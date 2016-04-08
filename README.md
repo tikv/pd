@@ -22,7 +22,7 @@ docker run -d -p 2379:2379 -p 2380:2380 -p 4001:4001 --name etcd pingcap/etcd \
     --advertise-client-urls="http://${HostIP}:2379"
 
 // Start pd
-docker run -d -p 234:1234 --name pd --link etcd:etcd pingcap/pd --etcd=etcd:2379
+docker run -d -p 1234:1234 --name pd --link etcd:etcd pingcap/pd --etcd=etcd:2379
 ```
 
 ### Cluster
