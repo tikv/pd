@@ -1,0 +1,16 @@
+FROM golang:1.6
+
+MAINTAINER siddontang
+
+RUN cd /go/src && \
+    git clone --depth=1 https://github.com/coreos/etcd.git github.com/coreos/etcd && \
+    cd github.com/coreos/etcd && \
+    ./build && \
+    cp -f ./bin/etcd* /go/bin/ && \
+    rm -rf /go/src/github.com/coreos/etcd
+
+ENV ETCDCTL_API=3
+
+EXPOSE 2379 2380 4001 7001
+
+ENTRYPOINT ["etcd"]
