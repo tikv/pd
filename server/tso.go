@@ -25,12 +25,12 @@ type atomicObject struct {
 	logical  int64
 }
 
-func getTimestampPath(rootPath string) string {
-	return path.Join(rootPath, "timestamp")
+func (s *Server) getTimestampPath() string {
+	return path.Join(s.rootPath, "timestamp")
 }
 
 func (s *Server) loadTimestamp() (int64, error) {
-	data, err := getValue(s.client, getTimestampPath(s.cfg.RootPath))
+	data, err := getValue(s.client, s.getTimestampPath())
 	if err != nil {
 		return 0, errors.Trace(err)
 	}
@@ -50,7 +50,7 @@ func (s *Server) loadTimestamp() (int64, error) {
 // otherwise, update it.
 func (s *Server) saveTimestamp(now time.Time) error {
 	data := uint64ToBytes(uint64(now.UnixNano()))
-	key := getTimestampPath(s.cfg.RootPath)
+	key := s.getTimestampPath()
 
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	resp, err := s.client.Txn(ctx).

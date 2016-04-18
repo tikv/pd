@@ -104,6 +104,11 @@ func (c *conn) Close() error {
 }
 
 func (c *conn) handleRequest(req *pdpb.Request) (*pdpb.Response, error) {
+	clusterID := req.GetHeader().GetClusterId()
+	if clusterID != c.s.cfg.ClusterID {
+		return nil, errors.Errorf("mismatch cluster id, need %d but got %d", c.s.cfg.ClusterID, clusterID)
+	}
+
 	switch req.GetCmdType() {
 	case pdpb.CommandType_Tso:
 		return c.handleTso(req)

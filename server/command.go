@@ -56,8 +56,7 @@ func (c *conn) handleIsBootstrapped(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Errorf("invalid is bootstrapped command, but %v", req)
 	}
 
-	clusterID := req.GetHeader().GetClusterId()
-	cluster, err := c.s.getCluster(clusterID)
+	cluster, err := c.s.getRaftCluster()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -77,8 +76,7 @@ func (c *conn) handleBootstrap(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Errorf("invalid bootstrap command, but %v", req)
 	}
 
-	clusterID := req.GetHeader().GetClusterId()
-	cluster, err := c.s.getCluster(clusterID)
+	cluster, err := c.s.getRaftCluster()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -86,12 +84,11 @@ func (c *conn) handleBootstrap(req *pdpb.Request) (*pdpb.Response, error) {
 		return NewBootstrappedError(), nil
 	}
 
-	return c.s.bootstrapCluster(clusterID, request)
+	return c.s.bootstrapCluster(request)
 }
 
-func (c *conn) getCluster(req *pdpb.Request) (*raftCluster, error) {
-	clusterID := req.GetHeader().GetClusterId()
-	cluster, err := c.s.getCluster(clusterID)
+func (c *conn) getRaftCluster(req *pdpb.Request) (*raftCluster, error) {
+	cluster, err := c.s.getRaftCluster()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -107,7 +104,7 @@ func (c *conn) handleGetMeta(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Errorf("invalid get meta command, but %v", req)
 	}
 
-	cluster, err := c.getCluster(req)
+	cluster, err := c.getRaftCluster(req)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -153,7 +150,7 @@ func (c *conn) handlePutMeta(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Errorf("invalid put meta command, but %v", req)
 	}
 
-	cluster, err := c.getCluster(req)
+	cluster, err := c.getRaftCluster(req)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -194,7 +191,7 @@ func (c *conn) handleAskChangePeer(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.New("missing leader for changing peer")
 	}
 
-	cluster, err := c.getCluster(req)
+	cluster, err := c.getRaftCluster(req)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -223,7 +220,7 @@ func (c *conn) handleAskSplit(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.New("missing split key for split")
 	}
 
-	cluster, err := c.getCluster(req)
+	cluster, err := c.getRaftCluster(req)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

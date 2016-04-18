@@ -27,6 +27,8 @@ func newTestServer(c *C, rootPath string) *Server {
 		RootPath:        rootPath,
 		LeaderLease:     1,
 		TsoSaveInterval: 500,
+		// We use cluster 0 for all tests.
+		ClusterID: 0,
 	}
 
 	svr, err := NewServer(cfg)
@@ -58,8 +60,9 @@ func deleteRoot(c *C, client *clientv3.Client, rootPath string) {
 var _ = Suite(&testLeaderServerSuite{})
 
 type testLeaderServerSuite struct {
-	client *clientv3.Client
-	svrs   map[string]*Server
+	client     *clientv3.Client
+	svrs       map[string]*Server
+	leaderPath string
 }
 
 func (s *testLeaderServerSuite) getRootPath() string {
@@ -72,6 +75,7 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 	for i := 0; i < 3; i++ {
 		svr := newTestServer(c, s.getRootPath())
 		s.svrs[svr.cfg.AdvertiseAddr] = svr
+		s.leaderPath = svr.getLeaderPath()
 	}
 
 	s.client = newEtcdClient(c)
@@ -92,7 +96,7 @@ func (s *testLeaderServerSuite) TestLeader(c *C) {
 	}
 
 	for i := 0; i < 100 && len(s.svrs) > 0; i++ {
-		leader, err := GetLeader(s.client, GetLeaderPath(s.getRootPath()))
+		leader, err := GetLeader(s.client, s.leaderPath)
 		c.Assert(err, IsNil)
 
 		if leader == nil {

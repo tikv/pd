@@ -28,23 +28,27 @@ var (
 )
 
 // Raft cluster key format:
-// cluster 1 -> /raft/1, value is metapb.Cluster
-// cluster 2 -> /raft/2
+// cluster 1 -> /1/raft, value is metapb.Cluster
+// cluster 2 -> /1/raft
 // For cluster 1
-// store 1 -> /raft/1/s/1, value is metapb.Store
-// region 1 -> /raft/1/r/1, value is encoded_region_key
-// region search key map -> /raft/1/k/encoded_region_key, value is metapb.Region
+// store 1 -> /1/raft/s/1, value is metapb.Store
+// region 1 -> /1/raft/r/1, value is encoded_region_key
+// region search key map -> /1/raft/k/encoded_region_key, value is metapb.Region
 //
 // Operation queue, pd can only handle operations like auto-balance, split,
 // merge sequentially, and every operation will be assigned a unique incremental ID.
-// pending queue -> /raft/1/j/1, /raft/1/j/2, value is operation job.
+// pending queue -> /1/raft/j/1, /raft/1/j/2, value is operation job.
 //
 // Encode region search key:
 //  1, the maximum end region key is empty, so the encode key is \xFF
 //  2, other region end key is not empty, the encode key is \z end_key
 
 type raftCluster struct {
+	sync.RWMutex
+
 	s *Server
+
+	running bool
 
 	clusterID   uint64
 	clusterRoot string
@@ -69,15 +73,20 @@ type raftCluster struct {
 	storeConns *storeConns
 }
 
-func (s *Server) newCluster(clusterID uint64, meta metapb.Cluster) (*raftCluster, error) {
-	c := &raftCluster{
-		s:           s,
-		clusterID:   clusterID,
-		clusterRoot: s.getClusterRootPath(clusterID),
-		askJobCh:    make(chan struct{}, askJobChannelSize),
-		quitCh:      make(chan struct{}),
-		storeConns:  newStoreConns(defaultConnFunc),
+func (c *raftCluster) Start(meta metapb.Cluster) error {
+	c.Lock()
+	defer c.Unlock()
+
+	if c.running {
+		log.Warn("raft cluster is already stared")
+		return nil
 	}
+
+	c.running = true
+
+	c.askJobCh = make(chan struct{}, askJobChannelSize)
+	c.quitCh = make(chan struct{})
+	c.storeConns = newStoreConns(defaultConnFunc)
 
 	c.storeConns.SetIdleTimeout(idleTimeout)
 
@@ -91,37 +100,49 @@ func (s *Server) newCluster(clusterID uint64, meta metapb.Cluster) (*raftCluster
 	// many stores, so it is OK to cache them all.
 	// And we should use these cache for later ChangePeer too.
 	if err := c.cacheAllStores(); err != nil {
-		return nil, errors.Trace(err)
+		return errors.Trace(err)
 	}
 
 	c.wg.Add(1)
 	go c.onJobWorker()
 
-	return c, nil
+	return nil
 }
 
-func (c *raftCluster) Close() {
+func (c *raftCluster) Stop() {
+	c.Lock()
+	defer c.Unlock()
+
+	if !c.running {
+		return
+	}
+
 	close(c.quitCh)
 	c.wg.Wait()
 
 	c.storeConns.Close()
+
+	c.running = false
 }
 
-func (s *Server) getClusterRootPath(clusterID uint64) string {
-	return path.Join(s.cfg.RootPath, "raft", strconv.FormatUint(clusterID, 10))
+func (c *raftCluster) IsRunning() bool {
+	c.RLock()
+	defer c.RUnlock()
+
+	return c.running
 }
 
-func (s *Server) getCluster(clusterID uint64) (*raftCluster, error) {
-	s.clusterLock.RLock()
-	c, ok := s.clusters[clusterID]
-	s.clusterLock.RUnlock()
+func (s *Server) getClusterRootPath() string {
+	return path.Join(s.rootPath, "raft")
+}
 
-	if ok {
-		return c, nil
+func (s *Server) getRaftCluster() (*raftCluster, error) {
+	if s.cluster.IsRunning() {
+		return s.cluster, nil
 	}
 
 	// Find in etcd
-	value, err := getValue(s.client, s.getClusterRootPath(clusterID))
+	value, err := getValue(s.client, s.getClusterRootPath())
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -134,36 +155,11 @@ func (s *Server) getCluster(clusterID uint64) (*raftCluster, error) {
 		return nil, errors.Trace(err)
 	}
 
-	s.clusterLock.Lock()
-	defer s.clusterLock.Unlock()
-
-	// check again, other goroutine may create it already.
-	c, ok = s.clusters[clusterID]
-	if ok {
-		return c, nil
-	}
-
-	if c, err = s.newCluster(clusterID, m); err != nil {
+	if err = s.cluster.Start(m); err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	s.clusters[clusterID] = c
-	return c, nil
-}
-
-func (s *Server) closeClusters() {
-	s.clusterLock.Lock()
-	defer s.clusterLock.Unlock()
-
-	if len(s.clusters) == 0 {
-		return
-	}
-
-	for _, cluster := range s.clusters {
-		cluster.Close()
-	}
-
-	s.clusters = make(map[uint64]*raftCluster)
+	return s.cluster, nil
 }
 
 func encodeRegionSearchKey(endKey []byte) string {
@@ -233,8 +229,10 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 	return nil
 }
 
-func (s *Server) bootstrapCluster(clusterID uint64, req *pdpb.BootstrapRequest) (*pdpb.Response, error) {
-	log.Infof("try to bootstrap cluster %d with %v", clusterID, req)
+func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, error) {
+	clusterID := s.cfg.ClusterID
+
+	log.Infof("try to bootstrap raft cluster %d with %v", clusterID, req)
 
 	if err := checkBootstrapRequest(clusterID, req); err != nil {
 		return nil, errors.Trace(err)
@@ -250,7 +248,7 @@ func (s *Server) bootstrapCluster(clusterID uint64, req *pdpb.BootstrapRequest) 
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	clusterRootPath := s.getClusterRootPath(clusterID)
+	clusterRootPath := s.getClusterRootPath()
 
 	var ops []clientv3.Op
 	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
@@ -294,31 +292,9 @@ func (s *Server) bootstrapCluster(clusterID uint64, req *pdpb.BootstrapRequest) 
 
 	log.Infof("bootstrap cluster %d ok", clusterID)
 
-	s.clusterLock.Lock()
-	defer s.clusterLock.Unlock()
-
-	if _, ok := s.clusters[clusterID]; ok {
-		// We have bootstrapped cluster ok, and another goroutine quickly requests to
-		// use this cluster and we create the cluster object for it.
-		// But can this really happen?
-		log.Warnf("cluster object %d already exists", clusterID)
-		return &pdpb.Response{
-			Bootstrap: &pdpb.BootstrapResponse{},
-		}, nil
-	}
-
-	c, err := s.newCluster(clusterID, clusterMeta)
-	if err != nil {
+	if err = s.cluster.Start(clusterMeta); err != nil {
 		return nil, errors.Trace(err)
 	}
-
-	mu := &c.mu
-	mu.Lock()
-	defer mu.Unlock()
-
-	mu.stores[storeMeta.GetId()] = *storeMeta
-
-	s.clusters[clusterID] = c
 
 	return &pdpb.Response{
 		Bootstrap: &pdpb.BootstrapResponse{},

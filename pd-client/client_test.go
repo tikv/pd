@@ -56,7 +56,7 @@ type testClientSuite struct {
 }
 
 func (s *testClientSuite) SetUpSuite(c *C) {
-	s.srv = newServer(c, 1234, "/pd-test")
+	s.srv = newServer(c, 1234, "/pd-test", clusterID)
 
 	// wait for srv to become leader
 	time.Sleep(time.Second * 3)
@@ -73,12 +73,13 @@ func (s *testClientSuite) TearDownSuite(c *C) {
 	s.srv.Close()
 }
 
-func newServer(c *C, port int, root string) *server.Server {
+func newServer(c *C, port int, root string, clusterID uint64) *server.Server {
 	cfg := &server.Config{
 		Addr:        fmt.Sprintf("127.0.0.1:%d", port),
 		EtcdAddrs:   strings.Split(*testEtcd, ","),
 		RootPath:    root,
 		LeaderLease: 1,
+		ClusterID:   clusterID,
 	}
 	s, err := server.NewServer(cfg)
 	c.Assert(err, IsNil)

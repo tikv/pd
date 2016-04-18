@@ -2,6 +2,8 @@ package server
 
 import (
 	"net"
+	"path"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,6 +24,8 @@ type Server struct {
 	listener net.Listener
 
 	client *clientv3.Client
+
+	rootPath string
 
 	isLeader int64
 	// leader value saved in etcd leader key.
@@ -46,7 +50,7 @@ type Server struct {
 
 	// for raft cluster
 	clusterLock sync.RWMutex
-	clusters    map[uint64]*raftCluster
+	cluster     *raftCluster
 
 	msgID uint64
 }
@@ -83,10 +87,16 @@ func NewServer(cfg *Config) (*Server, error) {
 		isLeader: 0,
 		conns:    make(map[*conn]struct{}),
 		closed:   0,
-		clusters: make(map[uint64]*raftCluster),
+		rootPath: path.Join(cfg.RootPath, strconv.FormatUint(cfg.ClusterID, 10)),
 	}
 
 	s.idAlloc = &idAllocator{s: s}
+	s.cluster = &raftCluster{
+		s:           s,
+		running:     false,
+		clusterID:   cfg.ClusterID,
+		clusterRoot: s.getClusterRootPath(),
+	}
 
 	return s, nil
 }

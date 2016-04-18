@@ -2,6 +2,7 @@ package pd
 
 import (
 	"path"
+	"strconv"
 	"sync"
 	"time"
 
@@ -42,8 +43,8 @@ type client struct {
 	quit        chan struct{}
 }
 
-func getLeaderPath(rootPath string) string {
-	return path.Join(rootPath, "leader")
+func getLeaderPath(clusterID uint64, rootPath string) string {
+	return path.Join(rootPath, strconv.FormatUint(clusterID, 10), "leader")
 }
 
 // NewClient creates a PD client.
@@ -56,7 +57,7 @@ func NewClient(etcdAddrs []string, rootPath string, clusterID uint64) (Client, e
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	leaderPath := getLeaderPath(rootPath)
+	leaderPath := getLeaderPath(clusterID, rootPath)
 	leaderAddr, revision, err := getLeader(etcdClient, leaderPath)
 	if err != nil {
 		return nil, errors.Trace(err)

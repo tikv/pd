@@ -39,7 +39,7 @@ func (s *testAllocIDSuite) TearDownSuite(c *C) {
 }
 
 func (s *testAllocIDSuite) TestID(c *C) {
-	mustGetLeader(c, s.client, s.getRootPath())
+	mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
 	var last uint64
 	for i := uint64(0); i < allocStep; i++ {
@@ -75,7 +75,7 @@ func (s *testAllocIDSuite) TestID(c *C) {
 }
 
 func (s *testAllocIDSuite) TestCommand(c *C) {
-	leader := mustGetLeader(c, s.client, s.getRootPath())
+	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
 	conn, err := net.Dial("tcp", leader.GetAddr())
 	c.Assert(err, IsNil)

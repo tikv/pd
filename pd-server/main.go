@@ -21,6 +21,7 @@ var (
 	leaderLease   = flag.Int64("lease", 3, "Leader lease time (second)")
 	logLevel      = flag.String("L", "debug", "log level: info, debug, warn, error, fatal")
 	pprofAddr     = flag.String("pprof", ":6060", "pprof HTTP listening address")
+	clusterID     = flag.Uint64("cluster-id", 0, "Cluster ID")
 )
 
 func main() {
@@ -38,6 +39,7 @@ func main() {
 		EtcdAddrs:     strings.Split(*etcdAddrs, ","),
 		RootPath:      *rootPath,
 		LeaderLease:   *leaderLease,
+		ClusterID:     *clusterID,
 	}
 
 	svr, err := server.NewServer(cfg)

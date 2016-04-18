@@ -69,7 +69,7 @@ func (s *testClusterWorkerSuite) bootstrap(c *C) *mockRaftStore {
 	store := req.Bootstrap.Store
 	region := req.Bootstrap.Region
 
-	_, err := s.svr.bootstrapCluster(s.clusterID, req.Bootstrap)
+	_, err := s.svr.bootstrapCluster(req.Bootstrap)
 	c.Assert(err, IsNil)
 
 	raftStore := s.newMockRaftStore(c, store)
@@ -98,7 +98,7 @@ func (s *testClusterWorkerSuite) newMockRaftStore(c *C, metaStore *metapb.Store)
 	go store.runCmd(c)
 	go store.runRaft(c)
 
-	cluster, err := s.svr.getCluster(s.clusterID)
+	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 
 	cluster.PutStore(metaStore)
@@ -522,7 +522,7 @@ func (s *mockRaftStore) handleSplit(c *C, req *raft_cmdpb.RaftCmdRequest) *raft_
 }
 
 func (s *testClusterWorkerSuite) SetUpSuite(c *C) {
-	s.clusterID = 1
+	s.clusterID = 0
 
 	s.stores = make(map[uint64]*mockRaftStore)
 
@@ -539,7 +539,7 @@ func (s *testClusterWorkerSuite) SetUpSuite(c *C) {
 
 	go s.svr.Run()
 
-	mustGetLeader(c, s.client, s.getRootPath())
+	mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
 	// Construct the raft cluster 5 stores.
 	s.bootstrap(c)
@@ -548,7 +548,7 @@ func (s *testClusterWorkerSuite) SetUpSuite(c *C) {
 	s.newMockRaftStore(c, nil)
 	s.newMockRaftStore(c, nil)
 
-	cluster, err := s.svr.getCluster(s.clusterID)
+	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 	cluster.PutMeta(&metapb.Cluster{
 		Id:            proto.Uint64(s.clusterID),
@@ -568,7 +568,7 @@ func (s *testClusterWorkerSuite) TearDownSuite(c *C) {
 }
 
 func (s *testClusterWorkerSuite) checkRegionPeerNumber(c *C, regionKey []byte, expectNumber int) *metapb.Region {
-	cluster, err := s.svr.getCluster(s.clusterID)
+	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 
 	for i := 0; i < 10; i++ {
@@ -606,7 +606,7 @@ func (s *testClusterWorkerSuite) regionPeerExisted(c *C, regionID uint64, peer *
 }
 
 func (s *testClusterWorkerSuite) TestChangePeer(c *C) {
-	cluster, err := s.svr.getCluster(s.clusterID)
+	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 
 	meta, err := cluster.GetMeta()
@@ -619,7 +619,7 @@ func (s *testClusterWorkerSuite) TestChangePeer(c *C) {
 
 	c.Assert(region.Peers, HasLen, 1)
 
-	leaderPd := mustGetLeader(c, s.client, s.getRootPath())
+	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
 	conn, err := net.Dial("tcp", leaderPd.GetAddr())
 	c.Assert(err, IsNil)
@@ -713,10 +713,10 @@ func (s *testClusterWorkerSuite) TestChangePeer(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestSplit(c *C) {
-	cluster, err := s.svr.getCluster(s.clusterID)
+	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 
-	leaderPd := mustGetLeader(c, s.client, s.getRootPath())
+	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 	conn, err := net.Dial("tcp", leaderPd.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()

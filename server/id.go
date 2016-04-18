@@ -83,5 +83,5 @@ func (alloc *idAllocator) generate() (uint64, error) {
 }
 
 func (s *Server) getAllocIDPath() string {
-	return path.Join(s.cfg.RootPath, "alloc_id")
+	return path.Join(s.rootPath, "alloc_id")
 }

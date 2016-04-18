@@ -12,7 +12,7 @@ var _ = Suite(&testLeaderChangeSuite{})
 type testLeaderChangeSuite struct{}
 
 func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
-	srv1 := newServer(c, 1235, "/pd-leader-change")
+	srv1 := newServer(c, 1235, "/pd-leader-change", 1)
 
 	// wait for srv1 to become leader
 	time.Sleep(time.Second * 3)
@@ -24,7 +24,7 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	p1, l1, err := client.GetTS()
 	c.Assert(err, IsNil)
 
-	srv2 := newServer(c, 1236, "/pd-leader-change")
+	srv2 := newServer(c, 1236, "/pd-leader-change", 1)
 	defer srv2.Close()
 
 	// stop srv1, srv2 will become leader

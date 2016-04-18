@@ -35,6 +35,9 @@ type Config struct {
 	// and the leader must guarantee that the next timestamp must be > T1 + 2 * TsoSaveInterval.
 	TsoSaveInterval int64
 
+	// ClusterID is the cluster ID communicating with other services.
+	ClusterID uint64
+
 	// Only test can change it.
 	nextRetryDelay time.Duration
 }

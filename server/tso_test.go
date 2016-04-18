@@ -80,9 +80,9 @@ func (s *testTsoSuite) testGetTimestamp(c *C, conn net.Conn, n int) {
 	}
 }
 
-func mustGetLeader(c *C, client *clientv3.Client, rootPath string) *pdpb.Leader {
+func mustGetLeader(c *C, client *clientv3.Client, leaderPath string) *pdpb.Leader {
 	for i := 0; i < 10; i++ {
-		leader, err := GetLeader(client, GetLeaderPath(rootPath))
+		leader, err := GetLeader(client, leaderPath)
 		c.Assert(err, IsNil)
 		if leader != nil {
 			return leader
@@ -95,7 +95,7 @@ func mustGetLeader(c *C, client *clientv3.Client, rootPath string) *pdpb.Leader 
 }
 
 func (s *testTsoSuite) TestTso(c *C) {
-	leader := mustGetLeader(c, s.client, s.getRootPath())
+	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {

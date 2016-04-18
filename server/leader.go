@@ -34,17 +34,12 @@ func (s *Server) enableLeader(b bool) {
 		//	2, close all running raft clusters
 		s.closeAllConnections()
 
-		s.closeClusters()
+		s.cluster.Stop()
 	}
 }
 
-// GetLeaderPath returns the leader path.
-func GetLeaderPath(rootPath string) string {
-	return path.Join(rootPath, "leader")
-}
-
 func (s *Server) getLeaderPath() string {
-	return GetLeaderPath(s.cfg.RootPath)
+	return path.Join(s.rootPath, "leader")
 }
 
 func (s *Server) leaderLoop() {

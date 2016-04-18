@@ -109,7 +109,7 @@ func (s *testClusterBaseSuite) newRegion(c *C, regionID uint64, startKey []byte,
 }
 
 func (s *testClusterSuite) TestBootstrap(c *C) {
-	leader := mustGetLeader(c, s.client, s.getRootPath())
+	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
 	conn, err := net.Dial("tcp", leader.GetAddr())
 	c.Assert(err, IsNil)
@@ -179,6 +179,16 @@ func (s *testClusterBaseSuite) bootstrapCluster(c *C, conn net.Conn, clusterID u
 	c.Assert(resp.Bootstrap, NotNil)
 }
 
+func (s *testClusterBaseSuite) tryBootstrapCluster(c *C, conn net.Conn, clusterID uint64, storeAddr string) {
+	req := s.newBootstrapRequest(c, clusterID, storeAddr)
+	sendRequest(c, conn, 0, req)
+	_, resp := recvResponse(c, conn)
+	if resp.Bootstrap == nil {
+		c.Assert(resp.Header.Error, NotNil)
+		c.Assert(resp.Header.Error.Bootstrapped, NotNil)
+	}
+}
+
 func (s *testClusterBaseSuite) getStore(c *C, conn net.Conn, clusterID uint64, storeID uint64) *metapb.Store {
 	req := &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
@@ -237,16 +247,16 @@ func (s *testClusterBaseSuite) getMeta(c *C, conn net.Conn, clusterID uint64) *m
 }
 
 func (s *testClusterSuite) TestGetPutMeta(c *C) {
-	leader := mustGetLeader(c, s.client, s.getRootPath())
+	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
 	conn, err := net.Dial("tcp", leader.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
 
-	clusterID := uint64(1)
+	clusterID := uint64(0)
 
 	storeAddr := "127.0.0.1:0"
-	s.bootstrapCluster(c, conn, clusterID, storeAddr)
+	s.tryBootstrapCluster(c, conn, clusterID, storeAddr)
 
 	// Get region.
 	region := s.getRegion(c, conn, clusterID, []byte("abc"))
@@ -297,15 +307,42 @@ func (s *testClusterSuite) TestGetPutMeta(c *C) {
 	c.Assert(meta.GetMaxPeerNumber(), Equals, uint32(5))
 }
 
-func (s *testClusterSuite) TestCache(c *C) {
-	clusterID := uint64(2)
+var _ = Suite(&testClusterCacheSuite{})
+
+type testClusterCacheSuite struct {
+	testClusterBaseSuite
+}
+
+func (s *testClusterCacheSuite) getRootPath() string {
+	return "test_cluster_cache"
+}
+
+func (s *testClusterCacheSuite) SetUpSuite(c *C) {
+	s.svr = newTestServer(c, s.getRootPath())
+
+	s.client = newEtcdClient(c)
+
+	deleteRoot(c, s.client, s.getRootPath())
+
+	go s.svr.Run()
+}
+
+func (s *testClusterCacheSuite) TearDownSuite(c *C) {
+	s.svr.Close()
+	s.client.Close()
+}
+
+func (s *testClusterCacheSuite) TestCache(c *C) {
+	mustGetLeader(c, s.client, s.svr.getLeaderPath())
+
+	clusterID := uint64(0)
 
 	req := s.newBootstrapRequest(c, clusterID, "127.0.0.1:1")
 	store1 := req.Bootstrap.Store
 
-	s.svr.bootstrapCluster(clusterID, req.Bootstrap)
+	s.svr.bootstrapCluster(req.Bootstrap)
 
-	cluster, err := s.svr.getCluster(clusterID)
+	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 
 	// Add another store.
@@ -318,12 +355,9 @@ func (s *testClusterSuite) TestCache(c *C) {
 		store2.GetId(): store2,
 	}
 
-	s.svr.clusterLock.Lock()
-	delete(s.svr.clusters, cluster.clusterID)
-	cluster.Close()
-	s.svr.clusterLock.Unlock()
+	s.svr.cluster.Stop()
 
-	cluster, err = s.svr.getCluster(clusterID)
+	cluster, err = s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 
 	allStores, err := cluster.GetAllStores()
