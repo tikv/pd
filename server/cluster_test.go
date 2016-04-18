@@ -32,9 +32,7 @@ func (s *testClusterSuite) getRootPath() string {
 
 func (s *testClusterSuite) SetUpSuite(c *C) {
 	s.svr = newTestServer(c, s.getRootPath())
-
 	s.client = newEtcdClient(c)
-
 	deleteRoot(c, s.client, s.getRootPath())
 
 	go s.svr.Run()
@@ -319,9 +317,7 @@ func (s *testClusterCacheSuite) getRootPath() string {
 
 func (s *testClusterCacheSuite) SetUpSuite(c *C) {
 	s.svr = newTestServer(c, s.getRootPath())
-
 	s.client = newEtcdClient(c)
-
 	deleteRoot(c, s.client, s.getRootPath())
 
 	go s.svr.Run()
@@ -340,7 +336,8 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	req := s.newBootstrapRequest(c, clusterID, "127.0.0.1:1")
 	store1 := req.Bootstrap.Store
 
-	s.svr.bootstrapCluster(req.Bootstrap)
+	_, err := s.svr.bootstrapCluster(req.Bootstrap)
+	c.Assert(err, IsNil)
 
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)

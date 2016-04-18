@@ -26,9 +26,7 @@ func (s *testTsoSuite) getRootPath() string {
 
 func (s *testTsoSuite) SetUpSuite(c *C) {
 	s.svr = newTestServer(c, s.getRootPath())
-
 	s.client = newEtcdClient(c)
-
 	deleteRoot(c, s.client, s.getRootPath())
 
 	go s.svr.Run()

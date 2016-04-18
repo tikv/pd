@@ -24,9 +24,7 @@ func (s *testAllocIDSuite) getRootPath() string {
 
 func (s *testAllocIDSuite) SetUpSuite(c *C) {
 	s.svr = newTestServer(c, s.getRootPath())
-
 	s.client = newEtcdClient(c)
-
 	s.alloc = s.svr.idAlloc
 
 	deleteRoot(c, s.client, s.getRootPath())
