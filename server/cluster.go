@@ -29,7 +29,7 @@ var (
 
 // Raft cluster key format:
 // cluster 1 -> /1/raft, value is metapb.Cluster
-// cluster 2 -> /1/raft
+// cluster 2 -> /2/raft
 // For cluster 1
 // store 1 -> /1/raft/s/1, value is metapb.Store
 // region 1 -> /1/raft/r/1, value is encoded_region_key
@@ -37,7 +37,7 @@ var (
 //
 // Operation queue, pd can only handle operations like auto-balance, split,
 // merge sequentially, and every operation will be assigned a unique incremental ID.
-// pending queue -> /1/raft/j/1, /raft/1/j/2, value is operation job.
+// pending queue -> /1/raft/j/1, /1/raft/j/2, value is operation job.
 //
 // Encode region search key:
 //  1, the maximum end region key is empty, so the encode key is \xFF
