@@ -9,7 +9,7 @@ install:
 	$(GO) install ./...
 
 test:
-	$(GO) test --race ./...
+	$(GO) test --race ./pd-server ./pd-client ./server
 
 check:
 	go get github.com/golang/lint/golint
