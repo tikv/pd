@@ -27,6 +27,10 @@ var (
 func main() {
 	flag.Parse()
 
+	if *clusterID == 0 {
+		log.Warn("cluster id is 0, don't use it in production")
+	}
+
 	log.SetLevelByString(*logLevel)
 
 	go func() {
