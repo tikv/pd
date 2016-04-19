@@ -78,7 +78,7 @@ func (c *raftCluster) Start(meta metapb.Cluster) error {
 	defer c.Unlock()
 
 	if c.running {
-		log.Warn("raft cluster has already been stared")
+		log.Warn("raft cluster has already been started")
 		return nil
 	}
 
