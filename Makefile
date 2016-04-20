@@ -26,6 +26,7 @@ check:
 deps:
 	# see https://github.com/coreos/etcd/blob/master/scripts/updatedep.sh
 	rm -rf Godeps vendor
+	mkdir -p cmd/vendor
 	ln -s cmd/vendor vendor
 	godep save ./...
 	rm -rf cmd/Godeps
