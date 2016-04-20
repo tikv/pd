@@ -5,14 +5,17 @@ all: build check test
 build: 
 	rm -rf vendor && ln -s cmd/vendor vendor
 	$(GO) build -o bin/pd-server cmd/pd-server/main.go
+	rm -rf vendor
 
 install: 
 	rm -rf vendor && ln -s cmd/vendor vendor
 	$(GO) install ./...
+	rm -rf vendor
 
 test: 
 	rm -rf vendor && ln -s cmd/vendor vendor
 	$(GO) test --race ./pd-client ./server
+	rm -rf vendor
 
 check:
 	go get github.com/golang/lint/golint
