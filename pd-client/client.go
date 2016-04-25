@@ -15,7 +15,10 @@ import (
 	"golang.org/x/net/context"
 )
 
-const requestTimeout = 3 * time.Second
+const (
+	requestTimeout    = 3 * time.Second
+	maxRetryGetLeader = 100
+)
 
 // Client is a PD (Placement Driver) client.
 // It should not be used after calling Close().
@@ -58,7 +61,20 @@ func NewClient(etcdAddrs []string, rootPath string, clusterID uint64) (Client, e
 		return nil, errors.Trace(err)
 	}
 	leaderPath := getLeaderPath(clusterID, rootPath)
-	leaderAddr, revision, err := getLeader(etcdClient, leaderPath)
+
+	var (
+		leaderAddr string
+		revision   int64
+	)
+
+	for i := 0; i < maxRetryGetLeader; i++ {
+		leaderAddr, revision, err = getLeader(etcdClient, leaderPath)
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
