@@ -18,9 +18,7 @@ import (
 )
 
 const (
-	// defaultMaxPeerNumber is the default max peer number for a region.
-	defaultMaxPeerNumber = uint32(3)
-	askJobChannelSize    = 1024
+	askJobChannelSize = 1024
 )
 
 var (
@@ -240,7 +238,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 
 	clusterMeta := metapb.Cluster{
 		Id:            proto.Uint64(clusterID),
-		MaxPeerNumber: proto.Uint32(defaultMaxPeerNumber),
+		MaxPeerNumber: proto.Uint32(s.cfg.MaxPeerNumber),
 	}
 
 	// Set cluster meta

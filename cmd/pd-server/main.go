@@ -18,10 +18,11 @@ var (
 	advertiseAddr = flag.String("advertise-addr", "", "server advertise listening address [127.0.0.1:1234] for client communication")
 	etcdAddrs     = flag.String("etcd", "127.0.0.1:2379", "Etcd endpoints, separated by comma")
 	rootPath      = flag.String("root", "/pd", "pd root path in etcd")
-	leaderLease   = flag.Int64("lease", 3, "Leader lease time (second)")
+	leaderLease   = flag.Int64("lease", 3, "leader lease time (second)")
 	logLevel      = flag.String("L", "debug", "log level: info, debug, warn, error, fatal")
 	pprofAddr     = flag.String("pprof", ":6060", "pprof HTTP listening address")
-	clusterID     = flag.Uint64("cluster-id", 0, "Cluster ID")
+	clusterID     = flag.Uint64("cluster-id", 0, "cluster ID")
+	maxPeerNumber = flag.Uint("max-peer-num", 3, "max peer number for the region")
 )
 
 func main() {
@@ -44,6 +45,7 @@ func main() {
 		RootPath:      *rootPath,
 		LeaderLease:   *leaderLease,
 		ClusterID:     *clusterID,
+		MaxPeerNumber: uint32(*maxPeerNumber),
 	}
 
 	svr, err := server.NewServer(cfg)
