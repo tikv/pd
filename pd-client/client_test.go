@@ -36,17 +36,13 @@ var (
 		Id:      proto.Uint64(1),
 		Address: proto.String("localhost"),
 	}
-	peer = &metapb.Peer{
-		Id:      proto.Uint64(2),
-		StoreId: proto.Uint64(store.GetId()),
-	}
 	region = &metapb.Region{
 		Id: proto.Uint64(3),
 		RegionEpoch: &metapb.RegionEpoch{
 			ConfVer: proto.Uint64(1),
 			Version: proto.Uint64(1),
 		},
-		Peers: []*metapb.Peer{peer},
+		StoreIds: []uint64{store.GetId()},
 	}
 )
 

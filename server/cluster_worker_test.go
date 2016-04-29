@@ -30,7 +30,7 @@ type testClusterWorkerSuite struct {
 	stores    map[uint64]*mockRaftStore
 
 	regionLeaderLock sync.Mutex
-	regionLeaders    map[uint64]metapb.Peer
+	regionLeaders    map[uint64]uint64
 
 	quitCh chan struct{}
 }
@@ -40,14 +40,14 @@ func (s *testClusterWorkerSuite) getRootPath() string {
 }
 
 type mockRaftPeer struct {
-	peer   metapb.Peer
-	region metapb.Region
+	storeID uint64
+	region  metapb.Region
 }
 
 type mockRaftMsg struct {
-	peer   metapb.Peer
-	region metapb.Region
-	req    *raft_cmdpb.RaftCmdRequest
+	storeID uint64
+	region  metapb.Region
+	req     *raft_cmdpb.RaftCmdRequest
 }
 
 type mockRaftStore struct {
@@ -112,7 +112,7 @@ func (s *testClusterWorkerSuite) newMockRaftStore(c *C, metaStore *metapb.Store)
 }
 
 func (s *testClusterWorkerSuite) sendRaftMsg(c *C, msg *mockRaftMsg) {
-	storeID := msg.peer.GetStoreId()
+	storeID := msg.storeID
 
 	s.storeLock.Lock()
 	defer s.storeLock.Unlock()
@@ -125,19 +125,19 @@ func (s *testClusterWorkerSuite) sendRaftMsg(c *C, msg *mockRaftMsg) {
 	select {
 	case store.raftMsgCh <- msg:
 	default:
-		c.Logf("can not send msg to %v", msg.peer)
+		c.Logf("can not send msg to %v", msg.storeID)
 	}
 }
 
 func (s *testClusterWorkerSuite) broadcastRaftMsg(c *C, leader *mockRaftPeer,
 	req *raft_cmdpb.RaftCmdRequest) {
 	region := leader.region
-	for _, peer := range region.Peers {
-		if peer.GetId() != leader.peer.GetId() {
+	for _, peerStoreID := range region.StoreIds {
+		if peerStoreID != leader.storeID {
 			msg := &mockRaftMsg{
-				peer:   *peer,
-				region: *proto.Clone(&region).(*metapb.Region),
-				req:    req,
+				storeID: peerStoreID,
+				region:  *proto.Clone(&region).(*metapb.Region),
+				req:     req,
 			}
 			s.sendRaftMsg(c, msg)
 		}
@@ -148,11 +148,11 @@ func (s *testClusterWorkerSuite) broadcastRaftMsg(c *C, leader *mockRaftPeer,
 	if req.AdminRequest != nil && req.AdminRequest.ChangePeer != nil {
 		changePeer := req.AdminRequest.ChangePeer
 		if changePeer.GetChangeType() == raftpb.ConfChangeType_AddNode {
-			c.Assert(changePeer.Peer.GetId(), Not(Equals), leader.peer.GetId())
+			c.Assert(changePeer.GetStoreId(), Not(Equals), leader.storeID)
 			msg := &mockRaftMsg{
-				peer:   *changePeer.Peer,
-				region: *proto.Clone(&region).(*metapb.Region),
-				req:    req,
+				storeID: changePeer.GetStoreId(),
+				region:  *proto.Clone(&region).(*metapb.Region),
+				req:     req,
 			}
 			s.sendRaftMsg(c, msg)
 		}
@@ -166,15 +166,15 @@ func (s *testClusterWorkerSuite) clearRegionLeader(c *C, regionID uint64) {
 	delete(s.regionLeaders, regionID)
 }
 
-func (s *testClusterWorkerSuite) chooseRegionLeader(c *C, region *metapb.Region) *metapb.Peer {
+func (s *testClusterWorkerSuite) chooseRegionLeader(c *C, region *metapb.Region) uint64 {
 	// randomly select a peer in the region as the leader
-	peer := region.Peers[rand.Intn(len(region.Peers))]
+	storeID := region.StoreIds[rand.Intn(len(region.StoreIds))]
 
 	s.regionLeaderLock.Lock()
 	defer s.regionLeaderLock.Unlock()
 
-	s.regionLeaders[region.GetId()] = *peer
-	return peer
+	s.regionLeaders[region.GetId()] = storeID
+	return storeID
 }
 
 func (s *mockRaftStore) addRegion(c *C, region *metapb.Region) {
@@ -183,21 +183,21 @@ func (s *mockRaftStore) addRegion(c *C, region *metapb.Region) {
 
 	storeID := s.store.GetId()
 	var (
-		peer  metapb.Peer
-		found = false
+		peerStoreID uint64
+		found       = false
 	)
 
-	for _, p := range region.Peers {
-		if p.GetStoreId() == storeID {
-			peer = *p
+	for _, id := range region.StoreIds {
+		if id == storeID {
+			peerStoreID = id
 			found = true
 			break
 		}
 	}
 	c.Assert(found, IsTrue)
 	s.peers[region.GetId()] = &mockRaftPeer{
-		peer:   peer,
-		region: *proto.Clone(region).(*metapb.Region),
+		storeID: peerStoreID,
+		region:  *proto.Clone(region).(*metapb.Region),
 	}
 }
 
@@ -268,8 +268,8 @@ func (s *mockRaftStore) handleRaftMsg(c *C, msg *mockRaftMsg) {
 	if !ok {
 		// No peer, create it.
 		s.peers[regionID] = &mockRaftPeer{
-			peer:   msg.peer,
-			region: msg.region,
+			storeID: msg.storeID,
+			region:  msg.region,
 		}
 	}
 
@@ -311,14 +311,14 @@ func (s *mockRaftStore) proposeCommand(c *C, req *raft_cmdpb.RaftCmdRequest) *ra
 	defer s.s.regionLeaderLock.Unlock()
 
 	leader, ok := s.s.regionLeaders[regionID]
-	if !ok || leader.GetId() != peer.peer.GetId() {
+	if !ok || leader != peer.storeID {
 		resp := newErrorCmdResponse(errors.New("peer not leader"))
 		resp.Header.Error.NotLeader = &errorpb.NotLeader{
 			RegionId: proto.Uint64(regionID),
 		}
 
 		if ok {
-			resp.Header.Error.NotLeader.Leader = &leader
+			resp.Header.Error.NotLeader.LeaderStoreId = proto.Uint64(leader)
 		}
 
 		return resp
@@ -329,7 +329,7 @@ func (s *mockRaftStore) proposeCommand(c *C, req *raft_cmdpb.RaftCmdRequest) *ra
 	resp := s.handleWriteCommand(c, req)
 
 	// update the region leader.
-	s.s.regionLeaders[regionID] = peer.peer
+	s.s.regionLeaders[regionID] = peer.storeID
 
 	return resp
 }
@@ -347,12 +347,12 @@ func (s *mockRaftStore) handleStatusRequest(c *C, req *raft_cmdpb.RaftCmdRequest
 
 	peer := s.peers[regionID]
 
-	var leader *metapb.Peer
+	var leader uint64
 	s.s.regionLeaderLock.Lock()
 	l, ok := s.s.regionLeaders[regionID]
 	s.s.regionLeaderLock.Unlock()
 	if ok {
-		leader = &l
+		leader = l
 	}
 
 	switch status.GetCmdType() {
@@ -361,7 +361,7 @@ func (s *mockRaftStore) handleStatusRequest(c *C, req *raft_cmdpb.RaftCmdRequest
 			StatusResponse: &raft_cmdpb.StatusResponse{
 				CmdType: raft_cmdpb.StatusCmdType_RegionLeader.Enum(),
 				RegionLeader: &raft_cmdpb.RegionLeaderResponse{
-					Leader: leader,
+					LeaderStoreId: proto.Uint64(leader),
 				},
 			},
 		}
@@ -370,8 +370,8 @@ func (s *mockRaftStore) handleStatusRequest(c *C, req *raft_cmdpb.RaftCmdRequest
 			StatusResponse: &raft_cmdpb.StatusResponse{
 				CmdType: raft_cmdpb.StatusCmdType_RegionDetail.Enum(),
 				RegionDetail: &raft_cmdpb.RegionDetailResponse{
-					Leader: leader,
-					Region: proto.Clone(&peer.region).(*metapb.Region),
+					LeaderStoreId: proto.Uint64(leader),
+					Region:        proto.Clone(&peer.region).(*metapb.Region),
 				},
 			},
 		}
@@ -398,7 +398,7 @@ func (s *mockRaftStore) handleAdminRequest(c *C, req *raft_cmdpb.RaftCmdRequest)
 func (s *mockRaftStore) handleChangePeer(c *C, req *raft_cmdpb.RaftCmdRequest) *raft_cmdpb.RaftCmdResponse {
 	changePeer := req.AdminRequest.ChangePeer
 	confType := changePeer.GetChangeType()
-	peer := changePeer.Peer
+	storeID := changePeer.GetStoreId()
 
 	raftPeer := s.peers[req.Header.GetRegionId()]
 	region := raftPeer.region
@@ -410,31 +410,31 @@ func (s *mockRaftStore) handleChangePeer(c *C, req *raft_cmdpb.RaftCmdRequest) *
 	}
 
 	if confType == raftpb.ConfChangeType_AddNode {
-		for _, p := range region.Peers {
-			if p.GetId() == peer.GetId() || p.GetStoreId() == peer.GetStoreId() {
-				return newErrorCmdResponse(errors.Errorf("add duplicated peer %v for region %v", peer, region))
+		for _, id := range region.StoreIds {
+			if id == storeID {
+				return newErrorCmdResponse(errors.Errorf("add duplicated peer %v for region %v", storeID, region))
 			}
 		}
-		region.Peers = append(region.Peers, peer)
+		region.StoreIds = append(region.StoreIds, storeID)
 		raftPeer.region = region
 	} else {
 		foundIndex := -1
-		for i, p := range region.Peers {
-			if p.GetId() == peer.GetId() {
+		for i, id := range region.StoreIds {
+			if id == storeID {
 				foundIndex = i
 				break
 			}
 		}
 
 		if foundIndex == -1 {
-			return newErrorCmdResponse(errors.Errorf("remove missing peer %v for region %v", peer, region))
+			return newErrorCmdResponse(errors.Errorf("remove missing peer %v for region %v", storeID, region))
 		}
 
-		region.Peers = append(region.Peers[:foundIndex], region.Peers[foundIndex+1:]...)
+		region.StoreIds = append(region.StoreIds[:foundIndex], region.StoreIds[foundIndex+1:]...)
 		raftPeer.region = region
 
 		// remove itself
-		if peer.GetStoreId() == s.store.GetId() {
+		if storeID == s.store.GetId() {
 			delete(s.peers, region.GetId())
 		}
 	}
@@ -456,11 +456,8 @@ func (s *mockRaftStore) handleSplit(c *C, req *raft_cmdpb.RaftCmdRequest) *raft_
 	raftPeer := s.peers[req.Header.GetRegionId()]
 	splitKey := split.SplitKey
 	newRegionID := split.GetNewRegionId()
-	newPeerIDs := split.GetNewPeerIds()
 
 	region := raftPeer.region
-
-	c.Assert(newPeerIDs, HasLen, len(region.Peers))
 
 	version := region.RegionEpoch.GetVersion()
 	if version > req.Header.RegionEpoch.GetVersion() {
@@ -480,7 +477,7 @@ func (s *mockRaftStore) handleSplit(c *C, req *raft_cmdpb.RaftCmdRequest) *raft_
 	region.RegionEpoch.Version = proto.Uint64(version + 1)
 	newRegion := &metapb.Region{
 		Id:       proto.Uint64(newRegionID),
-		Peers:    make([]*metapb.Peer, len(newPeerIDs)),
+		StoreIds: append([]uint64(nil), region.StoreIds...),
 		StartKey: splitKey,
 		EndKey:   append([]byte(nil), region.GetEndKey()...),
 		RegionEpoch: &metapb.RegionEpoch{
@@ -489,25 +486,21 @@ func (s *mockRaftStore) handleSplit(c *C, req *raft_cmdpb.RaftCmdRequest) *raft_
 		},
 	}
 
-	var newPeer metapb.Peer
+	var leaderStoreID uint64
 
-	for i, id := range newPeerIDs {
-		peer := *region.Peers[i]
-		peer.Id = proto.Uint64(id)
-
-		if peer.GetStoreId() == s.store.GetId() {
-			newPeer = peer
+	for _, id := range region.StoreIds {
+		if id == s.store.GetId() {
+			leaderStoreID = id
+			break
 		}
-
-		newRegion.Peers[i] = &peer
 	}
 
 	region.EndKey = append([]byte(nil), splitKey...)
 
 	raftPeer.region = region
 	s.peers[newRegionID] = &mockRaftPeer{
-		peer:   newPeer,
-		region: *newRegion,
+		storeID: leaderStoreID,
+		region:  *newRegion,
 	}
 
 	resp := &raft_cmdpb.RaftCmdResponse{
@@ -531,7 +524,7 @@ func (s *testClusterWorkerSuite) SetUpSuite(c *C) {
 
 	s.client = newEtcdClient(c)
 
-	s.regionLeaders = make(map[uint64]metapb.Peer)
+	s.regionLeaders = make(map[uint64]uint64)
 
 	s.quitCh = make(chan struct{})
 
@@ -574,22 +567,22 @@ func (s *testClusterWorkerSuite) checkRegionPeerNumber(c *C, regionKey []byte, e
 	for i := 0; i < 10; i++ {
 		region, err1 := cluster.GetRegion(regionKey)
 		c.Assert(err1, IsNil)
-		if len(region.Peers) == expectNumber {
+		if len(region.StoreIds) == expectNumber {
 			return region
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	region, err := cluster.GetRegion(regionKey)
 	c.Assert(err, IsNil)
-	c.Assert(region.Peers, HasLen, expectNumber)
+	c.Assert(region.StoreIds, HasLen, expectNumber)
 	return region
 }
 
-func (s *testClusterWorkerSuite) regionPeerExisted(c *C, regionID uint64, peer *metapb.Peer) bool {
+func (s *testClusterWorkerSuite) regionPeerExisted(c *C, regionID uint64, storeID uint64) bool {
 	s.storeLock.Lock()
 	defer s.storeLock.Unlock()
 
-	store, ok := s.stores[peer.GetStoreId()]
+	store, ok := s.stores[storeID]
 	if !ok {
 		return false
 	}
@@ -601,7 +594,7 @@ func (s *testClusterWorkerSuite) regionPeerExisted(c *C, regionID uint64, peer *
 		return false
 	}
 
-	c.Assert(p.peer.GetId(), Equals, peer.GetId())
+	c.Assert(p.storeID, Equals, storeID)
 	return true
 }
 
@@ -617,7 +610,7 @@ func (s *testClusterWorkerSuite) TestChangePeer(c *C) {
 	region, err := cluster.GetRegion(regionKey)
 	c.Assert(err, IsNil)
 
-	c.Assert(region.Peers, HasLen, 1)
+	c.Assert(region.StoreIds, HasLen, 1)
 
 	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
@@ -627,14 +620,14 @@ func (s *testClusterWorkerSuite) TestChangePeer(c *C) {
 
 	// add another 4 peers.
 	for i := 0; i < 4; i++ {
-		leaderPeer := s.chooseRegionLeader(c, region)
+		leaderID := s.chooseRegionLeader(c, region)
 
 		askChangePeer := &pdpb.Request{
 			Header:  newRequestHeader(s.clusterID),
 			CmdType: pdpb.CommandType_AskChangePeer.Enum(),
 			AskChangePeer: &pdpb.AskChangePeerRequest{
-				Leader: leaderPeer,
-				Region: region,
+				LeaderStoreId: proto.Uint64(leaderID),
+				Region:        region,
 			},
 		}
 
@@ -654,8 +647,8 @@ func (s *testClusterWorkerSuite) TestChangePeer(c *C) {
 	region = s.checkRegionPeerNumber(c, regionKey, 5)
 
 	regionID := region.GetId()
-	for _, peer := range region.Peers {
-		ok := s.regionPeerExisted(c, regionID, peer)
+	for _, id := range region.StoreIds {
+		ok := s.regionPeerExisted(c, regionID, id)
 		c.Assert(ok, IsTrue)
 	}
 
@@ -669,14 +662,14 @@ func (s *testClusterWorkerSuite) TestChangePeer(c *C) {
 
 	// remove 2 peers
 	for i := 0; i < 2; i++ {
-		leaderPeer := s.chooseRegionLeader(c, region)
+		leaderID := s.chooseRegionLeader(c, region)
 
 		askChangePeer := &pdpb.Request{
 			Header:  newRequestHeader(s.clusterID),
 			CmdType: pdpb.CommandType_AskChangePeer.Enum(),
 			AskChangePeer: &pdpb.AskChangePeerRequest{
-				Leader: leaderPeer,
-				Region: region,
+				LeaderStoreId: proto.Uint64(leaderID),
+				Region:        region,
 			},
 		}
 		sendRequest(c, conn, 0, askChangePeer)
@@ -688,16 +681,16 @@ func (s *testClusterWorkerSuite) TestChangePeer(c *C) {
 
 	region = s.checkRegionPeerNumber(c, regionKey, 3)
 
-	for _, peer := range region.Peers {
-		ok := s.regionPeerExisted(c, regionID, peer)
+	for _, id := range region.StoreIds {
+		ok := s.regionPeerExisted(c, regionID, id)
 		c.Assert(ok, IsTrue)
 	}
 
 	// check removed peer
-	for _, oldPeer := range oldRegion.Peers {
+	for _, oldID := range oldRegion.StoreIds {
 		found := false
-		for _, peer := range region.Peers {
-			if oldPeer.GetId() == peer.GetId() {
+		for _, id := range region.StoreIds {
+			if oldID == id {
 				found = true
 				break
 			}
@@ -707,7 +700,7 @@ func (s *testClusterWorkerSuite) TestChangePeer(c *C) {
 			continue
 		}
 
-		ok := s.regionPeerExisted(c, regionID, oldPeer)
+		ok := s.regionPeerExisted(c, regionID, oldID)
 		c.Assert(ok, IsFalse)
 	}
 }
@@ -742,7 +735,7 @@ func (s *testClusterWorkerSuite) TestSplit(c *C) {
 		c.Assert(region.GetEndKey(), BytesEquals, []byte(t.endKey))
 
 		// Now we treat the first peer in region as leader.
-		leaderPeer := s.chooseRegionLeader(c, region)
+		leaderID := s.chooseRegionLeader(c, region)
 		if rand.Intn(2) == 1 {
 			// randomly change leader
 			s.clearRegionLeader(c, region.GetId())
@@ -753,9 +746,9 @@ func (s *testClusterWorkerSuite) TestSplit(c *C) {
 			Header:  newRequestHeader(s.clusterID),
 			CmdType: pdpb.CommandType_AskSplit.Enum(),
 			AskSplit: &pdpb.AskSplitRequest{
-				Region:   region,
-				Leader:   leaderPeer,
-				SplitKey: []byte(t.splitKey),
+				Region:        region,
+				LeaderStoreId: proto.Uint64(leaderID),
+				SplitKey:      []byte(t.splitKey),
 			},
 		}
 
@@ -770,8 +763,8 @@ func (s *testClusterWorkerSuite) TestSplit(c *C) {
 		c.Assert(left.GetEndKey(), BytesEquals, []byte(t.splitKey))
 		c.Assert(left.GetId(), Equals, region.GetId())
 
-		for _, peer := range left.Peers {
-			ok := s.regionPeerExisted(c, left.GetId(), peer)
+		for _, id := range left.StoreIds {
+			ok := s.regionPeerExisted(c, left.GetId(), id)
 			c.Assert(ok, IsTrue)
 		}
 

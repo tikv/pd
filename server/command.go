@@ -187,7 +187,7 @@ func (c *conn) handleAskChangePeer(req *pdpb.Request) (*pdpb.Response, error) {
 	if request.Region == nil {
 		return nil, errors.New("missing region for changing peer")
 	}
-	if request.Leader == nil {
+	if request.LeaderStoreId == nil {
 		return nil, errors.New("missing leader for changing peer")
 	}
 
@@ -213,7 +213,7 @@ func (c *conn) handleAskSplit(req *pdpb.Request) (*pdpb.Response, error) {
 	if request.Region == nil {
 		return nil, errors.New("missing region for split")
 	}
-	if request.Leader == nil {
+	if request.LeaderStoreId == nil {
 		return nil, errors.New("missing leader for split")
 	}
 	if request.SplitKey == nil {
