@@ -20,17 +20,17 @@ import (
 
 	v3rpc "github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
-	storagepb "github.com/coreos/etcd/storage/storagepb"
+	mvccpb "github.com/coreos/etcd/mvcc/mvccpb"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
 
 const (
-	EventTypeDelete = storagepb.DELETE
-	EventTypePut    = storagepb.PUT
+	EventTypeDelete = mvccpb.DELETE
+	EventTypePut    = mvccpb.PUT
 )
 
-type Event storagepb.Event
+type Event mvccpb.Event
 
 type WatchChan <-chan WatchResponse
 
@@ -209,7 +209,7 @@ func (w *watcher) Close() error {
 	case <-w.donec:
 	}
 	<-w.donec
-	return <-w.errc
+	return v3rpc.Error(<-w.errc)
 }
 
 func (w *watcher) addStream(resp *pb.WatchResponse, pendingReq *watchRequest) {
@@ -496,7 +496,7 @@ func (w *watcher) resume() (ws pb.Watch_WatchClient, err error) {
 			break
 		}
 	}
-	return ws, err
+	return ws, v3rpc.Error(err)
 }
 
 // openWatchClient retries opening a watchclient until retryConnection fails
@@ -504,8 +504,8 @@ func (w *watcher) openWatchClient() (ws pb.Watch_WatchClient, err error) {
 	for {
 		if ws, err = w.remote.Watch(w.ctx); ws != nil {
 			break
-		} else if isHalted(w.ctx, err) {
-			return nil, err
+		} else if isHaltErr(w.ctx, err) {
+			return nil, v3rpc.Error(err)
 		}
 		newConn, nerr := w.c.retryConnection(w.conn, nil)
 		if nerr != nil {

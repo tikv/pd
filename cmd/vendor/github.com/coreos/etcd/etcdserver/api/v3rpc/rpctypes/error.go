@@ -23,9 +23,9 @@ var (
 	ErrEmptyKey     = grpc.Errorf(codes.InvalidArgument, "etcdserver: key is not provided")
 	ErrTooManyOps   = grpc.Errorf(codes.InvalidArgument, "etcdserver: too many operations in txn request")
 	ErrDuplicateKey = grpc.Errorf(codes.InvalidArgument, "etcdserver: duplicate key given in txn request")
-	ErrCompacted    = grpc.Errorf(codes.OutOfRange, "etcdserver: storage: required revision has been compacted")
-	ErrFutureRev    = grpc.Errorf(codes.OutOfRange, "etcdserver: storage: required revision is a future revision")
-	ErrNoSpace      = grpc.Errorf(codes.ResourceExhausted, "etcdserver: storage: database space exceeded")
+	ErrCompacted    = grpc.Errorf(codes.OutOfRange, "etcdserver: mvcc: required revision has been compacted")
+	ErrFutureRev    = grpc.Errorf(codes.OutOfRange, "etcdserver: mvcc: required revision is a future revision")
+	ErrNoSpace      = grpc.Errorf(codes.ResourceExhausted, "etcdserver: mvcc: database space exceeded")
 
 	ErrLeaseNotFound = grpc.Errorf(codes.NotFound, "etcdserver: requested lease not found")
 	ErrLeaseExist    = grpc.Errorf(codes.FailedPrecondition, "etcdserver: lease already exists")
@@ -41,4 +41,41 @@ var (
 	ErrUserNotFound     = grpc.Errorf(codes.FailedPrecondition, "etcdserver: user name not found")
 	ErrRoleAlreadyExist = grpc.Errorf(codes.FailedPrecondition, "etcdserver: role name already exists")
 	ErrRoleNotFound     = grpc.Errorf(codes.FailedPrecondition, "etcdserver: role name not found")
+	ErrAuthFailed       = grpc.Errorf(codes.InvalidArgument, "etcdserver: authentication failed, invalid user ID or password")
+
+	errStringToError = map[string]error{
+		grpc.ErrorDesc(ErrEmptyKey):     ErrEmptyKey,
+		grpc.ErrorDesc(ErrTooManyOps):   ErrTooManyOps,
+		grpc.ErrorDesc(ErrDuplicateKey): ErrDuplicateKey,
+		grpc.ErrorDesc(ErrCompacted):    ErrCompacted,
+		grpc.ErrorDesc(ErrFutureRev):    ErrFutureRev,
+		grpc.ErrorDesc(ErrNoSpace):      ErrNoSpace,
+
+		grpc.ErrorDesc(ErrLeaseNotFound): ErrLeaseNotFound,
+		grpc.ErrorDesc(ErrLeaseExist):    ErrLeaseExist,
+
+		grpc.ErrorDesc(ErrMemberExist):    ErrMemberExist,
+		grpc.ErrorDesc(ErrPeerURLExist):   ErrPeerURLExist,
+		grpc.ErrorDesc(ErrMemberBadURLs):  ErrMemberBadURLs,
+		grpc.ErrorDesc(ErrMemberNotFound): ErrMemberNotFound,
+
+		grpc.ErrorDesc(ErrRequestTooLarge): ErrRequestTooLarge,
+
+		grpc.ErrorDesc(ErrUserAlreadyExist): ErrUserAlreadyExist,
+		grpc.ErrorDesc(ErrUserNotFound):     ErrUserNotFound,
+		grpc.ErrorDesc(ErrRoleAlreadyExist): ErrRoleAlreadyExist,
+		grpc.ErrorDesc(ErrRoleNotFound):     ErrRoleNotFound,
+		grpc.ErrorDesc(ErrAuthFailed):       ErrAuthFailed,
+	}
 )
+
+func Error(err error) error {
+	if err == nil {
+		return nil
+	}
+	v, ok := errStringToError[err.Error()]
+	if !ok {
+		return err
+	}
+	return v
+}

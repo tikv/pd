@@ -3,7 +3,7 @@
 // DO NOT EDIT!
 
 /*
-	Package storagepb is a generated protocol buffer package.
+	Package mvccpb is a generated protocol buffer package.
 
 	It is generated from these files:
 		kv.proto
@@ -12,7 +12,7 @@
 		KeyValue
 		Event
 */
-package storagepb
+package mvccpb
 
 import (
 	"fmt"
@@ -28,6 +28,10 @@ import io "io"
 var _ = proto.Marshal
 var _ = fmt.Errorf
 var _ = math.Inf
+
+// This is a compile-time assertion to ensure that this generated file
+// is compatible with the proto package it is being compiled against.
+const _ = proto.GoGoProtoPackageIsVersion1
 
 type Event_EventType int32
 
@@ -51,6 +55,7 @@ var Event_EventType_value = map[string]int32{
 func (x Event_EventType) String() string {
 	return proto.EnumName(Event_EventType_name, int32(x))
 }
+func (Event_EventType) EnumDescriptor() ([]byte, []int) { return fileDescriptorKv, []int{1, 0} }
 
 type KeyValue struct {
 	// key is the key in bytes. An empty key is not allowed.
@@ -71,15 +76,16 @@ type KeyValue struct {
 	Lease int64 `protobuf:"varint,6,opt,name=lease,proto3" json:"lease,omitempty"`
 }
 
-func (m *KeyValue) Reset()         { *m = KeyValue{} }
-func (m *KeyValue) String() string { return proto.CompactTextString(m) }
-func (*KeyValue) ProtoMessage()    {}
+func (m *KeyValue) Reset()                    { *m = KeyValue{} }
+func (m *KeyValue) String() string            { return proto.CompactTextString(m) }
+func (*KeyValue) ProtoMessage()               {}
+func (*KeyValue) Descriptor() ([]byte, []int) { return fileDescriptorKv, []int{0} }
 
 type Event struct {
 	// type is the kind of event. If type is a PUT, it indicates
 	// new data has been stored to the key. If type is a DELETE,
 	// it indicates the key was deleted.
-	Type Event_EventType `protobuf:"varint,1,opt,name=type,proto3,enum=storagepb.Event_EventType" json:"type,omitempty"`
+	Type Event_EventType `protobuf:"varint,1,opt,name=type,proto3,enum=mvccpb.Event_EventType" json:"type,omitempty"`
 	// kv holds the KeyValue for the event.
 	// A PUT event contains current kv pair.
 	// A PUT event with kv.Version=1 indicates the creation of a key.
@@ -88,14 +94,15 @@ type Event struct {
 	Kv *KeyValue `protobuf:"bytes,2,opt,name=kv" json:"kv,omitempty"`
 }
 
-func (m *Event) Reset()         { *m = Event{} }
-func (m *Event) String() string { return proto.CompactTextString(m) }
-func (*Event) ProtoMessage()    {}
+func (m *Event) Reset()                    { *m = Event{} }
+func (m *Event) String() string            { return proto.CompactTextString(m) }
+func (*Event) ProtoMessage()               {}
+func (*Event) Descriptor() ([]byte, []int) { return fileDescriptorKv, []int{1} }
 
 func init() {
-	proto.RegisterType((*KeyValue)(nil), "storagepb.KeyValue")
-	proto.RegisterType((*Event)(nil), "storagepb.Event")
-	proto.RegisterEnum("storagepb.Event_EventType", Event_EventType_name, Event_EventType_value)
+	proto.RegisterType((*KeyValue)(nil), "mvccpb.KeyValue")
+	proto.RegisterType((*Event)(nil), "mvccpb.Event")
+	proto.RegisterEnum("mvccpb.Event_EventType", Event_EventType_name, Event_EventType_value)
 }
 func (m *KeyValue) Marshal() (data []byte, err error) {
 	size := m.Size()
@@ -112,13 +119,11 @@ func (m *KeyValue) MarshalTo(data []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if m.Key != nil {
-		if len(m.Key) > 0 {
-			data[i] = 0xa
-			i++
-			i = encodeVarintKv(data, i, uint64(len(m.Key)))
-			i += copy(data[i:], m.Key)
-		}
+	if len(m.Key) > 0 {
+		data[i] = 0xa
+		i++
+		i = encodeVarintKv(data, i, uint64(len(m.Key)))
+		i += copy(data[i:], m.Key)
 	}
 	if m.CreateRevision != 0 {
 		data[i] = 0x10
@@ -135,13 +140,11 @@ func (m *KeyValue) MarshalTo(data []byte) (int, error) {
 		i++
 		i = encodeVarintKv(data, i, uint64(m.Version))
 	}
-	if m.Value != nil {
-		if len(m.Value) > 0 {
-			data[i] = 0x2a
-			i++
-			i = encodeVarintKv(data, i, uint64(len(m.Value)))
-			i += copy(data[i:], m.Value)
-		}
+	if len(m.Value) > 0 {
+		data[i] = 0x2a
+		i++
+		i = encodeVarintKv(data, i, uint64(len(m.Value)))
+		i += copy(data[i:], m.Value)
 	}
 	if m.Lease != 0 {
 		data[i] = 0x30
@@ -214,11 +217,9 @@ func encodeVarintKv(data []byte, offset int, v uint64) int {
 func (m *KeyValue) Size() (n int) {
 	var l int
 	_ = l
-	if m.Key != nil {
-		l = len(m.Key)
-		if l > 0 {
-			n += 1 + l + sovKv(uint64(l))
-		}
+	l = len(m.Key)
+	if l > 0 {
+		n += 1 + l + sovKv(uint64(l))
 	}
 	if m.CreateRevision != 0 {
 		n += 1 + sovKv(uint64(m.CreateRevision))
@@ -229,11 +230,9 @@ func (m *KeyValue) Size() (n int) {
 	if m.Version != 0 {
 		n += 1 + sovKv(uint64(m.Version))
 	}
-	if m.Value != nil {
-		l = len(m.Value)
-		if l > 0 {
-			n += 1 + l + sovKv(uint64(l))
-		}
+	l = len(m.Value)
+	if l > 0 {
+		n += 1 + l + sovKv(uint64(l))
 	}
 	if m.Lease != 0 {
 		n += 1 + sovKv(uint64(m.Lease))
@@ -661,3 +660,23 @@ var (
 	ErrInvalidLengthKv = fmt.Errorf("proto: negative length found during unmarshaling")
 	ErrIntOverflowKv   = fmt.Errorf("proto: integer overflow")
 )
+
+var fileDescriptorKv = []byte{
+	// 255 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x09, 0x6e, 0x88, 0x02, 0xff, 0xe2, 0xe2, 0xc8, 0x2e, 0xd3, 0x2b,
+	0x28, 0xca, 0x2f, 0xc9, 0x17, 0x62, 0xcb, 0x2d, 0x4b, 0x4e, 0x2e, 0x48, 0x92, 0x12, 0x49, 0xcf,
+	0x4f, 0xcf, 0x07, 0x0b, 0xe9, 0x83, 0x58, 0x10, 0x59, 0xa5, 0x52, 0x2e, 0x0e, 0xef, 0xd4, 0xca,
+	0xb0, 0xc4, 0x9c, 0xd2, 0x54, 0x21, 0x6e, 0x2e, 0xe6, 0xec, 0xd4, 0x4a, 0x09, 0x46, 0x05, 0x46,
+	0x0d, 0x1e, 0x21, 0x71, 0x2e, 0xfe, 0xe4, 0xa2, 0xd4, 0xc4, 0x92, 0xd4, 0xf8, 0xa2, 0xd4, 0xb2,
+	0xcc, 0xe2, 0xcc, 0xfc, 0x3c, 0x09, 0x26, 0xa0, 0x04, 0xb3, 0x90, 0x08, 0x17, 0x4f, 0x6e, 0x7e,
+	0x0a, 0x42, 0x94, 0x19, 0x2c, 0xca, 0xcf, 0xc5, 0x5e, 0x96, 0x5a, 0x04, 0x16, 0x60, 0x01, 0x0b,
+	0xf0, 0x72, 0xb1, 0x96, 0x81, 0x4c, 0x95, 0x60, 0x05, 0x1b, 0x07, 0xe4, 0xe6, 0xa4, 0x26, 0x16,
+	0xa7, 0x4a, 0xb0, 0x81, 0x64, 0x95, 0xaa, 0xb8, 0x58, 0x5d, 0xcb, 0x52, 0xf3, 0x4a, 0x84, 0x54,
+	0xb9, 0x58, 0x4a, 0x2a, 0x0b, 0x52, 0xc1, 0x96, 0xf2, 0x19, 0x89, 0xeb, 0x41, 0x1c, 0xab, 0x07,
+	0x96, 0x84, 0x90, 0x21, 0x40, 0x69, 0x21, 0x19, 0x2e, 0xa6, 0xec, 0x32, 0xb0, 0x03, 0xb8, 0x8d,
+	0x04, 0x60, 0x8a, 0x60, 0x0e, 0x57, 0xd2, 0xe1, 0xe2, 0x44, 0x28, 0x65, 0xe7, 0x62, 0x0e, 0x08,
+	0x0d, 0x11, 0x60, 0x10, 0xe2, 0xe2, 0x62, 0x73, 0x71, 0xf5, 0x71, 0x0d, 0x71, 0x15, 0x60, 0x04,
+	0xb1, 0x5d, 0x23, 0x02, 0x3c, 0x83, 0x5c, 0x05, 0x98, 0x9c, 0x44, 0x4e, 0x3c, 0x94, 0x63, 0xb8,
+	0x00, 0xc4, 0x27, 0x1e, 0xc9, 0x31, 0x5e, 0x00, 0xe2, 0x07, 0x40, 0x9c, 0xc4, 0x06, 0x0e, 0x0f,
+	0x63, 0x40, 0x00, 0x00, 0x00, 0xff, 0xff, 0x4a, 0x2d, 0xc3, 0x10, 0x39, 0x01, 0x00, 0x00,
+}

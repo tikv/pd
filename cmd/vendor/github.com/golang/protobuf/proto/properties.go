@@ -701,11 +701,7 @@ func getPropertiesLocked(t reflect.Type) *StructProperties {
 		if f.Name == "XXX_unrecognized" { // special case
 			prop.unrecField = toField(&f)
 		}
-		oneof := f.Tag.Get("protobuf_oneof") // special case
-		if oneof != "" {
-			// Oneof fields don't use the traditional protobuf tag.
-			p.OrigName = oneof
-		}
+		oneof := f.Tag.Get("protobuf_oneof") != "" // special case
 		prop.Prop[i] = p
 		prop.order[i] = i
 		if debug {
@@ -715,7 +711,7 @@ func getPropertiesLocked(t reflect.Type) *StructProperties {
 			}
 			print("\n")
 		}
-		if p.enc == nil && !strings.HasPrefix(f.Name, "XXX_") && oneof == "" {
+		if p.enc == nil && !strings.HasPrefix(f.Name, "XXX_") && !oneof {
 			fmt.Fprintln(os.Stderr, "proto: no encoder for", f.Name, f.Type.String(), "[GetProperties]")
 		}
 	}

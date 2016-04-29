@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
-	storagepb "github.com/coreos/etcd/storage/storagepb"
+	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
@@ -175,7 +175,7 @@ func (s *Server) watchLeader() {
 			}
 
 			for _, ev := range wresp.Events {
-				if ev.Type == storagepb.EXPIRE || ev.Type == storagepb.DELETE {
+				if ev.Type == mvccpb.EXPIRE || ev.Type == mvccpb.DELETE {
 					log.Info("leader is expired or deleted")
 					return
 				}
