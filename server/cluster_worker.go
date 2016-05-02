@@ -319,10 +319,13 @@ func (c *raftCluster) handleAddPeerReq(region *metapb.Region) (uint64, error) {
 	return matchStore.GetId(), nil
 }
 
-// If leader is INVALID_ID, we can remove any peer in the region, or else we can only remove none leader peer.
+// If leaderStoreID is 0, we will return an error, or else we can remove none leader peer.
 func (c *raftCluster) handleRemovePeerReq(region *metapb.Region, leaderStoreID uint64) (uint64, error) {
 	if len(region.StoreIds) <= 1 {
 		return 0, errors.Errorf("can not remove peer for region %v", region)
+	}
+	if leaderStoreID == 0 {
+		return 0, errors.Errorf("invalid leader id for region %v", region)
 	}
 
 	for _, peerStoreID := range region.StoreIds {

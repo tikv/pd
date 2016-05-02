@@ -87,7 +87,7 @@ func (c *conn) handleBootstrap(req *pdpb.Request) (*pdpb.Response, error) {
 	return c.s.bootstrapCluster(request)
 }
 
-func (c *conn) getRaftCluster(req *pdpb.Request) (*raftCluster, error) {
+func (c *conn) getRaftCluster() (*raftCluster, error) {
 	cluster, err := c.s.getRaftCluster()
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -104,7 +104,7 @@ func (c *conn) handleGetMeta(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Errorf("invalid get meta command, but %v", req)
 	}
 
-	cluster, err := c.getRaftCluster(req)
+	cluster, err := c.getRaftCluster()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -150,7 +150,7 @@ func (c *conn) handlePutMeta(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Errorf("invalid put meta command, but %v", req)
 	}
 
-	cluster, err := c.getRaftCluster(req)
+	cluster, err := c.getRaftCluster()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -181,17 +181,14 @@ func (c *conn) handlePutMeta(req *pdpb.Request) (*pdpb.Response, error) {
 
 func (c *conn) handleAskChangePeer(req *pdpb.Request) (*pdpb.Response, error) {
 	request := req.GetAskChangePeer()
-	if request == nil {
-		return nil, errors.Errorf("invalid ask change peer command, but %v", req)
-	}
-	if request.Region == nil {
+	if request.GetRegion() == nil {
 		return nil, errors.New("missing region for changing peer")
 	}
-	if request.LeaderStoreId == nil {
+	if request.GetLeaderStoreId() == 0 {
 		return nil, errors.New("missing leader for changing peer")
 	}
 
-	cluster, err := c.getRaftCluster(req)
+	cluster, err := c.getRaftCluster()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -207,20 +204,17 @@ func (c *conn) handleAskChangePeer(req *pdpb.Request) (*pdpb.Response, error) {
 
 func (c *conn) handleAskSplit(req *pdpb.Request) (*pdpb.Response, error) {
 	request := req.GetAskSplit()
-	if request == nil {
-		return nil, errors.Errorf("invalid ask split command, but %v", req)
-	}
-	if request.Region == nil {
+	if request.GetRegion() == nil {
 		return nil, errors.New("missing region for split")
 	}
-	if request.LeaderStoreId == nil {
+	if request.GetLeaderStoreId() == 0 {
 		return nil, errors.New("missing leader for split")
 	}
-	if request.SplitKey == nil {
+	if request.GetSplitKey() == nil {
 		return nil, errors.New("missing split key for split")
 	}
 
-	cluster, err := c.getRaftCluster(req)
+	cluster, err := c.getRaftCluster()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
