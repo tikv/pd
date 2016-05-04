@@ -28,7 +28,7 @@ func newTestServer(c *C, rootPath string) *Server {
 		LeaderLease:     1,
 		TsoSaveInterval: 500,
 		// We use cluster 0 for all tests.
-		ClusterID: 0,
+		ClusterName: "0",
 	}
 
 	svr, err := NewServer(cfg)

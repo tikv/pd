@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -31,8 +32,8 @@ var (
 	// Note: IDs below are entirely arbitrary. They are only for checking
 	// whether GetRegion/GetStore works.
 	// If we alloc ID in client in the future, these IDs must be updated.
-	clusterID = uint64(time.Now().Unix())
-	store     = &metapb.Store{
+	clusterName = strconv.FormatUint(uint64(time.Now().Unix()), 10)
+	store       = &metapb.Store{
 		Id:      proto.Uint64(1),
 		Address: proto.String("localhost"),
 	}
@@ -52,7 +53,7 @@ type testClientSuite struct {
 }
 
 func (s *testClientSuite) SetUpSuite(c *C) {
-	s.srv = newServer(c, 1234, "/pd-test", clusterID)
+	s.srv = newServer(c, 1234, "/pd-test", clusterName)
 
 	// wait for srv to become leader
 	time.Sleep(time.Second * 3)
@@ -60,7 +61,7 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 	bootstrapServer(c, 1234)
 
 	var err error
-	s.client, err = NewClient(strings.Split(*testEtcd, ","), "/pd-test", clusterID)
+	s.client, err = NewClient(strings.Split(*testEtcd, ","), "/pd-test", clusterName)
 	c.Assert(err, IsNil)
 }
 
@@ -69,13 +70,13 @@ func (s *testClientSuite) TearDownSuite(c *C) {
 	s.srv.Close()
 }
 
-func newServer(c *C, port int, root string, clusterID uint64) *server.Server {
+func newServer(c *C, port int, root string, clusterName string) *server.Server {
 	cfg := &server.Config{
 		Addr:        fmt.Sprintf("127.0.0.1:%d", port),
 		EtcdAddrs:   strings.Split(*testEtcd, ","),
 		RootPath:    root,
 		LeaderLease: 1,
-		ClusterID:   clusterID,
+		ClusterName: clusterName,
 	}
 	s, err := server.NewServer(cfg)
 	c.Assert(err, IsNil)
@@ -87,8 +88,8 @@ func newServer(c *C, port int, root string, clusterID uint64) *server.Server {
 func bootstrapServer(c *C, port int) {
 	req := pdpb.Request{
 		Header: &pdpb.RequestHeader{
-			Uuid:      uuid.NewV4().Bytes(),
-			ClusterId: proto.Uint64(clusterID),
+			Uuid:        uuid.NewV4().Bytes(),
+			ClusterName: proto.String(clusterName),
 		},
 		CmdType: pdpb.CommandType_Bootstrap.Enum(),
 		Bootstrap: &pdpb.BootstrapRequest{

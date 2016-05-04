@@ -2,7 +2,6 @@ package pd
 
 import (
 	"path"
-	"strconv"
 	"sync"
 	"time"
 
@@ -38,7 +37,7 @@ type Client interface {
 }
 
 type client struct {
-	clusterID   uint64
+	clusterName string
 	etcdClient  *clientv3.Client
 	workerMutex sync.RWMutex
 	worker      *rpcWorker
@@ -46,12 +45,12 @@ type client struct {
 	quit        chan struct{}
 }
 
-func getLeaderPath(clusterID uint64, rootPath string) string {
-	return path.Join(rootPath, strconv.FormatUint(clusterID, 10), "leader")
+func getLeaderPath(clusterName string, rootPath string) string {
+	return path.Join(rootPath, clusterName, "leader")
 }
 
 // NewClient creates a PD client.
-func NewClient(etcdAddrs []string, rootPath string, clusterID uint64) (Client, error) {
+func NewClient(etcdAddrs []string, rootPath string, clusterName string) (Client, error) {
 	log.Infof("[pd] create etcd client with endpoints %v", etcdAddrs)
 	etcdClient, err := clientv3.New(clientv3.Config{
 		Endpoints:   etcdAddrs,
@@ -60,7 +59,7 @@ func NewClient(etcdAddrs []string, rootPath string, clusterID uint64) (Client, e
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	leaderPath := getLeaderPath(clusterID, rootPath)
+	leaderPath := getLeaderPath(clusterName, rootPath)
 
 	var (
 		leaderAddr string
@@ -80,10 +79,10 @@ func NewClient(etcdAddrs []string, rootPath string, clusterID uint64) (Client, e
 	}
 
 	client := &client{
-		clusterID:  clusterID,
-		etcdClient: etcdClient,
-		worker:     newRPCWorker(leaderAddr, clusterID),
-		quit:       make(chan struct{}),
+		clusterName: clusterName,
+		etcdClient:  etcdClient,
+		worker:      newRPCWorker(leaderAddr, clusterName),
+		quit:        make(chan struct{}),
 	}
 
 	client.wg.Add(1)
@@ -113,9 +112,8 @@ func (c *client) GetTS() (int64, int64, error) {
 }
 
 func (c *client) GetRegion(key []byte) (*metapb.Region, error) {
-	req := &metaRequest{
-		pbReq: &pdpb.GetMetaRequest{
-			MetaType:  pdpb.MetaType_RegionType.Enum(),
+	req := &regionRequest{
+		pbReq: &pdpb.GetRegionRequest{
 			RegionKey: key,
 		},
 		done: make(chan error),
@@ -135,10 +133,9 @@ func (c *client) GetRegion(key []byte) (*metapb.Region, error) {
 }
 
 func (c *client) GetStore(storeID uint64) (*metapb.Store, error) {
-	req := &metaRequest{
-		pbReq: &pdpb.GetMetaRequest{
-			MetaType: pdpb.MetaType_StoreType.Enum(),
-			StoreId:  proto.Uint64(storeID),
+	req := &storeRequest{
+		pbReq: &pdpb.GetStoreRequest{
+			StoreId: proto.Uint64(storeID),
 		},
 		done: make(chan error),
 	}
@@ -176,7 +173,7 @@ WATCH:
 			log.Infof("[pd] found new pd-server leader addr: %v", leaderAddr)
 			c.workerMutex.Lock()
 			c.worker.stop(errors.New("[pd] leader change"))
-			c.worker = newRPCWorker(leaderAddr, c.clusterID)
+			c.worker = newRPCWorker(leaderAddr, c.clusterName)
 			c.workerMutex.Unlock()
 			revision = rev
 		case <-c.quit:
