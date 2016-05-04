@@ -36,8 +36,8 @@ type Config struct {
 	// and the leader must guarantee that the next timestamp must be > T1 + 2 * TsoSaveInterval.
 	TsoSaveInterval int64
 
-	// ClusterID is the cluster ID communicating with other services.
-	ClusterID uint64
+	// ClusterName is the cluster Name communicating with other services.
+	ClusterName string
 
 	// MaxPeerNumber for a region. default is 3.
 	MaxPeerNumber uint32

@@ -96,7 +96,7 @@ func updateResponse(req *pdpb.Request, resp *pdpb.Response) {
 	}
 
 	resp.Header.Uuid = req.Header.Uuid
-	resp.Header.ClusterId = req.Header.ClusterId
+	resp.Header.ClusterName = req.Header.ClusterName
 }
 
 func (c *conn) Close() error {
@@ -104,9 +104,9 @@ func (c *conn) Close() error {
 }
 
 func (c *conn) handleRequest(req *pdpb.Request) (*pdpb.Response, error) {
-	clusterID := req.GetHeader().GetClusterId()
-	if clusterID != c.s.cfg.ClusterID {
-		return nil, errors.Errorf("mismatch cluster id, need %d but got %d", c.s.cfg.ClusterID, clusterID)
+	clusterName := req.GetHeader().GetClusterName()
+	if clusterName != c.s.cfg.ClusterName {
+		return nil, errors.Errorf("mismatch cluster id, need %s but got %s", c.s.cfg.ClusterName, clusterName)
 	}
 
 	switch req.GetCmdType() {
