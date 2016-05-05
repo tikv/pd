@@ -6,8 +6,10 @@ import (
 	"sync"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/golang/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/twinj/uuid"
 )
 
 var _ = Suite(&testAllocIDSuite{})
@@ -83,6 +85,10 @@ func (s *testAllocIDSuite) TestCommand(c *C) {
 
 	req := &pdpb.Request{
 		CmdType: pdpb.CommandType_AllocId.Enum(),
+		Header: &pdpb.RequestHeader{
+			Uuid:        uuid.NewV4().Bytes(),
+			ClusterName: proto.String("0"),
+		},
 		AllocId: idReq,
 	}
 

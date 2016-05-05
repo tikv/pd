@@ -106,7 +106,7 @@ func (c *conn) Close() error {
 func (c *conn) handleRequest(req *pdpb.Request) (*pdpb.Response, error) {
 	clusterName := req.GetHeader().GetClusterName()
 	if clusterName != c.s.cfg.ClusterName {
-		return nil, errors.Errorf("mismatch cluster id, need %s but got %s", c.s.cfg.ClusterName, clusterName)
+		return nil, errors.Errorf("mismatch cluster name, need %s but got %s", c.s.cfg.ClusterName, clusterName)
 	}
 
 	switch req.GetCmdType() {

@@ -11,6 +11,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/util"
+	"github.com/twinj/uuid"
 )
 
 var _ = Suite(&testTsoSuite{})
@@ -56,7 +57,11 @@ func (s *testTsoSuite) testGetTimestamp(c *C, conn net.Conn, n int) {
 
 	req := &pdpb.Request{
 		CmdType: pdpb.CommandType_Tso.Enum(),
-		Tso:     tso,
+		Header: &pdpb.RequestHeader{
+			Uuid:        uuid.NewV4().Bytes(),
+			ClusterName: proto.String("0"),
+		},
+		Tso: tso,
 	}
 
 	rawMsgID := uint64(rand.Int63())

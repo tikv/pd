@@ -28,8 +28,8 @@ var (
 func main() {
 	flag.Parse()
 
-	if *clusterName == "0" {
-		log.Warn("cluster name is 0, don't use it in production")
+	if *clusterName == "test" {
+		log.Warn("cluster name is test, don't use it in production")
 	}
 
 	log.SetLevelByString(*logLevel)
