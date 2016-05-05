@@ -339,13 +339,13 @@ func (c *raftCluster) handleRemovePeerReq(region *metapb.Region, leaderStoreID u
 }
 
 func (c *raftCluster) HandleAskChangePeer(request *pdpb.AskChangePeerRequest) error {
-	clusterMeta, err := c.GetMeta()
+	clusterConfig, err := c.GetConfig()
 	if err != nil {
 		return errors.Trace(err)
 	}
 
 	var (
-		maxPeerNumber = int(clusterMeta.GetMaxPeerNumber())
+		maxPeerNumber = int(clusterConfig.GetMaxPeerNumber())
 		region        = request.GetRegion()
 		regionID      = region.GetId()
 		peerNumber    = len(region.GetStoreIds())

@@ -29,9 +29,9 @@ var (
 var _ = Suite(&testClientSuite{})
 
 var (
-	// Note: IDs below are entirely arbitrary. They are only for checking
+	// Note: Names below are entirely arbitrary. They are only for checking
 	// whether GetRegion/GetStore works.
-	// If we alloc ID in client in the future, these IDs must be updated.
+	// If we alloc Name in client in the future, these Names must be updated.
 	clusterName = strconv.FormatUint(uint64(time.Now().Unix()), 10)
 	store       = &metapb.Store{
 		Id:      proto.Uint64(1),

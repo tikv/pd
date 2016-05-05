@@ -229,7 +229,7 @@ func (w *rpcWorker) getTSFromRemote(conn *bufio.ReadWriter, n int) ([]*pdpb.Time
 		return nil, errors.Trace(err)
 	}
 	if rsp.GetTso() == nil {
-		return nil, errors.New("[pd] tso filed in rpc response not set")
+		return nil, errors.New("[pd] tso field in rpc response not set")
 	}
 	timestamps := rsp.GetTso().GetTimestamps()
 	if len(timestamps) != n {
@@ -252,7 +252,7 @@ func (w *rpcWorker) getStoreFromRemote(conn *bufio.ReadWriter, storeReq *pdpb.Ge
 		return nil, errors.Trace(err)
 	}
 	if rsp.GetGetStore() == nil {
-		return nil, errors.New("[pd] GetStore filed in rpc response not set")
+		return nil, errors.New("[pd] GetStore field in rpc response not set")
 	}
 	return rsp.GetGetStore(), nil
 }
@@ -271,7 +271,7 @@ func (w *rpcWorker) getRegionFromRemote(conn *bufio.ReadWriter, regionReq *pdpb.
 		return nil, errors.Trace(err)
 	}
 	if rsp.GetGetRegion() == nil {
-		return nil, errors.New("[pd] GetRegion filed in rpc response not set")
+		return nil, errors.New("[pd] GetRegion field in rpc response not set")
 	}
 	return rsp.GetGetRegion(), nil
 }
@@ -290,7 +290,7 @@ func (w *rpcWorker) getClusterConfigFromRemote(conn *bufio.ReadWriter, clusterCo
 		return nil, errors.Trace(err)
 	}
 	if rsp.GetGetClusterConfig() == nil {
-		return nil, errors.New("[pd] GetRegion filed in rpc response not set")
+		return nil, errors.New("[pd] GetRegion field in rpc response not set")
 	}
 	return rsp.GetGetClusterConfig(), nil
 }

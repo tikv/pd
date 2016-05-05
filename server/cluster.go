@@ -230,7 +230,7 @@ func checkBootstrapRequest(clusterName string, req *pdpb.BootstrapRequest) error
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, error) {
 	clusterName := s.cfg.ClusterName
 
-	log.Infof("try to bootstrap raft cluster %d with %v", clusterName, req)
+	log.Infof("try to bootstrap raft cluster %s with %v", clusterName, req)
 
 	if err := checkBootstrapRequest(clusterName, req); err != nil {
 		return nil, errors.Trace(err)
@@ -428,7 +428,7 @@ func (c *raftCluster) PutStore(store *metapb.Store) error {
 	return nil
 }
 
-func (c *raftCluster) GetMeta() (*metapb.Cluster, error) {
+func (c *raftCluster) GetConfig() (*metapb.Cluster, error) {
 	mu := &c.mu
 	mu.RLock()
 	defer mu.RUnlock()
@@ -437,7 +437,7 @@ func (c *raftCluster) GetMeta() (*metapb.Cluster, error) {
 	return &meta, nil
 }
 
-func (c *raftCluster) PutMeta(meta *metapb.Cluster) error {
+func (c *raftCluster) PutConfig(meta *metapb.Cluster) error {
 	if meta.GetName() != c.clusterName {
 		return errors.Errorf("invalid cluster %v, mismatch cluster id %s", meta, c.clusterName)
 	}

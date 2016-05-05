@@ -543,7 +543,7 @@ func (s *testClusterWorkerSuite) SetUpSuite(c *C) {
 
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
-	cluster.PutMeta(&metapb.Cluster{
+	cluster.PutConfig(&metapb.Cluster{
 		Name:          proto.String(s.clusterName),
 		MaxPeerNumber: proto.Uint32(5),
 	})
@@ -602,7 +602,7 @@ func (s *testClusterWorkerSuite) TestChangePeer(c *C) {
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 
-	meta, err := cluster.GetMeta()
+	meta, err := cluster.GetConfig()
 	c.Assert(err, IsNil)
 	c.Assert(meta.GetMaxPeerNumber(), Equals, uint32(5))
 
@@ -652,7 +652,7 @@ func (s *testClusterWorkerSuite) TestChangePeer(c *C) {
 		c.Assert(ok, IsTrue)
 	}
 
-	err = cluster.PutMeta(&metapb.Cluster{
+	err = cluster.PutConfig(&metapb.Cluster{
 		Name:          proto.String(s.clusterName),
 		MaxPeerNumber: proto.Uint32(3),
 	})
