@@ -3,7 +3,6 @@ package server
 import (
 	"net"
 	"path"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -87,14 +86,14 @@ func NewServer(cfg *Config) (*Server, error) {
 		isLeader: 0,
 		conns:    make(map[*conn]struct{}),
 		closed:   0,
-		rootPath: path.Join(cfg.RootPath, strconv.FormatUint(cfg.ClusterID, 10)),
+		rootPath: path.Join(cfg.RootPath, cfg.ClusterName),
 	}
 
 	s.idAlloc = &idAllocator{s: s}
 	s.cluster = &raftCluster{
 		s:           s,
 		running:     false,
-		clusterID:   cfg.ClusterID,
+		clusterName: cfg.ClusterName,
 		clusterRoot: s.getClusterRootPath(),
 	}
 

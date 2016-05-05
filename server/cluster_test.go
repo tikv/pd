@@ -49,9 +49,9 @@ func (s *testClusterBaseSuite) allocID(c *C) uint64 {
 	return id
 }
 
-func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
+func newRequestHeader(clusterName string) *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
-		ClusterId: proto.Uint64(clusterID),
+		ClusterName: proto.String(clusterName),
 	}
 }
 
@@ -95,7 +95,7 @@ func (s *testClusterSuite) TestBootstrap(c *C) {
 	c.Assert(err, IsNil)
 	defer conn.Close()
 
-	clusterID := uint64(0)
+	clusterID := "0"
 
 	// IsBootstrapped returns false.
 	req := s.newIsBootstrapRequest(clusterID)
@@ -124,9 +124,9 @@ func (s *testClusterSuite) TestBootstrap(c *C) {
 	c.Assert(resp.Header.Error.Bootstrapped, NotNil)
 }
 
-func (s *testClusterBaseSuite) newIsBootstrapRequest(clusterID uint64) *pdpb.Request {
+func (s *testClusterBaseSuite) newIsBootstrapRequest(clusterName string) *pdpb.Request {
 	req := &pdpb.Request{
-		Header:         newRequestHeader(clusterID),
+		Header:         newRequestHeader(clusterName),
 		CmdType:        pdpb.CommandType_IsBootstrapped.Enum(),
 		IsBootstrapped: &pdpb.IsBootstrappedRequest{},
 	}
@@ -134,12 +134,12 @@ func (s *testClusterBaseSuite) newIsBootstrapRequest(clusterID uint64) *pdpb.Req
 	return req
 }
 
-func (s *testClusterBaseSuite) newBootstrapRequest(c *C, clusterID uint64, storeAddr string) *pdpb.Request {
+func (s *testClusterBaseSuite) newBootstrapRequest(c *C, clusterName string, storeAddr string) *pdpb.Request {
 	store := s.newStore(c, 0, storeAddr)
 	region := s.newRegion(c, 0, []byte{}, []byte{}, []uint64{store.GetId()}, nil)
 
 	req := &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
+		Header:  newRequestHeader(clusterName),
 		CmdType: pdpb.CommandType_Bootstrap.Enum(),
 		Bootstrap: &pdpb.BootstrapRequest{
 			Store:  store,
@@ -151,15 +151,15 @@ func (s *testClusterBaseSuite) newBootstrapRequest(c *C, clusterID uint64, store
 }
 
 // helper function to check and bootstrap.
-func (s *testClusterBaseSuite) bootstrapCluster(c *C, conn net.Conn, clusterID uint64, storeAddr string) {
-	req := s.newBootstrapRequest(c, clusterID, storeAddr)
+func (s *testClusterBaseSuite) bootstrapCluster(c *C, conn net.Conn, clusterName string, storeAddr string) {
+	req := s.newBootstrapRequest(c, clusterName, storeAddr)
 	sendRequest(c, conn, 0, req)
 	_, resp := recvResponse(c, conn)
 	c.Assert(resp.Bootstrap, NotNil)
 }
 
-func (s *testClusterBaseSuite) tryBootstrapCluster(c *C, conn net.Conn, clusterID uint64, storeAddr string) {
-	req := s.newBootstrapRequest(c, clusterID, storeAddr)
+func (s *testClusterBaseSuite) tryBootstrapCluster(c *C, conn net.Conn, clusterName string, storeAddr string) {
+	req := s.newBootstrapRequest(c, clusterName, storeAddr)
 	sendRequest(c, conn, 0, req)
 	_, resp := recvResponse(c, conn)
 	if resp.Bootstrap == nil {
@@ -168,121 +168,38 @@ func (s *testClusterBaseSuite) tryBootstrapCluster(c *C, conn net.Conn, clusterI
 	}
 }
 
-func (s *testClusterBaseSuite) getStore(c *C, conn net.Conn, clusterID uint64, storeID uint64) *metapb.Store {
+func (s *testClusterBaseSuite) getStore(c *C, conn net.Conn, clusterName string, storeID uint64) *metapb.Store {
 	req := &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_GetMeta.Enum(),
-		GetMeta: &pdpb.GetMetaRequest{
-			MetaType: pdpb.MetaType_StoreType.Enum(),
-			StoreId:  proto.Uint64(storeID),
+		Header:  newRequestHeader(clusterName),
+		CmdType: pdpb.CommandType_GetStore.Enum(),
+		GetStore: &pdpb.GetStoreRequest{
+			StoreId: proto.Uint64(storeID),
 		},
 	}
 
 	sendRequest(c, conn, 0, req)
 	_, resp := recvResponse(c, conn)
-	c.Assert(resp.GetMeta, NotNil)
-	c.Assert(resp.GetMeta.GetMetaType(), Equals, pdpb.MetaType_StoreType)
-	c.Assert(resp.GetMeta.GetStore().GetId(), Equals, uint64(storeID))
+	c.Assert(resp.GetStore, NotNil)
+	c.Assert(resp.GetStore.GetStore().GetId(), Equals, uint64(storeID))
 
-	return resp.GetMeta.GetStore()
+	return resp.GetStore.GetStore()
 }
 
-func (s *testClusterBaseSuite) getRegion(c *C, conn net.Conn, clusterID uint64, regionKey []byte) *metapb.Region {
+func (s *testClusterBaseSuite) getRegion(c *C, conn net.Conn, clusterName string, regionKey []byte) *metapb.Region {
 	req := &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_GetMeta.Enum(),
-		GetMeta: &pdpb.GetMetaRequest{
-			MetaType:  pdpb.MetaType_RegionType.Enum(),
+		Header:  newRequestHeader(clusterName),
+		CmdType: pdpb.CommandType_GetRegion.Enum(),
+		GetRegion: &pdpb.GetRegionRequest{
 			RegionKey: regionKey,
 		},
 	}
 
 	sendRequest(c, conn, 0, req)
 	_, resp := recvResponse(c, conn)
-	c.Assert(resp.GetMeta, NotNil)
-	c.Assert(resp.GetMeta.GetMetaType(), Equals, pdpb.MetaType_RegionType)
-	c.Assert(resp.GetMeta.GetRegion(), NotNil)
+	c.Assert(resp.GetRegion, NotNil)
+	c.Assert(resp.GetRegion.GetRegion(), NotNil)
 
-	return resp.GetMeta.GetRegion()
-}
-
-func (s *testClusterBaseSuite) getMeta(c *C, conn net.Conn, clusterID uint64) *metapb.Cluster {
-	req := &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_GetMeta.Enum(),
-		GetMeta: &pdpb.GetMetaRequest{
-			MetaType:  pdpb.MetaType_ClusterType.Enum(),
-			ClusterId: proto.Uint64(clusterID),
-		},
-	}
-
-	sendRequest(c, conn, 0, req)
-	_, resp := recvResponse(c, conn)
-	c.Assert(resp.GetMeta, NotNil)
-	c.Assert(resp.GetMeta.GetMetaType(), Equals, pdpb.MetaType_ClusterType)
-	c.Assert(resp.GetMeta.GetCluster(), NotNil)
-
-	return resp.GetMeta.GetCluster()
-}
-
-func (s *testClusterSuite) TestGetPutMeta(c *C) {
-	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
-
-	conn, err := net.Dial("tcp", leader.GetAddr())
-	c.Assert(err, IsNil)
-	defer conn.Close()
-
-	clusterID := uint64(0)
-
-	storeAddr := "127.0.0.1:0"
-	s.tryBootstrapCluster(c, conn, clusterID, storeAddr)
-
-	// Get region.
-	region := s.getRegion(c, conn, clusterID, []byte("abc"))
-	c.Assert(region.GetStoreIds(), HasLen, 1)
-
-	// Get store.
-	storeID := region.GetStoreIds()[0]
-	store := s.getStore(c, conn, clusterID, storeID)
-	c.Assert(store.GetAddress(), Equals, storeAddr)
-
-	// Update store.
-	storeAddr = "127.0.0.1:1"
-	req := &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_PutMeta.Enum(),
-		PutMeta: &pdpb.PutMetaRequest{
-			MetaType: pdpb.MetaType_StoreType.Enum(),
-			Store:    s.newStore(c, storeID, storeAddr),
-		},
-	}
-
-	sendRequest(c, conn, 0, req)
-	_, resp := recvResponse(c, conn)
-	c.Assert(resp.PutMeta, NotNil)
-	c.Assert(resp.PutMeta.GetMetaType(), Equals, pdpb.MetaType_StoreType)
-
-	store = s.getStore(c, conn, clusterID, storeID)
-	c.Assert(store.GetAddress(), Equals, storeAddr)
-
-	// Update cluster meta.
-	req = &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_PutMeta.Enum(),
-		PutMeta: &pdpb.PutMetaRequest{
-			MetaType: pdpb.MetaType_ClusterType.Enum(),
-			Cluster: &metapb.Cluster{
-				Id:            proto.Uint64(clusterID),
-				MaxPeerNumber: proto.Uint32(5),
-			},
-		},
-	}
-	sendRequest(c, conn, 0, req)
-	_, resp = recvResponse(c, conn)
-	c.Assert(resp.PutMeta, NotNil)
-	c.Assert(resp.PutMeta.GetMetaType(), Equals, pdpb.MetaType_ClusterType)
-	meta := s.getMeta(c, conn, clusterID)
-	c.Assert(meta.GetMaxPeerNumber(), Equals, uint32(5))
+	return resp.GetRegion.GetRegion()
 }
 
 var _ = Suite(&testClusterCacheSuite{})
@@ -311,7 +228,7 @@ func (s *testClusterCacheSuite) TearDownSuite(c *C) {
 func (s *testClusterCacheSuite) TestCache(c *C) {
 	mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
-	clusterID := uint64(0)
+	clusterID := string("0")
 
 	req := s.newBootstrapRequest(c, clusterID, "127.0.0.1:1")
 	store1 := req.Bootstrap.Store

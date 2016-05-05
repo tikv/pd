@@ -24,7 +24,7 @@ var _ = Suite(&testClusterWorkerSuite{})
 type testClusterWorkerSuite struct {
 	testClusterBaseSuite
 
-	clusterID uint64
+	clusterName string
 
 	storeLock sync.Mutex
 	stores    map[uint64]*mockRaftStore
@@ -65,7 +65,7 @@ type mockRaftStore struct {
 }
 
 func (s *testClusterWorkerSuite) bootstrap(c *C) *mockRaftStore {
-	req := s.newBootstrapRequest(c, s.clusterID, "127.0.0.1:0")
+	req := s.newBootstrapRequest(c, s.clusterName, "127.0.0.1:0")
 	store := req.Bootstrap.Store
 	region := req.Bootstrap.Region
 
@@ -515,7 +515,7 @@ func (s *mockRaftStore) handleSplit(c *C, req *raft_cmdpb.RaftCmdRequest) *raft_
 }
 
 func (s *testClusterWorkerSuite) SetUpSuite(c *C) {
-	s.clusterID = 0
+	s.clusterName = "0"
 
 	s.stores = make(map[uint64]*mockRaftStore)
 
@@ -543,8 +543,8 @@ func (s *testClusterWorkerSuite) SetUpSuite(c *C) {
 
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
-	cluster.PutMeta(&metapb.Cluster{
-		Id:            proto.Uint64(s.clusterID),
+	cluster.PutConfig(&metapb.Cluster{
+		Name:          proto.String(s.clusterName),
 		MaxPeerNumber: proto.Uint32(5),
 	})
 
@@ -602,7 +602,7 @@ func (s *testClusterWorkerSuite) TestChangePeer(c *C) {
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 
-	meta, err := cluster.GetMeta()
+	meta, err := cluster.GetConfig()
 	c.Assert(err, IsNil)
 	c.Assert(meta.GetMaxPeerNumber(), Equals, uint32(5))
 
@@ -623,7 +623,7 @@ func (s *testClusterWorkerSuite) TestChangePeer(c *C) {
 		leaderID := s.chooseRegionLeader(c, region)
 
 		askChangePeer := &pdpb.Request{
-			Header:  newRequestHeader(s.clusterID),
+			Header:  newRequestHeader(s.clusterName),
 			CmdType: pdpb.CommandType_AskChangePeer.Enum(),
 			AskChangePeer: &pdpb.AskChangePeerRequest{
 				LeaderStoreId: proto.Uint64(leaderID),
@@ -652,8 +652,8 @@ func (s *testClusterWorkerSuite) TestChangePeer(c *C) {
 		c.Assert(ok, IsTrue)
 	}
 
-	err = cluster.PutMeta(&metapb.Cluster{
-		Id:            proto.Uint64(s.clusterID),
+	err = cluster.PutConfig(&metapb.Cluster{
+		Name:          proto.String(s.clusterName),
 		MaxPeerNumber: proto.Uint32(3),
 	})
 	c.Assert(err, IsNil)
@@ -665,7 +665,7 @@ func (s *testClusterWorkerSuite) TestChangePeer(c *C) {
 		leaderID := s.chooseRegionLeader(c, region)
 
 		askChangePeer := &pdpb.Request{
-			Header:  newRequestHeader(s.clusterID),
+			Header:  newRequestHeader(s.clusterName),
 			CmdType: pdpb.CommandType_AskChangePeer.Enum(),
 			AskChangePeer: &pdpb.AskChangePeerRequest{
 				LeaderStoreId: proto.Uint64(leaderID),
@@ -743,7 +743,7 @@ func (s *testClusterWorkerSuite) TestSplit(c *C) {
 		}
 
 		askSplit := &pdpb.Request{
-			Header:  newRequestHeader(s.clusterID),
+			Header:  newRequestHeader(s.clusterName),
 			CmdType: pdpb.CommandType_AskSplit.Enum(),
 			AskSplit: &pdpb.AskSplitRequest{
 				Region:        region,

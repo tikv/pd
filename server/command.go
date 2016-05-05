@@ -98,8 +98,32 @@ func (c *conn) getRaftCluster() (*raftCluster, error) {
 	return cluster, nil
 }
 
-func (c *conn) handleGetMeta(req *pdpb.Request) (*pdpb.Response, error) {
-	request := req.GetGetMeta()
+func (c *conn) handleGetStore(req *pdpb.Request) (*pdpb.Response, error) {
+	request := req.GetGetStore()
+	if request == nil {
+		return nil, errors.Errorf("invalid get store command, but %v", req)
+	}
+
+	cluster, err := c.getRaftCluster()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	storeID := request.GetStoreId()
+	store, err := cluster.GetStore(storeID)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	// Store may be nil, should we return an error instead of none result?
+	return &pdpb.Response{
+		GetStore: &pdpb.GetStoreResponse{
+			Store: store,
+		},
+	}, nil
+}
+
+func (c *conn) handleGetRegion(req *pdpb.Request) (*pdpb.Response, error) {
+	request := req.GetGetRegion()
 	if request == nil {
 		return nil, errors.Errorf("invalid get meta command, but %v", req)
 	}
@@ -109,45 +133,23 @@ func (c *conn) handleGetMeta(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Trace(err)
 	}
 
-	resp := &pdpb.GetMetaResponse{
-		MetaType: request.MetaType,
-	}
-
-	switch request.GetMetaType() {
-	case pdpb.MetaType_StoreType:
-		storeID := request.GetStoreId()
-		store, err := cluster.GetStore(storeID)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		// Store may be nil, should we return an error instead of none result?
-		resp.Store = store
-	case pdpb.MetaType_RegionType:
-		key := request.GetRegionKey()
-		region, err := cluster.GetRegion(key)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		resp.Region = region
-	case pdpb.MetaType_ClusterType:
-		meta, err := cluster.GetMeta()
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		resp.Cluster = meta
-	default:
-		return nil, errors.Errorf("invalid meta type %v", request.GetMetaType())
+	key := request.GetRegionKey()
+	region, err := cluster.GetRegion(key)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
 	return &pdpb.Response{
-		GetMeta: resp,
+		GetRegion: &pdpb.GetRegionResponse{
+			Region: region,
+		},
 	}, nil
 }
 
-func (c *conn) handlePutMeta(req *pdpb.Request) (*pdpb.Response, error) {
-	request := req.GetPutMeta()
+func (c *conn) handleGetClusterConfig(req *pdpb.Request) (*pdpb.Response, error) {
+	request := req.GetGetClusterConfig()
 	if request == nil {
-		return nil, errors.Errorf("invalid put meta command, but %v", req)
+		return nil, errors.Errorf("invalid get meta command, but %v", req)
 	}
 
 	cluster, err := c.getRaftCluster()
@@ -155,27 +157,56 @@ func (c *conn) handlePutMeta(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Trace(err)
 	}
 
-	switch request.GetMetaType() {
-	case pdpb.MetaType_StoreType:
-		store := request.GetStore()
-		if err = cluster.PutStore(store); err != nil {
-			return nil, errors.Trace(err)
-		}
-	case pdpb.MetaType_ClusterType:
-		meta := request.GetCluster()
-		if err = cluster.PutMeta(meta); err != nil {
-			return nil, errors.Trace(err)
-		}
-	default:
-		return nil, errors.Errorf("invalid meta type %v", request.GetMetaType())
-	}
-
-	resp := &pdpb.PutMetaResponse{
-		MetaType: request.MetaType,
+	conf, err := cluster.GetConfig()
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
 	return &pdpb.Response{
-		PutMeta: resp,
+		GetClusterConfig: &pdpb.GetClusterConfigResponse{
+			Cluster: conf,
+		},
+	}, nil
+}
+
+func (c *conn) handlePutClusterConfig(req *pdpb.Request) (*pdpb.Response, error) {
+	request := req.GetPutClusterConfig()
+	if request == nil {
+		return nil, errors.Errorf("invalid get meta command, but %v", req)
+	}
+
+	cluster, err := c.getRaftCluster()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	conf := request.GetCluster()
+	if err = cluster.PutConfig(conf); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return &pdpb.Response{
+		PutClusterConfig: &pdpb.PutClusterConfigResponse{},
+	}, nil
+}
+
+func (c *conn) handlePutStore(req *pdpb.Request) (*pdpb.Response, error) {
+	request := req.GetPutStore()
+	if request == nil {
+		return nil, errors.Errorf("invalid put meta command, but %v", req)
+	}
+	store := request.GetStore()
+
+	cluster, err := c.getRaftCluster()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	if err = cluster.PutStore(store); err != nil {
+		return nil, errors.Trace(err)
+	}
+	return &pdpb.Response{
+		PutStore: &pdpb.PutStoreResponse{},
 	}, nil
 }
 

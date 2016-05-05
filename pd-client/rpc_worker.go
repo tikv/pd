@@ -34,26 +34,38 @@ type tsoRequest struct {
 	logical  int64
 }
 
-type metaRequest struct {
-	pbReq  *pdpb.GetMetaRequest
+type storeRequest struct {
+	pbReq  *pdpb.GetStoreRequest
 	done   chan error
-	pbResp *pdpb.GetMetaResponse
+	pbResp *pdpb.GetStoreResponse
+}
+
+type regionRequest struct {
+	pbReq  *pdpb.GetRegionRequest
+	done   chan error
+	pbResp *pdpb.GetRegionResponse
+}
+
+type clusterConfigRequest struct {
+	pbReq  *pdpb.GetClusterConfigRequest
+	done   chan error
+	pbResp *pdpb.GetClusterConfigResponse
 }
 
 type rpcWorker struct {
-	addr      string
-	clusterID uint64
-	requests  chan interface{}
-	wg        sync.WaitGroup
-	quit      chan struct{}
+	addr        string
+	clusterName string
+	requests    chan interface{}
+	wg          sync.WaitGroup
+	quit        chan struct{}
 }
 
-func newRPCWorker(addr string, clusterID uint64) *rpcWorker {
+func newRPCWorker(addr string, clusterName string) *rpcWorker {
 	w := &rpcWorker{
-		addr:      addr,
-		clusterID: clusterID,
-		requests:  make(chan interface{}, maxPipelineRequest),
-		quit:      make(chan struct{}),
+		addr:        addr,
+		clusterName: clusterName,
+		requests:    make(chan interface{}, maxPipelineRequest),
+		quit:        make(chan struct{}),
 	}
 	w.wg.Add(1)
 	go w.work()
@@ -69,7 +81,11 @@ func (w *rpcWorker) stop(err error) {
 		switch r := req.(type) {
 		case *tsoRequest:
 			r.done <- err
-		case *metaRequest:
+		case *storeRequest:
+			r.done <- err
+		case *regionRequest:
+			r.done <- err
+		case *clusterConfigRequest:
 			r.done <- err
 		}
 	}
@@ -128,14 +144,34 @@ func (w *rpcWorker) handleRequests(requests []interface{}, conn *bufio.ReadWrite
 		switch r := req.(type) {
 		case *tsoRequest:
 			tsoRequests = append(tsoRequests, r)
-		case *metaRequest:
-			metaResp, err := w.getMetaFromRemote(conn, r.pbReq)
+		case *storeRequest:
+			storeResp, err := w.getStoreFromRemote(conn, r.pbReq)
 			if err != nil {
 				ok = false
 				log.Error(err)
 				r.done <- err
 			} else {
-				r.pbResp = metaResp
+				r.pbResp = storeResp
+				r.done <- nil
+			}
+		case *regionRequest:
+			regionResp, err := w.getRegionFromRemote(conn, r.pbReq)
+			if err != nil {
+				ok = false
+				log.Error(err)
+				r.done <- err
+			} else {
+				r.pbResp = regionResp
+				r.done <- nil
+			}
+		case *clusterConfigRequest:
+			clusterConfigResp, err := w.getClusterConfigFromRemote(conn, r.pbReq)
+			if err != nil {
+				ok = false
+				log.Error(err)
+				r.done <- err
+			} else {
+				r.pbResp = clusterConfigResp
 				r.done <- nil
 			}
 		default:
@@ -173,8 +209,8 @@ func newMsgID() uint64 {
 func (w *rpcWorker) getTSFromRemote(conn *bufio.ReadWriter, n int) ([]*pdpb.Timestamp, error) {
 	req := pdpb.Request{
 		Header: &pdpb.RequestHeader{
-			Uuid:      uuid.NewV4().Bytes(),
-			ClusterId: proto.Uint64(w.clusterID),
+			Uuid:        uuid.NewV4().Bytes(),
+			ClusterName: proto.String(w.clusterName),
 		},
 		CmdType: pdpb.CommandType_Tso.Enum(),
 		Tso: &pdpb.TsoRequest{
@@ -193,7 +229,7 @@ func (w *rpcWorker) getTSFromRemote(conn *bufio.ReadWriter, n int) ([]*pdpb.Time
 		return nil, errors.Trace(err)
 	}
 	if rsp.GetTso() == nil {
-		return nil, errors.New("[pd] tso filed in rpc response not set")
+		return nil, errors.New("[pd] tso field in rpc response not set")
 	}
 	timestamps := rsp.GetTso().GetTimestamps()
 	if len(timestamps) != n {
@@ -202,16 +238,65 @@ func (w *rpcWorker) getTSFromRemote(conn *bufio.ReadWriter, n int) ([]*pdpb.Time
 	return timestamps, nil
 }
 
-func (w *rpcWorker) getMetaFromRemote(conn *bufio.ReadWriter, metaReq *pdpb.GetMetaRequest) (*pdpb.GetMetaResponse, error) {
+func (w *rpcWorker) getStoreFromRemote(conn *bufio.ReadWriter, storeReq *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
 	req := pdpb.Request{
 		Header: &pdpb.RequestHeader{
-			Uuid:      uuid.NewV4().Bytes(),
-			ClusterId: proto.Uint64(w.clusterID),
+			Uuid:        uuid.NewV4().Bytes(),
+			ClusterName: proto.String(w.clusterName),
 		},
-		CmdType: pdpb.CommandType_GetMeta.Enum(),
-		GetMeta: metaReq,
+		CmdType:  pdpb.CommandType_GetStore.Enum(),
+		GetStore: storeReq,
 	}
-	if err := util.WriteMessage(conn, newMsgID(), &req); err != nil {
+	rsp, err := w.do(conn, &req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if rsp.GetGetStore() == nil {
+		return nil, errors.New("[pd] GetStore field in rpc response not set")
+	}
+	return rsp.GetGetStore(), nil
+}
+
+func (w *rpcWorker) getRegionFromRemote(conn *bufio.ReadWriter, regionReq *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+	req := pdpb.Request{
+		Header: &pdpb.RequestHeader{
+			Uuid:        uuid.NewV4().Bytes(),
+			ClusterName: proto.String(w.clusterName),
+		},
+		CmdType:   pdpb.CommandType_GetRegion.Enum(),
+		GetRegion: regionReq,
+	}
+	rsp, err := w.do(conn, &req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if rsp.GetGetRegion() == nil {
+		return nil, errors.New("[pd] GetRegion field in rpc response not set")
+	}
+	return rsp.GetGetRegion(), nil
+}
+
+func (w *rpcWorker) getClusterConfigFromRemote(conn *bufio.ReadWriter, clusterConfigReq *pdpb.GetClusterConfigRequest) (*pdpb.GetClusterConfigResponse, error) {
+	req := pdpb.Request{
+		Header: &pdpb.RequestHeader{
+			Uuid:        uuid.NewV4().Bytes(),
+			ClusterName: proto.String(w.clusterName),
+		},
+		CmdType:          pdpb.CommandType_GetRegion.Enum(),
+		GetClusterConfig: clusterConfigReq,
+	}
+	rsp, err := w.do(conn, &req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if rsp.GetGetClusterConfig() == nil {
+		return nil, errors.New("[pd] GetRegion field in rpc response not set")
+	}
+	return rsp.GetGetClusterConfig(), nil
+}
+
+func (w *rpcWorker) do(conn *bufio.ReadWriter, req *pdpb.Request) (*pdpb.Response, error) {
+	if err := util.WriteMessage(conn, newMsgID(), req); err != nil {
 		return nil, errors.Errorf("[pd] rpc failed: %v", err)
 	}
 	conn.Flush()
@@ -222,10 +307,7 @@ func (w *rpcWorker) getMetaFromRemote(conn *bufio.ReadWriter, metaReq *pdpb.GetM
 	if err := w.checkResponse(&rsp); err != nil {
 		return nil, errors.Trace(err)
 	}
-	if rsp.GetGetMeta() == nil {
-		return nil, errors.New("[pd] GetMeta filed in rpc response not set")
-	}
-	return rsp.GetGetMeta(), nil
+	return &rsp, nil
 }
 
 func (w *rpcWorker) checkResponse(resp *pdpb.Response) error {

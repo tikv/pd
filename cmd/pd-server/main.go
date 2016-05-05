@@ -21,15 +21,15 @@ var (
 	leaderLease   = flag.Int64("lease", 3, "leader lease time (second)")
 	logLevel      = flag.String("L", "debug", "log level: info, debug, warn, error, fatal")
 	pprofAddr     = flag.String("pprof", ":6060", "pprof HTTP listening address")
-	clusterID     = flag.Uint64("cluster-id", 0, "cluster ID")
+	clusterName   = flag.String("name", "test", "cluster Name")
 	maxPeerNumber = flag.Uint("max-peer-num", 3, "max peer number for the region")
 )
 
 func main() {
 	flag.Parse()
 
-	if *clusterID == 0 {
-		log.Warn("cluster id is 0, don't use it in production")
+	if *clusterName == "test" {
+		log.Warn("cluster name is test, don't use it in production")
 	}
 
 	log.SetLevelByString(*logLevel)
@@ -44,7 +44,7 @@ func main() {
 		EtcdAddrs:     strings.Split(*etcdAddrs, ","),
 		RootPath:      *rootPath,
 		LeaderLease:   *leaderLease,
-		ClusterID:     *clusterID,
+		ClusterName:   *clusterName,
 		MaxPeerNumber: uint32(*maxPeerNumber),
 	}
 

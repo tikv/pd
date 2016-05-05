@@ -26,16 +26,16 @@ var (
 )
 
 // Raft cluster key format:
-// cluster 1 -> /1/raft, value is metapb.Cluster
-// cluster 2 -> /2/raft
-// For cluster 1
-// store 1 -> /1/raft/s/1, value is metapb.Store
-// region 1 -> /1/raft/r/1, value is encoded_region_key
-// region search key map -> /1/raft/k/encoded_region_key, value is metapb.Region
+// cluster xxx -> /xxx/raft, value is metapb.Cluster
+// cluster yyy -> /yyy/raft
+// For cluster xxx
+// store 1 -> /xxx/raft/s/1, value is metapb.Store
+// region 1 -> /xxx/raft/r/1, value is encoded_region_key
+// region search key map -> /xxx/raft/k/encoded_region_key, value is metapb.Region
 //
 // Operation queue, pd can only handle operations like auto-balance, split,
 // merge sequentially, and every operation will be assigned a unique incremental ID.
-// pending queue -> /1/raft/j/1, /1/raft/j/2, value is operation job.
+// pending queue -> /xxx/raft/j/1, /xxx/raft/j/2, value is operation job.
 //
 // Encode region search key:
 //  1, the maximum end region key is empty, so the encode key is \xFF
@@ -48,7 +48,7 @@ type raftCluster struct {
 
 	running bool
 
-	clusterID   uint64
+	clusterName string
 	clusterRoot string
 
 	wg sync.WaitGroup
@@ -191,34 +191,34 @@ func makeStoreKeyPrefix(clusterRootPath string) string {
 	return strings.Join([]string{clusterRootPath, "s", ""}, "/")
 }
 
-func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
+func checkBootstrapRequest(clusterName string, req *pdpb.BootstrapRequest) error {
 	// TODO: do more check for request fields validation.
 
 	storeMeta := req.GetStore()
 	if storeMeta == nil {
-		return errors.Errorf("missing store meta for bootstrap %d", clusterID)
+		return errors.Errorf("missing store meta for bootstrap %s", clusterName)
 	} else if storeMeta.GetId() == 0 {
 		return errors.New("invalid zero store id")
 	}
 
 	regionMeta := req.GetRegion()
 	if regionMeta == nil {
-		return errors.Errorf("missing region meta for bootstrap %d", clusterID)
+		return errors.Errorf("missing region meta for bootstrap %s", clusterName)
 	} else if len(regionMeta.GetStartKey()) > 0 || len(regionMeta.GetEndKey()) > 0 {
 		// first region start/end key must be empty
-		return errors.Errorf("invalid first region key range, must all be empty for bootstrap %d", clusterID)
+		return errors.Errorf("invalid first region key range, must all be empty for bootstrap %s", clusterName)
 	} else if regionMeta.GetId() == 0 {
 		return errors.New("invalid zero region id")
 	}
 
 	storeIDs := regionMeta.GetStoreIds()
 	if len(storeIDs) != 1 {
-		return errors.Errorf("invalid first region peer number %d, must be 1 for bootstrap %d", len(storeIDs), clusterID)
+		return errors.Errorf("invalid first region peer number %d, must be 1 for bootstrap %s", len(storeIDs), clusterName)
 	}
 
 	storeID := storeIDs[0]
 	if storeID != storeMeta.GetId() {
-		return errors.Errorf("invalid peer store id %d != %d for bootstrap %d", storeID, storeMeta.GetId(), clusterID)
+		return errors.Errorf("invalid peer store id %d != %d for bootstrap %s", storeID, storeMeta.GetId(), clusterName)
 	} else if storeID == 0 {
 		return errors.New("invalid zero peer store id")
 	}
@@ -227,16 +227,16 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 }
 
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, error) {
-	clusterID := s.cfg.ClusterID
+	clusterName := s.cfg.ClusterName
 
-	log.Infof("try to bootstrap raft cluster %d with %v", clusterID, req)
+	log.Infof("try to bootstrap raft cluster %s with %v", clusterName, req)
 
-	if err := checkBootstrapRequest(clusterID, req); err != nil {
+	if err := checkBootstrapRequest(clusterName, req); err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	clusterMeta := metapb.Cluster{
-		Id:            proto.Uint64(clusterID),
+		Name:          proto.String(clusterName),
 		MaxPeerNumber: proto.Uint32(s.cfg.MaxPeerNumber),
 	}
 
@@ -283,11 +283,11 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 		return nil, errors.Trace(err)
 	}
 	if !resp.Succeeded {
-		log.Warnf("cluster %d already bootstrapped", clusterID)
+		log.Warnf("cluster %s already bootstrapped", clusterName)
 		return NewBootstrappedError(), nil
 	}
 
-	log.Infof("bootstrap cluster %d ok", clusterID)
+	log.Infof("bootstrap cluster %s ok", clusterName)
 
 	if err = s.cluster.Start(clusterMeta); err != nil {
 		return nil, errors.Trace(err)
@@ -426,7 +426,7 @@ func (c *raftCluster) PutStore(store *metapb.Store) error {
 	return nil
 }
 
-func (c *raftCluster) GetMeta() (*metapb.Cluster, error) {
+func (c *raftCluster) GetConfig() (*metapb.Cluster, error) {
 	mu := &c.mu
 	mu.RLock()
 	defer mu.RUnlock()
@@ -435,9 +435,9 @@ func (c *raftCluster) GetMeta() (*metapb.Cluster, error) {
 	return &meta, nil
 }
 
-func (c *raftCluster) PutMeta(meta *metapb.Cluster) error {
-	if meta.GetId() != c.clusterID {
-		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
+func (c *raftCluster) PutConfig(meta *metapb.Cluster) error {
+	if meta.GetName() != c.clusterName {
+		return errors.Errorf("invalid cluster %v, mismatch cluster id %s", meta, c.clusterName)
 	}
 
 	metaValue, err := proto.Marshal(meta)

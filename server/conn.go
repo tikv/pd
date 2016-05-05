@@ -96,7 +96,7 @@ func updateResponse(req *pdpb.Request, resp *pdpb.Response) {
 	}
 
 	resp.Header.Uuid = req.Header.Uuid
-	resp.Header.ClusterId = req.Header.ClusterId
+	resp.Header.ClusterName = req.Header.ClusterName
 }
 
 func (c *conn) Close() error {
@@ -104,9 +104,9 @@ func (c *conn) Close() error {
 }
 
 func (c *conn) handleRequest(req *pdpb.Request) (*pdpb.Response, error) {
-	clusterID := req.GetHeader().GetClusterId()
-	if clusterID != c.s.cfg.ClusterID {
-		return nil, errors.Errorf("mismatch cluster id, need %d but got %d", c.s.cfg.ClusterID, clusterID)
+	clusterName := req.GetHeader().GetClusterName()
+	if clusterName != c.s.cfg.ClusterName {
+		return nil, errors.Errorf("mismatch cluster name, need %s but got %s", c.s.cfg.ClusterName, clusterName)
 	}
 
 	switch req.GetCmdType() {
@@ -118,14 +118,20 @@ func (c *conn) handleRequest(req *pdpb.Request) (*pdpb.Response, error) {
 		return c.handleBootstrap(req)
 	case pdpb.CommandType_IsBootstrapped:
 		return c.handleIsBootstrapped(req)
-	case pdpb.CommandType_GetMeta:
-		return c.handleGetMeta(req)
-	case pdpb.CommandType_PutMeta:
-		return c.handlePutMeta(req)
+	case pdpb.CommandType_GetStore:
+		return c.handleGetStore(req)
+	case pdpb.CommandType_PutStore:
+		return c.handlePutStore(req)
 	case pdpb.CommandType_AskChangePeer:
 		return c.handleAskChangePeer(req)
 	case pdpb.CommandType_AskSplit:
 		return c.handleAskSplit(req)
+	case pdpb.CommandType_GetRegion:
+		return c.handleGetRegion(req)
+	case pdpb.CommandType_GetClusterConfig:
+		return c.handleGetClusterConfig(req)
+	case pdpb.CommandType_PutClusterConfig:
+		return c.handlePutClusterConfig(req)
 	default:
 		return nil, errors.Errorf("unsupported command %s", req)
 	}
