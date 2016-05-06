@@ -185,22 +185,8 @@ func (w *rpcWorker) getTSFromRemote(conn *bufio.ReadWriter, n int) ([]*pdpb.Time
 			Number: proto.Uint32(uint32(n)),
 		},
 	}
-	msg := &msgpb.Message{
-		MsgType: msgpb.MessageType_PdReq.Enum(),
-		PdReq:   req,
-	}
-	if err := util.WriteMessage(conn, newMsgID(), msg); err != nil {
-		return nil, errors.Errorf("[pd] rpc failed: %v", err)
-	}
-	conn.Flush()
-	if _, err := util.ReadMessage(conn, msg); err != nil {
-		return nil, errors.Errorf("[pd] rpc failed: %v", err)
-	}
-	if msg.GetMsgType() != msgpb.MessageType_PdResp {
-		return nil, errors.Trace(errInvalidResponse)
-	}
-	resp := msg.GetPdResp()
-	if err := w.checkResponse(resp); err != nil {
+	resp, err := w.callRPC(conn, req)
+	if err != nil {
 		return nil, errors.Trace(err)
 	}
 	if resp.GetTso() == nil {
@@ -222,6 +208,17 @@ func (w *rpcWorker) getMetaFromRemote(conn *bufio.ReadWriter, metaReq *pdpb.GetM
 		CmdType: pdpb.CommandType_GetMeta.Enum(),
 		GetMeta: metaReq,
 	}
+	resp, err := w.callRPC(conn, req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if resp.GetGetMeta() == nil {
+		return nil, errors.New("[pd] GetMeta filed in rpc response not set")
+	}
+	return resp.GetGetMeta(), nil
+}
+
+func (w *rpcWorker) callRPC(conn *bufio.ReadWriter, req *pdpb.Request) (*pdpb.Response, error) {
 	msg := &msgpb.Message{
 		MsgType: msgpb.MessageType_PdReq.Enum(),
 		PdReq:   req,
@@ -240,10 +237,8 @@ func (w *rpcWorker) getMetaFromRemote(conn *bufio.ReadWriter, metaReq *pdpb.GetM
 	if err := w.checkResponse(resp); err != nil {
 		return nil, errors.Trace(err)
 	}
-	if resp.GetGetMeta() == nil {
-		return nil, errors.New("[pd] GetMeta filed in rpc response not set")
-	}
-	return resp.GetGetMeta(), nil
+
+	return resp, nil
 }
 
 func (w *rpcWorker) checkResponse(resp *pdpb.Response) error {

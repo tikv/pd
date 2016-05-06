@@ -57,6 +57,11 @@ func (c *conn) run() {
 			return
 		}
 
+		if msg.GetMsgType() != msgpb.MessageType_PdReq {
+			log.Errorf("invalid request message %v", msg)
+			return
+		}
+
 		request := msg.GetPdReq()
 		response, err := c.handleRequest(request)
 		if err != nil {
