@@ -339,7 +339,7 @@ func (c *raftCluster) handleRemovePeerReq(region *metapb.Region, leaderStoreID u
 }
 
 func (c *raftCluster) HandleAskChangePeer(request *pdpb.AskChangePeerRequest) error {
-	clusterMeta, err := c.GetMeta()
+	clusterMeta, err := c.GetConfig()
 	if err != nil {
 		return errors.Trace(err)
 	}

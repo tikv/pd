@@ -426,7 +426,7 @@ func (c *raftCluster) PutStore(store *metapb.Store) error {
 	return nil
 }
 
-func (c *raftCluster) GetMeta() (*metapb.Cluster, error) {
+func (c *raftCluster) GetConfig() (*metapb.Cluster, error) {
 	mu := &c.mu
 	mu.RLock()
 	defer mu.RUnlock()
@@ -435,7 +435,7 @@ func (c *raftCluster) GetMeta() (*metapb.Cluster, error) {
 	return &meta, nil
 }
 
-func (c *raftCluster) PutMeta(meta *metapb.Cluster) error {
+func (c *raftCluster) PutConfig(meta *metapb.Cluster) error {
 	if meta.GetId() != c.clusterID {
 		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
 	}
