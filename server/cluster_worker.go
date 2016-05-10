@@ -330,11 +330,11 @@ func (c *raftCluster) handleAddPeerReq(region *metapb.Region) (*metapb.Peer, err
 
 // If leader is nil, we will return an error, or else we can remove none leader peer.
 func (c *raftCluster) handleRemovePeerReq(region *metapb.Region, leader *metapb.Peer) (*metapb.Peer, error) {
-	if len(region.StoreIds) <= 1 {
-		return 0, errors.Errorf("can not remove peer for region %v", region)
+	if len(region.Peers) <= 1 {
+		return nil, errors.Errorf("can not remove peer for region %v", region)
 	}
 	if leader == nil {
-		return 0, errors.Errorf("invalid leader for region %v", region)
+		return nil, errors.Errorf("invalid leader for region %v", region)
 	}
 
 	for _, peer := range region.Peers {
@@ -598,7 +598,7 @@ RETRY:
 		if err != nil {
 			// We may meet some error, maybe network broken, node down, etc.
 			// We can check later next time.
-			return nil, 0, errors.Trace(err)
+			return nil, errors.Trace(err)
 		}
 
 		if resp.Header.Error != nil && resp.Header.Error.NotLeader != nil {
@@ -643,6 +643,7 @@ RETRY:
 }
 
 func (c *raftCluster) callCommand(request *raft_cmdpb.RaftCmdRequest) (*raft_cmdpb.RaftCmdResponse, error) {
+	storeID := request.Header.Peer.GetStoreId()
 	store, err := c.GetStore(storeID)
 	if err != nil {
 		return nil, errors.Trace(err)
