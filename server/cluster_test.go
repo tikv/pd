@@ -55,6 +55,19 @@ func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 	}
 }
 
+func (s *testClusterBaseSuite) newPeer(c *C, storeID uint64, peerID uint64) *metapb.Peer {
+	c.Assert(storeID, Greater, uint64(0))
+
+	if peerID == 0 {
+		peerID = s.allocID(c)
+	}
+
+	return &metapb.Peer{
+		StoreId: proto.Uint64(storeID),
+		Id:      proto.Uint64(peerID),
+	}
+}
+
 func (s *testClusterBaseSuite) newStore(c *C, storeID uint64, addr string) *metapb.Store {
 	if storeID == 0 {
 		storeID = s.allocID(c)
@@ -67,7 +80,7 @@ func (s *testClusterBaseSuite) newStore(c *C, storeID uint64, addr string) *meta
 }
 
 func (s *testClusterBaseSuite) newRegion(c *C, regionID uint64, startKey []byte,
-	endKey []byte, storeIDs []uint64, epoch *metapb.RegionEpoch) *metapb.Region {
+	endKey []byte, peers []*metapb.Peer, epoch *metapb.RegionEpoch) *metapb.Region {
 	if regionID == 0 {
 		regionID = s.allocID(c)
 	}
@@ -79,12 +92,17 @@ func (s *testClusterBaseSuite) newRegion(c *C, regionID uint64, startKey []byte,
 		}
 	}
 
+	for _, peer := range peers {
+		peerID := peer.GetId()
+		c.Assert(peerID, Greater, uint64(0))
+	}
+
 	return &metapb.Region{
 		Id:          proto.Uint64(regionID),
 		StartKey:    startKey,
 		EndKey:      endKey,
 		RegionEpoch: epoch,
-		StoreIds:    storeIDs,
+		Peers:       peers,
 	}
 }
 
@@ -136,7 +154,8 @@ func (s *testClusterBaseSuite) newIsBootstrapRequest(clusterID uint64) *pdpb.Req
 
 func (s *testClusterBaseSuite) newBootstrapRequest(c *C, clusterID uint64, storeAddr string) *pdpb.Request {
 	store := s.newStore(c, 0, storeAddr)
-	region := s.newRegion(c, 0, []byte{}, []byte{}, []uint64{store.GetId()}, nil)
+	peer := s.newPeer(c, store.GetId(), 0)
+	region := s.newRegion(c, 0, []byte{}, []byte{}, []*metapb.Peer{peer}, nil)
 
 	req := &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
@@ -239,10 +258,11 @@ func (s *testClusterSuite) TestGetPutMeta(c *C) {
 
 	// Get region.
 	region := s.getRegion(c, conn, clusterID, []byte("abc"))
-	c.Assert(region.GetStoreIds(), HasLen, 1)
+	c.Assert(region.GetPeers(), HasLen, 1)
+	peer := region.GetPeers()[0]
 
 	// Get store.
-	storeID := region.GetStoreIds()[0]
+	storeID := peer.GetStoreId()
 	store := s.getStore(c, conn, clusterID, storeID)
 	c.Assert(store.GetAddress(), Equals, storeAddr)
 

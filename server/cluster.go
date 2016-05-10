@@ -218,16 +218,17 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 		return errors.New("invalid zero region id")
 	}
 
-	storeIDs := regionMeta.GetStoreIds()
-	if len(storeIDs) != 1 {
-		return errors.Errorf("invalid first region peer number %d, must be 1 for bootstrap %d", len(storeIDs), clusterID)
+	peers := regionMeta.GetPeers()
+	if len(peers) != 1 {
+		return errors.Errorf("invalid first region peer number %d, must be 1 for bootstrap %d", len(peers), clusterID)
 	}
 
-	storeID := storeIDs[0]
-	if storeID != storeMeta.GetId() {
-		return errors.Errorf("invalid peer store id %d != %d for bootstrap %d", storeID, storeMeta.GetId(), clusterID)
-	} else if storeID == 0 {
-		return errors.New("invalid zero peer store id")
+	peer := peers[0]
+	if peer.GetStoreId() != storeMeta.GetId() {
+		return errors.Errorf("invalid peer store id %d != %d for bootstrap %d", peer.GetStoreId(), storeMeta.GetId(), clusterID)
+	}
+	if peer.GetId() == 0 {
+		return errors.New("invalid zero peer id")
 	}
 
 	return nil
