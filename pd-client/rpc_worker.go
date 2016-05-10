@@ -249,13 +249,13 @@ func (w *rpcWorker) getStoreFromRemote(conn *bufio.ReadWriter, storeReq *pdpb.Ge
 		return nil, errors.Trace(err)
 	}
 	if resp.GetGetStore() == nil {
-		return nil, errors.New("[pd] GetMeta filed in rpc response not set")
+		return nil, errors.New("[pd] GetStore filed in rpc response not set")
 	}
 	return resp.GetGetStore(), nil
 }
 
 func (w *rpcWorker) getRegionFromRemote(conn *bufio.ReadWriter, regionReq *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
-	req := pdpb.Request{
+	req := &pdpb.Request{
 		Header: &pdpb.RequestHeader{
 			Uuid:      uuid.NewV4().Bytes(),
 			ClusterId: proto.Uint64(w.clusterID),
@@ -263,7 +263,7 @@ func (w *rpcWorker) getRegionFromRemote(conn *bufio.ReadWriter, regionReq *pdpb.
 		CmdType:   pdpb.CommandType_GetRegion.Enum(),
 		GetRegion: regionReq,
 	}
-	rsp, err := w.callRPC(conn, &req)
+	rsp, err := w.callRPC(conn, req)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -274,20 +274,20 @@ func (w *rpcWorker) getRegionFromRemote(conn *bufio.ReadWriter, regionReq *pdpb.
 }
 
 func (w *rpcWorker) getClusterConfigFromRemote(conn *bufio.ReadWriter, clusterConfigReq *pdpb.GetClusterConfigRequest) (*pdpb.GetClusterConfigResponse, error) {
-	req := pdpb.Request{
+	req := &pdpb.Request{
 		Header: &pdpb.RequestHeader{
 			Uuid:      uuid.NewV4().Bytes(),
 			ClusterId: proto.Uint64(w.clusterID),
 		},
-		CmdType:          pdpb.CommandType_GetRegion.Enum(),
+		CmdType:          pdpb.CommandType_GetClusterConfig.Enum(),
 		GetClusterConfig: clusterConfigReq,
 	}
-	rsp, err := w.callRPC(conn, &req)
+	rsp, err := w.callRPC(conn, req)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 	if rsp.GetGetClusterConfig() == nil {
-		return nil, errors.New("[pd] GetRegion field in rpc response not set")
+		return nil, errors.New("[pd] GetClusterConfig field in rpc response not set")
 	}
 	return rsp.GetGetClusterConfig(), nil
 }
