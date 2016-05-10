@@ -9,6 +9,7 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	"github.com/golang/protobuf/proto"
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/util"
 )
@@ -38,14 +39,20 @@ func (s *testTsoSuite) TearDownSuite(c *C) {
 }
 
 func sendRequest(c *C, conn net.Conn, msgID uint64, request *pdpb.Request) {
-	err := util.WriteMessage(conn, msgID, request)
+	msg := &msgpb.Message{
+		MsgType: msgpb.MessageType_PdReq.Enum(),
+		PdReq:   request,
+	}
+	err := util.WriteMessage(conn, msgID, msg)
 	c.Assert(err, IsNil)
 }
 
 func recvResponse(c *C, conn net.Conn) (uint64, *pdpb.Response) {
-	resp := &pdpb.Response{}
-	msgID, err := util.ReadMessage(conn, resp)
+	msg := &msgpb.Message{}
+	msgID, err := util.ReadMessage(conn, msg)
 	c.Assert(err, IsNil)
+	c.Assert(msg.GetMsgType(), Equals, msgpb.MessageType_PdResp)
+	resp := msg.GetPdResp()
 	return msgID, resp
 }
 

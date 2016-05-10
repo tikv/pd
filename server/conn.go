@@ -6,6 +6,7 @@ import (
 
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/util"
 )
@@ -49,19 +50,24 @@ func (c *conn) run() {
 	}()
 
 	for {
-		request := &pdpb.Request{}
-		msgID, err := util.ReadMessage(c.rb, request)
+		msg := &msgpb.Message{}
+		msgID, err := util.ReadMessage(c.rb, msg)
 		if err != nil {
 			log.Errorf("read request message err %v", err)
 			return
 		}
 
+		if msg.GetMsgType() != msgpb.MessageType_PdReq {
+			log.Errorf("invalid request message %v", msg)
+			return
+		}
+
+		request := msg.GetPdReq()
 		response, err := c.handleRequest(request)
 		if err != nil {
 			log.Errorf("handle request %s err %v", request, errors.ErrorStack(err))
 			response = NewError(err)
 		}
-
 		if response == nil {
 			// we don't need to response, maybe error?
 			// if error, we will return an error response later.
@@ -71,7 +77,12 @@ func (c *conn) run() {
 
 		updateResponse(request, response)
 
-		if err = util.WriteMessage(c.wb, msgID, response); err != nil {
+		msg = &msgpb.Message{
+			MsgType: msgpb.MessageType_PdResp.Enum(),
+			PdResp:  response,
+		}
+
+		if err = util.WriteMessage(c.wb, msgID, msg); err != nil {
 			log.Errorf("write response message err %v", err)
 			return
 		}

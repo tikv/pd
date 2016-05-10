@@ -139,25 +139,32 @@ func (s *Server) getRaftCluster() (*raftCluster, error) {
 		return s.cluster, nil
 	}
 
-	// Find in etcd
+	return nil, nil
+}
+
+func (s *Server) createRaftCluster() error {
+	if s.cluster.IsRunning() {
+		return nil
+	}
+
 	value, err := getValue(s.client, s.getClusterRootPath())
 	if err != nil {
-		return nil, errors.Trace(err)
+		return errors.Trace(err)
 	}
 	if value == nil {
-		return nil, nil
+		return nil
 	}
 
 	clusterMeta := metapb.Cluster{}
 	if err = proto.Unmarshal(value, &clusterMeta); err != nil {
-		return nil, errors.Trace(err)
+		return errors.Trace(err)
 	}
 
 	if err = s.cluster.Start(clusterMeta); err != nil {
-		return nil, errors.Trace(err)
+		return errors.Trace(err)
 	}
 
-	return s.cluster, nil
+	return nil
 }
 
 func encodeRegionSearchKey(endKey []byte) string {

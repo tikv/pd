@@ -16,7 +16,7 @@ import (
 
 const (
 	// update timestamp every updateTimestampStep milliseconds.
-	updateTimestampStep = int64(10)
+	updateTimestampStep = int64(50)
 	maxLogical          = int64(1 << 18)
 )
 
@@ -115,12 +115,12 @@ func (s *Server) updateTimestamp() error {
 	now := time.Now()
 
 	since := now.Sub(prev.physical).Nanoseconds() / 1e6
-	if since > 2*updateTimestampStep {
+	if since > 3*updateTimestampStep {
 		log.Warnf("clock offset: %v, prev: %v, now %v", since, prev.physical, now)
 	}
 	// Avoid the same physical time stamp
 	if since <= 0 {
-		log.Warn("invalid physical time stamp, re-update later again")
+		log.Warn("invalid physical timestamp, prev:%v, now:%v, re-update later", prev.physical, now)
 		return nil
 	}
 

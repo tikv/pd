@@ -326,12 +326,12 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 
 	cluster, err = s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
+	c.Assert(cluster, IsNil)
 
-	allStores, err := cluster.GetAllStores()
+	allStores, err := s.svr.cluster.GetAllStores()
 	c.Assert(err, IsNil)
 	c.Assert(allStores, HasLen, 2)
 	for _, store := range allStores {
-		_, ok := stores[store.GetId()]
-		c.Assert(ok, IsTrue)
+		c.Assert(stores, HasKey, store.GetId())
 	}
 }

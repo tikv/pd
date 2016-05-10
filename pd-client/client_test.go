@@ -11,6 +11,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/util"
 	"github.com/pingcap/pd/server"
@@ -85,7 +86,7 @@ func newServer(c *C, port int, root string, clusterID uint64) *server.Server {
 }
 
 func bootstrapServer(c *C, port int) {
-	req := pdpb.Request{
+	req := &pdpb.Request{
 		Header: &pdpb.RequestHeader{
 			Uuid:      uuid.NewV4().Bytes(),
 			ClusterId: proto.Uint64(clusterID),
@@ -96,14 +97,17 @@ func bootstrapServer(c *C, port int) {
 			Region: region,
 		},
 	}
+	msg := &msgpb.Message{
+		MsgType: msgpb.MessageType_PdReq.Enum(),
+		PdReq:   req,
+	}
 
 	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	c.Assert(err, IsNil)
-	err = util.WriteMessage(conn, 0, &req)
+	err = util.WriteMessage(conn, 0, msg)
 	c.Assert(err, IsNil)
 
-	var rsp pdpb.Response
-	_, err = util.ReadMessage(conn, &rsp)
+	_, err = util.ReadMessage(conn, msg)
 	c.Assert(err, IsNil)
 }
 

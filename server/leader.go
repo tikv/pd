@@ -138,7 +138,13 @@ func (s *Server) campaignLeader() error {
 	s.enableLeader(true)
 	defer s.enableLeader(false)
 
-	// keeps the leader
+	// Try to create raft cluster.
+	err = s.createRaftCluster()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// Make the leader keepalived.
 	ch, err := lessor.KeepAlive(s.client.Ctx(), clientv3.LeaseID(leaseResp.ID))
 	if err != nil {
 		return errors.Trace(err)
