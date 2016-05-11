@@ -114,7 +114,6 @@ func (c *conn) handleGetStore(req *pdpb.Request) (*pdpb.Response, error) {
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	// Store may be nil, should we return an error instead of none result?
 	return &pdpb.Response{
 		GetStore: &pdpb.GetStoreResponse{
 			Store: store,
