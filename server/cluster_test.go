@@ -190,61 +190,55 @@ func (s *testClusterBaseSuite) tryBootstrapCluster(c *C, conn net.Conn, clusterI
 func (s *testClusterBaseSuite) getStore(c *C, conn net.Conn, clusterID uint64, storeID uint64) *metapb.Store {
 	req := &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_GetMeta.Enum(),
-		GetMeta: &pdpb.GetMetaRequest{
-			MetaType: pdpb.MetaType_StoreType.Enum(),
-			StoreId:  proto.Uint64(storeID),
+		CmdType: pdpb.CommandType_GetStore.Enum(),
+		GetStore: &pdpb.GetStoreRequest{
+			StoreId: proto.Uint64(storeID),
 		},
 	}
 
 	sendRequest(c, conn, 0, req)
 	_, resp := recvResponse(c, conn)
-	c.Assert(resp.GetMeta, NotNil)
-	c.Assert(resp.GetMeta.GetMetaType(), Equals, pdpb.MetaType_StoreType)
-	c.Assert(resp.GetMeta.GetStore().GetId(), Equals, uint64(storeID))
+	c.Assert(resp.GetStore, NotNil)
+	c.Assert(resp.GetStore.GetStore().GetId(), Equals, uint64(storeID))
 
-	return resp.GetMeta.GetStore()
+	return resp.GetStore.GetStore()
 }
 
 func (s *testClusterBaseSuite) getRegion(c *C, conn net.Conn, clusterID uint64, regionKey []byte) *metapb.Region {
 	req := &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_GetMeta.Enum(),
-		GetMeta: &pdpb.GetMetaRequest{
-			MetaType:  pdpb.MetaType_RegionType.Enum(),
+		CmdType: pdpb.CommandType_GetRegion.Enum(),
+		GetRegion: &pdpb.GetRegionRequest{
 			RegionKey: regionKey,
 		},
 	}
 
 	sendRequest(c, conn, 0, req)
 	_, resp := recvResponse(c, conn)
-	c.Assert(resp.GetMeta, NotNil)
-	c.Assert(resp.GetMeta.GetMetaType(), Equals, pdpb.MetaType_RegionType)
-	c.Assert(resp.GetMeta.GetRegion(), NotNil)
+	c.Assert(resp.GetRegion, NotNil)
+	c.Assert(resp.GetRegion.GetRegion(), NotNil)
 
-	return resp.GetMeta.GetRegion()
+	return resp.GetRegion.GetRegion()
 }
 
-func (s *testClusterBaseSuite) getMeta(c *C, conn net.Conn, clusterID uint64) *metapb.Cluster {
+func (s *testClusterBaseSuite) getClusterConfig(c *C, conn net.Conn, clusterID uint64) *metapb.Cluster {
 	req := &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_GetMeta.Enum(),
-		GetMeta: &pdpb.GetMetaRequest{
-			MetaType:  pdpb.MetaType_ClusterType.Enum(),
+		CmdType: pdpb.CommandType_GetClusterConfig.Enum(),
+		GetClusterConfig: &pdpb.GetClusterConfigRequest{
 			ClusterId: proto.Uint64(clusterID),
 		},
 	}
 
 	sendRequest(c, conn, 0, req)
 	_, resp := recvResponse(c, conn)
-	c.Assert(resp.GetMeta, NotNil)
-	c.Assert(resp.GetMeta.GetMetaType(), Equals, pdpb.MetaType_ClusterType)
-	c.Assert(resp.GetMeta.GetCluster(), NotNil)
+	c.Assert(resp.GetClusterConfig, NotNil)
+	c.Assert(resp.GetClusterConfig.GetCluster(), NotNil)
 
-	return resp.GetMeta.GetCluster()
+	return resp.GetClusterConfig.GetCluster()
 }
 
-func (s *testClusterSuite) TestGetPutMeta(c *C) {
+func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
 	conn, err := net.Dial("tcp", leader.GetAddr())
@@ -270,27 +264,24 @@ func (s *testClusterSuite) TestGetPutMeta(c *C) {
 	storeAddr = "127.0.0.1:1"
 	req := &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_PutMeta.Enum(),
-		PutMeta: &pdpb.PutMetaRequest{
-			MetaType: pdpb.MetaType_StoreType.Enum(),
-			Store:    s.newStore(c, storeID, storeAddr),
+		CmdType: pdpb.CommandType_PutStore.Enum(),
+		PutStore: &pdpb.PutStoreRequest{
+			Store: s.newStore(c, storeID, storeAddr),
 		},
 	}
 
 	sendRequest(c, conn, 0, req)
 	_, resp := recvResponse(c, conn)
-	c.Assert(resp.PutMeta, NotNil)
-	c.Assert(resp.PutMeta.GetMetaType(), Equals, pdpb.MetaType_StoreType)
+	c.Assert(resp.PutStore, NotNil)
 
 	store = s.getStore(c, conn, clusterID, storeID)
 	c.Assert(store.GetAddress(), Equals, storeAddr)
 
-	// Update cluster meta.
+	// Update cluster config.
 	req = &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_PutMeta.Enum(),
-		PutMeta: &pdpb.PutMetaRequest{
-			MetaType: pdpb.MetaType_ClusterType.Enum(),
+		CmdType: pdpb.CommandType_PutClusterConfig.Enum(),
+		PutClusterConfig: &pdpb.PutClusterConfigRequest{
 			Cluster: &metapb.Cluster{
 				Id:            proto.Uint64(clusterID),
 				MaxPeerNumber: proto.Uint32(5),
@@ -299,9 +290,8 @@ func (s *testClusterSuite) TestGetPutMeta(c *C) {
 	}
 	sendRequest(c, conn, 0, req)
 	_, resp = recvResponse(c, conn)
-	c.Assert(resp.PutMeta, NotNil)
-	c.Assert(resp.PutMeta.GetMetaType(), Equals, pdpb.MetaType_ClusterType)
-	meta := s.getMeta(c, conn, clusterID)
+	c.Assert(resp.PutClusterConfig, NotNil)
+	meta := s.getClusterConfig(c, conn, clusterID)
 	c.Assert(meta.GetMaxPeerNumber(), Equals, uint32(5))
 }
 

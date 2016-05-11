@@ -1,7 +1,7 @@
 {
 	"ImportPath": "github.com/pingcap/pd",
 	"GoVersion": "go1.6",
-	"GodepVersion": "v62",
+	"GodepVersion": "v63",
 	"Packages": [
 		"./..."
 	],
@@ -75,47 +75,47 @@
 		},
 		{
 			"ImportPath": "github.com/pingcap/kvproto/pkg/coprocessor",
-			"Rev": "0f04dc1cc91a02276f50474da96f8b0ed89491f6"
+			"Rev": "2d01b19f85e9781cc1c2b162756cff71cbdb64f3"
 		},
 		{
 			"ImportPath": "github.com/pingcap/kvproto/pkg/errorpb",
-			"Rev": "0f04dc1cc91a02276f50474da96f8b0ed89491f6"
+			"Rev": "2d01b19f85e9781cc1c2b162756cff71cbdb64f3"
 		},
 		{
 			"ImportPath": "github.com/pingcap/kvproto/pkg/kvrpcpb",
-			"Rev": "0f04dc1cc91a02276f50474da96f8b0ed89491f6"
+			"Rev": "2d01b19f85e9781cc1c2b162756cff71cbdb64f3"
 		},
 		{
 			"ImportPath": "github.com/pingcap/kvproto/pkg/metapb",
-			"Rev": "0f04dc1cc91a02276f50474da96f8b0ed89491f6"
+			"Rev": "2d01b19f85e9781cc1c2b162756cff71cbdb64f3"
 		},
 		{
 			"ImportPath": "github.com/pingcap/kvproto/pkg/msgpb",
-			"Rev": "0f04dc1cc91a02276f50474da96f8b0ed89491f6"
+			"Rev": "2d01b19f85e9781cc1c2b162756cff71cbdb64f3"
 		},
 		{
 			"ImportPath": "github.com/pingcap/kvproto/pkg/pd_jobpb",
-			"Rev": "0f04dc1cc91a02276f50474da96f8b0ed89491f6"
+			"Rev": "2d01b19f85e9781cc1c2b162756cff71cbdb64f3"
 		},
 		{
 			"ImportPath": "github.com/pingcap/kvproto/pkg/pdpb",
-			"Rev": "0f04dc1cc91a02276f50474da96f8b0ed89491f6"
+			"Rev": "2d01b19f85e9781cc1c2b162756cff71cbdb64f3"
 		},
 		{
 			"ImportPath": "github.com/pingcap/kvproto/pkg/raft_cmdpb",
-			"Rev": "0f04dc1cc91a02276f50474da96f8b0ed89491f6"
+			"Rev": "2d01b19f85e9781cc1c2b162756cff71cbdb64f3"
 		},
 		{
 			"ImportPath": "github.com/pingcap/kvproto/pkg/raft_serverpb",
-			"Rev": "0f04dc1cc91a02276f50474da96f8b0ed89491f6"
+			"Rev": "2d01b19f85e9781cc1c2b162756cff71cbdb64f3"
 		},
 		{
 			"ImportPath": "github.com/pingcap/kvproto/pkg/raftpb",
-			"Rev": "0f04dc1cc91a02276f50474da96f8b0ed89491f6"
+			"Rev": "2d01b19f85e9781cc1c2b162756cff71cbdb64f3"
 		},
 		{
 			"ImportPath": "github.com/pingcap/kvproto/pkg/util",
-			"Rev": "0f04dc1cc91a02276f50474da96f8b0ed89491f6"
+			"Rev": "2d01b19f85e9781cc1c2b162756cff71cbdb64f3"
 		},
 		{
 			"ImportPath": "github.com/twinj/uuid",
