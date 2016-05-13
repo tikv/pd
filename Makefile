@@ -35,3 +35,14 @@ deps:
 	rm -rf cmd/Godeps
 	rm vendor
 	mv Godeps cmd/
+
+update_kvproto:
+	rm -rf Godeps vendor
+	ln -s cmd/Godeps Godeps
+	ln -s cmd/vendor vendor
+	# Guarantee executing OK.
+	go get -u -v -d github.com/pingcap/kvproto/pkg || true
+	godep update github.com/pingcap/kvproto/pkg/...
+	rm Godeps vendor
+
+	
