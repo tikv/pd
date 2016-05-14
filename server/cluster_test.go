@@ -223,11 +223,9 @@ func (s *testClusterBaseSuite) getRegion(c *C, conn net.Conn, clusterID uint64, 
 
 func (s *testClusterBaseSuite) getClusterConfig(c *C, conn net.Conn, clusterID uint64) *metapb.Cluster {
 	req := &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_GetClusterConfig.Enum(),
-		GetClusterConfig: &pdpb.GetClusterConfigRequest{
-			ClusterId: proto.Uint64(clusterID),
-		},
+		Header:           newRequestHeader(clusterID),
+		CmdType:          pdpb.CommandType_GetClusterConfig.Enum(),
+		GetClusterConfig: &pdpb.GetClusterConfigRequest{},
 	}
 
 	sendRequest(c, conn, 0, req)
