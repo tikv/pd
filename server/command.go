@@ -15,7 +15,7 @@ func (c *conn) handleTso(req *pdpb.Request) (*pdpb.Response, error) {
 
 	tso := &pdpb.TsoResponse{}
 
-	count := request.GetNumber()
+	count := request.GetCount()
 	for i := uint32(0); i < count; i++ {
 		ts := c.s.getRespTS()
 		if ts == nil {

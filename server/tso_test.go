@@ -58,7 +58,7 @@ func recvResponse(c *C, conn net.Conn) (uint64, *pdpb.Response) {
 
 func (s *testTsoSuite) testGetTimestamp(c *C, conn net.Conn, n int) {
 	tso := &pdpb.TsoRequest{
-		Number: proto.Uint32(uint32(n)),
+		Count: proto.Uint32(uint32(n)),
 	}
 
 	req := &pdpb.Request{

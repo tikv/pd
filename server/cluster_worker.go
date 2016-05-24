@@ -73,7 +73,7 @@ func (c *raftCluster) handleChangePeerReq(region *metapb.Region, leaderID uint64
 	}
 
 	var (
-		maxPeerCount = int(clusterMeta.GetMaxPeerNumber())
+		maxPeerCount = int(clusterMeta.GetMaxPeerCount())
 		regionID     = region.GetId()
 		peerCount    = len(region.GetPeers())
 		changeType   raftpb.ConfChangeType

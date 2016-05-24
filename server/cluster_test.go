@@ -281,8 +281,8 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 		CmdType: pdpb.CommandType_PutClusterConfig.Enum(),
 		PutClusterConfig: &pdpb.PutClusterConfigRequest{
 			Cluster: &metapb.Cluster{
-				Id:            proto.Uint64(clusterID),
-				MaxPeerNumber: proto.Uint32(5),
+				Id:           proto.Uint64(clusterID),
+				MaxPeerCount: proto.Uint32(5),
 			},
 		},
 	}
@@ -290,7 +290,7 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	_, resp = recvResponse(c, conn)
 	c.Assert(resp.PutClusterConfig, NotNil)
 	meta := s.getClusterConfig(c, conn, clusterID)
-	c.Assert(meta.GetMaxPeerNumber(), Equals, uint32(5))
+	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
 }
 
 var _ = Suite(&testClusterCacheSuite{})

@@ -181,8 +181,8 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 	cluster.PutConfig(&metapb.Cluster{
-		Id:            proto.Uint64(s.clusterID),
-		MaxPeerNumber: proto.Uint32(5),
+		Id:           proto.Uint64(s.clusterID),
+		MaxPeerCount: proto.Uint32(5),
 	})
 
 	stores, err := cluster.GetAllStores()
@@ -307,7 +307,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 
 	meta, err := cluster.GetConfig()
 	c.Assert(err, IsNil)
-	meta.MaxPeerNumber = proto.Uint32(1)
+	meta.MaxPeerCount = proto.Uint32(1)
 	err = cluster.PutConfig(meta)
 	c.Assert(err, IsNil)
 
@@ -367,10 +367,10 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 	defer conn.Close()
 	leaderPeer := s.chooseRegionLeader(c, r1)
 
-	// Set MaxPeerNumber to 10.
+	// Set MaxPeerCount to 10.
 	meta, err := cluster.GetConfig()
 	c.Assert(err, IsNil)
-	meta.MaxPeerNumber = proto.Uint32(10)
+	meta.MaxPeerCount = proto.Uint32(10)
 	err = cluster.PutConfig(meta)
 	c.Assert(err, IsNil)
 
@@ -399,7 +399,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 	meta, err := cluster.GetConfig()
 	c.Assert(err, IsNil)
-	c.Assert(meta.GetMaxPeerNumber(), Equals, uint32(5))
+	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
 
 	// There is only one region now, directly use it for test.
 	regionKey := []byte("a")
@@ -435,8 +435,8 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 	// Remove 2 peers.
 	err = cluster.PutConfig(&metapb.Cluster{
-		Id:            proto.Uint64(s.clusterID),
-		MaxPeerNumber: proto.Uint32(3),
+		Id:           proto.Uint64(s.clusterID),
+		MaxPeerCount: proto.Uint32(3),
 	})
 	c.Assert(err, IsNil)
 
@@ -464,7 +464,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 
 	meta, err := cluster.GetConfig()
 	c.Assert(err, IsNil)
-	meta.MaxPeerNumber = proto.Uint32(2)
+	meta.MaxPeerCount = proto.Uint32(2)
 	err = cluster.PutConfig(meta)
 	c.Assert(err, IsNil)
 

@@ -214,8 +214,8 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 	}
 
 	clusterMeta := metapb.Cluster{
-		Id:            proto.Uint64(clusterID),
-		MaxPeerNumber: proto.Uint32(s.cfg.MaxPeerCount),
+		Id:           proto.Uint64(clusterID),
+		MaxPeerCount: proto.Uint32(s.cfg.MaxPeerCount),
 	}
 
 	// Set cluster meta
