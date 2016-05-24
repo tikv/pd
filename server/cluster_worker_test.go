@@ -356,6 +356,43 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	mustGetRegion(c, cluster, []byte("n"), r2)
 }
 
+func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
+	cluster, err := s.svr.getRaftCluster()
+	c.Assert(err, IsNil)
+	r1, err := cluster.GetRegion([]byte("a"))
+	c.Assert(err, IsNil)
+	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	conn, err := net.Dial("tcp", leaderPd.GetAddr())
+	c.Assert(err, IsNil)
+	defer conn.Close()
+	leaderPeer := s.chooseRegionLeader(c, r1)
+
+	// Set MaxPeerNumber to 10.
+	meta, err := cluster.GetConfig()
+	c.Assert(err, IsNil)
+	meta.MaxPeerNumber = proto.Uint32(10)
+	err = cluster.PutConfig(meta)
+	c.Assert(err, IsNil)
+
+	// Add Peers util all stores are used up.
+	for {
+		resp := s.heartbeatRegion(c, conn, 0, r1, leaderPeer)
+		if resp == nil {
+			break
+		}
+		s.checkChangePeerRes(c, resp, raftpb.ConfChangeType_AddNode, r1)
+	}
+
+	// Split.
+	r2ID, r2PeerIDs := s.askSplit(c, conn, 0, r1)
+	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)
+	leaderPeer2 := s.chooseRegionLeader(c, r2)
+	resp := s.heartbeatRegion(c, conn, 0, r2, leaderPeer2)
+	c.Assert(resp, IsNil)
+
+	mustGetRegion(c, cluster, []byte("m"), r2)
+}
+
 func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)

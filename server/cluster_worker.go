@@ -48,7 +48,8 @@ LOOP:
 			StoreId: proto.Uint64(store.GetId()),
 		}, nil
 	}
-	return nil, errors.Errorf("find no store to add peer for region %v", region)
+	log.Warnf("find no store to add peer for region %v", region)
+	return nil, nil
 }
 
 // If leader is nil, we will return an error, or else we can remove none leader peer.
@@ -94,6 +95,10 @@ func (c *raftCluster) handleChangePeerReq(region *metapb.Region, leaderID uint64
 		if peer, err = c.handleRemovePeerReq(region, leaderID); err != nil {
 			return nil, errors.Trace(err)
 		}
+	}
+
+	if peer == nil {
+		return nil, nil
 	}
 
 	changePeer := &pdpb.ChangePeer{
