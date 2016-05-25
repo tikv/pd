@@ -120,7 +120,7 @@ func (s *Server) updateTimestamp() error {
 	}
 	// Avoid the same physical time stamp
 	if since <= 0 {
-		log.Warn("invalid physical timestamp, prev:%v, now:%v, re-update later", prev.physical, now)
+		log.Warnf("invalid physical timestamp, prev:%v, now:%v, re-update later", prev.physical, now)
 		return nil
 	}
 
