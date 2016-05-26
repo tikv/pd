@@ -16,18 +16,21 @@ func newStoreIDMap(storeIDs ...uint64) storeIDMap {
 	return storeMap
 }
 
+// RegionInfo is region cache info.
 type RegionInfo struct {
 	region *metapb.Region
 	// leader peer
 	peer *metapb.Peer
 }
 
+// StoreInfo is store cache info.
 type StoreInfo struct {
 	store *metapb.Store
 	// region id -> leader peer
 	regions map[uint64]*metapb.Peer
 }
 
+// ClusterInfo is cluster cache info.
 type ClusterInfo struct {
 	sync.RWMutex
 
