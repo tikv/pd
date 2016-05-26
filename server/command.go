@@ -196,6 +196,8 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		}
 	}
 
+	cluster.cachedCluster.addRegion(reqRegion, request.GetLeader())
+
 	return &pdpb.Response{
 		RegionHeartbeat: &pdpb.RegionHeartbeatResponse{
 			ChangePeer: changePeer,

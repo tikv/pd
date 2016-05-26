@@ -21,9 +21,7 @@ func (c *raftCluster) handleAddPeerReq(region *metapb.Region) (*metapb.Peer, err
 		return nil, errors.Trace(err)
 	}
 
-	mu := &c.mu
-	mu.RLock()
-	defer mu.RUnlock()
+	stores := c.cachedCluster.getStores()
 
 	// Find a proper store which the region has not in.
 	// Now we just choose the first store. Later we will do
@@ -36,16 +34,17 @@ func (c *raftCluster) handleAddPeerReq(region *metapb.Region) (*metapb.Peer, err
 	// 2, We can check the store statistics and find a low load store.
 	// 3, more algorithms...
 LOOP:
-	for _, store := range mu.stores {
+	for _, store := range stores {
+		storeID := store.store.GetId()
 		// we can't add peer in the same store.
 		for _, peer := range region.Peers {
-			if peer.GetStoreId() == store.GetId() {
+			if peer.GetStoreId() == storeID {
 				continue LOOP
 			}
 		}
 		return &metapb.Peer{
 			Id:      proto.Uint64(peerID),
-			StoreId: proto.Uint64(store.GetId()),
+			StoreId: proto.Uint64(storeID),
 		}, nil
 	}
 	log.Warnf("find no store to add peer for region %v", region)

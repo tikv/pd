@@ -42,15 +42,8 @@ type raftCluster struct {
 	clusterID   uint64
 	clusterRoot string
 
-	mu struct {
-		sync.RWMutex
-		// TODO: keep meta revision
-		// cluster meta cache
-		meta metapb.Cluster
-
-		// store cache
-		stores map[uint64]metapb.Store
-	}
+	// cached cluster info
+	cachedCluster *ClusterInfo
 
 	// for store conns
 	storeConns *storeConns
@@ -70,8 +63,8 @@ func (c *raftCluster) Start(meta metapb.Cluster) error {
 	c.storeConns = newStoreConns(defaultConnFunc)
 	c.storeConns.SetIdleTimeout(idleTimeout)
 
-	mu := &c.mu
-	mu.meta = meta
+	c.cachedCluster = newClusterInfo()
+	c.cachedCluster.setMeta(&meta)
 
 	// Cache all stores when start the cluster. We don't have
 	// many stores, so it is OK to cache them all.
@@ -277,10 +270,6 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 }
 
 func (c *raftCluster) cacheAllStores() error {
-	mu := &c.mu
-	mu.Lock()
-	defer mu.Unlock()
-
 	kv := clientv3.NewKV(c.s.client)
 
 	key := makeStoreKeyPrefix(c.clusterRoot)
@@ -291,28 +280,23 @@ func (c *raftCluster) cacheAllStores() error {
 		return errors.Trace(err)
 	}
 
-	mu.stores = make(map[uint64]metapb.Store)
 	for _, kv := range resp.Kvs {
-		store := metapb.Store{}
-		if err = proto.Unmarshal(kv.Value, &store); err != nil {
+		store := &metapb.Store{}
+		if err = proto.Unmarshal(kv.Value, store); err != nil {
 			return errors.Trace(err)
 		}
 
-		storeID := store.GetId()
-		mu.stores[storeID] = store
+		c.cachedCluster.addStore(store)
 	}
 
 	return nil
 }
 
 func (c *raftCluster) GetAllStores() ([]metapb.Store, error) {
-	mu := &c.mu
-	mu.RLock()
-	defer mu.RUnlock()
-
-	stores := make([]metapb.Store, 0, len(mu.stores))
-	for _, store := range mu.stores {
-		stores = append(stores, store)
+	cachedStores := c.cachedCluster.getStores()
+	stores := make([]metapb.Store, 0, len(cachedStores))
+	for _, s := range cachedStores {
+		stores = append(stores, *s.store)
 	}
 
 	return stores, nil
@@ -323,19 +307,12 @@ func (c *raftCluster) GetStore(storeID uint64) (*metapb.Store, error) {
 		return nil, errors.New("invalid zero store id")
 	}
 
-	mu := &c.mu
-	mu.RLock()
-	defer mu.RUnlock()
-
-	// We cache all stores when start the cluster, and PutStore can also
-	// update the cache, so we can use this cache to get directly.
-
-	store, ok := mu.stores[storeID]
-	if ok {
-		return &store, nil
+	s := c.cachedCluster.getStore(storeID)
+	if s == nil {
+		return nil, errors.Errorf("invalid store ID %d, not found", storeID)
 	}
 
-	return nil, errors.Errorf("invalid store ID %d, not found", storeID)
+	return s.store, nil
 }
 
 func (c *raftCluster) GetRegion(regionKey []byte) (*metapb.Region, error) {
@@ -381,11 +358,6 @@ func (c *raftCluster) PutStore(store *metapb.Store) error {
 	}
 
 	storePath := makeStoreKey(c.clusterRoot, store.GetId())
-
-	mu := &c.mu
-	mu.Lock()
-	defer mu.Unlock()
-
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	resp, err := c.s.client.Txn(ctx).
 		If(c.s.leaderCmp()).
@@ -399,18 +371,13 @@ func (c *raftCluster) PutStore(store *metapb.Store) error {
 		return errors.Errorf("put store %v fail", store)
 	}
 
-	mu.stores[store.GetId()] = *store
+	c.cachedCluster.addStore(store)
 
 	return nil
 }
 
 func (c *raftCluster) GetConfig() (*metapb.Cluster, error) {
-	mu := &c.mu
-	mu.RLock()
-	defer mu.RUnlock()
-
-	meta := mu.meta
-	return &meta, nil
+	return c.cachedCluster.getMeta(), nil
 }
 
 func (c *raftCluster) PutConfig(meta *metapb.Cluster) error {
@@ -422,10 +389,6 @@ func (c *raftCluster) PutConfig(meta *metapb.Cluster) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-
-	mu := &c.mu
-	mu.Lock()
-	defer mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	resp, err := c.s.client.Txn(ctx).
@@ -440,6 +403,7 @@ func (c *raftCluster) PutConfig(meta *metapb.Cluster) error {
 		return errors.Errorf("put cluster meta %v error", meta)
 	}
 
-	mu.meta = *meta
+	c.cachedCluster.setMeta(meta)
+
 	return nil
 }
