@@ -86,6 +86,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	err = cluster.PutStore(store2)
 	c.Assert(err, IsNil)
 
+	// Check cachedCluster.
 	c.Assert(cluster.cachedCluster.getMeta().GetId(), Equals, clusterID)
 	c.Assert(cluster.cachedCluster.getMeta().GetMaxPeerCount(), Equals, defaultMaxPeerCount)
 
@@ -106,6 +107,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	leaderPeer := region.GetPeers()[0]
 	res := heartbeatRegion(c, conn, clusterID, 0, region, leaderPeer)
 	c.Assert(res.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(leaderPeer.GetId(), Not(Equals), res.GetPeer().GetId())
 
 	cacheStores = cluster.cachedCluster.getStores()
 	c.Assert(cacheStores, HasLen, 2)
@@ -114,43 +116,46 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	cacheRegion := cluster.cachedCluster.regions[region.GetId()]
 	mustEqualRegion(c, cacheRegion.region, region)
 
+	// Add another peer.
+	region.Peers = append(region.Peers, res.GetPeer())
 	region.RegionEpoch.ConfVer = proto.Uint64(region.GetRegionEpoch().GetConfVer() + 1)
 	res = heartbeatRegion(c, conn, clusterID, 0, region, leaderPeer)
 	c.Assert(res, IsNil)
 
 	c.Assert(cluster.cachedCluster.regions, HasLen, 1)
 
-	oldLeaderPeerID := region.GetId()
-	cacheRegion = cluster.cachedCluster.regions[oldLeaderPeerID]
+	oldRegionID := region.GetId()
+	cacheRegion = cluster.cachedCluster.regions[oldRegionID]
 	region, err = cluster.GetRegion(regionKey)
 	c.Assert(err, IsNil)
-	c.Assert(region.GetPeers(), HasLen, 1)
+	c.Assert(region.GetPeers(), HasLen, 2)
 	mustEqualRegion(c, cacheRegion.region, region)
 
-	cacheStore, ok := cluster.cachedCluster.stores[leaderPeer.GetStoreId()]
-	c.Assert(ok, IsTrue)
+	cacheStore = cluster.cachedCluster.getStore(store1.GetId())
+	c.Assert(cacheStore.regions, HasLen, 1)
 	cachePeer, ok := cacheStore.regions[region.GetId()]
-	c.Logf("[cacheStore]:%v, [leaderPeer]:%v", cacheStore, leaderPeer)
 	c.Assert(ok, IsTrue)
 	mustEqualPeer(c, cachePeer, leaderPeer)
 
 	// Test change leader peer.
-	newLeaderPeer := region.GetPeers()[0]
-	if newLeaderPeer.GetId() == oldLeaderPeerID {
-		newLeaderPeer = region.GetPeers()[1]
-	}
+	newLeaderPeer := region.GetPeers()[1]
+	c.Assert(leaderPeer.GetId(), Not(Equals), newLeaderPeer.GetId())
 
+	// There is no store to add peer, so the return res is nil.
 	res = heartbeatRegion(c, conn, clusterID, 0, region, newLeaderPeer)
-	c.Assert(res, NotNil)
+	c.Assert(res, IsNil)
 
 	region, err = cluster.GetRegion(regionKey)
 	c.Assert(err, IsNil)
-	c.Assert(region.GetPeers(), HasLen, 1)
+	c.Assert(region.GetPeers(), HasLen, 2)
 	mustEqualRegion(c, cacheRegion.region, region)
 
+	c.Assert(cluster.cachedCluster.regions, HasLen, 1)
+
 	c.Assert(cluster.cachedCluster.stores, HasLen, 2)
-	cacheStore, ok = cluster.cachedCluster.stores[newLeaderPeer.GetStoreId()]
-	c.Assert(ok, IsTrue)
+	cacheStore = cluster.cachedCluster.getStore(store1.GetId())
+	c.Assert(cacheStore.regions, HasLen, 0)
+	cacheStore = cluster.cachedCluster.getStore(store2.GetId())
 	c.Assert(cacheStore.regions, HasLen, 1)
 	cachePeer, ok = cacheStore.regions[region.GetId()]
 	c.Assert(ok, IsTrue)
@@ -158,6 +163,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 
 	s.svr.cluster.Stop()
 
+	// Check GetAllStores.
 	stores := map[uint64]*metapb.Store{
 		store1.GetId(): store1,
 		store2.GetId(): store2,
