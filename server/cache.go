@@ -58,18 +58,18 @@ func (c *ClusterInfo) addStore(store *metapb.Store) {
 	c.stores[store.GetId()] = storeInfo
 }
 
-func (c *ClusterInfo) removeStore(id uint64) {
+func (c *ClusterInfo) removeStore(storeID uint64) {
 	c.Lock()
 	defer c.Unlock()
 
-	delete(c.stores, id)
+	delete(c.stores, storeID)
 }
 
-func (c *ClusterInfo) getStore(id uint64) *StoreInfo {
+func (c *ClusterInfo) getStore(storeID uint64) *StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 
-	store, _ := c.stores[id]
+	store, _ := c.stores[storeID]
 	return store
 }
 
