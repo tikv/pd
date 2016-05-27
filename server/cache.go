@@ -1,9 +1,12 @@
 package server
 
 import (
+	"math/rand"
 	"sync"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 type storeIDMap map[uint64]struct{}
@@ -23,11 +26,121 @@ type RegionInfo struct {
 	peer *metapb.Peer
 }
 
+// RegionsInfo is regions cache info.
+type RegionsInfo struct {
+	sync.RWMutex
+
+	// region id -> RegionInfo
+	leaderRegions map[uint64]*RegionInfo
+	// store id -> regionid -> leader region peer
+	storeLeaderRegions map[uint64]map[uint64]*metapb.Peer
+}
+
+func newRegionsInfo() *RegionsInfo {
+	return &RegionsInfo{
+		leaderRegions:      make(map[uint64]*RegionInfo),
+		storeLeaderRegions: make(map[uint64]map[uint64]*metapb.Peer),
+	}
+}
+
+// randRegionPeer random selects a leader peer in regions.
+func (r *RegionsInfo) randRegionPeer(storeID uint64) *metapb.Peer {
+	r.RLock()
+	defer r.RUnlock()
+
+	storeRegions, ok := r.storeLeaderRegions[storeID]
+	if !ok {
+		return nil
+	}
+
+	idx, randIdx := 0, rand.Intn(len(storeRegions))
+	for _, peer := range storeRegions {
+		if idx == randIdx {
+			return peer
+		}
+
+		idx++
+	}
+
+	return nil
+}
+
+func (r *RegionsInfo) addRegion(region *metapb.Region, leaderPeer *metapb.Peer) {
+	r.Lock()
+	defer r.Unlock()
+
+	regionID := region.GetId()
+	cacheRegion, ok := r.leaderRegions[regionID]
+	if ok {
+		// If region leader has been changed, then remove old region from store cache.
+		oldLeaderPeer := cacheRegion.peer
+		if oldLeaderPeer.GetId() != leaderPeer.GetId() {
+			storeID := oldLeaderPeer.GetStoreId()
+			storeRegions, ok := r.storeLeaderRegions[storeID]
+			if ok {
+				delete(storeRegions, regionID)
+				if len(storeRegions) == 0 {
+					delete(r.storeLeaderRegions, storeID)
+				}
+			}
+		}
+	}
+
+	r.leaderRegions[regionID] = &RegionInfo{
+		region: region,
+		peer:   leaderPeer,
+	}
+
+	storeID := leaderPeer.GetStoreId()
+	store, ok := r.storeLeaderRegions[storeID]
+	if !ok {
+		store = make(map[uint64]*metapb.Peer)
+		r.storeLeaderRegions[storeID] = store
+	}
+	store[regionID] = leaderPeer
+}
+
+func (r *RegionsInfo) removeRegion(regionID uint64) {
+	r.Lock()
+	defer r.Unlock()
+
+	cacheRegion, ok := r.leaderRegions[regionID]
+	if ok {
+		storeID := cacheRegion.peer.GetStoreId()
+		storeRegions, ok := r.storeLeaderRegions[storeID]
+		if ok {
+			delete(storeRegions, regionID)
+			if len(storeRegions) == 0 {
+				delete(r.storeLeaderRegions, storeID)
+			}
+		}
+
+		delete(r.leaderRegions, regionID)
+	}
+}
+
 // StoreInfo is store cache info.
 type StoreInfo struct {
 	store *metapb.Store
-	// region id -> leader peer
-	regions map[uint64]*metapb.Peer
+
+	// store capacity info.
+	stats *pdpb.StoreStats
+}
+
+func (s *StoreInfo) clone() *StoreInfo {
+	return &StoreInfo{
+		store: proto.Clone(s.store).(*metapb.Store),
+		stats: proto.Clone(s.stats).(*pdpb.StoreStats),
+	}
+}
+
+// fractionUsed is the used fraction of storage capacity.
+func (s *StoreInfo) fractionUsed() float64 {
+	if s.stats.GetCapacity() == 0 {
+		return 0
+	}
+
+	return float64(s.stats.GetCapacity()-s.stats.GetAvailable()) / float64(s.stats.GetCapacity())
 }
 
 // ClusterInfo is cluster cache info.
@@ -36,13 +149,13 @@ type ClusterInfo struct {
 
 	meta    *metapb.Cluster
 	stores  map[uint64]*StoreInfo
-	regions map[uint64]*RegionInfo
+	regions *RegionsInfo
 }
 
 func newClusterInfo() *ClusterInfo {
 	return &ClusterInfo{
 		stores:  make(map[uint64]*StoreInfo),
-		regions: make(map[uint64]*RegionInfo),
+		regions: newRegionsInfo(),
 	}
 }
 
@@ -51,8 +164,8 @@ func (c *ClusterInfo) addStore(store *metapb.Store) {
 	defer c.Unlock()
 
 	storeInfo := &StoreInfo{
-		store:   store,
-		regions: make(map[uint64]*metapb.Peer),
+		store: store,
+		stats: &pdpb.StoreStats{},
 	}
 
 	c.stores[store.GetId()] = storeInfo
@@ -69,59 +182,36 @@ func (c *ClusterInfo) getStore(storeID uint64) *StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 
-	store, _ := c.stores[storeID]
-	return store
+	store, ok := c.stores[storeID]
+	if !ok {
+		return nil
+	}
+
+	return store.clone()
 }
 
 func (c *ClusterInfo) getStores() map[uint64]*StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 
-	return c.stores
+	stores := make(map[uint64]*StoreInfo, len(c.stores))
+	for key, store := range c.stores {
+		stores[key] = store.clone()
+	}
+
+	return stores
 }
 
-func (c *ClusterInfo) addRegion(region *metapb.Region, leaderPeer *metapb.Peer) {
-	c.Lock()
-	defer c.Unlock()
+func (c *ClusterInfo) getMetaStores() []metapb.Store {
+	c.RLock()
+	defer c.RUnlock()
 
-	regionID := region.GetId()
-	cacheRegion, ok := c.regions[regionID]
-	if ok {
-		// If region leader has been changed, then remove old region from store cache.
-		oldLeaderPeer := cacheRegion.peer
-		if oldLeaderPeer.GetId() != leaderPeer.GetId() {
-			storeID := oldLeaderPeer.GetStoreId()
-			store, ok := c.stores[storeID]
-			if ok {
-				delete(store.regions, regionID)
-			}
-		}
+	stores := make([]metapb.Store, 0, len(c.stores))
+	for _, store := range c.stores {
+		stores = append(stores, *proto.Clone(store.store).(*metapb.Store))
 	}
 
-	c.regions[regionID] = &RegionInfo{
-		region: region,
-		peer:   leaderPeer,
-	}
-
-	if store, ok := c.stores[leaderPeer.GetStoreId()]; ok {
-		store.regions[regionID] = leaderPeer
-	}
-}
-
-func (c *ClusterInfo) removeRegion(regionID uint64) {
-	c.Lock()
-	defer c.Unlock()
-
-	cacheRegion, ok := c.regions[regionID]
-	if ok {
-		storeID := cacheRegion.peer.GetStoreId()
-		store, ok := c.stores[storeID]
-		if ok {
-			delete(store.regions, regionID)
-		}
-
-		delete(c.regions, regionID)
-	}
+	return stores
 }
 
 func (c *ClusterInfo) setMeta(meta *metapb.Cluster) {
@@ -135,5 +225,5 @@ func (c *ClusterInfo) getMeta() *metapb.Cluster {
 	c.RLock()
 	defer c.RUnlock()
 
-	return c.meta
+	return proto.Clone(c.meta).(*metapb.Cluster)
 }

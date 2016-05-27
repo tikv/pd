@@ -79,7 +79,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 
 	cacheStore := cluster.cachedCluster.getStore(store1.GetId())
 	mustEqualStore(c, cacheStore.store, store1)
-	c.Assert(cluster.cachedCluster.regions, HasLen, 0)
+	c.Assert(cluster.cachedCluster.regions.leaderRegions, HasLen, 0)
 
 	// Add another store.
 	store2 := s.newStore(c, 0, "127.0.0.1:2")
@@ -96,7 +96,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	mustEqualStore(c, cacheStore.store, store2)
 	cacheStores := cluster.cachedCluster.getStores()
 	c.Assert(cacheStores, HasLen, 2)
-	c.Assert(cluster.cachedCluster.regions, HasLen, 0)
+	c.Assert(cluster.cachedCluster.regions.leaderRegions, HasLen, 0)
 
 	// There is only one region now, directly use it for test.
 	regionKey := []byte("a")
@@ -111,9 +111,9 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 
 	cacheStores = cluster.cachedCluster.getStores()
 	c.Assert(cacheStores, HasLen, 2)
-	c.Assert(cluster.cachedCluster.regions, HasLen, 1)
+	c.Assert(cluster.cachedCluster.regions.leaderRegions, HasLen, 1)
 
-	cacheRegion := cluster.cachedCluster.regions[region.GetId()]
+	cacheRegion := cluster.cachedCluster.regions.leaderRegions[region.GetId()]
 	mustEqualRegion(c, cacheRegion.region, region)
 
 	// Add another peer.
@@ -122,18 +122,18 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	res = heartbeatRegion(c, conn, clusterID, 0, region, leaderPeer)
 	c.Assert(res, IsNil)
 
-	c.Assert(cluster.cachedCluster.regions, HasLen, 1)
+	c.Assert(cluster.cachedCluster.regions.leaderRegions, HasLen, 1)
 
 	oldRegionID := region.GetId()
-	cacheRegion = cluster.cachedCluster.regions[oldRegionID]
+	cacheRegion = cluster.cachedCluster.regions.leaderRegions[oldRegionID]
 	region, err = cluster.GetRegion(regionKey)
 	c.Assert(err, IsNil)
 	c.Assert(region.GetPeers(), HasLen, 2)
 	mustEqualRegion(c, cacheRegion.region, region)
 
-	cacheStore = cluster.cachedCluster.getStore(store1.GetId())
-	c.Assert(cacheStore.regions, HasLen, 1)
-	cachePeer, ok := cacheStore.regions[region.GetId()]
+	cacheStoreRegions, ok := cluster.cachedCluster.regions.storeLeaderRegions[store1.GetId()]
+	c.Assert(ok, IsTrue)
+	cachePeer, ok := cacheStoreRegions[region.GetId()]
 	c.Assert(ok, IsTrue)
 	mustEqualPeer(c, cachePeer, leaderPeer)
 
@@ -150,14 +150,15 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(region.GetPeers(), HasLen, 2)
 	mustEqualRegion(c, cacheRegion.region, region)
 
-	c.Assert(cluster.cachedCluster.regions, HasLen, 1)
+	c.Assert(cluster.cachedCluster.regions.leaderRegions, HasLen, 1)
 
 	c.Assert(cluster.cachedCluster.stores, HasLen, 2)
-	cacheStore = cluster.cachedCluster.getStore(store1.GetId())
-	c.Assert(cacheStore.regions, HasLen, 0)
-	cacheStore = cluster.cachedCluster.getStore(store2.GetId())
-	c.Assert(cacheStore.regions, HasLen, 1)
-	cachePeer, ok = cacheStore.regions[region.GetId()]
+	cacheStoreRegions, ok = cluster.cachedCluster.regions.storeLeaderRegions[store1.GetId()]
+	c.Assert(ok, IsFalse)
+	cacheStoreRegions, ok = cluster.cachedCluster.regions.storeLeaderRegions[store2.GetId()]
+	c.Assert(ok, IsTrue)
+	c.Assert(cacheStoreRegions, HasLen, 1)
+	cachePeer, ok = cacheStoreRegions[region.GetId()]
 	c.Assert(ok, IsTrue)
 	mustEqualPeer(c, cachePeer, newLeaderPeer)
 

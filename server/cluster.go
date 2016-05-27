@@ -293,13 +293,7 @@ func (c *raftCluster) cacheAllStores() error {
 }
 
 func (c *raftCluster) GetAllStores() ([]metapb.Store, error) {
-	cachedStores := c.cachedCluster.getStores()
-	stores := make([]metapb.Store, 0, len(cachedStores))
-	for _, s := range cachedStores {
-		stores = append(stores, *s.store)
-	}
-
-	return stores, nil
+	return c.cachedCluster.getMetaStores(), nil
 }
 
 func (c *raftCluster) GetStore(storeID uint64) (*metapb.Store, error) {
