@@ -7,7 +7,7 @@ import (
 // Selector is an interface to select regions and stores for leader-transfer/rebalance.
 type Selector interface {
 	// Select selects one pair regions to do leader transfer.
-	SelectTransferredPeers(cluster *ClusterInfo, excluded map[uint64]struct{}) (*RegionInfo, *metapb.Peer)
+	SelectTransferRegion(cluster *ClusterInfo, excluded map[uint64]struct{}) (*RegionInfo, *metapb.Peer)
 	// SelectGoodPeer selects one region peer to be transferred to.
 	SelectGoodPeer(cluster *ClusterInfo, peers map[uint64]*metapb.Peer) *metapb.Peer
 	// SelectBadRegion selects one region to be transferred.
@@ -21,17 +21,17 @@ type Selector interface {
 const (
 	// If the used fraction of one storage is greater than this value,
 	// it will never be used as a selected target and it should be rebalanced.
-	maxUsedFraction = 0.6
+	maxCapacityUsedFraction = 0.6
 )
 
 var (
-	_ Selector = &regionCountSelector{}
+	_ Selector = &regionCapacitySelector{}
 )
 
-type regionCountSelector struct {
+type regionCapacitySelector struct {
 }
 
-func (rs *regionCountSelector) SelectBadStore(stores map[uint64]*StoreInfo, excluded map[uint64]struct{}) *StoreInfo {
+func (rs *regionCapacitySelector) SelectBadStore(stores map[uint64]*StoreInfo, excluded map[uint64]struct{}) *StoreInfo {
 	var badStore *StoreInfo
 	for _, store := range stores {
 		if store == nil {
@@ -42,7 +42,7 @@ func (rs *regionCountSelector) SelectBadStore(stores map[uint64]*StoreInfo, excl
 			continue
 		}
 
-		if store.fractionUsed() <= maxUsedFraction {
+		if store.usedFraction() <= maxCapacityUsedFraction {
 			continue
 		}
 
@@ -51,7 +51,7 @@ func (rs *regionCountSelector) SelectBadStore(stores map[uint64]*StoreInfo, excl
 			continue
 		}
 
-		if store.fractionUsed() > badStore.fractionUsed() {
+		if store.usedFraction() > badStore.usedFraction() {
 			badStore = store
 		}
 	}
@@ -59,7 +59,7 @@ func (rs *regionCountSelector) SelectBadStore(stores map[uint64]*StoreInfo, excl
 	return badStore
 }
 
-func (rs *regionCountSelector) SelectGoodStore(stores map[uint64]*StoreInfo, excluded map[uint64]struct{}) *StoreInfo {
+func (rs *regionCapacitySelector) SelectGoodStore(stores map[uint64]*StoreInfo, excluded map[uint64]struct{}) *StoreInfo {
 	var goodStore *StoreInfo
 	for _, store := range stores {
 		if store == nil {
@@ -70,7 +70,7 @@ func (rs *regionCountSelector) SelectGoodStore(stores map[uint64]*StoreInfo, exc
 			continue
 		}
 
-		if store.fractionUsed() > maxUsedFraction {
+		if store.usedFraction() > maxCapacityUsedFraction {
 			continue
 		}
 
@@ -79,7 +79,7 @@ func (rs *regionCountSelector) SelectGoodStore(stores map[uint64]*StoreInfo, exc
 			continue
 		}
 
-		if store.fractionUsed() < goodStore.fractionUsed() {
+		if store.usedFraction() < goodStore.usedFraction() {
 			goodStore = store
 		}
 	}
@@ -87,7 +87,7 @@ func (rs *regionCountSelector) SelectGoodStore(stores map[uint64]*StoreInfo, exc
 	return goodStore
 }
 
-func (rs *regionCountSelector) SelectBadRegion(cluster *ClusterInfo, excluded map[uint64]struct{}) *RegionInfo {
+func (rs *regionCapacitySelector) SelectBadRegion(cluster *ClusterInfo, excluded map[uint64]struct{}) *RegionInfo {
 	stores := cluster.getStores()
 	store := rs.SelectBadStore(stores, excluded)
 	if store == nil {
@@ -99,7 +99,7 @@ func (rs *regionCountSelector) SelectBadRegion(cluster *ClusterInfo, excluded ma
 	return cluster.regions.randRegion(storeID)
 }
 
-func (rs *regionCountSelector) SelectGoodPeer(cluster *ClusterInfo, peers map[uint64]*metapb.Peer) *metapb.Peer {
+func (rs *regionCapacitySelector) SelectGoodPeer(cluster *ClusterInfo, peers map[uint64]*metapb.Peer) *metapb.Peer {
 	stores := make(map[uint64]*StoreInfo, len(peers))
 	for storeID := range peers {
 		stores[storeID] = cluster.getStore(storeID)
@@ -114,7 +114,7 @@ func (rs *regionCountSelector) SelectGoodPeer(cluster *ClusterInfo, peers map[ui
 	return peers[storeID]
 }
 
-func (rs *regionCountSelector) SelectTransferredPeers(cluster *ClusterInfo, excluded map[uint64]struct{}) (*RegionInfo, *metapb.Peer) {
+func (rs *regionCapacitySelector) SelectTransferRegion(cluster *ClusterInfo, excluded map[uint64]struct{}) (*RegionInfo, *metapb.Peer) {
 	// First select one bad store region from cluster info.
 	region := rs.SelectBadRegion(cluster, excluded)
 	if region == nil {

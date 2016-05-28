@@ -135,8 +135,8 @@ func (s *StoreInfo) clone() *StoreInfo {
 	}
 }
 
-// fractionUsed is the used fraction of storage capacity.
-func (s *StoreInfo) fractionUsed() float64 {
+// usedFraction is the used fraction of storage capacity.
+func (s *StoreInfo) usedFraction() float64 {
 	if s.stats.GetCapacity() == 0 {
 		return 0
 	}
