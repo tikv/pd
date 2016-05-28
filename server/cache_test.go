@@ -133,9 +133,8 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 
 	cacheStoreRegions, ok := cluster.cachedCluster.regions.storeLeaderRegions[store1.GetId()]
 	c.Assert(ok, IsTrue)
-	cachePeer, ok := cacheStoreRegions[region.GetId()]
+	_, ok = cacheStoreRegions[region.GetId()]
 	c.Assert(ok, IsTrue)
-	mustEqualPeer(c, cachePeer, leaderPeer)
 
 	// Test change leader peer.
 	newLeaderPeer := region.GetPeers()[1]
@@ -158,9 +157,8 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	cacheStoreRegions, ok = cluster.cachedCluster.regions.storeLeaderRegions[store2.GetId()]
 	c.Assert(ok, IsTrue)
 	c.Assert(cacheStoreRegions, HasLen, 1)
-	cachePeer, ok = cacheStoreRegions[region.GetId()]
+	_, ok = cacheStoreRegions[region.GetId()]
 	c.Assert(ok, IsTrue)
-	mustEqualPeer(c, cachePeer, newLeaderPeer)
 
 	s.svr.cluster.Stop()
 

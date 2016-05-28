@@ -32,19 +32,19 @@ type RegionsInfo struct {
 
 	// region id -> RegionInfo
 	leaderRegions map[uint64]*RegionInfo
-	// store id -> regionid -> leader region peer
-	storeLeaderRegions map[uint64]map[uint64]*metapb.Peer
+	// store id -> regionid -> struct{}
+	storeLeaderRegions map[uint64]map[uint64]struct{}
 }
 
 func newRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
 		leaderRegions:      make(map[uint64]*RegionInfo),
-		storeLeaderRegions: make(map[uint64]map[uint64]*metapb.Peer),
+		storeLeaderRegions: make(map[uint64]map[uint64]struct{}),
 	}
 }
 
 // randRegionPeer random selects a leader peer in regions.
-func (r *RegionsInfo) randRegionPeer(storeID uint64) *metapb.Peer {
+func (r *RegionsInfo) randRegion(storeID uint64) *RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
 
@@ -53,16 +53,17 @@ func (r *RegionsInfo) randRegionPeer(storeID uint64) *metapb.Peer {
 		return nil
 	}
 
-	idx, randIdx := 0, rand.Intn(len(storeRegions))
-	for _, peer := range storeRegions {
+	idx, randIdx, randRegionID := 0, rand.Intn(len(storeRegions)), uint64(0)
+	for regionID := range storeRegions {
 		if idx == randIdx {
-			return peer
+			randRegionID = regionID
+			break
 		}
 
 		idx++
 	}
 
-	return nil
+	return r.leaderRegions[randRegionID]
 }
 
 func (r *RegionsInfo) addRegion(region *metapb.Region, leaderPeer *metapb.Peer) {
@@ -70,14 +71,14 @@ func (r *RegionsInfo) addRegion(region *metapb.Region, leaderPeer *metapb.Peer) 
 	defer r.Unlock()
 
 	regionID := region.GetId()
-	cacheRegion, ok := r.leaderRegions[regionID]
-	if ok {
+	cacheRegion, regionExist := r.leaderRegions[regionID]
+	if regionExist {
 		// If region leader has been changed, then remove old region from store cache.
 		oldLeaderPeer := cacheRegion.peer
 		if oldLeaderPeer.GetId() != leaderPeer.GetId() {
 			storeID := oldLeaderPeer.GetStoreId()
-			storeRegions, ok := r.storeLeaderRegions[storeID]
-			if ok {
+			storeRegions, storeExist := r.storeLeaderRegions[storeID]
+			if storeExist {
 				delete(storeRegions, regionID)
 				if len(storeRegions) == 0 {
 					delete(r.storeLeaderRegions, storeID)
@@ -94,10 +95,10 @@ func (r *RegionsInfo) addRegion(region *metapb.Region, leaderPeer *metapb.Peer) 
 	storeID := leaderPeer.GetStoreId()
 	store, ok := r.storeLeaderRegions[storeID]
 	if !ok {
-		store = make(map[uint64]*metapb.Peer)
+		store = make(map[uint64]struct{})
 		r.storeLeaderRegions[storeID] = store
 	}
-	store[regionID] = leaderPeer
+	store[regionID] = struct{}{}
 }
 
 func (r *RegionsInfo) removeRegion(regionID uint64) {
