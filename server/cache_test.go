@@ -32,29 +32,6 @@ func (s *testClusterCacheSuite) TearDownSuite(c *C) {
 	s.client.Close()
 }
 
-func mustEqualStore(c *C, store1 *metapb.Store, store2 *metapb.Store) {
-	c.Assert(store1.GetId(), Equals, store2.GetId())
-	c.Assert(store1.GetAddress(), Equals, store2.GetAddress())
-}
-
-func mustEqualRegion(c *C, region1 *metapb.Region, region2 *metapb.Region) {
-	c.Assert(region1.GetId(), Equals, region2.GetId())
-	c.Assert(region1.GetRegionEpoch().GetVersion(), Equals, region2.GetRegionEpoch().GetVersion())
-	c.Assert(region1.GetRegionEpoch().GetConfVer(), Equals, region2.GetRegionEpoch().GetConfVer())
-	c.Assert(region1.GetStartKey(), BytesEquals, region2.GetStartKey())
-	c.Assert(region1.GetEndKey(), BytesEquals, region2.GetEndKey())
-	c.Assert(len(region1.GetPeers()), Equals, len(region2.GetPeers()))
-
-	for i := range region1.GetPeers() {
-		mustEqualPeer(c, region1.GetPeers()[i], region2.GetPeers()[i])
-	}
-}
-
-func mustEqualPeer(c *C, peer1 *metapb.Peer, peer2 *metapb.Peer) {
-	c.Assert(peer1.GetId(), Equals, peer2.GetId())
-	c.Assert(peer1.GetStoreId(), Equals, peer2.GetStoreId())
-}
-
 func (s *testClusterCacheSuite) TestCache(c *C) {
 	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
@@ -78,7 +55,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(cluster.cachedCluster.getMeta().GetMaxPeerCount(), Equals, defaultMaxPeerCount)
 
 	cacheStore := cluster.cachedCluster.getStore(store1.GetId())
-	mustEqualStore(c, cacheStore.store, store1)
+	c.Assert(cacheStore.store, DeepEquals, store1)
 	c.Assert(cluster.cachedCluster.regions.leaderRegions, HasLen, 0)
 
 	// Add another store.
@@ -91,9 +68,9 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(cluster.cachedCluster.getMeta().GetMaxPeerCount(), Equals, defaultMaxPeerCount)
 
 	cacheStore = cluster.cachedCluster.getStore(store1.GetId())
-	mustEqualStore(c, cacheStore.store, store1)
+	c.Assert(cacheStore.store, DeepEquals, store1)
 	cacheStore = cluster.cachedCluster.getStore(store2.GetId())
-	mustEqualStore(c, cacheStore.store, store2)
+	c.Assert(cacheStore.store, DeepEquals, store2)
 	cacheStores := cluster.cachedCluster.getStores()
 	c.Assert(cacheStores, HasLen, 2)
 	c.Assert(cluster.cachedCluster.regions.leaderRegions, HasLen, 0)
@@ -114,7 +91,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(cluster.cachedCluster.regions.leaderRegions, HasLen, 1)
 
 	cacheRegion := cluster.cachedCluster.regions.leaderRegions[region.GetId()]
-	mustEqualRegion(c, cacheRegion.region, region)
+	c.Assert(cacheRegion.region, DeepEquals, region)
 
 	// Add another peer.
 	region.Peers = append(region.Peers, res.GetPeer())
@@ -129,7 +106,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	region, err = cluster.GetRegion(regionKey)
 	c.Assert(err, IsNil)
 	c.Assert(region.GetPeers(), HasLen, 2)
-	mustEqualRegion(c, cacheRegion.region, region)
+	c.Assert(cacheRegion.region, DeepEquals, region)
 
 	cacheStoreRegions, ok := cluster.cachedCluster.regions.storeLeaderRegions[store1.GetId()]
 	c.Assert(ok, IsTrue)
@@ -147,7 +124,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	region, err = cluster.GetRegion(regionKey)
 	c.Assert(err, IsNil)
 	c.Assert(region.GetPeers(), HasLen, 2)
-	mustEqualRegion(c, cacheRegion.region, region)
+	c.Assert(cacheRegion.region, DeepEquals, region)
 
 	c.Assert(cluster.cachedCluster.regions.leaderRegions, HasLen, 1)
 
