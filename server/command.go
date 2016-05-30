@@ -168,7 +168,7 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		return nil, errors.Trace(err)
 	}
 
-	splitOps, err := cluster.maybeSplit(request, reqRegion, searchRegion)
+	splitOps, delRegionKey, err := cluster.maybeSplit(request, reqRegion, searchRegion)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -196,6 +196,7 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		}
 	}
 
+	cluster.cachedCluster.regions.delSearchRegion(delRegionKey)
 	cluster.cachedCluster.regions.upsertRegion(reqRegion, request.GetLeader())
 
 	return &pdpb.Response{

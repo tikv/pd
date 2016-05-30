@@ -66,13 +66,28 @@ func newRegionsInfo() *RegionsInfo {
 	}
 }
 
+func (r *RegionsInfo) delSearchRegion(delRegionKey []byte) {
+	if len(delRegionKey) == 0 {
+		return
+	}
+
+	r.Lock()
+	defer r.Unlock()
+
+	searchItem := searchKeyItem{
+		key: searchKey(delRegionKey),
+	}
+	r.searchRegions.Delete(searchItem)
+}
+
 func (r *RegionsInfo) getRegion(startKey []byte, endKey []byte) *RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
 
 	startSearchItem := searchKeyItem{key: searchKey(startKey)}
 	endSearchItem := searchKeyItem{key: searchKey(endKey)}
-	searchItem := &searchKeyItem{}
+
+	var searchItem *searchKeyItem
 	r.searchRegions.AscendRange(startSearchItem, endSearchItem, func(i btree.Item) bool {
 		*searchItem = i.(searchKeyItem)
 		return false
@@ -140,9 +155,12 @@ func (r *RegionsInfo) upsertRegion(region *metapb.Region, leaderPeer *metapb.Pee
 			skipSearchRegionCache = true
 		}
 
-		// If region leader peer has been changed, remove old region from store cache.
 		oldLeaderPeer := cacheRegion.peer
-		if oldLeaderPeer.GetId() != leaderPeer.GetId() {
+		if oldLeaderPeer.GetId() == leaderPeer.GetId() {
+			// If region leader peer has not been changed, set `skipStoreRegionCache = true`.
+			skipStoreRegionCache = true
+		} else {
+			// If region leader peer has been changed, remove old region from store cache.
 			storeID := oldLeaderPeer.GetStoreId()
 			storeRegions, storeExist := r.storeLeaderRegions[storeID]
 			if storeExist {
@@ -151,9 +169,6 @@ func (r *RegionsInfo) upsertRegion(region *metapb.Region, leaderPeer *metapb.Pee
 					delete(r.storeLeaderRegions, storeID)
 				}
 			}
-		} else {
-			// If region leader peer has not been changed, set `skipStoreRegionCache = true`.
-			skipStoreRegionCache = true
 		}
 	}
 

@@ -309,9 +309,24 @@ func (c *raftCluster) GetStore(storeID uint64) (*metapb.Store, error) {
 	return store.store, nil
 }
 
-func (c *raftCluster) getRegion(regionKey []byte, maxSearchEndKey []byte) (*metapb.Region, error) {
+func (c *raftCluster) getRegion(startSearchKey string, endSearchEndKey string) (*metapb.Region, error) {
 	// First find region from cache.
-	return nil, nil
+	cacheRegion := c.cachedCluster.regions.getRegion([]byte(startSearchKey), []byte(endSearchEndKey))
+	if cacheRegion != nil {
+		return cacheRegion.region, nil
+	}
+
+	// Second find region from etcd.
+	region := &metapb.Region{}
+	ok, err := getProtoMsg(c.s.client, startSearchKey, region, clientv3.WithRange(endSearchEndKey), clientv3.WithLimit(1))
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if !ok {
+		return nil, nil
+	}
+
+	return region, nil
 }
 
 func (c *raftCluster) GetRegion(regionKey []byte) (*metapb.Region, error) {
@@ -320,27 +335,26 @@ func (c *raftCluster) GetRegion(regionKey []byte) (*metapb.Region, error) {
 	// if we use "abc" to search the region, the first key >= "abc" may be
 	// region 1, not region 2. So we use the next region key for search.
 	nextRegionKey := append(regionKey, 0x00)
-	searchKey := makeRegionSearchKey(c.clusterRoot, nextRegionKey)
+	startSearchKey := makeRegionSearchKey(c.clusterRoot, nextRegionKey)
 
 	// Etcd range search is for range [searchKey, endKey), if we want to get
 	// the latest region, we should use next max end key for search range.
 	// TODO: we can generate these keys in initialization.
-	maxEndKey := makeRegionSearchKey(c.clusterRoot, []byte{})
-	maxSearchEndKey := maxEndKey + "\x00"
+	endKey := makeRegionSearchKey(c.clusterRoot, []byte{})
+	endSearchEndKey := endKey + "\x00"
 
 	// Find the first region with end key >= searchKey
-	region := metapb.Region{}
-	ok, err := getProtoMsg(c.s.client, searchKey, &region, clientv3.WithRange(string(maxSearchEndKey)), clientv3.WithLimit(1))
+	region, err := c.getRegion(startSearchKey, endSearchEndKey)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	if !ok {
+	if region == nil {
 		return nil, nil
 	}
 
 	if bytes.Compare(regionKey, region.GetStartKey()) >= 0 &&
 		(len(region.GetEndKey()) == 0 || bytes.Compare(regionKey, region.GetEndKey()) < 0) {
-		return &region, nil
+		return region, nil
 	}
 
 	return nil, nil

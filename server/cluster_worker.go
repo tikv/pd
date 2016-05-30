@@ -183,7 +183,7 @@ func (c *raftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 }
 
 func (c *raftCluster) maybeSplit(request *pdpb.RegionHeartbeatRequest, reqRegion *metapb.Region,
-	region *metapb.Region) ([]clientv3.Op, error) {
+	region *metapb.Region) ([]clientv3.Op, []byte, error) {
 	// For split, we should handle heartbeat carefully.
 	// E.g, for region 1 [a, c) -> 1 [a, b) + 2 [b, c).
 	// after split, region 1 and 2 will do heartbeat independently.
@@ -193,7 +193,7 @@ func (c *raftCluster) maybeSplit(request *pdpb.RegionHeartbeatRequest, reqRegion
 	var ops []clientv3.Op
 	regionValue, err := proto.Marshal(reqRegion)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 	reqRegionEncStartKey := encodeRegionStartKey(reqRegion.GetStartKey())
 	reqRegionEncEndKey := encodeRegionSearchKey(reqRegion.GetEndKey())
@@ -204,7 +204,7 @@ func (c *raftCluster) maybeSplit(request *pdpb.RegionHeartbeatRequest, reqRegion
 		// Find no range after start key, insert directly.
 		ops = append(ops, clientv3.OpPut(reqRegionPath, reqRegionEncEndKey))
 		ops = append(ops, clientv3.OpPut(reqSearchKey, string(regionValue)))
-		return ops, nil
+		return ops, nil, nil
 	}
 
 	// If the request epoch is less than current region epoch, then returns an error.
@@ -212,15 +212,16 @@ func (c *raftCluster) maybeSplit(request *pdpb.RegionHeartbeatRequest, reqRegion
 	regionEpoch := region.GetRegionEpoch()
 	if reqRegionEpoch.GetVersion() < regionEpoch.GetVersion() {
 		// If the request epoch version is less than the current one, return an error.
-		return nil, errors.Errorf("invalid region epoch, request: %v, currenrt: %v", reqRegionEpoch, regionEpoch)
+		return nil, nil, errors.Errorf("invalid region epoch, request: %v, currenrt: %v", reqRegionEpoch, regionEpoch)
 	} else if reqRegionEpoch.GetVersion() == regionEpoch.GetVersion() {
 		// If the request epoch version is equal to the current one, do nothing.
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	regionEncStartKey := encodeRegionStartKey(region.GetStartKey())
 	regionEncEndKey := encodeRegionSearchKey(region.GetEndKey())
 
+	delRegionKey := []byte{}
 	if reqRegionEncStartKey == regionEncStartKey &&
 		reqRegionEncEndKey == regionEncEndKey {
 		// Seems there is something wrong? Do nothing.
@@ -239,12 +240,13 @@ func (c *raftCluster) maybeSplit(request *pdpb.RegionHeartbeatRequest, reqRegion
 		}
 		if regionSearchKey != reqSearchKey {
 			ops = append(ops, clientv3.OpDelete(regionSearchKey))
+			delRegionKey = []byte(regionSearchKey)
 		}
 		ops = append(ops, clientv3.OpPut(reqRegionPath, reqRegionEncEndKey))
 		ops = append(ops, clientv3.OpPut(reqSearchKey, string(regionValue)))
 	}
 
-	return ops, nil
+	return ops, delRegionKey, nil
 }
 
 func (c *raftCluster) callCommand(request *raft_cmdpb.RaftCmdRequest) (*raft_cmdpb.RaftCmdResponse, error) {
