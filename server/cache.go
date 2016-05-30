@@ -1,13 +1,36 @@
 package server
 
 import (
+	"bytes"
 	"math/rand"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/google/btree"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
+
+const defaultBtreeDegree = 64
+
+type searchKey []byte
+
+type searchKeyItem struct {
+	key searchKey
+	id  uint64
+}
+
+// Less compares two searchKeys.
+func (s searchKey) Less(other searchKey) bool {
+	return bytes.Compare(s, other) < 0
+}
+
+var _ btree.Item = &searchKeyItem{}
+
+// Less returns true if the region's encoded end key is less than the item key.
+func (s searchKeyItem) Less(than btree.Item) bool {
+	return s.key.Less(than.(searchKeyItem).key)
+}
 
 // RegionInfo is region cache info.
 type RegionInfo struct {
@@ -28,16 +51,43 @@ type RegionsInfo struct {
 	sync.RWMutex
 
 	// region id -> RegionInfo
-	leaderRegions map[uint64]*RegionInfo
-	// store id -> regionid -> struct{}
+	regions map[uint64]*RegionInfo
+	// search key -> region id
+	searchRegions *btree.BTree
+	// store id -> region id -> struct{}
 	storeLeaderRegions map[uint64]map[uint64]struct{}
 }
 
 func newRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
-		leaderRegions:      make(map[uint64]*RegionInfo),
+		regions:            make(map[uint64]*RegionInfo),
+		searchRegions:      btree.New(defaultBtreeDegree),
 		storeLeaderRegions: make(map[uint64]map[uint64]struct{}),
 	}
+}
+
+func (r *RegionsInfo) getRegion(startKey []byte, endKey []byte) *RegionInfo {
+	r.RLock()
+	defer r.RUnlock()
+
+	startSearchItem := searchKeyItem{key: searchKey(startKey)}
+	endSearchItem := searchKeyItem{key: searchKey(endKey)}
+	searchItem := &searchKeyItem{}
+	r.searchRegions.AscendRange(startSearchItem, endSearchItem, func(i btree.Item) bool {
+		*searchItem = i.(searchKeyItem)
+		return false
+	})
+	if searchItem == nil {
+		return nil
+	}
+
+	regionID := searchItem.id
+	region, ok := r.regions[regionID]
+	if ok {
+		return region.clone()
+	}
+
+	return nil
 }
 
 // randRegion random selects a region from region cache.
@@ -60,7 +110,7 @@ func (r *RegionsInfo) randRegion(storeID uint64) *RegionInfo {
 		idx++
 	}
 
-	region, ok := r.leaderRegions[randRegionID]
+	region, ok := r.regions[randRegionID]
 	if ok {
 		return region.clone()
 	}
@@ -68,21 +118,29 @@ func (r *RegionsInfo) randRegion(storeID uint64) *RegionInfo {
 	return nil
 }
 
-func (r *RegionsInfo) addRegion(region *metapb.Region, leaderPeer *metapb.Peer) {
+func (r *RegionsInfo) upsertRegion(region *metapb.Region, leaderPeer *metapb.Peer) {
 	r.Lock()
 	defer r.Unlock()
 
+	skipRegionCache, skipStoreRegionCache, skipSearchRegionCache := false, false, false
+
 	regionID := region.GetId()
-	cacheRegion, regionExist := r.leaderRegions[regionID]
+	cacheRegion, regionExist := r.regions[regionID]
 	if regionExist {
-		// If region epoch and leader peer has not been changed, return directly.
+		// If region epoch and leader peer has not been changed, set `skipRegionCache = true`.
 		if cacheRegion.region.GetRegionEpoch().GetVersion() == region.GetRegionEpoch().GetVersion() &&
 			cacheRegion.region.GetRegionEpoch().GetConfVer() == region.GetRegionEpoch().GetConfVer() &&
 			cacheRegion.peer.GetId() == leaderPeer.GetId() {
-			return
+			skipRegionCache = true
 		}
 
-		// If region leader has been changed, remove old region from store cache.
+		// If region startKey and endKey has not been changed, set `skipSearchRegionCache = true`.
+		if bytes.Equal(cacheRegion.region.GetStartKey(), region.GetStartKey()) &&
+			bytes.Equal(cacheRegion.region.GetEndKey(), region.GetEndKey()) {
+			skipSearchRegionCache = true
+		}
+
+		// If region leader peer has been changed, remove old region from store cache.
 		oldLeaderPeer := cacheRegion.peer
 		if oldLeaderPeer.GetId() != leaderPeer.GetId() {
 			storeID := oldLeaderPeer.GetStoreId()
@@ -93,28 +151,43 @@ func (r *RegionsInfo) addRegion(region *metapb.Region, leaderPeer *metapb.Peer) 
 					delete(r.storeLeaderRegions, storeID)
 				}
 			}
+		} else {
+			// If region leader peer has not been changed, set `skipStoreRegionCache = true`.
+			skipStoreRegionCache = true
 		}
 	}
 
-	r.leaderRegions[regionID] = &RegionInfo{
-		region: region,
-		peer:   leaderPeer,
+	if !skipRegionCache {
+		r.regions[regionID] = &RegionInfo{
+			region: region,
+			peer:   leaderPeer,
+		}
 	}
 
-	storeID := leaderPeer.GetStoreId()
-	store, ok := r.storeLeaderRegions[storeID]
-	if !ok {
-		store = make(map[uint64]struct{})
-		r.storeLeaderRegions[storeID] = store
+	if !skipStoreRegionCache {
+		storeID := leaderPeer.GetStoreId()
+		store, ok := r.storeLeaderRegions[storeID]
+		if !ok {
+			store = make(map[uint64]struct{})
+			r.storeLeaderRegions[storeID] = store
+		}
+		store[regionID] = struct{}{}
 	}
-	store[regionID] = struct{}{}
+
+	if !skipSearchRegionCache {
+		searchItem := searchKeyItem{
+			key: searchKey(encodeRegionSearchKey(region.GetEndKey())),
+			id:  region.GetId(),
+		}
+		r.searchRegions.ReplaceOrInsert(searchItem)
+	}
 }
 
 func (r *RegionsInfo) removeRegion(regionID uint64) {
 	r.Lock()
 	defer r.Unlock()
 
-	cacheRegion, ok := r.leaderRegions[regionID]
+	cacheRegion, ok := r.regions[regionID]
 	if ok {
 		storeID := cacheRegion.peer.GetStoreId()
 		storeRegions, ok := r.storeLeaderRegions[storeID]
@@ -125,7 +198,13 @@ func (r *RegionsInfo) removeRegion(regionID uint64) {
 			}
 		}
 
-		delete(r.leaderRegions, regionID)
+		delete(r.regions, regionID)
+
+		searchItem := searchKeyItem{
+			key: searchKey(encodeRegionSearchKey(cacheRegion.region.GetEndKey())),
+			id:  cacheRegion.region.GetId(),
+		}
+		r.searchRegions.Delete(searchItem)
 	}
 }
 

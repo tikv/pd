@@ -301,12 +301,17 @@ func (c *raftCluster) GetStore(storeID uint64) (*metapb.Store, error) {
 		return nil, errors.New("invalid zero store id")
 	}
 
-	s := c.cachedCluster.getStore(storeID)
-	if s == nil {
+	store := c.cachedCluster.getStore(storeID)
+	if store == nil {
 		return nil, errors.Errorf("invalid store ID %d, not found", storeID)
 	}
 
-	return s.store, nil
+	return store.store, nil
+}
+
+func (c *raftCluster) getRegion(regionKey []byte, maxSearchEndKey []byte) (*metapb.Region, error) {
+	// First find region from cache.
+	return nil, nil
 }
 
 func (c *raftCluster) GetRegion(regionKey []byte) (*metapb.Region, error) {
