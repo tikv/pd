@@ -40,7 +40,7 @@ func newRegionsInfo() *RegionsInfo {
 	}
 }
 
-// randRegionPeer random selects a leader peer in regions.
+// randRegion random selects a region from region cache.
 func (r *RegionsInfo) randRegion(storeID uint64) *RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
@@ -137,8 +137,8 @@ func (s *StoreInfo) clone() *StoreInfo {
 	}
 }
 
-// usedFraction is the used fraction of storage capacity.
-func (s *StoreInfo) usedFraction() float64 {
+// usedRatio is the used capacity ratio of storage capacity.
+func (s *StoreInfo) usedRatio() float64 {
 	if s.stats.GetCapacity() == 0 {
 		return 0
 	}
