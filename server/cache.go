@@ -16,6 +16,13 @@ type RegionInfo struct {
 	peer *metapb.Peer
 }
 
+func (r *RegionInfo) clone() *RegionInfo {
+	return &RegionInfo{
+		region: proto.Clone(r.region).(*metapb.Region),
+		peer:   proto.Clone(r.peer).(*metapb.Peer),
+	}
+}
+
 // RegionsInfo is regions cache info.
 type RegionsInfo struct {
 	sync.RWMutex
@@ -53,7 +60,12 @@ func (r *RegionsInfo) randRegion(storeID uint64) *RegionInfo {
 		idx++
 	}
 
-	return r.leaderRegions[randRegionID]
+	region, ok := r.leaderRegions[randRegionID]
+	if ok {
+		return region.clone()
+	}
+
+	return nil
 }
 
 func (r *RegionsInfo) addRegion(region *metapb.Region, leaderPeer *metapb.Peer) {
