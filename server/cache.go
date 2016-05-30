@@ -75,7 +75,14 @@ func (r *RegionsInfo) addRegion(region *metapb.Region, leaderPeer *metapb.Peer) 
 	regionID := region.GetId()
 	cacheRegion, regionExist := r.leaderRegions[regionID]
 	if regionExist {
-		// If region leader has been changed, then remove old region from store cache.
+		// If region epoch and leader peer has not been changed, return directly.
+		if cacheRegion.region.GetRegionEpoch().GetVersion() == region.GetRegionEpoch().GetVersion() &&
+			cacheRegion.region.GetRegionEpoch().GetConfVer() == region.GetRegionEpoch().GetConfVer() &&
+			cacheRegion.peer.GetId() == leaderPeer.GetId() {
+			return
+		}
+
+		// If region leader has been changed, remove old region from store cache.
 		oldLeaderPeer := cacheRegion.peer
 		if oldLeaderPeer.GetId() != leaderPeer.GetId() {
 			storeID := oldLeaderPeer.GetStoreId()
