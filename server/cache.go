@@ -9,16 +9,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-type storeIDMap map[uint64]struct{}
-
-func newStoreIDMap(storeIDs ...uint64) storeIDMap {
-	storeMap := make(storeIDMap, len(storeIDs))
-	for _, id := range storeIDs {
-		storeMap[id] = struct{}{}
-	}
-	return storeMap
-}
-
 // RegionInfo is region cache info.
 type RegionInfo struct {
 	region *metapb.Region
@@ -135,8 +125,8 @@ func (s *StoreInfo) clone() *StoreInfo {
 	}
 }
 
-// fractionUsed is the used fraction of storage capacity.
-func (s *StoreInfo) fractionUsed() float64 {
+// usedFraction is the used fraction of storage capacity.
+func (s *StoreInfo) usedFraction() float64 {
 	if s.stats.GetCapacity() == 0 {
 		return 0
 	}
