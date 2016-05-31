@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"path"
 	"strconv"
 	"strings"
@@ -25,12 +24,7 @@ var (
 // cluster 2 -> /2/raft
 // For cluster 1
 // store 1 -> /1/raft/s/1, value is metapb.Store
-// region 1 -> /1/raft/r/1, value is encoded_region_key
-// region search key map -> /1/raft/k/encoded_region_key, value is metapb.Region
-//
-// Encode region search key:
-//  1, the maximum end region key is empty, so the encode key is \xFF
-//  2, other region end key is not empty, the encode key is \z end_key
+// region 1 -> /1/raft/r/1, value is metapb.Region
 
 type raftCluster struct {
 	sync.RWMutex
@@ -75,6 +69,8 @@ func (c *raftCluster) Start(meta metapb.Cluster) error {
 	if err := c.cacheAllStores(); err != nil {
 		return errors.Trace(err)
 	}
+
+	// TODO: cache all regions
 
 	return nil
 }
@@ -146,6 +142,10 @@ func encodeRegionSearchKey(endKey []byte) string {
 
 func encodeRegionStartKey(startKey []byte) string {
 	return string(append([]byte{'z'}, startKey...))
+}
+
+func encodeRegionEndKey(endKey []byte) string {
+	return encodeRegionSearchKey(endKey)
 }
 
 func makeStoreKey(clusterRootPath string, storeID uint64) string {
@@ -312,52 +312,8 @@ func (c *raftCluster) GetStore(storeID uint64) (*metapb.Store, error) {
 	return store.store, nil
 }
 
-func (c *raftCluster) getRegion(startSearchKey []byte, endSearchKey []byte) (*metapb.Region, bool, error) {
-	// First find region from cache.
-	cacheRegion := c.cachedCluster.regions.getRegion(startSearchKey, endSearchKey)
-	if cacheRegion != nil {
-		return cacheRegion.region, true, nil
-	}
-
-	// Second find region from etcd.
-	region := &metapb.Region{}
-	ok, err := getProtoMsg(c.s.client, string(startSearchKey), region, clientv3.WithRange(string(endSearchKey)), clientv3.WithLimit(1))
-	if err != nil {
-		return nil, false, errors.Trace(err)
-	}
-	if !ok {
-		return nil, false, nil
-	}
-
-	return region, false, nil
-}
-
 func (c *raftCluster) GetRegion(regionKey []byte) (*metapb.Region, error) {
-	// We must use the next region key for search,
-	// e,g, we have two regions 1, 2, and key ranges are ["", "abc"), ["abc", +infinite),
-	// if we use "abc" to search the region, the first key >= "abc" may be
-	// region 1, not region 2. So we use the next region key for search.
-	nextRegionKey := append(regionKey, 0x00)
-	startSearchKey := []byte(makeRegionSearchKey(c.clusterRoot, nextRegionKey))
-
-	// Range search is for range [startSearchKey, endSearchKey).
-	endSearchKey := append(c.maxEndSearchKey, 0x00)
-
-	// Find the first region with end key >= searchKey
-	region, _, err := c.getRegion(startSearchKey, endSearchKey)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	if region == nil {
-		return nil, nil
-	}
-
-	if bytes.Compare(regionKey, region.GetStartKey()) >= 0 &&
-		(len(region.GetEndKey()) == 0 || bytes.Compare(regionKey, region.GetEndKey()) < 0) {
-		return region, nil
-	}
-
-	return nil, nil
+	return c.cachedCluster.regions.GetRegion(regionKey), nil
 }
 
 func (c *raftCluster) PutStore(store *metapb.Store) error {

@@ -93,21 +93,12 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(cacheStores, HasLen, 2)
 	c.Assert(cluster.cachedCluster.regions.regions, HasLen, 1)
 	cacheRegion := cluster.cachedCluster.regions.regions[region.GetId()]
-	c.Assert(cacheRegion.region, DeepEquals, region)
+	c.Assert(cacheRegion, DeepEquals, region)
 
 	cacheStoreRegions, ok := cluster.cachedCluster.regions.storeLeaderRegions[store1.GetId()]
 	c.Assert(ok, IsTrue)
 	_, ok = cacheStoreRegions[region.GetId()]
 	c.Assert(ok, IsTrue)
-
-	// This time we should use cache for region search.
-	nextRegionKey := append(regionKey, 0x00)
-	startSearchKey := []byte(makeRegionSearchKey(cluster.clusterRoot, nextRegionKey))
-	endSearchKey := append(cluster.maxEndSearchKey, 0x00)
-	region, useCache, err := cluster.getRegion(startSearchKey, endSearchKey)
-	c.Assert(err, IsNil)
-	c.Assert(useCache, IsTrue)
-	c.Assert(cacheRegion.region, DeepEquals, region)
 
 	// Add another peer.
 	region.Peers = append(region.Peers, res.GetPeer())
@@ -122,7 +113,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	region, err = cluster.GetRegion(regionKey)
 	c.Assert(err, IsNil)
 	c.Assert(region.GetPeers(), HasLen, 2)
-	c.Assert(cacheRegion.region, DeepEquals, region)
+	c.Assert(cacheRegion, DeepEquals, region)
 
 	cacheStoreRegions, ok = cluster.cachedCluster.regions.storeLeaderRegions[store1.GetId()]
 	c.Assert(ok, IsTrue)
@@ -140,7 +131,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	region, err = cluster.GetRegion(regionKey)
 	c.Assert(err, IsNil)
 	c.Assert(region.GetPeers(), HasLen, 2)
-	c.Assert(cacheRegion.region, DeepEquals, region)
+	c.Assert(cacheRegion, DeepEquals, region)
 
 	c.Assert(cluster.cachedCluster.regions.regions, HasLen, 1)
 
@@ -153,10 +144,9 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	_, ok = cacheStoreRegions[region.GetId()]
 	c.Assert(ok, IsTrue)
 
-	region, useCache, err = cluster.getRegion(startSearchKey, endSearchKey)
+	region, err = cluster.GetRegion(regionKey)
 	c.Assert(err, IsNil)
-	c.Assert(useCache, IsTrue)
-	c.Assert(cacheRegion.region, DeepEquals, region)
+	c.Assert(cacheRegion, DeepEquals, region)
 
 	s.svr.cluster.Stop()
 

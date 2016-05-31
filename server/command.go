@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/coreos/etcd/clientv3"
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -152,35 +153,42 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		return nil, errors.Errorf("invalid region heartbeat command, but %v", request)
 	}
 
-	// Handle split/merge region.
-	// For split, we should handle heartbeat carefully.
-	// E.g, for region 1 [a, c) -> 1 [a, b) + 2 [b, c).
-	// after split, region 1 and 2 will do heartbeat independently.
 	cluster, err := c.getRaftCluster()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	reqRegion := request.GetRegion()
-	reqRegionStartKey := reqRegion.GetStartKey()
-	searchRegion, err := cluster.GetRegion(reqRegionStartKey)
+	region := request.GetRegion()
+	leader := request.GetLeader()
+	if leader == nil {
+		return nil, errors.Errorf("invalid request leader, %v", request)
+	}
+
+	resp, err := cluster.cachedCluster.regions.Heartbeat(region, leader)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	splitOps, delRegionKey, err := cluster.maybeSplit(request, reqRegion, searchRegion)
+	changePeer, err := cluster.handleChangePeerReq(region, leader.GetId())
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	// Handle change peer for region.
-	changePeerOps, changePeer, err := cluster.maybeChangePeer(request, reqRegion, searchRegion)
-	if err != nil {
-		return nil, errors.Trace(err)
+	var ops []clientv3.Op
+	if resp.PutRegion != nil {
+		regionValue, err := proto.Marshal(resp.PutRegion)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		regionPath := makeRegionKey(cluster.clusterRoot, resp.PutRegion.GetId())
+		ops = append(ops, clientv3.OpPut(regionPath, string(regionValue)))
 	}
 
-	// Check whether need to update etcd meta info.
-	ops := append(splitOps, changePeerOps...)
+	if resp.RemoveRegion != nil {
+		regionPath := makeRegionKey(cluster.clusterRoot, resp.RemoveRegion.GetId())
+		ops = append(ops, clientv3.OpDelete(regionPath))
+	}
+
 	if len(ops) > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 		resp, err := c.s.client.Txn(ctx).
@@ -195,9 +203,6 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 			return nil, errors.New("handle region heartbeat failed")
 		}
 	}
-
-	cluster.cachedCluster.regions.delSearchRegion(delRegionKey)
-	cluster.cachedCluster.regions.upsertRegion(reqRegion, request.GetLeader())
 
 	return &pdpb.Response{
 		RegionHeartbeat: &pdpb.RegionHeartbeatResponse{

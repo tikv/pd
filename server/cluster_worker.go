@@ -3,7 +3,6 @@ package server
 import (
 	"sync/atomic"
 
-	"github.com/coreos/etcd/clientv3"
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
@@ -108,44 +107,6 @@ func (c *raftCluster) handleChangePeerReq(region *metapb.Region, leaderID uint64
 	return changePeer, nil
 }
 
-func (c *raftCluster) maybeChangePeer(request *pdpb.RegionHeartbeatRequest, reqRegion *metapb.Region,
-	region *metapb.Region) ([]clientv3.Op, *pdpb.ChangePeer, error) {
-	leader := request.GetLeader()
-	if leader == nil {
-		return nil, nil, errors.Errorf("invalid request leader, %v", request)
-	}
-	if region == nil {
-		return nil, nil, nil
-	}
-
-	regionEpoch := region.GetRegionEpoch()
-	reqRegionEpoch := reqRegion.GetRegionEpoch()
-
-	if reqRegionEpoch.GetConfVer() < regionEpoch.GetConfVer() {
-		// If the request epoch configure version is less than the current one, return an error.
-		return nil, nil, errors.Errorf("invalid region epoch, request: %v, currenrt: %v", reqRegionEpoch, regionEpoch)
-	} else if reqRegionEpoch.GetConfVer() > regionEpoch.GetConfVer() {
-		// If the request epoch configure version is greater than the current one, update region meta.
-		regionSearchPath := makeRegionSearchKey(c.clusterRoot, reqRegion.GetEndKey())
-		regionValue, err := proto.Marshal(reqRegion)
-		if err != nil {
-			return nil, nil, errors.Trace(err)
-		}
-
-		var ops []clientv3.Op
-		ops = append(ops, clientv3.OpPut(regionSearchPath, string(regionValue)))
-		return ops, nil, nil
-	}
-
-	// If the request epoch configure version is equal to the current one, handle change peer request.
-	changePeer, err := c.handleChangePeerReq(reqRegion, leader.GetId())
-	if err != nil {
-		return nil, nil, errors.Trace(err)
-	}
-
-	return nil, changePeer, nil
-}
-
 func (c *raftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
 	reqRegion := request.GetRegion()
 	startKey := reqRegion.GetStartKey()
@@ -180,73 +141,6 @@ func (c *raftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	}
 
 	return split, nil
-}
-
-func (c *raftCluster) maybeSplit(request *pdpb.RegionHeartbeatRequest, reqRegion *metapb.Region,
-	region *metapb.Region) ([]clientv3.Op, []byte, error) {
-	// For split, we should handle heartbeat carefully.
-	// E.g, for region 1 [a, c) -> 1 [a, b) + 2 [b, c).
-	// after split, region 1 and 2 will do heartbeat independently.
-	// We can know that now 1 can be found by region id but 2 is not.
-	// So we must process the region range overlapped problem.
-
-	var ops []clientv3.Op
-	regionValue, err := proto.Marshal(reqRegion)
-	if err != nil {
-		return nil, nil, errors.Trace(err)
-	}
-	reqRegionEncStartKey := encodeRegionStartKey(reqRegion.GetStartKey())
-	reqRegionEncEndKey := encodeRegionSearchKey(reqRegion.GetEndKey())
-	reqRegionPath := makeRegionKey(c.clusterRoot, reqRegion.GetId())
-	reqSearchKey := makeRegionSearchKey(c.clusterRoot, reqRegion.GetEndKey())
-
-	if region == nil {
-		// Find no range after start key, insert directly.
-		ops = append(ops, clientv3.OpPut(reqRegionPath, reqRegionEncEndKey))
-		ops = append(ops, clientv3.OpPut(reqSearchKey, string(regionValue)))
-		return ops, nil, nil
-	}
-
-	// If the request epoch is less than current region epoch, then returns an error.
-	reqRegionEpoch := reqRegion.GetRegionEpoch()
-	regionEpoch := region.GetRegionEpoch()
-	if reqRegionEpoch.GetVersion() < regionEpoch.GetVersion() {
-		// If the request epoch version is less than the current one, return an error.
-		return nil, nil, errors.Errorf("invalid region epoch, request: %v, currenrt: %v", reqRegionEpoch, regionEpoch)
-	} else if reqRegionEpoch.GetVersion() == regionEpoch.GetVersion() {
-		// If the request epoch version is equal to the current one, do nothing.
-		return nil, nil, nil
-	}
-
-	regionEncStartKey := encodeRegionStartKey(region.GetStartKey())
-	regionEncEndKey := encodeRegionSearchKey(region.GetEndKey())
-
-	delRegionKey := []byte{}
-	if reqRegionEncStartKey == regionEncStartKey &&
-		reqRegionEncEndKey == regionEncEndKey {
-		// Seems there is something wrong? Do nothing.
-	} else if regionEncStartKey >= reqRegionEncEndKey {
-		// No range [start, end) in region now, insert directly.
-		ops = append(ops, clientv3.OpPut(reqRegionPath, reqRegionEncEndKey))
-		ops = append(ops, clientv3.OpPut(reqSearchKey, string(regionValue)))
-	} else {
-		// Region overlapped, remove old region, insert new one.
-		// E.g, 1 [a, c) -> 1 [a, b) + 2 [b, c), either new 1 or 2 reports, the region
-		// is overlapped with origin [a, c).
-		regionPath := makeRegionKey(c.clusterRoot, region.GetId())
-		regionSearchKey := makeRegionSearchKey(c.clusterRoot, region.GetEndKey())
-		if regionPath != reqRegionPath {
-			ops = append(ops, clientv3.OpDelete(regionPath))
-		}
-		if regionSearchKey != reqSearchKey {
-			ops = append(ops, clientv3.OpDelete(regionSearchKey))
-			delRegionKey = []byte(regionSearchKey)
-		}
-		ops = append(ops, clientv3.OpPut(reqRegionPath, reqRegionEncEndKey))
-		ops = append(ops, clientv3.OpPut(reqSearchKey, string(regionValue)))
-	}
-
-	return ops, delRegionKey, nil
 }
 
 func (c *raftCluster) callCommand(request *raft_cmdpb.RaftCmdRequest) (*raft_cmdpb.RaftCmdResponse, error) {
