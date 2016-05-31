@@ -47,6 +47,9 @@ type raftCluster struct {
 
 	// for store conns
 	storeConns *storeConns
+
+	// max end search key
+	maxEndSearchKey []byte
 }
 
 func (c *raftCluster) Start(meta metapb.Cluster) error {
@@ -63,7 +66,7 @@ func (c *raftCluster) Start(meta metapb.Cluster) error {
 	c.storeConns = newStoreConns(defaultConnFunc)
 	c.storeConns.SetIdleTimeout(idleTimeout)
 
-	c.cachedCluster = newClusterInfo()
+	c.cachedCluster = newClusterInfo(c.clusterRoot)
 	c.cachedCluster.setMeta(&meta)
 
 	// Cache all stores when start the cluster. We don't have
@@ -309,24 +312,24 @@ func (c *raftCluster) GetStore(storeID uint64) (*metapb.Store, error) {
 	return store.store, nil
 }
 
-func (c *raftCluster) getRegion(startSearchKey string, endSearchEndKey string) (*metapb.Region, error) {
+func (c *raftCluster) getRegion(startSearchKey []byte, endSearchKey []byte) (*metapb.Region, bool, error) {
 	// First find region from cache.
-	cacheRegion := c.cachedCluster.regions.getRegion([]byte(startSearchKey), []byte(endSearchEndKey))
+	cacheRegion := c.cachedCluster.regions.getRegion(startSearchKey, endSearchKey)
 	if cacheRegion != nil {
-		return cacheRegion.region, nil
+		return cacheRegion.region, true, nil
 	}
 
 	// Second find region from etcd.
 	region := &metapb.Region{}
-	ok, err := getProtoMsg(c.s.client, startSearchKey, region, clientv3.WithRange(endSearchEndKey), clientv3.WithLimit(1))
+	ok, err := getProtoMsg(c.s.client, string(startSearchKey), region, clientv3.WithRange(string(endSearchKey)), clientv3.WithLimit(1))
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, false, errors.Trace(err)
 	}
 	if !ok {
-		return nil, nil
+		return nil, false, nil
 	}
 
-	return region, nil
+	return region, false, nil
 }
 
 func (c *raftCluster) GetRegion(regionKey []byte) (*metapb.Region, error) {
@@ -335,16 +338,13 @@ func (c *raftCluster) GetRegion(regionKey []byte) (*metapb.Region, error) {
 	// if we use "abc" to search the region, the first key >= "abc" may be
 	// region 1, not region 2. So we use the next region key for search.
 	nextRegionKey := append(regionKey, 0x00)
-	startSearchKey := makeRegionSearchKey(c.clusterRoot, nextRegionKey)
+	startSearchKey := []byte(makeRegionSearchKey(c.clusterRoot, nextRegionKey))
 
-	// Etcd range search is for range [searchKey, endKey), if we want to get
-	// the latest region, we should use next max end key for search range.
-	// TODO: we can generate these keys in initialization.
-	endKey := makeRegionSearchKey(c.clusterRoot, []byte{})
-	endSearchEndKey := endKey + "\x00"
+	// Range search is for range [startSearchKey, endSearchKey).
+	endSearchKey := append(c.maxEndSearchKey, 0x00)
 
 	// Find the first region with end key >= searchKey
-	region, err := c.getRegion(startSearchKey, endSearchEndKey)
+	region, _, err := c.getRegion(startSearchKey, endSearchKey)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

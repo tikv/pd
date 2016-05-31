@@ -28,8 +28,8 @@ func (s searchKey) Less(other searchKey) bool {
 var _ btree.Item = &searchKeyItem{}
 
 // Less returns true if the region's encoded end key is less than the item key.
-func (s searchKeyItem) Less(than btree.Item) bool {
-	return s.key.Less(than.(searchKeyItem).key)
+func (s *searchKeyItem) Less(than btree.Item) bool {
+	return s.key.Less(than.(*searchKeyItem).key)
 }
 
 // RegionInfo is region cache info.
@@ -50,6 +50,8 @@ func (r *RegionInfo) clone() *RegionInfo {
 type RegionsInfo struct {
 	sync.RWMutex
 
+	cluster *ClusterInfo
+
 	// region id -> RegionInfo
 	regions map[uint64]*RegionInfo
 	// search key -> region id
@@ -58,8 +60,9 @@ type RegionsInfo struct {
 	storeLeaderRegions map[uint64]map[uint64]struct{}
 }
 
-func newRegionsInfo() *RegionsInfo {
+func newRegionsInfo(cluster *ClusterInfo) *RegionsInfo {
 	return &RegionsInfo{
+		cluster:            cluster,
 		regions:            make(map[uint64]*RegionInfo),
 		searchRegions:      btree.New(defaultBtreeDegree),
 		storeLeaderRegions: make(map[uint64]map[uint64]struct{}),
@@ -74,7 +77,7 @@ func (r *RegionsInfo) delSearchRegion(delRegionKey []byte) {
 	r.Lock()
 	defer r.Unlock()
 
-	searchItem := searchKeyItem{
+	searchItem := &searchKeyItem{
 		key: searchKey(delRegionKey),
 	}
 	r.searchRegions.Delete(searchItem)
@@ -84,12 +87,12 @@ func (r *RegionsInfo) getRegion(startKey []byte, endKey []byte) *RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
 
-	startSearchItem := searchKeyItem{key: searchKey(startKey)}
-	endSearchItem := searchKeyItem{key: searchKey(endKey)}
+	startSearchItem := &searchKeyItem{key: searchKey(startKey)}
+	endSearchItem := &searchKeyItem{key: searchKey(endKey)}
 
 	var searchItem *searchKeyItem
 	r.searchRegions.AscendRange(startSearchItem, endSearchItem, func(i btree.Item) bool {
-		*searchItem = i.(searchKeyItem)
+		searchItem = i.(*searchKeyItem)
 		return false
 	})
 	if searchItem == nil {
@@ -190,8 +193,8 @@ func (r *RegionsInfo) upsertRegion(region *metapb.Region, leaderPeer *metapb.Pee
 	}
 
 	if !skipSearchRegionCache {
-		searchItem := searchKeyItem{
-			key: searchKey(encodeRegionSearchKey(region.GetEndKey())),
+		searchItem := &searchKeyItem{
+			key: searchKey(makeRegionSearchKey(r.cluster.clusterRoot, region.GetEndKey())),
 			id:  region.GetId(),
 		}
 		r.searchRegions.ReplaceOrInsert(searchItem)
@@ -215,8 +218,8 @@ func (r *RegionsInfo) removeRegion(regionID uint64) {
 
 		delete(r.regions, regionID)
 
-		searchItem := searchKeyItem{
-			key: searchKey(encodeRegionSearchKey(cacheRegion.region.GetEndKey())),
+		searchItem := &searchKeyItem{
+			key: searchKey(makeRegionSearchKey(r.cluster.clusterRoot, cacheRegion.region.GetEndKey())),
 			id:  cacheRegion.region.GetId(),
 		}
 		r.searchRegions.Delete(searchItem)
@@ -251,16 +254,19 @@ func (s *StoreInfo) usedRatio() float64 {
 type ClusterInfo struct {
 	sync.RWMutex
 
-	meta    *metapb.Cluster
-	stores  map[uint64]*StoreInfo
-	regions *RegionsInfo
+	meta        *metapb.Cluster
+	stores      map[uint64]*StoreInfo
+	regions     *RegionsInfo
+	clusterRoot string
 }
 
-func newClusterInfo() *ClusterInfo {
-	return &ClusterInfo{
-		stores:  make(map[uint64]*StoreInfo),
-		regions: newRegionsInfo(),
+func newClusterInfo(clusterRoot string) *ClusterInfo {
+	cluster := &ClusterInfo{
+		clusterRoot: clusterRoot,
+		stores:      make(map[uint64]*StoreInfo),
 	}
+	cluster.regions = newRegionsInfo(cluster)
+	return cluster
 }
 
 func (c *ClusterInfo) addStore(store *metapb.Store) {

@@ -92,10 +92,11 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	s.idAlloc = &idAllocator{s: s}
 	s.cluster = &raftCluster{
-		s:           s,
-		running:     false,
-		clusterID:   cfg.ClusterID,
-		clusterRoot: s.getClusterRootPath(),
+		s:               s,
+		running:         false,
+		clusterID:       cfg.ClusterID,
+		clusterRoot:     s.getClusterRootPath(),
+		maxEndSearchKey: []byte(makeRegionSearchKey(s.getClusterRootPath(), []byte{})),
 	}
 
 	return s, nil
