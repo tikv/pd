@@ -24,7 +24,6 @@ check:
 	go tool vet --shadow . 2>&1 | grep -vE 'vendor' | awk '{print} END{if(NR>0) {exit 1}}'
 	golint ./... 2>&1 | grep -vE 'vendor' | awk '{print} END{if(NR>0) {exit 1}}'
 	gofmt -s -l . 2>&1 | grep -vE 'vendor' | awk '{print} END{if(NR>0) {exit 1}}'
-	
 
 deps:
 	# see https://github.com/coreos/etcd/blob/master/scripts/updatedep.sh

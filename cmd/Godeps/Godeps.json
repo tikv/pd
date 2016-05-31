@@ -50,6 +50,10 @@
 			"Rev": "c3995ae437bb78d1189f4f147dfe5f87ad3596e4"
 		},
 		{
+			"ImportPath": "github.com/google/btree",
+			"Rev": "cc6329d4279e3f025a53a83c397d2339b5705c45"
+		},
+		{
 			"ImportPath": "github.com/golang/protobuf/proto",
 			"Rev": "dda510ac0fd43b39770f22ac6260eb91d377bce3"
 		},
