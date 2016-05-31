@@ -46,7 +46,7 @@ type Config struct {
 	// Remote metric address for StatsD.
 	MetricAddr string
 
-	// Metric prefix
+	// Metric prefix.
 	MetricPrefix string
 
 	// Only test can change it.
