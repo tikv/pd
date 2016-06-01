@@ -57,7 +57,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	cacheStore := cluster.cachedCluster.getStore(store1.GetId())
 	c.Assert(cacheStore.store, DeepEquals, store1)
 	c.Assert(cluster.cachedCluster.regions.regions, HasLen, 1)
-	c.Assert(cluster.cachedCluster.regions.storeLeaderRegions, HasLen, 0)
+	c.Assert(cluster.cachedCluster.regions.leaders.storeRegions, HasLen, 0)
 	c.Assert(cluster.cachedCluster.regions.searchRegions.Len(), Equals, 1)
 
 	// Add another store.
@@ -95,7 +95,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	cacheRegion := cluster.cachedCluster.regions.regions[region.GetId()]
 	c.Assert(cacheRegion, DeepEquals, region)
 
-	cacheStoreRegions, ok := cluster.cachedCluster.regions.storeLeaderRegions[store1.GetId()]
+	cacheStoreRegions, ok := cluster.cachedCluster.regions.leaders.storeRegions[store1.GetId()]
 	c.Assert(ok, IsTrue)
 	_, ok = cacheStoreRegions[region.GetId()]
 	c.Assert(ok, IsTrue)
@@ -115,7 +115,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(region.GetPeers(), HasLen, 2)
 	c.Assert(cacheRegion, DeepEquals, region)
 
-	cacheStoreRegions, ok = cluster.cachedCluster.regions.storeLeaderRegions[store1.GetId()]
+	cacheStoreRegions, ok = cluster.cachedCluster.regions.leaders.storeRegions[store1.GetId()]
 	c.Assert(ok, IsTrue)
 	_, ok = cacheStoreRegions[region.GetId()]
 	c.Assert(ok, IsTrue)
@@ -136,9 +136,9 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(cluster.cachedCluster.regions.regions, HasLen, 1)
 
 	c.Assert(cluster.cachedCluster.stores, HasLen, 2)
-	cacheStoreRegions, ok = cluster.cachedCluster.regions.storeLeaderRegions[store1.GetId()]
+	cacheStoreRegions, ok = cluster.cachedCluster.regions.leaders.storeRegions[store1.GetId()]
 	c.Assert(ok, IsFalse)
-	cacheStoreRegions, ok = cluster.cachedCluster.regions.storeLeaderRegions[store2.GetId()]
+	cacheStoreRegions, ok = cluster.cachedCluster.regions.leaders.storeRegions[store2.GetId()]
 	c.Assert(ok, IsTrue)
 	c.Assert(cacheStoreRegions, HasLen, 1)
 	_, ok = cacheStoreRegions[region.GetId()]

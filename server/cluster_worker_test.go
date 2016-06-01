@@ -432,8 +432,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 		// Update region epoch and check region info.
 		region.RegionEpoch.ConfVer = proto.Uint64(region.GetRegionEpoch().GetConfVer() + 1)
-		resp = heartbeatRegion(c, conn, s.clusterID, 0, region, leaderPeer)
-		c.Assert(resp, IsNil)
+		heartbeatRegion(c, conn, s.clusterID, 0, region, leaderPeer)
 		// Check region peer count.
 		region = s.checkRegionPeerCount(c, regionKey, i+2)
 	}
@@ -455,8 +454,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 		// Update region epoch and check region info.
 		region.RegionEpoch.ConfVer = proto.Uint64(region.GetRegionEpoch().GetConfVer() + 1)
-		resp = heartbeatRegion(c, conn, s.clusterID, 0, region, leaderPeer)
-		c.Assert(resp, IsNil)
+		heartbeatRegion(c, conn, s.clusterID, 0, region, leaderPeer)
 
 		// Check region peer count.
 		region = s.checkRegionPeerCount(c, regionKey, 4-i)

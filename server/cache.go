@@ -77,6 +77,46 @@ func encodeRegionEndKey(region *metapb.Region) string {
 	return string(append([]byte{'z'}, endKey...))
 }
 
+type leaders struct {
+	storeRegions map[uint64]map[uint64]struct{}
+	regionStores map[uint64]uint64
+}
+
+func (l *leaders) remove(regionID uint64) {
+	storeID, ok := l.regionStores[regionID]
+	if !ok {
+		return
+	}
+
+	l.removeStoreRegion(storeID, regionID)
+	delete(l.regionStores, regionID)
+}
+
+func (l *leaders) removeStoreRegion(regionID uint64, storeID uint64) {
+	storeRegions, ok := l.storeRegions[storeID]
+	if ok {
+		delete(storeRegions, regionID)
+		if len(storeRegions) == 0 {
+			delete(l.storeRegions, storeID)
+		}
+	}
+}
+
+func (l *leaders) update(regionID uint64, storeID uint64) {
+	storeRegions, ok := l.storeRegions[storeID]
+	if !ok {
+		storeRegions = make(map[uint64]struct{})
+		l.storeRegions[storeID] = storeRegions
+	}
+	storeRegions[regionID] = struct{}{}
+
+	if lastStoreID, ok := l.regionStores[regionID]; ok && lastStoreID != storeID {
+		l.removeStoreRegion(regionID, lastStoreID)
+	}
+
+	l.regionStores[regionID] = storeID
+}
+
 // RegionsInfo is regions cache info.
 type RegionsInfo struct {
 	sync.RWMutex
@@ -85,17 +125,18 @@ type RegionsInfo struct {
 	regions map[uint64]*metapb.Region
 	// search key -> region id
 	searchRegions *btree.BTree
-	// store id -> region id -> struct{}
-	storeLeaderRegions map[uint64]map[uint64]struct{}
-	regionLeaderStores map[uint64]uint64
+
+	leaders leaders
 }
 
 func newRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
-		regions:            make(map[uint64]*metapb.Region),
-		searchRegions:      btree.New(defaultBtreeDegree),
-		storeLeaderRegions: make(map[uint64]map[uint64]struct{}),
-		regionLeaderStores: make(map[uint64]uint64),
+		regions:       make(map[uint64]*metapb.Region),
+		searchRegions: btree.New(defaultBtreeDegree),
+		leaders: leaders{
+			storeRegions: make(map[uint64]map[uint64]struct{}),
+			regionStores: make(map[uint64]uint64),
+		},
 	}
 }
 
@@ -155,32 +196,6 @@ func (r *RegionsInfo) updataRegion(region *metapb.Region) {
 	r.regions[region.GetId()] = region
 }
 
-func (r *RegionsInfo) removeStoreLeaderRegion(regionID uint64) {
-	storeID, ok := r.regionLeaderStores[regionID]
-	if !ok {
-		return
-	}
-
-	storeRegions, ok := r.storeLeaderRegions[storeID]
-	if ok {
-		delete(storeRegions, regionID)
-		if len(storeRegions) == 0 {
-			delete(r.storeLeaderRegions, storeID)
-		}
-	}
-	delete(r.regionLeaderStores, regionID)
-}
-
-func (r *RegionsInfo) updateStoreLeaderRegion(regionID uint64, storeID uint64) {
-	store, ok := r.storeLeaderRegions[storeID]
-	if !ok {
-		store = make(map[uint64]struct{})
-		r.storeLeaderRegions[storeID] = store
-	}
-	store[regionID] = struct{}{}
-	r.regionLeaderStores[regionID] = storeID
-}
-
 func (r *RegionsInfo) removeRegion(region *metapb.Region) {
 	item := &searchKeyItem{
 		key:    searchKey(encodeRegionEndKey(region)),
@@ -192,7 +207,7 @@ func (r *RegionsInfo) removeRegion(region *metapb.Region) {
 	r.searchRegions.Delete(item)
 	delete(r.regions, region.GetId())
 
-	r.removeStoreLeaderRegion(regionID)
+	r.leaders.remove(regionID)
 }
 
 // HeartbeatResp is the response after heartbeat handling.
@@ -283,13 +298,7 @@ func (r *RegionsInfo) Heartbeat(region *metapb.Region, leaderPeer *metapb.Peer) 
 
 	regionID := region.GetId()
 	storeID := leaderPeer.GetStoreId()
-	store, ok := r.storeLeaderRegions[storeID]
-	if !ok {
-		store = make(map[uint64]struct{})
-		r.storeLeaderRegions[storeID] = store
-	}
-	store[regionID] = struct{}{}
-	r.regionLeaderStores[regionID] = storeID
+	r.leaders.update(regionID, storeID)
 
 	resp := &HeartbeatResp{
 		RemoveRegion: removeRegion,
@@ -307,7 +316,7 @@ func (r *RegionsInfo) randRegion(storeID uint64) *metapb.Region {
 	r.RLock()
 	defer r.RUnlock()
 
-	storeRegions, ok := r.storeLeaderRegions[storeID]
+	storeRegions, ok := r.leaders.storeRegions[storeID]
 	if !ok {
 		return nil
 	}
