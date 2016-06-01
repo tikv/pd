@@ -58,6 +58,25 @@ func keyInRegion(regionKey []byte, region *metapb.Region) bool {
 		(len(region.GetEndKey()) == 0 || bytes.Compare(regionKey, region.GetEndKey()) < 0)
 }
 
+func encodeRegionSearchKey(searchKey []byte) string {
+	return string(append([]byte{'z'}, searchKey...))
+}
+
+func encodeRegionStartKey(region *metapb.Region) string {
+	startKey := region.GetStartKey()
+	return string(append([]byte{'z'}, startKey...))
+}
+
+func encodeRegionEndKey(region *metapb.Region) string {
+	endKey := region.GetEndKey()
+
+	if len(endKey) == 0 {
+		return "\xFF"
+	}
+
+	return string(append([]byte{'z'}, endKey...))
+}
+
 // RegionsInfo is regions cache info.
 type RegionsInfo struct {
 	sync.RWMutex
@@ -80,6 +99,7 @@ func newRegionsInfo() *RegionsInfo {
 	}
 }
 
+// GetRegion gets the region by regionKey. Return nil if no found.
 func (r *RegionsInfo) GetRegion(regionKey []byte) *metapb.Region {
 	region := r.getRegion(regionKey)
 	if region == nil {
@@ -117,7 +137,7 @@ func (r *RegionsInfo) getRegion(regionKey []byte) *metapb.Region {
 
 func (r *RegionsInfo) addRegion(region *metapb.Region) {
 	item := &searchKeyItem{
-		key:    searchKey(encodeRegionSearchKey(region.GetEndKey())),
+		key:    searchKey(encodeRegionEndKey(region)),
 		region: region,
 	}
 	// TODO: if duplicated, panic!!!
@@ -127,7 +147,7 @@ func (r *RegionsInfo) addRegion(region *metapb.Region) {
 
 func (r *RegionsInfo) updataRegion(region *metapb.Region) {
 	item := &searchKeyItem{
-		key:    searchKey(encodeRegionSearchKey(region.GetEndKey())),
+		key:    searchKey(encodeRegionEndKey(region)),
 		region: region,
 	}
 	// TODO: if missing, panic!!!
@@ -163,7 +183,7 @@ func (r *RegionsInfo) updateStoreLeaderRegion(regionID uint64, storeID uint64) {
 
 func (r *RegionsInfo) removeRegion(region *metapb.Region) {
 	item := &searchKeyItem{
-		key:    searchKey(encodeRegionSearchKey(region.GetEndKey())),
+		key:    searchKey(encodeRegionEndKey(region)),
 		region: region,
 	}
 	regionID := region.GetId()
@@ -175,6 +195,9 @@ func (r *RegionsInfo) removeRegion(region *metapb.Region) {
 	r.removeStoreLeaderRegion(regionID)
 }
 
+// HeartbeatResp is the response after heartbeat handling.
+// If PutRegion is not nil, we should update it in etcd,
+// if RemoveRegion is not nil, we should remove it in etcd.
 type HeartbeatResp struct {
 	PutRegion    *metapb.Region
 	RemoveRegion *metapb.Region
@@ -184,8 +207,8 @@ func (r *RegionsInfo) heartbeatVersion(region *metapb.Region) (bool, *metapb.Reg
 	// For split, we should handle heartbeat carefully.
 	// E.g, for region 1 [a, c) -> 1 [a, b) + 2 [b, c).
 	// after split, region 1 and 2 will do heartbeat independently.
-	startKey := encodeRegionStartKey(region.GetStartKey())
-	endKey := encodeRegionEndKey(region.GetEndKey())
+	startKey := encodeRegionStartKey(region)
+	endKey := encodeRegionEndKey(region)
 
 	searchRegion := r.getRegion(region.GetStartKey())
 	if searchRegion == nil {
@@ -194,8 +217,8 @@ func (r *RegionsInfo) heartbeatVersion(region *metapb.Region) (bool, *metapb.Reg
 		return true, nil, nil
 	}
 
-	searchStartKey := encodeRegionStartKey(searchRegion.GetStartKey())
-	searchEndKey := encodeRegionEndKey(searchRegion.GetEndKey())
+	searchStartKey := encodeRegionStartKey(searchRegion)
+	searchEndKey := encodeRegionEndKey(searchRegion)
 
 	if startKey == searchStartKey && endKey == searchEndKey {
 		// we are the same, must check epoch here.
@@ -243,6 +266,7 @@ func (r *RegionsInfo) heartbeatConfVer(region *metapb.Region) (bool, error) {
 	return false, nil
 }
 
+// Heartbeat handles heartbeat for the region.
 func (r *RegionsInfo) Heartbeat(region *metapb.Region, leaderPeer *metapb.Peer) (*HeartbeatResp, error) {
 	r.Lock()
 	defer r.Unlock()

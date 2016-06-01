@@ -306,13 +306,6 @@ func mustGetRegion(c *C, cluster *raftCluster, key []byte, expect *metapb.Region
 	r, err := cluster.GetRegion(key)
 	c.Assert(err, IsNil)
 	c.Assert(r, DeepEquals, expect)
-
-	if r != nil {
-		regionPath := makeRegionKey(cluster.clusterRoot, r.GetId())
-		val, err := getValue(cluster.s.client, regionPath)
-		c.Assert(err, IsNil)
-		c.Assert(string(val), Equals, encodeRegionSearchKey(r.GetEndKey()))
-	}
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {

@@ -56,9 +56,9 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 
 	cacheStore := cluster.cachedCluster.getStore(store1.GetId())
 	c.Assert(cacheStore.store, DeepEquals, store1)
-	c.Assert(cluster.cachedCluster.regions.regions, HasLen, 0)
+	c.Assert(cluster.cachedCluster.regions.regions, HasLen, 1)
 	c.Assert(cluster.cachedCluster.regions.storeLeaderRegions, HasLen, 0)
-	c.Assert(cluster.cachedCluster.regions.searchRegions.Len(), Equals, 0)
+	c.Assert(cluster.cachedCluster.regions.searchRegions.Len(), Equals, 1)
 
 	// Add another store.
 	store2 := s.newStore(c, 0, "127.0.0.1:2")
@@ -75,14 +75,14 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(cacheStore.store, DeepEquals, store2)
 	cacheStores := cluster.cachedCluster.getStores()
 	c.Assert(cacheStores, HasLen, 2)
-	c.Assert(cluster.cachedCluster.regions.regions, HasLen, 0)
+	c.Assert(cluster.cachedCluster.regions.regions, HasLen, 1)
 
 	// There is only one region now, directly use it for test.
 	regionKey := []byte("a")
 	region, err := cluster.GetRegion(regionKey)
 	c.Assert(err, IsNil)
 	c.Assert(region.Peers, HasLen, 1)
-	c.Assert(cluster.cachedCluster.regions.regions, HasLen, 0)
+	c.Assert(cluster.cachedCluster.regions.regions, HasLen, 1)
 
 	leaderPeer := region.GetPeers()[0]
 	res := heartbeatRegion(c, conn, clusterID, 0, region, leaderPeer)

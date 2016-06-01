@@ -1,10 +1,12 @@
 package server
 
 import (
+	"fmt"
+	"math"
 	"path"
-	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/golang/protobuf/proto"
@@ -17,6 +19,10 @@ import (
 
 var (
 	errClusterNotBootstrapped = errors.New("cluster is not bootstrapped")
+)
+
+const (
+	maxBatchRegionCount = 10000
 )
 
 // Raft cluster key format:
@@ -41,9 +47,6 @@ type raftCluster struct {
 
 	// for store conns
 	storeConns *storeConns
-
-	// max end search key
-	maxEndSearchKey []byte
 }
 
 func (c *raftCluster) Start(meta metapb.Cluster) error {
@@ -70,7 +73,9 @@ func (c *raftCluster) Start(meta metapb.Cluster) error {
 		return errors.Trace(err)
 	}
 
-	// TODO: cache all regions
+	if err := c.cacheAllRegions(); err != nil {
+		return errors.Trace(err)
+	}
 
 	return nil
 }
@@ -132,32 +137,12 @@ func (s *Server) createRaftCluster() error {
 	return nil
 }
 
-func encodeRegionSearchKey(endKey []byte) string {
-	if len(endKey) == 0 {
-		return "\xFF"
-	}
-
-	return string(append([]byte{'z'}, endKey...))
-}
-
-func encodeRegionStartKey(startKey []byte) string {
-	return string(append([]byte{'z'}, startKey...))
-}
-
-func encodeRegionEndKey(endKey []byte) string {
-	return encodeRegionSearchKey(endKey)
-}
-
 func makeStoreKey(clusterRootPath string, storeID uint64) string {
-	return strings.Join([]string{clusterRootPath, "s", strconv.FormatUint(storeID, 10)}, "/")
+	return strings.Join([]string{clusterRootPath, "s", fmt.Sprintf("%020d", storeID)}, "/")
 }
 
 func makeRegionKey(clusterRootPath string, regionID uint64) string {
-	return strings.Join([]string{clusterRootPath, "r", strconv.FormatUint(regionID, 10)}, "/")
-}
-
-func makeRegionSearchKey(clusterRootPath string, endKey []byte) string {
-	return strings.Join([]string{clusterRootPath, "k", encodeRegionSearchKey(endKey)}, "/")
+	return strings.Join([]string{clusterRootPath, "r", fmt.Sprintf("%020d", regionID)}, "/")
 }
 
 func makeStoreKeyPrefix(clusterRootPath string) string {
@@ -233,17 +218,14 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 	}
 	ops = append(ops, clientv3.OpPut(storePath, string(storeValue)))
 
-	// Set region id -> search key
-	regionPath := makeRegionKey(clusterRootPath, req.GetRegion().GetId())
-	ops = append(ops, clientv3.OpPut(regionPath, encodeRegionSearchKey(req.GetRegion().GetEndKey())))
-
-	// Set region meta with search key
-	regionSearchPath := makeRegionSearchKey(clusterRootPath, req.GetRegion().GetEndKey())
 	regionValue, err := proto.Marshal(req.GetRegion())
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	ops = append(ops, clientv3.OpPut(regionSearchPath, string(regionValue)))
+
+	// Set region meta with region id.
+	regionPath := makeRegionKey(clusterRootPath, req.GetRegion().GetId())
+	ops = append(ops, clientv3.OpPut(regionPath, string(regionValue)))
 
 	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
 	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
@@ -273,6 +255,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 }
 
 func (c *raftCluster) cacheAllStores() error {
+	start := time.Now()
 	kv := clientv3.NewKV(c.s.client)
 
 	key := makeStoreKeyPrefix(c.clusterRoot)
@@ -291,7 +274,46 @@ func (c *raftCluster) cacheAllStores() error {
 
 		c.cachedCluster.addStore(store)
 	}
+	log.Infof("cache all %d stores cost %s", len(resp.Kvs), time.Now().Sub(start))
+	return nil
+}
 
+func (c *raftCluster) cacheAllRegions() error {
+	start := time.Now()
+	kv := clientv3.NewKV(c.s.client)
+
+	nextID := uint64(0)
+	endRegionKey := makeRegionKey(c.clusterRoot, math.MaxUint64)
+
+	c.cachedCluster.regions.Lock()
+	defer c.cachedCluster.regions.Unlock()
+
+	for {
+		key := makeRegionKey(c.clusterRoot, nextID)
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		resp, err := kv.Get(ctx, key, clientv3.WithRange(endRegionKey))
+		cancel()
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		if len(resp.Kvs) == 0 {
+			// No more data
+			break
+		}
+
+		for _, kv := range resp.Kvs {
+			region := &metapb.Region{}
+			if err = proto.Unmarshal(kv.Value, region); err != nil {
+				return errors.Trace(err)
+			}
+
+			nextID = region.GetId() + 1
+			c.cachedCluster.regions.addRegion(region)
+		}
+	}
+
+	log.Infof("cache all %d regions cost %s", len(c.cachedCluster.regions.regions), time.Now().Sub(start))
 	return nil
 }
 

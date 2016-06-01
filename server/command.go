@@ -164,6 +164,10 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		return nil, errors.Errorf("invalid request leader, %v", request)
 	}
 
+	if region == nil {
+		return nil, errors.Errorf("invalid request region, %v", request)
+	}
+
 	resp, err := cluster.cachedCluster.regions.Heartbeat(region, leader)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -189,6 +193,7 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		ops = append(ops, clientv3.OpDelete(regionPath))
 	}
 
+	// TODO: we can update in etcd asynchronously later.
 	if len(ops) > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 		resp, err := c.s.client.Txn(ctx).
