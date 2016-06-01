@@ -34,10 +34,6 @@ func (s *searchKeyItem) Less(than btree.Item) bool {
 }
 
 func cloneRegion(r *metapb.Region) *metapb.Region {
-	if r == nil {
-		return nil
-	}
-
 	return proto.Clone(r).(*metapb.Region)
 }
 
