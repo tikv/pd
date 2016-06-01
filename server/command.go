@@ -188,7 +188,11 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		ops = append(ops, clientv3.OpPut(regionPath, string(regionValue)))
 	}
 
-	if resp.RemoveRegion != nil {
+	if resp.RemoveRegion != nil && resp.RemoveRegion.GetId() != resp.PutRegion.GetId() {
+		// Well, we meet overlap and remove and then put the same region id,
+		// so here we ignore the remove operation here.
+		// The heartbeat will guarantee that if RemoveRegion exists, PutRegion can't
+		// be nil, if not, we will panic.
 		regionPath := makeRegionKey(cluster.clusterRoot, resp.RemoveRegion.GetId())
 		ops = append(ops, clientv3.OpDelete(regionPath))
 	}
