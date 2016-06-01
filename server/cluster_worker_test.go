@@ -308,6 +308,21 @@ func mustGetRegion(c *C, cluster *raftCluster, key []byte, expect *metapb.Region
 	c.Assert(r, DeepEquals, expect)
 }
 
+func checkSearchRegions(c *C, cluster *raftCluster, keys ...[]byte) {
+	cacheRegions := cluster.cachedCluster.regions
+	c.Assert(cacheRegions.searchRegions.Len(), Equals, len(keys))
+
+	for _, key := range keys {
+		mockRegion := &metapb.Region{EndKey: key}
+		item := &searchKeyItem{
+			key: searchKey(encodeRegionEndKey(mockRegion)),
+		}
+
+		getItem := cacheRegions.searchRegions.Get(item)
+		c.Assert(getItem.(*searchKeyItem).key, DeepEquals, item.key)
+	}
+}
+
 func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
@@ -326,6 +341,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	// split 1 to 1: [nil, m) 2: [m, nil), sync 1 first
 	r1, err := cluster.GetRegion([]byte("a"))
 	c.Assert(err, IsNil)
+	checkSearchRegions(c, cluster, []byte{})
 
 	r2ID, r2PeerIDs := s.askSplit(c, conn, 0, r1)
 	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)
@@ -334,6 +350,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 
 	resp := heartbeatRegion(c, conn, s.clusterID, 0, r1, leaderPeer1)
 	c.Assert(resp, IsNil)
+	checkSearchRegions(c, cluster, []byte("m"))
 
 	mustGetRegion(c, cluster, []byte("a"), r1)
 	// [m, nil) is missing before r2's heartbeat.
@@ -342,6 +359,8 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	leaderPeer2 := s.chooseRegionLeader(c, r2)
 	resp = heartbeatRegion(c, conn, s.clusterID, 0, r2, leaderPeer2)
 	c.Assert(resp, IsNil)
+	checkSearchRegions(c, cluster, []byte("m"), []byte{})
+
 	mustGetRegion(c, cluster, []byte("z"), r2)
 
 	// split 2 to 2: [m, q) 3: [q, nil), sync 3 first
@@ -352,6 +371,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 
 	resp = heartbeatRegion(c, conn, s.clusterID, 0, r3, leaderPeer3)
 	c.Assert(resp, IsNil)
+	checkSearchRegions(c, cluster, []byte("m"), []byte{})
 
 	mustGetRegion(c, cluster, []byte("z"), r3)
 	mustGetRegion(c, cluster, []byte("a"), r1)
@@ -360,6 +380,8 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 
 	resp = heartbeatRegion(c, conn, s.clusterID, 0, r2, leaderPeer2)
 	c.Assert(resp, IsNil)
+	checkSearchRegions(c, cluster, []byte("m"), []byte("q"), []byte{})
+
 	mustGetRegion(c, cluster, []byte("n"), r2)
 }
 

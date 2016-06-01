@@ -8,6 +8,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/google/btree"
 	"github.com/juju/errors"
+	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -21,16 +22,16 @@ type searchKeyItem struct {
 	region *metapb.Region
 }
 
-// Less compares two searchKeys.
+// Less compares whether searchKey is less than other.
 func (s searchKey) Less(other searchKey) bool {
 	return bytes.Compare(s, other) < 0
 }
 
 var _ btree.Item = &searchKeyItem{}
 
-// Less returns true if the region's encoded end key is less than the item key.
-func (s *searchKeyItem) Less(than btree.Item) bool {
-	return s.key.Less(than.(*searchKeyItem).key)
+// Less returns true if the key is less than the other item key.
+func (s *searchKeyItem) Less(other btree.Item) bool {
+	return s.key.Less(other.(*searchKeyItem).key)
 }
 
 func cloneRegion(r *metapb.Region) *metapb.Region {
@@ -74,7 +75,9 @@ func encodeRegionEndKey(region *metapb.Region) string {
 }
 
 type leaders struct {
+	// store id -> region id -> struct{}
 	storeRegions map[uint64]map[uint64]struct{}
+	// region id -> store id
 	regionStores map[uint64]uint64
 }
 
@@ -122,21 +125,21 @@ type RegionsInfo struct {
 	// search key -> region id
 	searchRegions *btree.BTree
 
-	leaders leaders
+	leaders *leaders
 }
 
 func newRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
 		regions:       make(map[uint64]*metapb.Region),
 		searchRegions: btree.New(defaultBtreeDegree),
-		leaders: leaders{
+		leaders: &leaders{
 			storeRegions: make(map[uint64]map[uint64]struct{}),
 			regionStores: make(map[uint64]uint64),
 		},
 	}
 }
 
-// GetRegion gets the region by regionKey. Return nil if no found.
+// GetRegion gets the region by regionKey. Return nil if not found.
 func (r *RegionsInfo) GetRegion(regionKey []byte) *metapb.Region {
 	region := r.getRegion(regionKey)
 	if region == nil {
@@ -177,18 +180,31 @@ func (r *RegionsInfo) addRegion(region *metapb.Region) {
 		key:    searchKey(encodeRegionEndKey(region)),
 		region: region,
 	}
-	// TODO: if duplicated, panic!!!
-	r.searchRegions.ReplaceOrInsert(item)
+
+	oldItem := r.searchRegions.ReplaceOrInsert(item)
+	if oldItem != nil {
+		log.Fatalf("addRegion for already existed region in searchRegions - %v", region)
+	}
+
+	_, ok := r.regions[region.GetId()]
+	if ok {
+		log.Fatalf("addRegion for already existed region in regions - %v", region)
+	}
+
 	r.regions[region.GetId()] = region
 }
 
-func (r *RegionsInfo) updataRegion(region *metapb.Region) {
+func (r *RegionsInfo) updateRegion(region *metapb.Region) {
 	item := &searchKeyItem{
 		key:    searchKey(encodeRegionEndKey(region)),
 		region: region,
 	}
-	// TODO: if missing, panic!!!
-	r.searchRegions.ReplaceOrInsert(item)
+
+	oldItem := r.searchRegions.ReplaceOrInsert(item)
+	if oldItem == nil {
+		log.Fatalf("updateRegion for none existed region - %v", region)
+	}
+
 	r.regions[region.GetId()] = region
 }
 
@@ -199,8 +215,11 @@ func (r *RegionsInfo) removeRegion(region *metapb.Region) {
 	}
 	regionID := region.GetId()
 
-	// TODO: if missing, panic!!!
-	r.searchRegions.Delete(item)
+	oldItem := r.searchRegions.Delete(item)
+	if oldItem == nil {
+		log.Fatalf("removeRegion for none existed region - %v", region)
+	}
+
 	delete(r.regions, region.GetId())
 
 	r.leaders.remove(regionID)
@@ -223,7 +242,7 @@ func (r *RegionsInfo) heartbeatVersion(region *metapb.Region) (bool, *metapb.Reg
 
 	searchRegion := r.getRegion(region.GetStartKey())
 	if searchRegion == nil {
-		// Find no range after start key, insert directly.
+		// Find no region for start key, insert directly.
 		r.addRegion(region)
 		return true, nil, nil
 	}
@@ -236,6 +255,8 @@ func (r *RegionsInfo) heartbeatVersion(region *metapb.Region) (bool, *metapb.Reg
 		if err := checkStaleRegion(searchRegion, region); err != nil {
 			return false, nil, errors.Trace(err)
 		}
+
+		// TODO: If we support merge regions, we should check the detail epoch version.
 		return false, nil, nil
 	}
 
@@ -270,7 +291,7 @@ func (r *RegionsInfo) heartbeatConfVer(region *metapb.Region) (bool, error) {
 
 	if region.GetRegionEpoch().GetConfVer() > curRegion.GetRegionEpoch().GetConfVer() {
 		// ConfChanged, update
-		r.updataRegion(region)
+		r.updateRegion(region)
 		return true, nil
 	}
 
