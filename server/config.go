@@ -8,6 +8,7 @@ const (
 	defaultTsoSaveInterval = 2000
 	defaultNextRetryDelay  = time.Second
 	defaultMaxPeerCount    = uint32(3)
+	defaultMetrixPrefix    = "pd"
 )
 
 // Config is the pd server configuration.
@@ -42,6 +43,12 @@ type Config struct {
 	// MaxPeerCount for a region. default is 3.
 	MaxPeerCount uint32
 
+	// Remote metric address for StatsD.
+	MetricAddr string
+
+	// Metric prefix.
+	MetricPrefix string
+
 	// Only test can change it.
 	nextRetryDelay time.Duration
 }
@@ -66,5 +73,9 @@ func (c *Config) adjust() {
 
 	if c.MaxPeerCount == 0 {
 		c.MaxPeerCount = defaultMaxPeerCount
+	}
+
+	if len(c.MetricPrefix) == 0 {
+		c.MetricPrefix = defaultMetrixPrefix
 	}
 }

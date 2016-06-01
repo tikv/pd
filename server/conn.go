@@ -54,6 +54,7 @@ func (c *conn) run() {
 		c.s.connsLock.Unlock()
 	}()
 
+	stats := c.s.stats
 	for {
 		msg := &msgpb.Message{}
 		msgID, err := util.ReadMessage(c.rb, msg)
@@ -68,11 +69,18 @@ func (c *conn) run() {
 		}
 
 		request := msg.GetPdReq()
+		stats.Increment("handle_request")
+		ts := stats.NewTiming()
 		response, err := c.handleRequest(request)
 		if err != nil {
 			log.Errorf("handle request %s err %v", request, errors.ErrorStack(err))
 			response = NewError(err)
+		} else {
+			stats.Increment("handle_request.success")
 		}
+
+		ts.Send("handle_request.cost")
+
 		if response == nil {
 			// we don't need to response, maybe error?
 			// if error, we will return an error response later.
