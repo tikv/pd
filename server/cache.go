@@ -141,7 +141,10 @@ func newRegionsInfo() *RegionsInfo {
 
 // GetRegion gets the region by regionKey. Return nil if not found.
 func (r *RegionsInfo) GetRegion(regionKey []byte) *metapb.Region {
+	r.RLock()
 	region := r.getRegion(regionKey)
+	r.RUnlock()
+
 	if region == nil {
 		return nil
 	}
