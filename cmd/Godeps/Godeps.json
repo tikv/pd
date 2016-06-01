@@ -1,7 +1,7 @@
 {
 	"ImportPath": "github.com/pingcap/pd",
 	"GoVersion": "go1.6",
-	"GodepVersion": "v63",
+	"GodepVersion": "v72",
 	"Packages": [
 		"./..."
 	],
@@ -176,6 +176,11 @@
 		{
 			"ImportPath": "google.golang.org/grpc/transport",
 			"Rev": "b062a3c003c22bfef58fa99d689e6a892b408f9d"
+		},
+		{
+			"ImportPath": "gopkg.in/alexcesaro/statsd.v2",
+			"Comment": "v2.0.0",
+			"Rev": "7fea3f0d2fab1ad973e641e51dba45443a311a90"
 		}
 	]
 }

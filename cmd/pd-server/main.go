@@ -23,6 +23,8 @@ var (
 	pprofAddr     = flag.String("pprof", ":6060", "pprof HTTP listening address")
 	clusterID     = flag.Uint64("cluster-id", 0, "cluster ID")
 	maxPeerCount  = flag.Uint("max-peer-count", 3, "max peer count for the region")
+	metricAddr    = flag.String("metric-addr", "", "StatsD metric address")
+	metricPrefix  = flag.String("metric-prefix", "pd", "metric prefix")
 )
 
 func main() {
@@ -46,6 +48,8 @@ func main() {
 		LeaderLease:   *leaderLease,
 		ClusterID:     *clusterID,
 		MaxPeerCount:  uint32(*maxPeerCount),
+		MetricAddr:    *metricAddr,
+		MetricPrefix:  *metricPrefix,
 	}
 
 	svr, err := server.NewServer(cfg)
