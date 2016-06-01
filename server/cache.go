@@ -186,14 +186,19 @@ func (r *RegionsInfo) addRegion(region *metapb.Region) {
 	}
 
 	oldItem := r.searchRegions.ReplaceOrInsert(item)
-	if oldItem != nil && bytes.Equal(oldItem.(*searchKeyItem).key, item.key) {
-		log.Fatalf("addRegion for already existed region - %v", region)
+	if oldItem != nil {
+		log.Fatalf("addRegion for already existed region in searchRegions - %v", region)
+	}
+
+	_, ok := r.regions[region.GetId()]
+	if ok {
+		log.Fatalf("addRegion for already existed region in regions - %v", region)
 	}
 
 	r.regions[region.GetId()] = region
 }
 
-func (r *RegionsInfo) updataRegion(region *metapb.Region) {
+func (r *RegionsInfo) updateRegion(region *metapb.Region) {
 	item := &searchKeyItem{
 		key:    searchKey(encodeRegionEndKey(region)),
 		region: region,
@@ -201,7 +206,7 @@ func (r *RegionsInfo) updataRegion(region *metapb.Region) {
 
 	oldItem := r.searchRegions.ReplaceOrInsert(item)
 	if oldItem == nil {
-		log.Fatalf("updataRegion for none existed region - %v", region)
+		log.Fatalf("updateRegion for none existed region - %v", region)
 	}
 
 	r.regions[region.GetId()] = region
@@ -290,7 +295,7 @@ func (r *RegionsInfo) heartbeatConfVer(region *metapb.Region) (bool, error) {
 
 	if region.GetRegionEpoch().GetConfVer() > curRegion.GetRegionEpoch().GetConfVer() {
 		// ConfChanged, update
-		r.updataRegion(region)
+		r.updateRegion(region)
 		return true, nil
 	}
 

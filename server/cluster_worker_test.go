@@ -313,9 +313,9 @@ func checkSearchRegions(c *C, cluster *raftCluster, keys ...[]byte) {
 	c.Assert(cacheRegions.searchRegions.Len(), Equals, len(keys))
 
 	for _, key := range keys {
-		fakeRegion := &metapb.Region{EndKey: key}
+		mockRegion := &metapb.Region{EndKey: key}
 		item := &searchKeyItem{
-			key: searchKey(encodeRegionEndKey(fakeRegion)),
+			key: searchKey(encodeRegionEndKey(mockRegion)),
 		}
 
 		getItem := cacheRegions.searchRegions.Get(item)
