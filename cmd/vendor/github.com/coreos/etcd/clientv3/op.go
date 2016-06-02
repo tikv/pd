@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -114,7 +114,7 @@ func OpPut(key, val string, opts ...OpOption) Op {
 	case ret.sort != nil:
 		panic("unexpected sort in put")
 	case ret.serializable:
-		panic("unexpected serializable in delete")
+		panic("unexpected serializable in put")
 	}
 	return ret
 }
@@ -198,7 +198,7 @@ func WithRange(endKey string) OpOption {
 }
 
 // WithFromKey specifies the range of 'Get' or 'Delete' requests
-// to be equal or greater than they key in the argument.
+// to be equal or greater than the key in the argument.
 func WithFromKey() OpOption { return WithRange("\x00") }
 
 // WithSerializable makes 'Get' request serializable. By default,

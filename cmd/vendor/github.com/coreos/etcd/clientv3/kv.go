@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,6 @@
 package clientv3
 
 import (
-	"sync"
-
 	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"golang.org/x/net/context"
@@ -62,7 +60,7 @@ type KV interface {
 	// Do is useful when creating arbitrary operations to be issued at a
 	// later time; the user can range over the operations, calling Do to
 	// execute them. Get/Put/Delete, on the other hand, are best suited
-	// for when the	operation should be issued at the time of declaration.
+	// for when the operation should be issued at the time of declaration.
 	Do(ctx context.Context, op Op) (OpResponse, error)
 
 	// Txn creates a transaction.
@@ -75,24 +73,20 @@ type OpResponse struct {
 	del *DeleteResponse
 }
 
-type kv struct {
-	c *Client
+func (op OpResponse) Put() *PutResponse    { return op.put }
+func (op OpResponse) Get() *GetResponse    { return op.get }
+func (op OpResponse) Del() *DeleteResponse { return op.del }
 
-	mu     sync.Mutex       // guards all fields
-	conn   *grpc.ClientConn // conn in-use
+type kv struct {
+	rc     *remoteClient
 	remote pb.KVClient
 }
 
 func NewKV(c *Client) KV {
-	conn := c.ActiveConnection()
-	remote := pb.NewKVClient(conn)
-
-	return &kv{
-		conn:   c.ActiveConnection(),
-		remote: remote,
-
-		c: c,
-	}
+	ret := &kv{}
+	f := func(conn *grpc.ClientConn) { ret.remote = pb.NewKVClient(conn) }
+	ret.rc = newRemoteClient(c, f)
+	return ret
 }
 
 func (kv *kv) Put(ctx context.Context, key, val string, opts ...OpOption) (*PutResponse, error) {
@@ -111,17 +105,19 @@ func (kv *kv) Delete(ctx context.Context, key string, opts ...OpOption) (*Delete
 }
 
 func (kv *kv) Compact(ctx context.Context, rev int64) error {
-	r := &pb.CompactionRequest{Revision: rev}
-	_, err := kv.getRemote().Compact(ctx, r)
+	remote, err := kv.getRemote(ctx)
+	if err != nil {
+		return rpctypes.Error(err)
+	}
+	defer kv.rc.release()
+	_, err = remote.Compact(ctx, &pb.CompactionRequest{Revision: rev})
 	if err == nil {
 		return nil
 	}
-
 	if isHaltErr(ctx, err) {
 		return rpctypes.Error(err)
 	}
-
-	go kv.switchRemote(err)
+	kv.rc.reconnect(err)
 	return rpctypes.Error(err)
 }
 
@@ -134,75 +130,69 @@ func (kv *kv) Txn(ctx context.Context) Txn {
 
 func (kv *kv) Do(ctx context.Context, op Op) (OpResponse, error) {
 	for {
-		var err error
-		switch op.t {
-		// TODO: handle other ops
-		case tRange:
-			var resp *pb.RangeResponse
-			r := &pb.RangeRequest{Key: op.key, RangeEnd: op.end, Limit: op.limit, Revision: op.rev, Serializable: op.serializable}
-			if op.sort != nil {
-				r.SortOrder = pb.RangeRequest_SortOrder(op.sort.Order)
-				r.SortTarget = pb.RangeRequest_SortTarget(op.sort.Target)
-			}
-
-			resp, err = kv.getRemote().Range(ctx, r)
-			if err == nil {
-				return OpResponse{get: (*GetResponse)(resp)}, nil
-			}
-		case tPut:
-			var resp *pb.PutResponse
-			r := &pb.PutRequest{Key: op.key, Value: op.val, Lease: int64(op.leaseID)}
-			resp, err = kv.getRemote().Put(ctx, r)
-			if err == nil {
-				return OpResponse{put: (*PutResponse)(resp)}, nil
-			}
-		case tDeleteRange:
-			var resp *pb.DeleteRangeResponse
-			r := &pb.DeleteRangeRequest{Key: op.key, RangeEnd: op.end}
-			resp, err = kv.getRemote().DeleteRange(ctx, r)
-			if err == nil {
-				return OpResponse{del: (*DeleteResponse)(resp)}, nil
-			}
-		default:
-			panic("Unknown op")
+		resp, err := kv.do(ctx, op)
+		if err == nil {
+			return resp, nil
 		}
-
 		if isHaltErr(ctx, err) {
-			return OpResponse{}, rpctypes.Error(err)
+			return resp, rpctypes.Error(err)
 		}
-
 		// do not retry on modifications
 		if op.isWrite() {
-			go kv.switchRemote(err)
-			return OpResponse{}, rpctypes.Error(err)
+			kv.rc.reconnect(err)
+			return resp, rpctypes.Error(err)
 		}
-
-		if nerr := kv.switchRemote(err); nerr != nil {
-			return OpResponse{}, nerr
+		if nerr := kv.rc.reconnectWait(ctx, err); nerr != nil {
+			return resp, rpctypes.Error(nerr)
 		}
 	}
 }
 
-func (kv *kv) switchRemote(prevErr error) error {
-	// Usually it's a bad idea to lock on network i/o but here it's OK
-	// since the link is down and new requests can't be processed anyway.
-	// Likewise, if connecting stalls, closing the Client can break the
-	// lock via context cancelation.
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-
-	newConn, err := kv.c.retryConnection(kv.conn, prevErr)
+func (kv *kv) do(ctx context.Context, op Op) (OpResponse, error) {
+	remote, err := kv.getRemote(ctx)
 	if err != nil {
-		return rpctypes.Error(err)
+		return OpResponse{}, err
 	}
+	defer kv.rc.release()
 
-	kv.conn = newConn
-	kv.remote = pb.NewKVClient(kv.conn)
-	return nil
+	switch op.t {
+	// TODO: handle other ops
+	case tRange:
+		var resp *pb.RangeResponse
+		r := &pb.RangeRequest{Key: op.key, RangeEnd: op.end, Limit: op.limit, Revision: op.rev, Serializable: op.serializable}
+		if op.sort != nil {
+			r.SortOrder = pb.RangeRequest_SortOrder(op.sort.Order)
+			r.SortTarget = pb.RangeRequest_SortTarget(op.sort.Target)
+		}
+
+		resp, err = remote.Range(ctx, r)
+		if err == nil {
+			return OpResponse{get: (*GetResponse)(resp)}, nil
+		}
+	case tPut:
+		var resp *pb.PutResponse
+		r := &pb.PutRequest{Key: op.key, Value: op.val, Lease: int64(op.leaseID)}
+		resp, err = remote.Put(ctx, r)
+		if err == nil {
+			return OpResponse{put: (*PutResponse)(resp)}, nil
+		}
+	case tDeleteRange:
+		var resp *pb.DeleteRangeResponse
+		r := &pb.DeleteRangeRequest{Key: op.key, RangeEnd: op.end}
+		resp, err = remote.DeleteRange(ctx, r)
+		if err == nil {
+			return OpResponse{del: (*DeleteResponse)(resp)}, nil
+		}
+	default:
+		panic("Unknown op")
+	}
+	return OpResponse{}, err
 }
 
-func (kv *kv) getRemote() pb.KVClient {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-	return kv.remote
+// getRemote must be followed by kv.rc.release() call.
+func (kv *kv) getRemote(ctx context.Context) (pb.KVClient, error) {
+	if err := kv.rc.acquire(ctx); err != nil {
+		return nil, err
+	}
+	return kv.remote, nil
 }
