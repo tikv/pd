@@ -28,23 +28,18 @@ import (
 
 const defaultBtreeDegree = 64
 
-type searchKey []byte
-
 type searchKeyItem struct {
-	key    searchKey
 	region *metapb.Region
-}
-
-// Less compares whether searchKey is less than other.
-func (s searchKey) Less(other searchKey) bool {
-	return bytes.Compare(s, other) < 0
 }
 
 var _ btree.Item = &searchKeyItem{}
 
-// Less returns true if the key is less than the other item key.
+// Less returns true if the region start key is greater than the other.
+// So we will sort the region with start key reversely.
 func (s *searchKeyItem) Less(other btree.Item) bool {
-	return s.key.Less(other.(*searchKeyItem).key)
+	left := s.region.GetStartKey()
+	right := other.(*searchKeyItem).region.GetStartKey()
+	return bytes.Compare(left, right) > 0
 }
 
 func cloneRegion(r *metapb.Region) *metapb.Region {
@@ -66,25 +61,6 @@ func checkStaleRegion(region *metapb.Region, checkRegion *metapb.Region) error {
 func keyInRegion(regionKey []byte, region *metapb.Region) bool {
 	return bytes.Compare(regionKey, region.GetStartKey()) >= 0 &&
 		(len(region.GetEndKey()) == 0 || bytes.Compare(regionKey, region.GetEndKey()) < 0)
-}
-
-func encodeRegionSearchKey(searchKey []byte) string {
-	return string(append([]byte{'z'}, searchKey...))
-}
-
-func encodeRegionStartKey(region *metapb.Region) string {
-	startKey := region.GetStartKey()
-	return string(append([]byte{'z'}, startKey...))
-}
-
-func encodeRegionEndKey(region *metapb.Region) string {
-	endKey := region.GetEndKey()
-
-	if len(endKey) == 0 {
-		return "\xFF"
-	}
-
-	return string(append([]byte{'z'}, endKey...))
 }
 
 type leaders struct {
@@ -170,13 +146,11 @@ func (r *RegionsInfo) GetRegion(regionKey []byte) *metapb.Region {
 }
 
 func (r *RegionsInfo) getRegion(regionKey []byte) *metapb.Region {
-	// We must use the next region key for search,
-	// e,g, we have two regions 1, 2, and key ranges are ["", "abc"), ["abc", +infinite),
-	// if we use "abc" to search the region, the first key >= "abc" may be
-	// region 1, not region 2. So we use the next region key for search.
-	nextRegionKey := append(regionKey, 0x00)
-
-	startSearchItem := &searchKeyItem{key: searchKey(encodeRegionSearchKey(nextRegionKey))}
+	startSearchItem := &searchKeyItem{
+		region: &metapb.Region{
+			StartKey: regionKey,
+		},
+	}
 
 	var searchItem *searchKeyItem
 	r.searchRegions.AscendGreaterOrEqual(startSearchItem, func(i btree.Item) bool {
@@ -193,7 +167,6 @@ func (r *RegionsInfo) getRegion(regionKey []byte) *metapb.Region {
 
 func (r *RegionsInfo) addRegion(region *metapb.Region) {
 	item := &searchKeyItem{
-		key:    searchKey(encodeRegionEndKey(region)),
 		region: region,
 	}
 
@@ -212,7 +185,6 @@ func (r *RegionsInfo) addRegion(region *metapb.Region) {
 
 func (r *RegionsInfo) updateRegion(region *metapb.Region) {
 	item := &searchKeyItem{
-		key:    searchKey(encodeRegionEndKey(region)),
 		region: region,
 	}
 
@@ -226,7 +198,6 @@ func (r *RegionsInfo) updateRegion(region *metapb.Region) {
 
 func (r *RegionsInfo) removeRegion(region *metapb.Region) {
 	item := &searchKeyItem{
-		key:    searchKey(encodeRegionEndKey(region)),
 		region: region,
 	}
 	regionID := region.GetId()
@@ -253,20 +224,20 @@ func (r *RegionsInfo) heartbeatVersion(region *metapb.Region) (bool, *metapb.Reg
 	// For split, we should handle heartbeat carefully.
 	// E.g, for region 1 [a, c) -> 1 [a, b) + 2 [b, c).
 	// after split, region 1 and 2 will do heartbeat independently.
-	startKey := encodeRegionStartKey(region)
-	endKey := encodeRegionEndKey(region)
+	startKey := region.GetStartKey()
+	endKey := region.GetEndKey()
 
-	searchRegion := r.getRegion(region.GetStartKey())
+	searchRegion := r.getRegion(startKey)
 	if searchRegion == nil {
 		// Find no region for start key, insert directly.
 		r.addRegion(region)
 		return true, nil, nil
 	}
 
-	searchStartKey := encodeRegionStartKey(searchRegion)
-	searchEndKey := encodeRegionEndKey(searchRegion)
+	searchStartKey := searchRegion.GetStartKey()
+	searchEndKey := searchRegion.GetEndKey()
 
-	if startKey == searchStartKey && endKey == searchEndKey {
+	if bytes.Equal(startKey, searchStartKey) && bytes.Equal(endKey, searchEndKey) {
 		// we are the same, must check epoch here.
 		if err := checkStaleRegion(searchRegion, region); err != nil {
 			return false, nil, errors.Trace(err)
@@ -276,7 +247,7 @@ func (r *RegionsInfo) heartbeatVersion(region *metapb.Region) (bool, *metapb.Reg
 		return false, nil, nil
 	}
 
-	if searchStartKey >= endKey {
+	if len(searchEndKey) > 0 && bytes.Compare(startKey, searchEndKey) >= 0 {
 		// No range covers [start, end) now, insert directly.
 		r.addRegion(region)
 		return true, nil, nil
