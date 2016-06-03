@@ -417,13 +417,13 @@ func (c *ClusterInfo) getStore(storeID uint64) *StoreInfo {
 	return store.clone()
 }
 
-func (c *ClusterInfo) getStores() map[uint64]*StoreInfo {
+func (c *ClusterInfo) getStores() []*StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 
-	stores := make(map[uint64]*StoreInfo, len(c.stores))
-	for key, store := range c.stores {
-		stores[key] = store.clone()
+	stores := make([]*StoreInfo, 0, len(c.stores))
+	for _, store := range c.stores {
+		stores = append(stores, store.clone())
 	}
 
 	return stores
