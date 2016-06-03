@@ -8,7 +8,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/raftpb"
 )
 
-// Operator is the interface to do
+// Operator is the interface to do some operations.
 type Operator interface {
 	// Do does the operator, if finished then return true.
 	Do(req *pdpb.RegionHeartbeatRequest) (bool, *pdpb.RegionHeartbeatResponse)
@@ -36,7 +36,7 @@ func leaderPeer(region *metapb.Region, storeID uint64) *metapb.Peer {
 	return nil
 }
 
-// BalanceOperator is used for regions balance.
+// BalanceOperator is used to do region balance.
 type BalanceOperator struct {
 	index int
 	ops   []Operator
@@ -88,7 +88,7 @@ func (bo *BalanceOperator) Do(req *pdpb.RegionHeartbeatRequest) (bool, *pdpb.Reg
 	return false, nil
 }
 
-// ChangePeerOperator is used for region balance.
+// ChangePeerOperator is used to do peer change.
 type ChangePeerOperator struct {
 	changePeer *pdpb.ChangePeer
 }
@@ -136,7 +136,7 @@ func (co *ChangePeerOperator) Do(req *pdpb.RegionHeartbeatRequest) (bool, *pdpb.
 	return false, res
 }
 
-// TransferLeaderOperator is used for region leader transfer.
+// TransferLeaderOperator is used to do leader transfer.
 type TransferLeaderOperator struct {
 	oldLeader *metapb.Peer
 	newLeader *metapb.Peer
@@ -163,7 +163,7 @@ func (lto *TransferLeaderOperator) Check(req *pdpb.RegionHeartbeatRequest) bool 
 	return false
 }
 
-// Do implements Operator.Do interface.
+// Do implements Operator.Doop interface.
 func (lto *TransferLeaderOperator) Do(req *pdpb.RegionHeartbeatRequest) (bool, *pdpb.RegionHeartbeatResponse) {
 	if lto.Check(req) {
 		return true, nil
@@ -194,13 +194,13 @@ const (
 )
 
 var (
-	_ Balancer = &regionCapacityBalancer{}
+	_ Balancer = &capacityBalancer{}
 )
 
-type regionCapacityBalancer struct {
+type capacityBalancer struct {
 }
 
-func (rs *regionCapacityBalancer) SelectFromStore(stores []*StoreInfo) *StoreInfo {
+func (cb *capacityBalancer) SelectFromStore(stores []*StoreInfo) *StoreInfo {
 	var resultStore *StoreInfo
 	for _, store := range stores {
 		if store == nil {
@@ -224,7 +224,7 @@ func (rs *regionCapacityBalancer) SelectFromStore(stores []*StoreInfo) *StoreInf
 	return resultStore
 }
 
-func (rs *regionCapacityBalancer) SelectToStore(stores []*StoreInfo) *StoreInfo {
+func (cb *capacityBalancer) SelectToStore(stores []*StoreInfo) *StoreInfo {
 	var resultStore *StoreInfo
 	for _, store := range stores {
 		if store == nil {
@@ -244,8 +244,8 @@ func (rs *regionCapacityBalancer) SelectToStore(stores []*StoreInfo) *StoreInfo 
 	return resultStore
 }
 
-func (rs *regionCapacityBalancer) SelectBalanceRegion(stores []*StoreInfo, regions *RegionsInfo) (*metapb.Region, *metapb.Peer) {
-	store := rs.SelectFromStore(stores)
+func (cb *capacityBalancer) SelectBalanceRegion(stores []*StoreInfo, regions *RegionsInfo) (*metapb.Region, *metapb.Peer) {
+	store := cb.SelectFromStore(stores)
 	if store == nil {
 		return nil, nil
 	}
@@ -257,13 +257,13 @@ func (rs *regionCapacityBalancer) SelectBalanceRegion(stores []*StoreInfo, regio
 	return region, leaderPeer
 }
 
-func (rs *regionCapacityBalancer) SelectNewLeaderPeer(cluster *ClusterInfo, peers map[uint64]*metapb.Peer) *metapb.Peer {
+func (cb *capacityBalancer) SelectNewLeaderPeer(cluster *ClusterInfo, peers map[uint64]*metapb.Peer) *metapb.Peer {
 	stores := make([]*StoreInfo, 0, len(peers))
 	for storeID := range peers {
 		stores = append(stores, cluster.getStore(storeID))
 	}
 
-	store := rs.SelectToStore(stores)
+	store := cb.SelectToStore(stores)
 	if store == nil {
 		return nil
 	}
@@ -272,10 +272,10 @@ func (rs *regionCapacityBalancer) SelectNewLeaderPeer(cluster *ClusterInfo, peer
 	return peers[storeID]
 }
 
-func (rs *regionCapacityBalancer) Balance(cluster *ClusterInfo, c *raftCluster) (*BalanceOperator, error) {
+func (cb *capacityBalancer) Balance(cluster *ClusterInfo, c *raftCluster) (*BalanceOperator, error) {
 	// Firstly, select one balance region from cluster info.
 	stores := cluster.getStores()
-	region, oldLeader := rs.SelectBalanceRegion(stores, cluster.regions)
+	region, oldLeader := cb.SelectBalanceRegion(stores, cluster.regions)
 	if region == nil || oldLeader == nil {
 		return nil, errors.New("Region cannot be found to do balance")
 	}
@@ -291,13 +291,13 @@ func (rs *regionCapacityBalancer) Balance(cluster *ClusterInfo, c *raftCluster) 
 		followerPeers[storeID] = peer
 	}
 
-	newLeader := rs.SelectNewLeaderPeer(cluster, followerPeers)
+	newLeader := cb.SelectNewLeaderPeer(cluster, followerPeers)
 	if newLeader == nil {
 		return nil, errors.New("New leader peer cannot be found to do balance")
 	}
 
 	// Thirdly, select one store to add new peer.
-	store := rs.SelectToStore(stores)
+	store := cb.SelectToStore(stores)
 	if store == nil {
 		return nil, errors.New("To store cannot be found to do balance")
 	}
