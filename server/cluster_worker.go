@@ -25,18 +25,31 @@ import (
 	"github.com/pingcap/kvproto/pkg/util"
 )
 
-func (c *raftCluster) handleChangePeerReq(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
-	balancer := newDefaultBalancer(region, leader)
-	balanceOperator, err := balancer.Balance(c)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
+func (c *raftCluster) HandleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
+	var (
+		balanceOperator *BalanceOperator
+		err             error
+	)
+
+	regionID := region.GetId()
+	balanceOperator = c.balanceWorker.getBalanceOperator(regionID)
 	if balanceOperator == nil {
-		return nil, nil
+		balancer := newDefaultBalancer(region, leader)
+		balanceOperator, err = balancer.Balance(c)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		if balanceOperator == nil {
+			return nil, nil
+		}
 	}
 
 	_, res, err := balanceOperator.Do(region, leader)
-	return res, errors.Trace(err)
+	if err != nil {
+		c.balanceWorker.removeBalanceOperator(regionID)
+	}
+
+	return res, nil
 }
 
 func (c *raftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {

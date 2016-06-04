@@ -32,11 +32,15 @@ const (
 )
 
 var (
-	_ Balancer = &capacityBalancer{}
 	_ Balancer = &defaultBalancer{}
+	_ Balancer = &capacityBalancer{}
 )
 
 type capacityBalancer struct {
+}
+
+func newCapacityBalancer() *capacityBalancer {
+	return &capacityBalancer{}
 }
 
 func (cb *capacityBalancer) SelectFromStore(stores []*StoreInfo, useFilter bool) *StoreInfo {

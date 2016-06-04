@@ -60,6 +60,9 @@ type raftCluster struct {
 
 	// for store conns
 	storeConns *storeConns
+
+	// balance worker
+	balanceWorker *balanceWorker
 }
 
 func (c *raftCluster) Start(meta metapb.Cluster) error {
@@ -90,6 +93,8 @@ func (c *raftCluster) Start(meta metapb.Cluster) error {
 		return errors.Trace(err)
 	}
 
+	c.balanceWorker = newBalanceWorker(c, newCapacityBalancer())
+
 	return nil
 }
 
@@ -100,6 +105,8 @@ func (c *raftCluster) Stop() {
 	if !c.running {
 		return
 	}
+
+	c.balanceWorker.stop()
 
 	c.storeConns.Close()
 

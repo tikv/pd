@@ -171,13 +171,13 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		return nil, errors.Trace(err)
 	}
 
-	region := request.GetRegion()
 	leader := request.GetLeader()
 	if leader == nil {
 		return nil, errors.Errorf("invalid request leader, %v", request)
 	}
 
-	if region == nil {
+	region := request.GetRegion()
+	if region.GetId() == 0 {
 		return nil, errors.Errorf("invalid request region, %v", request)
 	}
 
@@ -186,7 +186,7 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		return nil, errors.Trace(err)
 	}
 
-	res, err := cluster.handleChangePeerReq(region, leader)
+	res, err := cluster.HandleRegionHeartbeat(region, leader)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
