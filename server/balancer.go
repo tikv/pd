@@ -1,8 +1,22 @@
+// Copyright 2016 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package server
 
 import (
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
+	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/raftpb"
@@ -11,9 +25,9 @@ import (
 // Operator is the interface to do some operations.
 type Operator interface {
 	// Do does the operator, if finished then return true.
-	Do(req *pdpb.RegionHeartbeatRequest) (bool, *pdpb.RegionHeartbeatResponse)
+	Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.ChangePeer, error)
 	// Check checks whether the operator has been finished.
-	Check(req *pdpb.RegionHeartbeatRequest) bool
+	Check(region *metapb.Region, leader *metapb.Peer) (bool, error)
 }
 
 func containPeer(region *metapb.Region, peer *metapb.Peer) bool {
@@ -38,54 +52,56 @@ func leaderPeer(region *metapb.Region, storeID uint64) *metapb.Peer {
 
 // BalanceOperator is used to do region balance.
 type BalanceOperator struct {
-	index int
-	ops   []Operator
+	index  int
+	ops    []Operator
+	region *metapb.Region
 }
 
-func newBalanceOperator(oldLeader, newLeader, newPeer *metapb.Peer) *BalanceOperator {
-	leaderTransferOperator := newTransferLeaderOperator(oldLeader, newLeader)
-
-	addPeer := &pdpb.ChangePeer{
-		ChangeType: raftpb.ConfChangeType_AddNode.Enum(),
-		Peer:       newPeer,
-	}
-	addPeerOperator := newChangePeerOperator(addPeer)
-
-	removePeer := &pdpb.ChangePeer{
-		ChangeType: raftpb.ConfChangeType_RemoveNode.Enum(),
-		Peer:       oldLeader,
-	}
-	removePeerOperator := newChangePeerOperator(removePeer)
-
+func newBalanceOperator(region *metapb.Region, ops ...Operator) *BalanceOperator {
 	return &BalanceOperator{
-		index: 0,
-		ops:   []Operator{leaderTransferOperator, addPeerOperator, removePeerOperator},
+		index:  0,
+		ops:    ops,
+		region: region,
 	}
 }
 
 // Check implements Operator.Check interface.
-func (bo *BalanceOperator) Check(req *pdpb.RegionHeartbeatRequest) bool {
+func (bo *BalanceOperator) Check(region *metapb.Region, leader *metapb.Peer) (bool, error) {
 	if bo.index >= len(bo.ops) {
-		return true
-	}
-
-	return false
-}
-
-// Do implements Operator.Do interface.
-func (bo *BalanceOperator) Do(req *pdpb.RegionHeartbeatRequest) (bool, *pdpb.RegionHeartbeatResponse) {
-	// TODO: optimize it to return next operator response directly.
-	if bo.Check(req) {
 		return true, nil
 	}
 
-	finished, res := bo.ops[bo.index].Do(req)
+	err := checkStaleRegion(bo.region, region)
+	if err != nil {
+		return false, errors.Trace(err)
+	}
+
+	bo.region = cloneRegion(region)
+
+	return false, nil
+}
+
+// Do implements Operator.Do interface.
+func (bo *BalanceOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.ChangePeer, error) {
+	// TODO: optimize it to return next operator response directly.
+	ok, err := bo.Check(region, leader)
+	if err != nil {
+		return false, nil, errors.Trace(err)
+	}
+	if ok {
+		return true, nil, nil
+	}
+
+	finished, res, err := bo.ops[bo.index].Do(region, leader)
+	if err != nil {
+		return false, nil, errors.Trace(err)
+	}
 	if !finished {
-		return false, res
+		return false, res, nil
 	}
 
 	bo.index++
-	return false, nil
+	return false, nil, nil
 }
 
 // ChangePeerOperator is used to do peer change.
@@ -93,47 +109,57 @@ type ChangePeerOperator struct {
 	changePeer *pdpb.ChangePeer
 }
 
-func newChangePeerOperator(changePeer *pdpb.ChangePeer) *ChangePeerOperator {
+func newAddPeerOperator(peer *metapb.Peer) *ChangePeerOperator {
 	return &ChangePeerOperator{
-		changePeer: changePeer,
+		changePeer: &pdpb.ChangePeer{
+			ChangeType: raftpb.ConfChangeType_AddNode.Enum(),
+			Peer:       peer,
+		},
+	}
+}
+
+func newRemovePeerOperator(peer *metapb.Peer) *ChangePeerOperator {
+	return &ChangePeerOperator{
+		changePeer: &pdpb.ChangePeer{
+			ChangeType: raftpb.ConfChangeType_RemoveNode.Enum(),
+			Peer:       peer,
+		},
 	}
 }
 
 // Check implements Operator.Check interface.
-func (co *ChangePeerOperator) Check(req *pdpb.RegionHeartbeatRequest) bool {
-	region := req.GetRegion()
+func (co *ChangePeerOperator) Check(region *metapb.Region, leader *metapb.Peer) (bool, error) {
 	if region == nil {
-		return false
+		return false, errors.New("invalid region")
 	}
-
-	leaderPeer := req.GetLeader()
-	if leaderPeer == nil {
-		return false
+	if leader == nil {
+		return false, errors.New("invalid leader peer")
 	}
 
 	if co.changePeer.GetChangeType() == raftpb.ConfChangeType_AddNode {
-		if containPeer(region, leaderPeer) {
-			return true
+		if containPeer(region, leader) {
+			return true, nil
 		}
 	} else if co.changePeer.GetChangeType() == raftpb.ConfChangeType_RemoveNode {
-		if !containPeer(region, leaderPeer) {
-			return true
+		if !containPeer(region, leader) {
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
 
 // Do implements Operator.Do interface.
-func (co *ChangePeerOperator) Do(req *pdpb.RegionHeartbeatRequest) (bool, *pdpb.RegionHeartbeatResponse) {
-	if co.Check(req) {
-		return true, nil
+func (co *ChangePeerOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.ChangePeer, error) {
+	ok, err := co.Check(region, leader)
+	if err != nil {
+		return false, nil, errors.Trace(err)
+	}
+	if ok {
+		return true, nil, nil
 	}
 
-	res := &pdpb.RegionHeartbeatResponse{
-		ChangePeer: co.changePeer,
-	}
-	return false, res
+	return false, co.changePeer, nil
 }
 
 // TransferLeaderOperator is used to do leader transfer.
@@ -150,23 +176,32 @@ func newTransferLeaderOperator(oldLeader, newLeader *metapb.Peer) *TransferLeade
 }
 
 // Check implements Operator.Check interface.
-func (lto *TransferLeaderOperator) Check(req *pdpb.RegionHeartbeatRequest) bool {
-	leader := req.GetLeader()
+func (lto *TransferLeaderOperator) Check(region *metapb.Region, leader *metapb.Peer) (bool, error) {
 	if leader == nil {
-		return false
+		return false, errors.New("invalid leader peer")
 	}
 
+	// If the leader has already been changed to new leader, we finish it.
 	if leader.GetId() == lto.newLeader.GetId() {
-		return true
+		return true, nil
 	}
 
-	return false
+	// If the old leader has been changed but not be new leader, we also finish it.
+	if leader.GetId() != lto.oldLeader.GetId() {
+		return true, nil
+	}
+
+	return false, nil
 }
 
 // Do implements Operator.Doop interface.
-func (lto *TransferLeaderOperator) Do(req *pdpb.RegionHeartbeatRequest) (bool, *pdpb.RegionHeartbeatResponse) {
-	if lto.Check(req) {
-		return true, nil
+func (lto *TransferLeaderOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.ChangePeer, error) {
+	ok, err := lto.Check(region, leader)
+	if err != nil {
+		return false, nil, errors.Trace(err)
+	}
+	if ok {
+		return true, nil, nil
 	}
 
 	// TODO: call admin command, maybe we can send it to a channel.
@@ -179,12 +214,12 @@ func (lto *TransferLeaderOperator) Do(req *pdpb.RegionHeartbeatRequest) (bool, *
 		}
 	*/
 
-	return false, nil
+	return false, nil, nil
 }
 
 // Balancer is an interface to select store regions for auto-balance.
 type Balancer interface {
-	Balance(cluster *ClusterInfo, c *raftCluster) (*BalanceOperator, error)
+	Balance(cluster *raftCluster) (*BalanceOperator, error)
 }
 
 const (
@@ -272,12 +307,13 @@ func (cb *capacityBalancer) SelectNewLeaderPeer(cluster *ClusterInfo, peers map[
 	return peers[storeID]
 }
 
-func (cb *capacityBalancer) Balance(cluster *ClusterInfo, c *raftCluster) (*BalanceOperator, error) {
+func (cb *capacityBalancer) Balance(cluster *raftCluster) (*BalanceOperator, error) {
 	// Firstly, select one balance region from cluster info.
-	stores := cluster.getStores()
-	region, oldLeader := cb.SelectBalanceRegion(stores, cluster.regions)
+	stores := cluster.cachedCluster.getStores()
+	region, oldLeader := cb.SelectBalanceRegion(stores, cluster.cachedCluster.regions)
 	if region == nil || oldLeader == nil {
-		return nil, errors.New("Region cannot be found to do balance")
+		log.Warn("Region cannot be found to do balance")
+		return nil, nil
 	}
 
 	// Secondly, select one region peer to do leader transfer.
@@ -291,18 +327,20 @@ func (cb *capacityBalancer) Balance(cluster *ClusterInfo, c *raftCluster) (*Bala
 		followerPeers[storeID] = peer
 	}
 
-	newLeader := cb.SelectNewLeaderPeer(cluster, followerPeers)
+	newLeader := cb.SelectNewLeaderPeer(cluster.cachedCluster, followerPeers)
 	if newLeader == nil {
-		return nil, errors.New("New leader peer cannot be found to do balance")
+		log.Warn("New leader peer cannot be found to do balance")
+		return nil, nil
 	}
 
 	// Thirdly, select one store to add new peer.
 	store := cb.SelectToStore(stores)
 	if store == nil {
-		return nil, errors.New("To store cannot be found to do balance")
+		log.Warn("To store cannot be found to do balance")
+		return nil, nil
 	}
 
-	peerID, err := c.s.idAlloc.Alloc()
+	peerID, err := cluster.s.idAlloc.Alloc()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -312,5 +350,9 @@ func (cb *capacityBalancer) Balance(cluster *ClusterInfo, c *raftCluster) (*Bala
 		StoreId: proto.Uint64(store.store.GetId()),
 	}
 
-	return newBalanceOperator(oldLeader, newLeader, newPeer), nil
+	leaderTransferOperator := newTransferLeaderOperator(oldLeader, newLeader)
+	addPeerOperator := newAddPeerOperator(newPeer)
+	removePeerOperator := newRemovePeerOperator(oldLeader)
+
+	return newBalanceOperator(region, leaderTransferOperator, addPeerOperator, removePeerOperator), nil
 }
