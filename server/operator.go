@@ -171,7 +171,7 @@ func (lto *TransferLeaderOperator) Check(region *metapb.Region, leader *metapb.P
 
 	// If the old leader has been changed but not be new leader, we also finish it.
 	if leader.GetId() != lto.oldLeader.GetId() {
-		log.Warnf("Old leader %v has changed to %v, but not %v", lto.oldLeader, leader, lto.newLeader)
+		log.Warnf("old leader %v has changed to %v, but not %v", lto.oldLeader, leader, lto.newLeader)
 		return true, nil
 	}
 

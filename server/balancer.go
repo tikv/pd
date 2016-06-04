@@ -221,8 +221,6 @@ func (db *defaultBalancer) addPeer(cluster *raftCluster) (*BalanceOperator, erro
 		excludedStores[storeID] = struct{}{}
 	}
 
-	log.Errorf("[addPeer]%v - %v", excludedStores, db.region)
-
 	peer, err := db.SelectAddPeer(cluster, stores, excludedStores)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -231,8 +229,6 @@ func (db *defaultBalancer) addPeer(cluster *raftCluster) (*BalanceOperator, erro
 		log.Warnf("find no peer to remove for region %v", db.region)
 		return nil, nil
 	}
-
-	log.Errorf("[addPeer][done]%v", peer)
 
 	addPeerOperator := newAddPeerOperator(peer)
 	return newBalanceOperator(db.region, addPeerOperator), nil
