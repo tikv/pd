@@ -42,6 +42,26 @@ func (s *searchKeyItem) Less(other btree.Item) bool {
 	return bytes.Compare(left, right) > 0
 }
 
+func containPeer(region *metapb.Region, peer *metapb.Peer) bool {
+	for _, p := range region.GetPeers() {
+		if p.GetId() == peer.GetId() {
+			return true
+		}
+	}
+
+	return false
+}
+
+func leaderPeer(region *metapb.Region, storeID uint64) *metapb.Peer {
+	for _, peer := range region.GetPeers() {
+		if peer.GetStoreId() == storeID {
+			return peer
+		}
+	}
+
+	return nil
+}
+
 func cloneRegion(r *metapb.Region) *metapb.Region {
 	return proto.Clone(r).(*metapb.Region)
 }
