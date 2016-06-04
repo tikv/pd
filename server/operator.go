@@ -62,7 +62,6 @@ func (bo *BalanceOperator) Check(region *metapb.Region, leader *metapb.Peer) (bo
 
 // Do implements Operator.Do interface.
 func (bo *BalanceOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
-	// TODO: optimize it to return next operator response directly.
 	ok, err := bo.Check(region, leader)
 	if err != nil {
 		return false, nil, errors.Trace(err)
@@ -80,7 +79,9 @@ func (bo *BalanceOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool,
 	}
 
 	bo.index++
-	return false, nil, nil
+
+	ok, err = bo.Check(region, leader)
+	return ok, nil, errors.Trace(err)
 }
 
 // ChangePeerOperator is used to do peer change.
@@ -116,11 +117,11 @@ func (co *ChangePeerOperator) Check(region *metapb.Region, leader *metapb.Peer) 
 	}
 
 	if co.changePeer.GetChangeType() == raftpb.ConfChangeType_AddNode {
-		if containPeer(region, leader) {
+		if containPeer(region, co.changePeer.GetPeer()) {
 			return true, nil
 		}
 	} else if co.changePeer.GetChangeType() == raftpb.ConfChangeType_RemoveNode {
-		if !containPeer(region, leader) {
+		if !containPeer(region, co.changePeer.GetPeer()) {
 			return true, nil
 		}
 	}
@@ -187,15 +188,10 @@ func (lto *TransferLeaderOperator) Do(region *metapb.Region, leader *metapb.Peer
 		return true, nil, nil
 	}
 
-	// TODO: call admin command, maybe we can send it to a channel.
-	/*
-		res := &raft_cmdpb.AdminRequest{
-			CmdType: raft_cmdpb.AdminCmdType_TransferLeader.Enum(),
-			TransferLeader: &raft_cmdpb.TransferLeaderRequest{
-				Peer: lto.newLeader,
-			},
-		}
-	*/
-
-	return false, nil, nil
+	res := &pdpb.RegionHeartbeatResponse{
+		TransferLeader: &pdpb.TransferLeader{
+			Peer: lto.newLeader,
+		},
+	}
+	return false, res, nil
 }

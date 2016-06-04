@@ -33,20 +33,23 @@ const (
 
 var (
 	_ Balancer = &capacityBalancer{}
+	_ Balancer = &defaultBalancer{}
 )
 
 type capacityBalancer struct {
 }
 
-func (cb *capacityBalancer) SelectFromStore(stores []*StoreInfo) *StoreInfo {
+func (cb *capacityBalancer) SelectFromStore(stores []*StoreInfo, useFilter bool) *StoreInfo {
 	var resultStore *StoreInfo
 	for _, store := range stores {
 		if store == nil {
 			continue
 		}
 
-		if store.usedRatio() <= maxCapacityUsedRatio {
-			continue
+		if useFilter {
+			if store.usedRatio() <= maxCapacityUsedRatio {
+				continue
+			}
 		}
 
 		if resultStore == nil {
@@ -62,10 +65,14 @@ func (cb *capacityBalancer) SelectFromStore(stores []*StoreInfo) *StoreInfo {
 	return resultStore
 }
 
-func (cb *capacityBalancer) SelectToStore(stores []*StoreInfo) *StoreInfo {
+func (cb *capacityBalancer) SelectToStore(stores []*StoreInfo, excluded map[uint64]struct{}) *StoreInfo {
 	var resultStore *StoreInfo
 	for _, store := range stores {
 		if store == nil {
+			continue
+		}
+
+		if _, ok := excluded[store.store.GetId()]; ok {
 			continue
 		}
 
@@ -83,7 +90,7 @@ func (cb *capacityBalancer) SelectToStore(stores []*StoreInfo) *StoreInfo {
 }
 
 func (cb *capacityBalancer) SelectBalanceRegion(stores []*StoreInfo, regions *RegionsInfo) (*metapb.Region, *metapb.Peer) {
-	store := cb.SelectFromStore(stores)
+	store := cb.SelectFromStore(stores, true)
 	if store == nil {
 		return nil, nil
 	}
@@ -101,7 +108,7 @@ func (cb *capacityBalancer) SelectNewLeaderPeer(cluster *ClusterInfo, peers map[
 		stores = append(stores, cluster.getStore(storeID))
 	}
 
-	store := cb.SelectToStore(stores)
+	store := cb.SelectToStore(stores, nil)
 	if store == nil {
 		return nil
 	}
@@ -110,36 +117,10 @@ func (cb *capacityBalancer) SelectNewLeaderPeer(cluster *ClusterInfo, peers map[
 	return peers[storeID]
 }
 
-func (cb *capacityBalancer) Balance(cluster *raftCluster) (*BalanceOperator, error) {
-	// Firstly, select one balance region from cluster info.
-	stores := cluster.cachedCluster.getStores()
-	region, oldLeader := cb.SelectBalanceRegion(stores, cluster.cachedCluster.regions)
-	if region == nil || oldLeader == nil {
-		log.Warn("Region cannot be found to do balance")
-		return nil, nil
-	}
-
-	// Secondly, select one region peer to do leader transfer.
-	followerPeers := make(map[uint64]*metapb.Peer)
-	for _, peer := range region.GetPeers() {
-		if peer.GetId() == oldLeader.GetId() {
-			continue
-		}
-
-		storeID := peer.GetStoreId()
-		followerPeers[storeID] = peer
-	}
-
-	newLeader := cb.SelectNewLeaderPeer(cluster.cachedCluster, followerPeers)
-	if newLeader == nil {
-		log.Warn("New leader peer cannot be found to do balance")
-		return nil, nil
-	}
-
-	// Thirdly, select one store to add new peer.
-	store := cb.SelectToStore(stores)
+func (cb *capacityBalancer) SelectAddPeer(cluster *raftCluster, stores []*StoreInfo, excluded map[uint64]struct{}) (*metapb.Peer, error) {
+	store := cb.SelectToStore(stores, excluded)
 	if store == nil {
-		log.Warn("To store cannot be found to do balance")
+		log.Warn("to store cannot be found to add peer")
 		return nil, nil
 	}
 
@@ -148,9 +129,67 @@ func (cb *capacityBalancer) Balance(cluster *raftCluster) (*BalanceOperator, err
 		return nil, errors.Trace(err)
 	}
 
-	newPeer := &metapb.Peer{
+	peer := &metapb.Peer{
 		Id:      proto.Uint64(peerID),
 		StoreId: proto.Uint64(store.store.GetId()),
+	}
+
+	return peer, nil
+}
+
+func (cb *capacityBalancer) SelectRemovePeer(cluster *ClusterInfo, peers map[uint64]*metapb.Peer) (*metapb.Peer, error) {
+	stores := make([]*StoreInfo, 0, len(peers))
+	for storeID := range peers {
+		stores = append(stores, cluster.getStore(storeID))
+	}
+
+	store := cb.SelectFromStore(stores, false)
+	if store == nil {
+		log.Warn("from store cannot be found to remove peer")
+		return nil, nil
+	}
+
+	storeID := store.store.GetId()
+	return peers[storeID], nil
+}
+
+func (cb *capacityBalancer) Balance(cluster *raftCluster) (*BalanceOperator, error) {
+	// Firstly, select one balance region from cluster info.
+	stores := cluster.cachedCluster.getStores()
+	region, oldLeader := cb.SelectBalanceRegion(stores, cluster.cachedCluster.regions)
+	if region == nil || oldLeader == nil {
+		log.Warn("region cannot be found to do balance")
+		return nil, nil
+	}
+
+	// Secondly, select one region peer to do leader transfer.
+	followerPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
+	excludedStores := make(map[uint64]struct{}, len(region.GetPeers()))
+	for _, peer := range region.GetPeers() {
+		storeID := peer.GetStoreId()
+		excludedStores[storeID] = struct{}{}
+
+		if peer.GetId() == oldLeader.GetId() {
+			continue
+		}
+
+		followerPeers[storeID] = peer
+	}
+
+	newLeader := cb.SelectNewLeaderPeer(cluster.cachedCluster, followerPeers)
+	if newLeader == nil {
+		log.Warn("new leader peer cannot be found to do balance")
+		return nil, nil
+	}
+
+	// Thirdly, select one store to add new peer.
+	newPeer, err := cb.SelectAddPeer(cluster, stores, excludedStores)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if newPeer == nil {
+		log.Warn("new peer cannot be found to do balance")
+		return nil, nil
 	}
 
 	leaderTransferOperator := newTransferLeaderOperator(oldLeader, newLeader)
@@ -158,4 +197,89 @@ func (cb *capacityBalancer) Balance(cluster *raftCluster) (*BalanceOperator, err
 	removePeerOperator := newRemovePeerOperator(oldLeader)
 
 	return newBalanceOperator(region, leaderTransferOperator, addPeerOperator, removePeerOperator), nil
+}
+
+// defaultBalancer is used for default config change, like add/remove peer.
+type defaultBalancer struct {
+	capacityBalancer
+	region *metapb.Region
+	leader *metapb.Peer
+}
+
+func newDefaultBalancer(region *metapb.Region, leader *metapb.Peer) *defaultBalancer {
+	return &defaultBalancer{
+		region: region,
+		leader: leader,
+	}
+}
+
+func (db *defaultBalancer) addPeer(cluster *raftCluster) (*BalanceOperator, error) {
+	stores := cluster.cachedCluster.getStores()
+	excludedStores := make(map[uint64]struct{}, len(db.region.GetPeers()))
+	for _, peer := range db.region.GetPeers() {
+		storeID := peer.GetStoreId()
+		excludedStores[storeID] = struct{}{}
+	}
+
+	log.Errorf("[addPeer]%v - %v", excludedStores, db.region)
+
+	peer, err := db.SelectAddPeer(cluster, stores, excludedStores)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if peer == nil {
+		log.Warnf("find no peer to remove for region %v", db.region)
+		return nil, nil
+	}
+
+	log.Errorf("[addPeer][done]%v", peer)
+
+	addPeerOperator := newAddPeerOperator(peer)
+	return newBalanceOperator(db.region, addPeerOperator), nil
+}
+
+func (db *defaultBalancer) removePeer(cluster *raftCluster) (*BalanceOperator, error) {
+	followerPeers := make(map[uint64]*metapb.Peer, len(db.region.GetPeers()))
+	for _, peer := range db.region.GetPeers() {
+		if peer.GetId() == db.leader.GetId() {
+			continue
+		}
+
+		storeID := peer.GetStoreId()
+		followerPeers[storeID] = peer
+	}
+
+	peer, err := db.SelectRemovePeer(cluster.cachedCluster, followerPeers)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if peer == nil {
+		log.Warnf("find no store to add peer for region %v", db.region)
+		return nil, nil
+	}
+
+	removePeerOperator := newRemovePeerOperator(peer)
+	return newBalanceOperator(db.region, removePeerOperator), nil
+}
+
+func (db *defaultBalancer) Balance(cluster *raftCluster) (*BalanceOperator, error) {
+	clusterMeta, err := cluster.GetConfig()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	regionID := db.region.GetId()
+	peerCount := len(db.region.GetPeers())
+	maxPeerCount := int(clusterMeta.GetMaxPeerCount())
+
+	if peerCount == maxPeerCount {
+		log.Infof("region %d peer count equals %d, no need to change peer", regionID, maxPeerCount)
+		return nil, nil
+	} else if peerCount < maxPeerCount {
+		log.Infof("region %d peer count %d < %d, need to add peer", regionID, peerCount, maxPeerCount)
+		return db.addPeer(cluster)
+	} else {
+		log.Infof("region %d peer count %d > %d, need to remove peer", regionID, peerCount, maxPeerCount)
+		return db.removePeer(cluster)
+	}
 }

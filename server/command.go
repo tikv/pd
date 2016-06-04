@@ -186,7 +186,7 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		return nil, errors.Trace(err)
 	}
 
-	changePeer, err := cluster.handleChangePeerReq(region, leader.GetId())
+	res, err := cluster.handleChangePeerReq(region, leader)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -227,9 +227,7 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 	}
 
 	return &pdpb.Response{
-		RegionHeartbeat: &pdpb.RegionHeartbeatResponse{
-			ChangePeer: changePeer,
-		},
+		RegionHeartbeat: res,
 	}, nil
 }
 
