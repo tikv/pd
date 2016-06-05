@@ -120,10 +120,12 @@ func (co *ChangePeerOperator) Check(region *metapb.Region, leader *metapb.Peer) 
 		if containPeer(region, co.changePeer.GetPeer()) {
 			return true, nil
 		}
+		log.Infof("balance [%s], try to add peer %s", region, co.changePeer.GetPeer())
 	} else if co.changePeer.GetChangeType() == raftpb.ConfChangeType_RemoveNode {
 		if !containPeer(region, co.changePeer.GetPeer()) {
 			return true, nil
 		}
+		log.Infof("balance [%s], try to remove peer %s", region, co.changePeer.GetPeer())
 	}
 
 	return false, nil
@@ -175,6 +177,7 @@ func (lto *TransferLeaderOperator) Check(region *metapb.Region, leader *metapb.P
 		return true, nil
 	}
 
+	log.Infof("balance [%s], try to transfer leader from %s to %s", region, leader, lto.oldLeader)
 	return false, nil
 }
 
