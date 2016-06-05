@@ -33,7 +33,7 @@ type balanceWorker struct {
 
 	wg       sync.WaitGroup
 	interval time.Duration
-	cluster  *raftCluster
+	cluster  *ClusterInfo
 
 	// should we extract to another structure, so
 	// Balancer can use it?
@@ -45,7 +45,7 @@ type balanceWorker struct {
 	quit chan struct{}
 }
 
-func newBalanceWorker(cluster *raftCluster, balancer Balancer) *balanceWorker {
+func newBalanceWorker(cluster *ClusterInfo, balancer Balancer) *balanceWorker {
 	bw := &balanceWorker{
 		interval:         defaultBalanceInterval,
 		cluster:          cluster,

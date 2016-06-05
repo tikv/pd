@@ -395,6 +395,8 @@ type ClusterInfo struct {
 	stores      map[uint64]*StoreInfo
 	regions     *RegionsInfo
 	clusterRoot string
+
+	idAlloc IDAllocator
 }
 
 func newClusterInfo(clusterRoot string) *ClusterInfo {

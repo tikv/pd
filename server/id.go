@@ -26,6 +26,11 @@ const (
 	allocStep = uint64(1000)
 )
 
+// IDAllocator is the allocator to generate unique ID.
+type IDAllocator interface {
+	Alloc() (uint64, error)
+}
+
 type idAllocator struct {
 	mu   sync.Mutex
 	base uint64
