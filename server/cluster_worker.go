@@ -16,31 +16,40 @@ package server
 import (
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
+	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-func (c *raftCluster) HandleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
-	var (
-		balanceOperator *BalanceOperator
-		err             error
-	)
-
-	regionID := region.GetId()
-	balanceOperator = c.balanceWorker.getBalanceOperator(regionID)
+func (c *raftCluster) handleDefaultBalancer(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
+	balancer := newDefaultBalancer(region, leader)
+	balanceOperator, err := balancer.Balance(c)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 	if balanceOperator == nil {
-		balancer := newDefaultBalancer(region, leader)
-		balanceOperator, err = balancer.Balance(c)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		if balanceOperator == nil {
-			return nil, nil
-		}
+		return nil, nil
 	}
 
 	_, res, err := balanceOperator.Do(region, leader)
+	return res, errors.Trace(err)
+}
+
+func (c *raftCluster) HandleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
+	regionID := region.GetId()
+	balanceOperator := c.balanceWorker.getBalanceOperator(regionID)
+	if balanceOperator == nil {
+		return c.handleDefaultBalancer(region, leader)
+	}
+
+	ret, res, err := balanceOperator.Do(region, leader)
 	if err != nil {
+		log.Errorf("do balance for region %d failed %s", regionID, err)
+		c.balanceWorker.removeBalanceOperator(regionID)
+	}
+
+	if ret {
+		// Do finished, remove it.
 		c.balanceWorker.removeBalanceOperator(regionID)
 	}
 
