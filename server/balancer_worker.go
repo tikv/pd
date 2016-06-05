@@ -24,6 +24,8 @@ import (
 const (
 	defaultBalanceInterval = 60 * time.Second
 	defaultBalanceCount    = 3
+
+	maxRetryBalanceNumber = 10
 )
 
 type balanceWorker struct {
@@ -33,20 +35,23 @@ type balanceWorker struct {
 	interval time.Duration
 	cluster  *raftCluster
 
+	// should we extract to another structure, so
+	// Balancer can use it?
 	balanceOperators map[uint64]*BalanceOperator
 	balanceCount     int
-	balancers        []Balancer
+
+	balancer Balancer
 
 	quit chan struct{}
 }
 
-func newBalanceWorker(cluster *raftCluster, balancers ...Balancer) *balanceWorker {
+func newBalanceWorker(cluster *raftCluster, balancer Balancer) *balanceWorker {
 	bw := &balanceWorker{
 		interval:         defaultBalanceInterval,
 		cluster:          cluster,
 		balanceOperators: make(map[uint64]*BalanceOperator),
 		balanceCount:     defaultBalanceCount,
-		balancers:        balancers,
+		balancer:         balancer,
 		quit:             make(chan struct{}),
 	}
 
@@ -112,23 +117,32 @@ func (bw *balanceWorker) getBalanceOperator(regionID uint64) *BalanceOperator {
 }
 
 func (bw *balanceWorker) doBalance() error {
-	for _, balancer := range bw.balancers {
+	for i := 0; i < maxRetryBalanceNumber; i++ {
 		bw.RLock()
 		balanceCount := len(bw.balanceOperators)
 		bw.RUnlock()
 
+		// TODO: We should introduce more strategies to control
+		// how many balance tasks at same time.
 		if balanceCount >= bw.balanceCount {
+			log.Infof("%d exceed max balance count %d, can't do balance", balanceCount, bw.balanceCount)
 			return nil
 		}
 
 		// TODO: support select balance count in balancer.
-		balanceOperator, err := balancer.Balance(bw.cluster)
+		balanceOperator, err := bw.balancer.Balance(bw.cluster)
 		if err != nil {
 			return errors.Trace(err)
 		}
 
-		bw.addBalanceOperator(balanceOperator.region.GetId(), balanceOperator)
+		if bw.addBalanceOperator(balanceOperator.region.GetId(), balanceOperator) {
+			return nil
+		}
+
+		// Here mean the selected region has an operator already, we may retry to
+		// select another region for balance.
 	}
 
+	log.Info("find no proper region for balance, retry later")
 	return nil
 }
