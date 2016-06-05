@@ -14,15 +14,10 @@
 package server
 
 import (
-	"sync/atomic"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/raft_cmdpb"
-	"github.com/pingcap/kvproto/pkg/util"
 )
 
 func (c *raftCluster) HandleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
@@ -86,41 +81,4 @@ func (c *raftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	}
 
 	return split, nil
-}
-
-func (c *raftCluster) callCommand(request *raft_cmdpb.RaftCmdRequest) (*raft_cmdpb.RaftCmdResponse, error) {
-	storeID := request.Header.Peer.GetStoreId()
-	store, err := c.GetStore(storeID)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	nc, err := c.storeConns.GetConn(store.GetAddress())
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	msg := &msgpb.Message{
-		MsgType: msgpb.MessageType_Cmd.Enum(),
-		CmdReq:  request,
-	}
-
-	msgID := atomic.AddUint64(&c.s.msgID, 1)
-	if err = util.WriteMessage(nc.conn, msgID, msg); err != nil {
-		c.storeConns.RemoveConn(store.GetAddress())
-		return nil, errors.Trace(err)
-	}
-
-	msg.Reset()
-	if _, err = util.ReadMessage(nc.conn, msg); err != nil {
-		c.storeConns.RemoveConn(store.GetAddress())
-		return nil, errors.Trace(err)
-	}
-
-	if msg.CmdResp == nil {
-		// This is a very serious bug, should we panic here?
-		return nil, errors.Errorf("invalid command response message but %v", msg)
-	}
-
-	return msg.CmdResp, nil
 }
