@@ -25,8 +25,6 @@ import (
 type Operator interface {
 	// Do does the operator, if finished then return true.
 	Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error)
-	// Check checks whether the operator has been finished.
-	Check(region *metapb.Region, leader *metapb.Peer) (bool, error)
 }
 
 // BalanceOperator is used to do region balance.
@@ -44,8 +42,8 @@ func newBalanceOperator(region *metapb.Region, ops ...Operator) *BalanceOperator
 	}
 }
 
-// Check implements Operator.Check interface.
-func (bo *BalanceOperator) Check(region *metapb.Region, leader *metapb.Peer) (bool, error) {
+// Check checks whether operator already finished or not.
+func (bo *BalanceOperator) check(region *metapb.Region, leader *metapb.Peer) (bool, error) {
 	if bo.index >= len(bo.ops) {
 		return true, nil
 	}
@@ -62,7 +60,7 @@ func (bo *BalanceOperator) Check(region *metapb.Region, leader *metapb.Peer) (bo
 
 // Do implements Operator.Do interface.
 func (bo *BalanceOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
-	ok, err := bo.Check(region, leader)
+	ok, err := bo.check(region, leader)
 	if err != nil {
 		return false, nil, errors.Trace(err)
 	}
@@ -80,8 +78,7 @@ func (bo *BalanceOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool,
 
 	bo.index++
 
-	ok, err = bo.Check(region, leader)
-	return ok, nil, errors.Trace(err)
+	return bo.index >= len(bo.ops), nil, nil
 }
 
 // ChangePeerOperator is used to do peer change.
@@ -107,8 +104,8 @@ func newRemovePeerOperator(peer *metapb.Peer) *ChangePeerOperator {
 	}
 }
 
-// Check implements Operator.Check interface.
-func (co *ChangePeerOperator) Check(region *metapb.Region, leader *metapb.Peer) (bool, error) {
+// Check checks whether operator already finished or not.
+func (co *ChangePeerOperator) check(region *metapb.Region, leader *metapb.Peer) (bool, error) {
 	if region == nil {
 		return false, errors.New("invalid region")
 	}
@@ -133,7 +130,7 @@ func (co *ChangePeerOperator) Check(region *metapb.Region, leader *metapb.Peer) 
 
 // Do implements Operator.Do interface.
 func (co *ChangePeerOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
-	ok, err := co.Check(region, leader)
+	ok, err := co.check(region, leader)
 	if err != nil {
 		return false, nil, errors.Trace(err)
 	}
@@ -160,8 +157,8 @@ func newTransferLeaderOperator(oldLeader, newLeader *metapb.Peer) *TransferLeade
 	}
 }
 
-// Check implements Operator.Check interface.
-func (lto *TransferLeaderOperator) Check(region *metapb.Region, leader *metapb.Peer) (bool, error) {
+// Check checks whether operator already finished or not.
+func (lto *TransferLeaderOperator) check(region *metapb.Region, leader *metapb.Peer) (bool, error) {
 	if leader == nil {
 		return false, errors.New("invalid leader peer")
 	}
@@ -183,7 +180,7 @@ func (lto *TransferLeaderOperator) Check(region *metapb.Region, leader *metapb.P
 
 // Do implements Operator.Doop interface.
 func (lto *TransferLeaderOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
-	ok, err := lto.Check(region, leader)
+	ok, err := lto.check(region, leader)
 	if err != nil {
 		return false, nil, errors.Trace(err)
 	}
