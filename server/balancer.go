@@ -128,8 +128,6 @@ func (cb *capacityBalancer) SelectAddPeer(cluster *ClusterInfo, stores []*StoreI
 		return nil, nil
 	}
 
-	log.Errorf("[SelectAddPeer]%v - %v - %v", stores, store.usedRatio(), store.stats)
-
 	peerID, err := cluster.idAlloc.Alloc()
 	if err != nil {
 		return nil, errors.Trace(err)

@@ -132,7 +132,7 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	}
 	clusterInfo.addStore(store)
 
-	// Test add peer by using default balancer.
+	// Test add peer.
 	db := newDefaultBalancer(region, peer)
 	bop, err := db.Balance(clusterInfo)
 	c.Assert(err, IsNil)
@@ -142,4 +142,38 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	c.Assert(ok, IsTrue)
 	c.Assert(op.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(op.changePeer.GetPeer().GetStoreId(), Equals, uint64(4))
+
+	// Test add another peer.
+	region.Peers = append(region.Peers, op.changePeer.GetPeer())
+	db = newDefaultBalancer(region, peer)
+	bop, err = db.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+
+	op, ok = bop.ops[0].(*ChangePeerOperator)
+	c.Assert(ok, IsTrue)
+	c.Assert(op.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op.changePeer.GetPeer().GetStoreId(), Equals, uint64(3))
+
+	// Now peers count equals to max peer count, so there is nothing to do.
+	region.Peers = append(region.Peers, op.changePeer.GetPeer())
+	db = newDefaultBalancer(region, peer)
+	bop, err = db.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop, IsNil)
+
+	// Test remove peer.
+	id, err := clusterInfo.idAlloc.Alloc()
+	c.Assert(err, IsNil)
+
+	newPeer := s.newPeer(c, uint64(2), id)
+	region.Peers = append(region.Peers, newPeer)
+
+	db = newDefaultBalancer(region, peer)
+	bop, err = db.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+
+	op, ok = bop.ops[0].(*ChangePeerOperator)
+	c.Assert(ok, IsTrue)
+	c.Assert(op.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(op.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 }
