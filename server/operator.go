@@ -174,7 +174,7 @@ func (lto *TransferLeaderOperator) check(region *metapb.Region, leader *metapb.P
 		return true, nil
 	}
 
-	log.Infof("balance [%s], try to transfer leader from %s to %s", region, leader, lto.oldLeader)
+	log.Infof("balance [%s], try to transfer leader from %s to %s", region, lto.oldLeader, leader)
 	return false, nil
 }
 
