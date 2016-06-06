@@ -88,8 +88,6 @@ func (bo *BalanceOperator) GetRegionID() uint64 {
 
 // OnceOperator is the operator wrapping another operator
 // and can be called only once. It will return finished every time.
-// It is used for default balancer now, that we don't care region
-// executes same operator in next heartbeat.
 type OnceOperator struct {
 	op       Operator
 	finished bool
