@@ -20,22 +20,34 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
+	"github.com/ngaut/log"
 	"golang.org/x/net/context"
 )
 
 const (
-	requestTimeout = 10 * time.Second
+	requestTimeout  = 10 * time.Second
+	slowRequestTime = 1 * time.Second
 )
 
-// A helper function to get value with key from etcd.
-// TODO: return the value revision for outer use.
-func getValue(c *clientv3.Client, key string, opts ...clientv3.OpOption) ([]byte, error) {
+func kvGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
 	kv := clientv3.NewKV(c)
 
+	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	resp, err := kv.Get(ctx, key, opts...)
 	cancel()
 
+	if cost := time.Now().Sub(start); cost > slowRequestTime {
+		log.Warnf("kv gets too slow, cost %s", cost)
+	}
+
+	return resp, errors.Trace(err)
+}
+
+// A helper function to get value with key from etcd.
+// TODO: return the value revision for outer use.
+func getValue(c *clientv3.Client, key string, opts ...clientv3.OpOption) ([]byte, error) {
+	resp, err := kvGet(c, key, opts...)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -79,4 +91,20 @@ func uint64ToBytes(v uint64) []byte {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, v)
 	return b
+}
+
+// slowLogTxn wraps etcd transaction and log slow one.
+type slowLogTxn struct {
+	clientv3.Txn
+}
+
+// Commit implements Txn Commit interface.
+func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
+	start := time.Now()
+	resp, err := t.Txn.Commit()
+	if cost := time.Now().Sub(start); cost > slowRequestTime {
+		log.Warnf("txn runs too slow, cost %s", cost)
+	}
+
+	return resp, errors.Trace(err)
 }

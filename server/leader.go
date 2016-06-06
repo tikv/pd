@@ -135,9 +135,15 @@ func (s *Server) campaignLeader() error {
 	lessor := clientv3.NewLease(s.client)
 	defer lessor.Close()
 
+	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	leaseResp, err := lessor.Grant(ctx, s.cfg.LeaderLease)
 	cancel()
+
+	if cost := time.Now().Sub(start); cost > slowRequestTime {
+		log.Warnf("lessor grants too slow, cost %s", cost)
+	}
+
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -145,7 +151,7 @@ func (s *Server) campaignLeader() error {
 	leaderKey := s.getLeaderPath()
 	// The leader key must not exist, so the CreateRevision is 0.
 	ctx, cancel = context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := s.client.Txn(ctx).
+	resp, err := s.slowLogTxn(ctx).
 		If(clientv3.Compare(clientv3.CreateRevision(leaderKey), "=", 0)).
 		Then(clientv3.OpPut(leaderKey, s.leaderValue, clientv3.WithLease(clientv3.LeaseID(leaseResp.ID)))).
 		Commit()
@@ -221,7 +227,7 @@ func (s *Server) resignLeader() error {
 	// delete leader itself and let others start a new election again.
 	leaderKey := s.getLeaderPath()
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := s.client.Txn(ctx).
+	resp, err := s.slowLogTxn(ctx).
 		If(s.leaderCmp()).
 		Then(clientv3.OpDelete(leaderKey)).
 		Commit()
