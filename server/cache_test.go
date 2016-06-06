@@ -15,6 +15,7 @@ package server
 
 import (
 	"net"
+	"sync/atomic"
 
 	"github.com/golang/protobuf/proto"
 	. "github.com/pingcap/check"
@@ -184,4 +185,28 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	for _, store := range allStores {
 		c.Assert(stores, HasKey, store.GetId())
 	}
+}
+
+// mockIDAllocator mocks IDAllocator and it is only used for test.
+type mockIDAllocator struct {
+	base uint64
+}
+
+func newMockIDAllocator() *mockIDAllocator {
+	return &mockIDAllocator{
+		base: 0,
+	}
+}
+
+func (alloc *mockIDAllocator) Alloc() (uint64, error) {
+	return atomic.AddUint64(&alloc.base, 1), nil
+}
+
+func (s *testClusterCacheSuite) TestIDAlloc(c *C) {
+	cluster := newClusterInfo("/pd")
+	cluster.idAlloc = newMockIDAllocator()
+
+	id, err := cluster.idAlloc.Alloc()
+	c.Assert(err, IsNil)
+	c.Assert(id, Greater, uint64(0))
 }

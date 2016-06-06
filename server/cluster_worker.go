@@ -22,8 +22,11 @@ import (
 )
 
 func (c *raftCluster) handleDefaultBalancer(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
+	// TODO: we must consider max allowed running default balance regions too.
+	// E,g, max peer count is 3, if we have only two store 1, 2 and add 3 later,
+	// if we don't limit, we will allow many regions do ConfChange add peer.
 	balancer := newDefaultBalancer(region, leader)
-	balanceOperator, err := balancer.Balance(c)
+	balanceOperator, err := balancer.Balance(c.cachedCluster)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

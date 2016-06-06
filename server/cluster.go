@@ -80,6 +80,7 @@ func (c *raftCluster) Start(meta metapb.Cluster) error {
 	c.storeConns.SetIdleTimeout(idleTimeout)
 
 	c.cachedCluster = newClusterInfo(c.clusterRoot)
+	c.cachedCluster.idAlloc = c.s.idAlloc
 	c.cachedCluster.setMeta(&meta)
 
 	// Cache all stores when start the cluster. We don't have
@@ -93,7 +94,7 @@ func (c *raftCluster) Start(meta metapb.Cluster) error {
 		return errors.Trace(err)
 	}
 
-	c.balanceWorker = newBalanceWorker(c, newCapacityBalancer())
+	c.balanceWorker = newBalanceWorker(c.cachedCluster, newCapacityBalancer())
 
 	return nil
 }
