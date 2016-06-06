@@ -23,7 +23,8 @@ import (
 
 const (
 	defaultBalanceInterval = 60 * time.Second
-	defaultBalanceCount    = 3
+	// We can allow BalanceCount regions to do balance at same time.
+	defaultBalanceCount = 16
 
 	maxRetryBalanceNumber = 10
 )
@@ -98,6 +99,8 @@ func (bw *balanceWorker) addBalanceOperator(regionID uint64, op *BalanceOperator
 		return false
 	}
 
+	// TODO: should we check allowBalance again here?
+
 	bw.balanceOperators[regionID] = op
 	return true
 }
@@ -116,16 +119,25 @@ func (bw *balanceWorker) getBalanceOperator(regionID uint64) *BalanceOperator {
 	return bw.balanceOperators[regionID]
 }
 
+// allowBalance indicates that whether we can add more balance operator or not.
+func (bw *balanceWorker) allowBalance() bool {
+	bw.RLock()
+	balanceCount := len(bw.balanceOperators)
+	bw.RUnlock()
+
+	// TODO: We should introduce more strategies to control
+	// how many balance tasks at same time.
+	if balanceCount >= bw.balanceCount {
+		log.Infof("%d exceed max balance count %d, can't do balance", balanceCount, bw.balanceCount)
+		return false
+	}
+
+	return true
+}
+
 func (bw *balanceWorker) doBalance() error {
 	for i := 0; i < maxRetryBalanceNumber; i++ {
-		bw.RLock()
-		balanceCount := len(bw.balanceOperators)
-		bw.RUnlock()
-
-		// TODO: We should introduce more strategies to control
-		// how many balance tasks at same time.
-		if balanceCount >= bw.balanceCount {
-			log.Infof("%d exceed max balance count %d, can't do balance", balanceCount, bw.balanceCount)
+		if !bw.allowBalance() {
 			return nil
 		}
 
@@ -135,7 +147,7 @@ func (bw *balanceWorker) doBalance() error {
 			return errors.Trace(err)
 		}
 
-		if bw.addBalanceOperator(balanceOperator.region.GetId(), balanceOperator) {
+		if bw.addBalanceOperator(balanceOperator.GetRegionID(), balanceOperator) {
 			return nil
 		}
 
