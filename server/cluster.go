@@ -58,9 +58,6 @@ type raftCluster struct {
 	// cached cluster info
 	cachedCluster *ClusterInfo
 
-	// for store conns
-	storeConns *storeConns
-
 	// balance worker
 	balanceWorker *balanceWorker
 }
@@ -75,9 +72,6 @@ func (c *raftCluster) Start(meta metapb.Cluster) error {
 	}
 
 	c.running = true
-
-	c.storeConns = newStoreConns(defaultConnFunc)
-	c.storeConns.SetIdleTimeout(idleTimeout)
 
 	c.cachedCluster = newClusterInfo(c.clusterRoot)
 	c.cachedCluster.idAlloc = c.s.idAlloc
@@ -108,8 +102,6 @@ func (c *raftCluster) Stop() {
 	}
 
 	c.balanceWorker.stop()
-
-	c.storeConns.Close()
 
 	c.running = false
 }
