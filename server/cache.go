@@ -408,7 +408,7 @@ func newClusterInfo(clusterRoot string) *ClusterInfo {
 	return cluster
 }
 
-func (c *ClusterInfo) addStore(store *metapb.Store) {
+func (c *ClusterInfo) addMetaStore(store *metapb.Store) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -418,6 +418,13 @@ func (c *ClusterInfo) addStore(store *metapb.Store) {
 	}
 
 	c.stores[store.GetId()] = storeInfo
+}
+
+func (c *ClusterInfo) addStore(store *StoreInfo) {
+	c.Lock()
+	defer c.Unlock()
+
+	c.stores[store.store.GetId()] = store
 }
 
 func (c *ClusterInfo) removeStore(storeID uint64) {

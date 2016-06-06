@@ -285,7 +285,7 @@ func (c *raftCluster) cacheAllStores() error {
 			return errors.Trace(err)
 		}
 
-		c.cachedCluster.addStore(store)
+		c.cachedCluster.addMetaStore(store)
 	}
 	log.Infof("cache all %d stores cost %s", len(resp.Kvs), time.Now().Sub(start))
 	return nil
@@ -375,7 +375,7 @@ func (c *raftCluster) PutStore(store *metapb.Store) error {
 		return errors.Errorf("put store %v fail", store)
 	}
 
-	c.cachedCluster.addStore(store)
+	c.cachedCluster.addMetaStore(store)
 
 	return nil
 }
