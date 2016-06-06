@@ -52,10 +52,10 @@ func (c *raftCluster) HandleRegionHeartbeat(region *metapb.Region, leader *metap
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-	}
 
-	if balanceOperator == nil {
-		return nil, nil
+		if balanceOperator == nil {
+			return nil, nil
+		}
 	}
 
 	ret, res, err := balanceOperator.Do(region, leader)
