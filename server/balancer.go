@@ -28,7 +28,7 @@ type Balancer interface {
 const (
 	// If the used ratio of one storage is greater than this value,
 	// it should be rebalanced.
-	capacityUsedRatio = 0.4
+	minCapacityUsedRatio = 0.4
 	// If the used ratio of one storage is greater than this value,
 	// it will never be used as a selected target.
 	maxCapacityUsedRatio = 0.9
@@ -40,13 +40,13 @@ var (
 )
 
 type capacityBalancer struct {
-	capacityUsedRatio    float64
+	minCapacityUsedRatio float64
 	maxCapacityUsedRatio float64
 }
 
 func newCapacityBalancer() *capacityBalancer {
 	return &capacityBalancer{
-		capacityUsedRatio:    capacityUsedRatio,
+		minCapacityUsedRatio: minCapacityUsedRatio,
 		maxCapacityUsedRatio: maxCapacityUsedRatio,
 	}
 }
@@ -59,7 +59,7 @@ func (cb *capacityBalancer) SelectFromStore(stores []*StoreInfo, useFilter bool)
 		}
 
 		if useFilter {
-			if store.usedRatio() <= cb.capacityUsedRatio {
+			if store.usedRatio() <= cb.minCapacityUsedRatio {
 				continue
 			}
 		}

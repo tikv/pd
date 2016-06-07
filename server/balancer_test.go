@@ -171,7 +171,7 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 
 	// Now we have all stores with low capacityUsedRatio, so we need not to do balance.
 	cb := newCapacityBalancer()
-	cb.capacityUsedRatio = 0.4
+	cb.minCapacityUsedRatio = 0.4
 	cb.maxCapacityUsedRatio = 0.9
 	bop, err := cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
@@ -191,7 +191,7 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	// 2) add peer: 2
 	// 3) remove peer: 1
 	cb = newCapacityBalancer()
-	cb.capacityUsedRatio = 0.3
+	cb.minCapacityUsedRatio = 0.3
 	cb.maxCapacityUsedRatio = 0.9
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
@@ -217,7 +217,7 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 4, 100, 40)
 
 	cb = newCapacityBalancer()
-	cb.capacityUsedRatio = 0.4
+	cb.minCapacityUsedRatio = 0.4
 	cb.maxCapacityUsedRatio = 0.6
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
