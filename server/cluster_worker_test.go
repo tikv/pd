@@ -552,8 +552,9 @@ func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
 	defer conn.Close()
 
 	// Mock a store stats.
+	storeID := stores[0].GetId()
 	stats := &pdpb.StoreStats{
-		StoreId:     proto.Uint64(stores[0].GetId()),
+		StoreId:     proto.Uint64(storeID),
 		Capacity:    proto.Uint64(100),
 		Available:   proto.Uint64(50),
 		RegionCount: proto.Uint32(1),
@@ -561,4 +562,7 @@ func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
 
 	resp := s.heartbeatStore(c, conn, 0, stats)
 	c.Assert(resp, NotNil)
+
+	store := cluster.cachedCluster.getStore(storeID)
+	c.Assert(stats, DeepEquals, store.stats)
 }
