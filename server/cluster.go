@@ -58,8 +58,8 @@ type raftCluster struct {
 	// cached cluster info
 	cachedCluster *ClusterInfo
 
-	// balance worker
-	balanceWorker *balanceWorker
+	// balancer worker
+	balancerWorker *balancerWorker
 }
 
 func (c *raftCluster) Start(meta metapb.Cluster) error {
@@ -88,7 +88,8 @@ func (c *raftCluster) Start(meta metapb.Cluster) error {
 		return errors.Trace(err)
 	}
 
-	c.balanceWorker = newBalanceWorker(c.cachedCluster, newCapacityBalancer())
+	c.balancerWorker = newBalancerWorker(c.cachedCluster, newCapacityBalancer(), defaultBalanceInterval)
+	c.balancerWorker.run()
 
 	return nil
 }
@@ -101,7 +102,7 @@ func (c *raftCluster) Stop() {
 		return
 	}
 
-	c.balanceWorker.stop()
+	c.balancerWorker.stop()
 
 	c.running = false
 }
@@ -285,7 +286,7 @@ func (c *raftCluster) cacheAllStores() error {
 			return errors.Trace(err)
 		}
 
-		c.cachedCluster.addMetaStore(store)
+		c.cachedCluster.addStore(store)
 	}
 	log.Infof("cache all %d stores cost %s", len(resp.Kvs), time.Now().Sub(start))
 	return nil
@@ -375,7 +376,7 @@ func (c *raftCluster) PutStore(store *metapb.Store) error {
 		return errors.Errorf("put store %v fail", store)
 	}
 
-	c.cachedCluster.addMetaStore(store)
+	c.cachedCluster.addStore(store)
 
 	return nil
 }

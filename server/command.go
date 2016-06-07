@@ -232,10 +232,20 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 }
 
 func (c *conn) handleStoreHeartbeat(req *pdpb.Request) (*pdpb.Response, error) {
-	// TODO: finish it.
 	request := req.GetStoreHeartbeat()
-	if request.GetStats() == nil {
+	stats := request.GetStats()
+	if stats == nil {
 		return nil, errors.Errorf("invalid store heartbeat command, but %v", request)
+	}
+
+	cluster, err := c.getRaftCluster()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	ok := cluster.cachedCluster.updateStoreStatus(stats)
+	if !ok {
+		return nil, errors.Errorf("cannot find store to update stats, stats %v", stats)
 	}
 
 	return &pdpb.Response{

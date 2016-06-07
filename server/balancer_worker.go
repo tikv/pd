@@ -29,7 +29,7 @@ const (
 	maxRetryBalanceNumber = 10
 )
 
-type balanceWorker struct {
+type balancerWorker struct {
 	sync.RWMutex
 
 	wg       sync.WaitGroup
@@ -46,9 +46,9 @@ type balanceWorker struct {
 	quit chan struct{}
 }
 
-func newBalanceWorker(cluster *ClusterInfo, balancer Balancer) *balanceWorker {
-	bw := &balanceWorker{
-		interval:         defaultBalanceInterval,
+func newBalancerWorker(cluster *ClusterInfo, balancer Balancer, interval time.Duration) *balancerWorker {
+	bw := &balancerWorker{
+		interval:         interval,
 		cluster:          cluster,
 		balanceOperators: make(map[uint64]*BalanceOperator),
 		balanceCount:     defaultBalanceCount,
@@ -56,12 +56,15 @@ func newBalanceWorker(cluster *ClusterInfo, balancer Balancer) *balanceWorker {
 		quit:             make(chan struct{}),
 	}
 
-	bw.wg.Add(1)
-	go bw.run()
 	return bw
 }
 
-func (bw *balanceWorker) run() error {
+func (bw *balancerWorker) run() {
+	bw.wg.Add(1)
+	go bw.workBalancer()
+}
+
+func (bw *balancerWorker) workBalancer() {
 	defer bw.wg.Done()
 
 	ticker := time.NewTicker(bw.interval)
@@ -70,7 +73,7 @@ func (bw *balanceWorker) run() error {
 	for {
 		select {
 		case <-bw.quit:
-			return nil
+			return
 		case <-ticker.C:
 			err := bw.doBalance()
 			if err != nil {
@@ -80,7 +83,7 @@ func (bw *balanceWorker) run() error {
 	}
 }
 
-func (bw *balanceWorker) stop() {
+func (bw *balancerWorker) stop() {
 	close(bw.quit)
 	bw.wg.Wait()
 
@@ -90,7 +93,7 @@ func (bw *balanceWorker) stop() {
 	bw.balanceOperators = map[uint64]*BalanceOperator{}
 }
 
-func (bw *balanceWorker) addBalanceOperator(regionID uint64, op *BalanceOperator) bool {
+func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *BalanceOperator) bool {
 	bw.Lock()
 	defer bw.Unlock()
 
@@ -105,14 +108,14 @@ func (bw *balanceWorker) addBalanceOperator(regionID uint64, op *BalanceOperator
 	return true
 }
 
-func (bw *balanceWorker) removeBalanceOperator(regionID uint64) {
+func (bw *balancerWorker) removeBalanceOperator(regionID uint64) {
 	bw.Lock()
 	defer bw.Unlock()
 
 	delete(bw.balanceOperators, regionID)
 }
 
-func (bw *balanceWorker) getBalanceOperator(regionID uint64) *BalanceOperator {
+func (bw *balancerWorker) getBalanceOperator(regionID uint64) *BalanceOperator {
 	bw.RLock()
 	defer bw.RUnlock()
 
@@ -120,7 +123,7 @@ func (bw *balanceWorker) getBalanceOperator(regionID uint64) *BalanceOperator {
 }
 
 // allowBalance indicates that whether we can add more balance operator or not.
-func (bw *balanceWorker) allowBalance() bool {
+func (bw *balancerWorker) allowBalance() bool {
 	bw.RLock()
 	balanceCount := len(bw.balanceOperators)
 	bw.RUnlock()
@@ -135,7 +138,7 @@ func (bw *balanceWorker) allowBalance() bool {
 	return true
 }
 
-func (bw *balanceWorker) doBalance() error {
+func (bw *balancerWorker) doBalance() error {
 	for i := 0; i < maxRetryBalanceNumber; i++ {
 		if !bw.allowBalance() {
 			return nil
@@ -145,6 +148,9 @@ func (bw *balanceWorker) doBalance() error {
 		balanceOperator, err := bw.balancer.Balance(bw.cluster)
 		if err != nil {
 			return errors.Trace(err)
+		}
+		if balanceOperator == nil {
+			return nil
 		}
 
 		if bw.addBalanceOperator(balanceOperator.GetRegionID(), balanceOperator) {

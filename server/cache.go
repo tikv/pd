@@ -408,7 +408,7 @@ func newClusterInfo(clusterRoot string) *ClusterInfo {
 	return cluster
 }
 
-func (c *ClusterInfo) addMetaStore(store *metapb.Store) {
+func (c *ClusterInfo) addStore(store *metapb.Store) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -420,11 +420,18 @@ func (c *ClusterInfo) addMetaStore(store *metapb.Store) {
 	c.stores[store.GetId()] = storeInfo
 }
 
-func (c *ClusterInfo) addStore(store *StoreInfo) {
+func (c *ClusterInfo) updateStoreStatus(stats *pdpb.StoreStats) bool {
 	c.Lock()
 	defer c.Unlock()
 
-	c.stores[store.store.GetId()] = store
+	storeID := stats.GetStoreId()
+	store, ok := c.stores[storeID]
+	if !ok {
+		return false
+	}
+
+	store.stats = stats
+	return true
 }
 
 func (c *ClusterInfo) removeStore(storeID uint64) {
