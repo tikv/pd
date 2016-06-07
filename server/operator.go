@@ -78,7 +78,37 @@ func (bo *BalanceOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool,
 
 	bo.index++
 
-	return bo.index >= len(bo.ops), nil, nil
+	return bo.index >= len(bo.ops), res, nil
+}
+
+// GetRegionID returns the region id which the operator for balance.
+func (bo *BalanceOperator) GetRegionID() uint64 {
+	return bo.region.GetId()
+}
+
+// OnceOperator is the operator wrapping another operator
+// and can be called only once. It will return finished every time.
+type OnceOperator struct {
+	op       Operator
+	finished bool
+}
+
+func newOnceOperator(op Operator) *OnceOperator {
+	return &OnceOperator{
+		op:       op,
+		finished: false,
+	}
+}
+
+// Do implements Operator.Do interface.
+func (op *OnceOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
+	if op.finished {
+		return true, nil, nil
+	}
+
+	op.finished = true
+	_, resp, err := op.op.Do(region, leader)
+	return true, resp, errors.Trace(err)
 }
 
 // ChangePeerOperator is used to do peer change.

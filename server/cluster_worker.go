@@ -21,10 +21,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-func (c *raftCluster) handleDefaultBalancer(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
-	// TODO: we must consider max allowed running default balance regions too.
-	// E,g, max peer count is 3, if we have only two store 1, 2 and add 3 later,
-	// if we don't limit, we will allow many regions do ConfChange add peer.
+func (c *raftCluster) addDefaultBalanceOperator(region *metapb.Region, leader *metapb.Peer) (*BalanceOperator, error) {
+	if !c.balanceWorker.allowBalance() {
+		return nil, nil
+	}
+
 	balancer := newDefaultBalancer(region, leader)
 	balanceOperator, err := balancer.Balance(c.cachedCluster)
 	if err != nil {
@@ -34,26 +35,39 @@ func (c *raftCluster) handleDefaultBalancer(region *metapb.Region, leader *metap
 		return nil, nil
 	}
 
-	_, res, err := balanceOperator.Do(region, leader)
-	return res, errors.Trace(err)
+	if c.balanceWorker.addBalanceOperator(balanceOperator.GetRegionID(), balanceOperator) {
+		return balanceOperator, nil
+	}
+
+	// Em, the balance worker may have already added a BalanceOperator.
+	return c.balanceWorker.getBalanceOperator(region.GetId()), nil
 }
 
 func (c *raftCluster) HandleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
 	regionID := region.GetId()
 	balanceOperator := c.balanceWorker.getBalanceOperator(regionID)
+	var err error
 	if balanceOperator == nil {
-		return c.handleDefaultBalancer(region, leader)
+		balanceOperator, err = c.addDefaultBalanceOperator(region, leader)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		if balanceOperator == nil {
+			return nil, nil
+		}
 	}
 
 	ret, res, err := balanceOperator.Do(region, leader)
-	if err != nil {
-		log.Errorf("do balance for region %d failed %s", regionID, err)
-		c.balanceWorker.removeBalanceOperator(regionID)
-	}
-
 	if ret {
 		// Do finished, remove it.
 		c.balanceWorker.removeBalanceOperator(regionID)
+	}
+
+	if err != nil {
+		// failed, remove it.
+		c.balanceWorker.removeBalanceOperator(regionID)
+		log.Errorf("do balance for region %d failed %s", regionID, err)
 	}
 
 	return res, nil

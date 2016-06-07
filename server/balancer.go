@@ -235,7 +235,7 @@ func (db *defaultBalancer) addPeer(cluster *ClusterInfo) (*BalanceOperator, erro
 	}
 
 	addPeerOperator := newAddPeerOperator(peer)
-	return newBalanceOperator(db.region, addPeerOperator), nil
+	return newBalanceOperator(db.region, newOnceOperator(addPeerOperator)), nil
 }
 
 func (db *defaultBalancer) removePeer(cluster *ClusterInfo) (*BalanceOperator, error) {
@@ -259,7 +259,7 @@ func (db *defaultBalancer) removePeer(cluster *ClusterInfo) (*BalanceOperator, e
 	}
 
 	removePeerOperator := newRemovePeerOperator(peer)
-	return newBalanceOperator(db.region, removePeerOperator), nil
+	return newBalanceOperator(db.region, newOnceOperator(removePeerOperator)), nil
 }
 
 func (db *defaultBalancer) Balance(cluster *ClusterInfo) (*BalanceOperator, error) {
