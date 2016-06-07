@@ -22,7 +22,7 @@ import (
 )
 
 func (c *raftCluster) addDefaultBalanceOperator(region *metapb.Region, leader *metapb.Peer) (*BalanceOperator, error) {
-	if !c.balanceWorker.allowBalance() {
+	if !c.balancerWorker.allowBalance() {
 		return nil, nil
 	}
 
@@ -35,17 +35,17 @@ func (c *raftCluster) addDefaultBalanceOperator(region *metapb.Region, leader *m
 		return nil, nil
 	}
 
-	if c.balanceWorker.addBalanceOperator(balanceOperator.GetRegionID(), balanceOperator) {
+	if c.balancerWorker.addBalanceOperator(balanceOperator.GetRegionID(), balanceOperator) {
 		return balanceOperator, nil
 	}
 
 	// Em, the balance worker may have already added a BalanceOperator.
-	return c.balanceWorker.getBalanceOperator(region.GetId()), nil
+	return c.balancerWorker.getBalanceOperator(region.GetId()), nil
 }
 
 func (c *raftCluster) HandleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
 	regionID := region.GetId()
-	balanceOperator := c.balanceWorker.getBalanceOperator(regionID)
+	balanceOperator := c.balancerWorker.getBalanceOperator(regionID)
 	var err error
 	if balanceOperator == nil {
 		balanceOperator, err = c.addDefaultBalanceOperator(region, leader)
@@ -61,12 +61,12 @@ func (c *raftCluster) HandleRegionHeartbeat(region *metapb.Region, leader *metap
 	ret, res, err := balanceOperator.Do(region, leader)
 	if ret {
 		// Do finished, remove it.
-		c.balanceWorker.removeBalanceOperator(regionID)
+		c.balancerWorker.removeBalanceOperator(regionID)
 	}
 
 	if err != nil {
 		// failed, remove it.
-		c.balanceWorker.removeBalanceOperator(regionID)
+		c.balancerWorker.removeBalanceOperator(regionID)
 		log.Errorf("do balance for region %d failed %s", regionID, err)
 	}
 

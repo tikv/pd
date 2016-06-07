@@ -58,8 +58,8 @@ type raftCluster struct {
 	// cached cluster info
 	cachedCluster *ClusterInfo
 
-	// balance worker
-	balanceWorker *balanceWorker
+	// balancer worker
+	balancerWorker *balancerWorker
 }
 
 func (c *raftCluster) Start(meta metapb.Cluster) error {
@@ -88,7 +88,8 @@ func (c *raftCluster) Start(meta metapb.Cluster) error {
 		return errors.Trace(err)
 	}
 
-	c.balanceWorker = newBalanceWorker(c.cachedCluster, newCapacityBalancer())
+	c.balancerWorker = newBalancerWorker(c.cachedCluster, newCapacityBalancer(), defaultBalanceInterval)
+	c.balancerWorker.run()
 
 	return nil
 }
@@ -101,7 +102,7 @@ func (c *raftCluster) Stop() {
 		return
 	}
 
-	c.balanceWorker.stop()
+	c.balancerWorker.stop()
 
 	c.running = false
 }
