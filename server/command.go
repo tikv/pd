@@ -213,7 +213,7 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 	// TODO: we can update in etcd asynchronously later.
 	if len(ops) > 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-		resp, err := c.s.client.Txn(ctx).
+		resp, err := c.s.slowLogTxn(ctx).
 			If(c.s.leaderCmp()).
 			Then(ops...).
 			Commit()

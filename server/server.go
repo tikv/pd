@@ -24,6 +24,7 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	"golang.org/x/net/context"
 	statsd "gopkg.in/alexcesaro/statsd.v2"
 )
 
@@ -223,4 +224,12 @@ func (s *Server) closeAllConnections() {
 	}
 
 	s.conns = make(map[*conn]struct{})
+}
+
+func (s *Server) slowLogTxn(ctx context.Context) clientv3.Txn {
+	txn := s.client.Txn(ctx)
+
+	return &slowLogTxn{
+		Txn: txn,
+	}
 }

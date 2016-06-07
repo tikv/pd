@@ -65,7 +65,7 @@ func (s *Server) saveTimestamp(now time.Time) error {
 	key := s.getTimestampPath()
 
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := s.client.Txn(ctx).
+	resp, err := s.slowLogTxn(ctx).
 		If(s.leaderCmp()).
 		Then(clientv3.OpPut(key, string(data))).
 		Commit()

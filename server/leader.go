@@ -70,13 +70,24 @@ func (s *Server) leaderLoop() {
 			continue
 		}
 		if leader != nil {
-			log.Infof("leader is %s, watch it", leader)
-			s.watchLeader()
-			log.Info("leader changed, try to campaign leader")
+			if s.isSameLeader(leader) {
+				// oh, we are already leader, we may meet something wrong
+				// in previous campaignLeader. we can resign and campaign again.
+				log.Warnf("leader is still %s, resign and campaign again", leader)
+				if err = s.resignLeader(); err != nil {
+					log.Errorf("resign leader err %s", err)
+					time.Sleep(200 * time.Millisecond)
+					continue
+				}
+			} else {
+				log.Infof("leader is %s, watch it", leader)
+				s.watchLeader()
+				log.Info("leader changed, try to campaign leader")
+			}
 		}
 
 		if err = s.campaignLeader(); err != nil {
-			log.Errorf("campaign leader err %s", err)
+			log.Errorf("campaign leader err %s", errors.ErrorStack(err))
 		}
 	}
 }
@@ -97,6 +108,10 @@ func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Leader, error) {
 
 func (s *Server) getLeader() (*pdpb.Leader, error) {
 	return GetLeader(s.client, s.getLeaderPath())
+}
+
+func (s *Server) isSameLeader(leader *pdpb.Leader) bool {
+	return leader.GetAddr() == s.cfg.AdvertiseAddr && leader.GetPid() == int64(os.Getpid())
 }
 
 func (s *Server) marshalLeader() string {
@@ -120,9 +135,15 @@ func (s *Server) campaignLeader() error {
 	lessor := clientv3.NewLease(s.client)
 	defer lessor.Close()
 
+	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	leaseResp, err := lessor.Grant(ctx, s.cfg.LeaderLease)
 	cancel()
+
+	if cost := time.Now().Sub(start); cost > slowRequestTime {
+		log.Warnf("lessor grants too slow, cost %s", cost)
+	}
+
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -130,7 +151,7 @@ func (s *Server) campaignLeader() error {
 	leaderKey := s.getLeaderPath()
 	// The leader key must not exist, so the CreateRevision is 0.
 	ctx, cancel = context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := s.client.Txn(ctx).
+	resp, err := s.slowLogTxn(ctx).
 		If(clientv3.Compare(clientv3.CreateRevision(leaderKey), "=", 0)).
 		Then(clientv3.OpPut(leaderKey, s.leaderValue, clientv3.WithLease(clientv3.LeaseID(leaseResp.ID)))).
 		Commit()
@@ -200,6 +221,26 @@ func (s *Server) watchLeader() {
 			}
 		}
 	}
+}
+
+func (s *Server) resignLeader() error {
+	// delete leader itself and let others start a new election again.
+	leaderKey := s.getLeaderPath()
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	resp, err := s.slowLogTxn(ctx).
+		If(s.leaderCmp()).
+		Then(clientv3.OpDelete(leaderKey)).
+		Commit()
+	cancel()
+
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if !resp.Succeeded {
+		return errors.New("resign leader failed, we are not leader already")
+	}
+
+	return nil
 }
 
 func (s *Server) leaderCmp() clientv3.Cmp {

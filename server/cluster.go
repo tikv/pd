@@ -244,7 +244,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
 	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := s.client.Txn(ctx).
+	resp, err := s.slowLogTxn(ctx).
 		If(bootstrapCmp).
 		Then(ops...).
 		Commit()
@@ -270,12 +270,9 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 
 func (c *raftCluster) cacheAllStores() error {
 	start := time.Now()
-	kv := clientv3.NewKV(c.s.client)
 
 	key := makeStoreKeyPrefix(c.clusterRoot)
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := kv.Get(ctx, key, clientv3.WithPrefix())
-	cancel()
+	resp, err := kvGet(c.s.client, key, clientv3.WithPrefix())
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -294,7 +291,6 @@ func (c *raftCluster) cacheAllStores() error {
 
 func (c *raftCluster) cacheAllRegions() error {
 	start := time.Now()
-	kv := clientv3.NewKV(c.s.client)
 
 	nextID := uint64(0)
 	endRegionKey := makeRegionKey(c.clusterRoot, math.MaxUint64)
@@ -304,9 +300,7 @@ func (c *raftCluster) cacheAllRegions() error {
 
 	for {
 		key := makeRegionKey(c.clusterRoot, nextID)
-		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-		resp, err := kv.Get(ctx, key, clientv3.WithRange(endRegionKey))
-		cancel()
+		resp, err := kvGet(c.s.client, key, clientv3.WithRange(endRegionKey))
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -364,7 +358,7 @@ func (c *raftCluster) PutStore(store *metapb.Store) error {
 
 	storePath := makeStoreKey(c.clusterRoot, store.GetId())
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := c.s.client.Txn(ctx).
+	resp, err := c.s.slowLogTxn(ctx).
 		If(c.s.leaderCmp()).
 		Then(clientv3.OpPut(storePath, string(storeValue))).
 		Commit()
@@ -396,7 +390,7 @@ func (c *raftCluster) PutConfig(meta *metapb.Cluster) error {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := c.s.client.Txn(ctx).
+	resp, err := c.s.slowLogTxn(ctx).
 		If(c.s.leaderCmp()).
 		Then(clientv3.OpPut(c.clusterRoot, string(metaValue))).
 		Commit()

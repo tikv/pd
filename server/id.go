@@ -86,7 +86,7 @@ func (alloc *idAllocator) generate() (uint64, error) {
 	end += allocStep
 	value = uint64ToBytes(end)
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := alloc.s.client.Txn(ctx).
+	resp, err := alloc.s.slowLogTxn(ctx).
 		If(alloc.s.leaderCmp(), cmp).
 		Then(clientv3.OpPut(key, string(value))).
 		Commit()
