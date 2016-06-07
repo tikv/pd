@@ -38,7 +38,7 @@ func kvGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3
 	cancel()
 
 	if cost := time.Now().Sub(start); cost > slowRequestTime {
-		log.Warnf("kv gets too slow, cost %s", cost)
+		log.Warnf("kv gets %s too slow, resp: %v, err: %v, cost: %s", key, resp, err, cost)
 	}
 
 	return resp, errors.Trace(err)
@@ -103,7 +103,7 @@ func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	start := time.Now()
 	resp, err := t.Txn.Commit()
 	if cost := time.Now().Sub(start); cost > slowRequestTime {
-		log.Warnf("txn runs too slow, cost %s", cost)
+		log.Warnf("txn runs too slow, resp: %v, err: %v, cost: %s", resp, err, cost)
 	}
 
 	return resp, errors.Trace(err)
