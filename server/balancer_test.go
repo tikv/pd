@@ -138,7 +138,7 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(bop.ops, HasLen, 1)
 
-	op, ok := bop.ops[0].(*ChangePeerOperator)
+	op, ok := bop.ops[0].(*OnceOperator).op.(*ChangePeerOperator)
 	c.Assert(ok, IsTrue)
 	c.Assert(op.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(op.changePeer.GetPeer().GetStoreId(), Equals, uint64(4))
@@ -149,7 +149,7 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	bop, err = db.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 
-	op, ok = bop.ops[0].(*ChangePeerOperator)
+	op, ok = bop.ops[0].(*OnceOperator).op.(*ChangePeerOperator)
 	c.Assert(ok, IsTrue)
 	c.Assert(op.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(op.changePeer.GetPeer().GetStoreId(), Equals, uint64(3))
@@ -172,7 +172,7 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	bop, err = db.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 
-	op, ok = bop.ops[0].(*ChangePeerOperator)
+	op, ok = bop.ops[0].(*OnceOperator).op.(*ChangePeerOperator)
 	c.Assert(ok, IsTrue)
 	c.Assert(op.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))

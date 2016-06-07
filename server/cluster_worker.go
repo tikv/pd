@@ -58,7 +58,6 @@ func (c *raftCluster) HandleRegionHeartbeat(region *metapb.Region, leader *metap
 		}
 	}
 
-
 	ret, res, err := balanceOperator.Do(region, leader)
 	if ret {
 		// Do finished, remove it.
