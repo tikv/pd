@@ -27,8 +27,11 @@ type Balancer interface {
 
 const (
 	// If the used ratio of one storage is greater than this value,
-	// it will never be used as a selected target and it should be rebalanced.
-	maxCapacityUsedRatio = 0.4
+	// it should be rebalanced.
+	capacityUsedRatio = 0.4
+	// If the used ratio of one storage is greater than this value,
+	// it will never be used as a selected target.
+	maxCapacityUsedRatio = 0.9
 )
 
 var (
@@ -37,10 +40,15 @@ var (
 )
 
 type capacityBalancer struct {
+	capacityUsedRatio    float64
+	maxCapacityUsedRatio float64
 }
 
 func newCapacityBalancer() *capacityBalancer {
-	return &capacityBalancer{}
+	return &capacityBalancer{
+		capacityUsedRatio:    capacityUsedRatio,
+		maxCapacityUsedRatio: maxCapacityUsedRatio,
+	}
 }
 
 func (cb *capacityBalancer) SelectFromStore(stores []*StoreInfo, useFilter bool) *StoreInfo {
@@ -51,7 +59,7 @@ func (cb *capacityBalancer) SelectFromStore(stores []*StoreInfo, useFilter bool)
 		}
 
 		if useFilter {
-			if store.usedRatio() <= maxCapacityUsedRatio {
+			if store.usedRatio() <= cb.capacityUsedRatio {
 				continue
 			}
 		}
@@ -77,6 +85,10 @@ func (cb *capacityBalancer) SelectToStore(stores []*StoreInfo, excluded map[uint
 		}
 
 		if _, ok := excluded[store.store.GetId()]; ok {
+			continue
+		}
+
+		if store.usedRatio() >= cb.maxCapacityUsedRatio {
 			continue
 		}
 
@@ -205,15 +217,16 @@ func (cb *capacityBalancer) Balance(cluster *ClusterInfo) (*BalanceOperator, err
 
 // defaultBalancer is used for default config change, like add/remove peer.
 type defaultBalancer struct {
-	capacityBalancer
+	*capacityBalancer
 	region *metapb.Region
 	leader *metapb.Peer
 }
 
 func newDefaultBalancer(region *metapb.Region, leader *metapb.Peer) *defaultBalancer {
 	return &defaultBalancer{
-		region: region,
-		leader: leader,
+		region:           region,
+		leader:           leader,
+		capacityBalancer: newCapacityBalancer(),
 	}
 }
 

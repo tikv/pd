@@ -93,7 +93,6 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 
 	region := clusterInfo.regions.GetRegion([]byte("a"))
 	c.Assert(region.GetPeers(), HasLen, 1)
-	peer := region.GetPeers()[0]
 
 	// The store id will be 1,2,3,4.
 	store := clusterInfo.getStore(1)
@@ -131,6 +130,9 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 		Available: proto.Uint64(40),
 	}
 	clusterInfo.addStore(store)
+
+	// Get leader peer.
+	peer := region.GetPeers()[0]
 
 	// Test add peer.
 	db := newDefaultBalancer(region, peer)
@@ -172,8 +174,115 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	bop, err = db.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 
+	// Now we cannot remove leader peer, so the result is peer in store 2.
 	op, ok = bop.ops[0].(*OnceOperator).op.(*ChangePeerOperator)
 	c.Assert(ok, IsTrue)
 	c.Assert(op.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
+}
+
+func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
+	clusterInfo := s.newClusterInfo(c)
+	c.Assert(clusterInfo, NotNil)
+
+	region := clusterInfo.regions.GetRegion([]byte("a"))
+	c.Assert(region.GetPeers(), HasLen, 1)
+
+	// The store id will be 1,2,3,4.
+	store := clusterInfo.getStore(1)
+	c.Assert(store, NotNil)
+	store.stats = &pdpb.StoreStats{
+		StoreId:   proto.Uint64(store.store.GetId()),
+		Capacity:  proto.Uint64(100),
+		Available: proto.Uint64(60),
+	}
+	clusterInfo.addStore(store)
+
+	store = clusterInfo.getStore(2)
+	c.Assert(store, NotNil)
+	store.stats = &pdpb.StoreStats{
+		StoreId:   proto.Uint64(store.store.GetId()),
+		Capacity:  proto.Uint64(100),
+		Available: proto.Uint64(70),
+	}
+	clusterInfo.addStore(store)
+
+	store = clusterInfo.getStore(3)
+	c.Assert(store, NotNil)
+	store.stats = &pdpb.StoreStats{
+		StoreId:   proto.Uint64(store.store.GetId()),
+		Capacity:  proto.Uint64(100),
+		Available: proto.Uint64(80),
+	}
+	clusterInfo.addStore(store)
+
+	store = clusterInfo.getStore(4)
+	c.Assert(store, NotNil)
+	store.stats = &pdpb.StoreStats{
+		StoreId:   proto.Uint64(store.store.GetId()),
+		Capacity:  proto.Uint64(100),
+		Available: proto.Uint64(90),
+	}
+	clusterInfo.addStore(store)
+
+	// Now we have all stores with low capacityUsedRatio, so we need not to do balance.
+	cb := newCapacityBalancer()
+	cb.capacityUsedRatio = 0.4
+	cb.maxCapacityUsedRatio = 0.9
+	bop, err := cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop, IsNil)
+
+	// Get leader peer.
+	peer := region.GetPeers()[0]
+	c.Assert(peer, NotNil)
+
+	// Add two peers.
+	db := newDefaultBalancer(region, peer)
+	bop, err = db.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+
+	op, ok := bop.ops[0].(*OnceOperator).op.(*ChangePeerOperator)
+	c.Assert(ok, IsTrue)
+	c.Assert(op.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op.changePeer.GetPeer().GetStoreId(), Equals, uint64(4))
+
+	region.Peers = append(region.Peers, op.changePeer.GetPeer())
+
+	db = newDefaultBalancer(region, peer)
+	bop, err = db.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+
+	op, ok = bop.ops[0].(*OnceOperator).op.(*ChangePeerOperator)
+	c.Assert(ok, IsTrue)
+	c.Assert(op.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op.changePeer.GetPeer().GetStoreId(), Equals, uint64(3))
+
+	region.Peers = append(region.Peers, op.changePeer.GetPeer())
+
+	clusterInfo.regions.updateRegion(region)
+
+	// Reset capacityUsedRatio = 0.3 to balance region.
+	// Now the region is (1,3,4), the balance operators should be
+	// 1) leader transfer: 1 -> 4
+	// 2) add peer: 2
+	// 3) remove peer: 1
+	cb = newCapacityBalancer()
+	cb.capacityUsedRatio = 0.3
+	cb.maxCapacityUsedRatio = 0.9
+	bop, err = cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop.ops, HasLen, 3)
+
+	op1 := bop.ops[0].(*TransferLeaderOperator)
+	c.Assert(op1.oldLeader.GetStoreId(), Equals, uint64(1))
+	c.Assert(op1.newLeader.GetStoreId(), Equals, uint64(4))
+
+	op2 := bop.ops[1].(*ChangePeerOperator)
+	c.Assert(op2.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op2.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
+
+	op3 := bop.ops[2].(*ChangePeerOperator)
+	c.Assert(op3.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(op3.changePeer.GetPeer().GetStoreId(), Equals, uint64(1))
 }
