@@ -28,11 +28,6 @@ import (
 )
 
 func (c *raftCluster) handleAddPeerReq(region *metapb.Region) (*metapb.Peer, error) {
-	peerID, err := c.s.idAlloc.Alloc()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
 	stores := c.cachedCluster.getStores()
 
 	// Find a proper store which the region has not in.
@@ -54,6 +49,12 @@ LOOP:
 				continue LOOP
 			}
 		}
+
+		peerID, err := c.s.idAlloc.Alloc()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
 		return &metapb.Peer{
 			Id:      proto.Uint64(peerID),
 			StoreId: proto.Uint64(storeID),
