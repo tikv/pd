@@ -95,41 +95,10 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	c.Assert(region.GetPeers(), HasLen, 1)
 
 	// The store id will be 1,2,3,4.
-	store := clusterInfo.getStore(1)
-	c.Assert(store, NotNil)
-	store.stats = &pdpb.StoreStats{
-		StoreId:   proto.Uint64(store.store.GetId()),
-		Capacity:  proto.Uint64(100),
-		Available: proto.Uint64(10),
-	}
-	clusterInfo.addStore(store)
-
-	store = clusterInfo.getStore(2)
-	c.Assert(store, NotNil)
-	store.stats = &pdpb.StoreStats{
-		StoreId:   proto.Uint64(store.store.GetId()),
-		Capacity:  proto.Uint64(100),
-		Available: proto.Uint64(20),
-	}
-	clusterInfo.addStore(store)
-
-	store = clusterInfo.getStore(3)
-	c.Assert(store, NotNil)
-	store.stats = &pdpb.StoreStats{
-		StoreId:   proto.Uint64(store.store.GetId()),
-		Capacity:  proto.Uint64(100),
-		Available: proto.Uint64(30),
-	}
-	clusterInfo.addStore(store)
-
-	store = clusterInfo.getStore(4)
-	c.Assert(store, NotNil)
-	store.stats = &pdpb.StoreStats{
-		StoreId:   proto.Uint64(store.store.GetId()),
-		Capacity:  proto.Uint64(100),
-		Available: proto.Uint64(40),
-	}
-	clusterInfo.addStore(store)
+	s.updateStore(c, clusterInfo, 1, 100, 10)
+	s.updateStore(c, clusterInfo, 2, 100, 20)
+	s.updateStore(c, clusterInfo, 3, 100, 30)
+	s.updateStore(c, clusterInfo, 4, 100, 40)
 
 	// Get leader peer.
 	peer := region.GetPeers()[0]
@@ -181,6 +150,17 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	c.Assert(op.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 }
 
+func (s *testBalancerSuite) updateStore(c *C, clusterInfo *ClusterInfo, storeID uint64, capacity uint64, available uint64) {
+	store := clusterInfo.getStore(storeID)
+	c.Assert(store, NotNil)
+	store.stats = &pdpb.StoreStats{
+		StoreId:   proto.Uint64(store.store.GetId()),
+		Capacity:  proto.Uint64(capacity),
+		Available: proto.Uint64(available),
+	}
+	clusterInfo.addStore(store)
+}
+
 func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	clusterInfo := s.newClusterInfo(c)
 	c.Assert(clusterInfo, NotNil)
@@ -189,41 +169,10 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	c.Assert(region.GetPeers(), HasLen, 1)
 
 	// The store id will be 1,2,3,4.
-	store := clusterInfo.getStore(1)
-	c.Assert(store, NotNil)
-	store.stats = &pdpb.StoreStats{
-		StoreId:   proto.Uint64(store.store.GetId()),
-		Capacity:  proto.Uint64(100),
-		Available: proto.Uint64(60),
-	}
-	clusterInfo.addStore(store)
-
-	store = clusterInfo.getStore(2)
-	c.Assert(store, NotNil)
-	store.stats = &pdpb.StoreStats{
-		StoreId:   proto.Uint64(store.store.GetId()),
-		Capacity:  proto.Uint64(100),
-		Available: proto.Uint64(70),
-	}
-	clusterInfo.addStore(store)
-
-	store = clusterInfo.getStore(3)
-	c.Assert(store, NotNil)
-	store.stats = &pdpb.StoreStats{
-		StoreId:   proto.Uint64(store.store.GetId()),
-		Capacity:  proto.Uint64(100),
-		Available: proto.Uint64(80),
-	}
-	clusterInfo.addStore(store)
-
-	store = clusterInfo.getStore(4)
-	c.Assert(store, NotNil)
-	store.stats = &pdpb.StoreStats{
-		StoreId:   proto.Uint64(store.store.GetId()),
-		Capacity:  proto.Uint64(100),
-		Available: proto.Uint64(90),
-	}
-	clusterInfo.addStore(store)
+	s.updateStore(c, clusterInfo, 1, 100, 60)
+	s.updateStore(c, clusterInfo, 2, 100, 70)
+	s.updateStore(c, clusterInfo, 3, 100, 80)
+	s.updateStore(c, clusterInfo, 4, 100, 90)
 
 	// Now we have all stores with low capacityUsedRatio, so we need not to do balance.
 	cb := newCapacityBalancer()
@@ -285,4 +234,18 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	op3 := bop.ops[2].(*ChangePeerOperator)
 	c.Assert(op3.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op3.changePeer.GetPeer().GetStoreId(), Equals, uint64(1))
+
+	// If the region leader is to be balanced, but there is no store to balance to,
+	// then we will do nothing.
+	s.updateStore(c, clusterInfo, 1, 100, 10)
+	s.updateStore(c, clusterInfo, 2, 100, 20)
+	s.updateStore(c, clusterInfo, 3, 100, 30)
+	s.updateStore(c, clusterInfo, 4, 100, 40)
+
+	cb = newCapacityBalancer()
+	cb.capacityUsedRatio = 0.4
+	cb.maxCapacityUsedRatio = 0.6
+	bop, err = cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop, IsNil)
 }
