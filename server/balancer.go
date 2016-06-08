@@ -244,7 +244,7 @@ func (db *defaultBalancer) addPeer(cluster *ClusterInfo) (*BalanceOperator, erro
 		return nil, errors.Trace(err)
 	}
 	if peer == nil {
-		log.Warnf("find no peer to remove for region %v", db.region)
+		log.Warnf("find no store to add peer for region %v", db.region)
 		return nil, nil
 	}
 
@@ -268,7 +268,7 @@ func (db *defaultBalancer) removePeer(cluster *ClusterInfo) (*BalanceOperator, e
 		return nil, errors.Trace(err)
 	}
 	if peer == nil {
-		log.Warnf("find no store to add peer for region %v", db.region)
+		log.Warnf("find no store to remove peer for region %v", db.region)
 		return nil, nil
 	}
 
