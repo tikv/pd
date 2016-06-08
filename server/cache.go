@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/google/btree"
@@ -24,9 +25,13 @@ import (
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	statsd "gopkg.in/alexcesaro/statsd.v2"
 )
 
-const defaultBtreeDegree = 64
+const (
+	defaultBtreeDegree = 64
+	maxRandRegionTime  = 500 * time.Millisecond
+)
 
 type searchKeyItem struct {
 	region *metapb.Region
@@ -345,6 +350,7 @@ func (r *RegionsInfo) randRegion(storeID uint64) *metapb.Region {
 		return nil
 	}
 
+	start := time.Now()
 	idx, randIdx, randRegionID := 0, rand.Intn(len(storeRegions)), uint64(0)
 	for regionID := range storeRegions {
 		if idx == randIdx {
@@ -353,6 +359,11 @@ func (r *RegionsInfo) randRegion(storeID uint64) *metapb.Region {
 		}
 
 		idx++
+	}
+
+	// TODO: if costs too much time, we may refactor the rand region way.
+	if cost := time.Now().Sub(start); cost > maxRandRegionTime {
+		log.Warnf("select region %d in %d regions for store %d too slow, cost %s", randRegionID, len(storeRegions), storeID, cost)
 	}
 
 	region, ok := r.regions[randRegionID]
@@ -397,14 +408,21 @@ type ClusterInfo struct {
 	clusterRoot string
 
 	idAlloc IDAllocator
+
+	stats *statsd.Client
 }
 
 func newClusterInfo(clusterRoot string) *ClusterInfo {
 	cluster := &ClusterInfo{
 		clusterRoot: clusterRoot,
 		stores:      make(map[uint64]*StoreInfo),
+		regions:     newRegionsInfo(),
 	}
-	cluster.regions = newRegionsInfo()
+
+	// create a Mute stats, can' fail.
+	stats, _ := statsd.New(statsd.Mute(true))
+	cluster.stats = stats
+
 	return cluster
 }
 
