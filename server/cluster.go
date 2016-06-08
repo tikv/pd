@@ -75,6 +75,8 @@ func (c *raftCluster) Start(meta metapb.Cluster) error {
 
 	c.cachedCluster = newClusterInfo(c.clusterRoot)
 	c.cachedCluster.idAlloc = c.s.idAlloc
+	c.cachedCluster.stats = c.s.stats
+
 	c.cachedCluster.setMeta(&meta)
 
 	// Cache all stores when start the cluster. We don't have

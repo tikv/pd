@@ -139,23 +139,31 @@ func (bw *balancerWorker) allowBalance() bool {
 }
 
 func (bw *balancerWorker) doBalance() error {
+	stats := bw.cluster.stats
+
 	for i := 0; i < maxRetryBalanceNumber; i++ {
 		if !bw.allowBalance() {
 			return nil
 		}
 
+		stats.Increment("balance.select")
 		// TODO: support select balance count in balancer.
 		balanceOperator, err := bw.balancer.Balance(bw.cluster)
 		if err != nil {
+			stats.Increment("balance.select.fail")
 			return errors.Trace(err)
 		}
 		if balanceOperator == nil {
+			stats.Increment("balance.select.none")
 			return nil
 		}
 
 		if bw.addBalanceOperator(balanceOperator.GetRegionID(), balanceOperator) {
+			stats.Increment("balance.select.success")
 			return nil
 		}
+
+		stats.Increment("balance.select.duplicate")
 
 		// Here mean the selected region has an operator already, we may retry to
 		// select another region for balance.
