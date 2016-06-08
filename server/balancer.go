@@ -178,6 +178,11 @@ func (cb *capacityBalancer) Balance(cluster *ClusterInfo) (*BalanceOperator, err
 		return nil, nil
 	}
 
+	// If region peer count is less than max peer count, no need to do balance.
+	if len(region.GetPeers()) < int(cluster.getMeta().GetMaxPeerCount()) {
+		return nil, nil
+	}
+
 	// Secondly, select one region peer to do leader transfer.
 	followerPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 	excludedStores := make(map[uint64]struct{}, len(region.GetPeers()))
