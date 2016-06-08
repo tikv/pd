@@ -44,10 +44,10 @@ type capacityBalancer struct {
 	maxCapacityUsedRatio float64
 }
 
-func newCapacityBalancer() *capacityBalancer {
+func newCapacityBalancer(minRatio float64, maxRatio float64) *capacityBalancer {
 	return &capacityBalancer{
-		minCapacityUsedRatio: minCapacityUsedRatio,
-		maxCapacityUsedRatio: maxCapacityUsedRatio,
+		minCapacityUsedRatio: minRatio,
+		maxCapacityUsedRatio: maxRatio,
 	}
 }
 
@@ -224,9 +224,10 @@ type defaultBalancer struct {
 
 func newDefaultBalancer(region *metapb.Region, leader *metapb.Peer) *defaultBalancer {
 	return &defaultBalancer{
-		region:           region,
-		leader:           leader,
-		capacityBalancer: newCapacityBalancer(),
+		region: region,
+		leader: leader,
+		// TODO: we should use capacity used ratio configuration later.
+		capacityBalancer: newCapacityBalancer(minCapacityUsedRatio, maxCapacityUsedRatio),
 	}
 }
 

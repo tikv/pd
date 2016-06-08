@@ -62,6 +62,10 @@ type Config struct {
 	// Metric prefix.
 	MetricPrefix string
 
+	// For capacity balance.
+	MinCapacityUsedRatio float64
+	MaxCapacityUsedRatio float64
+
 	// Only test can change it.
 	nextRetryDelay time.Duration
 }
@@ -90,5 +94,13 @@ func (c *Config) adjust() {
 
 	if len(c.MetricPrefix) == 0 {
 		c.MetricPrefix = defaultMetrixPrefix
+	}
+
+	if c.MinCapacityUsedRatio == 0 {
+		c.MinCapacityUsedRatio = minCapacityUsedRatio
+	}
+
+	if c.MaxCapacityUsedRatio == 0 {
+		c.MaxCapacityUsedRatio = maxCapacityUsedRatio
 	}
 }

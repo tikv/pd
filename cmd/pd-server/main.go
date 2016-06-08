@@ -27,17 +27,19 @@ import (
 )
 
 var (
-	addr          = flag.String("addr", "127.0.0.1:1234", "server listening address")
-	advertiseAddr = flag.String("advertise-addr", "", "server advertise listening address [127.0.0.1:1234] for client communication")
-	etcdAddrs     = flag.String("etcd", "127.0.0.1:2379", "Etcd endpoints, separated by comma")
-	rootPath      = flag.String("root", "/pd", "pd root path in etcd")
-	leaderLease   = flag.Int64("lease", 3, "leader lease time (second)")
-	logLevel      = flag.String("L", "debug", "log level: info, debug, warn, error, fatal")
-	pprofAddr     = flag.String("pprof", ":6060", "pprof HTTP listening address")
-	clusterID     = flag.Uint64("cluster-id", 0, "cluster ID")
-	maxPeerCount  = flag.Uint("max-peer-count", 3, "max peer count for the region")
-	metricAddr    = flag.String("metric-addr", "", "StatsD metric address")
-	metricPrefix  = flag.String("metric-prefix", "pd", "metric prefix")
+	addr            = flag.String("addr", "127.0.0.1:1234", "server listening address")
+	advertiseAddr   = flag.String("advertise-addr", "", "server advertise listening address [127.0.0.1:1234] for client communication")
+	etcdAddrs       = flag.String("etcd", "127.0.0.1:2379", "Etcd endpoints, separated by comma")
+	rootPath        = flag.String("root", "/pd", "pd root path in etcd")
+	leaderLease     = flag.Int64("lease", 3, "leader lease time (second)")
+	logLevel        = flag.String("L", "debug", "log level: info, debug, warn, error, fatal")
+	pprofAddr       = flag.String("pprof", ":6060", "pprof HTTP listening address")
+	clusterID       = flag.Uint64("cluster-id", 0, "cluster ID")
+	maxPeerCount    = flag.Uint("max-peer-count", 3, "max peer count for the region")
+	metricAddr      = flag.String("metric-addr", "", "StatsD metric address")
+	metricPrefix    = flag.String("metric-prefix", "pd", "metric prefix")
+	minCapUsedRatio = flag.Float64("min-capacity-used-ratio", 0.4, "min capacity used ratio for choosing store in balance")
+	maxCapUsedRatio = flag.Float64("max-capacity-used-ratio", 0.9, "max capacity used ratio for choosing store in balance")
 )
 
 func main() {
@@ -54,15 +56,17 @@ func main() {
 	}()
 
 	cfg := &server.Config{
-		Addr:          *addr,
-		AdvertiseAddr: *advertiseAddr,
-		EtcdAddrs:     strings.Split(*etcdAddrs, ","),
-		RootPath:      *rootPath,
-		LeaderLease:   *leaderLease,
-		ClusterID:     *clusterID,
-		MaxPeerCount:  uint32(*maxPeerCount),
-		MetricAddr:    *metricAddr,
-		MetricPrefix:  *metricPrefix,
+		Addr:                 *addr,
+		AdvertiseAddr:        *advertiseAddr,
+		EtcdAddrs:            strings.Split(*etcdAddrs, ","),
+		RootPath:             *rootPath,
+		LeaderLease:          *leaderLease,
+		ClusterID:            *clusterID,
+		MaxPeerCount:         uint32(*maxPeerCount),
+		MetricAddr:           *metricAddr,
+		MetricPrefix:         *metricPrefix,
+		MinCapacityUsedRatio: *minCapUsedRatio,
+		MaxCapacityUsedRatio: *maxCapUsedRatio,
 	}
 
 	svr, err := server.NewServer(cfg)
