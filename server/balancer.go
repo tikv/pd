@@ -105,7 +105,7 @@ func (cb *capacityBalancer) SelectToStore(stores []*StoreInfo, excluded map[uint
 	return resultStore
 }
 
-func (cb *capacityBalancer) SelectBalanceRegion(stores []*StoreInfo, regions *RegionsInfo) (*metapb.Region, *metapb.Peer) {
+func (cb *capacityBalancer) SelectBalanceRegion(stores []*StoreInfo, cluster *ClusterInfo) (*metapb.Region, *metapb.Peer) {
 	store := cb.SelectFromStore(stores, true)
 	if store == nil {
 		return nil, nil
@@ -113,7 +113,13 @@ func (cb *capacityBalancer) SelectBalanceRegion(stores []*StoreInfo, regions *Re
 
 	// Random select one leader region from store.
 	storeID := store.store.GetId()
-	region := regions.randRegion(storeID)
+	region := cluster.regions.randRegion(storeID)
+
+	// If region peer count is less than max peer count, no need to do balance.
+	if len(region.GetPeers()) < int(cluster.getMeta().GetMaxPeerCount()) {
+		return nil, nil
+	}
+
 	leaderPeer := leaderPeer(region, storeID)
 	return region, leaderPeer
 }
@@ -172,7 +178,7 @@ func (cb *capacityBalancer) SelectRemovePeer(cluster *ClusterInfo, peers map[uin
 func (cb *capacityBalancer) Balance(cluster *ClusterInfo) (*BalanceOperator, error) {
 	// Firstly, select one balance region from cluster info.
 	stores := cluster.getStores()
-	region, oldLeader := cb.SelectBalanceRegion(stores, cluster.regions)
+	region, oldLeader := cb.SelectBalanceRegion(stores, cluster)
 	if region == nil || oldLeader == nil {
 		log.Warn("region cannot be found to do balance")
 		return nil, nil
@@ -244,7 +250,7 @@ func (db *defaultBalancer) addPeer(cluster *ClusterInfo) (*BalanceOperator, erro
 		return nil, errors.Trace(err)
 	}
 	if peer == nil {
-		log.Warnf("find no peer to remove for region %v", db.region)
+		log.Warnf("find no store to add peer for region %v", db.region)
 		return nil, nil
 	}
 
@@ -268,7 +274,7 @@ func (db *defaultBalancer) removePeer(cluster *ClusterInfo) (*BalanceOperator, e
 		return nil, errors.Trace(err)
 	}
 	if peer == nil {
-		log.Warnf("find no store to add peer for region %v", db.region)
+		log.Warnf("find no store to remove peer for region %v", db.region)
 		return nil, nil
 	}
 
