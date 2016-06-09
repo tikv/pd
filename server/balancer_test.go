@@ -175,6 +175,12 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
 
+	// Now region peer count is less than max peer count, so we need not to do balance.
+	cb = newCapacityBalancer(0.1, 0.9)
+	bop, err = cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop, IsNil)
+
 	// Get leader peer.
 	leaderPeer := region.GetPeers()[0]
 	c.Assert(leaderPeer, NotNil)
