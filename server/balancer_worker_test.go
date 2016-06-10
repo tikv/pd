@@ -82,4 +82,50 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	op3 := bop.ops[2].(*ChangePeerOperator)
 	c.Assert(op3.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op3.changePeer.GetPeer().GetStoreId(), Equals, uint64(1))
+
+	c.Assert(s.balancerWorker.balanceOperators, HasLen, 1)
+	c.Assert(s.balancerWorker.balancerCache.count(), Equals, 1)
+
+	// Since we have already cached region balance operator, so recall doBalance will do nothing.
+	ret = s.balancerWorker.doBalance()
+	c.Assert(ret, IsNil)
+
+	oldBop := bop
+	bop, ok = s.balancerWorker.balanceOperators[regionID]
+	c.Assert(ok, IsTrue)
+	c.Assert(bop, DeepEquals, oldBop)
+
+	// Try to remove region balance operator cache, but we also have balance expire cache, so
+	// we also cannot get a new balancer.
+	delete(s.balancerWorker.balanceOperators, regionID)
+	c.Assert(s.balancerWorker.balanceOperators, HasLen, 0)
+	c.Assert(s.balancerWorker.balancerCache.count(), Equals, 1)
+
+	ret = s.balancerWorker.doBalance()
+	c.Assert(ret, IsNil)
+	c.Assert(s.balancerWorker.balanceOperators, HasLen, 0)
+
+	// Remove balance expire cache, this time we can get a new balancer now.
+	s.balancerWorker.removeBalanceOperator(regionID)
+	c.Assert(s.balancerWorker.balanceOperators, HasLen, 0)
+	c.Assert(s.balancerWorker.balancerCache.count(), Equals, 0)
+
+	ret = s.balancerWorker.doBalance()
+	c.Assert(ret, IsNil)
+
+	bop, ok = s.balancerWorker.balanceOperators[regionID]
+	c.Assert(ok, IsTrue)
+	c.Assert(bop.ops, HasLen, 3)
+
+	op1 = bop.ops[0].(*TransferLeaderOperator)
+	c.Assert(op1.oldLeader.GetStoreId(), Equals, uint64(1))
+	c.Assert(op1.newLeader.GetStoreId(), Equals, uint64(4))
+
+	op2 = bop.ops[1].(*ChangePeerOperator)
+	c.Assert(op2.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op2.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
+
+	op3 = bop.ops[2].(*ChangePeerOperator)
+	c.Assert(op3.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(op3.changePeer.GetPeer().GetStoreId(), Equals, uint64(1))
 }

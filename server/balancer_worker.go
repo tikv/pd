@@ -14,6 +14,7 @@
 package server
 
 import (
+	"strconv"
 	"sync"
 	"time"
 
@@ -43,6 +44,8 @@ type balancerWorker struct {
 
 	balancer Balancer
 
+	balancerCache *ExpireCache
+
 	quit chan struct{}
 }
 
@@ -53,6 +56,7 @@ func newBalancerWorker(cluster *ClusterInfo, balancer Balancer, interval time.Du
 		balanceOperators: make(map[uint64]*BalanceOperator),
 		balanceCount:     defaultBalanceCount,
 		balancer:         balancer,
+		balancerCache:    NewExpireCache(interval),
 		quit:             make(chan struct{}),
 	}
 
@@ -102,9 +106,21 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *BalanceOperato
 		return false
 	}
 
+	// If the region is set balanced some time before, we can't set
+	// it again in a time interval.
+	regionIDkey := strconv.Itoa(int(regionID))
+	_, ok = bw.balancerCache.get(regionIDkey)
+	if ok {
+		return false
+	}
+
 	// TODO: should we check allowBalance again here?
 
 	bw.balanceOperators[regionID] = op
+
+	// Now the region expire time is 2*bw.interval.
+	bw.balancerCache.set(regionIDkey, nil, 2*bw.interval)
+
 	return true
 }
 
@@ -113,6 +129,9 @@ func (bw *balancerWorker) removeBalanceOperator(regionID uint64) {
 	defer bw.Unlock()
 
 	delete(bw.balanceOperators, regionID)
+
+	regionIDkey := strconv.Itoa(int(regionID))
+	bw.balancerCache.delete(regionIDkey)
 }
 
 func (bw *balancerWorker) getBalanceOperator(regionID uint64) *BalanceOperator {
@@ -163,7 +182,7 @@ func (bw *balancerWorker) doBalance() error {
 			return nil
 		}
 
-		stats.Increment("balance.select.duplicate")
+		stats.Increment("balance.select.fail")
 
 		// Here mean the selected region has an operator already, we may retry to
 		// select another region for balance.
