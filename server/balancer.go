@@ -105,7 +105,7 @@ func (cb *capacityBalancer) SelectToStore(stores []*StoreInfo, excluded map[uint
 	return resultStore
 }
 
-func (cb *capacityBalancer) SelectBalanceRegion(stores []*StoreInfo, cluster *ClusterInfo) (*metapb.Region, *metapb.Peer) {
+func (cb *capacityBalancer) SelectBalanceRegion(cluster *ClusterInfo, stores []*StoreInfo) (*metapb.Region, *metapb.Peer) {
 	store := cb.SelectFromStore(stores, true)
 	if store == nil {
 		return nil, nil
@@ -115,7 +115,7 @@ func (cb *capacityBalancer) SelectBalanceRegion(stores []*StoreInfo, cluster *Cl
 	storeID := store.store.GetId()
 	region := cluster.regions.randRegion(storeID)
 
-	// If region peer count is less than max peer count, no need to do balance.
+	// If region peer count is less than max peer count, no need to do capacity balance.
 	if len(region.GetPeers()) < int(cluster.getMeta().GetMaxPeerCount()) {
 		return nil, nil
 	}
@@ -178,7 +178,7 @@ func (cb *capacityBalancer) SelectRemovePeer(cluster *ClusterInfo, peers map[uin
 func (cb *capacityBalancer) Balance(cluster *ClusterInfo) (*BalanceOperator, error) {
 	// Firstly, select one balance region from cluster info.
 	stores := cluster.getStores()
-	region, oldLeader := cb.SelectBalanceRegion(stores, cluster)
+	region, oldLeader := cb.SelectBalanceRegion(cluster, stores)
 	if region == nil || oldLeader == nil {
 		log.Warn("region cannot be found to do balance")
 		return nil, nil

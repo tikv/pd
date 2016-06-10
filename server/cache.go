@@ -351,6 +351,11 @@ func (r *RegionsInfo) randRegion(storeID uint64) *metapb.Region {
 	}
 
 	start := time.Now()
+
+	// TODO: we should use a better way for region select.
+	// E.g, if the region is selected a little time before, we can't select
+	// it again quickly.
+
 	idx, randIdx, randRegionID := 0, rand.Intn(len(storeRegions)), uint64(0)
 	for regionID := range storeRegions {
 		if idx == randIdx {
