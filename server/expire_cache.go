@@ -19,23 +19,23 @@ import (
 )
 
 type cacheItem struct {
-	key    string
+	key    uint64
 	value  interface{}
 	expire time.Time
 }
 
-// ExpireCache is an expired cache.
-type ExpireCache struct {
+// ExpireRegionCache is an expired region cache.
+type ExpireRegionCache struct {
 	sync.RWMutex
 
-	items      map[string]cacheItem
+	items      map[uint64]cacheItem
 	gcInterval time.Duration
 }
 
-// NewExpireCache returns a new expired cache.
-func NewExpireCache(gcInterval time.Duration) *ExpireCache {
-	c := &ExpireCache{
-		items:      make(map[string]cacheItem),
+// NewExpireRegionCache returns a new expired region cache.
+func NewExpireRegionCache(gcInterval time.Duration) *ExpireRegionCache {
+	c := &ExpireRegionCache{
+		items:      make(map[uint64]cacheItem),
 		gcInterval: gcInterval,
 	}
 
@@ -43,7 +43,7 @@ func NewExpireCache(gcInterval time.Duration) *ExpireCache {
 	return c
 }
 
-func (c *ExpireCache) get(key string) (interface{}, bool) {
+func (c *ExpireRegionCache) get(key uint64) (interface{}, bool) {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -53,14 +53,13 @@ func (c *ExpireCache) get(key string) (interface{}, bool) {
 	}
 
 	if item.expire.Before(time.Now()) {
-		delete(c.items, key)
 		return nil, false
 	}
 
 	return item.value, true
 }
 
-func (c *ExpireCache) set(key string, value interface{}, expire time.Duration) {
+func (c *ExpireRegionCache) set(key uint64, value interface{}, expire time.Duration) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -70,28 +69,28 @@ func (c *ExpireCache) set(key string, value interface{}, expire time.Duration) {
 	}
 }
 
-func (c *ExpireCache) delete(key string) {
+func (c *ExpireRegionCache) delete(key uint64) {
 	c.Lock()
 	defer c.Unlock()
 
 	delete(c.items, key)
 }
 
-func (c *ExpireCache) count() int {
+func (c *ExpireRegionCache) count() int {
 	c.RLock()
 	defer c.RUnlock()
 
 	return len(c.items)
 }
 
-func (c *ExpireCache) doGC() {
+func (c *ExpireRegionCache) doGC() {
 	ticker := time.NewTicker(c.gcInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			keys := []string{}
+			keys := []uint64{}
 			c.RLock()
 			for k := range c.items {
 				keys = append(keys, k)

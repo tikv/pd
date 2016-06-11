@@ -19,26 +19,26 @@ import (
 	. "github.com/pingcap/check"
 )
 
-var _ = Suite(&testExpireCacheSuite{})
+var _ = Suite(&testExpireRegionCacheSuite{})
 
-type testExpireCacheSuite struct {
+type testExpireRegionCacheSuite struct {
 }
 
-func (s *testExpireCacheSuite) TestExpireCache(c *C) {
-	cache := NewExpireCache(time.Second)
-	cache.set("k1", 1, 1*time.Second)
-	cache.set("k2", "v2", 5*time.Second)
-	cache.set("k3", 3.0, 5*time.Second)
+func (s *testExpireRegionCacheSuite) TestExpireRegionCache(c *C) {
+	cache := NewExpireRegionCache(time.Second)
+	cache.set(1, 1, 1*time.Second)
+	cache.set(2, "v2", 5*time.Second)
+	cache.set(3, 3.0, 5*time.Second)
 
-	value, ok := cache.get("k1")
+	value, ok := cache.get(1)
 	c.Assert(ok, IsTrue)
 	c.Assert(value, Equals, 1)
 
-	value, ok = cache.get("k2")
+	value, ok = cache.get(2)
 	c.Assert(ok, IsTrue)
 	c.Assert(value, Equals, "v2")
 
-	value, ok = cache.get("k3")
+	value, ok = cache.get(3)
 	c.Assert(ok, IsTrue)
 	c.Assert(value, Equals, 3.0)
 
@@ -46,27 +46,27 @@ func (s *testExpireCacheSuite) TestExpireCache(c *C) {
 
 	time.Sleep(2 * time.Second)
 
-	value, ok = cache.get("k1")
+	value, ok = cache.get(1)
 	c.Assert(ok, IsFalse)
 	c.Assert(value, IsNil)
 
-	value, ok = cache.get("k2")
+	value, ok = cache.get(2)
 	c.Assert(ok, IsTrue)
 	c.Assert(value, Equals, "v2")
 
-	value, ok = cache.get("k3")
+	value, ok = cache.get(3)
 	c.Assert(ok, IsTrue)
 	c.Assert(value, Equals, 3.0)
 
 	c.Assert(cache.count(), Equals, 2)
 
-	cache.delete("k2")
+	cache.delete(2)
 
-	value, ok = cache.get("k2")
+	value, ok = cache.get(2)
 	c.Assert(ok, IsFalse)
 	c.Assert(value, IsNil)
 
-	value, ok = cache.get("k3")
+	value, ok = cache.get(3)
 	c.Assert(ok, IsTrue)
 	c.Assert(value, Equals, 3.0)
 

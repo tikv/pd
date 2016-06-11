@@ -14,7 +14,6 @@
 package server
 
 import (
-	"strconv"
 	"sync"
 	"time"
 
@@ -44,7 +43,7 @@ type balancerWorker struct {
 
 	balancer Balancer
 
-	balancerCache *ExpireCache
+	regionCache *ExpireRegionCache
 
 	quit chan struct{}
 }
@@ -56,7 +55,7 @@ func newBalancerWorker(cluster *ClusterInfo, balancer Balancer, interval time.Du
 		balanceOperators: make(map[uint64]*BalanceOperator),
 		balanceCount:     defaultBalanceCount,
 		balancer:         balancer,
-		balancerCache:    NewExpireCache(interval),
+		regionCache:      NewExpireRegionCache(interval),
 		quit:             make(chan struct{}),
 	}
 
@@ -108,8 +107,7 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *BalanceOperato
 
 	// If the region is set balanced some time before, we can't set
 	// it again in a time interval.
-	regionIDkey := strconv.Itoa(int(regionID))
-	_, ok = bw.balancerCache.get(regionIDkey)
+	_, ok = bw.regionCache.get(regionID)
 	if ok {
 		return false
 	}
@@ -119,7 +117,7 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *BalanceOperato
 	bw.balanceOperators[regionID] = op
 
 	// Now the region expire time is 2*bw.interval.
-	bw.balancerCache.set(regionIDkey, nil, 2*bw.interval)
+	bw.regionCache.set(regionID, nil, 2*bw.interval)
 
 	return true
 }
@@ -129,9 +127,7 @@ func (bw *balancerWorker) removeBalanceOperator(regionID uint64) {
 	defer bw.Unlock()
 
 	delete(bw.balanceOperators, regionID)
-
-	regionIDkey := strconv.Itoa(int(regionID))
-	bw.balancerCache.delete(regionIDkey)
+	bw.regionCache.delete(regionID)
 }
 
 func (bw *balancerWorker) getBalanceOperator(regionID uint64) *BalanceOperator {

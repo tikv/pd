@@ -84,7 +84,7 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	c.Assert(op3.changePeer.GetPeer().GetStoreId(), Equals, uint64(1))
 
 	c.Assert(s.balancerWorker.balanceOperators, HasLen, 1)
-	c.Assert(s.balancerWorker.balancerCache.count(), Equals, 1)
+	c.Assert(s.balancerWorker.regionCache.count(), Equals, 1)
 
 	// Since we have already cached region balance operator, so recall doBalance will do nothing.
 	ret = s.balancerWorker.doBalance()
@@ -99,7 +99,7 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	// we also cannot get a new balancer.
 	delete(s.balancerWorker.balanceOperators, regionID)
 	c.Assert(s.balancerWorker.balanceOperators, HasLen, 0)
-	c.Assert(s.balancerWorker.balancerCache.count(), Equals, 1)
+	c.Assert(s.balancerWorker.regionCache.count(), Equals, 1)
 
 	ret = s.balancerWorker.doBalance()
 	c.Assert(ret, IsNil)
@@ -108,7 +108,7 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	// Remove balance expire cache, this time we can get a new balancer now.
 	s.balancerWorker.removeBalanceOperator(regionID)
 	c.Assert(s.balancerWorker.balanceOperators, HasLen, 0)
-	c.Assert(s.balancerWorker.balancerCache.count(), Equals, 0)
+	c.Assert(s.balancerWorker.regionCache.count(), Equals, 0)
 
 	ret = s.balancerWorker.doBalance()
 	c.Assert(ret, IsNil)
