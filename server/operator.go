@@ -176,7 +176,7 @@ func (co *ChangePeerOperator) Do(region *metapb.Region, leader *metapb.Peer) (bo
 
 // TransferLeaderOperator is used to do leader transfer.
 type TransferLeaderOperator struct {
-	mustSuc bool
+	mustSuccess bool
 
 	oldLeader *metapb.Peer
 	newLeader *metapb.Peer
@@ -220,8 +220,8 @@ func (lto *TransferLeaderOperator) Do(region *metapb.Region, leader *metapb.Peer
 		return true, nil, nil
 	}
 
-	// If lto.mustSuc is true, then lto.check should always be true.
-	if lto.mustSuc {
+	// If lto.mustSuccess is true, then lto.check should always be true.
+	if lto.mustSuccess {
 		return false, nil, errors.Errorf("transfer leader operator called twice - %v", lto)
 	}
 
@@ -230,6 +230,6 @@ func (lto *TransferLeaderOperator) Do(region *metapb.Region, leader *metapb.Peer
 			Peer: lto.newLeader,
 		},
 	}
-	lto.mustSuc = true
+	lto.mustSuccess = true
 	return false, res, nil
 }
