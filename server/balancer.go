@@ -214,7 +214,7 @@ func (cb *capacityBalancer) Balance(cluster *ClusterInfo) (*BalanceOperator, err
 		return nil, nil
 	}
 
-	leaderTransferOperator := newTransferLeaderOperator(oldLeader, newLeader)
+	leaderTransferOperator := newTransferLeaderOperator(oldLeader, newLeader, maxWaitCount)
 	addPeerOperator := newAddPeerOperator(newPeer)
 	removePeerOperator := newRemovePeerOperator(oldLeader)
 

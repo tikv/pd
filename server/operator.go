@@ -21,6 +21,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/raftpb"
 )
 
+const (
+	// TODO: we can make this as a config flag.
+	// maxWaitCount is the heartbeat count when we check whether the operator is successful.
+	maxWaitCount = 3
+)
+
 // Operator is the interface to do some operations.
 type Operator interface {
 	// Do does the operator, if finished then return true.
@@ -176,16 +182,19 @@ func (co *ChangePeerOperator) Do(region *metapb.Region, leader *metapb.Peer) (bo
 
 // TransferLeaderOperator is used to do leader transfer.
 type TransferLeaderOperator struct {
-	mustSuccess bool
+	count        int
+	maxWaitCount int
 
 	oldLeader *metapb.Peer
 	newLeader *metapb.Peer
 }
 
-func newTransferLeaderOperator(oldLeader, newLeader *metapb.Peer) *TransferLeaderOperator {
+func newTransferLeaderOperator(oldLeader, newLeader *metapb.Peer, waitCount int) *TransferLeaderOperator {
 	return &TransferLeaderOperator{
-		oldLeader: oldLeader,
-		newLeader: newLeader,
+		oldLeader:    oldLeader,
+		newLeader:    newLeader,
+		count:        0,
+		maxWaitCount: waitCount,
 	}
 }
 
@@ -220,9 +229,14 @@ func (lto *TransferLeaderOperator) Do(region *metapb.Region, leader *metapb.Peer
 		return true, nil, nil
 	}
 
-	// If lto.mustSuccess is true, then lto.check should always be true.
-	if lto.mustSuccess {
-		return false, nil, errors.Errorf("transfer leader operator called twice - %v", lto)
+	// If lto.count is greater than 0, then we should check whether it exceeds the lto.maxWaitCount.
+	if lto.count > 0 {
+		if lto.count >= lto.maxWaitCount {
+			return false, nil, errors.Errorf("transfer leader operator called %d times but still be unsucceessful - %v", lto.count, lto)
+		}
+
+		lto.count++
+		return false, nil, nil
 	}
 
 	res := &pdpb.RegionHeartbeatResponse{
@@ -230,6 +244,6 @@ func (lto *TransferLeaderOperator) Do(region *metapb.Region, leader *metapb.Peer
 			Peer: lto.newLeader,
 		},
 	}
-	lto.mustSuccess = true
+	lto.count++
 	return false, res, nil
 }
