@@ -20,8 +20,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-// NewError returns a Response with go error.
-func NewError(err error) *pdpb.Response {
+// newError returns a Response with go error.
+func newError(err error) *pdpb.Response {
 	r := &pdpb.Response{
 		Header: &pdpb.ResponseHeader{},
 	}
@@ -33,13 +33,13 @@ func NewError(err error) *pdpb.Response {
 	return r
 }
 
-// NewErrorf returns a Response with special format message.
-func NewErrorf(format string, args ...interface{}) *pdpb.Response {
-	return NewError(fmt.Errorf(format, args...))
+// newErrorf returns a Response with special format message.
+func newErrorf(format string, args ...interface{}) *pdpb.Response {
+	return newError(fmt.Errorf(format, args...))
 }
 
-// NewBootstrappedError returns a BootstrappedError response.
-func NewBootstrappedError() *pdpb.Response {
+// newBootstrappedError returns a BootstrappedError response.
+func newBootstrappedError() *pdpb.Response {
 	r := &pdpb.Response{
 		Header: &pdpb.ResponseHeader{},
 	}

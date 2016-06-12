@@ -130,8 +130,8 @@ func (l *leaders) update(regionID uint64, storeID uint64) {
 	l.regionStores[regionID] = storeID
 }
 
-// RegionsInfo is regions cache info.
-type RegionsInfo struct {
+// regionsInfo is regions cache info.
+type regionsInfo struct {
 	sync.RWMutex
 
 	// region id -> RegionInfo
@@ -142,8 +142,8 @@ type RegionsInfo struct {
 	leaders *leaders
 }
 
-func newRegionsInfo() *RegionsInfo {
-	return &RegionsInfo{
+func newRegionsInfo() *regionsInfo {
+	return &regionsInfo{
 		regions:       make(map[uint64]*metapb.Region),
 		searchRegions: btree.New(defaultBtreeDegree),
 		leaders: &leaders{
@@ -153,10 +153,10 @@ func newRegionsInfo() *RegionsInfo {
 	}
 }
 
-// GetRegion gets the region by regionKey. Return nil if not found.
-func (r *RegionsInfo) GetRegion(regionKey []byte) *metapb.Region {
+// getRegion gets the region by regionKey. Return nil if not found.
+func (r *regionsInfo) getRegion(regionKey []byte) *metapb.Region {
 	r.RLock()
-	region := r.getRegion(regionKey)
+	region := r.innerGetRegion(regionKey)
 	r.RUnlock()
 
 	if region == nil {
@@ -170,7 +170,7 @@ func (r *RegionsInfo) GetRegion(regionKey []byte) *metapb.Region {
 	return nil
 }
 
-func (r *RegionsInfo) getRegion(regionKey []byte) *metapb.Region {
+func (r *regionsInfo) innerGetRegion(regionKey []byte) *metapb.Region {
 	startSearchItem := &searchKeyItem{
 		region: &metapb.Region{
 			StartKey: regionKey,
@@ -190,7 +190,7 @@ func (r *RegionsInfo) getRegion(regionKey []byte) *metapb.Region {
 	return searchItem.region
 }
 
-func (r *RegionsInfo) addRegion(region *metapb.Region) {
+func (r *regionsInfo) addRegion(region *metapb.Region) {
 	item := &searchKeyItem{
 		region: region,
 	}
@@ -208,7 +208,7 @@ func (r *RegionsInfo) addRegion(region *metapb.Region) {
 	r.regions[region.GetId()] = region
 }
 
-func (r *RegionsInfo) updateRegion(region *metapb.Region) {
+func (r *regionsInfo) updateRegion(region *metapb.Region) {
 	item := &searchKeyItem{
 		region: region,
 	}
@@ -221,7 +221,7 @@ func (r *RegionsInfo) updateRegion(region *metapb.Region) {
 	r.regions[region.GetId()] = region
 }
 
-func (r *RegionsInfo) removeRegion(region *metapb.Region) {
+func (r *regionsInfo) removeRegion(region *metapb.Region) {
 	item := &searchKeyItem{
 		region: region,
 	}
@@ -237,22 +237,14 @@ func (r *RegionsInfo) removeRegion(region *metapb.Region) {
 	r.leaders.remove(regionID)
 }
 
-// HeartbeatResp is the response after heartbeat handling.
-// If PutRegion is not nil, we should update it in etcd,
-// if RemoveRegion is not nil, we should remove it in etcd.
-type HeartbeatResp struct {
-	PutRegion    *metapb.Region
-	RemoveRegion *metapb.Region
-}
-
-func (r *RegionsInfo) heartbeatVersion(region *metapb.Region) (bool, *metapb.Region, error) {
+func (r *regionsInfo) heartbeatVersion(region *metapb.Region) (bool, *metapb.Region, error) {
 	// For split, we should handle heartbeat carefully.
 	// E.g, for region 1 [a, c) -> 1 [a, b) + 2 [b, c).
 	// after split, region 1 and 2 will do heartbeat independently.
 	startKey := region.GetStartKey()
 	endKey := region.GetEndKey()
 
-	searchRegion := r.getRegion(startKey)
+	searchRegion := r.innerGetRegion(startKey)
 	if searchRegion == nil {
 		// Find no region for start key, insert directly.
 		r.addRegion(region)
@@ -293,7 +285,7 @@ func (r *RegionsInfo) heartbeatVersion(region *metapb.Region) (bool, *metapb.Reg
 	return true, searchRegion, nil
 }
 
-func (r *RegionsInfo) heartbeatConfVer(region *metapb.Region) (bool, error) {
+func (r *regionsInfo) heartbeatConfVer(region *metapb.Region) (bool, error) {
 	// ConfVer is handled after Version, so here
 	// we must get the region by ID.
 	curRegion := r.regions[region.GetId()]
@@ -310,8 +302,16 @@ func (r *RegionsInfo) heartbeatConfVer(region *metapb.Region) (bool, error) {
 	return false, nil
 }
 
-// Heartbeat handles heartbeat for the region.
-func (r *RegionsInfo) Heartbeat(region *metapb.Region, leaderPeer *metapb.Peer) (*HeartbeatResp, error) {
+// heartbeatResp is the response after heartbeat handling.
+// If putRegion is not nil, we should update it in etcd,
+// if removeRegion is not nil, we should remove it in etcd.
+type heartbeatResp struct {
+	putRegion    *metapb.Region
+	removeRegion *metapb.Region
+}
+
+// heartbeat handles heartbeat for the region.
+func (r *regionsInfo) heartbeat(region *metapb.Region, leaderPeer *metapb.Peer) (*heartbeatResp, error) {
 	r.Lock()
 	defer r.Unlock()
 
@@ -329,19 +329,19 @@ func (r *RegionsInfo) Heartbeat(region *metapb.Region, leaderPeer *metapb.Peer) 
 	storeID := leaderPeer.GetStoreId()
 	r.leaders.update(regionID, storeID)
 
-	resp := &HeartbeatResp{
-		RemoveRegion: removeRegion,
+	resp := &heartbeatResp{
+		removeRegion: removeRegion,
 	}
 
 	if versionUpdated || confVerUpdated {
-		resp.PutRegion = region
+		resp.putRegion = region
 	}
 
 	return resp, nil
 }
 
-// randRegion random selects a region from region cache.
-func (r *RegionsInfo) randRegion(storeID uint64) *metapb.Region {
+// randRegion selects a region from region cache randomly.
+func (r *regionsInfo) randRegion(storeID uint64) *metapb.Region {
 	r.RLock()
 	defer r.RUnlock()
 
@@ -374,23 +374,23 @@ func (r *RegionsInfo) randRegion(storeID uint64) *metapb.Region {
 	return nil
 }
 
-// StoreInfo is store cache info.
-type StoreInfo struct {
+// storeInfo is store cache info.
+type storeInfo struct {
 	store *metapb.Store
 
 	// store capacity info.
 	stats *pdpb.StoreStats
 }
 
-func (s *StoreInfo) clone() *StoreInfo {
-	return &StoreInfo{
+func (s *storeInfo) clone() *storeInfo {
+	return &storeInfo{
 		store: proto.Clone(s.store).(*metapb.Store),
 		stats: proto.Clone(s.stats).(*pdpb.StoreStats),
 	}
 }
 
 // usedRatio is the used capacity ratio of storage capacity.
-func (s *StoreInfo) usedRatio() float64 {
+func (s *storeInfo) usedRatio() float64 {
 	if s.stats.GetCapacity() == 0 {
 		return 0
 	}
@@ -398,13 +398,13 @@ func (s *StoreInfo) usedRatio() float64 {
 	return float64(s.stats.GetCapacity()-s.stats.GetAvailable()) / float64(s.stats.GetCapacity())
 }
 
-// ClusterInfo is cluster cache info.
-type ClusterInfo struct {
+// clusterInfo is cluster cache info.
+type clusterInfo struct {
 	sync.RWMutex
 
 	meta        *metapb.Cluster
-	stores      map[uint64]*StoreInfo
-	regions     *RegionsInfo
+	stores      map[uint64]*storeInfo
+	regions     *regionsInfo
 	clusterRoot string
 
 	idAlloc IDAllocator
@@ -412,10 +412,10 @@ type ClusterInfo struct {
 	stats *statsd.Client
 }
 
-func newClusterInfo(clusterRoot string) *ClusterInfo {
-	cluster := &ClusterInfo{
+func newClusterInfo(clusterRoot string) *clusterInfo {
+	cluster := &clusterInfo{
 		clusterRoot: clusterRoot,
-		stores:      make(map[uint64]*StoreInfo),
+		stores:      make(map[uint64]*storeInfo),
 		regions:     newRegionsInfo(),
 	}
 
@@ -426,11 +426,11 @@ func newClusterInfo(clusterRoot string) *ClusterInfo {
 	return cluster
 }
 
-func (c *ClusterInfo) addStore(store *metapb.Store) {
+func (c *clusterInfo) addStore(store *metapb.Store) {
 	c.Lock()
 	defer c.Unlock()
 
-	storeInfo := &StoreInfo{
+	storeInfo := &storeInfo{
 		store: store,
 		stats: &pdpb.StoreStats{},
 	}
@@ -438,7 +438,7 @@ func (c *ClusterInfo) addStore(store *metapb.Store) {
 	c.stores[store.GetId()] = storeInfo
 }
 
-func (c *ClusterInfo) updateStoreStatus(stats *pdpb.StoreStats) bool {
+func (c *clusterInfo) updateStoreStatus(stats *pdpb.StoreStats) bool {
 	c.Lock()
 	defer c.Unlock()
 
@@ -452,14 +452,14 @@ func (c *ClusterInfo) updateStoreStatus(stats *pdpb.StoreStats) bool {
 	return true
 }
 
-func (c *ClusterInfo) removeStore(storeID uint64) {
+func (c *clusterInfo) removeStore(storeID uint64) {
 	c.Lock()
 	defer c.Unlock()
 
 	delete(c.stores, storeID)
 }
 
-func (c *ClusterInfo) getStore(storeID uint64) *StoreInfo {
+func (c *clusterInfo) getStore(storeID uint64) *storeInfo {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -471,11 +471,11 @@ func (c *ClusterInfo) getStore(storeID uint64) *StoreInfo {
 	return store.clone()
 }
 
-func (c *ClusterInfo) getStores() []*StoreInfo {
+func (c *clusterInfo) getStores() []*storeInfo {
 	c.RLock()
 	defer c.RUnlock()
 
-	stores := make([]*StoreInfo, 0, len(c.stores))
+	stores := make([]*storeInfo, 0, len(c.stores))
 	for _, store := range c.stores {
 		stores = append(stores, store.clone())
 	}
@@ -483,7 +483,7 @@ func (c *ClusterInfo) getStores() []*StoreInfo {
 	return stores
 }
 
-func (c *ClusterInfo) getMetaStores() []metapb.Store {
+func (c *clusterInfo) getMetaStores() []metapb.Store {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -495,14 +495,14 @@ func (c *ClusterInfo) getMetaStores() []metapb.Store {
 	return stores
 }
 
-func (c *ClusterInfo) setMeta(meta *metapb.Cluster) {
+func (c *clusterInfo) setMeta(meta *metapb.Cluster) {
 	c.Lock()
 	defer c.Unlock()
 
 	c.meta = meta
 }
 
-func (c *ClusterInfo) getMeta() *metapb.Cluster {
+func (c *clusterInfo) getMeta() *metapb.Cluster {
 	c.RLock()
 	defer c.RUnlock()
 

@@ -25,7 +25,7 @@ type testExpireRegionCacheSuite struct {
 }
 
 func (s *testExpireRegionCacheSuite) TestExpireRegionCache(c *C) {
-	cache := NewExpireRegionCache(time.Second, 2*time.Second)
+	cache := newExpireRegionCache(time.Second, 2*time.Second)
 	cache.setWithTTL(1, 1, 1*time.Second)
 	cache.setWithTTL(2, "v2", 5*time.Second)
 	cache.setWithTTL(3, 3.0, 5*time.Second)

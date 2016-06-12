@@ -41,7 +41,7 @@ func newConn(s *Server, netConn net.Conn) (*conn, error) {
 	s.connsLock.Lock()
 	defer s.connsLock.Unlock()
 
-	if !s.IsLeader() {
+	if !s.isLeader() {
 		return nil, errors.Errorf("server <%s> is not leader, cannot create new connection <%s>", s.cfg.Addr, netConn.RemoteAddr())
 	}
 
@@ -60,7 +60,7 @@ func newConn(s *Server, netConn net.Conn) (*conn, error) {
 func (c *conn) run() {
 	defer func() {
 		c.s.wg.Done()
-		c.Close()
+		c.close()
 
 		c.s.connsLock.Lock()
 		delete(c.s.conns, c)
@@ -87,7 +87,7 @@ func (c *conn) run() {
 		response, err := c.handleRequest(request)
 		if err != nil {
 			log.Errorf("handle request %s err %v", request, errors.ErrorStack(err))
-			response = NewError(err)
+			response = newError(err)
 		} else {
 			stats.Increment("handle_request.success")
 		}
@@ -136,7 +136,7 @@ func updateResponse(req *pdpb.Request, resp *pdpb.Response) {
 	resp.Header.ClusterId = req.Header.ClusterId
 }
 
-func (c *conn) Close() error {
+func (c *conn) close() error {
 	return errors.Trace(c.conn.Close())
 }
 

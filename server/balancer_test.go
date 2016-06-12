@@ -33,7 +33,7 @@ func (s *testBalancerSuite) getRootPath() string {
 	return "test_balancer"
 }
 
-func (s *testBalancerSuite) newClusterInfo(c *C) *ClusterInfo {
+func (s *testBalancerSuite) newClusterInfo(c *C) *clusterInfo {
 	clusterInfo := newClusterInfo(s.getRootPath())
 	clusterInfo.idAlloc = newMockIDAllocator()
 
@@ -81,7 +81,7 @@ func (s *testBalancerSuite) newClusterInfo(c *C) *ClusterInfo {
 	return clusterInfo
 }
 
-func (s *testBalancerSuite) updateStore(c *C, clusterInfo *ClusterInfo, storeID uint64, capacity uint64, available uint64) {
+func (s *testBalancerSuite) updateStore(c *C, clusterInfo *clusterInfo, storeID uint64, capacity uint64, available uint64) {
 	stats := &pdpb.StoreStats{
 		StoreId:   proto.Uint64(storeID),
 		Capacity:  proto.Uint64(capacity),
@@ -92,12 +92,12 @@ func (s *testBalancerSuite) updateStore(c *C, clusterInfo *ClusterInfo, storeID 
 	c.Assert(ok, IsTrue)
 }
 
-func (s *testBalancerSuite) addRegionPeer(c *C, clusterInfo *ClusterInfo, storeID uint64, region *metapb.Region, leaderPeer *metapb.Peer) {
+func (s *testBalancerSuite) addRegionPeer(c *C, clusterInfo *clusterInfo, storeID uint64, region *metapb.Region, leaderPeer *metapb.Peer) {
 	db := newDefaultBalancer(region, leaderPeer)
 	bop, err := db.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 
-	op, ok := bop.ops[0].(*OnceOperator).op.(*ChangePeerOperator)
+	op, ok := bop.ops[0].(*onceOperator).op.(*changePeerOperator)
 	c.Assert(ok, IsTrue)
 	c.Assert(op.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 
@@ -113,7 +113,7 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	clusterInfo := s.newClusterInfo(c)
 	c.Assert(clusterInfo, NotNil)
 
-	region := clusterInfo.regions.GetRegion([]byte("a"))
+	region := clusterInfo.regions.getRegion([]byte("a"))
 	c.Assert(region.GetPeers(), HasLen, 1)
 
 	// The store id will be 1,2,3,4.
@@ -150,7 +150,7 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	c.Assert(err, IsNil)
 
 	// Now we cannot remove leader peer, so the result is peer in store 2.
-	op, ok := bop.ops[0].(*OnceOperator).op.(*ChangePeerOperator)
+	op, ok := bop.ops[0].(*onceOperator).op.(*changePeerOperator)
 	c.Assert(ok, IsTrue)
 	c.Assert(op.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
@@ -160,7 +160,7 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	clusterInfo := s.newClusterInfo(c)
 	c.Assert(clusterInfo, NotNil)
 
-	region := clusterInfo.regions.GetRegion([]byte("a"))
+	region := clusterInfo.regions.getRegion([]byte("a"))
 	c.Assert(region.GetPeers(), HasLen, 1)
 
 	// The store id will be 1,2,3,4.
@@ -199,15 +199,15 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(bop.ops, HasLen, 3)
 
-	op1 := bop.ops[0].(*TransferLeaderOperator)
+	op1 := bop.ops[0].(*transferLeaderOperator)
 	c.Assert(op1.oldLeader.GetStoreId(), Equals, uint64(1))
 	c.Assert(op1.newLeader.GetStoreId(), Equals, uint64(4))
 
-	op2 := bop.ops[1].(*ChangePeerOperator)
+	op2 := bop.ops[1].(*changePeerOperator)
 	c.Assert(op2.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(op2.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 
-	op3 := bop.ops[2].(*ChangePeerOperator)
+	op3 := bop.ops[2].(*changePeerOperator)
 	c.Assert(op3.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op3.changePeer.GetPeer().GetStoreId(), Equals, uint64(1))
 

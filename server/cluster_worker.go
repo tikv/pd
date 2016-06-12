@@ -21,7 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-func (c *raftCluster) addDefaultBalanceOperator(region *metapb.Region, leader *metapb.Peer) (*BalanceOperator, error) {
+func (c *raftCluster) addDefaultBalanceOperator(region *metapb.Region, leader *metapb.Peer) (*balanceOperator, error) {
 	if !c.balancerWorker.allowBalance() {
 		return nil, nil
 	}
@@ -35,7 +35,7 @@ func (c *raftCluster) addDefaultBalanceOperator(region *metapb.Region, leader *m
 		return nil, nil
 	}
 
-	if c.balancerWorker.addBalanceOperator(balanceOperator.GetRegionID(), balanceOperator) {
+	if c.balancerWorker.addBalanceOperator(balanceOperator.getRegionID(), balanceOperator) {
 		return balanceOperator, nil
 	}
 
@@ -43,7 +43,7 @@ func (c *raftCluster) addDefaultBalanceOperator(region *metapb.Region, leader *m
 	return c.balancerWorker.getBalanceOperator(region.GetId()), nil
 }
 
-func (c *raftCluster) HandleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
+func (c *raftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
 	regionID := region.GetId()
 	balanceOperator := c.balancerWorker.getBalanceOperator(regionID)
 	var err error
@@ -73,10 +73,10 @@ func (c *raftCluster) HandleRegionHeartbeat(region *metapb.Region, leader *metap
 	return res, nil
 }
 
-func (c *raftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
+func (c *raftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
 	reqRegion := request.GetRegion()
 	startKey := reqRegion.GetStartKey()
-	region, err := c.GetRegion(startKey)
+	region, err := c.getRegion(startKey)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

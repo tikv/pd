@@ -34,28 +34,28 @@ type balancerWorker struct {
 
 	wg       sync.WaitGroup
 	interval time.Duration
-	cluster  *ClusterInfo
+	cluster  *clusterInfo
 
 	// should we extract to another structure, so
 	// Balancer can use it?
-	balanceOperators map[uint64]*BalanceOperator
+	balanceOperators map[uint64]*balanceOperator
 	balanceCount     int
 
 	balancer Balancer
 
-	regionCache *ExpireRegionCache
+	regionCache *expireRegionCache
 
 	quit chan struct{}
 }
 
-func newBalancerWorker(cluster *ClusterInfo, balancer Balancer, interval time.Duration) *balancerWorker {
+func newBalancerWorker(cluster *clusterInfo, balancer Balancer, interval time.Duration) *balancerWorker {
 	bw := &balancerWorker{
 		interval:         interval,
 		cluster:          cluster,
-		balanceOperators: make(map[uint64]*BalanceOperator),
+		balanceOperators: make(map[uint64]*balanceOperator),
 		balanceCount:     defaultBalanceCount,
 		balancer:         balancer,
-		regionCache:      NewExpireRegionCache(interval, 2*interval),
+		regionCache:      newExpireRegionCache(interval, 2*interval),
 		quit:             make(chan struct{}),
 	}
 
@@ -93,10 +93,10 @@ func (bw *balancerWorker) stop() {
 	bw.Lock()
 	defer bw.Unlock()
 
-	bw.balanceOperators = map[uint64]*BalanceOperator{}
+	bw.balanceOperators = map[uint64]*balanceOperator{}
 }
 
-func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *BalanceOperator) bool {
+func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *balanceOperator) bool {
 	bw.Lock()
 	defer bw.Unlock()
 
@@ -129,7 +129,7 @@ func (bw *balancerWorker) removeBalanceOperator(regionID uint64) {
 	bw.regionCache.delete(regionID)
 }
 
-func (bw *balancerWorker) getBalanceOperator(regionID uint64) *BalanceOperator {
+func (bw *balancerWorker) getBalanceOperator(regionID uint64) *balanceOperator {
 	bw.RLock()
 	defer bw.RUnlock()
 
@@ -172,7 +172,7 @@ func (bw *balancerWorker) doBalance() error {
 			return nil
 		}
 
-		if bw.addBalanceOperator(balanceOperator.GetRegionID(), balanceOperator) {
+		if bw.addBalanceOperator(balanceOperator.getRegionID(), balanceOperator) {
 			stats.Increment("balance.select.success")
 			return nil
 		}

@@ -34,7 +34,7 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	clusterInfo := s.newClusterInfo(c)
 	c.Assert(clusterInfo, NotNil)
 
-	region := clusterInfo.regions.GetRegion([]byte("a"))
+	region := clusterInfo.regions.getRegion([]byte("a"))
 	c.Assert(region.GetPeers(), HasLen, 1)
 
 	s.balancerWorker = newBalancerWorker(clusterInfo,
@@ -71,15 +71,37 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	c.Assert(ok, IsTrue)
 	c.Assert(bop.ops, HasLen, 3)
 
-	op1 := bop.ops[0].(*TransferLeaderOperator)
+	op1 := bop.ops[0].(*transferLeaderOperator)
+	c.Assert(op1.maxWaitCount, Equals, maxWaitCount)
 	c.Assert(op1.oldLeader.GetStoreId(), Equals, uint64(1))
 	c.Assert(op1.newLeader.GetStoreId(), Equals, uint64(4))
 
-	op2 := bop.ops[1].(*ChangePeerOperator)
+	// Now we check the maxWaitCount for transferLeaderOperator.
+	op1.maxWaitCount = 2
+
+	ok, res, err := op1.Do(region, leaderPeer)
+	c.Assert(err, IsNil)
+	c.Assert(ok, IsFalse)
+	c.Assert(res.GetTransferLeader().GetPeer().GetStoreId(), Equals, uint64(4))
+	c.Assert(op1.count, Equals, 1)
+
+	ok, res, err = op1.Do(region, leaderPeer)
+	c.Assert(err, IsNil)
+	c.Assert(ok, IsFalse)
+	c.Assert(res, IsNil)
+	c.Assert(op1.count, Equals, 2)
+
+	ok, res, err = op1.Do(region, leaderPeer)
+	c.Assert(err, NotNil)
+	c.Assert(ok, IsFalse)
+	c.Assert(res, IsNil)
+	c.Assert(op1.count, Equals, 2)
+
+	op2 := bop.ops[1].(*changePeerOperator)
 	c.Assert(op2.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(op2.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 
-	op3 := bop.ops[2].(*ChangePeerOperator)
+	op3 := bop.ops[2].(*changePeerOperator)
 	c.Assert(op3.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op3.changePeer.GetPeer().GetStoreId(), Equals, uint64(1))
 
@@ -117,15 +139,15 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	c.Assert(ok, IsTrue)
 	c.Assert(bop.ops, HasLen, 3)
 
-	op1 = bop.ops[0].(*TransferLeaderOperator)
+	op1 = bop.ops[0].(*transferLeaderOperator)
 	c.Assert(op1.oldLeader.GetStoreId(), Equals, uint64(1))
 	c.Assert(op1.newLeader.GetStoreId(), Equals, uint64(4))
 
-	op2 = bop.ops[1].(*ChangePeerOperator)
+	op2 = bop.ops[1].(*changePeerOperator)
 	c.Assert(op2.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(op2.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 
-	op3 = bop.ops[2].(*ChangePeerOperator)
+	op3 = bop.ops[2].(*changePeerOperator)
 	c.Assert(op3.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op3.changePeer.GetPeer().GetStoreId(), Equals, uint64(1))
 }
