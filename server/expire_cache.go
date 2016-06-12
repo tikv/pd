@@ -29,13 +29,15 @@ type ExpireRegionCache struct {
 	sync.RWMutex
 
 	items      map[uint64]cacheItem
+	ttl        time.Duration
 	gcInterval time.Duration
 }
 
 // NewExpireRegionCache returns a new expired region cache.
-func NewExpireRegionCache(gcInterval time.Duration) *ExpireRegionCache {
+func NewExpireRegionCache(gcInterval time.Duration, ttl time.Duration) *ExpireRegionCache {
 	c := &ExpireRegionCache{
 		items:      make(map[uint64]cacheItem),
+		ttl:        ttl,
 		gcInterval: gcInterval,
 	}
 
@@ -59,13 +61,17 @@ func (c *ExpireRegionCache) get(key uint64) (interface{}, bool) {
 	return item.value, true
 }
 
-func (c *ExpireRegionCache) set(key uint64, value interface{}, expire time.Duration) {
+func (c *ExpireRegionCache) set(key uint64, value interface{}) {
+	c.setWithTTL(key, value, c.ttl)
+}
+
+func (c *ExpireRegionCache) setWithTTL(key uint64, value interface{}, ttl time.Duration) {
 	c.Lock()
 	defer c.Unlock()
 
 	c.items[key] = cacheItem{
 		value:  value,
-		expire: time.Now().Add(expire),
+		expire: time.Now().Add(ttl),
 	}
 }
 
@@ -90,23 +96,16 @@ func (c *ExpireRegionCache) doGC() {
 	for {
 		select {
 		case <-ticker.C:
-			keys := []uint64{}
-			c.RLock()
-			for k := range c.items {
-				keys = append(keys, k)
-			}
-			c.RUnlock()
-
 			now := time.Now()
-			for _, key := range keys {
-				c.Lock()
+			c.Lock()
+			for key := range c.items {
 				if value, ok := c.items[key]; ok {
 					if value.expire.Before(now) {
 						delete(c.items, key)
 					}
 				}
-				c.Unlock()
 			}
+			c.Unlock()
 		}
 	}
 }

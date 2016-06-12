@@ -55,7 +55,7 @@ func newBalancerWorker(cluster *ClusterInfo, balancer Balancer, interval time.Du
 		balanceOperators: make(map[uint64]*BalanceOperator),
 		balanceCount:     defaultBalanceCount,
 		balancer:         balancer,
-		regionCache:      NewExpireRegionCache(interval),
+		regionCache:      NewExpireRegionCache(interval, 2*interval),
 		quit:             make(chan struct{}),
 	}
 
@@ -116,8 +116,7 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *BalanceOperato
 
 	bw.balanceOperators[regionID] = op
 
-	// Now the region expire time is 2*bw.interval.
-	bw.regionCache.set(regionID, nil, 2*bw.interval)
+	bw.regionCache.set(regionID, nil)
 
 	return true
 }
