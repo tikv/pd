@@ -185,6 +185,32 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	leaderPeer := region.GetPeers()[0]
 	c.Assert(leaderPeer, NotNil)
 
+	// If max peer count equals to 1, then we should add peer and do balance.
+	meta := clusterInfo.getMeta()
+	meta.MaxPeerCount = proto.Uint32(1)
+	clusterInfo.setMeta(meta)
+
+	cb = newCapacityBalancer(0.3, 0.9)
+	bop, err = cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop.ops, HasLen, 3)
+
+	op1 := bop.ops[0].(*changePeerOperator)
+	c.Assert(op1.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op1.changePeer.GetPeer().GetStoreId(), Equals, uint64(4))
+
+	op2 := bop.ops[1].(*transferLeaderOperator)
+	c.Assert(op2.oldLeader.GetStoreId(), Equals, uint64(1))
+	c.Assert(op2.newLeader.GetStoreId(), Equals, uint64(4))
+
+	op3 := bop.ops[2].(*changePeerOperator)
+	c.Assert(op3.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(op3.changePeer.GetPeer().GetStoreId(), Equals, uint64(1))
+
+	// Reset max peer count to 3.
+	meta.MaxPeerCount = proto.Uint32(3)
+	clusterInfo.setMeta(meta)
+
 	// Add two peers.
 	s.addRegionPeer(c, clusterInfo, 4, region, leaderPeer)
 	s.addRegionPeer(c, clusterInfo, 3, region, leaderPeer)
@@ -199,15 +225,15 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(bop.ops, HasLen, 3)
 
-	op1 := bop.ops[0].(*changePeerOperator)
+	op1 = bop.ops[0].(*changePeerOperator)
 	c.Assert(op1.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(op1.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 
-	op2 := bop.ops[1].(*transferLeaderOperator)
+	op2 = bop.ops[1].(*transferLeaderOperator)
 	c.Assert(op2.oldLeader.GetStoreId(), Equals, uint64(1))
 	c.Assert(op2.newLeader.GetStoreId(), Equals, uint64(4))
 
-	op3 := bop.ops[2].(*changePeerOperator)
+	op3 = bop.ops[2].(*changePeerOperator)
 	c.Assert(op3.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op3.changePeer.GetPeer().GetStoreId(), Equals, uint64(1))
 
