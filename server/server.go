@@ -42,7 +42,7 @@ type Server struct {
 
 	rootPath string
 
-	isLeader int64
+	isLeaderValue int64
 	// leader value saved in etcd leader key.
 	// Every write will use this to check leader validation.
 	leaderValue string
@@ -103,14 +103,14 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:      cfg,
-		listener: l,
-		client:   client,
-		isLeader: 0,
-		conns:    make(map[*conn]struct{}),
-		closed:   0,
-		rootPath: path.Join(cfg.RootPath, strconv.FormatUint(cfg.ClusterID, 10)),
-		stats:    stats,
+		cfg:           cfg,
+		listener:      l,
+		client:        client,
+		isLeaderValue: 0,
+		conns:         make(map[*conn]struct{}),
+		closed:        0,
+		rootPath:      path.Join(cfg.RootPath, strconv.FormatUint(cfg.ClusterID, 10)),
+		stats:         stats,
 	}
 
 	s.idAlloc = &idAllocator{s: s}
@@ -168,14 +168,9 @@ func (s *Server) Close() {
 	s.wg.Wait()
 }
 
-// IsClosed checks whether server is closed or not.
-func (s *Server) IsClosed() bool {
+// isClosed checks whether server is closed or not.
+func (s *Server) isClosed() bool {
 	return atomic.LoadInt64(&s.closed) == 1
-}
-
-// ListeningAddr returns listen address.
-func (s *Server) ListeningAddr() string {
-	return s.listener.Addr().String()
 }
 
 // Run runs the pd server.
@@ -217,7 +212,7 @@ func (s *Server) closeAllConnections() {
 	}
 
 	for conn := range s.conns {
-		err := conn.Close()
+		err := conn.close()
 		if err != nil {
 			log.Warnf("close conn failed - %v", err)
 		}

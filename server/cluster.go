@@ -56,13 +56,13 @@ type raftCluster struct {
 	clusterRoot string
 
 	// cached cluster info
-	cachedCluster *ClusterInfo
+	cachedCluster *clusterInfo
 
 	// balancer worker
 	balancerWorker *balancerWorker
 }
 
-func (c *raftCluster) Start(meta metapb.Cluster) error {
+func (c *raftCluster) start(meta metapb.Cluster) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -98,7 +98,7 @@ func (c *raftCluster) Start(meta metapb.Cluster) error {
 	return nil
 }
 
-func (c *raftCluster) Stop() {
+func (c *raftCluster) stop() {
 	c.Lock()
 	defer c.Unlock()
 
@@ -111,7 +111,7 @@ func (c *raftCluster) Stop() {
 	c.running = false
 }
 
-func (c *raftCluster) IsRunning() bool {
+func (c *raftCluster) isRunning() bool {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -123,7 +123,7 @@ func (s *Server) getClusterRootPath() string {
 }
 
 func (s *Server) getRaftCluster() (*raftCluster, error) {
-	if s.cluster.IsRunning() {
+	if s.cluster.isRunning() {
 		return s.cluster, nil
 	}
 
@@ -131,7 +131,7 @@ func (s *Server) getRaftCluster() (*raftCluster, error) {
 }
 
 func (s *Server) createRaftCluster() error {
-	if s.cluster.IsRunning() {
+	if s.cluster.isRunning() {
 		return nil
 	}
 
@@ -148,7 +148,7 @@ func (s *Server) createRaftCluster() error {
 		return errors.Trace(err)
 	}
 
-	if err = s.cluster.Start(clusterMeta); err != nil {
+	if err = s.cluster.start(clusterMeta); err != nil {
 		return errors.Trace(err)
 	}
 
@@ -258,12 +258,12 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 	}
 	if !resp.Succeeded {
 		log.Warnf("cluster %d already bootstrapped", clusterID)
-		return NewBootstrappedError(), nil
+		return newBootstrappedError(), nil
 	}
 
 	log.Infof("bootstrap cluster %d ok", clusterID)
 
-	if err = s.cluster.Start(clusterMeta); err != nil {
+	if err = s.cluster.start(clusterMeta); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -329,11 +329,11 @@ func (c *raftCluster) cacheAllRegions() error {
 	return nil
 }
 
-func (c *raftCluster) GetAllStores() ([]metapb.Store, error) {
+func (c *raftCluster) getAllStores() ([]metapb.Store, error) {
 	return c.cachedCluster.getMetaStores(), nil
 }
 
-func (c *raftCluster) GetStore(storeID uint64) (*metapb.Store, error) {
+func (c *raftCluster) getStore(storeID uint64) (*metapb.Store, error) {
 	if storeID == 0 {
 		return nil, errors.New("invalid zero store id")
 	}
@@ -346,11 +346,11 @@ func (c *raftCluster) GetStore(storeID uint64) (*metapb.Store, error) {
 	return store.store, nil
 }
 
-func (c *raftCluster) GetRegion(regionKey []byte) (*metapb.Region, error) {
-	return c.cachedCluster.regions.GetRegion(regionKey), nil
+func (c *raftCluster) getRegion(regionKey []byte) (*metapb.Region, error) {
+	return c.cachedCluster.regions.getRegion(regionKey), nil
 }
 
-func (c *raftCluster) PutStore(store *metapb.Store) error {
+func (c *raftCluster) putStore(store *metapb.Store) error {
 	if store.GetId() == 0 {
 		return errors.Errorf("invalid put store %v", store)
 	}
@@ -379,11 +379,11 @@ func (c *raftCluster) PutStore(store *metapb.Store) error {
 	return nil
 }
 
-func (c *raftCluster) GetConfig() (*metapb.Cluster, error) {
+func (c *raftCluster) getConfig() (*metapb.Cluster, error) {
 	return c.cachedCluster.getMeta(), nil
 }
 
-func (c *raftCluster) PutConfig(meta *metapb.Cluster) error {
+func (c *raftCluster) putConfig(meta *metapb.Cluster) error {
 	if meta.GetId() != c.clusterID {
 		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
 	}

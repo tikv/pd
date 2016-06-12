@@ -153,7 +153,8 @@ func (s *testClusterWorkerSuite) newMockRaftStore(c *C, metaStore *metapb.Store)
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 
-	cluster.PutStore(metaStore)
+	err = cluster.putStore(metaStore)
+	c.Assert(err, IsNil)
 
 	s.storeLock.Lock()
 	defer s.storeLock.Unlock()
@@ -193,12 +194,14 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
-	cluster.PutConfig(&metapb.Cluster{
+
+	err = cluster.putConfig(&metapb.Cluster{
 		Id:           proto.Uint64(s.clusterID),
 		MaxPeerCount: proto.Uint32(5),
 	})
+	c.Assert(err, IsNil)
 
-	stores, err := cluster.GetAllStores()
+	stores, err := cluster.getAllStores()
 	c.Assert(err, IsNil)
 	c.Assert(stores, HasLen, 5)
 }
@@ -212,7 +215,7 @@ func (s *testClusterWorkerSuite) checkRegionPeerCount(c *C, regionKey []byte, ex
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 
-	region, err := cluster.GetRegion(regionKey)
+	region, err := cluster.getRegion(regionKey)
 	c.Assert(err, IsNil)
 	c.Assert(region.Peers, HasLen, expectCount)
 	return region
@@ -316,7 +319,7 @@ func (s *testClusterWorkerSuite) heartbeatStore(c *C, conn net.Conn, msgID uint6
 }
 
 func mustGetRegion(c *C, cluster *raftCluster, key []byte, expect *metapb.Region) {
-	r, err := cluster.GetRegion(key)
+	r, err := cluster.getRegion(key)
 	c.Assert(err, IsNil)
 	c.Assert(r, DeepEquals, expect)
 }
@@ -340,10 +343,10 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 
-	meta, err := cluster.GetConfig()
+	meta, err := cluster.getConfig()
 	c.Assert(err, IsNil)
 	meta.MaxPeerCount = proto.Uint32(1)
-	err = cluster.PutConfig(meta)
+	err = cluster.putConfig(meta)
 	c.Assert(err, IsNil)
 
 	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
@@ -352,7 +355,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	defer conn.Close()
 
 	// split 1 to 1: [nil, m) 2: [m, nil), sync 1 first
-	r1, err := cluster.GetRegion([]byte("a"))
+	r1, err := cluster.getRegion([]byte("a"))
 	c.Assert(err, IsNil)
 	checkSearchRegions(c, cluster, []byte{})
 
@@ -401,7 +404,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
-	r1, err := cluster.GetRegion([]byte("a"))
+	r1, err := cluster.getRegion([]byte("a"))
 	c.Assert(err, IsNil)
 	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 	conn, err := net.Dial("tcp", leaderPd.GetAddr())
@@ -410,10 +413,10 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 	leaderPeer := s.chooseRegionLeader(c, r1)
 
 	// Set MaxPeerCount to 10.
-	meta, err := cluster.GetConfig()
+	meta, err := cluster.getConfig()
 	c.Assert(err, IsNil)
 	meta.MaxPeerCount = proto.Uint32(10)
-	err = cluster.PutConfig(meta)
+	err = cluster.putConfig(meta)
 	c.Assert(err, IsNil)
 
 	// Add Peers util all stores are used up.
@@ -439,13 +442,13 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 
-	meta, err := cluster.GetConfig()
+	meta, err := cluster.getConfig()
 	c.Assert(err, IsNil)
 	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
 
 	// There is only one region now, directly use it for test.
 	regionKey := []byte("a")
-	region, err := cluster.GetRegion(regionKey)
+	region, err := cluster.getRegion(regionKey)
 	c.Assert(err, IsNil)
 	c.Assert(region.Peers, HasLen, 1)
 
@@ -475,7 +478,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 	region = s.checkRegionPeerCount(c, regionKey, 5)
 
 	// Remove 2 peers.
-	err = cluster.PutConfig(&metapb.Cluster{
+	err = cluster.putConfig(&metapb.Cluster{
 		Id:           proto.Uint64(s.clusterID),
 		MaxPeerCount: proto.Uint32(3),
 	})
@@ -502,10 +505,10 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 
-	meta, err := cluster.GetConfig()
+	meta, err := cluster.getConfig()
 	c.Assert(err, IsNil)
 	meta.MaxPeerCount = proto.Uint32(2)
-	err = cluster.PutConfig(meta)
+	err = cluster.putConfig(meta)
 	c.Assert(err, IsNil)
 
 	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
@@ -513,7 +516,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	c.Assert(err, IsNil)
 	defer conn.Close()
 
-	r1, err := cluster.GetRegion([]byte("a"))
+	r1, err := cluster.getRegion([]byte("a"))
 	c.Assert(err, IsNil)
 	leaderPeer1 := s.chooseRegionLeader(c, r1)
 
@@ -542,7 +545,7 @@ func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
 	cluster, err := s.svr.getRaftCluster()
 	c.Assert(err, IsNil)
 
-	stores, err := cluster.GetAllStores()
+	stores, err := cluster.getAllStores()
 	c.Assert(err, IsNil)
 	c.Assert(stores, HasLen, 5)
 

@@ -109,7 +109,7 @@ func (s *testLeaderServerSuite) TestLeader(c *C) {
 	}
 
 	for i := 0; i < 100 && len(s.svrs) > 0; i++ {
-		leader, err := GetLeader(s.client, s.leaderPath)
+		leader, err := getLeader(s.client, s.leaderPath)
 		c.Assert(err, IsNil)
 
 		if leader == nil {
