@@ -96,7 +96,7 @@ func (c *conn) handleBootstrap(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Trace(err)
 	}
 	if cluster != nil {
-		return NewBootstrappedError(), nil
+		return newBootstrappedError(), nil
 	}
 
 	return c.s.bootstrapCluster(request)
@@ -125,7 +125,7 @@ func (c *conn) handleGetStore(req *pdpb.Request) (*pdpb.Response, error) {
 	}
 
 	storeID := request.GetStoreId()
-	store, err := cluster.GetStore(storeID)
+	store, err := cluster.getStore(storeID)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -148,7 +148,7 @@ func (c *conn) handleGetRegion(req *pdpb.Request) (*pdpb.Response, error) {
 	}
 
 	key := request.GetRegionKey()
-	region, err := cluster.GetRegion(key)
+	region, err := cluster.getRegion(key)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -181,32 +181,32 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		return nil, errors.Errorf("invalid request region, %v", request)
 	}
 
-	resp, err := cluster.cachedCluster.regions.Heartbeat(region, leader)
+	resp, err := cluster.cachedCluster.regions.heartbeat(region, leader)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	res, err := cluster.HandleRegionHeartbeat(region, leader)
+	res, err := cluster.handleRegionHeartbeat(region, leader)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	var ops []clientv3.Op
-	if resp.PutRegion != nil {
-		regionValue, err := proto.Marshal(resp.PutRegion)
+	if resp.putRegion != nil {
+		regionValue, err := proto.Marshal(resp.putRegion)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		regionPath := makeRegionKey(cluster.clusterRoot, resp.PutRegion.GetId())
+		regionPath := makeRegionKey(cluster.clusterRoot, resp.putRegion.GetId())
 		ops = append(ops, clientv3.OpPut(regionPath, string(regionValue)))
 	}
 
-	if resp.RemoveRegion != nil && resp.RemoveRegion.GetId() != resp.PutRegion.GetId() {
+	if resp.removeRegion != nil && resp.removeRegion.GetId() != resp.putRegion.GetId() {
 		// Well, we meet overlap and remove and then put the same region id,
 		// so here we ignore the remove operation here.
 		// The heartbeat will guarantee that if RemoveRegion exists, PutRegion can't
 		// be nil, if not, we will panic.
-		regionPath := makeRegionKey(cluster.clusterRoot, resp.RemoveRegion.GetId())
+		regionPath := makeRegionKey(cluster.clusterRoot, resp.removeRegion.GetId())
 		ops = append(ops, clientv3.OpDelete(regionPath))
 	}
 
@@ -264,7 +264,7 @@ func (c *conn) handleGetClusterConfig(req *pdpb.Request) (*pdpb.Response, error)
 		return nil, errors.Trace(err)
 	}
 
-	conf, err := cluster.GetConfig()
+	conf, err := cluster.getConfig()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -288,7 +288,7 @@ func (c *conn) handlePutClusterConfig(req *pdpb.Request) (*pdpb.Response, error)
 	}
 
 	conf := request.GetCluster()
-	if err = cluster.PutConfig(conf); err != nil {
+	if err = cluster.putConfig(conf); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -309,7 +309,7 @@ func (c *conn) handlePutStore(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Trace(err)
 	}
 
-	if err = cluster.PutStore(store); err != nil {
+	if err = cluster.putStore(store); err != nil {
 		return nil, errors.Trace(err)
 	}
 	return &pdpb.Response{
@@ -328,7 +328,7 @@ func (c *conn) handleAskSplit(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Trace(err)
 	}
 
-	split, err := cluster.HandleAskSplit(request)
+	split, err := cluster.handleAskSplit(request)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

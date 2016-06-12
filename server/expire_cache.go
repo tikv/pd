@@ -24,8 +24,8 @@ type cacheItem struct {
 	expire time.Time
 }
 
-// ExpireRegionCache is an expired region cache.
-type ExpireRegionCache struct {
+// expireRegionCache is an expired region cache.
+type expireRegionCache struct {
 	sync.RWMutex
 
 	items      map[uint64]cacheItem
@@ -33,9 +33,9 @@ type ExpireRegionCache struct {
 	gcInterval time.Duration
 }
 
-// NewExpireRegionCache returns a new expired region cache.
-func NewExpireRegionCache(gcInterval time.Duration, ttl time.Duration) *ExpireRegionCache {
-	c := &ExpireRegionCache{
+// newExpireRegionCache returns a new expired region cache.
+func newExpireRegionCache(gcInterval time.Duration, ttl time.Duration) *expireRegionCache {
+	c := &expireRegionCache{
 		items:      make(map[uint64]cacheItem),
 		ttl:        ttl,
 		gcInterval: gcInterval,
@@ -45,7 +45,7 @@ func NewExpireRegionCache(gcInterval time.Duration, ttl time.Duration) *ExpireRe
 	return c
 }
 
-func (c *ExpireRegionCache) get(key uint64) (interface{}, bool) {
+func (c *expireRegionCache) get(key uint64) (interface{}, bool) {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -61,11 +61,11 @@ func (c *ExpireRegionCache) get(key uint64) (interface{}, bool) {
 	return item.value, true
 }
 
-func (c *ExpireRegionCache) set(key uint64, value interface{}) {
+func (c *expireRegionCache) set(key uint64, value interface{}) {
 	c.setWithTTL(key, value, c.ttl)
 }
 
-func (c *ExpireRegionCache) setWithTTL(key uint64, value interface{}, ttl time.Duration) {
+func (c *expireRegionCache) setWithTTL(key uint64, value interface{}, ttl time.Duration) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -75,21 +75,21 @@ func (c *ExpireRegionCache) setWithTTL(key uint64, value interface{}, ttl time.D
 	}
 }
 
-func (c *ExpireRegionCache) delete(key uint64) {
+func (c *expireRegionCache) delete(key uint64) {
 	c.Lock()
 	defer c.Unlock()
 
 	delete(c.items, key)
 }
 
-func (c *ExpireRegionCache) count() int {
+func (c *expireRegionCache) count() int {
 	c.RLock()
 	defer c.RUnlock()
 
 	return len(c.items)
 }
 
-func (c *ExpireRegionCache) doGC() {
+func (c *expireRegionCache) doGC() {
 	ticker := time.NewTicker(c.gcInterval)
 	defer ticker.Stop()
 

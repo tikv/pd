@@ -28,9 +28,9 @@ import (
 	"golang.org/x/net/context"
 )
 
-// IsLeader returns whether server is leader or not.
-func (s *Server) IsLeader() bool {
-	return atomic.LoadInt64(&s.isLeader) == 1
+// isLeader returns whether server is leader or not.
+func (s *Server) isLeader() bool {
+	return atomic.LoadInt64(&s.isLeaderValue) == 1
 }
 
 func (s *Server) enableLeader(b bool) {
@@ -39,7 +39,7 @@ func (s *Server) enableLeader(b bool) {
 		value = 1
 	}
 
-	atomic.StoreInt64(&s.isLeader, value)
+	atomic.StoreInt64(&s.isLeaderValue, value)
 
 	if !b {
 		// if we lost leader, we may:
@@ -47,7 +47,7 @@ func (s *Server) enableLeader(b bool) {
 		//	2, close all running raft clusters
 		s.closeAllConnections()
 
-		s.cluster.Stop()
+		s.cluster.stop()
 	}
 }
 
@@ -59,7 +59,7 @@ func (s *Server) leaderLoop() {
 	defer s.wg.Done()
 
 	for {
-		if s.IsClosed() {
+		if s.isClosed() {
 			return
 		}
 
@@ -92,8 +92,8 @@ func (s *Server) leaderLoop() {
 	}
 }
 
-// GetLeader gets server leader from etcd.
-func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Leader, error) {
+// getLeader gets server leader from etcd.
+func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Leader, error) {
 	leader := &pdpb.Leader{}
 	ok, err := getProtoMsg(c, leaderPath, leader)
 	if err != nil {
@@ -107,7 +107,7 @@ func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Leader, error) {
 }
 
 func (s *Server) getLeader() (*pdpb.Leader, error) {
-	return GetLeader(s.client, s.getLeaderPath())
+	return getLeader(s.client, s.getLeaderPath())
 }
 
 func (s *Server) isSameLeader(leader *pdpb.Leader) bool {

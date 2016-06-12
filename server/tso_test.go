@@ -100,7 +100,7 @@ func (s *testTsoSuite) testGetTimestamp(c *C, conn net.Conn, n int) {
 
 func mustGetLeader(c *C, client *clientv3.Client, leaderPath string) *pdpb.Leader {
 	for i := 0; i < 10; i++ {
-		leader, err := GetLeader(client, leaderPath)
+		leader, err := getLeader(client, leaderPath)
 		c.Assert(err, IsNil)
 		if leader != nil {
 			return leader
