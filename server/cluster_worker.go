@@ -44,6 +44,12 @@ func (c *raftCluster) addDefaultBalanceOperator(region *metapb.Region, leader *m
 }
 
 func (c *raftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
+	// If the region peer count is 0, then we should not handle this.
+	if len(region.GetPeers()) == 0 {
+		log.Warnf("invalid region, zero region peer count - %v", region)
+		return nil, nil
+	}
+
 	regionID := region.GetId()
 	balanceOperator := c.balancerWorker.getBalanceOperator(regionID)
 	var err error

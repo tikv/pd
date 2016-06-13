@@ -118,7 +118,7 @@ func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*
 
 	// If region peer count is not equal to max peer count, no need to do capacity balance.
 	if len(region.GetPeers()) != int(cluster.getMeta().GetMaxPeerCount()) {
-		log.Warn("region peer count %d not equals to max peer count %d", len(region.GetPeers()), cluster.getMeta().GetMaxPeerCount())
+		log.Warnf("region peer count %d not equals to max peer count %d", len(region.GetPeers()), cluster.getMeta().GetMaxPeerCount())
 		return nil, nil
 	}
 
