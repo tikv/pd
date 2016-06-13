@@ -16,6 +16,8 @@ package server
 import (
 	"sync"
 	"time"
+
+	"github.com/ngaut/log"
 )
 
 type cacheItem struct {
@@ -96,16 +98,20 @@ func (c *expireRegionCache) doGC() {
 	for {
 		select {
 		case <-ticker.C:
+			count := 0
 			now := time.Now()
 			c.Lock()
 			for key := range c.items {
 				if value, ok := c.items[key]; ok {
 					if value.expire.Before(now) {
+						count++
 						delete(c.items, key)
 					}
 				}
 			}
 			c.Unlock()
+
+			log.Infof("GC %d items", count)
 		}
 	}
 }

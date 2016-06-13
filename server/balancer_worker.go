@@ -169,7 +169,7 @@ func (bw *balancerWorker) doBalance() error {
 		}
 		if balanceOperator == nil {
 			stats.Increment("balance.select.none")
-			return nil
+			continue
 		}
 
 		if bw.addBalanceOperator(balanceOperator.getRegionID(), balanceOperator) {

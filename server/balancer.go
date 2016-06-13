@@ -108,6 +108,7 @@ func (cb *capacityBalancer) selectToStore(stores []*storeInfo, excluded map[uint
 func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*storeInfo) (*metapb.Region, *metapb.Peer) {
 	store := cb.selectFromStore(stores, true)
 	if store == nil {
+		log.Warn("from store cannot be found to select balance region")
 		return nil, nil
 	}
 
@@ -115,8 +116,9 @@ func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*
 	storeID := store.store.GetId()
 	region := cluster.regions.randRegion(storeID)
 
-	// If region peer count is less than max peer count, no need to do capacity balance.
-	if len(region.GetPeers()) < int(cluster.getMeta().GetMaxPeerCount()) {
+	// If region peer count is not equal to max peer count, no need to do capacity balance.
+	if len(region.GetPeers()) != int(cluster.getMeta().GetMaxPeerCount()) {
+		log.Warn("region peer count %d not equals to max peer count %d", len(region.GetPeers()), cluster.getMeta().GetMaxPeerCount())
 		return nil, nil
 	}
 
