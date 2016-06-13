@@ -65,9 +65,10 @@ func (c *raftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metap
 
 	ret, res, err := balanceOperator.Do(region, leader)
 	if err != nil {
-		// failed, remove it.
-		c.balancerWorker.removeBalanceOperator(regionID)
+		// Do balance failed, remove it.
 		log.Errorf("do balance for region %d failed %s", regionID, err)
+		c.balancerWorker.removeBalanceOperator(regionID)
+		c.balancerWorker.removeRegionCache(regionID)
 	}
 	if ret {
 		// Do finished, remove it.

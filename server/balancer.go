@@ -115,6 +115,10 @@ func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*
 	// Random select one leader region from store.
 	storeID := store.store.GetId()
 	region := cluster.regions.randRegion(storeID)
+	if region == nil {
+		log.Warnf("random region is nil, store %d", storeID)
+		return nil, nil
+	}
 
 	// If region peer count is not equal to max peer count, no need to do capacity balance.
 	if len(region.GetPeers()) != int(cluster.getMeta().GetMaxPeerCount()) {

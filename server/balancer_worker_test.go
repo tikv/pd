@@ -119,7 +119,7 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 
 	// Try to remove region balance operator cache, but we also have balance expire cache, so
 	// we also cannot get a new balancer.
-	delete(s.balancerWorker.balanceOperators, regionID)
+	s.balancerWorker.removeBalanceOperator(regionID)
 	c.Assert(s.balancerWorker.balanceOperators, HasLen, 0)
 	c.Assert(s.balancerWorker.regionCache.count(), Equals, 1)
 
@@ -128,7 +128,7 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	c.Assert(s.balancerWorker.balanceOperators, HasLen, 0)
 
 	// Remove balance expire cache, this time we can get a new balancer now.
-	s.balancerWorker.removeBalanceOperator(regionID)
+	s.balancerWorker.removeRegionCache(regionID)
 	c.Assert(s.balancerWorker.balanceOperators, HasLen, 0)
 	c.Assert(s.balancerWorker.regionCache.count(), Equals, 0)
 
