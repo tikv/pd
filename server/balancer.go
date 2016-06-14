@@ -51,7 +51,16 @@ func newCapacityBalancer(minRatio float64, maxRatio float64) *capacityBalancer {
 	}
 }
 
-func (cb *capacityBalancer) selectFromStore(stores []*storeInfo, useFilter bool) *storeInfo {
+// calculate the score, higher score region will be selected as balance from store,
+// and lower score region will be balance to store.
+func (cb *capacityBalancer) score(store *storeInfo, regionCount int) float64 {
+	usedRatioScore := store.usedRatio()
+	leaderPeerCountScore := store.leaderScore(regionCount)
+	return usedRatioScore*0.5 + leaderPeerCountScore*0.5
+}
+
+func (cb *capacityBalancer) selectFromStore(stores []*storeInfo, regionCount int, useFilter bool) *storeInfo {
+	score := 0.0
 	var resultStore *storeInfo
 	for _, store := range stores {
 		if store == nil {
@@ -64,12 +73,15 @@ func (cb *capacityBalancer) selectFromStore(stores []*storeInfo, useFilter bool)
 			}
 		}
 
+		currScore := cb.score(store, regionCount)
 		if resultStore == nil {
 			resultStore = store
+			score = currScore
 			continue
 		}
 
-		if store.usedRatio() > resultStore.usedRatio() {
+		if currScore > score {
+			score = currScore
 			resultStore = store
 		}
 	}
@@ -77,7 +89,8 @@ func (cb *capacityBalancer) selectFromStore(stores []*storeInfo, useFilter bool)
 	return resultStore
 }
 
-func (cb *capacityBalancer) selectToStore(stores []*storeInfo, excluded map[uint64]struct{}) *storeInfo {
+func (cb *capacityBalancer) selectToStore(stores []*storeInfo, excluded map[uint64]struct{}, regionCount int) *storeInfo {
+	score := 0.0
 	var resultStore *storeInfo
 	for _, store := range stores {
 		if store == nil {
@@ -92,12 +105,15 @@ func (cb *capacityBalancer) selectToStore(stores []*storeInfo, excluded map[uint
 			continue
 		}
 
+		currScore := cb.score(store, regionCount)
 		if resultStore == nil {
 			resultStore = store
+			score = currScore
 			continue
 		}
 
-		if store.usedRatio() < resultStore.usedRatio() {
+		if currScore < score {
+			score = currScore
 			resultStore = store
 		}
 	}
@@ -106,7 +122,7 @@ func (cb *capacityBalancer) selectToStore(stores []*storeInfo, excluded map[uint
 }
 
 func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*storeInfo) (*metapb.Region, *metapb.Peer) {
-	store := cb.selectFromStore(stores, true)
+	store := cb.selectFromStore(stores, cluster.regions.regionCount(), true)
 	if store == nil {
 		log.Warn("from store cannot be found to select balance region")
 		return nil, nil
@@ -136,8 +152,9 @@ func (cb *capacityBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[
 		stores = append(stores, cluster.getStore(storeID))
 	}
 
-	store := cb.selectToStore(stores, nil)
+	store := cb.selectToStore(stores, nil, cluster.regions.regionCount())
 	if store == nil {
+		log.Warn("find no store to get new leader peer for region")
 		return nil
 	}
 
@@ -146,7 +163,7 @@ func (cb *capacityBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[
 }
 
 func (cb *capacityBalancer) selectAddPeer(cluster *clusterInfo, stores []*storeInfo, excluded map[uint64]struct{}) (*metapb.Peer, error) {
-	store := cb.selectToStore(stores, excluded)
+	store := cb.selectToStore(stores, excluded, cluster.regions.regionCount())
 	if store == nil {
 		log.Warn("to store cannot be found to add peer")
 		return nil, nil
@@ -171,7 +188,7 @@ func (cb *capacityBalancer) selectRemovePeer(cluster *clusterInfo, peers map[uin
 		stores = append(stores, cluster.getStore(storeID))
 	}
 
-	store := cb.selectFromStore(stores, false)
+	store := cb.selectFromStore(stores, cluster.regions.regionCount(), false)
 	if store == nil {
 		log.Warn("from store cannot be found to remove peer")
 		return nil, nil
