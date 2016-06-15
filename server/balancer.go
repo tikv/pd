@@ -59,7 +59,7 @@ func (cb *capacityBalancer) score(store *storeInfo, regionCount int) float64 {
 	usedRatioScore := store.usedRatio()
 	leaderScore := store.leaderScore(regionCount)
 	log.Infof("capacity balancer store %d, used ratio score: %v, leader score: %v [region count: %d]", store.store.GetId(), usedRatioScore, leaderScore, regionCount)
-	return usedRatioScore*0.5 + leaderScore*0.5
+	return usedRatioScore*0.6 + leaderScore*0.4
 }
 
 func (cb *capacityBalancer) selectFromStore(stores []*storeInfo, regionCount int, useFilter bool) *storeInfo {
@@ -224,10 +224,25 @@ func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*balanceOperator, err
 		followerPeers[storeID] = peer
 	}
 
+	var err error
+	removePeer := oldLeader
+	doLeaderBalance := true
 	newLeader := cb.selectNewLeaderPeer(cluster, followerPeers)
 	if newLeader == nil {
-		log.Warn("new leader peer cannot be found to do balance")
-		return nil, nil
+		log.Warn("new leader peer cannot be found to do balance, try to do follower peer balance")
+
+		// If we cannot find a region peer to do leader transfer,
+		// then we should balance a follower peer instead of leader peer.
+		doLeaderBalance = false
+
+		removePeer, err = cb.selectRemovePeer(cluster, followerPeers)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		if removePeer == nil {
+			log.Warnf("find no store to remove peer for region %v", region)
+			return nil, nil
+		}
 	}
 
 	// Thirdly, select one store to add new peer.
@@ -240,11 +255,15 @@ func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*balanceOperator, err
 		return nil, nil
 	}
 
-	leaderTransferOperator := newTransferLeaderOperator(oldLeader, newLeader, maxWaitCount)
 	addPeerOperator := newAddPeerOperator(newPeer)
-	removePeerOperator := newRemovePeerOperator(oldLeader)
+	removePeerOperator := newRemovePeerOperator(removePeer)
 
-	return newBalanceOperator(region, leaderTransferOperator, addPeerOperator, removePeerOperator), nil
+	if doLeaderBalance {
+		leaderTransferOperator := newTransferLeaderOperator(oldLeader, newLeader, maxWaitCount)
+		return newBalanceOperator(region, leaderTransferOperator, addPeerOperator, removePeerOperator), nil
+	}
+
+	return newBalanceOperator(region, addPeerOperator, removePeerOperator), nil
 }
 
 // defaultBalancer is used for default config change, like add/remove peer.
