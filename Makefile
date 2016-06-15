@@ -3,17 +3,17 @@ GO=GO15VENDOREXPERIMENT="1" go
 all: build check test 
 
 build: 
-	rm -rf vendor && ln -s cmd/vendor vendor
+	rm -rf vendor && ln -s _vendor/vendor vendor
 	$(GO) build -o bin/pd-server cmd/pd-server/main.go
 	rm -rf vendor
 
 install: 
-	rm -rf vendor && ln -s cmd/vendor vendor
+	rm -rf vendor && ln -s _vendor/vendor vendor
 	$(GO) install ./...
 	rm -rf vendor
 
 test: 
-	rm -rf vendor && ln -s cmd/vendor vendor
+	rm -rf vendor && ln -s _vendor/vendor vendor
 	$(GO) test --race ./pd-client ./server
 	rm -rf vendor
 
@@ -28,17 +28,17 @@ check:
 deps:
 	# see https://github.com/coreos/etcd/blob/master/scripts/updatedep.sh
 	rm -rf Godeps vendor
-	mkdir -p cmd/vendor
-	ln -s cmd/vendor vendor
+	mkdir -p _vendor/vendor
+	ln -s _vendor/vendor vendor
 	godep save ./...
-	rm -rf cmd/Godeps
+	rm -rf _vendor/Godeps
 	rm vendor
-	mv Godeps cmd/
+	mv Godeps _vendor/
 
 update_kvproto:
 	rm -rf Godeps vendor
-	ln -s cmd/Godeps Godeps
-	ln -s cmd/vendor vendor
+	ln -s _vendor/Godeps Godeps
+	ln -s _vendor/vendor vendor
 	# Guarantee executing OK.
 	go get -u -v -d github.com/pingcap/kvproto/pkg || true
 	godep update github.com/pingcap/kvproto/pkg/...
