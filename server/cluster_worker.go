@@ -47,7 +47,7 @@ func (c *raftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metap
 	// If the region peer count is 0, then we should not handle this.
 	if len(region.GetPeers()) == 0 {
 		log.Warnf("invalid region, zero region peer count - %v", region)
-		return nil, nil
+		return nil, errors.Errorf("invalid region, zero region peer count - %v", region)
 	}
 
 	regionID := region.GetId()
