@@ -44,6 +44,12 @@ func (c *raftCluster) addDefaultBalanceOperator(region *metapb.Region, leader *m
 }
 
 func (c *raftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
+	// If the region peer count is 0, then we should not handle this.
+	if len(region.GetPeers()) == 0 {
+		log.Warnf("invalid region, zero region peer count - %v", region)
+		return nil, errors.Errorf("invalid region, zero region peer count - %v", region)
+	}
+
 	regionID := region.GetId()
 	balanceOperator := c.balancerWorker.getBalanceOperator(regionID)
 	var err error
@@ -52,22 +58,21 @@ func (c *raftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metap
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-
 		if balanceOperator == nil {
 			return nil, nil
 		}
 	}
 
-	ret, res, err := balanceOperator.Do(region, leader)
-	if ret {
+	finished, res, err := balanceOperator.Do(region, leader)
+	if err != nil {
+		// Do balance failed, remove it.
+		log.Errorf("do balance for region %d failed %s", regionID, err)
+		c.balancerWorker.removeBalanceOperator(regionID)
+		c.balancerWorker.removeRegionCache(regionID)
+	}
+	if finished {
 		// Do finished, remove it.
 		c.balancerWorker.removeBalanceOperator(regionID)
-	}
-
-	if err != nil {
-		// failed, remove it.
-		c.balancerWorker.removeBalanceOperator(regionID)
-		log.Errorf("do balance for region %d failed %s", regionID, err)
 	}
 
 	return res, nil

@@ -116,8 +116,6 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *balanceOperato
 
 	bw.balanceOperators[regionID] = op
 
-	bw.regionCache.set(regionID, nil)
-
 	return true
 }
 
@@ -126,6 +124,13 @@ func (bw *balancerWorker) removeBalanceOperator(regionID uint64) {
 	defer bw.Unlock()
 
 	delete(bw.balanceOperators, regionID)
+}
+
+func (bw *balancerWorker) addRegionCache(regionID uint64) {
+	bw.regionCache.set(regionID, nil)
+}
+
+func (bw *balancerWorker) removeRegionCache(regionID uint64) {
 	bw.regionCache.delete(regionID)
 }
 
@@ -169,10 +174,12 @@ func (bw *balancerWorker) doBalance() error {
 		}
 		if balanceOperator == nil {
 			stats.Increment("balance.select.none")
-			return nil
+			continue
 		}
 
-		if bw.addBalanceOperator(balanceOperator.getRegionID(), balanceOperator) {
+		regionID := balanceOperator.getRegionID()
+		if bw.addBalanceOperator(regionID, balanceOperator) {
+			bw.addRegionCache(regionID)
 			stats.Increment("balance.select.success")
 			return nil
 		}
