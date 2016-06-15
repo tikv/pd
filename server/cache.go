@@ -340,7 +340,7 @@ func (r *regionsInfo) heartbeat(region *metapb.Region, leaderPeer *metapb.Peer) 
 	return resp, nil
 }
 
-func (r *regionsInfo) leaderPeerCount(storeID uint64) int {
+func (r *regionsInfo) leaderRegionCount(storeID uint64) int {
 	r.RLock()
 	defer r.RUnlock()
 
@@ -392,13 +392,13 @@ type storeStatus struct {
 	// store capacity info.
 	stats *pdpb.StoreStats
 
-	leaderPeerCount int
+	leaderRegionCount int
 }
 
 func (s *storeStatus) clone() *storeStatus {
 	return &storeStatus{
-		stats:           proto.Clone(s.stats).(*pdpb.StoreStats),
-		leaderPeerCount: s.leaderPeerCount,
+		stats:             proto.Clone(s.stats).(*pdpb.StoreStats),
+		leaderRegionCount: s.leaderRegionCount,
 	}
 }
 
@@ -431,7 +431,7 @@ func (s *storeInfo) leaderScore(regionCount int) float64 {
 		return 0
 	}
 
-	return float64(s.stats.leaderPeerCount) / float64(regionCount)
+	return float64(s.stats.leaderRegionCount) / float64(regionCount)
 }
 
 // clusterInfo is cluster cache info.
@@ -485,7 +485,7 @@ func (c *clusterInfo) updateStoreStatus(stats *pdpb.StoreStats) bool {
 	}
 
 	store.stats.stats = stats
-	store.stats.leaderPeerCount = c.regions.leaderPeerCount(storeID)
+	store.stats.leaderRegionCount = c.regions.leaderRegionCount(storeID)
 	return true
 }
 
