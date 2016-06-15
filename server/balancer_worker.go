@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	defaultBalanceInterval = 60 * time.Second
+	defaultBalanceInterval = 30 * time.Second
 	// We can allow BalanceCount regions to do balance at same time.
 	defaultBalanceCount = 16
 
