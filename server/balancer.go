@@ -56,6 +56,7 @@ func newCapacityBalancer(minRatio float64, maxRatio float64) *capacityBalancer {
 func (cb *capacityBalancer) score(store *storeInfo, regionCount int) float64 {
 	usedRatioScore := store.usedRatio()
 	leaderPeerCountScore := store.leaderScore(regionCount)
+	log.Infof("capacity balancer store, used ratio score: %v, leader score: %v", usedRatioScore, leaderPeerCountScore)
 	return usedRatioScore*0.5 + leaderPeerCountScore*0.5
 }
 
