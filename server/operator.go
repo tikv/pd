@@ -14,12 +14,18 @@
 package server
 
 import (
+	"fmt"
+	"sync/atomic"
+	"time"
+
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/raftpb"
 )
+
+var balancerIDs uint64
 
 const (
 	// TODO: we can make this as a config flag.
@@ -35,21 +41,38 @@ type Operator interface {
 
 // balanceOperator is used to do region balance.
 type balanceOperator struct {
-	index  int
-	ops    []Operator
-	region *metapb.Region
+	id       uint64
+	index    int
+	start    time.Time
+	end      time.Time
+	finished bool
+	ops      []Operator
+	region   *metapb.Region
 }
 
 func newBalanceOperator(region *metapb.Region, ops ...Operator) *balanceOperator {
 	return &balanceOperator{
+		id:     atomic.AddUint64(&balancerIDs, 1),
 		ops:    ops,
 		region: region,
 	}
 }
 
+func (bo *balanceOperator) String() string {
+	ret := fmt.Sprintf("[balanceOperator]id: %d, index: %d, start: %s, end: %s, finished: %v, region: %v, ops:",
+		bo.id, bo.index, bo.start, bo.end, bo.finished, bo.region)
+
+	for i := range bo.ops {
+		ret += fmt.Sprintf(" [%d - %v] ", i, bo.ops[i])
+	}
+
+	return ret
+}
+
 // Check checks whether operator already finished or not.
 func (bo *balanceOperator) check(region *metapb.Region, leader *metapb.Peer) (bool, error) {
 	if bo.index >= len(bo.ops) {
+		bo.finished = true
 		return true, nil
 	}
 
@@ -83,7 +106,8 @@ func (bo *balanceOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool,
 
 	bo.index++
 
-	return bo.index >= len(bo.ops), res, nil
+	bo.finished = bo.index >= len(bo.ops)
+	return bo.finished, res, nil
 }
 
 // getRegionID returns the region id which the operator for balance.
@@ -103,6 +127,10 @@ func newOnceOperator(op Operator) *onceOperator {
 		op:       op,
 		finished: false,
 	}
+}
+
+func (op *onceOperator) String() string {
+	return fmt.Sprintf("[onceOperator]op: %v, finished: %v", op.op, op.finished)
 }
 
 // Do implements Operator.Do interface.
@@ -137,6 +165,10 @@ func newRemovePeerOperator(peer *metapb.Peer) *changePeerOperator {
 			Peer:       peer,
 		},
 	}
+}
+
+func (co *changePeerOperator) String() string {
+	return fmt.Sprintf("[changePeerOperator]changePeer: %v", co.changePeer)
 }
 
 // check checks whether operator already finished or not.
@@ -197,30 +229,35 @@ func newTransferLeaderOperator(oldLeader, newLeader *metapb.Peer, waitCount int)
 	}
 }
 
+func (tlo *transferLeaderOperator) String() string {
+	return fmt.Sprintf("[transferLeaderOperator]count: %d, maxWaitCount: %d, oldLeader: %v, newLeader: %v",
+		tlo.count, tlo.maxWaitCount, tlo.oldLeader, tlo.newLeader)
+}
+
 // check checks whether operator already finished or not.
-func (lto *transferLeaderOperator) check(region *metapb.Region, leader *metapb.Peer) (bool, error) {
+func (tlo *transferLeaderOperator) check(region *metapb.Region, leader *metapb.Peer) (bool, error) {
 	if leader == nil {
 		return false, errors.New("invalid leader peer")
 	}
 
 	// If the leader has already been changed to new leader, we finish it.
-	if leader.GetId() == lto.newLeader.GetId() {
+	if leader.GetId() == tlo.newLeader.GetId() {
 		return true, nil
 	}
 
 	// If the old leader has been changed but not be new leader, we also finish it.
-	if leader.GetId() != lto.oldLeader.GetId() {
-		log.Warnf("old leader %v has changed to %v, but not %v", lto.oldLeader, leader, lto.newLeader)
+	if leader.GetId() != tlo.oldLeader.GetId() {
+		log.Warnf("old leader %v has changed to %v, but not %v", tlo.oldLeader, leader, tlo.newLeader)
 		return true, nil
 	}
 
-	log.Infof("balance [%s], try to transfer leader from %s to %s", region, lto.oldLeader, lto.newLeader)
+	log.Infof("balance [%s], try to transfer leader from %s to %s", region, tlo.oldLeader, tlo.newLeader)
 	return false, nil
 }
 
 // Do implements Operator.Do interface.
-func (lto *transferLeaderOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
-	ok, err := lto.check(region, leader)
+func (tlo *transferLeaderOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
+	ok, err := tlo.check(region, leader)
 	if err != nil {
 		return false, nil, errors.Trace(err)
 	}
@@ -228,21 +265,21 @@ func (lto *transferLeaderOperator) Do(region *metapb.Region, leader *metapb.Peer
 		return true, nil, nil
 	}
 
-	// If lto.count is greater than 0, then we should check whether it exceeds the lto.maxWaitCount.
-	if lto.count > 0 {
-		if lto.count >= lto.maxWaitCount {
-			return false, nil, errors.Errorf("transfer leader operator called %d times but still be unsucceessful - %v", lto.count, lto)
+	// If tlo.count is greater than 0, then we should check whether it exceeds the tlo.maxWaitCount.
+	if tlo.count > 0 {
+		if tlo.count >= tlo.maxWaitCount {
+			return false, nil, errors.Errorf("transfer leader operator called %d times but still be unsucceessful - %v", tlo.count, tlo)
 		}
 
-		lto.count++
+		tlo.count++
 		return false, nil, nil
 	}
 
 	res := &pdpb.RegionHeartbeatResponse{
 		TransferLeader: &pdpb.TransferLeader{
-			Peer: lto.newLeader,
+			Peer: tlo.newLeader,
 		},
 	}
-	lto.count++
+	tlo.count++
 	return false, res, nil
 }
