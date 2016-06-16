@@ -17,6 +17,7 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
+	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"golang.org/x/net/context"
 )
@@ -292,6 +293,8 @@ func (c *conn) handlePutClusterConfig(req *pdpb.Request) (*pdpb.Response, error)
 		return nil, errors.Trace(err)
 	}
 
+	log.Infof("put cluster config ok - %v", conf)
+
 	return &pdpb.Response{
 		PutClusterConfig: &pdpb.PutClusterConfigResponse{},
 	}, nil
@@ -312,6 +315,9 @@ func (c *conn) handlePutStore(req *pdpb.Request) (*pdpb.Response, error) {
 	if err = cluster.putStore(store); err != nil {
 		return nil, errors.Trace(err)
 	}
+
+	log.Infof("put store ok - %v", store)
+
 	return &pdpb.Response{
 		PutStore: &pdpb.PutStoreResponse{},
 	}, nil
