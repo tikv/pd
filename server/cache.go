@@ -80,7 +80,7 @@ func checkStaleRegion(region *metapb.Region, checkRegion *metapb.Region) error {
 		return nil
 	}
 
-	return errors.Errorf("stale epoch %s, now %s", epoch, checkEpoch)
+	return errors.Errorf("epoch %s is staler than %s", checkEpoch, epoch)
 }
 
 func getFollowerPeers(region *metapb.Region, leader *metapb.Peer) (map[uint64]*metapb.Peer, map[uint64]struct{}) {
