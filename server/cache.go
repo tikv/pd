@@ -416,21 +416,18 @@ func (r *regionsInfo) randRegion(storeID uint64) (*metapb.Region, *metapb.Peer) 
 	)
 
 	start := time.Now()
-	idx, randIdx := 0, rand.Intn(10)
 	for _, rg := range r.regions {
 		for _, peer := range region.GetPeers() {
 			if peer.GetStoreId() == storeID {
 				// Check whether it is leader region of this store.
 				regionID := region.GetId()
 				leaderStoreID, ok := r.leaders.regionStores[regionID]
-				if !ok {
-					if idx == randIdx {
+				if ok {
+					if leaderStoreID != storeID {
 						region = cloneRegion(rg)
 						leader = leaderPeer(region, leaderStoreID)
 						break
 					}
-
-					idx++
 				}
 			}
 		}

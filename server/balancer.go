@@ -58,8 +58,10 @@ func newCapacityBalancer(minRatio float64, maxRatio float64) *capacityBalancer {
 func (cb *capacityBalancer) score(store *storeInfo, regionCount int) float64 {
 	usedRatioScore := store.usedRatio()
 	leaderScore := store.leaderScore(regionCount)
-	log.Infof("capacity balancer store %d, used ratio score: %v, leader score: %v [region count: %d]", store.store.GetId(), usedRatioScore, leaderScore, regionCount)
-	return usedRatioScore*0.6 + leaderScore*0.4
+	score := usedRatioScore*0.6 + leaderScore*0.4
+	log.Infof("capacity balancer store %d, used ratio score: %v, leader score: %v [region count: %d], score: %v",
+		store.store.GetId(), usedRatioScore, leaderScore, regionCount, score)
+	return score
 }
 
 func (cb *capacityBalancer) selectFromStore(stores []*storeInfo, regionCount int, useFilter bool) *storeInfo {
@@ -140,8 +142,8 @@ func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*
 	storeID := store.store.GetId()
 	region = cluster.regions.randLeaderRegion(storeID)
 	if region == nil {
-		region, leader = cluster.regions.randRegion(storeID)
 		log.Warnf("random leader region is nil, store %d", storeID)
+		region, leader = cluster.regions.randRegion(storeID)
 		return region, leader, false
 	}
 
@@ -353,13 +355,13 @@ func (db *defaultBalancer) Balance(cluster *clusterInfo) (*balanceOperator, erro
 	maxPeerCount := int(clusterMeta.GetMaxPeerCount())
 
 	if peerCount == maxPeerCount {
-		log.Infof("region %d peer count equals %d, no need to change peer", regionID, maxPeerCount)
+		log.Debugf("region %d peer count equals %d, no need to change peer", regionID, maxPeerCount)
 		return nil, nil
 	} else if peerCount < maxPeerCount {
-		log.Infof("region %d peer count %d < %d, need to add peer", regionID, peerCount, maxPeerCount)
+		log.Debugf("region %d peer count %d < %d, need to add peer", regionID, peerCount, maxPeerCount)
 		return db.addPeer(cluster)
 	} else {
-		log.Infof("region %d peer count %d > %d, need to remove peer", regionID, peerCount, maxPeerCount)
+		log.Debugf("region %d peer count %d > %d, need to remove peer", regionID, peerCount, maxPeerCount)
 		return db.removePeer(cluster)
 	}
 }
