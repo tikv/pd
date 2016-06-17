@@ -64,6 +64,7 @@ func (cb *capacityBalancer) score(store *storeInfo, regionCount int) float64 {
 	return score
 }
 
+// checkScore checks whether the new store score is less than the old store score.
 func (cb *capacityBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Peer, newPeer *metapb.Peer) bool {
 	regionCount := cluster.regions.regionCount()
 	oldStore := cluster.getStore(oldPeer.GetStoreId())
@@ -146,6 +147,8 @@ func (cb *capacityBalancer) selectToStore(stores []*storeInfo, excluded map[uint
 	return resultStore
 }
 
+// selectBalanceRegion try to select a store leader region to do balance and returns true, but if we cannot find any,
+// we try to find a store follower region and returns false.
 func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*storeInfo) (*metapb.Region, *metapb.Peer, bool) {
 	store := cb.selectFromStore(stores, cluster.regions.regionCount(), true)
 	if store == nil {
@@ -289,7 +292,6 @@ func (cb *capacityBalancer) doFollowerBalance(cluster *clusterInfo, stores []*st
 }
 
 func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*balanceOperator, error) {
-	// Select one balance region from cluster info.
 	stores := cluster.getStores()
 	region, oldLeader, isLeaderBalance := cb.selectBalanceRegion(cluster, stores)
 	if region == nil || oldLeader == nil {
@@ -304,7 +306,7 @@ func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*balanceOperator, err
 		}
 		if !ok {
 			// If we cannot find a region peer to do leader transfer,
-			// then we should balance a follower peer instead of leader peer.
+			// then we do follower balance instead.
 			return cb.doFollowerBalance(cluster, stores, region, oldLeader)
 		}
 
