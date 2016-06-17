@@ -59,9 +59,29 @@ func (cb *capacityBalancer) score(store *storeInfo, regionCount int) float64 {
 	usedRatioScore := store.usedRatio()
 	leaderScore := store.leaderScore(regionCount)
 	score := usedRatioScore*0.6 + leaderScore*0.4
-	log.Infof("capacity balancer store %d, used ratio score: %v, leader score: %v [region count: %d], score: %v",
+	log.Debugf("capacity balancer store %d, used ratio score: %v, leader score: %v [region count: %d], score: %v",
 		store.store.GetId(), usedRatioScore, leaderScore, regionCount, score)
 	return score
+}
+
+func (cb *capacityBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Peer, newPeer *metapb.Peer) bool {
+	regionCount := cluster.regions.regionCount()
+	oldStore := cluster.getStore(oldPeer.GetStoreId())
+	newStore := cluster.getStore(newPeer.GetStoreId())
+	if oldStore == nil || newStore == nil {
+		log.Debugf("check score failed - old peer: %v, new peer: %v", oldPeer, newPeer)
+		return false
+	}
+
+	oldStoreScore := cb.score(oldStore, regionCount)
+	newStoreScore := cb.score(newStore, regionCount)
+
+	if oldStoreScore <= newStoreScore {
+		log.Debugf("check score failed - old peer: %v, new peer: %v, old store score: %v, new store score :%v", oldPeer, newPeer, oldStoreScore, newStoreScore)
+		return false
+	}
+
+	return true
 }
 
 func (cb *capacityBalancer) selectFromStore(stores []*storeInfo, regionCount int, useFilter bool) *storeInfo {
@@ -227,6 +247,10 @@ func (cb *capacityBalancer) doLeaderBalance(cluster *clusterInfo, stores []*stor
 		return nil, true, nil
 	}
 
+	if !cb.checkScore(cluster, leader, newPeer) {
+		return nil, false, nil
+	}
+
 	leaderTransferOperator := newTransferLeaderOperator(leader, newLeader, maxWaitCount)
 	addPeerOperator := newAddPeerOperator(newPeer)
 	removePeerOperator := newRemovePeerOperator(leader)
@@ -252,6 +276,10 @@ func (cb *capacityBalancer) doFollowerBalance(cluster *clusterInfo, stores []*st
 	}
 	if oldPeer == nil {
 		log.Warnf("find no store to remove peer for region %v", region)
+		return nil, nil
+	}
+
+	if !cb.checkScore(cluster, oldPeer, newPeer) {
 		return nil, nil
 	}
 
