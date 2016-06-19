@@ -55,10 +55,10 @@ func newCapacityBalancer(minRatio float64, maxRatio float64) *capacityBalancer {
 // and lower score region will be balance to store. The score range is (0,100).
 // TODO: we should adjust the weight of used ratio and leader score in futher,
 // now it is a little naive.
-func (cb *capacityBalancer) score(store *storeInfo, regionCount int) float64 {
+func (cb *capacityBalancer) score(store *storeInfo, regionCount int) int {
 	usedRatioScore := store.usedRatio()
 	leaderScore := store.leaderScore(regionCount)
-	score := (usedRatioScore*0.6 + leaderScore*0.4) * 100
+	score := int(usedRatioScore*0.6+leaderScore*0.4) * 100
 	log.Debugf("capacity balancer store %d, used ratio score: %v, leader score: %v [region count: %d], score: %v",
 		store.store.GetId(), usedRatioScore, leaderScore, regionCount, score)
 	return score
@@ -86,7 +86,7 @@ func (cb *capacityBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Pee
 }
 
 func (cb *capacityBalancer) selectFromStore(stores []*storeInfo, regionCount int, useFilter bool) *storeInfo {
-	score := 0.0
+	score := 0
 	var resultStore *storeInfo
 	for _, store := range stores {
 		if store == nil {
@@ -116,7 +116,7 @@ func (cb *capacityBalancer) selectFromStore(stores []*storeInfo, regionCount int
 }
 
 func (cb *capacityBalancer) selectToStore(stores []*storeInfo, excluded map[uint64]struct{}, regionCount int) *storeInfo {
-	score := 0.0
+	score := 0
 	var resultStore *storeInfo
 	for _, store := range stores {
 		if store == nil {
