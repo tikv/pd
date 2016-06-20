@@ -26,12 +26,19 @@ type Balancer interface {
 }
 
 const (
-	// If the used ratio of one storage is greater than this value,
-	// it should be rebalanced.
+	// If the used ratio of one storage is less than this value,
+	// it will never be used as a from store.
 	minCapacityUsedRatio = 0.4
 	// If the used ratio of one storage is greater than this value,
-	// it will never be used as a selected target.
+	// it will never be used as a to store.
 	maxCapacityUsedRatio = 0.9
+
+	// If the sending snapshot count of one storage is greater than this value,
+	// it will never be used as a from store.
+	maxSnapSendingCount = uint32(5)
+	// If the receiving snapshot count of one storage is greater than this value,
+	// it will never be used as a to store.
+	maxSnapReceivingCount = uint32(5)
 
 	defaultDiffScoreFraction = 0.1
 )
@@ -107,6 +114,10 @@ func (cb *capacityBalancer) selectFromStore(stores []*storeInfo, regionCount int
 			if store.usedRatio() <= cb.minCapacityUsedRatio {
 				continue
 			}
+
+			if store.stats.stats.GetSnapSendingCount() > maxSnapSendingCount {
+				continue
+			}
 		}
 
 		currScore := cb.score(store, regionCount)
@@ -138,6 +149,10 @@ func (cb *capacityBalancer) selectToStore(stores []*storeInfo, excluded map[uint
 		}
 
 		if store.usedRatio() >= cb.maxCapacityUsedRatio {
+			continue
+		}
+
+		if store.stats.stats.GetSnapReceivingCount() > maxSnapReceivingCount {
 			continue
 		}
 

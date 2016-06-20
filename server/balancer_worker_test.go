@@ -42,10 +42,10 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 		defaultBalanceInterval)
 
 	// The store id will be 1,2,3,4.
-	s.updateStore(c, clusterInfo, 1, 100, 10)
-	s.updateStore(c, clusterInfo, 2, 100, 20)
-	s.updateStore(c, clusterInfo, 3, 100, 30)
-	s.updateStore(c, clusterInfo, 4, 100, 40)
+	s.updateStore(c, clusterInfo, 1, 100, 10, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 20, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
 
 	// Now we have no region to do balance.
 	ret := s.balancerWorker.doBalance()
