@@ -493,7 +493,7 @@ func (s *storeInfo) leaderScore(regionCount int) int {
 		return 0
 	}
 
-	return s.stats.leaderRegionCount / regionCount
+	return s.stats.leaderRegionCount * 100 / regionCount
 }
 
 // clusterInfo is cluster cache info.
