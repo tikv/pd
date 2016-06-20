@@ -195,12 +195,6 @@ func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*
 		return region, leader, false
 	}
 
-	// If region peer count is not equal to max peer count, no need to do capacity balance.
-	if len(region.GetPeers()) != int(cluster.getMeta().GetMaxPeerCount()) {
-		log.Warnf("region peer count %d not equals to max peer count %d", len(region.GetPeers()), cluster.getMeta().GetMaxPeerCount())
-		return nil, nil, false
-	}
-
 	leader = leaderPeer(region, storeID)
 	return region, leader, true
 }
@@ -321,6 +315,13 @@ func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*balanceOperator, err
 	region, oldLeader, isLeaderBalance := cb.selectBalanceRegion(cluster, stores)
 	if region == nil || oldLeader == nil {
 		log.Warn("region cannot be found to do balance")
+		return nil, nil
+	}
+
+	// If region peer count is not equal to max peer count, no need to do capacity balance.
+	if len(region.GetPeers()) != int(cluster.getMeta().GetMaxPeerCount()) {
+		log.Warnf("region peer count %d not equals to max peer count %d, no need to do balance",
+			len(region.GetPeers()), cluster.getMeta().GetMaxPeerCount())
 		return nil, nil
 	}
 
