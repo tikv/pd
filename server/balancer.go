@@ -56,10 +56,10 @@ func newCapacityBalancer(minRatio float64, maxRatio float64) *capacityBalancer {
 // TODO: we should adjust the weight of used ratio and leader score in futher,
 // now it is a little naive.
 func (cb *capacityBalancer) score(store *storeInfo, regionCount int) int {
-	usedRatioScore := store.usedRatio()
+	usedRatioScore := store.usedRatioScore()
 	leaderScore := store.leaderScore(regionCount)
-	score := int((usedRatioScore*0.6 + leaderScore*0.4) * 100)
-	log.Debugf("capacity balancer store %d, used ratio score: %v, leader score: %v [region count: %d], score: %v",
+	score := int(float64(usedRatioScore)*0.6 + float64(leaderScore)*0.4)
+	log.Debugf("capacity balancer store %d, used ratio score: %d, leader score: %d [region count: %d], score: %d",
 		store.store.GetId(), usedRatioScore, leaderScore, regionCount, score)
 	return score
 }
@@ -78,7 +78,7 @@ func (cb *capacityBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Pee
 	newStoreScore := cb.score(newStore, regionCount)
 
 	if oldStoreScore <= newStoreScore {
-		log.Debugf("check score failed - old peer: %v, new peer: %v, old store score: %v, new store score :%v", oldPeer, newPeer, oldStoreScore, newStoreScore)
+		log.Debugf("check score failed - old peer: %v, new peer: %v, old store score: %d, new store score :%d", oldPeer, newPeer, oldStoreScore, newStoreScore)
 		return false
 	}
 

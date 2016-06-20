@@ -482,13 +482,18 @@ func (s *storeInfo) usedRatio() float64 {
 	return float64(s.stats.stats.GetCapacity()-s.stats.stats.GetAvailable()) / float64(s.stats.stats.GetCapacity())
 }
 
-// leaderScore is the leader peer count score of store.
-func (s *storeInfo) leaderScore(regionCount int) float64 {
+// usedRatioScore is the used capacity ratio of storage capacity, the score range is [0,100].
+func (s *storeInfo) usedRatioScore() int {
+	return int(s.usedRatio() * 100)
+}
+
+// leaderScore is the leader peer count score of store, the score range is [0,100].
+func (s *storeInfo) leaderScore(regionCount int) int {
 	if regionCount == 0 {
 		return 0
 	}
 
-	return float64(s.stats.leaderRegionCount) / float64(regionCount)
+	return s.stats.leaderRegionCount / regionCount
 }
 
 // clusterInfo is cluster cache info.
