@@ -35,10 +35,10 @@ const (
 
 	// If the sending snapshot count of one storage is greater than this value,
 	// it will never be used as a from store.
-	maxSnapSendingCount = uint32(5)
+	maxSnapSendingCount = uint32(3)
 	// If the receiving snapshot count of one storage is greater than this value,
 	// it will never be used as a to store.
-	maxSnapReceivingCount = uint32(5)
+	maxSnapReceivingCount = uint32(3)
 
 	defaultDiffScoreFraction = 0.1
 )
