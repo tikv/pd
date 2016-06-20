@@ -185,29 +185,55 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	leaderPeer := region.GetPeers()[0]
 	c.Assert(leaderPeer, NotNil)
 
+	// If max peer count equals to 1, then we should add peer and do balance.
+	meta := clusterInfo.getMeta()
+	meta.MaxPeerCount = proto.Uint32(1)
+	clusterInfo.setMeta(meta)
+
+	cb = newCapacityBalancer(0.3, 0.9)
+	bop, err = cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop.ops, HasLen, 3)
+
+	op1 := bop.ops[0].(*changePeerOperator)
+	c.Assert(op1.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op1.changePeer.GetPeer().GetStoreId(), Equals, uint64(4))
+
+	op2 := bop.ops[1].(*transferLeaderOperator)
+	c.Assert(op2.oldLeader.GetStoreId(), Equals, uint64(1))
+	c.Assert(op2.newLeader.GetStoreId(), Equals, uint64(4))
+
+	op3 := bop.ops[2].(*changePeerOperator)
+	c.Assert(op3.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(op3.changePeer.GetPeer().GetStoreId(), Equals, uint64(1))
+
+	// Reset max peer count to 3.
+	meta.MaxPeerCount = proto.Uint32(3)
+	clusterInfo.setMeta(meta)
+
 	// Add two peers.
 	s.addRegionPeer(c, clusterInfo, 4, region, leaderPeer)
 	s.addRegionPeer(c, clusterInfo, 3, region, leaderPeer)
 
 	// Reset capacityUsedRatio = 0.3 to balance region.
 	// Now the region is (1,3,4), the balance operators should be
-	// 1) leader transfer: 1 -> 4
-	// 2) add peer: 2
+	// 1) add peer: 2
+	// 2) leader transfer: 1 -> 4
 	// 3) remove peer: 1
 	cb = newCapacityBalancer(0.3, 0.9)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop.ops, HasLen, 3)
 
-	op1 := bop.ops[0].(*transferLeaderOperator)
-	c.Assert(op1.oldLeader.GetStoreId(), Equals, uint64(1))
-	c.Assert(op1.newLeader.GetStoreId(), Equals, uint64(4))
+	op1 = bop.ops[0].(*changePeerOperator)
+	c.Assert(op1.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op1.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 
-	op2 := bop.ops[1].(*changePeerOperator)
-	c.Assert(op2.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(op2.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
+	op2 = bop.ops[1].(*transferLeaderOperator)
+	c.Assert(op2.oldLeader.GetStoreId(), Equals, uint64(1))
+	c.Assert(op2.newLeader.GetStoreId(), Equals, uint64(4))
 
-	op3 := bop.ops[2].(*changePeerOperator)
+	op3 = bop.ops[2].(*changePeerOperator)
 	c.Assert(op3.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op3.changePeer.GetPeer().GetStoreId(), Equals, uint64(1))
 

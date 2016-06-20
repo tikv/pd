@@ -149,7 +149,14 @@ func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*
 	return region, leaderPeer
 }
 
-func (cb *capacityBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[uint64]*metapb.Peer) *metapb.Peer {
+func (cb *capacityBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[uint64]*metapb.Peer, newPeer *metapb.Peer) *metapb.Peer {
+	// If len(peers) equals to 0, then we cannot find one peer to do leader transfer.
+	// So that we should use new peer.
+	if len(peers) == 0 {
+		log.Warn("new leader peer cannot be found in region peers to do balance, use the new peer")
+		return newPeer
+	}
+
 	stores := make([]*storeInfo, 0, len(peers))
 	for storeID := range peers {
 		stores = append(stores, cluster.getStore(storeID))
@@ -202,7 +209,7 @@ func (cb *capacityBalancer) selectRemovePeer(cluster *clusterInfo, peers map[uin
 }
 
 func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*balanceOperator, error) {
-	// Firstly, select one balance region from cluster info.
+	// First, select one balance region from cluster info.
 	stores := cluster.getStores()
 	region, oldLeader := cb.selectBalanceRegion(cluster, stores)
 	if region == nil || oldLeader == nil {
@@ -210,7 +217,7 @@ func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*balanceOperator, err
 		return nil, nil
 	}
 
-	// Secondly, select one region peer to do leader transfer.
+	// Second, select one store to add new peer.
 	followerPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 	excludedStores := make(map[uint64]struct{}, len(region.GetPeers()))
 	for _, peer := range region.GetPeers() {
@@ -224,13 +231,6 @@ func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*balanceOperator, err
 		followerPeers[storeID] = peer
 	}
 
-	newLeader := cb.selectNewLeaderPeer(cluster, followerPeers)
-	if newLeader == nil {
-		log.Warn("new leader peer cannot be found to do balance")
-		return nil, nil
-	}
-
-	// Thirdly, select one store to add new peer.
 	newPeer, err := cb.selectAddPeer(cluster, stores, excludedStores)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -240,11 +240,18 @@ func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*balanceOperator, err
 		return nil, nil
 	}
 
-	leaderTransferOperator := newTransferLeaderOperator(oldLeader, newLeader, maxWaitCount)
+	// Third, select one region peer to do leader transfer.
+	newLeader := cb.selectNewLeaderPeer(cluster, followerPeers, newPeer)
+	if newLeader == nil {
+		log.Warn("new leader peer cannot be found to do balance")
+		return nil, nil
+	}
+
 	addPeerOperator := newAddPeerOperator(newPeer)
+	leaderTransferOperator := newTransferLeaderOperator(oldLeader, newLeader, maxWaitCount)
 	removePeerOperator := newRemovePeerOperator(oldLeader)
 
-	return newBalanceOperator(region, leaderTransferOperator, addPeerOperator, removePeerOperator), nil
+	return newBalanceOperator(region, addPeerOperator, leaderTransferOperator, removePeerOperator), nil
 }
 
 // defaultBalancer is used for default config change, like add/remove peer.
