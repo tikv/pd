@@ -80,7 +80,24 @@ func checkStaleRegion(region *metapb.Region, checkRegion *metapb.Region) error {
 		return nil
 	}
 
-	return errors.Errorf("stale epoch %s, now %s", epoch, checkEpoch)
+	return errors.Errorf("epoch %s is staler than %s", checkEpoch, epoch)
+}
+
+func getFollowerPeers(region *metapb.Region, leader *metapb.Peer) (map[uint64]*metapb.Peer, map[uint64]struct{}) {
+	followerPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
+	excludedStores := make(map[uint64]struct{}, len(region.GetPeers()))
+	for _, peer := range region.GetPeers() {
+		storeID := peer.GetStoreId()
+		excludedStores[storeID] = struct{}{}
+
+		if peer.GetId() == leader.GetId() {
+			continue
+		}
+
+		followerPeers[storeID] = peer
+	}
+
+	return followerPeers, excludedStores
 }
 
 func keyInRegion(regionKey []byte, region *metapb.Region) bool {
@@ -354,8 +371,8 @@ func (r *regionsInfo) regionCount() int {
 	return len(r.regions)
 }
 
-// randRegion selects a region from region cache randomly.
-func (r *regionsInfo) randRegion(storeID uint64) *metapb.Region {
+// randLeaderRegion selects a leader region from region cache randomly.
+func (r *regionsInfo) randLeaderRegion(storeID uint64) *metapb.Region {
 	r.RLock()
 	defer r.RUnlock()
 
@@ -375,9 +392,9 @@ func (r *regionsInfo) randRegion(storeID uint64) *metapb.Region {
 		idx++
 	}
 
-	// TODO: if costs too much time, we may refactor the rand region way.
+	// TODO: if costs too much time, we may refactor the rand leader region way.
 	if cost := time.Now().Sub(start); cost > maxRandRegionTime {
-		log.Warnf("select region %d in %d regions for store %d too slow, cost %s", randRegionID, len(storeRegions), storeID, cost)
+		log.Warnf("select leader region %d in %d regions for store %d too slow, cost %s", randRegionID, len(storeRegions), storeID, cost)
 	}
 
 	region, ok := r.regions[randRegionID]
@@ -386,6 +403,46 @@ func (r *regionsInfo) randRegion(storeID uint64) *metapb.Region {
 	}
 
 	return nil
+}
+
+// randRegion selects a region from region cache randomly.
+func (r *regionsInfo) randRegion(storeID uint64) (*metapb.Region, *metapb.Peer) {
+	r.RLock()
+	defer r.RUnlock()
+
+	var (
+		region *metapb.Region
+		leader *metapb.Peer
+	)
+
+	start := time.Now()
+	for _, rg := range r.regions {
+		for _, peer := range region.GetPeers() {
+			if peer.GetStoreId() == storeID {
+				// Check whether it is leader region of this store.
+				regionID := region.GetId()
+				leaderStoreID, ok := r.leaders.regionStores[regionID]
+				if ok {
+					if leaderStoreID != storeID {
+						region = cloneRegion(rg)
+						leader = leaderPeer(region, leaderStoreID)
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// TODO: if costs too much time, we may refactor the rand region way.
+	if cost := time.Now().Sub(start); cost > maxRandRegionTime {
+		log.Warnf("select region %d in %d regions for store %d too slow, cost %s", region.GetId(), len(r.regions), storeID, cost)
+	}
+
+	if region == nil {
+		return nil, nil
+	}
+
+	return region, leader
 }
 
 type storeStatus struct {
@@ -425,13 +482,18 @@ func (s *storeInfo) usedRatio() float64 {
 	return float64(s.stats.stats.GetCapacity()-s.stats.stats.GetAvailable()) / float64(s.stats.stats.GetCapacity())
 }
 
-// leaderScore is the leader peer count score of store.
-func (s *storeInfo) leaderScore(regionCount int) float64 {
+// usedRatioScore is the used capacity ratio of storage capacity, the score range is [0,100].
+func (s *storeInfo) usedRatioScore() int {
+	return int(s.usedRatio() * 100)
+}
+
+// leaderScore is the leader peer count score of store, the score range is [0,100].
+func (s *storeInfo) leaderScore(regionCount int) int {
 	if regionCount == 0 {
 		return 0
 	}
 
-	return float64(s.stats.leaderRegionCount) / float64(regionCount)
+	return s.stats.leaderRegionCount * 100 / regionCount
 }
 
 // clusterInfo is cluster cache info.

@@ -114,6 +114,7 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *balanceOperato
 
 	// TODO: should we check allowBalance again here?
 
+	op.start = time.Now()
 	bw.balanceOperators[regionID] = op
 
 	return true
@@ -122,6 +123,15 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *balanceOperato
 func (bw *balancerWorker) removeBalanceOperator(regionID uint64) {
 	bw.Lock()
 	defer bw.Unlock()
+
+	// Log balancer information.
+	op, ok := bw.balanceOperators[regionID]
+	if ok {
+		op.end = time.Now()
+		log.Infof("balancer operator finished - %s", op)
+	} else {
+		log.Errorf("balancer operator is empty to remove - %d", regionID)
+	}
 
 	delete(bw.balanceOperators, regionID)
 }
