@@ -438,10 +438,6 @@ func (r *regionsInfo) randRegion(storeID uint64) (*metapb.Region, *metapb.Peer) 
 		log.Warnf("select region %d in %d regions for store %d too slow, cost %s", region.GetId(), len(r.regions), storeID, cost)
 	}
 
-	if region == nil {
-		return nil, nil
-	}
-
 	return region, leader
 }
 

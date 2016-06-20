@@ -19,10 +19,9 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/net/context"
-
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
+	"golang.org/x/net/context"
 )
 
 func TestServer(t *testing.T) {

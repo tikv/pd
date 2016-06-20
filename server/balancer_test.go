@@ -271,7 +271,7 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 
 	// If the store to be balanced without leader region, but we can find store to add new peer,
 	// we should do follower balance.
-	s.updateStore(c, clusterInfo, 1, 100, 1, 0, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 99, 0, 0)
 	s.updateStore(c, clusterInfo, 2, 100, 40, 0, 0)
 	s.updateStore(c, clusterInfo, 3, 100, 10, 0, 0)
 	s.updateStore(c, clusterInfo, 4, 100, 20, 0, 0)
