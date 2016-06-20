@@ -52,14 +52,14 @@ func newCapacityBalancer(minRatio float64, maxRatio float64) *capacityBalancer {
 }
 
 // calculate the score, higher score region will be selected as balance from store,
-// and lower score region will be balance to store.
+// and lower score region will be balance to store. The score range is [0,100].
 // TODO: we should adjust the weight of used ratio and leader score in futher,
 // now it is a little naive.
-func (cb *capacityBalancer) score(store *storeInfo, regionCount int) float64 {
-	usedRatioScore := store.usedRatio()
+func (cb *capacityBalancer) score(store *storeInfo, regionCount int) int {
+	usedRatioScore := store.usedRatioScore()
 	leaderScore := store.leaderScore(regionCount)
-	score := usedRatioScore*0.6 + leaderScore*0.4
-	log.Debugf("capacity balancer store %d, used ratio score: %v, leader score: %v [region count: %d], score: %v",
+	score := int(float64(usedRatioScore)*0.6 + float64(leaderScore)*0.4)
+	log.Debugf("capacity balancer store %d, used ratio score: %d, leader score: %d [region count: %d], score: %d",
 		store.store.GetId(), usedRatioScore, leaderScore, regionCount, score)
 	return score
 }
@@ -78,7 +78,7 @@ func (cb *capacityBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Pee
 	newStoreScore := cb.score(newStore, regionCount)
 
 	if oldStoreScore <= newStoreScore {
-		log.Debugf("check score failed - old peer: %v, new peer: %v, old store score: %v, new store score :%v", oldPeer, newPeer, oldStoreScore, newStoreScore)
+		log.Debugf("check score failed - old peer: %v, new peer: %v, old store score: %d, new store score :%d", oldPeer, newPeer, oldStoreScore, newStoreScore)
 		return false
 	}
 
@@ -86,7 +86,7 @@ func (cb *capacityBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Pee
 }
 
 func (cb *capacityBalancer) selectFromStore(stores []*storeInfo, regionCount int, useFilter bool) *storeInfo {
-	score := 0.0
+	score := 0
 	var resultStore *storeInfo
 	for _, store := range stores {
 		if store == nil {
@@ -116,7 +116,7 @@ func (cb *capacityBalancer) selectFromStore(stores []*storeInfo, regionCount int
 }
 
 func (cb *capacityBalancer) selectToStore(stores []*storeInfo, excluded map[uint64]struct{}, regionCount int) *storeInfo {
-	score := 0.0
+	score := 0
 	var resultStore *storeInfo
 	for _, store := range stores {
 		if store == nil {
