@@ -32,6 +32,8 @@ const (
 	// If the used ratio of one storage is greater than this value,
 	// it will never be used as a selected target.
 	maxCapacityUsedRatio = 0.9
+
+	defaultDiffScoreFraction = 0.1
 )
 
 var (
@@ -64,7 +66,7 @@ func (cb *capacityBalancer) score(store *storeInfo, regionCount int) int {
 	return score
 }
 
-// checkScore checks whether the new store score is less than the old store score.
+// checkScore checks whether the new store score and old store score are valid.
 func (cb *capacityBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Peer, newPeer *metapb.Peer) bool {
 	regionCount := cluster.regions.regionCount()
 	oldStore := cluster.getStore(oldPeer.GetStoreId())
@@ -79,6 +81,14 @@ func (cb *capacityBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Pee
 
 	if oldStoreScore <= newStoreScore {
 		log.Debugf("check score failed - old peer: %v, new peer: %v, old store score: %d, new store score :%d", oldPeer, newPeer, oldStoreScore, newStoreScore)
+		return false
+	}
+
+	// If the diff score is in defaultScoreFraction range, then we will do nothing.
+	diffScore := oldStoreScore - newStoreScore
+	if diffScore <= int(float64(oldStoreScore)*defaultDiffScoreFraction) {
+		log.Debugf("check score failed - diff score is too small - old peer: %v, new peer: %v, old store score: %d, new store score :%d, diif score: %d",
+			oldPeer, newPeer, oldStoreScore, newStoreScore, diffScore)
 		return false
 	}
 
