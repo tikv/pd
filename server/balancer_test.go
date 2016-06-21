@@ -96,7 +96,7 @@ func (s *testBalancerSuite) updateStore(c *C, clusterInfo *clusterInfo, storeID 
 }
 
 func (s *testBalancerSuite) addRegionPeer(c *C, clusterInfo *clusterInfo, storeID uint64, region *metapb.Region, leaderPeer *metapb.Peer) {
-	db := newDefaultBalancer(region, leaderPeer)
+	db := newDefaultBalancer(region, leaderPeer, minCapacityUsedRatio, maxCapacityUsedRatio)
 	bop, err := db.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 
@@ -135,7 +135,7 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	s.addRegionPeer(c, clusterInfo, 3, region, leaderPeer)
 
 	// Now peers count equals to max peer count, so there is nothing to do.
-	db := newDefaultBalancer(region, leaderPeer)
+	db := newDefaultBalancer(region, leaderPeer, minCapacityUsedRatio, maxCapacityUsedRatio)
 	bop, err := db.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
@@ -148,7 +148,7 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	region.Peers = append(region.Peers, newPeer)
 
 	// Test remove peer.
-	db = newDefaultBalancer(region, leaderPeer)
+	db = newDefaultBalancer(region, leaderPeer, minCapacityUsedRatio, maxCapacityUsedRatio)
 	bop, err = db.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 
@@ -159,7 +159,7 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	c.Assert(op.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 }
 
-func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
+func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	clusterInfo := s.newClusterInfo(c)
 	c.Assert(clusterInfo, NotNil)
 
@@ -173,13 +173,13 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0)
 
 	// Now we have all stores with low capacityUsedRatio, so we need not to do balance.
-	cb := newCapacityBalancer(0.4, 0.9)
+	cb := newResourceBalancer(0.4, 0.9)
 	bop, err := cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
 
 	// Now region peer count is less than max peer count, so we need not to do balance.
-	cb = newCapacityBalancer(0.1, 0.9)
+	cb = newResourceBalancer(0.1, 0.9)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
@@ -197,7 +197,7 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	// 1) leader transfer: 1 -> 4
 	// 2) add peer: 2
 	// 3) remove peer: 1
-	cb = newCapacityBalancer(0.3, 0.9)
+	cb = newResourceBalancer(0.3, 0.9)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop.ops, HasLen, 3)
@@ -221,7 +221,7 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
 	s.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
 
-	cb = newCapacityBalancer(0.3, 0.9)
+	cb = newResourceBalancer(0.3, 0.9)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
@@ -233,7 +233,7 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
 	s.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
 
-	cb = newCapacityBalancer(0.4, 0.6)
+	cb = newResourceBalancer(0.4, 0.6)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
@@ -245,7 +245,7 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
 	s.updateStore(c, clusterInfo, 4, 100, 20, 0, 0)
 
-	cb = newCapacityBalancer(0.4, 0.7)
+	cb = newResourceBalancer(0.4, 0.7)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, NotNil)
@@ -264,7 +264,7 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
 	s.updateStore(c, clusterInfo, 4, 100, 20, 0, 0)
 
-	cb = newCapacityBalancer(0.4, 0.7)
+	cb = newResourceBalancer(0.4, 0.7)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
@@ -276,7 +276,7 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 3, 100, 10, 0, 0)
 	s.updateStore(c, clusterInfo, 4, 100, 20, 0, 0)
 
-	cb = newCapacityBalancer(0.4, 0.7)
+	cb = newResourceBalancer(0.4, 0.7)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, NotNil)
@@ -295,7 +295,7 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 3, 100, 10, 0, 0)
 	s.updateStore(c, clusterInfo, 4, 100, 20, 0, 0)
 
-	cb = newCapacityBalancer(0.4, 0.7)
+	cb = newResourceBalancer(0.4, 0.7)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)

@@ -26,7 +26,7 @@ func (c *raftCluster) addDefaultBalanceOperator(region *metapb.Region, leader *m
 		return nil, nil
 	}
 
-	balancer := newDefaultBalancer(region, leader)
+	balancer := newDefaultBalancer(region, leader, c.s.cfg.MinCapacityUsedRatio, c.s.cfg.MaxCapacityUsedRatio)
 	balanceOperator, err := balancer.Balance(c.cachedCluster)
 	if err != nil {
 		return nil, errors.Trace(err)
