@@ -245,13 +245,7 @@ func (tlo *transferLeaderOperator) check(region *metapb.Region, leader *metapb.P
 		return true, nil
 	}
 
-	// If the old leader has been changed but not be new leader, we also finish it.
-	if leader.GetId() != tlo.oldLeader.GetId() {
-		log.Warnf("old leader %v has changed to %v, but not %v", tlo.oldLeader, leader, tlo.newLeader)
-		return true, nil
-	}
-
-	log.Infof("balance [%s], try to transfer leader from %s to %s", region, tlo.oldLeader, tlo.newLeader)
+	log.Infof("balance [%s][]%d, try to transfer leader from %s to %s", tlo.count, region, tlo.oldLeader, tlo.newLeader)
 	return false, nil
 }
 

@@ -150,7 +150,7 @@ func (s *testClusterWorkerSuite) newMockRaftStore(c *C, metaStore *metapb.Store)
 		peers:    make(map[uint64]*metapb.Peer),
 	}
 
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
 	err = cluster.putStore(metaStore)
@@ -192,7 +192,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	s.newMockRaftStore(c, nil)
 	s.newMockRaftStore(c, nil)
 
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
 	err = cluster.putConfig(&metapb.Cluster{
@@ -201,7 +201,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	})
 	c.Assert(err, IsNil)
 
-	stores, err := cluster.getAllStores()
+	stores, err := cluster.GetAllStores()
 	c.Assert(err, IsNil)
 	c.Assert(stores, HasLen, 5)
 }
@@ -212,7 +212,7 @@ func (s *testClusterWorkerSuite) TearDownTest(c *C) {
 }
 
 func (s *testClusterWorkerSuite) checkRegionPeerCount(c *C, regionKey []byte, expectCount int) *metapb.Region {
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
 	region, err := cluster.getRegion(regionKey)
@@ -318,13 +318,13 @@ func (s *testClusterWorkerSuite) heartbeatStore(c *C, conn net.Conn, msgID uint6
 	return resp.GetStoreHeartbeat()
 }
 
-func mustGetRegion(c *C, cluster *raftCluster, key []byte, expect *metapb.Region) {
+func mustGetRegion(c *C, cluster *RaftCluster, key []byte, expect *metapb.Region) {
 	r, err := cluster.getRegion(key)
 	c.Assert(err, IsNil)
 	c.Assert(r, DeepEquals, expect)
 }
 
-func checkSearchRegions(c *C, cluster *raftCluster, keys ...[]byte) {
+func checkSearchRegions(c *C, cluster *RaftCluster, keys ...[]byte) {
 	cacheRegions := cluster.cachedCluster.regions
 	c.Assert(cacheRegions.searchRegions.Len(), Equals, len(keys))
 
@@ -340,11 +340,10 @@ func checkSearchRegions(c *C, cluster *raftCluster, keys ...[]byte) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
-	meta, err := cluster.getConfig()
-	c.Assert(err, IsNil)
+	meta := cluster.GetConfig()
 	meta.MaxPeerCount = proto.Uint32(1)
 	err = cluster.putConfig(meta)
 	c.Assert(err, IsNil)
@@ -402,7 +401,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 	r1, err := cluster.getRegion([]byte("a"))
 	c.Assert(err, IsNil)
@@ -413,8 +412,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 	leaderPeer := s.chooseRegionLeader(c, r1)
 
 	// Set MaxPeerCount to 10.
-	meta, err := cluster.getConfig()
-	c.Assert(err, IsNil)
+	meta := cluster.GetConfig()
 	meta.MaxPeerCount = proto.Uint32(10)
 	err = cluster.putConfig(meta)
 	c.Assert(err, IsNil)
@@ -439,11 +437,10 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
-	meta, err := cluster.getConfig()
-	c.Assert(err, IsNil)
+	meta := cluster.GetConfig()
 	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
 
 	// There is only one region now, directly use it for test.
@@ -502,11 +499,10 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
-	meta, err := cluster.getConfig()
-	c.Assert(err, IsNil)
+	meta := cluster.GetConfig()
 	meta.MaxPeerCount = proto.Uint32(2)
 	err = cluster.putConfig(meta)
 	c.Assert(err, IsNil)
@@ -542,10 +538,10 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
-	stores, err := cluster.getAllStores()
+	stores, err := cluster.GetAllStores()
 	c.Assert(err, IsNil)
 	c.Assert(stores, HasLen, 5)
 

@@ -72,7 +72,7 @@ func (c *conn) handleIsBootstrapped(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Errorf("invalid is bootstrapped command, but %v", req)
 	}
 
-	cluster, err := c.s.getRaftCluster()
+	cluster, err := c.s.GetRaftCluster()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -92,7 +92,7 @@ func (c *conn) handleBootstrap(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Errorf("invalid bootstrap command, but %v", req)
 	}
 
-	cluster, err := c.s.getRaftCluster()
+	cluster, err := c.s.GetRaftCluster()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -103,8 +103,8 @@ func (c *conn) handleBootstrap(req *pdpb.Request) (*pdpb.Response, error) {
 	return c.s.bootstrapCluster(request)
 }
 
-func (c *conn) getRaftCluster() (*raftCluster, error) {
-	cluster, err := c.s.getRaftCluster()
+func (c *conn) getRaftCluster() (*RaftCluster, error) {
+	cluster, err := c.s.GetRaftCluster()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -126,7 +126,7 @@ func (c *conn) handleGetStore(req *pdpb.Request) (*pdpb.Response, error) {
 	}
 
 	storeID := request.GetStoreId()
-	store, err := cluster.getStore(storeID)
+	store, err := cluster.GetStore(storeID)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -265,11 +265,7 @@ func (c *conn) handleGetClusterConfig(req *pdpb.Request) (*pdpb.Response, error)
 		return nil, errors.Trace(err)
 	}
 
-	conf, err := cluster.getConfig()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
+	conf := cluster.GetConfig()
 	return &pdpb.Response{
 		GetClusterConfig: &pdpb.GetClusterConfigResponse{
 			Cluster: conf,

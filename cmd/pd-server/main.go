@@ -24,6 +24,7 @@ import (
 
 	"github.com/ngaut/log"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/api"
 )
 
 var (
@@ -33,6 +34,7 @@ var (
 	rootPath        = flag.String("root", "/pd", "pd root path in etcd")
 	leaderLease     = flag.Int64("lease", 3, "leader lease time (second)")
 	logLevel        = flag.String("L", "debug", "log level: info, debug, warn, error, fatal")
+	httpAddr        = flag.String("httpAddr", ":9090", "http server listening address")
 	pprofAddr       = flag.String("pprof", ":6060", "pprof HTTP listening address")
 	clusterID       = flag.Uint64("cluster-id", 0, "cluster ID")
 	maxPeerCount    = flag.Uint("max-peer-count", 3, "max peer count for the region")
@@ -57,6 +59,7 @@ func main() {
 
 	cfg := &server.Config{
 		Addr:                 *addr,
+		HTTPAddr:             *httpAddr,
 		AdvertiseAddr:        *advertiseAddr,
 		EtcdAddrs:            strings.Split(*etcdAddrs, ","),
 		RootPath:             *rootPath,
@@ -69,7 +72,12 @@ func main() {
 		MaxCapacityUsedRatio: *maxCapUsedRatio,
 	}
 
-	svr, err := server.NewServer(cfg)
+	go func() {
+		api.ServeHTTP(cfg.HTTPAddr)
+	}()
+
+	var err error
+	server.PdServer, err = server.NewServer(cfg)
 	if err != nil {
 		log.Errorf("create pd server err %s\n", err)
 		return
@@ -85,9 +93,9 @@ func main() {
 	go func() {
 		sig := <-sc
 		log.Infof("Got signal [%d] to exit.", sig)
-		svr.Close()
+		server.PdServer.Close()
 		os.Exit(0)
 	}()
 
-	svr.Run()
+	server.PdServer.Run()
 }

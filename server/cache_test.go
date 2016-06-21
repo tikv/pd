@@ -61,7 +61,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	_, err = s.svr.bootstrapCluster(req.Bootstrap)
 	c.Assert(err, IsNil)
 
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
 	// Check cachedCluster.
@@ -175,11 +175,11 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 		store2.GetId(): store2,
 	}
 
-	cluster, err = s.svr.getRaftCluster()
+	cluster, err = s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 	c.Assert(cluster, IsNil)
 
-	allStores, err := s.svr.cluster.getAllStores()
+	allStores, err := s.svr.cluster.GetAllStores()
 	c.Assert(err, IsNil)
 	c.Assert(allStores, HasLen, 2)
 	for _, store := range allStores {

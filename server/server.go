@@ -28,6 +28,9 @@ import (
 	statsd "gopkg.in/alexcesaro/statsd.v2"
 )
 
+// PdServer is global pd server.
+var PdServer *Server
+
 const (
 	etcdTimeout = time.Second * 3
 )
@@ -65,7 +68,7 @@ type Server struct {
 
 	// for raft cluster
 	clusterLock sync.RWMutex
-	cluster     *raftCluster
+	cluster     *RaftCluster
 
 	msgID uint64
 
@@ -114,7 +117,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	s.idAlloc = &idAllocator{s: s}
-	s.cluster = &raftCluster{
+	s.cluster = &RaftCluster{
 		s:           s,
 		running:     false,
 		clusterID:   cfg.ClusterID,

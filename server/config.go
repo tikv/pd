@@ -29,6 +29,9 @@ type Config struct {
 	// Server listening address.
 	Addr string
 
+	// HTTP server listening address.
+	HTTPAddr string
+
 	// Server advertise listening address for outer client communication.
 	// If not set, using default Addr instead.
 	AdvertiseAddr string
