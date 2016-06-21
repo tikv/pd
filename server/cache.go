@@ -467,17 +467,20 @@ func (r *regionsInfo) randRegion(storeID uint64) (*metapb.Region, *metapb.Peer) 
 	return region, leader
 }
 
-type storeStatus struct {
+// StoreStatus is store status info.
+type StoreStatus struct {
 	// store capacity info.
-	stats *pdpb.StoreStats
+	Stats *pdpb.StoreStats `json:"stats"`
 
-	leaderRegionCount int
+	LeaderRegionCount int `json:"leaderRegionCount"`
+
+	Score int `json:"score"`
 }
 
-func (s *storeStatus) clone() *storeStatus {
-	return &storeStatus{
-		stats:             proto.Clone(s.stats).(*pdpb.StoreStats),
-		leaderRegionCount: s.leaderRegionCount,
+func (s *StoreStatus) clone() *StoreStatus {
+	return &StoreStatus{
+		Stats:             proto.Clone(s.Stats).(*pdpb.StoreStats),
+		LeaderRegionCount: s.LeaderRegionCount,
 	}
 }
 
@@ -485,7 +488,7 @@ func (s *storeStatus) clone() *storeStatus {
 type storeInfo struct {
 	store *metapb.Store
 
-	stats *storeStatus
+	stats *StoreStatus
 }
 
 func (s *storeInfo) clone() *storeInfo {
@@ -497,11 +500,11 @@ func (s *storeInfo) clone() *storeInfo {
 
 // usedRatio is the used capacity ratio of storage capacity.
 func (s *storeInfo) usedRatio() float64 {
-	if s.stats.stats.GetCapacity() == 0 {
+	if s.stats.Stats.GetCapacity() == 0 {
 		return 0
 	}
 
-	return float64(s.stats.stats.GetCapacity()-s.stats.stats.GetAvailable()) / float64(s.stats.stats.GetCapacity())
+	return float64(s.stats.Stats.GetCapacity()-s.stats.Stats.GetAvailable()) / float64(s.stats.Stats.GetCapacity())
 }
 
 // usedRatioScore is the used capacity ratio of storage capacity, the score range is [0,100].
@@ -515,7 +518,7 @@ func (s *storeInfo) leaderScore(regionCount int) int {
 		return 0
 	}
 
-	return s.stats.leaderRegionCount * 100 / regionCount
+	return s.stats.LeaderRegionCount * 100 / regionCount
 }
 
 // clusterInfo is cluster cache info.
@@ -552,7 +555,7 @@ func (c *clusterInfo) addStore(store *metapb.Store) {
 
 	storeInfo := &storeInfo{
 		store: store,
-		stats: &storeStatus{},
+		stats: &StoreStatus{},
 	}
 
 	c.stores[store.GetId()] = storeInfo
@@ -568,8 +571,8 @@ func (c *clusterInfo) updateStoreStatus(stats *pdpb.StoreStats) bool {
 		return false
 	}
 
-	store.stats.stats = stats
-	store.stats.leaderRegionCount = c.regions.leaderRegionCount(storeID)
+	store.stats.Stats = stats
+	store.stats.LeaderRegionCount = c.regions.leaderRegionCount(storeID)
 	return true
 }
 

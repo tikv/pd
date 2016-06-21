@@ -350,17 +350,17 @@ func (c *RaftCluster) GetStores() []*metapb.Store {
 }
 
 // GetStore gets store from cluster.
-func (c *RaftCluster) GetStore(storeID uint64) (*metapb.Store, error) {
+func (c *RaftCluster) GetStore(storeID uint64) (*metapb.Store, *StoreStatus, error) {
 	if storeID == 0 {
-		return nil, errors.New("invalid zero store id")
+		return nil, nil, errors.New("invalid zero store id")
 	}
 
 	store := c.cachedCluster.getStore(storeID)
 	if store == nil {
-		return nil, errors.Errorf("invalid store ID %d, not found", storeID)
+		return nil, nil, errors.Errorf("invalid store ID %d, not found", storeID)
 	}
 
-	return store.store, nil
+	return store.store, store.stats, nil
 }
 
 func (c *RaftCluster) putStore(store *metapb.Store) error {
@@ -434,4 +434,15 @@ func (c *RaftCluster) GetBalanceOperators() map[uint64]Operator {
 	}
 
 	return balanceOperators
+}
+
+// GetScore gets store score from balancer.
+func (c *RaftCluster) GetScore(store *metapb.Store, status *StoreStatus) int {
+	storeInfo := &storeInfo{
+		store: store,
+		stats: status,
+	}
+
+	regionCount := c.cachedCluster.regions.regionCount()
+	return c.balancerWorker.balancer.(*resourceBalancer).score(storeInfo, regionCount)
 }

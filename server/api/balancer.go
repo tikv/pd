@@ -43,7 +43,11 @@ func (bc *balancerController) GetBalancers() {
 	}
 
 	balancers := cluster.GetBalanceOperators()
-	balancersInfo := &balancersInfo{Count: len(balancers)}
+	balancersInfo := &balancersInfo{
+		Count:     len(balancers),
+		Balancers: make([]*balancerInfo, 0, len(balancers)),
+	}
+
 	for key, value := range balancers {
 		balancer := &balancerInfo{
 			ID:       key,

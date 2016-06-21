@@ -25,8 +25,13 @@ type storeController struct {
 }
 
 type storeInfo struct {
-	Count  int             `json:"count"`
-	Stores []*metapb.Store `json:"stores"`
+	Store  *metapb.Store       `json:"store"`
+	Status *server.StoreStatus `json:"status"`
+}
+
+type storesInfo struct {
+	Count  int          `json:"count"`
+	Stores []*storeInfo `json:"stores"`
 }
 
 func (sc *storeController) GetStore() {
@@ -47,13 +52,19 @@ func (sc *storeController) GetStore() {
 		return
 	}
 
-	store, err := cluster.GetStore(storeID)
+	store, status, err := cluster.GetStore(storeID)
 	if err != nil {
 		sc.serveError(500, err)
 		return
 	}
 
-	sc.Data["json"] = store
+	storeInfo := &storeInfo{
+		Store:  store,
+		Status: status,
+	}
+	storeInfo.Status.Score = cluster.GetScore(storeInfo.Store, storeInfo.Status)
+
+	sc.Data["json"] = storeInfo
 	sc.ServeJSON()
 }
 
@@ -69,9 +80,26 @@ func (sc *storeController) GetStores() {
 	}
 
 	stores := cluster.GetStores()
-	sc.Data["json"] = &storeInfo{
+	storesInfo := &storesInfo{
 		Count:  len(stores),
-		Stores: stores,
+		Stores: make([]*storeInfo, 0, len(stores)),
 	}
+
+	for _, s := range stores {
+		store, status, err := cluster.GetStore(s.GetId())
+		if err != nil {
+			sc.serveError(500, err)
+			return
+		}
+
+		storeInfo := &storeInfo{
+			Store:  store,
+			Status: status,
+		}
+		storeInfo.Status.Score = cluster.GetScore(storeInfo.Store, storeInfo.Status)
+		storesInfo.Stores = append(storesInfo.Stores, storeInfo)
+	}
+
+	sc.Data["json"] = storesInfo
 	sc.ServeJSON()
 }

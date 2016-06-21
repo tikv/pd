@@ -126,7 +126,7 @@ func (c *conn) handleGetStore(req *pdpb.Request) (*pdpb.Response, error) {
 	}
 
 	storeID := request.GetStoreId()
-	store, err := cluster.GetStore(storeID)
+	store, _, err := cluster.GetStore(storeID)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

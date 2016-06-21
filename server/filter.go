@@ -52,9 +52,9 @@ func newSnapCountFilter(maxSnapSendingCount uint32, maxSnapReceivingCount uint32
 }
 
 func (sf *snapCountFilter) FilterFromStore(store *storeInfo, args ...interface{}) bool {
-	return store.stats.stats.GetSnapSendingCount() > maxSnapSendingCount
+	return store.stats.Stats.GetSnapSendingCount() > maxSnapSendingCount
 }
 
 func (sf *snapCountFilter) FilterToStore(store *storeInfo, args ...interface{}) bool {
-	return store.stats.stats.GetSnapReceivingCount() > maxSnapReceivingCount
+	return store.stats.Stats.GetSnapReceivingCount() > maxSnapReceivingCount
 }
