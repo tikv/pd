@@ -38,7 +38,7 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	c.Assert(region.GetPeers(), HasLen, 1)
 
 	s.balancerWorker = newBalancerWorker(clusterInfo,
-		newCapacityBalancer(minCapacityUsedRatio, maxCapacityUsedRatio),
+		newResourceBalancer(minCapacityUsedRatio, maxCapacityUsedRatio),
 		defaultBalanceInterval)
 
 	// The store id will be 1,2,3,4.
