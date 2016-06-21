@@ -169,7 +169,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 
 	s.svr.cluster.stop()
 
-	// Check GetAllStores.
+	// Check GetStores.
 	stores := map[uint64]*metapb.Store{
 		store1.GetId(): store1,
 		store2.GetId(): store2,
@@ -179,8 +179,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(cluster, IsNil)
 
-	allStores, err := s.svr.cluster.GetAllStores()
-	c.Assert(err, IsNil)
+	allStores := s.svr.cluster.GetStores()
 	c.Assert(allStores, HasLen, 2)
 	for _, store := range allStores {
 		c.Assert(stores, HasKey, store.GetId())

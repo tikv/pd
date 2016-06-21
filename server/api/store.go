@@ -16,11 +16,17 @@ package api
 import (
 	"strconv"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
 )
 
 type storeController struct {
 	baseController
+}
+
+type storeInfo struct {
+	Count  int             `json:"count"`
+	Stores []*metapb.Store `json:"stores"`
 }
 
 func (sc *storeController) GetStore() {
@@ -62,12 +68,10 @@ func (sc *storeController) GetStores() {
 		return
 	}
 
-	stores, err := cluster.GetAllStores()
-	if err != nil {
-		sc.serveError(500, err)
-		return
+	stores := cluster.GetStores()
+	sc.Data["json"] = &storeInfo{
+		Count:  len(stores),
+		Stores: stores,
 	}
-
-	sc.Data["json"] = stores
 	sc.ServeJSON()
 }

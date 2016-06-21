@@ -330,10 +330,26 @@ func (c *RaftCluster) cacheAllRegions() error {
 	return nil
 }
 
-func (c *RaftCluster) GetAllStores() ([]metapb.Store, error) {
-	return c.cachedCluster.getMetaStores(), nil
+func (c *RaftCluster) getRegion(regionKey []byte) (*metapb.Region, error) {
+	return c.cachedCluster.regions.getRegion(regionKey), nil
 }
 
+// GetRegionByID gets region by regionID from cluster.
+func (c *RaftCluster) GetRegionByID(regionID uint64) *metapb.Region {
+	return c.cachedCluster.regions.getRegionByID(regionID)
+}
+
+// GetRegions gets regions from cluster.
+func (c *RaftCluster) GetRegions() []*metapb.Region {
+	return c.cachedCluster.regions.getRegions()
+}
+
+// GetStores gets stores from cluster.
+func (c *RaftCluster) GetStores() []*metapb.Store {
+	return c.cachedCluster.getMetaStores()
+}
+
+// GetStore gets store from cluster.
 func (c *RaftCluster) GetStore(storeID uint64) (*metapb.Store, error) {
 	if storeID == 0 {
 		return nil, errors.New("invalid zero store id")
@@ -345,15 +361,6 @@ func (c *RaftCluster) GetStore(storeID uint64) (*metapb.Store, error) {
 	}
 
 	return store.store, nil
-}
-
-func (c *RaftCluster) getRegion(regionKey []byte) (*metapb.Region, error) {
-	return c.cachedCluster.regions.getRegion(regionKey), nil
-}
-
-func (c *RaftCluster) GetRegionByID(regionID uint64) (*metapb.Region, error) {
-	// return c.cachedCluster.regions.getRegion(regionKey), nil
-	return nil, nil
 }
 
 func (c *RaftCluster) putStore(store *metapb.Store) error {
@@ -385,6 +392,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	return nil
 }
 
+// GetConfig gets config from cluster.
 func (c *RaftCluster) GetConfig() *metapb.Cluster {
 	return c.cachedCluster.getMeta()
 }
@@ -415,4 +423,15 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 	c.cachedCluster.setMeta(meta)
 
 	return nil
+}
+
+// GetBalanceOperators gets the balance operators from cluster.
+func (c *RaftCluster) GetBalanceOperators() map[uint64]Operator {
+	ops := c.balancerWorker.getBalanceOperators()
+	balanceOperators := make(map[uint64]Operator, len(ops))
+	for key, value := range ops {
+		balanceOperators[key] = value
+	}
+
+	return balanceOperators
 }

@@ -170,7 +170,7 @@ func newRegionsInfo() *regionsInfo {
 	}
 }
 
-// getRegion gets the region by regionKey. Return nil if not found.
+// getRegion gets the region by regionKey, returns nil if not found.
 func (r *regionsInfo) getRegion(regionKey []byte) *metapb.Region {
 	r.RLock()
 	region := r.innerGetRegion(regionKey)
@@ -185,6 +185,32 @@ func (r *regionsInfo) getRegion(regionKey []byte) *metapb.Region {
 	}
 
 	return nil
+}
+
+// getRegionByID gets the region by regionID, returns nil if not found.
+func (r *regionsInfo) getRegionByID(regionID uint64) *metapb.Region {
+	r.RLock()
+	defer r.RUnlock()
+
+	region, ok := r.regions[regionID]
+	if ok {
+		return cloneRegion(region)
+	}
+
+	return nil
+}
+
+// getRegions gets all the regions, returns nil if not found.
+func (r *regionsInfo) getRegions() []*metapb.Region {
+	r.RLock()
+	defer r.RUnlock()
+
+	regions := make([]*metapb.Region, 0, len(r.regions))
+	for _, region := range r.regions {
+		regions = append(regions, cloneRegion(region))
+	}
+
+	return regions
 }
 
 func (r *regionsInfo) innerGetRegion(regionKey []byte) *metapb.Region {
@@ -578,13 +604,13 @@ func (c *clusterInfo) getStores() []*storeInfo {
 	return stores
 }
 
-func (c *clusterInfo) getMetaStores() []metapb.Store {
+func (c *clusterInfo) getMetaStores() []*metapb.Store {
 	c.RLock()
 	defer c.RUnlock()
 
-	stores := make([]metapb.Store, 0, len(c.stores))
+	stores := make([]*metapb.Store, 0, len(c.stores))
 	for _, store := range c.stores {
-		stores = append(stores, *proto.Clone(store.store).(*metapb.Store))
+		stores = append(stores, proto.Clone(store.store).(*metapb.Store))
 	}
 
 	return stores

@@ -16,11 +16,17 @@ package api
 import (
 	"strconv"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
 )
 
 type regionController struct {
 	baseController
+}
+
+type regionInfo struct {
+	Count   int              `json:"count"`
+	Regions []*metapb.Region `json:"regions"`
 }
 
 func (rc *regionController) GetRegion() {
@@ -41,15 +47,26 @@ func (rc *regionController) GetRegion() {
 		return
 	}
 
-	region, err := cluster.GetRegionByID(regionID)
-	if err != nil {
-		rc.serveError(500, err)
-		return
-	}
-
+	region := cluster.GetRegionByID(regionID)
 	rc.Data["json"] = region
 	rc.ServeJSON()
 }
 
 func (rc *regionController) GetRegions() {
+	cluster, err := server.PdServer.GetRaftCluster()
+	if err != nil {
+		rc.serveError(500, err)
+		return
+	}
+	if cluster == nil {
+		rc.ServeJSON()
+		return
+	}
+
+	regions := cluster.GetRegions()
+	rc.Data["json"] = &regionInfo{
+		Count:   len(regions),
+		Regions: regions,
+	}
+	rc.ServeJSON()
 }

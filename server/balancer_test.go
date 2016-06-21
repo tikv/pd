@@ -100,11 +100,11 @@ func (s *testBalancerSuite) addRegionPeer(c *C, clusterInfo *clusterInfo, storeI
 	bop, err := db.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 
-	op, ok := bop.ops[0].(*onceOperator).op.(*changePeerOperator)
+	op, ok := bop.Ops[0].(*onceOperator).Op.(*changePeerOperator)
 	c.Assert(ok, IsTrue)
-	c.Assert(op.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 
-	peer := op.changePeer.GetPeer()
+	peer := op.ChangePeer.GetPeer()
 	c.Assert(peer.GetStoreId(), Equals, storeID)
 
 	addRegionPeer(c, region, peer)
@@ -153,10 +153,10 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	c.Assert(err, IsNil)
 
 	// Now we cannot remove leader peer, so the result is peer in store 2.
-	op, ok := bop.ops[0].(*onceOperator).op.(*changePeerOperator)
+	op, ok := bop.Ops[0].(*onceOperator).Op.(*changePeerOperator)
 	c.Assert(ok, IsTrue)
-	c.Assert(op.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(op.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
+	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 }
 
 func (s *testBalancerSuite) TestResourceBalancer(c *C) {
@@ -200,19 +200,19 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	cb = newResourceBalancer(0.3, 0.9)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
-	c.Assert(bop.ops, HasLen, 3)
+	c.Assert(bop.Ops, HasLen, 3)
 
-	op1 := bop.ops[0].(*transferLeaderOperator)
-	c.Assert(op1.oldLeader.GetStoreId(), Equals, uint64(1))
-	c.Assert(op1.newLeader.GetStoreId(), Equals, uint64(4))
+	op1 := bop.Ops[0].(*transferLeaderOperator)
+	c.Assert(op1.OldLeader.GetStoreId(), Equals, uint64(1))
+	c.Assert(op1.NewLeader.GetStoreId(), Equals, uint64(4))
 
-	op2 := bop.ops[1].(*changePeerOperator)
-	c.Assert(op2.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(op2.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
+	op2 := bop.Ops[1].(*changePeerOperator)
+	c.Assert(op2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 
-	op3 := bop.ops[2].(*changePeerOperator)
-	c.Assert(op3.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(op3.changePeer.GetPeer().GetStoreId(), Equals, uint64(1))
+	op3 := bop.Ops[2].(*changePeerOperator)
+	c.Assert(op3.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(op3.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(1))
 
 	// If the sending snapshot count of store is greater than maxSnapSendingCount,
 	// we will do nothing.
@@ -250,13 +250,13 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(bop, NotNil)
 
-	newOp1 := bop.ops[0].(*changePeerOperator)
-	c.Assert(newOp1.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(newOp1.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
+	newOp1 := bop.Ops[0].(*changePeerOperator)
+	c.Assert(newOp1.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(newOp1.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 
-	newOp2 := bop.ops[1].(*changePeerOperator)
-	c.Assert(newOp2.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(newOp2.changePeer.GetPeer().GetStoreId(), Equals, uint64(4))
+	newOp2 := bop.Ops[1].(*changePeerOperator)
+	c.Assert(newOp2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(newOp2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(4))
 
 	// If the old store and new store diff score is not big enough, we will do nothing.
 	s.updateStore(c, clusterInfo, 1, 100, 10, 0, 0)
@@ -281,13 +281,13 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(bop, NotNil)
 
-	newOp1 = bop.ops[0].(*changePeerOperator)
-	c.Assert(newOp1.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(newOp1.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
+	newOp1 = bop.Ops[0].(*changePeerOperator)
+	c.Assert(newOp1.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(newOp1.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 
-	newOp2 = bop.ops[1].(*changePeerOperator)
-	c.Assert(newOp2.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(newOp2.changePeer.GetPeer().GetStoreId(), Equals, uint64(3))
+	newOp2 = bop.Ops[1].(*changePeerOperator)
+	c.Assert(newOp2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(newOp2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(3))
 
 	// If the old store and new store diff score is not big enough, we will do nothing.
 	s.updateStore(c, clusterInfo, 1, 100, 1, 0, 0)

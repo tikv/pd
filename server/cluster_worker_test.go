@@ -201,8 +201,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	})
 	c.Assert(err, IsNil)
 
-	stores, err := cluster.GetAllStores()
-	c.Assert(err, IsNil)
+	stores := cluster.GetStores()
 	c.Assert(stores, HasLen, 5)
 }
 
@@ -541,8 +540,7 @@ func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
 	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
-	stores, err := cluster.GetAllStores()
-	c.Assert(err, IsNil)
+	stores := cluster.GetStores()
 	c.Assert(stores, HasLen, 5)
 
 	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())

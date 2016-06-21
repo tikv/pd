@@ -17,14 +17,6 @@ import (
 	"github.com/astaxie/beego"
 )
 
-type MainController struct {
-	beego.Controller
-}
-
-func (mc *MainController) Get() {
-	mc.Ctx.WriteString("hello")
-}
-
 func buildNewRouter() {
 	ns := beego.NewNamespace("/api/v1",
 		beego.NSRouter("/version", &versionController{}, "get:Version"),
@@ -33,6 +25,7 @@ func buildNewRouter() {
 		beego.NSRouter("/stores", &storeController{}, "get:GetStores"),
 		beego.NSRouter("/region/:regionID", &regionController{}, "get:GetRegion"),
 		beego.NSRouter("/regions", &regionController{}, "get:GetRegions"),
+		beego.NSRouter("/balancers", &balancerController{}, "get:GetBalancers"),
 	)
 
 	beego.AddNamespace(ns)
