@@ -20,7 +20,7 @@ import (
 // ServeHTTP creates a HTTP service.
 func ServeHTTP(addr string) {
 	beego.BConfig.AppName = "pd"
-	// beego.BConfig.RunMode = beego.PROD
+	beego.BConfig.RunMode = beego.PROD
 
 	buildNewRouter()
 
