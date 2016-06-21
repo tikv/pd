@@ -417,10 +417,10 @@ func (r *regionsInfo) randRegion(storeID uint64) (*metapb.Region, *metapb.Peer) 
 
 	start := time.Now()
 	for _, rg := range r.regions {
-		for _, peer := range region.GetPeers() {
+		for _, peer := range rg.GetPeers() {
 			if peer.GetStoreId() == storeID {
 				// Check whether it is leader region of this store.
-				regionID := region.GetId()
+				regionID := rg.GetId()
 				leaderStoreID, ok := r.leaders.regionStores[regionID]
 				if ok {
 					if leaderStoreID != storeID {
@@ -436,10 +436,6 @@ func (r *regionsInfo) randRegion(storeID uint64) (*metapb.Region, *metapb.Peer) 
 	// TODO: if costs too much time, we may refactor the rand region way.
 	if cost := time.Now().Sub(start); cost > maxRandRegionTime {
 		log.Warnf("select region %d in %d regions for store %d too slow, cost %s", region.GetId(), len(r.regions), storeID, cost)
-	}
-
-	if region == nil {
-		return nil, nil
 	}
 
 	return region, leader

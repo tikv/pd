@@ -21,7 +21,7 @@ import (
 var _ = Suite(&testBalancerWorkerSuite{})
 
 type testBalancerWorkerSuite struct {
-	testBalancerSuite
+	ts testBalancerSuite
 
 	balancerWorker *balancerWorker
 }
@@ -31,21 +31,21 @@ func (s *testBalancerWorkerSuite) getRootPath() string {
 }
 
 func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
-	clusterInfo := s.newClusterInfo(c)
+	clusterInfo := s.ts.newClusterInfo(c)
 	c.Assert(clusterInfo, NotNil)
 
 	region := clusterInfo.regions.getRegion([]byte("a"))
 	c.Assert(region.GetPeers(), HasLen, 1)
 
 	s.balancerWorker = newBalancerWorker(clusterInfo,
-		newCapacityBalancer(minCapacityUsedRatio, maxCapacityUsedRatio),
+		newResourceBalancer(minCapacityUsedRatio, maxCapacityUsedRatio),
 		defaultBalanceInterval)
 
 	// The store id will be 1,2,3,4.
-	s.updateStore(c, clusterInfo, 1, 100, 10)
-	s.updateStore(c, clusterInfo, 2, 100, 20)
-	s.updateStore(c, clusterInfo, 3, 100, 30)
-	s.updateStore(c, clusterInfo, 4, 100, 40)
+	s.ts.updateStore(c, clusterInfo, 1, 100, 10, 0, 0)
+	s.ts.updateStore(c, clusterInfo, 2, 100, 20, 0, 0)
+	s.ts.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
+	s.ts.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
 
 	// Now we have no region to do balance.
 	ret := s.balancerWorker.doBalance()
@@ -56,8 +56,8 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	c.Assert(leaderPeer, NotNil)
 
 	// Add two peers.
-	s.addRegionPeer(c, clusterInfo, 4, region, leaderPeer)
-	s.addRegionPeer(c, clusterInfo, 3, region, leaderPeer)
+	s.ts.addRegionPeer(c, clusterInfo, 4, region, leaderPeer)
+	s.ts.addRegionPeer(c, clusterInfo, 3, region, leaderPeer)
 
 	// Now the region is (1,3,4), the balance operators should be
 	// 1) leader transfer: 1 -> 4

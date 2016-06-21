@@ -91,7 +91,7 @@ func (c *raftCluster) start(meta metapb.Cluster) error {
 	}
 
 	// Use capacity balancer as the default BalancerWorker balancer.
-	balancer := newCapacityBalancer(c.s.cfg.MinCapacityUsedRatio, c.s.cfg.MaxCapacityUsedRatio)
+	balancer := newResourceBalancer(c.s.cfg.MinCapacityUsedRatio, c.s.cfg.MaxCapacityUsedRatio)
 	c.balancerWorker = newBalancerWorker(c.cachedCluster, balancer, defaultBalanceInterval)
 	c.balancerWorker.run()
 
