@@ -58,6 +58,14 @@
 			"Rev": "7d79101e329e5a3adf994758c578dab82b90c017"
 		},
 		{
+			"ImportPath": "github.com/gorilla/context",
+			"Rev": "aed02d124ae4a0e94fea4541c8effd05bf0c8296"
+		},
+		{
+			"ImportPath": "github.com/gorilla/mux",
+			"Rev": "9fa818a44c2bf1396a17f9d5a3c0f6dd39d2ff8e"
+		},
+		{
 			"ImportPath": "github.com/juju/errors",
 			"Rev": "b2c7a7da5b2995941048f60146e67702a292e468"
 		},
@@ -120,6 +128,14 @@
 		{
 			"ImportPath": "github.com/twinj/uuid",
 			"Rev": "179b7737f0094c2a65b3daa098a8a4a8f049ea8e"
+		},
+		{
+			"ImportPath": "github.com/unrolled/render",
+			"Rev": "198ad4d8b8a4612176b804ca10555b222a086b40"
+		},
+		{
+			"ImportPath": "github.com/urfave/negroni",
+			"Rev": "dcaac9107a7a6ba4cf5143afc145e2b70a1c12c2"
 		},
 		{
 			"ImportPath": "golang.org/x/net/context",
