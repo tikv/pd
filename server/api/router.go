@@ -14,19 +14,18 @@
 package api
 
 import (
-	"github.com/astaxie/beego"
+	"github.com/gorilla/mux"
 )
 
-func buildNewRouter() {
-	ns := beego.NewNamespace("/api/v1",
-		beego.NSRouter("/version", &versionController{}, "get:Version"),
-		beego.NSRouter("/cluster", &clusterController{}, "get:GetCluster"),
-		beego.NSRouter("/store/:storeID", &storeController{}, "get:GetStore"),
-		beego.NSRouter("/stores", &storeController{}, "get:GetStores"),
-		beego.NSRouter("/region/:regionID", &regionController{}, "get:GetRegion"),
-		beego.NSRouter("/regions", &regionController{}, "get:GetRegions"),
-		beego.NSRouter("/balancers", &balancerController{}, "get:GetBalancers"),
-	)
+func buildNewRouter() *mux.Router {
+	router := mux.NewRouter()
+	router.HandleFunc("/api/v1/balancers", getBalancers).Methods("GET")
+	router.HandleFunc("/api/v1/cluster", getCluster).Methods("GET")
+	router.HandleFunc("/api/v1/store/{id}", getStore).Methods("GET")
+	router.HandleFunc("/api/v1/stores", getStores).Methods("GET")
+	router.HandleFunc("/api/v1/region/{id}", getRegion).Methods("GET")
+	router.HandleFunc("/api/v1/regions", getRegions).Methods("GET")
+	router.HandleFunc("/api/v1/version", getVersion).Methods("GET")
 
-	beego.AddNamespace(ns)
+	return router
 }

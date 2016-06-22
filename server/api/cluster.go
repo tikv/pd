@@ -14,24 +14,20 @@
 package api
 
 import (
+	"net/http"
+
 	"github.com/pingcap/pd/server"
 )
 
-type clusterController struct {
-	baseController
-}
-
-func (cc *clusterController) GetCluster() {
+func getCluster(w http.ResponseWriter, r *http.Request) {
 	cluster, err := server.PdServer.GetRaftCluster()
 	if err != nil {
-		cc.serveError(500, err)
+		rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 	if cluster == nil {
-		cc.ServeJSON()
 		return
 	}
 
-	cc.Data["json"] = cluster.GetConfig()
-	cc.ServeJSON()
+	rd.JSON(w, http.StatusOK, cluster.GetConfig())
 }

@@ -14,15 +14,13 @@
 package api
 
 import (
+	"net/http"
 	"strconv"
 
+	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
 )
-
-type storeController struct {
-	baseController
-}
 
 type storeInfo struct {
 	Store  *metapb.Store       `json:"store"`
@@ -34,27 +32,27 @@ type storesInfo struct {
 	Stores []*storeInfo `json:"stores"`
 }
 
-func (sc *storeController) GetStore() {
+func getStore(w http.ResponseWriter, r *http.Request) {
 	cluster, err := server.PdServer.GetRaftCluster()
 	if err != nil {
-		sc.serveError(500, err)
+		rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 	if cluster == nil {
-		sc.ServeJSON()
 		return
 	}
 
-	storeIDStr := sc.Ctx.Input.Param(":storeID")
+	vars := mux.Vars(r)
+	storeIDStr := vars["id"]
 	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
 	if err != nil {
-		sc.serveError(500, err)
+		rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	store, status, err := cluster.GetStore(storeID)
 	if err != nil {
-		sc.serveError(500, err)
+		rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -64,18 +62,16 @@ func (sc *storeController) GetStore() {
 	}
 	storeInfo.Status.Score = cluster.GetScore(storeInfo.Store, storeInfo.Status)
 
-	sc.Data["json"] = storeInfo
-	sc.ServeJSON()
+	rd.JSON(w, http.StatusOK, storeInfo)
 }
 
-func (sc *storeController) GetStores() {
+func getStores(w http.ResponseWriter, r *http.Request) {
 	cluster, err := server.PdServer.GetRaftCluster()
 	if err != nil {
-		sc.serveError(500, err)
+		rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 	if cluster == nil {
-		sc.ServeJSON()
 		return
 	}
 
@@ -88,7 +84,7 @@ func (sc *storeController) GetStores() {
 	for _, s := range stores {
 		store, status, err := cluster.GetStore(s.GetId())
 		if err != nil {
-			sc.serveError(500, err)
+			rd.JSON(w, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -100,6 +96,5 @@ func (sc *storeController) GetStores() {
 		storesInfo.Stores = append(storesInfo.Stores, storeInfo)
 	}
 
-	sc.Data["json"] = storesInfo
-	sc.ServeJSON()
+	rd.JSON(w, http.StatusOK, storesInfo)
 }

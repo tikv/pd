@@ -14,59 +14,55 @@
 package api
 
 import (
+	"net/http"
 	"strconv"
 
+	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
 )
-
-type regionController struct {
-	baseController
-}
 
 type regionInfo struct {
 	Count   int              `json:"count"`
 	Regions []*metapb.Region `json:"regions"`
 }
 
-func (rc *regionController) GetRegion() {
+func getRegion(w http.ResponseWriter, r *http.Request) {
 	cluster, err := server.PdServer.GetRaftCluster()
 	if err != nil {
-		rc.serveError(500, err)
+		rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 	if cluster == nil {
-		rc.ServeJSON()
 		return
 	}
 
-	regionIDStr := rc.Ctx.Input.Param(":regionID")
+	vars := mux.Vars(r)
+	regionIDStr := vars["id"]
 	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
 	if err != nil {
-		rc.serveError(500, err)
+		rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	region := cluster.GetRegionByID(regionID)
-	rc.Data["json"] = region
-	rc.ServeJSON()
+	rd.JSON(w, http.StatusOK, region)
 }
 
-func (rc *regionController) GetRegions() {
+func getRegions(w http.ResponseWriter, r *http.Request) {
 	cluster, err := server.PdServer.GetRaftCluster()
 	if err != nil {
-		rc.serveError(500, err)
+		rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 	if cluster == nil {
-		rc.ServeJSON()
 		return
 	}
 
 	regions := cluster.GetRegions()
-	rc.Data["json"] = &regionInfo{
+	regionsInfo := &regionInfo{
 		Count:   len(regions),
 		Regions: regions,
 	}
-	rc.ServeJSON()
+	rd.JSON(w, http.StatusOK, regionsInfo)
 }

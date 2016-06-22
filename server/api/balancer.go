@@ -14,12 +14,10 @@
 package api
 
 import (
+	"net/http"
+
 	"github.com/pingcap/pd/server"
 )
-
-type balancerController struct {
-	baseController
-}
 
 type balancerInfo struct {
 	ID       uint64          `json:"id"`
@@ -31,14 +29,13 @@ type balancersInfo struct {
 	Balancers []*balancerInfo `json:"balancers"`
 }
 
-func (bc *balancerController) GetBalancers() {
+func getBalancers(w http.ResponseWriter, r *http.Request) {
 	cluster, err := server.PdServer.GetRaftCluster()
 	if err != nil {
-		bc.serveError(500, err)
+		rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 	if cluster == nil {
-		bc.ServeJSON()
 		return
 	}
 
@@ -57,6 +54,5 @@ func (bc *balancerController) GetBalancers() {
 		balancersInfo.Balancers = append(balancersInfo.Balancers, balancer)
 	}
 
-	bc.Data["json"] = balancersInfo
-	bc.ServeJSON()
+	rd.JSON(w, http.StatusOK, balancersInfo)
 }

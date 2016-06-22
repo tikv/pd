@@ -14,15 +14,23 @@
 package api
 
 import (
-	"github.com/astaxie/beego"
+	"net/http"
+
+	"github.com/unrolled/render"
+	"github.com/urfave/negroni"
 )
+
+var rd = render.New()
 
 // ServeHTTP creates a HTTP service.
 func ServeHTTP(addr string) {
-	beego.BConfig.AppName = "pd"
-	beego.BConfig.RunMode = beego.PROD
+	engine := negroni.New()
 
-	buildNewRouter()
+	recovery := negroni.NewRecovery()
+	engine.Use(recovery)
 
-	beego.Run(addr)
+	router := buildNewRouter()
+	engine.UseHandler(router)
+
+	http.ListenAndServe(addr, engine)
 }

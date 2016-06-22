@@ -1,17 +1,16 @@
 package api
 
+import (
+	"net/http"
+)
+
 type version struct {
 	Version string `json:"version"`
 }
 
-type versionController struct {
-	baseController
-}
-
-func (c *versionController) Version() {
-	c.Data["json"] = &version{
+func getVersion(w http.ResponseWriter, r *http.Request) {
+	version := &version{
 		Version: "1.0.0",
 	}
-
-	c.ServeJSON()
+	rd.JSON(w, http.StatusOK, version)
 }
