@@ -59,10 +59,12 @@
 		},
 		{
 			"ImportPath": "github.com/gorilla/context",
+			"Comment": "v1.1-4-gaed02d1",
 			"Rev": "aed02d124ae4a0e94fea4541c8effd05bf0c8296"
 		},
 		{
 			"ImportPath": "github.com/gorilla/mux",
+			"Comment": "v1.1-13-g9fa818a",
 			"Rev": "9fa818a44c2bf1396a17f9d5a3c0f6dd39d2ff8e"
 		},
 		{
@@ -135,6 +137,7 @@
 		},
 		{
 			"ImportPath": "github.com/urfave/negroni",
+			"Comment": "v0.2.0-48-gdcaac91",
 			"Rev": "dcaac9107a7a6ba4cf5143afc145e2b70a1c12c2"
 		},
 		{
