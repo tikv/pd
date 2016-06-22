@@ -19,12 +19,12 @@ import (
 	. "github.com/pingcap/check"
 )
 
-var _ = Suite(&testExpireRegionCacheSuite{})
+var _ = Suite(&testRegionCacheSuite{})
 
-type testExpireRegionCacheSuite struct {
+type testRegionCacheSuite struct {
 }
 
-func (s *testExpireRegionCacheSuite) TestExpireRegionCache(c *C) {
+func (s *testRegionCacheSuite) TestExpireRegionCache(c *C) {
 	cache := newExpireRegionCache(time.Second, 2*time.Second)
 	cache.setWithTTL(1, 1, 1*time.Second)
 	cache.setWithTTL(2, "v2", 5*time.Second)
@@ -71,4 +71,69 @@ func (s *testExpireRegionCacheSuite) TestExpireRegionCache(c *C) {
 	c.Assert(value, Equals, 3.0)
 
 	c.Assert(cache.count(), Equals, 1)
+}
+
+func (s *testRegionCacheSuite) TestLRUCache(c *C) {
+	cache := newLRUCache(3)
+	cache.add(1, "1")
+	cache.add(2, "2")
+	cache.add(3, "3")
+
+	val, ok := cache.get(3)
+	c.Assert(ok, IsTrue)
+	c.Assert(val, DeepEquals, "3")
+
+	val, ok = cache.get(2)
+	c.Assert(ok, IsTrue)
+	c.Assert(val, DeepEquals, "2")
+
+	val, ok = cache.get(1)
+	c.Assert(ok, IsTrue)
+	c.Assert(val, DeepEquals, "1")
+
+	c.Assert(cache.len(), Equals, 3)
+
+	cache.add(4, "4")
+
+	c.Assert(cache.len(), Equals, 3)
+
+	val, ok = cache.get(3)
+	c.Assert(ok, IsFalse)
+	c.Assert(val, IsNil)
+
+	val, ok = cache.get(1)
+	c.Assert(ok, IsTrue)
+	c.Assert(val, DeepEquals, "1")
+
+	val, ok = cache.get(2)
+	c.Assert(ok, IsTrue)
+	c.Assert(val, DeepEquals, "2")
+
+	val, ok = cache.get(4)
+	c.Assert(ok, IsTrue)
+	c.Assert(val, DeepEquals, "4")
+
+	c.Assert(cache.len(), Equals, 3)
+
+	cache.remove(1)
+	cache.remove(2)
+	cache.remove(4)
+
+	c.Assert(cache.len(), Equals, 0)
+
+	val, ok = cache.get(1)
+	c.Assert(ok, IsFalse)
+	c.Assert(val, IsNil)
+
+	val, ok = cache.get(2)
+	c.Assert(ok, IsFalse)
+	c.Assert(val, IsNil)
+
+	val, ok = cache.get(3)
+	c.Assert(ok, IsFalse)
+	c.Assert(val, IsNil)
+
+	val, ok = cache.get(4)
+	c.Assert(ok, IsFalse)
+	c.Assert(val, IsNil)
 }

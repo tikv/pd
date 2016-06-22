@@ -14,10 +14,10 @@
 package server
 
 import (
+	"container/list"
 	"sync"
 	"time"
 
-	"container/list"
 	"github.com/ngaut/log"
 )
 
