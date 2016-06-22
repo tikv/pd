@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"container/list"
 	"github.com/ngaut/log"
 )
 
@@ -114,4 +115,95 @@ func (c *expireRegionCache) doGC() {
 			log.Infof("GC %d items", count)
 		}
 	}
+}
+
+type lruCache struct {
+	sync.RWMutex
+
+	// maxCount is the maximum number of items.
+	// 0 means no limit.
+	maxCount int
+
+	ll    *list.List
+	cache map[uint64]*list.Element
+}
+
+// newLRUCache returns a new lru cache.
+func newLRUCache(maxCount int) *lruCache {
+	return &lruCache{
+		maxCount: maxCount,
+		ll:       list.New(),
+		cache:    make(map[uint64]*list.Element),
+	}
+}
+
+func (c *lruCache) add(key uint64, value interface{}) {
+	c.Lock()
+	defer c.Unlock()
+
+	if ele, ok := c.cache[key]; ok {
+		c.ll.MoveToFront(ele)
+		ele.Value.(*cacheItem).value = value
+		return
+	}
+
+	kv := &cacheItem{key: key, value: value}
+	ele := c.ll.PushFront(kv)
+	c.cache[key] = ele
+	if c.maxCount != 0 && c.ll.Len() > c.maxCount {
+		c.removeOldest()
+	}
+}
+
+func (c *lruCache) get(key uint64) (interface{}, bool) {
+	c.Lock()
+	defer c.Unlock()
+
+	if ele, ok := c.cache[key]; ok {
+		c.ll.MoveToFront(ele)
+		return ele.Value.(*cacheItem).value, true
+	}
+
+	return nil, false
+}
+
+func (c *lruCache) remove(key uint64) {
+	c.Lock()
+	defer c.Unlock()
+
+	if ele, ok := c.cache[key]; ok {
+		c.removeElement(ele)
+	}
+}
+
+func (c *lruCache) removeOldest() {
+	ele := c.ll.Back()
+	if ele != nil {
+		c.removeElement(ele)
+	}
+}
+
+func (c *lruCache) removeElement(ele *list.Element) {
+	c.ll.Remove(ele)
+	kv := ele.Value.(*cacheItem)
+	delete(c.cache, kv.key)
+}
+
+func (c *lruCache) elems() []*cacheItem {
+	c.RLock()
+	defer c.RUnlock()
+
+	elems := make([]*cacheItem, 0, c.ll.Len())
+	for ele := c.ll.Front(); ele != nil; ele = ele.Next() {
+		elems = append(elems, ele.Value.(*cacheItem))
+	}
+
+	return elems
+}
+
+func (c *lruCache) len() int {
+	c.RLock()
+	defer c.RUnlock()
+
+	return c.ll.Len()
 }

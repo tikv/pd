@@ -20,14 +20,9 @@ import (
 	"github.com/unrolled/render"
 )
 
-type balancerInfo struct {
-	ID       uint64          `json:"id"`
-	Balancer server.Operator `json:"balancer"`
-}
-
 type balancersInfo struct {
-	Count     int             `json:"count"`
-	Balancers []*balancerInfo `json:"balancers"`
+	Count     int               `json:"count"`
+	Balancers []server.Operator `json:"balancers"`
 }
 
 type balancerHandler struct {
@@ -55,15 +50,45 @@ func (h *balancerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	balancers := cluster.GetBalanceOperators()
 	balancersInfo := &balancersInfo{
 		Count:     len(balancers),
-		Balancers: make([]*balancerInfo, 0, len(balancers)),
+		Balancers: make([]server.Operator, 0, len(balancers)),
 	}
 
-	for key, value := range balancers {
-		balancer := &balancerInfo{
-			ID:       key,
-			Balancer: value,
-		}
+	for _, balancer := range balancers {
+		balancersInfo.Balancers = append(balancersInfo.Balancers, balancer)
+	}
 
+	h.rd.JSON(w, http.StatusOK, balancersInfo)
+}
+
+type historyOperatorHandler struct {
+	srv *server.Server
+	rd  *render.Render
+}
+
+func newHistoryOperatorHandler(srv *server.Server, rd *render.Render) *historyOperatorHandler {
+	return &historyOperatorHandler{
+		srv: srv,
+		rd:  rd,
+	}
+}
+
+func (h *historyOperatorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	cluster, err := h.srv.GetRaftCluster()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err)
+		return
+	}
+	if cluster == nil {
+		return
+	}
+
+	balancers := cluster.GetHistoryOperators()
+	balancersInfo := &balancersInfo{
+		Count:     len(balancers),
+		Balancers: make([]server.Operator, 0, len(balancers)),
+	}
+
+	for _, balancer := range balancers {
 		balancersInfo.Balancers = append(balancersInfo.Balancers, balancer)
 	}
 

@@ -45,7 +45,8 @@ type balancerWorker struct {
 
 	balancer Balancer
 
-	regionCache *expireRegionCache
+	regionCache      *expireRegionCache
+	historyOperators *lruCache
 
 	quit chan struct{}
 }
@@ -58,6 +59,7 @@ func newBalancerWorker(cluster *clusterInfo, balancer Balancer, interval time.Du
 		balanceCount:     defaultBalanceCount,
 		balancer:         balancer,
 		regionCache:      newExpireRegionCache(interval, 2*interval),
+		historyOperators: newLRUCache(100),
 		quit:             make(chan struct{}),
 	}
 
@@ -119,6 +121,8 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *balanceOperato
 	op.Start = time.Now()
 	bw.balanceOperators[regionID] = op
 
+	bw.historyOperators.add(regionID, op)
+
 	return true
 }
 
@@ -136,6 +140,8 @@ func (bw *balancerWorker) removeBalanceOperator(regionID uint64) {
 	}
 
 	delete(bw.balanceOperators, regionID)
+
+	bw.historyOperators.add(regionID, op)
 }
 
 func (bw *balancerWorker) addRegionCache(regionID uint64) {
@@ -158,6 +164,19 @@ func (bw *balancerWorker) getBalanceOperators() map[uint64]*balanceOperator {
 	defer bw.RUnlock()
 
 	return bw.balanceOperators
+}
+
+func (bw *balancerWorker) getHistoryOperators() []Operator {
+	bw.RLock()
+	defer bw.RUnlock()
+
+	elems := bw.historyOperators.elems()
+	operators := make([]Operator, 0, len(elems))
+	for _, elem := range elems {
+		operators = append(operators, elem.value.(Operator))
+	}
+
+	return operators
 }
 
 // allowBalance indicates that whether we can add more balance operator or not.

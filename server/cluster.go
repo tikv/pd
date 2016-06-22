@@ -436,6 +436,11 @@ func (c *RaftCluster) GetBalanceOperators() map[uint64]Operator {
 	return balanceOperators
 }
 
+// GetHistoryOperators gets the history operators from cluster.
+func (c *RaftCluster) GetHistoryOperators() []Operator {
+	return c.balancerWorker.getHistoryOperators()
+}
+
 // GetScore gets store score from balancer.
 func (c *RaftCluster) GetScore(store *metapb.Store, status *StoreStatus) int {
 	storeInfo := &storeInfo{
