@@ -17,8 +17,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
 const (
@@ -209,4 +211,42 @@ func (bw *balancerWorker) doBalance() error {
 
 	log.Info("find no proper region for balance, retry later")
 	return nil
+}
+
+func (bw *balancerWorker) mockBalanceOperator() {
+	oldLeaderPeer := &metapb.Peer{
+		Id:      proto.Uint64(777),
+		StoreId: proto.Uint64(888),
+	}
+	newLeaderPeer := &metapb.Peer{
+		Id:      proto.Uint64(555),
+		StoreId: proto.Uint64(666),
+	}
+	followerPeer := &metapb.Peer{
+		Id:      proto.Uint64(333),
+		StoreId: proto.Uint64(444),
+	}
+	newPeer := &metapb.Peer{
+		Id:      proto.Uint64(111),
+		StoreId: proto.Uint64(222),
+	}
+
+	region := &metapb.Region{
+		Id:       proto.Uint64(999),
+		StartKey: []byte("aaaa"),
+		EndKey:   []byte("zzzz"),
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: proto.Uint64(1),
+			Version: proto.Uint64(2),
+		},
+		Peers: []*metapb.Peer{
+			oldLeaderPeer, newLeaderPeer, followerPeer,
+		},
+	}
+
+	op1 := newTransferLeaderOperator(oldLeaderPeer, newLeaderPeer, maxWaitCount)
+	op2 := newAddPeerOperator(newPeer)
+	op3 := newRemovePeerOperator(oldLeaderPeer)
+	op := newBalanceOperator(region, op1, op2, op3)
+	bw.addBalanceOperator(region.GetId(), op)
 }

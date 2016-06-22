@@ -214,13 +214,13 @@ func (co *changePeerOperator) Do(region *metapb.Region, leader *metapb.Peer) (bo
 // transferLeaderOperator is used to do leader transfer.
 type transferLeaderOperator struct {
 	Count        int `json:"count"`
-	MaxWaitCount int `json:"maxWaitCount"`
+	MaxWaitCount int `json:"max_wait_count"`
 
-	OldLeader *metapb.Peer `json:"oldLeader"`
-	NewLeader *metapb.Peer `json:"newLeader"`
+	OldLeader *metapb.Peer `json:"old_leader"`
+	NewLeader *metapb.Peer `json:"new_leader"`
 }
 
-func newTransferLeaderOperator(oldLeader, newLeader *metapb.Peer, waitCount int) *transferLeaderOperator {
+func newTransferLeaderOperator(oldLeader *metapb.Peer, newLeader *metapb.Peer, waitCount int) *transferLeaderOperator {
 	return &transferLeaderOperator{
 		OldLeader:    oldLeader,
 		NewLeader:    newLeader,

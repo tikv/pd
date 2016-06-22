@@ -472,7 +472,7 @@ type StoreStatus struct {
 	// store capacity info.
 	Stats *pdpb.StoreStats `json:"stats"`
 
-	LeaderRegionCount int `json:"leaderRegionCount"`
+	LeaderRegionCount int `json:"leader_region_count"`
 
 	Score int `json:"score"`
 }
