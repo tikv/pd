@@ -147,6 +147,7 @@ func (op *onceOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *p
 // changePeerOperator is used to do peer change.
 type changePeerOperator struct {
 	ChangePeer *pdpb.ChangePeer `json:"operator"`
+	Name       string           `json:"name"`
 }
 
 func newAddPeerOperator(peer *metapb.Peer) *changePeerOperator {
@@ -155,6 +156,7 @@ func newAddPeerOperator(peer *metapb.Peer) *changePeerOperator {
 			ChangeType: raftpb.ConfChangeType_AddNode.Enum(),
 			Peer:       peer,
 		},
+		Name: "add_peer",
 	}
 }
 
@@ -164,6 +166,7 @@ func newRemovePeerOperator(peer *metapb.Peer) *changePeerOperator {
 			ChangeType: raftpb.ConfChangeType_RemoveNode.Enum(),
 			Peer:       peer,
 		},
+		Name: "remove_peer",
 	}
 }
 
@@ -218,6 +221,8 @@ type transferLeaderOperator struct {
 
 	OldLeader *metapb.Peer `json:"old_leader"`
 	NewLeader *metapb.Peer `json:"new_leader"`
+
+	Name string `json:"name"`
 }
 
 func newTransferLeaderOperator(oldLeader *metapb.Peer, newLeader *metapb.Peer, waitCount int) *transferLeaderOperator {
@@ -226,6 +231,7 @@ func newTransferLeaderOperator(oldLeader *metapb.Peer, newLeader *metapb.Peer, w
 		NewLeader:    newLeader,
 		Count:        0,
 		MaxWaitCount: waitCount,
+		Name:         "transfer_leader",
 	}
 }
 

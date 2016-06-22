@@ -16,20 +16,18 @@ package api
 import (
 	"net/http"
 
-	"github.com/unrolled/render"
+	"github.com/pingcap/pd/server"
 	"github.com/urfave/negroni"
 )
 
-var rd = render.New()
-
 // ServeHTTP creates a HTTP service.
-func ServeHTTP(addr string) {
+func ServeHTTP(addr string, srv *server.Server) {
 	engine := negroni.New()
 
 	recovery := negroni.NewRecovery()
 	engine.Use(recovery)
 
-	router := buildNewRouter()
+	router := createRouter(srv)
 	engine.UseHandler(router)
 
 	http.ListenAndServe(addr, engine)

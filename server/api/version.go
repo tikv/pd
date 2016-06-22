@@ -2,15 +2,27 @@ package api
 
 import (
 	"net/http"
+
+	"github.com/unrolled/render"
 )
 
 type version struct {
 	Version string `json:"version"`
 }
 
-func getVersion(w http.ResponseWriter, r *http.Request) {
+type versionHandler struct {
+	rd *render.Render
+}
+
+func newVersionHandler(rd *render.Render) *versionHandler {
+	return &versionHandler{
+		rd: rd,
+	}
+}
+
+func (h *versionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	version := &version{
 		Version: "1.0.0",
 	}
-	rd.JSON(w, http.StatusOK, version)
+	h.rd.JSON(w, http.StatusOK, version)
 }

@@ -15,17 +15,23 @@ package api
 
 import (
 	"github.com/gorilla/mux"
+	"github.com/pingcap/pd/server"
+	"github.com/unrolled/render"
 )
 
-func buildNewRouter() *mux.Router {
+func createRouter(srv *server.Server) *mux.Router {
+	rd := render.New(render.Options{
+		IndentJSON: true,
+	})
+
 	router := mux.NewRouter()
-	router.HandleFunc("/api/v1/balancers", getBalancers).Methods("GET")
-	router.HandleFunc("/api/v1/cluster", getCluster).Methods("GET")
-	router.HandleFunc("/api/v1/store/{id}", getStore).Methods("GET")
-	router.HandleFunc("/api/v1/stores", getStores).Methods("GET")
-	router.HandleFunc("/api/v1/region/{id}", getRegion).Methods("GET")
-	router.HandleFunc("/api/v1/regions", getRegions).Methods("GET")
-	router.HandleFunc("/api/v1/version", getVersion).Methods("GET")
+	router.Handle("/api/v1/balancers", newBalancerHandler(srv, rd)).Methods("GET")
+	router.Handle("/api/v1/cluster", newClusterHandler(srv, rd)).Methods("GET")
+	router.Handle("/api/v1/store/{id}", newStoreHandler(srv, rd)).Methods("GET")
+	router.Handle("/api/v1/stores", newStoresHandler(srv, rd)).Methods("GET")
+	router.Handle("/api/v1/region/{id}", newRegionHandler(srv, rd)).Methods("GET")
+	router.Handle("/api/v1/regions", newRegionsHandler(srv, rd)).Methods("GET")
+	router.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")
 
 	return router
 }

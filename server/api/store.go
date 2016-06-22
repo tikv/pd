@@ -20,6 +20,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
+	"github.com/unrolled/render"
 )
 
 type storeInfo struct {
@@ -32,10 +33,22 @@ type storesInfo struct {
 	Stores []*storeInfo `json:"stores"`
 }
 
-func getStore(w http.ResponseWriter, r *http.Request) {
-	cluster, err := server.PdServer.GetRaftCluster()
+type storeHandler struct {
+	srv *server.Server
+	rd  *render.Render
+}
+
+func newStoreHandler(srv *server.Server, rd *render.Render) *storeHandler {
+	return &storeHandler{
+		srv: srv,
+		rd:  rd,
+	}
+}
+
+func (h *storeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	cluster, err := h.srv.GetRaftCluster()
 	if err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 	if cluster == nil {
@@ -46,13 +59,13 @@ func getStore(w http.ResponseWriter, r *http.Request) {
 	storeIDStr := vars["id"]
 	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
 	if err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	store, status, err := cluster.GetStore(storeID)
 	if err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -62,13 +75,25 @@ func getStore(w http.ResponseWriter, r *http.Request) {
 	}
 	storeInfo.Status.Score = cluster.GetScore(storeInfo.Store, storeInfo.Status)
 
-	rd.JSON(w, http.StatusOK, storeInfo)
+	h.rd.JSON(w, http.StatusOK, storeInfo)
 }
 
-func getStores(w http.ResponseWriter, r *http.Request) {
-	cluster, err := server.PdServer.GetRaftCluster()
+type storesHandler struct {
+	srv *server.Server
+	rd  *render.Render
+}
+
+func newStoresHandler(srv *server.Server, rd *render.Render) *storesHandler {
+	return &storesHandler{
+		srv: srv,
+		rd:  rd,
+	}
+}
+
+func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	cluster, err := h.srv.GetRaftCluster()
 	if err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 	if cluster == nil {
@@ -84,7 +109,7 @@ func getStores(w http.ResponseWriter, r *http.Request) {
 	for _, s := range stores {
 		store, status, err := cluster.GetStore(s.GetId())
 		if err != nil {
-			rd.JSON(w, http.StatusInternalServerError, err)
+			h.rd.JSON(w, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -96,5 +121,5 @@ func getStores(w http.ResponseWriter, r *http.Request) {
 		storesInfo.Stores = append(storesInfo.Stores, storeInfo)
 	}
 
-	rd.JSON(w, http.StatusOK, storesInfo)
+	h.rd.JSON(w, http.StatusOK, storesInfo)
 }

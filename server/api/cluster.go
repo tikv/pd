@@ -17,17 +17,30 @@ import (
 	"net/http"
 
 	"github.com/pingcap/pd/server"
+	"github.com/unrolled/render"
 )
 
-func getCluster(w http.ResponseWriter, r *http.Request) {
-	cluster, err := server.PdServer.GetRaftCluster()
+type clusterHandler struct {
+	srv *server.Server
+	rd  *render.Render
+}
+
+func newClusterHandler(srv *server.Server, rd *render.Render) *clusterHandler {
+	return &clusterHandler{
+		srv: srv,
+		rd:  rd,
+	}
+}
+
+func (h *clusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	cluster, err := h.srv.GetRaftCluster()
 	if err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 	if cluster == nil {
 		return
 	}
 
-	rd.JSON(w, http.StatusOK, cluster.GetConfig())
+	h.rd.JSON(w, http.StatusOK, cluster.GetConfig())
 }

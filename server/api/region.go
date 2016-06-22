@@ -20,6 +20,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
+	"github.com/unrolled/render"
 )
 
 type regionInfo struct {
@@ -27,10 +28,22 @@ type regionInfo struct {
 	Regions []*metapb.Region `json:"regions"`
 }
 
-func getRegion(w http.ResponseWriter, r *http.Request) {
-	cluster, err := server.PdServer.GetRaftCluster()
+type regionHandler struct {
+	srv *server.Server
+	rd  *render.Render
+}
+
+func newRegionHandler(srv *server.Server, rd *render.Render) *regionHandler {
+	return &regionHandler{
+		srv: srv,
+		rd:  rd,
+	}
+}
+
+func (h *regionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	cluster, err := h.srv.GetRaftCluster()
 	if err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 	if cluster == nil {
@@ -41,18 +54,30 @@ func getRegion(w http.ResponseWriter, r *http.Request) {
 	regionIDStr := vars["id"]
 	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
 	if err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	region := cluster.GetRegionByID(regionID)
-	rd.JSON(w, http.StatusOK, region)
+	h.rd.JSON(w, http.StatusOK, region)
 }
 
-func getRegions(w http.ResponseWriter, r *http.Request) {
-	cluster, err := server.PdServer.GetRaftCluster()
+type regionsHandler struct {
+	srv *server.Server
+	rd  *render.Render
+}
+
+func newRegionsHandler(srv *server.Server, rd *render.Render) *regionsHandler {
+	return &regionsHandler{
+		srv: srv,
+		rd:  rd,
+	}
+}
+
+func (h *regionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	cluster, err := h.srv.GetRaftCluster()
 	if err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 	if cluster == nil {
@@ -64,5 +89,5 @@ func getRegions(w http.ResponseWriter, r *http.Request) {
 		Count:   len(regions),
 		Regions: regions,
 	}
-	rd.JSON(w, http.StatusOK, regionsInfo)
+	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }

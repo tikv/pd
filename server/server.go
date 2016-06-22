@@ -28,9 +28,6 @@ import (
 	statsd "gopkg.in/alexcesaro/statsd.v2"
 )
 
-// PdServer is global pd server.
-var PdServer *Server
-
 const (
 	etcdTimeout = time.Second * 3
 )

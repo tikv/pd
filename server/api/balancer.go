@@ -17,6 +17,7 @@ import (
 	"net/http"
 
 	"github.com/pingcap/pd/server"
+	"github.com/unrolled/render"
 )
 
 type balancerInfo struct {
@@ -29,10 +30,22 @@ type balancersInfo struct {
 	Balancers []*balancerInfo `json:"balancers"`
 }
 
-func getBalancers(w http.ResponseWriter, r *http.Request) {
-	cluster, err := server.PdServer.GetRaftCluster()
+type balancerHandler struct {
+	srv *server.Server
+	rd  *render.Render
+}
+
+func newBalancerHandler(srv *server.Server, rd *render.Render) *balancerHandler {
+	return &balancerHandler{
+		srv: srv,
+		rd:  rd,
+	}
+}
+
+func (h *balancerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	cluster, err := h.srv.GetRaftCluster()
 	if err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 	if cluster == nil {
@@ -54,5 +67,5 @@ func getBalancers(w http.ResponseWriter, r *http.Request) {
 		balancersInfo.Balancers = append(balancersInfo.Balancers, balancer)
 	}
 
-	rd.JSON(w, http.StatusOK, balancersInfo)
+	h.rd.JSON(w, http.StatusOK, balancersInfo)
 }
