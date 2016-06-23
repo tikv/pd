@@ -92,8 +92,6 @@ func (rb *resourceBalancer) score(store *storeInfo, regionCount int) int {
 	usedRatioScore := store.usedRatioScore()
 	leaderScore := store.leaderScore(regionCount)
 	score := int(float64(usedRatioScore)*0.6 + float64(leaderScore)*0.4)
-	log.Debugf("capacity balancer store %d, used ratio score: %d, leader score: %d [region count: %d], score: %d",
-		store.store.GetId(), usedRatioScore, leaderScore, regionCount, score)
 	return score
 }
 
