@@ -110,11 +110,6 @@ func (rb *resourceBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Pee
 	oldStoreScore := rb.score(oldStore, regionCount)
 	newStoreScore := rb.score(newStore, regionCount)
 
-	if oldStoreScore <= newStoreScore {
-		log.Debugf("check score failed - old peer: %v, new peer: %v, old store score: %d, new store score :%d", oldPeer, newPeer, oldStoreScore, newStoreScore)
-		return false
-	}
-
 	// If the diff score is in defaultScoreFraction range, then we will do nothing.
 	diffScore := oldStoreScore - newStoreScore
 	if diffScore <= int(float64(oldStoreScore)*defaultDiffScoreFraction) {
@@ -188,18 +183,19 @@ func (rb *resourceBalancer) selectToStore(stores []*storeInfo, excluded map[uint
 	return resultStore
 }
 
-// selectBalanceRegion try to select a store leader region to do balance and returns true, but if we cannot find any,
+// selectBalanceRegion tries to select a store leader region to do balance and returns true, but if we cannot find any,
 // we try to find a store follower region and returns false.
-func (rb *resourceBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*storeInfo) (*metapb.Region, *metapb.Peer, bool) {
+func (rb *resourceBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*storeInfo) (*metapb.Region, *metapb.Peer, *metapb.Peer, bool) {
 	store := rb.selectFromStore(stores, cluster.regions.regionCount(), true)
 	if store == nil {
 		log.Warn("from store cannot be found to select balance region")
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 
 	var (
-		region *metapb.Region
-		leader *metapb.Peer
+		region   *metapb.Region
+		leader   *metapb.Peer
+		follower *metapb.Peer
 	)
 
 	// Random select one leader region from store.
@@ -207,12 +203,12 @@ func (rb *resourceBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*
 	region = cluster.regions.randLeaderRegion(storeID)
 	if region == nil {
 		log.Warnf("random leader region is nil, store %d", storeID)
-		region, leader = cluster.regions.randRegion(storeID)
-		return region, leader, false
+		region, leader, follower = cluster.regions.randRegion(storeID)
+		return region, leader, follower, false
 	}
 
 	leader = leaderPeer(region, storeID)
-	return region, leader, true
+	return region, leader, nil, true
 }
 
 func (rb *resourceBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[uint64]*metapb.Peer) *metapb.Peer {
@@ -267,69 +263,39 @@ func (rb *resourceBalancer) selectRemovePeer(cluster *clusterInfo, peers map[uin
 	return peers[storeID], nil
 }
 
-func (rb *resourceBalancer) doLeaderBalance(cluster *clusterInfo, stores []*storeInfo, region *metapb.Region, leader *metapb.Peer) (*balanceOperator, bool, error) {
-	followerPeers, excludedStores := getFollowerPeers(region, leader)
+func (rb *resourceBalancer) doLeaderBalance(cluster *clusterInfo, stores []*storeInfo, region *metapb.Region, leader *metapb.Peer, newPeer *metapb.Peer) (*balanceOperator, error) {
+	followerPeers, _ := getFollowerPeers(region, leader)
 	newLeader := rb.selectNewLeaderPeer(cluster, followerPeers)
 	if newLeader == nil {
 		log.Warn("new leader peer cannot be found to do balance, try to do follower peer balance")
-		return nil, false, nil
-	}
-
-	// Select one store to add new peer.
-	newPeer, err := rb.selectAddPeer(cluster, stores, excludedStores)
-	if err != nil {
-		return nil, false, errors.Trace(err)
-	}
-	if newPeer == nil {
-		log.Warn("new peer cannot be found to do balance")
-		return nil, true, nil
+		return nil, nil
 	}
 
 	if !rb.checkScore(cluster, leader, newPeer) {
-		return nil, false, nil
+		return nil, nil
 	}
 
 	leaderTransferOperator := newTransferLeaderOperator(leader, newLeader, maxWaitCount)
 	addPeerOperator := newAddPeerOperator(newPeer)
 	removePeerOperator := newRemovePeerOperator(leader)
 
-	return newBalanceOperator(region, leaderTransferOperator, addPeerOperator, removePeerOperator), true, nil
+	return newBalanceOperator(region, leaderTransferOperator, addPeerOperator, removePeerOperator), nil
 }
 
-func (rb *resourceBalancer) doFollowerBalance(cluster *clusterInfo, stores []*storeInfo, region *metapb.Region, leader *metapb.Peer) (*balanceOperator, error) {
-	followerPeers, excludedStores := getFollowerPeers(region, leader)
-
-	newPeer, err := rb.selectAddPeer(cluster, stores, excludedStores)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	if newPeer == nil {
-		log.Warn("new peer cannot be found to do balance")
-		return nil, nil
-	}
-
-	oldPeer, err := rb.selectRemovePeer(cluster, followerPeers)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	if oldPeer == nil {
-		log.Warnf("find no store to remove peer for region %v", region)
-		return nil, nil
-	}
-
-	if !rb.checkScore(cluster, oldPeer, newPeer) {
+func (rb *resourceBalancer) doFollowerBalance(cluster *clusterInfo, stores []*storeInfo, region *metapb.Region, follower *metapb.Peer, newPeer *metapb.Peer) (*balanceOperator, error) {
+	if !rb.checkScore(cluster, follower, newPeer) {
 		return nil, nil
 	}
 
 	addPeerOperator := newAddPeerOperator(newPeer)
-	removePeerOperator := newRemovePeerOperator(oldPeer)
+	removePeerOperator := newRemovePeerOperator(follower)
 	return newBalanceOperator(region, addPeerOperator, removePeerOperator), nil
 }
 
 func (rb *resourceBalancer) Balance(cluster *clusterInfo) (*balanceOperator, error) {
 	stores := cluster.getStores()
-	region, oldLeader, isLeaderBalance := rb.selectBalanceRegion(cluster, stores)
-	if region == nil || oldLeader == nil {
+	region, leader, follower, isLeaderBalance := rb.selectBalanceRegion(cluster, stores)
+	if region == nil || leader == nil {
 		log.Warn("region cannot be found to do balance")
 		return nil, nil
 	}
@@ -341,21 +307,24 @@ func (rb *resourceBalancer) Balance(cluster *clusterInfo) (*balanceOperator, err
 		return nil, nil
 	}
 
-	if isLeaderBalance {
-		ops, ok, err := rb.doLeaderBalance(cluster, stores, region, oldLeader)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		if !ok {
-			// If we cannot find a region peer to do leader transfer,
-			// then we do follower balance instead.
-			return rb.doFollowerBalance(cluster, stores, region, oldLeader)
-		}
+	_, excludedStores := getFollowerPeers(region, leader)
 
-		return ops, nil
+	// Select one store to add new peer.
+	newPeer, err := rb.selectAddPeer(cluster, stores, excludedStores)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if newPeer == nil {
+		log.Warn("new peer cannot be found to do balance")
+		return nil, nil
 	}
 
-	return rb.doFollowerBalance(cluster, stores, region, oldLeader)
+	if isLeaderBalance {
+		ops, err := rb.doLeaderBalance(cluster, stores, region, leader, newPeer)
+		return ops, errors.Trace(err)
+	}
+
+	return rb.doFollowerBalance(cluster, stores, region, follower, newPeer)
 }
 
 // defaultBalancer is used for default config change, like add/remove peer.
@@ -420,19 +389,14 @@ func (db *defaultBalancer) removePeer(cluster *clusterInfo) (*balanceOperator, e
 
 func (db *defaultBalancer) Balance(cluster *clusterInfo) (*balanceOperator, error) {
 	clusterMeta := cluster.getMeta()
-
-	regionID := db.region.GetId()
 	peerCount := len(db.region.GetPeers())
 	maxPeerCount := int(clusterMeta.GetMaxPeerCount())
 
 	if peerCount == maxPeerCount {
-		log.Debugf("region %d peer count equals %d, no need to change peer", regionID, maxPeerCount)
 		return nil, nil
 	} else if peerCount < maxPeerCount {
-		log.Debugf("region %d peer count %d < %d, need to add peer", regionID, peerCount, maxPeerCount)
 		return db.addPeer(cluster)
 	} else {
-		log.Debugf("region %d peer count %d > %d, need to remove peer", regionID, peerCount, maxPeerCount)
 		return db.removePeer(cluster)
 	}
 }

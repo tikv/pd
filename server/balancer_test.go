@@ -238,26 +238,6 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
 
-	// If the store to be balanced with leader region, there is no store to do leader transfer,
-	// but we can find store to add new peer, we should do follower balance.
-	s.updateStore(c, clusterInfo, 1, 100, 10, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 40, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 20, 0, 0)
-
-	cb = newResourceBalancer(0.4, 0.7)
-	bop, err = cb.Balance(clusterInfo)
-	c.Assert(err, IsNil)
-	c.Assert(bop, NotNil)
-
-	newOp1 := bop.ops[0].(*changePeerOperator)
-	c.Assert(newOp1.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(newOp1.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
-
-	newOp2 := bop.ops[1].(*changePeerOperator)
-	c.Assert(newOp2.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(newOp2.changePeer.GetPeer().GetStoreId(), Equals, uint64(4))
-
 	// If the old store and new store diff score is not big enough, we will do nothing.
 	s.updateStore(c, clusterInfo, 1, 100, 10, 0, 0)
 	s.updateStore(c, clusterInfo, 2, 100, 21, 0, 0)
@@ -281,11 +261,11 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(bop, NotNil)
 
-	newOp1 = bop.ops[0].(*changePeerOperator)
+	newOp1 := bop.ops[0].(*changePeerOperator)
 	c.Assert(newOp1.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(newOp1.changePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 
-	newOp2 = bop.ops[1].(*changePeerOperator)
+	newOp2 := bop.ops[1].(*changePeerOperator)
 	c.Assert(newOp2.changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(newOp2.changePeer.GetPeer().GetStoreId(), Equals, uint64(3))
 
