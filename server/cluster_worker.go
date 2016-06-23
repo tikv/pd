@@ -125,11 +125,11 @@ func (c *RaftCluster) checkSplitRegion(left *metapb.Region, right *metapb.Region
 		return errors.New("invalid split region")
 	}
 
-	if bytes.Compare(left.GetStartKey(), right.GetEndKey()) >= 0 {
-		return errors.New("invalid split region")
+	if len(right.GetEndKey()) == 0 || bytes.Compare(left.GetStartKey(), right.GetEndKey()) < 0 {
+		return nil
 	}
 
-	return nil
+	return errors.New("invalid split region")
 }
 
 func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb.ReportSplitResponse, error) {
@@ -147,7 +147,7 @@ func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	originRegion.RegionEpoch = nil
 	originRegion.EndKey = right.GetEndKey()
 
-	// Wrap report split message as an Operator, and added into cache.
+	// Wrap report split as an Operator, and add it into history cache.
 	op := newSplitOperator(originRegion, left, right)
 	c.balancerWorker.historyOperators.add(originRegion.GetId(), op)
 
