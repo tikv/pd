@@ -161,6 +161,8 @@ func (c *conn) handleRequest(req *pdpb.Request) (*pdpb.Response, error) {
 		return c.handlePutStore(req)
 	case pdpb.CommandType_AskSplit:
 		return c.handleAskSplit(req)
+	case pdpb.CommandType_ReportSplit:
+		return c.handleReportSplit(req)
 	case pdpb.CommandType_GetRegion:
 		return c.handleGetRegion(req)
 	case pdpb.CommandType_RegionHeartbeat:

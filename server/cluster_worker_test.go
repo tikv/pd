@@ -317,6 +317,21 @@ func (s *testClusterWorkerSuite) heartbeatStore(c *C, conn net.Conn, msgID uint6
 	return resp.GetStoreHeartbeat()
 }
 
+func (s *testClusterWorkerSuite) reportSplit(c *C, conn net.Conn, msgID uint64, left *metapb.Region, right *metapb.Region) *pdpb.ReportSplitResponse {
+	req := &pdpb.Request{
+		Header:  newRequestHeader(s.clusterID),
+		CmdType: pdpb.CommandType_ReportSplit.Enum(),
+		ReportSplit: &pdpb.ReportSplitRequest{
+			Left:  left,
+			Right: right,
+		},
+	}
+	sendRequest(c, conn, msgID, req)
+	_, resp := recvResponse(c, conn)
+	c.Assert(resp.GetCmdType(), Equals, pdpb.CommandType_ReportSplit)
+	return resp.GetReportSplit()
+}
+
 func mustGetRegion(c *C, cluster *RaftCluster, key []byte, expect *metapb.Region) {
 	r, err := cluster.getRegion(key)
 	c.Assert(err, IsNil)
@@ -562,4 +577,39 @@ func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
 
 	store := cluster.cachedCluster.getStore(storeID)
 	c.Assert(stats, DeepEquals, store.stats.Stats)
+}
+
+func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
+	cluster, err := s.svr.GetRaftCluster()
+	c.Assert(err, IsNil)
+
+	stores := cluster.GetStores()
+	c.Assert(stores, HasLen, 5)
+
+	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	conn, err := net.Dial("tcp", leaderPd.GetAddr())
+	c.Assert(err, IsNil)
+	defer conn.Close()
+
+	// Mock a report split request.
+	peer := s.newPeer(c, 999, 0)
+	left := s.newRegion(c, 0, []byte("aaa"), []byte("bbb"), []*metapb.Peer{peer}, nil)
+	right := s.newRegion(c, 0, []byte("bbb"), []byte("ccc"), []*metapb.Peer{peer}, nil)
+
+	resp := s.reportSplit(c, conn, 0, left, right)
+	c.Assert(resp, NotNil)
+
+	regionID := left.GetId()
+	value, ok := cluster.balancerWorker.historyOperators.get(regionID)
+	c.Assert(ok, IsTrue)
+
+	op := value.(*splitOperator)
+	c.Assert(op.Left, DeepEquals, left)
+	c.Assert(op.Right, DeepEquals, right)
+	c.Assert(op.Origin.GetId(), Equals, regionID)
+	c.Assert(op.Origin.GetRegionEpoch(), IsNil)
+	c.Assert(op.Origin.GetStartKey(), BytesEquals, left.GetStartKey())
+	c.Assert(op.Origin.GetEndKey(), BytesEquals, right.GetEndKey())
+	c.Assert(op.Origin.GetPeers(), HasLen, 1)
+	c.Assert(op.Origin.GetPeers()[0], DeepEquals, peer)
 }

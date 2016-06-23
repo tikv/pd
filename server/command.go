@@ -339,3 +339,24 @@ func (c *conn) handleAskSplit(req *pdpb.Request) (*pdpb.Response, error) {
 		AskSplit: split,
 	}, nil
 }
+
+func (c *conn) handleReportSplit(req *pdpb.Request) (*pdpb.Response, error) {
+	request := req.GetReportSplit()
+	if request == nil {
+		return nil, errors.Errorf("invalid report split command, but %v", req)
+	}
+
+	cluster, err := c.getRaftCluster()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	split, err := cluster.handleReportSplit(request)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return &pdpb.Response{
+		ReportSplit: split,
+	}, nil
+}

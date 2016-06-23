@@ -283,3 +283,26 @@ func (tlo *transferLeaderOperator) Do(region *metapb.Region, leader *metapb.Peer
 	tlo.Count++
 	return false, res, nil
 }
+
+// splitOperator is used to do region split, only for history operator mark.
+type splitOperator struct {
+	Origin *metapb.Region `json:"origin"`
+	Left   *metapb.Region `json:"left"`
+	Right  *metapb.Region `json:"right"`
+
+	Name string `json:"name"`
+}
+
+func newSplitOperator(origin *metapb.Region, left *metapb.Region, right *metapb.Region) *splitOperator {
+	return &splitOperator{
+		Origin: origin,
+		Left:   left,
+		Right:  right,
+		Name:   "split",
+	}
+}
+
+// Do implements Operator.Do interface.
+func (so *splitOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
+	return true, nil, nil
+}

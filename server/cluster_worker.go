@@ -14,6 +14,8 @@
 package server
 
 import (
+	"bytes"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
@@ -112,4 +114,42 @@ func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	}
 
 	return split, nil
+}
+
+func (c *RaftCluster) checkSplitRegion(left *metapb.Region, right *metapb.Region) error {
+	if left == nil || right == nil {
+		return errors.New("invalid split region")
+	}
+
+	if !bytes.Equal(left.GetEndKey(), right.GetStartKey()) {
+		return errors.New("invalid split region")
+	}
+
+	if len(right.GetEndKey()) == 0 || bytes.Compare(left.GetStartKey(), right.GetEndKey()) < 0 {
+		return nil
+	}
+
+	return errors.New("invalid split region")
+}
+
+func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb.ReportSplitResponse, error) {
+	left := request.GetLeft()
+	right := request.GetRight()
+
+	err := c.checkSplitRegion(left, right)
+	if err != nil {
+		log.Warnf("report split region is invalid - %v, %v", request, errors.ErrorStack(err))
+		return nil, errors.Trace(err)
+	}
+
+	// Build origin region by using left and right.
+	originRegion := cloneRegion(left)
+	originRegion.RegionEpoch = nil
+	originRegion.EndKey = right.GetEndKey()
+
+	// Wrap report split as an Operator, and add it into history cache.
+	op := newSplitOperator(originRegion, left, right)
+	c.balancerWorker.historyOperators.add(originRegion.GetId(), op)
+
+	return &pdpb.ReportSplitResponse{}, nil
 }
