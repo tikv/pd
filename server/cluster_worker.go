@@ -14,6 +14,8 @@
 package server
 
 import (
+	"bytes"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
@@ -21,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-func (c *raftCluster) addDefaultBalanceOperator(region *metapb.Region, leader *metapb.Peer) (*balanceOperator, error) {
+func (c *RaftCluster) addDefaultBalanceOperator(region *metapb.Region, leader *metapb.Peer) (*balanceOperator, error) {
 	if !c.balancerWorker.allowBalance() {
 		return nil, nil
 	}
@@ -43,7 +45,7 @@ func (c *raftCluster) addDefaultBalanceOperator(region *metapb.Region, leader *m
 	return c.balancerWorker.getBalanceOperator(region.GetId()), nil
 }
 
-func (c *raftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
+func (c *RaftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
 	// If the region peer count is 0, then we should not handle this.
 	if len(region.GetPeers()) == 0 {
 		log.Warnf("invalid region, zero region peer count - %v", region)
@@ -78,7 +80,7 @@ func (c *raftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metap
 	return res, nil
 }
 
-func (c *raftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
+func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
 	reqRegion := request.GetRegion()
 	startKey := reqRegion.GetStartKey()
 	region, err := c.getRegion(startKey)
@@ -112,4 +114,42 @@ func (c *raftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	}
 
 	return split, nil
+}
+
+func (c *RaftCluster) checkSplitRegion(left *metapb.Region, right *metapb.Region) error {
+	if left == nil || right == nil {
+		return errors.New("invalid split region")
+	}
+
+	if !bytes.Equal(left.GetEndKey(), right.GetStartKey()) {
+		return errors.New("invalid split region")
+	}
+
+	if len(right.GetEndKey()) == 0 || bytes.Compare(left.GetStartKey(), right.GetEndKey()) < 0 {
+		return nil
+	}
+
+	return errors.New("invalid split region")
+}
+
+func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb.ReportSplitResponse, error) {
+	left := request.GetLeft()
+	right := request.GetRight()
+
+	err := c.checkSplitRegion(left, right)
+	if err != nil {
+		log.Warnf("report split region is invalid - %v, %v", request, errors.ErrorStack(err))
+		return nil, errors.Trace(err)
+	}
+
+	// Build origin region by using left and right.
+	originRegion := cloneRegion(left)
+	originRegion.RegionEpoch = nil
+	originRegion.EndKey = right.GetEndKey()
+
+	// Wrap report split as an Operator, and add it into history cache.
+	op := newSplitOperator(originRegion, left, right)
+	c.balancerWorker.historyOperators.add(originRegion.GetId(), op)
+
+	return &pdpb.ReportSplitResponse{}, nil
 }

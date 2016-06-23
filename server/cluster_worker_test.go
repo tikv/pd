@@ -150,7 +150,7 @@ func (s *testClusterWorkerSuite) newMockRaftStore(c *C, metaStore *metapb.Store)
 		peers:    make(map[uint64]*metapb.Peer),
 	}
 
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
 	err = cluster.putStore(metaStore)
@@ -192,7 +192,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	s.newMockRaftStore(c, nil)
 	s.newMockRaftStore(c, nil)
 
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
 	err = cluster.putConfig(&metapb.Cluster{
@@ -201,8 +201,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	})
 	c.Assert(err, IsNil)
 
-	stores, err := cluster.getAllStores()
-	c.Assert(err, IsNil)
+	stores := cluster.GetStores()
 	c.Assert(stores, HasLen, 5)
 }
 
@@ -212,7 +211,7 @@ func (s *testClusterWorkerSuite) TearDownTest(c *C) {
 }
 
 func (s *testClusterWorkerSuite) checkRegionPeerCount(c *C, regionKey []byte, expectCount int) *metapb.Region {
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
 	region, err := cluster.getRegion(regionKey)
@@ -318,13 +317,28 @@ func (s *testClusterWorkerSuite) heartbeatStore(c *C, conn net.Conn, msgID uint6
 	return resp.GetStoreHeartbeat()
 }
 
-func mustGetRegion(c *C, cluster *raftCluster, key []byte, expect *metapb.Region) {
+func (s *testClusterWorkerSuite) reportSplit(c *C, conn net.Conn, msgID uint64, left *metapb.Region, right *metapb.Region) *pdpb.ReportSplitResponse {
+	req := &pdpb.Request{
+		Header:  newRequestHeader(s.clusterID),
+		CmdType: pdpb.CommandType_ReportSplit.Enum(),
+		ReportSplit: &pdpb.ReportSplitRequest{
+			Left:  left,
+			Right: right,
+		},
+	}
+	sendRequest(c, conn, msgID, req)
+	_, resp := recvResponse(c, conn)
+	c.Assert(resp.GetCmdType(), Equals, pdpb.CommandType_ReportSplit)
+	return resp.GetReportSplit()
+}
+
+func mustGetRegion(c *C, cluster *RaftCluster, key []byte, expect *metapb.Region) {
 	r, err := cluster.getRegion(key)
 	c.Assert(err, IsNil)
 	c.Assert(r, DeepEquals, expect)
 }
 
-func checkSearchRegions(c *C, cluster *raftCluster, keys ...[]byte) {
+func checkSearchRegions(c *C, cluster *RaftCluster, keys ...[]byte) {
 	cacheRegions := cluster.cachedCluster.regions
 	c.Assert(cacheRegions.searchRegions.Len(), Equals, len(keys))
 
@@ -340,11 +354,10 @@ func checkSearchRegions(c *C, cluster *raftCluster, keys ...[]byte) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
-	meta, err := cluster.getConfig()
-	c.Assert(err, IsNil)
+	meta := cluster.GetConfig()
 	meta.MaxPeerCount = proto.Uint32(1)
 	err = cluster.putConfig(meta)
 	c.Assert(err, IsNil)
@@ -402,7 +415,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 	r1, err := cluster.getRegion([]byte("a"))
 	c.Assert(err, IsNil)
@@ -413,8 +426,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 	leaderPeer := s.chooseRegionLeader(c, r1)
 
 	// Set MaxPeerCount to 10.
-	meta, err := cluster.getConfig()
-	c.Assert(err, IsNil)
+	meta := cluster.GetConfig()
 	meta.MaxPeerCount = proto.Uint32(10)
 	err = cluster.putConfig(meta)
 	c.Assert(err, IsNil)
@@ -439,11 +451,10 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
-	meta, err := cluster.getConfig()
-	c.Assert(err, IsNil)
+	meta := cluster.GetConfig()
 	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
 
 	// There is only one region now, directly use it for test.
@@ -502,11 +513,10 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
-	meta, err := cluster.getConfig()
-	c.Assert(err, IsNil)
+	meta := cluster.GetConfig()
 	meta.MaxPeerCount = proto.Uint32(2)
 	err = cluster.putConfig(meta)
 	c.Assert(err, IsNil)
@@ -542,11 +552,10 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
-	stores, err := cluster.getAllStores()
-	c.Assert(err, IsNil)
+	stores := cluster.GetStores()
 	c.Assert(stores, HasLen, 5)
 
 	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
@@ -567,5 +576,40 @@ func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
 	c.Assert(resp, NotNil)
 
 	store := cluster.cachedCluster.getStore(storeID)
-	c.Assert(stats, DeepEquals, store.stats.stats)
+	c.Assert(stats, DeepEquals, store.stats.Stats)
+}
+
+func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
+	cluster, err := s.svr.GetRaftCluster()
+	c.Assert(err, IsNil)
+
+	stores := cluster.GetStores()
+	c.Assert(stores, HasLen, 5)
+
+	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	conn, err := net.Dial("tcp", leaderPd.GetAddr())
+	c.Assert(err, IsNil)
+	defer conn.Close()
+
+	// Mock a report split request.
+	peer := s.newPeer(c, 999, 0)
+	left := s.newRegion(c, 0, []byte("aaa"), []byte("bbb"), []*metapb.Peer{peer}, nil)
+	right := s.newRegion(c, 0, []byte("bbb"), []byte("ccc"), []*metapb.Peer{peer}, nil)
+
+	resp := s.reportSplit(c, conn, 0, left, right)
+	c.Assert(resp, NotNil)
+
+	regionID := left.GetId()
+	value, ok := cluster.balancerWorker.historyOperators.get(regionID)
+	c.Assert(ok, IsTrue)
+
+	op := value.(*splitOperator)
+	c.Assert(op.Left, DeepEquals, left)
+	c.Assert(op.Right, DeepEquals, right)
+	c.Assert(op.Origin.GetId(), Equals, regionID)
+	c.Assert(op.Origin.GetRegionEpoch(), IsNil)
+	c.Assert(op.Origin.GetStartKey(), BytesEquals, left.GetStartKey())
+	c.Assert(op.Origin.GetEndKey(), BytesEquals, right.GetEndKey())
+	c.Assert(op.Origin.GetPeers(), HasLen, 1)
+	c.Assert(op.Origin.GetPeers()[0], DeepEquals, peer)
 }

@@ -65,7 +65,7 @@ type Server struct {
 
 	// for raft cluster
 	clusterLock sync.RWMutex
-	cluster     *raftCluster
+	cluster     *RaftCluster
 
 	msgID uint64
 
@@ -114,7 +114,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	s.idAlloc = &idAllocator{s: s}
-	s.cluster = &raftCluster{
+	s.cluster = &RaftCluster{
 		s:           s,
 		running:     false,
 		clusterID:   cfg.ClusterID,

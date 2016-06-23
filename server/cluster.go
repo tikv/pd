@@ -38,14 +38,14 @@ const (
 	maxBatchRegionCount = 10000
 )
 
+// RaftCluster is used for cluster config management.
 // Raft cluster key format:
 // cluster 1 -> /1/raft, value is metapb.Cluster
 // cluster 2 -> /2/raft
 // For cluster 1
 // store 1 -> /1/raft/s/1, value is metapb.Store
 // region 1 -> /1/raft/r/1, value is metapb.Region
-
-type raftCluster struct {
+type RaftCluster struct {
 	sync.RWMutex
 
 	s *Server
@@ -62,7 +62,7 @@ type raftCluster struct {
 	balancerWorker *balancerWorker
 }
 
-func (c *raftCluster) start(meta metapb.Cluster) error {
+func (c *RaftCluster) start(meta metapb.Cluster) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -98,7 +98,7 @@ func (c *raftCluster) start(meta metapb.Cluster) error {
 	return nil
 }
 
-func (c *raftCluster) stop() {
+func (c *RaftCluster) stop() {
 	c.Lock()
 	defer c.Unlock()
 
@@ -111,7 +111,7 @@ func (c *raftCluster) stop() {
 	c.running = false
 }
 
-func (c *raftCluster) isRunning() bool {
+func (c *RaftCluster) isRunning() bool {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -122,7 +122,8 @@ func (s *Server) getClusterRootPath() string {
 	return path.Join(s.rootPath, "raft")
 }
 
-func (s *Server) getRaftCluster() (*raftCluster, error) {
+// GetRaftCluster gets raft cluster.
+func (s *Server) GetRaftCluster() (*RaftCluster, error) {
 	if s.cluster.isRunning() {
 		return s.cluster, nil
 	}
@@ -272,7 +273,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 	}, nil
 }
 
-func (c *raftCluster) cacheAllStores() error {
+func (c *RaftCluster) cacheAllStores() error {
 	start := time.Now()
 
 	key := makeStoreKeyPrefix(c.clusterRoot)
@@ -293,7 +294,7 @@ func (c *raftCluster) cacheAllStores() error {
 	return nil
 }
 
-func (c *raftCluster) cacheAllRegions() error {
+func (c *RaftCluster) cacheAllRegions() error {
 	start := time.Now()
 
 	nextID := uint64(0)
@@ -329,28 +330,40 @@ func (c *raftCluster) cacheAllRegions() error {
 	return nil
 }
 
-func (c *raftCluster) getAllStores() ([]metapb.Store, error) {
-	return c.cachedCluster.getMetaStores(), nil
+func (c *RaftCluster) getRegion(regionKey []byte) (*metapb.Region, error) {
+	return c.cachedCluster.regions.getRegion(regionKey), nil
 }
 
-func (c *raftCluster) getStore(storeID uint64) (*metapb.Store, error) {
+// GetRegionByID gets region by regionID from cluster.
+func (c *RaftCluster) GetRegionByID(regionID uint64) *metapb.Region {
+	return c.cachedCluster.regions.getRegionByID(regionID)
+}
+
+// GetRegions gets regions from cluster.
+func (c *RaftCluster) GetRegions() []*metapb.Region {
+	return c.cachedCluster.regions.getRegions()
+}
+
+// GetStores gets stores from cluster.
+func (c *RaftCluster) GetStores() []*metapb.Store {
+	return c.cachedCluster.getMetaStores()
+}
+
+// GetStore gets store from cluster.
+func (c *RaftCluster) GetStore(storeID uint64) (*metapb.Store, *StoreStatus, error) {
 	if storeID == 0 {
-		return nil, errors.New("invalid zero store id")
+		return nil, nil, errors.New("invalid zero store id")
 	}
 
 	store := c.cachedCluster.getStore(storeID)
 	if store == nil {
-		return nil, errors.Errorf("invalid store ID %d, not found", storeID)
+		return nil, nil, errors.Errorf("invalid store ID %d, not found", storeID)
 	}
 
-	return store.store, nil
+	return store.store, store.stats, nil
 }
 
-func (c *raftCluster) getRegion(regionKey []byte) (*metapb.Region, error) {
-	return c.cachedCluster.regions.getRegion(regionKey), nil
-}
-
-func (c *raftCluster) putStore(store *metapb.Store) error {
+func (c *RaftCluster) putStore(store *metapb.Store) error {
 	if store.GetId() == 0 {
 		return errors.Errorf("invalid put store %v", store)
 	}
@@ -379,11 +392,12 @@ func (c *raftCluster) putStore(store *metapb.Store) error {
 	return nil
 }
 
-func (c *raftCluster) getConfig() (*metapb.Cluster, error) {
-	return c.cachedCluster.getMeta(), nil
+// GetConfig gets config from cluster.
+func (c *RaftCluster) GetConfig() *metapb.Cluster {
+	return c.cachedCluster.getMeta()
 }
 
-func (c *raftCluster) putConfig(meta *metapb.Cluster) error {
+func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 	if meta.GetId() != c.clusterID {
 		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
 	}
@@ -409,4 +423,31 @@ func (c *raftCluster) putConfig(meta *metapb.Cluster) error {
 	c.cachedCluster.setMeta(meta)
 
 	return nil
+}
+
+// GetBalanceOperators gets the balance operators from cluster.
+func (c *RaftCluster) GetBalanceOperators() map[uint64]Operator {
+	ops := c.balancerWorker.getBalanceOperators()
+	balanceOperators := make(map[uint64]Operator, len(ops))
+	for key, value := range ops {
+		balanceOperators[key] = value
+	}
+
+	return balanceOperators
+}
+
+// GetHistoryOperators gets the history operators from cluster.
+func (c *RaftCluster) GetHistoryOperators() []Operator {
+	return c.balancerWorker.getHistoryOperators()
+}
+
+// GetScore gets store score from balancer.
+func (c *RaftCluster) GetScore(store *metapb.Store, status *StoreStatus) int {
+	storeInfo := &storeInfo{
+		store: store,
+		stats: status,
+	}
+
+	regionCount := c.cachedCluster.regions.regionCount()
+	return c.balancerWorker.balancer.(*resourceBalancer).score(storeInfo, regionCount)
 }

@@ -61,7 +61,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	_, err = s.svr.bootstrapCluster(req.Bootstrap)
 	c.Assert(err, IsNil)
 
-	cluster, err := s.svr.getRaftCluster()
+	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
 	// Check cachedCluster.
@@ -169,18 +169,17 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 
 	s.svr.cluster.stop()
 
-	// Check GetAllStores.
+	// Check GetStores.
 	stores := map[uint64]*metapb.Store{
 		store1.GetId(): store1,
 		store2.GetId(): store2,
 	}
 
-	cluster, err = s.svr.getRaftCluster()
+	cluster, err = s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 	c.Assert(cluster, IsNil)
 
-	allStores, err := s.svr.cluster.getAllStores()
-	c.Assert(err, IsNil)
+	allStores := s.svr.cluster.GetStores()
 	c.Assert(allStores, HasLen, 2)
 	for _, store := range allStores {
 		c.Assert(stores, HasKey, store.GetId())
