@@ -22,6 +22,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
@@ -93,8 +94,14 @@ func main() {
 	}()
 
 	go func() {
-		api.ServeHTTP(cfg.HTTPAddr, srv)
+		err = api.ServeHTTP(cfg.HTTPAddr, srv)
+		if err != nil {
+			log.Fatalf("serve http failed - %v", errors.Trace(err))
+		}
 	}()
 
-	srv.Run()
+	err = srv.Run()
+	if err != nil {
+		log.Fatalf("server run failed - %v", errors.Trace(err))
+	}
 }
