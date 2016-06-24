@@ -29,19 +29,19 @@ type regionInfo struct {
 }
 
 type regionHandler struct {
-	srv *server.Server
+	svr *server.Server
 	rd  *render.Render
 }
 
-func newRegionHandler(srv *server.Server, rd *render.Render) *regionHandler {
+func newRegionHandler(svr *server.Server, rd *render.Render) *regionHandler {
 	return &regionHandler{
-		srv: srv,
+		svr: svr,
 		rd:  rd,
 	}
 }
 
 func (h *regionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.srv.GetRaftCluster()
+	cluster, err := h.svr.GetRaftCluster()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
@@ -63,19 +63,19 @@ func (h *regionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type regionsHandler struct {
-	srv *server.Server
+	svr *server.Server
 	rd  *render.Render
 }
 
-func newRegionsHandler(srv *server.Server, rd *render.Render) *regionsHandler {
+func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 	return &regionsHandler{
-		srv: srv,
+		svr: svr,
 		rd:  rd,
 	}
 }
 
 func (h *regionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.srv.GetRaftCluster()
+	cluster, err := h.svr.GetRaftCluster()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return

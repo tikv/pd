@@ -21,19 +21,19 @@ import (
 )
 
 type clusterHandler struct {
-	srv *server.Server
+	svr *server.Server
 	rd  *render.Render
 }
 
-func newClusterHandler(srv *server.Server, rd *render.Render) *clusterHandler {
+func newClusterHandler(svr *server.Server, rd *render.Render) *clusterHandler {
 	return &clusterHandler{
-		srv: srv,
+		svr: svr,
 		rd:  rd,
 	}
 }
 
 func (h *clusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.srv.GetRaftCluster()
+	cluster, err := h.svr.GetRaftCluster()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return

@@ -34,19 +34,19 @@ type storesInfo struct {
 }
 
 type storeHandler struct {
-	srv *server.Server
+	svr *server.Server
 	rd  *render.Render
 }
 
-func newStoreHandler(srv *server.Server, rd *render.Render) *storeHandler {
+func newStoreHandler(svr *server.Server, rd *render.Render) *storeHandler {
 	return &storeHandler{
-		srv: srv,
+		svr: svr,
 		rd:  rd,
 	}
 }
 
 func (h *storeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.srv.GetRaftCluster()
+	cluster, err := h.svr.GetRaftCluster()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
@@ -79,19 +79,19 @@ func (h *storeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type storesHandler struct {
-	srv *server.Server
+	svr *server.Server
 	rd  *render.Render
 }
 
-func newStoresHandler(srv *server.Server, rd *render.Render) *storesHandler {
+func newStoresHandler(svr *server.Server, rd *render.Render) *storesHandler {
 	return &storesHandler{
-		srv: srv,
+		svr: svr,
 		rd:  rd,
 	}
 }
 
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.srv.GetRaftCluster()
+	cluster, err := h.svr.GetRaftCluster()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return

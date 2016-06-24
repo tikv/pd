@@ -19,19 +19,19 @@ import (
 	"github.com/unrolled/render"
 )
 
-func createRouter(srv *server.Server) *mux.Router {
+func createRouter(svr *server.Server) *mux.Router {
 	rd := render.New(render.Options{
 		IndentJSON: true,
 	})
 
 	router := mux.NewRouter()
-	router.Handle("/api/v1/balancers", newBalancerHandler(srv, rd)).Methods("GET")
-	router.Handle("/api/v1/cluster", newClusterHandler(srv, rd)).Methods("GET")
-	router.Handle("/api/v1/history/operators", newHistoryOperatorHandler(srv, rd)).Methods("GET")
-	router.Handle("/api/v1/store/{id}", newStoreHandler(srv, rd)).Methods("GET")
-	router.Handle("/api/v1/stores", newStoresHandler(srv, rd)).Methods("GET")
-	router.Handle("/api/v1/region/{id}", newRegionHandler(srv, rd)).Methods("GET")
-	router.Handle("/api/v1/regions", newRegionsHandler(srv, rd)).Methods("GET")
+	router.Handle("/api/v1/balancers", newBalancerHandler(svr, rd)).Methods("GET")
+	router.Handle("/api/v1/cluster", newClusterHandler(svr, rd)).Methods("GET")
+	router.Handle("/api/v1/history/operators", newHistoryOperatorHandler(svr, rd)).Methods("GET")
+	router.Handle("/api/v1/store/{id}", newStoreHandler(svr, rd)).Methods("GET")
+	router.Handle("/api/v1/stores", newStoresHandler(svr, rd)).Methods("GET")
+	router.Handle("/api/v1/region/{id}", newRegionHandler(svr, rd)).Methods("GET")
+	router.Handle("/api/v1/regions", newRegionsHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")
 
 	return router

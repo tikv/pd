@@ -22,13 +22,13 @@ import (
 )
 
 // ServeHTTP creates a HTTP service and serves.
-func ServeHTTP(addr string, srv *server.Server) error {
+func ServeHTTP(addr string, svr *server.Server) error {
 	engine := negroni.New()
 
 	recovery := negroni.NewRecovery()
 	engine.Use(recovery)
 
-	router := createRouter(srv)
+	router := createRouter(svr)
 	engine.UseHandler(router)
 
 	err := http.ListenAndServe(addr, engine)

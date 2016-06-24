@@ -26,19 +26,19 @@ type balancersInfo struct {
 }
 
 type balancerHandler struct {
-	srv *server.Server
+	svr *server.Server
 	rd  *render.Render
 }
 
-func newBalancerHandler(srv *server.Server, rd *render.Render) *balancerHandler {
+func newBalancerHandler(svr *server.Server, rd *render.Render) *balancerHandler {
 	return &balancerHandler{
-		srv: srv,
+		svr: svr,
 		rd:  rd,
 	}
 }
 
 func (h *balancerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.srv.GetRaftCluster()
+	cluster, err := h.svr.GetRaftCluster()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
@@ -61,19 +61,19 @@ func (h *balancerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type historyOperatorHandler struct {
-	srv *server.Server
+	svr *server.Server
 	rd  *render.Render
 }
 
-func newHistoryOperatorHandler(srv *server.Server, rd *render.Render) *historyOperatorHandler {
+func newHistoryOperatorHandler(svr *server.Server, rd *render.Render) *historyOperatorHandler {
 	return &historyOperatorHandler{
-		srv: srv,
+		svr: svr,
 		rd:  rd,
 	}
 }
 
 func (h *historyOperatorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.srv.GetRaftCluster()
+	cluster, err := h.svr.GetRaftCluster()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
