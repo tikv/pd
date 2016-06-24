@@ -49,10 +49,12 @@ type LogEvent struct {
 
 	AddReplicaEvent struct {
 		Region uint64 `json:"region"`
+		Store  uint64 `json:"store"`
 	} `json:"add_replica_event,omitempty"`
 
 	RemoveReplicaEvent struct {
 		Region uint64 `json:"region"`
+		Store  uint64 `json:"store"`
 	} `json:"remove_replica_event,omitempty"`
 
 	TransferLeaderEvent struct {
@@ -89,10 +91,12 @@ func (bw *balancerWorker) postEvent(op Operator, status statusType) {
 		if e.ChangePeer.GetChangeType() == raftpb.ConfChangeType_AddNode {
 			evt.Code = msgAddReplica
 			evt.AddReplicaEvent.Region = e.RegionID
+			evt.AddReplicaEvent.Store = e.ChangePeer.Peer.GetStoreId()
 			bw.innerPostEvent(evt)
 		} else {
 			evt.Code = msgRemoveReplica
 			evt.RemoveReplicaEvent.Region = e.RegionID
+			evt.AddReplicaEvent.Store = e.ChangePeer.Peer.GetStoreId()
 			bw.innerPostEvent(evt)
 		}
 	}
