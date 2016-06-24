@@ -162,11 +162,16 @@ func (bw *balancerWorker) getBalanceOperator(regionID uint64) *balanceOperator {
 	return bw.balanceOperators[regionID]
 }
 
-func (bw *balancerWorker) getBalanceOperators() map[uint64]*balanceOperator {
+func (bw *balancerWorker) getBalanceOperators() map[uint64]Operator {
 	bw.RLock()
 	defer bw.RUnlock()
 
-	return bw.balanceOperators
+	balanceOperators := make(map[uint64]Operator, len(bw.balanceOperators))
+	for key, value := range bw.balanceOperators {
+		balanceOperators[key] = value
+	}
+
+	return balanceOperators
 }
 
 func (bw *balancerWorker) getHistoryOperators() []Operator {

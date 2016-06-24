@@ -427,13 +427,7 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 
 // GetBalanceOperators gets the balance operators from cluster.
 func (c *RaftCluster) GetBalanceOperators() map[uint64]Operator {
-	ops := c.balancerWorker.getBalanceOperators()
-	balanceOperators := make(map[uint64]Operator, len(ops))
-	for key, value := range ops {
-		balanceOperators[key] = value
-	}
-
-	return balanceOperators
+	return c.balancerWorker.getBalanceOperators()
 }
 
 // GetHistoryOperators gets the history operators from cluster.
