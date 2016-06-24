@@ -14,6 +14,10 @@
 package server
 
 import (
+	"math/rand"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/raftpb"
 )
 
@@ -28,27 +32,27 @@ const (
 
 // LogEvent is operator log event.
 type LogEvent struct {
-	Code msgType
+	Code msgType `json:"code"`
 
 	SplitEvent struct {
-		Region uint64
-		Left   uint64
-		Right  uint64
-	} `json:",omitempty"`
+		Region uint64 `json:"region"`
+		Left   uint64 `json:"left"`
+		Right  uint64 `json:"right"`
+	} `json:"split_event,omitempty"`
 
 	AddReplicaEvent struct {
-		Region uint64
-	} `json:",omitempty"`
+		Region uint64 `json:"region"`
+	} `json:"add_replica_event,omitempty"`
 
 	RemoveReplicaEvent struct {
-		Region uint64
-	} `json:",omitempty"`
+		Region uint64 `json:"region"`
+	} `json:"remove_replica_event,omitempty"`
 
 	TransferLeaderEvent struct {
-		Region    uint64
-		StoreFrom uint64
-		StoreTo   uint64
-	} `json:",omitempty"`
+		Region    uint64 `json:"region"`
+		StoreFrom uint64 `json:"store_from"`
+		StoreTo   uint64 `json:"store_to"`
+	} `json:"transfer_leader_event,omitempty"`
 }
 
 func (bw *balancerWorker) noneBlockPostEvent(evt LogEvent) {
@@ -130,4 +134,64 @@ LOOP:
 	}
 
 	return evts
+}
+
+func randIDs(ids []int, n int) []uint64 {
+	l := len(ids)
+	m := map[int]bool{}
+	s := make([]uint64, l)
+
+	for i := 0; i < n; {
+		idx := rand.Intn(l)
+		if m[idx] {
+			continue
+		}
+
+		s[i] = uint64(ids[idx])
+		m[idx] = true
+		i++
+	}
+
+	return s
+}
+
+func (bw *balancerWorker) mockBalanceOperator() {
+	rids := rand.Perm(100000)
+	ids := randIDs(rids, 9)
+
+	oldLeaderPeer := &metapb.Peer{
+		Id:      proto.Uint64(uint64(ids[0])),
+		StoreId: proto.Uint64(uint64(ids[1])),
+	}
+	newLeaderPeer := &metapb.Peer{
+		Id:      proto.Uint64(uint64(ids[2])),
+		StoreId: proto.Uint64(uint64(ids[3])),
+	}
+	followerPeer := &metapb.Peer{
+		Id:      proto.Uint64(uint64(ids[4])),
+		StoreId: proto.Uint64(uint64(ids[5])),
+	}
+	newPeer := &metapb.Peer{
+		Id:      proto.Uint64(uint64(ids[6])),
+		StoreId: proto.Uint64(uint64(ids[7])),
+	}
+
+	region := &metapb.Region{
+		Id:       proto.Uint64(uint64(ids[8])),
+		StartKey: []byte("aaaa"),
+		EndKey:   []byte("zzzz"),
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: proto.Uint64(1),
+			Version: proto.Uint64(2),
+		},
+		Peers: []*metapb.Peer{
+			oldLeaderPeer, newLeaderPeer, followerPeer,
+		},
+	}
+
+	op1 := newTransferLeaderOperator(oldLeaderPeer, newLeaderPeer, maxWaitCount)
+	op2 := newAddPeerOperator(region.GetId(), newPeer)
+	op3 := newRemovePeerOperator(region.GetId(), oldLeaderPeer)
+	op := newBalanceOperator(region, op1, op2, op3)
+	bw.addBalanceOperator(region.GetId(), op)
 }

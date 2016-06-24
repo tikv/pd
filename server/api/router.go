@@ -27,6 +27,7 @@ func createRouter(svr *server.Server) *mux.Router {
 	router := mux.NewRouter()
 	router.Handle("/api/v1/balancers", newBalancerHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/cluster", newClusterHandler(svr, rd)).Methods("GET")
+	router.Handle("/api/v1/events", newEventsHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/history/operators", newHistoryOperatorHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/store/{id}", newStoreHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/stores", newStoresHandler(svr, rd)).Methods("GET")

@@ -21,19 +21,24 @@ import (
 	"github.com/unrolled/render"
 )
 
-type eventHandler struct {
+type eventsInfo struct {
+	Count  int               `json:"count"`
+	Events []server.LogEvent `json:"events"`
+}
+
+type eventsHandler struct {
 	svr *server.Server
 	rd  *render.Render
 }
 
-func newEventHandler(svr *server.Server, rd *render.Render) *eventHandler {
-	return &eventHandler{
+func newEventsHandler(svr *server.Server, rd *render.Render) *eventsHandler {
+	return &eventsHandler{
 		svr: svr,
 		rd:  rd,
 	}
 }
 
-func (h *eventHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *eventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cluster, err := h.svr.GetRaftCluster()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err)
@@ -45,6 +50,11 @@ func (h *eventHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	countStr := r.URL.Query().Get("count")
+	if len(countStr) == 0 {
+		h.rd.JSON(w, http.StatusOK, nil)
+		return
+	}
+
 	count, err := strconv.ParseInt(countStr, 10, 64)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err)
@@ -52,5 +62,10 @@ func (h *eventHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	evts := cluster.FetchEvents(count)
-	h.rd.JSON(w, http.StatusOK, evts)
+	eventsInfo := &eventsInfo{
+		Count:  len(evts),
+		Events: evts,
+	}
+
+	h.rd.JSON(w, http.StatusOK, eventsInfo)
 }
