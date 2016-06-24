@@ -44,6 +44,7 @@ func (h *balancerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cluster == nil {
+		h.rd.JSON(w, http.StatusOK, nil)
 		return
 	}
 
@@ -79,6 +80,7 @@ func (h *historyOperatorHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if cluster == nil {
+		h.rd.JSON(w, http.StatusOK, nil)
 		return
 	}
 

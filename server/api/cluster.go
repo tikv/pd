@@ -39,6 +39,7 @@ func (h *clusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cluster == nil {
+		h.rd.JSON(w, http.StatusOK, nil)
 		return
 	}
 
