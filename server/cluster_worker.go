@@ -151,5 +151,7 @@ func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	op := newSplitOperator(originRegion, left, right)
 	c.balancerWorker.historyOperators.add(originRegion.GetId(), op)
 
+	c.balancerWorker.postEvent(op)
+
 	return &pdpb.ReportSplitResponse{}, nil
 }

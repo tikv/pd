@@ -273,8 +273,8 @@ func (rb *resourceBalancer) doLeaderBalance(cluster *clusterInfo, stores []*stor
 	}
 
 	leaderTransferOperator := newTransferLeaderOperator(leader, newLeader, maxWaitCount)
-	addPeerOperator := newAddPeerOperator(newPeer)
-	removePeerOperator := newRemovePeerOperator(leader)
+	addPeerOperator := newAddPeerOperator(region.GetId(), newPeer)
+	removePeerOperator := newRemovePeerOperator(region.GetId(), leader)
 
 	return newBalanceOperator(region, leaderTransferOperator, addPeerOperator, removePeerOperator), nil
 }
@@ -284,8 +284,8 @@ func (rb *resourceBalancer) doFollowerBalance(cluster *clusterInfo, stores []*st
 		return nil, nil
 	}
 
-	addPeerOperator := newAddPeerOperator(newPeer)
-	removePeerOperator := newRemovePeerOperator(follower)
+	addPeerOperator := newAddPeerOperator(region.GetId(), newPeer)
+	removePeerOperator := newRemovePeerOperator(region.GetId(), follower)
 	return newBalanceOperator(region, addPeerOperator, removePeerOperator), nil
 }
 
@@ -356,7 +356,7 @@ func (db *defaultBalancer) addPeer(cluster *clusterInfo) (*balanceOperator, erro
 		return nil, nil
 	}
 
-	addPeerOperator := newAddPeerOperator(peer)
+	addPeerOperator := newAddPeerOperator(db.region.GetId(), peer)
 	return newBalanceOperator(db.region, newOnceOperator(addPeerOperator)), nil
 }
 
@@ -380,7 +380,7 @@ func (db *defaultBalancer) removePeer(cluster *clusterInfo) (*balanceOperator, e
 		return nil, nil
 	}
 
-	removePeerOperator := newRemovePeerOperator(peer)
+	removePeerOperator := newRemovePeerOperator(db.region.GetId(), peer)
 	return newBalanceOperator(db.region, newOnceOperator(removePeerOperator)), nil
 }
 

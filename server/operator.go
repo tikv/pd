@@ -147,31 +147,34 @@ func (op *onceOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *p
 // changePeerOperator is used to do peer change.
 type changePeerOperator struct {
 	ChangePeer *pdpb.ChangePeer `json:"operator"`
+	RegionID   uint64           `json:"regionid"`
 	Name       string           `json:"name"`
 }
 
-func newAddPeerOperator(peer *metapb.Peer) *changePeerOperator {
+func newAddPeerOperator(regionID uint64, peer *metapb.Peer) *changePeerOperator {
 	return &changePeerOperator{
 		ChangePeer: &pdpb.ChangePeer{
 			ChangeType: raftpb.ConfChangeType_AddNode.Enum(),
 			Peer:       peer,
 		},
-		Name: "add_peer",
+		RegionID: regionID,
+		Name:     "add_peer",
 	}
 }
 
-func newRemovePeerOperator(peer *metapb.Peer) *changePeerOperator {
+func newRemovePeerOperator(regionID uint64, peer *metapb.Peer) *changePeerOperator {
 	return &changePeerOperator{
 		ChangePeer: &pdpb.ChangePeer{
 			ChangeType: raftpb.ConfChangeType_RemoveNode.Enum(),
 			Peer:       peer,
 		},
-		Name: "remove_peer",
+		RegionID: regionID,
+		Name:     "remove_peer",
 	}
 }
 
 func (co *changePeerOperator) String() string {
-	return fmt.Sprintf("[changePeerOperator]changePeer: %v", co.ChangePeer)
+	return fmt.Sprintf("[changePeerOperator]regionID: %d, changePeer: %v", co.RegionID, co.ChangePeer)
 }
 
 // check checks whether operator already finished or not.
