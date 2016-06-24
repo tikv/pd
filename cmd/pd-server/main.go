@@ -73,7 +73,7 @@ func main() {
 		MaxCapacityUsedRatio: *maxCapUsedRatio,
 	}
 
-	srv, err := server.NewServer(cfg)
+	svr, err := server.NewServer(cfg)
 	if err != nil {
 		log.Errorf("create pd server err %s\n", err)
 		return
@@ -89,18 +89,18 @@ func main() {
 	go func() {
 		sig := <-sc
 		log.Infof("Got signal [%d] to exit.", sig)
-		srv.Close()
+		svr.Close()
 		os.Exit(0)
 	}()
 
 	go func() {
-		err = api.ServeHTTP(cfg.HTTPAddr, srv)
+		err = api.ServeHTTP(cfg.HTTPAddr, svr)
 		if err != nil {
 			log.Fatalf("serve http failed - %v", errors.Trace(err))
 		}
 	}()
 
-	err = srv.Run()
+	err = svr.Run()
 	if err != nil {
 		log.Fatalf("server run failed - %v", errors.Trace(err))
 	}

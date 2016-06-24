@@ -432,13 +432,14 @@ func (r *regionsInfo) randLeaderRegion(storeID uint64) *metapb.Region {
 }
 
 // randRegion selects a region from region cache randomly.
-func (r *regionsInfo) randRegion(storeID uint64) (*metapb.Region, *metapb.Peer) {
+func (r *regionsInfo) randRegion(storeID uint64) (*metapb.Region, *metapb.Peer, *metapb.Peer) {
 	r.RLock()
 	defer r.RUnlock()
 
 	var (
-		region *metapb.Region
-		leader *metapb.Peer
+		region   *metapb.Region
+		leader   *metapb.Peer
+		follower *metapb.Peer
 	)
 
 	start := time.Now()
@@ -451,6 +452,7 @@ func (r *regionsInfo) randRegion(storeID uint64) (*metapb.Region, *metapb.Peer) 
 				if ok {
 					if leaderStoreID != storeID {
 						region = cloneRegion(rg)
+						follower = peer
 						leader = leaderPeer(region, leaderStoreID)
 						break
 					}
@@ -464,7 +466,7 @@ func (r *regionsInfo) randRegion(storeID uint64) (*metapb.Region, *metapb.Peer) 
 		log.Warnf("select region %d in %d regions for store %d too slow, cost %s", region.GetId(), len(r.regions), storeID, cost)
 	}
 
-	return region, leader
+	return region, leader, follower
 }
 
 // StoreStatus is store status info.

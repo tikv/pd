@@ -15,7 +15,12 @@ package server
 
 // Filter is an interface to filter target store.
 type Filter interface {
+	// FilterFromStore checks whether `from stores` should be skipped.
+	// If return value is true, we should not use this store as `from store` that is to be balanced.
 	FilterFromStore(store *storeInfo, args ...interface{}) bool
+
+	// FilterToStore checks whether to stores should be skipped.
+	// If return value is true, we should not use this store as `to store` that is to be balanced to.
 	FilterToStore(store *storeInfo, args ...interface{}) bool
 }
 
@@ -52,9 +57,9 @@ func newSnapCountFilter(maxSnapSendingCount uint32, maxSnapReceivingCount uint32
 }
 
 func (sf *snapCountFilter) FilterFromStore(store *storeInfo, args ...interface{}) bool {
-	return store.stats.Stats.GetSnapSendingCount() > maxSnapSendingCount
+	return store.stats.Stats.GetSnapSendingCount() > sf.maxSnapSendingCount
 }
 
 func (sf *snapCountFilter) FilterToStore(store *storeInfo, args ...interface{}) bool {
-	return store.stats.Stats.GetSnapReceivingCount() > maxSnapReceivingCount
+	return store.stats.Stats.GetSnapReceivingCount() > sf.maxSnapReceivingCount
 }
