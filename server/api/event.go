@@ -44,19 +44,19 @@ func (h *feedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	keyStr := r.URL.Query().Get("key")
-	if len(keyStr) == 0 {
+	offsetStr := r.URL.Query().Get("offset")
+	if len(offsetStr) == 0 {
 		h.rd.JSON(w, http.StatusOK, nil)
 		return
 	}
 
-	key, err := strconv.ParseUint(keyStr, 10, 64)
+	offset, err := strconv.ParseUint(offsetStr, 10, 64)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 
-	evts := cluster.FetchEvents(key, false)
+	evts := cluster.FetchEvents(offset, false)
 	h.rd.JSON(w, http.StatusOK, evts)
 }
 
