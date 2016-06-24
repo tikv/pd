@@ -15,6 +15,7 @@ package server
 
 import (
 	"math/rand"
+	"sync/atomic"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -63,11 +64,9 @@ type LogEvent struct {
 	} `json:"transfer_leader_event,omitempty"`
 }
 
-func (bw *balancerWorker) noneBlockPostEvent(evt LogEvent) {
-	select {
-	case bw.eventCh <- evt:
-	default:
-	}
+func (bw *balancerWorker) innerPostEvent(evt LogEvent) {
+	key := atomic.AddUint64(&ids, 1)
+	bw.events.add(key, evt)
 }
 
 func (bw *balancerWorker) postEvent(op Operator, status statusType) {
@@ -79,7 +78,7 @@ func (bw *balancerWorker) postEvent(op Operator, status statusType) {
 		evt.SplitEvent.Region = e.Origin.GetId()
 		evt.SplitEvent.Left = e.Left.GetId()
 		evt.SplitEvent.Right = e.Right.GetId()
-		bw.noneBlockPostEvent(evt)
+		bw.innerPostEvent(evt)
 	case *balanceOperator:
 		regionID := e.Region.GetId()
 		for _, o := range e.Ops {
@@ -91,16 +90,16 @@ func (bw *balancerWorker) postEvent(op Operator, status statusType) {
 				evt.TransferLeaderEvent.Region = regionID
 				evt.TransferLeaderEvent.StoreFrom = eo.OldLeader.GetStoreId()
 				evt.TransferLeaderEvent.StoreTo = eo.NewLeader.GetStoreId()
-				bw.noneBlockPostEvent(evt)
+				bw.innerPostEvent(evt)
 			case *changePeerOperator:
 				if eo.ChangePeer.GetChangeType() == raftpb.ConfChangeType_AddNode {
 					evt.Code = msgAddReplica
 					evt.AddReplicaEvent.Region = eo.RegionID
-					bw.noneBlockPostEvent(evt)
+					bw.innerPostEvent(evt)
 				} else {
 					evt.Code = msgRemoveReplica
 					evt.RemoveReplicaEvent.Region = eo.RegionID
-					bw.noneBlockPostEvent(evt)
+					bw.innerPostEvent(evt)
 				}
 			}
 		}
@@ -112,27 +111,27 @@ func (bw *balancerWorker) postEvent(op Operator, status statusType) {
 			if eo.ChangePeer.GetChangeType() == raftpb.ConfChangeType_AddNode {
 				evt.Code = msgAddReplica
 				evt.AddReplicaEvent.Region = eo.RegionID
-				bw.noneBlockPostEvent(evt)
+				bw.innerPostEvent(evt)
 			} else {
 				evt.Code = msgRemoveReplica
 				evt.RemoveReplicaEvent.Region = eo.RegionID
-				bw.noneBlockPostEvent(evt)
+				bw.innerPostEvent(evt)
 			}
 		}
 	}
 }
 
-func (bw *balancerWorker) fetchEvents() []LogEvent {
-	evts := []LogEvent{}
+func (bw *balancerWorker) fetchEvents(key uint64, all bool) []LogEvent {
+	var elems []*cacheItem
+	if all {
+		elems = bw.events.fromElems(key)
+	} else {
+		elems = bw.events.elems()
+	}
 
-LOOP:
-	for {
-		select {
-		case evt := <-bw.eventCh:
-			evts = append(evts, evt)
-		default:
-			break LOOP
-		}
+	evts := make([]LogEvent, 0, len(elems))
+	for _, ele := range elems {
+		evts = append(evts, ele.value.(LogEvent))
 	}
 
 	return evts

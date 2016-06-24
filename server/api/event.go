@@ -15,6 +15,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
@@ -43,7 +44,19 @@ func (h *feedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	evts := cluster.FetchEvents()
+	keyStr := r.URL.Query().Get("key")
+	if len(keyStr) == 0 {
+		h.rd.JSON(w, http.StatusOK, nil)
+		return
+	}
+
+	key, err := strconv.ParseUint(keyStr, 10, 64)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	evts := cluster.FetchEvents(key, false)
 	h.rd.JSON(w, http.StatusOK, evts)
 }
 
@@ -60,4 +73,16 @@ func newEventsHandler(svr *server.Server, rd *render.Render) *eventsHandler {
 }
 
 func (h *eventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	cluster, err := h.svr.GetRaftCluster()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err)
+		return
+	}
+	if cluster == nil {
+		h.rd.JSON(w, http.StatusOK, nil)
+		return
+	}
+
+	evts := cluster.FetchEvents(0, true)
+	h.rd.JSON(w, http.StatusOK, evts)
 }

@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/raftpb"
 )
 
-var balancerIDs uint64
+var ids uint64
 
 const (
 	// TODO: we can make this as a config flag.
@@ -57,7 +57,7 @@ type balanceOperator struct {
 
 func newBalanceOperator(region *metapb.Region, ops ...Operator) *balanceOperator {
 	return &balanceOperator{
-		ID:     atomic.AddUint64(&balancerIDs, 1),
+		ID:     atomic.AddUint64(&ids, 1),
 		Ops:    ops,
 		Region: region,
 	}

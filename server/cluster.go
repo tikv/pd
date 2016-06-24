@@ -447,6 +447,6 @@ func (c *RaftCluster) GetScore(store *metapb.Store, status *StoreStatus) int {
 }
 
 // FetchEvents fetches the operator events.
-func (c *RaftCluster) FetchEvents() []LogEvent {
-	return c.balancerWorker.fetchEvents()
+func (c *RaftCluster) FetchEvents(key uint64, all bool) []LogEvent {
+	return c.balancerWorker.fetchEvents(key, all)
 }

@@ -207,3 +207,94 @@ func (c *lruCache) len() int {
 
 	return c.ll.Len()
 }
+
+type listCache struct {
+	sync.RWMutex
+
+	// maxCount is the maximum number of items.
+	// 0 means no limit.
+	maxCount int
+
+	ll *list.List
+}
+
+// newListCache returns a new list cache.
+func newListCache(maxCount int) *listCache {
+	return &listCache{
+		maxCount: maxCount,
+		ll:       list.New(),
+	}
+}
+
+func (c *listCache) add(key uint64, value interface{}) {
+	c.Lock()
+	defer c.Unlock()
+
+	kv := &cacheItem{key: key, value: value}
+	c.ll.PushFront(kv)
+
+	if c.maxCount != 0 && c.ll.Len() > c.maxCount {
+		c.ll.Remove(c.ll.Back())
+	}
+}
+
+func (c *listCache) get(key uint64) (interface{}, bool) {
+	c.Lock()
+	defer c.Unlock()
+
+	for ele := c.ll.Front(); ele != nil; ele = ele.Next() {
+		kv := ele.Value.(*cacheItem)
+		if kv.key == key {
+			return kv.value, true
+		}
+	}
+
+	return nil, false
+}
+
+func (c *listCache) remove(key uint64) {
+	c.Lock()
+	defer c.Unlock()
+
+	for ele := c.ll.Front(); ele != nil; ele = ele.Next() {
+		kv := ele.Value.(*cacheItem)
+		if kv.key == key {
+			c.ll.Remove(ele)
+			return
+		}
+	}
+}
+
+func (c *listCache) elems() []*cacheItem {
+	c.RLock()
+	defer c.RUnlock()
+
+	elems := make([]*cacheItem, 0, c.ll.Len())
+	for ele := c.ll.Front(); ele != nil; ele = ele.Next() {
+		elems = append(elems, ele.Value.(*cacheItem))
+	}
+
+	return elems
+}
+
+func (c *listCache) fromElems(key uint64) []*cacheItem {
+	c.RLock()
+	defer c.RUnlock()
+
+	elems := make([]*cacheItem, 0, c.ll.Len())
+	for ele := c.ll.Front(); ele != nil; ele = ele.Next() {
+		kv := ele.Value.(*cacheItem)
+		if kv.key > key {
+			elems = append(elems, ele.Value.(*cacheItem))
+		}
+	}
+
+	return elems
+}
+
+func (c *listCache) len() int {
+	c.RLock()
+	defer c.RUnlock()
+
+	return c.ll.Len()
+}

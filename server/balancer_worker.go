@@ -45,8 +45,7 @@ type balancerWorker struct {
 
 	regionCache      *expireRegionCache
 	historyOperators *lruCache
-
-	eventCh chan LogEvent
+	events           *listCache
 
 	quit chan struct{}
 }
@@ -60,7 +59,7 @@ func newBalancerWorker(cluster *clusterInfo, balancer Balancer, interval time.Du
 		balancer:         balancer,
 		regionCache:      newExpireRegionCache(interval, 2*interval),
 		historyOperators: newLRUCache(100),
-		eventCh:          make(chan LogEvent, 10000),
+		events:           newListCache(10000),
 		quit:             make(chan struct{}),
 	}
 
