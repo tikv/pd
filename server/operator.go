@@ -36,7 +36,12 @@ const (
 // Operator is the interface to do some operations.
 type Operator interface {
 	// Do does the operator, if finished then return true.
-	Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error)
+	Do(region *metapb.Region, leader *metapb.Peer, args ...interface{}) (bool, *pdpb.RegionHeartbeatResponse, error)
+}
+
+func hookEvent(op Operator, status statusType, args ...interface{}) {
+	bw := args[0].(*balancerWorker)
+	bw.postEvent(op, status)
 }
 
 // balanceOperator is used to do region balance.
@@ -87,7 +92,7 @@ func (bo *balanceOperator) check(region *metapb.Region, leader *metapb.Peer) (bo
 }
 
 // Do implements Operator.Do interface.
-func (bo *balanceOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
+func (bo *balanceOperator) Do(region *metapb.Region, leader *metapb.Peer, args ...interface{}) (bool, *pdpb.RegionHeartbeatResponse, error) {
 	ok, err := bo.check(region, leader)
 	if err != nil {
 		return false, nil, errors.Trace(err)
@@ -96,7 +101,7 @@ func (bo *balanceOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool,
 		return true, nil, nil
 	}
 
-	finished, res, err := bo.Ops[bo.Index].Do(region, leader)
+	finished, res, err := bo.Ops[bo.Index].Do(region, leader, args...)
 	if err != nil {
 		return false, nil, errors.Trace(err)
 	}
@@ -134,13 +139,13 @@ func (op *onceOperator) String() string {
 }
 
 // Do implements Operator.Do interface.
-func (op *onceOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
+func (op *onceOperator) Do(region *metapb.Region, leader *metapb.Peer, args ...interface{}) (bool, *pdpb.RegionHeartbeatResponse, error) {
 	if op.Finished {
 		return true, nil, nil
 	}
 
 	op.Finished = true
-	_, resp, err := op.Op.Do(region, leader)
+	_, resp, err := op.Op.Do(region, leader, args...)
 	return true, resp, errors.Trace(err)
 }
 
@@ -149,6 +154,7 @@ type changePeerOperator struct {
 	ChangePeer *pdpb.ChangePeer `json:"operator"`
 	RegionID   uint64           `json:"regionid"`
 	Name       string           `json:"name"`
+	firstCheck bool
 }
 
 func newAddPeerOperator(regionID uint64, peer *metapb.Peer) *changePeerOperator {
@@ -157,8 +163,9 @@ func newAddPeerOperator(regionID uint64, peer *metapb.Peer) *changePeerOperator 
 			ChangeType: raftpb.ConfChangeType_AddNode.Enum(),
 			Peer:       peer,
 		},
-		RegionID: regionID,
-		Name:     "add_peer",
+		RegionID:   regionID,
+		Name:       "add_peer",
+		firstCheck: true,
 	}
 }
 
@@ -168,8 +175,9 @@ func newRemovePeerOperator(regionID uint64, peer *metapb.Peer) *changePeerOperat
 			ChangeType: raftpb.ConfChangeType_RemoveNode.Enum(),
 			Peer:       peer,
 		},
-		RegionID: regionID,
-		Name:     "remove_peer",
+		RegionID:   regionID,
+		Name:       "remove_peer",
+		firstCheck: true,
 	}
 }
 
@@ -202,13 +210,18 @@ func (co *changePeerOperator) check(region *metapb.Region, leader *metapb.Peer) 
 }
 
 // Do implements Operator.Do interface.
-func (co *changePeerOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
+func (co *changePeerOperator) Do(region *metapb.Region, leader *metapb.Peer, args ...interface{}) (bool, *pdpb.RegionHeartbeatResponse, error) {
 	ok, err := co.check(region, leader)
 	if err != nil {
 		return false, nil, errors.Trace(err)
 	}
 	if ok {
 		return true, nil, nil
+	}
+
+	if co.firstCheck {
+		hookEvent(co, evtStart, args...)
+		co.firstCheck = false
 	}
 
 	res := &pdpb.RegionHeartbeatResponse{
@@ -226,6 +239,8 @@ type transferLeaderOperator struct {
 	NewLeader *metapb.Peer `json:"new_leader"`
 
 	Name string `json:"name"`
+
+	firstCheck bool
 }
 
 func newTransferLeaderOperator(oldLeader *metapb.Peer, newLeader *metapb.Peer, waitCount int) *transferLeaderOperator {
@@ -235,6 +250,7 @@ func newTransferLeaderOperator(oldLeader *metapb.Peer, newLeader *metapb.Peer, w
 		Count:        0,
 		MaxWaitCount: waitCount,
 		Name:         "transfer_leader",
+		firstCheck:   true,
 	}
 }
 
@@ -254,18 +270,24 @@ func (tlo *transferLeaderOperator) check(region *metapb.Region, leader *metapb.P
 		return true, nil
 	}
 
-	log.Infof("balance [%s][%d], try to transfer leader from %s to %s", tlo.Count, region, tlo.OldLeader, tlo.NewLeader)
+	log.Infof("balance [%d][%s], try to transfer leader from %s to %s", tlo.Count, region, tlo.OldLeader, tlo.NewLeader)
 	return false, nil
 }
 
 // Do implements Operator.Do interface.
-func (tlo *transferLeaderOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
+func (tlo *transferLeaderOperator) Do(region *metapb.Region, leader *metapb.Peer, args ...interface{}) (bool, *pdpb.RegionHeartbeatResponse, error) {
 	ok, err := tlo.check(region, leader)
 	if err != nil {
 		return false, nil, errors.Trace(err)
 	}
 	if ok {
+		hookEvent(tlo, evtEnd, args...)
 		return true, nil, nil
+	}
+
+	if tlo.firstCheck {
+		hookEvent(tlo, evtStart, args...)
+		tlo.firstCheck = false
 	}
 
 	// If tlo.count is greater than 0, then we should check whether it exceeds the tlo.maxWaitCount.
@@ -306,6 +328,6 @@ func newSplitOperator(origin *metapb.Region, left *metapb.Region, right *metapb.
 }
 
 // Do implements Operator.Do interface.
-func (so *splitOperator) Do(region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
+func (so *splitOperator) Do(region *metapb.Region, leader *metapb.Peer, args ...interface{}) (bool, *pdpb.RegionHeartbeatResponse, error) {
 	return true, nil, nil
 }

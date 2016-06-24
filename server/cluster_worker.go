@@ -65,7 +65,7 @@ func (c *RaftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metap
 		}
 	}
 
-	finished, res, err := balanceOperator.Do(region, leader)
+	finished, res, err := balanceOperator.Do(region, leader, c.balancerWorker)
 	if err != nil {
 		// Do balance failed, remove it.
 		log.Errorf("do balance for region %d failed %s", regionID, err)
@@ -151,7 +151,7 @@ func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	op := newSplitOperator(originRegion, left, right)
 	c.balancerWorker.historyOperators.add(originRegion.GetId(), op)
 
-	c.balancerWorker.postEvent(op)
+	c.balancerWorker.postEvent(op, evtEnd)
 
 	return &pdpb.ReportSplitResponse{}, nil
 }

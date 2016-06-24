@@ -15,15 +15,36 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
 
-type eventsInfo struct {
-	Count  int               `json:"count"`
-	Events []server.LogEvent `json:"events"`
+type feedHandler struct {
+	svr *server.Server
+	rd  *render.Render
+}
+
+func newFeedHandler(svr *server.Server, rd *render.Render) *feedHandler {
+	return &feedHandler{
+		svr: svr,
+		rd:  rd,
+	}
+}
+
+func (h *feedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	cluster, err := h.svr.GetRaftCluster()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err)
+		return
+	}
+	if cluster == nil {
+		h.rd.JSON(w, http.StatusOK, nil)
+		return
+	}
+
+	evts := cluster.FetchEvents()
+	h.rd.JSON(w, http.StatusOK, evts)
 }
 
 type eventsHandler struct {
@@ -39,33 +60,4 @@ func newEventsHandler(svr *server.Server, rd *render.Render) *eventsHandler {
 }
 
 func (h *eventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.svr.GetRaftCluster()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
-		return
-	}
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusOK, nil)
-		return
-	}
-
-	countStr := r.URL.Query().Get("count")
-	if len(countStr) == 0 {
-		h.rd.JSON(w, http.StatusOK, nil)
-		return
-	}
-
-	count, err := strconv.ParseInt(countStr, 10, 64)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
-		return
-	}
-
-	evts := cluster.FetchEvents(count)
-	eventsInfo := &eventsInfo{
-		Count:  len(evts),
-		Events: evts,
-	}
-
-	h.rd.JSON(w, http.StatusOK, eventsInfo)
 }

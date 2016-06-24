@@ -21,6 +21,13 @@ import (
 	"github.com/pingcap/kvproto/pkg/raftpb"
 )
 
+type statusType byte
+
+const (
+	evtStart statusType = iota + 1
+	evtEnd
+)
+
 type msgType byte
 
 const (
@@ -32,7 +39,8 @@ const (
 
 // LogEvent is operator log event.
 type LogEvent struct {
-	Code msgType `json:"code"`
+	Code   msgType    `json:"code"`
+	Status statusType `json:"status"`
 
 	SplitEvent struct {
 		Region uint64 `json:"region"`
@@ -62,11 +70,12 @@ func (bw *balancerWorker) noneBlockPostEvent(evt LogEvent) {
 	}
 }
 
-func (bw *balancerWorker) postEvent(op Operator) {
+func (bw *balancerWorker) postEvent(op Operator, status statusType) {
 	switch e := op.(type) {
 	case *splitOperator:
 		var evt LogEvent
 		evt.Code = msgSplit
+		evt.Status = status
 		evt.SplitEvent.Region = e.Origin.GetId()
 		evt.SplitEvent.Left = e.Left.GetId()
 		evt.SplitEvent.Right = e.Right.GetId()
@@ -75,6 +84,7 @@ func (bw *balancerWorker) postEvent(op Operator) {
 		regionID := e.Region.GetId()
 		for _, o := range e.Ops {
 			var evt LogEvent
+			evt.Status = status
 			switch eo := o.(type) {
 			case *transferLeaderOperator:
 				evt.Code = msgTransferLeader
@@ -96,6 +106,7 @@ func (bw *balancerWorker) postEvent(op Operator) {
 		}
 	case *onceOperator:
 		var evt LogEvent
+		evt.Status = status
 		switch eo := e.Op.(type) {
 		case *changePeerOperator:
 			if eo.ChangePeer.GetChangeType() == raftpb.ConfChangeType_AddNode {
@@ -111,23 +122,14 @@ func (bw *balancerWorker) postEvent(op Operator) {
 	}
 }
 
-func (bw *balancerWorker) fetchEvents(count int64) []LogEvent {
-	if count <= 0 {
-		return nil
-	}
-
-	evts := make([]LogEvent, 0, count)
+func (bw *balancerWorker) fetchEvents() []LogEvent {
+	evts := []LogEvent{}
 
 LOOP:
 	for {
 		select {
 		case evt := <-bw.eventCh:
 			evts = append(evts, evt)
-			count--
-
-			if count <= 0 {
-				break LOOP
-			}
 		default:
 			break LOOP
 		}

@@ -25,6 +25,7 @@ import (
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/raftpb"
 	statsd "gopkg.in/alexcesaro/statsd.v2"
 )
 
@@ -328,21 +329,53 @@ func (r *regionsInfo) heartbeatVersion(region *metapb.Region) (bool, *metapb.Reg
 	return true, searchRegion, nil
 }
 
-func (r *regionsInfo) heartbeatConfVer(region *metapb.Region) (bool, error) {
+func (r *regionsInfo) heartbeatConfVer(region *metapb.Region) (*pdpb.ChangePeer, bool, error) {
 	// ConfVer is handled after Version, so here
 	// we must get the region by ID.
-	curRegion := r.regions[region.GetId()]
-	if err := checkStaleRegion(curRegion, region); err != nil {
-		return false, errors.Trace(err)
+	cacheRegion := r.regions[region.GetId()]
+	if err := checkStaleRegion(cacheRegion, region); err != nil {
+		return nil, false, errors.Trace(err)
 	}
 
-	if region.GetRegionEpoch().GetConfVer() > curRegion.GetRegionEpoch().GetConfVer() {
+	if region.GetRegionEpoch().GetConfVer() > cacheRegion.GetRegionEpoch().GetConfVer() {
 		// ConfChanged, update
 		r.updateRegion(region)
-		return true, nil
+		return r.getChangePeer(cacheRegion, region), true, nil
 	}
 
-	return false, nil
+	return nil, false, nil
+}
+
+func (r *regionsInfo) getChangePeer(region *metapb.Region, curRegion *metapb.Region) *pdpb.ChangePeer {
+	if region == nil || curRegion == nil {
+		return nil
+	}
+
+	// Get remove peer.
+	for _, peer := range region.GetPeers() {
+		// Current region does not have region peer,
+		// so it is removing the region peer now.
+		if !containPeer(curRegion, peer) {
+			return &pdpb.ChangePeer{
+				ChangeType: raftpb.ConfChangeType_RemoveNode.Enum(),
+				Peer:       peer,
+			}
+		}
+	}
+
+	// Get add peer.
+	for _, peer := range curRegion.GetPeers() {
+		// Current region have region peer, but region does not have,
+		// so it is adding the region peer now.
+		if !containPeer(region, peer) {
+			return &pdpb.ChangePeer{
+				ChangeType: raftpb.ConfChangeType_AddNode.Enum(),
+				Peer:       peer,
+			}
+		}
+	}
+
+	return nil
 }
 
 // heartbeatResp is the response after heartbeat handling.
@@ -354,18 +387,18 @@ type heartbeatResp struct {
 }
 
 // heartbeat handles heartbeat for the region.
-func (r *regionsInfo) heartbeat(region *metapb.Region, leaderPeer *metapb.Peer) (*heartbeatResp, error) {
+func (r *regionsInfo) heartbeat(region *metapb.Region, leaderPeer *metapb.Peer) (*heartbeatResp, *pdpb.ChangePeer, error) {
 	r.Lock()
 	defer r.Unlock()
 
 	versionUpdated, removeRegion, err := r.heartbeatVersion(region)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
-	confVerUpdated, err := r.heartbeatConfVer(region)
+	changePeer, confVerUpdated, err := r.heartbeatConfVer(region)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, nil, errors.Trace(err)
 	}
 
 	regionID := region.GetId()
@@ -380,7 +413,7 @@ func (r *regionsInfo) heartbeat(region *metapb.Region, leaderPeer *metapb.Peer) 
 		resp.putRegion = region
 	}
 
-	return resp, nil
+	return resp, changePeer, nil
 }
 
 func (r *regionsInfo) leaderRegionCount(storeID uint64) int {

@@ -124,8 +124,6 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *balanceOperato
 
 	bw.historyOperators.add(regionID, op)
 
-	bw.postEvent(op)
-
 	return true
 }
 

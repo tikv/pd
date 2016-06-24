@@ -19,6 +19,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/raftpb"
 	"golang.org/x/net/context"
 )
 
@@ -182,7 +183,7 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		return nil, errors.Errorf("invalid request region, %v", request)
 	}
 
-	resp, err := cluster.cachedCluster.regions.heartbeat(region, leader)
+	resp, changePeer, err := cluster.cachedCluster.regions.heartbeat(region, leader)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -225,6 +226,17 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		if !resp.Succeeded {
 			return nil, errors.New("handle region heartbeat failed")
 		}
+	}
+
+	if changePeer != nil {
+		var op Operator
+		if changePeer.GetChangeType() == raftpb.ConfChangeType_AddNode {
+			op = newAddPeerOperator(region.GetId(), changePeer.GetPeer())
+		} else {
+			op = newRemovePeerOperator(region.GetId(), changePeer.GetPeer())
+		}
+
+		hookEvent(op, evtEnd, cluster.balancerWorker)
 	}
 
 	return &pdpb.Response{

@@ -79,7 +79,7 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	// Now we check the MaxWaitCount for transferLeaderOperator.
 	op1.MaxWaitCount = 2
 
-	ok, res, err := op1.Do(region, leaderPeer)
+	ok, res, err := op1.Do(region, leaderPeer, s.balancerWorker)
 	c.Assert(err, IsNil)
 	c.Assert(ok, IsFalse)
 	c.Assert(res.GetTransferLeader().GetPeer().GetStoreId(), Equals, uint64(4))
