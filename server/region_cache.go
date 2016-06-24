@@ -270,7 +270,7 @@ func (c *listCache) elems() []*cacheItem {
 	defer c.RUnlock()
 
 	elems := make([]*cacheItem, 0, c.ll.Len())
-	for ele := c.ll.Front(); ele != nil; ele = ele.Next() {
+	for ele := c.ll.Back(); ele != nil; ele = ele.Prev() {
 		elems = append(elems, ele.Value.(*cacheItem))
 	}
 
@@ -282,7 +282,7 @@ func (c *listCache) fromElems(key uint64) []*cacheItem {
 	defer c.RUnlock()
 
 	elems := make([]*cacheItem, 0, c.ll.Len())
-	for ele := c.ll.Front(); ele != nil; ele = ele.Next() {
+	for ele := c.ll.Back(); ele != nil; ele = ele.Prev() {
 		kv := ele.Value.(*cacheItem)
 		if kv.key > key {
 			elems = append(elems, ele.Value.(*cacheItem))

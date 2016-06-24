@@ -188,9 +188,9 @@ func (s *testRegionCacheSuite) TestListCache(c *C) {
 
 	elems := cache.elems()
 	c.Assert(elems, HasLen, 3)
-	c.Assert(elems[0].value, DeepEquals, "4")
+	c.Assert(elems[0].value, DeepEquals, "2")
 	c.Assert(elems[1].value, DeepEquals, "3")
-	c.Assert(elems[2].value, DeepEquals, "2")
+	c.Assert(elems[2].value, DeepEquals, "4")
 
 	elems = cache.fromElems(3)
 	c.Assert(elems, HasLen, 1)

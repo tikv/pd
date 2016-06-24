@@ -238,17 +238,19 @@ type transferLeaderOperator struct {
 	OldLeader *metapb.Peer `json:"old_leader"`
 	NewLeader *metapb.Peer `json:"new_leader"`
 
-	Name string `json:"name"`
+	RegionID uint64 `json:"regionid"`
+	Name     string `json:"name"`
 
 	firstCheck bool
 }
 
-func newTransferLeaderOperator(oldLeader *metapb.Peer, newLeader *metapb.Peer, waitCount int) *transferLeaderOperator {
+func newTransferLeaderOperator(regionID uint64, oldLeader *metapb.Peer, newLeader *metapb.Peer, waitCount int) *transferLeaderOperator {
 	return &transferLeaderOperator{
 		OldLeader:    oldLeader,
 		NewLeader:    newLeader,
 		Count:        0,
 		MaxWaitCount: waitCount,
+		RegionID:     regionID,
 		Name:         "transfer_leader",
 		firstCheck:   true,
 	}

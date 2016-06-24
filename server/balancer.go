@@ -272,9 +272,10 @@ func (rb *resourceBalancer) doLeaderBalance(cluster *clusterInfo, stores []*stor
 		return nil, nil
 	}
 
-	leaderTransferOperator := newTransferLeaderOperator(leader, newLeader, maxWaitCount)
-	addPeerOperator := newAddPeerOperator(region.GetId(), newPeer)
-	removePeerOperator := newRemovePeerOperator(region.GetId(), leader)
+	regionID := region.GetId()
+	leaderTransferOperator := newTransferLeaderOperator(regionID, leader, newLeader, maxWaitCount)
+	addPeerOperator := newAddPeerOperator(regionID, newPeer)
+	removePeerOperator := newRemovePeerOperator(regionID, leader)
 
 	return newBalanceOperator(region, leaderTransferOperator, addPeerOperator, removePeerOperator), nil
 }

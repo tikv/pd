@@ -14,11 +14,8 @@
 package server
 
 import (
-	"math/rand"
 	"sync/atomic"
 
-	"github.com/golang/protobuf/proto"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/raftpb"
 )
 
@@ -40,6 +37,7 @@ const (
 
 // LogEvent is operator log event.
 type LogEvent struct {
+	ID     uint64     `json:"id"`
 	Code   msgType    `json:"code"`
 	Status statusType `json:"status"`
 
@@ -66,57 +64,36 @@ type LogEvent struct {
 
 func (bw *balancerWorker) innerPostEvent(evt LogEvent) {
 	key := atomic.AddUint64(&ids, 1)
+	evt.ID = key
 	bw.events.add(key, evt)
 }
 
 func (bw *balancerWorker) postEvent(op Operator, status statusType) {
+	var evt LogEvent
+	evt.Status = status
+
 	switch e := op.(type) {
 	case *splitOperator:
-		var evt LogEvent
 		evt.Code = msgSplit
-		evt.Status = status
 		evt.SplitEvent.Region = e.Origin.GetId()
 		evt.SplitEvent.Left = e.Left.GetId()
 		evt.SplitEvent.Right = e.Right.GetId()
 		bw.innerPostEvent(evt)
-	case *balanceOperator:
-		regionID := e.Region.GetId()
-		for _, o := range e.Ops {
-			var evt LogEvent
-			evt.Status = status
-			switch eo := o.(type) {
-			case *transferLeaderOperator:
-				evt.Code = msgTransferLeader
-				evt.TransferLeaderEvent.Region = regionID
-				evt.TransferLeaderEvent.StoreFrom = eo.OldLeader.GetStoreId()
-				evt.TransferLeaderEvent.StoreTo = eo.NewLeader.GetStoreId()
-				bw.innerPostEvent(evt)
-			case *changePeerOperator:
-				if eo.ChangePeer.GetChangeType() == raftpb.ConfChangeType_AddNode {
-					evt.Code = msgAddReplica
-					evt.AddReplicaEvent.Region = eo.RegionID
-					bw.innerPostEvent(evt)
-				} else {
-					evt.Code = msgRemoveReplica
-					evt.RemoveReplicaEvent.Region = eo.RegionID
-					bw.innerPostEvent(evt)
-				}
-			}
-		}
-	case *onceOperator:
-		var evt LogEvent
-		evt.Status = status
-		switch eo := e.Op.(type) {
-		case *changePeerOperator:
-			if eo.ChangePeer.GetChangeType() == raftpb.ConfChangeType_AddNode {
-				evt.Code = msgAddReplica
-				evt.AddReplicaEvent.Region = eo.RegionID
-				bw.innerPostEvent(evt)
-			} else {
-				evt.Code = msgRemoveReplica
-				evt.RemoveReplicaEvent.Region = eo.RegionID
-				bw.innerPostEvent(evt)
-			}
+	case *transferLeaderOperator:
+		evt.Code = msgTransferLeader
+		evt.TransferLeaderEvent.Region = e.RegionID
+		evt.TransferLeaderEvent.StoreFrom = e.OldLeader.GetStoreId()
+		evt.TransferLeaderEvent.StoreTo = e.NewLeader.GetStoreId()
+		bw.innerPostEvent(evt)
+	case *changePeerOperator:
+		if e.ChangePeer.GetChangeType() == raftpb.ConfChangeType_AddNode {
+			evt.Code = msgAddReplica
+			evt.AddReplicaEvent.Region = e.RegionID
+			bw.innerPostEvent(evt)
+		} else {
+			evt.Code = msgRemoveReplica
+			evt.RemoveReplicaEvent.Region = e.RegionID
+			bw.innerPostEvent(evt)
 		}
 	}
 }
@@ -124,9 +101,9 @@ func (bw *balancerWorker) postEvent(op Operator, status statusType) {
 func (bw *balancerWorker) fetchEvents(key uint64, all bool) []LogEvent {
 	var elems []*cacheItem
 	if all {
-		elems = bw.events.fromElems(key)
-	} else {
 		elems = bw.events.elems()
+	} else {
+		elems = bw.events.fromElems(key)
 	}
 
 	evts := make([]LogEvent, 0, len(elems))
@@ -135,64 +112,4 @@ func (bw *balancerWorker) fetchEvents(key uint64, all bool) []LogEvent {
 	}
 
 	return evts
-}
-
-func randIDs(ids []int, n int) []uint64 {
-	l := len(ids)
-	m := map[int]bool{}
-	s := make([]uint64, l)
-
-	for i := 0; i < n; {
-		idx := rand.Intn(l)
-		if m[idx] {
-			continue
-		}
-
-		s[i] = uint64(ids[idx])
-		m[idx] = true
-		i++
-	}
-
-	return s
-}
-
-func (bw *balancerWorker) mockBalanceOperator() {
-	rids := rand.Perm(100000)
-	ids := randIDs(rids, 9)
-
-	oldLeaderPeer := &metapb.Peer{
-		Id:      proto.Uint64(uint64(ids[0])),
-		StoreId: proto.Uint64(uint64(ids[1])),
-	}
-	newLeaderPeer := &metapb.Peer{
-		Id:      proto.Uint64(uint64(ids[2])),
-		StoreId: proto.Uint64(uint64(ids[3])),
-	}
-	followerPeer := &metapb.Peer{
-		Id:      proto.Uint64(uint64(ids[4])),
-		StoreId: proto.Uint64(uint64(ids[5])),
-	}
-	newPeer := &metapb.Peer{
-		Id:      proto.Uint64(uint64(ids[6])),
-		StoreId: proto.Uint64(uint64(ids[7])),
-	}
-
-	region := &metapb.Region{
-		Id:       proto.Uint64(uint64(ids[8])),
-		StartKey: []byte("aaaa"),
-		EndKey:   []byte("zzzz"),
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: proto.Uint64(1),
-			Version: proto.Uint64(2),
-		},
-		Peers: []*metapb.Peer{
-			oldLeaderPeer, newLeaderPeer, followerPeer,
-		},
-	}
-
-	op1 := newTransferLeaderOperator(oldLeaderPeer, newLeaderPeer, maxWaitCount)
-	op2 := newAddPeerOperator(region.GetId(), newPeer)
-	op3 := newRemovePeerOperator(region.GetId(), oldLeaderPeer)
-	op := newBalanceOperator(region, op1, op2, op3)
-	bw.addBalanceOperator(region.GetId(), op)
 }
