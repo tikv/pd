@@ -96,7 +96,7 @@ func (bw *balancerWorker) postEvent(op Operator, status statusType) {
 		} else {
 			evt.Code = msgRemoveReplica
 			evt.RemoveReplicaEvent.Region = e.RegionID
-			evt.AddReplicaEvent.Store = e.ChangePeer.Peer.GetStoreId()
+			evt.RemoveReplicaEvent.Store = e.ChangePeer.Peer.GetStoreId()
 			bw.innerPostEvent(evt)
 		}
 	}
