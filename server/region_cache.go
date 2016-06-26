@@ -208,7 +208,7 @@ func (c *lruCache) len() int {
 	return c.ll.Len()
 }
 
-type listCache struct {
+type fifoCache struct {
 	sync.RWMutex
 
 	// maxCount is the maximum number of items.
@@ -218,15 +218,15 @@ type listCache struct {
 	ll *list.List
 }
 
-// newListCache returns a new list cache.
-func newListCache(maxCount int) *listCache {
-	return &listCache{
+// newFifoCache returns a new fifo cache.
+func newFifoCache(maxCount int) *fifoCache {
+	return &fifoCache{
 		maxCount: maxCount,
 		ll:       list.New(),
 	}
 }
 
-func (c *listCache) add(key uint64, value interface{}) {
+func (c *fifoCache) add(key uint64, value interface{}) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -238,34 +238,14 @@ func (c *listCache) add(key uint64, value interface{}) {
 	}
 }
 
-func (c *listCache) get(key uint64) (interface{}, bool) {
+func (c *fifoCache) remove() {
 	c.Lock()
 	defer c.Unlock()
 
-	for ele := c.ll.Front(); ele != nil; ele = ele.Next() {
-		kv := ele.Value.(*cacheItem)
-		if kv.key == key {
-			return kv.value, true
-		}
-	}
-
-	return nil, false
+	c.ll.Remove(c.ll.Back())
 }
 
-func (c *listCache) remove(key uint64) {
-	c.Lock()
-	defer c.Unlock()
-
-	for ele := c.ll.Front(); ele != nil; ele = ele.Next() {
-		kv := ele.Value.(*cacheItem)
-		if kv.key == key {
-			c.ll.Remove(ele)
-			return
-		}
-	}
-}
-
-func (c *listCache) elems() []*cacheItem {
+func (c *fifoCache) elems() []*cacheItem {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -277,7 +257,7 @@ func (c *listCache) elems() []*cacheItem {
 	return elems
 }
 
-func (c *listCache) fromElems(key uint64) []*cacheItem {
+func (c *fifoCache) fromElems(key uint64) []*cacheItem {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -292,7 +272,7 @@ func (c *listCache) fromElems(key uint64) []*cacheItem {
 	return elems
 }
 
-func (c *listCache) len() int {
+func (c *fifoCache) len() int {
 	c.RLock()
 	defer c.RUnlock()
 

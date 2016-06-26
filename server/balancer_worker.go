@@ -41,16 +41,16 @@ type balancerWorker struct {
 	balanceOperators map[uint64]*balanceOperator
 	balanceCount     int
 
-	balancer Balancer
+	balancer *resourceBalancer
 
 	regionCache      *expireRegionCache
 	historyOperators *lruCache
-	events           *listCache
+	events           *fifoCache
 
 	quit chan struct{}
 }
 
-func newBalancerWorker(cluster *clusterInfo, balancer Balancer, interval time.Duration) *balancerWorker {
+func newBalancerWorker(cluster *clusterInfo, balancer *resourceBalancer, interval time.Duration) *balancerWorker {
 	bw := &balancerWorker{
 		interval:         interval,
 		cluster:          cluster,
@@ -59,7 +59,7 @@ func newBalancerWorker(cluster *clusterInfo, balancer Balancer, interval time.Du
 		balancer:         balancer,
 		regionCache:      newExpireRegionCache(interval, 2*interval),
 		historyOperators: newLRUCache(100),
-		events:           newListCache(10000),
+		events:           newFifoCache(10000),
 		quit:             make(chan struct{}),
 	}
 

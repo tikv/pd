@@ -90,7 +90,6 @@ func (c *RaftCluster) start(meta metapb.Cluster) error {
 		return errors.Trace(err)
 	}
 
-	// Use capacity balancer as the default BalancerWorker balancer.
 	balancer := newResourceBalancer(c.s.cfg.MinCapacityUsedRatio, c.s.cfg.MaxCapacityUsedRatio)
 	c.balancerWorker = newBalancerWorker(c.cachedCluster, balancer, defaultBalanceInterval)
 	c.balancerWorker.run()
@@ -443,7 +442,7 @@ func (c *RaftCluster) GetScore(store *metapb.Store, status *StoreStatus) int {
 	}
 
 	regionCount := c.cachedCluster.regions.regionCount()
-	return c.balancerWorker.balancer.(*resourceBalancer).score(storeInfo, regionCount)
+	return c.balancerWorker.balancer.score(storeInfo, regionCount)
 }
 
 // FetchEvents fetches the operator events.

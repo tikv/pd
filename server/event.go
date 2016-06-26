@@ -117,3 +117,11 @@ func (bw *balancerWorker) fetchEvents(key uint64, all bool) []LogEvent {
 
 	return evts
 }
+
+func (bw *balancerWorker) hookStartEvent(op Operator) {
+	bw.postEvent(op, evtStart)
+}
+
+func (bw *balancerWorker) hookEndEvent(op Operator) {
+	bw.postEvent(op, evtEnd)
+}

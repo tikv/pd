@@ -121,9 +121,22 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(cacheRegions.leaders.storeRegions[store1.GetId()], HasKey, region.GetId())
 	c.Assert(cacheRegions.leaders.regionStores[region.GetId()], Equals, store1.GetId())
 
+	oldRegion := cloneRegion(region)
+	changePeer := cacheRegions.getChangePeer(oldRegion, region)
+	c.Assert(changePeer, IsNil)
+
 	// Add another peer.
 	region.Peers = append(region.Peers, res.GetPeer())
 	region.RegionEpoch.ConfVer = proto.Uint64(region.GetRegionEpoch().GetConfVer() + 1)
+
+	changePeer = cacheRegions.getChangePeer(oldRegion, region)
+	c.Assert(changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(changePeer.GetPeer(), DeepEquals, res.GetPeer())
+
+	changePeer = cacheRegions.getChangePeer(region, oldRegion)
+	c.Assert(changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(changePeer.GetPeer(), DeepEquals, res.GetPeer())
+
 	res = heartbeatRegion(c, conn, clusterID, 0, region, leaderPeer)
 	c.Assert(res, IsNil)
 

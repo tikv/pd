@@ -236,7 +236,7 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 			op = newRemovePeerOperator(region.GetId(), changePeer.GetPeer())
 		}
 
-		hookEvent(op, evtEnd, cluster.balancerWorker)
+		cluster.balancerWorker.postEvent(op, evtEnd)
 	}
 
 	return &pdpb.Response{

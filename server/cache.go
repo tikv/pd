@@ -365,7 +365,7 @@ func (r *regionsInfo) getChangePeer(region *metapb.Region, curRegion *metapb.Reg
 
 	// Get add peer.
 	for _, peer := range curRegion.GetPeers() {
-		// Current region have region peer, but region does not have,
+		// Current region has region peer, but region does not have,
 		// so it is adding the region peer now.
 		if !containPeer(region, peer) {
 			return &pdpb.ChangePeer{

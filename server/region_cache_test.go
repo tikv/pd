@@ -144,46 +144,14 @@ func (s *testRegionCacheSuite) TestLRUCache(c *C) {
 	c.Assert(val, IsNil)
 }
 
-func (s *testRegionCacheSuite) TestListCache(c *C) {
-	cache := newListCache(3)
+func (s *testRegionCacheSuite) TestFifoCache(c *C) {
+	cache := newFifoCache(3)
 	cache.add(1, "1")
 	cache.add(2, "2")
 	cache.add(3, "3")
-
-	val, ok := cache.get(3)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "3")
-
-	val, ok = cache.get(2)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "2")
-
-	val, ok = cache.get(1)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "1")
-
 	c.Assert(cache.len(), Equals, 3)
 
 	cache.add(4, "4")
-
-	c.Assert(cache.len(), Equals, 3)
-
-	val, ok = cache.get(1)
-	c.Assert(ok, IsFalse)
-	c.Assert(val, IsNil)
-
-	val, ok = cache.get(2)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "2")
-
-	val, ok = cache.get(3)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "3")
-
-	val, ok = cache.get(4)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "4")
-
 	c.Assert(cache.len(), Equals, 3)
 
 	elems := cache.elems()
@@ -196,25 +164,8 @@ func (s *testRegionCacheSuite) TestListCache(c *C) {
 	c.Assert(elems, HasLen, 1)
 	c.Assert(elems[0].value, DeepEquals, "4")
 
-	cache.remove(2)
-	cache.remove(3)
-	cache.remove(4)
-
+	cache.remove()
+	cache.remove()
+	cache.remove()
 	c.Assert(cache.len(), Equals, 0)
-
-	val, ok = cache.get(1)
-	c.Assert(ok, IsFalse)
-	c.Assert(val, IsNil)
-
-	val, ok = cache.get(2)
-	c.Assert(ok, IsFalse)
-	c.Assert(val, IsNil)
-
-	val, ok = cache.get(3)
-	c.Assert(ok, IsFalse)
-	c.Assert(val, IsNil)
-
-	val, ok = cache.get(4)
-	c.Assert(ok, IsFalse)
-	c.Assert(val, IsNil)
 }
