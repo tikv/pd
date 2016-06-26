@@ -26,7 +26,8 @@ const (
 	// We can allow BalanceCount regions to do balance at same time.
 	defaultBalanceCount = 16
 
-	maxRetryBalanceNumber = 10
+	maxRetryBalanceNumber  = 10
+	maxBalanceCountPerLoop = 3
 )
 
 type balancerWorker struct {
@@ -203,7 +204,12 @@ func (bw *balancerWorker) allowBalance() bool {
 func (bw *balancerWorker) doBalance() error {
 	stats := bw.cluster.stats
 
+	balanceCount := 0
 	for i := 0; i < maxRetryBalanceNumber; i++ {
+		if balanceCount >= maxBalanceCountPerLoop {
+			return nil
+		}
+
 		if !bw.allowBalance() {
 			return nil
 		}
@@ -224,7 +230,8 @@ func (bw *balancerWorker) doBalance() error {
 		if bw.addBalanceOperator(regionID, balanceOperator) {
 			bw.addRegionCache(regionID)
 			stats.Increment("balance.select.success")
-			return nil
+			balanceCount++
+			continue
 		}
 
 		stats.Increment("balance.select.fail")
