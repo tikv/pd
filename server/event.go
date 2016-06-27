@@ -65,7 +65,7 @@ type LogEvent struct {
 }
 
 func (bw *balancerWorker) innerPostEvent(evt LogEvent) {
-	key := atomic.AddUint64(&ids, 1)
+	key := atomic.AddUint64(&baseID, 1)
 	evt.ID = key
 	bw.events.add(key, evt)
 }
