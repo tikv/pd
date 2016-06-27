@@ -35,6 +35,18 @@ const (
 
 type callback func(op Operator)
 
+type opContext struct {
+	start callback
+	end   callback
+}
+
+func newOpContext(start callback, end callback) *opContext {
+	return &opContext{
+		start: start,
+		end:   end,
+	}
+}
+
 func doCallback(f callback, op Operator) {
 	if f != nil {
 		f(op)
@@ -44,7 +56,7 @@ func doCallback(f callback, op Operator) {
 // Operator is the interface to do some operations.
 type Operator interface {
 	// Do does the operator, if finished then return true.
-	Do(region *metapb.Region, leader *metapb.Peer, onStart callback, onEnd callback) (bool, *pdpb.RegionHeartbeatResponse, error)
+	Do(ctx *opContext, region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error)
 }
 
 // balanceOperator is used to do region balance.
@@ -95,7 +107,7 @@ func (bo *balanceOperator) check(region *metapb.Region, leader *metapb.Peer) (bo
 }
 
 // Do implements Operator.Do interface.
-func (bo *balanceOperator) Do(region *metapb.Region, leader *metapb.Peer, onStart callback, onEnd callback) (bool, *pdpb.RegionHeartbeatResponse, error) {
+func (bo *balanceOperator) Do(ctx *opContext, region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
 	ok, err := bo.check(region, leader)
 	if err != nil {
 		return false, nil, errors.Trace(err)
@@ -104,7 +116,7 @@ func (bo *balanceOperator) Do(region *metapb.Region, leader *metapb.Peer, onStar
 		return true, nil, nil
 	}
 
-	finished, res, err := bo.Ops[bo.Index].Do(region, leader, onStart, onEnd)
+	finished, res, err := bo.Ops[bo.Index].Do(ctx, region, leader)
 	if err != nil {
 		return false, nil, errors.Trace(err)
 	}
@@ -142,13 +154,13 @@ func (op *onceOperator) String() string {
 }
 
 // Do implements Operator.Do interface.
-func (op *onceOperator) Do(region *metapb.Region, leader *metapb.Peer, onStart callback, onEnd callback) (bool, *pdpb.RegionHeartbeatResponse, error) {
+func (op *onceOperator) Do(ctx *opContext, region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
 	if op.Finished {
 		return true, nil, nil
 	}
 
 	op.Finished = true
-	_, resp, err := op.Op.Do(region, leader, onStart, onEnd)
+	_, resp, err := op.Op.Do(ctx, region, leader)
 	return true, resp, errors.Trace(err)
 }
 
@@ -213,7 +225,7 @@ func (co *changePeerOperator) check(region *metapb.Region, leader *metapb.Peer) 
 }
 
 // Do implements Operator.Do interface.
-func (co *changePeerOperator) Do(region *metapb.Region, leader *metapb.Peer, onStart callback, onEnd callback) (bool, *pdpb.RegionHeartbeatResponse, error) {
+func (co *changePeerOperator) Do(ctx *opContext, region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
 	ok, err := co.check(region, leader)
 	if err != nil {
 		return false, nil, errors.Trace(err)
@@ -223,7 +235,7 @@ func (co *changePeerOperator) Do(region *metapb.Region, leader *metapb.Peer, onS
 	}
 
 	if co.firstCheck {
-		doCallback(onStart, co)
+		doCallback(ctx.start, co)
 		co.firstCheck = false
 	}
 
@@ -282,18 +294,18 @@ func (tlo *transferLeaderOperator) check(region *metapb.Region, leader *metapb.P
 }
 
 // Do implements Operator.Do interface.
-func (tlo *transferLeaderOperator) Do(region *metapb.Region, leader *metapb.Peer, onStart callback, onEnd callback) (bool, *pdpb.RegionHeartbeatResponse, error) {
+func (tlo *transferLeaderOperator) Do(ctx *opContext, region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
 	ok, err := tlo.check(region, leader)
 	if err != nil {
 		return false, nil, errors.Trace(err)
 	}
 	if ok {
-		doCallback(onEnd, tlo)
+		doCallback(ctx.end, tlo)
 		return true, nil, nil
 	}
 
 	if tlo.firstCheck {
-		doCallback(onStart, tlo)
+		doCallback(ctx.start, tlo)
 		tlo.firstCheck = false
 	}
 
@@ -335,6 +347,6 @@ func newSplitOperator(origin *metapb.Region, left *metapb.Region, right *metapb.
 }
 
 // Do implements Operator.Do interface.
-func (so *splitOperator) Do(region *metapb.Region, leader *metapb.Peer, onStart callback, onEnd callback) (bool, *pdpb.RegionHeartbeatResponse, error) {
+func (so *splitOperator) Do(ctx *opContext, region *metapb.Region, leader *metapb.Peer) (bool, *pdpb.RegionHeartbeatResponse, error) {
 	return true, nil, nil
 }

@@ -243,3 +243,7 @@ func (bw *balancerWorker) doBalance() error {
 	log.Info("find no proper region for balance, retry later")
 	return nil
 }
+
+func (bw *balancerWorker) storeScore(store *storeInfo, regionCount int) int {
+	return bw.balancer.score(store, regionCount)
+}

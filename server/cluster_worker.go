@@ -65,7 +65,8 @@ func (c *RaftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metap
 		}
 	}
 
-	finished, res, err := balanceOperator.Do(region, leader, c.balancerWorker.hookStartEvent, c.balancerWorker.hookEndEvent)
+	ctx := newOpContext(c.balancerWorker.hookStartEvent, c.balancerWorker.hookEndEvent)
+	finished, res, err := balanceOperator.Do(ctx, region, leader)
 	if err != nil {
 		// Do balance failed, remove it.
 		log.Errorf("do balance for region %d failed %s", regionID, err)

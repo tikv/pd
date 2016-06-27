@@ -442,7 +442,7 @@ func (c *RaftCluster) GetScore(store *metapb.Store, status *StoreStatus) int {
 	}
 
 	regionCount := c.cachedCluster.regions.regionCount()
-	return c.balancerWorker.balancer.score(storeInfo, regionCount)
+	return c.balancerWorker.storeScore(storeInfo, regionCount)
 }
 
 // FetchEvents fetches the operator events.
