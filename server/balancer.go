@@ -148,7 +148,7 @@ func (rb *resourceBalancer) selectFromStore(stores []*storeInfo, regionCount int
 	return resultStore
 }
 
-func (rb *resourceBalancer) selectToStore(stores []*storeInfo, excluded map[uint64]struct{}, regionCount int) *storeInfo {
+func (rb *resourceBalancer) selectToStore(stores []*storeInfo, excluded map[uint64]struct{}, regionCount int, useFilter bool) *storeInfo {
 	score := 0
 	var resultStore *storeInfo
 	for _, store := range stores {
@@ -160,8 +160,10 @@ func (rb *resourceBalancer) selectToStore(stores []*storeInfo, excluded map[uint
 			continue
 		}
 
-		if rb.filterToStore(store) {
-			continue
+		if useFilter {
+			if rb.filterToStore(store) {
+				continue
+			}
 		}
 
 		currScore := rb.score(store, regionCount)
@@ -214,7 +216,7 @@ func (rb *resourceBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[
 		stores = append(stores, cluster.getStore(storeID))
 	}
 
-	store := rb.selectToStore(stores, nil, cluster.regions.regionCount())
+	store := rb.selectToStore(stores, nil, cluster.regions.regionCount(), false)
 	if store == nil {
 		log.Warn("find no store to get new leader peer for region")
 		return nil
@@ -225,7 +227,7 @@ func (rb *resourceBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[
 }
 
 func (rb *resourceBalancer) selectAddPeer(cluster *clusterInfo, stores []*storeInfo, excluded map[uint64]struct{}) (*metapb.Peer, error) {
-	store := rb.selectToStore(stores, excluded, cluster.regions.regionCount())
+	store := rb.selectToStore(stores, excluded, cluster.regions.regionCount(), true)
 	if store == nil {
 		log.Warn("to store cannot be found to add peer")
 		return nil, nil

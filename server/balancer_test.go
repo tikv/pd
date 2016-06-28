@@ -214,6 +214,30 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	c.Assert(op3.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op3.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(1))
 
+	// If the store to be balanced with leader region, the capacity of region stores exceed the max used ratio,
+	// but we can find store to add new peer, we should also do leader balance.
+	s.updateStore(c, clusterInfo, 1, 100, 10, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 40, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 25, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 20, 0, 0)
+
+	cb = newResourceBalancer(0.4, 0.7)
+	bop, err = cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop, NotNil)
+
+	op1 = bop.Ops[0].(*transferLeaderOperator)
+	c.Assert(op1.OldLeader.GetStoreId(), Equals, uint64(1))
+	c.Assert(op1.NewLeader.GetStoreId(), Equals, uint64(3))
+
+	op2 = bop.Ops[1].(*changePeerOperator)
+	c.Assert(op2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
+
+	op3 = bop.Ops[2].(*changePeerOperator)
+	c.Assert(op3.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(op3.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(1))
+
 	// If the sending snapshot count of store is greater than maxSnapSendingCount,
 	// we will do nothing.
 	s.updateStore(c, clusterInfo, 1, 100, 10, 10, 0)
