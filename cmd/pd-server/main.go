@@ -140,8 +140,10 @@ func main() {
 	}
 }
 
-var flagArgs = map[string]bool{}
-var useConfigFile bool
+var (
+	flagArgs      = map[string]bool{}
+	useConfigFile = false
+)
 
 func setStringFlagConfig(dest *string, name string, value string) {
 	if flagArgs[name] || !useConfigFile {
