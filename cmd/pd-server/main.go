@@ -53,6 +53,30 @@ var (
 	maxBalanceCountPerLoop = flag.Uint64("max-balance-count-per-loop", 3, "the max region count to balance in a balance schedule")
 )
 
+func setCmdArgs(cfg *server.Config) {
+	cfg.SetStringFlagConfig(&cfg.Addr, "addr", *addr)
+	cfg.SetStringFlagConfig(&cfg.AdvertiseAddr, "advertise-addr", *advertiseAddr)
+	cfg.SetStringSliceFlagConfig(&cfg.EtcdAddrs, "etcd-addrs", *etcdAddrs)
+	cfg.SetStringFlagConfig(&cfg.HTTPAddr, "http-addr", *httpAddr)
+	cfg.SetStringFlagConfig(&cfg.PprofAddr, "pprof-addr", *pprofAddr)
+	cfg.SetStringFlagConfig(&cfg.RootPath, "root", *rootPath)
+	cfg.SetIntFlagConfig(&cfg.LeaderLease, "lease", *leaderLease)
+	cfg.SetStringFlagConfig(&cfg.LogLevel, "log-level", *logLevel)
+	cfg.SetIntFlagConfig(&cfg.TsoSaveInterval, "tso-save-interval", *tsoSaveInterval)
+	cfg.SetUintFlagConfig(&cfg.ClusterID, "cluster-id", *clusterID)
+	cfg.SetUintFlagConfig(&cfg.MaxPeerCount, "max-peer-count", *maxPeerCount)
+	cfg.SetStringFlagConfig(&cfg.MetricAddr, "metric-addr", *metricAddr)
+	cfg.SetFloatFlagConfig(&cfg.BCfg.MinCapacityUsedRatio, "min-capacity-used-ratio", *minCapUsedRatio)
+	cfg.SetFloatFlagConfig(&cfg.BCfg.MaxCapacityUsedRatio, "max-capacity-used-ratio", *maxCapUsedRatio)
+	cfg.SetUintFlagConfig(&cfg.BCfg.MaxSnapSendingCount, "max-snap-sending-count", *maxSnapSendCount)
+	cfg.SetUintFlagConfig(&cfg.BCfg.MaxSnapReceivingCount, "max-snap-receiving-count", *maxSnapRecvCount)
+	cfg.SetFloatFlagConfig(&cfg.BCfg.MaxDiffScoreFraction, "max-diff-score-fraction", *maxDiffScoreFrac)
+	cfg.SetUintFlagConfig(&cfg.BCfg.BalanceInterval, "balance-interval", *balanceInterval)
+	cfg.SetUintFlagConfig(&cfg.BCfg.MaxBalanceCount, "max-balance-count", *maxBalanceCount)
+	cfg.SetUintFlagConfig(&cfg.BCfg.MaxBalanceRetryPerLoop, "max-balance-retry-per-loop", *maxBalanceRetryPerLoop)
+	cfg.SetUintFlagConfig(&cfg.BCfg.MaxBalanceCountPerLoop, "max-balance-count-per-loop", *maxBalanceCountPerLoop)
+}
+
 func main() {
 	flag.Parse()
 
@@ -67,27 +91,7 @@ func main() {
 		log.Infof("PD init config - %v", cfg)
 	}
 
-	cfg.SetStringFlagConfig(&cfg.Addr, "addr", *addr)
-	cfg.SetStringFlagConfig(&cfg.AdvertiseAddr, "advertise-addr", *advertiseAddr)
-	cfg.SetStringSliceFlagConfig(&cfg.EtcdAddrs, "etcd", *etcdAddrs)
-	cfg.SetStringFlagConfig(&cfg.HTTPAddr, "http-addr", *httpAddr)
-	cfg.SetStringFlagConfig(&cfg.PprofAddr, "pprof", *pprofAddr)
-	cfg.SetStringFlagConfig(&cfg.RootPath, "root", *rootPath)
-	cfg.SetIntFlagConfig(&cfg.LeaderLease, "lease", *leaderLease)
-	cfg.SetStringFlagConfig(&cfg.LogLevel, "L", *logLevel)
-	cfg.SetIntFlagConfig(&cfg.TsoSaveInterval, "tso-save-interval", *tsoSaveInterval)
-	cfg.SetUintFlagConfig(&cfg.ClusterID, "cluster-id", *clusterID)
-	cfg.SetUintFlagConfig(&cfg.MaxPeerCount, "max-peer-count", *maxPeerCount)
-	cfg.SetStringFlagConfig(&cfg.MetricAddr, "metric-addr", *metricAddr)
-	cfg.SetFloatFlagConfig(&cfg.BCfg.MinCapacityUsedRatio, "min-capacity-used-ratio", *minCapUsedRatio)
-	cfg.SetFloatFlagConfig(&cfg.BCfg.MaxCapacityUsedRatio, "max-capacity-used-ratio", *maxCapUsedRatio)
-	cfg.SetUintFlagConfig(&cfg.BCfg.MaxSnapSendingCount, "max-snap-sending-count", *maxSnapSendCount)
-	cfg.SetUintFlagConfig(&cfg.BCfg.MaxSnapReceivingCount, "max-snap-receiving-count", *maxSnapRecvCount)
-	cfg.SetFloatFlagConfig(&cfg.BCfg.MaxDiffScoreFraction, "max-diff-score-fraction", *maxDiffScoreFrac)
-	cfg.SetUintFlagConfig(&cfg.BCfg.BalanceInterval, "balance-interval", *balanceInterval)
-	cfg.SetUintFlagConfig(&cfg.BCfg.MaxBalanceCount, "max-balance-count", *maxBalanceCount)
-	cfg.SetUintFlagConfig(&cfg.BCfg.MaxBalanceRetryPerLoop, "max-balance-retry-per-loop", *maxBalanceRetryPerLoop)
-	cfg.SetUintFlagConfig(&cfg.BCfg.MaxBalanceCountPerLoop, "max-balance-count-per-loop", *maxBalanceCountPerLoop)
+	setCmdArgs(cfg)
 
 	log.SetLevelByString(cfg.LogLevel)
 
