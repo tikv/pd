@@ -18,8 +18,8 @@ metric-prefix = "pd"
 
 min-capacity-used-ratio = 0.4
 max-capacity-used-ratio = 0.9
-max-snap-sending-count = 3
-max-snap-receiving-count = 3
+max-sending-snap-count = 3
+max-receiving-snap-count = 3
 max-diff-score-fraction = 0.1
 balance-interval = 30
 max-balance-count = 16

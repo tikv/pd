@@ -39,7 +39,7 @@ type resourceBalancer struct {
 func newResourceBalancer(cfg *BalanceConfig) *resourceBalancer {
 	rb := &resourceBalancer{cfg: cfg}
 	rb.addFilter(newCapacityFilter(cfg.MinCapacityUsedRatio, cfg.MaxCapacityUsedRatio))
-	rb.addFilter(newSnapCountFilter(cfg.MaxSnapSendingCount, cfg.MaxSnapReceivingCount))
+	rb.addFilter(newSnapCountFilter(cfg.MaxSendingSnapCount, cfg.MaxReceivingSnapCount))
 
 	return rb
 }

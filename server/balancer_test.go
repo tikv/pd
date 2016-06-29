@@ -89,13 +89,13 @@ func (s *testBalancerSuite) newClusterInfo(c *C) *clusterInfo {
 }
 
 func (s *testBalancerSuite) updateStore(c *C, clusterInfo *clusterInfo, storeID uint64, capacity uint64, available uint64,
-	snapSendingCount uint32, snapReceivingCount uint32) {
+	sendingSnapCount uint32, receivingSnapCount uint32) {
 	stats := &pdpb.StoreStats{
 		StoreId:            proto.Uint64(storeID),
 		Capacity:           proto.Uint64(capacity),
 		Available:          proto.Uint64(available),
-		SnapSendingCount:   proto.Uint32(snapSendingCount),
-		SnapReceivingCount: proto.Uint32(snapReceivingCount),
+		SendingSnapCount:   proto.Uint32(sendingSnapCount),
+		ReceivingSnapCount: proto.Uint32(receivingSnapCount),
 	}
 
 	ok := clusterInfo.updateStoreStatus(stats)

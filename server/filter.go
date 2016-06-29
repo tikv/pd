@@ -45,21 +45,21 @@ func (cf *capacityFilter) FilterToStore(store *storeInfo, args ...interface{}) b
 }
 
 type snapCountFilter struct {
-	maxSnapSendingCount   uint64
-	maxSnapReceivingCount uint64
+	maxSendingSnapCount   uint64
+	maxReceivingSnapCount uint64
 }
 
-func newSnapCountFilter(maxSnapSendingCount uint64, maxSnapReceivingCount uint64) *snapCountFilter {
+func newSnapCountFilter(maxSendingSnapCount uint64, maxReceivingSnapCount uint64) *snapCountFilter {
 	return &snapCountFilter{
-		maxSnapSendingCount:   maxSnapSendingCount,
-		maxSnapReceivingCount: maxSnapReceivingCount,
+		maxSendingSnapCount:   maxSendingSnapCount,
+		maxReceivingSnapCount: maxReceivingSnapCount,
 	}
 }
 
 func (sf *snapCountFilter) FilterFromStore(store *storeInfo, args ...interface{}) bool {
-	return uint64(store.stats.Stats.GetSnapSendingCount()) > sf.maxSnapSendingCount
+	return uint64(store.stats.Stats.GetSendingSnapCount()) > sf.maxSendingSnapCount
 }
 
 func (sf *snapCountFilter) FilterToStore(store *storeInfo, args ...interface{}) bool {
-	return uint64(store.stats.Stats.GetSnapReceivingCount()) > sf.maxSnapReceivingCount
+	return uint64(store.stats.Stats.GetReceivingSnapCount()) > sf.maxReceivingSnapCount
 }
