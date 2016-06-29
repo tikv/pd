@@ -14,9 +14,7 @@
 package server
 
 import (
-	"flag"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -70,52 +68,50 @@ type Config struct {
 	// Metric prefix.
 	MetricPrefix string `toml:"metric-prefix"`
 
-	BCfg *BalanceConfig `toml:"balance"`
+	BalanceCfg *BalanceConfig `toml:"balance"`
 
 	// Only test can change it.
 	nextRetryDelay time.Duration
-
-	args map[string]bool
 }
 
-// VisitArgs visits cmd args and sets into inner args map.
-func (c *Config) VisitArgs(flag *flag.Flag) {
-	if c.args == nil {
-		c.args = make(map[string]bool)
-	}
-
-	c.args[flag.Name] = true
-}
+const (
+	defaultRootPath        = "/pd"
+	defaultLeaderLease     = int64(3)
+	defaultTsoSaveInterval = int64(2000)
+	defaultMaxPeerCount    = uint64(3)
+	defaultMetricPrefix    = "pd"
+	defaultNextRetryDelay  = time.Second
+)
 
 func (c *Config) adjust() {
 	if len(c.RootPath) == 0 {
-		c.RootPath = "pd"
+		c.RootPath = defaultRootPath
 	}
 	// TODO: Maybe we should do more check for root path, only allow letters?
 
 	if c.LeaderLease <= 0 {
-		c.LeaderLease = 3
+		c.LeaderLease = defaultLeaderLease
 	}
 
 	if c.TsoSaveInterval <= 0 {
-		c.TsoSaveInterval = 2000
+		c.TsoSaveInterval = defaultTsoSaveInterval
 	}
 
 	if c.nextRetryDelay == 0 {
-		c.nextRetryDelay = time.Second
+		c.nextRetryDelay = defaultNextRetryDelay
 	}
 
 	if c.MaxPeerCount == 0 {
-		c.MaxPeerCount = 3
+		c.MaxPeerCount = defaultMaxPeerCount
 	}
 
 	if len(c.MetricPrefix) == 0 {
-		c.MetricPrefix = "pd"
+		c.MetricPrefix = defaultMetricPrefix
 	}
 
-	if c.BCfg == nil {
-		c.BCfg = &BalanceConfig{}
-		c.BCfg.adjust()
+	if c.BalanceCfg == nil {
+		c.BalanceCfg = &BalanceConfig{}
+		c.BalanceCfg.adjust()
 	}
 }
 
@@ -124,41 +120,6 @@ func (c *Config) String() string {
 		return "<nil>"
 	}
 	return fmt.Sprintf("Config(%+v)", *c)
-}
-
-// SetStringFlagConfig sets string flag value to config.
-func (c *Config) SetStringFlagConfig(dest *string, name string, value string) {
-	if c.args[name] {
-		*dest = value
-	}
-}
-
-// SetStringSliceFlagConfig sets string slice value to config.
-func (c *Config) SetStringSliceFlagConfig(dest *[]string, name string, value string) {
-	if c.args[name] {
-		*dest = append([]string{}, strings.Split(value, ",")...)
-	}
-}
-
-// SetIntFlagConfig sets int value to config.
-func (c *Config) SetIntFlagConfig(dest *int64, name string, value int64) {
-	if c.args[name] {
-		*dest = value
-	}
-}
-
-// SetUintFlagConfig sets uint value to config.
-func (c *Config) SetUintFlagConfig(dest *uint64, name string, value uint64) {
-	if c.args[name] {
-		*dest = value
-	}
-}
-
-// SetFloatFlagConfig sets float value to config.
-func (c *Config) SetFloatFlagConfig(dest *float64, name string, value float64) {
-	if c.args[name] {
-		*dest = value
-	}
 }
 
 // LoadFromFile loads config from file.
@@ -202,41 +163,53 @@ type BalanceConfig struct {
 	MaxBalanceCountPerLoop uint64 `toml:"max-balance-count-per-loop"`
 }
 
+const (
+	defaultMinCapacityUsedRatio   = float64(0.4)
+	defaultMaxCapacityUsedRatio   = float64(0.9)
+	defaultMaxSnapSendingCount    = uint64(3)
+	defaultMaxSnapReceivingCount  = uint64(3)
+	defaultMaxDiffScoreFraction   = float64(0.1)
+	defaultMaxBalanceCount        = uint64(16)
+	defaultBalanceInterval        = uint64(30)
+	defaultMaxBalanceRetryPerLoop = uint64(10)
+	defaultMaxBalanceCountPerLoop = uint64(3)
+)
+
 func (c *BalanceConfig) adjust() {
 	if c.MinCapacityUsedRatio == 0 {
-		c.MinCapacityUsedRatio = 0.4
+		c.MinCapacityUsedRatio = defaultMinCapacityUsedRatio
 	}
 
 	if c.MaxCapacityUsedRatio == 0 {
-		c.MaxCapacityUsedRatio = 0.9
+		c.MaxCapacityUsedRatio = defaultMaxCapacityUsedRatio
 	}
 
 	if c.MaxSnapSendingCount == 0 {
-		c.MaxSnapSendingCount = 3
+		c.MaxSnapSendingCount = defaultMaxSnapSendingCount
 	}
 
 	if c.MaxSnapReceivingCount == 0 {
-		c.MaxSnapReceivingCount = 3
+		c.MaxSnapReceivingCount = defaultMaxSnapReceivingCount
 	}
 
 	if c.MaxDiffScoreFraction == 0 {
-		c.MaxDiffScoreFraction = 0.1
+		c.MaxDiffScoreFraction = defaultMaxDiffScoreFraction
 	}
 
 	if c.BalanceInterval == 0 {
-		c.BalanceInterval = 30
+		c.BalanceInterval = defaultBalanceInterval
 	}
 
 	if c.MaxBalanceCount == 0 {
-		c.MaxBalanceCount = 16
+		c.MaxBalanceCount = defaultMaxBalanceCount
 	}
 
 	if c.MaxBalanceRetryPerLoop == 0 {
-		c.MaxBalanceRetryPerLoop = 10
+		c.MaxBalanceRetryPerLoop = defaultMaxBalanceRetryPerLoop
 	}
 
 	if c.MaxBalanceCountPerLoop == 0 {
-		c.MaxBalanceCountPerLoop = 3
+		c.MaxBalanceCountPerLoop = defaultMaxBalanceCountPerLoop
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/juju/errors"
@@ -54,34 +55,37 @@ var (
 )
 
 func setCmdArgs(cfg *server.Config) {
-	cfg.SetStringFlagConfig(&cfg.Addr, "addr", *addr)
-	cfg.SetStringFlagConfig(&cfg.AdvertiseAddr, "advertise-addr", *advertiseAddr)
-	cfg.SetStringSliceFlagConfig(&cfg.EtcdAddrs, "etcd-addrs", *etcdAddrs)
-	cfg.SetStringFlagConfig(&cfg.HTTPAddr, "http-addr", *httpAddr)
-	cfg.SetStringFlagConfig(&cfg.PprofAddr, "pprof-addr", *pprofAddr)
-	cfg.SetStringFlagConfig(&cfg.RootPath, "root", *rootPath)
-	cfg.SetIntFlagConfig(&cfg.LeaderLease, "lease", *leaderLease)
-	cfg.SetStringFlagConfig(&cfg.LogLevel, "log-level", *logLevel)
-	cfg.SetIntFlagConfig(&cfg.TsoSaveInterval, "tso-save-interval", *tsoSaveInterval)
-	cfg.SetUintFlagConfig(&cfg.ClusterID, "cluster-id", *clusterID)
-	cfg.SetUintFlagConfig(&cfg.MaxPeerCount, "max-peer-count", *maxPeerCount)
-	cfg.SetStringFlagConfig(&cfg.MetricAddr, "metric-addr", *metricAddr)
-	cfg.SetFloatFlagConfig(&cfg.BCfg.MinCapacityUsedRatio, "min-capacity-used-ratio", *minCapUsedRatio)
-	cfg.SetFloatFlagConfig(&cfg.BCfg.MaxCapacityUsedRatio, "max-capacity-used-ratio", *maxCapUsedRatio)
-	cfg.SetUintFlagConfig(&cfg.BCfg.MaxSnapSendingCount, "max-snap-sending-count", *maxSnapSendCount)
-	cfg.SetUintFlagConfig(&cfg.BCfg.MaxSnapReceivingCount, "max-snap-receiving-count", *maxSnapRecvCount)
-	cfg.SetFloatFlagConfig(&cfg.BCfg.MaxDiffScoreFraction, "max-diff-score-fraction", *maxDiffScoreFrac)
-	cfg.SetUintFlagConfig(&cfg.BCfg.BalanceInterval, "balance-interval", *balanceInterval)
-	cfg.SetUintFlagConfig(&cfg.BCfg.MaxBalanceCount, "max-balance-count", *maxBalanceCount)
-	cfg.SetUintFlagConfig(&cfg.BCfg.MaxBalanceRetryPerLoop, "max-balance-retry-per-loop", *maxBalanceRetryPerLoop)
-	cfg.SetUintFlagConfig(&cfg.BCfg.MaxBalanceCountPerLoop, "max-balance-count-per-loop", *maxBalanceCountPerLoop)
+	flag.Visit(func(flag *flag.Flag) {
+		flagArgs[flag.Name] = true
+	})
+
+	setStringFlagConfig(&cfg.Addr, "addr", *addr)
+	setStringFlagConfig(&cfg.AdvertiseAddr, "advertise-addr", *advertiseAddr)
+	setStringSliceFlagConfig(&cfg.EtcdAddrs, "etcd-addrs", *etcdAddrs)
+	setStringFlagConfig(&cfg.HTTPAddr, "http-addr", *httpAddr)
+	setStringFlagConfig(&cfg.PprofAddr, "pprof-addr", *pprofAddr)
+	setStringFlagConfig(&cfg.RootPath, "root", *rootPath)
+	setIntFlagConfig(&cfg.LeaderLease, "lease", *leaderLease)
+	setStringFlagConfig(&cfg.LogLevel, "log-level", *logLevel)
+	setIntFlagConfig(&cfg.TsoSaveInterval, "tso-save-interval", *tsoSaveInterval)
+	setUintFlagConfig(&cfg.ClusterID, "cluster-id", *clusterID)
+	setUintFlagConfig(&cfg.MaxPeerCount, "max-peer-count", *maxPeerCount)
+	setStringFlagConfig(&cfg.MetricAddr, "metric-addr", *metricAddr)
+	setFloatFlagConfig(&cfg.BalanceCfg.MinCapacityUsedRatio, "min-capacity-used-ratio", *minCapUsedRatio)
+	setFloatFlagConfig(&cfg.BalanceCfg.MaxCapacityUsedRatio, "max-capacity-used-ratio", *maxCapUsedRatio)
+	setUintFlagConfig(&cfg.BalanceCfg.MaxSnapSendingCount, "max-snap-sending-count", *maxSnapSendCount)
+	setUintFlagConfig(&cfg.BalanceCfg.MaxSnapReceivingCount, "max-snap-receiving-count", *maxSnapRecvCount)
+	setFloatFlagConfig(&cfg.BalanceCfg.MaxDiffScoreFraction, "max-diff-score-fraction", *maxDiffScoreFrac)
+	setUintFlagConfig(&cfg.BalanceCfg.BalanceInterval, "balance-interval", *balanceInterval)
+	setUintFlagConfig(&cfg.BalanceCfg.MaxBalanceCount, "max-balance-count", *maxBalanceCount)
+	setUintFlagConfig(&cfg.BalanceCfg.MaxBalanceRetryPerLoop, "max-balance-retry-per-loop", *maxBalanceRetryPerLoop)
+	setUintFlagConfig(&cfg.BalanceCfg.MaxBalanceCountPerLoop, "max-balance-count-per-loop", *maxBalanceCountPerLoop)
 }
 
 func main() {
 	flag.Parse()
 
 	cfg := &server.Config{}
-	flag.Visit(cfg.VisitArgs)
 
 	if *config != "" {
 		if err := cfg.LoadFromFile(*config); err != nil {
@@ -94,6 +98,7 @@ func main() {
 	setCmdArgs(cfg)
 
 	log.SetLevelByString(cfg.LogLevel)
+	log.SetHighlighting(false)
 
 	log.Infof("PD config - %v", cfg)
 
@@ -131,5 +136,37 @@ func main() {
 	err = svr.Run()
 	if err != nil {
 		log.Fatalf("server run failed - %v", errors.Trace(err))
+	}
+}
+
+var flagArgs = map[string]bool{}
+
+func setStringFlagConfig(dest *string, name string, value string) {
+	if flagArgs[name] {
+		*dest = value
+	}
+}
+
+func setStringSliceFlagConfig(dest *[]string, name string, value string) {
+	if flagArgs[name] {
+		*dest = append([]string{}, strings.Split(value, ",")...)
+	}
+}
+
+func setIntFlagConfig(dest *int64, name string, value int64) {
+	if flagArgs[name] {
+		*dest = value
+	}
+}
+
+func setUintFlagConfig(dest *uint64, name string, value uint64) {
+	if flagArgs[name] {
+		*dest = value
+	}
+}
+
+func setFloatFlagConfig(dest *float64, name string, value float64) {
+	if flagArgs[name] {
+		*dest = value
 	}
 }
