@@ -25,24 +25,6 @@ type Balancer interface {
 	Balance(cluster *clusterInfo) (*balanceOperator, error)
 }
 
-const (
-	// If the used ratio of one storage is less than this value,
-	// it will never be used as a from store.
-	minCapacityUsedRatio = 0.4
-	// If the used ratio of one storage is greater than this value,
-	// it will never be used as a to store.
-	maxCapacityUsedRatio = 0.9
-
-	// If the sending snapshot count of one storage is greater than this value,
-	// it will never be used as a from store.
-	maxSnapSendingCount = uint32(3)
-	// If the receiving snapshot count of one storage is greater than this value,
-	// it will never be used as a to store.
-	maxSnapReceivingCount = uint32(3)
-
-	defaultDiffScoreFraction = 0.1
-)
-
 var (
 	_ Balancer = &defaultBalancer{}
 	_ Balancer = &resourceBalancer{}
@@ -50,12 +32,14 @@ var (
 
 type resourceBalancer struct {
 	filters []Filter
+
+	cfg *BalanceConfig
 }
 
-func newResourceBalancer(minRatio float64, maxRatio float64) *resourceBalancer {
-	rb := &resourceBalancer{}
-	rb.addFilter(newCapacityFilter(minRatio, maxRatio))
-	rb.addFilter(newSnapCountFilter(maxSnapSendingCount, maxSnapReceivingCount))
+func newResourceBalancer(cfg *BalanceConfig) *resourceBalancer {
+	rb := &resourceBalancer{cfg: cfg}
+	rb.addFilter(newCapacityFilter(cfg.MinCapacityUsedRatio, cfg.MaxCapacityUsedRatio))
+	rb.addFilter(newSnapCountFilter(cfg.MaxSnapSendingCount, cfg.MaxSnapReceivingCount))
 
 	return rb
 }
@@ -109,7 +93,7 @@ func (rb *resourceBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Pee
 
 	// If the diff score is in defaultScoreFraction range, then we will do nothing.
 	diffScore := oldStoreScore - newStoreScore
-	if diffScore <= int(float64(oldStoreScore)*defaultDiffScoreFraction) {
+	if diffScore <= int(float64(oldStoreScore)*rb.cfg.MaxDiffScoreFraction) {
 		log.Debugf("check score failed - diff score is too small - old peer: %v, new peer: %v, old store score: %d, new store score :%d, diif score: %d",
 			oldPeer, newPeer, oldStoreScore, newStoreScore, diffScore)
 		return false
@@ -334,11 +318,11 @@ type defaultBalancer struct {
 	leader *metapb.Peer
 }
 
-func newDefaultBalancer(region *metapb.Region, leader *metapb.Peer, minRatio float64, maxRatio float64) *defaultBalancer {
+func newDefaultBalancer(region *metapb.Region, leader *metapb.Peer, cfg *BalanceConfig) *defaultBalancer {
 	return &defaultBalancer{
 		region:           region,
 		leader:           leader,
-		resourceBalancer: newResourceBalancer(minRatio, maxRatio),
+		resourceBalancer: newResourceBalancer(cfg),
 	}
 }
 

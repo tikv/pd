@@ -1,0 +1,27 @@
+# PD Configuration.
+
+addr = "127.0.0.1:1234"
+advertise-addr = ""
+etcd-addrs = ["127.0.0.1:2379"]
+http-addr = ":9090"
+pprof-addr = ":6060"
+root = "/pd"
+lease = 3
+log-level = "debug"
+tso-save-interval = 2000
+cluster-id = 0
+max-peer-count = 3
+metric-addr = ""
+metric-prefix = "pd"
+
+[balance]
+
+min-capacity-used-ratio = 0.4
+max-capacity-used-ratio = 0.9
+max-snap-sending-count = 3
+max-snap-receiving-count = 3
+max-diff-score-fraction = 0.1
+balance-interval = 30
+max-balance-count = 16
+max-balance-retry-per-loop = 10
+max-balance-count-per-loop = 3

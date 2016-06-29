@@ -30,6 +30,11 @@ func (s *testBalancerWorkerSuite) getRootPath() string {
 	return "test_balancer_worker"
 }
 
+func (s *testBalancerWorkerSuite) SetUpSuite(c *C) {
+	s.ts.cfg = new(BalanceConfig)
+	s.ts.cfg.adjust()
+}
+
 func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	clusterInfo := s.ts.newClusterInfo(c)
 	c.Assert(clusterInfo, NotNil)
@@ -37,9 +42,7 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	region := clusterInfo.regions.getRegion([]byte("a"))
 	c.Assert(region.GetPeers(), HasLen, 1)
 
-	s.balancerWorker = newBalancerWorker(clusterInfo,
-		newResourceBalancer(minCapacityUsedRatio, maxCapacityUsedRatio),
-		defaultBalanceInterval)
+	s.balancerWorker = newBalancerWorker(clusterInfo, s.ts.cfg)
 
 	// The store id will be 1,2,3,4.
 	s.ts.updateStore(c, clusterInfo, 1, 100, 10, 0, 0)

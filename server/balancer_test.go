@@ -27,10 +27,17 @@ var _ = Suite(&testBalancerSuite{})
 
 type testBalancerSuite struct {
 	testClusterBaseSuite
+
+	cfg *BalanceConfig
 }
 
 func (s *testBalancerSuite) getRootPath() string {
 	return "test_balancer"
+}
+
+func (s *testBalancerSuite) SetUpSuite(c *C) {
+	s.cfg = new(BalanceConfig)
+	s.cfg.adjust()
 }
 
 func (s *testBalancerSuite) newClusterInfo(c *C) *clusterInfo {
@@ -96,7 +103,7 @@ func (s *testBalancerSuite) updateStore(c *C, clusterInfo *clusterInfo, storeID 
 }
 
 func (s *testBalancerSuite) addRegionPeer(c *C, clusterInfo *clusterInfo, storeID uint64, region *metapb.Region, leaderPeer *metapb.Peer) {
-	db := newDefaultBalancer(region, leaderPeer, minCapacityUsedRatio, maxCapacityUsedRatio)
+	db := newDefaultBalancer(region, leaderPeer, s.cfg)
 	bop, err := db.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 
@@ -135,7 +142,7 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	s.addRegionPeer(c, clusterInfo, 3, region, leaderPeer)
 
 	// Now peers count equals to max peer count, so there is nothing to do.
-	db := newDefaultBalancer(region, leaderPeer, minCapacityUsedRatio, maxCapacityUsedRatio)
+	db := newDefaultBalancer(region, leaderPeer, s.cfg)
 	bop, err := db.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
@@ -148,7 +155,7 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	region.Peers = append(region.Peers, newPeer)
 
 	// Test remove peer.
-	db = newDefaultBalancer(region, leaderPeer, minCapacityUsedRatio, maxCapacityUsedRatio)
+	db = newDefaultBalancer(region, leaderPeer, s.cfg)
 	bop, err = db.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 
@@ -173,13 +180,19 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0)
 
 	// Now we have all stores with low capacityUsedRatio, so we need not to do balance.
-	cb := newResourceBalancer(0.4, 0.9)
+	testCfg := new(BalanceConfig)
+	testCfg.adjust()
+	testCfg.MinCapacityUsedRatio = 0.3
+	testCfg.MaxCapacityUsedRatio = 0.9
+	cb := newResourceBalancer(testCfg)
 	bop, err := cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
 
 	// Now region peer count is less than max peer count, so we need not to do balance.
-	cb = newResourceBalancer(0.1, 0.9)
+	testCfg.MinCapacityUsedRatio = 0.1
+	testCfg.MaxCapacityUsedRatio = 0.9
+	cb = newResourceBalancer(testCfg)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
@@ -197,7 +210,9 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	// 1) leader transfer: 1 -> 4
 	// 2) add peer: 2
 	// 3) remove peer: 1
-	cb = newResourceBalancer(0.3, 0.9)
+	testCfg.MinCapacityUsedRatio = 0.3
+	testCfg.MaxCapacityUsedRatio = 0.9
+	cb = newResourceBalancer(testCfg)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop.Ops, HasLen, 3)
@@ -221,7 +236,9 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 3, 100, 25, 0, 0)
 	s.updateStore(c, clusterInfo, 4, 100, 20, 0, 0)
 
-	cb = newResourceBalancer(0.4, 0.7)
+	testCfg.MinCapacityUsedRatio = 0.4
+	testCfg.MaxCapacityUsedRatio = 0.7
+	cb = newResourceBalancer(testCfg)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, NotNil)
@@ -245,7 +262,9 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
 	s.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
 
-	cb = newResourceBalancer(0.3, 0.9)
+	testCfg.MinCapacityUsedRatio = 0.3
+	testCfg.MaxCapacityUsedRatio = 0.9
+	cb = newResourceBalancer(testCfg)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
@@ -257,7 +276,9 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
 	s.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
 
-	cb = newResourceBalancer(0.4, 0.6)
+	testCfg.MinCapacityUsedRatio = 0.4
+	testCfg.MaxCapacityUsedRatio = 0.6
+	cb = newResourceBalancer(testCfg)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
@@ -268,7 +289,9 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
 	s.updateStore(c, clusterInfo, 4, 100, 20, 0, 0)
 
-	cb = newResourceBalancer(0.4, 0.7)
+	testCfg.MinCapacityUsedRatio = 0.4
+	testCfg.MaxCapacityUsedRatio = 0.7
+	cb = newResourceBalancer(testCfg)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
@@ -280,7 +303,9 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 3, 100, 10, 0, 0)
 	s.updateStore(c, clusterInfo, 4, 100, 20, 0, 0)
 
-	cb = newResourceBalancer(0.4, 0.7)
+	testCfg.MinCapacityUsedRatio = 0.4
+	testCfg.MaxCapacityUsedRatio = 0.7
+	cb = newResourceBalancer(testCfg)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, NotNil)
@@ -299,7 +324,9 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 3, 100, 10, 0, 0)
 	s.updateStore(c, clusterInfo, 4, 100, 20, 0, 0)
 
-	cb = newResourceBalancer(0.4, 0.7)
+	testCfg.MinCapacityUsedRatio = 0.4
+	testCfg.MaxCapacityUsedRatio = 0.7
+	cb = newResourceBalancer(testCfg)
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)

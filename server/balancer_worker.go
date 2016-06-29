@@ -21,28 +21,18 @@ import (
 	"github.com/ngaut/log"
 )
 
-const (
-	defaultBalanceInterval = 30 * time.Second
-	// We can allow BalanceCount regions to do balance at same time.
-	defaultBalanceCount = 16
-
-	maxRetryBalanceNumber  = 10
-	maxBalanceCountPerLoop = 3
-)
-
 type balancerWorker struct {
 	sync.RWMutex
 
-	wg       sync.WaitGroup
-	interval time.Duration
-	cluster  *clusterInfo
+	wg      sync.WaitGroup
+	cluster *clusterInfo
 
 	// should we extract to another structure, so
 	// Balancer can use it?
 	balanceOperators map[uint64]*balanceOperator
-	balanceCount     int
 
 	balancer *resourceBalancer
+	cfg      *BalanceConfig
 
 	regionCache      *expireRegionCache
 	historyOperators *lruCache
@@ -51,14 +41,13 @@ type balancerWorker struct {
 	quit chan struct{}
 }
 
-func newBalancerWorker(cluster *clusterInfo, balancer *resourceBalancer, interval time.Duration) *balancerWorker {
+func newBalancerWorker(cluster *clusterInfo, cfg *BalanceConfig) *balancerWorker {
 	bw := &balancerWorker{
-		interval:         interval,
+		cfg:              cfg,
 		cluster:          cluster,
 		balanceOperators: make(map[uint64]*balanceOperator),
-		balanceCount:     defaultBalanceCount,
-		balancer:         balancer,
-		regionCache:      newExpireRegionCache(interval, 2*interval),
+		balancer:         newResourceBalancer(cfg),
+		regionCache:      newExpireRegionCache(time.Duration(cfg.BalanceInterval)*time.Second, 2*time.Duration(cfg.BalanceInterval)*time.Second),
 		historyOperators: newLRUCache(100),
 		events:           newFifoCache(10000),
 		quit:             make(chan struct{}),
@@ -75,7 +64,7 @@ func (bw *balancerWorker) run() {
 func (bw *balancerWorker) workBalancer() {
 	defer bw.wg.Done()
 
-	ticker := time.NewTicker(bw.interval)
+	ticker := time.NewTicker(time.Duration(bw.cfg.BalanceInterval) * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -188,13 +177,13 @@ func (bw *balancerWorker) getHistoryOperators() []Operator {
 // allowBalance indicates that whether we can add more balance operator or not.
 func (bw *balancerWorker) allowBalance() bool {
 	bw.RLock()
-	balanceCount := len(bw.balanceOperators)
+	balanceCount := uint64(len(bw.balanceOperators))
 	bw.RUnlock()
 
 	// TODO: We should introduce more strategies to control
 	// how many balance tasks at same time.
-	if balanceCount >= bw.balanceCount {
-		log.Infof("%d exceed max balance count %d, can't do balance", balanceCount, bw.balanceCount)
+	if balanceCount >= bw.cfg.MaxBalanceCount {
+		log.Infof("%d exceed max balance count %d, can't do balance", balanceCount, bw.cfg.MaxBalanceCount)
 		return false
 	}
 
@@ -204,9 +193,9 @@ func (bw *balancerWorker) allowBalance() bool {
 func (bw *balancerWorker) doBalance() error {
 	stats := bw.cluster.stats
 
-	balanceCount := 0
-	for i := 0; i < maxRetryBalanceNumber; i++ {
-		if balanceCount >= maxBalanceCountPerLoop {
+	balanceCount := uint64(0)
+	for i := uint64(0); i < bw.cfg.MaxBalanceRetryPerLoop; i++ {
+		if balanceCount >= bw.cfg.MaxBalanceCountPerLoop {
 			return nil
 		}
 

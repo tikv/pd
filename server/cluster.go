@@ -90,8 +90,7 @@ func (c *RaftCluster) start(meta metapb.Cluster) error {
 		return errors.Trace(err)
 	}
 
-	balancer := newResourceBalancer(c.s.cfg.MinCapacityUsedRatio, c.s.cfg.MaxCapacityUsedRatio)
-	c.balancerWorker = newBalancerWorker(c.cachedCluster, balancer, defaultBalanceInterval)
+	c.balancerWorker = newBalancerWorker(c.cachedCluster, c.s.cfg.BCfg)
 	c.balancerWorker.run()
 
 	return nil
@@ -214,7 +213,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 
 	clusterMeta := metapb.Cluster{
 		Id:           proto.Uint64(clusterID),
-		MaxPeerCount: proto.Uint32(s.cfg.MaxPeerCount),
+		MaxPeerCount: proto.Uint32(uint32(s.cfg.MaxPeerCount)),
 	}
 
 	// Set cluster meta
