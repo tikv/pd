@@ -78,6 +78,7 @@ type Config struct {
 	args map[string]bool
 }
 
+// VisitArgs visits cmd args and sets into inner args map.
 func (c *Config) VisitArgs(flag *flag.Flag) {
 	if c.args == nil {
 		c.args = make(map[string]bool)
@@ -112,7 +113,10 @@ func (c *Config) adjust() {
 		c.MetricPrefix = "pd"
 	}
 
-	c.BCfg.adjust()
+	if c.BCfg == nil {
+		c.BCfg = &BalanceConfig{}
+		c.BCfg.adjust()
+	}
 }
 
 func (c *Config) String() string {
