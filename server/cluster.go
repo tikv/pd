@@ -90,7 +90,7 @@ func (c *RaftCluster) start(meta metapb.Cluster) error {
 		return errors.Trace(err)
 	}
 
-	c.balancerWorker = newBalancerWorker(c.cachedCluster, c.s.cfg.BCfg)
+	c.balancerWorker = newBalancerWorker(c.cachedCluster, c.s.cfg.BalanceCfg)
 	c.balancerWorker.run()
 
 	return nil
