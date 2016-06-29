@@ -92,6 +92,7 @@ func main() {
 			log.Fatalf("load config failed - %s", err)
 		}
 
+		useConfigFile = true
 		log.Infof("PD init config - %v", cfg)
 	}
 
@@ -140,33 +141,34 @@ func main() {
 }
 
 var flagArgs = map[string]bool{}
+var useConfigFile bool
 
 func setStringFlagConfig(dest *string, name string, value string) {
-	if flagArgs[name] {
+	if flagArgs[name] || !useConfigFile {
 		*dest = value
 	}
 }
 
 func setStringSliceFlagConfig(dest *[]string, name string, value string) {
-	if flagArgs[name] {
+	if flagArgs[name] || !useConfigFile {
 		*dest = append([]string{}, strings.Split(value, ",")...)
 	}
 }
 
 func setIntFlagConfig(dest *int64, name string, value int64) {
-	if flagArgs[name] {
+	if flagArgs[name] || !useConfigFile {
 		*dest = value
 	}
 }
 
 func setUintFlagConfig(dest *uint64, name string, value uint64) {
-	if flagArgs[name] {
+	if flagArgs[name] || !useConfigFile {
 		*dest = value
 	}
 }
 
 func setFloatFlagConfig(dest *float64, name string, value float64) {
-	if flagArgs[name] {
+	if flagArgs[name] || !useConfigFile {
 		*dest = value
 	}
 }
