@@ -31,7 +31,7 @@ func (s *testBalancerWorkerSuite) getRootPath() string {
 }
 
 func (s *testBalancerWorkerSuite) SetUpSuite(c *C) {
-	s.ts.cfg = &BalanceConfig{}
+	s.ts.cfg = newBalanceConfig()
 	s.ts.cfg.adjust()
 }
 

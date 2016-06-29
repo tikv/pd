@@ -85,7 +85,7 @@ func setCmdArgs(cfg *server.Config) {
 func main() {
 	flag.Parse()
 
-	cfg := &server.Config{}
+	cfg := server.NewConfig()
 
 	if *config != "" {
 		if err := cfg.LoadFromFile(*config); err != nil {

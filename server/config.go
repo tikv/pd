@@ -74,6 +74,13 @@ type Config struct {
 	nextRetryDelay time.Duration
 }
 
+// NewConfig creates a new config.
+func NewConfig() *Config {
+	return &Config{
+		BalanceCfg: newBalanceConfig(),
+	}
+}
+
 const (
 	defaultRootPath        = "/pd"
 	defaultLeaderLease     = int64(3)
@@ -161,6 +168,10 @@ type BalanceConfig struct {
 
 	// MaxBalanceCountPerLoop is the max region count to balance in a balance schedule.
 	MaxBalanceCountPerLoop uint64 `toml:"max-balance-count-per-loop"`
+}
+
+func newBalanceConfig() *BalanceConfig {
+	return &BalanceConfig{}
 }
 
 const (

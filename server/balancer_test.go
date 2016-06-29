@@ -36,7 +36,7 @@ func (s *testBalancerSuite) getRootPath() string {
 }
 
 func (s *testBalancerSuite) SetUpSuite(c *C) {
-	s.cfg = &BalanceConfig{}
+	s.cfg = newBalanceConfig()
 	s.cfg.adjust()
 }
 
@@ -180,7 +180,7 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0)
 
 	// Now we have all stores with low capacityUsedRatio, so we need not to do balance.
-	testCfg := &BalanceConfig{}
+	testCfg := newBalanceConfig()
 	testCfg.adjust()
 	testCfg.MinCapacityUsedRatio = 0.3
 	testCfg.MaxCapacityUsedRatio = 0.9
