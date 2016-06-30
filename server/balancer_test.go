@@ -330,4 +330,49 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
+
+	// If cluster max peer count config is 1, we can only add peer and remove leader peer.
+	s.updateStore(c, clusterInfo, 1, 100, 60, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 70, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 80, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0)
+
+	// Set cluster config.
+	oldMeta := clusterInfo.getMeta()
+	meta := &metapb.Cluster{
+		Id:           proto.Uint64(0),
+		MaxPeerCount: proto.Uint32(1),
+	}
+	clusterInfo.setMeta(meta)
+
+	testCfg.MinCapacityUsedRatio = 0.3
+	testCfg.MaxCapacityUsedRatio = 0.9
+	cb = newResourceBalancer(testCfg)
+	bop, err = cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop, IsNil)
+
+	// Set region peers to one peer.
+	peers := region.GetPeers()
+	region.Peers = []*metapb.Peer{leaderPeer}
+	clusterInfo.regions.updateRegion(region)
+
+	cb = newResourceBalancer(testCfg)
+	bop, err = cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop, NotNil)
+
+	newOp1 = bop.Ops[0].(*changePeerOperator)
+	c.Assert(newOp1.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(newOp1.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(4))
+
+	newOp2 = bop.Ops[1].(*changePeerOperator)
+	c.Assert(newOp2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(newOp2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(1))
+
+	// Reset cluster config and region peers.
+	clusterInfo.setMeta(oldMeta)
+
+	region.Peers = peers
+	clusterInfo.regions.updateRegion(region)
 }

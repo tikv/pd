@@ -247,6 +247,22 @@ func (rb *resourceBalancer) selectRemovePeer(cluster *clusterInfo, peers map[uin
 }
 
 func (rb *resourceBalancer) doLeaderBalance(cluster *clusterInfo, stores []*storeInfo, region *metapb.Region, leader *metapb.Peer, newPeer *metapb.Peer) (*balanceOperator, error) {
+	if !rb.checkScore(cluster, leader, newPeer) {
+		return nil, nil
+	}
+
+	regionID := region.GetId()
+
+	// If cluster max peer count config is 1, we cannot do leader transfer,
+	// only need to add new peer and remove leader peer.
+	meta := cluster.getMeta()
+	if meta.GetMaxPeerCount() == 1 {
+		addPeerOperator := newAddPeerOperator(regionID, newPeer)
+		removePeerOperator := newRemovePeerOperator(regionID, leader)
+
+		return newBalanceOperator(region, addPeerOperator, removePeerOperator), nil
+	}
+
 	followerPeers, _ := getFollowerPeers(region, leader)
 	newLeader := rb.selectNewLeaderPeer(cluster, followerPeers)
 	if newLeader == nil {
@@ -254,11 +270,6 @@ func (rb *resourceBalancer) doLeaderBalance(cluster *clusterInfo, stores []*stor
 		return nil, nil
 	}
 
-	if !rb.checkScore(cluster, leader, newPeer) {
-		return nil, nil
-	}
-
-	regionID := region.GetId()
 	leaderTransferOperator := newTransferLeaderOperator(regionID, leader, newLeader, maxWaitCount)
 	addPeerOperator := newAddPeerOperator(regionID, newPeer)
 	removePeerOperator := newRemovePeerOperator(regionID, leader)
