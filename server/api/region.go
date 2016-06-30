@@ -24,6 +24,11 @@ import (
 )
 
 type regionInfo struct {
+	Region *metapb.Region `json:"region"`
+	Leader *metapb.Peer   `json:"leader"`
+}
+
+type regionsInfo struct {
 	Count   int              `json:"count"`
 	Regions []*metapb.Region `json:"regions"`
 }
@@ -59,8 +64,12 @@ func (h *regionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	region := cluster.GetRegionByID(regionID)
-	h.rd.JSON(w, http.StatusOK, region)
+	region, leader := cluster.GetLeaderRegion(regionID)
+	regionInfo := &regionInfo{
+		Region: region,
+		Leader: leader,
+	}
+	h.rd.JSON(w, http.StatusOK, regionInfo)
 }
 
 type regionsHandler struct {
@@ -87,7 +96,7 @@ func (h *regionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	regions := cluster.GetRegions()
-	regionsInfo := &regionInfo{
+	regionsInfo := &regionsInfo{
 		Count:   len(regions),
 		Regions: regions,
 	}

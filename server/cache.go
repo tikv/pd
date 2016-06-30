@@ -188,17 +188,23 @@ func (r *regionsInfo) getRegion(regionKey []byte) *metapb.Region {
 	return nil
 }
 
-// getRegionByID gets the region by regionID, returns nil if not found.
-func (r *regionsInfo) getRegionByID(regionID uint64) *metapb.Region {
+// getLeaderRegion gets the region and leader peer by regionID.
+func (r *regionsInfo) getLeaderRegion(regionID uint64) (*metapb.Region, *metapb.Peer) {
 	r.RLock()
 	defer r.RUnlock()
 
 	region, ok := r.regions[regionID]
-	if ok {
-		return cloneRegion(region)
+	if !ok {
+		return nil, nil
 	}
 
-	return nil
+	retRegion := cloneRegion(region)
+	leaderStoreID, ok := r.leaders.regionStores[regionID]
+	if ok {
+		return retRegion, leaderPeer(retRegion, leaderStoreID)
+	}
+
+	return retRegion, nil
 }
 
 // getRegions gets all the regions, returns nil if not found.
