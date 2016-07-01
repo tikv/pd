@@ -72,14 +72,14 @@ func (rb *resourceBalancer) filterToStore(store *storeInfo, args ...interface{})
 // and lower score region will be balance to store. The score range is [0,100].
 // TODO: we should adjust the weight of used ratio and leader score in futher,
 // now it is a little naive.
-func (rb *resourceBalancer) score(store *storeInfo, regionCount int) int {
+func (rb *resourceBalancer) score(store *storeInfo, leaderCount int, regionCount int) int {
 	usedRatioScore := store.usedRatioScore()
-	leaderScore := store.leaderScore(regionCount)
+	leaderScore := store.leaderScore(leaderCount, regionCount)
 	return int(float64(usedRatioScore)*0.6 + float64(leaderScore)*0.4)
 }
 
 // checkScore checks whether the new store score and old store score are valid.
-func (rb *resourceBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Peer, newPeer *metapb.Peer) bool {
+func (rb *resourceBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Peer, newPeer *metapb.Peer, isLeaderPeer bool) bool {
 	regionCount := cluster.regions.regionCount()
 	oldStore := cluster.getStore(oldPeer.GetStoreId())
 	newStore := cluster.getStore(newPeer.GetStoreId())
@@ -88,13 +88,20 @@ func (rb *resourceBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Pee
 		return false
 	}
 
-	oldStoreScore := rb.score(oldStore, regionCount)
-	newStoreScore := rb.score(newStore, regionCount)
+	// We should check the diff score of pre-balance `from store` and post balance `to store`.
+	// If isLeaderPeer is true, we should calculate the `to store` score with added leader region count.
+	var oldStoreScore, newStoreScore int
+	oldStoreScore = rb.score(oldStore, oldStore.stats.LeaderRegionCount, regionCount)
+	if isLeaderPeer {
+		newStoreScore = rb.score(newStore, newStore.stats.LeaderRegionCount+1, regionCount)
+	} else {
+		newStoreScore = rb.score(newStore, newStore.stats.LeaderRegionCount, regionCount)
+	}
 
 	// If the diff score is in defaultScoreFraction range, then we will do nothing.
 	diffScore := oldStoreScore - newStoreScore
 	if diffScore <= int(float64(oldStoreScore)*rb.cfg.MaxDiffScoreFraction) {
-		log.Debugf("check score failed - diff score is too small - old peer: %v, new peer: %v, old store score: %d, new store score :%d, diif score: %d",
+		log.Debugf("check score failed - diff score is too small - old peer: %v, new peer: %v, old store score: %d, new store score: %d, diif score: %d",
 			oldPeer, newPeer, oldStoreScore, newStoreScore, diffScore)
 		return false
 	}
@@ -116,7 +123,7 @@ func (rb *resourceBalancer) selectFromStore(stores []*storeInfo, regionCount int
 			}
 		}
 
-		currScore := rb.score(store, regionCount)
+		currScore := rb.score(store, store.stats.LeaderRegionCount, regionCount)
 		if resultStore == nil {
 			resultStore = store
 			score = currScore
@@ -150,7 +157,7 @@ func (rb *resourceBalancer) selectToStore(stores []*storeInfo, excluded map[uint
 			}
 		}
 
-		currScore := rb.score(store, regionCount)
+		currScore := rb.score(store, store.stats.LeaderRegionCount, regionCount)
 		if resultStore == nil {
 			resultStore = store
 			score = currScore
@@ -247,10 +254,6 @@ func (rb *resourceBalancer) selectRemovePeer(cluster *clusterInfo, peers map[uin
 }
 
 func (rb *resourceBalancer) doLeaderBalance(cluster *clusterInfo, stores []*storeInfo, region *metapb.Region, leader *metapb.Peer, newPeer *metapb.Peer) (*balanceOperator, error) {
-	if !rb.checkScore(cluster, leader, newPeer) {
-		return nil, nil
-	}
-
 	regionID := region.GetId()
 
 	// If cluster max peer count config is 1, we cannot do leader transfer,
@@ -259,8 +262,14 @@ func (rb *resourceBalancer) doLeaderBalance(cluster *clusterInfo, stores []*stor
 	if meta.GetMaxPeerCount() == 1 {
 		addPeerOperator := newAddPeerOperator(regionID, newPeer)
 		removePeerOperator := newRemovePeerOperator(regionID, leader)
-
+		if !rb.checkScore(cluster, leader, newPeer, true) {
+			return nil, nil
+		}
 		return newBalanceOperator(region, addPeerOperator, removePeerOperator), nil
+	}
+
+	if !rb.checkScore(cluster, leader, newPeer, false) {
+		return nil, nil
 	}
 
 	followerPeers, _ := getFollowerPeers(region, leader)
@@ -278,7 +287,7 @@ func (rb *resourceBalancer) doLeaderBalance(cluster *clusterInfo, stores []*stor
 }
 
 func (rb *resourceBalancer) doFollowerBalance(cluster *clusterInfo, stores []*storeInfo, region *metapb.Region, follower *metapb.Peer, newPeer *metapb.Peer) (*balanceOperator, error) {
-	if !rb.checkScore(cluster, follower, newPeer) {
+	if !rb.checkScore(cluster, follower, newPeer, false) {
 		return nil, nil
 	}
 

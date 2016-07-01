@@ -283,19 +283,6 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
 
-	// If the old store and new store diff score is not big enough, we will do nothing.
-	s.updateStore(c, clusterInfo, 1, 100, 10, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 21, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 20, 0, 0)
-
-	testCfg.MinCapacityUsedRatio = 0.4
-	testCfg.MaxCapacityUsedRatio = 0.7
-	cb = newResourceBalancer(testCfg)
-	bop, err = cb.Balance(clusterInfo)
-	c.Assert(err, IsNil)
-	c.Assert(bop, IsNil)
-
 	// If the store to be balanced without leader region, but we can find store to add new peer,
 	// we should do follower balance.
 	s.updateStore(c, clusterInfo, 1, 100, 99, 0, 0)
@@ -317,19 +304,6 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	newOp2 := bop.Ops[1].(*changePeerOperator)
 	c.Assert(newOp2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(newOp2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(3))
-
-	// If the old store and new store diff score is not big enough, we will do nothing.
-	s.updateStore(c, clusterInfo, 1, 100, 1, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 11, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 10, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 20, 0, 0)
-
-	testCfg.MinCapacityUsedRatio = 0.4
-	testCfg.MaxCapacityUsedRatio = 0.7
-	cb = newResourceBalancer(testCfg)
-	bop, err = cb.Balance(clusterInfo)
-	c.Assert(err, IsNil)
-	c.Assert(bop, IsNil)
 
 	// If cluster max peer count config is 1, we can only add peer and remove leader peer.
 	s.updateStore(c, clusterInfo, 1, 100, 60, 0, 0)
@@ -369,6 +343,19 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	newOp2 = bop.Ops[1].(*changePeerOperator)
 	c.Assert(newOp2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(newOp2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(1))
+
+	// If the diff score is too small, we should do nothing.
+	s.updateStore(c, clusterInfo, 1, 100, 60, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 59, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 20, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 10, 0, 0)
+
+	testCfg.MinCapacityUsedRatio = 0.3
+	testCfg.MaxCapacityUsedRatio = 0.9
+	cb = newResourceBalancer(testCfg)
+	bop, err = cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop, IsNil)
 
 	// Reset cluster config and region peers.
 	clusterInfo.setMeta(oldMeta)

@@ -234,5 +234,5 @@ func (bw *balancerWorker) doBalance() error {
 }
 
 func (bw *balancerWorker) storeScore(store *storeInfo, regionCount int) int {
-	return bw.balancer.score(store, regionCount)
+	return bw.balancer.score(store, store.stats.LeaderRegionCount, regionCount)
 }
