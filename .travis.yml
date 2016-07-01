@@ -5,10 +5,11 @@ go:
   - 1.6
 
 before_script:
-  - git clone https://github.com/coreos/etcd.git $GOPATH/src/github.com/coreos/etcd
-  - cd $GOPATH/src/github.com/coreos/etcd
-  - ./build
-  - ./bin/etcd &
+  - cd $GOPATH
+  - curl -L https://github.com/coreos/etcd/releases/download/v3.0.0/etcd-v3.0.0-linux-amd64.tar.gz -o etcd-v3.0.0-linux-amd64.tar.gz
+  - tar xzvf etcd-v3.0.0-linux-amd64.tar.gz
+  - cd etcd-v3.0.0-linux-amd64
+  - ./etcd &
   - sleep 3s
   - cd $TRAVIS_BUILD_DIR
 
