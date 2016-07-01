@@ -64,7 +64,7 @@ func (h *regionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	region, leader := cluster.GetLeaderRegion(regionID)
+	region, leader := cluster.GetRegionAndLeader(regionID)
 	regionInfo := &regionInfo{
 		Region: region,
 		Leader: leader,

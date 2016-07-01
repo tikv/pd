@@ -188,8 +188,8 @@ func (r *regionsInfo) getRegion(regionKey []byte) *metapb.Region {
 	return nil
 }
 
-// getLeaderRegion gets the region and leader peer by regionID.
-func (r *regionsInfo) getLeaderRegion(regionID uint64) (*metapb.Region, *metapb.Peer) {
+// getRegionAndLeader gets the region and leader peer by regionID.
+func (r *regionsInfo) getRegionAndLeader(regionID uint64) (*metapb.Region, *metapb.Peer) {
 	r.RLock()
 	defer r.RUnlock()
 

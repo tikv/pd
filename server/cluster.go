@@ -332,9 +332,9 @@ func (c *RaftCluster) getRegion(regionKey []byte) (*metapb.Region, error) {
 	return c.cachedCluster.regions.getRegion(regionKey), nil
 }
 
-// GetLeaderRegion gets region and leader peer by regionID from cluster.
-func (c *RaftCluster) GetLeaderRegion(regionID uint64) (*metapb.Region, *metapb.Peer) {
-	return c.cachedCluster.regions.getLeaderRegion(regionID)
+// GetRegionAndLeader gets region and leader peer by regionID from cluster.
+func (c *RaftCluster) GetRegionAndLeader(regionID uint64) (*metapb.Region, *metapb.Peer) {
+	return c.cachedCluster.regions.getRegionAndLeader(regionID)
 }
 
 // GetRegions gets regions from cluster.
