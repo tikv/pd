@@ -547,15 +547,6 @@ func (s *storeInfo) usedRatioScore() int {
 	return int(s.usedRatio() * 100)
 }
 
-// leaderScore is the leader peer count score of store, the score range is [0,100].
-func (s *storeInfo) leaderScore(leaderCount int, regionCount int) int {
-	if regionCount == 0 {
-		return 0
-	}
-
-	return leaderCount * 100 / regionCount
-}
-
 // clusterInfo is cluster cache info.
 type clusterInfo struct {
 	sync.RWMutex

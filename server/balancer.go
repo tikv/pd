@@ -30,6 +30,15 @@ var (
 	_ Balancer = &resourceBalancer{}
 )
 
+// leaderScore is the leader peer count score of store, the score range is [0,100].
+func leaderScore(leaderCount int, regionCount int) int {
+	if regionCount == 0 {
+		return 0
+	}
+
+	return leaderCount * 100 / regionCount
+}
+
 type resourceBalancer struct {
 	filters []Filter
 
@@ -74,7 +83,7 @@ func (rb *resourceBalancer) filterToStore(store *storeInfo, args ...interface{})
 // now it is a little naive.
 func (rb *resourceBalancer) score(store *storeInfo, leaderCount int, regionCount int) int {
 	usedRatioScore := store.usedRatioScore()
-	leaderScore := store.leaderScore(leaderCount, regionCount)
+	leaderScore := leaderScore(leaderCount, regionCount)
 	return int(float64(usedRatioScore)*0.6 + float64(leaderScore)*0.4)
 }
 
