@@ -218,11 +218,6 @@
 		{
 			"ImportPath": "google.golang.org/grpc/transport",
 			"Rev": "aecdccadd24d03e42d00ec82f6774a428fc63c30"
-		},
-		{
-			"ImportPath": "gopkg.in/alexcesaro/statsd.v2",
-			"Comment": "v2.0.0",
-			"Rev": "7fea3f0d2fab1ad973e641e51dba45443a311a90"
 		}
 	]
 }
