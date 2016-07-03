@@ -7,9 +7,18 @@
 	],
 	"Deps": [
 		{
+			"ImportPath": "bitbucket.org/ww/goautoneg",
+			"Comment": "null-5",
+			"Rev": "'75cd24fc2f2c2a2088577d12123ddee5f54e0675'"
+		},
+		{
 			"ImportPath": "github.com/BurntSushi/toml",
 			"Comment": "v0.2.0-9-gf0aeabc",
 			"Rev": "f0aeabca5a127c4078abb8c8d64298b147264b55"
+		},
+		{
+			"ImportPath": "github.com/beorn7/perks/quantile",
+			"Rev": "3ac7bf7a47d159a033b107610db8a1b6575507a4"
 		},
 		{
 			"ImportPath": "github.com/cloudfoundry-incubator/candiedyaml",
@@ -82,6 +91,11 @@
 			"Rev": "b2c7a7da5b2995941048f60146e67702a292e468"
 		},
 		{
+			"ImportPath": "github.com/matttproud/golang_protobuf_extensions/pbutil",
+			"Comment": "v1.0.0-2-gc12348c",
+			"Rev": "c12348ce28de40eed0136aa2b644d0ee0650e56c"
+		},
+		{
 			"ImportPath": "github.com/ngaut/deadline",
 			"Rev": "fae8f9dfd7048de16575b9d4c255278e38c28a4f"
 		},
@@ -141,6 +155,23 @@
 			"ImportPath": "github.com/prometheus/client_golang/prometheus",
 			"Comment": "0.7.0-85-g9f1ed1e",
 			"Rev": "9f1ed1ed4a5f754c9b626e5cf8ec1ea7d622e017"
+		},
+		{
+			"ImportPath": "github.com/prometheus/client_model/go",
+			"Comment": "model-0.0.2-12-gfa8ad6f",
+			"Rev": "fa8ad6fec33561be4280a8f0514318c79d7f6cb6"
+		},
+		{
+			"ImportPath": "github.com/prometheus/common/expfmt",
+			"Rev": "ffe929a3f4c4faeaa10f2b9535c2b1be3ad15650"
+		},
+		{
+			"ImportPath": "github.com/prometheus/common/model",
+			"Rev": "ffe929a3f4c4faeaa10f2b9535c2b1be3ad15650"
+		},
+		{
+			"ImportPath": "github.com/prometheus/procfs",
+			"Rev": "abf152e5f3e97f2fafac028d2cc06c1feb87ffa5"
 		},
 		{
 			"ImportPath": "github.com/twinj/uuid",
