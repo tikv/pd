@@ -13,4 +13,4 @@ before_script:
   - sleep 3s
   - cd $TRAVIS_BUILD_DIR
 
-script: make test
+script: make check && make test
