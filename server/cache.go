@@ -26,7 +26,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/raftpb"
-	statsd "gopkg.in/alexcesaro/statsd.v2"
 )
 
 const (
@@ -572,8 +571,6 @@ type clusterInfo struct {
 	clusterRoot string
 
 	idAlloc IDAllocator
-
-	stats *statsd.Client
 }
 
 func newClusterInfo(clusterRoot string) *clusterInfo {
@@ -582,10 +579,6 @@ func newClusterInfo(clusterRoot string) *clusterInfo {
 		stores:      make(map[uint64]*storeInfo),
 		regions:     newRegionsInfo(),
 	}
-
-	// create a Mute stats, can' fail.
-	stats, _ := statsd.New(statsd.Mute(true))
-	cluster.stats = stats
 
 	return cluster
 }

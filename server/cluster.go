@@ -75,7 +75,6 @@ func (c *RaftCluster) start(meta metapb.Cluster) error {
 
 	c.cachedCluster = newClusterInfo(c.clusterRoot)
 	c.cachedCluster.idAlloc = c.s.idAlloc
-	c.cachedCluster.stats = c.s.stats
 
 	c.cachedCluster.setMeta(&meta)
 

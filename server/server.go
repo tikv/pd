@@ -25,7 +25,6 @@ import (
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"golang.org/x/net/context"
-	statsd "gopkg.in/alexcesaro/statsd.v2"
 )
 
 const (
@@ -68,8 +67,6 @@ type Server struct {
 	cluster     *RaftCluster
 
 	msgID uint64
-
-	stats *statsd.Client
 }
 
 // NewServer creates the pd server with given configuration.
@@ -97,11 +94,6 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg.AdvertiseAddr = l.Addr().String()
 	}
 
-	stats, err := initStatsClient(cfg)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
 	s := &Server{
 		cfg:           cfg,
 		listener:      l,
@@ -110,7 +102,6 @@ func NewServer(cfg *Config) (*Server, error) {
 		conns:         make(map[*conn]struct{}),
 		closed:        0,
 		rootPath:      path.Join(cfg.RootPath, strconv.FormatUint(cfg.ClusterID, 10)),
-		stats:         stats,
 	}
 
 	s.idAlloc = &idAllocator{s: s}
@@ -122,24 +113,6 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	return s, nil
-}
-
-func initStatsClient(cfg *Config) (*statsd.Client, error) {
-	var statsOpts []statsd.Option
-	if len(cfg.MetricAddr) > 0 {
-		statsOpts = append(statsOpts, statsd.Address(cfg.MetricAddr))
-	} else {
-		statsOpts = append(statsOpts, statsd.Mute(true))
-	}
-
-	statsOpts = append(statsOpts, statsd.Prefix(cfg.MetricPrefix))
-
-	stats, err := statsd.New(statsOpts...)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return stats, nil
 }
 
 // Close closes the server.
@@ -159,10 +132,6 @@ func (s *Server) Close() {
 
 	if s.client != nil {
 		s.client.Close()
-	}
-
-	if s.stats != nil {
-		s.stats.Close()
 	}
 
 	s.wg.Wait()

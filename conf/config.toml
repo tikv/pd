@@ -12,7 +12,6 @@ tso-save-interval = 2000
 cluster-id = 0
 max-peer-count = 3
 metric-addr = ""
-metric-prefix = "pd"
 
 [balance]
 

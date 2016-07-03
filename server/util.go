@@ -14,6 +14,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/binary"
 	"time"
 
@@ -107,4 +108,26 @@ func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	}
 
 	return resp, errors.Trace(err)
+}
+
+// convertName converts variable name to a linux type name.
+// Like `AbcDef -> abc_def`.
+func convertName(str string) string {
+	strBytes := []byte(str)
+
+	var name []byte
+	for i, r := range strBytes {
+		if r >= 'A' && r <= 'Z' {
+			if i > 0 {
+				name = append(name, '_')
+			}
+
+			name = append(name, bytes.ToLower([]byte{r})...)
+			continue
+		}
+
+		name = append(name, r)
+	}
+
+	return string(name)
 }

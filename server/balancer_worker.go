@@ -191,8 +191,6 @@ func (bw *balancerWorker) allowBalance() bool {
 }
 
 func (bw *balancerWorker) doBalance() error {
-	stats := bw.cluster.stats
-
 	balanceCount := uint64(0)
 	for i := uint64(0); i < bw.cfg.MaxBalanceRetryPerLoop; i++ {
 		if balanceCount >= bw.cfg.MaxBalanceCountPerLoop {
@@ -203,27 +201,26 @@ func (bw *balancerWorker) doBalance() error {
 			return nil
 		}
 
-		stats.Increment("balance.select")
 		// TODO: support select balance count in balancer.
 		balanceOperator, err := bw.balancer.Balance(bw.cluster)
 		if err != nil {
-			stats.Increment("balance.select.fail")
+			balancerCounter.WithLabelValues("failed").Inc()
 			return errors.Trace(err)
 		}
 		if balanceOperator == nil {
-			stats.Increment("balance.select.none")
+			balancerCounter.WithLabelValues("none").Inc()
 			continue
 		}
 
 		regionID := balanceOperator.getRegionID()
 		if bw.addBalanceOperator(regionID, balanceOperator) {
 			bw.addRegionCache(regionID)
-			stats.Increment("balance.select.success")
+			balancerCounter.WithLabelValues("successed").Inc()
 			balanceCount++
 			continue
 		}
 
-		stats.Increment("balance.select.fail")
+		balancerCounter.WithLabelValues("total").Inc()
 
 		// Here mean the selected region has an operator already, we may retry to
 		// select another region for balance.

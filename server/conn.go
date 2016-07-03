@@ -16,6 +16,7 @@ package server
 import (
 	"bufio"
 	"net"
+	"time"
 
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
@@ -67,7 +68,6 @@ func (c *conn) run() {
 		c.s.connsLock.Unlock()
 	}()
 
-	stats := c.s.stats
 	for {
 		msg := &msgpb.Message{}
 		msgID, err := util.ReadMessage(c.rb, msg)
@@ -81,18 +81,20 @@ func (c *conn) run() {
 			return
 		}
 
+		start := time.Now()
 		request := msg.GetPdReq()
-		stats.Increment("handle_request")
-		ts := stats.NewTiming()
+		label := request.GetCmdType().String()
+
 		response, err := c.handleRequest(request)
 		if err != nil {
 			log.Errorf("handle request %s err %v", request, errors.ErrorStack(err))
 			response = newError(err)
-		} else {
-			stats.Increment("handle_request.success")
+			cmdFailedCounter.WithLabelValues(label).Inc()
+			cmdFailedDuration.WithLabelValues(label).Observe(time.Since(start).Seconds())
 		}
 
-		ts.Send("handle_request.cost")
+		cmdCounter.WithLabelValues(label).Inc()
+		cmdDuration.WithLabelValues(label).Observe(time.Since(start).Seconds())
 
 		if response == nil {
 			// we don't need to response, maybe error?

@@ -65,9 +65,6 @@ type Config struct {
 	// Remote metric address for StatsD.
 	MetricAddr string `toml:"metric-addr"`
 
-	// Metric prefix.
-	MetricPrefix string `toml:"metric-prefix"`
-
 	BalanceCfg *BalanceConfig `toml:"balance"`
 
 	// Only test can change it.
@@ -86,7 +83,6 @@ const (
 	defaultLeaderLease     = int64(3)
 	defaultTsoSaveInterval = int64(2000)
 	defaultMaxPeerCount    = uint64(3)
-	defaultMetricPrefix    = "pd"
 	defaultNextRetryDelay  = time.Second
 )
 
@@ -110,10 +106,6 @@ func (c *Config) adjust() {
 
 	if c.MaxPeerCount == 0 {
 		c.MaxPeerCount = defaultMaxPeerCount
-	}
-
-	if len(c.MetricPrefix) == 0 {
-		c.MetricPrefix = defaultMetricPrefix
 	}
 
 	if c.BalanceCfg == nil {
