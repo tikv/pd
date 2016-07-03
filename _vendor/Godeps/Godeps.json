@@ -73,6 +73,11 @@
 			"Rev": "9fa818a44c2bf1396a17f9d5a3c0f6dd39d2ff8e"
 		},
 		{
+			"ImportPath": "github.com/gorilla/websocket",
+			"Comment": "v1.0.0-12-ga687089",
+			"Rev": "a68708917c6a4f06314ab4e52493cc61359c9d42"
+		},
+		{
 			"ImportPath": "github.com/juju/errors",
 			"Rev": "b2c7a7da5b2995941048f60146e67702a292e468"
 		},
