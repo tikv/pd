@@ -138,6 +138,11 @@
 			"Rev": "538778d641c5f8db5f9467423dbd86403e1c4a0b"
 		},
 		{
+			"ImportPath": "github.com/prometheus/client_golang/prometheus",
+			"Comment": "0.7.0-85-g9f1ed1e",
+			"Rev": "9f1ed1ed4a5f754c9b626e5cf8ec1ea7d622e017"
+		},
+		{
 			"ImportPath": "github.com/twinj/uuid",
 			"Rev": "179b7737f0094c2a65b3daa098a8a4a8f049ea8e"
 		},
