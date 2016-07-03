@@ -201,6 +201,8 @@ func (bw *balancerWorker) doBalance() error {
 			return nil
 		}
 
+		balancerCounter.WithLabelValues("total").Inc()
+
 		// TODO: support select balance count in balancer.
 		balanceOperator, err := bw.balancer.Balance(bw.cluster)
 		if err != nil {
@@ -219,8 +221,6 @@ func (bw *balancerWorker) doBalance() error {
 			balanceCount++
 			continue
 		}
-
-		balancerCounter.WithLabelValues("total").Inc()
 
 		// Here mean the selected region has an operator already, we may retry to
 		// select another region for balance.

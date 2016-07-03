@@ -13,29 +13,16 @@
 
 package server
 
-import (
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/prometheus/client_golang/prometheus"
-)
-
-func cmdTypes() []string {
-	cmds := []string{}
-	for name := range pdpb.CommandType_value {
-		cmds = append(cmds, convertName(name))
-	}
-
-	return cmds
-}
+import "github.com/prometheus/client_golang/prometheus"
 
 var (
-	cmds       = cmdTypes()
 	cmdCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "cmd",
 			Name:      "cmds_total",
 			Help:      "Counter of cmds.",
-		}, cmds)
+		}, []string{"type"})
 
 	cmdFailedCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -43,7 +30,7 @@ var (
 			Subsystem: "cmd",
 			Name:      "cmds_failed_total",
 			Help:      "Counter of failed cmds.",
-		}, cmds)
+		}, []string{"type"})
 
 	cmdDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -52,7 +39,7 @@ var (
 			Name:      "handle_cmds_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled success cmds.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
-		}, cmds)
+		}, []string{"type"})
 
 	cmdFailedDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -61,15 +48,15 @@ var (
 			Name:      "handle_failed_cmds_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of failed handled cmds.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
-		}, cmds)
+		}, []string{"type"})
 
 	balancerCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "balancer",
-			Name:      "balancers_total",
+			Name:      "balancers_count",
 			Help:      "Counter of balancers.",
-		}, []string{"total", "successed", "failed", "none"})
+		}, []string{"result"})
 )
 
 func init() {

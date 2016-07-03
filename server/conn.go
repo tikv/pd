@@ -83,7 +83,7 @@ func (c *conn) run() {
 
 		start := time.Now()
 		request := msg.GetPdReq()
-		label := request.GetCmdType().String()
+		label := convertName(request.GetCmdType().String())
 
 		response, err := c.handleRequest(request)
 		if err != nil {

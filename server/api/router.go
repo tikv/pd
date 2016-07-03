@@ -18,6 +18,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/server"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/unrolled/render"
 )
 
@@ -35,6 +36,7 @@ func createRouter(svr *server.Server) *mux.Router {
 	router.Handle("/api/v1/events", newEventsHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/feed", newFeedHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/history/operators", newHistoryOperatorHandler(svr, rd)).Methods("GET")
+	router.Handle("/api/v1/metrics", prometheus.Handler()).Methods("GET")
 	router.Handle("/api/v1/store/{id}", newStoreHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/stores", newStoresHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/region/{id}", newRegionHandler(svr, rd)).Methods("GET")
