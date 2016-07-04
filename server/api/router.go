@@ -36,7 +36,6 @@ func createRouter(svr *server.Server) *mux.Router {
 	router.Handle("/api/v1/events", newEventsHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/feed", newFeedHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/history/operators", newHistoryOperatorHandler(svr, rd)).Methods("GET")
-	router.Handle("/api/v1/metrics", prometheus.Handler()).Methods("GET")
 	router.Handle("/api/v1/store/{id}", newStoreHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/stores", newStoresHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/region/{id}", newRegionHandler(svr, rd)).Methods("GET")
@@ -44,6 +43,7 @@ func createRouter(svr *server.Server) *mux.Router {
 	router.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")
 
 	router.Handle("/", newHomeHandler(rd)).Methods("GET")
+	router.Handle("/metrics", prometheus.Handler()).Methods("GET")
 	router.Handle("/ws", newWSHandler(svr))
 
 	router.PathPrefix("/").Handler(http.FileServer(http.Dir("templates/static/")))
