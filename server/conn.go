@@ -83,12 +83,17 @@ func (c *conn) run() {
 
 		start := time.Now()
 		request := msg.GetPdReq()
-		label := convertName(request.GetCmdType().String())
+		requestCmdName := request.GetCmdType().String()
+		label, ok := cmds[requestCmdName]
+		if !ok {
+			label = convertName(requestCmdName)
+		}
 
 		response, err := c.handleRequest(request)
 		if err != nil {
 			log.Errorf("handle request %s err %v", request, errors.ErrorStack(err))
 			response = newError(err)
+
 			cmdFailedCounter.WithLabelValues(label).Inc()
 			cmdFailedDuration.WithLabelValues(label).Observe(time.Since(start).Seconds())
 		}

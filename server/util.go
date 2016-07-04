@@ -110,26 +110,20 @@ func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 }
 
 // convertName converts variable name to a linux type name.
-// Like `AbcDef -> abc_def`, notice that we must make sure the return name is less than 64 bytes.
+// Like `AbcDef -> abc_def`.
 func convertName(str string) string {
-	var (
-		name [64]byte
-		idx  int
-	)
-
+	name := make([]byte, 0, 64)
 	for i := 0; i < len(str); i++ {
 		if str[i] >= 'A' && str[i] <= 'Z' {
 			if i > 0 {
-				name[idx] = '_'
-				idx++
+				name = append(name, '_')
 			}
 
-			name[idx] = str[i] + 'a' - 'A'
+			name = append(name, str[i]+'a'-'A')
 		} else {
-			name[idx] = str[i]
+			name = append(name, str[i])
 		}
-		idx++
 	}
 
-	return string(name[:idx])
+	return string(name)
 }
