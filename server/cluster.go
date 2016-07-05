@@ -71,8 +71,6 @@ func (c *RaftCluster) start(meta metapb.Cluster) error {
 		return nil
 	}
 
-	c.running = true
-
 	c.cachedCluster = newClusterInfo(c.clusterRoot)
 	c.cachedCluster.idAlloc = c.s.idAlloc
 
@@ -91,6 +89,8 @@ func (c *RaftCluster) start(meta metapb.Cluster) error {
 
 	c.balancerWorker = newBalancerWorker(c.cachedCluster, c.s.cfg.BalanceCfg)
 	c.balancerWorker.run()
+
+	c.running = true
 
 	return nil
 }
