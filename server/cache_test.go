@@ -94,8 +94,8 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 
 	// There is only one region now, directly use it for test.
 	regionKey := []byte("a")
-	region, err := cluster.getRegion(regionKey)
-	c.Assert(err, IsNil)
+	region, leaderPeer := cluster.getRegionAndLeader(regionKey)
+	c.Assert(leaderPeer, IsNil)
 	c.Assert(region.Peers, HasLen, 1)
 
 	cacheRegions := cluster.cachedCluster.regions
@@ -104,7 +104,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(cacheRegions.leaders.storeRegions, HasLen, 0)
 	c.Assert(cacheRegions.leaders.regionStores, HasLen, 0)
 
-	leaderPeer := region.GetPeers()[0]
+	leaderPeer = region.GetPeers()[0]
 	res := heartbeatRegion(c, conn, clusterID, 0, region, leaderPeer)
 	c.Assert(res.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(leaderPeer.GetId(), Not(Equals), res.GetPeer().GetId())
@@ -144,8 +144,8 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 
 	oldRegionID := region.GetId()
 	cacheRegion = cacheRegions.regions[oldRegionID]
-	region, err = cluster.getRegion(regionKey)
-	c.Assert(err, IsNil)
+	region, leader := cluster.getRegionAndLeader(regionKey)
+	c.Assert(leader, DeepEquals, leaderPeer)
 	c.Assert(region.GetPeers(), HasLen, 2)
 	c.Assert(cacheRegion, DeepEquals, region)
 
@@ -163,8 +163,8 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	res = heartbeatRegion(c, conn, clusterID, 0, region, newLeaderPeer)
 	c.Assert(res, IsNil)
 
-	region, err = cluster.getRegion(regionKey)
-	c.Assert(err, IsNil)
+	region, leader = cluster.getRegionAndLeader(regionKey)
+	c.Assert(leader, DeepEquals, newLeaderPeer)
 	c.Assert(region.GetPeers(), HasLen, 2)
 	c.Assert(cacheRegion, DeepEquals, region)
 
@@ -176,8 +176,8 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(cacheRegions.leaders.storeRegions[store2.GetId()], HasKey, region.GetId())
 	c.Assert(cacheRegions.leaders.regionStores[region.GetId()], Equals, store2.GetId())
 
-	region, err = cluster.getRegion(regionKey)
-	c.Assert(err, IsNil)
+	region, leader = cluster.getRegionAndLeader(regionKey)
+	c.Assert(leader, DeepEquals, newLeaderPeer)
 	c.Assert(cacheRegion, DeepEquals, region)
 
 	s.svr.cluster.stop()

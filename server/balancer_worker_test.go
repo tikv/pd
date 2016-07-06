@@ -39,8 +39,9 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	clusterInfo := s.ts.newClusterInfo(c)
 	c.Assert(clusterInfo, NotNil)
 
-	region := clusterInfo.regions.getRegion([]byte("a"))
+	region, leaderPeer := clusterInfo.regions.getRegionAndLeader([]byte("a"))
 	c.Assert(region.GetPeers(), HasLen, 1)
+	c.Assert(leaderPeer, NotNil)
 
 	s.balancerWorker = newBalancerWorker(clusterInfo, s.ts.cfg)
 
@@ -53,10 +54,6 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	// Now we have no region to do balance.
 	ret := s.balancerWorker.doBalance()
 	c.Assert(ret, IsNil)
-
-	// Get leader peer.
-	leaderPeer := region.GetPeers()[0]
-	c.Assert(leaderPeer, NotNil)
 
 	// Add two peers.
 	s.ts.addRegionPeer(c, clusterInfo, 4, region, leaderPeer)

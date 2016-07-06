@@ -144,14 +144,11 @@ func (c *conn) handleGetRegion(req *pdpb.Request) (*pdpb.Response, error) {
 	}
 
 	key := request.GetRegionKey()
-	region, err := cluster.getRegion(key)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
+	region, leader := cluster.getRegionAndLeader(key)
 	return &pdpb.Response{
 		GetRegion: &pdpb.GetRegionResponse{
 			Region: region,
+			Leader: leader,
 		},
 	}, nil
 }

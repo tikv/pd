@@ -170,25 +170,31 @@ func newRegionsInfo() *regionsInfo {
 	}
 }
 
-// getRegion gets the region by regionKey, returns nil if not found.
-func (r *regionsInfo) getRegion(regionKey []byte) *metapb.Region {
+// getRegionAndLeader gets the region and leader peer by regionKey.
+func (r *regionsInfo) getRegionAndLeader(regionKey []byte) (*metapb.Region, *metapb.Peer) {
 	r.RLock()
+	defer r.RUnlock()
+
 	region := r.innerGetRegion(regionKey)
-	r.RUnlock()
-
 	if region == nil {
-		return nil
+		return nil, nil
 	}
 
-	if keyInRegion(regionKey, region) {
-		return cloneRegion(region)
+	if !keyInRegion(regionKey, region) {
+		return nil, nil
 	}
 
-	return nil
+	regionID := region.GetId()
+	leaderStoreID, ok := r.leaders.regionStores[regionID]
+	if ok {
+		return cloneRegion(region), leaderPeer(region, leaderStoreID)
+	}
+
+	return cloneRegion(region), nil
 }
 
-// getRegionAndLeader gets the region and leader peer by regionID.
-func (r *regionsInfo) getRegionAndLeader(regionID uint64) (*metapb.Region, *metapb.Peer) {
+// getRegionAndLeaderByID gets the region and leader peer by regionID.
+func (r *regionsInfo) getRegionAndLeaderByID(regionID uint64) (*metapb.Region, *metapb.Peer) {
 	r.RLock()
 	defer r.RUnlock()
 
@@ -197,13 +203,12 @@ func (r *regionsInfo) getRegionAndLeader(regionID uint64) (*metapb.Region, *meta
 		return nil, nil
 	}
 
-	retRegion := cloneRegion(region)
 	leaderStoreID, ok := r.leaders.regionStores[regionID]
 	if ok {
-		return retRegion, leaderPeer(retRegion, leaderStoreID)
+		return cloneRegion(region), leaderPeer(region, leaderStoreID)
 	}
 
-	return retRegion, nil
+	return cloneRegion(region), nil
 }
 
 // getRegions gets all the regions, returns nil if not found.

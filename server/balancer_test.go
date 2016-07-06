@@ -123,7 +123,7 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 	clusterInfo := s.newClusterInfo(c)
 	c.Assert(clusterInfo, NotNil)
 
-	region := clusterInfo.regions.getRegion([]byte("a"))
+	region, _ := clusterInfo.regions.getRegionAndLeader([]byte("a"))
 	c.Assert(region.GetPeers(), HasLen, 1)
 
 	// The store id will be 1,2,3,4.
@@ -170,7 +170,7 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	clusterInfo := s.newClusterInfo(c)
 	c.Assert(clusterInfo, NotNil)
 
-	region := clusterInfo.regions.getRegion([]byte("a"))
+	region, _ := clusterInfo.regions.getRegionAndLeader([]byte("a"))
 	c.Assert(region.GetPeers(), HasLen, 1)
 
 	// The store id will be 1,2,3,4.
