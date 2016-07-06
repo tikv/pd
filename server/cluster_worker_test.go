@@ -214,7 +214,7 @@ func (s *testClusterWorkerSuite) checkRegionPeerCount(c *C, regionKey []byte, ex
 	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
-	region, _ := cluster.getRegionAndLeader(regionKey)
+	region, _ := cluster.getRegion(regionKey)
 	c.Assert(region.Peers, HasLen, expectCount)
 	return region
 }
@@ -332,7 +332,7 @@ func (s *testClusterWorkerSuite) reportSplit(c *C, conn net.Conn, msgID uint64, 
 }
 
 func mustGetRegion(c *C, cluster *RaftCluster, key []byte, expect *metapb.Region) {
-	r, _ := cluster.getRegionAndLeader(key)
+	r, _ := cluster.getRegion(key)
 	c.Assert(r, DeepEquals, expect)
 }
 
@@ -366,7 +366,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	defer conn.Close()
 
 	// split 1 to 1: [nil, m) 2: [m, nil), sync 1 first
-	r1, _ := cluster.getRegionAndLeader([]byte("a"))
+	r1, _ := cluster.getRegion([]byte("a"))
 	c.Assert(err, IsNil)
 	checkSearchRegions(c, cluster, []byte{})
 
@@ -415,7 +415,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
-	r1, _ := cluster.getRegionAndLeader([]byte("a"))
+	r1, _ := cluster.getRegion([]byte("a"))
 	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 	conn, err := net.Dial("tcp", leaderPd.GetAddr())
 	c.Assert(err, IsNil)
@@ -456,7 +456,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 	// There is only one region now, directly use it for test.
 	regionKey := []byte("a")
-	region, _ := cluster.getRegionAndLeader(regionKey)
+	region, _ := cluster.getRegion(regionKey)
 	c.Assert(region.Peers, HasLen, 1)
 
 	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
@@ -522,7 +522,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	c.Assert(err, IsNil)
 	defer conn.Close()
 
-	r1, _ := cluster.getRegionAndLeader([]byte("a"))
+	r1, _ := cluster.getRegion([]byte("a"))
 	leaderPeer1 := s.chooseRegionLeader(c, r1)
 
 	// First sync, pd-server will return a AddPeer.

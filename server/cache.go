@@ -170,8 +170,8 @@ func newRegionsInfo() *regionsInfo {
 	}
 }
 
-// getRegionAndLeader gets the region and leader peer by regionKey.
-func (r *regionsInfo) getRegionAndLeader(regionKey []byte) (*metapb.Region, *metapb.Peer) {
+// getRegion gets the region and leader peer by regionKey.
+func (r *regionsInfo) getRegion(regionKey []byte) (*metapb.Region, *metapb.Peer) {
 	r.RLock()
 	defer r.RUnlock()
 
@@ -193,8 +193,8 @@ func (r *regionsInfo) getRegionAndLeader(regionKey []byte) (*metapb.Region, *met
 	return cloneRegion(region), nil
 }
 
-// getRegionAndLeaderByID gets the region and leader peer by regionID.
-func (r *regionsInfo) getRegionAndLeaderByID(regionID uint64) (*metapb.Region, *metapb.Peer) {
+// getRegionByID gets the region and leader peer by regionID.
+func (r *regionsInfo) getRegionByID(regionID uint64) (*metapb.Region, *metapb.Peer) {
 	r.RLock()
 	defer r.RUnlock()
 

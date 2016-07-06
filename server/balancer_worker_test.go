@@ -39,9 +39,9 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	clusterInfo := s.ts.newClusterInfo(c)
 	c.Assert(clusterInfo, NotNil)
 
-	region, leaderPeer := clusterInfo.regions.getRegionAndLeader([]byte("a"))
+	region, leader := clusterInfo.regions.getRegion([]byte("a"))
 	c.Assert(region.GetPeers(), HasLen, 1)
-	c.Assert(leaderPeer, NotNil)
+	c.Assert(leader, NotNil)
 
 	s.balancerWorker = newBalancerWorker(clusterInfo, s.ts.cfg)
 
@@ -56,8 +56,8 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	c.Assert(ret, IsNil)
 
 	// Add two peers.
-	s.ts.addRegionPeer(c, clusterInfo, 4, region, leaderPeer)
-	s.ts.addRegionPeer(c, clusterInfo, 3, region, leaderPeer)
+	s.ts.addRegionPeer(c, clusterInfo, 4, region, leader)
+	s.ts.addRegionPeer(c, clusterInfo, 3, region, leader)
 
 	// Now the region is (1,3,4), the balance operators should be
 	// 1) leader transfer: 1 -> 4
@@ -80,19 +80,19 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	op1.MaxWaitCount = 2
 
 	ctx := newOpContext(nil, nil)
-	ok, res, err := op1.Do(ctx, region, leaderPeer)
+	ok, res, err := op1.Do(ctx, region, leader)
 	c.Assert(err, IsNil)
 	c.Assert(ok, IsFalse)
 	c.Assert(res.GetTransferLeader().GetPeer().GetStoreId(), Equals, uint64(4))
 	c.Assert(op1.Count, Equals, 1)
 
-	ok, res, err = op1.Do(ctx, region, leaderPeer)
+	ok, res, err = op1.Do(ctx, region, leader)
 	c.Assert(err, IsNil)
 	c.Assert(ok, IsFalse)
 	c.Assert(res, IsNil)
 	c.Assert(op1.Count, Equals, 2)
 
-	ok, res, err = op1.Do(ctx, region, leaderPeer)
+	ok, res, err = op1.Do(ctx, region, leader)
 	c.Assert(err, NotNil)
 	c.Assert(ok, IsFalse)
 	c.Assert(res, IsNil)

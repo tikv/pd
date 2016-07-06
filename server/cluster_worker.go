@@ -84,7 +84,7 @@ func (c *RaftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metap
 func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
 	reqRegion := request.GetRegion()
 	startKey := reqRegion.GetStartKey()
-	region, _ := c.getRegionAndLeader(startKey)
+	region, _ := c.getRegion(startKey)
 
 	// If the request epoch is less than current region epoch, then returns an error.
 	reqRegionEpoch := reqRegion.GetRegionEpoch()
