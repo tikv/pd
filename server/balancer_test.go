@@ -255,7 +255,29 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	c.Assert(op3.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op3.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(1))
 
-	// If the sending snapshot count of store is greater than maxSnapSendingCount,
+	// If the sending snapshot count of `from store` is greater than MaxSnapSendingCount,
+	// we will do nothing.
+	s.updateStore(c, clusterInfo, 1, 100, 10, 10, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 80, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
+
+	testCfg.MinCapacityUsedRatio = 0.3
+	testCfg.MaxCapacityUsedRatio = 0.9
+	cb = newResourceBalancer(testCfg)
+	bop, err = cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop, NotNil)
+
+	newOp1 := bop.Ops[0].(*changePeerOperator)
+	c.Assert(newOp1.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(newOp1.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
+
+	newOp2 := bop.Ops[1].(*changePeerOperator)
+	c.Assert(newOp2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(newOp2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(3))
+
+	// If the receiving snapshot count of `to store` is greater than MaxReceivingSnapCount,
 	// we will do nothing.
 	s.updateStore(c, clusterInfo, 1, 100, 10, 10, 0)
 	s.updateStore(c, clusterInfo, 2, 100, 80, 0, 10)
@@ -297,11 +319,11 @@ func (s *testBalancerSuite) TestResourceBalancer(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(bop, NotNil)
 
-	newOp1 := bop.Ops[0].(*changePeerOperator)
+	newOp1 = bop.Ops[0].(*changePeerOperator)
 	c.Assert(newOp1.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(newOp1.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 
-	newOp2 := bop.Ops[1].(*changePeerOperator)
+	newOp2 = bop.Ops[1].(*changePeerOperator)
 	c.Assert(newOp2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(newOp2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(3))
 

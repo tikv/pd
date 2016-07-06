@@ -27,12 +27,6 @@ import (
 
 var baseID uint64
 
-const (
-	// TODO: we can make this as a config flag.
-	// maxWaitCount is the heartbeat count when we check whether the operator is successful.
-	maxWaitCount = 3
-)
-
 type callback func(op Operator)
 
 type opContext struct {

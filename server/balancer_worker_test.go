@@ -72,7 +72,7 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	c.Assert(bop.Ops, HasLen, 3)
 
 	op1 := bop.Ops[0].(*transferLeaderOperator)
-	c.Assert(op1.MaxWaitCount, Equals, maxWaitCount)
+	c.Assert(op1.MaxWaitCount, Equals, int(defaultMaxTransferWaitCount))
 	c.Assert(op1.OldLeader.GetStoreId(), Equals, uint64(1))
 	c.Assert(op1.NewLeader.GetStoreId(), Equals, uint64(4))
 

@@ -42,6 +42,7 @@ var (
 	clusterID              = flag.Uint64("cluster-id", 0, "cluster ID")
 	maxPeerCount           = flag.Uint64("max-peer-count", 3, "max peer count for the region")
 	metricAddr             = flag.String("metric-addr", "", "metric address")
+	maxLeaderCount         = flag.Uint64("max-leader-count", 10, "the max leader region count for choosing store in balance")
 	minCapUsedRatio        = flag.Float64("min-capacity-used-ratio", 0.4, "min capacity used ratio for choosing store in balance")
 	maxCapUsedRatio        = flag.Float64("max-capacity-used-ratio", 0.9, "max capacity used ratio for choosing store in balance")
 	maxSendSnapCount       = flag.Uint64("max-sending-snap-count", 3, "max sending snapshot count for choosing store in balance")
@@ -51,6 +52,7 @@ var (
 	maxBalanceCount        = flag.Uint64("max-balance-count", 16, "the max region count to balance at the same time")
 	maxBalanceRetryPerLoop = flag.Uint64("max-balance-retry-per-loop", 10, "the max retry count to balance in a balance schedule")
 	maxBalanceCountPerLoop = flag.Uint64("max-balance-count-per-loop", 3, "the max region count to balance in a balance schedule")
+	maxTransferWaitCount   = flag.Uint64("max-transfer-wait-count", 3, "the max heartbeat count to wait leader transfer to finish")
 )
 
 func setCmdArgs(cfg *server.Config) {
@@ -70,6 +72,7 @@ func setCmdArgs(cfg *server.Config) {
 	setUintFlagConfig(&cfg.ClusterID, "cluster-id", *clusterID)
 	setUintFlagConfig(&cfg.MaxPeerCount, "max-peer-count", *maxPeerCount)
 	setStringFlagConfig(&cfg.MetricAddr, "metric-addr", *metricAddr)
+	setUintFlagConfig(&cfg.BalanceCfg.MaxLeaderCount, "max-leader-count", *maxLeaderCount)
 	setFloatFlagConfig(&cfg.BalanceCfg.MinCapacityUsedRatio, "min-capacity-used-ratio", *minCapUsedRatio)
 	setFloatFlagConfig(&cfg.BalanceCfg.MaxCapacityUsedRatio, "max-capacity-used-ratio", *maxCapUsedRatio)
 	setUintFlagConfig(&cfg.BalanceCfg.MaxSendingSnapCount, "max-sending-snap-count", *maxSendSnapCount)
@@ -79,6 +82,7 @@ func setCmdArgs(cfg *server.Config) {
 	setUintFlagConfig(&cfg.BalanceCfg.MaxBalanceCount, "max-balance-count", *maxBalanceCount)
 	setUintFlagConfig(&cfg.BalanceCfg.MaxBalanceRetryPerLoop, "max-balance-retry-per-loop", *maxBalanceRetryPerLoop)
 	setUintFlagConfig(&cfg.BalanceCfg.MaxBalanceCountPerLoop, "max-balance-count-per-loop", *maxBalanceCountPerLoop)
+	setUintFlagConfig(&cfg.BalanceCfg.MaxTransferWaitCount, "max-transfer-wait-count", *maxTransferWaitCount)
 }
 
 func main() {
