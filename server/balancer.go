@@ -383,6 +383,10 @@ func (rb *resourceBalancer) doLeaderTransfer(cluster *clusterInfo) (*balanceOper
 		return nil, nil
 	}
 
+	if !rb.checkScore(cluster, leader, newLeader, true) {
+		return nil, nil
+	}
+
 	regionID := region.GetId()
 	leaderTransferOperator := newTransferLeaderOperator(regionID, leader, newLeader, int(rb.cfg.MaxTransferWaitCount))
 	return newBalanceOperator(region, leaderTransferOperator), nil
@@ -394,7 +398,7 @@ func (rb *resourceBalancer) doLeaderTransfer(cluster *clusterInfo) (*balanceOper
 // 1 do leader balance.
 // 2 do follower balance.
 // doLeaderTransfer:
-// 1 do leader transfer
+// 1 do leader transfer.
 func (rb *resourceBalancer) Balance(cluster *clusterInfo) (*balanceOperator, error) {
 	op, err := rb.doBalance(cluster)
 	if err != nil {
