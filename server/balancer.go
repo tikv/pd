@@ -40,25 +40,27 @@ func leaderScore(leaderCount int, regionCount int) int {
 }
 
 type resourceBalancer struct {
-	filters []Filter
+	balanceFilters        []Filter
+	leaderTransferFilters []Filter
 
 	cfg *BalanceConfig
 }
 
 func newResourceBalancer(cfg *BalanceConfig) *resourceBalancer {
 	rb := &resourceBalancer{cfg: cfg}
-	rb.addFilter(newCapacityFilter(cfg.MinCapacityUsedRatio, cfg.MaxCapacityUsedRatio))
-	rb.addFilter(newSnapCountFilter(cfg.MaxSendingSnapCount, cfg.MaxReceivingSnapCount))
+
+	// Add resource filters to check whether the store can only do balance.
+	rb.balanceFilters = append(rb.balanceFilters, newCapacityFilter(cfg.MinCapacityUsedRatio, cfg.MaxCapacityUsedRatio))
+	rb.balanceFilters = append(rb.balanceFilters, newSnapCountFilter(cfg.MaxSendingSnapCount, cfg.MaxReceivingSnapCount))
+
+	// Add leader transfer filters to check whether the store can only do leader transfer.
+	rb.leaderTransferFilters = append(rb.leaderTransferFilters, newLeaderCountFilter(cfg.MaxLeaderCount))
 
 	return rb
 }
 
-func (rb *resourceBalancer) addFilter(filter Filter) {
-	rb.filters = append(rb.filters, filter)
-}
-
-func (rb *resourceBalancer) filterFromStore(store *storeInfo, args ...interface{}) bool {
-	for _, filter := range rb.filters {
+func (rb *resourceBalancer) filterFromStore(store *storeInfo, filters []Filter, args ...interface{}) bool {
+	for _, filter := range filters {
 		if filter.FilterFromStore(store, args) {
 			return true
 		}
@@ -67,8 +69,8 @@ func (rb *resourceBalancer) filterFromStore(store *storeInfo, args ...interface{
 	return false
 }
 
-func (rb *resourceBalancer) filterToStore(store *storeInfo, args ...interface{}) bool {
-	for _, filter := range rb.filters {
+func (rb *resourceBalancer) filterToStore(store *storeInfo, filters []Filter, args ...interface{}) bool {
+	for _, filter := range filters {
 		if filter.FilterToStore(store, args) {
 			return true
 		}
@@ -118,7 +120,7 @@ func (rb *resourceBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Pee
 	return true
 }
 
-func (rb *resourceBalancer) selectFromStore(stores []*storeInfo, regionCount int, useFilter bool) *storeInfo {
+func (rb *resourceBalancer) selectFromStore(stores []*storeInfo, regionCount int, filters []Filter) *storeInfo {
 	score := 0
 	var resultStore *storeInfo
 	for _, store := range stores {
@@ -126,10 +128,8 @@ func (rb *resourceBalancer) selectFromStore(stores []*storeInfo, regionCount int
 			continue
 		}
 
-		if useFilter {
-			if rb.filterFromStore(store) {
-				continue
-			}
+		if rb.filterFromStore(store, filters) {
+			continue
 		}
 
 		currScore := rb.score(store, store.stats.LeaderRegionCount, regionCount)
@@ -148,7 +148,7 @@ func (rb *resourceBalancer) selectFromStore(stores []*storeInfo, regionCount int
 	return resultStore
 }
 
-func (rb *resourceBalancer) selectToStore(stores []*storeInfo, excluded map[uint64]struct{}, regionCount int, useFilter bool) *storeInfo {
+func (rb *resourceBalancer) selectToStore(stores []*storeInfo, excluded map[uint64]struct{}, regionCount int, filters []Filter) *storeInfo {
 	score := 0
 	var resultStore *storeInfo
 	for _, store := range stores {
@@ -160,10 +160,8 @@ func (rb *resourceBalancer) selectToStore(stores []*storeInfo, excluded map[uint
 			continue
 		}
 
-		if useFilter {
-			if rb.filterToStore(store) {
-				continue
-			}
+		if rb.filterToStore(store, filters) {
+			continue
 		}
 
 		currScore := rb.score(store, store.stats.LeaderRegionCount, regionCount)
@@ -185,7 +183,7 @@ func (rb *resourceBalancer) selectToStore(stores []*storeInfo, excluded map[uint
 // selectBalanceRegion tries to select a store leader region to do balance and returns true, but if we cannot find any,
 // we try to find a store follower region and returns false.
 func (rb *resourceBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*storeInfo) (*metapb.Region, *metapb.Peer, *metapb.Peer, bool) {
-	store := rb.selectFromStore(stores, cluster.regions.regionCount(), true)
+	store := rb.selectFromStore(stores, cluster.regions.regionCount(), rb.balanceFilters)
 	if store == nil {
 		log.Warn("from store cannot be found to select balance region")
 		return nil, nil, nil, false
@@ -210,13 +208,43 @@ func (rb *resourceBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*
 	return region, leader, nil, true
 }
 
+// selectLeaderTransferRegion tries to select a store leader region to do leader transfer.
+func (rb *resourceBalancer) selectLeaderTransferRegion(cluster *clusterInfo, stores []*storeInfo) (*metapb.Region, *metapb.Peer, *metapb.Peer) {
+	store := rb.selectFromStore(stores, cluster.regions.regionCount(), rb.leaderTransferFilters)
+	if store == nil {
+		log.Warn("from store cannot be found to select leader transfer region")
+		return nil, nil, nil
+	}
+
+	// Random select one leader region from store.
+	storeID := store.store.GetId()
+	region := cluster.regions.randLeaderRegion(storeID)
+	if region == nil {
+		return nil, nil, nil
+	}
+
+	leader := leaderPeer(region, storeID)
+	if leader == nil {
+		return nil, nil, nil
+	}
+
+	followerPeers, _ := getFollowerPeers(region, leader)
+	newLeader := rb.selectNewLeaderPeer(cluster, followerPeers)
+	if newLeader == nil {
+		log.Warn("new leader peer cannot be found to do leader transfer")
+		return nil, nil, nil
+	}
+
+	return region, leader, newLeader
+}
+
 func (rb *resourceBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[uint64]*metapb.Peer) *metapb.Peer {
 	stores := make([]*storeInfo, 0, len(peers))
 	for storeID := range peers {
 		stores = append(stores, cluster.getStore(storeID))
 	}
 
-	store := rb.selectToStore(stores, nil, cluster.regions.regionCount(), false)
+	store := rb.selectToStore(stores, nil, cluster.regions.regionCount(), nil)
 	if store == nil {
 		log.Warn("find no store to get new leader peer for region")
 		return nil
@@ -227,7 +255,7 @@ func (rb *resourceBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[
 }
 
 func (rb *resourceBalancer) selectAddPeer(cluster *clusterInfo, stores []*storeInfo, excluded map[uint64]struct{}) (*metapb.Peer, error) {
-	store := rb.selectToStore(stores, excluded, cluster.regions.regionCount(), true)
+	store := rb.selectToStore(stores, excluded, cluster.regions.regionCount(), rb.balanceFilters)
 	if store == nil {
 		log.Warn("to store cannot be found to add peer")
 		return nil, nil
@@ -252,7 +280,7 @@ func (rb *resourceBalancer) selectRemovePeer(cluster *clusterInfo, peers map[uin
 		stores = append(stores, cluster.getStore(storeID))
 	}
 
-	store := rb.selectFromStore(stores, cluster.regions.regionCount(), false)
+	store := rb.selectFromStore(stores, cluster.regions.regionCount(), nil)
 	if store == nil {
 		log.Warn("from store cannot be found to remove peer")
 		return nil, nil
@@ -288,7 +316,7 @@ func (rb *resourceBalancer) doLeaderBalance(cluster *clusterInfo, stores []*stor
 		return nil, nil
 	}
 
-	leaderTransferOperator := newTransferLeaderOperator(regionID, leader, newLeader, maxWaitCount)
+	leaderTransferOperator := newTransferLeaderOperator(regionID, leader, newLeader, int(rb.cfg.MaxTransferWaitCount))
 	addPeerOperator := newAddPeerOperator(regionID, newPeer)
 	removePeerOperator := newRemovePeerOperator(regionID, leader)
 
@@ -305,7 +333,7 @@ func (rb *resourceBalancer) doFollowerBalance(cluster *clusterInfo, stores []*st
 	return newBalanceOperator(region, addPeerOperator, removePeerOperator), nil
 }
 
-func (rb *resourceBalancer) Balance(cluster *clusterInfo) (*balanceOperator, error) {
+func (rb *resourceBalancer) doBalance(cluster *clusterInfo) (*balanceOperator, error) {
 	stores := cluster.getStores()
 	region, leader, follower, isLeaderBalance := rb.selectBalanceRegion(cluster, stores)
 	if region == nil || leader == nil {
@@ -313,7 +341,7 @@ func (rb *resourceBalancer) Balance(cluster *clusterInfo) (*balanceOperator, err
 		return nil, nil
 	}
 
-	// If region peer count is not equal to max peer count, no need to do capacity balance.
+	// If region peer count is not equal to max peer count, no need to do balance.
 	if len(region.GetPeers()) != int(cluster.getMeta().GetMaxPeerCount()) {
 		log.Warnf("region peer count %d not equals to max peer count %d, no need to do balance",
 			len(region.GetPeers()), cluster.getMeta().GetMaxPeerCount())
@@ -338,6 +366,49 @@ func (rb *resourceBalancer) Balance(cluster *clusterInfo) (*balanceOperator, err
 	}
 
 	return rb.doFollowerBalance(cluster, stores, region, follower, newPeer)
+}
+
+func (rb *resourceBalancer) doLeaderTransfer(cluster *clusterInfo) (*balanceOperator, error) {
+	stores := cluster.getStores()
+	region, leader, newLeader := rb.selectLeaderTransferRegion(cluster, stores)
+	if region == nil || leader == nil || newLeader == nil {
+		log.Warn("region cannot be found to do leader transfer")
+		return nil, nil
+	}
+
+	// If region peer count is not equal to max peer count, no need to do leader transfer.
+	if len(region.GetPeers()) != int(cluster.getMeta().GetMaxPeerCount()) {
+		log.Warnf("region peer count %d not equals to max peer count %d, no need to do leader transfer",
+			len(region.GetPeers()), cluster.getMeta().GetMaxPeerCount())
+		return nil, nil
+	}
+
+	if !rb.checkScore(cluster, leader, newLeader, true) {
+		return nil, nil
+	}
+
+	regionID := region.GetId()
+	leaderTransferOperator := newTransferLeaderOperator(regionID, leader, newLeader, int(rb.cfg.MaxTransferWaitCount))
+	return newBalanceOperator(region, leaderTransferOperator), nil
+}
+
+// Balance tries to select a store to do balance.
+// The priority of balance type is:
+// doBalance:
+// 1 do leader balance.
+// 2 do follower balance.
+// doLeaderTransfer:
+// 1 do leader transfer.
+func (rb *resourceBalancer) Balance(cluster *clusterInfo) (*balanceOperator, error) {
+	op, err := rb.doBalance(cluster)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if op != nil {
+		return op, nil
+	}
+
+	return rb.doLeaderTransfer(cluster)
 }
 
 // defaultBalancer is used for default config change, like add/remove peer.

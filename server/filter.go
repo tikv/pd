@@ -63,3 +63,21 @@ func (sf *snapCountFilter) FilterFromStore(store *storeInfo, args ...interface{}
 func (sf *snapCountFilter) FilterToStore(store *storeInfo, args ...interface{}) bool {
 	return uint64(store.stats.Stats.GetReceivingSnapCount()) > sf.maxReceivingSnapCount
 }
+
+type leaderCountFilter struct {
+	maxLeaderCount uint64
+}
+
+func newLeaderCountFilter(maxLeaderCount uint64) *leaderCountFilter {
+	return &leaderCountFilter{
+		maxLeaderCount: maxLeaderCount,
+	}
+}
+
+func (lf *leaderCountFilter) FilterFromStore(store *storeInfo, args ...interface{}) bool {
+	return uint64(store.stats.LeaderRegionCount) < lf.maxLeaderCount
+}
+
+func (lf *leaderCountFilter) FilterToStore(store *storeInfo, args ...interface{}) bool {
+	return false
+}

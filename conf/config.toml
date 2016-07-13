@@ -17,6 +17,7 @@ metric-addr = ""
 
 min-capacity-used-ratio = 0.4
 max-capacity-used-ratio = 0.9
+max-leader-count = 10
 max-sending-snap-count = 3
 max-receiving-snap-count = 3
 max-diff-score-fraction = 0.1
@@ -24,3 +25,4 @@ balance-interval = 30
 max-balance-count = 16
 max-balance-retry-per-loop = 10
 max-balance-count-per-loop = 3
+max-transfer-wait-count = 3

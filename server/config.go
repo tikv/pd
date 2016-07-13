@@ -137,6 +137,11 @@ type BalanceConfig struct {
 	// it will never be used as a to store.
 	MaxCapacityUsedRatio float64 `toml:"max-capacity-used-ratio"`
 
+	// For leader count balance.
+	// If the leader region count of one store is greater than this value,
+	// it will be used as a from store to do leader balance.
+	MaxLeaderCount uint64 `toml:"max-leader-count"`
+
 	// For snapshot balance filter.
 	// If the sending snapshot count of one storage is greater than this value,
 	// it will never be used as a from store.
@@ -160,6 +165,9 @@ type BalanceConfig struct {
 
 	// MaxBalanceCountPerLoop is the max region count to balance in a balance schedule.
 	MaxBalanceCountPerLoop uint64 `toml:"max-balance-count-per-loop"`
+
+	// MaxTransferWaitCount is the max heartbeat count to wait leader transfer to finish.
+	MaxTransferWaitCount uint64 `toml:"max-transfer-wait-count"`
 }
 
 func newBalanceConfig() *BalanceConfig {
@@ -169,6 +177,7 @@ func newBalanceConfig() *BalanceConfig {
 const (
 	defaultMinCapacityUsedRatio   = float64(0.4)
 	defaultMaxCapacityUsedRatio   = float64(0.9)
+	defaultMaxLeaderCount         = uint64(10)
 	defaultMaxSendingSnapCount    = uint64(3)
 	defaultMaxReceivingSnapCount  = uint64(3)
 	defaultMaxDiffScoreFraction   = float64(0.1)
@@ -176,6 +185,7 @@ const (
 	defaultBalanceInterval        = uint64(30)
 	defaultMaxBalanceRetryPerLoop = uint64(10)
 	defaultMaxBalanceCountPerLoop = uint64(3)
+	defaultMaxTransferWaitCount   = uint64(3)
 )
 
 func (c *BalanceConfig) adjust() {
@@ -185,6 +195,10 @@ func (c *BalanceConfig) adjust() {
 
 	if c.MaxCapacityUsedRatio == 0 {
 		c.MaxCapacityUsedRatio = defaultMaxCapacityUsedRatio
+	}
+
+	if c.MaxLeaderCount == 0 {
+		c.MaxLeaderCount = defaultMaxLeaderCount
 	}
 
 	if c.MaxSendingSnapCount == 0 {
@@ -213,6 +227,10 @@ func (c *BalanceConfig) adjust() {
 
 	if c.MaxBalanceCountPerLoop == 0 {
 		c.MaxBalanceCountPerLoop = defaultMaxBalanceCountPerLoop
+	}
+
+	if c.MaxTransferWaitCount == 0 {
+		c.MaxTransferWaitCount = defaultMaxTransferWaitCount
 	}
 }
 
