@@ -84,9 +84,9 @@ func (rb *resourceBalancer) filterToStore(store *storeInfo, filters []Filter, ar
 // TODO: we should adjust the weight of used ratio and leader score in futher,
 // now it is a little naive.
 func (rb *resourceBalancer) score(store *storeInfo, leaderCount int, regionCount int) int {
-	usedRatioScore := store.usedRatioScore()
+	capacityScore := store.usedRatioScore()
 	leaderScore := leaderScore(leaderCount, regionCount)
-	return int(float64(usedRatioScore)*0.6 + float64(leaderScore)*0.4)
+	return int(float64(capacityScore)*rb.cfg.CapacityScoreWeight + float64(leaderScore)*rb.cfg.LeaderScoreWeight)
 }
 
 // checkScore checks whether the new store score and old store score are valid.
