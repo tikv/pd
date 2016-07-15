@@ -33,6 +33,11 @@ func createRouter(svr *server.Server) *mux.Router {
 	router := mux.NewRouter()
 	router.Handle("/api/v1/balancers", newBalancerHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/cluster", newClusterHandler(svr, rd)).Methods("GET")
+
+	confHandler := newConfHandler(svr, rd)
+	router.HandleFunc("/api/v1/config", confHandler.Get).Methods("GET")
+	router.HandleFunc("/api/v1/config", confHandler.Post).Methods("POST")
+
 	router.Handle("/api/v1/events", newEventsHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/feed", newFeedHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/history/operators", newHistoryOperatorHandler(svr, rd)).Methods("GET")

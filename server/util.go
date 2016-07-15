@@ -127,3 +127,12 @@ func convertName(str string) string {
 
 	return string(name)
 }
+
+func sliceClone(strs []string) []string {
+	data := make([]string, 0, len(strs))
+	for _, str := range strs {
+		data = append(data, str)
+	}
+
+	return data
+}

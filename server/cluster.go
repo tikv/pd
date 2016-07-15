@@ -115,6 +115,22 @@ func (c *RaftCluster) isRunning() bool {
 	return c.running
 }
 
+// GetConfig gets config information.
+func (s *Server) GetConfig() *Config {
+	s.cfgLock.RLock()
+	defer s.cfgLock.RUnlock()
+
+	return s.cfg.clone()
+}
+
+// SetConfig sets the config information.
+func (s *Server) SetConfig(cfg *Config) {
+	s.cfgLock.Lock()
+	defer s.cfgLock.Unlock()
+
+	s.cfg.setCfg(cfg)
+}
+
 func (s *Server) getClusterRootPath() string {
 	return path.Join(s.rootPath, "raft")
 }

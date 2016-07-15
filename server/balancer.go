@@ -50,11 +50,11 @@ func newResourceBalancer(cfg *BalanceConfig) *resourceBalancer {
 	rb := &resourceBalancer{cfg: cfg}
 
 	// Add resource filters to check whether the store can only do balance.
-	rb.balanceFilters = append(rb.balanceFilters, newCapacityFilter(cfg.MinCapacityUsedRatio, cfg.MaxCapacityUsedRatio))
-	rb.balanceFilters = append(rb.balanceFilters, newSnapCountFilter(cfg.MaxSendingSnapCount, cfg.MaxReceivingSnapCount))
+	rb.balanceFilters = append(rb.balanceFilters, newCapacityFilter(cfg))
+	rb.balanceFilters = append(rb.balanceFilters, newSnapCountFilter(cfg))
 
 	// Add leader transfer filters to check whether the store can only do leader transfer.
-	rb.leaderTransferFilters = append(rb.leaderTransferFilters, newLeaderCountFilter(cfg.MaxLeaderCount))
+	rb.leaderTransferFilters = append(rb.leaderTransferFilters, newLeaderCountFilter(cfg))
 
 	return rb
 }

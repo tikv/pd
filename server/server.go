@@ -33,7 +33,8 @@ const (
 
 // Server is the pd server.
 type Server struct {
-	cfg *Config
+	cfgLock sync.RWMutex
+	cfg     *Config
 
 	listener net.Listener
 

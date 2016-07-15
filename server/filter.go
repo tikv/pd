@@ -25,57 +25,47 @@ type Filter interface {
 }
 
 type capacityFilter struct {
-	minCapacityUsedRatio float64
-	maxCapacityUsedRatio float64
+	cfg *BalanceConfig
 }
 
-func newCapacityFilter(minCapacityUsedRatio float64, maxCapacityUsedRatio float64) *capacityFilter {
-	return &capacityFilter{
-		minCapacityUsedRatio: minCapacityUsedRatio,
-		maxCapacityUsedRatio: maxCapacityUsedRatio,
-	}
+func newCapacityFilter(cfg *BalanceConfig) *capacityFilter {
+	return &capacityFilter{cfg: cfg}
 }
 
 func (cf *capacityFilter) FilterFromStore(store *storeInfo, args ...interface{}) bool {
-	return store.usedRatio() <= cf.minCapacityUsedRatio
+	return store.usedRatio() <= cf.cfg.MinCapacityUsedRatio
 }
 
 func (cf *capacityFilter) FilterToStore(store *storeInfo, args ...interface{}) bool {
-	return store.usedRatio() >= cf.maxCapacityUsedRatio
+	return store.usedRatio() >= cf.cfg.MaxCapacityUsedRatio
 }
 
 type snapCountFilter struct {
-	maxSendingSnapCount   uint64
-	maxReceivingSnapCount uint64
+	cfg *BalanceConfig
 }
 
-func newSnapCountFilter(maxSendingSnapCount uint64, maxReceivingSnapCount uint64) *snapCountFilter {
-	return &snapCountFilter{
-		maxSendingSnapCount:   maxSendingSnapCount,
-		maxReceivingSnapCount: maxReceivingSnapCount,
-	}
+func newSnapCountFilter(cfg *BalanceConfig) *snapCountFilter {
+	return &snapCountFilter{cfg: cfg}
 }
 
 func (sf *snapCountFilter) FilterFromStore(store *storeInfo, args ...interface{}) bool {
-	return uint64(store.stats.Stats.GetSendingSnapCount()) > sf.maxSendingSnapCount
+	return uint64(store.stats.Stats.GetSendingSnapCount()) > sf.cfg.MaxSendingSnapCount
 }
 
 func (sf *snapCountFilter) FilterToStore(store *storeInfo, args ...interface{}) bool {
-	return uint64(store.stats.Stats.GetReceivingSnapCount()) > sf.maxReceivingSnapCount
+	return uint64(store.stats.Stats.GetReceivingSnapCount()) > sf.cfg.MaxReceivingSnapCount
 }
 
 type leaderCountFilter struct {
-	maxLeaderCount uint64
+	cfg *BalanceConfig
 }
 
-func newLeaderCountFilter(maxLeaderCount uint64) *leaderCountFilter {
-	return &leaderCountFilter{
-		maxLeaderCount: maxLeaderCount,
-	}
+func newLeaderCountFilter(cfg *BalanceConfig) *leaderCountFilter {
+	return &leaderCountFilter{cfg: cfg}
 }
 
 func (lf *leaderCountFilter) FilterFromStore(store *storeInfo, args ...interface{}) bool {
-	return uint64(store.stats.LeaderRegionCount) < lf.maxLeaderCount
+	return uint64(store.stats.LeaderRegionCount) < lf.cfg.MaxLeaderCount
 }
 
 func (lf *leaderCountFilter) FilterToStore(store *storeInfo, args ...interface{}) bool {
