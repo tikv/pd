@@ -64,18 +64,20 @@ func (bw *balancerWorker) run() {
 func (bw *balancerWorker) workBalancer() {
 	defer bw.wg.Done()
 
-	ticker := time.NewTicker(time.Duration(bw.cfg.BalanceInterval) * time.Second)
-	defer ticker.Stop()
+	timer := time.NewTimer(time.Duration(bw.cfg.BalanceInterval) * time.Second)
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-bw.quit:
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			err := bw.doBalance()
 			if err != nil {
 				log.Warnf("do balance failed - %v", errors.ErrorStack(err))
 			}
+
+			timer.Reset(time.Duration(bw.cfg.BalanceInterval) * time.Second)
 		}
 	}
 }
