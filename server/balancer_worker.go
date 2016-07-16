@@ -183,7 +183,6 @@ func (bw *balancerWorker) allowBalance() bool {
 	// TODO: We should introduce more strategies to control
 	// how many balance tasks at same time.
 	if balanceCount >= bw.cfg.MaxBalanceCount {
-		log.Infof("%d exceed max balance count %d, can't do balance", balanceCount, bw.cfg.MaxBalanceCount)
 		return false
 	}
 
