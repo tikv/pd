@@ -136,3 +136,12 @@ func sliceClone(strs []string) []string {
 
 	return data
 }
+
+func mapClone(m map[uint64]struct{}) map[uint64]struct{} {
+	data := make(map[uint64]struct{}, len(m))
+	for k := range m {
+		data[k] = struct{}{}
+	}
+
+	return data
+}

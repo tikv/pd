@@ -126,7 +126,11 @@ func (c *Config) clone() *Config {
 func (c *Config) setCfg(cfg *Config) {
 	// TODO: add more check for cfg set.
 	cfg.adjust()
+
+	bc := c.BalanceCfg
 	*c = *cfg
+	c.BalanceCfg = bc
+	*c.BalanceCfg = *cfg.BalanceCfg
 }
 
 func (c *Config) String() string {

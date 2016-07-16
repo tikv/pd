@@ -156,6 +156,17 @@ func (s *testClusterWorkerSuite) newMockRaftStore(c *C, metaStore *metapb.Store)
 	err = cluster.putStore(metaStore)
 	c.Assert(err, IsNil)
 
+	stats := &pdpb.StoreStats{
+		StoreId:            proto.Uint64(metaStore.GetId()),
+		Capacity:           proto.Uint64(100),
+		Available:          proto.Uint64(50),
+		SendingSnapCount:   proto.Uint32(1),
+		ReceivingSnapCount: proto.Uint32(1),
+	}
+
+	ok := cluster.cachedCluster.updateStoreStatus(stats)
+	c.Assert(ok, IsTrue)
+
 	s.storeLock.Lock()
 	defer s.storeLock.Unlock()
 

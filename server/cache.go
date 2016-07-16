@@ -561,19 +561,21 @@ func (s *storeInfo) usedRatioScore() int {
 type clusterInfo struct {
 	sync.RWMutex
 
-	meta        *metapb.Cluster
-	stores      map[uint64]*storeInfo
-	regions     *regionsInfo
-	clusterRoot string
+	meta          *metapb.Cluster
+	stores        map[uint64]*storeInfo
+	unknownStores map[uint64]struct{}
+	regions       *regionsInfo
+	clusterRoot   string
 
 	idAlloc IDAllocator
 }
 
 func newClusterInfo(clusterRoot string) *clusterInfo {
 	cluster := &clusterInfo{
-		clusterRoot: clusterRoot,
-		stores:      make(map[uint64]*storeInfo),
-		regions:     newRegionsInfo(),
+		clusterRoot:   clusterRoot,
+		stores:        make(map[uint64]*storeInfo),
+		unknownStores: make(map[uint64]struct{}),
+		regions:       newRegionsInfo(),
 	}
 
 	return cluster
@@ -588,7 +590,9 @@ func (c *clusterInfo) addStore(store *metapb.Store) {
 		stats: &StoreStatus{},
 	}
 
-	c.stores[store.GetId()] = storeInfo
+	storeID := store.GetId()
+	c.stores[storeID] = storeInfo
+	c.unknownStores[storeID] = struct{}{}
 }
 
 func (c *clusterInfo) updateStoreStatus(stats *pdpb.StoreStats) bool {
@@ -602,6 +606,12 @@ func (c *clusterInfo) updateStoreStatus(stats *pdpb.StoreStats) bool {
 	}
 
 	store.stats.Stats = stats
+	if store.stats.Stats == nil {
+		c.unknownStores[storeID] = struct{}{}
+	} else {
+		delete(c.unknownStores, storeID)
+	}
+
 	store.stats.LeaderRegionCount = c.regions.leaderRegionCount(storeID)
 	return true
 }
@@ -661,4 +671,11 @@ func (c *clusterInfo) getMeta() *metapb.Cluster {
 	defer c.RUnlock()
 
 	return proto.Clone(c.meta).(*metapb.Cluster)
+}
+
+func (c *clusterInfo) getUnknownStores() map[uint64]struct{} {
+	c.RLock()
+	defer c.RUnlock()
+
+	return mapClone(c.unknownStores)
 }

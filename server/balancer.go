@@ -120,7 +120,7 @@ func (rb *resourceBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Pee
 	return true
 }
 
-func (rb *resourceBalancer) selectFromStore(stores []*storeInfo, regionCount int, filters []Filter) *storeInfo {
+func (rb *resourceBalancer) selectFromStore(stores []*storeInfo, excluded map[uint64]struct{}, regionCount int, filters []Filter) *storeInfo {
 	score := 0
 	var resultStore *storeInfo
 	for _, store := range stores {
@@ -128,7 +128,7 @@ func (rb *resourceBalancer) selectFromStore(stores []*storeInfo, regionCount int
 			continue
 		}
 
-		if store.stats == nil || store.stats.Stats == nil {
+		if _, ok := excluded[store.store.GetId()]; ok {
 			continue
 		}
 
@@ -160,10 +160,6 @@ func (rb *resourceBalancer) selectToStore(stores []*storeInfo, excluded map[uint
 			continue
 		}
 
-		if store.stats == nil || store.stats.Stats == nil {
-			continue
-		}
-
 		if _, ok := excluded[store.store.GetId()]; ok {
 			continue
 		}
@@ -191,7 +187,7 @@ func (rb *resourceBalancer) selectToStore(stores []*storeInfo, excluded map[uint
 // selectBalanceRegion tries to select a store leader region to do balance and returns true, but if we cannot find any,
 // we try to find a store follower region and returns false.
 func (rb *resourceBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*storeInfo) (*metapb.Region, *metapb.Peer, *metapb.Peer, bool) {
-	store := rb.selectFromStore(stores, cluster.regions.regionCount(), rb.balanceFilters)
+	store := rb.selectFromStore(stores, cluster.getUnknownStores(), cluster.regions.regionCount(), rb.balanceFilters)
 	if store == nil {
 		log.Warn("from store cannot be found to select balance region")
 		return nil, nil, nil, false
@@ -218,7 +214,7 @@ func (rb *resourceBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*
 
 // selectLeaderTransferRegion tries to select a store leader region to do leader transfer.
 func (rb *resourceBalancer) selectLeaderTransferRegion(cluster *clusterInfo, stores []*storeInfo) (*metapb.Region, *metapb.Peer, *metapb.Peer) {
-	store := rb.selectFromStore(stores, cluster.regions.regionCount(), rb.leaderTransferFilters)
+	store := rb.selectFromStore(stores, cluster.getUnknownStores(), cluster.regions.regionCount(), rb.leaderTransferFilters)
 	if store == nil {
 		log.Warn("from store cannot be found to select leader transfer region")
 		return nil, nil, nil
@@ -288,7 +284,7 @@ func (rb *resourceBalancer) selectRemovePeer(cluster *clusterInfo, peers map[uin
 		stores = append(stores, cluster.getStore(storeID))
 	}
 
-	store := rb.selectFromStore(stores, cluster.regions.regionCount(), nil)
+	store := rb.selectFromStore(stores, cluster.getUnknownStores(), cluster.regions.regionCount(), nil)
 	if store == nil {
 		log.Warn("from store cannot be found to remove peer")
 		return nil, nil
