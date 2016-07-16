@@ -128,6 +128,10 @@ func (rb *resourceBalancer) selectFromStore(stores []*storeInfo, regionCount int
 			continue
 		}
 
+		if store.stats == nil || store.stats.Stats == nil {
+			continue
+		}
+
 		if rb.filterFromStore(store, filters) {
 			continue
 		}
@@ -153,6 +157,10 @@ func (rb *resourceBalancer) selectToStore(stores []*storeInfo, excluded map[uint
 	var resultStore *storeInfo
 	for _, store := range stores {
 		if store == nil {
+			continue
+		}
+
+		if store.stats == nil || store.stats.Stats == nil {
 			continue
 		}
 
