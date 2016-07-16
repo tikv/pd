@@ -30,15 +30,6 @@ var (
 	_ Balancer = &resourceBalancer{}
 )
 
-// leaderScore is the leader peer count score of store, the score range is [0,100].
-func leaderScore(leaderCount int, regionCount int) int {
-	if regionCount == 0 {
-		return 0
-	}
-
-	return leaderCount * 100 / regionCount
-}
-
 type resourceBalancer struct {
 	balanceFilters        []Filter
 	leaderTransferFilters []Filter
@@ -84,9 +75,8 @@ func (rb *resourceBalancer) filterToStore(store *storeInfo, filters []Filter, ar
 // TODO: we should adjust the weight of used ratio and leader score in futher,
 // now it is a little naive.
 func (rb *resourceBalancer) score(store *storeInfo, leaderCount int, regionCount int) int {
-	capacityScore := store.usedRatioScore()
-	leaderScore := leaderScore(leaderCount, regionCount)
-	return int(float64(capacityScore)*rb.cfg.CapacityScoreWeight + float64(leaderScore)*rb.cfg.LeaderScoreWeight)
+	resourceScorer := newResourceScorer(rb.cfg, leaderCount, regionCount)
+	return resourceScorer.Score(store)
 }
 
 // checkScore checks whether the new store score and old store score are valid.
@@ -101,15 +91,19 @@ func (rb *resourceBalancer) checkScore(cluster *clusterInfo, oldPeer *metapb.Pee
 
 	// We should check the diff score of pre-balance `from store` and post balance `to store`.
 	// If isLeaderPeer is true, we should calculate the `to store` score with added leader region count.
-	var oldStoreScore, newStoreScore int
-	oldStoreScore = rb.score(oldStore, oldStore.stats.LeaderRegionCount, regionCount)
+	resourceScorer := newResourceScorer(rb.cfg, oldStore.stats.LeaderRegionCount, regionCount)
+	oldStoreScore := resourceScorer.Score(oldStore)
+
+	var newStoreScore int
 	if isLeaderPeer {
-		newStoreScore = rb.score(newStore, newStore.stats.LeaderRegionCount+1, regionCount)
+		resourceScorer = newResourceScorer(rb.cfg, newStore.stats.LeaderRegionCount+1, regionCount)
+		newStoreScore = resourceScorer.Score(newStore)
 	} else {
-		newStoreScore = rb.score(newStore, newStore.stats.LeaderRegionCount, regionCount)
+		resourceScorer = newResourceScorer(rb.cfg, newStore.stats.LeaderRegionCount, regionCount)
+		newStoreScore = resourceScorer.Score(newStore)
 	}
 
-	// If the diff score is in defaultScoreFraction range, then we will do nothing.
+	// If the diff score is in MaxDiffScoreFraction range, then we will do nothing.
 	diffScore := oldStoreScore - newStoreScore
 	if diffScore <= int(float64(oldStoreScore)*rb.cfg.MaxDiffScoreFraction) {
 		log.Debugf("check score failed - diff score is too small - old peer: %v, new peer: %v, old store score: %d, new store score: %d, diif score: %d",

@@ -552,11 +552,6 @@ func (s *storeInfo) usedRatio() float64 {
 	return float64(s.stats.Stats.GetCapacity()-s.stats.Stats.GetAvailable()) / float64(s.stats.Stats.GetCapacity())
 }
 
-// usedRatioScore is the used capacity ratio of storage capacity, the score range is [0,100].
-func (s *storeInfo) usedRatioScore() int {
-	return int(s.usedRatio() * 100)
-}
-
 // clusterInfo is cluster cache info.
 type clusterInfo struct {
 	sync.RWMutex
