@@ -74,7 +74,7 @@ func (h *storeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Store:  store,
 		Status: status,
 	}
-	storeInfo.Status.Score = cluster.GetScore(storeInfo.Store, storeInfo.Status)
+	storeInfo.Status.Scores = cluster.GetScores(storeInfo.Store, storeInfo.Status)
 
 	h.rd.JSON(w, http.StatusOK, storeInfo)
 }
@@ -119,7 +119,7 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Store:  store,
 			Status: status,
 		}
-		storeInfo.Status.Score = cluster.GetScore(storeInfo.Store, storeInfo.Status)
+		storeInfo.Status.Scores = cluster.GetScores(storeInfo.Store, storeInfo.Status)
 		storesInfo.Stores = append(storesInfo.Stores, storeInfo)
 	}
 

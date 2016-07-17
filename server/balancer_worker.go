@@ -31,8 +31,8 @@ type balancerWorker struct {
 	// Balancer can use it?
 	balanceOperators map[uint64]*balanceOperator
 
-	balancer *resourceBalancer
-	cfg      *BalanceConfig
+	balancers []Balancer
+	cfg       *BalanceConfig
 
 	regionCache      *expireRegionCache
 	historyOperators *lruCache
@@ -46,12 +46,14 @@ func newBalancerWorker(cluster *clusterInfo, cfg *BalanceConfig) *balancerWorker
 		cfg:              cfg,
 		cluster:          cluster,
 		balanceOperators: make(map[uint64]*balanceOperator),
-		balancer:         newResourceBalancer(cfg),
 		regionCache:      newExpireRegionCache(time.Duration(cfg.BalanceInterval)*time.Second, 2*time.Duration(cfg.BalanceInterval)*time.Second),
 		historyOperators: newLRUCache(100),
 		events:           newFifoCache(10000),
 		quit:             make(chan struct{}),
 	}
+
+	bw.balancers = append(bw.balancers, newLeaderBalancer(cfg))
+	bw.balancers = append(bw.balancers, newCapacityBalancer(cfg))
 
 	return bw
 }
@@ -204,33 +206,39 @@ func (bw *balancerWorker) doBalance() error {
 
 		balancerCounter.WithLabelValues("total").Inc()
 
-		// TODO: support select balance count in balancer.
-		balanceOperator, err := bw.balancer.Balance(bw.cluster)
-		if err != nil {
-			balancerCounter.WithLabelValues("failed").Inc()
-			return errors.Trace(err)
-		}
-		if balanceOperator == nil {
-			balancerCounter.WithLabelValues("none").Inc()
-			continue
-		}
+		for _, balancer := range bw.balancers {
+			balanceOperator, err := balancer.Balance(bw.cluster)
+			if err != nil {
+				balancerCounter.WithLabelValues("failed").Inc()
+				return errors.Trace(err)
+			}
+			if balanceOperator == nil {
+				balancerCounter.WithLabelValues("none").Inc()
+				continue
+			}
 
-		regionID := balanceOperator.getRegionID()
-		if bw.addBalanceOperator(regionID, balanceOperator) {
-			bw.addRegionCache(regionID)
-			balancerCounter.WithLabelValues("successed").Inc()
-			balanceCount++
-			continue
+			regionID := balanceOperator.getRegionID()
+			if bw.addBalanceOperator(regionID, balanceOperator) {
+				bw.addRegionCache(regionID)
+				balancerCounter.WithLabelValues("successed").Inc()
+				balanceCount++
+				break
+			}
 		}
-
-		// Here mean the selected region has an operator already, we may retry to
-		// select another region for balance.
 	}
 
 	log.Info("find no proper region for balance, retry later")
 	return nil
 }
 
-func (bw *balancerWorker) storeScore(store *storeInfo, regionCount int) int {
-	return bw.balancer.score(store, store.stats.LeaderRegionCount, regionCount)
+func (bw *balancerWorker) storeScores(store *storeInfo) []int {
+	scores := make([]int, 0, len(bw.balancers))
+	for _, balancer := range bw.balancers {
+		scorer := newScorer(balancer.ScoreType())
+		if scorer != nil {
+			scores = append(scores, scorer.Score(store))
+		}
+	}
+
+	return scores
 }

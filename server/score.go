@@ -13,6 +13,11 @@
 
 package server
 
+import (
+	"github.com/ngaut/log"
+	"github.com/pingcap/kvproto/pkg/metapb"
+)
+
 type scoreType byte
 
 const (
@@ -79,4 +84,28 @@ func newScorer(st scoreType) Scorer {
 	}
 
 	return nil
+}
+
+func checkScore(cluster *clusterInfo, oldPeer *metapb.Peer, newPeer *metapb.Peer, st scoreType, cfg *BalanceConfig) bool {
+	oldStore := cluster.getStore(oldPeer.GetStoreId())
+	newStore := cluster.getStore(newPeer.GetStoreId())
+	if oldStore == nil || newStore == nil {
+		log.Debugf("check score failed - old peer: %v, new peer: %v", oldPeer, newPeer)
+		return false
+	}
+
+	// TODO: we should check the diff score of pre-balance `from store` and post balance `to store`.
+	scorer := newScorer(st)
+	oldStoreScore := scorer.Score(oldStore)
+	newStoreScore := scorer.Score(newStore)
+
+	// Check whether the diff score is in MaxDiffScoreFraction range.
+	diffScore := oldStoreScore - newStoreScore
+	if diffScore <= int(float64(oldStoreScore)*cfg.MaxDiffScoreFraction) {
+		log.Debugf("check score failed - diff score is too small - old peer: %v, new peer: %v, old store score: %d, new store score: %d, diif score: %d",
+			oldPeer, newPeer, oldStoreScore, newStoreScore, diffScore)
+		return false
+	}
+
+	return true
 }

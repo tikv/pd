@@ -448,15 +448,14 @@ func (c *RaftCluster) GetHistoryOperators() []Operator {
 	return c.balancerWorker.getHistoryOperators()
 }
 
-// GetScore gets store score from balancer.
-func (c *RaftCluster) GetScore(store *metapb.Store, status *StoreStatus) int {
+// GetScores gets store scores from balancer.
+func (c *RaftCluster) GetScores(store *metapb.Store, status *StoreStatus) []int {
 	storeInfo := &storeInfo{
 		store: store,
 		stats: status,
 	}
 
-	regionCount := c.cachedCluster.regions.regionCount()
-	return c.balancerWorker.storeScore(storeInfo, regionCount)
+	return c.balancerWorker.storeScores(storeInfo)
 }
 
 // FetchEvents fetches the operator events.

@@ -519,7 +519,7 @@ type StoreStatus struct {
 
 	LeaderRegionCount int `json:"leader_region_count"`
 
-	Score int `json:"score"`
+	Scores []int `json:"scores"`
 }
 
 func (s *StoreStatus) clone() *StoreStatus {
