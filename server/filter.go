@@ -24,6 +24,26 @@ type Filter interface {
 	FilterToStore(store *storeInfo, args ...interface{}) bool
 }
 
+func filterFromStore(store *storeInfo, filters []Filter, args ...interface{}) bool {
+	for _, filter := range filters {
+		if filter.FilterFromStore(store, args) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func filterToStore(store *storeInfo, filters []Filter, args ...interface{}) bool {
+	for _, filter := range filters {
+		if filter.FilterToStore(store, args) {
+			return true
+		}
+	}
+
+	return false
+}
+
 type capacityFilter struct {
 	cfg *BalanceConfig
 }

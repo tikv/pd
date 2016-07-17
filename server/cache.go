@@ -543,6 +543,15 @@ func (s *storeInfo) clone() *storeInfo {
 	}
 }
 
+// leaderRatio is the leader region ratio of storage regions.
+func (s *storeInfo) leaderRatio() float64 {
+	if s.stats.Stats.GetRegionCount() == 0 {
+		return 0
+	}
+
+	return float64(s.stats.LeaderRegionCount) / float64(s.stats.Stats.GetRegionCount())
+}
+
 // usedRatio is the used capacity ratio of storage capacity.
 func (s *storeInfo) usedRatio() float64 {
 	if s.stats.Stats.GetCapacity() == 0 {

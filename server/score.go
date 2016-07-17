@@ -13,29 +13,29 @@
 
 package server
 
+type scoreType byte
+
+const (
+	leaderScore scoreType = iota + 1
+	capacityScore
+	resourceScore
+)
+
 // Scorer is an interface to calculate the score.
 type Scorer interface {
+	// Score calculates the score of store.
 	Score(store *storeInfo) int
 }
 
 type leaderScorer struct {
-	leaderCount int
-	regionCount int
 }
 
-func newLeaderScorer(leaderCount int, regionCount int) *leaderScorer {
-	return &leaderScorer{
-		leaderCount: leaderCount,
-		regionCount: regionCount,
-	}
+func newLeaderScorer() *leaderScorer {
+	return &leaderScorer{}
 }
 
 func (ls *leaderScorer) Score(store *storeInfo) int {
-	if ls.regionCount == 0 {
-		return 0
-	}
-
-	return ls.leaderCount * 100 / ls.regionCount
+	return int(store.leaderRatio() * 100)
 }
 
 type capacityScorer struct {
@@ -59,7 +59,7 @@ type resourceScorer struct {
 func newResourceScorer(cfg *BalanceConfig, leaderCount int, regionCount int) *resourceScorer {
 	return &resourceScorer{
 		cfg: cfg,
-		ls:  newLeaderScorer(leaderCount, regionCount),
+		ls:  newLeaderScorer(),
 		cs:  newCapacityScorer(),
 	}
 }
@@ -68,4 +68,15 @@ func (rs *resourceScorer) Score(store *storeInfo) int {
 	capacityScore := rs.ls.Score(store)
 	leaderScore := rs.cs.Score(store)
 	return int(float64(capacityScore)*rs.cfg.CapacityScoreWeight + float64(leaderScore)*rs.cfg.LeaderScoreWeight)
+}
+
+func newScorer(st scoreType) Scorer {
+	switch st {
+	case leaderScore:
+		return newLeaderScorer()
+	case capacityScore:
+		return newCapacityScorer()
+	}
+
+	return nil
 }
