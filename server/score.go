@@ -23,8 +23,18 @@ type scoreType byte
 const (
 	leaderScore scoreType = iota + 1
 	capacityScore
-	resourceScore
 )
+
+func (st scoreType) String() string {
+	switch st {
+	case leaderScore:
+		return "leader score"
+	case capacityScore:
+		return "capacity score"
+	default:
+		return "unknown"
+	}
+}
 
 // Scorer is an interface to calculate the score.
 type Scorer interface {
@@ -54,27 +64,6 @@ func (cs *capacityScorer) Score(store *storeInfo) int {
 	return int(store.usedRatio() * 100)
 }
 
-type resourceScorer struct {
-	cfg *BalanceConfig
-
-	ls *leaderScorer
-	cs *capacityScorer
-}
-
-func newResourceScorer(cfg *BalanceConfig, leaderCount int, regionCount int) *resourceScorer {
-	return &resourceScorer{
-		cfg: cfg,
-		ls:  newLeaderScorer(),
-		cs:  newCapacityScorer(),
-	}
-}
-
-func (rs *resourceScorer) Score(store *storeInfo) int {
-	capacityScore := rs.ls.Score(store)
-	leaderScore := rs.cs.Score(store)
-	return int(float64(capacityScore)*rs.cfg.CapacityScoreWeight + float64(leaderScore)*rs.cfg.LeaderScoreWeight)
-}
-
 func newScorer(st scoreType) Scorer {
 	switch st {
 	case leaderScore:
@@ -102,8 +91,8 @@ func checkScore(cluster *clusterInfo, oldPeer *metapb.Peer, newPeer *metapb.Peer
 	// Check whether the diff score is in MaxDiffScoreFraction range.
 	diffScore := oldStoreScore - newStoreScore
 	if diffScore <= int(float64(oldStoreScore)*cfg.MaxDiffScoreFraction) {
-		log.Debugf("check score failed - diff score is too small - old peer: %v, new peer: %v, old store score: %d, new store score: %d, diif score: %d",
-			oldPeer, newPeer, oldStoreScore, newStoreScore, diffScore)
+		log.Debugf("check score failed - diff score is too small - score type: %v, old peer: %v, new peer: %v, old store score: %d, new store score: %d, diif score: %d",
+			st, oldPeer, newPeer, oldStoreScore, newStoreScore, diffScore)
 		return false
 	}
 

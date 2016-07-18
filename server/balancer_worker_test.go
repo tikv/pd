@@ -72,12 +72,12 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	c.Assert(bop.Ops, HasLen, 3)
 
 	op1 := bop.Ops[0].(*transferLeaderOperator)
-	c.Assert(op1.MaxWaitCount, Equals, int(defaultMaxTransferWaitCount))
+	c.Assert(op1.cfg.MaxTransferWaitCount, Equals, defaultMaxTransferWaitCount)
 	c.Assert(op1.OldLeader.GetStoreId(), Equals, uint64(1))
 	c.Assert(op1.NewLeader.GetStoreId(), Equals, uint64(4))
 
-	// Now we check the MaxWaitCount for transferLeaderOperator.
-	op1.MaxWaitCount = 2
+	// Now we check the cfg.MaxTransferWaitCount for transferLeaderOperator.
+	op1.cfg.MaxTransferWaitCount = 2
 
 	ctx := newOpContext(nil, nil)
 	ok, res, err := op1.Do(ctx, region, leader)
@@ -97,6 +97,8 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	c.Assert(ok, IsFalse)
 	c.Assert(res, IsNil)
 	c.Assert(op1.Count, Equals, 2)
+
+	op1.cfg.MaxTransferWaitCount = defaultMaxTransferWaitCount
 
 	op2 := bop.Ops[1].(*changePeerOperator)
 	c.Assert(op2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)

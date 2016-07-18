@@ -241,8 +241,7 @@ func (co *changePeerOperator) Do(ctx *opContext, region *metapb.Region, leader *
 
 // transferLeaderOperator is used to do leader transfer.
 type transferLeaderOperator struct {
-	Count        int `json:"count"`
-	MaxWaitCount int `json:"max_wait_count"`
+	Count int `json:"count"`
 
 	OldLeader *metapb.Peer `json:"old_leader"`
 	NewLeader *metapb.Peer `json:"new_leader"`
@@ -253,23 +252,24 @@ type transferLeaderOperator struct {
 	firstCheck    bool
 	startCallback func(op Operator)
 	endCallback   func(op Operator)
+
+	cfg *BalanceConfig
 }
 
-func newTransferLeaderOperator(regionID uint64, oldLeader *metapb.Peer, newLeader *metapb.Peer, waitCount int) *transferLeaderOperator {
+func newTransferLeaderOperator(regionID uint64, oldLeader *metapb.Peer, newLeader *metapb.Peer, cfg *BalanceConfig) *transferLeaderOperator {
 	return &transferLeaderOperator{
-		OldLeader:    oldLeader,
-		NewLeader:    newLeader,
-		Count:        0,
-		MaxWaitCount: waitCount,
-		RegionID:     regionID,
-		Name:         "transfer_leader",
-		firstCheck:   true,
+		OldLeader:  oldLeader,
+		NewLeader:  newLeader,
+		RegionID:   regionID,
+		Name:       "transfer_leader",
+		firstCheck: true,
+		cfg:        cfg,
 	}
 }
 
 func (tlo *transferLeaderOperator) String() string {
-	return fmt.Sprintf("[transferLeaderOperator]count: %d, maxWaitCount: %d, oldLeader: %v, newLeader: %v",
-		tlo.Count, tlo.MaxWaitCount, tlo.OldLeader, tlo.NewLeader)
+	return fmt.Sprintf("[transferLeaderOperator]count: %d,  oldLeader: %v, newLeader: %v",
+		tlo.Count, tlo.OldLeader, tlo.NewLeader)
 }
 
 // check checks whether operator already finished or not.
@@ -303,9 +303,9 @@ func (tlo *transferLeaderOperator) Do(ctx *opContext, region *metapb.Region, lea
 		tlo.firstCheck = false
 	}
 
-	// If tlo.count is greater than 0, then we should check whether it exceeds the tlo.maxWaitCount.
+	// If tlo.count is greater than 0, then we should check whether it exceeds the tlo.cfg.MaxTransferWaitCount.
 	if tlo.Count > 0 {
-		if tlo.Count >= tlo.MaxWaitCount {
+		if tlo.Count >= int(tlo.cfg.MaxTransferWaitCount) {
 			return false, nil, errors.Errorf("transfer leader operator called %d times but still be unsucceessful - %v", tlo.Count, tlo)
 		}
 

@@ -227,7 +227,7 @@ func (cb *capacityBalancer) doLeaderBalance(cluster *clusterInfo, stores []*stor
 		return nil, nil
 	}
 
-	leaderTransferOperator := newTransferLeaderOperator(regionID, leader, newLeader, int(cb.cfg.MaxTransferWaitCount))
+	leaderTransferOperator := newTransferLeaderOperator(regionID, leader, newLeader, cb.cfg)
 	addPeerOperator := newAddPeerOperator(regionID, newPeer)
 	removePeerOperator := newRemovePeerOperator(regionID, leader)
 
@@ -379,7 +379,7 @@ func (lb *leaderBalancer) doBalance(cluster *clusterInfo) (*balanceOperator, err
 	}
 
 	regionID := region.GetId()
-	leaderTransferOperator := newTransferLeaderOperator(regionID, leader, newLeader, int(lb.cfg.MaxTransferWaitCount))
+	leaderTransferOperator := newTransferLeaderOperator(regionID, leader, newLeader, lb.cfg)
 	return newBalanceOperator(region, leaderTransferOperator), nil
 }
 
