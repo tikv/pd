@@ -20,6 +20,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/raftpb"
 )
 
@@ -64,6 +65,17 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 
+	stats := &pdpb.StoreStats{
+		StoreId:            proto.Uint64(store1.GetId()),
+		Capacity:           proto.Uint64(100),
+		Available:          proto.Uint64(50),
+		SendingSnapCount:   proto.Uint32(1),
+		ReceivingSnapCount: proto.Uint32(1),
+	}
+
+	ok := cluster.cachedCluster.updateStoreStatus(stats)
+	c.Assert(ok, IsTrue)
+
 	// Check cachedCluster.
 	c.Assert(cluster.cachedCluster.getMeta().GetId(), Equals, clusterID)
 	c.Assert(cluster.cachedCluster.getMeta().GetMaxPeerCount(), Equals, uint32(3))
@@ -79,6 +91,17 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	store2 := s.newStore(c, 0, "127.0.0.1:2")
 	err = cluster.putStore(store2)
 	c.Assert(err, IsNil)
+
+	stats = &pdpb.StoreStats{
+		StoreId:            proto.Uint64(store2.GetId()),
+		Capacity:           proto.Uint64(100),
+		Available:          proto.Uint64(50),
+		SendingSnapCount:   proto.Uint32(1),
+		ReceivingSnapCount: proto.Uint32(1),
+	}
+
+	ok = cluster.cachedCluster.updateStoreStatus(stats)
+	c.Assert(ok, IsTrue)
 
 	// Check cachedCluster.
 	c.Assert(cluster.cachedCluster.getMeta().GetId(), Equals, clusterID)
@@ -106,6 +129,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 
 	leader = region.GetPeers()[0]
 	res := heartbeatRegion(c, conn, clusterID, 0, region, leader)
+	c.Assert(res.GetPeer(), NotNil)
 	c.Assert(res.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(leader.GetId(), Not(Equals), res.GetPeer().GetId())
 

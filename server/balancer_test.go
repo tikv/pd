@@ -218,39 +218,6 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
 
-	// If we can only find a `from store` to do leader transfer, then we will try to do it.
-	s.updateStore(c, clusterInfo, 1, 100, 1, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 10, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 99, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 70, 0, 0)
-
-	testCfg.MaxLeaderCount = 0
-	testCfg.MinCapacityUsedRatio = 0.1
-	testCfg.MaxCapacityUsedRatio = 0.9
-
-	cb = newCapacityBalancer(testCfg)
-	bop, err = cb.Balance(clusterInfo)
-	c.Assert(err, IsNil)
-	c.Assert(bop.Ops, HasLen, 1)
-
-	op := bop.Ops[0].(*transferLeaderOperator)
-	c.Assert(op.OldLeader.GetStoreId(), Equals, uint64(1))
-	c.Assert(op.NewLeader.GetStoreId(), Equals, uint64(3))
-
-	// If we can only find a `from store` to do leader transfer, then we will try to do it.
-	// If the diff score is too small, we should do nothing.
-	s.updateStore(c, clusterInfo, 1, 100, 90, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 10, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 99, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 70, 0, 0)
-
-	cb = newCapacityBalancer(testCfg)
-	bop, err = cb.Balance(clusterInfo)
-	c.Assert(err, IsNil)
-	c.Assert(bop, IsNil)
-
-	testCfg.MaxLeaderCount = defaultMaxLeaderCount
-
 	// Reset capacityUsedRatio = 0.3 to balance region.
 	// Now the region is (1,3,4), the balance operators should be
 	// 1) leader transfer: 1 -> 4
