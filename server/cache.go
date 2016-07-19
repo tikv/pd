@@ -519,6 +519,8 @@ type StoreStatus struct {
 
 	LeaderRegionCount int `json:"leader_region_count"`
 
+	TotalRegionCount int `json:"total_region_count"`
+
 	Scores []int `json:"scores"`
 }
 
@@ -526,6 +528,7 @@ func (s *StoreStatus) clone() *StoreStatus {
 	return &StoreStatus{
 		Stats:             proto.Clone(s.Stats).(*pdpb.StoreStats),
 		LeaderRegionCount: s.LeaderRegionCount,
+		TotalRegionCount:  s.TotalRegionCount,
 	}
 }
 
@@ -545,11 +548,11 @@ func (s *storeInfo) clone() *storeInfo {
 
 // leaderRatio is the leader region ratio of storage regions.
 func (s *storeInfo) leaderRatio() float64 {
-	if s.stats.Stats.GetRegionCount() == 0 {
+	if s.stats.TotalRegionCount == 0 {
 		return 0
 	}
 
-	return float64(s.stats.LeaderRegionCount) / float64(s.stats.Stats.GetRegionCount())
+	return float64(s.stats.LeaderRegionCount) / float64(s.stats.TotalRegionCount)
 }
 
 // usedRatio is the used capacity ratio of storage capacity.
@@ -617,6 +620,7 @@ func (c *clusterInfo) updateStoreStatus(stats *pdpb.StoreStats) bool {
 	}
 
 	store.stats.LeaderRegionCount = c.regions.leaderRegionCount(storeID)
+	store.stats.TotalRegionCount = c.regions.regionCount()
 	return true
 }
 
