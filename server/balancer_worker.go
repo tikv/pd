@@ -206,24 +206,37 @@ func (bw *balancerWorker) doBalance() error {
 
 		balancerCounter.WithLabelValues("total").Inc()
 
+		scores := make([]*score, 0, len(bw.balancers))
+		bops := make([]*balanceOperator, 0, len(bw.balancers))
+
+		// Find the balance operator candidates.
 		for _, balancer := range bw.balancers {
-			balanceOperator, err := balancer.Balance(bw.cluster)
+			score, balanceOperator, err := balancer.Balance(bw.cluster)
 			if err != nil {
 				balancerCounter.WithLabelValues("failed").Inc()
 				return errors.Trace(err)
 			}
 			if balanceOperator == nil {
-				balancerCounter.WithLabelValues("none").Inc()
 				continue
 			}
 
-			regionID := balanceOperator.getRegionID()
-			if bw.addBalanceOperator(regionID, balanceOperator) {
-				bw.addRegionCache(regionID)
-				balancerCounter.WithLabelValues("successed").Inc()
-				balanceCount++
-				break
-			}
+			scores = append(scores, score)
+			bops = append(bops, balanceOperator)
+		}
+
+		// Calculate the priority of candidates score.
+		idx, score := priorityScore(bw.cfg, scores)
+		if score == nil {
+			balancerCounter.WithLabelValues("none").Inc()
+			continue
+		}
+
+		bop := bops[idx]
+		regionID := bop.getRegionID()
+		if bw.addBalanceOperator(regionID, bop) {
+			bw.addRegionCache(regionID)
+			balancerCounter.WithLabelValues("successed").Inc()
+			balanceCount++
 		}
 	}
 

@@ -18,6 +18,48 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
+type score struct {
+	first     int
+	second    int
+	diff      int
+	threshold int
+	st        string
+}
+
+func priorityScore(cfg *BalanceConfig, scores []*score) (int, *score) {
+	var (
+		maxPriority int
+		idx         int
+		resultScore *score
+	)
+
+	for i, score := range scores {
+		priority := score.diff
+		if score.threshold != -1 {
+			// If the score diff is close to threshold value, we should add the priority weight.
+			if abs(score.threshold-score.first) <= int(100*cfg.MaxDiffScoreFraction) {
+				priority += 10
+			}
+		}
+
+		if priority > maxPriority {
+			idx = i
+			resultScore = score
+		}
+	}
+
+	return idx, resultScore
+}
+
+func scoreThreshold(cfg *BalanceConfig, st scoreType) int {
+	switch st {
+	case capacityScore:
+		return int(cfg.MaxCapacityUsedRatio * 100)
+	default:
+		return -1
+	}
+}
+
 type scoreType byte
 
 const (
@@ -75,12 +117,12 @@ func newScorer(st scoreType) Scorer {
 	return nil
 }
 
-func checkScore(cluster *clusterInfo, oldPeer *metapb.Peer, newPeer *metapb.Peer, st scoreType, cfg *BalanceConfig) bool {
+func checkAndGetDiffScore(cluster *clusterInfo, oldPeer *metapb.Peer, newPeer *metapb.Peer, st scoreType, cfg *BalanceConfig) (*score, bool) {
 	oldStore := cluster.getStore(oldPeer.GetStoreId())
 	newStore := cluster.getStore(newPeer.GetStoreId())
 	if oldStore == nil || newStore == nil {
 		log.Debugf("check score failed - old peer: %v, new peer: %v", oldPeer, newPeer)
-		return false
+		return nil, false
 	}
 
 	// TODO: we should check the diff score of pre-balance `from store` and post balance `to store`.
@@ -93,8 +135,16 @@ func checkScore(cluster *clusterInfo, oldPeer *metapb.Peer, newPeer *metapb.Peer
 	if diffScore <= int(float64(oldStoreScore)*cfg.MaxDiffScoreFraction) {
 		log.Debugf("check score failed - diff score is too small - score type: %v, old peer: %v, new peer: %v, old store score: %d, new store score: %d, diif score: %d",
 			st, oldPeer, newPeer, oldStoreScore, newStoreScore, diffScore)
-		return false
+		return nil, false
 	}
 
-	return true
+	score := &score{
+		first:     oldStoreScore,
+		second:    newStoreScore,
+		diff:      diffScore,
+		threshold: scoreThreshold(cfg, st),
+		st:        st.String(),
+	}
+
+	return score, true
 }

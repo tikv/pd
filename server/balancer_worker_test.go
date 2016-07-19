@@ -46,74 +46,69 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	s.balancerWorker = newBalancerWorker(clusterInfo, s.ts.cfg)
 
 	// The store id will be 1,2,3,4.
-	s.ts.updateStore(c, clusterInfo, 1, 100, 10, 0, 0)
+	s.ts.updateStore(c, clusterInfo, 1, 100, 50, 0, 0)
 	s.ts.updateStore(c, clusterInfo, 2, 100, 20, 0, 0)
 	s.ts.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
 	s.ts.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
 
 	// Now we have no region to do balance.
-	ret := s.balancerWorker.doBalance()
-	c.Assert(ret, IsNil)
+	err := s.balancerWorker.doBalance()
+	c.Assert(err, IsNil)
 
 	// Add two peers.
 	s.ts.addRegionPeer(c, clusterInfo, 4, region, leader)
 	s.ts.addRegionPeer(c, clusterInfo, 3, region, leader)
 
-	// Now the region is (1,3,4), the balance operators should be
-	// 1) leader transfer: 1 -> 4
-	// 2) add peer: 2
-	// 3) remove peer: 1
-	ret = s.balancerWorker.doBalance()
-	c.Assert(ret, IsNil)
+	s.ts.cfg.MaxLeaderCount = 1
+
+	// Now the region is (1,3,4), leader is 1, the balance operators should be
+	// leader transfer: 1 -> 3/4
+	err = s.balancerWorker.doBalance()
+	c.Assert(err, IsNil)
 
 	regionID := region.GetId()
 	bop, ok := s.balancerWorker.balanceOperators[regionID]
 	c.Assert(ok, IsTrue)
-	c.Assert(bop.Ops, HasLen, 3)
+	c.Assert(bop.Ops, HasLen, 1)
 
-	op1 := bop.Ops[0].(*transferLeaderOperator)
-	c.Assert(op1.cfg.MaxTransferWaitCount, Equals, defaultMaxTransferWaitCount)
-	c.Assert(op1.OldLeader.GetStoreId(), Equals, uint64(1))
-	c.Assert(op1.NewLeader.GetStoreId(), Equals, uint64(4))
+	op := bop.Ops[0].(*transferLeaderOperator)
+	c.Assert(op.cfg.MaxTransferWaitCount, Equals, defaultMaxTransferWaitCount)
+	c.Assert(op.OldLeader.GetStoreId(), Equals, uint64(1))
+	newLeaderStoreID := op.NewLeader.GetStoreId()
+	c.Assert(newLeaderStoreID, Not(Equals), uint64(1))
 
 	// Now we check the cfg.MaxTransferWaitCount for transferLeaderOperator.
-	op1.cfg.MaxTransferWaitCount = 2
+	s.ts.cfg.MaxTransferWaitCount = 2
 
 	ctx := newOpContext(nil, nil)
-	ok, res, err := op1.Do(ctx, region, leader)
+	ok, res, err := op.Do(ctx, region, leader)
 	c.Assert(err, IsNil)
 	c.Assert(ok, IsFalse)
-	c.Assert(res.GetTransferLeader().GetPeer().GetStoreId(), Equals, uint64(4))
-	c.Assert(op1.Count, Equals, 1)
+	c.Assert(res.GetTransferLeader().GetPeer().GetStoreId(), Equals, newLeaderStoreID)
+	c.Assert(op.Count, Equals, 1)
 
-	ok, res, err = op1.Do(ctx, region, leader)
+	ok, res, err = op.Do(ctx, region, leader)
 	c.Assert(err, IsNil)
 	c.Assert(ok, IsFalse)
 	c.Assert(res, IsNil)
-	c.Assert(op1.Count, Equals, 2)
+	c.Assert(op.Count, Equals, 2)
 
-	ok, res, err = op1.Do(ctx, region, leader)
+	ok, res, err = op.Do(ctx, region, leader)
 	c.Assert(err, NotNil)
 	c.Assert(ok, IsFalse)
 	c.Assert(res, IsNil)
-	c.Assert(op1.Count, Equals, 2)
+	c.Assert(op.Count, Equals, 2)
 
-	op1.cfg.MaxTransferWaitCount = defaultMaxTransferWaitCount
-
-	op2 := bop.Ops[1].(*changePeerOperator)
-	c.Assert(op2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(op2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
-
-	op3 := bop.Ops[2].(*changePeerOperator)
-	c.Assert(op3.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(op3.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(1))
-
-	c.Assert(s.balancerWorker.balanceOperators, HasLen, 1)
-	c.Assert(s.balancerWorker.regionCache.count(), Equals, 1)
+	s.ts.cfg.MaxTransferWaitCount = defaultMaxTransferWaitCount
 
 	// Since we have already cached region balance operator, so recall doBalance will do nothing.
-	ret = s.balancerWorker.doBalance()
-	c.Assert(ret, IsNil)
+	s.ts.updateStore(c, clusterInfo, 1, 100, 50, 0, 0)
+	s.ts.updateStore(c, clusterInfo, 2, 100, 90, 0, 0)
+	s.ts.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
+	s.ts.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
+
+	err = s.balancerWorker.doBalance()
+	c.Assert(err, IsNil)
 
 	oldBop := bop
 	bop, ok = s.balancerWorker.balanceOperators[regionID]
@@ -126,8 +121,8 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	c.Assert(s.balancerWorker.balanceOperators, HasLen, 0)
 	c.Assert(s.balancerWorker.regionCache.count(), Equals, 1)
 
-	ret = s.balancerWorker.doBalance()
-	c.Assert(ret, IsNil)
+	err = s.balancerWorker.doBalance()
+	c.Assert(err, IsNil)
 	c.Assert(s.balancerWorker.balanceOperators, HasLen, 0)
 
 	// Remove balance expire cache, this time we can get a new balancer now.
@@ -135,22 +130,25 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	c.Assert(s.balancerWorker.balanceOperators, HasLen, 0)
 	c.Assert(s.balancerWorker.regionCache.count(), Equals, 0)
 
-	ret = s.balancerWorker.doBalance()
-	c.Assert(ret, IsNil)
+	err = s.balancerWorker.doBalance()
+	c.Assert(err, IsNil)
 
+	// Now the region is (1,3,4), leader is 3/4, the balance operators should be
+	// 1) add peer: 2
+	// 2) remove peer: 3/4
+	regionID = region.GetId()
 	bop, ok = s.balancerWorker.balanceOperators[regionID]
 	c.Assert(ok, IsTrue)
-	c.Assert(bop.Ops, HasLen, 3)
+	c.Assert(bop.Ops, HasLen, 2)
 
-	op1 = bop.Ops[0].(*transferLeaderOperator)
-	c.Assert(op1.OldLeader.GetStoreId(), Equals, uint64(1))
-	c.Assert(op1.NewLeader.GetStoreId(), Equals, uint64(4))
+	op1 := bop.Ops[0].(*changePeerOperator)
+	c.Assert(op1.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op1.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 
-	op2 = bop.Ops[1].(*changePeerOperator)
-	c.Assert(op2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(op2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
+	op2 := bop.Ops[1].(*changePeerOperator)
+	c.Assert(op2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(op2.ChangePeer.GetPeer().GetStoreId(), Not(Equals), uint64(2))
 
-	op3 = bop.Ops[2].(*changePeerOperator)
-	c.Assert(op3.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(op3.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(1))
+	c.Assert(s.balancerWorker.balanceOperators, HasLen, 1)
+	c.Assert(s.balancerWorker.regionCache.count(), Equals, 1)
 }
