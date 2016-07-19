@@ -17,9 +17,9 @@ package clientv3
 import (
 	"sync"
 
-	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"golang.org/x/net/context"
+	"google.golang.org/grpc"
 )
 
 // Txn is the interface that wraps mini-transactions.
@@ -66,8 +66,8 @@ type txn struct {
 
 	cmps []*pb.Compare
 
-	sus []*pb.RequestUnion
-	fas []*pb.RequestUnion
+	sus []*pb.RequestOp
+	fas []*pb.RequestOp
 }
 
 func (txn *txn) If(cs ...Cmp) Txn {
@@ -110,7 +110,7 @@ func (txn *txn) Then(ops ...Op) Txn {
 
 	for _, op := range ops {
 		txn.isWrite = txn.isWrite || op.isWrite()
-		txn.sus = append(txn.sus, op.toRequestUnion())
+		txn.sus = append(txn.sus, op.toRequestOp())
 	}
 
 	return txn
@@ -128,7 +128,7 @@ func (txn *txn) Else(ops ...Op) Txn {
 
 	for _, op := range ops {
 		txn.isWrite = txn.isWrite || op.isWrite()
-		txn.fas = append(txn.fas, op.toRequestUnion())
+		txn.fas = append(txn.fas, op.toRequestOp())
 	}
 
 	return txn
@@ -143,27 +143,17 @@ func (txn *txn) Commit() (*TxnResponse, error) {
 			return resp, err
 		}
 		if isHaltErr(txn.ctx, err) {
-			return nil, rpctypes.Error(err)
+			return nil, toErr(txn.ctx, err)
 		}
 		if txn.isWrite {
-			txn.kv.rc.reconnect(err)
-			return nil, rpctypes.Error(err)
-		}
-		if nerr := txn.kv.rc.reconnectWait(txn.ctx, err); nerr != nil {
-			return nil, nerr
+			return nil, toErr(txn.ctx, err)
 		}
 	}
 }
 
 func (txn *txn) commit() (*TxnResponse, error) {
-	rem, rerr := txn.kv.getRemote(txn.ctx)
-	if rerr != nil {
-		return nil, rerr
-	}
-	defer txn.kv.rc.release()
-
 	r := &pb.TxnRequest{Compare: txn.cmps, Success: txn.sus, Failure: txn.fas}
-	resp, err := rem.Txn(txn.ctx, r)
+	resp, err := txn.kv.remote.Txn(txn.ctx, r, grpc.FailFast(false))
 	if err != nil {
 		return nil, err
 	}
