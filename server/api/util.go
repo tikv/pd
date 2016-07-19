@@ -26,6 +26,7 @@ func fromBody(r *http.Request, data interface{}) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+	defer r.Body.Close()
 
 	err = json.Unmarshal(body, data)
 	if err != nil {
