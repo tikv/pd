@@ -26,5 +26,3 @@ max-balance-count = 16
 max-balance-retry-per-loop = 10
 max-balance-count-per-loop = 3
 max-transfer-wait-count = 3
-leader-score-weight = 0.4
-capacity-score-weight = 0.6

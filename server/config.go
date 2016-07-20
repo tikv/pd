@@ -187,12 +187,6 @@ type BalanceConfig struct {
 
 	// MaxTransferWaitCount is the max heartbeat count to wait leader transfer to finish.
 	MaxTransferWaitCount uint64 `toml:"max-transfer-wait-count" json:"max-transfer-wait-count"`
-
-	// LeaderScoreWeight is the leader score weight to calculate the store score.
-	LeaderScoreWeight float64 `toml:"leader-score-weight" json:"leader-score-weight"`
-
-	// CapacityScoreWeight is the capacity score weight to calculate the store score.
-	CapacityScoreWeight float64 `toml:"capacity-score-weight" json:"capacity-score-weight"`
 }
 
 func newBalanceConfig() *BalanceConfig {
@@ -211,8 +205,6 @@ const (
 	defaultMaxBalanceRetryPerLoop = uint64(10)
 	defaultMaxBalanceCountPerLoop = uint64(3)
 	defaultMaxTransferWaitCount   = uint64(3)
-	defaultLeaderScoreWeight      = float64(0.4)
-	defaultCapacityScoreWeight    = float64(0.6)
 )
 
 func (c *BalanceConfig) adjust() {
@@ -258,14 +250,6 @@ func (c *BalanceConfig) adjust() {
 
 	if c.MaxTransferWaitCount == 0 {
 		c.MaxTransferWaitCount = defaultMaxTransferWaitCount
-	}
-
-	if c.LeaderScoreWeight == 0 {
-		c.LeaderScoreWeight = defaultLeaderScoreWeight
-	}
-
-	if c.CapacityScoreWeight == 0 {
-		c.CapacityScoreWeight = defaultCapacityScoreWeight
 	}
 }
 
