@@ -128,6 +128,32 @@ func bootstrapServer(c *C, port int) {
 	c.Assert(err, IsNil)
 }
 
+func heartbeatRegion(c *C, port int) {
+	req := &pdpb.Request{
+		Header: &pdpb.RequestHeader{
+			Uuid:      uuid.NewV4().Bytes(),
+			ClusterId: proto.Uint64(clusterID),
+		},
+		CmdType: pdpb.CommandType_RegionHeartbeat.Enum(),
+		RegionHeartbeat: &pdpb.RegionHeartbeatRequest{
+			Region: region,
+			Leader: peer,
+		},
+	}
+	msg := &msgpb.Message{
+		MsgType: msgpb.MessageType_PdReq.Enum(),
+		PdReq:   req,
+	}
+
+	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	c.Assert(err, IsNil)
+	err = util.WriteMessage(conn, 0, msg)
+	c.Assert(err, IsNil)
+
+	_, err = util.ReadMessage(conn, msg)
+	c.Assert(err, IsNil)
+}
+
 func (s *testClientSuite) TestTSO(c *C) {
 	var tss []int64
 	for i := 0; i < 100; i++ {
@@ -144,9 +170,12 @@ func (s *testClientSuite) TestTSO(c *C) {
 }
 
 func (s *testClientSuite) TestGetRegion(c *C) {
-	r, err := s.client.GetRegion([]byte("a"))
+	heartbeatRegion(c, 1234)
+
+	r, leader, err := s.client.GetRegion([]byte("a"))
 	c.Assert(err, IsNil)
 	c.Assert(r, DeepEquals, region)
+	c.Assert(leader, DeepEquals, peer)
 }
 
 func (s *testClientSuite) TestGetStore(c *C) {
