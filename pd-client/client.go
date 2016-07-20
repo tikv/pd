@@ -87,6 +87,7 @@ func NewClient(etcdAddrs []string, rootPath string, clusterID uint64) (Client, e
 		if err == nil {
 			break
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
 
@@ -165,31 +166,49 @@ func (c *client) GetStore(storeID uint64) (*metapb.Store, error) {
 	return store, nil
 }
 
+// Use var here is for test changing.
+// TODO: refactor this after etcd fixes https://github.com/coreos/etcd/issues/5985
+var defaultWatchLeaderTimeout = 30 * time.Second
+
 func (c *client) watchLeader(leaderPath string, revision int64) {
 	defer c.wg.Done()
-WATCH:
+
 	for {
 		log.Infof("[pd] start watch pd leader on path %v, revision %v", leaderPath, revision)
-		rch := c.etcdClient.Watch(context.Background(), leaderPath, clientv3.WithRev(revision))
-		select {
-		case resp := <-rch:
+		ctx, cancel := context.WithTimeout(c.etcdClient.Ctx(), defaultWatchLeaderTimeout)
+		rch := c.etcdClient.Watch(ctx, leaderPath, clientv3.WithRev(revision))
+
+		for resp := range rch {
 			if resp.Canceled {
 				log.Warn("[pd] leader watcher canceled")
-				continue WATCH
+				break
 			}
+
 			leaderAddr, rev, err := getLeader(c.etcdClient, leaderPath)
 			if err != nil {
 				log.Warn(err)
-				continue WATCH
+				break
 			}
+
+			if revision == rev {
+				log.Infof("revision %d not changed, leader is not changed too", revision)
+				break
+			}
+
 			log.Infof("[pd] found new pd-server leader addr: %v", leaderAddr)
 			c.workerMutex.Lock()
 			c.worker.stop(errors.New("[pd] leader change"))
 			c.worker = newRPCWorker(leaderAddr, c.clusterID)
 			c.workerMutex.Unlock()
 			revision = rev
+		}
+
+		cancel()
+
+		select {
 		case <-c.quit:
 			return
+		default:
 		}
 	}
 }

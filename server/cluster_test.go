@@ -15,6 +15,7 @@ package server
 
 import (
 	"net"
+	"os"
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/golang/protobuf/proto"
@@ -45,15 +46,15 @@ func (s *testClusterSuite) getRootPath() string {
 
 func (s *testClusterSuite) SetUpSuite(c *C) {
 	s.svr = newTestServer(c, s.getRootPath())
-	s.client = newEtcdClient(c)
-	deleteRoot(c, s.client, s.getRootPath())
+	s.client = s.svr.client
 
 	go s.svr.Run()
 }
 
 func (s *testClusterSuite) TearDownSuite(c *C) {
 	s.svr.Close()
-	s.client.Close()
+
+	os.RemoveAll(s.svr.cfg.EtcdCfg.DataDir)
 }
 
 func (s *testClusterBaseSuite) allocID(c *C) uint64 {

@@ -37,8 +37,6 @@ type Server struct {
 	cfgLock sync.RWMutex
 	cfg     *Config
 
-	// Nothing to do now, we put here only to introduce the etcd in vendor.
-	// TODO: support embedding etcd.
 	etcd *embed.Etcd
 
 	listener net.Listener
@@ -73,18 +71,37 @@ type Server struct {
 	cluster     *RaftCluster
 
 	msgID uint64
+
+	id uint64
 }
 
 // NewServer creates the pd server with given configuration.
 func NewServer(cfg *Config) (*Server, error) {
 	cfg.adjust()
 
-	log.Infof("create etcd v3 client with endpoints %v", cfg.EtcdAddrs)
+	log.Info("start etcd...")
+	etcdCfg, err := cfg.EtcdCfg.GenEmbedEtcd()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	etcd, err := embed.StartEtcd(etcdCfg)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	endpoints := []string{etcd.Clients[0].Addr().String()}
+
+	log.Infof("create etcd v3 client with endpoints %v", endpoints)
 	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   cfg.EtcdAddrs,
+		Endpoints:   endpoints,
 		DialTimeout: etcdTimeout,
 	})
 	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	if err = isEtcdRunning(client, endpoints[0]); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -102,12 +119,14 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	s := &Server{
 		cfg:           cfg,
+		etcd:          etcd,
 		listener:      l,
 		client:        client,
 		isLeaderValue: 0,
 		conns:         make(map[*conn]struct{}),
 		closed:        0,
 		rootPath:      path.Join(cfg.RootPath, strconv.FormatUint(cfg.ClusterID, 10)),
+		id:            uint64(etcd.Server.ID()),
 	}
 
 	s.idAlloc = &idAllocator{s: s}
@@ -128,7 +147,7 @@ func (s *Server) Close() {
 		return
 	}
 
-	log.Info("closing server")
+	log.Infof("closing server")
 
 	s.enableLeader(false)
 
@@ -140,7 +159,15 @@ func (s *Server) Close() {
 		s.client.Close()
 	}
 
+	if s.etcd != nil {
+		log.Infof("closing etcd %d", s.id)
+		s.etcd.Close()
+		log.Infof("close etcd %d", s.id)
+	}
+
 	s.wg.Wait()
+
+	log.Info("close server")
 }
 
 // isClosed checks whether server is closed or not.
@@ -176,6 +203,16 @@ func (s *Server) Run() error {
 	}
 
 	return nil
+}
+
+// GetEndpoints returns the etcd endpoints for outer use.
+func (s *Server) GetEndpoints() []string {
+	return s.client.Endpoints()
+}
+
+// ID returns the unique etcd ID for this server in etcd cluster.
+func (s *Server) ID() uint64 {
+	return s.id
 }
 
 func (s *Server) closeAllConnections() {

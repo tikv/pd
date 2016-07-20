@@ -2,3 +2,4 @@ bin
 /vendor
 *.iml
 .idea
+default.etcd

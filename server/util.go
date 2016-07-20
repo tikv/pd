@@ -157,3 +157,41 @@ func mergeMap(m1 map[uint64]struct{}, m2 map[uint64]struct{}) map[uint64]struct{
 
 	return data
 }
+
+// check whether current etcd is running.
+func endpointStatus(c *clientv3.Client, endpoint string) (*clientv3.StatusResponse, error) {
+	m := clientv3.NewMaintenance(c)
+
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	resp, err := m.Status(ctx, endpoint)
+	cancel()
+
+	if cost := time.Now().Sub(start); cost > slowRequestTime {
+		log.Warnf("check etcd %s status, resp: %v, err: %v, cost: %s", endpoint, resp, err, cost)
+	}
+
+	return resp, errors.Trace(err)
+}
+
+const (
+	maxCheckEtcdRunningCount = 100
+	checkEtcdRunningDelay    = 100 * time.Millisecond
+)
+
+// check etcd starts ok or not
+func isEtcdRunning(c *clientv3.Client, endpoint string) error {
+	var err error
+	for i := 0; i < maxCheckEtcdRunningCount; i++ {
+		// etcd may not start ok, we should wait and check again
+		_, err = endpointStatus(c, endpoint)
+		if err == nil {
+			return nil
+		}
+
+		time.Sleep(checkEtcdRunningDelay)
+		continue
+	}
+
+	return errors.Trace(err)
+}

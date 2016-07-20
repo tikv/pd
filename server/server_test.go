@@ -14,59 +14,32 @@
 package server
 
 import (
-	"flag"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
-	"golang.org/x/net/context"
 )
 
 func TestServer(t *testing.T) {
 	TestingT(t)
 }
 
-var (
-	testEtcd = flag.String("etcd", "127.0.0.1:2379", "Etcd endpoints, separated by comma")
-)
-
 func newTestServer(c *C, rootPath string) *Server {
 	cfg := &Config{
 		Addr:            "127.0.0.1:0",
-		EtcdAddrs:       strings.Split(*testEtcd, ","),
 		RootPath:        rootPath,
 		LeaderLease:     1,
 		TsoSaveInterval: 500,
 		// We use cluster 0 for all tests.
 		ClusterID: 0,
+		EtcdCfg:   NewTestSingleEtcdConfig(),
 	}
 
 	svr, err := NewServer(cfg)
 	c.Assert(err, IsNil)
 
 	return svr
-}
-
-func newEtcdClient(c *C) *clientv3.Client {
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   strings.Split(*testEtcd, ","),
-		DialTimeout: time.Second,
-	})
-
-	c.Assert(err, IsNil)
-	return client
-}
-
-func deleteRoot(c *C, client *clientv3.Client, rootPath string) {
-	kv := clientv3.NewKV(client)
-
-	_, err := kv.Delete(context.Background(), rootPath+"/", clientv3.WithPrefix())
-	c.Assert(err, IsNil)
-
-	_, err = kv.Delete(context.Background(), rootPath)
-	c.Assert(err, IsNil)
 }
 
 var _ = Suite(&testLeaderServerSuite{})
@@ -84,15 +57,33 @@ func (s *testLeaderServerSuite) getRootPath() string {
 func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 	s.svrs = make(map[string]*Server)
 
+	etcdCfgs := NewTestMultiEtcdConfig(3)
+
+	ch := make(chan *Server, 3)
 	for i := 0; i < 3; i++ {
-		svr := newTestServer(c, s.getRootPath())
+		cfg := &Config{
+			Addr:            "127.0.0.1:0",
+			RootPath:        s.getRootPath(),
+			LeaderLease:     1,
+			TsoSaveInterval: 500,
+			ClusterID:       0,
+			EtcdCfg:         etcdCfgs[i],
+		}
+
+		go func() {
+			svr, err := NewServer(cfg)
+			c.Assert(err, IsNil)
+			ch <- svr
+		}()
+	}
+
+	for i := 0; i < 3; i++ {
+		svr := <-ch
 		s.svrs[svr.cfg.AdvertiseAddr] = svr
 		s.leaderPath = svr.getLeaderPath()
 	}
 
-	s.client = newEtcdClient(c)
-
-	deleteRoot(c, s.client, s.getRootPath())
+	s.setUpClient(c)
 }
 
 func (s *testLeaderServerSuite) TearDownSuite(c *C) {
@@ -102,30 +93,45 @@ func (s *testLeaderServerSuite) TearDownSuite(c *C) {
 	s.client.Close()
 }
 
+func (s *testLeaderServerSuite) setUpClient(c *C) {
+	endpoints := make([]string, 0, 3)
+
+	for _, svr := range s.svrs {
+		endpoints = append(endpoints, svr.GetEndpoints()...)
+	}
+
+	var err error
+	s.client, err = clientv3.New(clientv3.Config{
+		Endpoints:   endpoints,
+		DialTimeout: 3 * time.Second,
+	})
+	c.Assert(err, IsNil)
+}
+
 func (s *testLeaderServerSuite) TestLeader(c *C) {
 	for _, svr := range s.svrs {
 		go svr.Run()
 	}
 
-	for i := 0; i < 100 && len(s.svrs) > 0; i++ {
-		leader, err := getLeader(s.client, s.leaderPath)
-		c.Assert(err, IsNil)
+	leader1 := mustGetLeader(c, s.client, s.leaderPath)
+	svr, ok := s.svrs[leader1.GetAddr()]
+	c.Assert(ok, IsTrue)
+	svr.Close()
+	delete(s.svrs, leader1.GetAddr())
 
-		if leader == nil {
-			time.Sleep(500 * time.Millisecond)
-			continue
+	// now, another two servers must select a leader
+	s.setUpClient(c)
+
+	// wait leader changes
+	for i := 0; i < 50; i++ {
+		leader, _ := getLeader(s.client, s.leaderPath)
+		if leader != nil && leader.GetAddr() != leader1.GetAddr() {
+			break
 		}
 
-		// The leader key is not expired, retry again.
-		svr, ok := s.svrs[leader.GetAddr()]
-		if !ok {
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
-
-		delete(s.svrs, leader.GetAddr())
-		svr.Close()
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	c.Assert(s.svrs, HasLen, 0)
+	leader2 := mustGetLeader(c, s.client, s.leaderPath)
+	c.Assert(leader1.GetAddr(), Not(Equals), leader2.GetAddr())
 }
