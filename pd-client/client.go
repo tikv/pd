@@ -184,14 +184,14 @@ func (c *client) watchLeader(leaderPath string, revision int64) {
 				break
 			}
 
-			leaderAddr, rev, err := getLeader(c.etcdClient, leaderPath)
-			if err != nil {
-				log.Warn(err)
+			// We don't watch any changed, no need to check leader again.
+			if len(resp.Events) == 0 {
 				break
 			}
 
-			if revision == rev {
-				log.Infof("revision %d not changed, leader is not changed too", revision)
+			leaderAddr, rev, err := getLeader(c.etcdClient, leaderPath)
+			if err != nil {
+				log.Warn(err)
 				break
 			}
 
