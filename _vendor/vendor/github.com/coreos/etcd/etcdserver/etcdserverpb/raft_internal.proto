@@ -33,18 +33,40 @@ message InternalRaftRequest {
   LeaseGrantRequest lease_grant = 8;
   LeaseRevokeRequest lease_revoke = 9;
 
-  AuthEnableRequest auth_enable = 10;
-  AuthDisableRequest auth_disable = 11;
-  AuthUserAddRequest auth_user_add = 12;
-  AuthUserDeleteRequest auth_user_delete = 13;
-  AuthUserChangePasswordRequest auth_user_change_password = 14;
-  AuthUserGrantRequest auth_user_grant = 15;
-  AuthRoleAddRequest auth_role_add = 16;
-  AuthRoleGrantRequest auth_role_grant = 17;
-  AuthenticateRequest authenticate = 18;
+  AlarmRequest alarm = 10;
 
-  AlarmRequest alarm = 19;
+  AuthEnableRequest auth_enable = 1000;
+  AuthDisableRequest auth_disable = 1011;
+
+  InternalAuthenticateRequest authenticate = 1012;
+
+  AuthUserAddRequest auth_user_add = 1100;
+  AuthUserDeleteRequest auth_user_delete = 1101;
+  AuthUserGetRequest auth_user_get = 1102;
+  AuthUserChangePasswordRequest auth_user_change_password = 1103;
+  AuthUserGrantRoleRequest auth_user_grant_role = 1104;
+  AuthUserRevokeRoleRequest auth_user_revoke_role = 1105;
+  AuthUserListRequest auth_user_list = 1106;
+  AuthRoleListRequest auth_role_list = 1107;
+
+  AuthRoleAddRequest auth_role_add = 1200;
+  AuthRoleDeleteRequest auth_role_delete = 1201;
+  AuthRoleGetRequest auth_role_get = 1202;
+  AuthRoleGrantPermissionRequest auth_role_grant_permission = 1203;
+  AuthRoleRevokePermissionRequest auth_role_revoke_permission = 1204;
 }
 
 message EmptyResponse {
 }
+
+// What is the difference between AuthenticateRequest (defined in rpc.proto) and InternalAuthenticateRequest?
+// InternalAuthenticateRequest has a member that is filled by etcdserver and shouldn't be user-facing.
+// For avoiding misusage the field, we have an internal version of AuthenticateRequest.
+message InternalAuthenticateRequest {
+  string name = 1;
+  string password = 2;
+
+  // simple_token is generated in API layer (etcdserver/v3_server.go)
+  string simple_token = 3;
+}
+
