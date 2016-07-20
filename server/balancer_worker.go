@@ -46,7 +46,7 @@ func newBalancerWorker(cluster *clusterInfo, cfg *BalanceConfig) *balancerWorker
 		cfg:              cfg,
 		cluster:          cluster,
 		balanceOperators: make(map[uint64]*balanceOperator),
-		regionCache:      newExpireRegionCache(time.Duration(cfg.BalanceInterval)*time.Second, 2*time.Duration(cfg.BalanceInterval)*time.Second),
+		regionCache:      newExpireRegionCache(time.Duration(cfg.BalanceInterval)*time.Second, 4*time.Duration(cfg.BalanceInterval)*time.Second),
 		historyOperators: newLRUCache(100),
 		events:           newFifoCache(10000),
 		quit:             make(chan struct{}),

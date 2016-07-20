@@ -30,7 +30,6 @@ var (
 type Balancer interface {
 	// Balance selects one store to do balance.
 	Balance(cluster *clusterInfo) (*score, *balanceOperator, error)
-
 	// ScoreType returns score type.
 	ScoreType() scoreType
 }
