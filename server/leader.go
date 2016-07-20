@@ -28,6 +28,8 @@ import (
 	"golang.org/x/net/context"
 )
 
+const checkEtcdLeaderInterval = time.Second
+
 // isLeader returns whether server is leader or not.
 func (s *Server) isLeader() bool {
 	return atomic.LoadInt64(&s.isLeaderValue) == 1
@@ -86,6 +88,13 @@ func (s *Server) leaderLoop() {
 			}
 		}
 
+		if !s.isEtcdLeader() {
+			// we should put pd leader and etcd leader together
+			log.Infof("pd's etcd %s is not leader, leader is %s", s.etcd.Server.ID(), s.etcd.Server.Leader())
+			time.Sleep(checkEtcdLeaderInterval)
+			continue
+		}
+
 		if err = s.campaignLeader(); err != nil {
 			log.Errorf("campaign leader err %s", errors.ErrorStack(err))
 		}
@@ -129,8 +138,12 @@ func (s *Server) marshalLeader() string {
 	return string(data)
 }
 
+func (s *Server) isEtcdLeader() bool {
+	return s.etcd.Server.ID() == s.etcd.Server.Leader()
+}
+
 func (s *Server) campaignLeader() error {
-	log.Debug("begin to campaign leader")
+	log.Debugf("begin to campaign leader %s", s.cfg.AdvertiseAddr)
 
 	lessor := clientv3.NewLease(s.client)
 	defer lessor.Close()
@@ -163,7 +176,7 @@ func (s *Server) campaignLeader() error {
 		return errors.New("campaign leader failed, other server may campaign ok")
 	}
 
-	log.Debug("campaign leader ok")
+	log.Debugf("campaign leader ok %s", s.cfg.AdvertiseAddr)
 	s.enableLeader(true)
 	defer s.enableLeader(false)
 
@@ -187,6 +200,9 @@ func (s *Server) campaignLeader() error {
 	tsTicker := time.NewTicker(time.Duration(updateTimestampStep) * time.Millisecond)
 	defer tsTicker.Stop()
 
+	leaderTicker := time.NewTicker(checkEtcdLeaderInterval)
+	defer leaderTicker.Stop()
+
 	for {
 		select {
 		case _, ok := <-ch:
@@ -197,6 +213,10 @@ func (s *Server) campaignLeader() error {
 		case <-tsTicker.C:
 			if err = s.updateTimestamp(); err != nil {
 				return errors.Trace(err)
+			}
+		case <-leaderTicker.C:
+			if !s.isEtcdLeader() {
+				return errors.New("current etcd member is not leader")
 			}
 		}
 	}

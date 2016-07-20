@@ -15,6 +15,7 @@ package server
 
 import (
 	"net"
+	"os"
 	"sync/atomic"
 
 	"github.com/golang/protobuf/proto"
@@ -35,15 +36,15 @@ func (s *testClusterCacheSuite) getRootPath() string {
 
 func (s *testClusterCacheSuite) SetUpSuite(c *C) {
 	s.svr = newTestServer(c, s.getRootPath())
-	s.client = newEtcdClient(c)
-	deleteRoot(c, s.client, s.getRootPath())
+	s.client = s.svr.client
 
 	go s.svr.Run()
 }
 
 func (s *testClusterCacheSuite) TearDownSuite(c *C) {
 	s.svr.Close()
-	s.client.Close()
+
+	os.RemoveAll(s.svr.cfg.EtcdCfg.DataDir)
 }
 
 func (s *testClusterCacheSuite) TestCache(c *C) {

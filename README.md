@@ -9,7 +9,7 @@ Pd is the abbreviate for placement driver.
 
 + Install [*Go*](https://golang.org/), (version 1.5+ is required).
 + `make build`
-+ `./bin/pd-server --etcd=127.0.0.1:2379`
++ `./bin/pd-server`
 
 ## Docker
 
@@ -24,14 +24,12 @@ docker build -t pingcap/pd .
 ### Single Node
 
 ```
-// Start etcd
 export HostIP="0.0.0.0"
-docker run -d -p 2379:2379 -p 2380:2380 -p 4001:4001 --name etcd pingcap/etcd \
-    --listen-client-urls="http://0.0.0.0:2379" \
-    --advertise-client-urls="http://${HostIP}:2379"
 
-// Start pd
-docker run -d -p 1234:1234 --name pd --link etcd:etcd pingcap/pd --etcd=etcd:2379
+# Start pd
+docker run -d -p 1234:1234 -p 9090:9090 -p 2379:2379 -p 2380:2380 --name pd pingcap/pd \
+    --etcd-listen-client-url="http://0.0.0.0:2379" \
+    --etcd-advertise-client-url="http://${HostIP}:2379"
 ```
 
 ### Cluster

@@ -16,6 +16,7 @@ package server
 import (
 	"math/rand"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -175,11 +176,9 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	s.svr = newTestServer(c, s.getRootPath())
 	s.svr.cfg.nextRetryDelay = 50 * time.Millisecond
 
-	s.client = newEtcdClient(c)
+	s.client = s.svr.client
 
 	s.regionLeaders = make(map[uint64]metapb.Peer)
-
-	deleteRoot(c, s.client, s.getRootPath())
 
 	go s.svr.Run()
 
@@ -207,7 +206,8 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 
 func (s *testClusterWorkerSuite) TearDownTest(c *C) {
 	s.svr.Close()
-	s.client.Close()
+
+	os.RemoveAll(s.svr.cfg.EtcdCfg.DataDir)
 }
 
 func (s *testClusterWorkerSuite) checkRegionPeerCount(c *C, regionKey []byte, expectCount int) *metapb.Region {

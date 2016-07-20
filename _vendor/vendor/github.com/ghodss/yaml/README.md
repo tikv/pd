@@ -44,8 +44,6 @@ import "github.com/ghodss/yaml"
 Usage is very similar to the JSON library:
 
 ```go
-package main
-
 import (
 	"fmt"
 
@@ -54,7 +52,7 @@ import (
 
 type Person struct {
 	Name string `json:"name"`  // Affects YAML field names too.
-	Age int `json:"age"`
+	Age int `json:"name"`
 }
 
 func main() {
@@ -67,13 +65,13 @@ func main() {
 	}
 	fmt.Println(string(y))
 	/* Output:
-	age: 30
 	name: John
+	age: 30
 	*/
 
 	// Unmarshal the YAML back into a Person struct.
 	var p2 Person
-	err = yaml.Unmarshal(y, &p2)
+	err := yaml.Unmarshal(y, &p2)
 	if err != nil {
 		fmt.Printf("err: %v\n", err)
 		return
@@ -88,8 +86,6 @@ func main() {
 `yaml.YAMLToJSON` and `yaml.JSONToYAML` methods are also available:
 
 ```go
-package main
-
 import (
 	"fmt"
 

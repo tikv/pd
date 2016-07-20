@@ -16,6 +16,7 @@ package server
 import (
 	"math/rand"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -40,15 +41,14 @@ func (s *testTsoSuite) getRootPath() string {
 
 func (s *testTsoSuite) SetUpSuite(c *C) {
 	s.svr = newTestServer(c, s.getRootPath())
-	s.client = newEtcdClient(c)
-	deleteRoot(c, s.client, s.getRootPath())
+	s.client = s.svr.client
 
 	go s.svr.Run()
 }
 
 func (s *testTsoSuite) TearDownSuite(c *C) {
 	s.svr.Close()
-	s.client.Close()
+	os.RemoveAll(s.svr.cfg.EtcdCfg.DataDir)
 }
 
 func sendRequest(c *C, conn net.Conn, msgID uint64, request *pdpb.Request) {
@@ -91,7 +91,7 @@ func (s *testTsoSuite) testGetTimestamp(c *C, conn net.Conn, n int) {
 }
 
 func mustGetLeader(c *C, client *clientv3.Client, leaderPath string) *pdpb.Leader {
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 20; i++ {
 		leader, err := getLeader(client, leaderPath)
 		c.Assert(err, IsNil)
 		if leader != nil {

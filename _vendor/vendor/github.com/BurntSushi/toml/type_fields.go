@@ -92,11 +92,11 @@ func typeFields(t reflect.Type) []field {
 			// Scan f.typ for fields to include.
 			for i := 0; i < f.typ.NumField(); i++ {
 				sf := f.typ.Field(i)
-				if sf.PkgPath != "" && !sf.Anonymous { // unexported
+				if sf.PkgPath != "" { // unexported
 					continue
 				}
-				opts := getOptions(sf.Tag)
-				if opts.skip {
+				name := sf.Tag.Get("toml")
+				if name == "-" {
 					continue
 				}
 				index := make([]int, len(f.index)+1)
@@ -110,9 +110,8 @@ func typeFields(t reflect.Type) []field {
 				}
 
 				// Record found field and index sequence.
-				if opts.name != "" || !sf.Anonymous || ft.Kind() != reflect.Struct {
-					tagged := opts.name != ""
-					name := opts.name
+				if name != "" || !sf.Anonymous || ft.Kind() != reflect.Struct {
+					tagged := name != ""
 					if name == "" {
 						name = sf.Name
 					}

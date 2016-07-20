@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/embed"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"golang.org/x/net/context"
@@ -34,6 +35,8 @@ const (
 // Server is the pd server.
 type Server struct {
 	cfg *Config
+
+	etcd *embed.Etcd
 
 	listener net.Listener
 
@@ -73,12 +76,29 @@ type Server struct {
 func NewServer(cfg *Config) (*Server, error) {
 	cfg.adjust()
 
-	log.Infof("create etcd v3 client with endpoints %v", cfg.EtcdAddrs)
+	log.Info("start etcd...")
+	etcdCfg, err := cfg.EtcdCfg.GenEmbedEtcd()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	etcd, err := embed.StartEtcd(etcdCfg)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	endpoints := []string{etcd.Clients[0].Addr().String()}
+
+	log.Infof("create etcd v3 client with endpoints %v", endpoints)
 	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   cfg.EtcdAddrs,
+		Endpoints:   endpoints,
 		DialTimeout: etcdTimeout,
 	})
 	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	if err = isEtcdRunning(client, endpoints[0]); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -96,6 +116,7 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	s := &Server{
 		cfg:           cfg,
+		etcd:          etcd,
 		listener:      l,
 		client:        client,
 		isLeaderValue: 0,
@@ -122,7 +143,7 @@ func (s *Server) Close() {
 		return
 	}
 
-	log.Info("closing server")
+	log.Infof("closing server")
 
 	s.enableLeader(false)
 
@@ -134,7 +155,16 @@ func (s *Server) Close() {
 		s.client.Close()
 	}
 
+	if s.etcd != nil {
+		id := s.ID()
+		log.Infof("closing etcd %d", id)
+		s.etcd.Close()
+		log.Infof("close etcd %d", id)
+	}
+
 	s.wg.Wait()
+
+	log.Info("close server")
 }
 
 // isClosed checks whether server is closed or not.
@@ -170,6 +200,21 @@ func (s *Server) Run() error {
 	}
 
 	return nil
+}
+
+// GetEndpoints returns the etcd endpoints for outer use.
+func (s *Server) GetEndpoints() []string {
+	return s.client.Endpoints()
+}
+
+// ID returns the unique etcd ID for this server in etcd cluster.
+func (s *Server) ID() uint64 {
+	return uint64(s.etcd.Server.ID())
+}
+
+// GetConfig returns current configuration.
+func (s *Server) GetConfig() *Config {
+	return s.cfg
 }
 
 func (s *Server) closeAllConnections() {

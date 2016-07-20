@@ -16,6 +16,7 @@
 		RequestHeader
 		InternalRaftRequest
 		EmptyResponse
+		InternalAuthenticateRequest
 		ResponseHeader
 		RangeRequest
 		RangeResponse
@@ -23,8 +24,8 @@
 		PutResponse
 		DeleteRangeRequest
 		DeleteRangeResponse
-		RequestUnion
-		ResponseUnion
+		RequestOp
+		ResponseOp
 		Compare
 		TxnRequest
 		TxnResponse
@@ -67,13 +68,15 @@
 		AuthUserGetRequest
 		AuthUserDeleteRequest
 		AuthUserChangePasswordRequest
-		AuthUserGrantRequest
-		AuthUserRevokeRequest
+		AuthUserGrantRoleRequest
+		AuthUserRevokeRoleRequest
 		AuthRoleAddRequest
 		AuthRoleGetRequest
+		AuthUserListRequest
+		AuthRoleListRequest
 		AuthRoleDeleteRequest
-		AuthRoleGrantRequest
-		AuthRoleRevokeRequest
+		AuthRoleGrantPermissionRequest
+		AuthRoleRevokePermissionRequest
 		AuthEnableResponse
 		AuthDisableResponse
 		AuthenticateResponse
@@ -81,13 +84,15 @@
 		AuthUserGetResponse
 		AuthUserDeleteResponse
 		AuthUserChangePasswordResponse
-		AuthUserGrantResponse
-		AuthUserRevokeResponse
+		AuthUserGrantRoleResponse
+		AuthUserRevokeRoleResponse
 		AuthRoleAddResponse
 		AuthRoleGetResponse
+		AuthRoleListResponse
+		AuthUserListResponse
 		AuthRoleDeleteResponse
-		AuthRoleGrantResponse
-		AuthRoleRevokeResponse
+		AuthRoleGrantPermissionResponse
+		AuthRoleRevokePermissionResponse
 */
 package etcdserverpb
 

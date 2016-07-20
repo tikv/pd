@@ -16,6 +16,7 @@ package server
 import (
 	"math/rand"
 	"net"
+	"os"
 	"sync"
 
 	"github.com/coreos/etcd/clientv3"
@@ -37,17 +38,16 @@ func (s *testAllocIDSuite) getRootPath() string {
 
 func (s *testAllocIDSuite) SetUpSuite(c *C) {
 	s.svr = newTestServer(c, s.getRootPath())
-	s.client = newEtcdClient(c)
+	s.client = s.svr.client
 	s.alloc = s.svr.idAlloc
-
-	deleteRoot(c, s.client, s.getRootPath())
 
 	go s.svr.Run()
 }
 
 func (s *testAllocIDSuite) TearDownSuite(c *C) {
 	s.svr.Close()
-	s.client.Close()
+
+	os.RemoveAll(s.svr.cfg.EtcdCfg.DataDir)
 }
 
 func (s *testAllocIDSuite) TestID(c *C) {

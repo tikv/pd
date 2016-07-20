@@ -17,6 +17,7 @@ import (
 	"path"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
@@ -53,12 +54,13 @@ type Client interface {
 }
 
 type client struct {
-	clusterID   uint64
-	etcdClient  *clientv3.Client
-	workerMutex sync.RWMutex
-	worker      *rpcWorker
-	wg          sync.WaitGroup
-	quit        chan struct{}
+	clusterID      uint64
+	etcdClient     *clientv3.Client
+	workerMutex    sync.RWMutex
+	worker         *rpcWorker
+	wg             sync.WaitGroup
+	quit           chan struct{}
+	watchTimeoutMS int64
 }
 
 func getLeaderPath(clusterID uint64, rootPath string) string {
@@ -87,6 +89,7 @@ func NewClient(etcdAddrs []string, rootPath string, clusterID uint64) (Client, e
 		if err == nil {
 			break
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
 
@@ -95,10 +98,11 @@ func NewClient(etcdAddrs []string, rootPath string, clusterID uint64) (Client, e
 	}
 
 	client := &client{
-		clusterID:  clusterID,
-		etcdClient: etcdClient,
-		worker:     newRPCWorker(leaderAddr, clusterID),
-		quit:       make(chan struct{}),
+		clusterID:      clusterID,
+		etcdClient:     etcdClient,
+		worker:         newRPCWorker(leaderAddr, clusterID),
+		quit:           make(chan struct{}),
+		watchTimeoutMS: defaultWatchTimeoutMS,
 	}
 
 	client.wg.Add(1)
@@ -165,31 +169,50 @@ func (c *client) GetStore(storeID uint64) (*metapb.Store, error) {
 	return store, nil
 }
 
+// TODO: find a better way to solve watch doesn't know etcd is closed.
+const defaultWatchTimeoutMS = 30000
+
 func (c *client) watchLeader(leaderPath string, revision int64) {
 	defer c.wg.Done()
-WATCH:
+
 	for {
 		log.Infof("[pd] start watch pd leader on path %v, revision %v", leaderPath, revision)
-		rch := c.etcdClient.Watch(context.Background(), leaderPath, clientv3.WithRev(revision))
-		select {
-		case resp := <-rch:
+		// Now if the etcd is closed, watch can't know it, see https://github.com/coreos/etcd/issues/5985.
+		timeout := time.Duration(atomic.LoadInt64(&c.watchTimeoutMS)) * time.Millisecond
+		ctx, cancel := context.WithTimeout(c.etcdClient.Ctx(), timeout)
+		rch := c.etcdClient.Watch(ctx, leaderPath, clientv3.WithRev(revision))
+
+		for resp := range rch {
 			if resp.Canceled {
 				log.Warn("[pd] leader watcher canceled")
-				continue WATCH
+				break
 			}
+
 			leaderAddr, rev, err := getLeader(c.etcdClient, leaderPath)
 			if err != nil {
 				log.Warn(err)
-				continue WATCH
+				break
 			}
+
+			if revision == rev {
+				log.Infof("revision %d not changed, leader is not changed too", revision)
+				break
+			}
+
 			log.Infof("[pd] found new pd-server leader addr: %v", leaderAddr)
 			c.workerMutex.Lock()
 			c.worker.stop(errors.New("[pd] leader change"))
 			c.worker = newRPCWorker(leaderAddr, c.clusterID)
 			c.workerMutex.Unlock()
 			revision = rev
+		}
+
+		cancel()
+
+		select {
 		case <-c.quit:
 			return
+		default:
 		}
 	}
 }
