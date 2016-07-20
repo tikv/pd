@@ -14,10 +14,10 @@
 package pd
 
 import (
-	"flag"
 	"fmt"
 	"net"
-	"strings"
+	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -34,10 +34,6 @@ import (
 func TestClient(t *testing.T) {
 	TestingT(t)
 }
-
-var (
-	testEtcd = flag.String("etcd", "127.0.0.1:2379", "Etcd endpoints, separated by comma")
-)
 
 var _ = Suite(&testClientSuite{})
 
@@ -67,34 +63,41 @@ var (
 type testClientSuite struct {
 	srv    *server.Server
 	client Client
+	port   int
 }
 
 func (s *testClientSuite) SetUpSuite(c *C) {
-	s.srv = newServer(c, 1234, "/pd-test", clusterID)
+	s.srv = newServer(c, "/pd-test", clusterID)
+	_, port, err := net.SplitHostPort(s.srv.GetConfig().AdvertiseAddr)
+	c.Assert(err, IsNil)
+
+	s.port, err = strconv.Atoi(port)
+	c.Assert(err, IsNil)
 
 	// wait for srv to become leader
 	time.Sleep(time.Second * 3)
 
-	bootstrapServer(c, 1234)
+	bootstrapServer(c, s.port)
 
-	var err error
-	s.client, err = NewClient(strings.Split(*testEtcd, ","), "/pd-test", clusterID)
+	s.client, err = NewClient(s.srv.GetEndpoints(), "/pd-test", clusterID)
 	c.Assert(err, IsNil)
 }
 
 func (s *testClientSuite) TearDownSuite(c *C) {
-	s.client.Close()
 	s.srv.Close()
+	s.client.Close()
+	os.RemoveAll(s.srv.GetConfig().EtcdCfg.DataDir)
 }
 
-func newServer(c *C, port int, root string, clusterID uint64) *server.Server {
+func newServer(c *C, root string, clusterID uint64) *server.Server {
 	cfg := &server.Config{
-		Addr:        fmt.Sprintf("127.0.0.1:%d", port),
-		EtcdAddrs:   strings.Split(*testEtcd, ","),
+		Addr:        fmt.Sprintf("127.0.0.1:0"),
 		RootPath:    root,
 		LeaderLease: 1,
 		ClusterID:   clusterID,
+		EtcdCfg:     server.NewTestSingleEtcdConfig(),
 	}
+
 	s, err := server.NewServer(cfg)
 	c.Assert(err, IsNil)
 
@@ -170,7 +173,7 @@ func (s *testClientSuite) TestTSO(c *C) {
 }
 
 func (s *testClientSuite) TestGetRegion(c *C) {
-	heartbeatRegion(c, 1234)
+	heartbeatRegion(c, s.port)
 
 	r, leader, err := s.client.GetRegion([]byte("a"))
 	c.Assert(err, IsNil)
