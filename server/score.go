@@ -19,8 +19,8 @@ import (
 )
 
 type score struct {
-	first     int
-	second    int
+	from      int
+	to        int
 	diff      int
 	threshold int
 	st        string
@@ -37,7 +37,7 @@ func priorityScore(cfg *BalanceConfig, scores []*score) (int, *score) {
 		priority := score.diff
 		if score.threshold != -1 {
 			// If the score diff is close to threshold value, we should add the priority weight.
-			if abs(score.threshold-score.first) <= int(100*cfg.MaxDiffScoreFraction) {
+			if score.threshold-score.from <= int(100*cfg.MaxDiffScoreFraction) {
 				priority += 10
 			}
 		}
@@ -139,8 +139,8 @@ func checkAndGetDiffScore(cluster *clusterInfo, oldPeer *metapb.Peer, newPeer *m
 	}
 
 	score := &score{
-		first:     oldStoreScore,
-		second:    newStoreScore,
+		from:      oldStoreScore,
+		to:        newStoreScore,
 		diff:      diffScore,
 		threshold: scoreThreshold(cfg, st),
 		st:        st.String(),

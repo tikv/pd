@@ -157,11 +157,3 @@ func mergeMap(m1 map[uint64]struct{}, m2 map[uint64]struct{}) map[uint64]struct{
 
 	return data
 }
-
-func abs(a int) int {
-	if a < 0 {
-		return -a
-	}
-
-	return a
-}
