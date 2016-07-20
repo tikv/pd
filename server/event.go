@@ -16,7 +16,7 @@ package server
 import (
 	"sync/atomic"
 
-	"github.com/pingcap/kvproto/pkg/raftpb"
+	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 )
 
 type statusType byte

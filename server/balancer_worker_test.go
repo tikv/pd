@@ -15,7 +15,7 @@ package server
 
 import (
 	. "github.com/pingcap/check"
-	"github.com/pingcap/kvproto/pkg/raftpb"
+	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 )
 
 var _ = Suite(&testBalancerWorkerSuite{})

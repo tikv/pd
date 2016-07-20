@@ -23,9 +23,9 @@ import (
 	"github.com/google/btree"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/raftpb"
 )
 
 const (
