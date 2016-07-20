@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/embed"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"golang.org/x/net/context"
@@ -34,6 +35,10 @@ const (
 // Server is the pd server.
 type Server struct {
 	cfg *Config
+
+	// Nothing to do now, we put here only to introduce the etcd in vendor.
+	// TODO: support embedding etcd.
+	etcd *embed.Etcd
 
 	listener net.Listener
 
