@@ -306,6 +306,7 @@ type EtcdConfig struct {
 	AdvertiseClientURL  string `toml:"advertise-client-url" json:"advertise-client-url"`
 	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
 	InitialClusterToken string `toml:"initial-cluster-token" json:"initial-cluster-token"`
+	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
 }
 
 const (
@@ -331,6 +332,7 @@ func newEtcdConfig() *EtcdConfig {
 		AdvertiseClientURL:  defaultEtcdAdvertiseClientURL,
 		InitialCluster:      defaultEtcdInitialCluster,
 		InitialClusterToken: defaultEtcdInitialClusterToken,
+		InitialClusterState: embed.ClusterStateFlagNew,
 	}
 }
 

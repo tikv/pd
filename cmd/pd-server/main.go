@@ -62,7 +62,8 @@ var (
 	etcdAdvertisePeerURL    = flag.String("etcd-advertise-peer-url", "http://localhost:2380", "Etcd: peer URL to advertise to the rest of the cluster")
 	etcdAdvertiseClientURL  = flag.String("etcd-advertise-client-url", "http://localhost:2379", "Etcd: client URL to advertise to the public")
 	etcdInitialCluster      = flag.String("etcd-initial-cluster", "default=http://localhost:2380", "Etcd: initial cluster configuration for bootstrapping")
-	etcdInitialClusterToken = flag.String("etcd-initial-cluster-token", "etcd-cluster", "initial cluster token for the etcd cluster during bootstrap")
+	etcdInitialClusterToken = flag.String("etcd-initial-cluster-token", "etcd-cluster", "Etcd: initial cluster token for the etcd cluster during bootstrap")
+	etcdInitialClusterState = flag.String("etcd-initial-cluster-state", "new", "initial cluster state ('new' or 'existing')")
 )
 
 func setCmdArgs(cfg *server.Config) {
@@ -103,6 +104,7 @@ func setCmdArgs(cfg *server.Config) {
 	setStringFlagConfig(&cfg.EtcdCfg.AdvertiseClientURL, "etcd-advertise-client-url", *etcdAdvertiseClientURL)
 	setStringFlagConfig(&cfg.EtcdCfg.InitialCluster, "etcd-initial-cluster", *etcdInitialCluster)
 	setStringFlagConfig(&cfg.EtcdCfg.InitialClusterToken, "etcd-initial-cluster-token", *etcdInitialClusterToken)
+	setStringFlagConfig(&cfg.EtcdCfg.InitialClusterState, "etcd-initial-cluster-state", *etcdInitialClusterState)
 }
 
 func main() {
