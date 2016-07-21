@@ -1,6 +1,6 @@
 # Clustering Guide
 
-## A 3 nodes local cluster
+## A 3-node local cluster
 
 ```bash
 # Set correct HostIP here. 
@@ -50,7 +50,7 @@ pd-server --cluster-id=1 \
           
 ```
 
-Use `http` to see cluster members:
+Use `http` to see the cluster members:
 
 ```bash
 http :12379/v2/members
@@ -97,7 +97,7 @@ X-Etcd-Cluster-Id: 2d51087373879c4a
 }
 ```
 
-## A 3 nodes local cluster with docker
+## A 3-node local cluster with Docker
 
 ```bash
 
@@ -144,7 +144,7 @@ docker run -d -p 31234:1234 -p 39090:9090 -p 32379:2379 -p 32380:2380 --name pd3
         --etcd-listen-client-url="http://0.0.0.0:2379" 
 ```
 
-Using `docker ps` to see cluster starts ok:
+Using `docker ps` to see the running containers and check if the cluster is started:
 
 ```bash
 docker ps
@@ -154,7 +154,7 @@ CONTAINER ID        IMAGE               COMMAND                  CREATED        
 b8a3d7f815b2        pingcap/pd          "pd-server --addr=0.0"   9 seconds ago       Up 9 seconds        0.0.0.0:11234->1234/tcp, 0.0.0.0:12379->2379/tcp, 0.0.0.0:12380->2380/tcp, 0.0.0.0:19090->9090/tcp   pd1
 ```
 
-Use `http` to see cluster members:
+Use `http` to see cluster the members:
 
 ```bash
 http :12379/v2/members 

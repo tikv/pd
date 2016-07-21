@@ -5,16 +5,18 @@
 
 PD is the abbreviation for Placement Driver. It is used to manage and schedule the [TiKV](https://github.com/pingcap/tikv) cluster. 
 
-Now PD itself support distributed and fault-tolerant through embedding [etcd](https://github.com/coreos/etcd). 
+PD supports distribution and fault-tolerance by embedding [etcd](https://github.com/coreos/etcd). 
 
 ## Build
 
-You must install [*Go*](https://golang.org/) (version 1.5+) first, then use `make build` to install `pd-server` in `bin` directory. 
+1. Make sure [​*Go*​](https://golang.org/) (version 1.5+) is installed.
+2. Use `make build` to install PD. PD is installed in the `bin` directory. 
+
 ## Usage
 
 ### PD ports
 
-PD supplies some official ports for use.
+You can use the following default ports in PD:
 
 + **1234**: for client requests with customized protocol.
 + **9090**: for client requests with HTTP.
@@ -45,17 +47,17 @@ pd-server --cluster-id=1 \
 
 Command flag explanation:
 
-+ `cluster-id`: Unique ID to distinguish different PD cluster, can't be changed after bootstrapping. 
-+ `addr`: Listening address for client client traffic. The default official address is `0.0.0.0:1234`.
-+ `advertise-addr`: Advertise address for outer client communicates, it must be accessible to PD machine. 
-+ `http-addr`: HTTP listening address for client request. 
-+ `etcd-name`: etcd human readable name for this member. 
++ `cluster-id`: Unique ID to distinguish different PD clusters. It can't be changed after bootstrapping.  
++ `addr`: Listening address for client traffic. The default official address is `0.0.0.0:1234`.
++ `advertise-addr`: Advertise address for external client communication. It must be accessible to the PD node.
++ `http-addr`: HTTP listening address for client requests. 
++ `etcd-name`: etcd human readable name for this node. 
 + `etcd-data-dir`: etcd path to the data directory.
 + `etcd-listen-peer-url`: etcd listening address for peer traffic.
 + `etcd-advertise-peer-url`: etcd advertise peer url to the rest of the cluster.
 + `etcd-listen-client-url`: etcd listening address for client traffic.
 + `etcd-advertise-client-url`: etcd advertise url to the public, it must be accessible to PD machine.
-+ `etcd-initial-cluster-state`: etcd initial cluster state, `new` or `existing`.
++ `etcd-initial-cluster-state`: etcd initial cluster state. The value is either`new` or `existing`.
 + `etcd-initial-cluster`: etcd initail cluster configuration for bootstrapping. 
 
 Using `curl` to see PD member:
@@ -94,19 +96,19 @@ X-Etcd-Cluster-Id: 33dc747581249309
 
 ### Docker
 
-You can use following instruction to build PD docker directly:
+You can use the following command to build a PD image directly:
 
 ```
 docker build -t pingcap/pd .
 ```
 
-Or you can also use following instruction to get PD docker:
+Or you can also use following command to get PD from Docker hub:
 
 ```
 docker pull pingcap/pd
 ```
 
-Run a single node with docker: 
+Run a single node with Docker: 
 
 ```bash
 # Set correct HostIP here. 
