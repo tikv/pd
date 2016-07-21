@@ -122,5 +122,5 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	c.Error("failed getTS from new leader after 5 seconds")
+	c.Error("failed getTS from new leader after 10 seconds")
 }

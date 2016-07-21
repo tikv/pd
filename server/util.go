@@ -180,7 +180,7 @@ const (
 )
 
 // check etcd starts ok or not
-func isEtcdRunning(c *clientv3.Client, endpoint string) error {
+func waitEtcdStart(c *clientv3.Client, endpoint string) error {
 	var err error
 	for i := 0; i < maxCheckEtcdRunningCount; i++ {
 		// etcd may not start ok, we should wait and check again

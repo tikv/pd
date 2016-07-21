@@ -220,9 +220,7 @@ func (s *Server) campaignLeader() error {
 				return errors.New("current etcd member is not leader")
 			}
 		case <-s.client.Ctx().Done():
-			{
-				return errors.New("server closed")
-			}
+			return errors.New("server closed")
 		}
 	}
 }

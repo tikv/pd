@@ -101,7 +101,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, errors.Trace(err)
 	}
 
-	if err = isEtcdRunning(client, endpoints[0]); err != nil {
+	if err = waitEtcdStart(client, endpoints[0]); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -147,7 +147,7 @@ func (s *Server) Close() {
 		return
 	}
 
-	log.Infof("closing server")
+	log.Info("closing server")
 
 	s.enableLeader(false)
 
