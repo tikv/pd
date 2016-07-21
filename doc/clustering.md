@@ -204,10 +204,10 @@ X-Etcd-Cluster-Id: 2d51087373879c4a
 
 TODO...
 
-## Add/Remove pd node dynamically
+## Add/Remove PD node dynamically
 
 TODO...
 
-## Using pd with [kubernetes](http://kubernetes.io/)
+## Using PD with [kubernetes](http://kubernetes.io/)
 
 TODO...
