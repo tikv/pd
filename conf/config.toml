@@ -4,7 +4,6 @@ addr = "127.0.0.1:1234"
 advertise-addr = ""
 etcd-addrs = ["127.0.0.1:2379"]
 http-addr = ":9090"
-pprof-addr = ":6060"
 root = "/pd"
 lease = 3
 log-level = "debug"

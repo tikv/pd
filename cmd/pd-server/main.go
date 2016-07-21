@@ -15,8 +15,6 @@ package main
 
 import (
 	"flag"
-	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -33,7 +31,6 @@ var (
 	addr                   = flag.String("addr", "127.0.0.1:1234", "server listening address")
 	advertiseAddr          = flag.String("advertise-addr", "", "server advertise listening address [127.0.0.1:1234] for client communication")
 	httpAddr               = flag.String("http-addr", ":9090", "http server listening address")
-	pprofAddr              = flag.String("pprof", ":6060", "pprof HTTP listening address")
 	rootPath               = flag.String("root", "/pd", "pd root path in etcd")
 	leaderLease            = flag.Int64("lease", 3, "leader lease time (second)")
 	logLevel               = flag.String("L", "debug", "log level: info, debug, warn, error, fatal")
@@ -73,7 +70,6 @@ func setCmdArgs(cfg *server.Config) {
 	setStringFlagConfig(&cfg.Addr, "addr", *addr)
 	setStringFlagConfig(&cfg.AdvertiseAddr, "advertise-addr", *advertiseAddr)
 	setStringFlagConfig(&cfg.HTTPAddr, "http-addr", *httpAddr)
-	setStringFlagConfig(&cfg.PprofAddr, "pprof", *pprofAddr)
 	setStringFlagConfig(&cfg.RootPath, "root", *rootPath)
 	setIntFlagConfig(&cfg.LeaderLease, "lease", *leaderLease)
 	setStringFlagConfig(&cfg.LogLevel, "L", *logLevel)
@@ -125,10 +121,6 @@ func main() {
 	log.SetHighlighting(false)
 
 	log.Infof("PD config - %v", cfg)
-
-	go func() {
-		http.ListenAndServe(cfg.PprofAddr, nil)
-	}()
 
 	svr, err := server.NewServer(cfg)
 	if err != nil {

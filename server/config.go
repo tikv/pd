@@ -38,9 +38,6 @@ type Config struct {
 	// HTTP server listening address.
 	HTTPAddr string `toml:"http-addr" json:"http-addr"`
 
-	// Pprof listening address.
-	PprofAddr string `toml:"pprof-addr" json:"pprof-addr"`
-
 	// RootPath in Etcd as the prefix for all keys. If not set, use default "pd".
 	// Deprecated and will be removed later.
 	RootPath string `toml:"root" json:"root"`
