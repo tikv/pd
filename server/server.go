@@ -80,7 +80,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	cfg.adjust()
 
 	log.Info("start etcd...")
-	etcdCfg, err := cfg.EtcdCfg.GenEmbedEtcd()
+	etcdCfg, err := cfg.genEmbedEtcdConfig()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

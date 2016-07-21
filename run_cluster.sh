@@ -10,7 +10,7 @@ net="isolated_nw"
 
 function init {
     if ! docker network inspect ${net} > /dev/null 2>&1; then
-        echo "crate docker network ${net}"
+        echo "create docker network ${net}"
         docker network create --driver bridge ${net} 
     fi
 
@@ -18,10 +18,10 @@ function init {
         --link pd1:pd1 --link pd2:pd2 --link pd3:pd3 \
         pingcap/pd  \
         --addr="0.0.0.0:1234" --advertise-addr=${host}:11234 \
+        --cluster-id=1 \
         --etcd-name=pd1 \
         --etcd-advertise-client-url="http://${host}:12379" \
         --etcd-advertise-peer-url="http://pd1:2380" \
-        --etcd-initial-cluster-token="etcd-cluster" \
         --etcd-initial-cluster="pd1=http://pd1:2380,pd2=http://pd2:2380,pd3=http://pd3:2380" \
         --etcd-listen-peer-url="http://0.0.0.0:2380" \
         --etcd-listen-client-url="http://0.0.0.0:2379" 
@@ -30,10 +30,10 @@ function init {
         --link pd1:pd1 --link pd2:pd2 --link pd3:pd3 \
         pingcap/pd  \
         --addr="0.0.0.0:1234" --advertise-addr=${host}:21234 \
+        --cluster-id=1 \
         --etcd-name=pd2 \
         --etcd-advertise-client-url="http://${host}:22379" \
         --etcd-advertise-peer-url="http://pd2:2380" \
-        --etcd-initial-cluster-token="etcd-cluster" \
         --etcd-initial-cluster="pd1=http://pd1:2380,pd2=http://pd2:2380,pd3=http://pd3:2380" \
         --etcd-listen-peer-url="http://0.0.0.0:2380" \
         --etcd-listen-client-url="http://0.0.0.0:2379" 
@@ -42,10 +42,10 @@ function init {
         --link pd1:pd1 --link pd2:pd2 --link pd3:pd3 \
         pingcap/pd  \
         --addr="0.0.0.0:1234" --advertise-addr=${host}:31234 \
+        --cluster-id=1 \
         --etcd-name=pd3 \
         --etcd-advertise-client-url="http://${host}:32379" \
         --etcd-advertise-peer-url="http://pd3:2380" \
-        --etcd-initial-cluster-token="etcd-cluster" \
         --etcd-initial-cluster="pd1=http://pd1:2380,pd2=http://pd2:2380,pd3=http://pd3:2380" \
         --etcd-listen-peer-url="http://0.0.0.0:2380" \
         --etcd-listen-client-url="http://0.0.0.0:2379" 

@@ -42,6 +42,7 @@ type Config struct {
 	PprofAddr string `toml:"pprof-addr" json:"pprof-addr"`
 
 	// RootPath in Etcd as the prefix for all keys. If not set, use default "pd".
+	// Deprecated and will be removed later.
 	RootPath string `toml:"root" json:"root"`
 
 	// LeaderLease time, if leader doesn't update its TTL
@@ -305,20 +306,18 @@ type EtcdConfig struct {
 	AdvertisePeerURL    string `toml:"advertise-peer-url" json:"advertise-peer-url"`
 	AdvertiseClientURL  string `toml:"advertise-client-url" json:"advertise-client-url"`
 	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
-	InitialClusterToken string `toml:"initial-cluster-token" json:"initial-cluster-token"`
 	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
 }
 
 const (
-	defaultEtcdName                = "default"
-	defaultEtcdDataDir             = "default.etcd"
-	defaultEtcdWalDir              = ""
-	defaultEtcdListenPeerURL       = "http://localhost:2380"
-	defaultEtcdListenClientURL     = "http://localhost:2379"
-	defaultEtcdAdvertisePeerURL    = "http://localhost:2380"
-	defaultEtcdAdvertiseClientURL  = "http://localhost:2379"
-	defaultEtcdInitialCluster      = "default=http://localhost:2380"
-	defaultEtcdInitialClusterToken = "etcd-cluster"
+	defaultEtcdName               = "default"
+	defaultEtcdDataDir            = "default.pd"
+	defaultEtcdWalDir             = ""
+	defaultEtcdListenPeerURL      = "http://localhost:2380"
+	defaultEtcdListenClientURL    = "http://localhost:2379"
+	defaultEtcdAdvertisePeerURL   = "http://localhost:2380"
+	defaultEtcdAdvertiseClientURL = "http://localhost:2379"
+	defaultEtcdInitialCluster     = "default=http://localhost:2380"
 )
 
 func newEtcdConfig() *EtcdConfig {
@@ -331,7 +330,6 @@ func newEtcdConfig() *EtcdConfig {
 		AdvertisePeerURL:    defaultEtcdAdvertisePeerURL,
 		AdvertiseClientURL:  defaultEtcdAdvertiseClientURL,
 		InitialCluster:      defaultEtcdInitialCluster,
-		InitialClusterToken: defaultEtcdInitialClusterToken,
 		InitialClusterState: embed.ClusterStateFlagNew,
 	}
 }
@@ -355,39 +353,40 @@ func (c *EtcdConfig) String() string {
 	return fmt.Sprintf("EtcdConfig(%+v)", *c)
 }
 
-// GenEmbedEtcd generates a configuration for embedded etcd.
-func (c *EtcdConfig) GenEmbedEtcd() (*embed.Config, error) {
+// generates a configuration for embedded etcd.
+func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg := embed.NewConfig()
-	cfg.Name = c.Name
-	cfg.Dir = c.DataDir
-	cfg.WalDir = c.WalDir
-	cfg.InitialCluster = c.InitialCluster
-	cfg.InitialClusterToken = c.InitialClusterToken
+	cfg.Name = c.EtcdCfg.Name
+	cfg.Dir = c.EtcdCfg.DataDir
+	cfg.WalDir = c.EtcdCfg.WalDir
+	cfg.InitialCluster = c.EtcdCfg.InitialCluster
+	// Use unique cluster id as the etcd cluster token too.
+	cfg.InitialClusterToken = fmt.Sprintf("pd-%d", c.ClusterID)
 	cfg.ClusterState = embed.ClusterStateFlagNew
 	cfg.EnablePprof = true
 
-	u, err := url.Parse(c.ListenPeerURL)
+	u, err := url.Parse(c.EtcdCfg.ListenPeerURL)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	cfg.LPUrls = []url.URL{*u}
 
-	u, err = url.Parse(c.ListenClientURL)
+	u, err = url.Parse(c.EtcdCfg.ListenClientURL)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	cfg.LCUrls = []url.URL{*u}
 
-	u, err = url.Parse(c.AdvertisePeerURL)
+	u, err = url.Parse(c.EtcdCfg.AdvertisePeerURL)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	cfg.APUrls = []url.URL{*u}
 
-	u, err = url.Parse(c.AdvertiseClientURL)
+	u, err = url.Parse(c.EtcdCfg.AdvertiseClientURL)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

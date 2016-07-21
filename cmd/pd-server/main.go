@@ -34,11 +34,10 @@ var (
 	advertiseAddr          = flag.String("advertise-addr", "", "server advertise listening address [127.0.0.1:1234] for client communication")
 	httpAddr               = flag.String("http-addr", ":9090", "http server listening address")
 	pprofAddr              = flag.String("pprof", ":6060", "pprof HTTP listening address")
-	rootPath               = flag.String("root", "/pd", "pd root path in etcd")
 	leaderLease            = flag.Int64("lease", 3, "leader lease time (second)")
 	logLevel               = flag.String("L", "debug", "log level: info, debug, warn, error, fatal")
 	tsoSaveInterval        = flag.Int64("tso-save-interval", 2000, "the interval time (ms) to save timestamp")
-	clusterID              = flag.Uint64("cluster-id", 0, "cluster ID")
+	clusterID              = flag.Uint64("cluster-id", 0, "initial cluster ID for the pd cluster")
 	maxPeerCount           = flag.Uint64("max-peer-count", 3, "max peer count for the region")
 	metricAddr             = flag.String("metric-addr", "", "metric address")
 	maxLeaderCount         = flag.Uint64("max-leader-count", 10, "the max leader region count for choosing store in balance")
@@ -55,15 +54,14 @@ var (
 
 	// For etcd
 	etcdName                = flag.String("etcd-name", "default", "Etcd: human-readable name for this member")
-	etcdDataDir             = flag.String("etcd-data-dir", "default.etcd", "Etcd: path to the data directory")
+	etcdDataDir             = flag.String("etcd-data-dir", "default.pd", "Etcd: path to the data directory")
 	etcdWalDir              = flag.String("etcd-wal-dir", "", "Etcd: path to the dedicated wal directory")
 	etcdListenPeerURL       = flag.String("etcd-listen-peer-url", "http://localhost:2380", "Etcd: URL to listen on for peer traffic")
 	etcdListenClientURL     = flag.String("etcd-listen-client-url", "http://localhost:2379", "Etcd: URL to listen on for client traffic")
 	etcdAdvertisePeerURL    = flag.String("etcd-advertise-peer-url", "http://localhost:2380", "Etcd: peer URL to advertise to the rest of the cluster")
 	etcdAdvertiseClientURL  = flag.String("etcd-advertise-client-url", "http://localhost:2379", "Etcd: client URL to advertise to the public")
 	etcdInitialCluster      = flag.String("etcd-initial-cluster", "default=http://localhost:2380", "Etcd: initial cluster configuration for bootstrapping")
-	etcdInitialClusterToken = flag.String("etcd-initial-cluster-token", "etcd-cluster", "Etcd: initial cluster token for the etcd cluster during bootstrap")
-	etcdInitialClusterState = flag.String("etcd-initial-cluster-state", "new", "initial cluster state ('new' or 'existing')")
+	etcdInitialClusterState = flag.String("etcd-initial-cluster-state", "new", "Etcd: initial cluster state ('new' or 'existing')")
 )
 
 func setCmdArgs(cfg *server.Config) {
@@ -75,7 +73,6 @@ func setCmdArgs(cfg *server.Config) {
 	setStringFlagConfig(&cfg.AdvertiseAddr, "advertise-addr", *advertiseAddr)
 	setStringFlagConfig(&cfg.HTTPAddr, "http-addr", *httpAddr)
 	setStringFlagConfig(&cfg.PprofAddr, "pprof", *pprofAddr)
-	setStringFlagConfig(&cfg.RootPath, "root", *rootPath)
 	setIntFlagConfig(&cfg.LeaderLease, "lease", *leaderLease)
 	setStringFlagConfig(&cfg.LogLevel, "L", *logLevel)
 	setIntFlagConfig(&cfg.TsoSaveInterval, "tso-save-interval", *tsoSaveInterval)
@@ -103,7 +100,6 @@ func setCmdArgs(cfg *server.Config) {
 	setStringFlagConfig(&cfg.EtcdCfg.AdvertisePeerURL, "etcd-advertise-peer-url", *etcdAdvertisePeerURL)
 	setStringFlagConfig(&cfg.EtcdCfg.AdvertiseClientURL, "etcd-advertise-client-url", *etcdAdvertiseClientURL)
 	setStringFlagConfig(&cfg.EtcdCfg.InitialCluster, "etcd-initial-cluster", *etcdInitialCluster)
-	setStringFlagConfig(&cfg.EtcdCfg.InitialClusterToken, "etcd-initial-cluster-token", *etcdInitialClusterToken)
 	setStringFlagConfig(&cfg.EtcdCfg.InitialClusterState, "etcd-initial-cluster-state", *etcdInitialClusterState)
 }
 
