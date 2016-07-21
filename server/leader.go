@@ -62,6 +62,7 @@ func (s *Server) leaderLoop() {
 
 	for {
 		if s.isClosed() {
+			log.Infof("server is closed, return leader loop")
 			return
 		}
 
@@ -218,6 +219,10 @@ func (s *Server) campaignLeader() error {
 			if !s.isEtcdLeader() {
 				return errors.New("current etcd member is not leader")
 			}
+		case <-s.client.Ctx().Done():
+			{
+				return errors.New("server closed")
+			}
 		}
 	}
 }
@@ -226,8 +231,9 @@ func (s *Server) watchLeader() {
 	watcher := clientv3.NewWatcher(s.client)
 	defer watcher.Close()
 
+	ctx := s.client.Ctx()
 	for {
-		rch := watcher.Watch(s.client.Ctx(), s.getLeaderPath())
+		rch := watcher.Watch(ctx, s.getLeaderPath())
 		for wresp := range rch {
 			if wresp.Canceled {
 				return
@@ -239,6 +245,13 @@ func (s *Server) watchLeader() {
 					return
 				}
 			}
+		}
+
+		select {
+		case <-ctx.Done():
+			// server closed, return
+			return
+		default:
 		}
 	}
 }

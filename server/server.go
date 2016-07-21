@@ -160,9 +160,7 @@ func (s *Server) Close() {
 	}
 
 	if s.etcd != nil {
-		log.Infof("closing etcd %d", s.id)
 		s.etcd.Close()
-		log.Infof("close etcd %d", s.id)
 	}
 
 	s.wg.Wait()
