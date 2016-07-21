@@ -20,7 +20,7 @@ pd-server --cluster-id=1 \
           --etcd-listen-peer-url="http://0.0.0.0:12380" \
           --etcd-listen-client-url="http://0.0.0.0:12379"  
           
-# Start pd2 in one shell
+# Start pd2
 pd-server --cluster-id=1 \
           --addr=0.0.0.0:21234 \
           --advertise-addr="${HostIP}:21234" \
