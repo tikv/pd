@@ -36,7 +36,7 @@ func priorityScore(cfg *BalanceConfig, scores []*score) (int, *score) {
 	for i, score := range scores {
 		priority := score.diff
 		if score.threshold != -1 {
-			// If the score diff is close to threshold value, we should add the priority weight.
+			// If the from store score is close to threshold value, we should add the priority weight.
 			if score.threshold-score.from <= int(100*cfg.MaxDiffScoreFraction) {
 				priority += 10
 			}
