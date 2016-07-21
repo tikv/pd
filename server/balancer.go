@@ -117,6 +117,7 @@ type capacityBalancer struct {
 
 func newCapacityBalancer(cfg *BalanceConfig) *capacityBalancer {
 	cb := &capacityBalancer{cfg: cfg, st: capacityScore}
+	cb.filters = append(cb.filters, newStateFilter(cfg))
 	cb.filters = append(cb.filters, newCapacityFilter(cfg))
 	cb.filters = append(cb.filters, newSnapCountFilter(cfg))
 	return cb
@@ -126,9 +127,8 @@ func (cb *capacityBalancer) ScoreType() scoreType {
 	return cb.st
 }
 
-// selectBalanceRegion tries to select a store follower region to do balance.
 func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*storeInfo) (*metapb.Region, *metapb.Peer, *metapb.Peer) {
-	store := selectFromStore(stores, cluster.getUnknownStores(), cb.filters, cb.st)
+	store := selectFromStore(stores, nil, cb.filters, cb.st)
 	if store == nil {
 		log.Warn("from store cannot be found to select balance region")
 		return nil, nil, nil
@@ -156,7 +156,7 @@ func (cb *capacityBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[
 		stores = append(stores, cluster.getStore(storeID))
 	}
 
-	store := selectToStore(stores, cluster.getUnknownStores(), nil, cb.st)
+	store := selectToStore(stores, nil, nil, cb.st)
 	if store == nil {
 		log.Warn("find no store to get new leader peer for region")
 		return nil
@@ -220,7 +220,6 @@ func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*score, *balanceOpera
 	}
 
 	_, excludedStores := getFollowerPeers(region, leader)
-	excludedStores = mergeMap(excludedStores, cluster.getUnknownStores())
 
 	// Select one store to add new peer.
 	newPeer, err := cb.selectAddPeer(cluster, stores, excludedStores)
@@ -252,6 +251,7 @@ type leaderBalancer struct {
 
 func newLeaderBalancer(cfg *BalanceConfig) *leaderBalancer {
 	lb := &leaderBalancer{cfg: cfg, st: leaderScore}
+	lb.filters = append(lb.filters, newStateFilter(cfg))
 	lb.filters = append(lb.filters, newLeaderCountFilter(cfg))
 	return lb
 }
@@ -262,7 +262,7 @@ func (lb *leaderBalancer) ScoreType() scoreType {
 
 // selectBalanceRegion tries to select a store leader region to do balance.
 func (lb *leaderBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*storeInfo) (*metapb.Region, *metapb.Peer, *metapb.Peer) {
-	store := selectFromStore(stores, cluster.getUnknownStores(), lb.filters, lb.st)
+	store := selectFromStore(stores, nil, lb.filters, lb.st)
 	if store == nil {
 		log.Warn("from store cannot be found to select balance region")
 		return nil, nil, nil
@@ -296,7 +296,7 @@ func (lb *leaderBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[ui
 		stores = append(stores, cluster.getStore(storeID))
 	}
 
-	store := selectToStore(stores, cluster.getUnknownStores(), nil, lb.st)
+	store := selectToStore(stores, nil, nil, lb.st)
 	if store == nil {
 		log.Warn("find no store to get new leader peer for region")
 		return nil
@@ -361,8 +361,6 @@ func (db *defaultBalancer) addPeer(cluster *clusterInfo) (*balanceOperator, erro
 		storeID := peer.GetStoreId()
 		excludedStores[storeID] = struct{}{}
 	}
-
-	excludedStores = mergeMap(excludedStores, cluster.getUnknownStores())
 
 	peer, err := db.selectAddPeer(cluster, stores, excludedStores)
 	if err != nil {

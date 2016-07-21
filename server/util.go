@@ -137,27 +137,6 @@ func sliceClone(strs []string) []string {
 	return data
 }
 
-func mapClone(m map[uint64]struct{}) map[uint64]struct{} {
-	data := make(map[uint64]struct{}, len(m))
-	for k := range m {
-		data[k] = struct{}{}
-	}
-
-	return data
-}
-
-func mergeMap(m1 map[uint64]struct{}, m2 map[uint64]struct{}) map[uint64]struct{} {
-	data := make(map[uint64]struct{}, len(m1)+len(m2))
-	for k := range m1 {
-		data[k] = struct{}{}
-	}
-	for k := range m2 {
-		data[k] = struct{}{}
-	}
-
-	return data
-}
-
 // check whether current etcd is running.
 func endpointStatus(c *clientv3.Client, endpoint string) (*clientv3.StatusResponse, error) {
 	m := clientv3.NewMaintenance(c)

@@ -517,6 +517,8 @@ type StoreStatus struct {
 	// store capacity info.
 	Stats *pdpb.StoreStats `json:"stats"`
 
+	LastHeartbeatTS time.Time `json:"last_heartbeat_ts"`
+
 	LeaderRegionCount int `json:"leader_region_count"`
 
 	TotalRegionCount int `json:"total_region_count"`
@@ -527,6 +529,7 @@ type StoreStatus struct {
 func (s *StoreStatus) clone() *StoreStatus {
 	return &StoreStatus{
 		Stats:             proto.Clone(s.Stats).(*pdpb.StoreStats),
+		LastHeartbeatTS:   s.LastHeartbeatTS,
 		LeaderRegionCount: s.LeaderRegionCount,
 		TotalRegionCount:  s.TotalRegionCount,
 	}
@@ -568,21 +571,19 @@ func (s *storeInfo) usedRatio() float64 {
 type clusterInfo struct {
 	sync.RWMutex
 
-	meta          *metapb.Cluster
-	stores        map[uint64]*storeInfo
-	unknownStores map[uint64]struct{}
-	regions       *regionsInfo
-	clusterRoot   string
+	meta        *metapb.Cluster
+	stores      map[uint64]*storeInfo
+	regions     *regionsInfo
+	clusterRoot string
 
 	idAlloc IDAllocator
 }
 
 func newClusterInfo(clusterRoot string) *clusterInfo {
 	cluster := &clusterInfo{
-		clusterRoot:   clusterRoot,
-		stores:        make(map[uint64]*storeInfo),
-		unknownStores: make(map[uint64]struct{}),
-		regions:       newRegionsInfo(),
+		clusterRoot: clusterRoot,
+		stores:      make(map[uint64]*storeInfo),
+		regions:     newRegionsInfo(),
 	}
 
 	return cluster
@@ -599,7 +600,6 @@ func (c *clusterInfo) addStore(store *metapb.Store) {
 
 	storeID := store.GetId()
 	c.stores[storeID] = storeInfo
-	c.unknownStores[storeID] = struct{}{}
 }
 
 func (c *clusterInfo) updateStoreStatus(stats *pdpb.StoreStats) bool {
@@ -613,12 +613,7 @@ func (c *clusterInfo) updateStoreStatus(stats *pdpb.StoreStats) bool {
 	}
 
 	store.stats.Stats = stats
-	if store.stats.Stats == nil {
-		c.unknownStores[storeID] = struct{}{}
-	} else {
-		delete(c.unknownStores, storeID)
-	}
-
+	store.stats.LastHeartbeatTS = time.Now()
 	store.stats.LeaderRegionCount = c.regions.leaderRegionCount(storeID)
 	store.stats.TotalRegionCount = c.regions.regionCount()
 	return true
@@ -679,11 +674,4 @@ func (c *clusterInfo) getMeta() *metapb.Cluster {
 	defer c.RUnlock()
 
 	return proto.Clone(c.meta).(*metapb.Cluster)
-}
-
-func (c *clusterInfo) getUnknownStores() map[uint64]struct{} {
-	c.RLock()
-	defer c.RUnlock()
-
-	return mapClone(c.unknownStores)
 }

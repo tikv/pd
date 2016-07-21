@@ -13,6 +13,8 @@
 
 package server
 
+import "time"
+
 // Filter is an interface to filter target store.
 type Filter interface {
 	// FilterFromStore checks whether `from stores` should be skipped.
@@ -42,6 +44,35 @@ func filterToStore(store *storeInfo, filters []Filter, args ...interface{}) bool
 	}
 
 	return false
+}
+
+type stateFilter struct {
+	cfg *BalanceConfig
+}
+
+func newStateFilter(cfg *BalanceConfig) *stateFilter {
+	return &stateFilter{cfg: cfg}
+}
+
+func (sf *stateFilter) filterBadStore(store *storeInfo) bool {
+	if store.stats.Stats == nil {
+		// Unknown
+		return true
+	}
+	interval := time.Now().Sub(store.stats.LastHeartbeatTS).Seconds()
+	if uint64(interval) > sf.cfg.MaxStoreDownInterval {
+		// Down
+		return true
+	}
+	return false
+}
+
+func (sf *stateFilter) FilterFromStore(store *storeInfo, args ...interface{}) bool {
+	return sf.filterBadStore(store)
+}
+
+func (sf *stateFilter) FilterToStore(store *storeInfo, args ...interface{}) bool {
+	return sf.filterBadStore(store)
 }
 
 type capacityFilter struct {
