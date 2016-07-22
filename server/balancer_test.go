@@ -15,6 +15,7 @@ package server
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	. "github.com/pingcap/check"
@@ -339,4 +340,69 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 
 	region.Peers = peers
 	clusterInfo.regions.updateRegion(region)
+}
+
+// TODO: Refactor these tests, they are quite ugly now.
+func (s *testBalancerSuite) TestDownStore(c *C) {
+	clusterInfo := s.newClusterInfo(c)
+	c.Assert(clusterInfo, NotNil)
+
+	region, _ := clusterInfo.regions.getRegion([]byte("a"))
+	c.Assert(region.GetPeers(), HasLen, 1)
+
+	interval := 1 * time.Second
+	testCfg := newBalanceConfig()
+	testCfg.adjust()
+	testCfg.MinCapacityUsedRatio = 0.1
+	testCfg.MaxCapacityUsedRatio = 0.9
+	testCfg.MaxStoreDownInterval = uint64(interval.Seconds())
+	cb := newCapacityBalancer(testCfg)
+
+	// The store id will be 1,2,3,4.
+	s.updateStore(c, clusterInfo, 1, 100, 80, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 50, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 60, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 70, 0, 0)
+
+	// Get leader peer.
+	leader := region.GetPeers()[0]
+
+	// Test add peer.
+	s.addRegionPeer(c, clusterInfo, 4, region, leader)
+
+	// Test add another peer.
+	s.addRegionPeer(c, clusterInfo, 3, region, leader)
+
+	// Make store 2 up and down.
+	for i := 0; i < 3; i++ {
+		// Now we should move from store 4 to 2.
+		s.updateStore(c, clusterInfo, 1, 100, 80, 0, 0)
+		s.updateStore(c, clusterInfo, 2, 100, 70, 0, 0)
+		s.updateStore(c, clusterInfo, 3, 100, 60, 0, 0)
+		s.updateStore(c, clusterInfo, 4, 100, 50, 0, 0)
+
+		bop, err := cb.Balance(clusterInfo)
+		c.Assert(err, IsNil)
+		c.Assert(bop.Ops, HasLen, 2)
+
+		op0 := bop.Ops[0].(*changePeerOperator)
+		c.Assert(op0.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+		c.Assert(op0.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
+
+		op1 := bop.Ops[1].(*changePeerOperator)
+		c.Assert(op1.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+		c.Assert(op1.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(4))
+
+		// Update store 1,3,4 and let store 2 down.
+		time.Sleep(interval)
+		s.updateStore(c, clusterInfo, 1, 100, 80, 0, 0)
+		s.updateStore(c, clusterInfo, 3, 100, 60, 0, 0)
+		s.updateStore(c, clusterInfo, 4, 100, 50, 0, 0)
+		time.Sleep(interval)
+
+		// Now store 2 is down, we should not do balance.
+		bop, err = cb.Balance(clusterInfo)
+		c.Assert(err, IsNil)
+		c.Assert(bop, IsNil)
+	}
 }

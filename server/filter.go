@@ -59,7 +59,7 @@ func (sf *stateFilter) filterBadStore(store *storeInfo) bool {
 		// Unknown
 		return true
 	}
-	interval := time.Now().Sub(store.stats.LastHeartbeatTS).Seconds()
+	interval := time.Since(store.stats.LastHeartbeatTS).Seconds()
 	if uint64(interval) > sf.cfg.MaxStoreDownInterval {
 		// Down
 		return true
