@@ -381,7 +381,7 @@ func (s *testBalancerSuite) TestDownStore(c *C) {
 		s.updateStore(c, clusterInfo, 3, 100, 60, 0, 0)
 		s.updateStore(c, clusterInfo, 4, 100, 50, 0, 0)
 
-		bop, err := cb.Balance(clusterInfo)
+		_, bop, err := cb.Balance(clusterInfo)
 		c.Assert(err, IsNil)
 		c.Assert(bop.Ops, HasLen, 2)
 
@@ -401,7 +401,7 @@ func (s *testBalancerSuite) TestDownStore(c *C) {
 		time.Sleep(interval)
 
 		// Now store 2 is down, we should not do balance.
-		bop, err = cb.Balance(clusterInfo)
+		_, bop, err = cb.Balance(clusterInfo)
 		c.Assert(err, IsNil)
 		c.Assert(bop, IsNil)
 	}
