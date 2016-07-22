@@ -335,8 +335,8 @@ func (lb *leaderBalancer) Balance(cluster *clusterInfo) (*score, *balanceOperato
 	}
 
 	regionID := region.GetId()
-	leaderTransferOperator := newTransferLeaderOperator(regionID, leader, newLeader, lb.cfg)
-	return score, newBalanceOperator(region, leaderTransferOperator), nil
+	transferLeaderOperator := newTransferLeaderOperator(regionID, leader, newLeader, lb.cfg)
+	return score, newBalanceOperator(region, transferLeaderOperator), nil
 }
 
 // defaultBalancer is used for default config change, like add/remove peer.

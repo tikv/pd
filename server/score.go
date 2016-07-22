@@ -18,6 +18,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
+const noThreshold = -1
+
 type score struct {
 	from      int
 	to        int
@@ -35,7 +37,7 @@ func priorityScore(cfg *BalanceConfig, scores []*score) (int, *score) {
 
 	for i, score := range scores {
 		priority := score.diff
-		if score.threshold != -1 {
+		if score.threshold != noThreshold {
 			// If the from store score is close to threshold value, we should add the priority weight.
 			if score.threshold-score.from <= int(100*cfg.MaxDiffScoreFraction) {
 				priority += 10
@@ -56,7 +58,7 @@ func scoreThreshold(cfg *BalanceConfig, st scoreType) int {
 	case capacityScore:
 		return int(cfg.MaxCapacityUsedRatio * 100)
 	default:
-		return -1
+		return noThreshold
 	}
 }
 
