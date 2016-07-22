@@ -200,7 +200,7 @@ X-Etcd-Cluster-Id: 2d51087373879c4a
 }
 ```
 
-## A 3 nodes multi machine cluster
+## A 3 nodes multi-machine cluster
 
 TODO...
 

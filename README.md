@@ -56,7 +56,7 @@ The command flag explanation:
 + `etcd-listen-peer-url`: etcd listening address for peer traffic.
 + `etcd-advertise-peer-url`: etcd advertise peer url to the rest of the cluster.
 + `etcd-listen-client-url`: etcd listening address for client traffic.
-+ `etcd-advertise-client-url`: etcd advertise url to the public, it must be accessible to PD machine.
++ `etcd-advertise-client-url`: etcd advertise url to the public. It must be accessible to the PD node.
 + `etcd-initial-cluster-state`: etcd initial cluster state. The value is either`new` or `existing`.
 + `etcd-initial-cluster`: etcd initail cluster configuration for bootstrapping. 
 
