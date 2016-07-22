@@ -49,6 +49,7 @@ var (
 	maxBalanceRetryPerLoop = flag.Uint64("max-balance-retry-per-loop", 10, "the max retry count to balance in a balance schedule")
 	maxBalanceCountPerLoop = flag.Uint64("max-balance-count-per-loop", 3, "the max region count to balance in a balance schedule")
 	maxTransferWaitCount   = flag.Uint64("max-transfer-wait-count", 3, "the max heartbeat count to wait leader transfer to finish")
+	maxStoreDownDuration   = flag.Uint64("max-store-down-duration", 60, "the max duration a store without heartbeat will be considered to be down")
 
 	// For etcd
 	etcdName                = flag.String("etcd-name", "default", "Etcd: human-readable name for this member")
@@ -89,6 +90,7 @@ func setCmdArgs(cfg *server.Config) {
 	setUintFlagConfig(&cfg.BalanceCfg.MaxBalanceRetryPerLoop, "max-balance-retry-per-loop", *maxBalanceRetryPerLoop)
 	setUintFlagConfig(&cfg.BalanceCfg.MaxBalanceCountPerLoop, "max-balance-count-per-loop", *maxBalanceCountPerLoop)
 	setUintFlagConfig(&cfg.BalanceCfg.MaxTransferWaitCount, "max-transfer-wait-count", *maxTransferWaitCount)
+	setUintFlagConfig(&cfg.BalanceCfg.MaxStoreDownDuration, "max-store-down-duration", *maxStoreDownDuration)
 
 	setStringFlagConfig(&cfg.EtcdCfg.Name, "etcd-name", *etcdName)
 	setStringFlagConfig(&cfg.EtcdCfg.DataDir, "etcd-data-dir", *etcdDataDir)

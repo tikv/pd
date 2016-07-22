@@ -195,9 +195,9 @@ type BalanceConfig struct {
 	// MaxTransferWaitCount is the max heartbeat count to wait leader transfer to finish.
 	MaxTransferWaitCount uint64 `toml:"max-transfer-wait-count" json:"max-transfer-wait-count"`
 
-	// MaxStoreDownInterval is the max interval (in seconds)
-	// before we consider a store without heartbeat to be down.
-	MaxStoreDownInterval uint64 `toml:"max-store-down-interval" json:"max-store-down-interval"`
+	// MaxStoreDownDuration is the max duration at which
+	// a store will be considered to be down if it hasn't reported heartbeats.
+	MaxStoreDownDuration uint64 `toml:"max-store-down-duration" json:"max-store-down-duration"`
 }
 
 func newBalanceConfig() *BalanceConfig {
@@ -216,7 +216,7 @@ const (
 	defaultMaxBalanceRetryPerLoop = uint64(10)
 	defaultMaxBalanceCountPerLoop = uint64(3)
 	defaultMaxTransferWaitCount   = uint64(3)
-	defaultMaxStoreDownInterval   = uint64(60)
+	defaultMaxStoreDownDuration   = uint64(60)
 )
 
 func (c *BalanceConfig) adjust() {
@@ -264,8 +264,8 @@ func (c *BalanceConfig) adjust() {
 		c.MaxTransferWaitCount = defaultMaxTransferWaitCount
 	}
 
-	if c.MaxStoreDownInterval == 0 {
-		c.MaxStoreDownInterval = defaultMaxStoreDownInterval
+	if c.MaxStoreDownDuration == 0 {
+		c.MaxStoreDownDuration = defaultMaxStoreDownDuration
 	}
 }
 

@@ -350,12 +350,11 @@ func (s *testBalancerSuite) TestDownStore(c *C) {
 	region, _ := clusterInfo.regions.getRegion([]byte("a"))
 	c.Assert(region.GetPeers(), HasLen, 1)
 
-	interval := 1 * time.Second
 	testCfg := newBalanceConfig()
 	testCfg.adjust()
 	testCfg.MinCapacityUsedRatio = 0.1
 	testCfg.MaxCapacityUsedRatio = 0.9
-	testCfg.MaxStoreDownInterval = uint64(interval.Seconds())
+	testCfg.MaxStoreDownDuration = 1
 	cb := newCapacityBalancer(testCfg)
 
 	// The store id will be 1,2,3,4.
@@ -394,11 +393,11 @@ func (s *testBalancerSuite) TestDownStore(c *C) {
 		c.Assert(op1.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(4))
 
 		// Update store 1,3,4 and let store 2 down.
-		time.Sleep(interval)
+		time.Sleep(600 * time.Millisecond)
 		s.updateStore(c, clusterInfo, 1, 100, 80, 0, 0)
 		s.updateStore(c, clusterInfo, 3, 100, 60, 0, 0)
 		s.updateStore(c, clusterInfo, 4, 100, 50, 0, 0)
-		time.Sleep(interval)
+		time.Sleep(600 * time.Millisecond)
 
 		// Now store 2 is down, we should not do balance.
 		_, bop, err = cb.Balance(clusterInfo)

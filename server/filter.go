@@ -56,12 +56,12 @@ func newStateFilter(cfg *BalanceConfig) *stateFilter {
 
 func (sf *stateFilter) filterBadStore(store *storeInfo) bool {
 	if store.stats.Stats == nil {
-		// Unknown
+		// The store is in unknown state.
 		return true
 	}
 	interval := time.Since(store.stats.LastHeartbeatTS).Seconds()
-	if uint64(interval) > sf.cfg.MaxStoreDownInterval {
-		// Down
+	if uint64(interval) >= sf.cfg.MaxStoreDownDuration {
+		// The store is considered to be down.
 		return true
 	}
 	return false
