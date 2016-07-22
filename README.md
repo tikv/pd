@@ -45,7 +45,7 @@ pd-server --cluster-id=1 \
           --etcd-initial-cluster-state="new"  
 ```
 
-Command flag explanation:
+The command flag explanation:
 
 + `cluster-id`: Unique ID to distinguish different PD clusters. It can't be changed after bootstrapping.  
 + `addr`: Listening address for client traffic. The default official address is `0.0.0.0:1234`.
