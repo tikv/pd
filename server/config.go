@@ -156,12 +156,12 @@ type BalanceConfig struct {
 	// it will never be used as a to store.
 	MaxCapacityUsedRatio float64 `toml:"max-capacity-used-ratio" json:"max-capacity-used-ratio"`
 
-	// For leader count balance.
-	// If the leader region count of one store is greater than this value,
-	// it will be used as a from store to do leader balance.
+	// For leader balance.
+	// If the leader region count of one store is less than this value,
+	// it will never be used as a from store.
 	MaxLeaderCount uint64 `toml:"max-leader-count" json:"max-leader-count"`
 
-	// For snapshot balance filter.
+	// For capacity balance.
 	// If the sending snapshot count of one storage is greater than this value,
 	// it will never be used as a from store.
 	MaxSendingSnapCount uint64 `toml:"max-sending-snap-count" json:"max-sending-snap-count"`

@@ -25,7 +25,7 @@ type score struct {
 	to        int
 	diff      int
 	threshold int
-	st        string
+	st        scoreType
 }
 
 func priorityScore(cfg *BalanceConfig, scores []*score) (int, *score) {
@@ -145,7 +145,7 @@ func checkAndGetDiffScore(cluster *clusterInfo, oldPeer *metapb.Peer, newPeer *m
 		to:        newStoreScore,
 		diff:      diffScore,
 		threshold: scoreThreshold(cfg, st),
-		st:        st.String(),
+		st:        st,
 	}
 
 	return score, true
