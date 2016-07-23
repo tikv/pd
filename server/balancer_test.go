@@ -104,7 +104,7 @@ func (s *testBalancerSuite) updateStore(c *C, clusterInfo *clusterInfo, storeID 
 
 func (s *testBalancerSuite) addRegionPeer(c *C, clusterInfo *clusterInfo, storeID uint64, region *metapb.Region, leader *metapb.Peer) {
 	db := newDefaultBalancer(region, leader, s.cfg)
-	bop, err := db.Balance(clusterInfo)
+	_, bop, err := db.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 
 	op, ok := bop.Ops[0].(*onceOperator).Op.(*changePeerOperator)
@@ -143,7 +143,7 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 
 	// Now peers count equals to max peer count, so there is nothing to do.
 	db := newDefaultBalancer(region, leader, s.cfg)
-	bop, err := db.Balance(clusterInfo)
+	_, bop, err := db.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
 
@@ -156,7 +156,7 @@ func (s *testBalancerSuite) TestDefaultBalancer(c *C) {
 
 	// Test remove peer.
 	db = newDefaultBalancer(region, leader, s.cfg)
-	bop, err = db.Balance(clusterInfo)
+	_, bop, err = db.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 
 	// Now we cannot remove leader peer, so the result is peer in store 2.
@@ -179,21 +179,22 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	s.updateStore(c, clusterInfo, 3, 100, 80, 0, 0)
 	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0)
 
-	// Now we have all stores with low capacityUsedRatio, so we need not to do balance.
+	// Now we have all stores with low capacity used ratio, so we need not to do balance.
 	testCfg := newBalanceConfig()
 	testCfg.adjust()
-	testCfg.MinCapacityUsedRatio = 0.3
+	testCfg.MinCapacityUsedRatio = 0.5
 	testCfg.MaxCapacityUsedRatio = 0.9
 	cb := newCapacityBalancer(testCfg)
-	bop, err := cb.Balance(clusterInfo)
+	_, bop, err := cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
 
 	// Now region peer count is less than max peer count, so we need not to do balance.
 	testCfg.MinCapacityUsedRatio = 0.1
 	testCfg.MaxCapacityUsedRatio = 0.9
+
 	cb = newCapacityBalancer(testCfg)
-	bop, err = cb.Balance(clusterInfo)
+	_, bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
 
@@ -206,144 +207,82 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	s.addRegionPeer(c, clusterInfo, 3, region, leader)
 
 	// If we cannot find a `from store` to do balance, then we will do nothing.
-	s.updateStore(c, clusterInfo, 1, 100, 90, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 89, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 88, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 80, 0, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 91, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 92, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 93, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 94, 0, 0)
 
 	testCfg.MinCapacityUsedRatio = 0.3
 	testCfg.MaxCapacityUsedRatio = 0.9
+
 	cb = newCapacityBalancer(testCfg)
-	bop, err = cb.Balance(clusterInfo)
+	_, bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
 
-	// Reset capacityUsedRatio = 0.3 to balance region.
-	// Now the region is (1,3,4), the balance operators should be
-	// 1) leader transfer: 1 -> 4
-	// 2) add peer: 2
-	// 3) remove peer: 1
+	// If the store does not have follower region, we should do nothing.
 	s.updateStore(c, clusterInfo, 1, 100, 60, 0, 0)
 	s.updateStore(c, clusterInfo, 2, 100, 70, 0, 0)
 	s.updateStore(c, clusterInfo, 3, 100, 80, 0, 0)
 	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0)
 
-	testCfg.MinCapacityUsedRatio = 0.3
-	testCfg.MaxCapacityUsedRatio = 0.9
 	cb = newCapacityBalancer(testCfg)
-	bop, err = cb.Balance(clusterInfo)
+	_, bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
-	c.Assert(bop.Ops, HasLen, 3)
+	c.Assert(bop, IsNil)
 
-	op1 := bop.Ops[0].(*transferLeaderOperator)
-	c.Assert(op1.OldLeader.GetStoreId(), Equals, uint64(1))
-	c.Assert(op1.NewLeader.GetStoreId(), Equals, uint64(4))
+	// Now the region is (1,3,4), the balance operators should be
+	// 1) add peer: 2
+	// 2) remove peer: 4
+	s.updateStore(c, clusterInfo, 1, 100, 90, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 70, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 80, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 60, 0, 0)
+
+	cb = newCapacityBalancer(testCfg)
+	_, bop, err = cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop.Ops, HasLen, 2)
+
+	op1 := bop.Ops[0].(*changePeerOperator)
+	c.Assert(op1.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op1.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 
 	op2 := bop.Ops[1].(*changePeerOperator)
-	c.Assert(op2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(op2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
-
-	op3 := bop.Ops[2].(*changePeerOperator)
-	c.Assert(op3.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(op3.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(1))
-
-	// If the store to be balanced with leader region, the capacity of region stores exceed the max used ratio,
-	// but we can find store to add new peer, we should also do leader balance.
-	s.updateStore(c, clusterInfo, 1, 100, 10, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 40, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 25, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 20, 0, 0)
-
-	testCfg.MinCapacityUsedRatio = 0.4
-	testCfg.MaxCapacityUsedRatio = 0.7
-	cb = newCapacityBalancer(testCfg)
-	bop, err = cb.Balance(clusterInfo)
-	c.Assert(err, IsNil)
-	c.Assert(bop, NotNil)
-
-	op1 = bop.Ops[0].(*transferLeaderOperator)
-	c.Assert(op1.OldLeader.GetStoreId(), Equals, uint64(1))
-	c.Assert(op1.NewLeader.GetStoreId(), Equals, uint64(3))
-
-	op2 = bop.Ops[1].(*changePeerOperator)
-	c.Assert(op2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(op2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
-
-	op3 = bop.Ops[2].(*changePeerOperator)
-	c.Assert(op3.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(op3.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(1))
+	c.Assert(op2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(op2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(4))
 
 	// If the sending snapshot count of `from store` is greater than MaxSnapSendingCount,
 	// we will do nothing.
-	s.updateStore(c, clusterInfo, 1, 100, 10, 10, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 90, 0, 0)
 	s.updateStore(c, clusterInfo, 2, 100, 80, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 65, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 60, 10, 0)
 
-	testCfg.MinCapacityUsedRatio = 0.3
-	testCfg.MaxCapacityUsedRatio = 0.9
 	cb = newCapacityBalancer(testCfg)
-	bop, err = cb.Balance(clusterInfo)
+	_, bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, NotNil)
 
-	newOp1 := bop.Ops[0].(*changePeerOperator)
-	c.Assert(newOp1.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(newOp1.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
+	op1 = bop.Ops[0].(*changePeerOperator)
+	c.Assert(op1.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op1.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
 
-	newOp2 := bop.Ops[1].(*changePeerOperator)
-	c.Assert(newOp2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(newOp2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(3))
+	op2 = bop.Ops[1].(*changePeerOperator)
+	c.Assert(op2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(op2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(3))
 
 	// If the receiving snapshot count of `to store` is greater than MaxReceivingSnapCount,
 	// we will do nothing.
-	s.updateStore(c, clusterInfo, 1, 100, 10, 10, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 90, 0, 0)
 	s.updateStore(c, clusterInfo, 2, 100, 80, 0, 10)
-	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 65, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 60, 10, 0)
 
-	testCfg.MinCapacityUsedRatio = 0.3
-	testCfg.MaxCapacityUsedRatio = 0.9
 	cb = newCapacityBalancer(testCfg)
-	bop, err = cb.Balance(clusterInfo)
+	_, bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
-
-	// If the region leader is to be balanced, but there is no store to do leader transfer,
-	// then we will do nothing.
-	s.updateStore(c, clusterInfo, 1, 100, 10, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 20, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
-
-	testCfg.MinCapacityUsedRatio = 0.4
-	testCfg.MaxCapacityUsedRatio = 0.6
-	cb = newCapacityBalancer(testCfg)
-	bop, err = cb.Balance(clusterInfo)
-	c.Assert(err, IsNil)
-	c.Assert(bop, IsNil)
-
-	// If the store to be balanced without leader region, but we can find store to add new peer,
-	// we should do follower balance.
-	s.updateStore(c, clusterInfo, 1, 100, 99, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 40, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 10, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 20, 0, 0)
-
-	testCfg.MinCapacityUsedRatio = 0.4
-	testCfg.MaxCapacityUsedRatio = 0.7
-	cb = newCapacityBalancer(testCfg)
-	bop, err = cb.Balance(clusterInfo)
-	c.Assert(err, IsNil)
-	c.Assert(bop, NotNil)
-
-	newOp1 = bop.Ops[0].(*changePeerOperator)
-	c.Assert(newOp1.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(newOp1.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(2))
-
-	newOp2 = bop.Ops[1].(*changePeerOperator)
-	c.Assert(newOp2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(newOp2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(3))
 
 	// If cluster max peer count config is 1, we can only add peer and remove leader peer.
 	s.updateStore(c, clusterInfo, 1, 100, 60, 0, 0)
@@ -362,7 +301,7 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	testCfg.MinCapacityUsedRatio = 0.3
 	testCfg.MaxCapacityUsedRatio = 0.9
 	cb = newCapacityBalancer(testCfg)
-	bop, err = cb.Balance(clusterInfo)
+	_, bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
 
@@ -372,28 +311,26 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	clusterInfo.regions.updateRegion(region)
 
 	cb = newCapacityBalancer(testCfg)
-	bop, err = cb.Balance(clusterInfo)
+	_, bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, NotNil)
 
-	newOp1 = bop.Ops[0].(*changePeerOperator)
-	c.Assert(newOp1.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(newOp1.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(4))
+	op1 = bop.Ops[0].(*changePeerOperator)
+	c.Assert(op1.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op1.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(4))
 
-	newOp2 = bop.Ops[1].(*changePeerOperator)
-	c.Assert(newOp2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(newOp2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(1))
+	op2 = bop.Ops[1].(*changePeerOperator)
+	c.Assert(op2.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(op2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(1))
 
 	// If the diff score is too small, we should do nothing.
-	s.updateStore(c, clusterInfo, 1, 100, 60, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 59, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 20, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 10, 0, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 85, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 70, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 80, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0)
 
-	testCfg.MinCapacityUsedRatio = 0.3
-	testCfg.MaxCapacityUsedRatio = 0.9
 	cb = newCapacityBalancer(testCfg)
-	bop, err = cb.Balance(clusterInfo)
+	_, bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
 
