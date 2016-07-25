@@ -71,6 +71,23 @@ var (
 			Name:      "balancers_count",
 			Help:      "Counter of balancers.",
 		}, []string{"result"})
+
+	txnCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "txn",
+			Name:      "txns_count",
+			Help:      "Counter of txns.",
+		}, []string{"type"})
+
+	txnDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "txn",
+			Name:      "handle_txns_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled txns.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		}, []string{"type"})
 )
 
 func init() {
@@ -79,4 +96,6 @@ func init() {
 	prometheus.MustRegister(cmdDuration)
 	prometheus.MustRegister(cmdFailedDuration)
 	prometheus.MustRegister(balancerCounter)
+	prometheus.MustRegister(txnCounter)
+	prometheus.MustRegister(txnDuration)
 }

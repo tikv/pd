@@ -99,7 +99,7 @@ type slowLogTxn struct {
 	cancel context.CancelFunc
 }
 
-func newSlowLogTxn(client *clientv3.Client) *slowLogTxn {
+func newSlowLogTxn(client *clientv3.Client) clientv3.Txn {
 	ctx, cancel := context.WithTimeout(client.Ctx(), requestTimeout)
 	return &slowLogTxn{
 		Txn:    client.Txn(ctx),
@@ -107,14 +107,42 @@ func newSlowLogTxn(client *clientv3.Client) *slowLogTxn {
 	}
 }
 
+func (t *slowLogTxn) If(cs ...clientv3.Cmp) clientv3.Txn {
+	return &slowLogTxn{
+		Txn:    t.Txn.If(cs...),
+		cancel: t.cancel,
+	}
+}
+
+func (t *slowLogTxn) Then(ops ...clientv3.Op) clientv3.Txn {
+	return &slowLogTxn{
+		Txn:    t.Txn.Then(ops...),
+		cancel: t.cancel,
+	}
+}
+
 // Commit implements Txn Commit interface.
 func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	start := time.Now()
 	resp, err := t.Txn.Commit()
-	if cost := time.Now().Sub(start); cost > slowRequestTime {
+	t.cancel()
+
+	labels := []string{"total"}
+	cost := time.Now().Sub(start)
+	if cost > slowRequestTime {
+		labels = append(labels, "slow")
 		log.Warnf("txn runs too slow, resp: %v, err: %v, cost: %s", resp, err, cost)
 	}
-	t.cancel()
+	if err != nil {
+		labels = append(labels, "failed")
+	} else {
+		labels = append(labels, "success")
+	}
+	for _, label := range labels {
+		txnCounter.WithLabelValues(label).Inc()
+		txnDuration.WithLabelValues(label).Observe(cost.Seconds())
+	}
+
 	return resp, errors.Trace(err)
 }
 
