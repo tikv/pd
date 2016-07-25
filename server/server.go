@@ -231,13 +231,13 @@ func (s *Server) closeAllConnections() {
 }
 
 // txn returns an etcd client transaction wrapper.
-// This wrapper will set a request timeout to the context and log slow transactions.
+// The wrapper will set a request timeout to the context and log slow transactions.
 func (s *Server) txn() clientv3.Txn {
 	return newSlowLogTxn(s.client)
 }
 
 // leaderTxn returns txn() with a leader comparison to guarantee that
-// this transaction can only be executed if the server is leader.
+// the transaction can be executed only if the server is leader.
 func (s *Server) leaderTxn(cs ...clientv3.Cmp) clientv3.Txn {
 	return s.txn().If(append(cs, s.leaderCmp())...)
 }
