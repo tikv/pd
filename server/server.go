@@ -25,7 +25,6 @@ import (
 	"github.com/coreos/etcd/embed"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
-	"golang.org/x/net/context"
 )
 
 const (
@@ -231,10 +230,10 @@ func (s *Server) closeAllConnections() {
 	s.conns = make(map[*conn]struct{})
 }
 
-func (s *Server) slowLogTxn(ctx context.Context) clientv3.Txn {
-	txn := s.client.Txn(ctx)
+func (s *Server) Txn() clientv3.Txn {
+	return newSlowLogTxn(s.client)
+}
 
-	return &slowLogTxn{
-		Txn: txn,
-	}
+func (s *Server) LeaderTxn(cs ...clientv3.Cmp) clientv3.Txn {
+	return s.Txn().If(append(cs, s.leaderCmp())...)
 }

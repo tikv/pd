@@ -150,7 +150,7 @@ func (s *Server) campaignLeader() error {
 	defer lessor.Close()
 
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	ctx, cancel := context.WithTimeout(s.client.Ctx(), requestTimeout)
 	leaseResp, err := lessor.Grant(ctx, s.cfg.LeaderLease)
 	cancel()
 
@@ -164,12 +164,10 @@ func (s *Server) campaignLeader() error {
 
 	leaderKey := s.getLeaderPath()
 	// The leader key must not exist, so the CreateRevision is 0.
-	ctx, cancel = context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := s.slowLogTxn(ctx).
+	resp, err := s.Txn().
 		If(clientv3.Compare(clientv3.CreateRevision(leaderKey), "=", 0)).
 		Then(clientv3.OpPut(leaderKey, s.leaderValue, clientv3.WithLease(clientv3.LeaseID(leaseResp.ID)))).
 		Commit()
-	cancel()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -257,13 +255,7 @@ func (s *Server) watchLeader() {
 func (s *Server) resignLeader() error {
 	// delete leader itself and let others start a new election again.
 	leaderKey := s.getLeaderPath()
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := s.slowLogTxn(ctx).
-		If(s.leaderCmp()).
-		Then(clientv3.OpDelete(leaderKey)).
-		Commit()
-	cancel()
-
+	resp, err := s.LeaderTxn().Then(clientv3.OpDelete(leaderKey)).Commit()
 	if err != nil {
 		return errors.Trace(err)
 	}

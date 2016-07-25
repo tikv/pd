@@ -19,7 +19,6 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/juju/errors"
-	"golang.org/x/net/context"
 )
 
 const (
@@ -85,12 +84,7 @@ func (alloc *idAllocator) generate() (uint64, error) {
 
 	end += allocStep
 	value = uint64ToBytes(end)
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := alloc.s.slowLogTxn(ctx).
-		If(alloc.s.leaderCmp(), cmp).
-		Then(clientv3.OpPut(key, string(value))).
-		Commit()
-	cancel()
+	resp, err := alloc.s.LeaderTxn(cmp).Then(clientv3.OpPut(key, string(value))).Commit()
 	if err != nil {
 		return 0, errors.Trace(err)
 	}

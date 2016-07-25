@@ -23,7 +23,6 @@ import (
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"golang.org/x/net/context"
 )
 
 const (
@@ -64,12 +63,7 @@ func (s *Server) saveTimestamp(now time.Time) error {
 	data := uint64ToBytes(uint64(now.UnixNano()))
 	key := s.getTimestampPath()
 
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := s.slowLogTxn(ctx).
-		If(s.leaderCmp()).
-		Then(clientv3.OpPut(key, string(data))).
-		Commit()
-	cancel()
+	resp, err := s.LeaderTxn().Then(clientv3.OpPut(key, string(data))).Commit()
 	if err != nil {
 		return errors.Trace(err)
 	}

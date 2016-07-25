@@ -27,7 +27,6 @@ import (
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"golang.org/x/net/context"
 )
 
 var (
@@ -261,12 +260,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 
 	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
 	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := s.slowLogTxn(ctx).
-		If(bootstrapCmp).
-		Then(ops...).
-		Commit()
-	cancel()
+	resp, err := s.Txn().If(bootstrapCmp).Then(ops...).Commit()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -387,12 +381,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	}
 
 	storePath := makeStoreKey(c.clusterRoot, store.GetId())
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := c.s.slowLogTxn(ctx).
-		If(c.s.leaderCmp()).
-		Then(clientv3.OpPut(storePath, string(storeValue))).
-		Commit()
-	cancel()
+	resp, err := c.s.LeaderTxn().Then(clientv3.OpPut(storePath, string(storeValue))).Commit()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -420,12 +409,7 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 		return errors.Trace(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	resp, err := c.s.slowLogTxn(ctx).
-		If(c.s.leaderCmp()).
-		Then(clientv3.OpPut(c.clusterRoot, string(metaValue))).
-		Commit()
-	cancel()
+	resp, err := c.s.LeaderTxn().Then(clientv3.OpPut(c.clusterRoot, string(metaValue))).Commit()
 	if err != nil {
 		return errors.Trace(err)
 	}

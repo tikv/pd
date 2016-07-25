@@ -20,7 +20,6 @@ import (
 	"github.com/ngaut/log"
 	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"golang.org/x/net/context"
 )
 
 func (c *conn) handleTso(req *pdpb.Request) (*pdpb.Response, error) {
@@ -205,12 +204,7 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 
 	// TODO: we can update in etcd asynchronously later.
 	if len(ops) > 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-		resp, err := c.s.slowLogTxn(ctx).
-			If(c.s.leaderCmp()).
-			Then(ops...).
-			Commit()
-		cancel()
+		resp, err := c.s.LeaderTxn().Then(ops...).Commit()
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
