@@ -204,7 +204,7 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 
 	// TODO: we can update in etcd asynchronously later.
 	if len(ops) > 0 {
-		resp, err := c.s.LeaderTxn().Then(ops...).Commit()
+		resp, err := c.s.leaderTxn().Then(ops...).Commit()
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

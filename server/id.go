@@ -84,7 +84,7 @@ func (alloc *idAllocator) generate() (uint64, error) {
 
 	end += allocStep
 	value = uint64ToBytes(end)
-	resp, err := alloc.s.LeaderTxn(cmp).Then(clientv3.OpPut(key, string(value))).Commit()
+	resp, err := alloc.s.leaderTxn(cmp).Then(clientv3.OpPut(key, string(value))).Commit()
 	if err != nil {
 		return 0, errors.Trace(err)
 	}

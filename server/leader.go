@@ -164,7 +164,7 @@ func (s *Server) campaignLeader() error {
 
 	leaderKey := s.getLeaderPath()
 	// The leader key must not exist, so the CreateRevision is 0.
-	resp, err := s.Txn().
+	resp, err := s.txn().
 		If(clientv3.Compare(clientv3.CreateRevision(leaderKey), "=", 0)).
 		Then(clientv3.OpPut(leaderKey, s.leaderValue, clientv3.WithLease(clientv3.LeaseID(leaseResp.ID)))).
 		Commit()
@@ -255,7 +255,7 @@ func (s *Server) watchLeader() {
 func (s *Server) resignLeader() error {
 	// delete leader itself and let others start a new election again.
 	leaderKey := s.getLeaderPath()
-	resp, err := s.LeaderTxn().Then(clientv3.OpDelete(leaderKey)).Commit()
+	resp, err := s.leaderTxn().Then(clientv3.OpDelete(leaderKey)).Commit()
 	if err != nil {
 		return errors.Trace(err)
 	}

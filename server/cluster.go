@@ -260,7 +260,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 
 	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
 	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
-	resp, err := s.Txn().If(bootstrapCmp).Then(ops...).Commit()
+	resp, err := s.txn().If(bootstrapCmp).Then(ops...).Commit()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -381,7 +381,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	}
 
 	storePath := makeStoreKey(c.clusterRoot, store.GetId())
-	resp, err := c.s.LeaderTxn().Then(clientv3.OpPut(storePath, string(storeValue))).Commit()
+	resp, err := c.s.leaderTxn().Then(clientv3.OpPut(storePath, string(storeValue))).Commit()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -409,7 +409,7 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 		return errors.Trace(err)
 	}
 
-	resp, err := c.s.LeaderTxn().Then(clientv3.OpPut(c.clusterRoot, string(metaValue))).Commit()
+	resp, err := c.s.leaderTxn().Then(clientv3.OpPut(c.clusterRoot, string(metaValue))).Commit()
 	if err != nil {
 		return errors.Trace(err)
 	}
