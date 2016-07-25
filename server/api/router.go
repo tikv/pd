@@ -14,8 +14,6 @@
 package api
 
 import (
-	"net/http"
-
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/server"
 	"github.com/prometheus/client_golang/prometheus"
@@ -50,8 +48,6 @@ func createRouter(svr *server.Server) *mux.Router {
 	router.Handle("/", newHomeHandler(rd)).Methods("GET")
 	router.Handle("/metrics", prometheus.Handler()).Methods("GET")
 	router.Handle("/ws", newWSHandler(svr))
-
-	router.PathPrefix("/").Handler(http.FileServer(http.Dir("templates/static/")))
 
 	return router
 }

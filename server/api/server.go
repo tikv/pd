@@ -28,6 +28,9 @@ func ServeHTTP(addr string, svr *server.Server) error {
 	recovery := negroni.NewRecovery()
 	engine.Use(recovery)
 
+	static := negroni.NewStatic(http.Dir("templates/static/"))
+	engine.Use(static)
+
 	router := createRouter(svr)
 	engine.UseHandler(router)
 
