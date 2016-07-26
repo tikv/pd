@@ -127,21 +127,16 @@ func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	resp, err := t.Txn.Commit()
 	t.cancel()
 
-	labels := []string{"total"}
 	cost := time.Now().Sub(start)
 	if cost > slowRequestTime {
-		labels = append(labels, "slow")
 		log.Warnf("txn runs too slow, resp: %v, err: %v, cost: %s", resp, err, cost)
 	}
+	label := "success"
 	if err != nil {
-		labels = append(labels, "failed")
-	} else {
-		labels = append(labels, "success")
+		label = "failed"
 	}
-	for _, label := range labels {
-		txnCounter.WithLabelValues(label).Inc()
-		txnDuration.WithLabelValues(label).Observe(cost.Seconds())
-	}
+	txnCounter.WithLabelValues(label).Inc()
+	txnDuration.WithLabelValues(label).Observe(cost.Seconds())
 
 	return resp, errors.Trace(err)
 }
