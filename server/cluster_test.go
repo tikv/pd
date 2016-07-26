@@ -54,7 +54,7 @@ func (s *testClusterSuite) SetUpSuite(c *C) {
 func (s *testClusterSuite) TearDownSuite(c *C) {
 	s.svr.Close()
 
-	os.RemoveAll(s.svr.cfg.DataDir)
+	os.RemoveAll(s.svr.cfg.EtcdCfg.DataDir)
 }
 
 func (s *testClusterBaseSuite) allocID(c *C) uint64 {

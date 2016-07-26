@@ -8,37 +8,46 @@ export HostIP="192.168.199.105"
 
 # Start pd1
 pd-server --cluster-id=1 \
-          --host=${HostIP} \
+          --addr=0.0.0.0:11234 \
+          --advertise-addr="${HostIP}:11234" \
+          --http-addr="0.0.0.0:19090" \
           --cluster-id=1 \
-          --name=pd1 \
-          --port=11234 \
-          --http-port=19090 \
-          --client-port=12379 \
-          --peer-port=12380 \
-          --initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" 
-
+          --etcd-name=pd1 \
+          --etcd-data-dir="default.pd1" \
+          --etcd-advertise-client-url="http://${HostIP}:12379" \
+          --etcd-advertise-peer-url="http://${HostIP}:12380" \
+          --etcd-initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" \
+          --etcd-listen-peer-url="http://0.0.0.0:12380" \
+          --etcd-listen-client-url="http://0.0.0.0:12379"  
           
 # Start pd2
 pd-server --cluster-id=1 \
-          --host=${HostIP} \
+          --addr=0.0.0.0:21234 \
+          --advertise-addr="${HostIP}:21234" \
+          --http-addr="0.0.0.0:29090" \
           --cluster-id=1 \
-          --name=pd2 \
-          --port=21234 \
-          --http-port=29090 \
-          --client-port=22379 \
-          --peer-port=22380 \
-          --initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" 
+          --etcd-name=pd2 \
+          --etcd-data-dir="default.pd2" \
+          --etcd-advertise-client-url="http://${HostIP}:22379" \
+          --etcd-advertise-peer-url="http://${HostIP}:22380" \
+          --etcd-initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" \
+          --etcd-listen-peer-url="http://0.0.0.0:22380" \
+          --etcd-listen-client-url="http://0.0.0.0:22379"  
 
 # Start pd3
 pd-server --cluster-id=1 \
-          --host=${HostIP} \
+          --addr=0.0.0.0:31234 \
+          --advertise-addr="${HostIP}:31234" \
+          --http-addr="0.0.0.0:39090" \
           --cluster-id=1 \
-          --name=pd3 \
-          --port=31234 \
-          --http-port=39090 \
-          --client-port=32379 \
-          --peer-port=32380 \
-          --initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" 
+          --etcd-name=pd3 \
+          --etcd-data-dir="default.pd3" \
+          --etcd-advertise-client-url="http://${HostIP}:32379" \
+          --etcd-advertise-peer-url="http://${HostIP}:32380" \
+          --etcd-initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" \
+          --etcd-listen-peer-url="http://0.0.0.0:32380" \
+          --etcd-listen-client-url="http://0.0.0.0:32379"  
+          
 ```
 
 Use `http` to see the cluster members:
@@ -90,8 +99,6 @@ X-Etcd-Cluster-Id: 2d51087373879c4a
 
 ## A 3-node local cluster with Docker
 
-Notice that we use docker port mapping, so we should set `advertise` port for outer communication.
-
 ```bash
 
 # Set correct HostIP here. 
@@ -100,36 +107,51 @@ export HostIP="192.168.199.105"
 # Start pd1
 docker run -d -p 11234:1234 -p 19090:9090 -p 12379:2379 -p 12380:2380 --name pd1 \
         pingcap/pd  \
-        --host=${HostIP} \
+        --addr="0.0.0.0:1234" --advertise-addr=${HostIP}:11234 \
+        --http-addr="0.0.0.0:9090" \
         --cluster-id=1 \
-        --name=pd1 \
-        --advertise-port=11234 \
-        --advertise-client-port=12379 \
-        --advertise-peer-port=12380 \
-        --initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" 
-        
+        --etcd-name=pd1 \
+        --etcd-advertise-client-url="http://${HostIP}:12379" \
+        --etcd-advertise-peer-url="http://${HostIP}:12380" \
+        --etcd-initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" \
+        --etcd-listen-peer-url="http://0.0.0.0:2380" \
+        --etcd-listen-client-url="http://0.0.0.0:2379" 
        
 # Start pd2
 docker run -d -p 21234:1234 -p 29090:9090 -p 22379:2379 -p 22380:2380 --name pd2 \
         pingcap/pd  \
-        --host=${HostIP} \
+        --addr="0.0.0.0:1234" --advertise-addr=${HostIP}:21234 \
+        --http-addr="0.0.0.0:9090" \
         --cluster-id=1 \
-        --name=pd2 \
-        --advertise-port=21234 \
-        --advertise-client-port=22379 \
-        --advertise-peer-port=22380 \
-        --initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" 
+        --etcd-name=pd2 \
+        --etcd-advertise-client-url="http://${HostIP}:22379" \
+        --etcd-advertise-peer-url="http://${HostIP}:22380" \
+        --etcd-initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" \
+        --etcd-listen-peer-url="http://0.0.0.0:2380" \
+        --etcd-listen-client-url="http://0.0.0.0:2379" 
         
 # Start pd3
 docker run -d -p 31234:1234 -p 39090:9090 -p 32379:2379 -p 32380:2380 --name pd3 \
         pingcap/pd  \
-        --host=${HostIP} \
+        --addr="0.0.0.0:1234" --advertise-addr=${HostIP}:31234 \
+        --http-addr="0.0.0.0:9090" \
         --cluster-id=1 \
-        --name=pd3 \
-        --advertise-port=31234 \
-        --advertise-client-port=32379 \
-        --advertise-peer-port=32380 \
-        --initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" 
+        --etcd-name=pd3 \
+        --etcd-advertise-client-url="http://${HostIP}:32379" \
+        --etcd-advertise-peer-url="http://${HostIP}:32380" \
+        --etcd-initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" \
+        --etcd-listen-peer-url="http://0.0.0.0:2380" \
+        --etcd-listen-client-url="http://0.0.0.0:2379" 
+```
+
+Using `docker ps` to see the running containers and check if the cluster is started:
+
+```bash
+docker ps
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                                                                                                NAMES
+4ca7aac99f2d        pingcap/pd          "pd-server --addr=0.0"   8 seconds ago       Up 7 seconds        0.0.0.0:31234->1234/tcp, 0.0.0.0:32379->2379/tcp, 0.0.0.0:32380->2380/tcp, 0.0.0.0:39090->9090/tcp   pd3
+2ff56c6fa7a4        pingcap/pd          "pd-server --addr=0.0"   9 seconds ago       Up 8 seconds        0.0.0.0:21234->1234/tcp, 0.0.0.0:22379->2379/tcp, 0.0.0.0:22380->2380/tcp, 0.0.0.0:29090->9090/tcp   pd2
+b8a3d7f815b2        pingcap/pd          "pd-server --addr=0.0"   9 seconds ago       Up 9 seconds        0.0.0.0:11234->1234/tcp, 0.0.0.0:12379->2379/tcp, 0.0.0.0:12380->2380/tcp, 0.0.0.0:19090->9090/tcp   pd1
 ```
 
 Use `http` to see cluster the members:

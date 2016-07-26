@@ -45,7 +45,7 @@ func (s *testClusterCacheSuite) SetUpSuite(c *C) {
 func (s *testClusterCacheSuite) TearDownSuite(c *C) {
 	s.svr.Close()
 
-	os.RemoveAll(s.svr.cfg.DataDir)
+	os.RemoveAll(s.svr.cfg.EtcdCfg.DataDir)
 }
 
 func (s *testClusterCacheSuite) TestCache(c *C) {

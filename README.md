@@ -25,24 +25,40 @@ You can use the following default ports in PD:
 
 You can change these ports when starting PD.
 
-### Single Node with default ports
+### Single Node
 
 ```bash
 # Set correct HostIP here. 
 export HostIP="192.168.199.105"
 
 pd-server --cluster-id=1 \
-          --host=${HostIP} \
-          --name="pd" \
-          --initial-cluster="pd=http://${HostIP}:2380" 
+          --addr=0.0.0.0:1234 \
+          --advertise-addr="${HostIP}:1234" \
+          --http-addr="0.0.0.0:9090" \
+          --etcd-name="default" \
+          --etcd-data-dir="default.pd" \
+          --etcd-listen-peer-url="http://0.0.0.0:2380" \
+          --etcd-advertise-peer-url="http://${HostIP}:2380" \
+          --etcd-listen-client-url="http://0.0.0.0:2379" \
+          --etcd-advertise-client-url="http://${HostIP}:2379" \
+          --etcd-initial-cluster="default=http://${HostIP}:2380" \
+          --etcd-initial-cluster-state="new"  
 ```
 
 The command flag explanation:
 
 + `cluster-id`: The unique ID to distinguish different PD clusters. It can't be changed after bootstrapping.  
-+ `host`: The host for outer traffic.
-+ `name`: The human readable name for this node. 
-+ `initial-cluster`: The initial cluster configuration for bootstrapping. 
++ `addr`: The listening address for client traffic. 
++ `advertise-addr`: The advertise address for external client communication. It must be accessible to the PD node.
++ `http-addr`: The HTTP listening address for client requests. 
++ `etcd-name`: The etcd human readable name for this node. 
++ `etcd-data-dir`: The etcd path to the data directory.
++ `etcd-listen-peer-url`: The etcd listening address for peer traffic.
++ `etcd-advertise-peer-url`: The etcd advertise peer url to the rest of the cluster.
++ `etcd-listen-client-url`: The etcd listening address for client traffic.
++ `etcd-advertise-client-url`: The etcd advertise url to the public. It must be accessible to the PD node.
++ `etcd-initial-cluster-state`: The etcd initial cluster state. The value is either`new` or `existing`.
++ `etcd-initial-cluster`: The etcd initail cluster configuration for bootstrapping. 
 
 Using `curl` to see PD member:
 
@@ -100,9 +116,17 @@ export HostIP="192.168.199.105"
 
 docker run -d -p 1234:1234 -p 9090:9090 -p 2379:2379 -p 2380:2380 --name pd pingcap/pd \
           --cluster-id=1 \
-          --host=${HostIP} \
-          --name="pd" \
-          --initial-cluster="pd=http://${HostIP}:2380" 
+          --addr=0.0.0.0:1234 \
+          --advertise-addr="${HostIP}:1234" \
+          --http-addr="0.0.0.0:9090" \
+          --etcd-name="default" \
+          --etcd-data-dir="default.pd" \
+          --etcd-listen-peer-url="http://0.0.0.0:2380" \
+          --etcd-advertise-peer-url="http://${HostIP}:2380" \
+          --etcd-listen-client-url="http://0.0.0.0:2379" \
+          --etcd-advertise-client-url="http://${HostIP}:2379" \
+          --etcd-initial-cluster="default=http://${HostIP}:2380" \
+          --etcd-initial-cluster-state="new" 
 ```
 
 ### Cluster

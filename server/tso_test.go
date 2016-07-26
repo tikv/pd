@@ -48,7 +48,7 @@ func (s *testTsoSuite) SetUpSuite(c *C) {
 
 func (s *testTsoSuite) TearDownSuite(c *C) {
 	s.svr.Close()
-	os.RemoveAll(s.svr.cfg.DataDir)
+	os.RemoveAll(s.svr.cfg.EtcdCfg.DataDir)
 }
 
 func sendRequest(c *C, conn net.Conn, msgID uint64, request *pdpb.Request) {

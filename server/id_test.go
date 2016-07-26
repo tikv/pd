@@ -47,7 +47,7 @@ func (s *testAllocIDSuite) SetUpSuite(c *C) {
 func (s *testAllocIDSuite) TearDownSuite(c *C) {
 	s.svr.Close()
 
-	os.RemoveAll(s.svr.cfg.DataDir)
+	os.RemoveAll(s.svr.cfg.EtcdCfg.DataDir)
 }
 
 func (s *testAllocIDSuite) TestID(c *C) {

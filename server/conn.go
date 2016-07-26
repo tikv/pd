@@ -43,7 +43,7 @@ func newConn(s *Server, netConn net.Conn) (*conn, error) {
 	defer s.connsLock.Unlock()
 
 	if !s.isLeader() {
-		return nil, errors.Errorf("server <%s> is not leader, cannot create new connection <%s>", s.cfg.AdvertiseAddr, netConn.RemoteAddr())
+		return nil, errors.Errorf("server <%s> is not leader, cannot create new connection <%s>", s.cfg.Addr, netConn.RemoteAddr())
 	}
 
 	c := &conn{

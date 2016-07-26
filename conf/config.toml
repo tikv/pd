@@ -1,30 +1,19 @@
 # PD Configuration.
 
-cluster-id = 0
-
-name = "pd"
-data-dir = "default.pd"
-
-host = "127.0.0.1"
-client-port = 2379
-advertise-client-port = 2379
-peer-port = 2380
-advertise-peer-port = 2380
-port = 1234 # deprecate later
-advertise-port = 1234 # deprecate later 
-http-port = 9090 # deprecate later
-
-initial-cluster = "pd=http://127.0.0.1:2380"
-initial-cluster-state = "new"
-
-root = "/pd" # deprecate later
+addr = "127.0.0.1:1234"
+advertise-addr = ""
+etcd-addrs = ["127.0.0.1:2379"]
+http-addr = ":9090"
+root = "/pd"
 lease = 3
 log-level = "debug"
 tso-save-interval = 2000
+cluster-id = 0
 max-peer-count = 3
-
+metric-addr = ""
 
 [balance]
+
 min-capacity-used-ratio = 0.4
 max-capacity-used-ratio = 0.9
 max-leader-count = 10
@@ -38,4 +27,13 @@ max-balance-count-per-loop = 3
 max-transfer-wait-count = 3
 max-store-down-duration = 60
 
-
+[etcd]
+name = "default"
+data-dir = "default.pd"
+wal-dir = ""
+listen-peer-url = "http://localhost:2380"
+listen-client-url = "http://localhost:2379"
+advertise-peer-url = "http://localhost:2380"
+advertise-client-url = "http://localhost:2379"
+initial-cluster = "default=http://locahost:2380"
+initial-cluster-state = "new"

@@ -67,7 +67,7 @@ type testClientSuite struct {
 }
 
 func (s *testClientSuite) SetUpSuite(c *C) {
-	s.srv = newServer(c, clusterID)
+	s.srv = newServer(c, "/pd-test", clusterID)
 	_, port, err := net.SplitHostPort(s.srv.GetConfig().AdvertiseAddr)
 	c.Assert(err, IsNil)
 
@@ -79,19 +79,24 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 
 	bootstrapServer(c, s.port)
 
-	s.client, err = NewClient(s.srv.GetEndpoints(), "/pd", clusterID)
+	s.client, err = NewClient(s.srv.GetEndpoints(), "/pd-test", clusterID)
 	c.Assert(err, IsNil)
 }
 
 func (s *testClientSuite) TearDownSuite(c *C) {
 	s.srv.Close()
 	s.client.Close()
-	os.RemoveAll(s.srv.GetConfig().DataDir)
+	os.RemoveAll(s.srv.GetConfig().EtcdCfg.DataDir)
 }
 
-func newServer(c *C, clusterID uint64) *server.Server {
-	cfg := server.NewTestSingleConfig()
-	cfg.ClusterID = clusterID
+func newServer(c *C, root string, clusterID uint64) *server.Server {
+	cfg := &server.Config{
+		Addr:        fmt.Sprintf("127.0.0.1:0"),
+		RootPath:    root,
+		LeaderLease: 1,
+		ClusterID:   clusterID,
+		EtcdCfg:     server.NewTestSingleEtcdConfig(),
+	}
 
 	s, err := server.NewServer(cfg)
 	c.Assert(err, IsNil)

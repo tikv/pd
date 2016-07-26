@@ -14,7 +14,6 @@
 package server
 
 import (
-	"fmt"
 	"net"
 	"path"
 	"strconv"
@@ -79,11 +78,9 @@ type Server struct {
 // NewServer creates the pd server with given configuration.
 func NewServer(cfg *Config) (*Server, error) {
 	cfg.adjust()
-	log.Infof("PD config - %v", cfg)
 
+	log.Info("start etcd...")
 	etcdCfg, err := cfg.genEmbedEtcdConfig()
-	log.Info("start embed etcd")
-
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -108,12 +105,16 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, errors.Trace(err)
 	}
 
-	addr := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
-	log.Infof("listening port %s", addr)
-	l, err := net.Listen("tcp", addr)
+	log.Infof("listening address %s", cfg.Addr)
+	l, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {
 		client.Close()
 		return nil, errors.Trace(err)
+	}
+
+	// If advertise addr not set, using default listening address.
+	if len(cfg.AdvertiseAddr) == 0 {
+		cfg.AdvertiseAddr = l.Addr().String()
 	}
 
 	s := &Server{

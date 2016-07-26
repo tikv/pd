@@ -218,7 +218,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 func (s *testClusterWorkerSuite) TearDownTest(c *C) {
 	s.svr.Close()
 
-	os.RemoveAll(s.svr.cfg.DataDir)
+	os.RemoveAll(s.svr.cfg.EtcdCfg.DataDir)
 }
 
 func (s *testClusterWorkerSuite) checkRegionPeerCount(c *C, regionKey []byte, expectCount int) *metapb.Region {
