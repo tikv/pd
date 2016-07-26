@@ -78,7 +78,7 @@ var (
 			Subsystem: "txn",
 			Name:      "txns_count",
 			Help:      "Counter of txns.",
-		}, []string{"type"})
+		}, []string{"result"})
 
 	txnDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -87,7 +87,7 @@ var (
 			Name:      "handle_txns_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled txns.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
-		}, []string{"type"})
+		}, []string{"result"})
 )
 
 func init() {
