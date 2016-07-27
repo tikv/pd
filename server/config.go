@@ -14,6 +14,7 @@
 package server
 
 import (
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -28,6 +29,8 @@ import (
 
 // Config is the pd server configuration.
 type Config struct {
+	*flag.FlagSet `json:"-"`
+
 	Host       string `toml:"host" json:"host"`
 	Port       uint64 `toml:"port" json:"port"`
 	ClientPort uint64 `toml:"client-port" json:"client-port"`
@@ -64,21 +67,43 @@ type Config struct {
 	// MaxPeerCount for a region. default is 3.
 	MaxPeerCount uint64 `toml:"max-peer-count" json:"max-peer-count"`
 
-	BalanceCfg *BalanceConfig `toml:"balance" json:"balance"`
+	BalanceCfg BalanceConfig `toml:"balance" json:"balance"`
 
 	// Server advertise listening address for outer client communication.
 	// Host:Port
-	AdvertiseAddr string
+	AdvertiseAddr string `json:"-"`
 
 	// Only test can change it.
 	nextRetryDelay time.Duration
+
+	configFile string
 }
 
 // NewConfig creates a new config.
 func NewConfig() *Config {
-	return &Config{
-		BalanceCfg: newBalanceConfig(),
-	}
+	cfg := &Config{}
+	cfg.FlagSet = flag.NewFlagSet("pd", flag.ContinueOnError)
+	fs := cfg.FlagSet
+
+	fs.StringVar(&cfg.configFile, "config", "", "Config file")
+
+	fs.Uint64Var(&cfg.ClusterID, "cluster-id", 0, "initial cluster ID for the pd cluster")
+	fs.StringVar(&cfg.Name, "name", defaultName, "human-readable name for this pd member")
+	fs.StringVar(&cfg.DataDir, "data-dir", defaultDataDir, "path to the data directory (default 'default.{name}')")
+	fs.StringVar(&cfg.Host, "host", defaultHost, "host for outer traffic")
+	fs.Uint64Var(&cfg.Port, "port", defaultPort, "server port (deprecate later)")
+	fs.Uint64Var(&cfg.AdvertisePort, "advertise-port", 0, "advertise server port (deprecate later) (default '{port}')")
+	fs.Uint64Var(&cfg.HTTPPort, "http-port", defaultHTTPPort, "http port (deprecate later)")
+	fs.Uint64Var(&cfg.ClientPort, "client-port", defaultClientPort, "port for client traffic")
+	fs.Uint64Var(&cfg.AdvertiseClientPort, "advertise-client-port", 0, "advertise port for client traffic (default '{client-port}')")
+	fs.Uint64Var(&cfg.PeerPort, "peer-port", defaultPeerPort, "port for peer traffic")
+	fs.Uint64Var(&cfg.AdvertisePeerPort, "advertise-peer-port", 0, "advertise port for peer traffic (default '{peer-port}')")
+	fs.StringVar(&cfg.InitialCluster, "initial-cluser", defaultInitialCluster, "initial cluster configuration for bootstrapping (default '{name}=http://{host}:{advertise-peer-port}')")
+	fs.StringVar(&cfg.InitialClusterState, "initial-cluster-state", defualtInitialClusterState, "initial cluster state ('new' or 'existing')")
+
+	fs.StringVar(&cfg.LogLevel, "L", "info", "log level: debug, info, warn, error, fatal")
+
+	return cfg
 }
 
 // PdRootPath for all pd servers.
@@ -90,14 +115,15 @@ const (
 	defaultMaxPeerCount    = uint64(3)
 	defaultNextRetryDelay  = time.Second
 
-	defaultName           = "pd"
-	defaultDataDir        = "default.pd"
-	defaultHost           = "127.0.0.1"
-	defaultPort           = uint64(1234)
-	defaultClientPort     = uint64(2379)
-	defaultPeerPort       = uint64(2380)
-	defaultHTTPPort       = uint64(9090)
-	defaultInitialCluster = "pd=http://127.0.0.1:2380"
+	defaultName                = "pd"
+	defaultDataDir             = "default.pd"
+	defaultHost                = "127.0.0.1"
+	defaultPort                = uint64(1234)
+	defaultClientPort          = uint64(2379)
+	defaultPeerPort            = uint64(2380)
+	defaultHTTPPort            = uint64(9090)
+	defaultInitialCluster      = "pd=http://127.0.0.1:2380"
+	defualtInitialClusterState = "new"
 )
 
 func adjustString(v *string, defValue string) {
@@ -116,6 +142,36 @@ func adjustInt64(v *int64, defValue int64) {
 	if *v == 0 {
 		*v = defValue
 	}
+}
+
+// Parse parses flag definitions from the argument list.
+func (c *Config) Parse(arguments []string) error {
+	flagArgs := make(map[string]*flag.Flag)
+	flag.Visit(func(flag *flag.Flag) {
+		flagArgs[flag.Name] = flag
+	})
+
+	var err error
+	if confFlag, ok := flagArgs["config"]; ok {
+		c.configFile = confFlag.Value.String()
+		if c.configFile != "" {
+			err = c.configFromFile(c.configFile)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		}
+	}
+
+	err = c.FlagSet.Parse(arguments)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if len(c.FlagSet.Args()) != 0 {
+		return errors.Errorf("'%s' is an invalid flag", c.FlagSet.Arg(0))
+	}
+
+	return nil
 }
 
 func (c *Config) adjust() {
@@ -150,28 +206,20 @@ func (c *Config) adjust() {
 		c.nextRetryDelay = defaultNextRetryDelay
 	}
 
-	if c.BalanceCfg == nil {
-		c.BalanceCfg = &BalanceConfig{}
-	}
-
-	c.BalanceCfg.adjust()
+	(&c.BalanceCfg).adjust()
 }
 
 func (c *Config) clone() *Config {
 	cfg := &Config{}
 	*cfg = *c
-	cfg.BalanceCfg = cfg.BalanceCfg.clone()
 	return cfg
 }
 
-func (c *Config) setCfg(cfg *Config) {
+func (c *Config) setBalanceConfig(cfg BalanceConfig) {
 	// TODO: add more check for cfg set.
 	cfg.adjust()
 
-	bc := c.BalanceCfg
-	*c = *cfg
-	c.BalanceCfg = bc
-	*c.BalanceCfg = *cfg.BalanceCfg
+	c.BalanceCfg = cfg
 }
 
 func (c *Config) String() string {
@@ -181,8 +229,8 @@ func (c *Config) String() string {
 	return fmt.Sprintf("Config(%+v)", *c)
 }
 
-// LoadFromFile loads config from file.
-func (c *Config) LoadFromFile(path string) error {
+// configFromFile loads config from file.
+func (c *Config) configFromFile(path string) error {
 	_, err := toml.DecodeFile(path, c)
 	return errors.Trace(err)
 }
@@ -239,7 +287,7 @@ func newBalanceConfig() *BalanceConfig {
 }
 
 const (
-	defaultMinCapacityUsedRatio   = float64(0.4)
+	defaultMinCapacityUsedRatio   = float64(0.3)
 	defaultMaxCapacityUsedRatio   = float64(0.9)
 	defaultMaxLeaderCount         = uint64(10)
 	defaultMaxSendingSnapCount    = uint64(3)
@@ -301,16 +349,6 @@ func (c *BalanceConfig) adjust() {
 	if c.MaxStoreDownDuration == 0 {
 		c.MaxStoreDownDuration = defaultMaxStoreDownDuration
 	}
-}
-
-func (c *BalanceConfig) clone() *BalanceConfig {
-	if c == nil {
-		return nil
-	}
-
-	bc := &BalanceConfig{}
-	*bc = *c
-	return bc
 }
 
 func (c *BalanceConfig) String() string {

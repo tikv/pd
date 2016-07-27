@@ -37,13 +37,13 @@ func (h *confHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
-	config := &server.Config{}
+	config := &server.BalanceConfig{}
 	err := fromBody(r, config)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}
 
-	h.svr.SetConfig(config)
+	h.svr.SetBalanceConfig(*config)
 	h.rd.JSON(w, http.StatusOK, nil)
 }

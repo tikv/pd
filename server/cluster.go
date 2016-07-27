@@ -86,7 +86,7 @@ func (c *RaftCluster) start(meta metapb.Cluster) error {
 		return errors.Trace(err)
 	}
 
-	c.balancerWorker = newBalancerWorker(c.cachedCluster, c.s.cfg.BalanceCfg)
+	c.balancerWorker = newBalancerWorker(c.cachedCluster, &c.s.cfg.BalanceCfg)
 	c.balancerWorker.run()
 
 	c.running = true
@@ -116,18 +116,12 @@ func (c *RaftCluster) isRunning() bool {
 
 // GetConfig gets config information.
 func (s *Server) GetConfig() *Config {
-	s.cfgLock.RLock()
-	defer s.cfgLock.RUnlock()
-
 	return s.cfg.clone()
 }
 
-// SetConfig sets the config information.
-func (s *Server) SetConfig(cfg *Config) {
-	s.cfgLock.Lock()
-	defer s.cfgLock.Unlock()
-
-	s.cfg.setCfg(cfg)
+// SetBalanceConfig sets the balance config information.
+func (s *Server) SetBalanceConfig(cfg BalanceConfig) {
+	s.cfg.setBalanceConfig(cfg)
 }
 
 func (s *Server) getClusterRootPath() string {

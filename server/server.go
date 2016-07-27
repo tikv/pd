@@ -34,8 +34,7 @@ const (
 
 // Server is the pd server.
 type Server struct {
-	cfgLock sync.RWMutex
-	cfg     *Config
+	cfg *Config
 
 	etcd *embed.Etcd
 
