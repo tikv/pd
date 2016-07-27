@@ -47,6 +47,9 @@ type Config struct {
 	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
 	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
 
+	// Join to an existing pd cluster, a string of endpoints.
+	Join string `toml:"join" json:"join"`
+
 	// LeaderLease time, if leader doesn't update its TTL
 	// in etcd after lease time, etcd will expire the leader key
 	// and other servers can campaign the leader again.
@@ -98,8 +101,8 @@ func NewConfig() *Config {
 	fs.Uint64Var(&cfg.AdvertiseClientPort, "advertise-client-port", 0, "advertise port for client traffic (default '{client-port}')")
 	fs.Uint64Var(&cfg.PeerPort, "peer-port", defaultPeerPort, "port for peer traffic")
 	fs.Uint64Var(&cfg.AdvertisePeerPort, "advertise-peer-port", 0, "advertise port for peer traffic (default '{peer-port}')")
-	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "", "initial cluster configuration for bootstrapping (default '{name}=http://{host}:{advertise-peer-port}')")
 	fs.StringVar(&cfg.InitialClusterState, "initial-cluster-state", defualtInitialClusterState, "initial cluster state ('new' or 'existing')")
+	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: http://host:peer-port)")
 
 	fs.StringVar(&cfg.LogLevel, "L", "info", "log level: debug, info, warn, error, fatal")
 
@@ -366,7 +369,7 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.InitialCluster = c.InitialCluster
 	// Use unique cluster id as the etcd cluster token too.
 	cfg.InitialClusterToken = fmt.Sprintf("pd-%d", c.ClusterID)
-	cfg.ClusterState = embed.ClusterStateFlagNew
+	cfg.ClusterState = c.InitialClusterState
 	cfg.EnablePprof = true
 
 	// TODO: check SSL configuration later if possible

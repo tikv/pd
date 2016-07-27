@@ -79,6 +79,11 @@ func NewServer(cfg *Config) (*Server, error) {
 	cfg.adjust()
 	log.Infof("PD config - %v", cfg)
 
+	if cfg.Join != "" {
+		cfg.InitialCluster = cfg.PrepareJoinCluster()
+		cfg.InitialClusterState = embed.ClusterStateFlagExisting
+	}
+
 	etcdCfg, err := cfg.genEmbedEtcdConfig()
 	log.Info("start embed etcd")
 
