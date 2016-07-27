@@ -173,12 +173,14 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		return nil, errors.Errorf("invalid request region, %v", request)
 	}
 
+	downPeers := request.GetDownPeers()
+
 	resp, changePeer, err := cluster.cachedCluster.regions.heartbeat(region, leader)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	res, err := cluster.handleRegionHeartbeat(region, leader)
+	res, err := cluster.handleRegionHeartbeat(region, leader, downPeers)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

@@ -23,12 +23,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-func (c *RaftCluster) addDefaultBalanceOperator(region *metapb.Region, leader *metapb.Peer) (*balanceOperator, error) {
+func (c *RaftCluster) addReplicaBalanceOperator(region *metapb.Region, leader *metapb.Peer, downPeers []*pdpb.PeerStats) (*balanceOperator, error) {
 	if !c.balancerWorker.allowBalance() {
 		return nil, nil
 	}
 
-	balancer := newDefaultBalancer(region, leader, &c.s.cfg.BalanceCfg)
+	balancer := newReplicaBalancer(region, leader, downPeers, c.s.cfg.BalanceCfg)
 	_, balanceOperator, err := balancer.Balance(c.cachedCluster)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -45,7 +45,7 @@ func (c *RaftCluster) addDefaultBalanceOperator(region *metapb.Region, leader *m
 	return c.balancerWorker.getBalanceOperator(region.GetId()), nil
 }
 
-func (c *RaftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer) (*pdpb.RegionHeartbeatResponse, error) {
+func (c *RaftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer, downPeers []*pdpb.PeerStats) (*pdpb.RegionHeartbeatResponse, error) {
 	// If the region peer count is 0, then we should not handle this.
 	if len(region.GetPeers()) == 0 {
 		log.Warnf("invalid region, zero region peer count - %v", region)
@@ -56,7 +56,7 @@ func (c *RaftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metap
 	balanceOperator := c.balancerWorker.getBalanceOperator(regionID)
 	var err error
 	if balanceOperator == nil {
-		balanceOperator, err = c.addDefaultBalanceOperator(region, leader)
+		balanceOperator, err = c.addReplicaBalanceOperator(region, leader, downPeers)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

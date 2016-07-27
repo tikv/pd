@@ -18,6 +18,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 var (
@@ -413,6 +414,78 @@ func (db *defaultBalancer) Balance(cluster *clusterInfo) (*score, *balanceOperat
 		bop, err = db.addPeer(cluster)
 	} else if peerCount > maxPeerCount {
 		bop, err = db.removePeer(cluster)
+	}
+
+	return nil, bop, errors.Trace(err)
+}
+
+// replicaBalancer is used to balance active replica count.
+type replicaBalancer struct {
+	cfg             *BalanceConfig
+	region          *metapb.Region
+	leader          *metapb.Peer
+	downPeers       []*pdpb.PeerStats
+	defaultBalancer *defaultBalancer
+}
+
+func newReplicaBalancer(region *metapb.Region, leader *metapb.Peer, downPeers []*pdpb.PeerStats, cfg *BalanceConfig) *replicaBalancer {
+	return &replicaBalancer{
+		cfg:             cfg,
+		region:          region,
+		leader:          leader,
+		downPeers:       downPeers,
+		defaultBalancer: newDefaultBalancer(region, leader, cfg),
+	}
+}
+
+func (rb *replicaBalancer) addPeer(cluster *clusterInfo) (*balanceOperator, error) {
+	return rb.defaultBalancer.addPeer(cluster)
+}
+
+func (rb *replicaBalancer) removePeer(cluster *clusterInfo, downPeers []*metapb.Peer) (*balanceOperator, error) {
+	if len(downPeers) >= 1 {
+		removePeerOperator := newRemovePeerOperator(rb.region.GetId(), downPeers[0])
+		return newBalanceOperator(rb.region, newOnceOperator(removePeerOperator)), nil
+	}
+	return rb.defaultBalancer.removePeer(cluster)
+}
+
+func (rb *replicaBalancer) collectDownPeers(cluster *clusterInfo) []*metapb.Peer {
+	var downPeers []*metapb.Peer
+	for _, stats := range rb.downPeers {
+		peer := stats.GetPeer()
+		if peer == nil {
+			continue
+		}
+		store := cluster.getStore(peer.GetStoreId())
+		if store == nil {
+			continue
+		}
+		if stats.GetDownSeconds() >= rb.cfg.MaxPeerDownDuration {
+			// Peer has been down for too long.
+			downPeers = append(downPeers, peer)
+		} else if store.downSeconds() >= rb.cfg.MaxStoreDownDuration {
+			// Both peer and store are down, we should do balance.
+			downPeers = append(downPeers, peer)
+		}
+	}
+	return downPeers
+}
+
+func (rb *replicaBalancer) Balance(cluster *clusterInfo) (*score, *balanceOperator, error) {
+	downPeers := rb.collectDownPeers(cluster)
+	peerCount := len(rb.region.GetPeers())
+	maxPeerCount := int(cluster.getMeta().GetMaxPeerCount())
+
+	var (
+		bop *balanceOperator
+		err error
+	)
+
+	if peerCount-len(downPeers) < maxPeerCount {
+		bop, err = rb.addPeer(cluster)
+	} else if peerCount > maxPeerCount {
+		bop, err = rb.removePeer(cluster, downPeers)
 	}
 
 	return nil, bop, errors.Trace(err)

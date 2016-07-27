@@ -549,6 +549,10 @@ func (s *storeInfo) clone() *storeInfo {
 	}
 }
 
+func (s *storeInfo) downSeconds() uint64 {
+	return uint64(time.Since(s.stats.LastHeartbeatTS).Seconds())
+}
+
 // leaderRatio is the leader region ratio of storage regions.
 func (s *storeInfo) leaderRatio() float64 {
 	if s.stats.TotalRegionCount == 0 {

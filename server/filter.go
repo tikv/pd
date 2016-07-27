@@ -13,8 +13,6 @@
 
 package server
 
-import "time"
-
 // Filter is an interface to filter target store.
 type Filter interface {
 	// FilterFromStore checks whether `from stores` should be skipped.
@@ -59,8 +57,7 @@ func (sf *stateFilter) filterBadStore(store *storeInfo) bool {
 		// The store is in unknown state.
 		return true
 	}
-	interval := time.Since(store.stats.LastHeartbeatTS).Seconds()
-	if uint64(interval) >= sf.cfg.MaxStoreDownDuration {
+	if store.downSeconds() >= sf.cfg.MaxStoreDownDuration {
 		// The store is considered to be down.
 		return true
 	}
