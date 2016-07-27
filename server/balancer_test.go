@@ -429,7 +429,7 @@ func (s *testBalancerSuite) TestReplicaBalancer(c *C) {
 	s.addRegionPeer(c, clusterInfo, 3, region, leader)
 
 	downPeers := []*pdpb.PeerStats{
-		&pdpb.PeerStats{
+		{
 			Peer:        region.GetPeers()[1],
 			DownSeconds: new(uint64),
 		},
