@@ -34,7 +34,6 @@ export HostIP="192.168.199.105"
 pd-server --cluster-id=1 \
           --host=${HostIP} \
           --name="pd" \
-          --initial-cluster="pd=http://${HostIP}:2380" 
 ```
 
 The command flag explanation:
@@ -102,7 +101,6 @@ docker run -d -p 1234:1234 -p 9090:9090 -p 2379:2379 -p 2380:2380 --name pd ping
           --cluster-id=1 \
           --host=${HostIP} \
           --name="pd" \
-          --initial-cluster="pd=http://${HostIP}:2380" 
 ```
 
 ### Cluster

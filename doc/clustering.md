@@ -2,6 +2,8 @@
 
 ## A 3-node local cluster
 
+**NOTICE**: Before using join, please make sure there is no data folder in current directory.
+
 ```bash
 # Set correct HostIP here. 
 export HostIP="192.168.199.105"
@@ -14,9 +16,7 @@ pd-server --cluster-id=1 \
           --http-port=19090 \
           --client-port=12379 \
           --peer-port=12380 \
-          --initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" 
 
-          
 # Start pd2
 pd-server --cluster-id=1 \
           --host=${HostIP} \
@@ -25,7 +25,7 @@ pd-server --cluster-id=1 \
           --http-port=29090 \
           --client-port=22379 \
           --peer-port=22380 \
-          --initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" 
+          --join="http://${HostIP}:12379" # pd1
 
 # Start pd3
 pd-server --cluster-id=1 \
@@ -35,7 +35,16 @@ pd-server --cluster-id=1 \
           --http-port=39090 \
           --client-port=32379 \
           --peer-port=32380 \
-          --initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" 
+          --join="http://${HostIP}:22379" # pd2
+# Or
+# pd-server --cluster-id=1 \
+#           --host=${HostIP} \
+#           --name=pd3 \
+#           --port=31234 \
+#           --http-port=39090 \
+#           --client-port=32379 \
+#           --peer-port=32380 \
+#           --join="http://${HostIP}:12379,http://${HostIP}:22379" # pd1, pd2
 ```
 
 Use `http` to see the cluster members:
@@ -103,9 +112,8 @@ docker run -d -p 11234:1234 -p 19090:9090 -p 12379:2379 -p 12380:2380 --name pd1
         --advertise-port=11234 \
         --advertise-client-port=12379 \
         --advertise-peer-port=12380 \
-        --initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" 
-        
-       
+
+
 # Start pd2
 docker run -d -p 21234:1234 -p 29090:9090 -p 22379:2379 -p 22380:2380 --name pd2 \
         pingcap/pd  \
@@ -115,8 +123,8 @@ docker run -d -p 21234:1234 -p 29090:9090 -p 22379:2379 -p 22380:2380 --name pd2
         --advertise-port=21234 \
         --advertise-client-port=22379 \
         --advertise-peer-port=22380 \
-        --initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" 
-        
+        --join="http://${HostIP}:12379" # pd1
+
 # Start pd3
 docker run -d -p 31234:1234 -p 39090:9090 -p 32379:2379 -p 32380:2380 --name pd3 \
         pingcap/pd  \
@@ -126,7 +134,7 @@ docker run -d -p 31234:1234 -p 39090:9090 -p 32379:2379 -p 32380:2380 --name pd3
         --advertise-port=31234 \
         --advertise-client-port=32379 \
         --advertise-peer-port=32380 \
-        --initial-cluster="pd1=http://${HostIP}:12380,pd2=http://${HostIP}:22380,pd3=http://${HostIP}:32380" 
+        --join="http://${HostIP}:22379" # pd2
 ```
 
 Use `http` to see cluster the members:
@@ -179,7 +187,7 @@ X-Etcd-Cluster-Id: 2d51087373879c4a
 
 TODO...
 
-## Add/Remove PD node dynamically
+## Remove PD node dynamically
 
 TODO...
 
