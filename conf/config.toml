@@ -40,5 +40,5 @@ max-balance-count = 16
 max-balance-retry-per-loop = 10
 max-balance-count-per-loop = 3
 max-transfer-wait-count = 3
-max-peer-down-duration = 1800
-max-store-down-duration = 60
+max-peer-down-duration = "30m"
+max-store-down-duration = "60s"

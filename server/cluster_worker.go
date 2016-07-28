@@ -28,7 +28,7 @@ func (c *RaftCluster) addReplicaBalanceOperator(region *metapb.Region, leader *m
 		return nil, nil
 	}
 
-	balancer := newReplicaBalancer(region, leader, downPeers, c.s.cfg.BalanceCfg)
+	balancer := newReplicaBalancer(region, leader, downPeers, &c.s.cfg.BalanceCfg)
 	_, balanceOperator, err := balancer.Balance(c.cachedCluster)
 	if err != nil {
 		return nil, errors.Trace(err)
