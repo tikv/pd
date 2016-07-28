@@ -2,8 +2,6 @@
 
 ## A 3-node local cluster
 
-**NOTICE**: Before using join, please make sure there is no data folder in current directory.
-
 ```bash
 # Set correct HostIP here. 
 export HostIP="192.168.199.105"

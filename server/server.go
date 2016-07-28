@@ -80,7 +80,11 @@ func NewServer(cfg *Config) (*Server, error) {
 	log.Infof("PD config - %v", cfg)
 
 	if cfg.Join != "" {
-		cfg.InitialCluster = cfg.PrepareJoinCluster()
+		initialCluster, err := cfg.prepareJoinCluster()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		cfg.InitialCluster = initialCluster
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
 	}
 

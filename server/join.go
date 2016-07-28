@@ -37,7 +37,7 @@ func getTransport() (*http.Transport, error) {
 	return transport.NewTransport(tls, dialTimeout)
 }
 
-func newClient(eps []string) (client.Client, error) {
+func newClient(endpoints []string) (client.Client, error) {
 	tr, err := getTransport()
 	if err != nil {
 		return nil, err
@@ -45,16 +45,16 @@ func newClient(eps []string) (client.Client, error) {
 
 	cfg := client.Config{
 		Transport:               tr,
-		Endpoints:               eps,
+		Endpoints:               endpoints,
 		HeaderTimeoutPerRequest: 0, // no timeout
 	}
 
 	return client.New(cfg)
 }
 
-// PrepareJoinCluster send MemberAdd command to pd cluster,
+// prepareJoinCluster send MemberAdd command to pd cluster,
 // returns pd initial cluster configuration.
-func (cfg *Config) PrepareJoinCluster() string {
+func (cfg *Config) prepareJoinCluster() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
 	defer cancel()
 
@@ -71,8 +71,7 @@ func (cfg *Config) PrepareJoinCluster() string {
 
 	m, err := mAPI.Add(ctx, selfPeerURL)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
-		os.Exit(1)
+		return "", err
 	}
 
 	newID := m.ID
@@ -81,8 +80,7 @@ func (cfg *Config) PrepareJoinCluster() string {
 
 	members, err := mAPI.List(ctx)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
-		os.Exit(1)
+		return "", err
 	}
 
 	conf := []string{}
@@ -96,5 +94,5 @@ func (cfg *Config) PrepareJoinCluster() string {
 		}
 	}
 
-	return strings.Join(conf, ",")
+	return strings.Join(conf, ","), nil
 }
