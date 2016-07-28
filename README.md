@@ -45,7 +45,7 @@ The command flag explanation:
 + `cluster-id`: The unique ID to distinguish different PD clusters. It can't be changed after bootstrapping.  
 + `name`: The human readable name for this node. 
 + `client-urls`: The listening URL list for client traffic.
-+ `peer-urls`: The listening URL list for peer traffic
++ `peer-urls`: The listening URL list for peer traffic.
 
 Using `curl` to see PD member:
 
