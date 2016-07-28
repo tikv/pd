@@ -37,15 +37,15 @@ export HostIP="192.168.199.105"
 pd-server --cluster-id=1 \
           --name="pd" \
           --client-urls="http://${HostIP}:2379" \
-          --peer-urls="http://${HostIP}:2389"
+          --peer-urls="http://${HostIP}:2380"
 ```
 
 The command flag explanation:
 
 + `cluster-id`: The unique ID to distinguish different PD clusters. It can't be changed after bootstrapping.  
 + `name`: The human readable name for this node. 
-+ `client-urls`: The listening URL list for peer traffic.
-+ `peer-urls`: The listening URL list for client traffic
++ `client-urls`: The listening URL list for client traffic.
++ `peer-urls`: The listening URL list for peer traffic
 
 Using `curl` to see PD member:
 
