@@ -15,13 +15,10 @@ package server
 
 import (
 	"fmt"
-	"net/http"
-	"os"
 	"strings"
 	"time"
 
-	"github.com/coreos/etcd/client"
-	"github.com/coreos/etcd/pkg/transport"
+	"github.com/coreos/etcd/clientv3"
 	"golang.org/x/net/context"
 )
 
@@ -30,69 +27,48 @@ import (
 const defaultDialTimeout = 30 * time.Second
 
 // TODO: support HTTPS
-func getTransport() (*http.Transport, error) {
-	tls := transport.TLSInfo{}
-	dialTimeout := defaultDialTimeout
-
-	return transport.NewTransport(tls, dialTimeout)
-}
-
-func newClient(endpoints []string) (client.Client, error) {
-	tr, err := getTransport()
-	if err != nil {
-		return nil, err
+func (cfg *Config) genClientV3Config() clientv3.Config {
+	eps := strings.Split(cfg.Join, ",")
+	return clientv3.Config{
+		Endpoints:   eps,
+		DialTimeout: defaultDialTimeout,
 	}
-
-	cfg := client.Config{
-		Transport:               tr,
-		Endpoints:               endpoints,
-		HeaderTimeoutPerRequest: 0, // no timeout
-	}
-
-	return client.New(cfg)
 }
 
 // prepareJoinCluster send MemberAdd command to pd cluster,
 // returns pd initial cluster configuration.
 func (cfg *Config) prepareJoinCluster() (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
-	defer cancel()
+	ctx, _ := context.WithTimeout(context.Background(), defaultDialTimeout)
 
-	eps := strings.Split(cfg.Join, ",")
-	c, e := newClient(eps)
-	if e != nil {
-		fmt.Fprintln(os.Stderr, e.Error())
+	client, err := clientv3.New(cfg.genClientV3Config())
+	if err != nil {
+		return "", err
 	}
-	mAPI := client.NewMembersAPI(c)
+	defer client.Close()
 
-	// TODO: support HTTPS
 	scheme := "http"
 	selfPeerURL := fmt.Sprintf("%s://%s:%d", scheme, cfg.Host, cfg.PeerPort)
-
-	m, err := mAPI.Add(ctx, selfPeerURL)
+	addResp, err := client.MemberAdd(ctx, []string{selfPeerURL})
 	if err != nil {
 		return "", err
 	}
 
-	newID := m.ID
-	name := cfg.Name
-	fmt.Printf("Added member named %s with ID %s to cluster\n", name, newID)
+	fmt.Printf("Member %16x added to cluster %16x\n", addResp.Member.ID, addResp.Header.ClusterId)
 
-	members, err := mAPI.List(ctx)
+	listResp, err := client.MemberList(ctx)
 	if err != nil {
 		return "", err
 	}
 
 	conf := []string{}
-	for _, memb := range members {
-		for _, u := range memb.PeerURLs {
-			n := memb.Name
-			if memb.ID == newID {
-				n = name
-			}
-			conf = append(conf, fmt.Sprintf("%s=%s", n, u))
+	for _, memb := range listResp.Members {
+		name := memb.Name
+		if memb.ID == addResp.Member.ID {
+			name = cfg.Name
 		}
+		conf = append(conf, fmt.Sprintf("%s=%s", name, memb.PeerURLs[0]))
 	}
 
+	fmt.Println(strings.Join(conf, ","))
 	return strings.Join(conf, ","), nil
 }
