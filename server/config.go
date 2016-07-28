@@ -145,22 +145,21 @@ func adjustInt64(v *int64, defValue int64) {
 
 // Parse parses flag definitions from the argument list.
 func (c *Config) Parse(arguments []string) error {
-	flagArgs := make(map[string]*flag.Flag)
-	flag.Visit(func(flag *flag.Flag) {
-		flagArgs[flag.Name] = flag
-	})
+	// Parse first to get config file.
+	err := c.FlagSet.Parse(arguments)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
-	var err error
-	if confFlag, ok := flagArgs["config"]; ok {
-		c.configFile = confFlag.Value.String()
-		if c.configFile != "" {
-			err = c.configFromFile(c.configFile)
-			if err != nil {
-				return errors.Trace(err)
-			}
+	// Load config file if specified.
+	if c.configFile != "" {
+		err = c.configFromFile(c.configFile)
+		if err != nil {
+			return errors.Trace(err)
 		}
 	}
 
+	// Parse again to replace with command line options.
 	err = c.FlagSet.Parse(arguments)
 	if err != nil {
 		return errors.Trace(err)
