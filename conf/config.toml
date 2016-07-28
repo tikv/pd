@@ -5,19 +5,23 @@ cluster-id = 0
 name = "pd"
 data-dir = "default.pd"
 
-host = "127.0.0.1"
-client-port = 2379
-advertise-client-port = 2379
-peer-port = 2380
-advertise-peer-port = 2380
-port = 1234 # deprecate later
-advertise-port = 1234 # deprecate later 
-http-port = 9090 # deprecate later
+client-urls = "http://127.0.0.1:2379"
+# if not set, use ${client-urls}
+advertise-client-urls = ""
+
+peer-urls = "http://127.0.0.1:2380"
+# if not set, use ${peer-urls}
+advertise-peer-urls = ""
 
 initial-cluster = "pd=http://127.0.0.1:2380"
 initial-cluster-state = "new"
 
-root = "/pd" # deprecate later
+addr = "127.0.0.1:1234" # deprecate later
+# if not set, use ${addr}
+advertise-addr = "" # deprecate later 
+http-addr = "127.0.0.1:9090" # deprecate later
+
+
 lease = 3
 log-level = "debug"
 tso-save-interval = 2000

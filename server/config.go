@@ -31,15 +31,10 @@ import (
 type Config struct {
 	*flag.FlagSet `json:"-"`
 
-	Host       string `toml:"host" json:"host"`
-	Port       uint64 `toml:"port" json:"port"`
-	ClientPort uint64 `toml:"client-port" json:"client-port"`
-	PeerPort   uint64 `toml:"peer-port" json:"peer-port"`
-	HTTPPort   uint64 `toml:"http-port" json:"http-port"`
-
-	AdvertisePort       uint64 `toml:"advertise-port" json:"advertise-port"`
-	AdvertiseClientPort uint64 `toml:"advertise-client-port" json:"advertise-client-port"`
-	AdvertisePeerPort   uint64 `toml:"advertise-peer-port" json:"advertise-peer-port"`
+	ClientUrls          string `toml:"client-urls" json:"client-urls"`
+	PeerUrls            string `toml:"peer-urls" json:"peer-urls"`
+	AdvertiseClientUrls string `toml:"advertise-client-urls" json:"advertise-client-urls"`
+	AdvertisePeerUrls   string `toml:"advertise-peer-urls" json:"advertise-peer-urls"`
 
 	Name    string `toml:"name" json:"name"`
 	DataDir string `toml:"data-dir" json:"data-dir"`
@@ -69,14 +64,15 @@ type Config struct {
 
 	BalanceCfg BalanceConfig `toml:"balance" json:"balance"`
 
-	// Server advertise listening address for outer client communication.
-	// Host:Port
-	AdvertiseAddr string `json:"-"`
-
 	// Only test can change it.
 	nextRetryDelay time.Duration
 
 	configFile string
+
+	// deprecated later
+	Addr          string `toml:"addr" json:"addr"`
+	HTTPAddr      string `toml:"http-addr" json:"http-addr"`
+	AdvertiseAddr string `toml:"advertise-addr" json:"advertise-addr"`
 }
 
 // NewConfig creates a new config.
@@ -89,25 +85,21 @@ func NewConfig() *Config {
 
 	fs.Uint64Var(&cfg.ClusterID, "cluster-id", 0, "initial cluster ID for the pd cluster")
 	fs.StringVar(&cfg.Name, "name", defaultName, "human-readable name for this pd member")
-	fs.StringVar(&cfg.DataDir, "data-dir", defaultDataDir, "path to the data directory (default 'default.{name}')")
-	fs.StringVar(&cfg.Host, "host", defaultHost, "host for outer traffic")
-	fs.Uint64Var(&cfg.Port, "port", defaultPort, "server port (deprecate later)")
-	fs.Uint64Var(&cfg.AdvertisePort, "advertise-port", 0, "advertise server port (deprecate later) (default '{port}')")
-	fs.Uint64Var(&cfg.HTTPPort, "http-port", defaultHTTPPort, "http port (deprecate later)")
-	fs.Uint64Var(&cfg.ClientPort, "client-port", defaultClientPort, "port for client traffic")
-	fs.Uint64Var(&cfg.AdvertiseClientPort, "advertise-client-port", 0, "advertise port for client traffic (default '{client-port}')")
-	fs.Uint64Var(&cfg.PeerPort, "peer-port", defaultPeerPort, "port for peer traffic")
-	fs.Uint64Var(&cfg.AdvertisePeerPort, "advertise-peer-port", 0, "advertise port for peer traffic (default '{peer-port}')")
-	fs.StringVar(&cfg.InitialCluster, "initial-cluser", "", "initial cluster configuration for bootstrapping (default '{name}=http://{host}:{advertise-peer-port}')")
+	fs.StringVar(&cfg.DataDir, "data-dir", defaultDataDir, "path to the data directory (default 'default.${name}')")
+	fs.StringVar(&cfg.Addr, "addr", defaultAddr, "server listening address (deprecate later)")
+	fs.StringVar(&cfg.AdvertiseAddr, "advertise-addr", "", "advertise server address (deprecate later) (default '${addr}')")
+	fs.StringVar(&cfg.HTTPAddr, "http-addr", defaultHTTPAddr, "http address (deprecate later)")
+	fs.StringVar(&cfg.ClientUrls, "client-urls", defaultClientUrls, "url for client traffic")
+	fs.StringVar(&cfg.AdvertiseClientUrls, "advertise-client-urls", "", "advertise url for client traffic (default '${client-urls}')")
+	fs.StringVar(&cfg.PeerUrls, "peer-urls", defaultPeerUrls, "url for peer traffic")
+	fs.StringVar(&cfg.AdvertisePeerUrls, "advertise-peer-urls", "", "advertise url for peer traffic (default '${peer-urls}')")
+	fs.StringVar(&cfg.InitialCluster, "initial-cluser", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
 	fs.StringVar(&cfg.InitialClusterState, "initial-cluster-state", defualtInitialClusterState, "initial cluster state ('new' or 'existing')")
 
 	fs.StringVar(&cfg.LogLevel, "L", "info", "log level: debug, info, warn, error, fatal")
 
 	return cfg
 }
-
-// PdRootPath for all pd servers.
-const PdRootPath = "/pd"
 
 const (
 	defaultLeaderLease     = int64(3)
@@ -117,11 +109,10 @@ const (
 
 	defaultName                = "pd"
 	defaultDataDir             = "default.pd"
-	defaultHost                = "127.0.0.1"
-	defaultPort                = uint64(1234)
-	defaultClientPort          = uint64(2379)
-	defaultPeerPort            = uint64(2380)
-	defaultHTTPPort            = uint64(9090)
+	defaultAddr                = "0.0.0.0:1234"
+	defaultClientUrls          = "http://0.0.0.0:2379"
+	defaultPeerUrls            = "http://0.0.0.0:2380"
+	defaultHTTPAddr            = "0.0.0.0:9090"
 	defualtInitialClusterState = "new"
 )
 
@@ -174,22 +165,31 @@ func (c *Config) Parse(arguments []string) error {
 }
 
 func (c *Config) adjust() {
-	adjustString(&c.Host, defaultHost)
 	adjustString(&c.Name, defaultName)
-	adjustUint64(&c.Port, defaultPort)
-	adjustUint64(&c.ClientPort, defaultClientPort)
-	adjustUint64(&c.PeerPort, defaultPeerPort)
-	adjustUint64(&c.HTTPPort, defaultHTTPPort)
 	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 
-	adjustUint64(&c.AdvertisePort, c.Port)
-	adjustUint64(&c.AdvertiseClientPort, c.ClientPort)
-	adjustUint64(&c.AdvertisePeerPort, c.PeerPort)
+	adjustString(&c.ClientUrls, defaultClientUrls)
+	adjustString(&c.AdvertiseClientUrls, c.ClientUrls)
+	adjustString(&c.PeerUrls, defaultPeerUrls)
+	adjustString(&c.AdvertisePeerUrls, c.PeerUrls)
 
-	c.AdvertiseAddr = fmt.Sprintf("%s:%d", c.Host, c.AdvertisePort)
+	adjustString(&c.Addr, defaultAddr)
+	adjustString(&c.AdvertiseAddr, c.Addr)
+	adjustString(&c.HTTPAddr, defaultHTTPAddr)
 
-	adjustString(&c.InitialCluster, fmt.Sprintf("%s=http://%s:%d", c.Name, c.Host, c.AdvertisePeerPort))
-	adjustString(&c.InitialClusterState, embed.ClusterStateFlagNew)
+	if len(c.InitialCluster) == 0 {
+		// The advertise peer urls may be http://127.0.0.1:2380,http://127.0.0.1:2381
+		// so the initial cluster is pd=http://127.0.0.1:2380,pd=http://127.0.0.1:2381
+		items := strings.Split(c.AdvertisePeerUrls, ",")
+
+		sep := ""
+		for _, item := range items {
+			c.InitialCluster += fmt.Sprintf("%s%s=%s", sep, c.Name, item)
+			sep = ","
+		}
+	}
+
+	adjustString(&c.InitialClusterState, defualtInitialClusterState)
 
 	adjustUint64(&c.MaxPeerCount, defaultMaxPeerCount)
 
@@ -205,7 +205,7 @@ func (c *Config) adjust() {
 		c.nextRetryDelay = defaultNextRetryDelay
 	}
 
-	(&c.BalanceCfg).adjust()
+	c.BalanceCfg.adjust()
 }
 
 func (c *Config) clone() *Config {
@@ -357,6 +357,21 @@ func (c *BalanceConfig) String() string {
 	return fmt.Sprintf("BalanceConfig(%+v)", *c)
 }
 
+func parseUrls(s string) ([]url.URL, error) {
+	items := strings.Split(s, ",")
+	urls := make([]url.URL, 0, len(items))
+	for _, item := range items {
+		u, err := url.Parse(item)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		urls = append(urls, *u)
+	}
+
+	return urls, nil
+}
+
 // generates a configuration for embedded etcd.
 func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg := embed.NewConfig()
@@ -366,39 +381,30 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.InitialCluster = c.InitialCluster
 	// Use unique cluster id as the etcd cluster token too.
 	cfg.InitialClusterToken = fmt.Sprintf("pd-%d", c.ClusterID)
-	cfg.ClusterState = embed.ClusterStateFlagNew
+	cfg.ClusterState = defualtInitialClusterState
 	cfg.EnablePprof = true
 
-	// TODO: check SSL configuration later if possible
-	scheme := "http"
+	var err error
 
-	u, err := url.Parse(fmt.Sprintf("%s://0.0.0.0:%d", scheme, c.PeerPort))
+	cfg.LPUrls, err = parseUrls(c.PeerUrls)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	cfg.LPUrls = []url.URL{*u}
-
-	u, err = url.Parse(fmt.Sprintf("%s://0.0.0.0:%d", scheme, c.ClientPort))
+	cfg.APUrls, err = parseUrls(c.AdvertisePeerUrls)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	cfg.LCUrls = []url.URL{*u}
-
-	u, err = url.Parse(fmt.Sprintf("%s://%s:%d", scheme, c.Host, c.AdvertisePeerPort))
+	cfg.LCUrls, err = parseUrls(c.ClientUrls)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	cfg.APUrls = []url.URL{*u}
-
-	u, err = url.Parse(fmt.Sprintf("%s://%s:%d", scheme, c.Host, c.AdvertiseClientPort))
+	cfg.ACUrls, err = parseUrls(c.AdvertiseClientUrls)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-
-	cfg.ACUrls = []url.URL{*u}
 
 	return cfg, nil
 }
@@ -427,10 +433,9 @@ func NewTestSingleConfig() *Config {
 		// We use cluster 0 for all tests.
 		ClusterID:  0,
 		Name:       "pd",
-		Host:       "127.0.0.1",
-		Port:       freePort(),
-		ClientPort: freePort(),
-		PeerPort:   freePort(),
+		Addr:       fmt.Sprintf("127.0.0.1:%d", freePort()),
+		ClientUrls: fmt.Sprintf("http://127.0.0.1:%d", freePort()),
+		PeerUrls:   fmt.Sprintf("http://127.0.0.1:%d", freePort()),
 
 		InitialClusterState: "new",
 
@@ -439,7 +444,7 @@ func NewTestSingleConfig() *Config {
 	}
 
 	cfg.DataDir, _ = ioutil.TempDir("/tmp", "test_pd")
-	cfg.InitialCluster = fmt.Sprintf("pd=http://127.0.0.1:%d", cfg.PeerPort)
+	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
 
 	return cfg
 }
@@ -454,7 +459,7 @@ func NewTestMultiConfig(count int) []*Config {
 		cfg := NewTestSingleConfig()
 		cfg.Name = fmt.Sprintf("pd%d", i)
 
-		clusters = append(clusters, fmt.Sprintf("%s=%s", cfg.Name, fmt.Sprintf("http://127.0.0.1:%d", cfg.PeerPort)))
+		clusters = append(clusters, fmt.Sprintf("%s=%s", cfg.Name, cfg.PeerUrls))
 
 		cfgs[i-1] = cfg
 	}
