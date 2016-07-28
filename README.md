@@ -41,8 +41,8 @@ The command flag explanation:
 
 + `cluster-id`: The unique ID to distinguish different PD clusters. It can't be changed after bootstrapping.  
 + `name`: The human readable name for this node. 
-+ `client-urls`: The list of URLs to listen on for peer traffic.
-+ `peer-urls`: The list of URLs to listen on for client traffic.
++ `client-urls`: The listening URL list for peer traffic.
++ `peer-urls`: The listening URL list for client traffic
 
 Using `curl` to see PD member:
 
@@ -108,5 +108,5 @@ docker run -d -p 1234:1234 -p 9090:9090 -p 2379:2379 -p 2380:2380 --name pd ping
 
 The command flag explanation:
 
-+ `advertise-client-urls`: The list of this member's client URLs to advertise to the public.
-+ `advertise-peer-urls`: The list of this member's peer URLs to advertise to the rest of the cluster.
++ `advertise-client-urls`: The advertise URL list for client traffic from outside.
++ `advertise-peer-urls`: The advertise URL list for peer traffic from outside.
