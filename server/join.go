@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/juju/errors"
+	"github.com/ngaut/log"
 	"golang.org/x/net/context"
 )
 
@@ -28,9 +30,9 @@ const defaultDialTimeout = 30 * time.Second
 
 // TODO: support HTTPS
 func (cfg *Config) genClientV3Config() clientv3.Config {
-	eps := strings.Split(cfg.Join, ",")
+	endpoints := strings.Split(cfg.Join, ",")
 	return clientv3.Config{
-		Endpoints:   eps,
+		Endpoints:   endpoints,
 		DialTimeout: defaultDialTimeout,
 	}
 }
@@ -42,7 +44,7 @@ func (cfg *Config) prepareJoinCluster() (string, error) {
 
 	client, err := clientv3.New(cfg.genClientV3Config())
 	if err != nil {
-		return "", err
+		return "", errors.Trace(err)
 	}
 	defer client.Close()
 
@@ -50,25 +52,27 @@ func (cfg *Config) prepareJoinCluster() (string, error) {
 	selfPeerURL := fmt.Sprintf("%s://%s:%d", scheme, cfg.Host, cfg.PeerPort)
 	addResp, err := client.MemberAdd(ctx, []string{selfPeerURL})
 	if err != nil {
-		return "", err
+		return "", errors.Trace(err)
 	}
 
-	fmt.Printf("Member %16x added to cluster %16x\n", addResp.Member.ID, addResp.Header.ClusterId)
+	log.Infof("Member %16x added to cluster %16x\n", addResp.Member.ID, addResp.Header.ClusterId)
 
 	listResp, err := client.MemberList(ctx)
 	if err != nil {
-		return "", err
+		return "", errors.Trace(err)
 	}
 
 	conf := []string{}
 	for _, memb := range listResp.Members {
-		name := memb.Name
-		if memb.ID == addResp.Member.ID {
-			name = cfg.Name
+		for _, m := range memb.PeerURLs {
+			n := memb.Name
+			if memb.ID == addResp.Member.ID {
+				n = cfg.Name
+			}
+			conf = append(conf, fmt.Sprintf("%s=%s", n, m))
 		}
-		conf = append(conf, fmt.Sprintf("%s=%s", name, memb.PeerURLs[0]))
 	}
 
-	fmt.Println(strings.Join(conf, ","))
+	log.Infof("pd initial cluster: %s\n", strings.Join(conf, ","))
 	return strings.Join(conf, ","), nil
 }
