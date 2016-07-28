@@ -461,10 +461,10 @@ func (rb *replicaBalancer) collectDownPeers(cluster *clusterInfo) []*metapb.Peer
 		if store == nil {
 			continue
 		}
-		if stats.GetDownSeconds() >= rb.cfg.MaxPeerDownDuration {
+		if stats.GetDownSeconds() >= uint64(rb.cfg.MaxPeerDownDuration.Seconds()) {
 			// Peer has been down for too long.
 			downPeers = append(downPeers, peer)
-		} else if store.downSeconds() >= rb.cfg.MaxStoreDownDuration {
+		} else if store.downDuration() >= rb.cfg.MaxStoreDownDuration {
 			// Both peer and store are down, we should do balance.
 			downPeers = append(downPeers, peer)
 		}

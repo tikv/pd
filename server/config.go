@@ -278,11 +278,11 @@ type BalanceConfig struct {
 
 	// MaxPeerDownDuration is the max duration at which
 	// a peer will be considered to be down if its leader reports it.
-	MaxPeerDownDuration uint64 `toml:"max-peer-down-duration" json:"max-peer-down-duration"`
+	MaxPeerDownDuration time.Duration `toml:"max-peer-down-duration" json:"max-peer-down-duration"`
 
 	// MaxStoreDownDuration is the max duration at which
 	// a store will be considered to be down if it hasn't reported heartbeats.
-	MaxStoreDownDuration uint64 `toml:"max-store-down-duration" json:"max-store-down-duration"`
+	MaxStoreDownDuration time.Duration `toml:"max-store-down-duration" json:"max-store-down-duration"`
 }
 
 func newBalanceConfig() *BalanceConfig {
@@ -301,8 +301,8 @@ const (
 	defaultMaxBalanceRetryPerLoop = uint64(10)
 	defaultMaxBalanceCountPerLoop = uint64(3)
 	defaultMaxTransferWaitCount   = uint64(3)
-	defaultMaxPeerDownDuration    = uint64(30 * 60)
-	defaultMaxStoreDownDuration   = uint64(60)
+	defaultMaxPeerDownDuration    = 30 * time.Minute
+	defaultMaxStoreDownDuration   = 60 * time.Second
 )
 
 func (c *BalanceConfig) adjust() {

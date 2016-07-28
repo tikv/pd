@@ -549,10 +549,6 @@ func (s *storeInfo) clone() *storeInfo {
 	}
 }
 
-func (s *storeInfo) downSeconds() uint64 {
-	return uint64(time.Since(s.stats.LastHeartbeatTS).Seconds())
-}
-
 // leaderRatio is the leader region ratio of storage regions.
 func (s *storeInfo) leaderRatio() float64 {
 	if s.stats.TotalRegionCount == 0 {
@@ -569,6 +565,10 @@ func (s *storeInfo) usedRatio() float64 {
 	}
 
 	return float64(s.stats.Stats.GetCapacity()-s.stats.Stats.GetAvailable()) / float64(s.stats.Stats.GetCapacity())
+}
+
+func (s *storeInfo) downDuration() time.Duration {
+	return time.Since(s.stats.LastHeartbeatTS)
 }
 
 // clusterInfo is cluster cache info.
