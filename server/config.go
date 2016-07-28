@@ -110,9 +110,9 @@ const (
 
 	defaultName                = "pd"
 	defaultDataDir             = "default.pd"
-	defaultAddr                = "0.0.0.0:1234"
-	defaultClientUrls          = "http://0.0.0.0:2379"
-	defaultPeerUrls            = "http://0.0.0.0:2380"
+	defaultAddr                = "127.0.0.1:1234"
+	defaultClientUrls          = "http://127.0.0.1:2379"
+	defaultPeerUrls            = "http://127.0.0.1:2380"
 	defaultHTTPAddr            = "0.0.0.0:9090"
 	defualtInitialClusterState = "new"
 )

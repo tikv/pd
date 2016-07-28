@@ -27,6 +27,9 @@ You can change these ports when starting PD.
 
 ### Single Node with default ports
 
+You can run `pd-server` directly on your local machine, if you want to connect to PD from outside, 
+you can let PD listen on the host IP.
+
 ```bash
 # Set correct HostIP here. 
 export HostIP="192.168.199.105"
@@ -101,8 +104,12 @@ export HostIP="192.168.199.105"
 docker run -d -p 1234:1234 -p 9090:9090 -p 2379:2379 -p 2380:2380 --name pd pingcap/pd \
           --cluster-id=1 \
           --name="pd" \
+          --client-urls="http://0.0.0.0:2379" \
           --advertise-client-urls="http://${HostIP}:2379" \
-          --advertise-peer-urls="http://${HostIP}:2380" 
+          --peer-urls="http://0.0.0.0:2380" \
+          --advertise-peer-urls="http://${HostIP}:2380" \
+          --addr="0.0.0.0:1234" \
+          --advertise-addr="${HostIP}:1234"
 ```
 
 
