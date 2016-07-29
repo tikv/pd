@@ -98,7 +98,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.AdvertisePeerUrls, "advertise-peer-urls", "", "advertise url for peer traffic (default '${peer-urls}')")
 	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
 	fs.StringVar(&cfg.InitialClusterState, "initial-cluster-state", defualtInitialClusterState, "initial cluster state ('new' or 'existing')")
-	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: http://{host}:{peer-port})")
+	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: other's '${peer-urls}'")
 
 	fs.StringVar(&cfg.LogLevel, "L", "info", "log level: debug, info, warn, error, fatal")
 

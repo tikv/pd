@@ -49,9 +49,7 @@ func (cfg *Config) prepareJoinCluster() (string, error) {
 	}
 	defer client.Close()
 
-	scheme := "http"
-	selfPeerURL := fmt.Sprintf("%s://%s:%d", scheme, cfg.Host, cfg.PeerPort)
-	addResp, err := client.MemberAdd(ctx, []string{selfPeerURL})
+	addResp, err := client.MemberAdd(ctx, []string{cfg.PeerUrls})
 	if err != nil {
 		return "", errors.Trace(err)
 	}
