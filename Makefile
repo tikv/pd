@@ -1,6 +1,10 @@
 GO=GO15VENDOREXPERIMENT="1" go
 
-all: build check test 
+default: build
+
+all: dev install
+
+dev: build check test
 
 build: 
 	rm -rf vendor && ln -s _vendor/vendor vendor

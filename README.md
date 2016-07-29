@@ -10,20 +10,13 @@ PD supports distribution and fault-tolerance by embedding [etcd](https://github.
 ## Build
 
 1. Make sure [​*Go*​](https://golang.org/) (version 1.5+) is installed.
-2. Use `make build` to install PD. PD is installed in the `bin` directory. 
+2. Use `make` to install PD. PD is installed in the `bin` directory. 
 
 ## Usage
 
-### PD ports
+### Command flags
 
-You can use the following default ports in PD:
-
-+ **2379**: for client requests 
-+ **2380**: for peer communication.
-+ **1234**: for client requests with customized protocol (deprecated later).
-+ **9090**: for client requests with HTTP (deprecated later).
-
-You can change these ports when starting PD.
+See [configuration](https://github.com/pingcap/docs/blob/master/op-guide/configuration.md#placement-driver-pd).
 
 ### Single Node with default ports
 
@@ -39,13 +32,6 @@ pd-server --cluster-id=1 \
           --client-urls="http://${HostIP}:2379" \
           --peer-urls="http://${HostIP}:2380"
 ```
-
-The command flag explanation:
-
-+ `cluster-id`: The unique ID to distinguish different PD clusters. It can't be changed after bootstrapping.  
-+ `name`: The human readable name for this node. 
-+ `client-urls`: The listening URL list for client traffic.
-+ `peer-urls`: The listening URL list for peer traffic.
 
 Using `curl` to see PD member:
 
@@ -112,8 +98,11 @@ docker run -d -p 1234:1234 -p 9090:9090 -p 2379:2379 -p 2380:2380 --name pd ping
           --advertise-addr="${HostIP}:1234"
 ```
 
+### Cluster
 
-The command flag explanation:
+PD is a component in TiDB project, you must run it with TiDB and TiKV together, see 
+[clustering](https://github.com/pingcap/docs/blob/master/op-guide/clustering.md) to learn 
+how to set up the cluster and run them.
 
-+ `advertise-client-urls`: The advertise URL list for client traffic from outside.
-+ `advertise-peer-urls`: The advertise URL list for peer traffic from outside.
+You can also use [Docker](https://github.com/pingcap/docs/blob/master/op-guide/docker.md) to 
+run the cluster.
