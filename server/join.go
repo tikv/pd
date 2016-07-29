@@ -40,7 +40,8 @@ func (cfg *Config) genClientV3Config() clientv3.Config {
 // prepareJoinCluster send MemberAdd command to pd cluster,
 // returns pd initial cluster configuration.
 func (cfg *Config) prepareJoinCluster() (string, error) {
-	ctx, _ := context.WithTimeout(context.Background(), defaultDialTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
+	defer cancel()
 
 	client, err := clientv3.New(cfg.genClientV3Config())
 	if err != nil {
@@ -62,16 +63,16 @@ func (cfg *Config) prepareJoinCluster() (string, error) {
 		return "", errors.Trace(err)
 	}
 
-	conf := []string{}
+	pds := []string{}
 	for _, memb := range listResp.Members {
 		for _, m := range memb.PeerURLs {
 			n := memb.Name
 			if memb.ID == addResp.Member.ID {
 				n = cfg.Name
 			}
-			conf = append(conf, fmt.Sprintf("%s=%s", n, m))
+			pds = append(pds, fmt.Sprintf("%s=%s", n, m))
 		}
 	}
 
-	return strings.Join(conf, ","), nil
+	return strings.Join(pds, ","), nil
 }
