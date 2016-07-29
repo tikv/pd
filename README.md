@@ -104,5 +104,5 @@ PD is a component in TiDB project, you must run it with TiDB and TiKV together, 
 [clustering](https://github.com/pingcap/docs/blob/master/op-guide/clustering.md) to learn 
 how to set up the cluster and run them.
 
-You can also use [docker](https://github.com/pingcap/docs/blob/master/op-guide/docker.md) to 
+You can also use [Docker](https://github.com/pingcap/docs/blob/master/op-guide/docker.md) to 
 run the cluster.
