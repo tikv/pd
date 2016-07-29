@@ -234,6 +234,20 @@ func (c *Config) configFromFile(path string) error {
 	return errors.Trace(err)
 }
 
+type duration struct {
+	time.Duration
+}
+
+func (d *duration) Seconds() uint64 {
+	return uint64(d.Duration.Seconds())
+}
+
+func (d *duration) UnmarshalText(text []byte) error {
+	var err error
+	d.Duration, err = time.ParseDuration(string(text))
+	return err
+}
+
 // BalanceConfig is the balance configuration.
 type BalanceConfig struct {
 	// For capacity balance.
@@ -278,11 +292,11 @@ type BalanceConfig struct {
 
 	// MaxPeerDownDuration is the max duration at which
 	// a peer will be considered to be down if its leader reports it.
-	MaxPeerDownDuration time.Duration `toml:"max-peer-down-duration" json:"max-peer-down-duration"`
+	MaxPeerDownDuration duration `toml:"max-peer-down-duration" json:"max-peer-down-duration"`
 
 	// MaxStoreDownDuration is the max duration at which
 	// a store will be considered to be down if it hasn't reported heartbeats.
-	MaxStoreDownDuration time.Duration `toml:"max-store-down-duration" json:"max-store-down-duration"`
+	MaxStoreDownDuration duration `toml:"max-store-down-duration" json:"max-store-down-duration"`
 }
 
 func newBalanceConfig() *BalanceConfig {
@@ -350,12 +364,12 @@ func (c *BalanceConfig) adjust() {
 		c.MaxTransferWaitCount = defaultMaxTransferWaitCount
 	}
 
-	if c.MaxPeerDownDuration == 0 {
-		c.MaxPeerDownDuration = defaultMaxPeerDownDuration
+	if c.MaxPeerDownDuration.Duration == 0 {
+		c.MaxPeerDownDuration.Duration = defaultMaxPeerDownDuration
 	}
 
-	if c.MaxStoreDownDuration == 0 {
-		c.MaxStoreDownDuration = defaultMaxStoreDownDuration
+	if c.MaxStoreDownDuration.Duration == 0 {
+		c.MaxStoreDownDuration.Duration = defaultMaxStoreDownDuration
 	}
 }
 

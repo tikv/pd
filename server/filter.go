@@ -57,7 +57,7 @@ func (sf *stateFilter) filterBadStore(store *storeInfo) bool {
 		// The store is in unknown state.
 		return true
 	}
-	if store.downDuration() >= sf.cfg.MaxStoreDownDuration {
+	if store.downSeconds() >= sf.cfg.MaxStoreDownDuration.Seconds() {
 		// The store is considered to be down.
 		return true
 	}

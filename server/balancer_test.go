@@ -354,7 +354,7 @@ func (s *testBalancerSuite) TestDownStore(c *C) {
 	testCfg.adjust()
 	testCfg.MinCapacityUsedRatio = 0.1
 	testCfg.MaxCapacityUsedRatio = 0.9
-	testCfg.MaxStoreDownDuration = 1 * time.Second
+	testCfg.MaxStoreDownDuration.Duration = 1 * time.Second
 	cb := newCapacityBalancer(testCfg)
 
 	// The store id will be 1,2,3,4.
@@ -443,7 +443,7 @@ func (s *testBalancerSuite) TestReplicaBalancer(c *C) {
 	c.Assert(bop, IsNil)
 
 	// Make store 4 down.
-	s.cfg.MaxStoreDownDuration = 1 * time.Second
+	s.cfg.MaxStoreDownDuration.Duration = 1 * time.Second
 	time.Sleep(600 * time.Millisecond)
 	s.updateStore(c, clusterInfo, 1, 100, 10, 0, 0)
 	s.updateStore(c, clusterInfo, 2, 100, 20, 0, 0)
