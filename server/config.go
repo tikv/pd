@@ -98,7 +98,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.AdvertisePeerUrls, "advertise-peer-urls", "", "advertise url for peer traffic (default '${peer-urls}')")
 	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
 	fs.StringVar(&cfg.InitialClusterState, "initial-cluster-state", defualtInitialClusterState, "initial cluster state ('new' or 'existing')")
-	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: other's '${client-urls}'")
+	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
 
 	fs.StringVar(&cfg.LogLevel, "L", "info", "log level: debug, info, warn, error, fatal")
 
@@ -169,7 +169,7 @@ func (c *Config) Parse(arguments []string) error {
 
 func (c *Config) validate() error {
 	if c.Join != "" && c.InitialCluster != "" {
-		return errors.New("-initial-cluster and -join can not be provide at the same time")
+		return errors.New("-initial-cluster and -join can not be provided at the same time")
 	}
 	return nil
 }
