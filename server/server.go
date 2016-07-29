@@ -107,7 +107,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, errors.Trace(err)
 	}
 
-	log.Infof("listening port %s", cfg.Addr)
+	log.Infof("listening address %s", cfg.Addr)
 	l, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {
 		client.Close()
