@@ -135,6 +135,18 @@ func adjustInt64(v *int64, defValue int64) {
 	}
 }
 
+func adjustFloat64(v *float64, defValue float64) {
+	if *v == 0 {
+		*v = defValue
+	}
+}
+
+func adjustDuration(v *duration, defValue time.Duration) {
+	if v.Duration == 0 {
+		v.Duration = defValue
+	}
+}
+
 // Parse parses flag definitions from the argument list.
 func (c *Config) Parse(arguments []string) error {
 	// Parse first to get config file.
@@ -316,61 +328,28 @@ const (
 	defaultMaxBalanceCountPerLoop = uint64(3)
 	defaultMaxTransferWaitCount   = uint64(3)
 	defaultMaxPeerDownDuration    = 30 * time.Minute
-	defaultMaxStoreDownDuration   = 60 * time.Second
+	defaultMaxStoreDownDuration   = 10 * time.Minute
 )
 
 func (c *BalanceConfig) adjust() {
-	if c.MinCapacityUsedRatio == 0 {
-		c.MinCapacityUsedRatio = defaultMinCapacityUsedRatio
-	}
+	adjustFloat64(&c.MinCapacityUsedRatio, defaultMinCapacityUsedRatio)
+	adjustFloat64(&c.MaxCapacityUsedRatio, defaultMaxCapacityUsedRatio)
 
-	if c.MaxCapacityUsedRatio == 0 {
-		c.MaxCapacityUsedRatio = defaultMaxCapacityUsedRatio
-	}
+	adjustUint64(&c.MaxLeaderCount, defaultMaxLeaderCount)
+	adjustUint64(&c.MaxSendingSnapCount, defaultMaxSendingSnapCount)
+	adjustUint64(&c.MaxReceivingSnapCount, defaultMaxReceivingSnapCount)
 
-	if c.MaxLeaderCount == 0 {
-		c.MaxLeaderCount = defaultMaxLeaderCount
-	}
+	adjustFloat64(&c.MaxDiffScoreFraction, defaultMaxDiffScoreFraction)
 
-	if c.MaxSendingSnapCount == 0 {
-		c.MaxSendingSnapCount = defaultMaxSendingSnapCount
-	}
+	adjustUint64(&c.BalanceInterval, defaultBalanceInterval)
+	adjustUint64(&c.MaxBalanceCount, defaultMaxBalanceCount)
+	adjustUint64(&c.MaxBalanceRetryPerLoop, defaultMaxBalanceRetryPerLoop)
+	adjustUint64(&c.MaxBalanceCountPerLoop, defaultMaxBalanceCountPerLoop)
 
-	if c.MaxReceivingSnapCount == 0 {
-		c.MaxReceivingSnapCount = defaultMaxReceivingSnapCount
-	}
+	adjustUint64(&c.MaxTransferWaitCount, defaultMaxTransferWaitCount)
 
-	if c.MaxDiffScoreFraction == 0 {
-		c.MaxDiffScoreFraction = defaultMaxDiffScoreFraction
-	}
-
-	if c.BalanceInterval == 0 {
-		c.BalanceInterval = defaultBalanceInterval
-	}
-
-	if c.MaxBalanceCount == 0 {
-		c.MaxBalanceCount = defaultMaxBalanceCount
-	}
-
-	if c.MaxBalanceRetryPerLoop == 0 {
-		c.MaxBalanceRetryPerLoop = defaultMaxBalanceRetryPerLoop
-	}
-
-	if c.MaxBalanceCountPerLoop == 0 {
-		c.MaxBalanceCountPerLoop = defaultMaxBalanceCountPerLoop
-	}
-
-	if c.MaxTransferWaitCount == 0 {
-		c.MaxTransferWaitCount = defaultMaxTransferWaitCount
-	}
-
-	if c.MaxPeerDownDuration.Duration == 0 {
-		c.MaxPeerDownDuration.Duration = defaultMaxPeerDownDuration
-	}
-
-	if c.MaxStoreDownDuration.Duration == 0 {
-		c.MaxStoreDownDuration.Duration = defaultMaxStoreDownDuration
-	}
+	adjustDuration(&c.MaxPeerDownDuration, defaultMaxPeerDownDuration)
+	adjustDuration(&c.MaxStoreDownDuration, defaultMaxStoreDownDuration)
 }
 
 func (c *BalanceConfig) String() string {
