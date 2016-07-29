@@ -14,7 +14,6 @@
 package server
 
 import (
-	"fmt"
 	"net"
 	"path"
 	"strconv"
@@ -30,6 +29,8 @@ import (
 
 const (
 	etcdTimeout = time.Second * 3
+	// pdRootPath for all pd servers.
+	pdRootPath = "/pd"
 )
 
 // Server is the pd server.
@@ -119,9 +120,8 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, errors.Trace(err)
 	}
 
-	addr := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
-	log.Infof("listening port %s", addr)
-	l, err := net.Listen("tcp", addr)
+	log.Infof("listening address %s", cfg.Addr)
+	l, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {
 		client.Close()
 		return nil, errors.Trace(err)
@@ -135,7 +135,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		isLeaderValue: 0,
 		conns:         make(map[*conn]struct{}),
 		closed:        0,
-		rootPath:      path.Join(PdRootPath, strconv.FormatUint(cfg.ClusterID, 10)),
+		rootPath:      path.Join(pdRootPath, strconv.FormatUint(cfg.ClusterID, 10)),
 		id:            uint64(etcd.Server.ID()),
 	}
 

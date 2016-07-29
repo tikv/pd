@@ -18,35 +18,39 @@ PD supports distribution and fault-tolerance by embedding [etcd](https://github.
 
 You can use the following default ports in PD:
 
-+ **1234**: for client requests with customized protocol.
-+ **9090**: for client requests with HTTP.
-+ **2379**: for embedded etcd client requests 
-+ **2380**: for embedded etcd peer communication.
++ **2379**: for client requests 
++ **2380**: for peer communication.
++ **1234**: for client requests with customized protocol (deprecated later).
++ **9090**: for client requests with HTTP (deprecated later).
 
 You can change these ports when starting PD.
 
 ### Single Node with default ports
+
+You can run `pd-server` directly on your local machine, if you want to connect to PD from outside, 
+you can let PD listen on the host IP.
 
 ```bash
 # Set correct HostIP here. 
 export HostIP="192.168.199.105"
 
 pd-server --cluster-id=1 \
-          --host=${HostIP} \
           --name="pd" \
+          --client-urls="http://${HostIP}:2379" \
+          --peer-urls="http://${HostIP}:2380"
 ```
 
 The command flag explanation:
 
 + `cluster-id`: The unique ID to distinguish different PD clusters. It can't be changed after bootstrapping.  
-+ `host`: The host for outer traffic.
 + `name`: The human readable name for this node. 
-+ `initial-cluster`: The initial cluster configuration for bootstrapping. 
++ `client-urls`: The listening URL list for client traffic.
++ `peer-urls`: The listening URL list for peer traffic.
 
 Using `curl` to see PD member:
 
 ```bash
-curl :2379/v2/members
+curl ${HostIP}:2379/v2/members
 
 {"members":[{"id":"f62e88a6e81c149","name":"default","peerURLs":["http://192.168.199.105:2380"],"clientURLs":["http://192.168.199.105:2379"]}]}
 ```
@@ -54,7 +58,7 @@ curl :2379/v2/members
 A better tool [httpie](https://github.com/jkbrzt/httpie) is recommended:
 
 ```bash
-http :2379/v2/members
+http ${HostIP}:2379/v2/members
 HTTP/1.1 200 OK
 Content-Length: 144
 Content-Type: application/json
@@ -99,10 +103,17 @@ export HostIP="192.168.199.105"
 
 docker run -d -p 1234:1234 -p 9090:9090 -p 2379:2379 -p 2380:2380 --name pd pingcap/pd \
           --cluster-id=1 \
-          --host=${HostIP} \
           --name="pd" \
+          --client-urls="http://0.0.0.0:2379" \
+          --advertise-client-urls="http://${HostIP}:2379" \
+          --peer-urls="http://0.0.0.0:2380" \
+          --advertise-peer-urls="http://${HostIP}:2380" \
+          --addr="0.0.0.0:1234" \
+          --advertise-addr="${HostIP}:1234"
 ```
 
-### Cluster
 
-For how to set up and use PD cluster, see [clustering](./doc/clustering.md).
+The command flag explanation:
+
++ `advertise-client-urls`: The advertise URL list for client traffic from outside.
++ `advertise-peer-urls`: The advertise URL list for peer traffic from outside.

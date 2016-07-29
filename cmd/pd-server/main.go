@@ -15,7 +15,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -62,7 +61,7 @@ func main() {
 	}()
 
 	go func() {
-		err = api.ServeHTTP(fmt.Sprintf("0.0.0.0:%d", cfg.HTTPPort), svr)
+		err = api.ServeHTTP(cfg.HTTPAddr, svr)
 		if err != nil {
 			log.Fatalf("serve http failed - %v", errors.Trace(err))
 		}
