@@ -73,6 +73,5 @@ func (cfg *Config) prepareJoinCluster() (string, error) {
 		}
 	}
 
-	log.Infof("pd initial cluster: %s\n", strings.Join(conf, ","))
 	return strings.Join(conf, ","), nil
 }

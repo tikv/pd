@@ -76,8 +76,9 @@ type Server struct {
 
 // NewServer creates the pd server with given configuration.
 func NewServer(cfg *Config) (*Server, error) {
-	cfg.adjust()
-	log.Infof("PD config - %v", cfg)
+	if err := cfg.validate(); err != nil {
+		return nil, errors.Trace(err)
+	}
 
 	if cfg.Join != "" {
 		initialCluster, err := cfg.prepareJoinCluster()
@@ -87,6 +88,9 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg.InitialCluster = initialCluster
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
 	}
+
+	cfg.adjust()
+	log.Infof("PD config - %v", cfg)
 
 	etcdCfg, err := cfg.genEmbedEtcdConfig()
 	log.Info("start embed etcd")

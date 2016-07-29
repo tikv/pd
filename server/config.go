@@ -101,6 +101,7 @@ func NewConfig() *Config {
 	fs.Uint64Var(&cfg.AdvertiseClientPort, "advertise-client-port", 0, "advertise port for client traffic (default '{client-port}')")
 	fs.Uint64Var(&cfg.PeerPort, "peer-port", defaultPeerPort, "port for peer traffic")
 	fs.Uint64Var(&cfg.AdvertisePeerPort, "advertise-peer-port", 0, "advertise port for peer traffic (default '{peer-port}')")
+	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "", "initial cluster configuration for bootstrapping (default '{name}=http://{host}:{advertise-peer-port}')")
 	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: http://host:peer-port)")
 
 	fs.StringVar(&cfg.LogLevel, "L", "info", "log level: debug, info, warn, error, fatal")
@@ -172,6 +173,13 @@ func (c *Config) Parse(arguments []string) error {
 		return errors.Errorf("'%s' is an invalid flag", c.FlagSet.Arg(0))
 	}
 
+	return nil
+}
+
+func (c *Config) validate() error {
+	if c.Join != "" && c.InitialCluster != "" {
+		return errors.New("-initial-cluster and -join can not be provide at the same time")
+	}
 	return nil
 }
 
