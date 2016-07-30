@@ -179,15 +179,6 @@ func (c *Config) adjust() error {
 		return errors.Trace(err)
 	}
 
-	if c.Join != "" {
-		initialCluster, err := c.prepareJoinCluster()
-		if err != nil {
-			return errors.Trace(err)
-		}
-		c.InitialCluster = initialCluster
-		c.InitialClusterState = embed.ClusterStateFlagExisting
-	}
-
 	adjustString(&c.Name, defaultName)
 	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 
@@ -199,6 +190,15 @@ func (c *Config) adjust() error {
 	adjustString(&c.Addr, defaultAddr)
 	adjustString(&c.AdvertiseAddr, c.Addr)
 	adjustString(&c.HTTPAddr, defaultHTTPAddr)
+
+	if c.Join != "" {
+		initialCluster, err := c.prepareJoinCluster()
+		if err != nil {
+			return errors.Trace(err)
+		}
+		c.InitialCluster = initialCluster
+		c.InitialClusterState = embed.ClusterStateFlagExisting
+	}
 
 	if len(c.InitialCluster) == 0 {
 		// The advertise peer urls may be http://127.0.0.1:2380,http://127.0.0.1:2381

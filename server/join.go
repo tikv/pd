@@ -49,7 +49,7 @@ func (cfg *Config) prepareJoinCluster() (string, error) {
 	}
 	defer client.Close()
 
-	addResp, err := client.MemberAdd(ctx, []string{cfg.PeerUrls})
+	addResp, err := client.MemberAdd(ctx, []string{cfg.AdvertisePeerUrls})
 	if err != nil {
 		return "", errors.Trace(err)
 	}

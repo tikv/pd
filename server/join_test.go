@@ -19,11 +19,10 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/net/context"
-
 	"github.com/coreos/etcd/clientv3"
-	"github.com/ngaut/log"
+	"github.com/juju/errors"
 	. "github.com/pingcap/check"
+	"golang.org/x/net/context"
 )
 
 func TestJoin(t *testing.T) {
@@ -52,10 +51,34 @@ func newTestMultiJoinConfig(count int) []*Config {
 	return cfgs
 }
 
+func waitMembers(svr *Server, c int) error {
+	// maxRetryTime * waitInterval = 5s
+	maxRetryCount := 500
+	waitInterval := 100 * time.Millisecond
+
+	for cluster := svr.etcd.Server.Cluster(); maxRetryCount != 0; maxRetryCount-- {
+		membs := cluster.Members()
+		count := 0
+		for _, memb := range membs {
+			if len(memb.Name) == 0 {
+				// unstarted, see:
+				// https://github.com/coreos/etcd/blob/master/etcdctl/ctlv3/command/printer.go#L60
+				// https://coreos.com/etcd/docs/latest/runtime-configuration.html#add-a-new-member
+				break
+			}
+			count++
+			if count >= c {
+				return nil
+			}
+		}
+		time.Sleep(waitInterval)
+	}
+	return errors.New("waitMembers Timeout")
+}
+
 func (s *testJoinServerSuite) TestJoin(c *C) {
 	svrs := make([]*Server, 0, len(s.cfgs))
 	for i, cfg := range s.cfgs {
-		log.Info("NewServer: ", i)
 		svr, err := NewServer(cfg)
 		c.Assert(err, IsNil)
 		defer svr.Close()
@@ -64,7 +87,8 @@ func (s *testJoinServerSuite) TestJoin(c *C) {
 		go svr.Run()
 
 		// Make sure new pd is started.
-		time.Sleep(5 * time.Second)
+		err = waitMembers(svrs[0], i+1)
+		c.Assert(err, IsNil)
 	}
 
 	endpoints := strings.Split(s.cfgs[rand.Intn(3)].ClientUrls, ",")
