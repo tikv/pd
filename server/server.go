@@ -104,7 +104,12 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	if err = waitEtcdStart(client, endpoints[0]); err != nil {
-		return nil, errors.Trace(err)
+		// See https://github.com/coreos/etcd/issues/6067
+		// Here may return "not capable" error because we don't start
+		// all etcds in initial_cluster at same time, so here just log
+		// an error.
+		// Note that pd can not work correctly if we don't start all etcds.
+		log.Errorf("etcd start failed, err %v", err)
 	}
 
 	log.Infof("listening address %s", cfg.Addr)

@@ -100,9 +100,6 @@ func (s *testLeaderServerSuite) TestLeader(c *C) {
 	svr.Close()
 	delete(s.svrs, leader1.GetAddr())
 
-	// now, another two servers must select a leader
-	s.setUpClient(c)
-
 	// wait leader changes
 	for i := 0; i < 50; i++ {
 		leader, _ := getLeader(s.client, s.leaderPath)
