@@ -174,7 +174,20 @@ func (c *Config) validate() error {
 	return nil
 }
 
-func (c *Config) adjust() {
+func (c *Config) adjust() error {
+	if err := c.validate(); err != nil {
+		return errors.Trace(err)
+	}
+
+	if c.Join != "" {
+		initialCluster, err := c.prepareJoinCluster()
+		if err != nil {
+			return errors.Trace(err)
+		}
+		c.InitialCluster = initialCluster
+		c.InitialClusterState = embed.ClusterStateFlagExisting
+	}
+
 	adjustString(&c.Name, defaultName)
 	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 
@@ -216,6 +229,7 @@ func (c *Config) adjust() {
 	}
 
 	c.BalanceCfg.adjust()
+	return nil
 }
 
 func (c *Config) clone() *Config {
