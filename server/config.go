@@ -88,6 +88,7 @@ func NewConfig() *Config {
 
 	fs.Uint64Var(&cfg.ClusterID, "cluster-id", 0, "initial cluster ID for the pd cluster")
 	fs.StringVar(&cfg.Name, "name", defaultName, "human-readable name for this pd member")
+
 	fs.StringVar(&cfg.DataDir, "data-dir", defaultDataDir, "path to the data directory (default 'default.${name}')")
 	fs.StringVar(&cfg.Addr, "addr", defaultAddr, "server listening address (deprecate later)")
 	fs.StringVar(&cfg.AdvertiseAddr, "advertise-addr", "", "advertise server address (deprecate later) (default '${addr}')")
@@ -97,7 +98,6 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.PeerUrls, "peer-urls", defaultPeerUrls, "url for peer traffic")
 	fs.StringVar(&cfg.AdvertisePeerUrls, "advertise-peer-urls", "", "advertise url for peer traffic (default '${peer-urls}')")
 	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
-	fs.StringVar(&cfg.InitialClusterState, "initial-cluster-state", defualtInitialClusterState, "initial cluster state ('new' or 'existing')")
 	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
 
 	fs.StringVar(&cfg.LogLevel, "L", "info", "log level: debug, info, warn, error, fatal")
@@ -117,7 +117,7 @@ const (
 	defaultClientUrls          = "http://127.0.0.1:2379"
 	defaultPeerUrls            = "http://127.0.0.1:2380"
 	defaultHTTPAddr            = "0.0.0.0:9090"
-	defualtInitialClusterState = "new"
+	defualtInitialClusterState = embed.ClusterStateFlagNew
 )
 
 func adjustString(v *string, defValue string) {
