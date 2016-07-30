@@ -116,6 +116,7 @@ func StartEtcd(inCfg *Config) (e *Etcd, err error) {
 		QuotaBackendBytes:       cfg.QuotaBackendBytes,
 		StrictReconfigCheck:     cfg.StrictReconfigCheck,
 		EnablePprof:             cfg.EnablePprof,
+		ClientCertAuthEnabled:   cfg.ClientTLSInfo.ClientCertAuth,
 	}
 
 	if e.Server, err = etcdserver.NewServer(srvcfg); err != nil {
@@ -126,7 +127,9 @@ func StartEtcd(inCfg *Config) (e *Etcd, err error) {
 	e.errc = make(chan error, len(e.Peers)+len(e.Clients)+2*len(e.sctxs))
 
 	e.Server.Start()
-	e.serve()
+	if err = e.serve(); err != nil {
+		return
+	}
 	<-e.Server.ReadyNotify()
 	return
 }
@@ -274,6 +277,7 @@ func startClientListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 				plog.Info("stopping listening for client requests on ", u.Host)
 			}
 		}()
+		sctx.userHandlers = cfg.UserHandlers
 		sctxs[u.Host] = sctx
 	}
 	return sctxs, nil

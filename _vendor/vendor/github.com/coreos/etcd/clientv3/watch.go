@@ -140,6 +140,8 @@ type watchRequest struct {
 	rev int64
 	// progressNotify is for progress updates
 	progressNotify bool
+	// filters is the list of events to filter out
+	filters []pb.WatchCreateRequest_FilterType
 	// get the previous key-value pair before the event happens
 	prevKV bool
 	// retc receives a chan WatchResponse once the watcher is established
@@ -164,8 +166,12 @@ type watcherStream struct {
 }
 
 func NewWatcher(c *Client) Watcher {
+	return NewWatchFromWatchClient(pb.NewWatchClient(c.conn))
+}
+
+func NewWatchFromWatchClient(wc pb.WatchClient) Watcher {
 	return &watcher{
-		remote:  pb.NewWatchClient(c.conn),
+		remote:  wc,
 		streams: make(map[string]*watchGrpcStream),
 	}
 }
@@ -206,12 +212,22 @@ func (w *watcher) Watch(ctx context.Context, key string, opts ...OpOption) Watch
 	ow := opWatch(key, opts...)
 
 	retc := make(chan chan WatchResponse, 1)
+
+	var filters []pb.WatchCreateRequest_FilterType
+	if ow.filterPut {
+		filters = append(filters, pb.WatchCreateRequest_NOPUT)
+	}
+	if ow.filterDelete {
+		filters = append(filters, pb.WatchCreateRequest_NODELETE)
+	}
+
 	wr := &watchRequest{
 		ctx:            ctx,
 		key:            string(ow.key),
 		end:            string(ow.end),
 		rev:            ow.rev,
 		progressNotify: ow.progressNotify,
+		filters:        filters,
 		prevKV:         ow.prevKV,
 		retc:           retc,
 	}
@@ -686,6 +702,7 @@ func (wr *watchRequest) toPB() *pb.WatchRequest {
 		Key:            []byte(wr.key),
 		RangeEnd:       []byte(wr.end),
 		ProgressNotify: wr.progressNotify,
+		Filters:        wr.filters,
 		PrevKv:         wr.prevKV,
 	}
 	cr := &pb.WatchRequest_CreateRequest{CreateRequest: req}
