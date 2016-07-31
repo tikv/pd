@@ -257,7 +257,7 @@ func (d *duration) Seconds() uint64 {
 func (d *duration) UnmarshalText(text []byte) error {
 	var err error
 	d.Duration, err = time.ParseDuration(string(text))
-	return err
+	return errors.Trace(err)
 }
 
 // BalanceConfig is the balance configuration.

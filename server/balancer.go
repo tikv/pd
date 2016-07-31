@@ -23,7 +23,7 @@ import (
 
 var (
 	_ Balancer = &capacityBalancer{}
-	_ Balancer = &defaultBalancer{}
+	_ Balancer = &replicaBalancer{}
 	_ Balancer = &leaderBalancer{}
 )
 
@@ -340,46 +340,72 @@ func (lb *leaderBalancer) Balance(cluster *clusterInfo) (*score, *balanceOperato
 	return score, newBalanceOperator(region, transferLeaderOperator), nil
 }
 
-// defaultBalancer is used for default config change, like add/remove peer.
-type defaultBalancer struct {
+// replicaBalancer is used to balance active replica count.
+type replicaBalancer struct {
 	*capacityBalancer
-	region *metapb.Region
-	leader *metapb.Peer
+	cfg       *BalanceConfig
+	region    *metapb.Region
+	leader    *metapb.Peer
+	downPeers []*pdpb.PeerStats
 }
 
-func newDefaultBalancer(region *metapb.Region, leader *metapb.Peer, cfg *BalanceConfig) *defaultBalancer {
-	return &defaultBalancer{
+func newReplicaBalancer(region *metapb.Region, leader *metapb.Peer, downPeers []*pdpb.PeerStats, cfg *BalanceConfig) *replicaBalancer {
+	return &replicaBalancer{
+		cfg:              cfg,
 		region:           region,
 		leader:           leader,
+		downPeers:        downPeers,
 		capacityBalancer: newCapacityBalancer(cfg),
 	}
 }
 
-func (db *defaultBalancer) addPeer(cluster *clusterInfo) (*balanceOperator, error) {
+func (rb *replicaBalancer) addPeer(cluster *clusterInfo) (*balanceOperator, error) {
 	stores := cluster.getStores()
-	excludedStores := make(map[uint64]struct{}, len(db.region.GetPeers()))
-	for _, peer := range db.region.GetPeers() {
+	excludedStores := make(map[uint64]struct{}, len(rb.region.GetPeers()))
+	for _, peer := range rb.region.GetPeers() {
 		storeID := peer.GetStoreId()
 		excludedStores[storeID] = struct{}{}
 	}
 
-	peer, err := db.selectAddPeer(cluster, stores, excludedStores)
+	peer, err := rb.selectAddPeer(cluster, stores, excludedStores)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 	if peer == nil {
-		log.Warnf("find no store to add peer for region %v", db.region)
+		log.Warnf("find no store to add peer for region %v", rb.region)
 		return nil, nil
 	}
 
-	addPeerOperator := newAddPeerOperator(db.region.GetId(), peer)
-	return newBalanceOperator(db.region, newOnceOperator(addPeerOperator)), nil
+	addPeerOperator := newAddPeerOperator(rb.region.GetId(), peer)
+	return newBalanceOperator(rb.region, newOnceOperator(addPeerOperator)), nil
 }
 
-func (db *defaultBalancer) removePeer(cluster *clusterInfo) (*balanceOperator, error) {
-	followerPeers := make(map[uint64]*metapb.Peer, len(db.region.GetPeers()))
-	for _, peer := range db.region.GetPeers() {
-		if peer.GetId() == db.leader.GetId() {
+func (rb *replicaBalancer) removePeer(cluster *clusterInfo, downPeers []*metapb.Peer) (*balanceOperator, error) {
+	var peer *metapb.Peer
+
+	if len(downPeers) >= 1 {
+		peer = downPeers[0]
+	} else {
+		var err error
+		peer, err = rb.selectRemovePeer(cluster)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+
+	if peer == nil {
+		log.Warnf("find no store to remove peer for region %v", rb.region)
+		return nil, nil
+	}
+
+	removePeerOperator := newRemovePeerOperator(rb.region.GetId(), peer)
+	return newBalanceOperator(rb.region, newOnceOperator(removePeerOperator)), nil
+}
+
+func (rb *replicaBalancer) selectRemovePeer(cluster *clusterInfo) (*metapb.Peer, error) {
+	followerPeers := make(map[uint64]*metapb.Peer, len(rb.region.GetPeers()))
+	for _, peer := range rb.region.GetPeers() {
+		if peer.GetId() == rb.leader.GetId() {
 			continue
 		}
 
@@ -387,71 +413,11 @@ func (db *defaultBalancer) removePeer(cluster *clusterInfo) (*balanceOperator, e
 		followerPeers[storeID] = peer
 	}
 
-	peer, err := db.selectRemovePeer(cluster, followerPeers)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	if peer == nil {
-		log.Warnf("find no store to remove peer for region %v", db.region)
-		return nil, nil
-	}
-
-	removePeerOperator := newRemovePeerOperator(db.region.GetId(), peer)
-	return newBalanceOperator(db.region, newOnceOperator(removePeerOperator)), nil
-}
-
-func (db *defaultBalancer) Balance(cluster *clusterInfo) (*score, *balanceOperator, error) {
-	peerCount := len(db.region.GetPeers())
-	clusterMeta := cluster.getMeta()
-	maxPeerCount := int(clusterMeta.GetMaxPeerCount())
-
-	var (
-		bop *balanceOperator
-		err error
-	)
-
-	if peerCount < maxPeerCount {
-		bop, err = db.addPeer(cluster)
-	} else if peerCount > maxPeerCount {
-		bop, err = db.removePeer(cluster)
-	}
-
-	return nil, bop, errors.Trace(err)
-}
-
-// replicaBalancer is used to balance active replica count.
-type replicaBalancer struct {
-	cfg             *BalanceConfig
-	region          *metapb.Region
-	leader          *metapb.Peer
-	downPeers       []*pdpb.PeerStats
-	defaultBalancer *defaultBalancer
-}
-
-func newReplicaBalancer(region *metapb.Region, leader *metapb.Peer, downPeers []*pdpb.PeerStats, cfg *BalanceConfig) *replicaBalancer {
-	return &replicaBalancer{
-		cfg:             cfg,
-		region:          region,
-		leader:          leader,
-		downPeers:       downPeers,
-		defaultBalancer: newDefaultBalancer(region, leader, cfg),
-	}
-}
-
-func (rb *replicaBalancer) addPeer(cluster *clusterInfo) (*balanceOperator, error) {
-	return rb.defaultBalancer.addPeer(cluster)
-}
-
-func (rb *replicaBalancer) removePeer(cluster *clusterInfo, downPeers []*metapb.Peer) (*balanceOperator, error) {
-	if len(downPeers) >= 1 {
-		removePeerOperator := newRemovePeerOperator(rb.region.GetId(), downPeers[0])
-		return newBalanceOperator(rb.region, newOnceOperator(removePeerOperator)), nil
-	}
-	return rb.defaultBalancer.removePeer(cluster)
+	return rb.capacityBalancer.selectRemovePeer(cluster, followerPeers)
 }
 
 func (rb *replicaBalancer) collectDownPeers(cluster *clusterInfo) []*metapb.Peer {
-	var downPeers []*metapb.Peer
+	downPeers := make([]*metapb.Peer, 0, len(rb.downPeers))
 	for _, stats := range rb.downPeers {
 		peer := stats.GetPeer()
 		if peer == nil {
