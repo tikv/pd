@@ -58,7 +58,8 @@ func waitMembers(svr *Server, c int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
 	defer cancel()
 
-	for client := svr.GetClient(); maxRetryCount != 0; maxRetryCount-- {
+	client := svr.GetClient()
+	for ; maxRetryCount != 0; maxRetryCount-- {
 		listResp, err := client.MemberList(ctx)
 		if err != nil {
 			continue
