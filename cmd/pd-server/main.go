@@ -45,7 +45,7 @@ func main() {
 		log.Errorf("create pd server err %s\n", err)
 		return
 	}
-	err = svr.StartEtcd(api.NewHandler("/pd", svr))
+	err = svr.StartEtcd(api.NewHandler(svr))
 	if err != nil {
 		log.Errorf("server start etcd failed - %v", errors.Trace(err))
 		return
