@@ -20,18 +20,20 @@ import (
 	"github.com/urfave/negroni"
 )
 
+const apiPrefix = "/pd"
+
 // NewHandler creates a HTTP handler for API.
-func NewHandler(prefix string, svr *server.Server) http.Handler {
+func NewHandler(svr *server.Server) http.Handler {
 	engine := negroni.New()
 
 	recovery := negroni.NewRecovery()
 	engine.Use(recovery)
 
 	static := negroni.NewStatic(http.Dir("templates/static/"))
-	static.Prefix = prefix
+	static.Prefix = apiPrefix
 	engine.Use(static)
 
-	router := createRouter(prefix, svr)
+	router := createRouter(apiPrefix, svr)
 	engine.UseHandler(router)
 
 	return engine
