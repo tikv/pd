@@ -213,6 +213,11 @@ func (s *Server) GetEndpoints() []string {
 	return s.client.Endpoints()
 }
 
+// GetClient returns builtin etcd client.
+func (s *Server) GetClient() *clientv3.Client {
+	return s.client
+}
+
 // ID returns the unique etcd ID for this server in etcd cluster.
 func (s *Server) ID() uint64 {
 	return s.id

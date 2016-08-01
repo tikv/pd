@@ -53,24 +53,32 @@ func newTestMultiJoinConfig(count int) []*Config {
 
 func waitMembers(svr *Server, c int) error {
 	// maxRetryTime * waitInterval = 5s
-	maxRetryCount := 500
-	waitInterval := 100 * time.Millisecond
+	maxRetryCount := 10
+	waitInterval := 500 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
+	defer cancel()
 
-	for cluster := svr.etcd.Server.Cluster(); maxRetryCount != 0; maxRetryCount-- {
-		membs := cluster.Members()
+	for client := svr.GetClient(); maxRetryCount != 0; maxRetryCount-- {
+		listResp, err := client.MemberList(ctx)
+		if err != nil {
+			continue
+		}
+
 		count := 0
-		for _, memb := range membs {
+		for _, memb := range listResp.Members {
 			if len(memb.Name) == 0 {
 				// unstarted, see:
 				// https://github.com/coreos/etcd/blob/master/etcdctl/ctlv3/command/printer.go#L60
 				// https://coreos.com/etcd/docs/latest/runtime-configuration.html#add-a-new-member
-				break
+				continue
 			}
 			count++
-			if count >= c {
-				return nil
-			}
 		}
+
+		if count >= c {
+			return nil
+		}
+
 		time.Sleep(waitInterval)
 	}
 	return errors.New("waitMembers Timeout")
