@@ -462,6 +462,7 @@ func NewTestSingleConfig() *Config {
 		Addr:       fmt.Sprintf("127.0.0.1:%d", freePort()),
 		ClientUrls: fmt.Sprintf("http://127.0.0.1:%d", freePort()),
 		PeerUrls:   fmt.Sprintf("http://127.0.0.1:%d", freePort()),
+		HTTPAddr:   fmt.Sprintf("127.0.0.1:%d", freePort()),
 
 		InitialClusterState: "new",
 

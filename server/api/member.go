@@ -15,10 +15,14 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
+	"golang.org/x/net/context"
 )
+
+const defaultDialTimeout = 5 * time.Second
 
 type memberInfo struct {
 	Name       string   `json:"name"`
@@ -39,10 +43,13 @@ func newMemberListHandler(svr *server.Server, rd *render.Render) *memberListHand
 }
 
 func (h *memberListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetEtcd().Server.Cluster()
-	membs := cluster.Members()
-	memberInfos := make([]memberInfo, 0, len(membs))
-	for _, m := range membs {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
+	defer cancel()
+	client := h.svr.GetClient()
+
+	listResp, _ := client.MemberList(ctx)
+	memberInfos := make([]memberInfo, 0, len(listResp.Members))
+	for _, m := range listResp.Members {
 		info := memberInfo{
 			Name:       m.Name,
 			ClientURLs: m.ClientURLs,
@@ -50,5 +57,6 @@ func (h *memberListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		memberInfos = append(memberInfos, info)
 	}
+
 	h.rd.JSON(w, http.StatusOK, memberInfos)
 }
