@@ -19,7 +19,6 @@ initial-cluster-state = "new"
 addr = "127.0.0.1:1234" # deprecate later
 # if not set, use ${addr}
 # advertise-addr = "" # deprecate later 
-http-addr = "127.0.0.1:9090" # deprecate later
 
 
 lease = 3
