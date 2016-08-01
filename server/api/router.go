@@ -20,7 +20,7 @@ import (
 	"github.com/unrolled/render"
 )
 
-func createRouter(svr *server.Server) *mux.Router {
+func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := render.New(render.Options{
 		Directory:  "templates",
 		Extensions: []string{".html"},
@@ -28,7 +28,7 @@ func createRouter(svr *server.Server) *mux.Router {
 		Delims:     render.Delims{"[[", "]]"},
 	})
 
-	router := mux.NewRouter()
+	router := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	router.Handle("/api/v1/balancers", newBalancerHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/cluster", newClusterHandler(svr, rd)).Methods("GET")
 

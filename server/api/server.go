@@ -16,28 +16,23 @@ package api
 import (
 	"net/http"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/server"
 	"github.com/urfave/negroni"
 )
 
-// ServeHTTP creates a HTTP service and serves.
-func ServeHTTP(addr string, svr *server.Server) error {
+// NewHandler creates a HTTP handler for API.
+func NewHandler(prefix string, svr *server.Server) http.Handler {
 	engine := negroni.New()
 
 	recovery := negroni.NewRecovery()
 	engine.Use(recovery)
 
 	static := negroni.NewStatic(http.Dir("templates/static/"))
+	static.Prefix = prefix
 	engine.Use(static)
 
-	router := createRouter(svr)
+	router := createRouter(prefix, svr)
 	engine.UseHandler(router)
 
-	err := http.ListenAndServe(addr, engine)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	return nil
+	return engine
 }
