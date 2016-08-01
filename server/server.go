@@ -15,6 +15,7 @@ package server
 
 import (
 	"net"
+	"net/http"
 	"path"
 	"strconv"
 	"sync"
@@ -77,58 +78,31 @@ type Server struct {
 
 // NewServer creates the pd server with given configuration.
 func NewServer(cfg *Config) (*Server, error) {
+	s, err := CreateServer(cfg)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return s, s.StartEtcd(nil)
+}
+
+// CreateServer creates the UNINITIALIZED pd server with given configuration.
+func CreateServer(cfg *Config) (*Server, error) {
 	cfg.adjust()
 	log.Infof("PD config - %v", cfg)
-
-	etcdCfg, err := cfg.genEmbedEtcdConfig()
-	log.Info("start embed etcd")
-
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	etcd, err := embed.StartEtcd(etcdCfg)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	endpoints := []string{etcd.Clients[0].Addr().String()}
-
-	log.Infof("create etcd v3 client with endpoints %v", endpoints)
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: etcdTimeout,
-	})
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	if err = waitEtcdStart(client, endpoints[0]); err != nil {
-		// See https://github.com/coreos/etcd/issues/6067
-		// Here may return "not capable" error because we don't start
-		// all etcds in initial_cluster at same time, so here just log
-		// an error.
-		// Note that pd can not work correctly if we don't start all etcds.
-		log.Errorf("etcd start failed, err %v", err)
-	}
 
 	log.Infof("listening address %s", cfg.Addr)
 	l, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {
-		client.Close()
 		return nil, errors.Trace(err)
 	}
 
 	s := &Server{
 		cfg:           cfg,
-		etcd:          etcd,
 		listener:      l,
-		client:        client,
 		isLeaderValue: 0,
 		conns:         make(map[*conn]struct{}),
 		closed:        0,
 		rootPath:      path.Join(pdRootPath, strconv.FormatUint(cfg.ClusterID, 10)),
-		id:            uint64(etcd.Server.ID()),
 	}
 
 	s.idAlloc = &idAllocator{s: s}
@@ -140,6 +114,52 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	return s, nil
+}
+
+// StartEtcd starts an embed etcd server with an user handler.
+func (s *Server) StartEtcd(handler http.Handler) error {
+	etcdCfg, err := s.cfg.genEmbedEtcdConfig()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if handler != nil {
+		etcdCfg.UserHandlers = map[string]http.Handler{
+			"/pd/": handler,
+		}
+	}
+
+	log.Info("start embed etcd")
+
+	etcd, err := embed.StartEtcd(etcdCfg)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	endpoints := []string{etcd.Clients[0].Addr().String()}
+
+	log.Infof("create etcd v3 client with endpoints %v", endpoints)
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:   endpoints,
+		DialTimeout: etcdTimeout,
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if err = waitEtcdStart(client, endpoints[0]); err != nil {
+		// See https://github.com/coreos/etcd/issues/6067
+		// Here may return "not capable" error because we don't start
+		// all etcds in initial_cluster at same time, so here just log
+		// an error.
+		// Note that pd can not work correctly if we don't start all etcds.
+		log.Errorf("etcd start failed, err %v", err)
+	}
+
+	s.etcd = etcd
+	s.client = client
+	s.id = uint64(etcd.Server.ID())
+
+	return nil
 }
 
 // Close closes the server.
