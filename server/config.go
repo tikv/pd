@@ -17,9 +17,10 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"net/url"
+	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -421,21 +422,11 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	return cfg, nil
 }
 
-// Generate a unique port for etcd usage. This is only used for test.
-// Because initializing etcd must assign certain address.
-func freePort() uint64 {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		panic(err)
-	}
+var unixURLCount uint64
 
-	port := uint64(l.Addr().(*net.TCPAddr).Port)
-	l.Close()
-
-	// wait a little to avoid using binding address.
-	time.Sleep(50 * time.Millisecond)
-
-	return port
+// unixURL returns a unique unix socket url, used for test only.
+func unixURL() string {
+	return fmt.Sprintf("unix://localhost:%d.%d.sock", os.Getpid(), atomic.AddUint64(&unixURLCount, 1))
 }
 
 // NewTestSingleConfig is only for test to create one pd.
@@ -445,10 +436,10 @@ func NewTestSingleConfig() *Config {
 		// We use cluster 0 for all tests.
 		ClusterID:  0,
 		Name:       "pd",
-		ClientUrls: fmt.Sprintf("http://127.0.0.1:%d", freePort()),
-		PeerUrls:   fmt.Sprintf("http://127.0.0.1:%d", freePort()),
+		ClientUrls: unixURL(),
+		PeerUrls:   unixURL(),
 
-		InitialClusterState: "new",
+		InitialClusterState: embed.ClusterStateFlagNew,
 
 		LeaderLease:     1,
 		TsoSaveInterval: 500,

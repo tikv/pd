@@ -221,7 +221,15 @@ func rpcConnect(addr string) (net.Conn, error) {
 	}
 
 	for _, url := range urls {
-		conn, err := net.Dial("tcp", url.Host)
+		var conn net.Conn
+		switch url.Scheme {
+		// used in tests
+		case "unix", "unixs":
+			conn, err = net.Dial("unix", url.Host)
+		default:
+			conn, err = net.Dial("tcp", url.Host)
+		}
+
 		if err != nil {
 			continue
 		}

@@ -373,7 +373,15 @@ func rpcConnect(addr string) (net.Conn, error) {
 	}
 
 	for _, url := range urls {
-		conn, err := net.DialTimeout("tcp", url.Host, connectPDTimeout)
+		var conn net.Conn
+		switch url.Scheme {
+		// used in tests
+		case "unix", "unixs":
+			conn, err = net.DialTimeout("unix", url.Host, connectPDTimeout)
+		default:
+			conn, err = net.DialTimeout("tcp", url.Host, connectPDTimeout)
+		}
+
 		if err != nil {
 			continue
 		}
