@@ -47,7 +47,12 @@ func (h *memberListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	client := h.svr.GetClient()
 
-	listResp, _ := client.MemberList(ctx)
+	listResp, err := client.MemberList(ctx)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err)
+		return
+	}
+
 	memberInfos := make([]memberInfo, 0, len(listResp.Members))
 	for _, m := range listResp.Members {
 		info := memberInfo{
