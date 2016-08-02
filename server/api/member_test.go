@@ -19,6 +19,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -41,16 +42,39 @@ func (s *testMemberAPISuite) SetUpSuite(c *C) {
 	s.hc = newHTTPClient()
 }
 
-func correctListResponse(cfgs []*server.Config) []memberInfo {
-	ans := make([]memberInfo, 0, len(cfgs))
-	for _, c := range cfgs {
-		ans = append(ans, memberInfo{
-			Name:       c.Name,
-			ClientURLs: strings.Split(c.ClientUrls, ","),
-			PeerURLs:   strings.Split(c.PeerUrls, ","),
-		})
+func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
+	got := []memberInfo{}
+	json.Unmarshal(body, &got)
+
+	c.Assert(len(got), Equals, len(cfgs))
+
+	for _, memb := range got {
+		ok := false
+		for _, cfg := range cfgs {
+			if memb.Name == cfg.Name {
+				mcu := memb.ClientURLs
+				sort.Strings(mcu)
+				smcu := strings.Join(mcu, ",")
+				ccu := strings.Split(cfg.ClientUrls, ",")
+				sort.Strings(ccu)
+				sccu := strings.Join(ccu, ",")
+
+				if smcu == sccu {
+					mpu := memb.PeerURLs
+					sort.Strings(mpu)
+					smpu := strings.Join(mpu, ",")
+					cpu := strings.Split(cfg.PeerUrls, ",")
+					sort.Strings(cpu)
+					scpu := strings.Join(cpu, ",")
+
+					if smpu == scpu {
+						ok = true
+					}
+				}
+			}
+		}
+		c.Assert(ok, IsTrue)
 	}
-	return ans
 }
 
 func (s *testMemberAPISuite) TestMemberList(c *C) {
@@ -71,19 +95,15 @@ func (s *testMemberAPISuite) TestMemberList(c *C) {
 	c.Assert(err, IsNil)
 	buf, err := ioutil.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
-	got := []memberInfo{}
-	json.Unmarshal(buf, &got)
-
-	correct := correctListResponse([]*server.Config{cfg})
-	c.Assert(got, DeepEquals, correct)
+	checkListResponse(c, buf, []*server.Config{cfg})
 
 	cfgs := server.NewTestMultiConfig(3)
 	for _, cfg := range cfgs {
 		dirs = append(dirs, cfg.DataDir)
 
 		go func(cfg *server.Config) {
-			s, err := server.NewServer(cfg)
-			c.Assert(err, IsNil)
+			s, e := server.NewServer(cfg)
+			c.Assert(e, IsNil)
 			go s.Run()
 			go ServeHTTP(cfg.HTTPAddr, s)
 		}(cfg)
@@ -104,9 +124,5 @@ func (s *testMemberAPISuite) TestMemberList(c *C) {
 	c.Assert(err, IsNil)
 	buf, err = ioutil.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
-	got = []memberInfo{}
-	json.Unmarshal(buf, &got)
-
-	correct = correctListResponse(cfgs)
-	c.Assert(got, DeepEquals, correct)
+	checkListResponse(c, buf, cfgs)
 }

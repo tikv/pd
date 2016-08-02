@@ -18,7 +18,7 @@ install:
 
 test: 
 	rm -rf vendor && ln -s _vendor/vendor vendor
-	$(GO) test --race ./pd-client ./server
+	$(GO) test --race ./pd-client ./server ./server/api
 	rm -rf vendor
 
 check:
