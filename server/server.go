@@ -241,11 +241,6 @@ func (s *Server) closeAllConnections() {
 	s.conns = make(map[*conn]struct{})
 }
 
-// GetEtcd returns internal etcd.
-func (s *Server) GetEtcd() *embed.Etcd {
-	return s.etcd
-}
-
 // txn returns an etcd client transaction wrapper.
 // The wrapper will set a request timeout to the context and log slow transactions.
 func (s *Server) txn() clientv3.Txn {
