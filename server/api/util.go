@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
-	"time"
 
 	"github.com/juju/errors"
 )
@@ -35,10 +34,4 @@ func fromBody(r *http.Request, data interface{}) error {
 	}
 
 	return nil
-}
-
-func newHTTPClient() *http.Client {
-	return &http.Client{
-		Timeout: 10 * time.Second,
-	}
 }

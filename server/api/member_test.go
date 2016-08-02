@@ -39,7 +39,53 @@ type testMemberAPISuite struct {
 }
 
 func (s *testMemberAPISuite) SetUpSuite(c *C) {
-	s.hc = newHTTPClient()
+	s.hc = mustNewHTTPClient()
+}
+
+func mustNewHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 10 * time.Second,
+	}
+}
+
+type CleanUpFunc func()
+
+func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, CleanUpFunc) {
+	dirs := make([]string, 0, num)
+	svrs := make([]*server.Server, 0, num)
+	cfgs := server.NewTestMultiConfig(num)
+
+	ch := make(chan *server.Server, num)
+	for _, cfg := range cfgs {
+		dirs = append(dirs, cfg.DataDir)
+
+		go func(cfg *server.Config) {
+			s, e := server.NewServer(cfg)
+			c.Assert(e, IsNil)
+			go s.Run()
+			go ServeHTTP(cfg.HTTPAddr, s)
+			ch <- s
+		}(cfg)
+	}
+
+	for i := 0; i < num; i++ {
+		svr := <-ch
+		svrs = append(svrs, svr)
+	}
+	close(ch)
+
+	// wait etcds and http servers
+	time.Sleep(5 * time.Second)
+
+	// clean up
+	return cfgs, svrs, func() {
+		for _, s := range svrs {
+			s.Close()
+		}
+		for _, dir := range dirs {
+			os.RemoveAll(dir)
+		}
+	}
 }
 
 func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
@@ -80,46 +126,18 @@ func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
 }
 
 func (s *testMemberAPISuite) TestMemberList(c *C) {
-	dirs := make([]string, 0, 4)
-	cfg := server.NewTestSingleConfig()
-	dirs = append(dirs, cfg.DataDir)
-	svr, err := server.NewServer(cfg)
-	c.Assert(err, IsNil)
-	defer svr.Close()
-	go svr.Run()
-	go ServeHTTP(cfg.HTTPAddr, svr)
+	cfgs, _, clean := mustNewCluster(c, 1)
+	defer clean()
 
-	// wait http server
-	time.Sleep(1 * time.Second)
-
-	parts := []string{"http://", cfg.HTTPAddr, "/api/v1/members"}
+	parts := []string{"http://", cfgs[0].HTTPAddr, "/api/v1/members"}
 	resp, err := s.hc.Get(strings.Join(parts, ""))
 	c.Assert(err, IsNil)
 	buf, err := ioutil.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
-	checkListResponse(c, buf, []*server.Config{cfg})
+	checkListResponse(c, buf, cfgs)
 
-	cfgs := server.NewTestMultiConfig(3)
-	for _, cfg := range cfgs {
-		dirs = append(dirs, cfg.DataDir)
-
-		go func(cfg *server.Config) {
-			s, e := server.NewServer(cfg)
-			c.Assert(e, IsNil)
-			go s.Run()
-			go ServeHTTP(cfg.HTTPAddr, s)
-		}(cfg)
-	}
-
-	// wait etcds and http servers
-	time.Sleep(5 * time.Second)
-
-	// clean up
-	defer func() {
-		for _, dir := range dirs {
-			os.RemoveAll(dir)
-		}
-	}()
+	cfgs, _, clean = mustNewCluster(c, 3)
+	defer clean()
 
 	parts = []string{"http://", cfgs[rand.Intn(len(cfgs))].HTTPAddr, "/api/v1/members"}
 	resp, err = s.hc.Get(strings.Join(parts, ""))
