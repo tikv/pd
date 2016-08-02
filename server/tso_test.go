@@ -109,7 +109,7 @@ func (s *testTsoSuite) TestTso(c *C) {
 		go func() {
 			defer wg.Done()
 
-			conn, err := net.Dial("tcp", leader.GetAddr())
+			conn, err := rpcConnect(leader.GetAddr())
 			c.Assert(err, IsNil)
 			defer conn.Close()
 

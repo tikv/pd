@@ -55,7 +55,7 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	svrs := make(map[string]*server.Server, 3)
 	for i := 0; i < 3; i++ {
 		svr := <-ch
-		svrs[svr.GetConfig().AdvertiseAddr] = svr
+		svrs[svr.GetAddr()] = svr
 		endpoints = append(endpoints, svr.GetEndpoints()...)
 	}
 

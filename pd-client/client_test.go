@@ -14,10 +14,7 @@
 package pd
 
 import (
-	"fmt"
-	"net"
 	"os"
-	"strconv"
 	"testing"
 	"time"
 
@@ -63,22 +60,17 @@ var (
 type testClientSuite struct {
 	srv    *server.Server
 	client Client
-	port   int
 }
 
 func (s *testClientSuite) SetUpSuite(c *C) {
 	s.srv = newServer(c, clusterID)
-	_, port, err := net.SplitHostPort(s.srv.GetConfig().AdvertiseAddr)
-	c.Assert(err, IsNil)
-
-	s.port, err = strconv.Atoi(port)
-	c.Assert(err, IsNil)
 
 	// wait for srv to become leader
 	time.Sleep(time.Second * 3)
 
-	bootstrapServer(c, s.port)
+	bootstrapServer(c, s.srv.GetAddr())
 
+	var err error
 	s.client, err = NewClient(s.srv.GetEndpoints(), clusterID)
 	c.Assert(err, IsNil)
 }
@@ -100,7 +92,7 @@ func newServer(c *C, clusterID uint64) *server.Server {
 	return s
 }
 
-func bootstrapServer(c *C, port int) {
+func bootstrapServer(c *C, addr string) {
 	req := &pdpb.Request{
 		Header: &pdpb.RequestHeader{
 			Uuid:      uuid.NewV4().Bytes(),
@@ -117,7 +109,7 @@ func bootstrapServer(c *C, port int) {
 		PdReq:   req,
 	}
 
-	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	conn, err := rpcConnect(addr)
 	c.Assert(err, IsNil)
 	err = util.WriteMessage(conn, 0, msg)
 	c.Assert(err, IsNil)
@@ -126,7 +118,7 @@ func bootstrapServer(c *C, port int) {
 	c.Assert(err, IsNil)
 }
 
-func heartbeatRegion(c *C, port int) {
+func heartbeatRegion(c *C, addr string) {
 	req := &pdpb.Request{
 		Header: &pdpb.RequestHeader{
 			Uuid:      uuid.NewV4().Bytes(),
@@ -143,7 +135,7 @@ func heartbeatRegion(c *C, port int) {
 		PdReq:   req,
 	}
 
-	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	conn, err := rpcConnect(addr)
 	c.Assert(err, IsNil)
 	err = util.WriteMessage(conn, 0, msg)
 	c.Assert(err, IsNil)
@@ -168,7 +160,7 @@ func (s *testClientSuite) TestTSO(c *C) {
 }
 
 func (s *testClientSuite) TestGetRegion(c *C) {
-	heartbeatRegion(c, s.port)
+	heartbeatRegion(c, s.srv.GetAddr())
 
 	r, leader, err := s.client.GetRegion([]byte("a"))
 	c.Assert(err, IsNil)

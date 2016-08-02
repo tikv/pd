@@ -14,7 +14,6 @@
 package server
 
 import (
-	"net"
 	"os"
 	"sync/atomic"
 
@@ -47,7 +46,7 @@ func (s *testClusterCacheSuite) TearDownSuite(c *C) {
 func (s *testClusterCacheSuite) TestCache(c *C) {
 	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
-	conn, err := net.Dial("tcp", leaderPd.GetAddr())
+	conn, err := rpcConnect(leaderPd.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
 

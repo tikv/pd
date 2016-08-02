@@ -14,7 +14,6 @@
 package server
 
 import (
-	"net"
 	"net/http"
 	"path"
 	"strconv"
@@ -31,7 +30,9 @@ import (
 const (
 	etcdTimeout = time.Second * 3
 	// pdRootPath for all pd servers.
-	pdRootPath = "/pd"
+	pdRootPath  = "/pd"
+	pdAPIPrefix = "/pd/"
+	pdRPCPrefix = "/pd/rpc"
 )
 
 // Server is the pd server.
@@ -39,8 +40,6 @@ type Server struct {
 	cfg *Config
 
 	etcd *embed.Etcd
-
-	listener net.Listener
 
 	client *clientv3.Client
 
@@ -93,15 +92,8 @@ func CreateServer(cfg *Config) (*Server, error) {
 
 	log.Infof("PD config - %v", cfg)
 
-	log.Infof("listening address %s", cfg.Addr)
-	l, err := net.Listen("tcp", cfg.Addr)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
 	s := &Server{
 		cfg:           cfg,
-		listener:      l,
 		isLeaderValue: 0,
 		conns:         make(map[*conn]struct{}),
 		closed:        0,
@@ -120,15 +112,16 @@ func CreateServer(cfg *Config) (*Server, error) {
 }
 
 // StartEtcd starts an embed etcd server with an user handler.
-func (s *Server) StartEtcd(handler http.Handler) error {
+func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	etcdCfg, err := s.cfg.genEmbedEtcdConfig()
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if handler != nil {
-		etcdCfg.UserHandlers = map[string]http.Handler{
-			"/pd/": handler,
-		}
+	etcdCfg.UserHandlers = map[string]http.Handler{
+		pdRPCPrefix: s,
+	}
+	if apiHandler != nil {
+		etcdCfg.UserHandlers[pdAPIPrefix] = apiHandler
 	}
 
 	log.Info("start embed etcd")
@@ -176,10 +169,6 @@ func (s *Server) Close() {
 
 	s.enableLeader(false)
 
-	if s.listener != nil {
-		s.listener.Close()
-	}
-
 	if s.client != nil {
 		s.client.Close()
 	}
@@ -199,33 +188,49 @@ func (s *Server) isClosed() bool {
 }
 
 // Run runs the pd server.
-func (s *Server) Run() error {
+func (s *Server) Run() {
 	// We use "127.0.0.1:0" for test and will set correct listening
 	// address before run, so we set leader value here.
 	s.leaderValue = s.marshalLeader()
 
 	s.wg.Add(1)
-	go s.leaderLoop()
+	s.leaderLoop()
+}
 
-	for {
-		conn, err := s.listener.Accept()
-		if err != nil {
-			log.Errorf("accept err %s", err)
-			break
-		}
-
-		c, err := newConn(s, conn)
-		if err != nil {
-			log.Warn(err)
-			conn.Close()
-			continue
-		}
-
-		s.wg.Add(1)
-		go c.run()
+// ServeHTTP hijack the HTTP connection and switch to RPC.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "server doesn't support hijacking", http.StatusInternalServerError)
+		return
 	}
 
-	return nil
+	conn, bufrw, err := hj.Hijack()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	err = conn.SetDeadline(time.Time{})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	c, err := newConn(s, conn, bufrw)
+	if err != nil {
+		log.Warn(err)
+		conn.Close()
+		return
+	}
+
+	s.wg.Add(1)
+	go c.run()
+}
+
+// GetAddr returns the server urls for clients.
+func (s *Server) GetAddr() string {
+	return s.cfg.AdvertiseClientUrls
 }
 
 // GetEndpoints returns the etcd endpoints for outer use.
@@ -241,6 +246,11 @@ func (s *Server) GetClient() *clientv3.Client {
 // ID returns the unique etcd ID for this server in etcd cluster.
 func (s *Server) ID() uint64 {
 	return s.id
+}
+
+// Name returns the unique etcd Name for this server in etcd cluster.
+func (s *Server) Name() string {
+	return s.cfg.Name
 }
 
 func (s *Server) closeAllConnections() {

@@ -71,10 +71,6 @@ type Config struct {
 	nextRetryDelay time.Duration
 
 	configFile string
-
-	// deprecated later
-	Addr          string `toml:"addr" json:"addr"`
-	AdvertiseAddr string `toml:"advertise-addr" json:"advertise-addr"`
 }
 
 // NewConfig creates a new config.
@@ -89,8 +85,6 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Name, "name", defaultName, "human-readable name for this pd member")
 
 	fs.StringVar(&cfg.DataDir, "data-dir", defaultDataDir, "path to the data directory (default 'default.${name}')")
-	fs.StringVar(&cfg.Addr, "addr", defaultAddr, "server listening address (deprecate later)")
-	fs.StringVar(&cfg.AdvertiseAddr, "advertise-addr", "", "advertise server address (deprecate later) (default '${addr}')")
 	fs.StringVar(&cfg.ClientUrls, "client-urls", defaultClientUrls, "url for client traffic")
 	fs.StringVar(&cfg.AdvertiseClientUrls, "advertise-client-urls", "", "advertise url for client traffic (default '${client-urls}')")
 	fs.StringVar(&cfg.PeerUrls, "peer-urls", defaultPeerUrls, "url for peer traffic")
@@ -111,7 +105,6 @@ const (
 
 	defaultName                = "pd"
 	defaultDataDir             = "default.pd"
-	defaultAddr                = "127.0.0.1:1234"
 	defaultClientUrls          = "http://127.0.0.1:2379"
 	defaultPeerUrls            = "http://127.0.0.1:2380"
 	defualtInitialClusterState = embed.ClusterStateFlagNew
@@ -195,9 +188,6 @@ func (c *Config) adjust() error {
 	adjustString(&c.AdvertiseClientUrls, c.ClientUrls)
 	adjustString(&c.PeerUrls, defaultPeerUrls)
 	adjustString(&c.AdvertisePeerUrls, c.PeerUrls)
-
-	adjustString(&c.Addr, defaultAddr)
-	adjustString(&c.AdvertiseAddr, c.Addr)
 
 	if c.Join != "" {
 		initialCluster, err := c.prepareJoinCluster()
@@ -455,7 +445,6 @@ func NewTestSingleConfig() *Config {
 		// We use cluster 0 for all tests.
 		ClusterID:  0,
 		Name:       "pd",
-		Addr:       fmt.Sprintf("127.0.0.1:%d", freePort()),
 		ClientUrls: fmt.Sprintf("http://127.0.0.1:%d", freePort()),
 		PeerUrls:   fmt.Sprintf("http://127.0.0.1:%d", freePort()),
 
