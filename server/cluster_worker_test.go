@@ -368,7 +368,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	c.Assert(err, IsNil)
 
 	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
-	conn, err := net.Dial("tcp", leaderPD.GetAddr())
+	conn, err := rpcConnect(leaderPD.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
 
@@ -424,7 +424,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 	c.Assert(err, IsNil)
 	r1, _ := cluster.getRegion([]byte("a"))
 	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
-	conn, err := net.Dial("tcp", leaderPd.GetAddr())
+	conn, err := rpcConnect(leaderPd.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
 	leaderPeer := s.chooseRegionLeader(c, r1)
@@ -468,7 +468,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
-	conn, err := net.Dial("tcp", leaderPd.GetAddr())
+	conn, err := rpcConnect(leaderPd.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
 
@@ -525,7 +525,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	c.Assert(err, IsNil)
 
 	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
-	conn, err := net.Dial("tcp", leaderPD.GetAddr())
+	conn, err := rpcConnect(leaderPD.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
 
@@ -561,7 +561,7 @@ func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
 	c.Assert(stores, HasLen, 5)
 
 	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
-	conn, err := net.Dial("tcp", leaderPd.GetAddr())
+	conn, err := rpcConnect(leaderPd.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
 
@@ -589,7 +589,7 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	c.Assert(stores, HasLen, 5)
 
 	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
-	conn, err := net.Dial("tcp", leaderPd.GetAddr())
+	conn, err := rpcConnect(leaderPd.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
 

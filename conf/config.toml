@@ -16,10 +16,6 @@ advertise-peer-urls = ""
 initial-cluster = "pd=http://127.0.0.1:2380"
 initial-cluster-state = "new"
 
-addr = "127.0.0.1:1234" # deprecate later
-# if not set, use ${addr}
-# advertise-addr = "" # deprecate later 
-
 
 lease = 3
 log-level = "debug"

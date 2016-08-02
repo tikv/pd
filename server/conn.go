@@ -25,11 +25,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/util"
 )
 
-const (
-	readBufferSize  = 8 * 1024
-	writeBufferSize = 8 * 1024
-)
-
 type conn struct {
 	s *Server
 
@@ -38,18 +33,18 @@ type conn struct {
 	conn net.Conn
 }
 
-func newConn(s *Server, netConn net.Conn) (*conn, error) {
+func newConn(s *Server, netConn net.Conn, bufrw *bufio.ReadWriter) (*conn, error) {
 	s.connsLock.Lock()
 	defer s.connsLock.Unlock()
 
 	if !s.isLeader() {
-		return nil, errors.Errorf("server <%s> is not leader, cannot create new connection <%s>", s.cfg.AdvertiseAddr, netConn.RemoteAddr())
+		return nil, errors.Errorf("server <%s> is not leader, cannot create new connection <%s>", s.Name(), netConn.RemoteAddr())
 	}
 
 	c := &conn{
 		s:    s,
-		rb:   bufio.NewReaderSize(netConn, readBufferSize),
-		wb:   bufio.NewWriterSize(netConn, writeBufferSize),
+		rb:   bufrw.Reader,
+		wb:   bufrw.Writer,
 		conn: netConn,
 	}
 

@@ -15,7 +15,6 @@ package server
 
 import (
 	"math/rand"
-	"net"
 	"os"
 	"sync"
 
@@ -85,7 +84,7 @@ func (s *testAllocIDSuite) TestID(c *C) {
 func (s *testAllocIDSuite) TestCommand(c *C) {
 	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
-	conn, err := net.Dial("tcp", leader.GetAddr())
+	conn, err := rpcConnect(leader.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
 
