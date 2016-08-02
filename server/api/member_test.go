@@ -43,31 +43,33 @@ func (s *testMemberAPISuite) SetUpSuite(c *C) {
 }
 
 func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
-	got := []memberInfo{}
+	got := make(map[string][]memberInfo)
 	json.Unmarshal(body, &got)
 
-	c.Assert(len(got), Equals, len(cfgs))
+	c.Assert(len(got["members"]), Equals, len(cfgs))
 
-	for _, memb := range got {
+	for _, memb := range got["members"] {
 		ok := false
 		for _, cfg := range cfgs {
 			if memb.Name == cfg.Name {
-				mcu := memb.ClientUrls
-				sort.Strings(mcu)
-				smcu := strings.Join(mcu, ",")
-				ccu := strings.Split(cfg.ClientUrls, ",")
-				sort.Strings(ccu)
-				sccu := strings.Join(ccu, ",")
+				mClientUrls := memb.ClientUrls
+				sort.Strings(mClientUrls)
+				stringOfmClientUrls := strings.Join(mClientUrls, ",")
 
-				if smcu == sccu {
-					mpu := memb.PeerUrls
-					sort.Strings(mpu)
-					smpu := strings.Join(mpu, ",")
-					cpu := strings.Split(cfg.PeerUrls, ",")
-					sort.Strings(cpu)
-					scpu := strings.Join(cpu, ",")
+				cClientUrls := strings.Split(cfg.ClientUrls, ",")
+				sort.Strings(cClientUrls)
+				stringOfcClientUrls := strings.Join(cClientUrls, ",")
 
-					if smpu == scpu {
+				if stringOfmClientUrls == stringOfcClientUrls {
+					mPeerUrls := memb.PeerUrls
+					sort.Strings(mPeerUrls)
+					stringOfmPeerUrls := strings.Join(mPeerUrls, ",")
+
+					cPeerUrls := strings.Split(cfg.PeerUrls, ",")
+					sort.Strings(cPeerUrls)
+					stringOfcPeerUrls := strings.Join(cPeerUrls, ",")
+
+					if stringOfmPeerUrls == stringOfcPeerUrls {
 						ok = true
 					}
 				}

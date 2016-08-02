@@ -63,5 +63,7 @@ func (h *memberListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		memberInfos = append(memberInfos, info)
 	}
 
-	h.rd.JSON(w, http.StatusOK, memberInfos)
+	ret := make(map[string][]memberInfo)
+	ret["members"] = memberInfos
+	h.rd.JSON(w, http.StatusOK, ret)
 }
