@@ -26,8 +26,8 @@ const defaultDialTimeout = 5 * time.Second
 
 type memberInfo struct {
 	Name       string   `json:"name"`
-	ClientURLs []string `json:"client-ursl"`
-	PeerURLs   []string `json:"peer-urls"`
+	ClientUrls []string `json:"client-urls"`
+	PeerUrls   []string `json:"peer-urls"`
 }
 
 type memberListHandler struct {
@@ -57,8 +57,8 @@ func (h *memberListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, m := range listResp.Members {
 		info := memberInfo{
 			Name:       m.Name,
-			ClientURLs: m.ClientURLs,
-			PeerURLs:   m.PeerURLs,
+			ClientUrls: m.ClientURLs,
+			PeerUrls:   m.PeerURLs,
 		}
 		memberInfos = append(memberInfos, info)
 	}

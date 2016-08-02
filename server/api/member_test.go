@@ -52,7 +52,7 @@ func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
 		ok := false
 		for _, cfg := range cfgs {
 			if memb.Name == cfg.Name {
-				mcu := memb.ClientURLs
+				mcu := memb.ClientUrls
 				sort.Strings(mcu)
 				smcu := strings.Join(mcu, ",")
 				ccu := strings.Split(cfg.ClientUrls, ",")
@@ -60,7 +60,7 @@ func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
 				sccu := strings.Join(ccu, ",")
 
 				if smcu == sccu {
-					mpu := memb.PeerURLs
+					mpu := memb.PeerUrls
 					sort.Strings(mpu)
 					smpu := strings.Join(mpu, ",")
 					cpu := strings.Split(cfg.PeerUrls, ",")
