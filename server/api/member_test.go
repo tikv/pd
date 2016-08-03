@@ -90,13 +90,12 @@ func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpF
 	return cfgs, svrs, clean
 }
 
-func relaxEqualStings(c *C, ss []string, s string, sep string) {
-	sort.Strings(ss)
-	sortedStringA := strings.Join(ss, sep)
+func relaxEqualStings(c *C, a, b []string) {
+	sort.Strings(a)
+	sortedStringA := strings.Join(a, "")
 
-	sliceB := strings.Split(s, sep)
-	sort.Strings(sliceB)
-	sortedStringB := strings.Join(sliceB, sep)
+	sort.Strings(b)
+	sortedStringB := strings.Join(b, "")
 
 	c.Assert(sortedStringA, Equals, sortedStringB)
 }
@@ -113,8 +112,8 @@ func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
 				continue
 			}
 
-			relaxEqualStings(c, memb.ClientUrls, cfg.ClientUrls, ",")
-			relaxEqualStings(c, memb.PeerUrls, cfg.PeerUrls, ",")
+			relaxEqualStings(c, memb.ClientUrls, strings.Split(cfg.ClientUrls, ","))
+			relaxEqualStings(c, memb.PeerUrls, strings.Split(cfg.PeerUrls, ","))
 		}
 	}
 }
