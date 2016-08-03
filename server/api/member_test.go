@@ -97,28 +97,32 @@ func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
 	for _, memb := range got["members"] {
 		ok := false
 		for _, cfg := range cfgs {
-			if memb.Name == cfg.Name {
-				mClientUrls := memb.ClientUrls
-				sort.Strings(mClientUrls)
-				stringOfmClientUrls := strings.Join(mClientUrls, ",")
+			if memb.Name != cfg.Name {
+				continue
+			}
 
-				cClientUrls := strings.Split(cfg.ClientUrls, ",")
-				sort.Strings(cClientUrls)
-				stringOfcClientUrls := strings.Join(cClientUrls, ",")
+			mClientUrls := memb.ClientUrls
+			sort.Strings(mClientUrls)
+			stringOfmClientUrls := strings.Join(mClientUrls, ",")
 
-				if stringOfmClientUrls == stringOfcClientUrls {
-					mPeerUrls := memb.PeerUrls
-					sort.Strings(mPeerUrls)
-					stringOfmPeerUrls := strings.Join(mPeerUrls, ",")
+			cClientUrls := strings.Split(cfg.ClientUrls, ",")
+			sort.Strings(cClientUrls)
+			stringOfcClientUrls := strings.Join(cClientUrls, ",")
 
-					cPeerUrls := strings.Split(cfg.PeerUrls, ",")
-					sort.Strings(cPeerUrls)
-					stringOfcPeerUrls := strings.Join(cPeerUrls, ",")
+			if stringOfmClientUrls != stringOfcClientUrls {
+				continue
+			}
 
-					if stringOfmPeerUrls == stringOfcPeerUrls {
-						ok = true
-					}
-				}
+			mPeerUrls := memb.PeerUrls
+			sort.Strings(mPeerUrls)
+			stringOfmPeerUrls := strings.Join(mPeerUrls, ",")
+
+			cPeerUrls := strings.Split(cfg.PeerUrls, ",")
+			sort.Strings(cPeerUrls)
+			stringOfcPeerUrls := strings.Join(cPeerUrls, ",")
+
+			if stringOfmPeerUrls == stringOfcPeerUrls {
+				ok = true
 			}
 		}
 		c.Assert(ok, IsTrue)
