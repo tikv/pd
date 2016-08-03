@@ -25,6 +25,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/util"
 )
 
+const (
+	readBufferSize  = 8 * 1024
+	writeBufferSize = 8 * 1024
+)
+
 type conn struct {
 	s *Server
 
@@ -43,8 +48,8 @@ func newConn(s *Server, netConn net.Conn, bufrw *bufio.ReadWriter) (*conn, error
 
 	c := &conn{
 		s:    s,
-		rb:   bufrw.Reader,
-		wb:   bufrw.Writer,
+		rb:   bufio.NewReaderSize(bufrw.Reader, readBufferSize),
+		wb:   bufio.NewWriterSize(netConn, writeBufferSize),
 		conn: netConn,
 	}
 
