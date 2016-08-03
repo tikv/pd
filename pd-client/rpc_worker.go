@@ -375,7 +375,7 @@ func rpcConnect(addr string) (net.Conn, error) {
 	for _, url := range urls {
 		conn, err := net.DialTimeout("tcp", url.Host, connectPDTimeout)
 		if err != nil {
-			return nil, errors.Trace(err)
+			continue
 		}
 		err = req.Write(conn)
 		if err != nil {

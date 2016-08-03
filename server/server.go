@@ -201,25 +201,26 @@ func (s *Server) Run() {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hj, ok := w.(http.Hijacker)
 	if !ok {
-		http.Error(w, "server doesn't support hijacking", http.StatusInternalServerError)
+		log.Errorf("server doesn't support hijacking: conn %v", w)
 		return
 	}
 
 	conn, bufrw, err := hj.Hijack()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Errorf("hijack failed: conn %v err %v", w, err)
 		return
 	}
 
 	err = conn.SetDeadline(time.Time{})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Errorf("clear deadline failed: conn %v err %v", conn, err)
+		conn.Close()
 		return
 	}
 
 	c, err := newConn(s, conn, bufrw)
 	if err != nil {
-		log.Warn(err)
+		log.Errorf("new connection failed: conn %v err %v", conn, err)
 		conn.Close()
 		return
 	}
