@@ -28,7 +28,7 @@ import (
 	"github.com/pingcap/pd/server"
 )
 
-func TestJoin(t *testing.T) {
+func TestMemberAPI(t *testing.T) {
 	TestingT(t)
 }
 
@@ -39,10 +39,10 @@ type testMemberAPISuite struct {
 }
 
 func (s *testMemberAPISuite) SetUpSuite(c *C) {
-	s.hc = mustNewHTTPClient()
+	s.hc = newHTTPClient()
 }
 
-func mustNewHTTPClient() *http.Client {
+func newHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: 10 * time.Second,
 	}
@@ -78,7 +78,7 @@ func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpF
 	time.Sleep(5 * time.Second)
 
 	// clean up
-	return cfgs, svrs, func() {
+	clean := func() {
 		for _, s := range svrs {
 			s.Close()
 		}
@@ -86,6 +86,8 @@ func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpF
 			os.RemoveAll(dir)
 		}
 	}
+
+	return cfgs, svrs, clean
 }
 
 func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
