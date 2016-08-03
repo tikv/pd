@@ -48,9 +48,9 @@ func mustNewHTTPClient() *http.Client {
 	}
 }
 
-type CleanUpFunc func()
+type cleanUpFunc func()
 
-func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, CleanUpFunc) {
+func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpFunc) {
 	dirs := make([]string, 0, num)
 	svrs := make([]*server.Server, 0, num)
 	cfgs := server.NewTestMultiConfig(num)
@@ -130,23 +130,17 @@ func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
 }
 
 func (s *testMemberAPISuite) TestMemberList(c *C) {
-	cfgs, _, clean := mustNewCluster(c, 1)
-	defer clean()
+	howMany := []int{1, 3}
 
-	parts := []string{"http://", cfgs[0].HTTPAddr, "/api/v1/members"}
-	resp, err := s.hc.Get(strings.Join(parts, ""))
-	c.Assert(err, IsNil)
-	buf, err := ioutil.ReadAll(resp.Body)
-	c.Assert(err, IsNil)
-	checkListResponse(c, buf, cfgs)
+	for _, num := range howMany {
+		cfgs, _, clean := mustNewCluster(c, num)
+		defer clean()
 
-	cfgs, _, clean = mustNewCluster(c, 3)
-	defer clean()
-
-	parts = []string{"http://", cfgs[rand.Intn(len(cfgs))].HTTPAddr, "/api/v1/members"}
-	resp, err = s.hc.Get(strings.Join(parts, ""))
-	c.Assert(err, IsNil)
-	buf, err = ioutil.ReadAll(resp.Body)
-	c.Assert(err, IsNil)
-	checkListResponse(c, buf, cfgs)
+		parts := []string{"http://", cfgs[rand.Intn(len(cfgs))].HTTPAddr, "/api/v1/members"}
+		resp, err := s.hc.Get(strings.Join(parts, ""))
+		c.Assert(err, IsNil)
+		buf, err := ioutil.ReadAll(resp.Body)
+		c.Assert(err, IsNil)
+		checkListResponse(c, buf, cfgs)
+	}
 }
