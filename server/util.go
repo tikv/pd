@@ -228,7 +228,7 @@ func rpcConnect(addr string) (net.Conn, error) {
 		err = req.Write(conn)
 		if err != nil {
 			conn.Close()
-			return nil, errors.Trace(err)
+			continue
 		}
 		return conn, nil
 	}

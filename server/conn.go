@@ -48,8 +48,8 @@ func newConn(s *Server, netConn net.Conn, bufrw *bufio.ReadWriter) (*conn, error
 
 	c := &conn{
 		s:    s,
-		rb:   bufio.NewReaderSize(bufrw.Reader, readBufferSize),
-		wb:   bufio.NewWriterSize(netConn, writeBufferSize),
+		rb:   bufrw.Reader,
+		wb:   bufrw.Writer,
 		conn: netConn,
 	}
 
