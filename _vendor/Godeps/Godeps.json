@@ -454,7 +454,7 @@
 		},
 		{
 			"ImportPath": "github.com/unrolled/render",
-			"Rev": "198ad4d8b8a4612176b804ca10555b222a086b40"
+			"Rev": "7bc415efc1b94ad17b0fc642cb50b3e2465027e7"
 		},
 		{
 			"ImportPath": "github.com/urfave/negroni",
