@@ -90,6 +90,17 @@ func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpF
 	return cfgs, svrs, clean
 }
 
+func relaxEqualStings(c *C, ss []string, s string, sep string) {
+	sort.Strings(ss)
+	sortedStringA := strings.Join(ss, sep)
+
+	sliceB := strings.Split(s, sep)
+	sort.Strings(sliceB)
+	sortedStringB := strings.Join(sliceB, sep)
+
+	c.Assert(sortedStringA, Equals, sortedStringB)
+}
+
 func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
 	got := make(map[string][]memberInfo)
 	json.Unmarshal(body, &got)
@@ -97,44 +108,21 @@ func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
 	c.Assert(len(got["members"]), Equals, len(cfgs))
 
 	for _, memb := range got["members"] {
-		ok := false
 		for _, cfg := range cfgs {
 			if memb.Name != cfg.Name {
 				continue
 			}
 
-			mClientUrls := memb.ClientUrls
-			sort.Strings(mClientUrls)
-			stringOfmClientUrls := strings.Join(mClientUrls, ",")
-
-			cClientUrls := strings.Split(cfg.ClientUrls, ",")
-			sort.Strings(cClientUrls)
-			stringOfcClientUrls := strings.Join(cClientUrls, ",")
-
-			if stringOfmClientUrls != stringOfcClientUrls {
-				continue
-			}
-
-			mPeerUrls := memb.PeerUrls
-			sort.Strings(mPeerUrls)
-			stringOfmPeerUrls := strings.Join(mPeerUrls, ",")
-
-			cPeerUrls := strings.Split(cfg.PeerUrls, ",")
-			sort.Strings(cPeerUrls)
-			stringOfcPeerUrls := strings.Join(cPeerUrls, ",")
-
-			if stringOfmPeerUrls == stringOfcPeerUrls {
-				ok = true
-			}
+			relaxEqualStings(c, memb.ClientUrls, cfg.ClientUrls, ",")
+			relaxEqualStings(c, memb.PeerUrls, cfg.PeerUrls, ",")
 		}
-		c.Assert(ok, IsTrue)
 	}
 }
 
 func (s *testMemberAPISuite) TestMemberList(c *C) {
-	howMany := []int{1, 3}
+	numbers := []int{1, 3}
 
-	for _, num := range howMany {
+	for _, num := range numbers {
 		cfgs, _, clean := mustNewCluster(c, num)
 		defer clean()
 
