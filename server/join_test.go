@@ -16,7 +16,6 @@ package server
 import (
 	"math/rand"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
@@ -25,19 +24,9 @@ import (
 	"golang.org/x/net/context"
 )
 
-func TestJoin(t *testing.T) {
-	TestingT(t)
-}
-
 var _ = Suite(&testJoinServerSuite{})
 
-type testJoinServerSuite struct {
-	cfgs []*Config
-}
-
-func (s *testJoinServerSuite) SetUpSuite(c *C) {
-	s.cfgs = newTestMultiJoinConfig(3)
-}
+type testJoinServerSuite struct{}
 
 func newTestMultiJoinConfig(count int) []*Config {
 	cfgs := NewTestMultiConfig(count)
@@ -85,22 +74,50 @@ func waitMembers(svr *Server, c int) error {
 	return errors.New("waitMembers Timeout")
 }
 
-func (s *testJoinServerSuite) TestJoin(c *C) {
-	svrs := make([]*Server, 0, len(s.cfgs))
-	for i, cfg := range s.cfgs {
-		svr, err := NewServer(cfg)
-		c.Assert(err, IsNil)
-		defer svr.Close()
-		svrs = append(svrs, svr)
+type cleanUpFunc func()
 
-		go svr.Run()
+func mustNewJoinCluster(c *C, num int) ([]*Config, []*Server, cleanUpFunc) {
+	dirs := make([]string, 0, num)
+	svrs := make([]*Server, 0, num)
+	cfgs := newTestMultiJoinConfig(num)
 
-		// Make sure new pd is started.
-		err = waitMembers(svrs[0], i+1)
-		c.Assert(err, IsNil)
+	ch := make(chan *Server, num)
+	for _, cfg := range cfgs {
+		dirs = append(dirs, cfg.DataDir)
+
+		go func(cfg *Config) {
+			s, e := CreateServer(cfg)
+			c.Assert(e, IsNil)
+			e = s.StartEtcd(nil)
+			c.Assert(e, IsNil)
+			ch <- s
+			s.Run()
+		}(cfg)
 	}
 
-	endpoints := strings.Split(s.cfgs[rand.Intn(3)].ClientUrls, ",")
+	for i := 0; i < num; i++ {
+		svr := <-ch
+		svrs = append(svrs, svr)
+	}
+	close(ch)
+
+	waitMembers(svrs[rand.Intn(num)], num)
+
+	// clean up
+	clean := func() {
+		for _, s := range svrs {
+			s.Close()
+		}
+	}
+
+	return cfgs, svrs, clean
+}
+
+func (s *testJoinServerSuite) TestRegularJoin(c *C) {
+	cfgs, _, clean := mustNewJoinCluster(c, 3)
+	defer clean()
+
+	endpoints := strings.Split(cfgs[rand.Intn(3)].ClientUrls, ",")
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: 3 * time.Second,
@@ -113,5 +130,45 @@ func (s *testJoinServerSuite) TestJoin(c *C) {
 
 	listResp, err := client.MemberList(ctx)
 	c.Assert(err, IsNil)
-	c.Assert(len(listResp.Members), Equals, len(s.cfgs))
+	c.Assert(len(listResp.Members), Equals, len(cfgs))
+}
+
+func (s *testJoinServerSuite) TestJoinSelf(c *C) {
+	cfgs := newTestMultiJoinConfig(1)
+	cfgs[0].Join = cfgs[0].AdvertisePeerUrls
+
+	svr, err := CreateServer(cfgs[0])
+	c.Assert(err, IsNil)
+	err = svr.StartEtcd(nil)
+	c.Assert(err, IsNil)
+	defer svr.Close()
+	go svr.Run()
+
+	err = waitMembers(svr, 1)
+	c.Assert(err, IsNil)
+}
+
+func (s *testJoinServerSuite) TestReJoin(c *C) {
+	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
+	defer clean()
+
+	target := rand.Intn(len(cfgs))
+	svrs[target].Close()
+	time.Sleep(100 * time.Millisecond)
+
+	ch := make(chan *Server)
+	go func() {
+		cfgs[target].InitialCluster = ""
+		svr, err := CreateServer(cfgs[target])
+		c.Assert(err, IsNil)
+		err = svr.StartEtcd(nil)
+		c.Assert(err, IsNil)
+		defer svr.Close()
+		ch <- svr
+		svr.Run()
+	}()
+
+	re := <-ch
+	err := waitMembers(re, len(cfgs))
+	c.Assert(err, IsNil)
 }

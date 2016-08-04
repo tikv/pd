@@ -29,12 +29,10 @@ import (
 // 30s is long enough for most of the network conditions.
 const defaultDialTimeout = 30 * time.Second
 
-var existingDataErr, missingDataErr error
-
-func init() {
-	existingDataErr = errors.New("existing previous raft log")
-	missingDataErr = errors.New("missing raft log")
-}
+var (
+	errExistingData = errors.New("existing previous raft log")
+	errMissingData  = errors.New("missing raft log")
+)
 
 // TODO: support HTTPS
 func (cfg *Config) genClientV3Config() clientv3.Config {
@@ -113,7 +111,7 @@ func (cfg *Config) prepareJoinCluster() (string, string, error) {
 	endpoints := strings.Split(cfg.Join, ",")
 	if len(endpoints) == 1 && endpoints[0] == cfg.AdvertisePeerUrls {
 		if cfg.hasPreviousData() {
-			return "", "", errors.Trace(existingDataErr)
+			return "", "", errors.Trace(errExistingData)
 		}
 		return cfg.Join, embed.ClusterStateFlagNew, nil
 	}
@@ -128,12 +126,12 @@ func (cfg *Config) prepareJoinCluster() (string, string, error) {
 		if cfg.hasPreviousData() {
 			return genInitalClusterStr(listResp), embed.ClusterStateFlagExisting, nil
 		}
-		return "", "", errors.Trace(missingDataErr)
+		return "", "", errors.Trace(errMissingData)
 	}
 
 	// case 1 and 4
 	if cfg.hasPreviousData() {
-		return "", "", errors.Trace(existingDataErr)
+		return "", "", errors.Trace(errExistingData)
 	}
 
 	addResp, err := memberAdd(client, []string{cfg.AdvertisePeerUrls})
