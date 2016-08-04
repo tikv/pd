@@ -119,7 +119,7 @@ func (s *testClusterBaseSuite) newRegion(c *C, regionID uint64, startKey []byte,
 func (s *testClusterSuite) TestBootstrap(c *C) {
 	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
-	conn, err := net.Dial("tcp", leader.GetAddr())
+	conn, err := rpcConnect(leader.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
 
@@ -249,7 +249,7 @@ func (s *testClusterBaseSuite) getClusterConfig(c *C, conn net.Conn, clusterID u
 func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
-	conn, err := net.Dial("tcp", leader.GetAddr())
+	conn, err := rpcConnect(leader.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
 

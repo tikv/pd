@@ -65,8 +65,5 @@ func main() {
 		os.Exit(0)
 	}()
 
-	err = svr.Run()
-	if err != nil {
-		log.Fatalf("server run failed - %v", errors.Trace(err))
-	}
+	svr.Run()
 }

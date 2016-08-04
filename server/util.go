@@ -15,6 +15,8 @@ package server
 
 import (
 	"encoding/binary"
+	"net"
+	"net/http"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
@@ -205,4 +207,31 @@ func waitEtcdStart(c *clientv3.Client, endpoint string) error {
 	}
 
 	return errors.Trace(err)
+}
+
+func rpcConnect(addr string) (net.Conn, error) {
+	req, err := http.NewRequest("GET", pdRPCPrefix, nil)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	urls, err := parseUrls(addr)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	for _, url := range urls {
+		conn, err := net.Dial("tcp", url.Host)
+		if err != nil {
+			continue
+		}
+		err = req.Write(conn)
+		if err != nil {
+			conn.Close()
+			continue
+		}
+		return conn, nil
+	}
+
+	return nil, errors.Errorf("connect to %s failed", addr)
 }
