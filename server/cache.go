@@ -83,21 +83,25 @@ func checkStaleRegion(region *metapb.Region, checkRegion *metapb.Region) error {
 	return errors.Errorf("epoch %s is staler than %s", checkEpoch, epoch)
 }
 
-func getFollowerPeers(region *metapb.Region, leader *metapb.Peer) (map[uint64]*metapb.Peer, map[uint64]struct{}) {
+func getFollowerPeers(region *metapb.Region, leader *metapb.Peer) map[uint64]*metapb.Peer {
 	followerPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
-	excludedStores := make(map[uint64]struct{}, len(region.GetPeers()))
 	for _, peer := range region.GetPeers() {
 		storeID := peer.GetStoreId()
-		excludedStores[storeID] = struct{}{}
-
 		if peer.GetId() == leader.GetId() {
 			continue
 		}
-
 		followerPeers[storeID] = peer
 	}
+	return followerPeers
+}
 
-	return followerPeers, excludedStores
+func getExcludedStores(region *metapb.Region) map[uint64]bool {
+	excludedStores := make(map[uint64]bool, len(region.GetPeers()))
+	for _, peer := range region.GetPeers() {
+		storeID := peer.GetStoreId()
+		excludedStores[storeID] = true
+	}
+	return excludedStores
 }
 
 func keyInRegion(regionKey []byte, region *metapb.Region) bool {

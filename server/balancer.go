@@ -35,7 +35,7 @@ type Balancer interface {
 	ScoreType() scoreType
 }
 
-func selectFromStore(stores []*storeInfo, excluded map[uint64]struct{}, filters []Filter, st scoreType) *storeInfo {
+func selectFromStore(stores []*storeInfo, excluded map[uint64]bool, filters []Filter, st scoreType) *storeInfo {
 	score := 0
 	scorer := newScorer(st)
 	if scorer == nil {
@@ -48,7 +48,7 @@ func selectFromStore(stores []*storeInfo, excluded map[uint64]struct{}, filters 
 			continue
 		}
 
-		if _, ok := excluded[store.store.GetId()]; ok {
+		if excluded[store.store.GetId()] {
 			continue
 		}
 
@@ -72,7 +72,7 @@ func selectFromStore(stores []*storeInfo, excluded map[uint64]struct{}, filters 
 	return resultStore
 }
 
-func selectToStore(stores []*storeInfo, excluded map[uint64]struct{}, filters []Filter, st scoreType) *storeInfo {
+func selectToStore(stores []*storeInfo, excluded map[uint64]bool, filters []Filter, st scoreType) *storeInfo {
 	score := 0
 	scorer := newScorer(st)
 	if scorer == nil {
@@ -85,7 +85,7 @@ func selectToStore(stores []*storeInfo, excluded map[uint64]struct{}, filters []
 			continue
 		}
 
-		if _, ok := excluded[store.store.GetId()]; ok {
+		if excluded[store.store.GetId()] {
 			continue
 		}
 
@@ -131,7 +131,7 @@ func (cb *capacityBalancer) ScoreType() scoreType {
 func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*storeInfo) (*metapb.Region, *metapb.Peer, *metapb.Peer) {
 	store := selectFromStore(stores, nil, cb.filters, cb.st)
 	if store == nil {
-		log.Warn("from store cannot be found to select balance region")
+		log.Debug("from store cannot be found to select balance region")
 		return nil, nil, nil
 	}
 
@@ -151,26 +151,10 @@ func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*
 	return cluster.regions.randRegion(storeID)
 }
 
-func (cb *capacityBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[uint64]*metapb.Peer) *metapb.Peer {
-	stores := make([]*storeInfo, 0, len(peers))
-	for storeID := range peers {
-		stores = append(stores, cluster.getStore(storeID))
-	}
-
-	store := selectToStore(stores, nil, nil, cb.st)
-	if store == nil {
-		log.Warn("find no store to get new leader peer for region")
-		return nil
-	}
-
-	storeID := store.store.GetId()
-	return peers[storeID]
-}
-
-func (cb *capacityBalancer) selectAddPeer(cluster *clusterInfo, stores []*storeInfo, excluded map[uint64]struct{}) (*metapb.Peer, error) {
+func (cb *capacityBalancer) selectAddPeer(cluster *clusterInfo, stores []*storeInfo, excluded map[uint64]bool) (*metapb.Peer, error) {
 	store := selectToStore(stores, excluded, cb.filters, cb.st)
 	if store == nil {
-		log.Warn("to store cannot be found to add peer")
+		log.Debug("to store cannot be found to add peer")
 		return nil, nil
 	}
 
@@ -195,7 +179,7 @@ func (cb *capacityBalancer) selectRemovePeer(cluster *clusterInfo, peers map[uin
 
 	store := selectFromStore(stores, nil, nil, cb.st)
 	if store == nil {
-		log.Warn("from store cannot be found to remove peer")
+		log.Debug("from store cannot be found to remove peer")
 		return nil, nil
 	}
 
@@ -209,7 +193,7 @@ func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*score, *balanceOpera
 	stores := cluster.getStores()
 	region, leader, peer := cb.selectBalanceRegion(cluster, stores)
 	if region == nil || leader == nil || peer == nil {
-		log.Warn("region cannot be found to do balance")
+		log.Debug("region cannot be found to do balance")
 		return nil, nil, nil
 	}
 
@@ -220,10 +204,9 @@ func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*score, *balanceOpera
 		return nil, nil, nil
 	}
 
-	_, excludedStores := getFollowerPeers(region, leader)
-
 	// Select one store to add new peer.
-	newPeer, err := cb.selectAddPeer(cluster, stores, excludedStores)
+	excluded := getExcludedStores(region)
+	newPeer, err := cb.selectAddPeer(cluster, stores, excluded)
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
@@ -265,7 +248,7 @@ func (lb *leaderBalancer) ScoreType() scoreType {
 func (lb *leaderBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*storeInfo) (*metapb.Region, *metapb.Peer, *metapb.Peer) {
 	store := selectFromStore(stores, nil, lb.filters, lb.st)
 	if store == nil {
-		log.Warn("from store cannot be found to select balance region")
+		log.Debug("from store cannot be found to select balance region")
 		return nil, nil, nil
 	}
 
@@ -281,8 +264,8 @@ func (lb *leaderBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*st
 		return nil, nil, nil
 	}
 
-	followerPeers, _ := getFollowerPeers(region, leader)
-	newLeader := lb.selectNewLeaderPeer(cluster, followerPeers)
+	followers := getFollowerPeers(region, leader)
+	newLeader := lb.selectNewLeaderPeer(cluster, followers)
 	if newLeader == nil {
 		log.Warn("new leader peer cannot be found to do leader transfer")
 		return nil, nil, nil
@@ -299,7 +282,7 @@ func (lb *leaderBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[ui
 
 	store := selectToStore(stores, nil, nil, lb.st)
 	if store == nil {
-		log.Warn("find no store to get new leader peer for region")
+		log.Debug("find no store to get new leader peer for region")
 		return nil
 	}
 
@@ -319,7 +302,7 @@ func (lb *leaderBalancer) Balance(cluster *clusterInfo) (*score, *balanceOperato
 	stores := cluster.getStores()
 	region, leader, newLeader := lb.selectBalanceRegion(cluster, stores)
 	if region == nil || leader == nil || newLeader == nil {
-		log.Warn("region cannot be found to do leader transfer")
+		log.Debug("region cannot be found to do leader transfer")
 		return nil, nil, nil
 	}
 
@@ -361,13 +344,8 @@ func newReplicaBalancer(region *metapb.Region, leader *metapb.Peer, downPeers []
 
 func (rb *replicaBalancer) addPeer(cluster *clusterInfo) (*balanceOperator, error) {
 	stores := cluster.getStores()
-	excludedStores := make(map[uint64]struct{}, len(rb.region.GetPeers()))
-	for _, peer := range rb.region.GetPeers() {
-		storeID := peer.GetStoreId()
-		excludedStores[storeID] = struct{}{}
-	}
-
-	peer, err := rb.selectAddPeer(cluster, stores, excludedStores)
+	excluded := getExcludedStores(rb.region)
+	peer, err := rb.selectAddPeer(cluster, stores, excluded)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -387,7 +365,8 @@ func (rb *replicaBalancer) removePeer(cluster *clusterInfo, downPeers []*metapb.
 		peer = downPeers[0]
 	} else {
 		var err error
-		peer, err = rb.selectRemovePeer(cluster)
+		followers := getFollowerPeers(rb.region, rb.leader)
+		peer, err = rb.selectRemovePeer(cluster, followers)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -400,20 +379,6 @@ func (rb *replicaBalancer) removePeer(cluster *clusterInfo, downPeers []*metapb.
 
 	removePeerOperator := newRemovePeerOperator(rb.region.GetId(), peer)
 	return newBalanceOperator(rb.region, newOnceOperator(removePeerOperator)), nil
-}
-
-func (rb *replicaBalancer) selectRemovePeer(cluster *clusterInfo) (*metapb.Peer, error) {
-	followerPeers := make(map[uint64]*metapb.Peer, len(rb.region.GetPeers()))
-	for _, peer := range rb.region.GetPeers() {
-		if peer.GetId() == rb.leader.GetId() {
-			continue
-		}
-
-		storeID := peer.GetStoreId()
-		followerPeers[storeID] = peer
-	}
-
-	return rb.capacityBalancer.selectRemovePeer(cluster, followerPeers)
 }
 
 func (rb *replicaBalancer) collectDownPeers(cluster *clusterInfo) []*metapb.Peer {

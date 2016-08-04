@@ -18,7 +18,7 @@ initial-cluster-state = "new"
 
 
 lease = 3
-log-level = "debug"
+log-level = "info"
 tso-save-interval = 2000
 max-peer-count = 3
 
