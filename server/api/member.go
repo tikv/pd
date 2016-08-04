@@ -85,9 +85,9 @@ func newMemberDeleteHandler(svr *server.Server, rd *render.Render) *memberDelete
 func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	client := h.svr.GetClient()
 
-	// step 1. get id
+	// step 1. get etcd id
 	var id uint64
-	var name = (mux.Vars(r))["name"]
+	name := (mux.Vars(r))["name"]
 	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
 	defer cancel()
 	listResp, err := client.MemberList(ctx)
