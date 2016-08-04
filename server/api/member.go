@@ -14,9 +14,11 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 	"golang.org/x/net/context"
@@ -66,4 +68,51 @@ func (h *memberListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ret := make(map[string][]memberInfo)
 	ret["members"] = memberInfos
 	h.rd.JSON(w, http.StatusOK, ret)
+}
+
+type memberDeleteHandler struct {
+	svr *server.Server
+	rd  *render.Render
+}
+
+func newMemberDeleteHandler(svr *server.Server, rd *render.Render) *memberDeleteHandler {
+	return &memberDeleteHandler{
+		svr: svr,
+		rd:  rd,
+	}
+}
+
+func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	client := h.svr.GetClient()
+
+	// step 1. get id
+	var id uint64
+	var name = (mux.Vars(r))["name"]
+	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
+	defer cancel()
+	listResp, err := client.MemberList(ctx)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err)
+		return
+	}
+	for _, m := range listResp.Members {
+		if name == m.Name {
+			id = m.ID
+			break
+		}
+	}
+	if id == 0 {
+		h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("not found, pd: %s", name))
+		return
+	}
+
+	// step 2. remove member by id
+	ctx, cancel = context.WithTimeout(context.Background(), defaultDialTimeout)
+	defer cancel()
+	_, err = client.MemberRemove(ctx, id)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err)
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %s", name))
 }

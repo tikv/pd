@@ -46,6 +46,7 @@ func createRouter(svr *server.Server) *mux.Router {
 	router.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")
 
 	router.Handle("/api/v1/members", newMemberListHandler(svr, rd)).Methods("GET")
+	router.Handle("/api/v1/members/{name}", newMemberDeleteHandler(svr, rd)).Methods("DELETE")
 
 	router.Handle("/", newHomeHandler(rd)).Methods("GET")
 	router.Handle("/metrics", prometheus.Handler()).Methods("GET")
