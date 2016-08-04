@@ -19,14 +19,22 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/embed"
+	"github.com/coreos/etcd/wal"
 	"github.com/juju/errors"
-	"github.com/ngaut/log"
 	"golang.org/x/net/context"
 )
 
 // the maximum amount of time a dial will wait for a connection to setup.
 // 30s is long enough for most of the network conditions.
 const defaultDialTimeout = 30 * time.Second
+
+var existingDataErr, missingDataErr error
+
+func init() {
+	existingDataErr = errors.New("existing previous raft log")
+	missingDataErr = errors.New("missing raft log")
+}
 
 // TODO: support HTTPS
 func (cfg *Config) genClientV3Config() clientv3.Config {
@@ -37,40 +45,113 @@ func (cfg *Config) genClientV3Config() clientv3.Config {
 	}
 }
 
-// prepareJoinCluster send MemberAdd command to pd cluster,
-// returns pd initial cluster configuration.
-func (cfg *Config) prepareJoinCluster() (string, error) {
+func memberAdd(client *clientv3.Client, urls []string) (*clientv3.MemberAddResponse, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
 	defer cancel()
 
-	client, err := clientv3.New(cfg.genClientV3Config())
+	return client.MemberAdd(ctx, urls)
+}
+
+func memberList(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
+	defer cancel()
+
+	return client.MemberList(ctx)
+}
+
+func (cfg *Config) hasPreviousData() bool {
+	return wal.Exist(cfg.DataDir)
+}
+
+func (cfg *Config) isInCluster(client *clientv3.Client) (bool, *clientv3.MemberListResponse, error) {
+	list, err := memberList(client)
 	if err != nil {
-		return "", errors.Trace(err)
-	}
-	defer client.Close()
-
-	addResp, err := client.MemberAdd(ctx, []string{cfg.AdvertisePeerUrls})
-	if err != nil {
-		return "", errors.Trace(err)
+		return false, nil, errors.Trace(err)
 	}
 
-	log.Infof("Member %16x added to cluster %16x\n", addResp.Member.ID, addResp.Header.ClusterId)
-
-	listResp, err := client.MemberList(ctx)
-	if err != nil {
-		return "", errors.Trace(err)
+	for _, m := range list.Members {
+		if m.Name == cfg.Name {
+			return true, list, nil
+		}
 	}
+	return false, list, nil
+}
 
+func genInitalClusterStr(list *clientv3.MemberListResponse) string {
 	pds := []string{}
-	for _, memb := range listResp.Members {
+	for _, memb := range list.Members {
 		for _, m := range memb.PeerURLs {
-			n := memb.Name
-			if memb.ID == addResp.Member.ID {
-				n = cfg.Name
-			}
-			pds = append(pds, fmt.Sprintf("%s=%s", n, m))
+			pds = append(pds, fmt.Sprintf("%s=%s", memb.Name, m))
 		}
 	}
 
-	return strings.Join(pds, ","), nil
+	return strings.Join(pds, ",")
+}
+
+// prepareJoinCluster send MemberAdd command to pd cluster,
+// returns pd initial cluster configuration.
+//
+// join cases:
+//  1. join cluster
+//  2. join self, new cluster
+//  3. re-join after fail
+//  4. join after delete (treat as case 1)
+//
+// requires:
+//  1. no data-dir, MemberAdd
+//  2. no data-dir
+//  3. need data-dir(etcd reports: raft log corrupted, truncated, or lost?)
+//  4. no datat-dir, MemberAdd
+func (cfg *Config) prepareJoinCluster() (string, string, error) {
+	client, err := clientv3.New(cfg.genClientV3Config())
+	if err != nil {
+		return "", "", errors.Trace(err)
+	}
+	defer client.Close()
+
+	// case 2, join self
+	endpoints := strings.Split(cfg.Join, ",")
+	if len(endpoints) == 1 && endpoints[0] == cfg.AdvertisePeerUrls {
+		if cfg.hasPreviousData() {
+			return "", "", errors.Trace(existingDataErr)
+		}
+		return cfg.Join, embed.ClusterStateFlagNew, nil
+	}
+
+	ok, listResp, err := cfg.isInCluster(client)
+	if err != nil {
+		return "", "", errors.Trace(err)
+	}
+
+	if ok {
+		// case 3, re-join after fail
+		if cfg.hasPreviousData() {
+			return genInitalClusterStr(listResp), embed.ClusterStateFlagExisting, nil
+		}
+		return "", "", errors.Trace(missingDataErr)
+	}
+
+	// case 1 and 4
+	if cfg.hasPreviousData() {
+		return "", "", errors.Trace(existingDataErr)
+	}
+
+	addResp, err := memberAdd(client, []string{cfg.AdvertisePeerUrls})
+	if err != nil {
+		return "", "", errors.Trace(err)
+	}
+
+	listResp, err = memberList(client)
+	if err != nil {
+		return "", "", errors.Trace(err)
+	}
+
+	for i := range listResp.Members {
+		if listResp.Members[i].ID == addResp.Member.ID {
+			listResp.Members[i].Name = cfg.Name
+			break
+		}
+	}
+
+	return genInitalClusterStr(listResp), embed.ClusterStateFlagExisting, nil
 }

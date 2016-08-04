@@ -190,12 +190,12 @@ func (c *Config) adjust() error {
 	adjustString(&c.AdvertisePeerUrls, c.PeerUrls)
 
 	if c.Join != "" {
-		initialCluster, err := c.prepareJoinCluster()
+		initialCluster, state, err := c.prepareJoinCluster()
 		if err != nil {
 			return errors.Trace(err)
 		}
 		c.InitialCluster = initialCluster
-		c.InitialClusterState = embed.ClusterStateFlagExisting
+		c.InitialClusterState = state
 	}
 
 	if len(c.InitialCluster) == 0 {
