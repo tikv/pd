@@ -9,7 +9,7 @@ RUN cd /go/src/github.com/pingcap/pd/ && \
     cp -f ./bin/pd-server /go/bin/pd-server && \
     cp -rf ./templates /go/templates
 
-EXPOSE 1234 9090 2379 2380
+EXPOSE 2379 2380
 
 ENTRYPOINT ["pd-server"]
 
