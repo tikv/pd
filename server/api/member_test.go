@@ -60,10 +60,11 @@ func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpF
 		dirs = append(dirs, cfg.DataDir)
 
 		go func(cfg *server.Config) {
-			s, e := server.NewServer(cfg)
+			s, e := server.CreateServer(cfg)
+			c.Assert(e, IsNil)
+			e = s.StartEtcd(NewHandler(s))
 			c.Assert(e, IsNil)
 			go s.Run()
-			go ServeHTTP(cfg.HTTPAddr, s)
 			ch <- s
 		}(cfg)
 	}
@@ -125,7 +126,7 @@ func (s *testMemberAPISuite) TestMemberList(c *C) {
 		cfgs, _, clean := mustNewCluster(c, num)
 		defer clean()
 
-		parts := []string{"http://", cfgs[rand.Intn(len(cfgs))].HTTPAddr, "/api/v1/members"}
+		parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/members"}
 		resp, err := s.hc.Get(strings.Join(parts, ""))
 		c.Assert(err, IsNil)
 		buf, err := ioutil.ReadAll(resp.Body)
