@@ -116,3 +116,34 @@ func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %s", name))
 }
+
+type leaderInfo struct {
+	Addr string `json:"addr"`
+	Pid  int64  `json:"pid"`
+}
+
+type leaderHandler struct {
+	svr *server.Server
+	rd  *render.Render
+}
+
+func newLeaderHandler(svr *server.Server, rd *render.Render) *leaderHandler {
+	return &leaderHandler{
+		svr: svr,
+		rd:  rd,
+	}
+}
+
+func (h *leaderHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	leader, err := h.svr.GetLeader()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	ret := leaderInfo{
+		Addr: *leader.Addr,
+		Pid:  *leader.Pid,
+	}
+	h.rd.JSON(w, http.StatusOK, ret)
+}

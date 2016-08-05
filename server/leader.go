@@ -66,7 +66,7 @@ func (s *Server) leaderLoop() {
 			return
 		}
 
-		leader, err := s.getLeader()
+		leader, err := s.GetLeader()
 		if err != nil {
 			log.Errorf("get leader err %v", err)
 			time.Sleep(200 * time.Millisecond)
@@ -116,7 +116,8 @@ func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Leader, error) {
 	return leader, nil
 }
 
-func (s *Server) getLeader() (*pdpb.Leader, error) {
+// GetLeader gets pd cluster leader.
+func (s *Server) GetLeader() (*pdpb.Leader, error) {
 	return getLeader(s.client, s.getLeaderPath())
 }
 

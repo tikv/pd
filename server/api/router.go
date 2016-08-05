@@ -46,6 +46,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	router.Handle("/api/v1/members", newMemberListHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/members/{name}", newMemberDeleteHandler(svr, rd)).Methods("DELETE")
+	router.Handle("/api/v1/leader", newLeaderHandler(svr, rd)).Methods("GET")
 
 	router.Handle("/", newHomeHandler(rd)).Methods("GET")
 	router.Handle("/ws", newWSHandler(svr))

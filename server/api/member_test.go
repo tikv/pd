@@ -190,3 +190,20 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 	c.Assert(err, IsNil)
 	checkListResponse(c, buf, newCfgs)
 }
+
+func (s *testMemberAPISuite) TestLeader(c *C) {
+	cfgs, svrs, clean := mustNewCluster(c, 3)
+	defer clean()
+
+	leader, err := svrs[0].GetLeader()
+	c.Assert(err, IsNil)
+
+	parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/leader"}
+	resp, err := s.hc.Get(strings.Join(parts, ""))
+	defer resp.Body.Close()
+	buf, err := ioutil.ReadAll(resp.Body)
+
+	var got leaderInfo
+	json.Unmarshal(buf, &got)
+	c.Assert((got.Addr == *(leader.Addr) && got.Pid == *(leader.Pid)), IsTrue)
+}
