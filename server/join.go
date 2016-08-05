@@ -29,13 +29,8 @@ import (
 // 30s is long enough for most of the network conditions.
 const defaultDialTimeout = 30 * time.Second
 
-var (
-	errExistingData = errors.New("existing previous raft log")
-	errMissingData  = errors.New("missing raft log")
-)
-
 // TODO: support HTTPS
-func (cfg *Config) genClientV3Config() clientv3.Config {
+func genClientV3Config(cfg *Config) clientv3.Config {
 	endpoints := strings.Split(cfg.Join, ",")
 	return clientv3.Config{
 		Endpoints:   endpoints,
@@ -57,47 +52,16 @@ func memberList(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
 	return client.MemberList(ctx)
 }
 
-func hasPreviousData(cfg *Config) bool {
-	return wal.Exist(cfg.DataDir)
-}
-
-func isInCluster(cfg *Config, client *clientv3.Client) (bool, *clientv3.MemberListResponse, error) {
-	list, err := memberList(client)
-	if err != nil {
-		return false, nil, errors.Trace(err)
-	}
-
-	for _, m := range list.Members {
-		if m.Name == cfg.Name {
-			return true, list, nil
-		}
-	}
-	return false, list, nil
-}
-
-func genInitalClusterStr(list *clientv3.MemberListResponse) string {
-	pds := []string{}
-	for _, memb := range list.Members {
-		for _, m := range memb.PeerURLs {
-			pds = append(pds, fmt.Sprintf("%s=%s", memb.Name, m))
-		}
-	}
-
-	return strings.Join(pds, ",")
-}
-
 // prepareJoinCluster send MemberAdd command to pd cluster,
 // returns pd initial cluster configuration.
 //
-// TL;TR: join does nothing if there is data dir,
-//
-// Etcd can automatically re-join cluster if there is data dir.
+// Etcd automatically re-join cluster if there is data dir.
 // Join cases:
 //  1. join cluster
 //    1.1. with data-dir: return ""
 //    1.2. without data-dir: MemberAdd, MemberList, gen initial-cluster
 //  2. join self
-//    1.1. with data-dir: return ""
+//    2.1. with data-dir: return ""
 //    2.2. without data-dir: return ""
 //  3. re-join after fail
 //    3.1. with data-dir: return ""
@@ -106,39 +70,41 @@ func genInitalClusterStr(list *clientv3.MemberListResponse) string {
 //    4.1. with data-dir: return "" (cluster will reject it, however itself will keep runing.)
 //    4.2. without data-dir: treat as case 1.2
 func (cfg *Config) prepareJoinCluster() (string, string, error) {
-	// case 2, join self
+	initialCluster := ""
+	if wal.Exist(cfg.DataDir) {
+		// case 1.1, 2.1, 3.1, 4.1
+		return initialCluster, embed.ClusterStateFlagExisting, nil
+	}
+
+	// case 2.2, join self
 	if cfg.Join == cfg.AdvertiseClientUrls {
-		if hasPreviousData(cfg) {
-			return "", "", errors.Trace(errExistingData)
-		}
-		initialCluster := fmt.Sprintf("%s=%s", cfg.Name, cfg.AdvertisePeerUrls)
+		initialCluster = fmt.Sprintf("%s=%s", cfg.Name, cfg.AdvertisePeerUrls)
 		return initialCluster, embed.ClusterStateFlagNew, nil
 	}
 
-	client, err := clientv3.New(cfg.genClientV3Config())
+	client, err := clientv3.New(genClientV3Config(cfg))
 	if err != nil {
 		return "", "", errors.Trace(err)
 	}
 	defer client.Close()
 
-	ok, listResp, err := isInCluster(cfg, client)
+	listResp, err := memberList(client)
 	if err != nil {
 		return "", "", errors.Trace(err)
 	}
 
-	if ok {
-		// case 3, re-join after fail
-		if hasPreviousData(cfg) {
-			return genInitalClusterStr(listResp), embed.ClusterStateFlagExisting, nil
+	in := false
+	for _, m := range listResp.Members {
+		if m.Name == cfg.Name {
+			in = true
 		}
-		return "", "", errors.Trace(errMissingData)
+	}
+	if in {
+		// case 3.2
+		return "", "", errors.New("missing raft log")
 	}
 
-	// case 1 and 4
-	if hasPreviousData(cfg) {
-		return "", "", errors.Trace(errExistingData)
-	}
-
+	// case 1.2 and 4.2
 	addResp, err := memberAdd(client, []string{cfg.AdvertisePeerUrls})
 	if err != nil {
 		return "", "", errors.Trace(err)
@@ -149,12 +115,17 @@ func (cfg *Config) prepareJoinCluster() (string, string, error) {
 		return "", "", errors.Trace(err)
 	}
 
-	for i := range listResp.Members {
-		if listResp.Members[i].ID == addResp.Member.ID {
-			listResp.Members[i].Name = cfg.Name
-			break
+	pds := []string{}
+	for _, memb := range listResp.Members {
+		for _, m := range memb.PeerURLs {
+			n := memb.Name
+			if memb.ID == addResp.Member.ID {
+				n = cfg.Name
+			}
+			pds = append(pds, fmt.Sprintf("%s=%s", n, m))
 		}
 	}
+	initialCluster = strings.Join(pds, ",")
 
-	return genInitalClusterStr(listResp), embed.ClusterStateFlagExisting, nil
+	return initialCluster, embed.ClusterStateFlagExisting, nil
 }
