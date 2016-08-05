@@ -35,7 +35,7 @@ type Balancer interface {
 	ScoreType() scoreType
 }
 
-func selectFromStore(stores []*storeInfo, excluded map[uint64]bool, filters []Filter, st scoreType) *storeInfo {
+func selectFromStore(stores []*storeInfo, excluded map[uint64]struct{}, filters []Filter, st scoreType) *storeInfo {
 	score := 0
 	scorer := newScorer(st)
 	if scorer == nil {
@@ -48,7 +48,7 @@ func selectFromStore(stores []*storeInfo, excluded map[uint64]bool, filters []Fi
 			continue
 		}
 
-		if excluded[store.store.GetId()] {
+		if _, ok := excluded[store.store.GetId()]; ok {
 			continue
 		}
 
@@ -72,7 +72,7 @@ func selectFromStore(stores []*storeInfo, excluded map[uint64]bool, filters []Fi
 	return resultStore
 }
 
-func selectToStore(stores []*storeInfo, excluded map[uint64]bool, filters []Filter, st scoreType) *storeInfo {
+func selectToStore(stores []*storeInfo, excluded map[uint64]struct{}, filters []Filter, st scoreType) *storeInfo {
 	score := 0
 	scorer := newScorer(st)
 	if scorer == nil {
@@ -85,7 +85,7 @@ func selectToStore(stores []*storeInfo, excluded map[uint64]bool, filters []Filt
 			continue
 		}
 
-		if excluded[store.store.GetId()] {
+		if _, ok := excluded[store.store.GetId()]; ok {
 			continue
 		}
 
@@ -151,7 +151,7 @@ func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*
 	return cluster.regions.randRegion(storeID)
 }
 
-func (cb *capacityBalancer) selectAddPeer(cluster *clusterInfo, stores []*storeInfo, excluded map[uint64]bool) (*metapb.Peer, error) {
+func (cb *capacityBalancer) selectAddPeer(cluster *clusterInfo, stores []*storeInfo, excluded map[uint64]struct{}) (*metapb.Peer, error) {
 	store := selectToStore(stores, excluded, cb.filters, cb.st)
 	if store == nil {
 		log.Debug("to store cannot be found to add peer")

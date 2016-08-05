@@ -95,11 +95,11 @@ func getFollowerPeers(region *metapb.Region, leader *metapb.Peer) map[uint64]*me
 	return followerPeers
 }
 
-func getExcludedStores(region *metapb.Region) map[uint64]bool {
-	excludedStores := make(map[uint64]bool, len(region.GetPeers()))
+func getExcludedStores(region *metapb.Region) map[uint64]struct{} {
+	excludedStores := make(map[uint64]struct{}, len(region.GetPeers()))
 	for _, peer := range region.GetPeers() {
 		storeID := peer.GetStoreId()
-		excludedStores[storeID] = true
+		excludedStores[storeID] = struct{}{}
 	}
 	return excludedStores
 }

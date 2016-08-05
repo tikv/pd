@@ -207,20 +207,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	conn, bufrw, err := hj.Hijack()
 	if err != nil {
-		log.Errorf("hijack failed: conn %v err %v", w, err)
+		log.Error(err)
 		return
 	}
 
 	err = conn.SetDeadline(time.Time{})
 	if err != nil {
-		log.Errorf("clear deadline failed: conn %v err %v", conn, err)
+		log.Error(err)
 		conn.Close()
 		return
 	}
 
 	c, err := newConn(s, conn, bufrw)
 	if err != nil {
-		log.Errorf("new connection failed: conn %v err %v", conn, err)
+		log.Error(err)
 		conn.Close()
 		return
 	}
