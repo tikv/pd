@@ -152,28 +152,28 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 		{
 			// delete a nonexistent pd
 			name:    fmt.Sprintf("pd%d", rand.Int63()),
-			addr:    cfgs[rand.Intn(len(cfgs))].HTTPAddr,
+			addr:    cfgs[rand.Intn(len(cfgs))].ClientUrls,
 			checker: Equals,
 			status:  http.StatusNotFound,
 		},
 		{
 			// delete a pd randomly
 			name:    cfgs[target].Name,
-			addr:    cfgs[rand.Intn(len(cfgs))].HTTPAddr,
+			addr:    cfgs[rand.Intn(len(cfgs))].ClientUrls,
 			checker: Equals,
 			status:  http.StatusOK,
 		},
 		{
 			// delete it again
 			name:    cfgs[target].Name,
-			addr:    newCfgs[rand.Intn(len(newCfgs))].HTTPAddr,
+			addr:    newCfgs[rand.Intn(len(newCfgs))].ClientUrls,
 			checker: Not(Equals),
 			status:  http.StatusOK,
 		},
 	}
 
 	for _, t := range table {
-		parts := []string{"http://", t.addr, "/api/v1/members", "/" + t.name}
+		parts := []string{t.addr, apiPrefix, "/api/v1/members/", t.name}
 		req, err := http.NewRequest("DELETE", strings.Join(parts, ""), nil)
 		c.Assert(err, IsNil)
 		resp, err := s.hc.Do(req)
@@ -182,7 +182,7 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 		c.Assert(resp.StatusCode, t.checker, t.status)
 	}
 
-	parts := []string{"http://", cfgs[rand.Intn(len(newCfgs))].HTTPAddr, "/api/v1/members"}
+	parts := []string{cfgs[rand.Intn(len(newCfgs))].ClientUrls, apiPrefix, "/api/v1/members"}
 	resp, err := s.hc.Get(strings.Join(parts, ""))
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
