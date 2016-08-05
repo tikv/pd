@@ -57,11 +57,11 @@ func memberList(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
 	return client.MemberList(ctx)
 }
 
-func (cfg *Config) hasPreviousData() bool {
+func hasPreviousData(cfg *Config) bool {
 	return wal.Exist(cfg.DataDir)
 }
 
-func (cfg *Config) isInCluster(client *clientv3.Client) (bool, *clientv3.MemberListResponse, error) {
+func isInCluster(cfg *Config, client *clientv3.Client) (bool, *clientv3.MemberListResponse, error) {
 	list, err := memberList(client)
 	if err != nil {
 		return false, nil, errors.Trace(err)
@@ -89,21 +89,26 @@ func genInitalClusterStr(list *clientv3.MemberListResponse) string {
 // prepareJoinCluster send MemberAdd command to pd cluster,
 // returns pd initial cluster configuration.
 //
-// join cases:
-//  1. join cluster
-//  2. join self, new cluster
-//  3. re-join after fail
-//  4. join after delete (treat as case 1)
+// TL;TR: join does nothing if there is data dir,
 //
-// requires:
-//  1. no data-dir, MemberAdd
-//  2. no data-dir
-//  3. need data-dir(etcd reports: raft log corrupted, truncated, or lost?)
-//  4. no datat-dir, MemberAdd
+// Etcd can automatically re-join cluster if there is data dir.
+// Join cases:
+//  1. join cluster
+//    1.1. with data-dir: return ""
+//    1.2. without data-dir: MemberAdd, MemberList, gen initial-cluster
+//  2. join self
+//    1.1. with data-dir: return ""
+//    2.2. without data-dir: return ""
+//  3. re-join after fail
+//    3.1. with data-dir: return ""
+//    3.2. without data-dir: return error(etcd reports: raft log corrupted, truncated, or lost?)
+//  4. join after delete
+//    4.1. with data-dir: return "" (cluster will reject it, however itself will keep runing.)
+//    4.2. without data-dir: treat as case 1.2
 func (cfg *Config) prepareJoinCluster() (string, string, error) {
 	// case 2, join self
 	if cfg.Join == cfg.AdvertiseClientUrls {
-		if cfg.hasPreviousData() {
+		if hasPreviousData(cfg) {
 			return "", "", errors.Trace(errExistingData)
 		}
 		initialCluster := fmt.Sprintf("%s=%s", cfg.Name, cfg.AdvertisePeerUrls)
@@ -116,21 +121,21 @@ func (cfg *Config) prepareJoinCluster() (string, string, error) {
 	}
 	defer client.Close()
 
-	ok, listResp, err := cfg.isInCluster(client)
+	ok, listResp, err := isInCluster(cfg, client)
 	if err != nil {
 		return "", "", errors.Trace(err)
 	}
 
 	if ok {
 		// case 3, re-join after fail
-		if cfg.hasPreviousData() {
+		if hasPreviousData(cfg) {
 			return genInitalClusterStr(listResp), embed.ClusterStateFlagExisting, nil
 		}
 		return "", "", errors.Trace(errMissingData)
 	}
 
 	// case 1 and 4
-	if cfg.hasPreviousData() {
+	if hasPreviousData(cfg) {
 		return "", "", errors.Trace(errExistingData)
 	}
 
