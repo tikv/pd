@@ -101,20 +101,20 @@ func genInitalClusterStr(list *clientv3.MemberListResponse) string {
 //  3. need data-dir(etcd reports: raft log corrupted, truncated, or lost?)
 //  4. no datat-dir, MemberAdd
 func (cfg *Config) prepareJoinCluster() (string, string, error) {
+	// case 2, join self
+	if cfg.Join == cfg.AdvertiseClientUrls {
+		if cfg.hasPreviousData() {
+			return "", "", errors.Trace(errExistingData)
+		}
+		initialCluster := fmt.Sprintf("%s=%s", cfg.Name, cfg.AdvertisePeerUrls)
+		return initialCluster, embed.ClusterStateFlagNew, nil
+	}
+
 	client, err := clientv3.New(cfg.genClientV3Config())
 	if err != nil {
 		return "", "", errors.Trace(err)
 	}
 	defer client.Close()
-
-	// case 2, join self
-	endpoints := strings.Split(cfg.Join, ",")
-	if len(endpoints) == 1 && endpoints[0] == cfg.AdvertisePeerUrls {
-		if cfg.hasPreviousData() {
-			return "", "", errors.Trace(errExistingData)
-		}
-		return cfg.Join, embed.ClusterStateFlagNew, nil
-	}
 
 	ok, listResp, err := cfg.isInCluster(client)
 	if err != nil {

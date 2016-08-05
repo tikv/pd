@@ -135,7 +135,7 @@ func (s *testJoinServerSuite) TestRegularJoin(c *C) {
 
 func (s *testJoinServerSuite) TestJoinSelf(c *C) {
 	cfgs := newTestMultiJoinConfig(1)
-	cfgs[0].Join = cfgs[0].AdvertisePeerUrls
+	cfgs[0].Join = cfgs[0].AdvertiseClientUrls
 
 	svr, err := CreateServer(cfgs[0])
 	c.Assert(err, IsNil)
