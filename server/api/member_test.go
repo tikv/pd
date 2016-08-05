@@ -200,10 +200,12 @@ func (s *testMemberAPISuite) TestLeader(c *C) {
 
 	parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/leader"}
 	resp, err := s.hc.Get(strings.Join(parts, ""))
+	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	buf, err := ioutil.ReadAll(resp.Body)
 
 	var got leaderInfo
 	json.Unmarshal(buf, &got)
-	c.Assert((got.Addr == *(leader.Addr) && got.Pid == *(leader.Pid)), IsTrue)
+	c.Assert(got.Addr, Equals, *(leader.Addr))
+	c.Assert(got.Pid, Equals, *(leader.Pid))
 }
