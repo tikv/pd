@@ -121,12 +121,12 @@ func (s *Server) getLeader() (*pdpb.Leader, error) {
 }
 
 func (s *Server) isSameLeader(leader *pdpb.Leader) bool {
-	return leader.GetAddr() == s.cfg.AdvertiseAddr && leader.GetPid() == int64(os.Getpid())
+	return leader.GetAddr() == s.GetAddr() && leader.GetPid() == int64(os.Getpid())
 }
 
 func (s *Server) marshalLeader() string {
 	leader := &pdpb.Leader{
-		Addr: proto.String(s.cfg.AdvertiseAddr),
+		Addr: proto.String(s.GetAddr()),
 		Pid:  proto.Int64(int64(os.Getpid())),
 	}
 
@@ -144,7 +144,7 @@ func (s *Server) isEtcdLeader() bool {
 }
 
 func (s *Server) campaignLeader() error {
-	log.Debugf("begin to campaign leader %s", s.cfg.AdvertiseAddr)
+	log.Debugf("begin to campaign leader %s", s.Name())
 
 	lessor := clientv3.NewLease(s.client)
 	defer lessor.Close()
@@ -175,7 +175,7 @@ func (s *Server) campaignLeader() error {
 		return errors.New("campaign leader failed, other server may campaign ok")
 	}
 
-	log.Debugf("campaign leader ok %s", s.cfg.AdvertiseAddr)
+	log.Debugf("campaign leader ok %s", s.Name())
 	s.enableLeader(true)
 	defer s.enableLeader(false)
 

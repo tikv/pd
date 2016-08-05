@@ -40,9 +40,14 @@ func main() {
 	log.SetLevelByString(cfg.LogLevel)
 	log.SetHighlighting(false)
 
-	svr, err := server.NewServer(cfg)
+	svr, err := server.CreateServer(cfg)
 	if err != nil {
 		log.Errorf("create pd server err %s\n", err)
+		return
+	}
+	err = svr.StartEtcd(api.NewHandler(svr))
+	if err != nil {
+		log.Errorf("server start etcd failed - %v", errors.Trace(err))
 		return
 	}
 
@@ -60,15 +65,5 @@ func main() {
 		os.Exit(0)
 	}()
 
-	go func() {
-		err = api.ServeHTTP(cfg.HTTPAddr, svr)
-		if err != nil {
-			log.Fatalf("serve http failed - %v", errors.Trace(err))
-		}
-	}()
-
-	err = svr.Run()
-	if err != nil {
-		log.Fatalf("server run failed - %v", errors.Trace(err))
-	}
+	svr.Run()
 }

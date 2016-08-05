@@ -60,7 +60,7 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 
 	for i := 0; i < 3; i++ {
 		svr := <-ch
-		s.svrs[svr.cfg.AdvertiseAddr] = svr
+		s.svrs[svr.GetAddr()] = svr
 		s.leaderPath = svr.getLeaderPath()
 	}
 

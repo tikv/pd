@@ -14,7 +14,7 @@
 package server
 
 import (
-	"net"
+	"net/http"
 	"path"
 	"strconv"
 	"sync"
@@ -30,7 +30,9 @@ import (
 const (
 	etcdTimeout = time.Second * 3
 	// pdRootPath for all pd servers.
-	pdRootPath = "/pd"
+	pdRootPath  = "/pd"
+	pdAPIPrefix = "/pd/"
+	pdRPCPrefix = "/pd/rpc"
 )
 
 // Server is the pd server.
@@ -38,8 +40,6 @@ type Server struct {
 	cfg *Config
 
 	etcd *embed.Etcd
-
-	listener net.Listener
 
 	client *clientv3.Client
 
@@ -77,61 +77,27 @@ type Server struct {
 
 // NewServer creates the pd server with given configuration.
 func NewServer(cfg *Config) (*Server, error) {
+	s, err := CreateServer(cfg)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return s, s.StartEtcd(nil)
+}
+
+// CreateServer creates the UNINITIALIZED pd server with given configuration.
+func CreateServer(cfg *Config) (*Server, error) {
 	if err := cfg.adjust(); err != nil {
 		return nil, errors.Trace(err)
 	}
 
 	log.Infof("PD config - %v", cfg)
 
-	etcdCfg, err := cfg.genEmbedEtcdConfig()
-	log.Info("start embed etcd")
-
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	etcd, err := embed.StartEtcd(etcdCfg)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	endpoints := []string{etcd.Clients[0].Addr().String()}
-
-	log.Infof("create etcd v3 client with endpoints %v", endpoints)
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: etcdTimeout,
-	})
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	if err = waitEtcdStart(client, endpoints[0]); err != nil {
-		// See https://github.com/coreos/etcd/issues/6067
-		// Here may return "not capable" error because we don't start
-		// all etcds in initial_cluster at same time, so here just log
-		// an error.
-		// Note that pd can not work correctly if we don't start all etcds.
-		log.Errorf("etcd start failed, err %v", err)
-	}
-
-	log.Infof("listening address %s", cfg.Addr)
-	l, err := net.Listen("tcp", cfg.Addr)
-	if err != nil {
-		client.Close()
-		return nil, errors.Trace(err)
-	}
-
 	s := &Server{
 		cfg:           cfg,
-		etcd:          etcd,
-		listener:      l,
-		client:        client,
 		isLeaderValue: 0,
 		conns:         make(map[*conn]struct{}),
 		closed:        0,
 		rootPath:      path.Join(pdRootPath, strconv.FormatUint(cfg.ClusterID, 10)),
-		id:            uint64(etcd.Server.ID()),
 	}
 
 	s.idAlloc = &idAllocator{s: s}
@@ -145,6 +111,53 @@ func NewServer(cfg *Config) (*Server, error) {
 	return s, nil
 }
 
+// StartEtcd starts an embed etcd server with an user handler.
+func (s *Server) StartEtcd(apiHandler http.Handler) error {
+	etcdCfg, err := s.cfg.genEmbedEtcdConfig()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	etcdCfg.UserHandlers = map[string]http.Handler{
+		pdRPCPrefix: s,
+	}
+	if apiHandler != nil {
+		etcdCfg.UserHandlers[pdAPIPrefix] = apiHandler
+	}
+
+	log.Info("start embed etcd")
+
+	etcd, err := embed.StartEtcd(etcdCfg)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	endpoints := []string{etcd.Clients[0].Addr().String()}
+
+	log.Infof("create etcd v3 client with endpoints %v", endpoints)
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:   endpoints,
+		DialTimeout: etcdTimeout,
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if err = waitEtcdStart(client, endpoints[0]); err != nil {
+		// See https://github.com/coreos/etcd/issues/6067
+		// Here may return "not capable" error because we don't start
+		// all etcds in initial_cluster at same time, so here just log
+		// an error.
+		// Note that pd can not work correctly if we don't start all etcds.
+		log.Errorf("etcd start failed, err %v", err)
+	}
+
+	s.etcd = etcd
+	s.client = client
+	s.id = uint64(etcd.Server.ID())
+
+	return nil
+}
+
 // Close closes the server.
 func (s *Server) Close() {
 	if !atomic.CompareAndSwapInt64(&s.closed, 0, 1) {
@@ -155,10 +168,6 @@ func (s *Server) Close() {
 	log.Info("closing server")
 
 	s.enableLeader(false)
-
-	if s.listener != nil {
-		s.listener.Close()
-	}
 
 	if s.client != nil {
 		s.client.Close()
@@ -179,33 +188,50 @@ func (s *Server) isClosed() bool {
 }
 
 // Run runs the pd server.
-func (s *Server) Run() error {
+func (s *Server) Run() {
 	// We use "127.0.0.1:0" for test and will set correct listening
 	// address before run, so we set leader value here.
 	s.leaderValue = s.marshalLeader()
 
 	s.wg.Add(1)
-	go s.leaderLoop()
+	s.leaderLoop()
+}
 
-	for {
-		conn, err := s.listener.Accept()
-		if err != nil {
-			log.Errorf("accept err %s", err)
-			break
-		}
-
-		c, err := newConn(s, conn)
-		if err != nil {
-			log.Warn(err)
-			conn.Close()
-			continue
-		}
-
-		s.wg.Add(1)
-		go c.run()
+// ServeHTTP hijack the HTTP connection and switch to RPC.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		log.Errorf("server doesn't support hijacking: conn %v", w)
+		return
 	}
 
-	return nil
+	conn, bufrw, err := hj.Hijack()
+	if err != nil {
+		log.Errorf("hijack failed: conn %v err %v", w, err)
+		return
+	}
+
+	err = conn.SetDeadline(time.Time{})
+	if err != nil {
+		log.Errorf("clear deadline failed: conn %v err %v", conn, err)
+		conn.Close()
+		return
+	}
+
+	c, err := newConn(s, conn, bufrw)
+	if err != nil {
+		log.Errorf("new connection failed: conn %v err %v", conn, err)
+		conn.Close()
+		return
+	}
+
+	s.wg.Add(1)
+	go c.run()
+}
+
+// GetAddr returns the server urls for clients.
+func (s *Server) GetAddr() string {
+	return s.cfg.AdvertiseClientUrls
 }
 
 // GetEndpoints returns the etcd endpoints for outer use.
@@ -221,6 +247,11 @@ func (s *Server) GetClient() *clientv3.Client {
 // ID returns the unique etcd ID for this server in etcd cluster.
 func (s *Server) ID() uint64 {
 	return s.id
+}
+
+// Name returns the unique etcd Name for this server in etcd cluster.
+func (s *Server) Name() string {
+	return s.cfg.Name
 }
 
 func (s *Server) closeAllConnections() {
