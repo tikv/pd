@@ -206,6 +206,6 @@ func (s *testMemberAPISuite) TestLeader(c *C) {
 
 	var got leaderInfo
 	json.Unmarshal(buf, &got)
-	c.Assert(got.Addr, Equals, *(leader.Addr))
-	c.Assert(got.Pid, Equals, *(leader.Pid))
+	c.Assert(got.Addr, Equals, leader.GetAddr())
+	c.Assert(got.Pid, Equals, leader.GetPid())
 }
