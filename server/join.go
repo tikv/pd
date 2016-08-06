@@ -55,28 +55,55 @@ func memberList(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
 // prepareJoinCluster send MemberAdd command to pd cluster,
 // returns pd initial cluster configuration.
 //
-// Etcd automatically re-join cluster if there is data dir.
-// Join cases:
-//  1. join cluster
-//    1.1. with data-dir: return ""
-//    1.2. without data-dir: MemberAdd, MemberList, gen initial-cluster
-//  2. join self
-//    2.1. with data-dir: return ""
-//    2.2. without data-dir: return ""
-//  3. re-join after fail
-//    3.1. with data-dir: return ""
-//    3.2. without data-dir: return error(etcd reports: raft log corrupted, truncated, or lost?)
-//  4. join after delete
-//    4.1. with data-dir: return "" (cluster will reject it, however itself will keep runing.)
-//    4.2. without data-dir: treat as case 1.2
+// TL;TR: The join functionality is safe. With data, join does nothing, w/o data
+//        and it is not a member of cluster, join does MemberAdd, otherwise
+//        return an error.
+//
+// Etcd automatically re-join cluster if there is a data dir, so first we check
+// if there is data dir or not. With data dir, it returns an empty string(etcd
+// will get correct configurations from data dir.)
+//
+// Without data dir, we may have following cases:
+//
+//  1. a new pd joins to an existing cluster.
+//      join does: MemberAdd, MemberList, then generate initial-cluster.
+//
+//  2. a new pd joins itself
+//      join does: nothing.
+//
+//  3. an failed pd re-joins to previous cluster.
+//      join does: return an error(etcd reports: raft log corrupted, truncated,
+//                 or lost?)
+//
+//  4. a join self pd failed and it restarted with join while other peers try
+//     to connect to it.
+//      join does: nothing. (join can not detect whether it is in a cluster or
+//                 not, however, pd will shutdown as soon as other peers connect
+//                 to it. etcd reports: raft log corrupted, truncated, or lost?
+//                 this will not damage other peers.)
+//
+//  5. a deleted pd joins to previous cluster.
+//      join does: same as case1. (it is not in member list and there is no
+//                 data, so we can treat it as a new pd.)
+//
+// With data dir, special case:
+//
+//  6. a failed pd tries to join to previous cluster but it has been deleted
+//     during it's downtime.
+//      join does: return "" (etcd will connect to other peers and will find
+//                 itself has been removed)
+//
+//  7. a deleted pd joins to previous cluster
+//      join does: return "" (as etcd will read data dir and find itself has
+//                 been removed, so an empty string is fine.)
 func (cfg *Config) prepareJoinCluster() (string, string, error) {
 	initialCluster := ""
+	// cases with data
 	if wal.Exist(cfg.DataDir) {
-		// case 1.1, 2.1, 3.1, 4.1
 		return initialCluster, embed.ClusterStateFlagExisting, nil
 	}
 
-	// case 2.2, join self
+	// case 2, case 4
 	if cfg.Join == cfg.AdvertiseClientUrls {
 		initialCluster = fmt.Sprintf("%s=%s", cfg.Name, cfg.AdvertisePeerUrls)
 		return initialCluster, embed.ClusterStateFlagNew, nil
@@ -99,12 +126,13 @@ func (cfg *Config) prepareJoinCluster() (string, string, error) {
 			in = true
 		}
 	}
+
+	// case 3
 	if in {
-		// case 3.2
 		return "", "", errors.New("missing raft log")
 	}
 
-	// case 1.2 and 4.2
+	// case 1, case 5
 	addResp, err := memberAdd(client, []string{cfg.AdvertisePeerUrls})
 	if err != nil {
 		return "", "", errors.Trace(err)

@@ -14,17 +14,21 @@
 package server
 
 import (
+	"fmt"
 	"math/rand"
-	"strings"
+	"os"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
 	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testJoinServerSuite{})
+
+var (
+	errTimeout = errors.New("timeout")
+)
 
 type testJoinServerSuite struct{}
 
@@ -74,6 +78,53 @@ func waitMembers(svr *Server, c int) error {
 	return errors.New("waitMembers Timeout")
 }
 
+func waitLeader(svrs []*Server) {
+	// maxRetryTime * waitInterval = 5s
+	maxRetryCount := 10
+	waitInterval := 500 * time.Millisecond
+
+	for count := 0; count < maxRetryCount; count++ {
+		for _, s := range svrs {
+			if s.isLeader() {
+				return
+			}
+		}
+		time.Sleep(waitInterval)
+	}
+}
+
+// notice: cfg has changed
+func startPdWith(cfg *Config) (*Server, error) {
+	svrCh := make(chan *Server)
+	errCh := make(chan error)
+	go func() {
+		svr, err := CreateServer(cfg)
+		if err != nil {
+			errCh <- errors.Trace(err)
+			return
+		}
+		err = svr.StartEtcd(nil)
+		if err != nil {
+			errCh <- errors.Trace(err)
+			return
+		}
+		svrCh <- svr
+		svr.Run()
+	}()
+
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+
+	select {
+	case s := <-svrCh:
+		return s, nil
+	case e := <-errCh:
+		return nil, errors.Trace(e)
+	case <-timer.C:
+		return nil, errTimeout
+	}
+}
+
 type cleanUpFunc func()
 
 func mustNewJoinCluster(c *C, num int) ([]*Config, []*Server, cleanUpFunc) {
@@ -81,25 +132,12 @@ func mustNewJoinCluster(c *C, num int) ([]*Config, []*Server, cleanUpFunc) {
 	svrs := make([]*Server, 0, num)
 	cfgs := newTestMultiJoinConfig(num)
 
-	ch := make(chan *Server, num)
 	for _, cfg := range cfgs {
 		dirs = append(dirs, cfg.DataDir)
-
-		go func(cfg *Config) {
-			s, e := CreateServer(cfg)
-			c.Assert(e, IsNil)
-			e = s.StartEtcd(nil)
-			c.Assert(e, IsNil)
-			ch <- s
-			s.Run()
-		}(cfg)
-	}
-
-	for i := 0; i < num; i++ {
-		svr := <-ch
+		svr, err := startPdWith(cfg)
+		c.Assert(err, IsNil)
 		svrs = append(svrs, svr)
 	}
-	close(ch)
 
 	waitMembers(svrs[rand.Intn(num)], num)
 
@@ -113,39 +151,152 @@ func mustNewJoinCluster(c *C, num int) ([]*Config, []*Server, cleanUpFunc) {
 	return cfgs, svrs, clean
 }
 
-func (s *testJoinServerSuite) TestRegularJoin(c *C) {
-	cfgs, _, clean := mustNewJoinCluster(c, 3)
-	defer clean()
+func alive(target, peer *Server) error {
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
 
-	endpoints := strings.Split(cfgs[rand.Intn(3)].ClientUrls, ",")
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: 3 * time.Second,
-	})
-	c.Assert(err, IsNil)
-	defer client.Close()
+	ch := make(chan error)
+	go func() {
+		// put something to cluster
+		key := fmt.Sprintf("%d", rand.Int63())
+		value := key
+		client := peer.GetClient()
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		defer cancel()
+		_, err := client.Put(ctx, key, value)
+		if err != nil {
+			ch <- err
+			return
+		}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
-	defer cancel()
+		client = target.GetClient()
+		ctx, cancel = context.WithTimeout(context.Background(), requestTimeout)
+		defer cancel()
+		resp, err := client.Get(ctx, key)
+		if err != nil {
+			ch <- err
+			return
+		}
+		if string(resp.Kvs[0].Value) != value {
+			msg := fmt.Sprintf("not match, got: %s, expect: %s", resp.Kvs[0].Value, value)
+			err = errors.New(msg)
+			ch <- err
+			return
+		}
+		ch <- nil
+	}()
 
-	listResp, err := client.MemberList(ctx)
-	c.Assert(err, IsNil)
-	c.Assert(len(listResp.Members), Equals, len(cfgs))
+	select {
+	case err := <-ch:
+		return err
+	case <-timer.C:
+		return errTimeout
+	}
 }
 
-func (s *testJoinServerSuite) TestJoinSelf(c *C) {
+func (s *testJoinServerSuite) TestJoinCase1(c *C) {
+	_, svrs, clean := mustNewJoinCluster(c, 3)
+	defer clean()
+
+	err := waitMembers(svrs[0], 3)
+	c.Assert(err, IsNil)
+}
+
+func (s *testJoinServerSuite) TestJoinCase2(c *C) {
 	cfgs := newTestMultiJoinConfig(1)
 	cfgs[0].Join = cfgs[0].AdvertiseClientUrls
 
-	svr, err := CreateServer(cfgs[0])
-	c.Assert(err, IsNil)
-	err = svr.StartEtcd(nil)
-	c.Assert(err, IsNil)
+	svr, err := startPdWith(cfgs[0])
 	defer svr.Close()
-	go svr.Run()
 
 	err = waitMembers(svr, 1)
 	c.Assert(err, IsNil)
+}
+
+func (s *testJoinServerSuite) TestJoinCase3(c *C) {
+	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
+	defer clean()
+
+	target := 1
+	svrs[target].Close()
+	time.Sleep(500 * time.Millisecond)
+
+	cfgs[target].InitialCluster = ""
+	err := os.RemoveAll(cfgs[target].DataDir)
+	c.Assert(err, IsNil)
+
+	_, err = startPdWith(cfgs[target])
+	c.Assert(err, Not(IsNil))
+}
+
+// Case 4 is the same as case 1, because the join pd is brand new.
+func (s *testJoinServerSuite) TestJoinCase4(c *C) {
+	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
+	defer clean()
+
+	target := 0
+	svrs[target].Close()
+	time.Sleep(500 * time.Millisecond)
+
+	cfgs[target].InitialCluster = ""
+	cfgs[target].Join = cfgs[target].AdvertiseClientUrls
+	err := os.RemoveAll(cfgs[target].DataDir)
+	c.Assert(err, IsNil)
+
+	waitLeader([]*Server{svrs[1], svrs[2]})
+	_, err = startPdWith(cfgs[target])
+	c.Assert(err, IsNil)
+	err = alive(svrs[2], svrs[0])
+	c.Assert(err, Not(IsNil))
+
+	err = alive(svrs[2], svrs[1])
+	c.Assert(err, IsNil)
+}
+
+func (s *testJoinServerSuite) TestJoinCase6(c *C) {
+	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
+	defer clean()
+
+	target := 2
+	svrs[target].Close()
+	time.Sleep(500 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
+	defer cancel()
+	client := svrs[0].GetClient()
+	client.MemberRemove(ctx, svrs[target].ID())
+
+	cfgs[target].InitialCluster = ""
+	_, err := startPdWith(cfgs[target])
+	// deleted etcd will not start successfully.
+	c.Assert(err, Equals, errTimeout)
+
+	list, err := memberList(client)
+	c.Assert(err, IsNil)
+	c.Assert(len(list.Members), Equals, 2)
+}
+
+func (s *testJoinServerSuite) TestJoinCase7(c *C) {
+	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
+	defer clean()
+
+	target := 2
+	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
+	defer cancel()
+	client := svrs[0].GetClient()
+	client.MemberRemove(ctx, svrs[target].ID())
+
+	svrs[target].Close()
+	time.Sleep(500 * time.Millisecond)
+
+	cfgs[target].InitialCluster = ""
+	_, err := startPdWith(cfgs[target])
+	// deleted etcd will not start successfully.
+	c.Assert(err, Equals, errTimeout)
+
+	list, err := memberList(client)
+	c.Assert(err, IsNil)
+	c.Assert(len(list.Members), Equals, 2)
 }
 
 func (s *testJoinServerSuite) TestReJoin(c *C) {
@@ -154,21 +305,13 @@ func (s *testJoinServerSuite) TestReJoin(c *C) {
 
 	target := rand.Intn(len(cfgs))
 	svrs[target].Close()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
-	ch := make(chan *Server)
-	go func() {
-		cfgs[target].InitialCluster = ""
-		svr, err := CreateServer(cfgs[target])
-		c.Assert(err, IsNil)
-		err = svr.StartEtcd(nil)
-		c.Assert(err, IsNil)
-		defer svr.Close()
-		ch <- svr
-		svr.Run()
-	}()
+	cfgs[target].InitialCluster = ""
+	re, err := startPdWith(cfgs[target])
+	c.Assert(err, IsNil)
 
-	re := <-ch
-	err := waitMembers(re, len(cfgs))
+	waitLeader(svrs)
+	err = alive(re, svrs[0])
 	c.Assert(err, IsNil)
 }
