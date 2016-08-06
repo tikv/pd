@@ -203,6 +203,7 @@ func (s *testMemberAPISuite) TestLeader(c *C) {
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	buf, err := ioutil.ReadAll(resp.Body)
+	c.Assert(err, IsNil)
 
 	var got leaderInfo
 	json.Unmarshal(buf, &got)
