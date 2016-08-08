@@ -84,7 +84,7 @@ func NewConfig() *Config {
 	fs.Uint64Var(&cfg.ClusterID, "cluster-id", 0, "initial cluster ID for the pd cluster")
 	fs.StringVar(&cfg.Name, "name", defaultName, "human-readable name for this pd member")
 
-	fs.StringVar(&cfg.DataDir, "data-dir", defaultDataDir, "path to the data directory (default 'default.${name}')")
+	fs.StringVar(&cfg.DataDir, "data-dir", "", "path to the data directory (default 'default.${name}')")
 	fs.StringVar(&cfg.ClientUrls, "client-urls", defaultClientUrls, "url for client traffic")
 	fs.StringVar(&cfg.AdvertiseClientUrls, "advertise-client-urls", "", "advertise url for client traffic (default '${client-urls}')")
 	fs.StringVar(&cfg.PeerUrls, "peer-urls", defaultPeerUrls, "url for peer traffic")
@@ -104,7 +104,6 @@ const (
 	defaultNextRetryDelay  = time.Second
 
 	defaultName                = "pd"
-	defaultDataDir             = "default.pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
 	defaultPeerUrls            = "http://127.0.0.1:2380"
 	defualtInitialClusterState = embed.ClusterStateFlagNew
