@@ -78,19 +78,20 @@ func waitMembers(svr *Server, c int) error {
 	return errors.New("waitMembers Timeout")
 }
 
-func waitLeader(svrs []*Server) {
-	// maxRetryTime * waitInterval = 5s
-	maxRetryCount := 10
+func waitLeader(svrs []*Server) error {
+	// maxRetryTime * waitInterval = 10s
+	maxRetryCount := 20
 	waitInterval := 500 * time.Millisecond
-
 	for count := 0; count < maxRetryCount; count++ {
 		for _, s := range svrs {
-			if s.isLeader() {
-				return
+			// TODO: a better way of finding leader.
+			if s.etcd.Server.Leader() == s.etcd.Server.ID() {
+				return nil
 			}
 		}
 		time.Sleep(waitInterval)
 	}
+	return errTimeout
 }
 
 // notice: cfg has changed
@@ -152,7 +153,7 @@ func mustNewJoinCluster(c *C, num int) ([]*Config, []*Server, cleanUpFunc) {
 }
 
 func alive(target, peer *Server) error {
-	timer := time.NewTimer(5 * time.Second)
+	timer := time.NewTimer(10 * time.Second)
 	defer timer.Stop()
 
 	ch := make(chan error)
@@ -165,7 +166,7 @@ func alive(target, peer *Server) error {
 		defer cancel()
 		_, err := client.Put(ctx, key, value)
 		if err != nil {
-			ch <- err
+			ch <- errors.Trace(err)
 			return
 		}
 
@@ -174,7 +175,7 @@ func alive(target, peer *Server) error {
 		defer cancel()
 		resp, err := client.Get(ctx, key)
 		if err != nil {
-			ch <- err
+			ch <- errors.Trace(err)
 			return
 		}
 		if string(resp.Kvs[0].Value) != value {
@@ -207,6 +208,7 @@ func (s *testJoinServerSuite) TestJoinCase2(c *C) {
 	cfgs[0].Join = cfgs[0].AdvertiseClientUrls
 
 	svr, err := startPdWith(cfgs[0])
+	c.Assert(err, IsNil)
 	defer svr.Close()
 
 	err = waitMembers(svr, 1)
@@ -220,36 +222,42 @@ func (s *testJoinServerSuite) TestJoinCase3(c *C) {
 	target := 1
 	svrs[target].Close()
 	time.Sleep(500 * time.Millisecond)
-
-	cfgs[target].InitialCluster = ""
 	err := os.RemoveAll(cfgs[target].DataDir)
 	c.Assert(err, IsNil)
 
+	cfgs[target].InitialCluster = ""
 	_, err = startPdWith(cfgs[target])
 	c.Assert(err, Not(IsNil))
 }
 
-// Case 4 is the same as case 1, because the join pd is brand new.
 func (s *testJoinServerSuite) TestJoinCase4(c *C) {
 	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
 	defer clean()
 
+	err := alive(svrs[2], svrs[1])
+	c.Assert(err, IsNil)
+
 	target := 0
 	svrs[target].Close()
-	time.Sleep(500 * time.Millisecond)
+	err = os.RemoveAll(cfgs[target].DataDir)
+	c.Assert(err, IsNil)
+
+	err = waitLeader([]*Server{svrs[2], svrs[1]})
+	c.Assert(err, IsNil)
+
+	// put some data
+	err = alive(svrs[2], svrs[1])
+	c.Assert(err, IsNil)
 
 	cfgs[target].InitialCluster = ""
 	cfgs[target].Join = cfgs[target].AdvertiseClientUrls
-	err := os.RemoveAll(cfgs[target].DataDir)
-	c.Assert(err, IsNil)
-
-	waitLeader([]*Server{svrs[1], svrs[2]})
 	_, err = startPdWith(cfgs[target])
 	c.Assert(err, IsNil)
-	err = alive(svrs[2], svrs[0])
+
+	err = alive(svrs[0], svrs[2])
 	c.Assert(err, Not(IsNil))
 
-	err = alive(svrs[2], svrs[1])
+	err = alive(svrs[1], svrs[2])
 	c.Assert(err, IsNil)
 }
 
@@ -311,7 +319,11 @@ func (s *testJoinServerSuite) TestReJoin(c *C) {
 	re, err := startPdWith(cfgs[target])
 	c.Assert(err, IsNil)
 
-	waitLeader(svrs)
+	svrs = append(svrs[:target], svrs[target+1:]...)
+	svrs = append(svrs, re)
+	err = waitLeader(svrs)
+	c.Assert(err, IsNil)
+
 	err = alive(re, svrs[0])
 	c.Assert(err, IsNil)
 }

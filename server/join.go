@@ -78,9 +78,10 @@ func memberList(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
 //  4. a join self pd failed and it restarted with join while other peers try
 //     to connect to it.
 //      join does: nothing. (join can not detect whether it is in a cluster or
-//                 not, however, pd will shutdown as soon as other peers connect
-//                 to it. etcd reports: raft log corrupted, truncated, or lost?
-//                 this will not damage other peers.)
+//                 not, however, etcd will handle it safey, if there is no data
+//                 in cluster the restarted pd will join to cluster, otherwise
+//                 pd will shutdown as soon as other peers connect to it. etcd
+//                 reports: raft log corrupted, truncated, or lost?)
 //
 //  5. a deleted pd joins to previous cluster.
 //      join does: same as case1. (it is not in member list and there is no
