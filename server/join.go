@@ -52,51 +52,55 @@ func memberList(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
 	return client.MemberList(ctx)
 }
 
-// prepareJoinCluster send MemberAdd command to pd cluster,
-// returns pd initial cluster configuration.
+// prepareJoinCluster sends MemberAdd command to PD cluster,
+// and returns the initial configuration of the PD cluster.
 //
 // TL;TR: The join functionality is safe. With data, join does nothing, w/o data
 //        and it is not a member of cluster, join does MemberAdd, otherwise
 //        return an error.
 //
-// Etcd automatically re-join cluster if there is a data dir, so first we check
-// if there is data dir or not. With data dir, it returns an empty string(etcd
-// will get correct configurations from data dir.)
+// Etcd automatically re-joins the cluster if there is a data directory. So
+// first it checks if there is a data directory or not. If there is, it returns
+// an empty string (etcd will get the correct configurations from the data
+// directory.)
 //
-// Without data dir, we may have following cases:
+// If there is no data directory, there are following cases:
 //
-//  1. a new pd joins to an existing cluster.
-//      join does: MemberAdd, MemberList, then generate initial-cluster.
+//  - A new PD joins an existing cluster.
+//      What join does: MemberAdd, MemberList, then generate initial-cluster.
 //
-//  2. a new pd joins itself
-//      join does: nothing.
+//  - A new PD joins itself.
+//      What join does: nothing.
 //
-//  3. an failed pd re-joins to previous cluster.
-//      join does: return an error(etcd reports: raft log corrupted, truncated,
-//                 or lost?)
+//  - A failed PD re-joins the previous cluster.
+//      What join does: return an error. (etcd reports: raft log corrupted,
+//                      truncated, or lost?)
 //
-//  4. a join self pd failed and it restarted with join while other peers try
-//     to connect to it.
-//      join does: nothing. (join can not detect whether it is in a cluster or
-//                 not, however, etcd will handle it safey, if there is no data
-//                 in cluster the restarted pd will join to cluster, otherwise
-//                 pd will shutdown as soon as other peers connect to it. etcd
-//                 reports: raft log corrupted, truncated, or lost?)
+//  - A PD starts with join itself and fails, it is restarted with the same
+//    arguments while other peers try to connect to it.
+//      What join does: nothing. (join cannot detect whether it is in a cluster
+//                      or not, however, etcd will handle it safey, if there is
+//                      no data in the cluster the restarted PD will join the
+//                      cluster, otherwise, PD will shutdown as soon as other
+//                      peers connect to it. etcd reports: raft log corrupted,
+//                      truncated, or lost?)
 //
-//  5. a deleted pd joins to previous cluster.
-//      join does: same as case1. (it is not in member list and there is no
-//                 data, so we can treat it as a new pd.)
+//  - A deleted PD joins to previous cluster.
+//      What join does: MemberAdd, MemberList, then generate initial-cluster.
+//                      (it is not in the member list and there is no data, so
+//                       we can treat it as a new PD.)
 //
-// With data dir, special case:
+// If there is a data directory, there are following special cases:
 //
-//  6. a failed pd tries to join to previous cluster but it has been deleted
-//     during it's downtime.
-//      join does: return "" (etcd will connect to other peers and will find
-//                 itself has been removed)
+//  - A failed PD tries to join the previous cluster but it has been deleted
+//    during its downtime.
+//      What join does: return "" (etcd will connect to other peers and find
+//                      that the PD itself has been removed.)
 //
-//  7. a deleted pd joins to previous cluster.
-//      join does: return "" (as etcd will read data dir and find itself has
-//                 been removed, so an empty string is fine.)
+//  - A deleted PD joins the previous cluster.
+//      What join does: return "" (as etcd will read data directory and find
+//                      that the PD itself has been removed, so an empty string
+//                      is fine.)
 func (cfg *Config) prepareJoinCluster() (string, string, error) {
 	initialCluster := ""
 	// cases with data
