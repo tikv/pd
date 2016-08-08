@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/juju/errors"
@@ -30,7 +31,21 @@ var (
 	errTimeout = errors.New("timeout")
 )
 
-type testJoinServerSuite struct{}
+type testJoinServerSuite struct {
+	m    sync.Mutex
+	dirs []string
+}
+
+func (s *testJoinServerSuite) TearDownSuite(c *C) {
+	// wait a while, avoid `etcdserver: failed to purge snap file`
+	time.Sleep(5 * time.Second)
+
+	s.m.Lock()
+	for _, d := range s.dirs {
+		os.RemoveAll(d)
+	}
+	s.m.Unlock()
+}
 
 func newTestMultiJoinConfig(count int) []*Config {
 	cfgs := NewTestMultiConfig(count)
@@ -95,7 +110,7 @@ func waitLeader(svrs []*Server) error {
 }
 
 // notice: cfg has changed
-func startPdWith(cfg *Config) (*Server, error) {
+func startPdWith(s *testJoinServerSuite, cfg *Config) (*Server, error) {
 	svrCh := make(chan *Server)
 	errCh := make(chan error)
 	go func() {
@@ -109,6 +124,11 @@ func startPdWith(cfg *Config) (*Server, error) {
 			errCh <- errors.Trace(err)
 			return
 		}
+
+		s.m.Lock()
+		s.dirs = append(s.dirs, cfg.DataDir)
+		s.m.Unlock()
+
 		svrCh <- svr
 		svr.Run()
 	}()
@@ -128,14 +148,12 @@ func startPdWith(cfg *Config) (*Server, error) {
 
 type cleanUpFunc func()
 
-func mustNewJoinCluster(c *C, num int) ([]*Config, []*Server, cleanUpFunc) {
-	dirs := make([]string, 0, num)
+func mustNewJoinCluster(s *testJoinServerSuite, c *C, num int) ([]*Config, []*Server, cleanUpFunc) {
 	svrs := make([]*Server, 0, num)
 	cfgs := newTestMultiJoinConfig(num)
 
 	for _, cfg := range cfgs {
-		dirs = append(dirs, cfg.DataDir)
-		svr, err := startPdWith(cfg)
+		svr, err := startPdWith(s, cfg)
 		c.Assert(err, IsNil)
 		svrs = append(svrs, svr)
 	}
@@ -179,9 +197,7 @@ func alive(target, peer *Server) error {
 			return
 		}
 		if string(resp.Kvs[0].Value) != value {
-			msg := fmt.Sprintf("not match, got: %s, expect: %s", resp.Kvs[0].Value, value)
-			err = errors.New(msg)
-			ch <- err
+			ch <- errors.Errorf("not match, got: %s, expect: %s", resp.Kvs[0].Value, value)
 			return
 		}
 		ch <- nil
@@ -195,19 +211,21 @@ func alive(target, peer *Server) error {
 	}
 }
 
+// Case 1. a new pd joins to an existing cluster.
 func (s *testJoinServerSuite) TestJoinCase1(c *C) {
-	_, svrs, clean := mustNewJoinCluster(c, 3)
+	_, svrs, clean := mustNewJoinCluster(s, c, 3)
 	defer clean()
 
 	err := waitMembers(svrs[0], 3)
 	c.Assert(err, IsNil)
 }
 
+// Case 2. a new pd joins itself
 func (s *testJoinServerSuite) TestJoinCase2(c *C) {
 	cfgs := newTestMultiJoinConfig(1)
 	cfgs[0].Join = cfgs[0].AdvertiseClientUrls
 
-	svr, err := startPdWith(cfgs[0])
+	svr, err := startPdWith(s, cfgs[0])
 	c.Assert(err, IsNil)
 	defer svr.Close()
 
@@ -215,8 +233,9 @@ func (s *testJoinServerSuite) TestJoinCase2(c *C) {
 	c.Assert(err, IsNil)
 }
 
+// Case 3. an failed pd re-joins to previous cluster.
 func (s *testJoinServerSuite) TestJoinCase3(c *C) {
-	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
+	cfgs, svrs, clean := mustNewJoinCluster(s, c, 3)
 	defer clean()
 
 	target := 1
@@ -226,12 +245,14 @@ func (s *testJoinServerSuite) TestJoinCase3(c *C) {
 	c.Assert(err, IsNil)
 
 	cfgs[target].InitialCluster = ""
-	_, err = startPdWith(cfgs[target])
-	c.Assert(err, Not(IsNil))
+	_, err = startPdWith(s, cfgs[target])
+	c.Assert(err, NotNil)
 }
 
+// Case 4. a join self pd failed and it restarted with join while other peers
+//         try to connect to it.
 func (s *testJoinServerSuite) TestJoinCase4(c *C) {
-	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
+	cfgs, svrs, clean := mustNewJoinCluster(s, c, 3)
 	defer clean()
 
 	err := alive(svrs[2], svrs[1])
@@ -251,18 +272,20 @@ func (s *testJoinServerSuite) TestJoinCase4(c *C) {
 
 	cfgs[target].InitialCluster = ""
 	cfgs[target].Join = cfgs[target].AdvertiseClientUrls
-	_, err = startPdWith(cfgs[target])
+	_, err = startPdWith(s, cfgs[target])
 	c.Assert(err, IsNil)
 
 	err = alive(svrs[0], svrs[2])
-	c.Assert(err, Not(IsNil))
+	c.Assert(err, NotNil)
 
 	err = alive(svrs[1], svrs[2])
 	c.Assert(err, IsNil)
 }
 
+// Case 6. a failed pd tries to join to previous cluster but it has been deleted
+//         during it's downtime.
 func (s *testJoinServerSuite) TestJoinCase6(c *C) {
-	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
+	cfgs, svrs, clean := mustNewJoinCluster(s, c, 3)
 	defer clean()
 
 	target := 2
@@ -275,7 +298,7 @@ func (s *testJoinServerSuite) TestJoinCase6(c *C) {
 	client.MemberRemove(ctx, svrs[target].ID())
 
 	cfgs[target].InitialCluster = ""
-	_, err := startPdWith(cfgs[target])
+	_, err := startPdWith(s, cfgs[target])
 	// deleted etcd will not start successfully.
 	c.Assert(err, Equals, errTimeout)
 
@@ -284,8 +307,9 @@ func (s *testJoinServerSuite) TestJoinCase6(c *C) {
 	c.Assert(len(list.Members), Equals, 2)
 }
 
+// Case 7. a deleted pd joins to previous cluster.
 func (s *testJoinServerSuite) TestJoinCase7(c *C) {
-	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
+	cfgs, svrs, clean := mustNewJoinCluster(s, c, 3)
 	defer clean()
 
 	target := 2
@@ -298,7 +322,7 @@ func (s *testJoinServerSuite) TestJoinCase7(c *C) {
 	time.Sleep(500 * time.Millisecond)
 
 	cfgs[target].InitialCluster = ""
-	_, err := startPdWith(cfgs[target])
+	_, err := startPdWith(s, cfgs[target])
 	// deleted etcd will not start successfully.
 	c.Assert(err, Equals, errTimeout)
 
@@ -307,16 +331,28 @@ func (s *testJoinServerSuite) TestJoinCase7(c *C) {
 	c.Assert(len(list.Members), Equals, 2)
 }
 
+// General join case.
 func (s *testJoinServerSuite) TestReJoin(c *C) {
-	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
+	cfgs, svrs, clean := mustNewJoinCluster(s, c, 3)
 	defer clean()
 
 	target := rand.Intn(len(cfgs))
+	other := 0
+	for {
+		if other != target {
+			break
+		}
+		other = rand.Intn(len(cfgs))
+	}
+	// put some data
+	err := alive(svrs[target], svrs[other])
+	c.Assert(err, IsNil)
+
 	svrs[target].Close()
 	time.Sleep(500 * time.Millisecond)
 
 	cfgs[target].InitialCluster = ""
-	re, err := startPdWith(cfgs[target])
+	re, err := startPdWith(s, cfgs[target])
 	c.Assert(err, IsNil)
 
 	svrs = append(svrs[:target], svrs[target+1:]...)

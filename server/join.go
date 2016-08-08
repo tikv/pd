@@ -94,7 +94,7 @@ func memberList(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
 //      join does: return "" (etcd will connect to other peers and will find
 //                 itself has been removed)
 //
-//  7. a deleted pd joins to previous cluster
+//  7. a deleted pd joins to previous cluster.
 //      join does: return "" (as etcd will read data dir and find itself has
 //                 been removed, so an empty string is fine.)
 func (cfg *Config) prepareJoinCluster() (string, string, error) {
@@ -121,16 +121,16 @@ func (cfg *Config) prepareJoinCluster() (string, string, error) {
 		return "", "", errors.Trace(err)
 	}
 
-	in := false
+	existed := false
 	for _, m := range listResp.Members {
 		if m.Name == cfg.Name {
-			in = true
+			existed = true
 		}
 	}
 
 	// case 3
-	if in {
-		return "", "", errors.New("missing raft log")
+	if existed {
+		return "", "", errors.New("missing data or join a duplicated pd")
 	}
 
 	// case 1, case 5
