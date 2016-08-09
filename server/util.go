@@ -17,9 +17,11 @@ import (
 	"encoding/binary"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/pkg/capnslog"
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
@@ -234,4 +236,22 @@ func rpcConnect(addr string) (net.Conn, error) {
 	}
 
 	return nil, errors.Errorf("connect to %s failed", addr)
+}
+
+// SetLogOutput sets output path for all logs.
+func SetLogOutput(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// pd log.
+	log.SetOutput(f)
+	log.SetRotateByDay()
+
+	// etcd log.
+	formatter := capnslog.NewDefaultFormatter(f)
+	capnslog.SetFormatter(formatter)
+
+	return nil
 }
