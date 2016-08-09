@@ -154,7 +154,7 @@ func mustNewJoinCluster(c *C, num int) ([]*Config, []*Server, cleanUpFunc) {
 	return cfgs, svrs, clean
 }
 
-func alive(target, peer *Server) error {
+func isConnective(target, peer *Server) error {
 	timer := time.NewTimer(10 * time.Second)
 	defer timer.Stop()
 
@@ -239,7 +239,7 @@ func (s *testJoinServerSuite) TestJoinCase4(c *C) {
 	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
 	defer clean()
 
-	err := alive(svrs[2], svrs[1])
+	err := isConnective(svrs[2], svrs[1])
 	c.Assert(err, IsNil)
 
 	target := 0
@@ -251,7 +251,7 @@ func (s *testJoinServerSuite) TestJoinCase4(c *C) {
 	c.Assert(err, IsNil)
 
 	// put some data
-	err = alive(svrs[2], svrs[1])
+	err = isConnective(svrs[2], svrs[1])
 	c.Assert(err, IsNil)
 
 	cfgs[target].InitialCluster = ""
@@ -260,10 +260,10 @@ func (s *testJoinServerSuite) TestJoinCase4(c *C) {
 	c.Assert(err, IsNil)
 	defer svr.Close()
 
-	err = alive(svrs[0], svrs[2])
+	err = isConnective(svrs[0], svrs[2])
 	c.Assert(err, NotNil)
 
-	err = alive(svrs[1], svrs[2])
+	err = isConnective(svrs[1], svrs[2])
 	c.Assert(err, IsNil)
 }
 
@@ -330,7 +330,7 @@ func (s *testJoinServerSuite) TestReJoin(c *C) {
 		other = rand.Intn(len(cfgs))
 	}
 	// put some data
-	err := alive(svrs[target], svrs[other])
+	err := isConnective(svrs[target], svrs[other])
 	c.Assert(err, IsNil)
 
 	svrs[target].Close()
@@ -346,6 +346,6 @@ func (s *testJoinServerSuite) TestReJoin(c *C) {
 	err = waitLeader(svrs)
 	c.Assert(err, IsNil)
 
-	err = alive(re, svrs[0])
+	err = isConnective(re, svrs[0])
 	c.Assert(err, IsNil)
 }
