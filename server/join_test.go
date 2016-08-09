@@ -94,7 +94,7 @@ func waitLeader(svrs []*Server) error {
 	return errTimeout
 }
 
-// notice: cfg has changed
+// Notice: cfg has changed.
 func startPdWith(cfg *Config) (*Server, error) {
 	svrCh := make(chan *Server)
 	errCh := make(chan error)
@@ -141,7 +141,7 @@ func mustNewJoinCluster(c *C, num int) ([]*Config, []*Server, cleanUpFunc) {
 
 	waitMembers(svrs[rand.Intn(num)], num)
 
-	// clean up
+	// Clean up.
 	clean := func() {
 		for _, s := range svrs {
 			s.Close()
@@ -160,13 +160,13 @@ func isConnective(target, peer *Server) error {
 
 	ch := make(chan error)
 	go func() {
-		// put something to cluster
+		// Put something to cluster.
 		key := fmt.Sprintf("%d", rand.Int63())
 		value := key
 		client := peer.GetClient()
 		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-		defer cancel()
 		_, err := client.Put(ctx, key, value)
+		cancel()
 		if err != nil {
 			ch <- errors.Trace(err)
 			return
@@ -174,8 +174,8 @@ func isConnective(target, peer *Server) error {
 
 		client = target.GetClient()
 		ctx, cancel = context.WithTimeout(context.Background(), requestTimeout)
-		defer cancel()
 		resp, err := client.Get(ctx, key)
+		cancel()
 		if err != nil {
 			ch <- errors.Trace(err)
 			return
@@ -195,8 +195,8 @@ func isConnective(target, peer *Server) error {
 	}
 }
 
-// Case 1. a new pd joins to an existing cluster.
-func (s *testJoinServerSuite) TestJoinCase1(c *C) {
+// A new PD joins an existing cluster.
+func (s *testJoinServerSuite) TestNewPDJoinsExistingCluster(c *C) {
 	_, svrs, clean := mustNewJoinCluster(c, 3)
 	defer clean()
 
@@ -204,8 +204,8 @@ func (s *testJoinServerSuite) TestJoinCase1(c *C) {
 	c.Assert(err, IsNil)
 }
 
-// Case 2. a new pd joins itself
-func (s *testJoinServerSuite) TestJoinCase2(c *C) {
+// A new PD joins itself.
+func (s *testJoinServerSuite) TestNewPDJoinsItself(c *C) {
 	cfgs := newTestMultiJoinConfig(1)
 	cfgs[0].Join = cfgs[0].AdvertiseClientUrls
 
@@ -217,8 +217,8 @@ func (s *testJoinServerSuite) TestJoinCase2(c *C) {
 	c.Assert(err, IsNil)
 }
 
-// Case 3. an failed pd re-joins to previous cluster.
-func (s *testJoinServerSuite) TestJoinCase3(c *C) {
+// A failed PD re-joins the previous cluster.
+func (s *testJoinServerSuite) TestFailedPDJoinsPreviousCluster(c *C) {
 	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
 	defer clean()
 
@@ -233,9 +233,9 @@ func (s *testJoinServerSuite) TestJoinCase3(c *C) {
 	c.Assert(err, NotNil)
 }
 
-// Case 4. a join self pd failed and it restarted with join while other peers
-//         try to connect to it.
-func (s *testJoinServerSuite) TestJoinCase4(c *C) {
+// A PD starts with join itself and fails, it is restarted with the same
+// arguments while other peers try to connect to it.
+func (s *testJoinServerSuite) TestJoinSlefPDFiledAndRestarts(c *C) {
 	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
 	defer clean()
 
@@ -250,7 +250,7 @@ func (s *testJoinServerSuite) TestJoinCase4(c *C) {
 	err = waitLeader([]*Server{svrs[2], svrs[1]})
 	c.Assert(err, IsNil)
 
-	// put some data
+	// Put some data.
 	err = isConnective(svrs[2], svrs[1])
 	c.Assert(err, IsNil)
 
@@ -267,9 +267,9 @@ func (s *testJoinServerSuite) TestJoinCase4(c *C) {
 	c.Assert(err, IsNil)
 }
 
-// Case 6. a failed pd tries to join to previous cluster but it has been deleted
-//         during it's downtime.
-func (s *testJoinServerSuite) TestJoinCase6(c *C) {
+// A failed PD tries to join the previous cluster but it has been deleted
+// during its downtime.
+func (s *testJoinServerSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
 	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
 	defer clean()
 
@@ -284,7 +284,7 @@ func (s *testJoinServerSuite) TestJoinCase6(c *C) {
 
 	cfgs[target].InitialCluster = ""
 	_, err := startPdWith(cfgs[target])
-	// deleted etcd will not start successfully.
+	// Peleted PD will not start successfully.
 	c.Assert(err, Equals, errTimeout)
 
 	list, err := memberList(client)
@@ -292,8 +292,8 @@ func (s *testJoinServerSuite) TestJoinCase6(c *C) {
 	c.Assert(len(list.Members), Equals, 2)
 }
 
-// Case 7. a deleted pd joins to previous cluster.
-func (s *testJoinServerSuite) TestJoinCase7(c *C) {
+// A deleted PD joins the previous cluster.
+func (s *testJoinServerSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
 	defer clean()
 
@@ -308,7 +308,7 @@ func (s *testJoinServerSuite) TestJoinCase7(c *C) {
 
 	cfgs[target].InitialCluster = ""
 	_, err := startPdWith(cfgs[target])
-	// deleted etcd will not start successfully.
+	// A deleted PD will not start successfully.
 	c.Assert(err, Equals, errTimeout)
 
 	list, err := memberList(client)
@@ -317,7 +317,7 @@ func (s *testJoinServerSuite) TestJoinCase7(c *C) {
 }
 
 // General join case.
-func (s *testJoinServerSuite) TestReJoin(c *C) {
+func (s *testJoinServerSuite) TestGeneralJoin(c *C) {
 	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
 	defer clean()
 
@@ -329,7 +329,7 @@ func (s *testJoinServerSuite) TestReJoin(c *C) {
 		}
 		other = rand.Intn(len(cfgs))
 	}
-	// put some data
+	// Put some data.
 	err := isConnective(svrs[target], svrs[other])
 	c.Assert(err, IsNil)
 
