@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/coreos/pkg/capnslog"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/pd/server"
@@ -39,6 +40,20 @@ func main() {
 
 	log.SetLevelByString(cfg.LogLevel)
 	log.SetHighlighting(false)
+	// Output log to a log file.
+	if len(cfg.LogFile) > 0 {
+		logFile, err := os.OpenFile(cfg.LogFile, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0666)
+		if err != nil {
+			log.Errorf("open log file err %s\n", err)
+		}
+
+		log.SetOutput(logFile)
+		log.SetRotateByDay()
+
+		// Hijack etcd log.
+		f := capnslog.NewDefaultFormatter(logFile)
+		capnslog.SetFormatter(f)
+	}
 
 	svr, err := server.CreateServer(cfg)
 	if err != nil {

@@ -53,6 +53,8 @@ type Config struct {
 
 	// Log level.
 	LogLevel string `toml:"log-level" json:"log-level"`
+	// Log file.
+	LogFile string `toml:"log-file" json:"log-file"`
 
 	// TsoSaveInterval is the interval time (ms) to save timestamp.
 	// When the leader begins to run, it first loads the saved timestamp from etcd, e.g, T1,
@@ -93,6 +95,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
 
 	fs.StringVar(&cfg.LogLevel, "L", "info", "log level: debug, info, warn, error, fatal")
+	fs.StringVar(&cfg.LogFile, "log-file", "", "log file path")
 
 	return cfg
 }
