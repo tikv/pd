@@ -44,7 +44,7 @@ func main() {
 	if len(cfg.LogFile) > 0 {
 		logFile, err := os.OpenFile(cfg.LogFile, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0666)
 		if err != nil {
-			log.Errorf("open log file err %s\n", err)
+			log.Fatalf("open log file err %s\n", err)
 		}
 
 		log.SetOutput(logFile)
