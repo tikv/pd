@@ -115,11 +115,13 @@ func Register(m Collector) error {
 }
 
 // MustRegister works like Register but panics where Register would have
-// returned an error.
-func MustRegister(m Collector) {
-	err := Register(m)
-	if err != nil {
-		panic(err)
+// returned an error. MustRegister is also Variadic, where Register only
+// accepts a single Collector to register.
+func MustRegister(m ...Collector) {
+	for i := range m {
+		if err := Register(m[i]); err != nil {
+			panic(err)
+		}
 	}
 }
 
@@ -136,8 +138,8 @@ func RegisterOrGet(m Collector) (Collector, error) {
 	return defRegistry.RegisterOrGet(m)
 }
 
-// MustRegisterOrGet works like Register but panics where RegisterOrGet would
-// have returned an error.
+// MustRegisterOrGet works like RegisterOrGet but panics where RegisterOrGet
+// would have returned an error.
 func MustRegisterOrGet(m Collector) Collector {
 	existing, err := RegisterOrGet(m)
 	if err != nil {
