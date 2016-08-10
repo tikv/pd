@@ -300,8 +300,8 @@
 		},
 		{
 			"ImportPath": "github.com/coreos/pkg/capnslog",
-			"Comment": "v2-10-ga48e304",
-			"Rev": "a48e304ff9331be6d5df352b6b47bd1395ab5dd7"
+			"Comment": "v2-12-g3ac0863",
+			"Rev": "3ac0863d7acf3bc44daf49afef8919af12f704ef"
 		},
 		{
 			"ImportPath": "github.com/ghodss/yaml",
