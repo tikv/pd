@@ -235,7 +235,7 @@ func (s *testJoinServerSuite) TestFailedPDJoinsPreviousCluster(c *C) {
 
 // A PD starts with join itself and fails, it is restarted with the same
 // arguments while other peers try to connect to it.
-func (s *testJoinServerSuite) TestJoinSlefPDFiledAndRestarts(c *C) {
+func (s *testJoinServerSuite) TestJoinSelfPDFiledAndRestarts(c *C) {
 	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
 	defer clean()
 
@@ -284,7 +284,7 @@ func (s *testJoinServerSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
 
 	cfgs[target].InitialCluster = ""
 	_, err := startPdWith(cfgs[target])
-	// Peleted PD will not start successfully.
+	// Deleted PD will not start successfully.
 	c.Assert(err, Equals, errTimeout)
 
 	list, err := memberList(client)

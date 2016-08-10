@@ -103,12 +103,16 @@ func memberList(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
 //                      is fine.)
 func (cfg *Config) prepareJoinCluster() (string, string, error) {
 	initialCluster := ""
-	// cases with data
+	// Cases with data directory.
 	if wal.Exist(cfg.DataDir) {
 		return initialCluster, embed.ClusterStateFlagExisting, nil
 	}
 
-	// case 2, case 4
+	// Below are cases without data directory.
+
+	// - A new PD joins itself.
+	// - A PD starts with join itself and fails, it is restarted with the same
+	//   arguments while other peers try to connect to it.
 	if cfg.Join == cfg.AdvertiseClientUrls {
 		initialCluster = fmt.Sprintf("%s=%s", cfg.Name, cfg.AdvertisePeerUrls)
 		return initialCluster, embed.ClusterStateFlagNew, nil
@@ -132,12 +136,13 @@ func (cfg *Config) prepareJoinCluster() (string, string, error) {
 		}
 	}
 
-	// case 3
+	// - A failed PD re-joins the previous cluster.
 	if existed {
 		return "", "", errors.New("missing data or join a duplicated pd")
 	}
 
-	// case 1, case 5
+	// - A new PD joins an existing cluster.
+	// - A deleted PD joins to previous cluster.
 	addResp, err := memberAdd(client, []string{cfg.AdvertisePeerUrls})
 	if err != nil {
 		return "", "", errors.Trace(err)
