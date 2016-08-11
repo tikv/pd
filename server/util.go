@@ -14,13 +14,11 @@
 package server
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
@@ -241,26 +239,17 @@ func rpcConnect(addr string) (net.Conn, error) {
 	return nil, errors.Errorf("connect to %s failed", addr)
 }
 
-type redirectFormatter struct {
-	buf bytes.Buffer
-}
+type redirectFormatter struct{}
 
 // Format turns capnslog logs to ngaut logs.
 // TODO: remove ngaut log caller stack, "util.go:xxx"
 func (rf *redirectFormatter) Format(pkg string, level capnslog.LogLevel, depth int, entries ...interface{}) {
-	rf.buf.WriteString(fmt.Sprint(level.Char(), " | "))
-
 	if pkg != "" {
-		rf.buf.WriteString(pkg + ": ")
-	}
-	str := fmt.Sprint(entries...)
-	endsInNL := strings.HasSuffix(str, "\n")
-	rf.buf.WriteString(str)
-	if !endsInNL {
-		rf.buf.WriteString("\n")
+		pkg = fmt.Sprint(pkg, ": ")
 	}
 
-	logStr := rf.buf.String()
+	logStr := fmt.Sprint(level.Char(), " | ", pkg, entries)
+
 	switch level {
 	case capnslog.CRITICAL:
 		log.Fatalf(logStr)
@@ -277,8 +266,6 @@ func (rf *redirectFormatter) Format(pkg string, level capnslog.LogLevel, depth i
 	case capnslog.TRACE:
 		log.Debugf(logStr)
 	}
-
-	rf.buf.Reset()
 }
 
 // Flush only for implementing Formatter.
@@ -294,6 +281,9 @@ func SetLogOutput(path string) error {
 	// PD log.
 	log.SetOutput(f)
 	log.SetRotateByDay()
+
+	// Make sure turns off highlighting.
+	log.SetHighlighting(false)
 
 	// ETCD log.
 	capnslog.SetFormatter(&redirectFormatter{})
