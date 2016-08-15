@@ -271,8 +271,8 @@ func (rf *redirectFormatter) Format(pkg string, level capnslog.LogLevel, depth i
 // Flush only for implementing Formatter.
 func (rf *redirectFormatter) Flush() {}
 
-// SetLogOutput sets output path for all logs.
-func SetLogOutput(path string) error {
+// setLogOutput sets output path for all logs.
+func setLogOutput(path string) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
 	if err != nil {
 		return errors.Trace(err)
@@ -282,11 +282,27 @@ func SetLogOutput(path string) error {
 	log.SetOutput(f)
 	log.SetRotateByDay()
 
-	// Make sure turns off highlighting.
-	log.SetHighlighting(false)
-
 	// ETCD log.
 	capnslog.SetFormatter(&redirectFormatter{})
+
+	return nil
+}
+
+// InitLogger initalizes PD's logger.
+func InitLogger(cfg *Config) error {
+	log.SetLevelByString(cfg.LogLevel)
+	log.SetHighlighting(false)
+
+	// Force redirect etcd log to stderr.
+	if len(cfg.LogFile) == 0 {
+		capnslog.SetFormatter(capnslog.NewPrettyFormatter(os.Stderr, false))
+		return nil
+	}
+
+	err := setLogOutput(cfg.LogFile)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	return nil
 }

@@ -37,13 +37,9 @@ func main() {
 		os.Exit(2)
 	}
 
-	log.SetLevelByString(cfg.LogLevel)
-	log.SetHighlighting(false)
-	if len(cfg.LogFile) > 0 {
-		err = server.SetLogOutput(cfg.LogFile)
-		if err != nil {
-			log.Fatalf("open log file err %s\n", err)
-		}
+	err = server.InitLogger(cfg)
+	if err != nil {
+		log.Fatalf("initalize logger err %s\n", err)
 	}
 
 	svr, err := server.CreateServer(cfg)
