@@ -261,7 +261,7 @@ func (s *testJoinServerSuite) TestJoinSelfPDFiledAndRestarts(c *C) {
 	cfgs[target].InitialClusterState = "new"
 	cfgs[target].Join = cfgs[target].AdvertiseClientUrls
 	_, err = startPdWith(cfgs[target])
-	c.Assert(err, Equals, errTimeout)
+	c.Assert(err, NotNil)
 
 	err = isConnective(svrs[0], svrs[2])
 	c.Assert(err, NotNil)
