@@ -180,6 +180,10 @@ func isConnective(target, peer *Server) error {
 			ch <- errors.Trace(err)
 			return
 		}
+		if len(resp.Kvs) == 0 {
+			ch <- errors.Errorf("not match, got: %s, expect: %s", resp.Kvs, value)
+			return
+		}
 		if string(resp.Kvs[0].Value) != value {
 			ch <- errors.Errorf("not match, got: %s, expect: %s", resp.Kvs[0].Value, value)
 			return
