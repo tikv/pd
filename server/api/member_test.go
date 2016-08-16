@@ -42,7 +42,7 @@ type testMemberAPISuite struct {
 }
 
 func (s *testMemberAPISuite) SetUpSuite(c *C) {
-	s.hc = newUnixHTTPClient()
+	s.hc = newUnixSocketClient()
 
 }
 
@@ -50,7 +50,7 @@ func unixDial(_, addr string) (net.Conn, error) {
 	return net.Dial("unix", addr)
 }
 
-func newUnixHTTPClient() *http.Client {
+func newUnixSocketClient() *http.Client {
 	tr := &http.Transport{
 		Dial: unixDial,
 	}
@@ -62,17 +62,15 @@ func newUnixHTTPClient() *http.Client {
 	return client
 }
 
-func mustUnixAddrToHTTPAddr(c *C, addr string) string {
+func unixAddrToHTTPAddr(addr string) (string, error) {
 	ua, err := url.Parse(addr)
-	c.Assert(err, IsNil)
-
-	if ua.Scheme != "unix" && ua.Scheme != "unixs" {
-		c.Errorf("mustUnixAddrToHTTPAddr want unix socket addr, got %s\n", addr)
+	if err != nil {
+		return "", err
 	}
 
 	// Turn unix to http
 	ua.Scheme = "http"
-	return ua.String()
+	return ua.String(), nil
 }
 
 type cleanUpFunc func()
@@ -154,7 +152,8 @@ func (s *testMemberAPISuite) TestMemberList(c *C) {
 		defer clean()
 
 		parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/members"}
-		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
+		addr, err := unixAddrToHTTPAddr(strings.Join(parts, ""))
+		c.Assert(err, IsNil)
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
 		buf, err := ioutil.ReadAll(resp.Body)
@@ -201,7 +200,8 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 
 	for _, t := range table {
 		parts := []string{t.addr, apiPrefix, "/api/v1/members/", t.name}
-		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
+		addr, err := unixAddrToHTTPAddr(strings.Join(parts, ""))
+		c.Assert(err, IsNil)
 		req, err := http.NewRequest("DELETE", addr, nil)
 		c.Assert(err, IsNil)
 		resp, err := s.hc.Do(req)
@@ -211,7 +211,8 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 	}
 
 	parts := []string{cfgs[rand.Intn(len(newCfgs))].ClientUrls, apiPrefix, "/api/v1/members"}
-	addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
+	addr, err := unixAddrToHTTPAddr(strings.Join(parts, ""))
+	c.Assert(err, IsNil)
 	resp, err := s.hc.Get(addr)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
@@ -228,7 +229,8 @@ func (s *testMemberAPISuite) TestLeader(c *C) {
 	c.Assert(err, IsNil)
 
 	parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/leader"}
-	addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
+	addr, err := unixAddrToHTTPAddr(strings.Join(parts, ""))
+	c.Assert(err, IsNil)
 	resp, err := s.hc.Get(addr)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
