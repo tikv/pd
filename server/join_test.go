@@ -256,15 +256,16 @@ func (s *testJoinServerSuite) TestJoinSelfPDFiledAndRestarts(c *C) {
 	err = isConnective(svrs[2], svrs[1])
 	c.Assert(err, IsNil)
 
-	// Should not initalize successfully.
 	cfgs[target].InitialCluster = ""
 	cfgs[target].InitialClusterState = "new"
 	cfgs[target].Join = cfgs[target].AdvertiseClientUrls
-	_, err = startPdWith(cfgs[target])
-	c.Assert(err, NotNil)
-
-	err = isConnective(svrs[0], svrs[2])
-	c.Assert(err, NotNil)
+	svr, err := startPdWith(cfgs[target])
+	if err == nil {
+		// New PD becomes leader before other peers reach it.
+		err = isConnective(svr, svrs[2])
+		c.Assert(err, NotNil)
+		defer svr.Close()
+	}
 
 	err = isConnective(svrs[1], svrs[2])
 	c.Assert(err, IsNil)
