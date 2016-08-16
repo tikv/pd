@@ -239,9 +239,11 @@ func (s *testJoinServerSuite) TestJoinSelfPDFiledAndRestarts(c *C) {
 	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
 	defer clean()
 
+	// Put some data.
 	err := isConnective(svrs[2], svrs[1])
 	c.Assert(err, IsNil)
 
+	// Close join self PD and remove it's data.
 	target := 0
 	svrs[target].Close()
 	err = os.RemoveAll(cfgs[target].DataDir)
@@ -254,11 +256,12 @@ func (s *testJoinServerSuite) TestJoinSelfPDFiledAndRestarts(c *C) {
 	err = isConnective(svrs[2], svrs[1])
 	c.Assert(err, IsNil)
 
+	// Should not initalize successfully.
 	cfgs[target].InitialCluster = ""
+	cfgs[target].InitialClusterState = "new"
 	cfgs[target].Join = cfgs[target].AdvertiseClientUrls
-	svr, err := startPdWith(cfgs[target])
-	c.Assert(err, IsNil)
-	defer svr.Close()
+	_, err = startPdWith(cfgs[target])
+	c.Assert(err, Equals, errTimeout)
 
 	err = isConnective(svrs[0], svrs[2])
 	c.Assert(err, NotNil)
