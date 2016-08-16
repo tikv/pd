@@ -78,22 +78,6 @@ func waitMembers(svr *Server, c int) error {
 	return errors.New("waitMembers Timeout")
 }
 
-func waitLeader(svrs []*Server) error {
-	// maxRetryTime * waitInterval = 10s
-	maxRetryCount := 20
-	waitInterval := 500 * time.Millisecond
-	for count := 0; count < maxRetryCount; count++ {
-		for _, s := range svrs {
-			// TODO: a better way of finding leader.
-			if s.etcd.Server.Leader() == s.etcd.Server.ID() {
-				return nil
-			}
-		}
-		time.Sleep(waitInterval)
-	}
-	return errTimeout
-}
-
 // Notice: cfg has changed.
 func startPdWith(cfg *Config) (*Server, error) {
 	// wait must less than util.maxCheckEtcdRunningCount * util.checkEtcdRunningDelay
@@ -272,8 +256,7 @@ func (s *testJoinServerSuite) TestJoinSelfPDFiledAndRestarts(c *C) {
 	err = os.RemoveAll(cfgs[target].DataDir)
 	c.Assert(err, IsNil)
 
-	err = waitLeader([]*Server{svrs[2], svrs[1]})
-	c.Assert(err, IsNil)
+	mustWaitLeader([]*Server{svrs[2], svrs[1]})
 
 	// Put some data.
 	err = isConnective(svrs[2], svrs[1])
@@ -380,8 +363,7 @@ func (s *testJoinServerSuite) TestGeneralJoin(c *C) {
 
 	svrs = append(svrs[:target], svrs[target+1:]...)
 	svrs = append(svrs, re)
-	err = waitLeader(svrs)
-	c.Assert(err, IsNil)
+	mustWaitLeader(svrs)
 
 	err = isConnective(re, svrs[0])
 	c.Assert(err, IsNil)

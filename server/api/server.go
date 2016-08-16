@@ -16,6 +16,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/server"
 	"github.com/urfave/negroni"
 )
@@ -33,7 +34,12 @@ func NewHandler(svr *server.Server) http.Handler {
 	static.Prefix = apiPrefix
 	engine.Use(static)
 
-	router := createRouter(apiPrefix, svr)
+	router := mux.NewRouter()
+	router.PathPrefix(apiPrefix).Handler(negroni.New(
+		newRedirector(svr),
+		negroni.Wrap(createRouter(apiPrefix, svr)),
+	))
+
 	engine.UseHandler(router)
 
 	return engine

@@ -26,6 +26,9 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	"github.com/pingcap/kvproto/pkg/msgpb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/util"
 	"golang.org/x/net/context"
 )
 
@@ -218,7 +221,7 @@ func rpcConnect(addr string) (net.Conn, error) {
 		return nil, errors.Trace(err)
 	}
 
-	urls, err := parseUrls(addr)
+	urls, err := ParseUrls(addr)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -245,6 +248,25 @@ func rpcConnect(addr string) (net.Conn, error) {
 	}
 
 	return nil, errors.Errorf("connect to %s failed", addr)
+}
+
+func rpcCall(conn net.Conn, reqID uint64, request *pdpb.Request) (*pdpb.Response, error) {
+	req := &msgpb.Message{
+		MsgType: msgpb.MessageType_PdReq.Enum(),
+		PdReq:   request,
+	}
+	if err := util.WriteMessage(conn, reqID, req); err != nil {
+		return nil, errors.Trace(err)
+	}
+	resp := &msgpb.Message{}
+	respID, err := util.ReadMessage(conn, resp)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if respID != reqID {
+		return nil, errors.Errorf("message id mismatch: reqID %d respID %d", reqID, respID)
+	}
+	return resp.GetPdResp(), nil
 }
 
 type redirectFormatter struct{}

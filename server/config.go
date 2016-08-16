@@ -372,7 +372,9 @@ func (c *BalanceConfig) String() string {
 	return fmt.Sprintf("BalanceConfig(%+v)", *c)
 }
 
-func parseUrls(s string) ([]url.URL, error) {
+// ParseUrls parse a string into multiple urls.
+// Export for api.
+func ParseUrls(s string) ([]url.URL, error) {
 	items := strings.Split(s, ",")
 	urls := make([]url.URL, 0, len(items))
 	for _, item := range items {
@@ -401,22 +403,22 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 
 	var err error
 
-	cfg.LPUrls, err = parseUrls(c.PeerUrls)
+	cfg.LPUrls, err = ParseUrls(c.PeerUrls)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	cfg.APUrls, err = parseUrls(c.AdvertisePeerUrls)
+	cfg.APUrls, err = ParseUrls(c.AdvertisePeerUrls)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	cfg.LCUrls, err = parseUrls(c.ClientUrls)
+	cfg.LCUrls, err = ParseUrls(c.ClientUrls)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	cfg.ACUrls, err = parseUrls(c.AdvertiseClientUrls)
+	cfg.ACUrls, err = ParseUrls(c.AdvertiseClientUrls)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

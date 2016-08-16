@@ -34,6 +34,42 @@ func newTestServer(c *C) *Server {
 	return svr
 }
 
+func newMultiTestServers(c *C, count int) []*Server {
+	svrs := make([]*Server, 0, count)
+	cfgs := NewTestMultiConfig(count)
+
+	ch := make(chan *Server, count)
+	for i := 0; i < count; i++ {
+		cfg := cfgs[i]
+		go func() {
+			svr, err := NewServer(cfg)
+			c.Assert(err, IsNil)
+			ch <- svr
+		}()
+	}
+
+	for i := 0; i < count; i++ {
+		svr := <-ch
+		go svr.Run()
+		svrs = append(svrs, svr)
+	}
+
+	mustWaitLeader(svrs)
+	return svrs
+}
+
+func mustWaitLeader(svrs []*Server) *Server {
+	for i := 0; i < 100; i++ {
+		for _, s := range svrs {
+			if s.IsLeader() {
+				return s
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	panic("no leader")
+}
+
 var _ = Suite(&testLeaderServerSuite{})
 
 type testLeaderServerSuite struct {

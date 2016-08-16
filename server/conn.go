@@ -33,18 +33,15 @@ const (
 type conn struct {
 	s *Server
 
-	rb   *bufio.Reader
-	wb   *bufio.Writer
-	conn net.Conn
+	rb         *bufio.Reader
+	wb         *bufio.Writer
+	conn       net.Conn
+	leaderConn net.Conn
 }
 
 func newConn(s *Server, netConn net.Conn, bufrw *bufio.ReadWriter) (*conn, error) {
 	s.connsLock.Lock()
 	defer s.connsLock.Unlock()
-
-	if !s.isLeader() {
-		return nil, errors.Errorf("server <%s> is not leader, cannot create new connection <%s>", s.Name(), netConn.RemoteAddr())
-	}
 
 	c := &conn{
 		s:    s,
@@ -89,17 +86,27 @@ func (c *conn) run() {
 			label = convertName(requestCmdName)
 		}
 
-		response, err := c.handleRequest(request)
-		if err != nil {
-			log.Errorf("handle request %s err %v", request, errors.ErrorStack(err))
-			response = newError(err)
+		var response *pdpb.Response
 
-			cmdFailedCounter.WithLabelValues(label).Inc()
-			cmdFailedDuration.WithLabelValues(label).Observe(time.Since(start).Seconds())
+		if !c.s.IsLeader() {
+			response, err = c.proxyRequest(msgID, request)
+			if err != nil {
+				log.Errorf("proxy request %s err %v", request, errors.ErrorStack(err))
+				response = newError(err)
+			}
+		} else {
+			response, err = c.handleRequest(request)
+			if err != nil {
+				log.Errorf("handle request %s err %v", request, errors.ErrorStack(err))
+				response = newError(err)
+
+				cmdFailedCounter.WithLabelValues(label).Inc()
+				cmdFailedDuration.WithLabelValues(label).Observe(time.Since(start).Seconds())
+			}
+
+			cmdCounter.WithLabelValues(label).Inc()
+			cmdDuration.WithLabelValues(label).Observe(time.Since(start).Seconds())
 		}
-
-		cmdCounter.WithLabelValues(label).Inc()
-		cmdDuration.WithLabelValues(label).Observe(time.Since(start).Seconds())
 
 		if response == nil {
 			// we don't need to response, maybe error?
@@ -144,7 +151,33 @@ func updateResponse(req *pdpb.Request, resp *pdpb.Response) {
 }
 
 func (c *conn) close() error {
+	if c.leaderConn != nil {
+		c.leaderConn.Close()
+	}
 	return errors.Trace(c.conn.Close())
+}
+
+func (c *conn) proxyRequest(msgID uint64, req *pdpb.Request) (*pdpb.Response, error) {
+	// Create a connection to leader.
+	if c.leaderConn == nil {
+		leader, err := c.s.GetLeader()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		conn, err := rpcConnect(leader.GetAddr())
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		c.leaderConn = conn
+		log.Debugf("proxy conn %s to leader %s", c.conn.RemoteAddr(), leader.GetAddr())
+	}
+
+	resp, err := rpcCall(c.leaderConn, msgID, req)
+	if err != nil {
+		c.leaderConn.Close()
+		c.leaderConn = nil
+	}
+	return resp, err
 }
 
 func (c *conn) handleRequest(req *pdpb.Request) (*pdpb.Response, error) {

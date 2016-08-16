@@ -18,22 +18,13 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/rand"
-	"net"
 	"net/http"
-	"net/url"
-	"os"
 	"sort"
 	"strings"
-	"testing"
-	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
 )
-
-func TestMemberAPI(t *testing.T) {
-	TestingT(t)
-}
 
 var _ = Suite(&testMemberAPISuite{})
 
@@ -44,76 +35,6 @@ type testMemberAPISuite struct {
 func (s *testMemberAPISuite) SetUpSuite(c *C) {
 	s.hc = newUnixSocketClient()
 
-}
-
-func unixDial(_, addr string) (net.Conn, error) {
-	return net.Dial("unix", addr)
-}
-
-func newUnixSocketClient() *http.Client {
-	tr := &http.Transport{
-		Dial: unixDial,
-	}
-	client := &http.Client{
-		Timeout:   10 * time.Second,
-		Transport: tr,
-	}
-
-	return client
-}
-
-func unixAddrToHTTPAddr(addr string) (string, error) {
-	ua, err := url.Parse(addr)
-	if err != nil {
-		return "", err
-	}
-
-	// Turn unix to http
-	ua.Scheme = "http"
-	return ua.String(), nil
-}
-
-type cleanUpFunc func()
-
-func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpFunc) {
-	dirs := make([]string, 0, num)
-	svrs := make([]*server.Server, 0, num)
-	cfgs := server.NewTestMultiConfig(num)
-
-	ch := make(chan *server.Server, num)
-	for _, cfg := range cfgs {
-		dirs = append(dirs, cfg.DataDir)
-
-		go func(cfg *server.Config) {
-			s, e := server.CreateServer(cfg)
-			c.Assert(e, IsNil)
-			e = s.StartEtcd(NewHandler(s))
-			c.Assert(e, IsNil)
-			go s.Run()
-			ch <- s
-		}(cfg)
-	}
-
-	for i := 0; i < num; i++ {
-		svr := <-ch
-		svrs = append(svrs, svr)
-	}
-	close(ch)
-
-	// wait etcds and http servers
-	time.Sleep(5 * time.Second)
-
-	// clean up
-	clean := func() {
-		for _, s := range svrs {
-			s.Close()
-		}
-		for _, dir := range dirs {
-			os.RemoveAll(dir)
-		}
-	}
-
-	return cfgs, svrs, clean
 }
 
 func relaxEqualStings(c *C, a, b []string) {
@@ -163,11 +84,12 @@ func (s *testMemberAPISuite) TestMemberList(c *C) {
 }
 
 func (s *testMemberAPISuite) TestMemberDelete(c *C) {
-	cfgs, _, clean := mustNewCluster(c, 3)
+	cfgs, svrs, clean := mustNewCluster(c, 3)
 	defer clean()
 
 	target := rand.Intn(len(cfgs))
 	newCfgs := append(cfgs[:target], cfgs[target+1:]...)
+	newSvrs := append(svrs[:target], svrs[target+1:]...)
 
 	var table = []struct {
 		name    string
@@ -209,6 +131,9 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 		defer resp.Body.Close()
 		c.Assert(resp.StatusCode, t.checker, t.status)
 	}
+
+	// We may delete the leader above.
+	mustWaitLeader(newSvrs)
 
 	parts := []string{cfgs[rand.Intn(len(newCfgs))].ClientUrls, apiPrefix, "/api/v1/members"}
 	addr, err := unixAddrToHTTPAddr(strings.Join(parts, ""))
