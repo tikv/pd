@@ -16,6 +16,7 @@ package api
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
@@ -24,29 +25,78 @@ import (
 var _ = Suite(&testRedirectorSuite{})
 
 type testRedirectorSuite struct {
-	svrs    []*server.Server
-	cleanup cleanUpFunc
 }
 
 func (s *testRedirectorSuite) SetUpSuite(c *C) {
-	_, s.svrs, s.cleanup = mustNewCluster(c, 3)
 }
 
 func (s *testRedirectorSuite) TearDownSuite(c *C) {
-	s.cleanup()
 }
 
 func (s *testRedirectorSuite) TestRedirect(c *C) {
-	for _, svr := range s.svrs {
+	_, svrs, cleanup := mustNewCluster(c, 3)
+	defer cleanup()
+
+	for _, svr := range svrs {
 		mustRequestSuccess(c, svr)
 	}
 }
 
-func mustRequestSuccess(c *C, s *server.Server) {
-	client := newUnixSocketClient()
+func (s *testRedirectorSuite) TestNoLeader(c *C) {
+	_, servers, cleanup := mustNewCluster(c, 3)
+	defer cleanup()
+
+	// Make a slice [proxy0, proxy1, leader].
+	var svrs []*server.Server
+	leader := mustWaitLeader(servers)
+	for _, svr := range servers {
+		if svr != leader {
+			svrs = append(svrs, svr)
+		}
+	}
+	svrs = append(svrs, leader)
+
+	// Make connections to proxy0 and proxy1.
+	// Make sure they proxy request to leader.
+	for i := 0; i < 2; i++ {
+		svr := svrs[i]
+		mustRequestSuccess(c, svr)
+	}
+
+	// Close the leader and wait for a new one.
+	leader.Close()
+	newLeader := mustWaitLeader(svrs[:2])
+
+	// Make sure we can still request on the connections.
+	for i := 0; i < 2; i++ {
+		svr := svrs[i]
+		mustRequestSuccess(c, svr)
+	}
+
+	// Close the new leader and we have only one node now.
+	newLeader.Close()
+	time.Sleep(time.Second)
+
+	// Request will failed with no leader.
+	for i := 0; i < 2; i++ {
+		svr := svrs[i]
+		if svr != newLeader {
+			resp := mustRequest(c, svr)
+			c.Assert(resp.StatusCode, Equals, http.StatusInternalServerError)
+		}
+	}
+}
+
+func mustRequest(c *C, s *server.Server) *http.Response {
 	unixAddr := []string{s.GetAddr(), apiPrefix, "/api/v1/version"}
 	httpAddr := mustUnixAddrToHTTPAddr(c, strings.Join(unixAddr, ""))
+	client := newUnixSocketClient()
 	resp, err := client.Get(httpAddr)
 	c.Assert(err, IsNil)
+	return resp
+}
+
+func mustRequestSuccess(c *C, s *server.Server) {
+	resp := mustRequest(c, s)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 }

@@ -14,7 +14,6 @@
 package api
 
 import (
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,10 +26,6 @@ import (
 
 func TestAPIServer(t *testing.T) {
 	TestingT(t)
-}
-
-func unixDial(_, addr string) (net.Conn, error) {
-	return net.Dial("unix", addr)
 }
 
 func newUnixSocketClient() *http.Client {

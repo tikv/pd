@@ -14,6 +14,7 @@
 package server
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -34,7 +35,9 @@ func newTestServer(c *C) *Server {
 	return svr
 }
 
-func newMultiTestServers(c *C, count int) []*Server {
+type cleanupFunc func()
+
+func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
 	svrs := make([]*Server, 0, count)
 	cfgs := NewTestMultiConfig(count)
 
@@ -55,7 +58,15 @@ func newMultiTestServers(c *C, count int) []*Server {
 	}
 
 	mustWaitLeader(svrs)
-	return svrs
+
+	cleanup := func() {
+		for _, svr := range svrs {
+			svr.Close()
+			os.RemoveAll(svr.cfg.DataDir)
+		}
+	}
+
+	return svrs, cleanup
 }
 
 func mustWaitLeader(svrs []*Server) *Server {

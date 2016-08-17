@@ -40,6 +40,10 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if leader == nil {
+		http.Error(w, "no leader", http.StatusInternalServerError)
+		return
+	}
 
 	urls, err := server.ParseUrls(leader.GetAddr())
 	if err != nil {
@@ -47,6 +51,16 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		return
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(&urls[rand.Intn(len(urls))])
-	proxy.ServeHTTP(w, r)
+	u := &urls[rand.Intn(len(urls))]
+
+	// Use unix socket for tests.
+	if u.Scheme == "unix" {
+		u.Scheme = "http"
+		proxy := httputil.NewSingleHostReverseProxy(u)
+		proxy.Transport = &http.Transport{Dial: unixDial}
+		proxy.ServeHTTP(w, r)
+	} else {
+		proxy := httputil.NewSingleHostReverseProxy(u)
+		proxy.ServeHTTP(w, r)
+	}
 }

@@ -41,14 +41,9 @@ func (s *Server) enableLeader(b bool) {
 
 	atomic.StoreInt64(&s.isLeaderValue, value)
 
-	if !b {
-		// if we lost leader, we may:
-		//	1, close all client connections
-		//	2, close all running raft clusters
-		s.closeAllConnections()
-
-		s.cluster.stop()
-	}
+	// Reset connections and cluster.
+	s.closeAllConnections()
+	s.cluster.stop()
 }
 
 func (s *Server) getLeaderPath() string {

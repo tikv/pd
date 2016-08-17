@@ -16,6 +16,7 @@ package api
 import (
 	"encoding/json"
 	"io/ioutil"
+	"net"
 	"net/http"
 
 	"github.com/juju/errors"
@@ -34,4 +35,8 @@ func fromBody(r *http.Request, data interface{}) error {
 	}
 
 	return nil
+}
+
+func unixDial(_, addr string) (net.Conn, error) {
+	return net.Dial("unix", addr)
 }

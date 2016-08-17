@@ -164,12 +164,15 @@ func (c *conn) proxyRequest(msgID uint64, req *pdpb.Request) (*pdpb.Response, er
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
+		if leader == nil {
+			return nil, errors.New("no leader")
+		}
 		conn, err := rpcConnect(leader.GetAddr())
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 		c.leaderConn = conn
-		log.Debugf("proxy conn %s to leader %s", c.conn.RemoteAddr(), leader.GetAddr())
+		log.Debugf("proxy conn %v to leader %s", c.conn.RemoteAddr(), leader.GetAddr())
 	}
 
 	resp, err := rpcCall(c.leaderConn, msgID, req)
