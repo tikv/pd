@@ -96,14 +96,14 @@ func waitLeader(svrs []*Server) error {
 
 // Notice: cfg has changed.
 func startPdWith(cfg *Config) (*Server, error) {
-	// wait must less to util.maxCheckEtcdRunningCount * util.checkEtcdRunningDelay
+	// wait must less than util.maxCheckEtcdRunningCount * util.checkEtcdRunningDelay
 	wait := maxCheckEtcdRunningCount * checkEtcdRunningDelay / 2 // 5 seconds
 	svrCh := make(chan *Server)
 	errCh := make(chan error, 1)
 	abortCh := make(chan struct{}, 1)
 
 	go func() {
-		// Etcd may panic, raft log corrupted, truncated, or lost?
+		// Etcd may panic, reports: "raft log corrupted, truncated, or lost?"
 		defer func() {
 			if err := recover(); err != nil {
 				errCh <- errors.Errorf("%s", err)
@@ -279,14 +279,14 @@ func (s *testJoinServerSuite) TestJoinSelfPDFiledAndRestarts(c *C) {
 	err = isConnective(svrs[2], svrs[1])
 	c.Assert(err, IsNil)
 
-	// Since the original cluster ID is computed by the target PD, so the new
+	// Since the original cluster ID is computed by the target PD, so the
 	// restarted PD ,with the same config, has the same cluster ID and
 	// the same peer ID.
 	// Here comes two situation:
 	//  1. The restarted PD becomes leader before other peers reach it.
 	//     so there are two leaders in two cluster(with same cluster ID),
-	//     the leader of old cluster will send messages to the new leader,
-	//     but the new leader will reject them.
+	//     the leader of old cluster will send messages to the leader of the new
+	//     cluster, but the new leader will reject them.
 	//  2. Other peers reach the restarted PD before it becomes leader.
 	//     The restarted PD joins and becomes a follower, but soon it will find
 	//     it has lost data then panic.
