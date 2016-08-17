@@ -43,43 +43,42 @@ func (s *testRedirectorSuite) TestRedirect(c *C) {
 }
 
 func (s *testRedirectorSuite) TestNoLeader(c *C) {
-	_, servers, cleanup := mustNewCluster(c, 3)
+	_, svrs, cleanup := mustNewCluster(c, 3)
 	defer cleanup()
 
-	// Make a slice [proxy0, proxy1, leader].
-	var svrs []*server.Server
-	leader := mustWaitLeader(servers)
-	for _, svr := range servers {
+	// Collect two followers.
+	var followers []*server.Server
+	leader := mustWaitLeader(c, svrs)
+	for _, svr := range svrs {
 		if svr != leader {
-			svrs = append(svrs, svr)
+			followers = append(followers, svr)
 		}
 	}
-	svrs = append(svrs, leader)
 
-	// Make connections to proxy0 and proxy1.
-	// Make sure they proxy request to leader.
+	// Make connections to followers.
+	// Make sure they proxy requests to the leader.
 	for i := 0; i < 2; i++ {
-		svr := svrs[i]
+		svr := followers[i]
 		mustRequestSuccess(c, svr)
 	}
 
 	// Close the leader and wait for a new one.
 	leader.Close()
-	newLeader := mustWaitLeader(svrs[:2])
+	newLeader := mustWaitLeader(c, followers)
 
-	// Make sure we can still request on the connections.
+	// Make sure they proxy requests to the new leader.
 	for i := 0; i < 2; i++ {
-		svr := svrs[i]
+		svr := followers[i]
 		mustRequestSuccess(c, svr)
 	}
 
-	// Close the new leader and we have only one node now.
+	// Close the new leader and then we have only one node.
 	newLeader.Close()
 	time.Sleep(time.Second)
 
 	// Request will failed with no leader.
 	for i := 0; i < 2; i++ {
-		svr := svrs[i]
+		svr := followers[i]
 		if svr != newLeader {
 			resp := mustRequest(c, svr)
 			c.Assert(resp.StatusCode, Equals, http.StatusInternalServerError)

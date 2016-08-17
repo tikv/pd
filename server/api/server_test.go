@@ -40,21 +40,11 @@ func newUnixSocketClient() *http.Client {
 	return client
 }
 
-func unixAddrToHTTPAddr(addr string) (string, error) {
-	ua, err := url.Parse(addr)
-	if err != nil {
-		return "", err
-	}
-
-	// Turn unix to http
-	ua.Scheme = "http"
-	return ua.String(), nil
-}
-
 func mustUnixAddrToHTTPAddr(c *C, addr string) string {
-	u, err := unixAddrToHTTPAddr(addr)
+	u, err := url.Parse(addr)
 	c.Assert(err, IsNil)
-	return u
+	u.Scheme = "http"
+	return u.String()
 }
 
 type cleanUpFunc func()
@@ -85,7 +75,7 @@ func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpF
 	close(ch)
 
 	// wait etcds and http servers
-	mustWaitLeader(svrs)
+	mustWaitLeader(c, svrs)
 
 	// clean up
 	clean := func() {
@@ -100,7 +90,7 @@ func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpF
 	return cfgs, svrs, clean
 }
 
-func mustWaitLeader(svrs []*server.Server) *server.Server {
+func mustWaitLeader(c *C, svrs []*server.Server) *server.Server {
 	for i := 0; i < 100; i++ {
 		for _, svr := range svrs {
 			if svr.IsLeader() {
@@ -109,5 +99,6 @@ func mustWaitLeader(svrs []*server.Server) *server.Server {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	panic("no leader")
+	c.Fatal("no leader")
+	return nil
 }

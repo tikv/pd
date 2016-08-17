@@ -256,7 +256,7 @@ func (s *testJoinServerSuite) TestJoinSelfPDFiledAndRestarts(c *C) {
 	err = os.RemoveAll(cfgs[target].DataDir)
 	c.Assert(err, IsNil)
 
-	mustWaitLeader([]*Server{svrs[2], svrs[1]})
+	mustWaitLeader(c, []*Server{svrs[2], svrs[1]})
 
 	// Put some data.
 	err = isConnective(svrs[2], svrs[1])
@@ -363,7 +363,7 @@ func (s *testJoinServerSuite) TestGeneralJoin(c *C) {
 
 	svrs = append(svrs[:target], svrs[target+1:]...)
 	svrs = append(svrs, re)
-	mustWaitLeader(svrs)
+	mustWaitLeader(c, svrs)
 
 	err = isConnective(re, svrs[0])
 	c.Assert(err, IsNil)

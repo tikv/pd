@@ -180,7 +180,7 @@ func (c *conn) proxyRequest(msgID uint64, req *pdpb.Request) (*pdpb.Response, er
 		c.leaderConn.Close()
 		c.leaderConn = nil
 	}
-	return resp, err
+	return resp, errors.Trace(err)
 }
 
 func (c *conn) handleRequest(req *pdpb.Request) (*pdpb.Response, error) {

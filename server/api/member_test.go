@@ -34,7 +34,6 @@ type testMemberAPISuite struct {
 
 func (s *testMemberAPISuite) SetUpSuite(c *C) {
 	s.hc = newUnixSocketClient()
-
 }
 
 func relaxEqualStings(c *C, a, b []string) {
@@ -73,8 +72,7 @@ func (s *testMemberAPISuite) TestMemberList(c *C) {
 		defer clean()
 
 		parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/members"}
-		addr, err := unixAddrToHTTPAddr(strings.Join(parts, ""))
-		c.Assert(err, IsNil)
+		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
 		buf, err := ioutil.ReadAll(resp.Body)
@@ -122,8 +120,7 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 
 	for _, t := range table {
 		parts := []string{t.addr, apiPrefix, "/api/v1/members/", t.name}
-		addr, err := unixAddrToHTTPAddr(strings.Join(parts, ""))
-		c.Assert(err, IsNil)
+		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
 		req, err := http.NewRequest("DELETE", addr, nil)
 		c.Assert(err, IsNil)
 		resp, err := s.hc.Do(req)
@@ -133,11 +130,10 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 	}
 
 	// We may delete the leader above.
-	mustWaitLeader(newSvrs)
+	mustWaitLeader(c, newSvrs)
 
 	parts := []string{cfgs[rand.Intn(len(newCfgs))].ClientUrls, apiPrefix, "/api/v1/members"}
-	addr, err := unixAddrToHTTPAddr(strings.Join(parts, ""))
-	c.Assert(err, IsNil)
+	addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
 	resp, err := s.hc.Get(addr)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
@@ -154,7 +150,7 @@ func (s *testMemberAPISuite) TestLeader(c *C) {
 	c.Assert(err, IsNil)
 
 	parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/leader"}
-	addr, err := unixAddrToHTTPAddr(strings.Join(parts, ""))
+	addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
 	c.Assert(err, IsNil)
 	resp, err := s.hc.Get(addr)
 	c.Assert(err, IsNil)

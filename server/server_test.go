@@ -57,7 +57,7 @@ func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
 		svrs = append(svrs, svr)
 	}
 
-	mustWaitLeader(svrs)
+	mustWaitLeader(c, svrs)
 
 	cleanup := func() {
 		for _, svr := range svrs {
@@ -69,7 +69,7 @@ func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
 	return svrs, cleanup
 }
 
-func mustWaitLeader(svrs []*Server) *Server {
+func mustWaitLeader(c *C, svrs []*Server) *Server {
 	for i := 0; i < 100; i++ {
 		for _, s := range svrs {
 			if s.IsLeader() {
@@ -78,7 +78,8 @@ func mustWaitLeader(svrs []*Server) *Server {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	panic("no leader")
+	c.Fatal("no leader")
+	return nil
 }
 
 var _ = Suite(&testLeaderServerSuite{})
