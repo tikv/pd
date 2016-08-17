@@ -16,7 +16,6 @@ package server
 import (
 	"time"
 
-	"github.com/ngaut/log"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -81,10 +80,10 @@ func (s *testConnSuite) TestReconnect(c *C) {
 		svr := followers[i]
 		if svr != newLeader {
 			resp := mustRequest(c, svr)
-			error := resp.GetHeader().GetError()
-			c.Assert(error, NotNil)
-			log.Debugf("Response error: %v", error)
-			c.Assert(svr.IsLeader(), Equals, false)
+			err := resp.GetHeader().GetError()
+			c.Assert(err, NotNil)
+			c.Log("Response error: %v", err)
+			c.Assert(svr.IsLeader(), IsFalse)
 		}
 	}
 }
