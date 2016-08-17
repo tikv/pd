@@ -133,13 +133,12 @@ func mustNewJoinCluster(c *C, num int) ([]*Config, []*Server, cleanUpFunc) {
 	svrs := make([]*Server, 0, num)
 	cfgs := newTestMultiJoinConfig(num)
 
-	for _, cfg := range cfgs {
+	for i, cfg := range cfgs {
 		svr, err := startPdWith(cfg)
 		c.Assert(err, IsNil)
 		svrs = append(svrs, svr)
+		waitMembers(svrs[0], i+1)
 	}
-
-	waitMembers(svrs[rand.Intn(num)], num)
 
 	// Clean up.
 	clean := func() {
