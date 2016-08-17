@@ -96,9 +96,20 @@ func waitLeader(svrs []*Server) error {
 
 // Notice: cfg has changed.
 func startPdWith(cfg *Config) (*Server, error) {
+	// wait must less to util.maxCheckEtcdRunningCount * util.checkEtcdRunningDelay
+	wait := maxCheckEtcdRunningCount * checkEtcdRunningDelay / 2 // 5 seconds
 	svrCh := make(chan *Server)
-	errCh := make(chan error)
+	errCh := make(chan error, 1)
+	abortCh := make(chan struct{}, 1)
+
 	go func() {
+		// Etcd may panic, raft log corrupted, truncated, or lost?
+		defer func() {
+			if err := recover(); err != nil {
+				errCh <- errors.Errorf("%s", err)
+			}
+		}()
+
 		svr, err := CreateServer(cfg)
 		if err != nil {
 			errCh <- errors.Trace(err)
@@ -107,14 +118,22 @@ func startPdWith(cfg *Config) (*Server, error) {
 		err = svr.StartEtcd(nil)
 		if err != nil {
 			errCh <- errors.Trace(err)
+			svr.Close()
 			return
+		}
+
+		select {
+		case <-abortCh:
+			svr.Close()
+			return
+		default:
 		}
 
 		svrCh <- svr
 		svr.Run()
 	}()
 
-	timer := time.NewTimer(5 * time.Second)
+	timer := time.NewTimer(wait)
 	defer timer.Stop()
 
 	select {
@@ -123,6 +142,7 @@ func startPdWith(cfg *Config) (*Server, error) {
 	case e := <-errCh:
 		return nil, errors.Trace(e)
 	case <-timer.C:
+		abortCh <- struct{}{}
 		return nil, errTimeout
 	}
 }
@@ -259,15 +279,25 @@ func (s *testJoinServerSuite) TestJoinSelfPDFiledAndRestarts(c *C) {
 	err = isConnective(svrs[2], svrs[1])
 	c.Assert(err, IsNil)
 
+	// Since the original cluster ID is computed by the target PD, so the new
+	// restarted PD ,with the same config, has the same cluster ID and
+	// the same peer ID.
+	// Here comes two situation:
+	//  1. The restarted PD becomes leader before other peers reach it.
+	//     so there are two leaders in two cluster(with same cluster ID),
+	//     the leader of old cluster will send messages to the new leader,
+	//     but the new leader will reject them.
+	//  2. Other peers reach the restarted PD before it becomes leader.
+	//     The restarted PD joins and becomes a follower, but soon it will find
+	//     it has lost data then panic.
 	cfgs[target].InitialCluster = ""
 	cfgs[target].InitialClusterState = "new"
 	cfgs[target].Join = cfgs[target].AdvertiseClientUrls
-	svr, err := startPdWith(cfgs[target])
-	if err == nil {
-		// New PD becomes leader before other peers reach it.
+	svr, _ := startPdWith(cfgs[target])
+	if svr != nil {
 		err = isConnective(svr, svrs[2])
 		c.Assert(err, NotNil)
-		defer svr.Close()
+		svr.Close()
 	}
 
 	err = isConnective(svrs[1], svrs[2])
