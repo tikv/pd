@@ -82,7 +82,7 @@ func (s *testConnSuite) TestReconnect(c *C) {
 			resp := mustRequest(c, svr)
 			err := resp.GetHeader().GetError()
 			c.Assert(err, NotNil)
-			c.Log("Response error: %v", err)
+			c.Logf("Response error: %v", err)
 			c.Assert(svr.IsLeader(), IsFalse)
 		}
 	}

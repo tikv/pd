@@ -42,7 +42,7 @@ func (s *testRedirectorSuite) TestRedirect(c *C) {
 	}
 }
 
-func (s *testRedirectorSuite) TestNoLeader(c *C) {
+func (s *testRedirectorSuite) TestReconnect(c *C) {
 	_, svrs, cleanup := mustNewCluster(c, 3)
 	defer cleanup()
 
@@ -84,6 +84,40 @@ func (s *testRedirectorSuite) TestNoLeader(c *C) {
 			c.Assert(resp.StatusCode, Equals, http.StatusInternalServerError)
 		}
 	}
+}
+
+func (s *testRedirectorSuite) TestNotLeader(c *C) {
+	_, svrs, cleanup := mustNewCluster(c, 3)
+	defer cleanup()
+
+	// Find a follower.
+	var follower *server.Server
+	leader := mustWaitLeader(c, svrs)
+	for _, svr := range svrs {
+		if svr != leader {
+			follower = svr
+			break
+		}
+	}
+
+	client := newUnixSocketClient()
+
+	unixAddr := []string{follower.GetAddr(), apiPrefix, "/api/v1/version"}
+	httpAddr := mustUnixAddrToHTTPAddr(c, strings.Join(unixAddr, ""))
+
+	// Request to follower without redirectorHeader is OK.
+	request, err := http.NewRequest("GET", httpAddr, nil)
+	c.Assert(err, IsNil)
+	resp, err := client.Do(request)
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+
+	// Request to follower with redirectorHeader will failed.
+	request.RequestURI = ""
+	request.Header.Set(redirectorHeader, "pd")
+	resp, err = client.Do(request)
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Not(Equals), http.StatusOK)
 }
 
 func mustRequest(c *C, s *server.Server) *http.Response {

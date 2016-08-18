@@ -14,11 +14,22 @@
 package api
 
 import (
-	"math/rand"
+	"io/ioutil"
 	"net/http"
-	"net/http/httputil"
+	"net/url"
 
+	"github.com/ngaut/log"
 	"github.com/pingcap/pd/server"
+)
+
+const (
+	redirectorHeader = "PD-Redirector"
+)
+
+const (
+	errNoLeaderFound       = "no leader found"
+	errRedirectFailed      = "redirect failed"
+	errRedirectToNotLeader = "redirect to not leader"
 )
 
 type redirector struct {
@@ -35,13 +46,22 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		return
 	}
 
+	// Prevent more than one redirection.
+	if name := r.Header.Get(redirectorHeader); len(name) != 0 {
+		log.Errorf("redirect from %v, but %v is not leader", name, h.s.Name())
+		http.Error(w, errRedirectToNotLeader, http.StatusInternalServerError)
+		return
+	}
+
+	r.Header.Set(redirectorHeader, h.s.Name())
+
 	leader, err := h.s.GetLeader()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if leader == nil {
-		http.Error(w, "no leader", http.StatusInternalServerError)
+		http.Error(w, errNoLeaderFound, http.StatusInternalServerError)
 		return
 	}
 
@@ -51,16 +71,71 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		return
 	}
 
-	u := &urls[rand.Intn(len(urls))]
+	newCustomReverseProxies(urls).ServeHTTP(w, r)
+}
 
-	// Use unix socket for tests.
-	if u.Scheme == "unix" {
-		u.Scheme = "http"
-		proxy := httputil.NewSingleHostReverseProxy(u)
-		proxy.Transport = &http.Transport{Dial: unixDial}
-		proxy.ServeHTTP(w, r)
-	} else {
-		proxy := httputil.NewSingleHostReverseProxy(u)
-		proxy.ServeHTTP(w, r)
+type customReverseProxies struct {
+	urls    []url.URL
+	clients []*http.Client
+}
+
+func newCustomReverseProxies(urls []url.URL) *customReverseProxies {
+	p := &customReverseProxies{}
+
+	for _, u := range urls {
+		var client *http.Client
+
+		// Use unix socket in tests.
+		if u.Scheme == "unix" {
+			u.Scheme = "http"
+			client = &http.Client{Transport: &http.Transport{Dial: unixDial}}
+		} else {
+			client = &http.Client{}
+		}
+
+		p.urls = append(p.urls, u)
+		p.clients = append(p.clients, client)
+	}
+
+	return p
+}
+
+func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	for i, client := range p.clients {
+		r.RequestURI = ""
+		r.URL.Host = p.urls[i].Host
+		r.URL.Scheme = p.urls[i].Scheme
+
+		resp, err := client.Do(r)
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		b, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+
+		copyHeader(w.Header(), resp.Header)
+		w.WriteHeader(resp.StatusCode)
+		if _, err := w.Write(b); err != nil {
+			log.Error(err)
+			continue
+		}
+
+		return
+	}
+
+	http.Error(w, errRedirectFailed, http.StatusInternalServerError)
+}
+
+func copyHeader(dst, src http.Header) {
+	for k, vv := range src {
+		for _, v := range vv {
+			dst.Add(k, v)
+		}
 	}
 }
