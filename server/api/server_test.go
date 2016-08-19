@@ -97,7 +97,7 @@ func mustWaitLeader(c *C, svrs []*server.Server) *server.Server {
 				return svr
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 	c.Fatal("no leader")
 	return nil
