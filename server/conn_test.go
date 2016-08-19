@@ -75,7 +75,7 @@ func (s *testConnSuite) TestReconnect(c *C) {
 	newLeader.Close()
 	time.Sleep(time.Second)
 
-	// Request will failed with no leader.
+	// Request will fail with no leader.
 	for i := 0; i < 2; i++ {
 		svr := followers[i]
 		if svr != newLeader {

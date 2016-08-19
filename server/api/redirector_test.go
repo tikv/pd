@@ -76,7 +76,7 @@ func (s *testRedirectorSuite) TestReconnect(c *C) {
 	newLeader.Close()
 	time.Sleep(time.Second)
 
-	// Request will failed with no leader.
+	// Request will fail with no leader.
 	for i := 0; i < 2; i++ {
 		svr := followers[i]
 		if svr != newLeader {
@@ -112,7 +112,7 @@ func (s *testRedirectorSuite) TestNotLeader(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 
-	// Request to follower with redirectorHeader will failed.
+	// Request to follower with redirectorHeader will fail.
 	request.RequestURI = ""
 	request.Header.Set(redirectorHeader, "pd")
 	resp, err = client.Do(request)
