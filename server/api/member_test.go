@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
@@ -85,41 +86,54 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 	cfgs, svrs, clean := mustNewCluster(c, 3)
 	defer clean()
 
-	target := rand.Intn(len(cfgs))
-	newCfgs := append(cfgs[:target], cfgs[target+1:]...)
-	newSvrs := append(svrs[:target], svrs[target+1:]...)
+	target := rand.Intn(len(svrs))
+	server := svrs[target]
+
+	for i, cfg := range cfgs {
+		if cfg.Name == server.Name() {
+			cfgs = append(cfgs[:i], cfgs[i+1:]...)
+			break
+		}
+	}
+	for i, svr := range svrs {
+		if svr.Name() == server.Name() {
+			svrs = append(svrs[:i], svrs[i+1:]...)
+			break
+		}
+	}
+	clientURL := cfgs[rand.Intn(len(cfgs))].ClientUrls
+
+	server.Close()
+	time.Sleep(5 * time.Second)
+	mustWaitLeader(c, svrs)
 
 	var table = []struct {
 		name    string
-		addr    string
 		checker Checker
 		status  int
 	}{
 		{
 			// delete a nonexistent pd
-			name:    fmt.Sprintf("pd%d", rand.Int63()),
-			addr:    cfgs[rand.Intn(len(cfgs))].ClientUrls,
+			name:    fmt.Sprintf("test-%d", rand.Int63()),
 			checker: Equals,
 			status:  http.StatusNotFound,
 		},
 		{
 			// delete a pd randomly
-			name:    cfgs[target].Name,
-			addr:    cfgs[rand.Intn(len(cfgs))].ClientUrls,
+			name:    server.Name(),
 			checker: Equals,
 			status:  http.StatusOK,
 		},
 		{
 			// delete it again
-			name:    cfgs[target].Name,
-			addr:    newCfgs[rand.Intn(len(newCfgs))].ClientUrls,
-			checker: Not(Equals),
-			status:  http.StatusOK,
+			name:    server.Name(),
+			checker: Equals,
+			status:  http.StatusNotFound,
 		},
 	}
 
 	for _, t := range table {
-		parts := []string{t.addr, apiPrefix, "/api/v1/members/", t.name}
+		parts := []string{clientURL, apiPrefix, "/api/v1/members/", t.name}
 		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
 		req, err := http.NewRequest("DELETE", addr, nil)
 		c.Assert(err, IsNil)
@@ -129,17 +143,14 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 		c.Assert(resp.StatusCode, t.checker, t.status)
 	}
 
-	// We may delete the leader above.
-	mustWaitLeader(c, newSvrs)
-
-	parts := []string{cfgs[rand.Intn(len(newCfgs))].ClientUrls, apiPrefix, "/api/v1/members"}
+	parts := []string{clientURL, apiPrefix, "/api/v1/members"}
 	addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
 	resp, err := s.hc.Get(addr)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	buf, err := ioutil.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
-	checkListResponse(c, buf, newCfgs)
+	checkListResponse(c, buf, cfgs)
 }
 
 func (s *testMemberAPISuite) TestLeader(c *C) {
