@@ -187,7 +187,7 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 
 	var ops []clientv3.Op
 	if resp.putRegion != nil {
-		regionValue, err := proto.Marshal(resp.putRegion)
+		regionValue, err := resp.putRegion.Marshal()
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

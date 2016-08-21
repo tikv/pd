@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
-	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -151,7 +150,7 @@ func (s *Server) createRaftCluster() error {
 	}
 
 	clusterMeta := metapb.Cluster{}
-	if err = proto.Unmarshal(value, &clusterMeta); err != nil {
+	if err = clusterMeta.Unmarshal(value); err != nil {
 		return errors.Trace(err)
 	}
 
@@ -225,7 +224,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 	}
 
 	// Set cluster meta
-	clusterValue, err := proto.Marshal(&clusterMeta)
+	clusterValue, err := clusterMeta.Marshal()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -237,13 +236,13 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 	// Set store meta
 	storeMeta := req.GetStore()
 	storePath := makeStoreKey(clusterRootPath, storeMeta.GetId())
-	storeValue, err := proto.Marshal(storeMeta)
+	storeValue, err := storeMeta.Marshal()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 	ops = append(ops, clientv3.OpPut(storePath, string(storeValue)))
 
-	regionValue, err := proto.Marshal(req.GetRegion())
+	regionValue, err := req.GetRegion().Marshal()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -285,7 +284,7 @@ func (c *RaftCluster) cacheAllStores() error {
 
 	for _, kv := range resp.Kvs {
 		store := &metapb.Store{}
-		if err = proto.Unmarshal(kv.Value, store); err != nil {
+		if err = store.Unmarshal(kv.Value); err != nil {
 			return errors.Trace(err)
 		}
 
@@ -318,7 +317,7 @@ func (c *RaftCluster) cacheAllRegions() error {
 
 		for _, kv := range resp.Kvs {
 			region := &metapb.Region{}
-			if err = proto.Unmarshal(kv.Value, region); err != nil {
+			if err = region.Unmarshal(kv.Value); err != nil {
 				return errors.Trace(err)
 			}
 
@@ -369,7 +368,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		return errors.Errorf("invalid put store %v", store)
 	}
 
-	storeValue, err := proto.Marshal(store)
+	storeValue, err := store.Marshal()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -398,7 +397,7 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
 	}
 
-	metaValue, err := proto.Marshal(meta)
+	metaValue, err := meta.Marshal()
 	if err != nil {
 		return errors.Trace(err)
 	}

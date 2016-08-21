@@ -21,7 +21,6 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/mvcc/mvccpb"
-	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -117,7 +116,7 @@ func (s *Server) marshalLeader() string {
 		Pid:  int64(os.Getpid()),
 	}
 
-	data, err := proto.Marshal(leader)
+	data, err := leader.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
 		log.Fatalf("marshal leader %s err %v", leader, err)
