@@ -113,8 +113,8 @@ func (s *Server) isSameLeader(leader *pdpb.Leader) bool {
 
 func (s *Server) marshalLeader() string {
 	leader := &pdpb.Leader{
-		Addr: proto.String(s.GetAddr()),
-		Pid:  proto.Int64(int64(os.Getpid())),
+		Addr: s.GetAddr(),
+		Pid:  int64(os.Getpid()),
 	}
 
 	data, err := proto.Marshal(leader)

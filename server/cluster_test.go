@@ -18,7 +18,6 @@ import (
 	"os"
 
 	"github.com/coreos/etcd/clientv3"
-	"github.com/golang/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -61,7 +60,7 @@ func (s *testClusterBaseSuite) allocID(c *C) uint64 {
 
 func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
-		ClusterId: proto.Uint64(clusterID),
+		ClusterId: clusterID,
 	}
 }
 
@@ -73,8 +72,8 @@ func (s *testClusterBaseSuite) newPeer(c *C, storeID uint64, peerID uint64) *met
 	}
 
 	return &metapb.Peer{
-		StoreId: proto.Uint64(storeID),
-		Id:      proto.Uint64(peerID),
+		StoreId: storeID,
+		Id:      peerID,
 	}
 }
 
@@ -84,8 +83,8 @@ func (s *testClusterBaseSuite) newStore(c *C, storeID uint64, addr string) *meta
 	}
 
 	return &metapb.Store{
-		Id:      proto.Uint64(storeID),
-		Address: proto.String(addr),
+		Id:      storeID,
+		Address: addr,
 	}
 }
 
@@ -97,8 +96,8 @@ func (s *testClusterBaseSuite) newRegion(c *C, regionID uint64, startKey []byte,
 
 	if epoch == nil {
 		epoch = &metapb.RegionEpoch{
-			ConfVer: proto.Uint64(initEpochConfVer),
-			Version: proto.Uint64(initEpochVersion),
+			ConfVer: initEpochConfVer,
+			Version: initEpochVersion,
 		}
 	}
 
@@ -108,7 +107,7 @@ func (s *testClusterBaseSuite) newRegion(c *C, regionID uint64, startKey []byte,
 	}
 
 	return &metapb.Region{
-		Id:          proto.Uint64(regionID),
+		Id:          regionID,
 		StartKey:    startKey,
 		EndKey:      endKey,
 		RegionEpoch: epoch,
@@ -155,7 +154,7 @@ func (s *testClusterSuite) TestBootstrap(c *C) {
 func (s *testClusterBaseSuite) newIsBootstrapRequest(clusterID uint64) *pdpb.Request {
 	req := &pdpb.Request{
 		Header:         newRequestHeader(clusterID),
-		CmdType:        pdpb.CommandType_IsBootstrapped.Enum(),
+		CmdType:        pdpb.CommandType_IsBootstrapped,
 		IsBootstrapped: &pdpb.IsBootstrappedRequest{},
 	}
 
@@ -169,7 +168,7 @@ func (s *testClusterBaseSuite) newBootstrapRequest(c *C, clusterID uint64, store
 
 	req := &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_Bootstrap.Enum(),
+		CmdType: pdpb.CommandType_Bootstrap,
 		Bootstrap: &pdpb.BootstrapRequest{
 			Store:  store,
 			Region: region,
@@ -200,9 +199,9 @@ func (s *testClusterBaseSuite) tryBootstrapCluster(c *C, conn net.Conn, clusterI
 func (s *testClusterBaseSuite) getStore(c *C, conn net.Conn, clusterID uint64, storeID uint64) *metapb.Store {
 	req := &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_GetStore.Enum(),
+		CmdType: pdpb.CommandType_GetStore,
 		GetStore: &pdpb.GetStoreRequest{
-			StoreId: proto.Uint64(storeID),
+			StoreId: storeID,
 		},
 	}
 
@@ -217,7 +216,7 @@ func (s *testClusterBaseSuite) getStore(c *C, conn net.Conn, clusterID uint64, s
 func (s *testClusterBaseSuite) getRegion(c *C, conn net.Conn, clusterID uint64, regionKey []byte) *metapb.Region {
 	req := &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_GetRegion.Enum(),
+		CmdType: pdpb.CommandType_GetRegion,
 		GetRegion: &pdpb.GetRegionRequest{
 			RegionKey: regionKey,
 		},
@@ -234,7 +233,7 @@ func (s *testClusterBaseSuite) getRegion(c *C, conn net.Conn, clusterID uint64, 
 func (s *testClusterBaseSuite) getClusterConfig(c *C, conn net.Conn, clusterID uint64) *metapb.Cluster {
 	req := &pdpb.Request{
 		Header:           newRequestHeader(clusterID),
-		CmdType:          pdpb.CommandType_GetClusterConfig.Enum(),
+		CmdType:          pdpb.CommandType_GetClusterConfig,
 		GetClusterConfig: &pdpb.GetClusterConfigRequest{},
 	}
 
@@ -272,7 +271,7 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	storeAddr = "127.0.0.1:1"
 	req := &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_PutStore.Enum(),
+		CmdType: pdpb.CommandType_PutStore,
 		PutStore: &pdpb.PutStoreRequest{
 			Store: s.newStore(c, storeID, storeAddr),
 		},
@@ -288,11 +287,11 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	// Update cluster config.
 	req = &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_PutClusterConfig.Enum(),
+		CmdType: pdpb.CommandType_PutClusterConfig,
 		PutClusterConfig: &pdpb.PutClusterConfigRequest{
 			Cluster: &metapb.Cluster{
-				Id:           proto.Uint64(clusterID),
-				MaxPeerCount: proto.Uint32(5),
+				Id:           clusterID,
+				MaxPeerCount: 5,
 			},
 		},
 	}

@@ -17,7 +17,6 @@ import (
 	"os"
 	"sync/atomic"
 
-	"github.com/golang/protobuf/proto"
 	. "github.com/pingcap/check"
 	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -62,11 +61,11 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(err, IsNil)
 
 	stats := &pdpb.StoreStats{
-		StoreId:            proto.Uint64(store1.GetId()),
-		Capacity:           proto.Uint64(100),
-		Available:          proto.Uint64(50),
-		SendingSnapCount:   proto.Uint32(1),
-		ReceivingSnapCount: proto.Uint32(1),
+		StoreId:            store1.GetId(),
+		Capacity:           100,
+		Available:          50,
+		SendingSnapCount:   1,
+		ReceivingSnapCount: 1,
 	}
 
 	ok := cluster.cachedCluster.updateStoreStatus(stats)
@@ -89,11 +88,11 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(err, IsNil)
 
 	stats = &pdpb.StoreStats{
-		StoreId:            proto.Uint64(store2.GetId()),
-		Capacity:           proto.Uint64(100),
-		Available:          proto.Uint64(50),
-		SendingSnapCount:   proto.Uint32(1),
-		ReceivingSnapCount: proto.Uint32(1),
+		StoreId:            store2.GetId(),
+		Capacity:           100,
+		Available:          50,
+		SendingSnapCount:   1,
+		ReceivingSnapCount: 1,
 	}
 
 	ok = cluster.cachedCluster.updateStoreStatus(stats)
@@ -147,7 +146,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 
 	// Add another peer.
 	region.Peers = append(region.Peers, res.GetPeer())
-	region.RegionEpoch.ConfVer = proto.Uint64(region.GetRegionEpoch().GetConfVer() + 1)
+	region.RegionEpoch.ConfVer = region.GetRegionEpoch().GetConfVer() + 1
 
 	changePeer = cacheRegions.getChangePeer(oldRegion, region)
 	c.Assert(changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)

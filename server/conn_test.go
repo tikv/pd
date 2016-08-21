@@ -90,7 +90,7 @@ func (s *testConnSuite) TestReconnect(c *C) {
 
 func mustRequest(c *C, s *Server) *pdpb.Response {
 	req := &pdpb.Request{
-		CmdType: pdpb.CommandType_AllocId.Enum(),
+		CmdType: pdpb.CommandType_AllocId,
 		AllocId: &pdpb.AllocIdRequest{},
 	}
 	conn, err := rpcConnect(s.GetAddr())

@@ -29,13 +29,13 @@ func (c *conn) handleTso(req *pdpb.Request) (*pdpb.Response, error) {
 	}
 
 	count := request.GetCount()
-	ts := c.s.getRespTS(count)
-	if ts == nil {
-		return nil, errors.New("can not get timestamp")
+	ts, err := c.s.getRespTS(count)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
 	return &pdpb.Response{
-		Tso: &pdpb.TsoResponse{Timestamp: ts, Count: &count},
+		Tso: &pdpb.TsoResponse{Timestamp: ts, Count: count},
 	}, nil
 }
 
@@ -52,7 +52,7 @@ func (c *conn) handleAllocID(req *pdpb.Request) (*pdpb.Response, error) {
 	}
 
 	idResp := &pdpb.AllocIdResponse{
-		Id: proto.Uint64(id),
+		Id: id,
 	}
 
 	return &pdpb.Response{

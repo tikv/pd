@@ -91,7 +91,7 @@ func (s *testAllocIDSuite) TestCommand(c *C) {
 	idReq := &pdpb.AllocIdRequest{}
 
 	req := &pdpb.Request{
-		CmdType: pdpb.CommandType_AllocId.Enum(),
+		CmdType: pdpb.CommandType_AllocId,
 		AllocId: idReq,
 	}
 

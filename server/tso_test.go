@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
-	"github.com/golang/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -49,7 +48,7 @@ func (s *testTsoSuite) TearDownSuite(c *C) {
 
 func sendRequest(c *C, conn net.Conn, msgID uint64, request *pdpb.Request) {
 	msg := &msgpb.Message{
-		MsgType: msgpb.MessageType_PdReq.Enum(),
+		MsgType: msgpb.MessageType_PdReq,
 		PdReq:   request,
 	}
 	err := util.WriteMessage(conn, msgID, msg)
@@ -67,11 +66,11 @@ func recvResponse(c *C, conn net.Conn) (uint64, *pdpb.Response) {
 
 func (s *testTsoSuite) testGetTimestamp(c *C, conn net.Conn, n int) {
 	tso := &pdpb.TsoRequest{
-		Count: proto.Uint32(uint32(n)),
+		Count: uint32(n),
 	}
 
 	req := &pdpb.Request{
-		CmdType: pdpb.CommandType_Tso.Enum(),
+		CmdType: pdpb.CommandType_Tso,
 		Tso:     tso,
 	}
 

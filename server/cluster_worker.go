@@ -16,7 +16,6 @@ package server
 import (
 	"bytes"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -107,7 +106,7 @@ func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	}
 
 	split := &pdpb.AskSplitResponse{
-		NewRegionId: proto.Uint64(newRegionID),
+		NewRegionId: newRegionID,
 		NewPeerIds:  peerIDs,
 	}
 

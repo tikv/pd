@@ -118,7 +118,7 @@ func (c *conn) run() {
 		updateResponse(request, response)
 
 		msg = &msgpb.Message{
-			MsgType: msgpb.MessageType_PdResp.Enum(),
+			MsgType: msgpb.MessageType_PdResp,
 			PdResp:  response,
 		}
 

@@ -252,7 +252,7 @@ func rpcConnect(addr string) (net.Conn, error) {
 
 func rpcCall(conn net.Conn, reqID uint64, request *pdpb.Request) (*pdpb.Response, error) {
 	req := &msgpb.Message{
-		MsgType: msgpb.MessageType_PdReq.Enum(),
+		MsgType: msgpb.MessageType_PdReq,
 		PdReq:   request,
 	}
 	if err := util.WriteMessage(conn, reqID, req); err != nil {

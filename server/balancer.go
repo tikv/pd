@@ -14,7 +14,6 @@
 package server
 
 import (
-	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -164,8 +163,8 @@ func (cb *capacityBalancer) selectAddPeer(cluster *clusterInfo, stores []*storeI
 	}
 
 	peer := &metapb.Peer{
-		Id:      proto.Uint64(peerID),
-		StoreId: proto.Uint64(store.store.GetId()),
+		Id:      peerID,
+		StoreId: store.store.GetId(),
 	}
 
 	return peer, nil

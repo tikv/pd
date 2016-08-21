@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
-	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -146,8 +145,8 @@ func (s *Server) updateTimestamp() error {
 
 const maxRetryCount = 100
 
-func (s *Server) getRespTS(count uint32) *pdpb.Timestamp {
-	resp := &pdpb.Timestamp{}
+func (s *Server) getRespTS(count uint32) (pdpb.Timestamp, error) {
+	resp := pdpb.Timestamp{}
 	for i := 0; i < maxRetryCount; i++ {
 		current, ok := s.ts.Load().(*atomicObject)
 		if !ok {
@@ -156,14 +155,14 @@ func (s *Server) getRespTS(count uint32) *pdpb.Timestamp {
 			continue
 		}
 
-		resp.Physical = proto.Int64(int64(current.physical.UnixNano()) / 1e6)
-		resp.Logical = proto.Int64(atomic.AddInt64(&current.logical, int64(count)))
-		if *resp.Logical >= maxLogical {
+		resp.Physical = int64(current.physical.UnixNano()) / 1e6
+		resp.Logical = atomic.AddInt64(&current.logical, int64(count))
+		if resp.Logical >= maxLogical {
 			log.Errorf("logical part outside of max logical interval %v, please check ntp time, retry count %d", resp, i)
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-		return resp
+		return resp, nil
 	}
-	return nil
+	return resp, errors.New("can not get timestamp")
 }

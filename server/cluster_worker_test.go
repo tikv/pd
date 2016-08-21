@@ -143,7 +143,7 @@ func (s *testClusterWorkerSuite) newMockRaftStore(c *C, metaStore *metapb.Store)
 	c.Assert(err, IsNil)
 
 	addr := l.Addr().String()
-	metaStore.Address = proto.String(addr)
+	metaStore.Address = addr
 	store := &mockRaftStore{
 		s:        s,
 		listener: l,
@@ -158,11 +158,11 @@ func (s *testClusterWorkerSuite) newMockRaftStore(c *C, metaStore *metapb.Store)
 	c.Assert(err, IsNil)
 
 	stats := &pdpb.StoreStats{
-		StoreId:            proto.Uint64(metaStore.GetId()),
-		Capacity:           proto.Uint64(100),
-		Available:          proto.Uint64(50),
-		SendingSnapCount:   proto.Uint32(1),
-		ReceivingSnapCount: proto.Uint32(1),
+		StoreId:            metaStore.GetId(),
+		Capacity:           100,
+		Available:          50,
+		SendingSnapCount:   1,
+		ReceivingSnapCount: 1,
 	}
 
 	ok := cluster.cachedCluster.updateStoreStatus(stats)
@@ -202,8 +202,8 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	c.Assert(err, IsNil)
 
 	err = cluster.putConfig(&metapb.Cluster{
-		Id:           proto.Uint64(s.clusterID),
-		MaxPeerCount: proto.Uint32(5),
+		Id:           s.clusterID,
+		MaxPeerCount: 5,
 	})
 	c.Assert(err, IsNil)
 
@@ -251,7 +251,7 @@ func (s *testClusterWorkerSuite) checkChangePeerRes(c *C, res *pdpb.ChangePeer, 
 func (s *testClusterWorkerSuite) askSplit(c *C, conn net.Conn, msgID uint64, r *metapb.Region) (uint64, []uint64) {
 	req := &pdpb.Request{
 		Header:  newRequestHeader(s.clusterID),
-		CmdType: pdpb.CommandType_AskSplit.Enum(),
+		CmdType: pdpb.CommandType_AskSplit,
 		AskSplit: &pdpb.AskSplitRequest{
 			Region: r,
 		},
@@ -270,8 +270,8 @@ func updateRegionRange(r *metapb.Region, start, end []byte) {
 	r.StartKey = start
 	r.EndKey = end
 	r.RegionEpoch = &metapb.RegionEpoch{
-		ConfVer: proto.Uint64(r.GetRegionEpoch().GetConfVer()),
-		Version: proto.Uint64(r.GetRegionEpoch().GetVersion() + 1),
+		ConfVer: r.GetRegionEpoch().GetConfVer(),
+		Version: r.GetRegionEpoch().GetVersion() + 1,
 	}
 }
 
@@ -280,12 +280,12 @@ func splitRegion(c *C, old *metapb.Region, splitKey []byte, newRegionID uint64, 
 	c.Assert(len(old.Peers), Equals, len(newPeerIDs))
 	for i, peer := range old.Peers {
 		peers = append(peers, &metapb.Peer{
-			Id:      proto.Uint64(newPeerIDs[i]),
-			StoreId: proto.Uint64(peer.GetStoreId()),
+			Id:      newPeerIDs[i],
+			StoreId: peer.GetStoreId(),
 		})
 	}
 	newRegion := &metapb.Region{
-		Id:          proto.Uint64(newRegionID),
+		Id:          newRegionID,
 		RegionEpoch: proto.Clone(old.RegionEpoch).(*metapb.RegionEpoch),
 		Peers:       peers,
 	}
@@ -297,7 +297,7 @@ func splitRegion(c *C, old *metapb.Region, splitKey []byte, newRegionID uint64, 
 func heartbeatRegion(c *C, conn net.Conn, clusterID uint64, msgID uint64, region *metapb.Region, leader *metapb.Peer) *pdpb.ChangePeer {
 	req := &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_RegionHeartbeat.Enum(),
+		CmdType: pdpb.CommandType_RegionHeartbeat,
 		RegionHeartbeat: &pdpb.RegionHeartbeatRequest{
 			Leader: leader,
 			Region: region,
@@ -312,7 +312,7 @@ func heartbeatRegion(c *C, conn net.Conn, clusterID uint64, msgID uint64, region
 func (s *testClusterWorkerSuite) heartbeatStore(c *C, conn net.Conn, msgID uint64, stats *pdpb.StoreStats) *pdpb.StoreHeartbeatResponse {
 	req := &pdpb.Request{
 		Header:  newRequestHeader(s.clusterID),
-		CmdType: pdpb.CommandType_StoreHeartbeat.Enum(),
+		CmdType: pdpb.CommandType_StoreHeartbeat,
 		StoreHeartbeat: &pdpb.StoreHeartbeatRequest{
 			Stats: stats,
 		},
@@ -326,7 +326,7 @@ func (s *testClusterWorkerSuite) heartbeatStore(c *C, conn net.Conn, msgID uint6
 func (s *testClusterWorkerSuite) reportSplit(c *C, conn net.Conn, msgID uint64, left *metapb.Region, right *metapb.Region) *pdpb.ReportSplitResponse {
 	req := &pdpb.Request{
 		Header:  newRequestHeader(s.clusterID),
-		CmdType: pdpb.CommandType_ReportSplit.Enum(),
+		CmdType: pdpb.CommandType_ReportSplit,
 		ReportSplit: &pdpb.ReportSplitRequest{
 			Left:  left,
 			Right: right,
@@ -363,7 +363,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	c.Assert(err, IsNil)
 
 	meta := cluster.GetConfig()
-	meta.MaxPeerCount = proto.Uint32(1)
+	meta.MaxPeerCount = 1
 	err = cluster.putConfig(meta)
 	c.Assert(err, IsNil)
 
@@ -431,7 +431,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 
 	// Set MaxPeerCount to 10.
 	meta := cluster.GetConfig()
-	meta.MaxPeerCount = proto.Uint32(10)
+	meta.MaxPeerCount = 10
 	err = cluster.putConfig(meta)
 	c.Assert(err, IsNil)
 
@@ -483,7 +483,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 		c.Logf("[add peer][region]:%v", region)
 
 		// Update region epoch and check region info.
-		region.RegionEpoch.ConfVer = proto.Uint64(region.GetRegionEpoch().GetConfVer() + 1)
+		region.RegionEpoch.ConfVer = region.GetRegionEpoch().GetConfVer() + 1
 		heartbeatRegion(c, conn, s.clusterID, 0, region, leaderPeer)
 		// Check region peer count.
 		region = s.checkRegionPeerCount(c, regionKey, i+2)
@@ -493,8 +493,8 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 	// Remove 2 peers.
 	err = cluster.putConfig(&metapb.Cluster{
-		Id:           proto.Uint64(s.clusterID),
-		MaxPeerCount: proto.Uint32(3),
+		Id:           s.clusterID,
+		MaxPeerCount: 3,
 	})
 	c.Assert(err, IsNil)
 
@@ -505,7 +505,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 		s.checkChangePeerRes(c, resp, raftpb.ConfChangeType_RemoveNode, region)
 
 		// Update region epoch and check region info.
-		region.RegionEpoch.ConfVer = proto.Uint64(region.GetRegionEpoch().GetConfVer() + 1)
+		region.RegionEpoch.ConfVer = region.GetRegionEpoch().GetConfVer() + 1
 		heartbeatRegion(c, conn, s.clusterID, 0, region, leaderPeer)
 
 		// Check region peer count.
@@ -520,7 +520,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	c.Assert(err, IsNil)
 
 	meta := cluster.GetConfig()
-	meta.MaxPeerCount = proto.Uint32(2)
+	meta.MaxPeerCount = 2
 	err = cluster.putConfig(meta)
 	c.Assert(err, IsNil)
 
@@ -568,10 +568,10 @@ func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
 	// Mock a store stats.
 	storeID := stores[0].GetId()
 	stats := &pdpb.StoreStats{
-		StoreId:     proto.Uint64(storeID),
-		Capacity:    proto.Uint64(100),
-		Available:   proto.Uint64(50),
-		RegionCount: proto.Uint32(1),
+		StoreId:     storeID,
+		Capacity:    100,
+		Available:   50,
+		RegionCount: 1,
 	}
 
 	resp := s.heartbeatStore(c, conn, 0, stats)

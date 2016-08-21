@@ -142,8 +142,8 @@ func (h *leaderHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ret := leaderInfo{
-		Addr: *leader.Addr,
-		Pid:  *leader.Pid,
+		Addr: leader.Addr,
+		Pid:  leader.Pid,
 	}
 	h.rd.JSON(w, http.StatusOK, ret)
 }

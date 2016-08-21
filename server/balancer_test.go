@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	. "github.com/pingcap/check"
 	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -47,8 +46,8 @@ func (s *testBalancerSuite) newClusterInfo(c *C) *clusterInfo {
 
 	// Set cluster info.
 	meta := &metapb.Cluster{
-		Id:           proto.Uint64(0),
-		MaxPeerCount: proto.Uint32(3),
+		Id:           0,
+		MaxPeerCount: 3,
 	}
 	clusterInfo.setMeta(meta)
 
@@ -92,11 +91,11 @@ func (s *testBalancerSuite) newClusterInfo(c *C) *clusterInfo {
 func (s *testBalancerSuite) updateStore(c *C, clusterInfo *clusterInfo, storeID uint64, capacity uint64, available uint64,
 	sendingSnapCount uint32, receivingSnapCount uint32) {
 	stats := &pdpb.StoreStats{
-		StoreId:            proto.Uint64(storeID),
-		Capacity:           proto.Uint64(capacity),
-		Available:          proto.Uint64(available),
-		SendingSnapCount:   proto.Uint32(sendingSnapCount),
-		ReceivingSnapCount: proto.Uint32(receivingSnapCount),
+		StoreId:            storeID,
+		Capacity:           capacity,
+		Available:          available,
+		SendingSnapCount:   sendingSnapCount,
+		ReceivingSnapCount: receivingSnapCount,
 	}
 
 	ok := clusterInfo.updateStoreStatus(stats)
@@ -247,8 +246,8 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	// Set cluster config.
 	oldMeta := clusterInfo.getMeta()
 	meta := &metapb.Cluster{
-		Id:           proto.Uint64(0),
-		MaxPeerCount: proto.Uint32(1),
+		Id:           0,
+		MaxPeerCount: 1,
 	}
 	clusterInfo.setMeta(meta)
 

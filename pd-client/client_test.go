@@ -18,7 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/msgpb"
@@ -40,18 +39,18 @@ var (
 	// If we alloc ID in client in the future, these IDs must be updated.
 	clusterID = uint64(time.Now().Unix())
 	store     = &metapb.Store{
-		Id:      proto.Uint64(1),
-		Address: proto.String("localhost"),
+		Id:      1,
+		Address: "localhost",
 	}
 	peer = &metapb.Peer{
-		Id:      proto.Uint64(2),
-		StoreId: proto.Uint64(store.GetId()),
+		Id:      2,
+		StoreId: store.GetId(),
 	}
 	region = &metapb.Region{
-		Id: proto.Uint64(3),
+		Id: 3,
 		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: proto.Uint64(1),
-			Version: proto.Uint64(1),
+			ConfVer: 1,
+			Version: 1,
 		},
 		Peers: []*metapb.Peer{peer},
 	}
@@ -96,16 +95,16 @@ func bootstrapServer(c *C, addr string) {
 	req := &pdpb.Request{
 		Header: &pdpb.RequestHeader{
 			Uuid:      uuid.NewV4().Bytes(),
-			ClusterId: proto.Uint64(clusterID),
+			ClusterId: clusterID,
 		},
-		CmdType: pdpb.CommandType_Bootstrap.Enum(),
+		CmdType: pdpb.CommandType_Bootstrap,
 		Bootstrap: &pdpb.BootstrapRequest{
 			Store:  store,
 			Region: region,
 		},
 	}
 	msg := &msgpb.Message{
-		MsgType: msgpb.MessageType_PdReq.Enum(),
+		MsgType: msgpb.MessageType_PdReq,
 		PdReq:   req,
 	}
 
@@ -122,16 +121,16 @@ func heartbeatRegion(c *C, addr string) {
 	req := &pdpb.Request{
 		Header: &pdpb.RequestHeader{
 			Uuid:      uuid.NewV4().Bytes(),
-			ClusterId: proto.Uint64(clusterID),
+			ClusterId: clusterID,
 		},
-		CmdType: pdpb.CommandType_RegionHeartbeat.Enum(),
+		CmdType: pdpb.CommandType_RegionHeartbeat,
 		RegionHeartbeat: &pdpb.RegionHeartbeatRequest{
 			Region: region,
 			Leader: peer,
 		},
 	}
 	msg := &msgpb.Message{
-		MsgType: msgpb.MessageType_PdReq.Enum(),
+		MsgType: msgpb.MessageType_PdReq,
 		PdReq:   req,
 	}
 
