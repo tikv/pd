@@ -26,6 +26,8 @@ import (
 )
 
 func main() {
+	server.PrintPDInfo()
+
 	cfg := server.NewConfig()
 	err := cfg.Parse(os.Args[1:])
 	switch errors.Cause(err) {

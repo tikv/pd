@@ -1,5 +1,8 @@
 GO=GO15VENDOREXPERIMENT="1" go
 
+LDFLAGS += -X "github.com/pingcap/pd/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
+LDFLAGS += -X "github.com/pingcap/pd/server.PDGitHash=$(shell git rev-parse HEAD)"
+
 default: build
 
 all: dev install
@@ -8,7 +11,7 @@ dev: build check test
 
 build: 
 	rm -rf vendor && ln -s _vendor/vendor vendor
-	$(GO) build -o bin/pd-server cmd/pd-server/main.go
+	$(GO) build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 	rm -rf vendor
 
 install: 

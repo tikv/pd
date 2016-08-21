@@ -37,6 +37,20 @@ const (
 	slowRequestTime = 1 * time.Second
 )
 
+// Version information.
+var (
+	PDBuildTS = "None"
+	PDGitHash = "None"
+)
+
+// PrintPDInfo prints the PD version information.
+func PrintPDInfo() {
+	log.Infof("Welcome to the PD.")
+	log.Infof("Version:")
+	log.Infof("Git Commit Hash: %s", PDGitHash)
+	log.Infof("UTC Build Time:  %s", PDBuildTS)
+}
+
 func kvGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
 	kv := clientv3.NewKV(c)
 
