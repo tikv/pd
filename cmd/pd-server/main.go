@@ -26,8 +26,6 @@ import (
 )
 
 func main() {
-	server.PrintPDInfo()
-
 	cfg := server.NewConfig()
 	err := cfg.Parse(os.Args[1:])
 	switch errors.Cause(err) {
@@ -43,6 +41,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("initalize logger err %s\n", err)
 	}
+
+	server.PrintPDInfo()
 
 	svr, err := server.CreateServer(cfg)
 	if err != nil {
