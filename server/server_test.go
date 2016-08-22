@@ -70,7 +70,7 @@ func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
 }
 
 func mustWaitLeader(c *C, svrs []*Server) *Server {
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 500; i++ {
 		for _, s := range svrs {
 			if s.IsLeader() {
 				return s
