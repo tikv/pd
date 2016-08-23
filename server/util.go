@@ -303,13 +303,8 @@ func (rf *redirectFormatter) Flush() {}
 
 // setLogOutput sets output path for all logs.
 func setLogOutput(path string) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
 	// PD log.
-	log.SetOutput(f)
+	log.SetOutputByName(path)
 	log.SetRotateByDay()
 
 	// ETCD log.
