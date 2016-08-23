@@ -153,7 +153,7 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 	checkListResponse(c, buf, cfgs)
 }
 
-func (s *testMemberAPISuite) TestLeader(c *C) {
+func (s *testMemberAPISuite) TestMemberLeader(c *C) {
 	cfgs, svrs, clean := mustNewCluster(c, 3)
 	defer clean()
 

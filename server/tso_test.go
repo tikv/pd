@@ -16,7 +16,6 @@ package server
 import (
 	"math/rand"
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -30,20 +29,20 @@ import (
 var _ = Suite(&testTsoSuite{})
 
 type testTsoSuite struct {
-	client *clientv3.Client
-	svr    *Server
+	client  *clientv3.Client
+	svr     *Server
+	cleanup cleanUpFunc
 }
 
 func (s *testTsoSuite) SetUpSuite(c *C) {
-	s.svr = newTestServer(c)
+	s.svr, s.cleanup = newTestServer(c)
 	s.client = s.svr.client
 
 	go s.svr.Run()
 }
 
 func (s *testTsoSuite) TearDownSuite(c *C) {
-	s.svr.Close()
-	os.RemoveAll(s.svr.cfg.DataDir)
+	s.cleanup()
 }
 
 func sendRequest(c *C, conn net.Conn, msgID uint64, request *pdpb.Request) {

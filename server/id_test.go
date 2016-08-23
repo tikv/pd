@@ -15,7 +15,6 @@ package server
 
 import (
 	"math/rand"
-	"os"
 	"sync"
 
 	"github.com/coreos/etcd/clientv3"
@@ -26,13 +25,14 @@ import (
 var _ = Suite(&testAllocIDSuite{})
 
 type testAllocIDSuite struct {
-	client *clientv3.Client
-	alloc  *idAllocator
-	svr    *Server
+	client  *clientv3.Client
+	alloc   *idAllocator
+	svr     *Server
+	cleanup cleanUpFunc
 }
 
 func (s *testAllocIDSuite) SetUpSuite(c *C) {
-	s.svr = newTestServer(c)
+	s.svr, s.cleanup = newTestServer(c)
 	s.client = s.svr.client
 	s.alloc = s.svr.idAlloc
 
@@ -40,9 +40,7 @@ func (s *testAllocIDSuite) SetUpSuite(c *C) {
 }
 
 func (s *testAllocIDSuite) TearDownSuite(c *C) {
-	s.svr.Close()
-
-	os.RemoveAll(s.svr.cfg.DataDir)
+	s.cleanup()
 }
 
 func (s *testAllocIDSuite) TestID(c *C) {

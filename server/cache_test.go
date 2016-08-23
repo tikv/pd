@@ -14,7 +14,6 @@
 package server
 
 import (
-	"os"
 	"sync/atomic"
 
 	. "github.com/pingcap/check"
@@ -30,16 +29,14 @@ type testClusterCacheSuite struct {
 }
 
 func (s *testClusterCacheSuite) SetUpSuite(c *C) {
-	s.svr = newTestServer(c)
+	s.svr, s.cleanup = newTestServer(c)
 	s.client = s.svr.client
 
 	go s.svr.Run()
 }
 
 func (s *testClusterCacheSuite) TearDownSuite(c *C) {
-	s.svr.Close()
-
-	os.RemoveAll(s.svr.cfg.DataDir)
+	s.cleanup()
 }
 
 func (s *testClusterCacheSuite) TestCache(c *C) {

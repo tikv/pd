@@ -15,7 +15,6 @@ package server
 
 import (
 	"net"
-	"os"
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
@@ -31,8 +30,9 @@ const (
 var _ = Suite(&testClusterSuite{})
 
 type testClusterBaseSuite struct {
-	client *clientv3.Client
-	svr    *Server
+	client  *clientv3.Client
+	svr     *Server
+	cleanup cleanUpFunc
 }
 
 type testClusterSuite struct {
@@ -40,16 +40,14 @@ type testClusterSuite struct {
 }
 
 func (s *testClusterSuite) SetUpSuite(c *C) {
-	s.svr = newTestServer(c)
+	s.svr, s.cleanup = newTestServer(c)
 	s.client = s.svr.client
 
 	go s.svr.Run()
 }
 
 func (s *testClusterSuite) TearDownSuite(c *C) {
-	s.svr.Close()
-
-	os.RemoveAll(s.svr.cfg.DataDir)
+	s.cleanup()
 }
 
 func (s *testClusterBaseSuite) allocID(c *C) uint64 {

@@ -16,7 +16,6 @@ package server
 import (
 	"math/rand"
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -180,7 +179,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 
 	s.stores = make(map[uint64]*mockRaftStore)
 
-	s.svr = newTestServer(c)
+	s.svr, s.cleanup = newTestServer(c)
 	s.svr.cfg.nextRetryDelay = 50 * time.Millisecond
 
 	s.client = s.svr.client
@@ -212,9 +211,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TearDownTest(c *C) {
-	s.svr.Close()
-
-	os.RemoveAll(s.svr.cfg.DataDir)
+	s.cleanup()
 }
 
 func (s *testClusterWorkerSuite) checkRegionPeerCount(c *C, regionKey []byte, expectCount int) *metapb.Region {

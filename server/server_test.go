@@ -15,6 +15,7 @@ package server
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,24 +27,43 @@ func TestServer(t *testing.T) {
 	TestingT(t)
 }
 
-func newTestServer(c *C) *Server {
+var stripUnix = strings.NewReplacer("unix://", "")
+
+type cleanupFunc func()
+
+func newTestServer(c *C) (*Server, cleanUpFunc) {
 	cfg := NewTestSingleConfig()
 
 	svr, err := NewServer(cfg)
 	c.Assert(err, IsNil)
 
-	return svr
-}
+	cleanup := func() {
+		svr.Close()
+		os.RemoveAll(svr.cfg.DataDir)
 
-type cleanupFunc func()
+		os.Remove(stripUnix.Replace(svr.cfg.PeerUrls))
+		os.Remove(stripUnix.Replace(svr.cfg.ClientUrls))
+		os.Remove(stripUnix.Replace(svr.cfg.AdvertisePeerUrls))
+		os.Remove(stripUnix.Replace(svr.cfg.AdvertiseClientUrls))
+	}
+
+	return svr, cleanup
+}
 
 func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
 	svrs := make([]*Server, 0, count)
 	cfgs := NewTestMultiConfig(count)
+	urls := make([]string, 0, count*4)
 
 	ch := make(chan *Server, count)
 	for i := 0; i < count; i++ {
 		cfg := cfgs[i]
+
+		urls = append(urls, cfg.PeerUrls)
+		urls = append(urls, cfg.ClientUrls)
+		urls = append(urls, cfg.AdvertiseClientUrls)
+		urls = append(urls, cfg.AdvertisePeerUrls)
+
 		go func() {
 			svr, err := NewServer(cfg)
 			c.Assert(err, IsNil)
@@ -63,6 +83,9 @@ func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
 		for _, svr := range svrs {
 			svr.Close()
 			os.RemoveAll(svr.cfg.DataDir)
+		}
+		for _, u := range urls {
+			os.Remove(stripUnix.Replace(u))
 		}
 	}
 
@@ -120,6 +143,14 @@ func (s *testLeaderServerSuite) TearDownSuite(c *C) {
 		svr.Close()
 	}
 	s.client.Close()
+
+	// Make sure unix socket is removed.
+	for _, svr := range s.svrs {
+		os.Remove(stripUnix.Replace(svr.cfg.PeerUrls))
+		os.Remove(stripUnix.Replace(svr.cfg.ClientUrls))
+		os.Remove(stripUnix.Replace(svr.cfg.AdvertisePeerUrls))
+		os.Remove(stripUnix.Replace(svr.cfg.AdvertiseClientUrls))
+	}
 }
 
 func (s *testLeaderServerSuite) setUpClient(c *C) {

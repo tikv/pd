@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,18 +48,29 @@ func mustUnixAddrToHTTPAddr(c *C, addr string) string {
 	return u.String()
 }
 
+var stripUnix = strings.NewReplacer("unix://", "")
+
 type cleanUpFunc func()
 
 func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpFunc) {
 	dirs := make([]string, 0, num)
+	urls := make([]string, 0, num*4)
 	svrs := make([]*server.Server, 0, num)
 	cfgs := server.NewTestMultiConfig(num)
 
 	ch := make(chan *server.Server, num)
 	for _, cfg := range cfgs {
+		// data directory
 		dirs = append(dirs, cfg.DataDir)
 
+		// unix sockets
+		urls = append(urls, cfg.PeerUrls)
+		urls = append(urls, cfg.ClientUrls)
+		urls = append(urls, cfg.AdvertisePeerUrls)
+		urls = append(urls, cfg.AdvertiseClientUrls)
+
 		go func(cfg *server.Config) {
+
 			s, e := server.CreateServer(cfg)
 			c.Assert(e, IsNil)
 			e = s.StartEtcd(NewHandler(s))
@@ -84,6 +96,9 @@ func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpF
 		}
 		for _, dir := range dirs {
 			os.RemoveAll(dir)
+		}
+		for _, u := range urls {
+			os.Remove(stripUnix.Replace(u))
 		}
 	}
 
