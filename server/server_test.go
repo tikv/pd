@@ -27,8 +27,6 @@ func TestServer(t *testing.T) {
 	TestingT(t)
 }
 
-var stripUnix = strings.NewReplacer("unix://", "")
-
 type cleanupFunc func()
 
 func newTestServer(c *C) (*Server, cleanUpFunc) {
@@ -41,28 +39,28 @@ func newTestServer(c *C) (*Server, cleanUpFunc) {
 		svr.Close()
 		os.RemoveAll(svr.cfg.DataDir)
 
-		os.Remove(stripUnix.Replace(svr.cfg.PeerUrls))
-		os.Remove(stripUnix.Replace(svr.cfg.ClientUrls))
-		os.Remove(stripUnix.Replace(svr.cfg.AdvertisePeerUrls))
-		os.Remove(stripUnix.Replace(svr.cfg.AdvertiseClientUrls))
+		cleanUnixSocket(svr.cfg)
 	}
 
 	return svr, cleanup
 }
 
+var stripUnix = strings.NewReplacer("unix://", "")
+
+func cleanUnixSocket(cfg *Config) {
+	os.Remove(stripUnix.Replace(cfg.PeerUrls))
+	os.Remove(stripUnix.Replace(cfg.ClientUrls))
+	os.Remove(stripUnix.Replace(cfg.AdvertisePeerUrls))
+	os.Remove(stripUnix.Replace(cfg.AdvertiseClientUrls))
+}
+
 func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
 	svrs := make([]*Server, 0, count)
 	cfgs := NewTestMultiConfig(count)
-	urls := make([]string, 0, count*4)
 
 	ch := make(chan *Server, count)
 	for i := 0; i < count; i++ {
 		cfg := cfgs[i]
-
-		urls = append(urls, cfg.PeerUrls)
-		urls = append(urls, cfg.ClientUrls)
-		urls = append(urls, cfg.AdvertiseClientUrls)
-		urls = append(urls, cfg.AdvertisePeerUrls)
 
 		go func() {
 			svr, err := NewServer(cfg)
@@ -82,10 +80,12 @@ func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
 	cleanup := func() {
 		for _, svr := range svrs {
 			svr.Close()
-			os.RemoveAll(svr.cfg.DataDir)
 		}
-		for _, u := range urls {
-			os.Remove(stripUnix.Replace(u))
+
+		for _, cfg := range cfgs {
+			os.RemoveAll(cfg.DataDir)
+
+			cleanUnixSocket(cfg)
 		}
 	}
 
@@ -139,17 +139,13 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 }
 
 func (s *testLeaderServerSuite) TearDownSuite(c *C) {
-	for _, svr := range s.svrs {
-		svr.Close()
-	}
 	s.client.Close()
 
-	// Make sure unix socket is removed.
 	for _, svr := range s.svrs {
-		os.Remove(stripUnix.Replace(svr.cfg.PeerUrls))
-		os.Remove(stripUnix.Replace(svr.cfg.ClientUrls))
-		os.Remove(stripUnix.Replace(svr.cfg.AdvertisePeerUrls))
-		os.Remove(stripUnix.Replace(svr.cfg.AdvertiseClientUrls))
+		svr.Close()
+		os.RemoveAll(svr.cfg.DataDir)
+
+		cleanUnixSocket(svr.cfg)
 	}
 }
 

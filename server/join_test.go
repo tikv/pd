@@ -136,16 +136,8 @@ type cleanUpFunc func()
 func mustNewJoinCluster(c *C, num int) ([]*Config, []*Server, cleanUpFunc) {
 	svrs := make([]*Server, 0, num)
 	cfgs := newTestMultiJoinConfig(num)
-	dirs := make([]string, 0, num)
-	urls := make([]string, 0, num*4)
 
 	for i, cfg := range cfgs {
-		dirs = append(dirs, cfg.DataDir)
-		urls = append(urls, cfg.PeerUrls)
-		urls = append(urls, cfg.ClientUrls)
-		urls = append(urls, cfg.AdvertisePeerUrls)
-		urls = append(urls, cfg.AdvertiseClientUrls)
-
 		svr, err := startPdWith(cfg)
 		c.Assert(err, IsNil)
 		svrs = append(svrs, svr)
@@ -157,11 +149,10 @@ func mustNewJoinCluster(c *C, num int) ([]*Config, []*Server, cleanUpFunc) {
 		for _, s := range svrs {
 			s.Close()
 		}
-		for _, dir := range dirs {
-			os.RemoveAll(dir)
-		}
-		for _, u := range urls {
-			os.Remove(stripUnix.Replace(u))
+		for _, cfg := range cfgs {
+			os.RemoveAll(cfg.DataDir)
+
+			cleanUnixSocket(cfg)
 		}
 	}
 
@@ -232,11 +223,8 @@ func (s *testJoinServerSuite) TestNewPDJoinsItself(c *C) {
 
 	defer func() {
 		svr.Close()
-
-		os.Remove(stripUnix.Replace(cfgs[0].PeerUrls))
-		os.Remove(stripUnix.Replace(cfgs[0].ClientUrls))
-		os.Remove(stripUnix.Replace(cfgs[0].AdvertisePeerUrls))
-		os.Remove(stripUnix.Replace(cfgs[0].AdvertiseClientUrls))
+		os.RemoveAll(cfgs[0].DataDir)
+		cleanUnixSocket(cfgs[0])
 	}()
 
 	err = waitMembers(svr, 1)

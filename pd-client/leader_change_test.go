@@ -31,17 +31,8 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 
 	ch := make(chan *server.Server, 3)
 
-	dirs := make([]string, 0, 3)
-	urls := make([]string, 0, 3*4)
-
 	for i := 0; i < 3; i++ {
 		cfg := cfgs[i]
-
-		dirs = append(dirs, cfg.DataDir)
-		urls = append(urls, cfg.PeerUrls)
-		urls = append(urls, cfg.ClientUrls)
-		urls = append(urls, cfg.AdvertiseClientUrls)
-		urls = append(urls, cfg.AdvertisePeerUrls)
 
 		go func() {
 			svr, err := server.NewServer(cfg)
@@ -70,11 +61,10 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		for _, svr := range svrs {
 			svr.Close()
 		}
-		for _, dir := range dirs {
-			os.RemoveAll(dir)
-		}
-		for _, u := range urls {
-			os.Remove(stripUnix.Replace(u))
+		for _, cfg := range cfgs {
+			os.RemoveAll(cfg.DataDir)
+
+			cleanUnixSocket(cfg)
 		}
 	}()
 
