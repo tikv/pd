@@ -30,7 +30,6 @@ import (
 
 const (
 	defaultBtreeDegree = 64
-	maxRandRegionTime  = 500 * time.Millisecond
 )
 
 type searchKeyItem struct {
@@ -467,9 +466,6 @@ func (r *regionsInfo) randLeaderRegion(storeID uint64) *metapb.Region {
 
 	// TODO: if costs too much time, we may refactor the rand leader region way.
 	cost := time.Now().Sub(start)
-	if cost > maxRandRegionTime {
-		log.Warnf("select leader region %d in %d regions for store %d too slow, cost %s", randRegionID, len(storeRegions), storeID, cost)
-	}
 	randRegionDuration.WithLabelValues("leader").Observe(cost.Seconds())
 
 	region, ok := r.regions[randRegionID]
@@ -512,9 +508,6 @@ func (r *regionsInfo) randRegion(storeID uint64) (*metapb.Region, *metapb.Peer, 
 
 	// TODO: if costs too much time, we may refactor the rand region way.
 	cost := time.Now().Sub(start)
-	if cost > maxRandRegionTime {
-		log.Warnf("select region %d in %d regions for store %d too slow, cost %s", region.GetId(), len(r.regions), storeID, cost)
-	}
 	randRegionDuration.WithLabelValues("follower").Observe(cost.Seconds())
 
 	return region, leader, follower
