@@ -37,9 +37,7 @@ func newTestServer(c *C) (*Server, cleanUpFunc) {
 
 	cleanup := func() {
 		svr.Close()
-		os.RemoveAll(svr.cfg.DataDir)
-
-		cleanUnixSocket(svr.cfg)
+		cleanConfig(svr.cfg)
 	}
 
 	return svr, cleanup
@@ -47,7 +45,11 @@ func newTestServer(c *C) (*Server, cleanUpFunc) {
 
 var stripUnix = strings.NewReplacer("unix://", "")
 
-func cleanUnixSocket(cfg *Config) {
+func cleanConfig(cfg *Config) {
+	// Clean data directory
+	os.RemoveAll(cfg.DataDir)
+
+	// Clean unix sockets
 	os.Remove(stripUnix.Replace(cfg.PeerUrls))
 	os.Remove(stripUnix.Replace(cfg.ClientUrls))
 	os.Remove(stripUnix.Replace(cfg.AdvertisePeerUrls))
@@ -83,9 +85,7 @@ func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
 		}
 
 		for _, cfg := range cfgs {
-			os.RemoveAll(cfg.DataDir)
-
-			cleanUnixSocket(cfg)
+			cleanConfig(cfg)
 		}
 	}
 
@@ -143,9 +143,7 @@ func (s *testLeaderServerSuite) TearDownSuite(c *C) {
 
 	for _, svr := range s.svrs {
 		svr.Close()
-		os.RemoveAll(svr.cfg.DataDir)
-
-		cleanUnixSocket(svr.cfg)
+		cleanConfig(svr.cfg)
 	}
 }
 

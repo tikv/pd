@@ -150,9 +150,7 @@ func mustNewJoinCluster(c *C, num int) ([]*Config, []*Server, cleanUpFunc) {
 			s.Close()
 		}
 		for _, cfg := range cfgs {
-			os.RemoveAll(cfg.DataDir)
-
-			cleanUnixSocket(cfg)
+			cleanConfig(cfg)
 		}
 	}
 
@@ -223,8 +221,7 @@ func (s *testJoinServerSuite) TestNewPDJoinsItself(c *C) {
 
 	defer func() {
 		svr.Close()
-		os.RemoveAll(cfgs[0].DataDir)
-		cleanUnixSocket(cfgs[0])
+		cleanConfig(cfgs[0])
 	}()
 
 	err = waitMembers(svr, 1)

@@ -14,7 +14,6 @@
 package pd
 
 import (
-	"os"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
@@ -62,9 +61,7 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 			svr.Close()
 		}
 		for _, cfg := range cfgs {
-			os.RemoveAll(cfg.DataDir)
-
-			cleanUnixSocket(cfg)
+			cleanConfig(cfg)
 		}
 	}()
 

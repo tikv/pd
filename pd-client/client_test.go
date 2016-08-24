@@ -59,7 +59,11 @@ var (
 
 var stripUnix = strings.NewReplacer("unix://", "")
 
-func cleanUnixSocket(cfg *server.Config) {
+func cleanConfig(cfg *server.Config) {
+	// Clean data directory
+	os.RemoveAll(cfg.DataDir)
+
+	// Clean unix sockets
 	os.Remove(stripUnix.Replace(cfg.PeerUrls))
 	os.Remove(stripUnix.Replace(cfg.ClientUrls))
 	os.Remove(stripUnix.Replace(cfg.AdvertisePeerUrls))
@@ -104,9 +108,8 @@ func newServer(c *C, clusterID uint64) (*server.Server, cleanupFunc) {
 
 	cleanup := func() {
 		s.Close()
-		os.RemoveAll(cfg.DataDir)
 
-		cleanUnixSocket(cfg)
+		cleanConfig(cfg)
 	}
 
 	return s, cleanup
