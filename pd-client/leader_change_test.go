@@ -61,7 +61,7 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 			svr.Close()
 		}
 		for _, cfg := range cfgs {
-			cleanConfig(cfg)
+			cleanServer(cfg)
 		}
 	}()
 

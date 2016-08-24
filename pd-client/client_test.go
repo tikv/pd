@@ -59,7 +59,7 @@ var (
 
 var stripUnix = strings.NewReplacer("unix://", "")
 
-func cleanConfig(cfg *server.Config) {
+func cleanServer(cfg *server.Config) {
 	// Clean data directory
 	os.RemoveAll(cfg.DataDir)
 
@@ -109,7 +109,7 @@ func newServer(c *C, clusterID uint64) (*server.Server, cleanupFunc) {
 	cleanup := func() {
 		s.Close()
 
-		cleanConfig(cfg)
+		cleanServer(cfg)
 	}
 
 	return s, cleanup

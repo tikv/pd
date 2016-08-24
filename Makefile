@@ -51,4 +51,6 @@ update_kvproto:
 	godep update github.com/pingcap/kvproto/pkg/...
 	rm Godeps vendor
 
-	
+clean:
+	# clean unix socket
+	rm `find . -type s`
