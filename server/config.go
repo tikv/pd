@@ -269,7 +269,7 @@ func (d *duration) UnmarshalJSON(text []byte) error {
 	if err == nil {
 		d.Duration = duration
 	}
-	return err
+	return errors.Trace(err)
 }
 
 func (d *duration) UnmarshalText(text []byte) error {

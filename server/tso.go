@@ -92,6 +92,7 @@ func (s *Server) syncTimestamp() error {
 		if wait := last.Sub(now); wait > 0 {
 			log.Warnf("wait %v to guarantee valid generated timestamp", wait)
 			time.Sleep(wait)
+			continue
 		}
 		break
 	}
