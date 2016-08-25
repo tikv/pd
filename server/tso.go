@@ -31,7 +31,7 @@ const (
 )
 
 var (
-	errTime = time.Time{}
+	zeroTime = time.Time{}
 )
 
 type atomicObject struct {
@@ -46,15 +46,15 @@ func (s *Server) getTimestampPath() string {
 func (s *Server) loadTimestamp() (time.Time, error) {
 	data, err := getValue(s.client, s.getTimestampPath())
 	if err != nil {
-		return errTime, errors.Trace(err)
+		return zeroTime, errors.Trace(err)
 	}
 	if data == nil {
-		return errTime, nil
+		return zeroTime, nil
 	}
 
 	nano, err := bytesToUint64(data)
 	if err != nil {
-		return errTime, errors.Trace(err)
+		return zeroTime, errors.Trace(err)
 	}
 
 	return time.Unix(0, int64(nano)), nil
@@ -127,12 +127,13 @@ func (s *Server) updateTimestamp() error {
 	}
 
 	if now.Sub(s.lastSavedTime) >= 0 {
+		last := s.lastSavedTime
 		save := now.Add(s.cfg.TsoSaveInterval.Duration)
 		if err := s.saveTimestamp(save); err != nil {
 			return errors.Trace(err)
 		}
 
-		log.Debugf("save timestamp ok: prev %v save %v", prev, save)
+		log.Debugf("save timestamp ok: prev %v last %v save %v", prev, last, save)
 	}
 
 	current := &atomicObject{
