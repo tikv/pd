@@ -53,4 +53,4 @@ update_kvproto:
 
 clean:
 	# clean unix socket
-	rm `find . -type s`
+	find . -type s | xargs -r rm
