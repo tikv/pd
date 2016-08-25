@@ -30,6 +30,10 @@ const (
 	maxLogical          = int64(1 << 18)
 )
 
+var (
+	errTime = time.Time{}
+)
+
 type atomicObject struct {
 	physical time.Time
 	logical  int64
@@ -40,8 +44,6 @@ func (s *Server) getTimestampPath() string {
 }
 
 func (s *Server) loadTimestamp() (time.Time, error) {
-	errTime := time.Unix(0, 0)
-
 	data, err := getValue(s.client, s.getTimestampPath())
 	if err != nil {
 		return errTime, errors.Trace(err)

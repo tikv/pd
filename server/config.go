@@ -100,10 +100,9 @@ func NewConfig() *Config {
 }
 
 const (
-	defaultLeaderLease     = int64(3)
-	defaultTsoSaveInterval = 2 * time.Second
-	defaultMaxPeerCount    = uint64(3)
-	defaultNextRetryDelay  = time.Second
+	defaultLeaderLease    = int64(3)
+	defaultMaxPeerCount   = uint64(3)
+	defaultNextRetryDelay = time.Second
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
@@ -217,7 +216,7 @@ func (c *Config) adjust() error {
 
 	adjustInt64(&c.LeaderLease, defaultLeaderLease)
 
-	adjustDuration(&c.TsoSaveInterval, defaultTsoSaveInterval)
+	adjustDuration(&c.TsoSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
 
 	if c.nextRetryDelay == 0 {
 		c.nextRetryDelay = defaultNextRetryDelay
@@ -259,6 +258,18 @@ type duration struct {
 
 func (d *duration) Seconds() uint64 {
 	return uint64(d.Duration.Seconds())
+}
+
+func (d *duration) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf(`"%s"`, d.String())), nil
+}
+
+func (d *duration) UnmarshalJSON(text []byte) error {
+	duration, err := time.ParseDuration(string(text))
+	if err == nil {
+		d.Duration = duration
+	}
+	return err
 }
 
 func (d *duration) UnmarshalText(text []byte) error {
