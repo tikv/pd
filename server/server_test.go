@@ -14,6 +14,8 @@
 package server
 
 import (
+	"math/rand"
+	"net"
 	"os"
 	"strings"
 	"testing"
@@ -21,6 +23,7 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 func TestServer(t *testing.T) {
@@ -103,6 +106,13 @@ func mustWaitLeader(c *C, svrs []*Server) *Server {
 	}
 	c.Fatal("no leader")
 	return nil
+}
+
+func mustRPCCall(c *C, conn net.Conn, req *pdpb.Request) *pdpb.Response {
+	resp, err := rpcCall(conn, uint64(rand.Int63()), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp, NotNil)
+	return resp
 }
 
 var _ = Suite(&testLeaderServerSuite{})

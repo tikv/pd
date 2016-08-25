@@ -178,7 +178,7 @@ func (s *Server) campaignLeader() error {
 		return errors.Trace(err)
 	}
 
-	tsTicker := time.NewTicker(time.Duration(updateTimestampStep) * time.Millisecond)
+	tsTicker := time.NewTicker(updateTimestampStep)
 	defer tsTicker.Stop()
 
 	for {

@@ -14,7 +14,6 @@
 package server
 
 import (
-	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -63,7 +62,7 @@ func recvResponse(c *C, conn net.Conn) (uint64, *pdpb.Response) {
 	return msgID, resp
 }
 
-func (s *testTsoSuite) testGetTimestamp(c *C, conn net.Conn, n int) {
+func (s *testTsoSuite) testGetTimestamp(c *C, conn net.Conn, n int) pdpb.Timestamp {
 	tso := &pdpb.TsoRequest{
 		Count: uint32(n),
 	}
@@ -73,15 +72,14 @@ func (s *testTsoSuite) testGetTimestamp(c *C, conn net.Conn, n int) {
 		Tso:     tso,
 	}
 
-	rawMsgID := uint64(rand.Int63())
-	sendRequest(c, conn, rawMsgID, req)
-	msgID, resp := recvResponse(c, conn)
-	c.Assert(rawMsgID, Equals, msgID)
+	resp := mustRPCCall(c, conn, req)
 	c.Assert(resp.Tso, NotNil)
 	c.Assert(resp.Tso.GetCount(), Equals, uint32(n))
 
-	res := resp.Tso.Timestamp
+	res := resp.Tso.GetTimestamp()
 	c.Assert(res.GetLogical(), Greater, int64(0))
+
+	return res
 }
 
 func mustGetLeader(c *C, client *clientv3.Client, leaderPath string) *pdpb.Leader {
@@ -111,7 +109,20 @@ func (s *testTsoSuite) TestTso(c *C) {
 			c.Assert(err, IsNil)
 			defer conn.Close()
 
-			s.testGetTimestamp(c, conn, 10)
+			last := pdpb.Timestamp{
+				Physical: 0,
+				Logical:  0,
+			}
+
+			for j := 0; j < 50; j++ {
+				ts := s.testGetTimestamp(c, conn, 10)
+				c.Assert(ts.GetPhysical(), Not(Less), last.GetPhysical())
+				if ts.GetPhysical() == last.GetPhysical() {
+					c.Assert(ts.GetLogical(), Greater, last.GetLogical())
+				}
+				last = ts
+				time.Sleep(10 * time.Millisecond)
+			}
 		}()
 	}
 

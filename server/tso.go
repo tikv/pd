@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	// update timestamp every updateTimestampStep milliseconds.
-	updateTimestampStep = int64(50)
+	// update timestamp every updateTimestampStep.
+	updateTimestampStep = 50 * time.Millisecond
 	maxLogical          = int64(1 << 18)
 )
 
@@ -39,21 +39,23 @@ func (s *Server) getTimestampPath() string {
 	return path.Join(s.rootPath, "timestamp")
 }
 
-func (s *Server) loadTimestamp() (int64, error) {
+func (s *Server) loadTimestamp() (time.Time, error) {
+	errTime := time.Unix(0, 0)
+
 	data, err := getValue(s.client, s.getTimestampPath())
 	if err != nil {
-		return 0, errors.Trace(err)
+		return errTime, errors.Trace(err)
 	}
 	if data == nil {
-		return 0, nil
+		return errTime, nil
 	}
 
-	ts, err := bytesToUint64(data)
+	nano, err := bytesToUint64(data)
 	if err != nil {
-		return 0, errors.Trace(err)
+		return errTime, errors.Trace(err)
 	}
 
-	return int64(ts), nil
+	return time.Unix(0, int64(nano)), nil
 }
 
 // save timestamp, if lastTs is 0, we think the timestamp doesn't exist, so create it,
@@ -85,27 +87,19 @@ func (s *Server) syncTimestamp() error {
 
 	for {
 		now = time.Now()
-
-		since := (now.UnixNano() - last) / 1e6
-		if since <= 0 {
-			return errors.Errorf("%s <= last saved time %s", now, time.Unix(0, last))
+		if wait := last.Sub(now); wait > 0 {
+			log.Warnf("wait %v to guarantee valid generated timestamp", wait)
+			time.Sleep(wait)
 		}
-
-		// TODO: can we speed up this?
-		if wait := 2*s.cfg.TsoSaveInterval - since; wait > 0 {
-			log.Warnf("wait %d milliseconds to guarantee valid generated timestamp", wait)
-			time.Sleep(time.Duration(wait) * time.Millisecond)
-			continue
-		}
-
 		break
 	}
 
-	if err = s.saveTimestamp(now); err != nil {
+	save := now.Add(s.cfg.TsoSaveInterval.Duration)
+	if err = s.saveTimestamp(save); err != nil {
 		return errors.Trace(err)
 	}
 
-	log.Debug("sync and save timestamp ok")
+	log.Debugf("sync and save timestamp ok: last %v save %v", last, save)
 
 	current := &atomicObject{
 		physical: now,
@@ -116,23 +110,26 @@ func (s *Server) syncTimestamp() error {
 }
 
 func (s *Server) updateTimestamp() error {
-	prev := s.ts.Load().(*atomicObject)
+	prev := s.ts.Load().(*atomicObject).physical
 	now := time.Now()
 
-	since := now.Sub(prev.physical).Nanoseconds() / 1e6
+	since := now.Sub(prev)
 	if since > 3*updateTimestampStep {
-		log.Warnf("clock offset: %v, prev: %v, now %v", since, prev.physical, now)
+		log.Warnf("clock offset: %v, prev: %v, now: %v", since, prev, now)
 	}
 	// Avoid the same physical time stamp
 	if since <= 0 {
-		log.Warnf("invalid physical timestamp, prev:%v, now:%v, re-update later", prev.physical, now)
+		log.Warnf("invalid physical timestamp, prev: %v, now: %v, re-update later", prev, now)
 		return nil
 	}
 
-	if now.Sub(s.lastSavedTime).Nanoseconds()/1e6 > s.cfg.TsoSaveInterval {
-		if err := s.saveTimestamp(now); err != nil {
+	if now.Sub(s.lastSavedTime) >= 0 {
+		save := now.Add(s.cfg.TsoSaveInterval.Duration)
+		if err := s.saveTimestamp(save); err != nil {
 			return errors.Trace(err)
 		}
+
+		log.Debugf("save timestamp ok: prev %v save %v", prev, save)
 	}
 
 	current := &atomicObject{
@@ -159,7 +156,7 @@ func (s *Server) getRespTS(count uint32) (pdpb.Timestamp, error) {
 		resp.Logical = atomic.AddInt64(&current.logical, int64(count))
 		if resp.Logical >= maxLogical {
 			log.Errorf("logical part outside of max logical interval %v, please check ntp time, retry count %d", resp, i)
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(updateTimestampStep)
 			continue
 		}
 		return resp, nil
