@@ -103,6 +103,9 @@ func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Leader, error) {
 
 // GetLeader gets pd cluster leader.
 func (s *Server) GetLeader() (*pdpb.Leader, error) {
+	if s.client == nil {
+		return nil, errors.New("server is not ready")
+	}
 	return getLeader(s.client, s.getLeaderPath())
 }
 
