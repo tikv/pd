@@ -112,7 +112,7 @@ func (c *expireRegionCache) doGC() {
 			}
 			c.Unlock()
 
-			log.Infof("GC %d items", count)
+			log.Debugf("GC %d items", count)
 		}
 	}
 }
