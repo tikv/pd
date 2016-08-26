@@ -9,20 +9,21 @@ all: dev install
 
 dev: build check test
 
-build: 
-	rm -rf vendor && ln -s _vendor/vendor vendor
+build:
+	mv _vendor/vendor vendor
 	$(GO) build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
-	rm -rf vendor
+	mkdir -p _vendor
+	mv vendor _vendor/vendor
 
 install: 
-	rm -rf vendor && ln -s _vendor/vendor vendor
+	mv _vendor/vendor vendor
 	$(GO) install ./...
-	rm -rf vendor
+	mv vendor _vendor/vendor
 
 test: 
-	rm -rf vendor && ln -s _vendor/vendor vendor
+	mv _vendor/vendor vendor
 	$(GO) test --race ./pd-client ./server ./server/api
-	rm -rf vendor
+	mv vendor _vendor/vendor
 
 check:
 	go get github.com/golang/lint/golint
@@ -42,15 +43,26 @@ deps:
 	rm vendor
 	mv Godeps _vendor/
 
+update:
+	which glide >/dev/null || curl https://glide.sh/get | sh
+	which glide-vc || go get -v -u github.com/sgotti/glide-vc
+	mv _vendor/vendor vendor
+	rm -rf _vendor
+ifdef PKG
+	glide --verbose get --strip-vendor --skip-test ${PKG}
+else
+	glide --verbose update --strip-vendor --skip-test
+endif
+	@echo "removing test files"
+	glide vc --only-code --no-tests
+	mkdir -p _vendor
+	mv vendor _vendor/vendor
+
 update_kvproto:
-	rm -rf Godeps vendor
-	ln -s _vendor/Godeps Godeps
-	ln -s _vendor/vendor vendor
-	# Guarantee executing OK.
-	go get -u -v -d github.com/pingcap/kvproto/pkg || true
-	godep update github.com/pingcap/kvproto/pkg/...
-	rm Godeps vendor
+	make update PKG=github.com/pingcap/kvproto/pkg
 
 clean:
 	# clean unix socket
 	find . -type s | xargs -r rm
+
+.PHONY: update clean

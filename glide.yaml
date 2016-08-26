@@ -1,0 +1,197 @@
+package: github.com/pingcap/pd
+import:
+- package: github.com/BurntSushi/toml
+  version: 056c9bc7be7190eaa7715723883caffa5f8fa3e4
+- package: github.com/beorn7/perks
+  version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
+  subpackages:
+  - quantile
+- package: github.com/boltdb/bolt
+  version: acc803f0ced151102ed51bf824f8709ebd6602bc
+- package: github.com/cloudfoundry-incubator/candiedyaml
+  version: 5cef21e2e4f0fd147973b558d4db7395176bcd95
+- package: github.com/cockroachdb/cmux
+  version: 9d8f8e431ac319fe4e84d8eaffa4061ddfea1efb
+- package: github.com/coreos/etcd
+  version: e2088b8073aa4f80a9d88b134ec71b749839db5b
+  subpackages:
+  - alarm
+  - auth
+  - auth/authpb
+  - client
+  - clientv3
+  - compactor
+  - discovery
+  - embed
+  - error
+  - etcdserver
+  - etcdserver/api
+  - etcdserver/api/v2http
+  - etcdserver/api/v2http/httptypes
+  - etcdserver/api/v3rpc
+  - etcdserver/api/v3rpc/rpctypes
+  - etcdserver/auth
+  - etcdserver/etcdserverpb
+  - etcdserver/membership
+  - etcdserver/stats
+  - lease
+  - lease/leasehttp
+  - lease/leasepb
+  - mvcc
+  - mvcc/backend
+  - mvcc/mvccpb
+  - pkg/adt
+  - pkg/contention
+  - pkg/cors
+  - pkg/crc
+  - pkg/fileutil
+  - pkg/httputil
+  - pkg/idutil
+  - pkg/ioutil
+  - pkg/logutil
+  - pkg/netutil
+  - pkg/pathutil
+  - pkg/pbutil
+  - pkg/runtime
+  - pkg/schedule
+  - pkg/tlsutil
+  - pkg/transport
+  - pkg/types
+  - pkg/wait
+  - raft
+  - raft/raftpb
+  - rafthttp
+  - snap
+  - snap/snappb
+  - store
+  - version
+  - wal
+  - wal/walpb
+- package: github.com/coreos/go-semver
+  version: ~0.2.0
+  subpackages:
+  - semver
+- package: github.com/coreos/go-systemd
+  version: fa8411dcbcbad22b8542b0433914ef68b123f989
+  subpackages:
+  - journal
+- package: github.com/coreos/pkg
+  version: ~3.0.0
+  subpackages:
+  - capnslog
+- package: github.com/ghodss/yaml
+  version: 1a6f069841556a7bcaff4a397ca6e8328d266c2f
+- package: github.com/gogo/protobuf
+  version: 318371cbef6bab80e8d1c69b470fffa79eebfb54
+  subpackages:
+  - proto
+- package: github.com/golang/protobuf
+  version: 874264fbbb43f4d91e999fecb4b40143ed611400
+  subpackages:
+  - jsonpb
+  - proto
+- package: github.com/google/btree
+  version: 7d79101e329e5a3adf994758c578dab82b90c017
+- package: github.com/gorilla/context
+  version: ~1.1.0
+- package: github.com/gorilla/mux
+  version: ~1.1.0
+- package: github.com/gorilla/websocket
+  version: a836c37014dbbf0d1e871d04531b851fcbdeb22d
+- package: github.com/grpc-ecosystem/grpc-gateway
+  version: f52d055dc48aec25854ed7d31862f78913cf17d1
+  subpackages:
+  - runtime
+  - runtime/internal
+  - utilities
+- package: github.com/jonboulle/clockwork
+  version: ~0.1.0
+- package: github.com/juju/errors
+  version: b2c7a7da5b2995941048f60146e67702a292e468
+- package: github.com/matttproud/golang_protobuf_extensions
+  version: c12348ce28de40eed0136aa2b644d0ee0650e56c
+  subpackages:
+  - pbutil
+- package: github.com/ngaut/deadline
+  version: fae8f9dfd7048de16575b9d4c255278e38c28a4f
+- package: github.com/ngaut/log
+  version: cec23d3e10b016363780d894a0eb732a12c06e02
+- package: github.com/pingcap/check
+  version: ce8a2f822ab1e245a4eefcef2996531c79c943f1
+- package: github.com/pingcap/kvproto
+  version: a5157c64a51a304161c5ec0b1d56cac387d540ec
+  subpackages:
+  - pkg/coprocessor
+  - pkg/eraftpb
+  - pkg/errorpb
+  - pkg/kvrpcpb
+  - pkg/metapb
+  - pkg/msgpb
+  - pkg/pdpb
+  - pkg/raft_cmdpb
+  - pkg/raft_serverpb
+  - pkg/util
+- package: github.com/prometheus/client_golang
+  version: 9f1ed1ed4a5f754c9b626e5cf8ec1ea7d622e017
+  subpackages:
+  - prometheus
+- package: github.com/prometheus/client_model
+  version: fa8ad6fec33561be4280a8f0514318c79d7f6cb6
+  subpackages:
+  - go
+- package: github.com/prometheus/common
+  version: 4402f4e5ea79ec15f3c574773b6a5198fbea215f
+  subpackages:
+  - expfmt
+  - internal/bitbucket.org/ww/goautoneg
+  - model
+- package: github.com/prometheus/procfs
+  version: abf152e5f3e97f2fafac028d2cc06c1feb87ffa5
+- package: github.com/twinj/uuid
+  version: 70cac2bcd273ef6a371bb96cde363d28b68734c3
+- package: github.com/ugorji/go
+  version: b94837a2404ab90efe9289e77a70694c355739cb
+  subpackages:
+  - codec
+- package: github.com/unrolled/render
+  version: 7bc415efc1b94ad17b0fc642cb50b3e2465027e7
+- package: github.com/urfave/negroni
+  version: dc6b9d037e8dab60cbfc09c61d6932537829be8b
+- package: github.com/xiang90/probing
+  version: 6a0cc1ae81b4cc11db5e491e030e4b98fba79c19
+- package: golang.org/x/crypto
+  version: fbbbdbdd6f61a8f86b00866626c2fe3d2a642db0
+  repo: https://github.com/golang/crypto.git
+  vcs: git
+  subpackages:
+  - bcrypt
+  - blowfish
+- package: golang.org/x/net
+  version: e90d6d0afc4c315a0d87a568ae68577cc15149a0
+  repo: https://github.com/golang/net.git
+  vcs: git
+  subpackages:
+  - context
+  - http2/hpack
+  - internal/timeseries
+  - lex/httplex
+  - trace
+- package: golang.org/x/sys
+  version: a646d33e2ee3172a661fc09bca23bb4889a41bc8
+  repo: https://github.com/golang/sys.git
+  vcs: git
+  subpackages:
+  - unix
+- package: google.golang.org/grpc
+  version: 02fca896ff5f50c6bbbee0860345a49344b37a03
+  repo: https://github.com/grpc/grpc-go.git
+  vcs: git
+  subpackages:
+  - codes
+  - credentials
+  - grpclog
+  - internal
+  - metadata
+  - naming
+  - peer
+  - transport
