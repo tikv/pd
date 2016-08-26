@@ -96,7 +96,7 @@ func CreateServer(cfg *Config) (*Server, error) {
 		cfg:           cfg,
 		isLeaderValue: 0,
 		conns:         make(map[*conn]struct{}),
-		closed:        0,
+		closed:        1,
 		rootPath:      path.Join(pdRootPath, strconv.FormatUint(cfg.ClusterID, 10)),
 	}
 
@@ -155,6 +155,8 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	s.client = client
 	s.id = uint64(etcd.Server.ID())
 
+	// Server has started.
+	atomic.StoreInt64(&s.closed, 0)
 	return nil
 }
 
