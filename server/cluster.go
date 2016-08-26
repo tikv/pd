@@ -379,7 +379,10 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	stores := c.cachedCluster.getStores()
 	for _, s := range stores {
 		if s.store.GetAddress() == store.GetAddress() {
-			return errors.Errorf("duplicated store address: %s", store.GetAddress())
+			if s.store.GetId() == store.GetId() {
+				return nil
+			}
+			return errors.Errorf("duplicated store address: %s, already registered by id: %d", store.GetAddress(), store.GetId())
 		}
 	}
 
