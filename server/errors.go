@@ -51,3 +51,16 @@ func newBootstrappedError() *pdpb.Response {
 
 	return r
 }
+
+func newStoreIsTombstoneError() *pdpb.Response {
+	r := &pdpb.Response{
+		Header: &pdpb.ResponseHeader{},
+	}
+
+	r.Header.Error = &pdpb.Error{
+		Message:     proto.String("store is tombstone"),
+		IsTombstone: &pdpb.StoreIsTombstoneError{},
+	}
+
+	return r
+}

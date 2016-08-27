@@ -19,6 +19,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
@@ -231,6 +232,16 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 	}, nil
 }
 
+func checkStore(cluster *RaftCluster, storeID uint64) *pdpb.Response {
+	store, _, err := cluster.GetStore(storeID)
+	if err == nil && store != nil {
+		if store.GetState() == metapb.StoreState_Tombstone {
+			return newStoreIsTombstoneError()
+		}
+	}
+	return nil
+}
+
 func (c *conn) handleStoreHeartbeat(req *pdpb.Request) (*pdpb.Response, error) {
 	request := req.GetStoreHeartbeat()
 	stats := request.GetStats()
@@ -241,6 +252,10 @@ func (c *conn) handleStoreHeartbeat(req *pdpb.Request) (*pdpb.Response, error) {
 	cluster, err := c.getRaftCluster()
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+
+	if resp := checkStore(cluster, stats.GetStoreId()); resp != nil {
+		return resp, nil
 	}
 
 	ok := cluster.cachedCluster.updateStoreStatus(stats)
@@ -305,6 +320,10 @@ func (c *conn) handlePutStore(req *pdpb.Request) (*pdpb.Response, error) {
 	cluster, err := c.getRaftCluster()
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+
+	if resp := checkStore(cluster, store.GetId()); resp != nil {
+		return resp, nil
 	}
 
 	if err = cluster.putStore(store); err != nil {

@@ -45,7 +45,7 @@ func newStoreHandler(svr *server.Server, rd *render.Render) *storeHandler {
 	}
 }
 
-func (h *storeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	cluster, err := h.svr.GetRaftCluster()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err)
@@ -77,6 +77,33 @@ func (h *storeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	storeInfo.Status.Scores = cluster.GetScores(storeInfo.Store, storeInfo.Status)
 
 	h.rd.JSON(w, http.StatusOK, storeInfo)
+}
+
+func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	cluster, err := h.svr.GetRaftCluster()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err)
+		return
+	}
+	if cluster == nil {
+		h.rd.JSON(w, http.StatusOK, nil)
+		return
+	}
+
+	vars := mux.Vars(r)
+	storeIDStr := vars["id"]
+	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	if err := cluster.RemoveStore(storeID); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, nil)
 }
 
 type storesHandler struct {

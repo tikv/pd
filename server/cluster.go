@@ -364,8 +364,18 @@ func (c *RaftCluster) GetStore(storeID uint64) (*metapb.Store, *StoreStatus, err
 }
 
 func (c *RaftCluster) putStore(store *metapb.Store) error {
+	c.Lock()
+	defer c.Unlock()
+
 	if store.GetId() == 0 {
 		return errors.Errorf("invalid put store %v", store)
+	}
+
+	// Do not allow to update store that is not in up state.
+	if s := c.cachedCluster.getStore(store.GetId()); s != nil {
+		if !s.isUpState() {
+			return errors.Errorf("store is not in up state: %v", s)
+		}
 	}
 
 	storeValue, err := store.Marshal()
@@ -397,6 +407,19 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	c.cachedCluster.addStore(store)
 
 	return nil
+}
+
+func (c *RaftCluster) RemoveStore(storeID uint64) error {
+	store, _, err := c.GetStore(storeID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// TODO: Gracefully remove store.
+	store.State = metapb.StoreState_Tombstone
+	store.Address = ""
+
+	return c.putStore(store)
 }
 
 // GetConfig gets config from cluster.

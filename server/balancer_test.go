@@ -102,6 +102,14 @@ func (s *testBalancerSuite) updateStore(c *C, clusterInfo *clusterInfo, storeID 
 	c.Assert(ok, IsTrue)
 }
 
+func (s *testBalancerSuite) updateStoreState(c *C, clusterInfo *clusterInfo, storeID uint64, state metapb.StoreState) {
+	storeInfo := clusterInfo.getStore(storeID)
+	storeInfo.store.State = state
+	clusterInfo.addStore(storeInfo.store)
+	ok := clusterInfo.updateStoreStatus(storeInfo.stats.Stats)
+	c.Assert(ok, IsTrue)
+}
+
 func (s *testBalancerSuite) addRegionPeer(c *C, clusterInfo *clusterInfo, storeID uint64, region *metapb.Region, leader *metapb.Peer) {
 	db := newReplicaBalancer(region, leader, nil, s.cfg)
 	_, bop, err := db.Balance(clusterInfo)
@@ -485,4 +493,91 @@ func (s *testBalancerSuite) TestReplicaBalancerWithDownPeers(c *C) {
 	c.Assert(ok, IsTrue)
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(4))
+}
+
+func (s *testBalancerSuite) TestReplicaBalancerWithTombstone(c *C) {
+	clusterInfo := s.newClusterInfo(c)
+	c.Assert(clusterInfo, NotNil)
+
+	region, leader := clusterInfo.regions.getRegion([]byte("a"))
+	c.Assert(region.GetPeers(), HasLen, 1)
+
+	cfg := newBalanceConfig()
+	cfg.adjust()
+	cfg.MinCapacityUsedRatio = 0
+	cb := newCapacityBalancer(cfg)
+	rb := newReplicaBalancer(region, leader, nil, cfg)
+
+	// The store id will be 1,2,3,4.
+	s.updateStore(c, clusterInfo, 1, 100, 40, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 30, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 20, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 10, 0, 0)
+
+	s.addRegionPeer(c, clusterInfo, 2, region, leader)
+	s.addRegionPeer(c, clusterInfo, 3, region, leader)
+
+	// Transfer peer to store 4 if it is not tombstone.
+	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0)
+	_, bop, err := cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	checkTransferPeer(c, bop.Ops, 3, 4)
+
+	// No balance if store 4 is tombstone.
+	s.updateStoreState(c, clusterInfo, 4, metapb.StoreState_Tombstone)
+	_, bop, err = cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop, IsNil)
+
+	// Do balance if store 4 is up.
+	s.updateStoreState(c, clusterInfo, 4, metapb.StoreState_Up)
+	_, bop, err = cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	checkTransferPeer(c, bop.Ops, 3, 4)
+
+	// No balance if store 2 is up.
+	_, bop, err = rb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop, IsNil)
+
+	// Do balance if store 2 is tombstone.
+	s.updateStoreState(c, clusterInfo, 2, metapb.StoreState_Tombstone)
+	_, bop, err = rb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop.Ops, HasLen, 1)
+	checkOnceAddPeer(c, bop.Ops[0], 4)
+
+	s.addRegionPeer(c, clusterInfo, 4, region, leader)
+	_, bop, err = rb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop.Ops, HasLen, 1)
+	checkOnceRemovePeer(c, bop.Ops[0], 2)
+}
+
+func checkAddPeer(c *C, oper Operator, addID uint64) {
+	op, ok := oper.(*changePeerOperator)
+	c.Assert(ok, IsTrue)
+	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, addID)
+}
+
+func checkOnceAddPeer(c *C, oper Operator, addID uint64) {
+	checkAddPeer(c, oper.(*onceOperator).Op, addID)
+}
+
+func checkRemovePeer(c *C, oper Operator, removeID uint64) {
+	op, ok := oper.(*changePeerOperator)
+	c.Assert(ok, IsTrue)
+	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, removeID)
+}
+
+func checkOnceRemovePeer(c *C, oper Operator, removeID uint64) {
+	checkRemovePeer(c, oper.(*onceOperator).Op, removeID)
+}
+
+func checkTransferPeer(c *C, ops []Operator, removeID uint64, addID uint64) {
+	c.Assert(ops, HasLen, 2)
+	checkAddPeer(c, ops[0], addID)
+	checkRemovePeer(c, ops[1], removeID)
 }

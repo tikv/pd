@@ -228,6 +228,13 @@ func (s *testClusterBaseSuite) getRegion(c *C, conn net.Conn, clusterID uint64, 
 	return resp.GetRegion.GetRegion()
 }
 
+func (s *testClusterBaseSuite) getRaftCluster(c *C) *RaftCluster {
+	cluster, err := s.svr.GetRaftCluster()
+	c.Assert(err, IsNil)
+	c.Assert(cluster, NotNil)
+	return cluster
+}
+
 func (s *testClusterBaseSuite) getClusterConfig(c *C, conn net.Conn, clusterID uint64) *metapb.Cluster {
 	req := &pdpb.Request{
 		Header:           newRequestHeader(clusterID),
@@ -311,6 +318,8 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	_, resp = recvResponse(c, conn)
 	c.Assert(resp.PutStore, IsNil)
 
+	s.testRemoveStore(c, conn, clusterID, store)
+
 	// Update cluster config.
 	req = &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
@@ -327,4 +336,48 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	c.Assert(resp.PutClusterConfig, NotNil)
 	meta := s.getClusterConfig(c, conn, clusterID)
 	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
+}
+
+func (s *testClusterSuite) testRemoveStore(c *C, conn net.Conn, clusterID uint64, store *metapb.Store) {
+	cluster := s.getRaftCluster(c)
+
+	// First remove should be OK.
+	err := cluster.RemoveStore(store.GetId())
+	c.Assert(err, IsNil)
+
+	newStore := s.getStore(c, conn, clusterID, store.GetId())
+	c.Assert(newStore.GetId(), Equals, store.GetId())
+	c.Assert(newStore.GetState(), Equals, metapb.StoreState_Tombstone)
+
+	// Remove again should be failed.
+	err = cluster.RemoveStore(store.GetId())
+	c.Assert(err, NotNil)
+
+	// Put after removed should be failed.
+	err = cluster.putStore(store)
+	c.Assert(err, NotNil)
+
+	// Put after removed should return tombstone error.
+	req := &pdpb.Request{
+		Header:   newRequestHeader(clusterID),
+		CmdType:  pdpb.CommandType_PutStore,
+		PutStore: &pdpb.PutStoreRequest{Store: store},
+	}
+	sendRequest(c, conn, 0, req)
+	_, resp := recvResponse(c, conn)
+	c.Assert(resp.PutStore, IsNil)
+	c.Assert(resp.Header.Error.IsTombstone, NotNil)
+
+	// Update after removed should return tombstone error.
+	req = &pdpb.Request{
+		Header:  newRequestHeader(clusterID),
+		CmdType: pdpb.CommandType_StoreHeartbeat,
+		StoreHeartbeat: &pdpb.StoreHeartbeatRequest{
+			Stats: &pdpb.StoreStats{StoreId: store.GetId()},
+		},
+	}
+	sendRequest(c, conn, 0, req)
+	_, resp = recvResponse(c, conn)
+	c.Assert(resp.StoreHeartbeat, IsNil)
+	c.Assert(resp.Header.Error.IsTombstone, NotNil)
 }
