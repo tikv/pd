@@ -423,7 +423,7 @@ func (rb *replicaBalancer) collectDownPeers(cluster *clusterInfo) []*metapb.Peer
 }
 
 func (rb *replicaBalancer) collectTombstonePeers(cluster *clusterInfo) []*metapb.Peer {
-	tombPeers := make([]*metapb.Peer, 0)
+	var tombPeers []*metapb.Peer
 	for _, peer := range rb.region.GetPeers() {
 		store := cluster.getStore(peer.GetStoreId())
 		if store == nil {
