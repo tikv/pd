@@ -409,6 +409,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	return nil
 }
 
+// RemoveStore marks a store as tombstone in cluster.
 func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	store, _, err := c.GetStore(storeID)
 	if err != nil {
