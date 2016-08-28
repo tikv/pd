@@ -1,5 +1,5 @@
-hash: 218acf66b5662f056ff2a9d8f70970766d88955c2e1ea17eab34990dd4cb94c2
-updated: 2016-08-27T09:42:11.040143407+08:00
+hash: c064cb5b57e6df3e9862041ab13fb2dbdb3fe6ee4d6ab48e54caaece4a1c977a
+updated: 2016-08-28T21:20:50.011388605+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -8,7 +8,7 @@ imports:
 - name: github.com/boltdb/bolt
   version: acc803f0ced151102ed51bf824f8709ebd6602bc
 - name: github.com/BurntSushi/toml
-  version: 056c9bc7be7190eaa7715723883caffa5f8fa3e4
+  version: bbd5bb678321a0d6e58f1099321dfa73391c1b6f
 - name: github.com/cloudfoundry-incubator/candiedyaml
   version: 5cef21e2e4f0fd147973b558d4db7395176bcd95
 - name: github.com/cockroachdb/cmux
