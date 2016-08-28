@@ -33,16 +33,6 @@ check:
 	golint ./... 2>&1 | grep -vE 'vendor' | awk '{print} END{if(NR>0) {exit 1}}'
 	gofmt -s -l . 2>&1 | grep -vE 'vendor' | awk '{print} END{if(NR>0) {exit 1}}'
 
-deps:
-	# see https://github.com/coreos/etcd/blob/master/scripts/updatedep.sh
-	rm -rf Godeps vendor
-	mkdir -p _vendor/vendor
-	ln -s _vendor/vendor vendor
-	godep save ./...
-	rm -rf _vendor/Godeps
-	rm vendor
-	mv Godeps _vendor/
-
 update:
 	which glide >/dev/null || curl https://glide.sh/get | sh
 	which glide-vc || go get -v -u github.com/sgotti/glide-vc
