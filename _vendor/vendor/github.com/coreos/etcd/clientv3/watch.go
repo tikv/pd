@@ -61,6 +61,9 @@ type WatchResponse struct {
 	// the channel sends a final response that has Canceled set to true with a non-nil Err().
 	Canceled bool
 
+	// Created is used to indicate the creation of the watcher.
+	Created bool
+
 	closeErr error
 }
 
@@ -89,7 +92,7 @@ func (wr *WatchResponse) Err() error {
 
 // IsProgressNotify returns true if the WatchResponse is progress notification.
 func (wr *WatchResponse) IsProgressNotify() bool {
-	return len(wr.Events) == 0 && !wr.Canceled
+	return len(wr.Events) == 0 && !wr.Canceled && !wr.Created
 }
 
 // watcher implements the Watcher interface
@@ -98,6 +101,7 @@ type watcher struct {
 
 	// mu protects the grpc streams map
 	mu sync.RWMutex
+
 	// streams holds all the active grpc streams keyed by ctx value.
 	streams map[string]*watchGrpcStream
 }
@@ -138,6 +142,8 @@ type watchRequest struct {
 	key string
 	end string
 	rev int64
+	// send created notification event if this field is true
+	createdNotify bool
 	// progressNotify is for progress updates
 	progressNotify bool
 	// filters is the list of events to filter out
@@ -223,6 +229,7 @@ func (w *watcher) Watch(ctx context.Context, key string, opts ...OpOption) Watch
 
 	wr := &watchRequest{
 		ctx:            ctx,
+		createdNotify:  ow.createdNotify,
 		key:            string(ow.key),
 		end:            string(ow.end),
 		rev:            ow.rev,
@@ -261,6 +268,7 @@ func (w *watcher) Watch(ctx context.Context, key string, opts ...OpOption) Watch
 	case reqc <- wr:
 		ok = true
 	case <-wr.ctx.Done():
+		wgs.stopIfEmpty()
 	case <-donec:
 		if wgs.closeErr != nil {
 			closeCh <- WatchResponse{closeErr: wgs.closeErr}
@@ -304,7 +312,12 @@ func (w *watcher) Close() (err error) {
 }
 
 func (w *watchGrpcStream) Close() (err error) {
-	close(w.stopc)
+	w.mu.Lock()
+	if w.stopc != nil {
+		close(w.stopc)
+		w.stopc = nil
+	}
+	w.mu.Unlock()
 	<-w.donec
 	select {
 	case err = <-w.errc:
@@ -367,11 +380,13 @@ func (w *watchGrpcStream) addStream(resp *pb.WatchResponse, pendingReq *watchReq
 
 // closeStream closes the watcher resources and removes it
 func (w *watchGrpcStream) closeStream(ws *watcherStream) {
+	w.mu.Lock()
 	// cancels request stream; subscriber receives nil channel
 	close(ws.initReq.retc)
 	// close subscriber's channel
 	close(ws.outc)
 	delete(w.streams, ws.id)
+	w.mu.Unlock()
 }
 
 // run is the root of the goroutines for managing a watcher client
@@ -389,6 +404,14 @@ func (w *watchGrpcStream) run() {
 		w.owner.mu.Unlock()
 		w.cancel()
 	}()
+
+	// already stopped?
+	w.mu.RLock()
+	stopc := w.stopc
+	w.mu.RUnlock()
+	if stopc == nil {
+		return
+	}
 
 	// start a stream with the etcd grpc server
 	if wc, closeErr = w.newWatchClient(); closeErr != nil {
@@ -418,6 +441,7 @@ func (w *watchGrpcStream) run() {
 				w.addStream(pbresp, pendingReq)
 				pendingReq = nil
 				curReqC = w.reqc
+				w.dispatchEvent(pbresp)
 			case pbresp.Canceled:
 				delete(cancelSet, pbresp.WatchId)
 				// shutdown serveStream, if any
@@ -465,7 +489,7 @@ func (w *watchGrpcStream) run() {
 				failedReq = pendingReq
 			}
 			cancelSet = make(map[int64]struct{})
-		case <-w.stopc:
+		case <-stopc:
 			return
 		}
 
@@ -489,19 +513,23 @@ func (w *watchGrpcStream) dispatchEvent(pbresp *pb.WatchResponse) bool {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	ws, ok := w.streams[pbresp.WatchId]
+	if !ok {
+		return false
+	}
+
 	events := make([]*Event, len(pbresp.Events))
 	for i, ev := range pbresp.Events {
 		events[i] = (*Event)(ev)
 	}
-	if ok {
-		wr := &WatchResponse{
-			Header:          *pbresp.Header,
-			Events:          events,
-			CompactRevision: pbresp.CompactRevision,
-			Canceled:        pbresp.Canceled}
-		ws.recvc <- wr
+	wr := &WatchResponse{
+		Header:          *pbresp.Header,
+		Events:          events,
+		CompactRevision: pbresp.CompactRevision,
+		Created:         pbresp.Created,
+		Canceled:        pbresp.Canceled,
 	}
-	return ok
+	ws.recvc <- wr
+	return true
 }
 
 // serveWatchClient forwards messages from the grpc stream to run()
@@ -533,6 +561,14 @@ func (w *watchGrpcStream) serveStream(ws *watcherStream) {
 	for !closing {
 		curWr := emptyWr
 		outc := ws.outc
+
+		// ignore created event if create notify is not requested or
+		// we already sent the initial created event (when we are on the resume path).
+		if len(wrs) > 0 && wrs[0].Created &&
+			(!ws.initReq.createdNotify || ws.lastRev != 0) {
+			wrs = wrs[1:]
+		}
+
 		if len(wrs) > 0 {
 			curWr = wrs[0]
 		} else {
@@ -605,10 +641,18 @@ func (w *watchGrpcStream) serveStream(ws *watcherStream) {
 		}
 	}
 
-	w.mu.Lock()
 	w.closeStream(ws)
-	w.mu.Unlock()
+	w.stopIfEmpty()
 	// lazily send cancel message if events on missing id
+}
+
+func (wgs *watchGrpcStream) stopIfEmpty() {
+	wgs.mu.Lock()
+	if len(wgs.streams) == 0 && wgs.stopc != nil {
+		close(wgs.stopc)
+		wgs.stopc = nil
+	}
+	wgs.mu.Unlock()
 }
 
 func (w *watchGrpcStream) newWatchClient() (pb.Watch_WatchClient, error) {
@@ -635,13 +679,14 @@ func (w *watchGrpcStream) resume() (ws pb.Watch_WatchClient, err error) {
 // openWatchClient retries opening a watchclient until retryConnection fails
 func (w *watchGrpcStream) openWatchClient() (ws pb.Watch_WatchClient, err error) {
 	for {
-		select {
-		case <-w.stopc:
+		w.mu.Lock()
+		stopc := w.stopc
+		w.mu.Unlock()
+		if stopc == nil {
 			if err == nil {
 				err = context.Canceled
 			}
 			return nil, err
-		default:
 		}
 		if ws, err = w.remote.Watch(w.ctx, grpc.FailFast(false)); ws != nil && err == nil {
 			break

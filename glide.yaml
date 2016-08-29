@@ -13,7 +13,7 @@ import:
 - package: github.com/cockroachdb/cmux
   version: 9d8f8e431ac319fe4e84d8eaffa4061ddfea1efb
 - package: github.com/coreos/etcd
-  version: e2088b8073aa4f80a9d88b134ec71b749839db5b
+  version: e53b99588a05d1f4ef172c178d4ed8e8106b8be4
   subpackages:
   - alarm
   - auth

@@ -31,8 +31,6 @@ const (
 )
 
 var (
-	minLeaseTTL = int64(5)
-
 	leaseBucketName = []byte("lease")
 	// do not use maxInt64 since it can overflow time which will add
 	// the offset of unix time (1970yr to seconds).
@@ -45,13 +43,18 @@ var (
 
 type LeaseID int64
 
-// RangeDeleter defines an interface with DeleteRange method.
+// RangeDeleter defines an interface with Txn and DeleteRange method.
 // We define this interface only for lessor to limit the number
 // of methods of mvcc.KV to what lessor actually needs.
 //
 // Having a minimum interface makes testing easy.
 type RangeDeleter interface {
-	DeleteRange(key, end []byte) (int64, int64)
+	// TxnBegin see comments on mvcc.KV
+	TxnBegin() int64
+	// TxnEnd see comments on mvcc.KV
+	TxnEnd(txnID int64) error
+	// TxnDeleteRange see comments on mvcc.KV
+	TxnDeleteRange(txnID int64, key, end []byte) (n, rev int64, err error)
 }
 
 // Lessor owns leases. It can grant, revoke, renew and modify leases for lessee.
@@ -138,6 +141,10 @@ type lessor struct {
 	// The leased items can be recovered by iterating all the keys in kv.
 	b backend.Backend
 
+	// minLeaseTTL is the minimum lease TTL that can be granted for a lease. Any
+	// requests for shorter TTLs are extended to the minimum TTL.
+	minLeaseTTL int64
+
 	expiredC chan []*Lease
 	// stopC is a channel whose closure indicates that the lessor should be stopped.
 	stopC chan struct{}
@@ -145,14 +152,15 @@ type lessor struct {
 	doneC chan struct{}
 }
 
-func NewLessor(b backend.Backend) Lessor {
-	return newLessor(b)
+func NewLessor(b backend.Backend, minLeaseTTL int64) Lessor {
+	return newLessor(b, minLeaseTTL)
 }
 
-func newLessor(b backend.Backend) *lessor {
+func newLessor(b backend.Backend, minLeaseTTL int64) *lessor {
 	l := &lessor{
-		leaseMap: make(map[LeaseID]*Lease),
-		b:        b,
+		leaseMap:    make(map[LeaseID]*Lease),
+		b:           b,
+		minLeaseTTL: minLeaseTTL,
 		// expiredC is a small buffered chan to avoid unnecessary blocking.
 		expiredC: make(chan []*Lease, 16),
 		stopC:    make(chan struct{}),
@@ -188,6 +196,10 @@ func (le *lessor) Grant(id LeaseID, ttl int64) (*Lease, error) {
 		return nil, ErrLeaseExists
 	}
 
+	if l.TTL < le.minLeaseTTL {
+		l.TTL = le.minLeaseTTL
+	}
+
 	if le.primary {
 		l.refresh(0)
 	} else {
@@ -211,16 +223,30 @@ func (le *lessor) Revoke(id LeaseID) error {
 	// unlock before doing external work
 	le.mu.Unlock()
 
-	if le.rd != nil {
-		for item := range l.itemSet {
-			le.rd.DeleteRange([]byte(item.Key), nil)
+	if le.rd == nil {
+		return nil
+	}
+
+	tid := le.rd.TxnBegin()
+	for item := range l.itemSet {
+		_, _, err := le.rd.TxnDeleteRange(tid, []byte(item.Key), nil)
+		if err != nil {
+			panic(err)
 		}
 	}
 
 	le.mu.Lock()
 	defer le.mu.Unlock()
 	delete(le.leaseMap, l.ID)
-	l.removeFrom(le.b)
+	// lease deletion needs to be in the same backend transaction with the
+	// kv deletion. Or we might end up with not executing the revoke or not
+	// deleting the keys if etcdserver fails in between.
+	le.b.BatchTx().UnsafeDelete(leaseBucketName, int64ToBytes(int64(l.ID)))
+
+	err := le.rd.TxnEnd(tid)
+	if err != nil {
+		panic(err)
+	}
 
 	return nil
 }
@@ -406,6 +432,9 @@ func (le *lessor) initAndRecover() {
 			panic("failed to unmarshal lease proto item")
 		}
 		ID := LeaseID(lpb.ID)
+		if lpb.TTL < le.minLeaseTTL {
+			lpb.TTL = le.minLeaseTTL
+		}
 		le.leaseMap[ID] = &Lease{
 			ID:  ID,
 			TTL: lpb.TTL,
@@ -443,30 +472,13 @@ func (l Lease) persistTo(b backend.Backend) {
 	b.BatchTx().Unlock()
 }
 
-func (l Lease) removeFrom(b backend.Backend) {
-	key := int64ToBytes(int64(l.ID))
-
-	b.BatchTx().Lock()
-	b.BatchTx().UnsafeDelete(leaseBucketName, key)
-	b.BatchTx().Unlock()
-}
-
-// refresh refreshes the expiry of the lease. It extends the expiry at least
-// minLeaseTTL second.
+// refresh refreshes the expiry of the lease.
 func (l *Lease) refresh(extend time.Duration) {
-	if l.TTL < minLeaseTTL {
-		l.TTL = minLeaseTTL
-	}
 	l.expiry = time.Now().Add(extend + time.Second*time.Duration(l.TTL))
 }
 
 // forever sets the expiry of lease to be forever.
-func (l *Lease) forever() {
-	if l.TTL < minLeaseTTL {
-		l.TTL = minLeaseTTL
-	}
-	l.expiry = forever
-}
+func (l *Lease) forever() { l.expiry = forever }
 
 type LeaseItem struct {
 	Key string

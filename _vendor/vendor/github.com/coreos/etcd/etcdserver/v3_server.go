@@ -35,11 +35,8 @@ const (
 	// specify a large value might end up with shooting in the foot.
 	maxRequestBytes = 1.5 * 1024 * 1024
 
-	// max timeout for waiting a v3 request to go through raft.
-	maxV3RequestTimeout = 5 * time.Second
-
 	// In the health case, there might be a small gap (10s of entries) between
-	// the applied index and commited index.
+	// the applied index and committed index.
 	// However, if the committed entries are very heavy to apply, the gap might grow.
 	// We should stop accepting new proposals if the gap growing to a certain point.
 	maxGapBetweenApplyAndCommitIndex = 1000
@@ -84,41 +81,19 @@ type Authenticator interface {
 }
 
 func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeResponse, error) {
-	var result *applyResult
-	var err error
-
 	if r.Serializable {
-		for {
-			authInfo, err := s.authInfoFromCtx(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			hdr := &pb.RequestHeader{}
-			if authInfo != nil {
-				hdr.Username = authInfo.Username
-				hdr.AuthRevision = authInfo.Revision
-			}
-
-			result = s.applyV3.Apply(&pb.InternalRaftRequest{Header: hdr, Range: r})
-
-			if result.err != nil {
-				if result.err == auth.ErrAuthOldRevision {
-					continue
-				}
-				break
-			}
-
-			if authInfo == nil || authInfo.Revision == s.authStore.Revision() {
-				break
-			}
-
-			// The revision that authorized this request is obsolete.
-			// For avoiding TOCTOU problem, retry of the request is required.
+		var resp *pb.RangeResponse
+		var err error
+		chk := func(ai *auth.AuthInfo) error {
+			return s.authStore.IsRangePermitted(ai, r.Key, r.RangeEnd)
 		}
-	} else {
-		result, err = s.processInternalRaftRequest(ctx, pb.InternalRaftRequest{Range: r})
+		get := func() { resp, err = s.applyV3Base.Range(noTxn, r) }
+		if serr := s.doSerialize(ctx, chk, get); serr != nil {
+			return nil, serr
+		}
+		return resp, err
 	}
+	result, err := s.processInternalRaftRequest(ctx, pb.InternalRaftRequest{Range: r})
 	if err != nil {
 		return nil, err
 	}
@@ -151,41 +126,19 @@ func (s *EtcdServer) DeleteRange(ctx context.Context, r *pb.DeleteRangeRequest) 
 }
 
 func (s *EtcdServer) Txn(ctx context.Context, r *pb.TxnRequest) (*pb.TxnResponse, error) {
-	var result *applyResult
-	var err error
-
 	if isTxnSerializable(r) {
-		for {
-			authInfo, err := s.authInfoFromCtx(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			hdr := &pb.RequestHeader{}
-			if authInfo != nil {
-				hdr.Username = authInfo.Username
-				hdr.AuthRevision = authInfo.Revision
-			}
-
-			result = s.applyV3.Apply(&pb.InternalRaftRequest{Header: hdr, Txn: r})
-
-			if result.err != nil {
-				if result.err == auth.ErrAuthOldRevision {
-					continue
-				}
-				break
-			}
-
-			if authInfo == nil || authInfo.Revision == s.authStore.Revision() {
-				break
-			}
-
-			// The revision that authorized this request is obsolete.
-			// For avoiding TOCTOU problem, retry of this request is required.
+		var resp *pb.TxnResponse
+		var err error
+		chk := func(ai *auth.AuthInfo) error {
+			return checkTxnAuth(s.authStore, ai, r)
 		}
-	} else {
-		result, err = s.processInternalRaftRequest(ctx, pb.InternalRaftRequest{Txn: r})
+		get := func() { resp, err = s.applyV3Base.Txn(r) }
+		if serr := s.doSerialize(ctx, chk, get); serr != nil {
+			return nil, serr
+		}
+		return resp, err
 	}
+	result, err := s.processInternalRaftRequest(ctx, pb.InternalRaftRequest{Txn: r})
 	if err != nil {
 		return nil, err
 	}
@@ -507,24 +460,12 @@ func (s *EtcdServer) isValidSimpleToken(token string) bool {
 		return false
 	}
 
-	// CAUTION: below index synchronization is required because this node
-	// might not receive and apply the log entry of Authenticate() RPC.
-	authApplied := false
-	for i := 0; i < 10; i++ {
-		if uint64(index) <= s.getAppliedIndex() {
-			authApplied = true
-			break
-		}
-
-		time.Sleep(100 * time.Millisecond)
+	select {
+	case <-s.applyWait.Wait(uint64(index)):
+		return true
+	case <-s.stop:
+		return true
 	}
-
-	if !authApplied {
-		plog.Errorf("timeout of waiting Authenticate() RPC")
-		return false
-	}
-
-	return true
 }
 
 func (s *EtcdServer) authInfoFromCtx(ctx context.Context) (*auth.AuthInfo, error) {
@@ -549,6 +490,33 @@ func (s *EtcdServer) authInfoFromCtx(ctx context.Context) (*auth.AuthInfo, error
 		return nil, ErrInvalidAuthToken
 	}
 	return authInfo, nil
+}
+
+// doSerialize handles the auth logic, with permissions checked by "chk", for a serialized request "get". Returns a non-nil error on authentication failure.
+func (s *EtcdServer) doSerialize(ctx context.Context, chk func(*auth.AuthInfo) error, get func()) error {
+	for {
+		ai, err := s.authInfoFromCtx(ctx)
+		if err != nil {
+			return err
+		}
+		if ai == nil {
+			// chk expects non-nil AuthInfo; use empty credentials
+			ai = &auth.AuthInfo{}
+		}
+		if err = chk(ai); err != nil {
+			if err == auth.ErrAuthOldRevision {
+				continue
+			}
+			return err
+		}
+		// fetch response for serialized request
+		get()
+		//  empty credentials or current auth info means no need to retry
+		if ai.Revision == 0 || ai.Revision == s.authStore.Revision() {
+			return nil
+		}
+		// avoid TOCTOU error, retry of the request is required.
+	}
 }
 
 func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.InternalRaftRequest) (*applyResult, error) {
@@ -586,7 +554,7 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 	}
 	ch := s.w.Register(id)
 
-	cctx, cancel := context.WithTimeout(ctx, maxV3RequestTimeout)
+	cctx, cancel := context.WithTimeout(ctx, s.Cfg.ReqTimeout())
 	defer cancel()
 
 	start := time.Now()
