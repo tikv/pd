@@ -127,8 +127,8 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 		{
 			// delete it again
 			name:    server.Name(),
-			checker: Equals,
-			status:  http.StatusNotFound,
+			checker: Not(Equals),
+			status:  http.StatusOK,
 		},
 	}
 
