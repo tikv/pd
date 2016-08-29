@@ -273,55 +273,14 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	c.Assert(store.GetAddress(), Equals, storeAddr)
 
 	// Update store.
-	storeAddr = "127.0.0.1:1"
-	req := &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_PutStore,
-		PutStore: &pdpb.PutStoreRequest{
-			Store: s.newStore(c, storeID, storeAddr),
-		},
-	}
+	store.Address = "127.0.0.1:1"
+	s.testPutStore(c, conn, clusterID, store)
 
-	sendRequest(c, conn, 0, req)
-	_, resp := recvResponse(c, conn)
-	c.Assert(resp.PutStore, NotNil)
-
-	store = s.getStore(c, conn, clusterID, storeID)
-	c.Assert(store.GetAddress(), Equals, storeAddr)
-
-	// Update store again.
-	storeAddr = "127.0.0.1:1"
-	req = &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_PutStore,
-		PutStore: &pdpb.PutStoreRequest{
-			Store: s.newStore(c, storeID, storeAddr),
-		},
-	}
-
-	sendRequest(c, conn, 0, req)
-	_, resp = recvResponse(c, conn)
-	c.Assert(resp.PutStore, NotNil)
-
-	// Put store with a duplicated address.
-	storeAddr = "127.0.0.1:1"
-	req = &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_PutStore,
-		PutStore: &pdpb.PutStoreRequest{
-			// Allocate a new store Id.
-			Store: s.newStore(c, 0, storeAddr),
-		},
-	}
-
-	sendRequest(c, conn, 0, req)
-	_, resp = recvResponse(c, conn)
-	c.Assert(resp.PutStore, IsNil)
-
+	// Remove store.
 	s.testRemoveStore(c, conn, clusterID, store)
 
 	// Update cluster config.
-	req = &pdpb.Request{
+	req := &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
 		CmdType: pdpb.CommandType_PutClusterConfig,
 		PutClusterConfig: &pdpb.PutClusterConfigRequest{
@@ -332,10 +291,41 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 		},
 	}
 	sendRequest(c, conn, 0, req)
-	_, resp = recvResponse(c, conn)
+	_, resp := recvResponse(c, conn)
 	c.Assert(resp.PutClusterConfig, NotNil)
 	meta := s.getClusterConfig(c, conn, clusterID)
 	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
+}
+
+func putStore(c *C, conn net.Conn, clusterID uint64, store *metapb.Store) *pdpb.Response {
+	req := &pdpb.Request{
+		Header:   newRequestHeader(clusterID),
+		CmdType:  pdpb.CommandType_PutStore,
+		PutStore: &pdpb.PutStoreRequest{Store: store},
+	}
+	sendRequest(c, conn, 0, req)
+	_, resp := recvResponse(c, conn)
+	return resp
+}
+
+func (s *testClusterSuite) testPutStore(c *C, conn net.Conn, clusterID uint64, store *metapb.Store) {
+	// Update store.
+	resp := putStore(c, conn, clusterID, store)
+	c.Assert(resp.PutStore, NotNil)
+	newStore := s.getStore(c, conn, clusterID, store.GetId())
+	c.Assert(newStore, DeepEquals, store)
+
+	// Update store again.
+	resp = putStore(c, conn, clusterID, store)
+	c.Assert(resp.PutStore, NotNil)
+
+	// Put store with a duplicated address.
+	resp = putStore(c, conn, clusterID, s.newStore(c, 0, store.GetAddress()))
+	c.Assert(resp.PutStore, IsNil)
+
+	// Put a new store.
+	resp = putStore(c, conn, clusterID, s.newStore(c, 0, "127.0.0.1:12345"))
+	c.Assert(resp.PutStore, NotNil)
 }
 
 func (s *testClusterSuite) testRemoveStore(c *C, conn net.Conn, clusterID uint64, store *metapb.Store) {
@@ -353,23 +343,13 @@ func (s *testClusterSuite) testRemoveStore(c *C, conn net.Conn, clusterID uint64
 	err = cluster.RemoveStore(store.GetId())
 	c.Assert(err, NotNil)
 
-	// Put after removed should be failed.
-	err = cluster.putStore(store)
-	c.Assert(err, NotNil)
-
 	// Put after removed should return tombstone error.
-	req := &pdpb.Request{
-		Header:   newRequestHeader(clusterID),
-		CmdType:  pdpb.CommandType_PutStore,
-		PutStore: &pdpb.PutStoreRequest{Store: store},
-	}
-	sendRequest(c, conn, 0, req)
-	_, resp := recvResponse(c, conn)
+	resp := putStore(c, conn, clusterID, store)
 	c.Assert(resp.PutStore, IsNil)
 	c.Assert(resp.Header.Error.IsTombstone, NotNil)
 
 	// Update after removed should return tombstone error.
-	req = &pdpb.Request{
+	req := &pdpb.Request{
 		Header:  newRequestHeader(clusterID),
 		CmdType: pdpb.CommandType_StoreHeartbeat,
 		StoreHeartbeat: &pdpb.StoreHeartbeatRequest{

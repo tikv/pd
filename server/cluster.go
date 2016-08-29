@@ -371,13 +371,27 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		return errors.Errorf("invalid put store %v", store)
 	}
 
-	// Do not allow to update store that is not in up state.
+	// There are 3 cases here:
+	// Case 1: store id exists with the same address - do nothing;
+	// Case 2: store id exists with different address - update address;
 	if s := c.cachedCluster.getStore(store.GetId()); s != nil {
-		if !s.isUpState() {
-			return errors.Errorf("store is not in up state: %v", s)
+		if s.store.GetAddress() == store.GetAddress() {
+			return nil
 		}
+		s.store.Address = store.Address
+		return c.saveStore(s.store)
 	}
 
+	// Case 3: store id does not exist, check duplicated address.
+	for _, s := range c.cachedCluster.getStores() {
+		if s.store.GetAddress() == store.GetAddress() {
+			return errors.Errorf("duplicated store address: %s, already registered by id: %d", store.GetAddress(), store.GetId())
+		}
+	}
+	return c.saveStore(store)
+}
+
+func (c *RaftCluster) saveStore(store *metapb.Store) error {
 	storeValue, err := store.Marshal()
 	if err != nil {
 		return errors.Trace(err)
@@ -385,42 +399,35 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 
 	storePath := makeStoreKey(c.clusterRoot, store.GetId())
 
-	// Fix #287, check duplicated store address first.
-	stores := c.cachedCluster.getStores()
-	for _, s := range stores {
-		if s.store.GetAddress() == store.GetAddress() {
-			if s.store.GetId() == store.GetId() {
-				return nil
-			}
-			return errors.Errorf("duplicated store address: %s, already registered by id: %d", store.GetAddress(), store.GetId())
-		}
-	}
-
 	resp, err := c.s.leaderTxn().Then(clientv3.OpPut(storePath, string(storeValue))).Commit()
 	if err != nil {
 		return errors.Trace(err)
 	}
 	if !resp.Succeeded {
-		return errors.Errorf("put store %v fail", store)
+		return errors.Errorf("save store %v fail", store)
 	}
 
 	c.cachedCluster.addStore(store)
-
 	return nil
 }
 
 // RemoveStore marks a store as tombstone in cluster.
 func (c *RaftCluster) RemoveStore(storeID uint64) error {
+	c.Lock()
+	defer c.Unlock()
+
 	store, _, err := c.GetStore(storeID)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
+	if store.State == metapb.StoreState_Tombstone {
+		return errors.New("store has been removed")
+	}
+
 	// TODO: Gracefully remove store.
 	store.State = metapb.StoreState_Tombstone
-	store.Address = ""
-
-	return c.putStore(store)
+	return c.saveStore(store)
 }
 
 // GetConfig gets config from cluster.
