@@ -74,7 +74,7 @@ func (s *testGetLeaderSuite) sendRequest(c *C, addr string) {
 		case <-s.done:
 			return
 		default:
-			// We don't need to check the response and errror,
+			// We don't need to check the response and error,
 			// just make sure the server will not panic.
 			conn, err := rpcConnect(addr)
 			if err == nil {
