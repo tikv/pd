@@ -1,5 +1,5 @@
-hash: 703c03eebde97185258b99fa2d07ecd61b00d3501740fad2d3064af2c797af19
-updated: 2016-08-29T21:00:24.711872083+08:00
+hash: 5bbcf4aca5c1d3abdb94bc10f02cca9e35f4de32d24e3c504e1a30032f04b31d
+updated: 2016-08-29T21:19:12.62204792+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -159,7 +159,7 @@ imports:
 - name: github.com/urfave/negroni
   version: dc6b9d037e8dab60cbfc09c61d6932537829be8b
 - name: github.com/xiang90/probing
-  version: 6a0cc1ae81b4cc11db5e491e030e4b98fba79c19
+  version: 07dd2e8dfe18522e9c447ba95f2fe95262f63bb2
 - name: golang.org/x/crypto
   version: fbbbdbdd6f61a8f86b00866626c2fe3d2a642db0
   repo: https://github.com/golang/crypto.git

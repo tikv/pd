@@ -158,7 +158,7 @@ import:
 - package: github.com/urfave/negroni
   version: dc6b9d037e8dab60cbfc09c61d6932537829be8b
 - package: github.com/xiang90/probing
-  version: 6a0cc1ae81b4cc11db5e491e030e4b98fba79c19
+  version: 07dd2e8dfe18522e9c447ba95f2fe95262f63bb2
 - package: golang.org/x/crypto
   version: fbbbdbdd6f61a8f86b00866626c2fe3d2a642db0
   repo: https://github.com/golang/crypto.git
