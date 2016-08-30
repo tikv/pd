@@ -203,5 +203,6 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	err = cluster.RemoveStore(store.GetId())
 	c.Assert(err, IsNil)
 	n, err = s.client.GetStore(store.GetId())
-	c.Assert(err, NotNil)
+	c.Assert(n, IsNil)
+	c.Assert(err, IsNil)
 }
