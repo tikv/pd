@@ -195,4 +195,13 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	n, err := s.client.GetStore(store.GetId())
 	c.Assert(err, IsNil)
 	c.Assert(n, DeepEquals, store)
+
+	// Get a removed store should return error.
+	cluster, err := s.srv.GetRaftCluster()
+	c.Assert(err, IsNil)
+	c.Assert(cluster, NotNil)
+	err = cluster.RemoveStore(store.GetId())
+	c.Assert(err, IsNil)
+	n, err = s.client.GetStore(store.GetId())
+	c.Assert(err, NotNil)
 }

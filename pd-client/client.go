@@ -164,6 +164,9 @@ func (c *client) GetStore(storeID uint64) (*metapb.Store, error) {
 	if store == nil {
 		return nil, errors.New("[pd] store field in rpc response not set")
 	}
+	if store.GetState() == metapb.StoreState_Tombstone {
+		return nil, errors.New("[pd] store state is tombstone")
+	}
 	return store, nil
 }
 
