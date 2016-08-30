@@ -312,8 +312,8 @@ func (s *testClusterSuite) testPutStore(c *C, conn net.Conn, clusterID uint64, s
 	// Update store.
 	resp := putStore(c, conn, clusterID, store)
 	c.Assert(resp.PutStore, NotNil)
-	newStore := s.getStore(c, conn, clusterID, store.GetId())
-	c.Assert(newStore, DeepEquals, store)
+	updatedStore := s.getStore(c, conn, clusterID, store.GetId())
+	c.Assert(updatedStore, DeepEquals, store)
 
 	// Update store again.
 	resp = putStore(c, conn, clusterID, store)
@@ -335,9 +335,9 @@ func (s *testClusterSuite) testRemoveStore(c *C, conn net.Conn, clusterID uint64
 	err := cluster.RemoveStore(store.GetId())
 	c.Assert(err, IsNil)
 
-	newStore := s.getStore(c, conn, clusterID, store.GetId())
-	c.Assert(newStore.GetId(), Equals, store.GetId())
-	c.Assert(newStore.GetState(), Equals, metapb.StoreState_Tombstone)
+	removedStore := s.getStore(c, conn, clusterID, store.GetId())
+	c.Assert(removedStore.GetId(), Equals, store.GetId())
+	c.Assert(removedStore.GetState(), Equals, metapb.StoreState_Tombstone)
 
 	// Remove again should be failed.
 	err = cluster.RemoveStore(store.GetId())

@@ -232,6 +232,8 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 	}, nil
 }
 
+// checkStore returns an error response if the store exists and is in tombstone state.
+// It returns nil if it can't get the store.
 func checkStore(cluster *RaftCluster, storeID uint64) *pdpb.Response {
 	store, _, err := cluster.GetStore(storeID)
 	if err == nil && store != nil {
