@@ -192,16 +192,28 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 }
 
 func (s *testClientSuite) TestGetStore(c *C) {
+	cluster := s.srv.GetRaftCluster()
+	c.Assert(cluster, NotNil)
+
+	// Get an up store should be OK.
 	n, err := s.client.GetStore(store.GetId())
 	c.Assert(err, IsNil)
 	c.Assert(n, DeepEquals, store)
 
 	// Get a removed store should return error.
-	cluster := s.srv.GetRaftCluster()
-	c.Assert(cluster, NotNil)
 	err = cluster.RemoveStore(store.GetId())
 	c.Assert(err, IsNil)
+
+	// Get an offline store should be OK.
 	n, err = s.client.GetStore(store.GetId())
-	c.Assert(n, IsNil)
 	c.Assert(err, IsNil)
+	c.Assert(n.GetState(), Equals, metapb.StoreState_Offline)
+
+	err = cluster.BuryStore(store.GetId(), true)
+	c.Assert(err, IsNil)
+
+	// Get a tombstone store should fail.
+	n, err = s.client.GetStore(store.GetId())
+	c.Assert(err, IsNil)
+	c.Assert(n, IsNil)
 }

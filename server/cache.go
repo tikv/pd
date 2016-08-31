@@ -158,14 +158,17 @@ type regionsInfo struct {
 	regions map[uint64]*metapb.Region
 	// search key -> region id
 	searchRegions *btree.BTree
+	// store id -> region count
+	storeRegionCount map[uint64]uint64
 
 	leaders *leaders
 }
 
 func newRegionsInfo() *regionsInfo {
 	return &regionsInfo{
-		regions:       make(map[uint64]*metapb.Region),
-		searchRegions: btree.New(defaultBtreeDegree),
+		regions:          make(map[uint64]*metapb.Region),
+		searchRegions:    btree.New(defaultBtreeDegree),
+		storeRegionCount: make(map[uint64]uint64),
 		leaders: &leaders{
 			storeRegions: make(map[uint64]map[uint64]struct{}),
 			regionStores: make(map[uint64]uint64),
@@ -263,6 +266,8 @@ func (r *regionsInfo) addRegion(region *metapb.Region) {
 	}
 
 	r.regions[region.GetId()] = region
+
+	r.addRegionCount(region)
 }
 
 func (r *regionsInfo) updateRegion(region *metapb.Region) {
@@ -272,10 +277,18 @@ func (r *regionsInfo) updateRegion(region *metapb.Region) {
 
 	oldItem := r.searchRegions.ReplaceOrInsert(item)
 	if oldItem == nil {
-		log.Fatalf("updateRegion for none existed region - %v", region)
+		log.Fatalf("updateRegion for none existed region in searchRegions - %v", region)
+	}
+
+	oldRegion, ok := r.regions[region.GetId()]
+	if !ok {
+		log.Fatalf("updateRegion for none existed region in regions - %v", region)
 	}
 
 	r.regions[region.GetId()] = region
+
+	r.addRegionCount(region)
+	r.removeRegionCount(oldRegion)
 }
 
 func (r *regionsInfo) removeRegion(region *metapb.Region) {
@@ -286,12 +299,31 @@ func (r *regionsInfo) removeRegion(region *metapb.Region) {
 
 	oldItem := r.searchRegions.Delete(item)
 	if oldItem == nil {
-		log.Fatalf("removeRegion for none existed region - %v", region)
+		log.Fatalf("removeRegion for none existed region in searchRegions - %v", region)
+	}
+
+	_, ok := r.regions[region.GetId()]
+	if !ok {
+		log.Fatalf("removeRegion for none existed region in regions - %v", region)
 	}
 
 	delete(r.regions, region.GetId())
 
 	r.leaders.remove(regionID)
+
+	r.removeRegionCount(region)
+}
+
+func (r *regionsInfo) addRegionCount(region *metapb.Region) {
+	for _, peer := range region.GetPeers() {
+		r.storeRegionCount[peer.GetStoreId()]++
+	}
+}
+
+func (r *regionsInfo) removeRegionCount(region *metapb.Region) {
+	for _, peer := range region.GetPeers() {
+		r.storeRegionCount[peer.GetStoreId()]--
+	}
 }
 
 func (r *regionsInfo) heartbeatVersion(region *metapb.Region) (bool, *metapb.Region, error) {
@@ -427,6 +459,13 @@ func (r *regionsInfo) heartbeat(region *metapb.Region, leaderPeer *metapb.Peer) 
 	}
 
 	return resp, changePeer, nil
+}
+
+func (r *regionsInfo) getStoreRegionCount(storeID uint64) uint64 {
+	r.RLock()
+	defer r.RUnlock()
+
+	return r.storeRegionCount[storeID]
 }
 
 func (r *regionsInfo) leaderRegionCount(storeID uint64) int {

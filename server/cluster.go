@@ -58,6 +58,19 @@ type RaftCluster struct {
 
 	// balancer worker
 	balancerWorker *balancerWorker
+
+	wg   sync.WaitGroup
+	quit chan struct{}
+}
+
+func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
+	return &RaftCluster{
+		s:           s,
+		running:     false,
+		clusterID:   clusterID,
+		clusterRoot: s.getClusterRootPath(),
+		quit:        make(chan struct{}),
+	}
 }
 
 func (c *RaftCluster) start(meta metapb.Cluster) error {
@@ -88,6 +101,9 @@ func (c *RaftCluster) start(meta metapb.Cluster) error {
 	c.balancerWorker = newBalancerWorker(c.cachedCluster, &c.s.cfg.BalanceCfg)
 	c.balancerWorker.run()
 
+	c.wg.Add(1)
+	go c.runBackgroundJobs(c.s.cfg.BalanceCfg.BalanceInterval)
+
 	c.running = true
 
 	return nil
@@ -101,9 +117,12 @@ func (c *RaftCluster) stop() {
 		return
 	}
 
-	c.balancerWorker.stop()
-
 	c.running = false
+
+	close(c.quit)
+	c.wg.Wait()
+
+	c.balancerWorker.stop()
 }
 
 func (c *RaftCluster) isRunning() bool {
@@ -412,7 +431,8 @@ func (c *RaftCluster) saveStore(store *metapb.Store) error {
 	return nil
 }
 
-// RemoveStore marks a store as tombstone in cluster.
+// RemoveStore marks a store as offline in cluster.
+// State transition: Up -> Offline.
 func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	c.Lock()
 	defer c.Unlock()
@@ -422,13 +442,79 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 		return errors.Trace(err)
 	}
 
+	// Remove an offline store should be OK, nothing to do.
+	if store.State == metapb.StoreState_Offline {
+		return nil
+	}
+
 	if store.State == metapb.StoreState_Tombstone {
 		return errors.New("store has been removed")
 	}
 
-	// TODO: Gracefully remove store.
+	store.State = metapb.StoreState_Offline
+	return c.saveStore(store)
+}
+
+// BuryStore marks a store as tombstone in cluster.
+// State transition:
+// Case 1: Up -> Tombstone (if force is true);
+// Case 2: Offline -> Tombstone.
+func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
+	c.Lock()
+	defer c.Unlock()
+
+	store, _, err := c.GetStore(storeID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// Bury a tombstone store should be OK, nothing to do.
+	if store.State == metapb.StoreState_Tombstone {
+		return nil
+	}
+
+	if store.State == metapb.StoreState_Up {
+		if !force {
+			return errors.New("store is still up, please remove store gracefully")
+		}
+		log.Warnf("forcedly bury store %v", store)
+	}
+
 	store.State = metapb.StoreState_Tombstone
 	return c.saveStore(store)
+}
+
+func (c *RaftCluster) checkStores() {
+	cluster := c.cachedCluster
+	for _, store := range cluster.getMetaStores() {
+		if store.GetState() != metapb.StoreState_Offline {
+			continue
+		}
+		if cluster.regions.getStoreRegionCount(store.GetId()) == 0 {
+			err := c.BuryStore(store.GetId(), false)
+			if err != nil {
+				log.Errorf("bury store %v failed: %v", store, err)
+			} else {
+				log.Infof("buried store %v", store)
+			}
+		}
+	}
+}
+
+func (c *RaftCluster) runBackgroundJobs(interval uint64) {
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(time.Duration(interval) * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.quit:
+			return
+		case <-ticker.C:
+			c.checkStores()
+		}
+	}
 }
 
 // GetConfig gets config from cluster.

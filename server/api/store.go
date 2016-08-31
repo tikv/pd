@@ -90,7 +90,14 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := cluster.RemoveStore(storeID); err != nil {
+	_, force := r.URL.Query()["force"]
+	if force {
+		err = cluster.BuryStore(storeID, force)
+	} else {
+		err = cluster.RemoveStore(storeID)
+	}
+
+	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err)
 		return
 	}

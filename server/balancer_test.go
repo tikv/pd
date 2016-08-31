@@ -495,7 +495,7 @@ func (s *testBalancerSuite) TestReplicaBalancerWithDownPeers(c *C) {
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(4))
 }
 
-func (s *testBalancerSuite) TestReplicaBalancerWithTombstone(c *C) {
+func (s *testBalancerSuite) testReplicaBalancerWithNonUpState(c *C, state metapb.StoreState) {
 	clusterInfo := s.newClusterInfo(c)
 	c.Assert(clusterInfo, NotNil)
 
@@ -517,14 +517,14 @@ func (s *testBalancerSuite) TestReplicaBalancerWithTombstone(c *C) {
 	s.addRegionPeer(c, clusterInfo, 2, region, leader)
 	s.addRegionPeer(c, clusterInfo, 3, region, leader)
 
-	// Transfer peer to store 4 if it is not tombstone.
+	// Transfer peer to store 4 if it is up.
 	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0)
 	_, bop, err := cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	checkTransferPeer(c, bop.Ops, 3, 4)
 
-	// No balance if store 4 is tombstone.
-	s.updateStoreState(c, clusterInfo, 4, metapb.StoreState_Tombstone)
+	// No balance if store 4 is not up.
+	s.updateStoreState(c, clusterInfo, 4, state)
 	_, bop, err = cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
@@ -540,8 +540,8 @@ func (s *testBalancerSuite) TestReplicaBalancerWithTombstone(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(bop, IsNil)
 
-	// Do balance if store 2 is tombstone.
-	s.updateStoreState(c, clusterInfo, 2, metapb.StoreState_Tombstone)
+	// Do balance if store 2 is not up.
+	s.updateStoreState(c, clusterInfo, 2, state)
 	_, bop, err = rb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	c.Assert(bop.Ops, HasLen, 1)
@@ -552,6 +552,14 @@ func (s *testBalancerSuite) TestReplicaBalancerWithTombstone(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(bop.Ops, HasLen, 1)
 	checkOnceRemovePeer(c, bop.Ops[0], 2)
+}
+
+func (s *testBalancerSuite) TestReplicaBalancerWithOffline(c *C) {
+	s.testReplicaBalancerWithNonUpState(c, metapb.StoreState_Offline)
+}
+
+func (s *testBalancerSuite) TestReplicaBalancerWithTombstone(c *C) {
+	s.testReplicaBalancerWithNonUpState(c, metapb.StoreState_Tombstone)
 }
 
 func checkAddPeer(c *C, oper Operator, addID uint64) {

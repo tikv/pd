@@ -327,20 +327,70 @@ func (s *testClusterSuite) testPutStore(c *C, conn net.Conn, clusterID uint64, s
 	c.Assert(resp.PutStore, NotNil)
 }
 
+func (s *testClusterSuite) resetStoreState(c *C, storeID uint64, state metapb.StoreState) {
+	cluster, err := s.svr.GetRaftCluster()
+	c.Assert(err, IsNil)
+	c.Assert(cluster, NotNil)
+
+	store := &metapb.Store{
+		Id:    storeID,
+		State: state,
+	}
+	cluster.cachedCluster.addStore(store)
+}
+
 func (s *testClusterSuite) testRemoveStore(c *C, conn net.Conn, clusterID uint64, store *metapb.Store) {
 	cluster := s.getRaftCluster(c)
 
-	// First remove should be OK.
-	err := cluster.RemoveStore(store.GetId())
-	c.Assert(err, IsNil)
+	// When store is up:
+	{
+		// Case 1: RemoveStore should be OK;
+		s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
+		err := cluster.RemoveStore(store.GetId())
+		c.Assert(err, IsNil)
+		removedStore := s.getStore(c, conn, clusterID, store.GetId())
+		c.Assert(removedStore.GetState(), Equals, metapb.StoreState_Offline)
+		// Case 2: BuryStore w/ force should be OK;
+		s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
+		err = cluster.BuryStore(store.GetId(), true)
+		c.Assert(err, IsNil)
+		buriedStore := s.getStore(c, conn, clusterID, store.GetId())
+		c.Assert(buriedStore.GetState(), Equals, metapb.StoreState_Tombstone)
+		// Case 3: BuryStore w/o force should fail.
+		s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
+		err = cluster.BuryStore(store.GetId(), false)
+		c.Assert(err, NotNil)
+	}
 
-	removedStore := s.getStore(c, conn, clusterID, store.GetId())
-	c.Assert(removedStore.GetId(), Equals, store.GetId())
-	c.Assert(removedStore.GetState(), Equals, metapb.StoreState_Tombstone)
+	// When store is offline:
+	{
+		// Case 1: RemoveStore should be OK;
+		s.resetStoreState(c, store.GetId(), metapb.StoreState_Offline)
+		err := cluster.RemoveStore(store.GetId())
+		c.Assert(err, IsNil)
+		removedStore := s.getStore(c, conn, clusterID, store.GetId())
+		c.Assert(removedStore.GetState(), Equals, metapb.StoreState_Offline)
+		// Case 2: BuryStore w/ or w/o force should be OK.
+		s.resetStoreState(c, store.GetId(), metapb.StoreState_Offline)
+		err = cluster.BuryStore(store.GetId(), false)
+		c.Assert(err, IsNil)
+		buriedStore := s.getStore(c, conn, clusterID, store.GetId())
+		c.Assert(buriedStore.GetState(), Equals, metapb.StoreState_Tombstone)
+	}
 
-	// Remove again should be failed.
-	err = cluster.RemoveStore(store.GetId())
-	c.Assert(err, NotNil)
+	// When store is tombstone:
+	{
+		// Case 1: RemoveStore should should fail;
+		s.resetStoreState(c, store.GetId(), metapb.StoreState_Tombstone)
+		err := cluster.RemoveStore(store.GetId())
+		c.Assert(err, NotNil)
+		// Case 2: BuryStore w/ or w/o force should be OK.
+		s.resetStoreState(c, store.GetId(), metapb.StoreState_Tombstone)
+		err = cluster.BuryStore(store.GetId(), false)
+		c.Assert(err, IsNil)
+		buriedStore := s.getStore(c, conn, clusterID, store.GetId())
+		c.Assert(buriedStore.GetState(), Equals, metapb.StoreState_Tombstone)
+	}
 
 	// Put after removed should return tombstone error.
 	resp := putStore(c, conn, clusterID, store)
@@ -359,4 +409,53 @@ func (s *testClusterSuite) testRemoveStore(c *C, conn net.Conn, clusterID uint64
 	_, resp = recvResponse(c, conn)
 	c.Assert(resp.StoreHeartbeat, IsNil)
 	c.Assert(resp.Header.Error.IsTombstone, NotNil)
+}
+
+func (s *testClusterSuite) testCheckStores(c *C, conn net.Conn, clusterID uint64) {
+	cluster, err := s.svr.GetRaftCluster()
+	c.Assert(err, IsNil)
+	c.Assert(cluster, NotNil)
+
+	store := s.newStore(c, 0, "127.0.0.1:11111")
+	resp := putStore(c, conn, clusterID, store)
+	c.Assert(resp.PutStore, NotNil)
+
+	// store is up w/o region peers will not be buried.
+	cluster.checkStores()
+	tmpStore := s.getStore(c, conn, clusterID, store.GetId())
+	c.Assert(tmpStore.GetState(), Equals, metapb.StoreState_Up)
+
+	// Add a region peer to store.
+	leader := &metapb.Peer{StoreId: store.GetId()}
+	region := s.newRegion(c, 0, []byte{'a'}, []byte{'b'}, []*metapb.Peer{leader}, nil)
+	_, err = cluster.handleRegionHeartbeat(region, leader, nil)
+	c.Assert(err, IsNil)
+	c.Assert(cluster.cachedCluster.regions.getStoreRegionCount(store.GetId()), Equals, 1)
+
+	// store is up w/ region peers will not be buried.
+	cluster.checkStores()
+	tmpStore = s.getStore(c, conn, clusterID, store.GetId())
+	c.Assert(tmpStore.GetState(), Equals, metapb.StoreState_Up)
+
+	err = cluster.RemoveStore(store.GetId())
+	c.Assert(err, IsNil)
+	removedStore := s.getStore(c, conn, clusterID, store.GetId())
+	c.Assert(removedStore.GetState(), Equals, metapb.StoreState_Offline)
+
+	// store is offline w/ region peers will not be buried.
+	cluster.checkStores()
+	tmpStore = s.getStore(c, conn, clusterID, store.GetId())
+	c.Assert(tmpStore.GetState(), Equals, metapb.StoreState_Up)
+
+	// Clear store's region peers.
+	leader.StoreId = 0
+	region.Peers = []*metapb.Peer{leader}
+	_, err = cluster.handleRegionHeartbeat(region, leader, nil)
+	c.Assert(err, IsNil)
+	c.Assert(cluster.cachedCluster.regions.getStoreRegionCount(store.GetId()), Equals, 0)
+
+	// store is offline w/o region peers will be buried.
+	cluster.checkStores()
+	tmpStore = s.getStore(c, conn, clusterID, store.GetId())
+	c.Assert(tmpStore.GetState(), Equals, metapb.StoreState_Tombstone)
 }

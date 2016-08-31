@@ -14,6 +14,7 @@
 package server
 
 import (
+	"math/rand"
 	"sync/atomic"
 
 	. "github.com/pingcap/check"
@@ -211,6 +212,67 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	for _, store := range allStores {
 		c.Assert(stores, HasKey, store.GetId())
 	}
+}
+
+func randRegions(count int) []*metapb.Region {
+	regions := make([]*metapb.Region, 0, count)
+	for i := 0; i < count; i++ {
+		peers := make([]*metapb.Peer, 0, 3)
+		for j := 0; j < 3; j++ {
+			peer := &metapb.Peer{StoreId: uint64(rand.Intn(count))}
+			peers = append(peers, peer)
+		}
+		region := &metapb.Region{
+			Id:       uint64(i),
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			Peers:    peers,
+		}
+		regions = append(regions, region)
+	}
+	return regions
+}
+
+func checkStoreRegionCount(c *C, r *regionsInfo, regions []*metapb.Region) {
+	stores := make(map[uint64]uint64, 0)
+	for _, region := range regions {
+		for _, peer := range region.GetPeers() {
+			stores[peer.GetStoreId()]++
+		}
+	}
+	for id, count := range stores {
+		c.Assert(r.getStoreRegionCount(id), Equals, count)
+	}
+}
+
+func (s *testClusterCacheSuite) TestStoreRegionCount(c *C) {
+	count := 10
+	addRegions := randRegions(count)
+	updateRegions := randRegions(count)
+
+	r := newRegionsInfo()
+
+	var regions []*metapb.Region
+	for _, region := range addRegions {
+		r.addRegion(region)
+		regions = append(regions, region)
+		checkStoreRegionCount(c, r, regions)
+	}
+	checkStoreRegionCount(c, r, addRegions)
+
+	for i, region := range updateRegions {
+		r.updateRegion(region)
+		regions[i] = region
+		checkStoreRegionCount(c, r, regions)
+	}
+	checkStoreRegionCount(c, r, updateRegions)
+
+	for len(regions) > 0 {
+		r.removeRegion(regions[0])
+		regions = regions[1:]
+		checkStoreRegionCount(c, r, regions)
+	}
+	checkStoreRegionCount(c, r, regions)
 }
 
 // mockIDAllocator mocks IDAllocator and it is only used for test.

@@ -101,12 +101,7 @@ func CreateServer(cfg *Config) (*Server, error) {
 	}
 
 	s.idAlloc = &idAllocator{s: s}
-	s.cluster = &RaftCluster{
-		s:           s,
-		running:     false,
-		clusterID:   cfg.ClusterID,
-		clusterRoot: s.getClusterRootPath(),
-	}
+	s.cluster = newRaftCluster(s, cfg.ClusterID)
 
 	return s, nil
 }
