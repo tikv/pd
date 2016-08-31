@@ -572,6 +572,10 @@ func (s *storeInfo) downSeconds() uint64 {
 	return uint64(time.Since(s.stats.LastHeartbeatTS).Seconds())
 }
 
+func (s *storeInfo) isUpState() bool {
+	return s.store.GetState() == metapb.StoreState_Up
+}
+
 // clusterInfo is cluster cache info.
 type clusterInfo struct {
 	sync.RWMutex

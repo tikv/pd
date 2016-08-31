@@ -35,11 +35,14 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/config", confHandler.Get).Methods("GET")
 	router.HandleFunc("/api/v1/config", confHandler.Post).Methods("POST")
 
+	storeHandler := newStoreHandler(svr, rd)
+	router.HandleFunc("/api/v1/store/{id}", storeHandler.Get).Methods("GET")
+	router.HandleFunc("/api/v1/store/{id}", storeHandler.Delete).Methods("DELETE")
+	router.Handle("/api/v1/stores", newStoresHandler(svr, rd)).Methods("GET")
+
 	router.Handle("/api/v1/events", newEventsHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/feed", newFeedHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/history/operators", newHistoryOperatorHandler(svr, rd)).Methods("GET")
-	router.Handle("/api/v1/store/{id}", newStoreHandler(svr, rd)).Methods("GET")
-	router.Handle("/api/v1/stores", newStoresHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/region/{id}", newRegionHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/regions", newRegionsHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")

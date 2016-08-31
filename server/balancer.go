@@ -357,11 +357,11 @@ func (rb *replicaBalancer) addPeer(cluster *clusterInfo) (*balanceOperator, erro
 	return newBalanceOperator(rb.region, newOnceOperator(addPeerOperator)), nil
 }
 
-func (rb *replicaBalancer) removePeer(cluster *clusterInfo, downPeers []*metapb.Peer) (*balanceOperator, error) {
+func (rb *replicaBalancer) removePeer(cluster *clusterInfo, badPeers []*metapb.Peer) (*balanceOperator, error) {
 	var peer *metapb.Peer
 
-	if len(downPeers) >= 1 {
-		peer = downPeers[0]
+	if len(badPeers) >= 1 {
+		peer = badPeers[0]
 	} else {
 		var err error
 		followers := getFollowerPeers(rb.region, rb.leader)
@@ -378,6 +378,26 @@ func (rb *replicaBalancer) removePeer(cluster *clusterInfo, downPeers []*metapb.
 
 	removePeerOperator := newRemovePeerOperator(rb.region.GetId(), peer)
 	return newBalanceOperator(rb.region, newOnceOperator(removePeerOperator)), nil
+}
+
+func containsPeer(peers []*metapb.Peer, peer *metapb.Peer) bool {
+	for _, p := range peers {
+		if p.GetId() == peer.GetId() {
+			return true
+		}
+	}
+	return false
+}
+
+func (rb *replicaBalancer) collectBadPeers(cluster *clusterInfo) []*metapb.Peer {
+	badPeers := rb.collectTombstonePeers(cluster)
+	downPeers := rb.collectDownPeers(cluster)
+	for _, peer := range downPeers {
+		if !containsPeer(badPeers, peer) {
+			badPeers = append(badPeers, peer)
+		}
+	}
+	return badPeers
 }
 
 func (rb *replicaBalancer) collectDownPeers(cluster *clusterInfo) []*metapb.Peer {
@@ -402,20 +422,39 @@ func (rb *replicaBalancer) collectDownPeers(cluster *clusterInfo) []*metapb.Peer
 	return downPeers
 }
 
+func (rb *replicaBalancer) collectTombstonePeers(cluster *clusterInfo) []*metapb.Peer {
+	var tombPeers []*metapb.Peer
+	for _, peer := range rb.region.GetPeers() {
+		store := cluster.getStore(peer.GetStoreId())
+		if store == nil {
+			continue
+		}
+		if !store.isUpState() {
+			tombPeers = append(tombPeers, peer)
+		}
+	}
+	return tombPeers
+}
+
 func (rb *replicaBalancer) Balance(cluster *clusterInfo) (*score, *balanceOperator, error) {
-	downPeers := rb.collectDownPeers(cluster)
+	badPeers := rb.collectBadPeers(cluster)
 	peerCount := len(rb.region.GetPeers())
 	maxPeerCount := int(cluster.getMeta().GetMaxPeerCount())
+
+	if len(badPeers) > 0 {
+		log.Debugf("region: %v peers: %v bad peers: %v",
+			rb.region.GetId(), rb.region.GetPeers(), badPeers)
+	}
 
 	var (
 		bop *balanceOperator
 		err error
 	)
 
-	if peerCount-len(downPeers) < maxPeerCount {
+	if peerCount-len(badPeers) < maxPeerCount {
 		bop, err = rb.addPeer(cluster)
 	} else if peerCount > maxPeerCount {
-		bop, err = rb.removePeer(cluster, downPeers)
+		bop, err = rb.removePeer(cluster, badPeers)
 	}
 
 	return nil, bop, errors.Trace(err)

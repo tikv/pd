@@ -53,6 +53,9 @@ func newStateFilter(cfg *BalanceConfig) *stateFilter {
 }
 
 func (sf *stateFilter) filterBadStore(store *storeInfo) bool {
+	if !store.isUpState() {
+		return true
+	}
 	if store.stats.Stats == nil {
 		// The store is in unknown state.
 		return true

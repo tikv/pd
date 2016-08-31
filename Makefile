@@ -49,6 +49,6 @@ endif
 
 clean:
 	# clean unix socket
-	find . -type s | xargs -r rm
+	find . -type s -exec rm {} \;
 
 .PHONY: update clean
