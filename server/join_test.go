@@ -84,7 +84,7 @@ Outloop:
 		}
 		return errors.New("waitMembers Timeout")
 	}
-	time.Sleep(healthInterval)
+	time.Sleep(healthInterval - healthInterval)
 	return nil
 }
 

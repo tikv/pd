@@ -405,6 +405,7 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.InitialClusterToken = fmt.Sprintf("pd-%d", c.ClusterID)
 	cfg.ClusterState = c.InitialClusterState
 	cfg.EnablePprof = true
+	cfg.StrictReconfigCheck = false
 
 	var err error
 
