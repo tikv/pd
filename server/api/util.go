@@ -15,6 +15,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -22,19 +23,28 @@ import (
 	"github.com/juju/errors"
 )
 
-func fromBody(r *http.Request, data interface{}) error {
-	body, err := ioutil.ReadAll(r.Body)
+func readJSON(r io.Reader, data interface{}) error {
+	b, err := ioutil.ReadAll(r)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	defer r.Body.Close()
 
-	err = json.Unmarshal(body, data)
+	err = json.Unmarshal(b, data)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
 	return nil
+}
+
+func readJSONRequest(r *http.Request, data interface{}) error {
+	defer r.Body.Close()
+	return readJSON(r.Body, data)
+}
+
+func readJSONResponse(r *http.Response, data interface{}) error {
+	defer r.Body.Close()
+	return readJSON(r.Body, data)
 }
 
 func unixDial(_, addr string) (net.Conn, error) {

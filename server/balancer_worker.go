@@ -19,6 +19,8 @@ import (
 
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 type balancerWorker struct {
@@ -98,23 +100,29 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *balanceOperato
 	bw.Lock()
 	defer bw.Unlock()
 
-	_, ok := bw.balanceOperators[regionID]
-	if ok {
-		return false
+	// adminOP can replace any operators.
+	if op.Type != adminOP {
+		// Replace the old operator if the new op has higher priority.
+		oldOp, ok := bw.balanceOperators[regionID]
+		if ok && op.Type <= oldOp.Type {
+			return false
+		}
 	}
 
-	// If the region is set balanced some time before, we can't set
-	// it again in a time interval.
-	_, ok = bw.regionCache.get(regionID)
-	if ok {
-		return false
+	// adminOP and replicaOP should not care about cache.
+	if op.Type == balanceOP {
+		// If the region is set balanced some time before, we can't set
+		// it again in a time interval.
+		_, ok := bw.regionCache.get(regionID)
+		if ok {
+			return false
+		}
 	}
 
 	// TODO: should we check allowBalance again here?
 
 	op.Start = time.Now()
 	bw.balanceOperators[regionID] = op
-
 	bw.historyOperators.add(regionID, op)
 
 	return true
@@ -241,6 +249,18 @@ func (bw *balancerWorker) doBalance() error {
 	}
 
 	log.Info("find no proper region for balance, retry later")
+	return nil
+}
+
+func (bw *balancerWorker) checkReplicas(region *metapb.Region, leader *metapb.Peer, downPeers []*pdpb.PeerStats) error {
+	bc := newReplicaBalancer(region, leader, downPeers, bw.cfg)
+	_, op, err := bc.Balance(bw.cluster)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if op != nil {
+		bw.addBalanceOperator(region.GetId(), op)
+	}
 	return nil
 }
 

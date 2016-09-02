@@ -63,6 +63,11 @@ func cleanServer(cfg *server.Config) {
 
 type cleanUpFunc func()
 
+func mustNewServer(c *C) (*server.Server, cleanUpFunc) {
+	_, svrs, cleanup := mustNewCluster(c, 1)
+	return svrs[0], cleanup
+}
+
 func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpFunc) {
 	svrs := make([]*server.Server, 0, num)
 	cfgs := server.NewTestMultiConfig(num)

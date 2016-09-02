@@ -28,7 +28,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	})
 
 	router := mux.NewRouter().PathPrefix(prefix).Subrouter()
-	router.Handle("/api/v1/balancers", newBalancerHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/cluster", newClusterHandler(svr, rd)).Methods("GET")
 
 	confHandler := newConfHandler(svr, rd)
@@ -50,6 +49,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.Handle("/api/v1/members", newMemberListHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/members/{name}", newMemberDeleteHandler(svr, rd)).Methods("DELETE")
 	router.Handle("/api/v1/leader", newLeaderHandler(svr, rd)).Methods("GET")
+
+	balancerHandler := newBalancerHandler(svr, rd)
+	router.HandleFunc("/api/v1/balancers", balancerHandler.Get).Methods("GET")
+	router.HandleFunc("/api/v1/balancers", balancerHandler.Post).Methods("POST")
 
 	router.Handle("/", newHomeHandler(rd)).Methods("GET")
 	router.Handle("/ws", newWSHandler(svr))

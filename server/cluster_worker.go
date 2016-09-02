@@ -22,28 +22,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-func (c *RaftCluster) addReplicaBalanceOperator(region *metapb.Region, leader *metapb.Peer, downPeers []*pdpb.PeerStats) (*balanceOperator, error) {
-	if !c.balancerWorker.allowBalance() {
-		return nil, nil
-	}
-
-	balancer := newReplicaBalancer(region, leader, downPeers, &c.s.cfg.BalanceCfg)
-	_, balanceOperator, err := balancer.Balance(c.cachedCluster)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	if balanceOperator == nil {
-		return nil, nil
-	}
-
-	if c.balancerWorker.addBalanceOperator(balanceOperator.getRegionID(), balanceOperator) {
-		return balanceOperator, nil
-	}
-
-	// Em, the balance worker may have already added a BalanceOperator.
-	return c.balancerWorker.getBalanceOperator(region.GetId()), nil
-}
-
 func (c *RaftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer, downPeers []*pdpb.PeerStats) (*pdpb.RegionHeartbeatResponse, error) {
 	// If the region peer count is 0, then we should not handle this.
 	if len(region.GetPeers()) == 0 {
@@ -51,30 +29,30 @@ func (c *RaftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metap
 		return nil, errors.Errorf("invalid region, zero region peer count - %v", region)
 	}
 
+	bw := c.balancerWorker
 	regionID := region.GetId()
-	balanceOperator := c.balancerWorker.getBalanceOperator(regionID)
-	var err error
-	if balanceOperator == nil {
-		balanceOperator, err = c.addReplicaBalanceOperator(region, leader, downPeers)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		if balanceOperator == nil {
-			return nil, nil
-		}
+
+	err := bw.checkReplicas(region, leader, downPeers)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
-	ctx := newOpContext(c.balancerWorker.hookStartEvent, c.balancerWorker.hookEndEvent)
-	finished, res, err := balanceOperator.Do(ctx, region, leader)
+	op := bw.getBalanceOperator(regionID)
+	if op == nil {
+		return nil, nil
+	}
+
+	ctx := newOpContext(bw.hookStartEvent, bw.hookEndEvent)
+	finished, res, err := op.Do(ctx, region, leader)
 	if err != nil {
 		// Do balance failed, remove it.
 		log.Errorf("do balance for region %d failed %s", regionID, err)
-		c.balancerWorker.removeBalanceOperator(regionID)
-		c.balancerWorker.removeRegionCache(regionID)
+		bw.removeBalanceOperator(regionID)
+		bw.removeRegionCache(regionID)
 	}
 	if finished {
 		// Do finished, remove it.
-		c.balancerWorker.removeBalanceOperator(regionID)
+		bw.removeBalanceOperator(regionID)
 	}
 
 	return res, nil

@@ -283,6 +283,16 @@ func rpcCall(conn net.Conn, reqID uint64, request *pdpb.Request) (*pdpb.Response
 	return resp.GetPdResp(), nil
 }
 
+// RPCRequest sends a request to addr and waits for the response.
+// Export for API test.
+func RPCRequest(addr string, reqID uint64, request *pdpb.Request) (*pdpb.Response, error) {
+	conn, err := rpcConnect(addr)
+	if err != nil {
+		return nil, err
+	}
+	return rpcCall(conn, reqID, request)
+}
+
 type redirectFormatter struct{}
 
 // Format turns capnslog logs to ngaut logs.

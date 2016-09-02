@@ -30,6 +30,9 @@ import (
 
 var (
 	errClusterNotBootstrapped = errors.New("cluster is not bootstrapped")
+	errRegionNotFound         = func(regionID uint64) error {
+		return errors.Errorf("region %v not found", regionID)
+	}
 )
 
 const (
@@ -456,6 +459,69 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 
 	c.cachedCluster.setMeta(meta)
 
+	return nil
+}
+
+// NewAddPeerOperator creates an operator to add a peer to the region.
+// If storeID is 0, it will be chosen according to the balance rules.
+func (c *RaftCluster) NewAddPeerOperator(regionID uint64, storeID uint64) (Operator, error) {
+	region, _ := c.GetRegionByID(regionID)
+	if region == nil {
+		return nil, errRegionNotFound(regionID)
+	}
+
+	var peer *metapb.Peer
+
+	cluster := c.cachedCluster
+	if storeID == 0 {
+		cb := newCapacityBalancer(&c.s.cfg.BalanceCfg)
+		excluded := getExcludedStores(region)
+		var err error
+		peer, err = cb.selectAddPeer(cluster, cluster.getStores(), excluded)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+	} else {
+		_, _, err := c.GetStore(storeID)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		peerID, err := cluster.idAlloc.Alloc()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		peer = &metapb.Peer{
+			Id:      peerID,
+			StoreId: storeID,
+		}
+	}
+
+	return newAddPeerOperator(regionID, peer), nil
+}
+
+// NewRemovePeerOperator creates an operator to remove a peer from the region.
+func (c *RaftCluster) NewRemovePeerOperator(regionID uint64, peerID uint64) (Operator, error) {
+	region, _ := c.GetRegionByID(regionID)
+	if region == nil {
+		return nil, errRegionNotFound(regionID)
+	}
+
+	for _, peer := range region.GetPeers() {
+		if peer.GetId() == peerID {
+			return newRemovePeerOperator(regionID, peer), nil
+		}
+	}
+	return nil, errors.Errorf("region %v peer %v not found", regionID, peerID)
+}
+
+// SetAdminOperator sets the balance operator of the region.
+func (c *RaftCluster) SetAdminOperator(regionID uint64, ops []Operator) error {
+	region, _ := c.GetRegionByID(regionID)
+	if region == nil {
+		return errRegionNotFound(regionID)
+	}
+	bop := newBalanceOperator(region, adminOP, ops...)
+	c.balancerWorker.addBalanceOperator(regionID, bop)
 	return nil
 }
 

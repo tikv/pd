@@ -613,3 +613,73 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	c.Assert(op.Origin.GetPeers(), HasLen, 1)
 	c.Assert(op.Origin.GetPeers()[0], DeepEquals, peer)
 }
+
+func (s *testClusterWorkerSuite) TestBalanceOperatorPriority(c *C) {
+	cluster, err := s.svr.GetRaftCluster()
+	c.Assert(err, IsNil)
+	bw := cluster.balancerWorker
+
+	err = cluster.putConfig(&metapb.Cluster{
+		Id:           s.clusterID,
+		MaxPeerCount: 1,
+	})
+	c.Assert(err, IsNil)
+
+	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	conn, err := rpcConnect(leaderPd.GetAddr())
+	c.Assert(err, IsNil)
+	defer conn.Close()
+
+	region, _ := cluster.getRegion([]byte{'a'})
+	c.Assert(region.GetPeers(), HasLen, 1)
+	leader := s.chooseRegionLeader(c, region)
+
+	// region has enough replicas and no balance operator.
+	resp := heartbeatRegion(c, conn, s.clusterID, 0, region, leader)
+	c.Assert(resp, IsNil)
+
+	// Add a balanceOP.
+	removePeerOperator := newRemovePeerOperator(region.GetId(), leader)
+	bop := newBalanceOperator(region, balanceOP, removePeerOperator)
+	ok := bw.addBalanceOperator(region.GetId(), bop)
+	c.Assert(ok, IsTrue)
+	// Add a balanceOP again will fail.
+	ok = bw.addBalanceOperator(region.GetId(), bop)
+	c.Assert(ok, IsFalse)
+
+	// Now we will get a balanceOP.
+	resp = heartbeatRegion(c, conn, s.clusterID, 0, region, leader)
+	c.Assert(resp, DeepEquals, removePeerOperator.ChangePeer)
+	op := bw.getBalanceOperator(region.GetId())
+	c.Assert(op.Type, Equals, balanceOP)
+
+	err = cluster.putConfig(&metapb.Cluster{
+		Id:           s.clusterID,
+		MaxPeerCount: 3,
+	})
+	c.Assert(err, IsNil)
+
+	// Now region doesn't have enough replicas, we will get a replicaOP.
+	resp = heartbeatRegion(c, conn, s.clusterID, 0, region, leader)
+	c.Assert(resp.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	op = bw.getBalanceOperator(region.GetId())
+	// replicaOP finishes immediately, so we op is nil here.
+	c.Assert(op, IsNil)
+
+	// Add an adminOP.
+	aop := newBalanceOperator(region, adminOP, removePeerOperator)
+	ok = bw.addBalanceOperator(region.GetId(), aop)
+	c.Assert(ok, IsTrue)
+	// Add an adminOP again is OK.
+	ok = bw.addBalanceOperator(region.GetId(), aop)
+	c.Assert(ok, IsTrue)
+	// Add an balanceOP will fail.
+	ok = bw.addBalanceOperator(region.GetId(), bop)
+	c.Assert(ok, IsFalse)
+
+	// Now we will get an adminOP.
+	resp = heartbeatRegion(c, conn, s.clusterID, 0, region, leader)
+	c.Assert(resp, DeepEquals, removePeerOperator.ChangePeer)
+	op = bw.getBalanceOperator(region.GetId())
+	c.Assert(op.Type, Equals, adminOP)
+}

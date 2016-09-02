@@ -222,7 +222,7 @@ func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*score, *balanceOpera
 
 	addPeerOperator := newAddPeerOperator(region.GetId(), newPeer)
 	removePeerOperator := newRemovePeerOperator(region.GetId(), peer)
-	return score, newBalanceOperator(region, addPeerOperator, removePeerOperator), nil
+	return score, newBalanceOperator(region, balanceOP, addPeerOperator, removePeerOperator), nil
 }
 
 type leaderBalancer struct {
@@ -319,7 +319,7 @@ func (lb *leaderBalancer) Balance(cluster *clusterInfo) (*score, *balanceOperato
 
 	regionID := region.GetId()
 	transferLeaderOperator := newTransferLeaderOperator(regionID, leader, newLeader, lb.cfg)
-	return score, newBalanceOperator(region, transferLeaderOperator), nil
+	return score, newBalanceOperator(region, balanceOP, transferLeaderOperator), nil
 }
 
 // replicaBalancer is used to balance active replica count.
@@ -354,7 +354,7 @@ func (rb *replicaBalancer) addPeer(cluster *clusterInfo) (*balanceOperator, erro
 	}
 
 	addPeerOperator := newAddPeerOperator(rb.region.GetId(), peer)
-	return newBalanceOperator(rb.region, newOnceOperator(addPeerOperator)), nil
+	return newBalanceOperator(rb.region, replicaOP, newOnceOperator(addPeerOperator)), nil
 }
 
 func (rb *replicaBalancer) removePeer(cluster *clusterInfo, badPeers []*metapb.Peer) (*balanceOperator, error) {
@@ -377,7 +377,7 @@ func (rb *replicaBalancer) removePeer(cluster *clusterInfo, badPeers []*metapb.P
 	}
 
 	removePeerOperator := newRemovePeerOperator(rb.region.GetId(), peer)
-	return newBalanceOperator(rb.region, newOnceOperator(removePeerOperator)), nil
+	return newBalanceOperator(rb.region, replicaOP, newOnceOperator(removePeerOperator)), nil
 }
 
 func containsPeer(peers []*metapb.Peer, peer *metapb.Peer) bool {
