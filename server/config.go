@@ -190,7 +190,7 @@ func (c *Config) adjust() error {
 	adjustString(&c.AdvertisePeerUrls, c.PeerUrls)
 
 	if c.Join != "" {
-		initialCluster, state, err := c.prepareJoinCluster()
+		initialCluster, state, err := prepareJoinCluster(c)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -454,6 +454,8 @@ func NewTestSingleConfig() *Config {
 		TsoSaveInterval: duration{Duration: 200 * time.Millisecond},
 	}
 
+	cfg.AdvertiseClientUrls = cfg.ClientUrls
+	cfg.AdvertisePeerUrls = cfg.PeerUrls
 	cfg.DataDir, _ = ioutil.TempDir("/tmp", "test_pd")
 	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
 
