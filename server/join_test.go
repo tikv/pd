@@ -49,18 +49,13 @@ func waitMembers(svrs []*Server, c int) error {
 	maxRetryCount := 10
 	waitInterval := 500 * time.Millisecond
 
-	// healthInterval is the minimum time the cluster should be healthy
-	// before accepting add member requests.
-	// refer to https://github.com/coreos/etcd/commit/9063ce5e3f4f02631eada99e85b1605dff461009#diff-971f6af906b31cc86efd71aff56aa96bR70
-	healthInterval := 5 * time.Second
-
 	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
 	defer cancel()
 
 Outloop:
 	for _, svr := range svrs {
 		client := svr.GetClient()
-		for maxRetryCount = 10; maxRetryCount != 0; maxRetryCount-- {
+		for retryCount := maxRetryCount; retryCount != 0; retryCount-- {
 			time.Sleep(waitInterval)
 			listResp, err := client.MemberList(ctx)
 			if err != nil {
@@ -84,7 +79,6 @@ Outloop:
 		}
 		return errors.New("waitMembers Timeout")
 	}
-	time.Sleep(healthInterval - healthInterval)
 	return nil
 }
 
@@ -256,7 +250,7 @@ func (s *testJoinServerSuite) TestFailedPDJoinsPreviousCluster(c *C) {
 
 // A PD starts with join itself and fails, it is restarted with the same
 // arguments while other peers try to connect to it.
-func (s *testJoinServerSuite) TestJoinSelfPDFiledAndRestarts(c *C) {
+func (s *testJoinServerSuite) testJoinSelfPDFiledAndRestarts(c *C) {
 	cfgs, svrs, clean := mustNewJoinCluster(c, 3)
 	defer clean()
 
