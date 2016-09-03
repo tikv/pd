@@ -56,8 +56,8 @@ func memberList(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
 // and returns the initial configuration of the PD cluster.
 //
 // TL;TR: The join functionality is safe. With data, join does nothing, w/o data
-//        and it is not a member of cluster, join does MemberAdd, otherwise
-//        return an error.
+//        and it is not a member of cluster, join does MemberAdd, it returns an
+//        error if PD tries to join itself, missing data or join a duplicated PD.
 //
 // Etcd automatically re-joins the cluster if there is a data directory. So
 // first it checks if there is a data directory or not. If there is, it returns
@@ -69,20 +69,8 @@ func memberList(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
 //  - A new PD joins an existing cluster.
 //      What join does: MemberAdd, MemberList, then generate initial-cluster.
 //
-//  - A new PD joins itself.
-//      What join does: nothing.
-//
 //  - A failed PD re-joins the previous cluster.
 //      What join does: return an error. (etcd reports: raft log corrupted,
-//                      truncated, or lost?)
-//
-//  - A PD starts with join itself and fails, it is restarted with the same
-//    arguments while other peers try to connect to it.
-//      What join does: nothing. (join cannot detect whether it is in a cluster
-//                      or not, however, etcd will handle it safey, if there is
-//                      no data in the cluster the restarted PD will join the
-//                      cluster, otherwise, PD will shutdown as soon as other
-//                      peers connect to it. etcd reports: raft log corrupted,
 //                      truncated, or lost?)
 //
 //  - A deleted PD joins to previous cluster.
@@ -101,22 +89,20 @@ func memberList(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
 //      What join does: return "" (as etcd will read data directory and find
 //                      that the PD itself has been removed, so an empty string
 //                      is fine.)
-func (cfg *Config) prepareJoinCluster() (string, string, error) {
-	initialCluster := ""
+func prepareJoinCluster(cfg *Config) (string, string, error) {
+	// - A PD tries to join itself.
+	if cfg.Join == cfg.AdvertiseClientUrls {
+		return "", "", errors.New("join self is forbidden")
+	}
+
 	// Cases with data directory.
+
+	initialCluster := ""
 	if wal.Exist(cfg.DataDir) {
 		return initialCluster, embed.ClusterStateFlagExisting, nil
 	}
 
 	// Below are cases without data directory.
-
-	// - A new PD joins itself.
-	// - A PD starts with join itself and fails, it is restarted with the same
-	//   arguments while other peers try to connect to it.
-	if cfg.Join == cfg.AdvertiseClientUrls {
-		initialCluster = fmt.Sprintf("%s=%s", cfg.Name, cfg.AdvertisePeerUrls)
-		return initialCluster, embed.ClusterStateFlagNew, nil
-	}
 
 	client, err := clientv3.New(genClientV3Config(cfg))
 	if err != nil {
