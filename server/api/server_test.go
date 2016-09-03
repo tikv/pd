@@ -34,7 +34,7 @@ func newUnixSocketClient() *http.Client {
 		Dial: unixDial,
 	}
 	client := &http.Client{
-		Timeout:   10 * time.Second,
+		Timeout:   15 * time.Second,
 		Transport: tr,
 	}
 
