@@ -40,13 +40,13 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		}()
 	}
 
-	endpoints := make([]string, 0, 3)
+	endpointsMap := make(map[string][]string)
 
 	svrs := make(map[string]*server.Server, 3)
 	for i := 0; i < 3; i++ {
 		svr := <-ch
 		svrs[svr.GetAddr()] = svr
-		endpoints = append(endpoints, svr.GetEndpoints()...)
+		endpointsMap[svr.GetAddr()] = svr.GetEndpoints()
 	}
 
 	for _, svr := range svrs {
@@ -67,6 +67,11 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 
 	defaultWatchLeaderTimeout = 500 * time.Millisecond
 
+	endpoints := make([]string, 0, 2)
+	for _, eps := range endpointsMap {
+		endpoints = append(endpoints, eps...)
+	}
+
 	cli, err := NewClient(endpoints, 0)
 	c.Assert(err, IsNil)
 	defer cli.Close()
@@ -86,6 +91,18 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	c.Assert(err, IsNil)
 	svrs[leaderAddr].Close()
 	delete(svrs, leaderAddr)
+	delete(endpointsMap, leaderAddr)
+
+	endpoints = make([]string, 0, 2)
+	for _, eps := range endpointsMap {
+		endpoints = append(endpoints, eps...)
+	}
+
+	etcdClient, err = clientv3.New(clientv3.Config{
+		Endpoints:   endpoints,
+		DialTimeout: 3 * time.Second,
+	})
+	c.Assert(err, IsNil)
 
 	// wait leader changes
 	changed := false
@@ -98,6 +115,10 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	c.Assert(changed, IsTrue)
+
+	cli, err = NewClient(endpoints, 0)
+	c.Assert(err, IsNil)
+	defer cli.Close()
 
 	for i := 0; i < 20; i++ {
 		p2, l2, err := cli.GetTS()
