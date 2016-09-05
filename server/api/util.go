@@ -18,12 +18,13 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
-	"net/http"
 
 	"github.com/juju/errors"
 )
 
-func readJSON(r io.Reader, data interface{}) error {
+func readJSON(r io.ReadCloser, data interface{}) error {
+	defer r.Close()
+
 	b, err := ioutil.ReadAll(r)
 	if err != nil {
 		return errors.Trace(err)
@@ -35,16 +36,6 @@ func readJSON(r io.Reader, data interface{}) error {
 	}
 
 	return nil
-}
-
-func readJSONRequest(r *http.Request, data interface{}) error {
-	defer r.Body.Close()
-	return readJSON(r.Body, data)
-}
-
-func readJSONResponse(r *http.Response, data interface{}) error {
-	defer r.Body.Close()
-	return readJSON(r.Body, data)
 }
 
 func unixDial(_, addr string) (net.Conn, error) {

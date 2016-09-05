@@ -109,7 +109,7 @@ func (s *testBalancerSuite) testGet(c *C) *balancersInfo {
 	resp, err := client.Get(s.url)
 	c.Assert(err, IsNil)
 	info := new(balancersInfo)
-	err = readJSONResponse(resp, info)
+	err = readJSON(resp.Body, info)
 	c.Assert(err, IsNil)
 	return info
 }
@@ -121,14 +121,14 @@ func (s *testBalancerSuite) testPost(c *C, data string) {
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 }
 
-type changePeerOperator struct {
+type testChangePeerOperator struct {
 	ChangePeer *pdpb.ChangePeer `json:"operator"`
 	RegionID   uint64           `json:"regionid"`
 	Name       string           `json:"name"`
 }
 
 // Since those operators are not exported, we need to do some tricks to verify them.
-func mustParseOperator(c *C, bop server.Operator, ops []*changePeerOperator) {
+func mustParseOperator(c *C, bop server.Operator, ops []*testChangePeerOperator) {
 	data, err := json.Marshal(bop)
 	c.Assert(err, IsNil)
 	tmp := make(map[string]json.RawMessage)
@@ -157,8 +157,8 @@ func (s *testBalancerSuite) TestAddPeer(c *C) {
 
 	bops := s.mustGetOperators(c)
 	c.Assert(bops, HasLen, 1)
-	op := new(changePeerOperator)
-	mustParseOperator(c, bops[0], []*changePeerOperator{op})
+	op := new(testChangePeerOperator)
+	mustParseOperator(c, bops[0], []*testChangePeerOperator{op})
 
 	c.Assert(op.Name, Equals, "add_peer")
 	c.Assert(op.RegionID, Equals, region.GetId())
@@ -173,8 +173,8 @@ func (s *testBalancerSuite) TestRemovePeer(c *C) {
 
 	bops := s.mustGetOperators(c)
 	c.Assert(bops, HasLen, 1)
-	op := new(changePeerOperator)
-	mustParseOperator(c, bops[0], []*changePeerOperator{op})
+	op := new(testChangePeerOperator)
+	mustParseOperator(c, bops[0], []*testChangePeerOperator{op})
 
 	c.Assert(op.Name, Equals, "remove_peer")
 	c.Assert(op.RegionID, Equals, region.GetId())
@@ -192,9 +192,9 @@ func (s *testBalancerSuite) TestAddAndRemovePeer(c *C) {
 
 	bops := s.mustGetOperators(c)
 	c.Assert(bops, HasLen, 1)
-	addPeer := new(changePeerOperator)
-	removePeer := new(changePeerOperator)
-	mustParseOperator(c, bops[0], []*changePeerOperator{addPeer, removePeer})
+	addPeer := new(testChangePeerOperator)
+	removePeer := new(testChangePeerOperator)
+	mustParseOperator(c, bops[0], []*testChangePeerOperator{addPeer, removePeer})
 
 	c.Assert(addPeer.Name, Equals, "add_peer")
 	c.Assert(addPeer.RegionID, Equals, region.GetId())

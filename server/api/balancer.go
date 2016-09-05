@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
@@ -59,38 +58,6 @@ func (h *balancerHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, balancersInfo)
 }
 
-type operator struct {
-	Name     string `json:"name"`
-	RegionID uint64 `json:"region_id"`
-	StoreID  uint64 `json:"store_id"`
-	PeerID   uint64 `json:"peer_id"`
-}
-
-func newOperator(cluster *server.RaftCluster, m json.RawMessage) (uint64, server.Operator, error) {
-	op := &operator{}
-	if err := json.Unmarshal(m, op); err != nil {
-		return 0, nil, errors.Trace(err)
-	}
-
-	var (
-		operator server.Operator
-		err      error
-	)
-	switch op.Name {
-	case "add_peer":
-		operator, err = cluster.NewAddPeerOperator(op.RegionID, op.StoreID)
-	case "remove_peer":
-		operator, err = cluster.NewRemovePeerOperator(op.RegionID, op.PeerID)
-	default:
-		return 0, nil, errors.Errorf("invalid operator %v", op)
-	}
-	if err != nil {
-		return 0, nil, errors.Trace(err)
-	}
-
-	return op.RegionID, operator, nil
-}
-
 func (h *balancerHandler) Post(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
@@ -99,7 +66,7 @@ func (h *balancerHandler) Post(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var input []json.RawMessage
-	if err := readJSONRequest(r, &input); err != nil {
+	if err := readJSON(r.Body, &input); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
