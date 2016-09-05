@@ -57,7 +57,7 @@ type optype int
 
 // Priority: adminOP > replicaOP > balanceOP
 const (
-	balanceOP optype = iota
+	balanceOP optype = iota + 1
 	replicaOP
 	adminOP
 )

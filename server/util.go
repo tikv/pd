@@ -288,7 +288,7 @@ func rpcCall(conn net.Conn, reqID uint64, request *pdpb.Request) (*pdpb.Response
 func RPCRequest(addr string, reqID uint64, request *pdpb.Request) (*pdpb.Response, error) {
 	conn, err := rpcConnect(addr)
 	if err != nil {
-		return nil, err
+		return nil, errors.Trace(err)
 	}
 	return rpcCall(conn, reqID, request)
 }

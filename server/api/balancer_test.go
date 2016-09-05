@@ -138,16 +138,11 @@ func mustParseOperator(c *C, bop server.Operator, ops []*testChangePeerOperator)
 	c.Assert(err, IsNil)
 }
 
-func (s *testBalancerSuite) mustGetOperators(c *C) []server.Operator {
+func (s *testBalancerSuite) mustGetOperators(c *C) map[uint64]server.Operator {
 	cluster, err := s.svr.GetRaftCluster()
 	c.Assert(err, IsNil)
 	c.Assert(cluster, NotNil)
-	bops := cluster.GetBalanceOperators()
-	ops := make([]server.Operator, 0, len(bops))
-	for _, op := range bops {
-		ops = append(ops, op)
-	}
-	return ops
+	return cluster.GetBalanceOperators()
 }
 
 func (s *testBalancerSuite) TestAddPeer(c *C) {
@@ -158,7 +153,7 @@ func (s *testBalancerSuite) TestAddPeer(c *C) {
 	bops := s.mustGetOperators(c)
 	c.Assert(bops, HasLen, 1)
 	op := new(testChangePeerOperator)
-	mustParseOperator(c, bops[0], []*testChangePeerOperator{op})
+	mustParseOperator(c, bops[region.GetId()], []*testChangePeerOperator{op})
 
 	c.Assert(op.Name, Equals, "add_peer")
 	c.Assert(op.RegionID, Equals, region.GetId())
@@ -174,7 +169,7 @@ func (s *testBalancerSuite) TestRemovePeer(c *C) {
 	bops := s.mustGetOperators(c)
 	c.Assert(bops, HasLen, 1)
 	op := new(testChangePeerOperator)
-	mustParseOperator(c, bops[0], []*testChangePeerOperator{op})
+	mustParseOperator(c, bops[region.GetId()], []*testChangePeerOperator{op})
 
 	c.Assert(op.Name, Equals, "remove_peer")
 	c.Assert(op.RegionID, Equals, region.GetId())
@@ -194,7 +189,7 @@ func (s *testBalancerSuite) TestAddAndRemovePeer(c *C) {
 	c.Assert(bops, HasLen, 1)
 	addPeer := new(testChangePeerOperator)
 	removePeer := new(testChangePeerOperator)
-	mustParseOperator(c, bops[0], []*testChangePeerOperator{addPeer, removePeer})
+	mustParseOperator(c, bops[region.GetId()], []*testChangePeerOperator{addPeer, removePeer})
 
 	c.Assert(addPeer.Name, Equals, "add_peer")
 	c.Assert(addPeer.RegionID, Equals, region.GetId())
