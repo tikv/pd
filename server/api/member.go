@@ -51,7 +51,7 @@ func (h *memberListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	listResp, err := client.MemberList(ctx)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -92,7 +92,7 @@ func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	defer cancel()
 	listResp, err := client.MemberList(ctx)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	for _, m := range listResp.Members {
@@ -111,7 +111,7 @@ func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	defer cancel()
 	_, err = client.MemberRemove(ctx, id)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %s", name))
@@ -137,7 +137,7 @@ func newLeaderHandler(svr *server.Server, rd *render.Render) *leaderHandler {
 func (h *leaderHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	leader, err := h.svr.GetLeader()
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

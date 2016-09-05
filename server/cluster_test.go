@@ -229,8 +229,7 @@ func (s *testClusterBaseSuite) getRegion(c *C, conn net.Conn, clusterID uint64, 
 }
 
 func (s *testClusterBaseSuite) getRaftCluster(c *C) *RaftCluster {
-	cluster, err := s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 	return cluster
 }

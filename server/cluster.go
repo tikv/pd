@@ -128,12 +128,13 @@ func (s *Server) getClusterRootPath() string {
 }
 
 // GetRaftCluster gets raft cluster.
-func (s *Server) GetRaftCluster() (*RaftCluster, error) {
+// If cluster has not been bootstrapped, return nil.
+func (s *Server) GetRaftCluster() *RaftCluster {
 	if s.cluster.isRunning() {
-		return s.cluster, nil
+		return s.cluster
 	}
 
-	return nil, nil
+	return nil
 }
 
 func (s *Server) createRaftCluster() error {

@@ -150,8 +150,8 @@ func (s *testClusterWorkerSuite) newMockRaftStore(c *C, metaStore *metapb.Store)
 		peers:    make(map[uint64]*metapb.Peer),
 	}
 
-	cluster, err := s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.svr.GetRaftCluster()
+	c.Assert(cluster, NotNil)
 
 	err = cluster.putStore(metaStore)
 	c.Assert(err, IsNil)
@@ -197,10 +197,10 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	s.newMockRaftStore(c, nil)
 	s.newMockRaftStore(c, nil)
 
-	cluster, err := s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.svr.GetRaftCluster()
+	c.Assert(cluster, NotNil)
 
-	err = cluster.putConfig(&metapb.Cluster{
+	err := cluster.putConfig(&metapb.Cluster{
 		Id:           s.clusterID,
 		MaxPeerCount: 5,
 	})
@@ -215,8 +215,8 @@ func (s *testClusterWorkerSuite) TearDownTest(c *C) {
 }
 
 func (s *testClusterWorkerSuite) checkRegionPeerCount(c *C, regionKey []byte, expectCount int) *metapb.Region {
-	cluster, err := s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.svr.GetRaftCluster()
+	c.Assert(cluster, NotNil)
 
 	region, _ := cluster.getRegion(regionKey)
 	c.Assert(region.Peers, HasLen, expectCount)
@@ -356,12 +356,12 @@ func checkSearchRegions(c *C, cluster *RaftCluster, keys ...[]byte) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
-	cluster, err := s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.svr.GetRaftCluster()
+	c.Assert(cluster, NotNil)
 
 	meta := cluster.GetConfig()
 	meta.MaxPeerCount = 1
-	err = cluster.putConfig(meta)
+	err := cluster.putConfig(meta)
 	c.Assert(err, IsNil)
 
 	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
@@ -417,8 +417,9 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
-	cluster, err := s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.svr.GetRaftCluster()
+	c.Assert(cluster, NotNil)
+
 	r1, _ := cluster.getRegion([]byte("a"))
 	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 	conn, err := rpcConnect(leaderPd.GetAddr())
@@ -452,8 +453,8 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
-	cluster, err := s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.svr.GetRaftCluster()
+	c.Assert(cluster, NotNil)
 
 	meta := cluster.GetConfig()
 	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
@@ -513,12 +514,12 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
-	cluster, err := s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.svr.GetRaftCluster()
+	c.Assert(cluster, NotNil)
 
 	meta := cluster.GetConfig()
 	meta.MaxPeerCount = 2
-	err = cluster.putConfig(meta)
+	err := cluster.putConfig(meta)
 	c.Assert(err, IsNil)
 
 	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
@@ -551,8 +552,8 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
-	cluster, err := s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.svr.GetRaftCluster()
+	c.Assert(cluster, NotNil)
 
 	stores := cluster.GetStores()
 	c.Assert(stores, HasLen, 5)
@@ -579,8 +580,8 @@ func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
-	cluster, err := s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.svr.GetRaftCluster()
+	c.Assert(cluster, NotNil)
 
 	stores := cluster.GetStores()
 	c.Assert(stores, HasLen, 5)

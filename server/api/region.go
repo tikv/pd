@@ -46,13 +46,9 @@ func newRegionHandler(svr *server.Server, rd *render.Render) *regionHandler {
 }
 
 func (h *regionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.svr.GetRaftCluster()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
-		return
-	}
+	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusOK, nil)
+		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
 		return
 	}
 
@@ -60,7 +56,7 @@ func (h *regionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	regionIDStr := vars["id"]
 	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -85,13 +81,9 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 }
 
 func (h *regionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.svr.GetRaftCluster()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
-		return
-	}
+	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusOK, nil)
+		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
 		return
 	}
 

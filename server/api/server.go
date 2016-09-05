@@ -14,6 +14,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -22,6 +23,10 @@ import (
 )
 
 const apiPrefix = "/pd"
+
+var (
+	errNotBootstrapped = errors.New("cluster is not bootstrapped")
+)
 
 // NewHandler creates a HTTP handler for API.
 func NewHandler(svr *server.Server) http.Handler {

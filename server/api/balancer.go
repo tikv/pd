@@ -38,13 +38,9 @@ func newBalancerHandler(svr *server.Server, rd *render.Render) *balancerHandler 
 }
 
 func (h *balancerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.svr.GetRaftCluster()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
-		return
-	}
+	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusOK, nil)
+		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
 		return
 	}
 
@@ -74,13 +70,9 @@ func newHistoryOperatorHandler(svr *server.Server, rd *render.Render) *historyOp
 }
 
 func (h *historyOperatorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.svr.GetRaftCluster()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
-		return
-	}
+	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusOK, nil)
+		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
 		return
 	}
 

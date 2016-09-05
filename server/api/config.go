@@ -40,7 +40,7 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 	config := &server.BalanceConfig{}
 	err := fromBody(r, config)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

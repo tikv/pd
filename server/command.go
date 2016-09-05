@@ -67,10 +67,7 @@ func (c *conn) handleIsBootstrapped(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Errorf("invalid is bootstrapped command, but %v", req)
 	}
 
-	cluster, err := c.s.GetRaftCluster()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
+	cluster := c.s.GetRaftCluster()
 
 	resp := &pdpb.IsBootstrappedResponse{
 		Bootstrapped: proto.Bool(cluster != nil),
@@ -87,10 +84,7 @@ func (c *conn) handleBootstrap(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Errorf("invalid bootstrap command, but %v", req)
 	}
 
-	cluster, err := c.s.GetRaftCluster()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
+	cluster := c.s.GetRaftCluster()
 	if cluster != nil {
 		return newBootstrappedError(), nil
 	}
@@ -99,10 +93,7 @@ func (c *conn) handleBootstrap(req *pdpb.Request) (*pdpb.Response, error) {
 }
 
 func (c *conn) getRaftCluster() (*RaftCluster, error) {
-	cluster, err := c.s.GetRaftCluster()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
+	cluster := c.s.GetRaftCluster()
 	if cluster == nil {
 		return nil, errors.Trace(errClusterNotBootstrapped)
 	}

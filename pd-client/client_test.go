@@ -197,8 +197,7 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	c.Assert(n, DeepEquals, store)
 
 	// Get a removed store should return error.
-	cluster, err := s.srv.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.srv.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 	err = cluster.RemoveStore(store.GetId())
 	c.Assert(err, IsNil)

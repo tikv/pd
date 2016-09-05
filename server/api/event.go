@@ -39,13 +39,9 @@ func newFeedHandler(svr *server.Server, rd *render.Render) *feedHandler {
 }
 
 func (h *feedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.svr.GetRaftCluster()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
-		return
-	}
+	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusOK, nil)
+		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
 		return
 	}
 
@@ -57,7 +53,7 @@ func (h *feedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	offset, err := strconv.ParseUint(offsetStr, 10, 64)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -78,13 +74,9 @@ func newEventsHandler(svr *server.Server, rd *render.Render) *eventsHandler {
 }
 
 func (h *eventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.svr.GetRaftCluster()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
-		return
-	}
+	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusOK, nil)
+		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
 		return
 	}
 
@@ -133,11 +125,7 @@ func (h *wsHandler) fetchEventFeed() {
 	for {
 		time.Sleep(1 * time.Second)
 
-		cluster, err := h.svr.GetRaftCluster()
-		if err != nil {
-			log.Error(err)
-			continue
-		}
+		cluster := h.svr.GetRaftCluster()
 		if cluster == nil {
 			continue
 		}

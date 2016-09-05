@@ -54,8 +54,8 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	_, err = s.svr.bootstrapCluster(req.Bootstrap)
 	c.Assert(err, IsNil)
 
-	cluster, err := s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.svr.GetRaftCluster()
+	c.Assert(cluster, NotNil)
 
 	stats := &pdpb.StoreStats{
 		StoreId:            store1.GetId(),
@@ -203,8 +203,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 		store2.GetId(): store2,
 	}
 
-	cluster, err = s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster = s.svr.GetRaftCluster()
 	c.Assert(cluster, IsNil)
 
 	allStores := s.svr.cluster.GetStores()

@@ -46,13 +46,9 @@ func newStoreHandler(svr *server.Server, rd *render.Render) *storeHandler {
 }
 
 func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.svr.GetRaftCluster()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
-		return
-	}
+	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusOK, nil)
+		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
 		return
 	}
 
@@ -60,13 +56,13 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	storeIDStr := vars["id"]
 	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	store, status, err := cluster.GetStore(storeID)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -80,13 +76,9 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.svr.GetRaftCluster()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
-		return
-	}
+	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusOK, nil)
+		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
 		return
 	}
 
@@ -119,13 +111,9 @@ func newStoresHandler(svr *server.Server, rd *render.Render) *storesHandler {
 }
 
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.svr.GetRaftCluster()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
-		return
-	}
+	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusOK, nil)
+		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
 		return
 	}
 
@@ -138,7 +126,7 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, s := range stores {
 		store, status, err := cluster.GetStore(s.GetId())
 		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err)
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 

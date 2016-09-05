@@ -33,13 +33,9 @@ func newClusterHandler(svr *server.Server, rd *render.Render) *clusterHandler {
 }
 
 func (h *clusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster, err := h.svr.GetRaftCluster()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
-		return
-	}
+	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusOK, nil)
+		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
 		return
 	}
 
