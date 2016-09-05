@@ -123,7 +123,7 @@ func (h *wsHandler) fanout() {
 
 func (h *wsHandler) fetchEventFeed() {
 	for {
-		time.Sleep(1 * time.Second)
+		time.Sleep(time.Second)
 
 		cluster := h.svr.GetRaftCluster()
 		if cluster == nil {
