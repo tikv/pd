@@ -234,7 +234,7 @@ func randRegions(count int) []*metapb.Region {
 }
 
 func checkStoreRegionCount(c *C, r *regionsInfo, regions []*metapb.Region) {
-	stores := make(map[uint64]uint64, 0)
+	stores := make(map[uint64]uint64)
 	for _, region := range regions {
 		for _, peer := range region.GetPeers() {
 			stores[peer.GetStoreId()]++
@@ -272,7 +272,6 @@ func (s *testClusterCacheSuite) TestStoreRegionCount(c *C) {
 		regions = regions[1:]
 		checkStoreRegionCount(c, r, regions)
 	}
-	checkStoreRegionCount(c, r, regions)
 }
 
 // mockIDAllocator mocks IDAllocator and it is only used for test.
