@@ -139,8 +139,7 @@ func mustParseOperator(c *C, bop server.Operator, ops []*testChangePeerOperator)
 }
 
 func (s *testBalancerSuite) mustGetOperators(c *C) map[uint64]server.Operator {
-	cluster, err := s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 	return cluster.GetBalanceOperators()
 }

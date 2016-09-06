@@ -615,11 +615,12 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestBalanceOperatorPriority(c *C) {
-	cluster, err := s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.svr.GetRaftCluster()
+	c.Assert(cluster, NotNil)
+
 	bw := cluster.balancerWorker
 
-	err = cluster.putConfig(&metapb.Cluster{
+	err := cluster.putConfig(&metapb.Cluster{
 		Id:           s.clusterID,
 		MaxPeerCount: 1,
 	})
@@ -663,7 +664,7 @@ func (s *testClusterWorkerSuite) TestBalanceOperatorPriority(c *C) {
 	resp = heartbeatRegion(c, conn, s.clusterID, 0, region, leader)
 	c.Assert(resp.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	op = bw.getBalanceOperator(region.GetId())
-	// replicaOP finishes immediately, so we op is nil here.
+	// replicaOP finishes immediately, so the op is nil here.
 	c.Assert(op, IsNil)
 
 	// Add an adminOP.

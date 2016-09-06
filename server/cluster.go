@@ -470,19 +470,21 @@ func (c *RaftCluster) NewAddPeerOperator(regionID uint64, storeID uint64) (Opera
 		return nil, errRegionNotFound(regionID)
 	}
 
-	var peer *metapb.Peer
+	var (
+		peer *metapb.Peer
+		err  error
+	)
 
 	cluster := c.cachedCluster
 	if storeID == 0 {
 		cb := newCapacityBalancer(&c.s.cfg.BalanceCfg)
 		excluded := getExcludedStores(region)
-		var err error
 		peer, err = cb.selectAddPeer(cluster, cluster.getStores(), excluded)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
 	} else {
-		_, _, err := c.GetStore(storeID)
+		_, _, err = c.GetStore(storeID)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
