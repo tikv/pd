@@ -188,7 +188,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 
 	go s.svr.Run()
 
-	mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	mustWaitLeader(c, []*Server{s.svr})
 
 	// Build raft cluster with 5 stores.
 	s.bootstrap(c)

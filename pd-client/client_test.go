@@ -81,9 +81,7 @@ type testClientSuite struct {
 func (s *testClientSuite) SetUpSuite(c *C) {
 	s.srv, s.cleanup = newServer(c, clusterID)
 
-	// wait for srv to become leader
-	time.Sleep(time.Second * 3)
-
+	mustWaitLeader(c, []*server.Server{s.srv})
 	bootstrapServer(c, s.srv.GetAddr())
 
 	var err error
@@ -113,6 +111,19 @@ func newServer(c *C, clusterID uint64) (*server.Server, cleanupFunc) {
 	}
 
 	return s, cleanup
+}
+
+func mustWaitLeader(c *C, svrs []*server.Server) *server.Server {
+	for i := 0; i < 500; i++ {
+		for _, s := range svrs {
+			if s.IsLeader() {
+				return s
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	c.Fatal("no leader")
+	return nil
 }
 
 func bootstrapServer(c *C, addr string) {

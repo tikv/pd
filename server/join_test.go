@@ -84,8 +84,6 @@ Outloop:
 
 // Notice: cfg has changed.
 func startPdWith(cfg *Config) (*Server, error) {
-	// wait must less than util.maxCheckEtcdRunningCount * util.checkEtcdRunningDelay
-	wait := maxCheckEtcdRunningCount * checkEtcdRunningDelay / 2 // 5 seconds
 	svrCh := make(chan *Server)
 	errCh := make(chan error, 1)
 	abortCh := make(chan struct{}, 1)
@@ -114,7 +112,7 @@ func startPdWith(cfg *Config) (*Server, error) {
 		svr.Run()
 	}()
 
-	timer := time.NewTimer(wait)
+	timer := time.NewTimer(30 * time.Second)
 	defer timer.Stop()
 
 	select {
