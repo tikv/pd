@@ -328,8 +328,7 @@ func (s *testClusterSuite) testPutStore(c *C, conn net.Conn, clusterID uint64, s
 }
 
 func (s *testClusterSuite) resetStoreState(c *C, storeID uint64, state metapb.StoreState) {
-	cluster, err := s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 
 	store := &metapb.Store{
@@ -412,8 +411,7 @@ func (s *testClusterSuite) testRemoveStore(c *C, conn net.Conn, clusterID uint64
 }
 
 func (s *testClusterSuite) testCheckStores(c *C, conn net.Conn, clusterID uint64) {
-	cluster, err := s.svr.GetRaftCluster()
-	c.Assert(err, IsNil)
+	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 
 	store := s.newStore(c, 0, "127.0.0.1:11111")
@@ -428,7 +426,7 @@ func (s *testClusterSuite) testCheckStores(c *C, conn net.Conn, clusterID uint64
 	// Add a region peer to store.
 	leader := &metapb.Peer{StoreId: store.GetId()}
 	region := s.newRegion(c, 0, []byte{'a'}, []byte{'b'}, []*metapb.Peer{leader}, nil)
-	_, err = cluster.handleRegionHeartbeat(region, leader, nil)
+	_, err := cluster.handleRegionHeartbeat(region, leader, nil)
 	c.Assert(err, IsNil)
 	c.Assert(cluster.cachedCluster.regions.getStoreRegionCount(store.GetId()), Equals, 1)
 

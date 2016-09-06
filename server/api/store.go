@@ -86,7 +86,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	storeIDStr := vars["id"]
 	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -98,7 +98,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
