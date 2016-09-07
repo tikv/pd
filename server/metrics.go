@@ -64,6 +64,15 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"type"})
 
+	cmdCompletedDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "cmd",
+			Name:      "handle_completed_cmds_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of completed cmds.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		}, []string{"type"})
+
 	balancerCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -104,6 +113,7 @@ func init() {
 	prometheus.MustRegister(cmdFailedCounter)
 	prometheus.MustRegister(cmdDuration)
 	prometheus.MustRegister(cmdFailedDuration)
+	prometheus.MustRegister(cmdCompletedDuration)
 	prometheus.MustRegister(balancerCounter)
 	prometheus.MustRegister(txnCounter)
 	prometheus.MustRegister(txnDuration)
