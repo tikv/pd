@@ -163,25 +163,6 @@ func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	return resp, errors.Trace(err)
 }
 
-// convertName converts variable name to a linux type name.
-// Like `AbcDef -> abc_def`.
-func convertName(str string) string {
-	name := make([]byte, 0, 64)
-	for i := 0; i < len(str); i++ {
-		if str[i] >= 'A' && str[i] <= 'Z' {
-			if i > 0 {
-				name = append(name, '_')
-			}
-
-			name = append(name, str[i]+'a'-'A')
-		} else {
-			name = append(name, str[i])
-		}
-	}
-
-	return string(name)
-}
-
 func sliceClone(strs []string) []string {
 	data := make([]string, 0, len(strs))
 	for _, str := range strs {

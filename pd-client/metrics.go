@@ -13,14 +13,9 @@
 
 package pd
 
-import (
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/prometheus/client_golang/prometheus"
-)
+import "github.com/prometheus/client_golang/prometheus"
 
 var (
-	cmds = cmdTypes()
-
 	cmdCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd_client",
@@ -61,32 +56,4 @@ func init() {
 	prometheus.MustRegister(cmdFailedCounter)
 	prometheus.MustRegister(cmdDuration)
 	prometheus.MustRegister(cmdFailedDuration)
-}
-
-func cmdTypes() map[string]string {
-	types := make(map[string]string)
-	for name := range pdpb.CommandType_value {
-		types[name] = convertName(name)
-	}
-
-	return types
-}
-
-// convertName converts variable name to a linux type name.
-// Like `AbcDef -> abc_def`.
-func convertName(str string) string {
-	name := make([]byte, 0, 64)
-	for i := 0; i < len(str); i++ {
-		if str[i] >= 'A' && str[i] <= 'Z' {
-			if i > 0 {
-				name = append(name, '_')
-			}
-
-			name = append(name, str[i]+'a'-'A')
-		} else {
-			name = append(name, str[i])
-		}
-	}
-
-	return string(name)
 }

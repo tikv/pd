@@ -1,5 +1,7 @@
 GO=GO15VENDOREXPERIMENT="1" go
 
+PACKAGES  := $$(go list ./...| grep -vE 'vendor')
+
 LDFLAGS += -X "github.com/pingcap/pd/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "github.com/pingcap/pd/server.PDGitHash=$(shell git rev-parse HEAD)"
 
@@ -21,7 +23,7 @@ install:
 
 test: 
 	rm -rf vendor && ln -s _vendor/vendor vendor
-	$(GO) test --race ./pd-client ./server ./server/api
+	$(GO) test --race $(PACKAGES)
 	rm -rf vendor
 
 check:

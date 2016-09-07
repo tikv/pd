@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/util"
+	"github.com/pingcap/pd/pkg/metrics"
 )
 
 const (
@@ -80,11 +81,7 @@ func (c *conn) run() {
 
 		start := time.Now()
 		request := msg.GetPdReq()
-		requestCmdName := request.GetCmdType().String()
-		label, ok := cmds[requestCmdName]
-		if !ok {
-			label = convertName(requestCmdName)
-		}
+		label := metrics.GetCmdLabel(request)
 
 		var response *pdpb.Response
 

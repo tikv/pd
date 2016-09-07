@@ -13,23 +13,9 @@
 
 package server
 
-import (
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/prometheus/client_golang/prometheus"
-)
-
-func cmdTypes() map[string]string {
-	types := make(map[string]string)
-	for name := range pdpb.CommandType_value {
-		types[name] = convertName(name)
-	}
-
-	return types
-}
+import "github.com/prometheus/client_golang/prometheus"
 
 var (
-	cmds = cmdTypes()
-
 	cmdCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",

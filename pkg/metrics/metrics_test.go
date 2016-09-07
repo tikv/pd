@@ -11,16 +11,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package metrics
 
-import . "github.com/pingcap/check"
+import (
+	"testing"
 
-var _ = Suite(&testUtilSuite{})
+	. "github.com/pingcap/check"
+)
 
-type testUtilSuite struct {
+func Test(t *testing.T) {
+	TestingT(t)
 }
 
-func (s *testUtilSuite) TestConvertName(c *C) {
+var _ = Suite(&testMetricsSuite{})
+
+type testMetricsSuite struct {
+}
+
+func (s *testMetricsSuite) TestConvertName(c *C) {
 	inputs := []struct {
 		name    string
 		newName string
