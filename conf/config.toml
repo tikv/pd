@@ -24,7 +24,7 @@ max-peer-count = 3
 
 
 [balance]
-min-capacity-used-ratio = 0.4
+min-capacity-used-ratio = 0.1
 max-capacity-used-ratio = 0.9
 max-leader-count = 10
 max-sending-snap-count = 3

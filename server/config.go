@@ -335,7 +335,7 @@ func newBalanceConfig() *BalanceConfig {
 }
 
 const (
-	defaultMinCapacityUsedRatio   = float64(0.3)
+	defaultMinCapacityUsedRatio   = float64(0.1)
 	defaultMaxCapacityUsedRatio   = float64(0.9)
 	defaultMaxLeaderCount         = uint64(10)
 	defaultMaxSendingSnapCount    = uint64(3)
