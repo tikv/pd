@@ -34,10 +34,9 @@ const (
 type conn struct {
 	s *Server
 
-	rb         *bufio.Reader
-	wb         *bufio.Writer
-	conn       net.Conn
-	leaderConn net.Conn
+	rb   *bufio.Reader
+	wb   *bufio.Writer
+	conn net.Conn
 }
 
 func newConn(s *Server, netConn net.Conn, bufrw *bufio.ReadWriter) (*conn, error) {
@@ -66,6 +65,9 @@ func (c *conn) run() {
 		c.s.connsLock.Unlock()
 	}()
 
+	p := &leaderProxy{s: c.s}
+	defer p.close()
+
 	for {
 		msg := &msgpb.Message{}
 		msgID, err := util.ReadMessage(c.rb, msg)
@@ -86,7 +88,7 @@ func (c *conn) run() {
 		var response *pdpb.Response
 
 		if !c.s.IsLeader() {
-			response, err = c.proxyRequest(msgID, request)
+			response, err = p.handleRequest(msgID, request)
 			if err != nil {
 				log.Errorf("proxy request %s err %v", request, errors.ErrorStack(err))
 				response = newError(err)
@@ -153,36 +155,7 @@ func updateResponse(req *pdpb.Request, resp *pdpb.Response) {
 }
 
 func (c *conn) close() error {
-	if c.leaderConn != nil {
-		c.leaderConn.Close()
-	}
 	return errors.Trace(c.conn.Close())
-}
-
-func (c *conn) proxyRequest(msgID uint64, req *pdpb.Request) (*pdpb.Response, error) {
-	// Create a connection to leader.
-	if c.leaderConn == nil {
-		leader, err := c.s.GetLeader()
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		if leader == nil {
-			return nil, errors.New("no leader")
-		}
-		conn, err := rpcConnect(leader.GetAddr())
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		c.leaderConn = conn
-		log.Debugf("proxy conn %v to leader %s", c.conn.RemoteAddr(), leader.GetAddr())
-	}
-
-	resp, err := rpcCall(c.leaderConn, msgID, req)
-	if err != nil {
-		c.leaderConn.Close()
-		c.leaderConn = nil
-	}
-	return resp, errors.Trace(err)
 }
 
 func (c *conn) handleRequest(req *pdpb.Request) (*pdpb.Response, error) {
@@ -221,4 +194,40 @@ func (c *conn) handleRequest(req *pdpb.Request) (*pdpb.Response, error) {
 	default:
 		return nil, errors.Errorf("unsupported command %s", req)
 	}
+}
+
+type leaderProxy struct {
+	s    *Server
+	conn net.Conn
+}
+
+func (p *leaderProxy) close() {
+	if p.conn != nil {
+		p.conn.Close()
+	}
+}
+
+func (p *leaderProxy) handleRequest(msgID uint64, req *pdpb.Request) (*pdpb.Response, error) {
+	// Create a connection to leader.
+	if p.conn == nil {
+		leader, err := p.s.GetLeader()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		if leader == nil {
+			return nil, errors.New("no leader")
+		}
+		conn, err := rpcConnect(leader.GetAddr())
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		p.conn = conn
+	}
+
+	resp, err := rpcCall(p.conn, msgID, req)
+	if err != nil {
+		p.conn.Close()
+		p.conn = nil
+	}
+	return resp, errors.Trace(err)
 }
