@@ -118,9 +118,18 @@ func mustRPCCall(c *C, conn net.Conn, req *pdpb.Request) *pdpb.Response {
 var _ = Suite(&testLeaderServerSuite{})
 
 type testLeaderServerSuite struct {
-	client     *clientv3.Client
 	svrs       map[string]*Server
 	leaderPath string
+}
+
+func pickClient(svrs map[string]*Server) (ret *clientv3.Client) {
+	for _, svr := range svrs {
+		if ret != nil {
+			break
+		}
+		ret = svr.GetClient()
+	}
+	return
 }
 
 func (s *testLeaderServerSuite) SetUpSuite(c *C) {
@@ -144,32 +153,13 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 		s.svrs[svr.GetAddr()] = svr
 		s.leaderPath = svr.getLeaderPath()
 	}
-
-	s.setUpClient(c)
 }
 
 func (s *testLeaderServerSuite) TearDownSuite(c *C) {
-	s.client.Close()
-
 	for _, svr := range s.svrs {
 		svr.Close()
 		cleanServer(svr.cfg)
 	}
-}
-
-func (s *testLeaderServerSuite) setUpClient(c *C) {
-	endpoints := make([]string, 0, 3)
-
-	for _, svr := range s.svrs {
-		endpoints = append(endpoints, svr.GetEndpoints()...)
-	}
-
-	var err error
-	s.client, err = clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: 3 * time.Second,
-	})
-	c.Assert(err, IsNil)
 }
 
 func (s *testLeaderServerSuite) TestLeader(c *C) {
@@ -177,23 +167,13 @@ func (s *testLeaderServerSuite) TestLeader(c *C) {
 		go svr.Run()
 	}
 
-	leader1 := mustGetLeader(c, s.client, s.leaderPath)
+	leader1 := mustGetLeader(c, pickClient(s.svrs), s.leaderPath)
 	svr, ok := s.svrs[leader1.GetAddr()]
 	c.Assert(ok, IsTrue)
 	svr.Close()
 	delete(s.svrs, leader1.GetAddr())
 
-	// Create a client without the leader1's endpoints.
-	endpoints := make([]string, 0, 2)
-	for _, svr := range s.svrs {
-		endpoints = append(endpoints, svr.GetEndpoints()...)
-	}
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: 3 * time.Second,
-	})
-	c.Assert(err, IsNil)
-	defer client.Close()
+	client := pickClient(s.svrs)
 
 	// wait leader changes
 	for i := 0; i < 50; i++ {

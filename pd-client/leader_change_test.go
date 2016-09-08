@@ -25,6 +25,16 @@ var _ = Suite(&testLeaderChangeSuite{})
 
 type testLeaderChangeSuite struct{}
 
+func pickClient(svrs map[string]*server.Server) (ret *clientv3.Client) {
+	for _, svr := range svrs {
+		if ret != nil {
+			break
+		}
+		ret = svr.GetClient()
+	}
+	return
+}
+
 func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	cfgs := server.NewTestMultiConfig(3)
 
@@ -40,13 +50,10 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		}()
 	}
 
-	endpointsMap := make(map[string][]string)
-
 	svrs := make(map[string]*server.Server, 3)
 	for i := 0; i < 3; i++ {
 		svr := <-ch
 		svrs[svr.GetAddr()] = svr
-		endpointsMap[svr.GetAddr()] = svr.GetEndpoints()
 	}
 
 	for _, svr := range svrs {
@@ -67,12 +74,8 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 
 	defaultWatchLeaderTimeout = 500 * time.Millisecond
 
-	endpoints := make([]string, 0, 2)
-	for _, eps := range endpointsMap {
-		endpoints = append(endpoints, eps...)
-	}
-
-	cli, err := NewClient(endpoints, 0)
+	etcdClient := pickClient(svrs)
+	cli, err := NewClient(etcdClient.Endpoints(), 0)
 	c.Assert(err, IsNil)
 	defer cli.Close()
 
@@ -81,28 +84,12 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 
 	leaderPath := getLeaderPath(0)
 
-	etcdClient, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: 3 * time.Second,
-	})
-	c.Assert(err, IsNil)
-
 	leaderAddr, _, err := getLeader(etcdClient, leaderPath)
 	c.Assert(err, IsNil)
 	svrs[leaderAddr].Close()
 	delete(svrs, leaderAddr)
-	delete(endpointsMap, leaderAddr)
 
-	endpoints = make([]string, 0, 2)
-	for _, eps := range endpointsMap {
-		endpoints = append(endpoints, eps...)
-	}
-
-	etcdClient, err = clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: 3 * time.Second,
-	})
-	c.Assert(err, IsNil)
+	etcdClient = pickClient(svrs)
 
 	// wait leader changes
 	changed := false
@@ -116,7 +103,7 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	}
 	c.Assert(changed, IsTrue)
 
-	cli, err = NewClient(endpoints, 0)
+	cli, err = NewClient(etcdClient.Endpoints(), 0)
 	c.Assert(err, IsNil)
 	defer cli.Close()
 
