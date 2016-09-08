@@ -318,9 +318,19 @@ func (s *testClusterSuite) testPutStore(c *C, conn net.Conn, clusterID uint64, s
 	resp = putStore(c, conn, clusterID, store)
 	c.Assert(resp.PutStore, NotNil)
 
-	// Put store with a duplicated address.
+	// Put new store with a duplicated address when old store is up will fail.
 	resp = putStore(c, conn, clusterID, s.newStore(c, 0, store.GetAddress()))
 	c.Assert(resp.PutStore, IsNil)
+
+	// Put new store with a duplicated address when old store is offline will fail.
+	s.resetStoreState(c, store.GetId(), metapb.StoreState_Offline)
+	resp = putStore(c, conn, clusterID, s.newStore(c, 0, store.GetAddress()))
+	c.Assert(resp.PutStore, IsNil)
+
+	// Put new store with a duplicated address when old store is tombstone is OK.
+	s.resetStoreState(c, store.GetId(), metapb.StoreState_Tombstone)
+	resp = putStore(c, conn, clusterID, s.newStore(c, 0, store.GetAddress()))
+	c.Assert(resp.PutStore, NotNil)
 
 	// Put a new store.
 	resp = putStore(c, conn, clusterID, s.newStore(c, 0, "127.0.0.1:12345"))
@@ -330,12 +340,10 @@ func (s *testClusterSuite) testPutStore(c *C, conn net.Conn, clusterID uint64, s
 func (s *testClusterSuite) resetStoreState(c *C, storeID uint64, state metapb.StoreState) {
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
-
-	store := &metapb.Store{
-		Id:    storeID,
-		State: state,
-	}
-	cluster.cachedCluster.addStore(store)
+	storeInfo := cluster.cachedCluster.getStore(storeID)
+	c.Assert(storeInfo, NotNil)
+	storeInfo.store.State = state
+	cluster.cachedCluster.addStore(storeInfo.store)
 }
 
 func (s *testClusterSuite) testRemoveStore(c *C, conn net.Conn, clusterID uint64, store *metapb.Store) {
