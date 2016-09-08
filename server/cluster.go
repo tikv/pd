@@ -72,7 +72,6 @@ func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 		running:     false,
 		clusterID:   clusterID,
 		clusterRoot: s.getClusterRootPath(),
-		quit:        make(chan struct{}),
 	}
 }
 
@@ -105,6 +104,7 @@ func (c *RaftCluster) start(meta metapb.Cluster) error {
 	c.balancerWorker.run()
 
 	c.wg.Add(1)
+	c.quit = make(chan struct{})
 	go c.runBackgroundJobs(c.s.cfg.BalanceCfg.BalanceInterval)
 
 	c.running = true

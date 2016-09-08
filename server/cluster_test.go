@@ -457,3 +457,31 @@ func (s *testClusterSuite) testCheckStores(c *C, conn net.Conn, clusterID uint64
 	tmpStore = s.getStore(c, conn, clusterID, store.GetId())
 	c.Assert(tmpStore.GetState(), Equals, metapb.StoreState_Tombstone)
 }
+
+// Make sure PD will not panic if it start and stop again and again.
+func (s *testClusterSuite) TestClosedChannel(c *C) {
+	svr, cleanup := newTestServer(c)
+	defer cleanup()
+	go svr.Run()
+
+	leader := mustGetLeader(c, svr.client, svr.getLeaderPath())
+
+	conn, err := rpcConnect(leader.GetAddr())
+	c.Assert(err, IsNil)
+	defer conn.Close()
+
+	clusterID := uint64(0)
+	storeAddr := "127.0.0.1:0"
+	s.tryBootstrapCluster(c, conn, clusterID, storeAddr)
+
+	cluster := svr.GetRaftCluster()
+	c.Assert(cluster, NotNil)
+	cluster.stop()
+
+	err = svr.createRaftCluster()
+	c.Assert(err, IsNil)
+
+	cluster = svr.GetRaftCluster()
+	c.Assert(cluster, NotNil)
+	cluster.stop()
+}
