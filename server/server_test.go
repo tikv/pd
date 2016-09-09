@@ -122,14 +122,12 @@ type testLeaderServerSuite struct {
 	leaderPath string
 }
 
-func pickClient(svrs map[string]*Server) (ret *clientv3.Client) {
+func mustGetEtcdClient(c *C, svrs map[string]*Server) *clientv3.Client {
 	for _, svr := range svrs {
-		if ret != nil {
-			break
-		}
-		ret = svr.GetClient()
+		return svr.GetClient()
 	}
-	return
+	c.Fatal("etcd client none available")
+	return nil
 }
 
 func (s *testLeaderServerSuite) SetUpSuite(c *C) {
@@ -167,13 +165,13 @@ func (s *testLeaderServerSuite) TestLeader(c *C) {
 		go svr.Run()
 	}
 
-	leader1 := mustGetLeader(c, pickClient(s.svrs), s.leaderPath)
+	leader1 := mustGetLeader(c, mustGetEtcdClient(c, s.svrs), s.leaderPath)
 	svr, ok := s.svrs[leader1.GetAddr()]
 	c.Assert(ok, IsTrue)
 	svr.Close()
 	delete(s.svrs, leader1.GetAddr())
 
-	client := pickClient(s.svrs)
+	client := mustGetEtcdClient(c, s.svrs)
 
 	// wait leader changes
 	for i := 0; i < 50; i++ {

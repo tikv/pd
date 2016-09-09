@@ -25,14 +25,12 @@ var _ = Suite(&testLeaderChangeSuite{})
 
 type testLeaderChangeSuite struct{}
 
-func pickClient(svrs map[string]*server.Server) (ret *clientv3.Client) {
+func mustGetEtcdClient(c *C, svrs map[string]*server.Server) *clientv3.Client {
 	for _, svr := range svrs {
-		if ret != nil {
-			break
-		}
-		ret = svr.GetClient()
+		return svr.GetClient()
 	}
-	return
+	c.Fatal("etcd client none available")
+	return nil
 }
 
 func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
@@ -74,7 +72,7 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 
 	defaultWatchLeaderTimeout = 500 * time.Millisecond
 
-	etcdClient := pickClient(svrs)
+	etcdClient := mustGetEtcdClient(c, svrs)
 	cli, err := NewClient(etcdClient.Endpoints(), 0)
 	c.Assert(err, IsNil)
 	defer cli.Close()
@@ -89,7 +87,7 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	svrs[leaderAddr].Close()
 	delete(svrs, leaderAddr)
 
-	etcdClient = pickClient(svrs)
+	etcdClient = mustGetEtcdClient(c, svrs)
 
 	// wait leader changes
 	changed := false
