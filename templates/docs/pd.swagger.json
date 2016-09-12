@@ -1,0 +1,153 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "REST APIs provided by Placement Driver that is used to manage and schedule the TiKV cluster.",
+        "version": "1.0.0",
+        "title": "Placement Driver API",
+        "contact": {
+            "email": "support@pingcap.com"
+        },
+        "license": {
+            "name": "Apache 2.0",
+            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
+        }
+    },
+    "schemes": [
+        "http",
+        "https"
+    ],
+    "produces": [
+        "application/json"
+    ],
+    "paths": {
+        "/pd/api/v1/config": {
+            "get": {
+                "description": "Get PD config information.",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "An object of Config.",
+                        "schema": {
+                            "$ref": "#/definitions/Config"
+                        }
+                    },
+                    "500": {
+                        "description": "Unexpected error"
+                    }
+                }
+            }
+        },
+        "/pd/api/v1/cluster": {
+            "get": {
+                "description": "Get TiKV cluster information.",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "An object of Cluster.",
+                        "schema": {
+                            "$ref": "#/definitions/Cluster"
+                        }
+                    },
+                    "500": {
+                        "description": "Unexpected error"
+                    }
+                }
+            }
+        },
+    },
+    "definitions": {
+         "Balance": {
+            "type": "object",
+            "properties": {
+                "min-capacity-used-ratio": {
+                    "type": "number",
+                    "format": "double",
+                    "description": "For capacity balance. 
+                    If the used ratio of one store is less than this value, it will never be used as a from store."
+                },
+            }
+        },
+        "Config": {
+            "type": "object",
+            "properties": {
+                "client-urls": {
+                    "type": "string",
+                    "description": "URLs for client traffic."
+                },
+                "peer-urls": {
+                    "type": "string",
+                    "description": ""
+                },
+                "advertise-client-urls": {
+                    "type": "string",
+                    "description": ""
+                },
+                "name": {
+                    "type": "string",
+                    "description": ""
+                },
+                "data-dir": {
+                    "type": "string",
+                    "description": ""
+                },
+                "initial-cluster": {
+                    "type": "string",
+                    "description": ""
+                },
+                "initial-cluster-state": {
+                    "type": "string",
+                    "description": ""
+                },
+                "join": {
+                    "type": "string",
+                    "description": ""
+                },
+                "lease": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": ""
+                },
+                "log-level": {
+                    "type": "string",
+                    "description": "Log level info."
+                },
+                "log-file": {
+                    "type": "string",
+                    "description": "Log file name."
+                },
+                "tso-save-interval": {
+                    "type": "string",
+                    "description": ""
+                },
+                "cluster-id": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "ID of cluster."
+                },
+                "max_peer_count": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "Max peer count for TiKV cluster."
+                },
+                "balance": {
+                    "$ref": "#/definitions/Balance"
+                }
+            }
+        },
+        "Cluster": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "ID of cluster."
+                },
+                "max_peer_count": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "Max peer count for TiKV cluster."
+                }
+            }
+        }
+    }
+}
