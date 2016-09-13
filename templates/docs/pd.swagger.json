@@ -237,22 +237,6 @@
                     }
                 }
             }
-        },
-        "/pd/api/v1/history/operators": {
-            "get": {
-                "description": "Get all PD history balance operators.",
-                "responses": {
-                    "200": {
-                        "description": "A balancers object.",
-                        "schema": {
-                            "$ref": "#/definitions/Balancers"
-                        }
-                    },
-                    "500": {
-                        "description": "unexpected error"
-                    }
-                }
-            }
         }
     },
     "definitions": {
