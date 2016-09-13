@@ -20,13 +20,25 @@
         "application/json"
     ],
     "paths": {
-        "/pd/api/v1/config": {
+        "/pd/api/v1/version": {
             "get": {
-                "description": "Get PD config information.",
-                "parameters": [],
+                "description": "Get the PD version.",
                 "responses": {
                     "200": {
-                        "description": "An object of Config.",
+                        "description": "A version object.",
+                        "schema": {
+                            "$ref": "#/definitions/Version"
+                        }
+                    }
+                }
+            }
+        },
+        "/pd/api/v1/config": {
+            "get": {
+                "description": "Get the PD config.",
+                "responses": {
+                    "200": {
+                        "description": "A config object.",
                         "schema": {
                             "$ref": "#/definitions/Config"
                         }
@@ -37,15 +49,14 @@
                 }
             }
         },
-        "/pd/api/v1/cluster": {
+        "/pd/api/v1/leader": {
             "get": {
-                "description": "Get TiKV cluster information.",
-                "parameters": [],
+                "description": "Get the PD leader.",
                 "responses": {
                     "200": {
-                        "description": "An object of Cluster.",
+                        "description": "A leader object.",
                         "schema": {
-                            "$ref": "#/definitions/Cluster"
+                            "$ref": "#/definitions/Leader"
                         }
                     },
                     "500": {
@@ -54,49 +65,312 @@
                 }
             }
         },
+        "/pd/api/v1/members": {
+            "get": {
+                "description": "Get all PD members.",
+                "responses": {
+                    "200": {
+                        "description": "An array of member objects.",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/Member"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Unexpected error"
+                    }
+                }
+            }
+        },
+        "/pd/api/v1/members/{name}": {
+            "delete": {
+                "description": "Delete a PD member.",
+                "parameters": [{
+                    "name": "name",
+                    "type": "string",
+                    "in": "path",
+                    "required": true,
+                    "description": "The name of the member to delete."
+                }],
+                "responses": {
+                    "200": {
+                        "description": "Member deleted"
+                    },
+                    "404": {
+                        "description": "Member not found"
+                    },
+                    "500": {
+                        "description": "Unexpected error"
+                    }
+                }
+            }
+        },
+        "/pd/api/v1/stores": {
+            "get": {
+                "description": "Get all TiKV stores.",
+                "responses": {
+                    "200": {
+                        "description": "A stores object.",
+                        "schema": {
+                            "$ref": "#/definitions/Stores"
+                        }
+                    },
+                    "500": {
+                        "description": "unexpected error"
+                    }
+                }
+            }
+        },
+        "/pd/api/v1/store/{id}": {
+            "get": {
+                "description": "Get a TiKV store.",
+                "parameters": [{
+                    "name": "id",
+                    "type": "integer",
+                    "in": "path",
+                    "required": true,
+                    "description": "The id of the store to get."
+                }],
+                "responses": {
+                    "200": {
+                        "description": "A store object.",
+                        "schema": {
+                            "$ref": "#/definitions/Store"
+                        }
+                    },
+                    "500": {
+                        "description": "unexpected error"
+                    }
+                }
+            },
+            "delete": {
+                "description": "Delete a TiKV store.",
+                "parameters": [{
+                    "name": "id",
+                    "type": "integer",
+                    "in": "path",
+                    "required": true,
+                    "description": "The id of the store to delete."
+                }],
+                "responses": {
+                    "200": {
+                        "description": "Store deleted",
+                    },
+                    "500": {
+                        "description": "unexpected error"
+                    }
+                }
+            }
+        },
+        "/pd/api/v1/regions": {
+            "get": {
+                "description": "Get all TiKV regions.",
+                "responses": {
+                    "200": {
+                        "description": "A regions object.",
+                        "schema": {
+                            "$ref": "#/definitions/Regions"
+                        }
+                    },
+                    "500": {
+                        "description": "unexpected error"
+                    }
+                }
+            }
+        },
+        "/pd/api/v1/region/{id}": {
+            "get": {
+                "description": "Get a TiKV region.",
+                "parameters": [{
+                    "name": "id",
+                    "type": "integer",
+                    "in": "path",
+                    "required": true,
+                    "description": "The id of the region to get."
+                }],
+                "responses": {
+                    "200": {
+                        "description": "A region object.",
+                        "schema": {
+                            "$ref": "#/definitions/Region"
+                        }
+                    },
+                    "500": {
+                        "description": "unexpected error"
+                    }
+                }
+            }
+        },
+        "/pd/api/v1/events": {
+            "get": {
+                "description": "Get all PD events.",
+                "responses": {
+                    "200": {
+                        "description": "An array of event objects.",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/LogEvent"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "unexpected error"
+                    }
+                }
+            }
+        },
+        "/pd/api/v1/balancers": {
+            "get": {
+                "description": "Get all PD balancers.",
+                "responses": {
+                    "200": {
+                        "description": "A balancers object.",
+                        "schema": {
+                            "$ref": "#/definitions/Balancers"
+                        }
+                    },
+                    "500": {
+                        "description": "unexpected error"
+                    }
+                }
+            }
+        },
+        "/pd/api/v1/history/operators": {
+            "get": {
+                "description": "Get all PD history balance operators.",
+                "responses": {
+                    "200": {
+                        "description": "A balancers object.",
+                        "schema": {
+                            "$ref": "#/definitions/Balancers"
+                        }
+                    },
+                    "500": {
+                        "description": "unexpected error"
+                    }
+                }
+            }
+        }
     },
     "definitions": {
-         "Balance": {
+        "Version": {
+            "type": "object",
+            "properties": {
+                "version": {
+                    "type": "string",
+                }
+            }
+        },
+        "Balance": {
             "type": "object",
             "properties": {
                 "min-capacity-used-ratio": {
                     "type": "number",
                     "format": "double",
-                    "description": "For capacity balance. 
-                    If the used ratio of one store is less than this value, it will never be used as a from store."
+                    "description": "For capacity balance. If the used ratio of one store is less than this value, it will never be used as a from store."
                 },
+                "max-capacity-used-ratio": {
+                    "type": "number",
+                    "format": "double",
+                    "description": "For capacity balance. If the used ratio of one store is greater than this value, it will never be used as a to store."
+                },
+                "max-sending-snap-count": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "description": "For capacity balance. If the sending snapshot count of one storage is greater than this value, it will never be used as a from store."
+                },
+                "max-receiving-snap-count": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "description": "For capacity balance. If the receiving snapshot count of one storage is greater than this value, it will never be used as a to store."
+                },
+                "max-leader-count": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "description": "For leader balance. If the leader region count of one store is less than this value, it will never be used as a from store."
+                },
+                "max-diff-score-fraction": {
+                    "type": "number",
+                    "format": "double",
+                    "description": "If the new store and old store's diff scores are not beyond this value, the balancer will do nothing."
+                },
+                "balance-interval": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "description": "Balance loop interval time (seconds)."
+                },
+                "max-balance-count": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "description": "The max region count to balance at the same time."
+                },
+                "max-balance-retry-per-loop": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "description": "The max retry count to balance in a balance schedule."
+                },
+                "max-balance-count-per-loop": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "description": "The max region count to balance in a balance schedule."
+                },
+                "max-transfer-wait-count": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "description": "The max heartbeat count to wait leader transfer to finish."
+                },
+                "max-peer-down-duration": {
+                    "type": "string",
+                    "description": "The max duration at which a peer will be considered to be down if its leader reports it."
+                },
+                "max-store-down-duration": {
+                    "type": "string",
+                    "description": "The max duration at which a store will be considered to be down if it hasn't reported heartbeats."
+                }
             }
         },
         "Config": {
             "type": "object",
             "properties": {
-                "client-urls": {
-                    "type": "string",
-                    "description": "URLs for client traffic."
-                },
-                "peer-urls": {
-                    "type": "string",
-                    "description": ""
-                },
-                "advertise-client-urls": {
-                    "type": "string",
-                    "description": ""
-                },
                 "name": {
                     "type": "string",
-                    "description": ""
+                    "description": "Human-readable unique name for this member."
                 },
                 "data-dir": {
                     "type": "string",
-                    "description": ""
+                    "description": "Path to the data directory."
+                },
+                "client-urls": {
+                    "type": "string",
+                    "description": "List of URLs to listen on for client traffic."
+                },
+                "peer-urls": {
+                    "type": "string",
+                    "description": "List of URLs to listen on for peer traffic."
+                },
+                "advertise-client-urls": {
+                    "type": "string",
+                    "description": "List of this member’s peer URLs to advertise to the rest of the cluster."
+                },
+                "advertise-peer-urls": {
+                    "type": "string",
+                    "description": "List of this member’s client URLs to advertise to the rest of the cluster."
+                },
+                "cluster-id": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "Unique identification for the cluster."
                 },
                 "initial-cluster": {
                     "type": "string",
-                    "description": ""
+                    "description": "Initial cluster configuration for bootstrapping."
                 },
                 "initial-cluster-state": {
                     "type": "string",
-                    "description": ""
+                    "description": "Initial cluster state (\"new\" or \"existing\")."
                 },
                 "join": {
                     "type": "string",
@@ -109,20 +383,15 @@
                 },
                 "log-level": {
                     "type": "string",
-                    "description": "Log level info."
+                    "description": "The log level."
                 },
                 "log-file": {
                     "type": "string",
-                    "description": "Log file name."
+                    "description": "The log file."
                 },
                 "tso-save-interval": {
                     "type": "string",
-                    "description": ""
-                },
-                "cluster-id": {
-                    "type": "integer",
-                    "format": "int64",
-                    "description": "ID of cluster."
+                    "description": "The interval to save timestamp."
                 },
                 "max_peer_count": {
                     "type": "integer",
@@ -130,22 +399,425 @@
                     "description": "Max peer count for TiKV cluster."
                 },
                 "balance": {
-                    "$ref": "#/definitions/Balance"
+                    "$ref": "#/definitions/Balance",
                 }
             }
         },
-        "Cluster": {
+        "Leader": {
+            "type": "object",
+            "properties": {
+                "addr": {
+                    "type": "string",
+                    "description": "The leader's client URLs."
+                },
+                "pid": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "The leader's process id."
+                }
+            }
+        },
+        "Member": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Human-readable unique name for this member."
+                },
+                "client-urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "List of URLs to listen on for client traffic."
+                },
+                "peer-urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "description": "List of URLs to listen on for peer traffic."
+                }
+            }
+        },
+        "Stores": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "description": "The stores count."
+                },
+                "stores": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Store"
+                    }
+                }
+            }
+        },
+        "Store": {
+            "type": "object",
+            "properties": {
+                "store": {
+                    "$ref": "#/definitions/StoreMeta"
+                },
+                "status": {
+                    "$ref": "#/definitions/StoreStatus"
+                }
+            }
+        },
+        "StoreMeta": {
             "type": "object",
             "properties": {
                 "id": {
                     "type": "integer",
-                    "format": "int64",
-                    "description": "ID of cluster."
+                    "description": "The store's id."
                 },
-                "max_peer_count": {
+                "address": {
+                    "type": "string",
+                    "description": "The store's address."
+                },
+                "state": {
                     "type": "integer",
-                    "format": "int64",
-                    "description": "Max peer count for TiKV cluster."
+                    "description": "The store's state. (0=Up,1=Offline,2=Tombstone)"
+                }
+            }
+        },
+        "StoreStats": {
+            "type": "object",
+            "properties": {
+                "store_id": {
+                    "type": "integer",
+                    "description": "The store's id."
+                },
+                "capacity": {
+                    "type": "integer",
+                    "description": "The store's disk capacity (in bytes)."
+                },
+                "available": {
+                    "type": "integer",
+                    "description": "The store's disk available size (in bytes)."
+                },
+                "region_count": {
+                    "type": "integer",
+                    "description": "The store's total region count."
+                },
+                "sending_snap_count": {
+                    "type": "integer",
+                    "description": "The store's current sending snapshot count."
+                },
+                "receiving_snap_count": {
+                    "type": "integer",
+                    "description": "The store's current receiving snapshot count."
+                }
+            }
+        },
+        "StoreStatus": {
+            "type": "object",
+            "properties": {
+                "stats": {
+                    "$ref": "#/definitions/StoreStats"
+                },
+                "last_heartbeat_ts": {
+                    "type": "string",
+                    "description": "The timestamp of the last heartbeat from this store."
+                },
+                "total_region_count": {
+                    "type": "integer",
+                    "description": "The total number of regions in this store."
+                },
+                "leader_region_count": {
+                    "type": "integer",
+                    "description": "The number of leader regions in this store."
+                },
+                "scores": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer",
+                    },
+                    "description": "Balance scores of this store."
+                }
+            }
+        },
+        "Regions": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "description": "The regions count."
+                },
+                "regions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/RegionMeta"
+                    }
+                }
+            }
+        },
+        "Region": {
+            "type": "object",
+            "properties": {
+                "region": {
+                    "$ref": "#/definitions/RegionMeta"
+                },
+                "leader": {
+                    "$ref": "#/definitions/PeerMeta"
+                }
+            }
+        },
+        "RegionMeta": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer",
+                    "description": "The region's id."
+                },
+                "start_key": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The region's start key."
+                },
+                "end_key": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The region's end key."
+                },
+                "region_epoch": {
+                    "$ref": "#/definitions/RegionEpoch",
+                },
+                "peers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/PeerMeta"
+                    }
+                }
+            }
+        },
+        "RegionEpoch": {
+            "type": "object",
+            "properties": {
+                "version": {
+                    "type": "integer",
+                    "description": "The region's version."
+                },
+                "conf_ver": {
+                    "type": "integer",
+                    "description": "The region's configuration version."
+                }
+            }
+        },
+        "PeerMeta": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer",
+                    "description": "The peer's id."
+                },
+                "store_id": {
+                    "type": "integer",
+                    "description": "The peer's store id."
+                }
+            }
+        },
+        "LogEvent": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer",
+                    "description": "The event's id."
+                },
+                "code": {
+                    "type": "integer",
+                    "description": "The event's type. (1=Split,2=TransferLeader,3=AddReplica,4=RemoveReplica)"
+                },
+                "status": {
+                    "type": "integer",
+                    "description": "The event's status. (1=Start,2=End)"
+                },
+                "split_event": {
+                    "$ref": "#/definitions/SplitEvent"
+                },
+                "add_replica_event": {
+                    "$ref": "#/definitions/AddReplicaEvent"
+                },
+                "remove_replica_event": {
+                    "$ref": "#/definitions/RemoveReplicaEvent"
+                },
+                "transfer_leader_event": {
+                    "$ref": "#/definitions/TransferLeaderEvent"
+                }
+            }
+        },
+        "SplitEvent": {
+            "type": "object",
+            "properties": {
+                "region": {
+                    "type": "integer",
+                    "description": "The original region's id."
+                },
+                "left": {
+                    "type": "integer",
+                    "description": "The left half new region's id."
+                },
+                "right": {
+                    "type": "integer",
+                    "description": "The right half new region's id"
+                }
+            }
+        },
+        "AddReplicaEvent": {
+            "type": "object",
+            "properties": {
+                "region": {
+                    "type": "integer",
+                    "description": "The region's id."
+                },
+                "store": {
+                    "type": "integer",
+                    "description": "The store's id of the added peer."
+                }
+            }
+        },
+        "RemoveReplicaEvent": {
+            "type": "object",
+            "properties": {
+                "region": {
+                    "type": "integer",
+                    "description": "The region's id."
+                },
+                "store": {
+                    "type": "integer",
+                    "description": "The store's id of the removed peer."
+                }
+            }
+        },
+        "TransferLeaderEvent": {
+            "type": "object",
+            "properties": {
+                "region": {
+                    "type": "integer",
+                    "description": "The region's id."
+                },
+                "store_from": {
+                    "type": "integer",
+                    "description": "The store's id of the peer transfered from."
+                },
+                "store_to": {
+                    "type": "integer",
+                    "description": "The store's id of the peer transfered to."
+                }
+            }
+        },
+        "Balancers": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "description": "The balancers count."
+                },
+                "balancers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Balancer"
+                    }
+                }
+            }
+        },
+        "Balancer": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer",
+                    "description": "The balancer's id."
+                },
+                "type": {
+                    "type": "integer",
+                    "description": "The balancer's type. (1=balance,2=replica,3=admin)"
+                },
+                "index": {
+                    "type": "integer",
+                    "description": "The balancer's index of the current executing operator."
+                },
+                "start": {
+                    "type": "string",
+                    "description": "The balancer's start time."
+                },
+                "end": {
+                    "type": "string",
+                    "description": "The balancer's end time."
+                },
+                "finished": {
+                    "type": "boolean",
+                    "description": "The balancer's has been finished or not."
+                },
+                "region": {
+                    "$ref": "#/definitions/RegionMeta"
+                },
+                "operators": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/Operator"
+                    }
+                }
+            }
+        },
+        "Operator": {
+            "type": "object",
+            "description": "One of the ChangePeerOperator or TransferLeaderOperator.",
+            "properties": {
+                "ChangePeerOperator": {
+                    "$ref": "#/definitions/ChangePeerOperator"
+                },
+                "TransferLeaderOperator": {
+                    "$ref": "#/definitions/TransferLeaderOperator"
+                }
+            }
+        },
+        "ChangePeerOperator": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "The operator's name."
+                },
+                "regionid": {
+                    "type": "integer",
+                    "description": "The operator's region id."
+                },
+                "operator": {
+                    "type": "object",
+                    "properties": {
+                        "change_type": {
+                            "type": "integer",
+                            "description": "The configuration type. (0=AddNode,1=RemoveNode)"
+                        },
+                        "peer": {
+                            "$ref": "#/definitions/PeerMeta"
+                        }
+                    }
+                }
+            }
+        },
+        "TransferLeaderOperator": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "The operator's name."
+                },
+                "regionid": {
+                    "type": "integer",
+                    "description": "The operator's region id."
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "The operator's retries count."
+                },
+                "old_leader": {
+                    "$ref": "#/definitions/PeerMeta"
+                },
+                "new_leader": {
+                    "$ref": "#/definitions/PeerMeta"
                 }
             }
         }
