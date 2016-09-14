@@ -132,7 +132,7 @@ import:
   - pkg/raft_serverpb
   - pkg/util
 - package: github.com/prometheus/client_golang
-  version: 9f1ed1ed4a5f754c9b626e5cf8ec1ea7d622e017
+  version: 0.8.0
   subpackages:
   - prometheus
 - package: github.com/prometheus/client_model

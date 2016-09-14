@@ -1,5 +1,5 @@
-hash: 5c5ca57da3c88f1c7ca90ff271e5dfec6717a5c27b52c0fd7d81f0e7487d23f8
-updated: 2016-08-30T15:38:55.739794121+08:00
+hash: 77a5cf10aa3352dbdeb2d0fc039b05f485a0e2dd768da09c1d2c39a7440811c8
+updated: 2016-09-14T13:46:52.720856528+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -133,9 +133,10 @@ imports:
   - pkg/raft_serverpb
   - pkg/util
 - name: github.com/prometheus/client_golang
-  version: 9f1ed1ed4a5f754c9b626e5cf8ec1ea7d622e017
+  version: c5b7fccd204277076155f10851dad72b76a49317
   subpackages:
   - prometheus
+  - prometheus/push
 - name: github.com/prometheus/client_model
   version: fa8ad6fec33561be4280a8f0514318c79d7f6cb6
   subpackages:
