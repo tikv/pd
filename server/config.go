@@ -68,6 +68,8 @@ type Config struct {
 
 	BalanceCfg BalanceConfig `toml:"balance" json:"balance"`
 
+	MetricCfg MetricConfig `toml:"metric" json:"metric"`
+
 	// Only test can change them.
 	nextRetryDelay             time.Duration
 	disableStrictReconfigCheck bool
@@ -376,6 +378,12 @@ func (c *BalanceConfig) String() string {
 		return "<nil>"
 	}
 	return fmt.Sprintf("BalanceConfig(%+v)", *c)
+}
+
+// MetricConfig is the metric configuration.
+type MetricConfig struct {
+	PushAddress  string        `toml:"address" json:"address"`
+	PushInterval time.Duration `toml:"interval" json:"interval"`
 }
 
 // ParseUrls parse a string into multiple urls.

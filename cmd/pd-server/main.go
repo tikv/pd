@@ -44,6 +44,8 @@ func main() {
 
 	server.PrintPDInfo()
 
+	server.PushMetric(cfg)
+
 	svr, err := server.CreateServer(cfg)
 	if err != nil {
 		log.Errorf("create pd server err %s\n", err)

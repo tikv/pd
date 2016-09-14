@@ -37,3 +37,9 @@ max-balance-count-per-loop = 3
 max-transfer-wait-count = 3
 max-peer-down-duration = "30m"
 max-store-down-duration = "10m"
+
+[metric]
+# prometheus client push interval (second), set 0 to disable prometheus.
+interval = 15
+# prometheus pushgateway address, leaves it empty will disable prometheus.
+address = ""
