@@ -4,3 +4,4 @@ bin
 .idea
 default.etcd
 default.pd
+*.swp

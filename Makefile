@@ -11,6 +11,11 @@ all: dev install
 
 dev: build check test
 
+build-fe:
+	go get github.com/jteeuwen/go-bindata/...
+	go get github.com/elazarl/go-bindata-assetfs/...
+	cd server/api && go-bindata-assetfs -pkg api templates/... && cd -
+
 build:
 	rm -rf vendor && ln -s _vendor/vendor vendor
 	$(GO) build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
@@ -29,10 +34,10 @@ test:
 check:
 	go get github.com/golang/lint/golint
 
-	go tool vet . 2>&1 | grep -vE 'vendor|render.Delims' | awk '{print} END{if(NR>0) {exit 1}}'
-	go tool vet --shadow . 2>&1 | grep -vE 'vendor' | awk '{print} END{if(NR>0) {exit 1}}'
-	golint ./... 2>&1 | grep -vE 'vendor' | awk '{print} END{if(NR>0) {exit 1}}'
-	gofmt -s -l . 2>&1 | grep -vE 'vendor' | awk '{print} END{if(NR>0) {exit 1}}'
+	go tool vet . 2>&1 | grep -vE 'vendor|render.Delims|bindata_assetfs' | awk '{print} END{if(NR>0) {exit 1}}'
+	go tool vet --shadow . 2>&1 | grep -vE 'vendor|bindata_assetfs' | awk '{print} END{if(NR>0) {exit 1}}'
+	golint ./... 2>&1 | grep -vE 'vendor|bindata_assetfs' | awk '{print} END{if(NR>0) {exit 1}}'
+	gofmt -s -l . 2>&1 | grep -vE 'vendor|bindata_assetfs' | awk '{print} END{if(NR>0) {exit 1}}'
 
 update:
 	which glide >/dev/null || curl https://glide.sh/get | sh
@@ -40,9 +45,9 @@ update:
 	rm -r vendor && mv _vendor/vendor vendor || true
 	rm -rf _vendor
 ifdef PKG
-	glide --verbose get --strip-vendor --skip-test ${PKG}
+	glide get --strip-vendor --skip-test ${PKG}
 else
-	glide --verbose update --strip-vendor --skip-test
+	glide update --strip-vendor --skip-test
 endif
 	@echo "removing test files"
 	glide vc --only-code --no-tests

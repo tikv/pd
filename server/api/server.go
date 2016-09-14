@@ -35,8 +35,8 @@ func NewHandler(svr *server.Server) http.Handler {
 	recovery := negroni.NewRecovery()
 	engine.Use(recovery)
 
-	static := negroni.NewStatic(http.Dir("templates/static/"))
-	static.Prefix = apiPrefix
+	static := negroni.NewStatic(assetFS())
+	static.Prefix = apiPrefix + "/web"
 	engine.Use(static)
 
 	router := mux.NewRouter()

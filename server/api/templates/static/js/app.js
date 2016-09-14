@@ -111,13 +111,13 @@ dashboardApp.controller('LogEventController', function LogEventController($scope
     $scope.logs = [];
 
     $scope.init = function(wsHost) {
-            var ws = new WebSocket("ws://" + wsHost + "/ws");
+            var ws = new WebSocket("ws://" + wsHost + "/pd/ws");
 
             ws.onopen = function(evt) {
                 console.log("ws onopen");
                 $http({
                     method: 'GET',
-                    url: 'http://' + wsHost + '/api/v1/feed?offset=0',
+                    url: 'http://' + wsHost + '/pd/api/v1/feed?offset=0',
                 }).then(function(dataResponse) {
                     if (dataResponse.data != null) {
                         console.log(dataResponse.data)

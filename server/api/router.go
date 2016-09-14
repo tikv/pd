@@ -23,6 +23,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := render.New(render.Options{
 		Directory:  "templates",
 		Extensions: []string{".html"},
+		Asset:      Asset,
+		AssetNames: func() []string {
+			return []string{"templates/index.html"}
+		},
 		IndentJSON: true,
 		Delims:     render.Delims{"[[", "]]"},
 	})

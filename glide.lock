@@ -1,5 +1,5 @@
-hash: 77a5cf10aa3352dbdeb2d0fc039b05f485a0e2dd768da09c1d2c39a7440811c8
-updated: 2016-09-14T13:46:52.720856528+08:00
+hash: 9338e523847efc574af32abae5e12ba87c0a04d8a3dbcec64e7a48089238b238
+updated: 2016-09-06T19:41:34.652614228+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -80,6 +80,8 @@ imports:
   version: 3ac0863d7acf3bc44daf49afef8919af12f704ef
   subpackages:
   - capnslog
+- name: github.com/elazarl/go-bindata-assetfs
+  version: 9a6736ed45b44bf3835afeebb3034b57ed329f3e
 - name: github.com/ghodss/yaml
   version: 1a6f069841556a7bcaff4a397ca6e8328d266c2f
 - name: github.com/gogo/protobuf

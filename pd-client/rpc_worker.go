@@ -97,7 +97,8 @@ func (w *rpcWorker) stop(err error) {
 	close(w.quit)
 	w.wg.Wait()
 
-	for i := 0; i < len(w.requests); i++ {
+	n := len(w.requests)
+	for i := 0; i < n; i++ {
 		req := <-w.requests
 		switch r := req.(type) {
 		case *tsoRequest:
