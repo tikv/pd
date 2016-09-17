@@ -89,7 +89,7 @@ func (s *Server) syncTimestamp() error {
 
 	for {
 		now = time.Now()
-		if wait := last.Sub(now); wait > 0 {
+		if wait := last.Sub(now) + time.Millisecond; wait > 0 {
 			log.Warnf("wait %v to guarantee valid generated timestamp", wait)
 			time.Sleep(wait)
 			continue
@@ -121,7 +121,7 @@ func (s *Server) updateTimestamp() error {
 		log.Warnf("clock offset: %v, prev: %v, now: %v", since, prev, now)
 	}
 	// Avoid the same physical time stamp
-	if since <= 0 {
+	if since <= time.Millisecond {
 		log.Warnf("invalid physical timestamp, prev: %v, now: %v, re-update later", prev, now)
 		return nil
 	}
@@ -156,7 +156,7 @@ func (s *Server) getRespTS(count uint32) (pdpb.Timestamp, error) {
 			continue
 		}
 
-		resp.Physical = int64(current.physical.UnixNano()) / 1e6
+		resp.Physical = current.physical.UnixNano() / int64(time.Millisecond)
 		resp.Logical = atomic.AddInt64(&current.logical, int64(count))
 		if resp.Logical >= maxLogical {
 			log.Errorf("logical part outside of max logical interval %v, please check ntp time, retry count %d", resp, i)

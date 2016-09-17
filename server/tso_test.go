@@ -128,3 +128,31 @@ func (s *testTsoSuite) TestTso(c *C) {
 
 	wg.Wait()
 }
+
+func (s *testTsoSuite) TestSyncTimestamp(c *C) {
+	svr := s.svr
+	mustGetLeader(c, s.client, s.svr.getLeaderPath())
+
+	var prevTS int64
+	for i := 0; i < 10; i++ {
+		current := &atomicObject{
+			physical: svr.lastSavedTime,
+		}
+		svr.ts.Store(current)
+
+		ts, err := svr.getRespTS(1)
+		c.Assert(err, IsNil)
+		newTS := ts.Physical*int64(time.Millisecond) + ts.Logical
+		c.Assert(newTS, Greater, prevTS)
+		prevTS = newTS
+
+		err = svr.syncTimestamp()
+		c.Assert(err, IsNil)
+
+		ts, err = svr.getRespTS(1)
+		c.Assert(err, IsNil)
+		newTS = ts.Physical*int64(time.Millisecond) + ts.Logical
+		c.Assert(newTS, Greater, prevTS)
+		prevTS = newTS
+	}
+}
