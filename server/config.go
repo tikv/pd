@@ -382,8 +382,8 @@ func (c *BalanceConfig) String() string {
 
 // MetricConfig is the metric configuration.
 type MetricConfig struct {
-	PushAddress  string        `toml:"address" json:"address"`
-	PushInterval time.Duration `toml:"interval" json:"interval"`
+	PushAddress  string   `toml:"address" json:"address"`
+	PushInterval duration `toml:"interval" json:"interval"`
 }
 
 // ParseUrls parse a string into multiple urls.
