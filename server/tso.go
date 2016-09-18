@@ -27,6 +27,7 @@ import (
 const (
 	// update timestamp every updateTimestampStep.
 	updateTimestampStep = 50 * time.Millisecond
+	syncTimestampGuard  = time.Millisecond
 	maxLogical          = int64(1 << 18)
 )
 
@@ -89,7 +90,7 @@ func (s *Server) syncTimestamp() error {
 
 	for {
 		now = time.Now()
-		if wait := last.Sub(now) + time.Millisecond; wait > 0 {
+		if wait := last.Sub(now) + syncTimestampGuard; wait > 0 {
 			log.Warnf("wait %v to guarantee valid generated timestamp", wait)
 			time.Sleep(wait)
 			continue
