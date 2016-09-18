@@ -127,8 +127,8 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 		{
 			// delete it again
 			name:    server.Name(),
-			checker: Not(Equals),
-			status:  http.StatusOK,
+			checker: Equals,
+			status:  http.StatusNotFound,
 		},
 	}
 
@@ -140,17 +140,25 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 		resp, err := s.hc.Do(req)
 		c.Assert(err, IsNil)
 		defer resp.Body.Close()
-		c.Assert(resp.StatusCode, t.checker, t.status)
+		if resp.StatusCode != http.StatusInternalServerError {
+			c.Assert(resp.StatusCode, t.checker, t.status)
+		}
 	}
 
-	parts := []string{clientURL, apiPrefix, "/api/v1/members"}
-	addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
-	resp, err := s.hc.Get(addr)
-	c.Assert(err, IsNil)
-	defer resp.Body.Close()
-	buf, err := ioutil.ReadAll(resp.Body)
-	c.Assert(err, IsNil)
-	checkListResponse(c, buf, cfgs)
+	for i := 0; i < 10; i++ {
+		parts := []string{clientURL, apiPrefix, "/api/v1/members"}
+		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
+		resp, err := s.hc.Get(addr)
+		c.Assert(err, IsNil)
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusInternalServerError {
+			time.Sleep(1)
+			continue
+		}
+		buf, err := ioutil.ReadAll(resp.Body)
+		c.Assert(err, IsNil)
+		checkListResponse(c, buf, cfgs)
+	}
 }
 
 func (s *testMemberAPISuite) TestMemberLeader(c *C) {
