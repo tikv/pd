@@ -26,9 +26,9 @@ import (
 
 const (
 	// update timestamp every updateTimestampStep.
-	updateTimestampStep = 50 * time.Millisecond
-	syncTimestampGuard  = time.Millisecond
-	maxLogical          = int64(1 << 18)
+	updateTimestampStep  = 50 * time.Millisecond
+	updateTimestampGuard = time.Millisecond
+	maxLogical           = int64(1 << 18)
 )
 
 var (
@@ -90,7 +90,7 @@ func (s *Server) syncTimestamp() error {
 
 	for {
 		now = time.Now()
-		if wait := last.Sub(now) + syncTimestampGuard; wait > 0 {
+		if wait := last.Sub(now) + updateTimestampGuard; wait > 0 {
 			log.Warnf("wait %v to guarantee valid generated timestamp", wait)
 			time.Sleep(wait)
 			continue
@@ -122,7 +122,7 @@ func (s *Server) updateTimestamp() error {
 		log.Warnf("clock offset: %v, prev: %v, now: %v", since, prev, now)
 	}
 	// Avoid the same physical time stamp
-	if since <= time.Millisecond {
+	if since <= updateTimestampGuard {
 		log.Warnf("invalid physical timestamp, prev: %v, now: %v, re-update later", prev, now)
 		return nil
 	}
