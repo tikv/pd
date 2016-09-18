@@ -131,14 +131,19 @@ func (s *testTsoSuite) TestTso(c *C) {
 
 func (s *testTsoSuite) TestSyncTimestamp(c *C) {
 	svr := s.svr
-	mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	mustGetLeader(c, svr.client, svr.getLeaderPath())
 
 	var prevTS int64
 	for i := 0; i < 10; i++ {
-		current := &atomicObject{
-			physical: svr.lastSavedTime,
+		prev := svr.ts.Load().(*atomicObject).physical
+		prevMS := prev.UnixNano() / int64(time.Millisecond)
+		lastMS := svr.lastSavedTime.UnixNano() / int64(time.Millisecond)
+		if prevMS != lastMS {
+			current := &atomicObject{
+				physical: svr.lastSavedTime,
+			}
+			svr.ts.Store(current)
 		}
-		svr.ts.Store(current)
 
 		ts, err := svr.getRespTS(1)
 		c.Assert(err, IsNil)
@@ -146,8 +151,9 @@ func (s *testTsoSuite) TestSyncTimestamp(c *C) {
 		c.Assert(newTS, Greater, prevTS)
 		prevTS = newTS
 
-		err = svr.syncTimestamp()
+		err = svr.resignLeader()
 		c.Assert(err, IsNil)
+		mustGetLeader(c, svr.client, svr.getLeaderPath())
 
 		ts, err = svr.getRespTS(1)
 		c.Assert(err, IsNil)
