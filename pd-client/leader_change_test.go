@@ -19,6 +19,7 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/api"
 )
 
 var _ = Suite(&testLeaderChangeSuite{})
@@ -42,7 +43,9 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		cfg := cfgs[i]
 
 		go func() {
-			svr, err := server.NewServer(cfg)
+			svr, err := server.CreateServer(cfg)
+			c.Assert(err, IsNil)
+			err = svr.StartEtcd(api.NewHandler(svr))
 			c.Assert(err, IsNil)
 			ch <- svr
 		}()
@@ -70,8 +73,6 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		}
 	}()
 
-	defaultWatchLeaderTimeout = 500 * time.Millisecond
-
 	etcdClient := mustGetEtcdClient(c, svrs)
 	cli, err := NewClient(etcdClient.Endpoints(), 0)
 	c.Assert(err, IsNil)
@@ -80,20 +81,21 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	p1, l1, err := cli.GetTS()
 	c.Assert(err, IsNil)
 
-	leaderPath := getLeaderPath(0)
-
-	leaderAddr, _, err := getLeader(etcdClient, leaderPath)
+	leader, err := getLeader(etcdClient.Endpoints())
 	c.Assert(err, IsNil)
-	svrs[leaderAddr].Close()
-	delete(svrs, leaderAddr)
+	svrs[leader.GetAddr()].Close()
+	delete(svrs, leader.GetAddr())
 
 	etcdClient = mustGetEtcdClient(c, svrs)
+	cli, err = NewClient(etcdClient.Endpoints(), 0)
+	c.Assert(err, IsNil)
+	defer cli.Close()
 
 	// wait leader changes
 	changed := false
 	for i := 0; i < 20; i++ {
-		leaderAddr1, _, _ := getLeader(etcdClient, leaderPath)
-		if len(leaderAddr1) != 0 && leaderAddr1 != leaderAddr {
+		newLeader, _ := getLeader(etcdClient.Endpoints())
+		if newLeader != nil && newLeader.GetAddr() != leader.GetAddr() {
 			changed = true
 			break
 		}

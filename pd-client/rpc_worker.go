@@ -16,8 +16,6 @@ package pd
 import (
 	"bufio"
 	"net"
-	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,14 +27,16 @@ import (
 	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/util"
+	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/pkg/metrics"
+	"github.com/pingcap/pd/pkg/rpcutil"
 	"github.com/twinj/uuid"
 )
 
 const (
-	pdRPCPrefix      = "/pd/rpc"
-	connectPDTimeout = time.Second * 3
-	netIOTimeout     = time.Second
+	requestPDTimeout   = time.Second
+	connectPDTimeout   = time.Second * 3
+	reconnectPDTimeout = time.Second * 60
 )
 
 const (
@@ -74,16 +74,16 @@ type clusterConfigRequest struct {
 }
 
 type rpcWorker struct {
-	addr      string
+	addrs     []string
 	clusterID uint64
 	requests  chan interface{}
 	wg        sync.WaitGroup
 	quit      chan struct{}
 }
 
-func newRPCWorker(addr string, clusterID uint64) *rpcWorker {
+func newRPCWorker(addrs []string, clusterID uint64) *rpcWorker {
 	w := &rpcWorker{
-		addr:      addr,
+		addrs:     addrs,
 		clusterID: clusterID,
 		requests:  make(chan interface{}, maxPipelineRequest),
 		quit:      make(chan struct{}),
@@ -116,23 +116,27 @@ func (w *rpcWorker) stop(err error) {
 func (w *rpcWorker) work() {
 	defer w.wg.Done()
 
-RECONNECT:
-	log.Infof("[pd] connect to pd server %v", w.addr)
-	conn, err := rpcConnect(w.addr)
-	if err != nil {
-		log.Warnf("[pd] failed connect pd server: %v, will retry later", err)
-
-		select {
-		case <-time.After(netIOTimeout):
-			goto RECONNECT
-		case <-w.quit:
-			return
+	// Add default schema "http://" to addrs.
+	urls := make([]string, 0, len(w.addrs))
+	for _, addr := range w.addrs {
+		if strings.Contains(addr, "://") {
+			urls = append(urls, addr)
+		} else {
+			urls = append(urls, "http://"+addr)
 		}
 	}
 
-	reader := bufio.NewReaderSize(deadline.NewDeadlineReader(conn, netIOTimeout), readBufferSize)
-	writer := bufio.NewWriterSize(deadline.NewDeadlineWriter(conn, netIOTimeout), writeBufferSize)
-	readwriter := bufio.NewReadWriter(reader, writer)
+RECONNECT:
+	conn, isLeader := w.connectUrls(urls)
+	if conn == nil {
+		return
+	}
+	readwriter := newReadWriter(conn)
+
+	// We can't connect to the leader now, try to reconnect later.
+	if !isLeader {
+		time.AfterFunc(reconnectPDTimeout, func() { conn.Close() })
+	}
 
 	for {
 		var pending []interface{}
@@ -155,6 +159,32 @@ RECONNECT:
 		case <-w.quit:
 			conn.Close()
 			return
+		}
+	}
+}
+
+// connectUrls tries to connect to the leader first.
+// If it fails, it will try to connect to any urls.
+func (w *rpcWorker) connectUrls(urls []string) (net.Conn, bool) {
+	log.Infof("[pd] connect to pd server %v", urls)
+	for {
+		conn, err := rpcConnectLeader(urls)
+		if err == nil {
+			return conn, true
+		}
+		log.Warn(err)
+
+		conn, err = rpcConnect(urls)
+		if err == nil {
+			return conn, false
+		}
+		log.Warn(err)
+
+		select {
+		case <-time.After(connectPDTimeout):
+			break
+		case <-w.quit:
+			return nil, false
 		}
 	}
 }
@@ -361,52 +391,40 @@ func (w *rpcWorker) checkResponse(resp *pdpb.Response) error {
 	return nil
 }
 
-func parseUrls(s string) ([]url.URL, error) {
-	items := strings.Split(s, ",")
-	urls := make([]url.URL, 0, len(items))
-	for _, item := range items {
-		u, err := url.Parse(item)
+func getLeader(urls []string) (*pdpb.Leader, error) {
+	for _, u := range urls {
+		client, err := apiutil.NewClient(u, connectPDTimeout)
 		if err != nil {
-			return nil, errors.Trace(err)
+			continue
 		}
-
-		urls = append(urls, *u)
+		leader, err := client.GetLeader()
+		if err != nil {
+			continue
+		}
+		return leader, nil
 	}
-
-	return urls, nil
+	return nil, errors.Errorf("failed to get leader from %v", urls)
 }
 
-func rpcConnect(addr string) (net.Conn, error) {
-	req, err := http.NewRequest("GET", pdRPCPrefix, nil)
+func rpcConnect(urls []string) (net.Conn, error) {
+	s := strings.Join(urls, ",")
+	return rpcutil.ConnectUrls(s, connectPDTimeout)
+}
+
+func rpcConnectLeader(urls []string) (net.Conn, error) {
+	leader, err := getLeader(urls)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-
-	urls, err := parseUrls(addr)
+	conn, err := rpcutil.ConnectUrls(leader.GetAddr(), connectPDTimeout)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+	return conn, nil
+}
 
-	for _, url := range urls {
-		var conn net.Conn
-		switch url.Scheme {
-		// used in tests
-		case "unix", "unixs":
-			conn, err = net.DialTimeout("unix", url.Host, connectPDTimeout)
-		default:
-			conn, err = net.DialTimeout("tcp", url.Host, connectPDTimeout)
-		}
-
-		if err != nil {
-			continue
-		}
-		err = req.Write(conn)
-		if err != nil {
-			conn.Close()
-			continue
-		}
-		return conn, nil
-	}
-
-	return nil, errors.Errorf("connect to %s failed", addr)
+func newReadWriter(conn net.Conn) *bufio.ReadWriter {
+	reader := bufio.NewReaderSize(deadline.NewDeadlineReader(conn, requestPDTimeout), readBufferSize)
+	writer := bufio.NewWriterSize(deadline.NewDeadlineWriter(conn, requestPDTimeout), writeBufferSize)
+	return bufio.NewReadWriter(reader, writer)
 }

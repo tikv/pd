@@ -21,9 +21,8 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/util"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/twinj/uuid"
 )
@@ -138,18 +137,7 @@ func bootstrapServer(c *C, addr string) {
 			Region: region,
 		},
 	}
-	msg := &msgpb.Message{
-		MsgType: msgpb.MessageType_PdReq,
-		PdReq:   req,
-	}
-
-	conn, err := rpcConnect(addr)
-	c.Assert(err, IsNil)
-	err = util.WriteMessage(conn, 0, msg)
-	c.Assert(err, IsNil)
-
-	_, err = util.ReadMessage(conn, msg)
-	c.Assert(err, IsNil)
+	testutil.MustRPCRequest(c, addr, req)
 }
 
 func heartbeatRegion(c *C, addr string) {
@@ -164,18 +152,7 @@ func heartbeatRegion(c *C, addr string) {
 			Leader: peer,
 		},
 	}
-	msg := &msgpb.Message{
-		MsgType: msgpb.MessageType_PdReq,
-		PdReq:   req,
-	}
-
-	conn, err := rpcConnect(addr)
-	c.Assert(err, IsNil)
-	err = util.WriteMessage(conn, 0, msg)
-	c.Assert(err, IsNil)
-
-	_, err = util.ReadMessage(conn, msg)
-	c.Assert(err, IsNil)
+	testutil.MustRPCRequest(c, addr, req)
 }
 
 func (s *testClientSuite) TestTSO(c *C) {

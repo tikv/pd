@@ -1,6 +1,9 @@
 GO=GO15VENDOREXPERIMENT="1" go
 
-PACKAGES  := $$(go list ./...| grep -vE 'vendor')
+PACKAGES := $$(go list ./...| grep -vE 'vendor')
+
+GOFILTER := grep -vE 'vendor|render.Delims|bindata_assetfs|testutil'
+GOCHECKER := $(GOFILTER) | awk '{ print } END { if (NR > 0) { exit 1 } }'
 
 LDFLAGS += -X "github.com/pingcap/pd/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "github.com/pingcap/pd/server.PDGitHash=$(shell git rev-parse HEAD)"
@@ -21,12 +24,12 @@ build:
 	$(GO) build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 	rm -rf vendor
 
-install: 
+install:
 	rm -rf vendor && ln -s _vendor/vendor vendor
 	$(GO) install ./...
 	rm -rf vendor
 
-test: 
+test:
 	rm -rf vendor && ln -s _vendor/vendor vendor
 	$(GO) test --race $(PACKAGES)
 	rm -rf vendor
@@ -34,10 +37,13 @@ test:
 check:
 	go get github.com/golang/lint/golint
 
-	go tool vet . 2>&1 | grep -vE 'vendor|render.Delims|bindata_assetfs' | awk '{print} END{if(NR>0) {exit 1}}'
-	go tool vet --shadow . 2>&1 | grep -vE 'vendor|bindata_assetfs' | awk '{print} END{if(NR>0) {exit 1}}'
-	golint ./... 2>&1 | grep -vE 'vendor|bindata_assetfs' | awk '{print} END{if(NR>0) {exit 1}}'
-	gofmt -s -l . 2>&1 | grep -vE 'vendor|bindata_assetfs' | awk '{print} END{if(NR>0) {exit 1}}'
+	@echo "vet"
+	@ go tool vet . 2>&1 | $(GOCHECKER)
+	@ go tool vet --shadow . 2>&1 | $(GOCHECKER)
+	@echo "golint"
+	@ golint ./... 2>&1 | $(GOCHECKER)
+	@echo "gofmt"
+	@ gofmt -s -l . 2>&1 | $(GOCHECKER)
 
 update:
 	which glide >/dev/null || curl https://glide.sh/get | sh
@@ -55,7 +61,7 @@ endif
 	mv vendor _vendor/vendor
 
 clean:
-	# clean unix socket
+    # clean unix socket
 	find . -type s -exec rm {} \;
 
 .PHONY: update clean
