@@ -132,6 +132,7 @@ RECONNECT:
 		return
 	}
 	readwriter := newReadWriter(conn)
+	log.Infof("[pd] connected to %v", conn.RemoteAddr())
 
 	// We can't connect to the leader now, try to reconnect later.
 	if !isLeader {
