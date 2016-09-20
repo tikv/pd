@@ -15,33 +15,18 @@ package pd
 
 import (
 	"bufio"
-	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/juju/errors"
-	"github.com/ngaut/deadline"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/util"
-	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/pkg/metrics"
-	"github.com/pingcap/pd/pkg/rpcutil"
 	"github.com/twinj/uuid"
-)
-
-const (
-	requestPDTimeout   = time.Second
-	connectPDTimeout   = time.Second * 3
-	reconnectPDTimeout = time.Second * 60
-)
-
-const (
-	readBufferSize  = 8 * 1024
-	writeBufferSize = 8 * 1024
 )
 
 const maxPipelineRequest = 10000
@@ -74,7 +59,7 @@ type clusterConfigRequest struct {
 }
 
 type rpcWorker struct {
-	addrs     []string
+	urls      []string
 	clusterID uint64
 	requests  chan interface{}
 	wg        sync.WaitGroup
@@ -83,7 +68,7 @@ type rpcWorker struct {
 
 func newRPCWorker(addrs []string, clusterID uint64) *rpcWorker {
 	w := &rpcWorker{
-		addrs:     addrs,
+		urls:      addrsToUrls(addrs),
 		clusterID: clusterID,
 		requests:  make(chan interface{}, maxPipelineRequest),
 		quit:      make(chan struct{}),
@@ -116,28 +101,13 @@ func (w *rpcWorker) stop(err error) {
 func (w *rpcWorker) work() {
 	defer w.wg.Done()
 
-	// Add default schema "http://" to addrs.
-	urls := make([]string, 0, len(w.addrs))
-	for _, addr := range w.addrs {
-		if strings.Contains(addr, "://") {
-			urls = append(urls, addr)
-		} else {
-			urls = append(urls, "http://"+addr)
-		}
-	}
-
 RECONNECT:
-	conn, isLeader := w.connectUrls(urls)
+	log.Infof("[pd] connect to pd server %v", w.urls)
+	conn := mustNewConn(w.urls, w.quit)
 	if conn == nil {
-		return
+		return // Closed.
 	}
-	readwriter := newReadWriter(conn)
 	log.Infof("[pd] connected to %v", conn.RemoteAddr())
-
-	// We can't connect to the leader now, try to reconnect later.
-	if !isLeader {
-		time.AfterFunc(reconnectPDTimeout, func() { conn.Close() })
-	}
 
 	for {
 		var pending []interface{}
@@ -153,39 +123,17 @@ RECONNECT:
 					break POP_ALL
 				}
 			}
-			if ok := w.handleRequests(pending, readwriter); !ok {
+			if ok := w.handleRequests(pending, conn.ReadWriter); !ok {
 				conn.Close()
 				goto RECONNECT
 			}
 		case <-w.quit:
 			conn.Close()
 			return
-		}
-	}
-}
-
-// connectUrls tries to connect to the leader first.
-// If it fails, it will try to connect to any urls.
-func (w *rpcWorker) connectUrls(urls []string) (net.Conn, bool) {
-	log.Infof("[pd] connect to pd server %v", urls)
-	for {
-		conn, err := rpcConnectLeader(urls)
-		if err == nil {
-			return conn, true
-		}
-		log.Warn(err)
-
-		conn, err = rpcConnect(urls)
-		if err == nil {
-			return conn, false
-		}
-		log.Warn(err)
-
-		select {
-		case <-time.After(connectPDTimeout):
-			break
-		case <-w.quit:
-			return nil, false
+		case leaderConn := <-conn.C:
+			conn.Close()
+			conn = leaderConn
+			log.Infof("[pd] reconnected to leader %v", conn.RemoteAddr())
 		}
 	}
 }
@@ -392,40 +340,15 @@ func (w *rpcWorker) checkResponse(resp *pdpb.Response) error {
 	return nil
 }
 
-func getLeader(urls []string) (*pdpb.Leader, error) {
-	for _, u := range urls {
-		client, err := apiutil.NewClient(u, connectPDTimeout)
-		if err != nil {
-			continue
+func addrsToUrls(addrs []string) []string {
+	// Add default schema "http://" to addrs.
+	urls := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		if strings.Contains(addr, "://") {
+			urls = append(urls, addr)
+		} else {
+			urls = append(urls, "http://"+addr)
 		}
-		leader, err := client.GetLeader()
-		if err != nil {
-			continue
-		}
-		return leader, nil
 	}
-	return nil, errors.Errorf("failed to get leader from %v", urls)
-}
-
-func rpcConnect(urls []string) (net.Conn, error) {
-	s := strings.Join(urls, ",")
-	return rpcutil.ConnectUrls(s, connectPDTimeout)
-}
-
-func rpcConnectLeader(urls []string) (net.Conn, error) {
-	leader, err := getLeader(urls)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	conn, err := rpcutil.ConnectUrls(leader.GetAddr(), connectPDTimeout)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return conn, nil
-}
-
-func newReadWriter(conn net.Conn) *bufio.ReadWriter {
-	reader := bufio.NewReaderSize(deadline.NewDeadlineReader(conn, requestPDTimeout), readBufferSize)
-	writer := bufio.NewWriterSize(deadline.NewDeadlineWriter(conn, requestPDTimeout), writeBufferSize)
-	return bufio.NewReadWriter(reader, writer)
+	return urls
 }

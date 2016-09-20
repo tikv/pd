@@ -57,8 +57,10 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		svrs[svr.GetAddr()] = svr
 	}
 
+	endpoints := make([]string, 0, 3)
 	for _, svr := range svrs {
 		go svr.Run()
+		endpoints = append(endpoints, svr.GetEndpoints()...)
 	}
 
 	// wait etcds start ok.
@@ -73,39 +75,32 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		}
 	}()
 
-	etcdClient := mustGetEtcdClient(c, svrs)
-	cli, err := NewClient(etcdClient.Endpoints(), 0)
+	cli, err := NewClient(endpoints, 0)
 	c.Assert(err, IsNil)
 	defer cli.Close()
 
 	p1, l1, err := cli.GetTS()
 	c.Assert(err, IsNil)
 
-	leader, err := getLeader(etcdClient.Endpoints())
+	leader, err := getLeader(endpoints)
 	c.Assert(err, IsNil)
+	mustConnectLeader(c, endpoints, leader.GetAddr())
+
 	svrs[leader.GetAddr()].Close()
 	delete(svrs, leader.GetAddr())
-
-	etcdClient = mustGetEtcdClient(c, svrs)
-	cli, err = NewClient(etcdClient.Endpoints(), 0)
-	c.Assert(err, IsNil)
-	defer cli.Close()
 
 	// wait leader changes
 	changed := false
 	for i := 0; i < 20; i++ {
-		newLeader, _ := getLeader(etcdClient.Endpoints())
+		newLeader, _ := getLeader(endpoints)
 		if newLeader != nil && newLeader.GetAddr() != leader.GetAddr() {
+			mustConnectLeader(c, endpoints, newLeader.GetAddr())
 			changed = true
 			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
 	c.Assert(changed, IsTrue)
-
-	cli, err = NewClient(etcdClient.Endpoints(), 0)
-	c.Assert(err, IsNil)
-	defer cli.Close()
 
 	for i := 0; i < 20; i++ {
 		p2, l2, err := cli.GetTS()
@@ -116,4 +111,33 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	c.Error("failed getTS from new leader after 10 seconds")
+}
+
+func mustConnectLeader(c *C, urls []string, leaderAddr string) {
+	connCh := make(chan *conn)
+	go func() {
+		conn := mustNewConn(urls, nil)
+		connCh <- conn
+	}()
+
+	var conn *conn
+	select {
+	case conn = <-connCh:
+		addr := conn.RemoteAddr()
+		c.Assert(addr.Network()+"://"+addr.String(), Equals, leaderAddr)
+	case <-time.After(time.Second * 10):
+		c.Fatal("failed to connect to pd")
+	}
+	defer conn.Close()
+
+	conn.wg.Add(1)
+	go conn.connectLeader(urls, time.Second)
+
+	select {
+	case leaderConn := <-conn.C:
+		addr := leaderConn.RemoteAddr()
+		c.Assert(addr.Network()+"://"+addr.String(), Equals, leaderAddr)
+	case <-time.After(time.Second * 10):
+		c.Fatal("failed to connect to leader")
+	}
 }
