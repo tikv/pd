@@ -144,6 +144,27 @@ func (c *conn) handleGetRegion(req *pdpb.Request) (*pdpb.Response, error) {
 	}, nil
 }
 
+func (c *conn) handleGetRegionByID(req *pdpb.Request) (*pdpb.Response, error) {
+	request := req.GetGetRegionById()
+	if request == nil {
+		return nil, errors.Errorf("invalid get region by id command, but %v", req)
+	}
+
+	cluster, err := c.getRaftCluster()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	id := request.GetRegionId()
+	region, leader := cluster.GetRegionByID(id)
+	return &pdpb.Response{
+		GetRegionById: &pdpb.GetRegionResponse{
+			Region: region,
+			Leader: leader,
+		},
+	}, nil
+}
+
 func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) {
 	request := req.GetRegionHeartbeat()
 	if request == nil {

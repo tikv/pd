@@ -183,6 +183,8 @@ func (c *conn) handleRequest(req *pdpb.Request) (*pdpb.Response, error) {
 		return c.handleReportSplit(req)
 	case pdpb.CommandType_GetRegion:
 		return c.handleGetRegion(req)
+	case pdpb.CommandType_GetRegionByID:
+		return c.handleGetRegionByID(req)
 	case pdpb.CommandType_RegionHeartbeat:
 		return c.handleRegionHeartbeat(req)
 	case pdpb.CommandType_StoreHeartbeat:

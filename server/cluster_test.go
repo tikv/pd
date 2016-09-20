@@ -228,6 +228,23 @@ func (s *testClusterBaseSuite) getRegion(c *C, conn net.Conn, clusterID uint64, 
 	return resp.GetRegion.GetRegion()
 }
 
+func (s *testClusterBaseSuite) getRegionByID(c *C, conn net.Conn, clusterID uint64, regionID uint64) *metapb.Region {
+	req := &pdpb.Request{
+		Header:  newRequestHeader(clusterID),
+		CmdType: pdpb.CommandType_GetRegionByID,
+		GetRegionById: &pdpb.GetRegionByIDRequest{
+			RegionId: regionID,
+		},
+	}
+
+	sendRequest(c, conn, 0, req)
+	_, resp := recvResponse(c, conn)
+	c.Assert(resp.GetRegionById, NotNil)
+	c.Assert(resp.GetRegionById.GetRegion(), NotNil)
+
+	return resp.GetRegionById.GetRegion()
+}
+
 func (s *testClusterBaseSuite) getRaftCluster(c *C) *RaftCluster {
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
@@ -265,6 +282,10 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	region := s.getRegion(c, conn, clusterID, []byte("abc"))
 	c.Assert(region.GetPeers(), HasLen, 1)
 	peer := region.GetPeers()[0]
+
+	// Get region by id.
+	regionByID := s.getRegionByID(c, conn, clusterID, region.GetId())
+	c.Assert(region, DeepEquals, regionByID)
 
 	// Get store.
 	storeID := peer.GetStoreId()
