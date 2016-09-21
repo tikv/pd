@@ -130,7 +130,7 @@ RECONNECT:
 		case <-w.quit:
 			conn.Close()
 			return
-		case leaderConn := <-conn.C:
+		case leaderConn := <-conn.ConnChan:
 			conn.Close()
 			conn = leaderConn
 			log.Infof("[pd] reconnected to leader %v", conn.RemoteAddr())

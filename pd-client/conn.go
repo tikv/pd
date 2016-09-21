@@ -43,7 +43,7 @@ type conn struct {
 	net.Conn
 	wg         sync.WaitGroup
 	quit       chan struct{}
-	C          chan *conn
+	ConnChan   chan *conn
 	ReadWriter *bufio.ReadWriter
 }
 
@@ -53,7 +53,7 @@ func newConn(c net.Conn) *conn {
 	return &conn{
 		Conn:       c,
 		quit:       make(chan struct{}),
-		C:          make(chan *conn),
+		ConnChan:   make(chan *conn),
 		ReadWriter: bufio.NewReadWriter(reader, writer),
 	}
 }
@@ -101,7 +101,7 @@ func (c *conn) connectLeader(urls []string, interval time.Duration) {
 		case <-ticker.C:
 			conn, err := rpcConnectLeader(urls)
 			if err == nil {
-				c.C <- newConn(conn)
+				c.ConnChan <- newConn(conn)
 				return
 			}
 			log.Warn(err)

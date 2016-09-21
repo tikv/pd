@@ -63,8 +63,7 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		endpoints = append(endpoints, svr.GetEndpoints()...)
 	}
 
-	// wait etcds start ok.
-	time.Sleep(5 * time.Second)
+	mustWaitLeader(c, svrs)
 
 	defer func() {
 		for _, svr := range svrs {
@@ -134,7 +133,7 @@ func mustConnectLeader(c *C, urls []string, leaderAddr string) {
 	go conn.connectLeader(urls, time.Second)
 
 	select {
-	case leaderConn := <-conn.C:
+	case leaderConn := <-conn.ConnChan:
 		addr := leaderConn.RemoteAddr()
 		c.Assert(addr.Network()+"://"+addr.String(), Equals, leaderAddr)
 	case <-time.After(time.Second * 10):

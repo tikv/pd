@@ -80,7 +80,7 @@ type testClientSuite struct {
 func (s *testClientSuite) SetUpSuite(c *C) {
 	s.srv, s.cleanup = newServer(c, clusterID)
 
-	mustWaitLeader(c, []*server.Server{s.srv})
+	mustWaitLeader(c, map[string]*server.Server{s.srv.GetAddr(): s.srv})
 	bootstrapServer(c, s.srv.GetAddr())
 
 	var err error
@@ -112,7 +112,7 @@ func newServer(c *C, clusterID uint64) (*server.Server, cleanupFunc) {
 	return s, cleanup
 }
 
-func mustWaitLeader(c *C, svrs []*server.Server) *server.Server {
+func mustWaitLeader(c *C, svrs map[string]*server.Server) *server.Server {
 	for i := 0; i < 500; i++ {
 		for _, s := range svrs {
 			if s.IsLeader() {
