@@ -508,6 +508,62 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
+func (c *RaftCluster) collectMetrics() {
+	cluster := c.cachedCluster
+	metrics := make(map[string]float64)
+	regionTotalCount := 0
+	minUsedRatio, maxUsedRatio := float64(0.0), float64(0.0)
+	minLeaderRatio, maxLeaderRatio := float64(0.0), float64(0.0)
+
+	for _, s := range cluster.getStores() {
+		// Store state.
+		switch s.store.GetState() {
+		case metapb.StoreState_Up:
+			metrics["store_up_count"]++
+		case metapb.StoreState_Offline:
+			metrics["store_offline_count"]++
+		case metapb.StoreState_Tombstone:
+			metrics["store_tombstone_count"]++
+		}
+		if s.downSeconds() >= c.balancerWorker.cfg.MaxStoreDownDuration.Seconds() {
+			metrics["store_down_count"]++
+		}
+		if s.store.GetState() == metapb.StoreState_Tombstone {
+			continue
+		}
+
+		// Storage.
+		stats := s.stats.Stats
+		metrics["storage_size"] += float64(stats.GetCapacity() - stats.GetAvailable())
+		metrics["storage_capacity"] += float64(stats.GetCapacity())
+		if regionTotalCount < s.stats.TotalRegionCount {
+			regionTotalCount = s.stats.TotalRegionCount
+		}
+
+		// Balance.
+		if minUsedRatio > s.usedRatio() {
+			minUsedRatio = s.usedRatio()
+		}
+		if maxUsedRatio < s.usedRatio() {
+			maxUsedRatio = s.usedRatio()
+		}
+		if minLeaderRatio > s.leaderRatio() {
+			minLeaderRatio = s.leaderRatio()
+		}
+		if maxLeaderRatio < s.leaderRatio() {
+			maxLeaderRatio = s.leaderRatio()
+		}
+	}
+
+	metrics["region_total_count"] = float64(regionTotalCount)
+	metrics["store_max_diff_used_ratio"] = maxUsedRatio - minUsedRatio
+	metrics["store_max_diff_leader_ratio"] = maxLeaderRatio - minLeaderRatio
+
+	for label, value := range metrics {
+		clusterStatusGauge.WithLabelValues(label).Set(value)
+	}
+}
+
 func (c *RaftCluster) runBackgroundJobs(interval uint64) {
 	defer c.wg.Done()
 
@@ -520,6 +576,7 @@ func (c *RaftCluster) runBackgroundJobs(interval uint64) {
 			return
 		case <-ticker.C:
 			c.checkStores()
+			c.collectMetrics()
 		}
 	}
 }

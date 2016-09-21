@@ -96,6 +96,20 @@ func (bw *balancerWorker) stop() {
 	bw.balanceOperators = map[uint64]*balanceOperator{}
 }
 
+func collectBalancerMetrics(bop *balanceOperator) {
+	for _, op := range bop.Ops {
+		if _, ok := op.(*onceOperator); ok {
+			op = op.(*onceOperator)
+		}
+		switch o := op.(type) {
+		case *changePeerOperator:
+			balancerCounter.WithLabelValues(o.Name).Inc()
+		case *transferLeaderOperator:
+			balancerCounter.WithLabelValues(o.Name).Inc()
+		}
+	}
+}
+
 func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *balanceOperator) bool {
 	bw.Lock()
 	defer bw.Unlock()
@@ -120,6 +134,8 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *balanceOperato
 	}
 
 	// TODO: should we check allowBalance again here?
+
+	collectBalancerMetrics(op)
 
 	op.Start = time.Now()
 	bw.balanceOperators[regionID] = op
@@ -212,8 +228,6 @@ func (bw *balancerWorker) doBalance() error {
 			return nil
 		}
 
-		balancerCounter.WithLabelValues("total").Inc()
-
 		scores := make([]*score, 0, len(bw.balancers))
 		bops := make([]*balanceOperator, 0, len(bw.balancers))
 
@@ -221,7 +235,6 @@ func (bw *balancerWorker) doBalance() error {
 		for _, balancer := range bw.balancers {
 			score, balanceOperator, err := balancer.Balance(bw.cluster)
 			if err != nil {
-				balancerCounter.WithLabelValues("failed").Inc()
 				return errors.Trace(err)
 			}
 			if balanceOperator == nil {
@@ -235,7 +248,6 @@ func (bw *balancerWorker) doBalance() error {
 		// Calculate the priority of candidates score.
 		idx, score := priorityScore(bw.cfg, scores)
 		if score == nil {
-			balancerCounter.WithLabelValues("none").Inc()
 			continue
 		}
 
@@ -243,7 +255,6 @@ func (bw *balancerWorker) doBalance() error {
 		regionID := bop.getRegionID()
 		if bw.addBalanceOperator(regionID, bop) {
 			bw.addRegionCache(regionID)
-			balancerCounter.WithLabelValues("successed").Inc()
 			balanceCount++
 		}
 	}
