@@ -135,12 +135,13 @@ func (s *testTsoSuite) TestSyncTimestamp(c *C) {
 
 	var prevTS int64
 	for i := 0; i < 10; i++ {
+		last := svr.lastSavedTime.Load().(time.Time)
 		prev := svr.ts.Load().(*atomicObject).physical
+		lastMS := last.UnixNano() / int64(time.Millisecond)
 		prevMS := prev.UnixNano() / int64(time.Millisecond)
-		lastMS := svr.lastSavedTime.UnixNano() / int64(time.Millisecond)
 		if prevMS != lastMS {
 			current := &atomicObject{
-				physical: svr.lastSavedTime,
+				physical: last,
 			}
 			svr.ts.Store(current)
 		}
@@ -151,9 +152,8 @@ func (s *testTsoSuite) TestSyncTimestamp(c *C) {
 		c.Assert(newTS, Greater, prevTS)
 		prevTS = newTS
 
-		err = svr.resignLeader()
+		err = svr.syncTimestamp()
 		c.Assert(err, IsNil)
-		mustGetLeader(c, svr.client, svr.getLeaderPath())
 
 		ts, err = svr.getRespTS(1)
 		c.Assert(err, IsNil)
