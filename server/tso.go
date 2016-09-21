@@ -75,7 +75,7 @@ func (s *Server) saveTimestamp(now time.Time) error {
 		return errors.New("save timestamp failed, maybe we lost leader")
 	}
 
-	s.lastSavedTime = now
+	s.lastSavedTime.Store(now)
 
 	return nil
 }
@@ -114,6 +114,7 @@ func (s *Server) syncTimestamp() error {
 }
 
 func (s *Server) updateTimestamp() error {
+	last := s.lastSavedTime.Load().(time.Time)
 	prev := s.ts.Load().(*atomicObject).physical
 	now := time.Now()
 
@@ -127,13 +128,11 @@ func (s *Server) updateTimestamp() error {
 		return nil
 	}
 
-	if now.Sub(s.lastSavedTime) >= 0 {
-		last := s.lastSavedTime
+	if now.Sub(last) >= 0 {
 		save := now.Add(s.cfg.TsoSaveInterval.Duration)
 		if err := s.saveTimestamp(save); err != nil {
 			return errors.Trace(err)
 		}
-
 		log.Debugf("save timestamp ok: prev %v last %v save %v", prev, last, save)
 	}
 

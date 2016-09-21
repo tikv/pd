@@ -59,7 +59,7 @@ type Server struct {
 
 	// for tso
 	ts            atomic.Value
-	lastSavedTime time.Time
+	lastSavedTime atomic.Value
 
 	// for id allocator, we can use one allocator for
 	// store, region and peer, because we just need
