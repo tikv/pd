@@ -239,7 +239,6 @@ func (s *testClusterBaseSuite) getRegionByID(c *C, conn net.Conn, clusterID uint
 
 	sendRequest(c, conn, 0, req)
 	_, resp := recvResponse(c, conn)
-	c.Assert(resp.GetRegionById, NotNil)
 	c.Assert(resp.GetRegionById.GetRegion(), NotNil)
 
 	return resp.GetRegionById.GetRegion()
