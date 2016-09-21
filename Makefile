@@ -61,7 +61,7 @@ endif
 	mv vendor _vendor/vendor
 
 clean:
-    # clean unix socket
+	# clean unix socket
 	find . -type s -exec rm {} \;
 
 .PHONY: update clean
