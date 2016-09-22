@@ -144,4 +144,5 @@ func mustConnectLeader(c *C, urls []string, leaderAddr string) {
 	// Make sure it will not block forever.
 	conn.wg.Add(1)
 	go conn.connectLeader(urls, time.Second)
+	time.Sleep(time.Second * 3)
 }
