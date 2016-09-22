@@ -59,14 +59,6 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"type"})
 
-	balancerCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "balancer",
-			Name:      "balancers_count",
-			Help:      "Counter of balancers.",
-		}, []string{"type"})
-
 	txnCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -92,6 +84,22 @@ var (
 			Help:      "Bucketed histogram of processing time (s) of random regions.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"role"})
+
+	balancerCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "balancer",
+			Name:      "balancers_count",
+			Help:      "Counter of balancers.",
+		}, []string{"type"})
+
+	balancerGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "balancer",
+			Name:      "number_of_operators",
+			Help:      "Current number of operators in the balancer.",
+		}, []string{"type"})
 
 	clusterStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

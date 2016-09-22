@@ -96,20 +96,6 @@ func (bw *balancerWorker) stop() {
 	bw.balanceOperators = map[uint64]*balanceOperator{}
 }
 
-func collectBalancerMetrics(bop *balanceOperator) {
-	for _, op := range bop.Ops {
-		if _, ok := op.(*onceOperator); ok {
-			op = op.(*onceOperator)
-		}
-		switch o := op.(type) {
-		case *changePeerOperator:
-			balancerCounter.WithLabelValues(o.Name).Inc()
-		case *transferLeaderOperator:
-			balancerCounter.WithLabelValues(o.Name).Inc()
-		}
-	}
-}
-
 func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *balanceOperator) bool {
 	bw.Lock()
 	defer bw.Unlock()
@@ -135,7 +121,7 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *balanceOperato
 
 	// TODO: should we check allowBalance again here?
 
-	collectBalancerMetrics(op)
+	collectBalancerCounterMetrics(op)
 
 	op.Start = time.Now()
 	bw.balanceOperators[regionID] = op
@@ -218,6 +204,8 @@ func (bw *balancerWorker) allowBalance() bool {
 }
 
 func (bw *balancerWorker) doBalance() error {
+	collectBalancerGaugeMetrics(bw.getBalanceOperators())
+
 	balanceCount := uint64(0)
 	for i := uint64(0); i < bw.cfg.MaxBalanceRetryPerLoop; i++ {
 		if balanceCount >= bw.cfg.MaxBalanceCountPerLoop {
@@ -285,4 +273,47 @@ func (bw *balancerWorker) storeScores(store *storeInfo) []int {
 	}
 
 	return scores
+}
+
+func collectOperatorMetrics(bop *balanceOperator) map[string]uint64 {
+	metrics := make(map[string]uint64)
+	prefix := ""
+	switch bop.Type {
+	case adminOP:
+		prefix = "admin"
+	case replicaOP:
+		prefix = "replica"
+	case balanceOP:
+		prefix = "balance"
+	}
+	for _, op := range bop.Ops {
+		if _, ok := op.(*onceOperator); ok {
+			op = op.(*onceOperator)
+		}
+		switch o := op.(type) {
+		case *changePeerOperator:
+			metrics[prefix+o.Name]++
+		case *transferLeaderOperator:
+			metrics[prefix+o.Name]++
+		}
+	}
+	return metrics
+}
+
+func collectBalancerCounterMetrics(bop *balanceOperator) {
+	metrics := collectOperatorMetrics(bop)
+	for label, value := range metrics {
+		balancerCounter.WithLabelValues(label).Add(float64(value))
+	}
+}
+
+func collectBalancerGaugeMetrics(ops map[uint64]Operator) {
+	for _, op := range ops {
+		if bop, ok := op.(*balanceOperator); ok {
+			metrics := collectOperatorMetrics(bop)
+			for label, value := range metrics {
+				balancerGauge.WithLabelValues(label).Set(float64(value))
+			}
+		}
+	}
 }
