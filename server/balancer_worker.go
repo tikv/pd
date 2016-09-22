@@ -288,13 +288,13 @@ func collectOperatorMetrics(bop *balanceOperator) map[string]uint64 {
 	}
 	for _, op := range bop.Ops {
 		if _, ok := op.(*onceOperator); ok {
-			op = op.(*onceOperator)
+			op = op.(*onceOperator).Op
 		}
 		switch o := op.(type) {
 		case *changePeerOperator:
-			metrics[prefix+o.Name]++
+			metrics[prefix+"_"+o.Name]++
 		case *transferLeaderOperator:
-			metrics[prefix+o.Name]++
+			metrics[prefix+"_"+o.Name]++
 		}
 	}
 	return metrics
