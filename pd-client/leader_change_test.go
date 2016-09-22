@@ -139,4 +139,9 @@ func mustConnectLeader(c *C, urls []string, leaderAddr string) {
 	case <-time.After(time.Second * 10):
 		c.Fatal("failed to connect to leader")
 	}
+
+	// Create another goroutine and return to close the connection.
+	// Make sure it will not block forever.
+	conn.wg.Add(1)
+	go conn.connectLeader(urls, time.Second)
 }

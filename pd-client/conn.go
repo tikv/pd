@@ -53,7 +53,7 @@ func newConn(c net.Conn) *conn {
 	return &conn{
 		Conn:       c,
 		quit:       make(chan struct{}),
-		ConnChan:   make(chan *conn),
+		ConnChan:   make(chan *conn, 1),
 		ReadWriter: bufio.NewReadWriter(reader, writer),
 	}
 }
