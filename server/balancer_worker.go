@@ -100,11 +100,15 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *balanceOperato
 	bw.Lock()
 	defer bw.Unlock()
 
-	// adminOP can replace any operators.
-	if op.Type != adminOP {
-		// Replace the old operator if the new op has higher priority.
-		oldOp, ok := bw.balanceOperators[regionID]
-		if ok && op.Type <= oldOp.Type {
+	oldOp, ok := bw.balanceOperators[regionID]
+	if ok {
+		if oldOp.Index != 0 {
+			// Old operator is still in progress, don't replace it.
+			return false
+		}
+		if op.Type != adminOP && op.Type <= oldOp.Type {
+			// New operator is not an admin operator, and its priority
+			// is not higher than the old one.
 			return false
 		}
 	}
