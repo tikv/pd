@@ -280,11 +280,11 @@ func collectOperatorMetrics(bop *balanceOperator) map[string]uint64 {
 	prefix := ""
 	switch bop.Type {
 	case adminOP:
-		prefix = "admin"
+		prefix = "admin_"
 	case replicaOP:
-		prefix = "replica"
+		prefix = "replica_"
 	case balanceOP:
-		prefix = "balance"
+		prefix = "balance_"
 	}
 	for _, op := range bop.Ops {
 		if _, ok := op.(*onceOperator); ok {
@@ -292,9 +292,9 @@ func collectOperatorMetrics(bop *balanceOperator) map[string]uint64 {
 		}
 		switch o := op.(type) {
 		case *changePeerOperator:
-			metrics[prefix+"_"+o.Name]++
+			metrics[prefix+o.Name]++
 		case *transferLeaderOperator:
-			metrics[prefix+"_"+o.Name]++
+			metrics[prefix+o.Name]++
 		}
 	}
 	return metrics
