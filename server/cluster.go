@@ -512,8 +512,8 @@ func (c *RaftCluster) collectMetrics() {
 	cluster := c.cachedCluster
 	metrics := make(map[string]float64)
 	regionTotalCount := 0
-	minUsedRatio, maxUsedRatio := float64(0.0), float64(0.0)
-	minLeaderRatio, maxLeaderRatio := float64(0.0), float64(0.0)
+	minUsedRatio, maxUsedRatio := float64(1.0), float64(0.0)
+	minLeaderRatio, maxLeaderRatio := float64(1.0), float64(0.0)
 
 	for _, s := range cluster.getStores() {
 		// Store state.
