@@ -308,12 +308,16 @@ func collectBalancerCounterMetrics(bop *balanceOperator) {
 }
 
 func collectBalancerGaugeMetrics(ops map[uint64]Operator) {
+	metrics := make(map[string]uint64)
 	for _, op := range ops {
 		if bop, ok := op.(*balanceOperator); ok {
-			metrics := collectOperatorMetrics(bop)
-			for label, value := range metrics {
-				balancerGauge.WithLabelValues(label).Set(float64(value))
+			values := collectOperatorMetrics(bop)
+			for label, value := range values {
+				metrics[label] += value
 			}
 		}
+	}
+	for label, value := range metrics {
+		balancerGauge.WithLabelValues(label).Set(float64(value))
 	}
 }
