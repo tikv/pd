@@ -510,8 +510,14 @@ func (c *RaftCluster) checkStores() {
 
 func (c *RaftCluster) collectMetrics() {
 	cluster := c.cachedCluster
-	metrics := make(map[string]float64)
+
+	storeUpCount := 0
+	storeDownCount := 0
+	storeOfflineCount := 0
+	storeTombstoneCount := 0
 	regionTotalCount := 0
+	storageSize := uint64(0)
+	storageCapacity := uint64(0)
 	minUsedRatio, maxUsedRatio := float64(1.0), float64(0.0)
 	minLeaderRatio, maxLeaderRatio := float64(1.0), float64(0.0)
 
@@ -519,23 +525,27 @@ func (c *RaftCluster) collectMetrics() {
 		// Store state.
 		switch s.store.GetState() {
 		case metapb.StoreState_Up:
-			metrics["store_up_count"]++
+			storeUpCount++
 		case metapb.StoreState_Offline:
-			metrics["store_offline_count"]++
+			storeOfflineCount++
 		case metapb.StoreState_Tombstone:
-			metrics["store_tombstone_count"]++
-		}
-		if s.downSeconds() >= c.balancerWorker.cfg.MaxStoreDownDuration.Seconds() {
-			metrics["store_down_count"]++
+			storeTombstoneCount++
 		}
 		if s.store.GetState() == metapb.StoreState_Tombstone {
 			continue
 		}
+		if s.downSeconds() >= c.balancerWorker.cfg.MaxStoreDownDuration.Seconds() {
+			storeDownCount++
+		}
 
-		// Storage.
+		// Store stats.
 		stats := s.stats.Stats
-		metrics["storage_size"] += float64(stats.GetCapacity() - stats.GetAvailable())
-		metrics["storage_capacity"] += float64(stats.GetCapacity())
+		if stats == nil {
+			continue
+		}
+
+		storageSize += stats.GetCapacity() - stats.GetAvailable()
+		storageCapacity += stats.GetCapacity()
 		if regionTotalCount < s.stats.TotalRegionCount {
 			regionTotalCount = s.stats.TotalRegionCount
 		}
@@ -555,7 +565,14 @@ func (c *RaftCluster) collectMetrics() {
 		}
 	}
 
+	metrics := make(map[string]float64)
+	metrics["store_up_count"] = float64(storeUpCount)
+	metrics["store_down_count"] = float64(storeDownCount)
+	metrics["store_offline_count"] = float64(storeOfflineCount)
+	metrics["store_tombstone_count"] = float64(storeTombstoneCount)
 	metrics["region_total_count"] = float64(regionTotalCount)
+	metrics["storage_size"] = float64(storageSize)
+	metrics["storage_capacity"] = float64(storageCapacity)
 	metrics["store_max_diff_used_ratio"] = maxUsedRatio - minUsedRatio
 	metrics["store_max_diff_leader_ratio"] = maxLeaderRatio - minLeaderRatio
 
