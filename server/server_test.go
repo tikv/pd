@@ -21,13 +21,44 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 func TestServer(t *testing.T) {
 	TestingT(t)
+}
+
+// We can put more test utilities below.
+
+const (
+	maxWaitCount = 50
+	waitInterval = time.Millisecond * 200
+)
+
+func mustGetLeader(c *C, s *Server) *pdpb.Leader {
+	for i := 0; i < maxWaitCount; i++ {
+		leader, err := s.GetLeader()
+		if err == nil {
+			return leader
+		}
+		time.Sleep(waitInterval)
+	}
+	c.Fatal()
+	return nil
+}
+
+func mustGetLeaderServer(c *C, servers map[string]*Server) *Server {
+	for i := 0; i < maxWaitCount; i++ {
+		for _, s := range servers {
+			if s.IsLeader() {
+				return s
+			}
+		}
+		time.Sleep(waitInterval)
+	}
+	c.Fatal()
+	return nil
 }
 
 type cleanupFunc func()
@@ -118,16 +149,7 @@ func mustRPCCall(c *C, conn net.Conn, req *pdpb.Request) *pdpb.Response {
 var _ = Suite(&testLeaderServerSuite{})
 
 type testLeaderServerSuite struct {
-	svrs       map[string]*Server
-	leaderPath string
-}
-
-func mustGetEtcdClient(c *C, svrs map[string]*Server) *clientv3.Client {
-	for _, svr := range svrs {
-		return svr.GetClient()
-	}
-	c.Fatal("etcd client none available")
-	return nil
+	svrs map[string]*Server
 }
 
 func (s *testLeaderServerSuite) SetUpSuite(c *C) {
@@ -149,7 +171,6 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 	for i := 0; i < 3; i++ {
 		svr := <-ch
 		s.svrs[svr.GetAddr()] = svr
-		s.leaderPath = svr.getLeaderPath()
 	}
 }
 
@@ -165,24 +186,10 @@ func (s *testLeaderServerSuite) TestLeader(c *C) {
 		go svr.Run()
 	}
 
-	leader1 := mustGetLeader(c, mustGetEtcdClient(c, s.svrs), s.leaderPath)
-	svr, ok := s.svrs[leader1.GetAddr()]
-	c.Assert(ok, IsTrue)
-	svr.Close()
-	delete(s.svrs, leader1.GetAddr())
+	leader := mustGetLeaderServer(c, s.svrs)
+	leader.Close()
+	delete(s.svrs, leader.GetAddr())
 
-	client := mustGetEtcdClient(c, s.svrs)
-
-	// wait leader changes
-	for i := 0; i < 50; i++ {
-		leader, _ := getLeader(client, s.leaderPath)
-		if leader != nil && leader.GetAddr() != leader1.GetAddr() {
-			break
-		}
-
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	leader2 := mustGetLeader(c, client, s.leaderPath)
-	c.Assert(leader1.GetAddr(), Not(Equals), leader2.GetAddr())
+	newLeader := mustGetLeaderServer(c, s.svrs)
+	c.Assert(leader.GetAddr(), Not(Equals), newLeader.GetAddr())
 }

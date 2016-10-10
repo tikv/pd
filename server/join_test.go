@@ -108,8 +108,11 @@ func startPdWith(cfg *Config) (*Server, error) {
 		default:
 		}
 
+		go svr.Run()
+
+		// Let the server runs before returning it to prevent data race.
+		time.Sleep(time.Second)
 		svrCh <- svr
-		svr.Run()
 	}()
 
 	timer := time.NewTimer(30 * time.Second)

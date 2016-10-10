@@ -114,7 +114,7 @@ func (s *testClusterBaseSuite) newRegion(c *C, regionID uint64, startKey []byte,
 }
 
 func (s *testClusterSuite) TestBootstrap(c *C) {
-	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	leader := mustGetLeader(c, s.svr)
 
 	conn, err := rpcConnect(leader.GetAddr())
 	c.Assert(err, IsNil)
@@ -266,7 +266,7 @@ func (s *testClusterBaseSuite) getClusterConfig(c *C, conn net.Conn, clusterID u
 }
 
 func (s *testClusterSuite) TestGetPutConfig(c *C) {
-	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	leader := mustGetLeader(c, s.svr)
 
 	conn, err := rpcConnect(leader.GetAddr())
 	c.Assert(err, IsNil)
@@ -492,7 +492,7 @@ func (s *testClusterSuite) TestClosedChannel(c *C) {
 	defer cleanup()
 	go svr.Run()
 
-	leader := mustGetLeader(c, svr.client, svr.getLeaderPath())
+	leader := mustGetLeader(c, svr)
 
 	conn, err := rpcConnect(leader.GetAddr())
 	c.Assert(err, IsNil)

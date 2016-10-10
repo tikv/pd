@@ -44,7 +44,7 @@ func (s *testAllocIDSuite) TearDownSuite(c *C) {
 }
 
 func (s *testAllocIDSuite) TestID(c *C) {
-	mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	mustGetLeader(c, s.svr)
 
 	var last uint64
 	for i := uint64(0); i < allocStep; i++ {
@@ -80,7 +80,7 @@ func (s *testAllocIDSuite) TestID(c *C) {
 }
 
 func (s *testAllocIDSuite) TestCommand(c *C) {
-	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	leader := mustGetLeader(c, s.svr)
 
 	conn, err := rpcConnect(leader.GetAddr())
 	c.Assert(err, IsNil)

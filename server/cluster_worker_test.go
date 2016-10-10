@@ -364,7 +364,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	err := cluster.putConfig(meta)
 	c.Assert(err, IsNil)
 
-	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	leaderPD := mustGetLeader(c, s.svr)
 	conn, err := rpcConnect(leaderPD.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
@@ -421,7 +421,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 	c.Assert(cluster, NotNil)
 
 	r1, _ := cluster.getRegion([]byte("a"))
-	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	leaderPd := mustGetLeader(c, s.svr)
 	conn, err := rpcConnect(leaderPd.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
@@ -464,7 +464,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 	region, _ := cluster.getRegion(regionKey)
 	c.Assert(region.Peers, HasLen, 1)
 
-	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	leaderPd := mustGetLeader(c, s.svr)
 
 	conn, err := rpcConnect(leaderPd.GetAddr())
 	c.Assert(err, IsNil)
@@ -522,7 +522,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	err := cluster.putConfig(meta)
 	c.Assert(err, IsNil)
 
-	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	leaderPD := mustGetLeader(c, s.svr)
 	conn, err := rpcConnect(leaderPD.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
@@ -558,7 +558,7 @@ func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
 	stores := cluster.GetStores()
 	c.Assert(stores, HasLen, 5)
 
-	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	leaderPd := mustGetLeader(c, s.svr)
 	conn, err := rpcConnect(leaderPd.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
@@ -586,7 +586,7 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	stores := cluster.GetStores()
 	c.Assert(stores, HasLen, 5)
 
-	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	leaderPd := mustGetLeader(c, s.svr)
 	conn, err := rpcConnect(leaderPd.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()
@@ -626,7 +626,7 @@ func (s *testClusterWorkerSuite) TestBalanceOperatorPriority(c *C) {
 	})
 	c.Assert(err, IsNil)
 
-	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	leaderPd := mustGetLeader(c, s.svr)
 	conn, err := rpcConnect(leaderPd.GetAddr())
 	c.Assert(err, IsNil)
 	defer conn.Close()

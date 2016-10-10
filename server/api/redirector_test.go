@@ -121,7 +121,7 @@ func (s *testRedirectorSuite) TestNotLeader(c *C) {
 }
 
 func mustRequest(c *C, s *server.Server) *http.Response {
-	unixAddr := []string{s.GetAddr(), apiPrefix, "/api/v1/version"}
+	unixAddr := []string{s.GetAddr(), apiPrefix, "/api/v1/leader"}
 	httpAddr := mustUnixAddrToHTTPAddr(c, strings.Join(unixAddr, ""))
 	client := newUnixSocketClient()
 	resp, err := client.Get(httpAddr)

@@ -23,7 +23,6 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/pkg/capnslog"
-	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/msgpb"
@@ -31,11 +30,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/util"
 	"github.com/pingcap/pd/pkg/metrics"
 	"golang.org/x/net/context"
-)
-
-const (
-	requestTimeout  = 10 * time.Second
-	slowRequestTime = 1 * time.Second
 )
 
 // Version information.
@@ -100,24 +94,6 @@ func getValue(c *clientv3.Client, key string, opts ...clientv3.OpOption) ([]byte
 	return resp.Kvs[0].Value, nil
 }
 
-// Return boolean to indicate whether the key exists or not.
-// TODO: return the value revision for outer use.
-func getProtoMsg(c *clientv3.Client, key string, msg proto.Message, opts ...clientv3.OpOption) (bool, error) {
-	value, err := getValue(c, key, opts...)
-	if err != nil {
-		return false, errors.Trace(err)
-	}
-	if value == nil {
-		return false, nil
-	}
-
-	if err = proto.Unmarshal(value, msg); err != nil {
-		return false, errors.Trace(err)
-	}
-
-	return true, nil
-}
-
 func bytesToUint64(b []byte) (uint64, error) {
 	if len(b) != 8 {
 		return 0, errors.Errorf("invalid data, must 8 bytes, but %d", len(b))
@@ -130,54 +106,6 @@ func uint64ToBytes(v uint64) []byte {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, v)
 	return b
-}
-
-// slowLogTxn wraps etcd transaction and log slow one.
-type slowLogTxn struct {
-	clientv3.Txn
-	cancel context.CancelFunc
-}
-
-func newSlowLogTxn(client *clientv3.Client) clientv3.Txn {
-	ctx, cancel := context.WithTimeout(client.Ctx(), requestTimeout)
-	return &slowLogTxn{
-		Txn:    client.Txn(ctx),
-		cancel: cancel,
-	}
-}
-
-func (t *slowLogTxn) If(cs ...clientv3.Cmp) clientv3.Txn {
-	return &slowLogTxn{
-		Txn:    t.Txn.If(cs...),
-		cancel: t.cancel,
-	}
-}
-
-func (t *slowLogTxn) Then(ops ...clientv3.Op) clientv3.Txn {
-	return &slowLogTxn{
-		Txn:    t.Txn.Then(ops...),
-		cancel: t.cancel,
-	}
-}
-
-// Commit implements Txn Commit interface.
-func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
-	start := time.Now()
-	resp, err := t.Txn.Commit()
-	t.cancel()
-
-	cost := time.Now().Sub(start)
-	if cost > slowRequestTime {
-		log.Warnf("txn runs too slow, resp: %v, err: %v, cost: %s", resp, err, cost)
-	}
-	label := "success"
-	if err != nil {
-		label = "failed"
-	}
-	txnCounter.WithLabelValues(label).Inc()
-	txnDuration.WithLabelValues(label).Observe(cost.Seconds())
-
-	return resp, errors.Trace(err)
 }
 
 func sliceClone(strs []string) []string {

@@ -426,7 +426,7 @@ func (c *RaftCluster) saveStore(store *metapb.Store) error {
 
 	storePath := makeStoreKey(c.clusterRoot, store.GetId())
 
-	resp, err := c.s.leaderTxn().Then(clientv3.OpPut(storePath, string(storeValue))).Commit()
+	resp, err := c.s.txn().Then(clientv3.OpPut(storePath, string(storeValue))).Commit()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -613,7 +613,7 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 		return errors.Trace(err)
 	}
 
-	resp, err := c.s.leaderTxn().Then(clientv3.OpPut(c.clusterRoot, string(metaValue))).Commit()
+	resp, err := c.s.txn().Then(clientv3.OpPut(c.clusterRoot, string(metaValue))).Commit()
 	if err != nil {
 		return errors.Trace(err)
 	}

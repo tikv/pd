@@ -16,234 +16,117 @@ package server
 import (
 	"os"
 	"path"
-	"sync/atomic"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/mvcc/mvccpb"
-	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"golang.org/x/net/context"
 )
 
-// IsLeader returns whether server is leader or not.
+const (
+	campaignInterval = time.Millisecond * 100
+)
+
+// IsLeader returns whether this server is the leader or not.
 func (s *Server) IsLeader() bool {
-	return atomic.LoadInt64(&s.isLeaderValue) == 1
+	return s.getLessor() != nil
 }
 
-func (s *Server) enableLeader(b bool) {
-	value := int64(0)
-	if b {
-		value = 1
-	}
-
-	atomic.StoreInt64(&s.isLeaderValue, value)
-
-	// Reset connections and cluster.
-	s.closeAllConnections()
-	s.cluster.stop()
+// GetLeader returns the leader for the current election.
+func (s *Server) GetLeader() (*pdpb.Leader, error) {
+	return GetLeader(s.client, s.leaderPath())
 }
 
-func (s *Server) getLeaderPath() string {
+func (s *Server) leaderPath() string {
 	return path.Join(s.rootPath, "leader")
 }
 
 func (s *Server) leaderLoop() {
 	defer s.wg.Done()
 
-	for {
-		if s.isClosed() {
-			log.Infof("server is closed, return leader loop")
-			return
-		}
-
-		leader, err := s.GetLeader()
-		if err != nil {
-			log.Errorf("get leader err %v", err)
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-		if leader != nil {
-			if s.isSameLeader(leader) {
-				// oh, we are already leader, we may meet something wrong
-				// in previous campaignLeader. we can resign and campaign again.
-				log.Warnf("leader is still %s, resign and campaign again", leader)
-				if err = s.resignLeader(); err != nil {
-					log.Errorf("resign leader err %s", err)
-					time.Sleep(200 * time.Millisecond)
-					continue
-				}
-			} else {
-				log.Infof("leader is %s, watch it", leader)
-				s.watchLeader()
-				log.Info("leader changed, try to campaign leader")
-			}
-		}
-
-		if err = s.campaignLeader(); err != nil {
-			log.Errorf("campaign leader err %s", errors.ErrorStack(err))
-		}
-	}
-}
-
-// getLeader gets server leader from etcd.
-func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Leader, error) {
-	leader := &pdpb.Leader{}
-	ok, err := getProtoMsg(c, leaderPath, leader)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	if !ok {
-		return nil, nil
-	}
-
-	return leader, nil
-}
-
-// GetLeader gets pd cluster leader.
-func (s *Server) GetLeader() (*pdpb.Leader, error) {
-	if s.isClosed() {
-		return nil, errors.New("server is closed")
-	}
-	return getLeader(s.client, s.getLeaderPath())
-}
-
-func (s *Server) isSameLeader(leader *pdpb.Leader) bool {
-	return leader.GetAddr() == s.GetAddr() && leader.GetPid() == int64(os.Getpid())
-}
-
-func (s *Server) marshalLeader() string {
 	leader := &pdpb.Leader{
 		Addr: s.GetAddr(),
 		Pid:  int64(os.Getpid()),
 	}
 
-	data, err := leader.Marshal()
-	if err != nil {
-		// can't fail, so panic here.
-		log.Fatalf("marshal leader %s err %v", leader, err)
-	}
+	for !s.IsClosed() {
+		time.Sleep(campaignInterval)
 
-	return string(data)
+		lessor, err := NewLessor(s.client, int(s.cfg.LeaderLease), s.leaderPath())
+		if err != nil {
+			log.Errorf("failed to create lessor: %v", err)
+			continue
+		}
+
+		err = lessor.Campaign(leader)
+		if err != nil {
+			log.Errorf("failed to campaign leader: %v", err)
+			continue
+		}
+
+		s.leaderRound(lessor)
+	}
 }
 
-func (s *Server) campaignLeader() error {
-	log.Debugf("begin to campaign leader %s", s.Name())
+func (s *Server) leaderRound(lessor *Lessor) {
+	s.becomeLeader(lessor)
+	defer s.resignLeader()
 
-	lessor := clientv3.NewLease(s.client)
-	defer lessor.Close()
-
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(s.client.Ctx(), requestTimeout)
-	leaseResp, err := lessor.Grant(ctx, s.cfg.LeaderLease)
-	cancel()
-
-	if cost := time.Now().Sub(start); cost > slowRequestTime {
-		log.Warnf("lessor grants too slow, cost %s", cost)
+	if err := s.createRaftCluster(); err != nil {
+		log.Error(err)
+		return
 	}
 
-	if err != nil {
-		return errors.Trace(err)
+	if err := s.syncTimestamp(); err != nil {
+		log.Error(err)
+		return
 	}
 
-	leaderKey := s.getLeaderPath()
-	// The leader key must not exist, so the CreateRevision is 0.
-	resp, err := s.txn().
-		If(clientv3.Compare(clientv3.CreateRevision(leaderKey), "=", 0)).
-		Then(clientv3.OpPut(leaderKey, s.leaderValue, clientv3.WithLease(clientv3.LeaseID(leaseResp.ID)))).
-		Commit()
-	if err != nil {
-		return errors.Trace(err)
-	}
-	if !resp.Succeeded {
-		return errors.New("campaign leader failed, other server may campaign ok")
-	}
-
-	log.Debugf("campaign leader ok %s", s.Name())
-	s.enableLeader(true)
-	defer s.enableLeader(false)
-
-	// Try to create raft cluster.
-	err = s.createRaftCluster()
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	// Make the leader keepalived.
-	ch, err := lessor.KeepAlive(s.client.Ctx(), clientv3.LeaseID(leaseResp.ID))
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	log.Debug("sync timestamp for tso")
-	if err = s.syncTimestamp(); err != nil {
-		return errors.Trace(err)
-	}
-
-	tsTicker := time.NewTicker(updateTimestampStep)
-	defer tsTicker.Stop()
+	ticker := time.NewTicker(updateTimestampStep)
+	defer ticker.Stop()
 
 	for {
 		select {
-		case _, ok := <-ch:
-			if !ok {
-				log.Info("keep alive channel is closed")
-				return nil
-			}
-		case <-tsTicker.C:
-			if err = s.updateTimestamp(); err != nil {
-				return errors.Trace(err)
-			}
-		case <-s.client.Ctx().Done():
-			return errors.New("server closed")
-		}
-	}
-}
-
-func (s *Server) watchLeader() {
-	watcher := clientv3.NewWatcher(s.client)
-	defer watcher.Close()
-
-	ctx := s.client.Ctx()
-	for {
-		rch := watcher.Watch(ctx, s.getLeaderPath())
-		for wresp := range rch {
-			if wresp.Canceled {
+		case <-ticker.C:
+			if err := s.updateTimestamp(); err != nil {
+				log.Error(err)
 				return
 			}
-
-			for _, ev := range wresp.Events {
-				if ev.Type == mvccpb.DELETE {
-					log.Info("leader is deleted")
-					return
-				}
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-			// server closed, return
+		case <-lessor.Done():
 			return
-		default:
 		}
 	}
 }
 
-func (s *Server) resignLeader() error {
-	// delete leader itself and let others start a new election again.
-	leaderKey := s.getLeaderPath()
-	resp, err := s.leaderTxn().Then(clientv3.OpDelete(leaderKey)).Commit()
-	if err != nil {
-		return errors.Trace(err)
-	}
-	if !resp.Succeeded {
-		return errors.New("resign leader failed, we are not leader already")
-	}
+func (s *Server) becomeLeader(lessor *Lessor) {
+	s.lessor.Store(lessor)
+	s.closeAllConnections()
+}
 
+func (s *Server) resignLeader() {
+	lessor := s.getLessor()
+	if lessor != nil {
+		lessor.Close()
+	}
+	s.lessor.Store((*Lessor)(nil))
+	s.closeAllConnections()
+	s.cluster.stop()
+}
+
+func (s *Server) getLessor() *Lessor {
+	lessor := s.lessor.Load()
+	if lessor != nil {
+		return lessor.(*Lessor)
+	}
 	return nil
 }
 
-func (s *Server) leaderCmp() clientv3.Cmp {
-	return clientv3.Compare(clientv3.Value(s.getLeaderPath()), "=", s.leaderValue)
+// txn returns an etcd transaction wrapper. It guarantees that the
+// transaction will be executed only when this server is the leader.
+func (s *Server) txn() clientv3.Txn {
+	lessor := s.getLessor()
+	if lessor != nil {
+		return lessor.Txn()
+	}
+	return newNotLeaderTxn(s.client)
 }

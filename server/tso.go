@@ -67,7 +67,7 @@ func (s *Server) saveTimestamp(now time.Time) error {
 	data := uint64ToBytes(uint64(now.UnixNano()))
 	key := s.getTimestampPath()
 
-	resp, err := s.leaderTxn().Then(clientv3.OpPut(key, string(data))).Commit()
+	resp, err := s.txn().Then(clientv3.OpPut(key, string(data))).Commit()
 	if err != nil {
 		return errors.Trace(err)
 	}

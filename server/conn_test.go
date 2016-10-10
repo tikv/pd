@@ -75,15 +75,13 @@ func (s *testConnSuite) TestReconnect(c *C) {
 	newLeader.Close()
 	time.Sleep(time.Second)
 
-	// Request will fail with no leader.
+	// Request will fail with no majority.
 	for i := 0; i < 2; i++ {
 		svr := followers[i]
 		if svr != newLeader {
 			resp := mustRequest(c, svr)
 			err := resp.GetHeader().GetError()
 			c.Assert(err, NotNil)
-			c.Logf("Response error: %v", err)
-			c.Assert(svr.IsLeader(), IsFalse)
 		}
 	}
 }

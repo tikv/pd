@@ -27,6 +27,7 @@ const (
 )
 
 const (
+	errServerIsClosed      = "server is closed"
 	errNoLeaderFound       = "no leader found"
 	errRedirectFailed      = "redirect failed"
 	errRedirectToNotLeader = "redirect to not leader"
@@ -41,6 +42,11 @@ func newRedirector(s *server.Server) *redirector {
 }
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	if h.s.IsClosed() {
+		http.Error(w, errServerIsClosed, http.StatusInternalServerError)
+		return
+	}
+
 	if h.s.IsLeader() {
 		next(w, r)
 		return
