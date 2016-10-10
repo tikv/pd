@@ -14,12 +14,11 @@
 package server
 
 import (
-	"context"
-
 	"github.com/coreos/etcd/clientv3"
 	concurv3 "github.com/coreos/etcd/clientv3/concurrency"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"golang.org/x/net/context"
 )
 
 var (
@@ -55,22 +54,19 @@ func (l *Lessor) Close() {
 	l.session.Close()
 }
 
-func (l *Lessor) withTimeout() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(l.session.Client().Ctx(), requestTimeout)
+func (l *Lessor) ctx() context.Context {
+	return l.session.Client().Ctx()
 }
 
 // Campaign blocks until it is elected, or an error occurs.
 // It puts the leader as eligible for the election.
 func (l *Lessor) Campaign(leader *pdpb.Leader) error {
-	ctx, cancel := l.withTimeout()
-	defer cancel()
-
 	value, err := leader.Marshal()
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	err = l.election.Campaign(ctx, string(value))
+	err = l.election.Campaign(l.ctx(), string(value))
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -81,7 +77,7 @@ func (l *Lessor) Campaign(leader *pdpb.Leader) error {
 
 // Resign resigns the leadership.
 func (l *Lessor) Resign() error {
-	ctx, cancel := l.withTimeout()
+	ctx, cancel := context.WithTimeout(l.ctx(), requestTimeout)
 	defer cancel()
 	return l.election.Resign(ctx)
 }

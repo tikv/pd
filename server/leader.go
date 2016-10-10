@@ -64,6 +64,7 @@ func (s *Server) leaderLoop() {
 			continue
 		}
 
+		log.Infof("campaign leader ok: %v", s.Name())
 		s.leaderRound(lessor)
 	}
 }
