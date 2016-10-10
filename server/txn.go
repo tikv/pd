@@ -14,12 +14,12 @@
 package server
 
 import (
-	"context"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	"golang.org/x/net/context"
 )
 
 const (
