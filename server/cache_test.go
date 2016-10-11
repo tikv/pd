@@ -76,7 +76,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	cacheStore := cluster.cachedCluster.getStore(store1.GetId())
 	c.Assert(cacheStore.store, DeepEquals, store1)
 	c.Assert(cluster.cachedCluster.regions.regions, HasLen, 1)
-	c.Assert(cluster.cachedCluster.regions.searchRegions.Len(), Equals, 1)
+	c.Assert(cluster.cachedCluster.regions.searchRegions.length(), Equals, 1)
 	c.Assert(cluster.cachedCluster.regions.leaders.storeRegions, HasLen, 0)
 	c.Assert(cluster.cachedCluster.regions.leaders.regionStores, HasLen, 0)
 
@@ -116,7 +116,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 
 	cacheRegions := cluster.cachedCluster.regions
 	c.Assert(cacheRegions.regions, HasLen, 1)
-	c.Assert(cacheRegions.searchRegions.Len(), Equals, 1)
+	c.Assert(cacheRegions.searchRegions.length(), Equals, 1)
 	c.Assert(cacheRegions.leaders.storeRegions, HasLen, 0)
 	c.Assert(cacheRegions.leaders.regionStores, HasLen, 0)
 

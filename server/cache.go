@@ -20,31 +20,12 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/google/btree"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
-
-const (
-	defaultBtreeDegree = 64
-)
-
-type searchKeyItem struct {
-	region *metapb.Region
-}
-
-var _ btree.Item = &searchKeyItem{}
-
-// Less returns true if the region start key is greater than the other.
-// So we will sort the region with start key reversely.
-func (s *searchKeyItem) Less(other btree.Item) bool {
-	left := s.region.GetStartKey()
-	right := other.(*searchKeyItem).region.GetStartKey()
-	return bytes.Compare(left, right) > 0
-}
 
 func containPeer(region *metapb.Region, peer *metapb.Peer) bool {
 	for _, p := range region.GetPeers() {
@@ -103,11 +84,6 @@ func getExcludedStores(region *metapb.Region) map[uint64]struct{} {
 	return excludedStores
 }
 
-func keyInRegion(regionKey []byte, region *metapb.Region) bool {
-	return bytes.Compare(regionKey, region.GetStartKey()) >= 0 &&
-		(len(region.GetEndKey()) == 0 || bytes.Compare(regionKey, region.GetEndKey()) < 0)
-}
-
 type leaders struct {
 	// store id -> region id -> struct{}
 	storeRegions map[uint64]map[uint64]struct{}
@@ -157,7 +133,7 @@ type regionsInfo struct {
 	// region id -> RegionInfo
 	regions map[uint64]*metapb.Region
 	// search key -> region id
-	searchRegions *btree.BTree
+	searchRegions *regionTree
 	// store id -> region count
 	storeRegionCount map[uint64]uint64
 
@@ -167,7 +143,7 @@ type regionsInfo struct {
 func newRegionsInfo() *regionsInfo {
 	return &regionsInfo{
 		regions:          make(map[uint64]*metapb.Region),
-		searchRegions:    btree.New(defaultBtreeDegree),
+		searchRegions:    newRegionTree(),
 		storeRegionCount: make(map[uint64]uint64),
 		leaders: &leaders{
 			storeRegions: make(map[uint64]map[uint64]struct{}),
@@ -181,12 +157,8 @@ func (r *regionsInfo) getRegion(regionKey []byte) (*metapb.Region, *metapb.Peer)
 	r.RLock()
 	defer r.RUnlock()
 
-	region := r.innerGetRegion(regionKey)
+	region := r.searchRegions.search(regionKey)
 	if region == nil {
-		return nil, nil
-	}
-
-	if !keyInRegion(regionKey, region) {
 		return nil, nil
 	}
 
@@ -230,35 +202,8 @@ func (r *regionsInfo) getRegions() []*metapb.Region {
 	return regions
 }
 
-func (r *regionsInfo) innerGetRegion(regionKey []byte) *metapb.Region {
-	startSearchItem := &searchKeyItem{
-		region: &metapb.Region{
-			StartKey: regionKey,
-		},
-	}
-
-	var searchItem *searchKeyItem
-	r.searchRegions.AscendGreaterOrEqual(startSearchItem, func(i btree.Item) bool {
-		searchItem = i.(*searchKeyItem)
-		return false
-	})
-
-	if searchItem == nil {
-		return nil
-	}
-
-	return searchItem.region
-}
-
 func (r *regionsInfo) addRegion(region *metapb.Region) {
-	item := &searchKeyItem{
-		region: region,
-	}
-
-	oldItem := r.searchRegions.ReplaceOrInsert(item)
-	if oldItem != nil {
-		log.Fatalf("addRegion for already existed region in searchRegions - %v", region)
-	}
+	r.searchRegions.insert(region)
 
 	_, ok := r.regions[region.GetId()]
 	if ok {
@@ -271,14 +216,7 @@ func (r *regionsInfo) addRegion(region *metapb.Region) {
 }
 
 func (r *regionsInfo) updateRegion(region *metapb.Region) {
-	item := &searchKeyItem{
-		region: region,
-	}
-
-	oldItem := r.searchRegions.ReplaceOrInsert(item)
-	if oldItem == nil {
-		log.Fatalf("updateRegion for none existed region in searchRegions - %v", region)
-	}
+	r.searchRegions.update(region)
 
 	oldRegion, ok := r.regions[region.GetId()]
 	if !ok {
@@ -292,15 +230,7 @@ func (r *regionsInfo) updateRegion(region *metapb.Region) {
 }
 
 func (r *regionsInfo) removeRegion(region *metapb.Region) {
-	item := &searchKeyItem{
-		region: region,
-	}
-	regionID := region.GetId()
-
-	oldItem := r.searchRegions.Delete(item)
-	if oldItem == nil {
-		log.Fatalf("removeRegion for none existed region in searchRegions - %v", region)
-	}
+	r.searchRegions.remove(region)
 
 	_, ok := r.regions[region.GetId()]
 	if !ok {
@@ -309,7 +239,7 @@ func (r *regionsInfo) removeRegion(region *metapb.Region) {
 
 	delete(r.regions, region.GetId())
 
-	r.leaders.remove(regionID)
+	r.leaders.remove(region.GetId())
 
 	r.removeRegionCount(region)
 }
@@ -333,7 +263,7 @@ func (r *regionsInfo) heartbeatVersion(region *metapb.Region) (bool, *metapb.Reg
 	startKey := region.GetStartKey()
 	endKey := region.GetEndKey()
 
-	searchRegion := r.innerGetRegion(startKey)
+	searchRegion := r.searchRegions.search(startKey)
 	if searchRegion == nil {
 		// Find no region for start key, insert directly.
 		r.addRegion(region)
@@ -351,12 +281,6 @@ func (r *regionsInfo) heartbeatVersion(region *metapb.Region) (bool, *metapb.Reg
 
 		// TODO: If we support merge regions, we should check the detail epoch version.
 		return false, nil, nil
-	}
-
-	if len(searchEndKey) > 0 && bytes.Compare(startKey, searchEndKey) >= 0 {
-		// No range covers [start, end) now, insert directly.
-		r.addRegion(region)
-		return true, nil, nil
 	}
 
 	// overlap, remove old, insert new.
