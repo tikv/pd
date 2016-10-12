@@ -15,7 +15,7 @@ package server
 
 import (
 	"github.com/coreos/etcd/clientv3"
-	concurv3 "github.com/coreos/etcd/clientv3/concurrency"
+	"github.com/coreos/etcd/clientv3/concurrency"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"golang.org/x/net/context"
@@ -27,19 +27,19 @@ var (
 
 // Lessor is a wrapper for leader election.
 type Lessor struct {
-	session  *concurv3.Session
-	election *concurv3.Election
+	session  *concurrency.Session
+	election *concurrency.Election
 	compare  clientv3.Cmp
 }
 
 // NewLessor returns a new Lessor.
 func NewLessor(client *clientv3.Client, ttl int, prefix string) (*Lessor, error) {
-	session, err := concurv3.NewSession(client, concurv3.WithTTL(ttl))
+	session, err := concurrency.NewSession(client, concurrency.WithTTL(ttl))
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	election := concurv3.NewElection(session, prefix)
+	election := concurrency.NewElection(session, prefix)
 
 	lessor := &Lessor{
 		session:  session,

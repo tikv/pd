@@ -50,7 +50,11 @@ func (s *Server) leaderLoop() {
 	}
 
 	for !s.IsClosed() {
-		time.Sleep(campaignInterval)
+		select {
+		case <-s.client.Ctx().Done():
+			return
+		case <-time.After(campaignInterval):
+		}
 
 		lessor, err := NewLessor(s.client, int(s.cfg.LeaderLease), s.leaderPath())
 		if err != nil {
@@ -115,11 +119,8 @@ func (s *Server) resignLeader() {
 }
 
 func (s *Server) getLessor() *Lessor {
-	lessor := s.lessor.Load()
-	if lessor != nil {
-		return lessor.(*Lessor)
-	}
-	return nil
+	lessor, _ := s.lessor.Load().(*Lessor)
+	return lessor
 }
 
 // txn returns an etcd transaction wrapper. It guarantees that the
