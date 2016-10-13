@@ -62,10 +62,11 @@ func convertName(str string) string {
 }
 
 // PrometheusPushClient pushs metrics to Prometheus Pushgateway.
-func PrometheusPushClient(job, addr string, interval time.Duration) {
+func PrometheusPushClient(instance, addr string, interval time.Duration) {
 	for {
 		err := push.FromGatherer(
-			job, push.HostnameGroupingKey(),
+			"pd",
+			map[string]string{"instance": instance},
 			addr,
 			prometheus.DefaultGatherer,
 		)
