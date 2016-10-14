@@ -106,7 +106,7 @@ func (s *testBalancerSuite) updateStoreState(c *C, clusterInfo *clusterInfo, sto
 	storeInfo := clusterInfo.getStore(storeID)
 	storeInfo.store.State = state
 	clusterInfo.addStore(storeInfo.store)
-	ok := clusterInfo.updateStoreStatus(storeInfo.stats.Stats)
+	ok := clusterInfo.updateStoreStatus(storeInfo.stats.StoreStats)
 	c.Assert(ok, IsTrue)
 }
 

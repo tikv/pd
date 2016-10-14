@@ -531,21 +531,16 @@ func (c *RaftCluster) collectMetrics() {
 		case metapb.StoreState_Tombstone:
 			storeTombstoneCount++
 		}
-		if s.store.GetState() == metapb.StoreState_Tombstone {
+		if s.isTombstone() {
 			continue
 		}
-		if s.downSeconds() >= c.balancerWorker.cfg.MaxStoreDownDuration.Seconds() {
+		if s.downTime() >= c.balancerWorker.cfg.MaxStoreDownDuration.Duration {
 			storeDownCount++
 		}
 
 		// Store stats.
-		stats := s.stats.Stats
-		if stats == nil {
-			continue
-		}
-
-		storageSize += stats.GetCapacity() - stats.GetAvailable()
-		storageCapacity += stats.GetCapacity()
+		storageSize += s.stats.GetUsedSize()
+		storageCapacity += s.stats.GetCapacity()
 		if regionTotalCount < s.stats.TotalRegionCount {
 			regionTotalCount = s.stats.TotalRegionCount
 		}

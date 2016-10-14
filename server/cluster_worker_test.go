@@ -571,7 +571,7 @@ func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
 	c.Assert(resp, NotNil)
 
 	store := cluster.cachedCluster.getStore(storeID)
-	c.Assert(stats, DeepEquals, store.stats.Stats)
+	c.Assert(stats, DeepEquals, store.stats.StoreStats)
 }
 
 func (s *testClusterWorkerSuite) TestReportSplit(c *C) {

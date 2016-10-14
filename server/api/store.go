@@ -19,13 +19,31 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/timeutil"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
 
+type storeStatus struct {
+	*server.StoreStatus
+	Uptime timeutil.Duration `json:"uptime"`
+}
+
 type storeInfo struct {
-	Store  *metapb.Store       `json:"store"`
-	Status *server.StoreStatus `json:"status"`
+	Store  *metapb.Store `json:"store"`
+	Status *storeStatus  `json:"status"`
+	Scores []int         `json:"scores"`
+}
+
+func newStoreInfo(store *metapb.Store, status *server.StoreStatus, scores []int) *storeInfo {
+	return &storeInfo{
+		Store: store,
+		Status: &storeStatus{
+			StoreStatus: status,
+			Uptime:      timeutil.NewDuration(status.GetUptime()),
+		},
+		Scores: scores,
+	}
 }
 
 type storesInfo struct {
@@ -66,12 +84,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	storeInfo := &storeInfo{
-		Store:  store,
-		Status: status,
-	}
-	storeInfo.Status.Scores = cluster.GetScores(storeInfo.Store, storeInfo.Status)
-
+	storeInfo := newStoreInfo(store, status, cluster.GetScores(store, status))
 	h.rd.JSON(w, http.StatusOK, storeInfo)
 }
 
@@ -137,11 +150,7 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		storeInfo := &storeInfo{
-			Store:  store,
-			Status: status,
-		}
-		storeInfo.Status.Scores = cluster.GetScores(storeInfo.Store, storeInfo.Status)
+		storeInfo := newStoreInfo(store, status, cluster.GetScores(store, status))
 		storesInfo.Stores = append(storesInfo.Stores, storeInfo)
 	}
 

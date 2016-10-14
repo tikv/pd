@@ -26,6 +26,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/etcd/embed"
 	"github.com/juju/errors"
+	"github.com/pingcap/pd/pkg/timeutil"
 )
 
 // Config is the pd server configuration.
@@ -58,7 +59,7 @@ type Config struct {
 	LogFile string `toml:"log-file" json:"log-file"`
 
 	// TsoSaveInterval is the interval to save timestamp.
-	TsoSaveInterval duration `toml:"tso-save-interval" json:"tso-save-interval"`
+	TsoSaveInterval timeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
 	// ClusterID is the cluster ID communicating with other services.
 	ClusterID uint64 `toml:"cluster-id" json:"cluster-id"`
@@ -137,7 +138,7 @@ func adjustFloat64(v *float64, defValue float64) {
 	}
 }
 
-func adjustDuration(v *duration, defValue time.Duration) {
+func adjustDuration(v *timeutil.Duration, defValue time.Duration) {
 	if v.Duration == 0 {
 		v.Duration = defValue
 	}
@@ -255,32 +256,6 @@ func (c *Config) configFromFile(path string) error {
 	return errors.Trace(err)
 }
 
-type duration struct {
-	time.Duration
-}
-
-func (d *duration) Seconds() uint64 {
-	return uint64(d.Duration.Seconds())
-}
-
-func (d *duration) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf(`"%s"`, d.String())), nil
-}
-
-func (d *duration) UnmarshalJSON(text []byte) error {
-	duration, err := time.ParseDuration(string(text))
-	if err == nil {
-		d.Duration = duration
-	}
-	return errors.Trace(err)
-}
-
-func (d *duration) UnmarshalText(text []byte) error {
-	var err error
-	d.Duration, err = time.ParseDuration(string(text))
-	return errors.Trace(err)
-}
-
 // BalanceConfig is the balance configuration.
 type BalanceConfig struct {
 	// For capacity balance.
@@ -325,11 +300,11 @@ type BalanceConfig struct {
 
 	// MaxPeerDownDuration is the max duration at which
 	// a peer will be considered to be down if its leader reports it.
-	MaxPeerDownDuration duration `toml:"max-peer-down-duration" json:"max-peer-down-duration"`
+	MaxPeerDownDuration timeutil.Duration `toml:"max-peer-down-duration" json:"max-peer-down-duration"`
 
 	// MaxStoreDownDuration is the max duration at which
 	// a store will be considered to be down if it hasn't reported heartbeats.
-	MaxStoreDownDuration duration `toml:"max-store-down-duration" json:"max-store-down-duration"`
+	MaxStoreDownDuration timeutil.Duration `toml:"max-store-down-duration" json:"max-store-down-duration"`
 }
 
 func newBalanceConfig() *BalanceConfig {
@@ -382,8 +357,8 @@ func (c *BalanceConfig) String() string {
 
 // MetricConfig is the metric configuration.
 type MetricConfig struct {
-	PushAddress  string   `toml:"address" json:"address"`
-	PushInterval duration `toml:"interval" json:"interval"`
+	PushAddress  string            `toml:"address" json:"address"`
+	PushInterval timeutil.Duration `toml:"interval" json:"interval"`
 }
 
 // ParseUrls parse a string into multiple urls.
@@ -461,7 +436,7 @@ func NewTestSingleConfig() *Config {
 		InitialClusterState: embed.ClusterStateFlagNew,
 
 		LeaderLease:     1,
-		TsoSaveInterval: duration{Duration: 200 * time.Millisecond},
+		TsoSaveInterval: timeutil.NewDuration(200 * time.Millisecond),
 	}
 
 	cfg.AdvertiseClientUrls = cfg.ClientUrls

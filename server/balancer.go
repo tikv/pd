@@ -411,10 +411,10 @@ func (rb *replicaBalancer) collectDownPeers(cluster *clusterInfo) []*metapb.Peer
 		if store == nil {
 			continue
 		}
-		if stats.GetDownSeconds() >= rb.cfg.MaxPeerDownDuration.Seconds() {
+		if stats.GetDownSeconds() >= uint64(rb.cfg.MaxPeerDownDuration.Seconds()) {
 			// Peer has been down for too long.
 			downPeers = append(downPeers, peer)
-		} else if store.downSeconds() >= rb.cfg.MaxStoreDownDuration.Seconds() {
+		} else if store.downTime() >= rb.cfg.MaxStoreDownDuration.Duration {
 			// Both peer and store are down, we should do balance.
 			downPeers = append(downPeers, peer)
 		}
@@ -429,7 +429,7 @@ func (rb *replicaBalancer) collectTombstonePeers(cluster *clusterInfo) []*metapb
 		if store == nil {
 			continue
 		}
-		if !store.isUpState() {
+		if !store.isUp() {
 			tombPeers = append(tombPeers, peer)
 		}
 	}

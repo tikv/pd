@@ -53,14 +53,10 @@ func newStateFilter(cfg *BalanceConfig) *stateFilter {
 }
 
 func (sf *stateFilter) filterBadStore(store *storeInfo) bool {
-	if !store.isUpState() {
+	if !store.isUp() {
 		return true
 	}
-	if store.stats.Stats == nil {
-		// The store is in unknown state.
-		return true
-	}
-	if store.downSeconds() >= sf.cfg.MaxStoreDownDuration.Seconds() {
+	if store.downTime() >= sf.cfg.MaxStoreDownDuration.Duration {
 		// The store is considered to be down.
 		return true
 	}
@@ -100,11 +96,11 @@ func newSnapCountFilter(cfg *BalanceConfig) *snapCountFilter {
 }
 
 func (sf *snapCountFilter) FilterFromStore(store *storeInfo, args ...interface{}) bool {
-	return uint64(store.stats.Stats.GetSendingSnapCount()) > sf.cfg.MaxSendingSnapCount
+	return uint64(store.stats.GetSendingSnapCount()) > sf.cfg.MaxSendingSnapCount
 }
 
 func (sf *snapCountFilter) FilterToStore(store *storeInfo, args ...interface{}) bool {
-	return uint64(store.stats.Stats.GetReceivingSnapCount()) > sf.cfg.MaxReceivingSnapCount
+	return uint64(store.stats.GetReceivingSnapCount()) > sf.cfg.MaxReceivingSnapCount
 }
 
 type leaderCountFilter struct {
