@@ -140,15 +140,13 @@ func (bw *balancerWorker) removeBalanceOperator(regionID uint64) {
 
 	// Log balancer information.
 	op, ok := bw.balanceOperators[regionID]
-	if ok {
-		op.End = time.Now()
-		log.Infof("balancer operator finished - %s", op)
-	} else {
-		log.Errorf("balancer operator is empty to remove - %d", regionID)
+	if !ok {
+		return
 	}
 
 	delete(bw.balanceOperators, regionID)
 
+	op.End = time.Now()
 	bw.historyOperators.add(regionID, op)
 }
 
@@ -251,7 +249,6 @@ func (bw *balancerWorker) doBalance() error {
 		}
 	}
 
-	log.Info("find no proper region for balance, retry later")
 	return nil
 }
 

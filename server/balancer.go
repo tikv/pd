@@ -130,7 +130,6 @@ func (cb *capacityBalancer) ScoreType() scoreType {
 func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*storeInfo) (*metapb.Region, *metapb.Peer, *metapb.Peer) {
 	store := selectFromStore(stores, nil, cb.filters, cb.st)
 	if store == nil {
-		log.Debug("from store cannot be found to select balance region")
 		return nil, nil, nil
 	}
 
@@ -153,7 +152,6 @@ func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*
 func (cb *capacityBalancer) selectAddPeer(cluster *clusterInfo, stores []*storeInfo, excluded map[uint64]struct{}) (*metapb.Peer, error) {
 	store := selectToStore(stores, excluded, cb.filters, cb.st)
 	if store == nil {
-		log.Debug("to store cannot be found to add peer")
 		return nil, nil
 	}
 
@@ -178,7 +176,6 @@ func (cb *capacityBalancer) selectRemovePeer(cluster *clusterInfo, peers map[uin
 
 	store := selectFromStore(stores, nil, nil, cb.st)
 	if store == nil {
-		log.Debug("from store cannot be found to remove peer")
 		return nil, nil
 	}
 
@@ -192,14 +189,11 @@ func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*score, *balanceOpera
 	stores := cluster.getStores()
 	region, leader, peer := cb.selectBalanceRegion(cluster, stores)
 	if region == nil || leader == nil || peer == nil {
-		log.Debug("region cannot be found to do balance")
 		return nil, nil, nil
 	}
 
 	// If region peer count is not equal to max peer count, no need to do balance.
 	if len(region.GetPeers()) != int(cluster.getMeta().GetMaxPeerCount()) {
-		log.Warnf("region peer count %d not equals to max peer count %d, no need to do balance",
-			len(region.GetPeers()), cluster.getMeta().GetMaxPeerCount())
 		return nil, nil, nil
 	}
 
@@ -210,7 +204,6 @@ func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*score, *balanceOpera
 		return nil, nil, errors.Trace(err)
 	}
 	if newPeer == nil {
-		log.Warn("new peer cannot be found to do balance")
 		return nil, nil, nil
 	}
 
@@ -247,7 +240,6 @@ func (lb *leaderBalancer) ScoreType() scoreType {
 func (lb *leaderBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*storeInfo) (*metapb.Region, *metapb.Peer, *metapb.Peer) {
 	store := selectFromStore(stores, nil, lb.filters, lb.st)
 	if store == nil {
-		log.Debug("from store cannot be found to select balance region")
 		return nil, nil, nil
 	}
 
@@ -266,7 +258,6 @@ func (lb *leaderBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*st
 	followers := getFollowerPeers(region, leader)
 	newLeader := lb.selectNewLeaderPeer(cluster, followers)
 	if newLeader == nil {
-		log.Warn("new leader peer cannot be found to do leader transfer")
 		return nil, nil, nil
 	}
 
@@ -281,7 +272,6 @@ func (lb *leaderBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[ui
 
 	store := selectToStore(stores, nil, nil, lb.st)
 	if store == nil {
-		log.Debug("find no store to get new leader peer for region")
 		return nil
 	}
 
@@ -301,14 +291,11 @@ func (lb *leaderBalancer) Balance(cluster *clusterInfo) (*score, *balanceOperato
 	stores := cluster.getStores()
 	region, leader, newLeader := lb.selectBalanceRegion(cluster, stores)
 	if region == nil || leader == nil || newLeader == nil {
-		log.Debug("region cannot be found to do leader transfer")
 		return nil, nil, nil
 	}
 
 	// If region peer count is not equal to max peer count, no need to do leader transfer.
 	if len(region.GetPeers()) != int(cluster.getMeta().GetMaxPeerCount()) {
-		log.Warnf("region peer count %d not equals to max peer count %d, no need to do leader transfer",
-			len(region.GetPeers()), cluster.getMeta().GetMaxPeerCount())
 		return nil, nil, nil
 	}
 
@@ -349,7 +336,6 @@ func (rb *replicaBalancer) addPeer(cluster *clusterInfo) (*balanceOperator, erro
 		return nil, errors.Trace(err)
 	}
 	if peer == nil {
-		log.Warnf("find no store to add peer for region %v", rb.region)
 		return nil, nil
 	}
 
@@ -372,7 +358,6 @@ func (rb *replicaBalancer) removePeer(cluster *clusterInfo, badPeers []*metapb.P
 	}
 
 	if peer == nil {
-		log.Warnf("find no store to remove peer for region %v", rb.region)
 		return nil, nil
 	}
 
