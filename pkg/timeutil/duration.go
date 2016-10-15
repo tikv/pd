@@ -15,6 +15,7 @@ package timeutil
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/juju/errors"
@@ -37,11 +38,16 @@ func (d *Duration) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON parses a JSON string into the duration.
 func (d *Duration) UnmarshalJSON(text []byte) error {
-	duration, err := time.ParseDuration(string(text))
-	if err == nil {
-		d.Duration = duration
+	s, err := strconv.Unquote(string(text))
+	if err != nil {
+		return errors.Trace(err)
 	}
-	return errors.Trace(err)
+	duration, err := time.ParseDuration(s)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	d.Duration = duration
+	return nil
 }
 
 // UnmarshalText parses a TOML string into the duration.
