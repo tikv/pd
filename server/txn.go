@@ -100,15 +100,15 @@ func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	return resp, nil
 }
 
-type notLeaderTxn struct {
-	clientv3.Txn
-}
+type notLeaderTxn struct{}
 
-func newNotLeaderTxn(client *clientv3.Client) clientv3.Txn {
-	return &notLeaderTxn{
-		Txn: client.Txn(client.Ctx()),
-	}
-}
+func newNotLeaderTxn() clientv3.Txn { return &notLeaderTxn{} }
+
+func (t *notLeaderTxn) If(cs ...clientv3.Cmp) clientv3.Txn { return t }
+
+func (t *notLeaderTxn) Then(ops ...clientv3.Op) clientv3.Txn { return t }
+
+func (t *notLeaderTxn) Else(ops ...clientv3.Op) clientv3.Txn { return t }
 
 func (t *notLeaderTxn) Commit() (*clientv3.TxnResponse, error) {
 	return nil, errNotLeader

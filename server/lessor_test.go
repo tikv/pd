@@ -85,13 +85,15 @@ func (s *testLessorSuite) TestLessor(c *C) {
 		id := int(leader.GetPid())
 		c.Assert(lessors[id], Equals, lessor)
 
-		_, err = lessor.Txn().Then(clientv3.OpPut("hello", "world")).Commit()
+		op := clientv3.OpPut("hello", "world")
+
+		_, err = lessor.Txn().Then(op).Commit()
 		c.Assert(err, IsNil)
 
 		lessor.Close()
 		delete(lessors, id)
 
-		_, err = lessor.Txn().Then(clientv3.OpPut("hello", "world")).Commit()
+		_, err = lessor.Txn().Then(op).Commit()
 		c.Assert(err, NotNil)
 		c.Assert(errors.Cause(err), Equals, errTxnFailed)
 	}

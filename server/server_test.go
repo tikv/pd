@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coreos/etcd/clientv3"
+	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -44,7 +46,7 @@ func mustGetLeader(c *C, s *Server) *pdpb.Leader {
 		}
 		time.Sleep(waitInterval)
 	}
-	c.Fatal()
+	c.Fatal("failed to get leader")
 	return nil
 }
 
@@ -57,7 +59,7 @@ func mustGetLeaderServer(c *C, servers map[string]*Server) *Server {
 		}
 		time.Sleep(waitInterval)
 	}
-	c.Fatal()
+	c.Fatal("failed to get leader server")
 	return nil
 }
 
@@ -187,6 +189,20 @@ func (s *testLeaderServerSuite) TestLeader(c *C) {
 	}
 
 	leader := mustGetLeaderServer(c, s.svrs)
+
+	op := clientv3.OpPut("hello", "world")
+
+	_, err := leader.txn().Then(op).Commit()
+	c.Assert(err, IsNil)
+
+	for _, l := range s.svrs {
+		if l != leader {
+			_, err = l.txn().Then(op).Commit()
+			c.Assert(err, NotNil)
+			c.Assert(errors.Cause(err), Equals, errNotLeader)
+		}
+	}
+
 	leader.Close()
 	delete(s.svrs, leader.GetAddr())
 

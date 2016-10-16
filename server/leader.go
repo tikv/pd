@@ -130,5 +130,5 @@ func (s *Server) txn() clientv3.Txn {
 	if lessor != nil {
 		return lessor.Txn()
 	}
-	return newNotLeaderTxn(s.client)
+	return newNotLeaderTxn()
 }
