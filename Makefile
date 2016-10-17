@@ -47,7 +47,7 @@ check:
 
 coverage:
 	rm -rf vendor && ln -s _vendor/vendor vendor
-	$HOME/gopath/bin/goveralls -service=travis-ci
+	$(HOME)/gopath/bin/goveralls -service=travis-ci
 	rm -rf vendor
 
 update:
