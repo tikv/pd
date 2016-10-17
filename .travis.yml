@@ -9,4 +9,4 @@ install:
 
 script:
   - make dev
-  - $HOME/gopath/bin/goveralls -service=travis-ci
+  - make coverage
