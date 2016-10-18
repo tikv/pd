@@ -2,11 +2,18 @@ language: go
 
 go:
   - 1.6
-  - 1.7
-
-install:
-  - go get github.com/mattn/goveralls
 
 script:
   - make dev
-  - make coverage
+
+matrix:
+  include:
+  - go: 1.7
+    install:
+      - go get github.com/mattn/goveralls
+    env:
+      - COVERAGE=1
+    script:
+      - make dev
+    after_success:
+      - make coverage
