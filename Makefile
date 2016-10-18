@@ -9,7 +9,9 @@ LDFLAGS += -X "github.com/pingcap/pd/server.PDBuildTS=$(shell date -u '+%Y-%m-%d
 LDFLAGS += -X "github.com/pingcap/pd/server.PDGitHash=$(shell git rev-parse HEAD)"
 
 # Ignore following files's coverage.
-COVERIGNORE := main.go,bindata_assetfs.go
+#
+# See more: https://godoc.org/path/filepath#Match
+COVERIGNORE := "cmd/pd-server/main.go,server/api/bindata_assetfs.go"
 
 default: build
 
