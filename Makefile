@@ -1,12 +1,15 @@
 GO=GO15VENDOREXPERIMENT="1" go
 
-PACKAGES := $$(go list ./...| grep -vE 'vendor')
+PACKAGES := $$(go list ./...| grep -vE 'vendor|pd-server')
 
 GOFILTER := grep -vE 'vendor|render.Delims|bindata_assetfs|testutil'
 GOCHECKER := $(GOFILTER) | awk '{ print } END { if (NR > 0) { exit 1 } }'
 
 LDFLAGS += -X "github.com/pingcap/pd/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "github.com/pingcap/pd/server.PDGitHash=$(shell git rev-parse HEAD)"
+
+# Ignore following files's coverage.
+COVERIGNORE := main.go,bindata_assetfs.go
 
 default: build
 
@@ -48,7 +51,7 @@ check:
 travis_coverage:
 ifeq ("$(TRAVIS_COVERAGE)", "1")
 	rm -rf vendor && ln -s _vendor/vendor vendor
-	$(HOME)/gopath/bin/goveralls -service=travis-ci
+	$(HOME)/gopath/bin/goveralls -service=travis-ci -ignore $(COVERIGNORE)
 	rm -rf vendor
 else
 	@echo "coverage only runs in travis."
