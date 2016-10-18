@@ -16,4 +16,4 @@ matrix:
     script:
       - make dev
     after_success:
-      - make coverage
+      - make travis_coverage
