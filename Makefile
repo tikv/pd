@@ -4,6 +4,7 @@ PACKAGES := $$(go list ./...| grep -vE 'vendor')
 
 GOFILTER := grep -vE 'vendor|render.Delims|bindata_assetfs|testutil'
 GOCHECKER := $(GOFILTER) | awk '{ print } END { if (NR > 0) { exit 1 } }'
+GOVERSION := $(shell go version | awk '{ printf "%5.5s", $$3 }')
 
 LDFLAGS += -X "github.com/pingcap/pd/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "github.com/pingcap/pd/server.PDGitHash=$(shell git rev-parse HEAD)"
@@ -46,9 +47,11 @@ check:
 	@ gofmt -s -l . 2>&1 | $(GOCHECKER)
 
 coverage:
+ifeq ("$(GOVERSION)", "go1.7")
 	rm -rf vendor && ln -s _vendor/vendor vendor
 	$(HOME)/gopath/bin/goveralls -service=travis-ci
 	rm -rf vendor
+endif
 
 update:
 	which glide >/dev/null || curl https://glide.sh/get | sh
