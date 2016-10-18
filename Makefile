@@ -45,8 +45,8 @@ check:
 	@echo "gofmt"
 	@ gofmt -s -l . 2>&1 | $(GOCHECKER)
 
-coverage:
-ifeq ("$(COVERAGE)", "1")
+travis_coverage:
+ifeq ("$(TRAVIS_COVERAGE)", "1")
 	rm -rf vendor && ln -s _vendor/vendor vendor
 	$(HOME)/gopath/bin/goveralls -service=travis-ci
 	rm -rf vendor

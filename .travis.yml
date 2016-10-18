@@ -12,7 +12,7 @@ matrix:
     install:
       - go get github.com/mattn/goveralls
     env:
-      - COVERAGE=1
+      - TRAVIS_COVERAGE=1
     script:
       - make dev
     after_success:
