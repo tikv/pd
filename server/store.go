@@ -22,35 +22,36 @@ import (
 )
 
 // storeInfo contains information about a store.
+// TODO: Export this to API directly.
 type storeInfo struct {
-	store *metapb.Store
+	*metapb.Store
 	stats *StoreStatus
 }
 
 func newStoreInfo(store *metapb.Store) *storeInfo {
 	return &storeInfo{
-		store: store,
+		Store: store,
 		stats: newStoreStatus(),
 	}
 }
 
 func (s *storeInfo) clone() *storeInfo {
 	return &storeInfo{
-		store: proto.Clone(s.store).(*metapb.Store),
+		Store: proto.Clone(s.Store).(*metapb.Store),
 		stats: s.stats.clone(),
 	}
 }
 
 func (s *storeInfo) isUp() bool {
-	return s.store.GetState() == metapb.StoreState_Up
+	return s.GetState() == metapb.StoreState_Up
 }
 
 func (s *storeInfo) isOffline() bool {
-	return s.store.GetState() == metapb.StoreState_Offline
+	return s.GetState() == metapb.StoreState_Offline
 }
 
 func (s *storeInfo) isTombstone() bool {
-	return s.store.GetState() == metapb.StoreState_Tombstone
+	return s.GetState() == metapb.StoreState_Tombstone
 }
 
 func (s *storeInfo) downTime() time.Duration {

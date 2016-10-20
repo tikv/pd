@@ -74,7 +74,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(cluster.cachedCluster.getMeta().GetMaxPeerCount(), Equals, uint32(3))
 
 	cacheStore := cluster.cachedCluster.getStore(store1.GetId())
-	c.Assert(cacheStore.store, DeepEquals, store1)
+	c.Assert(cacheStore.Store, DeepEquals, store1)
 	c.Assert(cluster.cachedCluster.regions.regions, HasLen, 1)
 	c.Assert(cluster.cachedCluster.regions.searchRegions.length(), Equals, 1)
 	c.Assert(cluster.cachedCluster.regions.leaders.storeRegions, HasLen, 0)
@@ -101,9 +101,9 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(cluster.cachedCluster.getMeta().GetMaxPeerCount(), Equals, uint32(3))
 
 	cacheStore = cluster.cachedCluster.getStore(store1.GetId())
-	c.Assert(cacheStore.store, DeepEquals, store1)
+	c.Assert(cacheStore.Store, DeepEquals, store1)
 	cacheStore = cluster.cachedCluster.getStore(store2.GetId())
-	c.Assert(cacheStore.store, DeepEquals, store2)
+	c.Assert(cacheStore.Store, DeepEquals, store2)
 	cacheStores := cluster.cachedCluster.getStores()
 	c.Assert(cacheStores, HasLen, 2)
 	c.Assert(cluster.cachedCluster.regions.regions, HasLen, 1)

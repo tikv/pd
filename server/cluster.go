@@ -383,7 +383,7 @@ func (c *RaftCluster) GetStore(storeID uint64) (*metapb.Store, *StoreStatus, err
 		return nil, nil, errors.Errorf("invalid store ID %d, not found", storeID)
 	}
 
-	return store.store, store.stats, nil
+	return store.Store, store.stats, nil
 }
 
 func (c *RaftCluster) putStore(store *metapb.Store) error {
@@ -398,21 +398,21 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	// Case 1: store id exists with the same address - do nothing;
 	// Case 2: store id exists with different address - update address;
 	if s := c.cachedCluster.getStore(store.GetId()); s != nil {
-		if s.store.GetAddress() == store.GetAddress() {
+		if s.GetAddress() == store.GetAddress() {
 			return nil
 		}
-		s.store.Address = store.Address
-		return c.saveStore(s.store)
+		s.Address = store.Address
+		return c.saveStore(s.Store)
 	}
 
 	// Case 3: store id does not exist, check duplicated address.
 	for _, s := range c.cachedCluster.getStores() {
 		// It's OK to start a new store on the same address if the old store has been removed.
-		if s.store.GetState() == metapb.StoreState_Tombstone {
+		if s.isTombstone() {
 			continue
 		}
-		if s.store.GetAddress() == store.GetAddress() {
-			return errors.Errorf("duplicated store address: %v, already registered by %v", store, s.store)
+		if s.GetAddress() == store.GetAddress() {
+			return errors.Errorf("duplicated store address: %v, already registered by %v", store, s.Store)
 		}
 	}
 	return c.saveStore(store)
@@ -523,7 +523,7 @@ func (c *RaftCluster) collectMetrics() {
 
 	for _, s := range cluster.getStores() {
 		// Store state.
-		switch s.store.GetState() {
+		switch s.GetState() {
 		case metapb.StoreState_Up:
 			storeUpCount++
 		case metapb.StoreState_Offline:
@@ -699,7 +699,7 @@ func (c *RaftCluster) GetHistoryOperators() []Operator {
 // GetScores gets store scores from balancer.
 func (c *RaftCluster) GetScores(store *metapb.Store, status *StoreStatus) []int {
 	storeInfo := &storeInfo{
-		store: store,
+		Store: store,
 		stats: status,
 	}
 

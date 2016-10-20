@@ -103,10 +103,10 @@ func (s *testBalancerSuite) updateStore(c *C, clusterInfo *clusterInfo, storeID 
 }
 
 func (s *testBalancerSuite) updateStoreState(c *C, clusterInfo *clusterInfo, storeID uint64, state metapb.StoreState) {
-	storeInfo := clusterInfo.getStore(storeID)
-	storeInfo.store.State = state
-	clusterInfo.addStore(storeInfo.store)
-	ok := clusterInfo.updateStoreStatus(storeInfo.stats.StoreStats)
+	store := clusterInfo.getStore(storeID)
+	store.State = state
+	clusterInfo.addStore(store.Store)
+	ok := clusterInfo.updateStoreStatus(store.stats.StoreStats)
 	c.Assert(ok, IsTrue)
 }
 

@@ -556,7 +556,7 @@ func (c *clusterInfo) getMetaStores() []*metapb.Store {
 
 	stores := make([]*metapb.Store, 0, len(c.stores))
 	for _, store := range c.stores {
-		stores = append(stores, proto.Clone(store.store).(*metapb.Store))
+		stores = append(stores, proto.Clone(store.Store).(*metapb.Store))
 	}
 
 	return stores

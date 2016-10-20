@@ -47,7 +47,7 @@ func selectFromStore(stores []*storeInfo, excluded map[uint64]struct{}, filters 
 			continue
 		}
 
-		if _, ok := excluded[store.store.GetId()]; ok {
+		if _, ok := excluded[store.GetId()]; ok {
 			continue
 		}
 
@@ -84,7 +84,7 @@ func selectToStore(stores []*storeInfo, excluded map[uint64]struct{}, filters []
 			continue
 		}
 
-		if _, ok := excluded[store.store.GetId()]; ok {
+		if _, ok := excluded[store.GetId()]; ok {
 			continue
 		}
 
@@ -133,7 +133,7 @@ func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*
 		return nil, nil, nil
 	}
 
-	storeID := store.store.GetId()
+	storeID := store.GetId()
 	meta := cluster.getMeta()
 	if meta.GetMaxPeerCount() == 1 {
 		region := cluster.regions.randLeaderRegion(storeID)
@@ -162,7 +162,7 @@ func (cb *capacityBalancer) selectAddPeer(cluster *clusterInfo, stores []*storeI
 
 	peer := &metapb.Peer{
 		Id:      peerID,
-		StoreId: store.store.GetId(),
+		StoreId: store.GetId(),
 	}
 
 	return peer, nil
@@ -179,7 +179,7 @@ func (cb *capacityBalancer) selectRemovePeer(cluster *clusterInfo, peers map[uin
 		return nil, nil
 	}
 
-	storeID := store.store.GetId()
+	storeID := store.GetId()
 	return peers[storeID], nil
 }
 
@@ -244,7 +244,7 @@ func (lb *leaderBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*st
 	}
 
 	// Random select one leader region from store.
-	storeID := store.store.GetId()
+	storeID := store.GetId()
 	region := cluster.regions.randLeaderRegion(storeID)
 	if region == nil {
 		return nil, nil, nil
@@ -275,7 +275,7 @@ func (lb *leaderBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[ui
 		return nil
 	}
 
-	storeID := store.store.GetId()
+	storeID := store.GetId()
 	return peers[storeID]
 }
 
