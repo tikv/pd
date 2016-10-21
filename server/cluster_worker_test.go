@@ -636,7 +636,8 @@ func (s *testClusterWorkerSuite) TestBalanceOperatorPriority(c *C) {
 
 	// Add a balanceOP.
 	removePeerOperator := newRemovePeerOperator(region.GetId(), leader)
-	bop := newBalanceOperator(region, balanceOP, removePeerOperator)
+	regionInfo := newRegionInfo(region, leader)
+	bop := newBalanceOperator(regionInfo, balanceOP, removePeerOperator)
 	ok := bw.addBalanceOperator(region.GetId(), bop)
 	c.Assert(ok, IsTrue)
 	// Add a balanceOP again will fail.
@@ -665,19 +666,19 @@ func (s *testClusterWorkerSuite) TestBalanceOperatorPriority(c *C) {
 	// Add an in progress balanceOP.
 	addPeer := s.newPeer(c, 999, 0)
 	addPeerOperator := newAddPeerOperator(region.GetId(), addPeer)
-	bop = newBalanceOperator(region, balanceOP, addPeerOperator, removePeerOperator)
+	bop = newBalanceOperator(regionInfo, balanceOP, addPeerOperator, removePeerOperator)
 	bop.Index = 1
 	ok = bw.addBalanceOperator(region.GetId(), bop)
 	c.Assert(ok, IsTrue)
 
 	// New adminOP will not replace an in progress balanceOP.
-	aop := newBalanceOperator(region, adminOP, removePeerOperator)
+	aop := newBalanceOperator(regionInfo, adminOP, removePeerOperator)
 	ok = bw.addBalanceOperator(region.GetId(), aop)
 	c.Assert(ok, IsFalse)
 	bw.removeBalanceOperator(region.GetId())
 
 	// Add an adminOP.
-	aop = newBalanceOperator(region, adminOP, removePeerOperator)
+	aop = newBalanceOperator(regionInfo, adminOP, removePeerOperator)
 	ok = bw.addBalanceOperator(region.GetId(), aop)
 	c.Assert(ok, IsTrue)
 	// Add an adminOP again is OK.

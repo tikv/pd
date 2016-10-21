@@ -19,8 +19,6 @@ import (
 
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
-	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 type balancerWorker struct {
@@ -252,8 +250,8 @@ func (bw *balancerWorker) doBalance() error {
 	return nil
 }
 
-func (bw *balancerWorker) checkReplicas(region *metapb.Region, leader *metapb.Peer, downPeers []*pdpb.PeerStats) error {
-	bc := newReplicaBalancer(region, leader, downPeers, bw.cfg)
+func (bw *balancerWorker) checkReplicas(region *regionInfo) error {
+	bc := newReplicaBalancer(region, bw.cfg)
 	_, op, err := bc.Balance(bw.cluster)
 	if err != nil {
 		return errors.Trace(err)

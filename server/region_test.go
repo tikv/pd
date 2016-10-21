@@ -16,11 +16,60 @@ package server
 import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 var _ = Suite(&testRegionSuite{})
 
 type testRegionSuite struct{}
+
+func (s *testRegionSuite) TestRegionInfo(c *C) {
+	n := uint64(3)
+
+	peers := make([]*metapb.Peer, 0, n)
+	for i := uint64(0); i < n; i++ {
+		p := &metapb.Peer{
+			Id:      i,
+			StoreId: i,
+		}
+		peers = append(peers, p)
+	}
+	downPeers := []*pdpb.PeerStats{
+		{Peer: peers[n-1], DownSeconds: new(uint64)},
+	}
+	region := &metapb.Region{
+		Peers: peers,
+	}
+
+	r := newRegionInfo(region, peers[0])
+	r.DownPeers = downPeers
+	r = r.clone()
+
+	for i := uint64(0); i < n; i++ {
+		c.Assert(r.GetPeer(i), Equals, r.Peers[i])
+		c.Assert(r.ContainsPeer(i), IsTrue)
+	}
+	c.Assert(r.GetPeer(n), IsNil)
+	c.Assert(r.ContainsPeer(n), IsFalse)
+
+	for i := uint64(0); i < n; i++ {
+		c.Assert(r.GetStorePeer(i).GetStoreId(), Equals, i)
+	}
+	c.Assert(r.GetStorePeer(n), IsNil)
+
+	stores := r.GetStoreIds()
+	c.Assert(stores, HasLen, int(n))
+	for i := uint64(0); i < n; i++ {
+		_, ok := stores[i]
+		c.Assert(ok, IsTrue)
+	}
+
+	followers := r.GetFollowers()
+	c.Assert(followers, HasLen, int(n-1))
+	for i := uint64(1); i < n; i++ {
+		c.Assert(followers[peers[i].GetStoreId()], DeepEquals, peers[i])
+	}
+}
 
 func (s *testRegionSuite) TestRegionItem(c *C) {
 	item := newRegionItem([]byte("b"), []byte{})

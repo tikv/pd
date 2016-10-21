@@ -362,6 +362,11 @@ func (c *RaftCluster) GetRegionByID(regionID uint64) (*metapb.Region, *metapb.Pe
 	return c.cachedCluster.regions.getRegionByID(regionID)
 }
 
+// GetRegion returns the region from cluster.
+func (c *RaftCluster) GetRegion(regionID uint64) *regionInfo {
+	return c.cachedCluster.getRegion(regionID)
+}
+
 // GetRegions gets regions from cluster.
 func (c *RaftCluster) GetRegions() []*metapb.Region {
 	return c.cachedCluster.regions.getRegions()
@@ -624,7 +629,7 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 // NewAddPeerOperator creates an operator to add a peer to the region.
 // If storeID is 0, it will be chosen according to the balance rules.
 func (c *RaftCluster) NewAddPeerOperator(regionID uint64, storeID uint64) (Operator, error) {
-	region, _ := c.GetRegionByID(regionID)
+	region := c.GetRegion(regionID)
 	if region == nil {
 		return nil, errRegionNotFound(regionID)
 	}
@@ -637,8 +642,7 @@ func (c *RaftCluster) NewAddPeerOperator(regionID uint64, storeID uint64) (Opera
 	cluster := c.cachedCluster
 	if storeID == 0 {
 		cb := newCapacityBalancer(&c.s.cfg.BalanceCfg)
-		excluded := getExcludedStores(region)
-		peer, err = cb.selectAddPeer(cluster, cluster.getStores(), excluded)
+		peer, err = cb.selectAddPeer(cluster, cluster.getStores(), region.GetStoreIds())
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -677,7 +681,7 @@ func (c *RaftCluster) NewRemovePeerOperator(regionID uint64, peerID uint64) (Ope
 
 // SetAdminOperator sets the balance operator of the region.
 func (c *RaftCluster) SetAdminOperator(regionID uint64, ops []Operator) error {
-	region, _ := c.GetRegionByID(regionID)
+	region := c.GetRegion(regionID)
 	if region == nil {
 		return errRegionNotFound(regionID)
 	}
