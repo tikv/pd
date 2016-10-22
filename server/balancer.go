@@ -237,13 +237,7 @@ func (lb *leaderBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*st
 	}
 
 	// Random select one leader region from store.
-<<<<<<< HEAD
-	storeID := store.GetId()
-	region := cluster.regions.randLeaderRegion(storeID)
-=======
-	storeID := store.store.GetId()
-	region := cluster.randLeaderRegion(storeID)
->>>>>>> server: add regionInfo
+	region := cluster.randLeaderRegion(store.GetId())
 	if region == nil {
 		return nil, nil
 	}
