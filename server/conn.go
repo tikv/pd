@@ -193,6 +193,8 @@ func (c *conn) handleRequest(req *pdpb.Request) (*pdpb.Response, error) {
 		return c.handleGetClusterConfig(req)
 	case pdpb.CommandType_PutClusterConfig:
 		return c.handlePutClusterConfig(req)
+	case pdpb.CommandType_GetPDMembers:
+		return c.handleGetPDMembers(req)
 	default:
 		return nil, errors.Errorf("unsupported command %s", req)
 	}

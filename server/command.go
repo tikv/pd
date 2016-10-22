@@ -14,6 +14,8 @@
 package server
 
 import (
+	"context"
+
 	"github.com/coreos/etcd/clientv3"
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
@@ -390,5 +392,37 @@ func (c *conn) handleReportSplit(req *pdpb.Request) (*pdpb.Response, error) {
 
 	return &pdpb.Response{
 		ReportSplit: split,
+	}, nil
+}
+
+func (c *conn) handleGetPDMembers(req *pdpb.Request) (*pdpb.Response, error) {
+	request := req.GetGetPdMembers()
+	if request == nil {
+		return nil, errors.Errorf("invalid get members command, but %v", req)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), etcdTimeout)
+	defer cancel()
+	client := c.s.GetClient()
+
+	listResp, err := client.MemberList(ctx)
+	if err != nil {
+		return nil, errors.Errorf("handle get members failed, error: %v", err)
+	}
+
+	members := make([]*pdpb.PDMember, 0, len(listResp.Members))
+	for _, m := range listResp.Members {
+		info := &pdpb.PDMember{
+			Name:       &m.Name,
+			ClientUrls: m.ClientURLs,
+			PeerUrls:   m.PeerURLs,
+		}
+		members = append(members, info)
+	}
+
+	return &pdpb.Response{
+		GetPdMembers: &pdpb.GetPDMembersResponse{
+			Members: members,
+		},
 	}, nil
 }
