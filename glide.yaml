@@ -92,7 +92,7 @@ import:
   - jsonpb
   - proto
 - package: github.com/google/btree
-  version: 7d79101e329e5a3adf994758c578dab82b90c017
+  version: 925471ac9e2131377a91e1595defec898166fe49
 - package: github.com/gorilla/context
   version: ~1.1.0
 - package: github.com/gorilla/mux

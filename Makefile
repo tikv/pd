@@ -62,10 +62,10 @@ endif
 update:
 	which glide >/dev/null || curl https://glide.sh/get | sh
 	which glide-vc || go get -v -u github.com/sgotti/glide-vc
-	rm -r vendor && mv _vendor/vendor vendor || true
+	rm -rf vendor && mv _vendor/vendor vendor || true
 	rm -rf _vendor
 ifdef PKG
-	glide get --strip-vendor --skip-test ${PKG}
+	glide update --strip-vendor --skip-test ${PKG}
 else
 	glide update --strip-vendor --skip-test
 endif
