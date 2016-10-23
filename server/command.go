@@ -14,8 +14,6 @@
 package server
 
 import (
-	"context"
-
 	"github.com/coreos/etcd/clientv3"
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
@@ -401,9 +399,8 @@ func (c *conn) handleGetPDMembers(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Errorf("invalid get members command, but %v", req)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), etcdTimeout)
-	defer cancel()
 	client := c.s.GetClient()
+	ctx := client.Cxt()
 
 	listResp, err := client.MemberList(ctx)
 	if err != nil {
