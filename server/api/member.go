@@ -45,9 +45,9 @@ func newMemberListHandler(svr *server.Server, rd *render.Render) *memberListHand
 }
 
 func (h *memberListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
-	defer cancel()
 	client := h.svr.GetClient()
+	ctx, cancel := context.WithTimeout(client.Ctx(), defaultDialTimeout)
+	defer cancel()
 
 	listResp, err := client.MemberList(ctx)
 	if err != nil {
@@ -88,7 +88,7 @@ func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	// step 1. get etcd id
 	var id uint64
 	name := (mux.Vars(r))["name"]
-	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
+	ctx, cancel := context.WithTimeout(client.Ctx(), defaultDialTimeout)
 	defer cancel()
 	listResp, err := client.MemberList(ctx)
 	if err != nil {
@@ -107,7 +107,7 @@ func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// step 2. remove member by id
-	ctx, cancel = context.WithTimeout(context.Background(), defaultDialTimeout)
+	ctx, cancel = context.WithTimeout(client.Ctx(), defaultDialTimeout)
 	defer cancel()
 	_, err = client.MemberRemove(ctx, id)
 	if err != nil {

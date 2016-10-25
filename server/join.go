@@ -39,14 +39,14 @@ func genClientV3Config(cfg *Config) clientv3.Config {
 }
 
 func memberAdd(client *clientv3.Client, urls []string) (*clientv3.MemberAddResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
+	ctx, cancel := context.WithTimeout(client.Ctx(), defaultDialTimeout)
 	defer cancel()
 
 	return client.MemberAdd(ctx, urls)
 }
 
 func memberList(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
+	ctx, cancel := context.WithTimeout(client.Ctx(), defaultDialTimeout)
 	defer cancel()
 
 	return client.MemberList(ctx)
