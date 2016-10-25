@@ -353,3 +353,25 @@ func InitLogger(cfg *Config) error {
 
 	return nil
 }
+
+// GetPDMembers return a slice of PDMembers.
+func GetPDMembers(etcdClient *clientv3.Client) ([]*pdpb.PDMember, error) {
+	ctx := etcdClient.Ctx()
+
+	listResp, err := etcdClient.MemberList(ctx)
+	if err != nil {
+		return nil, errors.Errorf("member list failed, error: %v", err)
+	}
+
+	members := make([]*pdpb.PDMember, 0, len(listResp.Members))
+	for _, m := range listResp.Members {
+		info := &pdpb.PDMember{
+			Name:       &m.Name,
+			ClientUrls: m.ClientURLs,
+			PeerUrls:   m.PeerURLs,
+		}
+		members = append(members, info)
+	}
+
+	return members, nil
+}

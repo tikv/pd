@@ -400,21 +400,9 @@ func (c *conn) handleGetPDMembers(req *pdpb.Request) (*pdpb.Response, error) {
 	}
 
 	client := c.s.GetClient()
-	ctx := client.Cxt()
-
-	listResp, err := client.MemberList(ctx)
-	if err != nil {
-		return nil, errors.Errorf("handle get members failed, error: %v", err)
-	}
-
-	members := make([]*pdpb.PDMember, 0, len(listResp.Members))
-	for _, m := range listResp.Members {
-		info := &pdpb.PDMember{
-			Name:       &m.Name,
-			ClientUrls: m.ClientURLs,
-			PeerUrls:   m.PeerURLs,
-		}
-		members = append(members, info)
+	members, err := GetPDMembers(client)
+	if err == nil {
+		return nil, errors.Errorf("handle get PD members failed, but %v", req)
 	}
 
 	return &pdpb.Response{

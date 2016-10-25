@@ -19,18 +19,13 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 	"golang.org/x/net/context"
 )
 
 const defaultDialTimeout = 5 * time.Second
-
-type memberInfo struct {
-	Name       string   `json:"name"`
-	ClientUrls []string `json:"client-urls"`
-	PeerUrls   []string `json:"peer-urls"`
-}
 
 type memberListHandler struct {
 	svr *server.Server
@@ -46,27 +41,14 @@ func newMemberListHandler(svr *server.Server, rd *render.Render) *memberListHand
 
 func (h *memberListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	client := h.svr.GetClient()
-	ctx, cancel := context.WithTimeout(client.Ctx(), defaultDialTimeout)
-	defer cancel()
 
-	listResp, err := client.MemberList(ctx)
+	members, err := server.GetPDMembers(client)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	memberInfos := make([]memberInfo, 0, len(listResp.Members))
-	for _, m := range listResp.Members {
-		info := memberInfo{
-			Name:       m.Name,
-			ClientUrls: m.ClientURLs,
-			PeerUrls:   m.PeerURLs,
-		}
-		memberInfos = append(memberInfos, info)
-	}
-
-	ret := make(map[string][]memberInfo)
-	ret["members"] = memberInfos
+	ret := make(map[string][]*pdpb.PDMember)
+	ret["members"] = members
 	h.rd.JSON(w, http.StatusOK, ret)
 }
 
