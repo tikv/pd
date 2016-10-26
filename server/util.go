@@ -46,7 +46,7 @@ var (
 
 // PrintPDInfo prints the PD version information.
 func PrintPDInfo() {
-	log.Infof("Welcome to Placement Driver(PD).")
+	log.Infof("Welcome to Placement Driver (PD).")
 	log.Infof("Version:")
 	log.Infof("Git Commit Hash: %s", PDGitHash)
 	log.Infof("UTC Build Time:  %s", PDBuildTS)
