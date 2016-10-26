@@ -24,6 +24,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 )
 
@@ -48,14 +49,14 @@ func relaxEqualStings(c *C, a, b []string) {
 }
 
 func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
-	got := make(map[string][]memberInfo)
+	got := make(map[string][]*pdpb.PDMember)
 	json.Unmarshal(body, &got)
 
 	c.Assert(len(got["members"]), Equals, len(cfgs))
 
 	for _, memb := range got["members"] {
 		for _, cfg := range cfgs {
-			if memb.Name != cfg.Name {
+			if *memb.Name != cfg.Name {
 				continue
 			}
 
