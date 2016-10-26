@@ -402,7 +402,7 @@ func (c *conn) handleGetPDMembers(req *pdpb.Request) (*pdpb.Response, error) {
 	client := c.s.GetClient()
 	members, err := GetPDMembers(client)
 	if err != nil {
-		return nil, errors.Errorf("handle get PD members failed, but %v", req)
+		return nil, errors.Trace(err)
 	}
 
 	return &pdpb.Response{
