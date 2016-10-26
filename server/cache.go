@@ -63,27 +63,6 @@ func checkStaleRegion(region *metapb.Region, checkRegion *metapb.Region) error {
 	return errors.Errorf("epoch %s is staler than %s", checkEpoch, epoch)
 }
 
-func getFollowerPeers(region *metapb.Region, leader *metapb.Peer) map[uint64]*metapb.Peer {
-	followerPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
-	for _, peer := range region.GetPeers() {
-		storeID := peer.GetStoreId()
-		if peer.GetId() == leader.GetId() {
-			continue
-		}
-		followerPeers[storeID] = peer
-	}
-	return followerPeers
-}
-
-func getExcludedStores(region *metapb.Region) map[uint64]struct{} {
-	excludedStores := make(map[uint64]struct{}, len(region.GetPeers()))
-	for _, peer := range region.GetPeers() {
-		storeID := peer.GetStoreId()
-		excludedStores[storeID] = struct{}{}
-	}
-	return excludedStores
-}
-
 type leaders struct {
 	// store id -> region id -> struct{}
 	storeRegions map[uint64]map[uint64]struct{}
@@ -574,4 +553,42 @@ func (c *clusterInfo) getMeta() *metapb.Cluster {
 	defer c.RUnlock()
 
 	return proto.Clone(c.meta).(*metapb.Cluster)
+}
+
+func (c *clusterInfo) getRegion(regionID uint64) *regionInfo {
+	region, leader := c.regions.getRegionByID(regionID)
+	return newRegionInfo(region, leader)
+}
+
+func (c *clusterInfo) searchRegion(regionKey []byte) *regionInfo {
+	region, leader := c.regions.getRegion(regionKey)
+	return newRegionInfo(region, leader)
+}
+
+func (c *clusterInfo) updateRegion(region *regionInfo) {
+	c.regions.updateRegion(region.Region)
+}
+
+func (c *clusterInfo) randLeaderRegion(storeID uint64) *regionInfo {
+	region := c.regions.randLeaderRegion(storeID)
+	if region == nil {
+		return nil
+	}
+	leader := leaderPeer(region, storeID)
+	if leader == nil {
+		return nil
+	}
+	return newRegionInfo(region, leader)
+}
+
+func (c *clusterInfo) randFollowerRegion(storeID uint64) *regionInfo {
+	region, leader, _ := c.regions.randRegion(storeID)
+	if region == nil || leader == nil {
+		return nil
+	}
+	return newRegionInfo(region, leader)
+}
+
+func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) (*heartbeatResp, *pdpb.ChangePeer, error) {
+	return c.regions.heartbeat(region.Region, region.Leader)
 }

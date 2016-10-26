@@ -22,7 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-func (c *RaftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metapb.Peer, downPeers []*pdpb.PeerStats) (*pdpb.RegionHeartbeatResponse, error) {
+func (c *RaftCluster) handleRegionHeartbeat(region *regionInfo) (*pdpb.RegionHeartbeatResponse, error) {
 	// If the region peer count is 0, then we should not handle this.
 	if len(region.GetPeers()) == 0 {
 		log.Warnf("invalid region, zero region peer count - %v", region)
@@ -32,7 +32,7 @@ func (c *RaftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metap
 	bw := c.balancerWorker
 	regionID := region.GetId()
 
-	err := bw.checkReplicas(region, leader, downPeers)
+	err := bw.checkReplicas(region)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -43,7 +43,7 @@ func (c *RaftCluster) handleRegionHeartbeat(region *metapb.Region, leader *metap
 	}
 
 	ctx := newOpContext(bw.hookStartEvent, bw.hookEndEvent)
-	finished, res, err := op.Do(ctx, region, leader)
+	finished, res, err := op.Do(ctx, region)
 	if err != nil {
 		// Do balance failed, remove it.
 		log.Errorf("do balance for region %d failed %s", regionID, err)

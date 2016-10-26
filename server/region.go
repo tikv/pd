@@ -17,9 +17,79 @@ import (
 	"bytes"
 	"log"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/google/btree"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
+
+// TODO: Export this to API directly.
+type regionInfo struct {
+	*metapb.Region
+	Leader    *metapb.Peer
+	DownPeers []*pdpb.PeerStats
+}
+
+func newRegionInfo(region *metapb.Region, leader *metapb.Peer) *regionInfo {
+	return &regionInfo{
+		Region: region,
+		Leader: leader,
+	}
+}
+
+func (r *regionInfo) clone() *regionInfo {
+	downPeers := make([]*pdpb.PeerStats, len(r.DownPeers))
+	for _, peer := range r.DownPeers {
+		downPeers = append(downPeers, proto.Clone(peer).(*pdpb.PeerStats))
+	}
+	return &regionInfo{
+		Region:    proto.Clone(r.Region).(*metapb.Region),
+		Leader:    proto.Clone(r.Leader).(*metapb.Peer),
+		DownPeers: downPeers,
+	}
+}
+
+func (r *regionInfo) GetPeer(peerID uint64) *metapb.Peer {
+	for _, peer := range r.GetPeers() {
+		if peer.GetId() == peerID {
+			return peer
+		}
+	}
+	return nil
+}
+
+func (r *regionInfo) ContainsPeer(peerID uint64) bool {
+	return r.GetPeer(peerID) != nil
+}
+
+func (r *regionInfo) GetStorePeer(storeID uint64) *metapb.Peer {
+	for _, peer := range r.GetPeers() {
+		if peer.GetStoreId() == storeID {
+			return peer
+		}
+	}
+	return nil
+}
+
+func (r *regionInfo) GetStoreIds() map[uint64]struct{} {
+	peers := r.GetPeers()
+	stores := make(map[uint64]struct{}, len(peers))
+	for _, peer := range peers {
+		stores[peer.GetStoreId()] = struct{}{}
+	}
+	return stores
+}
+
+func (r *regionInfo) GetFollowers() map[uint64]*metapb.Peer {
+	peers := r.GetPeers()
+	followers := make(map[uint64]*metapb.Peer, len(peers))
+	for _, peer := range peers {
+		if r.Leader == nil || r.Leader.GetId() != peer.GetId() {
+			followers[peer.GetStoreId()] = peer
+		}
+	}
+	return followers
+}
 
 var _ btree.Item = &regionItem{}
 

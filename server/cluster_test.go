@@ -454,7 +454,8 @@ func (s *testClusterSuite) testCheckStores(c *C, conn net.Conn, clusterID uint64
 	// Add a region peer to store.
 	leader := &metapb.Peer{StoreId: store.GetId()}
 	region := s.newRegion(c, 0, []byte{'a'}, []byte{'b'}, []*metapb.Peer{leader}, nil)
-	_, err := cluster.handleRegionHeartbeat(region, leader, nil)
+	regionInfo := newRegionInfo(region, leader)
+	_, err := cluster.handleRegionHeartbeat(regionInfo)
 	c.Assert(err, IsNil)
 	c.Assert(cluster.cachedCluster.regions.getStoreRegionCount(store.GetId()), Equals, 1)
 
@@ -476,7 +477,7 @@ func (s *testClusterSuite) testCheckStores(c *C, conn net.Conn, clusterID uint64
 	// Clear store's region peers.
 	leader.StoreId = 0
 	region.Peers = []*metapb.Peer{leader}
-	_, err = cluster.handleRegionHeartbeat(region, leader, nil)
+	_, err = cluster.handleRegionHeartbeat(regionInfo)
 	c.Assert(err, IsNil)
 	c.Assert(cluster.cachedCluster.regions.getStoreRegionCount(store.GetId()), Equals, 0)
 
