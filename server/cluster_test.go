@@ -514,3 +514,26 @@ func (s *testClusterSuite) TestClosedChannel(c *C) {
 	c.Assert(cluster, NotNil)
 	cluster.stop()
 }
+
+func (s *testClusterSuite) TestGetPDMembers(c *C) {
+	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+
+	conn, err := rpcConnect(leader.GetAddr())
+	c.Assert(err, IsNil)
+	defer conn.Close()
+
+	clusterID := uint64(0)
+	req := &pdpb.Request{
+		Header:       newRequestHeader(clusterID),
+		CmdType:      pdpb.CommandType_GetPDMembers,
+		GetPdMembers: &pdpb.GetPDMembersRequest{},
+	}
+
+	sendRequest(c, conn, 0, req)
+	id, resp := recvResponse(c, conn)
+	c.Assert(id, Equals, clusterID)
+	c.Assert(resp, NotNil)
+	c.Assert(resp.GetPdMembers, NotNil)
+	// A more strict test can be found at api/member_test.go
+	c.Assert(len(resp.GetPdMembers.Members), Not(Equals), 0)
+}
