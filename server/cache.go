@@ -22,9 +22,14 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
-	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+)
+
+var (
+	errStoreNotFound = func(storeID uint64) error {
+		return errors.Errorf("store not found: %v", storeID)
+	}
 )
 
 func containPeer(region *metapb.Region, peer *metapb.Peer) bool {
@@ -277,53 +282,21 @@ func (r *regionsInfo) heartbeatVersion(region *metapb.Region) (bool, *metapb.Reg
 	return true, searchRegion, nil
 }
 
-func (r *regionsInfo) heartbeatConfVer(region *metapb.Region) (*pdpb.ChangePeer, bool, error) {
+func (r *regionsInfo) heartbeatConfVer(region *metapb.Region) (bool, error) {
 	// ConfVer is handled after Version, so here
 	// we must get the region by ID.
 	cacheRegion := r.regions[region.GetId()]
 	if err := checkStaleRegion(cacheRegion, region); err != nil {
-		return nil, false, errors.Trace(err)
+		return false, errors.Trace(err)
 	}
 
 	if region.GetRegionEpoch().GetConfVer() > cacheRegion.GetRegionEpoch().GetConfVer() {
 		// ConfChanged, update
 		r.updateRegion(region)
-		return r.getChangePeer(cacheRegion, region), true, nil
+		return true, nil
 	}
 
-	return nil, false, nil
-}
-
-func (r *regionsInfo) getChangePeer(region *metapb.Region, curRegion *metapb.Region) *pdpb.ChangePeer {
-	if region == nil || curRegion == nil {
-		return nil
-	}
-
-	// Get remove peer.
-	for _, peer := range region.GetPeers() {
-		// Current region does not have region peer,
-		// so it is removing the region peer now.
-		if !containPeer(curRegion, peer) {
-			return &pdpb.ChangePeer{
-				ChangeType: raftpb.ConfChangeType_RemoveNode.Enum(),
-				Peer:       peer,
-			}
-		}
-	}
-
-	// Get add peer.
-	for _, peer := range curRegion.GetPeers() {
-		// Current region has region peer, but region does not have,
-		// so it is adding the region peer now.
-		if !containPeer(region, peer) {
-			return &pdpb.ChangePeer{
-				ChangeType: raftpb.ConfChangeType_AddNode.Enum(),
-				Peer:       peer,
-			}
-		}
-	}
-
-	return nil
+	return false, nil
 }
 
 // heartbeatResp is the response after heartbeat handling.
@@ -335,18 +308,18 @@ type heartbeatResp struct {
 }
 
 // heartbeat handles heartbeat for the region.
-func (r *regionsInfo) heartbeat(region *metapb.Region, leaderPeer *metapb.Peer) (*heartbeatResp, *pdpb.ChangePeer, error) {
+func (r *regionsInfo) heartbeat(region *metapb.Region, leaderPeer *metapb.Peer) (*heartbeatResp, error) {
 	r.Lock()
 	defer r.Unlock()
 
 	versionUpdated, removeRegion, err := r.heartbeatVersion(region)
 	if err != nil {
-		return nil, nil, errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 
-	changePeer, confVerUpdated, err := r.heartbeatConfVer(region)
+	confVerUpdated, err := r.heartbeatConfVer(region)
 	if err != nil {
-		return nil, nil, errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 
 	regionID := region.GetId()
@@ -361,7 +334,7 @@ func (r *regionsInfo) heartbeat(region *metapb.Region, leaderPeer *metapb.Peer) 
 		resp.putRegion = region
 	}
 
-	return resp, changePeer, nil
+	return resp, nil
 }
 
 func (r *regionsInfo) getStoreRegionCount(storeID uint64) uint64 {
@@ -459,50 +432,31 @@ func (r *regionsInfo) randRegion(storeID uint64) (*metapb.Region, *metapb.Peer, 
 type clusterInfo struct {
 	sync.RWMutex
 
-	meta        *metapb.Cluster
-	stores      map[uint64]*storeInfo
-	regions     *regionsInfo
-	clusterRoot string
+	meta    *metapb.Cluster
+	stores  map[uint64]*storeInfo
+	regions *regionsInfo
 
 	idAlloc IDAllocator
 }
 
-func newClusterInfo(clusterRoot string) *clusterInfo {
-	cluster := &clusterInfo{
-		clusterRoot: clusterRoot,
-		stores:      make(map[uint64]*storeInfo),
-		regions:     newRegionsInfo(),
+func newClusterInfo(idAlloc IDAllocator) *clusterInfo {
+	return &clusterInfo{
+		stores:  make(map[uint64]*storeInfo),
+		regions: newRegionsInfo(),
+		idAlloc: idAlloc,
 	}
-
-	return cluster
 }
 
-func (c *clusterInfo) addStore(store *metapb.Store) {
-	c.Lock()
-	defer c.Unlock()
-
-	c.stores[store.GetId()] = newStoreInfo(store)
+func (c *clusterInfo) getMeta() *metapb.Cluster {
+	c.RLock()
+	defer c.RUnlock()
+	return proto.Clone(c.meta).(*metapb.Cluster)
 }
 
-func (c *clusterInfo) updateStoreStatus(stats *pdpb.StoreStats) bool {
+func (c *clusterInfo) setMeta(meta *metapb.Cluster) {
 	c.Lock()
 	defer c.Unlock()
-
-	storeID := stats.GetStoreId()
-	store, ok := c.stores[storeID]
-	if !ok {
-		return false
-	}
-
-	store.stats.update(stats, c.regions.regionCount(), c.regions.leaderRegionCount(storeID))
-	return true
-}
-
-func (c *clusterInfo) removeStore(storeID uint64) {
-	c.Lock()
-	defer c.Unlock()
-
-	delete(c.stores, storeID)
+	c.meta = meta
 }
 
 func (c *clusterInfo) getStore(storeID uint64) *storeInfo {
@@ -515,6 +469,12 @@ func (c *clusterInfo) getStore(storeID uint64) *storeInfo {
 	}
 
 	return store.clone()
+}
+
+func (c *clusterInfo) setStore(store *storeInfo) {
+	c.Lock()
+	defer c.Unlock()
+	c.stores[store.GetId()] = store
 }
 
 func (c *clusterInfo) getStores() []*storeInfo {
@@ -541,20 +501,6 @@ func (c *clusterInfo) getMetaStores() []*metapb.Store {
 	return stores
 }
 
-func (c *clusterInfo) setMeta(meta *metapb.Cluster) {
-	c.Lock()
-	defer c.Unlock()
-
-	c.meta = meta
-}
-
-func (c *clusterInfo) getMeta() *metapb.Cluster {
-	c.RLock()
-	defer c.RUnlock()
-
-	return proto.Clone(c.meta).(*metapb.Cluster)
-}
-
 func (c *clusterInfo) getRegion(regionID uint64) *regionInfo {
 	region, leader := c.regions.getRegionByID(regionID)
 	return newRegionInfo(region, leader)
@@ -563,6 +509,13 @@ func (c *clusterInfo) getRegion(regionID uint64) *regionInfo {
 func (c *clusterInfo) searchRegion(regionKey []byte) *regionInfo {
 	region, leader := c.regions.getRegion(regionKey)
 	return newRegionInfo(region, leader)
+}
+
+func (c *clusterInfo) addRegion(region *regionInfo) {
+	c.regions.addRegion(region.Region)
+	if region.Leader != nil {
+		c.regions.leaders.update(region.GetId(), region.Leader.GetStoreId())
+	}
 }
 
 func (c *clusterInfo) updateRegion(region *regionInfo) {
@@ -589,6 +542,20 @@ func (c *clusterInfo) randFollowerRegion(storeID uint64) *regionInfo {
 	return newRegionInfo(region, leader)
 }
 
-func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) (*heartbeatResp, *pdpb.ChangePeer, error) {
+func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
+	c.Lock()
+	defer c.Unlock()
+
+	storeID := stats.GetStoreId()
+	store, ok := c.stores[storeID]
+	if !ok {
+		return errors.Trace(errStoreNotFound(storeID))
+	}
+
+	store.stats.update(stats, c.regions.regionCount(), c.regions.leaderRegionCount(storeID))
+	return nil
+}
+
+func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) (*heartbeatResp, error) {
 	return c.regions.heartbeat(region.Region, region.Leader)
 }

@@ -84,9 +84,7 @@ func (c *RaftCluster) start(meta metapb.Cluster) error {
 		return nil
 	}
 
-	c.cachedCluster = newClusterInfo(c.clusterRoot)
-	c.cachedCluster.idAlloc = c.s.idAlloc
-
+	c.cachedCluster = newClusterInfo(c.s.idAlloc)
 	c.cachedCluster.setMeta(&meta)
 
 	// Cache all stores when start the cluster. We don't have
@@ -311,7 +309,7 @@ func (c *RaftCluster) cacheAllStores() error {
 			return errors.Trace(err)
 		}
 
-		c.cachedCluster.addStore(store)
+		c.cachedCluster.setStore(newStoreInfo(store))
 	}
 	log.Infof("cache all %d stores cost %s", len(resp.Kvs), time.Now().Sub(start))
 	return nil
@@ -345,7 +343,7 @@ func (c *RaftCluster) cacheAllRegions() error {
 			}
 
 			nextID = region.GetId() + 1
-			c.cachedCluster.regions.addRegion(region)
+			c.cachedCluster.addRegion(newRegionInfo(region, nil))
 		}
 	}
 
@@ -439,7 +437,7 @@ func (c *RaftCluster) saveStore(store *metapb.Store) error {
 		return errors.Errorf("save store %v fail", store)
 	}
 
-	c.cachedCluster.addStore(store)
+	c.cachedCluster.setStore(newStoreInfo(store))
 	return nil
 }
 

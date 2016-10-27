@@ -41,8 +41,7 @@ func (s *testBalancerSuite) SetUpSuite(c *C) {
 }
 
 func (s *testBalancerSuite) newClusterInfo(c *C) *clusterInfo {
-	clusterInfo := newClusterInfo(s.getRootPath())
-	clusterInfo.idAlloc = newMockIDAllocator()
+	clusterInfo := newClusterInfo(newMockIDAllocator())
 
 	// Set cluster info.
 	meta := &metapb.Cluster{
@@ -64,7 +63,7 @@ func (s *testBalancerSuite) newClusterInfo(c *C) *clusterInfo {
 
 		addr := fmt.Sprintf("127.0.0.1:%d", i)
 		store := s.newStore(c, id, addr)
-		clusterInfo.addStore(store)
+		clusterInfo.setStore(newStoreInfo(store))
 	}
 
 	// Add 1 peer, id will be 5.
@@ -77,10 +76,7 @@ func (s *testBalancerSuite) newClusterInfo(c *C) *clusterInfo {
 	c.Assert(err, IsNil)
 
 	region := s.newRegion(c, id, []byte{}, []byte{}, []*metapb.Peer{peer}, nil)
-	clusterInfo.regions.addRegion(region)
-
-	// Set leader store region.
-	clusterInfo.regions.leaders.update(region.GetId(), peer.GetStoreId())
+	clusterInfo.addRegion(newRegionInfo(region, peer))
 
 	stores := clusterInfo.getStores()
 	c.Assert(stores, HasLen, 4)
@@ -98,16 +94,13 @@ func (s *testBalancerSuite) updateStore(c *C, clusterInfo *clusterInfo, storeID 
 		ReceivingSnapCount: receivingSnapCount,
 	}
 
-	ok := clusterInfo.updateStoreStatus(stats)
-	c.Assert(ok, IsTrue)
+	c.Assert(clusterInfo.handleStoreHeartbeat(stats), IsNil)
 }
 
 func (s *testBalancerSuite) updateStoreState(c *C, clusterInfo *clusterInfo, storeID uint64, state metapb.StoreState) {
 	store := clusterInfo.getStore(storeID)
 	store.State = state
-	clusterInfo.addStore(store.Store)
-	ok := clusterInfo.updateStoreStatus(store.stats.StoreStats)
-	c.Assert(ok, IsTrue)
+	clusterInfo.setStore(store)
 }
 
 func (s *testBalancerSuite) addRegionPeer(c *C, clusterInfo *clusterInfo, storeID uint64, region *regionInfo) {

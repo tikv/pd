@@ -18,7 +18,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
-	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -185,7 +184,7 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		return nil, errors.Errorf("invalid request leader, %v", request)
 	}
 
-	resp, changePeer, err := cluster.cachedCluster.handleRegionHeartbeat(region)
+	resp, err := cluster.cachedCluster.handleRegionHeartbeat(region)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -225,17 +224,6 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 		}
 	}
 
-	if changePeer != nil {
-		var op Operator
-		if changePeer.GetChangeType() == raftpb.ConfChangeType_AddNode {
-			op = newAddPeerOperator(region.GetId(), changePeer.GetPeer())
-		} else {
-			op = newRemovePeerOperator(region.GetId(), changePeer.GetPeer())
-		}
-
-		cluster.balancerWorker.postEvent(op, evtEnd)
-	}
-
 	return &pdpb.Response{
 		RegionHeartbeat: res,
 	}, nil
@@ -269,9 +257,9 @@ func (c *conn) handleStoreHeartbeat(req *pdpb.Request) (*pdpb.Response, error) {
 		return resp, nil
 	}
 
-	ok := cluster.cachedCluster.updateStoreStatus(stats)
-	if !ok {
-		return nil, errors.Errorf("cannot find store to update stats, stats %v", stats)
+	err = cluster.cachedCluster.handleStoreHeartbeat(stats)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
 	return &pdpb.Response{

@@ -66,8 +66,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 		ReceivingSnapCount: 1,
 	}
 
-	ok := cluster.cachedCluster.updateStoreStatus(stats)
-	c.Assert(ok, IsTrue)
+	c.Assert(cluster.cachedCluster.handleStoreHeartbeat(stats), IsNil)
 
 	// Check cachedCluster.
 	c.Assert(cluster.cachedCluster.getMeta().GetId(), Equals, clusterID)
@@ -93,8 +92,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 		ReceivingSnapCount: 1,
 	}
 
-	ok = cluster.cachedCluster.updateStoreStatus(stats)
-	c.Assert(ok, IsTrue)
+	c.Assert(cluster.cachedCluster.handleStoreHeartbeat(stats), IsNil)
 
 	// Check cachedCluster.
 	c.Assert(cluster.cachedCluster.getMeta().GetId(), Equals, clusterID)
@@ -138,21 +136,9 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(cacheRegions.leaders.storeRegions[store1.GetId()], HasKey, region.GetId())
 	c.Assert(cacheRegions.leaders.regionStores[region.GetId()], Equals, store1.GetId())
 
-	oldRegion := cloneRegion(region)
-	changePeer := cacheRegions.getChangePeer(oldRegion, region)
-	c.Assert(changePeer, IsNil)
-
 	// Add another peer.
 	region.Peers = append(region.Peers, res.GetPeer())
 	region.RegionEpoch.ConfVer = region.GetRegionEpoch().GetConfVer() + 1
-
-	changePeer = cacheRegions.getChangePeer(oldRegion, region)
-	c.Assert(changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(changePeer.GetPeer(), DeepEquals, res.GetPeer())
-
-	changePeer = cacheRegions.getChangePeer(region, oldRegion)
-	c.Assert(changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(changePeer.GetPeer(), DeepEquals, res.GetPeer())
 
 	res = heartbeatRegion(c, conn, clusterID, 0, region, leader)
 	c.Assert(res, IsNil)
@@ -290,8 +276,7 @@ func (alloc *mockIDAllocator) Alloc() (uint64, error) {
 }
 
 func (s *testClusterCacheSuite) TestIDAlloc(c *C) {
-	cluster := newClusterInfo("/pd")
-	cluster.idAlloc = newMockIDAllocator()
+	cluster := newClusterInfo(newMockIDAllocator())
 
 	id, err := cluster.idAlloc.Alloc()
 	c.Assert(err, IsNil)

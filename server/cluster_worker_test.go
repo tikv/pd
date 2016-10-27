@@ -164,8 +164,7 @@ func (s *testClusterWorkerSuite) newMockRaftStore(c *C, metaStore *metapb.Store)
 		ReceivingSnapCount: 1,
 	}
 
-	ok := cluster.cachedCluster.updateStoreStatus(stats)
-	c.Assert(ok, IsTrue)
+	c.Assert(cluster.cachedCluster.handleStoreHeartbeat(stats), IsNil)
 
 	s.storeLock.Lock()
 	defer s.storeLock.Unlock()
