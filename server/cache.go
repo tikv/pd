@@ -30,7 +30,24 @@ var (
 	errStoreNotFound = func(storeID uint64) error {
 		return errors.Errorf("store %v not found", storeID)
 	}
+	errRegionNotFound = func(regionID uint64) error {
+		return errors.Errorf("region not found: %v", regionID)
+	}
+	errRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
+		return errors.Errorf("region is stale: region %v origin %v", region, origin)
+	}
 )
+
+func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
+	o := origin.GetRegionEpoch()
+	e := region.GetRegionEpoch()
+
+	if e.GetVersion() < o.GetVersion() || e.GetConfVer() < o.GetConfVer() {
+		return errors.Trace(errRegionIsStale(region, origin))
+	}
+
+	return nil
+}
 
 type storesInfo struct {
 	stores map[uint64]*storeInfo
@@ -96,18 +113,6 @@ func leaderPeer(region *metapb.Region, storeID uint64) *metapb.Peer {
 
 func cloneRegion(r *metapb.Region) *metapb.Region {
 	return proto.Clone(r).(*metapb.Region)
-}
-
-func checkStaleRegion(region *metapb.Region, checkRegion *metapb.Region) error {
-	epoch := region.GetRegionEpoch()
-	checkEpoch := checkRegion.GetRegionEpoch()
-
-	if checkEpoch.GetVersion() >= epoch.GetVersion() &&
-		checkEpoch.GetConfVer() >= epoch.GetConfVer() {
-		return nil
-	}
-
-	return errors.Errorf("epoch %s is staler than %s", checkEpoch, epoch)
 }
 
 type leaders struct {
@@ -379,11 +384,11 @@ func (r *regionsInfo) heartbeat(region *metapb.Region, leaderPeer *metapb.Peer) 
 	return resp, nil
 }
 
-func (r *regionsInfo) getStoreRegionCount(storeID uint64) uint64 {
+func (r *regionsInfo) getStoreRegionCount(storeID uint64) int {
 	r.RLock()
 	defer r.RUnlock()
 
-	return r.storeRegionCount[storeID]
+	return int(r.storeRegionCount[storeID])
 }
 
 func (r *regionsInfo) getStoreLeaderCount(storeID uint64) int {
@@ -552,8 +557,20 @@ func (c *clusterInfo) updateRegion(region *regionInfo) {
 	c.regions.updateRegion(region.Region)
 }
 
+func (c *clusterInfo) getMetaRegions() []*metapb.Region {
+	return c.regions.getRegions()
+}
+
 func (c *clusterInfo) getRegionCount() int {
 	return c.regions.getRegionCount()
+}
+
+func (c *clusterInfo) getStoreRegionCount(storeID uint64) int {
+	return c.regions.getStoreRegionCount(storeID)
+}
+
+func (c *clusterInfo) getStoreLeaderCount(storeID uint64) int {
+	return c.regions.getStoreLeaderCount(storeID)
 }
 
 func (c *clusterInfo) randLeaderRegion(storeID uint64) *regionInfo {

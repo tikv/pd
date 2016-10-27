@@ -94,9 +94,9 @@ func (s *testRegionSuite) TestRegionTree(c *C) {
 
 	c.Assert(tree.search([]byte("a")), IsNil)
 
-	regionA := newRegionItem([]byte("a"), []byte("b")).region
-	regionC := newRegionItem([]byte("c"), []byte("d")).region
-	regionD := newRegionItem([]byte("d"), []byte{}).region
+	regionA := newRegion([]byte("a"), []byte("b"))
+	regionC := newRegion([]byte("c"), []byte("d"))
+	regionD := newRegion([]byte("d"), []byte{})
 
 	tree.insert(regionA)
 	tree.insert(regionC)
@@ -119,11 +119,14 @@ func (s *testRegionSuite) TestRegionTree(c *C) {
 	c.Assert(tree.search([]byte("e")), Equals, regionD)
 }
 
-func newRegionItem(start, end []byte) *regionItem {
-	return &regionItem{
-		region: &metapb.Region{
-			StartKey: start,
-			EndKey:   end,
-		},
+func newRegion(start, end []byte) *metapb.Region {
+	return &metapb.Region{
+		StartKey:    start,
+		EndKey:      end,
+		RegionEpoch: &metapb.RegionEpoch{},
 	}
+}
+
+func newRegionItem(start, end []byte) *regionItem {
+	return &regionItem{region: newRegion(start, end)}
 }

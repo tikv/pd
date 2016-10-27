@@ -457,7 +457,7 @@ func (s *testClusterSuite) testCheckStores(c *C, conn net.Conn, clusterID uint64
 	regionInfo := newRegionInfo(region, leader)
 	_, err := cluster.handleRegionHeartbeat(regionInfo)
 	c.Assert(err, IsNil)
-	c.Assert(cluster.cachedCluster.regions.getStoreRegionCount(store.GetId()), Equals, 1)
+	c.Assert(cluster.cachedCluster.getStoreRegionCount(store.GetId()), Equals, 1)
 
 	// store is up w/ region peers will not be buried.
 	cluster.checkStores()
@@ -479,7 +479,7 @@ func (s *testClusterSuite) testCheckStores(c *C, conn net.Conn, clusterID uint64
 	region.Peers = []*metapb.Peer{leader}
 	_, err = cluster.handleRegionHeartbeat(regionInfo)
 	c.Assert(err, IsNil)
-	c.Assert(cluster.cachedCluster.regions.getStoreRegionCount(store.GetId()), Equals, 0)
+	c.Assert(cluster.cachedCluster.getStoreRegionCount(store.GetId()), Equals, 0)
 
 	// store is offline w/o region peers will be buried.
 	cluster.checkStores()

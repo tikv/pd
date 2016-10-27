@@ -126,6 +126,33 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	c.Assert(cache.getStoreCount(), Equals, int(n))
 }
 
+var _ = Suite(&testClusterUtilSuite{})
+
+type testClusterUtilSuite struct{}
+
+func (s *testClusterUtilSuite) TestCheckStaleRegion(c *C) {
+	// (0, 0) v.s. (0, 0)
+	region := newRegion([]byte{}, []byte{})
+	origin := newRegion([]byte{}, []byte{})
+	c.Assert(checkStaleRegion(region, origin), IsNil)
+	c.Assert(checkStaleRegion(origin, region), IsNil)
+
+	// (1, 0) v.s. (0, 0)
+	region.RegionEpoch.Version++
+	c.Assert(checkStaleRegion(origin, region), IsNil)
+	c.Assert(checkStaleRegion(region, origin), NotNil)
+
+	// (1, 1) v.s. (0, 0)
+	region.RegionEpoch.ConfVer++
+	c.Assert(checkStaleRegion(origin, region), IsNil)
+	c.Assert(checkStaleRegion(region, origin), NotNil)
+
+	// (0, 1) v.s. (0, 0)
+	region.RegionEpoch.Version--
+	c.Assert(checkStaleRegion(origin, region), IsNil)
+	c.Assert(checkStaleRegion(region, origin), NotNil)
+}
+
 var _ = Suite(&testClusterCacheSuite{})
 
 type testClusterCacheSuite struct {
@@ -323,7 +350,7 @@ func randRegions(count int) []*metapb.Region {
 }
 
 func checkStoreRegionCount(c *C, r *regionsInfo, regions []*metapb.Region) {
-	stores := make(map[uint64]uint64)
+	stores := make(map[uint64]int)
 	for _, region := range regions {
 		for _, peer := range region.GetPeers() {
 			stores[peer.GetStoreId()]++

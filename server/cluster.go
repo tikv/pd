@@ -30,9 +30,6 @@ import (
 
 var (
 	errClusterNotBootstrapped = errors.New("cluster is not bootstrapped")
-	errRegionNotFound         = func(regionID uint64) error {
-		return errors.Errorf("region %v not found", regionID)
-	}
 )
 
 const (
@@ -321,9 +318,6 @@ func (c *RaftCluster) cacheAllRegions() error {
 	nextID := uint64(0)
 	endRegionKey := makeRegionKey(c.clusterRoot, math.MaxUint64)
 
-	c.cachedCluster.regions.Lock()
-	defer c.cachedCluster.regions.Unlock()
-
 	for {
 		key := makeRegionKey(c.clusterRoot, nextID)
 		resp, err := kvGet(c.s.client, key, clientv3.WithRange(endRegionKey))
@@ -347,27 +341,30 @@ func (c *RaftCluster) cacheAllRegions() error {
 		}
 	}
 
-	log.Infof("cache all %d regions cost %s", len(c.cachedCluster.regions.regions), time.Now().Sub(start))
+	log.Infof("cache all %d regions cost %s", c.cachedCluster.getRegionCount(), time.Now().Sub(start))
 	return nil
 }
 
 func (c *RaftCluster) getRegion(regionKey []byte) (*metapb.Region, *metapb.Peer) {
-	return c.cachedCluster.regions.getRegion(regionKey)
+	region := c.cachedCluster.searchRegion(regionKey)
+	if region == nil {
+		return nil, nil
+	}
+	return region.Region, region.Leader
 }
 
 // GetRegionByID gets region and leader peer by regionID from cluster.
 func (c *RaftCluster) GetRegionByID(regionID uint64) (*metapb.Region, *metapb.Peer) {
-	return c.cachedCluster.regions.getRegionByID(regionID)
-}
-
-// GetRegion returns the region from cluster.
-func (c *RaftCluster) getRegionByID(regionID uint64) *regionInfo {
-	return c.cachedCluster.getRegion(regionID)
+	region := c.cachedCluster.getRegion(regionID)
+	if region == nil {
+		return nil, nil
+	}
+	return region.Region, region.Leader
 }
 
 // GetRegions gets regions from cluster.
 func (c *RaftCluster) GetRegions() []*metapb.Region {
-	return c.cachedCluster.regions.getRegions()
+	return c.cachedCluster.getMetaRegions()
 }
 
 // GetStores gets stores from cluster.
@@ -500,7 +497,7 @@ func (c *RaftCluster) checkStores() {
 		if store.GetState() != metapb.StoreState_Offline {
 			continue
 		}
-		if cluster.regions.getStoreRegionCount(store.GetId()) == 0 {
+		if cluster.getStoreRegionCount(store.GetId()) == 0 {
 			err := c.BuryStore(store.GetId(), false)
 			if err != nil {
 				log.Errorf("bury store %v failed: %v", store, err)
@@ -627,7 +624,7 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 // NewAddPeerOperator creates an operator to add a peer to the region.
 // If storeID is 0, it will be chosen according to the balance rules.
 func (c *RaftCluster) NewAddPeerOperator(regionID uint64, storeID uint64) (Operator, error) {
-	region := c.getRegionByID(regionID)
+	region := c.cachedCluster.getRegion(regionID)
 	if region == nil {
 		return nil, errRegionNotFound(regionID)
 	}
@@ -679,7 +676,7 @@ func (c *RaftCluster) NewRemovePeerOperator(regionID uint64, peerID uint64) (Ope
 
 // SetAdminOperator sets the balance operator of the region.
 func (c *RaftCluster) SetAdminOperator(regionID uint64, ops []Operator) error {
-	region := c.getRegionByID(regionID)
+	region := c.cachedCluster.getRegion(regionID)
 	if region == nil {
 		return errRegionNotFound(regionID)
 	}
