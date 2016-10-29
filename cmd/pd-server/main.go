@@ -28,6 +28,12 @@ import (
 func main() {
 	cfg := server.NewConfig()
 	err := cfg.Parse(os.Args[1:])
+
+	if cfg.Version {
+		server.PrintRawPDInfo()
+		os.Exit(0)
+	}
+
 	switch errors.Cause(err) {
 	case nil:
 	case flag.ErrHelp:

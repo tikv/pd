@@ -52,6 +52,12 @@ func PrintPDInfo() {
 	log.Infof("UTC Build Time:  %s", PDBuildTS)
 }
 
+// PrintRawPDInfo prints the PD version information without log info.
+func PrintRawPDInfo() {
+	fmt.Println("Git Commit Hash:", PDGitHash)
+	fmt.Println("UTC Build Time: ", PDBuildTS)
+}
+
 const zeroDuration = time.Duration(0)
 
 // PushMetric pushs metircs in background.

@@ -33,6 +33,8 @@ import (
 type Config struct {
 	*flag.FlagSet `json:"-"`
 
+	Version bool
+
 	ClientUrls          string `toml:"client-urls" json:"client-urls"`
 	PeerUrls            string `toml:"peer-urls" json:"peer-urls"`
 	AdvertiseClientUrls string `toml:"advertise-client-urls" json:"advertise-client-urls"`
@@ -84,6 +86,7 @@ func NewConfig() *Config {
 	cfg.FlagSet = flag.NewFlagSet("pd", flag.ContinueOnError)
 	fs := cfg.FlagSet
 
+	fs.BoolVar(&cfg.Version, "v", false, "print version information and exit")
 	fs.StringVar(&cfg.configFile, "config", "", "Config file")
 
 	fs.Uint64Var(&cfg.ClusterID, "cluster-id", 0, "initial cluster ID for the pd cluster")
