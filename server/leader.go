@@ -181,6 +181,8 @@ func (s *Server) campaignLeader() error {
 		return errors.Trace(err)
 	}
 
+	log.Infof("PD cluster leader %s is ready to serve", s.Name())
+
 	tsTicker := time.NewTicker(updateTimestampStep)
 	defer tsTicker.Stop()
 
