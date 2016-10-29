@@ -44,16 +44,16 @@ var (
 	PDGitHash = "None"
 )
 
-// PrintPDInfo prints the PD version information.
-func PrintPDInfo() {
+// LogPDInfo prints the PD version information.
+func LogPDInfo() {
 	log.Infof("Welcome to Placement Driver (PD).")
 	log.Infof("Version:")
 	log.Infof("Git Commit Hash: %s", PDGitHash)
 	log.Infof("UTC Build Time:  %s", PDBuildTS)
 }
 
-// PrintRawPDInfo prints the PD version information without log info.
-func PrintRawPDInfo() {
+// PrintPDInfo prints the PD version information without log info.
+func PrintPDInfo() {
 	fmt.Println("Git Commit Hash:", PDGitHash)
 	fmt.Println("UTC Build Time: ", PDBuildTS)
 }

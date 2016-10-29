@@ -30,7 +30,7 @@ func main() {
 	err := cfg.Parse(os.Args[1:])
 
 	if cfg.Version {
-		server.PrintRawPDInfo()
+		server.PrintPDInfo()
 		os.Exit(0)
 	}
 
@@ -48,7 +48,7 @@ func main() {
 		log.Fatalf("initalize logger err %s\n", err)
 	}
 
-	server.PrintPDInfo()
+	server.LogPDInfo()
 
 	server.PushMetric(cfg)
 
