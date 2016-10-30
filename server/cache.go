@@ -31,7 +31,7 @@ var (
 		return errors.Errorf("store %v not found", storeID)
 	}
 	errRegionNotFound = func(regionID uint64) error {
-		return errors.Errorf("region not found: %v", regionID)
+		return errors.Errorf("region %v not found", regionID)
 	}
 	errRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
 		return errors.Errorf("region is stale: region %v origin %v", region, origin)
