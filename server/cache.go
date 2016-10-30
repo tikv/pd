@@ -28,7 +28,7 @@ import (
 
 var (
 	errStoreNotFound = func(storeID uint64) error {
-		return errors.Errorf("store not found: %v", storeID)
+		return errors.Errorf("store %v not found", storeID)
 	}
 )
 
