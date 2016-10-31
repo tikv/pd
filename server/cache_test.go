@@ -85,6 +85,36 @@ func newTestRegions(n, np uint64) []*regionInfo {
 	return regions
 }
 
+func checkRegion(c *C, a *regionInfo, b *regionInfo) {
+	c.Assert(a.Region, DeepEquals, b.Region)
+	c.Assert(a.Leader, DeepEquals, b.Leader)
+}
+
+func checkRegions(c *C, cache *regionsInfo, regions []*regionInfo) {
+	regionCount := make(map[uint64]int)
+	leaderCount := make(map[uint64]int)
+	for _, region := range regions {
+		for _, peer := range region.Peers {
+			regionCount[peer.StoreId]++
+			if peer.Id == region.Leader.Id {
+				leaderCount[peer.StoreId]++
+			}
+		}
+	}
+
+	c.Assert(cache.getRegionCount(), Equals, len(regions))
+	for id, count := range regionCount {
+		c.Assert(cache.getStoreRegionCount(id), Equals, count)
+	}
+	for id, count := range leaderCount {
+		c.Assert(cache.getStoreLeaderCount(id), Equals, count)
+	}
+
+	for _, region := range cache.getRegions() {
+		c.Assert(region, DeepEquals, regions[region.GetId()].Region)
+	}
+}
+
 var _ = Suite(&testClusterInfoSuite{})
 
 type testClusterInfoSuite struct{}
@@ -124,6 +154,61 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	}
 
 	c.Assert(cache.getStoreCount(), Equals, int(n))
+}
+
+func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
+	n, np := uint64(3), uint64(3)
+	cache := newClusterInfo(newMockIDAllocator())
+	regions := newTestRegions(n, np)
+
+	for i, region := range regions {
+		// region does not exist.
+		_, err := cache.handleRegionHeartbeat(region)
+		c.Assert(err, IsNil)
+		checkRegions(c, cache.regions, regions[0:i+1])
+
+		// region is the same, not updated.
+		_, err = cache.handleRegionHeartbeat(region)
+		c.Assert(err, IsNil)
+		checkRegions(c, cache.regions, regions[0:i+1])
+
+		epoch := region.clone().GetRegionEpoch()
+
+		// region is updated.
+		region.RegionEpoch = &metapb.RegionEpoch{
+			Version: epoch.GetVersion() + 1,
+		}
+		_, err = cache.handleRegionHeartbeat(region)
+		c.Assert(err, IsNil)
+		checkRegions(c, cache.regions, regions[0:i+1])
+
+		// region is stale (Version).
+		stale := region.clone()
+		stale.RegionEpoch = &metapb.RegionEpoch{
+			ConfVer: epoch.GetConfVer() + 1,
+		}
+		_, err = cache.handleRegionHeartbeat(stale)
+		c.Assert(err, NotNil)
+		checkRegions(c, cache.regions, regions[0:i+1])
+
+		// region is updated.
+		region.RegionEpoch = &metapb.RegionEpoch{
+			Version: epoch.GetVersion() + 1,
+			ConfVer: epoch.GetConfVer() + 1,
+		}
+		_, err = cache.handleRegionHeartbeat(region)
+		c.Assert(err, IsNil)
+		checkRegions(c, cache.regions, regions[0:i+1])
+
+		// region is stale (ConfVer).
+		stale = region.clone()
+		stale.RegionEpoch = &metapb.RegionEpoch{
+			Version: epoch.GetVersion() + 1,
+		}
+		_, err = cache.handleRegionHeartbeat(stale)
+		c.Assert(err, NotNil)
+		checkRegions(c, cache.regions, regions[0:i+1])
+	}
 }
 
 var _ = Suite(&testClusterUtilSuite{})
