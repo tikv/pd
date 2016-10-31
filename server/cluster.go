@@ -318,6 +318,9 @@ func (c *RaftCluster) cacheAllRegions() error {
 	nextID := uint64(0)
 	endRegionKey := makeRegionKey(c.clusterRoot, math.MaxUint64)
 
+	c.cachedCluster.regions.Lock()
+	defer c.cachedCluster.regions.Unlock()
+
 	for {
 		key := makeRegionKey(c.clusterRoot, nextID)
 		resp, err := kvGet(c.s.client, key, clientv3.WithRange(endRegionKey))
@@ -341,7 +344,7 @@ func (c *RaftCluster) cacheAllRegions() error {
 		}
 	}
 
-	log.Infof("cache all %d regions cost %s", c.cachedCluster.getRegionCount(), time.Now().Sub(start))
+	log.Infof("cache all %d regions cost %s", len(c.cachedCluster.regions.regions), time.Now().Sub(start))
 	return nil
 }
 
