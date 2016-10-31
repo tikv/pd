@@ -159,6 +159,14 @@ func (c *conn) close() error {
 }
 
 func (c *conn) handleRequest(req *pdpb.Request) (*pdpb.Response, error) {
+	// Don't check cluster ID of this command type.
+	if req.GetCmdType() == pdpb.CommandType_GetPDMembers {
+		if req.GetHeader() == nil {
+			req.Header = &pdpb.RequestHeader{}
+		}
+		req.GetHeader().ClusterId = c.s.cfg.ClusterID
+	}
+
 	clusterID := req.GetHeader().GetClusterId()
 	if clusterID != c.s.cfg.ClusterID {
 		return nil, errors.Errorf("mismatch cluster id, need %d but got %d", c.s.cfg.ClusterID, clusterID)

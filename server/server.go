@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -97,11 +98,7 @@ func CreateServer(cfg *Config) (*Server, error) {
 		isLeaderValue: 0,
 		conns:         make(map[*conn]struct{}),
 		closed:        1,
-		rootPath:      path.Join(pdRootPath, strconv.FormatUint(cfg.ClusterID, 10)),
 	}
-
-	s.idAlloc = &idAllocator{s: s}
-	s.cluster = newRaftCluster(s, cfg.ClusterID)
 
 	return s, nil
 }
@@ -150,8 +147,44 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	s.client = client
 	s.id = uint64(etcd.Server.ID())
 
+	if err = s.initClusterID(); err != nil {
+		return errors.Trace(err)
+	}
+
+	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.cfg.ClusterID, 10))
+	s.idAlloc = &idAllocator{s: s}
+	s.cluster = newRaftCluster(s, s.cfg.ClusterID)
+
 	// Server has started.
 	atomic.StoreInt64(&s.closed, 0)
+	return nil
+}
+
+func (s *Server) initClusterID() error {
+	// Get any cluster key to parse the cluster ID.
+	resp, err := kvGet(s.client, pdRootPath, clientv3.WithLastCreate()...)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// Cluster ID does not exist.
+	if len(resp.Kvs) == 0 {
+		return nil
+	}
+
+	// Parse cluster ID.
+	key := string(resp.Kvs[0].Key)
+	elems := strings.Split(key, "/")
+	if len(elems) < 3 {
+		return errors.Errorf("invalid cluster key %v", key)
+	}
+
+	clusterID, err := strconv.ParseUint(elems[2], 10, 64)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	s.cfg.ClusterID = clusterID
 	return nil
 }
 

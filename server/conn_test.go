@@ -18,6 +18,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/testutil"
 )
 
 var _ = Suite(&testConnSuite{})
@@ -86,6 +87,33 @@ func (s *testConnSuite) TestReconnect(c *C) {
 			c.Assert(svr.IsLeader(), IsFalse)
 		}
 	}
+}
+
+func (s *testConnSuite) TestClusterID(c *C) {
+	cfg := NewTestSingleConfig()
+	cfg.ClusterID = uint64(123)
+
+	svr, err := NewServer(cfg)
+	c.Assert(err, IsNil)
+	go svr.Run()
+	defer func() {
+		svr.Close()
+		cleanServer(svr.cfg)
+	}()
+
+	mustWaitLeader(c, []*Server{svr})
+
+	resp := mustRequest(c, svr)
+	c.Assert(resp.GetHeader().GetError(), NotNil)
+
+	req := &pdpb.Request{
+		Header:       newRequestHeader(0),
+		CmdType:      pdpb.CommandType_GetPDMembers,
+		GetPdMembers: &pdpb.GetPDMembersRequest{},
+	}
+	resp = testutil.MustRPCRequest(c, svr.GetAddr(), req)
+	c.Assert(resp.GetHeader().GetError(), IsNil)
+	c.Assert(resp.GetHeader().GetClusterId(), Equals, cfg.ClusterID)
 }
 
 func mustRequest(c *C, s *Server) *pdpb.Response {

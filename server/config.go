@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"net/url"
 	"os"
 	"strings"
@@ -173,7 +174,24 @@ func (c *Config) Parse(arguments []string) error {
 		return errors.Errorf("'%s' is an invalid flag", c.FlagSet.Arg(0))
 	}
 
+	c.randomClusterID()
 	return nil
+}
+
+func (c *Config) randomClusterID() {
+	hasClusterID := false
+	c.FlagSet.Visit(func(f *flag.Flag) {
+		if f.Name == "cluster-id" {
+			hasClusterID = true
+		}
+	})
+	if hasClusterID {
+		return
+	}
+
+	// Generate a random cluster ID.
+	ts := uint64(time.Now().Unix())
+	c.ClusterID = (ts << 32) + uint64(rand.Uint32())
 }
 
 func (c *Config) validate() error {
