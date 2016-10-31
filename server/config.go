@@ -90,7 +90,7 @@ func NewConfig() *Config {
 	fs.BoolVar(&cfg.Version, "v", false, "print version information and exit")
 	fs.StringVar(&cfg.configFile, "config", "", "Config file")
 
-	fs.Uint64Var(&cfg.ClusterID, "cluster-id", 0, "initial cluster ID for the pd cluster")
+	fs.Uint64Var(&cfg.ClusterID, "cluster-id", 0, "initial cluster ID for the pd cluster [deprecated]")
 	fs.StringVar(&cfg.Name, "name", defaultName, "human-readable name for this pd member")
 
 	fs.StringVar(&cfg.DataDir, "data-dir", "", "path to the data directory (default 'default.${name}')")

@@ -1,7 +1,5 @@
 # PD Configuration.
 
-cluster-id = 0
-
 name = "pd"
 data-dir = "default.pd"
 
