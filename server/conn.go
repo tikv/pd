@@ -164,12 +164,12 @@ func (c *conn) handleRequest(req *pdpb.Request) (*pdpb.Response, error) {
 		if req.GetHeader() == nil {
 			req.Header = &pdpb.RequestHeader{}
 		}
-		req.GetHeader().ClusterId = c.s.cfg.ClusterID
+		req.GetHeader().ClusterId = c.s.clusterID
 	}
 
 	clusterID := req.GetHeader().GetClusterId()
-	if clusterID != c.s.cfg.ClusterID {
-		return nil, errors.Errorf("mismatch cluster id, need %d but got %d", c.s.cfg.ClusterID, clusterID)
+	if clusterID != c.s.clusterID {
+		return nil, errors.Errorf("mismatch cluster id, need %d but got %d", c.s.clusterID, clusterID)
 	}
 
 	switch req.GetCmdType() {

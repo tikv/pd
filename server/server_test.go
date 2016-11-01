@@ -23,11 +23,9 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/embed"
+	"github.com/ngaut/log"
 	. "github.com/pingcap/check"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/testutil"
 )
 
 func TestServer(t *testing.T) {
@@ -195,88 +193,62 @@ var _ = Suite(&testServerSuite{})
 
 type testServerSuite struct{}
 
-func newTestClusterIDConfig(c *C, args ...string) *Config {
-	cfg := NewConfig()
-	err := cfg.Parse(args)
-	c.Assert(err, IsNil)
+func newTestServersWithCfgs(c *C, cfgs []*Config) ([]*Server, cleanupFunc) {
+	svrs := make([]*Server, 0, len(cfgs))
 
-	cfg.Name = "pd"
-	cfg.ClientUrls = unixURL()
-	cfg.PeerUrls = unixURL()
-	cfg.InitialClusterState = embed.ClusterStateFlagNew
-	cfg.AdvertiseClientUrls = cfg.ClientUrls
-	cfg.AdvertisePeerUrls = cfg.PeerUrls
-	cfg.DataDir = "/tmp/test_pd_cluster_id"
-	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
-	cfg.disableStrictReconfigCheck = true
-
-	return cfg
-}
-
-func newTestBootstrapRequest(clusterID uint64) *pdpb.Request {
-	store := &metapb.Store{Id: 1}
-	peer := &metapb.Peer{Id: 1, StoreId: 1}
-	region := &metapb.Region{Id: 1, Peers: []*metapb.Peer{peer}}
-	return &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_Bootstrap,
-		Bootstrap: &pdpb.BootstrapRequest{
-			Store:  store,
-			Region: region,
-		},
+	ch := make(chan *Server)
+	for _, cfg := range cfgs {
+		go func(cfg *Config) {
+			svr, err := NewServer(cfg)
+			c.Assert(err, IsNil)
+			go svr.Run()
+			ch <- svr
+		}(cfg)
 	}
+
+	for i := 0; i < len(cfgs); i++ {
+		svrs = append(svrs, <-ch)
+	}
+	mustWaitLeader(c, svrs)
+
+	cleanup := func() {
+		for _, svr := range svrs {
+			svr.Close()
+		}
+		for _, cfg := range cfgs {
+			cleanServer(cfg)
+		}
+	}
+
+	return svrs, cleanup
 }
 
-func (s *testServerSuite) mustBootstrapCluster(c *C, cfg *Config) uint64 {
-	svr, err := NewServer(cfg)
-	c.Assert(err, IsNil)
+func (s *testServerSuite) TestClusterID(c *C) {
+	cfgs := NewTestMultiConfig(3)
+	for i, cfg := range cfgs {
+		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_cluster_id_%d", i)
+		cleanServer(cfg)
+	}
 
-	go svr.Run()
-	defer svr.Close()
-	mustWaitLeader(c, []*Server{svr})
+	svrs, cleanup := newTestServersWithCfgs(c, cfgs)
 
-	request := newTestBootstrapRequest(svr.cfg.ClusterID)
-	testutil.MustRPCRequest(c, svr.GetAddr(), request)
-	return svr.cfg.ClusterID
-}
+	// All PDs should have the same cluster ID.
+	clusterID := svrs[0].clusterID
+	c.Assert(clusterID, Not(Equals), uint64(0))
+	for _, svr := range svrs {
+		log.Debug(svr.clusterID)
+		c.Assert(svr.clusterID, Equals, clusterID)
+	}
 
-func (s *testServerSuite) TestFlagClusterID(c *C) {
-	clusterID := uint64(1)
+	// Restart all PDs.
+	for _, svr := range svrs {
+		svr.Close()
+	}
+	svrs, cleanup = newTestServersWithCfgs(c, cfgs)
+	defer cleanup()
 
-	// Bootstrap server with cluster ID specified to 1.
-	cfg := newTestClusterIDConfig(c, "-cluster-id", "1")
-	cleanServer(cfg)
-	c.Assert(cfg.ClusterID, Equals, clusterID)
-	c.Assert(s.mustBootstrapCluster(c, cfg), Equals, clusterID)
-
-	// New config with a random cluster ID.
-	cfg = newTestClusterIDConfig(c)
-	c.Assert(cfg.ClusterID, Not(Equals), uint64(0))
-
-	// New server and the cluster ID is still 1.
-	svr, err := NewServer(cfg)
-	c.Assert(err, IsNil)
-	c.Assert(svr.cfg.ClusterID, Equals, clusterID)
-	svr.Close()
-	cleanServer(cfg)
-}
-
-func (s *testServerSuite) TestRandomClusterID(c *C) {
-	// Bootstrap server with random cluster ID.
-	cfg := newTestClusterIDConfig(c)
-	c.Assert(cfg.ClusterID, Not(Equals), uint64(0))
-	cleanServer(cfg)
-	clusterID := s.mustBootstrapCluster(c, cfg)
-
-	// New config with cluster ID specified to 1.
-	cfg = newTestClusterIDConfig(c, "-cluster-id", "1")
-	c.Assert(cfg.ClusterID, Equals, uint64(1))
-	c.Assert(cfg.ClusterID, Not(Equals), clusterID)
-
-	// New server and the cluster ID is still the original cluster ID.
-	svr, err := NewServer(cfg)
-	c.Assert(err, IsNil)
-	c.Assert(svr.cfg.ClusterID, Equals, clusterID)
-	svr.Close()
-	cleanServer(cfg)
+	// All PDs should have the same cluster ID as before.
+	for _, svr := range svrs {
+		c.Assert(svr.clusterID, Equals, clusterID)
+	}
 }

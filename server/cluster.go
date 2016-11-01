@@ -230,7 +230,7 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 }
 
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, error) {
-	clusterID := s.cfg.ClusterID
+	clusterID := s.clusterID
 
 	log.Infof("try to bootstrap raft cluster %d with %v", clusterID, req)
 

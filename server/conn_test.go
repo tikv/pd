@@ -91,10 +91,9 @@ func (s *testConnSuite) TestReconnect(c *C) {
 
 func (s *testConnSuite) TestClusterID(c *C) {
 	cfg := NewTestSingleConfig()
-	cfg.ClusterID = uint64(123)
-
 	svr, err := NewServer(cfg)
 	c.Assert(err, IsNil)
+	c.Assert(svr.clusterID, Not(Equals), uint64(0))
 	go svr.Run()
 	defer func() {
 		svr.Close()
@@ -102,22 +101,21 @@ func (s *testConnSuite) TestClusterID(c *C) {
 	}()
 
 	mustWaitLeader(c, []*Server{svr})
-
-	resp := mustRequest(c, svr)
-	c.Assert(resp.GetHeader().GetError(), NotNil)
+	mustRequestSuccess(c, svr)
 
 	req := &pdpb.Request{
 		Header:       newRequestHeader(0),
 		CmdType:      pdpb.CommandType_GetPDMembers,
 		GetPdMembers: &pdpb.GetPDMembersRequest{},
 	}
-	resp = testutil.MustRPCRequest(c, svr.GetAddr(), req)
+	resp := testutil.MustRPCRequest(c, svr.GetAddr(), req)
 	c.Assert(resp.GetHeader().GetError(), IsNil)
-	c.Assert(resp.GetHeader().GetClusterId(), Equals, cfg.ClusterID)
+	c.Assert(resp.GetHeader().GetClusterId(), Equals, svr.clusterID)
 }
 
 func mustRequest(c *C, s *Server) *pdpb.Response {
 	req := &pdpb.Request{
+		Header:  newRequestHeader(s.clusterID),
 		CmdType: pdpb.CommandType_AllocId,
 		AllocId: &pdpb.AllocIdRequest{},
 	}

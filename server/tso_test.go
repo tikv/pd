@@ -68,6 +68,7 @@ func (s *testTsoSuite) testGetTimestamp(c *C, conn net.Conn, n int) pdpb.Timesta
 	}
 
 	req := &pdpb.Request{
+		Header:  newRequestHeader(s.svr.clusterID),
 		CmdType: pdpb.CommandType_Tso,
 		Tso:     tso,
 	}

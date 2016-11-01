@@ -31,9 +31,10 @@ import (
 const (
 	etcdTimeout = time.Second * 3
 	// pdRootPath for all pd servers.
-	pdRootPath  = "/pd"
-	pdAPIPrefix = "/pd/"
-	pdRPCPrefix = "/pd/rpc"
+	pdRootPath      = "/pd"
+	pdAPIPrefix     = "/pd/"
+	pdRPCPrefix     = "/pd/rpc"
+	pdClusterIDPath = "/pd/cluster_id"
 )
 
 // Server is the pd server.
@@ -43,6 +44,8 @@ type Server struct {
 	etcd *embed.Etcd
 
 	client *clientv3.Client
+
+	clusterID uint64
 
 	rootPath string
 
@@ -150,10 +153,11 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	if err = s.initClusterID(); err != nil {
 		return errors.Trace(err)
 	}
+	log.Infof("init cluster id %v", s.clusterID)
 
-	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.cfg.ClusterID, 10))
+	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	s.idAlloc = &idAllocator{s: s}
-	s.cluster = newRaftCluster(s, s.cfg.ClusterID)
+	s.cluster = newRaftCluster(s, s.clusterID)
 
 	// Server has started.
 	atomic.StoreInt64(&s.closed, 0)
@@ -167,25 +171,21 @@ func (s *Server) initClusterID() error {
 		return errors.Trace(err)
 	}
 
-	// Cluster ID does not exist.
-	if len(resp.Kvs) == 0 {
-		return nil
+	// If we can get any key except for "pdClusterIDPath", we need to
+	// parse the existed cluster ID from the key for compatibility.
+	if len(resp.Kvs) > 0 {
+		if key := string(resp.Kvs[0].Key); key != pdClusterIDPath {
+			elems := strings.Split(key, "/")
+			if len(elems) < 3 {
+				return errors.Errorf("invalid cluster key %v", key)
+			}
+			s.clusterID, err = strconv.ParseUint(elems[2], 10, 64)
+			return errors.Trace(err)
+		}
 	}
 
-	// Parse cluster ID.
-	key := string(resp.Kvs[0].Key)
-	elems := strings.Split(key, "/")
-	if len(elems) < 3 {
-		return errors.Errorf("invalid cluster key %v", key)
-	}
-
-	clusterID, err := strconv.ParseUint(elems[2], 10, 64)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	s.cfg.ClusterID = clusterID
-	return nil
+	s.clusterID, err = initOrGetClusterID(s.client, pdClusterIDPath)
+	return errors.Trace(err)
 }
 
 // Close closes the server.
@@ -282,6 +282,11 @@ func (s *Server) ID() uint64 {
 // Name returns the unique etcd Name for this server in etcd cluster.
 func (s *Server) Name() string {
 	return s.cfg.Name
+}
+
+// ClusterID returns the cluster ID of this server.
+func (s *Server) ClusterID() uint64 {
+	return s.clusterID
 }
 
 func (s *Server) closeAllConnections() {
