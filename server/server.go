@@ -166,25 +166,31 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 
 func (s *Server) initClusterID() error {
 	// Get any cluster key to parse the cluster ID.
-	resp, err := kvGet(s.client, pdRootPath, clientv3.WithLastCreate()...)
+	resp, err := kvGet(s.client, pdRootPath, clientv3.WithFirstCreate()...)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	// If we can get any key except for "pdClusterIDPath", we need to
-	// parse the existed cluster ID from the key for compatibility.
-	if len(resp.Kvs) > 0 {
-		if key := string(resp.Kvs[0].Key); key != pdClusterIDPath {
-			elems := strings.Split(key, "/")
-			if len(elems) < 3 {
-				return errors.Errorf("invalid cluster key %v", key)
-			}
-			s.clusterID, err = strconv.ParseUint(elems[2], 10, 64)
-			return errors.Trace(err)
-		}
+	// If no key exist, generate a random cluster ID.
+	if len(resp.Kvs) == 0 {
+		s.clusterID, err = initOrGetClusterID(s.client, pdClusterIDPath)
+		return errors.Trace(err)
 	}
 
-	s.clusterID, err = initOrGetClusterID(s.client, pdClusterIDPath)
+	key := string(resp.Kvs[0].Key)
+
+	// If the key is "pdClusterIDPath", parse the cluster ID from it.
+	if key == pdClusterIDPath {
+		s.clusterID, err = bytesToUint64(resp.Kvs[0].Value)
+		return errors.Trace(err)
+	}
+
+	// Parse the cluster ID from any other keys for compatibility.
+	elems := strings.Split(key, "/")
+	if len(elems) < 3 {
+		return errors.Errorf("invalid cluster key %v", key)
+	}
+	s.clusterID, err = strconv.ParseUint(elems[2], 10, 64)
 	return errors.Trace(err)
 }
 

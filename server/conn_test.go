@@ -38,6 +38,7 @@ func (s *testConnSuite) TestRedirect(c *C) {
 
 	for _, svr := range svrs {
 		mustRequestSuccess(c, svr)
+		mustGetPDMembersSuccess(c, svr)
 	}
 }
 
@@ -89,30 +90,6 @@ func (s *testConnSuite) TestReconnect(c *C) {
 	}
 }
 
-func (s *testConnSuite) TestClusterID(c *C) {
-	cfg := NewTestSingleConfig()
-	svr, err := NewServer(cfg)
-	c.Assert(err, IsNil)
-	c.Assert(svr.clusterID, Not(Equals), uint64(0))
-	go svr.Run()
-	defer func() {
-		svr.Close()
-		cleanServer(svr.cfg)
-	}()
-
-	mustWaitLeader(c, []*Server{svr})
-	mustRequestSuccess(c, svr)
-
-	req := &pdpb.Request{
-		Header:       newRequestHeader(0),
-		CmdType:      pdpb.CommandType_GetPDMembers,
-		GetPdMembers: &pdpb.GetPDMembersRequest{},
-	}
-	resp := testutil.MustRPCRequest(c, svr.GetAddr(), req)
-	c.Assert(resp.GetHeader().GetError(), IsNil)
-	c.Assert(resp.GetHeader().GetClusterId(), Equals, svr.clusterID)
-}
-
 func mustRequest(c *C, s *Server) *pdpb.Response {
 	req := &pdpb.Request{
 		Header:  newRequestHeader(s.clusterID),
@@ -130,4 +107,15 @@ func mustRequest(c *C, s *Server) *pdpb.Response {
 func mustRequestSuccess(c *C, s *Server) {
 	resp := mustRequest(c, s)
 	c.Assert(resp.GetHeader().GetError(), IsNil)
+}
+
+func mustGetPDMembersSuccess(c *C, s *Server) {
+	req := &pdpb.Request{
+		Header:       newRequestHeader(0),
+		CmdType:      pdpb.CommandType_GetPDMembers,
+		GetPdMembers: &pdpb.GetPDMembersRequest{},
+	}
+	resp := testutil.MustRPCRequest(c, s.GetAddr(), req)
+	c.Assert(resp.GetHeader().GetError(), IsNil)
+	c.Assert(resp.GetHeader().GetClusterId(), Equals, s.clusterID)
 }
