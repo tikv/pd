@@ -63,9 +63,6 @@ type Config struct {
 	// TsoSaveInterval is the interval to save timestamp.
 	TsoSaveInterval timeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
-	// ClusterID is the cluster ID communicating with other services.
-	ClusterID uint64 `toml:"cluster-id" json:"cluster-id"`
-
 	// MaxPeerCount for a region. default is 3.
 	MaxPeerCount uint64 `toml:"max-peer-count" json:"max-peer-count"`
 
@@ -89,7 +86,6 @@ func NewConfig() *Config {
 	fs.BoolVar(&cfg.Version, "v", false, "print version information and exit")
 	fs.StringVar(&cfg.configFile, "config", "", "Config file")
 
-	fs.Uint64Var(&cfg.ClusterID, "cluster-id", 0, "initial cluster ID for the pd cluster")
 	fs.StringVar(&cfg.Name, "name", defaultName, "human-readable name for this pd member")
 
 	fs.StringVar(&cfg.DataDir, "data-dir", "", "path to the data directory (default 'default.${name}')")
@@ -388,8 +384,6 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.Dir = c.DataDir
 	cfg.WalDir = ""
 	cfg.InitialCluster = c.InitialCluster
-	// Use unique cluster id as the etcd cluster token too.
-	cfg.InitialClusterToken = fmt.Sprintf("pd-%d", c.ClusterID)
 	cfg.ClusterState = c.InitialClusterState
 	cfg.EnablePprof = true
 	cfg.StrictReconfigCheck = !c.disableStrictReconfigCheck
@@ -430,8 +424,6 @@ func unixURL() string {
 // Because pd-client also needs this, so export here.
 func NewTestSingleConfig() *Config {
 	cfg := &Config{
-		// We use cluster 0 for all tests.
-		ClusterID:  0,
 		Name:       "pd",
 		ClientUrls: unixURL(),
 		PeerUrls:   unixURL(),

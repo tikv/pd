@@ -51,10 +51,12 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		}()
 	}
 
+	clusterID := uint64(0)
 	svrs := make(map[string]*server.Server, 3)
 	for i := 0; i < 3; i++ {
 		svr := <-ch
 		svrs[svr.GetAddr()] = svr
+		clusterID = svr.ClusterID()
 	}
 
 	endpoints := make([]string, 0, 3)
@@ -74,7 +76,7 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		}
 	}()
 
-	cli, err := NewClient(endpoints, 0)
+	cli, err := NewClient(endpoints, clusterID)
 	c.Assert(err, IsNil)
 	defer cli.Close()
 

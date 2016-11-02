@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -30,9 +31,10 @@ import (
 const (
 	etcdTimeout = time.Second * 3
 	// pdRootPath for all pd servers.
-	pdRootPath  = "/pd"
-	pdAPIPrefix = "/pd/"
-	pdRPCPrefix = "/pd/rpc"
+	pdRootPath      = "/pd"
+	pdAPIPrefix     = "/pd/"
+	pdRPCPrefix     = "/pd/rpc"
+	pdClusterIDPath = "/pd/cluster_id"
 )
 
 // Server is the pd server.
@@ -42,6 +44,8 @@ type Server struct {
 	etcd *embed.Etcd
 
 	client *clientv3.Client
+
+	clusterID uint64
 
 	rootPath string
 
@@ -97,11 +101,7 @@ func CreateServer(cfg *Config) (*Server, error) {
 		isLeaderValue: 0,
 		conns:         make(map[*conn]struct{}),
 		closed:        1,
-		rootPath:      path.Join(pdRootPath, strconv.FormatUint(cfg.ClusterID, 10)),
 	}
-
-	s.idAlloc = &idAllocator{s: s}
-	s.cluster = newRaftCluster(s, cfg.ClusterID)
 
 	return s, nil
 }
@@ -150,9 +150,48 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	s.client = client
 	s.id = uint64(etcd.Server.ID())
 
+	if err = s.initClusterID(); err != nil {
+		return errors.Trace(err)
+	}
+	log.Infof("init cluster id %v", s.clusterID)
+
+	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
+	s.idAlloc = &idAllocator{s: s}
+	s.cluster = newRaftCluster(s, s.clusterID)
+
 	// Server has started.
 	atomic.StoreInt64(&s.closed, 0)
 	return nil
+}
+
+func (s *Server) initClusterID() error {
+	// Get any cluster key to parse the cluster ID.
+	resp, err := kvGet(s.client, pdRootPath, clientv3.WithFirstCreate()...)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// If no key exist, generate a random cluster ID.
+	if len(resp.Kvs) == 0 {
+		s.clusterID, err = initOrGetClusterID(s.client, pdClusterIDPath)
+		return errors.Trace(err)
+	}
+
+	key := string(resp.Kvs[0].Key)
+
+	// If the key is "pdClusterIDPath", parse the cluster ID from it.
+	if key == pdClusterIDPath {
+		s.clusterID, err = bytesToUint64(resp.Kvs[0].Value)
+		return errors.Trace(err)
+	}
+
+	// Parse the cluster ID from any other keys for compatibility.
+	elems := strings.Split(key, "/")
+	if len(elems) < 3 {
+		return errors.Errorf("invalid cluster key %v", key)
+	}
+	s.clusterID, err = strconv.ParseUint(elems[2], 10, 64)
+	return errors.Trace(err)
 }
 
 // Close closes the server.
@@ -249,6 +288,11 @@ func (s *Server) ID() uint64 {
 // Name returns the unique etcd Name for this server in etcd cluster.
 func (s *Server) Name() string {
 	return s.cfg.Name
+}
+
+// ClusterID returns the cluster ID of this server.
+func (s *Server) ClusterID() uint64 {
+	return s.clusterID
 }
 
 func (s *Server) closeAllConnections() {

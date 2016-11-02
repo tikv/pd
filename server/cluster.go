@@ -147,11 +147,10 @@ func (s *Server) getClusterRootPath() string {
 // GetRaftCluster gets raft cluster.
 // If cluster has not been bootstrapped, return nil.
 func (s *Server) GetRaftCluster() *RaftCluster {
-	if s.cluster.isRunning() {
-		return s.cluster
+	if s.isClosed() || !s.cluster.isRunning() {
+		return nil
 	}
-
-	return nil
+	return s.cluster
 }
 
 func (s *Server) createRaftCluster() error {
@@ -228,7 +227,7 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 }
 
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, error) {
-	clusterID := s.cfg.ClusterID
+	clusterID := s.clusterID
 
 	log.Infof("try to bootstrap raft cluster %d with %v", clusterID, req)
 

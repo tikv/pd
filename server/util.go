@@ -16,6 +16,7 @@ package server
 import (
 	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -122,6 +123,45 @@ func getProtoMsg(c *clientv3.Client, key string, msg proto.Message, opts ...clie
 	}
 
 	return true, nil
+}
+
+func initOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
+	ctx, cancel := context.WithTimeout(c.Ctx(), requestTimeout)
+	defer cancel()
+
+	// Generate a random cluster ID.
+	ts := uint64(time.Now().Unix())
+	clusterID := (ts << 32) + uint64(rand.Uint32())
+	value := uint64ToBytes(clusterID)
+
+	// Multiple PDs may try to init the cluster ID at the same time.
+	// Only one PD can commit this transaction, then other PDs can get
+	// the committed cluster ID.
+	resp, err := c.Txn(ctx).
+		If(clientv3.Compare(clientv3.CreateRevision(key), "=", 0)).
+		Then(clientv3.OpPut(key, string(value))).
+		Else(clientv3.OpGet(key)).
+		Commit()
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	// Txn commits ok, return the generated cluster ID.
+	if resp.Succeeded {
+		return clusterID, nil
+	}
+
+	// Otherwise, parse the committed cluster ID.
+	if len(resp.Responses) == 0 {
+		return 0, errors.Errorf("txn returns empty response: %v", resp)
+	}
+
+	response := resp.Responses[0].GetResponseRange()
+	if response == nil || len(response.Kvs) != 1 {
+		return 0, errors.Errorf("txn returns invalid range response: %v", resp)
+	}
+
+	return bytesToUint64(response.Kvs[0].Value)
 }
 
 func bytesToUint64(b []byte) (uint64, error) {

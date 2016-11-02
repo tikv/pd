@@ -56,19 +56,27 @@ func mustRPCRequest(c *C, addr string, request *pdpb.Request) *pdpb.Response {
 	return resp
 }
 
-func mustBootstrapCluster(c *C, addr string) {
+func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
+	return &pdpb.RequestHeader{
+		ClusterId: clusterID,
+	}
+}
+
+func mustBootstrapCluster(c *C, s *server.Server) {
 	req := &pdpb.Request{
+		Header:  newRequestHeader(s.ClusterID()),
 		CmdType: pdpb.CommandType_Bootstrap,
 		Bootstrap: &pdpb.BootstrapRequest{
 			Store:  store,
 			Region: region,
 		},
 	}
-	mustRPCRequest(c, addr, req)
+	mustRPCRequest(c, s.GetAddr(), req)
 }
 
-func mustPutStore(c *C, addr string, storeID uint64) {
+func mustPutStore(c *C, s *server.Server, storeID uint64) {
 	req := &pdpb.Request{
+		Header:  newRequestHeader(s.ClusterID()),
 		CmdType: pdpb.CommandType_PutStore,
 		PutStore: &pdpb.PutStoreRequest{
 			Store: &metapb.Store{
@@ -77,7 +85,7 @@ func mustPutStore(c *C, addr string, storeID uint64) {
 			},
 		},
 	}
-	mustRPCRequest(c, addr, req)
+	mustRPCRequest(c, s.GetAddr(), req)
 }
 
 type testBalancerSuite struct {
@@ -96,8 +104,8 @@ func (s *testBalancerSuite) SetUpSuite(c *C) {
 	s.url = fmt.Sprintf("%s%s/api/v1/balancers", httpAddr, apiPrefix)
 	s.testStoreID = uint64(11111)
 
-	mustBootstrapCluster(c, addr)
-	mustPutStore(c, addr, s.testStoreID)
+	mustBootstrapCluster(c, s.svr)
+	mustPutStore(c, s.svr, s.testStoreID)
 }
 
 func (s *testBalancerSuite) TearDownSuite(c *C) {
