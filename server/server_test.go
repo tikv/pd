@@ -14,7 +14,6 @@
 package server
 
 import (
-	"fmt"
 	"math/rand"
 	"net"
 	"os"
@@ -23,7 +22,6 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
-	"github.com/ngaut/log"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -187,68 +185,4 @@ func (s *testLeaderServerSuite) TestLeader(c *C) {
 
 	leader2 := mustGetLeader(c, client, s.leaderPath)
 	c.Assert(leader1.GetAddr(), Not(Equals), leader2.GetAddr())
-}
-
-var _ = Suite(&testServerSuite{})
-
-type testServerSuite struct{}
-
-func newTestServersWithCfgs(c *C, cfgs []*Config) ([]*Server, cleanupFunc) {
-	svrs := make([]*Server, 0, len(cfgs))
-
-	ch := make(chan *Server)
-	for _, cfg := range cfgs {
-		go func(cfg *Config) {
-			svr, err := NewServer(cfg)
-			c.Assert(err, IsNil)
-			go svr.Run()
-			ch <- svr
-		}(cfg)
-	}
-
-	for i := 0; i < len(cfgs); i++ {
-		svrs = append(svrs, <-ch)
-	}
-	mustWaitLeader(c, svrs)
-
-	cleanup := func() {
-		for _, svr := range svrs {
-			svr.Close()
-		}
-		for _, cfg := range cfgs {
-			cleanServer(cfg)
-		}
-	}
-
-	return svrs, cleanup
-}
-
-func (s *testServerSuite) TestClusterID(c *C) {
-	cfgs := NewTestMultiConfig(3)
-	for i, cfg := range cfgs {
-		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_cluster_id_%d", i)
-		cleanServer(cfg)
-	}
-
-	svrs, cleanup := newTestServersWithCfgs(c, cfgs)
-
-	// All PDs should have the same cluster ID.
-	clusterID := svrs[0].clusterID
-	c.Assert(clusterID, Not(Equals), uint64(0))
-	for _, svr := range svrs {
-		log.Debug(svr.clusterID)
-		c.Assert(svr.clusterID, Equals, clusterID)
-	}
-
-	// Restart all PDs.
-	for _, svr := range svrs {
-		svr.Close()
-	}
-	svrs, cleanup = newTestServersWithCfgs(c, cfgs)
-	defer cleanup()
-
-	// All PDs should have the same cluster ID as before.
-	for _, svr := range svrs {
-		c.Assert(svr.clusterID, Equals, clusterID)
-	}
 }

@@ -78,13 +78,13 @@ type testClientSuite struct {
 }
 
 func (s *testClientSuite) SetUpSuite(c *C) {
-	s.srv, s.cleanup = newServer(c)
+	s.srv, s.cleanup = newServer(c, clusterID)
 
 	mustWaitLeader(c, map[string]*server.Server{s.srv.GetAddr(): s.srv})
-	bootstrapServer(c, s.srv)
+	bootstrapServer(c, s.srv.GetAddr())
 
 	var err error
-	s.client, err = NewClient(s.srv.GetEndpoints(), s.srv.ClusterID())
+	s.client, err = NewClient(s.srv.GetEndpoints(), clusterID)
 	c.Assert(err, IsNil)
 }
 
@@ -94,8 +94,9 @@ func (s *testClientSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func newServer(c *C) (*server.Server, cleanupFunc) {
+func newServer(c *C, clusterID uint64) (*server.Server, cleanupFunc) {
 	cfg := server.NewTestSingleConfig()
+	cfg.ClusterID = clusterID
 
 	s, err := server.NewServer(cfg)
 	c.Assert(err, IsNil)
@@ -124,11 +125,11 @@ func mustWaitLeader(c *C, svrs map[string]*server.Server) *server.Server {
 	return nil
 }
 
-func bootstrapServer(c *C, s *server.Server) {
+func bootstrapServer(c *C, addr string) {
 	req := &pdpb.Request{
 		Header: &pdpb.RequestHeader{
 			Uuid:      uuid.NewV4().Bytes(),
-			ClusterId: s.ClusterID(),
+			ClusterId: clusterID,
 		},
 		CmdType: pdpb.CommandType_Bootstrap,
 		Bootstrap: &pdpb.BootstrapRequest{
@@ -136,14 +137,14 @@ func bootstrapServer(c *C, s *server.Server) {
 			Region: region,
 		},
 	}
-	testutil.MustRPCRequest(c, s.GetAddr(), req)
+	testutil.MustRPCRequest(c, addr, req)
 }
 
-func heartbeatRegion(c *C, s *server.Server) {
+func heartbeatRegion(c *C, addr string) {
 	req := &pdpb.Request{
 		Header: &pdpb.RequestHeader{
 			Uuid:      uuid.NewV4().Bytes(),
-			ClusterId: s.ClusterID(),
+			ClusterId: clusterID,
 		},
 		CmdType: pdpb.CommandType_RegionHeartbeat,
 		RegionHeartbeat: &pdpb.RegionHeartbeatRequest{
@@ -151,7 +152,7 @@ func heartbeatRegion(c *C, s *server.Server) {
 			Leader: peer,
 		},
 	}
-	testutil.MustRPCRequest(c, s.GetAddr(), req)
+	testutil.MustRPCRequest(c, addr, req)
 }
 
 func (s *testClientSuite) TestTSO(c *C) {
@@ -170,7 +171,7 @@ func (s *testClientSuite) TestTSO(c *C) {
 }
 
 func (s *testClientSuite) TestGetRegion(c *C) {
-	heartbeatRegion(c, s.srv)
+	heartbeatRegion(c, s.srv.GetAddr())
 
 	r, leader, err := s.client.GetRegion([]byte("a"))
 	c.Assert(err, IsNil)

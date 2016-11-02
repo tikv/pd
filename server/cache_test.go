@@ -262,7 +262,7 @@ func (s *testClusterCacheSuite) TestCache(c *C) {
 	c.Assert(err, IsNil)
 	defer conn.Close()
 
-	clusterID := s.svr.clusterID
+	clusterID := uint64(0)
 
 	req := s.newBootstrapRequest(c, clusterID, "127.0.0.1:1")
 	store1 := req.Bootstrap.Store

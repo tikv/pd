@@ -120,7 +120,7 @@ func (s *testClusterSuite) TestBootstrap(c *C) {
 	c.Assert(err, IsNil)
 	defer conn.Close()
 
-	clusterID := s.svr.clusterID
+	clusterID := uint64(0)
 
 	// IsBootstrapped returns false.
 	req := s.newIsBootstrapRequest(clusterID)
@@ -272,7 +272,7 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	c.Assert(err, IsNil)
 	defer conn.Close()
 
-	clusterID := s.svr.clusterID
+	clusterID := uint64(0)
 
 	storeAddr := "127.0.0.1:0"
 	s.tryBootstrapCluster(c, conn, clusterID, storeAddr)
@@ -499,7 +499,7 @@ func (s *testClusterSuite) TestClosedChannel(c *C) {
 	c.Assert(err, IsNil)
 	defer conn.Close()
 
-	clusterID := svr.clusterID
+	clusterID := uint64(0)
 	storeAddr := "127.0.0.1:0"
 	s.tryBootstrapCluster(c, conn, clusterID, storeAddr)
 

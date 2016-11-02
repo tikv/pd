@@ -87,10 +87,7 @@ func (c *conn) run() {
 
 		var response *pdpb.Response
 
-		if err = c.checkRequest(request); err != nil {
-			log.Errorf("check request %s err %v", request, errors.ErrorStack(err))
-			response = newError(err)
-		} else if !c.s.IsLeader() {
+		if !c.s.IsLeader() {
 			response, err = p.handleRequest(msgID, request)
 			if err != nil {
 				log.Errorf("proxy request %s err %v", request, errors.ErrorStack(err))
@@ -101,6 +98,7 @@ func (c *conn) run() {
 			if err != nil {
 				log.Errorf("handle request %s err %v", request, errors.ErrorStack(err))
 				response = newError(err)
+
 			}
 		}
 
@@ -160,23 +158,12 @@ func (c *conn) close() error {
 	return errors.Trace(c.conn.Close())
 }
 
-func (c *conn) checkRequest(req *pdpb.Request) error {
-	// Don't check cluster ID of this command type.
-	if req.GetCmdType() == pdpb.CommandType_GetPDMembers {
-		if req.Header == nil {
-			req.Header = &pdpb.RequestHeader{}
-		}
-		req.Header.ClusterId = c.s.clusterID
-	}
-
-	clusterID := req.GetHeader().GetClusterId()
-	if clusterID != c.s.clusterID {
-		return errors.Errorf("mismatch cluster id, need %d but got %d", c.s.clusterID, clusterID)
-	}
-	return nil
-}
-
 func (c *conn) handleRequest(req *pdpb.Request) (*pdpb.Response, error) {
+	clusterID := req.GetHeader().GetClusterId()
+	if clusterID != c.s.cfg.ClusterID {
+		return nil, errors.Errorf("mismatch cluster id, need %d but got %d", c.s.cfg.ClusterID, clusterID)
+	}
+
 	switch req.GetCmdType() {
 	case pdpb.CommandType_Tso:
 		return c.handleTso(req)

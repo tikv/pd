@@ -89,7 +89,6 @@ func (s *testAllocIDSuite) TestCommand(c *C) {
 	idReq := &pdpb.AllocIdRequest{}
 
 	req := &pdpb.Request{
-		Header:  newRequestHeader(s.svr.clusterID),
 		CmdType: pdpb.CommandType_AllocId,
 		AllocId: idReq,
 	}

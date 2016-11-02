@@ -18,7 +18,6 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/testutil"
 )
 
 var _ = Suite(&testConnSuite{})
@@ -38,7 +37,6 @@ func (s *testConnSuite) TestRedirect(c *C) {
 
 	for _, svr := range svrs {
 		mustRequestSuccess(c, svr)
-		mustGetPDMembersSuccess(c, svr)
 	}
 }
 
@@ -92,7 +90,6 @@ func (s *testConnSuite) TestReconnect(c *C) {
 
 func mustRequest(c *C, s *Server) *pdpb.Response {
 	req := &pdpb.Request{
-		Header:  newRequestHeader(s.clusterID),
 		CmdType: pdpb.CommandType_AllocId,
 		AllocId: &pdpb.AllocIdRequest{},
 	}
@@ -107,15 +104,4 @@ func mustRequest(c *C, s *Server) *pdpb.Response {
 func mustRequestSuccess(c *C, s *Server) {
 	resp := mustRequest(c, s)
 	c.Assert(resp.GetHeader().GetError(), IsNil)
-}
-
-func mustGetPDMembersSuccess(c *C, s *Server) {
-	req := &pdpb.Request{
-		Header:       newRequestHeader(0),
-		CmdType:      pdpb.CommandType_GetPDMembers,
-		GetPdMembers: &pdpb.GetPDMembersRequest{},
-	}
-	resp := testutil.MustRPCRequest(c, s.GetAddr(), req)
-	c.Assert(resp.GetHeader().GetError(), IsNil)
-	c.Assert(resp.GetHeader().GetClusterId(), Equals, s.clusterID)
 }
