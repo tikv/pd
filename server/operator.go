@@ -69,6 +69,7 @@ type balanceOperator struct {
 	Index    int         `json:"index"`
 	Start    time.Time   `json:"start"`
 	End      time.Time   `json:"end"`
+	Started  bool        `json:"started"`
 	Finished bool        `json:"finished"`
 	Ops      []Operator  `json:"operators"`
 	Region   *regionInfo `json:"region"`
@@ -121,6 +122,11 @@ func (bo *balanceOperator) Do(ctx *opContext, region *regionInfo) (bool, *pdpb.R
 		return true, nil, nil
 	}
 
+	if !bo.Started {
+		bo.Started = true
+		bo.Start = time.Now()
+	}
+
 	finished, res, err := bo.Ops[bo.Index].Do(ctx, region)
 	if err != nil {
 		return false, nil, errors.Trace(err)
@@ -132,6 +138,10 @@ func (bo *balanceOperator) Do(ctx *opContext, region *regionInfo) (bool, *pdpb.R
 	bo.Index++
 
 	bo.Finished = bo.Index >= len(bo.Ops)
+	if bo.Finished {
+		bo.End = time.Now()
+	}
+
 	return bo.Finished, res, nil
 }
 

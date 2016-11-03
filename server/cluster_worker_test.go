@@ -648,6 +648,7 @@ func (s *testClusterWorkerSuite) TestBalanceOperatorPriority(c *C) {
 	c.Assert(resp, DeepEquals, removePeerOperator.ChangePeer)
 	op := bw.getBalanceOperator(region.GetId())
 	c.Assert(op.Type, Equals, balanceOP)
+	bw.removeBalanceOperator(region.GetId())
 
 	err = cluster.putConfig(&metapb.Cluster{
 		Id:           s.clusterID,
@@ -662,22 +663,32 @@ func (s *testClusterWorkerSuite) TestBalanceOperatorPriority(c *C) {
 	// replicaOP finishes immediately, so the op is nil here.
 	c.Assert(op, IsNil)
 
-	// Add an in progress balanceOP.
+	// Add a balanceOP.
 	addPeer := s.newPeer(c, 999, 0)
 	addPeerOperator := newAddPeerOperator(region.GetId(), addPeer)
 	bop = newBalanceOperator(regionInfo, balanceOP, addPeerOperator, removePeerOperator)
-	bop.Index = 1
 	ok = bw.addBalanceOperator(region.GetId(), bop)
 	c.Assert(ok, IsTrue)
 
-	// New adminOP will not replace an in progress balanceOP.
-	aop := newBalanceOperator(regionInfo, adminOP, removePeerOperator)
-	ok = bw.addBalanceOperator(region.GetId(), aop)
-	c.Assert(ok, IsFalse)
+	// Change MaxPeerCount to 1 to let the operator start.
+	cluster.putConfig(&metapb.Cluster{
+		Id:           s.clusterID,
+		MaxPeerCount: 1,
+	})
+	resp = heartbeatRegion(c, conn, s.clusterID, 0, region, leader)
+	c.Assert(resp, DeepEquals, addPeerOperator.ChangePeer)
+
+	// The balanceOP will not replaced by a replicaOP because it has started.
+	cluster.putConfig(&metapb.Cluster{
+		Id:           s.clusterID,
+		MaxPeerCount: 3,
+	})
+	resp = heartbeatRegion(c, conn, s.clusterID, 0, region, leader)
+	c.Assert(resp, DeepEquals, addPeerOperator.ChangePeer)
 	bw.removeBalanceOperator(region.GetId())
 
 	// Add an adminOP.
-	aop = newBalanceOperator(regionInfo, adminOP, removePeerOperator)
+	aop := newBalanceOperator(regionInfo, adminOP, removePeerOperator)
 	ok = bw.addBalanceOperator(region.GetId(), aop)
 	c.Assert(ok, IsTrue)
 	// Add an adminOP again is OK.
