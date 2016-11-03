@@ -100,7 +100,7 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *balanceOperato
 
 	oldOp, ok := bw.balanceOperators[regionID]
 	if ok {
-		if oldOp.Started {
+		if !oldOp.Start.IsZero() {
 			// Old operator is still in progress, don't replace it.
 			return false
 		}
@@ -125,7 +125,6 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *balanceOperato
 
 	collectBalancerCounterMetrics(op)
 
-	op.Start = time.Now()
 	bw.balanceOperators[regionID] = op
 	bw.historyOperators.add(regionID, op)
 

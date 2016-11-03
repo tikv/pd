@@ -64,15 +64,13 @@ const (
 
 // balanceOperator is used to do region balance.
 type balanceOperator struct {
-	ID       uint64      `json:"id"`
-	Type     optype      `json:"type"`
-	Index    int         `json:"index"`
-	Start    time.Time   `json:"start"`
-	End      time.Time   `json:"end"`
-	Started  bool        `json:"started"`
-	Finished bool        `json:"finished"`
-	Ops      []Operator  `json:"operators"`
-	Region   *regionInfo `json:"region"`
+	ID     uint64      `json:"id"`
+	Type   optype      `json:"type"`
+	Index  int         `json:"index"`
+	Start  time.Time   `json:"start"`
+	End    time.Time   `json:"end"`
+	Ops    []Operator  `json:"operators"`
+	Region *regionInfo `json:"region"`
 }
 
 func newBalanceOperator(region *regionInfo, optype optype, ops ...Operator) *balanceOperator {
@@ -85,8 +83,8 @@ func newBalanceOperator(region *regionInfo, optype optype, ops ...Operator) *bal
 }
 
 func (bo *balanceOperator) String() string {
-	ret := fmt.Sprintf("[balanceOperator]id: %d, index: %d, start: %s, end: %s, finished: %v, region: %v, ops:",
-		bo.ID, bo.Index, bo.Start, bo.End, bo.Finished, bo.Region)
+	ret := fmt.Sprintf("[balanceOperator]id: %d, index: %d, start: %s, end: %s, region: %v, ops:",
+		bo.ID, bo.Index, bo.Start, bo.End, bo.Region)
 
 	for i := range bo.Ops {
 		ret += fmt.Sprintf(" [%d - %v] ", i, bo.Ops[i])
@@ -98,7 +96,7 @@ func (bo *balanceOperator) String() string {
 // Check checks whether operator already finished or not.
 func (bo *balanceOperator) check(region *regionInfo) (bool, error) {
 	if bo.Index >= len(bo.Ops) {
-		bo.Finished = true
+		bo.End = time.Now()
 		return true, nil
 	}
 
@@ -122,8 +120,7 @@ func (bo *balanceOperator) Do(ctx *opContext, region *regionInfo) (bool, *pdpb.R
 		return true, nil, nil
 	}
 
-	if !bo.Started {
-		bo.Started = true
+	if bo.Start.IsZero() {
 		bo.Start = time.Now()
 	}
 
@@ -137,12 +134,10 @@ func (bo *balanceOperator) Do(ctx *opContext, region *regionInfo) (bool, *pdpb.R
 
 	bo.Index++
 
-	bo.Finished = bo.Index >= len(bo.Ops)
-	if bo.Finished {
+	if bo.Index >= len(bo.Ops) {
 		bo.End = time.Now()
 	}
-
-	return bo.Finished, res, nil
+	return !bo.End.IsZero(), res, nil
 }
 
 // getRegionID returns the region id which the operator for balance.
