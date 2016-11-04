@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -40,6 +41,12 @@ func (s *testGetLeaderSuite) SetUpSuite(c *C) {
 
 	svr, err := NewServer(cfg)
 	c.Assert(err, IsNil)
+
+	// There's no leader before the server has started.
+	leader, err := svr.GetLeader()
+	c.Assert(leader, IsNil)
+	c.Assert(errors.Cause(err), Equals, errNoLeader)
+
 	go svr.Run()
 
 	s.svr = svr

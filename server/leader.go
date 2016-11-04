@@ -27,6 +27,10 @@ import (
 	"golang.org/x/net/context"
 )
 
+var (
+	errNoLeader = errors.New("no leader")
+)
+
 // IsLeader returns whether server is leader or not.
 func (s *Server) IsLeader() bool {
 	return atomic.LoadInt64(&s.isLeaderValue) == 1
@@ -58,7 +62,7 @@ func (s *Server) leaderLoop() {
 			return
 		}
 
-		leader, err := s.GetLeader()
+		leader, err := getLeader(s.client, s.getLeaderPath())
 		if err != nil {
 			log.Errorf("get leader err %v", err)
 			time.Sleep(200 * time.Millisecond)
@@ -106,7 +110,14 @@ func (s *Server) GetLeader() (*pdpb.Leader, error) {
 	if s.isClosed() {
 		return nil, errors.New("server is closed")
 	}
-	return getLeader(s.client, s.getLeaderPath())
+	leader, err := getLeader(s.client, s.getLeaderPath())
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if leader == nil {
+		return nil, errors.Trace(errNoLeader)
+	}
+	return leader, nil
 }
 
 func (s *Server) isSameLeader(leader *pdpb.Leader) bool {

@@ -218,9 +218,6 @@ func (p *leaderProxy) handleRequest(msgID uint64, req *pdpb.Request) (*pdpb.Resp
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		if leader == nil {
-			return nil, errors.New("no leader")
-		}
 		conn, err := rpcConnect(leader.GetAddr())
 		if err != nil {
 			return nil, errors.Trace(err)

@@ -27,7 +27,6 @@ const (
 )
 
 const (
-	errNoLeaderFound       = "no leader found"
 	errRedirectFailed      = "redirect failed"
 	errRedirectToNotLeader = "redirect to not leader"
 )
@@ -58,10 +57,6 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 	leader, err := h.s.GetLeader()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if leader == nil {
-		http.Error(w, errNoLeaderFound, http.StatusInternalServerError)
 		return
 	}
 
