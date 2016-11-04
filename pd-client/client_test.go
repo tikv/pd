@@ -37,8 +37,7 @@ var (
 	// Note: IDs below are entirely arbitrary. They are only for checking
 	// whether GetRegion/GetStore works.
 	// If we alloc ID in client in the future, these IDs must be updated.
-	clusterID = uint64(time.Now().Unix())
-	store     = &metapb.Store{
+	store = &metapb.Store{
 		Id:      1,
 		Address: "localhost",
 	}
@@ -84,7 +83,7 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 	bootstrapServer(c, s.srv)
 
 	var err error
-	s.client, err = NewClient(s.srv.GetEndpoints(), s.srv.ClusterID())
+	s.client, err = NewClient(s.srv.GetEndpoints())
 	c.Assert(err, IsNil)
 }
 
