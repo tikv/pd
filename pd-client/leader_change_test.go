@@ -127,7 +127,6 @@ func mustConnectLeader(c *C, urls []string, leaderAddr string) {
 	case <-time.After(time.Second * 10):
 		c.Fatal("failed to connect to pd")
 	}
-	defer conn.Close()
 
 	conn.wg.Add(1)
 	go conn.connectLeader(urls, time.Second)
@@ -145,4 +144,8 @@ func mustConnectLeader(c *C, urls []string, leaderAddr string) {
 	conn.wg.Add(1)
 	go conn.connectLeader(urls, time.Second)
 	time.Sleep(time.Second * 3)
+	// Ensure the leader connection will be closed if we don't use it.
+	c.Assert(len(conn.ConnChan), Equals, 1)
+	conn.Close()
+	c.Assert(len(conn.ConnChan), Equals, 0)
 }
