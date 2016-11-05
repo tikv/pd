@@ -33,7 +33,7 @@ import (
 type Config struct {
 	*flag.FlagSet `json:"-"`
 
-	Version bool
+	Version bool `json:"-"`
 
 	ClientUrls          string `toml:"client-urls" json:"client-urls"`
 	PeerUrls            string `toml:"peer-urls" json:"peer-urls"`
