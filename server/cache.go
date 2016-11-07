@@ -227,19 +227,35 @@ func (r *regionsInfo) randFollowerRegion(storeID uint64) *regionInfo {
 
 type clusterInfo struct {
 	sync.RWMutex
+
+	id      IDAllocator
 	meta    *metapb.Cluster
 	stores  *storesInfo
 	regions *regionsInfo
-
-	idAlloc IDAllocator
 }
 
-func newClusterInfo(idAlloc IDAllocator) *clusterInfo {
+func newClusterInfo(id IDAllocator) *clusterInfo {
 	return &clusterInfo{
+		id:      id,
 		stores:  newStoresInfo(),
 		regions: newRegionsInfo(),
-		idAlloc: idAlloc,
 	}
+}
+
+func (c *clusterInfo) allocID() (uint64, error) {
+	return c.id.Alloc()
+}
+
+func (c *clusterInfo) allocPeer(storeID uint64) (*metapb.Peer, error) {
+	peerID, err := c.allocID()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	peer := &metapb.Peer{
+		Id:      peerID,
+		StoreId: storeID,
+	}
+	return peer, nil
 }
 
 func (c *clusterInfo) getMeta() *metapb.Cluster {
@@ -356,7 +372,7 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		return errors.Trace(errStoreNotFound(storeID))
 	}
 
-	store.stats.StoreStats = stats
+	store.stats.StoreStats = proto.Clone(stats).(*pdpb.StoreStats)
 	store.stats.LastHeartbeatTS = time.Now()
 	store.stats.TotalRegionCount = c.regions.getRegionCount()
 	store.stats.LeaderRegionCount = c.regions.getStoreLeaderCount(storeID)

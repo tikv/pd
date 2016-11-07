@@ -645,13 +645,9 @@ func (c *RaftCluster) NewAddPeerOperator(regionID uint64, storeID uint64) (Opera
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		peerID, err := cluster.idAlloc.Alloc()
+		peer, err = cluster.allocPeer(storeID)
 		if err != nil {
 			return nil, errors.Trace(err)
-		}
-		peer = &metapb.Peer{
-			Id:      peerID,
-			StoreId: storeID,
 		}
 	}
 

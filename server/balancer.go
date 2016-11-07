@@ -148,18 +148,7 @@ func (cb *capacityBalancer) selectAddPeer(cluster *clusterInfo, stores []*storeI
 	if store == nil {
 		return nil, nil
 	}
-
-	peerID, err := cluster.idAlloc.Alloc()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	peer := &metapb.Peer{
-		Id:      peerID,
-		StoreId: store.GetId(),
-	}
-
-	return peer, nil
+	return cluster.allocPeer(store.GetId())
 }
 
 func (cb *capacityBalancer) selectRemovePeer(cluster *clusterInfo, peers map[uint64]*metapb.Peer) (*metapb.Peer, error) {

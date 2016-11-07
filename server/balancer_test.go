@@ -58,7 +58,7 @@ func (s *testBalancerSuite) newClusterInfo(c *C) *clusterInfo {
 
 	// Add 4 stores, store id will be 1,2,3,4.
 	for i := 1; i < 5; i++ {
-		id, err = clusterInfo.idAlloc.Alloc()
+		id, err = clusterInfo.allocID()
 		c.Assert(err, IsNil)
 
 		addr := fmt.Sprintf("127.0.0.1:%d", i)
@@ -67,12 +67,12 @@ func (s *testBalancerSuite) newClusterInfo(c *C) *clusterInfo {
 	}
 
 	// Add 1 peer, id will be 5.
-	id, err = clusterInfo.idAlloc.Alloc()
+	id, err = clusterInfo.allocID()
 	c.Assert(err, IsNil)
 	peer = s.newPeer(c, 1, id)
 
 	// Add 1 region, id will be 6.
-	id, err = clusterInfo.idAlloc.Alloc()
+	id, err = clusterInfo.allocID()
 	c.Assert(err, IsNil)
 
 	region := s.newRegion(c, id, []byte{}, []byte{}, []*metapb.Peer{peer}, nil)
@@ -371,7 +371,7 @@ func (s *testBalancerSuite) TestReplicaBalancer(c *C) {
 	c.Assert(bop, IsNil)
 
 	// Mock add one more peer.
-	id, err := clusterInfo.idAlloc.Alloc()
+	id, err := clusterInfo.allocID()
 	c.Assert(err, IsNil)
 
 	newPeer := s.newPeer(c, uint64(2), id)
