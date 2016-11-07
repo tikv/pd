@@ -100,7 +100,8 @@ func (sf *snapCountFilter) FilterFromStore(store *storeInfo, args ...interface{}
 }
 
 func (sf *snapCountFilter) FilterToStore(store *storeInfo, args ...interface{}) bool {
-	return uint64(store.stats.GetReceivingSnapCount()) > sf.cfg.MaxReceivingSnapCount
+	return uint64(store.stats.GetReceivingSnapCount()) > sf.cfg.MaxReceivingSnapCount ||
+		uint64(store.stats.GetApplyingSnapCount()) > sf.cfg.MaxApplyingSnapCount
 }
 
 type leaderCountFilter struct {

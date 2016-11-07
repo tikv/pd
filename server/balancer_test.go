@@ -85,13 +85,14 @@ func (s *testBalancerSuite) newClusterInfo(c *C) *clusterInfo {
 }
 
 func (s *testBalancerSuite) updateStore(c *C, clusterInfo *clusterInfo, storeID uint64, capacity uint64, available uint64,
-	sendingSnapCount uint32, receivingSnapCount uint32) {
+	sendingSnapCount uint32, receivingSnapCount uint32, applyingSnapCount uint32) {
 	stats := &pdpb.StoreStats{
 		StoreId:            storeID,
 		Capacity:           capacity,
 		Available:          available,
 		SendingSnapCount:   sendingSnapCount,
 		ReceivingSnapCount: receivingSnapCount,
+		ApplyingSnapCount:  applyingSnapCount,
 	}
 
 	c.Assert(clusterInfo.handleStoreHeartbeat(stats), IsNil)
@@ -128,10 +129,10 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	c.Assert(region.GetPeers(), HasLen, 1)
 
 	// The store id will be 1,2,3,4.
-	s.updateStore(c, clusterInfo, 1, 100, 60, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 70, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 80, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 60, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 70, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 80, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0, 0)
 
 	// Now we have all stores with low capacity used ratio, so we need not to do balance.
 	testCfg := newBalanceConfig()
@@ -161,10 +162,10 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	s.addRegionPeer(c, clusterInfo, 3, region)
 
 	// If we cannot find a `from store` to do balance, then we will do nothing.
-	s.updateStore(c, clusterInfo, 1, 100, 91, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 92, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 93, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 94, 0, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 91, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 92, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 93, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 94, 0, 0, 0)
 
 	testCfg.MinCapacityUsedRatio = 0.3
 	testCfg.MaxCapacityUsedRatio = 0.9
@@ -177,10 +178,10 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	// Now the region is (1,3,4), the balance operators should be
 	// 1) add peer: 2
 	// 2) remove peer: 4
-	s.updateStore(c, clusterInfo, 1, 100, 90, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 70, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 80, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 60, 0, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 90, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 70, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 80, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 60, 0, 0, 0)
 
 	cb = newCapacityBalancer(testCfg)
 	_, bop, err = cb.Balance(clusterInfo)
@@ -197,10 +198,10 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 
 	// If the sending snapshot count of `from store` is greater than MaxSnapSendingCount,
 	// we will do nothing.
-	s.updateStore(c, clusterInfo, 1, 100, 90, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 80, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 65, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 60, 10, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 90, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 80, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 65, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 60, 10, 0, 0)
 
 	cb = newCapacityBalancer(testCfg)
 	_, bop, err = cb.Balance(clusterInfo)
@@ -217,10 +218,22 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 
 	// If the receiving snapshot count of `to store` is greater than MaxReceivingSnapCount,
 	// we will do nothing.
-	s.updateStore(c, clusterInfo, 1, 100, 90, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 80, 0, 10)
-	s.updateStore(c, clusterInfo, 3, 100, 65, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 60, 10, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 90, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 80, 0, 10, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 65, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 60, 10, 0, 0)
+
+	cb = newCapacityBalancer(testCfg)
+	_, bop, err = cb.Balance(clusterInfo)
+	c.Assert(err, IsNil)
+	c.Assert(bop, IsNil)
+
+	// If the applying snapshot count of `to store` is greater than MaxApplyingSnapCount,
+	// we will do nothing.
+	s.updateStore(c, clusterInfo, 1, 100, 90, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 80, 0, 0, 10)
+	s.updateStore(c, clusterInfo, 3, 100, 65, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 60, 10, 0, 0)
 
 	cb = newCapacityBalancer(testCfg)
 	_, bop, err = cb.Balance(clusterInfo)
@@ -228,10 +241,10 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	c.Assert(bop, IsNil)
 
 	// If cluster max peer count config is 1, we can only add peer and remove leader peer.
-	s.updateStore(c, clusterInfo, 1, 100, 60, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 70, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 80, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 60, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 70, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 80, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0, 0)
 
 	// Set cluster config.
 	oldMeta := clusterInfo.getMeta()
@@ -267,10 +280,10 @@ func (s *testBalancerSuite) TestCapacityBalancer(c *C) {
 	c.Assert(op2.ChangePeer.GetPeer().GetStoreId(), Equals, uint64(1))
 
 	// If the diff score is too small, we should do nothing.
-	s.updateStore(c, clusterInfo, 1, 100, 85, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 70, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 80, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 85, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 70, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 80, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0, 0)
 
 	cb = newCapacityBalancer(testCfg)
 	_, bop, err = cb.Balance(clusterInfo)
@@ -300,10 +313,10 @@ func (s *testBalancerSuite) TestDownStore(c *C) {
 	cb := newCapacityBalancer(testCfg)
 
 	// The store id will be 1,2,3,4.
-	s.updateStore(c, clusterInfo, 1, 100, 80, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 50, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 60, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 70, 0, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 80, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 50, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 60, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 70, 0, 0, 0)
 
 	// Test add peer.
 	s.addRegionPeer(c, clusterInfo, 4, region)
@@ -314,10 +327,10 @@ func (s *testBalancerSuite) TestDownStore(c *C) {
 	// Make store 2 up and down.
 	for i := 0; i < 3; i++ {
 		// Now we should move from store 4 to 2.
-		s.updateStore(c, clusterInfo, 1, 100, 80, 0, 0)
-		s.updateStore(c, clusterInfo, 2, 100, 70, 0, 0)
-		s.updateStore(c, clusterInfo, 3, 100, 60, 0, 0)
-		s.updateStore(c, clusterInfo, 4, 100, 50, 0, 0)
+		s.updateStore(c, clusterInfo, 1, 100, 80, 0, 0, 0)
+		s.updateStore(c, clusterInfo, 2, 100, 70, 0, 0, 0)
+		s.updateStore(c, clusterInfo, 3, 100, 60, 0, 0, 0)
+		s.updateStore(c, clusterInfo, 4, 100, 50, 0, 0, 0)
 
 		_, bop, err := cb.Balance(clusterInfo)
 		c.Assert(err, IsNil)
@@ -333,9 +346,9 @@ func (s *testBalancerSuite) TestDownStore(c *C) {
 
 		// Update store 1,3,4 and let store 2 down.
 		time.Sleep(600 * time.Millisecond)
-		s.updateStore(c, clusterInfo, 1, 100, 80, 0, 0)
-		s.updateStore(c, clusterInfo, 3, 100, 60, 0, 0)
-		s.updateStore(c, clusterInfo, 4, 100, 50, 0, 0)
+		s.updateStore(c, clusterInfo, 1, 100, 80, 0, 0, 0)
+		s.updateStore(c, clusterInfo, 3, 100, 60, 0, 0, 0)
+		s.updateStore(c, clusterInfo, 4, 100, 50, 0, 0, 0)
 		time.Sleep(600 * time.Millisecond)
 
 		// Now store 2 is down, we should not do balance.
@@ -353,10 +366,10 @@ func (s *testBalancerSuite) TestReplicaBalancer(c *C) {
 	c.Assert(region.GetPeers(), HasLen, 1)
 
 	// The store id will be 1,2,3,4.
-	s.updateStore(c, clusterInfo, 1, 100, 10, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 20, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 10, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 20, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 40, 0, 0, 0)
 
 	// Test add peer.
 	s.addRegionPeer(c, clusterInfo, 4, region)
@@ -397,10 +410,10 @@ func (s *testBalancerSuite) TestReplicaBalancerWithDownPeers(c *C) {
 	c.Assert(region.GetPeers(), HasLen, 1)
 
 	// The store id will be 1,2,3,4.
-	s.updateStore(c, clusterInfo, 1, 100, 10, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 20, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 10, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 20, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 40, 0, 0, 0)
 
 	// Test add peer.
 	s.addRegionPeer(c, clusterInfo, 4, region)
@@ -425,9 +438,9 @@ func (s *testBalancerSuite) TestReplicaBalancerWithDownPeers(c *C) {
 	// Make store 4 down.
 	s.cfg.MaxStoreDownDuration.Duration = 1 * time.Second
 	time.Sleep(600 * time.Millisecond)
-	s.updateStore(c, clusterInfo, 1, 100, 10, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 20, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 10, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 20, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 30, 0, 0, 0)
 	time.Sleep(600 * time.Millisecond)
 
 	// DownSeconds < s.cfg.MaxPeerDownDuration, but store 4 is down, add replica to store 2.
@@ -482,16 +495,16 @@ func (s *testBalancerSuite) testReplicaBalancerWithNonUpState(c *C, state metapb
 	rb := newReplicaBalancer(region, cfg)
 
 	// The store id will be 1,2,3,4.
-	s.updateStore(c, clusterInfo, 1, 100, 40, 0, 0)
-	s.updateStore(c, clusterInfo, 2, 100, 30, 0, 0)
-	s.updateStore(c, clusterInfo, 3, 100, 20, 0, 0)
-	s.updateStore(c, clusterInfo, 4, 100, 10, 0, 0)
+	s.updateStore(c, clusterInfo, 1, 100, 40, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 2, 100, 30, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 3, 100, 20, 0, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 10, 0, 0, 0)
 
 	s.addRegionPeer(c, clusterInfo, 2, region)
 	s.addRegionPeer(c, clusterInfo, 3, region)
 
 	// Transfer peer to store 4 if it is up.
-	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0)
+	s.updateStore(c, clusterInfo, 4, 100, 90, 0, 0, 0)
 	_, bop, err := cb.Balance(clusterInfo)
 	c.Assert(err, IsNil)
 	checkTransferPeer(c, bop.Ops, 3, 4)

@@ -271,12 +271,15 @@ type BalanceConfig struct {
 	MaxLeaderCount uint64 `toml:"max-leader-count" json:"max-leader-count"`
 
 	// For capacity balance.
-	// If the sending snapshot count of one storage is greater than this value,
+	// If the sending snapshot count of one store is greater than this value,
 	// it will never be used as a from store.
 	MaxSendingSnapCount uint64 `toml:"max-sending-snap-count" json:"max-sending-snap-count"`
-	// If the receiving snapshot count of one storage is greater than this value,
+	// If the receiving snapshot count of one store is greater than this value,
 	// it will never be used as a to store.
 	MaxReceivingSnapCount uint64 `toml:"max-receiving-snap-count" json:"max-receiving-snap-count"`
+	// If the applying snapshot count of one store is greater than this value,
+	// it will never be used as a to store.
+	MaxApplyingSnapCount uint64 `toml:"max-applying-snap-count" json:"max-applying-snap-count"`
 
 	// If the new store and old store's diff scores are not beyond this value,
 	// the balancer will do nothing.
@@ -316,6 +319,7 @@ const (
 	defaultMaxLeaderCount         = uint64(10)
 	defaultMaxSendingSnapCount    = uint64(3)
 	defaultMaxReceivingSnapCount  = uint64(3)
+	defaultMaxApplyingSnapCount   = uint64(3)
 	defaultMaxDiffScoreFraction   = float64(0.1)
 	defaultMaxBalanceCount        = uint64(16)
 	defaultBalanceInterval        = uint64(30)
@@ -333,6 +337,7 @@ func (c *BalanceConfig) adjust() {
 	adjustUint64(&c.MaxLeaderCount, defaultMaxLeaderCount)
 	adjustUint64(&c.MaxSendingSnapCount, defaultMaxSendingSnapCount)
 	adjustUint64(&c.MaxReceivingSnapCount, defaultMaxReceivingSnapCount)
+	adjustUint64(&c.MaxApplyingSnapCount, defaultMaxApplyingSnapCount)
 
 	adjustFloat64(&c.MaxDiffScoreFraction, defaultMaxDiffScoreFraction)
 

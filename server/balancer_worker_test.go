@@ -45,10 +45,10 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	s.balancerWorker = newBalancerWorker(clusterInfo, s.ts.cfg)
 
 	// The store id will be 1,2,3,4.
-	s.ts.updateStore(c, clusterInfo, 1, 100, 50, 0, 0)
-	s.ts.updateStore(c, clusterInfo, 2, 100, 20, 0, 0)
-	s.ts.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
-	s.ts.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
+	s.ts.updateStore(c, clusterInfo, 1, 100, 50, 0, 0, 0)
+	s.ts.updateStore(c, clusterInfo, 2, 100, 20, 0, 0, 0)
+	s.ts.updateStore(c, clusterInfo, 3, 100, 30, 0, 0, 0)
+	s.ts.updateStore(c, clusterInfo, 4, 100, 40, 0, 0, 0)
 
 	// Now we have no region to do balance.
 	err := s.balancerWorker.doBalance()
@@ -101,10 +101,10 @@ func (s *testBalancerWorkerSuite) TestBalancerWorker(c *C) {
 	s.ts.cfg.MaxTransferWaitCount = defaultMaxTransferWaitCount
 
 	// Since we have already cached region balance operator, so recall doBalance will do nothing.
-	s.ts.updateStore(c, clusterInfo, 1, 100, 50, 0, 0)
-	s.ts.updateStore(c, clusterInfo, 2, 100, 90, 0, 0)
-	s.ts.updateStore(c, clusterInfo, 3, 100, 30, 0, 0)
-	s.ts.updateStore(c, clusterInfo, 4, 100, 40, 0, 0)
+	s.ts.updateStore(c, clusterInfo, 1, 100, 50, 0, 0, 0)
+	s.ts.updateStore(c, clusterInfo, 2, 100, 90, 0, 0, 0)
+	s.ts.updateStore(c, clusterInfo, 3, 100, 30, 0, 0, 0)
+	s.ts.updateStore(c, clusterInfo, 4, 100, 40, 0, 0, 0)
 
 	err = s.balancerWorker.doBalance()
 	c.Assert(err, IsNil)

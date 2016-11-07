@@ -27,6 +27,7 @@ max-capacity-used-ratio = 0.9
 max-leader-count = 10
 max-sending-snap-count = 3
 max-receiving-snap-count = 3
+max-applying-snap-count = 3
 max-diff-score-fraction = 0.1
 balance-interval = 30
 max-balance-count = 16
