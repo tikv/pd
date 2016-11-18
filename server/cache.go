@@ -420,11 +420,11 @@ func (c *clusterInfo) randFollowerRegion(storeID uint64) *regionInfo {
 	return c.regions.randFollowerRegion(storeID)
 }
 
-func (c *clusterInfo) getRegionStores(region *regionInfo) []*storeInfo {
+func (c *clusterInfo) getFollowerStores(region *regionInfo) []*storeInfo {
 	c.RLock()
 	defer c.RUnlock()
 	var stores []*storeInfo
-	for id := range region.GetStoreIds() {
+	for id := range region.GetFollowers() {
 		if store := c.stores.getStore(id); store != nil {
 			stores = append(stores, store)
 		}
