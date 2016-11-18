@@ -201,16 +201,18 @@ func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*score, *balanceOpera
 }
 
 type leaderBalancer struct {
-	filters []Filter
-	st      scoreType
-
-	cfg *BalanceConfig
+	cfg      *BalanceConfig
+	st       scoreType
+	selector Selector
 }
 
 func newLeaderBalancer(cfg *BalanceConfig) *leaderBalancer {
+	var filters []Filter
+	filters = append(filters, newStateFilter(cfg))
+	filters = append(filters, newLeaderCountFilter(cfg))
+
 	lb := &leaderBalancer{cfg: cfg, st: leaderScore}
-	lb.filters = append(lb.filters, newStateFilter(cfg))
-	lb.filters = append(lb.filters, newLeaderCountFilter(cfg))
+	lb.selector = newBalanceSelector(newScorer(lb.st), filters)
 	return lb
 }
 
@@ -218,61 +220,14 @@ func (lb *leaderBalancer) ScoreType() scoreType {
 	return lb.st
 }
 
-// selectBalanceRegion tries to select a store leader region to do balance.
-func (lb *leaderBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*storeInfo) (*regionInfo, *metapb.Peer) {
-	store := selectFromStore(stores, nil, lb.filters, lb.st)
-	if store == nil {
-		return nil, nil
-	}
-
-	// Random select one leader region from store.
-	region := cluster.randLeaderRegion(store.GetId())
-	if region == nil {
-		return nil, nil
-	}
-
-	newLeader := lb.selectNewLeaderPeer(cluster, region.GetFollowers())
-	if newLeader == nil {
-		return nil, nil
-	}
-
-	return region, newLeader
-}
-
-func (lb *leaderBalancer) selectNewLeaderPeer(cluster *clusterInfo, peers map[uint64]*metapb.Peer) *metapb.Peer {
-	stores := make([]*storeInfo, 0, len(peers))
-	for storeID := range peers {
-		stores = append(stores, cluster.getStore(storeID))
-	}
-
-	store := selectToStore(stores, nil, nil, lb.st)
-	if store == nil {
-		return nil
-	}
-
-	storeID := store.GetId()
-	return peers[storeID]
-}
-
 // Balance tries to select a store region to do balance.
 // The balance type is leader transfer.
 func (lb *leaderBalancer) Balance(cluster *clusterInfo) (*score, *balanceOperator, error) {
-	// If cluster max peer count config is 1, we cannot do leader transfer,
-	meta := cluster.getMeta()
-	if meta.GetMaxPeerCount() == 1 {
+	region, _, target := scheduleLeader(cluster, lb.selector)
+	if region == nil {
 		return nil, nil, nil
 	}
-
-	stores := cluster.getStores()
-	region, newLeader := lb.selectBalanceRegion(cluster, stores)
-	if region == nil || newLeader == nil {
-		return nil, nil, nil
-	}
-
-	// If region peer count is not equal to max peer count, no need to do leader transfer.
-	if len(region.GetPeers()) != int(cluster.getMeta().GetMaxPeerCount()) {
-		return nil, nil, nil
-	}
+	newLeader := region.GetStorePeer(target.GetId())
 
 	score, ok := checkAndGetDiffScore(cluster, region.Leader, newLeader, lb.st, lb.cfg)
 	if !ok {
