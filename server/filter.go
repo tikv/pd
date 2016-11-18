@@ -13,34 +13,29 @@
 
 package server
 
-// Filter is an interface to filter target store.
+// Filter is an interface to filter source and target store.
 type Filter interface {
-	// FilterFromStore checks whether `from stores` should be skipped.
-	// If return value is true, we should not use this store as `from store` that is to be balanced.
-	FilterFromStore(store *storeInfo, args ...interface{}) bool
-
-	// FilterToStore checks whether to stores should be skipped.
-	// If return value is true, we should not use this store as `to store` that is to be balanced to.
-	FilterToStore(store *storeInfo, args ...interface{}) bool
+	// Return true if the store should not be used as a source store.
+	FilterSource(store *storeInfo) bool
+	// Return true if the store should not be used as a target store.
+	FilterTarget(store *storeInfo) bool
 }
 
-func filterFromStore(store *storeInfo, filters []Filter, args ...interface{}) bool {
+func filterSource(store *storeInfo, filters []Filter) bool {
 	for _, filter := range filters {
-		if filter.FilterFromStore(store, args) {
+		if filter.FilterSource(store) {
 			return true
 		}
 	}
-
 	return false
 }
 
-func filterToStore(store *storeInfo, filters []Filter, args ...interface{}) bool {
+func filterTarget(store *storeInfo, filters []Filter) bool {
 	for _, filter := range filters {
-		if filter.FilterToStore(store, args) {
+		if filter.FilterTarget(store) {
 			return true
 		}
 	}
-
 	return false
 }
 
@@ -63,11 +58,11 @@ func (sf *stateFilter) filterBadStore(store *storeInfo) bool {
 	return false
 }
 
-func (sf *stateFilter) FilterFromStore(store *storeInfo, args ...interface{}) bool {
+func (sf *stateFilter) FilterSource(store *storeInfo) bool {
 	return sf.filterBadStore(store)
 }
 
-func (sf *stateFilter) FilterToStore(store *storeInfo, args ...interface{}) bool {
+func (sf *stateFilter) FilterTarget(store *storeInfo) bool {
 	return sf.filterBadStore(store)
 }
 
@@ -79,11 +74,11 @@ func newCapacityFilter(cfg *BalanceConfig) *capacityFilter {
 	return &capacityFilter{cfg: cfg}
 }
 
-func (cf *capacityFilter) FilterFromStore(store *storeInfo, args ...interface{}) bool {
+func (cf *capacityFilter) FilterSource(store *storeInfo) bool {
 	return store.usedRatio() <= cf.cfg.MinCapacityUsedRatio
 }
 
-func (cf *capacityFilter) FilterToStore(store *storeInfo, args ...interface{}) bool {
+func (cf *capacityFilter) FilterTarget(store *storeInfo) bool {
 	return store.usedRatio() >= cf.cfg.MaxCapacityUsedRatio
 }
 
@@ -95,11 +90,11 @@ func newSnapCountFilter(cfg *BalanceConfig) *snapCountFilter {
 	return &snapCountFilter{cfg: cfg}
 }
 
-func (sf *snapCountFilter) FilterFromStore(store *storeInfo, args ...interface{}) bool {
+func (sf *snapCountFilter) FilterSource(store *storeInfo) bool {
 	return uint64(store.stats.GetSendingSnapCount()) > sf.cfg.MaxSendingSnapCount
 }
 
-func (sf *snapCountFilter) FilterToStore(store *storeInfo, args ...interface{}) bool {
+func (sf *snapCountFilter) FilterTarget(store *storeInfo) bool {
 	return uint64(store.stats.GetReceivingSnapCount()) > sf.cfg.MaxReceivingSnapCount ||
 		uint64(store.stats.GetApplyingSnapCount()) > sf.cfg.MaxApplyingSnapCount
 }
@@ -112,10 +107,10 @@ func newLeaderCountFilter(cfg *BalanceConfig) *leaderCountFilter {
 	return &leaderCountFilter{cfg: cfg}
 }
 
-func (lf *leaderCountFilter) FilterFromStore(store *storeInfo, args ...interface{}) bool {
+func (lf *leaderCountFilter) FilterSource(store *storeInfo) bool {
 	return uint64(store.stats.LeaderRegionCount) < lf.cfg.MaxLeaderCount
 }
 
-func (lf *leaderCountFilter) FilterToStore(store *storeInfo, args ...interface{}) bool {
+func (lf *leaderCountFilter) FilterTarget(store *storeInfo) bool {
 	return false
 }

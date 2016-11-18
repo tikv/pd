@@ -50,7 +50,7 @@ func selectFromStore(stores []*storeInfo, excluded map[uint64]struct{}, filters 
 			continue
 		}
 
-		if filterFromStore(store, filters) {
+		if filterSource(store, filters) {
 			continue
 		}
 
@@ -87,7 +87,7 @@ func selectToStore(stores []*storeInfo, excluded map[uint64]struct{}, filters []
 			continue
 		}
 
-		if filterToStore(store, filters) {
+		if filterTarget(store, filters) {
 			continue
 		}
 
