@@ -34,10 +34,7 @@ func newBalanceSelector(scorer Scorer, filters []Filter) *balanceSelector {
 func (s *balanceSelector) SelectSource(stores []*storeInfo, filters ...Filter) *storeInfo {
 	var result *storeInfo
 	for _, store := range stores {
-		if filterSource(store, filters) {
-			continue
-		}
-		if filterSource(store, s.filters) {
+		if filterSource(store, append(s.filters, filters...)) {
 			continue
 		}
 		if result == nil || s.scorer.Score(result) < s.scorer.Score(store) {
@@ -50,10 +47,7 @@ func (s *balanceSelector) SelectSource(stores []*storeInfo, filters ...Filter) *
 func (s *balanceSelector) SelectTarget(stores []*storeInfo, filters ...Filter) *storeInfo {
 	var result *storeInfo
 	for _, store := range stores {
-		if filterTarget(store, filters) {
-			continue
-		}
-		if filterTarget(store, s.filters) {
+		if filterTarget(store, append(s.filters, filters...)) {
 			continue
 		}
 		if result == nil || s.scorer.Score(result) > s.scorer.Score(store) {
