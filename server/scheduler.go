@@ -26,16 +26,10 @@ func scheduleLeader(cluster *clusterInfo, s Selector) (*regionInfo, *storeInfo, 
 		return nil, nil, nil
 	}
 
-	followers := region.GetFollowers()
-	targetStores := make([]*storeInfo, 0, len(followers))
-	for id := range followers {
-		if store := cluster.getStore(id); store != nil {
-			targetStores = append(targetStores, store)
-		}
-	}
+	targetStores := cluster.getRegionStores(region)
 
 	target := s.SelectTarget(targetStores)
-	if target == nil {
+	if target == nil || target.GetId() == source.GetId() {
 		return nil, nil, nil
 	}
 
