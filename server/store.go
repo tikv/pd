@@ -98,17 +98,6 @@ func (s *storeInfo) resourceScores() []int {
 	return scores
 }
 
-func (s *storeInfo) getScore(kind ResourceKind) float64 {
-	switch kind {
-	case leaderKind:
-		return s.leaderRatio()
-	case storageKind:
-		return s.usedRatio()
-	default:
-		return 0
-	}
-}
-
 // StoreStatus contains information about a store's status.
 type StoreStatus struct {
 	*pdpb.StoreStats
