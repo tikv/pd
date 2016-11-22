@@ -39,6 +39,28 @@ func filterTarget(store *storeInfo, filters []Filter) bool {
 	return false
 }
 
+type excludedFilter struct {
+	sources map[uint64]struct{}
+	targets map[uint64]struct{}
+}
+
+func newExcludedFilter(sources, targets map[uint64]struct{}) *excludedFilter {
+	return &excludedFilter{
+		sources: sources,
+		targets: targets,
+	}
+}
+
+func (f *excludedFilter) FilterSource(store *storeInfo) bool {
+	_, ok := f.sources[store.GetId()]
+	return ok
+}
+
+func (f *excludedFilter) FilterTarget(store *storeInfo) bool {
+	_, ok := f.targets[store.GetId()]
+	return ok
+}
+
 type stateFilter struct {
 	cfg *BalanceConfig
 }
