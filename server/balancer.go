@@ -33,92 +33,20 @@ type Balancer interface {
 	ScoreType() scoreType
 }
 
-func selectFromStore(stores []*storeInfo, excluded map[uint64]struct{}, filters []Filter, st scoreType) *storeInfo {
-	score := 0
-	scorer := newScorer(st)
-	if scorer == nil {
-		return nil
-	}
-
-	var resultStore *storeInfo
-	for _, store := range stores {
-		if store == nil {
-			continue
-		}
-
-		if _, ok := excluded[store.GetId()]; ok {
-			continue
-		}
-
-		if filterSource(store, filters) {
-			continue
-		}
-
-		currScore := scorer.Score(store)
-		if resultStore == nil {
-			resultStore = store
-			score = currScore
-			continue
-		}
-
-		if currScore > score {
-			score = currScore
-			resultStore = store
-		}
-	}
-
-	return resultStore
-}
-
-func selectToStore(stores []*storeInfo, excluded map[uint64]struct{}, filters []Filter, st scoreType) *storeInfo {
-	score := 0
-	scorer := newScorer(st)
-	if scorer == nil {
-		return nil
-	}
-
-	var resultStore *storeInfo
-	for _, store := range stores {
-		if store == nil {
-			continue
-		}
-
-		if _, ok := excluded[store.GetId()]; ok {
-			continue
-		}
-
-		if filterTarget(store, filters) {
-			continue
-		}
-
-		currScore := scorer.Score(store)
-		if resultStore == nil {
-			resultStore = store
-			score = currScore
-			continue
-		}
-
-		if currScore < score {
-			score = currScore
-			resultStore = store
-		}
-	}
-
-	return resultStore
-}
-
 type capacityBalancer struct {
-	filters []Filter
-	st      scoreType
-
-	cfg *BalanceConfig
+	cfg      *BalanceConfig
+	st       scoreType
+	selector Selector
 }
 
 func newCapacityBalancer(cfg *BalanceConfig) *capacityBalancer {
+	var filters []Filter
+	filters = append(filters, newStateFilter(cfg))
+	filters = append(filters, newCapacityFilter(cfg))
+	filters = append(filters, newSnapCountFilter(cfg))
+
 	cb := &capacityBalancer{cfg: cfg, st: capacityScore}
-	cb.filters = append(cb.filters, newStateFilter(cfg))
-	cb.filters = append(cb.filters, newCapacityFilter(cfg))
-	cb.filters = append(cb.filters, newSnapCountFilter(cfg))
+	cb.selector = newBalanceSelector(newScorer(cb.st), filters)
 	return cb
 }
 
@@ -126,52 +54,11 @@ func (cb *capacityBalancer) ScoreType() scoreType {
 	return cb.st
 }
 
-func (cb *capacityBalancer) selectBalanceRegion(cluster *clusterInfo, stores []*storeInfo) (*regionInfo, *metapb.Peer) {
-	store := selectFromStore(stores, nil, cb.filters, cb.st)
-	if store == nil {
-		return nil, nil
-	}
-
-	storeID := store.GetId()
-	region := cluster.randFollowerRegion(storeID)
-	if region == nil {
-		region = cluster.randLeaderRegion(storeID)
-	}
-	if region == nil {
-		return nil, nil
-	}
-	return region, region.GetStorePeer(storeID)
-}
-
-func (cb *capacityBalancer) selectAddPeer(cluster *clusterInfo, stores []*storeInfo, excluded map[uint64]struct{}) (*metapb.Peer, error) {
-	store := selectToStore(stores, excluded, cb.filters, cb.st)
-	if store == nil {
-		return nil, nil
-	}
-	return cluster.allocPeer(store.GetId())
-}
-
-func (cb *capacityBalancer) selectRemovePeer(cluster *clusterInfo, peers map[uint64]*metapb.Peer) (*metapb.Peer, error) {
-	stores := make([]*storeInfo, 0, len(peers))
-	for storeID := range peers {
-		stores = append(stores, cluster.getStore(storeID))
-	}
-
-	store := selectFromStore(stores, nil, nil, cb.st)
-	if store == nil {
-		return nil, nil
-	}
-
-	storeID := store.GetId()
-	return peers[storeID], nil
-}
-
 // Balance tries to select a store region to do balance.
 // The balance type is follower balance.
 func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*score, *balanceOperator, error) {
-	stores := cluster.getStores()
-	region, peer := cb.selectBalanceRegion(cluster, stores)
-	if region == nil || peer == nil {
+	region, source, target := scheduleStorage(cluster, cb.selector)
+	if region == nil {
 		return nil, nil, nil
 	}
 
@@ -180,13 +67,10 @@ func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*score, *balanceOpera
 		return nil, nil, nil
 	}
 
-	// Select one store to add new peer.
-	newPeer, err := cb.selectAddPeer(cluster, stores, region.GetStoreIds())
+	peer := region.GetStorePeer(source.GetId())
+	newPeer, err := cluster.allocPeer(target.GetId())
 	if err != nil {
 		return nil, nil, errors.Trace(err)
-	}
-	if newPeer == nil {
-		return nil, nil, nil
 	}
 
 	// Check and get diff score.
@@ -256,12 +140,16 @@ func newReplicaBalancer(region *regionInfo, cfg *BalanceConfig) *replicaBalancer
 
 func (rb *replicaBalancer) addPeer(cluster *clusterInfo) (*balanceOperator, error) {
 	stores := cluster.getStores()
-	peer, err := rb.selectAddPeer(cluster, stores, rb.region.GetStoreIds())
+
+	filter := newExcludedFilter(nil, rb.region.GetStoreIds())
+	target := rb.selector.SelectTarget(stores, filter)
+	if target == nil {
+		return nil, nil
+	}
+
+	peer, err := cluster.allocPeer(target.GetId())
 	if err != nil {
 		return nil, errors.Trace(err)
-	}
-	if peer == nil {
-		return nil, nil
 	}
 
 	addPeerOperator := newAddPeerOperator(rb.region.GetId(), peer)
@@ -274,10 +162,10 @@ func (rb *replicaBalancer) removePeer(cluster *clusterInfo, badPeers []*metapb.P
 	if len(badPeers) >= 1 {
 		peer = badPeers[0]
 	} else {
-		var err error
-		peer, err = rb.selectRemovePeer(cluster, rb.region.GetFollowers())
-		if err != nil {
-			return nil, errors.Trace(err)
+		stores := cluster.getFollowerStores(rb.region)
+		source := rb.selector.SelectSource(stores)
+		if source != nil {
+			peer = rb.region.GetStorePeer(source.GetId())
 		}
 	}
 

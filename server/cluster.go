@@ -516,32 +516,28 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 // NewAddPeerOperator creates an operator to add a peer to the region.
 // If storeID is 0, it will be chosen according to the balance rules.
 func (c *RaftCluster) NewAddPeerOperator(regionID uint64, storeID uint64) (Operator, error) {
-	region := c.cachedCluster.getRegion(regionID)
+	cluster := c.cachedCluster
+
+	region := cluster.getRegion(regionID)
 	if region == nil {
 		return nil, errRegionNotFound(regionID)
 	}
 
-	var (
-		peer *metapb.Peer
-		err  error
-	)
-
-	cluster := c.cachedCluster
-	if storeID == 0 {
-		cb := newCapacityBalancer(&c.s.cfg.BalanceCfg)
-		peer, err = cb.selectAddPeer(cluster, cluster.getStores(), region.GetStoreIds())
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
+	var target *storeInfo
+	if storeID != 0 {
+		target = cluster.getStore(storeID)
 	} else {
-		_, _, err = c.GetStore(storeID)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		peer, err = cluster.allocPeer(storeID)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
+		cb := newCapacityBalancer(&c.s.cfg.BalanceCfg)
+		filter := newExcludedFilter(nil, region.GetStoreIds())
+		target = cb.selector.SelectTarget(cluster.getStores(), filter)
+	}
+	if target == nil {
+		return nil, errors.New("No store available")
+	}
+
+	peer, err := cluster.allocPeer(target.GetId())
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
 	return newAddPeerOperator(regionID, peer), nil
