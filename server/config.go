@@ -74,8 +74,8 @@ type Config struct {
 	nextRetryDelay             time.Duration
 	disableStrictReconfigCheck bool
 
-	tickMs     uint
-	electionMs uint
+	tickMs     uint64
+	electionMs uint64
 
 	configFile string
 }
@@ -115,11 +115,13 @@ const (
 	defaultPeerUrls            = "http://127.0.0.1:2380"
 	defualtInitialClusterState = embed.ClusterStateFlagNew
 
+	// etcd use 100ms for heartbeat and 1s for election timeout.
+	// We can enlarge both a little to reduce the network aggression.
 	// now embed etcd use TickMs for heartbeat, we will update
 	// after embed etcd decouples tick and heartbeat.
-	defaultTickMs = uint(1000)
+	defaultTickMs = uint64(500)
 	// embed etcd has a check that `5 * tick > election`
-	defaultElectionMs = uint(6000)
+	defaultElectionMs = uint64(3000)
 )
 
 func adjustString(v *string, defValue string) {
@@ -234,8 +236,8 @@ func (c *Config) adjust() error {
 		c.nextRetryDelay = defaultNextRetryDelay
 	}
 
-	c.tickMs = defaultTickMs
-	c.electionMs = defaultElectionMs
+	adjustUint64(&c.tickMs, defaultTickMs)
+	adjustUint64(&c.electionMs, defaultElectionMs)
 
 	c.BalanceCfg.adjust()
 	return nil
@@ -404,8 +406,8 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ClusterState = c.InitialClusterState
 	cfg.EnablePprof = true
 	cfg.StrictReconfigCheck = !c.disableStrictReconfigCheck
-	cfg.TickMs = c.tickMs
-	cfg.ElectionMs = c.electionMs
+	cfg.TickMs = uint(c.tickMs)
+	cfg.ElectionMs = uint(c.electionMs)
 
 	var err error
 
