@@ -147,14 +147,18 @@ func (c *conn) handleGetRegionByID(req *pdpb.Request) (*pdpb.Response, error) {
 	if request == nil {
 		return nil, errors.Errorf("invalid get region by id command, but %v", req)
 	}
+	regionID := request.GetRegionId()
 
 	cluster, err := c.getRaftCluster()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	id := request.GetRegionId()
-	region, leader := cluster.GetRegionByID(id)
+	if cluster.cachedCluster.isRegionShutdown(regionID) {
+		return newRegionIsShutdownError(), nil
+	}
+
+	region, leader := cluster.GetRegionByID(regionID)
 	return &pdpb.Response{
 		GetRegionById: &pdpb.GetRegionResponse{
 			Region: region,
@@ -181,6 +185,15 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 	}
 	if region.Leader == nil {
 		return nil, errors.Errorf("invalid request leader, %v", request)
+	}
+
+	if cluster.cachedCluster.isRegionShutdown(region.GetId()) {
+		res := &pdpb.RegionHeartbeatResponse{
+			RegionShutdown: &pdpb.RegionShutdown{
+				Region: region.Region,
+			},
+		}
+		return &pdpb.Response{RegionHeartbeat: res}, nil
 	}
 
 	err = cluster.cachedCluster.handleRegionHeartbeat(region)
@@ -323,6 +336,27 @@ func (c *conn) handleAskSplit(req *pdpb.Request) (*pdpb.Response, error) {
 
 	return &pdpb.Response{
 		AskSplit: split,
+	}, nil
+}
+
+func (c *conn) handleAskMerge(req *pdpb.Request) (*pdpb.Response, error) {
+	request := req.GetAskMerge()
+	if request.GetFromRegion() == nil {
+		return nil, errors.Errorf("invalid ask merge request: %v", request)
+	}
+
+	cluster, err := c.getRaftCluster()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	response, err := cluster.handleAskMerge(request)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return &pdpb.Response{
+		AskMerge: response,
 	}, nil
 }
 

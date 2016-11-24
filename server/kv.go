@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
@@ -62,6 +64,14 @@ func (kv *kv) regionPath(regionID uint64) string {
 	return path.Join(kv.clusterPath, "r", fmt.Sprintf("%020d", regionID))
 }
 
+func (kv *kv) mergePath(regionID uint64) string {
+	return path.Join(kv.clusterPath, "merge", fmt.Sprintf("%020d", regionID))
+}
+
+func (kv *kv) shutdownPath(regionID uint64) string {
+	return path.Join(kv.clusterPath, "shutdown", fmt.Sprintf("%020d", regionID))
+}
+
 func (kv *kv) loadMeta(meta *metapb.Cluster) (bool, error) {
 	return kv.loadProto(kv.clusterPath, meta)
 }
@@ -84,6 +94,44 @@ func (kv *kv) loadRegion(regionID uint64, region *metapb.Region) (bool, error) {
 
 func (kv *kv) saveRegion(region *metapb.Region) error {
 	return kv.saveProto(kv.regionPath(region.GetId()), region)
+}
+
+func (kv *kv) loadRegionMerge(fromRegionID uint64) (uint64, bool, error) {
+	value, err := kv.load(kv.mergePath(1))
+	if err != nil {
+		return 0, false, errors.Trace(err)
+	}
+	if value == nil {
+		return 0, false, nil
+	}
+	intoRegionID, err := bytesToUint64(value)
+	return intoRegionID, true, errors.Trace(err)
+}
+
+func (kv *kv) markRegionMerge(fromRegionID, intoRegionID uint64) error {
+	intoValue := uint64ToBytes(intoRegionID)
+	return kv.save(kv.mergePath(fromRegionID), string(intoValue))
+}
+
+func (kv *kv) clearRegionMerge(fromRegionID uint64) error {
+	return kv.delete(kv.mergePath(fromRegionID))
+}
+
+func (kv *kv) commitRegionMerge(fromRegionID uint64, intoRegion *metapb.Region) error {
+	shutdownTime := uint64ToBytes(uint64(time.Now().Unix()))
+
+	intoValue, err := intoRegion.Marshal()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	ops := make([]clientv3.Op, 4)
+	ops[0] = clientv3.OpPut(kv.shutdownPath(fromRegionID), string(shutdownTime))
+	ops[1] = clientv3.OpDelete(kv.mergePath(fromRegionID))
+	ops[2] = clientv3.OpDelete(kv.regionPath(fromRegionID))
+	ops[3] = clientv3.OpPut(kv.regionPath(intoRegion.GetId()), string(intoValue))
+
+	return kv.commit(ops...)
 }
 
 func (kv *kv) loadStores(stores *storesInfo, rangeLimit int64) error {
@@ -144,6 +192,79 @@ func (kv *kv) loadRegions(regions *regionsInfo, rangeLimit int64) error {
 	}
 }
 
+func (kv *kv) loadMergeRegions(regions *regionsInfo, rangeLimit int64) error {
+	nextID := uint64(0)
+	endRegion := kv.mergePath(math.MaxUint64)
+	withRange := clientv3.WithRange(endRegion)
+	withLimit := clientv3.WithLimit(rangeLimit)
+
+	for {
+		key := kv.mergePath(nextID)
+		resp, err := kvGet(kv.client, key, withRange, withLimit)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		if len(resp.Kvs) == 0 {
+			return nil
+		}
+
+		for _, item := range resp.Kvs {
+			key := string(item.Key)
+			elems := strings.Split(key, "/merge/")
+			if len(elems) != 2 {
+				return errors.Errorf("invalid merge region key %v", key)
+			}
+
+			fromRegionID, err := strconv.ParseUint(elems[1], 10, 64)
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			intoRegionID, err := bytesToUint64(item.Value)
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			nextID = fromRegionID + 1
+			regions.markRegionMerge(fromRegionID, intoRegionID)
+		}
+	}
+}
+
+func (kv *kv) loadShutdownRegions(regions *regionsInfo, rangeLimit int64) error {
+	nextID := uint64(0)
+	endRegion := kv.shutdownPath(math.MaxUint64)
+	withRange := clientv3.WithRange(endRegion)
+	withLimit := clientv3.WithLimit(rangeLimit)
+
+	for {
+		key := kv.shutdownPath(nextID)
+		resp, err := kvGet(kv.client, key, withRange, withLimit)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		if len(resp.Kvs) == 0 {
+			return nil
+		}
+
+		for _, item := range resp.Kvs {
+			key := string(item.Key)
+			elems := strings.Split(key, "/shutdown/")
+			if len(elems) != 2 {
+				return errors.Errorf("invalid shutdown region key %v", key)
+			}
+
+			regionID, err := strconv.ParseUint(elems[1], 10, 64)
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			nextID = regionID + 1
+			regions.markRegionShutdown(regionID)
+		}
+	}
+}
+
 func (kv *kv) loadProto(key string, msg proto.Message) (bool, error) {
 	value, err := kv.load(key)
 	if err != nil {
@@ -177,7 +298,15 @@ func (kv *kv) load(key string) ([]byte, error) {
 }
 
 func (kv *kv) save(key, value string) error {
-	resp, err := kv.txn().Then(clientv3.OpPut(key, value)).Commit()
+	return kv.commit(clientv3.OpPut(key, value))
+}
+
+func (kv *kv) delete(key string) error {
+	return kv.commit(clientv3.OpDelete(key))
+}
+
+func (kv *kv) commit(ops ...clientv3.Op) error {
+	resp, err := kv.txn().Then(ops...).Commit()
 	if err != nil {
 		return errors.Trace(err)
 	}

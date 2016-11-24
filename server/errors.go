@@ -64,3 +64,16 @@ func newStoreIsTombstoneError() *pdpb.Response {
 
 	return r
 }
+
+func newRegionIsShutdownError() *pdpb.Response {
+	r := &pdpb.Response{
+		Header: &pdpb.ResponseHeader{},
+	}
+
+	r.Header.Error = &pdpb.Error{
+		Message:    proto.String("region is shutdown"),
+		IsShutdown: &pdpb.RegionIsShutdownError{},
+	}
+
+	return r
+}

@@ -20,10 +20,12 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/ngaut/log"
 	. "github.com/pingcap/check"
 	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/testutil"
 )
 
 var _ = Suite(&testClusterWorkerSuite{})
@@ -702,4 +704,136 @@ func (s *testClusterWorkerSuite) TestBalanceOperatorPriority(c *C) {
 	c.Assert(resp, DeepEquals, removePeerOperator.ChangePeer)
 	op = bw.getBalanceOperator(region.GetId())
 	c.Assert(op.Type, Equals, adminOP)
+}
+
+func newRegionHeartbeatRequest(clusterID uint64, region *metapb.Region, leader *metapb.Peer) *pdpb.Request {
+	return &pdpb.Request{
+		Header:  newRequestHeader(clusterID),
+		CmdType: pdpb.CommandType_RegionHeartbeat,
+		RegionHeartbeat: &pdpb.RegionHeartbeatRequest{
+			Leader: leader,
+			Region: region,
+		},
+	}
+}
+
+func (s *testClusterWorkerSuite) TestRegionMerge(c *C) {
+	cluster := s.svr.GetRaftCluster()
+	clusterID := s.svr.clusterID
+
+	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	conn, err := rpcConnect(leader.GetAddr())
+	c.Assert(err, IsNil)
+	defer conn.Close()
+
+	region1 := &metapb.Region{
+		Id:          1111,
+		StartKey:    []byte("a"),
+		EndKey:      []byte("b"),
+		RegionEpoch: &metapb.RegionEpoch{Version: 10, ConfVer: 10},
+		Peers: []*metapb.Peer{
+			&metapb.Peer{Id: 1, StoreId: 1},
+			&metapb.Peer{Id: 2, StoreId: 2},
+			&metapb.Peer{Id: 3, StoreId: 3},
+		},
+	}
+	leader1 := region1.GetPeers()[0]
+	region2 := &metapb.Region{
+		Id:          2222,
+		StartKey:    []byte("b"),
+		EndKey:      []byte("c"),
+		RegionEpoch: &metapb.RegionEpoch{Version: 10, ConfVer: 10},
+		Peers: []*metapb.Peer{
+			&metapb.Peer{Id: 3, StoreId: 3},
+			&metapb.Peer{Id: 4, StoreId: 4},
+			&metapb.Peer{Id: 5, StoreId: 5},
+		},
+	}
+	leader2 := region2.GetPeers()[0]
+
+	mergedRegion := &metapb.Region{
+		Id:          2222,
+		StartKey:    []byte("a"),
+		EndKey:      []byte("c"),
+		RegionEpoch: &metapb.RegionEpoch{Version: 11, ConfVer: 10},
+		Peers: []*metapb.Peer{
+			&metapb.Peer{Id: 1, StoreId: 1},
+			&metapb.Peer{Id: 2, StoreId: 2},
+		},
+	}
+	mergedLeader := mergedRegion.GetPeers()[0]
+
+	heartbeatRegion(c, conn, clusterID, 0, region1, leader1)
+	heartbeatRegion(c, conn, clusterID, 0, region2, leader2)
+
+	getRegion := &pdpb.Request{
+		Header:  newRequestHeader(clusterID),
+		CmdType: pdpb.CommandType_GetRegionByID,
+		GetRegionById: &pdpb.GetRegionByIDRequest{
+			RegionId: region1.GetId(),
+		},
+	}
+	resp := testutil.MustRPCCall(c, conn, getRegion)
+	c.Assert(resp.GetHeader().GetError(), IsNil)
+
+	askMerge := &pdpb.Request{
+		Header:  newRequestHeader(clusterID),
+		CmdType: pdpb.CommandType_AskMerge,
+		AskMerge: &pdpb.AskMergeRequest{
+			FromRegion: region1,
+		},
+	}
+	log.Debug(testutil.MustRPCCall(c, conn, askMerge))
+
+	c.Assert(cluster.cachedCluster.isRegionMerging(region1.GetId()), IsTrue)
+	c.Assert(cluster.cachedCluster.isRegionMerging(region2.GetId()), IsTrue)
+	c.Assert(heartbeatRegion(c, conn, clusterID, 0, region2, leader2), IsNil)
+
+	// Add region2's peers.
+	// (1, 2, 3) -> (1, 2, 3, 4)
+	change := heartbeatRegion(c, conn, clusterID, 0, region1, leader1)
+	c.Assert(change.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(change.GetPeer().GetStoreId(), Equals, region2.GetPeers()[1].GetStoreId())
+	region1.RegionEpoch.ConfVer++
+	region1.Peers = append(region1.Peers, region2.GetPeers()[1])
+	// (1, 2, 3) -> (1, 2, 3, 4, 5)
+	change = heartbeatRegion(c, conn, clusterID, 0, region1, leader1)
+	c.Assert(change.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(change.GetPeer().GetStoreId(), Equals, region2.GetPeers()[2].GetStoreId())
+	region1.RegionEpoch.ConfVer++
+	region1.Peers = append(region1.Peers, region2.GetPeers()[2])
+
+	// Remove region1's peers.
+	// (1, 2, 3, 4, 5) -> (2, 3, 4, 5)
+	change = heartbeatRegion(c, conn, clusterID, 0, region1, leader1)
+	c.Assert(change.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(change.GetPeer().GetStoreId(), Equals, region1.GetPeers()[0].GetStoreId())
+	region1.RegionEpoch.ConfVer++
+	region1.Peers = region1.Peers[1:]
+	// (2, 3, 4, 5) -> (3, 4, 5)
+	change = heartbeatRegion(c, conn, clusterID, 0, region1, leader1)
+	c.Assert(change.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(change.GetPeer().GetStoreId(), Equals, region1.GetPeers()[0].GetStoreId())
+	region1.RegionEpoch.ConfVer++
+	region1.Peers = region1.Peers[1:]
+
+	// Peers are match.
+	c.Assert(heartbeatRegion(c, conn, clusterID, 0, region1, leader1), IsNil)
+
+	// Merge.
+	resp = testutil.MustRPCCall(c, conn, newRegionHeartbeatRequest(clusterID, region2, leader2))
+	merge := resp.GetRegionHeartbeat().GetRegionMerge()
+	c.Assert(merge.GetFromRegion().GetId(), Equals, region1.GetId())
+
+	// Commit.
+	heartbeatRegion(c, conn, clusterID, 0, mergedRegion, mergedLeader)
+	c.Assert(cluster.cachedCluster.isRegionShutdown(region1.GetId()), IsTrue)
+
+	// Shutdown.
+	resp = testutil.MustRPCCall(c, conn, newRegionHeartbeatRequest(clusterID, region1, leader1))
+	shutdown := resp.GetRegionHeartbeat().GetRegionShutdown()
+	c.Assert(shutdown.GetRegion().GetId(), Equals, region1.GetId())
+
+	resp = testutil.MustRPCCall(c, conn, getRegion)
+	c.Assert(resp.GetHeader().GetError(), NotNil)
 }

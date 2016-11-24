@@ -19,11 +19,83 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
+func (c *RaftCluster) checkRegionMerge(region *regionInfo) (*pdpb.RegionHeartbeatResponse, error) {
+	cluster := c.cachedCluster
+
+	fromRegion, intoRegion := cluster.getMergingRegions(region.GetId())
+	if fromRegion == nil || intoRegion == nil {
+		return nil, nil
+	}
+
+	// Tell region to do nothing.
+	none := &pdpb.RegionHeartbeatResponse{}
+
+	for _, peer := range intoRegion.GetPeers() {
+		storeID := peer.GetStoreId()
+		if fromRegion.GetStorePeer(storeID) == nil {
+			// Into region do nothing if peers are not match.
+			if region.GetId() == intoRegion.GetId() {
+				return none, nil
+			}
+			newPeer, err := cluster.allocPeer(storeID)
+			if err != nil {
+				return nil, errors.Trace(err)
+			}
+			return &pdpb.RegionHeartbeatResponse{
+				ChangePeer: &pdpb.ChangePeer{
+					ChangeType: raftpb.ConfChangeType_AddNode.Enum(),
+					Peer:       newPeer,
+				},
+			}, nil
+		}
+	}
+
+	for _, peer := range fromRegion.GetPeers() {
+		storeID := peer.GetStoreId()
+		if intoRegion.GetStorePeer(storeID) == nil {
+			// Into region do nothing if peers are not match.
+			if region.GetId() == intoRegion.GetId() {
+				return none, nil
+			}
+			return &pdpb.RegionHeartbeatResponse{
+				ChangePeer: &pdpb.ChangePeer{
+					ChangeType: raftpb.ConfChangeType_RemoveNode.Enum(),
+					Peer:       peer,
+				},
+			}, nil
+		}
+	}
+
+	// If we reach here, from region and into region peers are match.
+
+	// From region do nothing if peers are match.
+	if region.GetId() == fromRegion.GetId() {
+		return none, nil
+	}
+
+	// Into region begin to merge if peers are match.
+	return &pdpb.RegionHeartbeatResponse{
+		RegionMerge: &pdpb.RegionMerge{
+			FromRegion: fromRegion.Region,
+		},
+	}, nil
+}
+
 func (c *RaftCluster) handleRegionHeartbeat(region *regionInfo) (*pdpb.RegionHeartbeatResponse, error) {
+	// We must not do balance if region is merging.
+	res, err := c.checkRegionMerge(region)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if res != nil {
+		return res, nil
+	}
+
 	// If the region peer count is 0, then we should not handle this.
 	if len(region.GetPeers()) == 0 {
 		log.Warnf("invalid region, zero region peer count - %v", region)
@@ -33,7 +105,7 @@ func (c *RaftCluster) handleRegionHeartbeat(region *regionInfo) (*pdpb.RegionHea
 	bw := c.balancerWorker
 	regionID := region.GetId()
 
-	err := bw.checkReplicas(region)
+	err = bw.checkReplicas(region)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -60,36 +132,30 @@ func (c *RaftCluster) handleRegionHeartbeat(region *regionInfo) (*pdpb.RegionHea
 }
 
 func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
-	reqRegion := request.GetRegion()
-	startKey := reqRegion.GetStartKey()
-	region, _ := c.getRegion(startKey)
+	region := request.GetRegion()
 
-	// If the request epoch is less than current region epoch, then returns an error.
-	reqRegionEpoch := reqRegion.GetRegionEpoch()
-	regionEpoch := region.GetRegionEpoch()
-	if reqRegionEpoch.GetVersion() < regionEpoch.GetVersion() ||
-		reqRegionEpoch.GetConfVer() < regionEpoch.GetConfVer() {
-		return nil, errors.Errorf("invalid region epoch, request: %v, currenrt: %v", reqRegionEpoch, regionEpoch)
-	}
-
-	newRegionID, err := c.s.idAlloc.Alloc()
+	newRegionID, newPeerIDs, err := c.cachedCluster.handleRegionSplit(region)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	peerIDs := make([]uint64, len(request.Region.Peers))
-	for i := 0; i < len(peerIDs); i++ {
-		if peerIDs[i], err = c.s.idAlloc.Alloc(); err != nil {
-			return nil, errors.Trace(err)
-		}
-	}
-
-	split := &pdpb.AskSplitResponse{
+	return &pdpb.AskSplitResponse{
 		NewRegionId: newRegionID,
-		NewPeerIds:  peerIDs,
+		NewPeerIds:  newPeerIDs,
+	}, nil
+}
+
+func (c *RaftCluster) handleAskMerge(request *pdpb.AskMergeRequest) (*pdpb.AskMergeResponse, error) {
+	fromRegion := request.GetFromRegion()
+
+	intoRegion, err := c.cachedCluster.handleRegionMerge(fromRegion)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
-	return split, nil
+	return &pdpb.AskMergeResponse{
+		IntoRegion: intoRegion,
+	}, nil
 }
 
 func (c *RaftCluster) checkSplitRegion(left *metapb.Region, right *metapb.Region) error {

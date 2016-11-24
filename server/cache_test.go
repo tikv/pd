@@ -113,7 +113,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 		checkRegion(c, cache.searchRegion(regionKey), region)
 		checkRegions(c, cache, regions[0:(i+1)])
 
-		cache.removeRegion(region)
+		cache.removeRegion(region.GetId())
 		c.Assert(cache.getRegion(i), IsNil)
 		c.Assert(cache.searchRegion(regionKey), IsNil)
 		checkRegions(c, cache, regions[0:i])

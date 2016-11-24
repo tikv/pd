@@ -14,6 +14,7 @@
 package server
 
 import (
+	"bytes"
 	"sync"
 	"time"
 
@@ -30,6 +31,12 @@ var (
 	}
 	errRegionNotFound = func(regionID uint64) error {
 		return errors.Errorf("region %v not found", regionID)
+	}
+	errRegionIsMerging = func(regionID uint64) error {
+		return errors.Errorf("region %v is merging", regionID)
+	}
+	errRegionIsShutdown = func(regionID uint64) error {
+		return errors.Errorf("region %v is shutdown", regionID)
 	}
 	errRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
 		return errors.Errorf("region is stale: region %v origin %v", region, origin)
@@ -90,6 +97,7 @@ func (s *storesInfo) getStoreCount() int {
 }
 
 type regionsInfo struct {
+	*mergeInfo
 	tree      *regionTree
 	regions   map[uint64]*regionInfo
 	leaders   map[uint64]map[uint64]*regionInfo
@@ -98,6 +106,7 @@ type regionsInfo struct {
 
 func newRegionsInfo() *regionsInfo {
 	return &regionsInfo{
+		mergeInfo: newMergeInfo(),
 		tree:      newRegionTree(),
 		regions:   make(map[uint64]*regionInfo),
 		leaders:   make(map[uint64]map[uint64]*regionInfo),
@@ -114,9 +123,7 @@ func (r *regionsInfo) getRegion(regionID uint64) *regionInfo {
 }
 
 func (r *regionsInfo) setRegion(region *regionInfo) {
-	if origin, ok := r.regions[region.GetId()]; ok {
-		r.removeRegion(origin)
-	}
+	r.removeRegion(region.GetId())
 	r.addRegion(region)
 }
 
@@ -152,7 +159,12 @@ func (r *regionsInfo) addRegion(region *regionInfo) {
 	}
 }
 
-func (r *regionsInfo) removeRegion(region *regionInfo) {
+func (r *regionsInfo) removeRegion(regionID uint64) {
+	region, ok := r.regions[regionID]
+	if !ok {
+		return
+	}
+
 	// Remove from tree and regions.
 	r.tree.remove(region.Region)
 	delete(r.regions, region.GetId())
@@ -210,6 +222,9 @@ func (r *regionsInfo) randLeaderRegion(storeID uint64) *regionInfo {
 		if region.Leader == nil {
 			log.Fatalf("rand leader region without leader: store %v region %v", storeID, region)
 		}
+		if r.isRegionMerging(region.GetId()) {
+			continue
+		}
 		return region.clone()
 	}
 	return nil
@@ -220,9 +235,27 @@ func (r *regionsInfo) randFollowerRegion(storeID uint64) *regionInfo {
 		if region.Leader == nil {
 			log.Fatalf("rand follower region without leader: store %v region %v", storeID, region)
 		}
+		if r.isRegionMerging(region.GetId()) {
+			continue
+		}
 		return region.clone()
 	}
 	return nil
+}
+
+func (r *regionsInfo) getMergingRegions(regionID uint64) (*regionInfo, *regionInfo) {
+	fromRegionID, intoRegionID, ok := r.mergeInfo.getMergingRegions(regionID)
+	if !ok {
+		return nil, nil
+	}
+	return r.regions[fromRegionID], r.regions[intoRegionID]
+}
+
+func (r *regionsInfo) commitRegionMerge(fromRegionID uint64, intoRegion *regionInfo) {
+	r.markRegionShutdown(fromRegionID)
+	r.clearRegionMerge(fromRegionID)
+	r.removeRegion(fromRegionID)
+	r.setRegion(intoRegion)
 }
 
 type clusterInfo struct {
@@ -268,6 +301,18 @@ func loadClusterInfo(id IDAllocator, kv *kv) (*clusterInfo, error) {
 		return nil, errors.Trace(err)
 	}
 	log.Infof("load %v regions cost %v", c.regions.getRegionCount(), time.Since(start))
+
+	start = time.Now()
+	if err := kv.loadMergeRegions(c.regions, kvRangeLimit); err != nil {
+		return nil, errors.Trace(err)
+	}
+	log.Infof("load %v merge regions cost %v", c.regions.getMergingRegionCount(), time.Since(start))
+
+	start = time.Now()
+	if err := kv.loadShutdownRegions(c.regions, kvRangeLimit); err != nil {
+		return nil, errors.Trace(err)
+	}
+	log.Infof("load %v shutdown regions cost %v", c.regions.getShutdownRegionCount(), time.Since(start))
 
 	return c, nil
 }
@@ -420,6 +465,24 @@ func (c *clusterInfo) randFollowerRegion(storeID uint64) *regionInfo {
 	return c.regions.randFollowerRegion(storeID)
 }
 
+func (c *clusterInfo) isRegionMerging(regionID uint64) bool {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regions.isRegionMerging(regionID)
+}
+
+func (c *clusterInfo) isRegionShutdown(regionID uint64) bool {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regions.isRegionShutdown(regionID)
+}
+
+func (c *clusterInfo) getMergingRegions(regionID uint64) (*regionInfo, *regionInfo) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regions.getMergingRegions(regionID)
+}
+
 // handleStoreHeartbeat updates the store status.
 func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.Lock()
@@ -445,6 +508,10 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 	c.Lock()
 	defer c.Unlock()
 
+	if c.regions.isRegionShutdown(region.GetId()) {
+		return errors.Trace(errRegionIsShutdown(region.GetId()))
+	}
+
 	region = region.clone()
 	origin := c.regions.getRegion(region.GetId())
 
@@ -461,6 +528,11 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 		return errors.Trace(errRegionIsStale(region.Region, origin.Region))
 	}
 
+	// Region version is updated, we need to commit or abort region merge.
+	if r.GetVersion() > o.GetVersion() && c.regions.isRegionMerging(region.GetId()) {
+		return c.handleRegionMergeHeartbeat(region)
+	}
+
 	// Region meta is updated, update kv and cache.
 	if r.GetVersion() > o.GetVersion() || r.GetConfVer() > o.GetConfVer() {
 		return c.putRegionLocked(region)
@@ -469,4 +541,123 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 	// Region meta is the same, update cache only.
 	c.regions.setRegion(region)
 	return nil
+}
+
+func (c *clusterInfo) handleRegionSplit(region *metapb.Region) (uint64, []uint64, error) {
+	c.RLock()
+	defer c.RUnlock()
+
+	_, err := c.checkRegionAvailable(region)
+	if err != nil {
+		return 0, nil, errors.Trace(err)
+	}
+
+	newRegionID, err := c.allocID()
+	if err != nil {
+		return 0, nil, errors.Trace(err)
+	}
+	newPeerIDs := make([]uint64, len(region.GetPeers()))
+	for i := 0; i < len(newPeerIDs); i++ {
+		if newPeerIDs[i], err = c.allocID(); err != nil {
+			return 0, nil, errors.Trace(err)
+		}
+	}
+
+	return newRegionID, newPeerIDs, nil
+}
+
+func (c *clusterInfo) handleRegionMerge(region *metapb.Region) (*metapb.Region, error) {
+	c.Lock()
+	defer c.Unlock()
+
+	// Check from region.
+	fromRegion, err := c.checkRegionAvailable(region)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// Check into region.
+	intoRegion := c.regions.searchRegion(fromRegion.GetEndKey())
+	if intoRegion == nil {
+		return nil, errors.New("neighbor region is not available")
+	}
+	if c.regions.isRegionMerging(intoRegion.GetId()) {
+		return nil, errors.Trace(errRegionIsMerging(intoRegion.GetId()))
+	}
+
+	// Mark from region and into region.
+	if c.kv != nil {
+		if err := c.kv.markRegionMerge(fromRegion.GetId(), intoRegion.GetId()); err != nil {
+			return nil, errors.Trace(err)
+		}
+	}
+	c.regions.markRegionMerge(fromRegion.GetId(), intoRegion.GetId())
+
+	return intoRegion.Region, nil
+}
+
+// Helper function for internal use.
+func (c *clusterInfo) handleRegionMergeHeartbeat(region *regionInfo) error {
+	fromRegion, intoRegion := c.regions.getMergingRegions(region.GetId())
+	if fromRegion == nil || intoRegion == nil {
+		log.Fatalf("there are no regions merging: region %v", region)
+	}
+
+	// Only into region can commit region merge.
+	if region.GetId() == intoRegion.GetId() {
+		r := region.GetRegionEpoch()
+		o := intoRegion.GetRegionEpoch()
+		if r.GetVersion() == o.GetVersion()+1 &&
+			regionRangeCover(region, fromRegion, intoRegion) {
+			// Commit region merge.
+			if c.kv != nil {
+				err := c.kv.commitRegionMerge(fromRegion.GetId(), region.Region)
+				if err != nil {
+					return errors.Trace(err)
+				}
+			}
+			c.regions.commitRegionMerge(fromRegion.GetId(), region)
+			return nil
+		}
+	}
+
+	// Abort region merge.
+	if c.kv != nil {
+		if err := c.kv.clearRegionMerge(fromRegion.GetId()); err != nil {
+			return errors.Trace(err)
+		}
+	}
+	c.regions.clearRegionMerge(fromRegion.GetId())
+	return c.innerPutRegion(region)
+}
+
+func regionRangeCover(newRegion, fromRegion, intoRegion *regionInfo) bool {
+	start, end := newRegion.GetStartKey(), newRegion.GetEndKey()
+	if bytes.Equal(start, fromRegion.GetStartKey()) && bytes.Equal(end, intoRegion.GetEndKey()) {
+		return true
+	}
+	if bytes.Equal(start, intoRegion.GetStartKey()) && bytes.Equal(end, fromRegion.GetEndKey()) {
+		return true
+	}
+	return false
+}
+
+// Helper function for internal use.
+func (c *clusterInfo) checkRegionAvailable(region *metapb.Region) (*regionInfo, error) {
+	origin := c.regions.getRegion(region.GetId())
+	if origin == nil {
+		return nil, errors.Trace(errRegionNotFound(region.GetId()))
+	}
+	if c.regions.isRegionMerging(region.GetId()) {
+		return nil, errors.Trace(errRegionIsMerging(region.GetId()))
+	}
+
+	// We need to make sure that region epoch are the same.
+	r := region.GetRegionEpoch()
+	o := origin.GetRegionEpoch()
+	if r.GetVersion() != o.GetVersion() || r.GetConfVer() != o.GetConfVer() {
+		return nil, errors.Trace(errRegionIsStale(region, origin.Region))
+	}
+
+	return origin, nil
 }
