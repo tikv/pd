@@ -129,6 +129,10 @@ func newReplicaChecker(cluster *clusterInfo, opt *scheduleOption) *replicaChecke
 	}
 }
 
+func (r *replicaChecker) GetResourceKind() ResourceKind {
+	return r.kind
+}
+
 func (r *replicaChecker) Check(region *regionInfo) *balanceOperator {
 	var stores []*storeInfo
 
