@@ -97,11 +97,11 @@ func newCapacityFilter(cfg *BalanceConfig) *capacityFilter {
 }
 
 func (cf *capacityFilter) FilterSource(store *storeInfo) bool {
-	return store.usedRatio() <= cf.cfg.MinCapacityUsedRatio
+	return store.storageRatio() <= cf.cfg.MinCapacityUsedRatio
 }
 
 func (cf *capacityFilter) FilterTarget(store *storeInfo) bool {
-	return store.usedRatio() >= cf.cfg.MaxCapacityUsedRatio
+	return store.storageRatio() >= cf.cfg.MaxCapacityUsedRatio
 }
 
 type snapCountFilter struct {

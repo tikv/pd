@@ -21,6 +21,14 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
+// ResourceKind distinguishes different kinds of resources.
+type ResourceKind int
+
+const (
+	leaderKind ResourceKind = iota + 1
+	storageKind
+)
+
 // storeInfo contains information about a store.
 // TODO: Export this to API directly.
 type storeInfo struct {
@@ -58,18 +66,36 @@ func (s *storeInfo) downTime() time.Duration {
 	return time.Since(s.stats.LastHeartbeatTS)
 }
 
-func (s *storeInfo) usedRatio() float64 {
+func (s *storeInfo) leaderRatio() float64 {
+	if s.stats.TotalRegionCount == 0 {
+		return 0
+	}
+	return float64(s.stats.LeaderRegionCount) / float64(s.stats.TotalRegionCount)
+}
+
+func (s *storeInfo) storageRatio() float64 {
 	if s.stats.GetCapacity() == 0 {
 		return 0
 	}
 	return float64(s.stats.GetUsedSize()) / float64(s.stats.GetCapacity())
 }
 
-func (s *storeInfo) leaderRatio() float64 {
-	if s.stats.TotalRegionCount == 0 {
+func (s *storeInfo) resourceRatio(kind ResourceKind) float64 {
+	switch kind {
+	case leaderKind:
+		return s.leaderRatio()
+	case storageKind:
+		return s.storageRatio()
+	default:
 		return 0
 	}
-	return float64(s.stats.LeaderRegionCount) / float64(s.stats.TotalRegionCount)
+}
+
+func (s *storeInfo) resourceScores() []int {
+	var scores []int
+	scores = append(scores, int(s.leaderRatio()*100))
+	scores = append(scores, int(s.storageRatio()*100))
+	return scores
 }
 
 // StoreStatus contains information about a store's status.

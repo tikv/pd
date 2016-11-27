@@ -28,14 +28,14 @@ var (
 // Balancer is an interface to select store regions for auto-balance.
 type Balancer interface {
 	// Balance selects one store to do balance.
-	Balance(cluster *clusterInfo) (*score, *balanceOperator, error)
-	// ScoreType returns score type.
-	ScoreType() scoreType
+	Balance(cluster *clusterInfo) (float64, *balanceOperator, error)
+	// GetResourceKind returns resource kind.
+	GetResourceKind() ResourceKind
 }
 
 type capacityBalancer struct {
 	cfg      *BalanceConfig
-	st       scoreType
+	kind     ResourceKind
 	selector Selector
 }
 
@@ -45,48 +45,48 @@ func newCapacityBalancer(cfg *BalanceConfig) *capacityBalancer {
 	filters = append(filters, newCapacityFilter(cfg))
 	filters = append(filters, newSnapCountFilter(cfg))
 
-	cb := &capacityBalancer{cfg: cfg, st: capacityScore}
-	cb.selector = newBalanceSelector(newScorer(cb.st), filters)
+	cb := &capacityBalancer{cfg: cfg, kind: storageKind}
+	cb.selector = newBalanceSelector(cb.kind, filters)
 	return cb
 }
 
-func (cb *capacityBalancer) ScoreType() scoreType {
-	return cb.st
+func (cb *capacityBalancer) GetResourceKind() ResourceKind {
+	return cb.kind
 }
 
 // Balance tries to select a store region to do balance.
 // The balance type is follower balance.
-func (cb *capacityBalancer) Balance(cluster *clusterInfo) (*score, *balanceOperator, error) {
+func (cb *capacityBalancer) Balance(cluster *clusterInfo) (float64, *balanceOperator, error) {
 	region, source, target := scheduleStorage(cluster, cb.selector)
 	if region == nil {
-		return nil, nil, nil
+		return 0, nil, nil
+	}
+
+	// Check diff score.
+	diff := source.resourceRatio(cb.kind) - target.resourceRatio(cb.kind)
+	if diff < cb.cfg.MaxDiffScoreFraction {
+		return 0, nil, nil
 	}
 
 	// If region peer count is not equal to max peer count, no need to do balance.
 	if len(region.GetPeers()) != int(cluster.getMeta().GetMaxPeerCount()) {
-		return nil, nil, nil
+		return 0, nil, nil
 	}
 
 	peer := region.GetStorePeer(source.GetId())
 	newPeer, err := cluster.allocPeer(target.GetId())
 	if err != nil {
-		return nil, nil, errors.Trace(err)
-	}
-
-	// Check and get diff score.
-	score, ok := checkAndGetDiffScore(cluster, peer, newPeer, cb.st, cb.cfg)
-	if !ok {
-		return nil, nil, nil
+		return 0, nil, errors.Trace(err)
 	}
 
 	addPeerOperator := newAddPeerOperator(region.GetId(), newPeer)
 	removePeerOperator := newRemovePeerOperator(region.GetId(), peer)
-	return score, newBalanceOperator(region, balanceOP, addPeerOperator, removePeerOperator), nil
+	return diff, newBalanceOperator(region, balanceOP, addPeerOperator, removePeerOperator), nil
 }
 
 type leaderBalancer struct {
 	cfg      *BalanceConfig
-	st       scoreType
+	kind     ResourceKind
 	selector Selector
 }
 
@@ -95,32 +95,32 @@ func newLeaderBalancer(cfg *BalanceConfig) *leaderBalancer {
 	filters = append(filters, newStateFilter(cfg))
 	filters = append(filters, newLeaderCountFilter(cfg))
 
-	lb := &leaderBalancer{cfg: cfg, st: leaderScore}
-	lb.selector = newBalanceSelector(newScorer(lb.st), filters)
+	lb := &leaderBalancer{cfg: cfg, kind: leaderKind}
+	lb.selector = newBalanceSelector(lb.kind, filters)
 	return lb
 }
 
-func (lb *leaderBalancer) ScoreType() scoreType {
-	return lb.st
+func (lb *leaderBalancer) GetResourceKind() ResourceKind {
+	return lb.kind
 }
 
 // Balance tries to select a store region to do balance.
 // The balance type is leader transfer.
-func (lb *leaderBalancer) Balance(cluster *clusterInfo) (*score, *balanceOperator, error) {
-	region, _, target := scheduleLeader(cluster, lb.selector)
+func (lb *leaderBalancer) Balance(cluster *clusterInfo) (float64, *balanceOperator, error) {
+	region, source, target := scheduleLeader(cluster, lb.selector)
 	if region == nil {
-		return nil, nil, nil
+		return 0, nil, nil
 	}
-	newLeader := region.GetStorePeer(target.GetId())
 
-	score, ok := checkAndGetDiffScore(cluster, region.Leader, newLeader, lb.st, lb.cfg)
-	if !ok {
-		return nil, nil, nil
+	diff := source.resourceRatio(lb.kind) - target.resourceRatio(lb.kind)
+	if diff < lb.cfg.MaxDiffScoreFraction {
+		return 0, nil, nil
 	}
 
 	regionID := region.GetId()
+	newLeader := region.GetStorePeer(target.GetId())
 	transferLeaderOperator := newTransferLeaderOperator(regionID, region.Leader, newLeader, lb.cfg)
-	return score, newBalanceOperator(region, balanceOP, transferLeaderOperator), nil
+	return diff, newBalanceOperator(region, balanceOP, transferLeaderOperator), nil
 }
 
 // replicaBalancer is used to balance active replica count.
@@ -138,25 +138,26 @@ func newReplicaBalancer(region *regionInfo, cfg *BalanceConfig) *replicaBalancer
 	}
 }
 
-func (rb *replicaBalancer) addPeer(cluster *clusterInfo) (*balanceOperator, error) {
+func (rb *replicaBalancer) addPeer(cluster *clusterInfo) *balanceOperator {
 	stores := cluster.getStores()
 
 	filter := newExcludedFilter(nil, rb.region.GetStoreIds())
 	target := rb.selector.SelectTarget(stores, filter)
 	if target == nil {
-		return nil, nil
+		return nil
 	}
 
 	peer, err := cluster.allocPeer(target.GetId())
 	if err != nil {
-		return nil, errors.Trace(err)
+		log.Errorf("failed to allocated peer: %v", err)
+		return nil
 	}
 
 	addPeerOperator := newAddPeerOperator(rb.region.GetId(), peer)
-	return newBalanceOperator(rb.region, replicaOP, newOnceOperator(addPeerOperator)), nil
+	return newBalanceOperator(rb.region, replicaOP, newOnceOperator(addPeerOperator))
 }
 
-func (rb *replicaBalancer) removePeer(cluster *clusterInfo, badPeers []*metapb.Peer) (*balanceOperator, error) {
+func (rb *replicaBalancer) removePeer(cluster *clusterInfo, badPeers []*metapb.Peer) *balanceOperator {
 	var peer *metapb.Peer
 
 	if len(badPeers) >= 1 {
@@ -170,11 +171,11 @@ func (rb *replicaBalancer) removePeer(cluster *clusterInfo, badPeers []*metapb.P
 	}
 
 	if peer == nil {
-		return nil, nil
+		return nil
 	}
 
 	removePeerOperator := newRemovePeerOperator(rb.region.GetId(), peer)
-	return newBalanceOperator(rb.region, replicaOP, newOnceOperator(removePeerOperator)), nil
+	return newBalanceOperator(rb.region, replicaOP, newOnceOperator(removePeerOperator))
 }
 
 func containsPeer(peers []*metapb.Peer, peer *metapb.Peer) bool {
@@ -233,7 +234,7 @@ func (rb *replicaBalancer) collectTombstonePeers(cluster *clusterInfo) []*metapb
 	return tombPeers
 }
 
-func (rb *replicaBalancer) Balance(cluster *clusterInfo) (*score, *balanceOperator, error) {
+func (rb *replicaBalancer) Balance(cluster *clusterInfo) (float64, *balanceOperator, error) {
 	badPeers := rb.collectBadPeers(cluster)
 	peerCount := len(rb.region.GetPeers())
 	maxPeerCount := int(cluster.getMeta().GetMaxPeerCount())
@@ -243,16 +244,11 @@ func (rb *replicaBalancer) Balance(cluster *clusterInfo) (*score, *balanceOperat
 			rb.region.GetId(), rb.region.GetPeers(), badPeers)
 	}
 
-	var (
-		bop *balanceOperator
-		err error
-	)
-
 	if peerCount-len(badPeers) < maxPeerCount {
-		bop, err = rb.addPeer(cluster)
+		return 0, rb.addPeer(cluster), nil
 	} else if peerCount > maxPeerCount {
-		bop, err = rb.removePeer(cluster, badPeers)
+		return 0, rb.removePeer(cluster, badPeers), nil
 	}
 
-	return nil, bop, errors.Trace(err)
+	return 0, nil, nil
 }

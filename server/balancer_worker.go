@@ -215,30 +215,25 @@ func (bw *balancerWorker) doBalance() error {
 			return nil
 		}
 
-		scores := make([]*score, 0, len(bw.balancers))
-		bops := make([]*balanceOperator, 0, len(bw.balancers))
+		var (
+			bop     *balanceOperator
+			maxDiff float64
+		)
 
 		// Find the balance operator candidates.
 		for _, balancer := range bw.balancers {
-			score, balanceOperator, err := balancer.Balance(bw.cluster)
+			diff, op, err := balancer.Balance(bw.cluster)
 			if err != nil {
 				return errors.Trace(err)
 			}
-			if balanceOperator == nil {
-				continue
+			if maxDiff < diff {
+				bop = op
 			}
-
-			scores = append(scores, score)
-			bops = append(bops, balanceOperator)
 		}
-
-		// Calculate the priority of candidates score.
-		idx, score := priorityScore(bw.cfg, scores)
-		if score == nil {
+		if bop == nil {
 			continue
 		}
 
-		bop := bops[idx]
 		regionID := bop.getRegionID()
 		if bw.addBalanceOperator(regionID, bop) {
 			bw.addRegionCache(regionID)
@@ -259,18 +254,6 @@ func (bw *balancerWorker) checkReplicas(region *regionInfo) error {
 		bw.addBalanceOperator(region.GetId(), op)
 	}
 	return nil
-}
-
-func (bw *balancerWorker) storeScores(store *storeInfo) []int {
-	scores := make([]int, 0, len(bw.balancers))
-	for _, balancer := range bw.balancers {
-		scorer := newScorer(balancer.ScoreType())
-		if scorer != nil {
-			scores = append(scores, scorer.Score(store))
-		}
-	}
-
-	return scores
 }
 
 func collectOperatorMetrics(bop *balanceOperator) map[string]uint64 {
