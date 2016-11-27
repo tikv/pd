@@ -20,13 +20,13 @@ type Selector interface {
 }
 
 type balanceSelector struct {
-	scorer  Scorer
+	kind    ResourceKind
 	filters []Filter
 }
 
-func newBalanceSelector(scorer Scorer, filters []Filter) *balanceSelector {
+func newBalanceSelector(kind ResourceKind, filters []Filter) *balanceSelector {
 	return &balanceSelector{
-		scorer:  scorer,
+		kind:    kind,
 		filters: filters,
 	}
 }
@@ -39,7 +39,7 @@ func (s *balanceSelector) SelectSource(stores []*storeInfo, filters ...Filter) *
 		if filterSource(store, filters) {
 			continue
 		}
-		if result == nil || s.scorer.Score(result) < s.scorer.Score(store) {
+		if result == nil || result.resourceRatio(s.kind) < store.resourceRatio(s.kind) {
 			result = store
 		}
 	}
@@ -54,7 +54,7 @@ func (s *balanceSelector) SelectTarget(stores []*storeInfo, filters ...Filter) *
 		if filterTarget(store, filters) {
 			continue
 		}
-		if result == nil || s.scorer.Score(result) > s.scorer.Score(store) {
+		if result == nil || result.resourceRatio(s.kind) > store.resourceRatio(s.kind) {
 			result = store
 		}
 	}

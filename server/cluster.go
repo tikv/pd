@@ -426,8 +426,8 @@ func (c *RaftCluster) collectMetrics() {
 	regionTotalCount := 0
 	storageSize := uint64(0)
 	storageCapacity := uint64(0)
-	minUsedRatio, maxUsedRatio := float64(1.0), float64(0.0)
 	minLeaderRatio, maxLeaderRatio := float64(1.0), float64(0.0)
+	minStorageRatio, maxStorageRatio := float64(1.0), float64(0.0)
 
 	for _, s := range cluster.getStores() {
 		// Store state.
@@ -454,17 +454,17 @@ func (c *RaftCluster) collectMetrics() {
 		}
 
 		// Balance.
-		if minUsedRatio > s.usedRatio() {
-			minUsedRatio = s.usedRatio()
-		}
-		if maxUsedRatio < s.usedRatio() {
-			maxUsedRatio = s.usedRatio()
-		}
 		if minLeaderRatio > s.leaderRatio() {
 			minLeaderRatio = s.leaderRatio()
 		}
 		if maxLeaderRatio < s.leaderRatio() {
 			maxLeaderRatio = s.leaderRatio()
+		}
+		if minStorageRatio > s.storageRatio() {
+			minStorageRatio = s.storageRatio()
+		}
+		if maxStorageRatio < s.storageRatio() {
+			maxStorageRatio = s.storageRatio()
 		}
 	}
 
@@ -476,8 +476,8 @@ func (c *RaftCluster) collectMetrics() {
 	metrics["region_total_count"] = float64(regionTotalCount)
 	metrics["storage_size"] = float64(storageSize)
 	metrics["storage_capacity"] = float64(storageCapacity)
-	metrics["store_max_diff_used_ratio"] = maxUsedRatio - minUsedRatio
 	metrics["store_max_diff_leader_ratio"] = maxLeaderRatio - minLeaderRatio
+	metrics["store_max_diff_storage_ratio"] = maxStorageRatio - minStorageRatio
 
 	for label, value := range metrics {
 		clusterStatusGauge.WithLabelValues(label).Set(value)
@@ -585,8 +585,7 @@ func (c *RaftCluster) GetScores(store *metapb.Store, status *StoreStatus) []int 
 		Store: store,
 		stats: status,
 	}
-
-	return c.balancerWorker.storeScores(storeInfo)
+	return storeInfo.resourceScores()
 }
 
 // FetchEvents fetches the operator events.
