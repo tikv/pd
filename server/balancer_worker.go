@@ -123,7 +123,7 @@ func (bw *balancerWorker) addBalanceOperator(regionID uint64, op *balanceOperato
 
 	// TODO: should we check allowBalance again here?
 
-	collectBalancerCounterMetrics(op)
+	collectOperatorCounterMetrics(op)
 
 	bw.balanceOperators[regionID] = op
 	bw.historyOperators.add(regionID, op)
@@ -203,8 +203,6 @@ func (bw *balancerWorker) allowBalance() bool {
 }
 
 func (bw *balancerWorker) doBalance() error {
-	collectBalancerGaugeMetrics(bw.getBalanceOperators())
-
 	balanceCount := uint64(0)
 	for i := uint64(0); i < bw.cfg.MaxBalanceRetryPerLoop; i++ {
 		if balanceCount >= bw.cfg.MaxBalanceCountPerLoop {
@@ -256,7 +254,7 @@ func (bw *balancerWorker) checkReplicas(region *regionInfo) error {
 	return nil
 }
 
-func collectOperatorMetrics(bop *balanceOperator) map[string]uint64 {
+func collectOperatorCounterMetrics(bop *balanceOperator) {
 	metrics := make(map[string]uint64)
 	prefix := ""
 	switch bop.Type {
@@ -278,27 +276,8 @@ func collectOperatorMetrics(bop *balanceOperator) map[string]uint64 {
 			metrics[prefix+o.Name]++
 		}
 	}
-	return metrics
-}
 
-func collectBalancerCounterMetrics(bop *balanceOperator) {
-	metrics := collectOperatorMetrics(bop)
 	for label, value := range metrics {
-		balancerCounter.WithLabelValues(label).Add(float64(value))
-	}
-}
-
-func collectBalancerGaugeMetrics(ops map[uint64]Operator) {
-	metrics := make(map[string]uint64)
-	for _, op := range ops {
-		if bop, ok := op.(*balanceOperator); ok {
-			values := collectOperatorMetrics(bop)
-			for label, value := range values {
-				metrics[label] += value
-			}
-		}
-	}
-	for label, value := range metrics {
-		balancerGauge.WithLabelValues(label).Set(float64(value))
+		operatorCounter.WithLabelValues(label).Add(float64(value))
 	}
 }
