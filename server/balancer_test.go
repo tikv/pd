@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/ngaut/log"
 	. "github.com/pingcap/check"
 	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -302,6 +303,80 @@ func (s *testReplicaCheckerSuite) Test(c *C) {
 	peer4, _ := cluster.allocPeer(4)
 	region.Peers = append(region.Peers, peer4)
 	checkRemovePeer(c, rc.Check(region), 1)
+}
+
+func (s *testReplicaCheckerSuite) TestConstraints(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+
+	cfg, opt := newTestScheduleConfig()
+	cfg.MinRegionCount = 1
+	cfg.MinBalanceDiffRatio = 0.01
+	opt.constraints = newConstraints(3, []*Constraint{
+		{
+			Labels:   map[string]string{"zone": "us"},
+			Replicas: 2,
+		},
+		{
+			Labels:   map[string]string{"zone": "cn", "disk": "ssd"},
+			Replicas: 1,
+		},
+	})
+	rc := newReplicaChecker(cluster, opt)
+
+	// Add stores 1,2,3,4.
+	tc.addLabelsStore(1, 6, 0.1, map[string]string{"zone": "us", "disk": "ssd"})
+	tc.addLabelsStore(2, 7, 0.2, nil)
+	tc.addLabelsStore(3, 8, 0.3, nil)
+	tc.addLabelsStore(4, 9, 0.4, nil)
+	// Add region 1 with leader in store 1.
+	tc.addLeaderRegion(1, 1)
+
+	// Although we can not satisfy any constraints, we will still ensure max replicas.
+	// So we add peers in store 2 and store 3, because they have smaller storage ratio.
+	region := cluster.getRegion(1)
+	checkAddPeer(c, rc.Check(region), 2)
+	peer2, _ := cluster.allocPeer(2)
+	region.Peers = append(region.Peers, peer2)
+	checkAddPeer(c, rc.Check(region), 3)
+	peer3, _ := cluster.allocPeer(3)
+	region.Peers = append(region.Peers, peer3)
+	log.Debug(region)
+	c.Assert(rc.Check(region), IsNil)
+
+	// Add stores 1,2,3,4.
+	tc.addLabelsStore(1, 6, 0.1, map[string]string{"zone": "us", "disk": "ssd"})
+	tc.addLabelsStore(2, 7, 0.2, map[string]string{"zone": "us", "disk": "hdd"})
+	tc.addLabelsStore(3, 8, 0.3, nil)
+	tc.addLabelsStore(4, 9, 0.4, nil)
+	// Add region 1 with leader in store 1 and follower in store 2.
+	tc.addLeaderRegion(1, 1, 2)
+
+	// Now the first constraint has been satisfied, but the second hasn't.
+	// We still need to add peer in store 3 to ensure max replicas.
+	region = cluster.getRegion(1)
+	checkAddPeer(c, rc.Check(region), 3)
+	peer3, _ = cluster.allocPeer(3)
+	region.Peers = append(region.Peers, peer3)
+	c.Assert(rc.Check(region), IsNil)
+
+	// Add stores 1,2,3,4.
+	tc.addLabelsStore(1, 6, 0.1, map[string]string{"zone": "us", "disk": "ssd"})
+	tc.addLabelsStore(2, 7, 0.2, map[string]string{"zone": "us", "disk": "hdd"})
+	tc.addLabelsStore(3, 8, 0.3, nil)
+	tc.addLabelsStore(4, 9, 0.4, map[string]string{"zone": "cn", "disk": "ssd"})
+	// Add region 1 with leader in store 1 and followers in stores 2,3.
+	tc.addLeaderRegion(1, 1, 2, 3)
+
+	// Stores 1,2 satisfy the first constraint, we need to add peer in
+	// store 4 to satisfy the second constraint.
+	// Then we can remove peer in store 3 because we have satisfied
+	// all constraints and have enough replicas.
+	region = cluster.getRegion(1)
+	checkAddPeer(c, rc.Check(region), 4)
+	peer4, _ := cluster.allocPeer(4)
+	region.Peers = append(region.Peers, peer4)
+	checkRemovePeer(c, rc.Check(region), 3)
 }
 
 func checkAddPeer(c *C, bop *balanceOperator, storeID uint64) {

@@ -140,21 +140,36 @@ func (r *replicaChecker) Check(region *regionInfo) *balanceOperator {
 		}
 	}
 
+	constraints := r.opt.GetConstraints()
+
 	// Make sure all constraints will be satisfied.
-	result := r.opt.GetConstraints().Match(stores)
+	result := constraints.Match(stores)
 	for _, matched := range result.constraints {
 		if len(matched.stores) < matched.constraint.Replicas {
-			return r.addPeer(region, matched.constraint)
+			if op := r.addPeer(region, matched.constraint); op != nil {
+				return op
+			}
 		}
 	}
+	if len(stores) < constraints.MaxReplicas {
+		// If we reach here and we don't have enough replicas,
+		// it means that we can't satisfy all constraints for now,
+		// but at least we try to satisfy the max replicas requirement.
+		log.Warnf("region replication constraints can not be satisfied: %v", region)
+		return r.addPeer(region, nil)
+	}
 
-	// Now we can remove bad or redundant (unmatched) peers.
+	// Now we can remove bad peers.
 	for _, peer := range badPeers {
 		return r.removePeer(region, peer)
 	}
-	for _, store := range stores {
-		if _, ok := result.stores[store.GetId()]; !ok {
-			return r.removePeer(region, region.GetStorePeer(store.GetId()))
+
+	// Now we have redundant replicas, we can remove unmatched peers.
+	if len(stores) > constraints.MaxReplicas {
+		for _, store := range stores {
+			if _, ok := result.stores[store.GetId()]; !ok {
+				return r.removePeer(region, region.GetStorePeer(store.GetId()))
+			}
 		}
 	}
 

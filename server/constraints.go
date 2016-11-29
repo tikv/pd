@@ -48,10 +48,6 @@ type Constraints struct {
 	Constraints []*Constraint
 }
 
-func (c *Constraints) String() string {
-	return fmt.Sprintf("Constraints(%+v)", *c)
-}
-
 func newConstraints(maxReplicas int, constraints []*Constraint) *Constraints {
 	sumReplicas := 0
 	for _, constraint := range constraints {
@@ -69,6 +65,10 @@ func newConstraints(maxReplicas int, constraints []*Constraint) *Constraints {
 		MaxReplicas: maxReplicas,
 		Constraints: constraints,
 	}
+}
+
+func (c *Constraints) String() string {
+	return fmt.Sprintf("Constraints(%+v)", *c)
 }
 
 // MatchResult is the result of matched stores and constraints.
