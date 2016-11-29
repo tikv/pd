@@ -318,27 +318,25 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 
 	cluster := c.cachedCluster
 
-	// There are 3 cases here:
-	// Case 1: store id exists with the same address - do nothing;
-	// Case 2: store id exists with different address - update address;
-	if s := cluster.getStore(store.GetId()); s != nil {
-		if s.GetAddress() == store.GetAddress() {
-			return nil
-		}
-		s.Address = store.Address
-		return cluster.putStore(s)
-	}
-
-	// Case 3: store id does not exist, check duplicated address.
+	// Store address can not be the same as other stores.
 	for _, s := range cluster.getStores() {
 		// It's OK to start a new store on the same address if the old store has been removed.
 		if s.isTombstone() {
 			continue
 		}
-		if s.GetAddress() == store.GetAddress() {
+		if s.GetId() != store.GetId() && s.GetAddress() == store.GetAddress() {
 			return errors.Errorf("duplicated store address: %v, already registered by %v", store, s.Store)
 		}
 	}
+
+	// Store exists, update store meta.
+	if s := cluster.getStore(store.GetId()); s != nil {
+		s.Address = store.Address
+		s.Labels = store.Labels
+		return cluster.putStore(s)
+	}
+
+	// Store does not exist, add a new store.
 	return cluster.putStore(newStoreInfo(store))
 }
 
