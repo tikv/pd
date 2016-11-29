@@ -19,6 +19,7 @@ import (
 	"io/ioutil"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -70,6 +71,9 @@ type Config struct {
 	ScheduleCfg ScheduleConfig `toml:"schedule" json:"schedule"`
 
 	MetricCfg metricutil.MetricConfig `toml:"metric" json:"metric"`
+
+	ConstraintCfg []ConstraintConfig `toml:"constraints" json:"constraints"`
+	constraints   *Constraints
 
 	// Only test can change them.
 	nextRetryDelay             time.Duration
@@ -244,7 +248,7 @@ func (c *Config) adjust() error {
 	adjustString(&c.MetricCfg.PushJob, c.Name)
 
 	c.ScheduleCfg.adjust()
-	return nil
+	return c.parseConstraints()
 }
 
 func (c *Config) clone() *Config {
@@ -336,12 +340,14 @@ func (c *ScheduleConfig) adjust() {
 
 // scheduleOption is a wrapper to access the configuration safely.
 type scheduleOption struct {
-	v atomic.Value
+	v           atomic.Value
+	constraints *Constraints
 }
 
-func newScheduleOption(cfg *ScheduleConfig) *scheduleOption {
+func newScheduleOption(cfg *Config) *scheduleOption {
 	o := &scheduleOption{}
-	o.store(cfg)
+	o.store(&cfg.ScheduleCfg)
+	o.constraints = cfg.constraints
 	return o
 }
 
@@ -351,6 +357,10 @@ func (o *scheduleOption) load() *ScheduleConfig {
 
 func (o *scheduleOption) store(cfg *ScheduleConfig) {
 	o.v.Store(cfg)
+}
+
+func (o *scheduleOption) GetConstraints() *Constraints {
+	return o.constraints
 }
 
 func (o *scheduleOption) GetMinRegionCount() uint64 {
@@ -387,6 +397,52 @@ func (o *scheduleOption) GetStorageScheduleLimit() uint64 {
 
 func (o *scheduleOption) GetStorageScheduleInterval() time.Duration {
 	return o.load().StorageScheduleInterval.Duration
+}
+
+// ConstraintConfig is the replica constraint configuration to place replicas.
+type ConstraintConfig struct {
+	Labels   []string `toml:"labels" json:"labels"`
+	Replicas int      `toml:"replicas" json:"replicas"`
+}
+
+var validLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-._]*[a-z0-9])?$`)
+
+func parseConstraint(cfg *ConstraintConfig) (*Constraint, error) {
+	if cfg.Replicas == 0 {
+		return nil, errors.New("constraint replicas must > 0")
+	}
+	labels := make(map[string]string)
+	for _, label := range cfg.Labels {
+		kv := strings.Split(strings.ToLower(label), "=")
+		if len(kv) != 2 {
+			return nil, errors.Errorf("invalid constraint %q", label)
+		}
+		k, v := kv[0], kv[1]
+		if !validLabel.MatchString(k) || !validLabel.MatchString(v) {
+			return nil, errors.Errorf("invalid constraint %q, must match %s", label, validLabel)
+		}
+		if _, ok := labels[k]; ok {
+			return nil, errors.Errorf("duplicated constraint %q", label)
+		}
+		labels[k] = v
+	}
+	return &Constraint{
+		Labels:   labels,
+		Replicas: cfg.Replicas,
+	}, nil
+}
+
+func (c *Config) parseConstraints() error {
+	var constraints []*Constraint
+	for _, cfg := range c.ConstraintCfg {
+		constraint, err := parseConstraint(&cfg)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		constraints = append(constraints, constraint)
+	}
+	c.constraints = newConstraints(int(c.MaxPeerCount), constraints)
+	return nil
 }
 
 // ParseUrls parse a string into multiple urls.

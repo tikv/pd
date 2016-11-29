@@ -68,6 +68,15 @@ func (c *testClusterInfo) addRegionStore(storeID uint64, regionCount int, storag
 	c.putStore(store)
 }
 
+func (c *testClusterInfo) addLabelsStore(storeID uint64, regionCount int, storageRatio float64, labels map[string]string) {
+	c.addRegionStore(storeID, regionCount, storageRatio)
+	store := c.getStore(storeID)
+	for k, v := range labels {
+		store.Labels = append(store.Labels, &metapb.StoreLabel{Key: k, Value: v})
+	}
+	c.putStore(store)
+}
+
 func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
 	region := &metapb.Region{Id: regionID}
 	leader, _ := c.allocPeer(leaderID)
@@ -101,10 +110,10 @@ func (c *testClusterInfo) updateSnapshotCount(storeID uint64, snapshotCount int)
 }
 
 func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption) {
-	cfg := newScheduleConfig()
+	cfg := NewConfig()
 	cfg.adjust()
 	opt := newScheduleOption(cfg)
-	return cfg, opt
+	return &cfg.ScheduleCfg, opt
 }
 
 var _ = Suite(&testLeaderBalancerSuite{})
@@ -195,6 +204,43 @@ func (s *testStorageBalancerSuite) Test(c *C) {
 	c.Assert(sb.Schedule(cluster), IsNil)
 }
 
+func (s *testStorageBalancerSuite) TestConstraints(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+
+	cfg, opt := newTestScheduleConfig()
+	cfg.MinRegionCount = 1
+	cfg.MinBalanceDiffRatio = 0.01
+	opt.constraints = newConstraints(1, []*Constraint{
+		{
+			Labels:   map[string]string{"zone": "cn"},
+			Replicas: 1,
+		},
+	})
+	sb := newStorageBalancer(opt)
+
+	// Add stores 1,2,3,4.
+	tc.addLabelsStore(1, 6, 0.1, nil)
+	tc.addLabelsStore(2, 7, 0.2, nil)
+	tc.addLabelsStore(3, 8, 0.3, nil)
+	tc.addLabelsStore(4, 9, 0.4, map[string]string{"zone": "cn", "disk": "ssd"})
+	// Add region 1 with leader in store 4.
+	tc.addLeaderRegion(1, 4)
+
+	// Store 4 has most regions, but no other stores can match the constraint.
+	c.Assert(sb.Schedule(cluster), IsNil)
+
+	// Now store 3 can match the constarint too,
+	// We can transfer peer from store 4 to store 3.
+	tc.addLabelsStore(3, 8, 0.3, map[string]string{"zone": "cn"})
+	checkTransferPeer(c, sb.Schedule(cluster), 4, 3)
+
+	// Now both store 2 and 3 can match the constraint.
+	// But store 2 has fewer regions than store 3, so transfer peer to store 2.
+	tc.addLabelsStore(2, 7, 0.2, map[string]string{"zone": "cn", "disk": "hdd"})
+	checkTransferPeer(c, sb.Schedule(cluster), 4, 2)
+}
+
 var _ = Suite(&testReplicaCheckerSuite{})
 
 type testReplicaCheckerSuite struct{}
@@ -207,7 +253,6 @@ func (s *testReplicaCheckerSuite) Test(c *C) {
 	rc := newReplicaChecker(cluster, opt)
 
 	cfg.MaxSnapshotCount = 2
-	cluster.putMeta(&metapb.Cluster{Id: 1, MaxPeerCount: 3})
 
 	// Add stores 1,2,3,4.
 	tc.addRegionStore(1, 4, 0.4)

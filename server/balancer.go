@@ -88,7 +88,7 @@ func (s *storageBalancer) GetResourceKind() ResourceKind {
 }
 
 func (s *storageBalancer) Schedule(cluster *clusterInfo) *balanceOperator {
-	region, source, target := scheduleStorage(cluster, s.selector)
+	region, source, target := scheduleStorage(cluster, s.opt, s.selector)
 	if region == nil {
 		return nil
 	}
@@ -130,24 +130,42 @@ func newReplicaChecker(cluster *clusterInfo, opt *scheduleOption) *replicaChecke
 }
 
 func (r *replicaChecker) Check(region *regionInfo) *balanceOperator {
-	badPeers := r.collectBadPeers(region)
-	peerCount := len(region.GetPeers())
-	maxPeerCount := int(r.cluster.getMeta().GetMaxPeerCount())
+	var stores []*storeInfo
 
-	if peerCount-len(badPeers) < maxPeerCount {
-		return r.addPeer(region)
+	// Filter bad stores.
+	badPeers := r.collectBadPeers(region)
+	for _, store := range r.cluster.getRegionStores(region) {
+		if _, ok := badPeers[store.GetId()]; !ok {
+			stores = append(stores, store)
+		}
 	}
-	if peerCount > maxPeerCount {
-		return r.removePeer(region, badPeers)
+
+	// Make sure all constraints will be satisfied.
+	result := r.opt.GetConstraints().Match(stores)
+	for _, matched := range result.constraints {
+		if len(matched.stores) < matched.constraint.Replicas {
+			return r.addPeer(region, matched.constraint)
+		}
 	}
+
+	// Now we can remove bad or redundant (unmatched) peers.
+	for _, peer := range badPeers {
+		return r.removePeer(region, peer)
+	}
+	for _, store := range stores {
+		if _, ok := result.stores[store.GetId()]; !ok {
+			return r.removePeer(region, region.GetStorePeer(store.GetId()))
+		}
+	}
+
 	return nil
 }
 
-func (r *replicaChecker) addPeer(region *regionInfo) *balanceOperator {
+func (r *replicaChecker) addPeer(region *regionInfo, constraint *Constraint) *balanceOperator {
 	stores := r.cluster.getStores()
 
-	filter := newExcludedFilter(nil, region.GetStoreIds())
-	target := r.selector.SelectTarget(stores, filter)
+	excluded := newExcludedFilter(nil, region.GetStoreIds())
+	target := r.selector.SelectTarget(stores, excluded, newConstraintFilter(nil, constraint))
 	if target == nil {
 		return nil
 	}
@@ -162,41 +180,19 @@ func (r *replicaChecker) addPeer(region *regionInfo) *balanceOperator {
 	return newBalanceOperator(region, replicaOP, newOnceOperator(addPeer))
 }
 
-func (r *replicaChecker) removePeer(region *regionInfo, badPeers []*metapb.Peer) *balanceOperator {
-	var peer *metapb.Peer
-
-	if len(badPeers) >= 1 {
-		peer = badPeers[0]
-	} else {
-		stores := r.cluster.getFollowerStores(region)
-		source := r.selector.SelectSource(stores)
-		if source != nil {
-			peer = region.GetStorePeer(source.GetId())
-		}
-	}
-	if peer == nil {
-		return nil
-	}
-
+func (r *replicaChecker) removePeer(region *regionInfo, peer *metapb.Peer) *balanceOperator {
 	removePeer := newRemovePeerOperator(region.GetId(), peer)
 	return newBalanceOperator(region, replicaOP, newOnceOperator(removePeer))
 }
 
-func (r *replicaChecker) collectBadPeers(region *regionInfo) []*metapb.Peer {
-	downPeers := r.collectDownPeers(region)
-
-	var badPeers []*metapb.Peer
+func (r *replicaChecker) collectBadPeers(region *regionInfo) map[uint64]*metapb.Peer {
+	badPeers := r.collectDownPeers(region)
 	for _, peer := range region.GetPeers() {
-		if _, ok := downPeers[peer.GetId()]; ok {
-			badPeers = append(badPeers, peer)
-			continue
-		}
 		store := r.cluster.getStore(peer.GetStoreId())
 		if store == nil || !store.isUp() {
-			badPeers = append(badPeers, peer)
+			badPeers[peer.GetStoreId()] = peer
 		}
 	}
-
 	return badPeers
 }
 
@@ -208,7 +204,7 @@ func (r *replicaChecker) collectDownPeers(region *regionInfo) map[uint64]*metapb
 			continue
 		}
 		if stats.GetDownSeconds() > uint64(r.opt.GetMaxStoreDownTime().Seconds()) {
-			downPeers[peer.GetId()] = peer
+			downPeers[peer.GetStoreId()] = peer
 		}
 	}
 	return downPeers

@@ -178,6 +178,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 
 	s.svr, s.cleanup = newTestServer(c)
 	s.svr.cfg.nextRetryDelay = 50 * time.Millisecond
+	s.svr.scheduleOpt.constraints = newConstraints(5, nil)
 
 	s.client = s.svr.client
 	s.clusterID = s.svr.clusterID
@@ -352,10 +353,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 
-	meta := cluster.GetConfig()
-	meta.MaxPeerCount = 1
-	err := cluster.putConfig(meta)
-	c.Assert(err, IsNil)
+	s.svr.scheduleOpt.constraints = newConstraints(1, nil)
 
 	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 	conn, err := rpcConnect(leaderPD.GetAddr())
@@ -483,11 +481,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 	region = s.checkRegionPeerCount(c, regionKey, 5)
 
 	// Remove 2 peers.
-	err = cluster.putConfig(&metapb.Cluster{
-		Id:           s.clusterID,
-		MaxPeerCount: 3,
-	})
-	c.Assert(err, IsNil)
+	s.svr.scheduleOpt.constraints = newConstraints(3, nil)
 
 	// Remove 2 peers
 	for i := 0; i < 2; i++ {
@@ -510,10 +504,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 
-	meta := cluster.GetConfig()
-	meta.MaxPeerCount = 2
-	err := cluster.putConfig(meta)
-	c.Assert(err, IsNil)
+	s.svr.scheduleOpt.constraints = newConstraints(2, nil)
 
 	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 	conn, err := rpcConnect(leaderPD.GetAddr())
