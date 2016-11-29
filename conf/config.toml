@@ -21,21 +21,16 @@ tso-save-interval = "3s"
 max-peer-count = 3
 
 
-[balance]
-min-capacity-used-ratio = 0.1
-max-capacity-used-ratio = 0.9
-max-leader-count = 10
-max-sending-snap-count = 3
-max-receiving-snap-count = 3
-max-applying-snap-count = 3
-max-diff-score-fraction = 0.1
-balance-interval = 30
-max-balance-count = 16
-max-balance-retry-per-loop = 10
-max-balance-count-per-loop = 3
-max-transfer-wait-count = 3
-max-peer-down-duration = "30m"
-max-store-down-duration = "10m"
+[schedule]
+min-region-count = 10
+min-leader-count = 10
+max-snapshot-count = 3
+min-balance-diff-ratio = 0.01
+max-store-down-duration = "30m"
+balance-interval = "30s"
+max-balance-count = 4
+max-balance-retry-per-loop = 4
+max-balance-count-per-loop = 1
 
 [metric]
 # prometheus client push interval, set "0s" to disable prometheus.

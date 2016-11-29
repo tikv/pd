@@ -25,6 +25,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
+const (
+	maxTransferLeaderWaitCount = 3
+)
+
 var baseID uint64
 
 type callback func(op Operator)
@@ -261,18 +265,15 @@ type transferLeaderOperator struct {
 	firstCheck    bool
 	startCallback func(op Operator)
 	endCallback   func(op Operator)
-
-	cfg *BalanceConfig
 }
 
-func newTransferLeaderOperator(regionID uint64, oldLeader *metapb.Peer, newLeader *metapb.Peer, cfg *BalanceConfig) *transferLeaderOperator {
+func newTransferLeaderOperator(regionID uint64, oldLeader *metapb.Peer, newLeader *metapb.Peer) *transferLeaderOperator {
 	return &transferLeaderOperator{
 		OldLeader:  oldLeader,
 		NewLeader:  newLeader,
 		RegionID:   regionID,
 		Name:       "transfer_leader",
 		firstCheck: true,
-		cfg:        cfg,
 	}
 }
 
@@ -312,9 +313,9 @@ func (tlo *transferLeaderOperator) Do(ctx *opContext, region *regionInfo) (bool,
 		tlo.firstCheck = false
 	}
 
-	// If tlo.count is greater than 0, then we should check whether it exceeds the tlo.cfg.MaxTransferWaitCount.
+	// If tlo.count is greater than 0, then we should check whether it exceeds the maxTransferLeaderWaitCount.
 	if tlo.Count > 0 {
-		if tlo.Count >= int(tlo.cfg.MaxTransferWaitCount) {
+		if tlo.Count >= maxTransferLeaderWaitCount {
 			return false, nil, errors.Errorf("transfer leader operator called %d times but still be unsucceessful - %v", tlo.Count, tlo)
 		}
 

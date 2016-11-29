@@ -32,7 +32,7 @@ var (
 )
 
 const (
-	maxBatchRegionCount = 10000
+	backgroundJobInterval = time.Minute
 )
 
 // RaftCluster is used for cluster config management.
@@ -89,12 +89,12 @@ func (c *RaftCluster) start() error {
 	}
 	c.cachedCluster = cluster
 
-	c.balancerWorker = newBalancerWorker(c.cachedCluster, &c.s.cfg.BalanceCfg)
+	c.balancerWorker = newBalancerWorker(c.cachedCluster, c.s.scheduleOpt)
 	c.balancerWorker.run()
 
 	c.wg.Add(1)
 	c.quit = make(chan struct{})
-	go c.runBackgroundJobs(c.s.cfg.BalanceCfg.BalanceInterval)
+	go c.runBackgroundJobs(backgroundJobInterval)
 
 	c.running = true
 
@@ -129,9 +129,10 @@ func (s *Server) GetConfig() *Config {
 	return s.cfg.clone()
 }
 
-// SetBalanceConfig sets the balance config information.
-func (s *Server) SetBalanceConfig(cfg BalanceConfig) {
-	s.cfg.setBalanceConfig(cfg)
+// SetScheduleConfig sets the balance config information.
+func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
+	s.cfg.setScheduleConfig(cfg)
+	s.scheduleOpt.store(&cfg)
 }
 
 func (s *Server) getClusterRootPath() string {
@@ -442,7 +443,7 @@ func (c *RaftCluster) collectMetrics() {
 		if s.isTombstone() {
 			continue
 		}
-		if s.downTime() >= c.balancerWorker.cfg.MaxStoreDownDuration.Duration {
+		if s.downTime() >= c.balancerWorker.opt.GetMaxStoreDownTime() {
 			storeDownCount++
 		}
 
@@ -484,10 +485,10 @@ func (c *RaftCluster) collectMetrics() {
 	}
 }
 
-func (c *RaftCluster) runBackgroundJobs(interval uint64) {
+func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 	defer c.wg.Done()
 
-	ticker := time.NewTicker(time.Duration(interval) * time.Second)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -527,7 +528,7 @@ func (c *RaftCluster) NewAddPeerOperator(regionID uint64, storeID uint64) (Opera
 	if storeID != 0 {
 		target = cluster.getStore(storeID)
 	} else {
-		cb := newCapacityBalancer(&c.s.cfg.BalanceCfg)
+		cb := newStorageBalancer(c.s.scheduleOpt)
 		filter := newExcludedFilter(nil, region.GetStoreIds())
 		target = cb.selector.SelectTarget(cluster.getStores(), filter)
 	}
