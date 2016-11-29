@@ -39,7 +39,8 @@ const (
 
 // Server is the pd server.
 type Server struct {
-	cfg *Config
+	cfg         *Config
+	scheduleOpt *scheduleOption
 
 	etcd *embed.Etcd
 
@@ -97,6 +98,7 @@ func CreateServer(cfg *Config) (*Server, error) {
 
 	s := &Server{
 		cfg:           cfg,
+		scheduleOpt:   newScheduleOption(&cfg.ScheduleCfg),
 		isLeaderValue: 0,
 		conns:         make(map[*conn]struct{}),
 		closed:        1,

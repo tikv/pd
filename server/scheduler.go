@@ -13,6 +13,13 @@
 
 package server
 
+// Scheduler is an interface to schedule resources.
+type Scheduler interface {
+	GetName() string
+	GetResourceKind() ResourceKind
+	Schedule(cluster *clusterInfo) *balanceOperator
+}
+
 // scheduleLeader schedules a region to transfer leader from the source store to the target store.
 func scheduleLeader(cluster *clusterInfo, s Selector) (*regionInfo, *storeInfo, *storeInfo) {
 	sourceStores := cluster.getStores()

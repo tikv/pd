@@ -62,77 +62,78 @@ func (f *excludedFilter) FilterTarget(store *storeInfo) bool {
 }
 
 type stateFilter struct {
-	cfg *BalanceConfig
+	opt *scheduleOption
 }
 
-func newStateFilter(cfg *BalanceConfig) *stateFilter {
-	return &stateFilter{cfg: cfg}
+func newStateFilter(opt *scheduleOption) *stateFilter {
+	return &stateFilter{opt: opt}
 }
 
-func (sf *stateFilter) filterBadStore(store *storeInfo) bool {
+func (f *stateFilter) filter(store *storeInfo) bool {
 	if !store.isUp() {
 		return true
 	}
-	if store.downTime() >= sf.cfg.MaxStoreDownDuration.Duration {
-		// The store is considered to be down.
-		return true
-	}
+	return store.downTime() > f.opt.GetMaxStoreDownTime()
+}
+
+func (f *stateFilter) FilterSource(store *storeInfo) bool {
+	return f.filter(store)
+}
+
+func (f *stateFilter) FilterTarget(store *storeInfo) bool {
+	return f.filter(store)
+}
+
+type regionCountFilter struct {
+	opt *scheduleOption
+}
+
+func newRegionCountFilter(opt *scheduleOption) *regionCountFilter {
+	return &regionCountFilter{opt: opt}
+}
+
+func (f *regionCountFilter) FilterSource(store *storeInfo) bool {
+	return uint64(store.stats.RegionCount) < f.opt.GetMinRegionCount()
+}
+
+func (f *regionCountFilter) FilterTarget(store *storeInfo) bool {
 	return false
-}
-
-func (sf *stateFilter) FilterSource(store *storeInfo) bool {
-	return sf.filterBadStore(store)
-}
-
-func (sf *stateFilter) FilterTarget(store *storeInfo) bool {
-	return sf.filterBadStore(store)
-}
-
-type capacityFilter struct {
-	cfg *BalanceConfig
-}
-
-func newCapacityFilter(cfg *BalanceConfig) *capacityFilter {
-	return &capacityFilter{cfg: cfg}
-}
-
-func (cf *capacityFilter) FilterSource(store *storeInfo) bool {
-	return store.storageRatio() <= cf.cfg.MinCapacityUsedRatio
-}
-
-func (cf *capacityFilter) FilterTarget(store *storeInfo) bool {
-	return store.storageRatio() >= cf.cfg.MaxCapacityUsedRatio
-}
-
-type snapCountFilter struct {
-	cfg *BalanceConfig
-}
-
-func newSnapCountFilter(cfg *BalanceConfig) *snapCountFilter {
-	return &snapCountFilter{cfg: cfg}
-}
-
-func (sf *snapCountFilter) FilterSource(store *storeInfo) bool {
-	return uint64(store.stats.GetSendingSnapCount()) > sf.cfg.MaxSendingSnapCount
-}
-
-func (sf *snapCountFilter) FilterTarget(store *storeInfo) bool {
-	return uint64(store.stats.GetReceivingSnapCount()) > sf.cfg.MaxReceivingSnapCount ||
-		uint64(store.stats.GetApplyingSnapCount()) > sf.cfg.MaxApplyingSnapCount
 }
 
 type leaderCountFilter struct {
-	cfg *BalanceConfig
+	opt *scheduleOption
 }
 
-func newLeaderCountFilter(cfg *BalanceConfig) *leaderCountFilter {
-	return &leaderCountFilter{cfg: cfg}
+func newLeaderCountFilter(opt *scheduleOption) *leaderCountFilter {
+	return &leaderCountFilter{opt: opt}
 }
 
-func (lf *leaderCountFilter) FilterSource(store *storeInfo) bool {
-	return uint64(store.stats.LeaderRegionCount) < lf.cfg.MaxLeaderCount
+func (f *leaderCountFilter) FilterSource(store *storeInfo) bool {
+	return uint64(store.stats.LeaderRegionCount) < f.opt.GetMinLeaderCount()
 }
 
-func (lf *leaderCountFilter) FilterTarget(store *storeInfo) bool {
+func (f *leaderCountFilter) FilterTarget(store *storeInfo) bool {
 	return false
+}
+
+type snapshotCountFilter struct {
+	opt *scheduleOption
+}
+
+func newSnapshotCountFilter(opt *scheduleOption) *snapshotCountFilter {
+	return &snapshotCountFilter{opt: opt}
+}
+
+func (f *snapshotCountFilter) filter(store *storeInfo) bool {
+	return uint64(store.stats.GetSendingSnapCount()) > f.opt.GetMaxSnapshotCount() ||
+		uint64(store.stats.GetReceivingSnapCount()) > f.opt.GetMaxSnapshotCount() ||
+		uint64(store.stats.GetApplyingSnapCount()) > f.opt.GetMaxSnapshotCount()
+}
+
+func (f *snapshotCountFilter) FilterSource(store *storeInfo) bool {
+	return f.filter(store)
+}
+
+func (f *snapshotCountFilter) FilterTarget(store *storeInfo) bool {
+	return f.filter(store)
 }

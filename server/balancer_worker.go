@@ -31,8 +31,9 @@ type balancerWorker struct {
 	// Balancer can use it?
 	balanceOperators map[uint64]*balanceOperator
 
-	balancers []Balancer
-	cfg       *BalanceConfig
+	balancers      []Scheduler
+	opt            *scheduleOption
+	replicaChecker *replicaChecker
 
 	regionCache      *expireRegionCache
 	historyOperators *lruCache
@@ -41,19 +42,20 @@ type balancerWorker struct {
 	quit chan struct{}
 }
 
-func newBalancerWorker(cluster *clusterInfo, cfg *BalanceConfig) *balancerWorker {
+func newBalancerWorker(cluster *clusterInfo, opt *scheduleOption) *balancerWorker {
 	bw := &balancerWorker{
-		cfg:              cfg,
+		opt:              opt,
 		cluster:          cluster,
+		replicaChecker:   newReplicaChecker(cluster, opt),
 		balanceOperators: make(map[uint64]*balanceOperator),
-		regionCache:      newExpireRegionCache(time.Duration(cfg.BalanceInterval)*time.Second, 4*time.Duration(cfg.BalanceInterval)*time.Second),
+		regionCache:      newExpireRegionCache(opt.GetBalanceInterval(), 4*opt.GetBalanceInterval()),
 		historyOperators: newLRUCache(100),
 		events:           newFifoCache(10000),
 		quit:             make(chan struct{}),
 	}
 
-	bw.balancers = append(bw.balancers, newLeaderBalancer(cfg))
-	bw.balancers = append(bw.balancers, newCapacityBalancer(cfg))
+	bw.balancers = append(bw.balancers, newLeaderBalancer(opt))
+	bw.balancers = append(bw.balancers, newStorageBalancer(opt))
 
 	return bw
 }
@@ -66,7 +68,7 @@ func (bw *balancerWorker) run() {
 func (bw *balancerWorker) workBalancer() {
 	defer bw.wg.Done()
 
-	timer := time.NewTimer(time.Duration(bw.cfg.BalanceInterval) * time.Second)
+	timer := time.NewTimer(bw.opt.GetBalanceInterval())
 	defer timer.Stop()
 
 	for {
@@ -79,7 +81,7 @@ func (bw *balancerWorker) workBalancer() {
 				log.Warnf("do balance failed - %v", errors.ErrorStack(err))
 			}
 
-			timer.Reset(time.Duration(bw.cfg.BalanceInterval) * time.Second)
+			timer.Reset(bw.opt.GetBalanceInterval())
 		}
 	}
 }
@@ -195,7 +197,7 @@ func (bw *balancerWorker) allowBalance() bool {
 
 	// TODO: We should introduce more strategies to control
 	// how many balance tasks at same time.
-	if balanceCount >= bw.cfg.MaxBalanceCount {
+	if balanceCount >= bw.opt.GetMaxBalanceCount() {
 		return false
 	}
 
@@ -204,8 +206,8 @@ func (bw *balancerWorker) allowBalance() bool {
 
 func (bw *balancerWorker) doBalance() error {
 	balanceCount := uint64(0)
-	for i := uint64(0); i < bw.cfg.MaxBalanceRetryPerLoop; i++ {
-		if balanceCount >= bw.cfg.MaxBalanceCountPerLoop {
+	for i := uint64(0); i < bw.opt.GetMaxBalanceRetryPerLoop(); i++ {
+		if balanceCount >= bw.opt.GetMaxBalanceCountPerLoop() {
 			return nil
 		}
 
@@ -213,29 +215,18 @@ func (bw *balancerWorker) doBalance() error {
 			return nil
 		}
 
-		var (
-			bop     *balanceOperator
-			maxDiff float64
-		)
-
 		// Find the balance operator candidates.
 		for _, balancer := range bw.balancers {
-			diff, op, err := balancer.Balance(bw.cluster)
-			if err != nil {
-				return errors.Trace(err)
+			bop := balancer.Schedule(bw.cluster)
+			if bop == nil {
+				continue
 			}
-			if maxDiff < diff {
-				bop = op
-			}
-		}
-		if bop == nil {
-			continue
-		}
 
-		regionID := bop.getRegionID()
-		if bw.addBalanceOperator(regionID, bop) {
-			bw.addRegionCache(regionID)
-			balanceCount++
+			regionID := bop.getRegionID()
+			if bw.addBalanceOperator(regionID, bop) {
+				bw.addRegionCache(regionID)
+				balanceCount++
+			}
 		}
 	}
 
@@ -243,11 +234,7 @@ func (bw *balancerWorker) doBalance() error {
 }
 
 func (bw *balancerWorker) checkReplicas(region *regionInfo) error {
-	bc := newReplicaBalancer(region, bw.cfg)
-	_, op, err := bc.Balance(bw.cluster)
-	if err != nil {
-		return errors.Trace(err)
-	}
+	op := bw.replicaChecker.Check(region)
 	if op != nil {
 		bw.addBalanceOperator(region.GetId(), op)
 	}
