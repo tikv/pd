@@ -56,9 +56,7 @@ func (s *testConstraintsSuite) TestReplicas(c *C) {
 	// No constraints, add default constraint with 3 replicas.
 	cs := newConstraints(3, constraints)
 	c.Assert(cs.MaxReplicas, Equals, 3)
-	c.Assert(cs.Constraints, HasLen, 1)
-	c.Assert(cs.Constraints[0].Labels, IsNil)
-	c.Assert(cs.Constraints[0].Replicas, Equals, 3)
+	c.Assert(cs.Constraints, IsNil)
 
 	constraints = append(constraints, &Constraint{
 		Labels:   map[string]string{"zone": "us-west", "disk": "ssd"},
@@ -79,42 +77,9 @@ func (s *testConstraintsSuite) TestReplicas(c *C) {
 	// max replicas 4 > sum replicas 3, add default constraint with 1 replica.
 	cs = newConstraints(4, constraints)
 	c.Assert(cs.MaxReplicas, Equals, 4)
-	c.Assert(cs.Constraints, HasLen, 3)
+	c.Assert(cs.Constraints, HasLen, 2)
 	c.Assert(cs.Constraints[0], DeepEquals, constraints[0])
 	c.Assert(cs.Constraints[1], DeepEquals, constraints[1])
-	c.Assert(cs.Constraints[2].Labels, IsNil)
-	c.Assert(cs.Constraints[2].Replicas, Equals, 1)
-}
-
-func (s *testConstraintsSuite) TestDefaultConstraint(c *C) {
-	var stores []*storeInfo
-
-	// Constraints with a default constraint.
-	cs := newConstraints(3, nil)
-	result := cs.Match(stores)
-	c.Assert(result.stores, HasLen, 0)
-	c.Assert(result.constraints[0].stores, HasLen, 0)
-
-	// Store 1,2 matches the default constraint.
-	stores = append(stores, newStoreInfo(&metapb.Store{Id: 1}))
-	stores = append(stores, newStoreInfo(&metapb.Store{Id: 2}))
-	result = cs.Match(stores)
-	c.Assert(result.stores, HasLen, 2)
-	c.Assert(result.stores[1], DeepEquals, cs.Constraints[0])
-	c.Assert(result.stores[2], DeepEquals, cs.Constraints[0])
-	c.Assert(result.constraints[0].stores, DeepEquals, stores)
-
-	// Store 1,2,3 matches the default constraint.
-	// Since the default constraint has been satisfied, store 4 don't need to match it.
-	stores = append(stores, newStoreInfo(&metapb.Store{Id: 3}))
-	stores = append(stores, newStoreInfo(&metapb.Store{Id: 4}))
-	result = cs.Match(stores)
-	c.Assert(result.stores, HasLen, 3)
-	c.Assert(result.stores[1], DeepEquals, cs.Constraints[0])
-	c.Assert(result.stores[2], DeepEquals, cs.Constraints[0])
-	c.Assert(result.stores[3], DeepEquals, cs.Constraints[0])
-	c.Assert(result.stores[4], IsNil)
-	c.Assert(result.constraints[0].stores, DeepEquals, stores[:3])
 }
 
 func (s *testConstraintsSuite) TestConstraints(c *C) {
@@ -128,14 +93,13 @@ func (s *testConstraintsSuite) TestConstraints(c *C) {
 			Replicas: 1,
 		},
 	}
-	// Constraints with 1 default replica.
 	cs := newConstraints(4, constraints)
-	// cs.Constraints[2] is the default constraint.
 
 	var stores []*storeInfo
 	result := cs.Match(stores)
 	c.Assert(result.stores, HasLen, 0)
-	c.Assert(result.constraints[0].stores, HasLen, 0)
+	c.Assert(result.constraints[0].stores, IsNil)
+	c.Assert(result.constraints[1].stores, IsNil)
 
 	// Create 5 stores with no labels.
 	stores = append(stores, newStoreInfo(&metapb.Store{Id: 0}))
@@ -144,17 +108,13 @@ func (s *testConstraintsSuite) TestConstraints(c *C) {
 	stores = append(stores, newStoreInfo(&metapb.Store{Id: 3}))
 	stores = append(stores, newStoreInfo(&metapb.Store{Id: 4}))
 
-	// Store 0 will match the default constraint and the other are redundant.
 	result = cs.Match(stores)
-	c.Assert(result.stores, HasLen, 1)
-	c.Assert(result.stores[0], DeepEquals, cs.Constraints[2])
+	c.Assert(result.stores, HasLen, 0)
 	c.Assert(result.constraints[0].stores, IsNil)
 	c.Assert(result.constraints[1].stores, IsNil)
-	c.Assert(result.constraints[2].stores, DeepEquals, stores[0:1])
 
 	// Store 0 matches constraint 0.
 	// Store 1 matches constraint 1.
-	// Store 2 matches constraint 2 (default constraint).
 	stores[0].Labels = []*metapb.StoreLabel{
 		{Key: "zone", Value: "us-west"},
 		{Key: "disk", Value: "ssd"},
@@ -175,16 +135,13 @@ func (s *testConstraintsSuite) TestConstraints(c *C) {
 	}
 
 	result = cs.Match(stores)
-	c.Assert(result.stores, HasLen, 3)
+	c.Assert(result.stores, HasLen, 2)
 	c.Assert(result.stores[0], DeepEquals, cs.Constraints[0])
 	c.Assert(result.stores[1], DeepEquals, cs.Constraints[1])
-	c.Assert(result.stores[2], DeepEquals, cs.Constraints[2])
 	c.Assert(result.constraints[0].stores, DeepEquals, stores[0:1])
 	c.Assert(result.constraints[1].stores, DeepEquals, stores[1:2])
-	c.Assert(result.constraints[2].stores, DeepEquals, stores[2:3])
 
 	// Store 0,1 can match constraint 0.
-	// Store 2 can match constraint 2 (default constraint).
 	// Store 3,4 can match constraint 1 (but store 4 is redundant).
 	stores[0].Labels = []*metapb.StoreLabel{
 		{Key: "zone", Value: "us-west"},
@@ -206,14 +163,12 @@ func (s *testConstraintsSuite) TestConstraints(c *C) {
 	}
 
 	result = cs.Match(stores)
-	c.Assert(result.stores, HasLen, 4)
+	c.Assert(result.stores, HasLen, 3)
 	c.Assert(result.stores[0], DeepEquals, cs.Constraints[0])
 	c.Assert(result.stores[1], DeepEquals, cs.Constraints[0])
-	c.Assert(result.stores[2], DeepEquals, cs.Constraints[2])
 	c.Assert(result.stores[3], DeepEquals, cs.Constraints[1])
 	c.Assert(result.constraints[0].stores, DeepEquals, stores[0:2])
 	c.Assert(result.constraints[1].stores, DeepEquals, stores[3:4])
-	c.Assert(result.constraints[2].stores, DeepEquals, stores[2:3])
 
 	// Store 0,1,2 can match constraint 0 (but store 2 is redundant).
 	// Store 3,4 can match constraint 1 (but store 4 is redundant).
@@ -242,12 +197,10 @@ func (s *testConstraintsSuite) TestConstraints(c *C) {
 	}
 
 	result = cs.Match(stores)
-	c.Assert(result.stores, HasLen, 4)
+	c.Assert(result.stores, HasLen, 3)
 	c.Assert(result.stores[0], DeepEquals, cs.Constraints[0])
 	c.Assert(result.stores[1], DeepEquals, cs.Constraints[0])
-	c.Assert(result.stores[2], DeepEquals, cs.Constraints[2])
 	c.Assert(result.stores[3], DeepEquals, cs.Constraints[1])
 	c.Assert(result.constraints[0].stores, DeepEquals, stores[0:2])
 	c.Assert(result.constraints[1].stores, DeepEquals, stores[3:4])
-	c.Assert(result.constraints[2].stores, DeepEquals, stores[2:3])
 }

@@ -56,10 +56,6 @@ func newConstraints(maxReplicas int, constraints []*Constraint) *Constraints {
 	if maxReplicas <= sumReplicas {
 		// Max replicas should not be smaller than the sum replicas.
 		maxReplicas = sumReplicas
-	} else {
-		// Add a default constraint to cover other replicas.
-		defaultConstraint := &Constraint{Replicas: maxReplicas - sumReplicas}
-		constraints = append(constraints, defaultConstraint)
 	}
 	return &Constraints{
 		MaxReplicas: maxReplicas,

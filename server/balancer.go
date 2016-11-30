@@ -152,10 +152,8 @@ func (r *replicaChecker) Check(region *regionInfo) *balanceOperator {
 		}
 	}
 	if len(stores) < constraints.MaxReplicas {
-		// If we reach here and we don't have enough replicas,
-		// it means that we can't satisfy all constraints for now,
-		// but at least we try to satisfy the max replicas requirement.
-		log.Warnf("region replication constraints can not be satisfied: %v", region)
+		// No matter whether we can satisfy all constraints or not,
+		// we should at least ensure that the region has enough replicas.
 		return r.addPeer(region, nil)
 	}
 
