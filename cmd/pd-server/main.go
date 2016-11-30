@@ -60,7 +60,7 @@ func main() {
 	err = svr.StartEtcd(api.NewHandler(svr))
 	if err != nil {
 		log.Errorf("server start etcd failed - %v", errors.Trace(err))
-		return
+		os.Exit(2)
 	}
 
 	sc := make(chan os.Signal, 1)
