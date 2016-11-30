@@ -441,8 +441,10 @@ func (c *Config) parseConstraints() error {
 		}
 		constraints = append(constraints, constraint)
 	}
-	c.constraints = newConstraints(int(c.MaxPeerCount), constraints)
-	return nil
+
+	var err error
+	c.constraints, err = newConstraints(int(c.MaxPeerCount), constraints)
+	return errors.Trace(err)
 }
 
 // ParseUrls parse a string into multiple urls.

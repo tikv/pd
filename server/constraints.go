@@ -16,6 +16,8 @@ package server
 import (
 	"fmt"
 	"sort"
+
+	"github.com/juju/errors"
 )
 
 // Constraint is a replica constraint to place region peers.
@@ -42,25 +44,51 @@ func (c *Constraint) Match(store *storeInfo) bool {
 	return true
 }
 
+// Exclusive returns true if the constraints are mutually exclusive.
+func (c *Constraint) Exclusive(other *Constraint) bool {
+	for k, v := range c.Labels {
+		if value, ok := other.Labels[k]; ok && value != v {
+			return true
+		}
+	}
+	return false
+}
+
 // Constraints contains all replica constraints.
 type Constraints struct {
 	MaxReplicas int
 	Constraints []*Constraint
 }
 
-func newConstraints(maxReplicas int, constraints []*Constraint) *Constraints {
+func newConstraints(maxReplicas int, constraints []*Constraint) (*Constraints, error) {
+	// Ensure max replicas is valid.
 	sumReplicas := 0
 	for _, constraint := range constraints {
+		if constraint.Replicas == 0 {
+			return nil, errors.Errorf("constraint %v must have replicas", constraint)
+		}
 		sumReplicas += constraint.Replicas
 	}
-	if maxReplicas <= sumReplicas {
-		// Max replicas should not be smaller than the sum replicas.
-		maxReplicas = sumReplicas
+	if maxReplicas < sumReplicas {
+		return nil, errors.Errorf("max replicas %v must not be smaller than the sum replicas %v", maxReplicas, sumReplicas)
 	}
+	if maxReplicas%2 == 0 {
+		return nil, errors.Errorf("max replicas %v must not be even", maxReplicas)
+	}
+
+	// Ensure Constraints are mutually exclusive.
+	for i, constraint := range constraints {
+		for _, other := range constraints[i+1:] {
+			if !constraint.Exclusive(other) {
+				return nil, errors.Errorf("constraint %v and %v must be mutually exclusive", constraints, other)
+			}
+		}
+	}
+
 	return &Constraints{
 		MaxReplicas: maxReplicas,
 		Constraints: constraints,
-	}
+	}, nil
 }
 
 func (c *Constraints) String() string {

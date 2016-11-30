@@ -212,7 +212,7 @@ func (s *testStorageBalancerSuite) TestConstraints(c *C) {
 	cfg, opt := newTestScheduleConfig()
 	cfg.MinRegionCount = 1
 	cfg.MinBalanceDiffRatio = 0.01
-	opt.constraints = newConstraints(1, []*Constraint{
+	opt.constraints, _ = newConstraints(1, []*Constraint{
 		{
 			Labels:   map[string]string{"zone": "cn"},
 			Replicas: 1,
@@ -312,7 +312,7 @@ func (s *testReplicaCheckerSuite) TestConstraints(c *C) {
 	cfg, opt := newTestScheduleConfig()
 	cfg.MinRegionCount = 1
 	cfg.MinBalanceDiffRatio = 0.01
-	opt.constraints = newConstraints(3, []*Constraint{
+	opt.constraints, _ = newConstraints(3, []*Constraint{
 		{
 			Labels:   map[string]string{"zone": "us"},
 			Replicas: 2,
