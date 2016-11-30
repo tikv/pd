@@ -86,7 +86,7 @@ func NewConfig() *Config {
 	cfg.FlagSet = flag.NewFlagSet("pd", flag.ContinueOnError)
 	fs := cfg.FlagSet
 
-	fs.BoolVar(&cfg.Version, "v", false, "print version information and exit")
+	fs.BoolVar(&cfg.Version, "version", false, "print version information and exit")
 	fs.StringVar(&cfg.configFile, "config", "", "Config file")
 
 	fs.StringVar(&cfg.Name, "name", defaultName, "human-readable name for this pd member")
