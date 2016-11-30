@@ -20,6 +20,41 @@ type Scheduler interface {
 	Schedule(cluster *clusterInfo) *balanceOperator
 }
 
+// grantLeaderScheduler transfers all leaders to peers in the store.
+type grantLeaderScheduler struct {
+	StoreID uint64 `json:"store_id"`
+}
+
+func newGrantLeaderScheduler(storeID uint64) *grantLeaderScheduler {
+	return &grantLeaderScheduler{StoreID: storeID}
+}
+
+func (s *grantLeaderScheduler) GetName() string {
+	return "grant-leader-scheduler"
+}
+
+func (s *grantLeaderScheduler) GetResourceKind() ResourceKind {
+	return leaderKind
+}
+
+func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) *balanceOperator {
+	region := cluster.randFollowerRegion(s.StoreID)
+	if region == nil {
+		return nil
+	}
+	return transferLeader(region, s.StoreID)
+}
+
+// transferLeader returns an operator to transfer leader to the store.
+func transferLeader(region *regionInfo, storeID uint64) *balanceOperator {
+	newLeader := region.GetStorePeer(storeID)
+	if newLeader == nil {
+		return nil
+	}
+	transferLeader := newTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
+	return newBalanceOperator(region, balanceOP, transferLeader)
+}
+
 // scheduleLeader schedules a region to transfer leader from the source store to the target store.
 func scheduleLeader(cluster *clusterInfo, s Selector) (*regionInfo, *storeInfo, *storeInfo) {
 	sourceStores := cluster.getStores()

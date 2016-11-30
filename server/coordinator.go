@@ -39,6 +39,9 @@ type coordinator struct {
 	opt     *scheduleOption
 	checker *replicaChecker
 
+	schedulers  map[string]Scheduler
+	controllers map[string]Controller
+
 	operators map[ResourceKind]map[uint64]*balanceOperator
 
 	regionCache *expireRegionCache
@@ -51,6 +54,8 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
 		cluster:     cluster,
 		opt:         opt,
 		checker:     newReplicaChecker(cluster, opt),
+		schedulers:  make(map[string]Scheduler),
+		controllers: make(map[string]Controller),
 		regionCache: newExpireRegionCache(regionCacheTTL, regionCacheTTL),
 		histories:   newLRUCache(historiesCacheSize),
 		events:      newFifoCache(eventsCacheSize),
@@ -86,16 +91,37 @@ func (c *coordinator) dispatch(region *regionInfo) *pdpb.RegionHeartbeatResponse
 }
 
 func (c *coordinator) run() {
-	c.wg.Add(1)
-	go c.runScheduler(newLeaderBalancer(c.opt), newLeaderController(c))
-
-	c.wg.Add(1)
-	go c.runScheduler(newStorageBalancer(c.opt), newStorageController(c))
+	c.addScheduler(newLeaderBalancer(c.opt), newLeaderController(c))
+	c.addScheduler(newStorageBalancer(c.opt), newStorageController(c))
 }
 
 func (c *coordinator) stop() {
 	c.cancel()
 	c.wg.Wait()
+}
+
+func (c *coordinator) addScheduler(s Scheduler, ctrl Controller) {
+	c.removeScheduler(s.GetName())
+
+	c.Lock()
+	defer c.Unlock()
+
+	c.schedulers[s.GetName()] = s
+	c.controllers[s.GetName()] = ctrl
+
+	c.wg.Add(1)
+	go c.runScheduler(s, ctrl)
+}
+
+func (c *coordinator) removeScheduler(name string) {
+	c.Lock()
+	defer c.Unlock()
+
+	if ctrl, ok := c.controllers[name]; ok {
+		ctrl.Stop()
+	}
+	delete(c.schedulers, name)
+	delete(c.controllers, name)
 }
 
 func (c *coordinator) runScheduler(s Scheduler, ctrl Controller) {

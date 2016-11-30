@@ -69,7 +69,6 @@ func (s *testCoordinatorSuite) TestSchedule(c *C) {
 	cfg.MinBalanceDiffRatio = 0.1
 	cfg.LeaderScheduleInterval.Duration = 100 * time.Millisecond
 	cfg.StorageScheduleInterval.Duration = 100 * time.Millisecond
-	cluster.putMeta(&metapb.Cluster{Id: 1, MaxPeerCount: 3})
 
 	co := newCoordinator(cluster, opt)
 	co.run()
@@ -139,6 +138,47 @@ func (s *testCoordinatorSuite) TestSchedule(c *C) {
 	// Remove peer in store 4.
 	resp = co.dispatch(region)
 	checkRemovePeerResp(c, resp, 4)
+}
+
+func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+
+	cfg, opt := newTestScheduleConfig()
+	cfg.LeaderScheduleInterval.Duration = 10 * time.Millisecond
+
+	co := newCoordinator(cluster, opt)
+	co.run()
+	defer co.stop()
+
+	c.Assert(co.schedulers, HasLen, 2)
+	co.removeScheduler("leader-balancer")
+	co.removeScheduler("storage-balancer")
+	c.Assert(co.schedulers, HasLen, 0)
+
+	// Add stores 1,2,3
+	tc.addLeaderStore(1, 1, 1)
+	tc.addLeaderStore(2, 1, 1)
+	tc.addLeaderStore(3, 1, 1)
+	// Add regions 1 with leader in store 1 and followers in stores 2,3
+	tc.addLeaderRegion(1, 1, 2, 3)
+	// Add regions 2 with leader in store 2 and followers in stores 1,3
+	tc.addLeaderRegion(2, 2, 1, 3)
+	// Add regions 3 with leader in store 3 and followers in stores 1,2
+	tc.addLeaderRegion(3, 3, 1, 2)
+
+	co.addScheduler(newGrantLeaderScheduler(1), newLeaderController(co))
+
+	// Transfer all leaders to store 1.
+	time.Sleep(100 * time.Millisecond)
+	checkTransferLeaderResp(c, co.dispatch(cluster.getRegion(2)), 1)
+	tc.addLeaderRegion(2, 1, 2, 3)
+	time.Sleep(100 * time.Millisecond)
+	checkTransferLeaderResp(c, co.dispatch(cluster.getRegion(3)), 1)
+	tc.addLeaderRegion(3, 1, 2, 3)
+	time.Sleep(100 * time.Millisecond)
+	c.Assert(co.dispatch(cluster.getRegion(2)), IsNil)
+	c.Assert(co.dispatch(cluster.getRegion(3)), IsNil)
 }
 
 var _ = Suite(&testControllerSuite{})
