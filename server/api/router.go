@@ -32,6 +32,13 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	})
 
 	router := mux.NewRouter().PathPrefix(prefix).Subrouter()
+
+	handler := svr.GetHandler()
+	schedulerHandler := newSchedulerHandler(handler, rd)
+	router.HandleFunc("/api/v1/schedulers", schedulerHandler.List).Methods("GET")
+	router.HandleFunc("/api/v1/schedulers", schedulerHandler.Post).Methods("POST")
+	router.HandleFunc("/api/v1/schedulers/{name}", schedulerHandler.Delete).Methods("DELETE")
+
 	router.Handle("/api/v1/cluster", newClusterHandler(svr, rd)).Methods("GET")
 
 	confHandler := newConfHandler(svr, rd)
