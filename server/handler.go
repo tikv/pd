@@ -63,7 +63,7 @@ func (h *Handler) AddLeaderScheduler(s Scheduler) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if !c.addScheduler(s, newLeaderController(c)) {
+	if !c.addScheduler(newLeaderScheduleController(c, s)) {
 		return errors.Errorf("scheduler %q exists", s.GetName())
 	}
 	return nil
