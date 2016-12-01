@@ -593,7 +593,7 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	c.Assert(resp, NotNil)
 
 	regionID := left.GetId()
-	value, ok := cluster.balancerWorker.historyOperators.get(regionID)
+	value, ok := cluster.coordinator.histories.get(regionID)
 	c.Assert(ok, IsTrue)
 
 	op := value.(*splitOperator)
@@ -605,101 +605,4 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	c.Assert(op.Origin.GetEndKey(), BytesEquals, right.GetEndKey())
 	c.Assert(op.Origin.GetPeers(), HasLen, 1)
 	c.Assert(op.Origin.GetPeers()[0], DeepEquals, peer)
-}
-
-func (s *testClusterWorkerSuite) TestBalanceOperatorPriority(c *C) {
-	cluster := s.svr.GetRaftCluster()
-	c.Assert(cluster, NotNil)
-
-	bw := cluster.balancerWorker
-
-	err := cluster.putConfig(&metapb.Cluster{
-		Id:           s.clusterID,
-		MaxPeerCount: 1,
-	})
-	c.Assert(err, IsNil)
-
-	leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
-	conn, err := rpcConnect(leaderPd.GetAddr())
-	c.Assert(err, IsNil)
-	defer conn.Close()
-
-	region, _ := cluster.getRegion([]byte{'a'})
-	c.Assert(region.GetPeers(), HasLen, 1)
-	leader := s.chooseRegionLeader(c, region)
-
-	// region has enough replicas and no balance operator.
-	resp := heartbeatRegion(c, conn, s.clusterID, 0, region, leader)
-	c.Assert(resp, IsNil)
-
-	// Add a balanceOP.
-	removePeerOperator := newRemovePeerOperator(region.GetId(), leader)
-	regionInfo := newRegionInfo(region, leader)
-	bop := newBalanceOperator(regionInfo, balanceOP, removePeerOperator)
-	ok := bw.addBalanceOperator(region.GetId(), bop)
-	c.Assert(ok, IsTrue)
-	// Add a balanceOP again will fail.
-	ok = bw.addBalanceOperator(region.GetId(), bop)
-	c.Assert(ok, IsFalse)
-
-	// Now we will get a balanceOP.
-	resp = heartbeatRegion(c, conn, s.clusterID, 0, region, leader)
-	c.Assert(resp, DeepEquals, removePeerOperator.ChangePeer)
-	op := bw.getBalanceOperator(region.GetId())
-	c.Assert(op.Type, Equals, balanceOP)
-	bw.removeBalanceOperator(region.GetId())
-
-	err = cluster.putConfig(&metapb.Cluster{
-		Id:           s.clusterID,
-		MaxPeerCount: 3,
-	})
-	c.Assert(err, IsNil)
-
-	// Now region doesn't have enough replicas, we will get a replicaOP.
-	resp = heartbeatRegion(c, conn, s.clusterID, 0, region, leader)
-	c.Assert(resp.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	op = bw.getBalanceOperator(region.GetId())
-	// replicaOP finishes immediately, so the op is nil here.
-	c.Assert(op, IsNil)
-
-	// Add a balanceOP.
-	addPeer := s.newPeer(c, 999, 0)
-	addPeerOperator := newAddPeerOperator(region.GetId(), addPeer)
-	bop = newBalanceOperator(regionInfo, balanceOP, addPeerOperator, removePeerOperator)
-	ok = bw.addBalanceOperator(region.GetId(), bop)
-	c.Assert(ok, IsTrue)
-
-	// Change MaxPeerCount to 1 to let the operator start.
-	cluster.putConfig(&metapb.Cluster{
-		Id:           s.clusterID,
-		MaxPeerCount: 1,
-	})
-	resp = heartbeatRegion(c, conn, s.clusterID, 0, region, leader)
-	c.Assert(resp, DeepEquals, addPeerOperator.ChangePeer)
-
-	// The balanceOP will not replaced by a replicaOP because it has started.
-	cluster.putConfig(&metapb.Cluster{
-		Id:           s.clusterID,
-		MaxPeerCount: 3,
-	})
-	resp = heartbeatRegion(c, conn, s.clusterID, 0, region, leader)
-	c.Assert(resp, DeepEquals, addPeerOperator.ChangePeer)
-	bw.removeBalanceOperator(region.GetId())
-
-	// Add an adminOP.
-	aop := newBalanceOperator(regionInfo, adminOP, removePeerOperator)
-	ok = bw.addBalanceOperator(region.GetId(), aop)
-	c.Assert(ok, IsTrue)
-	// Add an adminOP again is OK.
-	ok = bw.addBalanceOperator(region.GetId(), aop)
-	c.Assert(ok, IsTrue)
-	// Add an balanceOP will fail.
-	ok = bw.addBalanceOperator(region.GetId(), bop)
-	c.Assert(ok, IsFalse)
-
-	// Now we will get an adminOP.
-	resp = heartbeatRegion(c, conn, s.clusterID, 0, region, leader)
-	c.Assert(resp, DeepEquals, removePeerOperator.ChangePeer)
-	op = bw.getBalanceOperator(region.GetId())
-	c.Assert(op.Type, Equals, adminOP)
 }

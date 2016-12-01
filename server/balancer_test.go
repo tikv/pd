@@ -14,7 +14,6 @@
 package server
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -82,6 +81,7 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 
 func (c *testClusterInfo) updateLeaderCount(storeID uint64, leaderCount, regionCount int) {
 	store := c.getStore(storeID)
+	store.stats.TotalRegionCount = regionCount
 	store.stats.LeaderRegionCount = leaderCount
 	c.putStore(store)
 }
@@ -284,104 +284,4 @@ func checkTransferLeader(c *C, bop *balanceOperator, sourceID, targetID uint64) 
 	op := bop.Ops[0].(*transferLeaderOperator)
 	c.Assert(op.OldLeader.GetStoreId(), Equals, sourceID)
 	c.Assert(op.NewLeader.GetStoreId(), Equals, targetID)
-}
-
-var _ = Suite(&testBalancerSuite{})
-
-type testBalancerSuite struct {
-	testClusterBaseSuite
-
-	cfg *ScheduleConfig
-	opt *scheduleOption
-}
-
-func (s *testBalancerSuite) getRootPath() string {
-	return "test_balancer"
-}
-
-func (s *testBalancerSuite) SetUpSuite(c *C) {
-	s.cfg = newScheduleConfig()
-	s.cfg.adjust()
-	s.opt = newScheduleOption(s.cfg)
-}
-
-func (s *testBalancerSuite) newClusterInfo(c *C) *clusterInfo {
-	clusterInfo := newClusterInfo(newMockIDAllocator())
-
-	// Set cluster info.
-	meta := &metapb.Cluster{
-		Id:           0,
-		MaxPeerCount: 3,
-	}
-	clusterInfo.putMeta(meta)
-
-	var (
-		id   uint64
-		peer *metapb.Peer
-		err  error
-	)
-
-	// Add 4 stores, store id will be 1,2,3,4.
-	for i := 1; i < 5; i++ {
-		id, err = clusterInfo.allocID()
-		c.Assert(err, IsNil)
-
-		addr := fmt.Sprintf("127.0.0.1:%d", i)
-		store := s.newStore(c, id, addr)
-		clusterInfo.putStore(newStoreInfo(store))
-	}
-
-	// Add 1 peer, id will be 5.
-	id, err = clusterInfo.allocID()
-	c.Assert(err, IsNil)
-	peer = s.newPeer(c, 1, id)
-
-	// Add 1 region, id will be 6.
-	id, err = clusterInfo.allocID()
-	c.Assert(err, IsNil)
-
-	region := s.newRegion(c, id, []byte{}, []byte{}, []*metapb.Peer{peer}, nil)
-	clusterInfo.putRegion(newRegionInfo(region, peer))
-
-	stores := clusterInfo.getStores()
-	c.Assert(stores, HasLen, 4)
-
-	return clusterInfo
-}
-
-func (s *testBalancerSuite) updateStore(c *C, clusterInfo *clusterInfo, storeID uint64, capacity uint64, available uint64,
-	sendingSnapCount uint32, receivingSnapCount uint32, applyingSnapCount uint32) {
-	stats := &pdpb.StoreStats{
-		StoreId:            storeID,
-		Capacity:           capacity,
-		Available:          available,
-		SendingSnapCount:   sendingSnapCount,
-		ReceivingSnapCount: receivingSnapCount,
-		ApplyingSnapCount:  applyingSnapCount,
-	}
-
-	c.Assert(clusterInfo.handleStoreHeartbeat(stats), IsNil)
-}
-
-func (s *testBalancerSuite) updateStoreState(c *C, clusterInfo *clusterInfo, storeID uint64, state metapb.StoreState) {
-	store := clusterInfo.getStore(storeID)
-	store.State = state
-	clusterInfo.putStore(store)
-}
-
-func (s *testBalancerSuite) addRegionPeer(c *C, clusterInfo *clusterInfo, storeID uint64, region *regionInfo) {
-	r := newReplicaChecker(clusterInfo, s.opt)
-	bop := r.Check(region)
-	c.Assert(bop, NotNil)
-
-	op, ok := bop.Ops[0].(*onceOperator).Op.(*changePeerOperator)
-	c.Assert(ok, IsTrue)
-	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-
-	peer := op.ChangePeer.GetPeer()
-	c.Assert(peer.GetStoreId(), Equals, storeID)
-
-	addRegionPeer(c, region.Region, peer)
-
-	clusterInfo.putRegion(region)
 }

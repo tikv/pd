@@ -30,33 +30,7 @@ func (c *RaftCluster) handleRegionHeartbeat(region *regionInfo) (*pdpb.RegionHea
 		return nil, errors.Errorf("invalid region, zero region peer count - %v", region)
 	}
 
-	bw := c.balancerWorker
-	regionID := region.GetId()
-
-	err := bw.checkReplicas(region)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	op := bw.getBalanceOperator(regionID)
-	if op == nil {
-		return nil, nil
-	}
-
-	ctx := newOpContext(bw.hookStartEvent, bw.hookEndEvent)
-	finished, res, err := op.Do(ctx, region)
-	if err != nil {
-		// Do balance failed, remove it.
-		log.Errorf("do balance for region %d failed %s", regionID, err)
-		bw.removeBalanceOperator(regionID)
-		bw.removeRegionCache(regionID)
-	}
-	if finished {
-		// Do finished, remove it.
-		bw.removeBalanceOperator(regionID)
-	}
-
-	return res, nil
+	return c.coordinator.dispatch(region), nil
 }
 
 func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
@@ -125,9 +99,9 @@ func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 
 	// Wrap report split as an Operator, and add it into history cache.
 	op := newSplitOperator(originRegion, left, right)
-	c.balancerWorker.historyOperators.add(originRegion.GetId(), op)
+	c.coordinator.histories.add(originRegion.GetId(), op)
 
-	c.balancerWorker.postEvent(op, evtEnd)
+	c.coordinator.postEvent(op, evtEnd)
 
 	return &pdpb.ReportSplitResponse{}, nil
 }

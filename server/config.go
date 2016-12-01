@@ -295,25 +295,27 @@ type ScheduleConfig struct {
 	// a store will be considered to be down if it hasn't reported heartbeats.
 	MaxStoreDownDuration timeutil.Duration `toml:"max-store-down-duration" json:"max-store-down-duration"`
 
-	// BalanceInterval is the interval to schedule leader.
-	BalanceInterval timeutil.Duration `toml:"balance-interval" json:"balance-interval"`
-	// MaxBalanceCount is the max coexist schedules.
-	MaxBalanceCount uint64 `toml:"max-balance-count" json:"max-balance-count"`
+	// LeaderScheduleLimit is the max coexist leader schedules.
+	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
+	// LeaderScheduleInterval is the interval to schedule leader.
+	LeaderScheduleInterval timeutil.Duration `toml:"leader-schedule-interval" json:"leader-schedule-interval"`
 
-	MaxBalanceRetryPerLoop uint64 `toml:"max-balance-retry-per-loop" json:"max-balance-retry-per-loop"`
-	MaxBalanceCountPerLoop uint64 `toml:"max-balance-count-per-loop" json:"max-balance-count-per-loop"`
+	// StorageScheduleLimit is the max coexist storage schedules.
+	StorageScheduleLimit uint64 `toml:"storage-schedule-limit" json:"storage-schedule-limit"`
+	// StorageScheduleInterval is the interval to schedule storage.
+	StorageScheduleInterval timeutil.Duration `toml:"storage-schedule-interval" json:"storage-schedule-interval"`
 }
 
 const (
-	defaultMinRegionCount         = uint64(10)
-	defaultMinLeaderCount         = uint64(10)
-	defaultMaxSnapshotCount       = uint64(3)
-	defaultMinBalanceDiffRatio    = float64(0.1)
-	defaultMaxStoreDownDuration   = 30 * time.Minute
-	defaultBalanceInterval        = 30 * time.Second
-	defaultMaxBalanceCount        = uint64(16)
-	defaultMaxBalanceRetryPerLoop = uint64(10)
-	defaultMaxBalanceCountPerLoop = uint64(4)
+	defaultMinRegionCount          = uint64(10)
+	defaultMinLeaderCount          = uint64(10)
+	defaultMaxSnapshotCount        = uint64(3)
+	defaultMinBalanceDiffRatio     = float64(0.01)
+	defaultMaxStoreDownDuration    = 30 * time.Minute
+	defaultLeaderScheduleLimit     = 4
+	defaultLeaderScheduleInterval  = 30 * time.Second
+	defaultStorageScheduleLimit    = 4
+	defaultStorageScheduleInterval = 30 * time.Second
 )
 
 func newScheduleConfig() *ScheduleConfig {
@@ -326,10 +328,10 @@ func (c *ScheduleConfig) adjust() {
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	adjustFloat64(&c.MinBalanceDiffRatio, defaultMinBalanceDiffRatio)
 	adjustDuration(&c.MaxStoreDownDuration, defaultMaxStoreDownDuration)
-	adjustDuration(&c.BalanceInterval, defaultBalanceInterval)
-	adjustUint64(&c.MaxBalanceCount, defaultMaxBalanceCount)
-	adjustUint64(&c.MaxBalanceRetryPerLoop, defaultMaxBalanceRetryPerLoop)
-	adjustUint64(&c.MaxBalanceCountPerLoop, defaultMaxBalanceCountPerLoop)
+	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
+	adjustDuration(&c.LeaderScheduleInterval, defaultLeaderScheduleInterval)
+	adjustUint64(&c.StorageScheduleLimit, defaultStorageScheduleLimit)
+	adjustDuration(&c.StorageScheduleInterval, defaultStorageScheduleInterval)
 }
 
 // scheduleOption is a wrapper to access the configuration safely.
@@ -371,20 +373,20 @@ func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
 	return o.load().MaxStoreDownDuration.Duration
 }
 
-func (o *scheduleOption) GetMaxBalanceCount() uint64 {
-	return o.load().MaxBalanceCount
+func (o *scheduleOption) GetLeaderScheduleLimit() uint64 {
+	return o.load().LeaderScheduleLimit
 }
 
-func (o *scheduleOption) GetBalanceInterval() time.Duration {
-	return o.load().BalanceInterval.Duration
+func (o *scheduleOption) GetLeaderScheduleInterval() time.Duration {
+	return o.load().LeaderScheduleInterval.Duration
 }
 
-func (o *scheduleOption) GetMaxBalanceRetryPerLoop() uint64 {
-	return o.load().MaxBalanceRetryPerLoop
+func (o *scheduleOption) GetStorageScheduleLimit() uint64 {
+	return o.load().StorageScheduleLimit
 }
 
-func (o *scheduleOption) GetMaxBalanceCountPerLoop() uint64 {
-	return o.load().MaxBalanceCountPerLoop
+func (o *scheduleOption) GetStorageScheduleInterval() time.Duration {
+	return o.load().StorageScheduleInterval.Duration
 }
 
 // ParseUrls parse a string into multiple urls.

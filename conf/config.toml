@@ -27,10 +27,10 @@ min-leader-count = 10
 max-snapshot-count = 3
 min-balance-diff-ratio = 0.01
 max-store-down-duration = "30m"
-balance-interval = "30s"
-max-balance-count = 4
-max-balance-retry-per-loop = 4
-max-balance-count-per-loop = 1
+leader-schedule-limit = 4
+leader-schedule-interval = "30s"
+storage-schedule-limit = 4
+storage-schedule-interval = "30s"
 
 [metric]
 # prometheus client push interval, set "0s" to disable prometheus.
