@@ -39,8 +39,7 @@ func main() {
 	case flag.ErrHelp:
 		os.Exit(0)
 	default:
-		log.Errorf("parse cmd flags err %s\n", err)
-		os.Exit(2)
+		log.Fatalf("parse cmd flags err %s\n", err)
 	}
 
 	err = server.InitLogger(cfg)
@@ -54,13 +53,11 @@ func main() {
 
 	svr, err := server.CreateServer(cfg)
 	if err != nil {
-		log.Errorf("create pd server err %s\n", err)
-		return
+		log.Fatalf("create pd server err %s\n", err)
 	}
 	err = svr.StartEtcd(api.NewHandler(svr))
 	if err != nil {
-		log.Errorf("server start etcd failed - %v", errors.Trace(err))
-		os.Exit(2)
+		log.Fatalf("server start etcd failed - %v", errors.Trace(err))
 	}
 
 	sc := make(chan os.Signal, 1)
