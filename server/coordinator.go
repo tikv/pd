@@ -100,28 +100,46 @@ func (c *coordinator) stop() {
 	c.wg.Wait()
 }
 
-func (c *coordinator) addScheduler(s Scheduler, ctrl Controller) {
-	c.removeScheduler(s.GetName())
+func (c *coordinator) getSchedulers() []string {
+	c.RLock()
+	defer c.RUnlock()
 
+	var names []string
+	for name := range c.schedulers {
+		names = append(names, name)
+	}
+	return names
+}
+
+func (c *coordinator) addScheduler(s Scheduler, ctrl Controller) bool {
 	c.Lock()
 	defer c.Unlock()
 
-	c.schedulers[s.GetName()] = s
-	c.controllers[s.GetName()] = ctrl
+	if _, ok := c.schedulers[s.GetName()]; ok {
+		return false
+	}
 
 	c.wg.Add(1)
 	go c.runScheduler(s, ctrl)
+
+	c.schedulers[s.GetName()] = s
+	c.controllers[s.GetName()] = ctrl
+	return true
 }
 
-func (c *coordinator) removeScheduler(name string) {
+func (c *coordinator) removeScheduler(name string) bool {
 	c.Lock()
 	defer c.Unlock()
 
-	if ctrl, ok := c.controllers[name]; ok {
-		ctrl.Stop()
+	ctrl, ok := c.controllers[name]
+	if !ok {
+		return false
 	}
+
+	ctrl.Stop()
 	delete(c.schedulers, name)
 	delete(c.controllers, name)
+	return true
 }
 
 func (c *coordinator) runScheduler(s Scheduler, ctrl Controller) {
