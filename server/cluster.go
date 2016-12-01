@@ -55,8 +55,7 @@ type RaftCluster struct {
 	// cached cluster info
 	cachedCluster *clusterInfo
 
-	// balancer worker
-	balancerWorker *balancerWorker
+	coordinator *coordinator
 
 	wg   sync.WaitGroup
 	quit chan struct{}
@@ -89,8 +88,8 @@ func (c *RaftCluster) start() error {
 	}
 	c.cachedCluster = cluster
 
-	c.balancerWorker = newBalancerWorker(c.cachedCluster, c.s.scheduleOpt)
-	c.balancerWorker.run()
+	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt)
+	c.coordinator.run()
 
 	c.wg.Add(1)
 	c.quit = make(chan struct{})
@@ -114,7 +113,7 @@ func (c *RaftCluster) stop() {
 	close(c.quit)
 	c.wg.Wait()
 
-	c.balancerWorker.stop()
+	c.coordinator.stop()
 }
 
 func (c *RaftCluster) isRunning() bool {
@@ -443,7 +442,7 @@ func (c *RaftCluster) collectMetrics() {
 		if s.isTombstone() {
 			continue
 		}
-		if s.downTime() >= c.balancerWorker.opt.GetMaxStoreDownTime() {
+		if s.downTime() >= c.coordinator.opt.GetMaxStoreDownTime() {
 			storeDownCount++
 		}
 
@@ -566,18 +565,18 @@ func (c *RaftCluster) SetAdminOperator(regionID uint64, ops []Operator) error {
 		return errRegionNotFound(regionID)
 	}
 	bop := newBalanceOperator(region, adminOP, ops...)
-	c.balancerWorker.addBalanceOperator(regionID, bop)
+	c.coordinator.setOperator(storageKind, bop)
 	return nil
 }
 
 // GetBalanceOperators gets the balance operators from cluster.
 func (c *RaftCluster) GetBalanceOperators() map[uint64]Operator {
-	return c.balancerWorker.getBalanceOperators()
+	return c.coordinator.getOperators()
 }
 
 // GetHistoryOperators gets the history operators from cluster.
 func (c *RaftCluster) GetHistoryOperators() []Operator {
-	return c.balancerWorker.getHistoryOperators()
+	return c.coordinator.getHistories()
 }
 
 // GetScores gets store scores from balancer.
@@ -591,5 +590,5 @@ func (c *RaftCluster) GetScores(store *metapb.Store, status *StoreStatus) []int 
 
 // FetchEvents fetches the operator events.
 func (c *RaftCluster) FetchEvents(key uint64, all bool) []LogEvent {
-	return c.balancerWorker.fetchEvents(key, all)
+	return c.coordinator.fetchEvents(key, all)
 }

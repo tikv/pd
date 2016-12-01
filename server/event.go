@@ -64,13 +64,13 @@ type LogEvent struct {
 	} `json:"transfer_leader_event,omitempty"`
 }
 
-func (bw *balancerWorker) innerPostEvent(evt LogEvent) {
+func (c *coordinator) innerPostEvent(evt LogEvent) {
 	key := atomic.AddUint64(&baseID, 1)
 	evt.ID = key
-	bw.events.add(key, evt)
+	c.events.add(key, evt)
 }
 
-func (bw *balancerWorker) postEvent(op Operator, status statusType) {
+func (c *coordinator) postEvent(op Operator, status statusType) {
 	var evt LogEvent
 	evt.Status = status
 
@@ -80,34 +80,34 @@ func (bw *balancerWorker) postEvent(op Operator, status statusType) {
 		evt.SplitEvent.Region = e.Origin.GetId()
 		evt.SplitEvent.Left = e.Left.GetId()
 		evt.SplitEvent.Right = e.Right.GetId()
-		bw.innerPostEvent(evt)
+		c.innerPostEvent(evt)
 	case *transferLeaderOperator:
 		evt.Code = msgTransferLeader
 		evt.TransferLeaderEvent.Region = e.RegionID
 		evt.TransferLeaderEvent.StoreFrom = e.OldLeader.GetStoreId()
 		evt.TransferLeaderEvent.StoreTo = e.NewLeader.GetStoreId()
-		bw.innerPostEvent(evt)
+		c.innerPostEvent(evt)
 	case *changePeerOperator:
 		if e.ChangePeer.GetChangeType() == raftpb.ConfChangeType_AddNode {
 			evt.Code = msgAddReplica
 			evt.AddReplicaEvent.Region = e.RegionID
 			evt.AddReplicaEvent.Store = e.ChangePeer.Peer.GetStoreId()
-			bw.innerPostEvent(evt)
+			c.innerPostEvent(evt)
 		} else {
 			evt.Code = msgRemoveReplica
 			evt.RemoveReplicaEvent.Region = e.RegionID
 			evt.RemoveReplicaEvent.Store = e.ChangePeer.Peer.GetStoreId()
-			bw.innerPostEvent(evt)
+			c.innerPostEvent(evt)
 		}
 	}
 }
 
-func (bw *balancerWorker) fetchEvents(key uint64, all bool) []LogEvent {
+func (c *coordinator) fetchEvents(key uint64, all bool) []LogEvent {
 	var elems []*cacheItem
 	if all {
-		elems = bw.events.elems()
+		elems = c.events.elems()
 	} else {
-		elems = bw.events.fromElems(key)
+		elems = c.events.fromElems(key)
 	}
 
 	evts := make([]LogEvent, 0, len(elems))
@@ -118,10 +118,10 @@ func (bw *balancerWorker) fetchEvents(key uint64, all bool) []LogEvent {
 	return evts
 }
 
-func (bw *balancerWorker) hookStartEvent(op Operator) {
-	bw.postEvent(op, evtStart)
+func (c *coordinator) hookStartEvent(op Operator) {
+	c.postEvent(op, evtStart)
 }
 
-func (bw *balancerWorker) hookEndEvent(op Operator) {
-	bw.postEvent(op, evtEnd)
+func (c *coordinator) hookEndEvent(op Operator) {
+	c.postEvent(op, evtEnd)
 }
