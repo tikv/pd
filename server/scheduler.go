@@ -45,6 +45,49 @@ func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) *balanceOperator {
 	return transferLeader(region, s.StoreID)
 }
 
+type shuffleLeaderScheduler struct {
+	selector Selector
+}
+
+func newShuffleLeaderScheduler() *shuffleLeaderScheduler {
+	return &shuffleLeaderScheduler{
+		selector: newRandomSelector(leaderKind),
+	}
+}
+
+func (s *shuffleLeaderScheduler) GetName() string {
+	return "shuffle-leader-scheduler"
+}
+
+func (s *shuffleLeaderScheduler) GetResourceKind() ResourceKind {
+	return leaderKind
+}
+
+func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) *balanceOperator {
+	// We shuffle leaders between stores by:
+	// 1. select a store as a source store randomly;
+	// 2. transfer a leader from the store to another store;
+	// 3. transfer a leader to the store from another store.
+	// These will not change store's leader count, but swap leaders between stores.
+	var ops []Operator
+
+	// Transfer a leader from the source store.
+	region, source, target := scheduleLeader(cluster, s.selector)
+	if region == nil {
+		return nil
+	}
+	ops = append(ops, transferLeader(region, target.GetId()))
+
+	// Transfer a leader to the source store.
+	region = cluster.randFollowerRegion(source.GetId())
+	if region == nil {
+		return nil
+	}
+	ops = append(ops, transferLeader(region, source.GetId()))
+
+	return newBalanceOperator(region, balanceOP, ops...)
+}
+
 // transferLeader returns an operator to transfer leader to the store.
 func transferLeader(region *regionInfo, storeID uint64) *balanceOperator {
 	newLeader := region.GetStorePeer(storeID)

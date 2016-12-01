@@ -13,6 +13,8 @@
 
 package server
 
+import "math/rand"
+
 // Selector is an interface to select source and target store to schedule.
 type Selector interface {
 	SelectSource(stores []*storeInfo, filters ...Filter) *storeInfo
@@ -59,4 +61,43 @@ func (s *balanceSelector) SelectTarget(stores []*storeInfo, filters ...Filter) *
 		}
 	}
 	return result
+}
+
+type filterFunc func(*storeInfo) bool
+
+type randomSelector struct {
+	kind ResourceKind
+}
+
+func newRandomSelector(kind ResourceKind) *randomSelector {
+	return &randomSelector{kind: kind}
+}
+
+func (s *randomSelector) Select(stores []*storeInfo) *storeInfo {
+	if len(stores) == 0 {
+		return nil
+	}
+	return stores[rand.Int()%len(stores)]
+}
+
+func (s *randomSelector) SelectSource(stores []*storeInfo, filters ...Filter) *storeInfo {
+	var candidates []*storeInfo
+	for _, store := range stores {
+		if filterSource(store, filters) {
+			continue
+		}
+		candidates = append(candidates, store)
+	}
+	return s.Select(candidates)
+}
+
+func (s *randomSelector) SelectTarget(stores []*storeInfo, filters ...Filter) *storeInfo {
+	var candidates []*storeInfo
+	for _, store := range stores {
+		if filterTarget(store, filters) {
+			continue
+		}
+		candidates = append(candidates, store)
+	}
+	return s.Select(candidates)
 }
