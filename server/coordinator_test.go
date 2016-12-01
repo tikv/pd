@@ -169,7 +169,7 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 
 	gls := newGrantLeaderScheduler(1)
 	c.Assert(co.removeScheduler(gls.GetName()), IsFalse)
-	c.Assert(co.addScheduler(gls, newLeaderController(co)), IsTrue)
+	c.Assert(co.addScheduler(newLeaderScheduleController(co, gls)), IsTrue)
 
 	// Transfer all leaders to store 1.
 	time.Sleep(100 * time.Millisecond)
