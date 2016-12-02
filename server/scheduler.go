@@ -52,7 +52,7 @@ type shuffleLeaderScheduler struct {
 
 func newShuffleLeaderScheduler() *shuffleLeaderScheduler {
 	return &shuffleLeaderScheduler{
-		selector: newRandomSelector(leaderKind),
+		selector: newRandomSelector(),
 	}
 }
 

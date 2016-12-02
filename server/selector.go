@@ -63,14 +63,10 @@ func (s *balanceSelector) SelectTarget(stores []*storeInfo, filters ...Filter) *
 	return result
 }
 
-type filterFunc func(*storeInfo) bool
+type randomSelector struct{}
 
-type randomSelector struct {
-	kind ResourceKind
-}
-
-func newRandomSelector(kind ResourceKind) *randomSelector {
-	return &randomSelector{kind: kind}
+func newRandomSelector() *randomSelector {
+	return &randomSelector{}
 }
 
 func (s *randomSelector) Select(stores []*storeInfo) *storeInfo {
