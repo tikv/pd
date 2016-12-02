@@ -47,6 +47,7 @@ func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) *balanceOperator {
 
 type shuffleLeaderScheduler struct {
 	selector Selector
+	source   *storeInfo
 }
 
 func newShuffleLeaderScheduler() *shuffleLeaderScheduler {
@@ -64,28 +65,32 @@ func (s *shuffleLeaderScheduler) GetResourceKind() ResourceKind {
 }
 
 func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) *balanceOperator {
-	// We shuffle leaders between stores by:
-	// 1. select a store as a source store randomly;
-	// 2. transfer a leader from the store to another store;
+	// We shuffle leaders between stores:
+	// 1. select a store as a source store randomly.
+	// 2. transfer a leader from the store to another store.
 	// 3. transfer a leader to the store from another store.
 	// These will not change store's leader count, but swap leaders between stores.
-	var ops []Operator
 
-	// Transfer a leader from the source store.
-	region, source, target := scheduleLeader(cluster, s.selector)
-	if region == nil {
-		return nil
+	// Select a source store and transfer a leader from it.
+	if s.source == nil {
+		region, source, target := scheduleLeader(cluster, s.selector)
+		if region == nil {
+			return nil
+		}
+		s.source = source // Mark the source store.
+		return transferLeader(region, target.GetId())
 	}
-	ops = append(ops, transferLeader(region, target.GetId()))
+
+	// Reset the source store.
+	source := s.source
+	s.source = nil
 
 	// Transfer a leader to the source store.
-	region = cluster.randFollowerRegion(source.GetId())
+	region := cluster.randFollowerRegion(source.GetId())
 	if region == nil {
 		return nil
 	}
-	ops = append(ops, transferLeader(region, source.GetId()))
-
-	return newBalanceOperator(region, balanceOP, ops...)
+	return transferLeader(region, source.GetId())
 }
 
 // transferLeader returns an operator to transfer leader to the store.

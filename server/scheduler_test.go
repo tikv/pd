@@ -13,10 +13,7 @@
 
 package server
 
-import (
-	"github.com/ngaut/log"
-	. "github.com/pingcap/check"
-)
+import . "github.com/pingcap/check"
 
 var _ = Suite(&testShuffleLeaderSuite{})
 
@@ -46,11 +43,12 @@ func (s *testShuffleLeaderSuite) Test(c *C) {
 
 	for i := 0; i < 4; i++ {
 		bop := sl.Schedule(cluster)
-		log.Info(bop)
-		c.Assert(bop.Ops, HasLen, 2)
-		op := bop.Ops[0].(*balanceOperator).Ops[0].(*transferLeaderOperator)
+		op := bop.Ops[0].(*transferLeaderOperator)
+
 		sourceID := op.OldLeader.GetStoreId()
-		op = bop.Ops[1].(*balanceOperator).Ops[0].(*transferLeaderOperator)
+
+		bop = sl.Schedule(cluster)
+		op = bop.Ops[0].(*transferLeaderOperator)
 		c.Assert(op.NewLeader.GetStoreId(), Equals, sourceID)
 	}
 }
