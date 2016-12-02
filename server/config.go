@@ -26,7 +26,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/etcd/embed"
 	"github.com/juju/errors"
-	metrics "github.com/pingcap/pd/pkg/metricutil"
+	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/timeutil"
 )
 
@@ -69,7 +69,7 @@ type Config struct {
 
 	BalanceCfg BalanceConfig `toml:"balance" json:"balance"`
 
-	MetricCfg metrics.MetricConfig `toml:"metric" json:"metric"`
+	MetricCfg metricutil.MetricConfig `toml:"metric" json:"metric"`
 
 	// Only test can change them.
 	nextRetryDelay             time.Duration

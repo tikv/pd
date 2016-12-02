@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package metrics
+package metricutil
 
 import (
 	"time"
@@ -87,15 +87,15 @@ func prometheusPushClient(job, addr string, interval time.Duration) {
 	}
 }
 
-// PushMetrics pushes metircs in background.
-func PushMetrics(mcfg *MetricConfig) {
-	if mcfg.PushInterval.Duration == zeroDuration || len(mcfg.PushAddress) == 0 {
+// Push metircs in background.
+func Push(cfg *MetricConfig) {
+	if cfg.PushInterval.Duration == zeroDuration || len(cfg.PushAddress) == 0 {
 		log.Info("disable Prometheus push client")
 		return
 	}
 
 	log.Info("start Prometheus push client")
 
-	interval := mcfg.PushInterval.Duration
-	go prometheusPushClient(mcfg.PushJob, mcfg.PushAddress, interval)
+	interval := cfg.PushInterval.Duration
+	go prometheusPushClient(cfg.PushJob, cfg.PushAddress, interval)
 }

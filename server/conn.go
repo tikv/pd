@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/util"
-	metrics "github.com/pingcap/pd/pkg/metricutil"
+	"github.com/pingcap/pd/pkg/metricutil"
 )
 
 const (
@@ -83,7 +83,7 @@ func (c *conn) run() {
 
 		start := time.Now()
 		request := msg.GetPdReq()
-		label := metrics.GetCmdLabel(request)
+		label := metricutil.GetCmdLabel(request)
 
 		var response *pdpb.Response
 

@@ -21,7 +21,7 @@ import (
 
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
-	metrics "github.com/pingcap/pd/pkg/metricutil"
+	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 )
@@ -50,7 +50,7 @@ func main() {
 
 	server.LogPDInfo()
 
-	metrics.PushMetrics(&cfg.MetricCfg)
+	metricutil.Push(&cfg.MetricCfg)
 
 	svr, err := server.CreateServer(cfg)
 	if err != nil {
