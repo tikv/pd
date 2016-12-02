@@ -237,8 +237,8 @@ func endpointStatus(c *clientv3.Client, endpoint string) (*clientv3.StatusRespon
 }
 
 const (
-	maxCheckEtcdRunningCount = 100
-	checkEtcdRunningDelay    = 100 * time.Millisecond
+	maxCheckEtcdRunningCount = 60 * 10
+	checkEtcdRunningDelay    = time.Second
 )
 
 // check etcd starts ok or not
