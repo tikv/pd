@@ -26,6 +26,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/etcd/embed"
 	"github.com/juju/errors"
+	metrics "github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/timeutil"
 )
 
@@ -68,7 +69,7 @@ type Config struct {
 
 	BalanceCfg BalanceConfig `toml:"balance" json:"balance"`
 
-	MetricCfg MetricConfig `toml:"metric" json:"metric"`
+	MetricCfg metrics.MetricConfig `toml:"metric" json:"metric"`
 
 	// Only test can change them.
 	nextRetryDelay             time.Duration
@@ -239,6 +240,8 @@ func (c *Config) adjust() error {
 	adjustUint64(&c.tickMs, defaultTickMs)
 	adjustUint64(&c.electionMs, defaultElectionMs)
 
+	adjustString(&c.MetricCfg.PushJob, c.Name)
+
 	c.BalanceCfg.adjust()
 	return nil
 }
@@ -371,12 +374,6 @@ func (c *BalanceConfig) String() string {
 		return "<nil>"
 	}
 	return fmt.Sprintf("BalanceConfig(%+v)", *c)
-}
-
-// MetricConfig is the metric configuration.
-type MetricConfig struct {
-	PushAddress  string            `toml:"address" json:"address"`
-	PushInterval timeutil.Duration `toml:"interval" json:"interval"`
 }
 
 // ParseUrls parse a string into multiple urls.

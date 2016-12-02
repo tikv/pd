@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/util"
-	"github.com/pingcap/pd/pkg/metrics"
+	metrics "github.com/pingcap/pd/pkg/metricutil"
 )
 
 const (

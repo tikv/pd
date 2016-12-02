@@ -18,6 +18,7 @@ import (
 
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/timeutil"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 )
@@ -25,6 +26,15 @@ import (
 var (
 	cmdLabels = convertCmdLabels()
 )
+
+const zeroDuration = time.Duration(0)
+
+// MetricConfig is the metric configuration.
+type MetricConfig struct {
+	PushJob      string            `toml:"job" json:"job"`
+	PushAddress  string            `toml:"address" json:"address"`
+	PushInterval timeutil.Duration `toml:"interval" json:"interval"`
+}
 
 // GetCmdLabel gets the request command label name for metrics.
 func GetCmdLabel(request *pdpb.Request) string {
@@ -61,8 +71,8 @@ func convertName(str string) string {
 	return string(name)
 }
 
-// PrometheusPushClient pushs metrics to Prometheus Pushgateway.
-func PrometheusPushClient(job, addr string, interval time.Duration) {
+// prometheusPushClient pushs metrics to Prometheus Pushgateway.
+func prometheusPushClient(job, addr string, interval time.Duration) {
 	for {
 		err := push.FromGatherer(
 			job, push.HostnameGroupingKey(),
@@ -75,4 +85,17 @@ func PrometheusPushClient(job, addr string, interval time.Duration) {
 
 		time.Sleep(interval)
 	}
+}
+
+// PushMetric pushes metircs in background.
+func PushMetric(mcfg *MetricConfig) {
+	if mcfg.PushInterval.Duration == zeroDuration || len(mcfg.PushAddress) == 0 {
+		log.Info("disable Prometheus push client")
+		return
+	}
+
+	log.Info("start Prometheus push client")
+
+	interval := mcfg.PushInterval.Duration
+	go prometheusPushClient(mcfg.PushJob, mcfg.PushAddress, interval)
 }

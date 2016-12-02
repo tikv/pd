@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/util"
-	"github.com/pingcap/pd/pkg/metrics"
 	"github.com/twinj/uuid"
 )
 
@@ -338,7 +337,7 @@ func (w *rpcWorker) getClusterConfigFromRemote(conn *bufio.ReadWriter, clusterCo
 func (w *rpcWorker) callRPC(conn *bufio.ReadWriter, req *pdpb.Request) (resp *pdpb.Response, err error) {
 	// Record some metrics.
 	start := time.Now()
-	label := metrics.GetCmdLabel(req)
+	label := metricutil.GetCmdLabel(req)
 	defer func() {
 		if err == nil {
 			cmdCounter.WithLabelValues(label).Inc()

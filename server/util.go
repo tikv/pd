@@ -30,7 +30,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/util"
-	"github.com/pingcap/pd/pkg/metrics"
 	"golang.org/x/net/context"
 )
 
@@ -57,22 +56,6 @@ func LogPDInfo() {
 func PrintPDInfo() {
 	fmt.Println("Git Commit Hash:", PDGitHash)
 	fmt.Println("UTC Build Time: ", PDBuildTS)
-}
-
-const zeroDuration = time.Duration(0)
-
-// PushMetric pushs metircs in background.
-func PushMetric(cfg *Config) {
-	metircCfg := cfg.MetricCfg
-	if metircCfg.PushInterval.Duration == zeroDuration || len(metircCfg.PushAddress) == 0 {
-		log.Info("disable Prometheus push client")
-		return
-	}
-
-	log.Info("start Prometheus push client")
-
-	interval := metircCfg.PushInterval.Duration
-	go metrics.PrometheusPushClient(cfg.Name, metircCfg.PushAddress, interval)
 }
 
 // A helper function to get value with key from etcd.
