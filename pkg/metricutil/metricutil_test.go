@@ -15,8 +15,11 @@ package metrics
 
 import (
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/timeutil"
 )
 
 func Test(t *testing.T) {
@@ -43,5 +46,50 @@ func (s *testMetricsSuite) TestConvertName(c *C) {
 
 	for _, input := range inputs {
 		c.Assert(input.newName, Equals, convertName(input.name))
+	}
+}
+
+func (s *testMetricsSuite) TestGetCmdLabel(c *C) {
+	requests := make([]*pdpb.Request, 0, 2)
+	labels := make([]string, 0, 2)
+
+	r := new(pdpb.Request)
+	r.CmdType = pdpb.CommandType_Tso
+	requests = append(requests, r)
+	labels = append(labels, "tso")
+
+	// Invalid CommandType
+	r = new(pdpb.Request)
+	r.CmdType = pdpb.CommandType(-1)
+	requests = append(requests, r)
+	labels = append(labels, "-1")
+
+	for i, r := range requests {
+		l := GetCmdLabel(r)
+		c.Assert(l, Equals, labels[i])
+	}
+}
+
+// Seems useless, but improves coverage.
+func (s *testMetricsSuite) TestCoverage(c *C) {
+	cfgs := []*MetricConfig{
+		&MetricConfig{
+			PushJob:     "j1",
+			PushAddress: "127.0.0.1:9091",
+			PushInterval: timeutil.Duration{
+				Duration: time.Hour,
+			},
+		},
+		&MetricConfig{
+			PushJob:     "j2",
+			PushAddress: "127.0.0.1:9091",
+			PushInterval: timeutil.Duration{
+				Duration: zeroDuration,
+			},
+		},
+	}
+
+	for _, cfg := range cfgs {
+		PushMetrics(cfg)
 	}
 }

@@ -87,8 +87,8 @@ func prometheusPushClient(job, addr string, interval time.Duration) {
 	}
 }
 
-// PushMetric pushes metircs in background.
-func PushMetric(mcfg *MetricConfig) {
+// PushMetrics pushes metircs in background.
+func PushMetrics(mcfg *MetricConfig) {
 	if mcfg.PushInterval.Duration == zeroDuration || len(mcfg.PushAddress) == 0 {
 		log.Info("disable Prometheus push client")
 		return
