@@ -73,14 +73,14 @@ func (s *testMetricsSuite) TestGetCmdLabel(c *C) {
 // Seems useless, but improves coverage.
 func (s *testMetricsSuite) TestCoverage(c *C) {
 	cfgs := []*MetricConfig{
-		&MetricConfig{
+		{
 			PushJob:     "j1",
 			PushAddress: "127.0.0.1:9091",
 			PushInterval: timeutil.Duration{
 				Duration: time.Hour,
 			},
 		},
-		&MetricConfig{
+		{
 			PushJob:     "j2",
 			PushAddress: "127.0.0.1:9091",
 			PushInterval: timeutil.Duration{
