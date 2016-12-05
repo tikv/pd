@@ -461,6 +461,7 @@ func NewTestSingleConfig() *Config {
 	cfg.tickMs = 100
 	cfg.electionMs = 1000
 
+	cfg.adjust()
 	return cfg
 }
 
