@@ -3,6 +3,7 @@
 [![Build Status](https://travis-ci.org/pingcap/pd.svg?branch=master)](https://travis-ci.org/pingcap/pd)
 [![Go Report Card](https://goreportcard.com/badge/github.com/pingcap/pd)](https://goreportcard.com/report/github.com/pingcap/pd)
 [![Coverage Status](https://coveralls.io/repos/github/pingcap/pd/badge.svg?branch=master)](https://coveralls.io/github/pingcap/pd?branch=master)
+[![CircleCI Build Status](https://circleci.com/gh/pingcap/pd.svg?style=shield)](https://circleci.com/gh/pingcap/pd)
 
 PD is the abbreviation for Placement Driver. It is used to manage and schedule the [TiKV](https://github.com/pingcap/tikv) cluster. 
 
