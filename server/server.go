@@ -93,10 +93,6 @@ func NewServer(cfg *Config) (*Server, error) {
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(cfg *Config) (*Server, error) {
-	if err := cfg.adjust(); err != nil {
-		return nil, errors.Trace(err)
-	}
-
 	log.Infof("PD config - %v", cfg)
 
 	s := &Server{

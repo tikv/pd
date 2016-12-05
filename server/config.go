@@ -181,7 +181,8 @@ func (c *Config) Parse(arguments []string) error {
 		return errors.Errorf("'%s' is an invalid flag", c.FlagSet.Arg(0))
 	}
 
-	return nil
+	err = c.adjust()
+	return errors.Trace(err)
 }
 
 func (c *Config) validate() error {
