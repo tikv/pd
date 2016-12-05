@@ -628,7 +628,7 @@ func (c *clusterInfo) handleRegionMergeHeartbeat(region *regionInfo) error {
 		}
 	}
 	c.regions.clearRegionMerge(fromRegion.GetId())
-	return c.innerPutRegion(region)
+	return c.putRegionLocked(region)
 }
 
 func regionRangeCover(newRegion, fromRegion, intoRegion *regionInfo) bool {

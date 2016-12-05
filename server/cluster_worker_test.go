@@ -732,9 +732,9 @@ func (s *testClusterWorkerSuite) TestRegionMerge(c *C) {
 		EndKey:      []byte("b"),
 		RegionEpoch: &metapb.RegionEpoch{Version: 10, ConfVer: 10},
 		Peers: []*metapb.Peer{
-			&metapb.Peer{Id: 1, StoreId: 1},
-			&metapb.Peer{Id: 2, StoreId: 2},
-			&metapb.Peer{Id: 3, StoreId: 3},
+			{Id: 1, StoreId: 1},
+			{Id: 2, StoreId: 2},
+			{Id: 3, StoreId: 3},
 		},
 	}
 	leader1 := region1.GetPeers()[0]
@@ -744,9 +744,9 @@ func (s *testClusterWorkerSuite) TestRegionMerge(c *C) {
 		EndKey:      []byte("c"),
 		RegionEpoch: &metapb.RegionEpoch{Version: 10, ConfVer: 10},
 		Peers: []*metapb.Peer{
-			&metapb.Peer{Id: 3, StoreId: 3},
-			&metapb.Peer{Id: 4, StoreId: 4},
-			&metapb.Peer{Id: 5, StoreId: 5},
+			{Id: 3, StoreId: 3},
+			{Id: 4, StoreId: 4},
+			{Id: 5, StoreId: 5},
 		},
 	}
 	leader2 := region2.GetPeers()[0]
@@ -757,8 +757,8 @@ func (s *testClusterWorkerSuite) TestRegionMerge(c *C) {
 		EndKey:      []byte("c"),
 		RegionEpoch: &metapb.RegionEpoch{Version: 11, ConfVer: 10},
 		Peers: []*metapb.Peer{
-			&metapb.Peer{Id: 1, StoreId: 1},
-			&metapb.Peer{Id: 2, StoreId: 2},
+			{Id: 1, StoreId: 1},
+			{Id: 2, StoreId: 2},
 		},
 	}
 	mergedLeader := mergedRegion.GetPeers()[0]
