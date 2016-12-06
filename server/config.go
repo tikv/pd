@@ -415,14 +415,17 @@ func parseConstraint(cfg *ConstraintConfig) (*Constraint, error) {
 	for _, label := range cfg.Labels {
 		kv := strings.Split(strings.ToLower(label), "=")
 		if len(kv) != 2 {
-			return nil, errors.Errorf("invalid constraint %q", label)
+			return nil, errors.Errorf("invalid label %q", label)
 		}
 		k, v := kv[0], kv[1]
-		if !validLabel.MatchString(k) || !validLabel.MatchString(v) {
-			return nil, errors.Errorf("invalid constraint %q, must match %s", label, validLabel)
+		if !validLabel.MatchString(k) {
+			return nil, errors.Errorf("invalid label key %q, must match %s", k, validLabel)
+		}
+		if !validLabel.MatchString(v) {
+			return nil, errors.Errorf("invalid label value %q, must match %s", k, validLabel)
 		}
 		if _, ok := labels[k]; ok {
-			return nil, errors.Errorf("duplicated constraint %q", label)
+			return nil, errors.Errorf("duplicated label %q", label)
 		}
 		labels[k] = v
 	}

@@ -118,7 +118,7 @@ func (stores storesByID) Less(i, j int) bool { return stores[i].GetId() < stores
 // Although we can use a more optimize algorithm, but it may be hard
 // to understand by most users.
 // So we decide to use a straight forward algorithm to match stores
-// and constraints one by one in order, and it works find in most
+// and constraints one by one in order, and it works fine in most
 // cases. However, if we add more complicated constraints in the
 // future, we may need to reconsider the algorithm.
 func (c *Constraints) Match(stores []*storeInfo) *MatchResult {
