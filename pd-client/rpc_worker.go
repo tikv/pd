@@ -29,7 +29,10 @@ import (
 	"github.com/twinj/uuid"
 )
 
-const maxPipelineRequest = 10000
+const (
+	maxPipelineRequest    = 10000
+	maxInitClusterRetries = 300
+)
 
 // errInvalidResponse represents response message is invalid.
 var errInvalidResponse = errors.New("invalid response")
@@ -222,13 +225,17 @@ func (w *rpcWorker) initClusterID() error {
 	}
 	defer conn.Close()
 
-	clusterID, err := w.getClusterID(conn.ReadWriter)
-	if err != nil {
-		return errors.Trace(err)
+	for i := 0; i < maxInitClusterRetries; i++ {
+		clusterID, err := w.getClusterID(conn.ReadWriter)
+		if err == nil {
+			w.clusterID = clusterID
+			return nil
+		}
+		log.Errorf("[pd] failed to get cluster id: %v", err)
+		time.Sleep(time.Second)
 	}
 
-	w.clusterID = clusterID
-	return nil
+	return errors.New("failed to get cluster id")
 }
 
 func (w *rpcWorker) getClusterID(conn *bufio.ReadWriter) (uint64, error) {
