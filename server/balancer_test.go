@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/ngaut/log"
 	. "github.com/pingcap/check"
 	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -341,7 +340,6 @@ func (s *testReplicaCheckerSuite) TestConstraints(c *C) {
 	checkAddPeer(c, rc.Check(region), 3)
 	peer3, _ := cluster.allocPeer(3)
 	region.Peers = append(region.Peers, peer3)
-	log.Debug(region)
 	c.Assert(rc.Check(region), IsNil)
 
 	// Add stores 1,2,3,4.
