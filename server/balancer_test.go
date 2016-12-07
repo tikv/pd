@@ -38,6 +38,13 @@ func (c *testClusterInfo) setStoreUp(storeID uint64) {
 	c.putStore(store)
 }
 
+func (c *testClusterInfo) setStoreBusy(storeID uint64) {
+	store := c.getStore(storeID)
+	store.stats.IsBusy = true
+	store.stats.LastHeartbeatTS = time.Time{}
+	c.putStore(store)
+}
+
 func (c *testClusterInfo) setStoreDown(storeID uint64) {
 	store := c.getStore(storeID)
 	store.State = metapb.StoreState_Up
@@ -141,7 +148,7 @@ func (s *testLeaderBalancerSuite) Test(c *C) {
 	// Test leaderCountFilter.
 	// When leaderCount < 10, no schedule.
 	c.Assert(lb.Schedule(cluster), IsNil)
-	tc.updateLeaderCount(4, 11, 30)
+	tc.updateLeaderCount(4, 12, 30)
 	// When leaderCount > 10, transfer leader
 	// from store 4 (with most leaders) to store 1 (with least leaders).
 	checkTransferLeader(c, lb.Schedule(cluster), 4, 1)
@@ -151,12 +158,16 @@ func (s *testLeaderBalancerSuite) Test(c *C) {
 	// store 2 becomes the store with least leaders.
 	tc.setStoreDown(1)
 	checkTransferLeader(c, lb.Schedule(cluster), 4, 2)
+	// If store 2 is busy, it will be filtered,
+	// store 3 becomes the store with least leaders.
+	tc.setStoreBusy(2)
+	checkTransferLeader(c, lb.Schedule(cluster), 4, 3)
 
 	// Test MinBalanceDiffRatio.
 	// When diff leader ratio < MinBalanceDiffRatio, no schedule.
 	tc.updateLeaderCount(2, 10, 30)
 	tc.updateLeaderCount(3, 10, 30)
-	tc.updateLeaderCount(4, 11, 30)
+	tc.updateLeaderCount(4, 12, 30)
 	c.Assert(lb.Schedule(cluster), IsNil)
 }
 
