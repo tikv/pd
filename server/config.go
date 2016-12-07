@@ -75,9 +75,6 @@ type Config struct {
 	ConstraintCfg []ConstraintConfig `toml:"constraints" json:"constraints"`
 	constraints   *Constraints
 
-	ConstraintCfg []ConstraintConfig `toml:"constraints" json:"constraints"`
-	constraints   *Constraints
-
 	// Only test can change them.
 	nextRetryDelay             time.Duration
 	disableStrictReconfigCheck bool
