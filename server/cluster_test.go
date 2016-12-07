@@ -355,6 +355,11 @@ func (s *testClusterSuite) testPutStore(c *C, conn net.Conn, clusterID uint64, s
 	// Put a new store.
 	resp = putStore(c, conn, clusterID, s.newStore(c, 0, "127.0.0.1:12345"))
 	c.Assert(resp.PutStore, NotNil)
+
+	// Put an existed store with duplicated address with other old stores.
+	s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
+	resp = putStore(c, conn, clusterID, s.newStore(c, store.GetId(), "127.0.0.1:12345"))
+	c.Assert(resp.PutStore, IsNil)
 }
 
 func (s *testClusterSuite) resetStoreState(c *C, storeID uint64, state metapb.StoreState) {

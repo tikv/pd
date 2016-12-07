@@ -137,3 +137,23 @@ func (f *snapshotCountFilter) FilterSource(store *storeInfo) bool {
 func (f *snapshotCountFilter) FilterTarget(store *storeInfo) bool {
 	return f.filter(store)
 }
+
+type constraintFilter struct {
+	source *Constraint
+	target *Constraint
+}
+
+func newConstraintFilter(source, target *Constraint) *constraintFilter {
+	return &constraintFilter{
+		source: source,
+		target: target,
+	}
+}
+
+func (f *constraintFilter) FilterSource(store *storeInfo) bool {
+	return f.source != nil && !f.source.Match(store)
+}
+
+func (f *constraintFilter) FilterTarget(store *storeInfo) bool {
+	return f.target != nil && !f.target.Match(store)
+}
