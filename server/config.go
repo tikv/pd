@@ -467,54 +467,6 @@ func (c *Config) parseConstraints() error {
 	return errors.Trace(err)
 }
 
-// ConstraintConfig is the replica constraint configuration to place replicas.
-type ConstraintConfig struct {
-	Labels   []string `toml:"labels" json:"labels"`
-	Replicas int      `toml:"replicas" json:"replicas"`
-}
-
-var validLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-._]*[a-z0-9])?$`)
-
-func parseConstraint(cfg *ConstraintConfig) (*Constraint, error) {
-	if cfg.Replicas == 0 {
-		return nil, errors.New("constraint replicas must > 0")
-	}
-	labels := make(map[string]string)
-	for _, label := range cfg.Labels {
-		kv := strings.Split(strings.ToLower(label), "=")
-		if len(kv) != 2 {
-			return nil, errors.Errorf("invalid constraint %q", label)
-		}
-		k, v := kv[0], kv[1]
-		if !validLabel.MatchString(k) || !validLabel.MatchString(v) {
-			return nil, errors.Errorf("invalid constraint %q, must match %s", label, validLabel)
-		}
-		if _, ok := labels[k]; ok {
-			return nil, errors.Errorf("duplicated constraint %q", label)
-		}
-		labels[k] = v
-	}
-	return &Constraint{
-		Labels:   labels,
-		Replicas: cfg.Replicas,
-	}, nil
-}
-
-func (c *Config) parseConstraints() error {
-	var constraints []*Constraint
-	for _, cfg := range c.ConstraintCfg {
-		constraint, err := parseConstraint(&cfg)
-		if err != nil {
-			return errors.Trace(err)
-		}
-		constraints = append(constraints, constraint)
-	}
-
-	var err error
-	c.constraints, err = newConstraints(int(c.MaxPeerCount), constraints)
-	return errors.Trace(err)
-}
-
 // ParseUrls parse a string into multiple urls.
 // Export for api.
 func ParseUrls(s string) ([]url.URL, error) {
