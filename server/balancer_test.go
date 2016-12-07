@@ -68,6 +68,15 @@ func (c *testClusterInfo) addRegionStore(storeID uint64, regionCount int, storag
 	c.putStore(store)
 }
 
+func (c *testClusterInfo) addLabelsStore(storeID uint64, regionCount int, storageRatio float64, labels map[string]string) {
+	c.addRegionStore(storeID, regionCount, storageRatio)
+	store := c.getStore(storeID)
+	for k, v := range labels {
+		store.Labels = append(store.Labels, &metapb.StoreLabel{Key: k, Value: v})
+	}
+	c.putStore(store)
+}
+
 func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
 	region := &metapb.Region{Id: regionID}
 	leader, _ := c.allocPeer(leaderID)
@@ -101,10 +110,10 @@ func (c *testClusterInfo) updateSnapshotCount(storeID uint64, snapshotCount int)
 }
 
 func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption) {
-	cfg := newScheduleConfig()
+	cfg := NewConfig()
 	cfg.adjust()
 	opt := newScheduleOption(cfg)
-	return cfg, opt
+	return &cfg.ScheduleCfg, opt
 }
 
 var _ = Suite(&testLeaderBalancerSuite{})
@@ -195,6 +204,43 @@ func (s *testStorageBalancerSuite) Test(c *C) {
 	c.Assert(sb.Schedule(cluster), IsNil)
 }
 
+func (s *testStorageBalancerSuite) TestConstraints(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+
+	cfg, opt := newTestScheduleConfig()
+	cfg.MinRegionCount = 1
+	cfg.MinBalanceDiffRatio = 0.01
+	opt.constraints, _ = newConstraints(1, []*Constraint{
+		{
+			Labels:   map[string]string{"zone": "cn"},
+			Replicas: 1,
+		},
+	})
+	sb := newStorageBalancer(opt)
+
+	// Add stores 1,2,3,4.
+	tc.addLabelsStore(1, 6, 0.1, nil)
+	tc.addLabelsStore(2, 7, 0.2, nil)
+	tc.addLabelsStore(3, 8, 0.3, nil)
+	tc.addLabelsStore(4, 9, 0.4, map[string]string{"zone": "cn", "disk": "ssd"})
+	// Add region 1 with leader in store 4.
+	tc.addLeaderRegion(1, 4)
+
+	// Store 4 has most regions, but no other stores can match the constraint.
+	c.Assert(sb.Schedule(cluster), IsNil)
+
+	// Now store 3 can match the constarint too,
+	// We can transfer peer from store 4 to store 3.
+	tc.addLabelsStore(3, 8, 0.3, map[string]string{"zone": "cn"})
+	checkTransferPeer(c, sb.Schedule(cluster), 4, 3)
+
+	// Now both store 2 and 3 can match the constraint.
+	// But store 2 has fewer regions than store 3, so transfer peer to store 2.
+	tc.addLabelsStore(2, 7, 0.2, map[string]string{"zone": "cn", "disk": "hdd"})
+	checkTransferPeer(c, sb.Schedule(cluster), 4, 2)
+}
+
 var _ = Suite(&testReplicaCheckerSuite{})
 
 type testReplicaCheckerSuite struct{}
@@ -207,7 +253,6 @@ func (s *testReplicaCheckerSuite) Test(c *C) {
 	rc := newReplicaChecker(cluster, opt)
 
 	cfg.MaxSnapshotCount = 2
-	cluster.putMeta(&metapb.Cluster{Id: 1, MaxPeerCount: 3})
 
 	// Add stores 1,2,3,4.
 	tc.addRegionStore(1, 4, 0.4)
@@ -257,6 +302,79 @@ func (s *testReplicaCheckerSuite) Test(c *C) {
 	peer4, _ := cluster.allocPeer(4)
 	region.Peers = append(region.Peers, peer4)
 	checkRemovePeer(c, rc.Check(region), 1)
+}
+
+func (s *testReplicaCheckerSuite) TestConstraints(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+
+	cfg, opt := newTestScheduleConfig()
+	cfg.MinRegionCount = 1
+	cfg.MinBalanceDiffRatio = 0.01
+	opt.constraints, _ = newConstraints(3, []*Constraint{
+		{
+			Labels:   map[string]string{"zone": "us"},
+			Replicas: 2,
+		},
+		{
+			Labels:   map[string]string{"zone": "cn", "disk": "ssd"},
+			Replicas: 1,
+		},
+	})
+	rc := newReplicaChecker(cluster, opt)
+
+	// Add stores 1,2,3,4.
+	tc.addLabelsStore(1, 6, 0.1, map[string]string{"zone": "us", "disk": "ssd"})
+	tc.addLabelsStore(2, 7, 0.2, nil)
+	tc.addLabelsStore(3, 8, 0.3, nil)
+	tc.addLabelsStore(4, 9, 0.4, nil)
+	// Add region 1 with leader in store 1.
+	tc.addLeaderRegion(1, 1)
+
+	// Although we can not satisfy any constraints, we will still ensure max replicas.
+	// So we add peers in store 2 and store 3, because they have smaller storage ratio.
+	region := cluster.getRegion(1)
+	checkAddPeer(c, rc.Check(region), 2)
+	peer2, _ := cluster.allocPeer(2)
+	region.Peers = append(region.Peers, peer2)
+	checkAddPeer(c, rc.Check(region), 3)
+	peer3, _ := cluster.allocPeer(3)
+	region.Peers = append(region.Peers, peer3)
+	c.Assert(rc.Check(region), IsNil)
+
+	// Add stores 1,2,3,4.
+	tc.addLabelsStore(1, 6, 0.1, map[string]string{"zone": "us", "disk": "ssd"})
+	tc.addLabelsStore(2, 7, 0.2, map[string]string{"zone": "us", "disk": "hdd"})
+	tc.addLabelsStore(3, 8, 0.3, nil)
+	tc.addLabelsStore(4, 9, 0.4, nil)
+	// Add region 1 with leader in store 1 and follower in store 2.
+	tc.addLeaderRegion(1, 1, 2)
+
+	// Now the first constraint has been satisfied, but the second hasn't.
+	// We still need to add peer in store 3 to ensure max replicas.
+	region = cluster.getRegion(1)
+	checkAddPeer(c, rc.Check(region), 3)
+	peer3, _ = cluster.allocPeer(3)
+	region.Peers = append(region.Peers, peer3)
+	c.Assert(rc.Check(region), IsNil)
+
+	// Add stores 1,2,3,4.
+	tc.addLabelsStore(1, 6, 0.1, map[string]string{"zone": "us", "disk": "ssd"})
+	tc.addLabelsStore(2, 7, 0.2, map[string]string{"zone": "us", "disk": "hdd"})
+	tc.addLabelsStore(3, 8, 0.3, nil)
+	tc.addLabelsStore(4, 9, 0.4, map[string]string{"zone": "cn", "disk": "ssd"})
+	// Add region 1 with leader in store 1 and followers in stores 2,3.
+	tc.addLeaderRegion(1, 1, 2, 3)
+
+	// Stores 1,2 satisfy the first constraint, we need to add peer in
+	// store 4 to satisfy the second constraint.
+	// Then we can remove peer in store 3 because we have satisfied
+	// all constraints and have enough replicas.
+	region = cluster.getRegion(1)
+	checkAddPeer(c, rc.Check(region), 4)
+	peer4, _ := cluster.allocPeer(4)
+	region.Peers = append(region.Peers, peer4)
+	checkRemovePeer(c, rc.Check(region), 3)
 }
 
 func checkAddPeer(c *C, bop *balanceOperator, storeID uint64) {

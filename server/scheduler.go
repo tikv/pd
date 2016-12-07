@@ -45,7 +45,7 @@ func scheduleLeader(cluster *clusterInfo, s Selector) (*regionInfo, *storeInfo, 
 }
 
 // scheduleStorage schedules a region to transfer peer from the source store to the target store.
-func scheduleStorage(cluster *clusterInfo, s Selector) (*regionInfo, *storeInfo, *storeInfo) {
+func scheduleStorage(cluster *clusterInfo, opt *scheduleOption, s Selector) (*regionInfo, *storeInfo, *storeInfo) {
 	stores := cluster.getStores()
 
 	source := s.SelectSource(stores)
@@ -61,7 +61,11 @@ func scheduleStorage(cluster *clusterInfo, s Selector) (*regionInfo, *storeInfo,
 		return nil, nil, nil
 	}
 
-	target := s.SelectTarget(stores, newExcludedFilter(nil, region.GetStoreIds()))
+	excluded := newExcludedFilter(nil, region.GetStoreIds())
+	result := opt.GetConstraints().Match(cluster.getRegionStores(region))
+	constraint := newConstraintFilter(nil, result.stores[source.GetId()])
+
+	target := s.SelectTarget(stores, excluded, constraint)
 	if target == nil {
 		return nil, nil, nil
 	}
