@@ -176,6 +176,7 @@ func (c *conn) handleRegionHeartbeat(req *pdpb.Request) (*pdpb.Response, error) 
 
 	region := newRegionInfo(request.GetRegion(), request.GetLeader())
 	region.DownPeers = request.GetDownPeers()
+	region.PendingPeers = request.GetPendingPeers()
 	if region.GetId() == 0 {
 		return nil, errors.Errorf("invalid request region, %v", request)
 	}

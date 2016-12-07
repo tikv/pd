@@ -135,6 +135,19 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 
 		c.Assert(region.GetStorePeer(i), NotNil)
 	}
+
+	// All regions will be filtered out if they have pending peers.
+	for i := uint64(0); i < n; i++ {
+		for j := 0; j < cache.getStoreLeaderCount(i); j++ {
+			region := cache.randLeaderRegion(i)
+			region.PendingPeers = region.Peers
+			cache.setRegion(region)
+		}
+		c.Assert(cache.randLeaderRegion(i), IsNil)
+	}
+	for i := uint64(0); i < n; i++ {
+		c.Assert(cache.randFollowerRegion(i), IsNil)
+	}
 }
 
 func checkRegion(c *C, a *regionInfo, b *regionInfo) {

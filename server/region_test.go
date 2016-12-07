@@ -37,16 +37,22 @@ func (s *testRegionSuite) TestRegionInfo(c *C) {
 		}
 		peers = append(peers, p)
 	}
-	downPeers := []*pdpb.PeerStats{
-		{Peer: peers[n-1], DownSeconds: new(uint64)},
-	}
 	region := &metapb.Region{
 		Peers: peers,
 	}
+	downPeers := []*pdpb.PeerStats{
+		{Peer: peers[n-1], DownSeconds: new(uint64)},
+	}
+	pendingPeers := peers[0:1]
 
-	r := newRegionInfo(region, peers[0])
-	r.DownPeers = downPeers
-	r = r.clone()
+	info := newRegionInfo(region, peers[0])
+	c.Assert(info.IsStable(), IsTrue)
+	info.DownPeers = downPeers
+	info.PendingPeers = pendingPeers
+	c.Assert(info.IsStable(), IsFalse)
+
+	r := info.clone()
+	c.Assert(r, DeepEquals, info)
 
 	for i := uint64(0); i < n; i++ {
 		c.Assert(r.GetPeer(i), Equals, r.Peers[i])

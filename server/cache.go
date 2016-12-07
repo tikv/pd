@@ -210,6 +210,9 @@ func (r *regionsInfo) randLeaderRegion(storeID uint64) *regionInfo {
 		if region.Leader == nil {
 			log.Fatalf("rand leader region without leader: store %v region %v", storeID, region)
 		}
+		if !region.IsStable() {
+			continue
+		}
 		return region.clone()
 	}
 	return nil
@@ -219,6 +222,9 @@ func (r *regionsInfo) randFollowerRegion(storeID uint64) *regionInfo {
 	for _, region := range r.followers[storeID] {
 		if region.Leader == nil {
 			log.Fatalf("rand follower region without leader: store %v region %v", storeID, region)
+		}
+		if !region.IsStable() {
+			continue
 		}
 		return region.clone()
 	}

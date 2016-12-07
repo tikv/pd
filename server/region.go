@@ -25,8 +25,9 @@ import (
 // TODO: Export this to API directly.
 type regionInfo struct {
 	*metapb.Region
-	Leader    *metapb.Peer
-	DownPeers []*pdpb.PeerStats
+	Leader       *metapb.Peer
+	DownPeers    []*pdpb.PeerStats
+	PendingPeers []*metapb.Peer
 }
 
 func newRegionInfo(region *metapb.Region, leader *metapb.Peer) *regionInfo {
@@ -37,15 +38,24 @@ func newRegionInfo(region *metapb.Region, leader *metapb.Peer) *regionInfo {
 }
 
 func (r *regionInfo) clone() *regionInfo {
-	downPeers := make([]*pdpb.PeerStats, len(r.DownPeers))
+	downPeers := make([]*pdpb.PeerStats, 0, len(r.DownPeers))
 	for _, peer := range r.DownPeers {
 		downPeers = append(downPeers, proto.Clone(peer).(*pdpb.PeerStats))
 	}
-	return &regionInfo{
-		Region:    proto.Clone(r.Region).(*metapb.Region),
-		Leader:    proto.Clone(r.Leader).(*metapb.Peer),
-		DownPeers: downPeers,
+	pendingPeers := make([]*metapb.Peer, 0, len(r.PendingPeers))
+	for _, peer := range r.PendingPeers {
+		pendingPeers = append(pendingPeers, proto.Clone(peer).(*metapb.Peer))
 	}
+	return &regionInfo{
+		Region:       proto.Clone(r.Region).(*metapb.Region),
+		Leader:       proto.Clone(r.Leader).(*metapb.Peer),
+		DownPeers:    downPeers,
+		PendingPeers: pendingPeers,
+	}
+}
+
+func (r *regionInfo) IsStable() bool {
+	return len(r.DownPeers) == 0 && len(r.PendingPeers) == 0
 }
 
 func (r *regionInfo) GetPeer(peerID uint64) *metapb.Peer {
