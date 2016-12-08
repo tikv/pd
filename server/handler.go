@@ -78,3 +78,8 @@ func (h *Handler) AddLeaderBalancer() error {
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
 	return h.AddLeaderScheduler(newGrantLeaderScheduler(storeID))
 }
+
+// AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.
+func (h *Handler) AddShuffleLeaderScheduler() error {
+	return h.AddLeaderScheduler(newShuffleLeaderScheduler())
+}

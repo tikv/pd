@@ -71,6 +71,11 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	case "shuffle-leader-scheduler":
+		if err := h.AddShuffleLeaderScheduler(); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
 	h.r.JSON(w, http.StatusOK, nil)

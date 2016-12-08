@@ -14,6 +14,7 @@
 package server
 
 import (
+	"math/rand"
 	"net/http"
 	"path"
 	"strconv"
@@ -98,6 +99,7 @@ func NewServer(cfg *Config) (*Server, error) {
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(cfg *Config) (*Server, error) {
 	log.Infof("PD config - %v", cfg)
+	rand.Seed(time.Now().UnixNano())
 
 	s := &Server{
 		cfg:           cfg,
