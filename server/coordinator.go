@@ -39,7 +39,8 @@ type coordinator struct {
 	opt     *scheduleOption
 	checker *replicaChecker
 
-	operators map[ResourceKind]map[uint64]*balanceOperator
+	schedulers map[string]*ScheduleController
+	operators  map[ResourceKind]map[uint64]*balanceOperator
 
 	regionCache *expireRegionCache
 	histories   *lruCache
@@ -51,6 +52,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
 		cluster:     cluster,
 		opt:         opt,
 		checker:     newReplicaChecker(cluster, opt),
+		schedulers:  make(map[string]*ScheduleController),
 		regionCache: newExpireRegionCache(regionCacheTTL, regionCacheTTL),
 		histories:   newLRUCache(historiesCacheSize),
 		events:      newFifoCache(eventsCacheSize),
@@ -86,11 +88,8 @@ func (c *coordinator) dispatch(region *regionInfo) *pdpb.RegionHeartbeatResponse
 }
 
 func (c *coordinator) run() {
-	c.wg.Add(1)
-	go c.runScheduler(newLeaderBalancer(c.opt), newLeaderController(c))
-
-	c.wg.Add(1)
-	go c.runScheduler(newStorageBalancer(c.opt), newStorageController(c))
+	c.addScheduler(newLeaderScheduleController(c, newLeaderBalancer(c.opt)))
+	c.addScheduler(newStorageScheduleController(c, newStorageBalancer(c.opt)))
 }
 
 func (c *coordinator) stop() {
@@ -98,24 +97,64 @@ func (c *coordinator) stop() {
 	c.wg.Wait()
 }
 
-func (c *coordinator) runScheduler(s Scheduler, ctrl Controller) {
+func (c *coordinator) getSchedulers() []string {
+	c.RLock()
+	defer c.RUnlock()
+
+	var names []string
+	for name := range c.schedulers {
+		names = append(names, name)
+	}
+	return names
+}
+
+func (c *coordinator) addScheduler(s *ScheduleController) bool {
+	c.Lock()
+	defer c.Unlock()
+
+	if _, ok := c.schedulers[s.GetName()]; ok {
+		return false
+	}
+
+	c.wg.Add(1)
+	go c.runScheduler(s)
+
+	c.schedulers[s.GetName()] = s
+	return true
+}
+
+func (c *coordinator) removeScheduler(name string) bool {
+	c.Lock()
+	defer c.Unlock()
+
+	s, ok := c.schedulers[name]
+	if !ok {
+		return false
+	}
+
+	s.Stop()
+	delete(c.schedulers, name)
+	return true
+}
+
+func (c *coordinator) runScheduler(s *ScheduleController) {
 	defer c.wg.Done()
 
-	timer := time.NewTimer(ctrl.GetInterval())
+	timer := time.NewTimer(s.GetInterval())
 	defer timer.Stop()
 
 	for {
 		select {
 		case <-timer.C:
-			timer.Reset(ctrl.GetInterval())
-			if !ctrl.AllowSchedule() {
+			timer.Reset(s.GetInterval())
+			if !s.AllowSchedule() {
 				continue
 			}
 			if op := s.Schedule(c.cluster); op != nil {
 				c.addOperator(s.GetResourceKind(), op)
 			}
-		case <-ctrl.Ctx().Done():
-			log.Infof("%v stopped: %v", s.GetName(), ctrl.Ctx().Err())
+		case <-s.Ctx().Done():
+			log.Infof("%v stopped: %v", s.GetName(), s.Ctx().Err())
 			return
 		}
 	}
@@ -267,6 +306,26 @@ func (s *storageController) GetInterval() time.Duration {
 
 func (s *storageController) AllowSchedule() bool {
 	return s.c.getOperatorCount(storageKind) < int(s.c.opt.GetStorageScheduleLimit())
+}
+
+// ScheduleController combines Scheduler with Controller.
+type ScheduleController struct {
+	Scheduler
+	Controller
+}
+
+func newLeaderScheduleController(c *coordinator, s Scheduler) *ScheduleController {
+	return &ScheduleController{
+		Scheduler:  s,
+		Controller: newLeaderController(c),
+	}
+}
+
+func newStorageScheduleController(c *coordinator, s Scheduler) *ScheduleController {
+	return &ScheduleController{
+		Scheduler:  s,
+		Controller: newStorageController(c),
+	}
 }
 
 func collectOperatorCounterMetrics(bop *balanceOperator) {

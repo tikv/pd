@@ -35,7 +35,7 @@ func newLeaderBalancer(opt *scheduleOption) *leaderBalancer {
 }
 
 func (l *leaderBalancer) GetName() string {
-	return "leader_balancer"
+	return "leader-balancer"
 }
 
 func (l *leaderBalancer) GetResourceKind() ResourceKind {
@@ -53,13 +53,7 @@ func (l *leaderBalancer) Schedule(cluster *clusterInfo) *balanceOperator {
 		return nil
 	}
 
-	newLeader := region.GetStorePeer(target.GetId())
-	if newLeader == nil {
-		return nil
-	}
-
-	transferLeader := newTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
-	return newBalanceOperator(region, balanceOP, transferLeader)
+	return transferLeader(region, target.GetId())
 }
 
 type storageBalancer struct {
@@ -80,7 +74,7 @@ func newStorageBalancer(opt *scheduleOption) *storageBalancer {
 }
 
 func (s *storageBalancer) GetName() string {
-	return "storage_balancer"
+	return "storage-balancer"
 }
 
 func (s *storageBalancer) GetResourceKind() ResourceKind {
