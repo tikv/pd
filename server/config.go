@@ -257,13 +257,6 @@ func (c *Config) clone() *Config {
 	return cfg
 }
 
-func (c *Config) setScheduleConfig(cfg ScheduleConfig) {
-	// TODO: add more check for cfg set.
-	cfg.adjust()
-
-	c.ScheduleCfg = cfg
-}
-
 func (c *Config) String() string {
 	if c == nil {
 		return "<nil>"

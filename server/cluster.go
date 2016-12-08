@@ -130,7 +130,7 @@ func (s *Server) GetConfig() *Config {
 
 // SetScheduleConfig sets the balance config information.
 func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
-	s.cfg.setScheduleConfig(cfg)
+	s.cfg.ScheduleCfg = cfg
 	s.scheduleOpt.store(&cfg)
 }
 
