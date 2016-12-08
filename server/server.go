@@ -74,6 +74,9 @@ type Server struct {
 	// for kv operation.
 	kv *kv
 
+	// for API operation.
+	handler *Handler
+
 	// for raft cluster
 	clusterLock sync.RWMutex
 	cluster     *RaftCluster
@@ -104,6 +107,7 @@ func CreateServer(cfg *Config) (*Server, error) {
 		closed:        1,
 	}
 
+	s.handler = newHandler(s)
 	return s, nil
 }
 
@@ -275,6 +279,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // GetAddr returns the server urls for clients.
 func (s *Server) GetAddr() string {
 	return s.cfg.AdvertiseClientUrls
+}
+
+// GetHandler returns the handler for API.
+func (s *Server) GetHandler() *Handler {
+	return s.handler
 }
 
 // GetEndpoints returns the etcd endpoints for outer use.
