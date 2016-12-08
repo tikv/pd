@@ -157,35 +157,6 @@ func (bo *balanceOperator) getRegionID() uint64 {
 	return bo.Region.GetId()
 }
 
-// onceOperator is the operator wrapping another operator
-// and can be called only once. It will return finished every time.
-type onceOperator struct {
-	Op       Operator `json:"operator"`
-	Finished bool     `json:"finished"`
-}
-
-func newOnceOperator(op Operator) *onceOperator {
-	return &onceOperator{
-		Op:       op,
-		Finished: false,
-	}
-}
-
-func (op *onceOperator) String() string {
-	return fmt.Sprintf("[onceOperator]op: %v, finished: %v", op.Op, op.Finished)
-}
-
-// Do implements Operator.Do interface.
-func (op *onceOperator) Do(ctx *opContext, region *regionInfo) (bool, *pdpb.RegionHeartbeatResponse, error) {
-	if op.Finished {
-		return true, nil, nil
-	}
-
-	op.Finished = true
-	_, resp, err := op.Op.Do(ctx, region)
-	return true, resp, errors.Trace(err)
-}
-
 // changePeerOperator is used to do peer change.
 type changePeerOperator struct {
 	ChangePeer *pdpb.ChangePeer `json:"operator"`

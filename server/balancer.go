@@ -184,12 +184,12 @@ func (r *replicaChecker) addPeer(region *regionInfo, constraint *Constraint) *ba
 	}
 
 	addPeer := newAddPeerOperator(region.GetId(), peer)
-	return newBalanceOperator(region, replicaOP, newOnceOperator(addPeer))
+	return newBalanceOperator(region, replicaOP, addPeer)
 }
 
 func (r *replicaChecker) removePeer(region *regionInfo, peer *metapb.Peer) *balanceOperator {
 	removePeer := newRemovePeerOperator(region.GetId(), peer)
-	return newBalanceOperator(region, replicaOP, newOnceOperator(removePeer))
+	return newBalanceOperator(region, replicaOP, removePeer)
 }
 
 func (r *replicaChecker) collectBadPeers(region *regionInfo) map[uint64]*metapb.Peer {

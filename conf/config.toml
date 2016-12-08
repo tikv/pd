@@ -31,6 +31,8 @@ leader-schedule-limit = 8
 leader-schedule-interval = "10s"
 storage-schedule-limit = 4
 storage-schedule-interval = "30s"
+replica-schedule-limit = 8
+replica-schedule-interval = "10s"
 
 [metric]
 # prometheus client push interval, set "0s" to disable prometheus.

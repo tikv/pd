@@ -188,6 +188,7 @@ func (s *testStorageBalancerSuite) Test(c *C) {
 
 	cfg.MinRegionCount = 10
 	cfg.MinBalanceDiffRatio = 0.1
+	opt.constraints.MaxReplicas = 1
 
 	// Add stores 1,2,3,4.
 	tc.addRegionStore(1, 6, 0.1)
@@ -210,6 +211,12 @@ func (s *testStorageBalancerSuite) Test(c *C) {
 	// When store 1 is offline, it will be filtered,
 	// store 2 becomes the store with least regions.
 	checkTransferPeer(c, sb.Schedule(cluster), 4, 2)
+
+	// Test MaxReplicas.
+	opt.constraints.MaxReplicas = 3
+	c.Assert(sb.Schedule(cluster), IsNil)
+	opt.constraints.MaxReplicas = 1
+	c.Assert(sb.Schedule(cluster), NotNil)
 
 	// Test MinBalanceDiffRatio.
 	// When diff storage ratio < MinBalanceDiffRatio, no schedule.
@@ -389,13 +396,13 @@ func (s *testReplicaCheckerSuite) TestConstraints(c *C) {
 }
 
 func checkAddPeer(c *C, bop *balanceOperator, storeID uint64) {
-	op := bop.Ops[0].(*onceOperator).Op.(*changePeerOperator)
+	op := bop.Ops[0].(*changePeerOperator)
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
 func checkRemovePeer(c *C, bop *balanceOperator, storeID uint64) {
-	op := bop.Ops[0].(*onceOperator).Op.(*changePeerOperator)
+	op := bop.Ops[0].(*changePeerOperator)
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
 }

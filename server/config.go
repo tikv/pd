@@ -301,6 +301,11 @@ type ScheduleConfig struct {
 	StorageScheduleLimit uint64 `toml:"storage-schedule-limit" json:"storage-schedule-limit"`
 	// StorageScheduleInterval is the interval to schedule storage.
 	StorageScheduleInterval timeutil.Duration `toml:"storage-schedule-interval" json:"storage-schedule-interval"`
+
+	// ReplicaScheduleLimit is the max coexist replica schedules.
+	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit" json:"replica-schedule-limit"`
+	// ReplicaScheduleInterval is the interval to schedule storage.
+	ReplicaScheduleInterval timeutil.Duration `toml:"replica-schedule-interval" json:"replica-schedule-interval"`
 }
 
 const (
@@ -313,6 +318,8 @@ const (
 	defaultLeaderScheduleInterval  = 10 * time.Second
 	defaultStorageScheduleLimit    = 4
 	defaultStorageScheduleInterval = 30 * time.Second
+	defaultReplicaScheduleLimit    = 8
+	defaultReplicaScheduleInterval = 10 * time.Second
 )
 
 func newScheduleConfig() *ScheduleConfig {
@@ -329,6 +336,8 @@ func (c *ScheduleConfig) adjust() {
 	adjustDuration(&c.LeaderScheduleInterval, defaultLeaderScheduleInterval)
 	adjustUint64(&c.StorageScheduleLimit, defaultStorageScheduleLimit)
 	adjustDuration(&c.StorageScheduleInterval, defaultStorageScheduleInterval)
+	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
+	adjustDuration(&c.ReplicaScheduleInterval, defaultReplicaScheduleInterval)
 }
 
 // scheduleOption is a wrapper to access the configuration safely.
@@ -354,6 +363,10 @@ func (o *scheduleOption) store(cfg *ScheduleConfig) {
 
 func (o *scheduleOption) GetConstraints() *Constraints {
 	return o.constraints
+}
+
+func (o *scheduleOption) GetMaxReplicas() int {
+	return o.constraints.MaxReplicas
 }
 
 func (o *scheduleOption) GetMinRegionCount() uint64 {
@@ -390,6 +403,14 @@ func (o *scheduleOption) GetStorageScheduleLimit() uint64 {
 
 func (o *scheduleOption) GetStorageScheduleInterval() time.Duration {
 	return o.load().StorageScheduleInterval.Duration
+}
+
+func (o *scheduleOption) GetReplicaScheduleLimit() uint64 {
+	return o.load().ReplicaScheduleLimit
+}
+
+func (o *scheduleOption) GetReplicaScheduleInterval() time.Duration {
+	return o.load().ReplicaScheduleInterval.Duration
 }
 
 // ConstraintConfig is the replica constraint configuration to place replicas.

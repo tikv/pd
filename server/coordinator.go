@@ -37,7 +37,7 @@ type coordinator struct {
 
 	cluster *clusterInfo
 	opt     *scheduleOption
-	checker *replicaChecker
+	replica *replicaController
 
 	schedulers map[string]*ScheduleController
 	operators  map[ResourceKind]map[uint64]*balanceOperator
@@ -51,7 +51,6 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
 	c := &coordinator{
 		cluster:     cluster,
 		opt:         opt,
-		checker:     newReplicaChecker(cluster, opt),
 		schedulers:  make(map[string]*ScheduleController),
 		regionCache: newExpireRegionCache(regionCacheTTL, regionCacheTTL),
 		histories:   newLRUCache(historiesCacheSize),
@@ -60,6 +59,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
 
 	c.ctx, c.cancel = context.WithCancel(context.TODO())
 
+	c.replica = newReplicaController(c)
 	c.operators = make(map[ResourceKind]map[uint64]*balanceOperator)
 	c.operators[leaderKind] = make(map[uint64]*balanceOperator)
 	c.operators[storageKind] = make(map[uint64]*balanceOperator)
@@ -68,10 +68,14 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
 }
 
 func (c *coordinator) dispatch(region *regionInfo) *pdpb.RegionHeartbeatResponse {
-	op := c.getOperator(region.GetId())
-	if op == nil {
-		op = c.checker.Check(region)
+	if op := c.getOperator(region.GetId()); op == nil {
+		// If region has no ongoing operator, check for replicas.
+		if op := c.replica.Check(region); op != nil {
+			c.addOperator(storageKind, op)
+		}
 	}
+
+	op := c.getOperator(region.GetId())
 	if op == nil {
 		return nil
 	}
@@ -328,6 +332,37 @@ func newStorageScheduleController(c *coordinator, s Scheduler) *ScheduleControll
 	}
 }
 
+type replicaController struct {
+	c        *coordinator
+	opt      *scheduleOption
+	checker  *replicaChecker
+	lastTime time.Time
+}
+
+func newReplicaController(c *coordinator) *replicaController {
+	return &replicaController{
+		c:       c,
+		opt:     c.opt,
+		checker: newReplicaChecker(c.cluster, c.opt),
+	}
+}
+
+func (r *replicaController) Check(region *regionInfo) *balanceOperator {
+	if r.c.getOperatorCount(storageKind) >= int(r.opt.GetReplicaScheduleLimit()) {
+		return nil
+	}
+	if time.Since(r.lastTime) < r.opt.GetReplicaScheduleInterval() {
+		return nil
+	}
+
+	op := r.checker.Check(region)
+	log.Debug(op)
+	if op != nil {
+		r.lastTime = time.Now()
+	}
+	return op
+}
+
 func collectOperatorCounterMetrics(bop *balanceOperator) {
 	metrics := make(map[string]uint64)
 	prefix := ""
@@ -340,9 +375,6 @@ func collectOperatorCounterMetrics(bop *balanceOperator) {
 		prefix = "balance_"
 	}
 	for _, op := range bop.Ops {
-		if _, ok := op.(*onceOperator); ok {
-			op = op.(*onceOperator).Op
-		}
 		switch o := op.(type) {
 		case *changePeerOperator:
 			metrics[prefix+o.Name]++

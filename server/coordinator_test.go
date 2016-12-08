@@ -118,18 +118,36 @@ func (s *testCoordinatorSuite) TestSchedule(c *C) {
 
 	// Test replica checker.
 	// Peer in store 4 is down.
-	tc.addLeaderRegion(1, 2, 3, 4)
-	region = cluster.getRegion(1)
+	tc.addLeaderRegion(4, 2, 3, 4)
+	region = cluster.getRegion(4)
 	downPeer := &pdpb.PeerStats{
 		Peer:        region.GetStorePeer(4),
 		DownSeconds: proto.Uint64(24 * 60 * 60),
 	}
 	region.DownPeers = append(region.DownPeers, downPeer)
+
 	// Add peer in store 1.
+	// Check ReplicaScheduleLimit.
+	opCount := uint64(co.getOperatorCount(storageKind))
+	clonecfg.ReplicaScheduleLimit = opCount
+	opt.store(&clonecfg)
+	c.Assert(co.dispatch(region), IsNil)
+	clonecfg.ReplicaScheduleLimit = opCount + 1
+	opt.store(&clonecfg)
 	resp = co.dispatch(region)
 	checkAddPeerResp(c, resp, 1)
+
 	region.Peers = append(region.Peers, resp.GetChangePeer().GetPeer())
+	c.Assert(co.dispatch(region), IsNil)
+	co.regionCache.delete(region.GetId())
+
 	// Remove peer in store 4.
+	// Check ReplicaScheduleInterval.
+	clonecfg.ReplicaScheduleInterval.Duration = 10 * time.Second
+	opt.store(&clonecfg)
+	c.Assert(co.dispatch(region), IsNil)
+	clonecfg.ReplicaScheduleInterval.Duration = 0
+	opt.store(&clonecfg)
 	resp = co.dispatch(region)
 	checkRemovePeerResp(c, resp, 4)
 }

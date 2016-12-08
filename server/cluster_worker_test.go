@@ -444,6 +444,11 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
+	// Set interval to 0 for tests.
+	cfg, opt := s.svr.cfg, s.svr.scheduleOpt
+	cfg.ScheduleCfg.ReplicaScheduleInterval.Duration = 0
+	opt.store(&cfg.ScheduleCfg)
+
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 
@@ -474,8 +479,11 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 		// Update region epoch and check region info.
 		region.RegionEpoch.ConfVer = region.GetRegionEpoch().GetConfVer() + 1
 		heartbeatRegion(c, conn, s.clusterID, 0, region, leaderPeer)
+
 		// Check region peer count.
 		region = s.checkRegionPeerCount(c, regionKey, i+2)
+		// We need to delete region cache manually.
+		cluster.coordinator.regionCache.delete(region.GetId())
 	}
 
 	region = s.checkRegionPeerCount(c, regionKey, 5)
@@ -495,6 +503,8 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 		// Check region peer count.
 		region = s.checkRegionPeerCount(c, regionKey, 4-i)
+		// We need to delete region cache manually.
+		cluster.coordinator.regionCache.delete(region.GetId())
 	}
 
 	region = s.checkRegionPeerCount(c, regionKey, 3)
