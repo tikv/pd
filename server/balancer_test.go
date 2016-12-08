@@ -155,10 +155,6 @@ func (s *testLeaderBalancerSuite) Test(c *C) {
 	// store 2 becomes the store with least leaders.
 	tc.setStoreDown(1)
 	checkTransferLeader(c, lb.Schedule(cluster), 4, 2)
-	// If store 2 is busy, it will be filtered,
-	// store 3 becomes the store with least leaders.
-	tc.setStoreBusy(2)
-	checkTransferLeader(c, lb.Schedule(cluster), 4, 3)
 
 	// Test MinBalanceDiffRatio.
 	// When diff leader ratio < MinBalanceDiffRatio, no schedule.
