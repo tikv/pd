@@ -67,8 +67,22 @@ func (r *regionInfo) GetPeer(peerID uint64) *metapb.Peer {
 	return nil
 }
 
-func (r *regionInfo) ContainsPeer(peerID uint64) bool {
-	return r.GetPeer(peerID) != nil
+func (r *regionInfo) GetDownPeer(peerID uint64) *metapb.Peer {
+	for _, down := range r.DownPeers {
+		if down.GetPeer().GetId() == peerID {
+			return down.GetPeer()
+		}
+	}
+	return nil
+}
+
+func (r *regionInfo) GetPendingPeer(peerID uint64) *metapb.Peer {
+	for _, peer := range r.PendingPeers {
+		if peer.GetId() == peerID {
+			return peer
+		}
+	}
+	return nil
 }
 
 func (r *regionInfo) GetStorePeer(storeID uint64) *metapb.Peer {

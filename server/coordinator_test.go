@@ -64,12 +64,6 @@ func (s *testCoordinatorSuite) TestSchedule(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	cfg, opt := newTestScheduleConfig()
-	cfg.MinRegionCount = 1
-	cfg.MinLeaderCount = 1
-	cfg.MinBalanceDiffRatio = 0.1
-	cfg.LeaderScheduleInterval.Duration = 100 * time.Millisecond
-	cfg.StorageScheduleInterval.Duration = 100 * time.Millisecond
-
 	co := newCoordinator(cluster, opt)
 	co.run()
 	defer co.stop()
@@ -140,13 +134,48 @@ func (s *testCoordinatorSuite) TestSchedule(c *C) {
 	checkRemovePeerResp(c, resp, 4)
 }
 
+func (s *testCoordinatorSuite) TestPeerState(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+
+	_, opt := newTestScheduleConfig()
+	co := newCoordinator(cluster, opt)
+	co.run()
+	defer co.stop()
+
+	// Transfer peer from store 4 to store 1.
+	tc.addRegionStore(1, 1, 0.1)
+	tc.addRegionStore(2, 2, 0.2)
+	tc.addRegionStore(3, 3, 0.3)
+	tc.addRegionStore(4, 4, 0.4)
+	tc.addLeaderRegion(1, 2, 3, 4)
+
+	// Wait for schedule.
+	time.Sleep(time.Second)
+	checkTransferPeer(c, co.getOperator(1), 4, 1)
+
+	region := cluster.getRegion(1)
+
+	// Add new peer.
+	resp := co.dispatch(region)
+	checkAddPeerResp(c, resp, 1)
+	newPeer := resp.GetChangePeer().GetPeer()
+	region.Peers = append(region.Peers, newPeer)
+
+	// If the new peer is pending, the operator will not finish.
+	region.PendingPeers = append(region.PendingPeers, newPeer)
+	checkAddPeerResp(c, co.dispatch(region), 1)
+
+	// The new peer is not pending now, the operator will finish.
+	region.PendingPeers = nil
+	c.Assert(co.dispatch(region), IsNil)
+}
+
 func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 
-	cfg, opt := newTestScheduleConfig()
-	cfg.LeaderScheduleInterval.Duration = 10 * time.Millisecond
-
+	_, opt := newTestScheduleConfig()
 	co := newCoordinator(cluster, opt)
 	co.run()
 	defer co.stop()

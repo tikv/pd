@@ -26,7 +26,12 @@ import (
 )
 
 const (
+	maxOperatorWaitTime        = 10 * time.Minute
 	maxTransferLeaderWaitCount = 3
+)
+
+var (
+	errOperatorTimeout = errors.New("operator timeout")
 )
 
 var baseID uint64
@@ -127,6 +132,9 @@ func (bo *balanceOperator) Do(ctx *opContext, region *regionInfo) (bool, *pdpb.R
 	if bo.Start.IsZero() {
 		bo.Start = time.Now()
 	}
+	if time.Since(bo.Start) > maxOperatorWaitTime {
+		return false, nil, errors.Trace(errOperatorTimeout)
+	}
 
 	finished, res, err := bo.Ops[bo.Index].Do(ctx, region)
 	if err != nil {
@@ -216,16 +224,21 @@ func (co *changePeerOperator) String() string {
 
 // check checks whether operator already finished or not.
 func (co *changePeerOperator) check(region *regionInfo) (bool, error) {
+	peer := co.ChangePeer.GetPeer()
 	if co.ChangePeer.GetChangeType() == raftpb.ConfChangeType_AddNode {
-		if region.ContainsPeer(co.ChangePeer.GetPeer().GetId()) {
+		if region.GetPendingPeer(peer.GetId()) != nil {
+			// We don't know whether the added peer can work or not.
+			return false, nil
+		}
+		if region.GetPeer(peer.GetId()) != nil {
 			return true, nil
 		}
-		log.Infof("balance [%s], try to add peer %s", region, co.ChangePeer.GetPeer())
+		log.Infof("balance [%s], try to add peer %s", region, peer)
 	} else if co.ChangePeer.GetChangeType() == raftpb.ConfChangeType_RemoveNode {
-		if !region.ContainsPeer(co.ChangePeer.GetPeer().GetId()) {
+		if region.GetPeer(peer.GetId()) == nil {
 			return true, nil
 		}
-		log.Infof("balance [%s], try to remove peer %s", region, co.ChangePeer.GetPeer())
+		log.Infof("balance [%s], try to remove peer %s", region, peer)
 	}
 
 	return false, nil

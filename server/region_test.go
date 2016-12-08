@@ -40,15 +40,12 @@ func (s *testRegionSuite) TestRegionInfo(c *C) {
 	region := &metapb.Region{
 		Peers: peers,
 	}
-	downPeers := []*pdpb.PeerStats{
-		{Peer: peers[n-1], DownSeconds: new(uint64)},
-	}
-	pendingPeers := peers[0:1]
+	downPeer, pendingPeer := peers[0], peers[1]
 
 	info := newRegionInfo(region, peers[0])
 	c.Assert(info.IsStable(), IsTrue)
-	info.DownPeers = downPeers
-	info.PendingPeers = pendingPeers
+	info.DownPeers = []*pdpb.PeerStats{{Peer: downPeer}}
+	info.PendingPeers = []*metapb.Peer{pendingPeer}
 	c.Assert(info.IsStable(), IsFalse)
 
 	r := info.clone()
@@ -56,10 +53,12 @@ func (s *testRegionSuite) TestRegionInfo(c *C) {
 
 	for i := uint64(0); i < n; i++ {
 		c.Assert(r.GetPeer(i), Equals, r.Peers[i])
-		c.Assert(r.ContainsPeer(i), IsTrue)
 	}
 	c.Assert(r.GetPeer(n), IsNil)
-	c.Assert(r.ContainsPeer(n), IsFalse)
+	c.Assert(r.GetDownPeer(n), IsNil)
+	c.Assert(r.GetDownPeer(downPeer.GetId()), DeepEquals, downPeer)
+	c.Assert(r.GetPendingPeer(n), IsNil)
+	c.Assert(r.GetPendingPeer(pendingPeer.GetId()), DeepEquals, pendingPeer)
 
 	for i := uint64(0); i < n; i++ {
 		c.Assert(r.GetStorePeer(i).GetStoreId(), Equals, i)
