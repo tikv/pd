@@ -26,14 +26,18 @@ var _ = Suite(&testStoreSuite{})
 
 func (s *testStoreSuite) TestUrlStoreFilter(c *C) {
 	stores := []*metapb.Store{
-		&metapb.Store{
+		{
 			// metapb.StoreState_Up == 0
 			State: metapb.StoreState_Up,
 		},
-		&metapb.Store{
+		{
 			State: metapb.StoreState_Up,
 		},
-		&metapb.Store{
+		{
+			// metapb.StoreState_Up == 1
+			State: metapb.StoreState_Offline,
+		},
+		{
 			// metapb.StoreState_Tombstone == 2
 			State: metapb.StoreState_Tombstone,
 		},
@@ -44,27 +48,38 @@ func (s *testStoreSuite) TestUrlStoreFilter(c *C) {
 		want []*metapb.Store
 	}{
 		{
+			u:    "http://localhost:2379/pd/api/v1/stores",
+			want: stores[:3],
+		},
+		{
+			u:    "http://localhost:2379/pd/api/v1/stores?state=2",
+			want: stores[3:],
+		},
+		{
 			u:    "http://localhost:2379/pd/api/v1/stores?state=0",
 			want: stores[:2],
 		},
 		{
-			u:    "http://localhost:2379/pd/api/v1/stores?state=2",
+			u:    "http://localhost:2379/pd/api/v1/stores?state=2&state=1",
 			want: stores[2:],
-		},
-		{
-			u:    "http://localhost:2379/pd/api/v1/stores?state=foo",
-			want: stores,
-		},
-		{
-			u:    "http://localhost:2379/pd/api/v1/stores",
-			want: stores,
 		},
 	}
 
 	for _, t := range table {
 		uu, err := url.Parse(t.u)
 		c.Assert(err, IsNil)
-		f := newStoreStateFilter(uu)
+		f, err := newStoreStateFilter(uu)
+		c.Assert(err, IsNil)
 		c.Assert(f.filter(stores), DeepEquals, t.want)
 	}
+
+	u, err := url.Parse("http://localhost:2379/pd/api/v1/stores?state=foo")
+	c.Assert(err, IsNil)
+	_, err = newStoreStateFilter(u)
+	c.Assert(err, NotNil)
+
+	u, err = url.Parse("http://localhost:2379/pd/api/v1/stores?state=999999")
+	c.Assert(err, IsNil)
+	_, err = newStoreStateFilter(u)
+	c.Assert(err, NotNil)
 }

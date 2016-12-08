@@ -19,7 +19,7 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"github.com/ngaut/log"
+	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/timeutil"
 	"github.com/pingcap/pd/server"
@@ -144,7 +144,12 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Stores: make([]*storeInfo, 0, len(stores)),
 	}
 
-	urlFilter := newStoreStateFilter(r.URL)
+	urlFilter, err := newStoreStateFilter(r.URL)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	stores = urlFilter.filter(cluster.GetStores())
 	for _, s := range stores {
 		store, status, err := cluster.GetStore(s.GetId())
@@ -162,42 +167,46 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type storeStateFilter struct {
-	acceptAll   bool
-	acceptState metapb.StoreState
+	accepts []metapb.StoreState
 }
 
-func newStoreStateFilter(u *url.URL) *storeStateFilter {
-	acceptAll := true
-	acceptState := metapb.StoreState_Up
+func newStoreStateFilter(u *url.URL) (*storeStateFilter, error) {
+	var acceptStates []metapb.StoreState
 	if v, ok := u.Query()["state"]; ok {
-		if len(v) == 1 {
-			state, err := strconv.Atoi(v[0])
+		for _, s := range v {
+			state, err := strconv.Atoi(s)
 			if err != nil {
-				log.Errorf("store api: %s", err)
-			} else {
-				switch metapb.StoreState(state) {
-				case metapb.StoreState_Up, metapb.StoreState_Offline, metapb.StoreState_Tombstone:
-					acceptAll = false
-					acceptState = metapb.StoreState(state)
-				default:
-				}
+				return nil, errors.Trace(err)
+			}
+
+			storeState := metapb.StoreState(state)
+			switch storeState {
+			case metapb.StoreState_Up, metapb.StoreState_Offline, metapb.StoreState_Tombstone:
+				acceptStates = append(acceptStates, storeState)
+			default:
+				return nil, errors.Errorf("unknown StoreState: %v", storeState)
 			}
 		}
+	} else {
+		// Accepts Up and Offline by default.
+		acceptStates = []metapb.StoreState{metapb.StoreState_Up, metapb.StoreState_Offline}
 	}
 
 	return &storeStateFilter{
-		acceptAll:   acceptAll,
-		acceptState: acceptState,
-	}
+		accepts: acceptStates,
+	}, nil
 }
 
 func (filter *storeStateFilter) filter(stores []*metapb.Store) []*metapb.Store {
 	ret := make([]*metapb.Store, 0, len(stores))
 	for _, s := range stores {
-		if !filter.acceptAll && s.GetState() != filter.acceptState {
-			continue
+		state := s.GetState()
+		for _, accept := range filter.accepts {
+			if state == accept {
+				ret = append(ret, s)
+				break
+			}
 		}
-		ret = append(ret, s)
 	}
 	return ret
 }
