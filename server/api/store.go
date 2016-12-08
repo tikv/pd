@@ -18,6 +18,7 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/timeutil"
 	"github.com/pingcap/pd/server"
@@ -131,6 +132,24 @@ func newStoresHandler(svr *server.Server, rd *render.Render) *storesHandler {
 }
 
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	storeStateAll := true
+	storeState := metapb.StoreState_Up
+	if v, ok := r.URL.Query()["state"]; ok {
+		if len(v) == 1 {
+			state, err := strconv.Atoi(v[0])
+			if err != nil {
+				log.Errorf("store api: %s", err)
+			} else {
+				switch metapb.StoreState(state) {
+				case metapb.StoreState_Up, metapb.StoreState_Offline, metapb.StoreState_Tombstone:
+					storeStateAll = false
+					storeState = metapb.StoreState(state)
+				default:
+				}
+			}
+		}
+	}
+
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
 		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
@@ -139,11 +158,12 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	stores := cluster.GetStores()
 	storesInfo := &storesInfo{
-		Count:  len(stores),
 		Stores: make([]*storeInfo, 0, len(stores)),
 	}
-
 	for _, s := range stores {
+		if !storeStateAll && s.GetState() != storeState {
+			continue
+		}
 		store, status, err := cluster.GetStore(s.GetId())
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -153,6 +173,7 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		storeInfo := newStoreInfo(store, status, cluster.GetScores(store, status))
 		storesInfo.Stores = append(storesInfo.Stores, storeInfo)
 	}
+	storesInfo.Count = len(storesInfo.Stores)
 
 	h.rd.JSON(w, http.StatusOK, storesInfo)
 }
