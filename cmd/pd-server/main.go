@@ -68,12 +68,15 @@ func main() {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 
-	go func() {
-		sig := <-sc
-		log.Infof("Got signal [%d] to exit.", sig)
-		svr.Close()
-		os.Exit(0)
-	}()
+	go svr.Run()
 
-	svr.Run()
+	sig := <-sc
+	svr.Close()
+	log.Infof("Got signal [%d] to exit.", sig)
+	switch sig {
+	case syscall.SIGTERM:
+		os.Exit(0)
+	default:
+		os.Exit(1)
+	}
 }
