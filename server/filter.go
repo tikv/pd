@@ -73,6 +73,9 @@ func (f *stateFilter) filter(store *storeInfo) bool {
 	if !store.isUp() {
 		return true
 	}
+	if store.stats.GetIsBusy() {
+		return true
+	}
 	return store.downTime() > f.opt.GetMaxStoreDownTime()
 }
 
