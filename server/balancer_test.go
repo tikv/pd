@@ -38,16 +38,16 @@ func (c *testClusterInfo) setStoreUp(storeID uint64) {
 	c.putStore(store)
 }
 
-func (c *testClusterInfo) setStoreDown(storeID uint64) {
+func (c *testClusterInfo) setStoreBusy(storeID uint64) {
 	store := c.getStore(storeID)
-	store.State = metapb.StoreState_Up
+	store.stats.IsBusy = true
 	store.stats.LastHeartbeatTS = time.Time{}
 	c.putStore(store)
 }
 
-func (c *testClusterInfo) setStoreBusy(storeID uint64) {
+func (c *testClusterInfo) setStoreDown(storeID uint64) {
 	store := c.getStore(storeID)
-	store.stats.IsBusy = true
+	store.State = metapb.StoreState_Up
 	store.stats.LastHeartbeatTS = time.Time{}
 	c.putStore(store)
 }
