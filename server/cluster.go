@@ -512,62 +512,6 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 	return c.cachedCluster.putMeta(meta)
 }
 
-// NewAddPeerOperator creates an operator to add a peer to the region.
-// If storeID is 0, it will be chosen according to the balance rules.
-func (c *RaftCluster) NewAddPeerOperator(regionID uint64, storeID uint64) (Operator, error) {
-	cluster := c.cachedCluster
-
-	region := cluster.getRegion(regionID)
-	if region == nil {
-		return nil, errRegionNotFound(regionID)
-	}
-
-	var target *storeInfo
-	if storeID != 0 {
-		target = cluster.getStore(storeID)
-	} else {
-		cb := newStorageBalancer(c.s.scheduleOpt)
-		filter := newExcludedFilter(nil, region.GetStoreIds())
-		target = cb.selector.SelectTarget(cluster.getStores(), filter)
-	}
-	if target == nil {
-		return nil, errors.New("No store available")
-	}
-
-	peer, err := cluster.allocPeer(target.GetId())
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return newAddPeerOperator(regionID, peer), nil
-}
-
-// NewRemovePeerOperator creates an operator to remove a peer from the region.
-func (c *RaftCluster) NewRemovePeerOperator(regionID uint64, peerID uint64) (Operator, error) {
-	region, _ := c.GetRegionByID(regionID)
-	if region == nil {
-		return nil, errRegionNotFound(regionID)
-	}
-
-	for _, peer := range region.GetPeers() {
-		if peer.GetId() == peerID {
-			return newRemovePeerOperator(regionID, peer), nil
-		}
-	}
-	return nil, errors.Errorf("region %v peer %v not found", regionID, peerID)
-}
-
-// SetAdminOperator sets the balance operator of the region.
-func (c *RaftCluster) SetAdminOperator(regionID uint64, ops []Operator) error {
-	region := c.cachedCluster.getRegion(regionID)
-	if region == nil {
-		return errRegionNotFound(regionID)
-	}
-	bop := newBalanceOperator(region, adminOP, ops...)
-	c.coordinator.setOperator(storageKind, bop)
-	return nil
-}
-
 // GetBalanceOperators gets the balance operators from cluster.
 func (c *RaftCluster) GetBalanceOperators() map[uint64]Operator {
 	return c.coordinator.getOperators()

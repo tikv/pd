@@ -183,14 +183,6 @@ func (c *coordinator) addOperator(kind ResourceKind, op *balanceOperator) bool {
 	return true
 }
 
-func (c *coordinator) setOperator(kind ResourceKind, op *balanceOperator) {
-	c.Lock()
-	defer c.Unlock()
-
-	collectOperatorCounterMetrics(op)
-	c.operators[kind][op.Region.GetId()] = op
-}
-
 func (c *coordinator) removeOperator(op *balanceOperator) {
 	c.Lock()
 	defer c.Unlock()
@@ -371,21 +363,12 @@ func (r *replicaCheckController) Check(region *regionInfo) {
 
 func collectOperatorCounterMetrics(bop *balanceOperator) {
 	metrics := make(map[string]uint64)
-	prefix := ""
-	switch bop.Type {
-	case adminOP:
-		prefix = "admin_"
-	case replicaOP:
-		prefix = "replica_"
-	case balanceOP:
-		prefix = "balance_"
-	}
 	for _, op := range bop.Ops {
 		switch o := op.(type) {
 		case *changePeerOperator:
-			metrics[prefix+o.Name]++
+			metrics[o.Name]++
 		case *transferLeaderOperator:
-			metrics[prefix+o.Name]++
+			metrics[o.Name]++
 		}
 	}
 

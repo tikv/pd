@@ -100,7 +100,7 @@ func transferLeader(region *regionInfo, storeID uint64) *balanceOperator {
 		return nil
 	}
 	transferLeader := newTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
-	return newBalanceOperator(region, balanceOP, transferLeader)
+	return newBalanceOperator(region, transferLeader)
 }
 
 // scheduleLeader schedules a region to transfer leader from the source store to the target store.

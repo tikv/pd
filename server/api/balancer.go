@@ -14,7 +14,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/pingcap/pd/server"
@@ -56,39 +55,6 @@ func (h *balancerHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.rd.JSON(w, http.StatusOK, balancersInfo)
-}
-
-func (h *balancerHandler) Post(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
-		return
-	}
-
-	var input []json.RawMessage
-	if err := readJSON(r.Body, &input); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	ops := make(map[uint64][]server.Operator)
-	for _, message := range input {
-		id, op, err := newOperator(cluster, message)
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err)
-			return
-		}
-		ops[id] = append(ops[id], op)
-	}
-
-	for regionID, regionOps := range ops {
-		if err := cluster.SetAdminOperator(regionID, regionOps); err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err)
-			return
-		}
-	}
-
-	h.rd.JSON(w, http.StatusOK, nil)
 }
 
 type historyOperatorHandler struct {

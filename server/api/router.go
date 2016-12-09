@@ -64,7 +64,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	balancerHandler := newBalancerHandler(svr, rd)
 	router.HandleFunc("/api/v1/balancers", balancerHandler.Get).Methods("GET")
-	router.HandleFunc("/api/v1/balancers", balancerHandler.Post).Methods("POST")
 
 	router.Handle("/", newHomeHandler(rd)).Methods("GET")
 	router.Handle("/ws", newWSHandler(svr))

@@ -62,19 +62,9 @@ type Operator interface {
 	Do(ctx *opContext, region *regionInfo) (bool, *pdpb.RegionHeartbeatResponse, error)
 }
 
-type optype int
-
-// Priority: adminOP > replicaOP > balanceOP
-const (
-	balanceOP optype = iota + 1
-	replicaOP
-	adminOP
-)
-
 // balanceOperator is used to do region balance.
 type balanceOperator struct {
 	ID     uint64      `json:"id"`
-	Type   optype      `json:"type"`
 	Index  int         `json:"index"`
 	Start  time.Time   `json:"start"`
 	End    time.Time   `json:"end"`
@@ -82,10 +72,9 @@ type balanceOperator struct {
 	Region *regionInfo `json:"region"`
 }
 
-func newBalanceOperator(region *regionInfo, optype optype, ops ...Operator) *balanceOperator {
+func newBalanceOperator(region *regionInfo, ops ...Operator) *balanceOperator {
 	return &balanceOperator{
 		ID:     atomic.AddUint64(&baseID, 1),
-		Type:   optype,
 		Ops:    ops,
 		Region: region,
 	}

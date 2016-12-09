@@ -14,10 +14,7 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"strings"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -112,7 +109,7 @@ func (s *testBalancerSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func (s *testBalancerSuite) testGet(c *C) *balancersInfo {
+func (s *testBalancerSuite) TestGet(c *C) *balancersInfo {
 	client := newUnixSocketClient()
 	resp, err := client.Get(s.url)
 	c.Assert(err, IsNil)
@@ -120,89 +117,4 @@ func (s *testBalancerSuite) testGet(c *C) *balancersInfo {
 	err = readJSON(resp.Body, info)
 	c.Assert(err, IsNil)
 	return info
-}
-
-func (s *testBalancerSuite) testPost(c *C, data string) {
-	client := newUnixSocketClient()
-	resp, err := client.Post(s.url, "application/json", strings.NewReader(data))
-	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-}
-
-type testChangePeerOperator struct {
-	ChangePeer *pdpb.ChangePeer `json:"operator"`
-	RegionID   uint64           `json:"regionid"`
-	Name       string           `json:"name"`
-}
-
-// Since those operators are not exported, we need to do some tricks to verify them.
-func mustParseOperator(c *C, bop server.Operator, ops []*testChangePeerOperator) {
-	data, err := json.Marshal(bop)
-	c.Assert(err, IsNil)
-	tmp := make(map[string]json.RawMessage)
-	err = json.Unmarshal(data, &tmp)
-	c.Assert(err, IsNil)
-	err = json.Unmarshal(tmp["operators"], &ops)
-	c.Assert(err, IsNil)
-}
-
-func (s *testBalancerSuite) mustGetOperators(c *C) map[uint64]server.Operator {
-	cluster := s.svr.GetRaftCluster()
-	c.Assert(cluster, NotNil)
-	return cluster.GetBalanceOperators()
-}
-
-func (s *testBalancerSuite) TestAddPeer(c *C) {
-	data := fmt.Sprintf(`[{"name": "add_peer", "region_id": %v, "store_id": %v}]`,
-		region.GetId(), s.testStoreID)
-	s.testPost(c, data)
-
-	bops := s.mustGetOperators(c)
-	c.Assert(bops, HasLen, 1)
-	op := new(testChangePeerOperator)
-	mustParseOperator(c, bops[region.GetId()], []*testChangePeerOperator{op})
-
-	c.Assert(op.Name, Equals, "add_peer")
-	c.Assert(op.RegionID, Equals, region.GetId())
-	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, s.testStoreID)
-}
-
-func (s *testBalancerSuite) TestRemovePeer(c *C) {
-	peer := region.GetPeers()[0]
-	data := fmt.Sprintf(`[{"name": "remove_peer", "region_id": %v, "peer_id": %v}]`,
-		region.GetId(), peer.GetId())
-	s.testPost(c, data)
-
-	bops := s.mustGetOperators(c)
-	c.Assert(bops, HasLen, 1)
-	op := new(testChangePeerOperator)
-	mustParseOperator(c, bops[region.GetId()], []*testChangePeerOperator{op})
-
-	c.Assert(op.Name, Equals, "remove_peer")
-	c.Assert(op.RegionID, Equals, region.GetId())
-	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, peer.GetStoreId())
-}
-
-func (s *testBalancerSuite) TestAddAndRemovePeer(c *C) {
-	peer := region.GetPeers()[0]
-	data := fmt.Sprintf(`[
-      {"name": "add_peer", "region_id": %v, "store_id": %v},
-	  {"name": "remove_peer", "region_id": %v, "peer_id": %v}
-    ]`, region.GetId(), s.testStoreID,
-		region.GetId(), peer.GetId())
-	s.testPost(c, data)
-
-	bops := s.mustGetOperators(c)
-	c.Assert(bops, HasLen, 1)
-	addPeer := new(testChangePeerOperator)
-	removePeer := new(testChangePeerOperator)
-	mustParseOperator(c, bops[region.GetId()], []*testChangePeerOperator{addPeer, removePeer})
-
-	c.Assert(addPeer.Name, Equals, "add_peer")
-	c.Assert(addPeer.RegionID, Equals, region.GetId())
-	c.Assert(addPeer.ChangePeer.GetPeer().GetStoreId(), Equals, s.testStoreID)
-
-	c.Assert(removePeer.Name, Equals, "remove_peer")
-	c.Assert(removePeer.RegionID, Equals, region.GetId())
-	c.Assert(removePeer.ChangePeer.GetPeer().GetStoreId(), Equals, peer.GetStoreId())
 }

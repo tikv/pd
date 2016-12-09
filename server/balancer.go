@@ -101,7 +101,7 @@ func (s *storageBalancer) Schedule(cluster *clusterInfo) *balanceOperator {
 
 	addPeer := newAddPeerOperator(region.GetId(), newPeer)
 	removePeer := newRemovePeerOperator(region.GetId(), peer)
-	return newBalanceOperator(region, balanceOP, addPeer, removePeer)
+	return newBalanceOperator(region, addPeer, removePeer)
 }
 
 // replicaChecker ensures region has enough replicas.
@@ -184,12 +184,12 @@ func (r *replicaChecker) addPeer(region *regionInfo, constraint *Constraint) *ba
 	}
 
 	addPeer := newAddPeerOperator(region.GetId(), peer)
-	return newBalanceOperator(region, replicaOP, addPeer)
+	return newBalanceOperator(region, addPeer)
 }
 
 func (r *replicaChecker) removePeer(region *regionInfo, peer *metapb.Peer) *balanceOperator {
 	removePeer := newRemovePeerOperator(region.GetId(), peer)
-	return newBalanceOperator(region, replicaOP, removePeer)
+	return newBalanceOperator(region, removePeer)
 }
 
 func (r *replicaChecker) collectBadPeers(region *regionInfo) map[uint64]*metapb.Peer {
