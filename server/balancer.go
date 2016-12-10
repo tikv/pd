@@ -210,9 +210,14 @@ func (r *replicaChecker) collectDownPeers(region *regionInfo) map[uint64]*metapb
 		if peer == nil {
 			continue
 		}
-		if stats.GetDownSeconds() > uint64(r.opt.GetMaxStoreDownTime().Seconds()) {
-			downPeers[peer.GetStoreId()] = peer
+		store := r.cluster.getStore(peer.GetStoreId())
+		if store.downTime() < r.opt.GetMaxStoreDownTime() {
+			continue
 		}
+		if stats.GetDownSeconds() < uint64(r.opt.GetMaxStoreDownTime().Seconds()) {
+			continue
+		}
+		downPeers[peer.GetStoreId()] = peer
 	}
 	return downPeers
 }

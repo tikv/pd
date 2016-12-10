@@ -119,6 +119,7 @@ func (s *testCoordinatorSuite) TestSchedule(c *C) {
 	// Test replica checker.
 	// Peer in store 4 is down.
 	tc.addLeaderRegion(4, 2, 3, 4)
+	tc.setStoreDown(4)
 	region = cluster.getRegion(4)
 	downPeer := &pdpb.PeerStats{
 		Peer:        region.GetStorePeer(4),

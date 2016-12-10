@@ -290,6 +290,7 @@ func (s *testReplicaCheckerSuite) Test(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 
 	// Peer in store 2 is down, add peer in store 4.
+	tc.setStoreDown(2)
 	downPeer := &pdpb.PeerStats{
 		Peer:        region.GetStorePeer(2),
 		DownSeconds: proto.Uint64(24 * 60 * 60),
