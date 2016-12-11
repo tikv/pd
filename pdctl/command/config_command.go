@@ -49,12 +49,12 @@ func configShowCommandF(cmd *cobra.Command, args []string) {
 	url := getAddressFromCmd(cmd, schedulePrefix)
 	r, err := http.Get(url)
 	if err != nil {
-		fmt.Println("Failed to get config: ", err)
+		fmt.Printf("Failed to get config:[%s]\n", err)
 		return
 	}
 	defer r.Body.Close()
 	if r.StatusCode != http.StatusOK {
-		fmt.Println(r.StatusCode, " error")
+		fmt.Println(r.StatusCode, "error")
 		return
 	}
 
@@ -74,11 +74,11 @@ func configSetCommandF(cmd *cobra.Command, args []string) {
 
 	r, err := http.Get(url)
 	if err != nil {
-		fmt.Println("Failed to get config: ", err)
+		fmt.Printf("Failed to set config:[%s]\n", err)
 		return
 	}
 	if r.StatusCode != http.StatusOK {
-		fmt.Println(r.StatusCode, " error")
+		fmt.Println(r.StatusCode, "error")
 		return
 	}
 
@@ -92,14 +92,14 @@ func configSetCommandF(cmd *cobra.Command, args []string) {
 
 	req, err := json.Marshal(data)
 	if err != nil {
-		fmt.Println("Failed to set config: ", err)
+		fmt.Printf("Failed to set config:[%s]\n", err)
 		return
 	}
 
 	url = getAddressFromCmd(cmd, configPrefix)
 	r, err = http.Post(url, "application/json", bytes.NewBuffer(req))
 	if err != nil {
-		fmt.Println("Failed to get config: ", err)
+		fmt.Printf("Failed to set config:[%s]\n", err)
 	}
 	defer r.Body.Close()
 	if r.StatusCode == http.StatusOK {

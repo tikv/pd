@@ -2,6 +2,8 @@ package command
 
 import (
 	"fmt"
+	"net/url"
+	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -11,8 +13,20 @@ type CommandFlags struct {
 }
 
 func getAddressFromCmd(cmd *cobra.Command, prefix string) string {
-	p, _ := cmd.Flags().GetString("pd_url")
-	s := fmt.Sprintf("%s/%s", p, prefix)
+	p, err := cmd.Flags().GetString("pd_url")
+	if err != nil {
+		fmt.Println("Get pd address error,should set flag with '-u'")
+		os.Exit(1)
+	}
+
+	u, err := url.Parse(p)
+	if err != nil {
+		fmt.Println("address is wrong format,should like 'http://127.0.0.1:2379'")
+	}
+	if u.Scheme == "" {
+		u.Scheme = "http"
+	}
+	s := fmt.Sprintf("%s/%s", u, prefix)
 	return s
 }
 

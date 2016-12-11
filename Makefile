@@ -13,7 +13,7 @@ LDFLAGS += -X "github.com/pingcap/pd/server.PDGitHash=$(shell git rev-parse HEAD
 # See more: https://godoc.org/path/filepath#Match
 COVERIGNORE := "cmd/pd-server/main.go,server/api/bindata_assetfs.go"
 
-default: build
+default: build ctl
 
 all: dev install
 
@@ -27,6 +27,11 @@ build-fe:
 build:
 	rm -rf vendor && ln -s _vendor/vendor vendor
 	$(GO) build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	rm -rf vendor
+
+ctl:
+	rm -rf vendor && ln -s _vendor/vendor vendor
+	$(GO) build  -o bin/pdctl cmd/pdctl/main.go
 	rm -rf vendor
 
 install:
