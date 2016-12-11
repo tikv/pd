@@ -36,6 +36,10 @@ func (h *confHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetConfig())
 }
 
+func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
+	h.rd.JSON(w, http.StatusOK, &h.svr.GetConfig().ScheduleCfg)
+}
+
 func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 	config := &server.ScheduleConfig{}
 	err := readJSON(r.Body, config)
