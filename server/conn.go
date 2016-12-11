@@ -15,6 +15,7 @@ package server
 
 import (
 	"bufio"
+	"io"
 	"net"
 	"time"
 
@@ -72,7 +73,9 @@ func (c *conn) run() {
 		msg := &msgpb.Message{}
 		msgID, err := util.ReadMessage(c.rb, msg)
 		if err != nil {
-			log.Errorf("read request message err %v", err)
+			if errors.Cause(err) != io.EOF {
+				log.Errorf("read request message err %v", err)
+			}
 			return
 		}
 
