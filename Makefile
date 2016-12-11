@@ -31,7 +31,7 @@ build:
 
 ctl:
 	rm -rf vendor && ln -s _vendor/vendor vendor
-	$(GO) build  -o bin/pdctl cmd/pdctl/main.go
+	$(GO) build  -o bin/pd-ctl cmd/pd-ctl/main.go
 	rm -rf vendor
 
 install:

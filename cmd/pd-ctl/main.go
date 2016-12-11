@@ -1,3 +1,16 @@
+// Copyright 2016 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
@@ -17,6 +30,7 @@ var url string
 func init() {
 	flag.StringVar(&url, "u", "http://127.0.0.1:2379", "the pd address")
 }
+
 func main() {
 	flag.Parse()
 	sigint := make(chan os.Signal, 1)
@@ -44,10 +58,11 @@ func loop() {
 		if line == "exit" {
 			os.Exit(0)
 		}
+
 		readline.AddHistory(line)
 		args := strings.Split(line, " ")
 		args = append(args, "-u", url)
-		err, usage := pdctl.Start(args)
+		usage, err := pdctl.Start(args)
 		if err != nil {
 			fmt.Println(usage)
 		}
