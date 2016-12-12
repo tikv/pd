@@ -196,4 +196,10 @@ import:
   - naming
   - peer
   - transport
+- package: github.com/spf13/cobra
+  version: 9495bc009a56819bdb0ddbc1a373e29c140bc674
+  repo: https://github.com/spf13/cobra.git
+  vcs: git
+- package: github.com/bobappleyard/readline
+  version: 7e300e02d38ee8b418c0b4841877f1845d392328
 - package: github.com/elazarl/go-bindata-assetfs

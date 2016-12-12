@@ -33,14 +33,21 @@ func init() {
 
 func main() {
 	flag.Parse()
-	sigint := make(chan os.Signal, 1)
-	signal.Notify(sigint, syscall.SIGINT)
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
 
 	go func() {
-		select {
-		case <-sigint:
-			fmt.Println("\nExited")
-			readline.Cleanup()
+		sig := <-sc
+		fmt.Printf("\nGot signal [%d] to exit.\n", sig)
+		readline.Cleanup()
+		switch sig {
+		case syscall.SIGTERM:
+			os.Exit(0)
+		default:
 			os.Exit(1)
 		}
 	}()

@@ -1,10 +1,12 @@
-hash: b484ff3bf9a1a3dcf0d3a7b4e6ae418f422971c1408bacad08757841b5dfc0de
-updated: 2016-12-06T18:37:50.899110971+08:00
+hash: 5e3ef8c039500f191bf172d9bcf751c4924ac2e6a55e38686f9dfce13e3eb31c
+updated: 2016-12-12T10:31:07.41387807+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
   subpackages:
   - quantile
+- name: github.com/bobappleyard/readline
+  version: 7e300e02d38ee8b418c0b4841877f1845d392328
 - name: github.com/boltdb/bolt
   version: acc803f0ced151102ed51bf824f8709ebd6602bc
 - name: github.com/BurntSushi/toml
@@ -108,6 +110,8 @@ imports:
   - runtime
   - runtime/internal
   - utilities
+- name: github.com/inconshreveable/mousetrap
+  version: 76626ae9c91c4f2a10f34cad8ce83ea42c93bb75
 - name: github.com/jonboulle/clockwork
   version: 2eee05ed794112d45db504eb05aa693efd2b8b09
 - name: github.com/juju/errors
@@ -152,6 +156,12 @@ imports:
   - model
 - name: github.com/prometheus/procfs
   version: abf152e5f3e97f2fafac028d2cc06c1feb87ffa5
+- name: github.com/spf13/cobra
+  version: 9495bc009a56819bdb0ddbc1a373e29c140bc674
+  repo: https://github.com/spf13/cobra.git
+  vcs: git
+- name: github.com/spf13/pflag
+  version: 5ccb023bc27df288a957c5e994cd44fd19619465
 - name: github.com/twinj/uuid
   version: 70cac2bcd273ef6a371bb96cde363d28b68734c3
 - name: github.com/ugorji/go
