@@ -42,7 +42,7 @@ func main() {
 
 	go func() {
 		sig := <-sc
-		fmt.Printf("\nGot signal [%d] to exit.\n", sig)
+		fmt.Printf("\nGot signal [%v] to exit.\n", sig)
 		readline.Cleanup()
 		switch sig {
 		case syscall.SIGTERM:
