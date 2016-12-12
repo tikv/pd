@@ -24,13 +24,9 @@ build-fe:
 	go get github.com/elazarl/go-bindata-assetfs/...
 	cd server/api && go-bindata-assetfs -pkg api templates/... && cd -
 
-build: ctl
+build: 
 	rm -rf vendor && ln -s _vendor/vendor vendor
 	$(GO) build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
-	rm -rf vendor
-
-ctl:
-	rm -rf vendor && ln -s _vendor/vendor vendor
 	$(GO) build  -o bin/pd-ctl cmd/pd-ctl/main.go
 	rm -rf vendor
 
