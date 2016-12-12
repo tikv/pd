@@ -94,7 +94,8 @@ func configSetCommandF(cmd *cobra.Command, args []string) {
 		return
 	}
 	if r.StatusCode != http.StatusOK {
-		fmt.Println(r.StatusCode, "error")
+		r.Body.Close()
+		fmt.Printf("Failed with error code[%d]\n", r.StatusCode)
 		return
 	}
 
@@ -121,7 +122,6 @@ func configSetCommandF(cmd *cobra.Command, args []string) {
 	if r.StatusCode == http.StatusOK {
 		fmt.Println("Success!")
 	} else {
-		fmt.Println("Failed:")
-		io.Copy(os.Stdout, r.Body)
+		fmt.Printf("Failed with error code[%d]\n", r.StatusCode)
 	}
 }
