@@ -282,47 +282,49 @@ func (s *testReplicaCheckerSuite) Test(c *C) {
 	// Add region 1 with leader in store 1 and follower in store 2.
 	tc.addLeaderRegion(1, 1, 2)
 
-	// Region has 2 peers, we need 3.
+	// Region has 2 peers, we need to add a new peer.
 	region := cluster.getRegion(1)
 	checkAddPeer(c, rc.Check(region), 3)
-	peer3, _ := cluster.allocPeer(3)
-	region.Peers = append(region.Peers, peer3)
+
+	// Test stateFilter.
+	// If store 3 is down, we can add to store 4.
+	tc.setStoreDown(3)
+	checkAddPeer(c, rc.Check(region), 4)
+
+	// Test snapshotCountFilter.
+	// If snapshotCount > MaxSnapshotCount, we can not add peer.
+	tc.updateSnapshotCount(4, 3)
+	c.Assert(rc.Check(region), IsNil)
+	// If snapshotCount < MaxSnapshotCount, we can add peer again.
+	tc.updateSnapshotCount(4, 1)
+	checkAddPeer(c, rc.Check(region), 4)
+
+	// Add peer in store 4, and we have enough replicas.
+	peer4, _ := cluster.allocPeer(4)
+	region.Peers = append(region.Peers, peer4)
 	c.Assert(rc.Check(region), IsNil)
 
-	// Peer in store 2 is down, add peer in store 4.
+	// Add peer in store 3, and we have redundant replicas.
+	tc.setStoreUp(3)
+	peer3, _ := cluster.allocPeer(3)
+	region.Peers = append(region.Peers, peer3)
+	checkRemovePeer(c, rc.Check(region), 1)
+	region.Peers = region.Peers[1:]
+
+	// Peer in store 2 is down, remove it.
 	tc.setStoreDown(2)
 	downPeer := &pdpb.PeerStats{
 		Peer:        region.GetStorePeer(2),
 		DownSeconds: proto.Uint64(24 * 60 * 60),
 	}
 	region.DownPeers = append(region.DownPeers, downPeer)
-	checkReplacePeer(c, rc.Check(region), 4, 2)
+	checkRemovePeer(c, rc.Check(region), 2)
 	region.DownPeers = nil
 	c.Assert(rc.Check(region), IsNil)
 
-	// Peer in store 1 is offline, add peer in store 4.
-	tc.setStoreOffline(1)
-	checkTransferPeer(c, rc.Check(region), 1, 4)
-
-	// Test stateFilter.
-	// If store 4 is down, we have no other stores to add peer.
-	tc.setStoreDown(4)
-	c.Assert(rc.Check(region), IsNil)
-
-	// Test snapshotCountFilter.
-	// If snapshotCount < MaxSnapshotCount, we can add peer.
-	tc.setStoreUp(4)
-	checkAddPeer(c, rc.Check(region), 4)
-	// If snapshotCount > MaxSnapshotCount, we can not add peer.
-	tc.updateSnapshotCount(4, 3)
-	c.Assert(rc.Check(region), IsNil)
-	tc.updateSnapshotCount(4, 1)
-	checkAddPeer(c, rc.Check(region), 4)
-
-	// Remove redundant peer.
-	peer4, _ := cluster.allocPeer(4)
-	region.Peers = append(region.Peers, peer4)
-	checkRemovePeer(c, rc.Check(region), 1)
+	// Peer in store 2 is offline, remove it.
+	tc.setStoreOffline(3)
+	checkRemovePeer(c, rc.Check(region), 3)
 }
 
 func (s *testReplicaCheckerSuite) TestConstraints(c *C) {

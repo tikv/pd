@@ -135,11 +135,21 @@ func (s *testCoordinatorSuite) TestSchedule(c *C) {
 	clonecfg.ReplicaScheduleLimit = opCount + 1
 	opt.store(&clonecfg)
 
-	// Remove peer in store 4 and add peer in store 1.
+	// Remove peer in store 4.
 	resp = co.dispatch(region)
 	checkRemovePeerResp(c, resp, 4)
 	region.Peers = region.Peers[0 : len(region.Peers)-1]
+	region.DownPeers = nil
 	c.Assert(co.dispatch(region), IsNil)
+	co.regionCache.delete(region.GetId())
+
+	// Check ReplicaScheduleInterval.
+	resp = co.dispatch(region)
+	c.Assert(co.dispatch(region), IsNil)
+	clonecfg.ReplicaScheduleInterval.Duration = 0
+	opt.store(&clonecfg)
+
+	// Add new peer in store 1.
 	resp = co.dispatch(region)
 	checkAddPeerResp(c, resp, 1)
 	region.Peers = append(region.Peers, resp.GetChangePeer().GetPeer())
