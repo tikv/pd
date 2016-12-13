@@ -54,10 +54,6 @@ func (r *regionInfo) clone() *regionInfo {
 	}
 }
 
-func (r *regionInfo) IsStable() bool {
-	return len(r.DownPeers) == 0 && len(r.PendingPeers) == 0
-}
-
 func (r *regionInfo) GetPeer(peerID uint64) *metapb.Peer {
 	for _, peer := range r.GetPeers() {
 		if peer.GetId() == peerID {
