@@ -296,13 +296,13 @@ func (s *testReplicaCheckerSuite) Test(c *C) {
 		DownSeconds: proto.Uint64(24 * 60 * 60),
 	}
 	region.DownPeers = append(region.DownPeers, downPeer)
-	checkAddPeer(c, rc.Check(region), 4)
+	checkReplacePeer(c, rc.Check(region), 4, 2)
 	region.DownPeers = nil
 	c.Assert(rc.Check(region), IsNil)
 
 	// Peer in store 1 is offline, add peer in store 4.
 	tc.setStoreOffline(1)
-	checkAddPeer(c, rc.Check(region), 4)
+	checkTransferPeer(c, rc.Check(region), 1, 4)
 
 	// Test stateFilter.
 	// If store 4 is down, we have no other stores to add peer.
@@ -406,6 +406,15 @@ func checkRemovePeer(c *C, bop *balanceOperator, storeID uint64) {
 	op := bop.Ops[0].(*changePeerOperator)
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
+}
+
+func checkReplacePeer(c *C, bop *balanceOperator, sourceID, targetID uint64) {
+	op := bop.Ops[0].(*changePeerOperator)
+	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, targetID)
+	op = bop.Ops[1].(*changePeerOperator)
+	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, sourceID)
 }
 
 func checkTransferPeer(c *C, bop *balanceOperator, sourceID, targetID uint64) {

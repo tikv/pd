@@ -127,7 +127,6 @@ func (s *testCoordinatorSuite) TestSchedule(c *C) {
 	}
 	region.DownPeers = append(region.DownPeers, downPeer)
 
-	// Add peer in store 1.
 	// Check ReplicaScheduleLimit.
 	opCount := uint64(co.getOperatorCount(storageKind))
 	clonecfg.ReplicaScheduleLimit = opCount
@@ -135,22 +134,16 @@ func (s *testCoordinatorSuite) TestSchedule(c *C) {
 	c.Assert(co.dispatch(region), IsNil)
 	clonecfg.ReplicaScheduleLimit = opCount + 1
 	opt.store(&clonecfg)
-	resp = co.dispatch(region)
-	checkAddPeerResp(c, resp, 1)
 
-	region.Peers = append(region.Peers, resp.GetChangePeer().GetPeer())
-	c.Assert(co.dispatch(region), IsNil)
-	co.regionCache.delete(region.GetId())
-
-	// Remove peer in store 4.
-	// Check ReplicaScheduleInterval.
-	clonecfg.ReplicaScheduleInterval.Duration = 10 * time.Second
-	opt.store(&clonecfg)
-	c.Assert(co.dispatch(region), IsNil)
-	clonecfg.ReplicaScheduleInterval.Duration = 0
-	opt.store(&clonecfg)
+	// Remove peer in store 4 and add peer in store 1.
 	resp = co.dispatch(region)
 	checkRemovePeerResp(c, resp, 4)
+	region.Peers = region.Peers[0 : len(region.Peers)-1]
+	c.Assert(co.dispatch(region), IsNil)
+	resp = co.dispatch(region)
+	checkAddPeerResp(c, resp, 1)
+	region.Peers = append(region.Peers, resp.GetChangePeer().GetPeer())
+	c.Assert(co.dispatch(region), IsNil)
 }
 
 func (s *testCoordinatorSuite) TestPeerState(c *C) {

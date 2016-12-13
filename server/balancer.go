@@ -124,48 +124,13 @@ func newReplicaChecker(cluster *clusterInfo, opt *scheduleOption) *replicaChecke
 }
 
 func (r *replicaChecker) Check(region *regionInfo) *balanceOperator {
-	var stores []*storeInfo
-
-	// Filter bad stores.
-	badPeers := r.collectBadPeers(region)
-	for _, store := range r.cluster.getRegionStores(region) {
-		if _, ok := badPeers[store.GetId()]; !ok {
-			stores = append(stores, store)
-		}
+	if op := r.checkDownPeers(region); op != nil {
+		return op
 	}
-
-	constraints := r.opt.GetConstraints()
-
-	// Make sure all constraints will be satisfied.
-	result := constraints.Match(stores)
-	for _, matched := range result.constraints {
-		if len(matched.stores) < matched.constraint.Replicas {
-			if op := r.addPeer(region, matched.constraint); op != nil {
-				return op
-			}
-		}
+	if op := r.checkOfflinePeers(region); op != nil {
+		return op
 	}
-	if len(stores) < constraints.MaxReplicas {
-		// No matter whether we can satisfy all constraints or not,
-		// we should at least ensure that the region has enough replicas.
-		return r.addPeer(region, nil)
-	}
-
-	// Now we can remove bad peers.
-	for _, peer := range badPeers {
-		return r.removePeer(region, peer)
-	}
-
-	// Now we have redundant replicas, we can remove unmatched peers.
-	if len(stores) > constraints.MaxReplicas {
-		for _, store := range stores {
-			if _, ok := result.stores[store.GetId()]; !ok {
-				return r.removePeer(region, region.GetStorePeer(store.GetId()))
-			}
-		}
-	}
-
-	return nil
+	return r.checkConstraints(region)
 }
 
 func (r *replicaChecker) addPeer(region *regionInfo, constraint *Constraint) *balanceOperator {
@@ -192,19 +157,33 @@ func (r *replicaChecker) removePeer(region *regionInfo, peer *metapb.Peer) *bala
 	return newBalanceOperator(region, removePeer)
 }
 
-func (r *replicaChecker) collectBadPeers(region *regionInfo) map[uint64]*metapb.Peer {
-	badPeers := r.collectDownPeers(region)
-	for _, peer := range region.GetPeers() {
-		store := r.cluster.getStore(peer.GetStoreId())
-		if store == nil || !store.isUp() {
-			badPeers[peer.GetStoreId()] = peer
-		}
+func (r *replicaChecker) replacePeer(region *regionInfo, peer *metapb.Peer) (bool, Operator, Operator) {
+	stores := r.cluster.getStores()
+	result := r.opt.GetConstraints().Match(stores)
+
+	excluded := newExcludedFilter(nil, region.GetStoreIds())
+	constraint := newConstraintFilter(nil, result.stores[peer.GetStoreId()])
+
+	target := r.selector.SelectTarget(stores, excluded, constraint)
+	if target == nil {
+		target = r.selector.SelectTarget(stores, excluded)
 	}
-	return badPeers
+	if target == nil {
+		return false, nil, nil
+	}
+
+	newPeer, err := r.cluster.allocPeer(target.GetId())
+	if err != nil {
+		log.Errorf("failed to allocate peer: %v", err)
+		return false, nil, nil
+	}
+
+	addPeer := newAddPeerOperator(region.GetId(), newPeer)
+	removePeer := newRemovePeerOperator(region.GetId(), peer)
+	return true, addPeer, removePeer
 }
 
-func (r *replicaChecker) collectDownPeers(region *regionInfo) map[uint64]*metapb.Peer {
-	downPeers := make(map[uint64]*metapb.Peer)
+func (r *replicaChecker) checkDownPeers(region *regionInfo) *balanceOperator {
 	for _, stats := range region.DownPeers {
 		peer := stats.GetPeer()
 		if peer == nil {
@@ -217,7 +196,54 @@ func (r *replicaChecker) collectDownPeers(region *regionInfo) map[uint64]*metapb
 		if stats.GetDownSeconds() < uint64(r.opt.GetMaxStoreDownTime().Seconds()) {
 			continue
 		}
-		downPeers[peer.GetStoreId()] = peer
+		// If a peer is down, remove it first and add a new peer.
+		if ok, addPeer, removePeer := r.replacePeer(region, peer); ok {
+			return newBalanceOperator(region, removePeer, addPeer)
+		}
 	}
-	return downPeers
+	return nil
+}
+
+func (r *replicaChecker) checkOfflinePeers(region *regionInfo) *balanceOperator {
+	for _, peer := range region.GetPeers() {
+		store := r.cluster.getStore(peer.GetStoreId())
+		if store == nil || store.isUp() {
+			continue
+		}
+		// If a peer is offline, add a new peer first and remove it.
+		if ok, addPeer, removePeer := r.replacePeer(region, peer); ok {
+			return newBalanceOperator(region, addPeer, removePeer)
+		}
+	}
+	return nil
+}
+
+func (r *replicaChecker) checkConstraints(region *regionInfo) *balanceOperator {
+	stores := r.cluster.getRegionStores(region)
+	result := r.opt.GetConstraints().Match(stores)
+
+	// If we have redundant replicas, we can remove unmatched peers.
+	if len(stores) > r.opt.GetMaxReplicas() {
+		for _, store := range stores {
+			if _, ok := result.stores[store.GetId()]; !ok {
+				return r.removePeer(region, region.GetStorePeer(store.GetId()))
+			}
+		}
+	}
+
+	// Make sure all constraints will be satisfied.
+	for _, matched := range result.constraints {
+		if len(matched.stores) < matched.constraint.Replicas {
+			if op := r.addPeer(region, matched.constraint); op != nil {
+				return op
+			}
+		}
+	}
+	if len(stores) < r.opt.GetMaxReplicas() {
+		// No matter whether we can satisfy all constraints or not,
+		// we should at least ensure that the region has enough replicas.
+		return r.addPeer(region, nil)
+	}
+
+	return nil
 }
