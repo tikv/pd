@@ -157,6 +157,18 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	s.client = client
 	s.id = uint64(etcd.Server.ID())
 
+	// update advertise peer urls.
+	members, err := GetPDMembers(client)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	for _, m := range members {
+		if s.cfg.Name == m.GetName() {
+			s.cfg.AdvertisePeerUrls = strings.Join(m.GetPeerUrls(), ",")
+			log.Infof("update advertise peer urls to: %s", s.cfg.AdvertisePeerUrls)
+		}
+	}
+
 	if err = s.initClusterID(); err != nil {
 		return errors.Trace(err)
 	}

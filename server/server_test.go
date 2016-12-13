@@ -259,3 +259,39 @@ func (s *testServerSuite) TestClusterID(c *C) {
 		c.Assert(svr.clusterID, Equals, clusterID)
 	}
 }
+
+func (s *testServerSuite) TestUpdateAdvertiseUrls(c *C) {
+	cfgs := NewTestMultiConfig(2)
+	for i, cfg := range cfgs {
+		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_advertise_%d", i)
+		cleanServer(cfg)
+	}
+
+	svrs, cleanup := newTestServersWithCfgs(c, cfgs)
+
+	// AdvertisePeerUrls should equals to PeerUrls
+	for _, svr := range svrs {
+		c.Assert(svr.cfg.AdvertisePeerUrls, Equals, svr.cfg.PeerUrls)
+		c.Assert(svr.cfg.AdvertiseClientUrls, Equals, svr.cfg.ClientUrls)
+	}
+
+	// Close all PDs.
+	for _, svr := range svrs {
+		svr.Close()
+	}
+
+	// Little malicious tweak.
+	overlapPeerURL := "," + unixURL()
+	for _, cfg := range cfgs {
+		cfg.AdvertisePeerUrls += overlapPeerURL
+	}
+
+	// Restart all PDs.
+	svrs, cleanup = newTestServersWithCfgs(c, cfgs)
+	defer cleanup()
+
+	// All PDs should have the same advertise urls as before.
+	for _, svr := range svrs {
+		c.Assert(svr.cfg.AdvertisePeerUrls, Equals, svr.cfg.PeerUrls)
+	}
+}
