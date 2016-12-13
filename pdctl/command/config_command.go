@@ -45,8 +45,8 @@ func NewConfigCommand() *cobra.Command {
 func NewShowConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
 		Use:   "show",
-		Short: "show config fo PD",
-		Run:   configShowCommandF,
+		Short: "show config of PD",
+		Run:   showConfigCommandF,
 	}
 	return sc
 }
@@ -56,12 +56,12 @@ func NewSetConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
 		Use:   "set <option> <value>",
 		Short: "set the option with value",
-		Run:   configSetCommandF,
+		Run:   setConfigCommandF,
 	}
 	return sc
 }
 
-func configShowCommandF(cmd *cobra.Command, args []string) {
+func showConfigCommandF(cmd *cobra.Command, args []string) {
 	url := getAddressFromCmd(cmd, schedulePrefix)
 	r, err := http.Get(url)
 	if err != nil {
@@ -75,10 +75,9 @@ func configShowCommandF(cmd *cobra.Command, args []string) {
 	}
 
 	io.Copy(os.Stdout, r.Body)
-
 }
 
-func configSetCommandF(cmd *cobra.Command, args []string) {
+func setConfigCommandF(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
 		fmt.Println(cmd.UsageString())
 		return
