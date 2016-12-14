@@ -14,7 +14,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -23,12 +22,17 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/pingcap/pd/pdctl"
+	flag "github.com/spf13/pflag"
 )
 
-var url string
+var (
+	url    string
+	detach bool
+)
 
 func init() {
-	flag.StringVar(&url, "u", "http://127.0.0.1:2379", "the pd address")
+	flag.StringVarP(&url, "pd_url", "u", "http://127.0.0.1:2379", "the pd address")
+	flag.BoolVarP(&detach, "detach", "d", false, "Run pdctl without readline")
 }
 
 func main() {
@@ -50,7 +54,10 @@ func main() {
 			os.Exit(1)
 		}
 	}()
-
+	if detach {
+		pdctl.Start(os.Args[1:])
+		return
+	}
 	loop()
 }
 
