@@ -17,6 +17,7 @@ import (
 	"bufio"
 	"io"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/juju/errors"
@@ -73,7 +74,7 @@ func (c *conn) run() {
 		msg := &msgpb.Message{}
 		msgID, err := util.ReadMessage(c.rb, msg)
 		if err != nil {
-			if errors.Cause(err) != io.EOF {
+			if isUnexpectedConnError(err) {
 				log.Errorf("read request message err %v", err)
 			}
 			return
@@ -96,13 +97,17 @@ func (c *conn) run() {
 		} else if !c.s.IsLeader() {
 			response, err = p.handleRequest(msgID, request)
 			if err != nil {
-				log.Errorf("proxy request %s err %v", request, errors.ErrorStack(err))
+				if isUnexpectedConnError(err) {
+					log.Errorf("proxy request %s err %v", request, errors.ErrorStack(err))
+				}
 				response = newError(err)
 			}
 		} else {
 			response, err = c.handleRequest(request)
 			if err != nil {
-				log.Errorf("handle request %s err %v", request, errors.ErrorStack(err))
+				if isUnexpectedConnError(err) {
+					log.Errorf("handle request %s err %v", request, errors.ErrorStack(err))
+				}
 				response = newError(err)
 			}
 		}
@@ -130,12 +135,16 @@ func (c *conn) run() {
 		}
 
 		if err = util.WriteMessage(c.wb, msgID, msg); err != nil {
-			log.Errorf("write response message err %v", err)
+			if isUnexpectedConnError(err) {
+				log.Errorf("write response message err %v", err)
+			}
 			return
 		}
 
 		if err = c.wb.Flush(); err != nil {
-			log.Errorf("flush response message err %v", err)
+			if isUnexpectedConnError(err) {
+				log.Errorf("flush response message err %v", err)
+			}
 			return
 		}
 
@@ -160,7 +169,10 @@ func updateResponse(req *pdpb.Request, resp *pdpb.Response) {
 }
 
 func (c *conn) close() error {
-	return errors.Trace(c.conn.Close())
+	if err := c.conn.Close(); isUnexpectedConnError(err) {
+		return errors.Trace(err)
+	}
+	return nil
 }
 
 func (c *conn) checkRequest(req *pdpb.Request) error {
@@ -247,4 +259,17 @@ func (p *leaderProxy) handleRequest(msgID uint64, req *pdpb.Request) (*pdpb.Resp
 		p.conn = nil
 	}
 	return resp, errors.Trace(err)
+}
+
+func isUnexpectedConnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Cause(err) == io.EOF {
+		return false
+	}
+	if strings.Contains(err.Error(), "use of closed network connection") {
+		return false
+	}
+	return true
 }
