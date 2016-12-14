@@ -89,10 +89,12 @@ func deleteStoreCommandF(cmd *cobra.Command, args []string) {
 	r, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
 		fmt.Printf("Failed to delete store %s: [%s]\n", args[0], err)
+		return
 	}
 	reps, err := cli.Do(r)
 	if err != nil {
 		fmt.Printf("Failed to delete store %s: [%s]\n", args[0], err)
+		return
 	}
 
 	defer reps.Body.Close()
