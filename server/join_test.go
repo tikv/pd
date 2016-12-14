@@ -253,7 +253,7 @@ func (s *testJoinServerSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
 	// Deleted PD will not start successfully.
 	c.Assert(err, Equals, errTimeout)
 
-	list, err := memberList(client)
+	list, err := listEtcdMembers(client)
 	c.Assert(err, IsNil)
 	c.Assert(len(list.Members), Equals, 2)
 }
@@ -277,7 +277,7 @@ func (s *testJoinServerSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 	// A deleted PD will not start successfully.
 	c.Assert(err, Equals, errTimeout)
 
-	list, err := memberList(client)
+	list, err := listEtcdMembers(client)
 	c.Assert(err, IsNil)
 	c.Assert(len(list.Members), Equals, 2)
 }

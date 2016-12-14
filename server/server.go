@@ -158,13 +158,13 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	s.id = uint64(etcd.Server.ID())
 
 	// update advertise peer urls.
-	members, err := GetPDMembers(client)
+	etcdMembers, err := listEtcdMembers(client)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	for _, m := range members {
-		if s.cfg.Name == m.GetName() {
-			s.cfg.AdvertisePeerUrls = strings.Join(m.GetPeerUrls(), ",")
+	for _, m := range etcdMembers.Members {
+		if s.ID() == m.ID {
+			s.cfg.AdvertisePeerUrls = strings.Join(m.PeerURLs, ",")
 			log.Infof("update advertise peer urls to: %s", s.cfg.AdvertisePeerUrls)
 		}
 	}

@@ -368,13 +368,31 @@ func InitLogger(cfg *Config) error {
 	return nil
 }
 
-// GetPDMembers return a slice of PDMembers.
-func GetPDMembers(etcdClient *clientv3.Client) ([]*pdpb.PDMember, error) {
+// addEtcdMembers adds an etcd members.
+func addEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddResponse, error) {
+	ctx, cancel := context.WithTimeout(client.Ctx(), defaultDialTimeout)
+	defer cancel()
+
+	return client.MemberAdd(ctx, urls)
+}
+
+// listEtcdMembers returns a list of internal etcd members.
+func listEtcdMembers(etcdClient *clientv3.Client) (*clientv3.MemberListResponse, error) {
 	ctx := etcdClient.Ctx()
 
 	listResp, err := etcdClient.MemberList(ctx)
 	if err != nil {
-		return nil, errors.Errorf("member list failed, error: %v", err)
+		return nil, errors.Trace(err)
+	}
+
+	return listResp, nil
+}
+
+// GetPDMembers return a slice of PDMembers.
+func GetPDMembers(etcdClient *clientv3.Client) ([]*pdpb.PDMember, error) {
+	listResp, err := listEtcdMembers(etcdClient)
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
 
 	members := make([]*pdpb.PDMember, 0, len(listResp.Members))

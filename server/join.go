@@ -22,7 +22,6 @@ import (
 	"github.com/coreos/etcd/embed"
 	"github.com/coreos/etcd/wal"
 	"github.com/juju/errors"
-	"golang.org/x/net/context"
 )
 
 // the maximum amount of time a dial will wait for a connection to setup.
@@ -36,20 +35,6 @@ func genClientV3Config(cfg *Config) clientv3.Config {
 		Endpoints:   endpoints,
 		DialTimeout: defaultDialTimeout,
 	}
-}
-
-func memberAdd(client *clientv3.Client, urls []string) (*clientv3.MemberAddResponse, error) {
-	ctx, cancel := context.WithTimeout(client.Ctx(), defaultDialTimeout)
-	defer cancel()
-
-	return client.MemberAdd(ctx, urls)
-}
-
-func memberList(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
-	ctx, cancel := context.WithTimeout(client.Ctx(), defaultDialTimeout)
-	defer cancel()
-
-	return client.MemberList(ctx)
 }
 
 // prepareJoinCluster sends MemberAdd command to PD cluster,
@@ -110,7 +95,7 @@ func prepareJoinCluster(cfg *Config) (string, string, error) {
 	}
 	defer client.Close()
 
-	listResp, err := memberList(client)
+	listResp, err := listEtcdMembers(client)
 	if err != nil {
 		return "", "", errors.Trace(err)
 	}
@@ -129,12 +114,12 @@ func prepareJoinCluster(cfg *Config) (string, string, error) {
 
 	// - A new PD joins an existing cluster.
 	// - A deleted PD joins to previous cluster.
-	addResp, err := memberAdd(client, []string{cfg.AdvertisePeerUrls})
+	addResp, err := addEtcdMember(client, []string{cfg.AdvertisePeerUrls})
 	if err != nil {
 		return "", "", errors.Trace(err)
 	}
 
-	listResp, err = memberList(client)
+	listResp, err = listEtcdMembers(client)
 	if err != nil {
 		return "", "", errors.Trace(err)
 	}
