@@ -243,8 +243,9 @@ func (s *Server) Run() {
 
 // ServeHTTP hijack the HTTP connection and switch to RPC.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Before hijacke any connection, make sure the pd is initialized.
+	// Before hijack any connection, make sure the pd is initialized.
 	if s.isClosed() {
+		http.Error(w, "PD is not initialized or it is closed", http.StatusServiceUnavailable)
 		return
 	}
 
