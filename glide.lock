@@ -1,5 +1,5 @@
-hash: 2ffbfb61ce00148a42c65deca83abac7d0a30221158f358fa54cdb0adc2360b9
-updated: 2016-12-15T10:57:44.478649308+08:00
+hash: 52e7c523b9e714b5f37b58e575aac231b14304b20ddbe02285e45bb5c8f40323
+updated: 2016-12-15T11:49:33.029237507+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -14,7 +14,7 @@ imports:
 - name: github.com/cloudfoundry-incubator/candiedyaml
   version: 5cef21e2e4f0fd147973b558d4db7395176bcd95
 - name: github.com/cockroachdb/cmux
-  version: 9d8f8e431ac319fe4e84d8eaffa4061ddfea1efb
+  version: 112f0506e7743d64a6eb8fedbcff13d9979bbf92
 - name: github.com/coreos/etcd
   version: d8513adf1d2058047929b1ed7c038fbe023ebe3a
   subpackages:
@@ -87,7 +87,7 @@ imports:
 - name: github.com/elazarl/go-bindata-assetfs
   version: 9a6736ed45b44bf3835afeebb3034b57ed329f3e
 - name: github.com/ghodss/yaml
-  version: 1a6f069841556a7bcaff4a397ca6e8328d266c2f
+  version: 73d445a93680fa1a78ae23a5839bad48f32ba1ee
 - name: github.com/gogo/protobuf
   version: 318371cbef6bab80e8d1c69b470fffa79eebfb54
   subpackages:
@@ -108,7 +108,7 @@ imports:
 - name: github.com/grpc-ecosystem/go-grpc-prometheus
   version: 6b7015e65d366bf3f19b2b2a000a831940f0f7e0
 - name: github.com/grpc-ecosystem/grpc-gateway
-  version: f52d055dc48aec25854ed7d31862f78913cf17d1
+  version: 84398b94e188ee336f307779b57b3aa91af7063c
   subpackages:
   - runtime
   - runtime/internal
@@ -185,7 +185,7 @@ imports:
   - bcrypt
   - blowfish
 - name: golang.org/x/net
-  version: e90d6d0afc4c315a0d87a568ae68577cc15149a0
+  version: 6acef71eb69611914f7a30939ea9f6e194c78172
   repo: https://github.com/golang/net.git
   vcs: git
   subpackages:
@@ -202,7 +202,7 @@ imports:
   subpackages:
   - unix
 - name: google.golang.org/grpc
-  version: 02fca896ff5f50c6bbbee0860345a49344b37a03
+  version: 777daa17ff9b5daef1cfdf915088a2ada3332bf0
   repo: https://github.com/grpc/grpc-go.git
   vcs: git
   subpackages:
@@ -214,4 +214,6 @@ imports:
   - naming
   - peer
   - transport
+- name: gopkg.in/yaml.v2
+  version: 53feefa2559fb8dfa8d81baad31be332c97d6c77
 testImports: []
