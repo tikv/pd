@@ -261,6 +261,8 @@ func (p *leaderProxy) handleRequest(msgID uint64, req *pdpb.Request) (*pdpb.Resp
 	return resp, errors.Trace(err)
 }
 
+var errClosed = errors.New("use of closed network connection")
+
 func isUnexpectedConnError(err error) bool {
 	if err == nil {
 		return false
@@ -268,7 +270,7 @@ func isUnexpectedConnError(err error) bool {
 	if errors.Cause(err) == io.EOF {
 		return false
 	}
-	if strings.Contains(err.Error(), "use of closed network connection") {
+	if strings.Contains(err.Error(), errClosed.Error()) {
 		return false
 	}
 	return true

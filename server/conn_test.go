@@ -14,8 +14,10 @@
 package server
 
 import (
+	"io"
 	"time"
 
+	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
@@ -88,6 +90,13 @@ func (s *testConnSuite) TestReconnect(c *C) {
 			c.Assert(svr.IsLeader(), IsFalse)
 		}
 	}
+}
+
+func (s *testConnSuite) TestUnexpectedError(c *C) {
+	c.Assert(isUnexpectedConnError(nil), IsFalse)
+	c.Assert(isUnexpectedConnError(errors.Trace(io.EOF)), IsFalse)
+	c.Assert(isUnexpectedConnError(errors.Trace(errClosed)), IsFalse)
+	c.Assert(isUnexpectedConnError(errors.Trace(io.ErrClosedPipe)), IsTrue)
 }
 
 func mustRequest(c *C, s *Server) *pdpb.Response {
