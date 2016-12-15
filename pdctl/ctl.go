@@ -32,7 +32,7 @@ var (
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&commandFlags.URL, "pd_url", "u", "http://127.0.0.1:2379", "pd address")
+	rootCmd.PersistentFlags().StringVarP(&commandFlags.URL, "pd", "u", "http://127.0.0.1:2379", "pd address")
 	rootCmd.AddCommand(
 		command.NewConfigCommand(),
 		command.NewRegionCommand(),

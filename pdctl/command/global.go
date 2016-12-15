@@ -24,7 +24,7 @@ import (
 )
 
 func getAddressFromCmd(cmd *cobra.Command, prefix string) string {
-	p, err := cmd.Flags().GetString("pd_url")
+	p, err := cmd.Flags().GetString("pd")
 	if err != nil {
 		fmt.Println("Get pd address error,should set flag with '-u'")
 		os.Exit(1)

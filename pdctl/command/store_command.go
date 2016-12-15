@@ -32,18 +32,18 @@ var (
 func NewStoreCommand() *cobra.Command {
 	s := &cobra.Command{
 		Use:   "store [delete] <store_id>",
-		Short: "show the sotre status",
+		Short: "show the store status",
 		Run:   showStoreCommandF,
 	}
 	s.AddCommand(NewDeleteStoreCommand())
 	return s
 }
 
-// NewDeleteStoreCommand return a  delete subcommand of sotreCmd
+// NewDeleteStoreCommand return a  delete subcommand of storeCmd
 func NewDeleteStoreCommand() *cobra.Command {
 	d := &cobra.Command{
 		Use:   "delete <store_id>",
-		Short: "delete the sotre",
+		Short: "delete the store",
 		Run:   deleteStoreCommandF,
 	}
 	return d
