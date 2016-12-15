@@ -13,7 +13,7 @@ pdctl is a command line tool for pd
 run:
     
     ./pdctl store -d  -u 127.0.0.1:2379
-show all stores status. '-u' specify the pd address, it can be overwritten by envirment variours like `export PD_ADDR=127.0.0.1:2379`
+show all stores status. '-u' specify the pd address, it can be overwritten by environment variours like `export PD_ADDR=127.0.0.1:2379`
 
 ### Flags
 #### --pd,-u

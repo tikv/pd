@@ -33,7 +33,7 @@ func NewStoreCommand() *cobra.Command {
 	s := &cobra.Command{
 		Use:   "store [delete] <store_id>",
 		Short: "show the store status",
-		Run:   showStoreCommandF,
+		Run:   showStoreCommandFunc,
 	}
 	s.AddCommand(NewDeleteStoreCommand())
 	return s
@@ -44,12 +44,12 @@ func NewDeleteStoreCommand() *cobra.Command {
 	d := &cobra.Command{
 		Use:   "delete <store_id>",
 		Short: "delete the store",
-		Run:   deleteStoreCommandF,
+		Run:   deleteStoreCommandFunc,
 	}
 	return d
 }
 
-func showStoreCommandF(cmd *cobra.Command, args []string) {
+func showStoreCommandFunc(cmd *cobra.Command, args []string) {
 	var prefix string
 	prefix = storesPrefix
 	if len(args) == 1 {
@@ -74,7 +74,7 @@ func showStoreCommandF(cmd *cobra.Command, args []string) {
 	io.Copy(os.Stdout, r.Body)
 }
 
-func deleteStoreCommandF(cmd *cobra.Command, args []string) {
+func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		fmt.Println("Usage: store delete <store_id>")
 		return

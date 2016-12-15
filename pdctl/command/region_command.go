@@ -33,12 +33,12 @@ func NewRegionCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   "region <region_id>",
 		Short: "show the region status",
-		Run:   showRegionCommandF,
+		Run:   showRegionCommandFunc,
 	}
 	return r
 }
 
-func showRegionCommandF(cmd *cobra.Command, args []string) {
+func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 	var prefix string
 	prefix = regionsPrefix
 	if len(args) == 1 {

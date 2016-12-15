@@ -24,11 +24,11 @@ func NewExitCommand() *cobra.Command {
 	conf := &cobra.Command{
 		Use:   "exit",
 		Short: "exit pdctl",
-		Run:   exitCommandF,
+		Run:   exitCommandFunc,
 	}
 	return conf
 }
 
-func exitCommandF(cmd *cobra.Command, args []string) {
+func exitCommandFunc(cmd *cobra.Command, args []string) {
 	os.Exit(0)
 }
