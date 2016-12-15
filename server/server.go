@@ -164,8 +164,11 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	}
 	for _, m := range etcdMembers.Members {
 		if s.ID() == m.ID {
-			s.cfg.AdvertisePeerUrls = strings.Join(m.PeerURLs, ",")
-			log.Infof("update advertise peer urls to: %s", s.cfg.AdvertisePeerUrls)
+			etcdPeerURLs := strings.Join(m.PeerURLs, ",")
+			if s.cfg.AdvertisePeerUrls != etcdPeerURLs {
+				log.Infof("update advertise peer urls from %s to %s", s.cfg.AdvertisePeerUrls, etcdPeerURLs)
+				s.cfg.AdvertisePeerUrls = etcdPeerURLs
+			}
 		}
 	}
 
