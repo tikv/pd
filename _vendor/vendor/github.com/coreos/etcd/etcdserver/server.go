@@ -40,6 +40,7 @@ import (
 	"github.com/coreos/etcd/lease"
 	"github.com/coreos/etcd/mvcc"
 	"github.com/coreos/etcd/mvcc/backend"
+	"github.com/coreos/etcd/pkg/contention"
 	"github.com/coreos/etcd/pkg/fileutil"
 	"github.com/coreos/etcd/pkg/idutil"
 	"github.com/coreos/etcd/pkg/pbutil"
@@ -81,6 +82,9 @@ const (
 	maxInFlightMsgSnap = 16
 
 	releaseDelayAfterSnapshot = 30 * time.Second
+
+	// maxPendingRevokes is the maximum number of outstanding expired lease revocations.
+	maxPendingRevokes = 16
 )
 
 var (
@@ -173,9 +177,23 @@ type EtcdServer struct {
 
 	snapCount uint64
 
-	w          wait.Wait
-	stop       chan struct{}
-	done       chan struct{}
+	w wait.Wait
+
+	readMu sync.RWMutex
+	// read routine notifies etcd server that it waits for reading by sending an empty struct to
+	// readwaitC
+	readwaitc chan struct{}
+	// readNotifier is used to notify the read routine that it can process the request
+	// when there is no error
+	readNotifier *notifier
+
+	// stop signals the run goroutine should shutdown.
+	stop chan struct{}
+	// stopping is closed by run goroutine on shutdown.
+	stopping chan struct{}
+	// done is closed when all goroutines from start() complete.
+	done chan struct{}
+
 	errorc     chan error
 	id         types.ID
 	attributes membership.Attributes
@@ -214,8 +232,8 @@ type EtcdServer struct {
 	// to detect the cluster version immediately.
 	forceVersionC chan struct{}
 
-	msgSnapC chan raftpb.Message
-
+	// wgMu blocks concurrent waitgroup mutation while server stopping
+	wgMu sync.RWMutex
 	// wg is used to wait for the go routines that depends on the server state
 	// to exit when stopping the server.
 	wg sync.WaitGroup
@@ -247,7 +265,22 @@ func NewServer(cfg *ServerConfig) (srv *EtcdServer, err error) {
 
 	bepath := path.Join(cfg.SnapDir(), databaseFilename)
 	beExist := fileutil.Exist(bepath)
-	be := backend.NewDefaultBackend(bepath)
+
+	var be backend.Backend
+	beOpened := make(chan struct{})
+	go func() {
+		be = backend.NewDefaultBackend(bepath)
+		beOpened <- struct{}{}
+	}()
+
+	select {
+	case <-beOpened:
+	case <-time.After(time.Second):
+		plog.Warningf("another etcd process is running with the same data dir and holding the file lock.")
+		plog.Warningf("waiting for it to exit before starting...")
+		<-beOpened
+	}
+
 	defer func() {
 		if err != nil {
 			be.Close()
@@ -373,6 +406,7 @@ func NewServer(cfg *ServerConfig) (srv *EtcdServer, err error) {
 	sstats.Initialize()
 	lstats := stats.NewLeaderStats(id.String())
 
+	heartbeat := time.Duration(cfg.TickMs) * time.Millisecond
 	srv = &EtcdServer{
 		readych:   make(chan struct{}),
 		Cfg:       cfg,
@@ -380,10 +414,17 @@ func NewServer(cfg *ServerConfig) (srv *EtcdServer, err error) {
 		errorc:    make(chan error, 1),
 		store:     st,
 		r: raftNode{
+			isIDRemoved: func(id uint64) bool { return cl.IsIDRemoved(types.ID(id)) },
 			Node:        n,
-			ticker:      time.Tick(time.Duration(cfg.TickMs) * time.Millisecond),
+			ticker:      time.Tick(heartbeat),
+			// set up contention detectors for raft heartbeat message.
+			// expect to send a heartbeat within 2 heartbeat intervals.
+			td:          contention.NewTimeoutDetector(2 * heartbeat),
+			heartbeat:   heartbeat,
 			raftStorage: s,
 			storage:     NewStorage(w, ss),
+			msgSnapC:    make(chan raftpb.Message, maxInFlightMsgSnap),
+			readStateC:  make(chan raft.ReadState, 1),
 		},
 		id:            id,
 		attributes:    membership.Attributes{Name: cfg.Name, ClientURLs: cfg.ClientURLs.StringSlice()},
@@ -394,13 +435,12 @@ func NewServer(cfg *ServerConfig) (srv *EtcdServer, err error) {
 		peerRt:        prt,
 		reqIDGen:      idutil.NewGenerator(uint16(id), time.Now()),
 		forceVersionC: make(chan struct{}),
-		msgSnapC:      make(chan raftpb.Message, maxInFlightMsgSnap),
 	}
 
 	srv.applyV2 = &applierV2store{store: srv.store, cluster: srv.cluster}
 
 	srv.be = be
-	minTTL := time.Duration((3*cfg.ElectionTicks)/2) * time.Duration(cfg.TickMs) * time.Millisecond
+	minTTL := time.Duration((3*cfg.ElectionTicks)/2) * heartbeat
 
 	// always recover lessor before kv. When we recover the mvcc.KV it will reattach keys to its leases.
 	// If we recover mvcc.KV first, it will attach the keys to the wrong lessor before it recovers.
@@ -408,8 +448,13 @@ func NewServer(cfg *ServerConfig) (srv *EtcdServer, err error) {
 	srv.kv = mvcc.New(srv.be, srv.lessor, &srv.consistIndex)
 	if beExist {
 		kvindex := srv.kv.ConsistentIndex()
+		// TODO: remove kvindex != 0 checking when we do not expect users to upgrade
+		// etcd from pre-3.0 release.
 		if snapshot != nil && kvindex < snapshot.Metadata.Index {
-			return nil, fmt.Errorf("database file (%v index %d) does not match with snapshot (index %d).", bepath, kvindex, snapshot.Metadata.Index)
+			if kvindex != 0 {
+				return nil, fmt.Errorf("database file (%v index %d) does not match with snapshot (index %d).", bepath, kvindex, snapshot.Metadata.Index)
+			}
+			plog.Warningf("consistent index never saved (snapshot index=%d)", snapshot.Metadata.Index)
 		}
 	}
 	srv.consistIndex.setConsistentIndex(srv.kv.ConsistentIndex())
@@ -462,10 +507,11 @@ func NewServer(cfg *ServerConfig) (srv *EtcdServer, err error) {
 // It also starts a goroutine to publish its server information.
 func (s *EtcdServer) Start() {
 	s.start()
-	go s.publish(s.Cfg.ReqTimeout())
-	go s.purgeFile()
-	go monitorFileDescriptor(s.done)
-	go s.monitorVersions()
+	s.goAttach(func() { s.publish(s.Cfg.ReqTimeout()) })
+	s.goAttach(s.purgeFile)
+	s.goAttach(func() { monitorFileDescriptor(s.stopping) })
+	s.goAttach(s.monitorVersions)
+	s.goAttach(s.linearizableReadLoop)
 }
 
 // start prepares and starts server in a new goroutine. It is no longer safe to
@@ -480,6 +526,9 @@ func (s *EtcdServer) start() {
 	s.applyWait = wait.NewTimeList()
 	s.done = make(chan struct{})
 	s.stop = make(chan struct{})
+	s.stopping = make(chan struct{})
+	s.readwaitc = make(chan struct{}, 1)
+	s.readNotifier = newNotifier()
 	if s.ClusterVersion() != nil {
 		plog.Infof("starting server... [version: %v, cluster version: %v]", version.Version, version.Cluster(s.ClusterVersion().String()))
 	} else {
@@ -503,7 +552,7 @@ func (s *EtcdServer) purgeFile() {
 		plog.Fatalf("failed to purge wal file %v", e)
 	case e := <-serrc:
 		plog.Fatalf("failed to purge snap file %v", e)
-	case <-s.done:
+	case <-s.stopping:
 		return
 	}
 }
@@ -543,12 +592,62 @@ type etcdProgress struct {
 	appliedi  uint64
 }
 
+// raftReadyHandler contains a set of EtcdServer operations to be called by raftNode,
+// and helps decouple state machine logic from Raft algorithms.
+// TODO: add a state machine interface to apply the commit entries and do snapshot/recover
+type raftReadyHandler struct {
+	leadershipUpdate func()
+}
+
 func (s *EtcdServer) run() {
 	snap, err := s.r.raftStorage.Snapshot()
 	if err != nil {
 		plog.Panicf("get snapshot from raft storage error: %v", err)
 	}
-	s.r.start(s)
+
+	var (
+		smu   sync.RWMutex
+		syncC <-chan time.Time
+	)
+	setSyncC := func(ch <-chan time.Time) {
+		smu.Lock()
+		syncC = ch
+		smu.Unlock()
+	}
+	getSyncC := func() (ch <-chan time.Time) {
+		smu.RLock()
+		ch = syncC
+		smu.RUnlock()
+		return
+	}
+	rh := &raftReadyHandler{
+		leadershipUpdate: func() {
+			if !s.isLeader() {
+				if s.lessor != nil {
+					s.lessor.Demote()
+				}
+				if s.compactor != nil {
+					s.compactor.Pause()
+				}
+				setSyncC(nil)
+			} else {
+				setSyncC(s.SyncTicker)
+			}
+
+			// TODO: remove the nil checking
+			// current test utility does not provide the stats
+			if s.stats != nil {
+				s.stats.BecomeLeader()
+			}
+			if s.compactor != nil {
+				s.compactor.Resume()
+			}
+			if s.r.td != nil {
+				s.r.td.Reset()
+			}
+		},
+	}
+	s.r.start(rh)
 
 	// asynchronously accept apply packets, dispatch progress in-order
 	sched := schedule.NewFIFOScheduler()
@@ -559,9 +658,13 @@ func (s *EtcdServer) run() {
 	}
 
 	defer func() {
+		s.wgMu.Lock() // block concurrent waitgroup adds in goAttach while stopping
+		close(s.stopping)
+		s.wgMu.Unlock()
+
 		sched.Stop()
 
-		// wait for snapshots before closing raft so wal stays open
+		// wait for gouroutines before closing raft so wal stays open
 		s.wg.Wait()
 
 		// must stop raft after scheduler-- etcdserver can leak rafthttp pipelines
@@ -575,6 +678,9 @@ func (s *EtcdServer) run() {
 		}
 		if s.kv != nil {
 			s.kv.Close()
+		}
+		if s.authStore != nil {
+			s.authStore.Close()
 		}
 		if s.be != nil {
 			s.be.Close()
@@ -606,15 +712,30 @@ func (s *EtcdServer) run() {
 			f := func(context.Context) { s.applyAll(&ep, &ap) }
 			sched.Schedule(f)
 		case leases := <-expiredLeaseC:
-			go func() {
-				for _, l := range leases {
-					s.LeaseRevoke(context.TODO(), &pb.LeaseRevokeRequest{ID: int64(l.ID)})
+			s.goAttach(func() {
+				// Increases throughput of expired leases deletion process through parallelization
+				c := make(chan struct{}, maxPendingRevokes)
+				for _, lease := range leases {
+					select {
+					case c <- struct{}{}:
+					case <-s.stopping:
+						return
+					}
+					lid := lease.ID
+					s.goAttach(func() {
+						s.LeaseRevoke(context.TODO(), &pb.LeaseRevokeRequest{ID: int64(lid)})
+						<-c
+					})
 				}
-			}()
+			})
 		case err := <-s.errorc:
 			plog.Errorf("%s", err)
 			plog.Infof("the data-dir used by this member must be removed.")
 			return
+		case <-getSyncC():
+			if s.store.HasTTLKeys() {
+				s.sync(s.Cfg.ReqTimeout())
+			}
 		case <-s.stop:
 			return
 		}
@@ -641,7 +762,7 @@ func (s *EtcdServer) applyAll(ep *etcdProgress, apply *apply) {
 	s.triggerSnapshot(ep)
 	select {
 	// snapshot requested via send()
-	case m := <-s.msgSnapC:
+	case m := <-s.r.msgSnapC:
 		merged := s.createMergedSnapshotMessage(m, ep.appliedi, ep.confState)
 		s.sendMergedSnap(merged)
 	default:
@@ -977,8 +1098,6 @@ func (s *EtcdServer) Lead() uint64 { return atomic.LoadUint64(&s.r.lead) }
 
 func (s *EtcdServer) Leader() types.ID { return types.ID(s.Lead()) }
 
-func (s *EtcdServer) IsPprofEnabled() bool { return s.Cfg.EnablePprof }
-
 // configure sends a configuration change through consensus and
 // then waits for it to be applied to the server. It
 // will block until the change is performed or there is an error.
@@ -1002,7 +1121,7 @@ func (s *EtcdServer) configure(ctx context.Context, cc raftpb.ConfChange) error 
 	case <-ctx.Done():
 		s.w.Trigger(cc.ID, nil) // GC wait
 		return s.parseProposeCtxErr(ctx.Err(), start)
-	case <-s.done:
+	case <-s.stopping:
 		return ErrStopped
 	}
 }
@@ -1020,10 +1139,10 @@ func (s *EtcdServer) sync(timeout time.Duration) {
 	data := pbutil.MustMarshal(&req)
 	// There is no promise that node has leader when do SYNC request,
 	// so it uses goroutine to propose.
-	go func() {
+	s.goAttach(func() {
 		s.r.Propose(ctx, data)
 		cancel()
-	}()
+	})
 }
 
 // publish registers server information into the cluster. The information
@@ -1061,52 +1180,11 @@ func (s *EtcdServer) publish(timeout time.Duration) {
 	}
 }
 
-// TODO: move this function into raft.go
-func (s *EtcdServer) send(ms []raftpb.Message) {
-	sentAppResp := false
-	for i := len(ms) - 1; i >= 0; i-- {
-		if s.cluster.IsIDRemoved(types.ID(ms[i].To)) {
-			ms[i].To = 0
-		}
-
-		if ms[i].Type == raftpb.MsgAppResp {
-			if sentAppResp {
-				ms[i].To = 0
-			} else {
-				sentAppResp = true
-			}
-		}
-
-		if ms[i].Type == raftpb.MsgSnap {
-			// There are two separate data store: the store for v2, and the KV for v3.
-			// The msgSnap only contains the most recent snapshot of store without KV.
-			// So we need to redirect the msgSnap to etcd server main loop for merging in the
-			// current store snapshot and KV snapshot.
-			select {
-			case s.msgSnapC <- ms[i]:
-			default:
-				// drop msgSnap if the inflight chan if full.
-			}
-			ms[i].To = 0
-		}
-		if ms[i].Type == raftpb.MsgHeartbeat {
-			ok, exceed := s.r.td.Observe(ms[i].To)
-			if !ok {
-				// TODO: limit request rate.
-				plog.Warningf("failed to send out heartbeat on time (exceeded the %dms timeout for %v)", s.Cfg.TickMs, exceed)
-				plog.Warningf("server is likely overloaded")
-			}
-		}
-	}
-
-	s.r.transport.Send(ms)
-}
-
 func (s *EtcdServer) sendMergedSnap(merged snap.Message) {
 	atomic.AddInt64(&s.inflightSnapshots, 1)
 
 	s.r.transport.SendSnapshot(merged)
-	go func() {
+	s.goAttach(func() {
 		select {
 		case ok := <-merged.CloseNotify():
 			// delay releasing inflight snapshot for another 30 seconds to
@@ -1116,14 +1194,14 @@ func (s *EtcdServer) sendMergedSnap(merged snap.Message) {
 			if ok {
 				select {
 				case <-time.After(releaseDelayAfterSnapshot):
-				case <-s.done:
+				case <-s.stopping:
 				}
 			}
 			atomic.AddInt64(&s.inflightSnapshots, -1)
-		case <-s.done:
+		case <-s.stopping:
 			return
 		}
-	}()
+	})
 }
 
 // apply takes entries received from Raft (after it has been committed) and
@@ -1170,6 +1248,11 @@ func (s *EtcdServer) applyEntryNormal(e *raftpb.Entry) {
 		case s.forceVersionC <- struct{}{}:
 		default:
 		}
+		// promote lessor when the local member is leader and finished
+		// applying all entries from the last term.
+		if s.isLeader() {
+			s.lessor.Promote(s.Cfg.electionTimeout())
+		}
 		return
 	}
 
@@ -1215,7 +1298,7 @@ func (s *EtcdServer) applyEntryNormal(e *raftpb.Entry) {
 	}
 
 	plog.Errorf("applying raft message exceeded backend quota")
-	go func() {
+	s.goAttach(func() {
 		a := &pb.AlarmRequest{
 			MemberID: uint64(s.ID()),
 			Action:   pb.AlarmRequest_ACTIVATE,
@@ -1224,7 +1307,7 @@ func (s *EtcdServer) applyEntryNormal(e *raftpb.Entry) {
 		r := pb.InternalRaftRequest{Alarm: a}
 		s.processInternalRaftRequest(context.TODO(), r)
 		s.w.Trigger(id, ar)
-	}()
+	})
 }
 
 // applyConfChange applies a ConfChange to the server. It is only
@@ -1283,10 +1366,7 @@ func (s *EtcdServer) snapshot(snapi uint64, confState raftpb.ConfState) {
 	// the go routine created below.
 	s.KV().Commit()
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-
+	s.goAttach(func() {
 		d, err := clone.SaveNoCopy()
 		// TODO: current store will never fail to do a snapshot
 		// what should we do if the store might fail?
@@ -1334,7 +1414,7 @@ func (s *EtcdServer) snapshot(snapi uint64, confState raftpb.ConfState) {
 			plog.Panicf("unexpected compaction error %v", err)
 		}
 		plog.Infof("compacted raft log at %d", compacti)
-	}()
+	})
 }
 
 // CutPeer drops messages to the specified peer.
@@ -1373,7 +1453,7 @@ func (s *EtcdServer) monitorVersions() {
 		select {
 		case <-s.forceVersionC:
 		case <-time.After(monitorVersionInterval):
-		case <-s.done:
+		case <-s.stopping:
 			return
 		}
 
@@ -1394,18 +1474,18 @@ func (s *EtcdServer) monitorVersions() {
 		// 1. use the decided version if possible
 		// 2. or use the min cluster version
 		if s.cluster.Version() == nil {
+			verStr := version.MinClusterVersion
 			if v != nil {
-				go s.updateClusterVersion(v.String())
-			} else {
-				go s.updateClusterVersion(version.MinClusterVersion)
+				verStr = v.String()
 			}
+			s.goAttach(func() { s.updateClusterVersion(verStr) })
 			continue
 		}
 
 		// update cluster version only if the decided version is greater than
 		// the current cluster version
 		if v != nil && s.cluster.Version().LessThan(*v) {
-			go s.updateClusterVersion(v.String())
+			s.goAttach(func() { s.updateClusterVersion(v.String()) })
 		}
 	}
 }
@@ -1502,4 +1582,24 @@ func (s *EtcdServer) getCommittedIndex() uint64 {
 
 func (s *EtcdServer) setCommittedIndex(v uint64) {
 	atomic.StoreUint64(&s.committedIndex, v)
+}
+
+// goAttach creates a goroutine on a given function and tracks it using
+// the etcdserver waitgroup.
+func (s *EtcdServer) goAttach(f func()) {
+	s.wgMu.RLock() // this blocks with ongoing close(s.stopping)
+	defer s.wgMu.RUnlock()
+	select {
+	case <-s.stopping:
+		plog.Warning("server has stopped (skipping goAttach)")
+		return
+	default:
+	}
+
+	// now safe to add since waitgroup wait has not started yet
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		f()
+	}()
 }

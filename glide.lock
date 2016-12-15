@@ -1,5 +1,5 @@
-hash: 767ea2354fc19670607d437d2739fb285bdf8626c9861eed888708c4a5b089ea
-updated: 2016-12-13T18:54:06.851481096+08:00
+hash: 2ffbfb61ce00148a42c65deca83abac7d0a30221158f358fa54cdb0adc2360b9
+updated: 2016-12-15T10:57:44.478649308+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -16,7 +16,7 @@ imports:
 - name: github.com/cockroachdb/cmux
   version: 9d8f8e431ac319fe4e84d8eaffa4061ddfea1efb
 - name: github.com/coreos/etcd
-  version: e53b99588a05d1f4ef172c178d4ed8e8106b8be4
+  version: d8513adf1d2058047929b1ed7c038fbe023ebe3a
   subpackages:
   - alarm
   - auth
@@ -53,6 +53,7 @@ imports:
   - pkg/idutil
   - pkg/ioutil
   - pkg/logutil
+  - pkg/monotime
   - pkg/netutil
   - pkg/pathutil
   - pkg/pbutil
@@ -104,6 +105,8 @@ imports:
   version: 0eeaf8392f5b04950925b8a69fe70f110fa7cbfc
 - name: github.com/gorilla/websocket
   version: a836c37014dbbf0d1e871d04531b851fcbdeb22d
+- name: github.com/grpc-ecosystem/go-grpc-prometheus
+  version: 6b7015e65d366bf3f19b2b2a000a831940f0f7e0
 - name: github.com/grpc-ecosystem/grpc-gateway
   version: f52d055dc48aec25854ed7d31862f78913cf17d1
   subpackages:
@@ -161,7 +164,7 @@ imports:
   repo: https://github.com/spf13/cobra.git
   vcs: git
 - name: github.com/spf13/pflag
-  version: 5ccb023bc27df288a957c5e994cd44fd19619465
+  version: 25f8b5b07aece3207895bf19f7ab517eb3b22a40
 - name: github.com/twinj/uuid
   version: 70cac2bcd273ef6a371bb96cde363d28b68734c3
 - name: github.com/ugorji/go

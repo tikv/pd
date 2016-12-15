@@ -49,6 +49,8 @@ var (
 		"2.1.0": {streamTypeMsgAppV2, streamTypeMessage},
 		"2.2.0": {streamTypeMsgAppV2, streamTypeMessage},
 		"2.3.0": {streamTypeMsgAppV2, streamTypeMessage},
+		"3.0.0": {streamTypeMsgAppV2, streamTypeMessage},
+		"3.1.0": {streamTypeMsgAppV2, streamTypeMessage},
 	}
 )
 
@@ -158,6 +160,7 @@ func (cw *streamWriter) run() {
 
 			cw.status.deactivate(failureType{source: t.String(), action: "heartbeat"}, err.Error())
 
+			sentFailures.WithLabelValues(cw.peerID.String()).Inc()
 			cw.close()
 			plog.Warningf("lost the TCP streaming connection with peer %s (%s writer)", cw.peerID, t)
 			heartbeatc, msgc = nil, nil
@@ -184,6 +187,7 @@ func (cw *streamWriter) run() {
 			plog.Warningf("lost the TCP streaming connection with peer %s (%s writer)", cw.peerID, t)
 			heartbeatc, msgc = nil, nil
 			cw.r.ReportUnreachable(m.To)
+			sentFailures.WithLabelValues(cw.peerID.String()).Inc()
 
 		case conn := <-cw.connc:
 			cw.mu.Lock()
@@ -320,8 +324,8 @@ func (cr *streamReader) run() {
 		// overhead when retry.
 		case <-time.After(100 * time.Millisecond):
 		case <-cr.stopc:
-			close(cr.done)
 			plog.Infof("stopped streaming with peer %s (%s reader)", cr.peerID, t)
+			close(cr.done)
 			return
 		}
 	}
@@ -388,6 +392,7 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 				plog.MergeWarningf("dropped internal raft message from %s since receiving buffer is full (overloaded network)", types.ID(m.From))
 			}
 			plog.Debugf("dropped %s from %s since receiving buffer is full", m.Type, types.ID(m.From))
+			recvFailures.WithLabelValues(types.ID(m.From).String()).Inc()
 		}
 	}
 }

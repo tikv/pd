@@ -17,6 +17,7 @@ package embed
 import (
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -38,6 +39,9 @@ const (
 	DefaultMaxSnapshots = 5
 	DefaultMaxWALs      = 5
 
+	DefaultListenPeerURLs   = "http://localhost:2380"
+	DefaultListenClientURLs = "http://localhost:2379"
+
 	// maxElectionMs specifies the maximum value of election timeout.
 	// More details are listed in ../Documentation/tuning.md#time-parameters.
 	maxElectionMs = 50000
@@ -48,8 +52,6 @@ var (
 		"Choose one of \"initial-cluster\", \"discovery\" or \"discovery-srv\"")
 	ErrUnsetAdvertiseClientURLsFlag = fmt.Errorf("--advertise-client-urls is required when --listen-client-urls is set explicitly")
 
-	DefaultListenPeerURLs           = "http://localhost:2380"
-	DefaultListenClientURLs         = "http://localhost:2379"
 	DefaultInitialAdvertisePeerURLs = "http://localhost:2380"
 	DefaultAdvertiseClientURLs      = "http://localhost:2379"
 
@@ -253,6 +255,13 @@ func (cfg *configYAML) configFromFile(path string) error {
 }
 
 func (cfg *Config) Validate() error {
+	if err := checkBindURLs(cfg.LPUrls); err != nil {
+		return err
+	}
+	if err := checkBindURLs(cfg.LCUrls); err != nil {
+		return err
+	}
+
 	// Check if conflicting flags are passed.
 	nSet := 0
 	for _, v := range []bool{cfg.Durl != "", cfg.InitialCluster != "", cfg.DNSCluster != ""} {
@@ -345,4 +354,28 @@ func (cfg Config) IsDefaultHost() (string, error) {
 		return defaultHostname, defaultHostStatus
 	}
 	return "", defaultHostStatus
+}
+
+// checkBindURLs returns an error if any URL uses a domain name.
+// TODO: return error in 3.2.0
+func checkBindURLs(urls []url.URL) error {
+	for _, url := range urls {
+		if url.Scheme == "unix" || url.Scheme == "unixs" {
+			continue
+		}
+		host, _, err := net.SplitHostPort(url.Host)
+		if err != nil {
+			return err
+		}
+		if host == "localhost" {
+			// special case for local address
+			// TODO: support /etc/hosts ?
+			continue
+		}
+		if net.ParseIP(host) == nil {
+			err := fmt.Errorf("expected IP in URL for binding (%s)", url.String())
+			plog.Warning(err)
+		}
+	}
+	return nil
 }

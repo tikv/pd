@@ -57,6 +57,13 @@ func togRPCError(err error) error {
 		return rpctypes.ErrGRPCTimeout
 	case etcdserver.ErrTimeoutDueToLeaderFail:
 		return rpctypes.ErrGRPCTimeoutDueToLeaderFail
+	case etcdserver.ErrUnhealthy:
+		return rpctypes.ErrGRPCUnhealthy
+
+	case lease.ErrLeaseNotFound:
+		return rpctypes.ErrGRPCLeaseNotFound
+	case lease.ErrLeaseExists:
+		return rpctypes.ErrGRPCLeaseExist
 
 	case auth.ErrRootUserNotExist:
 		return rpctypes.ErrGRPCRootUserNotExist
@@ -64,6 +71,8 @@ func togRPCError(err error) error {
 		return rpctypes.ErrGRPCRootRoleNotExist
 	case auth.ErrUserAlreadyExist:
 		return rpctypes.ErrGRPCUserAlreadyExist
+	case auth.ErrUserEmpty:
+		return rpctypes.ErrGRPCUserEmpty
 	case auth.ErrUserNotFound:
 		return rpctypes.ErrGRPCUserNotFound
 	case auth.ErrRoleAlreadyExist:
