@@ -43,12 +43,12 @@ func (s *testShuffleLeaderSuite) Test(c *C) {
 
 	for i := 0; i < 4; i++ {
 		bop := sl.Schedule(cluster)
-		op := bop.Ops[0].(*transferLeaderOperator)
+		op := bop.(*regionOperator).Ops[0].(*transferLeaderOperator)
 
 		sourceID := op.OldLeader.GetStoreId()
 
 		bop = sl.Schedule(cluster)
-		op = bop.Ops[0].(*transferLeaderOperator)
+		op = bop.(*regionOperator).Ops[0].(*transferLeaderOperator)
 		c.Assert(op.NewLeader.GetStoreId(), Equals, sourceID)
 	}
 }

@@ -398,38 +398,29 @@ func (s *testReplicaCheckerSuite) TestConstraints(c *C) {
 	checkRemovePeer(c, rc.Check(region), 3)
 }
 
-func checkAddPeer(c *C, bop *balanceOperator, storeID uint64) {
-	op := bop.Ops[0].(*changePeerOperator)
+func checkAddPeer(c *C, bop Operator, storeID uint64) {
+	op := bop.(*regionOperator).Ops[0].(*changePeerOperator)
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
-func checkRemovePeer(c *C, bop *balanceOperator, storeID uint64) {
-	op := bop.Ops[0].(*changePeerOperator)
+func checkRemovePeer(c *C, bop Operator, storeID uint64) {
+	op := bop.(*regionOperator).Ops[0].(*changePeerOperator)
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
-func checkReplacePeer(c *C, bop *balanceOperator, sourceID, targetID uint64) {
-	op := bop.Ops[0].(*changePeerOperator)
-	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, targetID)
-	op = bop.Ops[1].(*changePeerOperator)
-	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, sourceID)
-}
-
-func checkTransferPeer(c *C, bop *balanceOperator, sourceID, targetID uint64) {
-	op := bop.Ops[0].(*changePeerOperator)
+func checkTransferPeer(c *C, bop Operator, sourceID, targetID uint64) {
+	op := bop.(*regionOperator).Ops[0].(*changePeerOperator)
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, targetID)
-	op = bop.Ops[1].(*changePeerOperator)
+	op = bop.(*regionOperator).Ops[1].(*changePeerOperator)
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, sourceID)
 }
 
-func checkTransferLeader(c *C, bop *balanceOperator, sourceID, targetID uint64) {
-	op := bop.Ops[0].(*transferLeaderOperator)
+func checkTransferLeader(c *C, bop Operator, sourceID, targetID uint64) {
+	op := bop.(*regionOperator).Ops[0].(*transferLeaderOperator)
 	c.Assert(op.OldLeader.GetStoreId(), Equals, sourceID)
 	c.Assert(op.NewLeader.GetStoreId(), Equals, targetID)
 }

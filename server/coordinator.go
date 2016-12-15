@@ -41,7 +41,7 @@ type coordinator struct {
 	checker *replicaCheckController
 
 	schedulers map[string]*ScheduleController
-	operators  map[ResourceKind]map[uint64]*balanceOperator
+	operators  map[ResourceKind]map[uint64]Operator
 
 	regionCache *expireRegionCache
 	histories   *lruCache
@@ -61,9 +61,9 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
 	c.ctx, c.cancel = context.WithCancel(context.TODO())
 
 	c.checker = newReplicaCheckController(c)
-	c.operators = make(map[ResourceKind]map[uint64]*balanceOperator)
-	c.operators[leaderKind] = make(map[uint64]*balanceOperator)
-	c.operators[storageKind] = make(map[uint64]*balanceOperator)
+	c.operators = make(map[ResourceKind]map[uint64]Operator)
+	c.operators[leaderKind] = make(map[uint64]Operator)
+	c.operators[storageKind] = make(map[uint64]Operator)
 
 	return c
 }
@@ -76,12 +76,13 @@ func (c *coordinator) dispatch(region *regionInfo) *pdpb.RegionHeartbeatResponse
 		return nil
 	}
 
-	ctx := newOpContext(c.hookStartEvent, c.hookEndEvent)
-	finished, res, err := op.Do(ctx, region)
-	if err != nil {
-		log.Errorf("failed to do operator for region %v: %v", region, err)
+	finished, res, err := op.Do(region)
+	if finished {
+		log.Infof("%v finished", op)
+		c.removeOperator(op)
 	}
-	if err != nil || finished {
+	if err != nil {
+		log.Errorf("%v failed: %v", op, err)
 		c.removeOperator(op)
 	}
 	return res
@@ -155,7 +156,7 @@ func (c *coordinator) runScheduler(s *ScheduleController) {
 				if op == nil {
 					continue
 				}
-				if c.addOperator(s.GetResourceKind(), op) {
+				if c.addOperator(op) {
 					break
 				}
 			}
@@ -166,11 +167,11 @@ func (c *coordinator) runScheduler(s *ScheduleController) {
 	}
 }
 
-func (c *coordinator) addOperator(kind ResourceKind, op *balanceOperator) bool {
+func (c *coordinator) addOperator(op Operator) bool {
 	c.Lock()
 	defer c.Unlock()
 
-	regionID := op.Region.GetId()
+	regionID := op.GetRegionID()
 	if c.getOperatorLocked(regionID) != nil {
 		return false
 	}
@@ -179,15 +180,15 @@ func (c *coordinator) addOperator(kind ResourceKind, op *balanceOperator) bool {
 	}
 
 	collectOperatorCounterMetrics(op)
-	c.operators[kind][op.Region.GetId()] = op
+	c.operators[op.GetResourceKind()][regionID] = op
 	return true
 }
 
-func (c *coordinator) removeOperator(op *balanceOperator) {
+func (c *coordinator) removeOperator(op Operator) {
 	c.Lock()
 	defer c.Unlock()
 
-	regionID := op.Region.GetId()
+	regionID := op.GetRegionID()
 	c.histories.add(regionID, op)
 	c.regionCache.set(regionID, nil)
 
@@ -196,13 +197,13 @@ func (c *coordinator) removeOperator(op *balanceOperator) {
 	}
 }
 
-func (c *coordinator) getOperator(regionID uint64) *balanceOperator {
+func (c *coordinator) getOperator(regionID uint64) Operator {
 	c.RLock()
 	defer c.RUnlock()
 	return c.getOperatorLocked(regionID)
 }
 
-func (c *coordinator) getOperatorLocked(regionID uint64) *balanceOperator {
+func (c *coordinator) getOperatorLocked(regionID uint64) Operator {
 	for _, ops := range c.operators {
 		if op, ok := ops[regionID]; ok {
 			return op
@@ -356,14 +357,14 @@ func (r *replicaCheckController) Check(region *regionInfo) {
 		return
 	}
 
-	if r.c.addOperator(storageKind, op) {
+	if r.c.addOperator(op) {
 		r.lastTime = time.Now()
 	}
 }
 
-func collectOperatorCounterMetrics(bop *balanceOperator) {
+func collectOperatorCounterMetrics(op Operator) {
 	metrics := make(map[string]uint64)
-	for _, op := range bop.Ops {
+	for _, op := range op.(*regionOperator).Ops {
 		switch o := op.(type) {
 		case *changePeerOperator:
 			metrics[o.Name]++

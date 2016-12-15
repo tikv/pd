@@ -15,6 +15,7 @@ package server
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/google/btree"
@@ -52,6 +53,10 @@ func (r *regionInfo) clone() *regionInfo {
 		DownPeers:    downPeers,
 		PendingPeers: pendingPeers,
 	}
+}
+
+func (r *regionInfo) String() string {
+	return fmt.Sprintf("%+v", *r)
 }
 
 func (r *regionInfo) GetPeer(peerID uint64) *metapb.Peer {

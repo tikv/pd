@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 
 	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 type statusType byte
@@ -63,6 +65,8 @@ type LogEvent struct {
 		StoreTo   uint64 `json:"store_to"`
 	} `json:"transfer_leader_event,omitempty"`
 }
+
+var baseID uint64
 
 func (c *coordinator) innerPostEvent(evt LogEvent) {
 	key := atomic.AddUint64(&baseID, 1)
@@ -124,4 +128,37 @@ func (c *coordinator) hookStartEvent(op Operator) {
 
 func (c *coordinator) hookEndEvent(op Operator) {
 	c.postEvent(op, evtEnd)
+}
+
+// TODO: These events are duplicated with history operators, we may
+// remove them eventually.
+
+// splitOperator is used to do region split, only for history operator mark.
+type splitOperator struct {
+	Name   string         `json:"name"`
+	Origin *metapb.Region `json:"origin"`
+	Left   *metapb.Region `json:"left"`
+	Right  *metapb.Region `json:"right"`
+}
+
+func newSplitOperator(origin *metapb.Region, left *metapb.Region, right *metapb.Region) *splitOperator {
+	return &splitOperator{
+		Name:   "split",
+		Origin: origin,
+		Left:   left,
+		Right:  right,
+	}
+}
+
+func (op *splitOperator) GetRegionID() uint64 {
+	return op.Origin.GetId()
+}
+
+func (op *splitOperator) GetResourceKind() ResourceKind {
+	return storageKind
+}
+
+// Do implements Operator.Do interface.
+func (op *splitOperator) Do(region *regionInfo) (bool, *pdpb.RegionHeartbeatResponse, error) {
+	return true, nil, nil
 }

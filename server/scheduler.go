@@ -13,11 +13,13 @@
 
 package server
 
+import "github.com/pingcap/kvproto/pkg/metapb"
+
 // Scheduler is an interface to schedule resources.
 type Scheduler interface {
 	GetName() string
 	GetResourceKind() ResourceKind
-	Schedule(cluster *clusterInfo) *balanceOperator
+	Schedule(cluster *clusterInfo) Operator
 }
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
@@ -37,12 +39,12 @@ func (s *grantLeaderScheduler) GetResourceKind() ResourceKind {
 	return leaderKind
 }
 
-func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) *balanceOperator {
+func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 	region := cluster.randFollowerRegion(s.StoreID)
 	if region == nil {
 		return nil
 	}
-	return transferLeader(region, s.StoreID)
+	return newTransferLeader(region, s.StoreID)
 }
 
 type shuffleLeaderScheduler struct {
@@ -64,7 +66,7 @@ func (s *shuffleLeaderScheduler) GetResourceKind() ResourceKind {
 	return leaderKind
 }
 
-func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) *balanceOperator {
+func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 	// We shuffle leaders between stores:
 	// 1. select a store as a source store randomly.
 	// 2. transfer a leader from the store to another store.
@@ -78,7 +80,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) *balanceOperator
 			return nil
 		}
 		s.source = source // Mark the source store.
-		return transferLeader(region, target.GetId())
+		return newTransferLeader(region, target.GetId())
 	}
 
 	// Reset the source store.
@@ -90,17 +92,32 @@ func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) *balanceOperator
 	if region == nil {
 		return nil
 	}
-	return transferLeader(region, source.GetId())
+	return newTransferLeader(region, source.GetId())
 }
 
-// transferLeader returns an operator to transfer leader to the store.
-func transferLeader(region *regionInfo, storeID uint64) *balanceOperator {
+func newAddPeer(region *regionInfo, peer *metapb.Peer) Operator {
+	addPeer := newAddPeerOperator(region.GetId(), peer)
+	return newRegionOperator(region, addPeer)
+}
+
+func newRemovePeer(region *regionInfo, peer *metapb.Peer) Operator {
+	removePeer := newRemovePeerOperator(region.GetId(), peer)
+	return newRegionOperator(region, removePeer)
+}
+
+func newTransferPeer(region *regionInfo, oldPeer, newPeer *metapb.Peer) Operator {
+	addPeer := newAddPeerOperator(region.GetId(), newPeer)
+	removePeer := newRemovePeerOperator(region.GetId(), oldPeer)
+	return newRegionOperator(region, addPeer, removePeer)
+}
+
+func newTransferLeader(region *regionInfo, storeID uint64) Operator {
 	newLeader := region.GetStorePeer(storeID)
 	if newLeader == nil {
 		return nil
 	}
 	transferLeader := newTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
-	return newBalanceOperator(region, transferLeader)
+	return newRegionOperator(region, transferLeader)
 }
 
 // scheduleLeader schedules a region to transfer leader from the source store to the target store.
