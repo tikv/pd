@@ -14,7 +14,6 @@
 package server
 
 import (
-	"os"
 	"path"
 	"sync/atomic"
 	"time"
@@ -121,13 +120,13 @@ func (s *Server) GetLeader() (*pdpb.Leader, error) {
 }
 
 func (s *Server) isSameLeader(leader *pdpb.Leader) bool {
-	return leader.GetAddr() == s.GetAddr() && leader.GetPid() == int64(os.Getpid())
+	return leader.GetAddr() == s.GetAddr() && leader.GetPid() == int64(s.ID())
 }
 
 func (s *Server) marshalLeader() string {
 	leader := &pdpb.Leader{
 		Addr: s.GetAddr(),
-		Pid:  int64(os.Getpid()),
+		Pid:  int64(s.ID()),
 	}
 
 	data, err := leader.Marshal()
