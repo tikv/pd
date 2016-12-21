@@ -394,10 +394,10 @@
                     "type": "string",
                     "description": "The leader's client URLs."
                 },
-                "pid": {
+                "id": {
                     "type": "integer",
-                    "format": "int64",
-                    "description": "The leader's process id."
+                    "format": "uint64",
+                    "description": "The leader's id."
                 }
             }
         },
