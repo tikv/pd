@@ -101,7 +101,7 @@ func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 
 type leaderInfo struct {
 	Addr string `json:"addr"`
-	Pid  int64  `json:"pid"`
+	ID   uint64 `json:"id"`
 }
 
 type leaderHandler struct {
@@ -125,7 +125,7 @@ func (h *leaderHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ret := leaderInfo{
 		Addr: leader.Addr,
-		Pid:  leader.Pid,
+		ID:   leader.Id,
 	}
 	h.rd.JSON(w, http.StatusOK, ret)
 }

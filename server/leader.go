@@ -120,13 +120,13 @@ func (s *Server) GetLeader() (*pdpb.Leader, error) {
 }
 
 func (s *Server) isSameLeader(leader *pdpb.Leader) bool {
-	return leader.GetAddr() == s.GetAddr() && leader.GetPid() == int64(s.ID())
+	return leader.GetAddr() == s.GetAddr() && leader.GetId() == s.ID()
 }
 
 func (s *Server) marshalLeader() string {
 	leader := &pdpb.Leader{
 		Addr: s.GetAddr(),
-		Pid:  int64(s.ID()),
+		Id:   s.ID(),
 	}
 
 	data, err := leader.Marshal()
