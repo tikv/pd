@@ -76,13 +76,8 @@ func (c *coordinator) dispatch(region *regionInfo) *pdpb.RegionHeartbeatResponse
 		return nil
 	}
 
-	finished, res, err := op.Do(region)
+	res, finished := op.Do(region)
 	if finished {
-		log.Infof("%v finished", op)
-		c.removeOperator(op)
-	}
-	if err != nil {
-		log.Errorf("%v failed: %v", op, err)
 		c.removeOperator(op)
 	}
 	return res

@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -28,22 +27,18 @@ const (
 	maxOperatorWaitTime = 5 * time.Minute
 )
 
-var (
-	errOperatorTimeout = errors.New("operator timeout")
-)
-
 // Operator is an interface to schedule region.
 type Operator interface {
 	GetRegionID() uint64
 	GetResourceKind() ResourceKind
-	Do(region *regionInfo) (bool, *pdpb.RegionHeartbeatResponse, error)
+	Do(region *regionInfo) (*pdpb.RegionHeartbeatResponse, bool)
 }
 
 type regionOperator struct {
 	Region *regionInfo `json:"region"`
-	Index  int         `json:"index"`
 	Start  time.Time   `json:"start"`
 	End    time.Time   `json:"end"`
+	Index  int         `json:"index"`
 	Ops    []Operator  `json:"operators"`
 }
 
@@ -78,24 +73,24 @@ func (op *regionOperator) GetResourceKind() ResourceKind {
 	return op.Ops[0].GetResourceKind()
 }
 
-func (op *regionOperator) Do(region *regionInfo) (bool, *pdpb.RegionHeartbeatResponse, error) {
+func (op *regionOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	if time.Since(op.Start) > maxOperatorWaitTime {
-		return false, nil, errors.Trace(errOperatorTimeout)
+		log.Errorf("%s : operator timeout", op)
+		return nil, true
 	}
-	if err := checkStaleRegion(op.Region.Region, region.Region); err != nil {
-		return false, nil, errors.Trace(err)
-	}
+
+	// Update region.
 	op.Region = region.clone()
 
 	// If an operator is not finished, do it.
 	for ; op.Index < len(op.Ops); op.Index++ {
-		finished, res, err := op.Ops[op.Index].Do(region)
-		if !finished {
-			return finished, res, err
+		if res, finished := op.Ops[op.Index].Do(region); !finished {
+			return res, false
 		}
 	}
 
-	return true, nil, nil
+	op.End = time.Now()
+	return nil, true
 }
 
 type changePeerOperator struct {
@@ -138,23 +133,23 @@ func (op *changePeerOperator) GetResourceKind() ResourceKind {
 	return storageKind
 }
 
-func (op *changePeerOperator) Do(region *regionInfo) (bool, *pdpb.RegionHeartbeatResponse, error) {
+func (op *changePeerOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	// Check if operator is finished.
 	peer := op.ChangePeer.GetPeer()
 	switch op.ChangePeer.GetChangeType() {
 	case raftpb.ConfChangeType_AddNode:
 		if region.GetPendingPeer(peer.GetId()) != nil {
 			// Peer is added but not finished.
-			return false, nil, nil
+			return nil, false
 		}
 		if region.GetPeer(peer.GetId()) != nil {
 			// Peer is added and finished.
-			return true, nil, nil
+			return nil, true
 		}
 	case raftpb.ConfChangeType_RemoveNode:
 		if region.GetPeer(peer.GetId()) == nil {
 			// Peer is removed.
-			return true, nil, nil
+			return nil, true
 		}
 	}
 
@@ -163,7 +158,7 @@ func (op *changePeerOperator) Do(region *regionInfo) (bool, *pdpb.RegionHeartbea
 	res := &pdpb.RegionHeartbeatResponse{
 		ChangePeer: op.ChangePeer,
 	}
-	return false, res, nil
+	return res, false
 }
 
 type transferLeaderOperator struct {
@@ -194,10 +189,10 @@ func (op *transferLeaderOperator) GetResourceKind() ResourceKind {
 	return leaderKind
 }
 
-func (op *transferLeaderOperator) Do(region *regionInfo) (bool, *pdpb.RegionHeartbeatResponse, error) {
+func (op *transferLeaderOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	// Check if operator is finished.
 	if region.Leader.GetId() == op.NewLeader.GetId() {
-		return true, nil, nil
+		return nil, true
 	}
 
 	log.Infof("%s %v", op, region)
@@ -207,5 +202,5 @@ func (op *transferLeaderOperator) Do(region *regionInfo) (bool, *pdpb.RegionHear
 			Peer: op.NewLeader,
 		},
 	}
-	return false, res, nil
+	return res, false
 }

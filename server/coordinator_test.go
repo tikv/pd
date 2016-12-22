@@ -36,8 +36,8 @@ func newTestOperator(regionID uint64, kind ResourceKind) Operator {
 
 func (op *testOperator) GetRegionID() uint64           { return op.RegionID }
 func (op *testOperator) GetResourceKind() ResourceKind { return op.Kind }
-func (op *testOperator) Do(region *regionInfo) (bool, *pdpb.RegionHeartbeatResponse, error) {
-	return false, nil, nil
+func (op *testOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
+	return nil, false
 }
 
 var _ = Suite(&testCoordinatorSuite{})
