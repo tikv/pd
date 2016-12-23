@@ -313,13 +313,13 @@ const (
 	defaultMinLeaderCount          = uint64(10)
 	defaultMaxSnapshotCount        = uint64(3)
 	defaultMinBalanceDiffRatio     = float64(0.01)
-	defaultMaxStoreDownDuration    = 30 * time.Minute
+	defaultMaxStoreDownDuration    = time.Hour
 	defaultLeaderScheduleLimit     = 8
-	defaultLeaderScheduleInterval  = 10 * time.Second
+	defaultLeaderScheduleInterval  = time.Second
 	defaultStorageScheduleLimit    = 4
-	defaultStorageScheduleInterval = 30 * time.Second
+	defaultStorageScheduleInterval = time.Second
 	defaultReplicaScheduleLimit    = 8
-	defaultReplicaScheduleInterval = 10 * time.Second
+	defaultReplicaScheduleInterval = time.Second
 )
 
 func newScheduleConfig() *ScheduleConfig {
