@@ -50,7 +50,7 @@ func newRegionOperator(region *regionInfo, ops ...Operator) *regionOperator {
 	kind := ops[0].GetResourceKind()
 	for _, op := range ops {
 		if op.GetResourceKind() != kind {
-			log.Fatal("new region operator with ops of different kinds")
+			log.Fatalf("new region operator with ops of different kinds %v and %v", op.GetResourceKind(), kind)
 		}
 	}
 
