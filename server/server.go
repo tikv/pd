@@ -126,6 +126,8 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 		etcdCfg.UserHandlers[pdAPIPrefix] = apiHandler
 	}
 
+	// existingCluster, gerr := GetClusterFromRemotePeers(getRemotePeerURLs(cl, cfg.Name), prt)
+
 	log.Info("start embed etcd")
 
 	etcd, err := embed.StartEtcd(etcdCfg)
