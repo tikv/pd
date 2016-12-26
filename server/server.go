@@ -25,6 +25,8 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/embed"
+	"github.com/coreos/etcd/etcdserver"
+	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 )
@@ -126,7 +128,25 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 		etcdCfg.UserHandlers[pdAPIPrefix] = apiHandler
 	}
 
-	// existingCluster, gerr := GetClusterFromRemotePeers(getRemotePeerURLs(cl, cfg.Name), prt)
+	var remoteClusterID uint64
+	// Get remote peer URLs.
+	// TODO: move etcd related functions to a new package.
+	urlmap, err := types.NewURLsMap(s.cfg.InitialCluster)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if len(urlmap) != 1 {
+		for name, urls := range urlmap {
+			if name != s.cfg.Name {
+				existingCluster, gerr := etcdserver.GetClusterFromRemotePeers(urls.StringSlice(), http.DefaultTransport)
+				if gerr != nil {
+					continue
+				}
+				remoteClusterID = uint64(existingCluster.ID())
+				break
+			}
+		}
+	}
 
 	log.Info("start embed etcd")
 
@@ -158,6 +178,12 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	s.etcd = etcd
 	s.client = client
 	s.id = uint64(etcd.Server.ID())
+
+	// Check cluster ID
+	localClusterID := uint64(etcd.Server.Cluster().ID())
+	if remoteClusterID != 0 && remoteClusterID != localClusterID {
+		return errors.Errorf("Etcd cluster ID mismatch, expect %d, got %d", localClusterID, remoteClusterID)
+	}
 
 	// update advertise peer urls.
 	etcdMembers, err := listEtcdMembers(client)
