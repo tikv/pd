@@ -12,7 +12,7 @@ pdctl is a command line tool for pd
 ### Example
 run:
     
-    ./pdctl store -d  -u 127.0.0.1:2379
+    ./pd-ctl store -d  -u 127.0.0.1:2379
 show all stores status. '-u' specify the pd address, it can be overwritten by setting the environment variable PD_ADDR. Such as `export PD_ADDR=127.0.0.1:2379`
 
 ### Flags
@@ -82,3 +82,21 @@ Success!
 
 #### Region <region_id>
 show one or all regions status
+##### Example
+```
+>> region
+{
+  "count": 1,
+  "regions": [......]
+}
+
+>> region 2
+{
+  "region": {
+      "id": 2,
+      ......
+  }
+  "leader": {
+      ......
+  }
+}
