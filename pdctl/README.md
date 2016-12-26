@@ -72,6 +72,7 @@ show the pd members status
 }
 >> member leader
 {
+  "name": "pd",
   "addr": "http://192.168.199.229:2379",
   "id": 9724873857558226554
 }
