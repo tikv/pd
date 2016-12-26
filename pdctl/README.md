@@ -62,7 +62,7 @@ show or set the balance config
 Success!
 ```
 
-#### Member [region | delete]
+#### Member [leader | delete]
 show the pd members status 
 ##### example
 ```

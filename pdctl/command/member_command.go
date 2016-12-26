@@ -43,7 +43,7 @@ func NewMemberCommand() *cobra.Command {
 // NewDeleteMemberCommand return a delete subcommand of memberCmd
 func NewDeleteMemberCommand() *cobra.Command {
 	d := &cobra.Command{
-		Use:   "delete <member_id>",
+		Use:   "delete <member_name>",
 		Short: "delete the member",
 		Run:   deleteMemberCommandFunc,
 	}
@@ -78,7 +78,7 @@ func showMemberCommandFunc(cmd *cobra.Command, args []string) {
 
 func deleteMemberCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		fmt.Println("Usage: member delete <member_id>")
+		fmt.Println("Usage: member delete <member_name>")
 		return
 	}
 	cli := &http.Client{}
@@ -96,11 +96,11 @@ func deleteMemberCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	defer reps.Body.Close()
-	if reps.StatusCode == http.StatusOK {
-		fmt.Println("Success!")
-	} else {
+	if reps.StatusCode != http.StatusOK {
 		printResponseError(reps)
+		return
 	}
+	fmt.Println("Success!")
 }
 
 func getLeaderMemberCommandFunc(cmd *cobra.Command, args []string) {
