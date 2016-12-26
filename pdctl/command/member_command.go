@@ -50,7 +50,7 @@ func NewDeleteMemberCommand() *cobra.Command {
 	return d
 }
 
-// NewGetLeaderMemberCommand return a leader subcommand of memberCmd
+// NewLeaderMemberCommand return a leader subcommand of memberCmd
 func NewLeaderMemberCommand() *cobra.Command {
 	l := &cobra.Command{
 		Use:   "leader",
