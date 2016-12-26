@@ -61,5 +61,23 @@ show or set the balance config
 >> config set leader-schedule-interval 20s
 Success!
 ```
+
+#### Member [region | delete]
+show the pd members status 
+##### example
+```
+>> member
+{
+  "members": [......] 
+}
+>> member leader
+{
+  "addr": "http://192.168.199.229:2379",
+  "id": 9724873857558226554
+}
+>> member delete pd2
+Success!
+```
+
 #### Region <region_id>
 show one or all regions status

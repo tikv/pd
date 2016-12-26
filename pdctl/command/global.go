@@ -64,5 +64,5 @@ Available Commands:{{range .Commands}}{{if .IsAvailableCommand}}
 Additional help topics:{{range .Commands}}{{if .IsHelpCommand}}
   {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{ if .HasAvailableSubCommands }}
 
-Use "{{if .HasParent}}{{.Name}} [command] help{{else}}[command] help{{end}}" for more information about a command.{{end}}
+Use "{{if .HasParent}}help {{.Name}} [command] {{else}}help [command]{{end}}" for more information about a command.{{end}}
 `
