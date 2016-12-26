@@ -181,5 +181,5 @@ func (s *testMemberAPISuite) TestMemberLeader(c *C) {
 	var got leaderInfo
 	json.Unmarshal(buf, &got)
 	c.Assert(got.Addr, Equals, leader.GetAddr())
-	c.Assert(got.Pid, Equals, leader.GetPid())
+	c.Assert(got.ID, Equals, leader.GetId())
 }

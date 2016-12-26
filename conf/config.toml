@@ -26,13 +26,13 @@ min-region-count = 10
 min-leader-count = 10
 max-snapshot-count = 3
 min-balance-diff-ratio = 0.01
-max-store-down-duration = "30m"
+max-store-down-duration = "1h"
 leader-schedule-limit = 8
-leader-schedule-interval = "10s"
+leader-schedule-interval = "1s"
 storage-schedule-limit = 4
-storage-schedule-interval = "30s"
+storage-schedule-interval = "1s"
 replica-schedule-limit = 8
-replica-schedule-interval = "10s"
+replica-schedule-interval = "1s"
 
 [metric]
 # prometheus client push interval, set "0s" to disable prometheus.

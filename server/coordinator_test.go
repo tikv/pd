@@ -23,10 +23,21 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-func newTestOperator(regionID uint64) *balanceOperator {
-	return &balanceOperator{
-		Region: newRegionInfo(&metapb.Region{Id: regionID}, nil),
-	}
+type testOperator struct {
+	RegionID uint64
+	Kind     ResourceKind
+}
+
+func newTestOperator(regionID uint64, kind ResourceKind) Operator {
+	region := newRegionInfo(&metapb.Region{Id: regionID}, nil)
+	op := &testOperator{RegionID: regionID, Kind: kind}
+	return newRegionOperator(region, op)
+}
+
+func (op *testOperator) GetRegionID() uint64           { return op.RegionID }
+func (op *testOperator) GetResourceKind() ResourceKind { return op.Kind }
+func (op *testOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
+	return nil, false
 }
 
 var _ = Suite(&testCoordinatorSuite{})
@@ -38,25 +49,26 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 	_, opt := newTestScheduleConfig()
 	co := newCoordinator(cluster, opt)
 
-	op := newTestOperator(1)
-	co.addOperator(leaderKind, op)
-	c.Assert(co.getOperatorCount(leaderKind), Equals, 1)
-	c.Assert(co.getOperator(1).Region.GetId(), Equals, op.Region.GetId())
+	op := newTestOperator(1, leaderKind)
+	co.addOperator(op)
+	c.Assert(co.getOperatorCount(op.GetResourceKind()), Equals, 1)
+	c.Assert(co.getOperator(1).GetRegionID(), Equals, op.GetRegionID())
 
 	// Region 1 already has an operator, cannot add another one.
-	co.addOperator(storageKind, op)
-	c.Assert(co.getOperatorCount(storageKind), Equals, 0)
+	op = newTestOperator(1, storageKind)
+	co.addOperator(op)
+	c.Assert(co.getOperatorCount(op.GetResourceKind()), Equals, 0)
 
 	// Region 1 is in region cache, cannot add another one.
 	co.removeOperator(op)
-	co.addOperator(storageKind, op)
-	c.Assert(co.getOperatorCount(storageKind), Equals, 0)
+	co.addOperator(op)
+	c.Assert(co.getOperatorCount(op.GetResourceKind()), Equals, 0)
 
 	// Delete region 1 from region cache, then we can add a new operator.
 	co.regionCache.delete(1)
-	co.addOperator(storageKind, op)
-	c.Assert(co.getOperatorCount(storageKind), Equals, 1)
-	c.Assert(co.getOperator(1).Region.GetId(), Equals, op.Region.GetId())
+	co.addOperator(op)
+	c.Assert(co.getOperatorCount(op.GetResourceKind()), Equals, 1)
+	c.Assert(co.getOperator(1).GetRegionID(), Equals, op.GetRegionID())
 }
 
 func (s *testCoordinatorSuite) TestSchedule(c *C) {
@@ -92,7 +104,6 @@ func (s *testCoordinatorSuite) TestSchedule(c *C) {
 	resp := co.dispatch(region)
 	checkAddPeerResp(c, resp, 1)
 	region.Peers = append(region.Peers, resp.GetChangePeer().GetPeer())
-	c.Assert(co.dispatch(region), IsNil)
 	resp = co.dispatch(region)
 	checkRemovePeerResp(c, resp, 4)
 	region.Peers = []*metapb.Peer{
@@ -127,7 +138,6 @@ func (s *testCoordinatorSuite) TestSchedule(c *C) {
 	}
 	region.DownPeers = append(region.DownPeers, downPeer)
 
-	// Add peer in store 1.
 	// Check ReplicaScheduleLimit.
 	opCount := uint64(co.getOperatorCount(storageKind))
 	clonecfg.ReplicaScheduleLimit = opCount
@@ -135,22 +145,26 @@ func (s *testCoordinatorSuite) TestSchedule(c *C) {
 	c.Assert(co.dispatch(region), IsNil)
 	clonecfg.ReplicaScheduleLimit = opCount + 1
 	opt.store(&clonecfg)
-	resp = co.dispatch(region)
-	checkAddPeerResp(c, resp, 1)
 
-	region.Peers = append(region.Peers, resp.GetChangePeer().GetPeer())
+	// Remove peer in store 4.
+	resp = co.dispatch(region)
+	checkRemovePeerResp(c, resp, 4)
+	region.Peers = region.Peers[0 : len(region.Peers)-1]
+	region.DownPeers = nil
 	c.Assert(co.dispatch(region), IsNil)
 	co.regionCache.delete(region.GetId())
 
-	// Remove peer in store 4.
 	// Check ReplicaScheduleInterval.
-	clonecfg.ReplicaScheduleInterval.Duration = 10 * time.Second
-	opt.store(&clonecfg)
+	resp = co.dispatch(region)
 	c.Assert(co.dispatch(region), IsNil)
 	clonecfg.ReplicaScheduleInterval.Duration = 0
 	opt.store(&clonecfg)
+
+	// Add new peer in store 1.
 	resp = co.dispatch(region)
-	checkRemovePeerResp(c, resp, 4)
+	checkAddPeerResp(c, resp, 1)
+	region.Peers = append(region.Peers, resp.GetChangePeer().GetPeer())
+	c.Assert(co.dispatch(region), IsNil)
 }
 
 func (s *testCoordinatorSuite) TestPeerState(c *C) {
@@ -183,10 +197,16 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 
 	// If the new peer is pending, the operator will not finish.
 	region.PendingPeers = append(region.PendingPeers, newPeer)
-	checkAddPeerResp(c, co.dispatch(region), 1)
+	c.Assert(co.dispatch(region), IsNil)
+	c.Assert(co.getOperator(region.GetId()), NotNil)
 
 	// The new peer is not pending now, the operator will finish.
+	// And we will proceed to remove peer in store 4.
 	region.PendingPeers = nil
+	resp = co.dispatch(region)
+	checkRemovePeerResp(c, resp, 4)
+	tc.addLeaderRegion(1, 1, 2, 3)
+	region = cluster.getRegion(1)
 	c.Assert(co.dispatch(region), IsNil)
 }
 
@@ -221,14 +241,16 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 
 	// Transfer all leaders to store 1.
 	time.Sleep(100 * time.Millisecond)
-	checkTransferLeaderResp(c, co.dispatch(cluster.getRegion(2)), 1)
-	tc.addLeaderRegion(2, 1, 2, 3)
+	region2 := cluster.getRegion(2)
+	checkTransferLeaderResp(c, co.dispatch(region2), 1)
+	region2.Leader = region2.GetStorePeer(1)
+	c.Assert(co.dispatch(region2), IsNil)
+
 	time.Sleep(100 * time.Millisecond)
-	checkTransferLeaderResp(c, co.dispatch(cluster.getRegion(3)), 1)
-	tc.addLeaderRegion(3, 1, 2, 3)
-	time.Sleep(100 * time.Millisecond)
-	c.Assert(co.dispatch(cluster.getRegion(2)), IsNil)
-	c.Assert(co.dispatch(cluster.getRegion(3)), IsNil)
+	region3 := cluster.getRegion(3)
+	checkTransferLeaderResp(c, co.dispatch(region3), 1)
+	region3.Leader = region3.GetStorePeer(1)
+	c.Assert(co.dispatch(region3), IsNil)
 }
 
 var _ = Suite(&testControllerSuite{})
@@ -251,10 +273,10 @@ func (s *testControllerSuite) Test(c *C) {
 func (s *testControllerSuite) test(c *C, co *coordinator, ctrl Controller, kind ResourceKind) {
 	c.Assert(ctrl.AllowSchedule(), IsTrue)
 
-	co.addOperator(kind, newTestOperator(1))
+	co.addOperator(newTestOperator(1, kind))
 	c.Assert(ctrl.AllowSchedule(), IsTrue)
 
-	co.addOperator(kind, newTestOperator(2))
+	co.addOperator(newTestOperator(2, kind))
 	c.Assert(ctrl.AllowSchedule(), IsFalse)
 
 	co.wg.Add(1)
