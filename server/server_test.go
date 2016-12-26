@@ -295,3 +295,31 @@ func (s *testServerSuite) TestUpdateAdvertiseUrls(c *C) {
 		c.Assert(svr.cfg.AdvertisePeerUrls, Equals, svr.cfg.PeerUrls)
 	}
 }
+
+func (s *testServerSuite) TestCheckClusterID(c *C) {
+	cfgs := NewTestMultiConfig(2)
+	for i, cfg := range cfgs {
+		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_clusterID_%d", i)
+		cleanServer(cfg)
+	}
+	originInitial := cfgs[0].InitialCluster
+	for _, cfg := range cfgs {
+		cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, cfg.PeerUrls)
+	}
+
+	cfgA, cfgB := cfgs[0], cfgs[1]
+	// Start a standalone cluster
+	svrsA, _ := newTestServersWithCfgs(c, []*Config{cfgA})
+	// Close it.
+	for _, svr := range svrsA {
+		svr.Close()
+	}
+
+	// Start another cluster.
+	newTestServersWithCfgs(c, []*Config{cfgB})
+
+	// Start pervious cluster, expect an error.
+	cfgA.InitialCluster = originInitial
+	_, err := NewServer(cfgA)
+	c.Assert(err, NotNil)
+}

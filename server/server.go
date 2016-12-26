@@ -16,6 +16,7 @@ package server
 import (
 	"math/rand"
 	"net/http"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -29,6 +30,7 @@ import (
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	"github.com/pingcap/pd/pkg/apiutil"
 )
 
 const (
@@ -136,10 +138,29 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 		return errors.Trace(err)
 	}
 	if len(urlmap) != 1 {
+		// Dirty hack, for tests.
+		unixToHTTP := strings.NewReplacer("unix://", "http://")
 		for name, urls := range urlmap {
 			if name != s.cfg.Name {
-				existingCluster, gerr := etcdserver.GetClusterFromRemotePeers(urls.StringSlice(), http.DefaultTransport)
+				urls := urls.StringSlice()
+				if len(urls) == 0 {
+					continue
+				}
+
+				// Again for tests.
+				u, gerr := url.Parse(urls[0])
 				if gerr != nil {
+					return errors.Trace(gerr)
+				}
+				trp := apiutil.NewHTTPTransport(u.Scheme)
+				for i := range urls {
+					urls[i] = unixToHTTP.Replace(urls[i])
+				}
+
+				existingCluster, gerr := etcdserver.GetClusterFromRemotePeers(urls, trp)
+				if gerr != nil {
+					// Do not return error, because other members may be not ready.
+					log.Error(gerr)
 					continue
 				}
 				remoteClusterID = uint64(existingCluster.ID())
