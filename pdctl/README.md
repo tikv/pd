@@ -1,4 +1,4 @@
-pdctl
+pdctl
 ========
 
 pdctl is a command line tool for pd
