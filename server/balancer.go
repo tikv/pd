@@ -128,29 +128,15 @@ func (r *replicaChecker) Check(region *regionInfo) Operator {
 	}
 
 	stores := r.cluster.getRegionStores(region)
-	result := r.opt.GetConstraints().Match(stores)
 
-	// If we have redundant replicas, we can remove unmatched peers.
+	// Remove redundant replicas.
 	if len(stores) > r.opt.GetMaxReplicas() {
-		for _, store := range stores {
-			if _, ok := result.stores[store.GetId()]; !ok {
-				return newRemovePeer(region, region.GetStorePeer(store.GetId()))
-			}
-		}
+		source := r.selector.SelectSource(stores)
+		return newRemovePeer(region, region.GetStorePeer(source.GetId()))
 	}
 
-	// Make sure all constraints will be satisfied.
-	for _, matched := range result.constraints {
-		if len(matched.stores) < matched.constraint.Replicas {
-			constraint := newConstraintFilter(nil, matched.constraint)
-			if op := r.addPeer(region, constraint); op != nil {
-				return op
-			}
-		}
-	}
+	// Ensure enough replicas.
 	if len(stores) < r.opt.GetMaxReplicas() {
-		// No matter whether we can satisfy all constraints or not,
-		// we should at least ensure that the region has enough replicas.
 		return r.addPeer(region)
 	}
 
