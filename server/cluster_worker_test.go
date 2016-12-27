@@ -482,8 +482,6 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 		// Check region peer count.
 		region = s.checkRegionPeerCount(c, regionKey, i+2)
-		// We need to delete region cache manually.
-		cluster.coordinator.regionCache.delete(region.GetId())
 	}
 
 	region = s.checkRegionPeerCount(c, regionKey, 5)
@@ -503,8 +501,6 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 		// Check region peer count.
 		region = s.checkRegionPeerCount(c, regionKey, 4-i)
-		// We need to delete region cache manually.
-		cluster.coordinator.regionCache.delete(region.GetId())
 	}
 
 	region = s.checkRegionPeerCount(c, regionKey, 3)

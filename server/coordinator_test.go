@@ -59,13 +59,8 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 	co.addOperator(op)
 	c.Assert(co.getOperatorCount(op.GetResourceKind()), Equals, 0)
 
-	// Region 1 is in region cache, cannot add another one.
+	// Remove the operator manually, then we can add a new operator.
 	co.removeOperator(op)
-	co.addOperator(op)
-	c.Assert(co.getOperatorCount(op.GetResourceKind()), Equals, 0)
-
-	// Delete region 1 from region cache, then we can add a new operator.
-	co.regionCache.delete(1)
 	co.addOperator(op)
 	c.Assert(co.getOperatorCount(op.GetResourceKind()), Equals, 1)
 	c.Assert(co.getOperator(1).GetRegionID(), Equals, op.GetRegionID())
@@ -152,7 +147,6 @@ func (s *testCoordinatorSuite) TestSchedule(c *C) {
 	region.Peers = region.Peers[0 : len(region.Peers)-1]
 	region.DownPeers = nil
 	c.Assert(co.dispatch(region), IsNil)
-	co.regionCache.delete(region.GetId())
 
 	// Check ReplicaScheduleInterval.
 	resp = co.dispatch(region)
