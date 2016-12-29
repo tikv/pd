@@ -300,7 +300,10 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 	cfgs := NewTestMultiConfig(2)
 	for i, cfg := range cfgs {
 		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_clusterID_%d", i)
+		// Clean up before testing.
 		cleanServer(cfg)
+		// Clean up after testing.
+		defer cleanServer(cfg)
 	}
 	originInitial := cfgs[0].InitialCluster
 	for _, cfg := range cfgs {

@@ -16,7 +16,6 @@ package server
 import (
 	"math/rand"
 	"net/http"
-	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -26,11 +25,10 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/embed"
-	"github.com/coreos/etcd/etcdserver"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
-	"github.com/pingcap/pd/pkg/apiutil"
+	"github.com/pingcap/pd/pkg/etcdutil"
 )
 
 const (
@@ -130,49 +128,27 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 		etcdCfg.UserHandlers[pdAPIPrefix] = apiHandler
 	}
 
-	var remoteClusterID uint64
-	// Get remote peer URLs.
-	// TODO: move etcd related functions to a new package.
+	log.Info("start embed etcd")
+
+	etcd, err := embed.StartEtcd(etcdCfg)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// Check cluster ID
+	var otherPeerURLs []string
 	urlmap, err := types.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	if len(urlmap) != 1 {
-		// Dirty hack, for tests.
-		unixToHTTP := strings.NewReplacer("unix://", "http://")
 		for name, urls := range urlmap {
 			if name != s.cfg.Name {
-				urls := urls.StringSlice()
-				if len(urls) == 0 {
-					continue
-				}
-
-				// Again for tests.
-				u, gerr := url.Parse(urls[0])
-				if gerr != nil {
-					return errors.Trace(gerr)
-				}
-				trp := apiutil.NewHTTPTransport(u.Scheme)
-				for i := range urls {
-					urls[i] = unixToHTTP.Replace(urls[i])
-				}
-
-				existingCluster, gerr := etcdserver.GetClusterFromRemotePeers(urls, trp)
-				if gerr != nil {
-					// Do not return error, because other members may be not ready.
-					log.Error(gerr)
-					continue
-				}
-				remoteClusterID = uint64(existingCluster.ID())
-				break
+				otherPeerURLs = append(otherPeerURLs, urls.StringSlice()...)
 			}
 		}
 	}
-
-	log.Info("start embed etcd")
-
-	etcd, err := embed.StartEtcd(etcdCfg)
-	if err != nil {
+	if err := etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), otherPeerURLs); err != nil {
 		return errors.Trace(err)
 	}
 
@@ -199,12 +175,6 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	s.etcd = etcd
 	s.client = client
 	s.id = uint64(etcd.Server.ID())
-
-	// Check cluster ID
-	localClusterID := uint64(etcd.Server.Cluster().ID())
-	if remoteClusterID != 0 && remoteClusterID != localClusterID {
-		return errors.Errorf("Etcd cluster ID mismatch, expect %d, got %d", localClusterID, remoteClusterID)
-	}
 
 	// update advertise peer urls.
 	etcdMembers, err := listEtcdMembers(client)
