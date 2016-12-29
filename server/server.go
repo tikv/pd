@@ -130,7 +130,7 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 		etcdCfg.UserHandlers[pdAPIPrefix] = apiHandler
 	}
 
-	var remoteClusterID *uint64
+	var remoteClusterID uint64
 	// Get remote peer URLs.
 	// TODO: move etcd related functions to a new package.
 	urlmap, err := types.NewURLsMap(s.cfg.InitialCluster)
@@ -163,8 +163,7 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 					log.Error(gerr)
 					continue
 				}
-				remoteClusterID = new(uint64)
-				*remoteClusterID = uint64(existingCluster.ID())
+				remoteClusterID = uint64(existingCluster.ID())
 				break
 			}
 		}
@@ -203,7 +202,7 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 
 	// Check cluster ID
 	localClusterID := uint64(etcd.Server.Cluster().ID())
-	if remoteClusterID != nil && *remoteClusterID != localClusterID {
+	if remoteClusterID != 0 && remoteClusterID != localClusterID {
 		return errors.Errorf("Etcd cluster ID mismatch, expect %d, got %d", localClusterID, remoteClusterID)
 	}
 
