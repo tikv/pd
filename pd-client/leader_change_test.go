@@ -43,9 +43,8 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		cfg := cfgs[i]
 
 		go func() {
-			svr, err := server.CreateServer(cfg)
-			c.Assert(err, IsNil)
-			err = svr.StartEtcd(api.NewHandler(svr))
+			svr := server.CreateServer(cfg)
+			err := svr.StartEtcd(api.NewHandler(svr))
 			c.Assert(err, IsNil)
 			ch <- svr
 		}()

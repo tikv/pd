@@ -75,9 +75,8 @@ func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpF
 	ch := make(chan *server.Server, num)
 	for _, cfg := range cfgs {
 		go func(cfg *server.Config) {
-			s, e := server.CreateServer(cfg)
-			c.Assert(e, IsNil)
-			e = s.StartEtcd(NewHandler(s))
+			s := server.CreateServer(cfg)
+			e := s.StartEtcd(NewHandler(s))
 			c.Assert(e, IsNil)
 			go s.Run()
 			ch <- s
