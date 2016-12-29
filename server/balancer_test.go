@@ -119,19 +119,19 @@ func (c *testClusterInfo) updateSnapshotCount(storeID uint64, snapshotCount int)
 func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption) {
 	cfg := NewConfig()
 	cfg.adjust()
-	cfg.ScheduleCfg.MinLeaderCount = 1
-	cfg.ScheduleCfg.MinRegionCount = 1
-	cfg.ScheduleCfg.LeaderScheduleInterval.Duration = 10 * time.Millisecond
-	cfg.ScheduleCfg.StorageScheduleInterval.Duration = 10 * time.Millisecond
+	cfg.Schedule.MinLeaderCount = 1
+	cfg.Schedule.MinRegionCount = 1
+	cfg.Schedule.LeaderScheduleInterval.Duration = 10 * time.Millisecond
+	cfg.Schedule.StorageScheduleInterval.Duration = 10 * time.Millisecond
 	opt := newScheduleOption(cfg)
-	return &cfg.ScheduleCfg, opt
+	return &cfg.Schedule, opt
 }
 
 var _ = Suite(&testLeaderBalancerSuite{})
 
 type testLeaderBalancerSuite struct{}
 
-func (s *testLeaderBalancerSuite) Test(c *C) {
+func (s *testLeaderBalancerSuite) TestBalance(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 
@@ -179,16 +179,16 @@ var _ = Suite(&testStorageBalancerSuite{})
 
 type testStorageBalancerSuite struct{}
 
-func (s *testStorageBalancerSuite) Test(c *C) {
+func (s *testStorageBalancerSuite) TestBalance(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 
 	cfg, opt := newTestScheduleConfig()
 	sb := newStorageBalancer(opt)
 
+	opt.SetMaxReplicas(1)
 	cfg.MinRegionCount = 10
 	cfg.MinBalanceDiffRatio = 0.1
-	opt.maxReplicas = 1
 
 	// Add stores 1,2,3,4.
 	tc.addRegionStore(1, 6, 0.1)
@@ -213,9 +213,9 @@ func (s *testStorageBalancerSuite) Test(c *C) {
 	checkTransferPeer(c, sb.Schedule(cluster), 4, 2)
 
 	// Test MaxReplicas.
-	opt.maxReplicas = 3
+	opt.SetMaxReplicas(3)
 	c.Assert(sb.Schedule(cluster), IsNil)
-	opt.maxReplicas = 1
+	opt.SetMaxReplicas(1)
 	c.Assert(sb.Schedule(cluster), NotNil)
 
 	// Test MinBalanceDiffRatio.

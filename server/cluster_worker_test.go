@@ -178,7 +178,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 
 	s.svr, s.cleanup = newTestServer(c)
 	s.svr.cfg.nextRetryDelay = 50 * time.Millisecond
-	s.svr.scheduleOpt.maxReplicas = 5
+	s.svr.scheduleOpt.SetMaxReplicas(5)
 
 	s.client = s.svr.client
 	s.clusterID = s.svr.clusterID
@@ -353,7 +353,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 
-	s.svr.scheduleOpt.maxReplicas = 1
+	s.svr.scheduleOpt.SetMaxReplicas(1)
 
 	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 	conn, err := rpcConnect(leaderPD.GetAddr())
@@ -446,8 +446,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 	// Set interval to 0 for tests.
 	cfg, opt := s.svr.cfg, s.svr.scheduleOpt
-	cfg.ScheduleCfg.ReplicaScheduleInterval.Duration = 0
-	opt.store(&cfg.ScheduleCfg)
+	cfg.Schedule.ReplicaScheduleInterval.Duration = 0
 
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
@@ -486,8 +485,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 	region = s.checkRegionPeerCount(c, regionKey, 5)
 
-	// Remove 2 peers.
-	s.svr.scheduleOpt.maxReplicas = 3
+	opt.SetMaxReplicas(3)
 
 	// Remove 2 peers
 	for i := 0; i < 2; i++ {
@@ -510,7 +508,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 
-	s.svr.scheduleOpt.maxReplicas = 2
+	s.svr.scheduleOpt.SetMaxReplicas(2)
 
 	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 	conn, err := rpcConnect(leaderPD.GetAddr())

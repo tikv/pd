@@ -64,12 +64,11 @@ type Config struct {
 	// TsoSaveInterval is the interval to save timestamp.
 	TsoSaveInterval timeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
-	// MaxPeerCount for a region. default is 3.
-	MaxPeerCount uint64 `toml:"max-peer-count" json:"max-peer-count"`
+	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
-	ScheduleCfg ScheduleConfig `toml:"schedule" json:"schedule"`
+	Schedule ScheduleConfig `toml:"schedule" json:"schedule"`
 
-	MetricCfg metricutil.MetricConfig `toml:"metric" json:"metric"`
+	Replication ReplicationConfig `toml:"replication" json:"replication"`
 
 	// Only test can change them.
 	nextRetryDelay             time.Duration
@@ -108,7 +107,6 @@ func NewConfig() *Config {
 
 const (
 	defaultLeaderLease    = int64(3)
-	defaultMaxPeerCount   = uint64(3)
 	defaultNextRetryDelay = time.Second
 
 	defaultName                = "pd"
@@ -228,8 +226,6 @@ func (c *Config) adjust() error {
 
 	adjustString(&c.InitialClusterState, defualtInitialClusterState)
 
-	adjustUint64(&c.MaxPeerCount, defaultMaxPeerCount)
-
 	adjustInt64(&c.LeaderLease, defaultLeaderLease)
 
 	adjustDuration(&c.TsoSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
@@ -241,9 +237,10 @@ func (c *Config) adjust() error {
 	adjustUint64(&c.tickMs, defaultTickMs)
 	adjustUint64(&c.electionMs, defaultElectionMs)
 
-	adjustString(&c.MetricCfg.PushJob, c.Name)
+	adjustString(&c.Metric.PushJob, c.Name)
 
-	c.ScheduleCfg.adjust()
+	c.Schedule.adjust()
+	c.Replication.adjust()
 	return nil
 }
 
@@ -305,6 +302,7 @@ type ScheduleConfig struct {
 }
 
 const (
+	defaultMaxReplicas             = uint64(3)
 	defaultMinRegionCount          = uint64(10)
 	defaultMinLeaderCount          = uint64(10)
 	defaultMaxSnapshotCount        = uint64(3)
@@ -317,10 +315,6 @@ const (
 	defaultReplicaScheduleLimit    = 8
 	defaultReplicaScheduleInterval = time.Second
 )
-
-func newScheduleConfig() *ScheduleConfig {
-	return &ScheduleConfig{}
-}
 
 func (c *ScheduleConfig) adjust() {
 	adjustUint64(&c.MinRegionCount, defaultMinRegionCount)
@@ -336,16 +330,26 @@ func (c *ScheduleConfig) adjust() {
 	adjustDuration(&c.ReplicaScheduleInterval, defaultReplicaScheduleInterval)
 }
 
+// ReplicationConfig is the replication configuration.
+type ReplicationConfig struct {
+	// MaxReplicas is the number of replicas for each region.
+	MaxReplicas uint64 `toml:"max-replicas" json:"max-replicas"`
+}
+
+func (c *ReplicationConfig) adjust() {
+	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
+}
+
 // scheduleOption is a wrapper to access the configuration safely.
 type scheduleOption struct {
-	v           atomic.Value
-	maxReplicas int
+	v   atomic.Value
+	rep *Replication
 }
 
 func newScheduleOption(cfg *Config) *scheduleOption {
 	o := &scheduleOption{}
-	o.store(&cfg.ScheduleCfg)
-	o.maxReplicas = int(cfg.MaxPeerCount)
+	o.store(&cfg.Schedule)
+	o.rep = newReplication(&cfg.Replication)
 	return o
 }
 
@@ -357,8 +361,16 @@ func (o *scheduleOption) store(cfg *ScheduleConfig) {
 	o.v.Store(cfg)
 }
 
+func (o *scheduleOption) GetReplication() *Replication {
+	return o.rep
+}
+
 func (o *scheduleOption) GetMaxReplicas() int {
-	return o.maxReplicas
+	return o.rep.GetMaxReplicas()
+}
+
+func (o *scheduleOption) SetMaxReplicas(replicas int) {
+	o.rep.cfg.MaxReplicas = uint64(replicas)
 }
 
 func (o *scheduleOption) GetMinRegionCount() uint64 {

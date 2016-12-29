@@ -50,7 +50,7 @@ func main() {
 
 	server.LogPDInfo()
 
-	metricutil.Push(&cfg.MetricCfg)
+	metricutil.Push(&cfg.Metric)
 
 	svr, err := server.CreateServer(cfg)
 	if err != nil {

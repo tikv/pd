@@ -14,12 +14,15 @@ advertise-peer-urls = ""
 initial-cluster = "pd=http://127.0.0.1:2380"
 initial-cluster-state = "new"
 
-
 lease = 3
 log-level = "info"
 tso-save-interval = "3s"
-max-peer-count = 3
 
+[metric]
+# prometheus client push interval, set "0s" to disable prometheus.
+interval = "15s"
+# prometheus pushgateway address, leaves it empty will disable prometheus.
+address = ""
 
 [schedule]
 min-region-count = 10
@@ -34,8 +37,6 @@ storage-schedule-interval = "1s"
 replica-schedule-limit = 8
 replica-schedule-interval = "1s"
 
-[metric]
-# prometheus client push interval, set "0s" to disable prometheus.
-interval = "15s"
-# prometheus pushgateway address, leaves it empty will disable prometheus.
-address = ""
+[replication]
+# The number of replicas for each region.
+max-replicas = 3

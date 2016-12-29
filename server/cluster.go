@@ -130,7 +130,7 @@ func (s *Server) GetConfig() *Config {
 
 // SetScheduleConfig sets the balance config information.
 func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
-	s.cfg.ScheduleCfg = cfg
+	s.cfg.Schedule = cfg
 	s.scheduleOpt.store(&cfg)
 }
 
@@ -214,7 +214,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 
 	clusterMeta := metapb.Cluster{
 		Id:           clusterID,
-		MaxPeerCount: uint32(s.cfg.MaxPeerCount),
+		MaxPeerCount: uint32(s.cfg.Replication.MaxReplicas),
 	}
 
 	// Set cluster meta
