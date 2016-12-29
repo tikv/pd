@@ -334,6 +334,12 @@ func (c *ScheduleConfig) adjust() {
 type ReplicationConfig struct {
 	// MaxReplicas is the number of replicas for each region.
 	MaxReplicas uint64 `toml:"max-replicas" json:"max-replicas"`
+
+	// The label keys specified the location of a store.
+	// The placement priorities is implied by the order of label keys.
+	// For example, ["zone", "rack"] means that we should place replicas to
+	// different zones first, then to different racks if we don't have enough zones.
+	LocationLabels []string `toml:"location-labels" json:"location-labels"`
 }
 
 func (c *ReplicationConfig) adjust() {

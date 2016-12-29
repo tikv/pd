@@ -95,6 +95,16 @@ func (r *regionInfo) GetStorePeer(storeID uint64) *metapb.Peer {
 	return nil
 }
 
+func (r *regionInfo) RemoveStorePeer(storeID uint64) {
+	var peers []*metapb.Peer
+	for _, peer := range r.GetPeers() {
+		if peer.GetStoreId() != storeID {
+			peers = append(peers, peer)
+		}
+	}
+	r.Peers = peers
+}
+
 func (r *regionInfo) GetStoreIds() map[uint64]struct{} {
 	peers := r.GetPeers()
 	stores := make(map[uint64]struct{}, len(peers))

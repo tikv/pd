@@ -327,7 +327,7 @@ func newReplicaCheckController(c *coordinator) *replicaCheckController {
 	return &replicaCheckController{
 		c:       c,
 		opt:     c.opt,
-		checker: newReplicaChecker(c.cluster, c.opt),
+		checker: newReplicaChecker(c.opt, c.cluster),
 	}
 }
 

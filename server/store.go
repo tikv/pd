@@ -50,6 +50,15 @@ func (s *storeInfo) clone() *storeInfo {
 	}
 }
 
+func (s *storeInfo) labelValue(key string) string {
+	for _, label := range s.GetLabels() {
+		if label.GetKey() == key {
+			return label.GetValue()
+		}
+	}
+	return ""
+}
+
 func (s *storeInfo) isUp() bool {
 	return s.GetState() == metapb.StoreState_Up
 }

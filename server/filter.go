@@ -140,3 +140,33 @@ func (f *snapshotCountFilter) FilterSource(store *storeInfo) bool {
 func (f *snapshotCountFilter) FilterTarget(store *storeInfo) bool {
 	return f.filter(store)
 }
+
+// replicationFilter ensures that the target store will not break the replication constraints.
+type replicationFilter struct {
+	rep      *Replication
+	stores   []*storeInfo
+	minScore int
+}
+
+func newReplicationFilter(rep *Replication, stores []*storeInfo, source *storeInfo) *replicationFilter {
+	for i, s := range stores {
+		if s.GetId() == source.GetId() {
+			stores = append(stores[:i], stores[i+1:]...)
+			break
+		}
+	}
+
+	return &replicationFilter{
+		rep:      rep,
+		stores:   stores,
+		minScore: rep.GetReplicaScore(stores, source),
+	}
+}
+
+func (f *replicationFilter) FilterSource(store *storeInfo) bool {
+	return false
+}
+
+func (f *replicationFilter) FilterTarget(store *storeInfo) bool {
+	return f.rep.GetReplicaScore(f.stores, store) < f.minScore
+}

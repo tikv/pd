@@ -63,6 +63,15 @@ func (s *testRegionSuite) TestRegionInfo(c *C) {
 	}
 	c.Assert(r.GetStorePeer(n), IsNil)
 
+	removePeer := &metapb.Peer{
+		Id:      n,
+		StoreId: n,
+	}
+	r.Peers = append(r.Peers, removePeer)
+	c.Assert(r.GetStorePeer(n), DeepEquals, removePeer)
+	r.RemoveStorePeer(n)
+	c.Assert(r.GetStorePeer(n), IsNil)
+
 	stores := r.GetStoreIds()
 	c.Assert(stores, HasLen, int(n))
 	for i := uint64(0); i < n; i++ {
