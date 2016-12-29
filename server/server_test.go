@@ -299,11 +299,9 @@ func (s *testServerSuite) TestUpdateAdvertiseUrls(c *C) {
 func (s *testServerSuite) TestCheckClusterID(c *C) {
 	cfgs := NewTestMultiConfig(2)
 	for i, cfg := range cfgs {
-		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_clusterID_%d", i)
+		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_check_clusterID_%d", i)
 		// Clean up before testing.
 		cleanServer(cfg)
-		// Clean up after testing.
-		defer cleanServer(cfg)
 	}
 	originInitial := cfgs[0].InitialCluster
 	for _, cfg := range cfgs {
@@ -312,14 +310,16 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 
 	cfgA, cfgB := cfgs[0], cfgs[1]
 	// Start a standalone cluster
-	svrsA, _ := newTestServersWithCfgs(c, []*Config{cfgA})
+	svrsA, cleanA := newTestServersWithCfgs(c, []*Config{cfgA})
+	defer cleanA()
 	// Close it.
 	for _, svr := range svrsA {
 		svr.Close()
 	}
 
 	// Start another cluster.
-	newTestServersWithCfgs(c, []*Config{cfgB})
+	_, cleanB := newTestServersWithCfgs(c, []*Config{cfgB})
+	defer cleanB()
 
 	// Start pervious cluster, expect an error.
 	cfgA.InitialCluster = originInitial

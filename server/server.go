@@ -93,6 +93,7 @@ type Server struct {
 func NewServer(cfg *Config) (*Server, error) {
 	s, err := CreateServer(cfg)
 	if err != nil {
+		s.Close()
 		return nil, errors.Trace(err)
 	}
 	return s, s.StartEtcd(nil)
