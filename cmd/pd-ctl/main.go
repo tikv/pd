@@ -88,7 +88,7 @@ func loop() {
 			continue
 		}
 
-		args := strings.Split(line, " ")
+		args := strings.Split(strings.TrimSpace(line), " ")
 		args = append(args, "-u", url)
 		usage, err := pdctl.Start(args)
 		if err != nil {

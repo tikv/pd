@@ -91,16 +91,16 @@ type Server struct {
 
 // NewServer creates the pd server with given configuration.
 func NewServer(cfg *Config) (*Server, error) {
-	s, err := CreateServer(cfg)
-	if err != nil {
+	s := CreateServer(cfg)
+	if err := s.StartEtcd(nil); err != nil {
 		s.Close()
 		return nil, errors.Trace(err)
 	}
-	return s, s.StartEtcd(nil)
+	return s, nil
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(cfg *Config) (*Server, error) {
+func CreateServer(cfg *Config) *Server {
 	log.Infof("PD config - %v", cfg)
 	rand.Seed(time.Now().UnixNano())
 
@@ -113,7 +113,7 @@ func CreateServer(cfg *Config) (*Server, error) {
 	}
 
 	s.handler = newHandler(s)
-	return s, nil
+	return s
 }
 
 // StartEtcd starts an embed etcd server with an user handler.

@@ -91,12 +91,8 @@ func startPdWith(cfg *Config) (*Server, error) {
 	go func() {
 		// TODO: Decouple join from cfg.adjust().
 		cfg.adjust()
-		svr, err := CreateServer(cfg)
-		if err != nil {
-			errCh <- errors.Trace(err)
-			return
-		}
-		err = svr.StartEtcd(nil)
+		svr := CreateServer(cfg)
+		err := svr.StartEtcd(nil)
 		if err != nil {
 			errCh <- errors.Trace(err)
 			svr.Close()

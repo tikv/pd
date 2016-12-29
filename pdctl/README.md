@@ -1,4 +1,4 @@
-pdctl
+pdctl
 ========
 
 pdctl is a command line tool for pd
@@ -12,7 +12,7 @@ pdctl is a command line tool for pd
 ### Example
 run:
     
-    ./pdctl store -d  -u 127.0.0.1:2379
+    ./pd-ctl store -d  -u 127.0.0.1:2379
 show all stores status. '-u' specify the pd address, it can be overwritten by setting the environment variable PD_ADDR. Such as `export PD_ADDR=127.0.0.1:2379`
 
 ### Flags
@@ -61,5 +61,43 @@ show or set the balance config
 >> config set leader-schedule-interval 20s
 Success!
 ```
+
+#### Member [leader | delete]
+show the pd members status 
+##### example
+```
+>> member
+{
+  "members": [......] 
+}
+>> member leader
+{
+  "name": "pd",
+  "addr": "http://192.168.199.229:2379",
+  "id": 9724873857558226554
+}
+>> member delete pd2
+Success!
+```
+
 #### Region <region_id>
 show one or all regions status
+##### Example
+```
+>> region
+{
+  "count": 1,
+  "regions": [......]
+}
+
+>> region 2
+{
+  "region": {
+      "id": 2,
+      ......
+  }
+  "leader": {
+      ......
+  }
+}
+```

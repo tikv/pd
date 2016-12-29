@@ -52,10 +52,7 @@ func main() {
 
 	metricutil.Push(&cfg.MetricCfg)
 
-	svr, err := server.CreateServer(cfg)
-	if err != nil {
-		log.Fatalf("create pd server err %s\n", err)
-	}
+	svr := server.CreateServer(cfg)
 	err = svr.StartEtcd(api.NewHandler(svr))
 	if err != nil {
 		log.Fatalf("server start etcd failed - %v", errors.Trace(err))

@@ -165,12 +165,9 @@ func scheduleStorage(cluster *clusterInfo, opt *scheduleOption, s Selector) (*re
 		// We only schedule region with just enough replicas.
 		return nil, nil, nil
 	}
-	result := opt.GetConstraints().Match(cluster.getRegionStores(region))
 
 	excluded := newExcludedFilter(nil, region.GetStoreIds())
-	constraint := newConstraintFilter(nil, result.stores[source.GetId()])
-
-	target := s.SelectTarget(stores, excluded, constraint)
+	target := s.SelectTarget(stores, excluded)
 	if target == nil {
 		return nil, nil, nil
 	}

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
@@ -100,6 +101,7 @@ func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 }
 
 type leaderInfo struct {
+	Name string `json:"name"`
 	Addr string `json:"addr"`
 	ID   uint64 `json:"id"`
 }
@@ -122,10 +124,38 @@ func (h *leaderHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	name, err := h.getNameByID(leader.Id)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	ret := leaderInfo{
+		Name: name,
 		Addr: leader.Addr,
 		ID:   leader.Id,
 	}
 	h.rd.JSON(w, http.StatusOK, ret)
+}
+
+func (h *leaderHandler) getNameByID(id uint64) (string, error) {
+	client := h.svr.GetClient()
+
+	var name string
+	ctx, cancel := context.WithTimeout(client.Ctx(), defaultDialTimeout)
+	defer cancel()
+	listResp, err := client.MemberList(ctx)
+	if err != nil {
+		return name, errors.Trace(err)
+	}
+	for _, m := range listResp.Members {
+		if id == m.ID {
+			name = m.Name
+			break
+		}
+	}
+	if name == "" {
+		return name, errors.Errorf("unknown member with id %d", id)
+	}
+	return name, nil
 }

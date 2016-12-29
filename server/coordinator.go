@@ -23,7 +23,6 @@ import (
 )
 
 const (
-	regionCacheTTL     = time.Minute
 	historiesCacheSize = 1000
 	eventsCacheSize    = 1000
 	maxScheduleRetries = 10
@@ -43,19 +42,17 @@ type coordinator struct {
 	schedulers map[string]*ScheduleController
 	operators  map[ResourceKind]map[uint64]Operator
 
-	regionCache *expireRegionCache
-	histories   *lruCache
-	events      *fifoCache
+	histories *lruCache
+	events    *fifoCache
 }
 
 func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
 	c := &coordinator{
-		cluster:     cluster,
-		opt:         opt,
-		schedulers:  make(map[string]*ScheduleController),
-		regionCache: newExpireRegionCache(regionCacheTTL, regionCacheTTL),
-		histories:   newLRUCache(historiesCacheSize),
-		events:      newFifoCache(eventsCacheSize),
+		cluster:    cluster,
+		opt:        opt,
+		schedulers: make(map[string]*ScheduleController),
+		histories:  newLRUCache(historiesCacheSize),
+		events:     newFifoCache(eventsCacheSize),
 	}
 
 	c.ctx, c.cancel = context.WithCancel(context.TODO())
@@ -170,9 +167,6 @@ func (c *coordinator) addOperator(op Operator) bool {
 	if c.getOperatorLocked(regionID) != nil {
 		return false
 	}
-	if _, ok := c.regionCache.get(regionID); ok {
-		return false
-	}
 
 	collectOperatorCounterMetrics(op)
 	c.operators[op.GetResourceKind()][regionID] = op
@@ -185,7 +179,6 @@ func (c *coordinator) removeOperator(op Operator) {
 
 	regionID := op.GetRegionID()
 	c.histories.add(regionID, op)
-	c.regionCache.set(regionID, nil)
 
 	for _, ops := range c.operators {
 		delete(ops, regionID)
