@@ -51,7 +51,7 @@ func NewHTTPClient(scheme string, timeout time.Duration) *http.Client {
 }
 
 // NewHTTPTransport returns a proper http.RoundTripper.
-func NewHTTPTransport(scheme string) http.RoundTripper {
+func NewHTTPTransport(scheme string) *http.Transport {
 	tr := &http.Transport{}
 	if scheme == "unix" || scheme == "unixs" {
 		tr.Dial = unixDial

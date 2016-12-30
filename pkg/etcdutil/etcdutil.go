@@ -15,14 +15,17 @@ package etcdutil
 
 import (
 	"net/url"
+	"strings"
 
 	"github.com/coreos/etcd/etcdserver"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/pd/pkg/apiutil"
-	"github.com/pingcap/pd/pkg/testutil"
 )
+
+// unixToHTTP replace unix scheme with http.
+var unixToHTTP = strings.NewReplacer("unix://", "http://")
 
 // CheckClusterID checks Etcd's cluster ID, returns an error if mismatch.
 // This function will never block even quorum is not satisfied.
@@ -38,10 +41,14 @@ func CheckClusterID(localClusterID types.ID, peerURLs []string) error {
 			return errors.Trace(gerr)
 		}
 		trp := apiutil.NewHTTPTransport(u.Scheme)
+		defer trp.CloseIdleConnections()
 
-		// For tests, unix RoundTripper and change scheme to http.
-		for i := range peerURLs {
-			peerURLs[i] = testutil.UnixToHTTP.Replace(peerURLs[i])
+		// For tests, change scheme to http.
+		// etcdserver/api/v3rpc does not recognize unix protocol.
+		if u.Scheme == "unix" || u.Scheme == "unixs" {
+			for i := range peerURLs {
+				peerURLs[i] = unixToHTTP.Replace(peerURLs[i])
+			}
 		}
 
 		existingCluster, gerr := etcdserver.GetClusterFromRemotePeers(peerURLs, trp)
@@ -57,4 +64,23 @@ func CheckClusterID(localClusterID types.ID, peerURLs []string) error {
 		return errors.Errorf("Etcd cluster ID mismatch, expect %d, got %d", localClusterID, remoteClusterID)
 	}
 	return nil
+}
+
+// ExtractURLsExcept extracts a string slice except ex's.
+func ExtractURLsExcept(um types.URLsMap, ex ...string) (ss []string) {
+	if len(um) == 0 {
+		return
+	}
+
+Outer:
+	for name, urls := range um {
+		for _, e := range ex {
+			if name == e {
+				continue Outer
+			}
+		}
+
+		ss = append(ss, urls.StringSlice()...)
+	}
+	return
 }

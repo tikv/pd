@@ -15,15 +15,11 @@ package testutil
 
 import (
 	"net"
-	"strings"
 
 	"github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/rpcutil"
 )
-
-// UnixToHTTP replace unix scheme with http.
-var UnixToHTTP = strings.NewReplacer("unix://", "http://")
 
 // MustRPCCall fails current test if fails to make a RPC call.
 func MustRPCCall(c *check.C, conn net.Conn, request *pdpb.Request) *pdpb.Response {

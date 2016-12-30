@@ -137,20 +137,15 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	}
 
 	// Check cluster ID
-	var otherPeerURLs []string
 	urlmap, err := types.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	if len(urlmap) != 1 {
-		for name, urls := range urlmap {
-			if name != s.cfg.Name {
-				otherPeerURLs = append(otherPeerURLs, urls.StringSlice()...)
-			}
+		otherPeerURLs := etcdutil.ExtractURLsExcept(urlmap, s.cfg.Name)
+		if err := etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), otherPeerURLs); err != nil {
+			return errors.Trace(err)
 		}
-	}
-	if err := etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), otherPeerURLs); err != nil {
-		return errors.Trace(err)
 	}
 
 	endpoints := []string{etcdCfg.LCUrls[0].String()}
