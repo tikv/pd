@@ -194,7 +194,7 @@ func (r *replicaChecker) selectBestPeer(region *regionInfo, filters ...Filter) (
 		bestScore int
 	)
 
-	// Find the store with maximum score.
+	// Find the store with best score.
 	regionStores := r.cluster.getRegionStores(region)
 	for _, store := range r.cluster.getStores() {
 		if filterTarget(store, filters) {
@@ -228,7 +228,7 @@ func (r *replicaChecker) selectWorstPeer(region *regionInfo, filters ...Filter) 
 		worstScore int
 	)
 
-	// Find the store with minimum score.
+	// Find the store with worst score.
 	regionStores := r.cluster.getRegionStores(region)
 	for _, store := range regionStores {
 		if filterSource(store, filters) {
@@ -277,7 +277,7 @@ func (r *replicaChecker) checkDownPeer(region *regionInfo) Operator {
 func (r *replicaChecker) checkOfflinePeer(region *regionInfo) Operator {
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.getStore(peer.GetStoreId())
-		if store == nil || store.isUp() {
+		if store.isUp() {
 			continue
 		}
 		newPeer, _ := r.selectBestReplacement(region, peer)
