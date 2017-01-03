@@ -61,6 +61,22 @@ func (f *excludedFilter) FilterTarget(store *storeInfo) bool {
 	return ok
 }
 
+type cacheFilter struct {
+	cache *idCache
+}
+
+func newCacheFilter(cache *idCache) *cacheFilter {
+	return &cacheFilter{cache: cache}
+}
+
+func (f *cacheFilter) FilterSource(store *storeInfo) bool {
+	return f.cache.get(store.GetId())
+}
+
+func (f *cacheFilter) FilterTarget(store *storeInfo) bool {
+	return false
+}
+
 type stateFilter struct {
 	opt *scheduleOption
 }

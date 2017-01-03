@@ -27,6 +27,25 @@ type cacheItem struct {
 	expire time.Time
 }
 
+type idCache struct {
+	*expireRegionCache
+}
+
+func newIDCache(interval, ttl time.Duration) *idCache {
+	return &idCache{
+		expireRegionCache: newExpireRegionCache(interval, ttl),
+	}
+}
+
+func (c *idCache) set(id uint64) {
+	c.expireRegionCache.set(id, nil)
+}
+
+func (c *idCache) get(id uint64) bool {
+	_, ok := c.expireRegionCache.get(id)
+	return ok
+}
+
 // expireRegionCache is an expired region cache.
 type expireRegionCache struct {
 	sync.RWMutex

@@ -241,14 +241,18 @@ func (s *testStorageBalancerSuite) TestReplicaScore(c *C) {
 	tc.addLabelsStore(3, 1, 0.3, map[string]string{"zone": "z1", "rack": "r2", "host": "h2"})
 
 	tc.addLeaderRegion(1, 1, 2, 3)
+	// This schedule try to replace peer in store 1, but we have no other stores,
+	// so store 1 will be set in the cache and skipped next schedule.
 	c.Assert(sb.Schedule(cluster), IsNil)
+	c.Assert(sb.cache.get(1), IsTrue)
 
-	// Store 4 has smaller storage ratio than store 1 but the same rack with other stores.
+	// Store 4 has smaller storage ratio than store 2.
 	tc.addLabelsStore(4, 1, 0.1, map[string]string{"zone": "z1", "rack": "r2", "host": "h3"})
-	c.Assert(sb.Schedule(cluster), IsNil)
+	checkTransferPeer(c, sb.Schedule(cluster), 2, 4)
 
-	// Store 5 has smaller storage ratio than store 1 and different rack with other stores.
+	// Store 5 has smaller storage ratio than store 1.
 	tc.addLabelsStore(5, 1, 0.2, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
+	sb.cache.delete(1) // Delete store 1 from cache, or it will be skipped.
 	checkTransferPeer(c, sb.Schedule(cluster), 1, 5)
 
 	// Store 6 has smaller storage ratio than store 5 and different rack with other stores.
@@ -260,6 +264,8 @@ func (s *testStorageBalancerSuite) TestReplicaScore(c *C) {
 	tc.setStoreDown(5)
 	tc.setStoreDown(6)
 	c.Assert(sb.Schedule(cluster), IsNil)
+	c.Assert(sb.cache.get(1), IsTrue)
+	sb.cache.delete(1)
 
 	// Store 7 has different zone with other stores but larger storage ratio than store 1.
 	tc.addLabelsStore(7, 1, 0.7, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})

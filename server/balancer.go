@@ -14,9 +14,13 @@
 package server
 
 import (
+	"time"
+
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
+
+var storeCacheInterval = 30 * time.Second
 
 type leaderBalancer struct {
 	opt      *scheduleOption
@@ -60,11 +64,15 @@ func (l *leaderBalancer) Schedule(cluster *clusterInfo) Operator {
 type storageBalancer struct {
 	opt      *scheduleOption
 	rep      *Replication
+	cache    *idCache
 	selector Selector
 }
 
 func newStorageBalancer(opt *scheduleOption) *storageBalancer {
+	cache := newIDCache(storeCacheInterval, 4*storeCacheInterval)
+
 	var filters []Filter
+	filters = append(filters, newCacheFilter(cache))
 	filters = append(filters, newStateFilter(opt))
 	filters = append(filters, newRegionCountFilter(opt))
 	filters = append(filters, newSnapshotCountFilter(opt))
@@ -72,6 +80,7 @@ func newStorageBalancer(opt *scheduleOption) *storageBalancer {
 	return &storageBalancer{
 		opt:      opt,
 		rep:      opt.GetReplication(),
+		cache:    cache,
 		selector: newBalanceSelector(storageKind, filters),
 	}
 }
@@ -96,6 +105,16 @@ func (s *storageBalancer) Schedule(cluster *clusterInfo) Operator {
 		return nil
 	}
 
+	op := s.transferPeer(cluster, region, oldPeer)
+	if op == nil {
+		// We can't transfer peer from this store now, so we add it to the cache
+		// and skip it for a while.
+		s.cache.set(oldPeer.GetStoreId())
+	}
+	return op
+}
+
+func (s *storageBalancer) transferPeer(cluster *clusterInfo, region *regionInfo, oldPeer *metapb.Peer) Operator {
 	stores := cluster.getRegionStores(region)
 	source := cluster.getStore(oldPeer.GetStoreId())
 
