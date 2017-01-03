@@ -185,13 +185,13 @@ func (r *replicaChecker) Check(region *regionInfo) Operator {
 }
 
 // selectBestPeer returns the best peer in other stores.
-func (r *replicaChecker) selectBestPeer(region *regionInfo, filters ...Filter) (*metapb.Peer, int) {
+func (r *replicaChecker) selectBestPeer(region *regionInfo, filters ...Filter) (*metapb.Peer, float64) {
 	filters = append(filters, r.filters...)
 	filters = append(filters, newExcludedFilter(nil, region.GetStoreIds()))
 
 	var (
 		bestStore *storeInfo
-		bestScore int
+		bestScore float64
 	)
 
 	// Find the store with best score.
@@ -220,12 +220,12 @@ func (r *replicaChecker) selectBestPeer(region *regionInfo, filters ...Filter) (
 }
 
 // selectWorstPeer returns the worst peer in the region.
-func (r *replicaChecker) selectWorstPeer(region *regionInfo, filters ...Filter) (*metapb.Peer, int) {
+func (r *replicaChecker) selectWorstPeer(region *regionInfo, filters ...Filter) (*metapb.Peer, float64) {
 	filters = append(filters, r.filters...)
 
 	var (
 		worstStore *storeInfo
-		worstScore int
+		worstScore float64
 	)
 
 	// Find the store with worst score.
@@ -248,7 +248,7 @@ func (r *replicaChecker) selectWorstPeer(region *regionInfo, filters ...Filter) 
 }
 
 // selectBestReplacement returns the best peer to replace the region peer.
-func (r *replicaChecker) selectBestReplacement(region *regionInfo, peer *metapb.Peer) (*metapb.Peer, int) {
+func (r *replicaChecker) selectBestReplacement(region *regionInfo, peer *metapb.Peer) (*metapb.Peer, float64) {
 	// Get a new region without the peer we are going to replace.
 	newRegion := region.clone()
 	newRegion.RemoveStorePeer(peer.GetStoreId())
@@ -298,7 +298,7 @@ func (r *replicaChecker) checkBetterPeer(region *regionInfo) Operator {
 	if newPeer == nil {
 		return nil
 	}
-	// We can't find a better peer (the smaller the better).
+	// We can't find a better peer (the lower the better).
 	if newScore >= oldScore {
 		return nil
 	}

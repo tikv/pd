@@ -15,6 +15,8 @@ package server
 
 import "math"
 
+const replicaBaseScore = 100
+
 // Replication provides some help to do replication.
 type Replication struct {
 	cfg *ReplicationConfig
@@ -29,20 +31,19 @@ func (r *Replication) GetMaxReplicas() int {
 	return int(r.cfg.MaxReplicas)
 }
 
-// GetReplicaScore returns the replica score of the store relative to the candidates.
-// This score reflects the similarity of the store between the candidates, the smaller the better.
-func (r *Replication) GetReplicaScore(candidates []*storeInfo, store *storeInfo) int {
-	score := 0
-	maxReplicas := len(candidates) + 1
+// GetReplicaScore returns the relative score between the store and the candidates.
+// A higher score means the store is more similar with the candidates, so the lower the better.
+func (r *Replication) GetReplicaScore(candidates []*storeInfo, store *storeInfo) float64 {
+	score := float64(0)
 
 	for i, key := range r.cfg.LocationLabels {
-		baseScore := int(math.Pow(float64(maxReplicas), float64(i)))
+		baseScore := math.Pow(replicaBaseScore, float64(i))
 
 		value := store.getLabelValue(key)
 		if len(value) == 0 {
 			// If the store doesn't have this label, we assume
 			// it has the same value with all candidates.
-			score += baseScore * len(candidates)
+			score += baseScore * float64(len(candidates))
 			continue
 		}
 
@@ -74,7 +75,7 @@ func (r *Replication) GetReplicaScore(candidates []*storeInfo, store *storeInfo)
 // Returns 0 if store A is as good as store B.
 // Returns 1 if store A is better than store B.
 // Returns -1 if store B is better than store A.
-func compareStoreScore(storeA *storeInfo, scoreA int, storeB *storeInfo, scoreB int) int {
+func compareStoreScore(storeA *storeInfo, scoreA float64, storeB *storeInfo, scoreB float64) int {
 	if scoreA < scoreB {
 		return 1
 	}

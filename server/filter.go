@@ -179,7 +179,7 @@ type replicationFilter struct {
 	rep        *Replication
 	stores     []*storeInfo
 	worstStore *storeInfo
-	worstScore int
+	worstScore float64
 }
 
 func newReplicationFilter(rep *Replication, stores []*storeInfo, worstStore *storeInfo) *replicationFilter {

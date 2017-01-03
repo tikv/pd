@@ -50,10 +50,9 @@ func (s *testReplicationSuite) TestReplicaScore(c *C) {
 				tc.addLabelsStore(storeID, 1, 0.1, labels)
 
 				store := cluster.getStore(storeID)
-				// We have (j*len(hosts)) replicas with the same zone,
-				// k replicas with the same rack, and the base score
-				// for the same rack is (len(stores)+1).
-				score := j*len(hosts) + k + k*(len(stores)+1)
+				// We have (j*len(hosts) + k) replicas with the same zone,
+				// k replicas with the same rack.
+				score := float64(1*(j*len(hosts)+k)*1 + replicaBaseScore*k)
 				c.Assert(rep.GetReplicaScore(stores, store), Equals, score)
 
 				stores = append(stores, store)
@@ -61,7 +60,7 @@ func (s *testReplicationSuite) TestReplicaScore(c *C) {
 		}
 	}
 
-	baseScore := len(stores) + 1
+	baseScore := replicaBaseScore
 	zoneReplicas := len(racks) * len(hosts) // replicas with the same zone
 	rackReplicas := len(zones) * len(hosts) // replicas with the same rack
 	hostReplicas := len(zones) * len(racks) // replicas with the same host
@@ -70,35 +69,36 @@ func (s *testReplicationSuite) TestReplicaScore(c *C) {
 	// Missing rack and host, we assume it has the same rack and host with
 	// other stores with the same zone.
 	tc.addLabelsStore(storeID, 1, 0.1, map[string]string{"zone": "z3"})
-	score := (1 + baseScore + baseScore*baseScore) * zoneReplicas
+	score := float64((1 + baseScore + baseScore*baseScore) * zoneReplicas)
 	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, score)
 
 	// Missing rack and host, but the zone is different with other stores.
 	tc.addLabelsStore(storeID, 1, 0.1, map[string]string{"zone": "z4"})
-	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, 0)
+	score = float64(0)
+	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, score)
 
 	// Missing zone and host, we assume it has the same zone with other stores
 	// and the same host with other stores with the same rack.
 	tc.addLabelsStore(storeID, 1, 0.1, map[string]string{"rack": "r3"})
-	score = 1*len(stores) + (baseScore+baseScore*baseScore)*rackReplicas
+	score = float64(1*len(stores) + (baseScore+baseScore*baseScore)*rackReplicas)
 	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, score)
 
 	// Missing zone and host, we assume it has the same zone with other stores,
 	// but different rack with other stores.
 	tc.addLabelsStore(storeID, 1, 0.1, map[string]string{"rack": "r4"})
-	score = 1 * len(stores)
+	score = float64(1 * len(stores))
 	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, score)
 
 	// Missing zone and rack, we assume it has the same zone and rack with other
 	// stores with the same host.
 	tc.addLabelsStore(storeID, 1, 0.1, map[string]string{"host": "h3"})
-	score = (1+baseScore)*len(stores) + (baseScore*baseScore)*hostReplicas
+	score = float64((1+baseScore)*len(stores) + (baseScore*baseScore)*hostReplicas)
 	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, score)
 
 	// Missing zone and rack, we assume it has the same zone and rack with other
 	// stores, but different host with other stores.
 	tc.addLabelsStore(storeID, 1, 0.1, map[string]string{"host": "h4"})
-	score = (1 + baseScore) * len(stores)
+	score = float64((1 + baseScore) * len(stores))
 	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, score)
 }
 
