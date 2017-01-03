@@ -25,7 +25,7 @@ import (
 const apiPrefix = "/pd"
 
 var (
-	errNotBootstrapped = errors.New("cluster is not bootstrapped")
+	errNotBootstrapped = errors.New("TiKV cluster is not bootstrapped, please start TiKV first")
 )
 
 // NewHandler creates a HTTP handler for API.

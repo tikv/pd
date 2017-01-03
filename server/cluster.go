@@ -27,10 +27,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-var (
-	errClusterNotBootstrapped = errors.New("cluster is not bootstrapped")
-)
-
 const (
 	backgroundJobInterval = time.Minute
 )

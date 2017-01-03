@@ -16,7 +16,7 @@ package server
 import "github.com/juju/errors"
 
 var (
-	errNotBootstrapped = errors.New("TiKV cluster not bootstrapped")
+	errNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first.")
 )
 
 // Handler is a helper to export methods to handle API/RPC requests.

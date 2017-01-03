@@ -93,7 +93,7 @@ func (c *conn) handleBootstrap(req *pdpb.Request) (*pdpb.Response, error) {
 func (c *conn) getRaftCluster() (*RaftCluster, error) {
 	cluster := c.s.GetRaftCluster()
 	if cluster == nil {
-		return nil, errors.Trace(errClusterNotBootstrapped)
+		return nil, errors.Trace(errNotBootstrapped)
 	}
 	return cluster, nil
 }
