@@ -48,36 +48,58 @@ func (s *testReplicationSuite) TestReplicaScore(c *C) {
 				}
 
 				tc.addLabelsStore(storeID, 1, 0.1, labels)
-				store := cluster.getStore(storeID)
-				stores = append(stores, store)
 
-				score := 1
-				if k == 0 {
-					// A new rack.
-					score++
-					if j == 0 {
-						// A new zone.
-						score++
-					}
-				}
+				store := cluster.getStore(storeID)
+				// We have (j*len(hosts)) replicas with the same zone,
+				// k replicas with the same rack, and the base score
+				// for the same rack is (len(stores)+1).
+				score := j*len(hosts) + k + k*(len(stores)+1)
 				c.Assert(rep.GetReplicaScore(stores, store), Equals, score)
+
+				stores = append(stores, store)
 			}
 		}
 	}
 
+	baseScore := len(stores) + 1
+	zoneReplicas := len(racks) * len(hosts) // replicas with the same zone
+	rackReplicas := len(zones) * len(hosts) // replicas with the same rack
+	hostReplicas := len(zones) * len(racks) // replicas with the same host
 	storeID := uint64(len(zones) * len(racks) * len(hosts))
+
+	// Missing rack and host, we assume it has the same rack and host with
+	// other stores with the same zone.
 	tc.addLabelsStore(storeID, 1, 0.1, map[string]string{"zone": "z3"})
-	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, 0)
+	score := (1 + baseScore + baseScore*baseScore) * zoneReplicas
+	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, score)
+
+	// Missing rack and host, but the zone is different with other stores.
 	tc.addLabelsStore(storeID, 1, 0.1, map[string]string{"zone": "z4"})
-	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, 3)
+	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, 0)
+
+	// Missing zone and host, we assume it has the same zone with other stores
+	// and the same host with other stores with the same rack.
 	tc.addLabelsStore(storeID, 1, 0.1, map[string]string{"rack": "r3"})
-	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, 0)
+	score = 1*len(stores) + (baseScore+baseScore*baseScore)*rackReplicas
+	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, score)
+
+	// Missing zone and host, we assume it has the same zone with other stores,
+	// but different rack with other stores.
 	tc.addLabelsStore(storeID, 1, 0.1, map[string]string{"rack": "r4"})
-	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, 2)
+	score = 1 * len(stores)
+	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, score)
+
+	// Missing zone and rack, we assume it has the same zone and rack with other
+	// stores with the same host.
 	tc.addLabelsStore(storeID, 1, 0.1, map[string]string{"host": "h3"})
-	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, 0)
+	score = (1+baseScore)*len(stores) + (baseScore*baseScore)*hostReplicas
+	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, score)
+
+	// Missing zone and rack, we assume it has the same zone and rack with other
+	// stores, but different host with other stores.
 	tc.addLabelsStore(storeID, 1, 0.1, map[string]string{"host": "h4"})
-	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, 1)
+	score = (1 + baseScore) * len(stores)
+	c.Assert(rep.GetReplicaScore(stores, cluster.getStore(storeID)), Equals, score)
 }
 
 func (s *testReplicationSuite) TestCompareStoreScore(c *C) {
@@ -92,11 +114,11 @@ func (s *testReplicationSuite) TestCompareStoreScore(c *C) {
 	store2 := cluster.getStore(2)
 	store3 := cluster.getStore(3)
 
-	c.Assert(compareStoreScore(store1, 2, store2, 1), Equals, 1)
+	c.Assert(compareStoreScore(store1, 1, store2, 2), Equals, 1)
 	c.Assert(compareStoreScore(store1, 1, store2, 1), Equals, 0)
-	c.Assert(compareStoreScore(store1, 1, store2, 2), Equals, -1)
+	c.Assert(compareStoreScore(store1, 2, store2, 1), Equals, -1)
 
-	c.Assert(compareStoreScore(store1, 2, store3, 1), Equals, 1)
+	c.Assert(compareStoreScore(store1, 1, store3, 2), Equals, 1)
 	c.Assert(compareStoreScore(store1, 1, store3, 1), Equals, 1)
-	c.Assert(compareStoreScore(store1, 1, store3, 2), Equals, -1)
+	c.Assert(compareStoreScore(store1, 2, store3, 1), Equals, -1)
 }

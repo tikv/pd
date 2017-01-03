@@ -395,15 +395,49 @@ func (s *testReplicaCheckerSuite) TestReplicaScore(c *C) {
 	tc.addLabelsStore(8, 1, 0.4, map[string]string{"zone": "z2", "rack": "r2", "host": "h1"})
 	c.Assert(rc.Check(region), IsNil)
 
-	// Store 9 has a different zone.
+	// Store 9 has a different zone, but it is almost full.
+	tc.addLabelsStore(9, 1, 0.9, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
+	c.Assert(rc.Check(region), IsNil)
+
+	// Store 10 has a different zone.
 	// Store 2 and 6 have the same replica score, but store 2 has larger storage ratio.
-	// So replace peer in store 2 with store 9.
-	tc.addLabelsStore(9, 1, 0.5, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
-	checkTransferPeer(c, rc.Check(region), 2, 9)
-	peer9, _ := cluster.allocPeer(9)
-	region.Peers = append(region.Peers, peer9)
+	// So replace peer in store 2 with store 10.
+	tc.addLabelsStore(10, 1, 0.5, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
+	checkTransferPeer(c, rc.Check(region), 2, 10)
+	peer10, _ := cluster.allocPeer(10)
+	region.Peers = append(region.Peers, peer10)
 	checkRemovePeer(c, rc.Check(region), 2)
 	region.RemoveStorePeer(2)
+	c.Assert(rc.Check(region), IsNil)
+}
+
+func (s *testReplicaCheckerSuite) TestReplicaScore2(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+
+	_, opt := newTestScheduleConfig()
+	opt.rep = newTestReplication(5, "zone", "host")
+
+	rc := newReplicaChecker(opt, cluster)
+
+	tc.addLabelsStore(1, 1, 0.5, map[string]string{"zone": "z1", "host": "h1"})
+	tc.addLabelsStore(2, 1, 0.5, map[string]string{"zone": "z1", "host": "h2"})
+	tc.addLabelsStore(3, 1, 0.3, map[string]string{"zone": "z1", "host": "h3"})
+	tc.addLabelsStore(4, 1, 0.5, map[string]string{"zone": "z2", "host": "h1"})
+	tc.addLabelsStore(5, 1, 0.4, map[string]string{"zone": "z2", "host": "h2"})
+	tc.addLabelsStore(6, 1, 0.5, map[string]string{"zone": "z3", "host": "h1"})
+
+	tc.addLeaderRegion(1, 1, 2, 4)
+	region := cluster.getRegion(1)
+
+	checkAddPeer(c, rc.Check(region), 6)
+	peer6, _ := cluster.allocPeer(6)
+	region.Peers = append(region.Peers, peer6)
+
+	checkAddPeer(c, rc.Check(region), 5)
+	peer5, _ := cluster.allocPeer(5)
+	region.Peers = append(region.Peers, peer5)
+
 	c.Assert(rc.Check(region), IsNil)
 }
 

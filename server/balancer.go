@@ -147,6 +147,7 @@ func newReplicaChecker(opt *scheduleOption, cluster *clusterInfo) *replicaChecke
 	var filters []Filter
 	filters = append(filters, newStateFilter(opt))
 	filters = append(filters, newSnapshotCountFilter(opt))
+	filters = append(filters, newStorageThresholdFilter(opt))
 
 	return &replicaChecker{
 		opt:     opt,
@@ -189,8 +190,8 @@ func (r *replicaChecker) selectBestPeer(region *regionInfo, filters ...Filter) (
 	filters = append(filters, newExcludedFilter(nil, region.GetStoreIds()))
 
 	var (
-		maxStore *storeInfo
-		maxScore int
+		bestStore *storeInfo
+		bestScore int
 	)
 
 	// Find the store with maximum score.
@@ -200,22 +201,22 @@ func (r *replicaChecker) selectBestPeer(region *regionInfo, filters ...Filter) (
 			continue
 		}
 		score := r.rep.GetReplicaScore(regionStores, store)
-		if maxStore == nil || compareStoreScore(store, score, maxStore, maxScore) > 0 {
-			maxStore = store
-			maxScore = score
+		if bestStore == nil || compareStoreScore(store, score, bestStore, bestScore) > 0 {
+			bestStore = store
+			bestScore = score
 		}
 	}
 
-	if maxStore == nil {
+	if bestStore == nil {
 		return nil, 0
 	}
 
-	newPeer, err := r.cluster.allocPeer(maxStore.GetId())
+	newPeer, err := r.cluster.allocPeer(bestStore.GetId())
 	if err != nil {
 		log.Errorf("failed to allocate peer: %v", err)
 		return nil, 0
 	}
-	return newPeer, maxScore
+	return newPeer, bestScore
 }
 
 // selectWorstPeer returns the worst peer in the region.
@@ -223,8 +224,8 @@ func (r *replicaChecker) selectWorstPeer(region *regionInfo, filters ...Filter) 
 	filters = append(filters, r.filters...)
 
 	var (
-		minStore *storeInfo
-		minScore int
+		worstStore *storeInfo
+		worstScore int
 	)
 
 	// Find the store with minimum score.
@@ -234,16 +235,16 @@ func (r *replicaChecker) selectWorstPeer(region *regionInfo, filters ...Filter) 
 			continue
 		}
 		score := r.rep.GetReplicaScore(regionStores, store)
-		if minStore == nil || compareStoreScore(store, score, minStore, minScore) < 0 {
-			minStore = store
-			minScore = score
+		if worstStore == nil || compareStoreScore(store, score, worstStore, worstScore) < 0 {
+			worstStore = store
+			worstScore = score
 		}
 	}
 
-	if minStore == nil {
+	if worstStore == nil {
 		return nil, 0
 	}
-	return region.GetStorePeer(minStore.GetId()), minScore
+	return region.GetStorePeer(worstStore.GetId()), worstScore
 }
 
 // selectBestReplacement returns the best peer to replace the region peer.
@@ -297,8 +298,8 @@ func (r *replicaChecker) checkBetterPeer(region *regionInfo) Operator {
 	if newPeer == nil {
 		return nil
 	}
-	// We can't find a better peer.
-	if newScore <= oldScore {
+	// We can't find a better peer (the smaller the better).
+	if newScore >= oldScore {
 		return nil
 	}
 	return newTransferPeer(region, oldPeer, newPeer)

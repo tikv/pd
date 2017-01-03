@@ -50,15 +50,6 @@ func (s *storeInfo) clone() *storeInfo {
 	}
 }
 
-func (s *storeInfo) labelValue(key string) string {
-	for _, label := range s.GetLabels() {
-		if label.GetKey() == key {
-			return label.GetValue()
-		}
-	}
-	return ""
-}
-
 func (s *storeInfo) isUp() bool {
 	return s.GetState() == metapb.StoreState_Up
 }
@@ -105,6 +96,15 @@ func (s *storeInfo) resourceScores() []int {
 	scores = append(scores, int(s.leaderRatio()*100))
 	scores = append(scores, int(s.storageRatio()*100))
 	return scores
+}
+
+func (s *storeInfo) getLabelValue(key string) string {
+	for _, label := range s.GetLabels() {
+		if label.GetKey() == key {
+			return label.GetValue()
+		}
+	}
+	return ""
 }
 
 // StoreStatus contains information about a store's status.
