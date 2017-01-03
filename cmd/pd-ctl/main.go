@@ -15,6 +15,7 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/signal"
 	"strings"
@@ -49,6 +50,14 @@ func main() {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 
+	var otherInput []string
+	stat, _ := os.Stdin.Stat()
+	if (stat.Mode() & os.ModeCharDevice) == 0 {
+		detach = true
+		b, _ := ioutil.ReadAll(os.Stdin)
+		otherInput = strings.Split(strings.TrimSpace(string(b[:])), " ")
+	}
+
 	go func() {
 		sig := <-sc
 		fmt.Printf("\nGot signal [%v] to exit.\n", sig)
@@ -60,7 +69,7 @@ func main() {
 		}
 	}()
 	if detach {
-		pdctl.Start(os.Args[1:])
+		pdctl.Start(append(os.Args[1:], otherInput...))
 		return
 	}
 	loop()
