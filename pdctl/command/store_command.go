@@ -74,7 +74,7 @@ type storesInfo struct {
 // NewStoreCommand return a store subcommand of rootCmd
 func NewStoreCommand() *cobra.Command {
 	s := &cobra.Command{
-		Use:   "store [delete | <status>] <store_id>",
+		Use:   "store [delete|status] <store_id>",
 		Short: "show the store status",
 		Run:   showStoreCommandFunc,
 	}
