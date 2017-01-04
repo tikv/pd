@@ -25,17 +25,21 @@ import (
 )
 
 // unixToHTTP replace unix scheme with http.
-var unixToHTTP = strings.NewReplacer("unix://", "http://")
+var unixToHTTP = strings.NewReplacer("unix://", "http://", "unixs://", "http://")
 
 // CheckClusterID checks Etcd's cluster ID, returns an error if mismatch.
 // This function will never block even quorum is not satisfied.
-func CheckClusterID(localClusterID types.ID, peerURLs []string) error {
-	if len(peerURLs) == 0 {
+func CheckClusterID(localClusterID types.ID, um types.URLsMap) error {
+	if len(um) == 0 {
 		return nil
 	}
 
-	var remoteClusterID types.ID
-	for _, u := range peerURLs {
+	var peerURLs []string
+	for _, urls := range um {
+		peerURLs = append(peerURLs, urls.StringSlice()...)
+	}
+
+	for i, u := range peerURLs {
 		u, gerr := url.Parse(u)
 		if gerr != nil {
 			return errors.Trace(gerr)
@@ -46,41 +50,20 @@ func CheckClusterID(localClusterID types.ID, peerURLs []string) error {
 		// For tests, change scheme to http.
 		// etcdserver/api/v3rpc does not recognize unix protocol.
 		if u.Scheme == "unix" || u.Scheme == "unixs" {
-			for i := range peerURLs {
-				peerURLs[i] = unixToHTTP.Replace(peerURLs[i])
-			}
+			peerURLs[i] = unixToHTTP.Replace(peerURLs[i])
 		}
 
-		existingCluster, gerr := etcdserver.GetClusterFromRemotePeers(peerURLs, trp)
+		remoteCluster, gerr := etcdserver.GetClusterFromRemotePeers([]string{peerURLs[i]}, trp)
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
 			log.Error(gerr)
 			continue
 		}
-		remoteClusterID = existingCluster.ID()
-		break
-	}
-	if remoteClusterID != 0 && remoteClusterID != localClusterID {
-		return errors.Errorf("Etcd cluster ID mismatch, expect %d, got %d", localClusterID, remoteClusterID)
+
+		remoteClusterID := remoteCluster.ID()
+		if remoteClusterID != localClusterID {
+			return errors.Errorf("Etcd cluster ID mismatch, expect %d, got %d", localClusterID, remoteClusterID)
+		}
 	}
 	return nil
-}
-
-// ExtractURLsExcept extracts a string slice except ex's.
-func ExtractURLsExcept(um types.URLsMap, ex ...string) (ss []string) {
-	if len(um) == 0 {
-		return
-	}
-
-Outer:
-	for name, urls := range um {
-		for _, e := range ex {
-			if name == e {
-				continue Outer
-			}
-		}
-
-		ss = append(ss, urls.StringSlice()...)
-	}
-	return
 }

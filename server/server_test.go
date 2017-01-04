@@ -310,8 +310,9 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 
 	cfgA, cfgB := cfgs[0], cfgs[1]
 	// Start a standalone cluster
-	svrsA, cleanA := newTestServersWithCfgs(c, []*Config{cfgA})
-	defer cleanA()
+	// TODO: clean up. For now tests failed because:
+	//    etcdserver: failed to purge snap file ...
+	svrsA, _ := newTestServersWithCfgs(c, []*Config{cfgA})
 	// Close it.
 	for _, svr := range svrsA {
 		svr.Close()
