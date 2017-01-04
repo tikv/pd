@@ -45,7 +45,6 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap) error {
 			return errors.Trace(gerr)
 		}
 		trp := apiutil.NewHTTPTransport(u.Scheme)
-		defer trp.CloseIdleConnections()
 
 		// For tests, change scheme to http.
 		// etcdserver/api/v3rpc does not recognize unix protocol.
@@ -57,13 +56,17 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap) error {
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
 			log.Error(gerr)
+			trp.CloseIdleConnections()
 			continue
 		}
 
 		remoteClusterID := remoteCluster.ID()
 		if remoteClusterID != localClusterID {
+			trp.CloseIdleConnections()
 			return errors.Errorf("Etcd cluster ID mismatch, expect %d, got %d", localClusterID, remoteClusterID)
 		}
+
+		trp.CloseIdleConnections()
 	}
 	return nil
 }
