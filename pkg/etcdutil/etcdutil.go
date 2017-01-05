@@ -53,20 +53,17 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap) error {
 		}
 
 		remoteCluster, gerr := etcdserver.GetClusterFromRemotePeers([]string{peerURLs[i]}, trp)
+		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
 			log.Error(gerr)
-			trp.CloseIdleConnections()
 			continue
 		}
 
 		remoteClusterID := remoteCluster.ID()
 		if remoteClusterID != localClusterID {
-			trp.CloseIdleConnections()
 			return errors.Errorf("Etcd cluster ID mismatch, expect %d, got %d", localClusterID, remoteClusterID)
 		}
-
-		trp.CloseIdleConnections()
 	}
 	return nil
 }
