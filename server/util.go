@@ -30,12 +30,13 @@ import (
 	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/util"
+	"github.com/pingcap/pd/pkg/etcdutil"
 	"golang.org/x/net/context"
 )
 
 const (
-	requestTimeout  = 10 * time.Second
-	slowRequestTime = 1 * time.Second
+	requestTimeout  = etcdutil.DefaultRequestTimeout
+	slowRequestTime = etcdutil.DefaultSlowRequestTime
 )
 
 // Version information.
@@ -203,44 +204,6 @@ func sliceClone(strs []string) []string {
 	return data
 }
 
-// check whether current etcd is running.
-func endpointStatus(c *clientv3.Client, endpoint string) (*clientv3.StatusResponse, error) {
-	m := clientv3.NewMaintenance(c)
-
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(c.Ctx(), requestTimeout)
-	resp, err := m.Status(ctx, endpoint)
-	cancel()
-
-	if cost := time.Now().Sub(start); cost > slowRequestTime {
-		log.Warnf("check etcd %s status, resp: %v, err: %v, cost: %s", endpoint, resp, err, cost)
-	}
-
-	return resp, errors.Trace(err)
-}
-
-const (
-	maxCheckEtcdRunningCount = 60 * 10
-	checkEtcdRunningDelay    = time.Second
-)
-
-// check etcd starts ok or not
-func waitEtcdStart(c *clientv3.Client, endpoint string) error {
-	var err error
-	for i := 0; i < maxCheckEtcdRunningCount; i++ {
-		// etcd may not start ok, we should wait and check again
-		_, err = endpointStatus(c, endpoint)
-		if err == nil {
-			return nil
-		}
-
-		time.Sleep(checkEtcdRunningDelay)
-		continue
-	}
-
-	return errors.Trace(err)
-}
-
 func rpcConnect(addr string) (net.Conn, error) {
 	req, err := http.NewRequest("GET", pdRPCPrefix, nil)
 	if err != nil {
@@ -368,29 +331,9 @@ func InitLogger(cfg *Config) error {
 	return nil
 }
 
-// addEtcdMembers adds an etcd members.
-func addEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddResponse, error) {
-	ctx, cancel := context.WithTimeout(client.Ctx(), defaultDialTimeout)
-	defer cancel()
-
-	return client.MemberAdd(ctx, urls)
-}
-
-// listEtcdMembers returns a list of internal etcd members.
-func listEtcdMembers(etcdClient *clientv3.Client) (*clientv3.MemberListResponse, error) {
-	ctx := etcdClient.Ctx()
-
-	listResp, err := etcdClient.MemberList(ctx)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return listResp, nil
-}
-
 // GetPDMembers return a slice of PDMembers.
 func GetPDMembers(etcdClient *clientv3.Client) ([]*pdpb.PDMember, error) {
-	listResp, err := listEtcdMembers(etcdClient)
+	listResp, err := etcdutil.ListEtcdMembers(etcdClient)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

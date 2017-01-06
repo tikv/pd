@@ -14,14 +14,33 @@
 package etcdutil
 
 import (
+	"context"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/etcdserver"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/pd/pkg/apiutil"
+)
+
+const (
+	// DefaultDialTimeout is the maximum amount of time a dial will wait for a
+	// connection to setup. 30s is long enough for most of the network conditions.
+	DefaultDialTimeout = 30 * time.Second
+
+	// DefaultRequestTimeout 10s is long enough for most of etcd clusters.
+	DefaultRequestTimeout = 10 * time.Second
+
+	// DefaultSlowRequestTime 1s for the threshold for normal request, for those
+	// longer then 1s, they are considered as slow requests.
+	DefaultSlowRequestTime = 1 * time.Second
+
+	maxCheckEtcdRunningCount = 60 * 10
+	checkEtcdRunningDelay    = 1 * time.Second
 )
 
 // unixToHTTP replace unix scheme with http.
@@ -66,4 +85,57 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap) error {
 		}
 	}
 	return nil
+}
+
+// AddEtcdMember adds an etcd members.
+func AddEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddResponse, error) {
+	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultDialTimeout)
+	defer cancel()
+
+	return client.MemberAdd(ctx, urls)
+}
+
+// ListEtcdMembers returns a list of internal etcd members.
+func ListEtcdMembers(etcdClient *clientv3.Client) (*clientv3.MemberListResponse, error) {
+	ctx := etcdClient.Ctx()
+
+	listResp, err := etcdClient.MemberList(ctx)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return listResp, nil
+}
+
+// WaitEtcdStart checks etcd starts ok or not
+func WaitEtcdStart(c *clientv3.Client, endpoint string) error {
+	var err error
+	for i := 0; i < maxCheckEtcdRunningCount; i++ {
+		// etcd may not start ok, we should wait and check again
+		_, err = endpointStatus(c, endpoint)
+		if err == nil {
+			return nil
+		}
+
+		time.Sleep(checkEtcdRunningDelay)
+		continue
+	}
+
+	return errors.Trace(err)
+}
+
+// endpointStatus checks whether current etcd is running.
+func endpointStatus(c *clientv3.Client, endpoint string) (*clientv3.StatusResponse, error) {
+	m := clientv3.NewMaintenance(c)
+
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(c.Ctx(), DefaultRequestTimeout)
+	resp, err := m.Status(ctx, endpoint)
+	cancel()
+
+	if cost := time.Now().Sub(start); cost > DefaultSlowRequestTime {
+		log.Warnf("check etcd %s status, resp: %v, err: %v, cost: %s", endpoint, resp, err, cost)
+	}
+
+	return resp, errors.Trace(err)
 }

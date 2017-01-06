@@ -21,6 +21,7 @@ import (
 
 	"github.com/juju/errors"
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/pkg/etcdutil"
 	"golang.org/x/net/context"
 )
 
@@ -49,7 +50,7 @@ func waitMembers(svrs []*Server, c int) error {
 	maxRetryCount := 10
 	waitInterval := 500 * time.Millisecond
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), etcdutil.DefaultDialTimeout)
 	defer cancel()
 
 Outloop:
@@ -239,7 +240,7 @@ func (s *testJoinServerSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
 	svrs[target].Close()
 	time.Sleep(500 * time.Millisecond)
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), etcdutil.DefaultDialTimeout)
 	defer cancel()
 	client := svrs[0].GetClient()
 	client.MemberRemove(ctx, svrs[target].ID())
@@ -249,7 +250,7 @@ func (s *testJoinServerSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
 	// Deleted PD will not start successfully.
 	c.Assert(err, Equals, errTimeout)
 
-	list, err := listEtcdMembers(client)
+	list, err := etcdutil.ListEtcdMembers(client)
 	c.Assert(err, IsNil)
 	c.Assert(len(list.Members), Equals, 2)
 }
@@ -260,7 +261,7 @@ func (s *testJoinServerSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 	defer clean()
 
 	target := 2
-	ctx, cancel := context.WithTimeout(context.Background(), defaultDialTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), etcdutil.DefaultDialTimeout)
 	defer cancel()
 	client := svrs[0].GetClient()
 	client.MemberRemove(ctx, svrs[target].ID())
@@ -273,7 +274,7 @@ func (s *testJoinServerSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 	// A deleted PD will not start successfully.
 	c.Assert(err, Equals, errTimeout)
 
-	list, err := listEtcdMembers(client)
+	list, err := etcdutil.ListEtcdMembers(client)
 	c.Assert(err, IsNil)
 	c.Assert(len(list.Members), Equals, 2)
 }

@@ -16,24 +16,20 @@ package server
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/embed"
 	"github.com/coreos/etcd/wal"
 	"github.com/juju/errors"
+	"github.com/pingcap/pd/pkg/etcdutil"
 )
-
-// the maximum amount of time a dial will wait for a connection to setup.
-// 30s is long enough for most of the network conditions.
-const defaultDialTimeout = 30 * time.Second
 
 // TODO: support HTTPS
 func genClientV3Config(cfg *Config) clientv3.Config {
 	endpoints := strings.Split(cfg.Join, ",")
 	return clientv3.Config{
 		Endpoints:   endpoints,
-		DialTimeout: defaultDialTimeout,
+		DialTimeout: etcdutil.DefaultDialTimeout,
 	}
 }
 
@@ -95,7 +91,7 @@ func prepareJoinCluster(cfg *Config) (string, string, error) {
 	}
 	defer client.Close()
 
-	listResp, err := listEtcdMembers(client)
+	listResp, err := etcdutil.ListEtcdMembers(client)
 	if err != nil {
 		return "", "", errors.Trace(err)
 	}
@@ -114,12 +110,12 @@ func prepareJoinCluster(cfg *Config) (string, string, error) {
 
 	// - A new PD joins an existing cluster.
 	// - A deleted PD joins to previous cluster.
-	addResp, err := addEtcdMember(client, []string{cfg.AdvertisePeerUrls})
+	addResp, err := etcdutil.AddEtcdMember(client, []string{cfg.AdvertisePeerUrls})
 	if err != nil {
 		return "", "", errors.Trace(err)
 	}
 
-	listResp, err = listEtcdMembers(client)
+	listResp, err = etcdutil.ListEtcdMembers(client)
 	if err != nil {
 		return "", "", errors.Trace(err)
 	}
