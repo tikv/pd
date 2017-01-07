@@ -14,12 +14,12 @@
 package server
 
 import (
-	"context"
 	"sync"
 	"time"
 
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"golang.org/x/net/context"
 )
 
 const (
