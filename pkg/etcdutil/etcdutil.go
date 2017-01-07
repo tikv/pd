@@ -14,7 +14,6 @@
 package etcdutil
 
 import (
-	"context"
 	"net/url"
 	"strings"
 	"time"
@@ -25,6 +24,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/pd/pkg/apiutil"
+	"golang.org/x/net/context"
 )
 
 const (

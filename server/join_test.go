@@ -111,7 +111,8 @@ func startPdWith(cfg *Config) (*Server, error) {
 		svr.Run()
 	}()
 
-	timer := time.NewTimer(30 * time.Second)
+	// It should be enough for starting a PD.
+	timer := time.NewTimer(etcdutil.DefaultRequestTimeout * 2)
 	defer timer.Stop()
 
 	select {
