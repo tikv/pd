@@ -13,7 +13,10 @@
 
 package server
 
-import "math"
+import (
+	"math"
+	"sort"
+)
 
 const replicaBaseScore = 100
 
@@ -31,40 +34,76 @@ func (r *Replication) GetMaxReplicas() int {
 	return int(r.cfg.MaxReplicas)
 }
 
-// GetReplicaScore returns the relative score between the store and the candidates.
-// A higher score means the store is more similar with the candidates, so the lower the better.
-func (r *Replication) GetReplicaScore(candidates []*storeInfo, store *storeInfo) float64 {
+// AllowUnsafeBalance returns true if it is allowed to do unsafe balance.
+func (r *Replication) AllowUnsafeBalance() bool {
+	return r.cfg.AllowUnsafeBalance
+}
+
+// GetReplicaScore returns the failure tolerance score of these replicas.
+// A higher score means these replicas can tolerant more kind of failures.
+func (r *Replication) GetReplicaScore(replicas []*storeInfo) float64 {
 	score := float64(0)
 
-	for i, key := range r.cfg.LocationLabels {
-		baseScore := math.Pow(replicaBaseScore, float64(i))
+	for i := range r.cfg.LocationLabels {
+		level := len(r.cfg.LocationLabels) - i - 1
+		levelScore := math.Pow(replicaBaseScore, float64(level))
 
-		value := store.getLabelValue(key)
-		if len(value) == 0 {
-			// If the store doesn't have this label, we assume
-			// it has the same value with all candidates.
-			score += baseScore * float64(len(candidates))
-			continue
+		// Collect replicas with the same location id.
+		ids := make(map[string]int, len(replicas))
+		for _, s := range replicas {
+			id := s.getLocationID(r.cfg.LocationLabels[0 : i+1])
+			if len(id) == 0 {
+				return 0
+			}
+			ids[id]++
 		}
 
-		// Reset candidates.
-		stores := candidates
-		candidates = []*storeInfo{}
+		// Count the number of replicas with the same location id.
+		counts := make([]int, 0, len(replicas))
+		for _, count := range ids {
+			counts = append(counts, count)
+		}
+		sort.Sort(sort.Reverse(sort.IntSlice(counts)))
 
-		// Push stores with the same label value to candidates.
+		// Check whether we can work if all replicas in the same location are down.
+		sum := 0
+		for c, count := range counts {
+			sum += count
+			if sum > (len(replicas)-1)/2 {
+				score += levelScore * float64(c)
+				break
+			}
+		}
+	}
+
+	return score
+}
+
+// GetDistinctScore returns the score that the other is distinct from the stores.
+// A higher score means the other store is more different from the existed stores.
+func (r *Replication) GetDistinctScore(stores []*storeInfo, other *storeInfo) float64 {
+	score := float64(0)
+
+	for i := range r.cfg.LocationLabels {
+		keys := r.cfg.LocationLabels[0 : i+1]
+		level := len(r.cfg.LocationLabels) - i - 1
+		levelScore := math.Pow(replicaBaseScore, float64(level))
+
 		for _, s := range stores {
-			if s.GetId() == store.GetId() {
+			if s.GetId() == other.GetId() {
 				continue
 			}
-			if s.getLabelValue(key) == value {
-				score += baseScore
-				candidates = append(candidates, s)
+			id1 := s.getLocationID(keys)
+			if len(id1) == 0 {
+				return 0
 			}
-		}
-
-		// If no candidates, it means the label value is different from others.
-		if len(candidates) == 0 {
-			break
+			id2 := other.getLocationID(keys)
+			if len(id2) == 0 {
+				return 0
+			}
+			if id1 != id2 {
+				score += levelScore
+			}
 		}
 	}
 
@@ -76,12 +115,14 @@ func (r *Replication) GetReplicaScore(candidates []*storeInfo, store *storeInfo)
 // Returns 1 if store A is better than store B.
 // Returns -1 if store B is better than store A.
 func compareStoreScore(storeA *storeInfo, scoreA float64, storeB *storeInfo, scoreB float64) int {
-	if scoreA < scoreB {
+	// The store with higher score is better.
+	if scoreA > scoreB {
 		return 1
 	}
-	if scoreA > scoreB {
+	if scoreA < scoreB {
 		return -1
 	}
+	// The store with lower storage ratio is better.
 	if storeA.storageRatio() < storeB.storageRatio() {
 		return 1
 	}

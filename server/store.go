@@ -107,6 +107,18 @@ func (s *storeInfo) getLabelValue(key string) string {
 	return ""
 }
 
+func (s *storeInfo) getLocationID(keys []string) string {
+	id := ""
+	for _, k := range keys {
+		v := s.getLabelValue(k)
+		if len(v) == 0 {
+			return ""
+		}
+		id += s.getLabelValue(k)
+	}
+	return id
+}
+
 // StoreStatus contains information about a store's status.
 type StoreStatus struct {
 	*pdpb.StoreStats
