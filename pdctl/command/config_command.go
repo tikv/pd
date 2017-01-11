@@ -17,9 +17,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -62,19 +60,12 @@ func NewSetConfigCommand() *cobra.Command {
 }
 
 func showConfigCommandFunc(cmd *cobra.Command, args []string) {
-	url := getAddressFromCmd(cmd, schedulePrefix)
-	r, err := http.Get(url)
+	r, err := doRequest(cmd, schedulePrefix, "GET")
 	if err != nil {
 		fmt.Printf("Failed to get config:[%s]\n", err)
 		return
 	}
-	defer r.Body.Close()
-	if r.StatusCode != http.StatusOK {
-		printResponseError(r)
-		return
-	}
-
-	io.Copy(os.Stdout, r.Body)
+	fmt.Println(r)
 }
 
 func setConfigCommandFunc(cmd *cobra.Command, args []string) {
@@ -86,20 +77,12 @@ func setConfigCommandFunc(cmd *cobra.Command, args []string) {
 	url := getAddressFromCmd(cmd, schedulePrefix)
 	var value interface{}
 	data := make(map[string]interface{})
-
-	r, err := http.Get(url)
+	err := doRequestWithData(cmd, schedulePrefix, "GET", &data)
 	if err != nil {
 		fmt.Printf("Failed to set config:[%s]\n", err)
 		return
 	}
-	if r.StatusCode != http.StatusOK {
-		printResponseError(r)
-		r.Body.Close()
-		return
-	}
 
-	json.NewDecoder(r.Body).Decode(&data)
-	r.Body.Close()
 	value, err = strconv.ParseFloat(args[1], 64)
 	if err != nil {
 		value = args[1]
@@ -113,7 +96,7 @@ func setConfigCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	url = getAddressFromCmd(cmd, configPrefix)
-	r, err = http.Post(url, "application/json", bytes.NewBuffer(req))
+	r, err := http.Post(url, "application/json", bytes.NewBuffer(req))
 	if err != nil {
 		fmt.Printf("Failed to set config:[%s]\n", err)
 	}

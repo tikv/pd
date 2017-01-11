@@ -13,37 +13,88 @@
 
 package command
 
-import (
-	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"os"
+import "fmt"
 
-	"github.com/spf13/cobra"
+const (
+	// B = 1 byte
+	B ByteSize = 1
+	// KB = 1024 * 1 byte = 1 kilobyte
+	KB = B << 10
+	// MB = 1024 * 1 kilobyte = 1 megabyte
+	MB = KB << 10
+	// GB = 1024 * 1 megabyte = 1 gigabyte
+	GB = MB << 10
+	// TB = 1024 * 1 gigabyte = 1 terabyte
+	TB = GB << 10
+	// PB = 1024 * 1 terabyte = 1 petabyte
+	PB = TB << 10
+	// EB = 1024 * 1 petabyte = 1 exabyte
+	EB = PB << 10
 )
 
-func getAddressFromCmd(cmd *cobra.Command, prefix string) string {
-	p, err := cmd.Flags().GetString("pd")
-	if err != nil {
-		fmt.Println("Get pd address error,should set flag with '-u'")
-		os.Exit(1)
-	}
+// ByteSize used for data size type
+type ByteSize uint64
 
-	u, err := url.Parse(p)
-	if err != nil {
-		fmt.Println("address is wrong format,should like 'http://127.0.0.1:2379'")
-	}
-	if u.Scheme == "" {
-		u.Scheme = "http"
-	}
-	s := fmt.Sprintf("%s/%s", u, prefix)
-	return s
+func (b ByteSize) toBytes() uint64 {
+	return uint64(b)
 }
 
-func printResponseError(r *http.Response) {
-	fmt.Printf("[%d]:", r.StatusCode)
-	io.Copy(os.Stdout, r.Body)
+func (b ByteSize) toKBytes() float64 {
+	v := b / KB
+	r := b % KB
+	return float64(v) + float64(r)/float64(KB)
+}
+
+func (b ByteSize) toMBytes() float64 {
+	v := b / MB
+	r := b % MB
+	return float64(v) + float64(r)/float64(MB)
+}
+
+func (b ByteSize) toGBytes() float64 {
+	v := b / GB
+	r := b % GB
+	return float64(v) + float64(r)/float64(GB)
+}
+
+func (b ByteSize) toTBytes() float64 {
+	v := b / TB
+	r := b % TB
+	return float64(v) + float64(r)/float64(TB)
+}
+
+func (b ByteSize) toPBytes() float64 {
+	v := b / PB
+	r := b % PB
+	return float64(v) + float64(r)/float64(PB)
+}
+
+func (b ByteSize) toEBytes() float64 {
+	v := b / EB
+	r := b % EB
+	return float64(v) + float64(r)/float64(EB)
+}
+
+// MarshalJSON implement josn MarshalJSON, format like "GB","MB","KB"
+func (b ByteSize) MarshalJSON() ([]byte, error) {
+	var r string
+	switch {
+	case b > EB:
+		r = fmt.Sprintf("%.2f EB", b.toEBytes())
+	case b > PB:
+		r = fmt.Sprintf("%.2f PB", b.toPBytes())
+	case b > TB:
+		r = fmt.Sprintf("%.2f TB", b.toTBytes())
+	case b > GB:
+		r = fmt.Sprintf("%.2f GB", b.toGBytes())
+	case b > MB:
+		r = fmt.Sprintf("%.2f MB", b.toMBytes())
+	case b > KB:
+		r = fmt.Sprintf("%.2f KB", b.toKBytes())
+	default:
+		r = fmt.Sprintf("%d B", b)
+	}
+	return []byte(`"` + r + `"`), nil
 }
 
 // UsageTemplate will used to generate a help information
