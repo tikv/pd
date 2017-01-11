@@ -106,3 +106,24 @@ func (s *testReplicationSuite) TestDistinctScore(c *C) {
 	store := cluster.getStore(100)
 	c.Assert(rep.GetDistinctScore(stores, store), Equals, float64(0))
 }
+
+func (s *testReplicationSuite) TestCompareStoreScore(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+
+	tc.addRegionStore(1, 1, 0.1)
+	tc.addRegionStore(2, 1, 0.1)
+	tc.addRegionStore(3, 1, 0.2)
+
+	store1 := cluster.getStore(1)
+	store2 := cluster.getStore(2)
+	store3 := cluster.getStore(3)
+
+	c.Assert(compareStoreScore(store1, 2, store2, 1), Equals, 1)
+	c.Assert(compareStoreScore(store1, 1, store2, 1), Equals, 0)
+	c.Assert(compareStoreScore(store1, 1, store2, 2), Equals, -1)
+
+	c.Assert(compareStoreScore(store1, 2, store3, 1), Equals, 1)
+	c.Assert(compareStoreScore(store1, 1, store3, 1), Equals, 1)
+	c.Assert(compareStoreScore(store1, 1, store3, 2), Equals, -1)
+}
