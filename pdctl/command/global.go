@@ -35,6 +35,9 @@ func InitPDClient(cmd *cobra.Command) error {
 		return err
 	}
 	log.SetLevel(log.LOG_LEVEL_NONE)
+	if pdClient != nil {
+		return nil
+	}
 	pdClient, err = pd.NewClient([]string{addr})
 	if err != nil {
 		return err

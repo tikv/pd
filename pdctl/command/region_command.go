@@ -30,9 +30,9 @@ var (
 	regionPrefix  = "pd/api/v1/region/%s"
 )
 
-type regionInfos struct {
-	Regions *metapb.Region `json:"regions"`
-	Leader  *metapb.Peer   `json:"leader"`
+type regionInfo struct {
+	Region *metapb.Region `json:"region"`
+	Leader *metapb.Peer   `json:"leader"`
 }
 
 // NewRegionCommand return a region subcommand of rootCmd
@@ -75,7 +75,7 @@ func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 func NewRegionWithKeyCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   "key <key>",
-		Short: "show the regions with key",
+		Short: "show the region with key",
 		Run:   showRegionWithTableCommandFunc,
 	}
 	return r
@@ -92,15 +92,15 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println("Error: ", err)
 		return
 	}
-	regions, peers, err := client.GetRegion([]byte(key))
+	region, leader, err := client.GetRegion([]byte(key))
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return
 	}
 
-	r := &regionInfos{
-		Regions: regions,
-		Leader:  peers,
+	r := &regionInfo{
+		Region: region,
+		Leader: leader,
 	}
 	infos, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
