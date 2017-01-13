@@ -14,12 +14,14 @@
 package command
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
 
+	"github.com/pingcap/pd/pd-client"
 	"github.com/spf13/cobra"
 )
 
@@ -35,6 +37,7 @@ func NewRegionCommand() *cobra.Command {
 		Short: "show the region status",
 		Run:   showRegionCommandFunc,
 	}
+	r.AddCommand(NewRegionTableCommand())
 	return r
 }
 
@@ -61,4 +64,30 @@ func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	io.Copy(os.Stdout, r.Body)
+}
+
+func NewRegionTableCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "table <key>",
+		Short: "show the regions with table key",
+		Run:   showRegionWithTableCommandFunc,
+	}
+	return r
+}
+
+func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
+	key := args[0]
+	addr, err := cmd.Flags().GetString("pd")
+	client := pd.NewClient([]string{addr})
+	regions, peers := client.GetRegion([]byte(key))
+	regionsInfo, err := json.Marshal(regions)
+	if err != nil {
+		fmt.Printlf("err: %s", err)
+	}
+	fmt.Println(string(regionsInfo))
+	peersInfo, err := json.Marshal(peers)
+	if err != nil {
+		fmt.Printlf("err: %s", err)
+	}
+	fmt.Println(string(peersInfo))
 }
