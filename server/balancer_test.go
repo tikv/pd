@@ -226,82 +226,12 @@ func (s *testStorageBalancerSuite) TestBalance(c *C) {
 	c.Assert(sb.Schedule(cluster), IsNil)
 }
 
-func (s *testStorageBalancerSuite) TestSafe(c *C) {
+func (s *testStorageBalancerSuite) TestReplicas3(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	opt.rep = newTestReplication(3, false, "zone", "rack", "host")
-
-	sb := newStorageBalancer(opt)
-
-	// Store 1 has the largest storage ratio, so the balancer try to replace peer in store 1.
-	tc.addLabelsStore(1, 1, 0.5, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
-	tc.addLabelsStore(2, 1, 0.4, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
-	tc.addLabelsStore(3, 1, 0.3, map[string]string{"zone": "z1", "rack": "r2", "host": "h2"})
-
-	tc.addLeaderRegion(1, 1, 2, 3)
-
-	// Store 4 has smaller storage ratio than store 1, but it is unsafe.
-	tc.addLabelsStore(4, 1, 0.1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
-	c.Assert(sb.Schedule(cluster), IsNil)
-	c.Assert(sb.cache.get(1), IsTrue)
-	sb.cache.delete(1)
-
-	// Store 5 has smaller storage ratio than store 1, and it is safe.
-	tc.addLabelsStore(5, 1, 0.2, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"})
-	checkTransferPeer(c, sb.Schedule(cluster), 1, 5)
-
-	// Store 6 has smaller storage ratio than store 5, but the distinct score decrease.
-	tc.addLabelsStore(6, 1, 0.1, map[string]string{"zone": "z1", "rack": "r2", "host": "h3"})
-	checkTransferPeer(c, sb.Schedule(cluster), 1, 5)
-}
-
-func (s *testStorageBalancerSuite) TestSafe2(c *C) {
-	cluster := newClusterInfo(newMockIDAllocator())
-	tc := newTestClusterInfo(cluster)
-
-	_, opt := newTestScheduleConfig()
-	opt.rep = newTestReplication(5, false, "zone", "rack", "host")
-
-	sb := newStorageBalancer(opt)
-
-	tc.addLabelsStore(1, 1, 0.1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
-	tc.addLabelsStore(2, 1, 0.2, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
-	tc.addLabelsStore(3, 1, 0.3, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
-	tc.addLabelsStore(4, 1, 0.4, map[string]string{"zone": "z4", "rack": "r1", "host": "h1"})
-	tc.addLabelsStore(5, 1, 0.5, map[string]string{"zone": "z5", "rack": "r1", "host": "h1"})
-
-	tc.addLeaderRegion(1, 1, 2, 3, 4, 5)
-
-	// Store 6 has smaller ratio, but it is unsafe.
-	tc.addLabelsStore(6, 1, 0.3, map[string]string{"zone": "z5", "rack": "r2", "host": "h1"})
-	c.Assert(sb.Schedule(cluster), IsNil)
-	c.Assert(sb.cache.get(5), IsTrue)
-	sb.cache.delete(5)
-
-	// Store 7 has smaller ratio, and it is safe.
-	tc.addLabelsStore(7, 1, 0.4, map[string]string{"zone": "z6", "rack": "r1", "host": "h1"})
-	checkTransferPeer(c, sb.Schedule(cluster), 5, 7)
-
-	// Store 1 has smaller ratio, and it is safe.
-	tc.addLeaderRegion(1, 2, 3, 4, 5, 6)
-	checkTransferPeer(c, sb.Schedule(cluster), 5, 1)
-
-	tc.addLabelsStore(11, 1, 0.9, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
-	tc.addLabelsStore(12, 1, 0.8, map[string]string{"zone": "z2", "rack": "r2", "host": "h1"})
-	tc.addLabelsStore(13, 1, 0.7, map[string]string{"zone": "z3", "rack": "r2", "host": "h1"})
-
-	tc.addLeaderRegion(1, 2, 3, 11, 12, 13)
-	checkTransferPeer(c, sb.Schedule(cluster), 11, 1)
-}
-
-func (s *testStorageBalancerSuite) TestUnsafe(c *C) {
-	cluster := newClusterInfo(newMockIDAllocator())
-	tc := newTestClusterInfo(cluster)
-
-	_, opt := newTestScheduleConfig()
-	opt.rep = newTestReplication(3, true, "zone", "rack", "host")
+	opt.rep = newTestReplication(3, "zone", "rack", "host")
 
 	sb := newStorageBalancer(opt)
 
@@ -330,7 +260,20 @@ func (s *testStorageBalancerSuite) TestUnsafe(c *C) {
 	checkTransferPeer(c, sb.Schedule(cluster), 1, 6)
 
 	// Store 7 has the same storage ratio with store 6, but in a different host.
-	tc.addLabelsStore(7, 1, 0.1, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"})
+	tc.addLabelsStore(7, 1, 0.2, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"})
+	checkTransferPeer(c, sb.Schedule(cluster), 1, 7)
+
+	// If store 7 is not available, we wait.
+	tc.setStoreDown(7)
+	c.Assert(sb.Schedule(cluster), IsNil)
+	c.Assert(sb.cache.get(1), IsTrue)
+	tc.setStoreUp(7)
+	checkTransferPeer(c, sb.Schedule(cluster), 2, 7)
+	sb.cache.delete(1)
+	checkTransferPeer(c, sb.Schedule(cluster), 1, 7)
+
+	// Store 8 has smaller storage ratio than store 7, but the distinct score decrease.
+	tc.addLabelsStore(8, 1, 0.1, map[string]string{"zone": "z1", "rack": "r2", "host": "h3"})
 	checkTransferPeer(c, sb.Schedule(cluster), 1, 7)
 
 	// Take down 4,5,6,7
@@ -343,8 +286,45 @@ func (s *testStorageBalancerSuite) TestUnsafe(c *C) {
 	sb.cache.delete(1)
 
 	// Store 7 has different zone with other stores but larger storage ratio than store 1.
-	tc.addLabelsStore(8, 1, 0.6, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
+	tc.addLabelsStore(9, 1, 0.6, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
 	c.Assert(sb.Schedule(cluster), IsNil)
+}
+
+func (s *testStorageBalancerSuite) TestReplicas5(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+
+	_, opt := newTestScheduleConfig()
+	opt.rep = newTestReplication(5, "zone", "rack", "host")
+
+	sb := newStorageBalancer(opt)
+
+	tc.addLabelsStore(1, 1, 0.1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
+	tc.addLabelsStore(2, 1, 0.2, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
+	tc.addLabelsStore(3, 1, 0.3, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
+	tc.addLabelsStore(4, 1, 0.4, map[string]string{"zone": "z4", "rack": "r1", "host": "h1"})
+	tc.addLabelsStore(5, 1, 0.5, map[string]string{"zone": "z5", "rack": "r1", "host": "h1"})
+
+	tc.addLeaderRegion(1, 1, 2, 3, 4, 5)
+
+	// Store 6 has smaller ratio.
+	tc.addLabelsStore(6, 1, 0.3, map[string]string{"zone": "z5", "rack": "r2", "host": "h1"})
+	checkTransferPeer(c, sb.Schedule(cluster), 5, 6)
+
+	// Store 7 has smaller ratio, and it is safe.
+	tc.addLabelsStore(7, 1, 0.4, map[string]string{"zone": "z6", "rack": "r1", "host": "h1"})
+	checkTransferPeer(c, sb.Schedule(cluster), 5, 7)
+
+	// Store 1 has smaller ratio, and it is safe.
+	tc.addLeaderRegion(1, 2, 3, 4, 5, 6)
+	checkTransferPeer(c, sb.Schedule(cluster), 5, 1)
+
+	tc.addLabelsStore(11, 1, 0.9, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
+	tc.addLabelsStore(12, 1, 0.8, map[string]string{"zone": "z2", "rack": "r2", "host": "h1"})
+	tc.addLabelsStore(13, 1, 0.7, map[string]string{"zone": "z3", "rack": "r2", "host": "h1"})
+
+	tc.addLeaderRegion(1, 2, 3, 11, 12, 13)
+	checkTransferPeer(c, sb.Schedule(cluster), 11, 1)
 }
 
 var _ = Suite(&testReplicaCheckerSuite{})
@@ -426,7 +406,7 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	opt.rep = newTestReplication(3, false, "zone", "rack", "host")
+	opt.rep = newTestReplication(3, "zone", "rack", "host")
 
 	rc := newReplicaChecker(opt, cluster)
 
@@ -475,7 +455,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	opt.rep = newTestReplication(3, false, "zone", "rack", "host")
+	opt.rep = newTestReplication(3, "zone", "rack", "host")
 
 	rc := newReplicaChecker(opt, cluster)
 
@@ -554,7 +534,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	opt.rep = newTestReplication(5, false, "zone", "host")
+	opt.rep = newTestReplication(5, "zone", "host")
 
 	rc := newReplicaChecker(opt, cluster)
 

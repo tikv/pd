@@ -211,7 +211,8 @@ func (f *replicaScoreFilter) FilterSource(store *storeInfo) bool {
 }
 
 func (f *replicaScoreFilter) FilterTarget(store *storeInfo) bool {
-	return f.rep.GetReplicaScore(append(f.stores, store)) < f.safeScore
+	newStores := append([]*storeInfo{store}, f.stores...)
+	return f.rep.GetReplicaScore(newStores) < f.safeScore
 }
 
 // distinctScoreFilter ensures that distinct score will not decrease.

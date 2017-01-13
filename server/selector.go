@@ -34,7 +34,7 @@ func newBalanceSelector(kind ResourceKind, filters []Filter) *balanceSelector {
 }
 
 func (s *balanceSelector) SelectSource(stores []*storeInfo, filters ...Filter) *storeInfo {
-	filters = append(s.filters, filters...)
+	filters = append(filters, s.filters...)
 
 	var result *storeInfo
 	for _, store := range stores {
@@ -49,7 +49,7 @@ func (s *balanceSelector) SelectSource(stores []*storeInfo, filters ...Filter) *
 }
 
 func (s *balanceSelector) SelectTarget(stores []*storeInfo, filters ...Filter) *storeInfo {
-	filters = append(s.filters, filters...)
+	filters = append(filters, s.filters...)
 
 	var result *storeInfo
 	for _, store := range stores {

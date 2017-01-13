@@ -34,11 +34,6 @@ func (r *Replication) GetMaxReplicas() int {
 	return int(r.cfg.MaxReplicas)
 }
 
-// AllowUnsafeBalance returns true if it is allowed to do unsafe balance.
-func (r *Replication) AllowUnsafeBalance() bool {
-	return r.cfg.AllowUnsafeBalance
-}
-
 // GetReplicaScore returns the failure tolerance score of these replicas.
 // A higher score means these replicas can tolerant more kind of failures.
 func (r *Replication) GetReplicaScore(replicas []*storeInfo) float64 {

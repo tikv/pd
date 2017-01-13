@@ -15,11 +15,10 @@ package server
 
 import . "github.com/pingcap/check"
 
-func newTestReplication(maxReplicas int, unsafeBalance bool, locationLabels ...string) *Replication {
+func newTestReplication(maxReplicas int, locationLabels ...string) *Replication {
 	cfg := &ReplicationConfig{
-		MaxReplicas:        uint64(maxReplicas),
-		LocationLabels:     locationLabels,
-		AllowUnsafeBalance: unsafeBalance,
+		MaxReplicas:    uint64(maxReplicas),
+		LocationLabels: locationLabels,
 	}
 	return newReplication(cfg)
 }
@@ -31,7 +30,7 @@ type testReplicationSuite struct{}
 func (s *testReplicationSuite) TestReplicaScore(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
-	rep := newTestReplication(3, false, "zone", "rack", "host")
+	rep := newTestReplication(3, "zone", "rack", "host")
 
 	zones := []string{"z1", "z2", "z3"}
 	racks := []string{"r1", "r2", "r3"}
@@ -70,7 +69,7 @@ func (s *testReplicationSuite) TestReplicaScore(c *C) {
 func (s *testReplicationSuite) TestDistinctScore(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
-	rep := newTestReplication(3, false, "zone", "rack", "host")
+	rep := newTestReplication(3, "zone", "rack", "host")
 
 	zones := []string{"z1", "z2", "z3"}
 	racks := []string{"r1", "r2", "r3"}

@@ -66,24 +66,28 @@ type storageBalancer struct {
 	opt      *scheduleOption
 	rep      *Replication
 	cache    *idCache
+	filters  []Filter
 	selector Selector
 }
 
 func newStorageBalancer(opt *scheduleOption) *storageBalancer {
 	cache := newIDCache(storeCacheInterval, 4*storeCacheInterval)
 
-	var filters []Filter
-	filters = append(filters, newCacheFilter(cache))
-	filters = append(filters, newStateFilter(opt))
-	filters = append(filters, newHealthFilter(opt))
-	filters = append(filters, newRegionCountFilter(opt))
-	filters = append(filters, newSnapshotCountFilter(opt))
+	var hardFilters []Filter
+	hardFilters = append(hardFilters, newCacheFilter(cache))
+	hardFilters = append(hardFilters, newStateFilter(opt))
+	hardFilters = append(hardFilters, newRegionCountFilter(opt))
+
+	var softFilters []Filter
+	softFilters = append(softFilters, newHealthFilter(opt))
+	softFilters = append(softFilters, newSnapshotCountFilter(opt))
 
 	return &storageBalancer{
 		opt:      opt,
 		rep:      opt.GetReplication(),
 		cache:    cache,
-		selector: newBalanceSelector(storageKind, filters),
+		filters:  softFilters,
+		selector: newBalanceSelector(storageKind, hardFilters),
 	}
 }
 
@@ -130,14 +134,22 @@ func (s *storageBalancer) transferPeer(cluster *clusterInfo, region *regionInfo,
 	// with the new peer.
 	distinctGuard := newDistinctScoreFilter(s.rep, stores, source)
 
-	// See if we can select a safe one first.
-	newPeer := scheduleAddPeer(cluster, s.selector, excluded, safeGuard, distinctGuard)
-	if newPeer == nil && s.rep.AllowUnsafeBalance() {
-		// If we can't, we find an unsafe one if it is allowed.
-		newPeer = scheduleAddPeer(cluster, s.selector, excluded, distinctGuard)
-	}
-	if newPeer == nil {
-		return nil
+	// See if we can select a safe new peer first.
+	filters := []Filter{excluded, distinctGuard, safeGuard}
+	newPeer := scheduleAddPeer(cluster, s.selector, filters...)
+	if newPeer != nil {
+		// If the safe new peer is not available for now, we wait.
+		newStore := cluster.getStore(newPeer.GetStoreId())
+		if filterTarget(newStore, s.filters) {
+			return nil
+		}
+	} else {
+		// If we can't find a safe new peer, we just find the smallest.
+		filters = append([]Filter{excluded, distinctGuard}, s.filters...)
+		newPeer = scheduleAddPeer(cluster, s.selector, filters...)
+		if newPeer == nil {
+			return nil
+		}
 	}
 
 	target := cluster.getStore(newPeer.GetStoreId())

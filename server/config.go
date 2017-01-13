@@ -340,13 +340,6 @@ type ReplicationConfig struct {
 	// For example, ["zone", "rack"] means that we should place replicas to
 	// different zones first, then to different racks if we don't have enough zones.
 	LocationLabels []string `toml:"location-labels" json:"location-labels"`
-
-	// Allow to balance even if it is unsafe. The balance algorithm tries its
-	// best to keep safe, but if resources are limited (not enough zones or
-	// racks), or under some abnormal conditions (stores are down or full), the
-	// current implementation can't balance and guarantee replicas are safe at
-	// the same time.
-	AllowUnsafeBalance bool `toml:"allow-unsafe-balance" json:"allow-unsafe-balance"`
 }
 
 func (c *ReplicationConfig) adjust() {
