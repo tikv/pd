@@ -191,30 +191,6 @@ func (f *storageThresholdFilter) FilterTarget(store *storeInfo) bool {
 	return store.storageRatio() > storageRatioThreshold
 }
 
-// replicaScoreFilter ensures that replica score will not decrease.
-type replicaScoreFilter struct {
-	rep       *Replication
-	stores    []*storeInfo
-	safeScore float64
-}
-
-func newReplicaScoreFilter(rep *Replication, stores []*storeInfo) *replicaScoreFilter {
-	return &replicaScoreFilter{
-		rep:       rep,
-		stores:    stores,
-		safeScore: rep.GetReplicaScore(stores),
-	}
-}
-
-func (f *replicaScoreFilter) FilterSource(store *storeInfo) bool {
-	return false
-}
-
-func (f *replicaScoreFilter) FilterTarget(store *storeInfo) bool {
-	newStores := append([]*storeInfo{store}, f.stores...)
-	return f.rep.GetReplicaScore(newStores) < f.safeScore
-}
-
 // distinctScoreFilter ensures that distinct score will not decrease.
 type distinctScoreFilter struct {
 	rep       *Replication

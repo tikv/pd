@@ -66,28 +66,24 @@ type storageBalancer struct {
 	opt      *scheduleOption
 	rep      *Replication
 	cache    *idCache
-	filters  []Filter
 	selector Selector
 }
 
 func newStorageBalancer(opt *scheduleOption) *storageBalancer {
 	cache := newIDCache(storeCacheInterval, 4*storeCacheInterval)
 
-	var hardFilters []Filter
-	hardFilters = append(hardFilters, newCacheFilter(cache))
-	hardFilters = append(hardFilters, newStateFilter(opt))
-	hardFilters = append(hardFilters, newRegionCountFilter(opt))
-
-	var softFilters []Filter
-	softFilters = append(softFilters, newHealthFilter(opt))
-	softFilters = append(softFilters, newSnapshotCountFilter(opt))
+	var filters []Filter
+	filters = append(filters, newCacheFilter(cache))
+	filters = append(filters, newStateFilter(opt))
+	filters = append(filters, newHealthFilter(opt))
+	filters = append(filters, newRegionCountFilter(opt))
+	filters = append(filters, newSnapshotCountFilter(opt))
 
 	return &storageBalancer{
 		opt:      opt,
 		rep:      opt.GetReplication(),
 		cache:    cache,
-		filters:  softFilters,
-		selector: newBalanceSelector(storageKind, hardFilters),
+		selector: newBalanceSelector(storageKind, filters),
 	}
 }
 
@@ -121,35 +117,15 @@ func (s *storageBalancer) Schedule(cluster *clusterInfo) Operator {
 }
 
 func (s *storageBalancer) transferPeer(cluster *clusterInfo, region *regionInfo, oldPeer *metapb.Peer) Operator {
+	// scoreGuard guarantees that the distinct score will not decrease.
 	stores := cluster.getRegionStores(region)
 	source := cluster.getStore(oldPeer.GetStoreId())
+	scoreGuard := newDistinctScoreFilter(s.rep, stores, source)
 
-	// Allocate a new peer from the other store with smallest storage ratio.
-	excluded := newExcludedFilter(nil, region.GetStoreIds())
-
-	// safeGuard guarantees the replica score after adding the new peer.
-	// It means that we are safe to add the new peer to the region.
-	safeGuard := newReplicaScoreFilter(s.rep, stores)
-	// distinctGuard guarantees the distinct score after replacing the old peer
-	// with the new peer.
-	distinctGuard := newDistinctScoreFilter(s.rep, stores, source)
-
-	// See if we can select a safe new peer first.
-	filters := []Filter{excluded, distinctGuard, safeGuard}
-	newPeer := scheduleAddPeer(cluster, s.selector, filters...)
-	if newPeer != nil {
-		// If the safe new peer is not available for now, we wait.
-		newStore := cluster.getStore(newPeer.GetStoreId())
-		if filterTarget(newStore, s.filters) {
-			return nil
-		}
-	} else {
-		// If we can't find a safe new peer, we just find the smallest.
-		filters = append([]Filter{excluded, distinctGuard}, s.filters...)
-		newPeer = scheduleAddPeer(cluster, s.selector, filters...)
-		if newPeer == nil {
-			return nil
-		}
+	checker := newReplicaChecker(s.opt, cluster)
+	newPeer, _ := checker.selectBestPeer(region, scoreGuard)
+	if newPeer == nil {
+		return nil
 	}
 
 	target := cluster.getStore(newPeer.GetStoreId())
@@ -191,7 +167,7 @@ func (r *replicaChecker) Check(region *regionInfo) Operator {
 	}
 
 	if len(region.GetPeers()) < r.rep.GetMaxReplicas() {
-		newPeer, _ := r.selectBestPeer(region, r.filters...)
+		newPeer, _ := r.selectBestPeer(region)
 		if newPeer == nil {
 			return nil
 		}
@@ -234,7 +210,7 @@ func (r *replicaChecker) selectBestPeer(region *regionInfo, filters ...Filter) (
 		}
 	}
 
-	if bestStore == nil {
+	if bestStore == nil || filterTarget(bestStore, r.filters) {
 		return nil, 0
 	}
 
@@ -267,20 +243,18 @@ func (r *replicaChecker) selectWorstPeer(region *regionInfo, filters ...Filter) 
 		}
 	}
 
-	if worstStore == nil {
+	if worstStore == nil || filterSource(worstStore, r.filters) {
 		return nil, 0
 	}
 	return region.GetStorePeer(worstStore.GetId()), worstScore
 }
 
 // selectBestReplacement returns the best peer to replace the region peer.
-func (r *replicaChecker) selectBestReplacement(region *regionInfo, peer *metapb.Peer, filters ...Filter) (*metapb.Peer, float64) {
+func (r *replicaChecker) selectBestReplacement(region *regionInfo, peer *metapb.Peer) (*metapb.Peer, float64) {
 	// Get a new region without the peer we are going to replace.
 	newRegion := region.clone()
 	newRegion.RemoveStorePeer(peer.GetStoreId())
-	// Get the best peer in other stores.
-	filters = append(filters, newExcludedFilter(nil, region.GetStoreIds()))
-	return r.selectBestPeer(newRegion, filters...)
+	return r.selectBestPeer(newRegion, newExcludedFilter(nil, region.GetStoreIds()))
 }
 
 func (r *replicaChecker) checkDownPeer(region *regionInfo) Operator {
@@ -307,25 +281,10 @@ func (r *replicaChecker) checkOfflinePeer(region *regionInfo) Operator {
 		if store.isUp() {
 			continue
 		}
-
-		// See if we can select a safe replacement.
-		stores := r.cluster.getRegionStores(region)
-		safeGuard := newReplicaScoreFilter(r.rep, stores)
-		newPeer, _ := r.selectBestReplacement(region, peer, safeGuard)
-		if newPeer != nil {
-			// If the safe replacement is not available for now, we wait.
-			newStore := r.cluster.getStore(newPeer.GetStoreId())
-			if filterTarget(newStore, r.filters) {
-				return nil
-			}
-		} else {
-			// If we there is no safe replacement, we just find the best.
-			newPeer, _ = r.selectBestReplacement(region, peer, r.filters...)
-			if newPeer == nil {
-				return nil
-			}
+		newPeer, _ := r.selectBestPeer(region)
+		if newPeer == nil {
+			return nil
 		}
-
 		return newTransferPeer(region, peer, newPeer)
 	}
 
@@ -337,7 +296,7 @@ func (r *replicaChecker) checkBestReplacement(region *regionInfo) Operator {
 	if oldPeer == nil {
 		return nil
 	}
-	newPeer, newScore := r.selectBestReplacement(region, oldPeer, r.filters...)
+	newPeer, newScore := r.selectBestReplacement(region, oldPeer)
 	if newPeer == nil {
 		return nil
 	}

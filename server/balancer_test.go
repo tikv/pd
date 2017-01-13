@@ -311,20 +311,20 @@ func (s *testStorageBalancerSuite) TestReplicas5(c *C) {
 	tc.addLabelsStore(6, 1, 0.3, map[string]string{"zone": "z5", "rack": "r2", "host": "h1"})
 	checkTransferPeer(c, sb.Schedule(cluster), 5, 6)
 
-	// Store 7 has smaller ratio, and it is safe.
+	// Store 7 has smaller ratio and higher score.
 	tc.addLabelsStore(7, 1, 0.4, map[string]string{"zone": "z6", "rack": "r1", "host": "h1"})
 	checkTransferPeer(c, sb.Schedule(cluster), 5, 7)
 
-	// Store 1 has smaller ratio, and it is safe.
+	// Store 1 has smaller ratio and higher score.
 	tc.addLeaderRegion(1, 2, 3, 4, 5, 6)
 	checkTransferPeer(c, sb.Schedule(cluster), 5, 1)
 
+	// Store 6 has smaller ratio and higher score.
 	tc.addLabelsStore(11, 1, 0.9, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
 	tc.addLabelsStore(12, 1, 0.8, map[string]string{"zone": "z2", "rack": "r2", "host": "h1"})
 	tc.addLabelsStore(13, 1, 0.7, map[string]string{"zone": "z3", "rack": "r2", "host": "h1"})
-
 	tc.addLeaderRegion(1, 2, 3, 11, 12, 13)
-	checkTransferPeer(c, sb.Schedule(cluster), 11, 1)
+	checkTransferPeer(c, sb.Schedule(cluster), 11, 6)
 }
 
 var _ = Suite(&testReplicaCheckerSuite{})
@@ -343,18 +343,20 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	// Add stores 1,2,3,4.
 	tc.addRegionStore(1, 4, 0.4)
 	tc.addRegionStore(2, 3, 0.3)
-	tc.addRegionStore(3, 2, 0.1)
-	tc.addRegionStore(4, 1, 0.2)
+	tc.addRegionStore(3, 2, 0.2)
+	tc.addRegionStore(4, 1, 0.1)
 	// Add region 1 with leader in store 1 and follower in store 2.
 	tc.addLeaderRegion(1, 1, 2)
 
 	// Region has 2 peers, we need to add a new peer.
 	region := cluster.getRegion(1)
-	checkAddPeer(c, rc.Check(region), 3)
+	checkAddPeer(c, rc.Check(region), 4)
 
 	// Test healthFilter.
-	// If store 3 is down, we can add to store 4.
-	tc.setStoreDown(3)
+	// If store 4 is down, we wait.
+	tc.setStoreDown(4)
+	c.Assert(rc.Check(region), IsNil)
+	tc.setStoreUp(4)
 	checkAddPeer(c, rc.Check(region), 4)
 
 	// Test snapshotCountFilter.
@@ -368,9 +370,9 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	// Test storageThresholdFilter.
 	// If storage ratio > storageRatioThreshold, we can not add peer.
 	tc.addRegionStore(4, 1, 0.9)
-	c.Assert(rc.Check(region), IsNil)
+	checkAddPeer(c, rc.Check(region), 3)
 	// If storage ratio < storageRatioThreshold, we can add peer again.
-	tc.addRegionStore(4, 1, 0.2)
+	tc.addRegionStore(4, 1, 0.1)
 	checkAddPeer(c, rc.Check(region), 4)
 
 	// Add peer in store 4, and we have enough replicas.
@@ -379,7 +381,6 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 
 	// Add peer in store 3, and we have redundant replicas.
-	tc.setStoreUp(3)
 	peer3, _ := cluster.allocPeer(3)
 	region.Peers = append(region.Peers, peer3)
 	checkRemovePeer(c, rc.Check(region), 1)
@@ -433,20 +434,21 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	region.Peers = append(region.Peers, peer4)
 	checkRemovePeer(c, rc.Check(region), 4)
 
+	// Test healthFilter.
 	tc.setStoreBusy(4, true)
+	c.Assert(rc.Check(region), IsNil)
+	tc.setStoreBusy(4, false)
 	checkRemovePeer(c, rc.Check(region), 4)
 	region.RemoveStorePeer(4)
 
-	// We can transfer peer to store 4, but it is busy.
+	// Transfer peer to store 4.
 	tc.setStoreOffline(3)
-	c.Assert(rc.Check(region), IsNil)
-	tc.setStoreBusy(4, false)
 	checkTransferPeer(c, rc.Check(region), 3, 4)
 
 	// Store 5 has a different zone, we can keep it safe.
 	tc.addLabelsStore(5, 1, 0.7, map[string]string{"zone": "z4", "rack": "r1", "host": "h1"})
 	checkTransferPeer(c, rc.Check(region), 3, 5)
-	tc.setStoreBusy(5, true)
+	tc.updateSnapshotCount(5, 10)
 	c.Assert(rc.Check(region), IsNil)
 }
 

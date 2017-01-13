@@ -13,10 +13,7 @@
 
 package server
 
-import (
-	"math"
-	"sort"
-)
+import "math"
 
 const replicaBaseScore = 100
 
@@ -32,46 +29,6 @@ func newReplication(cfg *ReplicationConfig) *Replication {
 // GetMaxReplicas returns the number of replicas for each region.
 func (r *Replication) GetMaxReplicas() int {
 	return int(r.cfg.MaxReplicas)
-}
-
-// GetReplicaScore returns the failure tolerance score of these replicas.
-// A higher score means these replicas can tolerant more kind of failures.
-func (r *Replication) GetReplicaScore(replicas []*storeInfo) float64 {
-	score := float64(0)
-
-	for i := range r.cfg.LocationLabels {
-		level := len(r.cfg.LocationLabels) - i - 1
-		levelScore := math.Pow(replicaBaseScore, float64(level))
-
-		// Collect replicas with the same location id.
-		ids := make(map[string]int, len(replicas))
-		for _, s := range replicas {
-			id := s.getLocationID(r.cfg.LocationLabels[0 : i+1])
-			if len(id) == 0 {
-				return 0
-			}
-			ids[id]++
-		}
-
-		// Count the number of replicas with the same location id.
-		counts := make([]int, 0, len(replicas))
-		for _, count := range ids {
-			counts = append(counts, count)
-		}
-		sort.Sort(sort.Reverse(sort.IntSlice(counts)))
-
-		// Check whether we can work if all replicas in the same location are down.
-		sum := 0
-		for c, count := range counts {
-			sum += count
-			if sum > (len(replicas)-1)/2 {
-				score += levelScore * float64(c)
-				break
-			}
-		}
-	}
-
-	return score
 }
 
 // GetDistinctScore returns the score that the other is distinct from the stores.
