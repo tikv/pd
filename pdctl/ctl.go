@@ -47,6 +47,8 @@ func init() {
 func Start(args []string) (string, error) {
 	rootCmd.SetArgs(args)
 	rootCmd.SilenceErrors = true
+	rootCmd.ParseFlags(args)
+	command.InitPDClient(rootCmd)
 	rootCmd.SetUsageTemplate(command.UsageTemplate)
 	if err := rootCmd.Execute(); err != nil {
 		return rootCmd.UsageString(), err

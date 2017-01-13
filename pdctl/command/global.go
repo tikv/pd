@@ -20,8 +20,34 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/juju/errors"
+	"github.com/ngaut/log"
+	"github.com/pingcap/pd/pd-client"
 	"github.com/spf13/cobra"
 )
+
+var pdClient pd.Client
+
+// InitPDClient initialize pd client from cmd
+func InitPDClient(cmd *cobra.Command) error {
+	addr, err := cmd.Flags().GetString("pd")
+	if err != nil {
+		return err
+	}
+	log.SetLevel(log.LOG_LEVEL_NONE)
+	pdClient, err = pd.NewClient([]string{addr})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func getClient() (pd.Client, error) {
+	if pdClient == nil {
+		return nil, errors.New("Must initialized pdClient firstly")
+	}
+	return pdClient, nil
+}
 
 func getAddressFromCmd(cmd *cobra.Command, prefix string) string {
 	p, err := cmd.Flags().GetString("pd")

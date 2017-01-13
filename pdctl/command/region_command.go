@@ -21,7 +21,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/pingcap/pd/pd-client"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
 )
 
@@ -30,6 +30,11 @@ var (
 	regionPrefix  = "pd/api/v1/region/%s"
 )
 
+type regionInfos struct {
+	Regions *metapb.Region `json:"regions"`
+	Leader  *metapb.Peer   `json:"leader"`
+}
+
 // NewRegionCommand return a region subcommand of rootCmd
 func NewRegionCommand() *cobra.Command {
 	r := &cobra.Command{
@@ -37,7 +42,7 @@ func NewRegionCommand() *cobra.Command {
 		Short: "show the region status",
 		Run:   showRegionCommandFunc,
 	}
-	r.AddCommand(NewRegionTableCommand())
+	r.AddCommand(NewRegionWithKeyCommand())
 	return r
 }
 
@@ -66,28 +71,41 @@ func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 	io.Copy(os.Stdout, r.Body)
 }
 
-func NewRegionTableCommand() *cobra.Command {
+// NewRegionWithKeyCommand return a region with key subcommand of regionCmd
+func NewRegionWithKeyCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "table <key>",
-		Short: "show the regions with table key",
+		Use:   "key <key>",
+		Short: "show the regions with key",
 		Run:   showRegionWithTableCommandFunc,
 	}
 	return r
 }
 
 func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
 	key := args[0]
-	addr, err := cmd.Flags().GetString("pd")
-	client := pd.NewClient([]string{addr})
-	regions, peers := client.GetRegion([]byte(key))
-	regionsInfo, err := json.Marshal(regions)
+	client, err := getClient()
 	if err != nil {
-		fmt.Printlf("err: %s", err)
+		fmt.Println("Error: ", err)
+		return
 	}
-	fmt.Println(string(regionsInfo))
-	peersInfo, err := json.Marshal(peers)
+	regions, peers, err := client.GetRegion([]byte(key))
 	if err != nil {
-		fmt.Printlf("err: %s", err)
+		fmt.Println("Error: ", err)
+		return
 	}
-	fmt.Println(string(peersInfo))
+
+	r := &regionInfos{
+		Regions: regions,
+		Leader:  peers,
+	}
+	infos, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		fmt.Println("Error: ", err)
+		return
+	}
+	fmt.Println(string(infos))
 }
