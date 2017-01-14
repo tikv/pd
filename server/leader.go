@@ -170,18 +170,18 @@ func (s *Server) campaignLeader() error {
 		return errors.New("campaign leader failed, other server may campaign ok")
 	}
 
+	// Make the leader keepalived.
+	ch, err := lessor.KeepAlive(s.client.Ctx(), clientv3.LeaseID(leaseResp.ID))
+	if err != nil {
+		return errors.Trace(err)
+	}
+
 	log.Debugf("campaign leader ok %s", s.Name())
 	s.enableLeader(true)
 	defer s.enableLeader(false)
 
 	// Try to create raft cluster.
 	err = s.createRaftCluster()
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	// Make the leader keepalived.
-	ch, err := lessor.KeepAlive(s.client.Ctx(), clientv3.LeaseID(leaseResp.ID))
 	if err != nil {
 		return errors.Trace(err)
 	}
