@@ -75,10 +75,11 @@ func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 // NewRegionWithKeyCommand return a region with key subcommand of regionCmd
 func NewRegionWithKeyCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "key <key>",
+		Use:   "key [--format=raw|protobuf] <key>",
 		Short: "show the region with key",
 		Run:   showRegionWithTableCommandFunc,
 	}
+	r.Flags().String("format", "raw", "the key format")
 	return r
 }
 
@@ -87,11 +88,27 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println(cmd.UsageString())
 		return
 	}
-	key, err := decodeProtobufText(args[0])
-	if err != nil {
-		fmt.Println("Error: ", err)
+
+	var (
+		key []byte
+		err error
+	)
+
+	format := cmd.Flags().Lookup("format").Value.String()
+	switch format {
+	case "raw":
+		key = []byte(args[0])
+	case "pb", "proto", "protobuf":
+		key, err = decodeProtobufText(args[0])
+		if err != nil {
+			fmt.Println("Error: ", err)
+			return
+		}
+	default:
+		fmt.Println("Error: unknown format")
 		return
 	}
+
 	client, err := getClient()
 	if err != nil {
 		fmt.Println("Error: ", err)
