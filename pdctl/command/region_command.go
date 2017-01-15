@@ -14,6 +14,7 @@
 package command
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -86,13 +87,17 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println(cmd.UsageString())
 		return
 	}
-	key := args[0]
+	key, err := decodeProtobufText(args[0])
+	if err != nil {
+		fmt.Println("Error: ", err)
+		return
+	}
 	client, err := getClient()
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return
 	}
-	region, leader, err := client.GetRegion([]byte(key))
+	region, leader, err := client.GetRegion(key)
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return
@@ -108,4 +113,26 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	fmt.Println(string(infos))
+}
+
+func decodeProtobufText(text string) ([]byte, error) {
+	var buf []byte
+	r := bytes.NewBuffer([]byte(text))
+	for {
+		c, err := r.ReadByte()
+		if err != nil {
+			if err != io.EOF {
+				return nil, err
+			}
+			break
+		}
+		if c == '\\' {
+			_, err := fmt.Sscanf(string(r.Next(3)), "%03o", &c)
+			if err != nil {
+				return nil, err
+			}
+		}
+		buf = append(buf, c)
+	}
+	return buf, nil
 }
