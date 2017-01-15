@@ -75,7 +75,7 @@ func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 // NewRegionWithKeyCommand return a region with key subcommand of regionCmd
 func NewRegionWithKeyCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "key [--format=raw|protobuf] <key>",
+		Use:   "key [--format=raw|pb|proto|protobuf] <key>",
 		Short: "show the region with key",
 		Run:   showRegionWithTableCommandFunc,
 	}
