@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/url"
-	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -27,6 +26,7 @@ import (
 	"github.com/coreos/etcd/embed"
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/metricutil"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/pkg/timeutil"
 )
 
@@ -478,20 +478,13 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	return cfg, nil
 }
 
-var unixURLCount uint64
-
-// unixURL returns a unique unix socket url, used for test only.
-func unixURL() string {
-	return fmt.Sprintf("unix://localhost:%d.%d.sock", os.Getpid(), atomic.AddUint64(&unixURLCount, 1))
-}
-
 // NewTestSingleConfig is only for test to create one pd.
 // Because pd-client also needs this, so export here.
 func NewTestSingleConfig() *Config {
 	cfg := &Config{
 		Name:       "pd",
-		ClientUrls: unixURL(),
-		PeerUrls:   unixURL(),
+		ClientUrls: testutil.UnixURL(),
+		PeerUrls:   testutil.UnixURL(),
 
 		InitialClusterState: embed.ClusterStateFlagNew,
 

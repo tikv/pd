@@ -26,6 +26,7 @@ import (
 	"github.com/ngaut/log"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/testutil"
 )
 
 func TestServer(t *testing.T) {
@@ -281,7 +282,7 @@ func (s *testServerSuite) TestUpdateAdvertiseUrls(c *C) {
 	}
 
 	// Little malicious tweak.
-	overlapPeerURL := "," + unixURL()
+	overlapPeerURL := "," + testutil.UnixURL()
 	for _, cfg := range cfgs {
 		cfg.AdvertisePeerUrls += overlapPeerURL
 	}
