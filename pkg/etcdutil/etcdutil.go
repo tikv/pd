@@ -89,22 +89,16 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap) error {
 
 // AddEtcdMember adds an etcd members.
 func AddEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddResponse, error) {
-	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultDialTimeout)
-	defer cancel()
-
-	return client.MemberAdd(ctx, urls)
+	ctx := client.Ctx()
+	addResp, err := client.MemberAdd(ctx, urls)
+	return addResp, errors.Trace(err)
 }
 
 // ListEtcdMembers returns a list of internal etcd members.
 func ListEtcdMembers(etcdClient *clientv3.Client) (*clientv3.MemberListResponse, error) {
 	ctx := etcdClient.Ctx()
-
 	listResp, err := etcdClient.MemberList(ctx)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return listResp, nil
+	return listResp, errors.Trace(err)
 }
 
 // WaitEtcdStart checks etcd starts ok or not
