@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/url"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/coreos/etcd/clientv3"
@@ -52,6 +54,28 @@ func newTestSingleConfig() *embed.Config {
 	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
 	cfg.ClusterState = embed.ClusterStateFlagNew
 	return cfg
+}
+
+// TODO: move to package testutil.
+var stripUnix = strings.NewReplacer("unix://", "")
+
+func cleanConfig(cfg *embed.Config) {
+	// Clean data directory
+	os.RemoveAll(cfg.Dir)
+
+	// Clean unix sockets
+	for _, u := range cfg.APUrls {
+		os.Remove(stripUnix.Replace(u.String()))
+	}
+	for _, u := range cfg.LPUrls {
+		os.Remove(stripUnix.Replace(u.String()))
+	}
+	for _, u := range cfg.ACUrls {
+		os.Remove(stripUnix.Replace(u.String()))
+	}
+	for _, u := range cfg.LCUrls {
+		os.Remove(stripUnix.Replace(u.String()))
+	}
 }
 
 func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {
@@ -119,6 +143,17 @@ func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {
 	err = CheckClusterID(etcd1.Server.Cluster().ID(), urlmap)
 	c.Assert(err, IsNil)
 
+	// Test RemoveEtcdMember
+	_, err = RemoveEtcdMember(client1, uint64(etcd2.Server.ID()))
+	c.Assert(err, IsNil)
+
+	listResp3, err := ListEtcdMembers(client1)
+	c.Assert(err, IsNil)
+	c.Assert(len(listResp3.Members), Equals, 1)
+	c.Assert(listResp3.Members[0].ID, Equals, uint64(etcd1.Server.ID()))
+
 	etcd1.Close()
 	etcd2.Close()
+	cleanConfig(cfg1)
+	cleanConfig(cfg2)
 }

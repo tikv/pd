@@ -95,10 +95,17 @@ func AddEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddR
 }
 
 // ListEtcdMembers returns a list of internal etcd members.
-func ListEtcdMembers(etcdClient *clientv3.Client) (*clientv3.MemberListResponse, error) {
-	ctx := etcdClient.Ctx()
-	listResp, err := etcdClient.MemberList(ctx)
+func ListEtcdMembers(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
+	ctx := client.Ctx()
+	listResp, err := client.MemberList(ctx)
 	return listResp, errors.Trace(err)
+}
+
+// RemoveEtcdMember removes the give id.
+func RemoveEtcdMember(client *clientv3.Client, id uint64) (*clientv3.MemberRemoveResponse, error) {
+	ctx := client.Ctx()
+	rmResp, err := client.MemberRemove(ctx, id)
+	return rmResp, errors.Trace(err)
 }
 
 // WaitEtcdStart checks etcd starts ok or not

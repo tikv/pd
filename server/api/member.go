@@ -21,9 +21,9 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
-	"golang.org/x/net/context"
 )
 
 const defaultDialTimeout = 5 * time.Second
@@ -71,9 +71,7 @@ func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	// step 1. get etcd id
 	var id uint64
 	name := (mux.Vars(r))["name"]
-	ctx, cancel := context.WithTimeout(client.Ctx(), defaultDialTimeout)
-	defer cancel()
-	listResp, err := client.MemberList(ctx)
+	listResp, err := etcdutil.ListEtcdMembers(client)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -90,9 +88,7 @@ func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// step 2. remove member by id
-	ctx, cancel = context.WithTimeout(client.Ctx(), defaultDialTimeout)
-	defer cancel()
-	_, err = client.MemberRemove(ctx, id)
+	_, err = etcdutil.RemoveEtcdMember(client, id)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -140,14 +136,12 @@ func (h *leaderHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *leaderHandler) getNameByID(id uint64) (string, error) {
 	client := h.svr.GetClient()
+	listResp, err := etcdutil.ListEtcdMembers(client)
+	if err != nil {
+		return "", errors.Trace(err)
+	}
 
 	var name string
-	ctx, cancel := context.WithTimeout(client.Ctx(), defaultDialTimeout)
-	defer cancel()
-	listResp, err := client.MemberList(ctx)
-	if err != nil {
-		return name, errors.Trace(err)
-	}
 	for _, m := range listResp.Members {
 		if id == m.ID {
 			name = m.Name
