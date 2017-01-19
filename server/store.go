@@ -114,7 +114,7 @@ func (s *storeInfo) getLocationID(keys []string) string {
 		if len(v) == 0 {
 			return ""
 		}
-		id += s.getLabelValue(k)
+		id += v
 	}
 	return id
 }

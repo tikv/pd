@@ -325,15 +325,24 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		}
 	}
 
-	// Store exists, update store meta.
-	if s := cluster.getStore(store.GetId()); s != nil {
+	s := cluster.getStore(store.GetId())
+	if s == nil {
+		// Add a new store.
+		s = newStoreInfo(store)
+	} else {
+		// Update an existed store.
 		s.Address = store.Address
 		s.Labels = store.Labels
-		return cluster.putStore(s)
 	}
 
-	// Store does not exist, add a new store.
-	return cluster.putStore(newStoreInfo(store))
+	// Check location labels.
+	for _, k := range c.s.cfg.Replication.LocationLabels {
+		if v := s.getLabelValue(k); len(v) == 0 {
+			return errors.Errorf("missing location label %q in store %v", k, s)
+		}
+	}
+
+	return cluster.putStore(s)
 }
 
 // RemoveStore marks a store as offline in cluster.
