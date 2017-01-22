@@ -127,16 +127,16 @@ func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption) {
 	return &cfg.Schedule, opt
 }
 
-var _ = Suite(&testLeaderBalancerSuite{})
+var _ = Suite(&testBalanceLeaderSchedulerSuite{})
 
-type testLeaderBalancerSuite struct{}
+type testBalanceLeaderSchedulerSuite struct{}
 
-func (s *testLeaderBalancerSuite) TestBalance(c *C) {
+func (s *testBalanceLeaderSchedulerSuite) TestBalance(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 
 	cfg, opt := newTestScheduleConfig()
-	lb := newLeaderBalancer(opt)
+	lb := newBalanceLeaderScheduler(opt)
 
 	cfg.MinLeaderCount = 10
 	cfg.MinBalanceDiffRatio = 0.1
@@ -175,16 +175,16 @@ func (s *testLeaderBalancerSuite) TestBalance(c *C) {
 	c.Assert(lb.Schedule(cluster), IsNil)
 }
 
-var _ = Suite(&testStorageBalancerSuite{})
+var _ = Suite(&testBalanceStorageSchedulerSuite{})
 
-type testStorageBalancerSuite struct{}
+type testBalanceStorageSchedulerSuite struct{}
 
-func (s *testStorageBalancerSuite) TestBalance(c *C) {
+func (s *testBalanceStorageSchedulerSuite) TestBalance(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 
 	cfg, opt := newTestScheduleConfig()
-	sb := newStorageBalancer(opt)
+	sb := newBalanceStorageScheduler(opt)
 
 	opt.SetMaxReplicas(1)
 	cfg.MinRegionCount = 10
@@ -226,14 +226,14 @@ func (s *testStorageBalancerSuite) TestBalance(c *C) {
 	c.Assert(sb.Schedule(cluster), IsNil)
 }
 
-func (s *testStorageBalancerSuite) TestReplicas3(c *C) {
+func (s *testBalanceStorageSchedulerSuite) TestReplicas3(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
 	opt.rep = newTestReplication(3, "zone", "rack", "host")
 
-	sb := newStorageBalancer(opt)
+	sb := newBalanceStorageScheduler(opt)
 
 	// Store 1 has the largest storage ratio, so the balancer try to replace peer in store 1.
 	tc.addLabelsStore(1, 1, 0.5, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -290,14 +290,14 @@ func (s *testStorageBalancerSuite) TestReplicas3(c *C) {
 	c.Assert(sb.Schedule(cluster), IsNil)
 }
 
-func (s *testStorageBalancerSuite) TestReplicas5(c *C) {
+func (s *testBalanceStorageSchedulerSuite) TestReplicas5(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
 	opt.rep = newTestReplication(5, "zone", "rack", "host")
 
-	sb := newStorageBalancer(opt)
+	sb := newBalanceStorageScheduler(opt)
 
 	tc.addLabelsStore(1, 1, 0.1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.addLabelsStore(2, 1, 0.2, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})

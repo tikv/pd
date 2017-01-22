@@ -56,8 +56,8 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch name {
-	case "leader-balancer":
-		if err := h.AddLeaderBalancer(); err != nil {
+	case "balance-leader-scheduler":
+		if err := h.AddBalanceLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}

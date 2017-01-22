@@ -22,32 +22,32 @@ import (
 
 var storeCacheInterval = 30 * time.Second
 
-type leaderBalancer struct {
+type balanceLeaderScheduler struct {
 	opt      *scheduleOption
 	selector Selector
 }
 
-func newLeaderBalancer(opt *scheduleOption) *leaderBalancer {
+func newBalanceLeaderScheduler(opt *scheduleOption) *balanceLeaderScheduler {
 	var filters []Filter
 	filters = append(filters, newStateFilter(opt))
 	filters = append(filters, newHealthFilter(opt))
 	filters = append(filters, newLeaderCountFilter(opt))
 
-	return &leaderBalancer{
+	return &balanceLeaderScheduler{
 		opt:      opt,
 		selector: newBalanceSelector(leaderKind, filters),
 	}
 }
 
-func (l *leaderBalancer) GetName() string {
-	return "leader-balancer"
+func (l *balanceLeaderScheduler) GetName() string {
+	return "balance-leader-scheduler"
 }
 
-func (l *leaderBalancer) GetResourceKind() ResourceKind {
+func (l *balanceLeaderScheduler) GetResourceKind() ResourceKind {
 	return leaderKind
 }
 
-func (l *leaderBalancer) Schedule(cluster *clusterInfo) Operator {
+func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 	region, newLeader := scheduleTransferLeader(cluster, l.selector)
 	if region == nil {
 		return nil
@@ -62,14 +62,14 @@ func (l *leaderBalancer) Schedule(cluster *clusterInfo) Operator {
 	return newTransferLeader(region, newLeader)
 }
 
-type storageBalancer struct {
+type balanceStorageScheduler struct {
 	opt      *scheduleOption
 	rep      *Replication
 	cache    *idCache
 	selector Selector
 }
 
-func newStorageBalancer(opt *scheduleOption) *storageBalancer {
+func newBalanceStorageScheduler(opt *scheduleOption) *balanceStorageScheduler {
 	cache := newIDCache(storeCacheInterval, 4*storeCacheInterval)
 
 	var filters []Filter
@@ -79,7 +79,7 @@ func newStorageBalancer(opt *scheduleOption) *storageBalancer {
 	filters = append(filters, newRegionCountFilter(opt))
 	filters = append(filters, newSnapshotCountFilter(opt))
 
-	return &storageBalancer{
+	return &balanceStorageScheduler{
 		opt:      opt,
 		rep:      opt.GetReplication(),
 		cache:    cache,
@@ -87,15 +87,15 @@ func newStorageBalancer(opt *scheduleOption) *storageBalancer {
 	}
 }
 
-func (s *storageBalancer) GetName() string {
-	return "storage-balancer"
+func (s *balanceStorageScheduler) GetName() string {
+	return "balance-storage-scheduler"
 }
 
-func (s *storageBalancer) GetResourceKind() ResourceKind {
+func (s *balanceStorageScheduler) GetResourceKind() ResourceKind {
 	return storageKind
 }
 
-func (s *storageBalancer) Schedule(cluster *clusterInfo) Operator {
+func (s *balanceStorageScheduler) Schedule(cluster *clusterInfo) Operator {
 	// Select a peer from the store with largest storage ratio.
 	region, oldPeer := scheduleRemovePeer(cluster, s.selector)
 	if region == nil {
@@ -116,7 +116,7 @@ func (s *storageBalancer) Schedule(cluster *clusterInfo) Operator {
 	return op
 }
 
-func (s *storageBalancer) transferPeer(cluster *clusterInfo, region *regionInfo, oldPeer *metapb.Peer) Operator {
+func (s *balanceStorageScheduler) transferPeer(cluster *clusterInfo, region *regionInfo, oldPeer *metapb.Peer) Operator {
 	// scoreGuard guarantees that the distinct score will not decrease.
 	stores := cluster.getRegionStores(region)
 	source := cluster.getStore(oldPeer.GetStoreId())

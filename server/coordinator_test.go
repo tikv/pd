@@ -214,8 +214,8 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	defer co.stop()
 
 	c.Assert(co.schedulers, HasLen, 2)
-	c.Assert(co.removeScheduler("leader-balancer"), IsTrue)
-	c.Assert(co.removeScheduler("storage-balancer"), IsTrue)
+	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsTrue)
+	c.Assert(co.removeScheduler("balance-storage-scheduler"), IsTrue)
 	c.Assert(co.schedulers, HasLen, 0)
 
 	// Add stores 1,2,3

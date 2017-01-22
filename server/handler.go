@@ -69,9 +69,9 @@ func (h *Handler) AddLeaderScheduler(s Scheduler) error {
 	return nil
 }
 
-// AddLeaderBalancer adds a leader-balancer.
-func (h *Handler) AddLeaderBalancer() error {
-	return h.AddLeaderScheduler(newLeaderBalancer(h.s.scheduleOpt))
+// AddBalanceLeaderScheduler adds a balance-leader-scheduler.
+func (h *Handler) AddBalanceLeaderScheduler() error {
+	return h.AddLeaderScheduler(newBalanceLeaderScheduler(h.s.scheduleOpt))
 }
 
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
