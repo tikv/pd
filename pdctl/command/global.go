@@ -26,22 +26,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var pdClient pd.Client
+var (
+	pdAddr   string
+	pdClient pd.Client
+)
 
 // InitPDClient initialize pd client from cmd
 func InitPDClient(cmd *cobra.Command) error {
-	addr, err := cmd.Flags().GetString("pd")
+	var err error
+
+	pdAddr, err = cmd.Flags().GetString("pd")
 	if err != nil {
 		return err
 	}
+
 	log.SetLevel(log.LOG_LEVEL_NONE)
 	if pdClient != nil {
 		return nil
 	}
-	pdClient, err = pd.NewClient([]string{addr})
+
+	pdClient, err = pd.NewClient([]string{pdAddr})
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
