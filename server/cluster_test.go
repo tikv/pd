@@ -15,6 +15,7 @@ package server
 
 import (
 	"net"
+	"time"
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
@@ -360,6 +361,33 @@ func (s *testClusterSuite) testPutStore(c *C, conn net.Conn, clusterID uint64, s
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
 	resp = putStore(c, conn, clusterID, s.newStore(c, store.GetId(), "127.0.0.1:12345"))
 	c.Assert(resp.PutStore, IsNil)
+
+	// Put an store with same store id and different address with other old stores.
+	// Put a new store and send a heartbeat in one second.
+	newStore := s.newStore(c, 0, "127.0.0.1:54321")
+	resp = putStore(c, conn, clusterID, newStore)
+	c.Assert(resp.PutStore, NotNil)
+	interval := time.Second
+	time.Sleep(interval)
+	req := &pdpb.Request{
+		Header:  newRequestHeader(clusterID),
+		CmdType: pdpb.CommandType_StoreHeartbeat,
+		StoreHeartbeat: &pdpb.StoreHeartbeatRequest{
+			Stats: &pdpb.StoreStats{StoreId: newStore.GetId()},
+		},
+	}
+	sendRequest(c, conn, 0, req)
+	_, resp = recvResponse(c, conn)
+	c.Assert(resp.StoreHeartbeat, NotNil)
+	// Now put a store with different address, it should fail.
+	resp = putStore(c, conn, clusterID, s.newStore(c, newStore.GetId(), "127.0.0.1:51234"))
+	c.Assert(resp.PutStore, IsNil)
+
+	// 2 * heartbeat interval later, now it is ok to update the newStore.
+	// 3 * interval, make sure it waits enough.
+	time.Sleep(3 * interval)
+	resp = putStore(c, conn, clusterID, s.newStore(c, newStore.GetId(), "127.0.0.1:51234"))
+	c.Assert(resp.PutStore, NotNil)
 }
 
 func (s *testClusterSuite) resetStoreState(c *C, storeID uint64, state metapb.StoreState) {

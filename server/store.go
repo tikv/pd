@@ -125,6 +125,7 @@ type StoreStatus struct {
 
 	StartTS           time.Time `json:"start_ts"`
 	LastHeartbeatTS   time.Time `json:"last_heartbeat_ts"`
+	HeartbeatCount    int64     `json:"heartbeat_count"`
 	TotalRegionCount  int       `json:"total_region_count"`
 	LeaderRegionCount int       `json:"leader_region_count"`
 }
@@ -141,6 +142,7 @@ func (s *StoreStatus) clone() *StoreStatus {
 		StoreStats:        proto.Clone(s.StoreStats).(*pdpb.StoreStats),
 		StartTS:           s.StartTS,
 		LastHeartbeatTS:   s.LastHeartbeatTS,
+		HeartbeatCount:    s.HeartbeatCount,
 		TotalRegionCount:  s.TotalRegionCount,
 		LeaderRegionCount: s.LeaderRegionCount,
 	}
@@ -153,6 +155,16 @@ func (s *StoreStatus) GetUptime() time.Duration {
 		return uptime
 	}
 	return 0
+}
+
+// GetHeartbeatInterval roughly calculates the heartbeat interval.
+// returns zero interval when there is no heartbeat arrived.
+func (s *StoreStatus) GetHeartbeatInterval() time.Duration {
+	if s.HeartbeatCount == 0 {
+		return time.Duration(0)
+	}
+
+	return time.Duration(int64(s.LastHeartbeatTS.Sub(s.StartTS)) / s.HeartbeatCount)
 }
 
 // GetUsedSize returns the used storage size.
