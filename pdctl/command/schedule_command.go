@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// NewScheduleCommand returns a schedule command.
 func NewScheduleCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "schedule [command]",
@@ -31,6 +32,7 @@ func NewScheduleCommand() *cobra.Command {
 	return c
 }
 
+// NewTransferLeaderCommand returns a transfer leader command.
 func NewTransferLeaderCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "transfer_leader <region_id> <store_id>",
@@ -40,6 +42,7 @@ func NewTransferLeaderCommand() *cobra.Command {
 	return c
 }
 
+// NewTransferRegionCommand returns a transfer region command.
 func NewTransferRegionCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "transfer_region <region_id> <store_id>...",
