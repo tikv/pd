@@ -89,22 +89,25 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap) error {
 
 // AddEtcdMember adds an etcd members.
 func AddEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddResponse, error) {
-	ctx := client.Ctx()
+	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
 	addResp, err := client.MemberAdd(ctx, urls)
+	cancel()
 	return addResp, errors.Trace(err)
 }
 
 // ListEtcdMembers returns a list of internal etcd members.
 func ListEtcdMembers(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
-	ctx := client.Ctx()
+	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
 	listResp, err := client.MemberList(ctx)
+	cancel()
 	return listResp, errors.Trace(err)
 }
 
 // RemoveEtcdMember removes the give id.
 func RemoveEtcdMember(client *clientv3.Client, id uint64) (*clientv3.MemberRemoveResponse, error) {
-	ctx := client.Ctx()
+	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
 	rmResp, err := client.MemberRemove(ctx, id)
+	cancel()
 	return rmResp, errors.Trace(err)
 }
 
@@ -134,7 +137,7 @@ func endpointStatus(c *clientv3.Client, endpoint string) (*clientv3.StatusRespon
 	resp, err := m.Status(ctx, endpoint)
 	cancel()
 
-	if cost := time.Now().Sub(start); cost > DefaultSlowRequestTime {
+	if cost := time.Since(start); cost > DefaultSlowRequestTime {
 		log.Warnf("check etcd %s status, resp: %v, err: %v, cost: %s", endpoint, resp, err, cost)
 	}
 
