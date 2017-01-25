@@ -28,7 +28,9 @@ import (
 	"github.com/coreos/etcd/pkg/netutil"
 	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
+
 	"github.com/ghodss/yaml"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -102,6 +104,7 @@ type Config struct {
 	InitialCluster      string `json:"initial-cluster"`
 	InitialClusterToken string `json:"initial-cluster-token"`
 	StrictReconfigCheck bool   `json:"strict-reconfig-check"`
+	EnableV2            bool   `json:"enable-v2"`
 
 	// security
 
@@ -115,6 +118,7 @@ type Config struct {
 	Debug        bool   `json:"debug"`
 	LogPkgLevels string `json:"log-package-levels"`
 	EnablePprof  bool
+	Metrics      string `json:"metrics"`
 
 	// ForceNewCluster starts a new cluster even if previously started; unsafe.
 	ForceNewCluster bool `json:"force-new-cluster"`
@@ -124,6 +128,14 @@ type Config struct {
 	// The map key is the route path for the handler, and
 	// you must ensure it can't be conflicted with etcd's.
 	UserHandlers map[string]http.Handler `json:"-"`
+	// ServiceRegister is for registering users' gRPC services. A simple usage example:
+	//	cfg := embed.NewConfig()
+	//	cfg.ServerRegister = func(s *grpc.Server) {
+	//		pb.RegisterFooServer(s, &fooServer{})
+	//		pb.RegisterBarServer(s, &barServer{})
+	//	}
+	//	embed.StartEtcd(cfg)
+	ServiceRegister func(*grpc.Server) `json:"-"`
 }
 
 // configYAML holds the config suitable for yaml parsing
@@ -173,6 +185,8 @@ func NewConfig() *Config {
 		ClusterState:        ClusterStateFlagNew,
 		InitialClusterToken: "etcd-cluster",
 		StrictReconfigCheck: true,
+		Metrics:             "basic",
+		EnableV2:            true,
 	}
 	cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name)
 	return cfg
@@ -354,6 +368,24 @@ func (cfg Config) IsDefaultHost() (string, error) {
 		return defaultHostname, defaultHostStatus
 	}
 	return "", defaultHostStatus
+}
+
+// UpdateDefaultClusterFromName updates cluster advertise URLs with default host.
+// TODO: check whether fields are set instead of whether fields have default value
+func (cfg *Config) UpdateDefaultClusterFromName(defaultInitialCluster string) {
+	defaultHost, defaultHostErr := cfg.IsDefaultHost()
+	defaultHostOverride := defaultHost == "" || defaultHostErr == nil
+	if (defaultHostOverride || cfg.Name != DefaultName) && cfg.InitialCluster == defaultInitialCluster {
+		cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name)
+		ip, _, _ := net.SplitHostPort(cfg.LCUrls[0].Host)
+		// if client-listen-url is 0.0.0.0, just use detected default host
+		// otherwise, rewrite advertise-client-url with localhost
+		if ip != "0.0.0.0" {
+			_, acPort, _ := net.SplitHostPort(cfg.ACUrls[0].Host)
+			cfg.ACUrls[0] = url.URL{Scheme: cfg.ACUrls[0].Scheme, Host: fmt.Sprintf("localhost:%s", acPort)}
+			cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name)
+		}
+	}
 }
 
 // checkBindURLs returns an error if any URL uses a domain name.

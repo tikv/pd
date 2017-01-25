@@ -46,7 +46,8 @@ type serveCtx struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	userHandlers map[string]http.Handler
+	userHandlers    map[string]http.Handler
+	serviceRegister func(*grpc.Server)
 }
 
 func newServeCtx() *serveCtx {
@@ -66,6 +67,9 @@ func (sctx *serveCtx) serve(s *etcdserver.EtcdServer, tlscfg *tls.Config, handle
 
 	if sctx.insecure {
 		gs := v3rpc.Server(s, nil)
+		if sctx.serviceRegister != nil {
+			sctx.serviceRegister(gs)
+		}
 		grpcl := m.Match(cmux.HTTP2())
 		go func() { errc <- gs.Serve(grpcl) }()
 
@@ -90,6 +94,9 @@ func (sctx *serveCtx) serve(s *etcdserver.EtcdServer, tlscfg *tls.Config, handle
 
 	if sctx.secure {
 		gs := v3rpc.Server(s, tlscfg)
+		if sctx.serviceRegister != nil {
+			sctx.serviceRegister(gs)
+		}
 		handler = grpcHandlerFunc(gs, handler)
 
 		dtls := transport.ShallowCopyTLSConfig(tlscfg)
@@ -122,6 +129,11 @@ func (sctx *serveCtx) serve(s *etcdserver.EtcdServer, tlscfg *tls.Config, handle
 // grpcHandlerFunc returns an http.Handler that delegates to grpcServer on incoming gRPC
 // connections or otherHandler otherwise. Copied from cockroachdb.
 func grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http.Handler) http.Handler {
+	if otherHandler == nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			grpcServer.ServeHTTP(w, r)
+		})
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && strings.Contains(r.Header.Get("Content-Type"), "application/grpc") {
 			grpcServer.ServeHTTP(w, r)
@@ -181,7 +193,9 @@ func (sctx *serveCtx) createMux(gwmux *gw.ServeMux, handler http.Handler) *http.
 	}
 
 	httpmux.Handle("/v3alpha/", gwmux)
-	httpmux.Handle("/", handler)
+	if handler != nil {
+		httpmux.Handle("/", handler)
+	}
 	return httpmux
 }
 

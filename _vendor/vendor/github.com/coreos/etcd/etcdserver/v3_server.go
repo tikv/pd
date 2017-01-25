@@ -17,8 +17,6 @@ package etcdserver
 import (
 	"bytes"
 	"encoding/binary"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/coreos/etcd/auth"
@@ -31,7 +29,6 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"golang.org/x/net/context"
-	"google.golang.org/grpc/metadata"
 )
 
 const (
@@ -617,52 +614,10 @@ func (s *EtcdServer) RoleDelete(ctx context.Context, r *pb.AuthRoleDeleteRequest
 	return result.resp.(*pb.AuthRoleDeleteResponse), nil
 }
 
-func (s *EtcdServer) isValidSimpleToken(token string) bool {
-	splitted := strings.Split(token, ".")
-	if len(splitted) != 2 {
-		return false
-	}
-	index, err := strconv.Atoi(splitted[1])
-	if err != nil {
-		return false
-	}
-
-	select {
-	case <-s.applyWait.Wait(uint64(index)):
-		return true
-	case <-s.stop:
-		return true
-	}
-}
-
-func (s *EtcdServer) authInfoFromCtx(ctx context.Context) (*auth.AuthInfo, error) {
-	md, ok := metadata.FromContext(ctx)
-	if !ok {
-		return nil, nil
-	}
-
-	ts, tok := md["token"]
-	if !tok {
-		return nil, nil
-	}
-
-	token := ts[0]
-	if !s.isValidSimpleToken(token) {
-		return nil, ErrInvalidAuthToken
-	}
-
-	authInfo, uok := s.AuthStore().AuthInfoFromToken(token)
-	if !uok {
-		plog.Warningf("invalid auth token: %s", token)
-		return nil, ErrInvalidAuthToken
-	}
-	return authInfo, nil
-}
-
 // doSerialize handles the auth logic, with permissions checked by "chk", for a serialized request "get". Returns a non-nil error on authentication failure.
 func (s *EtcdServer) doSerialize(ctx context.Context, chk func(*auth.AuthInfo) error, get func()) error {
 	for {
-		ai, err := s.authInfoFromCtx(ctx)
+		ai, err := s.AuthStore().AuthInfoFromCtx(ctx)
 		if err != nil {
 			return err
 		}
@@ -697,7 +652,7 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 		ID: s.reqIDGen.Next(),
 	}
 
-	authInfo, err := s.authInfoFromCtx(ctx)
+	authInfo, err := s.AuthStore().AuthInfoFromCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -759,7 +714,6 @@ func (s *EtcdServer) Watchable() mvcc.WatchableKV { return s.KV() }
 
 func (s *EtcdServer) linearizableReadLoop() {
 	var rs raft.ReadState
-	internalTimeout := time.Second
 
 	for {
 		ctx := make([]byte, 8)
@@ -778,7 +732,7 @@ func (s *EtcdServer) linearizableReadLoop() {
 		s.readNotifier = nextnr
 		s.readMu.Unlock()
 
-		cctx, cancel := context.WithTimeout(context.Background(), internalTimeout)
+		cctx, cancel := context.WithTimeout(context.Background(), s.Cfg.ReqTimeout())
 		if err := s.r.ReadIndex(cctx, ctx); err != nil {
 			cancel()
 			if err == raft.ErrStopped {
@@ -803,7 +757,7 @@ func (s *EtcdServer) linearizableReadLoop() {
 					// continue waiting for the response of the current requests.
 					plog.Warningf("ignored out-of-date read index response (want %v, got %v)", rs.RequestCtx, ctx)
 				}
-			case <-time.After(internalTimeout):
+			case <-time.After(s.Cfg.ReqTimeout()):
 				plog.Warningf("timed out waiting for read index response")
 				nr.notify(ErrTimeout)
 				timeout = true

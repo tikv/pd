@@ -1,5 +1,5 @@
-hash: f5ad1d3c8b2561380c35b4889a43eb9bf340986341d3b4b5cb60dbbd0d66fb64
-updated: 2016-12-21T20:29:22.494162545+08:00
+hash: 92674d8dbe76a4c4d9d00890991ae15c68e3b0107647807ec574954f04534ed4
+updated: 2017-01-25T12:14:33.209071259+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -16,7 +16,7 @@ imports:
 - name: github.com/cockroachdb/cmux
   version: 112f0506e7743d64a6eb8fedbcff13d9979bbf92
 - name: github.com/coreos/etcd
-  version: d8513adf1d2058047929b1ed7c038fbe023ebe3a
+  version: 6bef2bddcaced4fc6ed136e7434c4ee72c9e6782
   subpackages:
   - alarm
   - auth
@@ -47,6 +47,7 @@ imports:
   - pkg/adt
   - pkg/contention
   - pkg/cors
+  - pkg/cpuutil
   - pkg/crc
   - pkg/fileutil
   - pkg/httputil
@@ -164,7 +165,7 @@ imports:
   repo: https://github.com/spf13/cobra.git
   vcs: git
 - name: github.com/spf13/pflag
-  version: 25f8b5b07aece3207895bf19f7ab517eb3b22a40
+  version: a232f6d9f87afaaa08bafaff5da685f974b83313
 - name: github.com/twinj/uuid
   version: 70cac2bcd273ef6a371bb96cde363d28b68734c3
 - name: github.com/ugorji/go

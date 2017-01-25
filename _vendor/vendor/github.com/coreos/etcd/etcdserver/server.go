@@ -61,7 +61,7 @@ import (
 )
 
 const (
-	DefaultSnapCount = 10000
+	DefaultSnapCount = 100000
 
 	StoreClusterPrefix = "/0"
 	StoreKeysPrefix    = "/1"
@@ -459,7 +459,10 @@ func NewServer(cfg *ServerConfig) (srv *EtcdServer, err error) {
 	}
 	srv.consistIndex.setConsistentIndex(srv.kv.ConsistentIndex())
 
-	srv.authStore = auth.NewAuthStore(srv.be)
+	srv.authStore = auth.NewAuthStore(srv.be,
+		func(index uint64) <-chan struct{} {
+			return srv.applyWait.Wait(index)
+		})
 	if h := cfg.AutoCompactionRetention; h != 0 {
 		srv.compactor = compactor.NewPeriodic(h, srv.kv, srv)
 		srv.compactor.Run()
@@ -565,6 +568,8 @@ func (s *EtcdServer) RaftHandler() http.Handler { return s.r.transport.Handler()
 
 func (s *EtcdServer) Lessor() lease.Lessor { return s.lessor }
 
+func (s *EtcdServer) ApplyWait() <-chan struct{} { return s.applyWait.Wait(s.getCommittedIndex()) }
+
 func (s *EtcdServer) Process(ctx context.Context, m raftpb.Message) error {
 	if s.cluster.IsIDRemoved(types.ID(m.From)) {
 		plog.Warningf("reject message from removed member %s", types.ID(m.From).String())
@@ -596,7 +601,8 @@ type etcdProgress struct {
 // and helps decouple state machine logic from Raft algorithms.
 // TODO: add a state machine interface to apply the commit entries and do snapshot/recover
 type raftReadyHandler struct {
-	leadershipUpdate func()
+	updateLeadership     func()
+	updateCommittedIndex func(uint64)
 }
 
 func (s *EtcdServer) run() {
@@ -621,7 +627,7 @@ func (s *EtcdServer) run() {
 		return
 	}
 	rh := &raftReadyHandler{
-		leadershipUpdate: func() {
+		updateLeadership: func() {
 			if !s.isLeader() {
 				if s.lessor != nil {
 					s.lessor.Demote()
@@ -632,6 +638,9 @@ func (s *EtcdServer) run() {
 				setSyncC(nil)
 			} else {
 				setSyncC(s.SyncTicker)
+				if s.compactor != nil {
+					s.compactor.Resume()
+				}
 			}
 
 			// TODO: remove the nil checking
@@ -639,11 +648,14 @@ func (s *EtcdServer) run() {
 			if s.stats != nil {
 				s.stats.BecomeLeader()
 			}
-			if s.compactor != nil {
-				s.compactor.Resume()
-			}
 			if s.r.td != nil {
 				s.r.td.Reset()
+			}
+		},
+		updateCommittedIndex: func(ci uint64) {
+			cci := s.getCommittedIndex()
+			if ci > cci {
+				s.setCommittedIndex(ci)
 			}
 		},
 	}
@@ -699,16 +711,6 @@ func (s *EtcdServer) run() {
 	for {
 		select {
 		case ap := <-s.r.apply():
-			var ci uint64
-			if len(ap.entries) != 0 {
-				ci = ap.entries[len(ap.entries)-1].Index
-			}
-			if ap.snapshot.Metadata.Index > ci {
-				ci = ap.snapshot.Metadata.Index
-			}
-			if ci != 0 {
-				s.setCommittedIndex(ci)
-			}
 			f := func(context.Context) { s.applyAll(&ep, &ap) }
 			sched.Schedule(f)
 		case leases := <-expiredLeaseC:
@@ -1007,7 +1009,32 @@ func (s *EtcdServer) LeaderStats() []byte {
 
 func (s *EtcdServer) StoreStats() []byte { return s.store.JsonStats() }
 
+func (s *EtcdServer) checkMembershipOperationPermission(ctx context.Context) error {
+	if s.authStore == nil {
+		// In the context of ordinal etcd process, s.authStore will never be nil.
+		// This branch is for handling cases in server_test.go
+		return nil
+	}
+
+	// Note that this permission check is done in the API layer,
+	// so TOCTOU problem can be caused potentially in a schedule like this:
+	// update membership with user A -> revoke root role of A -> apply membership change
+	// in the state machine layer
+	// However, both of membership change and role management requires the root privilege.
+	// So careful operation by admins can prevent the problem.
+	authInfo, err := s.AuthStore().AuthInfoFromCtx(ctx)
+	if err != nil {
+		return err
+	}
+
+	return s.AuthStore().IsAdminPermitted(authInfo)
+}
+
 func (s *EtcdServer) AddMember(ctx context.Context, memb membership.Member) error {
+	if err := s.checkMembershipOperationPermission(ctx); err != nil {
+		return err
+	}
+
 	if s.Cfg.StrictReconfigCheck {
 		// by default StrictReconfigCheck is enabled; reject new members if unhealthy
 		if !s.cluster.IsReadyToAddNewMember() {
@@ -1034,6 +1061,10 @@ func (s *EtcdServer) AddMember(ctx context.Context, memb membership.Member) erro
 }
 
 func (s *EtcdServer) RemoveMember(ctx context.Context, id uint64) error {
+	if err := s.checkMembershipOperationPermission(ctx); err != nil {
+		return err
+	}
+
 	// by default StrictReconfigCheck is enabled; reject removal if leads to quorum loss
 	if err := s.mayRemoveMember(types.ID(id)); err != nil {
 		return err
@@ -1073,8 +1104,12 @@ func (s *EtcdServer) mayRemoveMember(id types.ID) error {
 }
 
 func (s *EtcdServer) UpdateMember(ctx context.Context, memb membership.Member) error {
-	b, err := json.Marshal(memb)
-	if err != nil {
+	b, merr := json.Marshal(memb)
+	if merr != nil {
+		return merr
+	}
+
+	if err := s.checkMembershipOperationPermission(ctx); err != nil {
 		return err
 	}
 	cc := raftpb.ConfChange{

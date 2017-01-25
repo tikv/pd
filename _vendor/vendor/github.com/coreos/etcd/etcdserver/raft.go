@@ -162,7 +162,7 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 
 					atomic.StoreUint64(&r.lead, rd.SoftState.Lead)
 					islead = rd.RaftState == raft.StateLeader
-					rh.leadershipUpdate()
+					rh.updateLeadership()
 				}
 
 				if len(rd.ReadStates) != 0 {
@@ -181,6 +181,8 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 					snapshot: rd.Snapshot,
 					raftDone: raftDone,
 				}
+
+				updateCommittedIndex(&ap, rh)
 
 				select {
 				case r.applyc <- ap:
@@ -229,6 +231,19 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 			}
 		}
 	}()
+}
+
+func updateCommittedIndex(ap *apply, rh *raftReadyHandler) {
+	var ci uint64
+	if len(ap.entries) != 0 {
+		ci = ap.entries[len(ap.entries)-1].Index
+	}
+	if ap.snapshot.Metadata.Index > ci {
+		ci = ap.snapshot.Metadata.Index
+	}
+	if ci != 0 {
+		rh.updateCommittedIndex(ci)
+	}
 }
 
 func (r *raftNode) sendMessages(ms []raftpb.Message) {
