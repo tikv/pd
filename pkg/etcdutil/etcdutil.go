@@ -103,7 +103,7 @@ func ListEtcdMembers(client *clientv3.Client) (*clientv3.MemberListResponse, err
 	return listResp, errors.Trace(err)
 }
 
-// RemoveEtcdMember removes the give id.
+// RemoveEtcdMember removes a member by the given id.
 func RemoveEtcdMember(client *clientv3.Client, id uint64) (*clientv3.MemberRemoveResponse, error) {
 	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
 	rmResp, err := client.MemberRemove(ctx, id)
