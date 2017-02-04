@@ -87,7 +87,7 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap) error {
 	return nil
 }
 
-// AddEtcdMember adds an etcd members.
+// AddEtcdMember adds an etcd member.
 func AddEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddResponse, error) {
 	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
 	addResp, err := client.MemberAdd(ctx, urls)
