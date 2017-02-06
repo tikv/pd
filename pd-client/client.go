@@ -153,6 +153,8 @@ func (c *client) updateLeader() error {
 func (c *client) switchLeader(addr string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	log.Infof("[pd] leader switches to: %v, previous: %v", addr, c.leader)
 	if _, ok := c.clients[addr]; !ok {
 		cc, err := grpc.Dial(addr, grpc.WithDialer(func(addr string, d time.Duration) (net.Conn, error) {
 			u, err := url.Parse(addr)
@@ -192,41 +194,47 @@ func (c *client) tsLoop() {
 
 	for {
 		select {
-		case firstReq := <-c.tsoRequests:
-			start := time.Now()
-			ctx, cancel := context.WithTimeout(context.Background(), pdTimeout)
-			defer cancel()
-
-			pendingCount := len(c.tsoRequests)
-			resp, err := c.leaderClient().Tso(ctx, &pdpb2.TsoRequest{
-				Header: &pdpb2.RequestHeader{ClusterId: c.clusterID},
-				Count:  uint32(pendingCount + 1),
-			})
-			requestDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds())
-			if err == nil && resp.GetCount() != uint32(pendingCount+1) {
-				err = errors.New("[pd] tso length in rpc response is incorrect")
-			}
-			if err != nil {
-				firstReq.done <- errors.Trace(err)
-				for i := 0; i < pendingCount; i++ {
-					req := <-c.tsoRequests
-					req.done <- errors.Trace(err)
-				}
-			}
-			tsHigh := resp.GetTimestamp()
-			firstReq.physical = tsHigh.GetPhysical()
-			firstReq.logical = tsHigh.GetLogical() - int64(pendingCount)
-			firstReq.done <- nil
-			for i := 1; i <= pendingCount; i++ {
-				req := <-c.tsoRequests
-				req.physical = tsHigh.GetPhysical()
-				req.logical = tsHigh.GetLogical() - int64(resp.GetCount()) + int64(i)
-				req.done <- nil
-			}
+		case first := <-c.tsoRequests:
+			c.procTSORequests(first)
 		case <-c.quit:
 			return
 		}
 	}
+}
+
+func (c *client) procTSORequests(first *tsoRequest) {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), pdTimeout)
+
+	pendingCount := len(c.tsoRequests)
+	resp, err := c.leaderClient().Tso(ctx, &pdpb2.TsoRequest{
+		Header: &pdpb2.RequestHeader{ClusterId: c.clusterID},
+		Count:  uint32(pendingCount + 1),
+	})
+	cancel()
+	requestDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds())
+	if err == nil && resp.GetCount() != uint32(pendingCount+1) {
+		err = errors.New("[pd] tso length in rpc response is incorrect")
+	}
+	if err != nil {
+		c.finishTSORequest(first, 0, 0, errors.Trace(err))
+		for i := 0; i < pendingCount; i++ {
+			c.finishTSORequest(<-c.tsoRequests, 0, 0, errors.Trace(err))
+		}
+		return
+	}
+
+	physical, logical := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical()
+	c.finishTSORequest(first, physical, logical, nil)
+	for i := 0; i < pendingCount; i++ {
+		logical--
+		c.finishTSORequest(<-c.tsoRequests, physical, logical, nil)
+	}
+}
+
+func (c *client) finishTSORequest(req *tsoRequest, physical, logical int64, err error) {
+	req.physical, req.logical = physical, logical
+	req.done <- err
 }
 
 func (c *client) Close() {
