@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/api"
 	"github.com/twinj/uuid"
 )
 
@@ -96,7 +97,8 @@ func (s *testClientSuite) TearDownSuite(c *C) {
 func newServer(c *C) (*server.Server, cleanupFunc) {
 	cfg := server.NewTestSingleConfig()
 
-	s, err := server.NewServer(cfg)
+	s := server.CreateServer(cfg)
+	err := s.StartEtcd(api.NewHandler(s))
 	c.Assert(err, IsNil)
 
 	go s.Run()

@@ -28,7 +28,9 @@ import (
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	"github.com/pingcap/kvproto/pkg/pdpb2"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -128,6 +130,7 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	if apiHandler != nil {
 		etcdCfg.UserHandlers[pdAPIPrefix] = apiHandler
 	}
+	etcdCfg.ServiceRegister = func(gs *grpc.Server) { pdpb2.RegisterPDServer(gs, s) }
 
 	log.Info("start embed etcd")
 
