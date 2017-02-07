@@ -112,7 +112,7 @@ func (s *testLeaderChangeSuite) mustGetLeader(c *C, urls []string) string {
 }
 
 func (s *testLeaderChangeSuite) verifyLeader(c *C, cli *client, leader string) {
-	cli.checkLeader()
+	cli.scheduleCheckLeader()
 	time.Sleep(time.Millisecond * 500)
 
 	cli.mu.RLock()

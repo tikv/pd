@@ -163,7 +163,7 @@ func (c *client) switchLeader(addr string) error {
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
-			return net.Dial(u.Scheme, u.Host)
+			return net.DialTimeout(u.Scheme, u.Host, d)
 		}), grpc.WithInsecure())
 		if err != nil {
 			return errors.Trace(err)
@@ -257,14 +257,14 @@ func (c *client) leaderClient() pdpb2.PDClient {
 	return c.clients[c.leader]
 }
 
-func (c *client) checkLeader() {
+func (c *client) scheduleCheckLeader() {
 	select {
 	case c.checkLeaderCh <- struct{}{}:
 	default:
 	}
 }
 
-func (c *client) GetClusterID(ctx context.Context) uint64 {
+func (c *client) GetClusterID(context.Context) uint64 {
 	return c.clusterID
 }
 
@@ -283,7 +283,7 @@ func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
 	case err := <-req.done:
 		if err != nil {
 			cmdFailedCounter.WithLabelValues("tso").Inc()
-			c.checkLeader()
+			c.scheduleCheckLeader()
 			return 0, 0, errors.Trace(err)
 		}
 		return req.physical, req.logical, err
@@ -305,7 +305,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 
 	if err != nil {
 		cmdFailedCounter.WithLabelValues("get_region").Inc()
-		c.checkLeader()
+		c.scheduleCheckLeader()
 		return nil, nil, errors.Trace(err)
 	}
 	return resp.GetRegion(), resp.GetLeader(), nil
@@ -324,7 +324,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 
 	if err != nil {
 		cmdFailedCounter.WithLabelValues("get_store").Inc()
-		c.checkLeader()
+		c.scheduleCheckLeader()
 		return nil, errors.Trace(err)
 	}
 	store := resp.GetStore()
