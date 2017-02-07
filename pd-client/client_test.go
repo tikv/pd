@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/twinj/uuid"
+	"golang.org/x/net/context"
 )
 
 func TestClient(t *testing.T) {
@@ -158,7 +159,7 @@ func heartbeatRegion(c *C, s *server.Server) {
 func (s *testClientSuite) TestTSO(c *C) {
 	var tss []int64
 	for i := 0; i < 100; i++ {
-		p, l, err := s.client.GetTS()
+		p, l, err := s.client.GetTS(context.Background())
 		c.Assert(err, IsNil)
 		tss = append(tss, p<<18+l)
 	}
@@ -173,7 +174,7 @@ func (s *testClientSuite) TestTSO(c *C) {
 func (s *testClientSuite) TestGetRegion(c *C) {
 	heartbeatRegion(c, s.srv)
 
-	r, leader, err := s.client.GetRegion([]byte("a"))
+	r, leader, err := s.client.GetRegion(context.Background(), []byte("a"))
 	c.Assert(err, IsNil)
 	c.Assert(r, DeepEquals, region)
 	c.Assert(leader, DeepEquals, peer)
@@ -184,7 +185,7 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	c.Assert(cluster, NotNil)
 
 	// Get an up store should be OK.
-	n, err := s.client.GetStore(store.GetId())
+	n, err := s.client.GetStore(context.Background(), store.GetId())
 	c.Assert(err, IsNil)
 	c.Assert(n, DeepEquals, store)
 
@@ -193,7 +194,7 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	c.Assert(err, IsNil)
 
 	// Get an offline store should be OK.
-	n, err = s.client.GetStore(store.GetId())
+	n, err = s.client.GetStore(context.Background(), store.GetId())
 	c.Assert(err, IsNil)
 	c.Assert(n.GetState(), Equals, metapb.StoreState_Offline)
 
@@ -201,7 +202,7 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	c.Assert(err, IsNil)
 
 	// Get a tombstone store should fail.
-	n, err = s.client.GetStore(store.GetId())
+	n, err = s.client.GetStore(context.Background(), store.GetId())
 	c.Assert(err, IsNil)
 	c.Assert(n, IsNil)
 }

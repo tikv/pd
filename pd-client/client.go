@@ -33,19 +33,19 @@ import (
 // It should not be used after calling Close().
 type Client interface {
 	// GetClusterID gets the cluster ID from PD.
-	GetClusterID() uint64
+	GetClusterID(ctx context.Context) uint64
 	// GetTS gets a timestamp from PD.
-	GetTS() (int64, int64, error)
+	GetTS(ctx context.Context) (int64, int64, error)
 	// GetRegion gets a region and its leader Peer from PD by key.
 	// The region may expire after split. Caller is responsible for caching and
 	// taking care of region change.
 	// Also it may return nil if PD finds no Region for the key temporarily,
 	// client should retry later.
-	GetRegion(key []byte) (*metapb.Region, *metapb.Peer, error)
+	GetRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error)
 	// GetStore gets a store from PD by store id.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
-	GetStore(storeID uint64) (*metapb.Store, error)
+	GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error)
 	// Close closes the client.
 	Close()
 }
@@ -62,12 +62,14 @@ const (
 	maxInitClusterRetries = 100
 )
 
+var errTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
+
 type client struct {
 	urls        []string
 	clusterID   uint64
 	tsoRequests chan *tsoRequest
 
-	mu            sync.RWMutex
+	mu            sync.RWMutex // TODO: use embedded struct style.
 	clients       map[string]pdpb2.PDClient
 	leader        string
 	checkLeaderCh chan struct{}
@@ -214,7 +216,7 @@ func (c *client) procTSORequests(first *tsoRequest) {
 	cancel()
 	requestDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds())
 	if err == nil && resp.GetCount() != uint32(pendingCount+1) {
-		err = errors.New("[pd] tso length in rpc response is incorrect")
+		err = errTSOLength
 	}
 	if err != nil {
 		c.finishTSORequest(first, 0, 0, errors.Trace(err))
@@ -255,10 +257,6 @@ func (c *client) leaderClient() pdpb2.PDClient {
 	return c.clients[c.leader]
 }
 
-func (c *client) GetClusterID() uint64 {
-	return c.clusterID
-}
-
 func (c *client) checkLeader() {
 	select {
 	case c.checkLeaderCh <- struct{}{}:
@@ -266,7 +264,11 @@ func (c *client) checkLeader() {
 	}
 }
 
-func (c *client) GetTS() (int64, int64, error) {
+func (c *client) GetClusterID(ctx context.Context) uint64 {
+	return c.clusterID
+}
+
+func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
 	cmdCounter.WithLabelValues("tso").Inc()
 
 	start := time.Now()
@@ -276,23 +278,26 @@ func (c *client) GetTS() (int64, int64, error) {
 		done: make(chan error, 1),
 	}
 	c.tsoRequests <- req
-	err := <-req.done
 
-	if err != nil {
-		cmdFailedCounter.WithLabelValues("tso").Inc()
-		c.checkLeader()
-		return 0, 0, errors.Trace(err)
+	select {
+	case err := <-req.done:
+		if err != nil {
+			cmdFailedCounter.WithLabelValues("tso").Inc()
+			c.checkLeader()
+			return 0, 0, errors.Trace(err)
+		}
+		return req.physical, req.logical, err
+	case <-ctx.Done():
+		return 0, 0, errors.Trace(ctx.Err())
 	}
-
-	return req.physical, req.logical, err
 }
 
-func (c *client) GetRegion(key []byte) (*metapb.Region, *metapb.Peer, error) {
+func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error) {
 	cmdCounter.WithLabelValues("get_region").Inc()
 
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(context.Background(), pdTimeout)
+	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	defer cancel()
 
 	resp, err := c.leaderClient().GetRegion(ctx, &pdpb2.GetRegionRequest{RegionKey: key})
@@ -306,12 +311,12 @@ func (c *client) GetRegion(key []byte) (*metapb.Region, *metapb.Peer, error) {
 	return resp.GetRegion(), resp.GetLeader(), nil
 }
 
-func (c *client) GetStore(storeID uint64) (*metapb.Store, error) {
+func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error) {
 	cmdCounter.WithLabelValues("get_store").Inc()
 
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(context.Background(), pdTimeout)
+	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	defer cancel()
 
 	resp, err := c.leaderClient().GetStore(ctx, &pdpb2.GetStoreRequest{StoreId: storeID})

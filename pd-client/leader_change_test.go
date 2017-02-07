@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testLeaderChangeSuite{})
@@ -69,7 +70,7 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	c.Assert(err, IsNil)
 	defer cli.Close()
 
-	p1, l1, err := cli.GetTS()
+	p1, l1, err := cli.GetTS(context.Background())
 	c.Assert(err, IsNil)
 
 	leader := s.mustGetLeader(c, endpoints)
@@ -84,7 +85,7 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	s.verifyLeader(c, cli.(*client), newLeader)
 
 	for i := 0; i < 20; i++ {
-		p2, l2, err := cli.GetTS()
+		p2, l2, err := cli.GetTS(context.Background())
 		if err == nil {
 			c.Assert(p1<<18+l1, Less, p2<<18+l2)
 			return
