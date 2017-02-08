@@ -81,19 +81,22 @@ type client struct {
 	leader        string
 	checkLeaderCh chan struct{}
 
-	wg   sync.WaitGroup
-	quit chan struct{}
+	wg     sync.WaitGroup
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewClient creates a PD client.
 func NewClient(pdAddrs []string) (Client, error) {
 	log.Infof("[pd] create pd client with endpoints %v", pdAddrs)
+	ctx, cancel := context.WithCancel(context.Background())
 	c := &client{
 		urls:          addrsToUrls(pdAddrs),
 		tsoRequests:   make(chan *tsoRequest, maxMergeTSORequests),
 		clients:       make(map[string]pdpb2.PDClient),
 		checkLeaderCh: make(chan struct{}, 1),
-		quit:          make(chan struct{}),
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 
 	if err := c.initClusterID(); err != nil {
@@ -188,7 +191,7 @@ func (c *client) leaderLoop() {
 		select {
 		case <-c.checkLeaderCh:
 		case <-time.After(time.Minute):
-		case <-c.quit:
+		case <-c.ctx.Done():
 			return
 		}
 
@@ -205,7 +208,7 @@ func (c *client) tsLoop() {
 		select {
 		case first := <-c.tsoRequests:
 			c.processTSORequests(first)
-		case <-c.quit:
+		case <-c.ctx.Done():
 			return
 		}
 	}
@@ -247,7 +250,7 @@ func (c *client) finishTSORequest(req *tsoRequest, physical, logical int64, err 
 }
 
 func (c *client) Close() {
-	close(c.quit)
+	c.cancel()
 	c.wg.Wait()
 
 	n := len(c.tsoRequests)
