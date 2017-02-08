@@ -276,8 +276,6 @@ func (c *client) GetClusterID(context.Context) uint64 {
 }
 
 func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
-	cmdCounter.WithLabelValues("tso").Inc()
-
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds()) }()
 
@@ -300,8 +298,6 @@ func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
 }
 
 func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error) {
-	cmdCounter.WithLabelValues("get_region").Inc()
-
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
@@ -319,8 +315,6 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 }
 
 func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error) {
-	cmdCounter.WithLabelValues("get_store").Inc()
-
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
