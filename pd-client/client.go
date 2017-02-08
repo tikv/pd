@@ -76,9 +76,12 @@ type client struct {
 	clusterID   uint64
 	tsoRequests chan *tsoRequest
 
-	mu            sync.RWMutex // TODO: use embedded struct style.
-	clients       map[string]pdpb2.PDClient
-	leader        string
+	connMu struct {
+		sync.RWMutex
+		clientConns map[string]*grpc.ClientConn
+		leader      string
+	}
+
 	checkLeaderCh chan struct{}
 
 	wg     sync.WaitGroup
@@ -93,11 +96,11 @@ func NewClient(pdAddrs []string) (Client, error) {
 	c := &client{
 		urls:          addrsToUrls(pdAddrs),
 		tsoRequests:   make(chan *tsoRequest, maxMergeTSORequests),
-		clients:       make(map[string]pdpb2.PDClient),
 		checkLeaderCh: make(chan struct{}, 1),
 		ctx:           ctx,
 		cancel:        cancel,
 	}
+	c.connMu.clientConns = make(map[string]*grpc.ClientConn)
 
 	if err := c.initClusterID(); err != nil {
 		return nil, errors.Trace(err)
@@ -149,9 +152,9 @@ func (c *client) updateLeader() error {
 		if err != nil {
 			continue
 		}
-		c.mu.RLock()
-		changed := c.leader != leader.GetAddr()
-		c.mu.RUnlock()
+		c.connMu.RLock()
+		changed := c.connMu.leader != leader.GetAddr()
+		c.connMu.RUnlock()
 		if changed {
 			if err = c.switchLeader(leader.GetAddr()); err != nil {
 				return errors.Trace(err)
@@ -163,11 +166,11 @@ func (c *client) updateLeader() error {
 }
 
 func (c *client) switchLeader(addr string) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
 
-	log.Infof("[pd] leader switches to: %v, previous: %v", addr, c.leader)
-	if _, ok := c.clients[addr]; !ok {
+	log.Infof("[pd] leader switches to: %v, previous: %v", addr, c.connMu.leader)
+	if _, ok := c.connMu.clientConns[addr]; !ok {
 		cc, err := grpc.Dial(addr, grpc.WithDialer(func(addr string, d time.Duration) (net.Conn, error) {
 			u, err := url.Parse(addr)
 			if err != nil {
@@ -178,9 +181,9 @@ func (c *client) switchLeader(addr string) error {
 		if err != nil {
 			return errors.Trace(err)
 		}
-		c.clients[addr] = pdpb2.NewPDClient(cc)
+		c.connMu.clientConns[addr] = cc
 	}
-	c.leader = addr
+	c.connMu.leader = addr
 	return nil
 }
 
@@ -261,10 +264,10 @@ func (c *client) Close() {
 }
 
 func (c *client) leaderClient() pdpb2.PDClient {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.connMu.RLock()
+	defer c.connMu.RUnlock()
 
-	return c.clients[c.leader]
+	return pdpb2.NewPDClient(c.connMu.clientConns[c.connMu.leader])
 }
 
 func (c *client) scheduleCheckLeader() {
