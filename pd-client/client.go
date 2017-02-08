@@ -62,7 +62,14 @@ const (
 	maxInitClusterRetries = 100
 )
 
-var errTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
+var (
+	// errFailInitClusterID is returned when failed to load clusterID from all supplied PD addresses.
+	errFailInitClusterID = errors.New("[pd] failed to get cluster id")
+	// errClosing is returned when request is canceled when client is closing.
+	errClosing = errors.New("[pd] closing")
+	// errTSOLength is returned when the number of response timestamps is inconsistent with request.
+	errTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
+)
 
 type client struct {
 	urls        []string
@@ -126,7 +133,7 @@ func (c *client) initClusterID() error {
 		time.Sleep(time.Second)
 	}
 
-	return errors.New("failed to get cluster id")
+	return errors.Trace(errFailInitClusterID)
 }
 
 func (c *client) updateLeader() error {
@@ -197,14 +204,14 @@ func (c *client) tsLoop() {
 	for {
 		select {
 		case first := <-c.tsoRequests:
-			c.procTSORequests(first)
+			c.processTSORequests(first)
 		case <-c.quit:
 			return
 		}
 	}
 }
 
-func (c *client) procTSORequests(first *tsoRequest) {
+func (c *client) processTSORequests(first *tsoRequest) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), pdTimeout)
 
@@ -246,7 +253,7 @@ func (c *client) Close() {
 	n := len(c.tsoRequests)
 	for i := 0; i < n; i++ {
 		req := <-c.tsoRequests
-		req.done <- errors.New("[pd] closing")
+		req.done <- errors.Trace(errClosing)
 	}
 }
 
