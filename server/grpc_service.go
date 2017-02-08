@@ -21,7 +21,23 @@ import (
 
 // GetPDMembers implements gRPC PDServer.
 func (s *Server) GetPDMembers(context.Context, *pdpb2.GetPDMembersRequest) (*pdpb2.GetPDMembersResponse, error) {
-	panic("not implemented")
+	members, err := GetPDMembers(s.GetClient())
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	members2 := make([]*pdpb2.Member, len(members))
+	for i := range members {
+		members2[i] = &pdpb2.Member{
+			Name:       members[i].GetName(),
+			MemberId:   s.clusterID,
+			PeerUrls:   members[i].PeerUrls,
+			ClientUrls: members[i].ClientUrls,
+		}
+	}
+	return &pdpb2.GetPDMembersResponse{
+		Header:  &pdpb2.ResponseHeader{ClusterId: s.clusterID},
+		Members: members2,
+	}, nil
 }
 
 // Tso implements gRPC PDServer.
