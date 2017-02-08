@@ -115,7 +115,7 @@ func (s *testLeaderChangeSuite) verifyLeader(c *C, cli *client, leader string) {
 	cli.scheduleCheckLeader()
 	time.Sleep(time.Millisecond * 500)
 
-	cli.mu.RLock()
-	defer cli.mu.RUnlock()
-	c.Assert(cli.leader, Equals, leader)
+	cli.connMu.RLock()
+	defer cli.connMu.RUnlock()
+	c.Assert(cli.connMu.leader, Equals, leader)
 }

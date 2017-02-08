@@ -177,7 +177,7 @@ func (c *client) switchLeader(addr string) error {
 				return nil, errors.Trace(err)
 			}
 			return net.DialTimeout(u.Scheme, u.Host, d)
-		}), grpc.WithInsecure())
+		}), grpc.WithInsecure()) // TODO: Support HTTPS.
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -262,6 +262,11 @@ func (c *client) Close() {
 	for i := 0; i < n; i++ {
 		req := <-c.tsoRequests
 		req.done <- errors.Trace(errClosing)
+	}
+	for _, cc := range c.connMu.clientConns {
+		if err := cc.Close(); err != nil {
+			log.Errorf("[pd] failed close grpc clientConn: %v", err)
+		}
 	}
 }
 
