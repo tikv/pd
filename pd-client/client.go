@@ -240,9 +240,11 @@ func (c *client) processTSORequests(first *tsoRequest) {
 	}
 
 	physical, logical := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical()
+	// Server returns the highest ts.
+	logical -= int64(resp.GetCount() - 1)
 	c.finishTSORequest(first, physical, logical, nil)
 	for i := 0; i < pendingCount; i++ {
-		logical--
+		logical++
 		c.finishTSORequest(<-c.tsoRequests, physical, logical, nil)
 	}
 }
@@ -307,10 +309,9 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	defer cancel()
-
 	resp, err := c.leaderClient().GetRegion(ctx, &pdpb2.GetRegionRequest{RegionKey: key})
 	requestDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds())
+	cancel()
 
 	if err != nil {
 		cmdFailedCounter.WithLabelValues("get_region").Inc()
@@ -324,10 +325,9 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	defer cancel()
-
 	resp, err := c.leaderClient().GetStore(ctx, &pdpb2.GetStoreRequest{StoreId: storeID})
 	requestDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds())
+	cancel()
 
 	if err != nil {
 		cmdFailedCounter.WithLabelValues("get_store").Inc()
