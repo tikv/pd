@@ -122,6 +122,7 @@ func NewClient(pdAddrs []string) (Client, error) {
 func (c *client) initClusterID() error {
 	for i := 0; i < maxInitClusterRetries; i++ {
 		for _, u := range c.urls {
+			// TODO: Use gRPC instead.
 			client, err := apiutil.NewClient(u, pdTimeout)
 			if err != nil {
 				log.Errorf("[pd] failed to get cluster id: %v", err)
