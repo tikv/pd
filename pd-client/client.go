@@ -223,7 +223,7 @@ func (c *client) processTSORequests(first *tsoRequest) {
 
 	pendingCount := len(c.tsoRequests)
 	resp, err := c.leaderClient().Tso(ctx, &pdpb2.TsoRequest{
-		Header: &pdpb2.RequestHeader{ClusterId: c.clusterID},
+		Header: c.requestHeader(),
 		Count:  uint32(pendingCount + 1),
 	})
 	cancel()
@@ -314,7 +314,10 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	resp, err := c.leaderClient().GetRegion(ctx, &pdpb2.GetRegionRequest{RegionKey: key})
+	resp, err := c.leaderClient().GetRegion(ctx, &pdpb2.GetRegionRequest{
+		Header:    c.requestHeader(),
+		RegionKey: key,
+	})
 	requestDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds())
 	cancel()
 
@@ -330,7 +333,10 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	resp, err := c.leaderClient().GetStore(ctx, &pdpb2.GetStoreRequest{StoreId: storeID})
+	resp, err := c.leaderClient().GetStore(ctx, &pdpb2.GetStoreRequest{
+		Header:  c.requestHeader(),
+		StoreId: storeID,
+	})
 	requestDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds())
 	cancel()
 
@@ -347,6 +353,12 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 		return nil, nil
 	}
 	return store, nil
+}
+
+func (c *client) requestHeader() *pdpb2.RequestHeader {
+	return &pdpb2.RequestHeader{
+		ClusterId: c.clusterID,
+	}
 }
 
 func addrsToUrls(addrs []string) []string {
