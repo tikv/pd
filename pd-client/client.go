@@ -265,6 +265,9 @@ func (c *client) Close() {
 		req := <-c.tsoRequests
 		req.done <- errors.Trace(errClosing)
 	}
+
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
 	for _, cc := range c.connMu.clientConns {
 		if err := cc.Close(); err != nil {
 			log.Errorf("[pd] failed close grpc clientConn: %v", err)

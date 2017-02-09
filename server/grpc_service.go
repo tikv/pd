@@ -28,7 +28,7 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
-// notLeaderError is returned when current server is not the leader and not possible to process the request.
+// notLeaderError is returned when current server is not the leader and not possible to process request.
 // TODO: work as proxy.
 var notLeaderError = grpc.Errorf(codes.Unavailable, "not leader")
 
