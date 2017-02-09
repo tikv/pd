@@ -145,6 +145,7 @@ func (c *client) initClusterID() error {
 
 func (c *client) updateLeader() error {
 	for _, u := range c.urls {
+		// TODO: Use gRPC instead.
 		client, err := apiutil.NewClient(u, pdTimeout)
 		if err != nil {
 			continue
