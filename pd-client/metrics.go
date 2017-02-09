@@ -16,14 +16,6 @@ package pd
 import "github.com/prometheus/client_golang/prometheus"
 
 var (
-	cmdFailedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd_client",
-			Subsystem: "cmd",
-			Name:      "cmds_failed_total",
-			Help:      "Counter of failed cmds.",
-		}, []string{"type"})
-
 	cmdDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd_client",
@@ -53,7 +45,6 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(cmdFailedCounter)
 	prometheus.MustRegister(cmdDuration)
 	prometheus.MustRegister(cmdFailedDuration)
 	prometheus.MustRegister(requestDuration)

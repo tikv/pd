@@ -220,7 +220,7 @@ func (c *client) tsLoop() {
 
 func (c *client) processTSORequests(first *tsoRequest) {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), pdTimeout)
+	ctx, cancel := context.WithTimeout(c.ctx, pdTimeout)
 
 	pendingCount := len(c.tsoRequests)
 	resp, err := c.leaderClient().Tso(ctx, &pdpb2.TsoRequest{
@@ -301,7 +301,7 @@ func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
 	select {
 	case err := <-req.done:
 		if err != nil {
-			cmdFailedCounter.WithLabelValues("tso").Inc()
+			cmdFailedDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds())
 			c.scheduleCheckLeader()
 			return 0, 0, errors.Trace(err)
 		}
@@ -323,7 +323,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 	cancel()
 
 	if err != nil {
-		cmdFailedCounter.WithLabelValues("get_region").Inc()
+		cmdFailedDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds())
 		c.scheduleCheckLeader()
 		return nil, nil, errors.Trace(err)
 	}
@@ -342,7 +342,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 	cancel()
 
 	if err != nil {
-		cmdFailedCounter.WithLabelValues("get_store").Inc()
+		cmdFailedDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds())
 		c.scheduleCheckLeader()
 		return nil, errors.Trace(err)
 	}
