@@ -286,35 +286,27 @@ type ScheduleConfig struct {
 	// a store will be considered to be down if it hasn't reported heartbeats.
 	MaxStoreDownDuration timeutil.Duration `toml:"max-store-down-duration" json:"max-store-down-duration"`
 
+	// ScheduleInterval is the interval to schedule.
+	ScheduleInterval timeutil.Duration `toml:"schedule-interval" json:"schedule-interval"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
-	// LeaderScheduleInterval is the interval to schedule leader.
-	LeaderScheduleInterval timeutil.Duration `toml:"leader-schedule-interval" json:"leader-schedule-interval"`
-
-	// StorageScheduleLimit is the max coexist storage schedules.
-	StorageScheduleLimit uint64 `toml:"storage-schedule-limit" json:"storage-schedule-limit"`
-	// StorageScheduleInterval is the interval to schedule storage.
-	StorageScheduleInterval timeutil.Duration `toml:"storage-schedule-interval" json:"storage-schedule-interval"`
-
+	// RegionScheduleLimit is the max coexist region schedules.
+	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit" json:"replica-schedule-limit"`
-	// ReplicaScheduleInterval is the interval to schedule storage.
-	ReplicaScheduleInterval timeutil.Duration `toml:"replica-schedule-interval" json:"replica-schedule-interval"`
 }
 
 const (
-	defaultMaxReplicas             = uint64(3)
-	defaultMinRegionCount          = uint64(10)
-	defaultMinLeaderCount          = uint64(10)
-	defaultMaxSnapshotCount        = uint64(3)
-	defaultMinBalanceDiffRatio     = float64(0.01)
-	defaultMaxStoreDownDuration    = time.Hour
-	defaultLeaderScheduleLimit     = 8
-	defaultLeaderScheduleInterval  = time.Second
-	defaultStorageScheduleLimit    = 4
-	defaultStorageScheduleInterval = time.Second
-	defaultReplicaScheduleLimit    = 8
-	defaultReplicaScheduleInterval = time.Second
+	defaultMaxReplicas          = uint64(3)
+	defaultMinRegionCount       = uint64(10)
+	defaultMinLeaderCount       = uint64(10)
+	defaultMaxSnapshotCount     = uint64(3)
+	defaultMinBalanceDiffRatio  = float64(0.01)
+	defaultMaxStoreDownDuration = time.Hour
+	defaultScheduleInterval     = time.Minute
+	defaultLeaderScheduleLimit  = 16
+	defaultRegionScheduleLimit  = 12
+	defaultReplicaScheduleLimit = 16
 )
 
 func (c *ScheduleConfig) adjust() {
@@ -323,12 +315,10 @@ func (c *ScheduleConfig) adjust() {
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	adjustFloat64(&c.MinBalanceDiffRatio, defaultMinBalanceDiffRatio)
 	adjustDuration(&c.MaxStoreDownDuration, defaultMaxStoreDownDuration)
+	adjustDuration(&c.ScheduleInterval, defaultScheduleInterval)
 	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
-	adjustDuration(&c.LeaderScheduleInterval, defaultLeaderScheduleInterval)
-	adjustUint64(&c.StorageScheduleLimit, defaultStorageScheduleLimit)
-	adjustDuration(&c.StorageScheduleInterval, defaultStorageScheduleInterval)
+	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
 	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
-	adjustDuration(&c.ReplicaScheduleInterval, defaultReplicaScheduleInterval)
 }
 
 // ReplicationConfig is the replication configuration.
@@ -400,28 +390,20 @@ func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
 	return o.load().MaxStoreDownDuration.Duration
 }
 
+func (o *scheduleOption) GetScheduleInterval() time.Duration {
+	return o.load().ScheduleInterval.Duration
+}
+
 func (o *scheduleOption) GetLeaderScheduleLimit() uint64 {
 	return o.load().LeaderScheduleLimit
 }
 
-func (o *scheduleOption) GetLeaderScheduleInterval() time.Duration {
-	return o.load().LeaderScheduleInterval.Duration
-}
-
-func (o *scheduleOption) GetStorageScheduleLimit() uint64 {
-	return o.load().StorageScheduleLimit
-}
-
-func (o *scheduleOption) GetStorageScheduleInterval() time.Duration {
-	return o.load().StorageScheduleInterval.Duration
+func (o *scheduleOption) GetRegionScheduleLimit() uint64 {
+	return o.load().RegionScheduleLimit
 }
 
 func (o *scheduleOption) GetReplicaScheduleLimit() uint64 {
 	return o.load().ReplicaScheduleLimit
-}
-
-func (o *scheduleOption) GetReplicaScheduleInterval() time.Duration {
-	return o.load().ReplicaScheduleInterval.Duration
 }
 
 // ParseUrls parse a string into multiple urls.

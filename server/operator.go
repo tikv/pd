@@ -130,7 +130,7 @@ func (op *changePeerOperator) GetRegionID() uint64 {
 }
 
 func (op *changePeerOperator) GetResourceKind() ResourceKind {
-	return storageKind
+	return regionKind
 }
 
 func (op *changePeerOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatResponse, bool) {

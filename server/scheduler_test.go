@@ -19,11 +19,12 @@ var _ = Suite(&testShuffleLeaderSuite{})
 
 type testShuffleLeaderSuite struct{}
 
-func (s *testShuffleLeaderSuite) Test(c *C) {
+func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 
-	sl := newShuffleLeaderScheduler()
+	_, opt := newTestScheduleConfig()
+	sl := newShuffleLeaderScheduler(opt)
 	c.Assert(sl.Schedule(cluster), IsNil)
 
 	// Add stores 1,2,3,4

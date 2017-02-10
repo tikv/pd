@@ -26,7 +26,7 @@ type ResourceKind int
 
 const (
 	leaderKind ResourceKind = iota + 1
-	storageKind
+	regionKind
 )
 
 // storeInfo contains information about a store.
@@ -84,7 +84,7 @@ func (s *storeInfo) resourceRatio(kind ResourceKind) float64 {
 	switch kind {
 	case leaderKind:
 		return s.leaderRatio()
-	case storageKind:
+	case regionKind:
 		return s.storageRatio()
 	default:
 		return 0

@@ -35,54 +35,60 @@ type coordinator struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	cluster *clusterInfo
-	opt     *scheduleOption
-	checker *replicaCheckController
-
-	schedulers map[string]*ScheduleController
-	operators  map[ResourceKind]map[uint64]Operator
+	cluster    *clusterInfo
+	opt        *scheduleOption
+	limiter    *scheduleLimiter
+	checker    *replicaChecker
+	operators  map[uint64]Operator
+	schedulers map[string]*scheduleController
 
 	histories *lruCache
 	events    *fifoCache
 }
 
 func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
-	c := &coordinator{
+	ctx, cancel := context.WithCancel(context.TODO())
+	return &coordinator{
+		ctx:        ctx,
+		cancel:     cancel,
 		cluster:    cluster,
 		opt:        opt,
-		schedulers: make(map[string]*ScheduleController),
+		limiter:    newScheduleLimiter(),
+		checker:    newReplicaChecker(opt, cluster),
+		operators:  make(map[uint64]Operator),
+		schedulers: make(map[string]*scheduleController),
 		histories:  newLRUCache(historiesCacheSize),
 		events:     newFifoCache(eventsCacheSize),
 	}
-
-	c.ctx, c.cancel = context.WithCancel(context.TODO())
-
-	c.checker = newReplicaCheckController(c)
-	c.operators = make(map[ResourceKind]map[uint64]Operator)
-	c.operators[leaderKind] = make(map[uint64]Operator)
-	c.operators[storageKind] = make(map[uint64]Operator)
-
-	return c
 }
 
 func (c *coordinator) dispatch(region *regionInfo) *pdpb.RegionHeartbeatResponse {
-	c.checker.Check(region)
-
-	op := c.getOperator(region.GetId())
-	if op == nil {
-		return nil
-	}
-
-	res, finished := op.Do(region)
-	if finished {
+	// Check existed operator.
+	if op := c.getOperator(region.GetId()); op != nil {
+		res, finished := op.Do(region)
+		if !finished {
+			return res
+		}
 		c.removeOperator(op)
 	}
-	return res
+
+	// Check replica operator.
+	if c.limiter.operatorCount(regionKind) >= c.opt.GetReplicaScheduleLimit() {
+		return nil
+	}
+	if op := c.checker.Check(region); op != nil {
+		if c.addOperator(op) {
+			res, _ := op.Do(region)
+			return res
+		}
+	}
+
+	return nil
 }
 
 func (c *coordinator) run() {
-	c.addScheduler(newLeaderScheduleController(c, newBalanceLeaderScheduler(c.opt)))
-	c.addScheduler(newStorageScheduleController(c, newBalanceStorageScheduler(c.opt)))
+	c.addScheduler(newBalanceLeaderScheduler(c.opt))
+	c.addScheduler(newBalanceStorageScheduler(c.opt))
 }
 
 func (c *coordinator) stop() {
@@ -101,17 +107,17 @@ func (c *coordinator) getSchedulers() []string {
 	return names
 }
 
-func (c *coordinator) addScheduler(s *ScheduleController) bool {
+func (c *coordinator) addScheduler(scheduler Scheduler) bool {
 	c.Lock()
 	defer c.Unlock()
 
+	s := newScheduleController(c, scheduler)
 	if _, ok := c.schedulers[s.GetName()]; ok {
 		return false
 	}
 
 	c.wg.Add(1)
 	go c.runScheduler(s)
-
 	c.schedulers[s.GetName()] = s
 	return true
 }
@@ -130,7 +136,7 @@ func (c *coordinator) removeScheduler(name string) bool {
 	return true
 }
 
-func (c *coordinator) runScheduler(s *ScheduleController) {
+func (c *coordinator) runScheduler(s *scheduleController) {
 	defer c.wg.Done()
 
 	timer := time.NewTimer(s.GetInterval())
@@ -164,12 +170,13 @@ func (c *coordinator) addOperator(op Operator) bool {
 	defer c.Unlock()
 
 	regionID := op.GetRegionID()
-	if c.getOperatorLocked(regionID) != nil {
+	if _, ok := c.operators[regionID]; ok {
 		return false
 	}
 
+	c.limiter.addOperator(op)
+	c.operators[regionID] = op
 	collectOperatorCounterMetrics(op)
-	c.operators[op.GetResourceKind()][regionID] = op
 	return true
 }
 
@@ -178,26 +185,16 @@ func (c *coordinator) removeOperator(op Operator) {
 	defer c.Unlock()
 
 	regionID := op.GetRegionID()
-	c.histories.add(regionID, op)
+	c.limiter.removeOperator(op)
+	delete(c.operators, regionID)
 
-	for _, ops := range c.operators {
-		delete(ops, regionID)
-	}
+	c.histories.add(regionID, op)
 }
 
 func (c *coordinator) getOperator(regionID uint64) Operator {
 	c.RLock()
 	defer c.RUnlock()
-	return c.getOperatorLocked(regionID)
-}
-
-func (c *coordinator) getOperatorLocked(regionID uint64) Operator {
-	for _, ops := range c.operators {
-		if op, ok := ops[regionID]; ok {
-			return op
-		}
-	}
-	return nil
+	return c.operators[regionID]
 }
 
 func (c *coordinator) getOperators() map[uint64]Operator {
@@ -205,10 +202,8 @@ func (c *coordinator) getOperators() map[uint64]Operator {
 	defer c.RUnlock()
 
 	operators := make(map[uint64]Operator)
-	for _, ops := range c.operators {
-		for id, op := range ops {
-			operators[id] = op
-		}
+	for id, op := range c.operators {
+		operators[id] = op
 	}
 
 	return operators
@@ -226,128 +221,70 @@ func (c *coordinator) getHistories() []Operator {
 	return operators
 }
 
-func (c *coordinator) getOperatorCount(kind ResourceKind) int {
-	c.RLock()
-	defer c.RUnlock()
-	return len(c.operators[kind])
+type scheduleLimiter struct {
+	sync.RWMutex
+	counts map[ResourceKind]uint64
 }
 
-// Controller is an interface to control the speed of different schedulers.
-type Controller interface {
-	Ctx() context.Context
-	Stop()
-	GetInterval() time.Duration
-	AllowSchedule() bool
+func newScheduleLimiter() *scheduleLimiter {
+	return &scheduleLimiter{
+		counts: make(map[ResourceKind]uint64),
+	}
 }
 
-type leaderController struct {
-	c      *coordinator
-	ctx    context.Context
-	cancel context.CancelFunc
+func (l *scheduleLimiter) addOperator(op Operator) {
+	l.Lock()
+	defer l.Unlock()
+	l.counts[op.GetResourceKind()]++
 }
 
-func newLeaderController(c *coordinator) *leaderController {
-	l := &leaderController{c: c}
-	l.ctx, l.cancel = context.WithCancel(c.ctx)
-	return l
+func (l *scheduleLimiter) removeOperator(op Operator) {
+	l.Lock()
+	defer l.Unlock()
+	l.counts[op.GetResourceKind()]--
 }
 
-func (l *leaderController) Ctx() context.Context {
-	return l.ctx
+func (l *scheduleLimiter) operatorCount(kind ResourceKind) uint64 {
+	l.RLock()
+	defer l.RUnlock()
+	return l.counts[kind]
 }
 
-func (l *leaderController) Stop() {
-	l.cancel()
+type scheduleController struct {
+	Scheduler
+	opt     *scheduleOption
+	limiter *scheduleLimiter
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
-func (l *leaderController) GetInterval() time.Duration {
-	return l.c.opt.GetLeaderScheduleInterval()
+func newScheduleController(c *coordinator, s Scheduler) *scheduleController {
+	ctx, cancel := context.WithCancel(c.ctx)
+	return &scheduleController{
+		Scheduler: s,
+		opt:       c.opt,
+		limiter:   c.limiter,
+		ctx:       ctx,
+		cancel:    cancel,
+	}
 }
 
-func (l *leaderController) AllowSchedule() bool {
-	return l.c.getOperatorCount(leaderKind) < int(l.c.opt.GetLeaderScheduleLimit())
-}
-
-type storageController struct {
-	c      *coordinator
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func newStorageController(c *coordinator) *storageController {
-	s := &storageController{c: c}
-	s.ctx, s.cancel = context.WithCancel(c.ctx)
-	return s
-}
-
-func (s *storageController) Ctx() context.Context {
+func (s *scheduleController) Ctx() context.Context {
 	return s.ctx
 }
 
-func (s *storageController) Stop() {
+func (s *scheduleController) Stop() {
 	s.cancel()
 }
 
-func (s *storageController) GetInterval() time.Duration {
-	return s.c.opt.GetStorageScheduleInterval()
+func (s *scheduleController) GetInterval() time.Duration {
+	limit := s.GetResourceLimit()
+	interval := s.opt.GetScheduleInterval().Nanoseconds()
+	return time.Duration(uint64(interval)/limit) * time.Nanosecond
 }
 
-func (s *storageController) AllowSchedule() bool {
-	return s.c.getOperatorCount(storageKind) < int(s.c.opt.GetStorageScheduleLimit())
-}
-
-// ScheduleController combines Scheduler with Controller.
-type ScheduleController struct {
-	Scheduler
-	Controller
-}
-
-func newLeaderScheduleController(c *coordinator, s Scheduler) *ScheduleController {
-	return &ScheduleController{
-		Scheduler:  s,
-		Controller: newLeaderController(c),
-	}
-}
-
-func newStorageScheduleController(c *coordinator, s Scheduler) *ScheduleController {
-	return &ScheduleController{
-		Scheduler:  s,
-		Controller: newStorageController(c),
-	}
-}
-
-type replicaCheckController struct {
-	c        *coordinator
-	opt      *scheduleOption
-	checker  *replicaChecker
-	lastTime time.Time
-}
-
-func newReplicaCheckController(c *coordinator) *replicaCheckController {
-	return &replicaCheckController{
-		c:       c,
-		opt:     c.opt,
-		checker: newReplicaChecker(c.opt, c.cluster),
-	}
-}
-
-func (r *replicaCheckController) Check(region *regionInfo) {
-	// Check limit and interval.
-	if time.Since(r.lastTime) < r.opt.GetReplicaScheduleInterval() {
-		return
-	}
-	if r.c.getOperatorCount(storageKind) >= int(r.opt.GetReplicaScheduleLimit()) {
-		return
-	}
-
-	op := r.checker.Check(region)
-	if op == nil {
-		return
-	}
-
-	if r.c.addOperator(op) {
-		r.lastTime = time.Now()
-	}
+func (s *scheduleController) AllowSchedule() bool {
+	return s.limiter.operatorCount(s.GetResourceKind()) < s.GetResourceLimit()
 }
 
 func collectOperatorCounterMetrics(op Operator) {

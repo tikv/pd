@@ -121,8 +121,7 @@ func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption) {
 	cfg.adjust()
 	cfg.Schedule.MinLeaderCount = 1
 	cfg.Schedule.MinRegionCount = 1
-	cfg.Schedule.LeaderScheduleInterval.Duration = 10 * time.Millisecond
-	cfg.Schedule.StorageScheduleInterval.Duration = 10 * time.Millisecond
+	cfg.Schedule.ScheduleInterval.Duration = time.Nanosecond
 	opt := newScheduleOption(cfg)
 	return &cfg.Schedule, opt
 }
