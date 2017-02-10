@@ -167,7 +167,7 @@ func (r *replicaChecker) Check(region *regionInfo) Operator {
 	}
 
 	if len(region.GetPeers()) < r.rep.GetMaxReplicas() {
-		newPeer, _ := r.selectBestPeer(region)
+		newPeer, _ := r.selectBestPeer(region, r.filters...)
 		if newPeer == nil {
 			return nil
 		}

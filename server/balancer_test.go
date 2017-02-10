@@ -353,22 +353,22 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	checkAddPeer(c, rc.Check(region), 4)
 
 	// Test healthFilter.
-	// If store 4 is down, we wait.
+	// If store 4 is down, we add to store 3.
 	tc.setStoreDown(4)
-	c.Assert(rc.Check(region), IsNil)
+	checkAddPeer(c, rc.Check(region), 3)
 	tc.setStoreUp(4)
 	checkAddPeer(c, rc.Check(region), 4)
 
 	// Test snapshotCountFilter.
-	// If snapshotCount > MaxSnapshotCount, we can not add peer.
+	// If snapshotCount > MaxSnapshotCount, we add to store 3.
 	tc.updateSnapshotCount(4, 3)
-	c.Assert(rc.Check(region), IsNil)
+	checkAddPeer(c, rc.Check(region), 3)
 	// If snapshotCount < MaxSnapshotCount, we can add peer again.
 	tc.updateSnapshotCount(4, 1)
 	checkAddPeer(c, rc.Check(region), 4)
 
 	// Test storageThresholdFilter.
-	// If storage ratio > storageRatioThreshold, we can not add peer.
+	// If storage ratio > storageRatioThreshold, we add to store 3.
 	tc.addRegionStore(4, 1, 0.9)
 	checkAddPeer(c, rc.Check(region), 3)
 	// If storage ratio < storageRatioThreshold, we can add peer again.
