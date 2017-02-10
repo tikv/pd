@@ -30,12 +30,10 @@ min-leader-count = 10
 max-snapshot-count = 3
 min-balance-diff-ratio = 0.01
 max-store-down-duration = "1h"
-leader-schedule-limit = 8
-leader-schedule-interval = "1s"
-storage-schedule-limit = 4
-storage-schedule-interval = "1s"
-replica-schedule-limit = 8
-replica-schedule-interval = "1s"
+schedule-interval = "5s"
+leader-schedule-limit = 16
+region-schedule-limit = 12
+replica-schedule-limit = 16
 
 [replication]
 # The number of replicas for each region.
