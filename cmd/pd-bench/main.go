@@ -17,7 +17,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/pingcap/pd/pd-client"
@@ -46,49 +45,85 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	wg := new(sync.WaitGroup)
-	wg.Add(*concurrency)
+	statsCh := make(chan *stats, *concurrency)
 	for i := 0; i < *concurrency; i++ {
-		go reqWorker(pdCli, wg)
+		go reqWorker(pdCli, statsCh)
 	}
-	wg.Wait()
+	finalStats := newStats(0)
+	for i := 0; i < *concurrency; i++ {
+		s := <-statsCh
+		finalStats.merge(s)
+	}
+	fmt.Println(finalStats.String())
 	pdCli.Close()
 }
 
-func reqWorker(pdCli pd.Client, wg *sync.WaitGroup) {
-	var maxDur time.Duration
-	var maxidx int
-	var minDur = time.Second
-	var (
-		milliCnt     int
-		twoMilliCnt  int
-		fiveMilliCnt int
-	)
-	for i := 0; i < *num; i++ {
+type stats struct {
+	maxDur       time.Duration
+	minDur       time.Duration
+	count        int
+	milliCnt     int
+	twoMilliCnt  int
+	fiveMilliCnt int
+}
+
+func newStats(count int) *stats {
+	return &stats{
+		minDur: time.Second,
+		count:  count,
+	}
+}
+
+func (s *stats) update(dur time.Duration) {
+	if s.minDur == 0 {
+		s.minDur = time.Second
+	}
+	if dur > s.maxDur {
+		s.maxDur = dur
+	}
+	if dur < s.minDur {
+		s.minDur = dur
+	}
+	if dur > time.Millisecond {
+		s.milliCnt++
+	}
+	if dur > time.Millisecond*2 {
+		s.twoMilliCnt++
+	}
+	if dur > time.Millisecond*5 {
+		s.fiveMilliCnt++
+	}
+}
+
+func (s *stats) merge(other *stats) {
+	if s.maxDur < other.maxDur {
+		s.maxDur = other.maxDur
+	}
+	if s.minDur > other.minDur {
+		s.minDur = other.minDur
+	}
+	s.count += other.count
+	s.milliCnt += other.milliCnt
+	s.twoMilliCnt += other.twoMilliCnt
+	s.fiveMilliCnt += other.fiveMilliCnt
+}
+
+func (s *stats) String() string {
+	return fmt.Sprintf("\nmax:%v, min:%v, count:%d, >1ms = %d, >2ms = %d, >5ms = %d\n",
+		s.maxDur, s.minDur, s.count, s.milliCnt, s.twoMilliCnt, s.fiveMilliCnt)
+}
+
+func reqWorker(pdCli pd.Client, statsCh chan *stats) {
+	s := newStats(*num)
+	for i := 0; i < s.count; i++ {
 		start := time.Now()
 		_, _, err := pdCli.GetTS()
 		if err != nil {
 			log.Fatal(err)
 		}
 		dur := time.Since(start)
-		if dur > maxDur {
-			maxDur = dur
-			maxidx = i
-		}
-		if dur < minDur {
-			minDur = dur
-		}
-		if dur > time.Millisecond {
-			milliCnt++
-		}
-		if dur > time.Millisecond*2 {
-			twoMilliCnt++
-		}
-		if dur > time.Millisecond*5 {
-			fiveMilliCnt++
-		}
+		s.update(dur)
 		time.Sleep(sleep)
 	}
-	fmt.Printf("max:(%v,%d), min:%v, num:%d, >1ms = %d, >2ms = %d, >5ms = %d\n", maxDur, maxidx, minDur, *num, milliCnt, twoMilliCnt, fiveMilliCnt)
-	wg.Done()
+	statsCh <- s
 }
