@@ -154,13 +154,8 @@ func (c *client) updateLeader() error {
 		if err != nil {
 			continue
 		}
-		c.connMu.RLock()
-		changed := c.connMu.leader != leader.GetAddr()
-		c.connMu.RUnlock()
-		if changed {
-			if err = c.switchLeader(leader.GetAddr()); err != nil {
-				return errors.Trace(err)
-			}
+		if err = c.switchLeader(leader.GetAddr()); err != nil {
+			return errors.Trace(err)
 		}
 		return nil
 	}
@@ -168,25 +163,42 @@ func (c *client) updateLeader() error {
 }
 
 func (c *client) switchLeader(addr string) error {
-	c.connMu.Lock()
-	defer c.connMu.Unlock()
+	c.connMu.RLock()
+	if c.connMu.leader == addr {
+		c.connMu.RUnlock()
+		return nil
+	}
 
 	log.Infof("[pd] leader switches to: %v, previous: %v", addr, c.connMu.leader)
-	if _, ok := c.connMu.clientConns[addr]; !ok {
-		cc, err := grpc.Dial(addr, grpc.WithDialer(func(addr string, d time.Duration) (net.Conn, error) {
-			u, err := url.Parse(addr)
-			if err != nil {
-				return nil, errors.Trace(err)
-			}
-			// For tests.
-			if u.Scheme == "unix" || u.Scheme == "unixs" {
-				return net.DialTimeout(u.Scheme, u.Host, d)
-			}
-			return net.DialTimeout("tcp", u.Host, d)
-		}), grpc.WithInsecure()) // TODO: Support HTTPS.
+	if _, ok := c.connMu.clientConns[addr]; ok {
+		c.connMu.RUnlock()
+		c.connMu.Lock()
+		c.connMu.leader = addr
+		c.connMu.Unlock()
+		return nil
+	}
+	c.connMu.RUnlock()
+
+	cc, err := grpc.Dial(addr, grpc.WithDialer(func(addr string, d time.Duration) (net.Conn, error) {
+		u, err := url.Parse(addr)
 		if err != nil {
-			return errors.Trace(err)
+			return nil, errors.Trace(err)
 		}
+		// For tests.
+		if u.Scheme == "unix" || u.Scheme == "unixs" {
+			return net.DialTimeout(u.Scheme, u.Host, d)
+		}
+		return net.DialTimeout("tcp", u.Host, d)
+	}), grpc.WithInsecure()) // TODO: Support HTTPS.
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+	if _, ok := c.connMu.clientConns[addr]; ok {
+		cc.Close()
+	} else {
 		c.connMu.clientConns[addr] = cc
 	}
 	c.connMu.leader = addr
