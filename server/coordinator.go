@@ -47,7 +47,7 @@ type coordinator struct {
 }
 
 func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
-	ctx, cancel := context.WithCancel(context.TODO())
+	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
 		ctx:        ctx,
 		cancel:     cancel,
