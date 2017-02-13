@@ -17,32 +17,65 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/sizeutil"
 	"github.com/pingcap/pd/pkg/timeutil"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
 
+type metaStore struct {
+	*metapb.Store
+	StateName string `json:"state_name"`
+}
+
 type storeStatus struct {
-	*server.StoreStatus
-	Uptime timeutil.Duration `json:"uptime"`
+	StoreID            uint64            `json:"store_id"`
+	Capacity           sizeutil.ByteSize `json:"capacity"`
+	Available          sizeutil.ByteSize `json:"available"`
+	RegionCount        uint32            `json:"region_count"`
+	SendingSnapCount   uint32            `json:"sending_snap_count"`
+	ReceivingSnapCount uint32            `json:"receiving_snap_count"`
+	StartTime          time.Time         `json:"start_time"`
+	ApplyingSnapCount  uint32            `json:"applying_snap_count"`
+	IsBusy             bool              `json:"is_busy"`
+
+	StartTS          time.Time         `json:"start_ts"`
+	LastHeartbeatTS  time.Time         `json:"last_heartbeat_ts"`
+	TotalRegionCount int               `json:"total_region_count"`
+	Uptime           timeutil.Duration `json:"uptime"`
 }
 
 type storeInfo struct {
-	Store  *metapb.Store `json:"store"`
-	Status *storeStatus  `json:"status"`
-	Scores []int         `json:"scores"`
+	Store  *metaStore   `json:"store"`
+	Status *storeStatus `json:"status"`
+	Scores []int        `json:"scores"`
 }
 
 func newStoreInfo(store *metapb.Store, status *server.StoreStatus, scores []int) *storeInfo {
 	return &storeInfo{
-		Store: store,
+		Store: &metaStore{
+			Store:     store,
+			StateName: store.State.String(),
+		},
 		Status: &storeStatus{
-			StoreStatus: status,
-			Uptime:      timeutil.NewDuration(status.GetUptime()),
+			StoreID:            status.StoreId,
+			Capacity:           sizeutil.ByteSize(status.Capacity),
+			Available:          sizeutil.ByteSize(status.Available),
+			RegionCount:        status.RegionCount,
+			SendingSnapCount:   status.SendingSnapCount,
+			ReceivingSnapCount: status.ReceivingSnapCount,
+			StartTime:          time.Unix(int64(status.StartTime), 0),
+			ApplyingSnapCount:  status.ApplyingSnapCount,
+			IsBusy:             status.IsBusy,
+			StartTS:            status.StartTS,
+			LastHeartbeatTS:    status.LastHeartbeatTS,
+			TotalRegionCount:   status.TotalRegionCount,
+			Uptime:             timeutil.NewDuration(status.GetUptime()),
 		},
 		Scores: scores,
 	}
