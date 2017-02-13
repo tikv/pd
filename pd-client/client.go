@@ -178,7 +178,11 @@ func (c *client) switchLeader(addr string) error {
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
-			return net.DialTimeout(u.Scheme, u.Host, d)
+			// For tests.
+			if u.Scheme == "unix" || u.Scheme == "unixs" {
+				return net.DialTimeout(u.Scheme, u.Host, d)
+			}
+			return net.DialTimeout("tcp", u.Host, d)
 		}), grpc.WithInsecure()) // TODO: Support HTTPS.
 		if err != nil {
 			return errors.Trace(err)
