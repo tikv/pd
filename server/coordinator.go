@@ -94,7 +94,7 @@ func (c *coordinator) dispatch(region *regionInfo) *pdpb.RegionHeartbeatResponse
 
 func (c *coordinator) run() {
 	c.addScheduler(newBalanceLeaderScheduler(c.opt))
-	c.addScheduler(newBalanceStorageScheduler(c.opt))
+	c.addScheduler(newBalanceRegionScheduler(c.opt))
 }
 
 func (c *coordinator) stop() {

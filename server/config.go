@@ -266,26 +266,12 @@ func (c *Config) configFromFile(path string) error {
 
 // ScheduleConfig is the schedule configuration.
 type ScheduleConfig struct {
-	// If the region count of one store is less than this value,
-	// it will never be used as a source store.
-	MinRegionCount uint64 `toml:"min-region-count" json:"min-region-count"`
-
-	// If the leader count of one store is less than this value,
-	// it will never be used as a source store.
-	MinLeaderCount uint64 `toml:"min-leader-count" json:"min-leader-count"`
-
 	// If the snapshot count of one store is greater than this value,
 	// it will never be used as a source or target store.
 	MaxSnapshotCount uint64 `toml:"max-snapshot-count" json:"max-snapshot-count"`
-
-	// If the source and target store's diff score is less than this value,
-	// the schedule will be canceled.
-	MinBalanceDiffRatio float64 `toml:"min-balance-diff-ratio" json:"min-balance-diff-ratio"`
-
-	// MaxStoreDownDuration is the max duration at which
+	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
-	MaxStoreDownDuration typeutil.Duration `toml:"max-store-down-duration" json:"max-store-down-duration"`
-
+	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time" json:"max-store-down-time"`
 	// ScheduleInterval is the interval to schedule.
 	ScheduleInterval typeutil.Duration `toml:"schedule-interval" json:"schedule-interval"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
@@ -297,12 +283,9 @@ type ScheduleConfig struct {
 }
 
 const (
-	defaultMaxReplicas          = uint64(3)
-	defaultMinRegionCount       = uint64(10)
-	defaultMinLeaderCount       = uint64(10)
-	defaultMaxSnapshotCount     = uint64(3)
-	defaultMinBalanceDiffRatio  = float64(0.01)
-	defaultMaxStoreDownDuration = time.Hour
+	defaultMaxReplicas          = 3
+	defaultMaxSnapshotCount     = 3
+	defaultMaxStoreDownTime     = time.Hour
 	defaultScheduleInterval     = time.Minute
 	defaultLeaderScheduleLimit  = 16
 	defaultRegionScheduleLimit  = 12
@@ -310,11 +293,8 @@ const (
 )
 
 func (c *ScheduleConfig) adjust() {
-	adjustUint64(&c.MinRegionCount, defaultMinRegionCount)
-	adjustUint64(&c.MinLeaderCount, defaultMinLeaderCount)
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
-	adjustFloat64(&c.MinBalanceDiffRatio, defaultMinBalanceDiffRatio)
-	adjustDuration(&c.MaxStoreDownDuration, defaultMaxStoreDownDuration)
+	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	adjustDuration(&c.ScheduleInterval, defaultScheduleInterval)
 	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
@@ -370,24 +350,12 @@ func (o *scheduleOption) SetMaxReplicas(replicas int) {
 	o.rep.cfg.MaxReplicas = uint64(replicas)
 }
 
-func (o *scheduleOption) GetMinRegionCount() uint64 {
-	return o.load().MinRegionCount
-}
-
-func (o *scheduleOption) GetMinLeaderCount() uint64 {
-	return o.load().MinLeaderCount
-}
-
 func (o *scheduleOption) GetMaxSnapshotCount() uint64 {
 	return o.load().MaxSnapshotCount
 }
 
-func (o *scheduleOption) GetMinBalanceDiffRatio() float64 {
-	return o.load().MinBalanceDiffRatio
-}
-
 func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
-	return o.load().MaxStoreDownDuration.Duration
+	return o.load().MaxStoreDownTime.Duration
 }
 
 func (o *scheduleOption) GetScheduleInterval() time.Duration {

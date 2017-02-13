@@ -14,6 +14,7 @@
 package server
 
 import (
+	"math"
 	"time"
 
 	"github.com/ngaut/log"
@@ -22,8 +23,22 @@ import (
 
 var storeCacheInterval = 30 * time.Second
 
+func minBalanceDiff(count uint64) float64 {
+	return math.Pow(2, math.Log10(float64(count)))
+}
+
+func adjustBalanceSpeed(sourceCount uint64, sourceRatio, targetRatio float64) (uint64, bool) {
+	if targetRatio >= sourceRatio {
+		return 0, false
+	}
+	diffRatio := 1 - targetRatio/sourceRatio
+	diffCount := diffRatio * float64(sourceCount)
+	return uint64(diffCount) / 4, diffCount > minBalanceDiff(sourceCount)
+}
+
 type balanceLeaderScheduler struct {
 	opt      *scheduleOption
+	limit    uint64
 	selector Selector
 }
 
@@ -32,10 +47,10 @@ func newBalanceLeaderScheduler(opt *scheduleOption) *balanceLeaderScheduler {
 	filters = append(filters, newBlockFilter())
 	filters = append(filters, newStateFilter(opt))
 	filters = append(filters, newHealthFilter(opt))
-	filters = append(filters, newLeaderCountFilter(opt))
 
 	return &balanceLeaderScheduler{
 		opt:      opt,
+		limit:    1,
 		selector: newBalanceSelector(leaderKind, filters),
 	}
 }
@@ -49,7 +64,7 @@ func (l *balanceLeaderScheduler) GetResourceKind() ResourceKind {
 }
 
 func (l *balanceLeaderScheduler) GetResourceLimit() uint64 {
-	return l.opt.GetLeaderScheduleLimit()
+	return l.limit
 }
 
 func (l *balanceLeaderScheduler) Prepare(cluster *clusterInfo) error { return nil }
@@ -64,56 +79,67 @@ func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 
 	source := cluster.getStore(region.Leader.GetStoreId())
 	target := cluster.getStore(newLeader.GetStoreId())
-	if source.leaderRatio()-target.leaderRatio() < l.opt.GetMinBalanceDiffRatio() {
+	if !l.adjustSchedule(source, target) {
 		return nil
 	}
 
 	return newTransferLeader(region, newLeader)
 }
 
-type balanceStorageScheduler struct {
+// adjustSchedule returns true if the schedule is allowed.
+func (l *balanceLeaderScheduler) adjustSchedule(source, target *storeInfo) bool {
+	sourceCount := source.leaderCount()
+	sourceRatio := source.leaderRatio()
+	targetRatio := target.leaderRatio()
+	limit, ok := adjustBalanceSpeed(sourceCount, sourceRatio, targetRatio)
+	l.limit = roundUint64(limit, 1, l.opt.GetLeaderScheduleLimit())
+	return ok
+}
+
+type balanceRegionScheduler struct {
 	opt      *scheduleOption
 	rep      *Replication
 	cache    *idCache
+	limit    uint64
 	selector Selector
 }
 
-func newBalanceStorageScheduler(opt *scheduleOption) *balanceStorageScheduler {
+func newBalanceRegionScheduler(opt *scheduleOption) *balanceRegionScheduler {
 	cache := newIDCache(storeCacheInterval, 4*storeCacheInterval)
 
 	var filters []Filter
 	filters = append(filters, newCacheFilter(cache))
 	filters = append(filters, newStateFilter(opt))
 	filters = append(filters, newHealthFilter(opt))
-	filters = append(filters, newRegionCountFilter(opt))
 	filters = append(filters, newSnapshotCountFilter(opt))
 
-	return &balanceStorageScheduler{
+	return &balanceRegionScheduler{
 		opt:      opt,
 		rep:      opt.GetReplication(),
 		cache:    cache,
+		limit:    1,
 		selector: newBalanceSelector(regionKind, filters),
 	}
 }
 
-func (s *balanceStorageScheduler) GetName() string {
-	return "balance-storage-scheduler"
+func (s *balanceRegionScheduler) GetName() string {
+	return "balance-region-scheduler"
 }
 
-func (s *balanceStorageScheduler) GetResourceKind() ResourceKind {
+func (s *balanceRegionScheduler) GetResourceKind() ResourceKind {
 	return regionKind
 }
 
-func (s *balanceStorageScheduler) GetResourceLimit() uint64 {
-	return s.opt.GetRegionScheduleLimit()
+func (s *balanceRegionScheduler) GetResourceLimit() uint64 {
+	return s.limit
 }
 
-func (s *balanceStorageScheduler) Prepare(cluster *clusterInfo) error { return nil }
+func (s *balanceRegionScheduler) Prepare(cluster *clusterInfo) error { return nil }
 
-func (s *balanceStorageScheduler) Cleanup(cluster *clusterInfo) {}
+func (s *balanceRegionScheduler) Cleanup(cluster *clusterInfo) {}
 
-func (s *balanceStorageScheduler) Schedule(cluster *clusterInfo) Operator {
-	// Select a peer from the store with largest storage ratio.
+func (s *balanceRegionScheduler) Schedule(cluster *clusterInfo) Operator {
+	// Select a peer from the store with most regions.
 	region, oldPeer := scheduleRemovePeer(cluster, s.selector)
 	if region == nil {
 		return nil
@@ -133,7 +159,7 @@ func (s *balanceStorageScheduler) Schedule(cluster *clusterInfo) Operator {
 	return op
 }
 
-func (s *balanceStorageScheduler) transferPeer(cluster *clusterInfo, region *regionInfo, oldPeer *metapb.Peer) Operator {
+func (s *balanceRegionScheduler) transferPeer(cluster *clusterInfo, region *regionInfo, oldPeer *metapb.Peer) Operator {
 	// scoreGuard guarantees that the distinct score will not decrease.
 	stores := cluster.getRegionStores(region)
 	source := cluster.getStore(oldPeer.GetStoreId())
@@ -146,11 +172,21 @@ func (s *balanceStorageScheduler) transferPeer(cluster *clusterInfo, region *reg
 	}
 
 	target := cluster.getStore(newPeer.GetStoreId())
-	if source.storageRatio()-target.storageRatio() < s.opt.GetMinBalanceDiffRatio() {
+	if !s.adjustSchedule(source, target) {
 		return nil
 	}
 
 	return newTransferPeer(region, oldPeer, newPeer)
+}
+
+// adjustSchedule returns true if the schedule is allowed.
+func (s *balanceRegionScheduler) adjustSchedule(source, target *storeInfo) bool {
+	sourceCount := source.regionCount()
+	sourceRatio := source.regionRatio()
+	targetRatio := target.regionRatio()
+	limit, ok := adjustBalanceSpeed(sourceCount, sourceRatio, targetRatio)
+	s.limit = roundUint64(limit, 1, s.opt.GetRegionScheduleLimit())
+	return ok
 }
 
 // replicaChecker ensures region has the best replicas.
@@ -165,7 +201,6 @@ func newReplicaChecker(opt *scheduleOption, cluster *clusterInfo) *replicaChecke
 	var filters []Filter
 	filters = append(filters, newHealthFilter(opt))
 	filters = append(filters, newSnapshotCountFilter(opt))
-	filters = append(filters, newStorageThresholdFilter(opt))
 
 	return &replicaChecker{
 		opt:     opt,
@@ -206,6 +241,7 @@ func (r *replicaChecker) Check(region *regionInfo) Operator {
 func (r *replicaChecker) selectBestPeer(region *regionInfo, filters ...Filter) (*metapb.Peer, float64) {
 	// Add some must have filters.
 	filters = append(filters, newStateFilter(r.opt))
+	filters = append(filters, newStorageThresholdFilter(r.opt))
 	filters = append(filters, newExcludedFilter(nil, region.GetStoreIds()))
 
 	var (
@@ -214,7 +250,7 @@ func (r *replicaChecker) selectBestPeer(region *regionInfo, filters ...Filter) (
 	)
 
 	// Select the store with best distinct score.
-	// If the scores are the same, select the store with minimal storage ratio.
+	// If the scores are the same, select the store with minimal region ratio.
 	stores := r.cluster.getRegionStores(region)
 	for _, store := range r.cluster.getStores() {
 		if filterTarget(store, filters) {
@@ -247,7 +283,7 @@ func (r *replicaChecker) selectWorstPeer(region *regionInfo, filters ...Filter) 
 	)
 
 	// Select the store with lowest distinct score.
-	// If the scores are the same, select the store with maximal storage ratio.
+	// If the scores are the same, select the store with maximal region ratio.
 	stores := r.cluster.getRegionStores(region)
 	for _, store := range stores {
 		if filterSource(store, filters) {

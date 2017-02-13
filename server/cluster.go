@@ -15,6 +15,7 @@ package server
 
 import (
 	"fmt"
+	"math"
 	"path"
 	"strings"
 	"sync"
@@ -427,11 +428,10 @@ func (c *RaftCluster) collectMetrics() {
 	storeDownCount := 0
 	storeOfflineCount := 0
 	storeTombstoneCount := 0
-	regionTotalCount := 0
 	storageSize := uint64(0)
 	storageCapacity := uint64(0)
-	minLeaderRatio, maxLeaderRatio := float64(1.0), float64(0.0)
-	minStorageRatio, maxStorageRatio := float64(1.0), float64(0.0)
+	minLeaderRatio, maxLeaderRatio := math.MaxFloat64, float64(0.0)
+	minRegionRatio, maxRegionRatio := math.MaxFloat64, float64(0.0)
 
 	for _, s := range cluster.getStores() {
 		// Store state.
@@ -451,24 +451,21 @@ func (c *RaftCluster) collectMetrics() {
 		}
 
 		// Store stats.
-		storageSize += s.stats.GetUsedSize()
+		storageSize += s.storageSize()
 		storageCapacity += s.stats.GetCapacity()
-		if regionTotalCount < s.stats.TotalRegionCount {
-			regionTotalCount = s.stats.TotalRegionCount
-		}
 
-		// Balance.
+		// Balance ratio.
 		if minLeaderRatio > s.leaderRatio() {
 			minLeaderRatio = s.leaderRatio()
 		}
 		if maxLeaderRatio < s.leaderRatio() {
 			maxLeaderRatio = s.leaderRatio()
 		}
-		if minStorageRatio > s.storageRatio() {
-			minStorageRatio = s.storageRatio()
+		if minRegionRatio > s.regionRatio() {
+			minRegionRatio = s.regionRatio()
 		}
-		if maxStorageRatio < s.storageRatio() {
-			maxStorageRatio = s.storageRatio()
+		if maxRegionRatio < s.regionRatio() {
+			minRegionRatio = s.regionRatio()
 		}
 	}
 
@@ -477,11 +474,11 @@ func (c *RaftCluster) collectMetrics() {
 	metrics["store_down_count"] = float64(storeDownCount)
 	metrics["store_offline_count"] = float64(storeOfflineCount)
 	metrics["store_tombstone_count"] = float64(storeTombstoneCount)
-	metrics["region_total_count"] = float64(regionTotalCount)
+	metrics["region_count"] = float64(cluster.getRegionCount())
 	metrics["storage_size"] = float64(storageSize)
 	metrics["storage_capacity"] = float64(storageCapacity)
-	metrics["store_max_diff_leader_ratio"] = maxLeaderRatio - minLeaderRatio
-	metrics["store_max_diff_storage_ratio"] = maxStorageRatio - minStorageRatio
+	metrics["leader_balance_ratio"] = 1 - minLeaderRatio/maxLeaderRatio
+	metrics["region_balance_ratio"] = 1 - minRegionRatio/maxRegionRatio
 
 	for label, value := range metrics {
 		clusterStatusGauge.WithLabelValues(label).Set(value)

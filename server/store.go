@@ -79,18 +79,35 @@ func (s *storeInfo) downTime() time.Duration {
 	return time.Since(s.stats.LastHeartbeatTS)
 }
 
+func (s *storeInfo) leaderCount() uint64 {
+	return uint64(s.stats.LeaderCount)
+}
+
 func (s *storeInfo) leaderRatio() float64 {
-	if s.stats.TotalRegionCount == 0 {
+	return float64(s.stats.LeaderCount)
+}
+
+func (s *storeInfo) regionCount() uint64 {
+	return uint64(s.stats.RegionCount)
+}
+
+func (s *storeInfo) regionRatio() float64 {
+	if s.stats.GetCapacity() == 0 {
 		return 0
 	}
-	return float64(s.stats.LeaderRegionCount) / float64(s.stats.TotalRegionCount)
+	capaGB := float64(s.stats.GetCapacity()) / float64(1024*1024*1024)
+	return float64(s.stats.RegionCount) / capaGB
+}
+
+func (s *storeInfo) storageSize() uint64 {
+	return s.stats.GetCapacity() - s.stats.GetAvailable()
 }
 
 func (s *storeInfo) storageRatio() float64 {
 	if s.stats.GetCapacity() == 0 {
 		return 0
 	}
-	return float64(s.stats.GetUsedSize()) / float64(s.stats.GetCapacity())
+	return float64(s.storageSize()) / float64(s.stats.GetCapacity())
 }
 
 func (s *storeInfo) resourceRatio(kind ResourceKind) float64 {
@@ -98,7 +115,7 @@ func (s *storeInfo) resourceRatio(kind ResourceKind) float64 {
 	case leaderKind:
 		return s.leaderRatio()
 	case regionKind:
-		return s.storageRatio()
+		return s.regionRatio()
 	default:
 		return 0
 	}
@@ -106,8 +123,8 @@ func (s *storeInfo) resourceRatio(kind ResourceKind) float64 {
 
 func (s *storeInfo) resourceScores() []int {
 	var scores []int
-	scores = append(scores, int(s.leaderRatio()*100))
-	scores = append(scores, int(s.storageRatio()*100))
+	scores = append(scores, int(s.leaderRatio()))
+	scores = append(scores, int(s.regionRatio()))
 	return scores
 }
 
@@ -137,41 +154,36 @@ type StoreStatus struct {
 	*pdpb.StoreStats
 
 	// Blocked means that the store is blocked from balance.
-	blocked           bool
-	StartTS           time.Time `json:"start_ts"`
-	LastHeartbeatTS   time.Time `json:"last_heartbeat_ts"`
-	TotalRegionCount  int       `json:"total_region_count"`
-	LeaderRegionCount int       `json:"leader_region_count"`
+	blocked         bool
+	LeaderCount     int       `json:"leader_count"`
+	LastHeartbeatTS time.Time `json:"last_heartbeat_ts"`
 }
 
 func newStoreStatus() *StoreStatus {
 	return &StoreStatus{
 		StoreStats: &pdpb.StoreStats{},
-		StartTS:    time.Now(),
 	}
 }
 
 func (s *StoreStatus) clone() *StoreStatus {
 	return &StoreStatus{
-		StoreStats:        proto.Clone(s.StoreStats).(*pdpb.StoreStats),
-		blocked:           s.blocked,
-		StartTS:           s.StartTS,
-		LastHeartbeatTS:   s.LastHeartbeatTS,
-		TotalRegionCount:  s.TotalRegionCount,
-		LeaderRegionCount: s.LeaderRegionCount,
+		StoreStats:      proto.Clone(s.StoreStats).(*pdpb.StoreStats),
+		blocked:         s.blocked,
+		LeaderCount:     s.LeaderCount,
+		LastHeartbeatTS: s.LastHeartbeatTS,
 	}
 }
 
-// GetUptime returns the uptime of the store.
+// GetStartTS returns the start timestamp.
+func (s *StoreStatus) GetStartTS() time.Time {
+	return time.Unix(int64(s.GetStartTime()), 0)
+}
+
+// GetUptime returns the uptime.
 func (s *StoreStatus) GetUptime() time.Duration {
-	uptime := s.LastHeartbeatTS.Sub(s.StartTS)
+	uptime := s.LastHeartbeatTS.Sub(s.GetStartTS())
 	if uptime > 0 {
 		return uptime
 	}
 	return 0
-}
-
-// GetUsedSize returns the used storage size.
-func (s *StoreStatus) GetUsedSize() uint64 {
-	return s.GetCapacity() - s.GetAvailable()
 }
