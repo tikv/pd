@@ -26,8 +26,7 @@ var (
 	pdAddrs     = flag.String("pd", "127.0.0.1:2379", "pd address")
 	concurrency = flag.Int("C", 100, "concurrency")
 	num         = flag.Int("N", 1000, "number of request per request worker")
-	sleepFlag   = flag.String("sleep", "1ms", "sleep time after a request, used to adjust pressure")
-	sleep       = time.Millisecond
+	sleep       = flag.Duration("sleep", time.Millisecond, "sleep time after a request, used to adjust pressure")
 )
 
 func main() {
@@ -38,10 +37,6 @@ func main() {
 	}
 	// To avoid the first time high latency.
 	_, _, err = pdCli.GetTS()
-	if err != nil {
-		log.Fatal(err)
-	}
-	sleep, err = time.ParseDuration(*sleepFlag)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -123,7 +118,7 @@ func reqWorker(pdCli pd.Client, statsCh chan *stats) {
 		}
 		dur := time.Since(start)
 		s.update(dur)
-		time.Sleep(sleep)
+		time.Sleep(*sleep)
 	}
 	statsCh <- s
 }
