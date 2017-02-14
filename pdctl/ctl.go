@@ -39,6 +39,7 @@ func init() {
 		command.NewStoreCommand(),
 		command.NewMemberCommand(),
 		command.NewExitCommand(),
+		command.NewLabelCommand(),
 	)
 	cobra.EnablePrefixMatching = true
 }
@@ -48,10 +49,15 @@ func Start(args []string) (string, error) {
 	rootCmd.SetArgs(args)
 	rootCmd.SilenceErrors = true
 	rootCmd.ParseFlags(args)
-	command.InitPDClient(rootCmd)
+	err := command.InitPDClient(rootCmd)
+	if err != nil {
+		return err.Error(), err
+	}
+
 	rootCmd.SetUsageTemplate(command.UsageTemplate)
 	if err := rootCmd.Execute(); err != nil {
 		return rootCmd.UsageString(), err
 	}
+	rootCmd.ResetFlags()
 	return "", nil
 }

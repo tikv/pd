@@ -16,6 +16,7 @@ package command
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,19 +27,55 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var pdClient pd.Client
+var (
+	pdClient       pd.Client
+	dailClient     = &http.Client{}
+	errInvalidAddr = errors.New("Invalid pd address, Cannot get connect to it")
+)
 
-func validPDAddr(pd string) (string, error) {
-	u, err := url.Parse(p)
+func doRequest(cmd *cobra.Command, prefix string, method string) (string, error) {
+	var res string
+	if method == "" {
+		method = "GET"
+	}
+	url := getAddressFromCmd(cmd, prefix)
+	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
-		fmt.Println("address is wrong format,should like 'http://127.0.0.1:2379'")
+		return res, err
+	}
+	reps, err := dailClient.Do(req)
+	if err != nil {
+		return res, err
+	}
+	defer reps.Body.Close()
+	if reps.StatusCode != http.StatusOK {
+		return res, genResponseError(reps)
+	}
+
+	r, err := ioutil.ReadAll(reps.Body)
+	if err != nil {
+		return res, err
+	}
+	res = string(r)
+	return res, nil
+}
+
+func validPDAddr(pd string) error {
+	u, err := url.Parse(pd)
+	if err != nil {
+		return err
 	}
 	if u.Scheme == "" {
 		u.Scheme = "http"
 	} else if u.Scheme != "http" {
-		return errors.New("Invalid pd address")
+		return errInvalidAddr
 	}
-
+	addr := u.String()
+	reps, err := http.Get(fmt.Sprintf("%s/pd/api/v1/hello", addr))
+	if err != nil || reps.StatusCode != http.StatusOK {
+		return errInvalidAddr
+	}
+	return nil
 }
 
 // InitPDClient initialize pd client from cmd
@@ -51,6 +88,11 @@ func InitPDClient(cmd *cobra.Command) error {
 	if pdClient != nil {
 		return nil
 	}
+	err = validPDAddr(addr)
+	if err != nil {
+		return err
+	}
+
 	pdClient, err = pd.NewClient([]string{addr})
 	if err != nil {
 		return err
@@ -86,6 +128,11 @@ func getAddressFromCmd(cmd *cobra.Command, prefix string) string {
 func printResponseError(r *http.Response) {
 	fmt.Printf("[%d]:", r.StatusCode)
 	io.Copy(os.Stdout, r.Body)
+}
+
+func genResponseError(r *http.Response) error {
+	res, _ := ioutil.ReadAll(r.Body)
+	return errors.Errorf("[%d] %s", r.StatusCode, res)
 }
 
 // UsageTemplate will used to generate a help information

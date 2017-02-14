@@ -141,7 +141,7 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if err := etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap); err != nil {
+	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap); err != nil {
 		return errors.Trace(err)
 	}
 
