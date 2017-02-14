@@ -1,5 +1,5 @@
-hash: 92674d8dbe76a4c4d9d00890991ae15c68e3b0107647807ec574954f04534ed4
-updated: 2017-01-25T12:14:33.209071259+08:00
+hash: 11d533a6593ba0594442024c14843f68cc3264152db94b6e20d4005459ec967b
+updated: 2017-02-14T10:54:53.740798266+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -85,6 +85,8 @@ imports:
   version: 3ac0863d7acf3bc44daf49afef8919af12f704ef
   subpackages:
   - capnslog
+- name: github.com/dustin/go-humanize
+  version: 7a41df006ff9af79a29f0ffa9c5f21fbe6314a2d
 - name: github.com/elazarl/go-bindata-assetfs
   version: 9a6736ed45b44bf3835afeebb3034b57ed329f3e
 - name: github.com/ghodss/yaml
@@ -165,7 +167,7 @@ imports:
   repo: https://github.com/spf13/cobra.git
   vcs: git
 - name: github.com/spf13/pflag
-  version: a232f6d9f87afaaa08bafaff5da685f974b83313
+  version: 9ff6c6923cfffbcd502984b8e0c80539a94968b7
 - name: github.com/twinj/uuid
   version: 70cac2bcd273ef6a371bb96cde363d28b68734c3
 - name: github.com/ugorji/go
