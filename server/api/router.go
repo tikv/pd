@@ -51,6 +51,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/store/{id}", storeHandler.Delete).Methods("DELETE")
 	router.Handle("/api/v1/stores", newStoresHandler(svr, rd)).Methods("GET")
 
+	labelsHandler := newLabelsHander(svr, rd)
+	router.HandleFunc("/api/v1/labels/{id}", storeHandler.Get).Methods("GET")
+
 	router.Handle("/api/v1/events", newEventsHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/feed", newFeedHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/history/operators", newHistoryOperatorHandler(svr, rd)).Methods("GET")

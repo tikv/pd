@@ -28,6 +28,19 @@ import (
 
 var pdClient pd.Client
 
+func validPDAddr(pd string) (string, error) {
+	u, err := url.Parse(p)
+	if err != nil {
+		fmt.Println("address is wrong format,should like 'http://127.0.0.1:2379'")
+	}
+	if u.Scheme == "" {
+		u.Scheme = "http"
+	} else if u.Scheme != "http" {
+		return errors.New("Invalid pd address")
+	}
+
+}
+
 // InitPDClient initialize pd client from cmd
 func InitPDClient(cmd *cobra.Command) error {
 	addr, err := cmd.Flags().GetString("pd")
