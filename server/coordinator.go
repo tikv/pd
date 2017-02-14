@@ -118,6 +118,8 @@ func (c *coordinator) addScheduler(scheduler Scheduler) bool {
 
 	c.wg.Add(1)
 	go c.runScheduler(s)
+
+	s.Prepare(c.cluster)
 	c.schedulers[s.GetName()] = s
 	return true
 }
@@ -132,6 +134,7 @@ func (c *coordinator) removeScheduler(name string) bool {
 	}
 
 	s.Stop()
+	s.Cleanup(c.cluster)
 	delete(c.schedulers, name)
 	return true
 }

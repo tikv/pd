@@ -23,6 +23,8 @@ type Scheduler interface {
 	GetName() string
 	GetResourceKind() ResourceKind
 	GetResourceLimit() uint64
+	Prepare(cluster *clusterInfo)
+	Cleanup(cluster *clusterInfo)
 	Schedule(cluster *clusterInfo) Operator
 }
 
@@ -48,12 +50,75 @@ func (s *grantLeaderScheduler) GetResourceLimit() uint64 {
 	return s.opt.GetLeaderScheduleLimit()
 }
 
-func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
-	region := cluster.randFollowerRegion(s.StoreID)
-	if region == nil {
-		return nil
+func (s *grantLeaderScheduler) Prepare(cluster *clusterInfo) {
+	for id := range s.stores {
+		cluster.blockStore(id)
 	}
-	return newTransferLeader(region, region.GetStorePeer(s.StoreID))
+}
+
+func (s *grantLeaderScheduler) Cleanup(cluster *clusterInfo) {
+	for id := range s.stores {
+		cluster.unblockStore(id)
+	}
+}
+
+func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
+	for id := range s.stores {
+		region := cluster.randFollowerRegion(id)
+		if region == nil {
+			continue
+		}
+		if _, ok := s.stores[region.Leader.StoreId]; ok {
+			continue
+		}
+		return newTransferLeader(region, region.GetStorePeer(id))
+	}
+	return nil
+}
+
+type evictLeaderScheduler struct {
+	stores map[uint64]struct{}
+}
+
+func newEvictLeaderScheduler(stores map[uint64]struct{}) *evictLeaderScheduler {
+	return &evictLeaderScheduler{stores: stores}
+}
+
+func (s *evictLeaderScheduler) GetName() string {
+	return "evict-leader-scheduler"
+}
+
+func (s *evictLeaderScheduler) GetResourceKind() ResourceKind {
+	return leaderKind
+}
+
+func (s *evictLeaderScheduler) Prepare(cluster *clusterInfo) {
+	for id := range s.stores {
+		cluster.blockStore(id)
+	}
+}
+
+func (s *evictLeaderScheduler) Cleanup(cluster *clusterInfo) {
+	for id := range s.stores {
+		cluster.unblockStore(id)
+	}
+}
+
+func (s *evictLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
+	for id := range s.stores {
+		region := cluster.randLeaderRegion(id)
+		if region == nil {
+			continue
+		}
+		for _, peer := range region.GetFollowers() {
+			if _, ok := s.stores[peer.GetStoreId()]; ok {
+				continue
+			}
+			return newTransferLeader(region, peer)
+		}
+		// TODO: no available followers, we need to transfer peers to other stores first.
+	}
+	return nil
 }
 
 type shuffleLeaderScheduler struct {
@@ -80,6 +145,10 @@ func (s *shuffleLeaderScheduler) GetResourceKind() ResourceKind {
 func (s *shuffleLeaderScheduler) GetResourceLimit() uint64 {
 	return s.opt.GetLeaderScheduleLimit()
 }
+
+func (s *shuffleLeaderScheduler) Prepare(cluster *clusterInfo) {}
+
+func (s *shuffleLeaderScheduler) Cleanup(cluster *clusterInfo) {}
 
 func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 	// We shuffle leaders between stores:

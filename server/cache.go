@@ -69,6 +69,18 @@ func (s *storesInfo) setStore(store *storeInfo) {
 	s.stores[store.GetId()] = store
 }
 
+func (s *storesInfo) blockStore(storeID uint64) {
+	if store, ok := s.stores[storeID]; ok {
+		store.block()
+	}
+}
+
+func (s *storesInfo) unblockStore(storeID uint64) {
+	if store, ok := s.stores[storeID]; ok {
+		store.unblock()
+	}
+}
+
 func (s *storesInfo) getStores() []*storeInfo {
 	stores := make([]*storeInfo, 0, len(s.stores))
 	for _, store := range s.stores {
@@ -334,6 +346,18 @@ func (c *clusterInfo) putStoreLocked(store *storeInfo) error {
 	}
 	c.stores.setStore(store)
 	return nil
+}
+
+func (c *clusterInfo) blockStore(storeID uint64) {
+	c.Lock()
+	defer c.Unlock()
+	c.stores.blockStore(storeID)
+}
+
+func (c *clusterInfo) unblockStore(storeID uint64) {
+	c.Lock()
+	defer c.Unlock()
+	c.stores.unblockStore(storeID)
 }
 
 func (c *clusterInfo) getStores() []*storeInfo {

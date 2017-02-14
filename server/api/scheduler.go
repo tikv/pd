@@ -62,12 +62,22 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "grant-leader-scheduler":
-		storeID, ok := input["store_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing store id")
+		stores := parseStoresInput(input["stores"])
+		if stores == nil {
+			h.r.JSON(w, http.StatusBadRequest, "missing store ids")
 			return
 		}
-		if err := h.AddGrantLeaderScheduler(uint64(storeID)); err != nil {
+		if err := h.AddGrantLeaderScheduler(stores); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	case "evict-leader-scheduler":
+		stores := parseStoresInput(input["stores"])
+		if stores == nil {
+			h.r.JSON(w, http.StatusBadRequest, "missing store ids")
+			return
+		}
+		if err := h.AddEvictLeaderScheduler(stores); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -90,4 +100,20 @@ func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.r.JSON(w, http.StatusOK, nil)
+}
+
+func parseStoresInput(v interface{}) map[uint64]struct{} {
+	items, ok := v.([]interface{})
+	if !ok {
+		return nil
+	}
+	stores := make(map[uint64]struct{})
+	for _, item := range items {
+		id, ok := item.(float64)
+		if !ok {
+			return nil
+		}
+		stores[uint64(id)] = struct{}{}
+	}
+	return stores
 }
