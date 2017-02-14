@@ -19,7 +19,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/timeutil"
+	"github.com/pingcap/pd/pkg/typeutil"
 )
 
 func Test(t *testing.T) {
@@ -76,14 +76,14 @@ func (s *testMetricsSuite) TestCoverage(c *C) {
 		{
 			PushJob:     "j1",
 			PushAddress: "127.0.0.1:9091",
-			PushInterval: timeutil.Duration{
+			PushInterval: typeutil.Duration{
 				Duration: time.Hour,
 			},
 		},
 		{
 			PushJob:     "j2",
 			PushAddress: "127.0.0.1:9091",
-			PushInterval: timeutil.Duration{
+			PushInterval: typeutil.Duration{
 				Duration: zeroDuration,
 			},
 		},

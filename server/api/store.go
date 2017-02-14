@@ -22,8 +22,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/pkg/sizeutil"
-	"github.com/pingcap/pd/pkg/timeutil"
+	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
@@ -35,8 +34,8 @@ type metaStore struct {
 
 type storeStatus struct {
 	StoreID            uint64            `json:"store_id"`
-	Capacity           sizeutil.ByteSize `json:"capacity"`
-	Available          sizeutil.ByteSize `json:"available"`
+	Capacity           typeutil.ByteSize `json:"capacity"`
+	Available          typeutil.ByteSize `json:"available"`
 	RegionCount        uint32            `json:"region_count"`
 	SendingSnapCount   uint32            `json:"sending_snap_count"`
 	ReceivingSnapCount uint32            `json:"receiving_snap_count"`
@@ -47,7 +46,7 @@ type storeStatus struct {
 	StartTS          time.Time         `json:"start_ts"`
 	LastHeartbeatTS  time.Time         `json:"last_heartbeat_ts"`
 	TotalRegionCount int               `json:"total_region_count"`
-	Uptime           timeutil.Duration `json:"uptime"`
+	Uptime           typeutil.Duration `json:"uptime"`
 }
 
 type storeInfo struct {
@@ -64,8 +63,8 @@ func newStoreInfo(store *metapb.Store, status *server.StoreStatus, scores []int)
 		},
 		Status: &storeStatus{
 			StoreID:            status.StoreId,
-			Capacity:           sizeutil.ByteSize(status.Capacity),
-			Available:          sizeutil.ByteSize(status.Available),
+			Capacity:           typeutil.ByteSize(status.Capacity),
+			Available:          typeutil.ByteSize(status.Available),
 			RegionCount:        status.RegionCount,
 			SendingSnapCount:   status.SendingSnapCount,
 			ReceivingSnapCount: status.ReceivingSnapCount,
@@ -75,7 +74,7 @@ func newStoreInfo(store *metapb.Store, status *server.StoreStatus, scores []int)
 			StartTS:            status.StartTS,
 			LastHeartbeatTS:    status.LastHeartbeatTS,
 			TotalRegionCount:   status.TotalRegionCount,
-			Uptime:             timeutil.NewDuration(status.GetUptime()),
+			Uptime:             typeutil.NewDuration(status.GetUptime()),
 		},
 		Scores: scores,
 	}

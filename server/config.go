@@ -27,7 +27,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/pkg/timeutil"
+	"github.com/pingcap/pd/pkg/typeutil"
 )
 
 // Config is the pd server configuration.
@@ -62,7 +62,7 @@ type Config struct {
 	LogFile string `toml:"log-file" json:"log-file"`
 
 	// TsoSaveInterval is the interval to save timestamp.
-	TsoSaveInterval timeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
+	TsoSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
@@ -148,7 +148,7 @@ func adjustFloat64(v *float64, defValue float64) {
 	}
 }
 
-func adjustDuration(v *timeutil.Duration, defValue time.Duration) {
+func adjustDuration(v *typeutil.Duration, defValue time.Duration) {
 	if v.Duration == 0 {
 		v.Duration = defValue
 	}
@@ -284,22 +284,22 @@ type ScheduleConfig struct {
 
 	// MaxStoreDownDuration is the max duration at which
 	// a store will be considered to be down if it hasn't reported heartbeats.
-	MaxStoreDownDuration timeutil.Duration `toml:"max-store-down-duration" json:"max-store-down-duration"`
+	MaxStoreDownDuration typeutil.Duration `toml:"max-store-down-duration" json:"max-store-down-duration"`
 
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
 	// LeaderScheduleInterval is the interval to schedule leader.
-	LeaderScheduleInterval timeutil.Duration `toml:"leader-schedule-interval" json:"leader-schedule-interval"`
+	LeaderScheduleInterval typeutil.Duration `toml:"leader-schedule-interval" json:"leader-schedule-interval"`
 
 	// StorageScheduleLimit is the max coexist storage schedules.
 	StorageScheduleLimit uint64 `toml:"storage-schedule-limit" json:"storage-schedule-limit"`
 	// StorageScheduleInterval is the interval to schedule storage.
-	StorageScheduleInterval timeutil.Duration `toml:"storage-schedule-interval" json:"storage-schedule-interval"`
+	StorageScheduleInterval typeutil.Duration `toml:"storage-schedule-interval" json:"storage-schedule-interval"`
 
 	// ReplicaScheduleLimit is the max coexist replica schedules.
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit" json:"replica-schedule-limit"`
 	// ReplicaScheduleInterval is the interval to schedule storage.
-	ReplicaScheduleInterval timeutil.Duration `toml:"replica-schedule-interval" json:"replica-schedule-interval"`
+	ReplicaScheduleInterval typeutil.Duration `toml:"replica-schedule-interval" json:"replica-schedule-interval"`
 }
 
 const (
@@ -490,7 +490,7 @@ func NewTestSingleConfig() *Config {
 		InitialClusterState: embed.ClusterStateFlagNew,
 
 		LeaderLease:     1,
-		TsoSaveInterval: timeutil.NewDuration(200 * time.Millisecond),
+		TsoSaveInterval: typeutil.NewDuration(200 * time.Millisecond),
 	}
 
 	cfg.AdvertiseClientUrls = cfg.ClientUrls

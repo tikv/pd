@@ -18,7 +18,7 @@ import (
 
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/timeutil"
+	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 )
@@ -33,7 +33,7 @@ const zeroDuration = time.Duration(0)
 type MetricConfig struct {
 	PushJob      string            `toml:"job" json:"job"`
 	PushAddress  string            `toml:"address" json:"address"`
-	PushInterval timeutil.Duration `toml:"interval" json:"interval"`
+	PushInterval typeutil.Duration `toml:"interval" json:"interval"`
 }
 
 // GetCmdLabel gets the request command label name for metrics.
