@@ -21,11 +21,12 @@ var (
 
 // Handler is a helper to export methods to handle API/RPC requests.
 type Handler struct {
-	s *Server
+	s   *Server
+	opt *scheduleOption
 }
 
 func newHandler(s *Server) *Handler {
-	return &Handler{s: s}
+	return &Handler{s: s, opt: s.scheduleOpt}
 }
 
 func (h *Handler) getCoordinator() (*coordinator, error) {
@@ -45,6 +46,18 @@ func (h *Handler) GetSchedulers() ([]string, error) {
 	return c.getSchedulers(), nil
 }
 
+// AddScheduler adds a scheduler.
+func (h *Handler) AddScheduler(s Scheduler) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if !c.addScheduler(s) {
+		return errors.Errorf("scheduler %q exists", s.GetName())
+	}
+	return nil
+}
+
 // RemoveScheduler removes a scheduler by name.
 func (h *Handler) RemoveScheduler(name string) error {
 	c, err := h.getCoordinator()
@@ -57,29 +70,17 @@ func (h *Handler) RemoveScheduler(name string) error {
 	return nil
 }
 
-// AddLeaderScheduler adds a leader scheduler.
-func (h *Handler) AddLeaderScheduler(s Scheduler) error {
-	c, err := h.getCoordinator()
-	if err != nil {
-		return errors.Trace(err)
-	}
-	if !c.addScheduler(newLeaderScheduleController(c, s)) {
-		return errors.Errorf("scheduler %q exists", s.GetName())
-	}
-	return nil
-}
-
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
-	return h.AddLeaderScheduler(newBalanceLeaderScheduler(h.s.scheduleOpt))
+	return h.AddScheduler(newBalanceLeaderScheduler(h.opt))
 }
 
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
-	return h.AddLeaderScheduler(newGrantLeaderScheduler(storeID))
+	return h.AddScheduler(newGrantLeaderScheduler(h.opt, storeID))
 }
 
 // AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.
 func (h *Handler) AddShuffleLeaderScheduler() error {
-	return h.AddLeaderScheduler(newShuffleLeaderScheduler())
+	return h.AddScheduler(newShuffleLeaderScheduler(h.opt))
 }

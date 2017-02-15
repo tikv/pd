@@ -22,16 +22,18 @@ import (
 type Scheduler interface {
 	GetName() string
 	GetResourceKind() ResourceKind
+	GetResourceLimit() uint64
 	Schedule(cluster *clusterInfo) Operator
 }
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
 type grantLeaderScheduler struct {
+	opt     *scheduleOption
 	StoreID uint64 `json:"store_id"`
 }
 
-func newGrantLeaderScheduler(storeID uint64) *grantLeaderScheduler {
-	return &grantLeaderScheduler{StoreID: storeID}
+func newGrantLeaderScheduler(opt *scheduleOption, storeID uint64) *grantLeaderScheduler {
+	return &grantLeaderScheduler{opt: opt, StoreID: storeID}
 }
 
 func (s *grantLeaderScheduler) GetName() string {
@@ -40,6 +42,10 @@ func (s *grantLeaderScheduler) GetName() string {
 
 func (s *grantLeaderScheduler) GetResourceKind() ResourceKind {
 	return leaderKind
+}
+
+func (s *grantLeaderScheduler) GetResourceLimit() uint64 {
+	return s.opt.GetLeaderScheduleLimit()
 }
 
 func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
@@ -51,12 +57,14 @@ func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 }
 
 type shuffleLeaderScheduler struct {
+	opt      *scheduleOption
 	selector Selector
 	selected *metapb.Peer
 }
 
-func newShuffleLeaderScheduler() *shuffleLeaderScheduler {
+func newShuffleLeaderScheduler(opt *scheduleOption) *shuffleLeaderScheduler {
 	return &shuffleLeaderScheduler{
+		opt:      opt,
 		selector: newRandomSelector(),
 	}
 }
@@ -67,6 +75,10 @@ func (s *shuffleLeaderScheduler) GetName() string {
 
 func (s *shuffleLeaderScheduler) GetResourceKind() ResourceKind {
 	return leaderKind
+}
+
+func (s *shuffleLeaderScheduler) GetResourceLimit() uint64 {
+	return s.opt.GetLeaderScheduleLimit()
 }
 
 func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) Operator {

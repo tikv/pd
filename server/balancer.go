@@ -47,6 +47,10 @@ func (l *balanceLeaderScheduler) GetResourceKind() ResourceKind {
 	return leaderKind
 }
 
+func (l *balanceLeaderScheduler) GetResourceLimit() uint64 {
+	return l.opt.GetLeaderScheduleLimit()
+}
+
 func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 	region, newLeader := scheduleTransferLeader(cluster, l.selector)
 	if region == nil {
@@ -83,7 +87,7 @@ func newBalanceStorageScheduler(opt *scheduleOption) *balanceStorageScheduler {
 		opt:      opt,
 		rep:      opt.GetReplication(),
 		cache:    cache,
-		selector: newBalanceSelector(storageKind, filters),
+		selector: newBalanceSelector(regionKind, filters),
 	}
 }
 
@@ -92,7 +96,11 @@ func (s *balanceStorageScheduler) GetName() string {
 }
 
 func (s *balanceStorageScheduler) GetResourceKind() ResourceKind {
-	return storageKind
+	return regionKind
+}
+
+func (s *balanceStorageScheduler) GetResourceLimit() uint64 {
+	return s.opt.GetRegionScheduleLimit()
 }
 
 func (s *balanceStorageScheduler) Schedule(cluster *clusterInfo) Operator {
@@ -167,7 +175,7 @@ func (r *replicaChecker) Check(region *regionInfo) Operator {
 	}
 
 	if len(region.GetPeers()) < r.rep.GetMaxReplicas() {
-		newPeer, _ := r.selectBestPeer(region)
+		newPeer, _ := r.selectBestPeer(region, r.filters...)
 		if newPeer == nil {
 			return nil
 		}

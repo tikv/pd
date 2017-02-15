@@ -444,9 +444,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
-	// Set interval to 0 for tests.
-	cfg, opt := s.svr.cfg, s.svr.scheduleOpt
-	cfg.Schedule.ReplicaScheduleInterval.Duration = 0
+	opt := s.svr.scheduleOpt
 
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
