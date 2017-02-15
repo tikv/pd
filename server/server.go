@@ -99,7 +99,6 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	go systimemon.StartMonitor(time.Now, func() {
-		log.Error("error: system time jump backward")
 		timeJumpBackCounter.Inc()
 	})
 	return s, nil
