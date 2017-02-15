@@ -14,6 +14,8 @@
 package server
 
 import (
+	"fmt"
+
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
@@ -31,15 +33,20 @@ type Scheduler interface {
 // grantLeaderScheduler transfers all leaders to peers in the store.
 type grantLeaderScheduler struct {
 	opt     *scheduleOption
-	StoreID uint64 `json:"store_id"`
+	name    string
+	storeID uint64
 }
 
 func newGrantLeaderScheduler(opt *scheduleOption, storeID uint64) *grantLeaderScheduler {
-	return &grantLeaderScheduler{opt: opt, StoreID: storeID}
+	return &grantLeaderScheduler{
+		opt:     opt,
+		name:    fmt.Sprintf("grant-leader-scheduler-%d", storeID),
+		storeID: storeID,
+	}
 }
 
 func (s *grantLeaderScheduler) GetName() string {
-	return "grant-leader-scheduler"
+	return s.name
 }
 
 func (s *grantLeaderScheduler) GetResourceKind() ResourceKind {
@@ -51,72 +58,62 @@ func (s *grantLeaderScheduler) GetResourceLimit() uint64 {
 }
 
 func (s *grantLeaderScheduler) Prepare(cluster *clusterInfo) {
-	for id := range s.stores {
-		cluster.blockStore(id)
-	}
+	cluster.blockStore(s.storeID)
 }
 
 func (s *grantLeaderScheduler) Cleanup(cluster *clusterInfo) {
-	for id := range s.stores {
-		cluster.unblockStore(id)
-	}
+	cluster.unblockStore(s.storeID)
 }
 
 func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
-	for id := range s.stores {
-		region := cluster.randFollowerRegion(id)
-		if region == nil {
-			continue
-		}
-		if _, ok := s.stores[region.Leader.StoreId]; ok {
-			continue
-		}
-		return newTransferLeader(region, region.GetStorePeer(id))
+	region := cluster.randFollowerRegion(s.storeID)
+	if region == nil {
+		return nil
 	}
-	return nil
+	return newTransferLeader(region, region.GetStorePeer(s.storeID))
 }
 
 type evictLeaderScheduler struct {
-	stores map[uint64]struct{}
+	opt     *scheduleOption
+	name    string
+	storeID uint64
 }
 
-func newEvictLeaderScheduler(stores map[uint64]struct{}) *evictLeaderScheduler {
-	return &evictLeaderScheduler{stores: stores}
+func newEvictLeaderScheduler(opt *scheduleOption, storeID uint64) *evictLeaderScheduler {
+	return &evictLeaderScheduler{
+		opt:     opt,
+		name:    fmt.Sprintf("evict-leader-scheduler-%d", storeID),
+		storeID: storeID,
+	}
 }
 
 func (s *evictLeaderScheduler) GetName() string {
-	return "evict-leader-scheduler"
+	return s.name
 }
 
 func (s *evictLeaderScheduler) GetResourceKind() ResourceKind {
 	return leaderKind
 }
 
+func (s *evictLeaderScheduler) GetResourceLimit() uint64 {
+	return s.opt.GetLeaderScheduleLimit()
+}
+
 func (s *evictLeaderScheduler) Prepare(cluster *clusterInfo) {
-	for id := range s.stores {
-		cluster.blockStore(id)
-	}
+	cluster.blockStore(s.storeID)
 }
 
 func (s *evictLeaderScheduler) Cleanup(cluster *clusterInfo) {
-	for id := range s.stores {
-		cluster.unblockStore(id)
-	}
+	cluster.unblockStore(s.storeID)
 }
 
 func (s *evictLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
-	for id := range s.stores {
-		region := cluster.randLeaderRegion(id)
-		if region == nil {
-			continue
-		}
-		for _, peer := range region.GetFollowers() {
-			if _, ok := s.stores[peer.GetStoreId()]; ok {
-				continue
-			}
-			return newTransferLeader(region, peer)
-		}
-		// TODO: no available followers, we need to transfer peers to other stores first.
+	region := cluster.randLeaderRegion(s.storeID)
+	if region == nil {
+		return nil
+	}
+	for _, peer := range region.GetFollowers() {
+		return newTransferLeader(region, peer)
 	}
 	return nil
 }

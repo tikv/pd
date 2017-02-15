@@ -81,8 +81,8 @@ func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
 }
 
 // AddEvictLeaderScheduler adds a evict-leader-scheduler.
-func (h *Handler) AddEvictLeaderScheduler(stores map[uint64]struct{}) error {
-	return h.AddLeaderScheduler(newEvictLeaderScheduler(stores))
+func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
+	return h.AddScheduler(newEvictLeaderScheduler(h.opt, storeID))
 }
 
 // AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.
