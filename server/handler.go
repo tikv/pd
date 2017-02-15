@@ -80,7 +80,7 @@ func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
 	return h.AddScheduler(newGrantLeaderScheduler(h.opt, storeID))
 }
 
-// AddEvictLeaderScheduler adds a evict-leader-scheduler.
+// AddEvictLeaderScheduler adds an evict-leader-scheduler.
 func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
 	return h.AddScheduler(newEvictLeaderScheduler(h.opt, storeID))
 }
