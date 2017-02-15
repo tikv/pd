@@ -28,6 +28,7 @@ import (
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	"github.com/ngaut/systimemon"
 	"github.com/pingcap/pd/pkg/etcdutil"
 )
 
@@ -96,6 +97,11 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.Close()
 		return nil, errors.Trace(err)
 	}
+
+	go systimemon.StartMonitor(time.Now, func() {
+		log.Error("error: system time jump backward")
+		timeJumpBackCounter.Inc()
+	})
 	return s, nil
 }
 

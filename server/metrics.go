@@ -91,6 +91,14 @@ var (
 			Name:      "status",
 			Help:      "Status of the cluster.",
 		}, []string{"type"})
+
+	timeJumpBackCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "monitor",
+			Name:      "time_jump_back_total",
+			Help:      "Counter of system time jumps backward.",
+		})
 )
 
 func init() {
@@ -103,4 +111,5 @@ func init() {
 	prometheus.MustRegister(txnDuration)
 	prometheus.MustRegister(operatorCounter)
 	prometheus.MustRegister(clusterStatusGauge)
+	prometheus.MustRegister(timeJumpBackCounter)
 }
