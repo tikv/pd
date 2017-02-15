@@ -77,17 +77,17 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	defer co.stop()
 
 	// Transfer peer from store 4 to store 1.
-	tc.addRegionStore(1, 1, 0.1)
-	tc.addRegionStore(2, 2, 0.2)
-	tc.addRegionStore(3, 3, 0.3)
 	tc.addRegionStore(4, 4, 0.4)
+	tc.addRegionStore(3, 3, 0.3)
+	tc.addRegionStore(2, 2, 0.2)
+	tc.addRegionStore(1, 1, 0.1)
 	tc.addLeaderRegion(1, 2, 3, 4)
 
 	// Transfer leader from store 4 to store 1.
-	tc.updateLeaderCount(1, 1, 10)
-	tc.updateLeaderCount(2, 2, 10)
-	tc.updateLeaderCount(3, 3, 10)
 	tc.updateLeaderCount(4, 4, 10)
+	tc.updateLeaderCount(3, 3, 10)
+	tc.updateLeaderCount(2, 2, 10)
+	tc.updateLeaderCount(1, 1, 10)
 	tc.addLeaderRegion(2, 4, 1, 2, 3)
 
 	// Wait for schedule and turn off balance.
@@ -154,10 +154,10 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	defer co.stop()
 
 	// Transfer peer from store 4 to store 1.
-	tc.addRegionStore(1, 1, 0.1)
-	tc.addRegionStore(2, 2, 0.2)
-	tc.addRegionStore(3, 3, 0.3)
 	tc.addRegionStore(4, 4, 0.4)
+	tc.addRegionStore(3, 3, 0.3)
+	tc.addRegionStore(2, 2, 0.2)
+	tc.addRegionStore(1, 1, 0.1)
 	tc.addLeaderRegion(1, 2, 3, 4)
 
 	// Wait for schedule.
