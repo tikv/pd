@@ -287,7 +287,7 @@ type ScheduleConfig struct {
 	MaxStoreDownDuration typeutil.Duration `toml:"max-store-down-duration" json:"max-store-down-duration"`
 
 	// ScheduleInterval is the interval to schedule.
-	ScheduleInterval timeutil.Duration `toml:"schedule-interval" json:"schedule-interval"`
+	ScheduleInterval typeutil.Duration `toml:"schedule-interval" json:"schedule-interval"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
 	// RegionScheduleLimit is the max coexist region schedules.
