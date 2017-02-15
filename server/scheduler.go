@@ -74,16 +74,22 @@ func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 }
 
 type evictLeaderScheduler struct {
-	opt     *scheduleOption
-	name    string
-	storeID uint64
+	opt      *scheduleOption
+	name     string
+	storeID  uint64
+	selector Selector
 }
 
 func newEvictLeaderScheduler(opt *scheduleOption, storeID uint64) *evictLeaderScheduler {
+	var filters []Filter
+	filters = append(filters, newStateFilter(opt))
+	filters = append(filters, newHealthFilter(opt))
+
 	return &evictLeaderScheduler{
-		opt:     opt,
-		name:    fmt.Sprintf("evict-leader-scheduler-%d", storeID),
-		storeID: storeID,
+		opt:      opt,
+		name:     fmt.Sprintf("evict-leader-scheduler-%d", storeID),
+		storeID:  storeID,
+		selector: newRandomSelector(filters),
 	}
 }
 
@@ -112,10 +118,11 @@ func (s *evictLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 	if region == nil {
 		return nil
 	}
-	for _, peer := range region.GetFollowers() {
-		return newTransferLeader(region, peer)
+	target := s.selector.SelectTarget(cluster.getFollowerStores(region))
+	if target == nil {
+		return nil
 	}
-	return nil
+	return newTransferLeader(region, region.GetStorePeer(target.GetId()))
 }
 
 type shuffleLeaderScheduler struct {
@@ -127,7 +134,7 @@ type shuffleLeaderScheduler struct {
 func newShuffleLeaderScheduler(opt *scheduleOption) *shuffleLeaderScheduler {
 	return &shuffleLeaderScheduler{
 		opt:      opt,
-		selector: newRandomSelector(),
+		selector: newRandomSelector(nil),
 	}
 }
 
