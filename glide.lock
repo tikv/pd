@@ -1,5 +1,5 @@
-hash: 11d533a6593ba0594442024c14843f68cc3264152db94b6e20d4005459ec967b
-updated: 2017-02-14T10:54:53.740798266+08:00
+hash: 76265ce7d49d84dd357a583a75fb5f23c3455d93c24185a90446ba1ed4851fda
+updated: 2017-02-15T17:25:46.565099361+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -130,6 +130,8 @@ imports:
   version: fae8f9dfd7048de16575b9d4c255278e38c28a4f
 - name: github.com/ngaut/log
   version: cec23d3e10b016363780d894a0eb732a12c06e02
+- name: github.com/ngaut/systimemon
+  version: c2ca1c75c6af5556eb6ce67994120adf12f2ccef
 - name: github.com/pingcap/check
   version: ce8a2f822ab1e245a4eefcef2996531c79c943f1
 - name: github.com/pingcap/kvproto

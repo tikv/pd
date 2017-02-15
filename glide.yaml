@@ -205,3 +205,5 @@ import:
 - package: github.com/dustin/go-humanize
   version: 7a41df006ff9af79a29f0ffa9c5f21fbe6314a2d
 - package: github.com/elazarl/go-bindata-assetfs
+- package: github.com/ngaut/systimemon
+  version: c2ca1c75c6af5556eb6ce67994120adf12f2ccef
