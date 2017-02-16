@@ -28,8 +28,8 @@ var (
 	errStoreNotFound = func(storeID uint64) error {
 		return errors.Errorf("store %v not found", storeID)
 	}
-	errStoreAcquired = func(storeID uint64) error {
-		return errors.Errorf("store %v is acquired", storeID)
+	errStoreIsBlocked = func(storeID uint64) error {
+		return errors.Errorf("store %v is blocked", storeID)
 	}
 	errRegionNotFound = func(regionID uint64) error {
 		return errors.Errorf("region %v not found", regionID)
@@ -72,24 +72,24 @@ func (s *storesInfo) setStore(store *storeInfo) {
 	s.stores[store.GetId()] = store
 }
 
-func (s *storesInfo) acquireStore(storeID uint64, owner string) error {
+func (s *storesInfo) blockStore(storeID uint64) error {
 	store, ok := s.stores[storeID]
 	if !ok {
 		return errStoreNotFound(storeID)
 	}
-	if store.isAcquired() {
-		return errStoreAcquired(storeID)
+	if store.isBlocked() {
+		return errStoreIsBlocked(storeID)
 	}
-	store.acquire(owner)
+	store.block()
 	return nil
 }
 
-func (s *storesInfo) releaseStore(storeID uint64) {
+func (s *storesInfo) unblockStore(storeID uint64) {
 	store, ok := s.stores[storeID]
 	if !ok {
-		log.Fatalf("store %d is released, but it is not found", storeID)
+		log.Fatalf("store %d is unblocked, but it is not found", storeID)
 	}
-	store.release()
+	store.unblock()
 }
 
 func (s *storesInfo) getStores() []*storeInfo {
@@ -359,16 +359,16 @@ func (c *clusterInfo) putStoreLocked(store *storeInfo) error {
 	return nil
 }
 
-func (c *clusterInfo) acquireStore(storeID uint64, owner string) error {
+func (c *clusterInfo) blockStore(storeID uint64) error {
 	c.Lock()
 	defer c.Unlock()
-	return c.stores.acquireStore(storeID, owner)
+	return c.stores.blockStore(storeID)
 }
 
-func (c *clusterInfo) releaseStore(storeID uint64) {
+func (c *clusterInfo) unblockStore(storeID uint64) {
 	c.Lock()
 	defer c.Unlock()
-	c.stores.releaseStore(storeID)
+	c.stores.unblockStore(storeID)
 }
 
 func (c *clusterInfo) getStores() []*storeInfo {

@@ -29,7 +29,7 @@ type balanceLeaderScheduler struct {
 
 func newBalanceLeaderScheduler(opt *scheduleOption) *balanceLeaderScheduler {
 	var filters []Filter
-	filters = append(filters, newOwnerFilter())
+	filters = append(filters, newBlockFilter())
 	filters = append(filters, newStateFilter(opt))
 	filters = append(filters, newHealthFilter(opt))
 	filters = append(filters, newLeaderCountFilter(opt))

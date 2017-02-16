@@ -58,11 +58,11 @@ func (s *grantLeaderScheduler) GetResourceLimit() uint64 {
 }
 
 func (s *grantLeaderScheduler) Prepare(cluster *clusterInfo) error {
-	return cluster.acquireStore(s.storeID, s.GetName())
+	return cluster.blockStore(s.storeID)
 }
 
 func (s *grantLeaderScheduler) Cleanup(cluster *clusterInfo) {
-	cluster.releaseStore(s.storeID)
+	cluster.unblockStore(s.storeID)
 }
 
 func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
@@ -106,11 +106,11 @@ func (s *evictLeaderScheduler) GetResourceLimit() uint64 {
 }
 
 func (s *evictLeaderScheduler) Prepare(cluster *clusterInfo) error {
-	return cluster.acquireStore(s.storeID, s.GetName())
+	return cluster.blockStore(s.storeID)
 }
 
 func (s *evictLeaderScheduler) Cleanup(cluster *clusterInfo) {
-	cluster.releaseStore(s.storeID)
+	cluster.unblockStore(s.storeID)
 }
 
 func (s *evictLeaderScheduler) Schedule(cluster *clusterInfo) Operator {

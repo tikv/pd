@@ -44,15 +44,15 @@ func (s *testStoresInfoSuite) TestStores(c *C) {
 
 	for i := uint64(0); i < n; i++ {
 		c.Assert(cache.getStore(i), IsNil)
-		c.Assert(cache.acquireStore(i, "abc"), NotNil)
+		c.Assert(cache.blockStore(i), NotNil)
 		cache.setStore(stores[i])
 		c.Assert(cache.getStore(i), DeepEquals, stores[i])
 		c.Assert(cache.getStoreCount(), Equals, int(i+1))
-		c.Assert(cache.acquireStore(i, "abc"), IsNil)
-		c.Assert(cache.getStore(i).isAcquired(), IsTrue)
-		c.Assert(cache.acquireStore(i, "abc"), NotNil)
-		cache.releaseStore(i)
-		c.Assert(cache.getStore(i).isAcquired(), IsFalse)
+		c.Assert(cache.blockStore(i), IsNil)
+		c.Assert(cache.getStore(i).isBlocked(), IsTrue)
+		c.Assert(cache.blockStore(i), NotNil)
+		cache.unblockStore(i)
+		c.Assert(cache.getStore(i).isBlocked(), IsFalse)
 	}
 	c.Assert(cache.getStoreCount(), Equals, int(n))
 

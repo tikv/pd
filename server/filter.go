@@ -61,18 +61,18 @@ func (f *excludedFilter) FilterTarget(store *storeInfo) bool {
 	return ok
 }
 
-type ownerFilter struct{}
+type blockFilter struct{}
 
-func newOwnerFilter() *ownerFilter {
-	return &ownerFilter{}
+func newBlockFilter() *blockFilter {
+	return &blockFilter{}
 }
 
-func (f *ownerFilter) FilterSource(store *storeInfo) bool {
-	return store.isAcquired()
+func (f *blockFilter) FilterSource(store *storeInfo) bool {
+	return store.isBlocked()
 }
 
-func (f *ownerFilter) FilterTarget(store *storeInfo) bool {
-	return store.isAcquired()
+func (f *blockFilter) FilterTarget(store *storeInfo) bool {
+	return store.isBlocked()
 }
 
 type cacheFilter struct {
