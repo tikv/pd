@@ -223,8 +223,8 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	defer co.stop()
 
 	c.Assert(co.schedulers, HasLen, 2)
-	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsTrue)
-	c.Assert(co.removeScheduler("balance-storage-scheduler"), IsTrue)
+	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
+	c.Assert(co.removeScheduler("balance-storage-scheduler"), IsNil)
 	c.Assert(co.schedulers, HasLen, 0)
 
 	// Add stores 1,2,3
@@ -238,9 +238,12 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	// Add regions 3 with leader in store 3 and followers in stores 1,2
 	tc.addLeaderRegion(3, 3, 1, 2)
 
-	gls := newGrantLeaderScheduler(opt, 1)
-	c.Assert(co.removeScheduler(gls.GetName()), IsFalse)
-	c.Assert(co.addScheduler(gls), IsTrue)
+	gls := newGrantLeaderScheduler(opt, 0)
+	c.Assert(co.addScheduler(gls), NotNil)
+	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
+
+	gls = newGrantLeaderScheduler(opt, 1)
+	c.Assert(co.addScheduler(gls), IsNil)
 
 	// Transfer all leaders to store 1.
 	time.Sleep(time.Second)

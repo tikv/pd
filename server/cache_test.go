@@ -37,16 +37,22 @@ func newTestStores(n uint64) []*storeInfo {
 	return stores
 }
 
-func (s *testStoresInfoSuite) Test(c *C) {
+func (s *testStoresInfoSuite) TestStores(c *C) {
 	n := uint64(10)
 	cache := newStoresInfo()
 	stores := newTestStores(n)
 
 	for i := uint64(0); i < n; i++ {
 		c.Assert(cache.getStore(i), IsNil)
+		c.Assert(cache.acquireStore(i, "abc"), NotNil)
 		cache.setStore(stores[i])
 		c.Assert(cache.getStore(i), DeepEquals, stores[i])
 		c.Assert(cache.getStoreCount(), Equals, int(i+1))
+		c.Assert(cache.acquireStore(i, "abc"), IsNil)
+		c.Assert(cache.getStore(i).isAcquired(), IsTrue)
+		c.Assert(cache.acquireStore(i, "abc"), NotNil)
+		cache.releaseStore(i)
+		c.Assert(cache.getStore(i).isAcquired(), IsFalse)
 	}
 	c.Assert(cache.getStoreCount(), Equals, int(n))
 

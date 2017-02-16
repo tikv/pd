@@ -50,16 +50,16 @@ func (s *storeInfo) clone() *storeInfo {
 	}
 }
 
-func (s *storeInfo) block() {
-	s.stats.Blocked = true
+func (s *storeInfo) acquire(owner string) {
+	s.stats.Owner = owner
 }
 
-func (s *storeInfo) unblock() {
-	s.stats.Blocked = false
+func (s *storeInfo) release() {
+	s.stats.Owner = ""
 }
 
-func (s *storeInfo) isBlocked() bool {
-	return s.stats.Blocked
+func (s *storeInfo) isAcquired() bool {
+	return s.stats.Owner != ""
 }
 
 func (s *storeInfo) isUp() bool {
@@ -135,7 +135,7 @@ func (s *storeInfo) getLocationID(keys []string) string {
 type StoreStatus struct {
 	*pdpb.StoreStats
 
-	Blocked           bool      `json:"blocked"`
+	Owner             string    `json:"owner"`
 	StartTS           time.Time `json:"start_ts"`
 	LastHeartbeatTS   time.Time `json:"last_heartbeat_ts"`
 	TotalRegionCount  int       `json:"total_region_count"`
@@ -152,7 +152,7 @@ func newStoreStatus() *StoreStatus {
 func (s *StoreStatus) clone() *StoreStatus {
 	return &StoreStatus{
 		StoreStats:        proto.Clone(s.StoreStats).(*pdpb.StoreStats),
-		Blocked:           s.Blocked,
+		Owner:             s.Owner,
 		StartTS:           s.StartTS,
 		LastHeartbeatTS:   s.LastHeartbeatTS,
 		TotalRegionCount:  s.TotalRegionCount,

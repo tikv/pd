@@ -25,7 +25,7 @@ type Scheduler interface {
 	GetName() string
 	GetResourceKind() ResourceKind
 	GetResourceLimit() uint64
-	Prepare(cluster *clusterInfo)
+	Prepare(cluster *clusterInfo) error
 	Cleanup(cluster *clusterInfo)
 	Schedule(cluster *clusterInfo) Operator
 }
@@ -57,12 +57,12 @@ func (s *grantLeaderScheduler) GetResourceLimit() uint64 {
 	return s.opt.GetLeaderScheduleLimit()
 }
 
-func (s *grantLeaderScheduler) Prepare(cluster *clusterInfo) {
-	cluster.blockStore(s.storeID)
+func (s *grantLeaderScheduler) Prepare(cluster *clusterInfo) error {
+	return cluster.acquireStore(s.storeID, s.GetName())
 }
 
 func (s *grantLeaderScheduler) Cleanup(cluster *clusterInfo) {
-	cluster.unblockStore(s.storeID)
+	cluster.releaseStore(s.storeID)
 }
 
 func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
@@ -105,12 +105,12 @@ func (s *evictLeaderScheduler) GetResourceLimit() uint64 {
 	return s.opt.GetLeaderScheduleLimit()
 }
 
-func (s *evictLeaderScheduler) Prepare(cluster *clusterInfo) {
-	cluster.blockStore(s.storeID)
+func (s *evictLeaderScheduler) Prepare(cluster *clusterInfo) error {
+	return cluster.acquireStore(s.storeID, s.GetName())
 }
 
 func (s *evictLeaderScheduler) Cleanup(cluster *clusterInfo) {
-	cluster.unblockStore(s.storeID)
+	cluster.releaseStore(s.storeID)
 }
 
 func (s *evictLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
@@ -150,7 +150,7 @@ func (s *shuffleLeaderScheduler) GetResourceLimit() uint64 {
 	return s.opt.GetLeaderScheduleLimit()
 }
 
-func (s *shuffleLeaderScheduler) Prepare(cluster *clusterInfo) {}
+func (s *shuffleLeaderScheduler) Prepare(cluster *clusterInfo) error { return nil }
 
 func (s *shuffleLeaderScheduler) Cleanup(cluster *clusterInfo) {}
 

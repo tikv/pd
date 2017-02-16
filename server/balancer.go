@@ -29,7 +29,7 @@ type balanceLeaderScheduler struct {
 
 func newBalanceLeaderScheduler(opt *scheduleOption) *balanceLeaderScheduler {
 	var filters []Filter
-	filters = append(filters, newBlockFilter())
+	filters = append(filters, newOwnerFilter())
 	filters = append(filters, newStateFilter(opt))
 	filters = append(filters, newHealthFilter(opt))
 	filters = append(filters, newLeaderCountFilter(opt))
@@ -52,7 +52,7 @@ func (l *balanceLeaderScheduler) GetResourceLimit() uint64 {
 	return l.opt.GetLeaderScheduleLimit()
 }
 
-func (l *balanceLeaderScheduler) Prepare(cluster *clusterInfo) {}
+func (l *balanceLeaderScheduler) Prepare(cluster *clusterInfo) error { return nil }
 
 func (l *balanceLeaderScheduler) Cleanup(cluster *clusterInfo) {}
 
@@ -108,7 +108,7 @@ func (s *balanceStorageScheduler) GetResourceLimit() uint64 {
 	return s.opt.GetRegionScheduleLimit()
 }
 
-func (s *balanceStorageScheduler) Prepare(cluster *clusterInfo) {}
+func (s *balanceStorageScheduler) Prepare(cluster *clusterInfo) error { return nil }
 
 func (s *balanceStorageScheduler) Cleanup(cluster *clusterInfo) {}
 

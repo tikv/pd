@@ -52,10 +52,7 @@ func (h *Handler) AddScheduler(s Scheduler) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if !c.addScheduler(s) {
-		return errors.Errorf("scheduler %q exists", s.GetName())
-	}
-	return nil
+	return c.addScheduler(s)
 }
 
 // RemoveScheduler removes a scheduler by name.
@@ -64,10 +61,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if !c.removeScheduler(name) {
-		return errors.Errorf("scheduler %q not found", name)
-	}
-	return nil
+	return c.removeScheduler(name)
 }
 
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
