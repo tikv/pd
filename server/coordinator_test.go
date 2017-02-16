@@ -92,6 +92,8 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 
 	// Wait for schedule and turn off balance.
 	time.Sleep(time.Second)
+	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
+	c.Assert(co.removeScheduler("balance-storage-scheduler"), IsNil)
 	checkTransferPeer(c, co.getOperator(1), 4, 1)
 	checkTransferLeader(c, co.getOperator(2), 4, 2)
 
