@@ -15,9 +15,6 @@ package command
 
 import (
 	"fmt"
-	"io"
-	"net/http"
-	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -61,19 +58,12 @@ func NewLeaderMemberCommand() *cobra.Command {
 }
 
 func showMemberCommandFunc(cmd *cobra.Command, args []string) {
-	url := getAddressFromCmd(cmd, membersPrefix)
-	r, err := http.Get(url)
+	r, err := doRequest(cmd, membersPrefix, "GET")
 	if err != nil {
-		fmt.Printf("Failed to get pd members:[%s]\n", err)
+		fmt.Printf("Failed to get pd members: %s", err)
 		return
 	}
-	defer r.Body.Close()
-	if r.StatusCode != http.StatusOK {
-		printResponseError(r)
-		return
-	}
-
-	io.Copy(os.Stdout, r.Body)
+	fmt.Println(r)
 }
 
 func deleteMemberCommandFunc(cmd *cobra.Command, args []string) {
@@ -81,40 +71,21 @@ func deleteMemberCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println("Usage: member delete <member_name>")
 		return
 	}
-	cli := &http.Client{}
-	prefix := fmt.Sprintf(memberPrefix, args[0])
-	url := getAddressFromCmd(cmd, prefix)
-	r, err := http.NewRequest("DELETE", url, nil)
-	if err != nil {
-		fmt.Printf("Failed to delete member %s: [%s]\n", args[0], err)
-		return
-	}
-	reps, err := cli.Do(r)
-	if err != nil {
-		fmt.Printf("Failed to delete member %s: [%s]\n", args[0], err)
-		return
-	}
 
-	defer reps.Body.Close()
-	if reps.StatusCode != http.StatusOK {
-		printResponseError(reps)
+	prefix := fmt.Sprintf(memberPrefix, args[0])
+	_, err := doRequest(cmd, prefix, "DELETE")
+	if err != nil {
+		fmt.Printf("Failed to delete member %s: %s", args[0], err)
 		return
 	}
 	fmt.Println("Success!")
 }
 
 func getLeaderMemberCommandFunc(cmd *cobra.Command, args []string) {
-	url := getAddressFromCmd(cmd, leaderMemberPrefix)
-	r, err := http.Get(url)
+	r, err := doRequest(cmd, leaderMemberPrefix, "GET")
 	if err != nil {
-		fmt.Printf("Failed to get the leader of pd members:[%s]\n", err)
+		fmt.Printf("Failed to get the leader of pd members: %s", err)
 		return
 	}
-	defer r.Body.Close()
-	if r.StatusCode != http.StatusOK {
-		printResponseError(r)
-		return
-	}
-
-	io.Copy(os.Stdout, r.Body)
+	fmt.Println(r)
 }
