@@ -73,6 +73,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.Handle("/", newHomeHandler(rd)).Methods("GET")
 	router.Handle("/ws", newWSHandler(svr))
 
-	router.HandleFunc("/api/v1/hello", newHomeHandler(rd).Hello).Methods("GET")
+	router.HandleFunc("/ping", newHomeHandler(rd).Ping).Methods("GET")
 	return router
 }

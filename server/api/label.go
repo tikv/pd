@@ -61,13 +61,13 @@ func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var labels []*metapb.StoreLabel
-	m := make(map[string]bool)
+	m := make(map[string]struct{})
 	stores := cluster.GetStores()
 	for _, s := range stores {
 		ls := s.GetLabels()
 		for _, l := range ls {
-			if ok := m[l.Key+l.Value]; !ok {
-				m[l.Key+l.Value] = true
+			if _, ok := m[l.Key+l.Value]; !ok {
+				m[l.Key+l.Value] = struct{}{}
 				labels = append(labels, l)
 			}
 		}
@@ -197,18 +197,14 @@ func newStoreLabelFilter(pattern, patternReString string) (*storeLabelFilter, er
 
 func (filter *storeLabelFilter) filterLabelKey(l *metapb.StoreLabel) bool {
 	if filter.isRegexp {
-		if filter.patternRe.MatchString(l.Key) {
-			return true
-		}
+		return filter.patternRe.MatchString(l.Key)
 	}
 	return l.Key == filter.pattern
 }
 
 func (filter *storeLabelFilter) filterLabelValue(l *metapb.StoreLabel) bool {
 	if filter.isRegexp {
-		if filter.patternRe.MatchString(l.Value) {
-			return true
-		}
+		return filter.patternRe.MatchString(l.Value)
 	}
 	return l.Value == filter.pattern
 }
