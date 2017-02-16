@@ -84,10 +84,10 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	tc.addLeaderRegion(1, 2, 3, 4)
 
 	// Transfer leader from store 4 to store 2.
-	tc.updateLeaderCount(4, 4, 10)
-	tc.updateLeaderCount(3, 3, 10)
-	tc.updateLeaderCount(2, 2, 10)
-	tc.updateLeaderCount(1, 1, 10)
+	tc.updateLeaderCount(4, 4)
+	tc.updateLeaderCount(3, 3)
+	tc.updateLeaderCount(2, 2)
+	tc.updateLeaderCount(1, 1)
 	tc.addLeaderRegion(2, 4, 3, 2)
 
 	// Wait for schedule and turn off balance.
@@ -131,10 +131,10 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	co.run()
 	defer co.stop()
 
-	tc.addRegionStore(1, 1, 0.1)
-	tc.addRegionStore(2, 2, 0.2)
-	tc.addRegionStore(3, 3, 0.3)
-	tc.addRegionStore(4, 4, 0.4)
+	tc.addRegionStore(1, 1)
+	tc.addRegionStore(2, 2)
+	tc.addRegionStore(3, 3)
+	tc.addRegionStore(4, 4)
 
 	// Add peer to store 1.
 	tc.addLeaderRegion(1, 2, 3)
@@ -224,8 +224,8 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	defer co.stop()
 
 	c.Assert(co.schedulers, HasLen, 2)
-	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsTrue)
-	c.Assert(co.removeScheduler("balance-region-scheduler"), IsTrue)
+	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
+	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
 	c.Assert(co.schedulers, HasLen, 0)
 
 	// Add stores 1,2,3
@@ -297,12 +297,12 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	cfg, opt := newTestScheduleConfig()
 	cfg.ScheduleInterval.Duration = time.Minute
 	co := newCoordinator(cluster, opt)
-	sc := newScheduleController(co, newBalanceLeaderScheduler(opt))
+	lb := newBalanceLeaderScheduler(opt)
+	sc := newScheduleController(co, lb)
 
-	cfg.LeaderScheduleLimit = 0
+	lb.limit = 0
 	c.Assert(sc.GetInterval(), Equals, time.Minute)
-
-	cfg.LeaderScheduleLimit = 2
+	lb.limit = 2
 	c.Assert(sc.GetInterval(), Equals, time.Second*30)
 
 	// limit = 2

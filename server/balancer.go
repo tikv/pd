@@ -23,15 +23,23 @@ import (
 
 var storeCacheInterval = 30 * time.Second
 
+// minBalanceDiff returns the minimal diff to do balance. The formula is based
+// on experience to let the diff increase alone with the count slowly.
 func minBalanceDiff(count uint64) float64 {
 	return math.Pow(2, math.Log10(float64(count)))
 }
 
-func adjustBalanceSpeed(sourceCount uint64, sourceRatio, targetRatio float64) (uint64, bool) {
-	if targetRatio >= sourceRatio {
+// adjustBalanceSpeed returns a schedule limit and whether we should balance.
+// First, we calculate the diffCount (the number of schedules to balance the
+// source and the target). Then, we adjust the schedule limit to less than the
+// diffCount, so we will not over-scheduled. Finally, the min balance diff
+// provides a buffer to make the cluster stable, so we don't need to schedule
+// very frequently.
+func adjustBalanceSpeed(sourceCount uint64, sourceScore, targetScore float64) (uint64, bool) {
+	if targetScore >= sourceScore {
 		return 0, false
 	}
-	diffRatio := 1 - targetRatio/sourceRatio
+	diffRatio := 1 - targetScore/sourceScore
 	diffCount := diffRatio * float64(sourceCount)
 	return uint64(diffCount) / 4, diffCount > minBalanceDiff(sourceCount)
 }
@@ -89,10 +97,10 @@ func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 // adjustSchedule returns true if the schedule is allowed.
 func (l *balanceLeaderScheduler) adjustSchedule(source, target *storeInfo) bool {
 	sourceCount := source.leaderCount()
-	sourceRatio := source.leaderRatio()
-	targetRatio := target.leaderRatio()
-	limit, ok := adjustBalanceSpeed(sourceCount, sourceRatio, targetRatio)
-	l.limit = roundUint64(limit, 1, l.opt.GetLeaderScheduleLimit())
+	sourceScore := source.leaderScore()
+	targetScore := target.leaderScore()
+	limit, ok := adjustBalanceSpeed(sourceCount, sourceScore, targetScore)
+	l.limit = ensureRangeUint64(limit, 1, l.opt.GetLeaderScheduleLimit())
 	return ok
 }
 
@@ -182,10 +190,10 @@ func (s *balanceRegionScheduler) transferPeer(cluster *clusterInfo, region *regi
 // adjustSchedule returns true if the schedule is allowed.
 func (s *balanceRegionScheduler) adjustSchedule(source, target *storeInfo) bool {
 	sourceCount := source.regionCount()
-	sourceRatio := source.regionRatio()
-	targetRatio := target.regionRatio()
-	limit, ok := adjustBalanceSpeed(sourceCount, sourceRatio, targetRatio)
-	s.limit = roundUint64(limit, 1, s.opt.GetRegionScheduleLimit())
+	sourceScore := source.regionScore()
+	targetScore := target.regionScore()
+	limit, ok := adjustBalanceSpeed(sourceCount, sourceScore, targetScore)
+	s.limit = ensureRangeUint64(limit, 1, s.opt.GetRegionScheduleLimit())
 	return ok
 }
 
@@ -250,7 +258,7 @@ func (r *replicaChecker) selectBestPeer(region *regionInfo, filters ...Filter) (
 	)
 
 	// Select the store with best distinct score.
-	// If the scores are the same, select the store with minimal region ratio.
+	// If the scores are the same, select the store with minimal region score.
 	stores := r.cluster.getRegionStores(region)
 	for _, store := range r.cluster.getStores() {
 		if filterTarget(store, filters) {
@@ -283,7 +291,7 @@ func (r *replicaChecker) selectWorstPeer(region *regionInfo, filters ...Filter) 
 	)
 
 	// Select the store with lowest distinct score.
-	// If the scores are the same, select the store with maximal region ratio.
+	// If the scores are the same, select the store with maximal region score.
 	stores := r.cluster.getRegionStores(region)
 	for _, store := range stores {
 		if filterSource(store, filters) {

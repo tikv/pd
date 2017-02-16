@@ -351,7 +351,7 @@ func GetPDMembers(etcdClient *clientv3.Client) ([]*pdpb.PDMember, error) {
 	return members, nil
 }
 
-func roundUint64(value, min, max uint64) uint64 {
+func ensureRangeUint64(value, min, max uint64) uint64 {
 	if value < min {
 		return min
 	}

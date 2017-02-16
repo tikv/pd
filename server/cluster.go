@@ -430,8 +430,8 @@ func (c *RaftCluster) collectMetrics() {
 	storeTombstoneCount := 0
 	storageSize := uint64(0)
 	storageCapacity := uint64(0)
-	minLeaderRatio, maxLeaderRatio := math.MaxFloat64, float64(0.0)
-	minRegionRatio, maxRegionRatio := math.MaxFloat64, float64(0.0)
+	minLeaderScore, maxLeaderScore := math.MaxFloat64, float64(0.0)
+	minRegionScore, maxRegionScore := math.MaxFloat64, float64(0.0)
 
 	for _, s := range cluster.getStores() {
 		// Store state.
@@ -454,18 +454,18 @@ func (c *RaftCluster) collectMetrics() {
 		storageSize += s.storageSize()
 		storageCapacity += s.stats.GetCapacity()
 
-		// Balance ratio.
-		if minLeaderRatio > s.leaderRatio() {
-			minLeaderRatio = s.leaderRatio()
+		// Balance score.
+		if minLeaderScore > s.leaderScore() {
+			minLeaderScore = s.leaderScore()
 		}
-		if maxLeaderRatio < s.leaderRatio() {
-			maxLeaderRatio = s.leaderRatio()
+		if maxLeaderScore < s.leaderScore() {
+			maxLeaderScore = s.leaderScore()
 		}
-		if minRegionRatio > s.regionRatio() {
-			minRegionRatio = s.regionRatio()
+		if minRegionScore > s.regionScore() {
+			minRegionScore = s.regionScore()
 		}
-		if maxRegionRatio < s.regionRatio() {
-			minRegionRatio = s.regionRatio()
+		if maxRegionScore < s.regionScore() {
+			minRegionScore = s.regionScore()
 		}
 	}
 
@@ -477,8 +477,8 @@ func (c *RaftCluster) collectMetrics() {
 	metrics["region_count"] = float64(cluster.getRegionCount())
 	metrics["storage_size"] = float64(storageSize)
 	metrics["storage_capacity"] = float64(storageCapacity)
-	metrics["leader_balance_ratio"] = 1 - minLeaderRatio/maxLeaderRatio
-	metrics["region_balance_ratio"] = 1 - minRegionRatio/maxRegionRatio
+	metrics["leader_balance_ratio"] = 1 - minLeaderScore/maxLeaderScore
+	metrics["region_balance_ratio"] = 1 - minRegionScore/maxRegionScore
 
 	for label, value := range metrics {
 		clusterStatusGauge.WithLabelValues(label).Set(value)
@@ -512,15 +512,6 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
 	}
 	return c.cachedCluster.putMeta(meta)
-}
-
-// GetScores gets store scores from balancer.
-func (c *RaftCluster) GetScores(store *metapb.Store, status *StoreStatus) []int {
-	storeInfo := &storeInfo{
-		Store: store,
-		stats: status,
-	}
-	return storeInfo.resourceScores()
 }
 
 // FetchEvents fetches the operator events.

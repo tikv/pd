@@ -61,7 +61,7 @@ func (c *testClusterInfo) setStoreBusy(storeID uint64, busy bool) {
 func (c *testClusterInfo) addLeaderStore(storeID uint64, leaderCount int) {
 	store := newStoreInfo(&metapb.Store{Id: storeID})
 	store.stats.LastHeartbeatTS = time.Now()
-	store.stats.LeaderCount = leaderCount
+	store.stats.LeaderCount = uint32(leaderCount)
 	c.putStore(store)
 }
 
@@ -96,7 +96,7 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 
 func (c *testClusterInfo) updateLeaderCount(storeID uint64, leaderCount int) {
 	store := c.getStore(storeID)
-	store.stats.LeaderCount = leaderCount
+	store.stats.LeaderCount = uint32(leaderCount)
 	c.putStore(store)
 }
 

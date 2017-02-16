@@ -41,7 +41,7 @@ func (s *balanceSelector) SelectSource(stores []*storeInfo, filters ...Filter) *
 		if filterSource(store, filters) {
 			continue
 		}
-		if result == nil || result.resourceRatio(s.kind) < store.resourceRatio(s.kind) {
+		if result == nil || result.resourceScore(s.kind) < store.resourceScore(s.kind) {
 			result = store
 		}
 	}
@@ -56,7 +56,7 @@ func (s *balanceSelector) SelectTarget(stores []*storeInfo, filters ...Filter) *
 		if filterTarget(store, filters) {
 			continue
 		}
-		if result == nil || result.resourceRatio(s.kind) > store.resourceRatio(s.kind) {
+		if result == nil || result.resourceScore(s.kind) > store.resourceScore(s.kind) {
 			result = store
 		}
 	}

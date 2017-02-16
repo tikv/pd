@@ -74,11 +74,11 @@ func compareStoreScore(storeA *storeInfo, scoreA float64, storeB *storeInfo, sco
 	if scoreA < scoreB {
 		return -1
 	}
-	// The store with lower region ratio is better.
-	if storeA.regionRatio() < storeB.regionRatio() {
+	// The store with lower region score is better.
+	if storeA.regionScore() < storeB.regionScore() {
 		return 1
 	}
-	if storeA.regionRatio() > storeB.regionRatio() {
+	if storeA.regionScore() > storeB.regionScore() {
 		return -1
 	}
 	return 0

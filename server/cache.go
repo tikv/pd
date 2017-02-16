@@ -495,7 +495,7 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	}
 
 	store.stats.StoreStats = proto.Clone(stats).(*pdpb.StoreStats)
-	store.stats.LeaderCount = c.regions.getStoreLeaderCount(storeID)
+	store.stats.LeaderCount = uint32(c.regions.getStoreLeaderCount(storeID))
 	store.stats.LastHeartbeatTS = time.Now()
 
 	c.stores.setStore(store)
