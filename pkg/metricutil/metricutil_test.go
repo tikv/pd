@@ -31,11 +31,24 @@ var _ = Suite(&testMetricsSuite{})
 type testMetricsSuite struct {
 }
 
-func (s *testMetricsSuite) TestConvertName(c *C) {
+func (s *testMetricsSuite) TestCamelCaseToSnakeCase(c *C) {
 	inputs := []struct {
 		name    string
 		newName string
 	}{
+		{"a", "a"},
+		{"snake", "snake"},
+		{"A", "a"},
+		{"ID", "id"},
+		{"MOTD", "motd"},
+		{"Snake", "snake"},
+		{"SnakeTest", "snake_test"},
+		{"SnakeID", "snake_id"},
+		{"SnakeIDGoogle", "snake_id_google"},
+		{"GetPDMembers", "get_pd_members"},
+		{"LinuxMOTD", "linux_motd"},
+		{"OMGWTFBBQ", "omgwtfbbq"},
+		{"omg_wtf_bbq", "omg_wtf_bbq"},
 		{"Abc", "abc"},
 		{"aAbc", "a_abc"},
 		{"ABc", "a_bc"},
@@ -45,7 +58,7 @@ func (s *testMetricsSuite) TestConvertName(c *C) {
 	}
 
 	for _, input := range inputs {
-		c.Assert(input.newName, Equals, convertName(input.name))
+		c.Assert(input.newName, Equals, camelCaseToSnakeCase(input.name))
 	}
 }
 

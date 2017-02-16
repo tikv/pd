@@ -15,6 +15,7 @@ package metricutil
 
 import (
 	"time"
+	"unicode"
 
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -41,7 +42,7 @@ func GetCmdLabel(request *pdpb.Request) string {
 	name := request.GetCmdType().String()
 	label, ok := cmdLabels[name]
 	if !ok {
-		label = convertName(name)
+		label = camelCaseToSnakeCase(name)
 	}
 	return label
 }
@@ -49,26 +50,24 @@ func GetCmdLabel(request *pdpb.Request) string {
 func convertCmdLabels() map[string]string {
 	labels := make(map[string]string)
 	for name := range pdpb.CommandType_value {
-		labels[name] = convertName(name)
+		labels[name] = camelCaseToSnakeCase(name)
 	}
 	return labels
 }
 
-// convertName converts variable name to a linux type name.
-// Like `AbcDef -> abc_def`.
-func convertName(str string) string {
-	name := make([]byte, 0, 64)
-	for i := 0; i < len(str); i++ {
-		if str[i] >= 'A' && str[i] <= 'Z' {
-			if i > 0 {
-				name = append(name, '_')
-			}
-			name = append(name, str[i]+'a'-'A')
-		} else {
-			name = append(name, str[i])
+func camelCaseToSnakeCase(str string) string {
+	runes := []rune(str)
+	length := len(runes)
+
+	var ret []rune
+	for i := 0; i < length; i++ {
+		if i > 0 && unicode.IsUpper(runes[i]) && ((i+1 < length && unicode.IsLower(runes[i+1])) || unicode.IsLower(runes[i-1])) {
+			ret = append(ret, '_')
 		}
+		ret = append(ret, unicode.ToLower(runes[i]))
 	}
-	return string(name)
+
+	return string(ret)
 }
 
 // prometheusPushClient pushs metrics to Prometheus Pushgateway.
