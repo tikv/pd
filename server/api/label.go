@@ -23,25 +23,6 @@ import (
 	"github.com/unrolled/render"
 )
 
-var (
-	errLabelConflictFilterRequst = errors.New("Cannot use string and regexp in same time")
-	errLabelReex                 = errors.New("Cannot compile regexp, Please check it")
-)
-
-type labelInfo struct {
-	ID      uint64               `json:"store_id"`
-	Address string               `json:"address"`
-	Labels  []*metapb.StoreLabel `json:"labels"`
-}
-
-func newLabelInfo(store *metapb.Store) *labelInfo {
-	return &labelInfo{
-		ID:      store.Id,
-		Address: store.Address,
-		Labels:  store.Labels,
-	}
-}
-
 type labelsHandler struct {
 	svr *server.Server
 	rd  *render.Render
@@ -75,21 +56,6 @@ func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, labels)
 }
 
-func (h *labelsHandler) List(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
-		return
-	}
-	var labels []*labelInfo
-	stores := cluster.GetStores()
-	for _, s := range stores {
-		label := newLabelInfo(s)
-		labels = append(labels, label)
-	}
-	h.rd.JSON(w, http.StatusOK, labels)
-}
-
 func (h *labelsHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
@@ -99,9 +65,7 @@ func (h *labelsHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 
 	name := r.URL.Query().Get("name")
 	value := r.URL.Query().Get("value")
-	nameRe := r.URL.Query().Get("name_re")
-	valueRe := r.URL.Query().Get("value_re")
-	filter, err := newStoresLabelFilter(name, nameRe, value, valueRe)
+	filter, err := newStoresLabelFilter(name, value)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -129,22 +93,22 @@ func (h *labelsHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 }
 
 type storesLabelFilter struct {
-	nameFilter  *storeLabelFilter
-	valueFilter *storeLabelFilter
+	keyPattern   *regexp.Regexp
+	valuePattern *regexp.Regexp
 }
 
-func newStoresLabelFilter(name, nameRe, value, valueRe string) (*storesLabelFilter, error) {
-	nameFilter, err := newStoreLabelFilter(name, nameRe)
+func newStoresLabelFilter(name, value string) (*storesLabelFilter, error) {
+	keyPattern, err := regexp.Compile(name)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	valueFilter, err := newStoreLabelFilter(value, valueRe)
+	valuePattern, err := regexp.Compile(value)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 	return &storesLabelFilter{
-		nameFilter:  nameFilter,
-		valueFilter: valueFilter,
+		keyPattern:   keyPattern,
+		valuePattern: valuePattern,
 	}, nil
 }
 
@@ -153,8 +117,8 @@ func (filter *storesLabelFilter) filter(stores []*metapb.Store) []*metapb.Store 
 	for _, s := range stores {
 		ls := s.GetLabels()
 		for _, l := range ls {
-			isKeyMatch := filter.nameFilter.filterLabelKey(l)
-			isValueMatch := filter.valueFilter.filterLabelValue(l)
+			isKeyMatch := filter.keyPattern.MatchString(l.Key)
+			isValueMatch := filter.valuePattern.MatchString(l.Value)
 			if isKeyMatch && isValueMatch {
 				ret = append(ret, s)
 				break
@@ -163,48 +127,4 @@ func (filter *storesLabelFilter) filter(stores []*metapb.Store) []*metapb.Store 
 
 	}
 	return ret
-}
-
-type storeLabelFilter struct {
-	pattern   string
-	patternRe *regexp.Regexp
-	isRegexp  bool
-}
-
-func newStoreLabelFilter(pattern, patternReString string) (*storeLabelFilter, error) {
-	var (
-		isRegexp  bool
-		patternRe *regexp.Regexp
-		err       error
-	)
-
-	if pattern != "" && patternReString != "" {
-		return nil, errLabelConflictFilterRequst
-	}
-	if pattern == "" {
-		isRegexp = true
-		patternRe, err = regexp.Compile(patternReString)
-		if err != nil {
-			return nil, errLabelReex
-		}
-	}
-	return &storeLabelFilter{
-		pattern:   pattern,
-		isRegexp:  isRegexp,
-		patternRe: patternRe,
-	}, nil
-}
-
-func (filter *storeLabelFilter) filterLabelKey(l *metapb.StoreLabel) bool {
-	if filter.isRegexp {
-		return filter.patternRe.MatchString(l.Key)
-	}
-	return l.Key == filter.pattern
-}
-
-func (filter *storeLabelFilter) filterLabelValue(l *metapb.StoreLabel) bool {
-	if filter.isRegexp {
-		return filter.patternRe.MatchString(l.Value)
-	}
-	return l.Value == filter.pattern
 }

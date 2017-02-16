@@ -87,8 +87,8 @@ func (s *testLabelsStoreSuite) TestStroesLabelFilter(c *C) {
 	}
 
 	var table = []struct {
-		name, nameRe, value, valueRe string
-		want                         []*metapb.Store
+		name, value string
+		want        []*metapb.Store
 	}{
 		{
 			name: "zone",
@@ -104,14 +104,14 @@ func (s *testLabelsStoreSuite) TestStroesLabelFilter(c *C) {
 			want:  stores[:1],
 		},
 		{
-			name:    "zone",
-			valueRe: "west",
-			want:    stores[:2],
+			name:  "zone",
+			value: "west",
+			want:  stores[:2],
 		},
 		{
-			nameRe: "zo",
-			value:  "beijing",
-			want:   stores[2:3],
+			name:  "zo",
+			value: "beijing",
+			want:  stores[2:3],
 		},
 		{
 			name:  "zone",
@@ -120,10 +120,10 @@ func (s *testLabelsStoreSuite) TestStroesLabelFilter(c *C) {
 		},
 	}
 	for _, t := range table {
-		f, err := newStoresLabelFilter(t.name, t.nameRe, t.value, t.valueRe)
+		f, err := newStoresLabelFilter(t.name, t.value)
 		c.Assert(err, IsNil)
 		c.Assert(f.filter(stores), DeepEquals, t.want)
 	}
-	_, err := newStoresLabelFilter("test", "testre", "t", "")
+	_, err := newStoresLabelFilter("test", ".[test")
 	c.Assert(err, NotNil)
 }
