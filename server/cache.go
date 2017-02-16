@@ -362,7 +362,7 @@ func (c *clusterInfo) putStoreLocked(store *storeInfo) error {
 func (c *clusterInfo) blockStore(storeID uint64) error {
 	c.Lock()
 	defer c.Unlock()
-	return c.stores.blockStore(storeID)
+	return errors.Trace(c.stores.blockStore(storeID))
 }
 
 func (c *clusterInfo) unblockStore(storeID uint64) {

@@ -52,7 +52,7 @@ func (h *Handler) AddScheduler(s Scheduler) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	return c.addScheduler(s)
+	return errors.Trace(c.addScheduler(s))
 }
 
 // RemoveScheduler removes a scheduler by name.
@@ -61,7 +61,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	return c.removeScheduler(name)
+	return errors.Trace(c.removeScheduler(name))
 }
 
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
