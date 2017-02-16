@@ -260,6 +260,38 @@ func (s *testScheduleLimiterSuite) TestOperatorCount(c *C) {
 	c.Assert(l.operatorCount(regionKind), Equals, uint64(1))
 }
 
+var _ = Suite(&testScheduleControllerSuite{})
+
+type testScheduleControllerSuite struct{}
+
+func (s *testScheduleControllerSuite) TestController(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	cfg, opt := newTestScheduleConfig()
+	cfg.ScheduleInterval.Duration = time.Minute
+	co := newCoordinator(cluster, opt)
+	sc := newScheduleController(co, newBalanceLeaderScheduler(opt))
+
+	cfg.LeaderScheduleLimit = 0
+	c.Assert(sc.GetInterval(), Equals, time.Minute)
+
+	cfg.LeaderScheduleLimit = 2
+	c.Assert(sc.GetInterval(), Equals, time.Second*30)
+
+	// limit = 2
+	op := newTestOperator(1, leaderKind)
+	// count = 0
+	c.Assert(sc.AllowSchedule(), IsTrue)
+	sc.limiter.addOperator(op)
+	// count = 1
+	c.Assert(sc.AllowSchedule(), IsTrue)
+	sc.limiter.addOperator(op)
+	// count = 2
+	c.Assert(sc.AllowSchedule(), IsFalse)
+	sc.limiter.removeOperator(op)
+	// count = 1
+	c.Assert(sc.AllowSchedule(), IsTrue)
+}
+
 func checkAddPeerResp(c *C, resp *pdpb.RegionHeartbeatResponse, storeID uint64) {
 	changePeer := resp.GetChangePeer()
 	c.Assert(changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)

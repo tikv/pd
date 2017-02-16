@@ -279,8 +279,11 @@ func (s *scheduleController) Stop() {
 
 func (s *scheduleController) GetInterval() time.Duration {
 	limit := s.GetResourceLimit()
-	interval := s.opt.GetScheduleInterval().Nanoseconds()
-	return time.Duration(uint64(interval)/limit) * time.Nanosecond
+	interval := s.opt.GetScheduleInterval()
+	if limit == 0 {
+		return interval
+	}
+	return time.Duration(uint64(interval.Nanoseconds())/limit) * time.Nanosecond
 }
 
 func (s *scheduleController) AllowSchedule() bool {
