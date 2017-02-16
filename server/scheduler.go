@@ -16,6 +16,7 @@ package server
 import (
 	"fmt"
 
+	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
@@ -58,7 +59,7 @@ func (s *grantLeaderScheduler) GetResourceLimit() uint64 {
 }
 
 func (s *grantLeaderScheduler) Prepare(cluster *clusterInfo) error {
-	return cluster.blockStore(s.storeID)
+	return errors.Trace(cluster.blockStore(s.storeID))
 }
 
 func (s *grantLeaderScheduler) Cleanup(cluster *clusterInfo) {
@@ -106,7 +107,7 @@ func (s *evictLeaderScheduler) GetResourceLimit() uint64 {
 }
 
 func (s *evictLeaderScheduler) Prepare(cluster *clusterInfo) error {
-	return cluster.blockStore(s.storeID)
+	return errors.Trace(cluster.blockStore(s.storeID))
 }
 
 func (s *evictLeaderScheduler) Cleanup(cluster *clusterInfo) {
@@ -132,9 +133,13 @@ type shuffleLeaderScheduler struct {
 }
 
 func newShuffleLeaderScheduler(opt *scheduleOption) *shuffleLeaderScheduler {
+	var filters []Filter
+	filters = append(filters, newStateFilter(opt))
+	filters = append(filters, newHealthFilter(opt))
+
 	return &shuffleLeaderScheduler{
 		opt:      opt,
-		selector: newRandomSelector(nil),
+		selector: newRandomSelector(filters),
 	}
 }
 
