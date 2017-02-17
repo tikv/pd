@@ -16,6 +16,7 @@ package command
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -97,7 +98,9 @@ func validPDAddr(pd string) error {
 	if err != nil {
 		return err
 	}
+	defer reps.Body.Close()
 	if reps.StatusCode != http.StatusOK {
+		ioutil.ReadAll(reps.Body)
 		return errInvalidAddr
 	}
 	return nil
