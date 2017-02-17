@@ -15,9 +15,6 @@ package command
 
 import (
 	"fmt"
-	"io"
-	"net/http"
-	"os"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -59,19 +56,12 @@ func showStoreCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		prefix = fmt.Sprintf(storePrefix, args[0])
 	}
-	url := getAddressFromCmd(cmd, prefix)
-	r, err := http.Get(url)
+	r, err := doRequest(cmd, prefix, "GET")
 	if err != nil {
-		fmt.Printf("Failed to get store:[%s]\n", err)
+		fmt.Printf("Failed to get store: %s", err)
 		return
 	}
-	defer r.Body.Close()
-	if r.StatusCode != http.StatusOK {
-		printResponseError(r)
-		return
-	}
-
-	io.Copy(os.Stdout, r.Body)
+	fmt.Println(r)
 }
 
 func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
@@ -79,28 +69,15 @@ func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println("Usage: store delete <store_id>")
 		return
 	}
-	cli := &http.Client{}
 	if _, err := strconv.Atoi(args[0]); err != nil {
 		fmt.Println("store_id should be a number")
 		return
 	}
 	prefix := fmt.Sprintf(storePrefix, args[0])
-	url := getAddressFromCmd(cmd, prefix)
-	r, err := http.NewRequest("DELETE", url, nil)
+	_, err := doRequest(cmd, prefix, "DELETE")
 	if err != nil {
-		fmt.Printf("Failed to delete store %s: [%s]\n", args[0], err)
+		fmt.Printf("Failed to delete store %s: %s", args[0], err)
 		return
 	}
-	reps, err := cli.Do(r)
-	if err != nil {
-		fmt.Printf("Failed to delete store %s: [%s]\n", args[0], err)
-		return
-	}
-
-	defer reps.Body.Close()
-	if reps.StatusCode == http.StatusOK {
-		fmt.Println("Success!")
-	} else {
-		printResponseError(reps)
-	}
+	fmt.Println("Success!")
 }

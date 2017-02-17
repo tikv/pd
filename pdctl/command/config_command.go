@@ -17,9 +17,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -62,19 +60,12 @@ func NewSetConfigCommand() *cobra.Command {
 }
 
 func showConfigCommandFunc(cmd *cobra.Command, args []string) {
-	url := getAddressFromCmd(cmd, schedulePrefix)
-	r, err := http.Get(url)
+	r, err := doRequest(cmd, schedulePrefix, "GET")
 	if err != nil {
-		fmt.Printf("Failed to get config:[%s]\n", err)
+		fmt.Printf("Failed to get config: %s", err)
 		return
 	}
-	defer r.Body.Close()
-	if r.StatusCode != http.StatusOK {
-		printResponseError(r)
-		return
-	}
-
-	io.Copy(os.Stdout, r.Body)
+	fmt.Println(r)
 }
 
 func setConfigCommandFunc(cmd *cobra.Command, args []string) {
