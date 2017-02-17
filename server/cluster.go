@@ -465,7 +465,7 @@ func (c *RaftCluster) collectMetrics() {
 			minRegionScore = s.regionScore()
 		}
 		if maxRegionScore < s.regionScore() {
-			minRegionScore = s.regionScore()
+			maxRegionScore = s.regionScore()
 		}
 	}
 

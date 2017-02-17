@@ -122,7 +122,7 @@ func (c *testClusterInfo) updateStorageRatio(storeID uint64, storageRatio float6
 func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption) {
 	cfg := NewConfig()
 	cfg.adjust()
-	cfg.Schedule.ScheduleInterval.Duration = time.Nanosecond
+	cfg.Schedule.MaxScheduleInterval.Duration = time.Nanosecond
 	opt := newScheduleOption(cfg)
 	return &cfg.Schedule, opt
 }
@@ -140,27 +140,26 @@ type testBalanceSpeedCase struct {
 
 func (s *testBalanceSpeedSuite) TestBalanceSpeed(c *C) {
 	testCases := []testBalanceSpeedCase{
-		// diff > 1
+		// diff >= 2
 		{1, 0, 0, false},
 		{2, 0, 0, true},
-		{4, 0, 1, true},
-		// diff > 2
+		{2, 1, 0, false},
+		{9, 0, 2, true},
+		{9, 6, 0, true},
+		{9, 8, 0, false},
+		// diff >= sqrt(10) = 3.16
 		{10, 0, 2, true},
 		{10, 6, 1, true},
-		{10, 7, 0, true},
-		{10, 9, 0, false},
-		// diff > 4
-		{100, 0, 25, true},
-		{100, 95, 1, true},
-		{100, 97, 0, false},
-		// diff > 8
-		{1000, 0, 250, true},
-		{1000, 991, 2, true},
-		{1000, 993, 1, false},
-		// diff > 16
-		{10000, 0, 2500, true},
-		{10000, 9983, 4, true},
-		{10000, 9985, 3, false},
+		{10, 7, 0, false},
+		// diff >= sqrt(100) = 10
+		{100, 89, 2, true},
+		{100, 91, 2, false},
+		// diff >= sqrt(1000) = 31.6
+		{1000, 968, 8, true},
+		{1000, 969, 7, false},
+		// diff >= sqrt(10000) = 100
+		{10000, 9899, 25, true},
+		{10000, 9901, 24, false},
 	}
 
 	s.testBalanceSpeed(c, testCases, 1)
@@ -172,9 +171,9 @@ func (s *testBalanceSpeedSuite) TestBalanceSpeed(c *C) {
 func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedCase, capaGB uint64) {
 	for _, t := range tests {
 		sourceCount := t.sourceCount
-		sourceRatio := float64(t.sourceCount) / float64(capaGB)
-		targetRatio := float64(t.targetCount) / float64(capaGB)
-		limit, ok := adjustBalanceSpeed(sourceCount, sourceRatio, targetRatio)
+		sourceScore := float64(t.sourceCount) / float64(capaGB)
+		targetScore := float64(t.targetCount) / float64(capaGB)
+		limit, ok := adjustBalanceSpeed(sourceCount, sourceScore, targetScore)
 		c.Assert(limit, Equals, t.balanceLimit)
 		c.Assert(ok, Equals, t.expectedResult)
 	}
@@ -199,24 +198,24 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalance(c *C) {
 	// Add region 1 with leader in store 1 and followers in stores 2,3,4.
 	tc.addLeaderRegion(1, 1, 2, 3, 4)
 
-	// Test min balance diff (>1).
+	// Test min balance diff (>=2).
 	c.Check(lb.Schedule(cluster), IsNil)
-	// 2 - 0 > 1
+	// 2 - 0 >= 2
 	tc.updateLeaderCount(1, 2)
 	c.Check(lb.Schedule(cluster), NotNil)
 
 	// Add stores 1,2,3,4
-	tc.addLeaderStore(1, 8)
-	tc.addLeaderStore(2, 9)
-	tc.addLeaderStore(3, 10)
+	tc.addLeaderStore(1, 7)
+	tc.addLeaderStore(2, 8)
+	tc.addLeaderStore(3, 9)
 	tc.addLeaderStore(4, 10)
 	// Add region 1 with leader in store 4 and followers in stores 1,2,3.
 	tc.addLeaderRegion(1, 4, 1, 2, 3)
 
-	// Test min balance diff (>2).
+	// Test min balance diff (>=4).
 	c.Check(lb.Schedule(cluster), IsNil)
-	// 13 - 8 > 2
-	tc.addLeaderStore(4, 13)
+	// 16 - 7 >= 4
+	tc.addLeaderStore(4, 16)
 	checkTransferLeader(c, lb.Schedule(cluster), 4, 1)
 
 	// Test stateFilter.
@@ -246,20 +245,20 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	opt.SetMaxReplicas(1)
 
 	// Add stores 1,2,3,4.
-	tc.addRegionStore(1, 8)
-	tc.addRegionStore(2, 9)
-	tc.addRegionStore(3, 10)
-	tc.addRegionStore(4, 11)
+	tc.addRegionStore(1, 6)
+	tc.addRegionStore(2, 8)
+	tc.addRegionStore(3, 8)
+	tc.addRegionStore(4, 9)
 	// Add region 1 with leader in store 4.
 	tc.addLeaderRegion(1, 4)
 	checkTransferPeer(c, sb.Schedule(cluster), 4, 1)
 
 	// Test stateFilter.
 	tc.setStoreOffline(1)
-	// Test min balance diff (>2).
+	// Test min balance diff (>=2).
 	c.Assert(sb.Schedule(cluster), IsNil)
-	// 12 - 9 > 2
-	tc.updateRegionCount(4, 12)
+	// 9 - 6 >= 2
+	tc.updateRegionCount(2, 6)
 	sb.cache.delete(4)
 	// When store 1 is offline, it will be filtered,
 	// store 2 becomes the store with least regions.

@@ -75,7 +75,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 		err = json.Unmarshal(buf, sc)
 		c.Assert(err, IsNil)
 
-		sc.ScheduleInterval.Duration = time.Second
+		sc.MaxScheduleInterval.Duration = time.Second
 		postData, err := json.Marshal(sc)
 		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config"}
 		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))

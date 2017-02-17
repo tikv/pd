@@ -26,7 +26,10 @@ var storeCacheInterval = 30 * time.Second
 // minBalanceDiff returns the minimal diff to do balance. The formula is based
 // on experience to let the diff increase alone with the count slowly.
 func minBalanceDiff(count uint64) float64 {
-	return math.Pow(2, math.Log10(float64(count)))
+	if count < 10 {
+		return float64(2)
+	}
+	return math.Sqrt(float64(count))
 }
 
 // adjustBalanceSpeed returns a schedule limit and whether we should balance.
@@ -41,7 +44,7 @@ func adjustBalanceSpeed(sourceCount uint64, sourceScore, targetScore float64) (u
 	}
 	diffRatio := 1 - targetScore/sourceScore
 	diffCount := diffRatio * float64(sourceCount)
-	return uint64(diffCount) / 4, diffCount > minBalanceDiff(sourceCount)
+	return uint64(diffCount) / 4, diffCount >= minBalanceDiff(sourceCount)
 }
 
 type balanceLeaderScheduler struct {
