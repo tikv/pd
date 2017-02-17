@@ -26,7 +26,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var pdClient pd.Client
+var (
+	pdClient pd.Client
+
+	pingPrifix     = "pd/ping"
+	errInvalidAddr = errors.New("Invalid pd address, Cannot get connect to it")
+)
 
 // InitPDClient initialize pd client from cmd
 func InitPDClient(cmd *cobra.Command) error {
@@ -37,6 +42,10 @@ func InitPDClient(cmd *cobra.Command) error {
 	log.SetLevel(log.LOG_LEVEL_NONE)
 	if pdClient != nil {
 		return nil
+	}
+	err = validPDAddr(addr)
+	if err != nil {
+		return err
 	}
 	pdClient, err = pd.NewClient([]string{addr})
 	if err != nil {
@@ -73,6 +82,25 @@ func getAddressFromCmd(cmd *cobra.Command, prefix string) string {
 func printResponseError(r *http.Response) {
 	fmt.Printf("[%d]:", r.StatusCode)
 	io.Copy(os.Stdout, r.Body)
+}
+
+func validPDAddr(pd string) error {
+	u, err := url.Parse(pd)
+	if err != nil {
+		return err
+	}
+	if u.Scheme == "" {
+		u.Scheme = "http"
+	}
+	addr := u.String()
+	reps, err := http.Get(fmt.Sprintf("%s/%s", addr, pingPrifix))
+	if err != nil {
+		return err
+	}
+	if reps.StatusCode != http.StatusOK {
+		return errInvalidAddr
+	}
+	return nil
 }
 
 // UsageTemplate will used to generate a help information
