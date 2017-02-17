@@ -64,7 +64,11 @@ func main() {
 	stat, _ := os.Stdin.Stat()
 	if (stat.Mode() & os.ModeCharDevice) == 0 {
 		detach = true
-		b, _ := ioutil.ReadAll(os.Stdin)
+		b, err := ioutil.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
 		input = strings.Split(strings.TrimSpace(string(b[:])), " ")
 	}
 	if detach {
