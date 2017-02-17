@@ -16,6 +16,7 @@ package command
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,7 +27,59 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var pdClient pd.Client
+var (
+	pdClient       pd.Client
+	dailClient     = &http.Client{}
+	errInvalidAddr = errors.New("Invalid pd address, Cannot get connect to it")
+)
+
+func doRequest(cmd *cobra.Command, prefix string, method string) (string, error) {
+	var res string
+	if method == "" {
+		method = "GET"
+	}
+	url := getAddressFromCmd(cmd, prefix)
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		return res, err
+	}
+	reps, err := dailClient.Do(req)
+	if err != nil {
+		return res, err
+	}
+	defer reps.Body.Close()
+	if reps.StatusCode != http.StatusOK {
+		return res, genResponseError(reps)
+	}
+
+	r, err := ioutil.ReadAll(reps.Body)
+	if err != nil {
+		return res, err
+	}
+	res = string(r)
+	return res, nil
+}
+
+func genResponseError(r *http.Response) error {
+	res, _ := ioutil.ReadAll(r.Body)
+	return errors.Errorf("[%d] %s", r.StatusCode, res)
+}
+
+func validPDAddr(pd string) error {
+	u, err := url.Parse(pd)
+	if err != nil {
+		return err
+	}
+	if u.Scheme == "" {
+		u.Scheme = "http"
+	}
+	addr := u.String()
+	reps, err := http.Get(fmt.Sprintf("%s/pd/ping", addr))
+	if err != nil || reps.StatusCode != http.StatusOK {
+		return errInvalidAddr
+	}
+	return nil
+}
 
 // InitPDClient initialize pd client from cmd
 func InitPDClient(cmd *cobra.Command) error {
@@ -37,6 +90,10 @@ func InitPDClient(cmd *cobra.Command) error {
 	log.SetLevel(log.LOG_LEVEL_NONE)
 	if pdClient != nil {
 		return nil
+	}
+	err = validPDAddr(addr)
+	if err != nil {
+		return err
 	}
 	pdClient, err = pd.NewClient([]string{addr})
 	if err != nil {
