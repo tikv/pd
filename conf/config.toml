@@ -25,11 +25,9 @@ interval = "15s"
 address = ""
 
 [schedule]
-# Control the schedule behavior.
 max-snapshot-count = 3
 max-store-down-time = "1h"
-# Control the schedule speed.
-schedule-interval = "1m"
+max-schedule-interval = "1m"
 leader-schedule-limit = 1024
 region-schedule-limit = 16
 replica-schedule-limit = 24
