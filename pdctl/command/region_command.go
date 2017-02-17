@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -55,7 +56,7 @@ func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		prefix = fmt.Sprintf(regionPrefix, args[0])
 	}
-	r, err := doRequest(cmd, prefix, "GET")
+	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get region: %s", err)
 		return

@@ -15,6 +15,7 @@ package command
 
 import (
 	"fmt"
+	"net/http"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -56,7 +57,7 @@ func showStoreCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		prefix = fmt.Sprintf(storePrefix, args[0])
 	}
-	r, err := doRequest(cmd, prefix, "GET")
+	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get store: %s", err)
 		return
@@ -74,7 +75,7 @@ func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	prefix := fmt.Sprintf(storePrefix, args[0])
-	_, err := doRequest(cmd, prefix, "DELETE")
+	_, err := doRequest(cmd, prefix, http.MethodDelete)
 	if err != nil {
 		fmt.Printf("Failed to delete store %s: %s", args[0], err)
 		return

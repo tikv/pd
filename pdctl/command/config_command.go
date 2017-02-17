@@ -60,7 +60,7 @@ func NewSetConfigCommand() *cobra.Command {
 }
 
 func showConfigCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, schedulePrefix, "GET")
+	r, err := doRequest(cmd, schedulePrefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get config: %s", err)
 		return

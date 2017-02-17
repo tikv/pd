@@ -15,6 +15,7 @@ package command
 
 import (
 	"fmt"
+	"net/http"
 
 	"github.com/spf13/cobra"
 )
@@ -58,7 +59,7 @@ func NewLeaderMemberCommand() *cobra.Command {
 }
 
 func showMemberCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, membersPrefix, "GET")
+	r, err := doRequest(cmd, membersPrefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get pd members: %s", err)
 		return
@@ -72,7 +73,7 @@ func deleteMemberCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	prefix := fmt.Sprintf(memberPrefix, args[0])
-	_, err := doRequest(cmd, prefix, "DELETE")
+	_, err := doRequest(cmd, prefix, http.MethodDelete)
 	if err != nil {
 		fmt.Printf("Failed to delete member %s: %s", args[0], err)
 		return
@@ -81,7 +82,7 @@ func deleteMemberCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func getLeaderMemberCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, leaderMemberPrefix, "GET")
+	r, err := doRequest(cmd, leaderMemberPrefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get the leader of pd members: %s", err)
 		return

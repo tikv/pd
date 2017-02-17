@@ -35,7 +35,7 @@ var (
 func doRequest(cmd *cobra.Command, prefix string, method string) (string, error) {
 	var res string
 	if method == "" {
-		method = "GET"
+		method = http.MethodGet
 	}
 	url := getAddressFromCmd(cmd, prefix)
 	req, err := http.NewRequest(method, url, nil)
