@@ -63,10 +63,12 @@ func (s *balanceSelector) SelectTarget(stores []*storeInfo, filters ...Filter) *
 	return result
 }
 
-type randomSelector struct{}
+type randomSelector struct {
+	filters []Filter
+}
 
-func newRandomSelector() *randomSelector {
-	return &randomSelector{}
+func newRandomSelector(filters []Filter) *randomSelector {
+	return &randomSelector{filters: filters}
 }
 
 func (s *randomSelector) Select(stores []*storeInfo) *storeInfo {
@@ -77,6 +79,8 @@ func (s *randomSelector) Select(stores []*storeInfo) *storeInfo {
 }
 
 func (s *randomSelector) SelectSource(stores []*storeInfo, filters ...Filter) *storeInfo {
+	filters = append(filters, s.filters...)
+
 	var candidates []*storeInfo
 	for _, store := range stores {
 		if filterSource(store, filters) {
@@ -88,6 +92,8 @@ func (s *randomSelector) SelectSource(stores []*storeInfo, filters ...Filter) *s
 }
 
 func (s *randomSelector) SelectTarget(stores []*storeInfo, filters ...Filter) *storeInfo {
+	filters = append(filters, s.filters...)
+
 	var candidates []*storeInfo
 	for _, store := range stores {
 		if filterTarget(store, filters) {

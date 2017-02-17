@@ -28,6 +28,9 @@ var (
 	errStoreNotFound = func(storeID uint64) error {
 		return errors.Errorf("store %v not found", storeID)
 	}
+	errStoreIsBlocked = func(storeID uint64) error {
+		return errors.Errorf("store %v is blocked", storeID)
+	}
 	errRegionNotFound = func(regionID uint64) error {
 		return errors.Errorf("region %v not found", regionID)
 	}
@@ -67,6 +70,26 @@ func (s *storesInfo) getStore(storeID uint64) *storeInfo {
 
 func (s *storesInfo) setStore(store *storeInfo) {
 	s.stores[store.GetId()] = store
+}
+
+func (s *storesInfo) blockStore(storeID uint64) error {
+	store, ok := s.stores[storeID]
+	if !ok {
+		return errStoreNotFound(storeID)
+	}
+	if store.isBlocked() {
+		return errStoreIsBlocked(storeID)
+	}
+	store.block()
+	return nil
+}
+
+func (s *storesInfo) unblockStore(storeID uint64) {
+	store, ok := s.stores[storeID]
+	if !ok {
+		log.Fatalf("store %d is unblocked, but it is not found", storeID)
+	}
+	store.unblock()
 }
 
 func (s *storesInfo) getStores() []*storeInfo {
@@ -334,6 +357,18 @@ func (c *clusterInfo) putStoreLocked(store *storeInfo) error {
 	}
 	c.stores.setStore(store)
 	return nil
+}
+
+func (c *clusterInfo) blockStore(storeID uint64) error {
+	c.Lock()
+	defer c.Unlock()
+	return errors.Trace(c.stores.blockStore(storeID))
+}
+
+func (c *clusterInfo) unblockStore(storeID uint64) {
+	c.Lock()
+	defer c.Unlock()
+	c.stores.unblockStore(storeID)
 }
 
 func (c *clusterInfo) getStores() []*storeInfo {

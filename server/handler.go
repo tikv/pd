@@ -52,10 +52,7 @@ func (h *Handler) AddScheduler(s Scheduler) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if !c.addScheduler(s) {
-		return errors.Errorf("scheduler %q exists", s.GetName())
-	}
-	return nil
+	return errors.Trace(c.addScheduler(s))
 }
 
 // RemoveScheduler removes a scheduler by name.
@@ -64,10 +61,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if !c.removeScheduler(name) {
-		return errors.Errorf("scheduler %q not found", name)
-	}
-	return nil
+	return errors.Trace(c.removeScheduler(name))
 }
 
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
@@ -78,6 +72,11 @@ func (h *Handler) AddBalanceLeaderScheduler() error {
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
 	return h.AddScheduler(newGrantLeaderScheduler(h.opt, storeID))
+}
+
+// AddEvictLeaderScheduler adds an evict-leader-scheduler.
+func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
+	return h.AddScheduler(newEvictLeaderScheduler(h.opt, storeID))
 }
 
 // AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.

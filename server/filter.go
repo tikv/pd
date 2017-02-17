@@ -61,6 +61,20 @@ func (f *excludedFilter) FilterTarget(store *storeInfo) bool {
 	return ok
 }
 
+type blockFilter struct{}
+
+func newBlockFilter() *blockFilter {
+	return &blockFilter{}
+}
+
+func (f *blockFilter) FilterSource(store *storeInfo) bool {
+	return store.isBlocked()
+}
+
+func (f *blockFilter) FilterTarget(store *storeInfo) bool {
+	return store.isBlocked()
+}
+
 type cacheFilter struct {
 	cache *idCache
 }

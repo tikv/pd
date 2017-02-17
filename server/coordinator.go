@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"golang.org/x/net/context"
@@ -26,6 +27,11 @@ const (
 	historiesCacheSize = 1000
 	eventsCacheSize    = 1000
 	maxScheduleRetries = 10
+)
+
+var (
+	errSchedulerExisted  = errors.New("scheduler is existed")
+	errSchedulerNotFound = errors.New("scheduler is not found")
 )
 
 type coordinator struct {
@@ -107,37 +113,42 @@ func (c *coordinator) getSchedulers() []string {
 	return names
 }
 
-func (c *coordinator) addScheduler(scheduler Scheduler) bool {
+func (c *coordinator) addScheduler(scheduler Scheduler) error {
 	c.Lock()
 	defer c.Unlock()
 
+	if _, ok := c.schedulers[scheduler.GetName()]; ok {
+		return errSchedulerExisted
+	}
+
 	s := newScheduleController(c, scheduler)
-	if _, ok := c.schedulers[s.GetName()]; ok {
-		return false
+	if err := s.Prepare(c.cluster); err != nil {
+		return errors.Trace(err)
 	}
 
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.GetName()] = s
-	return true
+	return nil
 }
 
-func (c *coordinator) removeScheduler(name string) bool {
+func (c *coordinator) removeScheduler(name string) error {
 	c.Lock()
 	defer c.Unlock()
 
 	s, ok := c.schedulers[name]
 	if !ok {
-		return false
+		return errSchedulerNotFound
 	}
 
 	s.Stop()
 	delete(c.schedulers, name)
-	return true
+	return nil
 }
 
 func (c *coordinator) runScheduler(s *scheduleController) {
 	defer c.wg.Done()
+	defer s.Cleanup(c.cluster)
 
 	timer := time.NewTimer(s.GetInterval())
 	defer timer.Stop()
@@ -279,8 +290,11 @@ func (s *scheduleController) Stop() {
 
 func (s *scheduleController) GetInterval() time.Duration {
 	limit := s.GetResourceLimit()
-	interval := s.opt.GetScheduleInterval().Nanoseconds()
-	return time.Duration(uint64(interval)/limit) * time.Nanosecond
+	interval := s.opt.GetScheduleInterval()
+	if limit == 0 {
+		return interval
+	}
+	return time.Duration(uint64(interval.Nanoseconds())/limit) * time.Nanosecond
 }
 
 func (s *scheduleController) AllowSchedule() bool {

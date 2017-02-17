@@ -50,6 +50,18 @@ func (s *storeInfo) clone() *storeInfo {
 	}
 }
 
+func (s *storeInfo) block() {
+	s.stats.blocked = true
+}
+
+func (s *storeInfo) unblock() {
+	s.stats.blocked = false
+}
+
+func (s *storeInfo) isBlocked() bool {
+	return s.stats.blocked
+}
+
 func (s *storeInfo) isUp() bool {
 	return s.GetState() == metapb.StoreState_Up
 }
@@ -123,6 +135,8 @@ func (s *storeInfo) getLocationID(keys []string) string {
 type StoreStatus struct {
 	*pdpb.StoreStats
 
+	// Blocked means that the store is blocked from balance.
+	blocked           bool
 	StartTS           time.Time `json:"start_ts"`
 	LastHeartbeatTS   time.Time `json:"last_heartbeat_ts"`
 	TotalRegionCount  int       `json:"total_region_count"`
@@ -139,6 +153,7 @@ func newStoreStatus() *StoreStatus {
 func (s *StoreStatus) clone() *StoreStatus {
 	return &StoreStatus{
 		StoreStats:        proto.Clone(s.StoreStats).(*pdpb.StoreStats),
+		blocked:           s.blocked,
 		StartTS:           s.StartTS,
 		LastHeartbeatTS:   s.LastHeartbeatTS,
 		TotalRegionCount:  s.TotalRegionCount,

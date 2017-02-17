@@ -29,6 +29,7 @@ type balanceLeaderScheduler struct {
 
 func newBalanceLeaderScheduler(opt *scheduleOption) *balanceLeaderScheduler {
 	var filters []Filter
+	filters = append(filters, newBlockFilter())
 	filters = append(filters, newStateFilter(opt))
 	filters = append(filters, newHealthFilter(opt))
 	filters = append(filters, newLeaderCountFilter(opt))
@@ -50,6 +51,10 @@ func (l *balanceLeaderScheduler) GetResourceKind() ResourceKind {
 func (l *balanceLeaderScheduler) GetResourceLimit() uint64 {
 	return l.opt.GetLeaderScheduleLimit()
 }
+
+func (l *balanceLeaderScheduler) Prepare(cluster *clusterInfo) error { return nil }
+
+func (l *balanceLeaderScheduler) Cleanup(cluster *clusterInfo) {}
 
 func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 	region, newLeader := scheduleTransferLeader(cluster, l.selector)
@@ -102,6 +107,10 @@ func (s *balanceStorageScheduler) GetResourceKind() ResourceKind {
 func (s *balanceStorageScheduler) GetResourceLimit() uint64 {
 	return s.opt.GetRegionScheduleLimit()
 }
+
+func (s *balanceStorageScheduler) Prepare(cluster *clusterInfo) error { return nil }
+
+func (s *balanceStorageScheduler) Cleanup(cluster *clusterInfo) {}
 
 func (s *balanceStorageScheduler) Schedule(cluster *clusterInfo) Operator {
 	// Select a peer from the store with largest storage ratio.
