@@ -55,13 +55,25 @@ func convertCmdLabels() map[string]string {
 	return labels
 }
 
+func runesHasLowerNeighborAt(runes []rune, idx int) bool {
+	length := len(runes)
+
+	if idx+1 < length && unicode.IsLower(runes[idx+1]) {
+		return true
+	}
+	if idx > 1 && unicode.IsLower(runes[idx-1]) {
+		return true
+	}
+	return false
+}
+
 func camelCaseToSnakeCase(str string) string {
 	runes := []rune(str)
 	length := len(runes)
 
 	var ret []rune
 	for i := 0; i < length; i++ {
-		if i > 0 && unicode.IsUpper(runes[i]) && ((i+1 < length && unicode.IsLower(runes[i+1])) || unicode.IsLower(runes[i-1])) {
+		if i > 0 && unicode.IsUpper(runes[i]) && runesHasLowerNeighborAt(runes, i) {
 			ret = append(ret, '_')
 		}
 		ret = append(ret, unicode.ToLower(runes[i]))
