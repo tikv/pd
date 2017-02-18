@@ -14,6 +14,8 @@
 package pdctl
 
 import (
+	"fmt"
+
 	"github.com/pingcap/pd/pdctl/command"
 	"github.com/spf13/cobra"
 )
@@ -44,17 +46,17 @@ func init() {
 }
 
 // Start run Command
-func Start(args []string) (string, error) {
+func Start(args []string) {
 	rootCmd.SetArgs(args)
 	rootCmd.SilenceErrors = true
 	rootCmd.ParseFlags(args)
 	err := command.InitPDClient(rootCmd)
 	if err != nil {
-		return err.Error(), err
+		fmt.Println(err)
+		return
 	}
 	rootCmd.SetUsageTemplate(command.UsageTemplate)
 	if err := rootCmd.Execute(); err != nil {
-		return rootCmd.UsageString(), err
+		fmt.Println(rootCmd.UsageString())
 	}
-	return "", nil
 }
