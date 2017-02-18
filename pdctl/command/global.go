@@ -28,11 +28,44 @@ import (
 )
 
 var (
-	pdClient pd.Client
+	pdClient   pd.Client
+	dailClient = &http.Client{}
 
 	pingPrifix     = "pd/ping"
 	errInvalidAddr = errors.New("Invalid pd address, Cannot get connect to it")
 )
+
+func doRequest(cmd *cobra.Command, prefix string, method string) (string, error) {
+	var res string
+	if method == "" {
+		method = http.MethodGet
+	}
+	url := getAddressFromCmd(cmd, prefix)
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		return res, err
+	}
+	reps, err := dailClient.Do(req)
+	if err != nil {
+		return res, err
+	}
+	defer reps.Body.Close()
+	if reps.StatusCode != http.StatusOK {
+		return res, genResponseError(reps)
+	}
+
+	r, err := ioutil.ReadAll(reps.Body)
+	if err != nil {
+		return res, err
+	}
+	res = string(r)
+	return res, nil
+}
+
+func genResponseError(r *http.Response) error {
+	res, _ := ioutil.ReadAll(r.Body)
+	return errors.Errorf("[%d] %s", r.StatusCode, res)
+}
 
 // InitPDClient initialize pd client from cmd
 func InitPDClient(cmd *cobra.Command) error {
