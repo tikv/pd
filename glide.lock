@@ -1,5 +1,5 @@
-hash: b8d4d9171d25e87e4f0b1beb81e4f25788898ee806fec4e5ac73b014a6e53d6b
-updated: 2017-02-06T16:31:59.02253707+08:00
+hash: cea0c01153e8d5c5c5f3ade838bb1a0b08560ca93780784be4a967f5dbdb6791
+updated: 2017-02-20T18:48:33.156317518+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -131,7 +131,7 @@ imports:
 - name: github.com/pingcap/check
   version: ce8a2f822ab1e245a4eefcef2996531c79c943f1
 - name: github.com/pingcap/kvproto
-  version: a6751b0d0db0dfed4d83350ce87c44cd9ff1f546
+  version: 54a87dc462982948c53e07be51e30a93a913b7e1
   subpackages:
   - pkg/coprocessor
   - pkg/eraftpb
@@ -166,7 +166,7 @@ imports:
   repo: https://github.com/spf13/cobra.git
   vcs: git
 - name: github.com/spf13/pflag
-  version: a232f6d9f87afaaa08bafaff5da685f974b83313
+  version: 9ff6c6923cfffbcd502984b8e0c80539a94968b7
 - name: github.com/twinj/uuid
   version: 70cac2bcd273ef6a371bb96cde363d28b68734c3
 - name: github.com/ugorji/go
