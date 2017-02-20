@@ -40,7 +40,7 @@ func minBalanceDiff(count uint64) float64 {
 // very frequently.
 func adjustBalanceSpeed(sourceCount uint64, sourceScore, targetScore float64) (uint64, bool) {
 	if targetScore >= sourceScore {
-		return 0, false
+		return 1, false
 	}
 	diffRatio := 1 - targetScore/sourceScore
 	diffCount := diffRatio * float64(sourceCount)
