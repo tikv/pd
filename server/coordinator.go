@@ -27,6 +27,7 @@ const (
 	historiesCacheSize  = 1000
 	eventsCacheSize     = 1000
 	maxScheduleRetries  = 10
+	maxScheduleInterval = time.Minute
 	minScheduleInterval = time.Millisecond * 10
 )
 
@@ -306,10 +307,7 @@ func (s *scheduleController) Schedule(cluster *clusterInfo) Operator {
 	}
 
 	// If we have no schedule, increase the interval exponentially.
-	s.interval *= 2
-	if s.interval > s.opt.GetMaxScheduleInterval() {
-		s.interval = s.opt.GetMaxScheduleInterval()
-	}
+	s.interval = minDuration(s.interval*2, maxScheduleInterval)
 	return nil
 }
 

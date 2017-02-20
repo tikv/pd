@@ -272,8 +272,6 @@ type ScheduleConfig struct {
 	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time" json:"max-store-down-time"`
-	// MaxScheduleInterval is the max interval to schedule.
-	MaxScheduleInterval typeutil.Duration `toml:"max-schedule-interval" json:"max-schedule-interval"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
 	// RegionScheduleLimit is the max coexist region schedules.
@@ -286,7 +284,6 @@ const (
 	defaultMaxReplicas          = 3
 	defaultMaxSnapshotCount     = 3
 	defaultMaxStoreDownTime     = time.Hour
-	defaultMaxScheduleInterval  = time.Minute
 	defaultLeaderScheduleLimit  = 16
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 16
@@ -295,7 +292,6 @@ const (
 func (c *ScheduleConfig) adjust() {
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
-	adjustDuration(&c.MaxScheduleInterval, defaultMaxScheduleInterval)
 	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
 	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
@@ -356,10 +352,6 @@ func (o *scheduleOption) GetMaxSnapshotCount() uint64 {
 
 func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
 	return o.load().MaxStoreDownTime.Duration
-}
-
-func (o *scheduleOption) GetMaxScheduleInterval() time.Duration {
-	return o.load().MaxScheduleInterval.Duration
 }
 
 func (o *scheduleOption) GetLeaderScheduleLimit() uint64 {

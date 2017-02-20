@@ -14,29 +14,29 @@
 package server
 
 import (
+	"time"
+
 	. "github.com/pingcap/check"
 )
 
-var _ = Suite(&testEnsureRangeSuite{})
+var _ = Suite(&testMinMaxSuite{})
 
-type testEnsureRangeSuite struct{}
+type testMinMaxSuite struct{}
 
-type testEnsureRangeCase struct {
-	v        uint64
-	min      uint64
-	max      uint64
-	expected uint64
+func (s *testMinMaxSuite) TestMinUint64(c *C) {
+	c.Assert(minUint64(1, 2), Equals, uint64(1))
+	c.Assert(minUint64(2, 1), Equals, uint64(1))
+	c.Assert(minUint64(1, 1), Equals, uint64(1))
 }
 
-func (s *testEnsureRangeSuite) TestUint64(c *C) {
-	tests := []*testEnsureRangeCase{
-		{0, 1, 3, 1},
-		{1, 1, 3, 1},
-		{2, 1, 3, 2},
-		{3, 1, 3, 3},
-		{4, 1, 3, 3},
-	}
-	for _, t := range tests {
-		c.Assert(ensureRangeUint64(t.v, t.min, t.max), Equals, t.expected)
-	}
+func (s *testMinMaxSuite) TestMaxUint64(c *C) {
+	c.Assert(maxUint64(1, 2), Equals, uint64(2))
+	c.Assert(maxUint64(2, 1), Equals, uint64(2))
+	c.Assert(maxUint64(1, 1), Equals, uint64(1))
+}
+
+func (s *testMinMaxSuite) TestMinDuration(c *C) {
+	c.Assert(minDuration(time.Minute, time.Second), Equals, time.Second)
+	c.Assert(minDuration(time.Second, time.Minute), Equals, time.Second)
+	c.Assert(minDuration(time.Second, time.Second), Equals, time.Second)
 }

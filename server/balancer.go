@@ -34,7 +34,7 @@ func minBalanceDiff(count uint64) float64 {
 
 // adjustBalanceSpeed returns a schedule limit and whether we should balance.
 // First, we calculate the diffCount (the number of schedules to balance the
-// source and the target). Then, we adjust the schedule limit to less than the
+// source and the target). Then, we adjust the balanceLimit to less than the
 // diffCount, so we will not over-scheduled. Finally, the min balance diff
 // provides a buffer to make the cluster stable, so we don't need to schedule
 // very frequently.
@@ -44,7 +44,8 @@ func adjustBalanceSpeed(sourceCount uint64, sourceScore, targetScore float64) (u
 	}
 	diffRatio := 1 - targetScore/sourceScore
 	diffCount := diffRatio * float64(sourceCount)
-	return uint64(diffCount) / 4, diffCount >= minBalanceDiff(sourceCount)
+	balanceLimit := maxUint64(1, uint64(diffCount)/4)
+	return balanceLimit, diffCount >= minBalanceDiff(sourceCount)
 }
 
 type balanceLeaderScheduler struct {
@@ -75,7 +76,7 @@ func (l *balanceLeaderScheduler) GetResourceKind() ResourceKind {
 }
 
 func (l *balanceLeaderScheduler) GetResourceLimit() uint64 {
-	return l.limit
+	return minUint64(l.limit, l.opt.GetLeaderScheduleLimit())
 }
 
 func (l *balanceLeaderScheduler) Prepare(cluster *clusterInfo) error { return nil }
@@ -98,13 +99,12 @@ func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 }
 
 // adjustSchedule returns true if the schedule is allowed.
-func (l *balanceLeaderScheduler) adjustSchedule(source, target *storeInfo) bool {
+func (l *balanceLeaderScheduler) adjustSchedule(source, target *storeInfo) (ok bool) {
 	sourceCount := source.leaderCount()
 	sourceScore := source.leaderScore()
 	targetScore := target.leaderScore()
-	limit, ok := adjustBalanceSpeed(sourceCount, sourceScore, targetScore)
-	l.limit = ensureRangeUint64(limit, 1, l.opt.GetLeaderScheduleLimit())
-	return ok
+	l.limit, ok = adjustBalanceSpeed(sourceCount, sourceScore, targetScore)
+	return
 }
 
 type balanceRegionScheduler struct {
@@ -142,7 +142,7 @@ func (s *balanceRegionScheduler) GetResourceKind() ResourceKind {
 }
 
 func (s *balanceRegionScheduler) GetResourceLimit() uint64 {
-	return s.limit
+	return minUint64(s.limit, s.opt.GetRegionScheduleLimit())
 }
 
 func (s *balanceRegionScheduler) Prepare(cluster *clusterInfo) error { return nil }
@@ -191,13 +191,12 @@ func (s *balanceRegionScheduler) transferPeer(cluster *clusterInfo, region *regi
 }
 
 // adjustSchedule returns true if the schedule is allowed.
-func (s *balanceRegionScheduler) adjustSchedule(source, target *storeInfo) bool {
+func (s *balanceRegionScheduler) adjustSchedule(source, target *storeInfo) (ok bool) {
 	sourceCount := source.regionCount()
 	sourceScore := source.regionScore()
 	targetScore := target.regionScore()
-	limit, ok := adjustBalanceSpeed(sourceCount, sourceScore, targetScore)
-	s.limit = ensureRangeUint64(limit, 1, s.opt.GetRegionScheduleLimit())
-	return ok
+	s.limit, ok = adjustBalanceSpeed(sourceCount, sourceScore, targetScore)
+	return
 }
 
 // replicaChecker ensures region has the best replicas.

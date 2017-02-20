@@ -295,18 +295,21 @@ type testScheduleControllerSuite struct{}
 func (s *testScheduleControllerSuite) TestController(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	cfg, opt := newTestScheduleConfig()
-	cfg.MaxScheduleInterval.Duration = minScheduleInterval * 6
 	co := newCoordinator(cluster, opt)
 	lb := newBalanceLeaderScheduler(opt)
 	sc := newScheduleController(co, lb)
 
-	c.Assert(sc.GetInterval(), Equals, minScheduleInterval)
-	c.Assert(sc.Schedule(cluster), IsNil)
-	c.Assert(sc.GetInterval(), Equals, minScheduleInterval*2)
-	c.Assert(sc.Schedule(cluster), IsNil)
-	c.Assert(sc.GetInterval(), Equals, minScheduleInterval*4)
-	c.Assert(sc.Schedule(cluster), IsNil)
-	c.Assert(sc.GetInterval(), Equals, cfg.MaxScheduleInterval.Duration)
+	for i := minScheduleInterval; sc.GetInterval() != maxScheduleInterval; i *= 2 {
+		c.Assert(sc.GetInterval(), Equals, i)
+		c.Assert(sc.Schedule(cluster), IsNil)
+	}
+
+	cfg.LeaderScheduleLimit = 1
+	c.Assert(sc.GetResourceLimit(), Equals, uint64(1))
+	cfg.LeaderScheduleLimit = 0
+	c.Assert(sc.GetResourceLimit(), Equals, uint64(0))
+	cfg.LeaderScheduleLimit = 2
+	c.Assert(sc.GetResourceLimit(), Equals, uint64(1))
 
 	// limit = 2
 	lb.limit = 2

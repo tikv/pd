@@ -122,7 +122,6 @@ func (c *testClusterInfo) updateStorageRatio(storeID uint64, storageRatio float6
 func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption) {
 	cfg := NewConfig()
 	cfg.adjust()
-	cfg.Schedule.MaxScheduleInterval.Duration = time.Nanosecond
 	opt := newScheduleOption(cfg)
 	return &cfg.Schedule, opt
 }
@@ -141,16 +140,16 @@ type testBalanceSpeedCase struct {
 func (s *testBalanceSpeedSuite) TestBalanceSpeed(c *C) {
 	testCases := []testBalanceSpeedCase{
 		// diff >= 2
-		{1, 0, 0, false},
-		{2, 0, 0, true},
-		{2, 1, 0, false},
+		{1, 0, 1, false},
+		{2, 0, 1, true},
+		{2, 1, 1, false},
 		{9, 0, 2, true},
-		{9, 6, 0, true},
-		{9, 8, 0, false},
+		{9, 6, 1, true},
+		{9, 8, 1, false},
 		// diff >= sqrt(10) = 3.16
 		{10, 0, 2, true},
 		{10, 6, 1, true},
-		{10, 7, 0, false},
+		{10, 7, 1, false},
 		// diff >= sqrt(100) = 10
 		{100, 89, 2, true},
 		{100, 91, 2, false},

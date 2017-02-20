@@ -27,7 +27,6 @@ address = ""
 [schedule]
 max-snapshot-count = 3
 max-store-down-time = "1h"
-max-schedule-interval = "1m"
 leader-schedule-limit = 1024
 region-schedule-limit = 16
 replica-schedule-limit = 24
