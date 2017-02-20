@@ -301,9 +301,11 @@ func (s *scheduleController) Stop() {
 
 func (s *scheduleController) Schedule(cluster *clusterInfo) Operator {
 	// If we have schedule, reset interval to the minimal interval.
-	if op := s.Scheduler.Schedule(cluster); op != nil {
-		s.interval = minScheduleInterval
-		return op
+	for i := 0; i < maxScheduleRetries; i++ {
+		if op := s.Scheduler.Schedule(cluster); op != nil {
+			s.interval = minScheduleInterval
+			return op
+		}
 	}
 
 	// If we have no schedule, increase the interval exponentially.
