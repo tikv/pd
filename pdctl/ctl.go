@@ -40,6 +40,7 @@ func init() {
 		command.NewMemberCommand(),
 		command.NewExitCommand(),
 		command.NewLabelCommand(),
+		command.NewPingCommand(),
 	)
 	cobra.EnablePrefixMatching = true
 }
