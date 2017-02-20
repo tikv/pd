@@ -1,5 +1,5 @@
-hash: 76265ce7d49d84dd357a583a75fb5f23c3455d93c24185a90446ba1ed4851fda
-updated: 2017-02-15T17:25:46.565099361+08:00
+hash: 5fbab4a7af3b084e751f9c3277a99b8388f340c45f984e3381f9181bbe477bd6
+updated: 2017-02-20T18:44:54.617161934+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -126,6 +126,8 @@ imports:
   version: c12348ce28de40eed0136aa2b644d0ee0650e56c
   subpackages:
   - pbutil
+- name: github.com/montanaflynn/stats
+  version: f8cd06f93c6c1b06028caafb88b540fc820f77c1
 - name: github.com/ngaut/deadline
   version: fae8f9dfd7048de16575b9d4c255278e38c28a4f
 - name: github.com/ngaut/log

@@ -17,6 +17,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/montanaflynn/stats"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
@@ -32,20 +33,29 @@ func minBalanceDiff(count uint64) float64 {
 	return math.Sqrt(float64(count))
 }
 
-// adjustBalanceSpeed returns a schedule limit and whether we should balance.
-// First, we calculate the diffCount (the number of schedules to balance the
-// source and the target). Then, we adjust the balanceLimit to less than the
-// diffCount, so we will not over-scheduled. Finally, the min balance diff
-// provides a buffer to make the cluster stable, so we don't need to schedule
-// very frequently.
-func adjustBalanceSpeed(sourceCount uint64, sourceScore, targetScore float64) (uint64, bool) {
+// shouldBalance returns true if we should balance the source and target store.
+// The min balance diff provides a buffer to make the cluster stable, so that we
+// don't need to schedule very frequently.
+func shouldBalance(source, target *storeInfo, kind ResourceKind) bool {
+	sourceCount := source.resourceCount(kind)
+	sourceScore := source.resourceScore(kind)
+	targetScore := target.resourceScore(kind)
 	if targetScore >= sourceScore {
-		return 1, false
+		return false
 	}
 	diffRatio := 1 - targetScore/sourceScore
 	diffCount := diffRatio * float64(sourceCount)
-	balanceLimit := maxUint64(1, uint64(diffCount)/4)
-	return balanceLimit, diffCount >= minBalanceDiff(sourceCount)
+	return diffCount >= minBalanceDiff(sourceCount)
+}
+
+func adjustBalanceLimit(cluster *clusterInfo, kind ResourceKind) uint64 {
+	stores := cluster.getStores()
+	counts := make([]float64, 0, len(stores))
+	for _, s := range stores {
+		counts = append(counts, float64(s.resourceCount(kind)))
+	}
+	limit, _ := stats.StandardDeviation(stats.Float64Data(counts))
+	return maxUint64(1, uint64(limit))
 }
 
 type balanceLeaderScheduler struct {
@@ -91,20 +101,12 @@ func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 
 	source := cluster.getStore(region.Leader.GetStoreId())
 	target := cluster.getStore(newLeader.GetStoreId())
-	if !l.adjustSchedule(source, target) {
+	if !shouldBalance(source, target, l.GetResourceKind()) {
 		return nil
 	}
+	l.limit = adjustBalanceLimit(cluster, l.GetResourceKind())
 
 	return newTransferLeader(region, newLeader)
-}
-
-// adjustSchedule returns true if the schedule is allowed.
-func (l *balanceLeaderScheduler) adjustSchedule(source, target *storeInfo) (ok bool) {
-	sourceCount := source.leaderCount()
-	sourceScore := source.leaderScore()
-	targetScore := target.leaderScore()
-	l.limit, ok = adjustBalanceSpeed(sourceCount, sourceScore, targetScore)
-	return
 }
 
 type balanceRegionScheduler struct {
@@ -183,20 +185,12 @@ func (s *balanceRegionScheduler) transferPeer(cluster *clusterInfo, region *regi
 	}
 
 	target := cluster.getStore(newPeer.GetStoreId())
-	if !s.adjustSchedule(source, target) {
+	if !shouldBalance(source, target, s.GetResourceKind()) {
 		return nil
 	}
+	s.limit = adjustBalanceLimit(cluster, s.GetResourceKind())
 
 	return newTransferPeer(region, oldPeer, newPeer)
-}
-
-// adjustSchedule returns true if the schedule is allowed.
-func (s *balanceRegionScheduler) adjustSchedule(source, target *storeInfo) (ok bool) {
-	sourceCount := source.regionCount()
-	sourceScore := source.regionScore()
-	targetScore := target.regionScore()
-	s.limit, ok = adjustBalanceSpeed(sourceCount, sourceScore, targetScore)
-	return
 }
 
 // replicaChecker ensures region has the best replicas.

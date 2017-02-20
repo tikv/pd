@@ -109,6 +109,17 @@ func (s *storeInfo) storageRatio() float64 {
 	return float64(s.storageSize()) / float64(s.stats.GetCapacity())
 }
 
+func (s *storeInfo) resourceCount(kind ResourceKind) uint64 {
+	switch kind {
+	case leaderKind:
+		return s.leaderCount()
+	case regionKind:
+		return s.regionCount()
+	default:
+		return 0
+	}
+}
+
 func (s *storeInfo) resourceScore(kind ResourceKind) float64 {
 	switch kind {
 	case leaderKind:

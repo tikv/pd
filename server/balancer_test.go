@@ -133,32 +133,31 @@ type testBalanceSpeedSuite struct{}
 type testBalanceSpeedCase struct {
 	sourceCount    uint64
 	targetCount    uint64
-	balanceLimit   uint64
 	expectedResult bool
 }
 
 func (s *testBalanceSpeedSuite) TestBalanceSpeed(c *C) {
 	testCases := []testBalanceSpeedCase{
 		// diff >= 2
-		{1, 0, 1, false},
-		{2, 0, 1, true},
-		{2, 1, 1, false},
-		{9, 0, 2, true},
-		{9, 6, 1, true},
-		{9, 8, 1, false},
+		{1, 0, false},
+		{2, 0, true},
+		{2, 1, false},
+		{9, 0, true},
+		{9, 6, true},
+		{9, 8, false},
 		// diff >= sqrt(10) = 3.16
-		{10, 0, 2, true},
-		{10, 6, 1, true},
-		{10, 7, 1, false},
+		{10, 0, true},
+		{10, 6, true},
+		{10, 7, false},
 		// diff >= sqrt(100) = 10
-		{100, 89, 2, true},
-		{100, 91, 2, false},
+		{100, 89, true},
+		{100, 91, false},
 		// diff >= sqrt(1000) = 31.6
-		{1000, 968, 8, true},
-		{1000, 969, 7, false},
+		{1000, 968, true},
+		{1000, 969, false},
 		// diff >= sqrt(10000) = 100
-		{10000, 9899, 25, true},
-		{10000, 9901, 24, false},
+		{10000, 9899, true},
+		{10000, 9901, false},
 	}
 
 	s.testBalanceSpeed(c, testCases, 1)
@@ -168,13 +167,23 @@ func (s *testBalanceSpeedSuite) TestBalanceSpeed(c *C) {
 }
 
 func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedCase, capaGB uint64) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+
 	for _, t := range tests {
-		sourceCount := t.sourceCount
-		sourceScore := float64(t.sourceCount) / float64(capaGB)
-		targetScore := float64(t.targetCount) / float64(capaGB)
-		limit, ok := adjustBalanceSpeed(sourceCount, sourceScore, targetScore)
-		c.Assert(limit, Equals, t.balanceLimit)
-		c.Assert(ok, Equals, t.expectedResult)
+		tc.addLeaderStore(1, int(t.sourceCount))
+		tc.addLeaderStore(2, int(t.targetCount))
+		source := cluster.getStore(1)
+		target := cluster.getStore(2)
+		c.Assert(shouldBalance(source, target, leaderKind), Equals, t.expectedResult)
+	}
+
+	for _, t := range tests {
+		tc.addRegionStore(1, int(t.sourceCount))
+		tc.addRegionStore(2, int(t.targetCount))
+		source := cluster.getStore(1)
+		target := cluster.getStore(2)
+		c.Assert(shouldBalance(source, target, regionKind), Equals, t.expectedResult)
 	}
 }
 
