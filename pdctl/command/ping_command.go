@@ -21,13 +21,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var pingPrefix = "pd/ping"
-
 // NewPingCommand return a ping subcommand of rootCmd
 func NewPingCommand() *cobra.Command {
 	m := &cobra.Command{
 		Use:   "ping",
-		Short: "show the total time of ping pd",
+		Short: "show the total time spend ping the pd",
 		Run:   showPingCommandFunc,
 	}
 	return m
