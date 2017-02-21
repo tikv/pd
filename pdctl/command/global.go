@@ -127,7 +127,7 @@ func validPDAddr(pd string) error {
 		u.Scheme = "http"
 	}
 	addr := u.String()
-	reps, err := http.Get(fmt.Sprintf("%s/%s", addr, pingPrifix))
+	reps, err := http.Get(fmt.Sprintf("%s/%s", addr, pingPrefix))
 	if err != nil {
 		return err
 	}
