@@ -30,6 +30,9 @@ import (
 var (
 	pdClient   pd.Client
 	dailClient = &http.Client{}
+
+	pingPrefix     = "pd/ping"
+	errInvalidAddr = errors.New("Invalid pd address, Cannot get connect to it")
 )
 
 func doRequest(cmd *cobra.Command, prefix string, method string) (string, error) {
@@ -74,6 +77,10 @@ func InitPDClient(cmd *cobra.Command) error {
 	if pdClient != nil {
 		return nil
 	}
+	err = validPDAddr(addr)
+	if err != nil {
+		return err
+	}
 	pdClient, err = pd.NewClient([]string{addr})
 	if err != nil {
 		return err
@@ -109,6 +116,27 @@ func getAddressFromCmd(cmd *cobra.Command, prefix string) string {
 func printResponseError(r *http.Response) {
 	fmt.Printf("[%d]:", r.StatusCode)
 	io.Copy(os.Stdout, r.Body)
+}
+
+func validPDAddr(pd string) error {
+	u, err := url.Parse(pd)
+	if err != nil {
+		return err
+	}
+	if u.Scheme == "" {
+		u.Scheme = "http"
+	}
+	addr := u.String()
+	reps, err := http.Get(fmt.Sprintf("%s/%s", addr, pingPrefix))
+	if err != nil {
+		return err
+	}
+	defer reps.Body.Close()
+	ioutil.ReadAll(reps.Body)
+	if reps.StatusCode != http.StatusOK {
+		return errInvalidAddr
+	}
+	return nil
 }
 
 // UsageTemplate will used to generate a help information

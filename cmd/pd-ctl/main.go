@@ -99,12 +99,11 @@ func loop() {
 			}
 			continue
 		}
-
+		if line == "exit" {
+			os.Exit(0)
+		}
 		args := strings.Split(strings.TrimSpace(line), " ")
 		args = append(args, "-u", url)
-		usage, err := pdctl.Start(args)
-		if err != nil {
-			fmt.Println(usage)
-		}
+		pdctl.Start(args)
 	}
 }
