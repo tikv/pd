@@ -132,8 +132,8 @@ func validPDAddr(pd string) error {
 		return err
 	}
 	defer reps.Body.Close()
+	ioutil.ReadAll(reps.Body)
 	if reps.StatusCode != http.StatusOK {
-		ioutil.ReadAll(reps.Body)
 		return errInvalidAddr
 	}
 	return nil
