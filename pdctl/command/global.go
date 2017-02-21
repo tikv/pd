@@ -31,7 +31,7 @@ var (
 	pdClient   pd.Client
 	dailClient = &http.Client{}
 
-	pingPrifix     = "pd/ping"
+	pingPrefix     = "pd/ping"
 	errInvalidAddr = errors.New("Invalid pd address, Cannot get connect to it")
 )
 
