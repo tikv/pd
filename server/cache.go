@@ -526,6 +526,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 
 	// Region meta is updated, update kv and cache.
 	if r.GetVersion() > o.GetVersion() || r.GetConfVer() > o.GetConfVer() {
+		log.Infof("update region %v origin %v", region, origin)
 		return c.putRegionLocked(region)
 	}
 
