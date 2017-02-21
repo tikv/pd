@@ -323,6 +323,13 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		if s.GetId() != store.GetId() && s.GetAddress() == store.GetAddress() {
 			return errors.Errorf("duplicated store address: %v, already registered by %v", store, s.Store)
 		}
+		if s.GetId() == store.GetId() && s.GetAddress() != store.GetAddress() {
+			// TODO: maybe we need some mechanism like etcd's MemberUpdate.
+			interval := s.stats.GetHeartbeatInterval()
+			if interval != time.Duration(0) && time.Since(s.stats.LastHeartbeatTS) < 2*interval {
+				return errors.Errorf("another store is running, but store id %v is the same", s.GetId())
+			}
+		}
 	}
 
 	s := cluster.getStore(store.GetId())
