@@ -15,11 +15,11 @@ package server
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
-	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/pdpb2"
@@ -54,27 +54,38 @@ func (s *Server) GetPDMembers(context.Context, *pdpb2.GetPDMembersRequest) (*pdp
 }
 
 // Tso implements gRPC PDServer.
-func (s *Server) Tso(ctx context.Context, request *pdpb2.TsoRequest) (*pdpb2.TsoResponse, error) {
-	if !s.IsLeader() {
-		return nil, notLeaderError
+func (s *Server) Tso(stream pdpb2.PD_TsoServer) error {
+	for {
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.Trace(err)
+		}
+		if !s.IsLeader() {
+			return notLeaderError
+		}
+		if err := s.validateHeader(request.GetHeader()); err != nil {
+			return errors.Trace(err)
+		}
+		count := request.GetCount()
+		ts, err := s.getRespTS(count)
+		if err != nil {
+			return grpc.Errorf(codes.Unknown, err.Error())
+		}
+		response := &pdpb2.TsoResponse{
+			Header: s.header(),
+			Timestamp: &pdpb2.Timestamp{
+				Physical: ts.GetPhysical(),
+				Logical:  ts.GetLogical(),
+			},
+			Count: count,
+		}
+		if err := stream.Send(response); err != nil {
+			return errors.Trace(err)
+		}
 	}
-	if err := s.validateHeader(request.GetHeader()); err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	count := request.GetCount()
-	ts, err := s.getRespTS(count)
-	if err != nil {
-		return nil, grpc.Errorf(codes.Unknown, err.Error())
-	}
-	return &pdpb2.TsoResponse{
-		Header: s.header(),
-		Timestamp: &pdpb2.Timestamp{
-			Physical: ts.GetPhysical(),
-			Logical:  ts.GetLogical(),
-		},
-		Count: count,
-	}, nil
 }
 
 // Bootstrap implements gRPC PDServer.
@@ -89,7 +100,7 @@ func (s *Server) Bootstrap(ctx context.Context, request *pdpb2.BootstrapRequest)
 	cluster := s.GetRaftCluster()
 	if cluster != nil {
 		err := &pdpb2.Error{
-			Type:    pdpb2.ErrorType_BOOTSTRAPPED,
+			Type:    pdpb2.ErrorType_NOT_BOOTSTRAPPED,
 			Message: "cluster is already bootstrapped",
 		}
 		return &pdpb2.BootstrapResponse{
@@ -330,7 +341,7 @@ func (s *Server) RegionHeartbeat(ctx context.Context, request *pdpb2.RegionHeart
 		if res.ChangePeer != nil {
 			resp.ChangePeer = &pdpb2.ChangePeer{
 				Peer:       res.ChangePeer.Peer,
-				ChangeType: &eraftpb.ConfChangeTypeWrapper{Type: res.ChangePeer.ChangeType},
+				ChangeType: pdpb2.ConfChangeType(res.ChangePeer.GetChangeType()),
 			}
 		}
 		if res.TransferLeader != nil {

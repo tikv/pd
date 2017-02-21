@@ -225,51 +225,93 @@ func (c *client) leaderLoop() {
 func (c *client) tsLoop() {
 	defer c.wg.Done()
 
+	var requests []*tsoRequest
+	var stream pdpb2.PD_TsoClient
+	var cancel context.CancelFunc
+
 	for {
+		var err error
+
+		if stream == nil {
+			var ctx context.Context
+			ctx, cancel = context.WithCancel(c.ctx)
+			stream, err = c.leaderClient().Tso(ctx)
+			if err != nil {
+				log.Errorf("[pd] create tso stream error: %v", err)
+				time.Sleep(time.Second)
+				continue
+			}
+		}
+
 		select {
 		case first := <-c.tsoRequests:
-			c.processTSORequests(first)
+			requests = append(requests, first)
+			pending := len(c.tsoRequests)
+			for i := 0; i < pending; i++ {
+				requests = append(requests, <-c.tsoRequests)
+			}
+			done := make(chan struct{})
+			go func(cancel context.CancelFunc) {
+				select {
+				case <-time.After(pdTimeout):
+					cancel()
+				case <-done:
+				}
+			}(cancel)
+			err = c.processTSORequests(stream, requests)
+			close(done)
+			requests = requests[:0]
 		case <-c.ctx.Done():
 			return
+		}
+
+		if err != nil {
+			log.Errorf("[pd] getTS error: %v", err)
+			cancel()
+			stream, cancel = nil, nil
 		}
 	}
 }
 
-func (c *client) processTSORequests(first *tsoRequest) {
+func (c *client) processTSORequests(stream pdpb2.PD_TsoClient, requests []*tsoRequest) error {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(c.ctx, pdTimeout)
-
-	pendingCount := len(c.tsoRequests)
-	resp, err := c.leaderClient().Tso(ctx, &pdpb2.TsoRequest{
+	//	ctx, cancel := context.WithTimeout(c.ctx, pdTimeout)
+	req := &pdpb2.TsoRequest{
 		Header: c.requestHeader(),
-		Count:  uint32(pendingCount + 1),
-	})
-	cancel()
+		Count:  uint32(len(requests)),
+	}
+	if err := stream.Send(req); err != nil {
+		c.finishTSORequest(requests, 0, 0, err)
+		c.scheduleCheckLeader()
+		return errors.Trace(err)
+	}
+	resp, err := stream.Recv()
+	if err != nil {
+		c.finishTSORequest(requests, 0, 0, errors.Trace(err))
+		c.scheduleCheckLeader()
+		return errors.Trace(err)
+	}
 	requestDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds())
-	if err == nil && resp.GetCount() != uint32(pendingCount+1) {
+	if err == nil && resp.GetCount() != uint32(len(requests)) {
 		err = errTSOLength
 	}
 	if err != nil {
-		c.finishTSORequest(first, 0, 0, errors.Trace(err))
-		for i := 0; i < pendingCount; i++ {
-			c.finishTSORequest(<-c.tsoRequests, 0, 0, errors.Trace(err))
-		}
-		return
+		c.finishTSORequest(requests, 0, 0, errors.Trace(err))
+		return errors.Trace(err)
 	}
 
 	physical, logical := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical()
 	// Server returns the highest ts.
 	logical -= int64(resp.GetCount() - 1)
-	c.finishTSORequest(first, physical, logical, nil)
-	for i := 0; i < pendingCount; i++ {
-		logical++
-		c.finishTSORequest(<-c.tsoRequests, physical, logical, nil)
-	}
+	c.finishTSORequest(requests, physical, logical, nil)
+	return nil
 }
 
-func (c *client) finishTSORequest(req *tsoRequest, physical, logical int64, err error) {
-	req.physical, req.logical = physical, logical
-	req.done <- err
+func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical int64, err error) {
+	for i := 0; i < len(requests); i++ {
+		requests[i].physical, requests[i].logical = physical, firstLogical+int64(i)
+		requests[i].done <- err
+	}
 }
 
 func (c *client) Close() {
