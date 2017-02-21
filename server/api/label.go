@@ -84,7 +84,7 @@ func (h *labelsHandler) GetStores(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		storeInfo := newStoreInfo(store, status, cluster.GetScores(store, status))
+		storeInfo := newStoreInfo(store, status)
 		storesInfo.Stores = append(storesInfo.Stores, storeInfo)
 	}
 	storesInfo.Count = len(storesInfo.Stores)
