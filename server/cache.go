@@ -513,6 +513,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 
 	// Region does not exist, add it.
 	if origin == nil {
+		log.Infof("insert region %v", region)
 		return c.putRegionLocked(region)
 	}
 
