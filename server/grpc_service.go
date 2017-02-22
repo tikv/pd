@@ -325,6 +325,17 @@ func (s *Server) RegionHeartbeat(ctx context.Context, request *pdpb2.RegionHeart
 		return resp, nil
 	}
 
+	err := cluster.cachedCluster.handleRegionHeartbeat(region)
+	if err != nil {
+		pberr := &pdpb2.Error{
+			Type:    pdpb2.ErrorType_UNKNOWN,
+			Message: errors.Trace(err).Error(),
+		}
+		resp.Header = s.errorHeader(pberr)
+
+		return resp, nil
+	}
+
 	res, err := cluster.handleRegionHeartbeat(region)
 	if err != nil {
 		pberr := &pdpb2.Error{
