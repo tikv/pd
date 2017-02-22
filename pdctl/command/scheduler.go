@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2017 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -149,8 +149,8 @@ func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	prefix := schedulersPrefix + "/" + args[0]
-	_, err := doRequest(cmd, prefix, http.MethodDelete)
+	path := schedulersPrefix + "/" + args[0]
+	_, err := doRequest(cmd, path, http.MethodDelete)
 	if err != nil {
 		fmt.Println(err)
 		return
