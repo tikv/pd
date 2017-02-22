@@ -59,6 +59,8 @@ func NewAddSchedulerCommand() *cobra.Command {
 	}
 	c.AddCommand(NewGrantLeaderSchedulerCommand())
 	c.AddCommand(NewEvictLeaderSchedulerCommand())
+	c.AddCommand(NewShuffleLeaderSchedulerCommand())
+	c.AddCommand(NewShuffleRegionSchedulerCommand())
 	return c
 }
 
@@ -67,7 +69,7 @@ func NewGrantLeaderSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "grant-leader-scheduler <store_id>",
 		Short: "add a scheduler to grant leader to a store",
-		Run:   addSchedulerCommandFunc,
+		Run:   addSchedulerForStoreCommandFunc,
 	}
 	return c
 }
@@ -77,12 +79,12 @@ func NewEvictLeaderSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "evict-leader-scheduler <store_id>",
 		Short: "add a scheduler to evict leader from a store",
-		Run:   addSchedulerCommandFunc,
+		Run:   addSchedulerForStoreCommandFunc,
 	}
 	return c
 }
 
-func addSchedulerCommandFunc(cmd *cobra.Command, args []string) {
+func addSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		fmt.Println(cmd.UsageString())
 		return
@@ -97,6 +99,37 @@ func addSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	input := make(map[string]interface{})
 	input["name"] = cmd.Name()
 	input["store_id"] = storeID
+	postJSON(cmd, schedulersPrefix, input)
+}
+
+// NewShuffleLeaderSchedulerCommand returns a command to add a shuffle-leader-scheduler.
+func NewShuffleLeaderSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "shuffle-leader-scheduler",
+		Short: "add a scheduler to shuffle leaders between stores",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
+// NewShuffleRegionSchedulerCommand returns a command to add a shuffle-region-scheduler.
+func NewShuffleRegionSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "shuffle-region-scheduler",
+		Short: "add a scheduler to shuffle regions between stores",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
+func addSchedulerCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 0 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+
+	input := make(map[string]interface{})
+	input["name"] = cmd.Name()
 	postJSON(cmd, schedulersPrefix, input)
 }
 
