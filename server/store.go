@@ -25,7 +25,8 @@ import (
 type ResourceKind int
 
 const (
-	leaderKind ResourceKind = iota + 1
+	adminKind ResourceKind = iota
+	leaderKind
 	regionKind
 )
 

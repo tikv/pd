@@ -181,6 +181,13 @@ func (c *coordinator) addOperator(op Operator) bool {
 	defer c.Unlock()
 
 	regionID := op.GetRegionID()
+
+	// Admin operator bypasses the check.
+	if op.GetResourceKind() == adminKind {
+		c.operators[regionID] = op
+		return true
+	}
+
 	if _, ok := c.operators[regionID]; ok {
 		return false
 	}
@@ -208,13 +215,13 @@ func (c *coordinator) getOperator(regionID uint64) Operator {
 	return c.operators[regionID]
 }
 
-func (c *coordinator) getOperators() map[uint64]Operator {
+func (c *coordinator) getOperators() []Operator {
 	c.RLock()
 	defer c.RUnlock()
 
-	operators := make(map[uint64]Operator)
-	for id, op := range c.operators {
-		operators[id] = op
+	var operators []Operator
+	for _, op := range c.operators {
+		operators = append(operators, op)
 	}
 
 	return operators

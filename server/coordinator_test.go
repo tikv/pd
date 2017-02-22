@@ -108,7 +108,6 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	region.RemoveStorePeer(4)
 	cluster.putRegion(region)
 	c.Assert(co.dispatch(region), IsNil)
-	c.Assert(co.getOperator(region.GetId()), IsNil)
 
 	// Transfer leader.
 	region = cluster.getRegion(2)

@@ -517,16 +517,6 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 	return c.cachedCluster.putMeta(meta)
 }
 
-// GetBalanceOperators gets the balance operators from cluster.
-func (c *RaftCluster) GetBalanceOperators() map[uint64]Operator {
-	return c.coordinator.getOperators()
-}
-
-// GetHistoryOperators gets the history operators from cluster.
-func (c *RaftCluster) GetHistoryOperators() []Operator {
-	return c.coordinator.getHistories()
-}
-
 // GetScores gets store scores from balancer.
 func (c *RaftCluster) GetScores(store *metapb.Store, status *StoreStatus) []int {
 	storeInfo := &storeInfo{
