@@ -14,6 +14,8 @@
 package command
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -137,6 +139,26 @@ func validPDAddr(pd string) error {
 		return errInvalidAddr
 	}
 	return nil
+}
+
+func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
+	data, err := json.Marshal(input)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	url := getAddressFromCmd(cmd, prefix)
+	r, err := http.Post(url, "application/json", bytes.NewBuffer(data))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer r.Body.Close()
+
+	if r.StatusCode != http.StatusOK {
+		printResponseError(r)
+	}
 }
 
 // UsageTemplate will used to generate a help information

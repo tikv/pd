@@ -43,6 +43,7 @@ func init() {
 		command.NewMemberCommand(),
 		command.NewExitCommand(),
 		command.NewLabelCommand(),
+		command.NewSchedulerCommand(),
 	)
 	cobra.EnablePrefixMatching = true
 }
