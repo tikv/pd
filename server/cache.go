@@ -531,6 +531,10 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 		return c.putRegionLocked(region)
 	}
 
+	if region.Leader.GetId() != origin.Leader.GetId() {
+		log.Infof("update region leader %v origin %v", region.Leader, origin.Leader)
+	}
+
 	// Region meta is the same, update cache only.
 	c.regions.setRegion(region)
 	return nil
