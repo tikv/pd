@@ -101,7 +101,7 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch name {
-	case "transfer_leader":
+	case "transfer-leader":
 		regionID, ok := input["region_id"].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
@@ -116,7 +116,7 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "transfer_region":
+	case "transfer-region":
 		regionID, ok := input["region_id"].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
