@@ -247,7 +247,8 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return errors.Trace(err)
 	}
 
-	op := newTransferPeer(region, oldPeer, newPeer)
-	c.addOperator(newAdminOperator(region, op))
+	addPeer := newAddPeerOperator(regionID, newPeer)
+	removePeer := newRemovePeerOperator(regionID, oldPeer)
+	c.addOperator(newAdminOperator(region, addPeer, removePeer))
 	return nil
 }
