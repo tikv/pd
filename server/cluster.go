@@ -455,18 +455,10 @@ func (c *RaftCluster) collectMetrics() {
 		storageCapacity += s.stats.GetCapacity()
 
 		// Balance score.
-		if minLeaderScore > s.leaderScore() {
-			minLeaderScore = s.leaderScore()
-		}
-		if maxLeaderScore < s.leaderScore() {
-			maxLeaderScore = s.leaderScore()
-		}
-		if minRegionScore > s.regionScore() {
-			minRegionScore = s.regionScore()
-		}
-		if maxRegionScore < s.regionScore() {
-			maxRegionScore = s.regionScore()
-		}
+		minLeaderScore = minFloat64(minLeaderScore, s.leaderScore())
+		maxLeaderScore = maxFloat64(maxLeaderScore, s.leaderScore())
+		minRegionScore = minFloat64(minRegionScore, s.regionScore())
+		maxRegionScore = maxFloat64(maxRegionScore, s.regionScore())
 	}
 
 	metrics := make(map[string]float64)
