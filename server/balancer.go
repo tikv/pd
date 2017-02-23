@@ -22,13 +22,17 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
-var storeCacheInterval = 30 * time.Second
+const (
+	storeCacheInterval    = 30 * time.Second
+	bootstrapBalanceCount = 10
+	bootstrapBalanceDiff  = 2
+)
 
 // minBalanceDiff returns the minimal diff to do balance. The formula is based
 // on experience to let the diff increase alone with the count slowly.
 func minBalanceDiff(count uint64) float64 {
-	if count < 10 {
-		return float64(2)
+	if count < bootstrapBalanceCount {
+		return bootstrapBalanceDiff
 	}
 	return math.Sqrt(float64(count))
 }
