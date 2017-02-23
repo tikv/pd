@@ -42,6 +42,7 @@ func GetCmdLabel(request *pdpb.Request) string {
 	label, ok := cmdLabels[name]
 	if !ok {
 		label = convertName(name)
+		cmdLabels[name] = label
 	}
 	return label
 }
