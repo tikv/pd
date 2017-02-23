@@ -513,6 +513,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 
 	// Region does not exist, add it.
 	if origin == nil {
+		log.Infof("insert region %v", region)
 		return c.putRegionLocked(region)
 	}
 
@@ -526,7 +527,12 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 
 	// Region meta is updated, update kv and cache.
 	if r.GetVersion() > o.GetVersion() || r.GetConfVer() > o.GetConfVer() {
+		log.Infof("update region %v origin %v", region, origin)
 		return c.putRegionLocked(region)
+	}
+
+	if region.Leader.GetId() != origin.Leader.GetId() {
+		log.Infof("update region leader %v origin %v", region, origin)
 	}
 
 	// Region meta is the same, update cache only.

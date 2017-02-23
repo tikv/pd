@@ -189,6 +189,53 @@ func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 	return newTransferLeader(region, region.GetStorePeer(storeID))
 }
 
+type shuffleRegionScheduler struct {
+	opt      *scheduleOption
+	selector Selector
+}
+
+func newShuffleRegionScheduler(opt *scheduleOption) *shuffleRegionScheduler {
+	var filters []Filter
+	filters = append(filters, newStateFilter(opt))
+	filters = append(filters, newHealthFilter(opt))
+
+	return &shuffleRegionScheduler{
+		opt:      opt,
+		selector: newRandomSelector(filters),
+	}
+}
+
+func (s *shuffleRegionScheduler) GetName() string {
+	return "shuffle-region-scheduler"
+}
+
+func (s *shuffleRegionScheduler) GetResourceKind() ResourceKind {
+	return regionKind
+}
+
+func (s *shuffleRegionScheduler) GetResourceLimit() uint64 {
+	return s.opt.GetRegionScheduleLimit()
+}
+
+func (s *shuffleRegionScheduler) Prepare(cluster *clusterInfo) error { return nil }
+
+func (s *shuffleRegionScheduler) Cleanup(cluster *clusterInfo) {}
+
+func (s *shuffleRegionScheduler) Schedule(cluster *clusterInfo) Operator {
+	region, oldPeer := scheduleRemovePeer(cluster, s.selector)
+	if region == nil {
+		return nil
+	}
+
+	excludedFilter := newExcludedFilter(nil, region.GetStoreIds())
+	newPeer := scheduleAddPeer(cluster, s.selector, excludedFilter)
+	if newPeer == nil {
+		return nil
+	}
+
+	return newTransferPeer(region, oldPeer, newPeer)
+}
+
 func newAddPeer(region *regionInfo, peer *metapb.Peer) Operator {
 	addPeer := newAddPeerOperator(region.GetId(), peer)
 	return newRegionOperator(region, addPeer)

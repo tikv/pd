@@ -83,3 +83,8 @@ func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
 func (h *Handler) AddShuffleLeaderScheduler() error {
 	return h.AddScheduler(newShuffleLeaderScheduler(h.opt))
 }
+
+// AddShuffleRegionScheduler adds a shuffle-region-scheduler.
+func (h *Handler) AddShuffleRegionScheduler() error {
+	return h.AddScheduler(newShuffleRegionScheduler(h.opt))
+}
