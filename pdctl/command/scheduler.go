@@ -29,11 +29,21 @@ var (
 func NewSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "scheduler",
+		Short: "scheduler commands",
+	}
+	c.AddCommand(NewShowSchedulerCommand())
+	c.AddCommand(NewAddSchedulerCommand())
+	c.AddCommand(NewRemoveSchedulerCommand())
+	return c
+}
+
+// NewShowSchedulerCommand returns a command to show schedulers.
+func NewShowSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "show",
 		Short: "show schedulers",
 		Run:   showSchedulerCommandFunc,
 	}
-	c.AddCommand(NewAddSchedulerCommand())
-	c.AddCommand(NewRemoveSchedulerCommand())
 	return c
 }
 
