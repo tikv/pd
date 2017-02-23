@@ -56,7 +56,7 @@ func convertCmdLabels() map[string]string {
 }
 
 func runesHasLowerNeighborAt(runes []rune, idx int) bool {
-	if idx > 1 && unicode.IsLower(runes[idx-1]) {
+	if idx > 0 && unicode.IsLower(runes[idx-1]) {
 		return true
 	}
 	if idx+1 < len(runes) && unicode.IsLower(runes[idx+1]) {

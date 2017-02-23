@@ -51,6 +51,7 @@ func (s *testMetricsSuite) TestCamelCaseToSnakeCase(c *C) {
 		{"omg_wtf_bbq", "omg_wtf_bbq"},
 		{"Abc", "abc"},
 		{"aAbc", "a_abc"},
+		{"aBCd", "a_b_cd"},
 		{"ABc", "a_bc"},
 		{"AbcDef", "abc_def"},
 		{"AbcdefghijklmnopqrstuvwxyzAbcdefghijklmnopqrstuvwxyzAbcdefghijklmnopqrstuvwxyz",
@@ -58,7 +59,7 @@ func (s *testMetricsSuite) TestCamelCaseToSnakeCase(c *C) {
 	}
 
 	for _, input := range inputs {
-		c.Assert(input.newName, Equals, camelCaseToSnakeCase(input.name))
+		c.Assert(camelCaseToSnakeCase(input.name), Equals, input.newName)
 	}
 }
 
