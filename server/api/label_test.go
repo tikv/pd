@@ -118,7 +118,7 @@ func (s *testLabelsStoreSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func (s *testLabelsStoreSuite) TestStroesLabelGet(c *C) {
+func (s *testLabelsStoreSuite) TestLabelsGet(c *C) {
 	resp, err := s.client.Get(fmt.Sprintf("%s/labels", s.urlPrefix))
 	defer resp.Body.Close()
 	c.Assert(err, IsNil)
@@ -127,7 +127,7 @@ func (s *testLabelsStoreSuite) TestStroesLabelGet(c *C) {
 	c.Assert(err, IsNil)
 }
 
-func (s *testLabelsStoreSuite) TestStroesLabelFilter(c *C) {
+func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 
 	var table = []struct {
 		name, value string
