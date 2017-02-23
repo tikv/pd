@@ -197,6 +197,9 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 
 	// Add missing peers.
 	for id := range storeIDs {
+		if c.cluster.getStore(id) == nil {
+			return errStoreNotFound(id)
+		}
 		if region.GetStorePeer(id) != nil {
 			continue
 		}
@@ -216,5 +219,35 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 	}
 
 	c.addOperator(newAdminOperator(region, ops...))
+	return nil
+}
+
+// AddTransferPeerOperator adds an operator to transfer peer.
+func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreID uint64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	region := c.cluster.getRegion(regionID)
+	if region == nil {
+		return errRegionNotFound(regionID)
+	}
+
+	oldPeer := region.GetStorePeer(fromStoreID)
+	if oldPeer == nil {
+		return errors.Errorf("region has no peer in store %v", fromStoreID)
+	}
+
+	if c.cluster.getStore(toStoreID) == nil {
+		return errStoreNotFound(toStoreID)
+	}
+	newPeer, err := c.cluster.allocPeer(toStoreID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	op := newTransferPeer(region, oldPeer, newPeer)
+	c.addOperator(newAdminOperator(region, op))
 	return nil
 }

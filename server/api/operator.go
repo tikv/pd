@@ -107,9 +107,9 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		storeID, ok := input["leader_store_id"].(float64)
+		storeID, ok := input["to_store_id"].(float64)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing leader store id")
+			h.r.JSON(w, http.StatusBadRequest, "missing store id to transfer leader to")
 			return
 		}
 		if err := h.AddTransferLeaderOperator(uint64(regionID), uint64(storeID)); err != nil {
@@ -122,16 +122,36 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		storeIDs, ok := parseStoreIDs(input["region_store_ids"])
+		storeIDs, ok := parseStoreIDs(input["to_store_ids"])
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid region store ids")
+			h.r.JSON(w, http.StatusBadRequest, "invalid store ids to transfer region to")
 			return
 		}
 		if len(storeIDs) == 0 {
-			h.r.JSON(w, http.StatusBadRequest, "missing region store ids")
+			h.r.JSON(w, http.StatusBadRequest, "missing store ids to transfer region to")
 			return
 		}
 		if err := h.AddTransferRegionOperator(uint64(regionID), storeIDs); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	case "transfer-peer":
+		regionID, ok := input["region_id"].(float64)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "missing region id")
+			return
+		}
+		fromID, ok := input["from_store_id"].(float64)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "invalid store id to transfer peer from")
+			return
+		}
+		toID, ok := input["to_store_id"].(float64)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "invalid store id to transfer peer to")
+			return
+		}
+		if err := h.AddTransferPeerOperator(uint64(regionID), uint64(fromID), uint64(toID)); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
