@@ -35,18 +35,6 @@ func (s *testMinMaxSuite) TestMaxUint64(c *C) {
 	c.Assert(maxUint64(1, 1), Equals, uint64(1))
 }
 
-func (s *testMinMaxSuite) TestMinFloat64(c *C) {
-	c.Assert(minFloat64(1, 2), Equals, float64(1))
-	c.Assert(minFloat64(2, 1), Equals, float64(1))
-	c.Assert(minFloat64(1, 1), Equals, float64(1))
-}
-
-func (s *testMinMaxSuite) TestMaxFloat64(c *C) {
-	c.Assert(maxFloat64(1, 2), Equals, float64(2))
-	c.Assert(maxFloat64(2, 1), Equals, float64(2))
-	c.Assert(maxFloat64(1, 1), Equals, float64(1))
-}
-
 func (s *testMinMaxSuite) TestMinDuration(c *C) {
 	c.Assert(minDuration(time.Minute, time.Second), Equals, time.Second)
 	c.Assert(minDuration(time.Second, time.Minute), Equals, time.Second)

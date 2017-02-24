@@ -288,7 +288,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 
 	sb := newBalanceRegionScheduler(opt)
 
-	// Store 1 has the largest storage ratio, so the balancer try to replace peer in store 1.
+	// Store 1 has the largest region score, so the balancer try to replace peer in store 1.
 	tc.addLabelsStore(1, 6, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.addLabelsStore(2, 5, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
 	tc.addLabelsStore(3, 4, map[string]string{"zone": "z1", "rack": "r2", "host": "h2"})
@@ -299,20 +299,20 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	c.Assert(sb.Schedule(cluster), IsNil)
 	c.Assert(sb.cache.get(1), IsTrue)
 
-	// Store 4 has smaller region ratio than store 2.
+	// Store 4 has smaller region score than store 2.
 	tc.addLabelsStore(4, 2, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
 	checkTransferPeer(c, sb.Schedule(cluster), 2, 4)
 
-	// Store 5 has smaller region ratio than store 1.
+	// Store 5 has smaller region score than store 1.
 	tc.addLabelsStore(5, 2, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	sb.cache.delete(1) // Delete store 1 from cache, or it will be skipped.
 	checkTransferPeer(c, sb.Schedule(cluster), 1, 5)
 
-	// Store 6 has smaller region ratio than store 5.
+	// Store 6 has smaller region score than store 5.
 	tc.addLabelsStore(6, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	checkTransferPeer(c, sb.Schedule(cluster), 1, 6)
 
-	// Store 7 has the same storage ratio with store 6, but in a different host.
+	// Store 7 has the same region score with store 6, but in a different host.
 	tc.addLabelsStore(7, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"})
 	checkTransferPeer(c, sb.Schedule(cluster), 1, 7)
 
@@ -325,7 +325,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	sb.cache.delete(1)
 	checkTransferPeer(c, sb.Schedule(cluster), 1, 7)
 
-	// Store 8 has smaller storage ratio than store 7, but the distinct score decrease.
+	// Store 8 has smaller region score than store 7, but the distinct score decrease.
 	tc.addLabelsStore(8, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h3"})
 	checkTransferPeer(c, sb.Schedule(cluster), 1, 7)
 
@@ -338,7 +338,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	c.Assert(sb.cache.get(1), IsTrue)
 	sb.cache.delete(1)
 
-	// Store 9 has different zone with other stores but larger storage ratio than store 1.
+	// Store 9 has different zone with other stores but larger region score than store 1.
 	tc.addLabelsStore(9, 9, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
 	c.Assert(sb.Schedule(cluster), IsNil)
 }
@@ -360,19 +360,19 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 
 	tc.addLeaderRegion(1, 1, 2, 3, 4, 5)
 
-	// Store 6 has smaller ratio.
+	// Store 6 has smaller region score.
 	tc.addLabelsStore(6, 1, map[string]string{"zone": "z5", "rack": "r2", "host": "h1"})
 	checkTransferPeer(c, sb.Schedule(cluster), 5, 6)
 
-	// Store 7 has smaller ratio and higher score.
+	// Store 7 has smaller region score and higher distinct score.
 	tc.addLabelsStore(7, 5, map[string]string{"zone": "z6", "rack": "r1", "host": "h1"})
 	checkTransferPeer(c, sb.Schedule(cluster), 5, 7)
 
-	// Store 1 has smaller ratio and higher score.
+	// Store 1 has smaller region score and higher distinct score.
 	tc.addLeaderRegion(1, 2, 3, 4, 5, 6)
 	checkTransferPeer(c, sb.Schedule(cluster), 5, 1)
 
-	// Store 6 has smaller ratio and higher score.
+	// Store 6 has smaller region score and higher distinct score.
 	tc.addLabelsStore(11, 9, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
 	tc.addLabelsStore(12, 8, map[string]string{"zone": "z2", "rack": "r2", "host": "h1"})
 	tc.addLabelsStore(13, 7, map[string]string{"zone": "z3", "rack": "r2", "host": "h1"})
@@ -472,17 +472,17 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	tc.addLeaderRegion(1, 1)
 	region := cluster.getRegion(1)
 
-	// Store 2 has different zone and smallest storage ratio.
+	// Store 2 has different zone and smallest region score.
 	checkAddPeer(c, rc.Check(region), 2)
 	peer2, _ := cluster.allocPeer(2)
 	region.Peers = append(region.Peers, peer2)
 
-	// Store 3 has different zone and smallest region ratio.
+	// Store 3 has different zone and smallest region score.
 	checkAddPeer(c, rc.Check(region), 3)
 	peer3, _ := cluster.allocPeer(3)
 	region.Peers = append(region.Peers, peer3)
 
-	// Store 4 has the same zone with store 3 and larger region ratio.
+	// Store 4 has the same zone with store 3 and larger region score.
 	peer4, _ := cluster.allocPeer(4)
 	region.Peers = append(region.Peers, peer4)
 	checkRemovePeer(c, rc.Check(region), 4)
@@ -528,7 +528,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	tc.addLabelsStore(3, 5, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	checkAddPeer(c, rc.Check(region), 3)
 
-	// Store 4 has smaller region ratio.
+	// Store 4 has smaller region score.
 	tc.addLabelsStore(4, 4, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	checkAddPeer(c, rc.Check(region), 4)
 
@@ -574,7 +574,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 
 	// Store 10 has a different zone.
-	// Store 2 and 6 have the same distinct score, but store 2 has larger region ratio.
+	// Store 2 and 6 have the same distinct score, but store 2 has larger region score.
 	// So replace peer in store 2 with store 10.
 	tc.addLabelsStore(10, 1, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
 	checkTransferPeer(c, rc.Check(region), 2, 10)
