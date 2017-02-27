@@ -47,6 +47,7 @@ var (
 		},
 		Peers: peers,
 	}
+	unixClient = newUnixSocketClient()
 )
 
 func TestAPIServer(t *testing.T) {
@@ -175,4 +176,17 @@ func mustPutStore(c *C, s *server.Server, store *metapb.Store) {
 		},
 	}
 	mustRPCRequest(c, s.GetAddr(), req)
+}
+
+func readJSONWithURL(url string, data interface{}) error {
+	resp, err := unixClient.Get(url)
+	defer resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	err = readJSON(resp.Body, data)
+	if err != nil {
+		return err
+	}
+	return nil
 }

@@ -30,7 +30,6 @@ type testStoreSuite struct {
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
-	client    *http.Client
 	stores    []*metapb.Store
 }
 
@@ -72,7 +71,6 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 	for _, store := range s.stores {
 		mustPutStore(c, s.svr, store)
 	}
-	s.client = newUnixSocketClient()
 }
 
 func (s *testStoreSuite) TearDownSuite(c *C) {
@@ -93,36 +91,28 @@ func checkStoresInfo(c *C, ss []*storeInfo, want []*metapb.Store) {
 }
 
 func (s *testStoreSuite) TestStoresList(c *C) {
-	resp, err := s.client.Get(fmt.Sprintf("%s/stores", s.urlPrefix))
-	defer resp.Body.Close()
-	c.Assert(err, IsNil)
+	url := fmt.Sprintf("%s/stores", s.urlPrefix)
 	info := new(storesInfo)
-	err = readJSON(resp.Body, info)
+	err := readJSONWithURL(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[:3])
 
-	resp, err = s.client.Get(fmt.Sprintf("%s/stores?state=0", s.urlPrefix))
-	defer resp.Body.Close()
-	c.Assert(err, IsNil)
-	err = readJSON(resp.Body, info)
+	url = fmt.Sprintf("%s/stores?state=0", s.urlPrefix)
+	err = readJSONWithURL(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[:2])
 
-	resp, err = s.client.Get(fmt.Sprintf("%s/stores?state=1", s.urlPrefix))
-	defer resp.Body.Close()
-	c.Assert(err, IsNil)
-	err = readJSON(resp.Body, info)
+	url = fmt.Sprintf("%s/stores?state=1", s.urlPrefix)
+	err = readJSONWithURL(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[2:3])
 
 }
 
 func (s *testStoreSuite) TestStoreGet(c *C) {
-	resp, err := s.client.Get(fmt.Sprintf("%s/store/1", s.urlPrefix))
-	defer resp.Body.Close()
-	c.Assert(err, IsNil)
+	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
 	info := new(storeInfo)
-	err = readJSON(resp.Body, info)
+	err := readJSONWithURL(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, []*storeInfo{info}, s.stores[:1])
 }
@@ -141,12 +131,13 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 			status: http.StatusInternalServerError,
 		},
 	}
+	client := newUnixSocketClient()
 	for _, t := range table {
 		req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/store/%d", s.urlPrefix, t.id), nil)
 		c.Assert(err, IsNil)
-		resp, err := s.client.Do(req)
-		defer resp.Body.Close()
+		resp, err := client.Do(req)
 		ioutil.ReadAll(resp.Body)
+		resp.Body.Close()
 		c.Assert(err, IsNil)
 		c.Assert(resp.StatusCode, Equals, t.status)
 	}

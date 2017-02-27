@@ -15,7 +15,6 @@ package api
 
 import (
 	"fmt"
-	"net/http"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -28,7 +27,6 @@ type testLabelsStoreSuite struct {
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
-	client    *http.Client
 	stores    []*metapb.Store
 }
 
@@ -111,7 +109,6 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 	for _, store := range s.stores {
 		mustPutStore(c, s.svr, store)
 	}
-	s.client = newUnixSocketClient()
 }
 
 func (s *testLabelsStoreSuite) TearDownSuite(c *C) {
@@ -119,11 +116,9 @@ func (s *testLabelsStoreSuite) TearDownSuite(c *C) {
 }
 
 func (s *testLabelsStoreSuite) TestLabelsGet(c *C) {
-	resp, err := s.client.Get(fmt.Sprintf("%s/labels", s.urlPrefix))
-	defer resp.Body.Close()
-	c.Assert(err, IsNil)
+	url := fmt.Sprintf("%s/labels", s.urlPrefix)
 	labels := make([]*metapb.StoreLabel, 0, len(s.stores))
-	err = readJSON(resp.Body, &labels)
+	err := readJSONWithURL(url, &labels)
 	c.Assert(err, IsNil)
 }
 
@@ -163,11 +158,9 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 		},
 	}
 	for _, t := range table {
-		resp, err := s.client.Get(fmt.Sprintf("%s/labels/stores?name=%s&value=%s", s.urlPrefix, t.name, t.value))
-		defer resp.Body.Close()
-		c.Assert(err, IsNil)
+		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", s.urlPrefix, t.name, t.value)
 		info := new(storesInfo)
-		err = readJSON(resp.Body, info)
+		err := readJSONWithURL(url, info)
 		c.Assert(err, IsNil)
 		checkStoresInfo(c, info.Stores, t.want)
 	}
