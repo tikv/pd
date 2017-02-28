@@ -184,9 +184,5 @@ func readJSONWithURL(url string, data interface{}) error {
 	if err != nil {
 		return err
 	}
-	err = readJSON(resp.Body, data)
-	if err != nil {
-		return err
-	}
-	return nil
+	return readJSON(resp.Body, data)
 }

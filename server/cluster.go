@@ -15,6 +15,7 @@ package server
 
 import (
 	"fmt"
+	"math"
 	"path"
 	"strings"
 	"sync"
@@ -427,11 +428,10 @@ func (c *RaftCluster) collectMetrics() {
 	storeDownCount := 0
 	storeOfflineCount := 0
 	storeTombstoneCount := 0
-	regionTotalCount := 0
 	storageSize := uint64(0)
 	storageCapacity := uint64(0)
-	minLeaderRatio, maxLeaderRatio := float64(1.0), float64(0.0)
-	minStorageRatio, maxStorageRatio := float64(1.0), float64(0.0)
+	minLeaderScore, maxLeaderScore := math.MaxFloat64, float64(0.0)
+	minRegionScore, maxRegionScore := math.MaxFloat64, float64(0.0)
 
 	for _, s := range cluster.getStores() {
 		// Store state.
@@ -451,25 +451,14 @@ func (c *RaftCluster) collectMetrics() {
 		}
 
 		// Store stats.
-		storageSize += s.stats.GetUsedSize()
+		storageSize += s.storageSize()
 		storageCapacity += s.stats.GetCapacity()
-		if regionTotalCount < s.stats.TotalRegionCount {
-			regionTotalCount = s.stats.TotalRegionCount
-		}
 
-		// Balance.
-		if minLeaderRatio > s.leaderRatio() {
-			minLeaderRatio = s.leaderRatio()
-		}
-		if maxLeaderRatio < s.leaderRatio() {
-			maxLeaderRatio = s.leaderRatio()
-		}
-		if minStorageRatio > s.storageRatio() {
-			minStorageRatio = s.storageRatio()
-		}
-		if maxStorageRatio < s.storageRatio() {
-			maxStorageRatio = s.storageRatio()
-		}
+		// Balance score.
+		minLeaderScore = math.Min(minLeaderScore, s.leaderScore())
+		maxLeaderScore = math.Max(maxLeaderScore, s.leaderScore())
+		minRegionScore = math.Min(minRegionScore, s.regionScore())
+		maxRegionScore = math.Max(maxRegionScore, s.regionScore())
 	}
 
 	metrics := make(map[string]float64)
@@ -477,11 +466,11 @@ func (c *RaftCluster) collectMetrics() {
 	metrics["store_down_count"] = float64(storeDownCount)
 	metrics["store_offline_count"] = float64(storeOfflineCount)
 	metrics["store_tombstone_count"] = float64(storeTombstoneCount)
-	metrics["region_total_count"] = float64(regionTotalCount)
+	metrics["region_count"] = float64(cluster.getRegionCount())
 	metrics["storage_size"] = float64(storageSize)
 	metrics["storage_capacity"] = float64(storageCapacity)
-	metrics["store_max_diff_leader_ratio"] = maxLeaderRatio - minLeaderRatio
-	metrics["store_max_diff_storage_ratio"] = maxStorageRatio - minStorageRatio
+	metrics["leader_balance_ratio"] = 1 - minLeaderScore/maxLeaderScore
+	metrics["region_balance_ratio"] = 1 - minRegionScore/maxRegionScore
 
 	for label, value := range metrics {
 		clusterStatusGauge.WithLabelValues(label).Set(value)
@@ -515,25 +504,6 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
 	}
 	return c.cachedCluster.putMeta(meta)
-}
-
-// GetBalanceOperators gets the balance operators from cluster.
-func (c *RaftCluster) GetBalanceOperators() map[uint64]Operator {
-	return c.coordinator.getOperators()
-}
-
-// GetHistoryOperators gets the history operators from cluster.
-func (c *RaftCluster) GetHistoryOperators() []Operator {
-	return c.coordinator.getHistories()
-}
-
-// GetScores gets store scores from balancer.
-func (c *RaftCluster) GetScores(store *metapb.Store, status *StoreStatus) []int {
-	storeInfo := &storeInfo{
-		Store: store,
-		stats: status,
-	}
-	return storeInfo.resourceScores()
 }
 
 // FetchEvents fetches the operator events.

@@ -46,7 +46,7 @@ func (s *testReplicationSuite) TestDistinctScore(c *C) {
 					"rack": rack,
 					"host": host,
 				}
-				tc.addLabelsStore(storeID, 1, 0.1, labels)
+				tc.addLabelsStore(storeID, 1, labels)
 				store := cluster.getStore(storeID)
 				stores = append(stores, store)
 
@@ -62,7 +62,7 @@ func (s *testReplicationSuite) TestDistinctScore(c *C) {
 		}
 	}
 
-	tc.addLabelsStore(100, 1, 0.1, map[string]string{})
+	tc.addLabelsStore(100, 1, map[string]string{})
 	store := cluster.getStore(100)
 	c.Assert(rep.GetDistinctScore(stores, store), Equals, float64(0))
 }
@@ -71,9 +71,9 @@ func (s *testReplicationSuite) TestCompareStoreScore(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 
-	tc.addRegionStore(1, 1, 0.1)
-	tc.addRegionStore(2, 1, 0.1)
-	tc.addRegionStore(3, 1, 0.2)
+	tc.addRegionStore(1, 1)
+	tc.addRegionStore(2, 1)
+	tc.addRegionStore(3, 3)
 
 	store1 := cluster.getStore(1)
 	store2 := cluster.getStore(2)

@@ -15,6 +15,7 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/signal"
 	"strings"
@@ -59,8 +60,19 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+	var input []string
+	stat, _ := os.Stdin.Stat()
+	if (stat.Mode() & os.ModeCharDevice) == 0 {
+		detach = true
+		b, err := ioutil.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		input = strings.Split(strings.TrimSpace(string(b[:])), " ")
+	}
 	if detach {
-		pdctl.Start(os.Args[1:])
+		pdctl.Start(append(os.Args[1:], input...))
 		return
 	}
 	loop()
@@ -87,12 +99,11 @@ func loop() {
 			}
 			continue
 		}
-
+		if line == "exit" {
+			os.Exit(0)
+		}
 		args := strings.Split(strings.TrimSpace(line), " ")
 		args = append(args, "-u", url)
-		usage, err := pdctl.Start(args)
-		if err != nil {
-			fmt.Println(usage)
-		}
+		pdctl.Start(args)
 	}
 }

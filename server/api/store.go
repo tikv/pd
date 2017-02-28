@@ -36,26 +36,24 @@ type storeStatus struct {
 	StoreID            uint64            `json:"store_id"`
 	Capacity           typeutil.ByteSize `json:"capacity"`
 	Available          typeutil.ByteSize `json:"available"`
+	LeaderCount        uint32            `json:"leader_count"`
 	RegionCount        uint32            `json:"region_count"`
 	SendingSnapCount   uint32            `json:"sending_snap_count"`
 	ReceivingSnapCount uint32            `json:"receiving_snap_count"`
-	StartTime          time.Time         `json:"start_time"`
 	ApplyingSnapCount  uint32            `json:"applying_snap_count"`
 	IsBusy             bool              `json:"is_busy"`
 
-	StartTS          time.Time         `json:"start_ts"`
-	LastHeartbeatTS  time.Time         `json:"last_heartbeat_ts"`
-	TotalRegionCount int               `json:"total_region_count"`
-	Uptime           typeutil.Duration `json:"uptime"`
+	StartTS         time.Time         `json:"start_ts"`
+	LastHeartbeatTS time.Time         `json:"last_heartbeat_ts"`
+	Uptime          typeutil.Duration `json:"uptime"`
 }
 
 type storeInfo struct {
 	Store  *metaStore   `json:"store"`
 	Status *storeStatus `json:"status"`
-	Scores []int        `json:"scores"`
 }
 
-func newStoreInfo(store *metapb.Store, status *server.StoreStatus, scores []int) *storeInfo {
+func newStoreInfo(store *metapb.Store, status *server.StoreStatus) *storeInfo {
 	return &storeInfo{
 		Store: &metaStore{
 			Store:     store,
@@ -65,18 +63,16 @@ func newStoreInfo(store *metapb.Store, status *server.StoreStatus, scores []int)
 			StoreID:            status.StoreId,
 			Capacity:           typeutil.ByteSize(status.Capacity),
 			Available:          typeutil.ByteSize(status.Available),
+			LeaderCount:        status.LeaderCount,
 			RegionCount:        status.RegionCount,
 			SendingSnapCount:   status.SendingSnapCount,
 			ReceivingSnapCount: status.ReceivingSnapCount,
-			StartTime:          time.Unix(int64(status.StartTime), 0),
 			ApplyingSnapCount:  status.ApplyingSnapCount,
 			IsBusy:             status.IsBusy,
-			StartTS:            status.StartTS,
+			StartTS:            status.GetStartTS(),
 			LastHeartbeatTS:    status.LastHeartbeatTS,
-			TotalRegionCount:   status.TotalRegionCount,
 			Uptime:             typeutil.NewDuration(status.GetUptime()),
 		},
-		Scores: scores,
 	}
 }
 
@@ -118,7 +114,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	storeInfo := newStoreInfo(store, status, cluster.GetScores(store, status))
+	storeInfo := newStoreInfo(store, status)
 	h.rd.JSON(w, http.StatusOK, storeInfo)
 }
 
@@ -190,7 +186,7 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		storeInfo := newStoreInfo(store, status, cluster.GetScores(store, status))
+		storeInfo := newStoreInfo(store, status)
 		storesInfo.Stores = append(storesInfo.Stores, storeInfo)
 	}
 	storesInfo.Count = len(storesInfo.Stores)

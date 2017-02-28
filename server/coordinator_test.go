@@ -77,23 +77,23 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	defer co.stop()
 
 	// Transfer peer from store 4 to store 1.
-	tc.addRegionStore(4, 4, 0.4)
-	tc.addRegionStore(3, 3, 0.3)
-	tc.addRegionStore(2, 2, 0.2)
-	tc.addRegionStore(1, 1, 0.1)
+	tc.addRegionStore(4, 4)
+	tc.addRegionStore(3, 3)
+	tc.addRegionStore(2, 2)
+	tc.addRegionStore(1, 1)
 	tc.addLeaderRegion(1, 2, 3, 4)
 
 	// Transfer leader from store 4 to store 2.
-	tc.updateLeaderCount(4, 4, 10)
-	tc.updateLeaderCount(3, 3, 10)
-	tc.updateLeaderCount(2, 2, 10)
-	tc.updateLeaderCount(1, 1, 10)
+	tc.updateLeaderCount(4, 4)
+	tc.updateLeaderCount(3, 3)
+	tc.updateLeaderCount(2, 2)
+	tc.updateLeaderCount(1, 1)
 	tc.addLeaderRegion(2, 4, 3, 2)
 
 	// Wait for schedule and turn off balance.
 	time.Sleep(time.Second)
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-storage-scheduler"), IsNil)
+	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
 	checkTransferPeer(c, co.getOperator(1), 4, 1)
 	checkTransferLeader(c, co.getOperator(2), 4, 2)
 
@@ -108,7 +108,6 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	region.RemoveStorePeer(4)
 	cluster.putRegion(region)
 	c.Assert(co.dispatch(region), IsNil)
-	c.Assert(co.getOperator(region.GetId()), IsNil)
 
 	// Transfer leader.
 	region = cluster.getRegion(2)
@@ -132,10 +131,10 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	co.run()
 	defer co.stop()
 
-	tc.addRegionStore(1, 1, 0.1)
-	tc.addRegionStore(2, 2, 0.2)
-	tc.addRegionStore(3, 3, 0.3)
-	tc.addRegionStore(4, 4, 0.4)
+	tc.addRegionStore(1, 1)
+	tc.addRegionStore(2, 2)
+	tc.addRegionStore(3, 3)
+	tc.addRegionStore(4, 4)
 
 	// Add peer to store 1.
 	tc.addLeaderRegion(1, 2, 3)
@@ -180,10 +179,10 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	defer co.stop()
 
 	// Transfer peer from store 4 to store 1.
-	tc.addRegionStore(4, 4, 0.4)
-	tc.addRegionStore(3, 3, 0.3)
-	tc.addRegionStore(2, 2, 0.2)
-	tc.addRegionStore(1, 1, 0.1)
+	tc.addRegionStore(1, 1)
+	tc.addRegionStore(2, 2)
+	tc.addRegionStore(3, 3)
+	tc.addRegionStore(4, 4)
 	tc.addLeaderRegion(1, 2, 3, 4)
 
 	// Wait for schedule.
@@ -226,13 +225,13 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 
 	c.Assert(co.schedulers, HasLen, 2)
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-storage-scheduler"), IsNil)
+	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
 	c.Assert(co.schedulers, HasLen, 0)
 
 	// Add stores 1,2,3
-	tc.addLeaderStore(1, 1, 1)
-	tc.addLeaderStore(2, 1, 1)
-	tc.addLeaderStore(3, 1, 1)
+	tc.addLeaderStore(1, 1)
+	tc.addLeaderStore(2, 1)
+	tc.addLeaderStore(3, 1)
 	// Add regions 1 with leader in store 1 and followers in stores 2,3
 	tc.addLeaderRegion(1, 1, 2, 3)
 	// Add regions 2 with leader in store 2 and followers in stores 1,3
@@ -296,17 +295,24 @@ type testScheduleControllerSuite struct{}
 func (s *testScheduleControllerSuite) TestController(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	cfg, opt := newTestScheduleConfig()
-	cfg.ScheduleInterval.Duration = time.Minute
 	co := newCoordinator(cluster, opt)
-	sc := newScheduleController(co, newBalanceLeaderScheduler(opt))
+	lb := newBalanceLeaderScheduler(opt)
+	sc := newScheduleController(co, lb)
 
+	for i := minScheduleInterval; sc.GetInterval() != maxScheduleInterval; i *= 2 {
+		c.Assert(sc.GetInterval(), Equals, i)
+		c.Assert(sc.Schedule(cluster), IsNil)
+	}
+
+	cfg.LeaderScheduleLimit = 1
+	c.Assert(sc.GetResourceLimit(), Equals, uint64(1))
 	cfg.LeaderScheduleLimit = 0
-	c.Assert(sc.GetInterval(), Equals, time.Minute)
-
+	c.Assert(sc.GetResourceLimit(), Equals, uint64(0))
 	cfg.LeaderScheduleLimit = 2
-	c.Assert(sc.GetInterval(), Equals, time.Second*30)
+	c.Assert(sc.GetResourceLimit(), Equals, uint64(1))
 
 	// limit = 2
+	lb.limit = 2
 	op := newTestOperator(1, leaderKind)
 	// count = 0
 	c.Assert(sc.AllowSchedule(), IsTrue)

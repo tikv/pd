@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -57,19 +56,12 @@ func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		prefix = fmt.Sprintf(regionPrefix, args[0])
 	}
-	url := getAddressFromCmd(cmd, prefix)
-	r, err := http.Get(url)
+	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get region:[%s]\n", err)
+		fmt.Printf("Failed to get region: %s", err)
 		return
 	}
-	defer r.Body.Close()
-	if r.StatusCode != http.StatusOK {
-		printResponseError(r)
-		return
-	}
-
-	io.Copy(os.Stdout, r.Body)
+	fmt.Println(r)
 }
 
 // NewRegionWithKeyCommand return a region with key subcommand of regionCmd

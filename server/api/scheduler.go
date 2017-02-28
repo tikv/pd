@@ -86,6 +86,14 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	case "shuffle-region-scheduler":
+		if err := h.AddShuffleRegionScheduler(); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	default:
+		h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
+		return
 	}
 
 	h.r.JSON(w, http.StatusOK, nil)

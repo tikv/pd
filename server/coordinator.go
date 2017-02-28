@@ -24,9 +24,11 @@ import (
 )
 
 const (
-	historiesCacheSize = 1000
-	eventsCacheSize    = 1000
-	maxScheduleRetries = 10
+	historiesCacheSize  = 1000
+	eventsCacheSize     = 1000
+	maxScheduleRetries  = 10
+	maxScheduleInterval = time.Minute
+	minScheduleInterval = time.Millisecond * 10
 )
 
 var (
@@ -94,7 +96,7 @@ func (c *coordinator) dispatch(region *regionInfo) *pdpb.RegionHeartbeatResponse
 
 func (c *coordinator) run() {
 	c.addScheduler(newBalanceLeaderScheduler(c.opt))
-	c.addScheduler(newBalanceStorageScheduler(c.opt))
+	c.addScheduler(newBalanceRegionScheduler(c.opt))
 }
 
 func (c *coordinator) stop() {
@@ -181,6 +183,13 @@ func (c *coordinator) addOperator(op Operator) bool {
 	defer c.Unlock()
 
 	regionID := op.GetRegionID()
+
+	// Admin operator bypasses the check.
+	if op.GetResourceKind() == adminKind {
+		c.operators[regionID] = op
+		return true
+	}
+
 	if _, ok := c.operators[regionID]; ok {
 		return false
 	}
@@ -208,13 +217,13 @@ func (c *coordinator) getOperator(regionID uint64) Operator {
 	return c.operators[regionID]
 }
 
-func (c *coordinator) getOperators() map[uint64]Operator {
+func (c *coordinator) getOperators() []Operator {
 	c.RLock()
 	defer c.RUnlock()
 
-	operators := make(map[uint64]Operator)
-	for id, op := range c.operators {
-		operators[id] = op
+	var operators []Operator
+	for _, op := range c.operators {
+		operators = append(operators, op)
 	}
 
 	return operators
@@ -263,10 +272,11 @@ func (l *scheduleLimiter) operatorCount(kind ResourceKind) uint64 {
 
 type scheduleController struct {
 	Scheduler
-	opt     *scheduleOption
-	limiter *scheduleLimiter
-	ctx     context.Context
-	cancel  context.CancelFunc
+	opt      *scheduleOption
+	limiter  *scheduleLimiter
+	interval time.Duration
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
 func newScheduleController(c *coordinator, s Scheduler) *scheduleController {
@@ -275,6 +285,7 @@ func newScheduleController(c *coordinator, s Scheduler) *scheduleController {
 		Scheduler: s,
 		opt:       c.opt,
 		limiter:   c.limiter,
+		interval:  minScheduleInterval,
 		ctx:       ctx,
 		cancel:    cancel,
 	}
@@ -288,13 +299,20 @@ func (s *scheduleController) Stop() {
 	s.cancel()
 }
 
-func (s *scheduleController) GetInterval() time.Duration {
-	limit := s.GetResourceLimit()
-	interval := s.opt.GetScheduleInterval()
-	if limit == 0 {
-		return interval
+func (s *scheduleController) Schedule(cluster *clusterInfo) Operator {
+	// If we have schedule, reset interval to the minimal interval.
+	if op := s.Scheduler.Schedule(cluster); op != nil {
+		s.interval = minScheduleInterval
+		return op
 	}
-	return time.Duration(uint64(interval.Nanoseconds())/limit) * time.Nanosecond
+
+	// If we have no schedule, increase the interval exponentially.
+	s.interval = minDuration(s.interval*2, maxScheduleInterval)
+	return nil
+}
+
+func (s *scheduleController) GetInterval() time.Duration {
+	return s.interval
 }
 
 func (s *scheduleController) AllowSchedule() bool {

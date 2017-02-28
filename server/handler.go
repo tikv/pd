@@ -16,7 +16,8 @@ package server
 import "github.com/juju/errors"
 
 var (
-	errNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
+	errNotBootstrapped  = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
+	errOperatorNotFound = errors.New("operator not found")
 )
 
 // Handler is a helper to export methods to handle API/RPC requests.
@@ -82,4 +83,172 @@ func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
 // AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.
 func (h *Handler) AddShuffleLeaderScheduler() error {
 	return h.AddScheduler(newShuffleLeaderScheduler(h.opt))
+}
+
+// AddShuffleRegionScheduler adds a shuffle-region-scheduler.
+func (h *Handler) AddShuffleRegionScheduler() error {
+	return h.AddScheduler(newShuffleRegionScheduler(h.opt))
+}
+
+// GetOperator returns the region operator.
+func (h *Handler) GetOperator(regionID uint64) (Operator, error) {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	op := c.getOperator(regionID)
+	if op == nil {
+		return nil, errOperatorNotFound
+	}
+
+	return op, nil
+}
+
+// RemoveOperator removes the region operator.
+func (h *Handler) RemoveOperator(regionID uint64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	op := c.getOperator(regionID)
+	if op == nil {
+		return errOperatorNotFound
+	}
+
+	c.removeOperator(op)
+	return nil
+}
+
+// GetOperators returns the running operators.
+func (h *Handler) GetOperators() ([]Operator, error) {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return c.getOperators(), nil
+}
+
+// GetAdminOperators returns the running admin operators.
+func (h *Handler) GetAdminOperators() ([]Operator, error) {
+	return h.GetOperatorsOfKind(adminKind)
+}
+
+// GetLeaderOperators returns the running leader operators.
+func (h *Handler) GetLeaderOperators() ([]Operator, error) {
+	return h.GetOperatorsOfKind(leaderKind)
+}
+
+// GetRegionOperators returns the running region operators.
+func (h *Handler) GetRegionOperators() ([]Operator, error) {
+	return h.GetOperatorsOfKind(regionKind)
+}
+
+// GetOperatorsOfKind returns the running operators of the kind.
+func (h *Handler) GetOperatorsOfKind(kind ResourceKind) ([]Operator, error) {
+	ops, err := h.GetOperators()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var results []Operator
+	for _, op := range ops {
+		if op.GetResourceKind() == kind {
+			results = append(results, op)
+		}
+	}
+	return results, nil
+}
+
+// AddTransferLeaderOperator adds an operator to transfer leader to the store.
+func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	region := c.cluster.getRegion(regionID)
+	if region == nil {
+		return errRegionNotFound(regionID)
+	}
+	newLeader := region.GetStorePeer(storeID)
+	if newLeader == nil {
+		return errors.Errorf("region has no peer in store %v", storeID)
+	}
+
+	op := newTransferLeaderOperator(regionID, region.Leader, newLeader)
+	c.addOperator(newAdminOperator(region, op))
+	return nil
+}
+
+// AddTransferRegionOperator adds an operator to transfer region to the stores.
+func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64]struct{}) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	region := c.cluster.getRegion(regionID)
+	if region == nil {
+		return errRegionNotFound(regionID)
+	}
+
+	var ops []Operator
+
+	// Add missing peers.
+	for id := range storeIDs {
+		if c.cluster.getStore(id) == nil {
+			return errStoreNotFound(id)
+		}
+		if region.GetStorePeer(id) != nil {
+			continue
+		}
+		peer, err := c.cluster.allocPeer(id)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		ops = append(ops, newAddPeerOperator(regionID, peer))
+	}
+
+	// Remove redundant peers.
+	for _, peer := range region.GetPeers() {
+		if _, ok := storeIDs[peer.GetStoreId()]; ok {
+			continue
+		}
+		ops = append(ops, newRemovePeerOperator(regionID, peer))
+	}
+
+	c.addOperator(newAdminOperator(region, ops...))
+	return nil
+}
+
+// AddTransferPeerOperator adds an operator to transfer peer.
+func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreID uint64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	region := c.cluster.getRegion(regionID)
+	if region == nil {
+		return errRegionNotFound(regionID)
+	}
+
+	oldPeer := region.GetStorePeer(fromStoreID)
+	if oldPeer == nil {
+		return errors.Errorf("region has no peer in store %v", fromStoreID)
+	}
+
+	if c.cluster.getStore(toStoreID) == nil {
+		return errStoreNotFound(toStoreID)
+	}
+	newPeer, err := c.cluster.allocPeer(toStoreID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	addPeer := newAddPeerOperator(regionID, newPeer)
+	removePeer := newRemovePeerOperator(regionID, oldPeer)
+	c.addOperator(newAdminOperator(region, addPeer, removePeer))
+	return nil
 }

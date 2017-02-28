@@ -207,3 +207,5 @@ import:
 - package: github.com/elazarl/go-bindata-assetfs
 - package: github.com/ngaut/systimemon
   version: c2ca1c75c6af5556eb6ce67994120adf12f2ccef
+- package: github.com/montanaflynn/stats
+  version: f8cd06f93c6c1b06028caafb88b540fc820f77c1
