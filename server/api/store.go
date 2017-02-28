@@ -69,8 +69,8 @@ func newStoreInfo(store *metapb.Store, status *server.StoreStatus) *storeInfo {
 			ReceivingSnapCount: status.ReceivingSnapCount,
 			ApplyingSnapCount:  status.ApplyingSnapCount,
 			IsBusy:             status.IsBusy,
-			StartTS:            status.GetStartTS(),
-			LastHeartbeatTS:    status.LastHeartbeatTS,
+			StartTS:            typeutil.UTCToLocalTime(status.GetStartTS()),
+			LastHeartbeatTS:    typeutil.UTCToLocalTime(status.LastHeartbeatTS),
 			Uptime:             typeutil.NewDuration(status.GetUptime()),
 		},
 	}
