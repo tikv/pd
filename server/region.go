@@ -1,5 +1,5 @@
 // Copyright 2016 PingCAP, Inc.
-//
+
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -16,6 +16,7 @@ package server
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/google/btree"
@@ -57,6 +58,47 @@ func (r *regionInfo) clone() *regionInfo {
 
 func (r *regionInfo) String() string {
 	return fmt.Sprintf("%+v", *r)
+}
+
+func (r *regionInfo) Diff(other *regionInfo) []string {
+	var ret []string
+	if r.Region.GetId() != other.Region.GetId() {
+		ret = append(ret, fmt.Sprintf("%v -> %v", r, other))
+		return ret
+	}
+
+	if !bytes.Equal(r.Region.EndKey, other.Region.EndKey) {
+		rr := &metapb.Region{EndKey: r.Region.EndKey}
+		oo := &metapb.Region{EndKey: other.Region.EndKey}
+		ret = append(ret, fmt.Sprintf("Endkey Changed:%s -> %s", rr, oo))
+	}
+
+	for _, a := range r.Peers {
+		both := false
+		for _, b := range other.Peers {
+			if reflect.DeepEqual(a, b) {
+				both = true
+				break
+			}
+		}
+		if !both {
+			ret = append(ret, fmt.Sprintf("Remove Peer:{%v}", a))
+		}
+	}
+	for _, b := range other.Peers {
+		both := false
+		for _, a := range r.Peers {
+			if reflect.DeepEqual(a, b) {
+				both = true
+				break
+			}
+		}
+		if !both {
+			ret = append(ret, fmt.Sprintf("Add Peer:{%v}", b))
+		}
+	}
+
+	return ret
 }
 
 func (r *regionInfo) GetPeer(peerID uint64) *metapb.Peer {

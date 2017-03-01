@@ -512,7 +512,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 
 	// Region does not exist, add it.
 	if origin == nil {
-		log.Infof("insert region %v", region)
+		log.Infof("[region %d] Insert new region %v", region.GetId(), region)
 		return c.putRegionLocked(region)
 	}
 
@@ -525,13 +525,17 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 	}
 
 	// Region meta is updated, update kv and cache.
-	if r.GetVersion() > o.GetVersion() || r.GetConfVer() > o.GetConfVer() {
-		log.Infof("update region %v origin %v", region, origin)
+	if r.GetVersion() > o.GetVersion() {
+		log.Infof("[region %d] Version changed from %d to %d, Diff:%s", region.GetId(), o.GetVersion(), r.GetVersion(), origin.Diff(region))
+		return c.putRegionLocked(region)
+	}
+	if r.GetConfVer() > o.GetConfVer() {
+		log.Infof("[region %d] ConfVer changed from %d to %d, Diff:%s", region.GetId(), o.GetConfVer(), r.GetConfVer(), origin.Diff(region))
 		return c.putRegionLocked(region)
 	}
 
 	if region.Leader.GetId() != origin.Leader.GetId() {
-		log.Infof("update region leader %v origin %v", region, origin)
+		log.Infof("[region %d] Leader changed from {PeerId:%d StoreId:%d} to {PeerId:%d StoreID:%d}", region.GetId(), origin.Leader.GetId(), origin.Leader.GetStoreId(), region.Leader.GetId(), region.Leader.GetStoreId())
 	}
 
 	// Region meta is the same, update cache only.
