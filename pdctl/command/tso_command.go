@@ -43,7 +43,7 @@ func showTSOCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	ts, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
-		fmt.Printf("Failed to parse tso: %s", err)
+		fmt.Printf("Failed to parse TSO: %s", err)
 		return
 	}
 	logical := ts & logicalBits
