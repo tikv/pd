@@ -41,7 +41,7 @@ func (s *balanceSelector) SelectSource(stores []*storeInfo, filters ...Filter) *
 		if filterSource(store, filters) {
 			continue
 		}
-		if result == nil || result.resourceRatio(s.kind) < store.resourceRatio(s.kind) {
+		if result == nil || result.resourceScore(s.kind) < store.resourceScore(s.kind) {
 			result = store
 		}
 	}
@@ -56,17 +56,19 @@ func (s *balanceSelector) SelectTarget(stores []*storeInfo, filters ...Filter) *
 		if filterTarget(store, filters) {
 			continue
 		}
-		if result == nil || result.resourceRatio(s.kind) > store.resourceRatio(s.kind) {
+		if result == nil || result.resourceScore(s.kind) > store.resourceScore(s.kind) {
 			result = store
 		}
 	}
 	return result
 }
 
-type randomSelector struct{}
+type randomSelector struct {
+	filters []Filter
+}
 
-func newRandomSelector() *randomSelector {
-	return &randomSelector{}
+func newRandomSelector(filters []Filter) *randomSelector {
+	return &randomSelector{filters: filters}
 }
 
 func (s *randomSelector) Select(stores []*storeInfo) *storeInfo {
@@ -77,6 +79,8 @@ func (s *randomSelector) Select(stores []*storeInfo) *storeInfo {
 }
 
 func (s *randomSelector) SelectSource(stores []*storeInfo, filters ...Filter) *storeInfo {
+	filters = append(filters, s.filters...)
+
 	var candidates []*storeInfo
 	for _, store := range stores {
 		if filterSource(store, filters) {
@@ -88,6 +92,8 @@ func (s *randomSelector) SelectSource(stores []*storeInfo, filters ...Filter) *s
 }
 
 func (s *randomSelector) SelectTarget(stores []*storeInfo, filters ...Filter) *storeInfo {
+	filters = append(filters, s.filters...)
+
 	var candidates []*storeInfo
 	for _, store := range stores {
 		if filterTarget(store, filters) {

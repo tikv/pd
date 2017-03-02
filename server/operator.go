@@ -34,12 +34,53 @@ type Operator interface {
 	Do(region *regionInfo) (*pdpb.RegionHeartbeatResponse, bool)
 }
 
+type adminOperator struct {
+	Region *regionInfo `json:"region"`
+	Start  time.Time   `json:"start"`
+	Ops    []Operator  `json:"ops"`
+}
+
+func newAdminOperator(region *regionInfo, ops ...Operator) *adminOperator {
+	return &adminOperator{
+		Region: region,
+		Start:  time.Now(),
+		Ops:    ops,
+	}
+}
+
+func (op *adminOperator) String() string {
+	return fmt.Sprintf("%+v", *op)
+}
+
+func (op *adminOperator) GetRegionID() uint64 {
+	return op.Region.GetId()
+}
+
+func (op *adminOperator) GetResourceKind() ResourceKind {
+	return adminKind
+}
+
+func (op *adminOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
+	// Update region.
+	op.Region = region.clone()
+
+	// Do all operators in order.
+	for i := 0; i < len(op.Ops); i++ {
+		if res, finished := op.Ops[i].Do(region); !finished {
+			return res, false
+		}
+	}
+
+	// Admin operator never ends, remove it from the API.
+	return nil, false
+}
+
 type regionOperator struct {
 	Region *regionInfo `json:"region"`
 	Start  time.Time   `json:"start"`
 	End    time.Time   `json:"end"`
 	Index  int         `json:"index"`
-	Ops    []Operator  `json:"operators"`
+	Ops    []Operator  `json:"ops"`
 }
 
 func newRegionOperator(region *regionInfo, ops ...Operator) *regionOperator {
@@ -130,7 +171,7 @@ func (op *changePeerOperator) GetRegionID() uint64 {
 }
 
 func (op *changePeerOperator) GetResourceKind() ResourceKind {
-	return storageKind
+	return regionKind
 }
 
 func (op *changePeerOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatResponse, bool) {

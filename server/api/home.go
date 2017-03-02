@@ -32,3 +32,7 @@ func newHomeHandler(rd *render.Render) *homeHandler {
 func (h *homeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.rd.HTML(w, http.StatusOK, "index", r.Host)
 }
+
+func (h *homeHandler) Ping(w http.ResponseWriter, r *http.Request) {
+	h.rd.Text(w, http.StatusOK, "")
+}

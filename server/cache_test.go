@@ -37,16 +37,22 @@ func newTestStores(n uint64) []*storeInfo {
 	return stores
 }
 
-func (s *testStoresInfoSuite) Test(c *C) {
+func (s *testStoresInfoSuite) TestStores(c *C) {
 	n := uint64(10)
 	cache := newStoresInfo()
 	stores := newTestStores(n)
 
 	for i := uint64(0); i < n; i++ {
 		c.Assert(cache.getStore(i), IsNil)
+		c.Assert(cache.blockStore(i), NotNil)
 		cache.setStore(stores[i])
 		c.Assert(cache.getStore(i), DeepEquals, stores[i])
 		c.Assert(cache.getStoreCount(), Equals, int(i+1))
+		c.Assert(cache.blockStore(i), IsNil)
+		c.Assert(cache.getStore(i).isBlocked(), IsTrue)
+		c.Assert(cache.blockStore(i), NotNil)
+		cache.unblockStore(i)
+		c.Assert(cache.getStore(i).isBlocked(), IsFalse)
 	}
 	c.Assert(cache.getStoreCount(), Equals, int(n))
 
@@ -273,19 +279,14 @@ func (s *testClusterInfoSuite) testStoreHeartbeat(c *C, cache *clusterInfo) {
 		c.Assert(cache.getStoreCount(), Equals, int(i+1))
 
 		stats := store.stats
-		startTS := stats.StartTS
-		c.Assert(stats.StartTS.IsZero(), IsFalse)
+		c.Assert(stats.LeaderCount, Equals, uint32(0))
 		c.Assert(stats.LastHeartbeatTS.IsZero(), IsTrue)
-		c.Assert(stats.TotalRegionCount, Equals, 0)
-		c.Assert(stats.LeaderRegionCount, Equals, 0)
 
 		c.Assert(cache.handleStoreHeartbeat(storeStats), IsNil)
 
 		stats = cache.getStore(store.GetId()).stats
-		c.Assert(stats.StartTS, Equals, startTS)
+		c.Assert(stats.LeaderCount, Equals, uint32(1))
 		c.Assert(stats.LastHeartbeatTS.IsZero(), IsFalse)
-		c.Assert(stats.TotalRegionCount, Equals, int(n))
-		c.Assert(stats.LeaderRegionCount, Equals, 1)
 	}
 
 	c.Assert(cache.getStoreCount(), Equals, int(n))

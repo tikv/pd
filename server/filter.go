@@ -61,6 +61,20 @@ func (f *excludedFilter) FilterTarget(store *storeInfo) bool {
 	return ok
 }
 
+type blockFilter struct{}
+
+func newBlockFilter() *blockFilter {
+	return &blockFilter{}
+}
+
+func (f *blockFilter) FilterSource(store *storeInfo) bool {
+	return store.isBlocked()
+}
+
+func (f *blockFilter) FilterTarget(store *storeInfo) bool {
+	return store.isBlocked()
+}
+
 type cacheFilter struct {
 	cache *idCache
 }
@@ -118,38 +132,6 @@ func (f *healthFilter) FilterSource(store *storeInfo) bool {
 
 func (f *healthFilter) FilterTarget(store *storeInfo) bool {
 	return f.filter(store)
-}
-
-type regionCountFilter struct {
-	opt *scheduleOption
-}
-
-func newRegionCountFilter(opt *scheduleOption) *regionCountFilter {
-	return &regionCountFilter{opt: opt}
-}
-
-func (f *regionCountFilter) FilterSource(store *storeInfo) bool {
-	return uint64(store.stats.RegionCount) < f.opt.GetMinRegionCount()
-}
-
-func (f *regionCountFilter) FilterTarget(store *storeInfo) bool {
-	return false
-}
-
-type leaderCountFilter struct {
-	opt *scheduleOption
-}
-
-func newLeaderCountFilter(opt *scheduleOption) *leaderCountFilter {
-	return &leaderCountFilter{opt: opt}
-}
-
-func (f *leaderCountFilter) FilterSource(store *storeInfo) bool {
-	return uint64(store.stats.LeaderRegionCount) < f.opt.GetMinLeaderCount()
-}
-
-func (f *leaderCountFilter) FilterTarget(store *storeInfo) bool {
-	return false
 }
 
 type snapshotCountFilter struct {

@@ -17,34 +17,62 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/pkg/timeutil"
+	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
 
+type metaStore struct {
+	*metapb.Store
+	StateName string `json:"state_name"`
+}
+
 type storeStatus struct {
-	*server.StoreStatus
-	Uptime timeutil.Duration `json:"uptime"`
+	StoreID            uint64            `json:"store_id"`
+	Capacity           typeutil.ByteSize `json:"capacity"`
+	Available          typeutil.ByteSize `json:"available"`
+	LeaderCount        uint32            `json:"leader_count"`
+	RegionCount        uint32            `json:"region_count"`
+	SendingSnapCount   uint32            `json:"sending_snap_count"`
+	ReceivingSnapCount uint32            `json:"receiving_snap_count"`
+	ApplyingSnapCount  uint32            `json:"applying_snap_count"`
+	IsBusy             bool              `json:"is_busy"`
+
+	StartTS         time.Time         `json:"start_ts"`
+	LastHeartbeatTS time.Time         `json:"last_heartbeat_ts"`
+	Uptime          typeutil.Duration `json:"uptime"`
 }
 
 type storeInfo struct {
-	Store  *metapb.Store `json:"store"`
-	Status *storeStatus  `json:"status"`
-	Scores []int         `json:"scores"`
+	Store  *metaStore   `json:"store"`
+	Status *storeStatus `json:"status"`
 }
 
-func newStoreInfo(store *metapb.Store, status *server.StoreStatus, scores []int) *storeInfo {
+func newStoreInfo(store *metapb.Store, status *server.StoreStatus) *storeInfo {
 	return &storeInfo{
-		Store: store,
-		Status: &storeStatus{
-			StoreStatus: status,
-			Uptime:      timeutil.NewDuration(status.GetUptime()),
+		Store: &metaStore{
+			Store:     store,
+			StateName: store.State.String(),
 		},
-		Scores: scores,
+		Status: &storeStatus{
+			StoreID:            status.StoreId,
+			Capacity:           typeutil.ByteSize(status.Capacity),
+			Available:          typeutil.ByteSize(status.Available),
+			LeaderCount:        status.LeaderCount,
+			RegionCount:        status.RegionCount,
+			SendingSnapCount:   status.SendingSnapCount,
+			ReceivingSnapCount: status.ReceivingSnapCount,
+			ApplyingSnapCount:  status.ApplyingSnapCount,
+			IsBusy:             status.IsBusy,
+			StartTS:            status.GetStartTS(),
+			LastHeartbeatTS:    status.LastHeartbeatTS,
+			Uptime:             typeutil.NewDuration(status.GetUptime()),
+		},
 	}
 }
 
@@ -86,7 +114,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	storeInfo := newStoreInfo(store, status, cluster.GetScores(store, status))
+	storeInfo := newStoreInfo(store, status)
 	h.rd.JSON(w, http.StatusOK, storeInfo)
 }
 
@@ -158,7 +186,7 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		storeInfo := newStoreInfo(store, status, cluster.GetScores(store, status))
+		storeInfo := newStoreInfo(store, status)
 		storesInfo.Stores = append(storesInfo.Stores, storeInfo)
 	}
 	storesInfo.Count = len(storesInfo.Stores)

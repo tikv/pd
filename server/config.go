@@ -27,7 +27,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/pkg/timeutil"
+	"github.com/pingcap/pd/pkg/typeutil"
 )
 
 // Config is the pd server configuration.
@@ -62,7 +62,7 @@ type Config struct {
 	LogFile string `toml:"log-file" json:"log-file"`
 
 	// TsoSaveInterval is the interval to save timestamp.
-	TsoSaveInterval timeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
+	TsoSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
@@ -148,7 +148,7 @@ func adjustFloat64(v *float64, defValue float64) {
 	}
 }
 
-func adjustDuration(v *timeutil.Duration, defValue time.Duration) {
+func adjustDuration(v *typeutil.Duration, defValue time.Duration) {
 	if v.Duration == 0 {
 		v.Duration = defValue
 	}
@@ -266,69 +266,35 @@ func (c *Config) configFromFile(path string) error {
 
 // ScheduleConfig is the schedule configuration.
 type ScheduleConfig struct {
-	// If the region count of one store is less than this value,
-	// it will never be used as a source store.
-	MinRegionCount uint64 `toml:"min-region-count" json:"min-region-count"`
-
-	// If the leader count of one store is less than this value,
-	// it will never be used as a source store.
-	MinLeaderCount uint64 `toml:"min-leader-count" json:"min-leader-count"`
-
 	// If the snapshot count of one store is greater than this value,
 	// it will never be used as a source or target store.
 	MaxSnapshotCount uint64 `toml:"max-snapshot-count" json:"max-snapshot-count"`
-
-	// If the source and target store's diff score is less than this value,
-	// the schedule will be canceled.
-	MinBalanceDiffRatio float64 `toml:"min-balance-diff-ratio" json:"min-balance-diff-ratio"`
-
-	// MaxStoreDownDuration is the max duration at which
+	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
-	MaxStoreDownDuration timeutil.Duration `toml:"max-store-down-duration" json:"max-store-down-duration"`
-
+	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time" json:"max-store-down-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
-	// LeaderScheduleInterval is the interval to schedule leader.
-	LeaderScheduleInterval timeutil.Duration `toml:"leader-schedule-interval" json:"leader-schedule-interval"`
-
-	// StorageScheduleLimit is the max coexist storage schedules.
-	StorageScheduleLimit uint64 `toml:"storage-schedule-limit" json:"storage-schedule-limit"`
-	// StorageScheduleInterval is the interval to schedule storage.
-	StorageScheduleInterval timeutil.Duration `toml:"storage-schedule-interval" json:"storage-schedule-interval"`
-
+	// RegionScheduleLimit is the max coexist region schedules.
+	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit" json:"replica-schedule-limit"`
-	// ReplicaScheduleInterval is the interval to schedule storage.
-	ReplicaScheduleInterval timeutil.Duration `toml:"replica-schedule-interval" json:"replica-schedule-interval"`
 }
 
 const (
-	defaultMaxReplicas             = uint64(3)
-	defaultMinRegionCount          = uint64(10)
-	defaultMinLeaderCount          = uint64(10)
-	defaultMaxSnapshotCount        = uint64(3)
-	defaultMinBalanceDiffRatio     = float64(0.01)
-	defaultMaxStoreDownDuration    = time.Hour
-	defaultLeaderScheduleLimit     = 8
-	defaultLeaderScheduleInterval  = time.Second
-	defaultStorageScheduleLimit    = 4
-	defaultStorageScheduleInterval = time.Second
-	defaultReplicaScheduleLimit    = 8
-	defaultReplicaScheduleInterval = time.Second
+	defaultMaxReplicas          = 3
+	defaultMaxSnapshotCount     = 3
+	defaultMaxStoreDownTime     = time.Hour
+	defaultLeaderScheduleLimit  = 16
+	defaultRegionScheduleLimit  = 12
+	defaultReplicaScheduleLimit = 16
 )
 
 func (c *ScheduleConfig) adjust() {
-	adjustUint64(&c.MinRegionCount, defaultMinRegionCount)
-	adjustUint64(&c.MinLeaderCount, defaultMinLeaderCount)
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
-	adjustFloat64(&c.MinBalanceDiffRatio, defaultMinBalanceDiffRatio)
-	adjustDuration(&c.MaxStoreDownDuration, defaultMaxStoreDownDuration)
+	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
-	adjustDuration(&c.LeaderScheduleInterval, defaultLeaderScheduleInterval)
-	adjustUint64(&c.StorageScheduleLimit, defaultStorageScheduleLimit)
-	adjustDuration(&c.StorageScheduleInterval, defaultStorageScheduleInterval)
+	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
 	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
-	adjustDuration(&c.ReplicaScheduleInterval, defaultReplicaScheduleInterval)
 }
 
 // ReplicationConfig is the replication configuration.
@@ -380,48 +346,24 @@ func (o *scheduleOption) SetMaxReplicas(replicas int) {
 	o.rep.cfg.MaxReplicas = uint64(replicas)
 }
 
-func (o *scheduleOption) GetMinRegionCount() uint64 {
-	return o.load().MinRegionCount
-}
-
-func (o *scheduleOption) GetMinLeaderCount() uint64 {
-	return o.load().MinLeaderCount
-}
-
 func (o *scheduleOption) GetMaxSnapshotCount() uint64 {
 	return o.load().MaxSnapshotCount
 }
 
-func (o *scheduleOption) GetMinBalanceDiffRatio() float64 {
-	return o.load().MinBalanceDiffRatio
-}
-
 func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
-	return o.load().MaxStoreDownDuration.Duration
+	return o.load().MaxStoreDownTime.Duration
 }
 
 func (o *scheduleOption) GetLeaderScheduleLimit() uint64 {
 	return o.load().LeaderScheduleLimit
 }
 
-func (o *scheduleOption) GetLeaderScheduleInterval() time.Duration {
-	return o.load().LeaderScheduleInterval.Duration
-}
-
-func (o *scheduleOption) GetStorageScheduleLimit() uint64 {
-	return o.load().StorageScheduleLimit
-}
-
-func (o *scheduleOption) GetStorageScheduleInterval() time.Duration {
-	return o.load().StorageScheduleInterval.Duration
+func (o *scheduleOption) GetRegionScheduleLimit() uint64 {
+	return o.load().RegionScheduleLimit
 }
 
 func (o *scheduleOption) GetReplicaScheduleLimit() uint64 {
 	return o.load().ReplicaScheduleLimit
-}
-
-func (o *scheduleOption) GetReplicaScheduleInterval() time.Duration {
-	return o.load().ReplicaScheduleInterval.Duration
 }
 
 // ParseUrls parse a string into multiple urls.
@@ -490,7 +432,7 @@ func NewTestSingleConfig() *Config {
 		InitialClusterState: embed.ClusterStateFlagNew,
 
 		LeaderLease:     1,
-		TsoSaveInterval: timeutil.NewDuration(200 * time.Millisecond),
+		TsoSaveInterval: typeutil.NewDuration(200 * time.Millisecond),
 	}
 
 	cfg.AdvertiseClientUrls = cfg.ClientUrls

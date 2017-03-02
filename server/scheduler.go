@@ -14,6 +14,9 @@
 package server
 
 import (
+	"fmt"
+
+	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
@@ -22,42 +25,121 @@ import (
 type Scheduler interface {
 	GetName() string
 	GetResourceKind() ResourceKind
+	GetResourceLimit() uint64
+	Prepare(cluster *clusterInfo) error
+	Cleanup(cluster *clusterInfo)
 	Schedule(cluster *clusterInfo) Operator
 }
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
 type grantLeaderScheduler struct {
-	StoreID uint64 `json:"store_id"`
+	opt     *scheduleOption
+	name    string
+	storeID uint64
 }
 
-func newGrantLeaderScheduler(storeID uint64) *grantLeaderScheduler {
-	return &grantLeaderScheduler{StoreID: storeID}
+func newGrantLeaderScheduler(opt *scheduleOption, storeID uint64) *grantLeaderScheduler {
+	return &grantLeaderScheduler{
+		opt:     opt,
+		name:    fmt.Sprintf("grant-leader-scheduler-%d", storeID),
+		storeID: storeID,
+	}
 }
 
 func (s *grantLeaderScheduler) GetName() string {
-	return "grant-leader-scheduler"
+	return s.name
 }
 
 func (s *grantLeaderScheduler) GetResourceKind() ResourceKind {
 	return leaderKind
 }
 
+func (s *grantLeaderScheduler) GetResourceLimit() uint64 {
+	return s.opt.GetLeaderScheduleLimit()
+}
+
+func (s *grantLeaderScheduler) Prepare(cluster *clusterInfo) error {
+	return errors.Trace(cluster.blockStore(s.storeID))
+}
+
+func (s *grantLeaderScheduler) Cleanup(cluster *clusterInfo) {
+	cluster.unblockStore(s.storeID)
+}
+
 func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
-	region := cluster.randFollowerRegion(s.StoreID)
+	region := cluster.randFollowerRegion(s.storeID)
 	if region == nil {
 		return nil
 	}
-	return newTransferLeader(region, region.GetStorePeer(s.StoreID))
+	return newTransferLeader(region, region.GetStorePeer(s.storeID))
+}
+
+type evictLeaderScheduler struct {
+	opt      *scheduleOption
+	name     string
+	storeID  uint64
+	selector Selector
+}
+
+func newEvictLeaderScheduler(opt *scheduleOption, storeID uint64) *evictLeaderScheduler {
+	var filters []Filter
+	filters = append(filters, newStateFilter(opt))
+	filters = append(filters, newHealthFilter(opt))
+
+	return &evictLeaderScheduler{
+		opt:      opt,
+		name:     fmt.Sprintf("evict-leader-scheduler-%d", storeID),
+		storeID:  storeID,
+		selector: newRandomSelector(filters),
+	}
+}
+
+func (s *evictLeaderScheduler) GetName() string {
+	return s.name
+}
+
+func (s *evictLeaderScheduler) GetResourceKind() ResourceKind {
+	return leaderKind
+}
+
+func (s *evictLeaderScheduler) GetResourceLimit() uint64 {
+	return s.opt.GetLeaderScheduleLimit()
+}
+
+func (s *evictLeaderScheduler) Prepare(cluster *clusterInfo) error {
+	return errors.Trace(cluster.blockStore(s.storeID))
+}
+
+func (s *evictLeaderScheduler) Cleanup(cluster *clusterInfo) {
+	cluster.unblockStore(s.storeID)
+}
+
+func (s *evictLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
+	region := cluster.randLeaderRegion(s.storeID)
+	if region == nil {
+		return nil
+	}
+	target := s.selector.SelectTarget(cluster.getFollowerStores(region))
+	if target == nil {
+		return nil
+	}
+	return newTransferLeader(region, region.GetStorePeer(target.GetId()))
 }
 
 type shuffleLeaderScheduler struct {
+	opt      *scheduleOption
 	selector Selector
 	selected *metapb.Peer
 }
 
-func newShuffleLeaderScheduler() *shuffleLeaderScheduler {
+func newShuffleLeaderScheduler(opt *scheduleOption) *shuffleLeaderScheduler {
+	var filters []Filter
+	filters = append(filters, newStateFilter(opt))
+	filters = append(filters, newHealthFilter(opt))
+
 	return &shuffleLeaderScheduler{
-		selector: newRandomSelector(),
+		opt:      opt,
+		selector: newRandomSelector(filters),
 	}
 }
 
@@ -68,6 +150,14 @@ func (s *shuffleLeaderScheduler) GetName() string {
 func (s *shuffleLeaderScheduler) GetResourceKind() ResourceKind {
 	return leaderKind
 }
+
+func (s *shuffleLeaderScheduler) GetResourceLimit() uint64 {
+	return s.opt.GetLeaderScheduleLimit()
+}
+
+func (s *shuffleLeaderScheduler) Prepare(cluster *clusterInfo) error { return nil }
+
+func (s *shuffleLeaderScheduler) Cleanup(cluster *clusterInfo) {}
 
 func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 	// We shuffle leaders between stores:
@@ -97,6 +187,53 @@ func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 		return nil
 	}
 	return newTransferLeader(region, region.GetStorePeer(storeID))
+}
+
+type shuffleRegionScheduler struct {
+	opt      *scheduleOption
+	selector Selector
+}
+
+func newShuffleRegionScheduler(opt *scheduleOption) *shuffleRegionScheduler {
+	var filters []Filter
+	filters = append(filters, newStateFilter(opt))
+	filters = append(filters, newHealthFilter(opt))
+
+	return &shuffleRegionScheduler{
+		opt:      opt,
+		selector: newRandomSelector(filters),
+	}
+}
+
+func (s *shuffleRegionScheduler) GetName() string {
+	return "shuffle-region-scheduler"
+}
+
+func (s *shuffleRegionScheduler) GetResourceKind() ResourceKind {
+	return regionKind
+}
+
+func (s *shuffleRegionScheduler) GetResourceLimit() uint64 {
+	return s.opt.GetRegionScheduleLimit()
+}
+
+func (s *shuffleRegionScheduler) Prepare(cluster *clusterInfo) error { return nil }
+
+func (s *shuffleRegionScheduler) Cleanup(cluster *clusterInfo) {}
+
+func (s *shuffleRegionScheduler) Schedule(cluster *clusterInfo) Operator {
+	region, oldPeer := scheduleRemovePeer(cluster, s.selector)
+	if region == nil {
+		return nil
+	}
+
+	excludedFilter := newExcludedFilter(nil, region.GetStoreIds())
+	newPeer := scheduleAddPeer(cluster, s.selector, excludedFilter)
+	if newPeer == nil {
+		return nil
+	}
+
+	return newTransferPeer(region, oldPeer, newPeer)
 }
 
 func newAddPeer(region *regionInfo, peer *metapb.Peer) Operator {

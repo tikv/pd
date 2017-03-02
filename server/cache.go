@@ -28,6 +28,9 @@ var (
 	errStoreNotFound = func(storeID uint64) error {
 		return errors.Errorf("store %v not found", storeID)
 	}
+	errStoreIsBlocked = func(storeID uint64) error {
+		return errors.Errorf("store %v is blocked", storeID)
+	}
 	errRegionNotFound = func(regionID uint64) error {
 		return errors.Errorf("region %v not found", regionID)
 	}
@@ -67,6 +70,26 @@ func (s *storesInfo) getStore(storeID uint64) *storeInfo {
 
 func (s *storesInfo) setStore(store *storeInfo) {
 	s.stores[store.GetId()] = store
+}
+
+func (s *storesInfo) blockStore(storeID uint64) error {
+	store, ok := s.stores[storeID]
+	if !ok {
+		return errStoreNotFound(storeID)
+	}
+	if store.isBlocked() {
+		return errStoreIsBlocked(storeID)
+	}
+	store.block()
+	return nil
+}
+
+func (s *storesInfo) unblockStore(storeID uint64) {
+	store, ok := s.stores[storeID]
+	if !ok {
+		log.Fatalf("store %d is unblocked, but it is not found", storeID)
+	}
+	store.unblock()
 }
 
 func (s *storesInfo) getStores() []*storeInfo {
@@ -336,6 +359,18 @@ func (c *clusterInfo) putStoreLocked(store *storeInfo) error {
 	return nil
 }
 
+func (c *clusterInfo) blockStore(storeID uint64) error {
+	c.Lock()
+	defer c.Unlock()
+	return errors.Trace(c.stores.blockStore(storeID))
+}
+
+func (c *clusterInfo) unblockStore(storeID uint64) {
+	c.Lock()
+	defer c.Unlock()
+	c.stores.unblockStore(storeID)
+}
+
 func (c *clusterInfo) getStores() []*storeInfo {
 	c.RLock()
 	defer c.RUnlock()
@@ -460,9 +495,8 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	}
 
 	store.stats.StoreStats = proto.Clone(stats).(*pdpb.StoreStats)
+	store.stats.LeaderCount = uint32(c.regions.getStoreLeaderCount(storeID))
 	store.stats.LastHeartbeatTS = time.Now()
-	store.stats.TotalRegionCount = c.regions.getRegionCount()
-	store.stats.LeaderRegionCount = c.regions.getStoreLeaderCount(storeID)
 
 	c.stores.setStore(store)
 	return nil
@@ -478,6 +512,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 
 	// Region does not exist, add it.
 	if origin == nil {
+		log.Infof("insert region %v", region)
 		return c.putRegionLocked(region)
 	}
 
@@ -491,7 +526,12 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 
 	// Region meta is updated, update kv and cache.
 	if r.GetVersion() > o.GetVersion() || r.GetConfVer() > o.GetConfVer() {
+		log.Infof("update region %v origin %v", region, origin)
 		return c.putRegionLocked(region)
+	}
+
+	if region.Leader.GetId() != origin.Leader.GetId() {
+		log.Infof("update region leader %v origin %v", region, origin)
 	}
 
 	// Region meta is the same, update cache only.

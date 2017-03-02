@@ -14,8 +14,11 @@
 package command
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,7 +29,45 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var pdClient pd.Client
+var (
+	pdClient   pd.Client
+	dailClient = &http.Client{}
+
+	pingPrefix     = "pd/ping"
+	errInvalidAddr = errors.New("Invalid pd address, Cannot get connect to it")
+)
+
+func doRequest(cmd *cobra.Command, prefix string, method string) (string, error) {
+	var res string
+	if method == "" {
+		method = http.MethodGet
+	}
+	url := getAddressFromCmd(cmd, prefix)
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		return res, err
+	}
+	reps, err := dailClient.Do(req)
+	if err != nil {
+		return res, err
+	}
+	defer reps.Body.Close()
+	if reps.StatusCode != http.StatusOK {
+		return res, genResponseError(reps)
+	}
+
+	r, err := ioutil.ReadAll(reps.Body)
+	if err != nil {
+		return res, err
+	}
+	res = string(r)
+	return res, nil
+}
+
+func genResponseError(r *http.Response) error {
+	res, _ := ioutil.ReadAll(r.Body)
+	return errors.Errorf("[%d] %s", r.StatusCode, res)
+}
 
 // InitPDClient initialize pd client from cmd
 func InitPDClient(cmd *cobra.Command) error {
@@ -37,6 +78,10 @@ func InitPDClient(cmd *cobra.Command) error {
 	log.SetLevel(log.LOG_LEVEL_NONE)
 	if pdClient != nil {
 		return nil
+	}
+	err = validPDAddr(addr)
+	if err != nil {
+		return err
 	}
 	pdClient, err = pd.NewClient([]string{addr})
 	if err != nil {
@@ -73,6 +118,47 @@ func getAddressFromCmd(cmd *cobra.Command, prefix string) string {
 func printResponseError(r *http.Response) {
 	fmt.Printf("[%d]:", r.StatusCode)
 	io.Copy(os.Stdout, r.Body)
+}
+
+func validPDAddr(pd string) error {
+	u, err := url.Parse(pd)
+	if err != nil {
+		return err
+	}
+	if u.Scheme == "" {
+		u.Scheme = "http"
+	}
+	addr := u.String()
+	reps, err := http.Get(fmt.Sprintf("%s/%s", addr, pingPrefix))
+	if err != nil {
+		return err
+	}
+	defer reps.Body.Close()
+	ioutil.ReadAll(reps.Body)
+	if reps.StatusCode != http.StatusOK {
+		return errInvalidAddr
+	}
+	return nil
+}
+
+func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
+	data, err := json.Marshal(input)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	url := getAddressFromCmd(cmd, prefix)
+	r, err := http.Post(url, "application/json", bytes.NewBuffer(data))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer r.Body.Close()
+
+	if r.StatusCode != http.StatusOK {
+		printResponseError(r)
+	}
 }
 
 // UsageTemplate will used to generate a help information

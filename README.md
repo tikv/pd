@@ -101,8 +101,8 @@ docker run -d -p 2379:2379 -p 2380:2380 --name pd pingcap/pd \
 ### Cluster
 
 PD is a component in TiDB project, you must run it with TiDB and TiKV together, see 
-[clustering](https://github.com/pingcap/docs/blob/master/op-guide/clustering.md) to learn 
+[binary deployment](https://github.com/pingcap/docs/blob/master/op-guide/binary-deployment.md) to learn 
 how to set up the cluster and run them.
 
-You can also use [Docker](https://github.com/pingcap/docs/blob/master/op-guide/docker.md) to 
+You can also use [Docker](https://github.com/pingcap/docs/blob/master/op-guide/docker-deployment.md) to 
 run the cluster.

@@ -1,4 +1,5 @@
-GO=GO15VENDOREXPERIMENT="1" go
+GO=GO15VENDOREXPERIMENT="1" CGO_ENABLED=0 go
+GOTEST=GO15VENDOREXPERIMENT="1" CGO_ENABLED=1 go test # go race detector requires cgo
 
 PACKAGES := $$(go list ./...| grep -vE 'vendor|pd-server')
 
@@ -28,6 +29,7 @@ build:
 	rm -rf vendor && ln -s _vendor/vendor vendor
 	$(GO) build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 	$(GO) build  -o bin/pd-ctl cmd/pd-ctl/main.go
+	$(GO) build  -o bin/pd-tso-bench cmd/pd-tso-bench/main.go
 	rm -rf vendor
 
 install:
@@ -37,7 +39,7 @@ install:
 
 test:
 	rm -rf vendor && ln -s _vendor/vendor vendor
-	$(GO) test --race $(PACKAGES)
+	$(GOTEST) --race $(PACKAGES)
 	rm -rf vendor
 
 check:

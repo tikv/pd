@@ -34,6 +34,13 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router := mux.NewRouter().PathPrefix(prefix).Subrouter()
 
 	handler := svr.GetHandler()
+
+	operatorHandler := newOperatorHandler(handler, rd)
+	router.HandleFunc("/api/v1/operators", operatorHandler.List).Methods("GET")
+	router.HandleFunc("/api/v1/operators", operatorHandler.Post).Methods("POST")
+	router.HandleFunc("/api/v1/operators/{region_id}", operatorHandler.Get).Methods("GET")
+	router.HandleFunc("/api/v1/operators/{region_id}", operatorHandler.Delete).Methods("DELETE")
+
 	schedulerHandler := newSchedulerHandler(handler, rd)
 	router.HandleFunc("/api/v1/schedulers", schedulerHandler.List).Methods("GET")
 	router.HandleFunc("/api/v1/schedulers", schedulerHandler.Post).Methods("POST")
@@ -51,9 +58,12 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/store/{id}", storeHandler.Delete).Methods("DELETE")
 	router.Handle("/api/v1/stores", newStoresHandler(svr, rd)).Methods("GET")
 
+	labelsHandler := newLabelsHandler(svr, rd)
+	router.HandleFunc("/api/v1/labels", labelsHandler.Get).Methods("GET")
+	router.HandleFunc("/api/v1/labels/stores", labelsHandler.GetStores).Methods("GET")
+
 	router.Handle("/api/v1/events", newEventsHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/feed", newFeedHandler(svr, rd)).Methods("GET")
-	router.Handle("/api/v1/history/operators", newHistoryOperatorHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/region/{id}", newRegionHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/regions", newRegionsHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")
@@ -62,11 +72,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.Handle("/api/v1/members/{name}", newMemberDeleteHandler(svr, rd)).Methods("DELETE")
 	router.Handle("/api/v1/leader", newLeaderHandler(svr, rd)).Methods("GET")
 
-	balancerHandler := newBalancerHandler(svr, rd)
-	router.HandleFunc("/api/v1/balancers", balancerHandler.Get).Methods("GET")
-
 	router.Handle("/", newHomeHandler(rd)).Methods("GET")
 	router.Handle("/ws", newWSHandler(svr))
 
+	router.HandleFunc("/ping", newHomeHandler(rd).Ping).Methods("GET")
 	return router
 }

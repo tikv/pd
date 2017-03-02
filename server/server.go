@@ -28,6 +28,7 @@ import (
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	"github.com/ngaut/systimemon"
 	"github.com/pingcap/kvproto/pkg/pdpb2"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"google.golang.org/grpc"
@@ -98,6 +99,10 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.Close()
 		return nil, errors.Trace(err)
 	}
+
+	go systimemon.StartMonitor(time.Now, func() {
+		timeJumpBackCounter.Inc()
+	})
 	return s, nil
 }
 
@@ -144,7 +149,7 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if err := etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap); err != nil {
+	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap); err != nil {
 		return errors.Trace(err)
 	}
 
