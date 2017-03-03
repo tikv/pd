@@ -39,17 +39,6 @@ var (
 	}
 )
 
-func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
-	o := origin.GetRegionEpoch()
-	e := region.GetRegionEpoch()
-
-	if e.GetVersion() < o.GetVersion() || e.GetConfVer() < o.GetConfVer() {
-		return errors.Trace(errRegionIsStale(region, origin))
-	}
-
-	return nil
-}
-
 type storesInfo struct {
 	stores map[uint64]*storeInfo
 }
@@ -114,9 +103,9 @@ func (s *storesInfo) getStoreCount() int {
 
 type regionsInfo struct {
 	tree      *regionTree
-	regions   map[uint64]*regionInfo
-	leaders   map[uint64]map[uint64]*regionInfo
-	followers map[uint64]map[uint64]*regionInfo
+	regions   map[uint64]*regionInfo            // regionID -> regionInfo
+	leaders   map[uint64]map[uint64]*regionInfo // storeID -> regionID -> regionInfo
+	followers map[uint64]map[uint64]*regionInfo // storeID -> regionID -> regionInfo
 }
 
 func newRegionsInfo() *regionsInfo {
@@ -328,10 +317,8 @@ func (c *clusterInfo) putMeta(meta *metapb.Cluster) error {
 }
 
 func (c *clusterInfo) putMetaLocked(meta *metapb.Cluster) error {
-	if c.kv != nil {
-		if err := c.kv.saveMeta(meta); err != nil {
-			return errors.Trace(err)
-		}
+	if err := c.kv.saveMeta(meta); err != nil {
+		return errors.Trace(err)
 	}
 	c.meta = meta
 	return nil
@@ -350,10 +337,8 @@ func (c *clusterInfo) putStore(store *storeInfo) error {
 }
 
 func (c *clusterInfo) putStoreLocked(store *storeInfo) error {
-	if c.kv != nil {
-		if err := c.kv.saveStore(store.Store); err != nil {
-			return errors.Trace(err)
-		}
+	if err := c.kv.saveStore(store.Store); err != nil {
+		return errors.Trace(err)
 	}
 	c.stores.setStore(store)
 	return nil
@@ -408,10 +393,8 @@ func (c *clusterInfo) putRegion(region *regionInfo) error {
 }
 
 func (c *clusterInfo) putRegionLocked(region *regionInfo) error {
-	if c.kv != nil {
-		if err := c.kv.saveRegion(region.Region); err != nil {
-			return errors.Trace(err)
-		}
+	if err := c.kv.saveRegion(region.Region); err != nil {
+		return errors.Trace(err)
 	}
 	c.regions.setRegion(region)
 	return nil
