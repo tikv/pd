@@ -13,12 +13,16 @@
 
 package server
 
-import "math"
+import (
+	"math"
+	"sync"
+)
 
 const replicaBaseScore = 100
 
 // Replication provides some help to do replication.
 type Replication struct {
+	mu  sync.RWMutex
 	cfg *ReplicationConfig
 }
 
@@ -28,7 +32,16 @@ func newReplication(cfg *ReplicationConfig) *Replication {
 
 // GetMaxReplicas returns the number of replicas for each region.
 func (r *Replication) GetMaxReplicas() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return int(r.cfg.MaxReplicas)
+}
+
+// GetMaxReplicas set the replicas for each region.
+func (r *Replication) SetMaxReplicas(replicas int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cfg.MaxReplicas = uint64(replicas)
 }
 
 // GetDistinctScore returns the score that the other is distinct from the stores.
