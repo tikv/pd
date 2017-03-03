@@ -525,17 +525,12 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 	}
 
 	// Region meta is updated, update kv and cache.
-	if r.GetVersion() > o.GetVersion() {
-		log.Infof("[region %d] Version changed from %d to %d, Diff:%s", region.GetId(), o.GetVersion(), r.GetVersion(), origin.Diff(region))
+	if r.GetVersion() > o.GetVersion() || r.GetConfVer() > o.GetConfVer() {
+		log.Infof("[region %d] Epoch changed from %v to %v Event:%s", region.GetId(), o, r, origin.Diff(region))
 		return c.putRegionLocked(region)
 	}
-	if r.GetConfVer() > o.GetConfVer() {
-		log.Infof("[region %d] ConfVer changed from %d to %d, Diff:%s", region.GetId(), o.GetConfVer(), r.GetConfVer(), origin.Diff(region))
-		return c.putRegionLocked(region)
-	}
-
 	if region.Leader.GetId() != origin.Leader.GetId() {
-		log.Infof("[region %d] Leader changed from {PeerId:%d StoreId:%d} to {PeerId:%d StoreID:%d}", region.GetId(), origin.Leader.GetId(), origin.Leader.GetStoreId(), region.Leader.GetId(), region.Leader.GetStoreId())
+		log.Infof("[region %d] Leader changed from peer:<id:%d store_id:%d > to peer:<id:%d store_id:%d>", region.GetId(), origin.Leader.GetId(), origin.Leader.GetStoreId(), region.Leader.GetId(), region.Leader.GetStoreId())
 	}
 
 	// Region meta is the same, update cache only.
