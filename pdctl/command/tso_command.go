@@ -28,12 +28,12 @@ const (
 
 // NewTSOCommand return a ping subcommand of rootCmd
 func NewTSOCommand() *cobra.Command {
-	m := &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "tso <timestamp>",
 		Short: "parse TSO to the system and logic time",
 		Run:   showTSOCommandFunc,
 	}
-	return m
+	return cmd
 }
 
 func showTSOCommandFunc(cmd *cobra.Command, args []string) {
