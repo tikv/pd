@@ -22,7 +22,10 @@ import (
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/typeutil"
 )
+
+const defaultHeapSize = 10000
 
 var (
 	errStoreNotFound = func(storeID uint64) error {
@@ -117,6 +120,11 @@ type regionsInfo struct {
 	regions   map[uint64]*regionInfo
 	leaders   map[uint64]map[uint64]*regionInfo
 	followers map[uint64]map[uint64]*regionInfo
+
+	bytesWrittenHeap *typeutil.PriorityQueue
+	bytesReadHeap    *typeutil.PriorityQueue
+	keysWrittenHeap  *typeutil.PriorityQueue
+	keysReadHeap     *typeutil.PriorityQueue
 }
 
 func newRegionsInfo() *regionsInfo {
@@ -125,6 +133,11 @@ func newRegionsInfo() *regionsInfo {
 		regions:   make(map[uint64]*regionInfo),
 		leaders:   make(map[uint64]map[uint64]*regionInfo),
 		followers: make(map[uint64]map[uint64]*regionInfo),
+
+		bytesWrittenHeap: typeutil.NewPriorityQuery(defaultHeapSize),
+		bytesReadHeap:    typeutil.NewPriorityQuery(defaultHeapSize),
+		keysWrittenHeap:  typeutil.NewPriorityQuery(defaultHeapSize),
+		keysReadHeap:     typeutil.NewPriorityQuery(defaultHeapSize),
 	}
 }
 
@@ -141,6 +154,13 @@ func (r *regionsInfo) setRegion(region *regionInfo) {
 		r.removeRegion(origin)
 	}
 	r.addRegion(region)
+}
+
+func (r *regionsInfo) updateHotStatus(region *regionInfo) {
+	r.keysReadHeap.Push(region.GetId(), region.GetId(), region.BytesRead)
+	r.keysReadHeap.Push(region.GetId(), region.GetId(), region.BytesWritten)
+	r.keysReadHeap.Push(region.GetId(), region.GetId(), region.KeysRead)
+	r.keysWrittenHeap.Push(region.GetId(), region.GetId(), region.KeysWritten)
 }
 
 func (r *regionsInfo) addRegion(region *regionInfo) {
@@ -536,5 +556,6 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 
 	// Region meta is the same, update cache only.
 	c.regions.setRegion(region)
+	c.regions.updateHotStatus(region)
 	return nil
 }

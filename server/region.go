@@ -29,6 +29,11 @@ type regionInfo struct {
 	Leader       *metapb.Peer
 	DownPeers    []*pdpb.PeerStats
 	PendingPeers []*metapb.Peer
+
+	BytesWritten uint64
+	BytesRead    uint64
+	KeysWritten  uint64
+	KeysRead     uint64
 }
 
 func newRegionInfo(region *metapb.Region, leader *metapb.Peer) *regionInfo {
