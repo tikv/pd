@@ -343,7 +343,7 @@ func (o *scheduleOption) GetMaxReplicas() int {
 }
 
 func (o *scheduleOption) SetMaxReplicas(replicas int) {
-	o.rep.cfg.MaxReplicas = uint64(replicas)
+	o.rep.SetMaxReplicas(replicas)
 }
 
 func (o *scheduleOption) GetMaxSnapshotCount() uint64 {
