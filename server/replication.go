@@ -15,43 +15,56 @@ package server
 
 import (
 	"math"
-	"sync"
+	"sync/atomic"
 )
 
 const replicaBaseScore = 100
 
 // Replication provides some help to do replication.
 type Replication struct {
-	mu  sync.RWMutex
-	cfg *ReplicationConfig
+	v atomic.Value
 }
 
 func newReplication(cfg *ReplicationConfig) *Replication {
-	return &Replication{cfg: cfg}
+	r := &Replication{}
+	r.store(cfg)
+	return r
+}
+
+func (r *Replication) load() *ReplicationConfig {
+	return r.v.Load().(*ReplicationConfig)
+}
+
+func (r *Replication) store(cfg *ReplicationConfig) {
+	r.v.Store(cfg)
 }
 
 // GetMaxReplicas returns the number of replicas for each region.
 func (r *Replication) GetMaxReplicas() int {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return int(r.cfg.MaxReplicas)
+	return int(r.load().MaxReplicas)
 }
 
 // SetMaxReplicas set the replicas for each region.
 func (r *Replication) SetMaxReplicas(replicas int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.cfg.MaxReplicas = uint64(replicas)
+	c := r.load()
+	c.MaxReplicas = uint64(replicas)
+	r.store(c)
+}
+
+// GetLocationLabels returns the location labels for each region
+func (r *Replication) GetLocationLabels() []string {
+	return r.load().LocationLabels
 }
 
 // GetDistinctScore returns the score that the other is distinct from the stores.
 // A higher score means the other store is more different from the existed stores.
 func (r *Replication) GetDistinctScore(stores []*storeInfo, other *storeInfo) float64 {
 	score := float64(0)
+	locationLabels := r.GetLocationLabels()
 
-	for i := range r.cfg.LocationLabels {
-		keys := r.cfg.LocationLabels[0 : i+1]
-		level := len(r.cfg.LocationLabels) - i - 1
+	for i := range locationLabels {
+		keys := locationLabels[0 : i+1]
+		level := len(locationLabels) - i - 1
 		levelScore := math.Pow(replicaBaseScore, float64(level))
 
 		for _, s := range stores {
