@@ -55,6 +55,12 @@ type regionRequest struct {
 	pbResp *pdpb.GetRegionResponse
 }
 
+type regionByIDRequest struct {
+	pbReq  *pdpb.GetRegionByIDRequest
+	done   chan error
+	pbResp *pdpb.GetRegionResponse
+}
+
 type clusterConfigRequest struct {
 	pbReq  *pdpb.GetClusterConfigRequest
 	done   chan error
