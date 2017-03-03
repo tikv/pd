@@ -304,12 +304,14 @@ func (s *testClusterInfoSuite) testStoreHeartbeat(c *C, cache *clusterInfo) {
 	c.Assert(cache.getStoreCount(), Equals, int(n))
 
 	// Test with kv.
-	for _, store := range stores {
-		tmp := &metapb.Store{}
-		ok, err := cache.kv.loadStore(store.GetId(), tmp)
-		c.Assert(ok, IsTrue)
-		c.Assert(err, IsNil)
-		c.Assert(tmp, DeepEquals, store.Store)
+	if kv := cache.kv; kv != nil {
+		for _, store := range stores {
+			tmp := &metapb.Store{}
+			ok, err := kv.loadStore(store.GetId(), tmp)
+			c.Assert(ok, IsTrue)
+			c.Assert(err, IsNil)
+			c.Assert(tmp, DeepEquals, store.Store)
+		}
 	}
 }
 
@@ -388,12 +390,14 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 	}
 
 	// Test with kv.
-	for _, region := range regions {
-		tmp := &metapb.Region{}
-		ok, err := cache.kv.loadRegion(region.GetId(), tmp)
-		c.Assert(ok, IsTrue)
-		c.Assert(err, IsNil)
-		c.Assert(tmp, DeepEquals, region.Region)
+	if kv := cache.kv; kv != nil {
+		for _, region := range regions {
+			tmp := &metapb.Region{}
+			ok, err := kv.loadRegion(region.GetId(), tmp)
+			c.Assert(ok, IsTrue)
+			c.Assert(err, IsNil)
+			c.Assert(tmp, DeepEquals, region.Region)
+		}
 	}
 }
 

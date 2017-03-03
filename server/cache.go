@@ -317,8 +317,10 @@ func (c *clusterInfo) putMeta(meta *metapb.Cluster) error {
 }
 
 func (c *clusterInfo) putMetaLocked(meta *metapb.Cluster) error {
-	if err := c.kv.saveMeta(meta); err != nil {
-		return errors.Trace(err)
+	if c.kv != nil {
+		if err := c.kv.saveMeta(meta); err != nil {
+			return errors.Trace(err)
+		}
 	}
 	c.meta = meta
 	return nil
@@ -337,8 +339,10 @@ func (c *clusterInfo) putStore(store *storeInfo) error {
 }
 
 func (c *clusterInfo) putStoreLocked(store *storeInfo) error {
-	if err := c.kv.saveStore(store.Store); err != nil {
-		return errors.Trace(err)
+	if c.kv != nil {
+		if err := c.kv.saveStore(store.Store); err != nil {
+			return errors.Trace(err)
+		}
 	}
 	c.stores.setStore(store)
 	return nil
@@ -393,8 +397,10 @@ func (c *clusterInfo) putRegion(region *regionInfo) error {
 }
 
 func (c *clusterInfo) putRegionLocked(region *regionInfo) error {
-	if err := c.kv.saveRegion(region.Region); err != nil {
-		return errors.Trace(err)
+	if c.kv != nil {
+		if err := c.kv.saveRegion(region.Region); err != nil {
+			return errors.Trace(err)
+		}
 	}
 	c.regions.setRegion(region)
 	return nil
