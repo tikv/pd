@@ -37,7 +37,7 @@ func (r *Replication) GetMaxReplicas() int {
 	return int(r.cfg.MaxReplicas)
 }
 
-// GetMaxReplicas set the replicas for each region.
+// SetMaxReplicas set the replicas for each region.
 func (r *Replication) SetMaxReplicas(replicas int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
