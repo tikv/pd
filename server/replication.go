@@ -22,7 +22,7 @@ const replicaBaseScore = 100
 
 // Replication provides some help to do replication.
 type Replication struct {
-	v atomic.Value
+	replicateCfg atomic.Value
 }
 
 func newReplication(cfg *ReplicationConfig) *Replication {
@@ -32,11 +32,11 @@ func newReplication(cfg *ReplicationConfig) *Replication {
 }
 
 func (r *Replication) load() *ReplicationConfig {
-	return r.v.Load().(*ReplicationConfig)
+	return r.replicateCfg.Load().(*ReplicationConfig)
 }
 
 func (r *Replication) store(cfg *ReplicationConfig) {
-	r.v.Store(cfg)
+	r.replicateCfg.Store(cfg)
 }
 
 // GetMaxReplicas returns the number of replicas for each region.
