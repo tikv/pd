@@ -14,6 +14,7 @@
 package server
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -526,11 +527,12 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 
 	// Region meta is updated, update kv and cache.
 	if r.GetVersion() > o.GetVersion() || r.GetConfVer() > o.GetConfVer() {
-		log.Infof("[region %d] Epoch changed from %v to %v Event:%s", region.GetId(), o, r, origin.Diff(region))
+		log.Infof("[region %d] %s, Epoch changed from {%s} to {%s},", region.GetId(), strings.Join(origin.Diff(region), ","), o, r)
 		return c.putRegionLocked(region)
 	}
+
 	if region.Leader.GetId() != origin.Leader.GetId() {
-		log.Infof("[region %d] Leader changed from peer:<id:%d store_id:%d > to peer:<id:%d store_id:%d>", region.GetId(), origin.Leader.GetId(), origin.Leader.GetStoreId(), region.Leader.GetId(), region.Leader.GetStoreId())
+		log.Infof("[region %d] Leader changed from peer:{id:%d store_id:%d} to peer:{id:%d store_id:%d}", region.GetId(), origin.Leader.GetId(), origin.Leader.GetStoreId(), region.Leader.GetId(), region.Leader.GetStoreId())
 	}
 
 	// Region meta is the same, update cache only.

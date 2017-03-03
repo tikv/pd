@@ -194,7 +194,7 @@ func (op *changePeerOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatRespo
 		}
 	}
 
-	log.Infof("[region %d] Do operator, %s", region.GetId(), op.ChangePeer.String())
+	log.Infof("[region %d] Do operator %s {%v}", region.GetId(), op.Name, op.ChangePeer.GetPeer())
 
 	res := &pdpb.RegionHeartbeatResponse{
 		ChangePeer: op.ChangePeer,
@@ -236,7 +236,7 @@ func (op *transferLeaderOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatR
 		return nil, true
 	}
 
-	log.Infof("[region %d] Do operator, %s", region.GetId(), op.String())
+	log.Infof("[region %d] Do operator %s,from peer:{%v} to peer:{%v}", region.GetId(), op.Name, op.OldLeader, op.NewLeader)
 	res := &pdpb.RegionHeartbeatResponse{
 		TransferLeader: &pdpb.TransferLeader{
 			Peer: op.NewLeader,

@@ -1,5 +1,4 @@
 // Copyright 2016 PingCAP, Inc.
-
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -82,7 +81,7 @@ func (r *regionInfo) Diff(other *regionInfo) []string {
 			}
 		}
 		if !both {
-			ret = append(ret, fmt.Sprintf("Remove Peer:{%v}", a))
+			ret = append(ret, fmt.Sprintf("Remove peer:{%v}", a))
 		}
 	}
 	for _, b := range other.Peers {
@@ -94,7 +93,7 @@ func (r *regionInfo) Diff(other *regionInfo) []string {
 			}
 		}
 		if !both {
-			ret = append(ret, fmt.Sprintf("Add Peer:{%v}", b))
+			ret = append(ret, fmt.Sprintf("Add peer:{%v}", b))
 		}
 	}
 
