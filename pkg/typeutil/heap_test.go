@@ -14,8 +14,6 @@
 package typeutil
 
 import (
-	"github.com/ngaut/log"
-
 	. "github.com/pingcap/check"
 )
 
@@ -59,21 +57,20 @@ func (s *testSizeSuite) TestPriorityQeury(c *C) {
 		},
 	}
 
-	pq := NewPriorityQuery(5)
+	pq := NewPriorityQueue(5)
 
 	for _, item := range items {
-		result := pq.Push(item.key, item.value, item.priority)
-		log.Warnf("%+v", pq.slice.items)
+		result := pq.Push(item.key, item.value, uint64(item.priority))
 		c.Assert(result, IsTrue)
 	}
-	c.Assert(pq.MinItem().value, Equals, 4)
+	c.Assert(pq.MinItem().Value, Equals, 4)
 	wants := []interface{}{1, 3, 6}
 	gets := pq.TopN(3)
 	c.Assert(gets, DeepEquals, wants)
 
 	//Update
 	items[0].priority = 1
-	pq.Push(items[0].key, items[0].value, items[0].priority)
+	pq.Push(items[0].key, items[0].value, uint64(items[0].priority))
 	gets = pq.TopN(3)
 	wants = []interface{}{3, 6, 5}
 	c.Assert(gets, DeepEquals, wants)

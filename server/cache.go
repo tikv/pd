@@ -134,10 +134,10 @@ func newRegionsInfo() *regionsInfo {
 		leaders:   make(map[uint64]map[uint64]*regionInfo),
 		followers: make(map[uint64]map[uint64]*regionInfo),
 
-		bytesWrittenHeap: typeutil.NewPriorityQuery(defaultHeapSize),
-		bytesReadHeap:    typeutil.NewPriorityQuery(defaultHeapSize),
-		keysWrittenHeap:  typeutil.NewPriorityQuery(defaultHeapSize),
-		keysReadHeap:     typeutil.NewPriorityQuery(defaultHeapSize),
+		bytesWrittenHeap: typeutil.NewPriorityQueue(defaultHeapSize),
+		bytesReadHeap:    typeutil.NewPriorityQueue(defaultHeapSize),
+		keysWrittenHeap:  typeutil.NewPriorityQueue(defaultHeapSize),
+		keysReadHeap:     typeutil.NewPriorityQueue(defaultHeapSize),
 	}
 }
 

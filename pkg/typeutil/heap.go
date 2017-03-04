@@ -1,116 +1,121 @@
+// copyright 2017 pingcap, inc.
+//
+// licensed under the apache license, version 2.0 (the "license");
+// you may not use this file except in compliance with the license.
+// you may obtain a copy of the license at
+//
+//     http://www.apache.org/licenses/license-2.0
+//
+// unless required by applicable law or agreed to in writing, software
+// distributed under the license is distributed on an "as is" basis,
+// see the license for the specific language governing permissions and
+// limitations under the license.
+
 package typeutil
 
 import (
 	"container/heap"
-	"fmt"
 	"sort"
 	"sync"
 )
 
-type Item struct {
-	key      interface{}
-	value    interface{}
+// ItemNode is one node for priority queue
+type ItemNode struct {
+	Key      interface{}
+	Value    interface{}
 	priority uint64
 	index    int
 }
 
-type Items []*Item
-
-func (items Items) String() string {
-	var ret string
-	for _, i := range items {
-		ret = ret + fmt.Sprintf("{key:%d,value:%d,priority:%d,index:%d} ", i.key, i.value, i.priority, i.index)
-	}
-	return ret
+type itemSlice struct {
+	items    []*ItemNode
+	itemsMap map[interface{}]*ItemNode
 }
 
-type ItemSlice struct {
-	items    Items
-	itemsMap map[interface{}]*Item
-}
+func (s itemSlice) Len() int { return len(s.items) }
 
-func (s ItemSlice) Len() int { return len(s.items) }
-
-func (s ItemSlice) Less(i, j int) bool {
+func (s itemSlice) Less(i, j int) bool {
 	return s.items[i].priority < s.items[j].priority
 }
 
-func (s ItemSlice) Swap(i, j int) {
+func (s itemSlice) Swap(i, j int) {
 	s.items[i], s.items[j] = s.items[j], s.items[i]
 	s.items[i].index = i
 	s.items[j].index = j
 	if s.itemsMap != nil {
-		s.itemsMap[s.items[i].key] = s.items[i]
-		s.itemsMap[s.items[j].key] = s.items[j]
+		s.itemsMap[s.items[i].Key] = s.items[i]
+		s.itemsMap[s.items[j].Key] = s.items[j]
 	}
 }
 
-func (s *ItemSlice) Push(x interface{}) {
+func (s *itemSlice) Push(x interface{}) {
 	n := len(s.items)
-	item := x.(*Item)
+	item := x.(*ItemNode)
 	item.index = n
 	s.items = append(s.items, item)
-	s.itemsMap[item.key] = item
+	s.itemsMap[item.Key] = item
 }
 
-func (s *ItemSlice) Pop() interface{} {
+func (s *itemSlice) Pop() interface{} {
 	old := s.items
 	n := len(old)
 	item := old[n-1]
 	item.index = -1 // for safety
-	delete(s.itemsMap, item.key)
+	delete(s.itemsMap, item.Key)
 	s.items = old[0 : n-1]
 	return item
 }
 
-// update modifies the priority and value of an Item in the queue.
-func (s *ItemSlice) update(key interface{}, value interface{}, priority uint64) {
+// update modifies the priority and value of an item in the queue.
+func (s *itemSlice) update(key interface{}, value interface{}, priority uint64) {
 	item := s.getItemByKey(key)
 	if item != nil {
 		s.updateItem(item, value, priority)
 	}
 }
 
-func (s *ItemSlice) updateItem(item *Item, value interface{}, priority uint64) {
-	item.value = value
+func (s *itemSlice) updateItem(item *ItemNode, value interface{}, priority uint64) {
+	item.Value = value
 	item.priority = priority
 	heap.Fix(s, item.index)
 }
 
-func (s *ItemSlice) getItemByKey(key interface{}) *Item {
+func (s *itemSlice) getItemByKey(key interface{}) *ItemNode {
 	if item, found := s.itemsMap[key]; found {
 		return item
 	}
 	return nil
 }
 
-// A PriorityQueue implements heap.Interface and holds Items.
+// PriorityQueue implements heap.Interface
 type PriorityQueue struct {
-	slice   ItemSlice
+	*sync.RWMutex
+
+	slice   itemSlice
 	maxSize int
-	mutex   sync.RWMutex
 }
 
-func NewPriorityQuery(maxSize int) *PriorityQueue {
+// NewPriorityQueue returns a priority queue
+func NewPriorityQueue(maxSize int) *PriorityQueue {
 	return &PriorityQueue{
-		slice: ItemSlice{
-			items:    make([]*Item, 0, maxSize),
-			itemsMap: make(map[interface{}]*Item),
+		RWMutex: &sync.RWMutex{},
+		slice: itemSlice{
+			items:    make([]*ItemNode, 0, maxSize),
+			itemsMap: make(map[interface{}]*ItemNode),
 		},
 		maxSize: maxSize,
 	}
 }
-func (pq *PriorityQueue) Init(maxSize int) {
-}
 
+// Len return the length of items
 func (pq PriorityQueue) Len() int {
-	pq.mutex.RLock()
+	pq.RLock()
+	defer pq.RUnlock()
 	size := pq.slice.Len()
-	pq.mutex.RUnlock()
 	return size
 }
 
-func (pq *PriorityQueue) minItem() *Item {
+func (pq *PriorityQueue) minItem() *ItemNode {
 	len := pq.slice.Len()
 	if len == 0 {
 		return nil
@@ -118,23 +123,25 @@ func (pq *PriorityQueue) minItem() *Item {
 	return pq.slice.items[0]
 }
 
-func (pq *PriorityQueue) MinItem() *Item {
-	pq.mutex.RLock()
-	defer pq.mutex.RUnlock()
+// MinItem return the minimal ItemNode
+func (pq *PriorityQueue) MinItem() *ItemNode {
+	pq.RLock()
+	defer pq.RUnlock()
 	return pq.minItem()
 }
 
+// Push a pair (key,value) with priority into the priority queue
 func (pq *PriorityQueue) Push(key, value interface{}, priority uint64) bool {
-	pq.mutex.Lock()
-	defer pq.mutex.Unlock()
+	pq.Lock()
+	defer pq.Unlock()
 	item := pq.slice.getItemByKey(key)
 	if item != nil {
 		pq.slice.updateItem(item, value, priority)
 		return true
 	}
-	item = &Item{
-		key:      key,
-		value:    value,
+	item = &ItemNode{
+		Key:      key,
+		Value:    value,
 		priority: priority,
 		index:    -1,
 	}
@@ -151,6 +158,7 @@ func (pq *PriorityQueue) Push(key, value interface{}, priority uint64) bool {
 	return true
 }
 
+// TopN get the top n values
 func (pq PriorityQueue) TopN(n int) []interface{} {
 	size := pq.Len()
 	if size > n {
@@ -160,26 +168,28 @@ func (pq PriorityQueue) TopN(n int) []interface{} {
 	items := pq.GetOrderItems()
 	ret := make([]interface{}, 0, n)
 	for i := 0; i < size; i++ {
-		ret = append(ret, items[i].value)
+		ret = append(ret, items[i].Value)
 	}
 	return ret
 }
 
-func (pq PriorityQueue) GetOrderItems() []*Item {
+// GetOrderItems return a reverse sort list of the items in PriorityQueue
+func (pq PriorityQueue) GetOrderItems() []*ItemNode {
 	size := pq.Len()
 	if size == 0 {
-		return []*Item{}
+		return []*ItemNode{}
 	}
-	s := ItemSlice{}
-	s.items = make([]*Item, size)
-	pq.mutex.RLock()
+	s := itemSlice{}
+	s.items = make([]*ItemNode, size)
+	pq.RLock()
 	for i := 0; i < size; i++ {
-		s.items[i] = &Item{
-			value:    pq.slice.items[i].value,
+		s.items[i] = &ItemNode{
+			Key:      pq.slice.items[i].Key,
+			Value:    pq.slice.items[i].Value,
 			priority: pq.slice.items[i].priority,
 		}
 	}
-	pq.mutex.RUnlock()
+	pq.RUnlock()
 	sort.Sort(sort.Reverse(s))
 	return s.items
 }
