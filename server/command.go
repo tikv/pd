@@ -23,6 +23,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
+const handleTSOWarnThreshold = time.Millisecond * 10
+
 func (c *conn) handleTso(req *pdpb.Request) (*pdpb.Response, error) {
 	startTime := time.Now()
 
@@ -37,7 +39,7 @@ func (c *conn) handleTso(req *pdpb.Request) (*pdpb.Response, error) {
 		return nil, errors.Trace(err)
 	}
 
-	if elapse := time.Since(startTime); elapse > time.Millisecond*10 {
+	if elapse := time.Since(startTime); elapse > handleTSOWarnThreshold {
 		log.Warnf("handle tso too slow, cost %v", elapse)
 	}
 
