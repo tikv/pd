@@ -166,7 +166,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 
 	// test TopN
 	for i := uint64(n); i > n-3; i-- {
-		res := cache.getTopRegionBytesRead(3)
+		res := cache.getTopRegionsBytesRead(3)
 		for j := uint64(0); j < 3; j++ {
 			checkRegion(c, cache.getRegion(res[j]), regions[i-j-1])
 		}
@@ -176,7 +176,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	}
 
 	for i := uint64(n); i > n-3; i-- {
-		res := cache.getTopRegionBytesWritten(3)
+		res := cache.getTopRegionsBytesWritten(3)
 		for j := uint64(0); j < 3; j++ {
 			checkRegion(c, cache.getRegion(res[j]), regions[i-j-1])
 		}
@@ -186,7 +186,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	}
 
 	for i := uint64(n); i > n-3; i-- {
-		res := cache.getTopRegionKeysRead(3)
+		res := cache.getTopRegionsKeysRead(3)
 		for j := uint64(0); j < 3; j++ {
 			checkRegion(c, cache.getRegion(res[j]), regions[i-j-1])
 		}
@@ -196,7 +196,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	}
 
 	for i := uint64(n); i > n-3; i-- {
-		res := cache.getTopRegionKeysWritten(3)
+		res := cache.getTopRegionsKeysWritten(3)
 		for j := uint64(0); j < 3; j++ {
 			checkRegion(c, cache.getRegion(res[j]), regions[i-j-1])
 		}

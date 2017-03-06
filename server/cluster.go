@@ -404,24 +404,24 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	return cluster.putStore(store)
 }
 
-// GetTopRegionBytesRead returns the regions bytes read top n
-func (c *RaftCluster) GetTopRegionBytesRead(n int) []uint64 {
-	return c.cachedCluster.getTopRegionBytesRead(n)
+// GetTopRegionsBytesRead returns the regions bytes read top n
+func (c *RaftCluster) GetTopRegionsBytesRead(n int) []uint64 {
+	return c.cachedCluster.getTopRegionsBytesRead(n)
 }
 
-// GetTopRegionBytesWritten returns the regions bytes written top n
-func (c *RaftCluster) GetTopRegionBytesWritten(n int) []uint64 {
-	return c.cachedCluster.getTopRegionBytesWritten(n)
+// GetTopRegionsBytesWritten returns the regions bytes written top n
+func (c *RaftCluster) GetTopRegionsBytesWritten(n int) []uint64 {
+	return c.cachedCluster.getTopRegionsBytesWritten(n)
 }
 
-// GetTopRegionKeysRead returns the regions read number top n
-func (c *RaftCluster) GetTopRegionKeysRead(n int) []uint64 {
-	return c.cachedCluster.getTopRegionKeysRead(n)
+// GetTopRegionsKeysRead returns the regions read number top n
+func (c *RaftCluster) GetTopRegionsKeysRead(n int) []uint64 {
+	return c.cachedCluster.getTopRegionsKeysRead(n)
 }
 
-// GetTopRegionKeysWritten returns the regions written number top n
-func (c *RaftCluster) GetTopRegionKeysWritten(n int) []uint64 {
-	return c.cachedCluster.getTopRegionKeysWritten(n)
+// GetTopRegionsKeysWritten returns the regions written number top n
+func (c *RaftCluster) GetTopRegionsKeysWritten(n int) []uint64 {
+	return c.cachedCluster.getTopRegionsKeysWritten(n)
 }
 
 func (c *RaftCluster) checkStores() {
