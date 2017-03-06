@@ -24,6 +24,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 )
 
@@ -143,12 +144,6 @@ func mustWaitLeader(c *C, svrs []*server.Server) *server.Server {
 	return nil
 }
 
-func mustRPCRequest(c *C, addr string, request *pdpb.Request) *pdpb.Response {
-	resp, err := server.RPCRequest(addr, 0, request)
-	c.Assert(err, IsNil)
-	return resp
-}
-
 func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
 		ClusterId: clusterID,
@@ -164,7 +159,7 @@ func mustBootstrapCluster(c *C, s *server.Server) {
 			Region: region,
 		},
 	}
-	mustRPCRequest(c, s.GetAddr(), req)
+	testutil.MustRPCRequest(c, s.GetAddr(), req)
 }
 
 func mustPutStore(c *C, s *server.Server, store *metapb.Store) {
@@ -175,7 +170,7 @@ func mustPutStore(c *C, s *server.Server, store *metapb.Store) {
 			Store: store,
 		},
 	}
-	mustRPCRequest(c, s.GetAddr(), req)
+	testutil.MustRPCRequest(c, s.GetAddr(), req)
 }
 
 func readJSONWithURL(url string, data interface{}) error {
