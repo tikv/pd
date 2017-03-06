@@ -91,6 +91,13 @@ func newTestRegions(n, np uint64) []*regionInfo {
 		}
 		regions = append(regions, newRegionInfo(region, peers[0]))
 	}
+
+	for i, region := range regions {
+		region.BytesWritten = uint64(i)
+		region.BytesRead = uint64(i)
+		region.KeysRead = uint64(i)
+		region.KeysWritten = uint64(i)
+	}
 	return regions
 }
 
@@ -130,6 +137,8 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 		checkRegion(c, cache.getRegion(i), region)
 		checkRegions(c, cache, regions[0:(i+1)])
 		checkRegion(c, cache.searchRegion(regionKey), region)
+
+		cache.updateHotStatus(region)
 	}
 
 	for i := uint64(0); i < n; i++ {
@@ -154,6 +163,48 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	for i := uint64(0); i < n; i++ {
 		c.Assert(cache.randFollowerRegion(i), IsNil)
 	}
+
+	// test TopN
+	for i := uint64(n); i > n-3; i-- {
+		res := cache.getTopRegionBytesRead(3)
+		for j := uint64(0); j < 3; j++ {
+			checkRegion(c, cache.getRegion(res[j]), regions[i-j-1])
+		}
+		//update regions
+		regions[i-1].BytesRead = 0
+		cache.updateHotStatus(regions[i-1])
+	}
+
+	for i := uint64(n); i > n-3; i-- {
+		res := cache.getTopRegionBytesWritten(3)
+		for j := uint64(0); j < 3; j++ {
+			checkRegion(c, cache.getRegion(res[j]), regions[i-j-1])
+		}
+		//update regions
+		regions[i-1].BytesWritten = 0
+		cache.updateHotStatus(regions[i-1])
+	}
+
+	for i := uint64(n); i > n-3; i-- {
+		res := cache.getTopRegionKeysRead(3)
+		for j := uint64(0); j < 3; j++ {
+			checkRegion(c, cache.getRegion(res[j]), regions[i-j-1])
+		}
+		//update regions
+		regions[i-1].KeysRead = 0
+		cache.updateHotStatus(regions[i-1])
+	}
+
+	for i := uint64(n); i > n-3; i-- {
+		res := cache.getTopRegionKeysWritten(3)
+		for j := uint64(0); j < 3; j++ {
+			checkRegion(c, cache.getRegion(res[j]), regions[i-j-1])
+		}
+		//update regions
+		regions[i-1].KeysWritten = 0
+		cache.updateHotStatus(regions[i-1])
+	}
+
 }
 
 func checkRegion(c *C, a *regionInfo, b *regionInfo) {

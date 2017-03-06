@@ -157,10 +157,46 @@ func (r *regionsInfo) setRegion(region *regionInfo) {
 }
 
 func (r *regionsInfo) updateHotStatus(region *regionInfo) {
-	r.keysReadHeap.Push(region.GetId(), region.GetId(), region.BytesRead)
-	r.keysReadHeap.Push(region.GetId(), region.GetId(), region.BytesWritten)
+	r.bytesReadHeap.Push(region.GetId(), region.GetId(), region.BytesRead)
+	r.bytesWrittenHeap.Push(region.GetId(), region.GetId(), region.BytesWritten)
 	r.keysReadHeap.Push(region.GetId(), region.GetId(), region.KeysRead)
 	r.keysWrittenHeap.Push(region.GetId(), region.GetId(), region.KeysWritten)
+}
+
+func (r *regionsInfo) getTopRegionKeysWritten(n int) []uint64 {
+	var topRegion []uint64
+	res := r.keysWrittenHeap.TopN(n)
+	for _, i := range res {
+		topRegion = append(topRegion, i.(uint64))
+	}
+	return topRegion
+}
+
+func (r *regionsInfo) getTopRegionKeysRead(n int) []uint64 {
+	var topRegion []uint64
+	res := r.keysReadHeap.TopN(n)
+	for _, i := range res {
+		topRegion = append(topRegion, i.(uint64))
+	}
+	return topRegion
+}
+
+func (r *regionsInfo) getTopRegionBytesRead(n int) []uint64 {
+	var topRegion []uint64
+	res := r.bytesReadHeap.TopN(n)
+	for _, i := range res {
+		topRegion = append(topRegion, i.(uint64))
+	}
+	return topRegion
+}
+
+func (r *regionsInfo) getTopRegionBytesWritten(n int) []uint64 {
+	var topRegion []uint64
+	res := r.bytesWrittenHeap.TopN(n)
+	for _, i := range res {
+		topRegion = append(topRegion, i.(uint64))
+	}
+	return topRegion
 }
 
 func (r *regionsInfo) addRegion(region *regionInfo) {
@@ -477,6 +513,30 @@ func (c *clusterInfo) randFollowerRegion(storeID uint64) *regionInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.regions.randFollowerRegion(storeID)
+}
+
+func (c *clusterInfo) getTopRegionBytesWritten(n int) []uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regions.getTopRegionBytesWritten(n)
+}
+
+func (c *clusterInfo) getTopRegionBytesRead(n int) []uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regions.getTopRegionBytesRead(n)
+}
+
+func (c *clusterInfo) getTopRegionKeysRead(n int) []uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regions.getTopRegionKeysRead(n)
+}
+
+func (c *clusterInfo) getTopRegionKeysWritten(n int) []uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regions.getTopRegionKeysWritten(n)
 }
 
 func (c *clusterInfo) getRegionStores(region *regionInfo) []*storeInfo {
