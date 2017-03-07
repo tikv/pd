@@ -14,9 +14,6 @@ package server
 
 import (
 	"bytes"
-	"fmt"
-	"reflect"
-	"strings"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/google/btree"
@@ -54,54 +51,6 @@ func (r *regionInfo) clone() *regionInfo {
 		DownPeers:    downPeers,
 		PendingPeers: pendingPeers,
 	}
-}
-
-func (r *regionInfo) String() string {
-	return fmt.Sprintf("%+v", *r)
-}
-
-func (r *regionInfo) DiffPeer(other *regionInfo) string {
-	var ret []string
-	for _, a := range r.Peers {
-		both := false
-		for _, b := range other.Peers {
-			if reflect.DeepEqual(a, b) {
-				both = true
-				break
-			}
-		}
-		if !both {
-			ret = append(ret, fmt.Sprintf("Remove peer:{%v}", a))
-		}
-	}
-	for _, b := range other.Peers {
-		both := false
-		for _, a := range r.Peers {
-			if reflect.DeepEqual(a, b) {
-				both = true
-				break
-			}
-		}
-		if !both {
-			ret = append(ret, fmt.Sprintf("Add peer:{%v}", b))
-		}
-	}
-	return strings.Join(ret, ",")
-}
-
-func (r *regionInfo) DiffKey(other *regionInfo) string {
-	var ret []string
-	if !bytes.Equal(r.Region.StartKey, other.Region.StartKey) {
-		rr := &metapb.Region{StartKey: r.Region.StartKey}
-		oo := &metapb.Region{StartKey: other.Region.StartKey}
-		ret = append(ret, fmt.Sprintf("StartKey Changed:%s -> %s", rr, oo))
-	}
-	if !bytes.Equal(r.Region.EndKey, other.Region.EndKey) {
-		rr := &metapb.Region{EndKey: r.Region.EndKey}
-		oo := &metapb.Region{EndKey: other.Region.EndKey}
-		ret = append(ret, fmt.Sprintf("EndKey Changed:%s -> %s", rr, oo))
-	}
-	return strings.Join(ret, ",")
 }
 
 func (r *regionInfo) GetPeer(peerID uint64) *metapb.Peer {

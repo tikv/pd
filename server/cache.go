@@ -526,11 +526,11 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 
 	// Region meta is updated, update kv and cache.
 	if r.GetVersion() > o.GetVersion() {
-		log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetId(), origin.DiffKey(region), o.GetVersion(), r.GetVersion())
+		log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetId(), diffRegionPeersInfo(origin, region), o.GetVersion(), r.GetVersion())
 		return c.putRegionLocked(region)
 	}
 	if r.GetConfVer() > o.GetConfVer() {
-		log.Infof("[region %d] %s, ConfVer changed from {%d} to {%d}", region.GetId(), origin.DiffPeer(region), o.GetConfVer(), r.GetConfVer())
+		log.Infof("[region %d] %s, ConfVer changed from {%d} to {%d}", region.GetId(), diffRegionPeersInfo(origin, region), o.GetConfVer(), r.GetConfVer())
 		return c.putRegionLocked(region)
 	}
 
