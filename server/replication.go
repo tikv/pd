@@ -48,7 +48,7 @@ func (r *Replication) GetMaxReplicas() int {
 func (r *Replication) SetMaxReplicas(replicas int) {
 	c := r.load()
 	v := c.clone()
-	v.MaxReplicas = replicas
+	v.MaxReplicas = uint64(replicas)
 	r.store(v)
 }
 

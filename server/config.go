@@ -310,11 +310,11 @@ type ReplicationConfig struct {
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {
-	localtionLabels := make([]string, 0, len(c.LocationLabels))
+	locationLabels := make([]string, 0, len(c.LocationLabels))
 	copy(locationLabels, c.LocationLabels)
 	return &ReplicationConfig{
 		MaxReplicas:    c.MaxReplicas,
-		LocationLabels: localtionLabels,
+		LocationLabels: locationLabels,
 	}
 }
 
