@@ -309,6 +309,15 @@ type ReplicationConfig struct {
 	LocationLabels []string `toml:"location-labels" json:"location-labels"`
 }
 
+func (c *ReplicationConfig) clone() *ReplicationConfig {
+	localtionLabels := make([]string, 0, len(c.LocationLabels))
+	copy(locationLabels, c.LocationLabels)
+	return &ReplicationConfig{
+		MaxReplicas:    c.MaxReplicas,
+		LocationLabels: localtionLabels,
+	}
+}
+
 func (c *ReplicationConfig) adjust() {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 }
