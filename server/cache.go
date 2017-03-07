@@ -530,7 +530,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 		return c.putRegionLocked(region)
 	}
 	if r.GetConfVer() > o.GetConfVer() {
-		log.Infof("[region %d] %s, ConfVer changed from {%d} to {%d}", region.GetId(), diffRegionPeersInfo(origin, region), o.GetConfVer(), r.GetConfVer())
+		log.Infof("[region %d] %s, ConfVer changed from {%d} to {%d}", region.GetId(), diffRegionKeyInfo(origin, region), o.GetConfVer(), r.GetConfVer())
 		return c.putRegionLocked(region)
 	}
 
