@@ -47,8 +47,9 @@ func (r *Replication) GetMaxReplicas() int {
 // SetMaxReplicas set the replicas for each region.
 func (r *Replication) SetMaxReplicas(replicas int) {
 	c := r.load()
-	c.MaxReplicas = uint64(replicas)
-	r.store(c)
+	v := c.clone()
+	v.MaxReplicas = uint64(replicas)
+	r.store(v)
 }
 
 // GetLocationLabels returns the location labels for each region
