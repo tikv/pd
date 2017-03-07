@@ -68,9 +68,16 @@ func (s *testRegionSuite) TestRegionInfo(c *C) {
 		StoreId: n,
 	}
 	r.Peers = append(r.Peers, removePeer)
+	c.Assert(info.DiffPeer(r), Matches, "Add peer.*")
+	c.Assert(r.DiffPeer(info), Matches, "Remove peer.*")
 	c.Assert(r.GetStorePeer(n), DeepEquals, removePeer)
 	r.RemoveStorePeer(n)
+	c.Assert(info.DiffPeer(r), Equals, "")
 	c.Assert(r.GetStorePeer(n), IsNil)
+	r.Region.StartKey = []byte{0}
+	c.Assert(info.DiffKey(r), Matches, "StartKey Changed.*")
+	r.Region.EndKey = []byte{1}
+	c.Assert(info.DiffKey(r), Matches, ".*EndKey Changed.*")
 
 	stores := r.GetStoreIds()
 	c.Assert(stores, HasLen, int(n))

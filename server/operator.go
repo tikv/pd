@@ -116,7 +116,7 @@ func (op *regionOperator) GetResourceKind() ResourceKind {
 
 func (op *regionOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	if time.Since(op.Start) > maxOperatorWaitTime {
-		log.Errorf("Operator timeout:%s", op)
+		log.Errorf("[region %d] Operator timeout:%s", region.GetId(), op)
 		return nil, true
 	}
 
