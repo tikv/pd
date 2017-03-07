@@ -39,17 +39,6 @@ var (
 	}
 )
 
-func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
-	o := origin.GetRegionEpoch()
-	e := region.GetRegionEpoch()
-
-	if e.GetVersion() < o.GetVersion() || e.GetConfVer() < o.GetConfVer() {
-		return errors.Trace(errRegionIsStale(region, origin))
-	}
-
-	return nil
-}
-
 type storesInfo struct {
 	stores map[uint64]*storeInfo
 }
@@ -114,9 +103,9 @@ func (s *storesInfo) getStoreCount() int {
 
 type regionsInfo struct {
 	tree      *regionTree
-	regions   map[uint64]*regionInfo
-	leaders   map[uint64]map[uint64]*regionInfo
-	followers map[uint64]map[uint64]*regionInfo
+	regions   map[uint64]*regionInfo            // regionID -> regionInfo
+	leaders   map[uint64]map[uint64]*regionInfo // storeID -> regionID -> regionInfo
+	followers map[uint64]map[uint64]*regionInfo // storeID -> regionID -> regionInfo
 }
 
 func newRegionsInfo() *regionsInfo {
