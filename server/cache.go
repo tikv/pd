@@ -22,7 +22,10 @@ import (
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/typeutil"
 )
+
+const defaultHeapSize = 10000
 
 var (
 	errStoreNotFound = func(storeID uint64) error {
@@ -117,6 +120,11 @@ type regionsInfo struct {
 	regions   map[uint64]*regionInfo
 	leaders   map[uint64]map[uint64]*regionInfo
 	followers map[uint64]map[uint64]*regionInfo
+
+	bytesWrittenHeap *typeutil.PriorityQueue
+	bytesReadHeap    *typeutil.PriorityQueue
+	keysWrittenHeap  *typeutil.PriorityQueue
+	keysReadHeap     *typeutil.PriorityQueue
 }
 
 func newRegionsInfo() *regionsInfo {
@@ -125,6 +133,11 @@ func newRegionsInfo() *regionsInfo {
 		regions:   make(map[uint64]*regionInfo),
 		leaders:   make(map[uint64]map[uint64]*regionInfo),
 		followers: make(map[uint64]map[uint64]*regionInfo),
+
+		bytesWrittenHeap: typeutil.NewPriorityQueue(defaultHeapSize),
+		bytesReadHeap:    typeutil.NewPriorityQueue(defaultHeapSize),
+		keysWrittenHeap:  typeutil.NewPriorityQueue(defaultHeapSize),
+		keysReadHeap:     typeutil.NewPriorityQueue(defaultHeapSize),
 	}
 }
 
@@ -141,6 +154,49 @@ func (r *regionsInfo) setRegion(region *regionInfo) {
 		r.removeRegion(origin)
 	}
 	r.addRegion(region)
+}
+
+func (r *regionsInfo) updateHotStatus(region *regionInfo) {
+	r.bytesReadHeap.Push(region.GetId(), region.GetId(), region.BytesRead)
+	r.bytesWrittenHeap.Push(region.GetId(), region.GetId(), region.BytesWritten)
+	r.keysReadHeap.Push(region.GetId(), region.GetId(), region.KeysRead)
+	r.keysWrittenHeap.Push(region.GetId(), region.GetId(), region.KeysWritten)
+}
+
+func (r *regionsInfo) getTopRegionsKeysWritten(n int) []uint64 {
+	var topRegion []uint64
+	res := r.keysWrittenHeap.TopN(n)
+	for _, i := range res {
+		topRegion = append(topRegion, i.(uint64))
+	}
+	return topRegion
+}
+
+func (r *regionsInfo) getTopRegionsKeysRead(n int) []uint64 {
+	var topRegion []uint64
+	res := r.keysReadHeap.TopN(n)
+	for _, i := range res {
+		topRegion = append(topRegion, i.(uint64))
+	}
+	return topRegion
+}
+
+func (r *regionsInfo) getTopRegionsBytesRead(n int) []uint64 {
+	var topRegion []uint64
+	res := r.bytesReadHeap.TopN(n)
+	for _, i := range res {
+		topRegion = append(topRegion, i.(uint64))
+	}
+	return topRegion
+}
+
+func (r *regionsInfo) getTopRegionsBytesWritten(n int) []uint64 {
+	var topRegion []uint64
+	res := r.bytesWrittenHeap.TopN(n)
+	for _, i := range res {
+		topRegion = append(topRegion, i.(uint64))
+	}
+	return topRegion
 }
 
 func (r *regionsInfo) addRegion(region *regionInfo) {
@@ -459,6 +515,30 @@ func (c *clusterInfo) randFollowerRegion(storeID uint64) *regionInfo {
 	return c.regions.randFollowerRegion(storeID)
 }
 
+func (c *clusterInfo) getTopRegionsBytesWritten(n int) []uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regions.getTopRegionsBytesWritten(n)
+}
+
+func (c *clusterInfo) getTopRegionsBytesRead(n int) []uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regions.getTopRegionsBytesRead(n)
+}
+
+func (c *clusterInfo) getTopRegionsKeysRead(n int) []uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regions.getTopRegionsKeysRead(n)
+}
+
+func (c *clusterInfo) getTopRegionsKeysWritten(n int) []uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regions.getTopRegionsKeysWritten(n)
+}
+
 func (c *clusterInfo) getRegionStores(region *regionInfo) []*storeInfo {
 	c.RLock()
 	defer c.RUnlock()
@@ -536,5 +616,6 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 
 	// Region meta is the same, update cache only.
 	c.regions.setRegion(region)
+	c.regions.updateHotStatus(region)
 	return nil
 }

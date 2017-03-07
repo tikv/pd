@@ -1,4 +1,4 @@
-package: github.com/pingcap/pd
+ackage: github.com/pingcap/pd
 import:
 - package: github.com/BurntSushi/toml
   version: 0.2.0
@@ -120,7 +120,7 @@ import:
 - package: github.com/pingcap/check
   version: ce8a2f822ab1e245a4eefcef2996531c79c943f1
 - package: github.com/pingcap/kvproto
-  version: 4416a5a5ad6f6c63c27904c85c67c26133059127
+  version: 854b7eeb43e436a692463a18f03dabfe917ebe2b 
   subpackages:
   - pkg/coprocessor
   - pkg/eraftpb

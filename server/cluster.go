@@ -404,6 +404,26 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	return cluster.putStore(store)
 }
 
+// GetTopRegionsBytesRead returns the regions bytes read top n
+func (c *RaftCluster) GetTopRegionsBytesRead(n int) []uint64 {
+	return c.cachedCluster.getTopRegionsBytesRead(n)
+}
+
+// GetTopRegionsBytesWritten returns the regions bytes written top n
+func (c *RaftCluster) GetTopRegionsBytesWritten(n int) []uint64 {
+	return c.cachedCluster.getTopRegionsBytesWritten(n)
+}
+
+// GetTopRegionsKeysRead returns the regions read number top n
+func (c *RaftCluster) GetTopRegionsKeysRead(n int) []uint64 {
+	return c.cachedCluster.getTopRegionsKeysRead(n)
+}
+
+// GetTopRegionsKeysWritten returns the regions written number top n
+func (c *RaftCluster) GetTopRegionsKeysWritten(n int) []uint64 {
+	return c.cachedCluster.getTopRegionsKeysWritten(n)
+}
+
 func (c *RaftCluster) checkStores() {
 	cluster := c.cachedCluster
 	for _, store := range cluster.getMetaStores() {
