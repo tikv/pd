@@ -131,6 +131,7 @@ func newBalanceRegionScheduler(opt *scheduleOption) *balanceRegionScheduler {
 	filters = append(filters, newStateFilter(opt))
 	filters = append(filters, newHealthFilter(opt))
 	filters = append(filters, newSnapshotCountFilter(opt))
+	filters = append(filters, newStorageThresholdFilter(opt))
 
 	return &balanceRegionScheduler{
 		opt:      opt,
