@@ -225,6 +225,13 @@ func (r *regionsInfo) randFollowerRegion(storeID uint64) *regionInfo {
 	return randRegion(r.followers[storeID])
 }
 
+func (r *regionsInfo) randomRegion() *regionInfo {
+	for _, region := range r.regions {
+		return region.clone()
+	}
+	return nil
+}
+
 func randRegion(regions map[uint64]*regionInfo) *regionInfo {
 	for _, region := range regions {
 		if region.Leader == nil {
@@ -410,6 +417,12 @@ func (c *clusterInfo) getRegions() []*regionInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.regions.getRegions()
+}
+
+func (c *clusterInfo) randomRegion() *regionInfo {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regions.randomRegion()
 }
 
 func (c *clusterInfo) getMetaRegions() []*metapb.Region {
