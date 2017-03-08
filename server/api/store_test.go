@@ -14,54 +14,155 @@
 package api
 
 import (
+	"fmt"
+	"io/ioutil"
+	"net/http"
 	"net/url"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server"
 )
-
-type testStoreSuite struct{}
 
 var _ = Suite(&testStoreSuite{})
 
-func (s *testStoreSuite) TestUrlStoreFilter(c *C) {
-	stores := []*metapb.Store{
+type testStoreSuite struct {
+	svr       *server.Server
+	cleanup   cleanUpFunc
+	urlPrefix string
+	stores    []*metapb.Store
+}
+
+func (s *testStoreSuite) SetUpSuite(c *C) {
+	s.stores = []*metapb.Store{
 		{
 			// metapb.StoreState_Up == 0
-			State: metapb.StoreState_Up,
+			Id:      1,
+			Address: "localhost:1",
+			State:   metapb.StoreState_Up,
 		},
 		{
-			State: metapb.StoreState_Up,
+			Id:      4,
+			Address: "localhost:4",
+			State:   metapb.StoreState_Up,
 		},
 		{
-			// metapb.StoreState_Up == 1
-			State: metapb.StoreState_Offline,
+			// metapb.StoreState_Offline == 1
+			Id:      6,
+			Address: "localhost:6",
+			State:   metapb.StoreState_Offline,
 		},
 		{
 			// metapb.StoreState_Tombstone == 2
-			State: metapb.StoreState_Tombstone,
+			Id:      7,
+			Address: "localhost:7",
+			State:   metapb.StoreState_Tombstone,
 		},
 	}
 
-	var table = []struct {
+	s.svr, s.cleanup = mustNewServer(c)
+	mustWaitLeader(c, []*server.Server{s.svr})
+
+	addr := s.svr.GetAddr()
+	httpAddr := mustUnixAddrToHTTPAddr(c, addr)
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", httpAddr, apiPrefix)
+
+	mustBootstrapCluster(c, s.svr)
+	for _, store := range s.stores {
+		mustPutStore(c, s.svr, store)
+	}
+}
+
+func (s *testStoreSuite) TearDownSuite(c *C) {
+	s.cleanup()
+}
+
+func checkStoresInfo(c *C, ss []*storeInfo, want []*metapb.Store) {
+	c.Assert(len(ss), Equals, len(want))
+	mapWant := make(map[uint64]*metapb.Store)
+	for _, s := range want {
+		if _, ok := mapWant[s.Id]; !ok {
+			mapWant[s.Id] = s
+		}
+	}
+	for _, s := range ss {
+		c.Assert(s.Store.Store, DeepEquals, mapWant[s.Store.Store.Id])
+	}
+}
+
+func (s *testStoreSuite) TestStoresList(c *C) {
+	url := fmt.Sprintf("%s/stores", s.urlPrefix)
+	info := new(storesInfo)
+	err := readJSONWithURL(url, info)
+	c.Assert(err, IsNil)
+	checkStoresInfo(c, info.Stores, s.stores[:3])
+
+	url = fmt.Sprintf("%s/stores?state=0", s.urlPrefix)
+	err = readJSONWithURL(url, info)
+	c.Assert(err, IsNil)
+	checkStoresInfo(c, info.Stores, s.stores[:2])
+
+	url = fmt.Sprintf("%s/stores?state=1", s.urlPrefix)
+	err = readJSONWithURL(url, info)
+	c.Assert(err, IsNil)
+	checkStoresInfo(c, info.Stores, s.stores[2:3])
+
+}
+
+func (s *testStoreSuite) TestStoreGet(c *C) {
+	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
+	info := new(storeInfo)
+	err := readJSONWithURL(url, info)
+	c.Assert(err, IsNil)
+	checkStoresInfo(c, []*storeInfo{info}, s.stores[:1])
+}
+
+func (s *testStoreSuite) TestStoreDelete(c *C) {
+	table := []struct {
+		id     int
+		status int
+	}{
+		{
+			id:     6,
+			status: http.StatusOK,
+		},
+		{
+			id:     7,
+			status: http.StatusInternalServerError,
+		},
+	}
+	client := newUnixSocketClient()
+	for _, t := range table {
+		req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/store/%d", s.urlPrefix, t.id), nil)
+		c.Assert(err, IsNil)
+		resp, err := client.Do(req)
+		ioutil.ReadAll(resp.Body)
+		resp.Body.Close()
+		c.Assert(err, IsNil)
+		c.Assert(resp.StatusCode, Equals, t.status)
+	}
+}
+
+func (s *testStoreSuite) TestUrlStoreFilter(c *C) {
+	table := []struct {
 		u    string
 		want []*metapb.Store
 	}{
 		{
 			u:    "http://localhost:2379/pd/api/v1/stores",
-			want: stores[:3],
+			want: s.stores[:3],
 		},
 		{
 			u:    "http://localhost:2379/pd/api/v1/stores?state=2",
-			want: stores[3:],
+			want: s.stores[3:],
 		},
 		{
 			u:    "http://localhost:2379/pd/api/v1/stores?state=0",
-			want: stores[:2],
+			want: s.stores[:2],
 		},
 		{
 			u:    "http://localhost:2379/pd/api/v1/stores?state=2&state=1",
-			want: stores[2:],
+			want: s.stores[2:],
 		},
 	}
 
@@ -70,7 +171,7 @@ func (s *testStoreSuite) TestUrlStoreFilter(c *C) {
 		c.Assert(err, IsNil)
 		f, err := newStoreStateFilter(uu)
 		c.Assert(err, IsNil)
-		c.Assert(f.filter(stores), DeepEquals, t.want)
+		c.Assert(f.filter(s.stores), DeepEquals, t.want)
 	}
 
 	u, err := url.Parse("http://localhost:2379/pd/api/v1/stores?state=foo")

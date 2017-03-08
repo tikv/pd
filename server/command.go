@@ -14,6 +14,8 @@
 package server
 
 import (
+	"time"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
@@ -21,7 +23,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
+const handleTSOWarnThreshold = time.Millisecond * 10
+
 func (c *conn) handleTso(req *pdpb.Request) (*pdpb.Response, error) {
+	startTime := time.Now()
+
 	request := req.GetTso()
 	if request == nil {
 		return nil, errors.Errorf("invalid tso command, but %v", req)
@@ -31,6 +37,10 @@ func (c *conn) handleTso(req *pdpb.Request) (*pdpb.Response, error) {
 	ts, err := c.s.getRespTS(count)
 	if err != nil {
 		return nil, errors.Trace(err)
+	}
+
+	if elapse := time.Since(startTime); elapse > handleTSOWarnThreshold {
+		log.Warnf("handle tso too slow, cost %v", elapse)
 	}
 
 	return &pdpb.Response{

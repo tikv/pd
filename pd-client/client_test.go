@@ -177,6 +177,15 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 	c.Assert(leader, DeepEquals, peer)
 }
 
+func (s *testClientSuite) TestGetRegionByID(c *C) {
+	heartbeatRegion(c, s.srv)
+
+	r, leader, err := s.client.GetRegionByID(3)
+	c.Assert(err, IsNil)
+	c.Assert(r, DeepEquals, region)
+	c.Assert(leader, DeepEquals, peer)
+}
+
 func (s *testClientSuite) TestGetStore(c *C) {
 	cluster := s.srv.GetRaftCluster()
 	c.Assert(cluster, NotNil)

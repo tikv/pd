@@ -129,6 +129,7 @@ func (s *Server) GetConfig() *Config {
 func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
 	s.cfg.Schedule = cfg
 	s.scheduleOpt.store(&cfg)
+	log.Infof("schedule config is updated: %+v, old: %+v", cfg, s.cfg.Schedule)
 }
 
 func (s *Server) getClusterRootPath() string {

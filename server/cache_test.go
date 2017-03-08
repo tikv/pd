@@ -16,6 +16,7 @@ package server
 import (
 	"sync/atomic"
 
+	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -24,6 +25,17 @@ import (
 var _ = Suite(&testStoresInfoSuite{})
 
 type testStoresInfoSuite struct{}
+
+func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
+	o := origin.GetRegionEpoch()
+	e := region.GetRegionEpoch()
+
+	if e.GetVersion() < o.GetVersion() || e.GetConfVer() < o.GetConfVer() {
+		return errors.Trace(errRegionIsStale(region, origin))
+	}
+
+	return nil
+}
 
 // Create n stores (0..n).
 func newTestStores(n uint64) []*storeInfo {

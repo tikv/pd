@@ -309,6 +309,15 @@ type ReplicationConfig struct {
 	LocationLabels []string `toml:"location-labels" json:"location-labels"`
 }
 
+func (c *ReplicationConfig) clone() *ReplicationConfig {
+	locationLabels := make([]string, 0, len(c.LocationLabels))
+	copy(locationLabels, c.LocationLabels)
+	return &ReplicationConfig{
+		MaxReplicas:    c.MaxReplicas,
+		LocationLabels: locationLabels,
+	}
+}
+
 func (c *ReplicationConfig) adjust() {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 }
@@ -343,7 +352,7 @@ func (o *scheduleOption) GetMaxReplicas() int {
 }
 
 func (o *scheduleOption) SetMaxReplicas(replicas int) {
-	o.rep.cfg.MaxReplicas = uint64(replicas)
+	o.rep.SetMaxReplicas(replicas)
 }
 
 func (o *scheduleOption) GetMaxSnapshotCount() uint64 {
