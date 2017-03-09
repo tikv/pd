@@ -14,12 +14,15 @@
 package server
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"net"
 	"net/http"
 	"os"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
@@ -27,6 +30,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/util"
@@ -370,4 +374,49 @@ func minDuration(a, b time.Duration) time.Duration {
 		return a
 	}
 	return b
+}
+
+func diffRegionPeersInfo(origin *regionInfo, other *regionInfo) string {
+	var ret []string
+	for _, a := range origin.Peers {
+		both := false
+		for _, b := range other.Peers {
+			if reflect.DeepEqual(a, b) {
+				both = true
+				break
+			}
+		}
+		if !both {
+			ret = append(ret, fmt.Sprintf("Remove peer:{%v}", a))
+		}
+	}
+	for _, b := range other.Peers {
+		both := false
+		for _, a := range origin.Peers {
+			if reflect.DeepEqual(a, b) {
+				both = true
+				break
+			}
+		}
+		if !both {
+			ret = append(ret, fmt.Sprintf("Add peer:{%v}", b))
+		}
+	}
+	return strings.Join(ret, ",")
+}
+
+func diffRegionKeyInfo(origin *regionInfo, other *regionInfo) string {
+	var ret []string
+	if !bytes.Equal(origin.Region.StartKey, other.Region.StartKey) {
+		originKey := &metapb.Region{StartKey: origin.Region.StartKey}
+		otherKey := &metapb.Region{StartKey: other.Region.StartKey}
+		ret = append(ret, fmt.Sprintf("StartKey Changed:{%s} -> {%s}", originKey, otherKey))
+	}
+	if !bytes.Equal(origin.Region.EndKey, other.Region.EndKey) {
+		originKey := &metapb.Region{EndKey: origin.Region.EndKey}
+		otherKey := &metapb.Region{EndKey: other.Region.EndKey}
+		ret = append(ret, fmt.Sprintf("EndKey Changed:{%s} -> {%s}", originKey, otherKey))
+	}
+
+	return strings.Join(ret, ",")
 }
