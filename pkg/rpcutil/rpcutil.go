@@ -14,14 +14,10 @@
 package rpcutil
 
 import (
-	"net"
 	"net/url"
 	"strings"
 
 	"github.com/juju/errors"
-	"github.com/pingcap/kvproto/pkg/msgpb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/util"
 )
 
 // ParseUrls parses a string into multiple urls.
@@ -38,31 +34,31 @@ func ParseUrls(s string) ([]url.URL, error) {
 	return urls, nil
 }
 
-// Call sends the request to conn and wait for the response.
-func Call(conn net.Conn, reqID uint64, request *pdpb.Request) (*pdpb.Response, error) {
-	req := &msgpb.Message{
-		MsgType: msgpb.MessageType_PdReq,
-		PdReq:   request,
-	}
-	if err := util.WriteMessage(conn, reqID, req); err != nil {
-		return nil, errors.Trace(err)
-	}
-	resp := &msgpb.Message{}
-	respID, err := util.ReadMessage(conn, resp)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	if respID != reqID {
-		return nil, errors.Errorf("message id mismatch: reqID %d respID %d", reqID, respID)
-	}
-	return resp.GetPdResp(), nil
-}
+// // Call sends the request to conn and wait for the response.
+// func Call(conn net.Conn, reqID uint64, request *pdpb.Request) (*pdpb.Response, error) {
+// 	req := &msgpb.Message{
+// 		MsgType: msgpb.MessageType_PdReq,
+// 		PdReq:   request,
+// 	}
+// 	if err := util.WriteMessage(conn, reqID, req); err != nil {
+// 		return nil, errors.Trace(err)
+// 	}
+// 	resp := &msgpb.Message{}
+// 	respID, err := util.ReadMessage(conn, resp)
+// 	if err != nil {
+// 		return nil, errors.Trace(err)
+// 	}
+// 	if respID != reqID {
+// 		return nil, errors.Errorf("message id mismatch: reqID %d respID %d", reqID, respID)
+// 	}
+// 	return resp.GetPdResp(), nil
+// }
 
-// Request connects to urls, then sends the request and wait for the response.
-func Request(urls string, reqID uint64, request *pdpb.Request) (*pdpb.Response, error) {
-	conn, err := ConnectUrls(urls, 0)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return Call(conn, reqID, request)
-}
+// // Request connects to urls, then sends the request and wait for the response.
+// func Request(urls string, reqID uint64, request *pdpb.Request) (*pdpb.Response, error) {
+// 	conn, err := ConnectUrls(urls, 0)
+// 	if err != nil {
+// 		return nil, errors.Trace(err)
+// 	}
+// 	return Call(conn, reqID, request)
+// }

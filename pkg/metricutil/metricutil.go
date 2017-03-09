@@ -17,14 +17,14 @@ import (
 	"time"
 
 	"github.com/ngaut/log"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/timeutil"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 )
 
 var (
-	cmdLabels = convertCmdLabels()
+	// cmdLabels = convertCmdLabels()
+	cmdLabels = make(map[string]string)
 )
 
 const zeroDuration = time.Duration(0)
@@ -36,23 +36,23 @@ type MetricConfig struct {
 	PushInterval timeutil.Duration `toml:"interval" json:"interval"`
 }
 
-// GetCmdLabel gets the request command label name for metrics.
-func GetCmdLabel(request *pdpb.Request) string {
-	name := request.GetCmdType().String()
-	label, ok := cmdLabels[name]
-	if !ok {
-		label = convertName(name)
-	}
-	return label
-}
+// // GetCmdLabel gets the request command label name for metrics.
+// func GetCmdLabel(request *pdpb.Request) string {
+// 	name := request.GetCmdType().String()
+// 	label, ok := cmdLabels[name]
+// 	if !ok {
+// 		label = convertName(name)
+// 	}
+// 	return label
+// }
 
-func convertCmdLabels() map[string]string {
-	labels := make(map[string]string)
-	for name := range pdpb.CommandType_value {
-		labels[name] = convertName(name)
-	}
-	return labels
-}
+// func convertCmdLabels() map[string]string {
+// 	labels := make(map[string]string)
+// 	for name := range pdpb.CommandType_value {
+// 		labels[name] = convertName(name)
+// 	}
+// 	return labels
+// }
 
 // convertName converts variable name to a linux type name.
 // Like `AbcDef -> abc_def`.

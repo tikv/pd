@@ -15,30 +15,25 @@ package testutil
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"sync/atomic"
-
-	"github.com/pingcap/check"
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/rpcutil"
 )
 
-// MustRPCCall fails current test if fails to make a RPC call.
-func MustRPCCall(c *check.C, conn net.Conn, request *pdpb.Request) *pdpb.Response {
-	resp, err := rpcutil.Call(conn, 0, request)
-	c.Assert(err, check.IsNil)
-	c.Assert(resp, check.NotNil)
-	return resp
-}
+// // MustRPCCall fails current test if fails to make a RPC call.
+// func MustRPCCall(c *check.C, conn net.Conn, request *pdpb.Request) *pdpb.Response {
+// 	resp, err := rpcutil.Call(conn, 0, request)
+// 	c.Assert(err, check.IsNil)
+// 	c.Assert(resp, check.NotNil)
+// 	return resp
+// }
 
-// MustRPCRequest fails current test if fails to make RPC requests.
-func MustRPCRequest(c *check.C, urls string, request *pdpb.Request) *pdpb.Response {
-	resp, err := rpcutil.Request(urls, 0, request)
-	c.Assert(err, check.IsNil)
-	c.Assert(resp, check.NotNil)
-	return resp
-}
+// // MustRPCRequest fails current test if fails to make RPC requests.
+// func MustRPCRequest(c *check.C, urls string, request *pdpb.Request) *pdpb.Response {
+// 	resp, err := rpcutil.Request(urls, 0, request)
+// 	c.Assert(err, check.IsNil)
+// 	c.Assert(resp, check.NotNil)
+// 	return resp
+// }
 
 var unixURLCount uint64
 

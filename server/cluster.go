@@ -199,7 +199,7 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 	return nil
 }
 
-func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, error) {
+func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
 	clusterID := s.clusterID
 
 	log.Infof("try to bootstrap raft cluster %d with %v", clusterID, req)
@@ -249,7 +249,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 	}
 	if !resp.Succeeded {
 		log.Warnf("cluster %d already bootstrapped", clusterID)
-		return newBootstrappedError(), nil
+		return nil, errors.Errorf("cluster %d already bootstrapped", clusterID)
 	}
 
 	log.Infof("bootstrap cluster %d ok", clusterID)
@@ -258,9 +258,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 		return nil, errors.Trace(err)
 	}
 
-	return &pdpb.Response{
-		Bootstrap: &pdpb.BootstrapResponse{},
-	}, nil
+	return &pdpb.BootstrapResponse{}, nil
 }
 
 func (c *RaftCluster) getRegion(regionKey []byte) (*metapb.Region, *metapb.Peer) {

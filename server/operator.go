@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/ngaut/log"
-	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -104,7 +103,8 @@ func newAddPeerOperator(regionID uint64, peer *metapb.Peer) *changePeerOperator 
 		Name:     "add_peer",
 		RegionID: regionID,
 		ChangePeer: &pdpb.ChangePeer{
-			ChangeType: raftpb.ConfChangeType_AddNode.Enum(),
+			// FIXME: replace with actual ConfChangeType once eraftpb uses proto3.
+			ChangeType: pdpb.ConfChangeType_AddNode,
 			Peer:       peer,
 		},
 	}
@@ -115,7 +115,8 @@ func newRemovePeerOperator(regionID uint64, peer *metapb.Peer) *changePeerOperat
 		Name:     "remove_peer",
 		RegionID: regionID,
 		ChangePeer: &pdpb.ChangePeer{
-			ChangeType: raftpb.ConfChangeType_RemoveNode.Enum(),
+			// FIXME: replace with actual ConfChangeType once eraftpb uses proto3.
+			ChangeType: pdpb.ConfChangeType_RemoveNode,
 			Peer:       peer,
 		},
 	}
@@ -137,7 +138,7 @@ func (op *changePeerOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatRespo
 	// Check if operator is finished.
 	peer := op.ChangePeer.GetPeer()
 	switch op.ChangePeer.GetChangeType() {
-	case raftpb.ConfChangeType_AddNode:
+	case pdpb.ConfChangeType_AddNode:
 		if region.GetPendingPeer(peer.GetId()) != nil {
 			// Peer is added but not finished.
 			return nil, false
@@ -146,7 +147,7 @@ func (op *changePeerOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatRespo
 			// Peer is added and finished.
 			return nil, true
 		}
-	case raftpb.ConfChangeType_RemoveNode:
+	case pdpb.ConfChangeType_RemoveNode:
 		if region.GetPeer(peer.GetId()) == nil {
 			// Peer is removed.
 			return nil, true
