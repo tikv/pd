@@ -70,6 +70,10 @@ type Config struct {
 
 	Replication ReplicationConfig `toml:"replication" json:"replication"`
 
+	// Etcd config
+	QuotaBackendBytes       typeutil.ByteSize `toml:"quota-backend-bytes" json:"quota-backend-bytes"`
+	AutoCompactionRetention int               `toml:"auto-compaction-retention" json:"auto-compaction-retention"`
+
 	// Only test can change them.
 	nextRetryDelay             time.Duration
 	disableStrictReconfigCheck bool
@@ -395,6 +399,8 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.StrictReconfigCheck = !c.disableStrictReconfigCheck
 	cfg.TickMs = uint(c.tickMs)
 	cfg.ElectionMs = uint(c.electionMs)
+	cfg.AutoCompactionRetention = c.AutoCompactionRetention
+	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
 
 	var err error
 
