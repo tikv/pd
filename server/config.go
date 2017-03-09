@@ -70,9 +70,12 @@ type Config struct {
 
 	Replication ReplicationConfig `toml:"replication" json:"replication"`
 
-	// Etcd config
-	QuotaBackendBytes       typeutil.ByteSize `toml:"quota-backend-bytes" json:"quota-backend-bytes"`
-	AutoCompactionRetention int               `toml:"auto-compaction-retention" json:"auto-compaction-retention"`
+	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
+	// the default size is 2GB, the maximum is 8GB.
+	QuotaBackendBytes typeutil.ByteSize `toml:"quota-backend-bytes" json:"quota-backend-bytes"`
+	// AutoCompactionRetention for mvcc key value store in hour. 0 means disable auto compaction.
+	// the default retention is 1 hour
+	AutoCompactionRetention int `toml:"auto-compaction-retention" json:"auto-compaction-retention"`
 
 	// Only test can change them.
 	nextRetryDelay             time.Duration
