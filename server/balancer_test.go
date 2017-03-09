@@ -14,6 +14,7 @@
 package server
 
 import (
+	"math"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -185,6 +186,21 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 		target := cluster.getStore(2)
 		c.Assert(shouldBalance(source, target, regionKind), Equals, t.expectedResult)
 	}
+}
+
+func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+	tc.addLeaderStore(1, 10)
+	tc.addLeaderStore(2, 20)
+	tc.addLeaderStore(3, 30)
+
+	// StandDeviation is sqrt((10^2+0+10^2)/3).
+	c.Assert(adjustBalanceLimit(cluster, leaderKind), Equals, uint64(math.Sqrt(200.0/3.0)))
+
+	tc.setStoreOffline(1)
+	// StandDeviation is sqrt((5^2+5^2)/2).
+	c.Assert(adjustBalanceLimit(cluster, leaderKind), Equals, uint64(math.Sqrt(50.0/2.0)))
 }
 
 var _ = Suite(&testBalanceLeaderSchedulerSuite{})
