@@ -242,7 +242,11 @@ func (c *client) tsLoop() {
 			stream, err = c.leaderClient().Tso(ctx)
 			if err != nil {
 				log.Errorf("[pd] create tso stream error: %v", err)
-				time.Sleep(time.Second)
+				select {
+				case <-time.After(time.Second):
+				case <-c.ctx.Done():
+					return
+				}
 				continue
 			}
 		}
