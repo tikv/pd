@@ -111,8 +111,9 @@ func NewConfig() *Config {
 }
 
 const (
-	defaultLeaderLease    = int64(3)
-	defaultNextRetryDelay = time.Second
+	defaultLeaderLease             = int64(3)
+	defaultNextRetryDelay          = time.Second
+	defaultAutoCompactionRetention = 1
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
@@ -237,6 +238,9 @@ func (c *Config) adjust() error {
 
 	if c.nextRetryDelay == 0 {
 		c.nextRetryDelay = defaultNextRetryDelay
+	}
+	if c.AutoCompactionRetention == 0 {
+		c.AutoCompactionRetention = defaultAutoCompactionRetention
 	}
 
 	adjustUint64(&c.tickMs, defaultTickMs)
