@@ -91,11 +91,12 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	tc.addLeaderRegion(2, 4, 3, 2)
 
 	// Wait for schedule and turn off balance.
-	time.Sleep(time.Second)
-	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
+	s.waitOperator(co, 1)
 	checkTransferPeer(c, co.getOperator(1), 4, 1)
+	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
+	s.waitOperator(co, 2)
 	checkTransferLeader(c, co.getOperator(2), 4, 2)
+	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 
 	// Transfer peer.
 	region := cluster.getRegion(1)
@@ -186,7 +187,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	tc.addLeaderRegion(1, 2, 3, 4)
 
 	// Wait for schedule.
-	time.Sleep(time.Second)
+	s.waitOperator(co, 1)
 	checkTransferPeer(c, co.getOperator(1), 4, 1)
 
 	region := cluster.getRegion(1)
@@ -247,19 +248,28 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(co.addScheduler(gls), IsNil)
 
 	// Transfer all leaders to store 1.
-	time.Sleep(time.Second)
+	s.waitOperator(co, 2)
 	region2 := cluster.getRegion(2)
 	checkTransferLeaderResp(c, co.dispatch(region2), 1)
 	region2.Leader = region2.GetStorePeer(1)
 	cluster.putRegion(region2)
 	c.Assert(co.dispatch(region2), IsNil)
 
-	time.Sleep(time.Second)
+	s.waitOperator(co, 3)
 	region3 := cluster.getRegion(3)
 	checkTransferLeaderResp(c, co.dispatch(region3), 1)
 	region3.Leader = region3.GetStorePeer(1)
 	cluster.putRegion(region3)
 	c.Assert(co.dispatch(region3), IsNil)
+}
+
+func (s *testCoordinatorSuite) waitOperator(co *coordinator, regionID uint64) {
+	for i := 0; i < 20; i++ {
+		if co.getOperator(regionID) != nil {
+			return
+		}
+		time.Sleep(time.Millisecond * 100)
+	}
 }
 
 var _ = Suite(&testScheduleLimiterSuite{})
