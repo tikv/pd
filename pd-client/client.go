@@ -174,14 +174,14 @@ func (c *client) switchLeader(addrs []string) error {
 	}
 
 	log.Infof("[pd] leader switches to: %v, previous: %v", addr, c.connMu.leader)
-	if _, ok := c.connMu.clientConns[addr]; ok {
-		c.connMu.RUnlock()
+	_, ok := c.connMu.clientConns[addr]
+	c.connMu.RUnlock()
+	if ok {
 		c.connMu.Lock()
 		c.connMu.leader = addr
 		c.connMu.Unlock()
 		return nil
 	}
-	c.connMu.RUnlock()
 
 	cc, err := grpc.Dial(addr, grpc.WithDialer(func(addr string, d time.Duration) (net.Conn, error) {
 		u, err := url.Parse(addr)
