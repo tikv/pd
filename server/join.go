@@ -33,7 +33,7 @@ func genClientV3Config(cfg *Config) clientv3.Config {
 	}
 }
 
-// prepareJoinCluster sends MemberAdd command to PD cluster,
+// PrepareJoinCluster sends MemberAdd command to PD cluster,
 // and returns the initial configuration of the PD cluster.
 //
 // TL;TR: The join functionality is safe. With data, join does nothing, w/o data
@@ -70,30 +70,36 @@ func genClientV3Config(cfg *Config) clientv3.Config {
 //      What join does: return "" (as etcd will read data directory and find
 //                      that the PD itself has been removed, so an empty string
 //                      is fine.)
-func prepareJoinCluster(cfg *Config) (string, string, error) {
+func PrepareJoinCluster(cfg *Config) error {
 	// - A PD tries to join itself.
+	if cfg.Join == "" {
+		return nil
+	}
+
 	if cfg.Join == cfg.AdvertiseClientUrls {
-		return "", "", errors.New("join self is forbidden")
+		return errors.New("join self is forbidden")
 	}
 
 	// Cases with data directory.
 
 	initialCluster := ""
 	if wal.Exist(cfg.DataDir) {
-		return initialCluster, embed.ClusterStateFlagExisting, nil
+		cfg.InitialCluster = initialCluster
+		cfg.InitialClusterState = embed.ClusterStateFlagExisting
+		return nil
 	}
 
 	// Below are cases without data directory.
 
 	client, err := clientv3.New(genClientV3Config(cfg))
 	if err != nil {
-		return "", "", errors.Trace(err)
+		return errors.Trace(err)
 	}
 	defer client.Close()
 
 	listResp, err := etcdutil.ListEtcdMembers(client)
 	if err != nil {
-		return "", "", errors.Trace(err)
+		return errors.Trace(err)
 	}
 
 	existed := false
@@ -105,19 +111,19 @@ func prepareJoinCluster(cfg *Config) (string, string, error) {
 
 	// - A failed PD re-joins the previous cluster.
 	if existed {
-		return "", "", errors.New("missing data or join a duplicated pd")
+		return errors.New("missing data or join a duplicated pd")
 	}
 
 	// - A new PD joins an existing cluster.
 	// - A deleted PD joins to previous cluster.
 	addResp, err := etcdutil.AddEtcdMember(client, []string{cfg.AdvertisePeerUrls})
 	if err != nil {
-		return "", "", errors.Trace(err)
+		return errors.Trace(err)
 	}
 
 	listResp, err = etcdutil.ListEtcdMembers(client)
 	if err != nil {
-		return "", "", errors.Trace(err)
+		return errors.Trace(err)
 	}
 
 	pds := []string{}
@@ -131,6 +137,7 @@ func prepareJoinCluster(cfg *Config) (string, string, error) {
 		}
 	}
 	initialCluster = strings.Join(pds, ",")
-
-	return initialCluster, embed.ClusterStateFlagExisting, nil
+	cfg.InitialCluster = initialCluster
+	cfg.InitialClusterState = embed.ClusterStateFlagExisting
+	return nil
 }

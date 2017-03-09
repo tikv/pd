@@ -21,6 +21,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"reflect"
 	"strings"
 	"time"
@@ -41,6 +42,9 @@ import (
 const (
 	requestTimeout  = etcdutil.DefaultRequestTimeout
 	slowRequestTime = etcdutil.DefaultSlowRequestTime
+
+	// PrivateDirMode grants owner to make/remove files inside the directory.
+	PrivateDirMode = 0700
 )
 
 // Version information.
@@ -305,9 +309,14 @@ func (rf *redirectFormatter) Format(pkg string, level capnslog.LogLevel, depth i
 func (rf *redirectFormatter) Flush() {}
 
 // setLogOutput sets output path for all logs.
-func setLogOutput(path string) error {
+func setLogOutput(logFile string) error {
 	// PD log.
-	log.SetOutputByName(path)
+	dir, _ := path.Split(logFile)
+	err := os.MkdirAll(dir, PrivateDirMode)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	log.SetOutputByName(logFile)
 	log.SetRotateByDay()
 
 	// ETCD log.

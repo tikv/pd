@@ -212,15 +212,6 @@ func (c *Config) adjust() error {
 	adjustString(&c.PeerUrls, defaultPeerUrls)
 	adjustString(&c.AdvertisePeerUrls, c.PeerUrls)
 
-	if c.Join != "" {
-		initialCluster, state, err := prepareJoinCluster(c)
-		if err != nil {
-			return errors.Trace(err)
-		}
-		c.InitialCluster = initialCluster
-		c.InitialClusterState = state
-	}
-
 	if len(c.InitialCluster) == 0 {
 		// The advertise peer urls may be http://127.0.0.1:2380,http://127.0.0.1:2381
 		// so the initial cluster is pd=http://127.0.0.1:2380,pd=http://127.0.0.1:2381
