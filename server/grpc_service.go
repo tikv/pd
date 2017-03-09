@@ -299,7 +299,7 @@ func (s *Server) RegionHeartbeat(ctx context.Context, request *pdpb.RegionHeartb
 		return resp, nil
 	}
 
-	res, err := cluster.handleRegionHeartbeat(region)
+	resp, err = cluster.handleRegionHeartbeat(region)
 	if err != nil {
 		pberr := &pdpb.Error{
 			Type:    pdpb.ErrorType_UNKNOWN,
@@ -309,11 +309,11 @@ func (s *Server) RegionHeartbeat(ctx context.Context, request *pdpb.RegionHeartb
 
 		return resp, nil
 	}
+	if resp == nil {
+		return &pdpb.RegionHeartbeatResponse{Header: s.header()}, nil
+	}
 
 	resp.Header = s.header()
-	resp.ChangePeer = res.ChangePeer
-	resp.TransferLeader = res.TransferLeader
-
 	return resp, nil
 }
 
