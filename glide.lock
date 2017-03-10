@@ -1,5 +1,5 @@
-hash: cea0c01153e8d5c5c5f3ade838bb1a0b08560ca93780784be4a967f5dbdb6791
-updated: 2017-02-20T18:48:33.156317518+08:00
+hash: 3d51879dfa7cb23ae33b7bfbc21b9b136ef251cc85ffce8acf1a8c262dc8d196
+updated: 2017-03-10T13:19:51.908870215+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -140,7 +140,6 @@ imports:
   - pkg/metapb
   - pkg/msgpb
   - pkg/pdpb
-  - pkg/pdpb2
   - pkg/raft_cmdpb
   - pkg/raft_serverpb
   - pkg/util
