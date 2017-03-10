@@ -43,8 +43,7 @@ const (
 	requestTimeout  = etcdutil.DefaultRequestTimeout
 	slowRequestTime = etcdutil.DefaultSlowRequestTime
 
-	// PrivateDirMode grants owner to make/remove files inside the directory.
-	PrivateDirMode = 0700
+	publicDirMode = 0755
 )
 
 // Version information.
@@ -312,7 +311,7 @@ func (rf *redirectFormatter) Flush() {}
 func setLogOutput(logFile string) error {
 	// PD log.
 	dir, _ := path.Split(logFile)
-	err := os.MkdirAll(dir, PrivateDirMode)
+	err := os.MkdirAll(dir, publicDirMode)
 	if err != nil {
 		return errors.Trace(err)
 	}
