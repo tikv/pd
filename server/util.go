@@ -310,7 +310,7 @@ func (rf *redirectFormatter) Flush() {}
 // setLogOutput sets output path for all logs.
 func setLogOutput(logFile string) error {
 	// PD log.
-	dir, _ := path.Split(logFile)
+	dir := path.Dir(logFile)
 	err := os.MkdirAll(dir, logDirMode)
 	if err != nil {
 		return errors.Trace(err)
