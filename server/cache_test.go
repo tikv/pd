@@ -182,10 +182,10 @@ func checkRegions(c *C, cache *regionsInfo, regions []*regionInfo) {
 			regionCount[peer.StoreId]++
 			if peer.Id == region.Leader.Id {
 				leaderCount[peer.StoreId]++
-				checkRegion(c, cache.leaders[peer.StoreId][region.Id], region)
+				checkRegion(c, cache.leaders[peer.StoreId].Get(region.Id), region)
 			} else {
 				followerCount[peer.StoreId]++
-				checkRegion(c, cache.followers[peer.StoreId][region.Id], region)
+				checkRegion(c, cache.followers[peer.StoreId].Get(region.Id), region)
 			}
 		}
 	}
