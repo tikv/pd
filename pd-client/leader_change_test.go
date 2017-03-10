@@ -64,7 +64,9 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		}
 	}()
 
-	bootstrapServer(c, mustWaitLeader(c, svrs))
+	leaderPeer := mustWaitLeader(c, svrs)
+	grpcClient := mustNewGrpcClient(c, leaderPeer.GetAddr())
+	bootstrapServer(c, newHeader(leaderPeer), grpcClient)
 
 	cli, err := NewClient(endpoints)
 	c.Assert(err, IsNil)
@@ -105,7 +107,7 @@ func (s *testLeaderChangeSuite) mustGetLeader(c *C, urls []string) string {
 		if err != nil {
 			continue
 		}
-		return leader.GetAddr()
+		return leader.GetClientUrls()[0]
 	}
 	c.Fatal("failed get leader")
 	return ""
