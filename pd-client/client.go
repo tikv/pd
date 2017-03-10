@@ -23,7 +23,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb2"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
@@ -154,7 +154,7 @@ func (c *client) updateLeader() error {
 		if err != nil {
 			continue
 		}
-		if err = c.switchLeader(leader.GetAddr()); err != nil {
+		if err = c.switchLeader(leader.GetClientUrls()); err != nil {
 			return errors.Trace(err)
 		}
 		return nil
@@ -162,7 +162,9 @@ func (c *client) updateLeader() error {
 	return errors.Errorf("failed to get leader from %v", c.urls)
 }
 
-func (c *client) switchLeader(addr string) error {
+func (c *client) switchLeader(addrs []string) error {
+	// FIXME: How to safely compare leader urls? For now, only allows one client url.
+	addr := addrs[0]
 	c.connMu.RLock()
 	if c.connMu.leader == addr {
 		c.connMu.RUnlock()
@@ -226,7 +228,7 @@ func (c *client) tsLoop() {
 	defer c.wg.Done()
 
 	var requests []*tsoRequest
-	var stream pdpb2.PD_TsoClient
+	var stream pdpb.PD_TsoClient
 	var cancel context.CancelFunc
 
 	for {
@@ -273,10 +275,10 @@ func (c *client) tsLoop() {
 	}
 }
 
-func (c *client) processTSORequests(stream pdpb2.PD_TsoClient, requests []*tsoRequest) error {
+func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoRequest) error {
 	start := time.Now()
 	//	ctx, cancel := context.WithTimeout(c.ctx, pdTimeout)
-	req := &pdpb2.TsoRequest{
+	req := &pdpb.TsoRequest{
 		Header: c.requestHeader(),
 		Count:  uint32(len(requests)),
 	}
@@ -333,11 +335,11 @@ func (c *client) Close() {
 	}
 }
 
-func (c *client) leaderClient() pdpb2.PDClient {
+func (c *client) leaderClient() pdpb.PDClient {
 	c.connMu.RLock()
 	defer c.connMu.RUnlock()
 
-	return pdpb2.NewPDClient(c.connMu.clientConns[c.connMu.leader])
+	return pdpb.NewPDClient(c.connMu.clientConns[c.connMu.leader])
 }
 
 func (c *client) scheduleCheckLeader() {
@@ -377,7 +379,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	resp, err := c.leaderClient().GetRegion(ctx, &pdpb2.GetRegionRequest{
+	resp, err := c.leaderClient().GetRegion(ctx, &pdpb.GetRegionRequest{
 		Header:    c.requestHeader(),
 		RegionKey: key,
 	})
@@ -396,7 +398,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	resp, err := c.leaderClient().GetStore(ctx, &pdpb2.GetStoreRequest{
+	resp, err := c.leaderClient().GetStore(ctx, &pdpb.GetStoreRequest{
 		Header:  c.requestHeader(),
 		StoreId: storeID,
 	})
@@ -418,8 +420,8 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 	return store, nil
 }
 
-func (c *client) requestHeader() *pdpb2.RequestHeader {
-	return &pdpb2.RequestHeader{
+func (c *client) requestHeader() *pdpb.RequestHeader {
+	return &pdpb.RequestHeader{
 		ClusterId: c.clusterID,
 	}
 }

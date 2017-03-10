@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server"
@@ -43,12 +42,12 @@ func newMemberListHandler(svr *server.Server, rd *render.Render) *memberListHand
 func (h *memberListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	client := h.svr.GetClient()
 
-	members, err := server.GetPDMembers(client)
+	members, err := server.GetMembers(client)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ret := make(map[string][]*pdpb.PDMember)
+	ret := make(map[string][]*pdpb.Member)
 	ret["members"] = members
 	h.rd.JSON(w, http.StatusOK, ret)
 }
@@ -69,6 +68,7 @@ func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	client := h.svr.GetClient()
 
 	// step 1. get etcd id
+	// TODO: GetPDMembers.
 	var id uint64
 	name := (mux.Vars(r))["name"]
 	listResp, err := etcdutil.ListEtcdMembers(client)
@@ -96,12 +96,6 @@ func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %s", name))
 }
 
-type leaderInfo struct {
-	Name string `json:"name"`
-	Addr string `json:"addr"`
-	ID   uint64 `json:"id"`
-}
-
 type leaderHandler struct {
 	svr *server.Server
 	rd  *render.Render
@@ -120,36 +114,6 @@ func (h *leaderHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	name, err := h.getNameByID(leader.Id)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 
-	ret := leaderInfo{
-		Name: name,
-		Addr: leader.Addr,
-		ID:   leader.Id,
-	}
-	h.rd.JSON(w, http.StatusOK, ret)
-}
-
-func (h *leaderHandler) getNameByID(id uint64) (string, error) {
-	client := h.svr.GetClient()
-	listResp, err := etcdutil.ListEtcdMembers(client)
-	if err != nil {
-		return "", errors.Trace(err)
-	}
-
-	var name string
-	for _, m := range listResp.Members {
-		if id == m.ID {
-			name = m.Name
-			break
-		}
-	}
-	if name == "" {
-		return name, errors.Errorf("unknown member with id %d", id)
-	}
-	return name, nil
+	h.rd.JSON(w, http.StatusOK, leader)
 }

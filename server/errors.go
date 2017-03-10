@@ -13,54 +13,47 @@
 
 package server
 
-import (
-	"fmt"
+// // newError returns a Response with go error.
+// func newError(err error) *pdpb.Response {
+// 	r := &pdpb.Response{
+// 		Header: &pdpb.ResponseHeader{},
+// 	}
 
-	"github.com/golang/protobuf/proto"
-	"github.com/pingcap/kvproto/pkg/pdpb"
-)
+// 	r.Header.Error = &pdpb.Error{
+// 		Message: proto.String(err.Error()),
+// 	}
 
-// newError returns a Response with go error.
-func newError(err error) *pdpb.Response {
-	r := &pdpb.Response{
-		Header: &pdpb.ResponseHeader{},
-	}
+// 	return r
+// }
 
-	r.Header.Error = &pdpb.Error{
-		Message: proto.String(err.Error()),
-	}
+// // newErrorf returns a Response with special format message.
+// func newErrorf(format string, args ...interface{}) *pdpb.Response {
+// 	return newError(fmt.Errorf(format, args...))
+// }
 
-	return r
-}
+// // newBootstrappedError returns a BootstrappedError response.
+// func newBootstrappedError() *pdpb.Response {
+// 	r := &pdpb.Response{
+// 		Header: &pdpb.ResponseHeader{},
+// 	}
 
-// newErrorf returns a Response with special format message.
-func newErrorf(format string, args ...interface{}) *pdpb.Response {
-	return newError(fmt.Errorf(format, args...))
-}
+// 	r.Header.Error = &pdpb.Error{
+// 		Message:      proto.String("cluster is already bootstrapped"),
+// 		Bootstrapped: &pdpb.BootstrappedError{},
+// 	}
 
-// newBootstrappedError returns a BootstrappedError response.
-func newBootstrappedError() *pdpb.Response {
-	r := &pdpb.Response{
-		Header: &pdpb.ResponseHeader{},
-	}
+// 	return r
+// }
 
-	r.Header.Error = &pdpb.Error{
-		Message:      proto.String("cluster is already bootstrapped"),
-		Bootstrapped: &pdpb.BootstrappedError{},
-	}
+// func newStoreIsTombstoneError() *pdpb.Response {
+// 	r := &pdpb.Response{
+// 		Header: &pdpb.ResponseHeader{},
+// 	}
 
-	return r
-}
+// 	r.Header.Error = &pdpb.Error{
+// 		Message:     proto.String("store is tombstone"),
+// 		IsTombstone: &pdpb.StoreIsTombstoneError{},
+// 	}
 
-func newStoreIsTombstoneError() *pdpb.Response {
-	r := &pdpb.Response{
-		Header: &pdpb.ResponseHeader{},
-	}
-
-	r.Header.Error = &pdpb.Error{
-		Message:     proto.String("store is tombstone"),
-		IsTombstone: &pdpb.StoreIsTombstoneError{},
-	}
-
-	return r
-}
+// 	return r
+// }

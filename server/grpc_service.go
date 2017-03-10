@@ -17,12 +17,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/pdpb2"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -32,29 +30,27 @@ import (
 // TODO: work as proxy.
 var notLeaderError = grpc.Errorf(codes.Unavailable, "not leader")
 
-// GetPDMembers implements gRPC PDServer.
-func (s *Server) GetPDMembers(context.Context, *pdpb2.GetPDMembersRequest) (*pdpb2.GetPDMembersResponse, error) {
-	members, err := GetPDMembers(s.GetClient())
+// GetMembers implements gRPC PDServer.
+func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
+	members, err := GetMembers(s.GetClient())
 	if err != nil {
 		return nil, grpc.Errorf(codes.Unknown, err.Error())
 	}
-	members2 := make([]*pdpb2.Member, len(members))
-	for i := range members {
-		members2[i] = &pdpb2.Member{
-			Name:       members[i].GetName(),
-			MemberId:   s.clusterID,
-			PeerUrls:   members[i].PeerUrls,
-			ClientUrls: members[i].ClientUrls,
-		}
+
+	leader, err := s.GetLeader()
+	if err != nil {
+		return nil, grpc.Errorf(codes.Unknown, err.Error())
 	}
-	return &pdpb2.GetPDMembersResponse{
+
+	return &pdpb.GetMembersResponse{
 		Header:  s.header(),
-		Members: members2,
+		Members: members,
+		Leader:  leader,
 	}, nil
 }
 
 // Tso implements gRPC PDServer.
-func (s *Server) Tso(stream pdpb2.PD_TsoServer) error {
+func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 	for {
 		request, err := stream.Recv()
 		if err == io.EOF {
@@ -74,13 +70,10 @@ func (s *Server) Tso(stream pdpb2.PD_TsoServer) error {
 		if err != nil {
 			return grpc.Errorf(codes.Unknown, err.Error())
 		}
-		response := &pdpb2.TsoResponse{
-			Header: s.header(),
-			Timestamp: &pdpb2.Timestamp{
-				Physical: ts.GetPhysical(),
-				Logical:  ts.GetLogical(),
-			},
-			Count: count,
+		response := &pdpb.TsoResponse{
+			Header:    s.header(),
+			Timestamp: &ts,
+			Count:     count,
 		}
 		if err := stream.Send(response); err != nil {
 			return errors.Trace(err)
@@ -89,7 +82,7 @@ func (s *Server) Tso(stream pdpb2.PD_TsoServer) error {
 }
 
 // Bootstrap implements gRPC PDServer.
-func (s *Server) Bootstrap(ctx context.Context, request *pdpb2.BootstrapRequest) (*pdpb2.BootstrapResponse, error) {
+func (s *Server) Bootstrap(ctx context.Context, request *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
 	if !s.IsLeader() {
 		return nil, notLeaderError
 	}
@@ -99,29 +92,25 @@ func (s *Server) Bootstrap(ctx context.Context, request *pdpb2.BootstrapRequest)
 
 	cluster := s.GetRaftCluster()
 	if cluster != nil {
-		err := &pdpb2.Error{
-			Type:    pdpb2.ErrorType_NOT_BOOTSTRAPPED,
+		err := &pdpb.Error{
+			Type:    pdpb.ErrorType_NOT_BOOTSTRAPPED,
 			Message: "cluster is already bootstrapped",
 		}
-		return &pdpb2.BootstrapResponse{
+		return &pdpb.BootstrapResponse{
 			Header: s.errorHeader(err),
 		}, nil
 	}
-	req := &pdpb.BootstrapRequest{
-		Store:  request.Store,
-		Region: request.Region,
-	}
-	if _, err := s.bootstrapCluster(req); err != nil {
+	if _, err := s.bootstrapCluster(request); err != nil {
 		return nil, grpc.Errorf(codes.Unknown, err.Error())
 	}
 
-	return &pdpb2.BootstrapResponse{
+	return &pdpb.BootstrapResponse{
 		Header: s.header(),
 	}, nil
 }
 
 // IsBootstrapped implements gRPC PDServer.
-func (s *Server) IsBootstrapped(ctx context.Context, request *pdpb2.IsBootstrappedRequest) (*pdpb2.IsBootstrappedResponse, error) {
+func (s *Server) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstrappedRequest) (*pdpb.IsBootstrappedResponse, error) {
 	if !s.IsLeader() {
 		return nil, notLeaderError
 	}
@@ -130,14 +119,14 @@ func (s *Server) IsBootstrapped(ctx context.Context, request *pdpb2.IsBootstrapp
 	}
 
 	cluster := s.GetRaftCluster()
-	return &pdpb2.IsBootstrappedResponse{
+	return &pdpb.IsBootstrappedResponse{
 		Header:       s.header(),
 		Bootstrapped: cluster != nil,
 	}, nil
 }
 
 // AllocID implements gRPC PDServer.
-func (s *Server) AllocID(ctx context.Context, request *pdpb2.AllocIDRequest) (*pdpb2.AllocIDResponse, error) {
+func (s *Server) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) (*pdpb.AllocIDResponse, error) {
 	if !s.IsLeader() {
 		return nil, notLeaderError
 	}
@@ -151,14 +140,14 @@ func (s *Server) AllocID(ctx context.Context, request *pdpb2.AllocIDRequest) (*p
 		return nil, grpc.Errorf(codes.Unknown, err.Error())
 	}
 
-	return &pdpb2.AllocIDResponse{
+	return &pdpb.AllocIDResponse{
 		Header: s.header(),
 		Id:     id,
 	}, nil
 }
 
 // GetStore implements gRPC PDServer.
-func (s *Server) GetStore(ctx context.Context, request *pdpb2.GetStoreRequest) (*pdpb2.GetStoreResponse, error) {
+func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
 	if !s.IsLeader() {
 		return nil, notLeaderError
 	}
@@ -168,14 +157,14 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb2.GetStoreRequest) (
 
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
-		return &pdpb2.GetStoreResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.GetStoreResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	store, _, err := cluster.GetStore(request.GetStoreId())
 	if err != nil {
 		return nil, grpc.Errorf(codes.Unknown, err.Error())
 	}
-	return &pdpb2.GetStoreResponse{
+	return &pdpb.GetStoreResponse{
 		Header: s.header(),
 		Store:  store,
 	}, nil
@@ -184,12 +173,12 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb2.GetStoreRequest) (
 // checkStore2 returns an error response if the store exists and is in tombstone state.
 // It returns nil if it can't get the store.
 // Copied from server/command.go
-func checkStore2(cluster *RaftCluster, storeID uint64) *pdpb2.Error {
+func checkStore2(cluster *RaftCluster, storeID uint64) *pdpb.Error {
 	store, _, err := cluster.GetStore(storeID)
 	if err == nil && store != nil {
 		if store.GetState() == metapb.StoreState_Tombstone {
-			return &pdpb2.Error{
-				Type:    pdpb2.ErrorType_STORE_TOMBSTONE,
+			return &pdpb.Error{
+				Type:    pdpb.ErrorType_STORE_TOMBSTONE,
 				Message: "store is tombstone",
 			}
 		}
@@ -198,7 +187,7 @@ func checkStore2(cluster *RaftCluster, storeID uint64) *pdpb2.Error {
 }
 
 // PutStore implements gRPC PDServer.
-func (s *Server) PutStore(ctx context.Context, request *pdpb2.PutStoreRequest) (*pdpb2.PutStoreResponse, error) {
+func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*pdpb.PutStoreResponse, error) {
 	if !s.IsLeader() {
 		return nil, notLeaderError
 	}
@@ -208,12 +197,12 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb2.PutStoreRequest) (
 
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
-		return &pdpb2.PutStoreResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.PutStoreResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	store := request.GetStore()
 	if pberr := checkStore2(cluster, store.GetId()); pberr != nil {
-		return &pdpb2.PutStoreResponse{
+		return &pdpb.PutStoreResponse{
 			Header: s.errorHeader(pberr),
 		}, nil
 	}
@@ -224,13 +213,13 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb2.PutStoreRequest) (
 
 	log.Infof("put store ok - %v", store)
 
-	return &pdpb2.PutStoreResponse{
+	return &pdpb.PutStoreResponse{
 		Header: s.header(),
 	}, nil
 }
 
 // StoreHeartbeat implements gRPC PDServer.
-func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb2.StoreHeartbeatRequest) (*pdpb2.StoreHeartbeatResponse, error) {
+func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbeatRequest) (*pdpb.StoreHeartbeatResponse, error) {
 	if !s.IsLeader() {
 		return nil, notLeaderError
 	}
@@ -243,53 +232,27 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb2.StoreHeartbe
 	}
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
-		return &pdpb2.StoreHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.StoreHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	if pberr := checkStore2(cluster, request.GetStats().GetStoreId()); pberr != nil {
-		return &pdpb2.StoreHeartbeatResponse{
+		return &pdpb.StoreHeartbeatResponse{
 			Header: s.errorHeader(pberr),
 		}, nil
 	}
 
-	stats := &pdpb.StoreStats{
-		StoreId:            request.Stats.StoreId,
-		Capacity:           request.Stats.Capacity,
-		Available:          request.Stats.Available,
-		RegionCount:        request.Stats.RegionCount,
-		SendingSnapCount:   request.Stats.SendingSnapCount,
-		ReceivingSnapCount: request.Stats.ReceivingSnapCount,
-		StartTime:          request.Stats.StartTime,
-		ApplyingSnapCount:  request.Stats.ApplyingSnapCount,
-		IsBusy:             request.Stats.IsBusy,
-	}
-
-	err := cluster.cachedCluster.handleStoreHeartbeat(stats)
+	err := cluster.cachedCluster.handleStoreHeartbeat(request.Stats)
 	if err != nil {
 		return nil, grpc.Errorf(codes.Unknown, err.Error())
 	}
 
-	return &pdpb2.StoreHeartbeatResponse{
+	return &pdpb.StoreHeartbeatResponse{
 		Header: s.header(),
 	}, nil
 }
 
-func toPDPB2PeerStats(stats []*pdpb2.PeerStats) []*pdpb.PeerStats {
-	ret := make([]*pdpb.PeerStats, 0, len(stats))
-	for _, s := range stats {
-		n := &pdpb.PeerStats{
-			Peer: s.Peer,
-		}
-		if s.DownSeconds != 0 {
-			n.DownSeconds = proto.Uint64(s.DownSeconds)
-		}
-		ret = append(ret, n)
-	}
-	return ret
-}
-
 // RegionHeartbeat implements gRPC PDServer.
-func (s *Server) RegionHeartbeat(ctx context.Context, request *pdpb2.RegionHeartbeatRequest) (*pdpb2.RegionHeartbeatResponse, error) {
+func (s *Server) RegionHeartbeat(ctx context.Context, request *pdpb.RegionHeartbeatRequest) (*pdpb.RegionHeartbeatResponse, error) {
 	if !s.IsLeader() {
 		return nil, notLeaderError
 	}
@@ -299,16 +262,16 @@ func (s *Server) RegionHeartbeat(ctx context.Context, request *pdpb2.RegionHeart
 
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
-		return &pdpb2.RegionHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.RegionHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	resp := &pdpb2.RegionHeartbeatResponse{}
+	resp := &pdpb.RegionHeartbeatResponse{}
 	region := newRegionInfo(request.GetRegion(), request.GetLeader())
-	region.DownPeers = toPDPB2PeerStats(request.GetDownPeers())
+	region.DownPeers = request.GetDownPeers()
 	region.PendingPeers = request.GetPendingPeers()
 	if region.GetId() == 0 {
-		pberr := &pdpb2.Error{
-			Type:    pdpb2.ErrorType_UNKNOWN,
+		pberr := &pdpb.Error{
+			Type:    pdpb.ErrorType_UNKNOWN,
 			Message: fmt.Sprintf("invalid request region, %v", request),
 		}
 		resp.Header = s.errorHeader(pberr)
@@ -316,8 +279,8 @@ func (s *Server) RegionHeartbeat(ctx context.Context, request *pdpb2.RegionHeart
 		return resp, nil
 	}
 	if region.Leader == nil {
-		pberr := &pdpb2.Error{
-			Type:    pdpb2.ErrorType_UNKNOWN,
+		pberr := &pdpb.Error{
+			Type:    pdpb.ErrorType_UNKNOWN,
 			Message: fmt.Sprintf("invalid request leader, %v", request),
 		}
 		resp.Header = s.errorHeader(pberr)
@@ -327,8 +290,8 @@ func (s *Server) RegionHeartbeat(ctx context.Context, request *pdpb2.RegionHeart
 
 	err := cluster.cachedCluster.handleRegionHeartbeat(region)
 	if err != nil {
-		pberr := &pdpb2.Error{
-			Type:    pdpb2.ErrorType_UNKNOWN,
+		pberr := &pdpb.Error{
+			Type:    pdpb.ErrorType_UNKNOWN,
 			Message: errors.Trace(err).Error(),
 		}
 		resp.Header = s.errorHeader(pberr)
@@ -336,35 +299,26 @@ func (s *Server) RegionHeartbeat(ctx context.Context, request *pdpb2.RegionHeart
 		return resp, nil
 	}
 
-	res, err := cluster.handleRegionHeartbeat(region)
+	resp, err = cluster.handleRegionHeartbeat(region)
 	if err != nil {
-		pberr := &pdpb2.Error{
-			Type:    pdpb2.ErrorType_UNKNOWN,
+		pberr := &pdpb.Error{
+			Type:    pdpb.ErrorType_UNKNOWN,
 			Message: errors.Trace(err).Error(),
 		}
 		resp.Header = s.errorHeader(pberr)
 
 		return resp, nil
+	}
+	if resp == nil {
+		return &pdpb.RegionHeartbeatResponse{Header: s.header()}, nil
 	}
 
 	resp.Header = s.header()
-	if res != nil {
-		if res.ChangePeer != nil {
-			resp.ChangePeer = &pdpb2.ChangePeer{
-				Peer:       res.ChangePeer.Peer,
-				ChangeType: pdpb2.ConfChangeType(res.ChangePeer.GetChangeType()),
-			}
-		}
-		if res.TransferLeader != nil {
-			resp.TransferLeader = &pdpb2.TransferLeader{Peer: res.TransferLeader.Peer}
-		}
-	}
-
 	return resp, nil
 }
 
 // GetRegion implements gRPC PDServer.
-func (s *Server) GetRegion(ctx context.Context, request *pdpb2.GetRegionRequest) (*pdpb2.GetRegionResponse, error) {
+func (s *Server) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
 	if !s.IsLeader() {
 		return nil, notLeaderError
 	}
@@ -374,10 +328,10 @@ func (s *Server) GetRegion(ctx context.Context, request *pdpb2.GetRegionRequest)
 
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
-		return &pdpb2.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 	region, leader := cluster.getRegion(request.GetRegionKey())
-	return &pdpb2.GetRegionResponse{
+	return &pdpb.GetRegionResponse{
 		Header: s.header(),
 		Region: region,
 		Leader: leader,
@@ -385,7 +339,7 @@ func (s *Server) GetRegion(ctx context.Context, request *pdpb2.GetRegionRequest)
 }
 
 // GetRegionByID implements gRPC PDServer.
-func (s *Server) GetRegionByID(ctx context.Context, request *pdpb2.GetRegionByIDRequest) (*pdpb2.GetRegionResponse, error) {
+func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDRequest) (*pdpb.GetRegionResponse, error) {
 	if !s.IsLeader() {
 		return nil, notLeaderError
 	}
@@ -395,11 +349,11 @@ func (s *Server) GetRegionByID(ctx context.Context, request *pdpb2.GetRegionByID
 
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
-		return &pdpb2.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 	id := request.GetRegionId()
 	region, leader := cluster.GetRegionByID(id)
-	return &pdpb2.GetRegionResponse{
+	return &pdpb.GetRegionResponse{
 		Header: s.header(),
 		Region: region,
 		Leader: leader,
@@ -407,7 +361,7 @@ func (s *Server) GetRegionByID(ctx context.Context, request *pdpb2.GetRegionByID
 }
 
 // AskSplit implements gRPC PDServer.
-func (s *Server) AskSplit(ctx context.Context, request *pdpb2.AskSplitRequest) (*pdpb2.AskSplitResponse, error) {
+func (s *Server) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
 	if !s.IsLeader() {
 		return nil, notLeaderError
 	}
@@ -417,7 +371,7 @@ func (s *Server) AskSplit(ctx context.Context, request *pdpb2.AskSplitRequest) (
 
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
-		return &pdpb2.AskSplitResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.AskSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 	if request.GetRegion().GetStartKey() == nil {
 		return nil, errors.New("missing region start key for split")
@@ -430,7 +384,7 @@ func (s *Server) AskSplit(ctx context.Context, request *pdpb2.AskSplitRequest) (
 		return nil, grpc.Errorf(codes.Unknown, err.Error())
 	}
 
-	return &pdpb2.AskSplitResponse{
+	return &pdpb.AskSplitResponse{
 		Header:      s.header(),
 		NewRegionId: split.NewRegionId,
 		NewPeerIds:  split.NewPeerIds,
@@ -438,7 +392,7 @@ func (s *Server) AskSplit(ctx context.Context, request *pdpb2.AskSplitRequest) (
 }
 
 // ReportSplit implements gRPC PDServer.
-func (s *Server) ReportSplit(ctx context.Context, request *pdpb2.ReportSplitRequest) (*pdpb2.ReportSplitResponse, error) {
+func (s *Server) ReportSplit(ctx context.Context, request *pdpb.ReportSplitRequest) (*pdpb.ReportSplitResponse, error) {
 	if !s.IsLeader() {
 		return nil, notLeaderError
 	}
@@ -448,24 +402,20 @@ func (s *Server) ReportSplit(ctx context.Context, request *pdpb2.ReportSplitRequ
 
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
-		return &pdpb2.ReportSplitResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.ReportSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-	req := &pdpb.ReportSplitRequest{
-		Left:  request.Left,
-		Right: request.Right,
-	}
-	_, err := cluster.handleReportSplit(req)
+	_, err := cluster.handleReportSplit(request)
 	if err != nil {
 		return nil, grpc.Errorf(codes.Unknown, err.Error())
 	}
 
-	return &pdpb2.ReportSplitResponse{
+	return &pdpb.ReportSplitResponse{
 		Header: s.header(),
 	}, nil
 }
 
 // GetClusterConfig implements gRPC PDServer.
-func (s *Server) GetClusterConfig(ctx context.Context, request *pdpb2.GetClusterConfigRequest) (*pdpb2.GetClusterConfigResponse, error) {
+func (s *Server) GetClusterConfig(ctx context.Context, request *pdpb.GetClusterConfigRequest) (*pdpb.GetClusterConfigResponse, error) {
 	if !s.IsLeader() {
 		return nil, notLeaderError
 	}
@@ -475,16 +425,16 @@ func (s *Server) GetClusterConfig(ctx context.Context, request *pdpb2.GetCluster
 
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
-		return &pdpb2.GetClusterConfigResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.GetClusterConfigResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-	return &pdpb2.GetClusterConfigResponse{
+	return &pdpb.GetClusterConfigResponse{
 		Header:  s.header(),
 		Cluster: cluster.GetConfig(),
 	}, nil
 }
 
 // PutClusterConfig implements gRPC PDServer.
-func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb2.PutClusterConfigRequest) (*pdpb2.PutClusterConfigResponse, error) {
+func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb.PutClusterConfigRequest) (*pdpb.PutClusterConfigResponse, error) {
 	if !s.IsLeader() {
 		return nil, notLeaderError
 	}
@@ -494,7 +444,7 @@ func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb2.PutCluster
 
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
-		return &pdpb2.PutClusterConfigResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.PutClusterConfigResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 	conf := request.GetCluster()
 	if err := cluster.putConfig(conf); err != nil {
@@ -503,32 +453,33 @@ func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb2.PutCluster
 
 	log.Infof("put cluster config ok - %v", conf)
 
-	return &pdpb2.PutClusterConfigResponse{
+	return &pdpb.PutClusterConfigResponse{
 		Header: s.header(),
 	}, nil
 }
 
-func (s *Server) validateHeader(header *pdpb2.RequestHeader) error {
+// TODO: Call it in gRPC intercepter.
+func (s *Server) validateHeader(header *pdpb.RequestHeader) error {
 	if header.GetClusterId() != s.clusterID {
 		return grpc.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
 	}
 	return nil
 }
 
-func (s *Server) header() *pdpb2.ResponseHeader {
-	return &pdpb2.ResponseHeader{ClusterId: s.clusterID}
+func (s *Server) header() *pdpb.ResponseHeader {
+	return &pdpb.ResponseHeader{ClusterId: s.clusterID}
 }
 
-func (s *Server) errorHeader(err *pdpb2.Error) *pdpb2.ResponseHeader {
-	return &pdpb2.ResponseHeader{
+func (s *Server) errorHeader(err *pdpb.Error) *pdpb.ResponseHeader {
+	return &pdpb.ResponseHeader{
 		ClusterId: s.clusterID,
 		Error:     err,
 	}
 }
 
-func (s *Server) notBootstrappedHeader() *pdpb2.ResponseHeader {
-	return s.errorHeader(&pdpb2.Error{
-		Type:    pdpb2.ErrorType_NOT_BOOTSTRAPPED,
+func (s *Server) notBootstrappedHeader() *pdpb.ResponseHeader {
+	return s.errorHeader(&pdpb.Error{
+		Type:    pdpb.ErrorType_NOT_BOOTSTRAPPED,
 		Message: "cluster is not bootstrapped",
 	})
 }

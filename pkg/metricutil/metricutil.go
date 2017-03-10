@@ -18,14 +18,14 @@ import (
 	"unicode"
 
 	"github.com/ngaut/log"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 )
 
 var (
-	cmdLabels = convertCmdLabels()
+	// cmdLabels = convertCmdLabels()
+	cmdLabels = make(map[string]string)
 )
 
 const zeroDuration = time.Duration(0)
@@ -37,23 +37,23 @@ type MetricConfig struct {
 	PushInterval typeutil.Duration `toml:"interval" json:"interval"`
 }
 
-// GetCmdLabel gets the request command label name for metrics.
-func GetCmdLabel(request *pdpb.Request) string {
-	name := request.GetCmdType().String()
-	label, ok := cmdLabels[name]
-	if !ok {
-		label = camelCaseToSnakeCase(name)
-	}
-	return label
-}
+// // GetCmdLabel gets the request command label name for metrics.
+// func GetCmdLabel(request *pdpb.Request) string {
+// 	name := request.GetCmdType().String()
+// 	label, ok := cmdLabels[name]
+// 	if !ok {
+// 		label = camelCaseToSnakeCase(name)
+// 	}
+// 	return label
+// }
 
-func convertCmdLabels() map[string]string {
-	labels := make(map[string]string)
-	for name := range pdpb.CommandType_value {
-		labels[name] = camelCaseToSnakeCase(name)
-	}
-	return labels
-}
+// func convertCmdLabels() map[string]string {
+// 	labels := make(map[string]string)
+// 	for name := range pdpb.CommandType_value {
+// 		labels[name] = camelCaseToSnakeCase(name)
+// 	}
+// 	return labels
+// }
 
 func runesHasLowerNeighborAt(runes []rune, idx int) bool {
 	if idx > 0 && unicode.IsLower(runes[idx-1]) {

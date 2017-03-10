@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"strings"
+
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/juju/errors"
@@ -44,7 +46,7 @@ func (s *Server) enableLeader(b bool) {
 	atomic.StoreInt64(&s.isLeaderValue, value)
 
 	// Reset connections and cluster.
-	s.closeAllConnections()
+	// s.closeAllConnections()
 	s.cluster.stop()
 }
 
@@ -91,8 +93,8 @@ func (s *Server) leaderLoop() {
 }
 
 // getLeader gets server leader from etcd.
-func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Leader, error) {
-	leader := &pdpb.Leader{}
+func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, error) {
+	leader := &pdpb.Member{}
 	ok, err := getProtoMsg(c, leaderPath, leader)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -105,7 +107,7 @@ func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Leader, error) {
 }
 
 // GetLeader gets pd cluster leader.
-func (s *Server) GetLeader() (*pdpb.Leader, error) {
+func (s *Server) GetLeader() (*pdpb.Member, error) {
 	if s.isClosed() {
 		return nil, errors.New("server is closed")
 	}
@@ -119,14 +121,17 @@ func (s *Server) GetLeader() (*pdpb.Leader, error) {
 	return leader, nil
 }
 
-func (s *Server) isSameLeader(leader *pdpb.Leader) bool {
-	return leader.GetAddr() == s.GetAddr() && leader.GetId() == s.ID()
+func (s *Server) isSameLeader(leader *pdpb.Member) bool {
+	// TODO: Relax equal client urls.
+	return strings.Join(leader.GetClientUrls(), ",") == s.GetAddr() && leader.GetMemberId() == s.ID()
 }
 
 func (s *Server) marshalLeader() string {
-	leader := &pdpb.Leader{
-		Addr: s.GetAddr(),
-		Id:   s.ID(),
+	leader := &pdpb.Member{
+		Name:       s.Name(),
+		MemberId:   s.ID(),
+		ClientUrls: strings.Split(s.GetAddr(), ","),
+		// TODO: PeerUrls
 	}
 
 	data, err := leader.Marshal()

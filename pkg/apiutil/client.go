@@ -54,7 +54,7 @@ func NewClient(addr string, timeout time.Duration) (*Client, error) {
 }
 
 // GetLeader returns the PD leader info.
-func (c *Client) GetLeader() (*pdpb.Leader, error) {
+func (c *Client) GetLeader() (*pdpb.Member, error) {
 	leaderURL := c.url + "/leader"
 	resp, err := c.hc.Get(leaderURL)
 	if err != nil {
@@ -63,7 +63,7 @@ func (c *Client) GetLeader() (*pdpb.Leader, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, errors.Errorf("GET %s: %s", leaderURL, resp.Status)
 	}
-	leader := &pdpb.Leader{}
+	leader := &pdpb.Member{}
 	if err := ReadJSON(resp.Body, leader); err != nil {
 		return nil, errors.Trace(err)
 	}
