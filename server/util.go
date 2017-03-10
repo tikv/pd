@@ -43,7 +43,7 @@ const (
 	requestTimeout  = etcdutil.DefaultRequestTimeout
 	slowRequestTime = etcdutil.DefaultSlowRequestTime
 
-	publicDirMode = 0755
+	logDirMode = 0755
 )
 
 // Version information.
@@ -311,7 +311,7 @@ func (rf *redirectFormatter) Flush() {}
 func setLogOutput(logFile string) error {
 	// PD log.
 	dir, _ := path.Split(logFile)
-	err := os.MkdirAll(dir, publicDirMode)
+	err := os.MkdirAll(dir, logDirMode)
 	if err != nil {
 		return errors.Trace(err)
 	}

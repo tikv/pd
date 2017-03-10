@@ -90,7 +90,6 @@ func startPdWith(cfg *Config) (*Server, error) {
 	abortCh := make(chan struct{}, 1)
 
 	go func() {
-		// TODO: Decouple join from cfg.adjust().
 		err := cfg.adjust()
 		if err != nil {
 			errCh <- errors.Trace(err)
