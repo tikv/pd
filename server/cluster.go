@@ -401,7 +401,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	}
 
 	store.State = metapb.StoreState_Tombstone
-	store.stats = new(StoreStatus)
+	store.stats = newStoreStatus()
 	return cluster.putStore(store)
 }
 
