@@ -14,7 +14,7 @@
 package server
 
 import (
-	"math/rand"
+	"context"
 	"sync"
 
 	"github.com/coreos/etcd/clientv3"
@@ -25,16 +25,18 @@ import (
 var _ = Suite(&testAllocIDSuite{})
 
 type testAllocIDSuite struct {
-	client  *clientv3.Client
-	alloc   *idAllocator
-	svr     *Server
-	cleanup cleanUpFunc
+	client       *clientv3.Client
+	alloc        *idAllocator
+	svr          *Server
+	cleanup      cleanUpFunc
+	grpcPDClient pdpb.PDClient
 }
 
 func (s *testAllocIDSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
 	s.client = s.svr.client
 	s.alloc = s.svr.idAlloc
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 
 	go s.svr.Run()
 }
@@ -80,28 +82,21 @@ func (s *testAllocIDSuite) TestID(c *C) {
 }
 
 func (s *testAllocIDSuite) TestCommand(c *C) {
-	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	//leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
-	conn, err := rpcConnect(leader.GetAddr())
-	c.Assert(err, IsNil)
-	defer conn.Close()
+	//idReq := &pdpb.AllocIDRequest{}
 
-	idReq := &pdpb.AllocIdRequest{}
-
-	req := &pdpb.Request{
-		Header:  newRequestHeader(s.svr.clusterID),
-		CmdType: pdpb.CommandType_AllocId,
-		AllocId: idReq,
+	req := &pdpb.AllocIDRequest{
+		Header: newRequestHeader(s.svr.clusterID),
 	}
 
 	var last uint64
 	for i := uint64(0); i < 2*allocStep; i++ {
-		rawMsgID := uint64(rand.Int63())
-		sendRequest(c, conn, rawMsgID, req)
-		msgID, resp := recvResponse(c, conn)
-		c.Assert(rawMsgID, Equals, msgID)
-		c.Assert(resp.AllocId, NotNil)
-		c.Assert(resp.AllocId.GetId(), Greater, last)
-		last = resp.AllocId.GetId()
+		//rawMsgID := uint64(rand.Int63())
+		resp, err := s.grpcPDClient.AllocID(context.Background(), req)
+		c.Assert(err, IsNil)
+		c.Assert(resp.GetId(), Greater, last)
+		//c.Assert(rawMsgID, Equals, resp.GetId())
+		last = resp.GetId()
 	}
 }

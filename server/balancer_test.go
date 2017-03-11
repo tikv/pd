@@ -16,7 +16,6 @@ package server
 import (
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
 	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -443,7 +442,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	tc.setStoreDown(2)
 	downPeer := &pdpb.PeerStats{
 		Peer:        region.GetStorePeer(2),
-		DownSeconds: proto.Uint64(24 * 60 * 60),
+		DownSeconds: 24 * 60 * 60,
 	}
 	region.DownPeers = append(region.DownPeers, downPeer)
 	checkRemovePeer(c, rc.Check(region), 2)

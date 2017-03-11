@@ -14,28 +14,28 @@
 package server
 
 import (
-	"net"
+	"context"
 	"sync"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
-	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/util"
 )
 
 var _ = Suite(&testTsoSuite{})
 
 type testTsoSuite struct {
-	client  *clientv3.Client
-	svr     *Server
-	cleanup cleanUpFunc
+	client       *clientv3.Client
+	svr          *Server
+	cleanup      cleanUpFunc
+	grpcPDClient pdpb.PDClient
 }
 
 func (s *testTsoSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
 	s.client = s.svr.client
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 
 	go s.svr.Run()
 }
@@ -44,46 +44,26 @@ func (s *testTsoSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func sendRequest(c *C, conn net.Conn, msgID uint64, request *pdpb.Request) {
-	msg := &msgpb.Message{
-		MsgType: msgpb.MessageType_PdReq,
-		PdReq:   request,
+func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
+	req := &pdpb.TsoRequest{
+		Header: newRequestHeader(s.svr.clusterID),
+		Count:  uint32(n),
 	}
-	err := util.WriteMessage(conn, msgID, msg)
+
+	tsoClient, err := s.grpcPDClient.Tso(context.Background())
 	c.Assert(err, IsNil)
-}
-
-func recvResponse(c *C, conn net.Conn) (uint64, *pdpb.Response) {
-	msg := &msgpb.Message{}
-	msgID, err := util.ReadMessage(conn, msg)
+	err = tsoClient.Send(req)
 	c.Assert(err, IsNil)
-	c.Assert(msg.GetMsgType(), Equals, msgpb.MessageType_PdResp)
-	resp := msg.GetPdResp()
-	return msgID, resp
-}
+	resp, err := tsoClient.Recv()
+	c.Assert(resp.GetCount(), Equals, uint32(n))
 
-func (s *testTsoSuite) testGetTimestamp(c *C, conn net.Conn, n int) pdpb.Timestamp {
-	tso := &pdpb.TsoRequest{
-		Count: uint32(n),
-	}
-
-	req := &pdpb.Request{
-		Header:  newRequestHeader(s.svr.clusterID),
-		CmdType: pdpb.CommandType_Tso,
-		Tso:     tso,
-	}
-
-	resp := mustRPCCall(c, conn, req)
-	c.Assert(resp.Tso, NotNil)
-	c.Assert(resp.Tso.GetCount(), Equals, uint32(n))
-
-	res := resp.Tso.GetTimestamp()
+	res := resp.GetTimestamp()
 	c.Assert(res.GetLogical(), Greater, int64(0))
 
 	return res
 }
 
-func mustGetLeader(c *C, client *clientv3.Client, leaderPath string) *pdpb.Leader {
+func mustGetLeader(c *C, client *clientv3.Client, leaderPath string) *pdpb.Member {
 	for i := 0; i < 20; i++ {
 		leader, err := getLeader(client, leaderPath)
 		c.Assert(err, IsNil)
@@ -98,7 +78,7 @@ func mustGetLeader(c *C, client *clientv3.Client, leaderPath string) *pdpb.Leade
 }
 
 func (s *testTsoSuite) TestTso(c *C) {
-	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	//leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
@@ -106,17 +86,13 @@ func (s *testTsoSuite) TestTso(c *C) {
 		go func() {
 			defer wg.Done()
 
-			conn, err := rpcConnect(leader.GetAddr())
-			c.Assert(err, IsNil)
-			defer conn.Close()
-
-			last := pdpb.Timestamp{
+			last := &pdpb.Timestamp{
 				Physical: 0,
 				Logical:  0,
 			}
 
 			for j := 0; j < 50; j++ {
-				ts := s.testGetTimestamp(c, conn, 10)
+				ts := s.testGetTimestamp(c, 10)
 				c.Assert(ts.GetPhysical(), Not(Less), last.GetPhysical())
 				if ts.GetPhysical() == last.GetPhysical() {
 					c.Assert(ts.GetLogical(), Greater, last.GetLogical())

@@ -15,9 +15,8 @@ package server
 
 import (
 	"fmt"
-	"math/rand"
-	"net"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +24,6 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	"github.com/ngaut/log"
 	. "github.com/pingcap/check"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
 )
 
@@ -118,13 +116,6 @@ func mustWaitLeader(c *C, svrs []*Server) *Server {
 	return nil
 }
 
-func mustRPCCall(c *C, conn net.Conn, req *pdpb.Request) *pdpb.Response {
-	resp, err := rpcCall(conn, uint64(rand.Int63()), req)
-	c.Assert(err, IsNil)
-	c.Assert(resp, NotNil)
-	return resp
-}
-
 var _ = Suite(&testLeaderServerSuite{})
 
 type testLeaderServerSuite struct {
@@ -176,17 +167,17 @@ func (s *testLeaderServerSuite) TestLeader(c *C) {
 	}
 
 	leader1 := mustGetLeader(c, mustGetEtcdClient(c, s.svrs), s.leaderPath)
-	svr, ok := s.svrs[leader1.GetAddr()]
+	svr, ok := s.svrs[getLeaderAddr(leader1)]
 	c.Assert(ok, IsTrue)
 	svr.Close()
-	delete(s.svrs, leader1.GetAddr())
+	delete(s.svrs, getLeaderAddr(leader1))
 
 	client := mustGetEtcdClient(c, s.svrs)
 
 	// wait leader changes
 	for i := 0; i < 50; i++ {
 		leader, _ := getLeader(client, s.leaderPath)
-		if leader != nil && leader.GetAddr() != leader1.GetAddr() {
+		if leader != nil && reflect.DeepEqual(leader.GetPeerUrls(), leader1.GetPeerUrls()) {
 			break
 		}
 
@@ -194,7 +185,7 @@ func (s *testLeaderServerSuite) TestLeader(c *C) {
 	}
 
 	leader2 := mustGetLeader(c, client, s.leaderPath)
-	c.Assert(leader1.GetAddr(), Not(Equals), leader2.GetAddr())
+	c.Assert(getLeaderAddr(leader1), Not(Equals), getLeaderAddr(leader2))
 }
 
 var _ = Suite(&testServerSuite{})

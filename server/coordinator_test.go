@@ -16,7 +16,6 @@ package server
 import (
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
 	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -148,7 +147,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	tc.setStoreDown(3)
 	downPeer := &pdpb.PeerStats{
 		Peer:        region.GetStorePeer(3),
-		DownSeconds: proto.Uint64(24 * 60 * 60),
+		DownSeconds: 24 * 60 * 60,
 	}
 	region.DownPeers = append(region.DownPeers, downPeer)
 	resp = co.dispatch(region)

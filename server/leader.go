@@ -92,6 +92,10 @@ func (s *Server) leaderLoop() {
 	}
 }
 
+func getLeaderAddr(leader *pdpb.Member) string {
+	return strings.Join(leader.GetClientUrls(), ",")
+}
+
 // getLeader gets server leader from etcd.
 func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, error) {
 	leader := &pdpb.Member{}
@@ -123,7 +127,7 @@ func (s *Server) GetLeader() (*pdpb.Member, error) {
 
 func (s *Server) isSameLeader(leader *pdpb.Member) bool {
 	// TODO: Relax equal client urls.
-	return strings.Join(leader.GetClientUrls(), ",") == s.GetAddr() && leader.GetMemberId() == s.ID()
+	return getLeaderAddr(leader) == s.GetAddr() && leader.GetMemberId() == s.ID()
 }
 
 func (s *Server) marshalLeader() string {

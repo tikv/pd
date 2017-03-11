@@ -14,12 +14,16 @@
 package server
 
 import (
+	"context"
 	"net"
+	"strings"
+	"time"
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -30,9 +34,10 @@ const (
 var _ = Suite(&testClusterSuite{})
 
 type testClusterBaseSuite struct {
-	client  *clientv3.Client
-	svr     *Server
-	cleanup cleanUpFunc
+	client       *clientv3.Client
+	svr          *Server
+	cleanup      cleanUpFunc
+	grpcPDClient pdpb.PDClient
 }
 
 type testClusterSuite struct {
@@ -42,12 +47,28 @@ type testClusterSuite struct {
 func (s *testClusterSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
 	s.client = s.svr.client
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 
 	go s.svr.Run()
 }
 
 func (s *testClusterSuite) TearDownSuite(c *C) {
 	s.cleanup()
+}
+
+var unixStripper = strings.NewReplacer("unix://", "", "unixs://", "")
+
+func unixGrpcDialer(addr string, timeout time.Duration) (net.Conn, error) {
+	sock, err := net.DialTimeout("unix", unixStripper.Replace(addr), timeout)
+	return sock, err
+}
+
+func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
+	conn, err := grpc.Dial(addr, grpc.WithInsecure(),
+		grpc.WithDialer(unixGrpcDialer))
+
+	c.Assert(err, IsNil)
+	return pdpb.NewPDClient(conn)
 }
 
 func (s *testClusterBaseSuite) allocID(c *C) uint64 {
@@ -114,134 +135,109 @@ func (s *testClusterBaseSuite) newRegion(c *C, regionID uint64, startKey []byte,
 }
 
 func (s *testClusterSuite) TestBootstrap(c *C) {
-	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
-
-	conn, err := rpcConnect(leader.GetAddr())
-	c.Assert(err, IsNil)
-	defer conn.Close()
 
 	clusterID := s.svr.clusterID
 
 	// IsBootstrapped returns false.
 	req := s.newIsBootstrapRequest(clusterID)
-	sendRequest(c, conn, 0, req)
-	_, resp := recvResponse(c, conn)
-	c.Assert(resp.IsBootstrapped, NotNil)
-	c.Assert(resp.IsBootstrapped.GetBootstrapped(), IsFalse)
+	resp, err := s.grpcPDClient.IsBootstrapped(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp, NotNil)
+	c.Assert(resp.GetBootstrapped(), IsFalse)
 
 	// Bootstrap the cluster.
 	storeAddr := "127.0.0.1:0"
-	s.bootstrapCluster(c, conn, clusterID, storeAddr)
+	s.bootstrapCluster(c, clusterID, storeAddr)
 
 	// IsBootstrapped returns true.
 	req = s.newIsBootstrapRequest(clusterID)
-	sendRequest(c, conn, 0, req)
-	_, resp = recvResponse(c, conn)
-	c.Assert(resp.IsBootstrapped, NotNil)
-	c.Assert(resp.IsBootstrapped.GetBootstrapped(), IsTrue)
+	resp, err = s.grpcPDClient.IsBootstrapped(context.Background(), req)
+	c.Assert(resp, IsNil)
+	c.Assert(resp, NotNil)
+	c.Assert(resp.GetBootstrapped(), IsTrue)
 
 	// check bootstrapped error.
-	req = s.newBootstrapRequest(c, clusterID, storeAddr)
-	sendRequest(c, conn, 0, req)
-	_, resp = recvResponse(c, conn)
-	c.Assert(resp.Bootstrap, IsNil)
-	c.Assert(resp.Header.Error, NotNil)
-	c.Assert(resp.Header.Error.Bootstrapped, NotNil)
+	reqBoot := s.newBootstrapRequest(c, clusterID, storeAddr)
+	respBoot, err := s.grpcPDClient.Bootstrap(context.Background(), reqBoot)
+	c.Assert(err, IsNil)
+	c.Assert(respBoot, IsNil)
+	c.Assert(respBoot.GetHeader().GetError(), NotNil)
+	c.Assert(respBoot.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_NOT_BOOTSTRAPPED)
 }
 
-func (s *testClusterBaseSuite) newIsBootstrapRequest(clusterID uint64) *pdpb.Request {
-	req := &pdpb.Request{
-		Header:         newRequestHeader(clusterID),
-		CmdType:        pdpb.CommandType_IsBootstrapped,
-		IsBootstrapped: &pdpb.IsBootstrappedRequest{},
+func (s *testClusterBaseSuite) newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {
+	req := &pdpb.IsBootstrappedRequest{
+		Header: newRequestHeader(clusterID),
 	}
 
 	return req
 }
 
-func (s *testClusterBaseSuite) newBootstrapRequest(c *C, clusterID uint64, storeAddr string) *pdpb.Request {
+func (s *testClusterBaseSuite) newBootstrapRequest(c *C, clusterID uint64, storeAddr string) *pdpb.BootstrapRequest {
 	store := s.newStore(c, 0, storeAddr)
 	peer := s.newPeer(c, store.GetId(), 0)
 	region := s.newRegion(c, 0, []byte{}, []byte{}, []*metapb.Peer{peer}, nil)
 
-	req := &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_Bootstrap,
-		Bootstrap: &pdpb.BootstrapRequest{
-			Store:  store,
-			Region: region,
-		},
+	req := &pdpb.BootstrapRequest{
+		Header: newRequestHeader(clusterID),
+		Store:  store,
+		Region: region,
 	}
 
 	return req
 }
 
 // helper function to check and bootstrap.
-func (s *testClusterBaseSuite) bootstrapCluster(c *C, conn net.Conn, clusterID uint64, storeAddr string) {
+func (s *testClusterBaseSuite) bootstrapCluster(c *C, clusterID uint64, storeAddr string) {
 	req := s.newBootstrapRequest(c, clusterID, storeAddr)
-	sendRequest(c, conn, 0, req)
-	_, resp := recvResponse(c, conn)
-	c.Assert(resp.Bootstrap, NotNil)
+	resp, err := s.grpcPDClient.Bootstrap(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError().GetType(), IsNil)
 }
 
-func (s *testClusterBaseSuite) tryBootstrapCluster(c *C, conn net.Conn, clusterID uint64, storeAddr string) {
+func (s *testClusterBaseSuite) tryBootstrapCluster(c *C, clusterID uint64, storeAddr string) {
 	req := s.newBootstrapRequest(c, clusterID, storeAddr)
-	sendRequest(c, conn, 0, req)
-	_, resp := recvResponse(c, conn)
-	if resp.Bootstrap == nil {
-		c.Assert(resp.Header.Error, NotNil)
-		c.Assert(resp.Header.Error.Bootstrapped, NotNil)
-	}
+	resp, err := s.grpcPDClient.Bootstrap(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError(), NotNil)
 }
 
-func (s *testClusterBaseSuite) getStore(c *C, conn net.Conn, clusterID uint64, storeID uint64) *metapb.Store {
-	req := &pdpb.Request{
+func (s *testClusterBaseSuite) getStore(c *C, clusterID uint64, storeID uint64) *metapb.Store {
+	req := &pdpb.GetStoreRequest{
 		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_GetStore,
-		GetStore: &pdpb.GetStoreRequest{
-			StoreId: storeID,
-		},
+		StoreId: storeID,
 	}
+	resp, err := s.grpcPDClient.GetStore(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetStore().GetId(), Equals, uint64(storeID))
 
-	sendRequest(c, conn, 0, req)
-	_, resp := recvResponse(c, conn)
-	c.Assert(resp.GetStore, NotNil)
-	c.Assert(resp.GetStore.GetStore().GetId(), Equals, uint64(storeID))
-
-	return resp.GetStore.GetStore()
+	return resp.GetStore()
 }
 
-func (s *testClusterBaseSuite) getRegion(c *C, conn net.Conn, clusterID uint64, regionKey []byte) *metapb.Region {
-	req := &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_GetRegion,
-		GetRegion: &pdpb.GetRegionRequest{
-			RegionKey: regionKey,
-		},
+func (s *testClusterBaseSuite) getRegion(c *C, clusterID uint64, regionKey []byte) *metapb.Region {
+	req := &pdpb.GetRegionRequest{
+		Header:    newRequestHeader(clusterID),
+		RegionKey: regionKey,
 	}
 
-	sendRequest(c, conn, 0, req)
-	_, resp := recvResponse(c, conn)
-	c.Assert(resp.GetRegion, NotNil)
-	c.Assert(resp.GetRegion.GetRegion(), NotNil)
+	resp, err := s.grpcPDClient.GetRegion(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetRegion(), NotNil)
 
-	return resp.GetRegion.GetRegion()
+	return resp.GetRegion()
 }
 
-func (s *testClusterBaseSuite) getRegionByID(c *C, conn net.Conn, clusterID uint64, regionID uint64) *metapb.Region {
-	req := &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_GetRegionByID,
-		GetRegionById: &pdpb.GetRegionByIDRequest{
-			RegionId: regionID,
-		},
+func (s *testClusterBaseSuite) getRegionByID(c *C, clusterID uint64, regionID uint64) *metapb.Region {
+	req := &pdpb.GetRegionByIDRequest{
+		Header:   newRequestHeader(clusterID),
+		RegionId: regionID,
 	}
 
-	sendRequest(c, conn, 0, req)
-	_, resp := recvResponse(c, conn)
-	c.Assert(resp.GetRegionById.GetRegion(), NotNil)
+	resp, err := s.grpcPDClient.GetRegionByID(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetRegion(), NotNil)
 
-	return resp.GetRegionById.GetRegion()
+	return resp.GetRegion()
 }
 
 func (s *testClusterBaseSuite) getRaftCluster(c *C) *RaftCluster {
@@ -250,116 +246,98 @@ func (s *testClusterBaseSuite) getRaftCluster(c *C) *RaftCluster {
 	return cluster
 }
 
-func (s *testClusterBaseSuite) getClusterConfig(c *C, conn net.Conn, clusterID uint64) *metapb.Cluster {
-	req := &pdpb.Request{
-		Header:           newRequestHeader(clusterID),
-		CmdType:          pdpb.CommandType_GetClusterConfig,
-		GetClusterConfig: &pdpb.GetClusterConfigRequest{},
+func (s *testClusterBaseSuite) getClusterConfig(c *C, clusterID uint64) *metapb.Cluster {
+	req := &pdpb.GetClusterConfigRequest{
+		Header: newRequestHeader(clusterID),
 	}
 
-	sendRequest(c, conn, 0, req)
-	_, resp := recvResponse(c, conn)
-	c.Assert(resp.GetClusterConfig, NotNil)
-	c.Assert(resp.GetClusterConfig.GetCluster(), NotNil)
+	resp, err := s.grpcPDClient.GetClusterConfig(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetCluster(), NotNil)
 
-	return resp.GetClusterConfig.GetCluster()
+	return resp.GetCluster()
 }
 
 func (s *testClusterSuite) TestGetPutConfig(c *C) {
-	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
-
-	conn, err := rpcConnect(leader.GetAddr())
-	c.Assert(err, IsNil)
-	defer conn.Close()
-
 	clusterID := s.svr.clusterID
 
 	storeAddr := "127.0.0.1:0"
-	s.tryBootstrapCluster(c, conn, clusterID, storeAddr)
+	s.tryBootstrapCluster(c, clusterID, storeAddr)
 
 	// Get region.
-	region := s.getRegion(c, conn, clusterID, []byte("abc"))
+	region := s.getRegion(c, clusterID, []byte("abc"))
 	c.Assert(region.GetPeers(), HasLen, 1)
 	peer := region.GetPeers()[0]
 
 	// Get region by id.
-	regionByID := s.getRegionByID(c, conn, clusterID, region.GetId())
+	regionByID := s.getRegionByID(c, clusterID, region.GetId())
 	c.Assert(region, DeepEquals, regionByID)
 
 	// Get store.
 	storeID := peer.GetStoreId()
-	store := s.getStore(c, conn, clusterID, storeID)
+	store := s.getStore(c, clusterID, storeID)
 	c.Assert(store.GetAddress(), Equals, storeAddr)
 
 	// Update store.
 	store.Address = "127.0.0.1:1"
-	s.testPutStore(c, conn, clusterID, store)
+	s.testPutStore(c, clusterID, store)
 
 	// Remove store.
-	s.testRemoveStore(c, conn, clusterID, store)
+	s.testRemoveStore(c, clusterID, store)
 
 	// Update cluster config.
-	req := &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_PutClusterConfig,
-		PutClusterConfig: &pdpb.PutClusterConfigRequest{
-			Cluster: &metapb.Cluster{
-				Id:           clusterID,
-				MaxPeerCount: 5,
-			},
+	req := &pdpb.PutClusterConfigRequest{
+		Header: newRequestHeader(clusterID),
+		Cluster: &metapb.Cluster{
+			Id:           clusterID,
+			MaxPeerCount: 5,
 		},
 	}
-	sendRequest(c, conn, 0, req)
-	_, resp := recvResponse(c, conn)
-	c.Assert(resp.PutClusterConfig, NotNil)
-	meta := s.getClusterConfig(c, conn, clusterID)
+	resp, err := s.grpcPDClient.PutClusterConfig(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError().GetType(), IsNil)
+	meta := s.getClusterConfig(c, clusterID)
 	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
 }
 
-func putStore(c *C, conn net.Conn, clusterID uint64, store *metapb.Store) *pdpb.Response {
-	req := &pdpb.Request{
-		Header:   newRequestHeader(clusterID),
-		CmdType:  pdpb.CommandType_PutStore,
-		PutStore: &pdpb.PutStoreRequest{Store: store},
+func putStore(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, store *metapb.Store) *pdpb.PutStoreResponse {
+	req := &pdpb.PutStoreRequest{
+		Header: newRequestHeader(clusterID),
+		Store:  store,
 	}
-	sendRequest(c, conn, 0, req)
-	_, resp := recvResponse(c, conn)
+	resp, err := grpcPDClient.PutStore(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError(), IsNil)
 	return resp
 }
 
-func (s *testClusterSuite) testPutStore(c *C, conn net.Conn, clusterID uint64, store *metapb.Store) {
+func (s *testClusterSuite) testPutStore(c *C, clusterID uint64, store *metapb.Store) {
 	// Update store.
-	resp := putStore(c, conn, clusterID, store)
-	c.Assert(resp.PutStore, NotNil)
-	updatedStore := s.getStore(c, conn, clusterID, store.GetId())
+	resp := putStore(c, s.grpcPDClient, clusterID, store)
+	c.Assert(resp, NotNil)
+	updatedStore := s.getStore(c, clusterID, store.GetId())
 	c.Assert(updatedStore, DeepEquals, store)
 
 	// Update store again.
-	resp = putStore(c, conn, clusterID, store)
-	c.Assert(resp.PutStore, NotNil)
+	resp = putStore(c, s.grpcPDClient, clusterID, store)
 
 	// Put new store with a duplicated address when old store is up will fail.
-	resp = putStore(c, conn, clusterID, s.newStore(c, 0, store.GetAddress()))
-	c.Assert(resp.PutStore, IsNil)
+	resp = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress()))
 
 	// Put new store with a duplicated address when old store is offline will fail.
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Offline)
-	resp = putStore(c, conn, clusterID, s.newStore(c, 0, store.GetAddress()))
-	c.Assert(resp.PutStore, IsNil)
+	resp = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress()))
 
 	// Put new store with a duplicated address when old store is tombstone is OK.
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Tombstone)
-	resp = putStore(c, conn, clusterID, s.newStore(c, 0, store.GetAddress()))
-	c.Assert(resp.PutStore, NotNil)
+	resp = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress()))
 
 	// Put a new store.
-	resp = putStore(c, conn, clusterID, s.newStore(c, 0, "127.0.0.1:12345"))
-	c.Assert(resp.PutStore, NotNil)
+	resp = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, "127.0.0.1:12345"))
 
 	// Put an existed store with duplicated address with other old stores.
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
-	resp = putStore(c, conn, clusterID, s.newStore(c, store.GetId(), "127.0.0.1:12345"))
-	c.Assert(resp.PutStore, IsNil)
+	resp = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, store.GetId(), "127.0.0.1:12345"))
 }
 
 func (s *testClusterSuite) resetStoreState(c *C, storeID uint64, state metapb.StoreState) {
@@ -371,7 +349,7 @@ func (s *testClusterSuite) resetStoreState(c *C, storeID uint64, state metapb.St
 	cluster.putStore(store)
 }
 
-func (s *testClusterSuite) testRemoveStore(c *C, conn net.Conn, clusterID uint64, store *metapb.Store) {
+func (s *testClusterSuite) testRemoveStore(c *C, clusterID uint64, store *metapb.Store) {
 	cluster := s.getRaftCluster(c)
 
 	// When store is up:
@@ -380,13 +358,13 @@ func (s *testClusterSuite) testRemoveStore(c *C, conn net.Conn, clusterID uint64
 		s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
 		err := cluster.RemoveStore(store.GetId())
 		c.Assert(err, IsNil)
-		removedStore := s.getStore(c, conn, clusterID, store.GetId())
+		removedStore := s.getStore(c, clusterID, store.GetId())
 		c.Assert(removedStore.GetState(), Equals, metapb.StoreState_Offline)
 		// Case 2: BuryStore w/ force should be OK;
 		s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
 		err = cluster.BuryStore(store.GetId(), true)
 		c.Assert(err, IsNil)
-		buriedStore := s.getStore(c, conn, clusterID, store.GetId())
+		buriedStore := s.getStore(c, clusterID, store.GetId())
 		c.Assert(buriedStore.GetState(), Equals, metapb.StoreState_Tombstone)
 		// Case 3: BuryStore w/o force should fail.
 		s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
@@ -400,13 +378,13 @@ func (s *testClusterSuite) testRemoveStore(c *C, conn net.Conn, clusterID uint64
 		s.resetStoreState(c, store.GetId(), metapb.StoreState_Offline)
 		err := cluster.RemoveStore(store.GetId())
 		c.Assert(err, IsNil)
-		removedStore := s.getStore(c, conn, clusterID, store.GetId())
+		removedStore := s.getStore(c, clusterID, store.GetId())
 		c.Assert(removedStore.GetState(), Equals, metapb.StoreState_Offline)
 		// Case 2: BuryStore w/ or w/o force should be OK.
 		s.resetStoreState(c, store.GetId(), metapb.StoreState_Offline)
 		err = cluster.BuryStore(store.GetId(), false)
 		c.Assert(err, IsNil)
-		buriedStore := s.getStore(c, conn, clusterID, store.GetId())
+		buriedStore := s.getStore(c, clusterID, store.GetId())
 		c.Assert(buriedStore.GetState(), Equals, metapb.StoreState_Tombstone)
 	}
 
@@ -420,40 +398,37 @@ func (s *testClusterSuite) testRemoveStore(c *C, conn net.Conn, clusterID uint64
 		s.resetStoreState(c, store.GetId(), metapb.StoreState_Tombstone)
 		err = cluster.BuryStore(store.GetId(), false)
 		c.Assert(err, IsNil)
-		buriedStore := s.getStore(c, conn, clusterID, store.GetId())
+		buriedStore := s.getStore(c, clusterID, store.GetId())
 		c.Assert(buriedStore.GetState(), Equals, metapb.StoreState_Tombstone)
 	}
 
-	// Put after removed should return tombstone error.
-	resp := putStore(c, conn, clusterID, store)
-	c.Assert(resp.PutStore, IsNil)
-	c.Assert(resp.Header.Error.IsTombstone, NotNil)
-
-	// Update after removed should return tombstone error.
-	req := &pdpb.Request{
-		Header:  newRequestHeader(clusterID),
-		CmdType: pdpb.CommandType_StoreHeartbeat,
-		StoreHeartbeat: &pdpb.StoreHeartbeatRequest{
-			Stats: &pdpb.StoreStats{StoreId: store.GetId()},
-		},
+	{
+		// Put after removed should return tombstone error.
+		resp := putStore(c, s.grpcPDClient, clusterID, store)
+		c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_STORE_TOMBSTONE)
 	}
-	sendRequest(c, conn, 0, req)
-	_, resp = recvResponse(c, conn)
-	c.Assert(resp.StoreHeartbeat, IsNil)
-	c.Assert(resp.Header.Error.IsTombstone, NotNil)
+	{
+		// Update after removed should return tombstone error.
+		req := &pdpb.StoreHeartbeatRequest{
+			Header: newRequestHeader(clusterID),
+			Stats:  &pdpb.StoreStats{StoreId: store.GetId()},
+		}
+		resp, err := s.grpcPDClient.StoreHeartbeat(context.Background(), req)
+		c.Assert(err, IsNil)
+		c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_STORE_TOMBSTONE)
+	}
 }
 
-func (s *testClusterSuite) testCheckStores(c *C, conn net.Conn, clusterID uint64) {
+func (s *testClusterSuite) testCheckStores(c *C, clusterID uint64) {
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 
 	store := s.newStore(c, 0, "127.0.0.1:11111")
-	resp := putStore(c, conn, clusterID, store)
-	c.Assert(resp.PutStore, NotNil)
+	putStore(c, s.grpcPDClient, clusterID, store)
 
 	// store is up w/o region peers will not be buried.
 	cluster.checkStores()
-	tmpStore := s.getStore(c, conn, clusterID, store.GetId())
+	tmpStore := s.getStore(c, clusterID, store.GetId())
 	c.Assert(tmpStore.GetState(), Equals, metapb.StoreState_Up)
 
 	// Add a region peer to store.
@@ -466,17 +441,17 @@ func (s *testClusterSuite) testCheckStores(c *C, conn net.Conn, clusterID uint64
 
 	// store is up w/ region peers will not be buried.
 	cluster.checkStores()
-	tmpStore = s.getStore(c, conn, clusterID, store.GetId())
+	tmpStore = s.getStore(c, clusterID, store.GetId())
 	c.Assert(tmpStore.GetState(), Equals, metapb.StoreState_Up)
 
 	err = cluster.RemoveStore(store.GetId())
 	c.Assert(err, IsNil)
-	removedStore := s.getStore(c, conn, clusterID, store.GetId())
+	removedStore := s.getStore(c, clusterID, store.GetId())
 	c.Assert(removedStore.GetState(), Equals, metapb.StoreState_Offline)
 
 	// store is offline w/ region peers will not be buried.
 	cluster.checkStores()
-	tmpStore = s.getStore(c, conn, clusterID, store.GetId())
+	tmpStore = s.getStore(c, clusterID, store.GetId())
 	c.Assert(tmpStore.GetState(), Equals, metapb.StoreState_Up)
 
 	// Clear store's region peers.
@@ -488,7 +463,7 @@ func (s *testClusterSuite) testCheckStores(c *C, conn net.Conn, clusterID uint64
 
 	// store is offline w/o region peers will be buried.
 	cluster.checkStores()
-	tmpStore = s.getStore(c, conn, clusterID, store.GetId())
+	tmpStore = s.getStore(c, clusterID, store.GetId())
 	c.Assert(tmpStore.GetState(), Equals, metapb.StoreState_Tombstone)
 }
 
@@ -498,21 +473,15 @@ func (s *testClusterSuite) TestClosedChannel(c *C) {
 	defer cleanup()
 	go svr.Run()
 
-	leader := mustGetLeader(c, svr.client, svr.getLeaderPath())
-
-	conn, err := rpcConnect(leader.GetAddr())
-	c.Assert(err, IsNil)
-	defer conn.Close()
-
 	clusterID := svr.clusterID
 	storeAddr := "127.0.0.1:0"
-	s.tryBootstrapCluster(c, conn, clusterID, storeAddr)
+	s.tryBootstrapCluster(c, clusterID, storeAddr)
 
 	cluster := svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 	cluster.stop()
 
-	err = svr.createRaftCluster()
+	err := svr.createRaftCluster()
 	c.Assert(err, IsNil)
 
 	cluster = svr.GetRaftCluster()
@@ -521,24 +490,15 @@ func (s *testClusterSuite) TestClosedChannel(c *C) {
 }
 
 func (s *testClusterSuite) TestGetPDMembers(c *C) {
-	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
-
-	conn, err := rpcConnect(leader.GetAddr())
-	c.Assert(err, IsNil)
-	defer conn.Close()
 
 	clusterID := uint64(0)
-	req := &pdpb.Request{
-		Header:       newRequestHeader(clusterID),
-		CmdType:      pdpb.CommandType_GetPDMembers,
-		GetPdMembers: &pdpb.GetPDMembersRequest{},
+	req := &pdpb.GetMembersRequest{
+		Header: newRequestHeader(clusterID),
 	}
 
-	sendRequest(c, conn, 0, req)
-	id, resp := recvResponse(c, conn)
-	c.Assert(id, Equals, clusterID)
-	c.Assert(resp, NotNil)
-	c.Assert(resp.GetPdMembers, NotNil)
+	resp, err := s.grpcPDClient.GetMembers(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetClusterId(), Equals, clusterID)
 	// A more strict test can be found at api/member_test.go
-	c.Assert(len(resp.GetPdMembers.Members), Not(Equals), 0)
+	c.Assert(len(resp.GetMembers()), Not(Equals), 0)
 }
