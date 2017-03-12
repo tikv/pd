@@ -16,7 +16,6 @@ package server
 import (
 	"fmt"
 	"os"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -177,7 +176,7 @@ func (s *testLeaderServerSuite) TestLeader(c *C) {
 	// wait leader changes
 	for i := 0; i < 50; i++ {
 		leader, _ := getLeader(client, s.leaderPath)
-		if leader != nil && reflect.DeepEqual(leader.GetPeerUrls(), leader1.GetPeerUrls()) {
+		if leader != nil && getLeaderAddr(leader) != getLeaderAddr(leader1) {
 			break
 		}
 

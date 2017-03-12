@@ -35,9 +35,9 @@ type testTsoSuite struct {
 func (s *testTsoSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
 	s.client = s.svr.client
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
-
 	go s.svr.Run()
+	mustWaitLeader(c, []*Server{s.svr})
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 }
 
 func (s *testTsoSuite) TearDownSuite(c *C) {

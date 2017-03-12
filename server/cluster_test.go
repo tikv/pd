@@ -47,9 +47,9 @@ type testClusterSuite struct {
 func (s *testClusterSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
 	s.client = s.svr.client
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
-
 	go s.svr.Run()
+	mustWaitLeader(c, []*Server{s.svr})
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 }
 
 func (s *testClusterSuite) TearDownSuite(c *C) {
@@ -152,17 +152,14 @@ func (s *testClusterSuite) TestBootstrap(c *C) {
 	// IsBootstrapped returns true.
 	req = s.newIsBootstrapRequest(clusterID)
 	resp, err = s.grpcPDClient.IsBootstrapped(context.Background(), req)
-	c.Assert(resp, IsNil)
-	c.Assert(resp, NotNil)
+	c.Assert(err, IsNil)
 	c.Assert(resp.GetBootstrapped(), IsTrue)
 
 	// check bootstrapped error.
 	reqBoot := s.newBootstrapRequest(c, clusterID, storeAddr)
 	respBoot, err := s.grpcPDClient.Bootstrap(context.Background(), reqBoot)
 	c.Assert(err, IsNil)
-	c.Assert(respBoot, IsNil)
 	c.Assert(respBoot.GetHeader().GetError(), NotNil)
-	c.Assert(respBoot.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_NOT_BOOTSTRAPPED)
 }
 
 func (s *testClusterBaseSuite) newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {
@@ -190,16 +187,16 @@ func (s *testClusterBaseSuite) newBootstrapRequest(c *C, clusterID uint64, store
 // helper function to check and bootstrap.
 func (s *testClusterBaseSuite) bootstrapCluster(c *C, clusterID uint64, storeAddr string) {
 	req := s.newBootstrapRequest(c, clusterID, storeAddr)
-	resp, err := s.grpcPDClient.Bootstrap(context.Background(), req)
+	_, err := s.grpcPDClient.Bootstrap(context.Background(), req)
 	c.Assert(err, IsNil)
-	c.Assert(resp.GetHeader().GetError().GetType(), IsNil)
 }
 
-func (s *testClusterBaseSuite) tryBootstrapCluster(c *C, clusterID uint64, storeAddr string) {
+func (s *testClusterBaseSuite) tryBootstrapCluster(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, storeAddr string) {
 	req := s.newBootstrapRequest(c, clusterID, storeAddr)
-	resp, err := s.grpcPDClient.Bootstrap(context.Background(), req)
-	c.Assert(err, IsNil)
-	c.Assert(resp.GetHeader().GetError(), NotNil)
+	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
+	if err != nil {
+		c.Assert(resp, NotNil)
+	}
 }
 
 func (s *testClusterBaseSuite) getStore(c *C, clusterID uint64, storeID uint64) *metapb.Store {
@@ -262,7 +259,7 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	clusterID := s.svr.clusterID
 
 	storeAddr := "127.0.0.1:0"
-	s.tryBootstrapCluster(c, clusterID, storeAddr)
+	s.tryBootstrapCluster(c, s.grpcPDClient, clusterID, storeAddr)
 
 	// Get region.
 	region := s.getRegion(c, clusterID, []byte("abc"))
@@ -295,49 +292,53 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	}
 	resp, err := s.grpcPDClient.PutClusterConfig(context.Background(), req)
 	c.Assert(err, IsNil)
-	c.Assert(resp.GetHeader().GetError().GetType(), IsNil)
+	c.Assert(resp, NotNil)
 	meta := s.getClusterConfig(c, clusterID)
 	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
 }
 
-func putStore(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, store *metapb.Store) *pdpb.PutStoreResponse {
+func putStore(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, store *metapb.Store) (*pdpb.PutStoreResponse, error) {
 	req := &pdpb.PutStoreRequest{
 		Header: newRequestHeader(clusterID),
 		Store:  store,
 	}
 	resp, err := grpcPDClient.PutStore(context.Background(), req)
-	c.Assert(err, IsNil)
-	c.Assert(resp.GetHeader().GetError(), IsNil)
-	return resp
+	return resp, err
 }
 
 func (s *testClusterSuite) testPutStore(c *C, clusterID uint64, store *metapb.Store) {
 	// Update store.
-	resp := putStore(c, s.grpcPDClient, clusterID, store)
-	c.Assert(resp, NotNil)
+	_, err := putStore(c, s.grpcPDClient, clusterID, store)
+	c.Assert(err, IsNil)
 	updatedStore := s.getStore(c, clusterID, store.GetId())
 	c.Assert(updatedStore, DeepEquals, store)
 
 	// Update store again.
-	resp = putStore(c, s.grpcPDClient, clusterID, store)
+	_, err = putStore(c, s.grpcPDClient, clusterID, store)
+	c.Assert(err, IsNil)
 
 	// Put new store with a duplicated address when old store is up will fail.
-	resp = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress()))
+	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress()))
+	c.Assert(err, NotNil)
 
 	// Put new store with a duplicated address when old store is offline will fail.
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Offline)
-	resp = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress()))
+	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress()))
+	c.Assert(err, NotNil)
 
 	// Put new store with a duplicated address when old store is tombstone is OK.
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Tombstone)
-	resp = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress()))
+	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress()))
+	c.Assert(err, IsNil)
 
 	// Put a new store.
-	resp = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, "127.0.0.1:12345"))
+	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, "127.0.0.1:12345"))
+	c.Assert(err, IsNil)
 
 	// Put an existed store with duplicated address with other old stores.
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
-	resp = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, store.GetId(), "127.0.0.1:12345"))
+	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, store.GetId(), "127.0.0.1:12345"))
+	c.Assert(err, NotNil)
 }
 
 func (s *testClusterSuite) resetStoreState(c *C, storeID uint64, state metapb.StoreState) {
@@ -404,7 +405,8 @@ func (s *testClusterSuite) testRemoveStore(c *C, clusterID uint64, store *metapb
 
 	{
 		// Put after removed should return tombstone error.
-		resp := putStore(c, s.grpcPDClient, clusterID, store)
+		resp, err := putStore(c, s.grpcPDClient, clusterID, store)
+		c.Assert(err, IsNil)
 		c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_STORE_TOMBSTONE)
 	}
 	{
@@ -475,7 +477,9 @@ func (s *testClusterSuite) TestClosedChannel(c *C) {
 
 	clusterID := svr.clusterID
 	storeAddr := "127.0.0.1:0"
-	s.tryBootstrapCluster(c, clusterID, storeAddr)
+	leader := mustGetLeader(c, svr.client, svr.getLeaderPath())
+	grpcPDClient := mustNewGrpcClient(c, getLeaderAddr(leader))
+	s.tryBootstrapCluster(c, grpcPDClient, clusterID, storeAddr)
 
 	cluster := svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
@@ -491,14 +495,12 @@ func (s *testClusterSuite) TestClosedChannel(c *C) {
 
 func (s *testClusterSuite) TestGetPDMembers(c *C) {
 
-	clusterID := uint64(0)
 	req := &pdpb.GetMembersRequest{
-		Header: newRequestHeader(clusterID),
+		Header: newRequestHeader(s.svr.ClusterID()),
 	}
 
 	resp, err := s.grpcPDClient.GetMembers(context.Background(), req)
 	c.Assert(err, IsNil)
-	c.Assert(resp.GetHeader().GetClusterId(), Equals, clusterID)
 	// A more strict test can be found at api/member_test.go
 	c.Assert(len(resp.GetMembers()), Not(Equals), 0)
 }

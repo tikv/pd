@@ -22,7 +22,6 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	. "github.com/pingcap/check"
-	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -189,6 +188,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	go s.svr.Run()
 
 	mustWaitLeader(c, []*Server{s.svr})
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 
 	// Build raft cluster with 5 stores.
 	s.bootstrap(c)
@@ -223,7 +223,7 @@ func (s *testClusterWorkerSuite) checkRegionPeerCount(c *C, regionKey []byte, ex
 	return region
 }
 
-func (s *testClusterWorkerSuite) checkChangePeerRes(c *C, res *pdpb.ChangePeer, tp raftpb.ConfChangeType, region *metapb.Region) {
+func (s *testClusterWorkerSuite) checkChangePeerRes(c *C, res *pdpb.ChangePeer, tp pdpb.ConfChangeType, region *metapb.Region) {
 	c.Assert(res, NotNil)
 	c.Assert(res.GetChangeType(), Equals, tp)
 	peer := res.GetPeer()
@@ -232,11 +232,11 @@ func (s *testClusterWorkerSuite) checkChangePeerRes(c *C, res *pdpb.ChangePeer, 
 	store, ok := s.stores[peer.GetStoreId()]
 	c.Assert(ok, IsTrue)
 
-	if tp == raftpb.ConfChangeType_AddNode {
+	if tp == pdpb.ConfChangeType_AddNode {
 		c.Assert(store.peers, Not(HasKey), peer.GetId())
 		store.addPeer(c, peer)
 		addRegionPeer(c, region, peer)
-	} else if tp == raftpb.ConfChangeType_RemoveNode {
+	} else if tp == pdpb.ConfChangeType_RemoveNode {
 		c.Assert(store.peers, HasKey, peer.GetId())
 		store.removePeer(c, peer)
 		removeRegionPeer(c, region, peer)
@@ -402,7 +402,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 		if resp == nil {
 			break
 		}
-		s.checkChangePeerRes(c, resp, raftpb.ConfChangeType_AddNode, r1)
+		s.checkChangePeerRes(c, resp, pdpb.ConfChangeType_AddNode, r1)
 	}
 
 	// Split.
@@ -437,7 +437,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 	for i := 0; i < 4; i++ {
 		resp := heartbeatRegion(c, s.grpcPDClient, s.clusterID, 0, region, leaderPeer)
 		// Check RegionHeartbeat response.
-		s.checkChangePeerRes(c, resp, raftpb.ConfChangeType_AddNode, region)
+		s.checkChangePeerRes(c, resp, pdpb.ConfChangeType_AddNode, region)
 		c.Logf("[add peer][region]:%v", region)
 
 		// Update region epoch and check region info.
@@ -456,7 +456,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 	for i := 0; i < 2; i++ {
 		resp := heartbeatRegion(c, s.grpcPDClient, s.clusterID, 0, region, leaderPeer)
 		// Check RegionHeartbeat response.
-		s.checkChangePeerRes(c, resp, raftpb.ConfChangeType_RemoveNode, region)
+		s.checkChangePeerRes(c, resp, pdpb.ConfChangeType_RemoveNode, region)
 
 		// Update region epoch and check region info.
 		region.RegionEpoch.ConfVer = region.GetRegionEpoch().GetConfVer() + 1
@@ -482,7 +482,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	// First sync, pd-server will return a AddPeer.
 	resp := heartbeatRegion(c, s.grpcPDClient, s.clusterID, 0, r1, leaderPeer1)
 	// Apply the AddPeer ConfChange, but with no sync.
-	s.checkChangePeerRes(c, resp, raftpb.ConfChangeType_AddNode, r1)
+	s.checkChangePeerRes(c, resp, pdpb.ConfChangeType_AddNode, r1)
 	// Split 1 to 1: [nil, m) 2: [m, nil).
 	r2ID, r2PeerIDs := s.askSplit(c, 0, r1)
 	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)

@@ -14,10 +14,13 @@
 package server
 
 import (
+	"context"
 	"sync"
+	"time"
 
 	"github.com/juju/errors"
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 var _ = Suite(&testGetLeaderSuite{})
@@ -34,8 +37,8 @@ func (s *testGetLeaderSuite) SetUpSuite(c *C) {
 	// Send requests before server has started.
 	s.wg.Add(1)
 	s.done = make(chan bool)
-	//	go s.sendRequest(c, cfg.ClientUrls)
-	//	time.Sleep(100 * time.Millisecond)
+	go s.sendRequest(c, cfg.ClientUrls)
+	time.Sleep(100 * time.Millisecond)
 
 	svr, err := NewServer(cfg)
 	c.Assert(err, IsNil)
@@ -66,11 +69,11 @@ func (s *testGetLeaderSuite) TestGetLeader(c *C) {
 	s.wg.Wait()
 }
 
-/*func (s *testGetLeaderSuite) sendRequest(c *C, addr string) {
+func (s *testGetLeaderSuite) sendRequest(c *C, addr string) {
 	defer s.wg.Done()
 
 	req := &pdpb.AllocIDRequest{
-		Header: newRequestHeader(s.svr.ClusterID()),
+		Header: newRequestHeader(0),
 	}
 
 	for {
@@ -80,13 +83,11 @@ func (s *testGetLeaderSuite) TestGetLeader(c *C) {
 		default:
 			// We don't need to check the response and error,
 			// just make sure the server will not panic.
-			conn, err := rpcConnect(addr)
-			if err == nil {
-				rpcCall(conn, 0, req)
-				conn.Close()
+			grpcPDClient := mustNewGrpcClient(c, addr)
+			if grpcPDClient != nil {
+				grpcPDClient.AllocID(context.Background(), req)
 			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 }
-*/

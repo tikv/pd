@@ -36,9 +36,9 @@ func (s *testAllocIDSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
 	s.client = s.svr.client
 	s.alloc = s.svr.idAlloc
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
-
 	go s.svr.Run()
+	mustWaitLeader(c, []*Server{s.svr})
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 }
 
 func (s *testAllocIDSuite) TearDownSuite(c *C) {
@@ -82,8 +82,6 @@ func (s *testAllocIDSuite) TestID(c *C) {
 }
 
 func (s *testAllocIDSuite) TestCommand(c *C) {
-	//leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
-
 	//idReq := &pdpb.AllocIDRequest{}
 
 	req := &pdpb.AllocIDRequest{
@@ -92,11 +90,9 @@ func (s *testAllocIDSuite) TestCommand(c *C) {
 
 	var last uint64
 	for i := uint64(0); i < 2*allocStep; i++ {
-		//rawMsgID := uint64(rand.Int63())
 		resp, err := s.grpcPDClient.AllocID(context.Background(), req)
 		c.Assert(err, IsNil)
 		c.Assert(resp.GetId(), Greater, last)
-		//c.Assert(rawMsgID, Equals, resp.GetId())
 		last = resp.GetId()
 	}
 }
