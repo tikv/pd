@@ -14,6 +14,7 @@
 package pd
 
 import (
+	"context"
 	"net"
 	"net/url"
 	"strings"
@@ -25,7 +26,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/apiutil"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
 
@@ -42,6 +42,8 @@ type Client interface {
 	// Also it may return nil if PD finds no Region for the key temporarily,
 	// client should retry later.
 	GetRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error)
+	// GetRegionByID gets a region and its leader Peer from PD by id.
+	GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Region, *metapb.Peer, error)
 	// GetStore gets a store from PD by store id.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
@@ -392,6 +394,23 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 		return nil, nil, errors.Trace(err)
 	}
 	return resp.GetRegion(), resp.GetLeader(), nil
+}
+
+func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Region, *metapb.Peer, error) {
+	start := time.Now()
+	defer func() { cmdDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	resp, err := c.leaderClient().GetRegionByID(ctx, &pdpb.GetRegionByIDRequest{
+		Header:   c.requestHeader(),
+		RegionId: regionID,
+	})
+	requestDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds())
+	cancel()
+
+	if err != nil {
+		return nil, nil, errors.Trace(err)
+	}
+	return resp.GetRegion(), req.pbResp.GetLeader(), nil
 }
 
 func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error) {

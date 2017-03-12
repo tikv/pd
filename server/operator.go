@@ -85,12 +85,12 @@ type regionOperator struct {
 func newRegionOperator(region *regionInfo, ops ...Operator) *regionOperator {
 	// Do some check here, just fatal because it must be bug.
 	if len(ops) == 0 {
-		log.Fatal("new region operator with no ops")
+		log.Fatalf("[region %d] new region operator with no ops", region.GetId())
 	}
 	kind := ops[0].GetResourceKind()
 	for _, op := range ops {
 		if op.GetResourceKind() != kind {
-			log.Fatalf("new region operator with ops of different kinds %v and %v", op.GetResourceKind(), kind)
+			log.Fatalf("[region %d] new region operator with ops of different kinds %v and %v", region.GetId(), op.GetResourceKind(), kind)
 		}
 	}
 
@@ -115,7 +115,7 @@ func (op *regionOperator) GetResourceKind() ResourceKind {
 
 func (op *regionOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	if time.Since(op.Start) > maxOperatorWaitTime {
-		log.Errorf("%s : operator timeout", op)
+		log.Errorf("[region %d] Operator timeout:%s", region.GetId(), op)
 		return nil, true
 	}
 
@@ -195,7 +195,7 @@ func (op *changePeerOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatRespo
 		}
 	}
 
-	log.Infof("%s %s", op, region)
+	log.Infof("[region %d] Do operator %s {%v}", region.GetId(), op.Name, op.ChangePeer.GetPeer())
 
 	res := &pdpb.RegionHeartbeatResponse{
 		ChangePeer: op.ChangePeer,
@@ -237,8 +237,7 @@ func (op *transferLeaderOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatR
 		return nil, true
 	}
 
-	log.Infof("%s %v", op, region)
-
+	log.Infof("[region %d] Do operator %s,from peer:{%v} to peer:{%v}", region.GetId(), op.Name, op.OldLeader, op.NewLeader)
 	res := &pdpb.RegionHeartbeatResponse{
 		TransferLeader: &pdpb.TransferLeader{
 			Peer: op.NewLeader,

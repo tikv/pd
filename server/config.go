@@ -70,6 +70,13 @@ type Config struct {
 
 	Replication ReplicationConfig `toml:"replication" json:"replication"`
 
+	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
+	// the default size is 2GB, the maximum is 8GB.
+	QuotaBackendBytes typeutil.ByteSize `toml:"quota-backend-bytes" json:"quota-backend-bytes"`
+	// AutoCompactionRetention for mvcc key value store in hour. 0 means disable auto compaction.
+	// the default retention is 1 hour
+	AutoCompactionRetention int `toml:"auto-compaction-retention" json:"auto-compaction-retention"`
+
 	// Only test can change them.
 	nextRetryDelay             time.Duration
 	disableStrictReconfigCheck bool
@@ -107,8 +114,9 @@ func NewConfig() *Config {
 }
 
 const (
-	defaultLeaderLease    = int64(3)
-	defaultNextRetryDelay = time.Second
+	defaultLeaderLease             = int64(3)
+	defaultNextRetryDelay          = time.Second
+	defaultAutoCompactionRetention = 1
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
@@ -204,15 +212,6 @@ func (c *Config) adjust() error {
 	adjustString(&c.PeerUrls, defaultPeerUrls)
 	adjustString(&c.AdvertisePeerUrls, c.PeerUrls)
 
-	if c.Join != "" {
-		initialCluster, state, err := prepareJoinCluster(c)
-		if err != nil {
-			return errors.Trace(err)
-		}
-		c.InitialCluster = initialCluster
-		c.InitialClusterState = state
-	}
-
 	if len(c.InitialCluster) == 0 {
 		// The advertise peer urls may be http://127.0.0.1:2380,http://127.0.0.1:2381
 		// so the initial cluster is pd=http://127.0.0.1:2380,pd=http://127.0.0.1:2381
@@ -233,6 +232,9 @@ func (c *Config) adjust() error {
 
 	if c.nextRetryDelay == 0 {
 		c.nextRetryDelay = defaultNextRetryDelay
+	}
+	if c.AutoCompactionRetention == 0 {
+		c.AutoCompactionRetention = defaultAutoCompactionRetention
 	}
 
 	adjustUint64(&c.tickMs, defaultTickMs)
@@ -284,7 +286,7 @@ const (
 	defaultMaxReplicas          = 3
 	defaultMaxSnapshotCount     = 3
 	defaultMaxStoreDownTime     = time.Hour
-	defaultLeaderScheduleLimit  = 16
+	defaultLeaderScheduleLimit  = 1024
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 16
 )
@@ -307,6 +309,15 @@ type ReplicationConfig struct {
 	// For example, ["zone", "rack"] means that we should place replicas to
 	// different zones first, then to different racks if we don't have enough zones.
 	LocationLabels []string `toml:"location-labels" json:"location-labels"`
+}
+
+func (c *ReplicationConfig) clone() *ReplicationConfig {
+	locationLabels := make([]string, 0, len(c.LocationLabels))
+	copy(locationLabels, c.LocationLabels)
+	return &ReplicationConfig{
+		MaxReplicas:    c.MaxReplicas,
+		LocationLabels: locationLabels,
+	}
 }
 
 func (c *ReplicationConfig) adjust() {
@@ -343,7 +354,7 @@ func (o *scheduleOption) GetMaxReplicas() int {
 }
 
 func (o *scheduleOption) SetMaxReplicas(replicas int) {
-	o.rep.cfg.MaxReplicas = uint64(replicas)
+	o.rep.SetMaxReplicas(replicas)
 }
 
 func (o *scheduleOption) GetMaxSnapshotCount() uint64 {
@@ -395,6 +406,8 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.StrictReconfigCheck = !c.disableStrictReconfigCheck
 	cfg.TickMs = uint(c.tickMs)
 	cfg.ElectionMs = uint(c.electionMs)
+	cfg.AutoCompactionRetention = c.AutoCompactionRetention
+	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
 
 	var err error
 

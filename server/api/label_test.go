@@ -14,19 +14,28 @@
 package api
 
 import (
+	"fmt"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server"
 )
-
-type testLabelsStoreSuite struct{}
 
 var _ = Suite(&testLabelsStoreSuite{})
 
-func (s *testLabelsStoreSuite) TestStroesLabelFilter(c *C) {
-	stores := []*metapb.Store{
+type testLabelsStoreSuite struct {
+	svr       *server.Server
+	cleanup   cleanUpFunc
+	urlPrefix string
+	stores    []*metapb.Store
+}
+
+func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
+	s.stores = []*metapb.Store{
 		{
-			Id:    1,
-			State: metapb.StoreState_Up,
+			Id:      1,
+			Address: "localhost:1",
+			State:   metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   "zone",
@@ -39,8 +48,9 @@ func (s *testLabelsStoreSuite) TestStroesLabelFilter(c *C) {
 			},
 		},
 		{
-			Id:    4,
-			State: metapb.StoreState_Up,
+			Id:      4,
+			Address: "localhost:4",
+			State:   metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   "zone",
@@ -53,8 +63,9 @@ func (s *testLabelsStoreSuite) TestStroesLabelFilter(c *C) {
 			},
 		},
 		{
-			Id:    6,
-			State: metapb.StoreState_Up,
+			Id:      6,
+			Address: "localhost:6",
+			State:   metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   "zone",
@@ -67,8 +78,9 @@ func (s *testLabelsStoreSuite) TestStroesLabelFilter(c *C) {
 			},
 		},
 		{
-			Id:    7,
-			State: metapb.StoreState_Up,
+			Id:      7,
+			Address: "localhost:7",
+			State:   metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   "zone",
@@ -86,32 +98,58 @@ func (s *testLabelsStoreSuite) TestStroesLabelFilter(c *C) {
 		},
 	}
 
+	s.svr, s.cleanup = mustNewServer(c)
+	mustWaitLeader(c, []*server.Server{s.svr})
+
+	addr := s.svr.GetAddr()
+	httpAddr := mustUnixAddrToHTTPAddr(c, addr)
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", httpAddr, apiPrefix)
+
+	mustBootstrapCluster(c, s.svr)
+	for _, store := range s.stores {
+		mustPutStore(c, s.svr, store)
+	}
+}
+
+func (s *testLabelsStoreSuite) TearDownSuite(c *C) {
+	s.cleanup()
+}
+
+func (s *testLabelsStoreSuite) TestLabelsGet(c *C) {
+	url := fmt.Sprintf("%s/labels", s.urlPrefix)
+	labels := make([]*metapb.StoreLabel, 0, len(s.stores))
+	err := readJSONWithURL(url, &labels)
+	c.Assert(err, IsNil)
+}
+
+func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
+
 	var table = []struct {
 		name, value string
 		want        []*metapb.Store
 	}{
 		{
 			name: "zone",
-			want: stores[:],
+			want: s.stores[:],
 		},
 		{
 			name: "other",
-			want: stores[3:],
+			want: s.stores[3:],
 		},
 		{
 			name:  "zone",
 			value: "us-west-1",
-			want:  stores[:1],
+			want:  s.stores[:1],
 		},
 		{
 			name:  "zone",
 			value: "west",
-			want:  stores[:2],
+			want:  s.stores[:2],
 		},
 		{
 			name:  "zo",
 			value: "beijing",
-			want:  stores[2:3],
+			want:  s.stores[2:3],
 		},
 		{
 			name:  "zone",
@@ -120,9 +158,11 @@ func (s *testLabelsStoreSuite) TestStroesLabelFilter(c *C) {
 		},
 	}
 	for _, t := range table {
-		f, err := newStoresLabelFilter(t.name, t.value)
+		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", s.urlPrefix, t.name, t.value)
+		info := new(storesInfo)
+		err := readJSONWithURL(url, info)
 		c.Assert(err, IsNil)
-		c.Assert(f.filter(stores), DeepEquals, t.want)
+		checkStoresInfo(c, info.Stores, t.want)
 	}
 	_, err := newStoresLabelFilter("test", ".[test")
 	c.Assert(err, NotNil)
