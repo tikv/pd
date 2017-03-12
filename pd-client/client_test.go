@@ -14,7 +14,6 @@
 package pd
 
 import (
-	"context"
 	"net"
 	"os"
 	"strings"
@@ -26,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
 
@@ -190,9 +190,14 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 }
 
 func (s *testClientSuite) TestGetRegionByID(c *C) {
-	heartbeatRegion(c, s.srv)
+	req := &pdpb.RegionHeartbeatRequest{
+		Header: newHeader(s.srv),
+		Region: region,
+		Leader: peer,
+	}
+	s.grpcPDClient.RegionHeartbeat(context.Background(), req)
 
-	r, leader, err := s.client.GetRegionByID(3)
+	r, leader, err := s.client.GetRegionByID(context.Background(), 3)
 	c.Assert(err, IsNil)
 	c.Assert(r, DeepEquals, region)
 	c.Assert(leader, DeepEquals, peer)

@@ -14,7 +14,6 @@
 package pd
 
 import (
-	"context"
 	"net"
 	"net/url"
 	"strings"
@@ -26,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/apiutil"
+	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
 
@@ -410,7 +410,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Re
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
-	return resp.GetRegion(), req.pbResp.GetLeader(), nil
+	return resp.GetRegion(), resp.GetLeader(), nil
 }
 
 func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error) {
