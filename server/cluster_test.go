@@ -14,7 +14,6 @@
 package server
 
 import (
-	"context"
 	"net"
 	"strings"
 	"time"
@@ -23,6 +22,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
 
