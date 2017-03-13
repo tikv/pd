@@ -119,53 +119,53 @@ func newRegionMap() *regionMap {
 	}
 }
 
-func (m *regionMap) Len() int {
-	if m == nil {
+func (rm *regionMap) Len() int {
+	if rm == nil {
 		return 0
 	}
-	return len(m.m)
+	return len(rm.m)
 }
 
-func (m *regionMap) Get(id uint64) *regionInfo {
-	if m == nil {
+func (rm *regionMap) Get(id uint64) *regionInfo {
+	if rm == nil {
 		return nil
 	}
-	if entry, ok := m.m[id]; ok {
+	if entry, ok := rm.m[id]; ok {
 		return entry.regionInfo
 	}
 	return nil
 }
 
-func (m *regionMap) Put(region *regionInfo) {
-	if old, ok := m.m[region.GetId()]; ok {
+func (rm *regionMap) Put(region *regionInfo) {
+	if old, ok := rm.m[region.GetId()]; ok {
 		old.regionInfo = region
 		return
 	}
-	m.m[region.GetId()] = &regionEntry{
+	rm.m[region.GetId()] = &regionEntry{
 		regionInfo: region,
-		pos:        len(m.ids),
+		pos:        len(rm.ids),
 	}
-	m.ids = append(m.ids, region.GetId())
+	rm.ids = append(rm.ids, region.GetId())
 }
 
-func (m *regionMap) RandomRegion() *regionInfo {
-	if m == nil || m.Len() == 0 {
+func (rm *regionMap) RandomRegion() *regionInfo {
+	if rm == nil || rm.Len() == 0 {
 		return nil
 	}
-	return m.Get(m.ids[rand.Intn(m.Len())])
+	return rm.Get(rm.ids[rand.Intn(rm.Len())])
 }
 
-func (m *regionMap) Delete(id uint64) {
-	if m == nil {
+func (rm *regionMap) Delete(id uint64) {
+	if rm == nil {
 		return
 	}
-	if old, ok := m.m[id]; ok {
-		len := m.Len()
-		last := m.m[m.ids[len-1]]
+	if old, ok := rm.m[id]; ok {
+		len := rm.Len()
+		last := rm.m[rm.ids[len-1]]
 		last.pos = old.pos
-		m.ids[last.pos] = last.GetId()
-		delete(m.m, id)
-		m.ids = m.ids[:len-1]
+		rm.ids[last.pos] = last.GetId()
+		delete(rm.m, id)
+		rm.ids = rm.ids[:len-1]
 	}
 }
 
