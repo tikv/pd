@@ -84,6 +84,7 @@ type client struct {
 		leader      string
 	}
 
+	tsDeadlineCh  chan deadline
 	checkLeaderCh chan struct{}
 
 	wg     sync.WaitGroup
@@ -98,6 +99,7 @@ func NewClient(pdAddrs []string) (Client, error) {
 	c := &client{
 		urls:          addrsToUrls(pdAddrs),
 		tsoRequests:   make(chan *tsoRequest, maxMergeTSORequests),
+		tsDeadlineCh:  make(chan deadline),
 		checkLeaderCh: make(chan struct{}, 1),
 		ctx:           ctx,
 		cancel:        cancel,
@@ -112,8 +114,9 @@ func NewClient(pdAddrs []string) (Client, error) {
 	}
 	log.Infof("[pd] init cluster id %v", c.clusterID)
 
-	c.wg.Add(2)
+	c.wg.Add(3)
 	go c.tsLoop()
+	go c.tsCancelLoop()
 	go c.leaderLoop()
 
 	// TODO: Update addrs from server continuously by using GetMember.
@@ -226,6 +229,31 @@ func (c *client) leaderLoop() {
 	}
 }
 
+type deadline struct {
+	timer  <-chan time.Time
+	done   chan struct{}
+	cancel context.CancelFunc
+}
+
+func (c *client) tsCancelLoop() {
+	defer c.wg.Done()
+
+	for {
+		select {
+		case d := <-c.tsDeadlineCh:
+			select {
+			case <-d.timer:
+				d.cancel()
+			case <-d.done:
+			case <-c.ctx.Done():
+				return
+			}
+		case <-c.ctx.Done():
+			return
+		}
+	}
+}
+
 func (c *client) tsLoop() {
 	defer c.wg.Done()
 
@@ -259,13 +287,11 @@ func (c *client) tsLoop() {
 				requests = append(requests, <-c.tsoRequests)
 			}
 			done := make(chan struct{})
-			go func(cancel context.CancelFunc) {
-				select {
-				case <-time.After(pdTimeout):
-					cancel()
-				case <-done:
-				}
-			}(cancel)
+			c.tsDeadlineCh <- deadline{
+				timer:  time.After(pdTimeout),
+				done:   done,
+				cancel: cancel,
+			}
 			err = c.processTSORequests(stream, requests)
 			close(done)
 			requests = requests[:0]
