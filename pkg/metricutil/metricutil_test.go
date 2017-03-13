@@ -63,28 +63,6 @@ func (s *testMetricsSuite) TestCamelCaseToSnakeCase(c *C) {
 	}
 }
 
-/*
-func (s *testMetricsSuite) TestGetCmdLabel(c *C) {
-	requests := make([]*pdpb.Request, 0, 2)
-	labels := make([]string, 0, 2)
-
-	r := new(pdpb.Request)
-	r.CmdType = pdpb.CommandType_Tso
-	requests = append(requests, r)
-	labels = append(labels, "tso")
-
-	// Invalid CommandType
-	r = new(pdpb.Request)
-	r.CmdType = pdpb.CommandType(-1)
-	requests = append(requests, r)
-	labels = append(labels, "-1")
-
-	for i, r := range requests {
-		l := GetCmdLabel(r)
-		c.Assert(l, Equals, labels[i])
-	}
-}
-*/
 // Seems useless, but improves coverage.
 func (s *testMetricsSuite) TestCoverage(c *C) {
 	cfgs := []*MetricConfig{

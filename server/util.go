@@ -244,35 +244,6 @@ func rpcConnect(addr string) (net.Conn, error) {
 	return nil, errors.Errorf("connect to %s failed", addr)
 }
 
-// func rpcCall(conn net.Conn, reqID uint64, request *pdpb.Request) (*pdpb.Response, error) {
-// 	req := &msgpb.Message{
-// 		MsgType: msgpb.MessageType_PdReq,
-// 		PdReq:   request,
-// 	}
-// 	if err := util.WriteMessage(conn, reqID, req); err != nil {
-// 		return nil, errors.Trace(err)
-// 	}
-// 	resp := &msgpb.Message{}
-// 	respID, err := util.ReadMessage(conn, resp)
-// 	if err != nil {
-// 		return nil, errors.Trace(err)
-// 	}
-// 	if respID != reqID {
-// 		return nil, errors.Errorf("message id mismatch: reqID %d respID %d", reqID, respID)
-// 	}
-// 	return resp.GetPdResp(), nil
-// }
-
-// // RPCRequest sends a request to addr and waits for the response.
-// // Export for API test.
-// func RPCRequest(addr string, reqID uint64, request *pdpb.Request) (*pdpb.Response, error) {
-// 	conn, err := rpcConnect(addr)
-// 	if err != nil {
-// 		return nil, errors.Trace(err)
-// 	}
-// 	return rpcCall(conn, reqID, request)
-// }
-
 type redirectFormatter struct{}
 
 // Format turns capnslog logs to ngaut logs.

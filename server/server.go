@@ -278,43 +278,6 @@ func (s *Server) Run() {
 	s.leaderLoop()
 }
 
-// // ServeHTTP hijack the HTTP connection and switch to RPC.
-// func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-// 	// Before hijacke any connection, make sure the pd is initialized.
-// 	if s.isClosed() {
-// 		return
-// 	}
-
-// 	hj, ok := w.(http.Hijacker)
-// 	if !ok {
-// 		log.Errorf("server doesn't support hijacking: conn %v", w)
-// 		return
-// 	}
-
-// 	conn, bufrw, err := hj.Hijack()
-// 	if err != nil {
-// 		log.Error(err)
-// 		return
-// 	}
-
-// 	err = conn.SetDeadline(time.Time{})
-// 	if err != nil {
-// 		log.Error(err)
-// 		conn.Close()
-// 		return
-// 	}
-
-// 	c, err := newConn(s, conn, bufrw)
-// 	if err != nil {
-// 		log.Error(err)
-// 		conn.Close()
-// 		return
-// 	}
-
-// 	s.wg.Add(1)
-// 	go c.run()
-// }
-
 // GetAddr returns the server urls for clients.
 func (s *Server) GetAddr() string {
 	return s.cfg.AdvertiseClientUrls
@@ -349,25 +312,6 @@ func (s *Server) Name() string {
 func (s *Server) ClusterID() uint64 {
 	return s.clusterID
 }
-
-// TODO: Shutdown grpc server gracefully.
-// func (s *Server) closeAllConnections() {
-// 	s.connsLock.Lock()
-// 	defer s.connsLock.Unlock()
-
-// 	if len(s.conns) == 0 {
-// 		return
-// 	}
-
-// 	for conn := range s.conns {
-// 		err := conn.close()
-// 		if err != nil {
-// 			log.Warnf("close conn failed - %v", err)
-// 		}
-// 	}
-
-// 	s.conns = make(map[*conn]struct{})
-// }
 
 // txn returns an etcd client transaction wrapper.
 // The wrapper will set a request timeout to the context and log slow transactions.
