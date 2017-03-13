@@ -18,7 +18,6 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	//	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/typeutil"
 )
 
@@ -63,7 +62,6 @@ func (s *testMetricsSuite) TestCamelCaseToSnakeCase(c *C) {
 	}
 }
 
-// Seems useless, but improves coverage.
 func (s *testMetricsSuite) TestCoverage(c *C) {
 	cfgs := []*MetricConfig{
 		{

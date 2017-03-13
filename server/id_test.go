@@ -14,12 +14,12 @@
 package server
 
 import (
-	"context"
 	"sync"
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testAllocIDSuite{})
