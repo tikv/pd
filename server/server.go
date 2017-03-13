@@ -63,9 +63,6 @@ type Server struct {
 
 	wg sync.WaitGroup
 
-	// connsLock sync.Mutex
-	// conns     map[*conn]struct{}
-
 	closed int64
 
 	// for tso
@@ -115,8 +112,7 @@ func CreateServer(cfg *Config) *Server {
 		cfg:           cfg,
 		scheduleOpt:   newScheduleOption(cfg),
 		isLeaderValue: 0,
-		// conns:         make(map[*conn]struct{}),
-		closed: 1,
+		closed:        1,
 	}
 
 	s.handler = newHandler(s)
@@ -129,9 +125,6 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	// etcdCfg.UserHandlers = map[string]http.Handler{
-	// 	pdRPCPrefix: s,
-	// }
 	if apiHandler != nil {
 		etcdCfg.UserHandlers = map[string]http.Handler{
 			pdAPIPrefix: apiHandler,

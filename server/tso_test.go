@@ -78,8 +78,6 @@ func mustGetLeader(c *C, client *clientv3.Client, leaderPath string) *pdpb.Membe
 }
 
 func (s *testTsoSuite) TestTso(c *C) {
-	//leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
-
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)

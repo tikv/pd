@@ -82,8 +82,6 @@ func (s *testAllocIDSuite) TestID(c *C) {
 }
 
 func (s *testAllocIDSuite) TestCommand(c *C) {
-	//idReq := &pdpb.AllocIDRequest{}
-
 	req := &pdpb.AllocIDRequest{
 		Header: newRequestHeader(s.svr.clusterID),
 	}

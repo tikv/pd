@@ -24,7 +24,6 @@ import (
 )
 
 var (
-	// cmdLabels = convertCmdLabels()
 	cmdLabels = make(map[string]string)
 )
 

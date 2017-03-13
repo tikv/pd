@@ -475,7 +475,6 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 
 	s.svr.scheduleOpt.SetMaxReplicas(2)
 
-	//leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 	r1, _ := cluster.getRegion([]byte("a"))
 	leaderPeer1 := s.chooseRegionLeader(c, r1)
 
@@ -507,8 +506,6 @@ func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
 	stores := cluster.GetStores()
 	c.Assert(stores, HasLen, 5)
 
-	//leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
-
 	// Mock a store stats.
 	storeID := stores[0].GetId()
 	stats := &pdpb.StoreStats{
@@ -532,7 +529,6 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	stores := cluster.GetStores()
 	c.Assert(stores, HasLen, 5)
 
-	//leaderPd := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 	// Mock a report split request.
 	peer := s.newPeer(c, 999, 0)
 	left := s.newRegion(c, 0, []byte("aaa"), []byte("bbb"), []*metapb.Peer{peer}, nil)

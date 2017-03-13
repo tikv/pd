@@ -126,16 +126,15 @@ func (s *Server) GetLeader() (*pdpb.Member, error) {
 }
 
 func (s *Server) isSameLeader(leader *pdpb.Member) bool {
-	// TODO: Relax equal client urls.
-	return getLeaderAddr(leader) == s.GetAddr() && leader.GetMemberId() == s.ID()
+	return leader.GetMemberId() == s.ID()
 }
 
 func (s *Server) marshalLeader() string {
 	leader := &pdpb.Member{
 		Name:       s.Name(),
 		MemberId:   s.ID(),
-		ClientUrls: strings.Split(s.GetAddr(), ","),
-		// TODO: PeerUrls
+		ClientUrls: strings.Split(s.cfg.AdvertiseClientUrls, ","),
+		PeerUrls:   strings.Split(s.cfg.AdvertisePeerUrls, ","),
 	}
 
 	data, err := leader.Marshal()
