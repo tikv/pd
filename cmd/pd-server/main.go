@@ -40,18 +40,22 @@ func main() {
 	case flag.ErrHelp:
 		os.Exit(0)
 	default:
-		log.Fatalf("parse cmd flags err %s\n", err)
+		log.Fatalf("parse cmd flags error %s\n", err)
 	}
 
 	err = server.InitLogger(cfg)
 	if err != nil {
-		log.Fatalf("initalize logger err %s\n", err)
+		log.Fatalf("initalize logger error %s\n", err)
 	}
 
 	server.LogPDInfo()
 
 	metricutil.Push(&cfg.Metric)
 
+	err = server.PrepareJoinCluster(cfg)
+	if err != nil {
+		log.Fatal("join error ", err)
+	}
 	svr := server.CreateServer(cfg)
 	err = svr.StartEtcd(api.NewHandler(svr))
 	if err != nil {

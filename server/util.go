@@ -21,6 +21,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"reflect"
 	"strings"
 	"time"
@@ -41,6 +42,8 @@ import (
 const (
 	requestTimeout  = etcdutil.DefaultRequestTimeout
 	slowRequestTime = etcdutil.DefaultSlowRequestTime
+
+	logDirMode = 0755
 )
 
 // Version information.
@@ -305,9 +308,14 @@ func (rf *redirectFormatter) Format(pkg string, level capnslog.LogLevel, depth i
 func (rf *redirectFormatter) Flush() {}
 
 // setLogOutput sets output path for all logs.
-func setLogOutput(path string) error {
+func setLogOutput(logFile string) error {
 	// PD log.
-	log.SetOutputByName(path)
+	dir := path.Dir(logFile)
+	err := os.MkdirAll(dir, logDirMode)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	log.SetOutputByName(logFile)
 	log.SetRotateByDay()
 
 	// ETCD log.

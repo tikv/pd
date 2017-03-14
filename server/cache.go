@@ -550,9 +550,9 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		return errors.Trace(errStoreNotFound(storeID))
 	}
 
-	store.stats.StoreStats = proto.Clone(stats).(*pdpb.StoreStats)
-	store.stats.LeaderCount = uint32(c.regions.getStoreLeaderCount(storeID))
-	store.stats.LastHeartbeatTS = time.Now()
+	store.status.StoreStats = proto.Clone(stats).(*pdpb.StoreStats)
+	store.status.LeaderCount = uint32(c.regions.getStoreLeaderCount(storeID))
+	store.status.LastHeartbeatTS = time.Now()
 
 	c.stores.setStore(store)
 	return nil
