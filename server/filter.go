@@ -120,7 +120,7 @@ func newHealthFilter(opt *scheduleOption) *healthFilter {
 }
 
 func (f *healthFilter) filter(store *storeInfo) bool {
-	if store.stats.GetIsBusy() {
+	if store.status.GetIsBusy() {
 		return true
 	}
 	return store.downTime() > f.opt.GetMaxStoreDownTime()
@@ -143,9 +143,9 @@ func newSnapshotCountFilter(opt *scheduleOption) *snapshotCountFilter {
 }
 
 func (f *snapshotCountFilter) filter(store *storeInfo) bool {
-	return uint64(store.stats.GetSendingSnapCount()) > f.opt.GetMaxSnapshotCount() ||
-		uint64(store.stats.GetReceivingSnapCount()) > f.opt.GetMaxSnapshotCount() ||
-		uint64(store.stats.GetApplyingSnapCount()) > f.opt.GetMaxSnapshotCount()
+	return uint64(store.status.GetSendingSnapCount()) > f.opt.GetMaxSnapshotCount() ||
+		uint64(store.status.GetReceivingSnapCount()) > f.opt.GetMaxSnapshotCount() ||
+		uint64(store.status.GetApplyingSnapCount()) > f.opt.GetMaxSnapshotCount()
 }
 
 func (f *snapshotCountFilter) FilterSource(store *storeInfo) bool {
