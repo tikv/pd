@@ -15,6 +15,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/signal"
@@ -83,7 +84,7 @@ func loop() {
 		Prompt:            "\033[31m»\033[0m ",
 		HistoryFile:       "/tmp/readline.tmp",
 		InterruptPrompt:   "^C",
-		EOFPrompt:         "exit",
+		EOFPrompt:         "^D",
 		HistorySearchFold: true,
 	})
 	if err != nil {
@@ -95,6 +96,8 @@ func loop() {
 		line, err := l.Readline()
 		if err != nil {
 			if err == readline.ErrInterrupt {
+				break
+			} else if err == io.EOF {
 				break
 			}
 			continue
