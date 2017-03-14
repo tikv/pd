@@ -149,7 +149,7 @@ func (rm *regionMap) Put(region *regionInfo) {
 }
 
 func (rm *regionMap) RandomRegion() *regionInfo {
-	if rm == nil || rm.Len() == 0 {
+	if rm.Len() == 0 {
 		return nil
 	}
 	return rm.Get(rm.ids[rand.Intn(rm.Len())])
