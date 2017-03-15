@@ -59,10 +59,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if err != nil {
 			return errors.Trace(err)
 		}
-		if !s.IsLeader() {
-			return notLeaderError
-		}
-		if err := s.validateHeader(request.GetHeader()); err != nil {
+		if err := s.validateRequest(request.GetHeader()); err != nil {
 			return errors.Trace(err)
 		}
 		count := request.GetCount()
@@ -83,10 +80,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 
 // Bootstrap implements gRPC PDServer.
 func (s *Server) Bootstrap(ctx context.Context, request *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
-	if !s.IsLeader() {
-		return nil, notLeaderError
-	}
-	if err := s.validateHeader(request.GetHeader()); err != nil {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -111,10 +105,7 @@ func (s *Server) Bootstrap(ctx context.Context, request *pdpb.BootstrapRequest) 
 
 // IsBootstrapped implements gRPC PDServer.
 func (s *Server) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstrappedRequest) (*pdpb.IsBootstrappedResponse, error) {
-	if !s.IsLeader() {
-		return nil, notLeaderError
-	}
-	if err := s.validateHeader(request.GetHeader()); err != nil {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -127,10 +118,7 @@ func (s *Server) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstrappe
 
 // AllocID implements gRPC PDServer.
 func (s *Server) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) (*pdpb.AllocIDResponse, error) {
-	if !s.IsLeader() {
-		return nil, notLeaderError
-	}
-	if err := s.validateHeader(request.GetHeader()); err != nil {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -148,10 +136,7 @@ func (s *Server) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) (*pd
 
 // GetStore implements gRPC PDServer.
 func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
-	if !s.IsLeader() {
-		return nil, notLeaderError
-	}
-	if err := s.validateHeader(request.GetHeader()); err != nil {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -188,10 +173,7 @@ func checkStore2(cluster *RaftCluster, storeID uint64) *pdpb.Error {
 
 // PutStore implements gRPC PDServer.
 func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*pdpb.PutStoreResponse, error) {
-	if !s.IsLeader() {
-		return nil, notLeaderError
-	}
-	if err := s.validateHeader(request.GetHeader()); err != nil {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -220,10 +202,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 
 // StoreHeartbeat implements gRPC PDServer.
 func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbeatRequest) (*pdpb.StoreHeartbeatResponse, error) {
-	if !s.IsLeader() {
-		return nil, notLeaderError
-	}
-	if err := s.validateHeader(request.GetHeader()); err != nil {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -253,10 +232,7 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 
 // RegionHeartbeat implements gRPC PDServer.
 func (s *Server) RegionHeartbeat(ctx context.Context, request *pdpb.RegionHeartbeatRequest) (*pdpb.RegionHeartbeatResponse, error) {
-	if !s.IsLeader() {
-		return nil, notLeaderError
-	}
-	if err := s.validateHeader(request.GetHeader()); err != nil {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -319,10 +295,7 @@ func (s *Server) RegionHeartbeat(ctx context.Context, request *pdpb.RegionHeartb
 
 // GetRegion implements gRPC PDServer.
 func (s *Server) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
-	if !s.IsLeader() {
-		return nil, notLeaderError
-	}
-	if err := s.validateHeader(request.GetHeader()); err != nil {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -340,10 +313,7 @@ func (s *Server) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) 
 
 // GetRegionByID implements gRPC PDServer.
 func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDRequest) (*pdpb.GetRegionResponse, error) {
-	if !s.IsLeader() {
-		return nil, notLeaderError
-	}
-	if err := s.validateHeader(request.GetHeader()); err != nil {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -362,10 +332,7 @@ func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDR
 
 // AskSplit implements gRPC PDServer.
 func (s *Server) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
-	if !s.IsLeader() {
-		return nil, notLeaderError
-	}
-	if err := s.validateHeader(request.GetHeader()); err != nil {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -393,10 +360,7 @@ func (s *Server) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest) (*
 
 // ReportSplit implements gRPC PDServer.
 func (s *Server) ReportSplit(ctx context.Context, request *pdpb.ReportSplitRequest) (*pdpb.ReportSplitResponse, error) {
-	if !s.IsLeader() {
-		return nil, notLeaderError
-	}
-	if err := s.validateHeader(request.GetHeader()); err != nil {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -416,10 +380,7 @@ func (s *Server) ReportSplit(ctx context.Context, request *pdpb.ReportSplitReque
 
 // GetClusterConfig implements gRPC PDServer.
 func (s *Server) GetClusterConfig(ctx context.Context, request *pdpb.GetClusterConfigRequest) (*pdpb.GetClusterConfigResponse, error) {
-	if !s.IsLeader() {
-		return nil, notLeaderError
-	}
-	if err := s.validateHeader(request.GetHeader()); err != nil {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -435,10 +396,7 @@ func (s *Server) GetClusterConfig(ctx context.Context, request *pdpb.GetClusterC
 
 // PutClusterConfig implements gRPC PDServer.
 func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb.PutClusterConfigRequest) (*pdpb.PutClusterConfigResponse, error) {
-	if !s.IsLeader() {
-		return nil, notLeaderError
-	}
-	if err := s.validateHeader(request.GetHeader()); err != nil {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -458,8 +416,12 @@ func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb.PutClusterC
 	}, nil
 }
 
+// validateRequest checks if Server is leader and clusterID is matched.
 // TODO: Call it in gRPC intercepter.
-func (s *Server) validateHeader(header *pdpb.RequestHeader) error {
+func (s *Server) validateRequest(header *pdpb.RequestHeader) error {
+	if !s.IsLeader() {
+		return notLeaderError
+	}
 	if header.GetClusterId() != s.clusterID {
 		return grpc.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
 	}

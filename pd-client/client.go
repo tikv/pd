@@ -99,7 +99,7 @@ func NewClient(pdAddrs []string) (Client, error) {
 	c := &client{
 		urls:          addrsToUrls(pdAddrs),
 		tsoRequests:   make(chan *tsoRequest, maxMergeTSORequests),
-		tsDeadlineCh:  make(chan deadline),
+		tsDeadlineCh:  make(chan deadline, 1),
 		checkLeaderCh: make(chan struct{}, 1),
 		ctx:           ctx,
 		cancel:        cancel,
