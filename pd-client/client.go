@@ -405,7 +405,6 @@ func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
 	case err := <-req.done:
 		if err != nil {
 			cmdFailedDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds())
-			c.scheduleCheckLeader()
 			return 0, 0, errors.Trace(err)
 		}
 		return req.physical, req.logical, err
@@ -435,16 +434,18 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 
 func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Region, *metapb.Peer, error) {
 	start := time.Now()
-	defer func() { cmdDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds()) }()
+	defer func() { cmdDuration.WithLabelValues("get_region_byid").Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().GetRegionByID(ctx, &pdpb.GetRegionByIDRequest{
 		Header:   c.requestHeader(),
 		RegionId: regionID,
 	})
-	requestDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds())
+	requestDuration.WithLabelValues("get_region_byid").Observe(time.Since(start).Seconds())
 	cancel()
 
 	if err != nil {
+		cmdFailedDuration.WithLabelValues("get_region_byid").Observe(time.Since(start).Seconds())
+		c.scheduleCheckLeader()
 		return nil, nil, errors.Trace(err)
 	}
 	return resp.GetRegion(), resp.GetLeader(), nil
