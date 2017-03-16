@@ -301,7 +301,7 @@ func (c *RaftCluster) GetStore(storeID uint64) (*metapb.Store, *StoreStatus, err
 		return nil, nil, errors.Errorf("invalid store ID %d, not found", storeID)
 	}
 
-	return store.Store, store.stats, nil
+	return store.Store, store.status, nil
 }
 
 func (c *RaftCluster) putStore(store *metapb.Store) error {
@@ -399,7 +399,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	}
 
 	store.State = metapb.StoreState_Tombstone
-	store.stats = new(StoreStatus)
+	store.status = newStoreStatus()
 	return cluster.putStore(store)
 }
 
@@ -451,7 +451,7 @@ func (c *RaftCluster) collectMetrics() {
 
 		// Store stats.
 		storageSize += s.storageSize()
-		storageCapacity += s.stats.GetCapacity()
+		storageCapacity += s.status.GetCapacity()
 
 		// Balance score.
 		minLeaderScore = math.Min(minLeaderScore, s.leaderScore())

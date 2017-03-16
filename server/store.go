@@ -34,33 +34,33 @@ const (
 // TODO: Export this to API directly.
 type storeInfo struct {
 	*metapb.Store
-	stats *StoreStatus
+	status *StoreStatus
 }
 
 func newStoreInfo(store *metapb.Store) *storeInfo {
 	return &storeInfo{
-		Store: store,
-		stats: newStoreStatus(),
+		Store:  store,
+		status: newStoreStatus(),
 	}
 }
 
 func (s *storeInfo) clone() *storeInfo {
 	return &storeInfo{
-		Store: proto.Clone(s.Store).(*metapb.Store),
-		stats: s.stats.clone(),
+		Store:  proto.Clone(s.Store).(*metapb.Store),
+		status: s.status.clone(),
 	}
 }
 
 func (s *storeInfo) block() {
-	s.stats.blocked = true
+	s.status.blocked = true
 }
 
 func (s *storeInfo) unblock() {
-	s.stats.blocked = false
+	s.status.blocked = false
 }
 
 func (s *storeInfo) isBlocked() bool {
-	return s.stats.blocked
+	return s.status.blocked
 }
 
 func (s *storeInfo) isUp() bool {
@@ -76,37 +76,37 @@ func (s *storeInfo) isTombstone() bool {
 }
 
 func (s *storeInfo) downTime() time.Duration {
-	return time.Since(s.stats.LastHeartbeatTS)
+	return time.Since(s.status.LastHeartbeatTS)
 }
 
 func (s *storeInfo) leaderCount() uint64 {
-	return uint64(s.stats.LeaderCount)
+	return uint64(s.status.LeaderCount)
 }
 
 func (s *storeInfo) leaderScore() float64 {
-	return float64(s.stats.LeaderCount)
+	return float64(s.status.LeaderCount)
 }
 
 func (s *storeInfo) regionCount() uint64 {
-	return uint64(s.stats.RegionCount)
+	return uint64(s.status.RegionCount)
 }
 
 func (s *storeInfo) regionScore() float64 {
-	if s.stats.GetCapacity() == 0 {
+	if s.status.GetCapacity() == 0 {
 		return 0
 	}
-	return float64(s.stats.RegionCount) / float64(s.stats.GetCapacity())
+	return float64(s.status.RegionCount) / float64(s.status.GetCapacity())
 }
 
 func (s *storeInfo) storageSize() uint64 {
-	return s.stats.GetCapacity() - s.stats.GetAvailable()
+	return s.status.GetCapacity() - s.status.GetAvailable()
 }
 
 func (s *storeInfo) storageRatio() float64 {
-	if s.stats.GetCapacity() == 0 {
+	if s.status.GetCapacity() == 0 {
 		return 0
 	}
-	return float64(s.storageSize()) / float64(s.stats.GetCapacity())
+	return float64(s.storageSize()) / float64(s.status.GetCapacity())
 }
 
 func (s *storeInfo) resourceCount(kind ResourceKind) uint64 {

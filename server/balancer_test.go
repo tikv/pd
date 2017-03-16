@@ -32,14 +32,14 @@ func newTestClusterInfo(cluster *clusterInfo) *testClusterInfo {
 func (c *testClusterInfo) setStoreUp(storeID uint64) {
 	store := c.getStore(storeID)
 	store.State = metapb.StoreState_Up
-	store.stats.LastHeartbeatTS = time.Now()
+	store.status.LastHeartbeatTS = time.Now()
 	c.putStore(store)
 }
 
 func (c *testClusterInfo) setStoreDown(storeID uint64) {
 	store := c.getStore(storeID)
 	store.State = metapb.StoreState_Up
-	store.stats.LastHeartbeatTS = time.Time{}
+	store.status.LastHeartbeatTS = time.Time{}
 	c.putStore(store)
 }
 
@@ -51,24 +51,24 @@ func (c *testClusterInfo) setStoreOffline(storeID uint64) {
 
 func (c *testClusterInfo) setStoreBusy(storeID uint64, busy bool) {
 	store := c.getStore(storeID)
-	store.stats.IsBusy = busy
-	store.stats.LastHeartbeatTS = time.Now()
+	store.status.IsBusy = busy
+	store.status.LastHeartbeatTS = time.Now()
 	c.putStore(store)
 }
 
 func (c *testClusterInfo) addLeaderStore(storeID uint64, leaderCount int) {
 	store := newStoreInfo(&metapb.Store{Id: storeID})
-	store.stats.LastHeartbeatTS = time.Now()
-	store.stats.LeaderCount = uint32(leaderCount)
+	store.status.LastHeartbeatTS = time.Now()
+	store.status.LeaderCount = uint32(leaderCount)
 	c.putStore(store)
 }
 
 func (c *testClusterInfo) addRegionStore(storeID uint64, regionCount int) {
 	store := newStoreInfo(&metapb.Store{Id: storeID})
-	store.stats.LastHeartbeatTS = time.Now()
-	store.stats.RegionCount = uint32(regionCount)
-	store.stats.Capacity = uint64(1024)
-	store.stats.Available = store.stats.Capacity
+	store.status.LastHeartbeatTS = time.Now()
+	store.status.RegionCount = uint32(regionCount)
+	store.status.Capacity = uint64(1024)
+	store.status.Available = store.status.Capacity
 	c.putStore(store)
 }
 
@@ -94,26 +94,26 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 
 func (c *testClusterInfo) updateLeaderCount(storeID uint64, leaderCount int) {
 	store := c.getStore(storeID)
-	store.stats.LeaderCount = uint32(leaderCount)
+	store.status.LeaderCount = uint32(leaderCount)
 	c.putStore(store)
 }
 
 func (c *testClusterInfo) updateRegionCount(storeID uint64, regionCount int) {
 	store := c.getStore(storeID)
-	store.stats.RegionCount = uint32(regionCount)
+	store.status.RegionCount = uint32(regionCount)
 	c.putStore(store)
 }
 
 func (c *testClusterInfo) updateSnapshotCount(storeID uint64, snapshotCount int) {
 	store := c.getStore(storeID)
-	store.stats.ApplyingSnapCount = uint32(snapshotCount)
+	store.status.ApplyingSnapCount = uint32(snapshotCount)
 	c.putStore(store)
 }
 
 func (c *testClusterInfo) updateStorageRatio(storeID uint64, storageRatio float64) {
 	store := c.getStore(storeID)
-	store.stats.Capacity = uint64(1024)
-	store.stats.Available = uint64(float64(store.stats.Capacity) * (1 - storageRatio))
+	store.status.Capacity = uint64(1024)
+	store.status.Available = uint64(float64(store.status.Capacity) * (1 - storageRatio))
 	c.putStore(store)
 }
 
