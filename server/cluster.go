@@ -163,6 +163,12 @@ func (s *Server) createRaftCluster() error {
 	return s.cluster.start()
 }
 
+func (s *Server) stopRaftCluster() {
+	// Reset connections and cluster.
+	s.closeAllConnections()
+	s.cluster.stop()
+}
+
 func makeStoreKey(clusterRootPath string, storeID uint64) string {
 	return strings.Join([]string{clusterRootPath, "s", fmt.Sprintf("%020d", storeID)}, "/")
 }

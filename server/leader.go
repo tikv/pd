@@ -182,23 +182,18 @@ func (s *Server) campaignLeader() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+	defer s.stopRaftCluster()
 
 	log.Debug("sync timestamp for tso")
 	if err = s.syncTimestamp(); err != nil {
 		return errors.Trace(err)
 	}
+	defer s.ts.Store(&atomicObject{
+		physical: zeroTime,
+	})
 
 	s.enableLeader(true)
-	defer func() {
-		s.enableLeader(false)
-		// Reset connections and cluster.
-		s.closeAllConnections()
-		s.cluster.stop()
-		// Clear ts.
-		s.ts.Store(&atomicObject{
-			physical: zeroTime,
-		})
-	}()
+	defer s.enableLeader(false)
 
 	log.Infof("PD cluster leader %s is ready to serve", s.Name())
 
