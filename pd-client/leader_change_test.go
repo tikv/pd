@@ -139,8 +139,8 @@ func (s *testLeaderChangeSuite) TestLeaderTransfer(c *C) {
 			default:
 			}
 
-			physical, logical, err := cli.GetTS()
-			if err == nil {
+			physical, logical, err1 := cli.GetTS()
+			if err1 == nil {
 				c.Assert(lastPhysical<<18+lastLogical, Less, physical<<18+logical)
 			}
 			time.Sleep(time.Millisecond)
