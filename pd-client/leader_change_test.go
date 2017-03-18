@@ -14,6 +14,9 @@
 package pd
 
 import (
+	"context"
+	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
@@ -34,12 +37,12 @@ func mustGetEtcdClient(c *C, svrs map[string]*server.Server) *clientv3.Client {
 	return nil
 }
 
-func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
-	cfgs := server.NewTestMultiConfig(3)
+func (s *testLeaderChangeSuite) prepareClusterN(c *C, n int) (svrs map[string]*server.Server, endpoints []string, closeFunc func()) {
+	cfgs := server.NewTestMultiConfig(n)
 
-	ch := make(chan *server.Server, 3)
+	ch := make(chan *server.Server, n)
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < n; i++ {
 		cfg := cfgs[i]
 
 		go func() {
@@ -50,13 +53,13 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		}()
 	}
 
-	svrs := make(map[string]*server.Server, 3)
-	for i := 0; i < 3; i++ {
+	svrs = make(map[string]*server.Server, n)
+	for i := 0; i < n; i++ {
 		svr := <-ch
 		svrs[svr.GetAddr()] = svr
 	}
 
-	endpoints := make([]string, 0, 3)
+	endpoints = make([]string, 0, n)
 	for _, svr := range svrs {
 		go svr.Run()
 		endpoints = append(endpoints, svr.GetEndpoints()...)
@@ -64,14 +67,20 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 
 	mustWaitLeader(c, svrs)
 
-	defer func() {
+	closeFunc = func() {
 		for _, svr := range svrs {
 			svr.Close()
 		}
 		for _, cfg := range cfgs {
 			cleanServer(cfg)
 		}
-	}()
+	}
+	return
+}
+
+func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
+	svrs, endpoints, closeFunc := s.prepareClusterN(c, 3)
+	defer closeFunc()
 
 	cli, err := NewClient(endpoints)
 	c.Assert(err, IsNil)
@@ -109,6 +118,49 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	c.Error("failed getTS from new leader after 10 seconds")
+}
+
+func (s *testLeaderChangeSuite) TestLeaderTransfer(c *C) {
+	servers, endpoints, closeFunc := s.prepareClusterN(c, 3)
+	defer closeFunc()
+
+	cli, err := NewClient(endpoints)
+	c.Assert(err, IsNil)
+	defer cli.Close()
+
+	quit := make(chan struct{})
+	lastPhysical, lastLogical, err := cli.GetTS()
+	c.Assert(err, IsNil)
+	go func() {
+		for {
+			select {
+			case <-quit:
+				return
+			default:
+			}
+
+			physical, logical, err := cli.GetTS()
+			if err == nil {
+				c.Assert(lastPhysical<<18+lastLogical, Less, physical<<18+logical)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+
+	etcdCli, err := clientv3.New(clientv3.Config{
+		Endpoints:   endpoints,
+		DialTimeout: time.Second,
+	})
+	c.Assert(err, IsNil)
+	leaderPath := filepath.Join("/pd", strconv.FormatUint(cli.GetClusterID(), 10), "leader")
+	for i := 0; i < 10; i++ {
+		mustWaitLeader(c, servers)
+		_, err = etcdCli.Delete(context.TODO(), leaderPath)
+		c.Assert(err, IsNil)
+		// Sleep to make sure all servers are notified and starts campaign.
+		time.Sleep(time.Second)
+	}
+	close(quit)
 }
 
 func mustConnectLeader(c *C, urls []string, leaderAddr string) {
