@@ -89,3 +89,35 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 		c.Assert(*sc, Equals, *sc1)
 	}
 }
+
+func (s *testConfigSuite) TestConfigReplication(c *C) {
+	numbers := []int{1, 3}
+	for _, num := range numbers {
+		cfgs, _, clean := mustNewCluster(c, num)
+		defer clean()
+
+		parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/replicate"}
+		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
+		resp, err := s.hc.Get(addr)
+		c.Assert(err, IsNil)
+		buf, err := ioutil.ReadAll(resp.Body)
+		c.Assert(err, IsNil)
+
+		rc := &server.ReplicationConfig{}
+		err = json.Unmarshal(buf, rc)
+		c.Assert(err, IsNil)
+
+		rc.MaxReplicas = 5
+		postData, err := json.Marshal(rc)
+		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/replicate"}
+		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))
+		resp, err = s.hc.Post(postAddr, "application/json", bytes.NewBuffer(postData))
+		c.Assert(err, IsNil)
+
+		resp, err = s.hc.Get(addr)
+		rc1 := &server.ReplicationConfig{}
+		json.NewDecoder(resp.Body).Decode(rc1)
+
+		c.Assert(*rc, DeepEquals, *rc1)
+	}
+}

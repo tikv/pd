@@ -247,6 +247,26 @@ func (c *Config) adjust() error {
 	return nil
 }
 
+func (c *Config) loadConfigInfo(kv *kv) error {
+	cfg, err := kv.loadConfig()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if cfg == nil {
+		return nil
+	}
+	c.Schedule = cfg.Schedule
+	c.Replication.MaxReplicas = cfg.Replication.MaxReplicas
+	return nil
+}
+
+func (c *Config) saveConfigInfo(kv *kv) error {
+	cfg := &Config{}
+	cfg.Schedule = c.Schedule
+	cfg.Replication.MaxReplicas = c.Replication.MaxReplicas
+	return kv.saveConfig(cfg)
+}
+
 func (c *Config) clone() *Config {
 	cfg := &Config{}
 	*cfg = *c
@@ -375,6 +395,10 @@ func (o *scheduleOption) GetRegionScheduleLimit() uint64 {
 
 func (o *scheduleOption) GetReplicaScheduleLimit() uint64 {
 	return o.load().ReplicaScheduleLimit
+}
+
+func (o *scheduleOption) persist(kv *kv) error {
+	return kv.saveScheduleOption(o)
 }
 
 // ParseUrls parse a string into multiple urls.

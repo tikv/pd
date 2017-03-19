@@ -181,6 +181,13 @@ func (s *Server) campaignLeader() error {
 	defer s.enableLeader(false)
 
 	// Try to create raft cluster.
+	isExist, err := s.kv.loadScheduleOption(s.scheduleOpt)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if !isExist {
+		s.kv.saveScheduleOption(s.scheduleOpt)
+	}
 	err = s.createRaftCluster()
 	if err != nil {
 		return errors.Trace(err)

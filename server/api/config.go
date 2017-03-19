@@ -40,7 +40,7 @@ func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, &h.svr.GetConfig().Schedule)
 }
 
-func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
 	config := &server.ScheduleConfig{}
 	err := readJSON(r.Body, config)
 	if err != nil {
@@ -49,5 +49,21 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.svr.SetScheduleConfig(*config)
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (h *confHandler) GetReplication(w http.ResponseWriter, r *http.Request) {
+	h.rd.JSON(w, http.StatusOK, &h.svr.GetConfig().Replication)
+}
+
+func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
+	config := &server.ReplicationConfig{}
+	err := readJSON(r.Body, config)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.svr.SetMaxReplicas(*config)
 	h.rd.JSON(w, http.StatusOK, nil)
 }
