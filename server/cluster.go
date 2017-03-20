@@ -135,8 +135,8 @@ func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
 	log.Infof("schedule config is updated: %+v, old: %+v", cfg, s.cfg.Schedule)
 }
 
-// SetMaxReplicas sets the  maximum replicas number
-func (s *Server) SetMaxReplicas(cfg ReplicationConfig) {
+// SetReplication sets the replication config
+func (s *Server) SetReplication(cfg ReplicationConfig) {
 	log.Info("Debug", cfg)
 	s.scheduleOpt.rep.store(&cfg)
 	err := s.scheduleOpt.persist(s.kv)

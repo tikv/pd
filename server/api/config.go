@@ -64,6 +64,6 @@ func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.svr.SetMaxReplicas(*config)
+	h.svr.SetReplication(*config)
 	h.rd.JSON(w, http.StatusOK, nil)
 }
