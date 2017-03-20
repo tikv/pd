@@ -137,11 +137,9 @@ func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
 
 // SetReplication sets the replication config
 func (s *Server) SetReplication(cfg ReplicationConfig) {
-	log.Info("Debug", cfg)
 	s.scheduleOpt.rep.store(&cfg)
 	err := s.scheduleOpt.persist(s.kv)
-	log.Info("Debug err", err)
-	log.Infof("replicas is updated: %+v, old: %+v", cfg, s.cfg.Replication)
+	log.Infof("replication is updated: %+v, old: %+v", cfg, s.cfg.Replication)
 }
 
 func (s *Server) getClusterRootPath() string {

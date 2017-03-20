@@ -186,7 +186,10 @@ func (s *Server) campaignLeader() error {
 		return errors.Trace(err)
 	}
 	if !isExist {
-		s.kv.saveScheduleOption(s.scheduleOpt)
+		err = s.kv.saveScheduleOption(s.scheduleOpt)
+		if err != nil {
+			return errors.Trace(err)
+		}
 	}
 	err = s.createRaftCluster()
 	if err != nil {
