@@ -171,12 +171,12 @@ func (s *Server) campaignLeader() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+	log.Debugf("campaign leader ok %s", s.Name())
+
 	err = s.reloadScheduleOption()
 	if err != nil {
 		return errors.Trace(err)
 	}
-	log.Debugf("campaign leader ok %s", s.Name())
-
 	// Try to create raft cluster.
 	err = s.createRaftCluster()
 	if err != nil {
