@@ -138,7 +138,7 @@ func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
 // SetReplication sets the replication config
 func (s *Server) SetReplication(cfg ReplicationConfig) {
 	s.scheduleOpt.rep.store(&cfg)
-	err := s.scheduleOpt.persist(s.kv)
+	s.scheduleOpt.persist(s.kv)
 	log.Infof("replication is updated: %+v, old: %+v", cfg, s.cfg.Replication)
 }
 

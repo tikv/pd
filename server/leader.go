@@ -175,12 +175,6 @@ func (s *Server) campaignLeader() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-
-	log.Debugf("campaign leader ok %s", s.Name())
-	s.enableLeader(true)
-	defer s.enableLeader(false)
-
-	// Try to create raft cluster.
 	isExist, err := s.kv.loadScheduleOption(s.scheduleOpt)
 	if err != nil {
 		return errors.Trace(err)
@@ -191,6 +185,12 @@ func (s *Server) campaignLeader() error {
 			return errors.Trace(err)
 		}
 	}
+
+	log.Debugf("campaign leader ok %s", s.Name())
+	s.enableLeader(true)
+	defer s.enableLeader(false)
+
+	// Try to create raft cluster.
 	err = s.createRaftCluster()
 	if err != nil {
 		return errors.Trace(err)
