@@ -311,11 +311,18 @@ func scheduleTransferLeader(cluster *clusterInfo, s Selector, filters ...Filter)
 	mostLeaderStore := s.SelectSource(stores, filters...)
 	leastLeaderStore := s.SelectTarget(stores, filters...)
 
-	if mostLeaderStore == nil && leastLeaderStore == nil {
+	var mostLeaderDistance, leastLeaderDistance float64
+	if mostLeaderStore != nil {
+		mostLeaderDistance = math.Abs(mostLeaderStore.leaderScore() - averageLeader)
+	}
+	if leastLeaderStore != nil {
+		leastLeaderDistance = math.Abs(leastLeaderStore.leaderScore() - averageLeader)
+	}
+	if mostLeaderDistance == 0 && leastLeaderDistance == 0 {
 		return nil, nil
 	}
 
-	if leastLeaderStore == nil || math.Abs(mostLeaderStore.leaderScore()-averageLeader) > math.Abs(leastLeaderStore.leaderScore()-averageLeader) {
+	if mostLeaderDistance > leastLeaderDistance {
 		// Transfer a leader out of mostLeaderStore.
 		region := cluster.randLeaderRegion(mostLeaderStore.GetId())
 		if region == nil {
