@@ -15,6 +15,7 @@ package server
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
@@ -297,25 +298,42 @@ func scheduleRemovePeer(cluster *clusterInfo, s Selector, filters ...Filter) (*r
 
 // scheduleTransferLeader schedules a region to transfer leader to the peer.
 func scheduleTransferLeader(cluster *clusterInfo, s Selector, filters ...Filter) (*regionInfo, *metapb.Peer) {
-	region := cluster.randomRegion()
+	stores := cluster.getStores()
+	if len(stores) == 0 {
+		return nil, nil
+	}
+
+	var averageLeader float64
+	for _, s := range stores {
+		averageLeader += float64(cluster.getStoreLeaderCount(s.GetId())) / float64(len(stores))
+	}
+
+	mostLeaderStore := s.SelectSource(stores, filters...)
+	leastLeaderStore := s.SelectTarget(stores, filters...)
+
+	if mostLeaderStore == nil && leastLeaderStore == nil {
+		return nil, nil
+	}
+
+	if leastLeaderStore == nil || math.Abs(mostLeaderStore.leaderScore()-averageLeader) > math.Abs(leastLeaderStore.leaderScore()-averageLeader) {
+		// Transfer a leader out of mostLeaderStore.
+		region := cluster.randLeaderRegion(mostLeaderStore.GetId())
+		if region == nil {
+			return nil, nil
+		}
+		targetStores := cluster.getFollowerStores(region)
+		target := s.SelectTarget(targetStores)
+		if target == nil {
+			return nil, nil
+		}
+
+		return region, region.GetStorePeer(target.GetId())
+	}
+
+	// Transfer a leader into leastLeaderStore.
+	region := cluster.randFollowerRegion(leastLeaderStore.GetId())
 	if region == nil {
 		return nil, nil
 	}
-
-	leaderStore := cluster.getStore(region.Leader.GetStoreId())
-	if leaderStore == nil {
-		return nil, nil
-	}
-	leaderStore = s.SelectSource([]*storeInfo{leaderStore}, filters...)
-	if leaderStore == nil {
-		return nil, nil
-	}
-
-	followerStores := cluster.getFollowerStores(region)
-	target := s.SelectTarget(followerStores, filters...)
-	if target == nil {
-		return nil, nil
-	}
-
-	return region, region.GetStorePeer(target.GetId())
+	return region, region.GetStorePeer(leastLeaderStore.GetId())
 }
