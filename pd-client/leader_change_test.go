@@ -14,7 +14,6 @@
 package pd
 
 import (
-	"context"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -23,6 +22,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testLeaderChangeSuite{})
@@ -121,7 +121,7 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 }
 
 func (s *testLeaderChangeSuite) TestLeaderTransfer(c *C) {
-	servers, endpoints, closeFunc := s.prepareClusterN(c, 3)
+	servers, endpoints, closeFunc := s.prepareClusterN(c, 2)
 	defer closeFunc()
 
 	cli, err := NewClient(endpoints)
@@ -142,6 +142,7 @@ func (s *testLeaderChangeSuite) TestLeaderTransfer(c *C) {
 			physical, logical, err1 := cli.GetTS()
 			if err1 == nil {
 				c.Assert(lastPhysical<<18+lastLogical, Less, physical<<18+logical)
+				lastPhysical, lastLogical = physical, logical
 			}
 			time.Sleep(time.Millisecond)
 		}
