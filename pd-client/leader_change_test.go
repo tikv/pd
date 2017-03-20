@@ -86,8 +86,9 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	c.Assert(err, IsNil)
 	defer cli.Close()
 
-	p1, l1, err := cli.GetTS()
+	physical, logical, err := cli.GetTS()
 	c.Assert(err, IsNil)
+	lastTS := s.makeTS(physical, logical)
 
 	leader, err := getLeader(endpoints)
 	c.Assert(err, IsNil)
@@ -110,9 +111,10 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	c.Assert(changed, IsTrue)
 
 	for i := 0; i < 20; i++ {
-		p2, l2, err := cli.GetTS()
+		physical, logical, err := cli.GetTS()
 		if err == nil {
-			c.Assert(p1<<18+l1, Less, p2<<18+l2)
+			ts := s.makeTS(physical, logical)
+			c.Assert(lastTS, Less, ts)
 			return
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -129,8 +131,9 @@ func (s *testLeaderChangeSuite) TestLeaderTransfer(c *C) {
 	defer cli.Close()
 
 	quit := make(chan struct{})
-	lastPhysical, lastLogical, err := cli.GetTS()
+	physical, logical, err := cli.GetTS()
 	c.Assert(err, IsNil)
+	lastTS := s.makeTS(physical, logical)
 	go func() {
 		for {
 			select {
@@ -141,8 +144,9 @@ func (s *testLeaderChangeSuite) TestLeaderTransfer(c *C) {
 
 			physical, logical, err1 := cli.GetTS()
 			if err1 == nil {
-				c.Assert(lastPhysical<<18+lastLogical, Less, physical<<18+logical)
-				lastPhysical, lastLogical = physical, logical
+				ts := s.makeTS(physical, logical)
+				c.Assert(lastTS, Less, ts)
+				lastTS = ts
 			}
 			time.Sleep(time.Millisecond)
 		}
@@ -162,6 +166,10 @@ func (s *testLeaderChangeSuite) TestLeaderTransfer(c *C) {
 		time.Sleep(time.Second)
 	}
 	close(quit)
+}
+
+func (s *testLeaderChangeSuite) makeTS(physical, logical int64) uint64 {
+	return uint64(physical<<18 + logical)
 }
 
 func mustConnectLeader(c *C, urls []string, leaderAddr string) {
