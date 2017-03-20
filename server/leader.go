@@ -269,11 +269,8 @@ func (s *Server) reloadScheduleOption() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if !isExist {
-		err = s.kv.saveScheduleOption(s.scheduleOpt)
-		if err != nil {
-			return errors.Trace(err)
-		}
+	if isExist {
+		return nil
 	}
-	return nil
+	return s.kv.saveScheduleOption(s.scheduleOpt)
 }

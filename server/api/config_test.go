@@ -14,7 +14,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"io/ioutil"
 	"math/rand"
@@ -75,9 +74,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 		postData, err := json.Marshal(sc)
 		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config"}
 		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))
-		resp, err = s.hc.Post(postAddr, "application/json", bytes.NewBuffer(postData))
-		ioutil.ReadAll(resp.Body)
-		resp.Body.Close()
+		err = postJSON(s.hc, postAddr, postData)
 		c.Assert(err, IsNil)
 
 		resp, err = s.hc.Get(addr)
@@ -107,9 +104,7 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 		postData, err := json.Marshal(rc)
 		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/replicate"}
 		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))
-		resp, err = s.hc.Post(postAddr, "application/json", bytes.NewBuffer(postData))
-		ioutil.ReadAll(resp.Body)
-		resp.Body.Close()
+		err = postJSON(s.hc, postAddr, postData)
 		c.Assert(err, IsNil)
 
 		resp, err = s.hc.Get(addr)
