@@ -68,23 +68,21 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
-		buf, err := ioutil.ReadAll(resp.Body)
-		c.Assert(err, IsNil)
-
 		sc := &server.ScheduleConfig{}
-		err = json.Unmarshal(buf, sc)
-		c.Assert(err, IsNil)
+		readJSON(resp.Body, sc)
 
 		sc.MaxStoreDownTime.Duration = time.Second
 		postData, err := json.Marshal(sc)
 		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config"}
 		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))
 		resp, err = s.hc.Post(postAddr, "application/json", bytes.NewBuffer(postData))
+		ioutil.ReadAll(resp.Body)
+		resp.Body.Close()
 		c.Assert(err, IsNil)
 
 		resp, err = s.hc.Get(addr)
 		sc1 := &server.ScheduleConfig{}
-		json.NewDecoder(resp.Body).Decode(sc1)
+		readJSON(resp.Body, sc1)
 
 		c.Assert(*sc, Equals, *sc1)
 	}
@@ -100,11 +98,9 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
-		buf, err := ioutil.ReadAll(resp.Body)
-		c.Assert(err, IsNil)
 
 		rc := &server.ReplicationConfig{}
-		err = json.Unmarshal(buf, rc)
+		err = readJSON(resp.Body, rc)
 		c.Assert(err, IsNil)
 
 		rc.MaxReplicas = 5
@@ -112,11 +108,13 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/replicate"}
 		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))
 		resp, err = s.hc.Post(postAddr, "application/json", bytes.NewBuffer(postData))
+		ioutil.ReadAll(resp.Body)
+		resp.Body.Close()
 		c.Assert(err, IsNil)
 
 		resp, err = s.hc.Get(addr)
 		rc1 := &server.ReplicationConfig{}
-		json.NewDecoder(resp.Body).Decode(rc1)
+		err = readJSON(resp.Body, rc1)
 
 		c.Assert(*rc, DeepEquals, *rc1)
 	}
