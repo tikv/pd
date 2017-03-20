@@ -17,19 +17,58 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 
+	"github.com/pingcap/pd/server"
 	"github.com/spf13/cobra"
 )
+
+const (
+	scheduleOpt = iota
+	replicateOpt
+)
+
+type field struct {
+	tag  string
+	typ  reflect.Kind
+	kind int
+}
 
 var (
 	configPrefix    = "pd/api/v1/config"
 	schedulePrefix  = "pd/api/v1/config/schedule"
 	replicatePrefix = "pd/api/v1/config/replicate"
+	optionRel       = make(map[string]field)
 )
+
+func init() {
+	s := server.ScheduleConfig{}
+	r := server.ReplicationConfig{}
+	fs := dumpConfig(s)
+	for _, f := range fs {
+		f.kind = scheduleOpt
+		optionRel[f.tag] = f
+	}
+	fs = dumpConfig(r)
+	for _, f := range fs {
+		f.kind = replicateOpt
+		optionRel[f.tag] = f
+	}
+}
+
+func dumpConfig(v interface{}) (ret []field) {
+	var f field
+	val := reflect.ValueOf(v)
+	for i := 0; i < val.Type().NumField(); i++ {
+		f.tag = val.Type().Field(i).Tag.Get("json")
+		f.typ = val.Type().Field(i).Type.Kind()
+		ret = append(ret, f)
+	}
+	return ret
+}
 
 // NewConfigCommand return a config subcommand of rootCmd
 func NewConfigCommand() *cobra.Command {
@@ -70,17 +109,6 @@ func NewSetConfigCommand() *cobra.Command {
 		Short: "set the option with value",
 		Run:   setConfigCommandFunc,
 	}
-	sc.AddCommand(NewSetReplicationCommand())
-	return sc
-}
-
-// NewSetReplicationCommand return  a set replication subcommand of setCmd
-func NewSetReplicationCommand() *cobra.Command {
-	sc := &cobra.Command{
-		Use:   "replicate <option> <value>",
-		Short: "set the replication option with value",
-		Run:   setReplicateConfigCommandFunc,
-	}
 	return sc
 }
 
@@ -107,92 +135,69 @@ func setConfigCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println(cmd.UsageString())
 		return
 	}
+	var (
+		value interface{}
+		path  string
+	)
+	opt, val := args[0], args[1]
 
-	url := getAddressFromCmd(cmd, schedulePrefix)
-	var value interface{}
+	f, ok := optionRel[opt]
+	if !ok {
+		fmt.Println("Failed to set config: unknow option")
+		return
+	}
+	switch f.kind {
+	case scheduleOpt:
+		path = schedulePrefix
+	case replicateOpt:
+		path = replicatePrefix
+	}
+
+	r, err := doRequest(cmd, path, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to set config: %s", err)
+		return
+	}
 	data := make(map[string]interface{})
-
-	r, err := http.Get(url)
-	if err != nil {
-		fmt.Printf("Failed to set config:[%s]\n", err)
-		return
-	}
-	if r.StatusCode != http.StatusOK {
-		printResponseError(r)
-		r.Body.Close()
-		return
-	}
-
-	json.NewDecoder(r.Body).Decode(&data)
-	r.Body.Close()
-	value, err = strconv.ParseFloat(args[1], 64)
-	if err != nil {
-		value = args[1]
-	}
-	data[args[0]] = value
-
-	req, err := json.Marshal(data)
-	if err != nil {
-		fmt.Printf("Failed to set config:[%s]\n", err)
-		return
-	}
-
-	url = getAddressFromCmd(cmd, configPrefix)
-	r, err = http.Post(url, "application/json", bytes.NewBuffer(req))
-	if err != nil {
-		fmt.Printf("Failed to set config:[%s]\n", err)
-	}
-	defer r.Body.Close()
-	if r.StatusCode == http.StatusOK {
-		fmt.Println("Success!")
-	} else {
-		printResponseError(r)
-	}
-}
-
-func setReplicateConfigCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 2 {
-		fmt.Println(cmd.UsageString())
-		return
-	}
-
-	var value interface{}
-	data := make(map[string]interface{})
-	r, err := doRequest(cmd, replicatePrefix, http.MethodGet)
-	if err != nil {
-		fmt.Printf("Failed to set replication config:[%s]\n", err)
-		return
-	}
 	err = json.Unmarshal([]byte(r), &data)
 	if err != nil {
-		fmt.Printf("Failed to set replication config:[%s]\n", err)
+		fmt.Printf("Failed to set config: %s", err)
 		return
 	}
-	value, err = strconv.ParseFloat(args[1], 64)
-	if err != nil {
-		value = args[1]
-		if strings.Contains(args[1], ",") {
-			value = strings.Split(args[1], ",")
+	switch k := f.typ; true {
+	case k <= reflect.Float64:
+		value, err = strconv.ParseFloat(val, 64)
+		if err != nil {
+			fmt.Println("Failed to set config: unsupport the option type %s", k)
+			return
 		}
+	case k == reflect.Slice:
+		value = []string{val}
+		if strings.Contains(val, ",") {
+			value = strings.Split(val, ",")
+		}
+	default:
+		value = val
 	}
-	data[args[0]] = value
-	reqData, err := json.Marshal(&data)
+	data[opt] = value
+
+	reqData, err := json.Marshal(data)
 	if err != nil {
-		fmt.Printf("Failed to set replication config:[%s]\n", err)
+		fmt.Printf("Failed to set config: %s", err)
 		return
 	}
-	url := getAddressFromCmd(cmd, replicatePrefix)
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(reqData))
+	if path == schedulePrefix {
+		path = configPrefix
+	}
+	req, err := getRequest(cmd, path, http.MethodPost, "application/json", bytes.NewBuffer(reqData))
 	if err != nil {
-		fmt.Printf("Failed to set replication config:[%s]\n", err)
+		fmt.Printf("Failed to set config: %s", err)
+		return
 	}
-	defer func() {
-		ioutil.ReadAll(resp.Body)
-		resp.Body.Close()
-	}()
-	if resp.StatusCode == http.StatusOK {
-		fmt.Println("Success!")
-	} else {
-		printResponseError(resp)
+	_, err = dail(req)
+	if err != nil {
+		fmt.Printf("Failed to set config: %s", err)
+		return
 	}
+	fmt.Println("Success!")
 }
