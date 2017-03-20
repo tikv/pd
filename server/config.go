@@ -247,26 +247,6 @@ func (c *Config) adjust() error {
 	return nil
 }
 
-func (c *Config) loadConfigInfo(kv *kv) error {
-	cfg, err := kv.loadConfig()
-	if err != nil {
-		return errors.Trace(err)
-	}
-	if cfg == nil {
-		return nil
-	}
-	c.Schedule = cfg.Schedule
-	c.Replication.MaxReplicas = cfg.Replication.MaxReplicas
-	return nil
-}
-
-func (c *Config) saveConfigInfo(kv *kv) error {
-	cfg := &Config{}
-	cfg.Schedule = c.Schedule
-	cfg.Replication.MaxReplicas = c.Replication.MaxReplicas
-	return kv.saveConfig(cfg)
-}
-
 func (c *Config) clone() *Config {
 	cfg := &Config{}
 	*cfg = *c

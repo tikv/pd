@@ -111,6 +111,7 @@ func CreateServer(cfg *Config) *Server {
 
 	s := &Server{
 		cfg:           cfg,
+		scheduleOpt:   newScheduleOption(cfg),
 		isLeaderValue: 0,
 		conns:         make(map[*conn]struct{}),
 		closed:        1,
@@ -196,7 +197,6 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	s.idAlloc = &idAllocator{s: s}
 	s.kv = newKV(s)
-	s.scheduleOpt = newScheduleOption(s.cfg)
 	s.cluster = newRaftCluster(s, s.clusterID)
 
 	// Server has started.
