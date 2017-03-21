@@ -87,7 +87,7 @@ func (s *Server) Bootstrap(ctx context.Context, request *pdpb.BootstrapRequest) 
 	cluster := s.GetRaftCluster()
 	if cluster != nil {
 		err := &pdpb.Error{
-			Type:    pdpb.ErrorType_NOT_BOOTSTRAPPED,
+			Type:    pdpb.ErrorType_UNKNOWN,
 			Message: "cluster is already bootstrapped",
 		}
 		return &pdpb.BootstrapResponse{
