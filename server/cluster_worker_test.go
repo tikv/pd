@@ -178,7 +178,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 
 	s.svr, s.cleanup = newTestServer(c)
 	s.svr.cfg.nextRetryDelay = 50 * time.Millisecond
-	s.svr.scheduleOpt.SetMaxReplicas(5)
+	s.svr.scheduleOpt.SetMaxReplicas(1)
 
 	s.client = s.svr.client
 	s.clusterID = s.svr.clusterID
@@ -353,8 +353,6 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 
-	s.svr.scheduleOpt.SetMaxReplicas(1)
-
 	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 	conn, err := rpcConnect(leaderPD.GetAddr())
 	c.Assert(err, IsNil)
@@ -408,6 +406,8 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
+	s.svr.scheduleOpt.SetMaxReplicas(5)
+
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 
@@ -444,6 +444,8 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
+	s.svr.scheduleOpt.SetMaxReplicas(5)
+
 	opt := s.svr.scheduleOpt
 
 	cluster := s.svr.GetRaftCluster()
@@ -503,10 +505,10 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
+	s.svr.scheduleOpt.SetMaxReplicas(2)
+
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
-
-	s.svr.scheduleOpt.SetMaxReplicas(2)
 
 	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 	conn, err := rpcConnect(leaderPD.GetAddr())

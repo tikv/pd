@@ -386,6 +386,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	}
 
 	store.State = metapb.StoreState_Offline
+	log.Warnf("[store %d] store %s has been Offline", store.GetId(), store.GetAddress())
 	return cluster.putStore(store)
 }
 
@@ -418,6 +419,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 
 	store.State = metapb.StoreState_Tombstone
 	store.status = newStoreStatus()
+	log.Warnf("[store %d] store %s has been Tombstone", store.GetId(), store.GetAddress())
 	return cluster.putStore(store)
 }
 
