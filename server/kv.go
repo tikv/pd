@@ -90,11 +90,14 @@ func (kv *kv) saveRegion(region *metapb.Region) error {
 }
 
 func (kv *kv) loadScheduleOption(opt *scheduleOption) (bool, error) {
-	cfg, err := kv.loadConfig()
+	cfg := &Config{}
+	cfg.Schedule = *opt.load()
+	cfg.Replication = *opt.rep.load()
+	isExist, err := kv.loadConfig(cfg)
 	if err != nil {
 		return false, errors.Trace(err)
 	}
-	if cfg == nil {
+	if !isExist {
 		return false, nil
 	}
 	opt.store(&cfg.Schedule)
@@ -117,20 +120,19 @@ func (kv *kv) saveConfig(cfg *Config) error {
 	return kv.save(kv.configPath, string(value))
 }
 
-func (kv *kv) loadConfig() (*Config, error) {
+func (kv *kv) loadConfig(cfg *Config) (bool, error) {
 	value, err := kv.load(kv.configPath)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return false, errors.Trace(err)
 	}
 	if value == nil {
-		return nil, nil
+		return false, nil
 	}
-	cfg := &Config{}
 	err = json.Unmarshal(value, cfg)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return false, errors.Trace(err)
 	}
-	return cfg, nil
+	return true, nil
 }
 
 func (kv *kv) loadStores(stores *storesInfo, rangeLimit int64) error {
