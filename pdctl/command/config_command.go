@@ -186,9 +186,6 @@ func setConfigCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Printf("Failed to set config: %s", err)
 		return
 	}
-	if path == schedulePrefix {
-		path = configPrefix
-	}
 	req, err := getRequest(cmd, path, http.MethodPost, "application/json", bytes.NewBuffer(reqData))
 	if err != nil {
 		fmt.Printf("Failed to set config: %s", err)

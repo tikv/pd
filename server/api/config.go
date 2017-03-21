@@ -40,7 +40,7 @@ func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, &h.svr.GetConfig().Schedule)
 }
 
-func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
 	config := &server.ScheduleConfig{}
 	err := readJSON(r.Body, config)
 	if err != nil {
