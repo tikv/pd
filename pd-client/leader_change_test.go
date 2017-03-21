@@ -78,6 +78,33 @@ func (s *testLeaderChangeSuite) prepareClusterN(c *C, n int) (svrs map[string]*s
 	return
 }
 
+func (s *testLeaderChangeSuite) TestLeaderConfigChange(c *C) {
+	svrs, endpoints, closeFunc := s.prepareClusterN(c, 3)
+	defer closeFunc()
+
+	leader, err := getLeader(endpoints)
+	c.Assert(err, IsNil)
+	mustConnectLeader(c, endpoints, leader.GetAddr())
+
+	r := server.ReplicationConfig{MaxReplicas: 5}
+	svrs[leader.GetAddr()].SetReplication(r)
+	svrs[leader.GetAddr()].Close()
+	// wait leader changes
+	changed := false
+	for i := 0; i < 20; i++ {
+		newLeader, _ := getLeader(endpoints)
+		if newLeader != nil && newLeader.GetAddr() != leader.GetAddr() {
+			mustConnectLeader(c, endpoints, newLeader.GetAddr())
+			changed = true
+			nr := svrs[newLeader.GetAddr()].GetConfig().Replication.MaxReplicas
+			c.Assert(nr, Equals, uint64(5))
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	c.Assert(changed, IsTrue)
+}
+
 func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	svrs, endpoints, closeFunc := s.prepareClusterN(c, 3)
 	defer closeFunc()
