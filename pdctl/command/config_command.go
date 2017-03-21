@@ -164,14 +164,14 @@ func setConfigCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Printf("Failed to set config: %s", err)
 		return
 	}
-	switch k := f.typ; true {
-	case k <= reflect.Float64:
+	switch f.typ {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Float32, reflect.Float64:
 		value, err = strconv.ParseFloat(val, 64)
 		if err != nil {
-			fmt.Printf("Failed to set config: unsupport the option type %s", k)
+			fmt.Printf("Failed to set config: %s", err)
 			return
 		}
-	case k == reflect.Slice:
+	case reflect.Slice:
 		value = []string{val}
 		if strings.Contains(val, ",") {
 			value = strings.Split(val, ",")
