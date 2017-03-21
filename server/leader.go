@@ -42,10 +42,6 @@ func (s *Server) enableLeader(b bool) {
 	}
 
 	atomic.StoreInt64(&s.isLeaderValue, value)
-
-	// Reset connections and cluster.
-	s.closeAllConnections()
-	s.cluster.stop()
 }
 
 func (s *Server) getLeaderPath() string {
@@ -177,19 +173,24 @@ func (s *Server) campaignLeader() error {
 	}
 
 	log.Debugf("campaign leader ok %s", s.Name())
-	s.enableLeader(true)
-	defer s.enableLeader(false)
 
 	// Try to create raft cluster.
 	err = s.createRaftCluster()
 	if err != nil {
 		return errors.Trace(err)
 	}
+	defer s.stopRaftCluster()
 
 	log.Debug("sync timestamp for tso")
 	if err = s.syncTimestamp(); err != nil {
 		return errors.Trace(err)
 	}
+	defer s.ts.Store(&atomicObject{
+		physical: zeroTime,
+	})
+
+	s.enableLeader(true)
+	defer s.enableLeader(false)
 
 	log.Infof("PD cluster leader %s is ready to serve", s.Name())
 
