@@ -168,7 +168,7 @@ func setConfigCommandFunc(cmd *cobra.Command, args []string) {
 	case k <= reflect.Float64:
 		value, err = strconv.ParseFloat(val, 64)
 		if err != nil {
-			fmt.Println("Failed to set config: unsupport the option type %s", k)
+			fmt.Printf("Failed to set config: unsupport the option type %s", k)
 			return
 		}
 	case k == reflect.Slice:
