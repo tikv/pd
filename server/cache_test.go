@@ -291,13 +291,11 @@ func (s *testClusterInfoSuite) testStoreHeartbeat(c *C, cache *clusterInfo) {
 		c.Assert(cache.getStoreCount(), Equals, int(i+1))
 
 		stats := store.status
-		c.Assert(stats.LeaderCount, Equals, uint32(0))
 		c.Assert(stats.LastHeartbeatTS.IsZero(), IsTrue)
 
 		c.Assert(cache.handleStoreHeartbeat(storeStats), IsNil)
 
 		stats = cache.getStore(store.GetId()).status
-		c.Assert(stats.LeaderCount, Equals, uint32(1))
 		c.Assert(stats.LastHeartbeatTS.IsZero(), IsFalse)
 	}
 

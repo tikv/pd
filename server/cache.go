@@ -551,11 +551,19 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	}
 
 	store.status.StoreStats = proto.Clone(stats).(*pdpb.StoreStats)
-	store.status.LeaderCount = uint32(c.regions.getStoreLeaderCount(storeID))
 	store.status.LastHeartbeatTS = time.Now()
 
 	c.stores.setStore(store)
 	return nil
+}
+
+func (c *clusterInfo) updateStoreStatus(id uint64) {
+	store := c.stores.getStore(id)
+	if store == nil {
+		return
+	}
+	store.status.LeaderCount = c.regions.getStoreLeaderCount(store.GetId())
+	store.status.RegionCount = c.regions.getStoreRegionCount(store.GetId())
 }
 
 // handleRegionHeartbeat updates the region information.
@@ -566,35 +574,62 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 	region = region.clone()
 	origin := c.regions.getRegion(region.GetId())
 
-	// Region does not exist, add it.
+	// Save to KV if meta is updated.
+	// Save to cache if meta or leader is updated, or contains any down/pending peer.
+	var saveKV, saveCache bool
 	if origin == nil {
 		log.Infof("[region %d] Insert new region {%v}", region.GetId(), region)
-		return c.putRegionLocked(region)
+		saveKV, saveCache = true, true
+	} else {
+		r := region.GetRegionEpoch()
+		o := origin.GetRegionEpoch()
+		// Region meta is stale, return an error.
+		if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
+			return errors.Trace(errRegionIsStale(region.Region, origin.Region))
+		}
+		if r.GetVersion() > o.GetVersion() {
+			log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetId(), diffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion())
+			saveKV, saveCache = true, true
+		}
+		if r.GetConfVer() > o.GetConfVer() {
+			log.Infof("[region %d] %s, ConfVer changed from {%d} to {%d}", region.GetId(), diffRegionPeersInfo(origin, region), o.GetConfVer(), r.GetConfVer())
+			saveKV, saveCache = true, true
+		}
+		if region.Leader.GetId() != origin.Leader.GetId() {
+			log.Infof("[region %d] Leader changed from {%v} to {%v}", region.GetId(), origin.GetPeer(origin.Leader.GetId()), region.GetPeer(region.Leader.GetId()))
+			saveCache = true
+		}
+		if len(region.DownPeers) > 0 || len(region.PendingPeers) > 0 {
+			saveCache = true
+		}
+		if len(origin.DownPeers) > 0 || len(origin.DownPeers) > 0 {
+			saveCache = true
+		}
 	}
 
-	r := region.GetRegionEpoch()
-	o := origin.GetRegionEpoch()
-
-	// Region meta is stale, return an error.
-	if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
-		return errors.Trace(errRegionIsStale(region.Region, origin.Region))
+	if saveKV && c.kv != nil {
+		if err := c.kv.saveRegion(region.Region); err != nil {
+			return errors.Trace(err)
+		}
 	}
 
-	// Region meta is updated, update kv and cache.
-	if r.GetVersion() > o.GetVersion() {
-		log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetId(), diffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion())
-		return c.putRegionLocked(region)
-	}
-	if r.GetConfVer() > o.GetConfVer() {
-		log.Infof("[region %d] %s, ConfVer changed from {%d} to {%d}", region.GetId(), diffRegionPeersInfo(origin, region), o.GetConfVer(), r.GetConfVer())
-		return c.putRegionLocked(region)
+	if saveCache {
+		c.regions.setRegion(region)
+
+		// Update related stores.
+		oldStores := make(map[uint64]struct{})
+		if origin != nil {
+			for _, p := range origin.Peers {
+				c.updateStoreStatus(p.GetStoreId())
+				oldStores[p.GetStoreId()] = struct{}{}
+			}
+		}
+		for _, p := range region.Peers {
+			if _, ok := oldStores[p.GetStoreId()]; !ok {
+				c.updateStoreStatus(p.GetStoreId())
+			}
+		}
 	}
 
-	if region.Leader.GetId() != origin.Leader.GetId() {
-		log.Infof("[region %d] Leader changed from {%v} to {%v}", region.GetId(), origin.GetPeer(origin.Leader.GetId()), region.GetPeer(region.Leader.GetId()))
-	}
-
-	// Region meta is the same, update cache only.
-	c.regions.setRegion(region)
 	return nil
 }
