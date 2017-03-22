@@ -315,7 +315,13 @@ func (s *testClusterInfoSuite) testStoreHeartbeat(c *C, cache *clusterInfo) {
 
 func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 	n, np := uint64(3), uint64(3)
+
+	stores := newTestStores(3)
 	regions := newTestRegions(n, np)
+
+	for _, store := range stores {
+		cache.putStore(store)
+	}
 
 	for i, region := range regions {
 		// region does not exist.
@@ -385,6 +391,11 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 			peer := region.GetStorePeer(store.GetId())
 			c.Assert(peer.GetId(), Not(Equals), region.Leader.GetId())
 		}
+	}
+
+	for _, store := range cache.stores.getStores() {
+		c.Assert(store.status.LeaderCount, Equals, cache.regions.getStoreLeaderCount(store.GetId()))
+		c.Assert(store.status.RegionCount, Equals, cache.regions.getStoreRegionCount(store.GetId()))
 	}
 
 	// Test with kv.

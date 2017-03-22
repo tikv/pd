@@ -102,6 +102,18 @@ func (s *storesInfo) getStoreCount() int {
 	return len(s.stores)
 }
 
+func (s *storesInfo) setLeaderCount(storeID uint64, leaderCount int) {
+	if store, ok := s.stores[storeID]; ok {
+		store.status.LeaderCount = leaderCount
+	}
+}
+
+func (s *storesInfo) setRegionCount(storeID uint64, regionCount int) {
+	if store, ok := s.stores[storeID]; ok {
+		store.status.RegionCount = regionCount
+	}
+}
+
 // regionMap wraps a map[uint64]*regionInfo and supports randomly pick a region.
 type regionMap struct {
 	m   map[uint64]*regionEntry
@@ -558,12 +570,8 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 }
 
 func (c *clusterInfo) updateStoreStatus(id uint64) {
-	store := c.stores.getStore(id)
-	if store == nil {
-		return
-	}
-	store.status.LeaderCount = c.regions.getStoreLeaderCount(store.GetId())
-	store.status.RegionCount = c.regions.getStoreRegionCount(store.GetId())
+	c.stores.setLeaderCount(id, c.regions.getStoreLeaderCount(id))
+	c.stores.setRegionCount(id, c.regions.getStoreRegionCount(id))
 }
 
 // handleRegionHeartbeat updates the region information.
@@ -617,17 +625,13 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 		c.regions.setRegion(region)
 
 		// Update related stores.
-		oldStores := make(map[uint64]struct{})
 		if origin != nil {
 			for _, p := range origin.Peers {
 				c.updateStoreStatus(p.GetStoreId())
-				oldStores[p.GetStoreId()] = struct{}{}
 			}
 		}
 		for _, p := range region.Peers {
-			if _, ok := oldStores[p.GetStoreId()]; !ok {
-				c.updateStoreStatus(p.GetStoreId())
-			}
+			c.updateStoreStatus(p.GetStoreId())
 		}
 	}
 
