@@ -33,15 +33,15 @@ type metaStore struct {
 }
 
 type storeStatus struct {
-	StoreID            uint64            `json:"store_id"`
-	Capacity           typeutil.ByteSize `json:"capacity"`
-	Available          typeutil.ByteSize `json:"available"`
-	LeaderCount        uint32            `json:"leader_count"`
-	RegionCount        uint32            `json:"region_count"`
-	SendingSnapCount   uint32            `json:"sending_snap_count"`
-	ReceivingSnapCount uint32            `json:"receiving_snap_count"`
-	ApplyingSnapCount  uint32            `json:"applying_snap_count"`
-	IsBusy             bool              `json:"is_busy"`
+	StoreID            uint64              `json:"store_id"`
+	Capacity           typeutil.ByteSize   `json:"capacity"`
+	Available          typeutil.ByteSize   `json:"available"`
+	LeaderCount        uint32              `json:"leader_count"`
+	RegionCount        uint32              `json:"region_count"`
+	SendingSnapCount   uint32              `json:"sending_snap_count"`
+	ReceivingSnapCount uint32              `json:"receiving_snap_count"`
+	ApplyingSnapCount  uint32              `json:"applying_snap_count"`
+	IsBusy             typeutil.StoreStatu `json:"is_busy"`
 
 	StartTS         time.Time         `json:"start_ts"`
 	LastHeartbeatTS time.Time         `json:"last_heartbeat_ts"`
@@ -68,7 +68,7 @@ func newStoreInfo(store *metapb.Store, status *server.StoreStatus) *storeInfo {
 			SendingSnapCount:   status.SendingSnapCount,
 			ReceivingSnapCount: status.ReceivingSnapCount,
 			ApplyingSnapCount:  status.ApplyingSnapCount,
-			IsBusy:             status.IsBusy,
+			IsBusy:             typeutil.StoreStatu(status.IsBusy),
 			StartTS:            status.GetStartTS(),
 			LastHeartbeatTS:    status.LastHeartbeatTS,
 			Uptime:             typeutil.NewDuration(status.GetUptime()),
