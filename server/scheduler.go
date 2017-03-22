@@ -249,6 +249,10 @@ func newRemovePeer(region *regionInfo, peer *metapb.Peer) Operator {
 func newTransferPeer(region *regionInfo, oldPeer, newPeer *metapb.Peer) Operator {
 	addPeer := newAddPeerOperator(region.GetId(), newPeer)
 	removePeer := newRemovePeerOperator(region.GetId(), oldPeer)
+	if region.Leader != nil && region.Leader.GetId() == oldPeer.GetId() {
+		transferLeader := newTransferLeaderOperator(region.GetId(), region.Leader, newPeer)
+		return newRegionOperator(region, addPeer, transferLeader, removePeer)
+	}
 	return newRegionOperator(region, addPeer, removePeer)
 }
 

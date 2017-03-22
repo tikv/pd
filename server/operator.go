@@ -88,12 +88,6 @@ func newRegionOperator(region *regionInfo, ops ...Operator) *regionOperator {
 	if len(ops) == 0 {
 		log.Fatalf("[region %d] new region operator with no ops", region.GetId())
 	}
-	kind := ops[0].GetResourceKind()
-	for _, op := range ops {
-		if op.GetResourceKind() != kind {
-			log.Fatalf("[region %d] new region operator with ops of different kinds %v and %v", region.GetId(), op.GetResourceKind(), kind)
-		}
-	}
 
 	return &regionOperator{
 		Region: region,
