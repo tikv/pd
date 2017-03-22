@@ -308,11 +308,11 @@ type ReplicationConfig struct {
 	// The placement priorities is implied by the order of label keys.
 	// For example, ["zone", "rack"] means that we should place replicas to
 	// different zones first, then to different racks if we don't have enough zones.
-	LocationLabels []string `toml:"location-labels,omitempty" json:"location-labels"`
+	LocationLabels typeutil.StringSlice `toml:"location-labels,omitempty" json:"location-labels"`
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {
-	locationLabels := make([]string, 0, len(c.LocationLabels))
+	locationLabels := make(typeutil.StringSlice, 0, len(c.LocationLabels))
 	copy(locationLabels, c.LocationLabels)
 	return &ReplicationConfig{
 		MaxReplicas:    c.MaxReplicas,

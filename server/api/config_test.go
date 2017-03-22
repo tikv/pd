@@ -108,11 +108,16 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))
 		err = postJSON(s.hc, postAddr, postData)
 		c.Assert(err, IsNil)
+		rc.LocationLabels = []string{"zone", "rack"}
+
+		rc2 := map[string]string{"location-labels": "zone,rack"}
+		postData, err = json.Marshal(rc2)
+		err = postJSON(s.hc, postAddr, postData)
 
 		resp, err = s.hc.Get(addr)
-		rc2 := &server.ReplicationConfig{}
-		err = readJSON(resp.Body, rc2)
+		rc3 := &server.ReplicationConfig{}
+		err = readJSON(resp.Body, rc3)
 
-		c.Assert(*rc, DeepEquals, *rc2)
+		c.Assert(*rc, DeepEquals, *rc3)
 	}
 }
