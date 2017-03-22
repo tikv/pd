@@ -128,6 +128,13 @@ func (s *Server) GetConfig() *Config {
 	return cfg
 }
 
+// GetScheduleConfig gets the balance config information.
+func (s *Server) GetScheduleConfig() *ScheduleConfig {
+	cfg := &ScheduleConfig{}
+	*cfg = *s.scheduleOpt.load()
+	return cfg
+}
+
 // SetScheduleConfig sets the balance config information.
 func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
 	s.scheduleOpt.store(&cfg)
@@ -135,8 +142,15 @@ func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
 	log.Infof("schedule config is updated: %+v, old: %+v", cfg, s.cfg.Schedule)
 }
 
-// SetReplication sets the replication config
-func (s *Server) SetReplication(cfg ReplicationConfig) {
+// GetReplicationConfig get the replication config
+func (s *Server) GetReplicationConfig() *ReplicationConfig {
+	cfg := &ReplicationConfig{}
+	*cfg = *s.scheduleOpt.rep.load()
+	return cfg
+}
+
+// SetReplicationConfig sets the replication config
+func (s *Server) SetReplicationConfig(cfg ReplicationConfig) {
 	s.scheduleOpt.rep.store(&cfg)
 	s.scheduleOpt.persist(s.kv)
 	log.Infof("replication is updated: %+v, old: %+v", cfg, s.cfg.Replication)

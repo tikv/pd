@@ -270,16 +270,16 @@ func (c *Config) configFromFile(path string) error {
 type ScheduleConfig struct {
 	// If the snapshot count of one store is greater than this value,
 	// it will never be used as a source or target store.
-	MaxSnapshotCount uint64 `toml:"max-snapshot-count" json:"max-snapshot-count"`
+	MaxSnapshotCount uint64 `toml:"max-snapshot-count,omitempty" json:"max-snapshot-count"`
 	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
-	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time" json:"max-store-down-time"`
+	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
-	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
+	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
 	// RegionScheduleLimit is the max coexist region schedules.
-	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
+	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
-	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit" json:"replica-schedule-limit"`
+	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit,omitempty" json:"replica-schedule-limit"`
 }
 
 const (
@@ -302,13 +302,13 @@ func (c *ScheduleConfig) adjust() {
 // ReplicationConfig is the replication configuration.
 type ReplicationConfig struct {
 	// MaxReplicas is the number of replicas for each region.
-	MaxReplicas uint64 `toml:"max-replicas" json:"max-replicas"`
+	MaxReplicas uint64 `toml:"max-replicas,omitempty" json:"max-replicas"`
 
 	// The label keys specified the location of a store.
 	// The placement priorities is implied by the order of label keys.
 	// For example, ["zone", "rack"] means that we should place replicas to
 	// different zones first, then to different racks if we don't have enough zones.
-	LocationLabels []string `toml:"location-labels" json:"location-labels"`
+	LocationLabels []string `toml:"location-labels,omitempty" json:"location-labels"`
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {
