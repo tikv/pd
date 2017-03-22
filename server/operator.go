@@ -76,14 +76,15 @@ func (op *adminOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatResponse, 
 }
 
 type regionOperator struct {
-	Region *regionInfo `json:"region"`
-	Start  time.Time   `json:"start"`
-	End    time.Time   `json:"end"`
-	Index  int         `json:"index"`
-	Ops    []Operator  `json:"ops"`
+	Region *regionInfo  `json:"region"`
+	Start  time.Time    `json:"start"`
+	End    time.Time    `json:"end"`
+	Index  int          `json:"index"`
+	Ops    []Operator   `json:"ops"`
+	Kind   ResourceKind `json:"kind"`
 }
 
-func newRegionOperator(region *regionInfo, ops ...Operator) *regionOperator {
+func newRegionOperator(region *regionInfo, kind ResourceKind, ops ...Operator) *regionOperator {
 	// Do some check here, just fatal because it must be bug.
 	if len(ops) == 0 {
 		log.Fatalf("[region %d] new region operator with no ops", region.GetId())
@@ -93,6 +94,7 @@ func newRegionOperator(region *regionInfo, ops ...Operator) *regionOperator {
 		Region: region,
 		Start:  time.Now(),
 		Ops:    ops,
+		Kind:   kind,
 	}
 }
 
@@ -105,7 +107,7 @@ func (op *regionOperator) GetRegionID() uint64 {
 }
 
 func (op *regionOperator) GetResourceKind() ResourceKind {
-	return op.Ops[0].GetResourceKind()
+	return op.Kind
 }
 
 func (op *regionOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatResponse, bool) {

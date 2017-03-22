@@ -616,28 +616,49 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 }
 
 func checkAddPeer(c *C, bop Operator, storeID uint64) {
-	op := bop.(*regionOperator).Ops[0].(*changePeerOperator)
+	var op *changePeerOperator
+	switch bop.(type) {
+	case *changePeerOperator:
+		op = bop.(*changePeerOperator)
+	case *regionOperator:
+		op = bop.(*regionOperator).Ops[0].(*changePeerOperator)
+	}
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
 func checkRemovePeer(c *C, bop Operator, storeID uint64) {
-	op := bop.(*regionOperator).Ops[0].(*changePeerOperator)
+	var op *changePeerOperator
+	switch bop.(type) {
+	case *changePeerOperator:
+		op = bop.(*changePeerOperator)
+	case *regionOperator:
+		op = bop.(*regionOperator).Ops[0].(*changePeerOperator)
+	}
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
 func checkTransferPeer(c *C, bop Operator, sourceID, targetID uint64) {
-	op := bop.(*regionOperator).Ops[0].(*changePeerOperator)
-	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, targetID)
-	op = bop.(*regionOperator).Ops[1].(*changePeerOperator)
-	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, sourceID)
+	op := bop.(*regionOperator)
+	if len(op.Ops) == 2 {
+		checkAddPeer(c, op.Ops[0], targetID)
+		checkRemovePeer(c, op.Ops[1], sourceID)
+	} else {
+		checkAddPeer(c, op.Ops[0], targetID)
+		checkTransferLeader(c, op.Ops[1], sourceID, targetID)
+		checkRemovePeer(c, op.Ops[2], sourceID)
+	}
 }
 
 func checkTransferLeader(c *C, bop Operator, sourceID, targetID uint64) {
-	op := bop.(*regionOperator).Ops[0].(*transferLeaderOperator)
+	var op *transferLeaderOperator
+	switch bop.(type) {
+	case *transferLeaderOperator:
+		op = bop.(*transferLeaderOperator)
+	case *regionOperator:
+		op = bop.(*regionOperator).Ops[0].(*transferLeaderOperator)
+	}
 	c.Assert(op.OldLeader.GetStoreId(), Equals, sourceID)
 	c.Assert(op.NewLeader.GetStoreId(), Equals, targetID)
 }

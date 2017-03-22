@@ -238,12 +238,12 @@ func (s *shuffleRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 
 func newAddPeer(region *regionInfo, peer *metapb.Peer) Operator {
 	addPeer := newAddPeerOperator(region.GetId(), peer)
-	return newRegionOperator(region, addPeer)
+	return newRegionOperator(region, regionKind, addPeer)
 }
 
 func newRemovePeer(region *regionInfo, peer *metapb.Peer) Operator {
 	removePeer := newRemovePeerOperator(region.GetId(), peer)
-	return newRegionOperator(region, removePeer)
+	return newRegionOperator(region, regionKind, removePeer)
 }
 
 func newTransferPeer(region *regionInfo, oldPeer, newPeer *metapb.Peer) Operator {
@@ -251,14 +251,14 @@ func newTransferPeer(region *regionInfo, oldPeer, newPeer *metapb.Peer) Operator
 	removePeer := newRemovePeerOperator(region.GetId(), oldPeer)
 	if region.Leader != nil && region.Leader.GetId() == oldPeer.GetId() {
 		transferLeader := newTransferLeaderOperator(region.GetId(), region.Leader, newPeer)
-		return newRegionOperator(region, addPeer, transferLeader, removePeer)
+		return newRegionOperator(region, regionKind, addPeer, transferLeader, removePeer)
 	}
-	return newRegionOperator(region, addPeer, removePeer)
+	return newRegionOperator(region, regionKind, addPeer, removePeer)
 }
 
 func newTransferLeader(region *regionInfo, newLeader *metapb.Peer) Operator {
 	transferLeader := newTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
-	return newRegionOperator(region, transferLeader)
+	return newRegionOperator(region, leaderKind, transferLeader)
 }
 
 // scheduleAddPeer schedules a new peer.
