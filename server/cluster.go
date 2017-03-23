@@ -122,14 +122,24 @@ func (c *RaftCluster) isRunning() bool {
 
 // GetConfig gets config information.
 func (s *Server) GetConfig() *Config {
-	return s.cfg.clone()
+	cfg := s.cfg.clone()
+	cfg.Schedule = *s.scheduleOpt.load()
+	cfg.Replication = *s.scheduleOpt.rep.load()
+	return cfg
 }
 
 // SetScheduleConfig sets the balance config information.
 func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
-	s.cfg.Schedule = cfg
 	s.scheduleOpt.store(&cfg)
+	s.scheduleOpt.persist(s.kv)
 	log.Infof("schedule config is updated: %+v, old: %+v", cfg, s.cfg.Schedule)
+}
+
+// SetReplication sets the replication config
+func (s *Server) SetReplication(cfg ReplicationConfig) {
+	s.scheduleOpt.rep.store(&cfg)
+	s.scheduleOpt.persist(s.kv)
+	log.Infof("replication is updated: %+v, old: %+v", cfg, s.cfg.Replication)
 }
 
 func (s *Server) getClusterRootPath() string {
@@ -151,6 +161,12 @@ func (s *Server) createRaftCluster() error {
 	}
 
 	return s.cluster.start()
+}
+
+func (s *Server) stopRaftCluster() {
+	// Reset connections and cluster.
+	s.closeAllConnections()
+	s.cluster.stop()
 }
 
 func makeStoreKey(clusterRootPath string, storeID uint64) string {
@@ -370,6 +386,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	}
 
 	store.State = metapb.StoreState_Offline
+	log.Warnf("[store %d] store %s has been Offline", store.GetId(), store.GetAddress())
 	return cluster.putStore(store)
 }
 
@@ -402,6 +419,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 
 	store.State = metapb.StoreState_Tombstone
 	store.status = newStoreStatus()
+	log.Warnf("[store %d] store %s has been Tombstone", store.GetId(), store.GetAddress())
 	return cluster.putStore(store)
 }
 

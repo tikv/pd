@@ -178,7 +178,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 
 	s.svr, s.cleanup = newTestServer(c)
 	s.svr.cfg.nextRetryDelay = 50 * time.Millisecond
-	s.svr.scheduleOpt.SetMaxReplicas(5)
+	s.svr.scheduleOpt.SetMaxReplicas(1)
 
 	s.client = s.svr.client
 	s.clusterID = s.svr.clusterID
@@ -353,8 +353,6 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 
-	s.svr.scheduleOpt.SetMaxReplicas(1)
-
 	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 	conn, err := rpcConnect(leaderPD.GetAddr())
 	c.Assert(err, IsNil)
@@ -370,8 +368,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 
 	leaderPeer1 := s.chooseRegionLeader(c, r1)
 
-	resp := heartbeatRegion(c, conn, s.clusterID, 0, r1, leaderPeer1)
-	c.Assert(resp, IsNil)
+	heartbeatRegion(c, conn, s.clusterID, 0, r1, leaderPeer1)
 	checkSearchRegions(c, cluster, []byte{})
 
 	mustGetRegion(c, cluster, []byte("a"), r1)
@@ -379,8 +376,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	mustGetRegion(c, cluster, []byte("z"), nil)
 
 	leaderPeer2 := s.chooseRegionLeader(c, r2)
-	resp = heartbeatRegion(c, conn, s.clusterID, 0, r2, leaderPeer2)
-	c.Assert(resp, IsNil)
+	heartbeatRegion(c, conn, s.clusterID, 0, r2, leaderPeer2)
 	checkSearchRegions(c, cluster, []byte{}, []byte("m"))
 
 	mustGetRegion(c, cluster, []byte("z"), r2)
@@ -391,8 +387,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 
 	leaderPeer3 := s.chooseRegionLeader(c, r3)
 
-	resp = heartbeatRegion(c, conn, s.clusterID, 0, r3, leaderPeer3)
-	c.Assert(resp, IsNil)
+	heartbeatRegion(c, conn, s.clusterID, 0, r3, leaderPeer3)
 	checkSearchRegions(c, cluster, []byte{}, []byte("q"))
 
 	mustGetRegion(c, cluster, []byte("z"), r3)
@@ -400,14 +395,15 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	// [m, q) is missing before r2's heartbeat.
 	mustGetRegion(c, cluster, []byte("n"), nil)
 
-	resp = heartbeatRegion(c, conn, s.clusterID, 0, r2, leaderPeer2)
-	c.Assert(resp, IsNil)
+	heartbeatRegion(c, conn, s.clusterID, 0, r2, leaderPeer2)
 	checkSearchRegions(c, cluster, []byte{}, []byte("m"), []byte("q"))
 
 	mustGetRegion(c, cluster, []byte("n"), r2)
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
+	s.svr.scheduleOpt.SetMaxReplicas(5)
+
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 
@@ -444,6 +440,8 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
+	s.svr.scheduleOpt.SetMaxReplicas(5)
+
 	opt := s.svr.scheduleOpt
 
 	cluster := s.svr.GetRaftCluster()
@@ -503,10 +501,10 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
+	s.svr.scheduleOpt.SetMaxReplicas(2)
+
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
-
-	s.svr.scheduleOpt.SetMaxReplicas(2)
 
 	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 	conn, err := rpcConnect(leaderPD.GetAddr())
