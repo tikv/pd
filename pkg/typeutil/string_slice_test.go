@@ -33,4 +33,5 @@ func (s *testStringSliceSuite) TestJSON(c *C) {
 	var nb StringSlice
 	err = json.Unmarshal(o, &nb)
 	c.Assert(err, IsNil)
+	c.Assert(nb, DeepEquals, b)
 }
