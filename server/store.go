@@ -158,7 +158,8 @@ type StoreStatus struct {
 
 	// Blocked means that the store is blocked from balance.
 	blocked         bool
-	LeaderCount     uint32    `json:"leader_count"`
+	LeaderCount     int
+	RegionCount     int
 	LastHeartbeatTS time.Time `json:"last_heartbeat_ts"`
 }
 
@@ -173,6 +174,7 @@ func (s *StoreStatus) clone() *StoreStatus {
 		StoreStats:      proto.Clone(s.StoreStats).(*pdpb.StoreStats),
 		blocked:         s.blocked,
 		LeaderCount:     s.LeaderCount,
+		RegionCount:     s.RegionCount,
 		LastHeartbeatTS: s.LastHeartbeatTS,
 	}
 }
