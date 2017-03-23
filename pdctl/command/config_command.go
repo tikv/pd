@@ -18,57 +18,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"reflect"
 	"strconv"
-	"strings"
 
-	"github.com/pingcap/pd/server"
 	"github.com/spf13/cobra"
 )
-
-const (
-	scheduleOpt = iota
-	replicateOpt
-)
-
-type field struct {
-	tag  string
-	typ  reflect.Kind
-	kind int
-}
 
 var (
 	configPrefix    = "pd/api/v1/config"
 	schedulePrefix  = "pd/api/v1/config/schedule"
 	replicatePrefix = "pd/api/v1/config/replicate"
-	optionRel       = make(map[string]field)
 )
-
-func init() {
-	s := server.ScheduleConfig{}
-	r := server.ReplicationConfig{}
-	fs := dumpConfig(s)
-	for _, f := range fs {
-		f.kind = scheduleOpt
-		optionRel[f.tag] = f
-	}
-	fs = dumpConfig(r)
-	for _, f := range fs {
-		f.kind = replicateOpt
-		optionRel[f.tag] = f
-	}
-}
-
-func dumpConfig(v interface{}) (ret []field) {
-	var f field
-	val := reflect.ValueOf(v)
-	for i := 0; i < val.Type().NumField(); i++ {
-		f.tag = val.Type().Field(i).Tag.Get("json")
-		f.typ = val.Type().Field(i).Type.Kind()
-		ret = append(ret, f)
-	}
-	return ret
-}
 
 // NewConfigCommand return a config subcommand of rootCmd
 func NewConfigCommand() *cobra.Command {
@@ -77,7 +36,8 @@ func NewConfigCommand() *cobra.Command {
 		Short: "tune pd configs",
 	}
 	conf.AddCommand(NewShowConfigCommand())
-	conf.AddCommand(NewSetConfigCommand())
+	conf.AddCommand(NewScheduleConfigCommand())
+	conf.AddCommand(NewReplicationConfigCommand())
 	return conf
 }
 
@@ -102,12 +62,22 @@ func NewShowAllConfigCommand() *cobra.Command {
 	return sc
 }
 
-// NewSetConfigCommand return a set subcommand of configCmd
-func NewSetConfigCommand() *cobra.Command {
+// NewScheduleConfigCommand return a set subcommand of configCmd
+func NewScheduleConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "set <option> <value>",
-		Short: "set the option with value",
-		Run:   setConfigCommandFunc,
+		Use:   "schedule <option> <value>",
+		Short: "set the schedule option with value",
+		Run:   setScheduleConfigCommandFunc,
+	}
+	return sc
+}
+
+// NewReplicationConfigCommand return a set subcommand of configCmd
+func NewReplicationConfigCommand() *cobra.Command {
+	sc := &cobra.Command{
+		Use:   "replication <option> <value>",
+		Short: "set the replication option with value",
+		Run:   setReplicationConfigCommandFunc,
 	}
 	return sc
 }
@@ -130,68 +100,46 @@ func showAllConfigCommandFunc(cmd *cobra.Command, args []string) {
 	fmt.Println(r)
 }
 
-func setConfigCommandFunc(cmd *cobra.Command, args []string) {
+func postDataWithPath(cmd *cobra.Command, args []string, path string) error {
+	opt, val := args[0], args[1]
+	var value interface{}
+	data := make(map[string]interface{})
+	value, err := strconv.ParseFloat(val, 64)
+	if err != nil {
+		value = val
+	}
+	data[opt] = value
+	reqData, err := json.Marshal(data)
+	req, err := getRequest(cmd, path, http.MethodPost, "application/json", bytes.NewBuffer(reqData))
+	if err != nil {
+		return err
+	}
+	_, err = dail(req)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func setScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
 		fmt.Println(cmd.UsageString())
 		return
 	}
-	var (
-		value interface{}
-		path  string
-	)
-	opt, val := args[0], args[1]
+	err := postDataWithPath(cmd, args, schedulePrefix)
+	if err != nil {
+		fmt.Printf("Failed to set config: %s", err)
+		return
+	}
+	fmt.Println("Success!")
+}
 
-	f, ok := optionRel[opt]
-	if !ok {
-		fmt.Println("Failed to set config: unknow option")
+func setReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 2 {
+		fmt.Println(cmd.UsageString())
 		return
 	}
-	switch f.kind {
-	case scheduleOpt:
-		path = schedulePrefix
-	case replicateOpt:
-		path = replicatePrefix
-	}
-
-	r, err := doRequest(cmd, path, http.MethodGet)
-	if err != nil {
-		fmt.Printf("Failed to set config: %s", err)
-		return
-	}
-	data := make(map[string]interface{})
-	err = json.Unmarshal([]byte(r), &data)
-	if err != nil {
-		fmt.Printf("Failed to set config: %s", err)
-		return
-	}
-	switch f.typ {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Float32, reflect.Float64:
-		value, err = strconv.ParseFloat(val, 64)
-		if err != nil {
-			fmt.Printf("Failed to set config: %s", err)
-			return
-		}
-	case reflect.Slice:
-		value = []string{val}
-		if strings.Contains(val, ",") {
-			value = strings.Split(val, ",")
-		}
-	default:
-		value = val
-	}
-	data[opt] = value
-
-	reqData, err := json.Marshal(data)
-	if err != nil {
-		fmt.Printf("Failed to set config: %s", err)
-		return
-	}
-	req, err := getRequest(cmd, path, http.MethodPost, "application/json", bytes.NewBuffer(reqData))
-	if err != nil {
-		fmt.Printf("Failed to set config: %s", err)
-		return
-	}
-	_, err = dail(req)
+	err := postDataWithPath(cmd, args, replicatePrefix)
 	if err != nil {
 		fmt.Printf("Failed to set config: %s", err)
 		return
