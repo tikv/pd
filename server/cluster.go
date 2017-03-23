@@ -122,14 +122,24 @@ func (c *RaftCluster) isRunning() bool {
 
 // GetConfig gets config information.
 func (s *Server) GetConfig() *Config {
-	return s.cfg.clone()
+	cfg := s.cfg.clone()
+	cfg.Schedule = *s.scheduleOpt.load()
+	cfg.Replication = *s.scheduleOpt.rep.load()
+	return cfg
 }
 
 // SetScheduleConfig sets the balance config information.
 func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
-	s.cfg.Schedule = cfg
 	s.scheduleOpt.store(&cfg)
+	s.scheduleOpt.persist(s.kv)
 	log.Infof("schedule config is updated: %+v, old: %+v", cfg, s.cfg.Schedule)
+}
+
+// SetReplication sets the replication config
+func (s *Server) SetReplication(cfg ReplicationConfig) {
+	s.scheduleOpt.rep.store(&cfg)
+	s.scheduleOpt.persist(s.kv)
+	log.Infof("replication is updated: %+v, old: %+v", cfg, s.cfg.Replication)
 }
 
 func (s *Server) getClusterRootPath() string {

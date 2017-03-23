@@ -368,9 +368,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 
 	leaderPeer1 := s.chooseRegionLeader(c, r1)
 
-	resp := heartbeatRegion(c, conn, s.clusterID, 0, r1, leaderPeer1)
-	c.Assert(resp.GetChangePeer(), IsNil)
-	c.Assert(resp.GetTransferLeader(), IsNil)
+	heartbeatRegion(c, conn, s.clusterID, 0, r1, leaderPeer1)
 	checkSearchRegions(c, cluster, []byte{})
 
 	mustGetRegion(c, cluster, []byte("a"), r1)
@@ -378,9 +376,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	mustGetRegion(c, cluster, []byte("z"), nil)
 
 	leaderPeer2 := s.chooseRegionLeader(c, r2)
-	resp = heartbeatRegion(c, conn, s.clusterID, 0, r2, leaderPeer2)
-	c.Assert(resp.GetChangePeer(), IsNil)
-	c.Assert(resp.GetTransferLeader(), IsNil)
+	heartbeatRegion(c, conn, s.clusterID, 0, r2, leaderPeer2)
 	checkSearchRegions(c, cluster, []byte{}, []byte("m"))
 
 	mustGetRegion(c, cluster, []byte("z"), r2)
@@ -391,9 +387,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 
 	leaderPeer3 := s.chooseRegionLeader(c, r3)
 
-	resp = heartbeatRegion(c, conn, s.clusterID, 0, r3, leaderPeer3)
-	c.Assert(resp.GetChangePeer(), IsNil)
-	c.Assert(resp.GetTransferLeader(), IsNil)
+	heartbeatRegion(c, conn, s.clusterID, 0, r3, leaderPeer3)
 	checkSearchRegions(c, cluster, []byte{}, []byte("q"))
 
 	mustGetRegion(c, cluster, []byte("z"), r3)
@@ -401,9 +395,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	// [m, q) is missing before r2's heartbeat.
 	mustGetRegion(c, cluster, []byte("n"), nil)
 
-	resp = heartbeatRegion(c, conn, s.clusterID, 0, r2, leaderPeer2)
-	c.Assert(resp.GetChangePeer(), IsNil)
-	c.Assert(resp.GetTransferLeader(), IsNil)
+	heartbeatRegion(c, conn, s.clusterID, 0, r2, leaderPeer2)
 	checkSearchRegions(c, cluster, []byte{}, []byte("m"), []byte("q"))
 
 	mustGetRegion(c, cluster, []byte("n"), r2)

@@ -377,6 +377,10 @@ func (o *scheduleOption) GetReplicaScheduleLimit() uint64 {
 	return o.load().ReplicaScheduleLimit
 }
 
+func (o *scheduleOption) persist(kv *kv) error {
+	return kv.saveScheduleOption(o)
+}
+
 // ParseUrls parse a string into multiple urls.
 // Export for api.
 func ParseUrls(s string) ([]url.URL, error) {

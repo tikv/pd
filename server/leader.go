@@ -171,9 +171,12 @@ func (s *Server) campaignLeader() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-
 	log.Debugf("campaign leader ok %s", s.Name())
 
+	err = s.reloadScheduleOption()
+	if err != nil {
+		return errors.Trace(err)
+	}
 	// Try to create raft cluster.
 	err = s.createRaftCluster()
 	if err != nil {
@@ -259,4 +262,15 @@ func (s *Server) resignLeader() error {
 
 func (s *Server) leaderCmp() clientv3.Cmp {
 	return clientv3.Compare(clientv3.Value(s.getLeaderPath()), "=", s.leaderValue)
+}
+
+func (s *Server) reloadScheduleOption() error {
+	isExist, err := s.kv.loadScheduleOption(s.scheduleOpt)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if isExist {
+		return nil
+	}
+	return s.kv.saveScheduleOption(s.scheduleOpt)
 }
