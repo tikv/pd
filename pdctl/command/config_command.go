@@ -100,15 +100,14 @@ func showAllConfigCommandFunc(cmd *cobra.Command, args []string) {
 	fmt.Println(r)
 }
 
-func postDataWithPath(cmd *cobra.Command, args []string, path string) error {
-	opt, val := args[0], args[1]
-	var value interface{}
+func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
+	var val interface{}
 	data := make(map[string]interface{})
-	value, err := strconv.ParseFloat(val, 64)
+	val, err := strconv.ParseFloat(value, 64)
 	if err != nil {
-		value = val
+		val = value
 	}
-	data[opt] = value
+	data[key] = val
 	reqData, err := json.Marshal(data)
 	req, err := getRequest(cmd, path, http.MethodPost, "application/json", bytes.NewBuffer(reqData))
 	if err != nil {
@@ -126,7 +125,8 @@ func setScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println(cmd.UsageString())
 		return
 	}
-	err := postDataWithPath(cmd, args, schedulePrefix)
+	opt, val := args[0], args[1]
+	err := postConfigDataWithPath(cmd, opt, val, schedulePrefix)
 	if err != nil {
 		fmt.Printf("Failed to set config: %s", err)
 		return
@@ -139,7 +139,8 @@ func setReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println(cmd.UsageString())
 		return
 	}
-	err := postDataWithPath(cmd, args, replicatePrefix)
+	opt, val := args[0], args[1]
+	err := postConfigDataWithPath(cmd, opt, val, replicatePrefix)
 	if err != nil {
 		fmt.Printf("Failed to set config: %s", err)
 		return
