@@ -654,7 +654,8 @@ func checkTransferPeer(c *C, bop Operator, sourceID, targetID uint64) {
 	} else {
 		c.Assert(op.Ops, HasLen, 3)
 		checkAddPeer(c, op.Ops[0], targetID)
-		checkTransferLeader(c, op.Ops[1], sourceID, targetID)
+		transferLeader := op.Ops[1].(*transferLeaderOperator)
+		c.Assert(transferLeader.OldLeader.GetStoreId(), Equals, sourceID)
 		checkRemovePeer(c, op.Ops[2], sourceID)
 	}
 }
