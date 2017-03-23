@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2017 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,23 @@
 package typeutil
 
 import (
-	"testing"
+	"encoding/json"
 
 	. "github.com/pingcap/check"
 )
 
-func Test(t *testing.T) { TestingT(t) }
+var _ = Suite(&testStringSliceSuite{})
+
+type testStringSliceSuite struct {
+}
+
+func (s *testStringSliceSuite) TestJSON(c *C) {
+	b := StringSlice([]string{"zone", "rack"})
+	o, err := json.Marshal(b)
+	c.Assert(err, IsNil)
+	c.Assert(string(o), Equals, "\"zone,rack\"")
+
+	var nb StringSlice
+	err = json.Unmarshal(o, &nb)
+	c.Assert(err, IsNil)
+}
