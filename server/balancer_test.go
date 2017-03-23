@@ -228,19 +228,28 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalance(c *C) {
 	tc.updateLeaderCount(1, 2)
 	c.Check(lb.Schedule(cluster), NotNil)
 
-	// Add stores 1,2,3,4
-	tc.addLeaderStore(1, 7)
-	tc.addLeaderStore(2, 8)
-	tc.addLeaderStore(3, 9)
-	tc.addLeaderStore(4, 10)
-	// Add region 1 with leader in store 4 and followers in stores 1,2,3.
-	tc.addLeaderRegion(1, 4, 1, 2, 3)
+	// Setup new leader counts.
+	tc.updateLeaderCount(1, 7)
+	tc.updateLeaderCount(2, 8)
+	tc.updateLeaderCount(3, 9)
+	tc.updateLeaderCount(4, 10)
+	// Add region 1 with leader in store 4 and followers in stores 2,3.
+	tc.addLeaderRegion(1, 4, 2, 3)
+	// Add region 2 with leader in store 1 and followers in stores 2,3.
+	tc.addLeaderRegion(2, 1, 2, 3)
 
-	// Test min balance diff (>=4).
+	// Min balance diff is 4.
+	// Balance diff is 3(10-7), leader counts: 7, 8, 9, 10.
 	c.Check(lb.Schedule(cluster), IsNil)
-	// 16 - 7 >= 4
-	tc.addLeaderStore(4, 16)
-	checkTransferLeader(c, lb.Schedule(cluster), 4, 1)
+	// Balance diff is 9(16-7), leader counts: 7, 8, 9, 16.
+	// Average leader count is 10, select store4(16 leaders) as source store.
+	tc.updateLeaderCount(4, 16)
+	checkTransferLeader(c, lb.Schedule(cluster), 4, 2)
+	// Balance diff is 9(10-1), leader counts: 1, 8, 9, 10.
+	// Average leader count is 7, select store1(1 leader) as target store.
+	tc.updateLeaderCount(1, 1)
+	tc.updateLeaderCount(4, 10)
+	checkTransferLeader(c, lb.Schedule(cluster), 3, 1)
 
 	// Test stateFilter.
 	// If store 1 is down, it will be filtered,

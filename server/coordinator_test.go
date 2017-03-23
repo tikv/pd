@@ -84,7 +84,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	tc.addLeaderRegion(1, 2, 3, 4)
 
 	// Transfer leader from store 4 to store 2.
-	tc.updateLeaderCount(4, 4)
+	tc.updateLeaderCount(4, 5)
 	tc.updateLeaderCount(3, 3)
 	tc.updateLeaderCount(2, 2)
 	tc.updateLeaderCount(1, 1)
