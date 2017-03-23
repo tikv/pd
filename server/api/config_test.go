@@ -72,7 +72,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 
 		sc.MaxStoreDownTime.Duration = time.Second
 		postData, err := json.Marshal(sc)
-		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config"}
+		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/schedule"}
 		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))
 		err = postJSON(s.hc, postAddr, postData)
 		c.Assert(err, IsNil)
