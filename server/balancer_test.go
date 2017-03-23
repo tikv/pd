@@ -617,11 +617,11 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 
 func checkAddPeer(c *C, bop Operator, storeID uint64) {
 	var op *changePeerOperator
-	switch bop.(type) {
+	switch t := bop.(type) {
 	case *changePeerOperator:
-		op = bop.(*changePeerOperator)
+		op = t
 	case *regionOperator:
-		op = bop.(*regionOperator).Ops[0].(*changePeerOperator)
+		op = t.Ops[0].(*changePeerOperator)
 	}
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
@@ -629,17 +629,17 @@ func checkAddPeer(c *C, bop Operator, storeID uint64) {
 
 func checkRemovePeer(c *C, bop Operator, storeID uint64) {
 	var op *changePeerOperator
-	switch bop.(type) {
+	switch t := bop.(type) {
 	case *changePeerOperator:
-		op = bop.(*changePeerOperator)
+		op = t
 	case *regionOperator:
-		regionOp := bop.(*regionOperator)
-		if len(regionOp.Ops) == 1 {
-			op = regionOp.Ops[0].(*changePeerOperator)
+		if len(t.Ops) == 1 {
+			op = t.Ops[0].(*changePeerOperator)
 		} else {
-			transferLeader := regionOp.Ops[0].(*transferLeaderOperator)
+			c.Assert(t.Ops, HasLen, 2)
+			transferLeader := t.Ops[0].(*transferLeaderOperator)
 			c.Assert(transferLeader.OldLeader.GetStoreId(), Equals, storeID)
-			op = bop.(*regionOperator).Ops[1].(*changePeerOperator)
+			op = t.Ops[1].(*changePeerOperator)
 		}
 	}
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
@@ -652,6 +652,7 @@ func checkTransferPeer(c *C, bop Operator, sourceID, targetID uint64) {
 		checkAddPeer(c, op.Ops[0], targetID)
 		checkRemovePeer(c, op.Ops[1], sourceID)
 	} else {
+		c.Assert(op.Ops, HasLen, 3)
 		checkAddPeer(c, op.Ops[0], targetID)
 		checkTransferLeader(c, op.Ops[1], sourceID, targetID)
 		checkRemovePeer(c, op.Ops[2], sourceID)
@@ -660,11 +661,11 @@ func checkTransferPeer(c *C, bop Operator, sourceID, targetID uint64) {
 
 func checkTransferLeader(c *C, bop Operator, sourceID, targetID uint64) {
 	var op *transferLeaderOperator
-	switch bop.(type) {
+	switch t := bop.(type) {
 	case *transferLeaderOperator:
-		op = bop.(*transferLeaderOperator)
+		op = t
 	case *regionOperator:
-		op = bop.(*regionOperator).Ops[0].(*transferLeaderOperator)
+		op = t.Ops[0].(*transferLeaderOperator)
 	}
 	c.Assert(op.OldLeader.GetStoreId(), Equals, sourceID)
 	c.Assert(op.NewLeader.GetStoreId(), Equals, targetID)
