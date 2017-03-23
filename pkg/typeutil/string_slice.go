@@ -25,7 +25,7 @@ type StringSlice []string
 
 // MarshalJSON returns the size as a JSON string.
 func (s StringSlice) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + strings.Join(s, ",") + `"`), nil
+	return []byte(strconv.Quote(strings.Join(s, ","))), nil
 }
 
 // UnmarshalJSON parses a JSON string into the bytesize.
