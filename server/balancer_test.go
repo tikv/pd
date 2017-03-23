@@ -205,63 +205,106 @@ func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
 
 var _ = Suite(&testBalanceLeaderSchedulerSuite{})
 
-type testBalanceLeaderSchedulerSuite struct{}
+type testBalanceLeaderSchedulerSuite struct {
+	cluster *clusterInfo
+	tc      *testClusterInfo
+	lb      *balanceLeaderScheduler
+}
 
-func (s *testBalanceLeaderSchedulerSuite) TestBalance(c *C) {
-	cluster := newClusterInfo(newMockIDAllocator())
-	tc := newTestClusterInfo(cluster)
-
+func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
+	s.cluster = newClusterInfo(newMockIDAllocator())
+	s.tc = newTestClusterInfo(s.cluster)
 	_, opt := newTestScheduleConfig()
-	lb := newBalanceLeaderScheduler(opt)
+	s.lb = newBalanceLeaderScheduler(opt)
+}
 
-	// Add stores 1,2,3,4
-	tc.addLeaderStore(1, 1)
-	tc.addLeaderStore(2, 0)
-	tc.addLeaderStore(3, 0)
-	tc.addLeaderStore(4, 0)
-	// Add region 1 with leader in store 1 and followers in stores 2,3,4.
-	tc.addLeaderRegion(1, 1, 2, 3, 4)
+func (s *testBalanceLeaderSchedulerSuite) schedule() Operator {
+	return s.lb.Schedule(s.cluster)
+}
 
+func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
+	// Stores:     1    2    3    4
+	// Leaders:    1    0    0    0
+	// Region1:    L    F    F    F
+	s.tc.addLeaderStore(1, 1)
+	s.tc.addLeaderStore(2, 0)
+	s.tc.addLeaderStore(3, 0)
+	s.tc.addLeaderStore(4, 0)
+	s.tc.addLeaderRegion(1, 1, 2, 3, 4)
 	// Test min balance diff (>=2).
-	c.Check(lb.Schedule(cluster), IsNil)
-	// 2 - 0 >= 2
-	tc.updateLeaderCount(1, 2)
-	c.Check(lb.Schedule(cluster), NotNil)
+	c.Check(s.schedule(), IsNil)
 
-	// Setup new leader counts.
-	tc.updateLeaderCount(1, 7)
-	tc.updateLeaderCount(2, 8)
-	tc.updateLeaderCount(3, 9)
-	tc.updateLeaderCount(4, 10)
-	// Add region 1 with leader in store 4 and followers in stores 2,3.
-	tc.addLeaderRegion(1, 4, 2, 3)
-	// Add region 2 with leader in store 1 and followers in stores 2,3.
-	tc.addLeaderRegion(2, 1, 2, 3)
+	// Stores:     1    2    3    4
+	// Leaders:    2    0    0    0
+	// Region1:    L    F    F    F
+	s.tc.updateLeaderCount(1, 2)
+	c.Check(s.schedule(), NotNil)
 
-	// Min balance diff is 4.
-	// Balance diff is 3(10-7), leader counts: 7, 8, 9, 10.
-	c.Check(lb.Schedule(cluster), IsNil)
-	// Balance diff is 9(16-7), leader counts: 7, 8, 9, 16.
-	// Average leader count is 10, select store4(16 leaders) as source store.
-	tc.updateLeaderCount(4, 16)
-	checkTransferLeader(c, lb.Schedule(cluster), 4, 2)
-	// Balance diff is 9(10-1), leader counts: 1, 8, 9, 10.
-	// Average leader count is 7, select store1(1 leader) as target store.
-	tc.updateLeaderCount(1, 1)
-	tc.updateLeaderCount(4, 10)
-	checkTransferLeader(c, lb.Schedule(cluster), 3, 1)
+	// Stores:     1    2    3    4
+	// Leaders:    7    8    9   10
+	// Region1:    F    F    F    L
+	s.tc.updateLeaderCount(1, 7)
+	s.tc.updateLeaderCount(2, 8)
+	s.tc.updateLeaderCount(3, 9)
+	s.tc.updateLeaderCount(4, 10)
+	s.tc.addLeaderRegion(1, 4, 1, 2, 3)
+	// Min balance diff is 4. Now is 10-7=3.
+	c.Check(s.schedule(), IsNil)
 
+	// Stores:     1    2    3    4
+	// Leaders:    7    8    9   16
+	// Region1:    F    F    F    L
+	s.tc.updateLeaderCount(4, 16)
+	// Min balance diff is 4. Now is 16-7=9.
+	c.Check(s.schedule(), NotNil)
+}
+
+func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
+	// Stores:     1    2    3    4
+	// Leaders:    1    2    3   10
+	// Region1:    F    F    F    L
+	s.tc.addLeaderStore(1, 1)
+	s.tc.addLeaderStore(2, 2)
+	s.tc.addLeaderStore(3, 3)
+	s.tc.addLeaderStore(4, 10)
+	s.tc.addLeaderRegion(1, 4, 1, 2, 3)
+
+	checkTransferLeader(c, s.schedule(), 4, 1)
 	// Test stateFilter.
 	// If store 1 is down, it will be filtered,
 	// store 2 becomes the store with least leaders.
-	tc.setStoreDown(1)
-	checkTransferLeader(c, lb.Schedule(cluster), 4, 2)
+	s.tc.setStoreDown(1)
+	checkTransferLeader(c, s.schedule(), 4, 2)
 
 	// Test healthFilter.
 	// If store 2 is busy, it will be filtered,
 	// store 3 becomes the store with least leaders.
-	tc.setStoreBusy(2, true)
-	checkTransferLeader(c, lb.Schedule(cluster), 4, 3)
+	s.tc.setStoreBusy(2, true)
+	checkTransferLeader(c, s.schedule(), 4, 3)
+}
+
+func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
+	// Stores:     1    2    3    4
+	// Leaders:    1    2    3   10
+	// Region1:    -    F    F    L
+	// Region2:    F    F    L    -
+	s.tc.addLeaderStore(1, 1)
+	s.tc.addLeaderStore(2, 2)
+	s.tc.addLeaderStore(3, 3)
+	s.tc.addLeaderStore(4, 10)
+	s.tc.addLeaderRegion(1, 4, 2, 3)
+	s.tc.addLeaderRegion(2, 3, 1, 2)
+	// Average leader is 4. Select store 4 as source.
+	checkTransferLeader(c, s.schedule(), 4, 2)
+
+	// Stores:     1    2    3    4
+	// Leaders:    1    8    9   10
+	// Region1:    -    F    F    L
+	// Region2:    F    F    L    -
+	s.tc.updateLeaderCount(2, 8)
+	s.tc.updateLeaderCount(3, 9)
+	// Average leader is 7. Select store 1 as target.
+	checkTransferLeader(c, s.schedule(), 3, 1)
 }
 
 var _ = Suite(&testBalanceRegionSchedulerSuite{})
