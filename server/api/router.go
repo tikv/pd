@@ -52,6 +52,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/config", confHandler.Get).Methods("GET")
 	router.HandleFunc("/api/v1/config/schedule", confHandler.SetSchedule).Methods("POST")
 	router.HandleFunc("/api/v1/config/schedule", confHandler.GetSchedule).Methods("GET")
+	router.HandleFunc("/api/v1/config/replicate", confHandler.SetReplication).Methods("POST")
+	router.HandleFunc("/api/v1/config/replicate", confHandler.GetReplication).Methods("GET")
 
 	storeHandler := newStoreHandler(svr, rd)
 	router.HandleFunc("/api/v1/store/{id}", storeHandler.Get).Methods("GET")

@@ -14,10 +14,12 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"io/ioutil"
 	"net"
+	"net/http"
 
 	"github.com/juju/errors"
 )
@@ -35,6 +37,16 @@ func readJSON(r io.ReadCloser, data interface{}) error {
 		return errors.Trace(err)
 	}
 
+	return nil
+}
+
+func postJSON(cli *http.Client, url string, data []byte) error {
+	resp, err := cli.Post(url, "application/json", bytes.NewBuffer(data))
+	if err != nil {
+		return errors.Trace(err)
+	}
+	ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
 	return nil
 }
 

@@ -151,7 +151,7 @@ func (s *Server) getRespTS(count uint32) (pdpb.Timestamp, error) {
 	var resp pdpb.Timestamp
 	for i := 0; i < maxRetryCount; i++ {
 		current, ok := s.ts.Load().(*atomicObject)
-		if !ok {
+		if !ok || current.physical == zeroTime {
 			log.Errorf("we haven't synced timestamp ok, wait and retry, retry count %d", i)
 			time.Sleep(200 * time.Millisecond)
 			continue
