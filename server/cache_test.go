@@ -14,8 +14,10 @@
 package server
 
 import (
+	"math/rand"
 	"sync/atomic"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -171,6 +173,25 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 func checkRegion(c *C, a *regionInfo, b *regionInfo) {
 	c.Assert(a.Region, DeepEquals, b.Region)
 	c.Assert(a.Leader, DeepEquals, b.Leader)
+	c.Assert(a.Peers, DeepEquals, b.Peers)
+	if len(a.DownPeers) > 0 || len(b.DownPeers) > 0 {
+		c.Assert(a.DownPeers, DeepEquals, b.DownPeers)
+	}
+	if len(a.PendingPeers) > 0 || len(b.PendingPeers) > 0 {
+		c.Assert(a.PendingPeers, DeepEquals, b.PendingPeers)
+	}
+}
+
+func checkRegionsKV(c *C, kv *kv, regions []*regionInfo) {
+	if kv != nil {
+		for _, region := range regions {
+			var meta metapb.Region
+			ok, err := kv.loadRegion(region.GetId(), &meta)
+			c.Assert(ok, IsTrue)
+			c.Assert(err, IsNil)
+			c.Assert(&meta, DeepEquals, region.Region)
+		}
+	}
 }
 
 func checkRegions(c *C, cache *regionsInfo, regions []*regionInfo) {
@@ -326,11 +347,13 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 	for i, region := range regions {
 		// region does not exist.
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
-		checkRegions(c, cache.regions, regions[0:i+1])
+		checkRegions(c, cache.regions, regions[:i+1])
+		checkRegionsKV(c, cache.kv, regions[:i+1])
 
 		// region is the same, not updated.
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
-		checkRegions(c, cache.regions, regions[0:i+1])
+		checkRegions(c, cache.regions, regions[:i+1])
+		checkRegionsKV(c, cache.kv, regions[:i+1])
 
 		epoch := region.clone().GetRegionEpoch()
 
@@ -339,7 +362,8 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 			Version: epoch.GetVersion() + 1,
 		}
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
-		checkRegions(c, cache.regions, regions[0:i+1])
+		checkRegions(c, cache.regions, regions[:i+1])
+		checkRegionsKV(c, cache.kv, regions[:i+1])
 
 		// region is stale (Version).
 		stale := region.clone()
@@ -347,7 +371,8 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 			ConfVer: epoch.GetConfVer() + 1,
 		}
 		c.Assert(cache.handleRegionHeartbeat(stale), NotNil)
-		checkRegions(c, cache.regions, regions[0:i+1])
+		checkRegions(c, cache.regions, regions[:i+1])
+		checkRegionsKV(c, cache.kv, regions[:i+1])
 
 		// region is updated.
 		region.RegionEpoch = &metapb.RegionEpoch{
@@ -355,7 +380,8 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 			ConfVer: epoch.GetConfVer() + 1,
 		}
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
-		checkRegions(c, cache.regions, regions[0:i+1])
+		checkRegions(c, cache.regions, regions[:i+1])
+		checkRegionsKV(c, cache.kv, regions[:i+1])
 
 		// region is stale (ConfVer).
 		stale = region.clone()
@@ -363,7 +389,28 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 			Version: epoch.GetVersion() + 1,
 		}
 		c.Assert(cache.handleRegionHeartbeat(stale), NotNil)
-		checkRegions(c, cache.regions, regions[0:i+1])
+		checkRegions(c, cache.regions, regions[:i+1])
+		checkRegionsKV(c, cache.kv, regions[:i+1])
+
+		// Add a down peer.
+		region.DownPeers = []*pdpb.PeerStats{
+			{
+				Peer:        region.Peers[rand.Intn(len(region.Peers))],
+				DownSeconds: proto.Uint64(42),
+			},
+		}
+		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
+		checkRegions(c, cache.regions, regions[:i+1])
+
+		// Add a pending peer.
+		region.PendingPeers = []*metapb.Peer{region.Peers[rand.Intn(len(region.Peers))]}
+		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
+		checkRegions(c, cache.regions, regions[:i+1])
+
+		// Clear down and pending peers.
+		region.DownPeers, region.PendingPeers = nil, nil
+		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
+		checkRegions(c, cache.regions, regions[:i+1])
 	}
 
 	regionCounts := make(map[uint64]int)
