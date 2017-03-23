@@ -305,7 +305,7 @@ func scheduleTransferLeader(cluster *clusterInfo, s Selector, filters ...Filter)
 
 	var averageLeader float64
 	for _, s := range stores {
-		averageLeader += float64(cluster.getStoreLeaderCount(s.GetId())) / float64(len(stores))
+		averageLeader += float64(s.leaderScore()) / float64(len(stores))
 	}
 
 	mostLeaderStore := s.SelectSource(stores, filters...)
