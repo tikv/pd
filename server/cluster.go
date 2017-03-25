@@ -120,7 +120,7 @@ func (c *RaftCluster) isRunning() bool {
 	return c.running
 }
 
-// GetConfig gets config information.
+// GetConfig gets the config information.
 func (s *Server) GetConfig() *Config {
 	cfg := s.cfg.clone()
 	cfg.Schedule = *s.scheduleOpt.load()

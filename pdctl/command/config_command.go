@@ -36,8 +36,7 @@ func NewConfigCommand() *cobra.Command {
 		Short: "tune pd configs",
 	}
 	conf.AddCommand(NewShowConfigCommand())
-	conf.AddCommand(NewScheduleConfigCommand())
-	conf.AddCommand(NewReplicationConfigCommand())
+	conf.AddCommand(NewSetConfigCommand())
 	return conf
 }
 
@@ -62,22 +61,12 @@ func NewShowAllConfigCommand() *cobra.Command {
 	return sc
 }
 
-// NewScheduleConfigCommand return a set subcommand of configCmd
-func NewScheduleConfigCommand() *cobra.Command {
+// NewSetConfigCommand return a set subcommand of configCmd
+func NewSetConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "schedule <option> <value>",
-		Short: "set the schedule option with value",
-		Run:   setScheduleConfigCommandFunc,
-	}
-	return sc
-}
-
-// NewReplicationConfigCommand return a set subcommand of configCmd
-func NewReplicationConfigCommand() *cobra.Command {
-	sc := &cobra.Command{
-		Use:   "replication <option> <value>",
-		Short: "set the replication option with value",
-		Run:   setReplicationConfigCommandFunc,
+		Use:   "set <option> <value>",
+		Short: "set the option with value",
+		Run:   setConfigCommandFunc,
 	}
 	return sc
 }
@@ -120,27 +109,13 @@ func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
 	return nil
 }
 
-func setScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {
+func setConfigCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
 		fmt.Println(cmd.UsageString())
 		return
 	}
 	opt, val := args[0], args[1]
-	err := postConfigDataWithPath(cmd, opt, val, schedulePrefix)
-	if err != nil {
-		fmt.Printf("Failed to set config: %s", err)
-		return
-	}
-	fmt.Println("Success!")
-}
-
-func setReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 2 {
-		fmt.Println(cmd.UsageString())
-		return
-	}
-	opt, val := args[0], args[1]
-	err := postConfigDataWithPath(cmd, opt, val, replicatePrefix)
+	err := postConfigDataWithPath(cmd, opt, val, configPrefix)
 	if err != nil {
 		fmt.Printf("Failed to set config: %s", err)
 		return
