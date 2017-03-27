@@ -642,12 +642,14 @@ func checkRemovePeer(c *C, bop Operator, storeID uint64) {
 			op = t.Ops[1].(*changePeerOperator)
 		}
 	}
+	c.Assert(op, NotNil)
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
 func checkTransferPeer(c *C, bop Operator, sourceID, targetID uint64) {
 	op := bop.(*regionOperator)
+	c.Assert(op, NotNil)
 	if len(op.Ops) == 2 {
 		checkAddPeer(c, op.Ops[0], targetID)
 		checkRemovePeer(c, op.Ops[1], sourceID)
@@ -668,6 +670,7 @@ func checkTransferLeader(c *C, bop Operator, sourceID, targetID uint64) {
 	case *regionOperator:
 		op = t.Ops[0].(*transferLeaderOperator)
 	}
+	c.Assert(op, NotNil)
 	c.Assert(op.OldLeader.GetStoreId(), Equals, sourceID)
 	c.Assert(op.NewLeader.GetStoreId(), Equals, targetID)
 }
