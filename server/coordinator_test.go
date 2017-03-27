@@ -299,7 +299,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	lb := newBalanceLeaderScheduler(opt)
 	sc := newScheduleController(co, lb)
 
-	for i := minScheduleInterval; sc.GetInterval() != maxScheduleInterval; i *= 2 {
+	for i := minScheduleInterval; sc.GetInterval() != maxScheduleInterval; i = time.Duration(float64(i) * scheduleIntervalFactor) {
 		c.Assert(sc.GetInterval(), Equals, i)
 		c.Assert(sc.Schedule(cluster), IsNil)
 	}
