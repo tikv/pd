@@ -31,7 +31,7 @@ type testOperator struct {
 func newTestOperator(regionID uint64, kind ResourceKind) Operator {
 	region := newRegionInfo(&metapb.Region{Id: regionID}, nil)
 	op := &testOperator{RegionID: regionID, Kind: kind}
-	return newRegionOperator(region, op)
+	return newRegionOperator(region, kind, op)
 }
 
 func (op *testOperator) GetRegionID() uint64           { return op.RegionID }

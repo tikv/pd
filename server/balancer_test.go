@@ -616,28 +616,61 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 }
 
 func checkAddPeer(c *C, bop Operator, storeID uint64) {
-	op := bop.(*regionOperator).Ops[0].(*changePeerOperator)
+	var op *changePeerOperator
+	switch t := bop.(type) {
+	case *changePeerOperator:
+		op = t
+	case *regionOperator:
+		op = t.Ops[0].(*changePeerOperator)
+	}
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
 func checkRemovePeer(c *C, bop Operator, storeID uint64) {
-	op := bop.(*regionOperator).Ops[0].(*changePeerOperator)
+	var op *changePeerOperator
+	switch t := bop.(type) {
+	case *changePeerOperator:
+		op = t
+	case *regionOperator:
+		if len(t.Ops) == 1 {
+			op = t.Ops[0].(*changePeerOperator)
+		} else {
+			c.Assert(t.Ops, HasLen, 2)
+			transferLeader := t.Ops[0].(*transferLeaderOperator)
+			c.Assert(transferLeader.OldLeader.GetStoreId(), Equals, storeID)
+			op = t.Ops[1].(*changePeerOperator)
+		}
+	}
+	c.Assert(op, NotNil)
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
 func checkTransferPeer(c *C, bop Operator, sourceID, targetID uint64) {
-	op := bop.(*regionOperator).Ops[0].(*changePeerOperator)
-	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, targetID)
-	op = bop.(*regionOperator).Ops[1].(*changePeerOperator)
-	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, sourceID)
+	op := bop.(*regionOperator)
+	c.Assert(op, NotNil)
+	if len(op.Ops) == 2 {
+		checkAddPeer(c, op.Ops[0], targetID)
+		checkRemovePeer(c, op.Ops[1], sourceID)
+	} else {
+		c.Assert(op.Ops, HasLen, 3)
+		checkAddPeer(c, op.Ops[0], targetID)
+		transferLeader := op.Ops[1].(*transferLeaderOperator)
+		c.Assert(transferLeader.OldLeader.GetStoreId(), Equals, sourceID)
+		checkRemovePeer(c, op.Ops[2], sourceID)
+	}
 }
 
 func checkTransferLeader(c *C, bop Operator, sourceID, targetID uint64) {
-	op := bop.(*regionOperator).Ops[0].(*transferLeaderOperator)
+	var op *transferLeaderOperator
+	switch t := bop.(type) {
+	case *transferLeaderOperator:
+		op = t
+	case *regionOperator:
+		op = t.Ops[0].(*transferLeaderOperator)
+	}
+	c.Assert(op, NotNil)
 	c.Assert(op.OldLeader.GetStoreId(), Equals, sourceID)
 	c.Assert(op.NewLeader.GetStoreId(), Equals, targetID)
 }
