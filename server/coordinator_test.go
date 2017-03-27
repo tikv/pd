@@ -327,6 +327,24 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	c.Assert(sc.AllowSchedule(), IsTrue)
 }
 
+func (s *testScheduleControllerSuite) TestInterval(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	_, opt := newTestScheduleConfig()
+	co := newCoordinator(cluster, opt)
+	lb := newBalanceLeaderScheduler(opt)
+	sc := newScheduleController(co, lb)
+
+	// If no operator for x seconds, the next check should be in x/2 seconds.
+	idleSeconds := []int{5, 10, 20, 30, 60}
+	for _, n := range idleSeconds {
+		sc.interval = minScheduleInterval
+		for totalSleep := time.Duration(0); totalSleep <= time.Second*time.Duration(n); totalSleep += sc.GetInterval() {
+			c.Assert(sc.Schedule(cluster), IsNil)
+		}
+		c.Assert(sc.GetInterval(), Less, time.Second*time.Duration(n/2))
+	}
+}
+
 func checkAddPeerResp(c *C, resp *pdpb.RegionHeartbeatResponse, storeID uint64) {
 	changePeer := resp.GetChangePeer()
 	c.Assert(changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
