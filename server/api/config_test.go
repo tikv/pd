@@ -72,7 +72,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 
 		sc.MaxStoreDownTime.Duration = time.Second
 		postData, err := json.Marshal(sc)
-		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config"}
+		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/schedule"}
 		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))
 		err = postJSON(s.hc, postAddr, postData)
 		c.Assert(err, IsNil)
@@ -101,16 +101,23 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 		c.Assert(err, IsNil)
 
 		rc.MaxReplicas = 5
-		postData, err := json.Marshal(rc)
+
+		rc1 := map[string]int{"max-replicas": 5}
+		postData, err := json.Marshal(rc1)
 		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/replicate"}
 		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))
 		err = postJSON(s.hc, postAddr, postData)
 		c.Assert(err, IsNil)
+		rc.LocationLabels = []string{"zone", "rack"}
+
+		rc2 := map[string]string{"location-labels": "zone,rack"}
+		postData, err = json.Marshal(rc2)
+		err = postJSON(s.hc, postAddr, postData)
 
 		resp, err = s.hc.Get(addr)
-		rc1 := &server.ReplicationConfig{}
-		err = readJSON(resp.Body, rc1)
+		rc3 := &server.ReplicationConfig{}
+		err = readJSON(resp.Body, rc3)
 
-		c.Assert(*rc, DeepEquals, *rc1)
+		c.Assert(*rc, DeepEquals, *rc3)
 	}
 }

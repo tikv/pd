@@ -41,7 +41,7 @@ func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
-	config := &server.ScheduleConfig{}
+	config := h.svr.GetScheduleConfig()
 	err := readJSON(r.Body, config)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -57,13 +57,13 @@ func (h *confHandler) GetReplication(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
-	config := &server.ReplicationConfig{}
+	config := h.svr.GetReplicationConfig()
 	err := readJSON(r.Body, config)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	h.svr.SetReplication(*config)
+	h.svr.SetReplicationConfig(*config)
 	h.rd.JSON(w, http.StatusOK, nil)
 }
