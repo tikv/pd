@@ -407,8 +407,13 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cache.regions, regions[:i+1])
 
-		// Clear down and pending peers.
-		region.DownPeers, region.PendingPeers = nil, nil
+		// Clear down peers.
+		region.DownPeers = nil
+		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
+		checkRegions(c, cache.regions, regions[:i+1])
+
+		// Clear pending peers.
+		region.PendingPeers = nil
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cache.regions, regions[:i+1])
 	}
