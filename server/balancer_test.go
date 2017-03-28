@@ -114,6 +114,7 @@ func (c *testClusterInfo) updateSnapshotCount(storeID uint64, snapshotCount int)
 func (c *testClusterInfo) updateStorageRatio(storeID uint64, storageRatio float64) {
 	store := c.getStore(storeID)
 	store.status.Capacity = uint64(1024)
+	store.status.UsedSize = uint64(float64(store.status.Capacity) * storageRatio)
 	store.status.Available = uint64(float64(store.status.Capacity) * (1 - storageRatio))
 	c.putStore(store)
 }
