@@ -295,12 +295,22 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.Response, e
 	}, nil
 }
 
-func (c *RaftCluster) getRegion(regionKey []byte) (*metapb.Region, *metapb.Peer) {
+// GetRegionByKey gets region and leader peer by region key from cluster.
+func (c *RaftCluster) GetRegionByKey(regionKey []byte) (*metapb.Region, *metapb.Peer) {
 	region := c.cachedCluster.searchRegion(regionKey)
 	if region == nil {
 		return nil, nil
 	}
 	return region.Region, region.Leader
+}
+
+// GetRegionInfoByKey gets regionInfo by region key from cluster.
+func (c *RaftCluster) GetRegionInfoByKey(regionKey []byte) *regionInfo {
+	region := c.cachedCluster.searchRegion(regionKey)
+	if region == nil {
+		return nil
+	}
+	return region
 }
 
 // GetRegionByID gets region and leader peer by regionID from cluster.
@@ -312,7 +322,16 @@ func (c *RaftCluster) GetRegionByID(regionID uint64) (*metapb.Region, *metapb.Pe
 	return region.Region, region.Leader
 }
 
-// GetRegions gets regions from cluster.
+// GetRegionInfoByID gets regionInfo by regionID from cluster.
+func (c *RaftCluster) GetRegionInfoByID(regionID uint64) *regionInfo {
+	region := c.cachedCluster.getRegion(regionID)
+	if region == nil {
+		return nil
+	}
+	return region
+}
+
+// GetRegion gets regions from cluster.
 func (c *RaftCluster) GetRegions() []*metapb.Region {
 	return c.cachedCluster.getMetaRegions()
 }

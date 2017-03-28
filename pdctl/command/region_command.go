@@ -15,7 +15,6 @@ package command
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,8 +25,9 @@ import (
 )
 
 var (
-	regionsPrefix = "pd/api/v1/regions"
-	regionPrefix  = "pd/api/v1/region/%s"
+	regionsPrefix   = "pd/api/v1/regions"
+	regionIDPrefix  = "pd/api/v1/region/id/%s"
+	regionKeyPrefix = "pd/api/v1/region/key/%s"
 )
 
 type regionInfo struct {
@@ -54,7 +54,7 @@ func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 			fmt.Println("region_id should be a number")
 			return
 		}
-		prefix = fmt.Sprintf(regionPrefix, args[0])
+		prefix = fmt.Sprintf(regionIDPrefix, args[0])
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
@@ -100,28 +100,14 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println("Error: unknown format")
 		return
 	}
+	prefix := fmt.Sprintf(regionKeyPrefix, key)
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get region: %s", err)
+		return
+	}
+	fmt.Println(r)
 
-	client, err := getClient()
-	if err != nil {
-		fmt.Println("Error: ", err)
-		return
-	}
-	region, leader, err := client.GetRegion(key)
-	if err != nil {
-		fmt.Println("Error: ", err)
-		return
-	}
-
-	r := &regionInfo{
-		Region: region,
-		Leader: leader,
-	}
-	infos, err := json.MarshalIndent(r, "", "  ")
-	if err != nil {
-		fmt.Println("Error: ", err)
-		return
-	}
-	fmt.Println(string(infos))
 }
 
 func decodeProtobufText(text string) ([]byte, error) {

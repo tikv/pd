@@ -45,7 +45,7 @@ func newRegionHandler(svr *server.Server, rd *render.Render) *regionHandler {
 	}
 }
 
-func (h *regionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
 		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
@@ -60,11 +60,19 @@ func (h *regionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	region, leader := cluster.GetRegionByID(regionID)
-	regionInfo := &regionInfo{
-		Region: region,
-		Leader: leader,
+	regionInfo := cluster.GetRegionInfoByID(regionID)
+	h.rd.JSON(w, http.StatusOK, regionInfo)
+}
+
+func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
+	cluster := h.svr.GetRaftCluster()
+	if cluster == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
+		return
 	}
+	vars := mux.Vars(r)
+	key := vars["key"]
+	regionInfo := cluster.GetRegionInfoByKey([]byte(key))
 	h.rd.JSON(w, http.StatusOK, regionInfo)
 }
 

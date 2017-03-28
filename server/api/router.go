@@ -66,7 +66,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	router.Handle("/api/v1/events", newEventsHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/feed", newFeedHandler(svr, rd)).Methods("GET")
-	router.Handle("/api/v1/region/{id}", newRegionHandler(svr, rd)).Methods("GET")
+
+	regionHandler := newRegionHandler(svr, rd)
+	router.HandleFunc("/api/v1/region/id/{id}", regionHandler.GetRegionByID).Methods("GET")
+	router.HandleFunc("/api/v1/region/key/{key}", regionHandler.GetRegionByKey).Methods("GET")
+
 	router.Handle("/api/v1/regions", newRegionsHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")
 
