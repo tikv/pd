@@ -52,6 +52,7 @@ func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 
 	tsoClient, err := s.grpcPDClient.Tso(context.Background())
 	c.Assert(err, IsNil)
+	defer tsoClient.CloseSend()
 	err = tsoClient.Send(req)
 	c.Assert(err, IsNil)
 	resp, err := tsoClient.Recv()
