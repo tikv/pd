@@ -119,6 +119,15 @@ func (r *regionInfo) GetFollowers() map[uint64]*metapb.Peer {
 	return followers
 }
 
+func (r *regionInfo) GetFollower() *metapb.Peer {
+	for _, peer := range r.GetPeers() {
+		if r.Leader == nil || r.Leader.GetId() != peer.GetId() {
+			return peer
+		}
+	}
+	return nil
+}
+
 var _ btree.Item = &regionItem{}
 
 type regionItem struct {

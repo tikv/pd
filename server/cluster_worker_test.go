@@ -178,7 +178,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 
 	s.svr, s.cleanup = newTestServer(c)
 	s.svr.cfg.nextRetryDelay = 50 * time.Millisecond
-	s.svr.scheduleOpt.SetMaxReplicas(5)
+	s.svr.scheduleOpt.SetMaxReplicas(1)
 
 	s.client = s.svr.client
 	s.clusterID = s.svr.clusterID
@@ -285,7 +285,7 @@ func splitRegion(c *C, old *metapb.Region, splitKey []byte, newRegionID uint64, 
 	return newRegion
 }
 
-func heartbeatRegion(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, msgID uint64, region *metapb.Region, leader *metapb.Peer) *pdpb.ChangePeer {
+func heartbeatRegion(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, msgID uint64, region *metapb.Region, leader *metapb.Peer) *pdpb.RegionHeartbeatResponse {
 	req := &pdpb.RegionHeartbeatRequest{
 		Header: newRequestHeader(clusterID),
 		Leader: leader,
@@ -293,7 +293,7 @@ func heartbeatRegion(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, msgID u
 	}
 	resp, err := grpcPDClient.RegionHeartbeat(context.Background(), req)
 	c.Assert(err, IsNil)
-	return resp.GetChangePeer()
+	return resp
 }
 
 func (s *testClusterWorkerSuite) heartbeatStore(c *C, msgID uint64, stats *pdpb.StoreStats) *pdpb.StoreHeartbeatResponse {
@@ -335,10 +335,6 @@ func checkSearchRegions(c *C, cluster *RaftCluster, keys ...[]byte) {
 func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
-
-	s.svr.scheduleOpt.SetMaxReplicas(1)
-
-	//	leaderPD := mustGetLeader(c, s.client, s.svr.getLeaderPath())
 
 	// split 1 to 1: [nil, m) 2: [m, nil), sync 1 first
 	r1, _ := cluster.getRegion([]byte("a"))
@@ -383,6 +379,8 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
+	s.svr.scheduleOpt.SetMaxReplicas(5)
+
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 
@@ -399,22 +397,27 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 	// Add Peers util all stores are used up.
 	for {
 		resp := heartbeatRegion(c, s.grpcPDClient, s.clusterID, 0, r1, leaderPeer)
-		if resp == nil {
+		if resp.GetChangePeer() == nil {
 			break
 		}
-		s.checkChangePeerRes(c, resp, pdpb.ConfChangeType_AddNode, r1)
+		s.checkChangePeerRes(c, resp.GetChangePeer(), pdpb.ConfChangeType_AddNode, r1)
 	}
 
 	// Split.
 	r2ID, r2PeerIDs := s.askSplit(c, 0, r1)
 	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)
 	leaderPeer2 := s.chooseRegionLeader(c, r2)
-	heartbeatRegion(c, s.grpcPDClient, s.clusterID, 0, r2, leaderPeer2)
+
+	resp := heartbeatRegion(c, s.grpcPDClient, s.clusterID, 0, r2, leaderPeer2)
+	c.Assert(resp.GetChangePeer(), IsNil)
+	c.Assert(resp.GetTransferLeader(), IsNil)
 
 	mustGetRegion(c, cluster, []byte("m"), r2)
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
+	s.svr.scheduleOpt.SetMaxReplicas(5)
+
 	opt := s.svr.scheduleOpt
 
 	cluster := s.svr.GetRaftCluster()
@@ -437,7 +440,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 	for i := 0; i < 4; i++ {
 		resp := heartbeatRegion(c, s.grpcPDClient, s.clusterID, 0, region, leaderPeer)
 		// Check RegionHeartbeat response.
-		s.checkChangePeerRes(c, resp, pdpb.ConfChangeType_AddNode, region)
+		s.checkChangePeerRes(c, resp.GetChangePeer(), pdpb.ConfChangeType_AddNode, region)
 		c.Logf("[add peer][region]:%v", region)
 
 		// Update region epoch and check region info.
@@ -453,27 +456,37 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 	opt.SetMaxReplicas(3)
 
 	// Remove 2 peers
-	for i := 0; i < 2; i++ {
+	peerCount := 5
+	for {
 		resp := heartbeatRegion(c, s.grpcPDClient, s.clusterID, 0, region, leaderPeer)
+		if resp.GetTransferLeader() != nil {
+			leaderPeer = resp.GetTransferLeader().GetPeer()
+			continue
+		}
+		if resp.GetChangePeer() == nil {
+			break
+		}
+
 		// Check RegionHeartbeat response.
-		s.checkChangePeerRes(c, resp, pdpb.ConfChangeType_RemoveNode, region)
+		s.checkChangePeerRes(c, resp.GetChangePeer(), pdpb.ConfChangeType_RemoveNode, region)
 
 		// Update region epoch and check region info.
 		region.RegionEpoch.ConfVer = region.GetRegionEpoch().GetConfVer() + 1
 		heartbeatRegion(c, s.grpcPDClient, s.clusterID, 0, region, leaderPeer)
 
 		// Check region peer count.
-		region = s.checkRegionPeerCount(c, regionKey, 4-i)
+		peerCount--
+		region = s.checkRegionPeerCount(c, regionKey, peerCount)
 	}
 
 	region = s.checkRegionPeerCount(c, regionKey, 3)
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
+	s.svr.scheduleOpt.SetMaxReplicas(2)
+
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
-
-	s.svr.scheduleOpt.SetMaxReplicas(2)
 
 	r1, _ := cluster.getRegion([]byte("a"))
 	leaderPeer1 := s.chooseRegionLeader(c, r1)
@@ -481,14 +494,15 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	// First sync, pd-server will return a AddPeer.
 	resp := heartbeatRegion(c, s.grpcPDClient, s.clusterID, 0, r1, leaderPeer1)
 	// Apply the AddPeer ConfChange, but with no sync.
-	s.checkChangePeerRes(c, resp, pdpb.ConfChangeType_AddNode, r1)
+	s.checkChangePeerRes(c, resp.GetChangePeer(), pdpb.ConfChangeType_AddNode, r1)
 	// Split 1 to 1: [nil, m) 2: [m, nil).
 	r2ID, r2PeerIDs := s.askSplit(c, 0, r1)
 	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)
 
 	// Sync r1 with both ConfVer and Version updated.
 	resp = heartbeatRegion(c, s.grpcPDClient, s.clusterID, 0, r1, leaderPeer1)
-	c.Assert(resp, IsNil)
+	c.Assert(resp.GetChangePeer(), IsNil)
+	c.Assert(resp.GetTransferLeader(), IsNil)
 
 	mustGetRegion(c, cluster, []byte("a"), r1)
 	mustGetRegion(c, cluster, []byte("z"), nil)
@@ -496,7 +510,8 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	// Sync r2.
 	leaderPeer2 := s.chooseRegionLeader(c, r2)
 	resp = heartbeatRegion(c, s.grpcPDClient, s.clusterID, 0, r2, leaderPeer2)
-	c.Assert(resp, IsNil)
+	c.Assert(resp.GetChangePeer(), IsNil)
+	c.Assert(resp.GetTransferLeader(), IsNil)
 }
 
 func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {

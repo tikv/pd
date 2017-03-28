@@ -36,8 +36,8 @@ type storeStatus struct {
 	StoreID            uint64            `json:"store_id"`
 	Capacity           typeutil.ByteSize `json:"capacity"`
 	Available          typeutil.ByteSize `json:"available"`
-	LeaderCount        uint32            `json:"leader_count"`
-	RegionCount        uint32            `json:"region_count"`
+	LeaderCount        int               `json:"leader_count"`
+	RegionCount        int               `json:"region_count"`
 	SendingSnapCount   uint32            `json:"sending_snap_count"`
 	ReceivingSnapCount uint32            `json:"receiving_snap_count"`
 	ApplyingSnapCount  uint32            `json:"applying_snap_count"`

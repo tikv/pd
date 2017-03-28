@@ -14,6 +14,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"path"
@@ -42,6 +43,7 @@ type kv struct {
 	s           *Server
 	client      *clientv3.Client
 	clusterPath string
+	configPath  string
 }
 
 func newKV(s *Server) *kv {
@@ -49,6 +51,7 @@ func newKV(s *Server) *kv {
 		s:           s,
 		client:      s.client,
 		clusterPath: path.Join(s.rootPath, "raft"),
+		configPath:  path.Join(s.rootPath, "config"),
 	}
 }
 
@@ -84,6 +87,52 @@ func (kv *kv) loadRegion(regionID uint64, region *metapb.Region) (bool, error) {
 
 func (kv *kv) saveRegion(region *metapb.Region) error {
 	return kv.saveProto(kv.regionPath(region.GetId()), region)
+}
+
+func (kv *kv) loadScheduleOption(opt *scheduleOption) (bool, error) {
+	cfg := &Config{}
+	cfg.Schedule = *opt.load()
+	cfg.Replication = *opt.rep.load()
+	isExist, err := kv.loadConfig(cfg)
+	if err != nil {
+		return false, errors.Trace(err)
+	}
+	if !isExist {
+		return false, nil
+	}
+	opt.store(&cfg.Schedule)
+	opt.rep.store(&cfg.Replication)
+	return true, nil
+}
+
+func (kv *kv) saveScheduleOption(opt *scheduleOption) error {
+	cfg := &Config{}
+	cfg.Schedule = *opt.load()
+	cfg.Replication = *opt.rep.load()
+	return kv.saveConfig(cfg)
+}
+
+func (kv *kv) saveConfig(cfg *Config) error {
+	value, err := json.Marshal(cfg)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return kv.save(kv.configPath, string(value))
+}
+
+func (kv *kv) loadConfig(cfg *Config) (bool, error) {
+	value, err := kv.load(kv.configPath)
+	if err != nil {
+		return false, errors.Trace(err)
+	}
+	if value == nil {
+		return false, nil
+	}
+	err = json.Unmarshal(value, cfg)
+	if err != nil {
+		return false, errors.Trace(err)
+	}
+	return true, nil
 }
 
 func (kv *kv) loadStores(stores *storesInfo, rangeLimit int64) error {

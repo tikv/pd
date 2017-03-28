@@ -14,8 +14,11 @@
 package pd
 
 import (
+	"path/filepath"
+	"strconv"
 	"time"
 
+	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
@@ -27,7 +30,7 @@ var _ = Suite(&testLeaderChangeSuite{})
 
 type testLeaderChangeSuite struct{}
 
-func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
+func (s *testLeaderChangeSuite) prepareClusterN(c *C, n int) (svrs map[string]*server.Server, endpoints []string, closeFunc func()) {
 	cfgs := server.NewTestMultiConfig(3)
 
 	ch := make(chan *server.Server, 3)
@@ -43,30 +46,67 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		}()
 	}
 
-	svrs := make(map[string]*server.Server, 3)
+	svrs = make(map[string]*server.Server, 3)
 	for i := 0; i < 3; i++ {
 		svr := <-ch
 		svrs[svr.GetAddr()] = svr
 	}
 
-	endpoints := make([]string, 0, 3)
+	endpoints = make([]string, 0, 3)
 	for _, svr := range svrs {
 		go svr.Run()
 		endpoints = append(endpoints, svr.GetEndpoints()...)
 	}
 
-	defer func() {
+	closeFunc = func() {
 		for _, svr := range svrs {
 			svr.Close()
 		}
 		for _, cfg := range cfgs {
 			cleanServer(cfg)
 		}
-	}()
+	}
 
 	leaderPeer := mustWaitLeader(c, svrs)
 	grpcClient := mustNewGrpcClient(c, leaderPeer.GetAddr())
 	bootstrapServer(c, newHeader(leaderPeer), grpcClient)
+	return
+}
+
+func (s *testLeaderChangeSuite) TestLeaderConfigChange(c *C) {
+	svrs, endpoints, closeFunc := s.prepareClusterN(c, 3)
+	defer closeFunc()
+
+	cli, err := NewClient(endpoints)
+	c.Assert(err, IsNil)
+	defer cli.Close()
+
+	leader := s.mustGetLeader(c, endpoints)
+	s.verifyLeader(c, cli.(*client), leader)
+
+	r := server.ReplicationConfig{MaxReplicas: 5}
+	svrs[leader].SetReplicationConfig(r)
+	svrs[leader].Close()
+	// wait leader changes
+	changed := false
+	for i := 0; i < 20; i++ {
+		mustWaitLeader(c, svrs)
+		newLeader := s.mustGetLeader(c, endpoints)
+		if newLeader != leader {
+			s.verifyLeader(c, cli.(*client), newLeader)
+			changed = true
+			nr := svrs[newLeader].GetConfig().Replication.MaxReplicas
+			c.Assert(nr, Equals, uint64(5))
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	c.Assert(changed, IsTrue)
+}
+
+func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
+	svrs, endpoints, closeFunc := s.prepareClusterN(c, 3)
+	defer closeFunc()
 
 	cli, err := NewClient(endpoints)
 	c.Assert(err, IsNil)
@@ -95,6 +135,56 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	c.Error("failed getTS from new leader after 10 seconds")
+}
+
+func (s *testLeaderChangeSuite) TestLeaderTransfer(c *C) {
+	servers, endpoints, closeFunc := s.prepareClusterN(c, 2)
+	defer closeFunc()
+
+	cli, err := NewClient(endpoints)
+	c.Assert(err, IsNil)
+	defer cli.Close()
+
+	quit := make(chan struct{})
+	physical, logical, err := cli.GetTS(context.Background())
+	c.Assert(err, IsNil)
+	lastTS := s.makeTS(physical, logical)
+	go func() {
+		for {
+			select {
+			case <-quit:
+				return
+			default:
+			}
+
+			physical, logical, err1 := cli.GetTS(context.Background())
+			if err1 == nil {
+				ts := s.makeTS(physical, logical)
+				c.Assert(lastTS, Less, ts)
+				lastTS = ts
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+
+	etcdCli, err := clientv3.New(clientv3.Config{
+		Endpoints:   endpoints,
+		DialTimeout: time.Second,
+	})
+	c.Assert(err, IsNil)
+	leaderPath := filepath.Join("/pd", strconv.FormatUint(cli.GetClusterID(context.Background()), 10), "leader")
+	for i := 0; i < 10; i++ {
+		mustWaitLeader(c, servers)
+		_, err = etcdCli.Delete(context.TODO(), leaderPath)
+		c.Assert(err, IsNil)
+		// Sleep to make sure all servers are notified and starts campaign.
+		time.Sleep(time.Second)
+	}
+	close(quit)
+}
+
+func (s *testLeaderChangeSuite) makeTS(physical, logical int64) uint64 {
+	return uint64(physical<<18 + logical)
 }
 
 func (s *testLeaderChangeSuite) mustGetLeader(c *C, urls []string) string {
