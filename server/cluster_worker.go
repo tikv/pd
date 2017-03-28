@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-func (c *RaftCluster) handleRegionHeartbeat(region *regionInfo) (*pdpb.RegionHeartbeatResponse, error) {
+func (c *RaftCluster) handleRegionHeartbeat(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, error) {
 	// If the region peer count is 0, then we should not handle this.
 	if len(region.GetPeers()) == 0 {
 		log.Warnf("invalid region, zero region peer count - %v", region)

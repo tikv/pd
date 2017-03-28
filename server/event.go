@@ -159,6 +159,6 @@ func (op *splitOperator) GetResourceKind() ResourceKind {
 }
 
 // Do implements Operator.Do interface.
-func (op *splitOperator) Do(region *regionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
+func (op *splitOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	return nil, true
 }

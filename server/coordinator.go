@@ -70,7 +70,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
 	}
 }
 
-func (c *coordinator) dispatch(region *regionInfo) *pdpb.RegionHeartbeatResponse {
+func (c *coordinator) dispatch(region *RegionInfo) *pdpb.RegionHeartbeatResponse {
 	// Check existed operator.
 	if op := c.getOperator(region.GetId()); op != nil {
 		res, finished := op.Do(region)

@@ -384,7 +384,7 @@ func minDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-func diffRegionPeersInfo(origin *regionInfo, other *regionInfo) string {
+func diffRegionPeersInfo(origin *RegionInfo, other *RegionInfo) string {
 	var ret []string
 	for _, a := range origin.Peers {
 		both := false
@@ -413,7 +413,7 @@ func diffRegionPeersInfo(origin *regionInfo, other *regionInfo) string {
 	return strings.Join(ret, ",")
 }
 
-func diffRegionKeyInfo(origin *regionInfo, other *regionInfo) string {
+func diffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 	var ret []string
 	if !bytes.Equal(origin.Region.StartKey, other.Region.StartKey) {
 		originKey := &metapb.Region{StartKey: origin.Region.StartKey}
