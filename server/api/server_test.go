@@ -173,6 +173,18 @@ func mustPutStore(c *C, s *server.Server, store *metapb.Store) {
 	testutil.MustRPCRequest(c, s.GetAddr(), req)
 }
 
+func mustRegionHeartBeat(c *C, s *server.Server, region *server.RegionInfo) {
+	req := &pdpb.Request{
+		Header:  newRequestHeader(s.ClusterID()),
+		CmdType: pdpb.CommandType_RegionHeartbeat,
+		RegionHeartbeat: &pdpb.RegionHeartbeatRequest{
+			Region: region.Region,
+			Leader: region.Leader,
+		},
+	}
+	testutil.MustRPCRequest(c, s.GetAddr(), req)
+}
+
 func readJSONWithURL(url string, data interface{}) error {
 	resp, err := unixClient.Get(url)
 	defer resp.Body.Close()
