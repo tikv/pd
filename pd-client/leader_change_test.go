@@ -31,11 +31,11 @@ var _ = Suite(&testLeaderChangeSuite{})
 type testLeaderChangeSuite struct{}
 
 func (s *testLeaderChangeSuite) prepareClusterN(c *C, n int) (svrs map[string]*server.Server, endpoints []string, closeFunc func()) {
-	cfgs := server.NewTestMultiConfig(3)
+	cfgs := server.NewTestMultiConfig(n)
 
-	ch := make(chan *server.Server, 3)
+	ch := make(chan *server.Server, n)
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < n; i++ {
 		cfg := cfgs[i]
 
 		go func() {
@@ -46,13 +46,13 @@ func (s *testLeaderChangeSuite) prepareClusterN(c *C, n int) (svrs map[string]*s
 		}()
 	}
 
-	svrs = make(map[string]*server.Server, 3)
-	for i := 0; i < 3; i++ {
+	svrs = make(map[string]*server.Server, n)
+	for i := 0; i < n; i++ {
 		svr := <-ch
 		svrs[svr.GetAddr()] = svr
 	}
 
-	endpoints = make([]string, 0, 3)
+	endpoints = make([]string, 0, n)
 	for _, svr := range svrs {
 		go svr.Run()
 		endpoints = append(endpoints, svr.GetEndpoints()...)
