@@ -601,7 +601,7 @@ func (s *testRegionMapSuite) TestRegionMap(c *C) {
 }
 
 func (s *testRegionMapSuite) regionInfo(id uint64) *RegionInfo {
-	return &regionInfo{
+	return &RegionInfo{
 		Region: &metapb.Region{
 			Id: id,
 		},
