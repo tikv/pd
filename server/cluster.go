@@ -537,5 +537,7 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 
 // FetchEvents fetches the operator events.
 func (c *RaftCluster) FetchEvents(key uint64, all bool) []LogEvent {
+	c.RLock()
+	defer c.RUnlock()
 	return c.coordinator.fetchEvents(key, all)
 }
