@@ -20,6 +20,7 @@ import (
 	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testGetLeaderSuite{})
@@ -71,9 +72,8 @@ func (s *testGetLeaderSuite) TestGetLeader(c *C) {
 func (s *testGetLeaderSuite) sendRequest(c *C, addr string) {
 	defer s.wg.Done()
 
-	req := &pdpb.Request{
-		CmdType: pdpb.CommandType_AllocId,
-		AllocId: &pdpb.AllocIdRequest{},
+	req := &pdpb.AllocIDRequest{
+		Header: newRequestHeader(0),
 	}
 
 	for {
@@ -83,10 +83,9 @@ func (s *testGetLeaderSuite) sendRequest(c *C, addr string) {
 		default:
 			// We don't need to check the response and error,
 			// just make sure the server will not panic.
-			conn, err := rpcConnect(addr)
-			if err == nil {
-				rpcCall(conn, 0, req)
-				conn.Close()
+			grpcPDClient := mustNewGrpcClient(c, addr)
+			if grpcPDClient != nil {
+				grpcPDClient.AllocID(context.Background(), req)
 			}
 		}
 		time.Sleep(10 * time.Millisecond)

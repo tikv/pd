@@ -17,7 +17,6 @@ import (
 	"math/rand"
 	"sync/atomic"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -396,7 +395,7 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 		region.DownPeers = []*pdpb.PeerStats{
 			{
 				Peer:        region.Peers[rand.Intn(len(region.Peers))],
-				DownSeconds: proto.Uint64(42),
+				DownSeconds: 42,
 			},
 		}
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)

@@ -17,6 +17,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/ngaut/log"
 	"github.com/pingcap/pd/server"
@@ -60,7 +61,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		return
 	}
 
-	urls, err := server.ParseUrls(leader.GetAddr())
+	urls, err := server.ParseUrls(strings.Join(leader.GetClientUrls(), ","))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -14,6 +14,7 @@
 package pd
 
 import (
+	"net"
 	"os"
 	"strings"
 	"testing"
@@ -22,9 +23,10 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
-	"github.com/twinj/uuid"
+	"github.com/pingcap/pd/server/api"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc"
 )
 
 func TestClient(t *testing.T) {
@@ -71,16 +73,18 @@ func cleanServer(cfg *server.Config) {
 type cleanupFunc func()
 
 type testClientSuite struct {
-	srv     *server.Server
-	client  Client
-	cleanup cleanupFunc
+	srv          *server.Server
+	client       Client
+	grpcPDClient pdpb.PDClient
+	cleanup      cleanupFunc
 }
 
 func (s *testClientSuite) SetUpSuite(c *C) {
 	s.srv, s.cleanup = newServer(c)
+	s.grpcPDClient = mustNewGrpcClient(c, s.srv.GetAddr())
 
 	mustWaitLeader(c, map[string]*server.Server{s.srv.GetAddr(): s.srv})
-	bootstrapServer(c, s.srv)
+	bootstrapServer(c, newHeader(s.srv), s.grpcPDClient)
 
 	var err error
 	s.client, err = NewClient(s.srv.GetEndpoints())
@@ -96,7 +100,8 @@ func (s *testClientSuite) TearDownSuite(c *C) {
 func newServer(c *C) (*server.Server, cleanupFunc) {
 	cfg := server.NewTestSingleConfig()
 
-	s, err := server.NewServer(cfg)
+	s := server.CreateServer(cfg)
+	err := s.StartEtcd(api.NewHandler(s))
 	c.Assert(err, IsNil)
 
 	go s.Run()
@@ -108,6 +113,21 @@ func newServer(c *C) (*server.Server, cleanupFunc) {
 	}
 
 	return s, cleanup
+}
+
+var unixStripper = strings.NewReplacer("unix://", "", "unixs://", "")
+
+func unixGrpcDialer(addr string, timeout time.Duration) (net.Conn, error) {
+	sock, err := net.DialTimeout("unix", unixStripper.Replace(addr), timeout)
+	return sock, err
+}
+
+func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
+	conn, err := grpc.Dial(addr, grpc.WithInsecure(),
+		grpc.WithDialer(unixGrpcDialer))
+
+	c.Assert(err, IsNil)
+	return pdpb.NewPDClient(conn)
 }
 
 func mustWaitLeader(c *C, svrs map[string]*server.Server) *server.Server {
@@ -123,40 +143,27 @@ func mustWaitLeader(c *C, svrs map[string]*server.Server) *server.Server {
 	return nil
 }
 
-func bootstrapServer(c *C, s *server.Server) {
-	req := &pdpb.Request{
-		Header: &pdpb.RequestHeader{
-			Uuid:      uuid.NewV4().Bytes(),
-			ClusterId: s.ClusterID(),
-		},
-		CmdType: pdpb.CommandType_Bootstrap,
-		Bootstrap: &pdpb.BootstrapRequest{
-			Store:  store,
-			Region: region,
-		},
+func newHeader(srv *server.Server) *pdpb.RequestHeader {
+	return &pdpb.RequestHeader{
+		ClusterId: srv.ClusterID(),
 	}
-	testutil.MustRPCRequest(c, s.GetAddr(), req)
 }
 
-func heartbeatRegion(c *C, s *server.Server) {
-	req := &pdpb.Request{
-		Header: &pdpb.RequestHeader{
-			Uuid:      uuid.NewV4().Bytes(),
-			ClusterId: s.ClusterID(),
-		},
-		CmdType: pdpb.CommandType_RegionHeartbeat,
-		RegionHeartbeat: &pdpb.RegionHeartbeatRequest{
-			Region: region,
-			Leader: peer,
-		},
+func bootstrapServer(c *C, header *pdpb.RequestHeader, client pdpb.PDClient) {
+	req := &pdpb.BootstrapRequest{
+		Header: header,
+		Store:  store,
+		Region: region,
 	}
-	testutil.MustRPCRequest(c, s.GetAddr(), req)
+
+	_, err := client.Bootstrap(context.Background(), req)
+	c.Assert(err, IsNil)
 }
 
 func (s *testClientSuite) TestTSO(c *C) {
 	var tss []int64
 	for i := 0; i < 100; i++ {
-		p, l, err := s.client.GetTS()
+		p, l, err := s.client.GetTS(context.Background())
 		c.Assert(err, IsNil)
 		tss = append(tss, p<<18+l)
 	}
@@ -169,18 +176,28 @@ func (s *testClientSuite) TestTSO(c *C) {
 }
 
 func (s *testClientSuite) TestGetRegion(c *C) {
-	heartbeatRegion(c, s.srv)
+	req := &pdpb.RegionHeartbeatRequest{
+		Header: newHeader(s.srv),
+		Region: region,
+		Leader: peer,
+	}
+	s.grpcPDClient.RegionHeartbeat(context.Background(), req)
 
-	r, leader, err := s.client.GetRegion([]byte("a"))
+	r, leader, err := s.client.GetRegion(context.Background(), []byte("a"))
 	c.Assert(err, IsNil)
 	c.Assert(r, DeepEquals, region)
 	c.Assert(leader, DeepEquals, peer)
 }
 
 func (s *testClientSuite) TestGetRegionByID(c *C) {
-	heartbeatRegion(c, s.srv)
+	req := &pdpb.RegionHeartbeatRequest{
+		Header: newHeader(s.srv),
+		Region: region,
+		Leader: peer,
+	}
+	s.grpcPDClient.RegionHeartbeat(context.Background(), req)
 
-	r, leader, err := s.client.GetRegionByID(3)
+	r, leader, err := s.client.GetRegionByID(context.Background(), 3)
 	c.Assert(err, IsNil)
 	c.Assert(r, DeepEquals, region)
 	c.Assert(leader, DeepEquals, peer)
@@ -191,7 +208,7 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	c.Assert(cluster, NotNil)
 
 	// Get an up store should be OK.
-	n, err := s.client.GetStore(store.GetId())
+	n, err := s.client.GetStore(context.Background(), store.GetId())
 	c.Assert(err, IsNil)
 	c.Assert(n, DeepEquals, store)
 
@@ -200,7 +217,7 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	c.Assert(err, IsNil)
 
 	// Get an offline store should be OK.
-	n, err = s.client.GetStore(store.GetId())
+	n, err = s.client.GetStore(context.Background(), store.GetId())
 	c.Assert(err, IsNil)
 	c.Assert(n.GetState(), Equals, metapb.StoreState_Offline)
 
@@ -208,7 +225,7 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	c.Assert(err, IsNil)
 
 	// Get a tombstone store should fail.
-	n, err = s.client.GetStore(store.GetId())
+	n, err = s.client.GetStore(context.Background(), store.GetId())
 	c.Assert(err, IsNil)
 	c.Assert(n, IsNil)
 }

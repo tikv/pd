@@ -49,14 +49,14 @@ func relaxEqualStings(c *C, a, b []string) {
 }
 
 func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
-	got := make(map[string][]*pdpb.PDMember)
+	got := make(map[string][]*pdpb.Member)
 	json.Unmarshal(body, &got)
 
 	c.Assert(len(got["members"]), Equals, len(cfgs))
 
 	for _, memb := range got["members"] {
 		for _, cfg := range cfgs {
-			if *memb.Name != cfg.Name {
+			if memb.GetName() != cfg.Name {
 				continue
 			}
 
@@ -178,8 +178,8 @@ func (s *testMemberAPISuite) TestMemberLeader(c *C) {
 	buf, err := ioutil.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 
-	var got leaderInfo
+	var got pdpb.Member
 	json.Unmarshal(buf, &got)
-	c.Assert(got.Addr, Equals, leader.GetAddr())
-	c.Assert(got.ID, Equals, leader.GetId())
+	c.Assert(got.GetClientUrls(), DeepEquals, leader.GetClientUrls())
+	c.Assert(got.GetMemberId(), Equals, leader.GetMemberId())
 }

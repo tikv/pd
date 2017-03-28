@@ -1,5 +1,5 @@
-hash: 5fbab4a7af3b084e751f9c3277a99b8388f340c45f984e3381f9181bbe477bd6
-updated: 2017-02-20T18:44:54.617161934+08:00
+hash: 9bf8de62d75110cd40d773abd624f2b6ef78e81215a2f136dc6baeecdc6234ea
+updated: 2017-03-28T17:58:23.823063648+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -88,7 +88,7 @@ imports:
 - name: github.com/dustin/go-humanize
   version: 7a41df006ff9af79a29f0ffa9c5f21fbe6314a2d
 - name: github.com/elazarl/go-bindata-assetfs
-  version: 9a6736ed45b44bf3835afeebb3034b57ed329f3e
+  version: 30f82fa23fd844bd5bb1e5f216db87fd77b5eb43
 - name: github.com/ghodss/yaml
   version: 73d445a93680fa1a78ae23a5839bad48f32ba1ee
 - name: github.com/gogo/protobuf
@@ -137,7 +137,7 @@ imports:
 - name: github.com/pingcap/check
   version: ce8a2f822ab1e245a4eefcef2996531c79c943f1
 - name: github.com/pingcap/kvproto
-  version: 4416a5a5ad6f6c63c27904c85c67c26133059127
+  version: 1ce19dac18a11abf6a04a11034bf42f2fbf57f1b
   subpackages:
   - pkg/coprocessor
   - pkg/eraftpb
@@ -171,7 +171,7 @@ imports:
   repo: https://github.com/spf13/cobra.git
   vcs: git
 - name: github.com/spf13/pflag
-  version: 9ff6c6923cfffbcd502984b8e0c80539a94968b7
+  version: d16db1e50e33dff1b6cdf37596cef36742128670
 - name: github.com/twinj/uuid
   version: 70cac2bcd273ef6a371bb96cde363d28b68734c3
 - name: github.com/ugorji/go

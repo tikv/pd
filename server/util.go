@@ -32,9 +32,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/msgpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/util"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"golang.org/x/net/context"
 )
@@ -246,35 +244,6 @@ func rpcConnect(addr string) (net.Conn, error) {
 	return nil, errors.Errorf("connect to %s failed", addr)
 }
 
-func rpcCall(conn net.Conn, reqID uint64, request *pdpb.Request) (*pdpb.Response, error) {
-	req := &msgpb.Message{
-		MsgType: msgpb.MessageType_PdReq,
-		PdReq:   request,
-	}
-	if err := util.WriteMessage(conn, reqID, req); err != nil {
-		return nil, errors.Trace(err)
-	}
-	resp := &msgpb.Message{}
-	respID, err := util.ReadMessage(conn, resp)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	if respID != reqID {
-		return nil, errors.Errorf("message id mismatch: reqID %d respID %d", reqID, respID)
-	}
-	return resp.GetPdResp(), nil
-}
-
-// RPCRequest sends a request to addr and waits for the response.
-// Export for API test.
-func RPCRequest(addr string, reqID uint64, request *pdpb.Request) (*pdpb.Response, error) {
-	conn, err := rpcConnect(addr)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return rpcCall(conn, reqID, request)
-}
-
 type redirectFormatter struct{}
 
 // Format turns capnslog logs to ngaut logs.
@@ -343,17 +312,18 @@ func InitLogger(cfg *Config) error {
 	return nil
 }
 
-// GetPDMembers return a slice of PDMembers.
-func GetPDMembers(etcdClient *clientv3.Client) ([]*pdpb.PDMember, error) {
+// GetMembers return a slice of Members.
+func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
 	listResp, err := etcdutil.ListEtcdMembers(etcdClient)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 
-	members := make([]*pdpb.PDMember, 0, len(listResp.Members))
+	members := make([]*pdpb.Member, 0, len(listResp.Members))
 	for _, m := range listResp.Members {
-		info := &pdpb.PDMember{
-			Name:       &m.Name,
+		info := &pdpb.Member{
+			Name:       m.Name,
+			MemberId:   m.ID,
 			ClientUrls: m.ClientURLs,
 			PeerUrls:   m.PeerURLs,
 		}

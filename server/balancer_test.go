@@ -17,9 +17,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
-	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -511,7 +509,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	tc.setStoreDown(2)
 	downPeer := &pdpb.PeerStats{
 		Peer:        region.GetStorePeer(2),
-		DownSeconds: proto.Uint64(24 * 60 * 60),
+		DownSeconds: 24 * 60 * 60,
 	}
 	region.DownPeers = append(region.DownPeers, downPeer)
 	checkRemovePeer(c, rc.Check(region), 2)
@@ -691,7 +689,7 @@ func checkAddPeer(c *C, bop Operator, storeID uint64) {
 	case *regionOperator:
 		op = t.Ops[0].(*changePeerOperator)
 	}
-	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(op.ChangePeer.GetChangeType(), Equals, pdpb.ConfChangeType_AddNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
@@ -711,7 +709,7 @@ func checkRemovePeer(c *C, bop Operator, storeID uint64) {
 		}
 	}
 	c.Assert(op, NotNil)
-	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(op.ChangePeer.GetChangeType(), Equals, pdpb.ConfChangeType_RemoveNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 

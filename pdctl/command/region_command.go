@@ -23,6 +23,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
+	"golang.org/x/net/context"
 )
 
 var (
@@ -106,7 +107,7 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println("Error: ", err)
 		return
 	}
-	region, leader, err := client.GetRegion(key)
+	region, leader, err := client.GetRegion(context.Background(), key)
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return

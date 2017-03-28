@@ -16,9 +16,7 @@ package server
 import (
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
-	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -149,7 +147,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	tc.setStoreDown(3)
 	downPeer := &pdpb.PeerStats{
 		Peer:        region.GetStorePeer(3),
-		DownSeconds: proto.Uint64(24 * 60 * 60),
+		DownSeconds: 24 * 60 * 60,
 	}
 	region.DownPeers = append(region.DownPeers, downPeer)
 	resp = co.dispatch(region)
@@ -358,13 +356,13 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 
 func checkAddPeerResp(c *C, resp *pdpb.RegionHeartbeatResponse, storeID uint64) {
 	changePeer := resp.GetChangePeer()
-	c.Assert(changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(changePeer.GetChangeType(), Equals, pdpb.ConfChangeType_AddNode)
 	c.Assert(changePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
 func checkRemovePeerResp(c *C, resp *pdpb.RegionHeartbeatResponse, storeID uint64) {
 	changePeer := resp.GetChangePeer()
-	c.Assert(changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(changePeer.GetChangeType(), Equals, pdpb.ConfChangeType_RemoveNode)
 	c.Assert(changePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
