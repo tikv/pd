@@ -620,7 +620,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *regionInfo) error {
 		if len(region.DownPeers) > 0 || len(region.PendingPeers) > 0 {
 			saveCache = true
 		}
-		if len(origin.DownPeers) > 0 || len(origin.DownPeers) > 0 {
+		if len(origin.DownPeers) > 0 || len(origin.PendingPeers) > 0 {
 			saveCache = true
 		}
 	}

@@ -87,7 +87,7 @@ func (s *testLeaderChangeSuite) TestLeaderConfigChange(c *C) {
 	mustConnectLeader(c, endpoints, leader.GetAddr())
 
 	r := server.ReplicationConfig{MaxReplicas: 5}
-	svrs[leader.GetAddr()].SetReplication(r)
+	svrs[leader.GetAddr()].SetReplicationConfig(r)
 	svrs[leader.GetAddr()].Close()
 	// wait leader changes
 	changed := false

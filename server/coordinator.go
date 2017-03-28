@@ -24,11 +24,12 @@ import (
 )
 
 const (
-	historiesCacheSize  = 1000
-	eventsCacheSize     = 1000
-	maxScheduleRetries  = 10
-	maxScheduleInterval = time.Minute
-	minScheduleInterval = time.Millisecond * 10
+	historiesCacheSize     = 1000
+	eventsCacheSize        = 1000
+	maxScheduleRetries     = 10
+	maxScheduleInterval    = time.Minute
+	minScheduleInterval    = time.Millisecond * 10
+	scheduleIntervalFactor = 1.3
 )
 
 var (
@@ -162,14 +163,8 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			if !s.AllowSchedule() {
 				continue
 			}
-			for i := 0; i < maxScheduleRetries; i++ {
-				op := s.Schedule(c.cluster)
-				if op == nil {
-					continue
-				}
-				if c.addOperator(op) {
-					break
-				}
+			if op := s.Schedule(c.cluster); op != nil {
+				c.addOperator(op)
 			}
 		case <-s.Ctx().Done():
 			log.Infof("%v stopped: %v", s.GetName(), s.Ctx().Err())
@@ -300,14 +295,16 @@ func (s *scheduleController) Stop() {
 }
 
 func (s *scheduleController) Schedule(cluster *clusterInfo) Operator {
-	// If we have schedule, reset interval to the minimal interval.
-	if op := s.Scheduler.Schedule(cluster); op != nil {
-		s.interval = minScheduleInterval
-		return op
+	for i := 0; i < maxScheduleRetries; i++ {
+		// If we have schedule, reset interval to the minimal interval.
+		if op := s.Scheduler.Schedule(cluster); op != nil {
+			s.interval = minScheduleInterval
+			return op
+		}
 	}
 
 	// If we have no schedule, increase the interval exponentially.
-	s.interval = minDuration(s.interval*2, maxScheduleInterval)
+	s.interval = minDuration(time.Duration(float64(s.interval)*scheduleIntervalFactor), maxScheduleInterval)
 	return nil
 }
 

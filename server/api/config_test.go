@@ -15,7 +15,6 @@ package api
 
 import (
 	"encoding/json"
-	"io/ioutil"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -41,7 +40,7 @@ func checkConfigResponse(c *C, body []byte, cfgs []*server.Config) {
 	c.Assert(err, IsNil)
 }
 
-func (s *testConfigSuite) TestConfigList(c *C) {
+func (s *testConfigSuite) TestConfigAll(c *C) {
 	numbers := []int{1, 3}
 	for _, num := range numbers {
 		cfgs, _, clean := mustNewCluster(c, num)
@@ -51,9 +50,32 @@ func (s *testConfigSuite) TestConfigList(c *C) {
 		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
-		buf, err := ioutil.ReadAll(resp.Body)
+		cfg := &server.Config{}
+		err = readJSON(resp.Body, cfg)
 		c.Assert(err, IsNil)
-		checkConfigResponse(c, buf, cfgs)
+
+		r := map[string]int{"max-replicas": 5}
+		postData, err := json.Marshal(r)
+		c.Assert(err, IsNil)
+		err = postJSON(s.hc, addr, postData)
+		c.Assert(err, IsNil)
+		l := map[string]interface{}{
+			"location-labels":       "zone,rack",
+			"region-schedule-limit": 10,
+		}
+		postData, err = json.Marshal(l)
+		c.Assert(err, IsNil)
+		err = postJSON(s.hc, addr, postData)
+		c.Assert(err, IsNil)
+
+		resp, err = s.hc.Get(addr)
+		newCfg := &server.Config{}
+		err = readJSON(resp.Body, newCfg)
+		c.Assert(err, IsNil)
+		cfg.Replication.MaxReplicas = 5
+		cfg.Replication.LocationLabels = []string{"zone", "rack"}
+		cfg.Schedule.RegionScheduleLimit = 10
+		c.Assert(cfg, DeepEquals, newCfg)
 	}
 }
 
@@ -72,7 +94,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 
 		sc.MaxStoreDownTime.Duration = time.Second
 		postData, err := json.Marshal(sc)
-		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config"}
+		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/schedule"}
 		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))
 		err = postJSON(s.hc, postAddr, postData)
 		c.Assert(err, IsNil)
@@ -101,16 +123,23 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 		c.Assert(err, IsNil)
 
 		rc.MaxReplicas = 5
-		postData, err := json.Marshal(rc)
+
+		rc1 := map[string]int{"max-replicas": 5}
+		postData, err := json.Marshal(rc1)
 		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/replicate"}
 		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))
 		err = postJSON(s.hc, postAddr, postData)
 		c.Assert(err, IsNil)
+		rc.LocationLabels = []string{"zone", "rack"}
+
+		rc2 := map[string]string{"location-labels": "zone,rack"}
+		postData, err = json.Marshal(rc2)
+		err = postJSON(s.hc, postAddr, postData)
 
 		resp, err = s.hc.Get(addr)
-		rc1 := &server.ReplicationConfig{}
-		err = readJSON(resp.Body, rc1)
+		rc3 := &server.ReplicationConfig{}
+		err = readJSON(resp.Body, rc3)
 
-		c.Assert(*rc, DeepEquals, *rc1)
+		c.Assert(*rc, DeepEquals, *rc3)
 	}
 }
