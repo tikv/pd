@@ -26,8 +26,8 @@ import (
 
 var (
 	regionsPrefix   = "pd/api/v1/regions"
-	regionIDPrefix  = "pd/api/v1/region/id/%s"
-	regionKeyPrefix = "pd/api/v1/region/key/%s"
+	regionIDPrefix  = "pd/api/v1/region/id"
+	regionKeyPrefix = "pd/api/v1/region/key"
 )
 
 type regionInfo struct {
@@ -54,7 +54,7 @@ func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 			fmt.Println("region_id should be a number")
 			return
 		}
-		prefix = fmt.Sprintf(regionIDPrefix, args[0])
+		prefix = regionIDPrefix + "/" + args[0]
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
@@ -82,14 +82,14 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	var (
-		key []byte
+		key string
 		err error
 	)
 
 	format := cmd.Flags().Lookup("format").Value.String()
 	switch format {
 	case "raw":
-		key = []byte(args[0])
+		key = args[0]
 	case "pb", "proto", "protobuf":
 		key, err = decodeProtobufText(args[0])
 		if err != nil {
@@ -100,7 +100,7 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println("Error: unknown format")
 		return
 	}
-	prefix := fmt.Sprintf(regionKeyPrefix, key)
+	prefix := regionKeyPrefix + "/" + key
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get region: %s", err)
@@ -110,24 +110,24 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 
 }
 
-func decodeProtobufText(text string) ([]byte, error) {
+func decodeProtobufText(text string) (string, error) {
 	var buf []byte
 	r := bytes.NewBuffer([]byte(text))
 	for {
 		c, err := r.ReadByte()
 		if err != nil {
 			if err != io.EOF {
-				return nil, err
+				return "", err
 			}
 			break
 		}
 		if c == '\\' {
 			_, err := fmt.Sscanf(string(r.Next(3)), "%03o", &c)
 			if err != nil {
-				return nil, err
+				return "", err
 			}
 		}
 		buf = append(buf, c)
 	}
-	return buf, nil
+	return string(buf), nil
 }
