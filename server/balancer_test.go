@@ -111,11 +111,11 @@ func (c *testClusterInfo) updateSnapshotCount(storeID uint64, snapshotCount int)
 	c.putStore(store)
 }
 
-func (c *testClusterInfo) updateStorageRatio(storeID uint64, storageRatio float64) {
+func (c *testClusterInfo) updateStorageRatio(storeID uint64, usedRatio, availableRatio float64) {
 	store := c.getStore(storeID)
 	store.status.Capacity = uint64(1024)
-	store.status.UsedSize = uint64(float64(store.status.Capacity) * storageRatio)
-	store.status.Available = uint64(float64(store.status.Capacity) * (1 - storageRatio))
+	store.status.UsedSize = uint64(float64(store.status.Capacity) * usedRatio)
+	store.status.Available = uint64(float64(store.status.Capacity) * availableRatio)
 	c.putStore(store)
 }
 
@@ -488,11 +488,13 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	checkAddPeer(c, rc.Check(region), 4)
 
 	// Test storageThresholdFilter.
-	// If storage ratio > storageRatioThreshold, we can not add peer.
-	tc.updateStorageRatio(4, 0.9)
+	// If availableRatio < storageRatioThreshold(0.2), we can not add peer.
+	tc.updateStorageRatio(4, 0.9, 0.1)
 	checkAddPeer(c, rc.Check(region), 3)
-	// If storage ratio < storageRatioThreshold, we can add peer again.
-	tc.updateStorageRatio(4, 0.7)
+	tc.updateStorageRatio(4, 0.5, 0.1)
+	checkAddPeer(c, rc.Check(region), 3)
+	// If availableRatio > storageRatioThreshold(0.2), we can add peer again.
+	tc.updateStorageRatio(4, 0.7, 0.3)
 	checkAddPeer(c, rc.Check(region), 4)
 
 	// Add peer in store 4, and we have enough replicas.
@@ -637,7 +639,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 
 	// Store 9 has a different zone, but it is almost full.
 	tc.addLabelsStore(9, 1, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
-	tc.updateStorageRatio(9, 0.9)
+	tc.updateStorageRatio(9, 0.9, 0.1)
 	c.Assert(rc.Check(region), IsNil)
 
 	// Store 10 has a different zone.
