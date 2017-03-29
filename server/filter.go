@@ -159,7 +159,7 @@ func (f *snapshotCountFilter) FilterTarget(store *storeInfo) bool {
 // storageThresholdFilter ensures that we will not use an almost full store as a target.
 type storageThresholdFilter struct{}
 
-const storageRatioThreshold = 0.8
+const storageAvailableRatioThreshold = 0.2
 
 func newStorageThresholdFilter(opt *scheduleOption) *storageThresholdFilter {
 	return &storageThresholdFilter{}
@@ -170,7 +170,7 @@ func (f *storageThresholdFilter) FilterSource(store *storeInfo) bool {
 }
 
 func (f *storageThresholdFilter) FilterTarget(store *storeInfo) bool {
-	return store.storageRatio() > storageRatioThreshold
+	return store.availableRatio() < storageAvailableRatioThreshold
 }
 
 // distinctScoreFilter ensures that distinct score will not decrease.

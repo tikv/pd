@@ -99,14 +99,14 @@ func (s *storeInfo) regionScore() float64 {
 }
 
 func (s *storeInfo) storageSize() uint64 {
-	return s.status.GetCapacity() - s.status.GetAvailable()
+	return s.status.UsedSize
 }
 
-func (s *storeInfo) storageRatio() float64 {
+func (s *storeInfo) availableRatio() float64 {
 	if s.status.GetCapacity() == 0 {
 		return 0
 	}
-	return float64(s.storageSize()) / float64(s.status.GetCapacity())
+	return float64(s.status.GetAvailable()) / float64(s.status.GetCapacity())
 }
 
 func (s *storeInfo) resourceCount(kind ResourceKind) uint64 {
