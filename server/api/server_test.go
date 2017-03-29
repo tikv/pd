@@ -14,6 +14,7 @@
 package api
 
 import (
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,8 +25,9 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc"
 )
 
 var (
@@ -150,39 +152,53 @@ func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 	}
 }
 
+var unixStripper = strings.NewReplacer("unix://", "", "unixs://", "")
+
+func unixGrpcDialer(addr string, timeout time.Duration) (net.Conn, error) {
+	sock, err := net.DialTimeout("unix", unixStripper.Replace(addr), timeout)
+	return sock, err
+}
+
+func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
+	conn, err := grpc.Dial(addr, grpc.WithInsecure(),
+		grpc.WithDialer(unixGrpcDialer))
+
+	c.Assert(err, IsNil)
+	return pdpb.NewPDClient(conn)
+}
 func mustBootstrapCluster(c *C, s *server.Server) {
-	req := &pdpb.Request{
-		Header:  newRequestHeader(s.ClusterID()),
-		CmdType: pdpb.CommandType_Bootstrap,
-		Bootstrap: &pdpb.BootstrapRequest{
-			Store:  store,
-			Region: region,
-		},
+	grpcPDClient := mustNewGrpcClient(c, s.GetAddr())
+	req := &pdpb.BootstrapRequest{
+		Header: newRequestHeader(s.ClusterID()),
+		Store:  store,
+		Region: region,
 	}
-	testutil.MustRPCRequest(c, s.GetAddr(), req)
+	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_OK)
 }
 
 func mustPutStore(c *C, s *server.Server, store *metapb.Store) {
-	req := &pdpb.Request{
-		Header:  newRequestHeader(s.ClusterID()),
-		CmdType: pdpb.CommandType_PutStore,
-		PutStore: &pdpb.PutStoreRequest{
-			Store: store,
-		},
+	grpcPDClient := mustNewGrpcClient(c, s.GetAddr())
+	req := &pdpb.PutStoreRequest{
+		Header: newRequestHeader(s.ClusterID()),
+		Store:  store,
 	}
-	testutil.MustRPCRequest(c, s.GetAddr(), req)
+	resp, err := grpcPDClient.PutStore(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_OK)
 }
 
 func mustRegionHeartBeat(c *C, s *server.Server, region *server.RegionInfo) {
-	req := &pdpb.Request{
-		Header:  newRequestHeader(s.ClusterID()),
-		CmdType: pdpb.CommandType_RegionHeartbeat,
-		RegionHeartbeat: &pdpb.RegionHeartbeatRequest{
-			Region: region.Region,
-			Leader: region.Leader,
-		},
+	grpcPDClient := mustNewGrpcClient(c, s.GetAddr())
+	req := &pdpb.RegionHeartbeatRequest{
+		Header: newRequestHeader(s.ClusterID()),
+		Region: region.Region,
+		Leader: region.Leader,
 	}
-	testutil.MustRPCRequest(c, s.GetAddr(), req)
+	resp, err := grpcPDClient.RegionHeartbeat(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_OK)
 }
 
 func readJSONWithURL(url string, data interface{}) error {

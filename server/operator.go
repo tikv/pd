@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/ngaut/log"
-	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -76,29 +75,25 @@ func (op *adminOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, 
 }
 
 type regionOperator struct {
-	Region *RegionInfo `json:"region"`
-	Start  time.Time   `json:"start"`
-	End    time.Time   `json:"end"`
-	Index  int         `json:"index"`
-	Ops    []Operator  `json:"ops"`
+	Region *RegionInfo  `json:"region"`
+	Start  time.Time    `json:"start"`
+	End    time.Time    `json:"end"`
+	Index  int          `json:"index"`
+	Ops    []Operator   `json:"ops"`
+	Kind   ResourceKind `json:"kind"`
 }
 
-func newRegionOperator(region *RegionInfo, ops ...Operator) *regionOperator {
+func newRegionOperator(region *RegionInfo, kind ResourceKind, ops ...Operator) *regionOperator {
 	// Do some check here, just fatal because it must be bug.
 	if len(ops) == 0 {
 		log.Fatalf("[region %d] new region operator with no ops", region.GetId())
-	}
-	kind := ops[0].GetResourceKind()
-	for _, op := range ops {
-		if op.GetResourceKind() != kind {
-			log.Fatalf("[region %d] new region operator with ops of different kinds %v and %v", region.GetId(), op.GetResourceKind(), kind)
-		}
 	}
 
 	return &regionOperator{
 		Region: region,
 		Start:  time.Now(),
 		Ops:    ops,
+		Kind:   kind,
 	}
 }
 
@@ -111,7 +106,7 @@ func (op *regionOperator) GetRegionID() uint64 {
 }
 
 func (op *regionOperator) GetResourceKind() ResourceKind {
-	return op.Ops[0].GetResourceKind()
+	return op.Kind
 }
 
 func (op *regionOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
@@ -145,7 +140,8 @@ func newAddPeerOperator(regionID uint64, peer *metapb.Peer) *changePeerOperator 
 		Name:     "add_peer",
 		RegionID: regionID,
 		ChangePeer: &pdpb.ChangePeer{
-			ChangeType: raftpb.ConfChangeType_AddNode.Enum(),
+			// FIXME: replace with actual ConfChangeType once eraftpb uses proto3.
+			ChangeType: pdpb.ConfChangeType_AddNode,
 			Peer:       peer,
 		},
 	}
@@ -156,7 +152,8 @@ func newRemovePeerOperator(regionID uint64, peer *metapb.Peer) *changePeerOperat
 		Name:     "remove_peer",
 		RegionID: regionID,
 		ChangePeer: &pdpb.ChangePeer{
-			ChangeType: raftpb.ConfChangeType_RemoveNode.Enum(),
+			// FIXME: replace with actual ConfChangeType once eraftpb uses proto3.
+			ChangeType: pdpb.ConfChangeType_RemoveNode,
 			Peer:       peer,
 		},
 	}
@@ -178,7 +175,7 @@ func (op *changePeerOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatRespo
 	// Check if operator is finished.
 	peer := op.ChangePeer.GetPeer()
 	switch op.ChangePeer.GetChangeType() {
-	case raftpb.ConfChangeType_AddNode:
+	case pdpb.ConfChangeType_AddNode:
 		if region.GetPendingPeer(peer.GetId()) != nil {
 			// Peer is added but not finished.
 			return nil, false
@@ -187,7 +184,7 @@ func (op *changePeerOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatRespo
 			// Peer is added and finished.
 			return nil, true
 		}
-	case raftpb.ConfChangeType_RemoveNode:
+	case pdpb.ConfChangeType_RemoveNode:
 		if region.GetPeer(peer.GetId()) == nil {
 			// Peer is removed.
 			return nil, true

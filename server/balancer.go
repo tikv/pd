@@ -56,7 +56,9 @@ func adjustBalanceLimit(cluster *clusterInfo, kind ResourceKind) uint64 {
 	stores := cluster.getStores()
 	counts := make([]float64, 0, len(stores))
 	for _, s := range stores {
-		counts = append(counts, float64(s.resourceCount(kind)))
+		if s.isUp() {
+			counts = append(counts, float64(s.resourceCount(kind)))
+		}
 	}
 	limit, _ := stats.StandardDeviation(stats.Float64Data(counts))
 	return maxUint64(1, uint64(limit))
@@ -129,6 +131,7 @@ func newBalanceRegionScheduler(opt *scheduleOption) *balanceRegionScheduler {
 	filters = append(filters, newStateFilter(opt))
 	filters = append(filters, newHealthFilter(opt))
 	filters = append(filters, newSnapshotCountFilter(opt))
+	filters = append(filters, newStorageThresholdFilter(opt))
 
 	return &balanceRegionScheduler{
 		opt:      opt,

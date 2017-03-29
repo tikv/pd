@@ -37,16 +37,21 @@ var (
 	errInvalidAddr = errors.New("Invalid pd address, Cannot get connect to it")
 )
 
-func doRequest(cmd *cobra.Command, prefix string, method string) (string, error) {
-	var res string
+func getRequest(cmd *cobra.Command, prefix string, method string, bodyType string, body io.Reader) (*http.Request, error) {
 	if method == "" {
 		method = http.MethodGet
 	}
 	url := getAddressFromCmd(cmd, prefix)
-	req, err := http.NewRequest(method, url, nil)
+	req, err := http.NewRequest(method, url, body)
 	if err != nil {
-		return res, err
+		return nil, err
 	}
+	req.Header.Set("Content-Type", bodyType)
+	return req, err
+}
+
+func dail(req *http.Request) (string, error) {
+	var res string
 	reps, err := dailClient.Do(req)
 	if err != nil {
 		return res, err
@@ -62,6 +67,14 @@ func doRequest(cmd *cobra.Command, prefix string, method string) (string, error)
 	}
 	res = string(r)
 	return res, nil
+}
+
+func doRequest(cmd *cobra.Command, prefix string, method string) (string, error) {
+	req, err := getRequest(cmd, prefix, method, "", nil)
+	if err != nil {
+		return "", err
+	}
+	return dail(req)
 }
 
 func genResponseError(r *http.Response) error {

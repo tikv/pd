@@ -14,11 +14,10 @@
 package server
 
 import (
+	"math"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
-	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -187,56 +186,123 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 	}
 }
 
-var _ = Suite(&testBalanceLeaderSchedulerSuite{})
-
-type testBalanceLeaderSchedulerSuite struct{}
-
-func (s *testBalanceLeaderSchedulerSuite) TestBalance(c *C) {
+func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
+	tc.addLeaderStore(1, 10)
+	tc.addLeaderStore(2, 20)
+	tc.addLeaderStore(3, 30)
 
+	// StandDeviation is sqrt((10^2+0+10^2)/3).
+	c.Assert(adjustBalanceLimit(cluster, leaderKind), Equals, uint64(math.Sqrt(200.0/3.0)))
+
+	tc.setStoreOffline(1)
+	// StandDeviation is sqrt((5^2+5^2)/2).
+	c.Assert(adjustBalanceLimit(cluster, leaderKind), Equals, uint64(math.Sqrt(50.0/2.0)))
+}
+
+var _ = Suite(&testBalanceLeaderSchedulerSuite{})
+
+type testBalanceLeaderSchedulerSuite struct {
+	cluster *clusterInfo
+	tc      *testClusterInfo
+	lb      *balanceLeaderScheduler
+}
+
+func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
+	s.cluster = newClusterInfo(newMockIDAllocator())
+	s.tc = newTestClusterInfo(s.cluster)
 	_, opt := newTestScheduleConfig()
-	lb := newBalanceLeaderScheduler(opt)
+	s.lb = newBalanceLeaderScheduler(opt)
+}
 
-	// Add stores 1,2,3,4
-	tc.addLeaderStore(1, 1)
-	tc.addLeaderStore(2, 0)
-	tc.addLeaderStore(3, 0)
-	tc.addLeaderStore(4, 0)
-	// Add region 1 with leader in store 1 and followers in stores 2,3,4.
-	tc.addLeaderRegion(1, 1, 2, 3, 4)
+func (s *testBalanceLeaderSchedulerSuite) schedule() Operator {
+	return s.lb.Schedule(s.cluster)
+}
 
+func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
+	// Stores:     1    2    3    4
+	// Leaders:    1    0    0    0
+	// Region1:    L    F    F    F
+	s.tc.addLeaderStore(1, 1)
+	s.tc.addLeaderStore(2, 0)
+	s.tc.addLeaderStore(3, 0)
+	s.tc.addLeaderStore(4, 0)
+	s.tc.addLeaderRegion(1, 1, 2, 3, 4)
 	// Test min balance diff (>=2).
-	c.Check(lb.Schedule(cluster), IsNil)
-	// 2 - 0 >= 2
-	tc.updateLeaderCount(1, 2)
-	c.Check(lb.Schedule(cluster), NotNil)
+	c.Check(s.schedule(), IsNil)
 
-	// Add stores 1,2,3,4
-	tc.addLeaderStore(1, 7)
-	tc.addLeaderStore(2, 8)
-	tc.addLeaderStore(3, 9)
-	tc.addLeaderStore(4, 10)
-	// Add region 1 with leader in store 4 and followers in stores 1,2,3.
-	tc.addLeaderRegion(1, 4, 1, 2, 3)
+	// Stores:     1    2    3    4
+	// Leaders:    2    0    0    0
+	// Region1:    L    F    F    F
+	s.tc.updateLeaderCount(1, 2)
+	c.Check(s.schedule(), NotNil)
 
-	// Test min balance diff (>=4).
-	c.Check(lb.Schedule(cluster), IsNil)
-	// 16 - 7 >= 4
-	tc.addLeaderStore(4, 16)
-	checkTransferLeader(c, lb.Schedule(cluster), 4, 1)
+	// Stores:     1    2    3    4
+	// Leaders:    7    8    9   10
+	// Region1:    F    F    F    L
+	s.tc.updateLeaderCount(1, 7)
+	s.tc.updateLeaderCount(2, 8)
+	s.tc.updateLeaderCount(3, 9)
+	s.tc.updateLeaderCount(4, 10)
+	s.tc.addLeaderRegion(1, 4, 1, 2, 3)
+	// Min balance diff is 4. Now is 10-7=3.
+	c.Check(s.schedule(), IsNil)
 
+	// Stores:     1    2    3    4
+	// Leaders:    7    8    9   16
+	// Region1:    F    F    F    L
+	s.tc.updateLeaderCount(4, 16)
+	// Min balance diff is 4. Now is 16-7=9.
+	c.Check(s.schedule(), NotNil)
+}
+
+func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
+	// Stores:     1    2    3    4
+	// Leaders:    1    2    3   10
+	// Region1:    F    F    F    L
+	s.tc.addLeaderStore(1, 1)
+	s.tc.addLeaderStore(2, 2)
+	s.tc.addLeaderStore(3, 3)
+	s.tc.addLeaderStore(4, 10)
+	s.tc.addLeaderRegion(1, 4, 1, 2, 3)
+
+	checkTransferLeader(c, s.schedule(), 4, 1)
 	// Test stateFilter.
 	// If store 1 is down, it will be filtered,
 	// store 2 becomes the store with least leaders.
-	tc.setStoreDown(1)
-	checkTransferLeader(c, lb.Schedule(cluster), 4, 2)
+	s.tc.setStoreDown(1)
+	checkTransferLeader(c, s.schedule(), 4, 2)
 
 	// Test healthFilter.
 	// If store 2 is busy, it will be filtered,
 	// store 3 becomes the store with least leaders.
-	tc.setStoreBusy(2, true)
-	checkTransferLeader(c, lb.Schedule(cluster), 4, 3)
+	s.tc.setStoreBusy(2, true)
+	checkTransferLeader(c, s.schedule(), 4, 3)
+}
+
+func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
+	// Stores:     1    2    3    4
+	// Leaders:    1    2    3   10
+	// Region1:    -    F    F    L
+	// Region2:    F    F    L    -
+	s.tc.addLeaderStore(1, 1)
+	s.tc.addLeaderStore(2, 2)
+	s.tc.addLeaderStore(3, 3)
+	s.tc.addLeaderStore(4, 10)
+	s.tc.addLeaderRegion(1, 4, 2, 3)
+	s.tc.addLeaderRegion(2, 3, 1, 2)
+	// Average leader is 4. Select store 4 as source.
+	checkTransferLeader(c, s.schedule(), 4, 2)
+
+	// Stores:     1    2    3    4
+	// Leaders:    1    8    9   10
+	// Region1:    -    F    F    L
+	// Region2:    F    F    L    -
+	s.tc.updateLeaderCount(2, 8)
+	s.tc.updateLeaderCount(3, 9)
+	// Average leader is 7. Select store 1 as target.
+	checkTransferLeader(c, s.schedule(), 3, 1)
 }
 
 var _ = Suite(&testBalanceRegionSchedulerSuite{})
@@ -443,7 +509,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	tc.setStoreDown(2)
 	downPeer := &pdpb.PeerStats{
 		Peer:        region.GetStorePeer(2),
-		DownSeconds: proto.Uint64(24 * 60 * 60),
+		DownSeconds: 24 * 60 * 60,
 	}
 	region.DownPeers = append(region.DownPeers, downPeer)
 	checkRemovePeer(c, rc.Check(region), 2)
@@ -616,28 +682,61 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 }
 
 func checkAddPeer(c *C, bop Operator, storeID uint64) {
-	op := bop.(*regionOperator).Ops[0].(*changePeerOperator)
-	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	var op *changePeerOperator
+	switch t := bop.(type) {
+	case *changePeerOperator:
+		op = t
+	case *regionOperator:
+		op = t.Ops[0].(*changePeerOperator)
+	}
+	c.Assert(op.ChangePeer.GetChangeType(), Equals, pdpb.ConfChangeType_AddNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
 func checkRemovePeer(c *C, bop Operator, storeID uint64) {
-	op := bop.(*regionOperator).Ops[0].(*changePeerOperator)
-	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	var op *changePeerOperator
+	switch t := bop.(type) {
+	case *changePeerOperator:
+		op = t
+	case *regionOperator:
+		if len(t.Ops) == 1 {
+			op = t.Ops[0].(*changePeerOperator)
+		} else {
+			c.Assert(t.Ops, HasLen, 2)
+			transferLeader := t.Ops[0].(*transferLeaderOperator)
+			c.Assert(transferLeader.OldLeader.GetStoreId(), Equals, storeID)
+			op = t.Ops[1].(*changePeerOperator)
+		}
+	}
+	c.Assert(op, NotNil)
+	c.Assert(op.ChangePeer.GetChangeType(), Equals, pdpb.ConfChangeType_RemoveNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
 func checkTransferPeer(c *C, bop Operator, sourceID, targetID uint64) {
-	op := bop.(*regionOperator).Ops[0].(*changePeerOperator)
-	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
-	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, targetID)
-	op = bop.(*regionOperator).Ops[1].(*changePeerOperator)
-	c.Assert(op.ChangePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
-	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, sourceID)
+	op := bop.(*regionOperator)
+	c.Assert(op, NotNil)
+	if len(op.Ops) == 2 {
+		checkAddPeer(c, op.Ops[0], targetID)
+		checkRemovePeer(c, op.Ops[1], sourceID)
+	} else {
+		c.Assert(op.Ops, HasLen, 3)
+		checkAddPeer(c, op.Ops[0], targetID)
+		transferLeader := op.Ops[1].(*transferLeaderOperator)
+		c.Assert(transferLeader.OldLeader.GetStoreId(), Equals, sourceID)
+		checkRemovePeer(c, op.Ops[2], sourceID)
+	}
 }
 
 func checkTransferLeader(c *C, bop Operator, sourceID, targetID uint64) {
-	op := bop.(*regionOperator).Ops[0].(*transferLeaderOperator)
+	var op *transferLeaderOperator
+	switch t := bop.(type) {
+	case *transferLeaderOperator:
+		op = t
+	case *regionOperator:
+		op = t.Ops[0].(*transferLeaderOperator)
+	}
+	c.Assert(op, NotNil)
 	c.Assert(op.OldLeader.GetStoreId(), Equals, sourceID)
 	c.Assert(op.NewLeader.GetStoreId(), Equals, targetID)
 }

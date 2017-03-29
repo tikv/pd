@@ -14,6 +14,8 @@
 package api
 
 import (
+	"encoding/json"
+	"io/ioutil"
 	"net/http"
 
 	"github.com/pingcap/pd/server"
@@ -34,6 +36,29 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 
 func (h *confHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetConfig())
+}
+
+func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
+	config := h.svr.GetConfig()
+	data, err := ioutil.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	err = json.Unmarshal(data, &config.Schedule)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	err = json.Unmarshal(data, &config.Replication)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.svr.SetScheduleConfig(config.Schedule)
+	h.svr.SetReplicationConfig(config.Replication)
+	h.rd.JSON(w, http.StatusOK, nil)
 }
 
 func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {

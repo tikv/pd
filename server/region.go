@@ -114,7 +114,7 @@ func (r *RegionInfo) GetStoreIds() map[uint64]struct{} {
 	return stores
 }
 
-// GetFollowers return  a map indicate the follow peers distributed
+// GetFollowers return a map indicate the follow peers distributed
 func (r *RegionInfo) GetFollowers() map[uint64]*metapb.Peer {
 	peers := r.GetPeers()
 	followers := make(map[uint64]*metapb.Peer, len(peers))
@@ -124,6 +124,16 @@ func (r *RegionInfo) GetFollowers() map[uint64]*metapb.Peer {
 		}
 	}
 	return followers
+}
+
+// GetFollower randomly return a follow peer
+func (r *RegionInfo) GetFollower() *metapb.Peer {
+	for _, peer := range r.GetPeers() {
+		if r.Leader == nil || r.Leader.GetId() != peer.GetId() {
+			return peer
+		}
+	}
+	return nil
 }
 
 var _ btree.Item = &regionItem{}

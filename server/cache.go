@@ -297,6 +297,10 @@ func (r *regionsInfo) getStoreFollowerCount(storeID uint64) int {
 	return r.followers[storeID].Len()
 }
 
+func (r *regionsInfo) randRegion() *RegionInfo {
+	return randRegion(r.regions)
+}
+
 func (r *regionsInfo) randLeaderRegion(storeID uint64) *RegionInfo {
 	return randRegion(r.leaders[storeID])
 }
@@ -489,6 +493,12 @@ func (c *clusterInfo) getRegions() []*RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.regions.getRegions()
+}
+
+func (c *clusterInfo) randomRegion() *RegionInfo {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regions.randRegion()
 }
 
 func (c *clusterInfo) getMetaRegions() []*metapb.Region {

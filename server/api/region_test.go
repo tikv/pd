@@ -64,6 +64,7 @@ func newTestRegionInfo(regionID, storeID uint64, start, end []byte) *server.Regi
 		PendingPeers: make([]*metapb.Peer, 0),
 	}
 }
+
 func (s *testRegionSuite) TestRegion(c *C) {
 	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	mustRegionHeartBeat(c, s.svr, r)

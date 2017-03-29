@@ -16,9 +16,7 @@ package server
 import (
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
-	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -31,7 +29,7 @@ type testOperator struct {
 func newTestOperator(regionID uint64, kind ResourceKind) Operator {
 	region := newRegionInfo(&metapb.Region{Id: regionID}, nil)
 	op := &testOperator{RegionID: regionID, Kind: kind}
-	return newRegionOperator(region, op)
+	return newRegionOperator(region, kind, op)
 }
 
 func (op *testOperator) GetRegionID() uint64           { return op.RegionID }
@@ -84,18 +82,19 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	tc.addLeaderRegion(1, 2, 3, 4)
 
 	// Transfer leader from store 4 to store 2.
-	tc.updateLeaderCount(4, 4)
+	tc.updateLeaderCount(4, 5)
 	tc.updateLeaderCount(3, 3)
 	tc.updateLeaderCount(2, 2)
 	tc.updateLeaderCount(1, 1)
 	tc.addLeaderRegion(2, 4, 3, 2)
 
 	// Wait for schedule and turn off balance.
-	time.Sleep(time.Second)
-	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
+	s.waitOperator(c, co, 1)
 	checkTransferPeer(c, co.getOperator(1), 4, 1)
+	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
+	s.waitOperator(c, co, 2)
 	checkTransferLeader(c, co.getOperator(2), 4, 2)
+	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 
 	// Transfer peer.
 	region := cluster.getRegion(1)
@@ -148,7 +147,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	tc.setStoreDown(3)
 	downPeer := &pdpb.PeerStats{
 		Peer:        region.GetStorePeer(3),
-		DownSeconds: proto.Uint64(24 * 60 * 60),
+		DownSeconds: 24 * 60 * 60,
 	}
 	region.DownPeers = append(region.DownPeers, downPeer)
 	resp = co.dispatch(region)
@@ -186,7 +185,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	tc.addLeaderRegion(1, 2, 3, 4)
 
 	// Wait for schedule.
-	time.Sleep(time.Second)
+	s.waitOperator(c, co, 1)
 	checkTransferPeer(c, co.getOperator(1), 4, 1)
 
 	region := cluster.getRegion(1)
@@ -247,19 +246,29 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(co.addScheduler(gls), IsNil)
 
 	// Transfer all leaders to store 1.
-	time.Sleep(time.Second)
+	s.waitOperator(c, co, 2)
 	region2 := cluster.getRegion(2)
 	checkTransferLeaderResp(c, co.dispatch(region2), 1)
 	region2.Leader = region2.GetStorePeer(1)
 	cluster.putRegion(region2)
 	c.Assert(co.dispatch(region2), IsNil)
 
-	time.Sleep(time.Second)
+	s.waitOperator(c, co, 3)
 	region3 := cluster.getRegion(3)
 	checkTransferLeaderResp(c, co.dispatch(region3), 1)
 	region3.Leader = region3.GetStorePeer(1)
 	cluster.putRegion(region3)
 	c.Assert(co.dispatch(region3), IsNil)
+}
+
+func (s *testCoordinatorSuite) waitOperator(c *C, co *coordinator, regionID uint64) {
+	for i := 0; i < 20; i++ {
+		if co.getOperator(regionID) != nil {
+			return
+		}
+		time.Sleep(time.Millisecond * 100)
+	}
+	c.Fatal("no operator found after retry 20 times.")
 }
 
 var _ = Suite(&testScheduleLimiterSuite{})
@@ -299,7 +308,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	lb := newBalanceLeaderScheduler(opt)
 	sc := newScheduleController(co, lb)
 
-	for i := minScheduleInterval; sc.GetInterval() != maxScheduleInterval; i *= 2 {
+	for i := minScheduleInterval; sc.GetInterval() != maxScheduleInterval; i = time.Duration(float64(i) * scheduleIntervalFactor) {
 		c.Assert(sc.GetInterval(), Equals, i)
 		c.Assert(sc.Schedule(cluster), IsNil)
 	}
@@ -327,15 +336,33 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	c.Assert(sc.AllowSchedule(), IsTrue)
 }
 
+func (s *testScheduleControllerSuite) TestInterval(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	_, opt := newTestScheduleConfig()
+	co := newCoordinator(cluster, opt)
+	lb := newBalanceLeaderScheduler(opt)
+	sc := newScheduleController(co, lb)
+
+	// If no operator for x seconds, the next check should be in x/2 seconds.
+	idleSeconds := []int{5, 10, 20, 30, 60}
+	for _, n := range idleSeconds {
+		sc.interval = minScheduleInterval
+		for totalSleep := time.Duration(0); totalSleep <= time.Second*time.Duration(n); totalSleep += sc.GetInterval() {
+			c.Assert(sc.Schedule(cluster), IsNil)
+		}
+		c.Assert(sc.GetInterval(), Less, time.Second*time.Duration(n/2))
+	}
+}
+
 func checkAddPeerResp(c *C, resp *pdpb.RegionHeartbeatResponse, storeID uint64) {
 	changePeer := resp.GetChangePeer()
-	c.Assert(changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_AddNode)
+	c.Assert(changePeer.GetChangeType(), Equals, pdpb.ConfChangeType_AddNode)
 	c.Assert(changePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
 func checkRemovePeerResp(c *C, resp *pdpb.RegionHeartbeatResponse, storeID uint64) {
 	changePeer := resp.GetChangePeer()
-	c.Assert(changePeer.GetChangeType(), Equals, raftpb.ConfChangeType_RemoveNode)
+	c.Assert(changePeer.GetChangeType(), Equals, pdpb.ConfChangeType_RemoveNode)
 	c.Assert(changePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 

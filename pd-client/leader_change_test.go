@@ -20,6 +20,7 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"golang.org/x/net/context"
@@ -28,14 +29,6 @@ import (
 var _ = Suite(&testLeaderChangeSuite{})
 
 type testLeaderChangeSuite struct{}
-
-func mustGetEtcdClient(c *C, svrs map[string]*server.Server) *clientv3.Client {
-	for _, svr := range svrs {
-		return svr.GetClient()
-	}
-	c.Fatal("etcd client none available")
-	return nil
-}
 
 func (s *testLeaderChangeSuite) prepareClusterN(c *C, n int) (svrs map[string]*server.Server, endpoints []string, closeFunc func()) {
 	cfgs := server.NewTestMultiConfig(n)
@@ -65,8 +58,6 @@ func (s *testLeaderChangeSuite) prepareClusterN(c *C, n int) (svrs map[string]*s
 		endpoints = append(endpoints, svr.GetEndpoints()...)
 	}
 
-	mustWaitLeader(c, svrs)
-
 	closeFunc = func() {
 		for _, svr := range svrs {
 			svr.Close()
@@ -75,6 +66,10 @@ func (s *testLeaderChangeSuite) prepareClusterN(c *C, n int) (svrs map[string]*s
 			cleanServer(cfg)
 		}
 	}
+
+	leaderPeer := mustWaitLeader(c, svrs)
+	grpcClient := mustNewGrpcClient(c, leaderPeer.GetAddr())
+	bootstrapServer(c, newHeader(leaderPeer), grpcClient)
 	return
 }
 
@@ -82,21 +77,25 @@ func (s *testLeaderChangeSuite) TestLeaderConfigChange(c *C) {
 	svrs, endpoints, closeFunc := s.prepareClusterN(c, 3)
 	defer closeFunc()
 
-	leader, err := getLeader(endpoints)
+	cli, err := NewClient(endpoints)
 	c.Assert(err, IsNil)
-	mustConnectLeader(c, endpoints, leader.GetAddr())
+	defer cli.Close()
+
+	leader := s.mustGetLeader(c, endpoints)
+	s.verifyLeader(c, cli.(*client), leader)
 
 	r := server.ReplicationConfig{MaxReplicas: 5}
-	svrs[leader.GetAddr()].SetReplicationConfig(r)
-	svrs[leader.GetAddr()].Close()
+	svrs[leader].SetReplicationConfig(r)
+	svrs[leader].Close()
 	// wait leader changes
 	changed := false
 	for i := 0; i < 20; i++ {
-		newLeader, _ := getLeader(endpoints)
-		if newLeader != nil && newLeader.GetAddr() != leader.GetAddr() {
-			mustConnectLeader(c, endpoints, newLeader.GetAddr())
+		mustWaitLeader(c, svrs)
+		newLeader := s.mustGetLeader(c, endpoints)
+		if newLeader != leader {
+			s.verifyLeader(c, cli.(*client), newLeader)
 			changed = true
-			nr := svrs[newLeader.GetAddr()].GetConfig().Replication.MaxReplicas
+			nr := svrs[newLeader].GetConfig().Replication.MaxReplicas
 			c.Assert(nr, Equals, uint64(5))
 			break
 		}
@@ -113,35 +112,24 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	c.Assert(err, IsNil)
 	defer cli.Close()
 
-	physical, logical, err := cli.GetTS()
+	p1, l1, err := cli.GetTS(context.Background())
 	c.Assert(err, IsNil)
-	lastTS := s.makeTS(physical, logical)
 
-	leader, err := getLeader(endpoints)
-	c.Assert(err, IsNil)
-	mustConnectLeader(c, endpoints, leader.GetAddr())
+	leader := s.mustGetLeader(c, endpoints)
+	s.verifyLeader(c, cli.(*client), leader)
 
-	svrs[leader.GetAddr()].Close()
-	delete(svrs, leader.GetAddr())
+	svrs[leader].Close()
+	delete(svrs, leader)
 
-	// wait leader changes
-	changed := false
-	for i := 0; i < 20; i++ {
-		newLeader, _ := getLeader(endpoints)
-		if newLeader != nil && newLeader.GetAddr() != leader.GetAddr() {
-			mustConnectLeader(c, endpoints, newLeader.GetAddr())
-			changed = true
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	c.Assert(changed, IsTrue)
+	mustWaitLeader(c, svrs)
+	newLeader := s.mustGetLeader(c, endpoints)
+	c.Assert(newLeader, Not(Equals), leader)
+	s.verifyLeader(c, cli.(*client), newLeader)
 
 	for i := 0; i < 20; i++ {
-		physical, logical, err := cli.GetTS()
+		p2, l2, err := cli.GetTS(context.Background())
 		if err == nil {
-			ts := s.makeTS(physical, logical)
-			c.Assert(lastTS, Less, ts)
+			c.Assert(p1<<18+l1, Less, p2<<18+l2)
 			return
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -158,7 +146,7 @@ func (s *testLeaderChangeSuite) TestLeaderTransfer(c *C) {
 	defer cli.Close()
 
 	quit := make(chan struct{})
-	physical, logical, err := cli.GetTS()
+	physical, logical, err := cli.GetTS(context.Background())
 	c.Assert(err, IsNil)
 	lastTS := s.makeTS(physical, logical)
 	go func() {
@@ -169,7 +157,7 @@ func (s *testLeaderChangeSuite) TestLeaderTransfer(c *C) {
 			default:
 			}
 
-			physical, logical, err1 := cli.GetTS()
+			physical, logical, err1 := cli.GetTS(context.Background())
 			if err1 == nil {
 				ts := s.makeTS(physical, logical)
 				c.Assert(lastTS, Less, ts)
@@ -184,7 +172,7 @@ func (s *testLeaderChangeSuite) TestLeaderTransfer(c *C) {
 		DialTimeout: time.Second,
 	})
 	c.Assert(err, IsNil)
-	leaderPath := filepath.Join("/pd", strconv.FormatUint(cli.GetClusterID(), 10), "leader")
+	leaderPath := filepath.Join("/pd", strconv.FormatUint(cli.GetClusterID(context.Background()), 10), "leader")
 	for i := 0; i < 10; i++ {
 		mustWaitLeader(c, servers)
 		_, err = etcdCli.Delete(context.TODO(), leaderPath)
@@ -199,40 +187,27 @@ func (s *testLeaderChangeSuite) makeTS(physical, logical int64) uint64 {
 	return uint64(physical<<18 + logical)
 }
 
-func mustConnectLeader(c *C, urls []string, leaderAddr string) {
-	connCh := make(chan *conn)
-	go func() {
-		conn := mustNewConn(urls, nil)
-		connCh <- conn
-	}()
-
-	var conn *conn
-	select {
-	case conn = <-connCh:
-		addr := conn.RemoteAddr()
-		c.Assert(addr.Network()+"://"+addr.String(), Equals, leaderAddr)
-	case <-time.After(time.Second * 10):
-		c.Fatal("failed to connect to pd")
+func (s *testLeaderChangeSuite) mustGetLeader(c *C, urls []string) string {
+	for _, u := range urls {
+		client, err := apiutil.NewClient(u, pdTimeout)
+		if err != nil {
+			continue
+		}
+		leader, err := client.GetLeader()
+		if err != nil {
+			continue
+		}
+		return leader.GetClientUrls()[0]
 	}
+	c.Fatal("failed get leader")
+	return ""
+}
 
-	conn.wg.Add(1)
-	go conn.connectLeader(urls, time.Second)
+func (s *testLeaderChangeSuite) verifyLeader(c *C, cli *client, leader string) {
+	cli.scheduleCheckLeader()
+	time.Sleep(time.Millisecond * 500)
 
-	select {
-	case leaderConn := <-conn.ConnChan:
-		addr := leaderConn.RemoteAddr()
-		c.Assert(addr.Network()+"://"+addr.String(), Equals, leaderAddr)
-	case <-time.After(time.Second * 10):
-		c.Fatal("failed to connect to leader")
-	}
-
-	// Create another goroutine and return to close the connection.
-	// Make sure it will not block forever.
-	conn.wg.Add(1)
-	go conn.connectLeader(urls, time.Second)
-	time.Sleep(time.Second * 3)
-	// Ensure the leader connection will be closed if we don't use it.
-	c.Assert(len(conn.ConnChan), Equals, 1)
-	conn.Close()
-	c.Assert(len(conn.ConnChan), Equals, 0)
+	cli.connMu.RLock()
+	defer cli.connMu.RUnlock()
+	c.Assert(cli.connMu.leader, Equals, leader)
 }

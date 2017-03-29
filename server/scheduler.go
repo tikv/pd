@@ -15,6 +15,7 @@ package server
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
@@ -238,23 +239,38 @@ func (s *shuffleRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 
 func newAddPeer(region *RegionInfo, peer *metapb.Peer) Operator {
 	addPeer := newAddPeerOperator(region.GetId(), peer)
-	return newRegionOperator(region, addPeer)
+	return newRegionOperator(region, regionKind, addPeer)
 }
 
 func newRemovePeer(region *RegionInfo, peer *metapb.Peer) Operator {
 	removePeer := newRemovePeerOperator(region.GetId(), peer)
-	return newRegionOperator(region, removePeer)
+	if region.Leader != nil && region.Leader.GetId() == peer.GetId() {
+		if follower := region.GetFollower(); follower != nil {
+			transferLeader := newTransferLeaderOperator(region.GetId(), region.Leader, follower)
+			return newRegionOperator(region, regionKind, transferLeader, removePeer)
+		}
+		return nil
+	}
+	return newRegionOperator(region, regionKind, removePeer)
 }
 
 func newTransferPeer(region *RegionInfo, oldPeer, newPeer *metapb.Peer) Operator {
 	addPeer := newAddPeerOperator(region.GetId(), newPeer)
 	removePeer := newRemovePeerOperator(region.GetId(), oldPeer)
-	return newRegionOperator(region, addPeer, removePeer)
+	if region.Leader != nil && region.Leader.GetId() == oldPeer.GetId() {
+		newLeader := newPeer
+		if follower := region.GetFollower(); follower != nil {
+			newLeader = follower
+		}
+		transferLeader := newTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
+		return newRegionOperator(region, regionKind, addPeer, transferLeader, removePeer)
+	}
+	return newRegionOperator(region, regionKind, addPeer, removePeer)
 }
 
 func newTransferLeader(region *RegionInfo, newLeader *metapb.Peer) Operator {
 	transferLeader := newTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
-	return newRegionOperator(region, transferLeader)
+	return newRegionOperator(region, leaderKind, transferLeader)
 }
 
 // scheduleAddPeer schedules a new peer.
@@ -297,24 +313,49 @@ func scheduleRemovePeer(cluster *clusterInfo, s Selector, filters ...Filter) (*R
 
 // scheduleTransferLeader schedules a region to transfer leader to the peer.
 func scheduleTransferLeader(cluster *clusterInfo, s Selector, filters ...Filter) (*RegionInfo, *metapb.Peer) {
-	sourceStores := cluster.getStores()
-
-	source := s.SelectSource(sourceStores, filters...)
-	if source == nil {
+	stores := cluster.getStores()
+	if len(stores) == 0 {
 		return nil, nil
 	}
 
-	region := cluster.randLeaderRegion(source.GetId())
+	var averageLeader float64
+	for _, s := range stores {
+		averageLeader += float64(s.leaderScore()) / float64(len(stores))
+	}
+
+	mostLeaderStore := s.SelectSource(stores, filters...)
+	leastLeaderStore := s.SelectTarget(stores, filters...)
+
+	var mostLeaderDistance, leastLeaderDistance float64
+	if mostLeaderStore != nil {
+		mostLeaderDistance = math.Abs(mostLeaderStore.leaderScore() - averageLeader)
+	}
+	if leastLeaderStore != nil {
+		leastLeaderDistance = math.Abs(leastLeaderStore.leaderScore() - averageLeader)
+	}
+	if mostLeaderDistance == 0 && leastLeaderDistance == 0 {
+		return nil, nil
+	}
+
+	if mostLeaderDistance > leastLeaderDistance {
+		// Transfer a leader out of mostLeaderStore.
+		region := cluster.randLeaderRegion(mostLeaderStore.GetId())
+		if region == nil {
+			return nil, nil
+		}
+		targetStores := cluster.getFollowerStores(region)
+		target := s.SelectTarget(targetStores)
+		if target == nil {
+			return nil, nil
+		}
+
+		return region, region.GetStorePeer(target.GetId())
+	}
+
+	// Transfer a leader into leastLeaderStore.
+	region := cluster.randFollowerRegion(leastLeaderStore.GetId())
 	if region == nil {
 		return nil, nil
 	}
-
-	targetStores := cluster.getFollowerStores(region)
-
-	target := s.SelectTarget(targetStores)
-	if target == nil {
-		return nil, nil
-	}
-
-	return region, region.GetStorePeer(target.GetId())
+	return region, region.GetStorePeer(leastLeaderStore.GetId())
 }

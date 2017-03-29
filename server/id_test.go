@@ -14,29 +14,31 @@
 package server
 
 import (
-	"math/rand"
 	"sync"
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testAllocIDSuite{})
 
 type testAllocIDSuite struct {
-	client  *clientv3.Client
-	alloc   *idAllocator
-	svr     *Server
-	cleanup cleanUpFunc
+	client       *clientv3.Client
+	alloc        *idAllocator
+	svr          *Server
+	cleanup      cleanUpFunc
+	grpcPDClient pdpb.PDClient
 }
 
 func (s *testAllocIDSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
 	s.client = s.svr.client
 	s.alloc = s.svr.idAlloc
-
 	go s.svr.Run()
+	mustWaitLeader(c, []*Server{s.svr})
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 }
 
 func (s *testAllocIDSuite) TearDownSuite(c *C) {
@@ -80,28 +82,15 @@ func (s *testAllocIDSuite) TestID(c *C) {
 }
 
 func (s *testAllocIDSuite) TestCommand(c *C) {
-	leader := mustGetLeader(c, s.client, s.svr.getLeaderPath())
-
-	conn, err := rpcConnect(leader.GetAddr())
-	c.Assert(err, IsNil)
-	defer conn.Close()
-
-	idReq := &pdpb.AllocIdRequest{}
-
-	req := &pdpb.Request{
-		Header:  newRequestHeader(s.svr.clusterID),
-		CmdType: pdpb.CommandType_AllocId,
-		AllocId: idReq,
+	req := &pdpb.AllocIDRequest{
+		Header: newRequestHeader(s.svr.clusterID),
 	}
 
 	var last uint64
 	for i := uint64(0); i < 2*allocStep; i++ {
-		rawMsgID := uint64(rand.Int63())
-		sendRequest(c, conn, rawMsgID, req)
-		msgID, resp := recvResponse(c, conn)
-		c.Assert(rawMsgID, Equals, msgID)
-		c.Assert(resp.AllocId, NotNil)
-		c.Assert(resp.AllocId.GetId(), Greater, last)
-		last = resp.AllocId.GetId()
+		resp, err := s.grpcPDClient.AllocID(context.Background(), req)
+		c.Assert(err, IsNil)
+		c.Assert(resp.GetId(), Greater, last)
+		last = resp.GetId()
 	}
 }

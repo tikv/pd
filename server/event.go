@@ -16,7 +16,6 @@ package server
 import (
 	"sync/atomic"
 
-	raftpb "github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -92,7 +91,7 @@ func (c *coordinator) postEvent(op Operator, status statusType) {
 		evt.TransferLeaderEvent.StoreTo = e.NewLeader.GetStoreId()
 		c.innerPostEvent(evt)
 	case *changePeerOperator:
-		if e.ChangePeer.GetChangeType() == raftpb.ConfChangeType_AddNode {
+		if e.ChangePeer.GetChangeType() == pdpb.ConfChangeType_AddNode {
 			evt.Code = msgAddReplica
 			evt.AddReplicaEvent.Region = e.RegionID
 			evt.AddReplicaEvent.Store = e.ChangePeer.Peer.GetStoreId()

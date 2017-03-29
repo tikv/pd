@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/pingcap/pd/pd-client"
+	"golang.org/x/net/context"
 )
 
 var (
@@ -36,7 +37,7 @@ func main() {
 		log.Fatal(err)
 	}
 	// To avoid the first time high latency.
-	_, _, err = pdCli.GetTS()
+	_, _, err = pdCli.GetTS(context.TODO())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -112,7 +113,7 @@ func reqWorker(pdCli pd.Client, statsCh chan *stats) {
 	s := newStats(*num)
 	for i := 0; i < s.count; i++ {
 		start := time.Now()
-		_, _, err := pdCli.GetTS()
+		_, _, err := pdCli.GetTS(context.TODO())
 		if err != nil {
 			log.Fatal(err)
 		}

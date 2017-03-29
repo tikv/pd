@@ -29,7 +29,9 @@ import (
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/ngaut/systimemon"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -60,9 +62,6 @@ type Server struct {
 	leaderValue string
 
 	wg sync.WaitGroup
-
-	connsLock sync.Mutex
-	conns     map[*conn]struct{}
 
 	closed int64
 
@@ -113,7 +112,6 @@ func CreateServer(cfg *Config) *Server {
 		cfg:           cfg,
 		scheduleOpt:   newScheduleOption(cfg),
 		isLeaderValue: 0,
-		conns:         make(map[*conn]struct{}),
 		closed:        1,
 	}
 
@@ -127,12 +125,12 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	etcdCfg.UserHandlers = map[string]http.Handler{
-		pdRPCPrefix: s,
-	}
 	if apiHandler != nil {
-		etcdCfg.UserHandlers[pdAPIPrefix] = apiHandler
+		etcdCfg.UserHandlers = map[string]http.Handler{
+			pdAPIPrefix: apiHandler,
+		}
 	}
+	etcdCfg.ServiceRegister = func(gs *grpc.Server) { pdpb.RegisterPDServer(gs, s) }
 
 	log.Info("start embed etcd")
 
@@ -273,43 +271,6 @@ func (s *Server) Run() {
 	s.leaderLoop()
 }
 
-// ServeHTTP hijack the HTTP connection and switch to RPC.
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Before hijacke any connection, make sure the pd is initialized.
-	if s.isClosed() {
-		return
-	}
-
-	hj, ok := w.(http.Hijacker)
-	if !ok {
-		log.Errorf("server doesn't support hijacking: conn %v", w)
-		return
-	}
-
-	conn, bufrw, err := hj.Hijack()
-	if err != nil {
-		log.Error(err)
-		return
-	}
-
-	err = conn.SetDeadline(time.Time{})
-	if err != nil {
-		log.Error(err)
-		conn.Close()
-		return
-	}
-
-	c, err := newConn(s, conn, bufrw)
-	if err != nil {
-		log.Error(err)
-		conn.Close()
-		return
-	}
-
-	s.wg.Add(1)
-	go c.run()
-}
-
 // GetAddr returns the server urls for clients.
 func (s *Server) GetAddr() string {
 	return s.cfg.AdvertiseClientUrls
@@ -343,24 +304,6 @@ func (s *Server) Name() string {
 // ClusterID returns the cluster ID of this server.
 func (s *Server) ClusterID() uint64 {
 	return s.clusterID
-}
-
-func (s *Server) closeAllConnections() {
-	s.connsLock.Lock()
-	defer s.connsLock.Unlock()
-
-	if len(s.conns) == 0 {
-		return
-	}
-
-	for conn := range s.conns {
-		err := conn.close()
-		if err != nil {
-			log.Warnf("close conn failed - %v", err)
-		}
-	}
-
-	s.conns = make(map[*conn]struct{})
 }
 
 // txn returns an etcd client transaction wrapper.

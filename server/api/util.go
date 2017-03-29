@@ -31,7 +31,6 @@ func readJSON(r io.ReadCloser, data interface{}) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-
 	err = json.Unmarshal(b, data)
 	if err != nil {
 		return errors.Trace(err)
@@ -45,8 +44,14 @@ func postJSON(cli *http.Client, url string, data []byte) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	ioutil.ReadAll(resp.Body)
+	res, err := ioutil.ReadAll(resp.Body)
 	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return errors.New(string(res))
+	}
 	return nil
 }
 
