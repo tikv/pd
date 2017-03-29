@@ -488,12 +488,12 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	checkAddPeer(c, rc.Check(region), 4)
 
 	// Test storageThresholdFilter.
-	// If availableRatio < storageRatioThreshold(0.2), we can not add peer.
+	// If availableRatio < storageAvailableRatioThreshold(0.2), we can not add peer.
 	tc.updateStorageRatio(4, 0.9, 0.1)
 	checkAddPeer(c, rc.Check(region), 3)
 	tc.updateStorageRatio(4, 0.5, 0.1)
 	checkAddPeer(c, rc.Check(region), 3)
-	// If availableRatio > storageRatioThreshold(0.2), we can add peer again.
+	// If availableRatio > storageAvailableRatioThreshold(0.2), we can add peer again.
 	tc.updateStorageRatio(4, 0.7, 0.3)
 	checkAddPeer(c, rc.Check(region), 4)
 
