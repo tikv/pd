@@ -16,49 +16,6 @@ package server
 import "github.com/prometheus/client_golang/prometheus"
 
 var (
-	cmdCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "cmd",
-			Name:      "cmds_total",
-			Help:      "Counter of cmds.",
-		}, []string{"type"})
-
-	cmdFailedCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "cmd",
-			Name:      "cmds_failed_total",
-			Help:      "Counter of failed cmds.",
-		}, []string{"type"})
-
-	cmdDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "cmd",
-			Name:      "handle_cmds_duration_seconds",
-			Help:      "Bucketed histogram of processing time (s) of handled success cmds.",
-			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
-		}, []string{"type"})
-
-	cmdFailedDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "cmd",
-			Name:      "handle_failed_cmds_duration_seconds",
-			Help:      "Bucketed histogram of processing time (s) of failed handled cmds.",
-			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
-		}, []string{"type"})
-
-	cmdCompletedDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "cmd",
-			Name:      "handle_completed_cmds_duration_seconds",
-			Help:      "Bucketed histogram of processing time (s) of completed cmds.",
-			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
-		}, []string{"type"})
-
 	txnCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -102,11 +59,6 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(cmdCounter)
-	prometheus.MustRegister(cmdFailedCounter)
-	prometheus.MustRegister(cmdDuration)
-	prometheus.MustRegister(cmdFailedDuration)
-	prometheus.MustRegister(cmdCompletedDuration)
 	prometheus.MustRegister(txnCounter)
 	prometheus.MustRegister(txnDuration)
 	prometheus.MustRegister(operatorCounter)

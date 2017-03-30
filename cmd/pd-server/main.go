@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/pd/pkg/metricutil"
@@ -49,6 +50,9 @@ func main() {
 	}
 
 	server.LogPDInfo()
+
+	// TODO: Make it configurable if it has big impact on performance.
+	grpc_prometheus.EnableHandlingTimeHistogram()
 
 	metricutil.Push(&cfg.Metric)
 
