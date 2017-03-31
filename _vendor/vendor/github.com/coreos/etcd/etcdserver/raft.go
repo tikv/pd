@@ -113,7 +113,7 @@ type raftNode struct {
 	readStateC chan raft.ReadState
 
 	// utility
-	ticker <-chan time.Time
+	ticker *time.Ticker
 	// contention detectors for raft heartbeat message
 	td          *contention.TimeoutDetector
 	heartbeat   time.Duration // for logging
@@ -140,10 +140,11 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 	go func() {
 		defer r.onStop()
 		islead := false
+		isCandidate := false
 
 		for {
 			select {
-			case <-r.ticker:
+			case <-r.ticker.C:
 				r.Tick()
 			case rd := <-r.Ready():
 				if rd.SoftState != nil {
@@ -162,6 +163,7 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 
 					atomic.StoreUint64(&r.lead, rd.SoftState.Lead)
 					islead = rd.RaftState == raft.StateLeader
+					isCandidate = rd.RaftState == raft.StateCandidate
 					rh.updateLeadership()
 				}
 
@@ -225,7 +227,17 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 					r.sendMessages(rd.Messages)
 				}
 				raftDone <- struct{}{}
+
 				r.Advance()
+
+				if isCandidate {
+					// candidate needs to wait for all pending configuration changes to be applied
+					// before continue. Or we might incorrectly count the number of votes (e.g. receive vote from
+					// a removed member).
+					// We simply wait for ALL pending entries to be applied for now.
+					// We might improve this later on if it causes unnecessary long blocking issues.
+					rh.waitForApply()
+				}
 			case <-r.stopped:
 				return
 			}
@@ -303,6 +315,7 @@ func (r *raftNode) stop() {
 
 func (r *raftNode) onStop() {
 	r.Stop()
+	r.ticker.Stop()
 	r.transport.Stop()
 	if err := r.storage.Close(); err != nil {
 		plog.Panicf("raft close storage error: %v", err)

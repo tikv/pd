@@ -19,7 +19,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"path"
+	"path/filepath"
+	"sync"
 
 	"github.com/coreos/etcd/etcdserver"
 	"github.com/coreos/etcd/etcdserver/api/v2http"
@@ -54,8 +55,11 @@ type Etcd struct {
 	Server  *etcdserver.EtcdServer
 
 	cfg   Config
+	stopc chan struct{}
 	errc  chan error
 	sctxs map[string]*serveCtx
+
+	closeOnce sync.Once
 }
 
 // StartEtcd launches the etcd server and HTTP handlers for client/server communication.
@@ -65,7 +69,7 @@ func StartEtcd(inCfg *Config) (e *Etcd, err error) {
 	if err = inCfg.Validate(); err != nil {
 		return nil, err
 	}
-	e = &Etcd{cfg: *inCfg}
+	e = &Etcd{cfg: *inCfg, stopc: make(chan struct{})}
 	cfg := &e.cfg
 	defer func() {
 		if e != nil && err != nil {
@@ -118,6 +122,7 @@ func StartEtcd(inCfg *Config) (e *Etcd, err error) {
 		QuotaBackendBytes:       cfg.QuotaBackendBytes,
 		StrictReconfigCheck:     cfg.StrictReconfigCheck,
 		ClientCertAuthEnabled:   cfg.ClientTLSInfo.ClientCertAuth,
+		AuthToken:               cfg.AuthToken,
 	}
 
 	if e.Server, err = etcdserver.NewServer(srvcfg); err != nil {
@@ -140,6 +145,8 @@ func (e *Etcd) Config() Config {
 }
 
 func (e *Etcd) Close() {
+	e.closeOnce.Do(func() { close(e.stopc) })
+
 	for _, sctx := range e.sctxs {
 		sctx.cancel()
 	}
@@ -166,7 +173,7 @@ func startPeerListeners(cfg *Config) (plns []net.Listener, err error) {
 		for i, u := range cfg.LPUrls {
 			phosts[i] = u.Host
 		}
-		cfg.PeerTLSInfo, err = transport.SelfCert(path.Join(cfg.Dir, "fixtures/peer"), phosts)
+		cfg.PeerTLSInfo, err = transport.SelfCert(filepath.Join(cfg.Dir, "fixtures", "peer"), phosts)
 		if err != nil {
 			plog.Fatalf("could not get certs (%v)", err)
 		}
@@ -221,7 +228,7 @@ func startClientListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 		for i, u := range cfg.LCUrls {
 			chosts[i] = u.Host
 		}
-		cfg.ClientTLSInfo, err = transport.SelfCert(path.Join(cfg.Dir, "fixtures/client"), chosts)
+		cfg.ClientTLSInfo, err = transport.SelfCert(filepath.Join(cfg.Dir, "fixtures", "client"), chosts)
 		if err != nil {
 			plog.Fatalf("could not get certs (%v)", err)
 		}
@@ -290,8 +297,11 @@ func startClientListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 			sctx.userHandlers[k] = cfg.UserHandlers[k]
 		}
 		sctx.serviceRegister = cfg.ServiceRegister
-		if cfg.EnablePprof {
+		if cfg.EnablePprof || cfg.Debug {
 			sctx.registerPprof()
+		}
+		if cfg.Debug {
+			sctx.registerTrace()
 		}
 		sctxs[u.Host] = sctx
 	}
@@ -315,7 +325,7 @@ func (e *Etcd) serve() (err error) {
 	ph := v2http.NewPeerHandler(e.Server)
 	for _, l := range e.Peers {
 		go func(l net.Listener) {
-			e.errc <- servePeerHTTP(l, ph)
+			e.errHandler(servePeerHTTP(l, ph))
 		}(l)
 	}
 
@@ -331,8 +341,20 @@ func (e *Etcd) serve() (err error) {
 		// read timeout does not work with http close notify
 		// TODO: https://github.com/golang/go/issues/9524
 		go func(s *serveCtx) {
-			e.errc <- s.serve(e.Server, ctlscfg, v2h, e.errc)
+			e.errHandler(s.serve(e.Server, ctlscfg, v2h, e.errHandler))
 		}(sctx)
 	}
 	return nil
+}
+
+func (e *Etcd) errHandler(err error) {
+	select {
+	case <-e.stopc:
+		return
+	default:
+	}
+	select {
+	case <-e.stopc:
+	case e.errc <- err:
+	}
 }

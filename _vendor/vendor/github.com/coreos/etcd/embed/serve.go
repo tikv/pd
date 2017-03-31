@@ -25,6 +25,9 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/etcdserver"
+	"github.com/coreos/etcd/etcdserver/api/v3client"
+	"github.com/coreos/etcd/etcdserver/api/v3lock"
+	"github.com/coreos/etcd/etcdserver/api/v3lock/v3lockpb"
 	"github.com/coreos/etcd/etcdserver/api/v3rpc"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/pkg/transport"
@@ -32,6 +35,7 @@ import (
 	"github.com/cockroachdb/cmux"
 	gw "github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"golang.org/x/net/context"
+	"golang.org/x/net/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -58,7 +62,7 @@ func newServeCtx() *serveCtx {
 // serve accepts incoming connections on the listener l,
 // creating a new service goroutine for each. The service goroutines
 // read requests and then call handler to reply to them.
-func (sctx *serveCtx) serve(s *etcdserver.EtcdServer, tlscfg *tls.Config, handler http.Handler, errc chan<- error) error {
+func (sctx *serveCtx) serve(s *etcdserver.EtcdServer, tlscfg *tls.Config, handler http.Handler, errHandler func(error)) error {
 	logger := defaultLog.New(ioutil.Discard, "etcdhttp", 0)
 	<-s.ReadyNotify()
 	plog.Info("ready to serve client requests")
@@ -67,11 +71,12 @@ func (sctx *serveCtx) serve(s *etcdserver.EtcdServer, tlscfg *tls.Config, handle
 
 	if sctx.insecure {
 		gs := v3rpc.Server(s, nil)
+		v3lockpb.RegisterLockServer(gs, v3lock.NewLockServer(v3client.New(s)))
 		if sctx.serviceRegister != nil {
 			sctx.serviceRegister(gs)
 		}
 		grpcl := m.Match(cmux.HTTP2())
-		go func() { errc <- gs.Serve(grpcl) }()
+		go func() { errHandler(gs.Serve(grpcl)) }()
 
 		opts := []grpc.DialOption{
 			grpc.WithInsecure(),
@@ -88,12 +93,13 @@ func (sctx *serveCtx) serve(s *etcdserver.EtcdServer, tlscfg *tls.Config, handle
 			ErrorLog: logger, // do not log user error
 		}
 		httpl := m.Match(cmux.HTTP1())
-		go func() { errc <- srvhttp.Serve(httpl) }()
+		go func() { errHandler(srvhttp.Serve(httpl)) }()
 		plog.Noticef("serving insecure client requests on %s, this is strongly discouraged!", sctx.l.Addr().String())
 	}
 
 	if sctx.secure {
 		gs := v3rpc.Server(s, tlscfg)
+		v3lockpb.RegisterLockServer(gs, v3lock.NewLockServer(v3client.New(s)))
 		if sctx.serviceRegister != nil {
 			sctx.serviceRegister(gs)
 		}
@@ -118,7 +124,7 @@ func (sctx *serveCtx) serve(s *etcdserver.EtcdServer, tlscfg *tls.Config, handle
 			TLSConfig: tlscfg,
 			ErrorLog:  logger, // do not log user error
 		}
-		go func() { errc <- srv.Serve(tlsl) }()
+		go func() { errHandler(srv.Serve(tlsl)) }()
 
 		plog.Infof("serving client requests on %s", sctx.l.Addr().String())
 	}
@@ -199,22 +205,30 @@ func (sctx *serveCtx) createMux(gwmux *gw.ServeMux, handler http.Handler) *http.
 	return httpmux
 }
 
-func (sctx *serveCtx) registerPprof() {
-	f := func(s string, h http.Handler) {
-		if sctx.userHandlers[s] != nil {
-			plog.Warningf("path %s already registered by user handler", s)
-			return
-		}
-		sctx.userHandlers[s] = h
+func (sctx *serveCtx) registerUserHandler(s string, h http.Handler) {
+	if sctx.userHandlers[s] != nil {
+		plog.Warningf("path %s already registered by user handler", s)
+		return
 	}
-	f(pprofPrefix+"/", http.HandlerFunc(pprof.Index))
-	f(pprofPrefix+"/profile", http.HandlerFunc(pprof.Profile))
-	f(pprofPrefix+"/symbol", http.HandlerFunc(pprof.Symbol))
-	f(pprofPrefix+"/cmdline", http.HandlerFunc(pprof.Cmdline))
-	f(pprofPrefix+"/trace", http.HandlerFunc(pprof.Trace))
+	sctx.userHandlers[s] = h
+}
 
-	f(pprofPrefix+"/heap", pprof.Handler("heap"))
-	f(pprofPrefix+"/goroutine", pprof.Handler("goroutine"))
-	f(pprofPrefix+"/threadcreate", pprof.Handler("threadcreate"))
-	f(pprofPrefix+"/block", pprof.Handler("block"))
+func (sctx *serveCtx) registerPprof() {
+	sctx.registerUserHandler(pprofPrefix+"/", http.HandlerFunc(pprof.Index))
+	sctx.registerUserHandler(pprofPrefix+"/profile", http.HandlerFunc(pprof.Profile))
+	sctx.registerUserHandler(pprofPrefix+"/symbol", http.HandlerFunc(pprof.Symbol))
+	sctx.registerUserHandler(pprofPrefix+"/cmdline", http.HandlerFunc(pprof.Cmdline))
+	sctx.registerUserHandler(pprofPrefix+"/trace", http.HandlerFunc(pprof.Trace))
+
+	sctx.registerUserHandler(pprofPrefix+"/heap", pprof.Handler("heap"))
+	sctx.registerUserHandler(pprofPrefix+"/goroutine", pprof.Handler("goroutine"))
+	sctx.registerUserHandler(pprofPrefix+"/threadcreate", pprof.Handler("threadcreate"))
+	sctx.registerUserHandler(pprofPrefix+"/block", pprof.Handler("block"))
+}
+
+func (sctx *serveCtx) registerTrace() {
+	reqf := func(w http.ResponseWriter, r *http.Request) { trace.Render(w, r, true) }
+	sctx.registerUserHandler("/debug/requests", http.HandlerFunc(reqf))
+	evf := func(w http.ResponseWriter, r *http.Request) { trace.RenderEvents(w, r, true) }
+	sctx.registerUserHandler("/debug/events", http.HandlerFunc(evf))
 }

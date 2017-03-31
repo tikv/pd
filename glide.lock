@@ -1,5 +1,5 @@
-hash: 9bf8de62d75110cd40d773abd624f2b6ef78e81215a2f136dc6baeecdc6234ea
-updated: 2017-03-28T17:58:23.823063648+08:00
+hash: e2d4f288dbf102051fd5ec0c4d5d0e58d0e67ac12268cad01136d8d20de0327b
+updated: 2017-03-31T14:25:43.136918798+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -16,7 +16,7 @@ imports:
 - name: github.com/cockroachdb/cmux
   version: 112f0506e7743d64a6eb8fedbcff13d9979bbf92
 - name: github.com/coreos/etcd
-  version: 6bef2bddcaced4fc6ed136e7434c4ee72c9e6782
+  version: 9ca7f22e84f58deb40ea0de78b350c0fe3eaf77b
   subpackages:
   - alarm
   - auth
@@ -32,6 +32,9 @@ imports:
   - etcdserver/api
   - etcdserver/api/v2http
   - etcdserver/api/v2http/httptypes
+  - etcdserver/api/v3client
+  - etcdserver/api/v3lock
+  - etcdserver/api/v3lock/v3lockpb
   - etcdserver/api/v3rpc
   - etcdserver/api/v3rpc/rpctypes
   - etcdserver/auth
@@ -64,6 +67,7 @@ imports:
   - pkg/transport
   - pkg/types
   - pkg/wait
+  - proxy/grpcproxy/adapter
   - raft
   - raft/raftpb
   - rafthttp
@@ -85,6 +89,8 @@ imports:
   version: 3ac0863d7acf3bc44daf49afef8919af12f704ef
   subpackages:
   - capnslog
+- name: github.com/dgrijalva/jwt-go
+  version: d2709f9f1f31ebcda9651b03077758c1f3a0018c
 - name: github.com/dustin/go-humanize
   version: 7a41df006ff9af79a29f0ffa9c5f21fbe6314a2d
 - name: github.com/elazarl/go-bindata-assetfs
