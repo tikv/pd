@@ -68,7 +68,6 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap) error {
 		// For tests, change scheme to http.
 		// etcdserver/api/v3rpc does not recognize unix protocol.
 		if u.Scheme == "unix" || u.Scheme == "unixs" {
-			//directly use http://localhost
 			peerURLs[i] = unixToHTTP.Replace(peerURLs[i])
 		}
 

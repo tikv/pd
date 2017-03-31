@@ -206,6 +206,6 @@ func readJSONWithURL(url string, data interface{}) error {
 	if err != nil {
 		return err
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
 	return readJSON(resp.Body, data)
 }
