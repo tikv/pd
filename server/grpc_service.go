@@ -32,6 +32,9 @@ var notLeaderError = grpc.Errorf(codes.Unavailable, "not leader")
 
 // GetMembers implements gRPC PDServer.
 func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
+	if s.isClosed() {
+		return nil, grpc.Errorf(codes.Unknown, "server not started")
+	}
 	members, err := GetMembers(s.GetClient())
 	if err != nil {
 		return nil, grpc.Errorf(codes.Unknown, err.Error())
