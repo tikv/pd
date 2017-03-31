@@ -203,9 +203,9 @@ func mustRegionHeartBeat(c *C, s *server.Server, region *server.RegionInfo) {
 
 func readJSONWithURL(url string, data interface{}) error {
 	resp, err := unixClient.Get(url)
-	defer resp.Body.Close()
 	if err != nil {
 		return err
 	}
+	resp.Body.Close()
 	return readJSON(resp.Body, data)
 }
