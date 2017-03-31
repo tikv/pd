@@ -23,5 +23,5 @@ var unixURLCount uint64
 
 // UnixURL returns a unique unix socket url, used for test only.
 func UnixURL() string {
-	return fmt.Sprintf("unix://localhost:%d.%d.sock", os.Getpid(), atomic.AddUint64(&unixURLCount, 1))
+	return fmt.Sprintf("unix://localhost:%d%d", os.Getpid(), atomic.AddUint64(&unixURLCount, 1))
 }
