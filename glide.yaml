@@ -120,7 +120,7 @@ import:
 - package: github.com/pingcap/check
   version: ce8a2f822ab1e245a4eefcef2996531c79c943f1
 - package: github.com/pingcap/kvproto
-  version: 1ce19dac18a11abf6a04a11034bf42f2fbf57f1b
+  version: 5e57c99ad20914529fccb18c7e1918bb154f9b7d
   subpackages:
   - pkg/coprocessor
   - pkg/eraftpb
