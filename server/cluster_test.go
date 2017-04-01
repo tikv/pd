@@ -160,6 +160,7 @@ func (s *testClusterSuite) TestBootstrap(c *C) {
 	respBoot, err := s.grpcPDClient.Bootstrap(context.Background(), reqBoot)
 	c.Assert(err, IsNil)
 	c.Assert(respBoot.GetHeader().GetError(), NotNil)
+	c.Assert(respBoot.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_ALREADY_BOOTSTRAPPED)
 }
 
 func (s *testClusterBaseSuite) newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {
