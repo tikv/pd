@@ -14,6 +14,8 @@
 package api
 
 import (
+	"net/http"
+
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
@@ -21,14 +23,7 @@ import (
 
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := render.New(render.Options{
-		Directory:  "templates",
-		Extensions: []string{".html"},
-		Asset:      Asset,
-		AssetNames: func() []string {
-			return []string{"templates/index.html"}
-		},
 		IndentJSON: true,
-		Delims:     render.Delims{"[[", "]]"},
 	})
 
 	router := mux.NewRouter().PathPrefix(prefix).Subrouter()
@@ -79,9 +74,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.Handle("/api/v1/members/{name}", newMemberDeleteHandler(svr, rd)).Methods("DELETE")
 	router.Handle("/api/v1/leader", newLeaderHandler(svr, rd)).Methods("GET")
 
-	router.Handle("/", newHomeHandler(rd)).Methods("GET")
-	router.Handle("/ws", newWSHandler(svr))
-
-	router.HandleFunc("/ping", newHomeHandler(rd).Ping).Methods("GET")
+	router.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 	return router
 }
