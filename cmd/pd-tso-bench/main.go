@@ -17,8 +17,13 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 
+	"github.com/juju/errors"
 	"github.com/pingcap/pd/pd-client"
 	"golang.org/x/net/context"
 )
@@ -28,6 +33,8 @@ var (
 	concurrency = flag.Int("C", 100, "concurrency")
 	num         = flag.Int("N", 1000, "number of request per request worker")
 	sleep       = flag.Duration("sleep", time.Millisecond, "sleep time after a request, used to adjust pressure")
+	interval    = flag.Duration("interval", time.Second, "interval to output the statistics")
+	wg          sync.WaitGroup
 )
 
 func main() {
@@ -36,23 +43,73 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
 	// To avoid the first time high latency.
-	_, _, err = pdCli.GetTS(context.TODO())
-	if err != nil {
-		log.Fatal(err)
-	}
-	statsCh := make(chan *stats, *concurrency)
 	for i := 0; i < *concurrency; i++ {
-		go reqWorker(pdCli, statsCh)
+		_, _, err = pdCli.GetTS(ctx)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
-	finalStats := newStats(0)
+
+	durCh := make(chan time.Duration, *concurrency*2)
+
+	wg.Add(*concurrency)
 	for i := 0; i < *concurrency; i++ {
-		s := <-statsCh
-		finalStats.merge(s)
+		go reqWorker(ctx, pdCli, durCh)
 	}
-	fmt.Println(finalStats.String())
+
+	wg.Add(1)
+	go showStats(ctx, durCh)
+
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+
+	go func() {
+		<-sc
+		cancel()
+	}()
+
+	wg.Wait()
+
 	pdCli.Close()
 }
+
+func showStats(ctx context.Context, durCh chan time.Duration) {
+	defer wg.Done()
+
+	ticker := time.NewTicker(*interval)
+
+	s := newStats()
+	total := newStats()
+
+	for {
+		select {
+		case <-ticker.C:
+			println(s.String())
+			total.merge(s)
+			s = newStats()
+		case d := <-durCh:
+			s.update(d)
+		case <-ctx.Done():
+			println("\nTotal:")
+			println(total.String())
+			return
+		}
+	}
+}
+
+const (
+	twoMS    = time.Millisecond * 2
+	fiveMS   = time.Millisecond * 5
+	tenMS    = time.Millisecond * 10
+	thirtyMS = time.Millisecond * 30
+)
 
 type stats struct {
 	maxDur       time.Duration
@@ -61,33 +118,50 @@ type stats struct {
 	milliCnt     int
 	twoMilliCnt  int
 	fiveMilliCnt int
+	tenMSCnt     int
+	thirtyCnt    int
 }
 
-func newStats(count int) *stats {
+func newStats() *stats {
 	return &stats{
-		minDur: time.Second,
-		count:  count,
+		minDur: time.Hour,
+		maxDur: 0,
 	}
 }
 
 func (s *stats) update(dur time.Duration) {
-	if s.minDur == 0 {
-		s.minDur = time.Second
-	}
+	s.count++
+
 	if dur > s.maxDur {
 		s.maxDur = dur
 	}
 	if dur < s.minDur {
 		s.minDur = dur
 	}
+
+	if dur > thirtyMS {
+		s.thirtyCnt++
+		return
+	}
+
+	if dur > tenMS {
+		s.tenMSCnt++
+		return
+	}
+
+	if dur > fiveMS {
+		s.fiveMilliCnt++
+		return
+	}
+
+	if dur > twoMS {
+		s.twoMilliCnt++
+		return
+	}
+
 	if dur > time.Millisecond {
 		s.milliCnt++
-	}
-	if dur > time.Millisecond*2 {
-		s.twoMilliCnt++
-	}
-	if dur > time.Millisecond*5 {
-		s.fiveMilliCnt++
+		return
 	}
 }
 
@@ -98,28 +172,40 @@ func (s *stats) merge(other *stats) {
 	if s.minDur > other.minDur {
 		s.minDur = other.minDur
 	}
+
 	s.count += other.count
 	s.milliCnt += other.milliCnt
 	s.twoMilliCnt += other.twoMilliCnt
 	s.fiveMilliCnt += other.fiveMilliCnt
+	s.tenMSCnt += other.tenMSCnt
+	s.thirtyCnt += other.thirtyCnt
 }
 
 func (s *stats) String() string {
-	return fmt.Sprintf("\nmax:%v, min:%v, count:%d, >1ms = %d, >2ms = %d, >5ms = %d\n",
-		s.maxDur, s.minDur, s.count, s.milliCnt, s.twoMilliCnt, s.fiveMilliCnt)
+	return fmt.Sprintf("count:%d, max:%d, min:%d, >1ms:%d, >2ms:%d, >5ms:%d, >10ms:%d, >30ms:%d",
+		s.count, s.maxDur.Nanoseconds()/int64(time.Millisecond), s.minDur.Nanoseconds()/int64(time.Millisecond),
+		s.milliCnt, s.twoMilliCnt, s.fiveMilliCnt, s.tenMSCnt, s.thirtyCnt)
 }
 
-func reqWorker(pdCli pd.Client, statsCh chan *stats) {
-	s := newStats(*num)
-	for i := 0; i < s.count; i++ {
+func reqWorker(ctx context.Context, pdCli pd.Client, durCh chan time.Duration) {
+	defer wg.Done()
+
+	for {
 		start := time.Now()
-		_, _, err := pdCli.GetTS(context.TODO())
+		_, _, err := pdCli.GetTS(ctx)
+		if errors.Cause(err) == context.Canceled {
+			return
+		}
+
 		if err != nil {
 			log.Fatal(err)
 		}
 		dur := time.Since(start)
-		s.update(dur)
-		time.Sleep(*sleep)
+
+		select {
+		case <-ctx.Done():
+			return
+		case durCh <- dur:
+		}
 	}
-	statsCh <- s
 }
