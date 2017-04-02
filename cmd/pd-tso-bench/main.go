@@ -105,10 +105,10 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 }
 
 const (
-	twoMS    = time.Millisecond * 2
-	fiveMS   = time.Millisecond * 5
-	tenMS    = time.Millisecond * 10
-	thirtyMS = time.Millisecond * 30
+	twoDur    = time.Millisecond * 2
+	fiveDur   = time.Millisecond * 5
+	tenDur    = time.Millisecond * 10
+	thirtyDur = time.Millisecond * 30
 )
 
 type stats struct {
@@ -139,22 +139,22 @@ func (s *stats) update(dur time.Duration) {
 		s.minDur = dur
 	}
 
-	if dur > thirtyMS {
+	if dur > thirtyDur {
 		s.thirtyCnt++
 		return
 	}
 
-	if dur > tenMS {
+	if dur > tenDur {
 		s.tenMSCnt++
 		return
 	}
 
-	if dur > fiveMS {
+	if dur > fiveDur {
 		s.fiveMilliCnt++
 		return
 	}
 
-	if dur > twoMS {
+	if dur > twoDur {
 		s.twoMilliCnt++
 		return
 	}
