@@ -41,3 +41,7 @@ func (h *clusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.rd.JSON(w, http.StatusOK, cluster.GetConfig())
 }
+
+func (h *clusterHandler) GetRaftClusterMeta(w http.ResponseWriter, r *http.Request) {
+	h.rd.JSON(w, http.StatusOK, h.svr.GetRaftClusterMeta())
+}

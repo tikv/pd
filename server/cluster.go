@@ -169,6 +169,17 @@ func (s *Server) GetRaftCluster() *RaftCluster {
 	return s.cluster
 }
 
+// GetRaftClusterMeta gets cluster meta info
+func (s *Server) GetRaftClusterMeta() *metapb.Cluster {
+	if !s.isClosed() && s.cluster.isRunning() {
+		return s.cluster.GetConfig()
+	}
+	return &metapb.Cluster{
+		Id:           s.clusterID,
+		MaxPeerCount: uint32(s.cfg.Replication.MaxReplicas),
+	}
+}
+
 func (s *Server) createRaftCluster() error {
 	if s.cluster.isRunning() {
 		return nil
