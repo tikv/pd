@@ -177,7 +177,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	s.stores = make(map[uint64]*mockRaftStore)
 
 	s.svr, s.cleanup = newTestServer(c)
-	s.svr.cfg.nextRetryDelay = 50 * time.Millisecond
+	s.svr.cfg.Server.NextRetryDelay = 50 * time.Millisecond
 	s.svr.scheduleOpt.SetMaxReplicas(1)
 
 	s.client = s.svr.client

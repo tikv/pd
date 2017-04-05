@@ -22,13 +22,14 @@ import (
 	"github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
+	"github.com/pingcap/pd/pkg/config"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 )
 
 func main() {
-	cfg := server.NewConfig()
+	cfg := config.NewConfig()
 	err := cfg.Parse(os.Args[1:])
 
 	if cfg.Version {

@@ -21,6 +21,7 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/apiutil"
+	"github.com/pingcap/pd/pkg/config"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"golang.org/x/net/context"
@@ -31,7 +32,7 @@ var _ = Suite(&testLeaderChangeSuite{})
 type testLeaderChangeSuite struct{}
 
 func (s *testLeaderChangeSuite) prepareClusterN(c *C, n int) (svrs map[string]*server.Server, endpoints []string, closeFunc func()) {
-	cfgs := server.NewTestMultiConfig(n)
+	cfgs := config.NewTestMultiConfig(n)
 
 	ch := make(chan *server.Server, n)
 
@@ -63,7 +64,7 @@ func (s *testLeaderChangeSuite) prepareClusterN(c *C, n int) (svrs map[string]*s
 			svr.Close()
 		}
 		for _, cfg := range cfgs {
-			cleanServer(cfg)
+			cleanServer(&cfg.Server)
 		}
 	}
 
@@ -84,7 +85,7 @@ func (s *testLeaderChangeSuite) TestLeaderConfigChange(c *C) {
 	leader := s.mustGetLeader(c, endpoints)
 	s.verifyLeader(c, cli.(*client), leader)
 
-	r := server.ReplicationConfig{MaxReplicas: 5}
+	r := config.ReplicationConfig{MaxReplicas: 5}
 	svrs[leader].SetReplicationConfig(r)
 	svrs[leader].Close()
 	// wait leader changes

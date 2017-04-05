@@ -25,6 +25,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/config"
 	"golang.org/x/net/context"
 )
 
@@ -90,7 +91,7 @@ func (kv *kv) saveRegion(region *metapb.Region) error {
 }
 
 func (kv *kv) loadScheduleOption(opt *scheduleOption) (bool, error) {
-	cfg := &Config{}
+	cfg := &config.Config{}
 	cfg.Schedule = *opt.load()
 	cfg.Replication = *opt.rep.load()
 	isExist, err := kv.loadConfig(cfg)
@@ -106,13 +107,13 @@ func (kv *kv) loadScheduleOption(opt *scheduleOption) (bool, error) {
 }
 
 func (kv *kv) saveScheduleOption(opt *scheduleOption) error {
-	cfg := &Config{}
+	cfg := &config.Config{}
 	cfg.Schedule = *opt.load()
 	cfg.Replication = *opt.rep.load()
 	return kv.saveConfig(cfg)
 }
 
-func (kv *kv) saveConfig(cfg *Config) error {
+func (kv *kv) saveConfig(cfg *config.Config) error {
 	value, err := json.Marshal(cfg)
 	if err != nil {
 		return errors.Trace(err)
@@ -120,7 +121,8 @@ func (kv *kv) saveConfig(cfg *Config) error {
 	return kv.save(kv.configPath, string(value))
 }
 
-func (kv *kv) loadConfig(cfg *Config) (bool, error) {
+func (kv *kv) loadConfig(cfg *config.Config) (bool, error) {
+	// TODO: migration
 	value, err := kv.load(kv.configPath)
 	if err != nil {
 		return false, errors.Trace(err)

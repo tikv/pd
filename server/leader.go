@@ -129,8 +129,8 @@ func (s *Server) marshalLeader() string {
 	leader := &pdpb.Member{
 		Name:       s.Name(),
 		MemberId:   s.ID(),
-		ClientUrls: strings.Split(s.cfg.AdvertiseClientUrls, ","),
-		PeerUrls:   strings.Split(s.cfg.AdvertisePeerUrls, ","),
+		ClientUrls: strings.Split(s.cfg.Server.AdvertiseClientUrls, ","),
+		PeerUrls:   strings.Split(s.cfg.Server.AdvertisePeerUrls, ","),
 	}
 
 	data, err := leader.Marshal()
@@ -150,7 +150,7 @@ func (s *Server) campaignLeader() error {
 
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(s.client.Ctx(), requestTimeout)
-	leaseResp, err := lessor.Grant(ctx, s.cfg.LeaderLease)
+	leaseResp, err := lessor.Grant(ctx, s.cfg.Server.LeaderLease)
 	cancel()
 
 	if cost := time.Now().Sub(start); cost > slowRequestTime {

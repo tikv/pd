@@ -20,6 +20,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/config"
 )
 
 type testClusterInfo struct {
@@ -119,9 +120,9 @@ func (c *testClusterInfo) updateStorageRatio(storeID uint64, usedRatio, availabl
 	c.putStore(store)
 }
 
-func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption) {
-	cfg := NewConfig()
-	cfg.adjust()
+func newTestScheduleConfig() (*config.ScheduleConfig, *scheduleOption) {
+	cfg := config.NewConfig()
+	cfg.Adjust()
 	opt := newScheduleOption(cfg)
 	return &cfg.Schedule, opt
 }

@@ -25,6 +25,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/config"
 	"github.com/pingcap/pd/server"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
@@ -78,7 +79,7 @@ func mustUnixAddrToHTTPAddr(c *C, addr string) string {
 
 var stripUnix = strings.NewReplacer("unix://", "")
 
-func cleanServer(cfg *server.Config) {
+func cleanServer(cfg *config.ServerConfig) {
 	// Clean data directory
 	os.RemoveAll(cfg.DataDir)
 
@@ -96,13 +97,13 @@ func mustNewServer(c *C) (*server.Server, cleanUpFunc) {
 	return svrs[0], cleanup
 }
 
-func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpFunc) {
+func mustNewCluster(c *C, num int) ([]*config.Config, []*server.Server, cleanUpFunc) {
 	svrs := make([]*server.Server, 0, num)
-	cfgs := server.NewTestMultiConfig(num)
+	cfgs := config.NewTestMultiConfig(num)
 
 	ch := make(chan *server.Server, num)
 	for _, cfg := range cfgs {
-		go func(cfg *server.Config) {
+		go func(cfg *config.Config) {
 			s := server.CreateServer(cfg)
 			e := s.StartEtcd(NewHandler(s))
 			c.Assert(e, IsNil)
@@ -126,7 +127,7 @@ func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpF
 			s.Close()
 		}
 		for _, cfg := range cfgs {
-			cleanServer(cfg)
+			cleanServer(&cfg.Server)
 		}
 	}
 

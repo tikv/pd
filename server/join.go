@@ -21,12 +21,13 @@ import (
 	"github.com/coreos/etcd/embed"
 	"github.com/coreos/etcd/wal"
 	"github.com/juju/errors"
+	"github.com/pingcap/pd/pkg/config"
 	"github.com/pingcap/pd/pkg/etcdutil"
 )
 
 // TODO: support HTTPS
-func genClientV3Config(cfg *Config) clientv3.Config {
-	endpoints := strings.Split(cfg.Join, ",")
+func genClientV3Config(cfg *config.Config) clientv3.Config {
+	endpoints := strings.Split(cfg.Server.Join, ",")
 	return clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: etcdutil.DefaultDialTimeout,
@@ -70,22 +71,22 @@ func genClientV3Config(cfg *Config) clientv3.Config {
 //      What join does: return "" (as etcd will read data directory and find
 //                      that the PD itself has been removed, so an empty string
 //                      is fine.)
-func PrepareJoinCluster(cfg *Config) error {
+func PrepareJoinCluster(cfg *config.Config) error {
 	// - A PD tries to join itself.
-	if cfg.Join == "" {
+	if cfg.Server.Join == "" {
 		return nil
 	}
 
-	if cfg.Join == cfg.AdvertiseClientUrls {
+	if cfg.Server.Join == cfg.Server.AdvertiseClientUrls {
 		return errors.New("join self is forbidden")
 	}
 
 	// Cases with data directory.
 
 	initialCluster := ""
-	if wal.Exist(cfg.DataDir) {
-		cfg.InitialCluster = initialCluster
-		cfg.InitialClusterState = embed.ClusterStateFlagExisting
+	if wal.Exist(cfg.Server.DataDir) {
+		cfg.Server.InitialCluster = initialCluster
+		cfg.Server.InitialClusterState = embed.ClusterStateFlagExisting
 		return nil
 	}
 
@@ -104,7 +105,7 @@ func PrepareJoinCluster(cfg *Config) error {
 
 	existed := false
 	for _, m := range listResp.Members {
-		if m.Name == cfg.Name {
+		if m.Name == cfg.Server.Name {
 			existed = true
 		}
 	}
@@ -116,7 +117,7 @@ func PrepareJoinCluster(cfg *Config) error {
 
 	// - A new PD joins an existing cluster.
 	// - A deleted PD joins to previous cluster.
-	addResp, err := etcdutil.AddEtcdMember(client, []string{cfg.AdvertisePeerUrls})
+	addResp, err := etcdutil.AddEtcdMember(client, []string{cfg.Server.AdvertisePeerUrls})
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -131,13 +132,13 @@ func PrepareJoinCluster(cfg *Config) error {
 		for _, m := range memb.PeerURLs {
 			n := memb.Name
 			if memb.ID == addResp.Member.ID {
-				n = cfg.Name
+				n = cfg.Server.Name
 			}
 			pds = append(pds, fmt.Sprintf("%s=%s", n, m))
 		}
 	}
 	initialCluster = strings.Join(pds, ",")
-	cfg.InitialCluster = initialCluster
-	cfg.InitialClusterState = embed.ClusterStateFlagExisting
+	cfg.Server.InitialCluster = initialCluster
+	cfg.Server.InitialClusterState = embed.ClusterStateFlagExisting
 	return nil
 }

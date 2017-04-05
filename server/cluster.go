@@ -26,6 +26,7 @@ import (
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/config"
 )
 
 const (
@@ -121,36 +122,36 @@ func (c *RaftCluster) isRunning() bool {
 }
 
 // GetConfig gets the config information.
-func (s *Server) GetConfig() *Config {
-	cfg := s.cfg.clone()
+func (s *Server) GetConfig() *config.Config {
+	cfg := s.cfg.Clone()
 	cfg.Schedule = *s.scheduleOpt.load()
 	cfg.Replication = *s.scheduleOpt.rep.load()
 	return cfg
 }
 
 // GetScheduleConfig gets the balance config information.
-func (s *Server) GetScheduleConfig() *ScheduleConfig {
-	cfg := &ScheduleConfig{}
+func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
+	cfg := &config.ScheduleConfig{}
 	*cfg = *s.scheduleOpt.load()
 	return cfg
 }
 
 // SetScheduleConfig sets the balance config information.
-func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
+func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) {
 	s.scheduleOpt.store(&cfg)
 	s.scheduleOpt.persist(s.kv)
 	log.Infof("schedule config is updated: %+v, old: %+v", cfg, s.cfg.Schedule)
 }
 
 // GetReplicationConfig get the replication config
-func (s *Server) GetReplicationConfig() *ReplicationConfig {
-	cfg := &ReplicationConfig{}
+func (s *Server) GetReplicationConfig() *config.ReplicationConfig {
+	cfg := &config.ReplicationConfig{}
 	*cfg = *s.scheduleOpt.rep.load()
 	return cfg
 }
 
 // SetReplicationConfig sets the replication config
-func (s *Server) SetReplicationConfig(cfg ReplicationConfig) {
+func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) {
 	s.scheduleOpt.rep.store(&cfg)
 	s.scheduleOpt.persist(s.kv)
 	log.Infof("replication is updated: %+v, old: %+v", cfg, s.cfg.Replication)

@@ -16,6 +16,8 @@ package server
 import (
 	"math"
 	"sync/atomic"
+
+	"github.com/pingcap/pd/pkg/config"
 )
 
 const replicaBaseScore = 100
@@ -25,17 +27,17 @@ type Replication struct {
 	replicateCfg atomic.Value
 }
 
-func newReplication(cfg *ReplicationConfig) *Replication {
+func newReplication(cfg *config.ReplicationConfig) *Replication {
 	r := &Replication{}
 	r.store(cfg)
 	return r
 }
 
-func (r *Replication) load() *ReplicationConfig {
-	return r.replicateCfg.Load().(*ReplicationConfig)
+func (r *Replication) load() *config.ReplicationConfig {
+	return r.replicateCfg.Load().(*config.ReplicationConfig)
 }
 
-func (r *Replication) store(cfg *ReplicationConfig) {
+func (r *Replication) store(cfg *config.ReplicationConfig) {
 	r.replicateCfg.Store(cfg)
 }
 
@@ -47,7 +49,7 @@ func (r *Replication) GetMaxReplicas() int {
 // SetMaxReplicas set the replicas for each region.
 func (r *Replication) SetMaxReplicas(replicas int) {
 	c := r.load()
-	v := c.clone()
+	v := c.Clone()
 	v.MaxReplicas = uint64(replicas)
 	r.store(v)
 }

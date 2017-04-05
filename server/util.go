@@ -33,6 +33,7 @@ import (
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/config"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"golang.org/x/net/context"
 )
@@ -215,7 +216,7 @@ func rpcConnect(addr string) (net.Conn, error) {
 		return nil, errors.Trace(err)
 	}
 
-	urls, err := ParseUrls(addr)
+	urls, err := config.ParseUrls(addr)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -294,17 +295,17 @@ func setLogOutput(logFile string) error {
 }
 
 // InitLogger initalizes PD's logger.
-func InitLogger(cfg *Config) error {
-	log.SetLevelByString(cfg.LogLevel)
+func InitLogger(cfg *config.Config) error {
+	log.SetLevelByString(cfg.Server.LogLevel)
 	log.SetHighlighting(false)
 
 	// Force redirect etcd log to stderr.
-	if len(cfg.LogFile) == 0 {
+	if len(cfg.Server.LogFile) == 0 {
 		capnslog.SetFormatter(capnslog.NewPrettyFormatter(os.Stderr, false))
 		return nil
 	}
 
-	err := setLogOutput(cfg.LogFile)
+	err := setLogOutput(cfg.Server.LogFile)
 	if err != nil {
 		return errors.Trace(err)
 	}

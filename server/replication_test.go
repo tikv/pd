@@ -13,10 +13,13 @@
 
 package server
 
-import . "github.com/pingcap/check"
+import (
+	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/pkg/config"
+)
 
 func newTestReplication(maxReplicas int, locationLabels ...string) *Replication {
-	cfg := &ReplicationConfig{
+	cfg := &config.ReplicationConfig{
 		MaxReplicas:    uint64(maxReplicas),
 		LocationLabels: locationLabels,
 	}
