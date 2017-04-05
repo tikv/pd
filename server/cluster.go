@@ -169,11 +169,8 @@ func (s *Server) GetRaftCluster() *RaftCluster {
 	return s.cluster
 }
 
-// GetClusterMeta gets cluster meta info
-func (s *Server) GetClusterMeta() *metapb.Cluster {
-	if !s.isClosed() && s.cluster.isRunning() {
-		return s.cluster.GetConfig()
-	}
+// GetCluster gets cluster
+func (s *Server) GetCluster() *metapb.Cluster {
 	return &metapb.Cluster{
 		Id:           s.clusterID,
 		MaxPeerCount: uint32(s.cfg.Replication.MaxReplicas),

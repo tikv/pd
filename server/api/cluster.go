@@ -33,5 +33,5 @@ func newClusterHandler(svr *server.Server, rd *render.Render) *clusterHandler {
 }
 
 func (h *clusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, h.svr.GetClusterMeta())
+	h.rd.JSON(w, http.StatusOK, h.svr.GetCluster())
 }
