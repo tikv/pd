@@ -21,10 +21,9 @@ import (
 
 	"github.com/juju/errors"
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/pkg/config"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"golang.org/x/net/context"
-
-	"github.com/pingcap/pd/pkg/config"
 )
 
 var _ = Suite(&testJoinServerSuite{})

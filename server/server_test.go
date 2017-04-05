@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
-	"github.com/ngaut/log"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/config"
 	"github.com/pingcap/pd/pkg/testutil"
@@ -235,7 +234,7 @@ func (s *testServerSuite) TestClusterID(c *C) {
 	clusterID := svrs[0].clusterID
 	c.Assert(clusterID, Not(Equals), uint64(0))
 	for _, svr := range svrs {
-		log.Debug(svr.clusterID)
+		fmt.Printf("server cluster id: %d\n", svr.clusterID)
 		c.Assert(svr.clusterID, Equals, clusterID)
 	}
 

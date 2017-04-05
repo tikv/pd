@@ -19,7 +19,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/ngaut/log"
+	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/pd/pkg/config"
 	"github.com/pingcap/pd/server"
 )
