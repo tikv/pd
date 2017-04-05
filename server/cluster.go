@@ -139,6 +139,7 @@ func (s *Server) GetScheduleConfig() *ScheduleConfig {
 func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
 	s.scheduleOpt.store(&cfg)
 	s.scheduleOpt.persist(s.kv)
+	s.cfg.Schedule = cfg
 	log.Infof("schedule config is updated: %+v, old: %+v", cfg, s.cfg.Schedule)
 }
 
@@ -153,6 +154,7 @@ func (s *Server) GetReplicationConfig() *ReplicationConfig {
 func (s *Server) SetReplicationConfig(cfg ReplicationConfig) {
 	s.scheduleOpt.rep.store(&cfg)
 	s.scheduleOpt.persist(s.kv)
+	s.cfg.Replication = cfg
 	log.Infof("replication is updated: %+v, old: %+v", cfg, s.cfg.Replication)
 }
 

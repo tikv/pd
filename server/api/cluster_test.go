@@ -48,8 +48,10 @@ func (s *testClusterInfo) TestCluster(c *C) {
 	err := readJSONWithURL(url, c1)
 	c.Assert(err, IsNil)
 	c2 := &metapb.Cluster{}
-	mustBootstrapCluster(c, s.svr)
+	r := server.ReplicationConfig{MaxReplicas: 6}
+	s.svr.SetReplicationConfig(r)
 	err = readJSONWithURL(url, c2)
 	c.Assert(err, IsNil)
+	c1.MaxPeerCount = 6
 	c.Assert(c1, DeepEquals, c2)
 }
