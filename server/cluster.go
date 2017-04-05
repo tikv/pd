@@ -169,8 +169,8 @@ func (s *Server) GetRaftCluster() *RaftCluster {
 	return s.cluster
 }
 
-// GetRaftClusterMeta gets cluster meta info
-func (s *Server) GetRaftClusterMeta() *metapb.Cluster {
+// GetClusterMeta gets cluster meta info
+func (s *Server) GetClusterMeta() *metapb.Cluster {
 	if !s.isClosed() && s.cluster.isRunning() {
 		return s.cluster.GetConfig()
 	}

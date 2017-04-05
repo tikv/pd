@@ -72,7 +72,7 @@ func (c *Client) GetLeader() (*pdpb.Member, error) {
 
 // GetClusterID returns the Cluster ID.
 func (c *Client) GetClusterID() (uint64, error) {
-	clusterURL := c.url + "/cluster/raft"
+	clusterURL := c.url + "/cluster"
 	resp, err := c.hc.Get(clusterURL)
 	if err != nil {
 		return 0, errors.Trace(err)
