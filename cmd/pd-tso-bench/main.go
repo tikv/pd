@@ -16,7 +16,8 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"sync"
@@ -24,6 +25,7 @@ import (
 	"time"
 
 	"github.com/juju/errors"
+	"github.com/ngaut/log"
 	"github.com/pingcap/pd/pd-client"
 	"golang.org/x/net/context"
 )
@@ -33,11 +35,19 @@ var (
 	concurrency = flag.Int("C", 1000, "concurrency")
 	sleep       = flag.Duration("sleep", time.Millisecond, "sleep time after a request, used to adjust pressure")
 	interval    = flag.Duration("interval", time.Second, "interval to output the statistics")
+	pprofAddr   = flag.String("pprof-addr", "127.0.0.1:6060", "pprof address")
 	wg          sync.WaitGroup
 )
 
 func main() {
 	flag.Parse()
+
+	go func() {
+		if err := http.ListenAndServe(*pprofAddr, nil); err != nil {
+			log.Error(err)
+		}
+	}()
+
 	pdCli, err := pd.NewClient([]string{*pdAddrs})
 	if err != nil {
 		log.Fatal(err)
