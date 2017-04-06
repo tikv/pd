@@ -30,8 +30,7 @@ import (
 
 var (
 	pdAddrs     = flag.String("pd", "127.0.0.1:2379", "pd address")
-	concurrency = flag.Int("C", 100, "concurrency")
-	num         = flag.Int("N", 1000, "number of request per request worker")
+	concurrency = flag.Int("C", 1000, "concurrency")
 	sleep       = flag.Duration("sleep", time.Millisecond, "sleep time after a request, used to adjust pressure")
 	interval    = flag.Duration("interval", time.Second, "interval to output the statistics")
 	wg          sync.WaitGroup
