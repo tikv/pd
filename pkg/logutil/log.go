@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"runtime"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/pkg/capnslog"
@@ -44,6 +45,10 @@ func (f *redirectFormatter) Format(pkg string, level capnslog.LogLevel, depth in
 	})
 
 	logStr := fmt.Sprint(entries)
+	// trim square
+	if len(logStr) > 2 {
+		logStr = logStr[1 : len(logStr)-1]
+	}
 
 	switch level {
 	case capnslog.CRITICAL:
@@ -108,6 +113,8 @@ func InitLogger(cfg *config.ServerConfig) error {
 	log.SetLevel(stringToLogLevel(cfg.LogLevel))
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true, TimestampFormat: "2006-01-02 15:04:05"})
 
+	log.AddHook(new(modifyHook))
+
 	// redirect etcd log
 	capnslog.SetFormatter(&redirectFormatter{})
 
@@ -122,4 +129,35 @@ func InitLogger(cfg *config.ServerConfig) error {
 	}
 
 	return nil
+}
+
+// FIXME: is this suitable for all condition?
+const logrusHookCallerDepth = 7
+
+// modifyHook enjects file and line pos info into log entry
+type modifyHook struct {
+}
+
+// Fire implements logrus Hook interface
+func (hook *modifyHook) Fire(entry *log.Entry) error {
+	_, file, line, ok := runtime.Caller(logrusHookCallerDepth)
+	if !ok {
+		return nil
+	}
+	short := file
+	for i := len(file) - 1; i > 0; i-- {
+		if file[i] == '/' {
+			short = file[i+1:]
+			break
+		}
+	}
+	file = short
+	entry.Data["file"] = file
+	entry.Data["line"] = line //fmt.Sprintf("%s:%d", file, line)
+	return nil
+}
+
+// Levels implements logrus Hook interface
+func (hook *modifyHook) Levels() []log.Level {
+	return log.AllLevels
 }
