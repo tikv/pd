@@ -18,6 +18,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"strings"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/pkg/capnslog"
@@ -46,7 +47,7 @@ func (f *redirectFormatter) Format(pkg string, level capnslog.LogLevel, depth in
 
 	logStr := fmt.Sprint(entries)
 	// trim square
-	if len(logStr) > 2 {
+	if len(logStr) > 2 && logStr[0] == '[' {
 		logStr = logStr[1 : len(logStr)-1]
 	}
 
@@ -131,29 +132,29 @@ func InitLogger(cfg *config.ServerConfig) error {
 	return nil
 }
 
-// FIXME: is this suitable for all condition?
-const logrusHookCallerDepth = 7
-
 // modifyHook enjects file and line pos info into log entry
 type modifyHook struct {
 }
 
 // Fire implements logrus Hook interface
+// https://github.com/sirupsen/logrus/issues/63
 func (hook *modifyHook) Fire(entry *log.Entry) error {
-	_, file, line, ok := runtime.Caller(logrusHookCallerDepth)
-	if !ok {
-		return nil
-	}
-	short := file
-	for i := len(file) - 1; i > 0; i-- {
-		if file[i] == '/' {
-			short = file[i+1:]
+	pc := make([]uintptr, 3, 3)
+	cnt := runtime.Callers(6, pc)
+
+	for i := 0; i < cnt; i++ {
+		fu := runtime.FuncForPC(pc[i] - 1)
+		name := fu.Name()
+		if !strings.Contains(name, "github.com/Sirupsen/logrus") &&
+			!strings.Contains(name, "github.com/pingcap/pd/pkg/logutil") &&
+			!strings.Contains(name, "github.com/coreos/pkg/capnslog") {
+			file, line := fu.FileLine(pc[i] - 1)
+			entry.Data["file"] = path.Base(file)
+			entry.Data["func"] = path.Base(name)
+			entry.Data["line"] = line
 			break
 		}
 	}
-	file = short
-	entry.Data["file"] = file
-	entry.Data["line"] = line //fmt.Sprintf("%s:%d", file, line)
 	return nil
 }
 
