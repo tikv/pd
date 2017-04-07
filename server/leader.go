@@ -175,7 +175,10 @@ func (s *Server) campaignLeader() error {
 	}
 
 	// Make the leader keepalived.
-	ch, err := lessor.KeepAlive(s.client.Ctx(), clientv3.LeaseID(leaseResp.ID))
+	ctx, cancel = context.WithCancel(s.client.Ctx())
+	defer cancel()
+
+	ch, err := lessor.KeepAlive(ctx, clientv3.LeaseID(leaseResp.ID))
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -219,7 +222,7 @@ func (s *Server) campaignLeader() error {
 			if err = s.updateTimestamp(); err != nil {
 				return errors.Trace(err)
 			}
-		case <-s.client.Ctx().Done():
+		case <-ctx.Done():
 			return errors.New("server closed")
 		}
 	}
@@ -229,7 +232,9 @@ func (s *Server) watchLeader() {
 	watcher := clientv3.NewWatcher(s.client)
 	defer watcher.Close()
 
-	ctx := s.client.Ctx()
+	ctx, cancel := context.WithCancel(s.client.Ctx())
+	defer cancel()
+
 	for {
 		rch := watcher.Watch(ctx, s.getLeaderPath())
 		for wresp := range rch {

@@ -56,11 +56,13 @@ func main() {
 
 	wg.Add(*concurrency)
 	for i := 0; i < *concurrency; i++ {
-		go reqWorker(ctx, pdCli, durCh)
+		childCtx, _ := context.WithCancel(ctx)
+		go reqWorker(childCtx, pdCli, durCh)
 	}
 
 	wg.Add(1)
-	go showStats(ctx, durCh)
+	childCtx, _ := context.WithCancel(ctx)
+	go showStats(childCtx, durCh)
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
