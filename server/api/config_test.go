@@ -21,7 +21,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/pkg/config"
 )
 
 var _ = Suite(&testConfigSuite{})
@@ -34,8 +34,8 @@ func (s *testConfigSuite) SetUpSuite(c *C) {
 	s.hc = newUnixSocketClient()
 }
 
-func checkConfigResponse(c *C, body []byte, cfgs []*server.Config) {
-	got := &server.Config{}
+func checkConfigResponse(c *C, body []byte, cfgs []*config.Config) {
+	got := &config.Config{}
 	err := json.Unmarshal(body, &got)
 	c.Assert(err, IsNil)
 }
@@ -46,11 +46,11 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 		cfgs, _, clean := mustNewCluster(c, num)
 		defer clean()
 
-		parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config"}
+		parts := []string{cfgs[rand.Intn(len(cfgs))].Server.ClientUrls, apiPrefix, "/api/v1/config"}
 		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
-		cfg := &server.Config{}
+		cfg := &config.Config{}
 		err = readJSON(resp.Body, cfg)
 		c.Assert(err, IsNil)
 
@@ -69,7 +69,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 		c.Assert(err, IsNil)
 
 		resp, err = s.hc.Get(addr)
-		newCfg := &server.Config{}
+		newCfg := &config.Config{}
 		err = readJSON(resp.Body, newCfg)
 		c.Assert(err, IsNil)
 		cfg.Replication.MaxReplicas = 5
@@ -85,22 +85,22 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 		cfgs, _, clean := mustNewCluster(c, num)
 		defer clean()
 
-		parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/schedule"}
+		parts := []string{cfgs[rand.Intn(len(cfgs))].Server.ClientUrls, apiPrefix, "/api/v1/config/schedule"}
 		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
-		sc := &server.ScheduleConfig{}
+		sc := &config.ScheduleConfig{}
 		readJSON(resp.Body, sc)
 
 		sc.MaxStoreDownTime.Duration = time.Second
 		postData, err := json.Marshal(sc)
-		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/schedule"}
+		postURL := []string{cfgs[rand.Intn(len(cfgs))].Server.ClientUrls, apiPrefix, "/api/v1/config/schedule"}
 		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))
 		err = postJSON(s.hc, postAddr, postData)
 		c.Assert(err, IsNil)
 
 		resp, err = s.hc.Get(addr)
-		sc1 := &server.ScheduleConfig{}
+		sc1 := &config.ScheduleConfig{}
 		readJSON(resp.Body, sc1)
 
 		c.Assert(*sc, Equals, *sc1)
@@ -113,12 +113,12 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 		cfgs, _, clean := mustNewCluster(c, num)
 		defer clean()
 
-		parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/replicate"}
+		parts := []string{cfgs[rand.Intn(len(cfgs))].Server.ClientUrls, apiPrefix, "/api/v1/config/replicate"}
 		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
 
-		rc := &server.ReplicationConfig{}
+		rc := &config.ReplicationConfig{}
 		err = readJSON(resp.Body, rc)
 		c.Assert(err, IsNil)
 
@@ -126,7 +126,7 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 
 		rc1 := map[string]int{"max-replicas": 5}
 		postData, err := json.Marshal(rc1)
-		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/replicate"}
+		postURL := []string{cfgs[rand.Intn(len(cfgs))].Server.ClientUrls, apiPrefix, "/api/v1/config/replicate"}
 		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))
 		err = postJSON(s.hc, postAddr, postData)
 		c.Assert(err, IsNil)
@@ -137,7 +137,7 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 		err = postJSON(s.hc, postAddr, postData)
 
 		resp, err = s.hc.Get(addr)
-		rc3 := &server.ReplicationConfig{}
+		rc3 := &config.ReplicationConfig{}
 		err = readJSON(resp.Body, rc3)
 
 		c.Assert(*rc, DeepEquals, *rc3)

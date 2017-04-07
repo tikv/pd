@@ -25,7 +25,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/pkg/config"
 )
 
 var _ = Suite(&testMemberAPISuite{})
@@ -48,7 +48,7 @@ func relaxEqualStings(c *C, a, b []string) {
 	c.Assert(sortedStringA, Equals, sortedStringB)
 }
 
-func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
+func checkListResponse(c *C, body []byte, cfgs []*config.Config) {
 	got := make(map[string][]*pdpb.Member)
 	json.Unmarshal(body, &got)
 
@@ -56,12 +56,13 @@ func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
 
 	for _, memb := range got["members"] {
 		for _, cfg := range cfgs {
-			if memb.GetName() != cfg.Name {
+			svrCfg := cfg.Server
+			if memb.GetName() != svrCfg.Name {
 				continue
 			}
 
-			relaxEqualStings(c, memb.ClientUrls, strings.Split(cfg.ClientUrls, ","))
-			relaxEqualStings(c, memb.PeerUrls, strings.Split(cfg.PeerUrls, ","))
+			relaxEqualStings(c, memb.ClientUrls, strings.Split(svrCfg.ClientUrls, ","))
+			relaxEqualStings(c, memb.PeerUrls, strings.Split(svrCfg.PeerUrls, ","))
 		}
 	}
 }
@@ -73,7 +74,7 @@ func (s *testMemberAPISuite) TestMemberList(c *C) {
 		cfgs, _, clean := mustNewCluster(c, num)
 		defer clean()
 
-		parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/members"}
+		parts := []string{cfgs[rand.Intn(len(cfgs))].Server.ClientUrls, apiPrefix, "/api/v1/members"}
 		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
@@ -91,7 +92,7 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 	server := svrs[target]
 
 	for i, cfg := range cfgs {
-		if cfg.Name == server.Name() {
+		if cfg.Server.Name == server.Name() {
 			cfgs = append(cfgs[:i], cfgs[i+1:]...)
 			break
 		}
@@ -102,7 +103,7 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 			break
 		}
 	}
-	clientURL := cfgs[rand.Intn(len(cfgs))].ClientUrls
+	clientURL := cfgs[rand.Intn(len(cfgs))].Server.ClientUrls
 
 	server.Close()
 	time.Sleep(5 * time.Second)
@@ -169,7 +170,7 @@ func (s *testMemberAPISuite) TestMemberLeader(c *C) {
 	leader, err := svrs[0].GetLeader()
 	c.Assert(err, IsNil)
 
-	parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/leader"}
+	parts := []string{cfgs[rand.Intn(len(cfgs))].Server.ClientUrls, apiPrefix, "/api/v1/leader"}
 	addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
 	c.Assert(err, IsNil)
 	resp, err := s.hc.Get(addr)

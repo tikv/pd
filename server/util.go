@@ -20,19 +20,17 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"os"
-	"path"
 	"reflect"
 	"strings"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/pkg/capnslog"
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
-	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/config"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"golang.org/x/net/context"
 )
@@ -40,8 +38,6 @@ import (
 const (
 	requestTimeout  = etcdutil.DefaultRequestTimeout
 	slowRequestTime = etcdutil.DefaultSlowRequestTime
-
-	logDirMode = 0755
 )
 
 // Version information.
@@ -215,7 +211,7 @@ func rpcConnect(addr string) (net.Conn, error) {
 		return nil, errors.Trace(err)
 	}
 
-	urls, err := ParseUrls(addr)
+	urls, err := config.ParseUrls(addr)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -242,74 +238,6 @@ func rpcConnect(addr string) (net.Conn, error) {
 	}
 
 	return nil, errors.Errorf("connect to %s failed", addr)
-}
-
-type redirectFormatter struct{}
-
-// Format turns capnslog logs to ngaut logs.
-// TODO: remove ngaut log caller stack, "util.go:xxx"
-func (rf *redirectFormatter) Format(pkg string, level capnslog.LogLevel, depth int, entries ...interface{}) {
-	if pkg != "" {
-		pkg = fmt.Sprint(pkg, ": ")
-	}
-
-	logStr := fmt.Sprint(level.Char(), " | ", pkg, entries)
-
-	switch level {
-	case capnslog.CRITICAL:
-		log.Fatalf(logStr)
-	case capnslog.ERROR:
-		log.Errorf(logStr)
-	case capnslog.WARNING:
-		log.Warningf(logStr)
-	case capnslog.NOTICE:
-		log.Infof(logStr)
-	case capnslog.INFO:
-		log.Infof(logStr)
-	case capnslog.DEBUG:
-		log.Debugf(logStr)
-	case capnslog.TRACE:
-		log.Debugf(logStr)
-	}
-}
-
-// Flush only for implementing Formatter.
-func (rf *redirectFormatter) Flush() {}
-
-// setLogOutput sets output path for all logs.
-func setLogOutput(logFile string) error {
-	// PD log.
-	dir := path.Dir(logFile)
-	err := os.MkdirAll(dir, logDirMode)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	log.SetOutputByName(logFile)
-	log.SetRotateByDay()
-
-	// ETCD log.
-	capnslog.SetFormatter(&redirectFormatter{})
-
-	return nil
-}
-
-// InitLogger initalizes PD's logger.
-func InitLogger(cfg *Config) error {
-	log.SetLevelByString(cfg.LogLevel)
-	log.SetHighlighting(false)
-
-	// Force redirect etcd log to stderr.
-	if len(cfg.LogFile) == 0 {
-		capnslog.SetFormatter(capnslog.NewPrettyFormatter(os.Stderr, false))
-		return nil
-	}
-
-	err := setLogOutput(cfg.LogFile)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	return nil
 }
 
 // GetMembers return a slice of Members.

@@ -23,13 +23,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/embed"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
-	"github.com/ngaut/log"
 	"github.com/ngaut/systimemon"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/config"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"google.golang.org/grpc"
 )
@@ -45,7 +46,7 @@ const (
 
 // Server is the pd server.
 type Server struct {
-	cfg         *Config
+	cfg         *config.Config
 	scheduleOpt *scheduleOption
 
 	etcd *embed.Etcd
@@ -90,7 +91,7 @@ type Server struct {
 }
 
 // NewServer creates the pd server with given configuration.
-func NewServer(cfg *Config) (*Server, error) {
+func NewServer(cfg *config.Config) (*Server, error) {
 	s := CreateServer(cfg)
 	if err := s.StartEtcd(nil); err != nil {
 		s.Close()
@@ -104,7 +105,7 @@ func NewServer(cfg *Config) (*Server, error) {
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(cfg *Config) *Server {
+func CreateServer(cfg *config.Config) *Server {
 	log.Infof("PD config - %v", cfg)
 	rand.Seed(time.Now().UnixNano())
 
@@ -121,7 +122,7 @@ func CreateServer(cfg *Config) *Server {
 
 // StartEtcd starts an embed etcd server with an user handler.
 func (s *Server) StartEtcd(apiHandler http.Handler) error {
-	etcdCfg, err := s.cfg.genEmbedEtcdConfig()
+	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -140,7 +141,7 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	}
 
 	// Check cluster ID
-	urlmap, err := types.NewURLsMap(s.cfg.InitialCluster)
+	urlmap, err := types.NewURLsMap(s.cfg.Server.InitialCluster)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -180,9 +181,9 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	for _, m := range etcdMembers.Members {
 		if s.ID() == m.ID {
 			etcdPeerURLs := strings.Join(m.PeerURLs, ",")
-			if s.cfg.AdvertisePeerUrls != etcdPeerURLs {
-				log.Infof("update advertise peer urls from %s to %s", s.cfg.AdvertisePeerUrls, etcdPeerURLs)
-				s.cfg.AdvertisePeerUrls = etcdPeerURLs
+			if s.cfg.Server.AdvertisePeerUrls != etcdPeerURLs {
+				log.Infof("update advertise peer urls from %s to %s", s.cfg.Server.AdvertisePeerUrls, etcdPeerURLs)
+				s.cfg.Server.AdvertisePeerUrls = etcdPeerURLs
 			}
 		}
 	}
@@ -273,7 +274,7 @@ func (s *Server) Run() {
 
 // GetAddr returns the server urls for clients.
 func (s *Server) GetAddr() string {
-	return s.cfg.AdvertiseClientUrls
+	return s.cfg.Server.AdvertiseClientUrls
 }
 
 // GetHandler returns the handler for API.
@@ -298,7 +299,7 @@ func (s *Server) ID() uint64 {
 
 // Name returns the unique etcd Name for this server in etcd cluster.
 func (s *Server) Name() string {
-	return s.cfg.Name
+	return s.cfg.Server.Name
 }
 
 // ClusterID returns the cluster ID of this server.

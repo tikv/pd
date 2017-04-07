@@ -20,6 +20,7 @@ import (
 	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/config"
 	"golang.org/x/net/context"
 )
 
@@ -32,12 +33,12 @@ type testGetLeaderSuite struct {
 }
 
 func (s *testGetLeaderSuite) SetUpSuite(c *C) {
-	cfg := NewTestSingleConfig()
+	cfg := config.NewTestSingleConfig()
 
 	// Send requests before server has started.
 	s.wg.Add(1)
 	s.done = make(chan bool)
-	go s.sendRequest(c, cfg.ClientUrls)
+	go s.sendRequest(c, cfg.Server.ClientUrls)
 	time.Sleep(100 * time.Millisecond)
 
 	svr, err := NewServer(cfg)

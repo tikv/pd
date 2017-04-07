@@ -17,8 +17,8 @@ import (
 	"fmt"
 	"io"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
-	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"golang.org/x/net/context"
@@ -62,7 +62,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if err != nil {
 			return errors.Trace(err)
 		}
-		if err := s.validateRequest(request.GetHeader()); err != nil {
+		if err = s.validateRequest(request.GetHeader()); err != nil {
 			return errors.Trace(err)
 		}
 		count := request.GetCount()

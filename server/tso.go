@@ -18,9 +18,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/juju/errors"
-	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
@@ -98,7 +98,7 @@ func (s *Server) syncTimestamp() error {
 		break
 	}
 
-	save := now.Add(s.cfg.TsoSaveInterval.Duration)
+	save := now.Add(s.cfg.Server.TsoSaveInterval.Duration)
 	if err = s.saveTimestamp(save); err != nil {
 		return errors.Trace(err)
 	}
@@ -129,7 +129,7 @@ func (s *Server) updateTimestamp() error {
 
 	if now.Sub(s.lastSavedTime) >= 0 {
 		last := s.lastSavedTime
-		save := now.Add(s.cfg.TsoSaveInterval.Duration)
+		save := now.Add(s.cfg.Server.TsoSaveInterval.Duration)
 		if err := s.saveTimestamp(save); err != nil {
 			return errors.Trace(err)
 		}

@@ -23,6 +23,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/config"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"golang.org/x/net/context"
@@ -59,7 +60,7 @@ var (
 
 var stripUnix = strings.NewReplacer("unix://", "")
 
-func cleanServer(cfg *server.Config) {
+func cleanServer(cfg *config.ServerConfig) {
 	// Clean data directory
 	os.RemoveAll(cfg.DataDir)
 
@@ -98,7 +99,7 @@ func (s *testClientSuite) TearDownSuite(c *C) {
 }
 
 func newServer(c *C) (*server.Server, cleanupFunc) {
-	cfg := server.NewTestSingleConfig()
+	cfg := config.NewTestSingleConfig()
 
 	s := server.CreateServer(cfg)
 	err := s.StartEtcd(api.NewHandler(s))
@@ -109,7 +110,7 @@ func newServer(c *C) (*server.Server, cleanupFunc) {
 	cleanup := func() {
 		s.Close()
 
-		cleanServer(cfg)
+		cleanServer(&cfg.Server)
 	}
 
 	return s, cleanup

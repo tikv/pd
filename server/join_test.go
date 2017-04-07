@@ -21,6 +21,7 @@ import (
 
 	"github.com/juju/errors"
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/pkg/config"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"golang.org/x/net/context"
 )
@@ -33,14 +34,14 @@ var (
 
 type testJoinServerSuite struct{}
 
-func newTestMultiJoinConfig(count int) []*Config {
-	cfgs := NewTestMultiConfig(count)
+func newTestMultiJoinConfig(count int) []*config.Config {
+	cfgs := config.NewTestMultiConfig(count)
 	for i := 0; i < count; i++ {
-		cfgs[i].InitialCluster = ""
+		cfgs[i].Server.InitialCluster = ""
 		if i == 0 {
 			continue
 		}
-		cfgs[i].Join = cfgs[i-1].ClientUrls
+		cfgs[i].Server.Join = cfgs[i-1].Server.ClientUrls
 	}
 	return cfgs
 }
@@ -84,13 +85,13 @@ Outloop:
 }
 
 // Notice: cfg has changed.
-func startPdWith(cfg *Config) (*Server, error) {
+func startPdWith(cfg *config.Config) (*Server, error) {
 	svrCh := make(chan *Server)
 	errCh := make(chan error, 1)
 	abortCh := make(chan struct{}, 1)
 
 	go func() {
-		err := cfg.adjust()
+		err := cfg.Adjust()
 		if err != nil {
 			errCh <- errors.Trace(err)
 			return
@@ -134,9 +135,7 @@ func startPdWith(cfg *Config) (*Server, error) {
 	}
 }
 
-type cleanUpFunc func()
-
-func mustNewJoinCluster(c *C, num int) ([]*Config, []*Server, cleanUpFunc) {
+func mustNewJoinCluster(c *C, num int) ([]*config.Config, []*Server, cleanUpFunc) {
 	svrs := make([]*Server, 0, num)
 	cfgs := newTestMultiJoinConfig(num)
 
@@ -217,7 +216,7 @@ func (s *testJoinServerSuite) TestNewPDJoinsExistingCluster(c *C) {
 // A PD joins itself.
 func (s *testJoinServerSuite) TestPDJoinsItself(c *C) {
 	cfg := newTestMultiJoinConfig(1)[0]
-	cfg.Join = cfg.AdvertiseClientUrls
+	cfg.Server.Join = cfg.Server.AdvertiseClientUrls
 
 	_, err := startPdWith(cfg)
 	c.Assert(err, NotNil)
@@ -231,10 +230,10 @@ func (s *testJoinServerSuite) TestFailedPDJoinsPreviousCluster(c *C) {
 	target := 1
 	svrs[target].Close()
 	time.Sleep(500 * time.Millisecond)
-	err := os.RemoveAll(cfgs[target].DataDir)
+	err := os.RemoveAll(cfgs[target].Server.DataDir)
 	c.Assert(err, IsNil)
 
-	cfgs[target].InitialCluster = ""
+	cfgs[target].Server.InitialCluster = ""
 	_, err = startPdWith(cfgs[target])
 	c.Assert(err, NotNil)
 }
@@ -254,7 +253,7 @@ func (s *testJoinServerSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
 	client := svrs[0].GetClient()
 	client.MemberRemove(ctx, svrs[target].ID())
 
-	cfgs[target].InitialCluster = ""
+	cfgs[target].Server.InitialCluster = ""
 	_, err := startPdWith(cfgs[target])
 	// Deleted PD will not start successfully.
 	c.Assert(err, Equals, errTimeout)
@@ -278,7 +277,7 @@ func (s *testJoinServerSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 	svrs[target].Close()
 	time.Sleep(500 * time.Millisecond)
 
-	cfgs[target].InitialCluster = ""
+	cfgs[target].Server.InitialCluster = ""
 	_, err := startPdWith(cfgs[target])
 	// A deleted PD will not start successfully.
 	c.Assert(err, Equals, errTimeout)
@@ -308,7 +307,7 @@ func (s *testJoinServerSuite) TestGeneralJoin(c *C) {
 	svrs[target].Close()
 	time.Sleep(500 * time.Millisecond)
 
-	cfgs[target].InitialCluster = ""
+	cfgs[target].Server.InitialCluster = ""
 	re, err := startPdWith(cfgs[target])
 	c.Assert(err, IsNil)
 	defer re.Close()
