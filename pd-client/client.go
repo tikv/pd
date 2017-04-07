@@ -401,13 +401,19 @@ func (c *client) GetClusterID(context.Context) uint64 {
 	return c.clusterID
 }
 
+var tsoReqPool = sync.Pool{
+	New: func() interface{} {
+		return &tsoRequest{
+			done: make(chan error, 1),
+		}
+	},
+}
+
 func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds()) }()
 
-	req := &tsoRequest{
-		done: make(chan error, 1),
-	}
+	req := tsoReqPool.Get().(*tsoRequest)
 	c.tsoRequests <- req
 
 	select {
@@ -416,7 +422,9 @@ func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
 			cmdFailedDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds())
 			return 0, 0, errors.Trace(err)
 		}
-		return req.physical, req.logical, err
+		physical, logical := req.physical, req.logical
+		tsoReqPool.Put(req)
+		return physical, logical, err
 	case <-ctx.Done():
 		return 0, 0, errors.Trace(ctx.Err())
 	}
