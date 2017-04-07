@@ -332,13 +332,16 @@ type clusterInfo struct {
 	meta    *metapb.Cluster
 	stores  *storesInfo
 	regions *regionsInfo
+
+	writeStatus *queueCache
 }
 
 func newClusterInfo(id IDAllocator) *clusterInfo {
 	return &clusterInfo{
-		id:      id,
-		stores:  newStoresInfo(),
-		regions: newRegionsInfo(),
+		id:          id,
+		stores:      newStoresInfo(),
+		regions:     newRegionsInfo(),
+		writeStatus: newQueueCache(writeStatusSize),
 	}
 }
 
@@ -461,10 +464,82 @@ func (c *clusterInfo) getStoreCount() int {
 	return c.stores.getStoreCount()
 }
 
+func (c *clusterInfo) getStoreWriteStatus() map[uint64]uint64 {
+	res := make(map[uint64]uint64)
+	for _, s := range c.getStores() {
+		res[s.GetId()] = s.status.GetBytesWritten()
+		res[0] += s.status.GetBytesWritten()
+	}
+	return res
+}
+
+func (c *clusterInfo) getStoreTotalWrite() uint64 {
+	var res uint64
+	for _, s := range c.getStores() {
+		if s.isUp() {
+			res += s.status.GetBytesWritten()
+		}
+	}
+	return res
+}
+func (c *clusterInfo) getStoreTotalWriteNoLock() uint64 {
+	var res uint64
+	for _, s := range c.stores.getStores() {
+		if s.isUp() {
+			res += s.status.GetBytesWritten()
+		}
+	}
+	return res
+}
+
 func (c *clusterInfo) getRegion(regionID uint64) *RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.regions.getRegion(regionID)
+}
+
+func (c *clusterInfo) enWriteStatuQueue(region *RegionInfo) {
+	key := string(region.GetEndKey())
+	newItem := RegionStateValue{
+		RegionID:   region.GetId(),
+		WriteBytes: region.WriteBytes,
+		StoreID:    region.Leader.GetStoreId(),
+	}
+	v := c.writeStatus.Get(key)
+	if v != nil {
+		ov := v.(RegionStateValue)
+		newItem.UpdateTimes = ov.UpdateTimes + 1
+
+		//	if ov.RegionID != region.GetId() {
+		//		newItem.WriteBytes = ov.WriteBytes
+		//		log.Infof("Debug split update %+v %+v \n", ov, newItem)
+		//	}
+		//	if ov.RegionID != region.GetId() {
+		//		newItem.WriteBytes = ov.WriteBytes
+		//		log.Infof("Debug transfer update %+v %+v \n", ov, newItem)
+		//	}
+		c.writeStatus.Update(key, newItem)
+		log.Infof("Debug update %+v %+v key %v \n", v, newItem, region.GetEndKey())
+		return
+	}
+
+	c.writeStatus.Push(key, newItem)
+}
+
+func (c *clusterInfo) outWriteStatuQueue(region *RegionInfo) {
+	key := string(region.GetEndKey())
+	v := c.writeStatus.Get(key)
+	if v == nil {
+		return
+	}
+	// skip split report
+	if v.(RegionStateValue).RegionID != region.GetId() {
+		log.Infof("Debug changed from region %d to region %d write %d\n", v.(RegionStateValue).RegionID, region.GetId(), region.WriteBytes)
+		c.enWriteStatuQueue(region)
+		return
+	}
+	log.Infof("Debug outQueue %d id:%d write:%d \n", v.(RegionStateValue).UpdateTimes, region.GetId(), region.WriteBytes)
+	c.writeStatus.Delete(key)
 }
 
 func (c *clusterInfo) searchRegion(regionKey []byte) *RegionInfo {
@@ -571,7 +646,6 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	if store == nil {
 		return errors.Trace(errStoreNotFound(storeID))
 	}
-
 	store.status.StoreStats = proto.Clone(stats).(*pdpb.StoreStats)
 	store.status.LastHeartbeatTS = time.Now()
 
@@ -595,6 +669,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
 	// Save to KV if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	var saveKV, saveCache bool
+	updateWriteStatus := true
 	if origin == nil {
 		log.Infof("[region %d] Insert new region {%v}", region.GetId(), region)
 		saveKV, saveCache = true, true
@@ -607,7 +682,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
 		}
 		if r.GetVersion() > o.GetVersion() {
 			log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetId(), diffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion())
-			saveKV, saveCache = true, true
+			saveKV, saveCache, updateWriteStatus = true, true, false
 		}
 		if r.GetConfVer() > o.GetConfVer() {
 			log.Infof("[region %d] %s, ConfVer changed from {%d} to {%d}", region.GetId(), diffRegionPeersInfo(origin, region), o.GetConfVer(), r.GetConfVer())
@@ -642,6 +717,19 @@ func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
 		}
 		for _, p := range region.Peers {
 			c.updateStoreStatus(p.GetStoreId())
+		}
+	}
+
+	if updateWriteStatus {
+		allow := uint64(float64(c.getStoreTotalWriteNoLock()) / float64(writeStatusSize))
+		//		log.Infof("Debug allow %d now %d", allow, region.WriteBytes)
+		if allow < minAllowSize {
+			allow = minAllowSize
+		}
+		if region.WriteBytes > allow {
+			c.enWriteStatuQueue(region)
+		} else {
+			c.outWriteStatuQueue(region)
 		}
 	}
 

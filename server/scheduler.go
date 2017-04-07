@@ -268,6 +268,17 @@ func newTransferPeer(region *RegionInfo, oldPeer, newPeer *metapb.Peer) Operator
 	return newRegionOperator(region, regionKind, addPeer, removePeer)
 }
 
+func newPriorityTransferPeer(region *RegionInfo, oldPeer, newPeer *metapb.Peer) Operator {
+	addPeer := newAddPeerOperator(region.GetId(), newPeer)
+	removePeer := newRemovePeerOperator(region.GetId(), oldPeer)
+	return newRegionOperator(region, priorityKind, addPeer, removePeer)
+}
+
+func newPriorityTransferLeader(region *RegionInfo, newLeader *metapb.Peer) Operator {
+	transferLeader := newTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
+	return newRegionOperator(region, priorityKind, transferLeader)
+}
+
 func newTransferLeader(region *RegionInfo, newLeader *metapb.Peer) Operator {
 	transferLeader := newTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
 	return newRegionOperator(region, leaderKind, transferLeader)

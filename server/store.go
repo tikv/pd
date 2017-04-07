@@ -28,6 +28,7 @@ const (
 	adminKind ResourceKind = iota
 	leaderKind
 	regionKind
+	priorityKind
 )
 
 // storeInfo contains information about a store.

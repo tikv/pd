@@ -27,6 +27,11 @@ type cacheItem struct {
 	expire time.Time
 }
 
+type kvItem struct {
+	key   interface{}
+	value interface{}
+}
+
 type idCache struct {
 	*expireRegionCache
 }
@@ -296,4 +301,106 @@ func (c *fifoCache) len() int {
 	defer c.RUnlock()
 
 	return c.ll.Len()
+}
+
+type queueCache struct {
+	sync.RWMutex
+
+	maxCount int
+	head     int
+	tail     int
+	index    map[interface{}]int
+	items    []kvItem
+}
+
+func newQueueCache(maxCount int) *queueCache {
+	return &queueCache{
+		maxCount: maxCount,
+		head:     0,
+		tail:     0,
+		index:    make(map[interface{}]int),
+		items:    make([]kvItem, maxCount, maxCount),
+	}
+}
+
+func (q *queueCache) isFull() bool {
+	return ((q.tail + 1) % q.maxCount) == q.head
+}
+
+func (q *queueCache) isEmpty() bool {
+	return q.head == q.tail
+}
+
+func (q *queueCache) Push(key interface{}, value interface{}) {
+	q.Lock()
+	if q.isFull() {
+		q.Unlock()
+		return
+	}
+	v := kvItem{key: key, value: value}
+	q.items[q.tail] = v
+	q.index[key] = q.tail
+	q.tail = (q.tail + 1) % q.maxCount
+	q.Unlock()
+}
+
+func (q *queueCache) Pop(key interface{}) interface{} {
+	q.Lock()
+	if q.isEmpty() {
+		q.Unlock()
+		return nil
+	}
+	v := q.items[q.head]
+	q.head = (q.head + 1) % q.maxCount
+	delete(q.index, v.key)
+	q.Unlock()
+	return v.value
+}
+
+func (q *queueCache) Delete(key interface{}) {
+	q.Lock()
+	id, ok := q.index[key]
+	if !ok {
+		q.Unlock()
+		return
+	}
+	q.items[id], q.items[q.head] = q.items[q.head], q.items[id]
+	q.head = (q.head + 1) % q.maxCount
+	delete(q.index, key)
+	q.Unlock()
+}
+
+func (q *queueCache) Get(key interface{}) interface{} {
+	q.RLock()
+	id, ok := q.index[key]
+	if !ok {
+		q.RUnlock()
+		return nil
+	}
+	v := q.items[id]
+	q.RUnlock()
+	return v.value
+}
+
+func (q *queueCache) Update(key interface{}, value interface{}) {
+	q.Lock()
+	id, ok := q.index[key]
+	if !ok {
+		q.Unlock()
+		return
+	}
+	v := kvItem{
+		key:   key,
+		value: value,
+	}
+	q.items[id] = v
+	q.Unlock()
+}
+
+func (q *queueCache) GetList() []kvItem {
+	res := make([]kvItem, 0, q.maxCount)
+	for head := q.head; head != q.tail; head = (head + 1) % q.maxCount {
+		res = append(res, q.items[head])
+	}
+	return res
 }

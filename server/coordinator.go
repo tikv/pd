@@ -24,12 +24,16 @@ import (
 )
 
 const (
-	historiesCacheSize     = 1000
-	eventsCacheSize        = 1000
-	maxScheduleRetries     = 10
-	maxScheduleInterval    = time.Minute
-	minScheduleInterval    = time.Millisecond * 10
-	scheduleIntervalFactor = 1.3
+	historiesCacheSize      = 1000
+	eventsCacheSize         = 1000
+	writeStatusSize         = 1000
+	maxScheduleRetries      = 10
+	maxScheduleInterval     = time.Minute
+	minScheduleInterval     = time.Millisecond * 10
+	minSlowScheduleInterval = time.Second * 3
+	scheduleIntervalFactor  = 1.3
+	hotRegionScheduleFactor = 0.9
+	minAllowSize            = 1024 * 1024
 )
 
 var (
@@ -96,8 +100,9 @@ func (c *coordinator) dispatch(region *RegionInfo) *pdpb.RegionHeartbeatResponse
 }
 
 func (c *coordinator) run() {
-	c.addScheduler(newBalanceLeaderScheduler(c.opt))
-	c.addScheduler(newBalanceRegionScheduler(c.opt))
+	c.addScheduler(newBalanceLeaderScheduler(c.opt), minScheduleInterval)
+	c.addScheduler(newBalanceRegionScheduler(c.opt), minScheduleInterval)
+	c.addScheduler(newBalanceHotRegionScheduler(c.opt), minSlowScheduleInterval)
 }
 
 func (c *coordinator) stop() {
@@ -116,7 +121,7 @@ func (c *coordinator) getSchedulers() []string {
 	return names
 }
 
-func (c *coordinator) addScheduler(scheduler Scheduler) error {
+func (c *coordinator) addScheduler(scheduler Scheduler, interval time.Duration) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -124,7 +129,7 @@ func (c *coordinator) addScheduler(scheduler Scheduler) error {
 		return errSchedulerExisted
 	}
 
-	s := newScheduleController(c, scheduler)
+	s := newScheduleController(c, scheduler, interval)
 	if err := s.Prepare(c.cluster); err != nil {
 		return errors.Trace(err)
 	}
@@ -159,13 +164,24 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 	for {
 		select {
 		case <-timer.C:
+
 			timer.Reset(s.GetInterval())
+			//			// for observal
+			//			if s.Scheduler.GetName() == "balance-hot-region-scheduler" {
+			//				s.Scheduler.(*balanceHotRegionScheduler).CalculateScore(c.cluster)
+			//				continue
+			//			}
+
 			if !s.AllowSchedule() {
 				continue
 			}
 			if op := s.Schedule(c.cluster); op != nil {
 				c.addOperator(op)
 			}
+			if s.Scheduler.GetName() == "balance-hot-region-scheduler" {
+				log.Info("Debug schedule end", s.GetInterval())
+			}
+
 		case <-s.Ctx().Done():
 			log.Infof("%v stopped: %v", s.GetName(), s.Ctx().Err())
 			return
@@ -182,6 +198,16 @@ func (c *coordinator) addOperator(op Operator) bool {
 	// Admin operator bypasses the check.
 	if op.GetResourceKind() == adminKind {
 		c.operators[regionID] = op
+		return true
+	}
+	if op.GetResourceKind() == priorityKind {
+		o, ok := c.operators[regionID]
+		if ok && o.GetResourceKind() == priorityKind {
+			return false
+		}
+		c.limiter.addOperator(op)
+		c.operators[regionID] = op
+		collectOperatorCounterMetrics(op)
 		return true
 	}
 
@@ -267,22 +293,24 @@ func (l *scheduleLimiter) operatorCount(kind ResourceKind) uint64 {
 
 type scheduleController struct {
 	Scheduler
-	opt      *scheduleOption
-	limiter  *scheduleLimiter
-	interval time.Duration
-	ctx      context.Context
-	cancel   context.CancelFunc
+	opt         *scheduleOption
+	limiter     *scheduleLimiter
+	interval    time.Duration
+	minInterval time.Duration
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
-func newScheduleController(c *coordinator, s Scheduler) *scheduleController {
+func newScheduleController(c *coordinator, s Scheduler, minInterval time.Duration) *scheduleController {
 	ctx, cancel := context.WithCancel(c.ctx)
 	return &scheduleController{
-		Scheduler: s,
-		opt:       c.opt,
-		limiter:   c.limiter,
-		interval:  minScheduleInterval,
-		ctx:       ctx,
-		cancel:    cancel,
+		Scheduler:   s,
+		opt:         c.opt,
+		limiter:     c.limiter,
+		interval:    minInterval,
+		minInterval: minInterval,
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 }
 
@@ -298,7 +326,7 @@ func (s *scheduleController) Schedule(cluster *clusterInfo) Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
 		// If we have schedule, reset interval to the minimal interval.
 		if op := s.Scheduler.Schedule(cluster); op != nil {
-			s.interval = minScheduleInterval
+			s.interval = s.minInterval
 			return op
 		}
 	}
@@ -313,6 +341,9 @@ func (s *scheduleController) GetInterval() time.Duration {
 }
 
 func (s *scheduleController) AllowSchedule() bool {
+	if s.Scheduler.GetName() == "balance-hot-region-scheduler" {
+		log.Info("Debug schedule operatorCount", s.limiter.operatorCount(s.GetResourceKind()), s.GetResourceLimit())
+	}
 	return s.limiter.operatorCount(s.GetResourceKind()) < s.GetResourceLimit()
 }
 
