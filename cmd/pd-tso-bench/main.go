@@ -82,6 +82,9 @@ func main() {
 func showStats(ctx context.Context, durCh chan time.Duration) {
 	defer wg.Done()
 
+	statCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	ticker := time.NewTicker(*interval)
 
 	s := newStats()
@@ -95,7 +98,7 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 			s = newStats()
 		case d := <-durCh:
 			s.update(d)
-		case <-ctx.Done():
+		case <-statCtx.Done():
 			println("\nTotal:")
 			println(total.String())
 			return
@@ -189,9 +192,12 @@ func (s *stats) String() string {
 func reqWorker(ctx context.Context, pdCli pd.Client, durCh chan time.Duration) {
 	defer wg.Done()
 
+	reqCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	for {
 		start := time.Now()
-		_, _, err := pdCli.GetTS(ctx)
+		_, _, err := pdCli.GetTS(reqCtx)
 		if errors.Cause(err) == context.Canceled {
 			return
 		}
@@ -202,7 +208,7 @@ func reqWorker(ctx context.Context, pdCli pd.Client, durCh chan time.Duration) {
 		dur := time.Since(start)
 
 		select {
-		case <-ctx.Done():
+		case <-reqCtx.Done():
 			return
 		case durCh <- dur:
 		}
