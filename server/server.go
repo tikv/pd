@@ -229,6 +229,8 @@ func (s *Server) initClusterID() error {
 		return errors.Errorf("invalid cluster key %v", key)
 	}
 	s.clusterID, err = strconv.ParseUint(elems[2], 10, 64)
+
+	log.Infof("init and load cluster id: %d", s.clusterID)
 	return errors.Trace(err)
 }
 
