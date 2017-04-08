@@ -498,17 +498,23 @@ func (c *clusterInfo) getRegion(regionID uint64) *RegionInfo {
 	return c.regions.getRegion(regionID)
 }
 
-func (c *clusterInfo) enWriteStatuQueue(region *RegionInfo) {
+func (c *clusterInfo) enWriteStatuQueue(region *RegionInfo, isAnti bool) {
 	key := string(region.GetEndKey())
 	newItem := RegionStateValue{
 		RegionID:   region.GetId(),
 		WriteBytes: region.WriteBytes,
 		StoreID:    region.Leader.GetStoreId(),
+		antiTimes:  2,
 	}
 	v := c.writeStatus.Get(key)
 	if v != nil {
 		ov := v.(RegionStateValue)
 		newItem.UpdateTimes = ov.UpdateTimes + 1
+		// to prevent traffic fluctuations
+		if isAnti {
+			newItem.UpdateTimes = ov.UpdateTimes
+			newItem.antiTimes = ov.antiTimes - 1
+		}
 
 		//	if ov.RegionID != region.GetId() {
 		//		newItem.WriteBytes = ov.WriteBytes
@@ -533,13 +539,19 @@ func (c *clusterInfo) outWriteStatuQueue(region *RegionInfo) {
 		return
 	}
 	// skip split report
-	if v.(RegionStateValue).RegionID != region.GetId() {
-		log.Infof("Debug changed from region %d to region %d write %d\n", v.(RegionStateValue).RegionID, region.GetId(), region.WriteBytes)
-		c.enWriteStatuQueue(region)
+	/*	if v.(RegionStateValue).RegionID != region.GetId() {
+			log.Infof("Debug changed from region %d to region %d write %d\n", v.(RegionStateValue).RegionID, region.GetId(), region.WriteBytes)
+			c.enWriteStatuQueue(region,true)
+			return
+		}
+		log.Infof("Debug outQueue %d id:%d write:%d \n", v.(RegionStateValue).UpdateTimes, region.GetId(), region.WriteBytes)*/
+	state := v.(RegionStateValue)
+	if state.antiTimes > 0 {
+		c.enWriteStatuQueue(region, true)
 		return
 	}
-	log.Infof("Debug outQueue %d id:%d write:%d \n", v.(RegionStateValue).UpdateTimes, region.GetId(), region.WriteBytes)
 	c.writeStatus.Delete(key)
+	log.Infof("Debug outQueue %d id:%d write:%d antiTimes:%d\n", state.UpdateTimes, region.GetId(), region.WriteBytes, state.antiTimes)
 }
 
 func (c *clusterInfo) searchRegion(regionKey []byte) *RegionInfo {
@@ -721,13 +733,13 @@ func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
 	}
 
 	if updateWriteStatus {
-		allow := uint64(float64(c.getStoreTotalWriteNoLock()) / float64(writeStatusSize))
+		allow := uint64(float64(c.getStoreTotalWriteNoLock()) / float64(writeStatusSize) / 2)
 		//		log.Infof("Debug allow %d now %d", allow, region.WriteBytes)
 		if allow < minAllowSize {
 			allow = minAllowSize
 		}
 		if region.WriteBytes > allow {
-			c.enWriteStatuQueue(region)
+			c.enWriteStatuQueue(region, false)
 		} else {
 			c.outWriteStatuQueue(region)
 		}

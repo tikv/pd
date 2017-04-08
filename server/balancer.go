@@ -377,7 +377,8 @@ type RegionStateValue struct {
 	RegionID    uint64 `json:"region_id"`
 	WriteBytes  uint64 `json:"write_bytes"`
 	UpdateTimes int    `json:"update_times"`
-	StoreID     uint64
+	StoreID     uint64 `json: "-"`
+	antiTimes   int    `json:"-"`
 }
 type MetaRegionStatus []RegionStateValue
 
@@ -400,7 +401,7 @@ type balanceHotRegionScheduler struct {
 func newBalanceHotRegionScheduler(opt *scheduleOption) *balanceHotRegionScheduler {
 	return &balanceHotRegionScheduler{
 		opt:         opt,
-		limit:       3,
+		limit:       1,
 		scoreStatus: make(map[uint64]RegionHotStatus),
 		r:           rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
@@ -450,7 +451,7 @@ func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 	items := cluster.writeStatus.GetList()
 	for _, item := range items {
 		r := item.value.(RegionStateValue)
-		if r.UpdateTimes < 3 {
+		if r.UpdateTimes < 5 {
 			continue
 		}
 
@@ -469,7 +470,7 @@ func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 			l.scoreStatus[storeID] = status
 		}
 		status.TotalWriteBytes += regionInfo.WriteBytes
-		status.MetaStatus = append(status.MetaStatus, RegionStateValue{id, regionInfo.WriteBytes, r.UpdateTimes, storeID})
+		status.MetaStatus = append(status.MetaStatus, RegionStateValue{id, regionInfo.WriteBytes, r.UpdateTimes, storeID, r.antiTimes})
 		l.scoreStatus[storeID] = status
 	}
 
