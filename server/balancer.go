@@ -374,11 +374,12 @@ func (r *replicaChecker) checkBestReplacement(region *RegionInfo) Operator {
 }
 
 type RegionStateValue struct {
-	RegionID    uint64 `json:"region_id"`
-	WriteBytes  uint64 `json:"write_bytes"`
-	UpdateTimes int    `json:"update_times"`
-	StoreID     uint64 `json: "-"`
-	antiTimes   int    `json:"-"`
+	RegionID       uint64    `json:"region_id"`
+	WriteBytes     uint64    `json:"write_bytes"`
+	UpdateTimes    int       `json:"update_times"`
+	LastUpdateTime time.Time `json:"last_update_time"`
+	StoreID        uint64    `json: "-"`
+	antiTimes      int       `json:"-"`
 }
 type MetaRegionStatus []RegionStateValue
 
@@ -470,7 +471,7 @@ func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 			l.scoreStatus[storeID] = status
 		}
 		status.TotalWriteBytes += regionInfo.WriteBytes
-		status.MetaStatus = append(status.MetaStatus, RegionStateValue{id, regionInfo.WriteBytes, r.UpdateTimes, storeID, r.antiTimes})
+		status.MetaStatus = append(status.MetaStatus, RegionStateValue{id, regionInfo.WriteBytes, r.UpdateTimes, r.LastUpdateTime, storeID, r.antiTimes})
 		l.scoreStatus[storeID] = status
 	}
 

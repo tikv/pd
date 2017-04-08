@@ -24,16 +24,18 @@ import (
 )
 
 const (
-	historiesCacheSize      = 1000
-	eventsCacheSize         = 1000
-	writeStatusSize         = 1000
-	maxScheduleRetries      = 10
-	maxScheduleInterval     = time.Minute
-	minScheduleInterval     = time.Millisecond * 10
-	minSlowScheduleInterval = time.Second * 3
-	scheduleIntervalFactor  = 1.3
-	hotRegionScheduleFactor = 0.9
-	minAllowSize            = 1024 * 1024
+	historiesCacheSize            = 1000
+	eventsCacheSize               = 1000
+	writeStatusSize               = 1000
+	maxScheduleRetries            = 10
+	maxScheduleInterval           = time.Minute
+	minScheduleInterval           = time.Millisecond * 10
+	minSlowScheduleInterval       = time.Second * 3
+	scheduleIntervalFactor        = 1.3
+	hotRegionScheduleFactor       = 0.9
+	minAllowSize                  = 1024 * 1024
+	regionHeartBeatReportInterval = 60
+	storeHeartBeatReportInterval  = 10
 )
 
 var (

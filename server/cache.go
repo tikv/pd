@@ -501,10 +501,11 @@ func (c *clusterInfo) getRegion(regionID uint64) *RegionInfo {
 func (c *clusterInfo) enWriteStatuQueue(region *RegionInfo, isAnti bool) {
 	key := string(region.GetEndKey())
 	newItem := RegionStateValue{
-		RegionID:   region.GetId(),
-		WriteBytes: region.WriteBytes,
-		StoreID:    region.Leader.GetStoreId(),
-		antiTimes:  2,
+		RegionID:       region.GetId(),
+		WriteBytes:     region.WriteBytes,
+		LastUpdateTime: time.Now(),
+		StoreID:        region.Leader.GetStoreId(),
+		antiTimes:      2,
 	}
 	v := c.writeStatus.Get(key)
 	if v != nil {
@@ -733,11 +734,12 @@ func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
 	}
 
 	if updateWriteStatus {
-		allow := uint64(float64(c.getStoreTotalWriteNoLock()) / float64(writeStatusSize) / 2)
+		allow := uint64(float64(c.getStoreTotalWriteNoLock()) / float64(writeStatusSize) / 2 / storeHeartBeatReportInterval)
 		//		log.Infof("Debug allow %d now %d", allow, region.WriteBytes)
 		if allow < minAllowSize {
 			allow = minAllowSize
 		}
+		region.WriteBytes = c.getAvgWriteBytes(region)
 		if region.WriteBytes > allow {
 			c.enWriteStatuQueue(region, false)
 		} else {
@@ -746,4 +748,16 @@ func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
 	}
 
 	return nil
+}
+
+func (c *clusterInfo) getAvgWriteBytes(region *RegionInfo) uint64 {
+	v := c.writeStatus.Get(string(region.GetEndKey()))
+	var avgBytes uint64
+	if v != nil {
+		interval := time.Now().Sub(v.(RegionStateValue).LastUpdateTime).Seconds()
+		avgBytes = uint64(float64(region.WriteBytes) / interval)
+	} else {
+		avgBytes = uint64(float64(region.WriteBytes) / float64(regionHeartBeatReportInterval))
+	}
+	return avgBytes
 }
