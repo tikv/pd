@@ -334,6 +334,7 @@ func (q *queueCache) isEmpty() bool {
 func (q *queueCache) Push(key interface{}, value interface{}) {
 	q.Lock()
 	if q.isFull() {
+		log.Info("Debug queue is full")
 		q.Unlock()
 		return
 	}
@@ -366,6 +367,7 @@ func (q *queueCache) Delete(key interface{}) {
 	}
 	q.items[id], q.items[q.head] = q.items[q.head], q.items[id]
 	q.head = (q.head + 1) % q.maxCount
+	q.index[q.items[id].key] = id
 	delete(q.index, key)
 	q.Unlock()
 }

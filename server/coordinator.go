@@ -33,7 +33,7 @@ const (
 	minSlowScheduleInterval       = time.Second * 3
 	scheduleIntervalFactor        = 1.3
 	hotRegionScheduleFactor       = 0.9
-	minAllowSize                  = 1024 * 1024
+	minRegionAllowWrite           = 64 * 1024
 	regionHeartBeatReportInterval = 60
 	storeHeartBeatReportInterval  = 10
 )
@@ -168,11 +168,6 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 		case <-timer.C:
 
 			timer.Reset(s.GetInterval())
-			//			// for observal
-			//			if s.Scheduler.GetName() == "balance-hot-region-scheduler" {
-			//				s.Scheduler.(*balanceHotRegionScheduler).CalculateScore(c.cluster)
-			//				continue
-			//			}
 
 			if !s.AllowSchedule() {
 				continue
@@ -343,9 +338,6 @@ func (s *scheduleController) GetInterval() time.Duration {
 }
 
 func (s *scheduleController) AllowSchedule() bool {
-	if s.Scheduler.GetName() == "balance-hot-region-scheduler" {
-		log.Info("Debug schedule operatorCount", s.limiter.operatorCount(s.GetResourceKind()), s.GetResourceLimit())
-	}
 	return s.limiter.operatorCount(s.GetResourceKind()) < s.GetResourceLimit()
 }
 

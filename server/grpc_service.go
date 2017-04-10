@@ -205,6 +205,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 
 // StoreHeartbeat implements gRPC PDServer.
 func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbeatRequest) (*pdpb.StoreHeartbeatResponse, error) {
+	//log.Info("Debug store heartbeatA")
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -235,6 +236,7 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 
 // RegionHeartbeat implements gRPC PDServer.
 func (s *Server) RegionHeartbeat(ctx context.Context, request *pdpb.RegionHeartbeatRequest) (*pdpb.RegionHeartbeatResponse, error) {
+	//log.Info("Debug region heartbeatB")
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, errors.Trace(err)
 	}

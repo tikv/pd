@@ -380,6 +380,7 @@ type RegionStateValue struct {
 	LastUpdateTime time.Time `json:"last_update_time"`
 	StoreID        uint64    `json: "-"`
 	antiTimes      int       `json:"-"`
+	version        uint64    `json:"-"`
 }
 type MetaRegionStatus []RegionStateValue
 
@@ -471,7 +472,7 @@ func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 			l.scoreStatus[storeID] = status
 		}
 		status.TotalWriteBytes += regionInfo.WriteBytes
-		status.MetaStatus = append(status.MetaStatus, RegionStateValue{id, regionInfo.WriteBytes, r.UpdateTimes, r.LastUpdateTime, storeID, r.antiTimes})
+		status.MetaStatus = append(status.MetaStatus, RegionStateValue{id, regionInfo.WriteBytes, r.UpdateTimes, r.LastUpdateTime, storeID, r.antiTimes, r.version})
 		l.scoreStatus[storeID] = status
 	}
 
@@ -501,9 +502,6 @@ func (l *balanceHotRegionScheduler) SelectSourceRegion(cluster *clusterInfo) *Re
 	length := l.scoreStatus[sourceStore].MetaStatus.Len()
 	for i := 0; i < 10; i++ {
 		rr := l.r.Int31n(int32((length+1)/2)) + int32(length/2)
-		//		if l.scoreStatus[sourceStore].MetaStatus[rr].UpdateTimes < 3 {
-		//			continue
-		//		}
 		rid := l.scoreStatus[sourceStore].MetaStatus[rr].RegionID
 		region := cluster.getRegion(rid)
 		if len(region.DownPeers) != 0 || len(region.PendingPeers) != 0 {
