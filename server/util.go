@@ -43,7 +43,7 @@ const (
 	requestTimeout  = etcdutil.DefaultRequestTimeout
 	slowRequestTime = etcdutil.DefaultSlowRequestTime
 
-	defaultLogMaxSize    = 1 // MB
+	defaultLogMaxSize    = 300 // MB
 	defaultLogMaxBackups = 3
 	defaultLogMaxAge     = 28 // days
 	defaultLogLevel      = log.InfoLevel
@@ -287,7 +287,7 @@ func (rf *redirectFormatter) Format(pkg string, level capnslog.LogLevel, depth i
 // Flush only for implementing Formatter.
 func (rf *redirectFormatter) Flush() {}
 
-// modifyHook enjects file name and line pos into log entry.
+// modifyHook injects file name and line pos into log entry.
 type contextHook struct{}
 
 // Fire implements logrus.Hook interface
