@@ -120,7 +120,7 @@ import:
 - package: github.com/pingcap/check
   version: ce8a2f822ab1e245a4eefcef2996531c79c943f1
 - package: github.com/pingcap/kvproto
-  version: 0811f27579a1070546c4d5496bf3f6fa62cec750 
+  version: ov/stream
   subpackages:
   - pkg/coprocessor
   - pkg/eraftpb
@@ -201,7 +201,7 @@ import:
   repo: https://github.com/spf13/cobra.git
   vcs: git
 - package: github.com/chzyer/readline
-  version: c914be64f07d9998f52bf0d598ec26d457168c0f 
+  version: c914be64f07d9998f52bf0d598ec26d457168c0f
 - package: github.com/dustin/go-humanize
   version: 7a41df006ff9af79a29f0ffa9c5f21fbe6314a2d
 - package: github.com/elazarl/go-bindata-assetfs
