@@ -1,5 +1,5 @@
-hash: 2de6008aff0da78b970f4414873c3318e0c084fc5be875d1935f1a5cc1b36f8d
-updated: 2017-04-07T13:30:27.614299275+08:00
+hash: 46f235ac2fe8d8d5e5f3b4a11ecb2f0382254edf988463de160b3da3cdb813bf
+updated: 2017-04-12T02:17:53.324092921+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -112,10 +112,8 @@ imports:
   version: 1ea25387ff6f684839d82767c1733ff4d4d15d0a
 - name: github.com/gorilla/mux
   version: 0eeaf8392f5b04950925b8a69fe70f110fa7cbfc
-- name: github.com/gorilla/websocket
-  version: a836c37014dbbf0d1e871d04531b851fcbdeb22d
 - name: github.com/grpc-ecosystem/go-grpc-prometheus
-  version: 2500245aa6110c562d17020fb31a2c133d737799
+  version: 6b7015e65d366bf3f19b2b2a000a831940f0f7e0
 - name: github.com/grpc-ecosystem/grpc-gateway
   version: 84398b94e188ee336f307779b57b3aa91af7063c
   subpackages:
@@ -172,6 +170,8 @@ imports:
   - model
 - name: github.com/prometheus/procfs
   version: abf152e5f3e97f2fafac028d2cc06c1feb87ffa5
+- name: github.com/Sirupsen/logrus
+  version: ba1b36c82c5e05c4f912a88eab0dcd91a171688f
 - name: github.com/spf13/cobra
   version: 9495bc009a56819bdb0ddbc1a373e29c140bc674
   repo: https://github.com/spf13/cobra.git
@@ -227,6 +227,8 @@ imports:
   - naming
   - peer
   - transport
+- name: gopkg.in/natefinch/lumberjack.v2
+  version: dd45e6a67c53f673bb49ca8a001fd3a63ceb640e
 - name: gopkg.in/yaml.v2
   version: 53feefa2559fb8dfa8d81baad31be332c97d6c77
 testImports: []

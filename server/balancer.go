@@ -17,8 +17,8 @@ import (
 	"math"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/montanaflynn/stats"
-	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
 

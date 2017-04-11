@@ -23,23 +23,30 @@ import (
 	"os"
 	"path"
 	"reflect"
+	"runtime"
 	"strings"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/pkg/capnslog"
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
-	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"golang.org/x/net/context"
+	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
 
 const (
 	requestTimeout  = etcdutil.DefaultRequestTimeout
 	slowRequestTime = etcdutil.DefaultSlowRequestTime
+
+	defaultLogMaxSize    = 1 // MB
+	defaultLogMaxBackups = 3
+	defaultLogMaxAge     = 28 // days
+	defaultLogLevel      = log.InfoLevel
 
 	logDirMode = 0755
 )
@@ -246,14 +253,18 @@ func rpcConnect(addr string) (net.Conn, error) {
 
 type redirectFormatter struct{}
 
-// Format turns capnslog logs to ngaut logs.
-// TODO: remove ngaut log caller stack, "util.go:xxx"
+// Format turns capnslog logs to logrus logs.
 func (rf *redirectFormatter) Format(pkg string, level capnslog.LogLevel, depth int, entries ...interface{}) {
 	if pkg != "" {
 		pkg = fmt.Sprint(pkg, ": ")
 	}
 
-	logStr := fmt.Sprint(level.Char(), " | ", pkg, entries)
+	logStr := fmt.Sprint(pkg, entries)
+
+	// trim square brackets
+	if len(logStr) > 2 && logStr[0] == '[' {
+		logStr = logStr[1 : len(logStr)-1]
+	}
 
 	switch level {
 	case capnslog.CRITICAL:
@@ -276,31 +287,110 @@ func (rf *redirectFormatter) Format(pkg string, level capnslog.LogLevel, depth i
 // Flush only for implementing Formatter.
 func (rf *redirectFormatter) Flush() {}
 
+// modifyHook enjects file name and line pos into log entry.
+type contextHook struct{}
+
+// Fire implements logrus.Hook interface
+// https://github.com/sirupsen/logrus/issues/63
+func (hook *contextHook) Fire(entry *log.Entry) error {
+	pc := make([]uintptr, 3, 3)
+	cnt := runtime.Callers(6, pc)
+
+	for i := 0; i < cnt; i++ {
+		fu := runtime.FuncForPC(pc[i] - 1)
+		name := fu.Name()
+		if !strings.Contains(name, "github.com/Sirupsen/logrus") &&
+			!strings.Contains(name, "github.com/coreos/pkg/capnslog") {
+			file, line := fu.FileLine(pc[i] - 1)
+			entry.Data["file"] = path.Base(file)
+			entry.Data["line"] = line
+			break
+		}
+	}
+	return nil
+}
+
+// Levels implements logrus.Hook interface.
+func (hook *contextHook) Levels() []log.Level {
+	return log.AllLevels
+}
+
+func stringToLogLevel(level string) log.Level {
+	switch strings.ToLower(level) {
+	case "fatal":
+		return log.FatalLevel
+	case "error":
+		return log.ErrorLevel
+	case "warn":
+		return log.WarnLevel
+	case "warning":
+		return log.WarnLevel
+	case "debug":
+		return log.DebugLevel
+	case "info":
+		return log.InfoLevel
+	}
+	return defaultLogLevel
+}
+
+// for compatability with ngaut/log
+type textFormatter struct{}
+
+// Format implements logrus.Formatter
+func (f *textFormatter) Format(entry *log.Entry) ([]byte, error) {
+	var b *bytes.Buffer
+	if entry.Buffer != nil {
+		b = entry.Buffer
+	} else {
+		b = &bytes.Buffer{}
+	}
+	b.WriteString(entry.Time.Format("2006/01/02 15:04:05"))
+	if file, ok := entry.Data["file"]; ok {
+		b.WriteString(fmt.Sprintf(" %s:%v:", file, entry.Data["line"]))
+	}
+	b.WriteString(fmt.Sprintf(" [%s] ", entry.Level.String()))
+	b.WriteString(entry.Message)
+	for k := range entry.Data {
+		if k != "file" && k != "line" {
+			b.WriteString(fmt.Sprintf(" %v=%v", k, entry.Data[k]))
+		}
+	}
+	b.WriteByte('\n')
+	return b.Bytes(), nil
+}
+
 // setLogOutput sets output path for all logs.
 func setLogOutput(logFile string) error {
-	// PD log.
+	// PD log
 	dir := path.Dir(logFile)
 	err := os.MkdirAll(dir, logDirMode)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	log.SetOutputByName(logFile)
-	log.SetRotateByDay()
 
-	// ETCD log.
-	capnslog.SetFormatter(&redirectFormatter{})
+	// use lumberjack to logrotate
+	log.SetOutput(&lumberjack.Logger{
+		Filename:   logFile,
+		MaxSize:    defaultLogMaxSize, // megabytes
+		MaxBackups: defaultLogMaxBackups,
+		MaxAge:     defaultLogMaxAge, // days
+		LocalTime:  true,
+	})
 
 	return nil
 }
 
 // InitLogger initalizes PD's logger.
 func InitLogger(cfg *Config) error {
-	log.SetLevelByString(cfg.LogLevel)
-	log.SetHighlighting(false)
+	log.SetLevel(stringToLogLevel(cfg.LogLevel))
+	log.AddHook(&contextHook{})
+	log.SetFormatter(&textFormatter{})
+
+	// etcd log
+	capnslog.SetFormatter(&redirectFormatter{})
 
 	// Force redirect etcd log to stderr.
 	if len(cfg.LogFile) == 0 {
-		capnslog.SetFormatter(capnslog.NewPrettyFormatter(os.Stderr, false))
 		return nil
 	}
 
