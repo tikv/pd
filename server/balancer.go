@@ -427,7 +427,6 @@ func (l *balanceHotRegionScheduler) Cleanup(cluster *clusterInfo) {}
 
 func (l *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 	l.CalculateScore(cluster)
-	log.Infof("Debug start schedule:%+v\n", l.scoreStatus)
 	region, leader := l.SelectTransferLeader(cluster)
 	if region == nil {
 		return nil

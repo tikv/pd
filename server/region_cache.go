@@ -345,7 +345,7 @@ func (q *statusCache) Delete(key interface{}) {
 
 func (q *statusCache) Get(key interface{}) interface{} {
 	q.RLock()
-	defer q.Unlock()
+	defer q.RUnlock()
 	item, ok := q.items[key]
 	if !ok {
 		return nil
@@ -354,6 +354,8 @@ func (q *statusCache) Get(key interface{}) interface{} {
 }
 
 func (q *statusCache) GetList() []interface{} {
+	q.Lock()
+	defer q.Unlock()
 	res := make([]interface{}, 0, q.maxCount)
 	for item := range q.items {
 		res = append(res, item)
