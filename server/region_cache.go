@@ -303,106 +303,60 @@ func (c *fifoCache) len() int {
 	return c.ll.Len()
 }
 
-type queueCache struct {
+type statusCache struct {
 	sync.RWMutex
 
 	maxCount int
-	head     int
-	tail     int
-	index    map[interface{}]int
-	items    []kvItem
+	items    map[interface{}]interface{}
 }
 
-func newQueueCache(maxCount int) *queueCache {
-	return &queueCache{
+func newStatusCache(maxCount int) *statusCache {
+	return &statusCache{
 		maxCount: maxCount,
-		head:     0,
-		tail:     0,
-		index:    make(map[interface{}]int),
-		items:    make([]kvItem, maxCount, maxCount),
+		items:    make(map[interface{}]interface{}),
 	}
 }
 
-func (q *queueCache) isFull() bool {
-	return ((q.tail + 1) % q.maxCount) == q.head
-}
-
-func (q *queueCache) isEmpty() bool {
-	return q.head == q.tail
-}
-
-func (q *queueCache) Push(key interface{}, value interface{}) {
+func (q *statusCache) isFull() bool {
 	q.Lock()
+	defer q.Unlock()
+	return len(q.items) >= q.maxCount
+}
+
+func (q *statusCache) Push(key interface{}, value interface{}) {
+	q.Lock()
+	defer q.Unlock()
 	if q.isFull() {
 		log.Info("Debug queue is full")
-		q.Unlock()
 		return
 	}
-	v := kvItem{key: key, value: value}
-	q.items[q.tail] = v
-	q.index[key] = q.tail
-	q.tail = (q.tail + 1) % q.maxCount
-	q.Unlock()
+	q.items[key] = value
 }
 
-func (q *queueCache) Pop(key interface{}) interface{} {
+func (q *statusCache) Delete(key interface{}) {
 	q.Lock()
-	if q.isEmpty() {
-		q.Unlock()
-		return nil
-	}
-	v := q.items[q.head]
-	q.head = (q.head + 1) % q.maxCount
-	delete(q.index, v.key)
-	q.Unlock()
-	return v.value
-}
-
-func (q *queueCache) Delete(key interface{}) {
-	q.Lock()
-	id, ok := q.index[key]
+	defer q.Unlock()
+	_, ok := q.items[key]
 	if !ok {
-		q.Unlock()
 		return
 	}
-	q.items[id], q.items[q.head] = q.items[q.head], q.items[id]
-	q.head = (q.head + 1) % q.maxCount
-	q.index[q.items[id].key] = id
-	delete(q.index, key)
-	q.Unlock()
+	delete(q.items, key)
 }
 
-func (q *queueCache) Get(key interface{}) interface{} {
+func (q *statusCache) Get(key interface{}) interface{} {
 	q.RLock()
-	id, ok := q.index[key]
+	defer q.Unlock()
+	item, ok := q.items[key]
 	if !ok {
-		q.RUnlock()
 		return nil
 	}
-	v := q.items[id]
-	q.RUnlock()
-	return v.value
+	return item
 }
 
-func (q *queueCache) Update(key interface{}, value interface{}) {
-	q.Lock()
-	id, ok := q.index[key]
-	if !ok {
-		q.Unlock()
-		return
-	}
-	v := kvItem{
-		key:   key,
-		value: value,
-	}
-	q.items[id] = v
-	q.Unlock()
-}
-
-func (q *queueCache) GetList() []kvItem {
-	res := make([]kvItem, 0, q.maxCount)
-	for head := q.head; head != q.tail; head = (head + 1) % q.maxCount {
-		res = append(res, q.items[head])
+func (q *statusCache) GetList() []interface{} {
+	res := make([]interface{}, 0, q.maxCount)
+	for item := range q.items {
+		res = append(res, item)
 	}
 	return res
 }

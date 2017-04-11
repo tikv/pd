@@ -333,7 +333,7 @@ type clusterInfo struct {
 	stores  *storesInfo
 	regions *regionsInfo
 
-	writeStatus *queueCache
+	writeStatus *statusCache
 }
 
 func newClusterInfo(id IDAllocator) *clusterInfo {
@@ -341,7 +341,7 @@ func newClusterInfo(id IDAllocator) *clusterInfo {
 		id:          id,
 		stores:      newStoresInfo(),
 		regions:     newRegionsInfo(),
-		writeStatus: newQueueCache(writeStatusSize),
+		writeStatus: newStatusCache(writeStatusSize),
 	}
 }
 
@@ -498,7 +498,7 @@ func (c *clusterInfo) getRegion(regionID uint64) *RegionInfo {
 	return c.regions.getRegion(regionID)
 }
 
-func (c *clusterInfo) enWriteStatuQueue(region *RegionInfo, isAnti bool) {
+func (c *clusterInfo) pushWriteStatuCache(region *RegionInfo, isAnti bool) {
 	key := string(region.GetEndKey())
 	newItem := RegionStateValue{
 		RegionID:       region.GetId(),
@@ -519,7 +519,7 @@ func (c *clusterInfo) enWriteStatuQueue(region *RegionInfo, isAnti bool) {
 			newItem.antiTimes = ov.antiTimes - 1
 		}
 
-		c.writeStatus.Update(key, newItem)
+		c.writeStatus.Push(key, newItem)
 		if ov.RegionID != region.GetId() || ov.version != newItem.version {
 			log.Infof("Debug changed split update form region %d to region %d,version from %d to %d,  write %d\n", ov.RegionID, newItem.RegionID, ov.version, newItem.version, region.WriteBytes)
 		} else {
@@ -532,7 +532,7 @@ func (c *clusterInfo) enWriteStatuQueue(region *RegionInfo, isAnti bool) {
 	log.Infof("Debug insert %+v %+v key %v \n", v, newItem, region.GetEndKey())
 }
 
-func (c *clusterInfo) outWriteStatuQueue(region *RegionInfo) {
+func (c *clusterInfo) deleteWriteStatuCache(region *RegionInfo) {
 	key := string(region.GetEndKey())
 	v := c.writeStatus.Get(key)
 	if v == nil {
@@ -541,7 +541,7 @@ func (c *clusterInfo) outWriteStatuQueue(region *RegionInfo) {
 
 	state := v.(RegionStateValue)
 	if state.antiTimes > 0 {
-		c.enWriteStatuQueue(region, true)
+		c.pushWriteStatuCache(region, true)
 		return
 	}
 
@@ -753,8 +753,8 @@ func (c *clusterInfo) updateWriteStatus(region *RegionInfo) {
 		avgRegionAllowWriteBytes = minRegionAllowWrite
 	}
 	if region.WriteBytes > avgRegionAllowWriteBytes {
-		c.enWriteStatuQueue(region, false)
+		c.pushWriteStatuCache(region, false)
 	} else {
-		c.outWriteStatuQueue(region)
+		c.deleteWriteStatuCache(region)
 	}
 }

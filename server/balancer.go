@@ -396,7 +396,7 @@ type RegionHotStatus struct {
 type balanceHotRegionScheduler struct {
 	opt         *scheduleOption
 	limit       uint64
-	scoreStatus map[uint64]RegionHotStatus
+	scoreStatus map[uint64]RegionHotStatus // store id -> regions status in this store
 	r           *rand.Rand
 }
 
@@ -452,7 +452,7 @@ func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 	l.clearScore()
 	items := cluster.writeStatus.GetList()
 	for _, item := range items {
-		r := item.value.(RegionStateValue)
+		r := item.(RegionStateValue)
 		if r.UpdateTimes < 5 {
 			continue
 		}
