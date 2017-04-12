@@ -28,7 +28,6 @@ import (
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
 	"github.com/ngaut/log"
-	"github.com/ngaut/systimemon"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"google.golang.org/grpc"
@@ -97,8 +96,9 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, errors.Trace(err)
 	}
 
-	go systimemon.StartMonitor(time.Now, func() {
+	go StartTimeMonitor(time.Now, func() bool {
 		timeJumpBackCounter.Inc()
+		return true
 	})
 	return s, nil
 }
