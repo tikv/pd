@@ -15,8 +15,10 @@ initial-cluster = "pd=http://127.0.0.1:2380"
 initial-cluster-state = "new"
 
 lease = 3
-log-level = "info"
 tso-save-interval = "3s"
+
+[log]
+log-level = "info"
 
 [metric]
 # prometheus client push interval, set "0s" to disable prometheus.

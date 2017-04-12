@@ -22,6 +22,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/juju/errors"
+	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
@@ -44,7 +45,7 @@ func main() {
 		log.Fatalf("parse cmd flags error %s\n", err)
 	}
 
-	err = server.InitLogger(cfg)
+	err = logutil.InitLogger(&cfg.Log)
 	if err != nil {
 		log.Fatalf("initalize logger error %s\n", err)
 	}

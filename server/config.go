@@ -25,6 +25,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/etcd/embed"
 	"github.com/juju/errors"
+	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/pkg/typeutil"
@@ -56,10 +57,8 @@ type Config struct {
 	// Etcd onlys support seoncds TTL, so here is second too.
 	LeaderLease int64 `toml:"lease" json:"lease"`
 
-	// Log level.
-	LogLevel string `toml:"log-level" json:"log-level"`
-	// Log file.
-	LogFile string `toml:"log-file" json:"log-file"`
+	// Log related config.
+	Log logutil.LogConfig `toml:"log" json:"log"`
 
 	// TsoSaveInterval is the interval to save timestamp.
 	TsoSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
@@ -107,8 +106,8 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
 	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
 
-	fs.StringVar(&cfg.LogLevel, "L", "info", "log level: debug, info, warn, error, fatal")
-	fs.StringVar(&cfg.LogFile, "log-file", "", "log file path")
+	fs.StringVar(&cfg.Log.Level, "L", "info", "log level: debug, info, warn, error, fatal")
+	fs.StringVar(&cfg.Log.Filename, "log-file", "", "log file path")
 
 	return cfg
 }
