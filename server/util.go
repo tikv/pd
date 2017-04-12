@@ -43,6 +43,7 @@ const (
 	requestTimeout  = etcdutil.DefaultRequestTimeout
 	slowRequestTime = etcdutil.DefaultSlowRequestTime
 
+	defaultLogTimeFormat = "2006/01/02 15:04:05"
 	defaultLogMaxSize    = 300 // MB
 	defaultLogMaxBackups = 3
 	defaultLogMaxAge     = 28 // days
@@ -299,8 +300,9 @@ func (hook *contextHook) Fire(entry *log.Entry) error {
 	for i := 0; i < cnt; i++ {
 		fu := runtime.FuncForPC(pc[i] - 1)
 		name := fu.Name()
-		if !strings.Contains(name, "github.com/Sirupsen/logrus") &&
-			!strings.Contains(name, "github.com/coreos/pkg/capnslog") {
+		isSkip := strings.Contains(name, "github.com/Sirupsen/logrus") ||
+			strings.Contains(name, "github.com/coreos/pkg/capnslog")
+		if !isSkip {
 			file, line := fu.FileLine(pc[i] - 1)
 			entry.Data["file"] = path.Base(file)
 			entry.Data["line"] = line
@@ -344,15 +346,15 @@ func (f *textFormatter) Format(entry *log.Entry) ([]byte, error) {
 	} else {
 		b = &bytes.Buffer{}
 	}
-	b.WriteString(entry.Time.Format("2006/01/02 15:04:05"))
+	b.WriteString(entry.Time.Format(defaultLogTimeFormat))
 	if file, ok := entry.Data["file"]; ok {
-		b.WriteString(fmt.Sprintf(" %s:%v:", file, entry.Data["line"]))
+		fmt.Fprintf(b, " %s:%v:", file, entry.Data["line"])
 	}
-	b.WriteString(fmt.Sprintf(" [%s] ", entry.Level.String()))
+	fmt.Fprintf(b, " [%s] ", entry.Level.String())
 	b.WriteString(entry.Message)
 	for k := range entry.Data {
 		if k != "file" && k != "line" {
-			b.WriteString(fmt.Sprintf(" %v=%v", k, entry.Data[k]))
+			fmt.Fprintf(b, " %v=%v", k, entry.Data[k])
 		}
 	}
 	b.WriteByte('\n')
