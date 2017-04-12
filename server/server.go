@@ -30,6 +30,7 @@ import (
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/pkg/systimemon"
 	"google.golang.org/grpc"
 )
 
@@ -96,7 +97,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, errors.Trace(err)
 	}
 
-	go StartTimeMonitor(time.Now, func() bool {
+	go systimemon.StartTimeMonitor(time.Now, func() bool {
 		timeJumpBackCounter.Inc()
 		return true
 	})
