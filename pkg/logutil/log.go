@@ -94,7 +94,7 @@ type contextHook struct{}
 // Fire implements logrus.Hook interface
 // https://github.com/sirupsen/logrus/issues/63
 func (hook *contextHook) Fire(entry *log.Entry) error {
-	pc := make([]uintptr, 3, 3)
+	pc := make([]uintptr, 3)
 	cnt := runtime.Callers(6, pc)
 
 	for i := 0; i < cnt; i++ {
@@ -161,6 +161,11 @@ func (f *textFormatter) Format(entry *log.Entry) ([]byte, error) {
 // setLogOutput sets output path for all logs.
 func setLogOutput(filename string) error {
 	// PD log
+	if st, err := os.Stat(filename); err == nil {
+		if st.IsDir() {
+			return errors.New("can't use directory as log file name")
+		}
+	}
 	dir := path.Dir(filename)
 	err := os.MkdirAll(dir, logDirMode)
 	if err != nil {
@@ -168,14 +173,19 @@ func setLogOutput(filename string) error {
 	}
 
 	// use lumberjack to logrotate
-	log.SetOutput(&lumberjack.Logger{
+	output := &lumberjack.Logger{
 		Filename:   filename,
 		MaxSize:    defaultLogMaxSize, // megabytes
 		MaxBackups: defaultLogMaxBackups,
 		MaxAge:     defaultLogMaxAge, // days
 		LocalTime:  true,
-	})
+	}
 
+	if _, err := output.Write([]byte{}); err != nil {
+		return errors.Errorf("log file is not writable: %v", err)
+	}
+
+	log.SetOutput(output)
 	return nil
 }
 

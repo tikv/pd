@@ -49,19 +49,18 @@ func (s *testLogSuite) TestLogging(c *C) {
 
 	tlog := capnslog.NewPackageLogger("github.com/pingcap/pd/pkg/logutil", "test")
 
-	tlog.Infof("this message should not be sent to buf")
+	tlog.Infof("[this message should not be sent to buf]")
 	c.Assert(s.buf.Len(), Equals, 0)
 
-	tlog.Warningf("this message should be sent to buf")
+	tlog.Warningf("[this message should be sent to buf]")
 	entry, err := s.buf.ReadString('\n')
 
 	c.Assert(err, IsNil)
 	c.Assert(entry, Matches, logPattern)
 
-	log.Warnf("this message if from logrus")
+	log.Warnf("this message comes from logrus")
 	entry, err = s.buf.ReadString('\n')
 
 	c.Assert(err, IsNil)
 	c.Assert(entry, Matches, logPattern)
-
 }
