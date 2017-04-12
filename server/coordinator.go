@@ -36,6 +36,8 @@ const (
 	minRegionAllowWrite           = 64 * 1024
 	regionHeartBeatReportInterval = 60
 	storeHeartBeatReportInterval  = 10
+	minHotRegionReportInterval    = 3
+	hotRegionUpdateTimesFlag      = 3
 )
 
 var (

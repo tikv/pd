@@ -373,22 +373,26 @@ func (r *replicaChecker) checkBestReplacement(region *RegionInfo) Operator {
 	return newTransferPeer(region, oldPeer, newPeer)
 }
 
+// RegionStateValue record each hot region state
 type RegionStateValue struct {
 	RegionID       uint64    `json:"region_id"`
 	WriteBytes     uint64    `json:"write_bytes"`
 	UpdateTimes    int       `json:"update_times"`
 	LastUpdateTime time.Time `json:"last_update_time"`
-	StoreID        uint64    `json: "-"`
-	antiTimes      int       `json:"-"`
-	version        uint64    `json:"-"`
+	StoreID        uint64    `json:"-"`
+	antiTimes      int
+	version        uint64
 }
+
+// MetaRegionStatus is a list of a group region state type
 type MetaRegionStatus []RegionStateValue
 
 func (m MetaRegionStatus) Len() int           { return len(m) }
 func (m MetaRegionStatus) Swap(i, j int)      { m[i], m[j] = m[j], m[i] }
 func (m MetaRegionStatus) Less(i, j int) bool { return m[i].WriteBytes > m[j].WriteBytes }
 
-type RegionHotStatus struct {
+// RegionsHotStatus record all hot regions in one store with sequence
+type RegionsHotStatus struct {
 	TotalWriteBytes uint64           `json:"total_write"`
 	MetaStatus      MetaRegionStatus `json:"status"`
 }
@@ -396,7 +400,7 @@ type RegionHotStatus struct {
 type balanceHotRegionScheduler struct {
 	opt         *scheduleOption
 	limit       uint64
-	scoreStatus map[uint64]RegionHotStatus // store id -> regions status in this store
+	scoreStatus map[uint64]RegionsHotStatus // store id -> regions status in this store
 	r           *rand.Rand
 }
 
@@ -404,7 +408,7 @@ func newBalanceHotRegionScheduler(opt *scheduleOption) *balanceHotRegionSchedule
 	return &balanceHotRegionScheduler{
 		opt:         opt,
 		limit:       1,
-		scoreStatus: make(map[uint64]RegionHotStatus),
+		scoreStatus: make(map[uint64]RegionsHotStatus),
 		r:           rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
@@ -452,7 +456,7 @@ func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 	items := cluster.writeStatus.GetList()
 	for _, item := range items {
 		r := item.(RegionStateValue)
-		if r.UpdateTimes < 5 {
+		if r.UpdateTimes < hotRegionUpdateTimesFlag {
 			continue
 		}
 
@@ -465,7 +469,7 @@ func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 		storeID := regionInfo.Leader.GetStoreId()
 		status, ok := l.scoreStatus[storeID]
 		if !ok {
-			status = RegionHotStatus{
+			status = RegionsHotStatus{
 				MetaStatus: make(MetaRegionStatus, 0, 100),
 			}
 			l.scoreStatus[storeID] = status
@@ -512,7 +516,7 @@ func (l *balanceHotRegionScheduler) SelectSourceRegion(cluster *clusterInfo) *Re
 	return nil
 }
 
-func (l *balanceHotRegionScheduler) GetStatus() map[uint64]RegionHotStatus {
+func (l *balanceHotRegionScheduler) GetStatus() map[uint64]RegionsHotStatus {
 	return l.scoreStatus
 }
 

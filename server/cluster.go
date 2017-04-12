@@ -120,10 +120,12 @@ func (c *RaftCluster) isRunning() bool {
 	return c.running
 }
 
-func (s *Server) GetHotRegions() map[uint64]RegionHotStatus {
+// GetHotRegions get all hot regions status
+func (s *Server) GetHotRegions() map[uint64]RegionsHotStatus {
 	return s.cluster.coordinator.schedulers["balance-hot-region-scheduler"].Scheduler.(*balanceHotRegionScheduler).GetStatus()
 }
 
+// GetHotStores get all hot stores status
 func (s *Server) GetHotStores() map[uint64]uint64 {
 	return s.cluster.cachedCluster.getStoreWriteStatus()
 }

@@ -27,11 +27,6 @@ type cacheItem struct {
 	expire time.Time
 }
 
-type kvItem struct {
-	key   interface{}
-	value interface{}
-}
-
 type idCache struct {
 	*expireRegionCache
 }
@@ -303,27 +298,32 @@ func (c *fifoCache) len() int {
 	return c.ll.Len()
 }
 
-type statusCache struct {
+type hashCache struct {
 	sync.RWMutex
 
 	maxCount int
+	length   int
 	items    map[interface{}]interface{}
 }
 
-func newStatusCache(maxCount int) *statusCache {
-	return &statusCache{
+func newHashCache(maxCount int) *hashCache {
+	return &hashCache{
 		maxCount: maxCount,
 		items:    make(map[interface{}]interface{}),
 	}
 }
 
-func (q *statusCache) isFull() bool {
-	q.Lock()
-	defer q.Unlock()
-	return len(q.items) >= q.maxCount
+func (q *hashCache) IsFull() bool {
+	q.RLock()
+	defer q.RUnlock()
+	return q.isFull()
 }
 
-func (q *statusCache) Push(key interface{}, value interface{}) {
+func (q *hashCache) isFull() bool {
+	return q.length >= q.maxCount
+}
+
+func (q *hashCache) Put(key interface{}, value interface{}) {
 	q.Lock()
 	defer q.Unlock()
 	if q.isFull() {
@@ -331,9 +331,10 @@ func (q *statusCache) Push(key interface{}, value interface{}) {
 		return
 	}
 	q.items[key] = value
+	q.length++
 }
 
-func (q *statusCache) Delete(key interface{}) {
+func (q *hashCache) Delete(key interface{}) {
 	q.Lock()
 	defer q.Unlock()
 	_, ok := q.items[key]
@@ -341,9 +342,10 @@ func (q *statusCache) Delete(key interface{}) {
 		return
 	}
 	delete(q.items, key)
+	q.length--
 }
 
-func (q *statusCache) Get(key interface{}) interface{} {
+func (q *hashCache) Get(key interface{}) interface{} {
 	q.RLock()
 	defer q.RUnlock()
 	item, ok := q.items[key]
@@ -353,11 +355,11 @@ func (q *statusCache) Get(key interface{}) interface{} {
 	return item
 }
 
-func (q *statusCache) GetList() []interface{} {
-	q.Lock()
-	defer q.Unlock()
+func (q *hashCache) GetList() []interface{} {
+	q.RLock()
+	defer q.RUnlock()
 	res := make([]interface{}, 0, q.maxCount)
-	for item := range q.items {
+	for _, item := range q.items {
 		res = append(res, item)
 	}
 	return res
