@@ -1,5 +1,5 @@
-hash: 2de6008aff0da78b970f4414873c3318e0c084fc5be875d1935f1a5cc1b36f8d
-updated: 2017-04-07T13:30:27.614299275+08:00
+hash: da7dded57bf804afe8742ea77a5cec94ef4f562d991d550ee095acbaa6457462
+updated: 2017-04-12T17:23:11.319053868+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -115,7 +115,7 @@ imports:
 - name: github.com/gorilla/websocket
   version: a836c37014dbbf0d1e871d04531b851fcbdeb22d
 - name: github.com/grpc-ecosystem/go-grpc-prometheus
-  version: 2500245aa6110c562d17020fb31a2c133d737799
+  version: 6b7015e65d366bf3f19b2b2a000a831940f0f7e0
 - name: github.com/grpc-ecosystem/grpc-gateway
   version: 84398b94e188ee336f307779b57b3aa91af7063c
   subpackages:
@@ -138,8 +138,6 @@ imports:
   version: fae8f9dfd7048de16575b9d4c255278e38c28a4f
 - name: github.com/ngaut/log
   version: cec23d3e10b016363780d894a0eb732a12c06e02
-- name: github.com/ngaut/systimemon
-  version: c2ca1c75c6af5556eb6ce67994120adf12f2ccef
 - name: github.com/pingcap/check
   version: ce8a2f822ab1e245a4eefcef2996531c79c943f1
 - name: github.com/pingcap/kvproto
