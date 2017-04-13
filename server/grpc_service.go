@@ -246,16 +246,16 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		// TODO: should we check headers here?
 
-		var region *RegionInfo
-
 		resp := &pdpb.RegionHeartbeatResponse{}
 		cluster := s.GetRaftCluster()
 		if cluster == nil {
 			resp.Header = s.notBootstrappedHeader()
-			goto SEND
+			if err := stream.Send(resp); err != nil {
+				return errors.Trace(err)
+			}
 		}
 
-		region = newRegionInfo(request.GetRegion(), request.GetLeader())
+		region := newRegionInfo(request.GetRegion(), request.GetLeader())
 		region.DownPeers = request.GetDownPeers()
 		region.PendingPeers = request.GetPendingPeers()
 		if region.GetId() == 0 {
@@ -264,7 +264,9 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 				Message: fmt.Sprintf("invalid request region, %v", request),
 			}
 			resp.Header = s.errorHeader(pberr)
-			goto SEND
+			if err := stream.Send(resp); err != nil {
+				return errors.Trace(err)
+			}
 		}
 		if region.Leader == nil {
 			pberr := &pdpb.Error{
@@ -272,7 +274,9 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 				Message: fmt.Sprintf("invalid request leader, %v", request),
 			}
 			resp.Header = s.errorHeader(pberr)
-			goto SEND
+			if err := stream.Send(resp); err != nil {
+				return errors.Trace(err)
+			}
 		}
 
 		err = cluster.cachedCluster.handleRegionHeartbeat(region)
@@ -282,7 +286,9 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 				Message: errors.Trace(err).Error(),
 			}
 			resp.Header = s.errorHeader(pberr)
-			goto SEND
+			if err := stream.Send(resp); err != nil {
+				return errors.Trace(err)
+			}
 		}
 
 		resp, err = cluster.handleRegionHeartbeat(region)
@@ -292,12 +298,16 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 				Message: errors.Trace(err).Error(),
 			}
 			resp.Header = s.errorHeader(pberr)
-			goto SEND
+			if err := stream.Send(resp); err != nil {
+				return errors.Trace(err)
+			}
 		}
 
 		resp.Header = s.header()
+		resp.RegionId = request.Region.Id
+		resp.RegionEpoch = request.Region.RegionEpoch
+		resp.TargetPeer = request.Leader
 
-	SEND:
 		if err := stream.Send(resp); err != nil {
 			return errors.Trace(err)
 		}
