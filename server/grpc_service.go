@@ -302,6 +302,12 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 				return errors.Trace(err)
 			}
 		}
+		if resp == nil {
+			resp = &pdpb.RegionHeartbeatResponse{Header: s.header()}
+			if err := stream.Send(resp); err != nil {
+				return errors.Trace(err)
+			}
+		}
 
 		resp.Header = s.header()
 		resp.RegionId = request.Region.Id
