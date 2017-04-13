@@ -35,3 +35,14 @@ func (s *testStringSliceSuite) TestJSON(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(nb, DeepEquals, b)
 }
+
+func (s *testStringSliceSuite) TestEmpty(c *C) {
+	var ss StringSlice
+	b, err := json.Marshal(ss)
+	c.Assert(err, IsNil)
+	c.Assert(string(b), Equals, "\"\"")
+
+	var ss2 StringSlice
+	c.Assert(ss2.UnmarshalJSON(b), IsNil)
+	c.Assert(ss2, DeepEquals, ss)
+}
