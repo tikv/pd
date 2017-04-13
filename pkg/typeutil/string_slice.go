@@ -34,6 +34,10 @@ func (s *StringSlice) UnmarshalJSON(text []byte) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+	if len(data) == 0 {
+		*s = nil
+		return nil
+	}
 	*s = strings.Split(data, ",")
 	return nil
 }
