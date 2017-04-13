@@ -239,11 +239,11 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	tc.addLeaderRegion(3, 3, 1, 2)
 
 	gls := newGrantLeaderScheduler(opt, 0)
-	c.Assert(co.addScheduler(gls), NotNil)
+	c.Assert(co.addScheduler(gls, minScheduleInterval), NotNil)
 	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
 
 	gls = newGrantLeaderScheduler(opt, 1)
-	c.Assert(co.addScheduler(gls), IsNil)
+	c.Assert(co.addScheduler(gls, minScheduleInterval), IsNil)
 
 	// Transfer all leaders to store 1.
 	s.waitOperator(c, co, 2)
@@ -306,7 +306,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	cfg, opt := newTestScheduleConfig()
 	co := newCoordinator(cluster, opt)
 	lb := newBalanceLeaderScheduler(opt)
-	sc := newScheduleController(co, lb)
+	sc := newScheduleController(co, lb, minScheduleInterval)
 
 	for i := minScheduleInterval; sc.GetInterval() != maxScheduleInterval; i = time.Duration(float64(i) * scheduleIntervalFactor) {
 		c.Assert(sc.GetInterval(), Equals, i)
@@ -341,7 +341,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	_, opt := newTestScheduleConfig()
 	co := newCoordinator(cluster, opt)
 	lb := newBalanceLeaderScheduler(opt)
-	sc := newScheduleController(co, lb)
+	sc := newScheduleController(co, lb, minScheduleInterval)
 
 	// If no operator for x seconds, the next check should be in x/2 seconds.
 	idleSeconds := []int{5, 10, 20, 30, 60}

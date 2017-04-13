@@ -122,7 +122,11 @@ func (c *RaftCluster) isRunning() bool {
 
 // GetHotRegions get all hot regions status
 func (s *Server) GetHotRegions() map[uint64]RegionsHotStatus {
-	return s.cluster.coordinator.schedulers["balance-hot-region-scheduler"].Scheduler.(*balanceHotRegionScheduler).GetStatus()
+	schedule, ok := s.cluster.coordinator.schedulers[hotRegionScheduleName]
+	if !ok {
+		return nil
+	}
+	return schedule.Scheduler.(*balanceHotRegionScheduler).GetStatus()
 }
 
 // GetHotStores get all hot stores status

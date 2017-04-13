@@ -468,20 +468,10 @@ func (c *clusterInfo) getStoreWriteStatus() map[uint64]uint64 {
 	res := make(map[uint64]uint64)
 	for _, s := range c.getStores() {
 		res[s.GetId()] = s.status.GetBytesWritten()
-		res[0] += s.status.GetBytesWritten()
 	}
 	return res
 }
 
-func (c *clusterInfo) getStoreTotalWrite() uint64 {
-	var res uint64
-	for _, s := range c.getStores() {
-		if s.isUp() {
-			res += s.status.GetBytesWritten()
-		}
-	}
-	return res
-}
 func (c *clusterInfo) getStoreTotalWriteNoLock() uint64 {
 	var res uint64
 	for _, s := range c.stores.getStores() {
@@ -502,35 +492,26 @@ func (c *clusterInfo) putWriteStatuCache(region *RegionInfo, isAnti bool) {
 	key := region.GetId()
 	newItem := RegionStateValue{
 		RegionID:       region.GetId(),
-		WriteBytes:     region.WriteBytes,
+		WrittenBytes:   region.WrittenBytes,
 		LastUpdateTime: time.Now(),
 		StoreID:        region.Leader.GetStoreId(),
 		version:        region.GetRegionEpoch().GetVersion(),
-		antiTimes:      2,
+		antiCount:      hotRegionAntiCount,
 	}
 	value, isExist := c.writeStatus.getWithoutMove(key)
 	if isExist {
 		v := value.(RegionStateValue)
-		newItem.UpdateTimes = v.UpdateTimes + 1
+		newItem.UpdateCount = v.UpdateCount + 1
 
 		// eliminate some noise
 		if isAnti {
-			newItem.UpdateTimes = v.UpdateTimes
-			newItem.antiTimes = v.antiTimes - 1
-			log.Infof("Debug anti region  %+v", newItem)
-		}
-
-		if v.RegionID != region.GetId() || v.version != newItem.version {
-			log.Infof("Debug changed split update form region %d to region %d, version from %d to %d,  write %d\n", v.RegionID, newItem.RegionID, v.version, newItem.version, region.WriteBytes)
-		} else {
-			log.Infof("Debug update %+v %+v region %d\n", v, newItem, region.GetId())
+			newItem.UpdateCount = v.UpdateCount
+			newItem.antiCount = v.antiCount - 1
 		}
 
 		c.writeStatus.add(key, newItem)
 		return
 	}
-
-	log.Infof("Debug insert %+v region %d \n", newItem, region.GetId())
 	c.writeStatus.add(key, newItem)
 }
 
@@ -542,13 +523,12 @@ func (c *clusterInfo) deleteWriteStatuCache(region *RegionInfo) {
 	}
 
 	state := v.(RegionStateValue)
-	if state.antiTimes > 0 {
+	if state.antiCount > 0 {
 		c.putWriteStatuCache(region, true)
 		return
 	}
 
 	c.writeStatus.remove(key)
-	log.Infof("Debug outQueue %d id:%d write:%d antiTimes:%d\n", state.UpdateTimes, region.GetId(), region.WriteBytes, state.antiTimes)
 }
 
 func (c *clusterInfo) searchRegion(regionKey []byte) *RegionInfo {
@@ -742,11 +722,11 @@ func (c *clusterInfo) updateWriteStatus(region *RegionInfo) {
 		if interval < minHotRegionReportInterval {
 			return
 		}
-		avgBytes = uint64(float64(region.WriteBytes) / interval)
+		avgBytes = uint64(float64(region.WrittenBytes) / interval)
 	} else {
-		avgBytes = uint64(float64(region.WriteBytes) / float64(regionHeartBeatReportInterval))
+		avgBytes = uint64(float64(region.WrittenBytes) / float64(regionHeartBeatReportInterval))
 	}
-	region.WriteBytes = avgBytes
+	region.WrittenBytes = avgBytes
 
 	// avgRegionAllowWriteBytes use to filter low write region heart beat
 	avgRegionAllowWriteBytes := uint64(float64(c.getStoreTotalWriteNoLock()) / float64(writeStatusSize) / 2 / storeHeartBeatReportInterval)
@@ -755,9 +735,7 @@ func (c *clusterInfo) updateWriteStatus(region *RegionInfo) {
 		avgRegionAllowWriteBytes = minRegionAllowWrite
 	}
 
-	log.Infof("Debug allow %d, now is %d ,region %d", avgRegionAllowWriteBytes, region.WriteBytes, region.GetId())
-
-	if region.WriteBytes > avgRegionAllowWriteBytes {
+	if region.WrittenBytes > avgRegionAllowWriteBytes {
 		c.putWriteStatuCache(region, false)
 	} else {
 		c.deleteWriteStatuCache(region)

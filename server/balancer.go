@@ -376,11 +376,11 @@ func (r *replicaChecker) checkBestReplacement(region *RegionInfo) Operator {
 // RegionStateValue record each hot region state
 type RegionStateValue struct {
 	RegionID       uint64    `json:"region_id"`
-	WriteBytes     uint64    `json:"write_bytes"`
-	UpdateTimes    int       `json:"update_times"`
+	WrittenBytes   uint64    `json:"written_bytes"`
+	UpdateCount    int       `json:"update_count"`
 	LastUpdateTime time.Time `json:"last_update_time"`
 	StoreID        uint64    `json:"-"`
-	antiTimes      int
+	antiCount      int
 	version        uint64
 }
 
@@ -389,12 +389,12 @@ type MetaRegionStatus []RegionStateValue
 
 func (m MetaRegionStatus) Len() int           { return len(m) }
 func (m MetaRegionStatus) Swap(i, j int)      { m[i], m[j] = m[j], m[i] }
-func (m MetaRegionStatus) Less(i, j int) bool { return m[i].WriteBytes > m[j].WriteBytes }
+func (m MetaRegionStatus) Less(i, j int) bool { return m[i].WrittenBytes > m[j].WrittenBytes }
 
 // RegionsHotStatus record all hot regions in one store with sequence
 type RegionsHotStatus struct {
-	TotalWriteBytes uint64           `json:"total_write"`
-	MetaStatus      MetaRegionStatus `json:"status"`
+	TotalWrittenBytes uint64           `json:"total_written"`
+	MetaStatus        MetaRegionStatus `json:"status"`
 }
 
 type balanceHotRegionScheduler struct {
@@ -430,6 +430,7 @@ func (l *balanceHotRegionScheduler) Prepare(cluster *clusterInfo) error { return
 func (l *balanceHotRegionScheduler) Cleanup(cluster *clusterInfo) {}
 
 func (l *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
+	log.Info("")
 	l.CalculateScore(cluster)
 	region, leader := l.SelectTransferLeader(cluster)
 	if region == nil {
@@ -444,7 +445,7 @@ func (l *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 
 func (l *balanceHotRegionScheduler) clearScore() {
 	for sid, status := range l.scoreStatus {
-		status.TotalWriteBytes = 0
+		status.TotalWrittenBytes = 0
 		if status.MetaStatus.Len() != 0 {
 			status.MetaStatus = status.MetaStatus[0:0]
 		}
@@ -459,16 +460,12 @@ func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 		if !ok {
 			continue
 		}
-		if r.UpdateTimes < hotRegionUpdateTimesFlag {
+		if r.UpdateCount < hotRegionMinUpdateCount {
 			continue
 		}
 
 		id := r.RegionID
 		regionInfo := cluster.getRegion(id)
-		if regionInfo.WriteBytes == 0 {
-			log.Infof("Debug error meet 0 write_bytes %d \n", regionInfo.GetId())
-			continue
-		}
 		storeID := regionInfo.Leader.GetStoreId()
 		status, ok := l.scoreStatus[storeID]
 		if !ok {
@@ -477,8 +474,8 @@ func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 			}
 			l.scoreStatus[storeID] = status
 		}
-		status.TotalWriteBytes += regionInfo.WriteBytes
-		status.MetaStatus = append(status.MetaStatus, RegionStateValue{id, regionInfo.WriteBytes, r.UpdateTimes, r.LastUpdateTime, storeID, r.antiTimes, r.version})
+		status.TotalWrittenBytes += r.WrittenBytes
+		status.MetaStatus = append(status.MetaStatus, RegionStateValue{id, r.WrittenBytes, r.UpdateCount, r.LastUpdateTime, storeID, r.antiCount, r.version})
 		l.scoreStatus[storeID] = status
 	}
 
@@ -487,6 +484,7 @@ func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 		l.scoreStatus[sid] = rs
 	}
 }
+
 func (l *balanceHotRegionScheduler) SelectSourceRegion(cluster *clusterInfo) *RegionInfo {
 	var (
 		maxWrite    uint64
@@ -496,8 +494,8 @@ func (l *balanceHotRegionScheduler) SelectSourceRegion(cluster *clusterInfo) *Re
 		if s.MetaStatus.Len() < 2 {
 			continue
 		}
-		if maxWrite < s.TotalWriteBytes {
-			maxWrite = s.TotalWriteBytes
+		if maxWrite < s.TotalWrittenBytes {
+			maxWrite = s.TotalWrittenBytes
 			sourceStore = sid
 		}
 	}
@@ -506,17 +504,16 @@ func (l *balanceHotRegionScheduler) SelectSourceRegion(cluster *clusterInfo) *Re
 	}
 
 	length := l.scoreStatus[sourceStore].MetaStatus.Len()
-	for i := 0; i < 10; i++ {
-		rr := l.r.Int31n(int32((length+1)/2)) + int32(length/2)
-		rid := l.scoreStatus[sourceStore].MetaStatus[rr].RegionID
-		region := cluster.getRegion(rid)
-		if len(region.DownPeers) != 0 || len(region.PendingPeers) != 0 {
-			log.Info("Debug not select peer", region.DownPeers, region.PendingPeers)
-			continue
-		}
-		return region
+	rr := l.r.Int31n(int32(length-1)) + 1
+	s := l.scoreStatus[sourceStore].MetaStatus[rr]
+	if s.antiCount < hotRegionMinUpdateCount {
+		return nil
 	}
-	return nil
+	region := cluster.getRegion(s.RegionID)
+	if len(region.DownPeers) != 0 || len(region.PendingPeers) != 0 {
+		return nil
+	}
+	return region
 }
 
 func (l *balanceHotRegionScheduler) GetStatus() map[uint64]RegionsHotStatus {
@@ -526,34 +523,30 @@ func (l *balanceHotRegionScheduler) GetStatus() map[uint64]RegionsHotStatus {
 func (l *balanceHotRegionScheduler) SelectTransferLeader(cluster *clusterInfo) (*RegionInfo, *metapb.Peer) {
 	sourceRegion := l.SelectSourceRegion(cluster)
 	if sourceRegion == nil {
-		log.Info("Debug not select source region")
 		return nil, nil
 	}
-	sourceStoreWriteBytes := l.scoreStatus[sourceRegion.Leader.GetStoreId()].TotalWriteBytes
+	sourceStoreWriteBytes := l.scoreStatus[sourceRegion.Leader.GetStoreId()].TotalWrittenBytes
 	var targetPeer *metapb.Peer
 
 	//select follow to transfer leader
 	var least uint64 = math.MaxUint64
 	for _, peer := range sourceRegion.GetFollowers() {
 		if s, ok := l.scoreStatus[peer.GetStoreId()]; ok {
-			if least >= s.TotalWriteBytes && uint64(float64(sourceStoreWriteBytes)*hotRegionScheduleFactor) > s.TotalWriteBytes+2*sourceRegion.WriteBytes {
+			if least >= s.TotalWrittenBytes && uint64(float64(sourceStoreWriteBytes)*hotRegionScheduleFactor) > s.TotalWrittenBytes+2*sourceRegion.WrittenBytes {
 				targetPeer = peer
-				least = s.TotalWriteBytes
+				least = s.TotalWrittenBytes
 			}
 		} else {
 			targetPeer = peer
 			least = 0
 		}
 	}
-	if targetPeer != nil {
-		log.Infof("Debug Transfer Leader Source:%d Target:%d Write:%d, region %d\n", sourceRegion.Leader.GetStoreId(), targetPeer.GetStoreId(), sourceRegion.WriteBytes, sourceRegion.GetId())
-	}
 	return sourceRegion, targetPeer
 }
 
 func (l *balanceHotRegionScheduler) SelectTransferPeer(cluster *clusterInfo, region *RegionInfo) *metapb.Peer {
 	filter := newExcludedFilter(region.GetStoreIds(), region.GetStoreIds())
-	sourceStoreWriteBytes := l.scoreStatus[region.Leader.GetStoreId()].TotalWriteBytes
+	sourceStoreWriteBytes := l.scoreStatus[region.Leader.GetStoreId()].TotalWrittenBytes
 	stores := cluster.getStores()
 	var bestStore *storeInfo
 	var least uint64 = math.MaxUint64
@@ -562,8 +555,8 @@ func (l *balanceHotRegionScheduler) SelectTransferPeer(cluster *clusterInfo, reg
 			continue
 		}
 		if s, ok := l.scoreStatus[store.GetId()]; ok {
-			if least >= s.TotalWriteBytes && uint64(float64(sourceStoreWriteBytes)*hotRegionScheduleFactor) > s.TotalWriteBytes+2*region.WriteBytes {
-				least = s.TotalWriteBytes
+			if least >= s.TotalWrittenBytes && uint64(float64(sourceStoreWriteBytes)*hotRegionScheduleFactor) > s.TotalWrittenBytes+2*region.WrittenBytes {
+				least = s.TotalWrittenBytes
 				bestStore = store
 			}
 		} else {
@@ -579,9 +572,6 @@ func (l *balanceHotRegionScheduler) SelectTransferPeer(cluster *clusterInfo, reg
 	if err != nil {
 		log.Errorf("failed to allocate peer: %v", err)
 		return nil
-	}
-	if newPeer != nil {
-		log.Infof("Debug Transfer Peer Source:%d Target:%d Write:%d region %d\n", region.Leader.GetStoreId(), newPeer.GetStoreId(), region.WriteBytes, region.GetId())
 	}
 
 	return newPeer

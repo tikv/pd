@@ -24,20 +24,23 @@ import (
 )
 
 const (
-	historiesCacheSize            = 1000
-	eventsCacheSize               = 1000
-	writeStatusSize               = 1000
-	maxScheduleRetries            = 10
-	maxScheduleInterval           = time.Minute
-	minScheduleInterval           = time.Millisecond * 10
-	minSlowScheduleInterval       = time.Second * 3
-	scheduleIntervalFactor        = 1.3
+	historiesCacheSize      = 1000
+	eventsCacheSize         = 1000
+	writeStatusSize         = 1000
+	maxScheduleRetries      = 10
+	maxScheduleInterval     = time.Minute
+	minScheduleInterval     = time.Millisecond * 10
+	minSlowScheduleInterval = time.Second * 3
+	scheduleIntervalFactor  = 1.3
+
 	hotRegionScheduleFactor       = 0.9
-	minRegionAllowWrite           = 64 * 1024
+	minRegionAllowWrite           = 16 * 1024
 	regionHeartBeatReportInterval = 60
 	storeHeartBeatReportInterval  = 10
 	minHotRegionReportInterval    = 3
-	hotRegionUpdateTimesFlag      = 3
+	hotRegionMinUpdateCount       = 3
+	hotRegionAntiCount            = 1
+	hotRegionScheduleName         = "balance-hot-region-scheduler"
 )
 
 var (
@@ -168,17 +171,12 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 	for {
 		select {
 		case <-timer.C:
-
 			timer.Reset(s.GetInterval())
-
 			if !s.AllowSchedule() {
 				continue
 			}
 			if op := s.Schedule(c.cluster); op != nil {
 				c.addOperator(op)
-			}
-			if s.Scheduler.GetName() == "balance-hot-region-scheduler" {
-				log.Info("Debug schedule end", s.GetInterval())
 			}
 
 		case <-s.Ctx().Done():
