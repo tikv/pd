@@ -18,7 +18,8 @@ lease = 3
 tso-save-interval = "3s"
 
 [log]
-log-level = "info"
+level = "info"
+#file = ""
 
 [metric]
 # prometheus client push interval, set "0s" to disable prometheus.

@@ -40,9 +40,9 @@ const (
 // LogConfig serializes log related config in toml/json.
 type LogConfig struct {
 	// Log level.
-	Level string `toml:"log-level" json:"log-level"`
+	Level string `toml:"level" json:"level"`
 	// Log file.
-	Filename string `toml:"log-file" json:"log-file"`
+	Filename string `toml:"file" json:"file"`
 }
 
 // redirectFormatter will redirect etcd logs to logrus logs.
