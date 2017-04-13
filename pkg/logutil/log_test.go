@@ -15,6 +15,7 @@ package logutil
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	log "github.com/Sirupsen/logrus"
@@ -23,7 +24,8 @@ import (
 )
 
 const (
-	logPattern = `\d\d\d\d/\d\d/\d\d \d\d:\d\d:\d\d ([\w_%!$@.,+~-]+|\\.)+:\d+: \[(fatal|error|warning|info|debug)\] .*?\n`
+	logPattern   = `\d\d\d\d/\d\d/\d\d \d\d:\d\d:\d\d ([\w_%!$@.,+~-]+|\\.)+:\d+: \[(fatal|error|warning|info|debug)\] .*?\n`
+	thisFilename = "log_test.go"
 )
 
 func Test(t *testing.T) {
@@ -54,13 +56,14 @@ func (s *testLogSuite) TestLogging(c *C) {
 
 	tlog.Warningf("[this message should be sent to buf]")
 	entry, err := s.buf.ReadString('\n')
-
 	c.Assert(err, IsNil)
 	c.Assert(entry, Matches, logPattern)
+	// All capnslog log will be trigered in logutil/log.go
+	c.Assert(strings.Contains(entry, "log.go"), IsTrue)
 
 	log.Warnf("this message comes from logrus")
 	entry, err = s.buf.ReadString('\n')
-
 	c.Assert(err, IsNil)
 	c.Assert(entry, Matches, logPattern)
+	c.Assert(strings.Contains(entry, thisFilename), IsTrue)
 }
