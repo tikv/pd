@@ -186,6 +186,17 @@ func (c *lruCache) get(key uint64) (interface{}, bool) {
 	return nil, false
 }
 
+func (c *lruCache) getWithoutMove(key uint64) (interface{}, bool) {
+	c.Lock()
+	defer c.Unlock()
+
+	if ele, ok := c.cache[key]; ok {
+		return ele.Value.(*cacheItem).value, true
+	}
+
+	return nil, false
+}
+
 func (c *lruCache) remove(key uint64) {
 	c.Lock()
 	defer c.Unlock()
@@ -296,71 +307,4 @@ func (c *fifoCache) len() int {
 	defer c.RUnlock()
 
 	return c.ll.Len()
-}
-
-type hashCache struct {
-	sync.RWMutex
-
-	maxCount int
-	length   int
-	items    map[interface{}]interface{}
-}
-
-func newHashCache(maxCount int) *hashCache {
-	return &hashCache{
-		maxCount: maxCount,
-		items:    make(map[interface{}]interface{}),
-	}
-}
-
-func (q *hashCache) IsFull() bool {
-	q.RLock()
-	defer q.RUnlock()
-	return q.isFull()
-}
-
-func (q *hashCache) isFull() bool {
-	return q.length >= q.maxCount
-}
-
-func (q *hashCache) Put(key interface{}, value interface{}) {
-	q.Lock()
-	defer q.Unlock()
-	if q.isFull() {
-		log.Info("Debug queue is full")
-		return
-	}
-	q.items[key] = value
-	q.length++
-}
-
-func (q *hashCache) Delete(key interface{}) {
-	q.Lock()
-	defer q.Unlock()
-	_, ok := q.items[key]
-	if !ok {
-		return
-	}
-	delete(q.items, key)
-	q.length--
-}
-
-func (q *hashCache) Get(key interface{}) interface{} {
-	q.RLock()
-	defer q.RUnlock()
-	item, ok := q.items[key]
-	if !ok {
-		return nil
-	}
-	return item
-}
-
-func (q *hashCache) GetList() []interface{} {
-	q.RLock()
-	defer q.RUnlock()
-	res := make([]interface{}, 0, q.maxCount)
-	for _, item := range q.items {
-		res = append(res, item)
-	}
-	return res
 }

@@ -333,7 +333,7 @@ type clusterInfo struct {
 	stores  *storesInfo
 	regions *regionsInfo
 
-	writeStatus *hashCache
+	writeStatus *lruCache
 }
 
 func newClusterInfo(id IDAllocator) *clusterInfo {
@@ -341,7 +341,7 @@ func newClusterInfo(id IDAllocator) *clusterInfo {
 		id:          id,
 		stores:      newStoresInfo(),
 		regions:     newRegionsInfo(),
-		writeStatus: newHashCache(writeStatusSize),
+		writeStatus: newLRUCache(writeStatusSize),
 	}
 }
 
@@ -499,7 +499,7 @@ func (c *clusterInfo) getRegion(regionID uint64) *RegionInfo {
 }
 
 func (c *clusterInfo) putWriteStatuCache(region *RegionInfo, isAnti bool) {
-	key := string(region.GetEndKey())
+	key := region.GetId()
 	newItem := RegionStateValue{
 		RegionID:       region.GetId(),
 		WriteBytes:     region.WriteBytes,
@@ -508,8 +508,8 @@ func (c *clusterInfo) putWriteStatuCache(region *RegionInfo, isAnti bool) {
 		version:        region.GetRegionEpoch().GetVersion(),
 		antiTimes:      2,
 	}
-	value := c.writeStatus.Get(key)
-	if value != nil {
+	value, isExist := c.writeStatus.getWithoutMove(key)
+	if isExist {
 		v := value.(RegionStateValue)
 		newItem.UpdateTimes = v.UpdateTimes + 1
 
@@ -517,26 +517,27 @@ func (c *clusterInfo) putWriteStatuCache(region *RegionInfo, isAnti bool) {
 		if isAnti {
 			newItem.UpdateTimes = v.UpdateTimes
 			newItem.antiTimes = v.antiTimes - 1
+			log.Infof("Debug anti region  %+v", newItem)
 		}
 
 		if v.RegionID != region.GetId() || v.version != newItem.version {
-			log.Infof("Debug changed split update form region %d to region %d,version from %d to %d,  write %d\n", v.RegionID, newItem.RegionID, v.version, newItem.version, region.WriteBytes)
+			log.Infof("Debug changed split update form region %d to region %d, version from %d to %d,  write %d\n", v.RegionID, newItem.RegionID, v.version, newItem.version, region.WriteBytes)
 		} else {
-			log.Infof("Debug update %+v %+v key %v \n", v, newItem, region.GetEndKey())
+			log.Infof("Debug update %+v %+v region %d\n", v, newItem, region.GetId())
 		}
 
-		c.writeStatus.Put(key, newItem)
+		c.writeStatus.add(key, newItem)
 		return
 	}
 
-	log.Infof("Debug insert %+v key %v \n", newItem, region.GetEndKey())
-	c.writeStatus.Put(key, newItem)
+	log.Infof("Debug insert %+v region %d \n", newItem, region.GetId())
+	c.writeStatus.add(key, newItem)
 }
 
 func (c *clusterInfo) deleteWriteStatuCache(region *RegionInfo) {
-	key := string(region.GetEndKey())
-	v := c.writeStatus.Get(key)
-	if v == nil {
+	key := region.GetId()
+	v, isExist := c.writeStatus.getWithoutMove(key)
+	if !isExist {
 		return
 	}
 
@@ -546,7 +547,7 @@ func (c *clusterInfo) deleteWriteStatuCache(region *RegionInfo) {
 		return
 	}
 
-	c.writeStatus.Delete(key)
+	c.writeStatus.remove(key)
 	log.Infof("Debug outQueue %d id:%d write:%d antiTimes:%d\n", state.UpdateTimes, region.GetId(), region.WriteBytes, state.antiTimes)
 }
 
@@ -735,8 +736,8 @@ func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
 func (c *clusterInfo) updateWriteStatus(region *RegionInfo) {
 	var avgBytes uint64
 
-	v := c.writeStatus.Get(string(region.GetEndKey()))
-	if v != nil {
+	v, isExist := c.writeStatus.getWithoutMove(region.GetId())
+	if isExist {
 		interval := time.Now().Sub(v.(RegionStateValue).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
 			return

@@ -453,9 +453,12 @@ func (l *balanceHotRegionScheduler) clearScore() {
 }
 func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 	l.clearScore()
-	items := cluster.writeStatus.GetList()
+	items := cluster.writeStatus.elems()
 	for _, item := range items {
-		r := item.(RegionStateValue)
+		r, ok := item.value.(RegionStateValue)
+		if !ok {
+			continue
+		}
 		if r.UpdateTimes < hotRegionUpdateTimesFlag {
 			continue
 		}
@@ -543,7 +546,7 @@ func (l *balanceHotRegionScheduler) SelectTransferLeader(cluster *clusterInfo) (
 		}
 	}
 	if targetPeer != nil {
-		log.Infof("Debug Transfer Leader Source:%d Target:%d Write:%d,RegionID:%d Key:%s\n", sourceRegion.Leader.GetStoreId(), targetPeer.GetStoreId(), sourceRegion.WriteBytes, sourceRegion.GetId(), sourceRegion.GetEndKey())
+		log.Infof("Debug Transfer Leader Source:%d Target:%d Write:%d, region %d\n", sourceRegion.Leader.GetStoreId(), targetPeer.GetStoreId(), sourceRegion.WriteBytes, sourceRegion.GetId())
 	}
 	return sourceRegion, targetPeer
 }
@@ -578,7 +581,7 @@ func (l *balanceHotRegionScheduler) SelectTransferPeer(cluster *clusterInfo, reg
 		return nil
 	}
 	if newPeer != nil {
-		log.Infof("Debug Transfer Peer Source:%d Target:%d Write:%d RegionID:%d Key:%s \n", region.Leader.GetStoreId(), newPeer.GetStoreId(), region.WriteBytes, region.GetId(), region.GetEndKey())
+		log.Infof("Debug Transfer Peer Source:%d Target:%d Write:%d region %d\n", region.Leader.GetStoreId(), newPeer.GetStoreId(), region.WriteBytes, region.GetId())
 	}
 
 	return newPeer
