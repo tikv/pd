@@ -60,6 +60,10 @@ type Config struct {
 	// Log related config.
 	Log logutil.LogConfig `toml:"log" json:"log"`
 
+	// Backward compatibility.
+	LogFileDeprecated  string `toml:"log-file" json:"log-file"`
+	LogLevelDeprecated string `toml:"log-level" json:"log-level"`
+
 	// TsoSaveInterval is the interval to save timestamp.
 	TsoSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
@@ -84,6 +88,9 @@ type Config struct {
 	electionMs uint64
 
 	configFile string
+
+	// For all warnings during parsing.
+	WarningMsgs []string
 }
 
 // NewConfig creates a new config.
@@ -106,7 +113,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
 	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
 
-	fs.StringVar(&cfg.Log.Level, "L", "info", "log level: debug, info, warn, error, fatal")
+	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	fs.StringVar(&cfg.Log.Filename, "log-file", "", "log file path")
 
 	return cfg
@@ -174,6 +181,19 @@ func (c *Config) Parse(arguments []string) error {
 		err = c.configFromFile(c.configFile)
 		if err != nil {
 			return errors.Trace(err)
+		}
+
+		// Backward compatibility for toml config
+		fmt.Printf("fuck %+v\n", c)
+		if c.LogFileDeprecated != "" && c.Log.Filename == "" {
+			c.Log.Filename = c.LogFileDeprecated
+			msg := fmt.Sprintf("log-file in %s is deprecated, use [log] instead", c.configFile)
+			c.WarningMsgs = append(c.WarningMsgs, msg)
+		}
+		if c.LogLevelDeprecated != "" && c.Log.Level == "" {
+			c.Log.Level = c.LogLevelDeprecated
+			msg := fmt.Sprintf("log-level in %s is deprecated, use [log] instead", c.configFile)
+			c.WarningMsgs = append(c.WarningMsgs, msg)
 		}
 	}
 

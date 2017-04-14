@@ -52,6 +52,10 @@ func main() {
 
 	server.LogPDInfo()
 
+	for _, msg := range cfg.WarningMsgs {
+		log.Warn(msg)
+	}
+
 	// TODO: Make it configurable if it has big impact on performance.
 	grpc_prometheus.EnableHandlingTimeHistogram()
 
