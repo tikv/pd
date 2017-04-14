@@ -184,7 +184,6 @@ func (c *Config) Parse(arguments []string) error {
 		}
 
 		// Backward compatibility for toml config
-		fmt.Printf("fuck %+v\n", c)
 		if c.LogFileDeprecated != "" && c.Log.Filename == "" {
 			c.Log.Filename = c.LogFileDeprecated
 			msg := fmt.Sprintf("log-file in %s is deprecated, use [log] instead", c.configFile)
