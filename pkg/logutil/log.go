@@ -72,9 +72,7 @@ func (rf *redirectFormatter) Format(pkg string, level capnslog.LogLevel, depth i
 		log.Infof(logStr)
 	case capnslog.INFO:
 		log.Infof(logStr)
-	case capnslog.DEBUG:
-		log.Debugf(logStr)
-	case capnslog.TRACE:
+	case capnslog.DEBUG, capnslog.TRACE:
 		log.Debugf(logStr)
 	}
 }
@@ -121,9 +119,7 @@ func stringToLogLevel(level string) log.Level {
 		return log.FatalLevel
 	case "error":
 		return log.ErrorLevel
-	case "warn":
-		return log.WarnLevel
-	case "warning":
+	case "warn", "warning":
 		return log.WarnLevel
 	case "debug":
 		return log.DebugLevel
@@ -149,9 +145,9 @@ func (f *textFormatter) Format(entry *log.Entry) ([]byte, error) {
 		fmt.Fprintf(b, " %s:%v:", file, entry.Data["line"])
 	}
 	fmt.Fprintf(b, " [%s] %s", entry.Level.String(), entry.Message)
-	for k := range entry.Data {
+	for k, v := range entry.Data {
 		if k != "file" && k != "line" {
-			fmt.Fprintf(b, " %v=%v", k, entry.Data[k])
+			fmt.Fprintf(b, " %v=%v", k, v)
 		}
 	}
 	b.WriteByte('\n')

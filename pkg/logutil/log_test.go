@@ -24,8 +24,7 @@ import (
 )
 
 const (
-	logPattern   = `\d\d\d\d/\d\d/\d\d \d\d:\d\d:\d\d ([\w_%!$@.,+~-]+|\\.)+:\d+: \[(fatal|error|warning|info|debug)\] .*?\n`
-	thisFilename = "log_test.go"
+	logPattern = `\d\d\d\d/\d\d/\d\d \d\d:\d\d:\d\d ([\w_%!$@.,+~-]+|\\.)+:\d+: \[(fatal|error|warning|info|debug)\] .*?\n`
 )
 
 func Test(t *testing.T) {
@@ -65,5 +64,5 @@ func (s *testLogSuite) TestLogging(c *C) {
 	entry, err = s.buf.ReadString('\n')
 	c.Assert(err, IsNil)
 	c.Assert(entry, Matches, logPattern)
-	c.Assert(strings.Contains(entry, thisFilename), IsTrue)
+	c.Assert(strings.Contains(entry, "log_test.go"), IsTrue)
 }
