@@ -186,7 +186,7 @@ func (c *lruCache) get(key uint64) (interface{}, bool) {
 	return nil, false
 }
 
-func (c *lruCache) getWithoutMove(key uint64) (interface{}, bool) {
+func (c *lruCache) peek(key uint64) (interface{}, bool) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -225,7 +225,9 @@ func (c *lruCache) elems() []*cacheItem {
 
 	elems := make([]*cacheItem, 0, c.ll.Len())
 	for ele := c.ll.Front(); ele != nil; ele = ele.Next() {
-		elems = append(elems, ele.Value.(*cacheItem))
+		clone := &cacheItem{}
+		*clone = *(ele.Value.(*cacheItem))
+		elems = append(elems, clone)
 	}
 
 	return elems

@@ -26,19 +26,19 @@ import (
 const (
 	historiesCacheSize      = 1000
 	eventsCacheSize         = 1000
-	writeStatusSize         = 1000
 	maxScheduleRetries      = 10
 	maxScheduleInterval     = time.Minute
 	minScheduleInterval     = time.Millisecond * 10
 	minSlowScheduleInterval = time.Second * 3
 	scheduleIntervalFactor  = 1.3
 
+	writeStatLRUMaxLen            = 1000
 	hotRegionScheduleFactor       = 0.9
-	minRegionAllowWrite           = 16 * 1024
+	hotRegionMinWriteRate         = 16 * 1024
 	regionHeartBeatReportInterval = 60
 	storeHeartBeatReportInterval  = 10
 	minHotRegionReportInterval    = 3
-	hotRegionMinUpdateCount       = 3
+	hotRegionLowThreshold         = 3
 	hotRegionAntiCount            = 1
 	hotRegionScheduleName         = "balance-hot-region-scheduler"
 )
@@ -290,24 +290,24 @@ func (l *scheduleLimiter) operatorCount(kind ResourceKind) uint64 {
 
 type scheduleController struct {
 	Scheduler
-	opt         *scheduleOption
-	limiter     *scheduleLimiter
-	interval    time.Duration
-	minInterval time.Duration
-	ctx         context.Context
-	cancel      context.CancelFunc
+	opt          *scheduleOption
+	limiter      *scheduleLimiter
+	nextInterval time.Duration
+	minInterval  time.Duration
+	ctx          context.Context
+	cancel       context.CancelFunc
 }
 
 func newScheduleController(c *coordinator, s Scheduler, minInterval time.Duration) *scheduleController {
 	ctx, cancel := context.WithCancel(c.ctx)
 	return &scheduleController{
-		Scheduler:   s,
-		opt:         c.opt,
-		limiter:     c.limiter,
-		interval:    minInterval,
-		minInterval: minInterval,
-		ctx:         ctx,
-		cancel:      cancel,
+		Scheduler:    s,
+		opt:          c.opt,
+		limiter:      c.limiter,
+		nextInterval: minInterval,
+		minInterval:  minInterval,
+		ctx:          ctx,
+		cancel:       cancel,
 	}
 }
 
@@ -323,18 +323,18 @@ func (s *scheduleController) Schedule(cluster *clusterInfo) Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
 		// If we have schedule, reset interval to the minimal interval.
 		if op := s.Scheduler.Schedule(cluster); op != nil {
-			s.interval = s.minInterval
+			s.nextInterval = s.minInterval
 			return op
 		}
 	}
 
 	// If we have no schedule, increase the interval exponentially.
-	s.interval = minDuration(time.Duration(float64(s.interval)*scheduleIntervalFactor), maxScheduleInterval)
+	s.nextInterval = minDuration(time.Duration(float64(s.nextInterval)*scheduleIntervalFactor), maxScheduleInterval)
 	return nil
 }
 
 func (s *scheduleController) GetInterval() time.Duration {
-	return s.interval
+	return s.nextInterval
 }
 
 func (s *scheduleController) AllowSchedule() bool {
