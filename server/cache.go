@@ -490,9 +490,9 @@ func (c *clusterInfo) getRegion(regionID uint64) *RegionInfo {
 
 // updateWriteStatCache removes thoes cold down regions and updates hot regions
 func (c *clusterInfo) updateWriteStatCache(region *RegionInfo, hotRegionThreshold uint64) {
+	var v RegionStat
 	key := region.GetId()
 	value, isExist := c.writeStatistics.peek(key)
-	v := value.(RegionStat)
 	newItem := RegionStat{
 		RegionID:       region.GetId(),
 		WrittenBytes:   region.WrittenBytes,
@@ -503,6 +503,7 @@ func (c *clusterInfo) updateWriteStatCache(region *RegionInfo, hotRegionThreshol
 	}
 
 	if isExist {
+		v = value.(RegionStat)
 		newItem.HotDegree = v.HotDegree + 1
 	}
 
