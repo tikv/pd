@@ -24,7 +24,6 @@ import (
 	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/apiutil"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
@@ -125,20 +124,21 @@ func NewClient(pdAddrs []string) (Client, error) {
 }
 
 func (c *client) initClusterID() error {
+	ctx, cancel := context.WithCancel(c.ctx)
+	defer cancel()
 	for i := 0; i < maxInitClusterRetries; i++ {
 		for _, u := range c.urls {
-			// TODO: Use gRPC instead.
-			client, err := apiutil.NewClient(u, pdTimeout)
+			cc, err := c.getOrCreateGRPCConn(u)
 			if err != nil {
 				log.Errorf("[pd] failed to get cluster id: %v", err)
 				continue
 			}
-			clusterID, err := client.GetClusterID()
+			members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
 			if err != nil {
 				log.Errorf("[pd] failed to get cluster id: %v", err)
 				continue
 			}
-			c.clusterID = clusterID
+			c.clusterID = members.GetHeader().GetClusterId()
 			return nil
 		}
 
@@ -149,17 +149,18 @@ func (c *client) initClusterID() error {
 }
 
 func (c *client) updateLeader() error {
+	ctx, cancel := context.WithCancel(c.ctx)
+	defer cancel()
 	for _, u := range c.urls {
-		// TODO: Use gRPC instead.
-		client, err := apiutil.NewClient(u, pdTimeout)
+		cc, err := c.getOrCreateGRPCConn(u)
 		if err != nil {
 			continue
 		}
-		leader, err := client.GetLeader()
-		if err != nil {
+		members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
+		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
 			continue
 		}
-		if err = c.switchLeader(leader.GetClientUrls()); err != nil {
+		if err = c.switchLeader(members.GetLeader().GetClientUrls()); err != nil {
 			return errors.Trace(err)
 		}
 		return nil
@@ -170,20 +171,32 @@ func (c *client) updateLeader() error {
 func (c *client) switchLeader(addrs []string) error {
 	// FIXME: How to safely compare leader urls? For now, only allows one client url.
 	addr := addrs[0]
+
 	c.connMu.RLock()
-	if c.connMu.leader == addr {
-		c.connMu.RUnlock()
+	oldLeader := c.connMu.leader
+	c.connMu.RUnlock()
+
+	if addr == oldLeader {
 		return nil
 	}
 
-	log.Infof("[pd] leader switches to: %v, previous: %v", addr, c.connMu.leader)
-	_, ok := c.connMu.clientConns[addr]
+	log.Infof("[pd] leader switches to: %v, previous: %v", addr, oldLeader)
+	if _, err := c.getOrCreateGRPCConn(addr); err != nil {
+		return errors.Trace(err)
+	}
+
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+	c.connMu.leader = addr
+	return nil
+}
+
+func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
+	c.connMu.RLock()
+	conn, ok := c.connMu.clientConns[addr]
 	c.connMu.RUnlock()
 	if ok {
-		c.connMu.Lock()
-		c.connMu.leader = addr
-		c.connMu.Unlock()
-		return nil
+		return conn, nil
 	}
 
 	cc, err := grpc.Dial(addr, grpc.WithDialer(func(addr string, d time.Duration) (net.Conn, error) {
@@ -198,18 +211,18 @@ func (c *client) switchLeader(addrs []string) error {
 		return net.DialTimeout("tcp", u.Host, d)
 	}), grpc.WithInsecure()) // TODO: Support HTTPS.
 	if err != nil {
-		return errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
-	if _, ok := c.connMu.clientConns[addr]; ok {
+	if old, ok := c.connMu.clientConns[addr]; ok {
 		cc.Close()
-	} else {
-		c.connMu.clientConns[addr] = cc
+		return old, nil
 	}
-	c.connMu.leader = addr
-	return nil
+
+	c.connMu.clientConns[addr] = cc
+	return cc, nil
 }
 
 func (c *client) leaderLoop() {
