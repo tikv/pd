@@ -539,8 +539,8 @@ func (l *balanceHotRegionScheduler) adjustBalanceLimit(storeID uint64) {
 	}
 
 	avgRegionCount := hotRegionTotalCount / float64(len(l.scoreStatus))
-	// divide 2 to avoid transfer back and forth
-	limit := uint64((float64(s.RegionsStat.Len()) - avgRegionCount) / 2)
+	// Multiplied by 0.75 to avoid transfer back and forth
+	limit := uint64((float64(s.RegionsStat.Len()) - avgRegionCount) * 0.75)
 	l.limit = maxUint64(1, limit)
 }
 

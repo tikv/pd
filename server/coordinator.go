@@ -38,14 +38,14 @@ const (
 	regionHeartBeatReportInterval = 60
 	storeHeartBeatReportInterval  = 10
 	minHotRegionReportInterval    = 3
-	hotRegionLowThreshold         = 3
 	hotRegionAntiCount            = 1
 	hotRegionScheduleName         = "balance-hot-region-scheduler"
 )
 
 var (
-	errSchedulerExisted  = errors.New("scheduler is existed")
-	errSchedulerNotFound = errors.New("scheduler is not found")
+	hotRegionLowThreshold = 3
+	errSchedulerExisted   = errors.New("scheduler is existed")
+	errSchedulerNotFound  = errors.New("scheduler is not found")
 )
 
 type coordinator struct {

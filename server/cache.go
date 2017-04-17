@@ -708,7 +708,6 @@ func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
 
 func (c *clusterInfo) updateWriteStatus(region *RegionInfo) {
 	var WrittenBytesPerSec uint64
-
 	v, isExist := c.writeStatistics.peek(region.GetId())
 	if isExist {
 		interval := time.Now().Sub(v.(RegionStat).LastUpdateTime).Seconds()
