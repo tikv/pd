@@ -128,13 +128,8 @@ func (c *client) initClusterID() error {
 	defer cancel()
 	for i := 0; i < maxInitClusterRetries; i++ {
 		for _, u := range c.urls {
-			cc, err := c.getOrCreateGRPCConn(u)
-			if err != nil {
-				log.Errorf("[pd] failed to get cluster id: %v", err)
-				continue
-			}
-			members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
-			if err != nil {
+			members, err := c.getMembers(ctx, u)
+			if err != nil || members.GetHeader() == nil {
 				log.Errorf("[pd] failed to get cluster id: %v", err)
 				continue
 			}
@@ -152,11 +147,7 @@ func (c *client) updateLeader() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 	for _, u := range c.urls {
-		cc, err := c.getOrCreateGRPCConn(u)
-		if err != nil {
-			continue
-		}
-		members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
+		members, err := c.getMembers(ctx, u)
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
 			continue
 		}
@@ -166,6 +157,18 @@ func (c *client) updateLeader() error {
 		return nil
 	}
 	return errors.Errorf("failed to get leader from %v", c.urls)
+}
+
+func (c *client) getMembers(ctx context.Context, url string) (*pdpb.GetMembersResponse, error) {
+	cc, err := c.getOrCreateGRPCConn(url)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return members, nil
 }
 
 func (c *client) switchLeader(addrs []string) error {
