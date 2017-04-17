@@ -401,7 +401,7 @@ type StoreHotRegions struct {
 type balanceHotRegionScheduler struct {
 	opt         *scheduleOption
 	limit       uint64
-	scoreStatus map[uint64]StoreHotRegions // store id -> regions status in this store
+	scoreStatus map[uint64]*StoreHotRegions // store id -> regions status in this store
 	r           *rand.Rand
 }
 
@@ -409,7 +409,7 @@ func newBalanceHotRegionScheduler(opt *scheduleOption) *balanceHotRegionSchedule
 	return &balanceHotRegionScheduler{
 		opt:         opt,
 		limit:       1,
-		scoreStatus: make(map[uint64]StoreHotRegions),
+		scoreStatus: make(map[uint64]*StoreHotRegions),
 		r:           rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
@@ -448,7 +448,7 @@ func (l *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 }
 
 func (l *balanceHotRegionScheduler) clearScore() {
-	l.scoreStatus = make(map[uint64]StoreHotRegions)
+	l.scoreStatus = make(map[uint64]*StoreHotRegions)
 }
 func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 	l.clearScore()
@@ -466,7 +466,7 @@ func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 		storeID := regionInfo.Leader.GetStoreId()
 		status, ok := l.scoreStatus[storeID]
 		if !ok {
-			status = StoreHotRegions{
+			status = &StoreHotRegions{
 				RegionsStat: make(ListRegionsStat, 0, 100),
 			}
 			l.scoreStatus[storeID] = status
@@ -474,7 +474,6 @@ func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 		status.StoreTotalWrittenBytes += r.WrittenBytes
 		status.RegionsStat = append(status.RegionsStat, RegionStat{r.RegionID, r.WrittenBytes, r.HotDegree, r.LastUpdateTime, storeID, r.antiCount, r.version})
 		status.RegionsNumber++
-		l.scoreStatus[storeID] = status
 	}
 
 	for _, rs := range l.scoreStatus {
@@ -544,7 +543,7 @@ func (l *balanceHotRegionScheduler) adjustBalanceLimit(storeID uint64) {
 	l.limit = maxUint64(1, limit)
 }
 
-func (l *balanceHotRegionScheduler) GetStatus() map[uint64]StoreHotRegions {
+func (l *balanceHotRegionScheduler) GetStatus() map[uint64]*StoreHotRegions {
 	return l.scoreStatus
 }
 
