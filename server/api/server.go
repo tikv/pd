@@ -14,10 +14,10 @@
 package api
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/juju/errors"
 	"github.com/pingcap/pd/server"
 	"github.com/urfave/negroni"
 )

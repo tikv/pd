@@ -103,7 +103,7 @@ func (s *Server) syncTimestamp() error {
 		return errors.Trace(err)
 	}
 
-	log.Debugf("sync and save timestamp ok: last %v save %v", last, save)
+	log.Infof("sync and save timestamp: last %v save %v", last, save)
 
 	current := &atomicObject{
 		physical: now,

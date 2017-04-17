@@ -19,6 +19,7 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/juju/errors"
+	"github.com/ngaut/log"
 )
 
 const (
@@ -92,6 +93,7 @@ func (alloc *idAllocator) generate() (uint64, error) {
 		return 0, errors.New("generate id failed, we may not leader")
 	}
 
+	log.Infof("idAllocator allocates a new id: %d", end)
 	return end, nil
 }
 
