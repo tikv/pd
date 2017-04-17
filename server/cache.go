@@ -521,7 +521,6 @@ func (c *clusterInfo) updateWriteStatCache(region *RegionInfo, hotRegionThreshol
 		newItem.antiCount = v.antiCount - 1
 		newItem.WrittenBytes = v.WrittenBytes
 	}
-
 	c.writeStatistics.add(key, newItem)
 }
 

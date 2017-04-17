@@ -330,6 +330,7 @@ func (s *scheduleController) Schedule(cluster *clusterInfo) Operator {
 
 	// If we have no schedule, increase the interval exponentially.
 	s.nextInterval = minDuration(time.Duration(float64(s.nextInterval)*scheduleIntervalFactor), maxScheduleInterval)
+
 	return nil
 }
 

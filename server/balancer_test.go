@@ -119,6 +119,12 @@ func (c *testClusterInfo) updateStorageRatio(storeID uint64, usedRatio, availabl
 	c.putStore(store)
 }
 
+func (c *testClusterInfo) updateStorageWrittenBytes(storeID uint64, BytesWritten uint64) {
+	store := c.getStore(storeID)
+	store.status.BytesWritten = BytesWritten
+	c.putStore(store)
+}
+
 func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption) {
 	cfg := NewConfig()
 	cfg.adjust()
