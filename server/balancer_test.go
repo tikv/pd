@@ -783,25 +783,33 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	tc.updateStorageWrittenBytes(2, 0)
 	tc.updateStorageWrittenBytes(3, 0)
 
-	// Add 3 region
+	// Add 3 regions
 	// region_id  leader_store follower_store follower_store  written_bytes
 	//	      1        1              2              3           479516
 	//	      2        1              2              -           418115
 	//	      3        1              2              3             0
+	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
+	//|-----------|--------------|----------------|----------------|---------------|
+	//|     1     |       1      |        2       |       3        |     479516    |
+	//|     2     |       1      |        2       |       -        |     418115    |
+	//|     3     |       1      |        2       |       3        |       0       |
+
 	tc.addLeaderRegionWithWriteInfo(1, 1, 479516*regionHeartBeatReportInterval, 2, 3)
-	// for test follow just 1 peer in here
+	// for test follow just 1 peer here
 	tc.addLeaderRegionWithWriteInfo(2, 1, 419115*regionHeartBeatReportInterval, 2)
 	tc.addLeaderRegionWithWriteInfo(3, 1, 0, 2, 3)
 	hotRegionLowThreshold = 0
 	checkTransferLeader(c, hb.Schedule(cluster), 1, 2)
 
 	// add 2 region , total 5 region
-	// region_id  leader_store follower_store follower_store  written_bytes
-	//	      1        1              2              3           479516
-	//	      2        1              2              -			 418115
-	//	      3        1              2              3             0
-	//        4        2              1              3           102451
-	//        5        3              1              2           120314
+	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
+	//|-----------|--------------|----------------|----------------|---------------|
+	//|     1     |       1      |        2       |       3        |     479516    |
+	//|     2     |       1      |        2       |       -        |     418115    |
+	//|     3     |       1      |        2       |       3        |       0       |
+	//|     4     |       2      |        1       |       3        |     115451    |
+	//|     5     |       3      |        1       |       2        |     120314    |
+
 	tc.updateStorageWrittenBytes(2, 890345153)
 	tc.updateStorageWrittenBytes(3, 1090345153)
 	tc.addLeaderRegionWithWriteInfo(4, 2, 115451*regionHeartBeatReportInterval, 1, 3)
@@ -810,10 +818,12 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 
 	// Test CalculateScore.
 	// hot region in store like
-	// store_id  hot_region_numbers
-	//     1            2
-	//     2            1
-	//     3            1
+	//| store_id | hot_region_numbers |
+	//|----------|--------------------|
+	//|     1    |          2         |
+	//|     2    |          1         |
+	//|     3    |          1         |
+
 	expect := []struct {
 		streID          int
 		hotRegionNumber int
@@ -830,10 +840,12 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	// Test adjustLimit
 	// add 3 regions, and add 2 store. then total 7 regions
 	// hot region in store like
-	// store_id  hot_region_numbers
-	//     1            7
-	//     2            1
-	//     3            1
+	//| store_id | hot_region_numbers |
+	//|----------|--------------------|
+	//|     1    |          7         |
+	//|     2    |          1         |
+	//|     3    |          1         |
+
 	tc.addRegionStore(5, 0)
 	tc.addRegionStore(6, 0)
 	tc.addLeaderRegionWithWriteInfo(6, 1, 122451*regionHeartBeatReportInterval, 2, 3)

@@ -373,7 +373,7 @@ func (r *replicaChecker) checkBestReplacement(region *RegionInfo) Operator {
 	return newTransferPeer(region, oldPeer, newPeer)
 }
 
-// RegionStat records each hot region statistics
+// RegionStat records each hot region's statistics
 type RegionStat struct {
 	RegionID       uint64    `json:"region_id"`
 	WrittenBytes   uint64    `json:"written_bytes"`
@@ -391,7 +391,7 @@ func (m ListRegionsStat) Len() int           { return len(m) }
 func (m ListRegionsStat) Swap(i, j int)      { m[i], m[j] = m[j], m[i] }
 func (m ListRegionsStat) Less(i, j int) bool { return m[i].WrittenBytes < m[j].WrittenBytes }
 
-// StoreHotRegions record all hot regions in one store with sequence
+// StoreHotRegions records all hot regions in one store with sequence
 type StoreHotRegions struct {
 	StoreTotalWrittenBytes uint64          `json:"total_written"`
 	RegionsNumber          int             `json:"regions_number"`
@@ -488,7 +488,7 @@ func (l *balanceHotRegionScheduler) SelectSourceRegion(cluster *clusterInfo) *Re
 		maxHotStoreRegionsNumber int
 	)
 	// choose a hot store as transfer source
-	// the numbers of the hot regions in that store is considered priority than StoreTotalWrittenBytes
+	// the numbers of the hot regions in that store has higher priority than StoreTotalWrittenBytes
 	for sid, s := range l.scoreStatus {
 		if s.RegionsStat.Len() < 2 {
 			continue
@@ -513,7 +513,7 @@ func (l *balanceHotRegionScheduler) SelectSourceRegion(cluster *clusterInfo) *Re
 
 	length := l.scoreStatus[sourceStore].RegionsStat.Len()
 	// the hottest region in the store not move
-	// radmon pick a region from 1 .. length-1
+	// radmonly pick a region from 1 .. length-1
 	// TODO: consider hot degree when pick
 	rr := l.r.Int31n(int32(length-1)) + 1
 	pickedRegionStat := l.scoreStatus[sourceStore].RegionsStat[rr]

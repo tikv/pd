@@ -488,7 +488,7 @@ func (c *clusterInfo) getRegion(regionID uint64) *RegionInfo {
 	return c.regions.getRegion(regionID)
 }
 
-// updateWriteStatCache removes thoes cold down regions and updates hot regions
+// updateWriteStatCache removes those cold down regions and updates hot regions
 func (c *clusterInfo) updateWriteStatCache(region *RegionInfo, hotRegionThreshold uint64) {
 	var v RegionStat
 	key := region.GetId()
@@ -720,7 +720,7 @@ func (c *clusterInfo) updateWriteStatus(region *RegionInfo) {
 	}
 	region.WrittenBytes = WrittenBytesPerSec
 
-	// hotRegionThreshold use to pick hot region
+	// hotRegionThreshold is use to pick hot region
 	// suppose the number of the hot regions is writeStatLRUMaxLen
 	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot regions
 	// divide 2 because the store reports data about two times than the region record write to rocksdb

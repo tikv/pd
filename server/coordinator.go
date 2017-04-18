@@ -44,8 +44,8 @@ const (
 
 var (
 	hotRegionLowThreshold = 3
-	errSchedulerExisted   = errors.New("scheduler is existed")
-	errSchedulerNotFound  = errors.New("scheduler is not found")
+	errSchedulerExisted   = errors.New("scheduler existed")
+	errSchedulerNotFound  = errors.New("scheduler not found")
 )
 
 type coordinator struct {
