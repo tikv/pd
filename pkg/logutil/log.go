@@ -56,11 +56,6 @@ func (rf *redirectFormatter) Format(pkg string, level capnslog.LogLevel, depth i
 
 	logStr := fmt.Sprint(pkg, entries)
 
-	// trim square brackets
-	if len(logStr) > 2 && logStr[0] == '[' {
-		logStr = logStr[1 : len(logStr)-1]
-	}
-
 	switch level {
 	case capnslog.CRITICAL:
 		log.Fatalf(logStr)
