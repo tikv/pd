@@ -19,7 +19,6 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
-	"time"
 
 	"github.com/juju/errors"
 )
@@ -39,15 +38,6 @@ func ReadJSON(r io.ReadCloser, data interface{}) error {
 	}
 
 	return nil
-}
-
-// NewHTTPClient returns a HTTP client according to the scheme.
-func NewHTTPClient(scheme string, timeout time.Duration) *http.Client {
-	tr := NewHTTPTransport(scheme)
-	return &http.Client{
-		Timeout:   timeout,
-		Transport: tr,
-	}
 }
 
 // NewHTTPTransport returns a proper http.RoundTripper.
