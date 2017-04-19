@@ -244,6 +244,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			return errors.Trace(err)
 		}
 
+		log.Infof("[RegionHeartbeat]: request %+v", request)
 		// TODO: should we check headers here?
 
 		resp := &pdpb.RegionHeartbeatResponse{}
@@ -253,6 +254,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			if err := stream.Send(resp); err != nil {
 				return errors.Trace(err)
 			}
+			continue
 		}
 
 		region := newRegionInfo(request.GetRegion(), request.GetLeader())
@@ -267,6 +269,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			if err := stream.Send(resp); err != nil {
 				return errors.Trace(err)
 			}
+			continue
 		}
 		if region.Leader == nil {
 			pberr := &pdpb.Error{
@@ -277,6 +280,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			if err := stream.Send(resp); err != nil {
 				return errors.Trace(err)
 			}
+			continue
 		}
 
 		err = cluster.cachedCluster.handleRegionHeartbeat(region)
@@ -289,6 +293,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			if err := stream.Send(resp); err != nil {
 				return errors.Trace(err)
 			}
+			continue
 		}
 
 		resp, err = cluster.handleRegionHeartbeat(region)
@@ -301,12 +306,10 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			if err := stream.Send(resp); err != nil {
 				return errors.Trace(err)
 			}
+			continue
 		}
 		if resp == nil {
-			resp = &pdpb.RegionHeartbeatResponse{Header: s.header()}
-			if err := stream.Send(resp); err != nil {
-				return errors.Trace(err)
-			}
+			resp = &pdpb.RegionHeartbeatResponse{}
 		}
 
 		resp.Header = s.header()
@@ -314,6 +317,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		resp.RegionEpoch = request.Region.RegionEpoch
 		resp.TargetPeer = request.Leader
 
+		log.Infof("[RegionHeartbeat]: response %+v", resp)
 		if err := stream.Send(resp); err != nil {
 			return errors.Trace(err)
 		}
