@@ -41,6 +41,16 @@ func (s *testLogSuite) SetUpSuite(c *C) {
 	s.buf = &bytes.Buffer{}
 }
 
+func (s *testLogSuite) TestStringToLogLevel(c *C) {
+	c.Assert(stringToLogLevel("fatal"), Equals, log.FatalLevel)
+	c.Assert(stringToLogLevel("ERROR"), Equals, log.ErrorLevel)
+	c.Assert(stringToLogLevel("warn"), Equals, log.WarnLevel)
+	c.Assert(stringToLogLevel("warning"), Equals, log.WarnLevel)
+	c.Assert(stringToLogLevel("debug"), Equals, log.DebugLevel)
+	c.Assert(stringToLogLevel("info"), Equals, log.InfoLevel)
+	c.Assert(stringToLogLevel("whatever"), Equals, log.InfoLevel)
+}
+
 // TestLogging assure log format and log redirection works.
 func (s *testLogSuite) TestLogging(c *C) {
 	conf := &LogConfig{Level: "warn", Filename: ""}
