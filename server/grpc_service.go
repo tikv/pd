@@ -62,7 +62,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if err != nil {
 			return errors.Trace(err)
 		}
-		if err := s.validateRequest(request.GetHeader()); err != nil {
+		if err = s.validateRequest(request.GetHeader()); err != nil {
 			return errors.Trace(err)
 		}
 		count := request.GetCount()
@@ -250,7 +250,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		cluster := s.GetRaftCluster()
 		if cluster == nil {
 			resp.Header = s.notBootstrappedHeader()
-			if err := stream.Send(resp); err != nil {
+			if err = stream.Send(resp); err != nil {
 				return errors.Trace(err)
 			}
 			continue
@@ -265,7 +265,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 				Message: fmt.Sprintf("invalid request region, %v", request),
 			}
 			resp.Header = s.errorHeader(pberr)
-			if err := stream.Send(resp); err != nil {
+			if err = stream.Send(resp); err != nil {
 				return errors.Trace(err)
 			}
 			continue
@@ -276,7 +276,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 				Message: fmt.Sprintf("invalid request leader, %v", request),
 			}
 			resp.Header = s.errorHeader(pberr)
-			if err := stream.Send(resp); err != nil {
+			if err = stream.Send(resp); err != nil {
 				return errors.Trace(err)
 			}
 			continue
@@ -289,7 +289,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 				Message: errors.Trace(err).Error(),
 			}
 			resp.Header = s.errorHeader(pberr)
-			if err := stream.Send(resp); err != nil {
+			if err = stream.Send(resp); err != nil {
 				return errors.Trace(err)
 			}
 			continue
