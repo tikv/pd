@@ -393,9 +393,9 @@ func (m ListRegionsStat) Less(i, j int) bool { return m[i].WrittenBytes < m[j].W
 
 // StoreHotRegions records all hot regions in one store with sequence
 type StoreHotRegions struct {
-	StoreTotalWrittenBytes uint64          `json:"total_written"`
-	RegionsNumber          int             `json:"regions_number"`
-	RegionsStat            ListRegionsStat `json:"status"`
+	TotalWrittenBytes uint64          `json:"total_written"`
+	RegionCount       int             `json:"region_count"`
+	RegionsStat       ListRegionsStat `json:"status"`
 }
 
 type balanceHotRegionScheduler struct {
@@ -431,7 +431,7 @@ func (l *balanceHotRegionScheduler) Prepare(cluster *clusterInfo) error { return
 func (l *balanceHotRegionScheduler) Cleanup(cluster *clusterInfo) {}
 
 func (l *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
-	l.CalculateScore(cluster)
+	l.calculateScore(cluster)
 	region := l.SelectSourceRegion(cluster)
 	if region == nil {
 		return nil
@@ -450,7 +450,7 @@ func (l *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 func (l *balanceHotRegionScheduler) clearScore() {
 	l.scoreStatus = make(map[uint64]*StoreHotRegions)
 }
-func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
+func (l *balanceHotRegionScheduler) calculateScore(cluster *clusterInfo) {
 	l.clearScore()
 	items := cluster.writeStatistics.elems()
 	for _, item := range items {
@@ -471,9 +471,17 @@ func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 			}
 			l.scoreStatus[storeID] = status
 		}
-		status.StoreTotalWrittenBytes += r.WrittenBytes
-		status.RegionsStat = append(status.RegionsStat, RegionStat{r.RegionID, r.WrittenBytes, r.HotDegree, r.LastUpdateTime, storeID, r.antiCount, r.version})
-		status.RegionsNumber++
+		status.TotalWrittenBytes += r.WrittenBytes
+		status.RegionsStat = append(status.RegionsStat, RegionStat{
+			RegionID:       r.RegionID,
+			WrittenBytes:   r.WrittenBytes,
+			HotDegree:      r.HotDegree,
+			LastUpdateTime: r.LastUpdateTime,
+			StoreID:        storeID,
+			antiCount:      r.antiCount,
+			version:        r.version,
+		})
+		status.RegionCount++
 	}
 
 	for _, rs := range l.scoreStatus {
@@ -483,26 +491,26 @@ func (l *balanceHotRegionScheduler) CalculateScore(cluster *clusterInfo) {
 
 func (l *balanceHotRegionScheduler) SelectSourceRegion(cluster *clusterInfo) *RegionInfo {
 	var (
-		maxWritten               uint64
-		sourceStore              uint64
-		maxHotStoreRegionsNumber int
+		maxWritten             uint64
+		sourceStore            uint64
+		maxHotStoreRegionCount int
 	)
 	// choose a hot store as transfer source
-	// the numbers of the hot regions in that store has higher priority than StoreTotalWrittenBytes
+	// the numbers of the hot regions in that store has higher priority than TotalWrittenBytes
 	for sid, s := range l.scoreStatus {
 		if s.RegionsStat.Len() < 2 {
 			continue
 		}
 
-		if maxHotStoreRegionsNumber < s.RegionsStat.Len() {
-			maxHotStoreRegionsNumber = s.RegionsStat.Len()
-			maxWritten = s.StoreTotalWrittenBytes
+		if maxHotStoreRegionCount < s.RegionsStat.Len() {
+			maxHotStoreRegionCount = s.RegionsStat.Len()
+			maxWritten = s.TotalWrittenBytes
 			sourceStore = sid
 			continue
 		}
 
-		if maxHotStoreRegionsNumber == s.RegionsStat.Len() && maxWritten < s.StoreTotalWrittenBytes {
-			maxWritten = s.StoreTotalWrittenBytes
+		if maxHotStoreRegionCount == s.RegionsStat.Len() && maxWritten < s.TotalWrittenBytes {
+			maxWritten = s.TotalWrittenBytes
 			sourceStore = sid
 		}
 	}
@@ -594,25 +602,25 @@ func (l *balanceHotRegionScheduler) selectTransferPeer(sourceRegion *RegionInfo,
 // and then choose the least total written bytes store
 func (l *balanceHotRegionScheduler) selectBestStore(stores []uint64, sourceRegion *RegionInfo) uint64 {
 	sr := l.scoreStatus[sourceRegion.Leader.GetStoreId()]
-	sourceStoreWrittenBytes := sr.StoreTotalWrittenBytes
-	sourceStoreHotRegionsNumber := sr.RegionsStat.Len()
+	sourceStoreWrittenBytes := sr.TotalWrittenBytes
+	sourceStoreHotRegionCount := sr.RegionsStat.Len()
 
 	var (
 		targetStore     uint64
 		minWrittenBytes uint64 = math.MaxUint64
 	)
-	minRegionsNumber := int(math.MaxInt32)
+	minRegionCount := int(math.MaxInt32)
 	for _, store := range stores {
 		if s, ok := l.scoreStatus[store]; ok {
-			if sourceStoreHotRegionsNumber-s.RegionsStat.Len() > 1 && minRegionsNumber > s.RegionsStat.Len() {
+			if sourceStoreHotRegionCount-s.RegionsStat.Len() > 1 && minRegionCount > s.RegionsStat.Len() {
 				targetStore = store
-				minWrittenBytes = s.StoreTotalWrittenBytes
-				minRegionsNumber = s.RegionsStat.Len()
+				minWrittenBytes = s.TotalWrittenBytes
+				minRegionCount = s.RegionsStat.Len()
 				continue
 			}
-			if minRegionsNumber == s.RegionsStat.Len() && minWrittenBytes > s.StoreTotalWrittenBytes &&
-				uint64(float64(sourceStoreWrittenBytes)*hotRegionScheduleFactor) > s.StoreTotalWrittenBytes+2*sourceRegion.WrittenBytes {
-				minWrittenBytes = s.StoreTotalWrittenBytes
+			if minRegionCount == s.RegionsStat.Len() && minWrittenBytes > s.TotalWrittenBytes &&
+				uint64(float64(sourceStoreWrittenBytes)*hotRegionScheduleFactor) > s.TotalWrittenBytes+2*sourceRegion.WrittenBytes {
+				minWrittenBytes = s.TotalWrittenBytes
 				targetStore = store
 			}
 

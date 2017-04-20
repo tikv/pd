@@ -784,10 +784,6 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	tc.updateStorageWrittenBytes(3, 0)
 
 	// Add 3 regions
-	// region_id  leader_store follower_store follower_store  written_bytes
-	//	      1        1              2              3           479516
-	//	      2        1              2              -           418115
-	//	      3        1              2              3             0
 	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
 	//|-----------|--------------|----------------|----------------|---------------|
 	//|     1     |       1      |        2       |       3        |     479516    |
@@ -816,7 +812,7 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	tc.addLeaderRegionWithWriteInfo(5, 3, 120314*regionHeartBeatReportInterval, 1, 2)
 	checkTransferPeer(c, hb.Schedule(cluster), 1, 4)
 
-	// Test CalculateScore.
+	// Test calculateScore.
 	// hot region in store like
 	//| store_id | hot_region_numbers |
 	//|----------|--------------------|
@@ -832,9 +828,9 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 		{2, 1},
 		{3, 1},
 	}
-	hb.CalculateScore(tc.clusterInfo)
+	hb.calculateScore(tc.clusterInfo)
 	for _, e := range expect {
-		c.Assert(hb.scoreStatus[uint64(e.streID)].RegionsNumber, Equals, e.hotRegionNumber)
+		c.Assert(hb.scoreStatus[uint64(e.streID)].RegionCount, Equals, e.hotRegionNumber)
 	}
 
 	// Test adjustLimit
@@ -853,7 +849,7 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	tc.addLeaderRegionWithWriteInfo(8, 1, 122154*regionHeartBeatReportInterval, 2, 3)
 	tc.addLeaderRegionWithWriteInfo(9, 1, 122345*regionHeartBeatReportInterval, 2, 3)
 	tc.addLeaderRegionWithWriteInfo(10, 1, 132254*regionHeartBeatReportInterval, 2, 3)
-	hb.CalculateScore(tc.clusterInfo)
+	hb.calculateScore(tc.clusterInfo)
 
 	// Select a source region and will ajust limit according to source
 	r := hb.SelectSourceRegion(tc.clusterInfo)

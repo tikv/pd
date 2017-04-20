@@ -472,7 +472,7 @@ func (c *clusterInfo) getStoresWriteStat() map[uint64]uint64 {
 	return res
 }
 
-func (c *clusterInfo) getClusterTotalWrittenBytesNoLock() uint64 {
+func (c *clusterInfo) getClusterTotalWrittenBytes() uint64 {
 	var totalWrittenBytes uint64
 	for _, s := range c.stores.getStores() {
 		if s.isUp() {
@@ -724,7 +724,8 @@ func (c *clusterInfo) updateWriteStatus(region *RegionInfo) {
 	// suppose the number of the hot regions is writeStatLRUMaxLen
 	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot regions
 	// divide 2 because the store reports data about two times than the region record write to rocksdb
-	hotRegionThreshold := uint64(float64(c.getClusterTotalWrittenBytesNoLock()) / float64(writeStatLRUMaxLen) / 2 / storeHeartBeatReportInterval)
+	divisor := float64(writeStatLRUMaxLen) * 2 * storeHeartBeatReportInterval
+	hotRegionThreshold := uint64(float64(c.getClusterTotalWrittenBytes()) / divisor)
 
 	if hotRegionThreshold < hotRegionMinWriteRate {
 		hotRegionThreshold = hotRegionMinWriteRate
