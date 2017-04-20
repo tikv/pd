@@ -244,7 +244,6 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			return errors.Trace(err)
 		}
 
-		log.Infof("[RegionHeartbeat]: request %+v", request)
 		// TODO: should we check headers here?
 
 		resp := &pdpb.RegionHeartbeatResponse{}
@@ -317,7 +316,6 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		resp.RegionEpoch = request.Region.RegionEpoch
 		resp.TargetPeer = request.Leader
 
-		log.Infof("[RegionHeartbeat]: response %+v", resp)
 		if err := stream.Send(resp); err != nil {
 			return errors.Trace(err)
 		}
