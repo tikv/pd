@@ -115,12 +115,10 @@ import:
   - pbutil
 - package: github.com/ngaut/deadline
   version: fae8f9dfd7048de16575b9d4c255278e38c28a4f
-- package: github.com/ngaut/log
-  version: cec23d3e10b016363780d894a0eb732a12c06e02
 - package: github.com/pingcap/check
   version: ce8a2f822ab1e245a4eefcef2996531c79c943f1
 - package: github.com/pingcap/kvproto
-  version: 0811f27579a1070546c4d5496bf3f6fa62cec750 
+  version: 0811f27579a1070546c4d5496bf3f6fa62cec750
   subpackages:
   - pkg/coprocessor
   - pkg/eraftpb
@@ -201,11 +199,9 @@ import:
   repo: https://github.com/spf13/cobra.git
   vcs: git
 - package: github.com/chzyer/readline
-  version: c914be64f07d9998f52bf0d598ec26d457168c0f 
+  version: c914be64f07d9998f52bf0d598ec26d457168c0f
 - package: github.com/dustin/go-humanize
   version: 7a41df006ff9af79a29f0ffa9c5f21fbe6314a2d
 - package: github.com/elazarl/go-bindata-assetfs
-- package: github.com/ngaut/systimemon
-  version: c2ca1c75c6af5556eb6ce67994120adf12f2ccef
 - package: github.com/montanaflynn/stats
   version: f8cd06f93c6c1b06028caafb88b540fc820f77c1
