@@ -73,20 +73,25 @@ func cleanServer(cfg *server.Config) {
 type cleanupFunc func()
 
 type testClientSuite struct {
-	srv          *server.Server
-	client       Client
-	grpcPDClient pdpb.PDClient
-	cleanup      cleanupFunc
+	cleanup cleanupFunc
+
+	srv             *server.Server
+	client          Client
+	grpcPDClient    pdpb.PDClient
+	regionHeartbeat pdpb.PD_RegionHeartbeatClient
 }
 
 func (s *testClientSuite) SetUpSuite(c *C) {
 	s.srv, s.cleanup = newServer(c)
 	s.grpcPDClient = mustNewGrpcClient(c, s.srv.GetAddr())
 
+	var err error
+	s.regionHeartbeat, err = s.grpcPDClient.RegionHeartbeat(context.Background())
+	c.Assert(err, IsNil)
+
 	mustWaitLeader(c, map[string]*server.Server{s.srv.GetAddr(): s.srv})
 	bootstrapServer(c, newHeader(s.srv), s.grpcPDClient)
 
-	var err error
 	s.client, err = NewClient(s.srv.GetEndpoints())
 	c.Assert(err, IsNil)
 }
@@ -181,7 +186,8 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 		Region: region,
 		Leader: peer,
 	}
-	s.grpcPDClient.RegionHeartbeat(context.Background(), req)
+	err := s.regionHeartbeat.Send(req)
+	c.Assert(err, IsNil)
 
 	r, leader, err := s.client.GetRegion(context.Background(), []byte("a"))
 	c.Assert(err, IsNil)
@@ -195,7 +201,8 @@ func (s *testClientSuite) TestGetRegionByID(c *C) {
 		Region: region,
 		Leader: peer,
 	}
-	s.grpcPDClient.RegionHeartbeat(context.Background(), req)
+	err := s.regionHeartbeat.Send(req)
+	c.Assert(err, IsNil)
 
 	r, leader, err := s.client.GetRegionByID(context.Background(), 3)
 	c.Assert(err, IsNil)

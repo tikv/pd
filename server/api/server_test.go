@@ -189,14 +189,17 @@ func mustPutStore(c *C, s *server.Server, store *metapb.Store) {
 	c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_OK)
 }
 
-func mustRegionHeartBeat(c *C, s *server.Server, region *server.RegionInfo) {
-	grpcPDClient := mustNewGrpcClient(c, s.GetAddr())
+func mustRegionHeartBeat(c *C, client pdpb.PD_RegionHeartbeatClient, clusterID uint64, region *server.RegionInfo) {
 	req := &pdpb.RegionHeartbeatRequest{
-		Header: newRequestHeader(s.ClusterID()),
+		Header: newRequestHeader(clusterID),
 		Region: region.Region,
 		Leader: region.Leader,
 	}
-	resp, err := grpcPDClient.RegionHeartbeat(context.Background(), req)
+
+	// FIXME: it may out of order in the future.
+	err := client.Send(req)
+	c.Assert(err, IsNil)
+	resp, err := client.Recv()
 	c.Assert(err, IsNil)
 	c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_OK)
 }
