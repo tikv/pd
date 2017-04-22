@@ -20,7 +20,6 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"golang.org/x/net/context"
@@ -81,7 +80,7 @@ func (s *testLeaderChangeSuite) TestLeaderConfigChange(c *C) {
 	c.Assert(err, IsNil)
 	defer cli.Close()
 
-	leader := s.mustGetLeader(c, endpoints)
+	leader := s.mustGetLeader(c, cli.(*client), endpoints)
 	s.verifyLeader(c, cli.(*client), leader)
 
 	r := server.ReplicationConfig{MaxReplicas: 5}
@@ -91,7 +90,7 @@ func (s *testLeaderChangeSuite) TestLeaderConfigChange(c *C) {
 	changed := false
 	for i := 0; i < 20; i++ {
 		mustWaitLeader(c, svrs)
-		newLeader := s.mustGetLeader(c, endpoints)
+		newLeader := s.mustGetLeader(c, cli.(*client), endpoints)
 		if newLeader != leader {
 			s.verifyLeader(c, cli.(*client), newLeader)
 			changed = true
@@ -115,14 +114,14 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	p1, l1, err := cli.GetTS(context.Background())
 	c.Assert(err, IsNil)
 
-	leader := s.mustGetLeader(c, endpoints)
+	leader := s.mustGetLeader(c, cli.(*client), endpoints)
 	s.verifyLeader(c, cli.(*client), leader)
 
 	svrs[leader].Close()
 	delete(svrs, leader)
 
 	mustWaitLeader(c, svrs)
-	newLeader := s.mustGetLeader(c, endpoints)
+	newLeader := s.mustGetLeader(c, cli.(*client), endpoints)
 	c.Assert(newLeader, Not(Equals), leader)
 	s.verifyLeader(c, cli.(*client), newLeader)
 
@@ -187,17 +186,13 @@ func (s *testLeaderChangeSuite) makeTS(physical, logical int64) uint64 {
 	return uint64(physical<<18 + logical)
 }
 
-func (s *testLeaderChangeSuite) mustGetLeader(c *C, urls []string) string {
+func (s *testLeaderChangeSuite) mustGetLeader(c *C, cli *client, urls []string) string {
 	for _, u := range urls {
-		client, err := apiutil.NewClient(u, pdTimeout)
-		if err != nil {
+		members, err := cli.getMembers(context.Background(), u)
+		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
 			continue
 		}
-		leader, err := client.GetLeader()
-		if err != nil {
-			continue
-		}
-		return leader.GetClientUrls()[0]
+		return members.GetLeader().GetClientUrls()[0]
 	}
 	c.Fatal("failed get leader")
 	return ""

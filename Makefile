@@ -20,11 +20,6 @@ all: dev install
 
 dev: build check test
 
-build-fe:
-	go get github.com/jteeuwen/go-bindata/...
-	go get github.com/elazarl/go-bindata-assetfs/...
-	cd server/api && go-bindata-assetfs -pkg api templates/... && cd -
-
 build:
 	rm -rf vendor && ln -s _vendor/vendor vendor
 	$(GO) build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
