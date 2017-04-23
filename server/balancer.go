@@ -384,18 +384,18 @@ type RegionStat struct {
 	version        uint64
 }
 
-// ListRegionsStat is a list of a group region state type
-type ListRegionsStat []RegionStat
+// RegionsStat is a list of a group region state type
+type RegionsStat []RegionStat
 
-func (m ListRegionsStat) Len() int           { return len(m) }
-func (m ListRegionsStat) Swap(i, j int)      { m[i], m[j] = m[j], m[i] }
-func (m ListRegionsStat) Less(i, j int) bool { return m[i].WrittenBytes < m[j].WrittenBytes }
+func (m RegionsStat) Len() int           { return len(m) }
+func (m RegionsStat) Swap(i, j int)      { m[i], m[j] = m[j], m[i] }
+func (m RegionsStat) Less(i, j int) bool { return m[i].WrittenBytes < m[j].WrittenBytes }
 
 // StoreHotRegions records all hot regions in one store with sequence
 type StoreHotRegions struct {
-	TotalWrittenBytes uint64          `json:"total_written"`
-	RegionCount       int             `json:"region_count"`
-	RegionsStat       ListRegionsStat `json:"status"`
+	TotalWrittenBytes uint64      `json:"total_written"`
+	RegionCount       int         `json:"region_count"`
+	RegionsStat       RegionsStat `json:"stats"`
 }
 
 type balanceHotRegionScheduler struct {
@@ -447,11 +447,8 @@ func (l *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 	return nil
 }
 
-func (l *balanceHotRegionScheduler) clearScore() {
-	l.scoreStatus = make(map[uint64]*StoreHotRegions)
-}
 func (l *balanceHotRegionScheduler) calculateScore(cluster *clusterInfo) {
-	l.clearScore()
+	l.scoreStatus = make(map[uint64]*StoreHotRegions)
 	items := cluster.writeStatistics.elems()
 	for _, item := range items {
 		r, ok := item.value.(RegionStat)
@@ -467,7 +464,7 @@ func (l *balanceHotRegionScheduler) calculateScore(cluster *clusterInfo) {
 		status, ok := l.scoreStatus[storeID]
 		if !ok {
 			status = &StoreHotRegions{
-				RegionsStat: make(ListRegionsStat, 0, 100),
+				RegionsStat: make(RegionsStat, 0, 100),
 			}
 			l.scoreStatus[storeID] = status
 		}
@@ -573,12 +570,15 @@ func (l *balanceHotRegionScheduler) selectTransferLeader(sourceRegion *RegionInf
 }
 
 func (l *balanceHotRegionScheduler) selectTransferPeer(sourceRegion *RegionInfo, cluster *clusterInfo) *metapb.Peer {
-	filter := newExcludedFilter(sourceRegion.GetStoreIds(), sourceRegion.GetStoreIds())
+	var filters []Filter
 	stores := cluster.getStores()
+
+	filters = append(filters, newExcludedFilter(sourceRegion.GetStoreIds(), sourceRegion.GetStoreIds()))
+	filters = append(filters, newDistinctScoreFilter(l.opt.GetReplication(), stores, cluster.getLeaderStore(sourceRegion)))
 
 	storeIDs := make([]uint64, 0, len(stores))
 	for _, store := range stores {
-		if filter.FilterTarget(store) {
+		if filterTarget(store, filters) {
 			continue
 		}
 		storeIDs = append(storeIDs, store.GetId())

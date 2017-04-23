@@ -488,12 +488,12 @@ func (c *clusterInfo) getRegion(regionID uint64) *RegionInfo {
 	return c.regions.getRegion(regionID)
 }
 
-// updateWriteStatCache removes those cold down regions and updates hot regions
+// updateWriteStatCache updates statistic for a region if it's hot, or remove it from statistics if it cools down
 func (c *clusterInfo) updateWriteStatCache(region *RegionInfo, hotRegionThreshold uint64) {
-	var v RegionStat
+	var v *RegionStat
 	key := region.GetId()
 	value, isExist := c.writeStatistics.peek(key)
-	newItem := RegionStat{
+	newItem := &RegionStat{
 		RegionID:       region.GetId(),
 		WrittenBytes:   region.WrittenBytes,
 		LastUpdateTime: time.Now(),
@@ -503,13 +503,12 @@ func (c *clusterInfo) updateWriteStatCache(region *RegionInfo, hotRegionThreshol
 	}
 
 	if isExist {
-		v = value.(RegionStat)
+		v = value.(*RegionStat)
 		newItem.HotDegree = v.HotDegree + 1
 	}
 
 	if region.WrittenBytes < hotRegionThreshold {
 		if !isExist {
-			c.writeStatistics.remove(key)
 			return
 		}
 		if v.antiCount <= 0 {
@@ -604,6 +603,13 @@ func (c *clusterInfo) getRegionStores(region *RegionInfo) []*storeInfo {
 		}
 	}
 	return stores
+}
+
+func (c *clusterInfo) getLeaderStore(region *RegionInfo) *storeInfo {
+	c.RLock()
+	defer c.RUnlock()
+	return c.stores.getStore(region.Leader.GetStoreId())
+
 }
 
 func (c *clusterInfo) getFollowerStores(region *RegionInfo) []*storeInfo {
