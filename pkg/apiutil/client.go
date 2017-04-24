@@ -82,7 +82,7 @@ func init() {
 	httpClient := &http.Client{
 		Timeout: apiClientTimeout,
 	}
-	unixClinet := &http.Client{
+	unixClient := &http.Client{
 		Timeout: apiClientTimeout,
 		Transport: &http.Transport{
 			Dial: func(_, addr string) (net.Conn, error) {
@@ -94,7 +94,7 @@ func init() {
 	clients = map[string]*http.Client{
 		"http":  httpClient,
 		"https": httpClient,
-		"unix":  unixClinet,
-		"unixs": unixClinet,
+		"unix":  unixClient,
+		"unixs": unixClient,
 	}
 }
