@@ -376,13 +376,17 @@ func (r *replicaChecker) checkBestReplacement(region *RegionInfo) Operator {
 
 // RegionStat records each hot region's statistics
 type RegionStat struct {
-	RegionID       uint64    `json:"region_id"`
-	WrittenBytes   uint64    `json:"written_bytes"`
-	HotDegree      int       `json:"hot_degree"`
+	RegionID     uint64 `json:"region_id"`
+	WrittenBytes uint64 `json:"written_bytes"`
+	// HotDegree records the hot region update times
+	HotDegree int `json:"hot_degree"`
+	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
 	StoreID        uint64    `json:"-"`
-	antiCount      int
-	version        uint64
+	// antiCount used to eliminate some noise when remove region in cache
+	antiCount int
+	// version used to check the region split times
+	version uint64
 }
 
 // RegionsStat is a list of a group region state type
