@@ -21,21 +21,21 @@ import (
 )
 
 type hotStatusHandler struct {
-	svr *server.Server
-	rd  *render.Render
+	*server.Handler
+	rd *render.Render
 }
 
-func newHotStatusHandler(svr *server.Server, rd *render.Render) *hotStatusHandler {
+func newHotStatusHandler(handler *server.Handler, rd *render.Render) *hotStatusHandler {
 	return &hotStatusHandler{
-		svr: svr,
-		rd:  rd,
+		Handler: handler,
+		rd:      rd,
 	}
 }
 
 func (h *hotStatusHandler) GetHotRegions(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, h.svr.GetHotRegions())
+	h.rd.JSON(w, http.StatusOK, h.GetHotWriteRegions())
 }
 
 func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, h.svr.GetHotStores())
+	h.rd.JSON(w, http.StatusOK, h.GetHotWriteStores())
 }

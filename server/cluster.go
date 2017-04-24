@@ -120,20 +120,6 @@ func (c *RaftCluster) isRunning() bool {
 	return c.running
 }
 
-// GetHotRegions gets all hot regions status
-func (s *Server) GetHotRegions() map[uint64]*StoreHotRegions {
-	schedule, ok := s.cluster.coordinator.schedulers[hotRegionScheduleName]
-	if !ok {
-		return nil
-	}
-	return schedule.Scheduler.(*balanceHotRegionScheduler).GetStatus()
-}
-
-// GetHotStores gets all hot stores status
-func (s *Server) GetHotStores() map[uint64]uint64 {
-	return s.cluster.cachedCluster.getStoresWriteStat()
-}
-
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *Config {
 	cfg := s.cfg.clone()

@@ -117,6 +117,16 @@ func (c *coordinator) stop() {
 	c.wg.Wait()
 }
 
+func (c *coordinator) getScheduler(name string) Scheduler {
+	c.RLock()
+	defer c.RUnlock()
+	scheduler, ok := c.schedulers[name]
+	if !ok {
+		return nil
+	}
+	return scheduler
+}
+
 func (c *coordinator) getSchedulers() []string {
 	c.RLock()
 	defer c.RUnlock()

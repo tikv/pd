@@ -60,7 +60,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/labels", labelsHandler.Get).Methods("GET")
 	router.HandleFunc("/api/v1/labels/stores", labelsHandler.GetStores).Methods("GET")
 
-	hotStatusHandler := newHotStatusHandler(svr, rd)
+	hotStatusHandler := newHotStatusHandler(handler, rd)
 	router.HandleFunc("/api/v1/hotspot/regions", hotStatusHandler.GetHotRegions).Methods("GET")
 	router.HandleFunc("/api/v1/hotspot/stores", hotStatusHandler.GetHotStores).Methods("GET")
 
