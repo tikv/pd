@@ -20,8 +20,21 @@ tso-save-interval = "3s"
 [log]
 level = "info"
 
-#[log.file]
+# log format, one of json, text, console
+#format = "text"
+
+# disable automatic timestamps in output
+#disable-timestamp = false
+
+# file logging
+[log.file]
 #filename = ""
+# max log file size in MB
+#max-size = 300
+# max log file keep days
+#max-days = 28
+# maximum number of old log files to retain
+#max-backups = 7
 
 [metric]
 # prometheus client push interval, set "0s" to disable prometheus.
