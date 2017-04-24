@@ -560,7 +560,7 @@ func (l *balanceHotRegionScheduler) GetStatus() map[uint64]*StoreHotRegions {
 	l.RLock()
 	defer l.RUnlock()
 	status := make(map[uint64]*StoreHotRegions)
-	for id, stat := range status {
+	for id, stat := range l.scoreStatus {
 		clone := *stat
 		status[id] = &clone
 	}

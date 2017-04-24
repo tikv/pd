@@ -716,7 +716,7 @@ func (c *clusterInfo) updateWriteStatus(region *RegionInfo) {
 	var WrittenBytesPerSec uint64
 	v, isExist := c.writeStatistics.peek(region.GetId())
 	if isExist {
-		interval := time.Now().Sub(v.(RegionStat).LastUpdateTime).Seconds()
+		interval := time.Now().Sub(v.(*RegionStat).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
 			return
 		}
