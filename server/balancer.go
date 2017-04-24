@@ -17,6 +17,7 @@ import (
 	"math"
 	"math/rand"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/montanaflynn/stats"
@@ -399,6 +400,7 @@ type StoreHotRegions struct {
 }
 
 type balanceHotRegionScheduler struct {
+	sync.RWMutex
 	opt         *scheduleOption
 	limit       uint64
 	scoreStatus map[uint64]*StoreHotRegions // store id -> regions status in this store
@@ -448,10 +450,12 @@ func (l *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 }
 
 func (l *balanceHotRegionScheduler) calculateScore(cluster *clusterInfo) {
+	l.Lock()
+	defer l.Unlock()
 	l.scoreStatus = make(map[uint64]*StoreHotRegions)
 	items := cluster.writeStatistics.elems()
 	for _, item := range items {
-		r, ok := item.value.(RegionStat)
+		r, ok := item.value.(*RegionStat)
 		if !ok {
 			continue
 		}
@@ -549,6 +553,8 @@ func (l *balanceHotRegionScheduler) adjustBalanceLimit(storeID uint64) {
 }
 
 func (l *balanceHotRegionScheduler) GetStatus() map[uint64]*StoreHotRegions {
+	l.RLock()
+	defer l.RUnlock()
 	return l.scoreStatus
 }
 
@@ -575,6 +581,8 @@ func (l *balanceHotRegionScheduler) selectTransferPeer(sourceRegion *RegionInfo,
 
 	filters = append(filters, newExcludedFilter(sourceRegion.GetStoreIds(), sourceRegion.GetStoreIds()))
 	filters = append(filters, newDistinctScoreFilter(l.opt.GetReplication(), stores, cluster.getLeaderStore(sourceRegion)))
+	filters = append(filters, newStateFilter(l.opt))
+	filters = append(filters, newStorageThresholdFilter(l.opt))
 
 	storeIDs := make([]uint64, 0, len(stores))
 	for _, store := range stores {
