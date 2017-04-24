@@ -14,6 +14,7 @@
 package apiutil
 
 import (
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -23,7 +24,8 @@ import (
 )
 
 const (
-	apiPrefix = "/pd/api/v1"
+	apiPrefix        = "/pd/api/v1"
+	apiClientTimeout = time.Second * 3
 )
 
 // Client is a client to access PD APIs.
@@ -33,7 +35,7 @@ type Client struct {
 }
 
 // NewClient returns a client to access PD APIs.
-func NewClient(addr string, timeout time.Duration) (*Client, error) {
+func NewClient(addr string) (*Client, error) {
 	u, err := url.Parse(addr)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -45,8 +47,13 @@ func NewClient(addr string, timeout time.Duration) (*Client, error) {
 		u.Scheme = "http"
 	}
 
+	hc := clients[scheme]
+	if hc == nil {
+		hc = clients["http"]
+	}
+
 	client := &Client{
-		hc:  NewHTTPClient(scheme, timeout),
+		hc:  hc,
 		url: u.String(),
 	}
 	return client, nil
@@ -67,4 +74,27 @@ func (c *Client) GetLeader() (*pdpb.Leader, error) {
 		return nil, errors.Trace(err)
 	}
 	return leader, nil
+}
+
+var clients map[string]*http.Client
+
+func init() {
+	httpClient := &http.Client{
+		Timeout: apiClientTimeout,
+	}
+	unixClient := &http.Client{
+		Timeout: apiClientTimeout,
+		Transport: &http.Transport{
+			Dial: func(_, addr string) (net.Conn, error) {
+				return net.Dial("unix", addr)
+			},
+		},
+	}
+
+	clients = map[string]*http.Client{
+		"http":  httpClient,
+		"https": httpClient,
+		"unix":  unixClient,
+		"unixs": unixClient,
+	}
 }
