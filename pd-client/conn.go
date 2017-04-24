@@ -120,7 +120,7 @@ func (c *conn) connectLeader(urls []string, interval time.Duration) {
 
 func getLeader(urls []string) (*pdpb.Leader, error) {
 	for _, u := range urls {
-		client, err := apiutil.NewClient(u, connectPDTimeout)
+		client, err := apiutil.NewClient(u)
 		if err != nil {
 			continue
 		}
