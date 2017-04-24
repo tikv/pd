@@ -1,5 +1,7 @@
 machine:
   environment:
+    GITHUB_PROJECT_USERNAME: pingcap
+    GITHUB_PROJECT_REPONAME: pd
     GODIST: "go1.7.3.linux-amd64.tar.gz"
     GITHUB_PROJECT_USERNAME: pingcap
     GITHUB_PROJECT_REPONAME: pd
