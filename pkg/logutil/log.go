@@ -40,11 +40,11 @@ const (
 type FileLogConfig struct {
 	// Log filename, leave empty to disable file log.
 	Filename string `toml:"filename" json:"filename"`
-	// Is log rotate enabled. TODO
+	// Is log rotate enabled. TODO.
 	LogRotate bool `toml:"log-rotate" json:"log-rotate"`
-	// Max size for a single file, in MB
+	// Max size for a single file, in MB.
 	MaxSize int `toml:"max-size" json:"max-size"`
-	// Max log keep days, default is never deleting
+	// Max log keep days, default is never deleting.
 	MaxDays int `toml:"max-days" json:"max-days"`
 	// Maximum number of old log files to retain.
 	MaxBackups int `toml:"max-backups" json:"max-backups"`
@@ -155,7 +155,7 @@ func (f *textFormatter) Format(entry *log.Entry) ([]byte, error) {
 		b = &bytes.Buffer{}
 	}
 	if !f.DisableTimestamp {
-		fmt.Fprintf(b, " %s", entry.Time.Format(defaultLogTimeFormat))
+		fmt.Fprintf(b, "%s ", entry.Time.Format(defaultLogTimeFormat))
 	}
 	if file, ok := entry.Data["file"]; ok {
 		fmt.Fprintf(b, "%s:%v:", file, entry.Data["line"])
