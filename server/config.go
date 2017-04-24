@@ -114,7 +114,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
 
 	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
-	fs.StringVar(&cfg.Log.Filename, "log-file", "", "log file path")
+	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 
 	return cfg
 }
@@ -184,9 +184,9 @@ func (c *Config) Parse(arguments []string) error {
 		}
 
 		// Backward compatibility for toml config
-		if c.LogFileDeprecated != "" && c.Log.Filename == "" {
-			c.Log.Filename = c.LogFileDeprecated
-			msg := fmt.Sprintf("log-file in %s is deprecated, use [log] instead", c.configFile)
+		if c.LogFileDeprecated != "" && c.Log.File.Filename == "" {
+			c.Log.File.Filename = c.LogFileDeprecated
+			msg := fmt.Sprintf("log-file in %s is deprecated, use [log.file] instead", c.configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 		}
 		if c.LogLevelDeprecated != "" && c.Log.Level == "" {

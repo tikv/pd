@@ -53,7 +53,7 @@ func (s *testLogSuite) TestStringToLogLevel(c *C) {
 
 // TestLogging assure log format and log redirection works.
 func (s *testLogSuite) TestLogging(c *C) {
-	conf := &LogConfig{Level: "warn", Filename: ""}
+	conf := &LogConfig{Level: "warn", File: FileLogConfig{}}
 	c.Assert(InitLogger(conf), IsNil)
 
 	log.SetOutput(s.buf)

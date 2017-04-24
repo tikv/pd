@@ -19,7 +19,9 @@ tso-save-interval = "3s"
 
 [log]
 level = "info"
-#file = ""
+
+#[log.file]
+#filename = ""
 
 [metric]
 # prometheus client push interval, set "0s" to disable prometheus.

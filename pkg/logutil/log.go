@@ -37,12 +37,17 @@ const (
 	logDirMode = 0755
 )
 
+// FileLogConfig serializes file log related config in toml/json.
+type FileLogConfig struct {
+	Filename string `toml:"filename" json:"filename"`
+}
+
 // LogConfig serializes log related config in toml/json.
 type LogConfig struct {
 	// Log level.
 	Level string `toml:"level" json:"level"`
 	// Log file.
-	Filename string `toml:"file" json:"file"`
+	File FileLogConfig `toml:"file" json:"file"`
 }
 
 // redirectFormatter will redirect etcd logs to logrus logs.
@@ -189,11 +194,11 @@ func InitLogger(cfg *LogConfig) error {
 	// etcd log
 	capnslog.SetFormatter(&redirectFormatter{})
 
-	if len(cfg.Filename) == 0 {
+	if len(cfg.File.Filename) == 0 {
 		return nil
 	}
 
-	err := setLogOutput(cfg.Filename)
+	err := setLogOutput(cfg.File.Filename)
 	if err != nil {
 		return errors.Trace(err)
 	}
