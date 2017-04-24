@@ -555,7 +555,12 @@ func (l *balanceHotRegionScheduler) adjustBalanceLimit(storeID uint64) {
 func (l *balanceHotRegionScheduler) GetStatus() map[uint64]*StoreHotRegions {
 	l.RLock()
 	defer l.RUnlock()
-	return l.scoreStatus
+	status := make(map[uint64]*StoreHotRegions)
+	for id, stat := range status {
+		clone := *stat
+		status[id] = &clone
+	}
+	return status
 }
 
 func (l *balanceHotRegionScheduler) selectTransferLeader(sourceRegion *RegionInfo) *metapb.Peer {
