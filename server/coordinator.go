@@ -117,14 +117,14 @@ func (c *coordinator) stop() {
 	c.wg.Wait()
 }
 
-func (c *coordinator) getScheduler(name string) Scheduler {
+func (c *coordinator) getHotWriteRegions() map[uint64]*StoreHotRegions {
 	c.RLock()
 	defer c.RUnlock()
-	scheduler, ok := c.schedulers[name]
+	s, ok := c.schedulers[hotRegionScheduleName]
 	if !ok {
 		return nil
 	}
-	return scheduler
+	return s.Scheduler.(*balanceHotRegionScheduler).GetStatus()
 }
 
 func (c *coordinator) getSchedulers() []string {

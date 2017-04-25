@@ -53,11 +53,7 @@ func (h *Handler) GetHotWriteRegions() map[uint64]*StoreHotRegions {
 	if err != nil {
 		return nil
 	}
-	s := c.getScheduler(hotRegionScheduleName)
-	if s == nil {
-		return nil
-	}
-	return s.(*balanceHotRegionScheduler).GetStatus()
+	return c.getHotWriteRegions()
 }
 
 // GetHotWriteStores gets all hot write stores status
