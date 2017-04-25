@@ -32,8 +32,6 @@ const (
 	defaultLogMaxSize    = 300 // MB
 	defaultLogFormat     = "text"
 	defaultLogLevel      = log.InfoLevel
-
-	logDirMode = 0755
 )
 
 // FileLogConfig serializes file log related config in toml/json.
@@ -194,18 +192,11 @@ func stringToLogFormatter(format string, disableTimestamp bool) log.Formatter {
 
 // InitFileLog initializes file based logging options.
 func InitFileLog(cfg *FileLogConfig) error {
-	// PD log
 	if st, err := os.Stat(cfg.Filename); err == nil {
 		if st.IsDir() {
 			return errors.New("can't use directory as log file name")
 		}
 	}
-	dir := path.Dir(cfg.Filename)
-	err := os.MkdirAll(dir, logDirMode)
-	if err != nil {
-		return err
-	}
-
 	if cfg.MaxSize == 0 {
 		cfg.MaxSize = defaultLogMaxSize
 	}
@@ -217,11 +208,6 @@ func InitFileLog(cfg *FileLogConfig) error {
 		MaxBackups: cfg.MaxBackups,
 		MaxAge:     cfg.MaxDays,
 		LocalTime:  true,
-	}
-
-	if _, err := output.Write([]byte{}); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to write to log, %v\n", err)
-		return errors.Errorf("log file is not writable: %v", err)
 	}
 
 	log.SetOutput(output)
