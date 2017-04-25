@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ngaut/log"
+	log "github.com/Sirupsen/logrus"
 )
 
 type cacheItem struct {
