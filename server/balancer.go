@@ -472,7 +472,7 @@ func (h *balanceHotRegionScheduler) calculateScore(cluster *clusterInfo) {
 		status, ok := h.scoreStatus[storeID]
 		if !ok {
 			status = &StoreHotRegions{
-				RegionsStat: make(RegionsStat, 0, 100),
+				RegionsStat: make(RegionsStat, 0, storeHotRegionsDefaultLen),
 			}
 			h.scoreStatus[storeID] = status
 		}
@@ -528,7 +528,7 @@ func (h *balanceHotRegionScheduler) SelectSourceRegion(cluster *clusterInfo) *Re
 	// the hottest region in the store not move
 	// randomly pick a region from 1 .. length-1
 	// TODO: consider hot degree when pick
-	rr := h.r.Int31n(int32(length-1)) + 1
+	rr := h.r.Intn(length-1) + 1
 	pickedRegionStat := h.scoreStatus[sourceStore].RegionsStat[rr]
 	if pickedRegionStat.antiCount < hotRegionAntiCount {
 		return nil
@@ -551,8 +551,8 @@ func (h *balanceHotRegionScheduler) adjustBalanceLimit(storeID uint64) {
 	}
 
 	avgRegionCount := hotRegionTotalCount / float64(len(h.scoreStatus))
-	// Multiplied by 0.75 to avoid transfer back and forth
-	limit := uint64((float64(s.RegionsStat.Len()) - avgRegionCount) * 0.75)
+	// Multiplied by hotRegionLimitCoeff to avoid transfer back and forth
+	limit := uint64((float64(s.RegionsStat.Len()) - avgRegionCount) * hotRegionLimitCoeff)
 	h.limit = maxUint64(1, limit)
 }
 
