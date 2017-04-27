@@ -34,7 +34,7 @@ const (
 
 	writeStatLRUMaxLen            = 1000
 	storeHotRegionsDefaultLen     = 100
-	hotRegionLimitCoeff           = 0.75
+	hotRegionLimitFactor          = 0.75
 	hotRegionScheduleFactor       = 0.9
 	hotRegionMinWriteRate         = 16 * 1024
 	regionHeartBeatReportInterval = 60
