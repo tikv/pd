@@ -211,6 +211,46 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	c.Assert(co.dispatch(region), IsNil)
 }
 
+func (s *testCoordinatorSuite) TestShouldRun(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+
+	_, opt := newTestScheduleConfig()
+	co := newCoordinator(cluster, opt)
+
+	tc.LoadRegion(1, 1, 2, 3)
+	tc.LoadRegion(2, 1, 2, 3)
+	tc.LoadRegion(3, 1, 2, 3)
+	tc.LoadRegion(4, 1, 2, 3)
+	tc.LoadRegion(5, 1, 2, 3)
+	c.Assert(co.shouldRun(), IsFalse)
+
+	r1 := tc.getRegion(1)
+	r1.Leader = r1.Peers[0]
+	tc.handleRegionHeartbeat(r1)
+	c.Assert(co.shouldRun(), IsFalse)
+
+	r2 := tc.getRegion(2)
+	r2.Leader = r2.Peers[0]
+	tc.handleRegionHeartbeat(r2)
+	c.Assert(co.shouldRun(), IsFalse)
+
+	r3 := tc.getRegion(3)
+	r3.Leader = r3.Peers[0]
+	tc.handleRegionHeartbeat(r3)
+	c.Assert(co.shouldRun(), IsFalse)
+
+	r4 := tc.getRegion(4)
+	r4.Leader = r4.Peers[0]
+	tc.handleRegionHeartbeat(r4)
+	c.Assert(co.shouldRun(), IsTrue)
+
+	r5 := tc.getRegion(5)
+	r5.Leader = r5.Peers[0]
+	tc.handleRegionHeartbeat(r5)
+	c.Assert(co.shouldRun(), IsTrue)
+}
+
 func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)

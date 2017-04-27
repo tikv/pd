@@ -62,7 +62,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if err != nil {
 			return errors.Trace(err)
 		}
-		if err := s.validateRequest(request.GetHeader()); err != nil {
+		if err = s.validateRequest(request.GetHeader()); err != nil {
 			return errors.Trace(err)
 		}
 		count := request.GetCount()

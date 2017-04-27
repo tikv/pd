@@ -86,7 +86,7 @@ func (c *RaftCluster) start() error {
 	c.cachedCluster = cluster
 
 	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt)
-	c.coordinator.run()
+	go c.coordinator.run()
 
 	c.wg.Add(1)
 	c.quit = make(chan struct{})

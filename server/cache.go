@@ -332,6 +332,8 @@ type clusterInfo struct {
 	meta    *metapb.Cluster
 	stores  *storesInfo
 	regions *regionsInfo
+
+	reactiveRegions int
 }
 
 func newClusterInfo(id IDAllocator) *clusterInfo {
@@ -561,6 +563,12 @@ func (c *clusterInfo) getFollowerStores(region *RegionInfo) []*storeInfo {
 	return stores
 }
 
+func (c *clusterInfo) isClusterInfoFullReported() bool {
+	c.RLock()
+	defer c.RUnlock()
+	return float64(c.regions.regions.Len())*runSchedulerFactor <= float64(c.reactiveRegions)
+}
+
 // handleStoreHeartbeat updates the store status.
 func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.Lock()
@@ -615,6 +623,9 @@ func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
 		}
 		if region.Leader.GetId() != origin.Leader.GetId() {
 			log.Infof("[region %d] Leader changed from {%v} to {%v}", region.GetId(), origin.GetPeer(origin.Leader.GetId()), region.GetPeer(region.Leader.GetId()))
+			if origin.Leader.GetId() == 0 {
+				c.reactiveRegions++
+			}
 			saveCache = true
 		}
 		if len(region.DownPeers) > 0 || len(region.PendingPeers) > 0 {

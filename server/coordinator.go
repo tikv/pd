@@ -24,12 +24,14 @@ import (
 )
 
 const (
-	historiesCacheSize     = 1000
-	eventsCacheSize        = 1000
-	maxScheduleRetries     = 10
-	maxScheduleInterval    = time.Minute
-	minScheduleInterval    = time.Millisecond * 10
-	scheduleIntervalFactor = 1.3
+	runSchedulerCheckInterval = 3 * time.Second
+	runSchedulerFactor        = 0.8
+	historiesCacheSize        = 1000
+	eventsCacheSize           = 1000
+	maxScheduleRetries        = 10
+	maxScheduleInterval       = time.Minute
+	minScheduleInterval       = time.Millisecond * 10
+	scheduleIntervalFactor    = 1.3
 )
 
 var (
@@ -96,6 +98,17 @@ func (c *coordinator) dispatch(region *RegionInfo) *pdpb.RegionHeartbeatResponse
 }
 
 func (c *coordinator) run() {
+	ticker := time.NewTicker(runSchedulerCheckInterval)
+	defer ticker.Stop()
+	for {
+		if c.shouldRun() {
+			break
+		}
+		select {
+		case <-ticker.C:
+		}
+	}
+	log.Info("Run scheduler")
 	c.addScheduler(newBalanceLeaderScheduler(c.opt))
 	c.addScheduler(newBalanceRegionScheduler(c.opt))
 }
@@ -114,6 +127,10 @@ func (c *coordinator) getSchedulers() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+func (c *coordinator) shouldRun() bool {
+	return c.cluster.isClusterInfoFullReported()
 }
 
 func (c *coordinator) addScheduler(scheduler Scheduler) error {
