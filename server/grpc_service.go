@@ -248,6 +248,7 @@ func (s *Server) RegionHeartbeat(ctx context.Context, request *pdpb.RegionHeartb
 	region := newRegionInfo(request.GetRegion(), request.GetLeader())
 	region.DownPeers = request.GetDownPeers()
 	region.PendingPeers = request.GetPendingPeers()
+	region.WrittenBytes = request.GetBytesWritten()
 	if region.GetId() == 0 {
 		pberr := &pdpb.Error{
 			Type:    pdpb.ErrorType_UNKNOWN,

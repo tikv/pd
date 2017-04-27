@@ -186,6 +186,17 @@ func (c *lruCache) get(key uint64) (interface{}, bool) {
 	return nil, false
 }
 
+func (c *lruCache) peek(key uint64) (interface{}, bool) {
+	c.RLock()
+	defer c.RUnlock()
+
+	if ele, ok := c.cache[key]; ok {
+		return ele.Value.(*cacheItem).value, true
+	}
+
+	return nil, false
+}
+
 func (c *lruCache) remove(key uint64) {
 	c.Lock()
 	defer c.Unlock()
@@ -214,7 +225,8 @@ func (c *lruCache) elems() []*cacheItem {
 
 	elems := make([]*cacheItem, 0, c.ll.Len())
 	for ele := c.ll.Front(); ele != nil; ele = ele.Next() {
-		elems = append(elems, ele.Value.(*cacheItem))
+		clone := *(ele.Value.(*cacheItem))
+		elems = append(elems, &clone)
 	}
 
 	return elems

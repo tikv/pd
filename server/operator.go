@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	maxOperatorWaitTime = 5 * time.Minute
+	maxOperatorWaitTime = 3 * time.Minute
 )
 
 // Operator is an interface to schedule region.

@@ -47,13 +47,27 @@ func (h *Handler) GetSchedulers() ([]string, error) {
 	return c.getSchedulers(), nil
 }
 
+// GetHotWriteRegions gets all hot regions status
+func (h *Handler) GetHotWriteRegions() map[uint64]*StoreHotRegions {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return nil
+	}
+	return c.getHotWriteRegions()
+}
+
+// GetHotWriteStores gets all hot write stores status
+func (h *Handler) GetHotWriteStores() map[uint64]uint64 {
+	return h.s.cluster.cachedCluster.getStoresWriteStat()
+}
+
 // AddScheduler adds a scheduler.
 func (h *Handler) AddScheduler(s Scheduler) error {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return errors.Trace(err)
 	}
-	return errors.Trace(c.addScheduler(s))
+	return errors.Trace(c.addScheduler(s, minScheduleInterval))
 }
 
 // RemoveScheduler removes a scheduler by name.
