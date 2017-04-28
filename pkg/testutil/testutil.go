@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 )
 
-var unixURLCount uint64
+var unixURLCount uint64 = 1024
 
 // UnixURL returns a unique unix socket url, used for test only.
 func UnixURL() string {
