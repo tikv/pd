@@ -25,7 +25,7 @@ import (
 
 const (
 	runSchedulerCheckInterval = 3 * time.Second
-	runSchedulerFactor        = 0.8
+	collectFactor             = 0.8
 	historiesCacheSize        = 1000
 	eventsCacheSize           = 1000
 	maxScheduleRetries        = 10
@@ -117,11 +117,15 @@ func (c *coordinator) run() {
 		if c.shouldRun() {
 			break
 		}
+		log.Info("coordinator: Waiting for the cluster information to be collected")
 		select {
 		case <-ticker.C:
+		case <-c.ctx.Done():
+			log.Info("coordinator: Stopped coordinator")
+			return
 		}
 	}
-	log.Info("Run scheduler")
+	log.Info("coordinator: Run scheduler")
 	c.addScheduler(newBalanceLeaderScheduler(c.opt), minScheduleInterval)
 	c.addScheduler(newBalanceRegionScheduler(c.opt), minScheduleInterval)
 	c.addScheduler(newBalanceHotRegionScheduler(c.opt), minSlowScheduleInterval)
@@ -154,7 +158,7 @@ func (c *coordinator) getSchedulers() []string {
 }
 
 func (c *coordinator) shouldRun() bool {
-	return c.cluster.isClusterInfoFullReported()
+	return c.cluster.isPrepare()
 }
 
 func (c *coordinator) addScheduler(scheduler Scheduler, interval time.Duration) error {
