@@ -112,9 +112,8 @@ func (c *RaftCluster) stop() {
 	c.running = false
 
 	close(c.quit)
-	c.wg.Wait()
-
 	c.coordinator.stop()
+	c.wg.Wait()
 }
 
 func (c *RaftCluster) isRunning() bool {
