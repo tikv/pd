@@ -225,30 +225,23 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	tc.LoadRegion(5, 1, 2, 3)
 	c.Assert(co.shouldRun(), IsFalse)
 
-	r1 := tc.getRegion(1)
-	r1.Leader = r1.Peers[0]
-	tc.handleRegionHeartbeat(r1)
-	c.Assert(co.shouldRun(), IsFalse)
+	tbl := []struct {
+		regionID  uint64
+		shouldRun bool
+	}{
+		{1, false},
+		{2, false},
+		{3, false},
+		{4, true},
+		{5, true},
+	}
 
-	r2 := tc.getRegion(2)
-	r2.Leader = r2.Peers[0]
-	tc.handleRegionHeartbeat(r2)
-	c.Assert(co.shouldRun(), IsFalse)
-
-	r3 := tc.getRegion(3)
-	r3.Leader = r3.Peers[0]
-	tc.handleRegionHeartbeat(r3)
-	c.Assert(co.shouldRun(), IsFalse)
-
-	r4 := tc.getRegion(4)
-	r4.Leader = r4.Peers[0]
-	tc.handleRegionHeartbeat(r4)
-	c.Assert(co.shouldRun(), IsTrue)
-
-	r5 := tc.getRegion(5)
-	r5.Leader = r5.Peers[0]
-	tc.handleRegionHeartbeat(r5)
-	c.Assert(co.shouldRun(), IsTrue)
+	for _, t := range tbl {
+		r := tc.getRegion(t.regionID)
+		r.Leader = r.Peers[0]
+		tc.handleRegionHeartbeat(r)
+		c.Assert(co.shouldRun(), Equals, t.shouldRun)
+	}
 }
 
 func (s *testCoordinatorSuite) TestAddScheduler(c *C) {

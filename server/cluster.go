@@ -84,17 +84,21 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 	c.cachedCluster = cluster
-
 	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt)
-	go c.coordinator.run()
-
-	c.wg.Add(1)
 	c.quit = make(chan struct{})
+
+	c.wg.Add(2)
+	go c.runCoordinator()
 	go c.runBackgroundJobs(backgroundJobInterval)
 
 	c.running = true
 
 	return nil
+}
+
+func (c *RaftCluster) runCoordinator() {
+	c.coordinator.run()
+	c.wg.Done()
 }
 
 func (c *RaftCluster) stop() {

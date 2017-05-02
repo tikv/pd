@@ -94,7 +94,7 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 }
 
 func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) {
-	//  regions load from etcd will no leader
+	//  regions load from etcd will have no leader
 	region := &metapb.Region{Id: regionID}
 	region.Peers = []*metapb.Peer{}
 	for _, id := range followerIds {

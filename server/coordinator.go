@@ -113,11 +113,12 @@ func (c *coordinator) dispatch(region *RegionInfo) *pdpb.RegionHeartbeatResponse
 func (c *coordinator) run() {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
 	defer ticker.Stop()
+	log.Info("coordinator: Start collect cluster information")
 	for {
 		if c.shouldRun() {
+			log.Info("coordinator: Cluster information is prepared")
 			break
 		}
-		log.Info("coordinator: Waiting for the cluster information to be collected")
 		select {
 		case <-ticker.C:
 		case <-c.ctx.Done():
@@ -158,7 +159,7 @@ func (c *coordinator) getSchedulers() []string {
 }
 
 func (c *coordinator) shouldRun() bool {
-	return c.cluster.isPrepare()
+	return c.cluster.isPrepared()
 }
 
 func (c *coordinator) addScheduler(scheduler Scheduler, interval time.Duration) error {

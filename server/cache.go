@@ -625,8 +625,8 @@ func (c *clusterInfo) getFollowerStores(region *RegionInfo) []*storeInfo {
 	return stores
 }
 
-// isPrepare check whether the clusterInfo is collected when the PD restart
-func (c *clusterInfo) isPrepare() bool {
+// isPrepared if the cluster information is collected
+func (c *clusterInfo) isPrepared() bool {
 	c.RLock()
 	defer c.RUnlock()
 	return float64(c.regions.regions.Len())*collectFactor <= float64(c.reactiveRegions)
@@ -685,7 +685,6 @@ func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
 		}
 		if region.Leader.GetId() != origin.Leader.GetId() {
 			log.Infof("[region %d] Leader changed from {%v} to {%v}", region.GetId(), origin.GetPeer(origin.Leader.GetId()), region.GetPeer(region.Leader.GetId()))
-			log.Info("test %+v", origin.Leader)
 			if origin.Leader.GetId() == 0 {
 				c.reactiveRegions++
 			}
