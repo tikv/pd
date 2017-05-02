@@ -88,7 +88,7 @@ func InitPDClient(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	log.SetLevel(log.InfoLevel)
+	log.SetOutput(ioutil.Discard)
 	if pdClient != nil {
 		return nil
 	}
