@@ -47,6 +47,7 @@ func init() {
 		command.NewOperatorCommand(),
 		command.NewSchedulerCommand(),
 		command.NewTSOCommand(),
+		command.NewHotSpotCommand(),
 	)
 	cobra.EnablePrefixMatching = true
 }
