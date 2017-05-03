@@ -211,8 +211,12 @@ func (c *coordinator) addOperator(op Operator) bool {
 	}
 	if op.GetResourceKind() == priorityKind {
 		o, ok := c.operators[regionID]
-		if ok && o.GetResourceKind() == priorityKind {
-			return false
+		if ok {
+			if o.GetResourceKind() == priorityKind {
+				return false
+			}
+			c.limiter.removeOperator(o)
+			log.Infof("coordinator: add more prioriy operator: %+v remove operator: %+v", op, o)
 		}
 		c.limiter.addOperator(op)
 		c.operators[regionID] = op
