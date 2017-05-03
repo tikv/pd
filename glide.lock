@@ -1,5 +1,5 @@
-hash: 46f235ac2fe8d8d5e5f3b4a11ecb2f0382254edf988463de160b3da3cdb813bf
-updated: 2017-04-12T02:17:53.324092921+08:00
+hash: 4b6ab744b92f76bf689153232d35e5c3d00d91ca5f7dccb2ce9743ca37a6763a
+updated: 2017-05-02T15:01:38.795129329+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -16,7 +16,7 @@ imports:
 - name: github.com/cockroachdb/cmux
   version: 112f0506e7743d64a6eb8fedbcff13d9979bbf92
 - name: github.com/coreos/etcd
-  version: 9ca7f22e84f58deb40ea0de78b350c0fe3eaf77b
+  version: ea5f6dab6b1d07e22cf46bf5f5088d567548c124
   subpackages:
   - alarm
   - auth
@@ -33,6 +33,8 @@ imports:
   - etcdserver/api/v2http
   - etcdserver/api/v2http/httptypes
   - etcdserver/api/v3client
+  - etcdserver/api/v3election
+  - etcdserver/api/v3election/v3electionpb
   - etcdserver/api/v3lock
   - etcdserver/api/v3lock/v3lockpb
   - etcdserver/api/v3rpc
@@ -52,6 +54,7 @@ imports:
   - pkg/cors
   - pkg/cpuutil
   - pkg/crc
+  - pkg/debugutil
   - pkg/fileutil
   - pkg/httputil
   - pkg/idutil
@@ -177,7 +180,7 @@ imports:
   repo: https://github.com/spf13/cobra.git
   vcs: git
 - name: github.com/spf13/pflag
-  version: 9a906f17374922ed0f74e1b2f593d3723f2ffb00
+  version: c990990ab4981d84da820b7b00c85139ca150b5f
 - name: github.com/twinj/uuid
   version: 70cac2bcd273ef6a371bb96cde363d28b68734c3
 - name: github.com/ugorji/go

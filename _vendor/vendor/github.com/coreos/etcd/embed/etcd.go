@@ -25,6 +25,7 @@ import (
 	"github.com/coreos/etcd/etcdserver"
 	"github.com/coreos/etcd/etcdserver/api/v2http"
 	"github.com/coreos/etcd/pkg/cors"
+	"github.com/coreos/etcd/pkg/debugutil"
 	runtimeutil "github.com/coreos/etcd/pkg/runtime"
 	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
@@ -200,7 +201,6 @@ func startPeerListeners(cfg *Config) (plns []net.Listener, err error) {
 	}()
 
 	for i, u := range cfg.LPUrls {
-		var tlscfg *tls.Config
 		if u.Scheme == "http" {
 			if !cfg.PeerTLSInfo.Empty() {
 				plog.Warningf("The scheme of peer url %s is HTTP while peer key/cert files are presented. Ignored peer key/cert files.", u.String())
@@ -209,12 +209,7 @@ func startPeerListeners(cfg *Config) (plns []net.Listener, err error) {
 				plog.Warningf("The scheme of peer url %s is HTTP while client cert auth (--peer-client-cert-auth) is enabled. Ignored client cert auth for this url.", u.String())
 			}
 		}
-		if !cfg.PeerTLSInfo.Empty() {
-			if tlscfg, err = cfg.PeerTLSInfo.ServerConfig(); err != nil {
-				return nil, err
-			}
-		}
-		if plns[i], err = rafthttp.NewListener(u, tlscfg); err != nil {
+		if plns[i], err = rafthttp.NewListener(u, &cfg.PeerTLSInfo); err != nil {
 			return nil, err
 		}
 		plog.Info("listening for peers on ", u.String())
@@ -237,7 +232,7 @@ func startClientListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 	}
 
 	if cfg.EnablePprof {
-		plog.Infof("pprof is enabled under %s", pprofPrefix)
+		plog.Infof("pprof is enabled under %s", debugutil.HTTPPrefixPProf)
 	}
 
 	sctxs = make(map[string]*serveCtx)
@@ -257,19 +252,21 @@ func startClientListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 		}
 
 		proto := "tcp"
+		addr := u.Host
 		if u.Scheme == "unix" || u.Scheme == "unixs" {
 			proto = "unix"
+			addr = u.Host + u.Path
 		}
 
 		sctx.secure = u.Scheme == "https" || u.Scheme == "unixs"
 		sctx.insecure = !sctx.secure
-		if oldctx := sctxs[u.Host]; oldctx != nil {
+		if oldctx := sctxs[addr]; oldctx != nil {
 			oldctx.secure = oldctx.secure || sctx.secure
 			oldctx.insecure = oldctx.insecure || sctx.insecure
 			continue
 		}
 
-		if sctx.l, err = net.Listen(proto, u.Host); err != nil {
+		if sctx.l, err = net.Listen(proto, addr); err != nil {
 			return nil, err
 		}
 
@@ -303,7 +300,7 @@ func startClientListeners(cfg *Config) (sctxs map[string]*serveCtx, err error) {
 		if cfg.Debug {
 			sctx.registerTrace()
 		}
-		sctxs[u.Host] = sctx
+		sctxs[addr] = sctx
 	}
 	return sctxs, nil
 }
@@ -338,8 +335,6 @@ func (e *Etcd) serve() (err error) {
 		})
 	}
 	for _, sctx := range e.sctxs {
-		// read timeout does not work with http close notify
-		// TODO: https://github.com/golang/go/issues/9524
 		go func(s *serveCtx) {
 			e.errHandler(s.serve(e.Server, ctlscfg, v2h, e.errHandler))
 		}(sctx)
