@@ -206,6 +206,7 @@ func (c *coordinator) addOperator(op Operator) bool {
 
 	// Admin operator bypasses the check.
 	if op.GetResourceKind() == adminKind {
+		c.histories.add(regionID, op)
 		c.operators[regionID] = op
 		return true
 	}
@@ -214,9 +215,8 @@ func (c *coordinator) addOperator(op Operator) bool {
 		if ok && o.GetResourceKind() == priorityKind {
 			return false
 		}
-		c.limiter.addOperator(op)
-		c.operators[regionID] = op
-		collectOperatorCounterMetrics(op)
+
+		c.collectOperator(regionID, op)
 		return true
 	}
 
@@ -224,10 +224,15 @@ func (c *coordinator) addOperator(op Operator) bool {
 		return false
 	}
 
+	c.collectOperator(regionID, op)
+	return true
+}
+
+func (c *coordinator) collectOperator(regionID uint64, op Operator) {
+	c.histories.add(regionID, op)
 	c.limiter.addOperator(op)
 	c.operators[regionID] = op
 	collectOperatorCounterMetrics(op)
-	return true
 }
 
 func (c *coordinator) removeOperator(op Operator) {
@@ -266,6 +271,21 @@ func (c *coordinator) getHistories() []Operator {
 	var operators []Operator
 	for _, elem := range c.histories.elems() {
 		operators = append(operators, elem.value.(Operator))
+	}
+
+	return operators
+}
+
+func (c *coordinator) getHistoriesOfKind(kind ResourceKind) []Operator {
+	c.RLock()
+	defer c.RUnlock()
+
+	var operators []Operator
+	for _, elem := range c.histories.elems() {
+		op := elem.value.(Operator)
+		if op.GetResourceKind() == kind {
+			operators = append(operators, elem.value.(Operator))
+		}
 	}
 
 	return operators

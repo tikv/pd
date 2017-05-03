@@ -174,6 +174,22 @@ func (h *Handler) GetOperatorsOfKind(kind ResourceKind) ([]Operator, error) {
 	return results, nil
 }
 
+func (h *Handler) GetHistoryOperators() ([]Operator, error) {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return c.getHistories(), nil
+}
+
+func (h *Handler) GetHistoryOperatorsOfKind(kind ResourceKind) ([]Operator, error) {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return c.getHistoriesOfKind(kind), nil
+}
+
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.
 func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) error {
 	c, err := h.getCoordinator()

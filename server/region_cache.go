@@ -232,6 +232,21 @@ func (c *lruCache) elems() []*cacheItem {
 	return elems
 }
 
+func (c *lruCache) elemsWithLimit(limit int) []*cacheItem {
+	c.RLock()
+	defer c.RUnlock()
+	if limit > c.len() {
+		limit = c.len()
+	}
+	elems := make([]*cacheItem, 0, c.ll.Len())
+	for ele, i := c.ll.Front(), 0; ele != nil && i < limit; ele = ele.Next() {
+		clone := *(ele.Value.(*cacheItem))
+		elems = append(elems, &clone)
+		i++
+	}
+	return elems
+}
+
 func (c *lruCache) len() int {
 	c.RLock()
 	defer c.RUnlock()
