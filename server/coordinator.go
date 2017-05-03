@@ -204,12 +204,6 @@ func (c *coordinator) addOperator(op Operator) bool {
 
 	regionID := op.GetRegionID()
 
-	// Admin operator bypasses the check.
-	if op.GetResourceKind() == adminKind {
-		c.operators[regionID] = op
-		return true
-	}
-
 	if old, ok := c.operators[regionID]; ok {
 		if op.GetResourceKind() == adminKind ||
 			(op.GetResourceKind() == priorityKind && old.GetResourceKind() != priorityKind) {
