@@ -24,13 +24,15 @@ import (
 )
 
 const (
-	historiesCacheSize      = 1000
-	eventsCacheSize         = 1000
-	maxScheduleRetries      = 10
-	maxScheduleInterval     = time.Minute
-	minScheduleInterval     = time.Millisecond * 10
-	minSlowScheduleInterval = time.Second * 3
-	scheduleIntervalFactor  = 1.3
+	runSchedulerCheckInterval = 3 * time.Second
+	collectFactor             = 0.8
+	historiesCacheSize        = 1000
+	eventsCacheSize           = 1000
+	maxScheduleRetries        = 10
+	maxScheduleInterval       = time.Minute
+	minScheduleInterval       = time.Millisecond * 10
+	minSlowScheduleInterval   = time.Second * 3
+	scheduleIntervalFactor    = 1.3
 
 	writeStatLRUMaxLen            = 1000
 	storeHotRegionsDefaultLen     = 100
@@ -109,6 +111,22 @@ func (c *coordinator) dispatch(region *RegionInfo) *pdpb.RegionHeartbeatResponse
 }
 
 func (c *coordinator) run() {
+	ticker := time.NewTicker(runSchedulerCheckInterval)
+	defer ticker.Stop()
+	log.Info("coordinator: Start collect cluster information")
+	for {
+		if c.shouldRun() {
+			log.Info("coordinator: Cluster information is prepared")
+			break
+		}
+		select {
+		case <-ticker.C:
+		case <-c.ctx.Done():
+			log.Info("coordinator: Stopped coordinator")
+			return
+		}
+	}
+	log.Info("coordinator: Run scheduler")
 	c.addScheduler(newBalanceLeaderScheduler(c.opt), minScheduleInterval)
 	c.addScheduler(newBalanceRegionScheduler(c.opt), minScheduleInterval)
 	c.addScheduler(newBalanceHotRegionScheduler(c.opt), minSlowScheduleInterval)
@@ -138,6 +156,10 @@ func (c *coordinator) getSchedulers() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+func (c *coordinator) shouldRun() bool {
+	return c.cluster.isPrepared()
 }
 
 func (c *coordinator) addScheduler(scheduler Scheduler, interval time.Duration) error {
