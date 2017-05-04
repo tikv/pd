@@ -27,6 +27,8 @@ import (
 	"github.com/unrolled/render"
 )
 
+const defaultStoreDownTime = time.Minute
+
 type metaStore struct {
 	*metapb.Store
 	StateName string `json:"state_name"`
@@ -74,7 +76,7 @@ func newStoreInfo(store *metapb.Store, status *server.StoreStatus) *storeInfo {
 			Uptime:             typeutil.NewDuration(status.GetUptime()),
 		},
 	}
-	if time.Now().Sub(status.LastHeartbeatTS) > time.Minute {
+	if time.Now().Sub(status.LastHeartbeatTS) > defaultStoreDownTime {
 		s.Store.StateName = "Down"
 	}
 	return s
