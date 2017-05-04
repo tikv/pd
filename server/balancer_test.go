@@ -93,6 +93,17 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 	c.putRegion(newRegionInfo(region, leader))
 }
 
+func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) {
+	//  regions load from etcd will have no leader
+	region := &metapb.Region{Id: regionID}
+	region.Peers = []*metapb.Peer{}
+	for _, id := range followerIds {
+		peer, _ := c.allocPeer(id)
+		region.Peers = append(region.Peers, peer)
+	}
+	c.putRegion(newRegionInfo(region, nil))
+}
+
 func (c *testClusterInfo) addLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
 	region := &metapb.Region{Id: regionID}
 	leader, _ := c.allocPeer(leaderID)

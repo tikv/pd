@@ -333,6 +333,7 @@ type clusterInfo struct {
 	stores  *storesInfo
 	regions *regionsInfo
 
+	activeRegions   int
 	writeStatistics *lruCache
 }
 
@@ -624,6 +625,13 @@ func (c *clusterInfo) getFollowerStores(region *RegionInfo) []*storeInfo {
 	return stores
 }
 
+// isPrepared if the cluster information is collected
+func (c *clusterInfo) isPrepared() bool {
+	c.RLock()
+	defer c.RUnlock()
+	return float64(c.regions.regions.Len())*collectFactor <= float64(c.activeRegions)
+}
+
 // handleStoreHeartbeat updates the store status.
 func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.Lock()
@@ -677,6 +685,9 @@ func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
 		}
 		if region.Leader.GetId() != origin.Leader.GetId() {
 			log.Infof("[region %d] Leader changed from {%v} to {%v}", region.GetId(), origin.GetPeer(origin.Leader.GetId()), region.GetPeer(region.Leader.GetId()))
+			if origin.Leader.GetId() == 0 {
+				c.activeRegions++
+			}
 			saveCache = true
 		}
 		if len(region.DownPeers) > 0 || len(region.PendingPeers) > 0 {

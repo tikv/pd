@@ -211,6 +211,39 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	c.Assert(co.dispatch(region), IsNil)
 }
 
+func (s *testCoordinatorSuite) TestShouldRun(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+
+	_, opt := newTestScheduleConfig()
+	co := newCoordinator(cluster, opt)
+
+	tc.LoadRegion(1, 1, 2, 3)
+	tc.LoadRegion(2, 1, 2, 3)
+	tc.LoadRegion(3, 1, 2, 3)
+	tc.LoadRegion(4, 1, 2, 3)
+	tc.LoadRegion(5, 1, 2, 3)
+	c.Assert(co.shouldRun(), IsFalse)
+
+	tbl := []struct {
+		regionID  uint64
+		shouldRun bool
+	}{
+		{1, false},
+		{2, false},
+		{3, false},
+		{4, true},
+		{5, true},
+	}
+
+	for _, t := range tbl {
+		r := tc.getRegion(t.regionID)
+		r.Leader = r.Peers[0]
+		tc.handleRegionHeartbeat(r)
+		c.Assert(co.shouldRun(), Equals, t.shouldRun)
+	}
+}
+
 func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
