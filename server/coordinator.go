@@ -227,19 +227,27 @@ func (c *coordinator) addOperator(op Operator) bool {
 	regionID := op.GetRegionID()
 
 	if old, ok := c.operators[regionID]; ok {
-		if op.GetResourceKind() == adminKind ||
-			(op.GetResourceKind() == priorityKind && old.GetResourceKind() != priorityKind) {
-			c.limiter.removeOperator(old)
-			log.Infof("coordinator: add operator %+v with higher priority, remove operator: %+v", op, old)
-		} else {
+		if !isPriorityOperator(op, old) {
 			return false
 		}
+		c.limiter.removeOperator(old)
+		log.Infof("coordinator: add operator %+v with higher priority, remove operator: %+v", op, old)
 	}
 
 	c.limiter.addOperator(op)
 	c.operators[regionID] = op
 	collectOperatorCounterMetrics(op)
 	return true
+}
+
+func isPriorityOperator(new Operator, old Operator) bool {
+	if new.GetResourceKind() == adminKind {
+		return true
+	}
+	if new.GetResourceKind() == priorityKind && old.GetResourceKind() != priorityKind {
+		return true
+	}
+	return false
 }
 
 func (c *coordinator) removeOperator(op Operator) {
