@@ -227,7 +227,7 @@ func (c *coordinator) addOperator(op Operator) bool {
 	regionID := op.GetRegionID()
 
 	if old, ok := c.operators[regionID]; ok {
-		if !isPriorityOperator(op, old) {
+		if !isHigherPriorityOperator(op, old) {
 			return false
 		}
 		c.limiter.removeOperator(old)
@@ -240,7 +240,7 @@ func (c *coordinator) addOperator(op Operator) bool {
 	return true
 }
 
-func isPriorityOperator(new Operator, old Operator) bool {
+func isHigherPriorityOperator(new Operator, old Operator) bool {
 	if new.GetResourceKind() == adminKind {
 		return true
 	}
