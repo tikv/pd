@@ -76,7 +76,7 @@ func newStoreInfo(store *metapb.Store, status *server.StoreStatus) *storeInfo {
 			Uptime:             typeutil.NewDuration(status.GetUptime()),
 		},
 	}
-	if time.Now().Sub(status.LastHeartbeatTS) > defaultStoreDownTime {
+	if time.Now().Sub(status.LastHeartbeatTS) > defaultStoreDownTime && store.State == metapb.StoreState_Up {
 		s.Store.StateName = "Down"
 	}
 	return s
