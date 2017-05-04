@@ -54,7 +54,7 @@ type storeInfo struct {
 }
 
 func newStoreInfo(store *metapb.Store, status *server.StoreStatus) *storeInfo {
-	return &storeInfo{
+	s := &storeInfo{
 		Store: &metaStore{
 			Store:     store,
 			StateName: store.State.String(),
@@ -74,6 +74,10 @@ func newStoreInfo(store *metapb.Store, status *server.StoreStatus) *storeInfo {
 			Uptime:             typeutil.NewDuration(status.GetUptime()),
 		},
 	}
+	if time.Now().Sub(status.LastHeartbeatTS) > time.Minute {
+		s.Store.StateName = "Down"
+	}
+	return s
 }
 
 type storesInfo struct {
