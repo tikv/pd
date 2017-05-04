@@ -208,7 +208,7 @@ func (c *coordinator) addOperator(op Operator) bool {
 		if op.GetResourceKind() == adminKind ||
 			(op.GetResourceKind() == priorityKind && old.GetResourceKind() != priorityKind) {
 			c.limiter.removeOperator(old)
-			log.Infof("coordinator: add operator with higher priority: %+v remove operator: %+v", op, old)
+			log.Infof("coordinator: add operator %+v with higher priority, remove operator: %+v", op, old)
 		} else {
 			return false
 		}

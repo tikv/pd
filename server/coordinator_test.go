@@ -343,6 +343,14 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	c.Assert(sc.AllowSchedule(), IsFalse)
 	co.addOperator(op3)
 	c.Assert(sc.AllowSchedule(), IsTrue)
+	co.removeOperator(op3)
+
+	// add a adminKind operator will remove old operator
+	co.addOperator(op2)
+	c.Assert(sc.AllowSchedule(), IsFalse)
+	op4 := newTestOperator(2, adminKind)
+	co.addOperator(op4)
+	c.Assert(sc.AllowSchedule(), IsTrue)
 }
 
 func (s *testScheduleControllerSuite) TestInterval(c *C) {
