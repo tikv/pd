@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
@@ -30,12 +29,6 @@ type testHistorySuite struct {
 	cleanup   cleanUpFunc
 	urlPrefix string
 	cli       *http.Client
-}
-
-type adminOperator struct {
-	Region *server.RegionInfo `json:"region"`
-	Start  time.Time          `json:"start"`
-	Ops    []server.Operator  `json:"ops"`
 }
 
 func (s *testHistorySuite) SetUpSuite(c *C) {

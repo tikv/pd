@@ -174,6 +174,7 @@ func (h *Handler) GetOperatorsOfKind(kind ResourceKind) ([]Operator, error) {
 	return results, nil
 }
 
+// GetHistoryOperators returns history operators
 func (h *Handler) GetHistoryOperators() ([]Operator, error) {
 	c, err := h.getCoordinator()
 	if err != nil {
@@ -182,6 +183,7 @@ func (h *Handler) GetHistoryOperators() ([]Operator, error) {
 	return c.getHistories(), nil
 }
 
+// GetHistoryOperatorsOfKind returns history operators by Kind
 func (h *Handler) GetHistoryOperatorsOfKind(kind ResourceKind) ([]Operator, error) {
 	c, err := h.getCoordinator()
 	if err != nil {

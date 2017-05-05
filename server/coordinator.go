@@ -24,13 +24,15 @@ import (
 )
 
 const (
-	historiesCacheSize      = 1000
-	eventsCacheSize         = 1000
-	maxScheduleRetries      = 10
-	maxScheduleInterval     = time.Minute
-	minScheduleInterval     = time.Millisecond * 10
-	minSlowScheduleInterval = time.Second * 3
-	scheduleIntervalFactor  = 1.3
+	runSchedulerCheckInterval = 3 * time.Second
+	collectFactor             = 0.8
+	historiesCacheSize        = 1000
+	eventsCacheSize           = 1000
+	maxScheduleRetries        = 10
+	maxScheduleInterval       = time.Minute
+	minScheduleInterval       = time.Millisecond * 10
+	minSlowScheduleInterval   = time.Second * 3
+	scheduleIntervalFactor    = 1.3
 
 	writeStatLRUMaxLen            = 1000
 	storeHotRegionsDefaultLen     = 100
@@ -109,6 +111,22 @@ func (c *coordinator) dispatch(region *RegionInfo) *pdpb.RegionHeartbeatResponse
 }
 
 func (c *coordinator) run() {
+	ticker := time.NewTicker(runSchedulerCheckInterval)
+	defer ticker.Stop()
+	log.Info("coordinator: Start collect cluster information")
+	for {
+		if c.shouldRun() {
+			log.Info("coordinator: Cluster information is prepared")
+			break
+		}
+		select {
+		case <-ticker.C:
+		case <-c.ctx.Done():
+			log.Info("coordinator: Stopped coordinator")
+			return
+		}
+	}
+	log.Info("coordinator: Run scheduler")
 	c.addScheduler(newBalanceLeaderScheduler(c.opt), minScheduleInterval)
 	c.addScheduler(newBalanceRegionScheduler(c.opt), minScheduleInterval)
 	c.addScheduler(newBalanceHotRegionScheduler(c.opt), minSlowScheduleInterval)
@@ -138,6 +156,10 @@ func (c *coordinator) getSchedulers() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+func (c *coordinator) shouldRun() bool {
+	return c.cluster.isPrepared()
 }
 
 func (c *coordinator) addScheduler(scheduler Scheduler, interval time.Duration) error {
@@ -204,35 +226,29 @@ func (c *coordinator) addOperator(op Operator) bool {
 
 	regionID := op.GetRegionID()
 
-	// Admin operator bypasses the check.
-	if op.GetResourceKind() == adminKind {
-		c.histories.add(regionID, op)
-		c.operators[regionID] = op
-		return true
-	}
-	if op.GetResourceKind() == priorityKind {
-		o, ok := c.operators[regionID]
-		if ok && o.GetResourceKind() == priorityKind {
+	if old, ok := c.operators[regionID]; ok {
+		if !isHigherPriorityOperator(op, old) {
 			return false
 		}
-
-		c.collectOperator(regionID, op)
-		return true
+		c.limiter.removeOperator(old)
+		log.Infof("coordinator: add operator %+v with higher priority, remove operator: %+v", op, old)
 	}
 
-	if _, ok := c.operators[regionID]; ok {
-		return false
-	}
-
-	c.collectOperator(regionID, op)
-	return true
-}
-
-func (c *coordinator) collectOperator(regionID uint64, op Operator) {
 	c.histories.add(regionID, op)
 	c.limiter.addOperator(op)
 	c.operators[regionID] = op
 	collectOperatorCounterMetrics(op)
+	return true
+}
+
+func isHigherPriorityOperator(new Operator, old Operator) bool {
+	if new.GetResourceKind() == adminKind {
+		return true
+	}
+	if new.GetResourceKind() == priorityKind && old.GetResourceKind() != priorityKind {
+		return true
+	}
+	return false
 }
 
 func (c *coordinator) removeOperator(op Operator) {
@@ -376,7 +392,11 @@ func (s *scheduleController) AllowSchedule() bool {
 
 func collectOperatorCounterMetrics(op Operator) {
 	metrics := make(map[string]uint64)
-	for _, op := range op.(*regionOperator).Ops {
+	regionOp, ok := op.(*regionOperator)
+	if !ok {
+		return
+	}
+	for _, op := range regionOp.Ops {
 		switch o := op.(type) {
 		case *changePeerOperator:
 			metrics[o.Name]++

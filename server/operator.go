@@ -81,7 +81,6 @@ type regionOperator struct {
 	Index  int          `json:"index"`
 	Ops    []Operator   `json:"ops"`
 	Kind   ResourceKind `json:"kind"`
-	State  string       `json:"state"`
 }
 
 func newRegionOperator(region *RegionInfo, kind ResourceKind, ops ...Operator) *regionOperator {
@@ -95,7 +94,6 @@ func newRegionOperator(region *RegionInfo, kind ResourceKind, ops ...Operator) *
 		Start:  time.Now(),
 		Ops:    ops,
 		Kind:   kind,
-		State:  "Doing",
 	}
 }
 
@@ -113,7 +111,6 @@ func (op *regionOperator) GetResourceKind() ResourceKind {
 
 func (op *regionOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	if time.Since(op.Start) > maxOperatorWaitTime {
-		op.State = "Time Out"
 		log.Errorf("[region %d] Operator timeout:%s", region.GetId(), op)
 		return nil, true
 	}
@@ -128,7 +125,6 @@ func (op *regionOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse,
 		}
 	}
 
-	op.State = "Finish"
 	op.End = time.Now()
 	return nil, true
 }
