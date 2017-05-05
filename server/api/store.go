@@ -27,8 +27,6 @@ import (
 	"github.com/unrolled/render"
 )
 
-const defaultStoreDownTime = time.Minute
-
 type metaStore struct {
 	*metapb.Store
 	StateName string `json:"state_name"`
@@ -55,6 +53,8 @@ type storeInfo struct {
 	Status *storeStatus `json:"status"`
 }
 
+const downStateName = "Down"
+
 func newStoreInfo(store *metapb.Store, status *server.StoreStatus) *storeInfo {
 	s := &storeInfo{
 		Store: &metaStore{
@@ -76,8 +76,8 @@ func newStoreInfo(store *metapb.Store, status *server.StoreStatus) *storeInfo {
 			Uptime:             typeutil.NewDuration(status.GetUptime()),
 		},
 	}
-	if time.Now().Sub(status.LastHeartbeatTS) > defaultStoreDownTime && store.State == metapb.StoreState_Up {
-		s.Store.StateName = "Down"
+	if store.State == metapb.StoreState_Up && status.IsDown() {
+		s.Store.StateName = downStateName
 	}
 	return s
 }

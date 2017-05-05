@@ -18,9 +18,11 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 )
 
@@ -183,4 +185,20 @@ func (s *testStoreSuite) TestUrlStoreFilter(c *C) {
 	c.Assert(err, IsNil)
 	_, err = newStoreStateFilter(u)
 	c.Assert(err, NotNil)
+}
+
+func (s *testStoreSuite) TestDownState(c *C) {
+	status := &server.StoreStatus{
+		StoreStats: &pdpb.StoreStats{},
+	}
+	store := &metapb.Store{
+		State: metapb.StoreState_Up,
+	}
+	status.LastHeartbeatTS = time.Now()
+	storeInfo := newStoreInfo(store, status)
+	c.Assert(storeInfo.Store.StateName, Equals, metapb.StoreState_Up.String())
+
+	status.LastHeartbeatTS = time.Now().Add(-time.Minute * 2)
+	storeInfo = newStoreInfo(store, status)
+	c.Assert(storeInfo.Store.StateName, Equals, downStateName)
 }
