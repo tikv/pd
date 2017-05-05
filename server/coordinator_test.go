@@ -356,17 +356,33 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 	// limit = 2
 	lb.limit = 2
-	op := newTestOperator(1, leaderKind)
 	// count = 0
 	c.Assert(sc.AllowSchedule(), IsTrue)
-	sc.limiter.addOperator(op)
+	op1 := newTestOperator(1, leaderKind)
+	c.Assert(co.addOperator(op1), IsTrue)
 	// count = 1
 	c.Assert(sc.AllowSchedule(), IsTrue)
-	sc.limiter.addOperator(op)
+	op2 := newTestOperator(2, leaderKind)
+	c.Assert(co.addOperator(op2), IsTrue)
 	// count = 2
 	c.Assert(sc.AllowSchedule(), IsFalse)
-	sc.limiter.removeOperator(op)
+	co.removeOperator(op1)
 	// count = 1
+	c.Assert(sc.AllowSchedule(), IsTrue)
+
+	// add a priorityKind operator will remove old operator
+	op3 := newTestOperator(2, priorityKind)
+	c.Assert(co.addOperator(op1), IsTrue)
+	c.Assert(sc.AllowSchedule(), IsFalse)
+	c.Assert(co.addOperator(op3), IsTrue)
+	c.Assert(sc.AllowSchedule(), IsTrue)
+	co.removeOperator(op3)
+
+	// add a adminKind operator will remove old operator
+	c.Assert(co.addOperator(op2), IsTrue)
+	c.Assert(sc.AllowSchedule(), IsFalse)
+	op4 := newTestOperator(2, adminKind)
+	c.Assert(co.addOperator(op4), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsTrue)
 }
 

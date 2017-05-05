@@ -226,30 +226,28 @@ func (c *coordinator) addOperator(op Operator) bool {
 
 	regionID := op.GetRegionID()
 
-	// Admin operator bypasses the check.
-	if op.GetResourceKind() == adminKind {
-		c.operators[regionID] = op
-		return true
-	}
-	if op.GetResourceKind() == priorityKind {
-		o, ok := c.operators[regionID]
-		if ok && o.GetResourceKind() == priorityKind {
+	if old, ok := c.operators[regionID]; ok {
+		if !isHigherPriorityOperator(op, old) {
 			return false
 		}
-		c.limiter.addOperator(op)
-		c.operators[regionID] = op
-		collectOperatorCounterMetrics(op)
-		return true
-	}
-
-	if _, ok := c.operators[regionID]; ok {
-		return false
+		c.limiter.removeOperator(old)
+		log.Infof("coordinator: add operator %+v with higher priority, remove operator: %+v", op, old)
 	}
 
 	c.limiter.addOperator(op)
 	c.operators[regionID] = op
 	collectOperatorCounterMetrics(op)
 	return true
+}
+
+func isHigherPriorityOperator(new Operator, old Operator) bool {
+	if new.GetResourceKind() == adminKind {
+		return true
+	}
+	if new.GetResourceKind() == priorityKind && old.GetResourceKind() != priorityKind {
+		return true
+	}
+	return false
 }
 
 func (c *coordinator) removeOperator(op Operator) {
@@ -378,7 +376,11 @@ func (s *scheduleController) AllowSchedule() bool {
 
 func collectOperatorCounterMetrics(op Operator) {
 	metrics := make(map[string]uint64)
-	for _, op := range op.(*regionOperator).Ops {
+	regionOp, ok := op.(*regionOperator)
+	if !ok {
+		return
+	}
+	for _, op := range regionOp.Ops {
 		switch o := op.(type) {
 		case *changePeerOperator:
 			metrics[o.Name]++
