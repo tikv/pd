@@ -17,8 +17,8 @@ import (
 	"fmt"
 	"math"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
-	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
@@ -266,6 +266,17 @@ func newTransferPeer(region *RegionInfo, oldPeer, newPeer *metapb.Peer) Operator
 		return newRegionOperator(region, regionKind, addPeer, transferLeader, removePeer)
 	}
 	return newRegionOperator(region, regionKind, addPeer, removePeer)
+}
+
+func newPriorityTransferPeer(region *RegionInfo, oldPeer, newPeer *metapb.Peer) Operator {
+	addPeer := newAddPeerOperator(region.GetId(), newPeer)
+	removePeer := newRemovePeerOperator(region.GetId(), oldPeer)
+	return newRegionOperator(region, priorityKind, addPeer, removePeer)
+}
+
+func newPriorityTransferLeader(region *RegionInfo, newLeader *metapb.Peer) Operator {
+	transferLeader := newTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
+	return newRegionOperator(region, priorityKind, transferLeader)
 }
 
 func newTransferLeader(region *RegionInfo, newLeader *metapb.Peer) Operator {

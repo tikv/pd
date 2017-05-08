@@ -17,13 +17,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ngaut/log"
+	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 const (
-	maxOperatorWaitTime = 5 * time.Minute
+	maxOperatorWaitTime = 3 * time.Minute
 )
 
 // Operator is an interface to schedule region.

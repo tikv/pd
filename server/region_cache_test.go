@@ -115,6 +115,10 @@ func (s *testRegionCacheSuite) TestLRUCache(c *C) {
 
 	c.Assert(cache.len(), Equals, 3)
 
+	val, ok = cache.peek(1)
+	c.Assert(ok, IsTrue)
+	c.Assert(val, DeepEquals, "1")
+
 	elems := cache.elems()
 	c.Assert(elems, HasLen, 3)
 	c.Assert(elems[0].value, DeepEquals, "4")

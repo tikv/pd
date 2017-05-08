@@ -13,7 +13,7 @@ import:
 - package: github.com/cockroachdb/cmux
   version: 112f0506e7743d64a6eb8fedbcff13d9979bbf92
 - package: github.com/coreos/etcd
-  version: 9ca7f22e84f58deb40ea0de78b350c0fe3eaf77b
+  version: ea5f6dab6b1d07e22cf46bf5f5088d567548c124
   subpackages:
   - alarm
   - auth
@@ -97,8 +97,6 @@ import:
   version: ~1.1.0
 - package: github.com/gorilla/mux
   version: ~1.1.0
-- package: github.com/gorilla/websocket
-  version: a836c37014dbbf0d1e871d04531b851fcbdeb22d
 - package: github.com/grpc-ecosystem/grpc-gateway
   version: 84398b94e188ee336f307779b57b3aa91af7063c
   subpackages:
@@ -120,7 +118,7 @@ import:
 - package: github.com/pingcap/check
   version: ce8a2f822ab1e245a4eefcef2996531c79c943f1
 - package: github.com/pingcap/kvproto
-  version: 0811f27579a1070546c4d5496bf3f6fa62cec750 
+  version: 0811f27579a1070546c4d5496bf3f6fa62cec750
   subpackages:
   - pkg/coprocessor
   - pkg/eraftpb
@@ -201,7 +199,7 @@ import:
   repo: https://github.com/spf13/cobra.git
   vcs: git
 - package: github.com/chzyer/readline
-  version: c914be64f07d9998f52bf0d598ec26d457168c0f 
+  version: c914be64f07d9998f52bf0d598ec26d457168c0f
 - package: github.com/dustin/go-humanize
   version: 7a41df006ff9af79a29f0ffa9c5f21fbe6314a2d
 - package: github.com/elazarl/go-bindata-assetfs
@@ -209,3 +207,7 @@ import:
   version: c2ca1c75c6af5556eb6ce67994120adf12f2ccef
 - package: github.com/montanaflynn/stats
   version: f8cd06f93c6c1b06028caafb88b540fc820f77c1
+- package: github.com/Sirupsen/logrus
+  version: v0.11.5
+- package: gopkg.in/natefinch/lumberjack.v2
+  version: v2

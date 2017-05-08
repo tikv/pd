@@ -21,9 +21,9 @@ import (
 	"sync"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/juju/errors"
-	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -84,17 +84,21 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 	c.cachedCluster = cluster
-
 	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt)
-	c.coordinator.run()
-
-	c.wg.Add(1)
 	c.quit = make(chan struct{})
+
+	c.wg.Add(2)
+	go c.runCoordinator()
 	go c.runBackgroundJobs(backgroundJobInterval)
 
 	c.running = true
 
 	return nil
+}
+
+func (c *RaftCluster) runCoordinator() {
+	c.coordinator.run()
+	c.wg.Done()
 }
 
 func (c *RaftCluster) stop() {
@@ -108,9 +112,8 @@ func (c *RaftCluster) stop() {
 	c.running = false
 
 	close(c.quit)
-	c.wg.Wait()
-
 	c.coordinator.stop()
+	c.wg.Wait()
 }
 
 func (c *RaftCluster) isRunning() bool {
