@@ -29,6 +29,7 @@ const (
 	leaderKind
 	regionKind
 	priorityKind
+	otherKind
 )
 
 // storeInfo contains information about a store.
