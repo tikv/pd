@@ -48,7 +48,8 @@ const (
 )
 
 var (
-	hotRegionLowThreshold = 3
+	majorHotRegionDegreeLowThreshold = 3
+	minorHotRegionDegreeLowThreshold = 5
 	errSchedulerExisted   = errors.New("scheduler existed")
 	errSchedulerNotFound  = errors.New("scheduler not found")
 )

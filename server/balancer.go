@@ -482,11 +482,11 @@ func (h *balanceHotRegionScheduler) calculateScores(cluster *clusterInfo) {
 	h.Lock()
 	defer h.Unlock()
 
-	h.calculateScoresImpl(cluster, major)
-	h.calculateScoresImpl(cluster, minor)
+	h.calculateScoresImpl(cluster, major, majorHotRegionDegreeLowThreshold)
+	h.calculateScoresImpl(cluster, minor, minorHotRegionDegreeLowThreshold)
 }
 
-func (h *balanceHotRegionScheduler) calculateScoresImpl(cluster *clusterInfo, t HotRegionType) {
+func (h *balanceHotRegionScheduler) calculateScoresImpl(cluster *clusterInfo, t HotRegionType, degreeThreshold int) {
 	scoreStatus := make(map[uint64]*StoreHotRegions)
 	var items []*cacheItem
 	switch t {
@@ -503,7 +503,7 @@ func (h *balanceHotRegionScheduler) calculateScoresImpl(cluster *clusterInfo, t 
 		if !ok {
 			continue
 		}
-		if r.HotDegree < hotRegionLowThreshold {
+		if r.HotDegree < degreeThreshold {
 			continue
 		}
 
