@@ -348,6 +348,12 @@ func (r *replicaChecker) checkOfflinePeer(region *RegionInfo) Operator {
 		if store.isUp() {
 			continue
 		}
+
+		// check the number of replicas firstly
+		if len(region.GetPeers()) > r.opt.GetMaxReplicas() {
+			return newRemovePeer(region, peer)
+		}
+
 		newPeer, _ := r.selectBestPeer(region)
 		if newPeer == nil {
 			return nil

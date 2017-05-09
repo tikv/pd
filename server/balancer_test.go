@@ -592,10 +592,15 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 	tc.setStoreBusy(4, false)
 	checkRemovePeer(c, rc.Check(region), 4)
-	region.RemoveStorePeer(4)
 
-	// Transfer peer to store 4.
+	// Test offline
+	// the number of region peers more than the maxReplicas
+	// remove the peer
 	tc.setStoreOffline(3)
+	checkRemovePeer(c, rc.Check(region), 3)
+	region.RemoveStorePeer(4)
+	// the number of region peers equals the maxReplicas
+	// Transfer peer to store 4.
 	checkTransferPeer(c, rc.Check(region), 3, 4)
 
 	// Store 5 has a different zone, we can keep it safe.
