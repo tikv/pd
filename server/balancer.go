@@ -464,16 +464,16 @@ func (h *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 		return newPriorityTransferLeader(srcRegionMajor, newLeaderMajor)
 	}
 
-	// balance minor hot regions
-	srcRegionMinor, srcPeerMinor, destPeerMinor := h.balanceByPeer(cluster, minor)
-	if srcRegionMinor != nil {
-		return newPriorityTransferPeer(srcRegionMinor, srcPeerMinor, destPeerMinor)
-	}
-
-	srcRegionMinor, newLeaderMinor := h.balanceByLeader(cluster, minor)
-	if srcRegionMinor != nil {
-		return newPriorityTransferLeader(srcRegionMinor, newLeaderMinor)
-	}
+	//// balance minor hot regions
+	//srcRegionMinor, srcPeerMinor, destPeerMinor := h.balanceByPeer(cluster, minor)
+	//if srcRegionMinor != nil {
+	//	return newPriorityTransferPeer(srcRegionMinor, srcPeerMinor, destPeerMinor)
+	//}
+	//
+	//srcRegionMinor, newLeaderMinor := h.balanceByLeader(cluster, minor)
+	//if srcRegionMinor != nil {
+	//	return newPriorityTransferLeader(srcRegionMinor, newLeaderMinor)
+	//}
 
 	return nil
 }
