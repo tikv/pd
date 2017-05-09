@@ -14,6 +14,7 @@
 package api
 
 import (
+	"github.com/juju/errors"
 	"net/http"
 	"strconv"
 
@@ -21,6 +22,8 @@ import (
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
+
+var errUnknownOperatorKind = errors.New("Unknown operator kind")
 
 type historyHandler struct {
 	*server.Handler
@@ -47,9 +50,20 @@ func (h *historyHandler) GetOperators(w http.ResponseWriter, r *http.Request) {
 func (h *historyHandler) GetOperatorsOfKind(w http.ResponseWriter, r *http.Request) {
 	k := mux.Vars(r)["kind"]
 	l := mux.Vars(r)["limit"]
-	kind, err := strconv.Atoi(k)
-	if err != nil {
-		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+	var kind server.ResourceKind
+	switch k {
+	case "admin":
+		kind = 0
+	case "leader":
+		kind = 1
+	case "region":
+		kind = 2
+	case "hotspot":
+		kind = 3
+	case "other":
+		kind = 4
+	default:
+		h.r.JSON(w, http.StatusInternalServerError, errUnknownOperatorKind.Error())
 		return
 	}
 	limit, err := strconv.Atoi(l)
@@ -57,8 +71,12 @@ func (h *historyHandler) GetOperatorsOfKind(w http.ResponseWriter, r *http.Reque
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if limit <= 0 {
+		h.r.JSON(w, http.StatusOK, nil)
+		return
+	}
 
-	ops, err := h.GetHistoryOperatorsOfKind(server.ResourceKind(kind))
+	ops, err := h.GetHistoryOperatorsOfKind(kind)
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -66,5 +84,6 @@ func (h *historyHandler) GetOperatorsOfKind(w http.ResponseWriter, r *http.Reque
 	if limit > len(ops) {
 		limit = len(ops)
 	}
+
 	h.r.JSON(w, http.StatusOK, ops[:limit])
 }

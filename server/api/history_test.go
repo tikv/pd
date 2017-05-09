@@ -84,19 +84,21 @@ func (s *testHistorySuite) TestHistroyOperators(c *C) {
 
 	// gets history by kind and limit
 	tbl := []struct {
-		kind   int
+		kind   string
 		limit  int
 		result int
 	}{
-		{0, 0, 0},
-		{0, 1, 1},
-		{0, 2, 2},
-		{0, 3, 2},
+		{"admin", 0, 0},
+		{"admin", -1, 0},
+		{"admin", 1, 1},
+		{"admin", 2, 2},
+		{"admin", 3, 2},
 	}
 
 	for _, t := range tbl {
-		url = fmt.Sprintf("%s/history/%d/%d", s.urlPrefix, t.kind, t.limit)
+		url = fmt.Sprintf("%s/history/%s/%d", s.urlPrefix, t.kind, t.limit)
 		resp, err = s.cli.Get(url)
+		c.Assert(resp.StatusCode, Equals, 200)
 		c.Assert(err, IsNil)
 		res = []interface{}{}
 		err = readJSON(resp.Body, &res)

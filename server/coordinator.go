@@ -300,7 +300,7 @@ func (c *coordinator) getHistoriesOfKind(kind ResourceKind) []Operator {
 	for _, elem := range c.histories.elems() {
 		op := elem.value.(Operator)
 		if op.GetResourceKind() == kind {
-			operators = append(operators, elem.value.(Operator))
+			operators = append(operators, op)
 		}
 	}
 
