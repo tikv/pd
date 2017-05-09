@@ -344,7 +344,7 @@ func newClusterInfo(id IDAllocator) *clusterInfo {
 		stores:               newStoresInfo(),
 		regions:              newRegionsInfo(),
 		majorWriteStatistics: newLRUCache(writeStatLRUMaxLen),
-		minorWriteStatistics: newLRUCache(writeStatLRUMaxLen),
+		minorWriteStatistics: newLRUCache(writeStatLRUMaxLen * 8),
 	}
 }
 
