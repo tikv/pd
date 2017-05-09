@@ -194,3 +194,10 @@ func (s *StoreStatus) GetUptime() time.Duration {
 	}
 	return 0
 }
+
+const defaultStoreDownTime = time.Minute
+
+// IsDown returns whether the store is down
+func (s *StoreStatus) IsDown() bool {
+	return time.Now().Sub(s.LastHeartbeatTS) > defaultStoreDownTime
+}

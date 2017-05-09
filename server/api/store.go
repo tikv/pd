@@ -53,8 +53,10 @@ type storeInfo struct {
 	Status *storeStatus `json:"status"`
 }
 
+const downStateName = "Down"
+
 func newStoreInfo(store *metapb.Store, status *server.StoreStatus) *storeInfo {
-	return &storeInfo{
+	s := &storeInfo{
 		Store: &metaStore{
 			Store:     store,
 			StateName: store.State.String(),
@@ -74,6 +76,10 @@ func newStoreInfo(store *metapb.Store, status *server.StoreStatus) *storeInfo {
 			Uptime:             typeutil.NewDuration(status.GetUptime()),
 		},
 	}
+	if store.State == metapb.StoreState_Up && status.IsDown() {
+		s.Store.StateName = downStateName
+	}
+	return s
 }
 
 type storesInfo struct {
