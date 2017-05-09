@@ -841,7 +841,7 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	}
 	hb.calculateScore(tc.clusterInfo)
 	for _, e := range expect {
-		c.Assert(hb.scoreStatus[uint64(e.streID)].RegionCount, Equals, e.hotRegionNumber)
+		c.Assert(hb.majorScoreStatus[uint64(e.streID)].RegionCount, Equals, e.hotRegionNumber)
 	}
 
 	// Test adjustLimit
