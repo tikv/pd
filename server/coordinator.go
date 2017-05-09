@@ -39,7 +39,7 @@ const (
 	hotRegionLimitFactor          = 0.75
 	hotRegionScheduleFactor       = 0.9
 	majorHotRegionMinWriteRate    = 16 * 1024
-	minorHotRegionMinWriteRate    = 4 * 1024
+	minorHotRegionMinWriteRate    = 2 * 1024
 	regionHeartBeatReportInterval = 60
 	storeHeartBeatReportInterval  = 10
 	minHotRegionReportInterval    = 3

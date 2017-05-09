@@ -790,7 +790,7 @@ func (c *clusterInfo) updateWriteStatus(region *RegionInfo) {
 	if majorHotRegionThreshold < majorHotRegionMinWriteRate {
 		majorHotRegionThreshold = majorHotRegionMinWriteRate
 	}
-	minorHotRegionThreshold := majorHotRegionThreshold / 4
+	minorHotRegionThreshold := majorHotRegionThreshold / 8
 	if minorHotRegionThreshold < minorHotRegionMinWriteRate {
 		minorHotRegionThreshold = minorHotRegionMinWriteRate
 	}
