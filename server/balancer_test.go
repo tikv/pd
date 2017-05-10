@@ -206,7 +206,7 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 		tc.addLeaderStore(2, int(t.targetCount))
 		source := cluster.getStore(1)
 		target := cluster.getStore(2)
-		c.Assert(shouldBalance(source, target, leaderKind), Equals, t.expectedResult)
+		c.Assert(shouldBalance(source, target, LeaderKind), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -214,7 +214,7 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 		tc.addRegionStore(2, int(t.targetCount))
 		source := cluster.getStore(1)
 		target := cluster.getStore(2)
-		c.Assert(shouldBalance(source, target, regionKind), Equals, t.expectedResult)
+		c.Assert(shouldBalance(source, target, RegionKind), Equals, t.expectedResult)
 	}
 }
 
@@ -226,11 +226,11 @@ func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
 	tc.addLeaderStore(3, 30)
 
 	// StandDeviation is sqrt((10^2+0+10^2)/3).
-	c.Assert(adjustBalanceLimit(cluster, leaderKind), Equals, uint64(math.Sqrt(200.0/3.0)))
+	c.Assert(adjustBalanceLimit(cluster, LeaderKind), Equals, uint64(math.Sqrt(200.0/3.0)))
 
 	tc.setStoreOffline(1)
 	// StandDeviation is sqrt((5^2+5^2)/2).
-	c.Assert(adjustBalanceLimit(cluster, leaderKind), Equals, uint64(math.Sqrt(50.0/2.0)))
+	c.Assert(adjustBalanceLimit(cluster, LeaderKind), Equals, uint64(math.Sqrt(50.0/2.0)))
 }
 
 var _ = Suite(&testBalanceLeaderSchedulerSuite{})

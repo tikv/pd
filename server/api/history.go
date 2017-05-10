@@ -50,22 +50,6 @@ func (h *historyHandler) GetOperators(w http.ResponseWriter, r *http.Request) {
 func (h *historyHandler) GetOperatorsOfKind(w http.ResponseWriter, r *http.Request) {
 	k := mux.Vars(r)["kind"]
 	l := mux.Vars(r)["limit"]
-	var kind server.ResourceKind
-	switch k {
-	case "admin":
-		kind = 0
-	case "leader":
-		kind = 1
-	case "region":
-		kind = 2
-	case "hotspot":
-		kind = 3
-	case "other":
-		kind = 4
-	default:
-		h.r.JSON(w, http.StatusInternalServerError, errUnknownOperatorKind.Error())
-		return
-	}
 	limit, err := strconv.Atoi(l)
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
@@ -75,7 +59,11 @@ func (h *historyHandler) GetOperatorsOfKind(w http.ResponseWriter, r *http.Reque
 		h.r.JSON(w, http.StatusOK, nil)
 		return
 	}
-
+	kind := server.ParseResourceKind(k)
+	if kind == server.UnKnownKind {
+		h.r.JSON(w, http.StatusInternalServerError, errUnknownOperatorKind.Error())
+		return
+	}
 	ops, err := h.GetHistoryOperatorsOfKind(kind)
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())

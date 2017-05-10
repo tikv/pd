@@ -97,7 +97,7 @@ func (c *coordinator) dispatch(region *RegionInfo) *pdpb.RegionHeartbeatResponse
 	}
 
 	// Check replica operator.
-	if c.limiter.operatorCount(regionKind) >= c.opt.GetReplicaScheduleLimit() {
+	if c.limiter.operatorCount(RegionKind) >= c.opt.GetReplicaScheduleLimit() {
 		return nil
 	}
 	if op := c.checker.Check(region); op != nil {
@@ -242,10 +242,10 @@ func (c *coordinator) addOperator(op Operator) bool {
 }
 
 func isHigherPriorityOperator(new Operator, old Operator) bool {
-	if new.GetResourceKind() == adminKind {
+	if new.GetResourceKind() == AdminKind {
 		return true
 	}
-	if new.GetResourceKind() == priorityKind && old.GetResourceKind() != priorityKind {
+	if new.GetResourceKind() == PriorityKind && old.GetResourceKind() != PriorityKind {
 		return true
 	}
 	return false

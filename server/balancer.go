@@ -82,7 +82,7 @@ func newBalanceLeaderScheduler(opt *scheduleOption) *balanceLeaderScheduler {
 	return &balanceLeaderScheduler{
 		opt:      opt,
 		limit:    1,
-		selector: newBalanceSelector(leaderKind, filters),
+		selector: newBalanceSelector(LeaderKind, filters),
 	}
 }
 
@@ -91,7 +91,7 @@ func (l *balanceLeaderScheduler) GetName() string {
 }
 
 func (l *balanceLeaderScheduler) GetResourceKind() ResourceKind {
-	return leaderKind
+	return LeaderKind
 }
 
 func (l *balanceLeaderScheduler) GetResourceLimit() uint64 {
@@ -141,7 +141,7 @@ func newBalanceRegionScheduler(opt *scheduleOption) *balanceRegionScheduler {
 		rep:      opt.GetReplication(),
 		cache:    cache,
 		limit:    1,
-		selector: newBalanceSelector(regionKind, filters),
+		selector: newBalanceSelector(RegionKind, filters),
 	}
 }
 
@@ -150,7 +150,7 @@ func (s *balanceRegionScheduler) GetName() string {
 }
 
 func (s *balanceRegionScheduler) GetResourceKind() ResourceKind {
-	return regionKind
+	return RegionKind
 }
 
 func (s *balanceRegionScheduler) GetResourceLimit() uint64 {
@@ -425,7 +425,7 @@ func (h *balanceHotRegionScheduler) GetName() string {
 }
 
 func (h *balanceHotRegionScheduler) GetResourceKind() ResourceKind {
-	return priorityKind
+	return PriorityKind
 }
 
 func (h *balanceHotRegionScheduler) GetResourceLimit() uint64 {

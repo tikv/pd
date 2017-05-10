@@ -146,17 +146,17 @@ func (h *Handler) GetOperators() ([]Operator, error) {
 
 // GetAdminOperators returns the running admin operators.
 func (h *Handler) GetAdminOperators() ([]Operator, error) {
-	return h.GetOperatorsOfKind(adminKind)
+	return h.GetOperatorsOfKind(AdminKind)
 }
 
 // GetLeaderOperators returns the running leader operators.
 func (h *Handler) GetLeaderOperators() ([]Operator, error) {
-	return h.GetOperatorsOfKind(leaderKind)
+	return h.GetOperatorsOfKind(LeaderKind)
 }
 
 // GetRegionOperators returns the running region operators.
 func (h *Handler) GetRegionOperators() ([]Operator, error) {
-	return h.GetOperatorsOfKind(regionKind)
+	return h.GetOperatorsOfKind(RegionKind)
 }
 
 // GetOperatorsOfKind returns the running operators of the kind.
