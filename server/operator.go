@@ -22,17 +22,23 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-const maxOperatorWaitTime = 3 * time.Minute
+const maxOperatorWaitTime = 5 * time.Minute
 
 // ResourceKind distinguishes different kinds of resources.
 type ResourceKind int
 
 const (
+	// UnKnownKind indicates the unknown kind resource
 	UnKnownKind ResourceKind = iota
+	// AdminKind indicates that specify by admin
 	AdminKind
+	// LeaderKind indicates the leader kind resource
 	LeaderKind
+	// RegionKind indicates the region kind resource
 	RegionKind
+	// PriorityKind indicates the priority kind resource
 	PriorityKind
+	// OtherKind indicates the other kind resource
 	OtherKind
 )
 
@@ -62,6 +68,7 @@ func (k ResourceKind) String() string {
 	return resourceKindToName[0]
 }
 
+// ParseResourceKind convert string to ResourceKind
 func ParseResourceKind(name string) ResourceKind {
 	k, ok := resourceKindToValue[name]
 	if ok {
