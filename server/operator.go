@@ -51,7 +51,7 @@ var resourceKindToName = map[int]string{
 	5: "other",
 }
 
-var resourceKindToValue = map[string]ResourceKind{
+var resourceNameToValue = map[string]ResourceKind{
 	"unknown":  UnKnownKind,
 	"admin":    AdminKind,
 	"leader":   LeaderKind,
@@ -70,11 +70,11 @@ func (k ResourceKind) String() string {
 
 // ParseResourceKind convert string to ResourceKind
 func ParseResourceKind(name string) ResourceKind {
-	k, ok := resourceKindToValue[name]
+	k, ok := resourceNameToValue[name]
 	if ok {
 		return k
 	}
-	return resourceKindToValue["unknown"]
+	return UnKnownKind
 }
 
 // Operator is an interface to schedule region.
