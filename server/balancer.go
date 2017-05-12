@@ -442,7 +442,7 @@ func (h *balanceHotRegionScheduler) Prepare(cluster *clusterInfo) error { return
 func (h *balanceHotRegionScheduler) Cleanup(cluster *clusterInfo) {}
 
 func (h *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
-	h.calculateScores(cluster)
+	h.calcScore(cluster)
 
 	// balance by peer
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster)
@@ -459,9 +459,10 @@ func (h *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 	return nil
 }
 
-func (h *balanceHotRegionScheduler) calculateScores(cluster *clusterInfo) {
+func (h *balanceHotRegionScheduler) calcScore(cluster *clusterInfo) {
 	h.Lock()
 	defer h.Unlock()
+
 	h.scoreStatus = make(map[uint64]*StoreHotRegions)
 	items := cluster.writeStatistics.elems()
 	for _, item := range items {
