@@ -38,8 +38,7 @@ const (
 	storeHotRegionsDefaultLen     = 100
 	hotRegionLimitFactor          = 0.75
 	hotRegionScheduleFactor       = 0.9
-	majorHotRegionMinWriteRate    = 16 * 1024
-	minorHotRegionMinWriteRate    = 3 * 1024
+	hotRegionMinWriteRate         = 16 * 1024
 	regionHeartBeatReportInterval = 60
 	storeHeartBeatReportInterval  = 10
 	minHotRegionReportInterval    = 3
@@ -48,8 +47,7 @@ const (
 )
 
 var (
-	majorHotRegionDegreeLowThreshold = 3
-	minorHotRegionDegreeLowThreshold = 5
+	hotRegionLowThreshold = 3
 	errSchedulerExisted   = errors.New("scheduler existed")
 	errSchedulerNotFound  = errors.New("scheduler not found")
 )

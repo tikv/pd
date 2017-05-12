@@ -333,18 +333,16 @@ type clusterInfo struct {
 	stores  *storesInfo
 	regions *regionsInfo
 
-	activeRegions        int
-	majorWriteStatistics *lruCache
-	minorWriteStatistics *lruCache
+	activeRegions   int
+	writeStatistics *lruCache
 }
 
 func newClusterInfo(id IDAllocator) *clusterInfo {
 	return &clusterInfo{
-		id:                   id,
-		stores:               newStoresInfo(),
-		regions:              newRegionsInfo(),
-		majorWriteStatistics: newLRUCache(writeStatLRUMaxLen),
-		minorWriteStatistics: newLRUCache(writeStatLRUMaxLen * 8),
+		id:              id,
+		stores:          newStoresInfo(),
+		regions:         newRegionsInfo(),
+		writeStatistics: newLRUCache(writeStatLRUMaxLen),
 	}
 }
 
@@ -492,16 +490,10 @@ func (c *clusterInfo) getRegion(regionID uint64) *RegionInfo {
 }
 
 // updateWriteStatCache updates statistic for a region if it's hot, or remove it from statistics if it cools down
-func (c *clusterInfo) updateWriteStatCache(region *RegionInfo, majorHotRegionThreshold, minorHotRegionThreshold uint64) {
-	if !c.updateMajorWriteStatCache(region, majorHotRegionThreshold) {
-		c.updateMinorWriteStatCache(region, minorHotRegionThreshold)
-	}
-}
-
-func (c *clusterInfo) updateMajorWriteStatCache(region *RegionInfo, majorHotRegionThreshold uint64) bool {
+func (c *clusterInfo) updateWriteStatCache(region *RegionInfo, hotRegionThreshold uint64) {
 	var v *RegionStat
 	key := region.GetId()
-	value, isExist := c.majorWriteStatistics.peek(key)
+	value, isExist := c.writeStatistics.peek(key)
 	newItem := &RegionStat{
 		RegionID:       region.GetId(),
 		WrittenBytes:   region.WrittenBytes,
@@ -516,47 +508,12 @@ func (c *clusterInfo) updateMajorWriteStatCache(region *RegionInfo, majorHotRegi
 		newItem.HotDegree = v.HotDegree + 1
 	}
 
-	if region.WrittenBytes < majorHotRegionThreshold {
-		if !isExist {
-			return false
-		}
-		if v.antiCount <= 0 {
-			c.majorWriteStatistics.remove(key)
-			return false
-		}
-		// eliminate some noise
-		newItem.HotDegree = v.HotDegree - 1
-		newItem.antiCount = v.antiCount - 1
-		newItem.WrittenBytes = v.WrittenBytes
-	}
-	c.majorWriteStatistics.add(key, newItem)
-	return true
-}
-
-func (c *clusterInfo) updateMinorWriteStatCache(region *RegionInfo, minorHotRegionThreshold uint64) {
-	var v *RegionStat
-	key := region.GetId()
-	value, isExist := c.minorWriteStatistics.peek(key)
-	newItem := &RegionStat{
-		RegionID:       region.GetId(),
-		WrittenBytes:   region.WrittenBytes,
-		LastUpdateTime: time.Now(),
-		StoreID:        region.Leader.GetStoreId(),
-		version:        region.GetRegionEpoch().GetVersion(),
-		antiCount:      hotRegionAntiCount,
-	}
-
-	if isExist {
-		v = value.(*RegionStat)
-		newItem.HotDegree = v.HotDegree + 1
-	}
-
-	if region.WrittenBytes < minorHotRegionThreshold {
+	if region.WrittenBytes < hotRegionThreshold {
 		if !isExist {
 			return
 		}
 		if v.antiCount <= 0 {
-			c.minorWriteStatistics.remove(key)
+			c.writeStatistics.remove(key)
 			return
 		}
 		// eliminate some noise
@@ -564,7 +521,7 @@ func (c *clusterInfo) updateMinorWriteStatCache(region *RegionInfo, minorHotRegi
 		newItem.antiCount = v.antiCount - 1
 		newItem.WrittenBytes = v.WrittenBytes
 	}
-	c.minorWriteStatistics.add(key, newItem)
+	c.writeStatistics.add(key, newItem)
 }
 
 func (c *clusterInfo) searchRegion(regionKey []byte) *RegionInfo {
@@ -768,7 +725,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
 
 func (c *clusterInfo) updateWriteStatus(region *RegionInfo) {
 	var WrittenBytesPerSec uint64
-	v, isExist := c.majorWriteStatistics.peek(region.GetId())
+	v, isExist := c.writeStatistics.peek(region.GetId())
 	if isExist {
 		interval := time.Now().Sub(v.(*RegionStat).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
@@ -785,10 +742,10 @@ func (c *clusterInfo) updateWriteStatus(region *RegionInfo) {
 	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot regions
 	// divide 2 because the store reports data about two times than the region record write to rocksdb
 	divisor := float64(writeStatLRUMaxLen) * 2 * storeHeartBeatReportInterval
-	majorHotRegionThreshold := uint64(float64(c.getClusterTotalWrittenBytes()) / divisor)
+	hotRegionThreshold := uint64(float64(c.getClusterTotalWrittenBytes()) / divisor)
 
-	if majorHotRegionThreshold < majorHotRegionMinWriteRate {
-		majorHotRegionThreshold = majorHotRegionMinWriteRate
+	if hotRegionThreshold < hotRegionMinWriteRate {
+		hotRegionThreshold = hotRegionMinWriteRate
 	}
-	c.updateWriteStatCache(region, majorHotRegionThreshold, minorHotRegionMinWriteRate)
+	c.updateWriteStatCache(region, hotRegionThreshold)
 }
