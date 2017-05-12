@@ -22,9 +22,60 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
+const maxOperatorWaitTime = 5 * time.Minute
+
+// ResourceKind distinguishes different kinds of resources.
+type ResourceKind int
+
 const (
-	maxOperatorWaitTime = 5 * time.Minute
+	// UnKnownKind indicates the unknown kind resource
+	UnKnownKind ResourceKind = iota
+	// AdminKind indicates that specify by admin
+	AdminKind
+	// LeaderKind indicates the leader kind resource
+	LeaderKind
+	// RegionKind indicates the region kind resource
+	RegionKind
+	// PriorityKind indicates the priority kind resource
+	PriorityKind
+	// OtherKind indicates the other kind resource
+	OtherKind
 )
+
+var resourceKindToName = map[int]string{
+	0: "unknown",
+	1: "admin",
+	2: "leader",
+	3: "region",
+	4: "priority",
+	5: "other",
+}
+
+var resourceNameToValue = map[string]ResourceKind{
+	"unknown":  UnKnownKind,
+	"admin":    AdminKind,
+	"leader":   LeaderKind,
+	"region":   RegionKind,
+	"priority": PriorityKind,
+	"other":    OtherKind,
+}
+
+func (k ResourceKind) String() string {
+	s, ok := resourceKindToName[int(k)]
+	if ok {
+		return s
+	}
+	return resourceKindToName[0]
+}
+
+// ParseResourceKind convert string to ResourceKind
+func ParseResourceKind(name string) ResourceKind {
+	k, ok := resourceNameToValue[name]
+	if ok {
+		return k
+	}
+	return UnKnownKind
+}
 
 // Operator is an interface to schedule region.
 type Operator interface {
@@ -56,7 +107,7 @@ func (op *adminOperator) GetRegionID() uint64 {
 }
 
 func (op *adminOperator) GetResourceKind() ResourceKind {
-	return adminKind
+	return AdminKind
 }
 
 func (op *adminOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
@@ -168,7 +219,7 @@ func (op *changePeerOperator) GetRegionID() uint64 {
 }
 
 func (op *changePeerOperator) GetResourceKind() ResourceKind {
-	return regionKind
+	return RegionKind
 }
 
 func (op *changePeerOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
@@ -224,7 +275,7 @@ func (op *transferLeaderOperator) GetRegionID() uint64 {
 }
 
 func (op *transferLeaderOperator) GetResourceKind() ResourceKind {
-	return leaderKind
+	return LeaderKind
 }
 
 func (op *transferLeaderOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {

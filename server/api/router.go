@@ -30,6 +30,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	handler := svr.GetHandler()
 
+	historyHanlder := newHistoryHandler(handler, rd)
+	router.HandleFunc("/api/v1/history", historyHanlder.GetOperators).Methods("GET")
+	router.HandleFunc("/api/v1/history/{kind}/{limit}", historyHanlder.GetOperatorsOfKind).Methods("GET")
+
 	operatorHandler := newOperatorHandler(handler, rd)
 	router.HandleFunc("/api/v1/operators", operatorHandler.List).Methods("GET")
 	router.HandleFunc("/api/v1/operators", operatorHandler.Post).Methods("POST")
@@ -63,7 +67,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	hotStatusHandler := newHotStatusHandler(handler, rd)
 	router.HandleFunc("/api/v1/hotspot/regions", hotStatusHandler.GetHotRegions).Methods("GET")
 	router.HandleFunc("/api/v1/hotspot/stores", hotStatusHandler.GetHotStores).Methods("GET")
-
 	router.Handle("/api/v1/events", newEventsHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/feed", newFeedHandler(svr, rd)).Methods("GET")
 
