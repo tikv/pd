@@ -26,7 +26,7 @@ const clusterPrefix = "pd/api/v1/cluster"
 func NewClusterCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cluster",
-		Short: "show cluster information",
+		Short: "show the cluster information",
 		Run:   showClusterCommandFunc,
 	}
 	return cmd
@@ -35,7 +35,7 @@ func NewClusterCommand() *cobra.Command {
 func showClusterCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, clusterPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get cluster information: %s", err)
+		fmt.Printf("Failed to get the cluster information: %s", err)
 		return
 	}
 	fmt.Println(r)
