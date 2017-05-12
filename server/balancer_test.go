@@ -805,7 +805,7 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	// for test follow just 1 peer here
 	tc.addLeaderRegionWithWriteInfo(2, 1, 419115*regionHeartBeatReportInterval, 2)
 	tc.addLeaderRegionWithWriteInfo(3, 1, 0, 2, 3)
-	majorHotRegionDegreeLowThreshold = 0
+	hotRegionLowThreshold = 0
 	checkTransferLeader(c, hb.Schedule(cluster), 1, 2)
 
 	// add 2 region , total 5 region

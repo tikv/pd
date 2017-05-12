@@ -397,12 +397,12 @@ func (m RegionsStat) Less(i, j int) bool { return m[i].WrittenBytes < m[j].Writt
 
 // StoreHotRegions records all hot regions in one store with sequence
 type StoreHotRegions struct {
-	// Hot regions in this store as the role of Leader
+	// Hot regions in this store as the role of leader
 	WrittenBytesAsLeader uint64      `json:"total_written_bytes_as_leader"`
 	RegionsCountAsLeader int         `json:"regions_count_as_leader"`
 	RegionsStatAsLeader  RegionsStat `json:"statistics_as_leader"`
 
-	// Hot regions in this store as the role of Follower or Follower
+	// Hot regions in this store as the role of replica
 	WrittenBytesAsPeer uint64      `json:"total_written_bytes_as_peer"`
 	RegionsCountAsPeer int         `json:"regions_count_as_peer"`
 	RegionsStatAsPeer  RegionsStat `json:"statistics_as_peer"`
