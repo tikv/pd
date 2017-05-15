@@ -32,6 +32,11 @@ const (
 	backgroundJobInterval = time.Minute
 )
 
+// Error instances
+var (
+	ErrNotBootstrapped = errors.New("TiKV cluster is not bootstrapped, please start TiKV first")
+)
+
 // RaftCluster is used for cluster config management.
 // Raft cluster key format:
 // cluster 1 -> /1/raft, value is metapb.Cluster
@@ -182,6 +187,15 @@ func (s *Server) GetCluster() *metapb.Cluster {
 	}
 }
 
+// GetRaftClusterBootstrapTime gets raft cluster bootstrap time
+func (s *Server) GetRaftClusterBootstrapTime() (time.Time, error) {
+	data, err := getValue(s.client, makeBootstrapTimeKey(s.getClusterRootPath()))
+	if err != nil {
+		return zeroTime, errors.Trace(err)
+	}
+	return parseTimestamp(data)
+}
+
 func (s *Server) createRaftCluster() error {
 	if s.cluster.isRunning() {
 		return nil
@@ -204,6 +218,10 @@ func makeRegionKey(clusterRootPath string, regionID uint64) string {
 
 func makeStoreKeyPrefix(clusterRootPath string) string {
 	return strings.Join([]string{clusterRootPath, "s", ""}, "/")
+}
+
+func makeBootstrapTimeKey(clusterRootPath string) string {
+	return strings.Join([]string{clusterRootPath, "bootstrap_time"}, "/")
 }
 
 func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
@@ -243,6 +261,7 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 }
 
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
+
 	clusterID := s.clusterID
 
 	log.Infof("try to bootstrap raft cluster %d with %v", clusterID, req)
@@ -265,6 +284,13 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 
 	var ops []clientv3.Op
 	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
+
+	// Set bootstrap time
+	bootstrapKey := makeBootstrapTimeKey(clusterRootPath)
+	nano := time.Now().UnixNano()
+
+	timeData := uint64ToBytes(uint64(nano))
+	ops = append(ops, clientv3.OpPut(bootstrapKey, string(timeData)))
 
 	// Set store meta
 	storeMeta := req.GetStore()

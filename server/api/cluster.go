@@ -35,3 +35,12 @@ func newClusterHandler(svr *server.Server, rd *render.Render) *clusterHandler {
 func (h *clusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetCluster())
 }
+
+func (h *clusterHandler) GetRaftClusterBootstrapTime(w http.ResponseWriter, r *http.Request) {
+	data, err := h.svr.GetRaftClusterBootstrapTime()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, data)
+}

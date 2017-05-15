@@ -102,7 +102,7 @@ func newStoreHandler(svr *server.Server, rd *render.Render) *storeHandler {
 func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
 		return
 	}
 
@@ -127,7 +127,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
 		return
 	}
 
@@ -169,7 +169,7 @@ func newStoresHandler(svr *server.Server, rd *render.Render) *storesHandler {
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
 		return
 	}
 

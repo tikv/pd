@@ -15,6 +15,7 @@ package api
 
 import (
 	"fmt"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -56,4 +57,16 @@ func (s *testClusterInfo) TestCluster(c *C) {
 
 	c1.MaxPeerCount = 6
 	c.Assert(c1, DeepEquals, c2)
+}
+
+func (s *testClusterInfo) TestGetBootstrapTime(c *C) {
+	url := fmt.Sprintf("%s/raft/bootstrap/time", s.urlPrefix)
+	var t, now time.Time
+	err := readJSONWithURL(url, t)
+	c.Assert(err, NotNil)
+	now = time.Now()
+	mustBootstrapCluster(c, s.svr)
+	err = readJSONWithURL(url, &t)
+	c.Assert(err, IsNil)
+	c.Assert(t.After(now), IsTrue)
 }
