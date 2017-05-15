@@ -798,27 +798,34 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	_, opt := newTestScheduleConfig()
 	hb := newBalanceHotRegionScheduler(opt)
 
-	// Add stores 1, 2, 3, 4 with region counts 3, 3, 3, 0.
+	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
 	tc.addRegionStore(1, 3)
-	tc.addRegionStore(2, 3)
-	tc.addRegionStore(3, 3)
-	tc.addRegionStore(4, 0)
+	tc.addRegionStore(2, 2)
+	tc.addRegionStore(3, 2)
+	tc.addRegionStore(4, 2)
+	tc.addRegionStore(5, 0)
 
 	// Report store written bytes.
-	tc.updateStorageWrittenBytes(1, 60*1024*1024)
-	tc.updateStorageWrittenBytes(2, 61*1024*1024)
-	tc.updateStorageWrittenBytes(3, 60*1024*1024)
-	tc.updateStorageWrittenBytes(4, 0)
+	tc.updateStorageWrittenBytes(1, 75*1024*1024)
+	tc.updateStorageWrittenBytes(2, 45*1024*1024)
+	tc.updateStorageWrittenBytes(3, 45*1024*1024)
+	tc.updateStorageWrittenBytes(4, 60*1024*1024)
+	tc.updateStorageWrittenBytes(5, 0)
 
-	// Region 1 and 2 are hot regions, region 3 is not.
-	tc.addLeaderRegionWithWriteInfo(1, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
-	tc.addLeaderRegionWithWriteInfo(2, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
-	tc.addLeaderRegionWithWriteInfo(3, 1, 0, 2, 3)
+	// Region 1, 2 and 3 are hot regions.
+	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
+	//|-----------|--------------|----------------|----------------|---------------|
+	//|     1     |       1      |        2       |       3        |      256KB    |
+	//|     2     |       1      |        3       |       4        |      512KB    |
+	//|     3     |       1      |        2       |       4        |      512KB    |
+	tc.addLeaderRegionWithWriteInfo(1, 1, 256*1024*regionHeartBeatReportInterval, 2, 3)
+	tc.addLeaderRegionWithWriteInfo(2, 1, 512*1024*regionHeartBeatReportInterval, 3, 4)
+	tc.addLeaderRegionWithWriteInfo(3, 1, 512*1024*regionHeartBeatReportInterval, 2, 4)
 	hotRegionLowThreshold = 0
 
-	// Will transfer a hot regions from store 2 to store 4, because store 2 has the
-	// largest written bytes.
-	checkTransferPeer(c, hb.Schedule(cluster), 2, 4)
+	// Will transfer a hot region from store 1 to store 5, because the total count of peers
+	// which is hot for store 1 is more larger than other stores.
+	checkTransferPeer(c, hb.Schedule(cluster), 1, 5)
 
 	// After transfer a hot region from store 1 to store 4, update store written
 	// bytes and written bytes.
@@ -830,7 +837,7 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	tc.addLeaderRegionWithWriteInfo(2, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
 	tc.addLeaderRegionWithWriteInfo(3, 1, 0, 2, 3)
 
-	// We can find that the leader of hot region 1 and hot region 2 are both on store 1,
+	// We can find that the leader of all hot regions are on store 1,
 	// so one of the leader will transfer to another store.
 	checkTransferLeaderFrom(c, hb.Schedule(cluster), 1)
 }
