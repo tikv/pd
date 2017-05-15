@@ -149,7 +149,7 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 		return errors.Trace(err)
 	}
 
-	endpoints := []string{etcdCfg.LCUrls[0].String()}
+	endpoints := []string{etcdCfg.ACUrls[0].String()}
 
 	log.Infof("create etcd v3 client with endpoints %v", endpoints)
 	client, err := clientv3.New(clientv3.Config{
