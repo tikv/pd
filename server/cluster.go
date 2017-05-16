@@ -81,11 +81,11 @@ func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 
 func (c *RaftCluster) loadClusterStatus() error {
 	status := &RaftClusterStatus{}
-	time, err := c.s.kv.getClusterBootstrapTime()
+	t, err := c.s.kv.getClusterBootstrapTime()
 	if err != nil {
 		return errors.Trace(err)
 	}
-	status.BootstrapTime = time
+	status.BootstrapTime = t
 	c.status = status
 	return nil
 }
