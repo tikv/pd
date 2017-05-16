@@ -65,6 +65,21 @@ func (kv *kv) regionPath(regionID uint64) string {
 	return path.Join(kv.clusterPath, "r", fmt.Sprintf("%020d", regionID))
 }
 
+func (kv *kv) clusterStatePath(option string) string {
+	return path.Join(kv.clusterPath, "status", option)
+}
+
+func (kv *kv) getClusterBootstrapTime() (time.Time, error) {
+	data, err := kv.load(kv.clusterStatePath("bootstrap_time"))
+	if err != nil {
+		return zeroTime, errors.Trace(err)
+	}
+	if len(data) == 0 {
+		return zeroTime, ErrNotBootstrapped
+	}
+	return parseTimestamp(data)
+}
+
 func (kv *kv) loadMeta(meta *metapb.Cluster) (bool, error) {
 	return kv.loadProto(kv.clusterPath, meta)
 }

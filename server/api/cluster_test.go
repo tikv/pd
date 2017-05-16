@@ -59,14 +59,14 @@ func (s *testClusterInfo) TestCluster(c *C) {
 	c.Assert(c1, DeepEquals, c2)
 }
 
-func (s *testClusterInfo) TestGetBootstrapTime(c *C) {
-	url := fmt.Sprintf("%s/cluster/raft/status/bootstrap_time", s.urlPrefix)
-	var t, now time.Time
-	err := readJSONWithURL(url, t)
+func (s *testClusterInfo) TestGetClusterStatus(c *C) {
+	url := fmt.Sprintf("%s/cluster/raft/status", s.urlPrefix)
+	status := server.RaftClusterStatus{}
+	err := readJSONWithURL(url, &status)
 	c.Assert(err, NotNil)
-	now = time.Now()
+	now := time.Now()
 	mustBootstrapCluster(c, s.svr)
-	err = readJSONWithURL(url, &t)
+	err = readJSONWithURL(url, &status)
 	c.Assert(err, IsNil)
-	c.Assert(t.After(now), IsTrue)
+	c.Assert(status.BootstrapTime.After(now), IsTrue)
 }

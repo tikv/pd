@@ -16,7 +16,6 @@ package api
 import (
 	"net/http"
 
-	"github.com/gorilla/mux"
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
@@ -40,17 +39,11 @@ func (h *clusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetCluster())
 }
 
-func (h *clusterHandler) GetRaftClusterBootstrapTime(w http.ResponseWriter, r *http.Request) {
-	option := mux.Vars(r)["bootstrap_time"]
-	switch option {
-	case option:
-		data, err := h.svr.GetRaftClusterBootstrapTime()
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		h.rd.JSON(w, http.StatusOK, data)
-	default:
-		h.rd.JSON(w, http.StatusInternalServerError, errUnknownStatusOption.Error())
+func (h *clusterHandler) GetRaftClusterStatus(w http.ResponseWriter, r *http.Request) {
+	status, err := h.svr.GetRaftClusterStatus()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
+	h.rd.JSON(w, http.StatusOK, status)
 }
