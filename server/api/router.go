@@ -46,7 +46,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/schedulers/{name}", schedulerHandler.Delete).Methods("DELETE")
 
 	router.Handle("/api/v1/cluster", newClusterHandler(svr, rd)).Methods("GET")
-	router.HandleFunc("/api/v1/raft/bootstrap/time", newClusterHandler(svr, rd).GetRaftClusterBootstrapTime).Methods("GET")
+	router.HandleFunc("/api/v1/cluster/raft/status/{option}", newClusterHandler(svr, rd).GetRaftClusterBootstrapTime).Methods("GET")
 
 	confHandler := newConfHandler(svr, rd)
 	router.HandleFunc("/api/v1/config", confHandler.Get).Methods("GET")

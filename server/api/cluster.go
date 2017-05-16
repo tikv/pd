@@ -16,9 +16,13 @@ package api
 import (
 	"net/http"
 
+	"github.com/gorilla/mux"
+	"github.com/juju/errors"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
+
+var errUnknownStatusOption = errors.New("unKnown status option")
 
 type clusterHandler struct {
 	svr *server.Server
@@ -37,10 +41,16 @@ func (h *clusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *clusterHandler) GetRaftClusterBootstrapTime(w http.ResponseWriter, r *http.Request) {
-	data, err := h.svr.GetRaftClusterBootstrapTime()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
+	option := mux.Vars(r)["bootstrap_time"]
+	switch option {
+	case option:
+		data, err := h.svr.GetRaftClusterBootstrapTime()
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.rd.JSON(w, http.StatusOK, data)
+	default:
+		h.rd.JSON(w, http.StatusInternalServerError, errUnknownStatusOption.Error())
 	}
-	h.rd.JSON(w, http.StatusOK, data)
 }

@@ -60,7 +60,7 @@ func (s *testClusterInfo) TestCluster(c *C) {
 }
 
 func (s *testClusterInfo) TestGetBootstrapTime(c *C) {
-	url := fmt.Sprintf("%s/raft/bootstrap/time", s.urlPrefix)
+	url := fmt.Sprintf("%s/cluster/raft/status/bootstrap_time", s.urlPrefix)
 	var t, now time.Time
 	err := readJSONWithURL(url, t)
 	c.Assert(err, NotNil)
