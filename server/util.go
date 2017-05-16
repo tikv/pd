@@ -335,10 +335,9 @@ func diffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 }
 
 func parseTimestamp(data []byte) (time.Time, error) {
-	if data == nil {
+	if len(data) == 0 {
 		return zeroTime, nil
 	}
-
 	nano, err := bytesToUint64(data)
 	if err != nil {
 		return zeroTime, errors.Trace(err)

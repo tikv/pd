@@ -220,8 +220,12 @@ func makeStoreKeyPrefix(clusterRootPath string) string {
 	return strings.Join([]string{clusterRootPath, "s", ""}, "/")
 }
 
+func makeRaftClusterStatusPrefix(clusterRootPath string) string {
+	return strings.Join([]string{clusterRootPath, "status"}, "/")
+}
+
 func makeBootstrapTimeKey(clusterRootPath string) string {
-	return strings.Join([]string{clusterRootPath, "bootstrap_time"}, "/")
+	return strings.Join([]string{makeRaftClusterStatusPrefix(clusterRootPath), "bootstrap_time"}, "/")
 }
 
 func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
