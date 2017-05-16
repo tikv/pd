@@ -21,8 +21,6 @@ import (
 	"github.com/unrolled/render"
 )
 
-var errUnknownStatusOption = errors.New("unKnown status option")
-
 type clusterHandler struct {
 	svr *server.Server
 	rd  *render.Render
