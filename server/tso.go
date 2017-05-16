@@ -49,6 +49,9 @@ func (s *Server) loadTimestamp() (time.Time, error) {
 	if err != nil {
 		return zeroTime, errors.Trace(err)
 	}
+	if len(data) == 0 {
+		return zeroTime, nil
+	}
 	return parseTimestamp(data)
 }
 
