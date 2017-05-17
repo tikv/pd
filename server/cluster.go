@@ -67,7 +67,6 @@ type RaftCluster struct {
 
 // ClusterStatus saves some state information
 type ClusterStatus struct {
-	// use pointer to omitempty
 	BootstrapTime *time.Time `json:"raft_bootstrap_time,omitempty"`
 }
 
@@ -217,7 +216,7 @@ func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
 		return nil, errors.Trace(err)
 	}
 	clone := &ClusterStatus{}
-	*clone = *(s.cluster.status)
+	*clone = *s.cluster.status
 	return clone, nil
 }
 
