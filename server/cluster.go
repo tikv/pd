@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"math"
 	"path"
-	"strings"
 	"sync"
 	"time"
 
@@ -233,23 +232,19 @@ func (s *Server) stopRaftCluster() {
 }
 
 func makeStoreKey(clusterRootPath string, storeID uint64) string {
-	return strings.Join([]string{clusterRootPath, "s", fmt.Sprintf("%020d", storeID)}, "/")
+	return path.Join(clusterRootPath, "s", fmt.Sprintf("%020d", storeID))
 }
 
 func makeRegionKey(clusterRootPath string, regionID uint64) string {
-	return strings.Join([]string{clusterRootPath, "r", fmt.Sprintf("%020d", regionID)}, "/")
-}
-
-func makeStoreKeyPrefix(clusterRootPath string) string {
-	return strings.Join([]string{clusterRootPath, "s", ""}, "/")
+	return path.Join(clusterRootPath, "r", fmt.Sprintf("%020d", regionID))
 }
 
 func makeRaftClusterStatusPrefix(clusterRootPath string) string {
-	return strings.Join([]string{clusterRootPath, "status"}, "/")
+	return path.Join(clusterRootPath, "status")
 }
 
 func makeBootstrapTimeKey(clusterRootPath string) string {
-	return strings.Join([]string{makeRaftClusterStatusPrefix(clusterRootPath), "bootstrap_time"}, "/")
+	return path.Join(makeRaftClusterStatusPrefix(clusterRootPath), "bootstrap_time")
 }
 
 func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
