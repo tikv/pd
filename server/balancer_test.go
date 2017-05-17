@@ -818,7 +818,7 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	//|     1     |       1      |        2       |       3        |      256KB    |
 	//|     2     |       1      |        3       |       4        |      512KB    |
 	//|     3     |       1      |        2       |       4        |      512KB    |
-	tc.addLeaderRegionWithWriteInfo(1, 1, 256*1024*regionHeartBeatReportInterval, 2, 3)
+	tc.addLeaderRegionWithWriteInfo(1, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
 	tc.addLeaderRegionWithWriteInfo(2, 1, 512*1024*regionHeartBeatReportInterval, 3, 4)
 	tc.addLeaderRegionWithWriteInfo(3, 1, 512*1024*regionHeartBeatReportInterval, 2, 4)
 	hotRegionLowThreshold = 0
@@ -835,7 +835,7 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	tc.updateStorageWrittenBytes(4, 30*1024*1024)
 	tc.addLeaderRegionWithWriteInfo(1, 1, 512*1024*regionHeartBeatReportInterval, 2, 4)
 	tc.addLeaderRegionWithWriteInfo(2, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
-	tc.addLeaderRegionWithWriteInfo(3, 1, 0, 2, 3)
+	tc.addLeaderRegionWithWriteInfo(3, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
 
 	// We can find that the leader of all hot regions are on store 1,
 	// so one of the leader will transfer to another store.

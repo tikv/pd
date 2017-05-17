@@ -48,7 +48,7 @@ func (h *Handler) GetSchedulers() ([]string, error) {
 }
 
 // GetHotWriteRegions gets all hot regions status
-func (h *Handler) GetHotWriteRegions() map[uint64]*StoreHotRegions {
+func (h *Handler) GetHotWriteRegions() *StoreHotRegionInfos {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil

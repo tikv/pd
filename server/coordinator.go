@@ -137,7 +137,7 @@ func (c *coordinator) stop() {
 	c.wg.Wait()
 }
 
-func (c *coordinator) getHotWriteRegions() map[uint64]*StoreHotRegions {
+func (c *coordinator) getHotWriteRegions() StoreHotRegionInfos {
 	c.RLock()
 	defer c.RUnlock()
 	s, ok := c.schedulers[hotRegionScheduleName]
