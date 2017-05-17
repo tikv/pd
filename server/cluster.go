@@ -62,12 +62,13 @@ type RaftCluster struct {
 	wg   sync.WaitGroup
 	quit chan struct{}
 
-	status *RaftClusterStatus
+	status *ClusterStatus
 }
 
-// RaftClusterStatus saves some state information
-type RaftClusterStatus struct {
-	BootstrapTime time.Time `json:"bootstrap_time"`
+// ClusterStatus saves some state information
+type ClusterStatus struct {
+	// use pointer to omitempty
+	BootstrapTime *time.Time `json:"raft_bootstrap_time,omitempty"`
 }
 
 func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
@@ -80,15 +81,18 @@ func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 }
 
 func (c *RaftCluster) loadClusterStatus() error {
-	status := &RaftClusterStatus{}
+	status := &ClusterStatus{}
 	t, err := c.s.kv.getClusterBootstrapTime()
 	if err != nil {
 		return errors.Trace(err)
 	}
-	status.BootstrapTime = t
+	if t != zeroTime {
+		status.BootstrapTime = &t
+	}
 	c.status = status
 	return nil
 }
+
 func (c *RaftCluster) start() error {
 	c.Lock()
 	defer c.Unlock()
@@ -204,17 +208,15 @@ func (s *Server) GetCluster() *metapb.Cluster {
 	}
 }
 
-// GetRaftClusterStatus gets cluster status
-func (s *Server) GetRaftClusterStatus() (*RaftClusterStatus, error) {
+// GetClusterStatus gets cluster status
+func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
 	s.cluster.Lock()
 	defer s.cluster.Unlock()
-	if s.cluster.status == nil {
-		err := s.cluster.loadClusterStatus()
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
+	err := s.cluster.loadClusterStatus()
+	if err != nil {
+		return nil, errors.Trace(err)
 	}
-	clone := &RaftClusterStatus{}
+	clone := &ClusterStatus{}
 	*clone = *(s.cluster.status)
 	return clone, nil
 }

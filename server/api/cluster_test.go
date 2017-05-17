@@ -60,13 +60,14 @@ func (s *testClusterInfo) TestCluster(c *C) {
 }
 
 func (s *testClusterInfo) TestGetClusterStatus(c *C) {
-	url := fmt.Sprintf("%s/cluster/raft/status", s.urlPrefix)
-	status := server.RaftClusterStatus{}
+	url := fmt.Sprintf("%s/cluster/status", s.urlPrefix)
+	status := server.ClusterStatus{}
 	err := readJSONWithURL(url, &status)
-	c.Assert(err, NotNil)
+	c.Assert(status.BootstrapTime, IsNil)
 	now := time.Now()
 	mustBootstrapCluster(c, s.svr)
 	err = readJSONWithURL(url, &status)
+	fmt.Printf("%+v", status)
 	c.Assert(err, IsNil)
 	c.Assert(status.BootstrapTime.After(now), IsTrue)
 }

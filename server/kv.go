@@ -75,7 +75,7 @@ func (kv *kv) getClusterBootstrapTime() (time.Time, error) {
 		return zeroTime, errors.Trace(err)
 	}
 	if len(data) == 0 {
-		return zeroTime, ErrNotBootstrapped
+		return zeroTime, nil
 	}
 	return parseTimestamp(data)
 }

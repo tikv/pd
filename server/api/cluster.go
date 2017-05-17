@@ -36,8 +36,8 @@ func (h *clusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetCluster())
 }
 
-func (h *clusterHandler) GetRaftClusterStatus(w http.ResponseWriter, r *http.Request) {
-	status, err := h.svr.GetRaftClusterStatus()
+func (h *clusterHandler) GetClusterStatus(w http.ResponseWriter, r *http.Request) {
+	status, err := h.svr.GetClusterStatus()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
