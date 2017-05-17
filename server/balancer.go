@@ -22,7 +22,6 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/montanaflynn/stats"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/tidb/statistics"
 )
 
 const (
