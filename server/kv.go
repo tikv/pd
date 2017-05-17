@@ -69,8 +69,8 @@ func (kv *kv) clusterStatePath(option string) string {
 	return path.Join(kv.clusterPath, "status", option)
 }
 
-func (kv *kv) getClusterBootstrapTime() (time.Time, error) {
-	data, err := kv.load(kv.clusterStatePath("bootstrap_time"))
+func (kv *kv) getRaftClusterBootstrapTime() (time.Time, error) {
+	data, err := kv.load(kv.clusterStatePath("raft_bootstrap_time"))
 	if err != nil {
 		return zeroTime, errors.Trace(err)
 	}

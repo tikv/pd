@@ -14,6 +14,7 @@
 package server
 
 import (
+	"math/rand"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -39,4 +40,18 @@ func (s *testMinMaxSuite) TestMinDuration(c *C) {
 	c.Assert(minDuration(time.Minute, time.Second), Equals, time.Second)
 	c.Assert(minDuration(time.Second, time.Minute), Equals, time.Second)
 	c.Assert(minDuration(time.Second, time.Second), Equals, time.Second)
+}
+
+var _ = Suite(&testUtilSuite{})
+
+type testUtilSuite struct{}
+
+func (s *testUtilSuite) TestParseTimestap(c *C) {
+	for i := 0; i < 3; i++ {
+		t := time.Now().Add(time.Second * time.Duration(rand.Int31n(1000)))
+		data := uint64ToBytes(uint64(t.UnixNano()))
+		nt, err := parseTimestamp(data)
+		c.Assert(err, IsNil)
+		c.Assert(nt, Equals, t)
+	}
 }

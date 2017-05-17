@@ -66,7 +66,7 @@ type RaftCluster struct {
 
 // ClusterStatus saves some state information
 type ClusterStatus struct {
-	BootstrapTime *time.Time `json:"raft_bootstrap_time,omitempty"`
+	RaftBootstrapTime *time.Time `json:"raft_bootstrap_time,omitempty"`
 }
 
 func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
@@ -80,12 +80,12 @@ func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 
 func (c *RaftCluster) loadClusterStatus() error {
 	status := &ClusterStatus{}
-	t, err := c.s.kv.getClusterBootstrapTime()
+	t, err := c.s.kv.getRaftClusterBootstrapTime()
 	if err != nil {
 		return errors.Trace(err)
 	}
 	if t != zeroTime {
-		status.BootstrapTime = &t
+		status.RaftBootstrapTime = &t
 	}
 	c.status = status
 	return nil
@@ -244,7 +244,7 @@ func makeRaftClusterStatusPrefix(clusterRootPath string) string {
 }
 
 func makeBootstrapTimeKey(clusterRootPath string) string {
-	return path.Join(makeRaftClusterStatusPrefix(clusterRootPath), "bootstrap_time")
+	return path.Join(makeRaftClusterStatusPrefix(clusterRootPath), "raft_bootstrap_time")
 }
 
 func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {

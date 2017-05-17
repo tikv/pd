@@ -63,10 +63,10 @@ func (s *testClusterInfo) TestGetClusterStatus(c *C) {
 	url := fmt.Sprintf("%s/cluster/status", s.urlPrefix)
 	status := server.ClusterStatus{}
 	err := readJSONWithURL(url, &status)
-	c.Assert(status.BootstrapTime, IsNil)
+	c.Assert(status.RaftBootstrapTime, IsNil)
 	now := time.Now()
 	mustBootstrapCluster(c, s.svr)
 	err = readJSONWithURL(url, &status)
 	c.Assert(err, IsNil)
-	c.Assert(status.BootstrapTime.After(now), IsTrue)
+	c.Assert(status.RaftBootstrapTime.After(now), IsTrue)
 }
