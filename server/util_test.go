@@ -54,4 +54,8 @@ func (s *testUtilSuite) TestParseTimestap(c *C) {
 		c.Assert(err, IsNil)
 		c.Assert(nt, Equals, t)
 	}
+	data := []byte("pd")
+	nt, err := parseTimestamp(data)
+	c.Assert(err, NotNil)
+	c.Assert(nt.Equal(zeroTime), IsTrue)
 }
