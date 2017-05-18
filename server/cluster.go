@@ -66,7 +66,7 @@ type RaftCluster struct {
 
 // ClusterStatus saves some state information
 type ClusterStatus struct {
-	RaftBootstrapTime *time.Time `json:"raft_bootstrap_time,omitempty"`
+	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
 }
 
 func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
@@ -84,9 +84,7 @@ func (c *RaftCluster) loadClusterStatus() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if t != zeroTime {
-		status.RaftBootstrapTime = &t
-	}
+	status.RaftBootstrapTime = t
 	c.status = status
 	return nil
 }
