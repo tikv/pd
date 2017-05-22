@@ -238,6 +238,7 @@ func (c *coordinator) addOperator(op Operator) bool {
 	c.limiter.addOperator(op)
 	c.operators[regionID] = op
 	collectOperatorCounterMetrics(op)
+	collectOperatorStateCounterMetrics(op)
 	return true
 }
 
@@ -260,6 +261,7 @@ func (c *coordinator) removeOperator(op Operator) {
 	delete(c.operators, regionID)
 
 	c.histories.add(regionID, op)
+	collectOperatorStateCounterMetrics(op)
 }
 
 func (c *coordinator) getOperator(regionID uint64) Operator {
@@ -408,4 +410,8 @@ func collectOperatorCounterMetrics(op Operator) {
 	for label, value := range metrics {
 		operatorCounter.WithLabelValues(label).Add(float64(value))
 	}
+}
+
+func collectOperatorStateCounterMetrics(op Operator) {
+	operatorCounter.WithLabelValues(op.GetState().String()).Add(1)
 }

@@ -15,6 +15,7 @@ package server
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -77,17 +78,53 @@ func ParseResourceKind(name string) ResourceKind {
 	return UnKnownKind
 }
 
+// OperatorState indicates state of the operator
+type OperatorState int
+
+const (
+	// OperatorUnKnownState indicates the unknown state
+	OperatorUnKnownState OperatorState = iota
+	// OperatorDoing indicates the doing state
+	OperatorDoing
+	// OperatorFinished indicates the finished state
+	OperatorFinished
+	// OperatorTimeOut indicates the time_out state
+	OperatorTimeOut
+)
+
+var operatorStateToName = map[int]string{
+	0: "unknown",
+	1: "doing",
+	2: "finished",
+	3: "time_out",
+}
+
+func (o OperatorState) String() string {
+	s, ok := operatorStateToName[int(o)]
+	if ok {
+		return s
+	}
+	return operatorStateToName[0]
+}
+
+// MarshalJSON returns the state as a JSON string.
+func (o OperatorState) MarshalJSON() ([]byte, error) {
+	return []byte(strconv.Quote(o.String())), nil
+}
+
 // Operator is an interface to schedule region.
 type Operator interface {
 	GetRegionID() uint64
 	GetResourceKind() ResourceKind
+	GetState() OperatorState
 	Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool)
 }
 
 type adminOperator struct {
-	Region *RegionInfo `json:"region"`
-	Start  time.Time   `json:"start"`
-	Ops    []Operator  `json:"ops"`
+	Region *RegionInfo   `json:"region"`
+	Start  time.Time     `json:"start"`
+	Ops    []Operator    `json:"ops"`
+	State  OperatorState `json:"state"`
 }
 
 func newAdminOperator(region *RegionInfo, ops ...Operator) *adminOperator {
@@ -95,6 +132,7 @@ func newAdminOperator(region *RegionInfo, ops ...Operator) *adminOperator {
 		Region: region,
 		Start:  time.Now(),
 		Ops:    ops,
+		State:  OperatorDoing,
 	}
 }
 
@@ -110,6 +148,10 @@ func (op *adminOperator) GetResourceKind() ResourceKind {
 	return AdminKind
 }
 
+func (op *adminOperator) GetState() OperatorState {
+	return op.State
+}
+
 func (op *adminOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	// Update region.
 	op.Region = region.clone()
@@ -122,16 +164,18 @@ func (op *adminOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, 
 	}
 
 	// Admin operator never ends, remove it from the API.
+	op.State = OperatorFinished
 	return nil, false
 }
 
 type regionOperator struct {
-	Region *RegionInfo  `json:"region"`
-	Start  time.Time    `json:"start"`
-	End    time.Time    `json:"end"`
-	Index  int          `json:"index"`
-	Ops    []Operator   `json:"ops"`
-	Kind   ResourceKind `json:"kind"`
+	Region *RegionInfo   `json:"region"`
+	Start  time.Time     `json:"start"`
+	End    time.Time     `json:"end"`
+	Index  int           `json:"index"`
+	Ops    []Operator    `json:"ops"`
+	Kind   ResourceKind  `json:"kind"`
+	State  OperatorState `json:"state"`
 }
 
 func newRegionOperator(region *RegionInfo, kind ResourceKind, ops ...Operator) *regionOperator {
@@ -145,6 +189,7 @@ func newRegionOperator(region *RegionInfo, kind ResourceKind, ops ...Operator) *
 		Start:  time.Now(),
 		Ops:    ops,
 		Kind:   kind,
+		State:  OperatorDoing,
 	}
 }
 
@@ -160,9 +205,14 @@ func (op *regionOperator) GetResourceKind() ResourceKind {
 	return op.Kind
 }
 
+func (op *regionOperator) GetState() OperatorState {
+	return op.State
+}
+
 func (op *regionOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	if time.Since(op.Start) > maxOperatorWaitTime {
 		log.Errorf("[region %d] Operator timeout:%s", region.GetId(), op)
+		op.State = OperatorTimeOut
 		return nil, true
 	}
 
@@ -177,6 +227,7 @@ func (op *regionOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse,
 	}
 
 	op.End = time.Now()
+	op.State = OperatorFinished
 	return nil, true
 }
 
@@ -184,6 +235,7 @@ type changePeerOperator struct {
 	Name       string           `json:"name"`
 	RegionID   uint64           `json:"region_id"`
 	ChangePeer *pdpb.ChangePeer `json:"change_peer"`
+	State      OperatorState    `json:"state"`
 }
 
 func newAddPeerOperator(regionID uint64, peer *metapb.Peer) *changePeerOperator {
@@ -195,6 +247,7 @@ func newAddPeerOperator(regionID uint64, peer *metapb.Peer) *changePeerOperator 
 			ChangeType: pdpb.ConfChangeType_AddNode,
 			Peer:       peer,
 		},
+		State: OperatorDoing,
 	}
 }
 
@@ -207,6 +260,7 @@ func newRemovePeerOperator(regionID uint64, peer *metapb.Peer) *changePeerOperat
 			ChangeType: pdpb.ConfChangeType_RemoveNode,
 			Peer:       peer,
 		},
+		State: OperatorDoing,
 	}
 }
 
@@ -222,6 +276,10 @@ func (op *changePeerOperator) GetResourceKind() ResourceKind {
 	return RegionKind
 }
 
+func (op *changePeerOperator) GetState() OperatorState {
+	return op.State
+}
+
 func (op *changePeerOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	// Check if operator is finished.
 	peer := op.ChangePeer.GetPeer()
@@ -233,11 +291,13 @@ func (op *changePeerOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatRespo
 		}
 		if region.GetPeer(peer.GetId()) != nil {
 			// Peer is added and finished.
+			op.State = OperatorFinished
 			return nil, true
 		}
 	case pdpb.ConfChangeType_RemoveNode:
 		if region.GetPeer(peer.GetId()) == nil {
 			// Peer is removed.
+			op.State = OperatorFinished
 			return nil, true
 		}
 	}
@@ -251,10 +311,11 @@ func (op *changePeerOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatRespo
 }
 
 type transferLeaderOperator struct {
-	Name      string       `json:"name"`
-	RegionID  uint64       `json:"region_id"`
-	OldLeader *metapb.Peer `json:"old_leader"`
-	NewLeader *metapb.Peer `json:"new_leader"`
+	Name      string        `json:"name"`
+	RegionID  uint64        `json:"region_id"`
+	OldLeader *metapb.Peer  `json:"old_leader"`
+	NewLeader *metapb.Peer  `json:"new_leader"`
+	State     OperatorState `json:"state"`
 }
 
 func newTransferLeaderOperator(regionID uint64, oldLeader, newLeader *metapb.Peer) *transferLeaderOperator {
@@ -263,6 +324,7 @@ func newTransferLeaderOperator(regionID uint64, oldLeader, newLeader *metapb.Pee
 		RegionID:  regionID,
 		OldLeader: oldLeader,
 		NewLeader: newLeader,
+		State:     OperatorDoing,
 	}
 }
 
@@ -278,9 +340,14 @@ func (op *transferLeaderOperator) GetResourceKind() ResourceKind {
 	return LeaderKind
 }
 
+func (op *transferLeaderOperator) GetState() OperatorState {
+	return op.State
+}
+
 func (op *transferLeaderOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	// Check if operator is finished.
 	if region.Leader.GetId() == op.NewLeader.GetId() {
+		op.State = OperatorFinished
 		return nil, true
 	}
 

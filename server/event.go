@@ -157,6 +157,10 @@ func (op *splitOperator) GetResourceKind() ResourceKind {
 	return OtherKind
 }
 
+func (op *splitOperator) GetState() OperatorState {
+	return OperatorFinished
+}
+
 // Do implements Operator.Do interface.
 func (op *splitOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	return nil, true
