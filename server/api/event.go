@@ -36,7 +36,7 @@ func newFeedHandler(svr *server.Server, rd *render.Render) *feedHandler {
 func (h *feedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
 		return
 	}
 
@@ -71,7 +71,7 @@ func newEventsHandler(svr *server.Server, rd *render.Render) *eventsHandler {
 func (h *eventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
 		return
 	}
 

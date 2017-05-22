@@ -333,3 +333,12 @@ func diffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 
 	return strings.Join(ret, ",")
 }
+
+func parseTimestamp(data []byte) (time.Time, error) {
+	nano, err := bytesToUint64(data)
+	if err != nil {
+		return zeroTime, errors.Trace(err)
+	}
+
+	return time.Unix(0, int64(nano)), nil
+}
