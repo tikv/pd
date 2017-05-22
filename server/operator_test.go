@@ -14,6 +14,8 @@
 package server
 
 import (
+	"encoding/json"
+
 	. "github.com/pingcap/check"
 )
 
@@ -38,6 +40,7 @@ func (s *testResouceKindSuite) TestString(c *C) {
 		c.Assert(t.value.String(), Equals, t.name)
 	}
 }
+
 func (s *testResouceKindSuite) TestParseResouceKind(c *C) {
 	tbl := []struct {
 		name  string
@@ -53,5 +56,37 @@ func (s *testResouceKindSuite) TestParseResouceKind(c *C) {
 	}
 	for _, t := range tbl {
 		c.Assert(ParseResourceKind(t.name), Equals, t.value)
+	}
+}
+
+var _ = Suite(&testOperatorSuite{})
+
+type testOperatorSuite struct{}
+
+func (o *testOperatorSuite) TestOperatorStateString(c *C) {
+	tbl := []struct {
+		value OperatorState
+		name  string
+	}{
+		{OperatorUnKnownState, "unknown"},
+		{OperatorDoing, "doing"},
+		{OperatorFinished, "finished"},
+		{OperatorTimeOut, "time_out"},
+		{OperatorState(404), "unknown"},
+	}
+	for _, t := range tbl {
+		c.Assert(t.value.String(), Equals, t.name)
+	}
+}
+
+func (o *testOperatorSuite) TestOperatorStateMarshal(c *C) {
+	states := []OperatorState{OperatorUnKnownState, OperatorDoing, OperatorFinished, OperatorTimeOut}
+	for _, s := range states {
+		data, err := json.Marshal(s)
+		c.Assert(err, IsNil)
+		var newState OperatorState
+		err = json.Unmarshal(data, &newState)
+		c.Assert(err, IsNil)
+		c.Assert(newState, Equals, s)
 	}
 }

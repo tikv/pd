@@ -19,6 +19,7 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
+	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -99,6 +100,13 @@ var operatorStateToName = map[int]string{
 	3: "time_out",
 }
 
+var operatorStateNameToValue = map[string]OperatorState{
+	"unknown":  OperatorUnKnownState,
+	"doing":    OperatorDoing,
+	"finished": OperatorFinished,
+	"time_out": OperatorTimeOut,
+}
+
 func (o OperatorState) String() string {
 	s, ok := operatorStateToName[int(o)]
 	if ok {
@@ -107,9 +115,23 @@ func (o OperatorState) String() string {
 	return operatorStateToName[0]
 }
 
-// MarshalJSON returns the state as a JSON string.
+// MarshalJSON returns the state as a JSON string
 func (o OperatorState) MarshalJSON() ([]byte, error) {
 	return []byte(strconv.Quote(o.String())), nil
+}
+
+// UnmarshalJSON  parses a JSON string into the OperatorState
+func (o *OperatorState) UnmarshalJSON(text []byte) error {
+	s, err := strconv.Unquote(string(text))
+	if err != nil {
+		return errors.Trace(err)
+	}
+	state, ok := operatorStateNameToValue[s]
+	if !ok {
+		*o = OperatorUnKnownState
+	}
+	*o = state
+	return nil
 }
 
 // Operator is an interface to schedule region.

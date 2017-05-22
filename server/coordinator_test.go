@@ -24,16 +24,18 @@ import (
 type testOperator struct {
 	RegionID uint64
 	Kind     ResourceKind
+	State    OperatorState
 }
 
 func newTestOperator(regionID uint64, kind ResourceKind) Operator {
 	region := newRegionInfo(&metapb.Region{Id: regionID}, nil)
-	op := &testOperator{RegionID: regionID, Kind: kind}
+	op := &testOperator{RegionID: regionID, Kind: kind, State: OperatorDoing}
 	return newRegionOperator(region, kind, op)
 }
 
 func (op *testOperator) GetRegionID() uint64           { return op.RegionID }
 func (op *testOperator) GetResourceKind() ResourceKind { return op.Kind }
+func (op *testOperator) GetState() OperatorState       { return op.State }
 func (op *testOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	return nil, false
 }
