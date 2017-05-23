@@ -17,16 +17,11 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/server"
 	"github.com/urfave/negroni"
 )
 
 const apiPrefix = "/pd"
-
-var (
-	errNotBootstrapped = errors.New("TiKV cluster is not bootstrapped, please start TiKV first")
-)
 
 // NewHandler creates a HTTP handler for API.
 func NewHandler(svr *server.Server) http.Handler {
