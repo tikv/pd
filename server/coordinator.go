@@ -14,6 +14,7 @@
 package server
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -222,15 +223,18 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 
 func (c *coordinator) addOperator(op Operator) bool {
 	c.Lock()
-	defer c.Unlock()
 
 	regionID := op.GetRegionID()
 
 	if old, ok := c.operators[regionID]; ok {
 		if !isHigherPriorityOperator(op, old) {
+			c.Unlock()
 			return false
 		}
-		c.limiter.removeOperator(old)
+		c.Unlock()
+		old.SetState(OperatorReplaced)
+		c.removeOperator(old)
+		c.Lock()
 		log.Infof("coordinator: add operator %+v with higher priority, remove operator: %+v", op, old)
 	}
 
@@ -239,6 +243,7 @@ func (c *coordinator) addOperator(op Operator) bool {
 	c.operators[regionID] = op
 	collectOperatorCounterMetrics(op)
 	collectOperatorStateCounterMetrics(op)
+	c.Unlock()
 	return true
 }
 
@@ -393,25 +398,22 @@ func (s *scheduleController) AllowSchedule() bool {
 }
 
 func collectOperatorCounterMetrics(op Operator) {
-	metrics := make(map[string]uint64)
 	regionOp, ok := op.(*regionOperator)
 	if !ok {
 		return
 	}
 	for _, op := range regionOp.Ops {
-		switch o := op.(type) {
-		case *changePeerOperator:
-			metrics[o.Name]++
-		case *transferLeaderOperator:
-			metrics[o.Name]++
-		}
-	}
-
-	for label, value := range metrics {
-		operatorCounter.WithLabelValues(label).Add(float64(value))
+		operatorCounter.WithLabelValues(op.GetName()).Add(1)
 	}
 }
 
 func collectOperatorStateCounterMetrics(op Operator) {
-	operatorCounter.WithLabelValues(op.GetState().String()).Add(1)
+	regionOp, ok := op.(*regionOperator)
+	if !ok {
+		return
+	}
+	for _, op := range regionOp.Ops {
+		lable := strings.Join([]string{op.GetName(), op.GetState().String()}, "_")
+		operatorCounter.WithLabelValues(lable).Add(1)
+	}
 }

@@ -69,9 +69,11 @@ func (o *testOperatorSuite) TestOperatorStateString(c *C) {
 		name  string
 	}{
 		{OperatorUnKnownState, "unknown"},
-		{OperatorDoing, "doing"},
+		{OperatorWaiting, "waiting"},
+		{OperatorRunning, "running"},
 		{OperatorFinished, "finished"},
-		{OperatorTimeOut, "time_out"},
+		{OperatorTimeOut, "timeout"},
+		{OperatorReplaced, "replaced"},
 		{OperatorState(404), "unknown"},
 	}
 	for _, t := range tbl {
@@ -80,13 +82,24 @@ func (o *testOperatorSuite) TestOperatorStateString(c *C) {
 }
 
 func (o *testOperatorSuite) TestOperatorStateMarshal(c *C) {
-	states := []OperatorState{OperatorUnKnownState, OperatorDoing, OperatorFinished, OperatorTimeOut}
-	for _, s := range states {
-		data, err := json.Marshal(s)
+	tbl := []struct {
+		state  OperatorState
+		except OperatorState
+	}{
+		{OperatorUnKnownState, OperatorUnKnownState},
+		{OperatorWaiting, OperatorWaiting},
+		{OperatorRunning, OperatorRunning},
+		{OperatorFinished, OperatorFinished},
+		{OperatorTimeOut, OperatorTimeOut},
+		{OperatorReplaced, OperatorReplaced},
+		{OperatorState(404), OperatorUnKnownState},
+	}
+	for _, t := range tbl {
+		data, err := json.Marshal(t.state)
 		c.Assert(err, IsNil)
 		var newState OperatorState
 		err = json.Unmarshal(data, &newState)
 		c.Assert(err, IsNil)
-		c.Assert(newState, Equals, s)
+		c.Assert(newState, Equals, t.except)
 	}
 }
