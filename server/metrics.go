@@ -62,6 +62,7 @@ var (
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "Status",
+			Help:      "Status of the scheduler.",
 		}, []string{"group", "type"})
 )
 
@@ -71,4 +72,5 @@ func init() {
 	prometheus.MustRegister(operatorCounter)
 	prometheus.MustRegister(clusterStatusGauge)
 	prometheus.MustRegister(timeJumpBackCounter)
+	prometheus.MustRegister(schedulerStatusGauge)
 }
