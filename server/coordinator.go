@@ -242,7 +242,6 @@ func (c *coordinator) addOperator(op Operator) bool {
 	c.limiter.addOperator(op)
 	c.operators[regionID] = op
 	collectOperatorCounterMetrics(op)
-	collectOperatorStateCounterMetrics(op)
 	c.Unlock()
 	return true
 }
@@ -266,7 +265,7 @@ func (c *coordinator) removeOperator(op Operator) {
 	delete(c.operators, regionID)
 
 	c.histories.add(regionID, op)
-	collectOperatorStateCounterMetrics(op)
+	collectOperatorCounterMetrics(op)
 }
 
 func (c *coordinator) getOperator(regionID uint64) Operator {
@@ -398,16 +397,6 @@ func (s *scheduleController) AllowSchedule() bool {
 }
 
 func collectOperatorCounterMetrics(op Operator) {
-	regionOp, ok := op.(*regionOperator)
-	if !ok {
-		return
-	}
-	for _, op := range regionOp.Ops {
-		operatorCounter.WithLabelValues(op.GetName()).Add(1)
-	}
-}
-
-func collectOperatorStateCounterMetrics(op Operator) {
 	regionOp, ok := op.(*regionOperator)
 	if !ok {
 		return
