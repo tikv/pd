@@ -56,6 +56,13 @@ var (
 			Name:      "time_jump_back_total",
 			Help:      "Counter of system time jumps backward.",
 		})
+
+	schedulerStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "Status",
+		}, []string{"group", "type"})
 )
 
 func init() {

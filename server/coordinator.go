@@ -14,6 +14,7 @@
 package server
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -156,6 +157,39 @@ func (c *coordinator) getSchedulers() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+func (c *coordinator) collectSchedulerMetrics() {
+	c.RLock()
+	defer c.RUnlock()
+	for _, s := range c.schedulers {
+		var allowScheduler float64
+		if s.AllowSchedule() {
+			allowScheduler = 1
+		}
+		limit := float64(s.GetResourceLimit())
+
+		schedulerStatusGauge.WithLabelValues(s.GetName(), "allow_schedule").Set(allowScheduler)
+		schedulerStatusGauge.WithLabelValues(s.GetName(), "limit").Set(limit)
+	}
+}
+
+func (c *coordinator) collectHotSpotMetrics() {
+	c.RLock()
+	defer c.RUnlock()
+	s, ok := c.schedulers[hotRegionScheduleName]
+	if !ok {
+		return
+	}
+	status := s.Scheduler.(*balanceHotRegionScheduler).GetStatus()
+	for storeID, stat := range status {
+		group := fmt.Sprintf("store_%d", storeID)
+		totalWriteBytes := float64(stat.TotalWrittenBytes)
+		hotWriteRegionCount := float64(stat.RegionCount)
+
+		schedulerStatusGauge.WithLabelValues(group, "total_write_bytes").Set(totalWriteBytes)
+		schedulerStatusGauge.WithLabelValues(group, "hot_write_region").Set(hotWriteRegionCount)
+	}
 }
 
 func (c *coordinator) shouldRun() bool {

@@ -114,7 +114,6 @@ func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 		return nil
 	}
 	l.limit = adjustBalanceLimit(cluster, l.GetResourceKind())
-
 	return newTransferLeader(region, newLeader)
 }
 
