@@ -91,6 +91,7 @@ func (c *coordinator) dispatch(region *RegionInfo) *pdpb.RegionHeartbeatResponse
 	if op := c.getOperator(region.GetId()); op != nil {
 		res, finished := op.Do(region)
 		if !finished {
+			collectOperatorCounterMetrics(op)
 			return res
 		}
 		c.removeOperator(op)
@@ -222,18 +223,15 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 
 func (c *coordinator) addOperator(op Operator) bool {
 	c.Lock()
-
+	defer c.Unlock()
 	regionID := op.GetRegionID()
 
 	if old, ok := c.operators[regionID]; ok {
 		if !isHigherPriorityOperator(op, old) {
-			c.Unlock()
 			return false
 		}
-		c.Unlock()
 		old.SetState(OperatorReplaced)
-		c.removeOperator(old)
-		c.Lock()
+		c.removeOperatorLocked(old)
 		log.Infof("coordinator: add operator %+v with higher priority, remove operator: %+v", op, old)
 	}
 
@@ -241,7 +239,6 @@ func (c *coordinator) addOperator(op Operator) bool {
 	c.limiter.addOperator(op)
 	c.operators[regionID] = op
 	collectOperatorCounterMetrics(op)
-	c.Unlock()
 	return true
 }
 
@@ -258,7 +255,10 @@ func isHigherPriorityOperator(new Operator, old Operator) bool {
 func (c *coordinator) removeOperator(op Operator) {
 	c.Lock()
 	defer c.Unlock()
+	c.removeOperatorLocked(op)
+}
 
+func (c *coordinator) removeOperatorLocked(op Operator) {
 	regionID := op.GetRegionID()
 	c.limiter.removeOperator(op)
 	delete(c.operators, regionID)
