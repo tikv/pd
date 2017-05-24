@@ -154,7 +154,7 @@ func (op *splitOperator) GetRegionID() uint64 {
 }
 
 func (op *splitOperator) GetResourceKind() ResourceKind {
-	return regionKind
+	return OtherKind
 }
 
 // Do implements Operator.Do interface.

@@ -83,7 +83,7 @@ type client struct {
 		leader      string
 	}
 
-	tsDeadlineCh  chan deadline
+	tsDeadlineCh  chan *deadline
 	checkLeaderCh chan struct{}
 
 	wg     sync.WaitGroup
@@ -98,7 +98,7 @@ func NewClient(pdAddrs []string) (Client, error) {
 	c := &client{
 		urls:          addrsToUrls(pdAddrs),
 		tsoRequests:   make(chan *tsoRequest, maxMergeTSORequests),
-		tsDeadlineCh:  make(chan deadline, 1),
+		tsDeadlineCh:  make(chan *deadline, 1),
 		checkLeaderCh: make(chan struct{}, 1),
 		ctx:           ctx,
 		cancel:        cancel,
@@ -286,7 +286,7 @@ type streamClient struct {
 func (c *client) newStreamClient(cli pdpb.PD_TsoClient) *streamClient {
 	ret := &streamClient{
 		cli: cli,
-		ch:  make(chan []*tsoRequest, 20),
+		ch:  make(chan []*tsoRequest, 200),
 	}
 	go ret.recvWorkerLoop(c)
 	return ret
@@ -364,7 +364,7 @@ func (c *client) tsLoop() {
 				requests = append(requests, <-c.tsoRequests)
 			}
 			done := make(chan struct{})
-			dl := deadline{
+			dl := &deadline{
 				timer:  time.After(pdTimeout),
 				done:   done,
 				cancel: cancel,

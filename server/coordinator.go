@@ -97,7 +97,7 @@ func (c *coordinator) dispatch(region *RegionInfo) *pdpb.RegionHeartbeatResponse
 	}
 
 	// Check replica operator.
-	if c.limiter.operatorCount(regionKind) >= c.opt.GetReplicaScheduleLimit() {
+	if c.limiter.operatorCount(RegionKind) >= c.opt.GetReplicaScheduleLimit() {
 		return nil
 	}
 	if op := c.checker.Check(region); op != nil {
@@ -234,6 +234,7 @@ func (c *coordinator) addOperator(op Operator) bool {
 		log.Infof("coordinator: add operator %+v with higher priority, remove operator: %+v", op, old)
 	}
 
+	c.histories.add(regionID, op)
 	c.limiter.addOperator(op)
 	c.operators[regionID] = op
 	collectOperatorCounterMetrics(op)
@@ -241,10 +242,10 @@ func (c *coordinator) addOperator(op Operator) bool {
 }
 
 func isHigherPriorityOperator(new Operator, old Operator) bool {
-	if new.GetResourceKind() == adminKind {
+	if new.GetResourceKind() == AdminKind {
 		return true
 	}
-	if new.GetResourceKind() == priorityKind && old.GetResourceKind() != priorityKind {
+	if new.GetResourceKind() == PriorityKind && old.GetResourceKind() != PriorityKind {
 		return true
 	}
 	return false
@@ -286,6 +287,21 @@ func (c *coordinator) getHistories() []Operator {
 	var operators []Operator
 	for _, elem := range c.histories.elems() {
 		operators = append(operators, elem.value.(Operator))
+	}
+
+	return operators
+}
+
+func (c *coordinator) getHistoriesOfKind(kind ResourceKind) []Operator {
+	c.RLock()
+	defer c.RUnlock()
+
+	var operators []Operator
+	for _, elem := range c.histories.elems() {
+		op := elem.value.(Operator)
+		if op.GetResourceKind() == kind {
+			operators = append(operators, op)
+		}
 	}
 
 	return operators
