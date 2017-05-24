@@ -187,8 +187,8 @@ func (c *coordinator) collectHotSpotMetrics() {
 		totalWriteBytes := float64(stat.TotalWrittenBytes)
 		hotWriteRegionCount := float64(stat.RegionCount)
 
-		schedulerStatusGauge.WithLabelValues(group, "total_write_bytes").Set(totalWriteBytes)
-		schedulerStatusGauge.WithLabelValues(group, "hot_write_region").Set(hotWriteRegionCount)
+		hotSpotStatusGauge.WithLabelValues(group, "total_write_bytes").Set(totalWriteBytes)
+		hotSpotStatusGauge.WithLabelValues(group, "hot_write_region").Set(hotWriteRegionCount)
 	}
 }
 
