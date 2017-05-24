@@ -39,7 +39,7 @@ var (
 			Subsystem: "schedule",
 			Name:      "operators_count",
 			Help:      "Counter of schedule operators.",
-		}, []string{"type"})
+		}, []string{"type", "state"})
 
 	clusterStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

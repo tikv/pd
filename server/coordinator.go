@@ -14,7 +14,6 @@
 package server
 
 import (
-	"strings"
 	"sync"
 	"time"
 
@@ -402,7 +401,6 @@ func collectOperatorCounterMetrics(op Operator) {
 		return
 	}
 	for _, op := range regionOp.Ops {
-		lable := strings.Join([]string{op.GetName(), op.GetState().String()}, "_")
-		operatorCounter.WithLabelValues(lable).Add(1)
+		operatorCounter.WithLabelValues(op.GetName(), op.GetState().String()).Add(1)
 	}
 }
