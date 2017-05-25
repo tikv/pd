@@ -16,9 +16,10 @@ import (
 )
 
 var (
-	endpoints = flag.String("endpoints", "http://127.0.0.1:2379", "endpoints urls")
-	allocID   = flag.Uint64("alloc-id", 0, "please make sure alloced ID is safe")
-	clusterID = flag.Uint64("cluster-id", 0, "please make cluster ID match with tikv")
+	endpoints   = flag.String("endpoints", "http://127.0.0.1:2379", "endpoints urls")
+	allocID     = flag.Uint64("alloc-id", 0, "please make sure alloced ID is safe")
+	clusterID   = flag.Uint64("cluster-id", 0, "please make cluster ID match with tikv")
+	maxReplicas = flag.Int("max-replicas", 3, "max replicas is the number of replicas for each region")
 )
 
 const (
@@ -69,7 +70,7 @@ func main() {
 	// recover meta of cluster
 	clusterMeta := metapb.Cluster{
 		Id:           *clusterID,
-		MaxPeerCount: uint32(3),
+		MaxPeerCount: uint32(*maxReplicas),
 	}
 	clusterValue, err := clusterMeta.Marshal()
 	if err != nil {
@@ -89,10 +90,10 @@ func main() {
 		exitErr(err)
 	}
 	if !resp.Succeeded {
-		fmt.Println("cluster already bootstrapped")
+		fmt.Println("failed to recover: the cluster is already bootstrapped")
 		return
 	}
-	fmt.Println("recover success! please restart PD")
+	fmt.Println("recover success! please restart the PD cluster")
 }
 
 func uint64ToBytes(v uint64) []byte {
