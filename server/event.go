@@ -161,7 +161,7 @@ func (op *splitOperator) GetState() OperatorState {
 	return OperatorFinished
 }
 
-func (op *splitOperator) SetState(state OperatorState) {
+func (op *splitOperator) SetState(_ OperatorState) {
 	return
 }
 
