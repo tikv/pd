@@ -169,7 +169,7 @@ func (c *coordinator) collectSchedulerMetrics() {
 		}
 		limit := float64(s.GetResourceLimit())
 
-		schedulerStatusGauge.WithLabelValues(s.GetName(), "allow_schedule").Set(allowScheduler)
+		schedulerStatusGauge.WithLabelValues(s.GetName(), "allow").Set(allowScheduler)
 		schedulerStatusGauge.WithLabelValues(s.GetName(), "limit").Set(limit)
 	}
 }
@@ -183,12 +183,12 @@ func (c *coordinator) collectHotSpotMetrics() {
 	}
 	status := s.Scheduler.(*balanceHotRegionScheduler).GetStatus()
 	for storeID, stat := range status {
-		group := fmt.Sprintf("store_%d", storeID)
+		store := fmt.Sprintf("store_%d", storeID)
 		totalWriteBytes := float64(stat.TotalWrittenBytes)
 		hotWriteRegionCount := float64(stat.RegionCount)
 
-		hotSpotStatusGauge.WithLabelValues(group, "total_write_bytes").Set(totalWriteBytes)
-		hotSpotStatusGauge.WithLabelValues(group, "hot_write_region").Set(hotWriteRegionCount)
+		hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes").Set(totalWriteBytes)
+		hotSpotStatusGauge.WithLabelValues(store, "hot_write_region").Set(hotWriteRegionCount)
 	}
 }
 

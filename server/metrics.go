@@ -71,7 +71,7 @@ var (
 			Subsystem: "hotspot",
 			Name:      "status",
 			Help:      "Status of the hotspot.",
-		}, []string{"group", "type"})
+		}, []string{"store", "type"})
 )
 
 func init() {
