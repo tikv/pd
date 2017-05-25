@@ -161,9 +161,7 @@ func (op *splitOperator) GetState() OperatorState {
 	return OperatorFinished
 }
 
-func (op *splitOperator) SetState(_ OperatorState) {
-	return
-}
+func (op *splitOperator) SetState(_ OperatorState) {}
 
 func (op *splitOperator) GetName() string {
 	return op.Name

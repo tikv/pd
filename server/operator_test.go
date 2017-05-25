@@ -15,6 +15,7 @@ package server
 
 import (
 	"encoding/json"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -182,7 +183,20 @@ func (o *testOperatorSuite) TestOperatorState(c *C) {
 	c.Assert(finished, IsTrue)
 	c.Assert(op.GetState(), Equals, OperatorFinished)
 
+	regionOp, ok := op.(*regionOperator)
+	c.Assert(ok, IsTrue)
+
 	// if operator finished, SetState still finished
 	op.SetState(OperatorRunning)
 	c.Assert(op.GetState(), Equals, OperatorFinished)
+
+	// SetState success
+	regionOp.State = OperatorWaiting
+	op.SetState(OperatorRunning)
+	c.Assert(op.GetState(), Equals, OperatorRunning)
+
+	regionOp.Start = regionOp.Start.Add(-maxOperatorWaitTime).Add(-time.Minute)
+	op.Do(regionInfo)
+	c.Assert(op.GetState(), Equals, OperatorTimeOut)
+
 }
