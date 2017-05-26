@@ -574,6 +574,9 @@ func (c *RaftCluster) collectMetrics() {
 	for label, value := range metrics {
 		clusterStatusGauge.WithLabelValues(label).Set(value)
 	}
+
+	c.coordinator.collectSchedulerMetrics()
+	c.coordinator.collectHotSpotMetrics()
 }
 
 func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
