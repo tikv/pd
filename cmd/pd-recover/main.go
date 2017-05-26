@@ -39,9 +39,11 @@ func main() {
 	flag.Parse()
 	if *clusterID == 0 {
 		fmt.Println("please specify safe alloc-id")
+		return
 	}
 	if *allocID == 0 {
 		fmt.Println("please specify safe cluster-id")
+		return
 	}
 
 	rootPath := path.Join(pdRootPath, strconv.FormatUint(*clusterID, 10))
