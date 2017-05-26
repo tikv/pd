@@ -56,6 +56,22 @@ var (
 			Name:      "time_jump_back_total",
 			Help:      "Counter of system time jumps backward.",
 		})
+
+	schedulerStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "status",
+			Help:      "Status of the scheduler.",
+		}, []string{"kind", "type"})
+
+	hotSpotStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "hotspot",
+			Name:      "status",
+			Help:      "Status of the hotspot.",
+		}, []string{"store", "type"})
 )
 
 func init() {
@@ -64,4 +80,6 @@ func init() {
 	prometheus.MustRegister(operatorCounter)
 	prometheus.MustRegister(clusterStatusGauge)
 	prometheus.MustRegister(timeJumpBackCounter)
+	prometheus.MustRegister(schedulerStatusGauge)
+	prometheus.MustRegister(hotSpotStatusGauge)
 }
