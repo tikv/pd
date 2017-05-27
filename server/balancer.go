@@ -30,11 +30,12 @@ const (
 	bootstrapBalanceDiff  = 2
 )
 
+// BalanceType : the perspective of balance
 type BalanceType int
 
 const (
-	ByPeer BalanceType = iota
-	ByLeader
+	byPeer BalanceType = iota
+	byLeader
 )
 
 // minBalanceDiff returns the minimal diff to do balance. The formula is based
@@ -567,7 +568,7 @@ func (h *balanceHotRegionScheduler) balanceByPeer(cluster *clusterInfo) (*Region
 		destStoreID = h.selectDestStoreByPeer(destStoreIDs, srcRegion, srcStoreID)
 		if destStoreID != 0 {
 			srcRegion.WrittenBytes = rs.WrittenBytes
-			h.adjustBalanceLimit(srcStoreID, ByPeer)
+			h.adjustBalanceLimit(srcStoreID, byPeer)
 
 			var srcPeer *metapb.Peer
 			for _, peer := range srcRegion.GetPeers() {
@@ -629,10 +630,10 @@ func (h *balanceHotRegionScheduler) adjustBalanceLimit(storeID uint64, t Balance
 	var srcStatistics *HotRegionsStat
 	var allStatistics map[uint64]*HotRegionsStat
 	switch t {
-	case ByPeer:
+	case byPeer:
 		srcStatistics = h.statisticsAsPeer[storeID]
 		allStatistics = h.statisticsAsPeer
-	case ByLeader:
+	case byLeader:
 		srcStatistics = h.statisticsAsLeader[storeID]
 		allStatistics = h.statisticsAsLeader
 	}
@@ -687,7 +688,7 @@ func (h *balanceHotRegionScheduler) balanceByLeader(cluster *clusterInfo) (*Regi
 
 		destPeer := h.selectDestStoreByLeader(srcRegion)
 		if destPeer != nil {
-			h.adjustBalanceLimit(srcStoreID, ByLeader)
+			h.adjustBalanceLimit(srcStoreID, byLeader)
 			return srcRegion, destPeer
 		}
 	}
@@ -725,6 +726,7 @@ func (h *balanceHotRegionScheduler) selectDestStoreByLeader(srcRegion *RegionInf
 	return destPeer
 }
 
+// StoreHotRegionInfos : used to get human readable description for hot regions.
 type StoreHotRegionInfos struct {
 	AsPeer   map[uint64]*HotRegionsStat `json:"as_peer"`
 	AsLeader map[uint64]*HotRegionsStat `json:"as_leader"`

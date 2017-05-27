@@ -815,7 +815,7 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	// Region 1, 2 and 3 are hot regions.
 	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
 	//|-----------|--------------|----------------|----------------|---------------|
-	//|     1     |       1      |        2       |       3        |      256KB    |
+	//|     1     |       1      |        2       |       3        |      512KB    |
 	//|     2     |       1      |        3       |       4        |      512KB    |
 	//|     3     |       1      |        2       |       4        |      512KB    |
 	tc.addLeaderRegionWithWriteInfo(1, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
@@ -827,15 +827,20 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	// which is hot for store 1 is more larger than other stores.
 	checkTransferPeer(c, hb.Schedule(cluster), 1, 5)
 
-	// After transfer a hot region from store 1 to store 4, update store written
-	// bytes and written bytes.
+	// After transfer a hot region from store 1 to store 5
+	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
+	//|-----------|--------------|----------------|----------------|---------------|
+	//|     1     |       1      |        2       |       3        |      512KB    |
+	//|     2     |       1      |        3       |       4        |      512KB    |
+	//|     3     |       5      |        2       |       4        |      512KB    |
 	tc.updateStorageWrittenBytes(1, 60*1024*1024)
 	tc.updateStorageWrittenBytes(2, 30*1024*1024)
 	tc.updateStorageWrittenBytes(3, 60*1024*1024)
 	tc.updateStorageWrittenBytes(4, 30*1024*1024)
-	tc.addLeaderRegionWithWriteInfo(1, 1, 512*1024*regionHeartBeatReportInterval, 2, 4)
-	tc.addLeaderRegionWithWriteInfo(2, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
-	tc.addLeaderRegionWithWriteInfo(3, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
+	tc.updateStorageWrittenBytes(5, 30*1024*1024)
+	tc.addLeaderRegionWithWriteInfo(1, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
+	tc.addLeaderRegionWithWriteInfo(2, 1, 512*1024*regionHeartBeatReportInterval, 3, 4)
+	tc.addLeaderRegionWithWriteInfo(3, 5, 512*1024*regionHeartBeatReportInterval, 2, 4)
 
 	// We can find that the leader of all hot regions are on store 1,
 	// so one of the leader will transfer to another store.
