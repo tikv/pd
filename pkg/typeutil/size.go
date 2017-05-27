@@ -25,7 +25,7 @@ type ByteSize uint64
 
 // MarshalJSON returns the size as a JSON string.
 func (b ByteSize) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + gh.Bytes(uint64(b)) + `"`), nil
+	return []byte(`"` + gh.IBytes(uint64(b)) + `"`), nil
 }
 
 // UnmarshalJSON parses a JSON string into the bytesize.

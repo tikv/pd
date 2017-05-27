@@ -89,7 +89,7 @@ func newBalanceLeaderScheduler(opt *scheduleOption) *balanceLeaderScheduler {
 	return &balanceLeaderScheduler{
 		opt:      opt,
 		limit:    1,
-		selector: newBalanceSelector(leaderKind, filters),
+		selector: newBalanceSelector(LeaderKind, filters),
 	}
 }
 
@@ -98,7 +98,7 @@ func (l *balanceLeaderScheduler) GetName() string {
 }
 
 func (l *balanceLeaderScheduler) GetResourceKind() ResourceKind {
-	return leaderKind
+	return LeaderKind
 }
 
 func (l *balanceLeaderScheduler) GetResourceLimit() uint64 {
@@ -121,7 +121,6 @@ func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 		return nil
 	}
 	l.limit = adjustBalanceLimit(cluster, l.GetResourceKind())
-
 	return newTransferLeader(region, newLeader)
 }
 
@@ -148,7 +147,7 @@ func newBalanceRegionScheduler(opt *scheduleOption) *balanceRegionScheduler {
 		rep:      opt.GetReplication(),
 		cache:    cache,
 		limit:    1,
-		selector: newBalanceSelector(regionKind, filters),
+		selector: newBalanceSelector(RegionKind, filters),
 	}
 }
 
@@ -157,7 +156,7 @@ func (s *balanceRegionScheduler) GetName() string {
 }
 
 func (s *balanceRegionScheduler) GetResourceKind() ResourceKind {
-	return regionKind
+	return RegionKind
 }
 
 func (s *balanceRegionScheduler) GetResourceLimit() uint64 {
@@ -355,6 +354,12 @@ func (r *replicaChecker) checkOfflinePeer(region *RegionInfo) Operator {
 		if store.isUp() {
 			continue
 		}
+
+		// check the number of replicas firstly
+		if len(region.GetPeers()) > r.opt.GetMaxReplicas() {
+			return newRemovePeer(region, peer)
+		}
+
 		newPeer, _ := r.selectBestPeer(region)
 		if newPeer == nil {
 			return nil
@@ -437,7 +442,7 @@ func (h *balanceHotRegionScheduler) GetName() string {
 }
 
 func (h *balanceHotRegionScheduler) GetResourceKind() ResourceKind {
-	return priorityKind
+	return PriorityKind
 }
 
 func (h *balanceHotRegionScheduler) GetResourceLimit() uint64 {

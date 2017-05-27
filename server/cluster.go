@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"math"
 	"path"
-	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +29,11 @@ import (
 
 const (
 	backgroundJobInterval = time.Minute
+)
+
+// Error instances
+var (
+	ErrNotBootstrapped = errors.New("TiKV cluster is not bootstrapped, please start TiKV first")
 )
 
 // RaftCluster is used for cluster config management.
@@ -56,6 +60,13 @@ type RaftCluster struct {
 
 	wg   sync.WaitGroup
 	quit chan struct{}
+
+	status *ClusterStatus
+}
+
+// ClusterStatus saves some state information
+type ClusterStatus struct {
+	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
 }
 
 func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
@@ -65,6 +76,17 @@ func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 		clusterID:   clusterID,
 		clusterRoot: s.getClusterRootPath(),
 	}
+}
+
+func (c *RaftCluster) loadClusterStatus() error {
+	status := &ClusterStatus{}
+	t, err := c.s.kv.getRaftClusterBootstrapTime()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	status.RaftBootstrapTime = t
+	c.status = status
+	return nil
 }
 
 func (c *RaftCluster) start() error {
@@ -182,6 +204,19 @@ func (s *Server) GetCluster() *metapb.Cluster {
 	}
 }
 
+// GetClusterStatus gets cluster status
+func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
+	s.cluster.Lock()
+	defer s.cluster.Unlock()
+	err := s.cluster.loadClusterStatus()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	clone := &ClusterStatus{}
+	*clone = *s.cluster.status
+	return clone, nil
+}
+
 func (s *Server) createRaftCluster() error {
 	if s.cluster.isRunning() {
 		return nil
@@ -195,15 +230,19 @@ func (s *Server) stopRaftCluster() {
 }
 
 func makeStoreKey(clusterRootPath string, storeID uint64) string {
-	return strings.Join([]string{clusterRootPath, "s", fmt.Sprintf("%020d", storeID)}, "/")
+	return path.Join(clusterRootPath, "s", fmt.Sprintf("%020d", storeID))
 }
 
 func makeRegionKey(clusterRootPath string, regionID uint64) string {
-	return strings.Join([]string{clusterRootPath, "r", fmt.Sprintf("%020d", regionID)}, "/")
+	return path.Join(clusterRootPath, "r", fmt.Sprintf("%020d", regionID))
 }
 
-func makeStoreKeyPrefix(clusterRootPath string) string {
-	return strings.Join([]string{clusterRootPath, "s", ""}, "/")
+func makeRaftClusterStatusPrefix(clusterRootPath string) string {
+	return path.Join(clusterRootPath, "status")
+}
+
+func makeBootstrapTimeKey(clusterRootPath string) string {
+	return path.Join(makeRaftClusterStatusPrefix(clusterRootPath), "raft_bootstrap_time")
 }
 
 func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
@@ -265,6 +304,13 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 
 	var ops []clientv3.Op
 	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
+
+	// Set bootstrap time
+	bootstrapKey := makeBootstrapTimeKey(clusterRootPath)
+	nano := time.Now().UnixNano()
+
+	timeData := uint64ToBytes(uint64(nano))
+	ops = append(ops, clientv3.OpPut(bootstrapKey, string(timeData)))
 
 	// Set store meta
 	storeMeta := req.GetStore()
@@ -528,6 +574,9 @@ func (c *RaftCluster) collectMetrics() {
 	for label, value := range metrics {
 		clusterStatusGauge.WithLabelValues(label).Set(value)
 	}
+
+	c.coordinator.collectSchedulerMetrics()
+	c.coordinator.collectHotSpotMetrics()
 }
 
 func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {

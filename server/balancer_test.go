@@ -206,7 +206,7 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 		tc.addLeaderStore(2, int(t.targetCount))
 		source := cluster.getStore(1)
 		target := cluster.getStore(2)
-		c.Assert(shouldBalance(source, target, leaderKind), Equals, t.expectedResult)
+		c.Assert(shouldBalance(source, target, LeaderKind), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -214,7 +214,7 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 		tc.addRegionStore(2, int(t.targetCount))
 		source := cluster.getStore(1)
 		target := cluster.getStore(2)
-		c.Assert(shouldBalance(source, target, regionKind), Equals, t.expectedResult)
+		c.Assert(shouldBalance(source, target, RegionKind), Equals, t.expectedResult)
 	}
 }
 
@@ -226,11 +226,11 @@ func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
 	tc.addLeaderStore(3, 30)
 
 	// StandDeviation is sqrt((10^2+0+10^2)/3).
-	c.Assert(adjustBalanceLimit(cluster, leaderKind), Equals, uint64(math.Sqrt(200.0/3.0)))
+	c.Assert(adjustBalanceLimit(cluster, LeaderKind), Equals, uint64(math.Sqrt(200.0/3.0)))
 
 	tc.setStoreOffline(1)
 	// StandDeviation is sqrt((5^2+5^2)/2).
-	c.Assert(adjustBalanceLimit(cluster, leaderKind), Equals, uint64(math.Sqrt(50.0/2.0)))
+	c.Assert(adjustBalanceLimit(cluster, LeaderKind), Equals, uint64(math.Sqrt(50.0/2.0)))
 }
 
 var _ = Suite(&testBalanceLeaderSchedulerSuite{})
@@ -592,10 +592,15 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 	tc.setStoreBusy(4, false)
 	checkRemovePeer(c, rc.Check(region), 4)
-	region.RemoveStorePeer(4)
 
-	// Transfer peer to store 4.
+	// Test offline
+	// the number of region peers more than the maxReplicas
+	// remove the peer
 	tc.setStoreOffline(3)
+	checkRemovePeer(c, rc.Check(region), 3)
+	region.RemoveStorePeer(4)
+	// the number of region peers equals the maxReplicas
+	// Transfer peer to store 4.
 	checkTransferPeer(c, rc.Check(region), 3, 4)
 
 	// Store 5 has a different zone, we can keep it safe.

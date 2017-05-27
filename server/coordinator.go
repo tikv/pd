@@ -14,6 +14,7 @@
 package server
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -91,13 +92,14 @@ func (c *coordinator) dispatch(region *RegionInfo) *pdpb.RegionHeartbeatResponse
 	if op := c.getOperator(region.GetId()); op != nil {
 		res, finished := op.Do(region)
 		if !finished {
+			collectOperatorCounterMetrics(op)
 			return res
 		}
 		c.removeOperator(op)
 	}
 
 	// Check replica operator.
-	if c.limiter.operatorCount(regionKind) >= c.opt.GetReplicaScheduleLimit() {
+	if c.limiter.operatorCount(RegionKind) >= c.opt.GetReplicaScheduleLimit() {
 		return nil
 	}
 	if op := c.checker.Check(region); op != nil {
@@ -156,6 +158,39 @@ func (c *coordinator) getSchedulers() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+func (c *coordinator) collectSchedulerMetrics() {
+	c.RLock()
+	defer c.RUnlock()
+	for _, s := range c.schedulers {
+		var allowScheduler float64
+		if s.AllowSchedule() {
+			allowScheduler = 1
+		}
+		limit := float64(s.GetResourceLimit())
+
+		schedulerStatusGauge.WithLabelValues(s.GetName(), "allow").Set(allowScheduler)
+		schedulerStatusGauge.WithLabelValues(s.GetName(), "limit").Set(limit)
+	}
+}
+
+func (c *coordinator) collectHotSpotMetrics() {
+	c.RLock()
+	defer c.RUnlock()
+	s, ok := c.schedulers[hotRegionScheduleName]
+	if !ok {
+		return
+	}
+	status := s.Scheduler.(*balanceHotRegionScheduler).GetStatus()
+	for storeID, stat := range status {
+		store := fmt.Sprintf("store_%d", storeID)
+		totalWriteBytes := float64(stat.TotalWrittenBytes)
+		hotWriteRegionCount := float64(stat.RegionCount)
+
+		hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes").Set(totalWriteBytes)
+		hotSpotStatusGauge.WithLabelValues(store, "hot_write_region").Set(hotWriteRegionCount)
+	}
 }
 
 func (c *coordinator) shouldRun() bool {
@@ -223,17 +258,18 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 func (c *coordinator) addOperator(op Operator) bool {
 	c.Lock()
 	defer c.Unlock()
-
 	regionID := op.GetRegionID()
 
 	if old, ok := c.operators[regionID]; ok {
 		if !isHigherPriorityOperator(op, old) {
 			return false
 		}
-		c.limiter.removeOperator(old)
+		old.SetState(OperatorReplaced)
+		c.removeOperatorLocked(old)
 		log.Infof("coordinator: add operator %+v with higher priority, remove operator: %+v", op, old)
 	}
 
+	c.histories.add(regionID, op)
 	c.limiter.addOperator(op)
 	c.operators[regionID] = op
 	collectOperatorCounterMetrics(op)
@@ -241,10 +277,10 @@ func (c *coordinator) addOperator(op Operator) bool {
 }
 
 func isHigherPriorityOperator(new Operator, old Operator) bool {
-	if new.GetResourceKind() == adminKind {
+	if new.GetResourceKind() == AdminKind {
 		return true
 	}
-	if new.GetResourceKind() == priorityKind && old.GetResourceKind() != priorityKind {
+	if new.GetResourceKind() == PriorityKind && old.GetResourceKind() != PriorityKind {
 		return true
 	}
 	return false
@@ -253,12 +289,16 @@ func isHigherPriorityOperator(new Operator, old Operator) bool {
 func (c *coordinator) removeOperator(op Operator) {
 	c.Lock()
 	defer c.Unlock()
+	c.removeOperatorLocked(op)
+}
 
+func (c *coordinator) removeOperatorLocked(op Operator) {
 	regionID := op.GetRegionID()
 	c.limiter.removeOperator(op)
 	delete(c.operators, regionID)
 
 	c.histories.add(regionID, op)
+	collectOperatorCounterMetrics(op)
 }
 
 func (c *coordinator) getOperator(regionID uint64) Operator {
@@ -286,6 +326,21 @@ func (c *coordinator) getHistories() []Operator {
 	var operators []Operator
 	for _, elem := range c.histories.elems() {
 		operators = append(operators, elem.value.(Operator))
+	}
+
+	return operators
+}
+
+func (c *coordinator) getHistoriesOfKind(kind ResourceKind) []Operator {
+	c.RLock()
+	defer c.RUnlock()
+
+	var operators []Operator
+	for _, elem := range c.histories.elems() {
+		op := elem.value.(Operator)
+		if op.GetResourceKind() == kind {
+			operators = append(operators, op)
+		}
 	}
 
 	return operators
@@ -375,21 +430,11 @@ func (s *scheduleController) AllowSchedule() bool {
 }
 
 func collectOperatorCounterMetrics(op Operator) {
-	metrics := make(map[string]uint64)
 	regionOp, ok := op.(*regionOperator)
 	if !ok {
 		return
 	}
 	for _, op := range regionOp.Ops {
-		switch o := op.(type) {
-		case *changePeerOperator:
-			metrics[o.Name]++
-		case *transferLeaderOperator:
-			metrics[o.Name]++
-		}
-	}
-
-	for label, value := range metrics {
-		operatorCounter.WithLabelValues(label).Add(float64(value))
+		operatorCounter.WithLabelValues(op.GetName(), op.GetState().String()).Add(1)
 	}
 }
