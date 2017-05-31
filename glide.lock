@@ -1,5 +1,5 @@
-hash: 4b6ab744b92f76bf689153232d35e5c3d00d91ca5f7dccb2ce9743ca37a6763a
-updated: 2017-05-02T15:01:38.795129329+08:00
+hash: 44f2cc432c159682aa54c992da629b12f3188a8839fffb75b7230d76a7f6e604
+updated: 2017-05-31T17:38:07.198647308+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -85,7 +85,7 @@ imports:
   subpackages:
   - semver
 - name: github.com/coreos/go-systemd
-  version: fa8411dcbcbad22b8542b0433914ef68b123f989
+  version: 48702e0da86bd25e76cfef347e2adeb434a0d0a6
   subpackages:
   - journal
 - name: github.com/coreos/pkg
@@ -116,9 +116,9 @@ imports:
 - name: github.com/gorilla/mux
   version: 0eeaf8392f5b04950925b8a69fe70f110fa7cbfc
 - name: github.com/grpc-ecosystem/go-grpc-prometheus
-  version: 6b7015e65d366bf3f19b2b2a000a831940f0f7e0
+  version: 2500245aa6110c562d17020fb31a2c133d737799
 - name: github.com/grpc-ecosystem/grpc-gateway
-  version: 84398b94e188ee336f307779b57b3aa91af7063c
+  version: 18d159699f2e83fc5bb9ef2f79465ca3f3122676
   subpackages:
   - runtime
   - runtime/internal
@@ -180,7 +180,7 @@ imports:
   repo: https://github.com/spf13/cobra.git
   vcs: git
 - name: github.com/spf13/pflag
-  version: c990990ab4981d84da820b7b00c85139ca150b5f
+  version: e57e3eeb33f795204c1ca35f56c44f83227c6e66
 - name: github.com/twinj/uuid
   version: 70cac2bcd273ef6a371bb96cde363d28b68734c3
 - name: github.com/ugorji/go
@@ -201,13 +201,14 @@ imports:
   - bcrypt
   - blowfish
 - name: golang.org/x/net
-  version: 6acef71eb69611914f7a30939ea9f6e194c78172
+  version: d1e1b351919c6738fdeb9893d5c998b161464f0c
   repo: https://github.com/golang/net.git
   vcs: git
   subpackages:
   - context
   - http2
   - http2/hpack
+  - idna
   - internal/timeseries
   - lex/httplex
   - trace
@@ -217,8 +218,15 @@ imports:
   vcs: git
   subpackages:
   - unix
+- name: golang.org/x/text
+  version: 4ee4af566555f5fbe026368b75596286a312663a
+  subpackages:
+  - secure/bidirule
+  - transform
+  - unicode/bidi
+  - unicode/norm
 - name: google.golang.org/grpc
-  version: 777daa17ff9b5daef1cfdf915088a2ada3332bf0
+  version: 8050b9cbc271307e5a716a9d782803d09b0d6f2d
   repo: https://github.com/grpc/grpc-go.git
   vcs: git
   subpackages:
@@ -226,9 +234,12 @@ imports:
   - credentials
   - grpclog
   - internal
+  - keepalive
   - metadata
   - naming
   - peer
+  - stats
+  - tap
   - transport
 - name: gopkg.in/natefinch/lumberjack.v2
   version: dd45e6a67c53f673bb49ca8a001fd3a63ceb640e
