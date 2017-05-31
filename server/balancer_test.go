@@ -555,6 +555,24 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	checkTransferPeer(c, rc.Check(region), 3, 1)
 }
 
+func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+	tc.addRegionStore(1, 1)
+	tc.addRegionStore(2, 1)
+	_, opt := newTestScheduleConfig()
+
+	rc := newReplicaChecker(opt, cluster)
+
+	// now region peer in store 1,2,3.but we just have store 1,2
+	// This happens only in recovering the PD cluster
+	// should not panic
+	tc.addLeaderRegion(1, 1, 2, 3)
+	region := cluster.getRegion(1)
+	op := rc.Check(region)
+	c.Assert(op, IsNil)
+}
+
 func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
