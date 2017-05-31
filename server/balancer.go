@@ -16,7 +16,6 @@ package server
 import (
 	"math"
 	"math/rand"
-	"sort"
 	"sync"
 	"time"
 
@@ -29,6 +28,14 @@ const (
 	storeCacheInterval    = 30 * time.Second
 	bootstrapBalanceCount = 10
 	bootstrapBalanceDiff  = 2
+)
+
+// BalanceType : the perspective of balance
+type BalanceType int
+
+const (
+	byPeer BalanceType = iota
+	byLeader
 )
 
 // minBalanceDiff returns the minimal diff to do balance. The formula is based
@@ -409,27 +416,32 @@ func (m RegionsStat) Len() int           { return len(m) }
 func (m RegionsStat) Swap(i, j int)      { m[i], m[j] = m[j], m[i] }
 func (m RegionsStat) Less(i, j int) bool { return m[i].WrittenBytes < m[j].WrittenBytes }
 
-// StoreHotRegions records all hot regions in one store with sequence
-type StoreHotRegions struct {
-	TotalWrittenBytes uint64      `json:"total_written"`
-	RegionCount       int         `json:"region_count"`
-	RegionsStat       RegionsStat `json:"stats"`
+// HotRegionsStat records all hot regions statistics
+type HotRegionsStat struct {
+	WrittenBytes uint64      `json:"total_written_bytes"`
+	RegionsCount int         `json:"regions_count"`
+	RegionsStat  RegionsStat `json:"statistics"`
 }
 
 type balanceHotRegionScheduler struct {
 	sync.RWMutex
-	opt         *scheduleOption
-	limit       uint64
-	scoreStatus map[uint64]*StoreHotRegions // store id -> regions status in this store
-	r           *rand.Rand
+	opt   *scheduleOption
+	limit uint64
+
+	// store id -> hot regions statistics as the role of replica
+	statisticsAsPeer map[uint64]*HotRegionsStat
+	// store id -> hot regions statistics as the role of leader
+	statisticsAsLeader map[uint64]*HotRegionsStat
+	r                  *rand.Rand
 }
 
 func newBalanceHotRegionScheduler(opt *scheduleOption) *balanceHotRegionScheduler {
 	return &balanceHotRegionScheduler{
-		opt:         opt,
-		limit:       1,
-		scoreStatus: make(map[uint64]*StoreHotRegions),
-		r:           rand.New(rand.NewSource(time.Now().UnixNano())),
+		opt:                opt,
+		limit:              1,
+		statisticsAsPeer:   make(map[uint64]*HotRegionsStat),
+		statisticsAsLeader: make(map[uint64]*HotRegionsStat),
+		r:                  rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -450,26 +462,29 @@ func (h *balanceHotRegionScheduler) Prepare(cluster *clusterInfo) error { return
 func (h *balanceHotRegionScheduler) Cleanup(cluster *clusterInfo) {}
 
 func (h *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
-	h.calculateScore(cluster)
-	region := h.SelectSourceRegion(cluster)
-	if region == nil {
-		return nil
+	h.calcScore(cluster)
+
+	// balance by peer
+	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster)
+	if srcRegion != nil {
+		return newPriorityTransferPeer(srcRegion, srcPeer, destPeer)
 	}
-	newLeader := h.selectTransferLeader(region)
-	if newLeader != nil {
-		return newPriorityTransferLeader(region, newLeader)
+
+	// balance by leader
+	srcRegion, newLeader := h.balanceByLeader(cluster)
+	if srcRegion != nil {
+		return newPriorityTransferLeader(srcRegion, newLeader)
 	}
-	peer := h.selectTransferPeer(region, cluster)
-	if peer != nil {
-		return newPriorityTransferPeer(region, region.Leader, peer)
-	}
+
 	return nil
 }
 
-func (h *balanceHotRegionScheduler) calculateScore(cluster *clusterInfo) {
+func (h *balanceHotRegionScheduler) calcScore(cluster *clusterInfo) {
 	h.Lock()
 	defer h.Unlock()
-	h.scoreStatus = make(map[uint64]*StoreHotRegions)
+
+	h.statisticsAsPeer = make(map[uint64]*HotRegionsStat)
+	h.statisticsAsLeader = make(map[uint64]*HotRegionsStat)
 	items := cluster.writeStatistics.elems()
 	for _, item := range items {
 		r, ok := item.value.(*RegionStat)
@@ -481,183 +496,270 @@ func (h *balanceHotRegionScheduler) calculateScore(cluster *clusterInfo) {
 		}
 
 		regionInfo := cluster.getRegion(r.RegionID)
-		storeID := regionInfo.Leader.GetStoreId()
-		status, ok := h.scoreStatus[storeID]
-		if !ok {
-			status = &StoreHotRegions{
-				RegionsStat: make(RegionsStat, 0, storeHotRegionsDefaultLen),
+		leaderStoreID := regionInfo.Leader.GetStoreId()
+		storeIDs := regionInfo.GetStoreIds()
+		for storeID := range storeIDs {
+			peerStat, ok := h.statisticsAsPeer[storeID]
+			if !ok {
+				peerStat = &HotRegionsStat{
+					RegionsStat: make(RegionsStat, 0, storeHotRegionsDefaultLen),
+				}
+				h.statisticsAsPeer[storeID] = peerStat
 			}
-			h.scoreStatus[storeID] = status
-		}
-		status.TotalWrittenBytes += r.WrittenBytes
-		status.RegionsStat = append(status.RegionsStat, RegionStat{
-			RegionID:       r.RegionID,
-			WrittenBytes:   r.WrittenBytes,
-			HotDegree:      r.HotDegree,
-			LastUpdateTime: r.LastUpdateTime,
-			StoreID:        storeID,
-			antiCount:      r.antiCount,
-			version:        r.version,
-		})
-		status.RegionCount++
-	}
+			leaderStat, ok := h.statisticsAsLeader[storeID]
+			if !ok {
+				leaderStat = &HotRegionsStat{
+					RegionsStat: make(RegionsStat, 0, storeHotRegionsDefaultLen),
+				}
+				h.statisticsAsLeader[storeID] = leaderStat
+			}
 
-	for _, rs := range h.scoreStatus {
-		sort.Sort(sort.Reverse(rs.RegionsStat))
+			stat := RegionStat{
+				RegionID:       r.RegionID,
+				WrittenBytes:   r.WrittenBytes,
+				HotDegree:      r.HotDegree,
+				LastUpdateTime: r.LastUpdateTime,
+				StoreID:        storeID,
+				antiCount:      r.antiCount,
+				version:        r.version,
+			}
+			peerStat.WrittenBytes += r.WrittenBytes
+			peerStat.RegionsCount++
+			peerStat.RegionsStat = append(peerStat.RegionsStat, stat)
+
+			if storeID == leaderStoreID {
+				leaderStat.WrittenBytes += r.WrittenBytes
+				leaderStat.RegionsCount++
+				leaderStat.RegionsStat = append(leaderStat.RegionsStat, stat)
+			}
+		}
 	}
 }
 
-func (h *balanceHotRegionScheduler) SelectSourceRegion(cluster *clusterInfo) *RegionInfo {
+func (h *balanceHotRegionScheduler) balanceByPeer(cluster *clusterInfo) (*RegionInfo, *metapb.Peer, *metapb.Peer) {
 	var (
-		maxWritten             uint64
-		sourceStore            uint64
+		maxWrittenBytes        uint64
+		srcStoreID             uint64
 		maxHotStoreRegionCount int
 	)
-	// choose a hot store as transfer source
-	// the numbers of the hot regions in that store has higher priority than TotalWrittenBytes
-	for sid, s := range h.scoreStatus {
-		if s.RegionsStat.Len() < 2 {
-			continue
-		}
 
-		if maxHotStoreRegionCount < s.RegionsStat.Len() {
-			maxHotStoreRegionCount = s.RegionsStat.Len()
-			maxWritten = s.TotalWrittenBytes
-			sourceStore = sid
-			continue
-		}
-
-		if maxHotStoreRegionCount == s.RegionsStat.Len() && maxWritten < s.TotalWrittenBytes {
-			maxWritten = s.TotalWrittenBytes
-			sourceStore = sid
+	// get the srcStoreId
+	for storeID, statistics := range h.statisticsAsPeer {
+		count, writtenBytes := statistics.RegionsStat.Len(), statistics.WrittenBytes
+		if count >= 2 && (count > maxHotStoreRegionCount || (count == maxHotStoreRegionCount && writtenBytes > maxWrittenBytes)) {
+			maxHotStoreRegionCount = count
+			maxWrittenBytes = writtenBytes
+			srcStoreID = storeID
 		}
 	}
-
-	if sourceStore == 0 {
-		return nil
+	if srcStoreID == 0 {
+		return nil, nil, nil
 	}
 
-	length := h.scoreStatus[sourceStore].RegionsStat.Len()
-	// the hottest region in the store not move
-	// randomly pick a region from 1 .. length-1
-	// TODO: consider hot degree when pick
-	rr := h.r.Intn(length-1) + 1
-	pickedRegionStat := h.scoreStatus[sourceStore].RegionsStat[rr]
-	if pickedRegionStat.antiCount < hotRegionAntiCount {
-		return nil
-	}
-	sourceRegion := cluster.getRegion(pickedRegionStat.RegionID)
-	if len(sourceRegion.DownPeers) != 0 || len(sourceRegion.PendingPeers) != 0 {
-		return nil
-	}
-	// use written bytes per second
-	sourceRegion.WrittenBytes = pickedRegionStat.WrittenBytes
-	h.adjustBalanceLimit(sourceStore)
-	return sourceRegion
-}
-
-func (h *balanceHotRegionScheduler) adjustBalanceLimit(storeID uint64) {
-	s := h.scoreStatus[storeID]
-	var hotRegionTotalCount float64
-	for _, m := range h.scoreStatus {
-		hotRegionTotalCount += float64(m.RegionsStat.Len())
-	}
-
-	avgRegionCount := hotRegionTotalCount / float64(len(h.scoreStatus))
-	// Multiplied by hotRegionLimitFactor to avoid transfer back and forth
-	limit := uint64((float64(s.RegionsStat.Len()) - avgRegionCount) * hotRegionLimitFactor)
-	h.limit = maxUint64(1, limit)
-}
-
-func (h *balanceHotRegionScheduler) GetStatus() map[uint64]*StoreHotRegions {
-	h.RLock()
-	defer h.RUnlock()
-	status := make(map[uint64]*StoreHotRegions)
-	for id, stat := range h.scoreStatus {
-		clone := *stat
-		status[id] = &clone
-	}
-	return status
-}
-
-func (h *balanceHotRegionScheduler) selectTransferLeader(sourceRegion *RegionInfo) *metapb.Peer {
-	followPeers := sourceRegion.GetFollowers()
-	storeIDs := make([]uint64, 0, len(followPeers))
-	for _, peer := range followPeers {
-		storeIDs = append(storeIDs, peer.GetStoreId())
-	}
-
-	targetStoreID := h.selectBestStore(storeIDs, sourceRegion)
-	var targetPeer *metapb.Peer
-	for _, peer := range followPeers {
-		if peer.GetStoreId() == targetStoreID {
-			targetPeer = peer
-		}
-	}
-	return targetPeer
-}
-
-func (h *balanceHotRegionScheduler) selectTransferPeer(sourceRegion *RegionInfo, cluster *clusterInfo) *metapb.Peer {
-	var filters []Filter
 	stores := cluster.getStores()
-
-	filters = append(filters, newExcludedFilter(sourceRegion.GetStoreIds(), sourceRegion.GetStoreIds()))
-	filters = append(filters, newDistinctScoreFilter(h.opt.GetReplication(), stores, cluster.getLeaderStore(sourceRegion)))
-	filters = append(filters, newStateFilter(h.opt))
-	filters = append(filters, newStorageThresholdFilter(h.opt))
-
-	storeIDs := make([]uint64, 0, len(stores))
-	for _, store := range stores {
-		if filterTarget(store, filters) {
+	var destStoreID uint64
+	for _, i := range h.r.Perm(h.statisticsAsPeer[srcStoreID].RegionsStat.Len()) {
+		rs := h.statisticsAsPeer[srcStoreID].RegionsStat[i]
+		srcRegion := cluster.getRegion(rs.RegionID)
+		if len(srcRegion.DownPeers) != 0 || len(srcRegion.PendingPeers) != 0 {
 			continue
 		}
-		storeIDs = append(storeIDs, store.GetId())
-	}
-	targetStoreID := h.selectBestStore(storeIDs, sourceRegion)
-	targetStore := cluster.getStore(targetStoreID)
-	if targetStore == nil {
-		return nil
-	}
-	newPeer, err := cluster.allocPeer(targetStore.GetId())
-	if err != nil {
-		log.Errorf("failed to allocate peer: %v", err)
-		return nil
-	}
 
-	return newPeer
-}
-
-// select a store to transfer peer
-// preferred to the store that with the least number of regions
-// and then choose the least total written bytes store
-func (h *balanceHotRegionScheduler) selectBestStore(stores []uint64, sourceRegion *RegionInfo) uint64 {
-	sr := h.scoreStatus[sourceRegion.Leader.GetStoreId()]
-	sourceStoreWrittenBytes := sr.TotalWrittenBytes
-	sourceStoreHotRegionCount := sr.RegionsStat.Len()
-
-	var (
-		targetStore     uint64
-		minWrittenBytes uint64 = math.MaxUint64
-	)
-	minRegionCount := int(math.MaxInt32)
-	for _, store := range stores {
-		if s, ok := h.scoreStatus[store]; ok {
-			if sourceStoreHotRegionCount-s.RegionsStat.Len() > 1 && minRegionCount > s.RegionsStat.Len() {
-				targetStore = store
-				minWrittenBytes = s.TotalWrittenBytes
-				minRegionCount = s.RegionsStat.Len()
+		var filters []Filter
+		filters = append(filters, newExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()))
+		filters = append(filters, newDistinctScoreFilter(h.opt.GetReplication(), stores, cluster.getLeaderStore(srcRegion)))
+		filters = append(filters, newStateFilter(h.opt))
+		filters = append(filters, newStorageThresholdFilter(h.opt))
+		destStoreIDs := make([]uint64, 0, len(stores))
+		for _, store := range stores {
+			if filterTarget(store, filters) {
 				continue
 			}
-			if minRegionCount == s.RegionsStat.Len() && minWrittenBytes > s.TotalWrittenBytes &&
-				uint64(float64(sourceStoreWrittenBytes)*hotRegionScheduleFactor) > s.TotalWrittenBytes+2*sourceRegion.WrittenBytes {
-				minWrittenBytes = s.TotalWrittenBytes
-				targetStore = store
+			destStoreIDs = append(destStoreIDs, store.GetId())
+		}
+
+		destStoreID = h.selectDestStoreByPeer(destStoreIDs, srcRegion, srcStoreID)
+		if destStoreID != 0 {
+			srcRegion.WrittenBytes = rs.WrittenBytes
+			h.adjustBalanceLimit(srcStoreID, byPeer)
+
+			var srcPeer *metapb.Peer
+			for _, peer := range srcRegion.GetPeers() {
+				if peer.GetStoreId() == srcStoreID {
+					srcPeer = peer
+					break
+				}
 			}
 
+			if srcPeer == nil {
+				return nil, nil, nil
+			}
+
+			destPeer, err := cluster.allocPeer(destStoreID)
+			if err != nil {
+				log.Errorf("failed to allocate peer: %v", err)
+				return nil, nil, nil
+			}
+
+			return srcRegion, srcPeer, destPeer
+		}
+	}
+
+	return nil, nil, nil
+}
+
+func (h *balanceHotRegionScheduler) selectDestStoreByPeer(candidateStoreIDs []uint64, srcRegion *RegionInfo, srcStoreID uint64) uint64 {
+	sr := h.statisticsAsPeer[srcStoreID]
+	srcWrittenBytes := sr.WrittenBytes
+	srcHotRegionsCount := sr.RegionsStat.Len()
+
+	var (
+		destStoreID     uint64
+		minWrittenBytes uint64 = math.MaxUint64
+	)
+	minRegionsCount := int(math.MaxInt32)
+	for _, storeID := range candidateStoreIDs {
+		if s, ok := h.statisticsAsPeer[storeID]; ok {
+			if srcHotRegionsCount-s.RegionsStat.Len() > 1 && minRegionsCount > s.RegionsStat.Len() {
+				destStoreID = storeID
+				minWrittenBytes = s.WrittenBytes
+				minRegionsCount = s.RegionsStat.Len()
+				continue
+			}
+			if minRegionsCount == s.RegionsStat.Len() && minWrittenBytes > s.WrittenBytes &&
+				uint64(float64(srcWrittenBytes)*hotRegionScheduleFactor) > s.WrittenBytes+2*srcRegion.WrittenBytes {
+				minWrittenBytes = s.WrittenBytes
+				destStoreID = storeID
+			}
 		} else {
-			targetStore = store
+			destStoreID = storeID
 			break
 		}
 	}
-	return targetStore
+	return destStoreID
+}
+
+func (h *balanceHotRegionScheduler) adjustBalanceLimit(storeID uint64, t BalanceType) {
+	var srcStatistics *HotRegionsStat
+	var allStatistics map[uint64]*HotRegionsStat
+	switch t {
+	case byPeer:
+		srcStatistics = h.statisticsAsPeer[storeID]
+		allStatistics = h.statisticsAsPeer
+	case byLeader:
+		srcStatistics = h.statisticsAsLeader[storeID]
+		allStatistics = h.statisticsAsLeader
+	}
+
+	var hotRegionTotalCount float64
+	for _, m := range allStatistics {
+		hotRegionTotalCount += float64(m.RegionsStat.Len())
+	}
+
+	avgRegionCount := hotRegionTotalCount / float64(len(allStatistics))
+	// Multiplied by hotRegionLimitFactor to avoid transfer back and forth
+	limit := uint64((float64(srcStatistics.RegionsStat.Len()) - avgRegionCount) * hotRegionLimitFactor)
+	h.limit = maxUint64(1, limit)
+}
+
+func (h *balanceHotRegionScheduler) balanceByLeader(cluster *clusterInfo) (*RegionInfo, *metapb.Peer) {
+	var (
+		maxWrittenBytes        uint64
+		srcStoreID             uint64
+		maxHotStoreRegionCount int
+	)
+
+	// select srcStoreId by leader
+	for storeID, statistics := range h.statisticsAsLeader {
+		if statistics.RegionsStat.Len() < 2 {
+			continue
+		}
+
+		if maxHotStoreRegionCount < statistics.RegionsStat.Len() {
+			maxHotStoreRegionCount = statistics.RegionsStat.Len()
+			maxWrittenBytes = statistics.WrittenBytes
+			srcStoreID = storeID
+			continue
+		}
+
+		if maxHotStoreRegionCount == statistics.RegionsStat.Len() && maxWrittenBytes < statistics.WrittenBytes {
+			maxWrittenBytes = statistics.WrittenBytes
+			srcStoreID = storeID
+		}
+	}
+	if srcStoreID == 0 {
+		return nil, nil
+	}
+
+	// select destPeer
+	for _, i := range h.r.Perm(h.statisticsAsLeader[srcStoreID].RegionsStat.Len()) {
+		rs := h.statisticsAsLeader[srcStoreID].RegionsStat[i]
+		srcRegion := cluster.getRegion(rs.RegionID)
+		if len(srcRegion.DownPeers) != 0 || len(srcRegion.PendingPeers) != 0 {
+			continue
+		}
+
+		destPeer := h.selectDestStoreByLeader(srcRegion)
+		if destPeer != nil {
+			h.adjustBalanceLimit(srcStoreID, byLeader)
+			return srcRegion, destPeer
+		}
+	}
+	return nil, nil
+}
+
+func (h *balanceHotRegionScheduler) selectDestStoreByLeader(srcRegion *RegionInfo) *metapb.Peer {
+	sr := h.statisticsAsLeader[srcRegion.Leader.GetStoreId()]
+	srcWrittenBytes := sr.WrittenBytes
+	srcHotRegionsCount := sr.RegionsStat.Len()
+
+	var (
+		destPeer        *metapb.Peer
+		minWrittenBytes uint64 = math.MaxUint64
+	)
+	minRegionsCount := int(math.MaxInt32)
+	for storeID, peer := range srcRegion.GetFollowers() {
+		if s, ok := h.statisticsAsLeader[storeID]; ok {
+			if srcHotRegionsCount-s.RegionsStat.Len() > 1 && minRegionsCount > s.RegionsStat.Len() {
+				destPeer = peer
+				minWrittenBytes = s.WrittenBytes
+				minRegionsCount = s.RegionsStat.Len()
+				continue
+			}
+			if minRegionsCount == s.RegionsStat.Len() && minWrittenBytes > s.WrittenBytes &&
+				uint64(float64(srcWrittenBytes)*hotRegionScheduleFactor) > s.WrittenBytes+2*srcRegion.WrittenBytes {
+				minWrittenBytes = s.WrittenBytes
+				destPeer = peer
+			}
+		} else {
+			destPeer = peer
+			break
+		}
+	}
+	return destPeer
+}
+
+// StoreHotRegionInfos : used to get human readable description for hot regions.
+type StoreHotRegionInfos struct {
+	AsPeer   map[uint64]*HotRegionsStat `json:"as_peer"`
+	AsLeader map[uint64]*HotRegionsStat `json:"as_leader"`
+}
+
+func (h *balanceHotRegionScheduler) GetStatus() *StoreHotRegionInfos {
+	h.RLock()
+	defer h.RUnlock()
+	asPeer := make(map[uint64]*HotRegionsStat, len(h.statisticsAsPeer))
+	for id, stat := range h.statisticsAsPeer {
+		clone := *stat
+		asPeer[id] = &clone
+	}
+	asLeader := make(map[uint64]*HotRegionsStat, len(h.statisticsAsLeader))
+	for id, stat := range h.statisticsAsLeader {
+		clone := *stat
+		asLeader[id] = &clone
+	}
+	return &StoreHotRegionInfos{
+		AsPeer:   asPeer,
+		AsLeader: asLeader,
+	}
 }
