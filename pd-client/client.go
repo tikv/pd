@@ -561,6 +561,7 @@ func (c *client) pdTSOClient() pdpb.PD_TsoClient {
 	}
 }
 
+// TSOResponse is the result of GetTSAsync.
 type TSOResponse struct {
 	wg       sync.WaitGroup
 	err      error
@@ -661,7 +662,7 @@ func (async *asyncTSOClient) backgroundRecvWorker() {
 func (async *asyncTSOClient) call() (*TSOResponse, error) {
 	async.mu.RLock()
 	if async.mu.unhealth {
-		return nil, errors.New("This asyncTSOClient maybe stale.")
+		return nil, errors.New("This asyncTSOClient maybe stale")
 	}
 	async.mu.RUnlock()
 
