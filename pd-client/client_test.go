@@ -17,6 +17,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -173,6 +174,44 @@ func (s *testClientSuite) TestTSO(c *C) {
 		c.Assert(ts, Greater, last)
 		last = ts
 	}
+}
+
+func (s *testClientSuite) TestTSOAsync(c *C) {
+	var tss []int64
+	for i := 0; i < 100; i++ {
+		resp := s.client.GetTSAsync()
+		resp.wg.Wait()
+		c.Assert(resp.err, IsNil)
+		tss = append(tss, resp.physical<<18+resp.logical)
+	}
+	var last int64
+	for _, ts := range tss {
+		c.Assert(ts, Greater, last)
+		last = ts
+	}
+}
+
+func (s *testClientSuite) TestTSOAsyncRace(c *C) {
+	var wg sync.WaitGroup
+	begin := make(chan struct{})
+	count := 100
+	wg.Add(count)
+	for i := 0; i < count; i++ {
+		go func() {
+			<-begin
+
+			for j := 0; j < 100; j++ {
+				resp := s.client.GetTSAsync()
+				resp.wg.Wait()
+				c.Assert(resp.err, IsNil)
+
+			}
+
+			wg.Done()
+		}()
+	}
+	close(begin)
+	wg.Wait()
 }
 
 func (s *testClientSuite) TestGetRegion(c *C) {

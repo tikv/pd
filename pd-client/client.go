@@ -49,6 +49,8 @@ type Client interface {
 	GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error)
 	// Close closes the client.
 	Close()
+	// GetTSAsync gets a timestamp from PD, it's a nonblock function.
+	GetTSAsync() *TSOResponse
 }
 
 type tsoRequest struct {
@@ -89,6 +91,11 @@ type client struct {
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	asyncTSOMu struct {
+		sync.RWMutex
+		cli *asyncTSOClient
+	}
 }
 
 // NewClient creates a PD client.
@@ -117,6 +124,8 @@ func NewClient(pdAddrs []string) (Client, error) {
 	go c.tsLoop()
 	go c.tsCancelLoop()
 	go c.leaderLoop()
+
+	c.asyncTSOMu.cli = newAsyncTSOClient(c.pdTSOClient(), c.requestHeader())
 
 	// TODO: Update addrs from server continuously by using GetMember.
 
@@ -425,6 +434,12 @@ var tsoReqPool = sync.Pool{
 	},
 }
 
+// func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
+// 	resp := c.GetTSAsync()
+// 	resp.wg.Wait()
+// 	return resp.physical, resp.logical, resp.err
+// }
+
 func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds()) }()
@@ -527,4 +542,154 @@ func addrsToUrls(addrs []string) []string {
 		}
 	}
 	return urls
+}
+
+func (c *client) pdTSOClient() pdpb.PD_TsoClient {
+	ctx := context.Background()
+	for {
+		stream, err := c.leaderClient().Tso(ctx)
+		if err == nil {
+			return stream
+		}
+
+		log.Errorf("[pd] create tso stream error: %v", err)
+		select {
+		case <-time.After(time.Second):
+		case <-c.ctx.Done():
+			return nil
+		}
+	}
+}
+
+type TSOResponse struct {
+	wg       sync.WaitGroup
+	err      error
+	physical int64
+	logical  int64
+}
+
+type asyncTSOClient struct {
+	cli    pdpb.PD_TsoClient
+	header *pdpb.RequestHeader
+
+	input  chan *TSOResponse
+	workCh chan []*TSOResponse
+
+	mu struct {
+		sync.RWMutex
+		unhealth bool
+	}
+}
+
+func newAsyncTSOClient(cli pdpb.PD_TsoClient, header *pdpb.RequestHeader) *asyncTSOClient {
+	const chanSize = 2048
+	ret := &asyncTSOClient{
+		cli:    cli,
+		header: header,
+
+		input:  make(chan *TSOResponse, chanSize),
+		workCh: make(chan []*TSOResponse, chanSize),
+	}
+	go ret.backgroundRecvWorker()
+	go ret.backgroundSendWorker()
+	return ret
+}
+
+func (async *asyncTSOClient) close() {
+	close(async.input)
+	for unconsumed := range async.workCh {
+		for i := 0; i < len(unconsumed); i++ {
+			unconsumed[i].wg.Done()
+		}
+	}
+}
+
+func (async *asyncTSOClient) backgroundSendWorker() {
+	// Close workCh will notify the receive goroutine to exit.
+	defer close(async.workCh)
+
+	for {
+		count := len(async.input)
+		batch := make([]*TSOResponse, count)
+		for i := 0; i < count; i++ {
+			tmp := <-async.input
+			batch[i] = tmp
+		}
+
+		req := &pdpb.TsoRequest{
+			Header: async.header,
+			Count:  uint32(count),
+		}
+		err := async.cli.Send(req)
+		if err != nil {
+			for i := 0; i < len(batch); i++ {
+				input := batch[i]
+				input.err = errors.Trace(err)
+				input.wg.Done()
+			}
+			async.mu.Lock()
+			async.mu.unhealth = true
+			async.mu.Unlock()
+			return
+		}
+
+		async.workCh <- batch
+	}
+}
+
+func (async *asyncTSOClient) backgroundRecvWorker() {
+	for batch := range async.workCh {
+		resp, err := async.cli.Recv()
+		if err != nil {
+			async.mu.Lock()
+			async.mu.unhealth = true
+			async.mu.Unlock()
+		}
+
+		physical, logical := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical()
+		for i := 0; i < len(batch); i++ {
+			val := batch[i]
+			val.physical = physical
+			val.logical = logical + int64(i)
+			val.err = err
+			val.wg.Done()
+		}
+	}
+
+}
+
+func (async *asyncTSOClient) call() (*TSOResponse, error) {
+	async.mu.RLock()
+	if async.mu.unhealth {
+		return nil, errors.New("This asyncTSOClient maybe stale.")
+	}
+	async.mu.RUnlock()
+
+	ret := &TSOResponse{}
+	ret.wg.Add(1)
+	async.input <- ret
+	return ret, nil
+}
+
+func (c *client) GetTSAsync() *TSOResponse {
+	for {
+		c.asyncTSOMu.RLock()
+		cli := c.asyncTSOMu.cli
+		c.asyncTSOMu.RUnlock()
+
+		ret, err := cli.call()
+		if err == nil {
+			return ret
+		}
+
+		c.scheduleCheckLeader()
+		newCli := newAsyncTSOClient(c.pdTSOClient(), c.requestHeader())
+
+		c.asyncTSOMu.Lock()
+		if c.asyncTSOMu.cli == cli {
+			cli.close()
+			c.asyncTSOMu.cli = newCli
+		}
+		c.asyncTSOMu.Unlock()
+	}
 }
