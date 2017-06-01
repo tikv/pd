@@ -139,7 +139,7 @@ func (c *coordinator) stop() {
 	c.wg.Wait()
 }
 
-func (c *coordinator) getHotWriteRegions() map[uint64]*StoreHotRegions {
+func (c *coordinator) getHotWriteRegions() *StoreHotRegionInfos {
 	c.RLock()
 	defer c.RUnlock()
 	s, ok := c.schedulers[hotRegionScheduleName]
@@ -183,13 +183,21 @@ func (c *coordinator) collectHotSpotMetrics() {
 		return
 	}
 	status := s.Scheduler.(*balanceHotRegionScheduler).GetStatus()
-	for storeID, stat := range status {
+	for storeID, stat := range status.AsPeer {
 		store := fmt.Sprintf("store_%d", storeID)
-		totalWriteBytes := float64(stat.TotalWrittenBytes)
-		hotWriteRegionCount := float64(stat.RegionCount)
+		totalWriteBytes := float64(stat.WrittenBytes)
+		hotWriteRegionCount := float64(stat.RegionsCount)
 
-		hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes").Set(totalWriteBytes)
-		hotSpotStatusGauge.WithLabelValues(store, "hot_write_region").Set(hotWriteRegionCount)
+		hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_peer").Set(totalWriteBytes)
+		hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_peer").Set(hotWriteRegionCount)
+	}
+	for storeID, stat := range status.AsLeader {
+		store := fmt.Sprintf("store_%d", storeID)
+		totalWriteBytes := float64(stat.WrittenBytes)
+		hotWriteRegionCount := float64(stat.RegionsCount)
+
+		hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_leader").Set(totalWriteBytes)
+		hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_leader").Set(hotWriteRegionCount)
 	}
 }
 
