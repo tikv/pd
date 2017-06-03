@@ -15,6 +15,7 @@ package server
 
 import (
 	"sync/atomic"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -138,6 +139,7 @@ type splitOperator struct {
 	Origin *metapb.Region `json:"origin"`
 	Left   *metapb.Region `json:"left"`
 	Right  *metapb.Region `json:"right"`
+	End    time.Time      `json:"end"`
 }
 
 func newSplitOperator(origin *metapb.Region, left *metapb.Region, right *metapb.Region) *splitOperator {
@@ -146,6 +148,7 @@ func newSplitOperator(origin *metapb.Region, left *metapb.Region, right *metapb.
 		Origin: origin,
 		Left:   left,
 		Right:  right,
+		End:    time.Now(),
 	}
 }
 
