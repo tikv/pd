@@ -98,7 +98,7 @@ import:
 - package: github.com/gorilla/mux
   version: ~1.1.0
 - package: github.com/grpc-ecosystem/grpc-gateway
-  version: v1.2.0 
+  version: v1.2.2
   subpackages:
   - runtime
   - runtime/internal
@@ -182,7 +182,7 @@ import:
   subpackages:
   - unix
 - package: google.golang.org/grpc
-  version: v1.2.1
+  version: 3419b42955675df23457629c75f58eb8dcd56954
   repo: https://github.com/grpc/grpc-go.git
   vcs: git
   subpackages:

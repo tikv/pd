@@ -1,5 +1,5 @@
-hash: 44f2cc432c159682aa54c992da629b12f3188a8839fffb75b7230d76a7f6e604
-updated: 2017-05-31T17:38:07.198647308+08:00
+hash: 376b5ab9aaa1fa0fc81f8050adf143996f5ae7ac28e51b87e782f18824361d19
+updated: 2017-06-03T13:29:10.846148675+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -109,6 +109,7 @@ imports:
   subpackages:
   - jsonpb
   - proto
+  - ptypes/any
 - name: github.com/google/btree
   version: 925471ac9e2131377a91e1595defec898166fe49
 - name: github.com/gorilla/context
@@ -116,9 +117,9 @@ imports:
 - name: github.com/gorilla/mux
   version: 0eeaf8392f5b04950925b8a69fe70f110fa7cbfc
 - name: github.com/grpc-ecosystem/go-grpc-prometheus
-  version: 2500245aa6110c562d17020fb31a2c133d737799
+  version: 6b7015e65d366bf3f19b2b2a000a831940f0f7e0
 - name: github.com/grpc-ecosystem/grpc-gateway
-  version: 18d159699f2e83fc5bb9ef2f79465ca3f3122676
+  version: 589b126116b5fc961939b3e156c29e4d9d58222f
   subpackages:
   - runtime
   - runtime/internal
@@ -225,13 +226,18 @@ imports:
   - transform
   - unicode/bidi
   - unicode/norm
+- name: google.golang.org/genproto
+  version: aa2eb687b4d3e17154372564ad8d6bf11c3cf21f
+  subpackages:
+  - googleapis/rpc/status
 - name: google.golang.org/grpc
-  version: 8050b9cbc271307e5a716a9d782803d09b0d6f2d
+  version: 3419b42955675df23457629c75f58eb8dcd56954
   repo: https://github.com/grpc/grpc-go.git
   vcs: git
   subpackages:
   - codes
   - credentials
+  - grpclb/grpc_lb_v1
   - grpclog
   - internal
   - keepalive
@@ -239,10 +245,11 @@ imports:
   - naming
   - peer
   - stats
+  - status
   - tap
   - transport
 - name: gopkg.in/natefinch/lumberjack.v2
-  version: dd45e6a67c53f673bb49ca8a001fd3a63ceb640e
+  version: df99d62fd42d8b3752c8a42c6723555372c02a03
 - name: gopkg.in/yaml.v2
   version: 53feefa2559fb8dfa8d81baad31be332c97d6c77
 testImports: []
