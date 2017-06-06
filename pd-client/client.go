@@ -564,6 +564,12 @@ type TSOResponse struct {
 	logical  int64
 }
 
+// Wait gets the result data, it may block the caller if data not available yet.
+func (r *TSOResponse) Wait() (int64, int64, error) {
+	r.wg.Wait()
+	return r.physical, r.logical, errors.Trace(r.err)
+}
+
 type asyncTSOClient struct {
 	cli    pdpb.PD_TsoClient
 	header *pdpb.RequestHeader
