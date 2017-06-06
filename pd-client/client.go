@@ -355,7 +355,6 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 		Header: c.requestHeader(),
 		Count:  uint32(len(requests)),
 	}
-
 	if err := stream.Send(req); err != nil {
 		c.finishTSORequest(requests, 0, 0, err)
 		c.scheduleCheckLeader()

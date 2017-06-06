@@ -17,8 +17,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"sync"
@@ -74,10 +72,6 @@ func main() {
 	go func() {
 		<-sc
 		cancel()
-	}()
-
-	go func() {
-		http.ListenAndServe(":6666", nil)
 	}()
 
 	wg.Wait()
