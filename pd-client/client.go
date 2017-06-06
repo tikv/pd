@@ -297,13 +297,7 @@ func (c *client) tsLoop() {
 			if err != nil {
 				log.Errorf("[pd] create tso stream error: %v", err)
 				cancel()
-
-				n := len(c.tsoRequests)
-				for i := 0; i < n; i++ {
-					req := <-c.tsoRequests
-					req.done <- errors.Trace(err)
-				}
-
+				c.finishExistTSORequest(err)
 				select {
 				case <-time.After(time.Second):
 				case <-loopCtx.Done():
@@ -387,15 +381,19 @@ func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical
 	}
 }
 
-func (c *client) Close() {
-	c.cancel()
-	c.wg.Wait()
-
+func (c *client) finishExistTSORequest(err error) {
 	n := len(c.tsoRequests)
 	for i := 0; i < n; i++ {
 		req := <-c.tsoRequests
 		req.done <- errors.Trace(errClosing)
 	}
+}
+
+func (c *client) Close() {
+	c.cancel()
+	c.wg.Wait()
+
+	c.finishExistTSORequest(errClosing)
 
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
