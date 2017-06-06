@@ -100,7 +100,7 @@ func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	// Wrap report split as an Operator, and add it into history cache.
 	op := newSplitOperator(originRegion, left, right)
 	c.coordinator.histories.add(originRegion.GetId(), op)
-
+	log.Infof("[region %d] region split, generate new region: %v", originRegion.GetId(), right)
 	c.coordinator.postEvent(op, evtEnd)
 
 	return &pdpb.ReportSplitResponse{}, nil
