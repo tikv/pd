@@ -14,7 +14,6 @@
 package pd
 
 import (
-	"fmt"
 	"net"
 	"net/url"
 	"strings"
@@ -349,20 +348,12 @@ func (c *client) tsLoop() {
 	}
 }
 
-var global uint64
-
 func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoRequest) error {
 	start := time.Now()
 	//	ctx, cancel := context.WithTimeout(c.ctx, pdTimeout)
 	req := &pdpb.TsoRequest{
 		Header: c.requestHeader(),
 		Count:  uint32(len(requests)),
-	}
-
-	global++
-	if global > 1000 {
-		global = 0
-		fmt.Println("!!!!!!!!!!! ", req.Count)
 	}
 
 	if err := stream.Send(req); err != nil {
@@ -445,31 +436,25 @@ var tsoReqPool = sync.Pool{
 }
 
 func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
-	resp := c.GetTSAsync()
-	resp.wg.Wait()
-	return resp.physical, resp.logical, resp.err
+	start := time.Now()
+	defer func() { cmdDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds()) }()
+
+	req := tsoReqPool.Get().(*tsoRequest)
+	c.tsoRequests <- req
+
+	select {
+	case err := <-req.done:
+		if err != nil {
+			cmdFailedDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds())
+			return 0, 0, errors.Trace(err)
+		}
+		physical, logical := req.physical, req.logical
+		tsoReqPool.Put(req)
+		return physical, logical, err
+	case <-ctx.Done():
+		return 0, 0, errors.Trace(ctx.Err())
+	}
 }
-
-// func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
-// 	start := time.Now()
-// 	defer func() { cmdDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds()) }()
-
-// 	req := tsoReqPool.Get().(*tsoRequest)
-// 	c.tsoRequests <- req
-
-// 	select {
-// 	case err := <-req.done:
-// 		if err != nil {
-// 			cmdFailedDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds())
-// 			return 0, 0, errors.Trace(err)
-// 		}
-// 		physical, logical := req.physical, req.logical
-// 		tsoReqPool.Put(req)
-// 		return physical, logical, err
-// 	case <-ctx.Done():
-// 		return 0, 0, errors.Trace(ctx.Err())
-// 	}
-// }
 
 func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error) {
 	start := time.Now()
@@ -593,7 +578,7 @@ type asyncTSOClient struct {
 }
 
 func newAsyncTSOClient(cli pdpb.PD_TsoClient, header *pdpb.RequestHeader) *asyncTSOClient {
-	const chanSize = 1024
+	const chanSize = 64 // 64 is a tuned value.
 	ret := &asyncTSOClient{
 		cli:    cli,
 		header: header,
@@ -610,6 +595,7 @@ func (async *asyncTSOClient) close() {
 	close(async.input)
 	for unconsumed := range async.workCh {
 		for i := 0; i < len(unconsumed); i++ {
+			unconsumed[i].err = errors.New("tso client closed")
 			unconsumed[i].wg.Done()
 		}
 	}
@@ -619,41 +605,19 @@ func (async *asyncTSOClient) backgroundSendWorker() {
 	// Close workCh will notify the receive goroutine to exit.
 	defer close(async.workCh)
 
-	xxx := 0
-
 	for {
-		first, ok := <-async.input
-		if !ok {
+		batch, closed := getBatch(async.input)
+		if closed {
 			return
 		}
 
-		remain := len(async.input)
-		batch := make([]*TSOResponse, remain+1)
-		batch[0] = first
-		for i := 0; i < remain; i++ {
-			tmp := <-async.input
-			batch[i+1] = tmp
-		}
-		count := remain + 1
-
 		req := &pdpb.TsoRequest{
 			Header: async.header,
-			Count:  uint32(count),
+			Count:  uint32(len(batch)),
 		}
-
-		xxx++
-		if xxx > 5000 {
-			xxx = 0
-			fmt.Println(" count ------------ ", count)
-		}
-
 		err := async.cli.Send(req)
 		if err != nil {
-			for i := 0; i < len(batch); i++ {
-				input := batch[i]
-				input.err = errors.Trace(err)
-				input.wg.Done()
-			}
+			finishBatch(batch, 0, 0, err)
 			async.mu.Lock()
 			async.mu.unhealth = true
 			async.mu.Unlock()
@@ -672,17 +636,37 @@ func (async *asyncTSOClient) backgroundRecvWorker() {
 			async.mu.unhealth = true
 			async.mu.Unlock()
 		}
-
 		physical, logical := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical()
-		for i := 0; i < len(batch); i++ {
-			val := batch[i]
-			val.physical = physical
-			val.logical = logical + int64(i)
-			val.err = err
-			val.wg.Done()
-		}
+		finishBatch(batch, physical, logical, errors.Trace(err))
 	}
+}
 
+// getBatch gets a batch of data from the channel, returns the batch
+// and whether the channel is closed.
+// NOTE: this function assumes it's the only consumer of the channel.
+func getBatch(ch <-chan *TSOResponse) ([]*TSOResponse, bool) {
+	first, ok := <-ch
+	if !ok {
+		return nil, true
+	}
+	remain := len(ch)
+	batch := make([]*TSOResponse, 0, remain+1)
+	batch = append(batch, first)
+	for i := 0; i < remain; i++ {
+		tmp := <-async.input
+		batch = append(batch, tmp)
+	}
+	return batch, false
+}
+
+func finishBatch(batch []*TSOResponse, physical, logical int64, err error) {
+	for i := 0; i < len(batch); i++ {
+		val := batch[i]
+		val.physical = physical
+		val.logical = logical + int64(i)
+		val.err = err
+		val.wg.Done()
+	}
 }
 
 func (async *asyncTSOClient) call() (*TSOResponse, error) {
