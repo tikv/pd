@@ -297,6 +297,7 @@ func (c *client) tsLoop() {
 			if err != nil {
 				log.Errorf("[pd] create tso stream error: %v", err)
 				cancel()
+
 				select {
 				case <-time.After(time.Second):
 				case <-loopCtx.Done():
