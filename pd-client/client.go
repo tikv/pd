@@ -298,6 +298,12 @@ func (c *client) tsLoop() {
 				log.Errorf("[pd] create tso stream error: %v", err)
 				cancel()
 
+				n := len(c.tsoRequests)
+				for i := 0; i < n; i++ {
+					req := <-c.tsoRequests
+					req.done <- errors.Trace(err)
+				}
+
 				select {
 				case <-time.After(time.Second):
 				case <-loopCtx.Done():
