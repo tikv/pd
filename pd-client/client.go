@@ -653,7 +653,7 @@ func getBatch(ch <-chan *TSOResponse) ([]*TSOResponse, bool) {
 	batch := make([]*TSOResponse, 0, remain+1)
 	batch = append(batch, first)
 	for i := 0; i < remain; i++ {
-		tmp := <-async.input
+		tmp := <-ch
 		batch = append(batch, tmp)
 	}
 	return batch, false

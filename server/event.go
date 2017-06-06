@@ -15,6 +15,7 @@ package server
 
 import (
 	"sync/atomic"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -134,18 +135,20 @@ func (c *coordinator) hookEndEvent(op Operator) {
 
 // splitOperator is used to do region split, only for history operator mark.
 type splitOperator struct {
-	Name   string         `json:"name"`
-	Origin *metapb.Region `json:"origin"`
-	Left   *metapb.Region `json:"left"`
-	Right  *metapb.Region `json:"right"`
+	Name    string         `json:"name"`
+	Origin  *metapb.Region `json:"origin"`
+	Left    *metapb.Region `json:"left"`
+	Right   *metapb.Region `json:"right"`
+	EndTime time.Time      `json:"end_time"`
 }
 
 func newSplitOperator(origin *metapb.Region, left *metapb.Region, right *metapb.Region) *splitOperator {
 	return &splitOperator{
-		Name:   "split",
-		Origin: origin,
-		Left:   left,
-		Right:  right,
+		Name:    "split",
+		Origin:  origin,
+		Left:    left,
+		Right:   right,
+		EndTime: time.Now(),
 	}
 }
 

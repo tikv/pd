@@ -73,7 +73,7 @@ import:
   subpackages:
   - semver
 - package: github.com/coreos/go-systemd
-  version: fa8411dcbcbad22b8542b0433914ef68b123f989
+  version: v14 
   subpackages:
   - journal
 - package: github.com/coreos/pkg
@@ -98,7 +98,7 @@ import:
 - package: github.com/gorilla/mux
   version: ~1.1.0
 - package: github.com/grpc-ecosystem/grpc-gateway
-  version: 84398b94e188ee336f307779b57b3aa91af7063c
+  version: v1.2.0 
   subpackages:
   - runtime
   - runtime/internal
@@ -166,7 +166,7 @@ import:
   - bcrypt
   - blowfish
 - package: golang.org/x/net
-  version: 6acef71eb69611914f7a30939ea9f6e194c78172
+  version: d1e1b351919c6738fdeb9893d5c998b161464f0c 
   repo: https://github.com/golang/net.git
   vcs: git
   subpackages:
@@ -182,7 +182,7 @@ import:
   subpackages:
   - unix
 - package: google.golang.org/grpc
-  version: v1.0.4
+  version: v1.2.1
   repo: https://github.com/grpc/grpc-go.git
   vcs: git
   subpackages:
