@@ -135,15 +135,15 @@ type Server interface {
 	// AddMember attempts to add a member into the cluster. It will return
 	// ErrIDRemoved if member ID is removed from the cluster, or return
 	// ErrIDExists if member ID exists in the cluster.
-	AddMember(ctx context.Context, memb membership.Member) error
+	AddMember(ctx context.Context, memb membership.Member) ([]*membership.Member, error)
 	// RemoveMember attempts to remove a member from the cluster. It will
 	// return ErrIDRemoved if member ID is removed from the cluster, or return
 	// ErrIDNotFound if member ID is not in the cluster.
-	RemoveMember(ctx context.Context, id uint64) error
+	RemoveMember(ctx context.Context, id uint64) ([]*membership.Member, error)
 
 	// UpdateMember attempts to update an existing member in the cluster. It will
 	// return ErrIDNotFound if the member ID does not exist.
-	UpdateMember(ctx context.Context, updateMemb membership.Member) error
+	UpdateMember(ctx context.Context, updateMemb membership.Member) ([]*membership.Member, error)
 
 	// ClusterVersion is the cluster-wide minimum major.minor version.
 	// Cluster version is set to the min version that an etcd member is
@@ -238,6 +238,11 @@ type EtcdServer struct {
 	// wg is used to wait for the go routines that depends on the server state
 	// to exit when stopping the server.
 	wg sync.WaitGroup
+
+	// ctx is used for etcd-initiated requests that may need to be canceled
+	// on etcd server shutdown.
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewServer creates a new EtcdServer from the supplied configuration. The
@@ -536,6 +541,7 @@ func (s *EtcdServer) start() {
 	s.done = make(chan struct{})
 	s.stop = make(chan struct{})
 	s.stopping = make(chan struct{})
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.readwaitc = make(chan struct{}, 1)
 	s.readNotifier = newNotifier()
 	if s.ClusterVersion() != nil {
@@ -686,6 +692,7 @@ func (s *EtcdServer) run() {
 		s.wgMu.Lock() // block concurrent waitgroup adds in goAttach while stopping
 		close(s.stopping)
 		s.wgMu.Unlock()
+		s.cancel()
 
 		sched.Stop()
 
@@ -740,7 +747,7 @@ func (s *EtcdServer) run() {
 					}
 					lid := lease.ID
 					s.goAttach(func() {
-						s.LeaseRevoke(context.TODO(), &pb.LeaseRevokeRequest{ID: int64(lid)})
+						s.LeaseRevoke(s.ctx, &pb.LeaseRevokeRequest{ID: int64(lid)})
 						<-c
 					})
 				}
@@ -967,7 +974,7 @@ func (s *EtcdServer) TransferLeadership() error {
 	}
 
 	tm := s.Cfg.ReqTimeout()
-	ctx, cancel := context.WithTimeout(context.TODO(), tm)
+	ctx, cancel := context.WithTimeout(s.ctx, tm)
 	err := s.transferLeadership(ctx, s.Lead(), uint64(transferee))
 	cancel()
 	return err
@@ -1046,27 +1053,27 @@ func (s *EtcdServer) checkMembershipOperationPermission(ctx context.Context) err
 	return s.AuthStore().IsAdminPermitted(authInfo)
 }
 
-func (s *EtcdServer) AddMember(ctx context.Context, memb membership.Member) error {
+func (s *EtcdServer) AddMember(ctx context.Context, memb membership.Member) ([]*membership.Member, error) {
 	if err := s.checkMembershipOperationPermission(ctx); err != nil {
-		return err
+		return nil, err
 	}
 
 	if s.Cfg.StrictReconfigCheck {
 		// by default StrictReconfigCheck is enabled; reject new members if unhealthy
 		if !s.cluster.IsReadyToAddNewMember() {
 			plog.Warningf("not enough started members, rejecting member add %+v", memb)
-			return ErrNotEnoughStartedMembers
+			return nil, ErrNotEnoughStartedMembers
 		}
 		if !isConnectedFullySince(s.r.transport, time.Now().Add(-HealthInterval), s.ID(), s.cluster.Members()) {
 			plog.Warningf("not healthy for reconfigure, rejecting member add %+v", memb)
-			return ErrUnhealthy
+			return nil, ErrUnhealthy
 		}
 	}
 
 	// TODO: move Member to protobuf type
 	b, err := json.Marshal(memb)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	cc := raftpb.ConfChange{
 		Type:    raftpb.ConfChangeAddNode,
@@ -1076,14 +1083,14 @@ func (s *EtcdServer) AddMember(ctx context.Context, memb membership.Member) erro
 	return s.configure(ctx, cc)
 }
 
-func (s *EtcdServer) RemoveMember(ctx context.Context, id uint64) error {
+func (s *EtcdServer) RemoveMember(ctx context.Context, id uint64) ([]*membership.Member, error) {
 	if err := s.checkMembershipOperationPermission(ctx); err != nil {
-		return err
+		return nil, err
 	}
 
 	// by default StrictReconfigCheck is enabled; reject removal if leads to quorum loss
 	if err := s.mayRemoveMember(types.ID(id)); err != nil {
-		return err
+		return nil, err
 	}
 
 	cc := raftpb.ConfChange{
@@ -1119,14 +1126,14 @@ func (s *EtcdServer) mayRemoveMember(id types.ID) error {
 	return nil
 }
 
-func (s *EtcdServer) UpdateMember(ctx context.Context, memb membership.Member) error {
+func (s *EtcdServer) UpdateMember(ctx context.Context, memb membership.Member) ([]*membership.Member, error) {
 	b, merr := json.Marshal(memb)
 	if merr != nil {
-		return merr
+		return nil, merr
 	}
 
 	if err := s.checkMembershipOperationPermission(ctx); err != nil {
-		return err
+		return nil, err
 	}
 	cc := raftpb.ConfChange{
 		Type:    raftpb.ConfChangeUpdateNode,
@@ -1149,31 +1156,34 @@ func (s *EtcdServer) Lead() uint64 { return atomic.LoadUint64(&s.r.lead) }
 
 func (s *EtcdServer) Leader() types.ID { return types.ID(s.Lead()) }
 
+type confChangeResponse struct {
+	membs []*membership.Member
+	err   error
+}
+
 // configure sends a configuration change through consensus and
 // then waits for it to be applied to the server. It
 // will block until the change is performed or there is an error.
-func (s *EtcdServer) configure(ctx context.Context, cc raftpb.ConfChange) error {
+func (s *EtcdServer) configure(ctx context.Context, cc raftpb.ConfChange) ([]*membership.Member, error) {
 	cc.ID = s.reqIDGen.Next()
 	ch := s.w.Register(cc.ID)
 	start := time.Now()
 	if err := s.r.ProposeConfChange(ctx, cc); err != nil {
 		s.w.Trigger(cc.ID, nil)
-		return err
+		return nil, err
 	}
 	select {
 	case x := <-ch:
-		if err, ok := x.(error); ok {
-			return err
+		if x == nil {
+			plog.Panicf("configure trigger value should never be nil")
 		}
-		if x != nil {
-			plog.Panicf("return type should always be error")
-		}
-		return nil
+		resp := x.(*confChangeResponse)
+		return resp.membs, resp.err
 	case <-ctx.Done():
 		s.w.Trigger(cc.ID, nil) // GC wait
-		return s.parseProposeCtxErr(ctx.Err(), start)
+		return nil, s.parseProposeCtxErr(ctx.Err(), start)
 	case <-s.stopping:
-		return ErrStopped
+		return nil, ErrStopped
 	}
 }
 
@@ -1181,7 +1191,6 @@ func (s *EtcdServer) configure(ctx context.Context, cc raftpb.ConfChange) error 
 // This makes no guarantee that the request will be proposed or performed.
 // The request will be canceled after the given timeout.
 func (s *EtcdServer) sync(timeout time.Duration) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	req := pb.Request{
 		Method: "SYNC",
 		ID:     s.reqIDGen.Next(),
@@ -1190,6 +1199,7 @@ func (s *EtcdServer) sync(timeout time.Duration) {
 	data := pbutil.MustMarshal(&req)
 	// There is no promise that node has leader when do SYNC request,
 	// so it uses goroutine to propose.
+	ctx, cancel := context.WithTimeout(s.ctx, timeout)
 	s.goAttach(func() {
 		s.r.Propose(ctx, data)
 		cancel()
@@ -1214,7 +1224,7 @@ func (s *EtcdServer) publish(timeout time.Duration) {
 	}
 
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		ctx, cancel := context.WithTimeout(s.ctx, timeout)
 		_, err := s.Do(ctx, req)
 		cancel()
 		switch err {
@@ -1269,7 +1279,7 @@ func (s *EtcdServer) apply(es []raftpb.Entry, confState *raftpb.ConfState) (appl
 			pbutil.MustUnmarshal(&cc, e.Data)
 			removedSelf, err := s.applyConfChange(cc, confState)
 			shouldStop = shouldStop || removedSelf
-			s.w.Trigger(cc.ID, err)
+			s.w.Trigger(cc.ID, &confChangeResponse{s.cluster.Members(), err})
 		default:
 			plog.Panicf("entry type should be either EntryNormal or EntryConfChange")
 		}
@@ -1355,7 +1365,7 @@ func (s *EtcdServer) applyEntryNormal(e *raftpb.Entry) {
 			Alarm:    pb.AlarmType_NOSPACE,
 		}
 		r := pb.InternalRaftRequest{Alarm: a}
-		s.processInternalRaftRequest(context.TODO(), r)
+		s.processInternalRaftRequest(s.ctx, r)
 		s.w.Trigger(id, ar)
 	})
 }
@@ -1551,7 +1561,7 @@ func (s *EtcdServer) updateClusterVersion(ver string) {
 		Path:   membership.StoreClusterVersionKey(),
 		Val:    ver,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), s.Cfg.ReqTimeout())
+	ctx, cancel := context.WithTimeout(s.ctx, s.Cfg.ReqTimeout())
 	_, err := s.Do(ctx, req)
 	cancel()
 	switch err {

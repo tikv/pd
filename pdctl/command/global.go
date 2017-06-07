@@ -23,8 +23,8 @@ import (
 	"net/url"
 	"os"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
-	"github.com/ngaut/log"
 	"github.com/pingcap/pd/pd-client"
 	"github.com/spf13/cobra"
 )
@@ -88,7 +88,7 @@ func InitPDClient(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	log.SetLevel(log.LOG_LEVEL_NONE)
+	log.SetOutput(ioutil.Discard)
 	if pdClient != nil {
 		return nil
 	}

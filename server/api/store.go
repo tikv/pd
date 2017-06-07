@@ -53,8 +53,10 @@ type storeInfo struct {
 	Status *storeStatus `json:"status"`
 }
 
+const downStateName = "Down"
+
 func newStoreInfo(store *metapb.Store, status *server.StoreStatus) *storeInfo {
-	return &storeInfo{
+	s := &storeInfo{
 		Store: &metaStore{
 			Store:     store,
 			StateName: store.State.String(),
@@ -74,6 +76,10 @@ func newStoreInfo(store *metapb.Store, status *server.StoreStatus) *storeInfo {
 			Uptime:             typeutil.NewDuration(status.GetUptime()),
 		},
 	}
+	if store.State == metapb.StoreState_Up && status.IsDown() {
+		s.Store.StateName = downStateName
+	}
+	return s
 }
 
 type storesInfo struct {
@@ -96,7 +102,7 @@ func newStoreHandler(svr *server.Server, rd *render.Render) *storeHandler {
 func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
 		return
 	}
 
@@ -121,7 +127,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
 		return
 	}
 
@@ -163,7 +169,7 @@ func newStoresHandler(svr *server.Server, rd *render.Render) *storesHandler {
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
 		return
 	}
 

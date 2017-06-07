@@ -21,15 +21,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-// ResourceKind distinguishes different kinds of resources.
-type ResourceKind int
-
-const (
-	adminKind ResourceKind = iota
-	leaderKind
-	regionKind
-)
-
 // storeInfo contains information about a store.
 // TODO: Export this to API directly.
 type storeInfo struct {
@@ -111,9 +102,9 @@ func (s *storeInfo) availableRatio() float64 {
 
 func (s *storeInfo) resourceCount(kind ResourceKind) uint64 {
 	switch kind {
-	case leaderKind:
+	case LeaderKind:
 		return s.leaderCount()
-	case regionKind:
+	case RegionKind:
 		return s.regionCount()
 	default:
 		return 0
@@ -122,9 +113,9 @@ func (s *storeInfo) resourceCount(kind ResourceKind) uint64 {
 
 func (s *storeInfo) resourceScore(kind ResourceKind) float64 {
 	switch kind {
-	case leaderKind:
+	case LeaderKind:
 		return s.leaderScore()
-	case regionKind:
+	case RegionKind:
 		return s.regionScore()
 	default:
 		return 0
@@ -191,4 +182,11 @@ func (s *StoreStatus) GetUptime() time.Duration {
 		return uptime
 	}
 	return 0
+}
+
+const defaultStoreDownTime = time.Minute
+
+// IsDown returns whether the store is down
+func (s *StoreStatus) IsDown() bool {
+	return time.Now().Sub(s.LastHeartbeatTS) > defaultStoreDownTime
 }

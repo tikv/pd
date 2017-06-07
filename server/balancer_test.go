@@ -93,6 +93,31 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 	c.putRegion(newRegionInfo(region, leader))
 }
 
+func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) {
+	//  regions load from etcd will have no leader
+	region := &metapb.Region{Id: regionID}
+	region.Peers = []*metapb.Peer{}
+	for _, id := range followerIds {
+		peer, _ := c.allocPeer(id)
+		region.Peers = append(region.Peers, peer)
+	}
+	c.putRegion(newRegionInfo(region, nil))
+}
+
+func (c *testClusterInfo) addLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
+	region := &metapb.Region{Id: regionID}
+	leader, _ := c.allocPeer(leaderID)
+	region.Peers = []*metapb.Peer{leader}
+	for _, id := range followerIds {
+		peer, _ := c.allocPeer(id)
+		region.Peers = append(region.Peers, peer)
+	}
+	r := newRegionInfo(region, leader)
+	r.WrittenBytes = writtenBytes
+	c.updateWriteStatus(r)
+	c.putRegion(r)
+}
+
 func (c *testClusterInfo) updateLeaderCount(storeID uint64, leaderCount int) {
 	store := c.getStore(storeID)
 	store.status.LeaderCount = leaderCount
@@ -116,6 +141,12 @@ func (c *testClusterInfo) updateStorageRatio(storeID uint64, usedRatio, availabl
 	store.status.Capacity = uint64(1024)
 	store.status.UsedSize = uint64(float64(store.status.Capacity) * usedRatio)
 	store.status.Available = uint64(float64(store.status.Capacity) * availableRatio)
+	c.putStore(store)
+}
+
+func (c *testClusterInfo) updateStorageWrittenBytes(storeID uint64, BytesWritten uint64) {
+	store := c.getStore(storeID)
+	store.status.BytesWritten = BytesWritten
 	c.putStore(store)
 }
 
@@ -175,7 +206,7 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 		tc.addLeaderStore(2, int(t.targetCount))
 		source := cluster.getStore(1)
 		target := cluster.getStore(2)
-		c.Assert(shouldBalance(source, target, leaderKind), Equals, t.expectedResult)
+		c.Assert(shouldBalance(source, target, LeaderKind), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -183,7 +214,7 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 		tc.addRegionStore(2, int(t.targetCount))
 		source := cluster.getStore(1)
 		target := cluster.getStore(2)
-		c.Assert(shouldBalance(source, target, regionKind), Equals, t.expectedResult)
+		c.Assert(shouldBalance(source, target, RegionKind), Equals, t.expectedResult)
 	}
 }
 
@@ -195,11 +226,11 @@ func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
 	tc.addLeaderStore(3, 30)
 
 	// StandDeviation is sqrt((10^2+0+10^2)/3).
-	c.Assert(adjustBalanceLimit(cluster, leaderKind), Equals, uint64(math.Sqrt(200.0/3.0)))
+	c.Assert(adjustBalanceLimit(cluster, LeaderKind), Equals, uint64(math.Sqrt(200.0/3.0)))
 
 	tc.setStoreOffline(1)
 	// StandDeviation is sqrt((5^2+5^2)/2).
-	c.Assert(adjustBalanceLimit(cluster, leaderKind), Equals, uint64(math.Sqrt(50.0/2.0)))
+	c.Assert(adjustBalanceLimit(cluster, LeaderKind), Equals, uint64(math.Sqrt(50.0/2.0)))
 }
 
 var _ = Suite(&testBalanceLeaderSchedulerSuite{})
@@ -524,6 +555,24 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	checkTransferPeer(c, rc.Check(region), 3, 1)
 }
 
+func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+	tc.addRegionStore(1, 1)
+	tc.addRegionStore(2, 1)
+	_, opt := newTestScheduleConfig()
+
+	rc := newReplicaChecker(opt, cluster)
+
+	// now region peer in store 1,2,3.but we just have store 1,2
+	// This happens only in recovering the PD cluster
+	// should not panic
+	tc.addLeaderRegion(1, 1, 2, 3)
+	region := cluster.getRegion(1)
+	op := rc.Check(region)
+	c.Assert(op, IsNil)
+}
+
 func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
@@ -561,10 +610,15 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 	tc.setStoreBusy(4, false)
 	checkRemovePeer(c, rc.Check(region), 4)
-	region.RemoveStorePeer(4)
 
-	// Transfer peer to store 4.
+	// Test offline
+	// the number of region peers more than the maxReplicas
+	// remove the peer
 	tc.setStoreOffline(3)
+	checkRemovePeer(c, rc.Check(region), 3)
+	region.RemoveStorePeer(4)
+	// the number of region peers equals the maxReplicas
+	// Transfer peer to store 4.
 	checkTransferPeer(c, rc.Check(region), 3, 4)
 
 	// Store 5 has a different zone, we can keep it safe.
@@ -742,4 +796,76 @@ func checkTransferLeader(c *C, bop Operator, sourceID, targetID uint64) {
 	c.Assert(op, NotNil)
 	c.Assert(op.OldLeader.GetStoreId(), Equals, sourceID)
 	c.Assert(op.NewLeader.GetStoreId(), Equals, targetID)
+}
+
+func checkTransferLeaderFrom(c *C, bop Operator, sourceID uint64) {
+	var op *transferLeaderOperator
+	switch t := bop.(type) {
+	case *transferLeaderOperator:
+		op = t
+	case *regionOperator:
+		op = t.Ops[0].(*transferLeaderOperator)
+	}
+	c.Assert(op, NotNil)
+	c.Assert(op.OldLeader.GetStoreId(), Equals, sourceID)
+}
+
+var _ = Suite(&testBalanceHotRegionSchedulerSuite{})
+
+type testBalanceHotRegionSchedulerSuite struct{}
+
+func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+
+	_, opt := newTestScheduleConfig()
+	hb := newBalanceHotRegionScheduler(opt)
+
+	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
+	tc.addRegionStore(1, 3)
+	tc.addRegionStore(2, 2)
+	tc.addRegionStore(3, 2)
+	tc.addRegionStore(4, 2)
+	tc.addRegionStore(5, 0)
+
+	// Report store written bytes.
+	tc.updateStorageWrittenBytes(1, 75*1024*1024)
+	tc.updateStorageWrittenBytes(2, 45*1024*1024)
+	tc.updateStorageWrittenBytes(3, 45*1024*1024)
+	tc.updateStorageWrittenBytes(4, 60*1024*1024)
+	tc.updateStorageWrittenBytes(5, 0)
+
+	// Region 1, 2 and 3 are hot regions.
+	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
+	//|-----------|--------------|----------------|----------------|---------------|
+	//|     1     |       1      |        2       |       3        |      512KB    |
+	//|     2     |       1      |        3       |       4        |      512KB    |
+	//|     3     |       1      |        2       |       4        |      512KB    |
+	tc.addLeaderRegionWithWriteInfo(1, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
+	tc.addLeaderRegionWithWriteInfo(2, 1, 512*1024*regionHeartBeatReportInterval, 3, 4)
+	tc.addLeaderRegionWithWriteInfo(3, 1, 512*1024*regionHeartBeatReportInterval, 2, 4)
+	hotRegionLowThreshold = 0
+
+	// Will transfer a hot region from store 1 to store 5, because the total count of peers
+	// which is hot for store 1 is more larger than other stores.
+	checkTransferPeer(c, hb.Schedule(cluster), 1, 5)
+
+	// After transfer a hot region from store 1 to store 5
+	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
+	//|-----------|--------------|----------------|----------------|---------------|
+	//|     1     |       1      |        2       |       3        |      512KB    |
+	//|     2     |       1      |        3       |       4        |      512KB    |
+	//|     3     |       5      |        2       |       4        |      512KB    |
+	tc.updateStorageWrittenBytes(1, 60*1024*1024)
+	tc.updateStorageWrittenBytes(2, 30*1024*1024)
+	tc.updateStorageWrittenBytes(3, 60*1024*1024)
+	tc.updateStorageWrittenBytes(4, 30*1024*1024)
+	tc.updateStorageWrittenBytes(5, 30*1024*1024)
+	tc.addLeaderRegionWithWriteInfo(1, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
+	tc.addLeaderRegionWithWriteInfo(2, 1, 512*1024*regionHeartBeatReportInterval, 3, 4)
+	tc.addLeaderRegionWithWriteInfo(3, 5, 512*1024*regionHeartBeatReportInterval, 2, 4)
+
+	// We can find that the leader of all hot regions are on store 1,
+	// so one of the leader will transfer to another store.
+	checkTransferLeaderFrom(c, hb.Schedule(cluster), 1)
 }

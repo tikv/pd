@@ -17,8 +17,8 @@ import (
 	"fmt"
 	"io"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
-	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"golang.org/x/net/context"
@@ -259,6 +259,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		region := newRegionInfo(request.GetRegion(), request.GetLeader())
 		region.DownPeers = request.GetDownPeers()
 		region.PendingPeers = request.GetPendingPeers()
+		region.WrittenBytes = request.GetBytesWritten()
 		if region.GetId() == 0 {
 			pberr := &pdpb.Error{
 				Type:    pdpb.ErrorType_UNKNOWN,

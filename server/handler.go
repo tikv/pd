@@ -47,13 +47,27 @@ func (h *Handler) GetSchedulers() ([]string, error) {
 	return c.getSchedulers(), nil
 }
 
+// GetHotWriteRegions gets all hot regions status
+func (h *Handler) GetHotWriteRegions() *StoreHotRegionInfos {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return nil
+	}
+	return c.getHotWriteRegions()
+}
+
+// GetHotWriteStores gets all hot write stores status
+func (h *Handler) GetHotWriteStores() map[uint64]uint64 {
+	return h.s.cluster.cachedCluster.getStoresWriteStat()
+}
+
 // AddScheduler adds a scheduler.
 func (h *Handler) AddScheduler(s Scheduler) error {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return errors.Trace(err)
 	}
-	return errors.Trace(c.addScheduler(s))
+	return errors.Trace(c.addScheduler(s, minScheduleInterval))
 }
 
 // RemoveScheduler removes a scheduler by name.
@@ -132,17 +146,17 @@ func (h *Handler) GetOperators() ([]Operator, error) {
 
 // GetAdminOperators returns the running admin operators.
 func (h *Handler) GetAdminOperators() ([]Operator, error) {
-	return h.GetOperatorsOfKind(adminKind)
+	return h.GetOperatorsOfKind(AdminKind)
 }
 
 // GetLeaderOperators returns the running leader operators.
 func (h *Handler) GetLeaderOperators() ([]Operator, error) {
-	return h.GetOperatorsOfKind(leaderKind)
+	return h.GetOperatorsOfKind(LeaderKind)
 }
 
 // GetRegionOperators returns the running region operators.
 func (h *Handler) GetRegionOperators() ([]Operator, error) {
-	return h.GetOperatorsOfKind(regionKind)
+	return h.GetOperatorsOfKind(RegionKind)
 }
 
 // GetOperatorsOfKind returns the running operators of the kind.
@@ -158,6 +172,24 @@ func (h *Handler) GetOperatorsOfKind(kind ResourceKind) ([]Operator, error) {
 		}
 	}
 	return results, nil
+}
+
+// GetHistoryOperators returns history operators
+func (h *Handler) GetHistoryOperators() ([]Operator, error) {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return c.getHistories(), nil
+}
+
+// GetHistoryOperatorsOfKind returns history operators by Kind
+func (h *Handler) GetHistoryOperatorsOfKind(kind ResourceKind) ([]Operator, error) {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return c.getHistoriesOfKind(kind), nil
 }
 
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.

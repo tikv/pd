@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
-	"github.com/ngaut/log"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/testutil"
 )

@@ -18,11 +18,11 @@ import (
 	"strings"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/etcdserver"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
-	"github.com/ngaut/log"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"golang.org/x/net/context"
 )

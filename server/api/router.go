@@ -27,8 +27,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	})
 
 	router := mux.NewRouter().PathPrefix(prefix).Subrouter()
-
 	handler := svr.GetHandler()
+
+	historyHanlder := newHistoryHandler(handler, rd)
+	router.HandleFunc("/api/v1/history", historyHanlder.GetOperators).Methods("GET")
+	router.HandleFunc("/api/v1/history/{kind}/{limit}", historyHanlder.GetOperatorsOfKind).Methods("GET")
 
 	operatorHandler := newOperatorHandler(handler, rd)
 	router.HandleFunc("/api/v1/operators", operatorHandler.List).Methods("GET")
@@ -42,6 +45,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/schedulers/{name}", schedulerHandler.Delete).Methods("DELETE")
 
 	router.Handle("/api/v1/cluster", newClusterHandler(svr, rd)).Methods("GET")
+	router.HandleFunc("/api/v1/cluster/status", newClusterHandler(svr, rd).GetClusterStatus).Methods("GET")
 
 	confHandler := newConfHandler(svr, rd)
 	router.HandleFunc("/api/v1/config", confHandler.Get).Methods("GET")
@@ -60,6 +64,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/labels", labelsHandler.Get).Methods("GET")
 	router.HandleFunc("/api/v1/labels/stores", labelsHandler.GetStores).Methods("GET")
 
+	hotStatusHandler := newHotStatusHandler(handler, rd)
+	router.HandleFunc("/api/v1/hotspot/regions", hotStatusHandler.GetHotRegions).Methods("GET")
+	router.HandleFunc("/api/v1/hotspot/stores", hotStatusHandler.GetHotStores).Methods("GET")
 	router.Handle("/api/v1/events", newEventsHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/feed", newFeedHandler(svr, rd)).Methods("GET")
 

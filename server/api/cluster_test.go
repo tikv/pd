@@ -15,6 +15,7 @@ package api
 
 import (
 	"fmt"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -56,4 +57,16 @@ func (s *testClusterInfo) TestCluster(c *C) {
 
 	c1.MaxPeerCount = 6
 	c.Assert(c1, DeepEquals, c2)
+}
+
+func (s *testClusterInfo) TestGetClusterStatus(c *C) {
+	url := fmt.Sprintf("%s/cluster/status", s.urlPrefix)
+	status := server.ClusterStatus{}
+	err := readJSONWithURL(url, &status)
+	c.Assert(status.RaftBootstrapTime.IsZero(), IsTrue)
+	now := time.Now()
+	mustBootstrapCluster(c, s.svr)
+	err = readJSONWithURL(url, &status)
+	c.Assert(err, IsNil)
+	c.Assert(status.RaftBootstrapTime.After(now), IsTrue)
 }

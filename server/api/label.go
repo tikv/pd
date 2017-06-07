@@ -38,7 +38,7 @@ func newLabelsHandler(svr *server.Server, rd *render.Render) *labelsHandler {
 func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
 		return
 	}
 	var labels []*metapb.StoreLabel
@@ -59,7 +59,7 @@ func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *labelsHandler) GetStores(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped.Error())
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
 		return
 	}
 

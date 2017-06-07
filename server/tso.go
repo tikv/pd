@@ -18,9 +18,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/juju/errors"
-	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
@@ -49,16 +49,10 @@ func (s *Server) loadTimestamp() (time.Time, error) {
 	if err != nil {
 		return zeroTime, errors.Trace(err)
 	}
-	if data == nil {
+	if len(data) == 0 {
 		return zeroTime, nil
 	}
-
-	nano, err := bytesToUint64(data)
-	if err != nil {
-		return zeroTime, errors.Trace(err)
-	}
-
-	return time.Unix(0, int64(nano)), nil
+	return parseTimestamp(data)
 }
 
 // save timestamp, if lastTs is 0, we think the timestamp doesn't exist, so create it,

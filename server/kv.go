@@ -20,10 +20,10 @@ import (
 	"path"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/gogo/protobuf/proto"
 	"github.com/juju/errors"
-	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"golang.org/x/net/context"
 )
@@ -63,6 +63,21 @@ func (kv *kv) storePath(storeID uint64) string {
 
 func (kv *kv) regionPath(regionID uint64) string {
 	return path.Join(kv.clusterPath, "r", fmt.Sprintf("%020d", regionID))
+}
+
+func (kv *kv) clusterStatePath(option string) string {
+	return path.Join(kv.clusterPath, "status", option)
+}
+
+func (kv *kv) getRaftClusterBootstrapTime() (time.Time, error) {
+	data, err := kv.load(kv.clusterStatePath("raft_bootstrap_time"))
+	if err != nil {
+		return zeroTime, errors.Trace(err)
+	}
+	if len(data) == 0 {
+		return zeroTime, nil
+	}
+	return parseTimestamp(data)
 }
 
 func (kv *kv) loadMeta(meta *metapb.Cluster) (bool, error) {
