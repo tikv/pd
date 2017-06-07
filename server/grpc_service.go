@@ -234,9 +234,9 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 }
 
 // RegionHeartbeat implements gRPC PDServer.
-func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
+func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 	for {
-		request, err := stream.Recv()
+		request, err := server.Recv()
 		if err == io.EOF {
 			return nil
 		}
@@ -246,11 +246,11 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		// TODO: should we check headers here?
 
-		resp := &pdpb.RegionHeartbeatResponse{}
 		cluster := s.GetRaftCluster()
 		if cluster == nil {
-			resp.Header = s.notBootstrappedHeader()
-			if err = stream.Send(resp); err != nil {
+			msg := "cluster is not bootstrapped"
+			err = sendErrorRegionHeartbeatResponse(server, s.clusterID, pdpb.ErrorType_NOT_BOOTSTRAPPED, msg)
+			if err != nil {
 				return errors.Trace(err)
 			}
 			continue
@@ -261,23 +261,17 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		region.PendingPeers = request.GetPendingPeers()
 		region.WrittenBytes = request.GetBytesWritten()
 		if region.GetId() == 0 {
-			pberr := &pdpb.Error{
-				Type:    pdpb.ErrorType_UNKNOWN,
-				Message: fmt.Sprintf("invalid request region, %v", request),
-			}
-			resp.Header = s.errorHeader(pberr)
-			if err = stream.Send(resp); err != nil {
+			msg := fmt.Sprintf("invalid request region, %v", request)
+			err = sendErrorRegionHeartbeatResponse(server, s.clusterID, pdpb.ErrorType_UNKNOWN, msg)
+			if err != nil {
 				return errors.Trace(err)
 			}
 			continue
 		}
 		if region.Leader == nil {
-			pberr := &pdpb.Error{
-				Type:    pdpb.ErrorType_UNKNOWN,
-				Message: fmt.Sprintf("invalid request leader, %v", request),
-			}
-			resp.Header = s.errorHeader(pberr)
-			if err = stream.Send(resp); err != nil {
+			msg := fmt.Sprintf("invalid request leader, %v", request)
+			err = sendErrorRegionHeartbeatResponse(server, s.clusterID, pdpb.ErrorType_UNKNOWN, msg)
+			if err != nil {
 				return errors.Trace(err)
 			}
 			continue
@@ -285,25 +279,20 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		err = cluster.cachedCluster.handleRegionHeartbeat(region)
 		if err != nil {
-			pberr := &pdpb.Error{
-				Type:    pdpb.ErrorType_UNKNOWN,
-				Message: errors.Trace(err).Error(),
-			}
-			resp.Header = s.errorHeader(pberr)
-			if err = stream.Send(resp); err != nil {
+			msg := errors.Trace(err).Error()
+			err = sendErrorRegionHeartbeatResponse(server, s.clusterID, pdpb.ErrorType_UNKNOWN, msg)
+			if err != nil {
 				return errors.Trace(err)
 			}
 			continue
 		}
 
+		var resp *pdpb.RegionHeartbeatResponse
 		resp, err = cluster.handleRegionHeartbeat(region)
 		if err != nil {
-			pberr := &pdpb.Error{
-				Type:    pdpb.ErrorType_UNKNOWN,
-				Message: errors.Trace(err).Error(),
-			}
-			resp.Header = s.errorHeader(pberr)
-			if err := stream.Send(resp); err != nil {
+			msg := errors.Trace(err).Error()
+			err = sendErrorRegionHeartbeatResponse(server, s.clusterID, pdpb.ErrorType_UNKNOWN, msg)
+			if err != nil {
 				return errors.Trace(err)
 			}
 			continue
@@ -318,7 +307,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		resp.RegionEpoch = request.Region.RegionEpoch
 		resp.TargetPeer = request.Leader
 
-		if err := stream.Send(resp); err != nil {
+		if err := server.Send(resp); err != nil {
 			return errors.Trace(err)
 		}
 	}
@@ -475,4 +464,20 @@ func (s *Server) notBootstrappedHeader() *pdpb.ResponseHeader {
 		Type:    pdpb.ErrorType_NOT_BOOTSTRAPPED,
 		Message: "cluster is not bootstrapped",
 	})
+}
+
+func sendErrorRegionHeartbeatResponse(server pdpb.PD_RegionHeartbeatServer, clusterID uint64, ty pdpb.ErrorType, msg string) error {
+	pberr := &pdpb.Error{
+		Type:    ty,
+		Message: msg,
+	}
+	resp := &pdpb.RegionHeartbeatResponse{}
+	resp.Header = &pdpb.ResponseHeader{
+		ClusterId: clusterID,
+		Error:     pberr,
+	}
+	if err := server.Send(resp); err != nil {
+		return errors.Trace(err)
+	}
+	return nil
 }
