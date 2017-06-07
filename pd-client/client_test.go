@@ -179,8 +179,8 @@ func (s *testClientSuite) TestTSO(c *C) {
 func (s *testClientSuite) TestTSOAsync(c *C) {
 	var tss []int64
 	for i := 0; i < 100; i++ {
-		resp := s.client.GetTSAsync()
-		resp.wg.Wait()
+		resp := s.client.GetTSAsync(context.Background())
+		resp.Wait()
 		c.Assert(resp.err, IsNil)
 		tss = append(tss, resp.physical<<18+resp.logical)
 	}
@@ -201,8 +201,8 @@ func (s *testClientSuite) TestTSOAsyncRace(c *C) {
 			<-begin
 
 			for j := 0; j < 100; j++ {
-				resp := s.client.GetTSAsync()
-				resp.wg.Wait()
+				resp := s.client.GetTSAsync(context.Background())
+				resp.Wait()
 				c.Assert(resp.err, IsNil)
 
 			}
