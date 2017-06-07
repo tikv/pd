@@ -573,7 +573,7 @@ func (r *TSOResponse) Wait() (int64, int64, error) {
 	select {
 	case <-r.ch:
 	case <-r.ctx.Done():
-		r.err = r.ctx.Err()
+		return 0, 0, errors.Trace(r.ctx.Err())
 	}
 	return r.physical, r.logical, errors.Trace(r.err)
 }
@@ -716,6 +716,8 @@ func (c *client) GetTSAsync(ctx context.Context) *TSOResponse {
 		if c.asyncTSOMu.cli == cli {
 			cli.close()
 			c.asyncTSOMu.cli = newCli
+		} else {
+			newCli.close()
 		}
 		c.asyncTSOMu.Unlock()
 	}
