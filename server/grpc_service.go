@@ -308,7 +308,8 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			continue
 		}
 		if resp == nil {
-			resp = &pdpb.RegionHeartbeatResponse{}
+			// No operations, skip.
+			continue
 		}
 
 		resp.Header = s.header()
