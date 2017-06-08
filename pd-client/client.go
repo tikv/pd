@@ -49,6 +49,8 @@ type Client interface {
 	GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error)
 	// Close closes the client.
 	Close()
+	// GetTSAsync gets a timestamp from PD, it's a nonblock function.
+	GetTSAsync(ctx context.Context) *TSOResponse
 }
 
 type tsoRequest struct {
@@ -89,6 +91,11 @@ type client struct {
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	asyncTSOMu struct {
+		sync.RWMutex
+		cli *asyncTSOClient
+	}
 }
 
 // NewClient creates a PD client.
@@ -117,6 +124,8 @@ func NewClient(pdAddrs []string) (Client, error) {
 	go c.tsLoop()
 	go c.tsCancelLoop()
 	go c.leaderLoop()
+
+	c.asyncTSOMu.cli = newAsyncTSOClient(c.pdTSOClient(), c.requestHeader())
 
 	// TODO: Update addrs from server continuously by using GetMember.
 
@@ -395,6 +404,11 @@ func (c *client) Close() {
 
 	c.revokeTSORequest(errClosing)
 
+	c.asyncTSOMu.Lock()
+	c.asyncTSOMu.cli.close()
+	c.asyncTSOMu.cli = nil
+	c.asyncTSOMu.Unlock()
+
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
 	for _, cc := range c.connMu.clientConns {
@@ -532,4 +546,184 @@ func addrsToUrls(addrs []string) []string {
 		}
 	}
 	return urls
+}
+
+func (c *client) pdTSOClient() pdpb.PD_TsoClient {
+	for {
+		stream, err := c.leaderClient().Tso(c.ctx)
+		if err == nil {
+			return stream
+		}
+
+		log.Errorf("[pd] create tso stream error: %v", err)
+		select {
+		case <-time.After(time.Second):
+		case <-c.ctx.Done():
+			return nil
+		}
+	}
+}
+
+// TSOResponse is the result of GetTSAsync.
+type TSOResponse struct {
+	ch       chan struct{}
+	ctx      context.Context
+	err      error
+	physical int64
+	logical  int64
+}
+
+// Wait gets the result data, it may block the caller if data not available yet.
+func (r *TSOResponse) Wait() (int64, int64, error) {
+	select {
+	case <-r.ch:
+	case <-r.ctx.Done():
+		return 0, 0, errors.Trace(r.ctx.Err())
+	}
+	return r.physical, r.logical, errors.Trace(r.err)
+}
+
+type asyncTSOClient struct {
+	cli    pdpb.PD_TsoClient
+	header *pdpb.RequestHeader
+
+	input  chan *TSOResponse
+	workCh chan []*TSOResponse
+
+	mu struct {
+		sync.RWMutex
+		unhealth bool
+	}
+}
+
+func newAsyncTSOClient(cli pdpb.PD_TsoClient, header *pdpb.RequestHeader) *asyncTSOClient {
+	const chanSize = 64 // 64 is a tuned value.
+	ret := &asyncTSOClient{
+		cli:    cli,
+		header: header,
+
+		input:  make(chan *TSOResponse, chanSize),
+		workCh: make(chan []*TSOResponse, chanSize),
+	}
+	go ret.backgroundRecvWorker()
+	go ret.backgroundSendWorker()
+	return ret
+}
+
+func (async *asyncTSOClient) close() {
+	close(async.input)
+	for unconsumed := range async.workCh {
+		for i := 0; i < len(unconsumed); i++ {
+			unconsumed[i].err = errors.New("tso client closed")
+			close(unconsumed[i].ch)
+		}
+	}
+}
+
+func (async *asyncTSOClient) backgroundSendWorker() {
+	// Close workCh will notify the receive goroutine to exit.
+	defer close(async.workCh)
+
+	for {
+		batch, closed := getBatch(async.input)
+		if closed {
+			return
+		}
+
+		req := &pdpb.TsoRequest{
+			Header: async.header,
+			Count:  uint32(len(batch)),
+		}
+		err := async.cli.Send(req)
+		if err != nil {
+			finishBatch(batch, 0, 0, err)
+			async.mu.Lock()
+			async.mu.unhealth = true
+			async.mu.Unlock()
+			return
+		}
+
+		async.workCh <- batch
+	}
+}
+
+func (async *asyncTSOClient) backgroundRecvWorker() {
+	for batch := range async.workCh {
+		resp, err := async.cli.Recv()
+		if err != nil {
+			async.mu.Lock()
+			async.mu.unhealth = true
+			async.mu.Unlock()
+		}
+		physical, logical := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical()
+		finishBatch(batch, physical, logical, errors.Trace(err))
+	}
+}
+
+// getBatch gets a batch of data from the channel, returns the batch
+// and whether the channel is closed.
+// NOTE: this function assumes it's the only consumer of the channel.
+func getBatch(ch <-chan *TSOResponse) ([]*TSOResponse, bool) {
+	first, ok := <-ch
+	if !ok {
+		return nil, true
+	}
+	remain := len(ch)
+	batch := make([]*TSOResponse, 0, remain+1)
+	batch = append(batch, first)
+	for i := 0; i < remain; i++ {
+		tmp := <-ch
+		batch = append(batch, tmp)
+	}
+	return batch, false
+}
+
+func finishBatch(batch []*TSOResponse, physical, logical int64, err error) {
+	for i := 0; i < len(batch); i++ {
+		val := batch[i]
+		val.physical = physical
+		val.logical = logical + int64(i)
+		val.err = err
+		close(val.ch)
+	}
+}
+
+func (async *asyncTSOClient) call(ctx context.Context) (*TSOResponse, error) {
+	async.mu.RLock()
+	if async.mu.unhealth {
+		return nil, errors.New("This asyncTSOClient maybe stale")
+	}
+	async.mu.RUnlock()
+
+	ret := &TSOResponse{
+		ch:  make(chan struct{}),
+		ctx: ctx,
+	}
+	async.input <- ret
+	return ret, nil
+}
+
+func (c *client) GetTSAsync(ctx context.Context) *TSOResponse {
+	for {
+		c.asyncTSOMu.RLock()
+		cli := c.asyncTSOMu.cli
+		c.asyncTSOMu.RUnlock()
+
+		ret, err := cli.call(ctx)
+		if err == nil {
+			return ret
+		}
+
+		c.scheduleCheckLeader()
+		newCli := newAsyncTSOClient(c.pdTSOClient(), c.requestHeader())
+
+		c.asyncTSOMu.Lock()
+		if c.asyncTSOMu.cli == cli {
+			cli.close()
+			c.asyncTSOMu.cli = newCli
+		} else {
+			newCli.close()
+		}
+		c.asyncTSOMu.Unlock()
+	}
 }
