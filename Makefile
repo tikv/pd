@@ -12,7 +12,7 @@ LDFLAGS += -X "github.com/pingcap/pd/server.PDGitHash=$(shell git rev-parse HEAD
 RACE_FLAG =
 ifeq ("$(WITH_RACE)", "1")
 	RACE_FLAG = -race
-	GO        = GO15VENDOREXPERIMENT="1" CGO_ENABLED=1 go
+	GO = GO15VENDOREXPERIMENT="1" CGO_ENABLED=1 go
 endif
 
 # Ignore following files's coverage.
