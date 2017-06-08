@@ -298,8 +298,13 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 			continue
 		}
 		if resp == nil {
-			// No operations, skip.
-			continue
+			if s.regionHeartbeatUnaryMode {
+				// A workaround for passing tests, remove it ASAP.
+				resp = new(pdpb.RegionHeartbeatResponse)
+			} else {
+				// No operations, skip.
+				continue
+			}
 		}
 
 		resp.Header = s.header()
