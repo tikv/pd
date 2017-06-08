@@ -9,6 +9,12 @@ GOCHECKER := $(GOFILTER) | awk '{ print } END { if (NR > 0) { exit 1 } }'
 LDFLAGS += -X "github.com/pingcap/pd/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "github.com/pingcap/pd/server.PDGitHash=$(shell git rev-parse HEAD)"
 
+RACE_FLAG =
+ifeq ("$(WITH_RACE)", "1")
+	RACE_FLAG = -race
+	GO        = GO15VENDOREXPERIMENT="1" CGO_ENABLED=1 go
+endif
+
 # Ignore following files's coverage.
 #
 # See more: https://godoc.org/path/filepath#Match
@@ -22,10 +28,10 @@ dev: build check test
 
 build:
 	rm -rf vendor && ln -s _vendor/vendor vendor
-	$(GO) build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
-	$(GO) build  -o bin/pd-ctl cmd/pd-ctl/main.go
-	$(GO) build  -o bin/pd-tso-bench cmd/pd-tso-bench/main.go
-	$(GO) build  -o bin/pd-recover cmd/pd-recover/main.go
+	$(GO) build $(RACE_FLAG) -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	$(GO) build -o bin/pd-ctl cmd/pd-ctl/main.go
+	$(GO) build -o bin/pd-tso-bench cmd/pd-tso-bench/main.go
+	$(GO) build -o bin/pd-recover cmd/pd-recover/main.go
 	rm -rf vendor
 
 install:
