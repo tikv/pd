@@ -16,28 +16,44 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/juju/errors"
+	"github.com/ngaut/log"
 	"github.com/pingcap/pd/pd-client"
 	"golang.org/x/net/context"
 )
 
 var (
-	pdAddrs     = flag.String("pd", "127.0.0.1:2379", "pd address")
-	concurrency = flag.Int("C", 1000, "concurrency")
-	sleep       = flag.Duration("sleep", time.Millisecond, "sleep time after a request, used to adjust pressure")
-	interval    = flag.Duration("interval", time.Second, "interval to output the statistics")
-	wg          sync.WaitGroup
+	pdAddrs        = flag.String("pd", "127.0.0.1:2379", "pd address")
+	concurrency    = flag.Int("C", 1000, "concurrency")
+	sleep          = flag.Duration("sleep", time.Millisecond, "sleep time after a request, used to adjust pressure")
+	interval       = flag.Duration("interval", time.Second, "interval to output the statistics")
+	pprofAddr      = flag.String("pprof-addr", ":6060", "pprof address")
+	pprofBlockRate = flag.Int("pprof-block-rate", 1, "pprof block rate")
+	wg             sync.WaitGroup
 )
 
 func main() {
 	flag.Parse()
+
+	go func() {
+		if *pprofBlockRate > 0 {
+			runtime.SetBlockProfileRate(*pprofBlockRate)
+		}
+
+		if err := http.ListenAndServe(*pprofAddr, nil); err != nil {
+			log.Error(err)
+		}
+	}()
+
 	pdCli, err := pd.NewClient([]string{*pdAddrs})
 	if err != nil {
 		log.Fatal(err)
