@@ -14,11 +14,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 )
 
@@ -29,6 +31,9 @@ type testHistorySuite struct {
 	cleanup   cleanUpFunc
 	urlPrefix string
 	cli       *http.Client
+
+	grpcPDClient    pdpb.PDClient
+	regionHeartbeat pdpb.PD_RegionHeartbeatClient
 }
 
 func (s *testHistorySuite) SetUpSuite(c *C) {
@@ -42,11 +47,16 @@ func (s *testHistorySuite) SetUpSuite(c *C) {
 	mustBootstrapCluster(c, s.svr)
 	s.cli = newUnixSocketClient()
 
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	regionHeartbeat, err := s.grpcPDClient.RegionHeartbeat(context.Background())
+	c.Assert(err, IsNil)
+	s.regionHeartbeat = regionHeartbeat
+
 	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
-	mustRegionHeartBeat(c, s.svr, r)
+	mustRegionHeartBeat(c, s.regionHeartbeat, s.svr.ClusterID(), r)
 
 	r = newTestRegionInfo(3, 1, []byte("b"), []byte("f"))
-	mustRegionHeartBeat(c, s.svr, r)
+	mustRegionHeartBeat(c, s.regionHeartbeat, s.svr.ClusterID(), r)
 }
 
 func (s *testHistorySuite) TearDownSuite(c *C) {

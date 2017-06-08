@@ -99,6 +99,8 @@ type testClusterWorkerSuite struct {
 	regionLeaderLock sync.Mutex
 	// regionID -> Peer
 	regionLeaders map[uint64]metapb.Peer
+
+	regionHeartbeat pdpb.PD_RegionHeartbeatClient
 }
 
 func (s *testClusterWorkerSuite) clearRegionLeader(c *C, regionID uint64) {

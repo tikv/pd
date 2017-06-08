@@ -80,10 +80,6 @@ type Config struct {
 	// the default retention is 1 hour
 	AutoCompactionRetention int `toml:"auto-compaction-retention" json:"auto-compaction-retention"`
 
-	// Only test can change them.
-	nextRetryDelay             time.Duration
-	disableStrictReconfigCheck bool
-
 	tickMs     uint64
 	electionMs uint64
 
@@ -91,6 +87,12 @@ type Config struct {
 
 	// For all warnings during parsing.
 	WarningMsgs []string
+
+	// Only test can change them.
+	nextRetryDelay             time.Duration
+	disableStrictReconfigCheck bool
+	// It is a workaround for passing tests,which make test region heartbeat easy.
+	regionHeartbeatUnaryMode bool
 }
 
 // NewConfig creates a new config.
@@ -475,6 +477,7 @@ func NewTestSingleConfig() *Config {
 	cfg.DataDir, _ = ioutil.TempDir("/tmp", "test_pd")
 	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
 	cfg.disableStrictReconfigCheck = true
+	cfg.regionHeartbeatUnaryMode = true
 	cfg.tickMs = 100
 	cfg.electionMs = 1000
 

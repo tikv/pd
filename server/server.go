@@ -87,10 +87,6 @@ type Server struct {
 	msgID uint64
 
 	id uint64
-
-	// Used in tests only
-	// FIXME: it is a workaround for passing tests, remove it ASAP.
-	regionHeartbeatUnaryMode bool
 }
 
 // NewServer creates the pd server with given configuration.

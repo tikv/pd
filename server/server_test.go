@@ -43,8 +43,6 @@ func newTestServer(c *C) (*Server, cleanUpFunc) {
 		cleanServer(svr.cfg)
 	}
 
-	// TODO: remove it.
-	svr.regionHeartbeatUnaryMode = true
 	return svr, cleanup
 }
 

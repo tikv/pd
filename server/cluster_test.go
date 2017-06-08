@@ -38,9 +38,6 @@ type testClusterBaseSuite struct {
 	svr          *Server
 	cleanup      cleanUpFunc
 	grpcPDClient pdpb.PDClient
-
-	// persist streams
-	regionHeartbeat pdpb.PD_RegionHeartbeatClient
 }
 
 type testClusterSuite struct {
