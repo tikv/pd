@@ -445,7 +445,9 @@ func (c *client) GetTSAsync(ctx context.Context) TSFuture {
 	return req
 }
 
+// TSFuture is a future which promises to return a TSO.
 type TSFuture interface {
+	// Wait gets the physical and logical time, it would block caller if data is not available yet.
 	Wait() (int64, int64, error)
 }
 
