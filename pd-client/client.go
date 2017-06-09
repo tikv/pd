@@ -36,7 +36,7 @@ type Client interface {
 	// GetTS gets a timestamp from PD.
 	GetTS(ctx context.Context) (int64, int64, error)
 	// GetTSAsync gets a timestamp from PD, without block the caller.
-	GetTSAsync(ctx context.Context) *tsoRequest
+	GetTSAsync(ctx context.Context) TSFuture
 	// GetRegion gets a region and its leader Peer from PD by key.
 	// The region may expire after split. Caller is responsible for caching and
 	// taking care of region change.
@@ -434,7 +434,7 @@ var tsoReqPool = sync.Pool{
 	},
 }
 
-func (c *client) GetTSAsync(ctx context.Context) *tsoRequest {
+func (c *client) GetTSAsync(ctx context.Context) TSFuture {
 	req := tsoReqPool.Get().(*tsoRequest)
 	req.start = time.Now()
 	req.ctx = ctx
@@ -443,6 +443,10 @@ func (c *client) GetTSAsync(ctx context.Context) *tsoRequest {
 	c.tsoRequests <- req
 
 	return req
+}
+
+type TSFuture interface {
+	Wait() (int64, int64, error)
 }
 
 func (req *tsoRequest) Wait() (int64, int64, error) {
