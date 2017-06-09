@@ -300,6 +300,7 @@ func (c *client) tsLoop() {
 			stream, err = c.leaderClient().Tso(ctx)
 			if err != nil {
 				log.Errorf("[pd] create tso stream error: %v", err)
+				c.scheduleCheckLeader()
 				cancel()
 				c.revokeTSORequest(err)
 				select {
@@ -338,6 +339,7 @@ func (c *client) tsLoop() {
 
 		if err != nil {
 			log.Errorf("[pd] getTS error: %v", err)
+			c.scheduleCheckLeader()
 			cancel()
 			stream, cancel = nil, nil
 		}
@@ -346,20 +348,17 @@ func (c *client) tsLoop() {
 
 func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoRequest) error {
 	start := time.Now()
-	//	ctx, cancel := context.WithTimeout(c.ctx, pdTimeout)
 	req := &pdpb.TsoRequest{
 		Header: c.requestHeader(),
 		Count:  uint32(len(requests)),
 	}
 	if err := stream.Send(req); err != nil {
 		c.finishTSORequest(requests, 0, 0, err)
-		c.scheduleCheckLeader()
 		return errors.Trace(err)
 	}
 	resp, err := stream.Recv()
 	if err != nil {
 		c.finishTSORequest(requests, 0, 0, errors.Trace(err))
-		c.scheduleCheckLeader()
 		return errors.Trace(err)
 	}
 	requestDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds())
