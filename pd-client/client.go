@@ -35,6 +35,8 @@ type Client interface {
 	GetClusterID(ctx context.Context) uint64
 	// GetTS gets a timestamp from PD.
 	GetTS(ctx context.Context) (int64, int64, error)
+	// GetTSAsync gets a timestamp from PD, without block the caller.
+	GetTSAsync(ctx context.Context) *tsoRequest
 	// GetRegion gets a region and its leader Peer from PD by key.
 	// The region may expire after split. Caller is responsible for caching and
 	// taking care of region change.
@@ -52,6 +54,8 @@ type Client interface {
 }
 
 type tsoRequest struct {
+	start    time.Time
+	ctx      context.Context
 	done     chan error
 	physical int64
 	logical  int64
@@ -430,25 +434,36 @@ var tsoReqPool = sync.Pool{
 	},
 }
 
-func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
-	start := time.Now()
-	defer func() { cmdDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds()) }()
-
+func (c *client) GetTSAsync(ctx context.Context) *tsoRequest {
 	req := tsoReqPool.Get().(*tsoRequest)
+	req.start = time.Now()
+	req.ctx = ctx
+	req.physical = 0
+	req.logical = 0
 	c.tsoRequests <- req
 
+	return req
+}
+
+func (req *tsoRequest) Wait() (int64, int64, error) {
+	defer func() { cmdDuration.WithLabelValues("tso").Observe(time.Since(req.start).Seconds()) }()
 	select {
 	case err := <-req.done:
 		if err != nil {
-			cmdFailedDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds())
+			cmdFailedDuration.WithLabelValues("tso").Observe(time.Since(req.start).Seconds())
 			return 0, 0, errors.Trace(err)
 		}
 		physical, logical := req.physical, req.logical
 		tsoReqPool.Put(req)
 		return physical, logical, err
-	case <-ctx.Done():
-		return 0, 0, errors.Trace(ctx.Err())
+	case <-req.ctx.Done():
+		return 0, 0, errors.Trace(req.ctx.Err())
 	}
+}
+
+func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
+	resp := c.GetTSAsync(ctx)
+	return resp.Wait()
 }
 
 func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error) {
