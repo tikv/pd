@@ -17,6 +17,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -173,6 +174,25 @@ func (s *testClientSuite) TestTSO(c *C) {
 		c.Assert(ts, Greater, last)
 		last = ts
 	}
+}
+
+func (s *testClientSuite) TestTSORace(c *C) {
+	var wg sync.WaitGroup
+	begin := make(chan struct{})
+	count := 10
+	wg.Add(count)
+	for i := 0; i < count; i++ {
+		go func(begin chan struct{}, wg *sync.WaitGroup) {
+			<-begin
+			for i := 0; i < 100; i++ {
+				_, _, err := s.client.GetTS(context.Background())
+				c.Assert(err, IsNil)
+			}
+			wg.Done()
+		}(begin, &wg)
+	}
+	close(begin)
+	wg.Wait()
 }
 
 func (s *testClientSuite) TestGetRegion(c *C) {
