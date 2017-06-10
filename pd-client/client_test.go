@@ -182,14 +182,14 @@ func (s *testClientSuite) TestTSORace(c *C) {
 	count := 10
 	wg.Add(count)
 	for i := 0; i < count; i++ {
-		go func(begin chan struct{}, wg *sync.WaitGroup) {
+		go func() {
 			<-begin
 			for i := 0; i < 100; i++ {
 				_, _, err := s.client.GetTS(context.Background())
 				c.Assert(err, IsNil)
 			}
 			wg.Done()
-		}(begin, &wg)
+		}()
 	}
 	close(begin)
 	wg.Wait()
