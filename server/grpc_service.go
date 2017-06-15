@@ -235,6 +235,7 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 
 // RegionHeartbeat implements gRPC PDServer.
 func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
+	isNewStream := true
 	for {
 		request, err := server.Recv()
 		if err == io.EOF {
@@ -242,6 +243,13 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 		}
 		if err != nil {
 			return errors.Trace(err)
+		}
+		if isNewStream {
+			storeID := request.GetLeader().GetStoreId()
+			s.streams.Lock()
+			s.streams.regionHeartbeatStreams[storeID] = server
+			s.streams.Unlock()
+			isNewStream = false
 		}
 
 		// TODO: should we check headers here?

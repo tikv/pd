@@ -45,6 +45,8 @@ const (
 	minHotRegionReportInterval    = 3
 	hotRegionAntiCount            = 1
 	hotRegionScheduleName         = "balance-hot-region-scheduler"
+
+	defaultOperatorChannelSize = 100
 )
 
 var (
@@ -67,23 +69,25 @@ type coordinator struct {
 	operators  map[uint64]Operator
 	schedulers map[string]*scheduleController
 
-	histories *lruCache
-	events    *fifoCache
+	histories    *lruCache
+	events       *fifoCache
+	operatorChan chan Operator
 }
 
 func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
-		ctx:        ctx,
-		cancel:     cancel,
-		cluster:    cluster,
-		opt:        opt,
-		limiter:    newScheduleLimiter(),
-		checker:    newReplicaChecker(opt, cluster),
-		operators:  make(map[uint64]Operator),
-		schedulers: make(map[string]*scheduleController),
-		histories:  newLRUCache(historiesCacheSize),
-		events:     newFifoCache(eventsCacheSize),
+		ctx:          ctx,
+		cancel:       cancel,
+		cluster:      cluster,
+		opt:          opt,
+		limiter:      newScheduleLimiter(),
+		checker:      newReplicaChecker(opt, cluster),
+		operators:    make(map[uint64]Operator),
+		schedulers:   make(map[string]*scheduleController),
+		histories:    newLRUCache(historiesCacheSize),
+		events:       newFifoCache(eventsCacheSize),
+		operatorChan: make(chan Operator, defaultOperatorChannelSize),
 	}
 }
 
@@ -253,7 +257,9 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 				continue
 			}
 			if op := s.Schedule(c.cluster); op != nil {
-				c.addOperator(op)
+				if c.addOperator(op) {
+					c.pushOperator(op)
+				}
 			}
 
 		case <-s.Ctx().Done():
@@ -282,6 +288,14 @@ func (c *coordinator) addOperator(op Operator) bool {
 	c.operators[regionID] = op
 	collectOperatorCounterMetrics(op)
 	return true
+}
+
+func (c *coordinator) pushOperator(op Operator) {
+	c.operatorChan <- op
+}
+
+func (c *coordinator) WatchOperator() <-chan Operator {
+	return c.operatorChan
 }
 
 func isHigherPriorityOperator(new Operator, old Operator) bool {

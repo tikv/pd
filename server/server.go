@@ -14,6 +14,7 @@
 package server
 
 import (
+	"fmt"
 	"math/rand"
 	"net/http"
 	"path"
@@ -87,6 +88,37 @@ type Server struct {
 	msgID uint64
 
 	id uint64
+
+	streams *streamCache
+}
+
+type streamCache struct {
+	sync.RWMutex
+	regionHeartbeatStreams map[uint64]pdpb.PD_RegionHeartbeatServer
+}
+
+func (s *streamCache) sendRegionResponse(id uint64, resp *pdpb.RegionHeartbeatResponse) error {
+	s.Lock()
+	defer s.Unlock()
+	stream, ok := s.regionHeartbeatStreams[id]
+	if !ok {
+		desc := fmt.Sprintf("no stream with store %d", id)
+		return errors.New(desc)
+	}
+	err := stream.Send(resp)
+	if err != nil {
+		if strings.Contains(err.Error(), "the stream has been done") {
+			delete(s.regionHeartbeatStreams, id)
+		}
+		return err
+	}
+	return nil
+}
+
+func newStreamCache() *streamCache {
+	return &streamCache{
+		regionHeartbeatStreams: make(map[uint64]pdpb.PD_RegionHeartbeatServer),
+	}
 }
 
 // NewServer creates the pd server with given configuration.
@@ -114,6 +146,7 @@ func CreateServer(cfg *Config) *Server {
 		scheduleOpt:   newScheduleOption(cfg),
 		isLeaderValue: 0,
 		closed:        1,
+		streams:       newStreamCache(),
 	}
 
 	s.handler = newHandler(s)

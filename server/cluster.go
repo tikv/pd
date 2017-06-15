@@ -109,13 +109,48 @@ func (c *RaftCluster) start() error {
 	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt)
 	c.quit = make(chan struct{})
 
-	c.wg.Add(2)
+	c.wg.Add(3)
 	go c.runCoordinator()
 	go c.runBackgroundJobs(backgroundJobInterval)
+	go c.doWatchOperator()
 
 	c.running = true
 
 	return nil
+}
+
+func (c *RaftCluster) doWatchOperator() {
+	watchCh := c.coordinator.WatchOperator()
+	defer c.wg.Done()
+	for {
+		select {
+		case op := <-watchCh:
+			region := c.cachedCluster.getRegion(op.GetRegionID())
+			if region == nil {
+				continue
+			}
+			storeID := region.Leader.GetStoreId()
+			resp, finished := op.Do(region)
+			if finished || resp == nil {
+				continue
+			}
+			resp.Header = c.s.header()
+			resp.RegionId = region.GetId()
+			resp.RegionEpoch = region.GetRegionEpoch()
+			resp.TargetPeer = region.Leader
+
+			err := c.s.streams.sendRegionResponse(storeID, resp)
+			if err != nil {
+				log.Infof("do operator failed: %v error: %s", op, err)
+			} else {
+				log.Infof("[region %d] Do operator immediately: %v", region.GetId(), op)
+			}
+
+		case <-c.quit:
+			log.Info("stop watch operator")
+			return
+		}
+	}
 }
 
 func (c *RaftCluster) runCoordinator() {
