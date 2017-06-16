@@ -151,10 +151,10 @@ func (o *testOperatorSuite) TestOperatorState(c *C) {
 	tc.addLeaderRegion(1, 4, 2, 3)
 
 	// Get the operator tansfer peer from store 4 to store 1
-	// Now operator are Waiting
+	// Now operator will do immediately,so will running
 	waitOperator(c, co, 1)
 	op := co.getOperator(1)
-	c.Assert(op.GetState(), Equals, OperatorWaiting)
+	c.Assert(op.GetState(), Equals, OperatorRunning)
 	regionInfo := tc.getRegion(1)
 
 	// Do Operator, Operator start running. doRegionHeartbeatRequest will add one peer in store 1
