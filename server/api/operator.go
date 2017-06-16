@@ -14,7 +14,6 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -94,7 +93,6 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	fmt.Println("Debug input", input)
 	name, ok := input["name"].(string)
 	if !ok {
 		h.r.JSON(w, http.StatusInternalServerError, "missing operator name")
