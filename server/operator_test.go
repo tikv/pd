@@ -18,7 +18,9 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testResouceKindSuite{})
@@ -149,10 +151,10 @@ func (o *testOperatorSuite) TestOperatorState(c *C) {
 	tc.addLeaderRegion(1, 4, 2, 3)
 
 	// Get the operator tansfer peer from store 4 to store 1
-	// Now operator are Waiting
+	// Now operator will do immediately,so will running
 	waitOperator(c, co, 1)
 	op := co.getOperator(1)
-	c.Assert(op.GetState(), Equals, OperatorWaiting)
+	c.Assert(op.GetState(), Equals, OperatorRunning)
 	regionInfo := tc.getRegion(1)
 
 	// Do Operator, Operator start running. doRegionHeartbeatRequest will add one peer in store 1
@@ -198,5 +200,61 @@ func (o *testOperatorSuite) TestOperatorState(c *C) {
 	regionOp.Start = regionOp.Start.Add(-maxOperatorWaitTime).Add(-time.Minute)
 	op.Do(regionInfo)
 	c.Assert(op.GetState(), Equals, OperatorTimeOut)
+
+}
+
+var _ = Suite(&testWatchOperatorSuite{})
+
+type testWatchOperatorSuite struct {
+	testClusterBaseSuite
+	regionHeartbeat pdpb.PD_RegionHeartbeatClient
+}
+
+func (s *testWatchOperatorSuite) SetUpTest(c *C) {
+	s.svr, s.cleanup = newTestServer(c)
+	go s.svr.Run()
+
+	mustWaitLeader(c, []*Server{s.svr})
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+
+	var err error
+	s.regionHeartbeat, err = s.grpcPDClient.RegionHeartbeat(context.Background())
+	c.Assert(err, IsNil)
+	storeAddr := "127.0.0.1:0"
+	reqBoot := s.newBootstrapRequest(c, s.svr.clusterID, storeAddr)
+	respBoot, err := s.grpcPDClient.Bootstrap(context.Background(), reqBoot)
+	c.Assert(err, IsNil)
+	c.Assert(respBoot.GetHeader().GetError(), IsNil)
+
+}
+
+func (s *testWatchOperatorSuite) TearDownTest(c *C) {
+	s.cleanup()
+	s.regionHeartbeat.CloseSend()
+}
+
+func (s *testWatchOperatorSuite) TestPushOperator(c *C) {
+	p := &metapb.Peer{Id: 2, StoreId: 1}
+	r := &metapb.Region{Id: 1, Peers: []*metapb.Peer{p}}
+	s.svr.cluster.cachedCluster.putRegion(newRegionInfo(r, p))
+
+	req := &pdpb.RegionHeartbeatRequest{
+		Header: &pdpb.RequestHeader{
+			ClusterId: s.svr.ClusterID(),
+		},
+		Region: r,
+		Leader: p,
+	}
+	err := s.regionHeartbeat.Send(req)
+	c.Assert(err, IsNil)
+	resp, err := s.regionHeartbeat.Recv()
+	c.Assert(err, IsNil)
+
+	addPeer := &metapb.Peer{Id: 3, StoreId: 1}
+	op := newAddPeerOperator(1, addPeer)
+	s.svr.cluster.coordinator.pushOperator(op)
+	resp, err = s.regionHeartbeat.Recv()
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetChangePeer().GetPeer(), DeepEquals, addPeer)
 
 }

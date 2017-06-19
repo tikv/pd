@@ -100,7 +100,7 @@ type testClusterWorkerSuite struct {
 	// regionID -> Peer
 	regionLeaders map[uint64]metapb.Peer
 
-	regionHeartbeat pdpb.PD_RegionHeartbeatClient
+	regionHeartbeat map[uint64]pdpb.PD_RegionHeartbeatClient
 }
 
 func (s *testClusterWorkerSuite) clearRegionLeader(c *C, regionID uint64) {
@@ -186,6 +186,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	s.clusterID = s.svr.clusterID
 
 	s.regionLeaders = make(map[uint64]metapb.Peer)
+	s.regionHeartbeat = make(map[uint64]pdpb.PD_RegionHeartbeatClient)
 
 	go s.svr.Run()
 
@@ -193,8 +194,6 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 
 	var err error
-	s.regionHeartbeat, err = s.grpcPDClient.RegionHeartbeat(context.Background())
-	c.Assert(err, IsNil)
 
 	// Build raft cluster with 5 stores.
 	s.bootstrap(c)
@@ -299,9 +298,18 @@ func (s *testClusterWorkerSuite) heartbeatRegion(c *C, clusterID uint64, msgID u
 	}
 
 	// FIXME: it may out of order in the future.
-	err := s.regionHeartbeat.Send(req)
+	var err error
+	stream, ok := s.regionHeartbeat[leader.GetStoreId()]
+	if !ok {
+		stream, err = s.grpcPDClient.RegionHeartbeat(context.Background())
+		c.Assert(err, IsNil)
+		s.regionHeartbeat[leader.GetStoreId()] = stream
+	}
 	c.Assert(err, IsNil)
-	resp, err := s.regionHeartbeat.Recv()
+
+	err = stream.Send(req)
+	c.Assert(err, IsNil)
+	resp, err := stream.Recv()
 	c.Assert(err, IsNil)
 	return resp
 }

@@ -188,6 +188,9 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 	}
 	err := s.regionHeartbeat.Send(req)
 	c.Assert(err, IsNil)
+	// for wait server do it
+	_, err = s.regionHeartbeat.Recv()
+	c.Assert(err, IsNil)
 
 	r, leader, err := s.client.GetRegion(context.Background(), []byte("a"))
 	c.Assert(err, IsNil)

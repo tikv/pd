@@ -45,6 +45,8 @@ const (
 	minHotRegionReportInterval    = 3
 	hotRegionAntiCount            = 1
 	hotRegionScheduleName         = "balance-hot-region-scheduler"
+
+	defaultOperatorChannelSize = 100
 )
 
 var (
@@ -52,6 +54,45 @@ var (
 	errSchedulerExisted   = errors.New("scheduler existed")
 	errSchedulerNotFound  = errors.New("scheduler not found")
 )
+
+type operatorRequest struct {
+	resp *pdpb.RegionHeartbeatResponse
+	err  chan error
+}
+
+type streamOperatorChan struct {
+	sync.RWMutex
+	chs map[uint64]chan *operatorRequest
+}
+
+func newStreamOperatorChan() *streamOperatorChan {
+	return &streamOperatorChan{
+		chs: make(map[uint64]chan *operatorRequest),
+	}
+}
+
+func (c *streamOperatorChan) send(resp *pdpb.RegionHeartbeatResponse) {
+	c.Lock()
+	defer c.Unlock()
+	req := &operatorRequest{
+		resp: resp,
+		err:  make(chan error),
+	}
+	for uid, ch := range c.chs {
+		ch <- req
+		select {
+		case err := <-req.err:
+			if err != nil {
+				log.Infof("push region hearbeat response faild: %+v error: %s", resp, err)
+				delete(c.chs, uid)
+				close(ch)
+				continue
+			}
+			return
+		}
+	}
+	log.Infof("push region hearbeat response faild: %+v error:  no stream to send", resp)
+}
 
 type coordinator struct {
 	sync.RWMutex
@@ -67,23 +108,25 @@ type coordinator struct {
 	operators  map[uint64]Operator
 	schedulers map[string]*scheduleController
 
-	histories *lruCache
-	events    *fifoCache
+	histories     *lruCache
+	events        *fifoCache
+	operatorChans map[uint64]*streamOperatorChan
 }
 
 func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
-		ctx:        ctx,
-		cancel:     cancel,
-		cluster:    cluster,
-		opt:        opt,
-		limiter:    newScheduleLimiter(),
-		checker:    newReplicaChecker(opt, cluster),
-		operators:  make(map[uint64]Operator),
-		schedulers: make(map[string]*scheduleController),
-		histories:  newLRUCache(historiesCacheSize),
-		events:     newFifoCache(eventsCacheSize),
+		ctx:           ctx,
+		cancel:        cancel,
+		cluster:       cluster,
+		opt:           opt,
+		limiter:       newScheduleLimiter(),
+		checker:       newReplicaChecker(opt, cluster),
+		operators:     make(map[uint64]Operator),
+		schedulers:    make(map[string]*scheduleController),
+		histories:     newLRUCache(historiesCacheSize),
+		events:        newFifoCache(eventsCacheSize),
+		operatorChans: make(map[uint64]*streamOperatorChan),
 	}
 }
 
@@ -93,6 +136,7 @@ func (c *coordinator) dispatch(region *RegionInfo) *pdpb.RegionHeartbeatResponse
 		res, finished := op.Do(region)
 		if !finished {
 			collectOperatorCounterMetrics(op)
+			c.sendToWatcher(region, res)
 			return res
 		}
 		c.removeOperator(op)
@@ -105,6 +149,7 @@ func (c *coordinator) dispatch(region *RegionInfo) *pdpb.RegionHeartbeatResponse
 	if op := c.checker.Check(region); op != nil {
 		if c.addOperator(op) {
 			res, _ := op.Do(region)
+			c.sendToWatcher(region, res)
 			return res
 		}
 	}
@@ -253,7 +298,9 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 				continue
 			}
 			if op := s.Schedule(c.cluster); op != nil {
-				c.addOperator(op)
+				if c.addOperator(op) {
+					c.pushOperator(op)
+				}
 			}
 
 		case <-s.Ctx().Done():
@@ -282,6 +329,48 @@ func (c *coordinator) addOperator(op Operator) bool {
 	c.operators[regionID] = op
 	collectOperatorCounterMetrics(op)
 	return true
+}
+
+func (c *coordinator) pushOperator(op Operator) {
+	region := c.cluster.getRegion(op.GetRegionID())
+	resp, finished := op.Do(region)
+	if finished || resp == nil {
+		return
+	}
+	c.sendToWatcher(region, resp)
+}
+
+func (c *coordinator) sendToWatcher(region *RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
+	if msg == nil {
+		return
+	}
+	c.RLock()
+	defer c.RUnlock()
+	storeID := region.Leader.GetStoreId()
+	streamChan, ok := c.operatorChans[storeID]
+	if !ok {
+		log.Infof("send message to watcher faild: %+v error: no stream with store %d", msg, storeID)
+		return
+	}
+
+	streamChan.send(msg)
+}
+
+func (c *coordinator) WatchOperator(storeID uint64, uid uint64) <-chan *operatorRequest {
+	c.Lock()
+	defer c.Unlock()
+	streamChan, ok := c.operatorChans[storeID]
+	if !ok {
+		streamChan = newStreamOperatorChan()
+		c.operatorChans[storeID] = streamChan
+	}
+	ch, ok := streamChan.chs[uid]
+	if !ok {
+		ch = make(chan *operatorRequest, defaultOperatorChannelSize)
+		streamChan.chs[uid] = ch
+	}
+
+	return ch
 }
 
 func isHigherPriorityOperator(new Operator, old Operator) bool {

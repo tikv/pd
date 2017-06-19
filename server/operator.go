@@ -16,6 +16,7 @@ package server
 import (
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -225,6 +226,7 @@ type regionOperator struct {
 	Ops    []Operator    `json:"ops"`
 	Kind   ResourceKind  `json:"kind"`
 	State  OperatorState `json:"state"`
+	mu     *sync.RWMutex
 }
 
 func newRegionOperator(region *RegionInfo, kind ResourceKind, ops ...Operator) *regionOperator {
@@ -240,6 +242,7 @@ func newRegionOperator(region *RegionInfo, kind ResourceKind, ops ...Operator) *
 		Ops:    ops,
 		Kind:   kind,
 		State:  OperatorWaiting,
+		mu:     &sync.RWMutex{},
 	}
 }
 
@@ -248,18 +251,26 @@ func (op *regionOperator) String() string {
 }
 
 func (op *regionOperator) GetRegionID() uint64 {
+	op.mu.RLock()
+	defer op.mu.RUnlock()
 	return op.Region.GetId()
 }
 
 func (op *regionOperator) GetResourceKind() ResourceKind {
+	op.mu.RLock()
+	defer op.mu.RUnlock()
 	return op.Kind
 }
 
 func (op *regionOperator) GetState() OperatorState {
+	op.mu.RLock()
+	defer op.mu.RUnlock()
 	return op.State
 }
 
 func (op *regionOperator) SetState(state OperatorState) {
+	op.mu.Lock()
+	defer op.mu.Unlock()
 	if op.State == OperatorFinished || op.State == OperatorTimeOut {
 		return
 	}
@@ -270,10 +281,14 @@ func (op *regionOperator) SetState(state OperatorState) {
 }
 
 func (op *regionOperator) GetName() string {
+	op.mu.RLock()
+	defer op.mu.RUnlock()
 	return op.Name
 }
 
 func (op *regionOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
+	op.mu.Lock()
+	defer op.mu.Unlock()
 	if time.Since(op.Start) > maxOperatorWaitTime {
 		log.Errorf("[region %d] Operator timeout:%s", region.GetId(), op)
 		op.State = OperatorTimeOut
@@ -382,7 +397,10 @@ func (op *changePeerOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatRespo
 
 	op.State = OperatorRunning
 	res := &pdpb.RegionHeartbeatResponse{
-		ChangePeer: op.ChangePeer,
+		ChangePeer:  op.ChangePeer,
+		RegionId:    region.GetId(),
+		RegionEpoch: region.GetRegionEpoch(),
+		TargetPeer:  region.Leader,
 	}
 	return res, false
 }
@@ -445,6 +463,9 @@ func (op *transferLeaderOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatR
 		TransferLeader: &pdpb.TransferLeader{
 			Peer: op.NewLeader,
 		},
+		RegionId:    region.GetId(),
+		RegionEpoch: region.GetRegionEpoch(),
+		TargetPeer:  region.Leader,
 	}
 	return res, false
 }
