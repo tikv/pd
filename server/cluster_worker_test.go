@@ -14,7 +14,6 @@
 package server
 
 import (
-	"fmt"
 	"math/rand"
 	"net"
 	"sync"
@@ -454,11 +453,9 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 	leaderPeer := s.chooseRegionLeader(c, region)
 	c.Logf("[leaderPeer]:%v, [region]:%v", leaderPeer, region)
-	fmt.Println("Debug 1")
 
 	// Add 4 peers.
 	for i := 0; i < 4; i++ {
-		fmt.Println("Debug 2")
 		resp := s.heartbeatRegion(c, s.clusterID, 0, region, leaderPeer)
 		// Check RegionHeartbeat response.
 		s.checkChangePeerRes(c, resp.GetChangePeer(), pdpb.ConfChangeType_AddNode, region)
@@ -470,10 +467,8 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 		// Check region peer count.
 		region = s.checkRegionPeerCount(c, regionKey, i+2)
-		fmt.Println("Debug 3")
 	}
 
-	fmt.Println("Debug 4")
 	region = s.checkRegionPeerCount(c, regionKey, 5)
 
 	opt.SetMaxReplicas(3)
@@ -481,7 +476,6 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 	// Remove 2 peers
 	peerCount := 5
 	for {
-		fmt.Println("Debug 5")
 		resp := s.heartbeatRegion(c, s.clusterID, 0, region, leaderPeer)
 		if resp.GetTransferLeader() != nil {
 			leaderPeer = resp.GetTransferLeader().GetPeer()
@@ -501,7 +495,6 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 		// Check region peer count.
 		peerCount--
 		region = s.checkRegionPeerCount(c, regionKey, peerCount)
-		fmt.Println("Debug 6")
 	}
 
 	region = s.checkRegionPeerCount(c, regionKey, 3)

@@ -85,10 +85,8 @@ func (c *streamOperatorChan) send(resp *pdpb.RegionHeartbeatResponse) {
 		case err := <-req.err:
 			if err != nil {
 				log.Infof("push region hearbeat response faild: %+v error: %s", resp, err)
-				if strings.Contains(err.Error(), "the stream has been done") {
-					delete(c.chs, uid)
-					close(ch)
-				}
+				delete(c.chs, uid)
+				close(ch)
 				continue
 			}
 			return
