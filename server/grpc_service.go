@@ -244,7 +244,10 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 			return errors.Trace(err)
 		}
 
-		// TODO: should we check headers here?
+		if err := s.validateRequest(request.GetHeader()); err != nil {
+			// TODO: How to close this stream?
+			return errors.Trace(err)
+		}
 
 		cluster := s.GetRaftCluster()
 		if cluster == nil {
