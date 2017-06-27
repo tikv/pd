@@ -91,7 +91,7 @@ type Config struct {
 	// Only test can change them.
 	nextRetryDelay             time.Duration
 	disableStrictReconfigCheck bool
-	// It is a workaround for passing tests,which make test region heartbeat easy.
+	// It is a workaround for passing tests, which makes testing region heartbeat easy.
 	regionHeartbeatUnaryMode bool
 }
 
