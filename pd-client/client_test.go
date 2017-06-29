@@ -209,6 +209,8 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 	err := s.regionHeartbeat.Send(req)
 	c.Assert(err, IsNil)
 
+	time.Sleep(time.Millisecond * 200)
+
 	r, leader, err := s.client.GetRegion(context.Background(), []byte("a"))
 	c.Assert(err, IsNil)
 	c.Assert(r, DeepEquals, region)
