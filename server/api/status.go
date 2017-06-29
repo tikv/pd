@@ -36,8 +36,6 @@ func newStatusHandler(rd *render.Render) *statusHandler {
 }
 
 func (h *statusHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	version := status{
 		BuildTS: server.PDBuildTS,
 		GitHash: server.PDGitHash,
