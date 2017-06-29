@@ -196,12 +196,11 @@ func mustRegionHeartBeat(c *C, client pdpb.PD_RegionHeartbeatClient, clusterID u
 		Leader: region.Leader,
 	}
 
-	// FIXME: it may out of order in the future.
 	err := client.Send(req)
 	c.Assert(err, IsNil)
-	resp, err := client.Recv()
-	c.Assert(err, IsNil)
-	c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_OK)
+
+	// Sleep a while to make sure the message is processed by server.
+	time.Sleep(time.Millisecond * 200)
 }
 
 func readJSONWithURL(url string, data interface{}) error {
