@@ -244,7 +244,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 			return errors.Trace(err)
 		}
 
-		if err := s.validateRequest(request.GetHeader()); err != nil {
+		if err = s.validateRequest(request.GetHeader()); err != nil {
 			// TODO: How to close this stream?
 			return errors.Trace(err)
 		}
@@ -301,13 +301,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 			continue
 		}
 		if resp == nil {
-			if s.cfg.regionHeartbeatUnaryMode {
-				// A workaround for passing tests, remove it ASAP.
-				resp = new(pdpb.RegionHeartbeatResponse)
-			} else {
-				// No operations, skip.
-				continue
-			}
+			continue
 		}
 
 		resp.Header = s.header()

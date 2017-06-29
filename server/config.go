@@ -91,8 +91,6 @@ type Config struct {
 	// Only test can change them.
 	nextRetryDelay             time.Duration
 	disableStrictReconfigCheck bool
-	// It is a workaround for passing tests, which makes testing region heartbeat easy.
-	regionHeartbeatUnaryMode bool
 }
 
 // NewConfig creates a new config.
@@ -477,7 +475,6 @@ func NewTestSingleConfig() *Config {
 	cfg.DataDir, _ = ioutil.TempDir("/tmp", "test_pd")
 	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
 	cfg.disableStrictReconfigCheck = true
-	cfg.regionHeartbeatUnaryMode = true
 	cfg.tickMs = 100
 	cfg.electionMs = 1000
 
