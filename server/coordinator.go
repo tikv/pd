@@ -285,8 +285,9 @@ func (c *coordinator) addOperator(op Operator) bool {
 	c.operators[regionID] = op
 
 	if region := c.cluster.getRegion(op.GetRegionID()); region != nil {
-		msg, _ := op.Do(region)
-		c.hbStreams.sendMsg(region, msg)
+		if msg, _ := op.Do(region); msg != nil {
+			c.hbStreams.sendMsg(region, msg)
+		}
 	}
 
 	collectOperatorCounterMetrics(op)
