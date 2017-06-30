@@ -42,19 +42,24 @@ func checkStatusResponse(c *C, body []byte, cfgs []*server.Config) {
 	c.Assert(got.GitHash, Equals, server.PDGitHash)
 }
 
+func (s *testStatusAPISuite) testStatusInternal(c *C, num int) {
+	cfgs, _, clean := mustNewCluster(c, num)
+	defer clean()
+
+	parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/status"}
+	addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
+	resp, err := s.hc.Get(addr)
+	c.Assert(err, IsNil)
+	defer resp.Body.Close()
+	buf, err := ioutil.ReadAll(resp.Body)
+	c.Assert(err, IsNil)
+	checkStatusResponse(c, buf, cfgs)
+}
+
 func (s *testStatusAPISuite) TestStatus(c *C) {
 	numbers := []int{1, 3}
 
 	for _, num := range numbers {
-		cfgs, _, clean := mustNewCluster(c, num)
-		defer clean()
-
-		parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/status"}
-		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
-		resp, err := s.hc.Get(addr)
-		c.Assert(err, IsNil)
-		buf, err := ioutil.ReadAll(resp.Body)
-		c.Assert(err, IsNil)
-		checkStatusResponse(c, buf, cfgs)
+		s.testStatusInternal(c, num)
 	}
 }
