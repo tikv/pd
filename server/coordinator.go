@@ -41,6 +41,7 @@ const (
 	hotRegionScheduleFactor       = 0.9
 	hotRegionMinWriteRate         = 16 * 1024
 	regionHeartBeatReportInterval = 60
+	regionheartbeatSendChanCap    = 1024
 	storeHeartBeatReportInterval  = 10
 	minHotRegionReportInterval    = 3
 	hotRegionAntiCount            = 1
@@ -473,7 +474,7 @@ func newHeartbeatStreams(ctx context.Context, clusterID uint64) *heartbeatStream
 		ctx:       ctx,
 		clusterID: clusterID,
 		streams:   make(map[uint64]pdpb.PD_RegionHeartbeatServer),
-		msgCh:     make(chan *pdpb.RegionHeartbeatResponse, 1),
+		msgCh:     make(chan *pdpb.RegionHeartbeatResponse, regionheartbeatSendChanCap),
 		streamCh:  make(chan updateStream, 1),
 	}
 }
