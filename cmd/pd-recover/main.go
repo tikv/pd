@@ -38,11 +38,11 @@ func exitErr(err error) {
 func main() {
 	flag.Parse()
 	if *clusterID == 0 {
-		fmt.Println("please specify safe alloc-id")
+		fmt.Println("please specify safe cluster-id")
 		return
 	}
 	if *allocID == 0 {
-		fmt.Println("please specify safe cluster-id")
+		fmt.Println("please specify safe alloc-id")
 		return
 	}
 
