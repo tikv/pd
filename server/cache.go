@@ -391,6 +391,12 @@ func (c *clusterInfo) allocPeer(storeID uint64) (*metapb.Peer, error) {
 	return peer, nil
 }
 
+func (c *clusterInfo) getClusterID() uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.meta.GetId()
+}
+
 func (c *clusterInfo) getMeta() *metapb.Cluster {
 	c.RLock()
 	defer c.RUnlock()

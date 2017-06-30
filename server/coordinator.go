@@ -69,6 +69,8 @@ type coordinator struct {
 
 	histories *lruCache
 	events    *fifoCache
+
+	hbStreams *heartbeatStreams
 }
 
 func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
@@ -84,6 +86,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
 		schedulers: make(map[string]*scheduleController),
 		histories:  newLRUCache(historiesCacheSize),
 		events:     newFifoCache(eventsCacheSize),
+		hbStreams:  newHeartbeatStreams(ctx, cluster.getClusterID()),
 	}
 }
 
@@ -103,10 +106,7 @@ func (c *coordinator) dispatch(region *RegionInfo) *pdpb.RegionHeartbeatResponse
 		return nil
 	}
 	if op := c.checker.Check(region); op != nil {
-		if c.addOperator(op) {
-			res, _ := op.Do(region)
-			return res
-		}
+		c.addOperator(op)
 	}
 
 	return nil
@@ -132,6 +132,8 @@ func (c *coordinator) run() {
 	c.addScheduler(newBalanceLeaderScheduler(c.opt), minScheduleInterval)
 	c.addScheduler(newBalanceRegionScheduler(c.opt), minScheduleInterval)
 	c.addScheduler(newBalanceHotRegionScheduler(c.opt), minSlowScheduleInterval)
+
+	go c.hbStreams.run()
 }
 
 func (c *coordinator) stop() {
@@ -280,6 +282,12 @@ func (c *coordinator) addOperator(op Operator) bool {
 	c.histories.add(regionID, op)
 	c.limiter.addOperator(op)
 	c.operators[regionID] = op
+
+	if region := c.cluster.getRegion(op.GetRegionID()); region != nil {
+		msg, _ := op.Do(region)
+		c.hbStreams.sendMsg(region, msg)
+	}
+
 	collectOperatorCounterMetrics(op)
 	return true
 }
@@ -444,5 +452,76 @@ func collectOperatorCounterMetrics(op Operator) {
 	}
 	for _, op := range regionOp.Ops {
 		operatorCounter.WithLabelValues(op.GetName(), op.GetState().String()).Add(1)
+	}
+}
+
+type updateStream struct {
+	storeID uint64
+	stream  pdpb.PD_RegionHeartbeatServer
+}
+
+type heartbeatStreams struct {
+	ctx       context.Context
+	clusterID uint64
+	streams   map[uint64]pdpb.PD_RegionHeartbeatServer
+	msgCh     chan *pdpb.RegionHeartbeatResponse
+	streamCh  chan updateStream
+}
+
+func newHeartbeatStreams(ctx context.Context, clusterID uint64) *heartbeatStreams {
+	return &heartbeatStreams{
+		ctx:       ctx,
+		clusterID: clusterID,
+		streams:   make(map[uint64]pdpb.PD_RegionHeartbeatServer),
+		msgCh:     make(chan *pdpb.RegionHeartbeatResponse, 1),
+		streamCh:  make(chan updateStream, 1),
+	}
+}
+
+func (s *heartbeatStreams) run() {
+	for {
+		select {
+		case update := <-s.streamCh:
+			s.streams[update.storeID] = update.stream
+		case msg := <-s.msgCh:
+			storeID := msg.GetTargetPeer().GetStoreId()
+			if stream, ok := s.streams[storeID]; ok {
+				if err := stream.Send(msg); err != nil {
+					log.Errorf("send heartbeat message fail: %v", err)
+					delete(s.streams, storeID)
+				}
+			} else {
+				log.Debugf("heartbeat stream not found for store %v, skip send message", storeID)
+			}
+		case <-s.ctx.Done():
+			return
+		}
+	}
+}
+
+func (s *heartbeatStreams) updateStream(storeID uint64, stream pdpb.PD_RegionHeartbeatServer) {
+	update := updateStream{
+		storeID: storeID,
+		stream:  stream,
+	}
+	select {
+	case s.streamCh <- update:
+	case <-s.ctx.Done():
+	}
+}
+
+func (s *heartbeatStreams) sendMsg(region *RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
+	if region.Leader == nil {
+		return
+	}
+
+	msg.Header = &pdpb.ResponseHeader{ClusterId: s.clusterID}
+	msg.RegionId = region.GetId()
+	msg.RegionEpoch = region.GetRegionEpoch()
+	msg.TargetPeer = region.Leader
+
+	select {
+	case s.msgCh <- msg:
+	case <-s.ctx.Done():
 	}
 }

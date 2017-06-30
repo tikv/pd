@@ -235,17 +235,13 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 
 // RegionHeartbeat implements gRPC PDServer.
 func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
+	isNew := true
 	for {
 		request, err := server.Recv()
 		if err == io.EOF {
 			return nil
 		}
 		if err != nil {
-			return errors.Trace(err)
-		}
-
-		if err = s.validateRequest(request.GetHeader()); err != nil {
-			// TODO: How to close this stream?
 			return errors.Trace(err)
 		}
 
@@ -257,6 +253,15 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 				return errors.Trace(err)
 			}
 			continue
+		}
+
+		if isNew {
+			if err = s.validateRequest(request.GetHeader()); err != nil {
+				return errors.Trace(err)
+			}
+			storeID := request.GetLeader().GetStoreId()
+			cluster.coordinator.hbStreams.updateStream(storeID, server)
+			isNew = false
 		}
 
 		region := newRegionInfo(request.GetRegion(), request.GetLeader())
