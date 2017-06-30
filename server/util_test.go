@@ -52,7 +52,7 @@ func (s *testUtilSuite) TestParseTimestap(c *C) {
 		data := uint64ToBytes(uint64(t.UnixNano()))
 		nt, err := parseTimestamp(data)
 		c.Assert(err, IsNil)
-		c.Assert(nt, Equals, t)
+		c.Assert(nt.Equal(t), IsTrue)
 	}
 	data := []byte("pd")
 	nt, err := parseTimestamp(data)
