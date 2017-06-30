@@ -260,7 +260,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 				return errors.Trace(err)
 			}
 			storeID := request.GetLeader().GetStoreId()
-			cluster.coordinator.hbStreams.updateStream(storeID, server)
+			cluster.coordinator.hbStreams.bindStream(storeID, server)
 			isNew = false
 		}
 
@@ -295,27 +295,13 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 			continue
 		}
 
-		var resp *pdpb.RegionHeartbeatResponse
-		resp, err = cluster.handleRegionHeartbeat(region)
+		err = cluster.handleRegionHeartbeat(region)
 		if err != nil {
 			msg := errors.Trace(err).Error()
 			err = sendErrorRegionHeartbeatResponse(server, s.clusterID, pdpb.ErrorType_UNKNOWN, msg)
 			if err != nil {
 				return errors.Trace(err)
 			}
-			continue
-		}
-		if resp == nil {
-			continue
-		}
-
-		resp.Header = s.header()
-		resp.RegionId = request.Region.Id
-		resp.RegionEpoch = request.Region.RegionEpoch
-		resp.TargetPeer = request.Leader
-
-		if err := server.Send(resp); err != nil {
-			return errors.Trace(err)
 		}
 	}
 }

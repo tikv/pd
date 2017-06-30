@@ -91,26 +91,27 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
 	}
 }
 
-func (c *coordinator) dispatch(region *RegionInfo) *pdpb.RegionHeartbeatResponse {
+func (c *coordinator) dispatch(region *RegionInfo) {
 	// Check existed operator.
 	if op := c.getOperator(region.GetId()); op != nil {
 		res, finished := op.Do(region)
 		if !finished {
 			collectOperatorCounterMetrics(op)
-			return res
+			if res != nil {
+				c.hbStreams.sendMsg(region, res)
+			}
+			return
 		}
 		c.removeOperator(op)
 	}
 
 	// Check replica operator.
 	if c.limiter.operatorCount(RegionKind) >= c.opt.GetReplicaScheduleLimit() {
-		return nil
+		return
 	}
 	if op := c.checker.Check(region); op != nil {
 		c.addOperator(op)
 	}
-
-	return nil
 }
 
 func (c *coordinator) run() {
@@ -133,8 +134,6 @@ func (c *coordinator) run() {
 	c.addScheduler(newBalanceLeaderScheduler(c.opt), minScheduleInterval)
 	c.addScheduler(newBalanceRegionScheduler(c.opt), minScheduleInterval)
 	c.addScheduler(newBalanceHotRegionScheduler(c.opt), minSlowScheduleInterval)
-
-	go c.hbStreams.run()
 }
 
 func (c *coordinator) stop() {
@@ -457,27 +456,33 @@ func collectOperatorCounterMetrics(op Operator) {
 	}
 }
 
-type updateStream struct {
+type heartbeatStream interface {
+	Send(*pdpb.RegionHeartbeatResponse) error
+}
+
+type streamUpdate struct {
 	storeID uint64
-	stream  pdpb.PD_RegionHeartbeatServer
+	stream  heartbeatStream
 }
 
 type heartbeatStreams struct {
 	ctx       context.Context
 	clusterID uint64
-	streams   map[uint64]pdpb.PD_RegionHeartbeatServer
+	streams   map[uint64]heartbeatStream
 	msgCh     chan *pdpb.RegionHeartbeatResponse
-	streamCh  chan updateStream
+	streamCh  chan streamUpdate
 }
 
 func newHeartbeatStreams(ctx context.Context, clusterID uint64) *heartbeatStreams {
-	return &heartbeatStreams{
+	hs := &heartbeatStreams{
 		ctx:       ctx,
 		clusterID: clusterID,
-		streams:   make(map[uint64]pdpb.PD_RegionHeartbeatServer),
+		streams:   make(map[uint64]heartbeatStream),
 		msgCh:     make(chan *pdpb.RegionHeartbeatResponse, regionheartbeatSendChanCap),
-		streamCh:  make(chan updateStream, 1),
+		streamCh:  make(chan streamUpdate, 1),
 	}
+	go hs.run()
+	return hs
 }
 
 func (s *heartbeatStreams) run() {
@@ -501,8 +506,8 @@ func (s *heartbeatStreams) run() {
 	}
 }
 
-func (s *heartbeatStreams) updateStream(storeID uint64, stream pdpb.PD_RegionHeartbeatServer) {
-	update := updateStream{
+func (s *heartbeatStreams) bindStream(storeID uint64, stream heartbeatStream) {
+	update := streamUpdate{
 		storeID: storeID,
 		stream:  stream,
 	}
