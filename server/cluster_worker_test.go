@@ -98,10 +98,46 @@ type testClusterWorkerSuite struct {
 
 	regionLeaderLock sync.Mutex
 	// regionID -> Peer
-	regionLeaders map[uint64]metapb.Peer
+	regionLeaders    map[uint64]metapb.Peer
+	heartbeatClients map[uint64]*regionHeartbeatClient
+}
 
-	regionHeartbeat pdpb.PD_RegionHeartbeatClient
-	heartbeatRespCh chan *pdpb.RegionHeartbeatResponse
+type regionHeartbeatClient struct {
+	stream pdpb.PD_RegionHeartbeatClient
+	respCh chan *pdpb.RegionHeartbeatResponse
+}
+
+func newRegionheartbeatClient(c *C, grpcClient pdpb.PDClient) *regionHeartbeatClient {
+	stream, err := grpcClient.RegionHeartbeat(context.Background())
+	c.Assert(err, IsNil)
+	ch := make(chan *pdpb.RegionHeartbeatResponse)
+	go func() {
+		for {
+			res, err := stream.Recv()
+			if err != nil {
+				return
+			}
+			ch <- res
+		}
+	}()
+	return &regionHeartbeatClient{
+		stream: stream,
+		respCh: ch,
+	}
+}
+
+func (c *regionHeartbeatClient) close() {
+	c.stream.CloseSend()
+}
+
+func (c *regionHeartbeatClient) SendRecv(msg *pdpb.RegionHeartbeatRequest) *pdpb.RegionHeartbeatResponse {
+	c.stream.Send(msg)
+	select {
+	case <-time.After(time.Millisecond * 200):
+		return nil
+	case res := <-c.respCh:
+		return res
+	}
 }
 
 func (s *testClusterWorkerSuite) clearRegionLeader(c *C, regionID uint64) {
@@ -193,8 +229,6 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 
-	s.regionHeartbeat, s.heartbeatRespCh = s.runHeartbeatReceiver(c)
-
 	// Build raft cluster with 5 stores.
 	s.bootstrap(c)
 	s.newMockRaftStore(c, nil)
@@ -213,6 +247,11 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 
 	stores := cluster.GetStores()
 	c.Assert(stores, HasLen, 5)
+
+	s.heartbeatClients = make(map[uint64]*regionHeartbeatClient)
+	for _, store := range stores {
+		s.heartbeatClients[store.GetId()] = newRegionheartbeatClient(c, s.grpcPDClient)
+	}
 }
 
 func (s *testClusterWorkerSuite) runHeartbeatReceiver(c *C) (pdpb.PD_RegionHeartbeatClient, chan *pdpb.RegionHeartbeatResponse) {
@@ -233,7 +272,9 @@ func (s *testClusterWorkerSuite) runHeartbeatReceiver(c *C) (pdpb.PD_RegionHeart
 
 func (s *testClusterWorkerSuite) TearDownTest(c *C) {
 	s.cleanup()
-	s.regionHeartbeat.CloseSend()
+	for _, client := range s.heartbeatClients {
+		client.close()
+	}
 }
 
 func (s *testClusterWorkerSuite) checkRegionPeerCount(c *C, regionKey []byte, expectCount int) *metapb.Region {
@@ -314,16 +355,8 @@ func (s *testClusterWorkerSuite) heartbeatRegion(c *C, clusterID uint64, msgID u
 		Region: region,
 	}
 
-	// FIXME: it may out of order in the future.
-	err := s.regionHeartbeat.Send(req)
-	c.Assert(err, IsNil)
-
-	select {
-	case <-time.After(time.Millisecond * 200):
-		return nil
-	case res := <-s.heartbeatRespCh:
-		return res
-	}
+	heartbeatClient := s.heartbeatClients[leader.GetStoreId()]
+	return heartbeatClient.SendRecv(req)
 }
 
 func (s *testClusterWorkerSuite) heartbeatStore(c *C, msgID uint64, stats *pdpb.StoreStats) *pdpb.StoreHeartbeatResponse {
