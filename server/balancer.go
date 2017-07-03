@@ -206,7 +206,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster *clusterInfo, region *Regi
 	}
 	s.limit = adjustBalanceLimit(cluster, s.GetResourceKind())
 
-	return newTransferPeer(region, oldPeer, newPeer)
+	return newTransferPeer(region, RegionKind, oldPeer, newPeer)
 }
 
 // replicaChecker ensures region has the best replicas.
@@ -372,7 +372,7 @@ func (r *replicaChecker) checkOfflinePeer(region *RegionInfo) Operator {
 		if newPeer == nil {
 			return nil
 		}
-		return newTransferPeer(region, peer, newPeer)
+		return newTransferPeer(region, RegionKind, peer, newPeer)
 	}
 
 	return nil
@@ -391,7 +391,7 @@ func (r *replicaChecker) checkBestReplacement(region *RegionInfo) Operator {
 	if newScore <= oldScore {
 		return nil
 	}
-	return newTransferPeer(region, oldPeer, newPeer)
+	return newTransferPeer(region, RegionKind, oldPeer, newPeer)
 }
 
 // RegionStat records each hot region's statistics
@@ -467,7 +467,7 @@ func (h *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 	// balance by peer
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster)
 	if srcRegion != nil {
-		return newPriorityTransferPeer(srcRegion, srcPeer, destPeer)
+		return newTransferPeer(srcRegion, PriorityKind, srcPeer, destPeer)
 	}
 
 	// balance by leader
