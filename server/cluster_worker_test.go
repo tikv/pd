@@ -577,13 +577,13 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 
 	// Mock a report split request.
 	peer := s.newPeer(c, 999, 0)
-	left := s.newRegion(c, 0, []byte("aaa"), []byte("bbb"), []*metapb.Peer{peer}, nil)
-	right := s.newRegion(c, 0, []byte("bbb"), []byte("ccc"), []*metapb.Peer{peer}, nil)
+	left := s.newRegion(c, 2, []byte("aaa"), []byte("bbb"), []*metapb.Peer{peer}, nil)
+	right := s.newRegion(c, 1, []byte("bbb"), []byte("ccc"), []*metapb.Peer{peer}, nil)
 
 	resp := s.reportSplit(c, 0, left, right)
 	c.Assert(resp, NotNil)
 
-	regionID := left.GetId()
+	regionID := right.GetId()
 	value, ok := cluster.coordinator.histories.get(regionID)
 	c.Assert(ok, IsTrue)
 
