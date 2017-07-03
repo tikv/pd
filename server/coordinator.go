@@ -474,8 +474,9 @@ type heartbeatStreams struct {
 }
 
 func newHeartbeatStreams(ctx context.Context, clusterID uint64) *heartbeatStreams {
+	localCtx, _ := context.WithCancel(ctx)
 	hs := &heartbeatStreams{
-		ctx:       ctx,
+		ctx:       localCtx,
 		clusterID: clusterID,
 		streams:   make(map[uint64]heartbeatStream),
 		msgCh:     make(chan *pdpb.RegionHeartbeatResponse, regionheartbeatSendChanCap),
@@ -496,9 +497,13 @@ func (s *heartbeatStreams) run() {
 				if err := stream.Send(msg); err != nil {
 					log.Errorf("send heartbeat message fail: %v", err)
 					delete(s.streams, storeID)
+					regionHeartbeatCounter.WithLabelValues("down", "err")
+				} else {
+					regionHeartbeatCounter.WithLabelValues("down", "ok")
 				}
 			} else {
 				log.Debugf("heartbeat stream not found for store %v, skip send message", storeID)
+				regionHeartbeatCounter.WithLabelValues("down", "skip")
 			}
 		case <-s.ctx.Done():
 			return
