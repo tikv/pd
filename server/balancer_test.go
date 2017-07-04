@@ -785,6 +785,13 @@ func checkTransferPeer(c *C, bop Operator, sourceID, targetID uint64) {
 	}
 }
 
+func checkTransferPeerWithLeaderTransfer(c *C, bop Operator, sourceID, targetID uint64) {
+	op := bop.(*regionOperator)
+	c.Assert(op, NotNil)
+	c.Assert(op.Ops, HasLen, 3)
+	checkTransferPeer(c, bop, sourceID, targetID)
+}
+
 func checkTransferLeader(c *C, bop Operator, sourceID, targetID uint64) {
 	var op *transferLeaderOperator
 	switch t := bop.(type) {
@@ -848,7 +855,7 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 
 	// Will transfer a hot region from store 1 to store 5, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
-	checkTransferPeer(c, hb.Schedule(cluster), 1, 5)
+	checkTransferPeerWithLeaderTransfer(c, hb.Schedule(cluster), 1, 5)
 
 	// After transfer a hot region from store 1 to store 5
 	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
