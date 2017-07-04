@@ -195,12 +195,16 @@ func (s *balanceRegionScheduler) transferPeer(cluster *clusterInfo, region *Regi
 	scoreGuard := newDistinctScoreFilter(s.rep, stores, source)
 
 	checker := newReplicaChecker(s.opt, cluster)
-	newPeer, _ := checker.selectBestPeer(region, scoreGuard)
-	if newPeer == nil {
+	storeID, _ := checker.SelectBestStoreToAddReplica(region, scoreGuard)
+	if storeID == 0 {
+		return nil
+	}
+	newPeer, err := cluster.allocPeer(storeID)
+	if err != nil {
 		return nil
 	}
 
-	target := cluster.getStore(newPeer.GetStoreId())
+	target := cluster.getStore(storeID)
 	if !shouldBalance(source, target, s.GetResourceKind()) {
 		return nil
 	}
@@ -239,8 +243,12 @@ func (r *replicaChecker) Check(region *RegionInfo) Operator {
 	}
 
 	if len(region.GetPeers()) < r.rep.GetMaxReplicas() {
-		newPeer, _ := r.selectBestPeer(region, r.filters...)
-		if newPeer == nil {
+		storeID, _ := r.SelectBestStoreToAddReplica(region, r.filters...)
+		if storeID == 0 {
+			return nil
+		}
+		newPeer, err := r.cluster.allocPeer(storeID)
+		if err != nil {
 			return nil
 		}
 		return newAddPeer(region, newPeer)
@@ -257,8 +265,8 @@ func (r *replicaChecker) Check(region *RegionInfo) Operator {
 	return r.checkBestReplacement(region)
 }
 
-// selectBestPeer returns the best peer in other stores.
-func (r *replicaChecker) selectBestPeer(region *RegionInfo, filters ...Filter) (*metapb.Peer, float64) {
+// SelectBestStoreToAddReplica returns the store to add a replica.
+func (r *replicaChecker) SelectBestStoreToAddReplica(region *RegionInfo, filters ...Filter) (uint64, float64) {
 	// Add some must have filters.
 	filters = append(filters, newStateFilter(r.opt))
 	filters = append(filters, newStorageThresholdFilter(r.opt))
@@ -284,15 +292,10 @@ func (r *replicaChecker) selectBestPeer(region *RegionInfo, filters ...Filter) (
 	}
 
 	if bestStore == nil || filterTarget(bestStore, r.filters) {
-		return nil, 0
+		return 0, 0
 	}
 
-	newPeer, err := r.cluster.allocPeer(bestStore.GetId())
-	if err != nil {
-		log.Errorf("failed to allocate peer: %v", err)
-		return nil, 0
-	}
-	return newPeer, bestScore
+	return bestStore.GetId(), bestScore
 }
 
 // selectWorstPeer returns the worst peer in the region.
@@ -322,12 +325,12 @@ func (r *replicaChecker) selectWorstPeer(region *RegionInfo, filters ...Filter) 
 	return region.GetStorePeer(worstStore.GetId()), worstScore
 }
 
-// selectBestReplacement returns the best peer to replace the region peer.
-func (r *replicaChecker) selectBestReplacement(region *RegionInfo, peer *metapb.Peer) (*metapb.Peer, float64) {
+// selectBestReplacement returns the best store to replace the region peer.
+func (r *replicaChecker) selectBestReplacement(region *RegionInfo, peer *metapb.Peer) (uint64, float64) {
 	// Get a new region without the peer we are going to replace.
 	newRegion := region.clone()
 	newRegion.RemoveStorePeer(peer.GetStoreId())
-	return r.selectBestPeer(newRegion, newExcludedFilter(nil, region.GetStoreIds()))
+	return r.SelectBestStoreToAddReplica(newRegion, newExcludedFilter(nil, region.GetStoreIds()))
 }
 
 func (r *replicaChecker) checkDownPeer(region *RegionInfo) Operator {
@@ -368,8 +371,12 @@ func (r *replicaChecker) checkOfflinePeer(region *RegionInfo) Operator {
 			return newRemovePeer(region, peer)
 		}
 
-		newPeer, _ := r.selectBestPeer(region)
-		if newPeer == nil {
+		storeID, _ := r.SelectBestStoreToAddReplica(region)
+		if storeID == 0 {
+			return nil
+		}
+		newPeer, err := r.cluster.allocPeer(storeID)
+		if err != nil {
 			return nil
 		}
 		return newTransferPeer(region, RegionKind, peer, newPeer)
@@ -383,12 +390,16 @@ func (r *replicaChecker) checkBestReplacement(region *RegionInfo) Operator {
 	if oldPeer == nil {
 		return nil
 	}
-	newPeer, newScore := r.selectBestReplacement(region, oldPeer)
-	if newPeer == nil {
+	storeID, newScore := r.selectBestReplacement(region, oldPeer)
+	if storeID == 0 {
 		return nil
 	}
 	// Make sure the new peer is better than the old peer.
 	if newScore <= oldScore {
+		return nil
+	}
+	newPeer, err := r.cluster.allocPeer(storeID)
+	if err != nil {
 		return nil
 	}
 	return newTransferPeer(region, RegionKind, oldPeer, newPeer)
