@@ -16,6 +16,7 @@ package server
 import (
 	"fmt"
 	"io"
+	"sync"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
@@ -233,8 +234,20 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 	}, nil
 }
 
+type syncHeartbeatServer struct {
+	sync.Mutex
+	server pdpb.PD_RegionHeartbeatServer
+}
+
+func (s *syncHeartbeatServer) Send(msg *pdpb.RegionHeartbeatResponse) error {
+	s.Lock()
+	defer s.Unlock()
+	return s.server.Send(msg)
+}
+
 // RegionHeartbeat implements gRPC PDServer.
 func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
+	syncServer := &syncHeartbeatServer{server: server}
 	isNew := true
 	for {
 		request, err := server.Recv()
@@ -248,7 +261,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 		cluster := s.GetRaftCluster()
 		if cluster == nil {
 			msg := "cluster is not bootstrapped"
-			err = regionHeartbeatErr(server, s.clusterID, pdpb.ErrorType_NOT_BOOTSTRAPPED, msg)
+			err = regionHeartbeatErr(syncServer, s.clusterID, pdpb.ErrorType_NOT_BOOTSTRAPPED, msg)
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -260,7 +273,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 				return errors.Trace(err)
 			}
 			storeID := request.GetLeader().GetStoreId()
-			cluster.coordinator.hbStreams.bindStream(storeID, server)
+			cluster.coordinator.hbStreams.bindStream(storeID, syncServer)
 			isNew = false
 		}
 
@@ -270,7 +283,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 		region.WrittenBytes = request.GetBytesWritten()
 		if region.GetId() == 0 {
 			msg := fmt.Sprintf("invalid request region, %v", request)
-			err = regionHeartbeatErr(server, s.clusterID, pdpb.ErrorType_UNKNOWN, msg)
+			err = regionHeartbeatErr(syncServer, s.clusterID, pdpb.ErrorType_UNKNOWN, msg)
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -278,7 +291,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 		}
 		if region.Leader == nil {
 			msg := fmt.Sprintf("invalid request leader, %v", request)
-			err = regionHeartbeatErr(server, s.clusterID, pdpb.ErrorType_UNKNOWN, msg)
+			err = regionHeartbeatErr(syncServer, s.clusterID, pdpb.ErrorType_UNKNOWN, msg)
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -288,7 +301,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 		err = cluster.cachedCluster.handleRegionHeartbeat(region)
 		if err != nil {
 			msg := errors.Trace(err).Error()
-			err = regionHeartbeatErr(server, s.clusterID, pdpb.ErrorType_UNKNOWN, msg)
+			err = regionHeartbeatErr(syncServer, s.clusterID, pdpb.ErrorType_UNKNOWN, msg)
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -298,7 +311,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 		err = cluster.handleRegionHeartbeat(region)
 		if err != nil {
 			msg := errors.Trace(err).Error()
-			err = regionHeartbeatErr(server, s.clusterID, pdpb.ErrorType_UNKNOWN, msg)
+			err = regionHeartbeatErr(syncServer, s.clusterID, pdpb.ErrorType_UNKNOWN, msg)
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -461,7 +474,7 @@ func (s *Server) notBootstrappedHeader() *pdpb.ResponseHeader {
 	})
 }
 
-func regionHeartbeatErr(server pdpb.PD_RegionHeartbeatServer, clusterID uint64, ty pdpb.ErrorType, msg string) error {
+func regionHeartbeatErr(server *syncHeartbeatServer, clusterID uint64, ty pdpb.ErrorType, msg string) error {
 	regionHeartbeatCounter.WithLabelValues("up", "err")
 
 	pberr := &pdpb.Error{
