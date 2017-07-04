@@ -537,3 +537,22 @@ func (s *heartbeatStreams) sendMsg(region *RegionInfo, msg *pdpb.RegionHeartbeat
 	case <-s.ctx.Done():
 	}
 }
+
+func (s *heartbeatStreams) sendErr(region *RegionInfo, errType pdpb.ErrorType, errMsg string) {
+	regionHeartbeatCounter.WithLabelValues("up", "err")
+
+	msg := &pdpb.RegionHeartbeatResponse{
+		Header: &pdpb.ResponseHeader{
+			ClusterId: s.clusterID,
+			Error: &pdpb.Error{
+				Type:    errType,
+				Message: errMsg,
+			},
+		},
+	}
+
+	select {
+	case s.msgCh <- msg:
+	case <-s.ctx.Done():
+	}
+}

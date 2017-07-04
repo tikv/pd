@@ -86,14 +86,13 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 	s.srv, s.cleanup = newServer(c)
 	s.grpcPDClient = mustNewGrpcClient(c, s.srv.GetAddr())
 
-	var err error
-	s.regionHeartbeat, err = s.grpcPDClient.RegionHeartbeat(context.Background())
-	c.Assert(err, IsNil)
-
 	mustWaitLeader(c, map[string]*server.Server{s.srv.GetAddr(): s.srv})
 	bootstrapServer(c, newHeader(s.srv), s.grpcPDClient)
 
+	var err error
 	s.client, err = NewClient(s.srv.GetEndpoints())
+	c.Assert(err, IsNil)
+	s.regionHeartbeat, err = s.grpcPDClient.RegionHeartbeat(context.Background())
 	c.Assert(err, IsNil)
 }
 
