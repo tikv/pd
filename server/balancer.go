@@ -195,16 +195,12 @@ func (s *balanceRegionScheduler) transferPeer(cluster *clusterInfo, region *Regi
 	scoreGuard := newDistinctScoreFilter(s.rep, stores, source)
 
 	checker := newReplicaChecker(s.opt, cluster)
-	storeID, _ := checker.SelectBestStoreToAddReplica(region, scoreGuard)
-	if storeID == 0 {
-		return nil
-	}
-	newPeer, err := cluster.allocPeer(storeID)
-	if err != nil {
+	newPeer := checker.SelectBestPeerToAddReplica(region, scoreGuard)
+	if newPeer == nil {
 		return nil
 	}
 
-	target := cluster.getStore(storeID)
+	target := cluster.getStore(newPeer.GetStoreId())
 	if !shouldBalance(source, target, s.GetResourceKind()) {
 		return nil
 	}
@@ -243,12 +239,8 @@ func (r *replicaChecker) Check(region *RegionInfo) Operator {
 	}
 
 	if len(region.GetPeers()) < r.rep.GetMaxReplicas() {
-		storeID, _ := r.SelectBestStoreToAddReplica(region, r.filters...)
-		if storeID == 0 {
-			return nil
-		}
-		newPeer, err := r.cluster.allocPeer(storeID)
-		if err != nil {
+		newPeer := r.SelectBestPeerToAddReplica(region, r.filters...)
+		if newPeer == nil {
 			return nil
 		}
 		return newAddPeer(region, newPeer)
@@ -263,6 +255,19 @@ func (r *replicaChecker) Check(region *RegionInfo) Operator {
 	}
 
 	return r.checkBestReplacement(region)
+}
+
+// SelectBestPeerToAddReplica returns a new peer that to be used to add a replica.
+func (r *replicaChecker) SelectBestPeerToAddReplica(region *RegionInfo, filters ...Filter) *metapb.Peer {
+	storeID, _ := r.SelectBestStoreToAddReplica(region, filters...)
+	if storeID == 0 {
+		return nil
+	}
+	newPeer, err := r.cluster.allocPeer(storeID)
+	if err != nil {
+		return nil
+	}
+	return newPeer
 }
 
 // SelectBestStoreToAddReplica returns the store to add a replica.
@@ -371,12 +376,8 @@ func (r *replicaChecker) checkOfflinePeer(region *RegionInfo) Operator {
 			return newRemovePeer(region, peer)
 		}
 
-		storeID, _ := r.SelectBestStoreToAddReplica(region)
-		if storeID == 0 {
-			return nil
-		}
-		newPeer, err := r.cluster.allocPeer(storeID)
-		if err != nil {
+		newPeer := r.SelectBestPeerToAddReplica(region)
+		if newPeer == nil {
 			return nil
 		}
 		return newTransferPeer(region, RegionKind, peer, newPeer)
