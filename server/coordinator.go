@@ -497,13 +497,13 @@ func (s *heartbeatStreams) run() {
 				if err := stream.Send(msg); err != nil {
 					log.Errorf("send heartbeat message fail: %v", err)
 					delete(s.streams, storeID)
-					regionHeartbeatCounter.WithLabelValues("down", "err")
+					regionHeartbeatCounter.WithLabelValues("push", "err")
 				} else {
-					regionHeartbeatCounter.WithLabelValues("down", "ok")
+					regionHeartbeatCounter.WithLabelValues("push", "ok")
 				}
 			} else {
 				log.Debugf("heartbeat stream not found for store %v, skip send message", storeID)
-				regionHeartbeatCounter.WithLabelValues("down", "skip")
+				regionHeartbeatCounter.WithLabelValues("push", "skip")
 			}
 		case <-s.ctx.Done():
 			return
@@ -539,7 +539,7 @@ func (s *heartbeatStreams) sendMsg(region *RegionInfo, msg *pdpb.RegionHeartbeat
 }
 
 func (s *heartbeatStreams) sendErr(region *RegionInfo, errType pdpb.ErrorType, errMsg string) {
-	regionHeartbeatCounter.WithLabelValues("up", "err")
+	regionHeartbeatCounter.WithLabelValues("report", "err")
 
 	msg := &pdpb.RegionHeartbeatResponse{
 		Header: &pdpb.ResponseHeader{

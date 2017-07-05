@@ -238,13 +238,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
 		resp := &pdpb.RegionHeartbeatResponse{
-			Header: &pdpb.ResponseHeader{
-				ClusterId: s.clusterID,
-				Error: &pdpb.Error{
-					Type:    pdpb.ErrorType_NOT_BOOTSTRAPPED,
-					Message: "cluster is not bootstrapped",
-				},
-			},
+			Header: s.notBootstrappedHeader(),
 		}
 		err := server.Send(resp)
 		return errors.Trace(err)
@@ -300,7 +294,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg)
 		}
 
-		regionHeartbeatCounter.WithLabelValues("up", "ok")
+		regionHeartbeatCounter.WithLabelValues("report", "ok")
 	}
 }
 
