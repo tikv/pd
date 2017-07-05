@@ -1,5 +1,5 @@
-hash: 68ae06f0500e66592b29b3e94470eb9ed4a09d54b7bc10ac0eaa0deba4903316
-updated: 2017-06-27T13:42:23.726181691+08:00
+hash: 0b3373db40ba76b226b76e314af963ac1002f086da7057b0c033dd7609f0dc3c
+updated: 2017-07-05T10:37:06.795879399+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -220,7 +220,7 @@ imports:
   subpackages:
   - unix
 - name: golang.org/x/text
-  version: 4ee4af566555f5fbe026368b75596286a312663a
+  version: 2bf8f2a19ec09c670e931282edfe6567f6be21c9
   subpackages:
   - secure/bidirule
   - transform
@@ -231,7 +231,7 @@ imports:
   subpackages:
   - googleapis/rpc/status
 - name: google.golang.org/grpc
-  version: 3419b42955675df23457629c75f58eb8dcd56954
+  version: b15215fb911b24a5d61d57feec4233d610530464
   repo: https://github.com/grpc/grpc-go.git
   vcs: git
   subpackages:
@@ -249,7 +249,7 @@ imports:
   - tap
   - transport
 - name: gopkg.in/natefinch/lumberjack.v2
-  version: df99d62fd42d8b3752c8a42c6723555372c02a03
+  version: dd45e6a67c53f673bb49ca8a001fd3a63ceb640e
 - name: gopkg.in/yaml.v2
   version: 53feefa2559fb8dfa8d81baad31be332c97d6c77
 testImports: []
