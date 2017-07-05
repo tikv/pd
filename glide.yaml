@@ -182,7 +182,7 @@ import:
   subpackages:
   - unix
 - package: google.golang.org/grpc
-  version: 3419b42955675df23457629c75f58eb8dcd56954
+  version: v1.4.2
   repo: https://github.com/grpc/grpc-go.git
   vcs: git
   subpackages:
