@@ -69,6 +69,30 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 	c.Assert(co.getOperator(1).GetRegionID(), Equals, op2.GetRegionID())
 }
 
+type mockHeartbeatStream struct {
+	ch chan *pdpb.RegionHeartbeatResponse
+}
+
+func (s *mockHeartbeatStream) Send(m *pdpb.RegionHeartbeatResponse) error {
+	s.ch <- m
+	return nil
+}
+
+func (s *mockHeartbeatStream) Recv() *pdpb.RegionHeartbeatResponse {
+	select {
+	case <-time.After(time.Millisecond * 200):
+		return nil
+	case res := <-s.ch:
+		return res
+	}
+}
+
+func newMockHeartbeatStream() *mockHeartbeatStream {
+	return &mockHeartbeatStream{
+		ch: make(chan *pdpb.RegionHeartbeatResponse),
+	}
+}
+
 func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
@@ -100,25 +124,35 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	checkTransferLeader(c, co.getOperator(2), 4, 2)
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 
+	stream := newMockHeartbeatStream()
+
 	// Transfer peer.
 	region := cluster.getRegion(1)
-	resp := co.dispatch(region)
+	resp := dispatchAndRecvHeartbeat(co, region, stream)
 	checkAddPeerResp(c, resp, 1)
 	region.Peers = append(region.Peers, resp.GetChangePeer().GetPeer())
 	cluster.putRegion(region)
-	resp = co.dispatch(region)
+	resp = dispatchAndRecvHeartbeat(co, region, stream)
 	checkRemovePeerResp(c, resp, 4)
 	region.RemoveStorePeer(4)
 	cluster.putRegion(region)
-	c.Assert(co.dispatch(region), IsNil)
+	resp = dispatchAndRecvHeartbeat(co, region, stream)
+	c.Assert(resp, IsNil)
 
 	// Transfer leader.
 	region = cluster.getRegion(2)
-	resp = co.dispatch(region)
+	resp = dispatchAndRecvHeartbeat(co, region, stream)
 	checkTransferLeaderResp(c, resp, 2)
 	region.Leader = resp.GetTransferLeader().GetPeer()
 	cluster.putRegion(region)
-	c.Assert(co.dispatch(region), IsNil)
+	resp = dispatchAndRecvHeartbeat(co, region, stream)
+	c.Assert(resp, IsNil)
+}
+
+func dispatchAndRecvHeartbeat(co *coordinator, region *RegionInfo, stream *mockHeartbeatStream) *pdpb.RegionHeartbeatResponse {
+	co.hbStreams.bindStream(region.Leader.GetStoreId(), stream)
+	co.dispatch(region)
+	return stream.Recv()
 }
 
 func (s *testCoordinatorSuite) TestReplica(c *C) {
@@ -139,13 +173,16 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	tc.addRegionStore(3, 3)
 	tc.addRegionStore(4, 4)
 
+	stream := newMockHeartbeatStream()
+
 	// Add peer to store 1.
 	tc.addLeaderRegion(1, 2, 3)
 	region := cluster.getRegion(1)
-	resp := co.dispatch(region)
+	resp := dispatchAndRecvHeartbeat(co, region, stream)
 	checkAddPeerResp(c, resp, 1)
 	region.Peers = append(region.Peers, resp.GetChangePeer().GetPeer())
-	c.Assert(co.dispatch(region), IsNil)
+	resp = dispatchAndRecvHeartbeat(co, region, stream)
+	c.Assert(resp, IsNil)
 
 	// Peer in store 3 is down, remove peer in store 3 and add peer to store 4.
 	tc.setStoreDown(3)
@@ -154,22 +191,24 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 		DownSeconds: 24 * 60 * 60,
 	}
 	region.DownPeers = append(region.DownPeers, downPeer)
-	resp = co.dispatch(region)
+	resp = dispatchAndRecvHeartbeat(co, region, stream)
 	checkRemovePeerResp(c, resp, 3)
 	region.RemoveStorePeer(3)
 	region.DownPeers = nil
-	resp = co.dispatch(region)
+	resp = dispatchAndRecvHeartbeat(co, region, stream)
 	checkAddPeerResp(c, resp, 4)
 	region.Peers = append(region.Peers, resp.GetChangePeer().GetPeer())
-	c.Assert(co.dispatch(region), IsNil)
+	resp = dispatchAndRecvHeartbeat(co, region, stream)
+	c.Assert(resp, IsNil)
 
 	// Remove peer from store 4.
 	tc.addLeaderRegion(2, 1, 2, 3, 4)
 	region = cluster.getRegion(2)
-	resp = co.dispatch(region)
+	resp = dispatchAndRecvHeartbeat(co, region, stream)
 	checkRemovePeerResp(c, resp, 4)
 	region.RemoveStorePeer(4)
-	c.Assert(co.dispatch(region), IsNil)
+	resp = dispatchAndRecvHeartbeat(co, region, stream)
+	c.Assert(resp, IsNil)
 }
 
 func (s *testCoordinatorSuite) TestPeerState(c *C) {
@@ -188,6 +227,8 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	tc.addRegionStore(4, 4)
 	tc.addLeaderRegion(1, 2, 3, 4)
 
+	stream := newMockHeartbeatStream()
+
 	// Wait for schedule.
 	waitOperator(c, co, 1)
 	checkTransferPeer(c, co.getOperator(1), 4, 1)
@@ -195,24 +236,26 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	region := cluster.getRegion(1)
 
 	// Add new peer.
-	resp := co.dispatch(region)
+	resp := dispatchAndRecvHeartbeat(co, region, stream)
 	checkAddPeerResp(c, resp, 1)
 	newPeer := resp.GetChangePeer().GetPeer()
 	region.Peers = append(region.Peers, newPeer)
 
 	// If the new peer is pending, the operator will not finish.
 	region.PendingPeers = append(region.PendingPeers, newPeer)
-	c.Assert(co.dispatch(region), IsNil)
+	resp = dispatchAndRecvHeartbeat(co, region, stream)
+	c.Assert(resp, IsNil)
 	c.Assert(co.getOperator(region.GetId()), NotNil)
 
 	// The new peer is not pending now, the operator will finish.
 	// And we will proceed to remove peer in store 4.
 	region.PendingPeers = nil
-	resp = co.dispatch(region)
+	resp = dispatchAndRecvHeartbeat(co, region, stream)
 	checkRemovePeerResp(c, resp, 4)
 	tc.addLeaderRegion(1, 1, 2, 3)
 	region = cluster.getRegion(1)
-	c.Assert(co.dispatch(region), IsNil)
+	resp = dispatchAndRecvHeartbeat(co, region, stream)
+	c.Assert(resp, IsNil)
 }
 
 func (s *testCoordinatorSuite) TestShouldRun(c *C) {
@@ -265,6 +308,8 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
 	c.Assert(co.schedulers, HasLen, 0)
 
+	stream := newMockHeartbeatStream()
+
 	// Add stores 1,2,3
 	tc.addLeaderStore(1, 1)
 	tc.addLeaderStore(2, 1)
@@ -286,17 +331,21 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	// Transfer all leaders to store 1.
 	waitOperator(c, co, 2)
 	region2 := cluster.getRegion(2)
-	checkTransferLeaderResp(c, co.dispatch(region2), 1)
+	resp := dispatchAndRecvHeartbeat(co, region2, stream)
+	checkTransferLeaderResp(c, resp, 1)
 	region2.Leader = region2.GetStorePeer(1)
 	cluster.putRegion(region2)
-	c.Assert(co.dispatch(region2), IsNil)
+	resp = dispatchAndRecvHeartbeat(co, region2, stream)
+	c.Assert(resp, IsNil)
 
 	waitOperator(c, co, 3)
 	region3 := cluster.getRegion(3)
-	checkTransferLeaderResp(c, co.dispatch(region3), 1)
+	resp = dispatchAndRecvHeartbeat(co, region3, stream)
+	checkTransferLeaderResp(c, resp, 1)
 	region3.Leader = region3.GetStorePeer(1)
 	cluster.putRegion(region3)
-	c.Assert(co.dispatch(region3), IsNil)
+	resp = dispatchAndRecvHeartbeat(co, region3, stream)
+	c.Assert(resp, IsNil)
 }
 
 func waitOperator(c *C, co *coordinator, regionID uint64) {

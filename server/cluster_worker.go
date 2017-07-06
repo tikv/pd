@@ -23,14 +23,15 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-func (c *RaftCluster) handleRegionHeartbeat(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, error) {
+func (c *RaftCluster) handleRegionHeartbeat(region *RegionInfo) error {
 	// If the region peer count is 0, then we should not handle this.
 	if len(region.GetPeers()) == 0 {
 		log.Warnf("invalid region, zero region peer count - %v", region)
-		return nil, errors.Errorf("invalid region, zero region peer count - %v", region)
+		return errors.Errorf("invalid region, zero region peer count - %v", region)
 	}
 
-	return c.coordinator.dispatch(region), nil
+	c.coordinator.dispatch(region)
+	return nil
 }
 
 func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
@@ -93,14 +94,14 @@ func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	}
 
 	// Build origin region by using left and right.
-	originRegion := proto.Clone(left).(*metapb.Region)
+	originRegion := proto.Clone(right).(*metapb.Region)
 	originRegion.RegionEpoch = nil
-	originRegion.EndKey = right.GetEndKey()
+	originRegion.StartKey = left.GetStartKey()
 
 	// Wrap report split as an Operator, and add it into history cache.
 	op := newSplitOperator(originRegion, left, right)
 	c.coordinator.histories.add(originRegion.GetId(), op)
-	log.Infof("[region %d] region split, generate new region: %v", originRegion.GetId(), right)
+	log.Infof("[region %d] region split, generate new region: %v", originRegion.GetId(), left)
 	c.coordinator.postEvent(op, evtEnd)
 
 	return &pdpb.ReportSplitResponse{}, nil

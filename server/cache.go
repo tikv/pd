@@ -382,6 +382,7 @@ func (c *clusterInfo) allocID() (uint64, error) {
 func (c *clusterInfo) allocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := c.allocID()
 	if err != nil {
+		log.Errorf("failed to alloc peer: %v", err)
 		return nil, errors.Trace(err)
 	}
 	peer := &metapb.Peer{
@@ -389,6 +390,12 @@ func (c *clusterInfo) allocPeer(storeID uint64) (*metapb.Peer, error) {
 		StoreId: storeID,
 	}
 	return peer, nil
+}
+
+func (c *clusterInfo) getClusterID() uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.meta.GetId()
 }
 
 func (c *clusterInfo) getMeta() *metapb.Cluster {

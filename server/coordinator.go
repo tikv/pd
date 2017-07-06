@@ -41,6 +41,7 @@ const (
 	hotRegionScheduleFactor       = 0.9
 	hotRegionMinWriteRate         = 16 * 1024
 	regionHeartBeatReportInterval = 60
+	regionheartbeatSendChanCap    = 1024
 	storeHeartBeatReportInterval  = 10
 	minHotRegionReportInterval    = 3
 	hotRegionAntiCount            = 1
@@ -69,6 +70,8 @@ type coordinator struct {
 
 	histories *lruCache
 	events    *fifoCache
+
+	hbStreams *heartbeatStreams
 }
 
 func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
@@ -84,32 +87,31 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
 		schedulers: make(map[string]*scheduleController),
 		histories:  newLRUCache(historiesCacheSize),
 		events:     newFifoCache(eventsCacheSize),
+		hbStreams:  newHeartbeatStreams(ctx, cluster.getClusterID()),
 	}
 }
 
-func (c *coordinator) dispatch(region *RegionInfo) *pdpb.RegionHeartbeatResponse {
+func (c *coordinator) dispatch(region *RegionInfo) {
 	// Check existed operator.
 	if op := c.getOperator(region.GetId()); op != nil {
 		res, finished := op.Do(region)
 		if !finished {
 			collectOperatorCounterMetrics(op)
-			return res
+			if res != nil {
+				c.hbStreams.sendMsg(region, res)
+			}
+			return
 		}
 		c.removeOperator(op)
 	}
 
 	// Check replica operator.
 	if c.limiter.operatorCount(RegionKind) >= c.opt.GetReplicaScheduleLimit() {
-		return nil
+		return
 	}
 	if op := c.checker.Check(region); op != nil {
-		if c.addOperator(op) {
-			res, _ := op.Do(region)
-			return res
-		}
+		c.addOperator(op)
 	}
-
-	return nil
 }
 
 func (c *coordinator) run() {
@@ -280,6 +282,13 @@ func (c *coordinator) addOperator(op Operator) bool {
 	c.histories.add(regionID, op)
 	c.limiter.addOperator(op)
 	c.operators[regionID] = op
+
+	if region := c.cluster.getRegion(op.GetRegionID()); region != nil {
+		if msg, _ := op.Do(region); msg != nil {
+			c.hbStreams.sendMsg(region, msg)
+		}
+	}
+
 	collectOperatorCounterMetrics(op)
 	return true
 }
@@ -444,5 +453,106 @@ func collectOperatorCounterMetrics(op Operator) {
 	}
 	for _, op := range regionOp.Ops {
 		operatorCounter.WithLabelValues(op.GetName(), op.GetState().String()).Add(1)
+	}
+}
+
+type heartbeatStream interface {
+	Send(*pdpb.RegionHeartbeatResponse) error
+}
+
+type streamUpdate struct {
+	storeID uint64
+	stream  heartbeatStream
+}
+
+type heartbeatStreams struct {
+	ctx       context.Context
+	clusterID uint64
+	streams   map[uint64]heartbeatStream
+	msgCh     chan *pdpb.RegionHeartbeatResponse
+	streamCh  chan streamUpdate
+}
+
+func newHeartbeatStreams(ctx context.Context, clusterID uint64) *heartbeatStreams {
+	localCtx, _ := context.WithCancel(ctx)
+	hs := &heartbeatStreams{
+		ctx:       localCtx,
+		clusterID: clusterID,
+		streams:   make(map[uint64]heartbeatStream),
+		msgCh:     make(chan *pdpb.RegionHeartbeatResponse, regionheartbeatSendChanCap),
+		streamCh:  make(chan streamUpdate, 1),
+	}
+	go hs.run()
+	return hs
+}
+
+func (s *heartbeatStreams) run() {
+	for {
+		select {
+		case update := <-s.streamCh:
+			s.streams[update.storeID] = update.stream
+		case msg := <-s.msgCh:
+			storeID := msg.GetTargetPeer().GetStoreId()
+			if stream, ok := s.streams[storeID]; ok {
+				if err := stream.Send(msg); err != nil {
+					log.Errorf("send heartbeat message fail: %v", err)
+					delete(s.streams, storeID)
+					regionHeartbeatCounter.WithLabelValues("push", "err")
+				} else {
+					regionHeartbeatCounter.WithLabelValues("push", "ok")
+				}
+			} else {
+				log.Debugf("heartbeat stream not found for store %v, skip send message", storeID)
+				regionHeartbeatCounter.WithLabelValues("push", "skip")
+			}
+		case <-s.ctx.Done():
+			return
+		}
+	}
+}
+
+func (s *heartbeatStreams) bindStream(storeID uint64, stream heartbeatStream) {
+	update := streamUpdate{
+		storeID: storeID,
+		stream:  stream,
+	}
+	select {
+	case s.streamCh <- update:
+	case <-s.ctx.Done():
+	}
+}
+
+func (s *heartbeatStreams) sendMsg(region *RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
+	if region.Leader == nil {
+		return
+	}
+
+	msg.Header = &pdpb.ResponseHeader{ClusterId: s.clusterID}
+	msg.RegionId = region.GetId()
+	msg.RegionEpoch = region.GetRegionEpoch()
+	msg.TargetPeer = region.Leader
+
+	select {
+	case s.msgCh <- msg:
+	case <-s.ctx.Done():
+	}
+}
+
+func (s *heartbeatStreams) sendErr(region *RegionInfo, errType pdpb.ErrorType, errMsg string) {
+	regionHeartbeatCounter.WithLabelValues("report", "err")
+
+	msg := &pdpb.RegionHeartbeatResponse{
+		Header: &pdpb.ResponseHeader{
+			ClusterId: s.clusterID,
+			Error: &pdpb.Error{
+				Type:    errType,
+				Message: errMsg,
+			},
+		},
+	}
+
+	select {
+	case s.msgCh <- msg:
+	case <-s.ctx.Done():
 	}
 }
