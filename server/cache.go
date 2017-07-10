@@ -663,15 +663,15 @@ func (c *clusterInfo) updateStoreStatus(id uint64) {
 
 // handleRegionHeartbeat updates the region information.
 func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
-	c.Lock()
-	defer c.Unlock()
-
 	region = region.clone()
+	c.RLock()
 	origin := c.regions.getRegion(region.GetId())
+	c.RUnlock()
 
 	// Save to KV if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	var saveKV, saveCache bool
+	// Mark isNew if the region in cache does not have leader.
+	var saveKV, saveCache, isNew bool
 	if origin == nil {
 		log.Infof("[region %d] Insert new region {%v}", region.GetId(), region)
 		saveKV, saveCache = true, true
@@ -693,7 +693,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
 		if region.Leader.GetId() != origin.Leader.GetId() {
 			log.Infof("[region %d] Leader changed from {%v} to {%v}", region.GetId(), origin.GetPeer(origin.Leader.GetId()), region.GetPeer(region.Leader.GetId()))
 			if origin.Leader.GetId() == 0 {
-				c.activeRegions++
+				isNew = true
 			}
 			saveCache = true
 		}
@@ -709,6 +709,13 @@ func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
 		if err := c.kv.saveRegion(region.Region); err != nil {
 			return errors.Trace(err)
 		}
+	}
+
+	c.Lock()
+	defer c.Unlock()
+
+	if isNew {
+		c.activeRegions++
 	}
 
 	if saveCache {
