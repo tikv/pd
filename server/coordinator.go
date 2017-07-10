@@ -270,13 +270,16 @@ func (c *coordinator) addOperator(op Operator) bool {
 	defer c.Unlock()
 	regionID := op.GetRegionID()
 
+	log.Infof("[region %v] add operator: %+v", regionID, op)
+
 	if old, ok := c.operators[regionID]; ok {
 		if !isHigherPriorityOperator(op, old) {
+			log.Infof("[region %v] cancel add operator, old: %+v", regionID, old)
 			return false
 		}
+		log.Infof("[region %v] replace old operator: %+v", regionID, old)
 		old.SetState(OperatorReplaced)
 		c.removeOperatorLocked(old)
-		log.Infof("coordinator: add operator %+v with higher priority, remove operator: %+v", op, old)
 	}
 
 	c.histories.add(regionID, op)
@@ -495,14 +498,14 @@ func (s *heartbeatStreams) run() {
 			storeID := msg.GetTargetPeer().GetStoreId()
 			if stream, ok := s.streams[storeID]; ok {
 				if err := stream.Send(msg); err != nil {
-					log.Errorf("send heartbeat message fail: %v", err)
+					log.Errorf("[region %v] send heartbeat message fail: %v", msg.RegionId, err)
 					delete(s.streams, storeID)
 					regionHeartbeatCounter.WithLabelValues("push", "err")
 				} else {
 					regionHeartbeatCounter.WithLabelValues("push", "ok")
 				}
 			} else {
-				log.Debugf("heartbeat stream not found for store %v, skip send message", storeID)
+				log.Debugf("[region %v] heartbeat stream not found for store %v, skip send message", msg.RegionId, storeID)
 				regionHeartbeatCounter.WithLabelValues("push", "skip")
 			}
 		case <-s.ctx.Done():
