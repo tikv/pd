@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	defaultLogTimeFormat = "2006/01/02 15:04:05"
+	defaultLogTimeFormat = "2006/01/02 15:04:05.000"
 	defaultLogMaxSize    = 300 // MB
 	defaultLogFormat     = "text"
 	defaultLogLevel      = log.InfoLevel

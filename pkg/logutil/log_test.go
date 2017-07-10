@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	logPattern = `\d\d\d\d/\d\d/\d\d \d\d:\d\d:\d\d ([\w_%!$@.,+~-]+|\\.)+:\d+: \[(fatal|error|warning|info|debug)\] .*?\n`
+	logPattern = `\d\d\d\d/\d\d/\d\d \d\d:\d\d:\d\d\.\d\d\d ([\w_%!$@.,+~-]+|\\.)+:\d+: \[(fatal|error|warning|info|debug)\] .*?\n`
 )
 
 func Test(t *testing.T) {
