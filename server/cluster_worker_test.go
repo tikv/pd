@@ -357,7 +357,7 @@ func (s *testClusterWorkerSuite) heartbeatRegion(c *C, clusterID uint64, msgID u
 
 	timeout := time.Millisecond * 500
 	if expectNil {
-		timeout = time.Millisecond * 50
+		timeout = time.Millisecond * 100
 	}
 
 	heartbeatClient := s.heartbeatClients[leader.GetStoreId()]
