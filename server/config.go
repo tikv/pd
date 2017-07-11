@@ -115,6 +115,7 @@ func NewConfig() *Config {
 
 	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
+	fs.BoolVar(&cfg.Log.File.LogRotate, "rotate-log", true, "rotate log")
 
 	return cfg
 }
