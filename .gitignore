@@ -1,5 +1,6 @@
 bin
 /vendor
+_vendor/src/github.com/pingcap/pd
 *.iml
 .idea
 default.etcd
