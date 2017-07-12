@@ -34,7 +34,7 @@ endif
 
 test:
 	# testing..
-	@GOPATH=$(VENDOR) ENABLE_CGO=1 go test $(TEST_PKGS)
+	@GOPATH=$(VENDOR) ENABLE_CGO=1 go test -race -cover $(TEST_PKGS)
 
 check:
 	go get github.com/golang/lint/golint
@@ -71,7 +71,6 @@ endif
 
 clean:
 	# clean unix socket
-	for p in $(TEST_PKGS); do echo $$p; done
 	find . -type s -exec rm {} \;
 
 .PHONY: update clean
