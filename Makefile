@@ -1,5 +1,5 @@
 PD_PKG := github.com/pingcap/pd
-VENDOR := $(shell rm -f _vendor/src/$(PD_PKG) &&\
+VENDOR := $(shell rm -rf _vendor/src/$(PD_PKG) &&\
                  ln -s `pwd` _vendor/src/$(PD_PKG) &&\
                  pwd)/_vendor
 TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
