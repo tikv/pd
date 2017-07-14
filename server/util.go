@@ -342,3 +342,7 @@ func parseTimestamp(data []byte) (time.Time, error) {
 
 	return time.Unix(0, int64(nano)), nil
 }
+
+func subTimeByWallClock(after time.Time, before time.Time) time.Duration {
+	return time.Duration(after.UnixNano() - before.UnixNano())
+}

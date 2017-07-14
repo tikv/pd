@@ -84,7 +84,7 @@ func (s *Server) syncTimestamp() error {
 
 	for {
 		now = time.Now()
-		if wait := time.Duration(last.UnixNano()-now.UnixNano()) + updateTimestampGuard; wait > 0 {
+		if wait := subTimeByWallClock(last, now) + updateTimestampGuard; wait > 0 {
 			log.Warnf("wait %v to guarantee valid generated timestamp", wait)
 			time.Sleep(wait)
 			continue
@@ -111,7 +111,7 @@ func (s *Server) updateTimestamp() error {
 	prev := s.ts.Load().(*atomicObject).physical
 	now := time.Now()
 
-	since := time.Duration(now.UnixNano() - prev.UnixNano())
+	since := subTimeByWallClock(now, prev)
 	if since > 3*updateTimestampStep {
 		log.Warnf("clock offset: %v, prev: %v, now: %v", since, prev, now)
 	}
@@ -121,7 +121,7 @@ func (s *Server) updateTimestamp() error {
 		return nil
 	}
 
-	if now.UnixNano()-s.lastSavedTime.UnixNano() >= 0 {
+	if subTimeByWallClock(now, s.lastSavedTime) >= 0 {
 		last := s.lastSavedTime
 		save := now.Add(s.cfg.TsoSaveInterval.Duration)
 		if err := s.saveTimestamp(save); err != nil {
