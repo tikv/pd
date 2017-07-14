@@ -22,10 +22,10 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/coreos/etcd/discovery"
 	"github.com/coreos/etcd/etcdserver"
 	"github.com/coreos/etcd/pkg/cors"
 	"github.com/coreos/etcd/pkg/netutil"
+	"github.com/coreos/etcd/pkg/srv"
 	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
 
@@ -321,11 +321,15 @@ func (cfg *Config) PeerURLsMapAndToken(which string) (urlsmap types.URLsMap, tok
 		urlsmap[cfg.Name] = cfg.APUrls
 		token = cfg.Durl
 	case cfg.DNSCluster != "":
-		var clusterStr string
-		clusterStr, err = discovery.SRVGetCluster(cfg.Name, cfg.DNSCluster, cfg.APUrls)
-		if err != nil {
-			return nil, "", err
+		clusterStrs, cerr := srv.GetCluster("etcd-server", cfg.Name, cfg.DNSCluster, cfg.APUrls)
+		if cerr != nil {
+			plog.Errorf("couldn't resolve during SRV discovery (%v)", cerr)
+			return nil, "", cerr
 		}
+		for _, s := range clusterStrs {
+			plog.Noticef("got bootstrap from DNS for etcd-server at %s", s)
+		}
+		clusterStr := strings.Join(clusterStrs, ",")
 		if strings.Contains(clusterStr, "https://") && cfg.PeerTLSInfo.CAFile == "" {
 			cfg.PeerTLSInfo.ServerName = cfg.DNSCluster
 		}
@@ -387,7 +391,7 @@ func (cfg *Config) UpdateDefaultClusterFromName(defaultInitialCluster string) (s
 	}
 
 	used := false
-	pip, pport, _ := net.SplitHostPort(cfg.LPUrls[0].Host)
+	pip, pport := cfg.LPUrls[0].Hostname(), cfg.LPUrls[0].Port()
 	if cfg.defaultPeerHost() && pip == "0.0.0.0" {
 		cfg.APUrls[0] = url.URL{Scheme: cfg.APUrls[0].Scheme, Host: fmt.Sprintf("%s:%s", defaultHostname, pport)}
 		used = true
@@ -397,7 +401,7 @@ func (cfg *Config) UpdateDefaultClusterFromName(defaultInitialCluster string) (s
 		cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name)
 	}
 
-	cip, cport, _ := net.SplitHostPort(cfg.LCUrls[0].Host)
+	cip, cport := cfg.LCUrls[0].Hostname(), cfg.LCUrls[0].Port()
 	if cfg.defaultClientHost() && cip == "0.0.0.0" {
 		cfg.ACUrls[0] = url.URL{Scheme: cfg.ACUrls[0].Scheme, Host: fmt.Sprintf("%s:%s", defaultHostname, cport)}
 		used = true

@@ -318,33 +318,36 @@ func (a *applierV3backend) Range(txn mvcc.TxnRead, r *pb.RangeRequest) (*pb.Rang
 }
 
 func (a *applierV3backend) Txn(rt *pb.TxnRequest) (*pb.TxnResponse, error) {
-	ok := true
-	for _, c := range rt.Compare {
-		if _, ok = a.applyCompare(c); !ok {
-			break
+	isWrite := !isTxnReadonly(rt)
+	txn := mvcc.NewReadOnlyTxnWrite(a.s.KV().Read())
+
+	reqs, ok := a.compareToOps(txn, rt)
+	if isWrite {
+		if err := a.checkRequestPut(txn, reqs); err != nil {
+			txn.End()
+			return nil, err
 		}
 	}
-
-	var reqs []*pb.RequestOp
-	if ok {
-		reqs = rt.Success
-	} else {
-		reqs = rt.Failure
-	}
-
-	if err := a.checkRequestPut(reqs); err != nil {
-		return nil, err
-	}
-	if err := a.checkRequestRange(reqs); err != nil {
+	if err := checkRequestRange(txn, reqs); err != nil {
+		txn.End()
 		return nil, err
 	}
 
 	resps := make([]*pb.ResponseOp, len(reqs))
+	txnResp := &pb.TxnResponse{
+		Responses: resps,
+		Succeeded: ok,
+		Header:    &pb.ResponseHeader{},
+	}
 
-	// When executing the operations of txn, etcd must hold the txn lock so
-	// readers do not see any intermediate results.
-	// TODO: use Read txn if only Ranges
-	txn := a.s.KV().Write()
+	// When executing mutable txn ops, etcd must hold the txn lock so
+	// readers do not see any intermediate results. Since writes are
+	// serialized on the raft loop, the revision in the read view will
+	// be the revision of the write txn.
+	if isWrite {
+		txn.End()
+		txn = a.s.KV().Write()
+	}
 	for i := range reqs {
 		resps[i] = a.applyUnion(txn, reqs[i])
 	}
@@ -354,23 +357,25 @@ func (a *applierV3backend) Txn(rt *pb.TxnRequest) (*pb.TxnResponse, error) {
 	}
 	txn.End()
 
-	txnResp := &pb.TxnResponse{}
-	txnResp.Header = &pb.ResponseHeader{}
 	txnResp.Header.Revision = rev
-	txnResp.Responses = resps
-	txnResp.Succeeded = ok
 	return txnResp, nil
 }
 
-// applyCompare applies the compare request.
-// It returns the revision at which the comparison happens. If the comparison
-// succeeds, the it returns true. Otherwise it returns false.
-func (a *applierV3backend) applyCompare(c *pb.Compare) (int64, bool) {
-	rr, err := a.s.KV().Range(c.Key, nil, mvcc.RangeOptions{})
-	rev := rr.Rev
+func (a *applierV3backend) compareToOps(rv mvcc.ReadView, rt *pb.TxnRequest) ([]*pb.RequestOp, bool) {
+	for _, c := range rt.Compare {
+		if !applyCompare(rv, c) {
+			return rt.Failure, false
+		}
+	}
+	return rt.Success, true
+}
 
+// applyCompare applies the compare request.
+// If the comparison succeeds, it returns true. Otherwise, returns false.
+func applyCompare(rv mvcc.ReadView, c *pb.Compare) bool {
+	rr, err := rv.Range(c.Key, nil, mvcc.RangeOptions{})
 	if err != nil {
-		return rev, false
+		return false
 	}
 	var ckv mvccpb.KeyValue
 	if len(rr.KVs) != 0 {
@@ -382,7 +387,7 @@ func (a *applierV3backend) applyCompare(c *pb.Compare) (int64, bool) {
 			// We can treat non-existence as the empty set explicitly, such that
 			// even a key with a value of length 0 bytes is still a real key
 			// that was written that way
-			return rev, false
+			return false
 		}
 	}
 
@@ -414,23 +419,15 @@ func (a *applierV3backend) applyCompare(c *pb.Compare) (int64, bool) {
 
 	switch c.Result {
 	case pb.Compare_EQUAL:
-		if result != 0 {
-			return rev, false
-		}
+		return result == 0
 	case pb.Compare_NOT_EQUAL:
-		if result == 0 {
-			return rev, false
-		}
+		return result != 0
 	case pb.Compare_GREATER:
-		if result != 1 {
-			return rev, false
-		}
+		return result > 0
 	case pb.Compare_LESS:
-		if result != -1 {
-			return rev, false
-		}
+		return result < 0
 	}
-	return rev, true
+	return true
 }
 
 func (a *applierV3backend) applyUnion(txn mvcc.TxnWrite, union *pb.RequestOp) *pb.ResponseOp {
@@ -486,15 +483,14 @@ func (a *applierV3backend) LeaseGrant(lc *pb.LeaseGrantRequest) (*pb.LeaseGrantR
 	if err == nil {
 		resp.ID = int64(l.ID)
 		resp.TTL = l.TTL()
-		resp.Header = &pb.ResponseHeader{Revision: a.s.KV().Rev()}
+		resp.Header = newHeader(a.s)
 	}
-
 	return resp, err
 }
 
 func (a *applierV3backend) LeaseRevoke(lc *pb.LeaseRevokeRequest) (*pb.LeaseRevokeResponse, error) {
 	err := a.s.lessor.Revoke(lease.LeaseID(lc.ID))
-	return &pb.LeaseRevokeResponse{Header: &pb.ResponseHeader{Revision: a.s.KV().Rev()}}, err
+	return &pb.LeaseRevokeResponse{Header: newHeader(a.s)}, err
 }
 
 func (a *applierV3backend) Alarm(ar *pb.AlarmRequest) (*pb.AlarmResponse, error) {
@@ -575,69 +571,125 @@ func (a *applierV3backend) AuthEnable() (*pb.AuthEnableResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &pb.AuthEnableResponse{}, nil
+	return &pb.AuthEnableResponse{Header: newHeader(a.s)}, nil
 }
 
 func (a *applierV3backend) AuthDisable() (*pb.AuthDisableResponse, error) {
 	a.s.AuthStore().AuthDisable()
-	return &pb.AuthDisableResponse{}, nil
+	return &pb.AuthDisableResponse{Header: newHeader(a.s)}, nil
 }
 
 func (a *applierV3backend) Authenticate(r *pb.InternalAuthenticateRequest) (*pb.AuthenticateResponse, error) {
 	ctx := context.WithValue(context.WithValue(a.s.ctx, "index", a.s.consistIndex.ConsistentIndex()), "simpleToken", r.SimpleToken)
-	return a.s.AuthStore().Authenticate(ctx, r.Name, r.Password)
+	resp, err := a.s.AuthStore().Authenticate(ctx, r.Name, r.Password)
+	if resp != nil {
+		resp.Header = newHeader(a.s)
+	}
+	return resp, err
 }
 
 func (a *applierV3backend) UserAdd(r *pb.AuthUserAddRequest) (*pb.AuthUserAddResponse, error) {
-	return a.s.AuthStore().UserAdd(r)
+	resp, err := a.s.AuthStore().UserAdd(r)
+	if resp != nil {
+		resp.Header = newHeader(a.s)
+	}
+	return resp, err
 }
 
 func (a *applierV3backend) UserDelete(r *pb.AuthUserDeleteRequest) (*pb.AuthUserDeleteResponse, error) {
-	return a.s.AuthStore().UserDelete(r)
+	resp, err := a.s.AuthStore().UserDelete(r)
+	if resp != nil {
+		resp.Header = newHeader(a.s)
+	}
+	return resp, err
 }
 
 func (a *applierV3backend) UserChangePassword(r *pb.AuthUserChangePasswordRequest) (*pb.AuthUserChangePasswordResponse, error) {
-	return a.s.AuthStore().UserChangePassword(r)
+	resp, err := a.s.AuthStore().UserChangePassword(r)
+	if resp != nil {
+		resp.Header = newHeader(a.s)
+	}
+	return resp, err
 }
 
 func (a *applierV3backend) UserGrantRole(r *pb.AuthUserGrantRoleRequest) (*pb.AuthUserGrantRoleResponse, error) {
-	return a.s.AuthStore().UserGrantRole(r)
+	resp, err := a.s.AuthStore().UserGrantRole(r)
+	if resp != nil {
+		resp.Header = newHeader(a.s)
+	}
+	return resp, err
 }
 
 func (a *applierV3backend) UserGet(r *pb.AuthUserGetRequest) (*pb.AuthUserGetResponse, error) {
-	return a.s.AuthStore().UserGet(r)
+	resp, err := a.s.AuthStore().UserGet(r)
+	if resp != nil {
+		resp.Header = newHeader(a.s)
+	}
+	return resp, err
 }
 
 func (a *applierV3backend) UserRevokeRole(r *pb.AuthUserRevokeRoleRequest) (*pb.AuthUserRevokeRoleResponse, error) {
-	return a.s.AuthStore().UserRevokeRole(r)
+	resp, err := a.s.AuthStore().UserRevokeRole(r)
+	if resp != nil {
+		resp.Header = newHeader(a.s)
+	}
+	return resp, err
 }
 
 func (a *applierV3backend) RoleAdd(r *pb.AuthRoleAddRequest) (*pb.AuthRoleAddResponse, error) {
-	return a.s.AuthStore().RoleAdd(r)
+	resp, err := a.s.AuthStore().RoleAdd(r)
+	if resp != nil {
+		resp.Header = newHeader(a.s)
+	}
+	return resp, err
 }
 
 func (a *applierV3backend) RoleGrantPermission(r *pb.AuthRoleGrantPermissionRequest) (*pb.AuthRoleGrantPermissionResponse, error) {
-	return a.s.AuthStore().RoleGrantPermission(r)
+	resp, err := a.s.AuthStore().RoleGrantPermission(r)
+	if resp != nil {
+		resp.Header = newHeader(a.s)
+	}
+	return resp, err
 }
 
 func (a *applierV3backend) RoleGet(r *pb.AuthRoleGetRequest) (*pb.AuthRoleGetResponse, error) {
-	return a.s.AuthStore().RoleGet(r)
+	resp, err := a.s.AuthStore().RoleGet(r)
+	if resp != nil {
+		resp.Header = newHeader(a.s)
+	}
+	return resp, err
 }
 
 func (a *applierV3backend) RoleRevokePermission(r *pb.AuthRoleRevokePermissionRequest) (*pb.AuthRoleRevokePermissionResponse, error) {
-	return a.s.AuthStore().RoleRevokePermission(r)
+	resp, err := a.s.AuthStore().RoleRevokePermission(r)
+	if resp != nil {
+		resp.Header = newHeader(a.s)
+	}
+	return resp, err
 }
 
 func (a *applierV3backend) RoleDelete(r *pb.AuthRoleDeleteRequest) (*pb.AuthRoleDeleteResponse, error) {
-	return a.s.AuthStore().RoleDelete(r)
+	resp, err := a.s.AuthStore().RoleDelete(r)
+	if resp != nil {
+		resp.Header = newHeader(a.s)
+	}
+	return resp, err
 }
 
 func (a *applierV3backend) UserList(r *pb.AuthUserListRequest) (*pb.AuthUserListResponse, error) {
-	return a.s.AuthStore().UserList(r)
+	resp, err := a.s.AuthStore().UserList(r)
+	if resp != nil {
+		resp.Header = newHeader(a.s)
+	}
+	return resp, err
 }
 
 func (a *applierV3backend) RoleList(r *pb.AuthRoleListRequest) (*pb.AuthRoleListResponse, error) {
-	return a.s.AuthStore().RoleList(r)
+	resp, err := a.s.AuthStore().RoleList(r)
+	if resp != nil {
+		resp.Header = newHeader(a.s)
+	}
+	return resp, err
 }
 
 type quotaApplierV3 struct {
@@ -715,7 +767,7 @@ func (s *kvSortByValue) Less(i, j int) bool {
 	return bytes.Compare(s.kvs[i].Value, s.kvs[j].Value) < 0
 }
 
-func (a *applierV3backend) checkRequestPut(reqs []*pb.RequestOp) error {
+func (a *applierV3backend) checkRequestPut(rv mvcc.ReadView, reqs []*pb.RequestOp) error {
 	for _, requ := range reqs {
 		tv, ok := requ.Request.(*pb.RequestOp_RequestPut)
 		if !ok {
@@ -727,7 +779,7 @@ func (a *applierV3backend) checkRequestPut(reqs []*pb.RequestOp) error {
 		}
 		if preq.IgnoreValue || preq.IgnoreLease {
 			// expects previous key-value, error if not exist
-			rr, err := a.s.KV().Range(preq.Key, nil, mvcc.RangeOptions{})
+			rr, err := rv.Range(preq.Key, nil, mvcc.RangeOptions{})
 			if err != nil {
 				return err
 			}
@@ -745,7 +797,7 @@ func (a *applierV3backend) checkRequestPut(reqs []*pb.RequestOp) error {
 	return nil
 }
 
-func (a *applierV3backend) checkRequestRange(reqs []*pb.RequestOp) error {
+func checkRequestRange(rv mvcc.ReadView, reqs []*pb.RequestOp) error {
 	for _, requ := range reqs {
 		tv, ok := requ.Request.(*pb.RequestOp_RequestRange)
 		if !ok {
@@ -756,10 +808,10 @@ func (a *applierV3backend) checkRequestRange(reqs []*pb.RequestOp) error {
 			continue
 		}
 
-		if greq.Revision > a.s.KV().Rev() {
+		if greq.Revision > rv.Rev() {
 			return mvcc.ErrFutureRev
 		}
-		if greq.Revision < a.s.KV().FirstRev() {
+		if greq.Revision < rv.FirstRev() {
 			return mvcc.ErrCompacted
 		}
 	}
@@ -814,4 +866,13 @@ func pruneKVs(rr *mvcc.RangeResult, isPrunable func(*mvccpb.KeyValue) bool) {
 		}
 	}
 	rr.KVs = rr.KVs[:j]
+}
+
+func newHeader(s *EtcdServer) *pb.ResponseHeader {
+	return &pb.ResponseHeader{
+		ClusterId: uint64(s.Cluster().ID()),
+		MemberId:  uint64(s.ID()),
+		Revision:  s.KV().Rev(),
+		RaftTerm:  s.Term(),
+	}
 }
