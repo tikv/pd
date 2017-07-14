@@ -35,6 +35,8 @@ level = "info"
 #max-days = 28
 # maximum number of old log files to retain
 #max-backups = 7
+# rotate log by day
+#log-rotate = true
 
 [metric]
 # prometheus client push interval, set "0s" to disable prometheus.
