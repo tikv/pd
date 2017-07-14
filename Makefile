@@ -1,19 +1,15 @@
-GO=GO15VENDOREXPERIMENT="1" CGO_ENABLED=0 go
-GOTEST=GO15VENDOREXPERIMENT="1" CGO_ENABLED=1 go test # go race detector requires cgo
+PD_PKG := github.com/pingcap/pd
+VENDOR := $(shell rm -f _vendor/src/$(PD_PKG) &&\
+                 ln -s `pwd` _vendor/src/$(PD_PKG) &&\
+                 pwd)/_vendor
+TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
+                     uniq | sed -e "s/^\./github.com\/pingcap\/pd/")
 
-PACKAGES := $$(go list ./...| grep -vE 'vendor|pd-server')
-
-GOFILTER := grep -vE 'vendor|render.Delims|bindata_assetfs|testutil'
+GOFILTER := grep -vE 'vendor|testutil'
 GOCHECKER := $(GOFILTER) | awk '{ print } END { if (NR > 0) { exit 1 } }'
 
-LDFLAGS += -X "github.com/pingcap/pd/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
-LDFLAGS += -X "github.com/pingcap/pd/server.PDGitHash=$(shell git rev-parse HEAD)"
-
-RACE_FLAG =
-ifeq ("$(WITH_RACE)", "1")
-	RACE_FLAG = -race
-	GO = GO15VENDOREXPERIMENT="1" CGO_ENABLED=1 go
-endif
+LDFLAGS += -X "$(PD_PKG)/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
+LDFLAGS += -X "$(PD_PKG)/server.PDGitHash=$(shell git rev-parse HEAD)"
 
 # Ignore following files's coverage.
 #
@@ -22,27 +18,23 @@ COVERIGNORE := "cmd/*/*,pdctl/*,pdctl/*/*,server/api/bindata_assetfs.go"
 
 default: build
 
-all: dev install
+all: dev
 
 dev: build check test
 
 build:
-	rm -rf vendor && ln -s _vendor/vendor vendor
-	$(GO) build $(RACE_FLAG) -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
-	$(GO) build -o bin/pd-ctl cmd/pd-ctl/main.go
-	$(GO) build -o bin/pd-tso-bench cmd/pd-tso-bench/main.go
-	$(GO) build -o bin/pd-recover cmd/pd-recover/main.go
-	rm -rf vendor
-
-install:
-	rm -rf vendor && ln -s _vendor/vendor vendor
-	$(GO) install ./...
-	rm -rf vendor
+ifeq ("$(WITH_RACE)", "1")
+	GOPATH=$(VENDOR) ENABLE_CGO=1 go build -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+else
+	GOPATH=$(VENDOR) go build  -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+endif
+	GOPATH=$(VENDOR) go build -o bin/pd-ctl cmd/pd-ctl/main.go
+	GOPATH=$(VENDOR) go build -o bin/pd-tso-bench cmd/pd-tso-bench/main.go
+	GOPATH=$(VENDOR) go build -o bin/pd-recover cmd/pd-recover/main.go
 
 test:
-	rm -rf vendor && ln -s _vendor/vendor vendor
-	$(GOTEST) --race $(PACKAGES)
-	rm -rf vendor
+	# testing..
+	@GOPATH=$(VENDOR) ENABLE_CGO=1 go test -race -cover $(TEST_PKGS)
 
 check:
 	go get github.com/golang/lint/golint
@@ -57,9 +49,7 @@ check:
 
 travis_coverage:
 ifeq ("$(TRAVIS_COVERAGE)", "1")
-	rm -rf vendor && ln -s _vendor/vendor vendor
-	$(HOME)/gopath/bin/goveralls -service=travis-ci -ignore $(COVERIGNORE)
-	rm -rf vendor
+	GOPATH=$(VENDOR) $(HOME)/gopath/bin/goveralls -service=travis-ci -ignore $(COVERIGNORE)
 else
 	@echo "coverage only runs in travis."
 endif
@@ -67,7 +57,7 @@ endif
 update:
 	which glide >/dev/null || curl https://glide.sh/get | sh
 	which glide-vc || go get -v -u github.com/sgotti/glide-vc
-	rm -rf vendor && mv _vendor/vendor vendor || true
+	rm -rf vendor && mv _vendor/src vendor || true
 	rm -rf _vendor
 ifdef PKG
 	glide get --strip-vendor --skip-test ${PKG}
@@ -77,7 +67,7 @@ endif
 	@echo "removing test files"
 	glide vc --only-code --no-tests
 	mkdir -p _vendor
-	mv vendor _vendor/vendor
+	mv vendor _vendor/src
 
 clean:
 	# clean unix socket
