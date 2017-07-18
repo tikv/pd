@@ -26,9 +26,10 @@ func AllocTestURL() string {
 	if err != nil {
 		log.Fatal(err)
 	}
+	addr := fmt.Sprintf("http://%s", l.Addr())
 	err = l.Close()
 	if err != nil {
 		log.Fatal(err)
 	}
-	return fmt.Sprintf("http://%s", l.Addr())
+	return addr
 }
