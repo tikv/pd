@@ -39,8 +39,7 @@ func (s *testRegionSuite) SetUpSuite(c *C) {
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
-	httpAddr := mustUnixAddrToHTTPAddr(c, addr)
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", httpAddr, apiPrefix)
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
 

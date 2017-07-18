@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"math/rand"
 	"net/http"
-	"strings"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -46,8 +45,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 		cfgs, _, clean := mustNewCluster(c, num)
 		defer clean()
 
-		parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config"}
-		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
+		addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/config"
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
 		cfg := &server.Config{}
@@ -85,8 +83,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 		cfgs, _, clean := mustNewCluster(c, num)
 		defer clean()
 
-		parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/schedule"}
-		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
+		addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/config/schedule"
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
 		sc := &server.ScheduleConfig{}
@@ -94,8 +91,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 
 		sc.MaxStoreDownTime.Duration = time.Second
 		postData, err := json.Marshal(sc)
-		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/schedule"}
-		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))
+		postAddr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/config/schedule"
 		err = postJSON(s.hc, postAddr, postData)
 		c.Assert(err, IsNil)
 
@@ -113,8 +109,7 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 		cfgs, _, clean := mustNewCluster(c, num)
 		defer clean()
 
-		parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/replicate"}
-		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
+		addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/config/replicate"
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
 
@@ -126,8 +121,7 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 
 		rc1 := map[string]int{"max-replicas": 5}
 		postData, err := json.Marshal(rc1)
-		postURL := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/config/replicate"}
-		postAddr := mustUnixAddrToHTTPAddr(c, strings.Join(postURL, ""))
+		postAddr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/config/replicate"
 		err = postJSON(s.hc, postAddr, postData)
 		c.Assert(err, IsNil)
 		rc.LocationLabels = []string{"zone", "rack"}

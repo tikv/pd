@@ -73,8 +73,7 @@ func (s *testMemberAPISuite) TestMemberList(c *C) {
 		cfgs, _, clean := mustNewCluster(c, num)
 		defer clean()
 
-		parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/members"}
-		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
+		addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/members"
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
 		buf, err := ioutil.ReadAll(resp.Body)
@@ -134,8 +133,7 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 	}
 
 	for _, t := range table {
-		parts := []string{clientURL, apiPrefix, "/api/v1/members/", t.name}
-		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
+		addr := clientURL + apiPrefix + "/api/v1/members/" + t.name
 		req, err := http.NewRequest("DELETE", addr, nil)
 		c.Assert(err, IsNil)
 		resp, err := s.hc.Do(req)
@@ -147,8 +145,7 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 	}
 
 	for i := 0; i < 10; i++ {
-		parts := []string{clientURL, apiPrefix, "/api/v1/members"}
-		addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
+		addr := clientURL + apiPrefix + "/api/v1/members"
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
 		defer resp.Body.Close()
@@ -169,8 +166,7 @@ func (s *testMemberAPISuite) TestMemberLeader(c *C) {
 	leader, err := svrs[0].GetLeader()
 	c.Assert(err, IsNil)
 
-	parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/leader"}
-	addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
+	addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/leader"
 	c.Assert(err, IsNil)
 	resp, err := s.hc.Get(addr)
 	c.Assert(err, IsNil)

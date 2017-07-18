@@ -15,12 +15,20 @@ package testutil
 
 import (
 	"fmt"
-	"sync/atomic"
+	"net"
+
+	log "github.com/Sirupsen/logrus"
 )
 
-var unixURLCount uint64 = 1024
-
-// UnixURL returns a unique unix socket url, used for test only.
-func UnixURL() string {
-	return fmt.Sprintf("unix://localhost:%d", atomic.AddUint64(&unixURLCount, 1))
+// AllocTestURL allocates a local URL for testing.
+func AllocTestURL() string {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = l.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+	return fmt.Sprintf("http://%s", l.Addr())
 }

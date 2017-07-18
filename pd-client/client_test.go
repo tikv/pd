@@ -14,7 +14,6 @@
 package pd
 
 import (
-	"net"
 	"os"
 	"strings"
 	"sync"
@@ -58,17 +57,9 @@ var (
 	}
 )
 
-var stripUnix = strings.NewReplacer("unix://", "")
-
 func cleanServer(cfg *server.Config) {
 	// Clean data directory
 	os.RemoveAll(cfg.DataDir)
-
-	// Clean unix sockets
-	os.Remove(stripUnix.Replace(cfg.PeerUrls))
-	os.Remove(stripUnix.Replace(cfg.ClientUrls))
-	os.Remove(stripUnix.Replace(cfg.AdvertisePeerUrls))
-	os.Remove(stripUnix.Replace(cfg.AdvertiseClientUrls))
 }
 
 type cleanupFunc func()
@@ -120,16 +111,8 @@ func newServer(c *C) (*server.Server, cleanupFunc) {
 	return s, cleanup
 }
 
-var unixStripper = strings.NewReplacer("unix://", "", "unixs://", "")
-
-func unixGrpcDialer(addr string, timeout time.Duration) (net.Conn, error) {
-	sock, err := net.DialTimeout("unix", unixStripper.Replace(addr), timeout)
-	return sock, err
-}
-
 func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(addr, grpc.WithInsecure(),
-		grpc.WithDialer(unixGrpcDialer))
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
 
 	c.Assert(err, IsNil)
 	return pdpb.NewPDClient(conn)

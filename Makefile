@@ -69,8 +69,4 @@ endif
 	mkdir -p _vendor
 	mv vendor _vendor/src
 
-clean:
-	# clean unix socket
-	find . -type s -exec rm {} \;
-
 .PHONY: update clean

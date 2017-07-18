@@ -15,7 +15,6 @@ package api
 
 import (
 	"net/http"
-	"strings"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -102,11 +101,9 @@ func (s *testRedirectorSuite) TestNotLeader(c *C) {
 
 	client := newUnixSocketClient()
 
-	unixAddr := []string{follower.GetAddr(), apiPrefix, "/api/v1/version"}
-	httpAddr := mustUnixAddrToHTTPAddr(c, strings.Join(unixAddr, ""))
-
+	addr := follower.GetAddr() + apiPrefix + "/api/v1/version"
 	// Request to follower without redirectorHeader is OK.
-	request, err := http.NewRequest("GET", httpAddr, nil)
+	request, err := http.NewRequest("GET", addr, nil)
 	c.Assert(err, IsNil)
 	resp, err := client.Do(request)
 	c.Assert(err, IsNil)
@@ -121,10 +118,7 @@ func (s *testRedirectorSuite) TestNotLeader(c *C) {
 }
 
 func mustRequest(c *C, s *server.Server) *http.Response {
-	unixAddr := []string{s.GetAddr(), apiPrefix, "/api/v1/version"}
-	httpAddr := mustUnixAddrToHTTPAddr(c, strings.Join(unixAddr, ""))
-	client := newUnixSocketClient()
-	resp, err := client.Get(httpAddr)
+	resp, err := http.Get(s.GetAddr() + apiPrefix + "/api/v1/version")
 	c.Assert(err, IsNil)
 	return resp
 }

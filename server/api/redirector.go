@@ -79,18 +79,8 @@ func newCustomReverseProxies(urls []url.URL) *customReverseProxies {
 	p := &customReverseProxies{}
 
 	for _, u := range urls {
-		var client *http.Client
-
-		// Use unix socket in tests.
-		if u.Scheme == "unix" {
-			u.Scheme = "http"
-			client = &http.Client{Transport: &http.Transport{Dial: unixDial}}
-		} else {
-			client = &http.Client{}
-		}
-
 		p.urls = append(p.urls, u)
-		p.clients = append(p.clients, client)
+		p.clients = append(p.clients, &http.Client{})
 	}
 
 	return p

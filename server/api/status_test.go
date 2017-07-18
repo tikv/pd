@@ -18,7 +18,6 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"net/http"
-	"strings"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
@@ -46,8 +45,7 @@ func (s *testStatusAPISuite) testStatusInternal(c *C, num int) {
 	cfgs, _, clean := mustNewCluster(c, num)
 	defer clean()
 
-	parts := []string{cfgs[rand.Intn(len(cfgs))].ClientUrls, apiPrefix, "/api/v1/status"}
-	addr := mustUnixAddrToHTTPAddr(c, strings.Join(parts, ""))
+	addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/status"
 	resp, err := s.hc.Get(addr)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()

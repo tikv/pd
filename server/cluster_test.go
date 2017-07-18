@@ -14,9 +14,7 @@
 package server
 
 import (
-	"net"
 	"strings"
-	"time"
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
@@ -56,16 +54,8 @@ func (s *testClusterSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-var unixStripper = strings.NewReplacer("unix://", "", "unixs://", "")
-
-func unixGrpcDialer(addr string, timeout time.Duration) (net.Conn, error) {
-	sock, err := net.DialTimeout("unix", unixStripper.Replace(addr), timeout)
-	return sock, err
-}
-
 func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(addr, grpc.WithInsecure(),
-		grpc.WithDialer(unixGrpcDialer))
+	conn, err := grpc.Dial(strings.TrimLeft(addr, "http://"), grpc.WithInsecure())
 
 	c.Assert(err, IsNil)
 	return pdpb.NewPDClient(conn)
