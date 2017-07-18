@@ -35,7 +35,7 @@ type testMemberAPISuite struct {
 }
 
 func (s *testMemberAPISuite) SetUpSuite(c *C) {
-	s.hc = newUnixSocketClient()
+	s.hc = newHTTPClient()
 }
 
 func relaxEqualStings(c *C, a, b []string) {

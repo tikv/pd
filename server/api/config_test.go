@@ -30,7 +30,7 @@ type testConfigSuite struct {
 }
 
 func (s *testConfigSuite) SetUpSuite(c *C) {
-	s.hc = newUnixSocketClient()
+	s.hc = newHTTPClient()
 }
 
 func checkConfigResponse(c *C, body []byte, cfgs []*server.Config) {

@@ -99,7 +99,7 @@ func (s *testRedirectorSuite) TestNotLeader(c *C) {
 		}
 	}
 
-	client := newUnixSocketClient()
+	client := newHTTPClient()
 
 	addr := follower.GetAddr() + apiPrefix + "/api/v1/version"
 	// Request to follower without redirectorHeader is OK.

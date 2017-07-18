@@ -132,7 +132,7 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 			status: http.StatusInternalServerError,
 		},
 	}
-	client := newUnixSocketClient()
+	client := newHTTPClient()
 	for _, t := range table {
 		req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/store/%d", s.urlPrefix, t.id), nil)
 		c.Assert(err, IsNil)

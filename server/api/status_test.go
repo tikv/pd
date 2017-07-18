@@ -30,7 +30,7 @@ type testStatusAPISuite struct {
 }
 
 func (s *testStatusAPISuite) SetUpSuite(c *C) {
-	s.hc = newUnixSocketClient()
+	s.hc = newHTTPClient()
 }
 
 func checkStatusResponse(c *C, body []byte, cfgs []*server.Config) {
