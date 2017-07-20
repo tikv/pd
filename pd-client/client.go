@@ -14,8 +14,6 @@
 package pd
 
 import (
-	"net"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -206,17 +204,7 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 		return conn, nil
 	}
 
-	cc, err := grpc.Dial(addr, grpc.WithDialer(func(addr string, d time.Duration) (net.Conn, error) {
-		u, err := url.Parse(addr)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		// For tests.
-		if u.Scheme == "unix" || u.Scheme == "unixs" {
-			return net.DialTimeout(u.Scheme, u.Host, d)
-		}
-		return net.DialTimeout("tcp", u.Host, d)
-	}), grpc.WithInsecure()) // TODO: Support HTTPS.
+	cc, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure()) // TODO: Support HTTPS.
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

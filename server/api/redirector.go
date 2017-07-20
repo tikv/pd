@@ -71,38 +71,29 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 }
 
 type customReverseProxies struct {
-	urls    []url.URL
-	clients []*http.Client
+	urls   []url.URL
+	client *http.Client
 }
 
 func newCustomReverseProxies(urls []url.URL) *customReverseProxies {
-	p := &customReverseProxies{}
+	p := &customReverseProxies{
+		client: &http.Client{},
+	}
 
 	for _, u := range urls {
-		var client *http.Client
-
-		// Use unix socket in tests.
-		if u.Scheme == "unix" {
-			u.Scheme = "http"
-			client = &http.Client{Transport: &http.Transport{Dial: unixDial}}
-		} else {
-			client = &http.Client{}
-		}
-
 		p.urls = append(p.urls, u)
-		p.clients = append(p.clients, client)
 	}
 
 	return p
 }
 
 func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	for i, client := range p.clients {
+	for _, url := range p.urls {
 		r.RequestURI = ""
-		r.URL.Host = p.urls[i].Host
-		r.URL.Scheme = p.urls[i].Scheme
+		r.URL.Host = url.Host
+		r.URL.Scheme = url.Scheme
 
-		resp, err := client.Do(r)
+		resp, err := p.client.Do(r)
 		if err != nil {
 			log.Error(err)
 			continue

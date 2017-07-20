@@ -66,8 +66,7 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
-	httpAddr := mustUnixAddrToHTTPAddr(c, addr)
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", httpAddr, apiPrefix)
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
 	for _, store := range s.stores {
@@ -133,7 +132,7 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 			status: http.StatusInternalServerError,
 		},
 	}
-	client := newUnixSocketClient()
+	client := newHTTPClient()
 	for _, t := range table {
 		req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/store/%d", s.urlPrefix, t.id), nil)
 		c.Assert(err, IsNil)

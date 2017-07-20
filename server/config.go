@@ -462,8 +462,8 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 func NewTestSingleConfig() *Config {
 	cfg := &Config{
 		Name:       "pd",
-		ClientUrls: testutil.UnixURL(),
-		PeerUrls:   testutil.UnixURL(),
+		ClientUrls: testutil.AllocTestURL(),
+		PeerUrls:   testutil.AllocTestURL(),
 
 		InitialClusterState: embed.ClusterStateFlagNew,
 

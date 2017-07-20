@@ -14,8 +14,7 @@
 package etcdutil
 
 import (
-	"net/url"
-	"strings"
+	"net/http"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -23,7 +22,6 @@ import (
 	"github.com/coreos/etcd/etcdserver"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
-	"github.com/pingcap/pd/pkg/apiutil"
 	"golang.org/x/net/context"
 )
 
@@ -43,9 +41,6 @@ const (
 	checkEtcdRunningDelay    = 1 * time.Second
 )
 
-// unixToHTTP replace unix scheme with http.
-var unixToHTTP = strings.NewReplacer("unix://", "http://", "unixs://", "http://")
-
 // CheckClusterID checks Etcd's cluster ID, returns an error if mismatch.
 // This function will never block even quorum is not satisfied.
 func CheckClusterID(localClusterID types.ID, um types.URLsMap) error {
@@ -58,20 +53,9 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap) error {
 		peerURLs = append(peerURLs, urls.StringSlice()...)
 	}
 
-	for i, u := range peerURLs {
-		u, gerr := url.Parse(u)
-		if gerr != nil {
-			return errors.Trace(gerr)
-		}
-		trp := apiutil.NewHTTPTransport(u.Scheme)
-
-		// For tests, change scheme to http.
-		// etcdserver/api/v3rpc does not recognize unix protocol.
-		if u.Scheme == "unix" || u.Scheme == "unixs" {
-			peerURLs[i] = unixToHTTP.Replace(peerURLs[i])
-		}
-
-		remoteCluster, gerr := etcdserver.GetClusterFromRemotePeers([]string{peerURLs[i]}, trp)
+	for _, u := range peerURLs {
+		trp := &http.Transport{}
+		remoteCluster, gerr := etcdserver.GetClusterFromRemotePeers([]string{u}, trp)
 		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.

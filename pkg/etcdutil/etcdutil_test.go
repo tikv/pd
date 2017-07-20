@@ -18,7 +18,6 @@ import (
 	"io/ioutil"
 	"net/url"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/coreos/etcd/clientv3"
@@ -43,10 +42,10 @@ func newTestSingleConfig() *embed.Config {
 	cfg.Dir, _ = ioutil.TempDir("/tmp", "test_etcd")
 	cfg.WalDir = ""
 
-	pu, _ := url.Parse(testutil.UnixURL())
+	pu, _ := url.Parse(testutil.AllocTestURL())
 	cfg.LPUrls = []url.URL{*pu}
 	cfg.APUrls = cfg.LPUrls
-	cu, _ := url.Parse(testutil.UnixURL())
+	cu, _ := url.Parse(testutil.AllocTestURL())
 	cfg.LCUrls = []url.URL{*cu}
 	cfg.ACUrls = cfg.LCUrls
 
@@ -56,26 +55,9 @@ func newTestSingleConfig() *embed.Config {
 	return cfg
 }
 
-// TODO: move to package testutil.
-var stripUnix = strings.NewReplacer("unix://", "")
-
 func cleanConfig(cfg *embed.Config) {
 	// Clean data directory
 	os.RemoveAll(cfg.Dir)
-
-	// Clean unix sockets
-	for _, u := range cfg.APUrls {
-		os.Remove(stripUnix.Replace(u.String()))
-	}
-	for _, u := range cfg.LPUrls {
-		os.Remove(stripUnix.Replace(u.String()))
-	}
-	for _, u := range cfg.ACUrls {
-		os.Remove(stripUnix.Replace(u.String()))
-	}
-	for _, u := range cfg.LCUrls {
-		os.Remove(stripUnix.Replace(u.String()))
-	}
 }
 
 func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {

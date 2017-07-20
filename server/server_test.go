@@ -16,7 +16,6 @@ package server
 import (
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -53,17 +52,9 @@ func mustRunTestServer(c *C) (*Server, cleanUpFunc) {
 	return server, cleanup
 }
 
-var stripUnix = strings.NewReplacer("unix://", "")
-
 func cleanServer(cfg *Config) {
 	// Clean data directory
 	os.RemoveAll(cfg.DataDir)
-
-	// Clean unix sockets
-	os.Remove(stripUnix.Replace(cfg.PeerUrls))
-	os.Remove(stripUnix.Replace(cfg.ClientUrls))
-	os.Remove(stripUnix.Replace(cfg.AdvertisePeerUrls))
-	os.Remove(stripUnix.Replace(cfg.AdvertiseClientUrls))
 }
 
 func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
@@ -272,7 +263,7 @@ func (s *testServerSuite) TestUpdateAdvertiseUrls(c *C) {
 	}
 
 	// Little malicious tweak.
-	overlapPeerURL := "," + testutil.UnixURL()
+	overlapPeerURL := "," + testutil.AllocTestURL()
 	for _, cfg := range cfgs {
 		cfg.AdvertisePeerUrls += overlapPeerURL
 	}
