@@ -18,6 +18,7 @@ import (
 	"io"
 
 	log "github.com/Sirupsen/logrus"
+	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -54,14 +55,22 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 
 // Tso implements gRPC PDServer.
 func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
+	timeoutStream := newTimeoutServerStream(stream, func() proto.Message { return new(pdpb.TsoRequest) }, defaultStreamTimeout)
 	for {
-		request, err := stream.Recv()
+		msg, err := timeoutStream.Recv()
 		if err == io.EOF {
 			return nil
+		}
+		if err == errStreamTimeout {
+			if !s.IsLeader() {
+				return notLeaderError
+			}
+			continue
 		}
 		if err != nil {
 			return errors.Trace(err)
 		}
+		request := msg.(*pdpb.TsoRequest)
 		if err = s.validateRequest(request.GetHeader()); err != nil {
 			return errors.Trace(err)
 		}
@@ -235,6 +244,7 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 
 // RegionHeartbeat implements gRPC PDServer.
 func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
+	timeoutStream := newTimeoutServerStream(server, func() proto.Message { return new(pdpb.RegionHeartbeatRequest) }, defaultStreamTimeout)
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
 		resp := &pdpb.RegionHeartbeatResponse{
@@ -246,14 +256,21 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 
 	isNew := true
 	for {
-		request, err := server.Recv()
+		msg, err := timeoutStream.Recv()
 		if err == io.EOF {
 			return nil
+		}
+		if err == errStreamTimeout {
+			if !s.IsLeader() {
+				return notLeaderError
+			}
+			continue
 		}
 		if err != nil {
 			return errors.Trace(err)
 		}
 
+		request := msg.(*pdpb.RegionHeartbeatRequest)
 		if err = s.validateRequest(request.GetHeader()); err != nil {
 			return errors.Trace(err)
 		}
