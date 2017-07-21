@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	kvRangeLimit      = 100000
+	kvRangeLimit      = 10000
 	kvRequestTimeout  = time.Second * 10
 	kvSlowRequestTime = time.Second * 1
 )
