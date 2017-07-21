@@ -1,5 +1,5 @@
-hash: 0b3373db40ba76b226b76e314af963ac1002f086da7057b0c033dd7609f0dc3c
-updated: 2017-07-05T10:37:06.795879399+08:00
+hash: 8230300f7fc65a14a8b20d08f5f909020ed556b9bf745dff56333432e3333d93
+updated: 2017-07-21T10:24:21.756681879+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -16,7 +16,7 @@ imports:
 - name: github.com/cockroachdb/cmux
   version: 112f0506e7743d64a6eb8fedbcff13d9979bbf92
 - name: github.com/coreos/etcd
-  version: ea5f6dab6b1d07e22cf46bf5f5088d567548c124
+  version: c31bec0f29facff13f7c3e3d948e55dd6689ed42
   subpackages:
   - alarm
   - auth
@@ -35,12 +35,15 @@ imports:
   - etcdserver/api/v3client
   - etcdserver/api/v3election
   - etcdserver/api/v3election/v3electionpb
+  - etcdserver/api/v3election/v3electionpb/gw
   - etcdserver/api/v3lock
   - etcdserver/api/v3lock/v3lockpb
+  - etcdserver/api/v3lock/v3lockpb/gw
   - etcdserver/api/v3rpc
   - etcdserver/api/v3rpc/rpctypes
   - etcdserver/auth
   - etcdserver/etcdserverpb
+  - etcdserver/etcdserverpb/gw
   - etcdserver/membership
   - etcdserver/stats
   - lease
@@ -66,6 +69,7 @@ imports:
   - pkg/pbutil
   - pkg/runtime
   - pkg/schedule
+  - pkg/srv
   - pkg/tlsutil
   - pkg/transport
   - pkg/types
@@ -220,14 +224,14 @@ imports:
   subpackages:
   - unix
 - name: golang.org/x/text
-  version: 2bf8f2a19ec09c670e931282edfe6567f6be21c9
+  version: 836efe42bb4aa16aaa17b9c155d8813d336ed720
   subpackages:
   - secure/bidirule
   - transform
   - unicode/bidi
   - unicode/norm
 - name: google.golang.org/genproto
-  version: aa2eb687b4d3e17154372564ad8d6bf11c3cf21f
+  version: b0a3dcfcd1a9bd48e63634bd8802960804cf8315
   subpackages:
   - googleapis/rpc/status
 - name: google.golang.org/grpc
@@ -251,5 +255,5 @@ imports:
 - name: gopkg.in/natefinch/lumberjack.v2
   version: dd45e6a67c53f673bb49ca8a001fd3a63ceb640e
 - name: gopkg.in/yaml.v2
-  version: 53feefa2559fb8dfa8d81baad31be332c97d6c77
+  version: cd8b52f8269e0feb286dfeef29f8fe4d5b397e0b
 testImports: []

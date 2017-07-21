@@ -46,16 +46,16 @@ import (
 )
 
 const (
-	authPrefix               = "/v2/auth"
-	keysPrefix               = "/v2/keys"
-	deprecatedMachinesPrefix = "/v2/machines"
-	membersPrefix            = "/v2/members"
-	statsPrefix              = "/v2/stats"
-	varsPath                 = "/debug/vars"
-	metricsPath              = "/metrics"
-	healthPath               = "/health"
-	versionPath              = "/version"
-	configPath               = "/config"
+	authPrefix     = "/v2/auth"
+	keysPrefix     = "/v2/keys"
+	machinesPrefix = "/v2/machines"
+	membersPrefix  = "/v2/members"
+	statsPrefix    = "/v2/stats"
+	varsPath       = "/debug/vars"
+	metricsPath    = "/metrics"
+	healthPath     = "/health"
+	versionPath    = "/version"
+	configPath     = "/config"
 )
 
 // NewClientHandler generates a muxed http.Handler with the given parameters to serve etcd client requests.
@@ -84,9 +84,7 @@ func NewClientHandler(server *etcdserver.EtcdServer, timeout time.Duration) http
 		clientCertAuthEnabled: server.Cfg.ClientCertAuthEnabled,
 	}
 
-	dmh := &deprecatedMachinesHandler{
-		cluster: server.Cluster(),
-	}
+	mah := &machinesHandler{cluster: server.Cluster()}
 
 	sech := &authHandler{
 		sec:                   sec,
@@ -108,7 +106,7 @@ func NewClientHandler(server *etcdserver.EtcdServer, timeout time.Duration) http
 	mux.Handle(metricsPath, prometheus.Handler())
 	mux.Handle(membersPrefix, mh)
 	mux.Handle(membersPrefix+"/", mh)
-	mux.Handle(deprecatedMachinesPrefix, dmh)
+	mux.Handle(machinesPrefix, mah)
 	handleAuth(mux, sech)
 
 	return requestLogger(mux)
@@ -170,11 +168,11 @@ func (h *keysHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type deprecatedMachinesHandler struct {
+type machinesHandler struct {
 	cluster api.Cluster
 }
 
-func (h *deprecatedMachinesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *machinesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !allowMethod(w, r.Method, "GET", "HEAD") {
 		return
 	}
