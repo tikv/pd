@@ -528,10 +528,10 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 	// Remove 2 peers
 	peerCount := 5
-	for {
+	for i := 0; i < 10; i++ {
 		resp := s.heartbeatRegion(c, s.clusterID, 0, region, leaderPeer, false)
 		if resp == nil {
-			break
+			continue
 		}
 		if resp.GetTransferLeader() != nil {
 			leaderPeer = resp.GetTransferLeader().GetPeer()
@@ -548,9 +548,11 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 		// Check region peer count.
 		peerCount--
 		region = s.checkRegionPeerCount(c, regionKey, peerCount)
+		if peerCount == 3 {
+			return
+		}
 	}
-
-	region = s.checkRegionPeerCount(c, regionKey, 3)
+	c.Fatal("peerCount not decrease to 3 after retry 10 times")
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {

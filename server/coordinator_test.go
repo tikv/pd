@@ -80,7 +80,7 @@ func (s *mockHeartbeatStream) Send(m *pdpb.RegionHeartbeatResponse) error {
 
 func (s *mockHeartbeatStream) Recv() *pdpb.RegionHeartbeatResponse {
 	select {
-	case <-time.After(time.Millisecond * 200):
+	case <-time.After(time.Millisecond * 500):
 		return nil
 	case res := <-s.ch:
 		return res
