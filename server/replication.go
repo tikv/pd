@@ -63,29 +63,14 @@ func (r *Replication) GetDistinctScore(stores []*storeInfo, other *storeInfo) fl
 	score := float64(0)
 	locationLabels := r.GetLocationLabels()
 
-	for i := range locationLabels {
-		keys := locationLabels[0 : i+1]
-		level := len(locationLabels) - i - 1
-		levelScore := math.Pow(replicaBaseScore, float64(level))
-
-		for _, s := range stores {
-			if s.GetId() == other.GetId() {
-				continue
-			}
-			id1 := s.getLocationID(keys)
-			if len(id1) == 0 {
-				return 0
-			}
-			id2 := other.getLocationID(keys)
-			if len(id2) == 0 {
-				return 0
-			}
-			if id1 != id2 {
-				score += levelScore
-			}
+	for _, s := range stores {
+		if s.GetId() == other.GetId() {
+			continue
+		}
+		if index := s.compareLocation(other, locationLabels); index != -1 {
+			score += math.Pow(replicaBaseScore, float64(len(locationLabels)-index-1))
 		}
 	}
-
 	return score
 }
 

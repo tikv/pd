@@ -50,12 +50,12 @@ func (s *testReplicationSuite) TestDistinctScore(c *C) {
 				store := cluster.getStore(storeID)
 				stores = append(stores, store)
 
-				// Number of stores with different zones.
+				// Number of stores in different zones.
 				nzones := i * len(racks) * len(hosts)
-				// Number of stores with different racks.
-				nracks := nzones + j*len(hosts)
-				// Number of stores with different hosts.
-				nhosts := nracks + k
+				// Number of stores in the same zone but in different racks.
+				nracks := j * len(hosts)
+				// Number of stores in the same rack but in different hosts.
+				nhosts := k
 				score := (nzones*replicaBaseScore+nracks)*replicaBaseScore + nhosts
 				c.Assert(rep.GetDistinctScore(stores, store), Equals, float64(score))
 			}

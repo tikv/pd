@@ -131,16 +131,18 @@ func (s *storeInfo) getLabelValue(key string) string {
 	return ""
 }
 
-func (s *storeInfo) getLocationID(keys []string) string {
-	id := ""
-	for _, k := range keys {
-		v := s.getLabelValue(k)
-		if len(v) == 0 {
-			return ""
+// compareLocation compares 2 stores' labels and returns at which level their
+// locations are different. It returns -1 if they are at the same location.
+func (s *storeInfo) compareLocation(other *storeInfo, labels []string) int {
+	for i, key := range labels {
+		v1, v2 := s.getLabelValue(key), other.getLabelValue(key)
+		// If label is not set, the store is considered at the same location
+		// with any other store.
+		if v1 != "" && v2 != "" && v1 != v2 {
+			return i
 		}
-		id += v
 	}
-	return id
+	return -1
 }
 
 // StoreStatus contains information about a store's status.
