@@ -402,6 +402,19 @@ func (c *RaftCluster) GetStore(storeID uint64) (*metapb.Store, *StoreStatus, err
 	return store.Store, store.status, nil
 }
 
+// UpdateStoreLabels updates a store's location labels.
+func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel) error {
+	store := c.cachedCluster.getStore(storeID)
+	if store == nil {
+		return errors.Errorf("invalid store ID %d, not found", storeID)
+	}
+	storeMeta := store.Store
+	storeMeta.Labels = labels
+	// putStore will perform label merge.
+	err := c.putStore(storeMeta)
+	return errors.Trace(err)
+}
+
 func (c *RaftCluster) putStore(store *metapb.Store) error {
 	c.Lock()
 	defer c.Unlock()
@@ -430,13 +443,13 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	} else {
 		// Update an existed store.
 		s.Address = store.Address
-		s.Labels = store.Labels
+		s.mergeLabels(store.Labels)
 	}
 
 	// Check location labels.
 	for _, k := range c.s.cfg.Replication.LocationLabels {
 		if v := s.getLabelValue(k); len(v) == 0 {
-			return errors.Errorf("missing location label %q in store %v", k, s)
+			log.Warnf("missing location label %q in store %v", k, s)
 		}
 	}
 

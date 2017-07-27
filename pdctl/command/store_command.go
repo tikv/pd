@@ -16,6 +16,7 @@ package command
 import (
 	"fmt"
 	"net/http"
+	"path"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -29,11 +30,12 @@ var (
 // NewStoreCommand return a store subcommand of rootCmd
 func NewStoreCommand() *cobra.Command {
 	s := &cobra.Command{
-		Use:   "store [delete] <store_id>",
+		Use:   "store [delete|label] <store_id>",
 		Short: "show the store status",
 		Run:   showStoreCommandFunc,
 	}
 	s.AddCommand(NewDeleteStoreCommand())
+	s.AddCommand(NewLabelStoreCommand())
 	return s
 }
 
@@ -45,6 +47,16 @@ func NewDeleteStoreCommand() *cobra.Command {
 		Run:   deleteStoreCommandFunc,
 	}
 	return d
+}
+
+// NewLabelStoreCommand returns a label subcommand of storeCmd.
+func NewLabelStoreCommand() *cobra.Command {
+	l := &cobra.Command{
+		Use:   "label <store_id> <key> <value>",
+		Short: "set a store's label value",
+		Run:   labelStoreCommandFunc,
+	}
+	return l
 }
 
 func showStoreCommandFunc(cmd *cobra.Command, args []string) {
@@ -81,4 +93,17 @@ func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	fmt.Println("Success!")
+}
+
+func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 3 {
+		fmt.Println("Usage: store label <store_id> <key> <value>")
+		return
+	}
+	if _, err := strconv.Atoi(args[0]); err != nil {
+		fmt.Println("store_id should be a number")
+		return
+	}
+	prefix := fmt.Sprintf(path.Join(storePrefix, "label"), args[0])
+	postJSON(cmd, prefix, map[string]interface{}{args[1]: args[2]})
 }

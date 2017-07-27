@@ -145,6 +145,19 @@ func (s *storeInfo) compareLocation(other *storeInfo, labels []string) int {
 	return -1
 }
 
+func (s *storeInfo) mergeLabels(labels []*metapb.StoreLabel) {
+L:
+	for _, newLabel := range labels {
+		for _, label := range s.Labels {
+			if label.Key == newLabel.Key {
+				label.Value = newLabel.Value
+				continue L
+			}
+		}
+		s.Labels = append(s.Labels, newLabel)
+	}
+}
+
 // StoreStatus contains information about a store's status.
 type StoreStatus struct {
 	*pdpb.StoreStats
