@@ -14,6 +14,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -99,11 +100,13 @@ func (s *testStoreSuite) TestStoresList(c *C) {
 	checkStoresInfo(c, info.Stores, s.stores[:3])
 
 	url = fmt.Sprintf("%s/stores?state=0", s.urlPrefix)
+	info = new(storesInfo)
 	err = readJSONWithURL(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[:2])
 
 	url = fmt.Sprintf("%s/stores?state=1", s.urlPrefix)
+	info = new(storesInfo)
 	err = readJSONWithURL(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[2:3])
@@ -116,6 +119,28 @@ func (s *testStoreSuite) TestStoreGet(c *C) {
 	err := readJSONWithURL(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, []*storeInfo{info}, s.stores[:1])
+}
+
+func (s *testStoreSuite) TestStoreLabel(c *C) {
+	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
+	var info storeInfo
+	err := readJSONWithURL(url, &info)
+	c.Assert(err, IsNil)
+	c.Assert(info.Store.Labels, HasLen, 0)
+
+	labels := map[string]string{"zone": "cn", "host": "local"}
+	b, err := json.Marshal(labels)
+	c.Assert(err, IsNil)
+	err = postJSON(&http.Client{}, url+"/label", b)
+	c.Assert(err, IsNil)
+
+	err = readJSONWithURL(url, &info)
+	c.Assert(err, IsNil)
+	c.Assert(info.Store.Labels, HasLen, len(labels))
+	for _, l := range info.Store.Labels {
+		c.Assert(labels[l.Key], Equals, l.Value)
+	}
+	s.stores[0].Labels = info.Store.Labels
 }
 
 func (s *testStoreSuite) TestStoreDelete(c *C) {
