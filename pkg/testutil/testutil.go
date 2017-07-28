@@ -16,12 +16,30 @@ package testutil
 import (
 	"fmt"
 	"net"
+	"sync"
+	"time"
 
 	log "github.com/Sirupsen/logrus"
 )
 
+var (
+	testAddrMutex sync.Mutex
+	testAddrMap   = make(map[string]struct{})
+)
+
 // AllocTestURL allocates a local URL for testing.
 func AllocTestURL() string {
+	for i := 0; i < 10; i++ {
+		if u := tryAllocTestURL(); u != "" {
+			return u
+		}
+		time.Sleep(time.Second)
+	}
+	log.Fatal("failed to alloc test URL")
+	return ""
+}
+
+func tryAllocTestURL() string {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		log.Fatal(err)
@@ -31,5 +49,12 @@ func AllocTestURL() string {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	testAddrMutex.Lock()
+	defer testAddrMutex.Unlock()
+	if _, ok := testAddrMap[addr]; ok {
+		return ""
+	}
+	testAddrMap[addr] = struct{}{}
 	return addr
 }
