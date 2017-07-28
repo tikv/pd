@@ -37,7 +37,7 @@ const (
 	// longer then 1s, they are considered as slow requests.
 	DefaultSlowRequestTime = 1 * time.Second
 
-	maxCheckEtcdRunningCount = 60 * 10
+	maxCheckEtcdRunningCount = 60
 	checkEtcdRunningDelay    = 1 * time.Second
 )
 
