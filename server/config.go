@@ -305,7 +305,7 @@ const (
 	defaultMaxReplicas          = 3
 	defaultMaxSnapshotCount     = 3
 	defaultMaxStoreDownTime     = time.Hour
-	defaultLeaderScheduleLimit  = 1024
+	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 16
 )

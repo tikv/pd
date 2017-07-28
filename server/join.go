@@ -128,11 +128,11 @@ func PrepareJoinCluster(cfg *Config) error {
 
 	pds := []string{}
 	for _, memb := range listResp.Members {
+		n := memb.Name
+		if memb.ID == addResp.Member.ID {
+			n = cfg.Name
+		}
 		for _, m := range memb.PeerURLs {
-			n := memb.Name
-			if memb.ID == addResp.Member.ID {
-				n = cfg.Name
-			}
 			pds = append(pds, fmt.Sprintf("%s=%s", n, m))
 		}
 	}
