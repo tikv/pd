@@ -128,6 +128,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.Labels, HasLen, 0)
 
+	// Test set.
 	labels := map[string]string{"zone": "cn", "host": "local"}
 	b, err := json.Marshal(labels)
 	c.Assert(err, IsNil)
@@ -140,6 +141,22 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	for _, l := range info.Store.Labels {
 		c.Assert(labels[l.Key], Equals, l.Value)
 	}
+
+	// Test merge.
+	labels = map[string]string{"zack": "zack1", "host": "host1"}
+	b, err = json.Marshal(labels)
+	c.Assert(err, IsNil)
+	err = postJSON(&http.Client{}, url+"/label", b)
+	c.Assert(err, IsNil)
+
+	expectLabel := map[string]string{"zone": "cn", "zack": "zack1", "host": "host1"}
+	err = readJSONWithURL(url, &info)
+	c.Assert(err, IsNil)
+	c.Assert(info.Store.Labels, HasLen, len(expectLabel))
+	for _, l := range info.Store.Labels {
+		c.Assert(expectLabel[l.Key], Equals, l.Value)
+	}
+
 	s.stores[0].Labels = info.Store.Labels
 }
 
