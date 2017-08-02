@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,6 +84,11 @@ func (s *testMemberAPISuite) TestMemberList(c *C) {
 }
 
 func (s *testMemberAPISuite) TestMemberDelete(c *C) {
+	s.testMemberDelete(c, true)
+	s.testMemberDelete(c, false)
+}
+
+func (s *testMemberAPISuite) testMemberDelete(c *C, byName bool) {
 	cfgs, svrs, clean := mustNewCluster(c, 3)
 	defer clean()
 
@@ -109,6 +115,7 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 
 	var table = []struct {
 		name    string
+		id      uint64
 		checker Checker
 		status  int
 	}{
@@ -121,19 +128,26 @@ func (s *testMemberAPISuite) TestMemberDelete(c *C) {
 		{
 			// delete a pd randomly
 			name:    server.Name(),
+			id:      server.ID(),
 			checker: Equals,
 			status:  http.StatusOK,
 		},
 		{
 			// delete it again
 			name:    server.Name(),
+			id:      server.ID(),
 			checker: Equals,
 			status:  http.StatusNotFound,
 		},
 	}
 
 	for _, t := range table {
-		addr := clientURL + apiPrefix + "/api/v1/members/" + t.name
+		var addr string
+		if byName {
+			addr = clientURL + apiPrefix + "/api/v1/members/" + t.name
+		} else {
+			addr = clientURL + apiPrefix + "/api/v1/members/id/" + strconv.FormatUint(t.id, 10)
+		}
 		req, err := http.NewRequest("DELETE", addr, nil)
 		c.Assert(err, IsNil)
 		resp, err := s.hc.Do(req)
