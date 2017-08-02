@@ -16,6 +16,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -64,7 +65,7 @@ func newMemberDeleteHandler(svr *server.Server, rd *render.Render) *memberDelete
 	}
 }
 
-func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *memberDeleteHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
 	client := h.svr.GetClient()
 
 	// step 1. get etcd id
@@ -94,6 +95,23 @@ func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %s", name))
+}
+
+func (h *memberDeleteHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
+	idStr := mux.Vars(r)["id"]
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	client := h.svr.GetClient()
+	_, err = etcdutil.RemoveEtcdMember(client, id)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %v", id))
 }
 
 type leaderHandler struct {

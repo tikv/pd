@@ -22,7 +22,6 @@ import (
 
 var (
 	membersPrefix      = "pd/api/v1/members"
-	memberPrefix       = "pd/api/v1/members/%s"
 	leaderMemberPrefix = "pd/api/v1/leader"
 )
 
@@ -41,10 +40,19 @@ func NewMemberCommand() *cobra.Command {
 // NewDeleteMemberCommand return a delete subcommand of memberCmd
 func NewDeleteMemberCommand() *cobra.Command {
 	d := &cobra.Command{
-		Use:   "delete <member_name>",
-		Short: "delete the member",
-		Run:   deleteMemberCommandFunc,
+		Use:   "delete <subcommand>",
+		Short: "delete a member",
 	}
+	d.AddCommand(&cobra.Command{
+		Use:   "name <member_name>",
+		Short: "delete a member by name",
+		Run:   deleteMemberByNameCommandFunc,
+	})
+	d.AddCommand(&cobra.Command{
+		Use:   "id <member_id>",
+		Short: "delete a member by id",
+		Run:   deleteMemberByIDCommandFunc,
+	})
 	return d
 }
 
@@ -67,12 +75,26 @@ func showMemberCommandFunc(cmd *cobra.Command, args []string) {
 	fmt.Println(r)
 }
 
-func deleteMemberCommandFunc(cmd *cobra.Command, args []string) {
+func deleteMemberByNameCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		fmt.Println("Usage: member delete <member_name>")
 		return
 	}
-	prefix := fmt.Sprintf(memberPrefix, args[0])
+	prefix := membersPrefix + "/" + args[0]
+	_, err := doRequest(cmd, prefix, http.MethodDelete)
+	if err != nil {
+		fmt.Printf("Failed to delete member %s: %s", args[0], err)
+		return
+	}
+	fmt.Println("Success!")
+}
+
+func deleteMemberByIDCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		fmt.Println("Usage: member delete id <member_id>")
+		return
+	}
+	prefix := membersPrefix + "/id/" + args[0]
 	_, err := doRequest(cmd, prefix, http.MethodDelete)
 	if err != nil {
 		fmt.Printf("Failed to delete member %s: %s", args[0], err)

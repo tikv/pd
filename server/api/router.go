@@ -80,7 +80,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.Handle("/api/v1/status", newStatusHandler(rd)).Methods("GET")
 
 	router.Handle("/api/v1/members", newMemberListHandler(svr, rd)).Methods("GET")
-	router.Handle("/api/v1/members/{name}", newMemberDeleteHandler(svr, rd)).Methods("DELETE")
+	memberDeleteHandler := newMemberDeleteHandler(svr, rd)
+	router.HandleFunc("/api/v1/members/{name}", memberDeleteHandler.DeleteByName).Methods("DELETE")
+	router.HandleFunc("/api/v1/members/id/{id}", memberDeleteHandler.DeleteByID).Methods("DELETE")
 	router.Handle("/api/v1/leader", newLeaderHandler(svr, rd)).Methods("GET")
 
 	router.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
