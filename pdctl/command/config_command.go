@@ -74,7 +74,7 @@ func NewSetConfigCommand() *cobra.Command {
 func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, schedulePrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get config: %s", err)
+		fmt.Printf("Failed to get config: %s\n", err)
 		return
 	}
 	fmt.Println(r)
@@ -83,7 +83,7 @@ func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 func showAllConfigCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, configPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get config: %s", err)
+		fmt.Printf("Failed to get config: %s\n", err)
 		return
 	}
 	fmt.Println(r)
@@ -117,7 +117,7 @@ func setConfigCommandFunc(cmd *cobra.Command, args []string) {
 	opt, val := args[0], args[1]
 	err := postConfigDataWithPath(cmd, opt, val, configPrefix)
 	if err != nil {
-		fmt.Printf("Failed to set config: %s", err)
+		fmt.Printf("Failed to set config: %s\n", err)
 		return
 	}
 	fmt.Println("Success!")

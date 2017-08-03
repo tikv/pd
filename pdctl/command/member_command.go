@@ -69,7 +69,7 @@ func NewLeaderMemberCommand() *cobra.Command {
 func showMemberCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, membersPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get pd members: %s", err)
+		fmt.Printf("Failed to get pd members: %s\n", err)
 		return
 	}
 	fmt.Println(r)
@@ -83,7 +83,7 @@ func deleteMemberByNameCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := membersPrefix + "/" + args[0]
 	_, err := doRequest(cmd, prefix, http.MethodDelete)
 	if err != nil {
-		fmt.Printf("Failed to delete member %s: %s", args[0], err)
+		fmt.Printf("Failed to delete member %s: %s\n", args[0], err)
 		return
 	}
 	fmt.Println("Success!")
@@ -97,7 +97,7 @@ func deleteMemberByIDCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := membersPrefix + "/id/" + args[0]
 	_, err := doRequest(cmd, prefix, http.MethodDelete)
 	if err != nil {
-		fmt.Printf("Failed to delete member %s: %s", args[0], err)
+		fmt.Printf("Failed to delete member %s: %s\n", args[0], err)
 		return
 	}
 	fmt.Println("Success!")
@@ -106,7 +106,7 @@ func deleteMemberByIDCommandFunc(cmd *cobra.Command, args []string) {
 func getLeaderMemberCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, leaderMemberPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get the leader of pd members: %s", err)
+		fmt.Printf("Failed to get the leader of pd members: %s\n", err)
 		return
 	}
 	fmt.Println(r)

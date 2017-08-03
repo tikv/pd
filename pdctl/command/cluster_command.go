@@ -35,7 +35,7 @@ func NewClusterCommand() *cobra.Command {
 func showClusterCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, clusterPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get the cluster information: %s", err)
+		fmt.Printf("Failed to get the cluster information: %s\n", err)
 		return
 	}
 	fmt.Println(r)

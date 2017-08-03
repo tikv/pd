@@ -71,7 +71,7 @@ func showStoreCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get store: %s", err)
+		fmt.Printf("Failed to get store: %s\n", err)
 		return
 	}
 	fmt.Println(r)
@@ -89,7 +89,7 @@ func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := fmt.Sprintf(storePrefix, args[0])
 	_, err := doRequest(cmd, prefix, http.MethodDelete)
 	if err != nil {
-		fmt.Printf("Failed to delete store %s: %s", args[0], err)
+		fmt.Printf("Failed to delete store %s: %s\n", args[0], err)
 		return
 	}
 	fmt.Println("Success!")

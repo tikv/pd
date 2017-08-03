@@ -58,7 +58,7 @@ func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get region: %s", err)
+		fmt.Printf("Failed to get region: %s\n", err)
 		return
 	}
 	fmt.Println(r)
@@ -104,7 +104,7 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := regionKeyPrefix + "/" + key
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get region: %s", err)
+		fmt.Printf("Failed to get region: %s\n", err)
 		return
 	}
 	fmt.Println(r)
