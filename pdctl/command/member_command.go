@@ -80,7 +80,7 @@ func deleteMemberByNameCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println("Usage: member delete <member_name>")
 		return
 	}
-	prefix := membersPrefix + "/" + args[0]
+	prefix := membersPrefix + "/name/" + args[0]
 	_, err := doRequest(cmd, prefix, http.MethodDelete)
 	if err != nil {
 		fmt.Printf("Failed to delete member %s: %s\n", args[0], err)

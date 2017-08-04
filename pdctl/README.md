@@ -76,7 +76,7 @@ show the pd members status
   "addr": "http://192.168.199.229:2379",
   "id": 9724873857558226554
 }
->> member delete pd2
+>> member delete name pd2
 Success!
 ```
 

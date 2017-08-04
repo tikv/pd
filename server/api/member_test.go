@@ -144,7 +144,7 @@ func (s *testMemberAPISuite) testMemberDelete(c *C, byName bool) {
 	for _, t := range table {
 		var addr string
 		if byName {
-			addr = clientURL + apiPrefix + "/api/v1/members/" + t.name
+			addr = clientURL + apiPrefix + "/api/v1/members/name/" + t.name
 		} else {
 			addr = clientURL + apiPrefix + "/api/v1/members/id/" + strconv.FormatUint(t.id, 10)
 		}
