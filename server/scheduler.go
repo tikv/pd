@@ -74,7 +74,7 @@ func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 		balancerCounter.WithLabelValues(s.GetName(), "no_follower").Inc()
 		return nil
 	}
-	balancerCounter.WithLabelValues(s.GetName(), "add_operator").Inc()
+	balancerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	return newTransferLeader(region, region.GetStorePeer(s.storeID))
 }
 
@@ -130,7 +130,7 @@ func (s *evictLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 		balancerCounter.WithLabelValues(s.GetName(), "no_target_store").Inc()
 		return nil
 	}
-	balancerCounter.WithLabelValues(s.GetName(), "add_operator").Inc()
+	balancerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	return newTransferLeader(region, region.GetStorePeer(target.GetId()))
 }
 
@@ -183,7 +183,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 		}
 		// Mark the selected store.
 		s.selected = region.Leader
-		balancerCounter.WithLabelValues(s.GetName(), "add_operator").Inc()
+		balancerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 		return newTransferLeader(region, newLeader)
 	}
 
@@ -197,7 +197,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 		balancerCounter.WithLabelValues(s.GetName(), "no_follower").Inc()
 		return nil
 	}
-	balancerCounter.WithLabelValues(s.GetName(), "add_operator").Inc()
+	balancerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	return newTransferLeader(region, region.GetStorePeer(storeID))
 }
 
@@ -248,7 +248,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 		return nil
 	}
 
-	balancerCounter.WithLabelValues(s.GetName(), "add_operator").Inc()
+	balancerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	return newTransferPeer(region, RegionKind, oldPeer, newPeer)
 }
 
