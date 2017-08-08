@@ -110,7 +110,8 @@ func (l *balanceLeaderScheduler) Prepare(cluster *clusterInfo) error { return ni
 func (l *balanceLeaderScheduler) Cleanup(cluster *clusterInfo) {}
 
 func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
-	region, newLeader := scheduleTransferLeader(cluster, l.selector)
+	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
+	region, newLeader := scheduleTransferLeader(cluster, l.GetName(), l.selector)
 	if region == nil {
 		return nil
 	}
@@ -118,9 +119,11 @@ func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 	source := cluster.getStore(region.Leader.GetStoreId())
 	target := cluster.getStore(newLeader.GetStoreId())
 	if !shouldBalance(source, target, l.GetResourceKind()) {
+		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}
 	l.limit = adjustBalanceLimit(cluster, l.GetResourceKind())
+	schedulerCounter.WithLabelValues(l.GetName(), "new_opeartor").Inc()
 	return newTransferLeader(region, newLeader)
 }
 
@@ -168,14 +171,16 @@ func (s *balanceRegionScheduler) Prepare(cluster *clusterInfo) error { return ni
 func (s *balanceRegionScheduler) Cleanup(cluster *clusterInfo) {}
 
 func (s *balanceRegionScheduler) Schedule(cluster *clusterInfo) Operator {
+	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	// Select a peer from the store with most regions.
-	region, oldPeer := scheduleRemovePeer(cluster, s.selector)
+	region, oldPeer := scheduleRemovePeer(cluster, s.GetName(), s.selector)
 	if region == nil {
 		return nil
 	}
 
 	// We don't schedule region with abnormal number of replicas.
 	if len(region.GetPeers()) != s.rep.GetMaxReplicas() {
+		schedulerCounter.WithLabelValues(s.GetName(), "abnormal_replica").Inc()
 		return nil
 	}
 
@@ -185,6 +190,7 @@ func (s *balanceRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 		// and skip it for a while.
 		s.cache.set(oldPeer.GetStoreId())
 	}
+	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	return op
 }
 
@@ -197,11 +203,13 @@ func (s *balanceRegionScheduler) transferPeer(cluster *clusterInfo, region *Regi
 	checker := newReplicaChecker(s.opt, cluster)
 	newPeer := checker.SelectBestPeerToAddReplica(region, scoreGuard)
 	if newPeer == nil {
+		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
 		return nil
 	}
 
 	target := cluster.getStore(newPeer.GetStoreId())
 	if !shouldBalance(source, target, s.GetResourceKind()) {
+		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
 	}
 	s.limit = adjustBalanceLimit(cluster, s.GetResourceKind())
@@ -474,20 +482,24 @@ func (h *balanceHotRegionScheduler) Prepare(cluster *clusterInfo) error { return
 func (h *balanceHotRegionScheduler) Cleanup(cluster *clusterInfo) {}
 
 func (h *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
+	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
 	h.calcScore(cluster)
 
 	// balance by peer
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster)
 	if srcRegion != nil {
+		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
 		return newTransferPeer(srcRegion, PriorityKind, srcPeer, destPeer)
 	}
 
 	// balance by leader
 	srcRegion, newLeader := h.balanceByLeader(cluster)
 	if srcRegion != nil {
+		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 		return newPriorityTransferLeader(srcRegion, newLeader)
 	}
 
+	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 	return nil
 }
 
