@@ -68,13 +68,13 @@ func (s *grantLeaderScheduler) Cleanup(cluster *clusterInfo) {
 }
 
 func (s *grantLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
-	balancerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region := cluster.randFollowerRegion(s.storeID)
 	if region == nil {
-		balancerCounter.WithLabelValues(s.GetName(), "no_follower").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no_follower").Inc()
 		return nil
 	}
-	balancerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
+	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	return newTransferLeader(region, region.GetStorePeer(s.storeID))
 }
 
@@ -119,18 +119,18 @@ func (s *evictLeaderScheduler) Cleanup(cluster *clusterInfo) {
 }
 
 func (s *evictLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
-	balancerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region := cluster.randLeaderRegion(s.storeID)
 	if region == nil {
-		balancerCounter.WithLabelValues(s.GetName(), "no_leader").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no_leader").Inc()
 		return nil
 	}
 	target := s.selector.SelectTarget(cluster.getFollowerStores(region))
 	if target == nil {
-		balancerCounter.WithLabelValues(s.GetName(), "no_target_store").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no_target_store").Inc()
 		return nil
 	}
-	balancerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
+	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	return newTransferLeader(region, region.GetStorePeer(target.GetId()))
 }
 
@@ -174,7 +174,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 	// 3. transfer a leader to the store from another store.
 	// These will not change store's leader count, but swap leaders between stores.
 
-	balancerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	// Select a store and transfer a leader from it.
 	if s.selected == nil {
 		region, newLeader := scheduleTransferLeader(cluster, s.GetName(), s.selector)
@@ -183,7 +183,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 		}
 		// Mark the selected store.
 		s.selected = region.Leader
-		balancerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 		return newTransferLeader(region, newLeader)
 	}
 
@@ -194,10 +194,10 @@ func (s *shuffleLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 	// Transfer a leader to the selected store.
 	region := cluster.randFollowerRegion(storeID)
 	if region == nil {
-		balancerCounter.WithLabelValues(s.GetName(), "no_follower").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no_follower").Inc()
 		return nil
 	}
-	balancerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
+	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	return newTransferLeader(region, region.GetStorePeer(storeID))
 }
 
@@ -234,21 +234,21 @@ func (s *shuffleRegionScheduler) Prepare(cluster *clusterInfo) error { return ni
 func (s *shuffleRegionScheduler) Cleanup(cluster *clusterInfo) {}
 
 func (s *shuffleRegionScheduler) Schedule(cluster *clusterInfo) Operator {
-	balancerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region, oldPeer := scheduleRemovePeer(cluster, s.GetName(), s.selector)
 	if region == nil {
-		balancerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
 		return nil
 	}
 
 	excludedFilter := newExcludedFilter(nil, region.GetStoreIds())
 	newPeer := scheduleAddPeer(cluster, s.selector, excludedFilter)
 	if newPeer == nil {
-		balancerCounter.WithLabelValues(s.GetName(), "no_new_peer").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no_new_peer").Inc()
 		return nil
 	}
 
-	balancerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
+	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	return newTransferPeer(region, RegionKind, oldPeer, newPeer)
 }
 
@@ -317,7 +317,7 @@ func scheduleRemovePeer(cluster *clusterInfo, schedulerName string, s Selector, 
 
 	source := s.SelectSource(stores, filters...)
 	if source == nil {
-		balancerCounter.WithLabelValues(schedulerName, "no_store").Inc()
+		schedulerCounter.WithLabelValues(schedulerName, "no_store").Inc()
 		return nil, nil
 	}
 
@@ -326,7 +326,7 @@ func scheduleRemovePeer(cluster *clusterInfo, schedulerName string, s Selector, 
 		region = cluster.randLeaderRegion(source.GetId())
 	}
 	if region == nil {
-		balancerCounter.WithLabelValues(schedulerName, "no_region").Inc()
+		schedulerCounter.WithLabelValues(schedulerName, "no_region").Inc()
 		return nil, nil
 	}
 
@@ -337,7 +337,7 @@ func scheduleRemovePeer(cluster *clusterInfo, schedulerName string, s Selector, 
 func scheduleTransferLeader(cluster *clusterInfo, schedulerName string, s Selector, filters ...Filter) (*RegionInfo, *metapb.Peer) {
 	stores := cluster.getStores()
 	if len(stores) == 0 {
-		balancerCounter.WithLabelValues(schedulerName, "no_store").Inc()
+		schedulerCounter.WithLabelValues(schedulerName, "no_store").Inc()
 		return nil, nil
 	}
 
@@ -357,7 +357,7 @@ func scheduleTransferLeader(cluster *clusterInfo, schedulerName string, s Select
 		leastLeaderDistance = math.Abs(leastLeaderStore.leaderScore() - averageLeader)
 	}
 	if mostLeaderDistance == 0 && leastLeaderDistance == 0 {
-		balancerCounter.WithLabelValues(schedulerName, "already_balanced").Inc()
+		schedulerCounter.WithLabelValues(schedulerName, "already_balanced").Inc()
 		return nil, nil
 	}
 
@@ -365,13 +365,13 @@ func scheduleTransferLeader(cluster *clusterInfo, schedulerName string, s Select
 		// Transfer a leader out of mostLeaderStore.
 		region := cluster.randLeaderRegion(mostLeaderStore.GetId())
 		if region == nil {
-			balancerCounter.WithLabelValues(schedulerName, "no_leader_region").Inc()
+			schedulerCounter.WithLabelValues(schedulerName, "no_leader_region").Inc()
 			return nil, nil
 		}
 		targetStores := cluster.getFollowerStores(region)
 		target := s.SelectTarget(targetStores)
 		if target == nil {
-			balancerCounter.WithLabelValues(schedulerName, "no_target_store").Inc()
+			schedulerCounter.WithLabelValues(schedulerName, "no_target_store").Inc()
 			return nil, nil
 		}
 
@@ -381,7 +381,7 @@ func scheduleTransferLeader(cluster *clusterInfo, schedulerName string, s Select
 	// Transfer a leader into leastLeaderStore.
 	region := cluster.randFollowerRegion(leastLeaderStore.GetId())
 	if region == nil {
-		balancerCounter.WithLabelValues(schedulerName, "no_target_peer").Inc()
+		schedulerCounter.WithLabelValues(schedulerName, "no_target_peer").Inc()
 		return nil, nil
 	}
 	return region, region.GetStorePeer(leastLeaderStore.GetId())

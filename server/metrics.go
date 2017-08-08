@@ -65,7 +65,7 @@ var (
 			Help:      "Status of the scheduler.",
 		}, []string{"kind", "type"})
 
-	balancerCounter = prometheus.NewCounterVec(
+	schedulerCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "scheduler",
@@ -105,7 +105,7 @@ func init() {
 	prometheus.MustRegister(clusterStatusGauge)
 	prometheus.MustRegister(timeJumpBackCounter)
 	prometheus.MustRegister(schedulerStatusGauge)
-	prometheus.MustRegister(balancerCounter)
+	prometheus.MustRegister(schedulerCounter)
 	prometheus.MustRegister(regionHeartbeatCounter)
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(tsoCounter)
