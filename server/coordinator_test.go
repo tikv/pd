@@ -458,6 +458,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 }
 
 func checkAddPeerResp(c *C, resp *pdpb.RegionHeartbeatResponse, storeID uint64) {
+	c.Log(resp)
 	changePeer := resp.GetChangePeer()
 	c.Assert(changePeer.GetChangeType(), Equals, pdpb.ConfChangeType_AddNode)
 	c.Assert(changePeer.GetPeer().GetStoreId(), Equals, storeID)
