@@ -69,8 +69,8 @@ var (
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "scheduler",
-			Name:      "banalcer",
-			Help:      "Counter of balancer events.",
+			Name:      "event_count",
+			Help:      "Counter of scheduler events.",
 		}, []string{"type", "name"})
 
 	regionHeartbeatCounter = prometheus.NewCounterVec(
