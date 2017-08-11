@@ -193,3 +193,46 @@ func (s *testMemberAPISuite) TestMemberLeader(c *C) {
 	c.Assert(got.GetClientUrls(), DeepEquals, leader.GetClientUrls())
 	c.Assert(got.GetMemberId(), Equals, leader.GetMemberId())
 }
+
+func (s *testMemberAPISuite) TestLeaderResign(c *C) {
+	cfgs, svrs, clean := mustNewCluster(c, 3)
+	defer clean()
+
+	addrs := make(map[uint64]string)
+	for i := range cfgs {
+		addrs[svrs[i].ID()] = cfgs[i].ClientUrls
+	}
+
+	leader1, err := svrs[0].GetLeader()
+	c.Assert(err, IsNil)
+
+	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/leader/resign")
+	leader2 := s.waitLeaderChange(c, svrs[0], leader1)
+	s.post(c, addrs[leader2.GetMemberId()]+apiPrefix+"/api/v1/leader/transfer/"+leader1.GetName())
+	leader3 := s.waitLeaderChange(c, svrs[0], leader2)
+	c.Assert(leader3.GetMemberId(), Equals, leader1.GetMemberId())
+}
+
+func (s *testMemberAPISuite) post(c *C, url string) {
+	for i := 0; i < 5; i++ {
+		res, err := http.Post(url, "", nil)
+		c.Assert(err, IsNil)
+		if res.StatusCode == http.StatusOK {
+			return
+		}
+		time.Sleep(time.Millisecond * 500)
+	}
+	c.Fatal("failed to send query after retry 5 times")
+}
+
+func (s *testMemberAPISuite) waitLeaderChange(c *C, svr *server.Server, old *pdpb.Member) *pdpb.Member {
+	for i := 0; i < 100; i++ {
+		leader, _ := svr.GetLeader()
+		if leader.GetMemberId() != old.GetMemberId() {
+			return leader
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	c.Fatal("leader is not changed after 10 seconds")
+	return nil
+}
