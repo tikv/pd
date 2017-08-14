@@ -86,9 +86,10 @@ type evictLeaderScheduler struct {
 }
 
 func newEvictLeaderScheduler(opt *scheduleOption, storeID uint64) *evictLeaderScheduler {
-	var filters []Filter
-	filters = append(filters, newStateFilter(opt))
-	filters = append(filters, newHealthFilter(opt))
+	filters := []Filter{
+		newStateFilter(opt),
+		newHealthFilter(opt),
+	}
 
 	return &evictLeaderScheduler{
 		opt:      opt,
@@ -141,9 +142,10 @@ type shuffleLeaderScheduler struct {
 }
 
 func newShuffleLeaderScheduler(opt *scheduleOption) *shuffleLeaderScheduler {
-	var filters []Filter
-	filters = append(filters, newStateFilter(opt))
-	filters = append(filters, newHealthFilter(opt))
+	filters := []Filter{
+		newStateFilter(opt),
+		newHealthFilter(opt),
+	}
 
 	return &shuffleLeaderScheduler{
 		opt:      opt,
@@ -207,9 +209,10 @@ type shuffleRegionScheduler struct {
 }
 
 func newShuffleRegionScheduler(opt *scheduleOption) *shuffleRegionScheduler {
-	var filters []Filter
-	filters = append(filters, newStateFilter(opt))
-	filters = append(filters, newHealthFilter(opt))
+	filters := []Filter{
+		newStateFilter(opt),
+		newHealthFilter(opt),
+	}
 
 	return &shuffleRegionScheduler{
 		opt:      opt,

@@ -18,8 +18,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand"
-	"net"
-	"net/http"
 	"reflect"
 	"strings"
 	"time"
@@ -210,35 +208,6 @@ func sliceClone(strs []string) []string {
 	}
 
 	return data
-}
-
-func rpcConnect(addr string) (net.Conn, error) {
-	req, err := http.NewRequest("GET", pdRPCPrefix, nil)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	urls, err := ParseUrls(addr)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	for _, url := range urls {
-		var conn net.Conn
-		conn, err = net.Dial("tcp", url.Host)
-
-		if err != nil {
-			continue
-		}
-		err = req.Write(conn)
-		if err != nil {
-			conn.Close()
-			continue
-		}
-		return conn, nil
-	}
-
-	return nil, errors.Errorf("connect to %s failed", addr)
 }
 
 // GetMembers return a slice of Members.

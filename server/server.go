@@ -39,7 +39,6 @@ const (
 	// pdRootPath for all pd servers.
 	pdRootPath      = "/pd"
 	pdAPIPrefix     = "/pd/"
-	pdRPCPrefix     = "/pd/rpc"
 	pdClusterIDPath = "/pd/cluster_id"
 )
 
@@ -81,8 +80,7 @@ type Server struct {
 	handler *Handler
 
 	// for raft cluster
-	clusterLock sync.RWMutex
-	cluster     *RaftCluster
+	cluster *RaftCluster
 
 	msgID uint64
 

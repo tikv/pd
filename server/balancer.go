@@ -81,11 +81,11 @@ type balanceLeaderScheduler struct {
 }
 
 func newBalanceLeaderScheduler(opt *scheduleOption) *balanceLeaderScheduler {
-	var filters []Filter
-	filters = append(filters, newBlockFilter())
-	filters = append(filters, newStateFilter(opt))
-	filters = append(filters, newHealthFilter(opt))
-
+	filters := []Filter{
+		newBlockFilter(),
+		newStateFilter(opt),
+		newHealthFilter(opt),
+	}
 	return &balanceLeaderScheduler{
 		opt:      opt,
 		limit:    1,
@@ -137,13 +137,13 @@ type balanceRegionScheduler struct {
 
 func newBalanceRegionScheduler(opt *scheduleOption) *balanceRegionScheduler {
 	cache := newIDCache(storeCacheInterval, 4*storeCacheInterval)
-
-	var filters []Filter
-	filters = append(filters, newCacheFilter(cache))
-	filters = append(filters, newStateFilter(opt))
-	filters = append(filters, newHealthFilter(opt))
-	filters = append(filters, newSnapshotCountFilter(opt))
-	filters = append(filters, newStorageThresholdFilter(opt))
+	filters := []Filter{
+		newCacheFilter(cache),
+		newStateFilter(opt),
+		newHealthFilter(opt),
+		newSnapshotCountFilter(opt),
+		newStorageThresholdFilter(opt),
+	}
 
 	return &balanceRegionScheduler{
 		opt:      opt,
@@ -281,9 +281,12 @@ func (r *replicaChecker) SelectBestPeerToAddReplica(region *RegionInfo, filters 
 // SelectBestStoreToAddReplica returns the store to add a replica.
 func (r *replicaChecker) SelectBestStoreToAddReplica(region *RegionInfo, filters ...Filter) (uint64, float64) {
 	// Add some must have filters.
-	filters = append(filters, newStateFilter(r.opt))
-	filters = append(filters, newStorageThresholdFilter(r.opt))
-	filters = append(filters, newExcludedFilter(nil, region.GetStoreIds()))
+	newFilters := []Filter{
+		newStateFilter(r.opt),
+		newStorageThresholdFilter(r.opt),
+		newExcludedFilter(nil, region.GetStoreIds()),
+	}
+	filters = append(filters, newFilters...)
 
 	var (
 		bestStore *storeInfo
@@ -589,11 +592,12 @@ func (h *balanceHotRegionScheduler) balanceByPeer(cluster *clusterInfo) (*Region
 			continue
 		}
 
-		var filters []Filter
-		filters = append(filters, newExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()))
-		filters = append(filters, newDistinctScoreFilter(h.opt.GetReplication(), stores, cluster.getLeaderStore(srcRegion)))
-		filters = append(filters, newStateFilter(h.opt))
-		filters = append(filters, newStorageThresholdFilter(h.opt))
+		filters := []Filter{
+			newExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
+			newDistinctScoreFilter(h.opt.GetReplication(), stores, cluster.getLeaderStore(srcRegion)),
+			newStateFilter(h.opt),
+			newStorageThresholdFilter(h.opt),
+		}
 		destStoreIDs := make([]uint64, 0, len(stores))
 		for _, store := range stores {
 			if filterTarget(store, filters) {
