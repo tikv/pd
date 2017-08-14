@@ -10,6 +10,7 @@ GOCHECKER := $(GOFILTER) | awk '{ print } END { if (NR > 0) { exit 1 } }'
 
 LDFLAGS += -X "$(PD_PKG)/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "$(PD_PKG)/server.PDGitHash=$(shell git rev-parse HEAD)"
+LDFLAGS += -X "$(PD_PKG)/server.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
 
 # Ignore following files's coverage.
 #
@@ -26,9 +27,9 @@ build:
 ifeq ("$(WITH_RACE)", "1")
 	GOPATH=$(VENDOR) ENABLE_CGO=1 go build -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 else
-	GOPATH=$(VENDOR) go build  -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	GOPATH=$(VENDOR) go build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
-	GOPATH=$(VENDOR) go build -o bin/pd-ctl cmd/pd-ctl/main.go
+	GOPATH=$(VENDOR) go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl cmd/pd-ctl/main.go
 	GOPATH=$(VENDOR) go build -o bin/pd-tso-bench cmd/pd-tso-bench/main.go
 	GOPATH=$(VENDOR) go build -o bin/pd-recover cmd/pd-recover/main.go
 
