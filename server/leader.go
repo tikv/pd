@@ -34,7 +34,7 @@ var (
 
 // IsLeader returns whether server is leader or not.
 func (s *Server) IsLeader() bool {
-	return atomic.LoadInt64(&s.isLeaderValue) == 1
+	return atomic.LoadInt64(&s.isLeader) == 1
 }
 
 func (s *Server) enableLeader(b bool) {
@@ -43,7 +43,7 @@ func (s *Server) enableLeader(b bool) {
 		value = 1
 	}
 
-	atomic.StoreInt64(&s.isLeaderValue, value)
+	atomic.StoreInt64(&s.isLeader, value)
 }
 
 func (s *Server) getLeaderPath() string {

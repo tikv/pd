@@ -44,47 +44,38 @@ const (
 
 // Server is the pd server.
 type Server struct {
+	// Server state.
+	isServing int64
+	isLeader  int64
+
+	// Configs and initial fields.
 	cfg         *Config
+	etcdCfg     *embed.Config
 	scheduleOpt *scheduleOption
-
-	etcd *embed.Etcd
-
-	client *clientv3.Client
-
-	clusterID uint64
-
-	rootPath string
-
-	isLeaderValue int64
-	// leader value saved in etcd leader key.
-	// Every write will use this to check leader validation.
-	leaderValue string
+	handler     *Handler
 
 	wg sync.WaitGroup
 
-	closed int64
+	// Etcd and cluster informations.
+	etcd        *embed.Etcd
+	client      *clientv3.Client
+	id          uint64
+	clusterID   uint64
+	rootPath    string
+	leaderValue string // leader value saved in etcd leader key.  Every write will use this to check leader validation.
 
+	// Server services.
 	// for tso
 	ts            atomic.Value
 	lastSavedTime time.Time
-
 	// for id allocator, we can use one allocator for
 	// store, region and peer, because we just need
 	// a unique ID.
 	idAlloc *idAllocator
-
 	// for kv operation.
 	kv *kv
-
-	// for API operation.
-	handler *Handler
-
 	// for raft cluster
 	cluster *RaftCluster
-
-	msgID uint64
-
-	id uint64
 }
 
 // NewServer creates the pd server with given configuration.
@@ -95,49 +86,42 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, errors.Trace(err)
 	}
 
-	go systimemon.StartMonitor(time.Now, func() {
-		log.Errorf("system time jumps backward")
-		timeJumpBackCounter.Inc()
-	})
 	return s, nil
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(cfg *Config) *Server {
+func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server, error) {
 	log.Infof("PD config - %v", cfg)
 	rand.Seed(time.Now().UnixNano())
 
 	s := &Server{
-		cfg:           cfg,
-		scheduleOpt:   newScheduleOption(cfg),
-		isLeaderValue: 0,
-		closed:        1,
+		cfg:         cfg,
+		scheduleOpt: newScheduleOption(cfg),
 	}
-
 	s.handler = newHandler(s)
-	return s
-}
 
-// StartEtcd starts an embed etcd server with an user handler.
-func (s *Server) StartEtcd(apiHandler http.Handler) error {
+	// Adjust etcd config.
 	etcdCfg, err := s.cfg.genEmbedEtcdConfig()
 	if err != nil {
-		return errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
-	if apiHandler != nil {
+	if apiRegister != nil {
 		etcdCfg.UserHandlers = map[string]http.Handler{
-			pdAPIPrefix: apiHandler,
+			pdAPIPrefix: apiRegister(s),
 		}
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) { pdpb.RegisterPDServer(gs, s) }
+	s.etcdCfg = etcdCfg
 
+	return s, nil
+}
+
+func (s *Server) startEtcd() error {
 	log.Info("start embed etcd")
-
-	etcd, err := embed.StartEtcd(etcdCfg)
+	etcd, err := embed.StartEtcd(s.etcdCfg)
 	if err != nil {
 		return errors.Trace(err)
 	}
-
 	// Check cluster ID
 	urlmap, err := types.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
@@ -147,8 +131,7 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 		return errors.Trace(err)
 	}
 
-	endpoints := []string{etcdCfg.ACUrls[0].String()}
-
+	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
 	log.Infof("create etcd v3 client with endpoints %v", endpoints)
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
@@ -167,10 +150,6 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 		log.Errorf("etcd start failed, err %v", err)
 	}
 
-	s.etcd = etcd
-	s.client = client
-	s.id = uint64(etcd.Server.ID())
-
 	// update advertise peer urls.
 	etcdMembers, err := etcdutil.ListEtcdMembers(client)
 	if err != nil {
@@ -186,18 +165,27 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 		}
 	}
 
-	if err = s.initClusterID(); err != nil {
+	s.etcd = etcd
+	s.client = client
+	s.id = uint64(etcd.Server.ID())
+	return nil
+}
+
+func (s *Server) startServer() error {
+	if err := s.initClusterID(); err != nil {
 		return errors.Trace(err)
 	}
 	log.Infof("init cluster id %v", s.clusterID)
 
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
+	s.leaderValue = s.marshalLeader()
+
 	s.idAlloc = &idAllocator{s: s}
 	s.kv = newKV(s)
 	s.cluster = newRaftCluster(s, s.clusterID)
 
 	// Server has started.
-	atomic.StoreInt64(&s.closed, 0)
+	atomic.StoreInt64(&s.isServing, 1)
 	return nil
 }
 
@@ -235,7 +223,7 @@ func (s *Server) initClusterID() error {
 
 // Close closes the server.
 func (s *Server) Close() {
-	if !atomic.CompareAndSwapInt64(&s.closed, 0, 1) {
+	if !atomic.CompareAndSwapInt64(&s.isServing, 1, 0) {
 		// server is already closed
 		return
 	}
@@ -259,17 +247,31 @@ func (s *Server) Close() {
 
 // isClosed checks whether server is closed or not.
 func (s *Server) isClosed() bool {
-	return atomic.LoadInt64(&s.closed) == 1
+	return atomic.LoadInt64(&s.isServing) == 0
 }
 
+var timeMonitorOnce sync.Once
+
 // Run runs the pd server.
-func (s *Server) Run() {
-	// We use "127.0.0.1:0" for test and will set correct listening
-	// address before run, so we set leader value here.
-	s.leaderValue = s.marshalLeader()
+func (s *Server) Run() error {
+	timeMonitorOnce.Do(func() {
+		go systimemon.StartMonitor(time.Now, func() {
+			log.Errorf("system time jumps backward")
+			timeJumpBackCounter.Inc()
+		})
+	})
+
+	if err := s.startEtcd(); err != nil {
+		return errors.Trace(err)
+	}
+
+	if err := s.startServer(); err != nil {
+		return errors.Trace(err)
+	}
 
 	s.wg.Add(1)
-	s.leaderLoop()
+	go s.leaderLoop()
+	return nil
 }
 
 // GetAddr returns the server urls for clients.
