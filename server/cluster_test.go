@@ -45,7 +45,8 @@ type testClusterSuite struct {
 func (s *testClusterSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
 	s.client = s.svr.client
-	go s.svr.Run()
+	err := s.svr.Run()
+	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 }
@@ -464,7 +465,8 @@ func (s *testClusterSuite) testCheckStores(c *C, clusterID uint64) {
 func (s *testClusterSuite) TestClosedChannel(c *C) {
 	svr, cleanup := newTestServer(c)
 	defer cleanup()
-	go svr.Run()
+	err := svr.Run()
+	c.Assert(err, IsNil)
 
 	clusterID := svr.clusterID
 	storeAddr := "127.0.0.1:0"
@@ -476,7 +478,7 @@ func (s *testClusterSuite) TestClosedChannel(c *C) {
 	c.Assert(cluster, NotNil)
 	cluster.stop()
 
-	err := svr.createRaftCluster()
+	err = svr.createRaftCluster()
 	c.Assert(err, IsNil)
 
 	cluster = svr.GetRaftCluster()

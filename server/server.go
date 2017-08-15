@@ -59,15 +59,12 @@ type Server struct {
 	// Etcd and cluster informations.
 	etcd        *embed.Etcd
 	client      *clientv3.Client
-	id          uint64
-	clusterID   uint64
+	id          uint64 // etcd server id.
+	clusterID   uint64 // pd cluster id.
 	rootPath    string
 	leaderValue string // leader value saved in etcd leader key.  Every write will use this to check leader validation.
 
 	// Server services.
-	// for tso
-	ts            atomic.Value
-	lastSavedTime time.Time
 	// for id allocator, we can use one allocator for
 	// store, region and peer, because we just need
 	// a unique ID.
@@ -76,17 +73,9 @@ type Server struct {
 	kv *kv
 	// for raft cluster
 	cluster *RaftCluster
-}
-
-// NewServer creates the pd server with given configuration.
-func NewServer(cfg *Config) (*Server, error) {
-	s := CreateServer(cfg)
-	if err := s.StartEtcd(nil); err != nil {
-		s.Close()
-		return nil, errors.Trace(err)
-	}
-
-	return s, nil
+	// For tso, set after pd becomes leader.
+	ts            atomic.Value
+	lastSavedTime time.Time
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
@@ -150,13 +139,15 @@ func (s *Server) startEtcd() error {
 		log.Errorf("etcd start failed, err %v", err)
 	}
 
+	etcdServerID := uint64(etcd.Server.ID())
+
 	// update advertise peer urls.
 	etcdMembers, err := etcdutil.ListEtcdMembers(client)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	for _, m := range etcdMembers.Members {
-		if s.ID() == m.ID {
+		if etcdServerID == m.ID {
 			etcdPeerURLs := strings.Join(m.PeerURLs, ",")
 			if s.cfg.AdvertisePeerUrls != etcdPeerURLs {
 				log.Infof("update advertise peer urls from %s to %s", s.cfg.AdvertisePeerUrls, etcdPeerURLs)
@@ -167,7 +158,7 @@ func (s *Server) startEtcd() error {
 
 	s.etcd = etcd
 	s.client = client
-	s.id = uint64(etcd.Server.ID())
+	s.id = etcdServerID
 	return nil
 }
 

@@ -219,12 +219,13 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	s.svr.cfg.nextRetryDelay = 50 * time.Millisecond
 	s.svr.scheduleOpt.SetMaxReplicas(1)
 
+	err := s.svr.Run()
+	c.Assert(err, IsNil)
+
 	s.client = s.svr.client
 	s.clusterID = s.svr.clusterID
 
 	s.regionLeaders = make(map[uint64]metapb.Peer)
-
-	go s.svr.Run()
 
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
@@ -239,7 +240,7 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 
-	err := cluster.putConfig(&metapb.Cluster{
+	err = cluster.putConfig(&metapb.Cluster{
 		Id:           s.clusterID,
 		MaxPeerCount: 5,
 	})

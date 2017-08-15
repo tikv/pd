@@ -38,8 +38,9 @@ func (s *testLeaderChangeSuite) prepareClusterN(c *C, n int) (svrs map[string]*s
 		cfg := cfgs[i]
 
 		go func() {
-			svr := server.CreateServer(cfg)
-			err := svr.StartEtcd(api.NewHandler(svr))
+			svr, err := server.CreateServer(cfg, api.NewHandler)
+			c.Assert(err, IsNil)
+			err = svr.Run()
 			c.Assert(err, IsNil)
 			ch <- svr
 		}()
@@ -53,7 +54,6 @@ func (s *testLeaderChangeSuite) prepareClusterN(c *C, n int) (svrs map[string]*s
 
 	endpoints = make([]string, 0, n)
 	for _, svr := range svrs {
-		go svr.Run()
 		endpoints = append(endpoints, svr.GetEndpoints()...)
 	}
 
