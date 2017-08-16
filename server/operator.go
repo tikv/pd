@@ -14,8 +14,8 @@
 package server
 
 import (
-	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -154,28 +154,33 @@ type Operator interface {
 }
 
 type adminOperator struct {
-	Name   string        `json:"name"`
-	Region *RegionInfo   `json:"region"`
-	Start  time.Time     `json:"start"`
-	Ops    []Operator    `json:"ops"`
-	State  OperatorState `json:"state"`
+	Name         string    `json:"name"`
+	Start        time.Time `json:"start"`
+	sync.RWMutex `json:"-"`
+	Region       *RegionInfo   `json:"region"`
+	Ops          []Operator    `json:"ops"`
+	State        OperatorState `json:"state"`
 }
 
 func newAdminOperator(region *RegionInfo, ops ...Operator) *adminOperator {
 	return &adminOperator{
 		Name:   "admin_operator",
-		Region: region,
 		Start:  time.Now(),
+		Region: region,
 		Ops:    ops,
 		State:  OperatorWaiting,
 	}
 }
 
 func (op *adminOperator) String() string {
-	return fmt.Sprintf("%+v", *op)
+	op.RLock()
+	defer op.RUnlock()
+	return jsonString(op)
 }
 
 func (op *adminOperator) GetRegionID() uint64 {
+	op.RLock()
+	defer op.RUnlock()
 	return op.Region.GetId()
 }
 
@@ -184,15 +189,18 @@ func (op *adminOperator) GetResourceKind() ResourceKind {
 }
 
 func (op *adminOperator) GetState() OperatorState {
+	op.RLock()
+	defer op.RUnlock()
 	return op.State
 }
 
 func (op *adminOperator) SetState(state OperatorState) {
+	op.Lock()
+	defer op.Unlock()
 	op.State = state
 	for _, o := range op.Ops {
 		o.SetState(state)
 	}
-
 }
 
 func (op *adminOperator) GetName() string {
@@ -200,6 +208,8 @@ func (op *adminOperator) GetName() string {
 }
 
 func (op *adminOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
+	op.Lock()
+	defer op.Unlock()
 	// Update region.
 	op.Region = region.clone()
 
@@ -217,14 +227,15 @@ func (op *adminOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, 
 }
 
 type regionOperator struct {
-	Name   string        `json:"name"`
-	Region *RegionInfo   `json:"region"`
-	Start  time.Time     `json:"start"`
-	End    time.Time     `json:"end"`
-	Index  int           `json:"index"`
-	Ops    []Operator    `json:"ops"`
-	Kind   ResourceKind  `json:"kind"`
-	State  OperatorState `json:"state"`
+	Name         string    `json:"name"`
+	Start        time.Time `json:"start"`
+	sync.RWMutex `json:"_"`
+	Region       *RegionInfo   `json:"region"`
+	End          time.Time     `json:"end"`
+	Index        int           `json:"index"`
+	Ops          []Operator    `json:"ops"`
+	Kind         ResourceKind  `json:"kind"`
+	State        OperatorState `json:"state"`
 }
 
 func newRegionOperator(region *RegionInfo, kind ResourceKind, ops ...Operator) *regionOperator {
@@ -235,8 +246,8 @@ func newRegionOperator(region *RegionInfo, kind ResourceKind, ops ...Operator) *
 
 	return &regionOperator{
 		Name:   "region_operator",
-		Region: region,
 		Start:  time.Now(),
+		Region: region,
 		Ops:    ops,
 		Kind:   kind,
 		State:  OperatorWaiting,
@@ -244,10 +255,14 @@ func newRegionOperator(region *RegionInfo, kind ResourceKind, ops ...Operator) *
 }
 
 func (op *regionOperator) String() string {
-	return fmt.Sprintf("%+v", *op)
+	op.RLock()
+	defer op.RUnlock()
+	return jsonString(op)
 }
 
 func (op *regionOperator) GetRegionID() uint64 {
+	op.RLock()
+	defer op.RUnlock()
 	return op.Region.GetId()
 }
 
@@ -256,10 +271,14 @@ func (op *regionOperator) GetResourceKind() ResourceKind {
 }
 
 func (op *regionOperator) GetState() OperatorState {
+	op.RLock()
+	defer op.RUnlock()
 	return op.State
 }
 
 func (op *regionOperator) SetState(state OperatorState) {
+	op.Lock()
+	defer op.Unlock()
 	if op.State == OperatorFinished || op.State == OperatorTimeOut {
 		return
 	}
@@ -274,8 +293,10 @@ func (op *regionOperator) GetName() string {
 }
 
 func (op *regionOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
+	op.Lock()
+	defer op.Unlock()
 	if time.Since(op.Start) > maxOperatorWaitTime {
-		log.Errorf("[region %d] Operator timeout:%s", region.GetId(), op)
+		log.Errorf("[region %d] Operator timeout:%s", region.GetId(), jsonString(op))
 		op.State = OperatorTimeOut
 		return nil, true
 	}
@@ -297,10 +318,11 @@ func (op *regionOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse,
 }
 
 type changePeerOperator struct {
-	Name       string           `json:"name"`
-	RegionID   uint64           `json:"region_id"`
-	ChangePeer *pdpb.ChangePeer `json:"change_peer"`
-	State      OperatorState    `json:"state"`
+	Name         string           `json:"name"`
+	RegionID     uint64           `json:"region_id"`
+	ChangePeer   *pdpb.ChangePeer `json:"change_peer"`
+	sync.RWMutex `json:"_"`
+	State        OperatorState `json:"state"`
 }
 
 func newAddPeerOperator(regionID uint64, peer *metapb.Peer) *changePeerOperator {
@@ -330,7 +352,9 @@ func newRemovePeerOperator(regionID uint64, peer *metapb.Peer) *changePeerOperat
 }
 
 func (op *changePeerOperator) String() string {
-	return fmt.Sprintf("%+v", *op)
+	op.RLock()
+	defer op.RUnlock()
+	return jsonString(op)
 }
 
 func (op *changePeerOperator) GetRegionID() uint64 {
@@ -342,10 +366,14 @@ func (op *changePeerOperator) GetResourceKind() ResourceKind {
 }
 
 func (op *changePeerOperator) GetState() OperatorState {
+	op.RLock()
+	defer op.RUnlock()
 	return op.State
 }
 
 func (op *changePeerOperator) SetState(state OperatorState) {
+	op.Lock()
+	defer op.Unlock()
 	if op.State == OperatorFinished {
 		return
 	}
@@ -357,6 +385,8 @@ func (op *changePeerOperator) GetName() string {
 }
 
 func (op *changePeerOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
+	op.Lock()
+	defer op.Unlock()
 	// Check if operator is finished.
 	peer := op.ChangePeer.GetPeer()
 	switch op.ChangePeer.GetChangeType() {
@@ -388,11 +418,12 @@ func (op *changePeerOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatRespo
 }
 
 type transferLeaderOperator struct {
-	Name      string        `json:"name"`
-	RegionID  uint64        `json:"region_id"`
-	OldLeader *metapb.Peer  `json:"old_leader"`
-	NewLeader *metapb.Peer  `json:"new_leader"`
-	State     OperatorState `json:"state"`
+	Name         string       `json:"name"`
+	RegionID     uint64       `json:"region_id"`
+	OldLeader    *metapb.Peer `json:"old_leader"`
+	NewLeader    *metapb.Peer `json:"new_leader"`
+	sync.RWMutex `json:"_"`
+	State        OperatorState `json:"state"`
 }
 
 func newTransferLeaderOperator(regionID uint64, oldLeader, newLeader *metapb.Peer) *transferLeaderOperator {
@@ -406,7 +437,9 @@ func newTransferLeaderOperator(regionID uint64, oldLeader, newLeader *metapb.Pee
 }
 
 func (op *transferLeaderOperator) String() string {
-	return fmt.Sprintf("%+v", *op)
+	op.RLock()
+	defer op.RUnlock()
+	return jsonString(op)
 }
 
 func (op *transferLeaderOperator) GetRegionID() uint64 {
@@ -418,10 +451,14 @@ func (op *transferLeaderOperator) GetResourceKind() ResourceKind {
 }
 
 func (op *transferLeaderOperator) GetState() OperatorState {
+	op.RLock()
+	defer op.RUnlock()
 	return op.State
 }
 
 func (op *transferLeaderOperator) SetState(state OperatorState) {
+	op.Lock()
+	defer op.Unlock()
 	if op.State == OperatorFinished {
 		return
 	}
@@ -433,6 +470,8 @@ func (op *transferLeaderOperator) GetName() string {
 }
 
 func (op *transferLeaderOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
+	op.Lock()
+	defer op.Unlock()
 	// Check if operator is finished.
 	if region.Leader.GetId() == op.NewLeader.GetId() {
 		op.State = OperatorFinished
