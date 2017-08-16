@@ -114,6 +114,16 @@ func (s *storesInfo) setRegionCount(storeID uint64, regionCount int) {
 	}
 }
 
+func (s *storesInfo) totalWrittenBytes() uint64 {
+	var totalWrittenBytes uint64
+	for _, s := range s.stores {
+		if s.isUp() {
+			totalWrittenBytes += s.status.GetBytesWritten()
+		}
+	}
+	return totalWrittenBytes
+}
+
 // regionMap wraps a map[uint64]*RegionInfo and supports randomly pick a region.
 type regionMap struct {
 	m   map[uint64]*regionEntry
@@ -473,21 +483,13 @@ func (c *clusterInfo) getStoreCount() int {
 }
 
 func (c *clusterInfo) getStoresWriteStat() map[uint64]uint64 {
+	c.RLock()
+	defer c.RUnlock()
 	res := make(map[uint64]uint64)
-	for _, s := range c.getStores() {
+	for _, s := range c.stores.stores {
 		res[s.GetId()] = s.status.GetBytesWritten()
 	}
 	return res
-}
-
-func (c *clusterInfo) getClusterTotalWrittenBytes() uint64 {
-	var totalWrittenBytes uint64
-	for _, s := range c.stores.getStores() {
-		if s.isUp() {
-			totalWrittenBytes += s.status.GetBytesWritten()
-		}
-	}
-	return totalWrittenBytes
 }
 
 func (c *clusterInfo) getRegion(regionID uint64) *RegionInfo {
@@ -617,7 +619,6 @@ func (c *clusterInfo) getLeaderStore(region *RegionInfo) *storeInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.stores.getStore(region.Leader.GetStoreId())
-
 }
 
 func (c *clusterInfo) getFollowerStores(region *RegionInfo) []*storeInfo {
@@ -756,7 +757,7 @@ func (c *clusterInfo) updateWriteStatus(region *RegionInfo) {
 	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot regions
 	// divide 2 because the store reports data about two times than the region record write to rocksdb
 	divisor := float64(writeStatLRUMaxLen) * 2 * storeHeartBeatReportInterval
-	hotRegionThreshold := uint64(float64(c.getClusterTotalWrittenBytes()) / divisor)
+	hotRegionThreshold := uint64(float64(c.stores.totalWrittenBytes()) / divisor)
 
 	if hotRegionThreshold < hotRegionMinWriteRate {
 		hotRegionThreshold = hotRegionMinWriteRate
