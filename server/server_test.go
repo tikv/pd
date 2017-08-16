@@ -90,16 +90,17 @@ func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
 }
 
 func mustWaitLeader(c *C, svrs []*Server) *Server {
-	for i := 0; i < 500; i++ {
+	var leader *Server
+	testutil.WaitUtil(c, func(c *C) bool {
 		for _, s := range svrs {
 			if s.IsLeader() {
-				return s
+				leader = s
+				return true
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	c.Fatal("no leader")
-	return nil
+		return false
+	})
+	return leader
 }
 
 var _ = Suite(&testLeaderServerSuite{})

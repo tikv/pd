@@ -14,9 +14,9 @@
 package server
 
 import (
+	"bytes"
 	"math/rand"
 	"net"
-	"reflect"
 	"sync"
 	"time"
 
@@ -60,32 +60,24 @@ func (s *mockRaftStore) removePeer(c *C, peer *metapb.Peer) {
 }
 
 func addRegionPeer(c *C, region *metapb.Region, peer *metapb.Peer) {
-	found := false
 	for _, p := range region.Peers {
 		if p.GetId() == peer.GetId() || p.GetStoreId() == peer.GetStoreId() {
-			found = true
-			break
+			c.Fatalf("new peer %v conflict with existed peer %v", peer, p)
 		}
 	}
-
-	c.Assert(found, IsFalse)
 	region.Peers = append(region.Peers, peer)
 }
 
 func removeRegionPeer(c *C, region *metapb.Region, peer *metapb.Peer) {
-	found := false
 	peers := make([]*metapb.Peer, 0, len(region.Peers))
 	for _, p := range region.Peers {
 		if p.GetId() == peer.GetId() {
 			c.Assert(p.GetStoreId(), Equals, peer.GetStoreId())
-			found = true
 			continue
 		}
-
 		peers = append(peers, p)
 	}
-
-	c.Assert(found, IsTrue)
+	c.Assert(len(region.Peers), Not(Equals), len(peers))
 	region.Peers = peers
 }
 
@@ -298,11 +290,15 @@ func (s *testClusterWorkerSuite) onChangePeerRes(c *C, res *pdpb.ChangePeer, reg
 	c.Assert(ok, IsTrue)
 	switch res.GetChangeType() {
 	case pdpb.ConfChangeType_AddNode:
-		c.Assert(store.peers, Not(HasKey), peer.GetId())
+		if _, ok := store.peers[peer.GetId()]; ok {
+			return
+		}
 		store.addPeer(c, peer)
 		addRegionPeer(c, region, peer)
 	case pdpb.ConfChangeType_RemoveNode:
-		c.Assert(store.peers, HasKey, peer.GetId())
+		if _, ok := store.peers[peer.GetId()]; !ok {
+			return
+		}
 		store.removePeer(c, peer)
 		removeRegionPeer(c, region, peer)
 	default:
@@ -347,8 +343,8 @@ func splitRegion(c *C, old *metapb.Region, splitKey []byte, newRegionID uint64, 
 		RegionEpoch: proto.Clone(old.RegionEpoch).(*metapb.RegionEpoch),
 		Peers:       peers,
 	}
-	updateRegionRange(newRegion, splitKey, old.EndKey)
-	updateRegionRange(old, old.StartKey, splitKey)
+	updateRegionRange(newRegion, old.StartKey, splitKey)
+	updateRegionRange(old, splitKey, old.EndKey)
 	return newRegion
 }
 
@@ -388,20 +384,26 @@ func mustGetRegion(c *C, cluster *RaftCluster, key []byte, expect *metapb.Region
 	c.Assert(r, DeepEquals, expect)
 }
 
-func (s *testClusterWorkerSuite) checkSearchRegions(cluster *RaftCluster, keys ...[]byte) func(c *C) bool {
+func (s *testClusterWorkerSuite) checkSearchRegions(cluster *RaftCluster, keys ...string) func(c *C) bool {
 	return func(c *C) bool {
 		cluster.cachedCluster.RLock()
 		defer cluster.cachedCluster.RUnlock()
 
 		cacheRegions := cluster.cachedCluster.regions
-		if cacheRegions.tree.length() != len(keys) {
-			c.Logf("region length not match, expect %v, got %v", len(keys), cacheRegions.tree.length())
+		if cacheRegions.tree.length() != len(keys)/2 {
+			c.Logf("region length not match, expect %v, got %v", len(keys)/2, cacheRegions.tree.length())
 			return false
 		}
 
-		for _, key := range keys {
-			if cacheRegions.tree.search(key) == nil {
-				c.Logf("region not found for key: %q", key)
+		for i := 0; i < len(keys); i += 2 {
+			start, end := []byte(keys[i]), []byte(keys[i+1])
+			region := cacheRegions.tree.search(start)
+			if region == nil {
+				c.Logf("region not found for key: %q", start)
+				return false
+			}
+			if bytes.Compare(region.StartKey, start) != 0 || bytes.Compare(region.EndKey, end) != 0 {
+				c.Logf("keyrange not match, expect: [%q, %q], got [%q, %q]", start, end, region.StartKey, region.EndKey)
 				return false
 			}
 		}
@@ -413,46 +415,38 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 
-	// split 1 to 1: [nil, m) 2: [m, nil), sync 1 first
 	r1, _ := cluster.GetRegionByKey([]byte("a"))
-	testutil.WaitUtil(c, s.checkSearchRegions(cluster, []byte{}))
+	// 1: [nil, nil)
+	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "", ""))
 
+	// split 1 to 2: [nil, m) 1: [m, nil), sync 2 first
 	r2ID, r2PeerIDs := s.askSplit(c, r1)
 	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)
-
-	leaderPeer1 := s.chooseRegionLeader(c, r1)
-
-	s.heartbeatRegion(c, s.clusterID, r1, leaderPeer1)
-	testutil.WaitUtil(c, s.checkSearchRegions(cluster, []byte{}))
-
-	mustGetRegion(c, cluster, []byte("a"), r1)
-	// [m, nil) is missing before r2's heartbeat.
-	mustGetRegion(c, cluster, []byte("z"), nil)
-
 	leaderPeer2 := s.chooseRegionLeader(c, r2)
 	s.heartbeatRegion(c, s.clusterID, r2, leaderPeer2)
-	testutil.WaitUtil(c, s.checkSearchRegions(cluster, []byte{}, []byte("m")))
+	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "", "m"))
+	mustGetRegion(c, cluster, []byte("a"), r2)
+	// [m, nil) is missing before r1's heartbeat.
+	mustGetRegion(c, cluster, []byte("z"), nil)
 
-	mustGetRegion(c, cluster, []byte("z"), r2)
+	leaderPeer1 := s.chooseRegionLeader(c, r1)
+	s.heartbeatRegion(c, s.clusterID, r1, leaderPeer1)
+	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "", "m", "m", ""))
+	mustGetRegion(c, cluster, []byte("z"), r1)
 
-	// split 2 to 2: [m, q) 3: [q, nil), sync 3 first
-	r3ID, r3PeerIDs := s.askSplit(c, r2)
-	r3 := splitRegion(c, r2, []byte("q"), r3ID, r3PeerIDs)
-
-	leaderPeer3 := s.chooseRegionLeader(c, r3)
-
-	s.heartbeatRegion(c, s.clusterID, r3, leaderPeer3)
-	testutil.WaitUtil(c, s.checkSearchRegions(cluster, []byte{}, []byte("q")))
-
-	mustGetRegion(c, cluster, []byte("z"), r3)
-	mustGetRegion(c, cluster, []byte("a"), r1)
-	// [m, q) is missing before r2's heartbeat.
+	// split 1 to 3: [m, q) 1: [q, nil), sync 1 first
+	r3ID, r3PeerIDs := s.askSplit(c, r1)
+	r3 := splitRegion(c, r1, []byte("q"), r3ID, r3PeerIDs)
+	s.heartbeatRegion(c, s.clusterID, r1, leaderPeer1)
+	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "", "m", "q", ""))
+	mustGetRegion(c, cluster, []byte("z"), r1)
+	mustGetRegion(c, cluster, []byte("a"), r2)
+	// [m, q) is missing before r3's heartbeat.
 	mustGetRegion(c, cluster, []byte("n"), nil)
-
-	s.heartbeatRegion(c, s.clusterID, r2, leaderPeer2)
-	testutil.WaitUtil(c, s.checkSearchRegions(cluster, []byte{}, []byte("m"), []byte("q")))
-
-	mustGetRegion(c, cluster, []byte("n"), r2)
+	leaderPeer3 := s.chooseRegionLeader(c, r3)
+	s.heartbeatRegion(c, s.clusterID, r3, leaderPeer3)
+	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "", "m", "m", "q", "q", ""))
+	mustGetRegion(c, cluster, []byte("n"), r3)
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
@@ -492,13 +486,9 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 	r2ID, r2PeerIDs := s.askSplit(c, r1)
 	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)
 	leaderPeer2 := s.chooseRegionLeader(c, r2)
-
 	resp := s.heartbeatRegion(c, s.clusterID, r2, leaderPeer2)
 	c.Assert(resp, IsNil)
-	testutil.WaitUtil(c, func(c *C) bool {
-		r, _ := cluster.GetRegionByKey([]byte("m"))
-		return reflect.DeepEqual(r, r2)
-	})
+	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "", "m"))
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
@@ -614,21 +604,20 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 		s.onChangePeerRes(c, res.GetChangePeer(), r1)
 		return true
 	})
-	// Split 1 to 1: [nil, m) 2: [m, nil).
+	// Split 1 to 2: [nil, m) 1: [m, nil).
 	r2ID, r2PeerIDs := s.askSplit(c, r1)
 	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)
 
 	// Sync r1 with both ConfVer and Version updated.
 	resp := s.heartbeatRegion(c, s.clusterID, r1, leaderPeer1)
 	c.Assert(resp, IsNil)
-
-	mustGetRegion(c, cluster, []byte("a"), r1)
-	mustGetRegion(c, cluster, []byte("z"), nil)
-
+	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "m", ""))
+	mustGetRegion(c, cluster, []byte("z"), r1)
+	mustGetRegion(c, cluster, []byte("a"), nil)
 	// Sync r2.
 	leaderPeer2 := s.chooseRegionLeader(c, r2)
-	resp = s.heartbeatRegion(c, s.clusterID, r2, leaderPeer2)
-	c.Assert(resp, IsNil)
+	s.heartbeatRegion(c, s.clusterID, r2, leaderPeer2)
+	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "", "m", "m", ""))
 }
 
 func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
