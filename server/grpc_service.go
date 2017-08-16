@@ -294,7 +294,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg)
 		}
 
-		regionHeartbeatCounter.WithLabelValues("report", "ok")
+		regionHeartbeatCounter.WithLabelValues("report", "ok").Inc()
 	}
 }
 

@@ -49,7 +49,9 @@ type testCoordinatorSuite struct{}
 func (s *testCoordinatorSuite) TestBasic(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	_, opt := newTestScheduleConfig()
-	co := newCoordinator(cluster, opt)
+	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	defer hbStreams.Close()
+	co := newCoordinator(cluster, opt, hbStreams)
 	l := co.limiter
 
 	op1 := newTestOperator(1, LeaderKind)
@@ -96,9 +98,11 @@ func newMockHeartbeatStream() *mockHeartbeatStream {
 func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
+	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	defer hbStreams.Close()
 
 	_, opt := newTestScheduleConfig()
-	co := newCoordinator(cluster, opt)
+	co := newCoordinator(cluster, opt, hbStreams)
 	co.run()
 	defer co.stop()
 
@@ -158,13 +162,15 @@ func dispatchAndRecvHeartbeat(co *coordinator, region *RegionInfo, stream *mockH
 func (s *testCoordinatorSuite) TestReplica(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
+	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	defer hbStreams.Close()
 
 	// Turn off balance.
 	cfg, opt := newTestScheduleConfig()
 	cfg.LeaderScheduleLimit = 0
 	cfg.RegionScheduleLimit = 0
 
-	co := newCoordinator(cluster, opt)
+	co := newCoordinator(cluster, opt, hbStreams)
 	co.run()
 	defer co.stop()
 
@@ -214,9 +220,11 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
+	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	defer hbStreams.Close()
 
 	_, opt := newTestScheduleConfig()
-	co := newCoordinator(cluster, opt)
+	co := newCoordinator(cluster, opt, hbStreams)
 	co.run()
 	defer co.stop()
 
@@ -261,9 +269,11 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
+	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	defer hbStreams.Close()
 
 	_, opt := newTestScheduleConfig()
-	co := newCoordinator(cluster, opt)
+	co := newCoordinator(cluster, opt, hbStreams)
 
 	tc.LoadRegion(1, 1, 2, 3)
 	tc.LoadRegion(2, 1, 2, 3)
@@ -294,11 +304,13 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
+	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	defer hbStreams.Close()
 
 	cfg, opt := newTestScheduleConfig()
 	cfg.ReplicaScheduleLimit = 0
 
-	co := newCoordinator(cluster, opt)
+	co := newCoordinator(cluster, opt, hbStreams)
 	co.run()
 	defer co.stop()
 
@@ -391,7 +403,9 @@ type testScheduleControllerSuite struct{}
 func (s *testScheduleControllerSuite) TestController(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	cfg, opt := newTestScheduleConfig()
-	co := newCoordinator(cluster, opt)
+	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	defer hbStreams.Close()
+	co := newCoordinator(cluster, opt, hbStreams)
 	lb := newBalanceLeaderScheduler(opt)
 	sc := newScheduleController(co, lb, minScheduleInterval)
 
@@ -442,7 +456,9 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	_, opt := newTestScheduleConfig()
-	co := newCoordinator(cluster, opt)
+	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	defer hbStreams.Close()
+	co := newCoordinator(cluster, opt, hbStreams)
 	lb := newBalanceLeaderScheduler(opt)
 	sc := newScheduleController(co, lb, minScheduleInterval)
 
