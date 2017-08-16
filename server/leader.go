@@ -305,6 +305,7 @@ func (s *Server) watchLeader() {
 // ResignLeader resigns current PD's leadership. If nextLeader is empty, all
 // other pd-servers can campaign.
 func (s *Server) ResignLeader(nextLeader string) error {
+	log.Infof("%s tries to resign leader with next leader directive: %v", s.Name(), nextLeader)
 	// Determine next leaders.
 	var leaderIDs []string
 	res, err := etcdutil.ListEtcdMembers(s.client)
@@ -336,6 +337,8 @@ func (s *Server) ResignLeader(nextLeader string) error {
 	if !resp.Succeeded {
 		return errors.New("save next leader failed, maybe lost leadership")
 	}
+
+	log.Infof("%s ready to resign leader, expect next leaders: %v", s.Name(), nextLeaderValue)
 
 	// Resign leader.
 	select {
