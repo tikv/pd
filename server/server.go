@@ -76,6 +76,8 @@ type Server struct {
 	// For tso, set after pd becomes leader.
 	ts            atomic.Value
 	lastSavedTime time.Time
+  // For resign notify.
+  resignCh chan struct{}
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
@@ -86,6 +88,7 @@ func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server,
 	s := &Server{
 		cfg:         cfg,
 		scheduleOpt: newScheduleOption(cfg),
+    resignCh:      make(chan struct{}),
 	}
 	s.handler = newHandler(s)
 

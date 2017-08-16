@@ -58,12 +58,26 @@ func NewDeleteMemberCommand() *cobra.Command {
 
 // NewLeaderMemberCommand return a leader subcommand of memberCmd
 func NewLeaderMemberCommand() *cobra.Command {
-	l := &cobra.Command{
-		Use:   "leader",
+	d := &cobra.Command{
+		Use:   "leader <subcommand>",
+		Short: "leader commands",
+	}
+	d.AddCommand(&cobra.Command{
+		Use:   "show",
 		Short: "show the leader member status",
 		Run:   getLeaderMemberCommandFunc,
-	}
-	return l
+	})
+	d.AddCommand(&cobra.Command{
+		Use:   "resign",
+		Short: "resign current leader pd's leadership",
+		Run:   resignLeaderCommandFunc,
+	})
+	d.AddCommand(&cobra.Command{
+		Use:   "transfer <member_name>",
+		Short: "transfer leadership to another pd",
+		Run:   transferPDLeaderCommandFunc,
+	})
+	return d
 }
 
 func showMemberCommandFunc(cmd *cobra.Command, args []string) {
@@ -110,4 +124,28 @@ func getLeaderMemberCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	fmt.Println(r)
+}
+
+func resignLeaderCommandFunc(cmd *cobra.Command, args []string) {
+	prefix := leaderMemberPrefix + "/resign"
+	_, err := doRequest(cmd, prefix, http.MethodPost)
+	if err != nil {
+		fmt.Printf("Failed to resign: %s\n", err)
+		return
+	}
+	fmt.Println("Success!")
+}
+
+func transferPDLeaderCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		fmt.Println("Usage: leader transfer <member_name>")
+		return
+	}
+	prefix := leaderMemberPrefix + "/transfer/" + args[0]
+	_, err := doRequest(cmd, prefix, http.MethodPost)
+	if err != nil {
+		fmt.Printf("Failed to trasfer leadership: %s\n", err)
+		return
+	}
+	fmt.Println("Success!")
 }
