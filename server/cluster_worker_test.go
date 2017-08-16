@@ -416,7 +416,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 
 	leaderPeer1 := s.chooseRegionLeader(c, r1)
 
-	s.heartbeatRegion(c, s.clusterID, 0, r1, leaderPeer1, true)
+	s.heartbeatRegion(c, s.clusterID, 0, r1, leaderPeer1, false)
 	checkSearchRegions(c, cluster, []byte{})
 
 	mustGetRegion(c, cluster, []byte("a"), r1)
