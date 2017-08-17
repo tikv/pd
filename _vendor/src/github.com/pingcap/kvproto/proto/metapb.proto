@@ -1,0 +1,59 @@
+syntax = "proto2";
+package metapb;
+
+import "gogoproto/gogo.proto";
+
+option (gogoproto.marshaler_all) = true;
+option (gogoproto.sizer_all) = true;
+option (gogoproto.unmarshaler_all) = true;
+
+option java_package = "com.pingcap.tikv.kvproto";
+
+message Cluster {
+    optional uint64 id              = 1 [(gogoproto.nullable) = false];
+    // max peer count for a region.
+    // pd will do the auto-balance if region peer count mismatches.
+    optional uint32 max_peer_count  = 2 [(gogoproto.nullable) = false];
+    // more attributes......
+}
+
+enum StoreState {
+    Up        = 0;
+    Offline   = 1;
+    Tombstone = 2;
+}
+
+// Case insensitive key/value for replica constraints.
+message StoreLabel {
+    optional string key         = 1 [(gogoproto.nullable) = false];
+    optional string value       = 2 [(gogoproto.nullable) = false];
+}
+
+message Store {
+    optional uint64 id          = 1 [(gogoproto.nullable) = false];
+    optional string address     = 2 [(gogoproto.nullable) = false];
+    optional StoreState state   = 3 [(gogoproto.nullable) = false];
+    repeated StoreLabel labels  = 4;
+    // more attributes......
+}
+
+message RegionEpoch {
+    // Conf change version, auto increment when add or remove peer
+    optional uint64 conf_ver	= 1 [(gogoproto.nullable) = false];
+    // Region version, auto increment when split or merge
+    optional uint64 version     = 2 [(gogoproto.nullable) = false];
+}
+
+message Region {
+    optional uint64 id                  = 1 [(gogoproto.nullable) = false];
+    // Region key range [start_key, end_key).
+    optional bytes  start_key           = 2;
+    optional bytes  end_key             = 3;
+    optional RegionEpoch region_epoch   = 4;
+    repeated Peer   peers               = 5;
+}
+
+message Peer {      
+    optional uint64 id          = 1 [(gogoproto.nullable) = false]; 
+    optional uint64 store_id    = 2 [(gogoproto.nullable) = false];
+}
