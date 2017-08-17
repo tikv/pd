@@ -124,6 +124,16 @@ func (s *storesInfo) totalWrittenBytes() uint64 {
 	return totalWrittenBytes
 }
 
+func (s *storesInfo) totalReadBytes() uint64 {
+	var totalReadBytes uint64
+	for _, s := range s.stores {
+		if s.isUp() {
+			totalReadBytes += s.status.GetBytesRead()
+		}
+	}
+	return totalReadBytes
+}
+
 // regionMap wraps a map[uint64]*RegionInfo and supports randomly pick a region.
 type regionMap struct {
 	m   map[uint64]*regionEntry
@@ -345,6 +355,7 @@ type clusterInfo struct {
 
 	activeRegions   int
 	writeStatistics *lruCache
+	readStatistics  *lruCache
 }
 
 func newClusterInfo(id IDAllocator) *clusterInfo {
@@ -353,6 +364,7 @@ func newClusterInfo(id IDAllocator) *clusterInfo {
 		stores:          newStoresInfo(),
 		regions:         newRegionsInfo(),
 		writeStatistics: newLRUCache(writeStatLRUMaxLen),
+		readStatistics:  newLRUCache(writeStatLRUMaxLen), // ?
 	}
 }
 
@@ -492,6 +504,16 @@ func (c *clusterInfo) getStoresWriteStat() map[uint64]uint64 {
 	return res
 }
 
+func (c *clusterInfo) getStoresReadStat() map[uint64]uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	res := make(map[uint64]uint64)
+	for _, s := range c.stores.stores {
+		res[s.GetId()] = s.status.GetBytesRead()
+	}
+	return res
+}
+
 func (c *clusterInfo) getRegion(regionID uint64) *RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
@@ -531,6 +553,41 @@ func (c *clusterInfo) updateWriteStatCache(region *RegionInfo, hotRegionThreshol
 		newItem.WrittenBytes = v.WrittenBytes
 	}
 	c.writeStatistics.add(key, newItem)
+}
+
+// updateReadStatCache updates statistic for a region if it's hot, or remove it from statistics if it cools down
+func (c *clusterInfo) updateReadStatCache(region *RegionInfo, hotRegionThreshold uint64) {
+	var v *ReadRegionStat
+	key := region.GetId()
+	value, isExist := c.readStatistics.peek(key)
+	newItem := &ReadRegionStat{
+		RegionID:       region.GetId(),
+		ReadBytes:      region.ReadBytes,
+		LastUpdateTime: time.Now(),
+		StoreID:        region.Leader.GetStoreId(),
+		version:        region.GetRegionEpoch().GetVersion(),
+		antiCount:      hotRegionAntiCount,
+	}
+
+	if isExist {
+		v = value.(*ReadRegionStat)
+		newItem.HotDegree = v.HotDegree + 1
+	}
+
+	if region.ReadBytes < hotRegionThreshold {
+		if !isExist {
+			return
+		}
+		if v.antiCount <= 0 {
+			c.readStatistics.remove(key)
+			return
+		}
+		// eliminate some noise
+		newItem.HotDegree = v.HotDegree - 1
+		newItem.antiCount = v.antiCount - 1
+		newItem.ReadBytes = v.ReadBytes
+	}
+	c.readStatistics.add(key, newItem)
 }
 
 func (c *clusterInfo) searchRegion(regionKey []byte) *RegionInfo {
@@ -734,6 +791,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *RegionInfo) error {
 	}
 
 	c.updateWriteStatus(region)
+	c.updateReadStatus(region)
 
 	return nil
 }
@@ -763,4 +821,31 @@ func (c *clusterInfo) updateWriteStatus(region *RegionInfo) {
 		hotRegionThreshold = hotRegionMinWriteRate
 	}
 	c.updateWriteStatCache(region, hotRegionThreshold)
+}
+
+func (c *clusterInfo) updateReadStatus(region *RegionInfo) {
+	var ReadBytesPerSec uint64
+	v, isExist := c.readStatistics.peek(region.GetId())
+	if isExist {
+		interval := time.Now().Sub(v.(*ReadRegionStat).LastUpdateTime).Seconds()
+		if interval < minHotRegionReportInterval {
+			return
+		}
+		ReadBytesPerSec = uint64(float64(region.ReadBytes) / interval)
+	} else {
+		ReadBytesPerSec = uint64(float64(region.ReadBytes) / float64(regionHeartBeatReportInterval))
+	}
+	region.ReadBytes = ReadBytesPerSec
+
+	// hotRegionThreshold is use to pick hot region
+	// suppose the number of the hot regions is writeStatLRUMaxLen
+	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot regions
+	// divide 2 because the store reports data about two times than the region record write to rocksdb
+	divisor := float64(writeStatLRUMaxLen) * 2 * storeHeartBeatReportInterval // ?
+	hotRegionThreshold := uint64(float64(c.stores.totalReadBytes()) / divisor)
+
+	if hotRegionThreshold < hotRegionMinWriteRate { // ?
+		hotRegionThreshold = hotRegionMinWriteRate
+	}
+	c.updateReadStatCache(region, hotRegionThreshold)
 }

@@ -28,6 +28,7 @@ type RegionInfo struct {
 	DownPeers    []*pdpb.PeerStats
 	PendingPeers []*metapb.Peer
 	WrittenBytes uint64
+	ReadBytes    uint64
 }
 
 func newRegionInfo(region *metapb.Region, leader *metapb.Peer) *RegionInfo {
@@ -52,6 +53,7 @@ func (r *RegionInfo) clone() *RegionInfo {
 		DownPeers:    downPeers,
 		PendingPeers: pendingPeers,
 		WrittenBytes: r.WrittenBytes,
+		ReadBytes:    r.ReadBytes,
 	}
 }
 
