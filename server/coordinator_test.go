@@ -360,6 +360,42 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(resp, IsNil)
 }
 
+func (s *testCoordinatorSuite) TestRestart(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	defer hbStreams.Close()
+
+	// Turn off balance, we test add replica only.
+	cfg, opt := newTestScheduleConfig()
+	cfg.LeaderScheduleLimit = 0
+	cfg.RegionScheduleLimit = 0
+
+	// Add 3 stores (1, 2, 3) and a region with 1 replica on store 1.
+	tc.addRegionStore(1, 1)
+	tc.addRegionStore(2, 2)
+	tc.addRegionStore(3, 3)
+	tc.addLeaderRegion(1, 1)
+	cluster.activeRegions = 1
+	region := cluster.getRegion(1)
+
+	// Add 1 replica on store 2.
+	co := newCoordinator(cluster, opt, hbStreams)
+	co.run()
+	stream := newMockHeartbeatStream()
+	resp := dispatchAndRecvHeartbeat(co, region, stream)
+	checkAddPeerResp(c, resp, 2)
+	region.Peers = append(region.Peers, resp.GetChangePeer().GetPeer())
+	co.stop()
+
+	// Recreate coodinator then add another replica on store 3.
+	co = newCoordinator(cluster, opt, hbStreams)
+	co.run()
+	resp = dispatchAndRecvHeartbeat(co, region, stream)
+	checkAddPeerResp(c, resp, 3)
+	co.stop()
+}
+
 func waitOperator(c *C, co *coordinator, regionID uint64) {
 	for i := 0; i < 20; i++ {
 		if co.getOperator(regionID) != nil {
