@@ -417,35 +417,35 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 
 	r1, _ := cluster.GetRegionByKey([]byte("a"))
 	// 1: [nil, nil)
-	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "", ""))
+	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", ""))
 
 	// split 1 to 2: [nil, m) 1: [m, nil), sync 2 first
 	r2ID, r2PeerIDs := s.askSplit(c, r1)
 	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)
 	leaderPeer2 := s.chooseRegionLeader(c, r2)
 	s.heartbeatRegion(c, s.clusterID, r2, leaderPeer2)
-	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "", "m"))
+	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", "m"))
 	mustGetRegion(c, cluster, []byte("a"), r2)
 	// [m, nil) is missing before r1's heartbeat.
 	mustGetRegion(c, cluster, []byte("z"), nil)
 
 	leaderPeer1 := s.chooseRegionLeader(c, r1)
 	s.heartbeatRegion(c, s.clusterID, r1, leaderPeer1)
-	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "", "m", "m", ""))
+	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", "m", "m", ""))
 	mustGetRegion(c, cluster, []byte("z"), r1)
 
 	// split 1 to 3: [m, q) 1: [q, nil), sync 1 first
 	r3ID, r3PeerIDs := s.askSplit(c, r1)
 	r3 := splitRegion(c, r1, []byte("q"), r3ID, r3PeerIDs)
 	s.heartbeatRegion(c, s.clusterID, r1, leaderPeer1)
-	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "", "m", "q", ""))
+	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", "m", "q", ""))
 	mustGetRegion(c, cluster, []byte("z"), r1)
 	mustGetRegion(c, cluster, []byte("a"), r2)
 	// [m, q) is missing before r3's heartbeat.
 	mustGetRegion(c, cluster, []byte("n"), nil)
 	leaderPeer3 := s.chooseRegionLeader(c, r3)
 	s.heartbeatRegion(c, s.clusterID, r3, leaderPeer3)
-	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "", "m", "m", "q", "q", ""))
+	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", "m", "m", "q", "q", ""))
 	mustGetRegion(c, cluster, []byte("n"), r3)
 }
 
@@ -465,8 +465,8 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 	c.Assert(err, IsNil)
 
 	// Add Peers util all stores are used up.
-	testutil.WaitUtil(c, func(c *C) bool {
-		testutil.WaitUtil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func(c *C) bool {
+		testutil.WaitUntil(c, func(c *C) bool {
 			res := s.heartbeatRegion(c, s.clusterID, r1, leaderPeer)
 			if res == nil {
 				c.Log("no response")
@@ -488,7 +488,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 	leaderPeer2 := s.chooseRegionLeader(c, r2)
 	resp := s.heartbeatRegion(c, s.clusterID, r2, leaderPeer2)
 	c.Assert(resp, IsNil)
-	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "", "m"))
+	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", "m"))
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
@@ -514,7 +514,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 	// Add 4 peers.
 	for i := 1; i <= 4; i++ {
-		testutil.WaitUtil(c, func(c *C) bool {
+		testutil.WaitUntil(c, func(c *C) bool {
 			res := s.heartbeatRegion(c, s.clusterID, region, leaderPeer)
 			if res == nil {
 				c.Log("no response")
@@ -527,7 +527,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 			s.onChangePeerRes(c, res.GetChangePeer(), region)
 			return true
 		})
-		testutil.WaitUtil(c, func(c *C) bool {
+		testutil.WaitUntil(c, func(c *C) bool {
 			// update to server
 			s.heartbeatRegion(c, s.clusterID, region, leaderPeer)
 			return s.checkRegionPeerCount(c, regionKey, i+1)
@@ -535,7 +535,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 	}
 
 	// Wait util no more commands.
-	testutil.WaitUtil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func(c *C) bool {
 		res := s.heartbeatRegion(c, s.clusterID, region, leaderPeer)
 		if res == nil {
 			return true
@@ -555,7 +555,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 	// Remove 2 peers
 	for peerCount := 5; peerCount > 3; peerCount-- {
-		testutil.WaitUtil(c, func(c *C) bool {
+		testutil.WaitUntil(c, func(c *C) bool {
 			res := s.heartbeatRegion(c, s.clusterID, region, leaderPeer)
 			if res == nil {
 				c.Log("no response")
@@ -573,7 +573,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 			s.onChangePeerRes(c, res.GetChangePeer(), region)
 			return true
 		})
-		testutil.WaitUtil(c, func(c *C) bool {
+		testutil.WaitUntil(c, func(c *C) bool {
 			// update to server
 			s.heartbeatRegion(c, s.clusterID, region, leaderPeer)
 			return s.checkRegionPeerCount(c, regionKey, peerCount-1)
@@ -591,7 +591,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	leaderPeer1 := s.chooseRegionLeader(c, r1)
 
 	// Wait for AddPeer command.
-	testutil.WaitUtil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func(c *C) bool {
 		res := s.heartbeatRegion(c, s.clusterID, r1, leaderPeer1)
 		if res == nil {
 			c.Log("no response")
@@ -611,13 +611,13 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	// Sync r1 with both ConfVer and Version updated.
 	resp := s.heartbeatRegion(c, s.clusterID, r1, leaderPeer1)
 	c.Assert(resp, IsNil)
-	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "m", ""))
+	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "m", ""))
 	mustGetRegion(c, cluster, []byte("z"), r1)
 	mustGetRegion(c, cluster, []byte("a"), nil)
 	// Sync r2.
 	leaderPeer2 := s.chooseRegionLeader(c, r2)
 	s.heartbeatRegion(c, s.clusterID, r2, leaderPeer2)
-	testutil.WaitUtil(c, s.checkSearchRegions(cluster, "", "m", "m", ""))
+	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", "m", "m", ""))
 }
 
 func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {

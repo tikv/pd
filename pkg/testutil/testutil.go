@@ -65,12 +65,12 @@ const (
 	waitRetrySleep = time.Millisecond * 50
 )
 
-// CheckFunc is a condition checker that passed to WaitUtil. Its implementation
+// CheckFunc is a condition checker that passed to WaitUntil. Its implementation
 // may call c.Fatal() to abort the test, or c.Log() to add more information.
 type CheckFunc func(c *check.C) bool
 
-// WaitUtil repeatly evaluates f() for a period of time, util it returns true.
-func WaitUtil(c *check.C, f CheckFunc) {
+// WaitUntil repeatly evaluates f() for a period of time, util it returns true.
+func WaitUntil(c *check.C, f CheckFunc) {
 	c.Log("wait start")
 	for i := 0; i < waitMaxRetry; i++ {
 		if f(c) {

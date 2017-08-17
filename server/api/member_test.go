@@ -228,7 +228,7 @@ func (s *testMemberAPISuite) post(c *C, url string) {
 
 func (s *testMemberAPISuite) waitLeaderChange(c *C, svr *server.Server, old *pdpb.Member) *pdpb.Member {
 	var leader *pdpb.Member
-	testutil.WaitUtil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func(c *C) bool {
 		var err error
 		leader, err = svr.GetLeader()
 		if err != nil {
