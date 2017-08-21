@@ -20,7 +20,6 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"golang.org/x/net/context"
 )
 
@@ -74,7 +73,7 @@ type coordinator struct {
 	hbStreams *heartbeatStreams
 }
 
-func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
+func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
 		ctx:        ctx,
@@ -87,7 +86,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
 		schedulers: make(map[string]*scheduleController),
 		histories:  newLRUCache(historiesCacheSize),
 		events:     newFifoCache(eventsCacheSize),
-		hbStreams:  newHeartbeatStreams(ctx, cluster.getClusterID()),
+		hbStreams:  hbStreams,
 	}
 }
 
@@ -456,106 +455,5 @@ func collectOperatorCounterMetrics(op Operator) {
 	}
 	for _, op := range regionOp.Ops {
 		operatorCounter.WithLabelValues(op.GetName(), op.GetState().String()).Add(1)
-	}
-}
-
-type heartbeatStream interface {
-	Send(*pdpb.RegionHeartbeatResponse) error
-}
-
-type streamUpdate struct {
-	storeID uint64
-	stream  heartbeatStream
-}
-
-type heartbeatStreams struct {
-	ctx       context.Context
-	clusterID uint64
-	streams   map[uint64]heartbeatStream
-	msgCh     chan *pdpb.RegionHeartbeatResponse
-	streamCh  chan streamUpdate
-}
-
-func newHeartbeatStreams(ctx context.Context, clusterID uint64) *heartbeatStreams {
-	localCtx, _ := context.WithCancel(ctx)
-	hs := &heartbeatStreams{
-		ctx:       localCtx,
-		clusterID: clusterID,
-		streams:   make(map[uint64]heartbeatStream),
-		msgCh:     make(chan *pdpb.RegionHeartbeatResponse, regionheartbeatSendChanCap),
-		streamCh:  make(chan streamUpdate, 1),
-	}
-	go hs.run()
-	return hs
-}
-
-func (s *heartbeatStreams) run() {
-	for {
-		select {
-		case update := <-s.streamCh:
-			s.streams[update.storeID] = update.stream
-		case msg := <-s.msgCh:
-			storeID := msg.GetTargetPeer().GetStoreId()
-			if stream, ok := s.streams[storeID]; ok {
-				if err := stream.Send(msg); err != nil {
-					log.Errorf("[region %v] send heartbeat message fail: %v", msg.RegionId, err)
-					delete(s.streams, storeID)
-					regionHeartbeatCounter.WithLabelValues("push", "err")
-				} else {
-					regionHeartbeatCounter.WithLabelValues("push", "ok")
-				}
-			} else {
-				log.Debugf("[region %v] heartbeat stream not found for store %v, skip send message", msg.RegionId, storeID)
-				regionHeartbeatCounter.WithLabelValues("push", "skip")
-			}
-		case <-s.ctx.Done():
-			return
-		}
-	}
-}
-
-func (s *heartbeatStreams) bindStream(storeID uint64, stream heartbeatStream) {
-	update := streamUpdate{
-		storeID: storeID,
-		stream:  stream,
-	}
-	select {
-	case s.streamCh <- update:
-	case <-s.ctx.Done():
-	}
-}
-
-func (s *heartbeatStreams) sendMsg(region *RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
-	if region.Leader == nil {
-		return
-	}
-
-	msg.Header = &pdpb.ResponseHeader{ClusterId: s.clusterID}
-	msg.RegionId = region.GetId()
-	msg.RegionEpoch = region.GetRegionEpoch()
-	msg.TargetPeer = region.Leader
-
-	select {
-	case s.msgCh <- msg:
-	case <-s.ctx.Done():
-	}
-}
-
-func (s *heartbeatStreams) sendErr(region *RegionInfo, errType pdpb.ErrorType, errMsg string) {
-	regionHeartbeatCounter.WithLabelValues("report", "err")
-
-	msg := &pdpb.RegionHeartbeatResponse{
-		Header: &pdpb.ResponseHeader{
-			ClusterId: s.clusterID,
-			Error: &pdpb.Error{
-				Type:    errType,
-				Message: errMsg,
-			},
-		},
-	}
-
-	select {
-	case s.msgCh <- msg:
-	case <-s.ctx.Done():
 	}
 }
