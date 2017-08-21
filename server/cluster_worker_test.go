@@ -466,19 +466,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 
 	// Add Peers util all stores are used up.
 	testutil.WaitUntil(c, func(c *C) bool {
-		testutil.WaitUntil(c, func(c *C) bool {
-			res := s.heartbeatRegion(c, s.clusterID, r1, leaderPeer)
-			if res == nil {
-				c.Log("no response")
-				return false
-			}
-			if res.GetChangePeer() == nil || res.GetChangePeer().GetChangeType() != pdpb.ConfChangeType_AddNode {
-				c.Log("response is not AddNode")
-				return false
-			}
-			s.onChangePeerRes(c, res.GetChangePeer(), r1)
-			return true
-		})
+		s.waitAddNode(c, r1, leaderPeer)
 		return len(r1.Peers) == len(s.stores)
 	})
 
@@ -489,6 +477,22 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 	resp := s.heartbeatRegion(c, s.clusterID, r2, leaderPeer2)
 	c.Assert(resp, IsNil)
 	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", "m"))
+}
+
+func (s *testClusterWorkerSuite) waitAddNode(c *C, r *metapb.Region, leader *metapb.Peer) {
+	testutil.WaitUntil(c, func(c *C) bool {
+		res := s.heartbeatRegion(c, s.clusterID, r, leader)
+		if res == nil {
+			c.Log("no response")
+			return false
+		}
+		if res.GetChangePeer() == nil || res.GetChangePeer().GetChangeType() != pdpb.ConfChangeType_AddNode {
+			c.Log("response is not AddNode")
+			return false
+		}
+		s.onChangePeerRes(c, res.GetChangePeer(), r)
+		return true
+	})
 }
 
 func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
@@ -514,19 +518,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 	// Add 4 peers.
 	for i := 1; i <= 4; i++ {
-		testutil.WaitUntil(c, func(c *C) bool {
-			res := s.heartbeatRegion(c, s.clusterID, region, leaderPeer)
-			if res == nil {
-				c.Log("no response")
-				return false
-			}
-			if res.GetChangePeer() == nil || res.GetChangePeer().GetChangeType() != pdpb.ConfChangeType_AddNode {
-				c.Log("response is not AddNode")
-				return false
-			}
-			s.onChangePeerRes(c, res.GetChangePeer(), region)
-			return true
-		})
+		s.waitAddNode(c, region, leaderPeer)
 		testutil.WaitUntil(c, func(c *C) bool {
 			// update to server
 			s.heartbeatRegion(c, s.clusterID, region, leaderPeer)
@@ -591,19 +583,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	leaderPeer1 := s.chooseRegionLeader(c, r1)
 
 	// Wait for AddPeer command.
-	testutil.WaitUntil(c, func(c *C) bool {
-		res := s.heartbeatRegion(c, s.clusterID, r1, leaderPeer1)
-		if res == nil {
-			c.Log("no response")
-			return false
-		}
-		if res.GetChangePeer() == nil || res.GetChangePeer().GetChangeType() != pdpb.ConfChangeType_AddNode {
-			c.Log("response is not AddNode")
-			return false
-		}
-		s.onChangePeerRes(c, res.GetChangePeer(), r1)
-		return true
-	})
+	s.waitAddNode(c, r1, leaderPeer1)
 	// Split 1 to 2: [nil, m) 1: [m, nil).
 	r2ID, r2PeerIDs := s.askSplit(c, r1)
 	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)
