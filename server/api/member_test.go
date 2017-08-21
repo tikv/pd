@@ -26,6 +26,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 )
 
@@ -226,13 +227,19 @@ func (s *testMemberAPISuite) post(c *C, url string) {
 }
 
 func (s *testMemberAPISuite) waitLeaderChange(c *C, svr *server.Server, old *pdpb.Member) *pdpb.Member {
-	for i := 0; i < 100; i++ {
-		leader, _ := svr.GetLeader()
-		if leader.GetMemberId() != old.GetMemberId() {
-			return leader
+	var leader *pdpb.Member
+	testutil.WaitUntil(c, func(c *C) bool {
+		var err error
+		leader, err = svr.GetLeader()
+		if err != nil {
+			c.Log(err)
+			return false
 		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	c.Fatal("leader is not changed after 10 seconds")
-	return nil
+		if leader.GetMemberId() == old.GetMemberId() {
+			c.Log("leader not change")
+			return false
+		}
+		return true
+	})
+	return leader
 }

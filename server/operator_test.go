@@ -134,10 +134,11 @@ func doRegionHeartbeatResponse(region *RegionInfo, resp *pdpb.RegionHeartbeatRes
 func (o *testOperatorSuite) TestOperatorState(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
+	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	defer hbStreams.Close()
 
 	_, opt := newTestScheduleConfig()
-
-	co := newCoordinator(cluster, opt)
+	co := newCoordinator(cluster, opt, hbStreams)
 	co.run()
 	defer co.stop()
 
