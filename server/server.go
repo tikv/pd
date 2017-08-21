@@ -87,6 +87,8 @@ type Server struct {
 	msgID uint64
 
 	id uint64
+
+	hbStreams *heartbeatStreams
 }
 
 // NewServer creates the pd server with given configuration.
@@ -197,6 +199,7 @@ func (s *Server) StartEtcd(apiHandler http.Handler) error {
 	s.idAlloc = &idAllocator{s: s}
 	s.kv = newKV(s)
 	s.cluster = newRaftCluster(s, s.clusterID)
+	s.hbStreams = newHeartbeatStreams(s.clusterID)
 
 	// Server has started.
 	atomic.StoreInt64(&s.closed, 0)
@@ -252,6 +255,10 @@ func (s *Server) Close() {
 
 	if s.etcd != nil {
 		s.etcd.Close()
+	}
+
+	if s.hbStreams != nil {
+		s.hbStreams.Close()
 	}
 
 	s.wg.Wait()
