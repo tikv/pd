@@ -154,9 +154,9 @@ type Operator interface {
 }
 
 type adminOperator struct {
-	Name         string    `json:"name"`
-	Start        time.Time `json:"start"`
 	sync.RWMutex `json:"-"`
+	Name         string        `json:"name"`
+	Start        time.Time     `json:"start"`
 	Region       *RegionInfo   `json:"region"`
 	Ops          []Operator    `json:"ops"`
 	State        OperatorState `json:"state"`
@@ -227,9 +227,9 @@ func (op *adminOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, 
 }
 
 type regionOperator struct {
-	Name         string    `json:"name"`
-	Start        time.Time `json:"start"`
-	sync.RWMutex `json:"_"`
+	sync.RWMutex `json:"-"`
+	Name         string        `json:"name"`
+	Start        time.Time     `json:"start"`
 	Region       *RegionInfo   `json:"region"`
 	End          time.Time     `json:"end"`
 	Index        int           `json:"index"`
@@ -318,11 +318,11 @@ func (op *regionOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse,
 }
 
 type changePeerOperator struct {
+	sync.RWMutex `json:"-"`
 	Name         string           `json:"name"`
 	RegionID     uint64           `json:"region_id"`
 	ChangePeer   *pdpb.ChangePeer `json:"change_peer"`
-	sync.RWMutex `json:"_"`
-	State        OperatorState `json:"state"`
+	State        OperatorState    `json:"state"`
 }
 
 func newAddPeerOperator(regionID uint64, peer *metapb.Peer) *changePeerOperator {
@@ -418,11 +418,11 @@ func (op *changePeerOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatRespo
 }
 
 type transferLeaderOperator struct {
-	Name         string       `json:"name"`
-	RegionID     uint64       `json:"region_id"`
-	OldLeader    *metapb.Peer `json:"old_leader"`
-	NewLeader    *metapb.Peer `json:"new_leader"`
-	sync.RWMutex `json:"_"`
+	sync.RWMutex `json:"-"`
+	Name         string        `json:"name"`
+	RegionID     uint64        `json:"region_id"`
+	OldLeader    *metapb.Peer  `json:"old_leader"`
+	NewLeader    *metapb.Peer  `json:"new_leader"`
 	State        OperatorState `json:"state"`
 }
 
