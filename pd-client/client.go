@@ -61,6 +61,7 @@ type tsoRequest struct {
 
 const (
 	pdTimeout             = 3 * time.Second
+	updateLeaderTimeout   = time.Second // Use a shorter timeout to recover faster from network isolation.
 	maxMergeTSORequests   = 10000
 	maxInitClusterRetries = 100
 )
@@ -146,10 +147,10 @@ func (c *client) initClusterID() error {
 }
 
 func (c *client) updateLeader() error {
-	ctx, cancel := context.WithCancel(c.ctx)
-	defer cancel()
 	for _, u := range c.urls {
+		ctx, cancel := context.WithTimeout(c.ctx, updateLeaderTimeout)
 		members, err := c.getMembers(ctx, u)
+		cancel()
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
 			continue
 		}
@@ -284,7 +285,7 @@ func (c *client) tsLoop() {
 
 		if stream == nil {
 			var ctx context.Context
-			ctx, cancel = context.WithCancel(c.ctx)
+			ctx, cancel = context.WithTimeout(c.ctx, pdTimeout)
 			stream, err = c.leaderClient().Tso(ctx)
 			if err != nil {
 				log.Errorf("[pd] create tso stream error: %v", err)
