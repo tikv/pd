@@ -187,13 +187,16 @@ func (s *StoreStatus) clone() *StoreStatus {
 
 // GetStartTS returns the start timestamp.
 func (s *StoreStatus) GetStartTS() time.Time {
+	if s.IsDown() {
+		return time.Unix(0, 0)
+	}
 	return time.Unix(int64(s.GetStartTime()), 0)
 }
 
 // GetUptime returns the uptime.
 func (s *StoreStatus) GetUptime() time.Duration {
 	uptime := s.LastHeartbeatTS.Sub(s.GetStartTS())
-	if uptime > 0 {
+	if uptime > 0 && !s.IsDown() {
 		return uptime
 	}
 	return 0
