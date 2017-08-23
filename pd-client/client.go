@@ -285,8 +285,8 @@ func (c *client) tsLoop() {
 
 		if stream == nil {
 			var ctx context.Context
-			ctx, cancel = context.WithTimeout(c.ctx, pdTimeout)
-			stream, err = c.leaderClient().Tso(ctx)
+			ctx, cancel = context.WithCancel(c.ctx)
+			stream, err = c.leaderClient().Tso(ctx, grpc.FailFast(true))
 			if err != nil {
 				log.Errorf("[pd] create tso stream error: %v", err)
 				c.scheduleCheckLeader()
