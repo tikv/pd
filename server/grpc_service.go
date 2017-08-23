@@ -148,13 +148,13 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 		return &pdpb.GetStoreResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	store, _, err := cluster.GetStore(request.GetStoreId())
+	store, err := cluster.GetStore(request.GetStoreId())
 	if err != nil {
 		return nil, grpc.Errorf(codes.Unknown, err.Error())
 	}
 	return &pdpb.GetStoreResponse{
 		Header: s.header(),
-		Store:  store,
+		Store:  store.Store,
 	}, nil
 }
 
@@ -162,7 +162,7 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 // It returns nil if it can't get the store.
 // Copied from server/command.go
 func checkStore2(cluster *RaftCluster, storeID uint64) *pdpb.Error {
-	store, _, err := cluster.GetStore(storeID)
+	store, err := cluster.GetStore(storeID)
 	if err == nil && store != nil {
 		if store.GetState() == metapb.StoreState_Tombstone {
 			return &pdpb.Error{

@@ -59,7 +59,7 @@ func (r *Replication) GetLocationLabels() []string {
 
 // GetDistinctScore returns the score that the other is distinct from the stores.
 // A higher score means the other store is more different from the existed stores.
-func (r *Replication) GetDistinctScore(stores []*storeInfo, other *storeInfo) float64 {
+func (r *Replication) GetDistinctScore(stores []*StoreInfo, other *StoreInfo) float64 {
 	score := float64(0)
 	locationLabels := r.GetLocationLabels()
 
@@ -78,7 +78,7 @@ func (r *Replication) GetDistinctScore(stores []*storeInfo, other *storeInfo) fl
 // Returns 0 if store A is as good as store B.
 // Returns 1 if store A is better than store B.
 // Returns -1 if store B is better than store A.
-func compareStoreScore(storeA *storeInfo, scoreA float64, storeB *storeInfo, scoreB float64) int {
+func compareStoreScore(storeA *StoreInfo, scoreA float64, storeB *StoreInfo, scoreB float64) int {
 	// The store with higher score is better.
 	if scoreA > scoreB {
 		return 1

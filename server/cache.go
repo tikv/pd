@@ -41,16 +41,16 @@ var (
 )
 
 type storesInfo struct {
-	stores map[uint64]*storeInfo
+	stores map[uint64]*StoreInfo
 }
 
 func newStoresInfo() *storesInfo {
 	return &storesInfo{
-		stores: make(map[uint64]*storeInfo),
+		stores: make(map[uint64]*StoreInfo),
 	}
 }
 
-func (s *storesInfo) getStore(storeID uint64) *storeInfo {
+func (s *storesInfo) getStore(storeID uint64) *StoreInfo {
 	store, ok := s.stores[storeID]
 	if !ok {
 		return nil
@@ -58,7 +58,7 @@ func (s *storesInfo) getStore(storeID uint64) *storeInfo {
 	return store.clone()
 }
 
-func (s *storesInfo) setStore(store *storeInfo) {
+func (s *storesInfo) setStore(store *StoreInfo) {
 	s.stores[store.GetId()] = store
 }
 
@@ -82,8 +82,8 @@ func (s *storesInfo) unblockStore(storeID uint64) {
 	store.unblock()
 }
 
-func (s *storesInfo) getStores() []*storeInfo {
-	stores := make([]*storeInfo, 0, len(s.stores))
+func (s *storesInfo) getStores() []*StoreInfo {
+	stores := make([]*StoreInfo, 0, len(s.stores))
 	for _, store := range s.stores {
 		stores = append(stores, store.clone())
 	}
@@ -104,13 +104,13 @@ func (s *storesInfo) getStoreCount() int {
 
 func (s *storesInfo) setLeaderCount(storeID uint64, leaderCount int) {
 	if store, ok := s.stores[storeID]; ok {
-		store.status.LeaderCount = leaderCount
+		store.LeaderCount = leaderCount
 	}
 }
 
 func (s *storesInfo) setRegionCount(storeID uint64, regionCount int) {
 	if store, ok := s.stores[storeID]; ok {
-		store.status.RegionCount = regionCount
+		store.RegionCount = regionCount
 	}
 }
 
@@ -118,7 +118,7 @@ func (s *storesInfo) totalWrittenBytes() uint64 {
 	var totalWrittenBytes uint64
 	for _, s := range s.stores {
 		if s.isUp() {
-			totalWrittenBytes += s.status.GetBytesWritten()
+			totalWrittenBytes += s.Stats.GetBytesWritten()
 		}
 	}
 	return totalWrittenBytes
@@ -430,19 +430,19 @@ func (c *clusterInfo) putMetaLocked(meta *metapb.Cluster) error {
 	return nil
 }
 
-func (c *clusterInfo) getStore(storeID uint64) *storeInfo {
+func (c *clusterInfo) getStore(storeID uint64) *StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.stores.getStore(storeID)
 }
 
-func (c *clusterInfo) putStore(store *storeInfo) error {
+func (c *clusterInfo) putStore(store *StoreInfo) error {
 	c.Lock()
 	defer c.Unlock()
 	return c.putStoreLocked(store.clone())
 }
 
-func (c *clusterInfo) putStoreLocked(store *storeInfo) error {
+func (c *clusterInfo) putStoreLocked(store *StoreInfo) error {
 	if c.kv != nil {
 		if err := c.kv.saveStore(store.Store); err != nil {
 			return errors.Trace(err)
@@ -464,7 +464,7 @@ func (c *clusterInfo) unblockStore(storeID uint64) {
 	c.stores.unblockStore(storeID)
 }
 
-func (c *clusterInfo) getStores() []*storeInfo {
+func (c *clusterInfo) getStores() []*StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.stores.getStores()
@@ -487,7 +487,7 @@ func (c *clusterInfo) getStoresWriteStat() map[uint64]uint64 {
 	defer c.RUnlock()
 	res := make(map[uint64]uint64)
 	for _, s := range c.stores.stores {
-		res[s.GetId()] = s.status.GetBytesWritten()
+		res[s.GetId()] = s.Stats.GetBytesWritten()
 	}
 	return res
 }
@@ -603,10 +603,10 @@ func (c *clusterInfo) randFollowerRegion(storeID uint64) *RegionInfo {
 	return c.regions.randFollowerRegion(storeID)
 }
 
-func (c *clusterInfo) getRegionStores(region *RegionInfo) []*storeInfo {
+func (c *clusterInfo) getRegionStores(region *RegionInfo) []*StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
-	var stores []*storeInfo
+	var stores []*StoreInfo
 	for id := range region.GetStoreIds() {
 		if store := c.stores.getStore(id); store != nil {
 			stores = append(stores, store)
@@ -615,16 +615,16 @@ func (c *clusterInfo) getRegionStores(region *RegionInfo) []*storeInfo {
 	return stores
 }
 
-func (c *clusterInfo) getLeaderStore(region *RegionInfo) *storeInfo {
+func (c *clusterInfo) getLeaderStore(region *RegionInfo) *StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.stores.getStore(region.Leader.GetStoreId())
 }
 
-func (c *clusterInfo) getFollowerStores(region *RegionInfo) []*storeInfo {
+func (c *clusterInfo) getFollowerStores(region *RegionInfo) []*StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
-	var stores []*storeInfo
+	var stores []*StoreInfo
 	for id := range region.GetFollowers() {
 		if store := c.stores.getStore(id); store != nil {
 			stores = append(stores, store)
@@ -650,8 +650,8 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	if store == nil {
 		return errors.Trace(errStoreNotFound(storeID))
 	}
-	store.status.StoreStats = proto.Clone(stats).(*pdpb.StoreStats)
-	store.status.LastHeartbeatTS = time.Now()
+	store.Stats = proto.Clone(stats).(*pdpb.StoreStats)
+	store.LastHeartbeatTS = time.Now()
 
 	c.stores.setStore(store)
 	return nil

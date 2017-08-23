@@ -36,7 +36,7 @@ func (s *testReplicationSuite) TestDistinctScore(c *C) {
 	racks := []string{"r1", "r2", "r3"}
 	hosts := []string{"h1", "h2", "h3"}
 
-	var stores []*storeInfo
+	var stores []*StoreInfo
 	for i, zone := range zones {
 		for j, rack := range racks {
 			for k, host := range hosts {

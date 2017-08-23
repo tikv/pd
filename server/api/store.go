@@ -33,19 +33,17 @@ type metaStore struct {
 }
 
 type storeStatus struct {
-	StoreID            uint64            `json:"store_id"`
-	Capacity           typeutil.ByteSize `json:"capacity"`
-	Available          typeutil.ByteSize `json:"available"`
-	LeaderCount        int               `json:"leader_count"`
-	RegionCount        int               `json:"region_count"`
-	SendingSnapCount   uint32            `json:"sending_snap_count"`
-	ReceivingSnapCount uint32            `json:"receiving_snap_count"`
-	ApplyingSnapCount  uint32            `json:"applying_snap_count"`
-	IsBusy             bool              `json:"is_busy"`
-
-	StartTS         time.Time         `json:"start_ts"`
-	LastHeartbeatTS time.Time         `json:"last_heartbeat_ts"`
-	Uptime          typeutil.Duration `json:"uptime"`
+	Capacity           typeutil.ByteSize `json:"capacity,omitempty"`
+	Available          typeutil.ByteSize `json:"available,omitempty"`
+	LeaderCount        int               `json:"leader_count,omitempty"`
+	RegionCount        int               `json:"region_count,omitempty"`
+	SendingSnapCount   uint32            `json:"sending_snap_count,omitempty"`
+	ReceivingSnapCount uint32            `json:"receiving_snap_count,omitempty"`
+	ApplyingSnapCount  uint32            `json:"applying_snap_count,omitempty"`
+	IsBusy             bool              `json:"is_busy,omitempty"`
+	StartTS            time.Time         `json:"start_ts,omitempty"`
+	LastHeartbeatTS    time.Time         `json:"last_heartbeat_ts,omitempty"`
+	Uptime             typeutil.Duration `json:"uptime,omitempty"`
 }
 
 type storeInfo struct {
@@ -55,28 +53,27 @@ type storeInfo struct {
 
 const downStateName = "Down"
 
-func newStoreInfo(store *metapb.Store, status *server.StoreStatus) *storeInfo {
+func newStoreInfo(store *server.StoreInfo) *storeInfo {
 	s := &storeInfo{
 		Store: &metaStore{
-			Store:     store,
+			Store:     store.Store,
 			StateName: store.State.String(),
 		},
 		Status: &storeStatus{
-			StoreID:            status.StoreId,
-			Capacity:           typeutil.ByteSize(status.Capacity),
-			Available:          typeutil.ByteSize(status.Available),
-			LeaderCount:        status.LeaderCount,
-			RegionCount:        status.RegionCount,
-			SendingSnapCount:   status.SendingSnapCount,
-			ReceivingSnapCount: status.ReceivingSnapCount,
-			ApplyingSnapCount:  status.ApplyingSnapCount,
-			IsBusy:             status.IsBusy,
-			StartTS:            status.GetStartTS(),
-			LastHeartbeatTS:    status.LastHeartbeatTS,
-			Uptime:             typeutil.NewDuration(status.GetUptime()),
+			Capacity:           typeutil.ByteSize(store.Stats.GetCapacity()),
+			Available:          typeutil.ByteSize(store.Stats.GetAvailable()),
+			LeaderCount:        store.LeaderCount,
+			RegionCount:        store.RegionCount,
+			SendingSnapCount:   store.Stats.GetSendingSnapCount(),
+			ReceivingSnapCount: store.Stats.GetReceivingSnapCount(),
+			ApplyingSnapCount:  store.Stats.GetApplyingSnapCount(),
+			IsBusy:             store.Stats.GetIsBusy(),
+			StartTS:            store.GetStartTS(),
+			LastHeartbeatTS:    store.LastHeartbeatTS,
+			Uptime:             typeutil.NewDuration(store.GetUptime()),
 		},
 	}
-	if store.State == metapb.StoreState_Up && status.IsDown() {
+	if store.State == metapb.StoreState_Up && store.IsDown() {
 		s.Store.StateName = downStateName
 	}
 	return s
@@ -114,13 +111,13 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	store, status, err := cluster.GetStore(storeID)
+	store, err := cluster.GetStore(storeID)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	storeInfo := newStoreInfo(store, status)
+	storeInfo := newStoreInfo(store)
 	h.rd.JSON(w, http.StatusOK, storeInfo)
 }
 
@@ -222,13 +219,13 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	stores = urlFilter.filter(cluster.GetStores())
 	for _, s := range stores {
-		store, status, err := cluster.GetStore(s.GetId())
+		store, err := cluster.GetStore(s.GetId())
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		storeInfo := newStoreInfo(store, status)
+		storeInfo := newStoreInfo(store)
 		storesInfo.Stores = append(storesInfo.Stores, storeInfo)
 	}
 	storesInfo.Count = len(storesInfo.Stores)

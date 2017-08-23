@@ -21,86 +21,93 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-// storeInfo contains information about a store.
-// TODO: Export this to API directly.
-type storeInfo struct {
+// StoreInfo contains information about a store.
+type StoreInfo struct {
 	*metapb.Store
-	status *StoreStatus
+	Stats *pdpb.StoreStats
+	// Blocked means that the store is blocked from balance.
+	blocked         bool
+	LeaderCount     int
+	RegionCount     int
+	LastHeartbeatTS time.Time
 }
 
-func newStoreInfo(store *metapb.Store) *storeInfo {
-	return &storeInfo{
-		Store:  store,
-		status: newStoreStatus(),
+func newStoreInfo(store *metapb.Store) *StoreInfo {
+	return &StoreInfo{
+		Store: store,
 	}
 }
 
-func (s *storeInfo) clone() *storeInfo {
-	return &storeInfo{
-		Store:  proto.Clone(s.Store).(*metapb.Store),
-		status: s.status.clone(),
+func (s *StoreInfo) clone() *StoreInfo {
+	return &StoreInfo{
+		Store:           proto.Clone(s.Store).(*metapb.Store),
+		Stats:           proto.Clone(s.Stats).(*pdpb.StoreStats),
+		blocked:         s.blocked,
+		LeaderCount:     s.LeaderCount,
+		RegionCount:     s.RegionCount,
+		LastHeartbeatTS: s.LastHeartbeatTS,
 	}
 }
 
-func (s *storeInfo) block() {
-	s.status.blocked = true
+func (s *StoreInfo) block() {
+	s.blocked = true
 }
 
-func (s *storeInfo) unblock() {
-	s.status.blocked = false
+func (s *StoreInfo) unblock() {
+	s.blocked = false
 }
 
-func (s *storeInfo) isBlocked() bool {
-	return s.status.blocked
+func (s *StoreInfo) isBlocked() bool {
+	return s.blocked
 }
 
-func (s *storeInfo) isUp() bool {
+func (s *StoreInfo) isUp() bool {
 	return s.GetState() == metapb.StoreState_Up
 }
 
-func (s *storeInfo) isOffline() bool {
+func (s *StoreInfo) isOffline() bool {
 	return s.GetState() == metapb.StoreState_Offline
 }
 
-func (s *storeInfo) isTombstone() bool {
+func (s *StoreInfo) isTombstone() bool {
 	return s.GetState() == metapb.StoreState_Tombstone
 }
 
-func (s *storeInfo) downTime() time.Duration {
-	return time.Since(s.status.LastHeartbeatTS)
+func (s *StoreInfo) downTime() time.Duration {
+	return time.Since(s.LastHeartbeatTS)
 }
 
-func (s *storeInfo) leaderCount() uint64 {
-	return uint64(s.status.LeaderCount)
+func (s *StoreInfo) leaderCount() uint64 {
+	return uint64(s.LeaderCount)
 }
 
-func (s *storeInfo) leaderScore() float64 {
-	return float64(s.status.LeaderCount)
+func (s *StoreInfo) leaderScore() float64 {
+	return float64(s.LeaderCount)
 }
 
-func (s *storeInfo) regionCount() uint64 {
-	return uint64(s.status.RegionCount)
+func (s *StoreInfo) regionCount() uint64 {
+	return uint64(s.RegionCount)
 }
 
-func (s *storeInfo) regionScore() float64 {
-	if s.status.GetCapacity() == 0 {
+func (s *StoreInfo) regionScore() float64 {
+	if s.Stats.GetCapacity() == 0 {
 		return 0
 	}
-	return float64(s.status.RegionCount) / float64(s.status.GetCapacity())
+	return float64(s.RegionCount) / float64(s.Stats.GetCapacity())
 }
 
-func (s *storeInfo) storageSize() uint64 {
-	return s.status.UsedSize
+func (s *StoreInfo) storageSize() uint64 {
+	return s.Stats.GetUsedSize()
 }
 
-func (s *storeInfo) availableRatio() float64 {
-	if s.status.GetCapacity() == 0 {
+func (s *StoreInfo) availableRatio() float64 {
+	if s.Stats.GetCapacity() == 0 {
 		return 0
 	}
-	return float64(s.status.GetAvailable()) / float64(s.status.GetCapacity())
+	return float64(s.Stats.GetAvailable()) / float64(s.Stats.GetCapacity())
 }
 
-func (s *storeInfo) resourceCount(kind ResourceKind) uint64 {
+func (s *StoreInfo) resourceCount(kind ResourceKind) uint64 {
 	switch kind {
 	case LeaderKind:
 		return s.leaderCount()
@@ -111,7 +118,7 @@ func (s *storeInfo) resourceCount(kind ResourceKind) uint64 {
 	}
 }
 
-func (s *storeInfo) resourceScore(kind ResourceKind) float64 {
+func (s *StoreInfo) resourceScore(kind ResourceKind) float64 {
 	switch kind {
 	case LeaderKind:
 		return s.leaderScore()
@@ -122,7 +129,28 @@ func (s *storeInfo) resourceScore(kind ResourceKind) float64 {
 	}
 }
 
-func (s *storeInfo) getLabelValue(key string) string {
+// GetStartTS returns the start timestamp.
+func (s *StoreInfo) GetStartTS() time.Time {
+	return time.Unix(int64(s.Stats.GetStartTime()), 0)
+}
+
+// GetUptime returns the uptime.
+func (s *StoreInfo) GetUptime() time.Duration {
+	uptime := s.LastHeartbeatTS.Sub(s.GetStartTS())
+	if uptime > 0 {
+		return uptime
+	}
+	return 0
+}
+
+const defaultStoreDownTime = time.Minute
+
+// IsDown returns whether the store is down
+func (s *StoreInfo) IsDown() bool {
+	return time.Now().Sub(s.LastHeartbeatTS) > defaultStoreDownTime
+}
+
+func (s *StoreInfo) getLabelValue(key string) string {
 	for _, label := range s.GetLabels() {
 		if label.GetKey() == key {
 			return label.GetValue()
@@ -133,7 +161,7 @@ func (s *storeInfo) getLabelValue(key string) string {
 
 // compareLocation compares 2 stores' labels and returns at which level their
 // locations are different. It returns -1 if they are at the same location.
-func (s *storeInfo) compareLocation(other *storeInfo, labels []string) int {
+func (s *StoreInfo) compareLocation(other *StoreInfo, labels []string) int {
 	for i, key := range labels {
 		v1, v2 := s.getLabelValue(key), other.getLabelValue(key)
 		// If label is not set, the store is considered at the same location
@@ -145,7 +173,7 @@ func (s *storeInfo) compareLocation(other *storeInfo, labels []string) int {
 	return -1
 }
 
-func (s *storeInfo) mergeLabels(labels []*metapb.StoreLabel) {
+func (s *StoreInfo) mergeLabels(labels []*metapb.StoreLabel) {
 L:
 	for _, newLabel := range labels {
 		for _, label := range s.Labels {
@@ -156,52 +184,4 @@ L:
 		}
 		s.Labels = append(s.Labels, newLabel)
 	}
-}
-
-// StoreStatus contains information about a store's status.
-type StoreStatus struct {
-	*pdpb.StoreStats
-
-	// Blocked means that the store is blocked from balance.
-	blocked         bool
-	LeaderCount     int
-	RegionCount     int
-	LastHeartbeatTS time.Time `json:"last_heartbeat_ts"`
-}
-
-func newStoreStatus() *StoreStatus {
-	return &StoreStatus{
-		StoreStats: &pdpb.StoreStats{},
-	}
-}
-
-func (s *StoreStatus) clone() *StoreStatus {
-	return &StoreStatus{
-		StoreStats:      proto.Clone(s.StoreStats).(*pdpb.StoreStats),
-		blocked:         s.blocked,
-		LeaderCount:     s.LeaderCount,
-		RegionCount:     s.RegionCount,
-		LastHeartbeatTS: s.LastHeartbeatTS,
-	}
-}
-
-// GetStartTS returns the start timestamp.
-func (s *StoreStatus) GetStartTS() time.Time {
-	return time.Unix(int64(s.GetStartTime()), 0)
-}
-
-// GetUptime returns the uptime.
-func (s *StoreStatus) GetUptime() time.Duration {
-	uptime := s.LastHeartbeatTS.Sub(s.GetStartTS())
-	if uptime > 0 {
-		return uptime
-	}
-	return 0
-}
-
-const defaultStoreDownTime = time.Minute
-
-// IsDown returns whether the store is down
-func (s *StoreStatus) IsDown() bool {
-	return time.Now().Sub(s.LastHeartbeatTS) > defaultStoreDownTime
 }

@@ -389,17 +389,16 @@ func (c *RaftCluster) GetStores() []*metapb.Store {
 }
 
 // GetStore gets store from cluster.
-func (c *RaftCluster) GetStore(storeID uint64) (*metapb.Store, *StoreStatus, error) {
+func (c *RaftCluster) GetStore(storeID uint64) (*StoreInfo, error) {
 	if storeID == 0 {
-		return nil, nil, errors.New("invalid zero store id")
+		return nil, errors.New("invalid zero store id")
 	}
 
 	store := c.cachedCluster.getStore(storeID)
 	if store == nil {
-		return nil, nil, errors.Errorf("invalid store ID %d, not found", storeID)
+		return nil, errors.Errorf("invalid store ID %d, not found", storeID)
 	}
-
-	return store.Store, store.status, nil
+	return store, nil
 }
 
 // UpdateStoreLabels updates a store's location labels.
@@ -511,7 +510,6 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	}
 
 	store.State = metapb.StoreState_Tombstone
-	store.status = newStoreStatus()
 	log.Warnf("[store %d] store %s has been Tombstone", store.GetId(), store.GetAddress())
 	return cluster.putStore(store)
 }
@@ -564,7 +562,7 @@ func (c *RaftCluster) collectMetrics() {
 
 		// Store stats.
 		storageSize += s.storageSize()
-		storageCapacity += s.status.GetCapacity()
+		storageCapacity += s.Stats.GetCapacity()
 
 		// Balance score.
 		minLeaderScore = math.Min(minLeaderScore, s.leaderScore())

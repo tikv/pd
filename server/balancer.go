@@ -50,7 +50,7 @@ func minBalanceDiff(count uint64) float64 {
 // shouldBalance returns true if we should balance the source and target store.
 // The min balance diff provides a buffer to make the cluster stable, so that we
 // don't need to schedule very frequently.
-func shouldBalance(source, target *storeInfo, kind ResourceKind) bool {
+func shouldBalance(source, target *StoreInfo, kind ResourceKind) bool {
 	sourceCount := source.resourceCount(kind)
 	sourceScore := source.resourceScore(kind)
 	targetScore := target.resourceScore(kind)
@@ -289,7 +289,7 @@ func (r *replicaChecker) SelectBestStoreToAddReplica(region *RegionInfo, filters
 	filters = append(filters, newFilters...)
 
 	var (
-		bestStore *storeInfo
+		bestStore *StoreInfo
 		bestScore float64
 	)
 
@@ -317,7 +317,7 @@ func (r *replicaChecker) SelectBestStoreToAddReplica(region *RegionInfo, filters
 // selectWorstPeer returns the worst peer in the region.
 func (r *replicaChecker) selectWorstPeer(region *RegionInfo, filters ...Filter) (*metapb.Peer, float64) {
 	var (
-		worstStore *storeInfo
+		worstStore *StoreInfo
 		worstScore float64
 	)
 

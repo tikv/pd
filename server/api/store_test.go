@@ -229,17 +229,17 @@ func (s *testStoreSuite) TestUrlStoreFilter(c *C) {
 }
 
 func (s *testStoreSuite) TestDownState(c *C) {
-	status := &server.StoreStatus{
-		StoreStats: &pdpb.StoreStats{},
+	store := &server.StoreInfo{
+		Store: &metapb.Store{
+			State: metapb.StoreState_Up,
+		},
+		Stats:           &pdpb.StoreStats{},
+		LastHeartbeatTS: time.Now(),
 	}
-	store := &metapb.Store{
-		State: metapb.StoreState_Up,
-	}
-	status.LastHeartbeatTS = time.Now()
-	storeInfo := newStoreInfo(store, status)
+	storeInfo := newStoreInfo(store)
 	c.Assert(storeInfo.Store.StateName, Equals, metapb.StoreState_Up.String())
 
-	status.LastHeartbeatTS = time.Now().Add(-time.Minute * 2)
-	storeInfo = newStoreInfo(store, status)
+	store.LastHeartbeatTS = time.Now().Add(-time.Minute * 2)
+	storeInfo = newStoreInfo(store)
 	c.Assert(storeInfo.Store.StateName, Equals, downStateName)
 }

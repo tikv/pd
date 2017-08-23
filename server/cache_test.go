@@ -39,8 +39,8 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 }
 
 // Create n stores (0..n).
-func newTestStores(n uint64) []*storeInfo {
-	stores := make([]*storeInfo, 0, n)
+func newTestStores(n uint64) []*StoreInfo {
+	stores := make([]*StoreInfo, 0, n)
 	for i := uint64(0); i < n; i++ {
 		store := &metapb.Store{
 			Id: i,
@@ -310,13 +310,12 @@ func (s *testClusterInfoSuite) testStoreHeartbeat(c *C, cache *clusterInfo) {
 		c.Assert(cache.putStore(store), IsNil)
 		c.Assert(cache.getStoreCount(), Equals, int(i+1))
 
-		stats := store.status
-		c.Assert(stats.LastHeartbeatTS.IsZero(), IsTrue)
+		c.Assert(store.LastHeartbeatTS.IsZero(), IsTrue)
 
 		c.Assert(cache.handleStoreHeartbeat(storeStats), IsNil)
 
-		stats = cache.getStore(store.GetId()).status
-		c.Assert(stats.LastHeartbeatTS.IsZero(), IsFalse)
+		s := cache.getStore(store.GetId())
+		c.Assert(s.LastHeartbeatTS.IsZero(), IsFalse)
 	}
 
 	c.Assert(cache.getStoreCount(), Equals, int(n))
@@ -445,8 +444,8 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 	}
 
 	for _, store := range cache.stores.getStores() {
-		c.Assert(store.status.LeaderCount, Equals, cache.regions.getStoreLeaderCount(store.GetId()))
-		c.Assert(store.status.RegionCount, Equals, cache.regions.getStoreRegionCount(store.GetId()))
+		c.Assert(store.LeaderCount, Equals, cache.regions.getStoreLeaderCount(store.GetId()))
+		c.Assert(store.RegionCount, Equals, cache.regions.getStoreRegionCount(store.GetId()))
 	}
 
 	// Test with kv.
