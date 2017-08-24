@@ -33,17 +33,17 @@ type metaStore struct {
 }
 
 type storeStatus struct {
-	Capacity           typeutil.ByteSize `json:"capacity,omitempty"`
-	Available          typeutil.ByteSize `json:"available,omitempty"`
-	LeaderCount        int               `json:"leader_count,omitempty"`
-	RegionCount        int               `json:"region_count,omitempty"`
-	SendingSnapCount   uint32            `json:"sending_snap_count,omitempty"`
-	ReceivingSnapCount uint32            `json:"receiving_snap_count,omitempty"`
-	ApplyingSnapCount  uint32            `json:"applying_snap_count,omitempty"`
-	IsBusy             bool              `json:"is_busy,omitempty"`
-	StartTS            time.Time         `json:"start_ts,omitempty"`
-	LastHeartbeatTS    time.Time         `json:"last_heartbeat_ts,omitempty"`
-	Uptime             typeutil.Duration `json:"uptime,omitempty"`
+	Capacity           typeutil.ByteSize  `json:"capacity,omitempty"`
+	Available          typeutil.ByteSize  `json:"available,omitempty"`
+	LeaderCount        int                `json:"leader_count,omitempty"`
+	RegionCount        int                `json:"region_count,omitempty"`
+	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
+	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
+	ApplyingSnapCount  uint32             `json:"applying_snap_count,omitempty"`
+	IsBusy             bool               `json:"is_busy,omitempty"`
+	StartTS            *time.Time         `json:"start_ts,omitempty"`
+	LastHeartbeatTS    *time.Time         `json:"last_heartbeat_ts,omitempty"`
+	Uptime             *typeutil.Duration `json:"uptime,omitempty"`
 }
 
 type storeInfo struct {
@@ -68,11 +68,21 @@ func newStoreInfo(store *server.StoreInfo) *storeInfo {
 			ReceivingSnapCount: store.Stats.GetReceivingSnapCount(),
 			ApplyingSnapCount:  store.Stats.GetApplyingSnapCount(),
 			IsBusy:             store.Stats.GetIsBusy(),
-			StartTS:            store.GetStartTS(),
-			LastHeartbeatTS:    store.LastHeartbeatTS,
-			Uptime:             typeutil.NewDuration(store.GetUptime()),
 		},
 	}
+
+	if store.Stats != nil {
+		startTS := store.GetStartTS()
+		s.Status.StartTS = &startTS
+	}
+	if lastHeartbeat := store.LastHeartbeatTS; !lastHeartbeat.IsZero() {
+		s.Status.LastHeartbeatTS = &lastHeartbeat
+	}
+	if upTime := store.GetUptime(); upTime > 0 {
+		duration := typeutil.NewDuration(upTime)
+		s.Status.Uptime = &duration
+	}
+
 	if store.State == metapb.StoreState_Up && store.IsDown() {
 		s.Store.StateName = downStateName
 	}
