@@ -473,8 +473,10 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 	// Split.
 	r2ID, r2PeerIDs := s.askSplit(c, r1)
 	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)
+	c.Logf("r1: %v, r2: %v", r1, r2)
 	leaderPeer2 := s.chooseRegionLeader(c, r2)
 	resp := s.heartbeatRegion(c, s.clusterID, r2, leaderPeer2)
+	c.Logf("resp: %+v", resp)
 	c.Assert(resp, IsNil)
 	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", "m"))
 }
