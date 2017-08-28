@@ -30,12 +30,13 @@ var (
 // NewStoreCommand return a store subcommand of rootCmd
 func NewStoreCommand() *cobra.Command {
 	s := &cobra.Command{
-		Use:   "store [delete|label] <store_id>",
+		Use:   "store [delete|label|weight] <store_id>",
 		Short: "show the store status",
 		Run:   showStoreCommandFunc,
 	}
 	s.AddCommand(NewDeleteStoreCommand())
 	s.AddCommand(NewLabelStoreCommand())
+	s.AddCommand(NewSetStoreWeightCommand())
 	return s
 }
 
@@ -57,6 +58,15 @@ func NewLabelStoreCommand() *cobra.Command {
 		Run:   labelStoreCommandFunc,
 	}
 	return l
+}
+
+// NewSetStoreWeightCommand returns a weight subcommand of storeCmd.
+func NewSetStoreWeightCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "weight <store_id> <leader_weight> <region_weight>",
+		Short: "set a store's leader and region balance weight",
+		Run:   setStoreWeightCommandFunc,
+	}
 }
 
 func showStoreCommandFunc(cmd *cobra.Command, args []string) {
@@ -106,4 +116,26 @@ func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	prefix := fmt.Sprintf(path.Join(storePrefix, "label"), args[0])
 	postJSON(cmd, prefix, map[string]interface{}{args[1]: args[2]})
+}
+
+func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 3 {
+		fmt.Println("Usage: store weight <store_id> <leader_weight> <region_weight>")
+		return
+	}
+	leader, err := strconv.ParseFloat(args[1], 64)
+	if err != nil || leader < 0 {
+		fmt.Println("leader_weight should be a number that >= 0.")
+		return
+	}
+	region, err := strconv.ParseFloat(args[2], 64)
+	if err != nil || region < 0 {
+		fmt.Println("region_weight should be a number that >= 0")
+		return
+	}
+	prefix := fmt.Sprintf(path.Join(storePrefix, "label"), args[0])
+	postJSON(cmd, prefix, map[string]interface{}{
+		"leader": leader,
+		"region": region,
+	})
 }

@@ -514,6 +514,24 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	return cluster.putStore(store)
 }
 
+// SetStoreWeight sets up a store's leader/region balance weight.
+func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	store := c.cachedCluster.getStore(storeID)
+	if store == nil {
+		return errors.Trace(errStoreNotFound(storeID))
+	}
+
+	if err := c.s.kv.saveStoreWeight(storeID, leader, region); err != nil {
+		return errors.Trace(err)
+	}
+
+	store.LeaderWeight, store.RegionWeight = leader, region
+	return c.cachedCluster.putStore(store)
+}
+
 func (c *RaftCluster) checkStores() {
 	cluster := c.cachedCluster
 	for _, store := range cluster.getMetaStores() {

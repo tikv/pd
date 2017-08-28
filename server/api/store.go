@@ -197,6 +197,56 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 
+func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
+	cluster := h.svr.GetRaftCluster()
+	if cluster == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
+		return
+	}
+
+	vars := mux.Vars(r)
+	storeIDStr := vars["id"]
+	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var input map[string]interface{}
+	if err := readJSON(r.Body, &input); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	leaderVal, ok := input["leader"]
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "leader weight unset")
+		return
+	}
+	regionVal, ok := input["region"]
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "region weight unset")
+		return
+	}
+	leader, ok := leaderVal.(float64)
+	if !ok || leader < 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "badformat leader weight")
+		return
+	}
+	region, ok := regionVal.(float64)
+	if !ok || region < 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "badformat region weight")
+		return
+	}
+
+	if err := cluster.SetStoreWeight(storeID, leader, region); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
 type storesHandler struct {
 	svr *server.Server
 	rd  *render.Render
