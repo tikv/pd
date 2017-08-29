@@ -75,6 +75,18 @@ func (c *testClusterInfo) addRegionStore(storeID uint64, regionCount int) {
 	c.putStore(store)
 }
 
+func (c *testClusterInfo) updateStoreLeaderWeight(storeID uint64, weight float64) {
+	store := c.getStore(storeID)
+	store.LeaderWeight = weight
+	c.putStore(store)
+}
+
+func (c *testClusterInfo) updateStoreRegionWeight(storeID uint64, weight float64) {
+	store := c.getStore(storeID)
+	store.RegionWeight = weight
+	c.putStore(store)
+}
+
 func (c *testClusterInfo) addLabelsStore(storeID uint64, regionCount int, labels map[string]string) {
 	c.addRegionStore(storeID, regionCount)
 	store := c.getStore(storeID)
@@ -315,6 +327,26 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
 	checkTransferLeader(c, s.schedule(), 4, 3)
 }
 
+func (s *testBalanceLeaderSchedulerSuite) TestWeight(c *C) {
+	// Stores:	1	2	3	4
+	// Leaders:    10      10      10      10
+	// Weight:    0.5     0.5       1       2
+	// Region1:     L       F       F       F
+
+	s.tc.addLeaderStore(1, 10)
+	s.tc.addLeaderStore(2, 10)
+	s.tc.addLeaderStore(3, 10)
+	s.tc.addLeaderStore(4, 10)
+	s.tc.updateStoreLeaderWeight(1, 0.5)
+	s.tc.updateStoreLeaderWeight(2, 0.5)
+	s.tc.updateStoreLeaderWeight(3, 1)
+	s.tc.updateStoreLeaderWeight(4, 2)
+	s.tc.addLeaderRegion(1, 1, 2, 3, 4)
+	checkTransferLeader(c, s.schedule(), 1, 4)
+	s.tc.updateLeaderCount(4, 30)
+	checkTransferLeader(c, s.schedule(), 1, 3)
+}
+
 func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	// Stores:     1    2    3    4
 	// Leaders:    1    2    3   10
@@ -478,6 +510,30 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	tc.addLabelsStore(13, 7, map[string]string{"zone": "z3", "rack": "r2", "host": "h1"})
 	tc.addLeaderRegion(1, 2, 3, 11, 12, 13)
 	checkTransferPeer(c, sb.Schedule(cluster), 11, 6)
+}
+
+func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+
+	_, opt := newTestScheduleConfig()
+	sb := newBalanceRegionScheduler(opt)
+	opt.SetMaxReplicas(1)
+
+	tc.addRegionStore(1, 10)
+	tc.addRegionStore(2, 10)
+	tc.addRegionStore(3, 10)
+	tc.addRegionStore(4, 10)
+	tc.updateStoreRegionWeight(1, 0.5)
+	tc.updateStoreRegionWeight(2, 0.5)
+	tc.updateStoreRegionWeight(3, 1.0)
+	tc.updateStoreRegionWeight(4, 2.0)
+
+	tc.addLeaderRegion(1, 1)
+	checkTransferPeer(c, sb.Schedule(cluster), 1, 4)
+
+	tc.updateRegionCount(4, 30)
+	checkTransferPeer(c, sb.Schedule(cluster), 1, 3)
 }
 
 var _ = Suite(&testReplicaCheckerSuite{})
