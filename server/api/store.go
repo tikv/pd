@@ -36,7 +36,11 @@ type storeStatus struct {
 	Capacity           typeutil.ByteSize  `json:"capacity,omitempty"`
 	Available          typeutil.ByteSize  `json:"available,omitempty"`
 	LeaderCount        int                `json:"leader_count,omitempty"`
+	LeaderWeight       float64            `json:"leader_weight,omitempty"`
+	LeaderScore        float64            `json:"leader_score,omitempty"`
 	RegionCount        int                `json:"region_count,omitempty"`
+	RegionWeight       float64            `json:"region_weight,omitempty"`
+	RegionScore        float64            `json:"region_score,omitempty"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
 	ApplyingSnapCount  uint32             `json:"applying_snap_count,omitempty"`
@@ -63,7 +67,11 @@ func newStoreInfo(store *server.StoreInfo) *storeInfo {
 			Capacity:           typeutil.ByteSize(store.Stats.GetCapacity()),
 			Available:          typeutil.ByteSize(store.Stats.GetAvailable()),
 			LeaderCount:        store.LeaderCount,
+			LeaderWeight:       store.LeaderWeight,
+			LeaderScore:        store.LeaderScore(),
 			RegionCount:        store.RegionCount,
+			RegionWeight:       store.RegionWeight,
+			RegionScore:        store.RegionScore(),
 			SendingSnapCount:   store.Stats.GetSendingSnapCount(),
 			ReceivingSnapCount: store.Stats.GetReceivingSnapCount(),
 			ApplyingSnapCount:  store.Stats.GetApplyingSnapCount(),

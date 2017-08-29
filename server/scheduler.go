@@ -346,7 +346,7 @@ func scheduleTransferLeader(cluster *clusterInfo, schedulerName string, s Select
 
 	var averageLeader float64
 	for _, s := range stores {
-		averageLeader += float64(s.leaderScore()) / float64(len(stores))
+		averageLeader += float64(s.LeaderScore()) / float64(len(stores))
 	}
 
 	mostLeaderStore := s.SelectSource(stores, filters...)
@@ -354,10 +354,10 @@ func scheduleTransferLeader(cluster *clusterInfo, schedulerName string, s Select
 
 	var mostLeaderDistance, leastLeaderDistance float64
 	if mostLeaderStore != nil {
-		mostLeaderDistance = math.Abs(mostLeaderStore.leaderScore() - averageLeader)
+		mostLeaderDistance = math.Abs(mostLeaderStore.LeaderScore() - averageLeader)
 	}
 	if leastLeaderStore != nil {
-		leastLeaderDistance = math.Abs(leastLeaderStore.leaderScore() - averageLeader)
+		leastLeaderDistance = math.Abs(leastLeaderStore.LeaderScore() - averageLeader)
 	}
 	if mostLeaderDistance == 0 && leastLeaderDistance == 0 {
 		schedulerCounter.WithLabelValues(schedulerName, "already_balanced").Inc()

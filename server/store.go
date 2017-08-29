@@ -89,7 +89,8 @@ func (s *StoreInfo) leaderCount() uint64 {
 
 const minWeight = 1e-6
 
-func (s *StoreInfo) leaderScore() float64 {
+// LeaderScore returns the store's leader score: leaderCount / leaderWeight.
+func (s *StoreInfo) LeaderScore() float64 {
 	if s.LeaderWeight <= 0 {
 		return float64(s.LeaderCount) / minWeight
 	}
@@ -100,9 +101,10 @@ func (s *StoreInfo) regionCount() uint64 {
 	return uint64(s.RegionCount)
 }
 
-func (s *StoreInfo) regionScore() float64 {
+// RegionScore returns the store's region score: regionCount / regionWeight.
+func (s *StoreInfo) RegionScore() float64 {
 	if s.RegionWeight <= 0 {
-		return float64(s.LeaderCount) / minWeight
+		return float64(s.RegionCount) / minWeight
 	}
 	return float64(s.RegionCount) / s.RegionWeight
 }
@@ -132,9 +134,9 @@ func (s *StoreInfo) resourceCount(kind ResourceKind) uint64 {
 func (s *StoreInfo) resourceScore(kind ResourceKind) float64 {
 	switch kind {
 	case LeaderKind:
-		return s.leaderScore()
+		return s.LeaderScore()
 	case RegionKind:
-		return s.regionScore()
+		return s.RegionScore()
 	default:
 		return 0
 	}
