@@ -327,7 +327,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
 	checkTransferLeader(c, s.schedule(), 4, 3)
 }
 
-func (s *testBalanceLeaderSchedulerSuite) TestWeight(c *C) {
+func (s *testBalanceLeaderSchedulerSuite) TestLeaderWeight(c *C) {
 	// Stores:	1	2	3	4
 	// Leaders:    10      10      10      10
 	// Weight:    0.5     0.5       1       2
@@ -338,7 +338,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestWeight(c *C) {
 	s.tc.addLeaderStore(3, 10)
 	s.tc.addLeaderStore(4, 10)
 	s.tc.updateStoreLeaderWeight(1, 0.5)
-	s.tc.updateStoreLeaderWeight(2, 0.5)
+	s.tc.updateStoreLeaderWeight(2, 0.9)
 	s.tc.updateStoreLeaderWeight(3, 1)
 	s.tc.updateStoreLeaderWeight(4, 2)
 	s.tc.addLeaderRegion(1, 1, 2, 3, 4)
@@ -525,7 +525,7 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	tc.addRegionStore(3, 10)
 	tc.addRegionStore(4, 10)
 	tc.updateStoreRegionWeight(1, 0.5)
-	tc.updateStoreRegionWeight(2, 0.5)
+	tc.updateStoreRegionWeight(2, 0.9)
 	tc.updateStoreRegionWeight(3, 1.0)
 	tc.updateStoreRegionWeight(4, 2.0)
 
