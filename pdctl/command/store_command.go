@@ -133,7 +133,7 @@ func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println("region_weight should be a number that >= 0")
 		return
 	}
-	prefix := fmt.Sprintf(path.Join(storePrefix, "label"), args[0])
+	prefix := fmt.Sprintf(path.Join(storePrefix, "weight"), args[0])
 	postJSON(cmd, prefix, map[string]interface{}{
 		"leader": leader,
 		"region": region,
