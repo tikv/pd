@@ -67,7 +67,7 @@ func NewHotReadRegionCommand() *cobra.Command {
 	return cmd
 }
 
-func showHotRegionsCommandFunc(cmd *cobra.Command, args []string) {
+func showHotReadRegionsCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, hotReadRegionsPrefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get hotspot: %s\n", err)
