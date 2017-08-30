@@ -46,6 +46,7 @@ const (
 	minHotRegionReportInterval    = 3
 	hotRegionAntiCount            = 1
 	hotRegionScheduleName         = "balance-hot-region-scheduler"
+	hotReadRegionScheduleName     = "balance-hot-read-region-scheduler"
 )
 
 var (
@@ -134,6 +135,7 @@ func (c *coordinator) run() {
 	c.addScheduler(newBalanceLeaderScheduler(c.opt), minScheduleInterval)
 	c.addScheduler(newBalanceRegionScheduler(c.opt), minScheduleInterval)
 	c.addScheduler(newBalanceHotRegionScheduler(c.opt), minSlowScheduleInterval)
+	c.addScheduler(newBalanceHotReadRegionScheduler(c.opt), minSlowScheduleInterval)
 }
 
 func (c *coordinator) stop() {
@@ -149,6 +151,16 @@ func (c *coordinator) getHotWriteRegions() *StoreHotRegionInfos {
 		return nil
 	}
 	return s.Scheduler.(*balanceHotRegionScheduler).GetStatus()
+}
+
+func (c *coordinator) getHotReadRegions() *StoreHotReadRegionInfos {
+	c.RLock()
+	defer c.RUnlock()
+	s, ok := c.schedulers[hotReadRegionScheduleName]
+	if !ok {
+		return nil
+	}
+	return s.Scheduler.(*balanceHotReadRegionScheduler).GetStatus()
 }
 
 func (c *coordinator) getSchedulers() []string {

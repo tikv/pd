@@ -56,6 +56,15 @@ func (h *Handler) GetHotWriteRegions() *StoreHotRegionInfos {
 	return c.getHotWriteRegions()
 }
 
+// GetHotReadRegions gets all hot read regions status
+func (h *Handler) GetHotReadRegions() *StoreHotReadRegionInfos {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return nil
+	}
+	return c.getHotReadRegions()
+}
+
 // GetHotWriteStores gets all hot write stores status
 func (h *Handler) GetHotWriteStores() map[uint64]uint64 {
 	return h.s.cluster.cachedCluster.getStoresWriteStat()

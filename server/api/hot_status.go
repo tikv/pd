@@ -36,6 +36,10 @@ func (h *hotStatusHandler) GetHotRegions(w http.ResponseWriter, r *http.Request)
 	h.rd.JSON(w, http.StatusOK, h.GetHotWriteRegions())
 }
 
+func (h *hotStatusHandler) GetHotReadRegions(w http.ResponseWriter, r *http.Request) {
+	h.rd.JSON(w, http.StatusOK, h.GetHotReadRegions())
+}
+
 func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.GetHotWriteStores())
 }

@@ -306,6 +306,7 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
 	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
+	c.Assert(co.removeScheduler("balance-hot-read-region-scheduler"), IsNil)
 	c.Assert(co.schedulers, HasLen, 0)
 
 	stream := newMockHeartbeatStream()
