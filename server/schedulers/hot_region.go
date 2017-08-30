@@ -238,6 +238,8 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 	)
 
 	// get the srcStoreId
+	// We choose the store with the maximum hot region first;
+	// inside these stores, we choose the one with maximum written bytes.
 	for storeID, statistics := range storesStat {
 		count, readBytes := statistics.RegionsStat.Len(), statistics.TotalFlowBytes
 		if count >= 2 && (count > maxHotStoreRegionCount || (count == maxHotStoreRegionCount && readBytes > maxReadBytes)) {
@@ -250,6 +252,9 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 		return nil, nil, nil
 	}
 
+	// get one source region and a target store.
+	// For each region in the source store, we try to find the best target store;
+	// If we can find a target store, then return from this method.
 	stores := cluster.GetStores()
 	var destStoreID uint64
 	for _, i := range h.r.Perm(storesStat[srcStoreID].RegionsStat.Len()) {
@@ -290,6 +295,8 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 				return nil, nil, nil
 			}
 
+			// When the target store is decided, we allocate a peer ID to hold the source region,
+			// because it doesn't exist in the system right now.
 			destPeer, err := cluster.AllocPeer(destStoreID)
 			if err != nil {
 				log.Errorf("failed to allocate peer: %v", err)
@@ -303,6 +310,8 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 	return nil, nil, nil
 }
 
+// selectDestStoreByPeer selects a target store to hold the region of the source region.
+// We choose a target store based on the hot region number and written bytes of this store.
 func (h *balanceHotRegionsScheduler) selectDestStoreByPeer(candidateStoreIDs []uint64, srcRegion *core.RegionInfo, srcStoreID uint64, storesStat core.StoreHotRegionsStat) uint64 {
 	sr := storesStat[srcStoreID]
 	srcReadBytes := sr.TotalFlowBytes

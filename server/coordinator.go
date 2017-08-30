@@ -319,6 +319,8 @@ func (c *coordinator) addOperator(op *schedule.Operator) bool {
 
 	log.Infof("[region %v] add operator: %s", regionID, op)
 
+	// If the new operator passed in has higher priorities than the old one,
+	// then replace the old operator.
 	if old, ok := c.operators[regionID]; ok {
 		if !isHigherPriorityOperator(op, old) {
 			log.Infof("[region %v] cancel add operator, old: %s", regionID, old)
