@@ -826,8 +826,6 @@ type balanceHotReadRegionScheduler struct {
 	opt   *scheduleOption
 	limit uint64
 
-	// store id -> hot read regions statistics as the role of replica
-	statisticsAsPeer map[uint64]*HotReadRegionsStat
 	// store id -> hot read regions statistics as the role of leader
 	statisticsAsLeader map[uint64]*HotReadRegionsStat
 	r                  *rand.Rand
@@ -837,7 +835,6 @@ func newBalanceHotReadRegionScheduler(opt *scheduleOption) *balanceHotReadRegion
 	return &balanceHotReadRegionScheduler{
 		opt:                opt,
 		limit:              1,
-		statisticsAsPeer:   make(map[uint64]*HotReadRegionsStat),
 		statisticsAsLeader: make(map[uint64]*HotReadRegionsStat),
 		r:                  rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
@@ -863,18 +860,18 @@ func (h *balanceHotReadRegionScheduler) Schedule(cluster *clusterInfo) Operator 
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
 	h.calcScore(cluster)
 
-	// balance by peer
-	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster)
-	if srcRegion != nil {
-		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return newTransferPeer(srcRegion, PriorityKind, srcPeer, destPeer)
-	}
-
 	// balance by leader
 	srcRegion, newLeader := h.balanceByLeader(cluster)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 		return newPriorityTransferLeader(srcRegion, newLeader)
+	}
+
+	// balance by peer
+	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster)
+	if srcRegion != nil {
+		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
+		return newTransferPeer(srcRegion, PriorityKind, srcPeer, destPeer)
 	}
 
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
@@ -885,7 +882,6 @@ func (h *balanceHotReadRegionScheduler) calcScore(cluster *clusterInfo) {
 	h.Lock()
 	defer h.Unlock()
 
-	h.statisticsAsPeer = make(map[uint64]*HotReadRegionsStat)
 	h.statisticsAsLeader = make(map[uint64]*HotReadRegionsStat)
 	items := cluster.readStatistics.elems()
 	for _, item := range items {
@@ -901,13 +897,6 @@ func (h *balanceHotReadRegionScheduler) calcScore(cluster *clusterInfo) {
 		leaderStoreID := regionInfo.Leader.GetStoreId()
 		storeIDs := regionInfo.GetStoreIds()
 		for storeID := range storeIDs {
-			peerStat, ok := h.statisticsAsPeer[storeID]
-			if !ok {
-				peerStat = &HotReadRegionsStat{
-					ReadRegionsStat: make(ReadRegionsStat, 0, storeHotRegionsDefaultLen),
-				}
-				h.statisticsAsPeer[storeID] = peerStat
-			}
 			leaderStat, ok := h.statisticsAsLeader[storeID]
 			if !ok {
 				leaderStat = &HotReadRegionsStat{
@@ -925,9 +914,6 @@ func (h *balanceHotReadRegionScheduler) calcScore(cluster *clusterInfo) {
 				antiCount:      r.antiCount,
 				version:        r.version,
 			}
-			peerStat.ReadBytes += r.ReadBytes
-			peerStat.RegionsCount++
-			peerStat.ReadRegionsStat = append(peerStat.ReadRegionsStat, stat)
 
 			if storeID == leaderStoreID {
 				leaderStat.ReadBytes += r.ReadBytes
@@ -946,7 +932,7 @@ func (h *balanceHotReadRegionScheduler) balanceByPeer(cluster *clusterInfo) (*Re
 	)
 
 	// get the srcStoreId
-	for storeID, statistics := range h.statisticsAsPeer {
+	for storeID, statistics := range h.statisticsAsLeader {
 		count, readBytes := statistics.ReadRegionsStat.Len(), statistics.ReadBytes
 		if count >= 2 && (count > maxHotStoreRegionCount || (count == maxHotStoreRegionCount && readBytes > maxReadBytes)) {
 			maxHotStoreRegionCount = count
@@ -960,8 +946,8 @@ func (h *balanceHotReadRegionScheduler) balanceByPeer(cluster *clusterInfo) (*Re
 
 	stores := cluster.getStores()
 	var destStoreID uint64
-	for _, i := range h.r.Perm(h.statisticsAsPeer[srcStoreID].ReadRegionsStat.Len()) {
-		rs := h.statisticsAsPeer[srcStoreID].ReadRegionsStat[i]
+	for _, i := range h.r.Perm(h.statisticsAsLeader[srcStoreID].ReadRegionsStat.Len()) {
+		rs := h.statisticsAsLeader[srcStoreID].ReadRegionsStat[i]
 		srcRegion := cluster.getRegion(rs.RegionID)
 		if len(srcRegion.DownPeers) != 0 || len(srcRegion.PendingPeers) != 0 {
 			continue
@@ -1012,7 +998,7 @@ func (h *balanceHotReadRegionScheduler) balanceByPeer(cluster *clusterInfo) (*Re
 }
 
 func (h *balanceHotReadRegionScheduler) selectDestStoreByPeer(candidateStoreIDs []uint64, srcRegion *RegionInfo, srcStoreID uint64) uint64 {
-	sr := h.statisticsAsPeer[srcStoreID]
+	sr := h.statisticsAsLeader[srcStoreID]
 	srcReadBytes := sr.ReadBytes
 	srcHotRegionsCount := sr.ReadRegionsStat.Len()
 
@@ -1022,7 +1008,7 @@ func (h *balanceHotReadRegionScheduler) selectDestStoreByPeer(candidateStoreIDs 
 	)
 	minRegionsCount := int(math.MaxInt32)
 	for _, storeID := range candidateStoreIDs {
-		if s, ok := h.statisticsAsPeer[storeID]; ok {
+		if s, ok := h.statisticsAsLeader[storeID]; ok {
 			if srcHotRegionsCount-s.ReadRegionsStat.Len() > 1 && minRegionsCount > s.ReadRegionsStat.Len() {
 				destStoreID = storeID
 				minReadBytes = s.ReadBytes
@@ -1045,14 +1031,8 @@ func (h *balanceHotReadRegionScheduler) selectDestStoreByPeer(candidateStoreIDs 
 func (h *balanceHotReadRegionScheduler) adjustBalanceLimit(storeID uint64, t BalanceType) {
 	var srcStatistics *HotReadRegionsStat
 	var allStatistics map[uint64]*HotReadRegionsStat
-	switch t {
-	case byPeer:
-		srcStatistics = h.statisticsAsPeer[storeID]
-		allStatistics = h.statisticsAsPeer
-	case byLeader:
-		srcStatistics = h.statisticsAsLeader[storeID]
-		allStatistics = h.statisticsAsLeader
-	}
+	srcStatistics = h.statisticsAsLeader[storeID]
+	allStatistics = h.statisticsAsLeader
 
 	var hotRegionTotalCount float64
 	for _, m := range allStatistics {
@@ -1144,25 +1124,18 @@ func (h *balanceHotReadRegionScheduler) selectDestStoreByLeader(srcRegion *Regio
 
 // StoreHotReadRegionInfos : used to get human readable description for hot read regions.
 type StoreHotReadRegionInfos struct {
-	AsPeer   map[uint64]*HotReadRegionsStat `json:"as_peer"`
 	AsLeader map[uint64]*HotReadRegionsStat `json:"as_leader"`
 }
 
 func (h *balanceHotReadRegionScheduler) GetStatus() *StoreHotReadRegionInfos {
 	h.RLock()
 	defer h.RUnlock()
-	asPeer := make(map[uint64]*HotReadRegionsStat, len(h.statisticsAsPeer))
-	for id, stat := range h.statisticsAsPeer {
-		clone := *stat
-		asPeer[id] = &clone
-	}
 	asLeader := make(map[uint64]*HotReadRegionsStat, len(h.statisticsAsLeader))
 	for id, stat := range h.statisticsAsLeader {
 		clone := *stat
 		asLeader[id] = &clone
 	}
 	return &StoreHotReadRegionInfos{
-		AsPeer:   asPeer,
 		AsLeader: asLeader,
 	}
 }
