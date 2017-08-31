@@ -330,7 +330,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
 func (s *testBalanceLeaderSchedulerSuite) TestLeaderWeight(c *C) {
 	// Stores:	1	2	3	4
 	// Leaders:    10      10      10      10
-	// Weight:    0.5     0.5       1       2
+	// Weight:    0.5     0.9       1       2
 	// Region1:     L       F       F       F
 
 	s.tc.addLeaderStore(1, 10)
