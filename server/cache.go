@@ -533,6 +533,15 @@ func (c *clusterInfo) updateWriteStatCache(region *RegionInfo, hotRegionThreshol
 	c.writeStatistics.add(key, newItem)
 }
 
+func (c *clusterInfo) isRegionHot(id uint64) bool {
+	c.RLock()
+	defer c.RUnlock()
+	if stat, ok := c.writeStatistics.peek(id); ok {
+		return stat.(*RegionStat).HotDegree >= hotRegionLowThreshold
+	}
+	return false
+}
+
 func (c *clusterInfo) searchRegion(regionKey []byte) *RegionInfo {
 	c.RLock()
 	defer c.RUnlock()

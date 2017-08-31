@@ -116,6 +116,12 @@ func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 		return nil
 	}
 
+	// Skip hot regions.
+	if cluster.isRegionHot(region.GetId()) {
+		schedulerCounter.WithLabelValues(l.GetName(), "region_hot").Inc()
+		return nil
+	}
+
 	source := cluster.getStore(region.Leader.GetStoreId())
 	target := cluster.getStore(newLeader.GetStoreId())
 	if !shouldBalance(source, target, l.GetResourceKind()) {
@@ -181,6 +187,12 @@ func (s *balanceRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 	// We don't schedule region with abnormal number of replicas.
 	if len(region.GetPeers()) != s.rep.GetMaxReplicas() {
 		schedulerCounter.WithLabelValues(s.GetName(), "abnormal_replica").Inc()
+		return nil
+	}
+
+	// Skip hot regions.
+	if cluster.isRegionHot(region.GetId()) {
+		schedulerCounter.WithLabelValues(s.GetName(), "region_hot").Inc()
 		return nil
 	}
 

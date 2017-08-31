@@ -577,6 +577,11 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 
 func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	s.svr.scheduleOpt.SetMaxReplicas(2)
+	// Stop schedulers.
+	scheduleCfg := s.svr.GetScheduleConfig()
+	scheduleCfg.LeaderScheduleLimit = 0
+	scheduleCfg.RegionScheduleLimit = 0
+	s.svr.SetScheduleConfig(*scheduleCfg)
 
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
