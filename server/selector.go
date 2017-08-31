@@ -63,6 +63,60 @@ func (s *balanceSelector) SelectTarget(stores []*StoreInfo, filters ...Filter) *
 	return result
 }
 
+type replicaSelector struct {
+	regionStores []*StoreInfo
+	rep          *Replication
+	filters      []Filter
+}
+
+func newReplicaSelector(regionStores []*StoreInfo, rep *Replication, filters ...Filter) Selector {
+	return &replicaSelector{
+		regionStores: regionStores,
+		rep:          rep,
+		filters:      filters,
+	}
+}
+
+func (s *replicaSelector) SelectSource(stores []*StoreInfo, filters ...Filter) *StoreInfo {
+	var (
+		best      *StoreInfo
+		bestScore float64
+	)
+	for _, store := range stores {
+		if filterSource(store, filters) {
+			continue
+		}
+		score := s.rep.GetDistinctScore(s.regionStores, store)
+		if best == nil || compareStoreScore(store, score, best, bestScore) < 0 {
+			best, bestScore = store, score
+		}
+	}
+	if best == nil || filterSource(best, s.filters) {
+		return nil
+	}
+	return best
+}
+
+func (s *replicaSelector) SelectTarget(stores []*StoreInfo, filters ...Filter) *StoreInfo {
+	var (
+		best      *StoreInfo
+		bestScore float64
+	)
+	for _, store := range stores {
+		if filterTarget(store, filters) {
+			continue
+		}
+		score := s.rep.GetDistinctScore(s.regionStores, store)
+		if best == nil || compareStoreScore(store, score, best, bestScore) > 0 {
+			best, bestScore = store, score
+		}
+	}
+	if best == nil || filterTarget(best, s.filters) {
+		return nil
+	}
+	return best
+}
+
 type randomSelector struct {
 	filters []Filter
 }
