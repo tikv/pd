@@ -22,6 +22,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/montanaflynn/stats"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
@@ -138,15 +139,15 @@ func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 type balanceRegionScheduler struct {
 	opt      *scheduleOption
 	rep      *Replication
-	cache    *idCache
+	cache    *cache.IDTTL
 	limit    uint64
 	selector schedule.Selector
 }
 
 func newBalanceRegionScheduler(opt *scheduleOption) *balanceRegionScheduler {
-	cache := newIDCache(storeCacheInterval, 4*storeCacheInterval)
+	cache := cache.NewIDTTL(storeCacheInterval, 4*storeCacheInterval)
 	filters := []schedule.Filter{
-		newCacheFilter(cache),
+		schedule.NewCacheFilter(cache),
 		schedule.NewStateFilter(opt),
 		schedule.NewHealthFilter(opt),
 		schedule.NewSnapshotCountFilter(opt),
@@ -202,7 +203,7 @@ func (s *balanceRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 	if op == nil {
 		// We can't transfer peer from this store now, so we add it to the cache
 		// and skip it for a while.
-		s.cache.set(oldPeer.GetStoreId())
+		s.cache.Put(oldPeer.GetStoreId())
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	return op
@@ -494,9 +495,9 @@ func (h *balanceHotRegionScheduler) calcScore(cluster *clusterInfo) {
 
 	h.statisticsAsPeer = make(map[uint64]*HotRegionsStat)
 	h.statisticsAsLeader = make(map[uint64]*HotRegionsStat)
-	items := cluster.writeStatistics.elems()
+	items := cluster.writeStatistics.Elems()
 	for _, item := range items {
-		r, ok := item.value.(*RegionStat)
+		r, ok := item.Value.(*RegionStat)
 		if !ok {
 			continue
 		}
@@ -772,20 +773,4 @@ func (h *balanceHotRegionScheduler) GetStatus() *StoreHotRegionInfos {
 		AsPeer:   asPeer,
 		AsLeader: asLeader,
 	}
-}
-
-type cacheFilter struct {
-	cache *idCache
-}
-
-func newCacheFilter(cache *idCache) *cacheFilter {
-	return &cacheFilter{cache: cache}
-}
-
-func (f *cacheFilter) FilterSource(store *core.StoreInfo) bool {
-	return f.cache.get(store.GetId())
-}
-
-func (f *cacheFilter) FilterTarget(store *core.StoreInfo) bool {
-	return false
 }
