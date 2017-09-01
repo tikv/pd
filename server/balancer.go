@@ -300,57 +300,24 @@ func (r *replicaChecker) SelectBestStoreToAddReplica(region *RegionInfo, filters
 	}
 	filters = append(filters, newFilters...)
 
-	var (
-		bestStore *StoreInfo
-		bestScore float64
-	)
-
-	// Select the store with best distinct score.
-	// If the scores are the same, select the store with minimal region score.
-	stores := r.cluster.getRegionStores(region)
-	for _, store := range r.cluster.getStores() {
-		if filterTarget(store, filters) {
-			continue
-		}
-		score := r.rep.GetDistinctScore(stores, store)
-		if bestStore == nil || compareStoreScore(store, score, bestStore, bestScore) > 0 {
-			bestStore = store
-			bestScore = score
-		}
-	}
-
-	if bestStore == nil || filterTarget(bestStore, r.filters) {
+	regionStores := r.cluster.getRegionStores(region)
+	selector := newReplicaSelector(regionStores, r.rep, r.filters...)
+	target := selector.SelectTarget(r.cluster.getStores(), filters...)
+	if target == nil {
 		return 0, 0
 	}
-
-	return bestStore.GetId(), bestScore
+	return target.GetId(), r.rep.GetDistinctScore(regionStores, target)
 }
 
 // selectWorstPeer returns the worst peer in the region.
-func (r *replicaChecker) selectWorstPeer(region *RegionInfo, filters ...Filter) (*metapb.Peer, float64) {
-	var (
-		worstStore *StoreInfo
-		worstScore float64
-	)
-
-	// Select the store with lowest distinct score.
-	// If the scores are the same, select the store with maximal region score.
-	stores := r.cluster.getRegionStores(region)
-	for _, store := range stores {
-		if filterSource(store, filters) {
-			continue
-		}
-		score := r.rep.GetDistinctScore(stores, store)
-		if worstStore == nil || compareStoreScore(store, score, worstStore, worstScore) < 0 {
-			worstStore = store
-			worstScore = score
-		}
-	}
-
-	if worstStore == nil || filterSource(worstStore, r.filters) {
+func (r *replicaChecker) selectWorstPeer(region *RegionInfo) (*metapb.Peer, float64) {
+	regionStores := r.cluster.getRegionStores(region)
+	selector := newReplicaSelector(regionStores, r.rep, r.filters...)
+	worstStore := selector.SelectSource(regionStores)
+	if worstStore == nil {
 		return nil, 0
 	}
-	return region.GetStorePeer(worstStore.GetId()), worstScore
+	return region.GetStorePeer(worstStore.GetId()), r.rep.GetDistinctScore(regionStores, worstStore)
 }
 
 // selectBestReplacement returns the best store to replace the region peer.
