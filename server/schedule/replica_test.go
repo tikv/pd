@@ -45,7 +45,7 @@ func (s *testReplicationSuite) TestDistinctScore(c *C) {
 					"rack": rack,
 					"host": host,
 				}
-				store := s.newStoreInfo(storeID, storeLabels)
+				store := s.newStoreInfo(storeID, 1, storeLabels)
 				stores = append(stores, store)
 
 				// Number of stores in different zones.
@@ -59,11 +59,25 @@ func (s *testReplicationSuite) TestDistinctScore(c *C) {
 			}
 		}
 	}
-	store := s.newStoreInfo(100, nil)
+	store := s.newStoreInfo(100, 1, nil)
 	c.Assert(DistinctScore(labels, stores, store), Equals, float64(0))
 }
 
-func (s *testReplicationSuite) newStoreInfo(id uint64, labels map[string]string) *core.StoreInfo {
+func (s *testReplicationSuite) TestCompareStoreScore(c *C) {
+	store1 := s.newStoreInfo(1, 1, nil)
+	store2 := s.newStoreInfo(2, 1, nil)
+	store3 := s.newStoreInfo(3, 3, nil)
+
+	c.Assert(compareStoreScore(store1, 2, store2, 1), Equals, 1)
+	c.Assert(compareStoreScore(store1, 1, store2, 1), Equals, 0)
+	c.Assert(compareStoreScore(store1, 1, store2, 2), Equals, -1)
+
+	c.Assert(compareStoreScore(store1, 2, store3, 1), Equals, 1)
+	c.Assert(compareStoreScore(store1, 1, store3, 1), Equals, 1)
+	c.Assert(compareStoreScore(store1, 1, store3, 2), Equals, -1)
+}
+
+func (s *testReplicationSuite) newStoreInfo(id uint64, regionCount int, labels map[string]string) *core.StoreInfo {
 	var storeLabels []*metapb.StoreLabel
 	for k, v := range labels {
 		storeLabels = append(storeLabels, &metapb.StoreLabel{
@@ -71,8 +85,10 @@ func (s *testReplicationSuite) newStoreInfo(id uint64, labels map[string]string)
 			Value: v,
 		})
 	}
-	return core.NewStoreInfo(&metapb.Store{
+	store := core.NewStoreInfo(&metapb.Store{
 		Id:     id,
 		Labels: storeLabels,
 	})
+	store.RegionCount = regionCount
+	return store
 }

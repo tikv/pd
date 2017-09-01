@@ -31,6 +31,14 @@ func newTestClusterInfo(cluster *clusterInfo) *testClusterInfo {
 	return &testClusterInfo{clusterInfo: cluster}
 }
 
+func newTestReplication(maxReplicas int, locationLabels ...string) *Replication {
+	cfg := &ReplicationConfig{
+		MaxReplicas:    uint64(maxReplicas),
+		LocationLabels: locationLabels,
+	}
+	return newReplication(cfg)
+}
+
 func (c *testClusterInfo) setStoreUp(storeID uint64) {
 	store := c.getStore(storeID)
 	store.State = metapb.StoreState_Up
