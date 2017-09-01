@@ -16,6 +16,8 @@ package server
 import (
 	"math"
 	"sync/atomic"
+
+	"github.com/pingcap/pd/server/core"
 )
 
 const replicaBaseScore = 100
@@ -59,7 +61,7 @@ func (r *Replication) GetLocationLabels() []string {
 
 // GetDistinctScore returns the score that the other is distinct from the stores.
 // A higher score means the other store is more different from the existed stores.
-func (r *Replication) GetDistinctScore(stores []*StoreInfo, other *StoreInfo) float64 {
+func (r *Replication) GetDistinctScore(stores []*core.StoreInfo, other *core.StoreInfo) float64 {
 	score := float64(0)
 	locationLabels := r.GetLocationLabels()
 
@@ -67,7 +69,7 @@ func (r *Replication) GetDistinctScore(stores []*StoreInfo, other *StoreInfo) fl
 		if s.GetId() == other.GetId() {
 			continue
 		}
-		if index := s.compareLocation(other, locationLabels); index != -1 {
+		if index := s.CompareLocation(other, locationLabels); index != -1 {
 			score += math.Pow(replicaBaseScore, float64(len(locationLabels)-index-1))
 		}
 	}
@@ -78,7 +80,7 @@ func (r *Replication) GetDistinctScore(stores []*StoreInfo, other *StoreInfo) fl
 // Returns 0 if store A is as good as store B.
 // Returns 1 if store A is better than store B.
 // Returns -1 if store B is better than store A.
-func compareStoreScore(storeA *StoreInfo, scoreA float64, storeB *StoreInfo, scoreB float64) int {
+func compareStoreScore(storeA *core.StoreInfo, scoreA float64, storeB *core.StoreInfo, scoreB float64) int {
 	// The store with higher score is better.
 	if scoreA > scoreB {
 		return 1

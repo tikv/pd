@@ -26,6 +26,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server/core"
 	"golang.org/x/net/context"
 )
 
@@ -180,7 +181,7 @@ func (kv *kv) loadStores(stores *storesInfo, rangeLimit int64) error {
 				return errors.Trace(err)
 			}
 
-			storeInfo := newStoreInfo(store)
+			storeInfo := core.NewStoreInfo(store)
 			leaderWeight, err := kv.loadFloatWithDefaultValue(kv.storeLeaderWeightPath(storeInfo.GetId()), 1.0)
 			if err != nil {
 				return errors.Trace(err)

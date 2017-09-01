@@ -22,6 +22,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/montanaflynn/stats"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server/core"
 )
 
 const (
@@ -50,10 +51,10 @@ func minBalanceDiff(count uint64) float64 {
 // shouldBalance returns true if we should balance the source and target store.
 // The min balance diff provides a buffer to make the cluster stable, so that we
 // don't need to schedule very frequently.
-func shouldBalance(source, target *StoreInfo, kind ResourceKind) bool {
-	sourceCount := source.resourceCount(kind)
-	sourceScore := source.resourceScore(kind)
-	targetScore := target.resourceScore(kind)
+func shouldBalance(source, target *core.StoreInfo, kind core.ResourceKind) bool {
+	sourceCount := source.ResourceCount(kind)
+	sourceScore := source.ResourceScore(kind)
+	targetScore := target.ResourceScore(kind)
 	if targetScore >= sourceScore {
 		return false
 	}
@@ -62,12 +63,12 @@ func shouldBalance(source, target *StoreInfo, kind ResourceKind) bool {
 	return diffCount >= minBalanceDiff(sourceCount)
 }
 
-func adjustBalanceLimit(cluster *clusterInfo, kind ResourceKind) uint64 {
+func adjustBalanceLimit(cluster *clusterInfo, kind core.ResourceKind) uint64 {
 	stores := cluster.getStores()
 	counts := make([]float64, 0, len(stores))
 	for _, s := range stores {
-		if s.isUp() {
-			counts = append(counts, float64(s.resourceCount(kind)))
+		if s.IsUp() {
+			counts = append(counts, float64(s.ResourceCount(kind)))
 		}
 	}
 	limit, _ := stats.StandardDeviation(stats.Float64Data(counts))
@@ -89,7 +90,7 @@ func newBalanceLeaderScheduler(opt *scheduleOption) *balanceLeaderScheduler {
 	return &balanceLeaderScheduler{
 		opt:      opt,
 		limit:    1,
-		selector: newBalanceSelector(LeaderKind, filters),
+		selector: newBalanceSelector(core.LeaderKind, filters),
 	}
 }
 
@@ -97,8 +98,8 @@ func (l *balanceLeaderScheduler) GetName() string {
 	return "balance-leader-scheduler"
 }
 
-func (l *balanceLeaderScheduler) GetResourceKind() ResourceKind {
-	return LeaderKind
+func (l *balanceLeaderScheduler) GetResourceKind() core.ResourceKind {
+	return core.LeaderKind
 }
 
 func (l *balanceLeaderScheduler) GetResourceLimit() uint64 {
@@ -156,7 +157,7 @@ func newBalanceRegionScheduler(opt *scheduleOption) *balanceRegionScheduler {
 		rep:      opt.GetReplication(),
 		cache:    cache,
 		limit:    1,
-		selector: newBalanceSelector(RegionKind, filters),
+		selector: newBalanceSelector(core.RegionKind, filters),
 	}
 }
 
@@ -164,8 +165,8 @@ func (s *balanceRegionScheduler) GetName() string {
 	return "balance-region-scheduler"
 }
 
-func (s *balanceRegionScheduler) GetResourceKind() ResourceKind {
-	return RegionKind
+func (s *balanceRegionScheduler) GetResourceKind() core.ResourceKind {
+	return core.RegionKind
 }
 
 func (s *balanceRegionScheduler) GetResourceLimit() uint64 {
@@ -226,7 +227,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster *clusterInfo, region *Regi
 	}
 	s.limit = adjustBalanceLimit(cluster, s.GetResourceKind())
 
-	return newTransferPeer(region, RegionKind, oldPeer, newPeer)
+	return newTransferPeer(region, core.RegionKind, oldPeer, newPeer)
 }
 
 // replicaChecker ensures region has the best replicas.
@@ -339,7 +340,7 @@ func (r *replicaChecker) checkDownPeer(region *RegionInfo) Operator {
 			log.Infof("lost the store %d,maybe you are recovering the PD cluster.", peer.GetStoreId())
 			return nil
 		}
-		if store.downTime() < r.opt.GetMaxStoreDownTime() {
+		if store.DownTime() < r.opt.GetMaxStoreDownTime() {
 			continue
 		}
 		if stats.GetDownSeconds() < uint64(r.opt.GetMaxStoreDownTime().Seconds()) {
@@ -357,7 +358,7 @@ func (r *replicaChecker) checkOfflinePeer(region *RegionInfo) Operator {
 			log.Infof("lost the store %d,maybe you are recovering the PD cluster.", peer.GetStoreId())
 			return nil
 		}
-		if store.isUp() {
+		if store.IsUp() {
 			continue
 		}
 
@@ -370,7 +371,7 @@ func (r *replicaChecker) checkOfflinePeer(region *RegionInfo) Operator {
 		if newPeer == nil {
 			return nil
 		}
-		return newTransferPeer(region, RegionKind, peer, newPeer)
+		return newTransferPeer(region, core.RegionKind, peer, newPeer)
 	}
 
 	return nil
@@ -393,7 +394,7 @@ func (r *replicaChecker) checkBestReplacement(region *RegionInfo) Operator {
 	if err != nil {
 		return nil
 	}
-	return newTransferPeer(region, RegionKind, oldPeer, newPeer)
+	return newTransferPeer(region, core.RegionKind, oldPeer, newPeer)
 }
 
 // RegionStat records each hot region's statistics
@@ -451,8 +452,8 @@ func (h *balanceHotRegionScheduler) GetName() string {
 	return "balance-hot-region-scheduler"
 }
 
-func (h *balanceHotRegionScheduler) GetResourceKind() ResourceKind {
-	return PriorityKind
+func (h *balanceHotRegionScheduler) GetResourceKind() core.ResourceKind {
+	return core.PriorityKind
 }
 
 func (h *balanceHotRegionScheduler) GetResourceLimit() uint64 {
@@ -471,7 +472,7 @@ func (h *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return newTransferPeer(srcRegion, PriorityKind, srcPeer, destPeer)
+		return newTransferPeer(srcRegion, core.PriorityKind, srcPeer, destPeer)
 	}
 
 	// balance by leader

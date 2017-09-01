@@ -20,6 +20,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 )
 
 type testClusterInfo struct {
@@ -58,7 +59,7 @@ func (c *testClusterInfo) setStoreBusy(storeID uint64, busy bool) {
 }
 
 func (c *testClusterInfo) addLeaderStore(storeID uint64, leaderCount int) {
-	store := newStoreInfo(&metapb.Store{Id: storeID})
+	store := core.NewStoreInfo(&metapb.Store{Id: storeID})
 	store.Stats = &pdpb.StoreStats{}
 	store.LastHeartbeatTS = time.Now()
 	store.LeaderCount = leaderCount
@@ -66,7 +67,7 @@ func (c *testClusterInfo) addLeaderStore(storeID uint64, leaderCount int) {
 }
 
 func (c *testClusterInfo) addRegionStore(storeID uint64, regionCount int) {
-	store := newStoreInfo(&metapb.Store{Id: storeID})
+	store := core.NewStoreInfo(&metapb.Store{Id: storeID})
 	store.Stats = &pdpb.StoreStats{}
 	store.LastHeartbeatTS = time.Now()
 	store.RegionCount = regionCount
@@ -220,7 +221,7 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 		tc.addLeaderStore(2, int(t.targetCount))
 		source := cluster.getStore(1)
 		target := cluster.getStore(2)
-		c.Assert(shouldBalance(source, target, LeaderKind), Equals, t.expectedResult)
+		c.Assert(shouldBalance(source, target, core.LeaderKind), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -228,7 +229,7 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 		tc.addRegionStore(2, int(t.targetCount))
 		source := cluster.getStore(1)
 		target := cluster.getStore(2)
-		c.Assert(shouldBalance(source, target, RegionKind), Equals, t.expectedResult)
+		c.Assert(shouldBalance(source, target, core.RegionKind), Equals, t.expectedResult)
 	}
 }
 
@@ -240,11 +241,11 @@ func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
 	tc.addLeaderStore(3, 30)
 
 	// StandDeviation is sqrt((10^2+0+10^2)/3).
-	c.Assert(adjustBalanceLimit(cluster, LeaderKind), Equals, uint64(math.Sqrt(200.0/3.0)))
+	c.Assert(adjustBalanceLimit(cluster, core.LeaderKind), Equals, uint64(math.Sqrt(200.0/3.0)))
 
 	tc.setStoreOffline(1)
 	// StandDeviation is sqrt((5^2+5^2)/2).
-	c.Assert(adjustBalanceLimit(cluster, LeaderKind), Equals, uint64(math.Sqrt(50.0/2.0)))
+	c.Assert(adjustBalanceLimit(cluster, core.LeaderKind), Equals, uint64(math.Sqrt(50.0/2.0)))
 }
 
 var _ = Suite(&testBalanceLeaderSchedulerSuite{})

@@ -21,46 +21,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-var _ = Suite(&testResouceKindSuite{})
-
-type testResouceKindSuite struct{}
-
-func (s *testResouceKindSuite) TestString(c *C) {
-	tbl := []struct {
-		value ResourceKind
-		name  string
-	}{
-		{UnKnownKind, "unknown"},
-		{AdminKind, "admin"},
-		{LeaderKind, "leader"},
-		{RegionKind, "region"},
-		{PriorityKind, "priority"},
-		{OtherKind, "other"},
-		{ResourceKind(404), "unknown"},
-	}
-	for _, t := range tbl {
-		c.Assert(t.value.String(), Equals, t.name)
-	}
-}
-
-func (s *testResouceKindSuite) TestParseResouceKind(c *C) {
-	tbl := []struct {
-		name  string
-		value ResourceKind
-	}{
-		{"unknown", UnKnownKind},
-		{"admin", AdminKind},
-		{"leader", LeaderKind},
-		{"region", RegionKind},
-		{"priority", PriorityKind},
-		{"other", OtherKind},
-		{"test", UnKnownKind},
-	}
-	for _, t := range tbl {
-		c.Assert(ParseResourceKind(t.name), Equals, t.value)
-	}
-}
-
 var _ = Suite(&testOperatorSuite{})
 
 type testOperatorSuite struct{}

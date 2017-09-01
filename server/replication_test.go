@@ -13,7 +13,10 @@
 
 package server
 
-import . "github.com/pingcap/check"
+import (
+	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/server/core"
+)
 
 func newTestReplication(maxReplicas int, locationLabels ...string) *Replication {
 	cfg := &ReplicationConfig{
@@ -36,7 +39,7 @@ func (s *testReplicationSuite) TestDistinctScore(c *C) {
 	racks := []string{"r1", "r2", "r3"}
 	hosts := []string{"h1", "h2", "h3"}
 
-	var stores []*StoreInfo
+	var stores []*core.StoreInfo
 	for i, zone := range zones {
 		for j, rack := range racks {
 			for k, host := range hosts {

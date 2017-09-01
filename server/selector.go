@@ -13,50 +13,54 @@
 
 package server
 
-import "math/rand"
+import (
+	"math/rand"
+
+	"github.com/pingcap/pd/server/core"
+)
 
 // Selector is an interface to select source and target store to schedule.
 type Selector interface {
-	SelectSource(stores []*StoreInfo, filters ...Filter) *StoreInfo
-	SelectTarget(stores []*StoreInfo, filters ...Filter) *StoreInfo
+	SelectSource(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo
+	SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo
 }
 
 type balanceSelector struct {
-	kind    ResourceKind
+	kind    core.ResourceKind
 	filters []Filter
 }
 
-func newBalanceSelector(kind ResourceKind, filters []Filter) *balanceSelector {
+func newBalanceSelector(kind core.ResourceKind, filters []Filter) *balanceSelector {
 	return &balanceSelector{
 		kind:    kind,
 		filters: filters,
 	}
 }
 
-func (s *balanceSelector) SelectSource(stores []*StoreInfo, filters ...Filter) *StoreInfo {
+func (s *balanceSelector) SelectSource(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 
-	var result *StoreInfo
+	var result *core.StoreInfo
 	for _, store := range stores {
 		if filterSource(store, filters) {
 			continue
 		}
-		if result == nil || result.resourceScore(s.kind) < store.resourceScore(s.kind) {
+		if result == nil || result.ResourceScore(s.kind) < store.ResourceScore(s.kind) {
 			result = store
 		}
 	}
 	return result
 }
 
-func (s *balanceSelector) SelectTarget(stores []*StoreInfo, filters ...Filter) *StoreInfo {
+func (s *balanceSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 
-	var result *StoreInfo
+	var result *core.StoreInfo
 	for _, store := range stores {
 		if filterTarget(store, filters) {
 			continue
 		}
-		if result == nil || result.resourceScore(s.kind) > store.resourceScore(s.kind) {
+		if result == nil || result.ResourceScore(s.kind) > store.ResourceScore(s.kind) {
 			result = store
 		}
 	}
@@ -64,12 +68,12 @@ func (s *balanceSelector) SelectTarget(stores []*StoreInfo, filters ...Filter) *
 }
 
 type replicaSelector struct {
-	regionStores []*StoreInfo
+	regionStores []*core.StoreInfo
 	rep          *Replication
 	filters      []Filter
 }
 
-func newReplicaSelector(regionStores []*StoreInfo, rep *Replication, filters ...Filter) Selector {
+func newReplicaSelector(regionStores []*core.StoreInfo, rep *Replication, filters ...Filter) Selector {
 	return &replicaSelector{
 		regionStores: regionStores,
 		rep:          rep,
@@ -77,9 +81,9 @@ func newReplicaSelector(regionStores []*StoreInfo, rep *Replication, filters ...
 	}
 }
 
-func (s *replicaSelector) SelectSource(stores []*StoreInfo, filters ...Filter) *StoreInfo {
+func (s *replicaSelector) SelectSource(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	var (
-		best      *StoreInfo
+		best      *core.StoreInfo
 		bestScore float64
 	)
 	for _, store := range stores {
@@ -97,9 +101,9 @@ func (s *replicaSelector) SelectSource(stores []*StoreInfo, filters ...Filter) *
 	return best
 }
 
-func (s *replicaSelector) SelectTarget(stores []*StoreInfo, filters ...Filter) *StoreInfo {
+func (s *replicaSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	var (
-		best      *StoreInfo
+		best      *core.StoreInfo
 		bestScore float64
 	)
 	for _, store := range stores {
@@ -125,17 +129,17 @@ func newRandomSelector(filters []Filter) *randomSelector {
 	return &randomSelector{filters: filters}
 }
 
-func (s *randomSelector) Select(stores []*StoreInfo) *StoreInfo {
+func (s *randomSelector) Select(stores []*core.StoreInfo) *core.StoreInfo {
 	if len(stores) == 0 {
 		return nil
 	}
 	return stores[rand.Int()%len(stores)]
 }
 
-func (s *randomSelector) SelectSource(stores []*StoreInfo, filters ...Filter) *StoreInfo {
+func (s *randomSelector) SelectSource(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 
-	var candidates []*StoreInfo
+	var candidates []*core.StoreInfo
 	for _, store := range stores {
 		if filterSource(store, filters) {
 			continue
@@ -145,10 +149,10 @@ func (s *randomSelector) SelectSource(stores []*StoreInfo, filters ...Filter) *S
 	return s.Select(candidates)
 }
 
-func (s *randomSelector) SelectTarget(stores []*StoreInfo, filters ...Filter) *StoreInfo {
+func (s *randomSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 
-	var candidates []*StoreInfo
+	var candidates []*core.StoreInfo
 	for _, store := range stores {
 		if filterTarget(store, filters) {
 			continue

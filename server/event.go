@@ -19,6 +19,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 )
 
 type statusType byte
@@ -156,8 +157,8 @@ func (op *splitOperator) GetRegionID() uint64 {
 	return op.Origin.GetId()
 }
 
-func (op *splitOperator) GetResourceKind() ResourceKind {
-	return OtherKind
+func (op *splitOperator) GetResourceKind() core.ResourceKind {
+	return core.OtherKind
 }
 
 func (op *splitOperator) GetState() OperatorState {

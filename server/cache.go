@@ -23,6 +23,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 )
 
 var (
@@ -41,24 +42,24 @@ var (
 )
 
 type storesInfo struct {
-	stores map[uint64]*StoreInfo
+	stores map[uint64]*core.StoreInfo
 }
 
 func newStoresInfo() *storesInfo {
 	return &storesInfo{
-		stores: make(map[uint64]*StoreInfo),
+		stores: make(map[uint64]*core.StoreInfo),
 	}
 }
 
-func (s *storesInfo) getStore(storeID uint64) *StoreInfo {
+func (s *storesInfo) getStore(storeID uint64) *core.StoreInfo {
 	store, ok := s.stores[storeID]
 	if !ok {
 		return nil
 	}
-	return store.clone()
+	return store.Clone()
 }
 
-func (s *storesInfo) setStore(store *StoreInfo) {
+func (s *storesInfo) setStore(store *core.StoreInfo) {
 	s.stores[store.GetId()] = store
 }
 
@@ -67,10 +68,10 @@ func (s *storesInfo) blockStore(storeID uint64) error {
 	if !ok {
 		return errStoreNotFound(storeID)
 	}
-	if store.isBlocked() {
+	if store.IsBlocked() {
 		return errStoreIsBlocked(storeID)
 	}
-	store.block()
+	store.Block()
 	return nil
 }
 
@@ -79,13 +80,13 @@ func (s *storesInfo) unblockStore(storeID uint64) {
 	if !ok {
 		log.Fatalf("store %d is unblocked, but it is not found", storeID)
 	}
-	store.unblock()
+	store.Unblock()
 }
 
-func (s *storesInfo) getStores() []*StoreInfo {
-	stores := make([]*StoreInfo, 0, len(s.stores))
+func (s *storesInfo) getStores() []*core.StoreInfo {
+	stores := make([]*core.StoreInfo, 0, len(s.stores))
 	for _, store := range s.stores {
-		stores = append(stores, store.clone())
+		stores = append(stores, store.Clone())
 	}
 	return stores
 }
@@ -117,7 +118,7 @@ func (s *storesInfo) setRegionCount(storeID uint64, regionCount int) {
 func (s *storesInfo) totalWrittenBytes() uint64 {
 	var totalWrittenBytes uint64
 	for _, s := range s.stores {
-		if s.isUp() {
+		if s.IsUp() {
 			totalWrittenBytes += s.Stats.GetBytesWritten()
 		}
 	}
@@ -430,19 +431,19 @@ func (c *clusterInfo) putMetaLocked(meta *metapb.Cluster) error {
 	return nil
 }
 
-func (c *clusterInfo) getStore(storeID uint64) *StoreInfo {
+func (c *clusterInfo) getStore(storeID uint64) *core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.stores.getStore(storeID)
 }
 
-func (c *clusterInfo) putStore(store *StoreInfo) error {
+func (c *clusterInfo) putStore(store *core.StoreInfo) error {
 	c.Lock()
 	defer c.Unlock()
-	return c.putStoreLocked(store.clone())
+	return c.putStoreLocked(store.Clone())
 }
 
-func (c *clusterInfo) putStoreLocked(store *StoreInfo) error {
+func (c *clusterInfo) putStoreLocked(store *core.StoreInfo) error {
 	if c.kv != nil {
 		if err := c.kv.saveStore(store.Store); err != nil {
 			return errors.Trace(err)
@@ -464,7 +465,7 @@ func (c *clusterInfo) unblockStore(storeID uint64) {
 	c.stores.unblockStore(storeID)
 }
 
-func (c *clusterInfo) getStores() []*StoreInfo {
+func (c *clusterInfo) getStores() []*core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.stores.getStores()
@@ -612,10 +613,10 @@ func (c *clusterInfo) randFollowerRegion(storeID uint64) *RegionInfo {
 	return c.regions.randFollowerRegion(storeID)
 }
 
-func (c *clusterInfo) getRegionStores(region *RegionInfo) []*StoreInfo {
+func (c *clusterInfo) getRegionStores(region *RegionInfo) []*core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
-	var stores []*StoreInfo
+	var stores []*core.StoreInfo
 	for id := range region.GetStoreIds() {
 		if store := c.stores.getStore(id); store != nil {
 			stores = append(stores, store)
@@ -624,16 +625,16 @@ func (c *clusterInfo) getRegionStores(region *RegionInfo) []*StoreInfo {
 	return stores
 }
 
-func (c *clusterInfo) getLeaderStore(region *RegionInfo) *StoreInfo {
+func (c *clusterInfo) getLeaderStore(region *RegionInfo) *core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.stores.getStore(region.Leader.GetStoreId())
 }
 
-func (c *clusterInfo) getFollowerStores(region *RegionInfo) []*StoreInfo {
+func (c *clusterInfo) getFollowerStores(region *RegionInfo) []*core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
-	var stores []*StoreInfo
+	var stores []*core.StoreInfo
 	for id := range region.GetFollowers() {
 		if store := c.stores.getStore(id); store != nil {
 			stores = append(stores, store)

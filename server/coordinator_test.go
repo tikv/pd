@@ -20,25 +20,26 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/server/core"
 )
 
 type testOperator struct {
 	RegionID uint64
-	Kind     ResourceKind
+	Kind     core.ResourceKind
 	State    OperatorState
 }
 
-func newTestOperator(regionID uint64, kind ResourceKind) Operator {
+func newTestOperator(regionID uint64, kind core.ResourceKind) Operator {
 	region := newRegionInfo(&metapb.Region{Id: regionID}, nil)
 	op := &testOperator{RegionID: regionID, Kind: kind, State: OperatorRunning}
 	return newRegionOperator(region, kind, op)
 }
 
-func (op *testOperator) GetRegionID() uint64           { return op.RegionID }
-func (op *testOperator) GetResourceKind() ResourceKind { return op.Kind }
-func (op *testOperator) GetState() OperatorState       { return op.State }
-func (op *testOperator) SetState(state OperatorState)  { op.State = state }
-func (op *testOperator) GetName() string               { return "test" }
+func (op *testOperator) GetRegionID() uint64                { return op.RegionID }
+func (op *testOperator) GetResourceKind() core.ResourceKind { return op.Kind }
+func (op *testOperator) GetState() OperatorState            { return op.State }
+func (op *testOperator) SetState(state OperatorState)       { op.State = state }
+func (op *testOperator) GetName() string                    { return "test" }
 func (op *testOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	return nil, false
 }
@@ -55,13 +56,13 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 	co := newCoordinator(cluster, opt, hbStreams)
 	l := co.limiter
 
-	op1 := newTestOperator(1, LeaderKind)
+	op1 := newTestOperator(1, core.LeaderKind)
 	co.addOperator(op1)
 	c.Assert(l.operatorCount(op1.GetResourceKind()), Equals, uint64(1))
 	c.Assert(co.getOperator(1).GetRegionID(), Equals, op1.GetRegionID())
 
 	// Region 1 already has an operator, cannot add another one.
-	op2 := newTestOperator(1, RegionKind)
+	op2 := newTestOperator(1, core.RegionKind)
 	co.addOperator(op2)
 	c.Assert(l.operatorCount(op2.GetResourceKind()), Equals, uint64(0))
 
@@ -412,24 +413,24 @@ type testScheduleLimiterSuite struct{}
 
 func (s *testScheduleLimiterSuite) TestOperatorCount(c *C) {
 	l := newScheduleLimiter()
-	c.Assert(l.operatorCount(LeaderKind), Equals, uint64(0))
-	c.Assert(l.operatorCount(RegionKind), Equals, uint64(0))
+	c.Assert(l.operatorCount(core.LeaderKind), Equals, uint64(0))
+	c.Assert(l.operatorCount(core.RegionKind), Equals, uint64(0))
 
-	leaderOP := newTestOperator(1, LeaderKind)
+	leaderOP := newTestOperator(1, core.LeaderKind)
 	l.addOperator(leaderOP)
-	c.Assert(l.operatorCount(LeaderKind), Equals, uint64(1))
+	c.Assert(l.operatorCount(core.LeaderKind), Equals, uint64(1))
 	l.addOperator(leaderOP)
-	c.Assert(l.operatorCount(LeaderKind), Equals, uint64(2))
+	c.Assert(l.operatorCount(core.LeaderKind), Equals, uint64(2))
 	l.removeOperator(leaderOP)
-	c.Assert(l.operatorCount(LeaderKind), Equals, uint64(1))
+	c.Assert(l.operatorCount(core.LeaderKind), Equals, uint64(1))
 
-	regionOP := newTestOperator(1, RegionKind)
+	regionOP := newTestOperator(1, core.RegionKind)
 	l.addOperator(regionOP)
-	c.Assert(l.operatorCount(RegionKind), Equals, uint64(1))
+	c.Assert(l.operatorCount(core.RegionKind), Equals, uint64(1))
 	l.addOperator(regionOP)
-	c.Assert(l.operatorCount(RegionKind), Equals, uint64(2))
+	c.Assert(l.operatorCount(core.RegionKind), Equals, uint64(2))
 	l.removeOperator(regionOP)
-	c.Assert(l.operatorCount(RegionKind), Equals, uint64(1))
+	c.Assert(l.operatorCount(core.RegionKind), Equals, uint64(1))
 }
 
 var _ = Suite(&testScheduleControllerSuite{})
@@ -461,11 +462,11 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	lb.limit = 2
 	// count = 0
 	c.Assert(sc.AllowSchedule(), IsTrue)
-	op1 := newTestOperator(1, LeaderKind)
+	op1 := newTestOperator(1, core.LeaderKind)
 	c.Assert(co.addOperator(op1), IsTrue)
 	// count = 1
 	c.Assert(sc.AllowSchedule(), IsTrue)
-	op2 := newTestOperator(2, LeaderKind)
+	op2 := newTestOperator(2, core.LeaderKind)
 	c.Assert(co.addOperator(op2), IsTrue)
 	// count = 2
 	c.Assert(sc.AllowSchedule(), IsFalse)
@@ -474,7 +475,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	c.Assert(sc.AllowSchedule(), IsTrue)
 
 	// add a PriorityKind operator will remove old operator
-	op3 := newTestOperator(2, PriorityKind)
+	op3 := newTestOperator(2, core.PriorityKind)
 	c.Assert(co.addOperator(op1), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsFalse)
 	c.Assert(co.addOperator(op3), IsTrue)
@@ -484,7 +485,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	// add a AdminKind operator will remove old operator
 	c.Assert(co.addOperator(op2), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsFalse)
-	op4 := newTestOperator(2, AdminKind)
+	op4 := newTestOperator(2, core.AdminKind)
 	c.Assert(co.addOperator(op4), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsTrue)
 }

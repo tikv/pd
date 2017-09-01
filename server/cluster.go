@@ -25,6 +25,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 )
 
 const (
@@ -389,7 +390,7 @@ func (c *RaftCluster) GetStores() []*metapb.Store {
 }
 
 // GetStore gets store from cluster.
-func (c *RaftCluster) GetStore(storeID uint64) (*StoreInfo, error) {
+func (c *RaftCluster) GetStore(storeID uint64) (*core.StoreInfo, error) {
 	if storeID == 0 {
 		return nil, errors.New("invalid zero store id")
 	}
@@ -427,7 +428,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	// Store address can not be the same as other stores.
 	for _, s := range cluster.getStores() {
 		// It's OK to start a new store on the same address if the old store has been removed.
-		if s.isTombstone() {
+		if s.IsTombstone() {
 			continue
 		}
 		if s.GetId() != store.GetId() && s.GetAddress() == store.GetAddress() {
@@ -438,16 +439,16 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	s := cluster.getStore(store.GetId())
 	if s == nil {
 		// Add a new store.
-		s = newStoreInfo(store)
+		s = core.NewStoreInfo(store)
 	} else {
 		// Update an existed store.
 		s.Address = store.Address
-		s.mergeLabels(store.Labels)
+		s.MergeLabels(store.Labels)
 	}
 
 	// Check location labels.
 	for _, k := range c.s.cfg.Replication.LocationLabels {
-		if v := s.getLabelValue(k); len(v) == 0 {
+		if v := s.GetLabelValue(k); len(v) == 0 {
 			log.Warnf("missing location label %q in store %v", k, s)
 		}
 	}
@@ -469,11 +470,11 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	}
 
 	// Remove an offline store should be OK, nothing to do.
-	if store.isOffline() {
+	if store.IsOffline() {
 		return nil
 	}
 
-	if store.isTombstone() {
+	if store.IsTombstone() {
 		return errors.New("store has been removed")
 	}
 
@@ -498,11 +499,11 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	}
 
 	// Bury a tombstone store should be OK, nothing to do.
-	if store.isTombstone() {
+	if store.IsTombstone() {
 		return nil
 	}
 
-	if store.isUp() {
+	if store.IsUp() {
 		if !force {
 			return errors.New("store is still up, please remove store gracefully")
 		}
@@ -571,15 +572,15 @@ func (c *RaftCluster) collectMetrics() {
 		case metapb.StoreState_Tombstone:
 			storeTombstoneCount++
 		}
-		if s.isTombstone() {
+		if s.IsTombstone() {
 			continue
 		}
-		if s.downTime() >= c.coordinator.opt.GetMaxStoreDownTime() {
+		if s.DownTime() >= c.coordinator.opt.GetMaxStoreDownTime() {
 			storeDownCount++
 		}
 
 		// Store stats.
-		storageSize += s.storageSize()
+		storageSize += s.StorageSize()
 		storageCapacity += s.Stats.GetCapacity()
 
 		// Balance score.

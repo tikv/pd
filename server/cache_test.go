@@ -21,6 +21,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 )
 
 var _ = Suite(&testStoresInfoSuite{})
@@ -39,13 +40,13 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 }
 
 // Create n stores (0..n).
-func newTestStores(n uint64) []*StoreInfo {
-	stores := make([]*StoreInfo, 0, n)
+func newTestStores(n uint64) []*core.StoreInfo {
+	stores := make([]*core.StoreInfo, 0, n)
 	for i := uint64(0); i < n; i++ {
 		store := &metapb.Store{
 			Id: i,
 		}
-		stores = append(stores, newStoreInfo(store))
+		stores = append(stores, core.NewStoreInfo(store))
 	}
 	return stores
 }
@@ -62,10 +63,10 @@ func (s *testStoresInfoSuite) TestStores(c *C) {
 		c.Assert(cache.getStore(i), DeepEquals, stores[i])
 		c.Assert(cache.getStoreCount(), Equals, int(i+1))
 		c.Assert(cache.blockStore(i), IsNil)
-		c.Assert(cache.getStore(i).isBlocked(), IsTrue)
+		c.Assert(cache.getStore(i).IsBlocked(), IsTrue)
 		c.Assert(cache.blockStore(i), NotNil)
 		cache.unblockStore(i)
-		c.Assert(cache.getStore(i).isBlocked(), IsFalse)
+		c.Assert(cache.getStore(i).IsBlocked(), IsFalse)
 	}
 	c.Assert(cache.getStoreCount(), Equals, int(n))
 

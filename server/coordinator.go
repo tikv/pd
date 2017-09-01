@@ -20,6 +20,7 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
+	"github.com/pingcap/pd/server/core"
 	"golang.org/x/net/context"
 )
 
@@ -105,7 +106,7 @@ func (c *coordinator) dispatch(region *RegionInfo) {
 	}
 
 	// Check replica operator.
-	if c.limiter.operatorCount(RegionKind) >= c.opt.GetReplicaScheduleLimit() {
+	if c.limiter.operatorCount(core.RegionKind) >= c.opt.GetReplicaScheduleLimit() {
 		return
 	}
 	if op := c.checker.Check(region); op != nil {
@@ -296,10 +297,10 @@ func (c *coordinator) addOperator(op Operator) bool {
 }
 
 func isHigherPriorityOperator(new Operator, old Operator) bool {
-	if new.GetResourceKind() == AdminKind {
+	if new.GetResourceKind() == core.AdminKind {
 		return true
 	}
-	if new.GetResourceKind() == PriorityKind && old.GetResourceKind() != PriorityKind {
+	if new.GetResourceKind() == core.PriorityKind && old.GetResourceKind() != core.PriorityKind {
 		return true
 	}
 	return false
@@ -350,7 +351,7 @@ func (c *coordinator) getHistories() []Operator {
 	return operators
 }
 
-func (c *coordinator) getHistoriesOfKind(kind ResourceKind) []Operator {
+func (c *coordinator) getHistoriesOfKind(kind core.ResourceKind) []Operator {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -367,12 +368,12 @@ func (c *coordinator) getHistoriesOfKind(kind ResourceKind) []Operator {
 
 type scheduleLimiter struct {
 	sync.RWMutex
-	counts map[ResourceKind]uint64
+	counts map[core.ResourceKind]uint64
 }
 
 func newScheduleLimiter() *scheduleLimiter {
 	return &scheduleLimiter{
-		counts: make(map[ResourceKind]uint64),
+		counts: make(map[core.ResourceKind]uint64),
 	}
 }
 
@@ -388,7 +389,7 @@ func (l *scheduleLimiter) removeOperator(op Operator) {
 	l.counts[op.GetResourceKind()]--
 }
 
-func (l *scheduleLimiter) operatorCount(kind ResourceKind) uint64 {
+func (l *scheduleLimiter) operatorCount(kind core.ResourceKind) uint64 {
 	l.RLock()
 	defer l.RUnlock()
 	return l.counts[kind]
