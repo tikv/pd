@@ -35,3 +35,25 @@ func DistinctScore(labels []string, stores []*core.StoreInfo, other *core.StoreI
 	}
 	return score
 }
+
+// compareStoreScore compares which store is better for replication.
+// Returns 0 if store A is as good as store B.
+// Returns 1 if store A is better than store B.
+// Returns -1 if store B is better than store A.
+func compareStoreScore(storeA *core.StoreInfo, scoreA float64, storeB *core.StoreInfo, scoreB float64) int {
+	// The store with higher score is better.
+	if scoreA > scoreB {
+		return 1
+	}
+	if scoreA < scoreB {
+		return -1
+	}
+	// The store with lower region score is better.
+	if storeA.RegionScore() < storeB.RegionScore() {
+		return 1
+	}
+	if storeA.RegionScore() > storeB.RegionScore() {
+		return -1
+	}
+	return 0
+}

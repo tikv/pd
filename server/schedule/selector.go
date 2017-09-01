@@ -11,39 +11,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package schedule
 
 import (
 	"math/rand"
 
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule"
 )
 
 // Selector is an interface to select source and target store to schedule.
 type Selector interface {
-	SelectSource(stores []*core.StoreInfo, filters ...schedule.Filter) *core.StoreInfo
-	SelectTarget(stores []*core.StoreInfo, filters ...schedule.Filter) *core.StoreInfo
+	SelectSource(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo
+	SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo
 }
 
 type balanceSelector struct {
 	kind    core.ResourceKind
-	filters []schedule.Filter
+	filters []Filter
 }
 
-func newBalanceSelector(kind core.ResourceKind, filters []schedule.Filter) *balanceSelector {
+// NewBalanceSelector creates a Selector that select source/target store by their
+// resource scores.
+func NewBalanceSelector(kind core.ResourceKind, filters []Filter) Selector {
 	return &balanceSelector{
 		kind:    kind,
 		filters: filters,
 	}
 }
 
-func (s *balanceSelector) SelectSource(stores []*core.StoreInfo, filters ...schedule.Filter) *core.StoreInfo {
+func (s *balanceSelector) SelectSource(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 
 	var result *core.StoreInfo
 	for _, store := range stores {
-		if schedule.FilterSource(store, filters) {
+		if FilterSource(store, filters) {
 			continue
 		}
 		if result == nil || result.ResourceScore(s.kind) < store.ResourceScore(s.kind) {
@@ -53,12 +54,12 @@ func (s *balanceSelector) SelectSource(stores []*core.StoreInfo, filters ...sche
 	return result
 }
 
-func (s *balanceSelector) SelectTarget(stores []*core.StoreInfo, filters ...schedule.Filter) *core.StoreInfo {
+func (s *balanceSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 
 	var result *core.StoreInfo
 	for _, store := range stores {
-		if schedule.FilterTarget(store, filters) {
+		if FilterTarget(store, filters) {
 			continue
 		}
 		if result == nil || result.ResourceScore(s.kind) > store.ResourceScore(s.kind) {
@@ -70,63 +71,66 @@ func (s *balanceSelector) SelectTarget(stores []*core.StoreInfo, filters ...sche
 
 type replicaSelector struct {
 	regionStores []*core.StoreInfo
-	rep          *Replication
-	filters      []schedule.Filter
+	labels       []string
+	filters      []Filter
 }
 
-func newReplicaSelector(regionStores []*core.StoreInfo, rep *Replication, filters ...schedule.Filter) Selector {
+// NewReplicaSelector creates a Selector that select source/target store by their
+// distinct scores based on a region's peer stores.
+func NewReplicaSelector(regionStores []*core.StoreInfo, labels []string, filters ...Filter) Selector {
 	return &replicaSelector{
 		regionStores: regionStores,
-		rep:          rep,
+		labels:       labels,
 		filters:      filters,
 	}
 }
 
-func (s *replicaSelector) SelectSource(stores []*core.StoreInfo, filters ...schedule.Filter) *core.StoreInfo {
+func (s *replicaSelector) SelectSource(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	var (
 		best      *core.StoreInfo
 		bestScore float64
 	)
 	for _, store := range stores {
-		if schedule.FilterSource(store, filters) {
+		if FilterSource(store, filters) {
 			continue
 		}
-		score := schedule.DistinctScore(s.rep.GetLocationLabels(), s.regionStores, store)
+		score := DistinctScore(s.labels, s.regionStores, store)
 		if best == nil || compareStoreScore(store, score, best, bestScore) < 0 {
 			best, bestScore = store, score
 		}
 	}
-	if best == nil || schedule.FilterSource(best, s.filters) {
+	if best == nil || FilterSource(best, s.filters) {
 		return nil
 	}
 	return best
 }
 
-func (s *replicaSelector) SelectTarget(stores []*core.StoreInfo, filters ...schedule.Filter) *core.StoreInfo {
+func (s *replicaSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	var (
 		best      *core.StoreInfo
 		bestScore float64
 	)
 	for _, store := range stores {
-		if schedule.FilterTarget(store, filters) {
+		if FilterTarget(store, filters) {
 			continue
 		}
-		score := schedule.DistinctScore(s.rep.GetLocationLabels(), s.regionStores, store)
+		score := DistinctScore(s.labels, s.regionStores, store)
 		if best == nil || compareStoreScore(store, score, best, bestScore) > 0 {
 			best, bestScore = store, score
 		}
 	}
-	if best == nil || schedule.FilterTarget(best, s.filters) {
+	if best == nil || FilterTarget(best, s.filters) {
 		return nil
 	}
 	return best
 }
 
 type randomSelector struct {
-	filters []schedule.Filter
+	filters []Filter
 }
 
-func newRandomSelector(filters []schedule.Filter) *randomSelector {
+// NewRandomSelector creates a selector that select store randomly.
+func NewRandomSelector(filters []Filter) Selector {
 	return &randomSelector{filters: filters}
 }
 
@@ -137,12 +141,12 @@ func (s *randomSelector) Select(stores []*core.StoreInfo) *core.StoreInfo {
 	return stores[rand.Int()%len(stores)]
 }
 
-func (s *randomSelector) SelectSource(stores []*core.StoreInfo, filters ...schedule.Filter) *core.StoreInfo {
+func (s *randomSelector) SelectSource(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 
 	var candidates []*core.StoreInfo
 	for _, store := range stores {
-		if schedule.FilterSource(store, filters) {
+		if FilterSource(store, filters) {
 			continue
 		}
 		candidates = append(candidates, store)
@@ -150,12 +154,12 @@ func (s *randomSelector) SelectSource(stores []*core.StoreInfo, filters ...sched
 	return s.Select(candidates)
 }
 
-func (s *randomSelector) SelectTarget(stores []*core.StoreInfo, filters ...schedule.Filter) *core.StoreInfo {
+func (s *randomSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 
 	var candidates []*core.StoreInfo
 	for _, store := range stores {
-		if schedule.FilterTarget(store, filters) {
+		if FilterTarget(store, filters) {
 			continue
 		}
 		candidates = append(candidates, store)

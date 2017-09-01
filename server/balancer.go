@@ -79,7 +79,7 @@ func adjustBalanceLimit(cluster *clusterInfo, kind core.ResourceKind) uint64 {
 type balanceLeaderScheduler struct {
 	opt      *scheduleOption
 	limit    uint64
-	selector Selector
+	selector schedule.Selector
 }
 
 func newBalanceLeaderScheduler(opt *scheduleOption) *balanceLeaderScheduler {
@@ -91,7 +91,7 @@ func newBalanceLeaderScheduler(opt *scheduleOption) *balanceLeaderScheduler {
 	return &balanceLeaderScheduler{
 		opt:      opt,
 		limit:    1,
-		selector: newBalanceSelector(core.LeaderKind, filters),
+		selector: schedule.NewBalanceSelector(core.LeaderKind, filters),
 	}
 }
 
@@ -140,7 +140,7 @@ type balanceRegionScheduler struct {
 	rep      *Replication
 	cache    *idCache
 	limit    uint64
-	selector Selector
+	selector schedule.Selector
 }
 
 func newBalanceRegionScheduler(opt *scheduleOption) *balanceRegionScheduler {
@@ -158,7 +158,7 @@ func newBalanceRegionScheduler(opt *scheduleOption) *balanceRegionScheduler {
 		rep:      opt.GetReplication(),
 		cache:    cache,
 		limit:    1,
-		selector: newBalanceSelector(core.RegionKind, filters),
+		selector: schedule.NewBalanceSelector(core.RegionKind, filters),
 	}
 }
 
@@ -304,7 +304,7 @@ func (r *replicaChecker) SelectBestStoreToAddReplica(region *core.RegionInfo, fi
 	filters = append(filters, newFilters...)
 
 	regionStores := r.cluster.getRegionStores(region)
-	selector := newReplicaSelector(regionStores, r.rep, r.filters...)
+	selector := schedule.NewReplicaSelector(regionStores, r.rep.GetLocationLabels(), r.filters...)
 	target := selector.SelectTarget(r.cluster.getStores(), filters...)
 	if target == nil {
 		return 0, 0
@@ -315,7 +315,7 @@ func (r *replicaChecker) SelectBestStoreToAddReplica(region *core.RegionInfo, fi
 // selectWorstPeer returns the worst peer in the region.
 func (r *replicaChecker) selectWorstPeer(region *core.RegionInfo) (*metapb.Peer, float64) {
 	regionStores := r.cluster.getRegionStores(region)
-	selector := newReplicaSelector(regionStores, r.rep, r.filters...)
+	selector := schedule.NewReplicaSelector(regionStores, r.rep.GetLocationLabels(), r.filters...)
 	worstStore := selector.SelectSource(regionStores)
 	if worstStore == nil {
 		return nil, 0

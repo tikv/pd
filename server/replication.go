@@ -13,11 +13,7 @@
 
 package server
 
-import (
-	"sync/atomic"
-
-	"github.com/pingcap/pd/server/core"
-)
+import "sync/atomic"
 
 // Replication provides some help to do replication.
 type Replication struct {
@@ -54,26 +50,4 @@ func (r *Replication) SetMaxReplicas(replicas int) {
 // GetLocationLabels returns the location labels for each region
 func (r *Replication) GetLocationLabels() []string {
 	return r.load().LocationLabels
-}
-
-// compareStoreScore compares which store is better for replication.
-// Returns 0 if store A is as good as store B.
-// Returns 1 if store A is better than store B.
-// Returns -1 if store B is better than store A.
-func compareStoreScore(storeA *core.StoreInfo, scoreA float64, storeB *core.StoreInfo, scoreB float64) int {
-	// The store with higher score is better.
-	if scoreA > scoreB {
-		return 1
-	}
-	if scoreA < scoreB {
-		return -1
-	}
-	// The store with lower region score is better.
-	if storeA.RegionScore() < storeB.RegionScore() {
-		return 1
-	}
-	if storeA.RegionScore() > storeB.RegionScore() {
-		return -1
-	}
-	return 0
 }
