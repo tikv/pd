@@ -256,12 +256,12 @@ func (s *shuffleRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 	return newTransferPeer(region, core.RegionKind, oldPeer, newPeer)
 }
 
-func newAddPeer(region *RegionInfo, peer *metapb.Peer) Operator {
+func newAddPeer(region *core.RegionInfo, peer *metapb.Peer) Operator {
 	addPeer := newAddPeerOperator(region.GetId(), peer)
 	return newRegionOperator(region, core.RegionKind, addPeer)
 }
 
-func newRemovePeer(region *RegionInfo, peer *metapb.Peer) Operator {
+func newRemovePeer(region *core.RegionInfo, peer *metapb.Peer) Operator {
 	removePeer := newRemovePeerOperator(region.GetId(), peer)
 	if region.Leader != nil && region.Leader.GetId() == peer.GetId() {
 		if follower := region.GetFollower(); follower != nil {
@@ -273,7 +273,7 @@ func newRemovePeer(region *RegionInfo, peer *metapb.Peer) Operator {
 	return newRegionOperator(region, core.RegionKind, removePeer)
 }
 
-func newTransferPeer(region *RegionInfo, kind core.ResourceKind, oldPeer, newPeer *metapb.Peer) Operator {
+func newTransferPeer(region *core.RegionInfo, kind core.ResourceKind, oldPeer, newPeer *metapb.Peer) Operator {
 	addPeer := newAddPeerOperator(region.GetId(), newPeer)
 	removePeer := newRemovePeerOperator(region.GetId(), oldPeer)
 	if region.Leader != nil && region.Leader.GetId() == oldPeer.GetId() {
@@ -287,12 +287,12 @@ func newTransferPeer(region *RegionInfo, kind core.ResourceKind, oldPeer, newPee
 	return newRegionOperator(region, kind, addPeer, removePeer)
 }
 
-func newPriorityTransferLeader(region *RegionInfo, newLeader *metapb.Peer) Operator {
+func newPriorityTransferLeader(region *core.RegionInfo, newLeader *metapb.Peer) Operator {
 	transferLeader := newTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
 	return newRegionOperator(region, core.PriorityKind, transferLeader)
 }
 
-func newTransferLeader(region *RegionInfo, newLeader *metapb.Peer) Operator {
+func newTransferLeader(region *core.RegionInfo, newLeader *metapb.Peer) Operator {
 	transferLeader := newTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
 	return newRegionOperator(region, core.LeaderKind, transferLeader)
 }
@@ -316,7 +316,7 @@ func scheduleAddPeer(cluster *clusterInfo, s Selector, filters ...Filter) *metap
 }
 
 // scheduleRemovePeer schedules a region to remove the peer.
-func scheduleRemovePeer(cluster *clusterInfo, schedulerName string, s Selector, filters ...Filter) (*RegionInfo, *metapb.Peer) {
+func scheduleRemovePeer(cluster *clusterInfo, schedulerName string, s Selector, filters ...Filter) (*core.RegionInfo, *metapb.Peer) {
 	stores := cluster.getStores()
 
 	source := s.SelectSource(stores, filters...)
@@ -338,7 +338,7 @@ func scheduleRemovePeer(cluster *clusterInfo, schedulerName string, s Selector, 
 }
 
 // scheduleTransferLeader schedules a region to transfer leader to the peer.
-func scheduleTransferLeader(cluster *clusterInfo, schedulerName string, s Selector, filters ...Filter) (*RegionInfo, *metapb.Peer) {
+func scheduleTransferLeader(cluster *clusterInfo, schedulerName string, s Selector, filters ...Filter) (*core.RegionInfo, *metapb.Peer) {
 	stores := cluster.getStores()
 	if len(stores) == 0 {
 		schedulerCounter.WithLabelValues(schedulerName, "no_store").Inc()

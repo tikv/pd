@@ -172,6 +172,6 @@ func (op *splitOperator) GetName() string {
 }
 
 // Do implements Operator.Do interface.
-func (op *splitOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
+func (op *splitOperator) Do(region *core.RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	return nil, true
 }

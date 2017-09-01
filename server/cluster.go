@@ -361,7 +361,7 @@ func (c *RaftCluster) GetRegionByKey(regionKey []byte) (*metapb.Region, *metapb.
 }
 
 // GetRegionInfoByKey gets regionInfo by region key from cluster.
-func (c *RaftCluster) GetRegionInfoByKey(regionKey []byte) *RegionInfo {
+func (c *RaftCluster) GetRegionInfoByKey(regionKey []byte) *core.RegionInfo {
 	return c.cachedCluster.searchRegion(regionKey)
 }
 
@@ -375,7 +375,7 @@ func (c *RaftCluster) GetRegionByID(regionID uint64) (*metapb.Region, *metapb.Pe
 }
 
 // GetRegionInfoByID gets regionInfo by regionID from cluster.
-func (c *RaftCluster) GetRegionInfoByID(regionID uint64) *RegionInfo {
+func (c *RaftCluster) GetRegionInfoByID(regionID uint64) *core.RegionInfo {
 	return c.cachedCluster.getRegion(regionID)
 }
 

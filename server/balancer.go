@@ -207,7 +207,7 @@ func (s *balanceRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 	return op
 }
 
-func (s *balanceRegionScheduler) transferPeer(cluster *clusterInfo, region *RegionInfo, oldPeer *metapb.Peer) Operator {
+func (s *balanceRegionScheduler) transferPeer(cluster *clusterInfo, region *core.RegionInfo, oldPeer *metapb.Peer) Operator {
 	// scoreGuard guarantees that the distinct score will not decrease.
 	stores := cluster.getRegionStores(region)
 	source := cluster.getStore(oldPeer.GetStoreId())
@@ -251,7 +251,7 @@ func newReplicaChecker(opt *scheduleOption, cluster *clusterInfo) *replicaChecke
 	}
 }
 
-func (r *replicaChecker) Check(region *RegionInfo) Operator {
+func (r *replicaChecker) Check(region *core.RegionInfo) Operator {
 	if op := r.checkDownPeer(region); op != nil {
 		return op
 	}
@@ -279,7 +279,7 @@ func (r *replicaChecker) Check(region *RegionInfo) Operator {
 }
 
 // SelectBestPeerToAddReplica returns a new peer that to be used to add a replica.
-func (r *replicaChecker) SelectBestPeerToAddReplica(region *RegionInfo, filters ...Filter) *metapb.Peer {
+func (r *replicaChecker) SelectBestPeerToAddReplica(region *core.RegionInfo, filters ...Filter) *metapb.Peer {
 	storeID, _ := r.SelectBestStoreToAddReplica(region, filters...)
 	if storeID == 0 {
 		return nil
@@ -292,7 +292,7 @@ func (r *replicaChecker) SelectBestPeerToAddReplica(region *RegionInfo, filters 
 }
 
 // SelectBestStoreToAddReplica returns the store to add a replica.
-func (r *replicaChecker) SelectBestStoreToAddReplica(region *RegionInfo, filters ...Filter) (uint64, float64) {
+func (r *replicaChecker) SelectBestStoreToAddReplica(region *core.RegionInfo, filters ...Filter) (uint64, float64) {
 	// Add some must have filters.
 	newFilters := []Filter{
 		newStateFilter(r.opt),
@@ -311,7 +311,7 @@ func (r *replicaChecker) SelectBestStoreToAddReplica(region *RegionInfo, filters
 }
 
 // selectWorstPeer returns the worst peer in the region.
-func (r *replicaChecker) selectWorstPeer(region *RegionInfo) (*metapb.Peer, float64) {
+func (r *replicaChecker) selectWorstPeer(region *core.RegionInfo) (*metapb.Peer, float64) {
 	regionStores := r.cluster.getRegionStores(region)
 	selector := newReplicaSelector(regionStores, r.rep, r.filters...)
 	worstStore := selector.SelectSource(regionStores)
@@ -322,14 +322,14 @@ func (r *replicaChecker) selectWorstPeer(region *RegionInfo) (*metapb.Peer, floa
 }
 
 // selectBestReplacement returns the best store to replace the region peer.
-func (r *replicaChecker) selectBestReplacement(region *RegionInfo, peer *metapb.Peer) (uint64, float64) {
+func (r *replicaChecker) selectBestReplacement(region *core.RegionInfo, peer *metapb.Peer) (uint64, float64) {
 	// Get a new region without the peer we are going to replace.
-	newRegion := region.clone()
+	newRegion := region.Clone()
 	newRegion.RemoveStorePeer(peer.GetStoreId())
 	return r.SelectBestStoreToAddReplica(newRegion, newExcludedFilter(nil, region.GetStoreIds()))
 }
 
-func (r *replicaChecker) checkDownPeer(region *RegionInfo) Operator {
+func (r *replicaChecker) checkDownPeer(region *core.RegionInfo) Operator {
 	for _, stats := range region.DownPeers {
 		peer := stats.GetPeer()
 		if peer == nil {
@@ -351,7 +351,7 @@ func (r *replicaChecker) checkDownPeer(region *RegionInfo) Operator {
 	return nil
 }
 
-func (r *replicaChecker) checkOfflinePeer(region *RegionInfo) Operator {
+func (r *replicaChecker) checkOfflinePeer(region *core.RegionInfo) Operator {
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.getStore(peer.GetStoreId())
 		if store == nil {
@@ -377,7 +377,7 @@ func (r *replicaChecker) checkOfflinePeer(region *RegionInfo) Operator {
 	return nil
 }
 
-func (r *replicaChecker) checkBestReplacement(region *RegionInfo) Operator {
+func (r *replicaChecker) checkBestReplacement(region *core.RegionInfo) Operator {
 	oldPeer, oldScore := r.selectWorstPeer(region)
 	if oldPeer == nil {
 		return nil
@@ -543,7 +543,7 @@ func (h *balanceHotRegionScheduler) calcScore(cluster *clusterInfo) {
 	}
 }
 
-func (h *balanceHotRegionScheduler) balanceByPeer(cluster *clusterInfo) (*RegionInfo, *metapb.Peer, *metapb.Peer) {
+func (h *balanceHotRegionScheduler) balanceByPeer(cluster *clusterInfo) (*core.RegionInfo, *metapb.Peer, *metapb.Peer) {
 	var (
 		maxWrittenBytes        uint64
 		srcStoreID             uint64
@@ -616,7 +616,7 @@ func (h *balanceHotRegionScheduler) balanceByPeer(cluster *clusterInfo) (*Region
 	return nil, nil, nil
 }
 
-func (h *balanceHotRegionScheduler) selectDestStoreByPeer(candidateStoreIDs []uint64, srcRegion *RegionInfo, srcStoreID uint64) uint64 {
+func (h *balanceHotRegionScheduler) selectDestStoreByPeer(candidateStoreIDs []uint64, srcRegion *core.RegionInfo, srcStoreID uint64) uint64 {
 	sr := h.statisticsAsPeer[srcStoreID]
 	srcWrittenBytes := sr.WrittenBytes
 	srcHotRegionsCount := sr.RegionsStat.Len()
@@ -670,7 +670,7 @@ func (h *balanceHotRegionScheduler) adjustBalanceLimit(storeID uint64, t Balance
 	h.limit = maxUint64(1, limit)
 }
 
-func (h *balanceHotRegionScheduler) balanceByLeader(cluster *clusterInfo) (*RegionInfo, *metapb.Peer) {
+func (h *balanceHotRegionScheduler) balanceByLeader(cluster *clusterInfo) (*core.RegionInfo, *metapb.Peer) {
 	var (
 		maxWrittenBytes        uint64
 		srcStoreID             uint64
@@ -716,7 +716,7 @@ func (h *balanceHotRegionScheduler) balanceByLeader(cluster *clusterInfo) (*Regi
 	return nil, nil
 }
 
-func (h *balanceHotRegionScheduler) selectDestStoreByLeader(srcRegion *RegionInfo) *metapb.Peer {
+func (h *balanceHotRegionScheduler) selectDestStoreByLeader(srcRegion *core.RegionInfo) *metapb.Peer {
 	sr := h.statisticsAsLeader[srcRegion.Leader.GetStoreId()]
 	srcWrittenBytes := sr.WrittenBytes
 	srcHotRegionsCount := sr.RegionsStat.Len()

@@ -105,7 +105,7 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 		peer, _ := c.allocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	c.putRegion(newRegionInfo(region, leader))
+	c.putRegion(core.NewRegionInfo(region, leader))
 }
 
 func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) {
@@ -116,7 +116,7 @@ func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) {
 		peer, _ := c.allocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	c.putRegion(newRegionInfo(region, nil))
+	c.putRegion(core.NewRegionInfo(region, nil))
 }
 
 func (c *testClusterInfo) addLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
@@ -127,7 +127,7 @@ func (c *testClusterInfo) addLeaderRegionWithWriteInfo(regionID uint64, leaderID
 		peer, _ := c.allocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	r := newRegionInfo(region, leader)
+	r := core.NewRegionInfo(region, leader)
 	r.WrittenBytes = writtenBytes
 	c.updateWriteStatus(r)
 	c.putRegion(r)

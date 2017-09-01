@@ -19,6 +19,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 )
 
 var _ = Suite(&testOperatorSuite{})
@@ -66,7 +67,7 @@ func (o *testOperatorSuite) TestOperatorStateMarshal(c *C) {
 	}
 }
 
-func doRegionHeartbeatResponse(region *RegionInfo, resp *pdpb.RegionHeartbeatResponse) {
+func doRegionHeartbeatResponse(region *core.RegionInfo, resp *pdpb.RegionHeartbeatResponse) {
 	if resp == nil {
 		return
 	}

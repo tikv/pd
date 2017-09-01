@@ -86,8 +86,8 @@ type testRegionsInfoSuite struct{}
 
 // Create n regions (0..n) of n stores (0..n).
 // Each region contains np peers, the first peer is the leader.
-func newTestRegions(n, np uint64) []*RegionInfo {
-	regions := make([]*RegionInfo, 0, n)
+func newTestRegions(n, np uint64) []*core.RegionInfo {
+	regions := make([]*core.RegionInfo, 0, n)
 	for i := uint64(0); i < n; i++ {
 		peers := make([]*metapb.Peer, 0, np)
 		for j := uint64(0); j < np; j++ {
@@ -103,7 +103,7 @@ func newTestRegions(n, np uint64) []*RegionInfo {
 			StartKey: []byte{byte(i)},
 			EndKey:   []byte{byte(i + 1)},
 		}
-		regions = append(regions, newRegionInfo(region, peers[0]))
+		regions = append(regions, core.NewRegionInfo(region, peers[0]))
 	}
 	return regions
 }
@@ -170,7 +170,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	}
 }
 
-func checkRegion(c *C, a *RegionInfo, b *RegionInfo) {
+func checkRegion(c *C, a *core.RegionInfo, b *core.RegionInfo) {
 	c.Assert(a.Region, DeepEquals, b.Region)
 	c.Assert(a.Leader, DeepEquals, b.Leader)
 	c.Assert(a.Peers, DeepEquals, b.Peers)
@@ -182,7 +182,7 @@ func checkRegion(c *C, a *RegionInfo, b *RegionInfo) {
 	}
 }
 
-func checkRegionsKV(c *C, kv *kv, regions []*RegionInfo) {
+func checkRegionsKV(c *C, kv *kv, regions []*core.RegionInfo) {
 	if kv != nil {
 		for _, region := range regions {
 			var meta metapb.Region
@@ -194,7 +194,7 @@ func checkRegionsKV(c *C, kv *kv, regions []*RegionInfo) {
 	}
 }
 
-func checkRegions(c *C, cache *regionsInfo, regions []*RegionInfo) {
+func checkRegions(c *C, cache *regionsInfo, regions []*core.RegionInfo) {
 	regionCount := make(map[uint64]int)
 	leaderCount := make(map[uint64]int)
 	followerCount := make(map[uint64]int)
@@ -354,7 +354,7 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 		checkRegions(c, cache.regions, regions[:i+1])
 		checkRegionsKV(c, cache.kv, regions[:i+1])
 
-		epoch := region.clone().GetRegionEpoch()
+		epoch := region.Clone().GetRegionEpoch()
 
 		// region is updated.
 		region.RegionEpoch = &metapb.RegionEpoch{
@@ -365,7 +365,7 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 		checkRegionsKV(c, cache.kv, regions[:i+1])
 
 		// region is stale (Version).
-		stale := region.clone()
+		stale := region.Clone()
 		stale.RegionEpoch = &metapb.RegionEpoch{
 			ConfVer: epoch.GetConfVer() + 1,
 		}
@@ -383,7 +383,7 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 		checkRegionsKV(c, cache.kv, regions[:i+1])
 
 		// region is stale (ConfVer).
-		stale = region.clone()
+		stale = region.Clone()
 		stale.RegionEpoch = &metapb.RegionEpoch{
 			Version: epoch.GetVersion() + 1,
 		}
@@ -464,7 +464,7 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 func heartbeatRegions(c *C, cache *clusterInfo, regions []*metapb.Region) {
 	// Heartbeat and check region one by one.
 	for _, region := range regions {
-		r := newRegionInfo(region, nil)
+		r := core.NewRegionInfo(region, nil)
 
 		c.Assert(cache.handleRegionHeartbeat(r), IsNil)
 
@@ -479,7 +479,7 @@ func heartbeatRegions(c *C, cache *clusterInfo, regions []*metapb.Region) {
 
 	// Check all regions after handling all heartbeats.
 	for _, region := range regions {
-		r := newRegionInfo(region, nil)
+		r := core.NewRegionInfo(region, nil)
 
 		checkRegion(c, cache.getRegion(r.GetId()), r)
 		checkRegion(c, cache.searchRegion(r.StartKey), r)
@@ -599,8 +599,8 @@ func (s *testRegionMapSuite) TestRegionMap(c *C) {
 	s.check(c, rm, 2, 3)
 }
 
-func (s *testRegionMapSuite) regionInfo(id uint64) *RegionInfo {
-	return &RegionInfo{
+func (s *testRegionMapSuite) regionInfo(id uint64) *core.RegionInfo {
+	return &core.RegionInfo{
 		Region: &metapb.Region{
 			Id: id,
 		},
