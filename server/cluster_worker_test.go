@@ -473,11 +473,8 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
 	// Split.
 	r2ID, r2PeerIDs := s.askSplit(c, r1)
 	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)
-	c.Logf("r1: %v, r2: %v", r1, r2)
 	leaderPeer2 := s.chooseRegionLeader(c, r2)
-	resp := s.heartbeatRegion(c, s.clusterID, r2, leaderPeer2)
-	c.Logf("resp: %+v", resp)
-	c.Assert(resp, IsNil)
+	s.heartbeatRegion(c, s.clusterID, r2, leaderPeer2)
 	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", "m"))
 }
 
@@ -596,8 +593,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
 	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)
 
 	// Sync r1 with both ConfVer and Version updated.
-	resp := s.heartbeatRegion(c, s.clusterID, r1, leaderPeer1)
-	c.Assert(resp, IsNil)
+	s.heartbeatRegion(c, s.clusterID, r1, leaderPeer1)
 	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "m", ""))
 	mustGetRegion(c, cluster, []byte("z"), r1)
 	mustGetRegion(c, cluster, []byte("a"), nil)
