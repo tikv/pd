@@ -23,6 +23,7 @@ import (
 	"github.com/montanaflynn/stats"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule"
 )
 
 const (
@@ -82,10 +83,10 @@ type balanceLeaderScheduler struct {
 }
 
 func newBalanceLeaderScheduler(opt *scheduleOption) *balanceLeaderScheduler {
-	filters := []Filter{
-		newBlockFilter(),
-		newStateFilter(opt),
-		newHealthFilter(opt),
+	filters := []schedule.Filter{
+		schedule.NewBlockFilter(),
+		schedule.NewStateFilter(opt),
+		schedule.NewHealthFilter(opt),
 	}
 	return &balanceLeaderScheduler{
 		opt:      opt,
@@ -144,12 +145,12 @@ type balanceRegionScheduler struct {
 
 func newBalanceRegionScheduler(opt *scheduleOption) *balanceRegionScheduler {
 	cache := newIDCache(storeCacheInterval, 4*storeCacheInterval)
-	filters := []Filter{
+	filters := []schedule.Filter{
 		newCacheFilter(cache),
-		newStateFilter(opt),
-		newHealthFilter(opt),
-		newSnapshotCountFilter(opt),
-		newStorageThresholdFilter(opt),
+		schedule.NewStateFilter(opt),
+		schedule.NewHealthFilter(opt),
+		schedule.NewSnapshotCountFilter(opt),
+		schedule.NewStorageThresholdFilter(opt),
 	}
 
 	return &balanceRegionScheduler{
@@ -211,7 +212,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster *clusterInfo, region *core
 	// scoreGuard guarantees that the distinct score will not decrease.
 	stores := cluster.getRegionStores(region)
 	source := cluster.getStore(oldPeer.GetStoreId())
-	scoreGuard := newDistinctScoreFilter(s.rep, stores, source)
+	scoreGuard := schedule.NewDistinctScoreFilter(s.rep.GetLocationLabels(), stores, source)
 
 	checker := newReplicaChecker(s.opt, cluster)
 	newPeer := checker.SelectBestPeerToAddReplica(region, scoreGuard)
@@ -235,13 +236,14 @@ type replicaChecker struct {
 	opt     *scheduleOption
 	rep     *Replication
 	cluster *clusterInfo
-	filters []Filter
+	filters []schedule.Filter
 }
 
 func newReplicaChecker(opt *scheduleOption, cluster *clusterInfo) *replicaChecker {
-	var filters []Filter
-	filters = append(filters, newHealthFilter(opt))
-	filters = append(filters, newSnapshotCountFilter(opt))
+	filters := []schedule.Filter{
+		schedule.NewHealthFilter(opt),
+		schedule.NewSnapshotCountFilter(opt),
+	}
 
 	return &replicaChecker{
 		opt:     opt,
@@ -279,7 +281,7 @@ func (r *replicaChecker) Check(region *core.RegionInfo) Operator {
 }
 
 // SelectBestPeerToAddReplica returns a new peer that to be used to add a replica.
-func (r *replicaChecker) SelectBestPeerToAddReplica(region *core.RegionInfo, filters ...Filter) *metapb.Peer {
+func (r *replicaChecker) SelectBestPeerToAddReplica(region *core.RegionInfo, filters ...schedule.Filter) *metapb.Peer {
 	storeID, _ := r.SelectBestStoreToAddReplica(region, filters...)
 	if storeID == 0 {
 		return nil
@@ -292,12 +294,12 @@ func (r *replicaChecker) SelectBestPeerToAddReplica(region *core.RegionInfo, fil
 }
 
 // SelectBestStoreToAddReplica returns the store to add a replica.
-func (r *replicaChecker) SelectBestStoreToAddReplica(region *core.RegionInfo, filters ...Filter) (uint64, float64) {
+func (r *replicaChecker) SelectBestStoreToAddReplica(region *core.RegionInfo, filters ...schedule.Filter) (uint64, float64) {
 	// Add some must have filters.
-	newFilters := []Filter{
-		newStateFilter(r.opt),
-		newStorageThresholdFilter(r.opt),
-		newExcludedFilter(nil, region.GetStoreIds()),
+	newFilters := []schedule.Filter{
+		schedule.NewStateFilter(r.opt),
+		schedule.NewStorageThresholdFilter(r.opt),
+		schedule.NewExcludedFilter(nil, region.GetStoreIds()),
 	}
 	filters = append(filters, newFilters...)
 
@@ -307,7 +309,7 @@ func (r *replicaChecker) SelectBestStoreToAddReplica(region *core.RegionInfo, fi
 	if target == nil {
 		return 0, 0
 	}
-	return target.GetId(), r.rep.GetDistinctScore(regionStores, target)
+	return target.GetId(), schedule.DistinctScore(r.rep.GetLocationLabels(), regionStores, target)
 }
 
 // selectWorstPeer returns the worst peer in the region.
@@ -318,7 +320,7 @@ func (r *replicaChecker) selectWorstPeer(region *core.RegionInfo) (*metapb.Peer,
 	if worstStore == nil {
 		return nil, 0
 	}
-	return region.GetStorePeer(worstStore.GetId()), r.rep.GetDistinctScore(regionStores, worstStore)
+	return region.GetStorePeer(worstStore.GetId()), schedule.DistinctScore(r.rep.GetLocationLabels(), regionStores, worstStore)
 }
 
 // selectBestReplacement returns the best store to replace the region peer.
@@ -326,7 +328,7 @@ func (r *replicaChecker) selectBestReplacement(region *core.RegionInfo, peer *me
 	// Get a new region without the peer we are going to replace.
 	newRegion := region.Clone()
 	newRegion.RemoveStorePeer(peer.GetStoreId())
-	return r.SelectBestStoreToAddReplica(newRegion, newExcludedFilter(nil, region.GetStoreIds()))
+	return r.SelectBestStoreToAddReplica(newRegion, schedule.NewExcludedFilter(nil, region.GetStoreIds()))
 }
 
 func (r *replicaChecker) checkDownPeer(region *core.RegionInfo) Operator {
@@ -572,15 +574,15 @@ func (h *balanceHotRegionScheduler) balanceByPeer(cluster *clusterInfo) (*core.R
 			continue
 		}
 
-		filters := []Filter{
-			newExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
-			newDistinctScoreFilter(h.opt.GetReplication(), stores, cluster.getLeaderStore(srcRegion)),
-			newStateFilter(h.opt),
-			newStorageThresholdFilter(h.opt),
+		filters := []schedule.Filter{
+			schedule.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
+			schedule.NewDistinctScoreFilter(h.opt.GetReplication().GetLocationLabels(), stores, cluster.getLeaderStore(srcRegion)),
+			schedule.NewStateFilter(h.opt),
+			schedule.NewStorageThresholdFilter(h.opt),
 		}
 		destStoreIDs := make([]uint64, 0, len(stores))
 		for _, store := range stores {
-			if filterTarget(store, filters) {
+			if schedule.FilterTarget(store, filters) {
 				continue
 			}
 			destStoreIDs = append(destStoreIDs, store.GetId())
@@ -770,4 +772,20 @@ func (h *balanceHotRegionScheduler) GetStatus() *StoreHotRegionInfos {
 		AsPeer:   asPeer,
 		AsLeader: asLeader,
 	}
+}
+
+type cacheFilter struct {
+	cache *idCache
+}
+
+func newCacheFilter(cache *idCache) *cacheFilter {
+	return &cacheFilter{cache: cache}
+}
+
+func (f *cacheFilter) FilterSource(store *core.StoreInfo) bool {
+	return f.cache.get(store.GetId())
+}
+
+func (f *cacheFilter) FilterTarget(store *core.StoreInfo) bool {
+	return false
 }

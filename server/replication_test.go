@@ -13,10 +13,7 @@
 
 package server
 
-import (
-	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/server/core"
-)
+import . "github.com/pingcap/check"
 
 func newTestReplication(maxReplicas int, locationLabels ...string) *Replication {
 	cfg := &ReplicationConfig{
@@ -29,46 +26,6 @@ func newTestReplication(maxReplicas int, locationLabels ...string) *Replication 
 var _ = Suite(&testReplicationSuite{})
 
 type testReplicationSuite struct{}
-
-func (s *testReplicationSuite) TestDistinctScore(c *C) {
-	cluster := newClusterInfo(newMockIDAllocator())
-	tc := newTestClusterInfo(cluster)
-	rep := newTestReplication(3, "zone", "rack", "host")
-
-	zones := []string{"z1", "z2", "z3"}
-	racks := []string{"r1", "r2", "r3"}
-	hosts := []string{"h1", "h2", "h3"}
-
-	var stores []*core.StoreInfo
-	for i, zone := range zones {
-		for j, rack := range racks {
-			for k, host := range hosts {
-				storeID := uint64(i*len(racks)*len(hosts) + j*len(hosts) + k)
-				labels := map[string]string{
-					"zone": zone,
-					"rack": rack,
-					"host": host,
-				}
-				tc.addLabelsStore(storeID, 1, labels)
-				store := cluster.getStore(storeID)
-				stores = append(stores, store)
-
-				// Number of stores in different zones.
-				nzones := i * len(racks) * len(hosts)
-				// Number of stores in the same zone but in different racks.
-				nracks := j * len(hosts)
-				// Number of stores in the same rack but in different hosts.
-				nhosts := k
-				score := (nzones*replicaBaseScore+nracks)*replicaBaseScore + nhosts
-				c.Assert(rep.GetDistinctScore(stores, store), Equals, float64(score))
-			}
-		}
-	}
-
-	tc.addLabelsStore(100, 1, map[string]string{})
-	store := cluster.getStore(100)
-	c.Assert(rep.GetDistinctScore(stores, store), Equals, float64(0))
-}
 
 func (s *testReplicationSuite) TestCompareStoreScore(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())

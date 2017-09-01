@@ -14,13 +14,10 @@
 package server
 
 import (
-	"math"
 	"sync/atomic"
 
 	"github.com/pingcap/pd/server/core"
 )
-
-const replicaBaseScore = 100
 
 // Replication provides some help to do replication.
 type Replication struct {
@@ -57,23 +54,6 @@ func (r *Replication) SetMaxReplicas(replicas int) {
 // GetLocationLabels returns the location labels for each region
 func (r *Replication) GetLocationLabels() []string {
 	return r.load().LocationLabels
-}
-
-// GetDistinctScore returns the score that the other is distinct from the stores.
-// A higher score means the other store is more different from the existed stores.
-func (r *Replication) GetDistinctScore(stores []*core.StoreInfo, other *core.StoreInfo) float64 {
-	score := float64(0)
-	locationLabels := r.GetLocationLabels()
-
-	for _, s := range stores {
-		if s.GetId() == other.GetId() {
-			continue
-		}
-		if index := s.CompareLocation(other, locationLabels); index != -1 {
-			score += math.Pow(replicaBaseScore, float64(len(locationLabels)-index-1))
-		}
-	}
-	return score
 }
 
 // compareStoreScore compares which store is better for replication.

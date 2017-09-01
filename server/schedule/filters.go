@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package schedule
 
 import "github.com/pingcap/pd/server/core"
 
@@ -23,7 +23,8 @@ type Filter interface {
 	FilterTarget(store *core.StoreInfo) bool
 }
 
-func filterSource(store *core.StoreInfo, filters []Filter) bool {
+// FilterSource checks if store can pass all Filters as source store.
+func FilterSource(store *core.StoreInfo, filters []Filter) bool {
 	for _, filter := range filters {
 		if filter.FilterSource(store) {
 			return true
@@ -32,7 +33,8 @@ func filterSource(store *core.StoreInfo, filters []Filter) bool {
 	return false
 }
 
-func filterTarget(store *core.StoreInfo, filters []Filter) bool {
+// FilterTarget checks if store can pass all Filters as target store.
+func FilterTarget(store *core.StoreInfo, filters []Filter) bool {
 	for _, filter := range filters {
 		if filter.FilterTarget(store) {
 			return true
@@ -46,7 +48,8 @@ type excludedFilter struct {
 	targets map[uint64]struct{}
 }
 
-func newExcludedFilter(sources, targets map[uint64]struct{}) *excludedFilter {
+// NewExcludedFilter creates a Filter that filters all specified stores.
+func NewExcludedFilter(sources, targets map[uint64]struct{}) Filter {
 	return &excludedFilter{
 		sources: sources,
 		targets: targets,
@@ -65,7 +68,8 @@ func (f *excludedFilter) FilterTarget(store *core.StoreInfo) bool {
 
 type blockFilter struct{}
 
-func newBlockFilter() *blockFilter {
+// NewBlockFilter creates a Filter that filters all stores that are blocked from balance.
+func NewBlockFilter() Filter {
 	return &blockFilter{}
 }
 
@@ -77,27 +81,12 @@ func (f *blockFilter) FilterTarget(store *core.StoreInfo) bool {
 	return store.IsBlocked()
 }
 
-type cacheFilter struct {
-	cache *idCache
-}
-
-func newCacheFilter(cache *idCache) *cacheFilter {
-	return &cacheFilter{cache: cache}
-}
-
-func (f *cacheFilter) FilterSource(store *core.StoreInfo) bool {
-	return f.cache.get(store.GetId())
-}
-
-func (f *cacheFilter) FilterTarget(store *core.StoreInfo) bool {
-	return false
-}
-
 type stateFilter struct {
-	opt *scheduleOption
+	opt Options
 }
 
-func newStateFilter(opt *scheduleOption) *stateFilter {
+// NewStateFilter creates a Filter that filters all stores that are not UP.
+func NewStateFilter(opt Options) Filter {
 	return &stateFilter{opt: opt}
 }
 
@@ -114,10 +103,11 @@ func (f *stateFilter) FilterTarget(store *core.StoreInfo) bool {
 }
 
 type healthFilter struct {
-	opt *scheduleOption
+	opt Options
 }
 
-func newHealthFilter(opt *scheduleOption) *healthFilter {
+// NewHealthFilter creates a Filter that filters all stores that are Busy or Down.
+func NewHealthFilter(opt Options) Filter {
 	return &healthFilter{opt: opt}
 }
 
@@ -137,10 +127,12 @@ func (f *healthFilter) FilterTarget(store *core.StoreInfo) bool {
 }
 
 type snapshotCountFilter struct {
-	opt *scheduleOption
+	opt Options
 }
 
-func newSnapshotCountFilter(opt *scheduleOption) *snapshotCountFilter {
+// NewSnapshotCountFilter creates a Filter that filters all stores that are
+// currently handling too many snapshots.
+func NewSnapshotCountFilter(opt Options) Filter {
 	return &snapshotCountFilter{opt: opt}
 }
 
@@ -158,12 +150,13 @@ func (f *snapshotCountFilter) FilterTarget(store *core.StoreInfo) bool {
 	return f.filter(store)
 }
 
-// storageThresholdFilter ensures that we will not use an almost full store as a target.
 type storageThresholdFilter struct{}
 
 const storageAvailableRatioThreshold = 0.2
 
-func newStorageThresholdFilter(opt *scheduleOption) *storageThresholdFilter {
+// NewStorageThresholdFilter creates a Filter that filters all stores that are
+// almost full.
+func NewStorageThresholdFilter(opt Options) Filter {
 	return &storageThresholdFilter{}
 }
 
@@ -177,12 +170,14 @@ func (f *storageThresholdFilter) FilterTarget(store *core.StoreInfo) bool {
 
 // distinctScoreFilter ensures that distinct score will not decrease.
 type distinctScoreFilter struct {
-	rep       *Replication
+	labels    []string
 	stores    []*core.StoreInfo
 	safeScore float64
 }
 
-func newDistinctScoreFilter(rep *Replication, stores []*core.StoreInfo, source *core.StoreInfo) *distinctScoreFilter {
+// NewDistinctScoreFilter creates a filter that filters all stores that have
+// lower distinct score than specified store.
+func NewDistinctScoreFilter(labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
 	newStores := make([]*core.StoreInfo, 0, len(stores)-1)
 	for _, s := range stores {
 		if s.GetId() == source.GetId() {
@@ -192,9 +187,9 @@ func newDistinctScoreFilter(rep *Replication, stores []*core.StoreInfo, source *
 	}
 
 	return &distinctScoreFilter{
-		rep:       rep,
+		labels:    labels,
 		stores:    newStores,
-		safeScore: rep.GetDistinctScore(newStores, source),
+		safeScore: DistinctScore(labels, newStores, source),
 	}
 }
 
@@ -203,5 +198,5 @@ func (f *distinctScoreFilter) FilterSource(store *core.StoreInfo) bool {
 }
 
 func (f *distinctScoreFilter) FilterTarget(store *core.StoreInfo) bool {
-	return f.rep.GetDistinctScore(f.stores, store) < f.safeScore
+	return DistinctScore(f.labels, f.stores, store) < f.safeScore
 }
