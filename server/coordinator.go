@@ -20,6 +20,7 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
+	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"golang.org/x/net/context"
 )
@@ -68,8 +69,8 @@ type coordinator struct {
 	operators  map[uint64]Operator
 	schedulers map[string]*scheduleController
 
-	histories *lruCache
-	events    *fifoCache
+	histories *cache.LRU
+	events    *cache.FIFO
 
 	hbStreams *heartbeatStreams
 }
@@ -85,8 +86,8 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 		checker:    newReplicaChecker(opt, cluster),
 		operators:  make(map[uint64]Operator),
 		schedulers: make(map[string]*scheduleController),
-		histories:  newLRUCache(historiesCacheSize),
-		events:     newFifoCache(eventsCacheSize),
+		histories:  cache.NewLRU(historiesCacheSize),
+		events:     cache.NewFIFO(eventsCacheSize),
 		hbStreams:  hbStreams,
 	}
 }
@@ -282,7 +283,7 @@ func (c *coordinator) addOperator(op Operator) bool {
 		c.removeOperatorLocked(old)
 	}
 
-	c.histories.add(regionID, op)
+	c.histories.Put(regionID, op)
 	c.limiter.addOperator(op)
 	c.operators[regionID] = op
 
@@ -317,7 +318,7 @@ func (c *coordinator) removeOperatorLocked(op Operator) {
 	c.limiter.removeOperator(op)
 	delete(c.operators, regionID)
 
-	c.histories.add(regionID, op)
+	c.histories.Put(regionID, op)
 	collectOperatorCounterMetrics(op)
 }
 
@@ -344,8 +345,8 @@ func (c *coordinator) getHistories() []Operator {
 	defer c.RUnlock()
 
 	var operators []Operator
-	for _, elem := range c.histories.elems() {
-		operators = append(operators, elem.value.(Operator))
+	for _, elem := range c.histories.Elems() {
+		operators = append(operators, elem.Value.(Operator))
 	}
 
 	return operators
@@ -356,8 +357,8 @@ func (c *coordinator) getHistoriesOfKind(kind core.ResourceKind) []Operator {
 	defer c.RUnlock()
 
 	var operators []Operator
-	for _, elem := range c.histories.elems() {
-		op := elem.value.(Operator)
+	for _, elem := range c.histories.Elems() {
+		op := elem.Value.(Operator)
 		if op.GetResourceKind() == kind {
 			operators = append(operators, op)
 		}

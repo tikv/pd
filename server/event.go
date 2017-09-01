@@ -19,6 +19,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -72,7 +73,7 @@ var baseID uint64
 func (c *coordinator) innerPostEvent(evt LogEvent) {
 	key := atomic.AddUint64(&baseID, 1)
 	evt.ID = key
-	c.events.add(key, evt)
+	c.events.Put(key, evt)
 }
 
 func (c *coordinator) postEvent(op Operator, status statusType) {
@@ -108,16 +109,16 @@ func (c *coordinator) postEvent(op Operator, status statusType) {
 }
 
 func (c *coordinator) fetchEvents(key uint64, all bool) []LogEvent {
-	var elems []*cacheItem
+	var elems []*cache.Item
 	if all {
-		elems = c.events.elems()
+		elems = c.events.Elems()
 	} else {
-		elems = c.events.fromElems(key)
+		elems = c.events.FromElems(key)
 	}
 
 	evts := make([]LogEvent, 0, len(elems))
 	for _, ele := range elems {
-		evts = append(evts, ele.value.(LogEvent))
+		evts = append(evts, ele.Value.(LogEvent))
 	}
 
 	return evts

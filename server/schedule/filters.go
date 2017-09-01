@@ -13,7 +13,10 @@
 
 package schedule
 
-import "github.com/pingcap/pd/server/core"
+import (
+	"github.com/pingcap/pd/server/cache"
+	"github.com/pingcap/pd/server/core"
+)
 
 // Filter is an interface to filter source and target store.
 type Filter interface {
@@ -148,6 +151,23 @@ func (f *snapshotCountFilter) FilterSource(store *core.StoreInfo) bool {
 
 func (f *snapshotCountFilter) FilterTarget(store *core.StoreInfo) bool {
 	return f.filter(store)
+}
+
+type cacheFilter struct {
+	cache *cache.IDTTL
+}
+
+// NewCacheFilter creates a Filter that filters all stores that are in the cache.
+func NewCacheFilter(cache *cache.IDTTL) Filter {
+	return &cacheFilter{cache: cache}
+}
+
+func (f *cacheFilter) FilterSource(store *core.StoreInfo) bool {
+	return f.cache.Exists(store.GetId())
+}
+
+func (f *cacheFilter) FilterTarget(store *core.StoreInfo) bool {
+	return false
 }
 
 type storageThresholdFilter struct{}

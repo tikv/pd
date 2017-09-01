@@ -23,6 +23,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -345,7 +346,7 @@ type clusterInfo struct {
 	regions *regionsInfo
 
 	activeRegions   int
-	writeStatistics *lruCache
+	writeStatistics *cache.LRU
 }
 
 func newClusterInfo(id IDAllocator) *clusterInfo {
@@ -353,7 +354,7 @@ func newClusterInfo(id IDAllocator) *clusterInfo {
 		id:              id,
 		stores:          newStoresInfo(),
 		regions:         newRegionsInfo(),
-		writeStatistics: newLRUCache(writeStatLRUMaxLen),
+		writeStatistics: cache.NewLRU(writeStatLRUMaxLen),
 	}
 }
 
@@ -503,7 +504,7 @@ func (c *clusterInfo) getRegion(regionID uint64) *core.RegionInfo {
 func (c *clusterInfo) updateWriteStatCache(region *core.RegionInfo, hotRegionThreshold uint64) {
 	var v *RegionStat
 	key := region.GetId()
-	value, isExist := c.writeStatistics.peek(key)
+	value, isExist := c.writeStatistics.Peek(key)
 	newItem := &RegionStat{
 		RegionID:       region.GetId(),
 		WrittenBytes:   region.WrittenBytes,
@@ -523,7 +524,7 @@ func (c *clusterInfo) updateWriteStatCache(region *core.RegionInfo, hotRegionThr
 			return
 		}
 		if v.antiCount <= 0 {
-			c.writeStatistics.remove(key)
+			c.writeStatistics.Remove(key)
 			return
 		}
 		// eliminate some noise
@@ -531,13 +532,13 @@ func (c *clusterInfo) updateWriteStatCache(region *core.RegionInfo, hotRegionThr
 		newItem.antiCount = v.antiCount - 1
 		newItem.WrittenBytes = v.WrittenBytes
 	}
-	c.writeStatistics.add(key, newItem)
+	c.writeStatistics.Put(key, newItem)
 }
 
 func (c *clusterInfo) isRegionHot(id uint64) bool {
 	c.RLock()
 	defer c.RUnlock()
-	if stat, ok := c.writeStatistics.peek(id); ok {
+	if stat, ok := c.writeStatistics.Peek(id); ok {
 		return stat.(*RegionStat).HotDegree >= hotRegionLowThreshold
 	}
 	return false
@@ -750,7 +751,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 
 func (c *clusterInfo) updateWriteStatus(region *core.RegionInfo) {
 	var WrittenBytesPerSec uint64
-	v, isExist := c.writeStatistics.peek(region.GetId())
+	v, isExist := c.writeStatistics.Peek(region.GetId())
 	if isExist {
 		interval := time.Now().Sub(v.(*RegionStat).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
