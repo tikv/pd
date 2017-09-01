@@ -30,7 +30,7 @@ type testOperator struct {
 }
 
 func newTestOperator(regionID uint64, kind core.ResourceKind) Operator {
-	region := newRegionInfo(&metapb.Region{Id: regionID}, nil)
+	region := core.NewRegionInfo(&metapb.Region{Id: regionID}, nil)
 	op := &testOperator{RegionID: regionID, Kind: kind, State: OperatorRunning}
 	return newRegionOperator(region, kind, op)
 }
@@ -40,7 +40,7 @@ func (op *testOperator) GetResourceKind() core.ResourceKind { return op.Kind }
 func (op *testOperator) GetState() OperatorState            { return op.State }
 func (op *testOperator) SetState(state OperatorState)       { op.State = state }
 func (op *testOperator) GetName() string                    { return "test" }
-func (op *testOperator) Do(region *RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
+func (op *testOperator) Do(region *core.RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	return nil, false
 }
 
@@ -153,14 +153,14 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	dispatchHeartbeatNoResp(c, co, region, stream)
 }
 
-func dispatchHeartbeatNoResp(c *C, co *coordinator, region *RegionInfo, stream *mockHeartbeatStream) {
+func dispatchHeartbeatNoResp(c *C, co *coordinator, region *core.RegionInfo, stream *mockHeartbeatStream) {
 	co.hbStreams.bindStream(region.Leader.GetStoreId(), stream)
 	co.dispatch(region)
 	res := stream.Recv()
 	c.Assert(res, IsNil)
 }
 
-func dispatchAndRecvHeartbeat(c *C, co *coordinator, region *RegionInfo, stream *mockHeartbeatStream) *pdpb.RegionHeartbeatResponse {
+func dispatchAndRecvHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream *mockHeartbeatStream) *pdpb.RegionHeartbeatResponse {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		co.hbStreams.bindStream(region.Leader.GetStoreId(), stream)

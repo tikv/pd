@@ -91,7 +91,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 	}
 }
 
-func (c *coordinator) dispatch(region *RegionInfo) {
+func (c *coordinator) dispatch(region *core.RegionInfo) {
 	// Check existed operator.
 	if op := c.getOperator(region.GetId()); op != nil {
 		res, finished := op.Do(region)

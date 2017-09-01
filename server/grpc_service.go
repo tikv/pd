@@ -21,6 +21,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -266,7 +267,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 			isNew = false
 		}
 
-		region := newRegionInfo(request.GetRegion(), request.GetLeader())
+		region := core.NewRegionInfo(request.GetRegion(), request.GetLeader())
 		region.DownPeers = request.GetDownPeers()
 		region.PendingPeers = request.GetPendingPeers()
 		region.WrittenBytes = request.GetBytesWritten()

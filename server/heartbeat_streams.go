@@ -18,6 +18,7 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 	"golang.org/x/net/context"
 )
 
@@ -97,7 +98,7 @@ func (s *heartbeatStreams) bindStream(storeID uint64, stream heartbeatStream) {
 	}
 }
 
-func (s *heartbeatStreams) sendMsg(region *RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
+func (s *heartbeatStreams) sendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
 	if region.Leader == nil {
 		return
 	}
@@ -113,7 +114,7 @@ func (s *heartbeatStreams) sendMsg(region *RegionInfo, msg *pdpb.RegionHeartbeat
 	}
 }
 
-func (s *heartbeatStreams) sendErr(region *RegionInfo, errType pdpb.ErrorType, errMsg string) {
+func (s *heartbeatStreams) sendErr(region *core.RegionInfo, errType pdpb.ErrorType, errMsg string) {
 	regionHeartbeatCounter.WithLabelValues("report", "err").Inc()
 
 	msg := &pdpb.RegionHeartbeatResponse{

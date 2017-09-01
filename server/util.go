@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/server/core"
 	"golang.org/x/net/context"
 )
 
@@ -258,7 +259,7 @@ func minDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-func diffRegionPeersInfo(origin *RegionInfo, other *RegionInfo) string {
+func diffRegionPeersInfo(origin *core.RegionInfo, other *core.RegionInfo) string {
 	var ret []string
 	for _, a := range origin.Peers {
 		both := false
@@ -287,7 +288,7 @@ func diffRegionPeersInfo(origin *RegionInfo, other *RegionInfo) string {
 	return strings.Join(ret, ",")
 }
 
-func diffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
+func diffRegionKeyInfo(origin *core.RegionInfo, other *core.RegionInfo) string {
 	var ret []string
 	if !bytes.Equal(origin.Region.StartKey, other.Region.StartKey) {
 		originKey := &metapb.Region{StartKey: origin.Region.StartKey}

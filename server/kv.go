@@ -250,7 +250,7 @@ func (kv *kv) loadRegions(regions *regionsInfo, rangeLimit int64) error {
 			}
 
 			nextID = region.GetId() + 1
-			regions.setRegion(newRegionInfo(region, nil))
+			regions.setRegion(core.NewRegionInfo(region, nil))
 		}
 
 		if len(resp.Kvs) < int(rangeLimit) {
