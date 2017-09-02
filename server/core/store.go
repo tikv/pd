@@ -214,3 +214,9 @@ L:
 		s.Labels = append(s.Labels, newLabel)
 	}
 }
+
+// StoreHotRegionInfos : used to get human readable description for hot regions.
+type StoreHotRegionInfos struct {
+	AsPeer   map[uint64]*HotRegionsStat `json:"as_peer"`
+	AsLeader map[uint64]*HotRegionsStat `json:"as_leader"`
+}

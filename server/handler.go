@@ -53,7 +53,7 @@ func (h *Handler) GetSchedulers() ([]string, error) {
 }
 
 // GetHotWriteRegions gets all hot regions status
-func (h *Handler) GetHotWriteRegions() *StoreHotRegionInfos {
+func (h *Handler) GetHotWriteRegions() *core.StoreHotRegionInfos {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil
@@ -204,7 +204,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 		return errors.Trace(err)
 	}
 
-	region := c.cluster.getRegion(regionID)
+	region := c.cluster.GetRegion(regionID)
 	if region == nil {
 		return errRegionNotFound(regionID)
 	}
@@ -225,7 +225,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		return errors.Trace(err)
 	}
 
-	region := c.cluster.getRegion(regionID)
+	region := c.cluster.GetRegion(regionID)
 	if region == nil {
 		return errRegionNotFound(regionID)
 	}
@@ -266,7 +266,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return errors.Trace(err)
 	}
 
-	region := c.cluster.getRegion(regionID)
+	region := c.cluster.GetRegion(regionID)
 	if region == nil {
 		return errRegionNotFound(regionID)
 	}

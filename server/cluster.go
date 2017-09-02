@@ -367,7 +367,7 @@ func (c *RaftCluster) GetRegionInfoByKey(regionKey []byte) *core.RegionInfo {
 
 // GetRegionByID gets region and leader peer by regionID from cluster.
 func (c *RaftCluster) GetRegionByID(regionID uint64) (*metapb.Region, *metapb.Peer) {
-	region := c.cachedCluster.getRegion(regionID)
+	region := c.cachedCluster.GetRegion(regionID)
 	if region == nil {
 		return nil, nil
 	}
@@ -376,7 +376,7 @@ func (c *RaftCluster) GetRegionByID(regionID uint64) (*metapb.Region, *metapb.Pe
 
 // GetRegionInfoByID gets regionInfo by regionID from cluster.
 func (c *RaftCluster) GetRegionInfoByID(regionID uint64) *core.RegionInfo {
-	return c.cachedCluster.getRegion(regionID)
+	return c.cachedCluster.GetRegion(regionID)
 }
 
 // GetRegions gets regions from cluster.

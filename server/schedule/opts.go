@@ -27,4 +27,6 @@ type Options interface {
 
 	GetMaxReplicas() int
 	GetLocationLabels() []string
+
+	GetHotRegionLowThreshold() int
 }

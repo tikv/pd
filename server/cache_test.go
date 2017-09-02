@@ -468,7 +468,7 @@ func heartbeatRegions(c *C, cache *clusterInfo, regions []*metapb.Region) {
 
 		c.Assert(cache.handleRegionHeartbeat(r), IsNil)
 
-		checkRegion(c, cache.getRegion(r.GetId()), r)
+		checkRegion(c, cache.GetRegion(r.GetId()), r)
 		checkRegion(c, cache.searchRegion(r.StartKey), r)
 
 		if len(r.EndKey) > 0 {
@@ -481,7 +481,7 @@ func heartbeatRegions(c *C, cache *clusterInfo, regions []*metapb.Region) {
 	for _, region := range regions {
 		r := core.NewRegionInfo(region, nil)
 
-		checkRegion(c, cache.getRegion(r.GetId()), r)
+		checkRegion(c, cache.GetRegion(r.GetId()), r)
 		checkRegion(c, cache.searchRegion(r.StartKey), r)
 
 		if len(r.EndKey) > 0 {

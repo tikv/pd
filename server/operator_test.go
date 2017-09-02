@@ -73,7 +73,7 @@ func (o *testOperatorSuite) TestOperatorState(c *C) {
 	waitOperator(c, co, 1)
 	op := co.getOperator(1)
 	c.Assert(op.GetState(), Equals, schedule.OperatorRunning)
-	regionInfo := tc.getRegion(1)
+	regionInfo := tc.GetRegion(1)
 
 	// Do Operator, Operator start running. doRegionHeartbeatRequest will add one peer in store 1
 	c.Assert(regionInfo, NotNil)

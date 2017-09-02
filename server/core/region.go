@@ -14,6 +14,8 @@
 package core
 
 import (
+	"time"
+
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -136,4 +138,33 @@ func (r *RegionInfo) GetFollower() *metapb.Peer {
 		}
 	}
 	return nil
+}
+
+// RegionStat records each hot region's statistics
+type RegionStat struct {
+	RegionID     uint64 `json:"region_id"`
+	WrittenBytes uint64 `json:"written_bytes"`
+	// HotDegree records the hot region update times
+	HotDegree int `json:"hot_degree"`
+	// LastUpdateTime used to calculate average write
+	LastUpdateTime time.Time `json:"last_update_time"`
+	StoreID        uint64    `json:"-"`
+	// AntiCount used to eliminate some noise when remove region in cache
+	AntiCount int
+	// Version used to check the region split times
+	Version uint64
+}
+
+// RegionsStat is a list of a group region state type
+type RegionsStat []RegionStat
+
+func (m RegionsStat) Len() int           { return len(m) }
+func (m RegionsStat) Swap(i, j int)      { m[i], m[j] = m[j], m[i] }
+func (m RegionsStat) Less(i, j int) bool { return m[i].WrittenBytes < m[j].WrittenBytes }
+
+// HotRegionsStat records all hot regions statistics
+type HotRegionsStat struct {
+	WrittenBytes uint64      `json:"total_written_bytes"`
+	RegionsCount int         `json:"regions_count"`
+	RegionsStat  RegionsStat `json:"statistics"`
 }

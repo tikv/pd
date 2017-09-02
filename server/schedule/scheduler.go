@@ -25,13 +25,16 @@ type Cluster interface {
 
 	GetStores() []*core.StoreInfo
 	GetStore(id uint64) *core.StoreInfo
+	GetRegion(id uint64) *core.RegionInfo
 	GetRegionStores(region *core.RegionInfo) []*core.StoreInfo
 	GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo
+	GetLeaderStore(region *core.RegionInfo) *core.StoreInfo
 
 	BlockStore(id uint64) error
 	UnblockStore(id uint64)
 
 	IsRegionHot(id uint64) bool
+	RegionWriteStats() []*core.RegionStat
 
 	// TODO: it should be removed. Schedulers don't need to know anything
 	// about peers.

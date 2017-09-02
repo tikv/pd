@@ -39,9 +39,6 @@ const (
 	scheduleIntervalFactor    = 1.3
 
 	writeStatLRUMaxLen            = 1000
-	storeHotRegionsDefaultLen     = 100
-	hotRegionLimitFactor          = 0.75
-	hotRegionScheduleFactor       = 0.9
 	hotRegionMinWriteRate         = 16 * 1024
 	regionHeartBeatReportInterval = 60
 	regionheartbeatSendChanCap    = 1024
@@ -136,7 +133,7 @@ func (c *coordinator) run() {
 	log.Info("coordinator: Run scheduler")
 	c.addScheduler(schedulers.NewBalanceLeaderScheduler(c.opt), minScheduleInterval)
 	c.addScheduler(schedulers.NewBalanceRegionScheduler(c.opt), minScheduleInterval)
-	c.addScheduler(newBalanceHotRegionScheduler(c.opt), minSlowScheduleInterval)
+	c.addScheduler(schedulers.NewBalanceHotRegionScheduler(c.opt), minSlowScheduleInterval)
 }
 
 func (c *coordinator) stop() {
@@ -144,14 +141,23 @@ func (c *coordinator) stop() {
 	c.wg.Wait()
 }
 
-func (c *coordinator) getHotWriteRegions() *StoreHotRegionInfos {
+// Hack to retrive info from scheduler.
+// TODO: remove it.
+type hasHotStatus interface {
+	GetStatus() *core.StoreHotRegionInfos
+}
+
+func (c *coordinator) getHotWriteRegions() *core.StoreHotRegionInfos {
 	c.RLock()
 	defer c.RUnlock()
 	s, ok := c.schedulers[hotRegionScheduleName]
 	if !ok {
 		return nil
 	}
-	return s.Scheduler.(*balanceHotRegionScheduler).GetStatus()
+	if h, ok := s.Scheduler.(hasHotStatus); ok {
+		return h.GetStatus()
+	}
+	return nil
 }
 
 func (c *coordinator) getSchedulers() []string {
@@ -187,7 +193,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 	if !ok {
 		return
 	}
-	status := s.Scheduler.(*balanceHotRegionScheduler).GetStatus()
+	status := s.Scheduler.(hasHotStatus).GetStatus()
 	for storeID, stat := range status.AsPeer {
 		store := fmt.Sprintf("store_%d", storeID)
 		totalWriteBytes := float64(stat.WrittenBytes)
@@ -289,7 +295,7 @@ func (c *coordinator) addOperator(op schedule.Operator) bool {
 	c.limiter.addOperator(op)
 	c.operators[regionID] = op
 
-	if region := c.cluster.getRegion(op.GetRegionID()); region != nil {
+	if region := c.cluster.GetRegion(op.GetRegionID()); region != nil {
 		if msg, _ := op.Do(region); msg != nil {
 			c.hbStreams.sendMsg(region, msg)
 		}

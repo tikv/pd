@@ -22,11 +22,6 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 )
 
-func newPriorityTransferLeader(region *core.RegionInfo, newLeader *metapb.Peer) schedule.Operator {
-	transferLeader := schedule.NewTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
-	return schedule.NewRegionOperator(region, core.PriorityKind, transferLeader)
-}
-
 // scheduleAddPeer schedules a new peer.
 func scheduleAddPeer(cluster *clusterInfo, s schedule.Selector, filters ...schedule.Filter) *metapb.Peer {
 	stores := cluster.GetStores()

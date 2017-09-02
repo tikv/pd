@@ -402,6 +402,10 @@ func (o *scheduleOption) persist(kv *kv) error {
 	return kv.saveScheduleOption(o)
 }
 
+func (o *scheduleOption) GetHotRegionLowThreshold() int {
+	return hotRegionLowThreshold
+}
+
 // ParseUrls parse a string into multiple urls.
 // Export for api.
 func ParseUrls(s string) ([]url.URL, error) {

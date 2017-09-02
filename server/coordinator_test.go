@@ -135,7 +135,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	stream := newMockHeartbeatStream()
 
 	// Transfer peer.
-	region := cluster.getRegion(1)
+	region := cluster.GetRegion(1)
 	resp := dispatchAndRecvHeartbeat(c, co, region, stream)
 	checkAddPeerResp(c, resp, 1)
 	region.Peers = append(region.Peers, resp.GetChangePeer().GetPeer())
@@ -147,7 +147,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	dispatchHeartbeatNoResp(c, co, region, stream)
 
 	// Transfer leader.
-	region = cluster.getRegion(2)
+	region = cluster.GetRegion(2)
 	resp = dispatchAndRecvHeartbeat(c, co, region, stream)
 	checkTransferLeaderResp(c, resp, 2)
 	region.Leader = resp.GetTransferLeader().GetPeer()
@@ -197,7 +197,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 
 	// Add peer to store 1.
 	tc.addLeaderRegion(1, 2, 3)
-	region := cluster.getRegion(1)
+	region := cluster.GetRegion(1)
 	resp := dispatchAndRecvHeartbeat(c, co, region, stream)
 	checkAddPeerResp(c, resp, 1)
 	region.Peers = append(region.Peers, resp.GetChangePeer().GetPeer())
@@ -221,7 +221,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 
 	// Remove peer from store 4.
 	tc.addLeaderRegion(2, 1, 2, 3, 4)
-	region = cluster.getRegion(2)
+	region = cluster.GetRegion(2)
 	resp = dispatchAndRecvHeartbeat(c, co, region, stream)
 	checkRemovePeerResp(c, resp, 4)
 	region.RemoveStorePeer(4)
@@ -252,7 +252,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	waitOperator(c, co, 1)
 	checkTransferPeer(c, co.getOperator(1), 4, 1)
 
-	region := cluster.getRegion(1)
+	region := cluster.GetRegion(1)
 
 	// Add new peer.
 	resp := dispatchAndRecvHeartbeat(c, co, region, stream)
@@ -271,7 +271,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	resp = dispatchAndRecvHeartbeat(c, co, region, stream)
 	checkRemovePeerResp(c, resp, 4)
 	tc.addLeaderRegion(1, 1, 2, 3)
-	region = cluster.getRegion(1)
+	region = cluster.GetRegion(1)
 	dispatchHeartbeatNoResp(c, co, region, stream)
 }
 
@@ -303,7 +303,7 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	}
 
 	for _, t := range tbl {
-		r := tc.getRegion(t.regionID)
+		r := tc.GetRegion(t.regionID)
 		r.Leader = r.Peers[0]
 		tc.handleRegionHeartbeat(r)
 		c.Assert(co.shouldRun(), Equals, t.shouldRun)
@@ -351,7 +351,7 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 
 	// Transfer all leaders to store 1.
 	waitOperator(c, co, 2)
-	region2 := cluster.getRegion(2)
+	region2 := cluster.GetRegion(2)
 	resp := dispatchAndRecvHeartbeat(c, co, region2, stream)
 	checkTransferLeaderResp(c, resp, 1)
 	region2.Leader = region2.GetStorePeer(1)
@@ -359,7 +359,7 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	dispatchHeartbeatNoResp(c, co, region2, stream)
 
 	waitOperator(c, co, 3)
-	region3 := cluster.getRegion(3)
+	region3 := cluster.GetRegion(3)
 	resp = dispatchAndRecvHeartbeat(c, co, region3, stream)
 	checkTransferLeaderResp(c, resp, 1)
 	region3.Leader = region3.GetStorePeer(1)
@@ -384,7 +384,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	tc.addRegionStore(3, 3)
 	tc.addLeaderRegion(1, 1)
 	cluster.activeRegions = 1
-	region := cluster.getRegion(1)
+	region := cluster.GetRegion(1)
 
 	// Add 1 replica on store 2.
 	co := newCoordinator(cluster, opt, hbStreams)

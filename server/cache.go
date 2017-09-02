@@ -499,7 +499,8 @@ func (c *clusterInfo) getStoresWriteStat() map[uint64]uint64 {
 	return res
 }
 
-func (c *clusterInfo) getRegion(regionID uint64) *core.RegionInfo {
+// GetRegions searches for a region by ID.
+func (c *clusterInfo) GetRegion(regionID uint64) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.regions.getRegion(regionID)
@@ -507,20 +508,20 @@ func (c *clusterInfo) getRegion(regionID uint64) *core.RegionInfo {
 
 // updateWriteStatCache updates statistic for a region if it's hot, or remove it from statistics if it cools down
 func (c *clusterInfo) updateWriteStatCache(region *core.RegionInfo, hotRegionThreshold uint64) {
-	var v *RegionStat
+	var v *core.RegionStat
 	key := region.GetId()
 	value, isExist := c.writeStatistics.Peek(key)
-	newItem := &RegionStat{
+	newItem := &core.RegionStat{
 		RegionID:       region.GetId(),
 		WrittenBytes:   region.WrittenBytes,
 		LastUpdateTime: time.Now(),
 		StoreID:        region.Leader.GetStoreId(),
-		version:        region.GetRegionEpoch().GetVersion(),
-		antiCount:      hotRegionAntiCount,
+		Version:        region.GetRegionEpoch().GetVersion(),
+		AntiCount:      hotRegionAntiCount,
 	}
 
 	if isExist {
-		v = value.(*RegionStat)
+		v = value.(*core.RegionStat)
 		newItem.HotDegree = v.HotDegree + 1
 	}
 
@@ -528,16 +529,26 @@ func (c *clusterInfo) updateWriteStatCache(region *core.RegionInfo, hotRegionThr
 		if !isExist {
 			return
 		}
-		if v.antiCount <= 0 {
+		if v.AntiCount <= 0 {
 			c.writeStatistics.Remove(key)
 			return
 		}
 		// eliminate some noise
 		newItem.HotDegree = v.HotDegree - 1
-		newItem.antiCount = v.antiCount - 1
+		newItem.AntiCount = v.AntiCount - 1
 		newItem.WrittenBytes = v.WrittenBytes
 	}
 	c.writeStatistics.Put(key, newItem)
+}
+
+// RegionWriteStats returns hot region's write stats.
+func (c *clusterInfo) RegionWriteStats() []*core.RegionStat {
+	elements := c.writeStatistics.Elems()
+	stats := make([]*core.RegionStat, len(elements))
+	for i := range elements {
+		stats[i] = elements[i].Value.(*core.RegionStat)
+	}
+	return stats
 }
 
 // IsRegionHot checks if a region is in hot state.
@@ -545,7 +556,7 @@ func (c *clusterInfo) IsRegionHot(id uint64) bool {
 	c.RLock()
 	defer c.RUnlock()
 	if stat, ok := c.writeStatistics.Peek(id); ok {
-		return stat.(*RegionStat).HotDegree >= hotRegionLowThreshold
+		return stat.(*core.RegionStat).HotDegree >= hotRegionLowThreshold
 	}
 	return false
 }
@@ -764,7 +775,7 @@ func (c *clusterInfo) updateWriteStatus(region *core.RegionInfo) {
 	var WrittenBytesPerSec uint64
 	v, isExist := c.writeStatistics.Peek(region.GetId())
 	if isExist {
-		interval := time.Now().Sub(v.(*RegionStat).LastUpdateTime).Seconds()
+		interval := time.Now().Sub(v.(*core.RegionStat).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
 			return
 		}

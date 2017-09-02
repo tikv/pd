@@ -581,7 +581,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	tc.addLeaderRegion(1, 1, 2)
 
 	// Region has 2 peers, we need to add a new peer.
-	region := cluster.getRegion(1)
+	region := cluster.GetRegion(1)
 	checkAddPeer(c, rc.Check(region), 4)
 
 	// Test healthFilter.
@@ -649,7 +649,7 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 	// This happens only in recovering the PD cluster
 	// should not panic
 	tc.addLeaderRegion(1, 1, 2, 3)
-	region := cluster.getRegion(1)
+	region := cluster.GetRegion(1)
 	op := rc.Check(region)
 	c.Assert(op, IsNil)
 }
@@ -669,7 +669,7 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	tc.addLabelsStore(4, 4, map[string]string{"zone": "z3", "rack": "r2", "host": "h1"})
 
 	tc.addLeaderRegion(1, 1)
-	region := cluster.getRegion(1)
+	region := cluster.GetRegion(1)
 
 	// Store 2 has different zone and smallest region score.
 	checkAddPeer(c, rc.Check(region), 2)
@@ -723,7 +723,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 
 	// We need 3 replicas.
 	tc.addLeaderRegion(1, 1)
-	region := tc.getRegion(1)
+	region := tc.GetRegion(1)
 	checkAddPeer(c, rc.Check(region), 2)
 	peer2, _ := cluster.AllocPeer(2)
 	region.Peers = append(region.Peers, peer2)
@@ -806,7 +806,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	tc.addLabelsStore(6, 1, map[string]string{"zone": "z3", "host": "h1"})
 
 	tc.addLeaderRegion(1, 1, 2, 4)
-	region := cluster.getRegion(1)
+	region := cluster.GetRegion(1)
 
 	checkAddPeer(c, rc.Check(region), 6)
 	peer6, _ := cluster.AllocPeer(6)
@@ -907,7 +907,7 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	hb := newBalanceHotRegionScheduler(opt)
+	hb := schedulers.NewBalanceHotRegionScheduler(opt)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
 	tc.addRegionStore(1, 3)
