@@ -19,6 +19,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/schedule"
 	"github.com/unrolled/render"
 )
 
@@ -54,8 +55,8 @@ func (h *operatorHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 	var (
-		results []server.Operator
-		ops     []server.Operator
+		results []schedule.Operator
+		ops     []schedule.Operator
 		err     error
 	)
 

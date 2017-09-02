@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule"
 )
 
 type statusType byte
@@ -76,7 +77,7 @@ func (c *coordinator) innerPostEvent(evt LogEvent) {
 	c.events.Put(key, evt)
 }
 
-func (c *coordinator) postEvent(op Operator, status statusType) {
+func (c *coordinator) postEvent(op schedule.Operator, status statusType) {
 	var evt LogEvent
 	evt.Status = status
 
@@ -87,13 +88,13 @@ func (c *coordinator) postEvent(op Operator, status statusType) {
 		evt.SplitEvent.Left = e.Left.GetId()
 		evt.SplitEvent.Right = e.Right.GetId()
 		c.innerPostEvent(evt)
-	case *transferLeaderOperator:
+	case *schedule.TransferLeaderOperator:
 		evt.Code = msgTransferLeader
 		evt.TransferLeaderEvent.Region = e.RegionID
 		evt.TransferLeaderEvent.StoreFrom = e.OldLeader.GetStoreId()
 		evt.TransferLeaderEvent.StoreTo = e.NewLeader.GetStoreId()
 		c.innerPostEvent(evt)
-	case *changePeerOperator:
+	case *schedule.ChangePeerOperator:
 		if e.ChangePeer.GetChangeType() == pdpb.ConfChangeType_AddNode {
 			evt.Code = msgAddReplica
 			evt.AddReplicaEvent.Region = e.RegionID
@@ -124,11 +125,11 @@ func (c *coordinator) fetchEvents(key uint64, all bool) []LogEvent {
 	return evts
 }
 
-func (c *coordinator) hookStartEvent(op Operator) {
+func (c *coordinator) hookStartEvent(op schedule.Operator) {
 	c.postEvent(op, evtStart)
 }
 
-func (c *coordinator) hookEndEvent(op Operator) {
+func (c *coordinator) hookEndEvent(op schedule.Operator) {
 	c.postEvent(op, evtEnd)
 }
 
@@ -162,11 +163,11 @@ func (op *splitOperator) GetResourceKind() core.ResourceKind {
 	return core.OtherKind
 }
 
-func (op *splitOperator) GetState() OperatorState {
-	return OperatorFinished
+func (op *splitOperator) GetState() schedule.OperatorState {
+	return schedule.OperatorFinished
 }
 
-func (op *splitOperator) SetState(_ OperatorState) {}
+func (op *splitOperator) SetState(_ schedule.OperatorState) {}
 
 func (op *splitOperator) GetName() string {
 	return op.Name

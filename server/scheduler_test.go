@@ -13,7 +13,10 @@
 
 package server
 
-import . "github.com/pingcap/check"
+import (
+	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/server/schedule"
+)
 
 var _ = Suite(&testShuffleLeaderSuite{})
 
@@ -44,12 +47,12 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 
 	for i := 0; i < 4; i++ {
 		bop := sl.Schedule(cluster)
-		op := bop.(*regionOperator).Ops[0].(*transferLeaderOperator)
+		op := bop.(*schedule.RegionOperator).Ops[0].(*schedule.TransferLeaderOperator)
 
 		sourceID := op.OldLeader.GetStoreId()
 
 		bop = sl.Schedule(cluster)
-		op = bop.(*regionOperator).Ops[0].(*transferLeaderOperator)
+		op = bop.(*schedule.RegionOperator).Ops[0].(*schedule.TransferLeaderOperator)
 		c.Assert(op.NewLeader.GetStoreId(), Equals, sourceID)
 	}
 }

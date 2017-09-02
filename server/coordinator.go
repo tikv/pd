@@ -22,6 +22,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule"
 	"golang.org/x/net/context"
 )
 
@@ -66,7 +67,7 @@ type coordinator struct {
 	opt        *scheduleOption
 	limiter    *scheduleLimiter
 	checker    *replicaChecker
-	operators  map[uint64]Operator
+	operators  map[uint64]schedule.Operator
 	schedulers map[string]*scheduleController
 
 	histories *cache.LRU
@@ -84,7 +85,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 		opt:        opt,
 		limiter:    newScheduleLimiter(),
 		checker:    newReplicaChecker(opt, cluster),
-		operators:  make(map[uint64]Operator),
+		operators:  make(map[uint64]schedule.Operator),
 		schedulers: make(map[string]*scheduleController),
 		histories:  cache.NewLRU(historiesCacheSize),
 		events:     cache.NewFIFO(eventsCacheSize),
@@ -266,7 +267,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 	}
 }
 
-func (c *coordinator) addOperator(op Operator) bool {
+func (c *coordinator) addOperator(op schedule.Operator) bool {
 	c.Lock()
 	defer c.Unlock()
 	regionID := op.GetRegionID()
@@ -279,7 +280,7 @@ func (c *coordinator) addOperator(op Operator) bool {
 			return false
 		}
 		log.Infof("[region %v] replace old operator: %+v", regionID, old)
-		old.SetState(OperatorReplaced)
+		old.SetState(schedule.OperatorReplaced)
 		c.removeOperatorLocked(old)
 	}
 
@@ -297,7 +298,7 @@ func (c *coordinator) addOperator(op Operator) bool {
 	return true
 }
 
-func isHigherPriorityOperator(new Operator, old Operator) bool {
+func isHigherPriorityOperator(new, old schedule.Operator) bool {
 	if new.GetResourceKind() == core.AdminKind {
 		return true
 	}
@@ -307,13 +308,13 @@ func isHigherPriorityOperator(new Operator, old Operator) bool {
 	return false
 }
 
-func (c *coordinator) removeOperator(op Operator) {
+func (c *coordinator) removeOperator(op schedule.Operator) {
 	c.Lock()
 	defer c.Unlock()
 	c.removeOperatorLocked(op)
 }
 
-func (c *coordinator) removeOperatorLocked(op Operator) {
+func (c *coordinator) removeOperatorLocked(op schedule.Operator) {
 	regionID := op.GetRegionID()
 	c.limiter.removeOperator(op)
 	delete(c.operators, regionID)
@@ -322,17 +323,17 @@ func (c *coordinator) removeOperatorLocked(op Operator) {
 	collectOperatorCounterMetrics(op)
 }
 
-func (c *coordinator) getOperator(regionID uint64) Operator {
+func (c *coordinator) getOperator(regionID uint64) schedule.Operator {
 	c.RLock()
 	defer c.RUnlock()
 	return c.operators[regionID]
 }
 
-func (c *coordinator) getOperators() []Operator {
+func (c *coordinator) getOperators() []schedule.Operator {
 	c.RLock()
 	defer c.RUnlock()
 
-	var operators []Operator
+	var operators []schedule.Operator
 	for _, op := range c.operators {
 		operators = append(operators, op)
 	}
@@ -340,25 +341,25 @@ func (c *coordinator) getOperators() []Operator {
 	return operators
 }
 
-func (c *coordinator) getHistories() []Operator {
+func (c *coordinator) getHistories() []schedule.Operator {
 	c.RLock()
 	defer c.RUnlock()
 
-	var operators []Operator
+	var operators []schedule.Operator
 	for _, elem := range c.histories.Elems() {
-		operators = append(operators, elem.Value.(Operator))
+		operators = append(operators, elem.Value.(schedule.Operator))
 	}
 
 	return operators
 }
 
-func (c *coordinator) getHistoriesOfKind(kind core.ResourceKind) []Operator {
+func (c *coordinator) getHistoriesOfKind(kind core.ResourceKind) []schedule.Operator {
 	c.RLock()
 	defer c.RUnlock()
 
-	var operators []Operator
+	var operators []schedule.Operator
 	for _, elem := range c.histories.Elems() {
-		op := elem.Value.(Operator)
+		op := elem.Value.(schedule.Operator)
 		if op.GetResourceKind() == kind {
 			operators = append(operators, op)
 		}
@@ -378,13 +379,13 @@ func newScheduleLimiter() *scheduleLimiter {
 	}
 }
 
-func (l *scheduleLimiter) addOperator(op Operator) {
+func (l *scheduleLimiter) addOperator(op schedule.Operator) {
 	l.Lock()
 	defer l.Unlock()
 	l.counts[op.GetResourceKind()]++
 }
 
-func (l *scheduleLimiter) removeOperator(op Operator) {
+func (l *scheduleLimiter) removeOperator(op schedule.Operator) {
 	l.Lock()
 	defer l.Unlock()
 	l.counts[op.GetResourceKind()]--
@@ -427,7 +428,7 @@ func (s *scheduleController) Stop() {
 	s.cancel()
 }
 
-func (s *scheduleController) Schedule(cluster *clusterInfo) Operator {
+func (s *scheduleController) Schedule(cluster *clusterInfo) schedule.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
 		// If we have schedule, reset interval to the minimal interval.
 		if op := s.Scheduler.Schedule(cluster); op != nil {
@@ -450,8 +451,8 @@ func (s *scheduleController) AllowSchedule() bool {
 	return s.limiter.operatorCount(s.GetResourceKind()) < s.GetResourceLimit()
 }
 
-func collectOperatorCounterMetrics(op Operator) {
-	regionOp, ok := op.(*regionOperator)
+func collectOperatorCounterMetrics(op schedule.Operator) {
+	regionOp, ok := op.(*schedule.RegionOperator)
 	if !ok {
 		return
 	}

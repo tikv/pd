@@ -16,7 +16,6 @@ package server
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"reflect"
@@ -315,9 +314,4 @@ func parseTimestamp(data []byte) (time.Time, error) {
 
 func subTimeByWallClock(after time.Time, before time.Time) time.Duration {
 	return time.Duration(after.UnixNano() - before.UnixNano())
-}
-
-func jsonString(v interface{}) string {
-	data, _ := json.Marshal(v)
-	return string(data)
 }

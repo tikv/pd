@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule"
 )
 
 type testClusterInfo struct {
@@ -271,7 +272,7 @@ func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
 	s.lb = newBalanceLeaderScheduler(opt)
 }
 
-func (s *testBalanceLeaderSchedulerSuite) schedule() Operator {
+func (s *testBalanceLeaderSchedulerSuite) schedule() schedule.Operator {
 	return s.lb.Schedule(s.cluster)
 }
 
@@ -805,31 +806,31 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 }
 
-func checkAddPeer(c *C, bop Operator, storeID uint64) {
-	var op *changePeerOperator
+func checkAddPeer(c *C, bop schedule.Operator, storeID uint64) {
+	var op *schedule.ChangePeerOperator
 	switch t := bop.(type) {
-	case *changePeerOperator:
+	case *schedule.ChangePeerOperator:
 		op = t
-	case *regionOperator:
-		op = t.Ops[0].(*changePeerOperator)
+	case *schedule.RegionOperator:
+		op = t.Ops[0].(*schedule.ChangePeerOperator)
 	}
 	c.Assert(op.ChangePeer.GetChangeType(), Equals, pdpb.ConfChangeType_AddNode)
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
-func checkRemovePeer(c *C, bop Operator, storeID uint64) {
-	var op *changePeerOperator
+func checkRemovePeer(c *C, bop schedule.Operator, storeID uint64) {
+	var op *schedule.ChangePeerOperator
 	switch t := bop.(type) {
-	case *changePeerOperator:
+	case *schedule.ChangePeerOperator:
 		op = t
-	case *regionOperator:
+	case *schedule.RegionOperator:
 		if len(t.Ops) == 1 {
-			op = t.Ops[0].(*changePeerOperator)
+			op = t.Ops[0].(*schedule.ChangePeerOperator)
 		} else {
 			c.Assert(t.Ops, HasLen, 2)
-			transferLeader := t.Ops[0].(*transferLeaderOperator)
+			transferLeader := t.Ops[0].(*schedule.TransferLeaderOperator)
 			c.Assert(transferLeader.OldLeader.GetStoreId(), Equals, storeID)
-			op = t.Ops[1].(*changePeerOperator)
+			op = t.Ops[1].(*schedule.ChangePeerOperator)
 		}
 	}
 	c.Assert(op, NotNil)
@@ -837,8 +838,8 @@ func checkRemovePeer(c *C, bop Operator, storeID uint64) {
 	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
-func checkTransferPeer(c *C, bop Operator, sourceID, targetID uint64) {
-	op := bop.(*regionOperator)
+func checkTransferPeer(c *C, bop schedule.Operator, sourceID, targetID uint64) {
+	op := bop.(*schedule.RegionOperator)
 	c.Assert(op, NotNil)
 	if len(op.Ops) == 2 {
 		checkAddPeer(c, op.Ops[0], targetID)
@@ -846,39 +847,39 @@ func checkTransferPeer(c *C, bop Operator, sourceID, targetID uint64) {
 	} else {
 		c.Assert(op.Ops, HasLen, 3)
 		checkAddPeer(c, op.Ops[0], targetID)
-		transferLeader := op.Ops[1].(*transferLeaderOperator)
+		transferLeader := op.Ops[1].(*schedule.TransferLeaderOperator)
 		c.Assert(transferLeader.OldLeader.GetStoreId(), Equals, sourceID)
 		checkRemovePeer(c, op.Ops[2], sourceID)
 	}
 }
 
-func checkTransferPeerWithLeaderTransfer(c *C, bop Operator, sourceID, targetID uint64) {
-	op := bop.(*regionOperator)
+func checkTransferPeerWithLeaderTransfer(c *C, bop schedule.Operator, sourceID, targetID uint64) {
+	op := bop.(*schedule.RegionOperator)
 	c.Assert(op, NotNil)
 	c.Assert(op.Ops, HasLen, 3)
 	checkTransferPeer(c, bop, sourceID, targetID)
 }
 
-func checkTransferLeader(c *C, bop Operator, sourceID, targetID uint64) {
-	var op *transferLeaderOperator
+func checkTransferLeader(c *C, bop schedule.Operator, sourceID, targetID uint64) {
+	var op *schedule.TransferLeaderOperator
 	switch t := bop.(type) {
-	case *transferLeaderOperator:
+	case *schedule.TransferLeaderOperator:
 		op = t
-	case *regionOperator:
-		op = t.Ops[0].(*transferLeaderOperator)
+	case *schedule.RegionOperator:
+		op = t.Ops[0].(*schedule.TransferLeaderOperator)
 	}
 	c.Assert(op, NotNil)
 	c.Assert(op.OldLeader.GetStoreId(), Equals, sourceID)
 	c.Assert(op.NewLeader.GetStoreId(), Equals, targetID)
 }
 
-func checkTransferLeaderFrom(c *C, bop Operator, sourceID uint64) {
-	var op *transferLeaderOperator
+func checkTransferLeaderFrom(c *C, bop schedule.Operator, sourceID uint64) {
+	var op *schedule.TransferLeaderOperator
 	switch t := bop.(type) {
-	case *transferLeaderOperator:
+	case *schedule.TransferLeaderOperator:
 		op = t
-	case *regionOperator:
-		op = t.Ops[0].(*transferLeaderOperator)
+	case *schedule.RegionOperator:
+		op = t.Ops[0].(*schedule.TransferLeaderOperator)
 	}
 	c.Assert(op, NotNil)
 	c.Assert(op.OldLeader.GetStoreId(), Equals, sourceID)

@@ -112,7 +112,7 @@ func (l *balanceLeaderScheduler) Prepare(cluster *clusterInfo) error { return ni
 
 func (l *balanceLeaderScheduler) Cleanup(cluster *clusterInfo) {}
 
-func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
+func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) schedule.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 	region, newLeader := scheduleTransferLeader(cluster, l.GetName(), l.selector)
 	if region == nil {
@@ -179,7 +179,7 @@ func (s *balanceRegionScheduler) Prepare(cluster *clusterInfo) error { return ni
 
 func (s *balanceRegionScheduler) Cleanup(cluster *clusterInfo) {}
 
-func (s *balanceRegionScheduler) Schedule(cluster *clusterInfo) Operator {
+func (s *balanceRegionScheduler) Schedule(cluster *clusterInfo) schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	// Select a peer from the store with most regions.
 	region, oldPeer := scheduleRemovePeer(cluster, s.GetName(), s.selector)
@@ -209,7 +209,7 @@ func (s *balanceRegionScheduler) Schedule(cluster *clusterInfo) Operator {
 	return op
 }
 
-func (s *balanceRegionScheduler) transferPeer(cluster *clusterInfo, region *core.RegionInfo, oldPeer *metapb.Peer) Operator {
+func (s *balanceRegionScheduler) transferPeer(cluster *clusterInfo, region *core.RegionInfo, oldPeer *metapb.Peer) schedule.Operator {
 	// scoreGuard guarantees that the distinct score will not decrease.
 	stores := cluster.getRegionStores(region)
 	source := cluster.getStore(oldPeer.GetStoreId())
@@ -254,7 +254,7 @@ func newReplicaChecker(opt *scheduleOption, cluster *clusterInfo) *replicaChecke
 	}
 }
 
-func (r *replicaChecker) Check(region *core.RegionInfo) Operator {
+func (r *replicaChecker) Check(region *core.RegionInfo) schedule.Operator {
 	if op := r.checkDownPeer(region); op != nil {
 		return op
 	}
@@ -332,7 +332,7 @@ func (r *replicaChecker) selectBestReplacement(region *core.RegionInfo, peer *me
 	return r.SelectBestStoreToAddReplica(newRegion, schedule.NewExcludedFilter(nil, region.GetStoreIds()))
 }
 
-func (r *replicaChecker) checkDownPeer(region *core.RegionInfo) Operator {
+func (r *replicaChecker) checkDownPeer(region *core.RegionInfo) schedule.Operator {
 	for _, stats := range region.DownPeers {
 		peer := stats.GetPeer()
 		if peer == nil {
@@ -354,7 +354,7 @@ func (r *replicaChecker) checkDownPeer(region *core.RegionInfo) Operator {
 	return nil
 }
 
-func (r *replicaChecker) checkOfflinePeer(region *core.RegionInfo) Operator {
+func (r *replicaChecker) checkOfflinePeer(region *core.RegionInfo) schedule.Operator {
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.getStore(peer.GetStoreId())
 		if store == nil {
@@ -380,7 +380,7 @@ func (r *replicaChecker) checkOfflinePeer(region *core.RegionInfo) Operator {
 	return nil
 }
 
-func (r *replicaChecker) checkBestReplacement(region *core.RegionInfo) Operator {
+func (r *replicaChecker) checkBestReplacement(region *core.RegionInfo) schedule.Operator {
 	oldPeer, oldScore := r.selectWorstPeer(region)
 	if oldPeer == nil {
 		return nil
@@ -467,7 +467,7 @@ func (h *balanceHotRegionScheduler) Prepare(cluster *clusterInfo) error { return
 
 func (h *balanceHotRegionScheduler) Cleanup(cluster *clusterInfo) {}
 
-func (h *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) Operator {
+func (h *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) schedule.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
 	h.calcScore(cluster)
 

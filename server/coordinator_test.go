@@ -21,25 +21,26 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule"
 )
 
 type testOperator struct {
 	RegionID uint64
 	Kind     core.ResourceKind
-	State    OperatorState
+	State    schedule.OperatorState
 }
 
-func newTestOperator(regionID uint64, kind core.ResourceKind) Operator {
+func newTestOperator(regionID uint64, kind core.ResourceKind) schedule.Operator {
 	region := core.NewRegionInfo(&metapb.Region{Id: regionID}, nil)
-	op := &testOperator{RegionID: regionID, Kind: kind, State: OperatorRunning}
-	return newRegionOperator(region, kind, op)
+	op := &testOperator{RegionID: regionID, Kind: kind, State: schedule.OperatorRunning}
+	return schedule.NewRegionOperator(region, kind, op)
 }
 
-func (op *testOperator) GetRegionID() uint64                { return op.RegionID }
-func (op *testOperator) GetResourceKind() core.ResourceKind { return op.Kind }
-func (op *testOperator) GetState() OperatorState            { return op.State }
-func (op *testOperator) SetState(state OperatorState)       { op.State = state }
-func (op *testOperator) GetName() string                    { return "test" }
+func (op *testOperator) GetRegionID() uint64                   { return op.RegionID }
+func (op *testOperator) GetResourceKind() core.ResourceKind    { return op.Kind }
+func (op *testOperator) GetState() schedule.OperatorState      { return op.State }
+func (op *testOperator) SetState(state schedule.OperatorState) { op.State = state }
+func (op *testOperator) GetName() string                       { return "test" }
 func (op *testOperator) Do(region *core.RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
 	return nil, false
 }

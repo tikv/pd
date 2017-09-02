@@ -16,6 +16,7 @@ package server
 import (
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule"
 )
 
 var (
@@ -108,7 +109,7 @@ func (h *Handler) AddShuffleRegionScheduler() error {
 }
 
 // GetOperator returns the region operator.
-func (h *Handler) GetOperator(regionID uint64) (Operator, error) {
+func (h *Handler) GetOperator(regionID uint64) (schedule.Operator, error) {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -139,7 +140,7 @@ func (h *Handler) RemoveOperator(regionID uint64) error {
 }
 
 // GetOperators returns the running operators.
-func (h *Handler) GetOperators() ([]Operator, error) {
+func (h *Handler) GetOperators() ([]schedule.Operator, error) {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -148,27 +149,27 @@ func (h *Handler) GetOperators() ([]Operator, error) {
 }
 
 // GetAdminOperators returns the running admin operators.
-func (h *Handler) GetAdminOperators() ([]Operator, error) {
+func (h *Handler) GetAdminOperators() ([]schedule.Operator, error) {
 	return h.GetOperatorsOfKind(core.AdminKind)
 }
 
 // GetLeaderOperators returns the running leader operators.
-func (h *Handler) GetLeaderOperators() ([]Operator, error) {
+func (h *Handler) GetLeaderOperators() ([]schedule.Operator, error) {
 	return h.GetOperatorsOfKind(core.LeaderKind)
 }
 
 // GetRegionOperators returns the running region operators.
-func (h *Handler) GetRegionOperators() ([]Operator, error) {
+func (h *Handler) GetRegionOperators() ([]schedule.Operator, error) {
 	return h.GetOperatorsOfKind(core.RegionKind)
 }
 
 // GetOperatorsOfKind returns the running operators of the kind.
-func (h *Handler) GetOperatorsOfKind(kind core.ResourceKind) ([]Operator, error) {
+func (h *Handler) GetOperatorsOfKind(kind core.ResourceKind) ([]schedule.Operator, error) {
 	ops, err := h.GetOperators()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	var results []Operator
+	var results []schedule.Operator
 	for _, op := range ops {
 		if op.GetResourceKind() == kind {
 			results = append(results, op)
@@ -178,7 +179,7 @@ func (h *Handler) GetOperatorsOfKind(kind core.ResourceKind) ([]Operator, error)
 }
 
 // GetHistoryOperators returns history operators
-func (h *Handler) GetHistoryOperators() ([]Operator, error) {
+func (h *Handler) GetHistoryOperators() ([]schedule.Operator, error) {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -187,7 +188,7 @@ func (h *Handler) GetHistoryOperators() ([]Operator, error) {
 }
 
 // GetHistoryOperatorsOfKind returns history operators by Kind
-func (h *Handler) GetHistoryOperatorsOfKind(kind core.ResourceKind) ([]Operator, error) {
+func (h *Handler) GetHistoryOperatorsOfKind(kind core.ResourceKind) ([]schedule.Operator, error) {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -211,8 +212,8 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 		return errors.Errorf("region has no peer in store %v", storeID)
 	}
 
-	op := newTransferLeaderOperator(regionID, region.Leader, newLeader)
-	c.addOperator(newAdminOperator(region, op))
+	op := schedule.NewTransferLeaderOperator(regionID, region.Leader, newLeader)
+	c.addOperator(schedule.NewAdminOperator(region, op))
 	return nil
 }
 
@@ -228,7 +229,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		return errRegionNotFound(regionID)
 	}
 
-	var ops []Operator
+	var ops []schedule.Operator
 
 	// Add missing peers.
 	for id := range storeIDs {
@@ -242,7 +243,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		if err != nil {
 			return errors.Trace(err)
 		}
-		ops = append(ops, newAddPeerOperator(regionID, peer))
+		ops = append(ops, schedule.NewAddPeerOperator(regionID, peer))
 	}
 
 	// Remove redundant peers.
@@ -250,10 +251,10 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		if _, ok := storeIDs[peer.GetStoreId()]; ok {
 			continue
 		}
-		ops = append(ops, newRemovePeerOperator(regionID, peer))
+		ops = append(ops, schedule.NewRemovePeerOperator(regionID, peer))
 	}
 
-	c.addOperator(newAdminOperator(region, ops...))
+	c.addOperator(schedule.NewAdminOperator(region, ops...))
 	return nil
 }
 
@@ -282,8 +283,8 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return errors.Trace(err)
 	}
 
-	addPeer := newAddPeerOperator(regionID, newPeer)
-	removePeer := newRemovePeerOperator(regionID, oldPeer)
-	c.addOperator(newAdminOperator(region, addPeer, removePeer))
+	addPeer := schedule.NewAddPeerOperator(regionID, newPeer)
+	removePeer := schedule.NewRemovePeerOperator(regionID, oldPeer)
+	c.addOperator(schedule.NewAdminOperator(region, addPeer, removePeer))
 	return nil
 }
