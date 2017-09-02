@@ -20,6 +20,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 )
 
 type testClusterInfo struct {
@@ -28,6 +29,14 @@ type testClusterInfo struct {
 
 func newTestClusterInfo(cluster *clusterInfo) *testClusterInfo {
 	return &testClusterInfo{clusterInfo: cluster}
+}
+
+func newTestReplication(maxReplicas int, locationLabels ...string) *Replication {
+	cfg := &ReplicationConfig{
+		MaxReplicas:    uint64(maxReplicas),
+		LocationLabels: locationLabels,
+	}
+	return newReplication(cfg)
 }
 
 func (c *testClusterInfo) setStoreUp(storeID uint64) {
@@ -58,7 +67,7 @@ func (c *testClusterInfo) setStoreBusy(storeID uint64, busy bool) {
 }
 
 func (c *testClusterInfo) addLeaderStore(storeID uint64, leaderCount int) {
-	store := newStoreInfo(&metapb.Store{Id: storeID})
+	store := core.NewStoreInfo(&metapb.Store{Id: storeID})
 	store.Stats = &pdpb.StoreStats{}
 	store.LastHeartbeatTS = time.Now()
 	store.LeaderCount = leaderCount
@@ -66,7 +75,7 @@ func (c *testClusterInfo) addLeaderStore(storeID uint64, leaderCount int) {
 }
 
 func (c *testClusterInfo) addRegionStore(storeID uint64, regionCount int) {
-	store := newStoreInfo(&metapb.Store{Id: storeID})
+	store := core.NewStoreInfo(&metapb.Store{Id: storeID})
 	store.Stats = &pdpb.StoreStats{}
 	store.LastHeartbeatTS = time.Now()
 	store.RegionCount = regionCount
@@ -104,7 +113,7 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 		peer, _ := c.allocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	c.putRegion(newRegionInfo(region, leader))
+	c.putRegion(core.NewRegionInfo(region, leader))
 }
 
 func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) {
@@ -115,7 +124,7 @@ func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) {
 		peer, _ := c.allocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	c.putRegion(newRegionInfo(region, nil))
+	c.putRegion(core.NewRegionInfo(region, nil))
 }
 
 func (c *testClusterInfo) addLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
@@ -126,7 +135,7 @@ func (c *testClusterInfo) addLeaderRegionWithWriteInfo(regionID uint64, leaderID
 		peer, _ := c.allocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	r := newRegionInfo(region, leader)
+	r := core.NewRegionInfo(region, leader)
 	r.WrittenBytes = writtenBytes
 	c.updateWriteStatus(r)
 	c.putRegion(r)
@@ -220,7 +229,7 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 		tc.addLeaderStore(2, int(t.targetCount))
 		source := cluster.getStore(1)
 		target := cluster.getStore(2)
-		c.Assert(shouldBalance(source, target, LeaderKind), Equals, t.expectedResult)
+		c.Assert(shouldBalance(source, target, core.LeaderKind), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -228,7 +237,7 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 		tc.addRegionStore(2, int(t.targetCount))
 		source := cluster.getStore(1)
 		target := cluster.getStore(2)
-		c.Assert(shouldBalance(source, target, RegionKind), Equals, t.expectedResult)
+		c.Assert(shouldBalance(source, target, core.RegionKind), Equals, t.expectedResult)
 	}
 }
 
@@ -240,11 +249,11 @@ func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
 	tc.addLeaderStore(3, 30)
 
 	// StandDeviation is sqrt((10^2+0+10^2)/3).
-	c.Assert(adjustBalanceLimit(cluster, LeaderKind), Equals, uint64(math.Sqrt(200.0/3.0)))
+	c.Assert(adjustBalanceLimit(cluster, core.LeaderKind), Equals, uint64(math.Sqrt(200.0/3.0)))
 
 	tc.setStoreOffline(1)
 	// StandDeviation is sqrt((5^2+5^2)/2).
-	c.Assert(adjustBalanceLimit(cluster, LeaderKind), Equals, uint64(math.Sqrt(50.0/2.0)))
+	c.Assert(adjustBalanceLimit(cluster, core.LeaderKind), Equals, uint64(math.Sqrt(50.0/2.0)))
 }
 
 var _ = Suite(&testBalanceLeaderSchedulerSuite{})
@@ -399,7 +408,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	c.Assert(sb.Schedule(cluster), IsNil)
 	// 9 - 6 >= 2
 	tc.updateRegionCount(2, 6)
-	sb.cache.delete(4)
+	sb.cache.Remove(4)
 	// When store 1 is offline, it will be filtered,
 	// store 2 becomes the store with least regions.
 	checkTransferPeer(c, sb.Schedule(cluster), 4, 2)
@@ -429,7 +438,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	// This schedule try to replace peer in store 1, but we have no other stores,
 	// so store 1 will be set in the cache and skipped next schedule.
 	c.Assert(sb.Schedule(cluster), IsNil)
-	c.Assert(sb.cache.get(1), IsTrue)
+	c.Assert(sb.cache.Exists(1), IsTrue)
 
 	// Store 4 has smaller region score than store 2.
 	tc.addLabelsStore(4, 2, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
@@ -437,7 +446,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 
 	// Store 5 has smaller region score than store 1.
 	tc.addLabelsStore(5, 2, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
-	sb.cache.delete(1) // Delete store 1 from cache, or it will be skipped.
+	sb.cache.Remove(1) // Delete store 1 from cache, or it will be skipped.
 	checkTransferPeer(c, sb.Schedule(cluster), 1, 5)
 
 	// Store 6 has smaller region score than store 5.
@@ -451,10 +460,10 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	// If store 7 is not available, we wait.
 	tc.setStoreDown(7)
 	c.Assert(sb.Schedule(cluster), IsNil)
-	c.Assert(sb.cache.get(1), IsTrue)
+	c.Assert(sb.cache.Exists(1), IsTrue)
 	tc.setStoreUp(7)
 	checkTransferPeer(c, sb.Schedule(cluster), 2, 7)
-	sb.cache.delete(1)
+	sb.cache.Remove(1)
 	checkTransferPeer(c, sb.Schedule(cluster), 1, 7)
 
 	// Store 8 has smaller region score than store 7, but the distinct score decrease.
@@ -467,8 +476,8 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	tc.setStoreDown(6)
 	tc.setStoreDown(7)
 	c.Assert(sb.Schedule(cluster), IsNil)
-	c.Assert(sb.cache.get(1), IsTrue)
-	sb.cache.delete(1)
+	c.Assert(sb.cache.Exists(1), IsTrue)
+	sb.cache.Remove(1)
 
 	// Store 9 has different zone with other stores but larger region score than store 1.
 	tc.addLabelsStore(9, 9, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})

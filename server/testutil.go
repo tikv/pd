@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/embed"
-	. "github.com/pingcap/check"
+	"github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 )
@@ -35,11 +35,11 @@ func cleanServer(cfg *Config) {
 }
 
 // NewTestServer creates a pd server for testing.
-func NewTestServer(c *C) (*Config, *Server, CleanupFunc) {
+func NewTestServer(c *check.C) (*Config, *Server, CleanupFunc) {
 	cfg := NewTestSingleConfig()
 	s, err := CreateServer(cfg, nil)
-	c.Assert(err, IsNil)
-	c.Assert(s.Run(), IsNil)
+	c.Assert(err, check.IsNil)
+	c.Assert(s.Run(), check.IsNil)
 
 	cleanup := func() {
 		s.Close()

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package core
 
 import (
 	"time"
@@ -34,7 +34,8 @@ type StoreInfo struct {
 	RegionWeight    float64
 }
 
-func newStoreInfo(store *metapb.Store) *StoreInfo {
+// NewStoreInfo creates StoreInfo with meta data.
+func NewStoreInfo(store *metapb.Store) *StoreInfo {
 	return &StoreInfo{
 		Store:        store,
 		LeaderWeight: 1.0,
@@ -42,7 +43,8 @@ func newStoreInfo(store *metapb.Store) *StoreInfo {
 	}
 }
 
-func (s *StoreInfo) clone() *StoreInfo {
+// Clone creates a copy of current StoreInfo.
+func (s *StoreInfo) Clone() *StoreInfo {
 	return &StoreInfo{
 		Store:           proto.Clone(s.Store).(*metapb.Store),
 		Stats:           proto.Clone(s.Stats).(*pdpb.StoreStats),
@@ -55,31 +57,38 @@ func (s *StoreInfo) clone() *StoreInfo {
 	}
 }
 
-func (s *StoreInfo) block() {
+// Block stops balancer from selecting the store.
+func (s *StoreInfo) Block() {
 	s.blocked = true
 }
 
-func (s *StoreInfo) unblock() {
+// Unblock allows balancer to select the store.
+func (s *StoreInfo) Unblock() {
 	s.blocked = false
 }
 
-func (s *StoreInfo) isBlocked() bool {
+// IsBlocked returns if the store is blocked.
+func (s *StoreInfo) IsBlocked() bool {
 	return s.blocked
 }
 
-func (s *StoreInfo) isUp() bool {
+// IsUp returns checks if the store's state is Up.
+func (s *StoreInfo) IsUp() bool {
 	return s.GetState() == metapb.StoreState_Up
 }
 
-func (s *StoreInfo) isOffline() bool {
+// IsOffline checks if the store's state is Offline.
+func (s *StoreInfo) IsOffline() bool {
 	return s.GetState() == metapb.StoreState_Offline
 }
 
-func (s *StoreInfo) isTombstone() bool {
+// IsTombstone checks if the store's state is Tombstone.
+func (s *StoreInfo) IsTombstone() bool {
 	return s.GetState() == metapb.StoreState_Tombstone
 }
 
-func (s *StoreInfo) downTime() time.Duration {
+// DownTime returns the time elapsed since last heartbeat.
+func (s *StoreInfo) DownTime() time.Duration {
 	return time.Since(s.LastHeartbeatTS)
 }
 
@@ -109,18 +118,21 @@ func (s *StoreInfo) RegionScore() float64 {
 	return float64(s.RegionCount) / s.RegionWeight
 }
 
-func (s *StoreInfo) storageSize() uint64 {
+// StorageSize returns store's used storage size reported from tikv.
+func (s *StoreInfo) StorageSize() uint64 {
 	return s.Stats.GetUsedSize()
 }
 
-func (s *StoreInfo) availableRatio() float64 {
+// AvailableRatio is store's freeSpace/capacity.
+func (s *StoreInfo) AvailableRatio() float64 {
 	if s.Stats.GetCapacity() == 0 {
 		return 0
 	}
 	return float64(s.Stats.GetAvailable()) / float64(s.Stats.GetCapacity())
 }
 
-func (s *StoreInfo) resourceCount(kind ResourceKind) uint64 {
+// ResourceCount reutrns count of leader/region in the store.
+func (s *StoreInfo) ResourceCount(kind ResourceKind) uint64 {
 	switch kind {
 	case LeaderKind:
 		return s.leaderCount()
@@ -131,7 +143,8 @@ func (s *StoreInfo) resourceCount(kind ResourceKind) uint64 {
 	}
 }
 
-func (s *StoreInfo) resourceScore(kind ResourceKind) float64 {
+// ResourceScore reutrns score of leader/region in the store.
+func (s *StoreInfo) ResourceScore(kind ResourceKind) float64 {
 	switch kind {
 	case LeaderKind:
 		return s.LeaderScore()
@@ -163,7 +176,8 @@ func (s *StoreInfo) IsDown() bool {
 	return time.Now().Sub(s.LastHeartbeatTS) > defaultStoreDownTime
 }
 
-func (s *StoreInfo) getLabelValue(key string) string {
+// GetLabelValue returns a label's value (if exists).
+func (s *StoreInfo) GetLabelValue(key string) string {
 	for _, label := range s.GetLabels() {
 		if label.GetKey() == key {
 			return label.GetValue()
@@ -172,11 +186,11 @@ func (s *StoreInfo) getLabelValue(key string) string {
 	return ""
 }
 
-// compareLocation compares 2 stores' labels and returns at which level their
+// CompareLocation compares 2 stores' labels and returns at which level their
 // locations are different. It returns -1 if they are at the same location.
-func (s *StoreInfo) compareLocation(other *StoreInfo, labels []string) int {
+func (s *StoreInfo) CompareLocation(other *StoreInfo, labels []string) int {
 	for i, key := range labels {
-		v1, v2 := s.getLabelValue(key), other.getLabelValue(key)
+		v1, v2 := s.GetLabelValue(key), other.GetLabelValue(key)
 		// If label is not set, the store is considered at the same location
 		// with any other store.
 		if v1 != "" && v2 != "" && v1 != v2 {
@@ -186,7 +200,9 @@ func (s *StoreInfo) compareLocation(other *StoreInfo, labels []string) int {
 	return -1
 }
 
-func (s *StoreInfo) mergeLabels(labels []*metapb.StoreLabel) {
+// MergeLabels merges the passed in labels with origins, overriding duplicated
+// ones.
+func (s *StoreInfo) MergeLabels(labels []*metapb.StoreLabel) {
 L:
 	for _, newLabel := range labels {
 		for _, label := range s.Labels {

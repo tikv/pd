@@ -13,7 +13,10 @@
 
 package server
 
-import "github.com/juju/errors"
+import (
+	"github.com/juju/errors"
+	"github.com/pingcap/pd/server/core"
+)
 
 var (
 	errNotBootstrapped  = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
@@ -146,21 +149,21 @@ func (h *Handler) GetOperators() ([]Operator, error) {
 
 // GetAdminOperators returns the running admin operators.
 func (h *Handler) GetAdminOperators() ([]Operator, error) {
-	return h.GetOperatorsOfKind(AdminKind)
+	return h.GetOperatorsOfKind(core.AdminKind)
 }
 
 // GetLeaderOperators returns the running leader operators.
 func (h *Handler) GetLeaderOperators() ([]Operator, error) {
-	return h.GetOperatorsOfKind(LeaderKind)
+	return h.GetOperatorsOfKind(core.LeaderKind)
 }
 
 // GetRegionOperators returns the running region operators.
 func (h *Handler) GetRegionOperators() ([]Operator, error) {
-	return h.GetOperatorsOfKind(RegionKind)
+	return h.GetOperatorsOfKind(core.RegionKind)
 }
 
 // GetOperatorsOfKind returns the running operators of the kind.
-func (h *Handler) GetOperatorsOfKind(kind ResourceKind) ([]Operator, error) {
+func (h *Handler) GetOperatorsOfKind(kind core.ResourceKind) ([]Operator, error) {
 	ops, err := h.GetOperators()
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -184,7 +187,7 @@ func (h *Handler) GetHistoryOperators() ([]Operator, error) {
 }
 
 // GetHistoryOperatorsOfKind returns history operators by Kind
-func (h *Handler) GetHistoryOperatorsOfKind(kind ResourceKind) ([]Operator, error) {
+func (h *Handler) GetHistoryOperatorsOfKind(kind core.ResourceKind) ([]Operator, error) {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil, errors.Trace(err)

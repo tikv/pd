@@ -642,7 +642,7 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	c.Assert(resp, NotNil)
 
 	regionID := right.GetId()
-	value, ok := cluster.coordinator.histories.get(regionID)
+	value, ok := cluster.coordinator.histories.Get(regionID)
 	c.Assert(ok, IsTrue)
 
 	op := value.(*splitOperator)

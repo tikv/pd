@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/core"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
@@ -157,7 +158,7 @@ func mustPutStore(c *C, s *server.Server, store *metapb.Store) {
 	c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_OK)
 }
 
-func mustRegionHeartBeat(c *C, client pdpb.PD_RegionHeartbeatClient, clusterID uint64, region *server.RegionInfo) {
+func mustRegionHeartBeat(c *C, client pdpb.PD_RegionHeartbeatClient, clusterID uint64, region *core.RegionInfo) {
 	req := &pdpb.RegionHeartbeatRequest{
 		Header: newRequestHeader(clusterID),
 		Region: region.Region,

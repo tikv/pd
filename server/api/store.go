@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/core"
 	"github.com/unrolled/render"
 )
 
@@ -57,7 +58,7 @@ type storeInfo struct {
 
 const downStateName = "Down"
 
-func newStoreInfo(store *server.StoreInfo) *storeInfo {
+func newStoreInfo(store *core.StoreInfo) *storeInfo {
 	s := &storeInfo{
 		Store: &metaStore{
 			Store:     store.Store,

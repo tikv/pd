@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/core"
 )
 
 var _ = Suite(&testStoreSuite{})
@@ -229,7 +230,7 @@ func (s *testStoreSuite) TestUrlStoreFilter(c *C) {
 }
 
 func (s *testStoreSuite) TestDownState(c *C) {
-	store := &server.StoreInfo{
+	store := &core.StoreInfo{
 		Store: &metapb.Store{
 			State: metapb.StoreState_Up,
 		},
