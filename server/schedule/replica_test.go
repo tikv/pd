@@ -21,7 +21,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
-func TestCore(t *testing.T) {
+func TestSchedule(t *testing.T) {
 	TestingT(t)
 }
 

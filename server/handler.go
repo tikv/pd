@@ -86,7 +86,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
-	return h.AddScheduler(newBalanceLeaderScheduler(h.opt))
+	return h.AddScheduler(schedulers.NewBalanceLeaderScheduler(h.opt))
 }
 
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.

@@ -439,13 +439,27 @@ var _ = Suite(&testScheduleControllerSuite{})
 
 type testScheduleControllerSuite struct{}
 
+type mockLimitScheduler struct {
+	schedule.Scheduler
+	limit uint64
+}
+
+func (s *mockLimitScheduler) GetResourceLimit() uint64 {
+	if s.limit != 0 {
+		return s.limit
+	}
+	return s.Scheduler.GetResourceLimit()
+}
+
 func (s *testScheduleControllerSuite) TestController(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	cfg, opt := newTestScheduleConfig()
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	defer hbStreams.Close()
 	co := newCoordinator(cluster, opt, hbStreams)
-	lb := newBalanceLeaderScheduler(opt)
+	lb := &mockLimitScheduler{
+		Scheduler: schedulers.NewBalanceLeaderScheduler(opt),
+	}
 	sc := newScheduleController(co, lb, minScheduleInterval)
 
 	for i := minScheduleInterval; sc.GetInterval() != maxScheduleInterval; i = time.Duration(float64(i) * scheduleIntervalFactor) {
@@ -498,7 +512,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	defer hbStreams.Close()
 	co := newCoordinator(cluster, opt, hbStreams)
-	lb := newBalanceLeaderScheduler(opt)
+	lb := schedulers.NewBalanceLeaderScheduler(opt)
 	sc := newScheduleController(co, lb, minScheduleInterval)
 
 	// If no operator for x seconds, the next check should be in x/2 seconds.

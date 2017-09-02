@@ -22,13 +22,11 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/montanaflynn/stats"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
 
 const (
-	storeCacheInterval    = 30 * time.Second
 	bootstrapBalanceCount = 10
 	bootstrapBalanceDiff  = 2
 )
@@ -75,161 +73,6 @@ func adjustBalanceLimit(cluster *clusterInfo, kind core.ResourceKind) uint64 {
 	}
 	limit, _ := stats.StandardDeviation(stats.Float64Data(counts))
 	return maxUint64(1, uint64(limit))
-}
-
-type balanceLeaderScheduler struct {
-	opt      *scheduleOption
-	limit    uint64
-	selector schedule.Selector
-}
-
-func newBalanceLeaderScheduler(opt *scheduleOption) *balanceLeaderScheduler {
-	filters := []schedule.Filter{
-		schedule.NewBlockFilter(),
-		schedule.NewStateFilter(opt),
-		schedule.NewHealthFilter(opt),
-	}
-	return &balanceLeaderScheduler{
-		opt:      opt,
-		limit:    1,
-		selector: schedule.NewBalanceSelector(core.LeaderKind, filters),
-	}
-}
-
-func (l *balanceLeaderScheduler) GetName() string {
-	return "balance-leader-scheduler"
-}
-
-func (l *balanceLeaderScheduler) GetResourceKind() core.ResourceKind {
-	return core.LeaderKind
-}
-
-func (l *balanceLeaderScheduler) GetResourceLimit() uint64 {
-	return minUint64(l.limit, l.opt.GetLeaderScheduleLimit())
-}
-
-func (l *balanceLeaderScheduler) Prepare(cluster schedule.Cluster) error { return nil }
-
-func (l *balanceLeaderScheduler) Cleanup(cluster schedule.Cluster) {}
-
-func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) schedule.Operator {
-	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
-	region, newLeader := scheduleTransferLeader(cluster.(*clusterInfo), l.GetName(), l.selector)
-	if region == nil {
-		return nil
-	}
-
-	// Skip hot regions.
-	if cluster.IsRegionHot(region.GetId()) {
-		schedulerCounter.WithLabelValues(l.GetName(), "region_hot").Inc()
-		return nil
-	}
-
-	source := cluster.GetStore(region.Leader.GetStoreId())
-	target := cluster.GetStore(newLeader.GetStoreId())
-	if !shouldBalance(source, target, l.GetResourceKind()) {
-		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
-		return nil
-	}
-	l.limit = adjustBalanceLimit(cluster.(*clusterInfo), l.GetResourceKind())
-	schedulerCounter.WithLabelValues(l.GetName(), "new_opeartor").Inc()
-	return schedule.CreateTransferLeaderOperator(region, newLeader)
-}
-
-type balanceRegionScheduler struct {
-	opt      *scheduleOption
-	rep      *Replication
-	cache    *cache.TTLUint64
-	limit    uint64
-	selector schedule.Selector
-}
-
-func newBalanceRegionScheduler(opt *scheduleOption) *balanceRegionScheduler {
-	cache := cache.NewIDTTL(storeCacheInterval, 4*storeCacheInterval)
-	filters := []schedule.Filter{
-		schedule.NewCacheFilter(cache),
-		schedule.NewStateFilter(opt),
-		schedule.NewHealthFilter(opt),
-		schedule.NewSnapshotCountFilter(opt),
-		schedule.NewStorageThresholdFilter(opt),
-	}
-
-	return &balanceRegionScheduler{
-		opt:      opt,
-		rep:      opt.GetReplication(),
-		cache:    cache,
-		limit:    1,
-		selector: schedule.NewBalanceSelector(core.RegionKind, filters),
-	}
-}
-
-func (s *balanceRegionScheduler) GetName() string {
-	return "balance-region-scheduler"
-}
-
-func (s *balanceRegionScheduler) GetResourceKind() core.ResourceKind {
-	return core.RegionKind
-}
-
-func (s *balanceRegionScheduler) GetResourceLimit() uint64 {
-	return minUint64(s.limit, s.opt.GetRegionScheduleLimit())
-}
-
-func (s *balanceRegionScheduler) Prepare(cluster schedule.Cluster) error { return nil }
-
-func (s *balanceRegionScheduler) Cleanup(cluster schedule.Cluster) {}
-
-func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) schedule.Operator {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	// Select a peer from the store with most regions.
-	region, oldPeer := scheduleRemovePeer(cluster.(*clusterInfo), s.GetName(), s.selector)
-	if region == nil {
-		return nil
-	}
-
-	// We don't schedule region with abnormal number of replicas.
-	if len(region.GetPeers()) != s.rep.GetMaxReplicas() {
-		schedulerCounter.WithLabelValues(s.GetName(), "abnormal_replica").Inc()
-		return nil
-	}
-
-	// Skip hot regions.
-	if cluster.IsRegionHot(region.GetId()) {
-		schedulerCounter.WithLabelValues(s.GetName(), "region_hot").Inc()
-		return nil
-	}
-
-	op := s.transferPeer(cluster.(*clusterInfo), region, oldPeer)
-	if op == nil {
-		// We can't transfer peer from this store now, so we add it to the cache
-		// and skip it for a while.
-		s.cache.Put(oldPeer.GetStoreId())
-	}
-	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	return op
-}
-
-func (s *balanceRegionScheduler) transferPeer(cluster *clusterInfo, region *core.RegionInfo, oldPeer *metapb.Peer) schedule.Operator {
-	// scoreGuard guarantees that the distinct score will not decrease.
-	stores := cluster.GetRegionStores(region)
-	source := cluster.GetStore(oldPeer.GetStoreId())
-	scoreGuard := schedule.NewDistinctScoreFilter(s.rep.GetLocationLabels(), stores, source)
-
-	checker := schedule.NewReplicaChecker(s.opt, cluster)
-	newPeer := checker.SelectBestPeerToAddReplica(region, scoreGuard)
-	if newPeer == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
-		return nil
-	}
-
-	target := cluster.GetStore(newPeer.GetStoreId())
-	if !shouldBalance(source, target, s.GetResourceKind()) {
-		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
-		return nil
-	}
-	s.limit = adjustBalanceLimit(cluster, s.GetResourceKind())
-
-	return schedule.CreateMovePeerOperator(region, core.RegionKind, oldPeer, newPeer)
 }
 
 // RegionStat records each hot region's statistics
