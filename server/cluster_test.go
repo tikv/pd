@@ -337,7 +337,7 @@ func (s *testClusterSuite) testPutStore(c *C, clusterID uint64, store *metapb.St
 func (s *testClusterSuite) resetStoreState(c *C, storeID uint64, state metapb.StoreState) {
 	cluster := s.svr.GetRaftCluster().cachedCluster
 	c.Assert(cluster, NotNil)
-	store := cluster.getStore(storeID)
+	store := cluster.GetStore(storeID)
 	c.Assert(store, NotNil)
 	store.State = state
 	cluster.putStore(store)

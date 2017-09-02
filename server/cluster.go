@@ -395,7 +395,7 @@ func (c *RaftCluster) GetStore(storeID uint64) (*core.StoreInfo, error) {
 		return nil, errors.New("invalid zero store id")
 	}
 
-	store := c.cachedCluster.getStore(storeID)
+	store := c.cachedCluster.GetStore(storeID)
 	if store == nil {
 		return nil, errors.Errorf("invalid store ID %d, not found", storeID)
 	}
@@ -404,7 +404,7 @@ func (c *RaftCluster) GetStore(storeID uint64) (*core.StoreInfo, error) {
 
 // UpdateStoreLabels updates a store's location labels.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel) error {
-	store := c.cachedCluster.getStore(storeID)
+	store := c.cachedCluster.GetStore(storeID)
 	if store == nil {
 		return errors.Errorf("invalid store ID %d, not found", storeID)
 	}
@@ -426,7 +426,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	cluster := c.cachedCluster
 
 	// Store address can not be the same as other stores.
-	for _, s := range cluster.getStores() {
+	for _, s := range cluster.GetStores() {
 		// It's OK to start a new store on the same address if the old store has been removed.
 		if s.IsTombstone() {
 			continue
@@ -436,7 +436,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		}
 	}
 
-	s := cluster.getStore(store.GetId())
+	s := cluster.GetStore(store.GetId())
 	if s == nil {
 		// Add a new store.
 		s = core.NewStoreInfo(store)
@@ -464,7 +464,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 
 	cluster := c.cachedCluster
 
-	store := cluster.getStore(storeID)
+	store := cluster.GetStore(storeID)
 	if store == nil {
 		return errors.Trace(errStoreNotFound(storeID))
 	}
@@ -493,7 +493,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 
 	cluster := c.cachedCluster
 
-	store := cluster.getStore(storeID)
+	store := cluster.GetStore(storeID)
 	if store == nil {
 		return errors.Trace(errStoreNotFound(storeID))
 	}
@@ -520,7 +520,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) err
 	c.Lock()
 	defer c.Unlock()
 
-	store := c.cachedCluster.getStore(storeID)
+	store := c.cachedCluster.GetStore(storeID)
 	if store == nil {
 		return errors.Trace(errStoreNotFound(storeID))
 	}
@@ -562,7 +562,7 @@ func (c *RaftCluster) collectMetrics() {
 	minLeaderScore, maxLeaderScore := math.MaxFloat64, float64(0.0)
 	minRegionScore, maxRegionScore := math.MaxFloat64, float64(0.0)
 
-	for _, s := range cluster.getStores() {
+	for _, s := range cluster.GetStores() {
 		// Store state.
 		switch s.GetState() {
 		case metapb.StoreState_Up:

@@ -370,6 +370,10 @@ func (o *scheduleOption) GetMaxReplicas() int {
 	return o.rep.GetMaxReplicas()
 }
 
+func (o *scheduleOption) GetLocationLabels() []string {
+	return o.rep.GetLocationLabels()
+}
+
 func (o *scheduleOption) SetMaxReplicas(replicas int) {
 	o.rep.SetMaxReplicas(replicas)
 }

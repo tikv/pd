@@ -315,7 +315,7 @@ func (s *testClusterInfoSuite) testStoreHeartbeat(c *C, cache *clusterInfo) {
 
 		c.Assert(cache.handleStoreHeartbeat(storeStats), IsNil)
 
-		s := cache.getStore(store.GetId())
+		s := cache.GetStore(store.GetId())
 		c.Assert(s.LastHeartbeatTS.IsZero(), IsFalse)
 	}
 
@@ -435,10 +435,10 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 	}
 
 	for _, region := range regions {
-		for _, store := range cache.getRegionStores(region) {
+		for _, store := range cache.GetRegionStores(region) {
 			c.Assert(region.GetStorePeer(store.GetId()), NotNil)
 		}
-		for _, store := range cache.getFollowerStores(region) {
+		for _, store := range cache.GetFollowerStores(region) {
 			peer := region.GetStorePeer(store.GetId())
 			c.Assert(peer.GetId(), Not(Equals), region.Leader.GetId())
 		}

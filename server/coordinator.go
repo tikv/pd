@@ -66,7 +66,7 @@ type coordinator struct {
 	cluster    *clusterInfo
 	opt        *scheduleOption
 	limiter    *scheduleLimiter
-	checker    *replicaChecker
+	checker    *schedule.ReplicaChecker
 	operators  map[uint64]schedule.Operator
 	schedulers map[string]*scheduleController
 
@@ -84,7 +84,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 		cluster:    cluster,
 		opt:        opt,
 		limiter:    newScheduleLimiter(),
-		checker:    newReplicaChecker(opt, cluster),
+		checker:    schedule.NewReplicaChecker(opt, cluster),
 		operators:  make(map[uint64]schedule.Operator),
 		schedulers: make(map[string]*scheduleController),
 		histories:  cache.NewLRU(historiesCacheSize),

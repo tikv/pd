@@ -21,4 +21,7 @@ import (
 type Options interface {
 	GetMaxSnapshotCount() uint64
 	GetMaxStoreDownTime() time.Duration
+
+	GetMaxReplicas() int
+	GetLocationLabels() []string
 }

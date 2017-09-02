@@ -391,7 +391,8 @@ func (c *clusterInfo) allocID() (uint64, error) {
 	return c.id.Alloc()
 }
 
-func (c *clusterInfo) allocPeer(storeID uint64) (*metapb.Peer, error) {
+// AllocPeer allocs a new peer on a store.
+func (c *clusterInfo) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := c.allocID()
 	if err != nil {
 		log.Errorf("failed to alloc peer: %v", err)
@@ -432,7 +433,8 @@ func (c *clusterInfo) putMetaLocked(meta *metapb.Cluster) error {
 	return nil
 }
 
-func (c *clusterInfo) getStore(storeID uint64) *core.StoreInfo {
+// GetStore searches for a store by ID.
+func (c *clusterInfo) GetStore(storeID uint64) *core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.stores.getStore(storeID)
@@ -454,19 +456,22 @@ func (c *clusterInfo) putStoreLocked(store *core.StoreInfo) error {
 	return nil
 }
 
-func (c *clusterInfo) blockStore(storeID uint64) error {
+// BlockStore stops balancer from selecting the store.
+func (c *clusterInfo) BlockStore(storeID uint64) error {
 	c.Lock()
 	defer c.Unlock()
 	return errors.Trace(c.stores.blockStore(storeID))
 }
 
-func (c *clusterInfo) unblockStore(storeID uint64) {
+// UnblockStore allows balancer to select the store.
+func (c *clusterInfo) UnblockStore(storeID uint64) {
 	c.Lock()
 	defer c.Unlock()
 	c.stores.unblockStore(storeID)
 }
 
-func (c *clusterInfo) getStores() []*core.StoreInfo {
+// GetStores returns all stores in the cluster.
+func (c *clusterInfo) GetStores() []*core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.stores.getStores()
@@ -535,7 +540,8 @@ func (c *clusterInfo) updateWriteStatCache(region *core.RegionInfo, hotRegionThr
 	c.writeStatistics.Put(key, newItem)
 }
 
-func (c *clusterInfo) isRegionHot(id uint64) bool {
+// IsRegionHot checks if a region is in hot state.
+func (c *clusterInfo) IsRegionHot(id uint64) bool {
 	c.RLock()
 	defer c.RUnlock()
 	if stat, ok := c.writeStatistics.Peek(id); ok {
@@ -602,19 +608,22 @@ func (c *clusterInfo) getStoreLeaderCount(storeID uint64) int {
 	return c.regions.getStoreLeaderCount(storeID)
 }
 
-func (c *clusterInfo) randLeaderRegion(storeID uint64) *core.RegionInfo {
+// RandLeaderRegion returns a random region that has leader on the store.
+func (c *clusterInfo) RandLeaderRegion(storeID uint64) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.regions.randLeaderRegion(storeID)
 }
 
-func (c *clusterInfo) randFollowerRegion(storeID uint64) *core.RegionInfo {
+// RandFolowerRegion returns a random region that has a follower on the store.
+func (c *clusterInfo) RandFollowerRegion(storeID uint64) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.regions.randFollowerRegion(storeID)
 }
 
-func (c *clusterInfo) getRegionStores(region *core.RegionInfo) []*core.StoreInfo {
+// GetRegionStores returns all stores that contains the region's peer.
+func (c *clusterInfo) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 	var stores []*core.StoreInfo
@@ -626,13 +635,15 @@ func (c *clusterInfo) getRegionStores(region *core.RegionInfo) []*core.StoreInfo
 	return stores
 }
 
-func (c *clusterInfo) getLeaderStore(region *core.RegionInfo) *core.StoreInfo {
+// GetRegionStores returns all stores that contains the region's leader peer.
+func (c *clusterInfo) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.stores.getStore(region.Leader.GetStoreId())
 }
 
-func (c *clusterInfo) getFollowerStores(region *core.RegionInfo) []*core.StoreInfo {
+// GetRegionStores returns all stores that contains the region's follower peer.
+func (c *clusterInfo) GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 	var stores []*core.StoreInfo

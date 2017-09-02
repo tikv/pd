@@ -41,27 +41,27 @@ func newTestReplication(maxReplicas int, locationLabels ...string) *Replication 
 }
 
 func (c *testClusterInfo) setStoreUp(storeID uint64) {
-	store := c.getStore(storeID)
+	store := c.GetStore(storeID)
 	store.State = metapb.StoreState_Up
 	store.LastHeartbeatTS = time.Now()
 	c.putStore(store)
 }
 
 func (c *testClusterInfo) setStoreDown(storeID uint64) {
-	store := c.getStore(storeID)
+	store := c.GetStore(storeID)
 	store.State = metapb.StoreState_Up
 	store.LastHeartbeatTS = time.Time{}
 	c.putStore(store)
 }
 
 func (c *testClusterInfo) setStoreOffline(storeID uint64) {
-	store := c.getStore(storeID)
+	store := c.GetStore(storeID)
 	store.State = metapb.StoreState_Offline
 	c.putStore(store)
 }
 
 func (c *testClusterInfo) setStoreBusy(storeID uint64, busy bool) {
-	store := c.getStore(storeID)
+	store := c.GetStore(storeID)
 	store.Stats.IsBusy = busy
 	store.LastHeartbeatTS = time.Now()
 	c.putStore(store)
@@ -86,20 +86,20 @@ func (c *testClusterInfo) addRegionStore(storeID uint64, regionCount int) {
 }
 
 func (c *testClusterInfo) updateStoreLeaderWeight(storeID uint64, weight float64) {
-	store := c.getStore(storeID)
+	store := c.GetStore(storeID)
 	store.LeaderWeight = weight
 	c.putStore(store)
 }
 
 func (c *testClusterInfo) updateStoreRegionWeight(storeID uint64, weight float64) {
-	store := c.getStore(storeID)
+	store := c.GetStore(storeID)
 	store.RegionWeight = weight
 	c.putStore(store)
 }
 
 func (c *testClusterInfo) addLabelsStore(storeID uint64, regionCount int, labels map[string]string) {
 	c.addRegionStore(storeID, regionCount)
-	store := c.getStore(storeID)
+	store := c.GetStore(storeID)
 	for k, v := range labels {
 		store.Labels = append(store.Labels, &metapb.StoreLabel{Key: k, Value: v})
 	}
@@ -108,10 +108,10 @@ func (c *testClusterInfo) addLabelsStore(storeID uint64, regionCount int, labels
 
 func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
 	region := &metapb.Region{Id: regionID}
-	leader, _ := c.allocPeer(leaderID)
+	leader, _ := c.AllocPeer(leaderID)
 	region.Peers = []*metapb.Peer{leader}
 	for _, id := range followerIds {
-		peer, _ := c.allocPeer(id)
+		peer, _ := c.AllocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
 	c.putRegion(core.NewRegionInfo(region, leader))
@@ -122,7 +122,7 @@ func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) {
 	region := &metapb.Region{Id: regionID}
 	region.Peers = []*metapb.Peer{}
 	for _, id := range followerIds {
-		peer, _ := c.allocPeer(id)
+		peer, _ := c.AllocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
 	c.putRegion(core.NewRegionInfo(region, nil))
@@ -130,10 +130,10 @@ func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) {
 
 func (c *testClusterInfo) addLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
 	region := &metapb.Region{Id: regionID}
-	leader, _ := c.allocPeer(leaderID)
+	leader, _ := c.AllocPeer(leaderID)
 	region.Peers = []*metapb.Peer{leader}
 	for _, id := range followerIds {
-		peer, _ := c.allocPeer(id)
+		peer, _ := c.AllocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
 	r := core.NewRegionInfo(region, leader)
@@ -143,25 +143,25 @@ func (c *testClusterInfo) addLeaderRegionWithWriteInfo(regionID uint64, leaderID
 }
 
 func (c *testClusterInfo) updateLeaderCount(storeID uint64, leaderCount int) {
-	store := c.getStore(storeID)
+	store := c.GetStore(storeID)
 	store.LeaderCount = leaderCount
 	c.putStore(store)
 }
 
 func (c *testClusterInfo) updateRegionCount(storeID uint64, regionCount int) {
-	store := c.getStore(storeID)
+	store := c.GetStore(storeID)
 	store.RegionCount = regionCount
 	c.putStore(store)
 }
 
 func (c *testClusterInfo) updateSnapshotCount(storeID uint64, snapshotCount int) {
-	store := c.getStore(storeID)
+	store := c.GetStore(storeID)
 	store.Stats.ApplyingSnapCount = uint32(snapshotCount)
 	c.putStore(store)
 }
 
 func (c *testClusterInfo) updateStorageRatio(storeID uint64, usedRatio, availableRatio float64) {
-	store := c.getStore(storeID)
+	store := c.GetStore(storeID)
 	store.Stats.Capacity = uint64(1024)
 	store.Stats.UsedSize = uint64(float64(store.Stats.Capacity) * usedRatio)
 	store.Stats.Available = uint64(float64(store.Stats.Capacity) * availableRatio)
@@ -169,7 +169,7 @@ func (c *testClusterInfo) updateStorageRatio(storeID uint64, usedRatio, availabl
 }
 
 func (c *testClusterInfo) updateStorageWrittenBytes(storeID uint64, BytesWritten uint64) {
-	store := c.getStore(storeID)
+	store := c.GetStore(storeID)
 	store.Stats.BytesWritten = BytesWritten
 	c.putStore(store)
 }
@@ -228,16 +228,16 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 	for _, t := range tests {
 		tc.addLeaderStore(1, int(t.sourceCount))
 		tc.addLeaderStore(2, int(t.targetCount))
-		source := cluster.getStore(1)
-		target := cluster.getStore(2)
+		source := cluster.GetStore(1)
+		target := cluster.GetStore(2)
 		c.Assert(shouldBalance(source, target, core.LeaderKind), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
 		tc.addRegionStore(1, int(t.sourceCount))
 		tc.addRegionStore(2, int(t.targetCount))
-		source := cluster.getStore(1)
-		target := cluster.getStore(2)
+		source := cluster.GetStore(1)
+		target := cluster.GetStore(2)
 		c.Assert(shouldBalance(source, target, core.RegionKind), Equals, t.expectedResult)
 	}
 }
@@ -555,7 +555,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	cfg, opt := newTestScheduleConfig()
-	rc := newReplicaChecker(opt, cluster)
+	rc := schedule.NewReplicaChecker(opt, cluster)
 
 	cfg.MaxSnapshotCount = 2
 
@@ -597,12 +597,12 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	checkAddPeer(c, rc.Check(region), 4)
 
 	// Add peer in store 4, and we have enough replicas.
-	peer4, _ := cluster.allocPeer(4)
+	peer4, _ := cluster.AllocPeer(4)
 	region.Peers = append(region.Peers, peer4)
 	c.Assert(rc.Check(region), IsNil)
 
 	// Add peer in store 3, and we have redundant replicas.
-	peer3, _ := cluster.allocPeer(3)
+	peer3, _ := cluster.AllocPeer(3)
 	region.Peers = append(region.Peers, peer3)
 	checkRemovePeer(c, rc.Check(region), 1)
 	region.RemoveStorePeer(1)
@@ -630,7 +630,7 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 	tc.addRegionStore(2, 1)
 	_, opt := newTestScheduleConfig()
 
-	rc := newReplicaChecker(opt, cluster)
+	rc := schedule.NewReplicaChecker(opt, cluster)
 
 	// now region peer in store 1,2,3.but we just have store 1,2
 	// This happens only in recovering the PD cluster
@@ -648,7 +648,7 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	_, opt := newTestScheduleConfig()
 	opt.rep = newTestReplication(3, "zone", "rack", "host")
 
-	rc := newReplicaChecker(opt, cluster)
+	rc := schedule.NewReplicaChecker(opt, cluster)
 
 	tc.addLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.addLabelsStore(2, 2, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
@@ -660,16 +660,16 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 
 	// Store 2 has different zone and smallest region score.
 	checkAddPeer(c, rc.Check(region), 2)
-	peer2, _ := cluster.allocPeer(2)
+	peer2, _ := cluster.AllocPeer(2)
 	region.Peers = append(region.Peers, peer2)
 
 	// Store 3 has different zone and smallest region score.
 	checkAddPeer(c, rc.Check(region), 3)
-	peer3, _ := cluster.allocPeer(3)
+	peer3, _ := cluster.AllocPeer(3)
 	region.Peers = append(region.Peers, peer3)
 
 	// Store 4 has the same zone with store 3 and larger region score.
-	peer4, _ := cluster.allocPeer(4)
+	peer4, _ := cluster.AllocPeer(4)
 	region.Peers = append(region.Peers, peer4)
 	checkRemovePeer(c, rc.Check(region), 4)
 
@@ -703,7 +703,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	_, opt := newTestScheduleConfig()
 	opt.rep = newTestReplication(3, "zone", "rack", "host")
 
-	rc := newReplicaChecker(opt, cluster)
+	rc := schedule.NewReplicaChecker(opt, cluster)
 
 	tc.addLabelsStore(1, 9, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.addLabelsStore(2, 8, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -712,7 +712,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	tc.addLeaderRegion(1, 1)
 	region := tc.getRegion(1)
 	checkAddPeer(c, rc.Check(region), 2)
-	peer2, _ := cluster.allocPeer(2)
+	peer2, _ := cluster.AllocPeer(2)
 	region.Peers = append(region.Peers, peer2)
 
 	// Store 1,2,3 have the same zone, rack, and host.
@@ -742,12 +742,12 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	checkAddPeer(c, rc.Check(region), 7)
 
 	// Add peer to store 7.
-	peer7, _ := cluster.allocPeer(7)
+	peer7, _ := cluster.AllocPeer(7)
 	region.Peers = append(region.Peers, peer7)
 
 	// Replace peer in store 1 with store 6 because it has a different rack.
 	checkTransferPeer(c, rc.Check(region), 1, 6)
-	peer6, _ := cluster.allocPeer(6)
+	peer6, _ := cluster.AllocPeer(6)
 	region.Peers = append(region.Peers, peer6)
 	checkRemovePeer(c, rc.Check(region), 1)
 	region.RemoveStorePeer(1)
@@ -769,7 +769,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	// So replace peer in store 2 with store 10.
 	tc.addLabelsStore(10, 1, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
 	checkTransferPeer(c, rc.Check(region), 2, 10)
-	peer10, _ := cluster.allocPeer(10)
+	peer10, _ := cluster.AllocPeer(10)
 	region.Peers = append(region.Peers, peer10)
 	checkRemovePeer(c, rc.Check(region), 2)
 	region.RemoveStorePeer(2)
@@ -783,7 +783,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	_, opt := newTestScheduleConfig()
 	opt.rep = newTestReplication(5, "zone", "host")
 
-	rc := newReplicaChecker(opt, cluster)
+	rc := schedule.NewReplicaChecker(opt, cluster)
 
 	tc.addLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "h1"})
 	tc.addLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
@@ -796,11 +796,11 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	region := cluster.getRegion(1)
 
 	checkAddPeer(c, rc.Check(region), 6)
-	peer6, _ := cluster.allocPeer(6)
+	peer6, _ := cluster.AllocPeer(6)
 	region.Peers = append(region.Peers, peer6)
 
 	checkAddPeer(c, rc.Check(region), 5)
-	peer5, _ := cluster.allocPeer(5)
+	peer5, _ := cluster.AllocPeer(5)
 	region.Peers = append(region.Peers, peer5)
 
 	c.Assert(rc.Check(region), IsNil)
