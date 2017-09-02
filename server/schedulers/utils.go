@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2017 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,64 +11,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package schedulers
 
 import (
 	"math"
 
-	log "github.com/Sirupsen/logrus"
+	"github.com/ngaut/log"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
 
-func newPriorityTransferLeader(region *core.RegionInfo, newLeader *metapb.Peer) schedule.Operator {
-	transferLeader := schedule.NewTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
-	return schedule.NewRegionOperator(region, core.PriorityKind, transferLeader)
-}
-
-// scheduleAddPeer schedules a new peer.
-func scheduleAddPeer(cluster *clusterInfo, s schedule.Selector, filters ...schedule.Filter) *metapb.Peer {
-	stores := cluster.GetStores()
-
-	target := s.SelectTarget(stores, filters...)
-	if target == nil {
-		return nil
-	}
-
-	newPeer, err := cluster.AllocPeer(target.GetId())
-	if err != nil {
-		log.Errorf("failed to allocate peer: %v", err)
-		return nil
-	}
-
-	return newPeer
-}
-
-// scheduleRemovePeer schedules a region to remove the peer.
-func scheduleRemovePeer(cluster *clusterInfo, schedulerName string, s schedule.Selector, filters ...schedule.Filter) (*core.RegionInfo, *metapb.Peer) {
-	stores := cluster.GetStores()
-
-	source := s.SelectSource(stores, filters...)
-	if source == nil {
-		schedulerCounter.WithLabelValues(schedulerName, "no_store").Inc()
-		return nil, nil
-	}
-
-	region := cluster.RandFollowerRegion(source.GetId())
-	if region == nil {
-		region = cluster.RandLeaderRegion(source.GetId())
-	}
-	if region == nil {
-		schedulerCounter.WithLabelValues(schedulerName, "no_region").Inc()
-		return nil, nil
-	}
-
-	return region, region.GetStorePeer(source.GetId())
-}
-
 // scheduleTransferLeader schedules a region to transfer leader to the peer.
-func scheduleTransferLeader(cluster *clusterInfo, schedulerName string, s schedule.Selector, filters ...schedule.Filter) (*core.RegionInfo, *metapb.Peer) {
+func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s schedule.Selector, filters ...schedule.Filter) (*core.RegionInfo, *metapb.Peer) {
 	stores := cluster.GetStores()
 	if len(stores) == 0 {
 		schedulerCounter.WithLabelValues(schedulerName, "no_store").Inc()
@@ -119,4 +74,44 @@ func scheduleTransferLeader(cluster *clusterInfo, schedulerName string, s schedu
 		return nil, nil
 	}
 	return region, region.GetStorePeer(leastLeaderStore.GetId())
+}
+
+// scheduleRemovePeer schedules a region to remove the peer.
+func scheduleRemovePeer(cluster schedule.Cluster, schedulerName string, s schedule.Selector, filters ...schedule.Filter) (*core.RegionInfo, *metapb.Peer) {
+	stores := cluster.GetStores()
+
+	source := s.SelectSource(stores, filters...)
+	if source == nil {
+		schedulerCounter.WithLabelValues(schedulerName, "no_store").Inc()
+		return nil, nil
+	}
+
+	region := cluster.RandFollowerRegion(source.GetId())
+	if region == nil {
+		region = cluster.RandLeaderRegion(source.GetId())
+	}
+	if region == nil {
+		schedulerCounter.WithLabelValues(schedulerName, "no_region").Inc()
+		return nil, nil
+	}
+
+	return region, region.GetStorePeer(source.GetId())
+}
+
+// scheduleAddPeer schedules a new peer.
+func scheduleAddPeer(cluster schedule.Cluster, s schedule.Selector, filters ...schedule.Filter) *metapb.Peer {
+	stores := cluster.GetStores()
+
+	target := s.SelectTarget(stores, filters...)
+	if target == nil {
+		return nil
+	}
+
+	newPeer, err := cluster.AllocPeer(target.GetId())
+	if err != nil {
+		log.Errorf("failed to allocate peer: %v", err)
+		return nil
+	}
+
+	return newPeer
 }

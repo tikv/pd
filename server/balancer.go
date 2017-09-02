@@ -108,13 +108,13 @@ func (l *balanceLeaderScheduler) GetResourceLimit() uint64 {
 	return minUint64(l.limit, l.opt.GetLeaderScheduleLimit())
 }
 
-func (l *balanceLeaderScheduler) Prepare(cluster *clusterInfo) error { return nil }
+func (l *balanceLeaderScheduler) Prepare(cluster schedule.Cluster) error { return nil }
 
-func (l *balanceLeaderScheduler) Cleanup(cluster *clusterInfo) {}
+func (l *balanceLeaderScheduler) Cleanup(cluster schedule.Cluster) {}
 
-func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) schedule.Operator {
+func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) schedule.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
-	region, newLeader := scheduleTransferLeader(cluster, l.GetName(), l.selector)
+	region, newLeader := scheduleTransferLeader(cluster.(*clusterInfo), l.GetName(), l.selector)
 	if region == nil {
 		return nil
 	}
@@ -131,9 +131,9 @@ func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) schedule.Operato
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}
-	l.limit = adjustBalanceLimit(cluster, l.GetResourceKind())
+	l.limit = adjustBalanceLimit(cluster.(*clusterInfo), l.GetResourceKind())
 	schedulerCounter.WithLabelValues(l.GetName(), "new_opeartor").Inc()
-	return newTransferLeader(region, newLeader)
+	return schedule.CreateTransferLeaderOperator(region, newLeader)
 }
 
 type balanceRegionScheduler struct {
@@ -175,14 +175,14 @@ func (s *balanceRegionScheduler) GetResourceLimit() uint64 {
 	return minUint64(s.limit, s.opt.GetRegionScheduleLimit())
 }
 
-func (s *balanceRegionScheduler) Prepare(cluster *clusterInfo) error { return nil }
+func (s *balanceRegionScheduler) Prepare(cluster schedule.Cluster) error { return nil }
 
-func (s *balanceRegionScheduler) Cleanup(cluster *clusterInfo) {}
+func (s *balanceRegionScheduler) Cleanup(cluster schedule.Cluster) {}
 
-func (s *balanceRegionScheduler) Schedule(cluster *clusterInfo) schedule.Operator {
+func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	// Select a peer from the store with most regions.
-	region, oldPeer := scheduleRemovePeer(cluster, s.GetName(), s.selector)
+	region, oldPeer := scheduleRemovePeer(cluster.(*clusterInfo), s.GetName(), s.selector)
 	if region == nil {
 		return nil
 	}
@@ -199,7 +199,7 @@ func (s *balanceRegionScheduler) Schedule(cluster *clusterInfo) schedule.Operato
 		return nil
 	}
 
-	op := s.transferPeer(cluster, region, oldPeer)
+	op := s.transferPeer(cluster.(*clusterInfo), region, oldPeer)
 	if op == nil {
 		// We can't transfer peer from this store now, so we add it to the cache
 		// and skip it for a while.
@@ -295,23 +295,23 @@ func (h *balanceHotRegionScheduler) GetResourceLimit() uint64 {
 	return h.limit
 }
 
-func (h *balanceHotRegionScheduler) Prepare(cluster *clusterInfo) error { return nil }
+func (h *balanceHotRegionScheduler) Prepare(cluster schedule.Cluster) error { return nil }
 
-func (h *balanceHotRegionScheduler) Cleanup(cluster *clusterInfo) {}
+func (h *balanceHotRegionScheduler) Cleanup(cluster schedule.Cluster) {}
 
-func (h *balanceHotRegionScheduler) Schedule(cluster *clusterInfo) schedule.Operator {
+func (h *balanceHotRegionScheduler) Schedule(cluster schedule.Cluster) schedule.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
-	h.calcScore(cluster)
+	h.calcScore(cluster.(*clusterInfo))
 
 	// balance by peer
-	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster)
+	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster.(*clusterInfo))
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
 		return schedule.CreateMovePeerOperator(srcRegion, core.PriorityKind, srcPeer, destPeer)
 	}
 
 	// balance by leader
-	srcRegion, newLeader := h.balanceByLeader(cluster)
+	srcRegion, newLeader := h.balanceByLeader(cluster.(*clusterInfo))
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 		return newPriorityTransferLeader(srcRegion, newLeader)

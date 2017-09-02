@@ -11,20 +11,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package schedulers
 
-import (
-	"time"
-)
+import "github.com/prometheus/client_golang/prometheus"
 
-// Options for schedulers.
-type Options interface {
-	GetLeaderScheduleLimit() uint64
-	GetRegionScheduleLimit() uint64
+var schedulerCounter = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "event_count_wip",
+		Help:      "Counter of scheduler events.",
+	}, []string{"type", "name"})
 
-	GetMaxSnapshotCount() uint64
-	GetMaxStoreDownTime() time.Duration
-
-	GetMaxReplicas() int
-	GetLocationLabels() []string
+func init() {
+	prometheus.MustRegister(schedulerCounter)
 }

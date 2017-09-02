@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedulers"
 )
 
 type testOperator struct {
@@ -341,11 +342,11 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	// Add regions 3 with leader in store 3 and followers in stores 1,2
 	tc.addLeaderRegion(3, 3, 1, 2)
 
-	gls := newGrantLeaderScheduler(opt, 0)
+	gls := schedulers.NewGrantLeaderScheduler(opt, 0)
 	c.Assert(co.addScheduler(gls, minScheduleInterval), NotNil)
 	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
 
-	gls = newGrantLeaderScheduler(opt, 1)
+	gls = schedulers.NewGrantLeaderScheduler(opt, 1)
 	c.Assert(co.addScheduler(gls, minScheduleInterval), IsNil)
 
 	// Transfer all leaders to store 1.

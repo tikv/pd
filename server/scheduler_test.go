@@ -16,6 +16,7 @@ package server
 import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedulers"
 )
 
 var _ = Suite(&testShuffleLeaderSuite{})
@@ -27,7 +28,7 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	sl := newShuffleLeaderScheduler(opt)
+	sl := schedulers.NewShuffleLeaderScheduler(opt)
 	c.Assert(sl.Schedule(cluster), IsNil)
 
 	// Add stores 1,2,3,4

@@ -17,6 +17,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedulers"
 )
 
 var (
@@ -66,7 +67,7 @@ func (h *Handler) GetHotWriteStores() map[uint64]uint64 {
 }
 
 // AddScheduler adds a scheduler.
-func (h *Handler) AddScheduler(s Scheduler) error {
+func (h *Handler) AddScheduler(s schedule.Scheduler) error {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return errors.Trace(err)
@@ -90,22 +91,22 @@ func (h *Handler) AddBalanceLeaderScheduler() error {
 
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
-	return h.AddScheduler(newGrantLeaderScheduler(h.opt, storeID))
+	return h.AddScheduler(schedulers.NewGrantLeaderScheduler(h.opt, storeID))
 }
 
 // AddEvictLeaderScheduler adds an evict-leader-scheduler.
 func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
-	return h.AddScheduler(newEvictLeaderScheduler(h.opt, storeID))
+	return h.AddScheduler(schedulers.NewEvictLeaderScheduler(h.opt, storeID))
 }
 
 // AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.
 func (h *Handler) AddShuffleLeaderScheduler() error {
-	return h.AddScheduler(newShuffleLeaderScheduler(h.opt))
+	return h.AddScheduler(schedulers.NewShuffleLeaderScheduler(h.opt))
 }
 
 // AddShuffleRegionScheduler adds a shuffle-region-scheduler.
 func (h *Handler) AddShuffleRegionScheduler() error {
-	return h.AddScheduler(newShuffleRegionScheduler(h.opt))
+	return h.AddScheduler(schedulers.NewShuffleRegionScheduler(h.opt))
 }
 
 // GetOperator returns the region operator.

@@ -209,7 +209,7 @@ func (c *coordinator) shouldRun() bool {
 	return c.cluster.isPrepared()
 }
 
-func (c *coordinator) addScheduler(scheduler Scheduler, interval time.Duration) error {
+func (c *coordinator) addScheduler(scheduler schedule.Scheduler, interval time.Duration) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -398,7 +398,7 @@ func (l *scheduleLimiter) operatorCount(kind core.ResourceKind) uint64 {
 }
 
 type scheduleController struct {
-	Scheduler
+	schedule.Scheduler
 	opt          *scheduleOption
 	limiter      *scheduleLimiter
 	nextInterval time.Duration
@@ -407,7 +407,7 @@ type scheduleController struct {
 	cancel       context.CancelFunc
 }
 
-func newScheduleController(c *coordinator, s Scheduler, minInterval time.Duration) *scheduleController {
+func newScheduleController(c *coordinator, s schedule.Scheduler, minInterval time.Duration) *scheduleController {
 	ctx, cancel := context.WithCancel(c.ctx)
 	return &scheduleController{
 		Scheduler:    s,

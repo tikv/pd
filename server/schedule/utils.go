@@ -53,3 +53,10 @@ func CreateMovePeerOperator(region *core.RegionInfo, kind core.ResourceKind, old
 	}
 	return NewRegionOperator(region, kind, addPeer, removePeer)
 }
+
+// CreateTransferLeaderOperator creates a RegionOperator that transfer a region's
+// leader to another peer.
+func CreateTransferLeaderOperator(region *core.RegionInfo, newLeader *metapb.Peer) Operator {
+	transferLeader := NewTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
+	return NewRegionOperator(region, core.LeaderKind, transferLeader)
+}
