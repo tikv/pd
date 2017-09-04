@@ -388,9 +388,9 @@ var _ = Suite(&testBalanceRegionSchedulerSuite{})
 type testBalanceRegionSchedulerSuite struct{}
 
 // TODO: remove it after moving tests to schedulers directory.
-func (s *testBalanceRegionSchedulerSuite) getCache(scheduler schedule.Scheduler) *cache.IDTTL {
+func (s *testBalanceRegionSchedulerSuite) getCache(scheduler schedule.Scheduler) *cache.TTLUint64 {
 	type hasCache interface {
-		GetCache() *cache.IDTTL
+		GetCache() *cache.TTLUint64
 	}
 	if c, ok := scheduler.(hasCache); ok {
 		return c.GetCache()

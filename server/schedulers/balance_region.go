@@ -26,7 +26,7 @@ const storeCacheInterval = 30 * time.Second
 
 type balanceRegionScheduler struct {
 	opt      schedule.Options
-	cache    *cache.IDTTL
+	cache    *cache.TTLUint64
 	limit    uint64
 	selector schedule.Selector
 }
@@ -122,6 +122,6 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 
 // GetCache returns interval id cache in the scheduler. This is for test only.
 // TODO: remove it after moving tests into this directory.
-func (s *balanceRegionScheduler) GetCache() *cache.IDTTL {
+func (s *balanceRegionScheduler) GetCache() *cache.TTLUint64 {
 	return s.cache
 }
