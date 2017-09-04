@@ -19,7 +19,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-// RegionInfo record detail region info
+// RegionInfo records detail region info.
 type RegionInfo struct {
 	*metapb.Region
 	Leader       *metapb.Peer
@@ -55,7 +55,7 @@ func (r *RegionInfo) Clone() *RegionInfo {
 	}
 }
 
-// GetPeer return the peer with specified peer id
+// GetPeer returns the peer with specified peer id.
 func (r *RegionInfo) GetPeer(peerID uint64) *metapb.Peer {
 	for _, peer := range r.GetPeers() {
 		if peer.GetId() == peerID {
@@ -65,7 +65,7 @@ func (r *RegionInfo) GetPeer(peerID uint64) *metapb.Peer {
 	return nil
 }
 
-// GetDownPeer return the down peers with specified peer id
+// GetDownPeer returns the down peers with specified peer id.
 func (r *RegionInfo) GetDownPeer(peerID uint64) *metapb.Peer {
 	for _, down := range r.DownPeers {
 		if down.GetPeer().GetId() == peerID {
@@ -75,7 +75,7 @@ func (r *RegionInfo) GetDownPeer(peerID uint64) *metapb.Peer {
 	return nil
 }
 
-// GetPendingPeer return the pending peer with specified peer id
+// GetPendingPeer returns the pending peer with specified peer id.
 func (r *RegionInfo) GetPendingPeer(peerID uint64) *metapb.Peer {
 	for _, peer := range r.PendingPeers {
 		if peer.GetId() == peerID {
@@ -85,7 +85,7 @@ func (r *RegionInfo) GetPendingPeer(peerID uint64) *metapb.Peer {
 	return nil
 }
 
-// GetStorePeer return the peer in specified store
+// GetStorePeer returns the peer in specified store.
 func (r *RegionInfo) GetStorePeer(storeID uint64) *metapb.Peer {
 	for _, peer := range r.GetPeers() {
 		if peer.GetStoreId() == storeID {
@@ -95,7 +95,7 @@ func (r *RegionInfo) GetStorePeer(storeID uint64) *metapb.Peer {
 	return nil
 }
 
-// RemoveStorePeer remove the peer in specified store
+// RemoveStorePeer removes the peer in specified store.
 func (r *RegionInfo) RemoveStorePeer(storeID uint64) {
 	var peers []*metapb.Peer
 	for _, peer := range r.GetPeers() {
@@ -106,7 +106,7 @@ func (r *RegionInfo) RemoveStorePeer(storeID uint64) {
 	r.Peers = peers
 }
 
-// GetStoreIds return a map indicate the region distributed
+// GetStoreIds returns a map indicate the region distributed.
 func (r *RegionInfo) GetStoreIds() map[uint64]struct{} {
 	peers := r.GetPeers()
 	stores := make(map[uint64]struct{}, len(peers))
@@ -116,7 +116,7 @@ func (r *RegionInfo) GetStoreIds() map[uint64]struct{} {
 	return stores
 }
 
-// GetFollowers return a map indicate the follow peers distributed
+// GetFollowers returns a map indicate the follow peers distributed.
 func (r *RegionInfo) GetFollowers() map[uint64]*metapb.Peer {
 	peers := r.GetPeers()
 	followers := make(map[uint64]*metapb.Peer, len(peers))
@@ -128,7 +128,7 @@ func (r *RegionInfo) GetFollowers() map[uint64]*metapb.Peer {
 	return followers
 }
 
-// GetFollower randomly return a follow peer
+// GetFollower randomly returns a follow peer.
 func (r *RegionInfo) GetFollower() *metapb.Peer {
 	for _, peer := range r.GetPeers() {
 		if r.Leader == nil || r.Leader.GetId() != peer.GetId() {
