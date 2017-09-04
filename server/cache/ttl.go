@@ -120,25 +120,25 @@ func (c *TTL) doGC() {
 	}
 }
 
-// IDTTL is simple TTL saves only IDs.
-type IDTTL struct {
+// TTLUint64 is simple TTL saves only uint64s.
+type TTLUint64 struct {
 	*TTL
 }
 
-// NewIDTTL creates a new IDTTL cache.
-func NewIDTTL(gcInterval, ttl time.Duration) *IDTTL {
-	return &IDTTL{
+// NewIDTTL creates a new TTLUint64 cache.
+func NewIDTTL(gcInterval, ttl time.Duration) *TTLUint64 {
+	return &TTLUint64{
 		TTL: NewTTL(gcInterval, ttl),
 	}
 }
 
 // Put saves an ID in cache.
-func (c *IDTTL) Put(id uint64) {
+func (c *TTLUint64) Put(id uint64) {
 	c.TTL.Put(id, nil)
 }
 
 // Exists checks if an ID exists in cache.
-func (c *IDTTL) Exists(id uint64) bool {
+func (c *TTLUint64) Exists(id uint64) bool {
 	_, ok := c.TTL.Get(id)
 	return ok
 }

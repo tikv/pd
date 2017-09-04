@@ -139,7 +139,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster *clusterInfo) Operator {
 type balanceRegionScheduler struct {
 	opt      *scheduleOption
 	rep      *Replication
-	cache    *cache.IDTTL
+	cache    *cache.TTLUint64
 	limit    uint64
 	selector schedule.Selector
 }

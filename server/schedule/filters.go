@@ -154,11 +154,11 @@ func (f *snapshotCountFilter) FilterTarget(store *core.StoreInfo) bool {
 }
 
 type cacheFilter struct {
-	cache *cache.IDTTL
+	cache *cache.TTLUint64
 }
 
 // NewCacheFilter creates a Filter that filters all stores that are in the cache.
-func NewCacheFilter(cache *cache.IDTTL) Filter {
+func NewCacheFilter(cache *cache.TTLUint64) Filter {
 	return &cacheFilter{cache: cache}
 }
 
