@@ -18,15 +18,21 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 )
 
+func init() {
+	schedule.RegisterScheduler("balanceLeader", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
+		return newBalanceLeaderScheduler(opt), nil
+	})
+}
+
 type balanceLeaderScheduler struct {
 	opt      schedule.Options
 	limit    uint64
 	selector schedule.Selector
 }
 
-// NewBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
+// newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
-func NewBalanceLeaderScheduler(opt schedule.Options) schedule.Scheduler {
+func newBalanceLeaderScheduler(opt schedule.Options) schedule.Scheduler {
 	filters := []schedule.Filter{
 		schedule.NewBlockFilter(),
 		schedule.NewStateFilter(opt),

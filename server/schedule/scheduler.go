@@ -14,6 +14,9 @@
 package schedule
 
 import (
+	"fmt"
+
+	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 )
@@ -49,4 +52,27 @@ type Scheduler interface {
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)
 	Schedule(cluster Cluster) Operator
+}
+
+// CreateSchedulerFunc is for creating scheudler.
+type CreateSchedulerFunc func(opt Options, args []string) (Scheduler, error)
+
+var schedulerMap = make(map[string]CreateSchedulerFunc)
+
+// RegisterScheduler binds a scheduler creator. It should be called in init()
+// func of a package.
+func RegisterScheduler(name string, createFn CreateSchedulerFunc) {
+	if _, ok := schedulerMap[name]; ok {
+		panic(fmt.Sprintf("duplicated scheduler name: %v", name))
+	}
+	schedulerMap[name] = createFn
+}
+
+// CreateScheduler creates a scheduler with registered creator func.
+func CreateScheduler(name string, opt Options, args ...string) (Scheduler, error) {
+	fn, ok := schedulerMap[name]
+	if !ok {
+		return nil, errors.Errorf("create func of %v is not registered", name)
+	}
+	return fn(opt, args)
 }

@@ -25,6 +25,12 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 )
 
+func init() {
+	schedule.RegisterScheduler("hotRegion", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
+		return newBalanceHotRegionScheduler(opt), nil
+	})
+}
+
 const (
 	hotRegionLimitFactor      = 0.75
 	storeHotRegionsDefaultLen = 100
@@ -51,9 +57,9 @@ type balanceHotRegionScheduler struct {
 	r                  *rand.Rand
 }
 
-// NewBalanceHotRegionScheduler creates a scheduler that keeps hot regions on
+// newBalanceHotRegionScheduler creates a scheduler that keeps hot regions on
 // each stores balanced.
-func NewBalanceHotRegionScheduler(opt schedule.Options) schedule.Scheduler {
+func newBalanceHotRegionScheduler(opt schedule.Options) schedule.Scheduler {
 	return &balanceHotRegionScheduler{
 		opt:                opt,
 		limit:              1,

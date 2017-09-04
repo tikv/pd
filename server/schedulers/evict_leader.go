@@ -15,11 +15,25 @@ package schedulers
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
+
+func init() {
+	schedule.RegisterScheduler("evictLeader", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
+		if len(args) != 1 {
+			return nil, errors.New("evictLeader needs 1 argument")
+		}
+		id, err := strconv.ParseUint(args[0], 10, 64)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return newEvictLeaderScheduler(opt, id), nil
+	})
+}
 
 type evictLeaderScheduler struct {
 	opt      schedule.Options
@@ -28,9 +42,9 @@ type evictLeaderScheduler struct {
 	selector schedule.Selector
 }
 
-// NewEvictLeaderScheduler creates an admin scheduler that transfers all leaders
+// newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
-func NewEvictLeaderScheduler(opt schedule.Options, storeID uint64) schedule.Scheduler {
+func newEvictLeaderScheduler(opt schedule.Options, storeID uint64) schedule.Scheduler {
 	filters := []schedule.Filter{
 		schedule.NewStateFilter(opt),
 		schedule.NewHealthFilter(opt),

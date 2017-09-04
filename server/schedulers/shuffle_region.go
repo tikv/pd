@@ -18,14 +18,20 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 )
 
+func init() {
+	schedule.RegisterScheduler("shuffleRegion", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
+		return newShuffleRegionScheduler(opt), nil
+	})
+}
+
 type shuffleRegionScheduler struct {
 	opt      schedule.Options
 	selector schedule.Selector
 }
 
-// NewShuffleRegionScheduler creates an admin scheduler that shuffles regions
+// newShuffleRegionScheduler creates an admin scheduler that shuffles regions
 // between stores.
-func NewShuffleRegionScheduler(opt schedule.Options) schedule.Scheduler {
+func newShuffleRegionScheduler(opt schedule.Options) schedule.Scheduler {
 	filters := []schedule.Filter{
 		schedule.NewStateFilter(opt),
 		schedule.NewHealthFilter(opt),

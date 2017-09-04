@@ -14,10 +14,11 @@
 package server
 
 import (
+	"strconv"
+
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedulers"
 )
 
 var (
@@ -86,27 +87,47 @@ func (h *Handler) RemoveScheduler(name string) error {
 
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
-	return h.AddScheduler(schedulers.NewBalanceLeaderScheduler(h.opt))
+	s, err := schedule.CreateScheduler("balanceLeader", h.opt)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return h.AddScheduler(s)
 }
 
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
-	return h.AddScheduler(schedulers.NewGrantLeaderScheduler(h.opt, storeID))
+	s, err := schedule.CreateScheduler("grantLeader", h.opt, strconv.FormatUint(storeID, 10))
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return h.AddScheduler(s)
 }
 
 // AddEvictLeaderScheduler adds an evict-leader-scheduler.
 func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
-	return h.AddScheduler(schedulers.NewEvictLeaderScheduler(h.opt, storeID))
+	s, err := schedule.CreateScheduler("evictLeader", h.opt, strconv.FormatUint(storeID, 10))
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return h.AddScheduler(s)
 }
 
 // AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.
 func (h *Handler) AddShuffleLeaderScheduler() error {
-	return h.AddScheduler(schedulers.NewShuffleLeaderScheduler(h.opt))
+	s, err := schedule.CreateScheduler("shuffleLeader", h.opt)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return h.AddScheduler(s)
 }
 
 // AddShuffleRegionScheduler adds a shuffle-region-scheduler.
 func (h *Handler) AddShuffleRegionScheduler() error {
-	return h.AddScheduler(schedulers.NewShuffleRegionScheduler(h.opt))
+	s, err := schedule.CreateScheduler("shuffleRegion", h.opt)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return h.AddScheduler(s)
 }
 
 // GetOperator returns the region operator.

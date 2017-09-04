@@ -22,6 +22,12 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 )
 
+func init() {
+	schedule.RegisterScheduler("balanceRegion", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
+		return newBalanceRegionScheduler(opt), nil
+	})
+}
+
 const storeCacheInterval = 30 * time.Second
 
 type balanceRegionScheduler struct {
@@ -31,9 +37,9 @@ type balanceRegionScheduler struct {
 	selector schedule.Selector
 }
 
-// NewBalanceRegionScheduler creates a scheduler that tends to keep regions on
+// newBalanceRegionScheduler creates a scheduler that tends to keep regions on
 // each store balanced.
-func NewBalanceRegionScheduler(opt schedule.Options) schedule.Scheduler {
+func newBalanceRegionScheduler(opt schedule.Options) schedule.Scheduler {
 	cache := cache.NewIDTTL(storeCacheInterval, 4*storeCacheInterval)
 	filters := []schedule.Filter{
 		schedule.NewCacheFilter(cache),

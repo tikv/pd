@@ -15,11 +15,25 @@ package schedulers
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
+
+func init() {
+	schedule.RegisterScheduler("grantLeader", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
+		if len(args) != 1 {
+			return nil, errors.New("grantLeader needs 1 argument")
+		}
+		id, err := strconv.ParseUint(args[0], 10, 64)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return newGrantLeaderScheduler(opt, id), nil
+	})
+}
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
 type grantLeaderScheduler struct {
@@ -28,9 +42,9 @@ type grantLeaderScheduler struct {
 	storeID uint64
 }
 
-// NewGrantLeaderScheduler creates an admin scheduler that transfers all leaders
+// newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
-func NewGrantLeaderScheduler(opt schedule.Options, storeID uint64) schedule.Scheduler {
+func newGrantLeaderScheduler(opt schedule.Options, storeID uint64) schedule.Scheduler {
 	return &grantLeaderScheduler{
 		opt:     opt,
 		name:    fmt.Sprintf("grant-leader-scheduler-%d", storeID),

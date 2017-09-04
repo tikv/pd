@@ -19,15 +19,21 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 )
 
+func init() {
+	schedule.RegisterScheduler("shuffleLeader", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
+		return newShuffleLeaderScheduler(opt), nil
+	})
+}
+
 type shuffleLeaderScheduler struct {
 	opt      schedule.Options
 	selector schedule.Selector
 	selected *metapb.Peer
 }
 
-// NewShuffleLeaderScheduler creates an admin scheduler that shuffles leaders
+// newShuffleLeaderScheduler creates an admin scheduler that shuffles leaders
 // between stores.
-func NewShuffleLeaderScheduler(opt schedule.Options) schedule.Scheduler {
+func newShuffleLeaderScheduler(opt schedule.Options) schedule.Scheduler {
 	filters := []schedule.Filter{
 		schedule.NewStateFilter(opt),
 		schedule.NewHealthFilter(opt),

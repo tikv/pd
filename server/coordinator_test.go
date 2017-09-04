@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedulers"
 )
 
 type testOperator struct {
@@ -342,11 +341,13 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	// Add regions 3 with leader in store 3 and followers in stores 1,2
 	tc.addLeaderRegion(3, 3, 1, 2)
 
-	gls := schedulers.NewGrantLeaderScheduler(opt, 0)
+	gls, err := schedule.CreateScheduler("grantLeader", opt, "0")
+	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls, minScheduleInterval), NotNil)
 	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
 
-	gls = schedulers.NewGrantLeaderScheduler(opt, 1)
+	gls, err = schedule.CreateScheduler("grantLeader", opt, "1")
+	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls, minScheduleInterval), IsNil)
 
 	// Transfer all leaders to store 1.
@@ -457,8 +458,10 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	defer hbStreams.Close()
 	co := newCoordinator(cluster, opt, hbStreams)
+	scheduler, err := schedule.CreateScheduler("balanceLeader", opt)
+	c.Assert(err, IsNil)
 	lb := &mockLimitScheduler{
-		Scheduler: schedulers.NewBalanceLeaderScheduler(opt),
+		Scheduler: scheduler,
 	}
 	sc := newScheduleController(co, lb, minScheduleInterval)
 
@@ -512,7 +515,8 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	defer hbStreams.Close()
 	co := newCoordinator(cluster, opt, hbStreams)
-	lb := schedulers.NewBalanceLeaderScheduler(opt)
+	lb, err := schedule.CreateScheduler("balanceLeader", opt)
+	c.Assert(err, IsNil)
 	sc := newScheduleController(co, lb, minScheduleInterval)
 
 	// If no operator for x seconds, the next check should be in x/2 seconds.

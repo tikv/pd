@@ -23,7 +23,6 @@ import (
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedulers"
 	"golang.org/x/net/context"
 )
 
@@ -131,9 +130,12 @@ func (c *coordinator) run() {
 		}
 	}
 	log.Info("coordinator: Run scheduler")
-	c.addScheduler(schedulers.NewBalanceLeaderScheduler(c.opt), minScheduleInterval)
-	c.addScheduler(schedulers.NewBalanceRegionScheduler(c.opt), minScheduleInterval)
-	c.addScheduler(schedulers.NewBalanceHotRegionScheduler(c.opt), minSlowScheduleInterval)
+	s, _ := schedule.CreateScheduler("balanceLeader", c.opt)
+	c.addScheduler(s, minScheduleInterval)
+	s, _ = schedule.CreateScheduler("balanceRegion", c.opt)
+	c.addScheduler(s, minScheduleInterval)
+	s, _ = schedule.CreateScheduler("hotRegion", c.opt)
+	c.addScheduler(s, minSlowScheduleInterval)
 }
 
 func (c *coordinator) stop() {
