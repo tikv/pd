@@ -72,7 +72,7 @@ func (s *StoreInfo) IsBlocked() bool {
 	return s.blocked
 }
 
-// IsUp returns checks if the store's state is Up.
+// IsUp checks if the store's state is Up.
 func (s *StoreInfo) IsUp() bool {
 	return s.GetState() == metapb.StoreState_Up
 }
