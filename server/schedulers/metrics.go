@@ -19,7 +19,7 @@ var schedulerCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: "pd",
 		Subsystem: "scheduler",
-		Name:      "event_count_wip",
+		Name:      "event_count",
 		Help:      "Counter of scheduler events.",
 	}, []string{"type", "name"})
 

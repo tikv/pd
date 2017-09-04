@@ -26,6 +26,8 @@ import (
 	"github.com/pingcap/pd/server/schedulers"
 )
 
+// TODO: move tests to schedulers directory.
+
 type testClusterInfo struct {
 	*clusterInfo
 }

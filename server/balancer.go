@@ -20,6 +20,8 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
+// TODO: remove this file.
+
 const (
 	bootstrapBalanceCount = 10
 	bootstrapBalanceDiff  = 2
