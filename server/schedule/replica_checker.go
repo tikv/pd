@@ -26,7 +26,7 @@ type ReplicaChecker struct {
 	filters []Filter
 }
 
-// NewReplicaChecker a replica checker.
+// NewReplicaChecker creates a replica checker.
 func NewReplicaChecker(opt Options, cluster Cluster) *ReplicaChecker {
 	filters := []Filter{
 		NewHealthFilter(opt),
