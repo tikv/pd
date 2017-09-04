@@ -20,6 +20,7 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"golang.org/x/net/context"
@@ -111,8 +112,16 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	c.Assert(err, IsNil)
 	defer cli.Close()
 
-	p1, l1, err := cli.GetTS(context.Background())
-	c.Assert(err, IsNil)
+	var p1, l1 int64
+	testutil.WaitUntil(c, func(c *C) bool {
+		var err error
+		p1, l1, err = cli.GetTS(context.Background())
+		if err == nil {
+			return true
+		}
+		c.Log(err)
+		return false
+	})
 
 	leader := s.mustGetLeader(c, cli.(*client), endpoints)
 	s.verifyLeader(c, cli.(*client), leader)
@@ -145,8 +154,15 @@ func (s *testLeaderChangeSuite) TestLeaderTransfer(c *C) {
 	defer cli.Close()
 
 	quit := make(chan struct{})
-	physical, logical, err := cli.GetTS(context.Background())
-	c.Assert(err, IsNil)
+	var physical, logical int64
+	testutil.WaitUntil(c, func(c *C) bool {
+		physical, logical, err = cli.GetTS(context.Background())
+		if err == nil {
+			return true
+		}
+		c.Log(err)
+		return false
+	})
 	lastTS := s.makeTS(physical, logical)
 	go func() {
 		for {
