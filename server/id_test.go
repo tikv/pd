@@ -34,9 +34,10 @@ type testAllocIDSuite struct {
 
 func (s *testAllocIDSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
+	err := s.svr.Run()
+	c.Assert(err, IsNil)
 	s.client = s.svr.client
 	s.alloc = s.svr.idAlloc
-	go s.svr.Run()
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 }

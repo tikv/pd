@@ -21,6 +21,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -148,13 +149,13 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 		return &pdpb.GetStoreResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	store, _, err := cluster.GetStore(request.GetStoreId())
+	store, err := cluster.GetStore(request.GetStoreId())
 	if err != nil {
 		return nil, grpc.Errorf(codes.Unknown, err.Error())
 	}
 	return &pdpb.GetStoreResponse{
 		Header: s.header(),
-		Store:  store,
+		Store:  store.Store,
 	}, nil
 }
 
@@ -162,7 +163,7 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 // It returns nil if it can't get the store.
 // Copied from server/command.go
 func checkStore2(cluster *RaftCluster, storeID uint64) *pdpb.Error {
-	store, _, err := cluster.GetStore(storeID)
+	store, err := cluster.GetStore(storeID)
 	if err == nil && store != nil {
 		if store.GetState() == metapb.StoreState_Tombstone {
 			return &pdpb.Error{
@@ -266,7 +267,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 			isNew = false
 		}
 
-		region := newRegionInfo(request.GetRegion(), request.GetLeader())
+		region := core.NewRegionInfo(request.GetRegion(), request.GetLeader())
 		region.DownPeers = request.GetDownPeers()
 		region.PendingPeers = request.GetPendingPeers()
 		region.WrittenBytes = request.GetBytesWritten()
@@ -294,7 +295,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg)
 		}
 
-		regionHeartbeatCounter.WithLabelValues("report", "ok")
+		regionHeartbeatCounter.WithLabelValues("report", "ok").Inc()
 	}
 }
 

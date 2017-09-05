@@ -24,17 +24,20 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/pingcap/pd/pdctl"
+	"github.com/pingcap/pd/server"
 	flag "github.com/spf13/pflag"
 )
 
 var (
-	url    string
-	detach bool
+	url     string
+	detach  bool
+	version bool
 )
 
 func init() {
 	flag.StringVarP(&url, "pd", "u", "http://127.0.0.1:2379", "The pd address")
 	flag.BoolVarP(&detach, "detach", "d", false, "Run pdctl without readline")
+	flag.BoolVarP(&version, "version", "V", false, "print version information and exit")
 }
 
 func main() {
@@ -43,6 +46,11 @@ func main() {
 		os.Args = append(os.Args, "-u", pdAddr)
 	}
 	flag.Parse()
+
+	if version {
+		server.PrintPDInfo()
+		os.Exit(0)
+	}
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,

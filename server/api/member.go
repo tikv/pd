@@ -71,7 +71,7 @@ func (h *memberDeleteHandler) DeleteByName(w http.ResponseWriter, r *http.Reques
 	// step 1. get etcd id
 	// TODO: GetPDMembers.
 	var id uint64
-	name := (mux.Vars(r))["name"]
+	name := mux.Vars(r)["name"]
 	listResp, err := etcdutil.ListEtcdMembers(client)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -126,7 +126,7 @@ func newLeaderHandler(svr *server.Server, rd *render.Render) *leaderHandler {
 	}
 }
 
-func (h *leaderHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *leaderHandler) Get(w http.ResponseWriter, r *http.Request) {
 	leader, err := h.svr.GetLeader()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -134,4 +134,24 @@ func (h *leaderHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.rd.JSON(w, http.StatusOK, leader)
+}
+
+func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {
+	err := h.svr.ResignLeader("")
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (h *leaderHandler) Transfer(w http.ResponseWriter, r *http.Request) {
+	err := h.svr.ResignLeader(mux.Vars(r)["next_leader"])
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, nil)
 }

@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/api"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
@@ -62,10 +61,8 @@ func cleanServer(cfg *server.Config) {
 	os.RemoveAll(cfg.DataDir)
 }
 
-type cleanupFunc func()
-
 type testClientSuite struct {
-	cleanup cleanupFunc
+	cleanup server.CleanupFunc
 
 	srv             *server.Server
 	client          Client
@@ -74,7 +71,7 @@ type testClientSuite struct {
 }
 
 func (s *testClientSuite) SetUpSuite(c *C) {
-	s.srv, s.cleanup = newServer(c)
+	_, s.srv, s.cleanup = server.NewTestServer(c)
 	s.grpcPDClient = mustNewGrpcClient(c, s.srv.GetAddr())
 
 	mustWaitLeader(c, map[string]*server.Server{s.srv.GetAddr(): s.srv})
@@ -91,24 +88,6 @@ func (s *testClientSuite) TearDownSuite(c *C) {
 	s.client.Close()
 
 	s.cleanup()
-}
-
-func newServer(c *C) (*server.Server, cleanupFunc) {
-	cfg := server.NewTestSingleConfig()
-
-	s := server.CreateServer(cfg)
-	err := s.StartEtcd(api.NewHandler(s))
-	c.Assert(err, IsNil)
-
-	go s.Run()
-
-	cleanup := func() {
-		s.Close()
-
-		cleanServer(cfg)
-	}
-
-	return s, cleanup
 }
 
 func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {

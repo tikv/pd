@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/core"
 	"golang.org/x/net/context"
 )
 
@@ -53,13 +54,13 @@ func (s *testRegionSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func newTestRegionInfo(regionID, storeID uint64, start, end []byte) *server.RegionInfo {
+func newTestRegionInfo(regionID, storeID uint64, start, end []byte) *core.RegionInfo {
 	leader := &metapb.Peer{
 		Id:      regionID,
 		StoreId: storeID,
 	}
 
-	return &server.RegionInfo{
+	return &core.RegionInfo{
 		Region: &metapb.Region{
 			Id:       regionID,
 			StartKey: start,
@@ -76,13 +77,13 @@ func (s *testRegionSuite) TestRegion(c *C) {
 	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	mustRegionHeartBeat(c, s.regionHeartbeat, s.svr.ClusterID(), r)
 	url := fmt.Sprintf("%s/region/id/%d", s.urlPrefix, r.GetId())
-	r1 := &server.RegionInfo{}
+	r1 := &core.RegionInfo{}
 	err := readJSONWithURL(url, r1)
 	c.Assert(err, IsNil)
 	c.Assert(r1, DeepEquals, r)
 
 	url = fmt.Sprintf("%s/region/key/%s", s.urlPrefix, "a")
-	r2 := &server.RegionInfo{}
+	r2 := &core.RegionInfo{}
 	err = readJSONWithURL(url, r2)
 	c.Assert(err, IsNil)
 	c.Assert(r2, DeepEquals, r)

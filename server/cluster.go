@@ -25,6 +25,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 )
 
 const (
@@ -106,7 +107,7 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 	c.cachedCluster = cluster
-	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt)
+	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt, c.s.hbStreams)
 	c.quit = make(chan struct{})
 
 	c.wg.Add(2)
@@ -360,13 +361,13 @@ func (c *RaftCluster) GetRegionByKey(regionKey []byte) (*metapb.Region, *metapb.
 }
 
 // GetRegionInfoByKey gets regionInfo by region key from cluster.
-func (c *RaftCluster) GetRegionInfoByKey(regionKey []byte) *RegionInfo {
+func (c *RaftCluster) GetRegionInfoByKey(regionKey []byte) *core.RegionInfo {
 	return c.cachedCluster.searchRegion(regionKey)
 }
 
 // GetRegionByID gets region and leader peer by regionID from cluster.
 func (c *RaftCluster) GetRegionByID(regionID uint64) (*metapb.Region, *metapb.Peer) {
-	region := c.cachedCluster.getRegion(regionID)
+	region := c.cachedCluster.GetRegion(regionID)
 	if region == nil {
 		return nil, nil
 	}
@@ -374,8 +375,8 @@ func (c *RaftCluster) GetRegionByID(regionID uint64) (*metapb.Region, *metapb.Pe
 }
 
 // GetRegionInfoByID gets regionInfo by regionID from cluster.
-func (c *RaftCluster) GetRegionInfoByID(regionID uint64) *RegionInfo {
-	return c.cachedCluster.getRegion(regionID)
+func (c *RaftCluster) GetRegionInfoByID(regionID uint64) *core.RegionInfo {
+	return c.cachedCluster.GetRegion(regionID)
 }
 
 // GetRegions gets regions from cluster.
@@ -389,22 +390,21 @@ func (c *RaftCluster) GetStores() []*metapb.Store {
 }
 
 // GetStore gets store from cluster.
-func (c *RaftCluster) GetStore(storeID uint64) (*metapb.Store, *StoreStatus, error) {
+func (c *RaftCluster) GetStore(storeID uint64) (*core.StoreInfo, error) {
 	if storeID == 0 {
-		return nil, nil, errors.New("invalid zero store id")
+		return nil, errors.New("invalid zero store id")
 	}
 
-	store := c.cachedCluster.getStore(storeID)
+	store := c.cachedCluster.GetStore(storeID)
 	if store == nil {
-		return nil, nil, errors.Errorf("invalid store ID %d, not found", storeID)
+		return nil, errors.Errorf("invalid store ID %d, not found", storeID)
 	}
-
-	return store.Store, store.status, nil
+	return store, nil
 }
 
 // UpdateStoreLabels updates a store's location labels.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel) error {
-	store := c.cachedCluster.getStore(storeID)
+	store := c.cachedCluster.GetStore(storeID)
 	if store == nil {
 		return errors.Errorf("invalid store ID %d, not found", storeID)
 	}
@@ -426,9 +426,9 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	cluster := c.cachedCluster
 
 	// Store address can not be the same as other stores.
-	for _, s := range cluster.getStores() {
+	for _, s := range cluster.GetStores() {
 		// It's OK to start a new store on the same address if the old store has been removed.
-		if s.isTombstone() {
+		if s.IsTombstone() {
 			continue
 		}
 		if s.GetId() != store.GetId() && s.GetAddress() == store.GetAddress() {
@@ -436,19 +436,19 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		}
 	}
 
-	s := cluster.getStore(store.GetId())
+	s := cluster.GetStore(store.GetId())
 	if s == nil {
 		// Add a new store.
-		s = newStoreInfo(store)
+		s = core.NewStoreInfo(store)
 	} else {
 		// Update an existed store.
 		s.Address = store.Address
-		s.mergeLabels(store.Labels)
+		s.MergeLabels(store.Labels)
 	}
 
 	// Check location labels.
 	for _, k := range c.s.cfg.Replication.LocationLabels {
-		if v := s.getLabelValue(k); len(v) == 0 {
+		if v := s.GetLabelValue(k); len(v) == 0 {
 			log.Warnf("missing location label %q in store %v", k, s)
 		}
 	}
@@ -464,17 +464,17 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 
 	cluster := c.cachedCluster
 
-	store := cluster.getStore(storeID)
+	store := cluster.GetStore(storeID)
 	if store == nil {
 		return errors.Trace(errStoreNotFound(storeID))
 	}
 
 	// Remove an offline store should be OK, nothing to do.
-	if store.isOffline() {
+	if store.IsOffline() {
 		return nil
 	}
 
-	if store.isTombstone() {
+	if store.IsTombstone() {
 		return errors.New("store has been removed")
 	}
 
@@ -493,17 +493,17 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 
 	cluster := c.cachedCluster
 
-	store := cluster.getStore(storeID)
+	store := cluster.GetStore(storeID)
 	if store == nil {
 		return errors.Trace(errStoreNotFound(storeID))
 	}
 
 	// Bury a tombstone store should be OK, nothing to do.
-	if store.isTombstone() {
+	if store.IsTombstone() {
 		return nil
 	}
 
-	if store.isUp() {
+	if store.IsUp() {
 		if !force {
 			return errors.New("store is still up, please remove store gracefully")
 		}
@@ -511,9 +511,26 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	}
 
 	store.State = metapb.StoreState_Tombstone
-	store.status = newStoreStatus()
 	log.Warnf("[store %d] store %s has been Tombstone", store.GetId(), store.GetAddress())
 	return cluster.putStore(store)
+}
+
+// SetStoreWeight sets up a store's leader/region balance weight.
+func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	store := c.cachedCluster.GetStore(storeID)
+	if store == nil {
+		return errors.Trace(errStoreNotFound(storeID))
+	}
+
+	if err := c.s.kv.saveStoreWeight(storeID, leader, region); err != nil {
+		return errors.Trace(err)
+	}
+
+	store.LeaderWeight, store.RegionWeight = leader, region
+	return c.cachedCluster.putStore(store)
 }
 
 func (c *RaftCluster) checkStores() {
@@ -545,7 +562,7 @@ func (c *RaftCluster) collectMetrics() {
 	minLeaderScore, maxLeaderScore := math.MaxFloat64, float64(0.0)
 	minRegionScore, maxRegionScore := math.MaxFloat64, float64(0.0)
 
-	for _, s := range cluster.getStores() {
+	for _, s := range cluster.GetStores() {
 		// Store state.
 		switch s.GetState() {
 		case metapb.StoreState_Up:
@@ -555,22 +572,22 @@ func (c *RaftCluster) collectMetrics() {
 		case metapb.StoreState_Tombstone:
 			storeTombstoneCount++
 		}
-		if s.isTombstone() {
+		if s.IsTombstone() {
 			continue
 		}
-		if s.downTime() >= c.coordinator.opt.GetMaxStoreDownTime() {
+		if s.DownTime() >= c.coordinator.opt.GetMaxStoreDownTime() {
 			storeDownCount++
 		}
 
 		// Store stats.
-		storageSize += s.storageSize()
-		storageCapacity += s.status.GetCapacity()
+		storageSize += s.StorageSize()
+		storageCapacity += s.Stats.GetCapacity()
 
 		// Balance score.
-		minLeaderScore = math.Min(minLeaderScore, s.leaderScore())
-		maxLeaderScore = math.Max(maxLeaderScore, s.leaderScore())
-		minRegionScore = math.Min(minRegionScore, s.regionScore())
-		maxRegionScore = math.Max(maxRegionScore, s.regionScore())
+		minLeaderScore = math.Min(minLeaderScore, s.LeaderScore())
+		maxLeaderScore = math.Max(maxLeaderScore, s.LeaderScore())
+		minRegionScore = math.Min(minRegionScore, s.RegionScore())
+		maxRegionScore = math.Max(maxRegionScore, s.RegionScore())
 	}
 
 	metrics := make(map[string]float64)

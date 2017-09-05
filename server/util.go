@@ -18,8 +18,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand"
-	"net"
-	"net/http"
 	"reflect"
 	"strings"
 	"time"
@@ -31,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/server/core"
 	"golang.org/x/net/context"
 )
 
@@ -49,21 +48,26 @@ const (
 
 // Version information.
 var (
-	PDBuildTS = "None"
-	PDGitHash = "None"
+	PDReleaseVersion = "0.9.0"
+	PDBuildTS        = "None"
+	PDGitHash        = "None"
+	PDGitBranch      = "None"
 )
 
 // LogPDInfo prints the PD version information.
 func LogPDInfo() {
 	log.Infof("Welcome to Placement Driver (PD).")
-	log.Infof("Version:")
+	log.Infof("Release Version: %s", PDReleaseVersion)
 	log.Infof("Git Commit Hash: %s", PDGitHash)
+	log.Infof("Git Branch: %s", PDGitBranch)
 	log.Infof("UTC Build Time:  %s", PDBuildTS)
 }
 
 // PrintPDInfo prints the PD version information without log info.
 func PrintPDInfo() {
+	fmt.Println("Release Version:", PDReleaseVersion)
 	fmt.Println("Git Commit Hash:", PDGitHash)
+	fmt.Println("Git Branch:", PDGitBranch)
 	fmt.Println("UTC Build Time: ", PDBuildTS)
 }
 
@@ -212,35 +216,6 @@ func sliceClone(strs []string) []string {
 	return data
 }
 
-func rpcConnect(addr string) (net.Conn, error) {
-	req, err := http.NewRequest("GET", pdRPCPrefix, nil)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	urls, err := ParseUrls(addr)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	for _, url := range urls {
-		var conn net.Conn
-		conn, err = net.Dial("tcp", url.Host)
-
-		if err != nil {
-			continue
-		}
-		err = req.Write(conn)
-		if err != nil {
-			conn.Close()
-			continue
-		}
-		return conn, nil
-	}
-
-	return nil, errors.Errorf("connect to %s failed", addr)
-}
-
 // GetMembers return a slice of Members.
 func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
 	listResp, err := etcdutil.ListEtcdMembers(etcdClient)
@@ -283,7 +258,7 @@ func minDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-func diffRegionPeersInfo(origin *RegionInfo, other *RegionInfo) string {
+func diffRegionPeersInfo(origin *core.RegionInfo, other *core.RegionInfo) string {
 	var ret []string
 	for _, a := range origin.Peers {
 		both := false
@@ -312,7 +287,7 @@ func diffRegionPeersInfo(origin *RegionInfo, other *RegionInfo) string {
 	return strings.Join(ret, ",")
 }
 
-func diffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
+func diffRegionKeyInfo(origin *core.RegionInfo, other *core.RegionInfo) string {
 	var ret []string
 	if !bytes.Equal(origin.Region.StartKey, other.Region.StartKey) {
 		originKey := &metapb.Region{StartKey: origin.Region.StartKey}

@@ -21,9 +21,10 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 )
 
-func (c *RaftCluster) handleRegionHeartbeat(region *RegionInfo) error {
+func (c *RaftCluster) handleRegionHeartbeat(region *core.RegionInfo) error {
 	// If the region peer count is 0, then we should not handle this.
 	if len(region.GetPeers()) == 0 {
 		log.Warnf("invalid region, zero region peer count - %v", region)
@@ -100,7 +101,7 @@ func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 
 	// Wrap report split as an Operator, and add it into history cache.
 	op := newSplitOperator(originRegion, left, right)
-	c.coordinator.histories.add(originRegion.GetId(), op)
+	c.coordinator.histories.Put(originRegion.GetId(), op)
 	log.Infof("[region %d] region split, generate new region: %v", originRegion.GetId(), left)
 	c.coordinator.postEvent(op, evtEnd)
 

@@ -16,7 +16,6 @@ package server
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"strings"
 	"sync/atomic"
@@ -27,7 +26,6 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
-	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 )
 
@@ -372,6 +370,10 @@ func (o *scheduleOption) GetMaxReplicas() int {
 	return o.rep.GetMaxReplicas()
 }
 
+func (o *scheduleOption) GetLocationLabels() []string {
+	return o.rep.GetLocationLabels()
+}
+
 func (o *scheduleOption) SetMaxReplicas(replicas int) {
 	o.rep.SetMaxReplicas(replicas)
 }
@@ -398,6 +400,10 @@ func (o *scheduleOption) GetReplicaScheduleLimit() uint64 {
 
 func (o *scheduleOption) persist(kv *kv) error {
 	return kv.saveScheduleOption(o)
+}
+
+func (o *scheduleOption) GetHotRegionLowThreshold() int {
+	return hotRegionLowThreshold
 }
 
 // ParseUrls parse a string into multiple urls.
@@ -455,53 +461,4 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	}
 
 	return cfg, nil
-}
-
-// NewTestSingleConfig is only for test to create one pd.
-// Because pd-client also needs this, so export here.
-func NewTestSingleConfig() *Config {
-	cfg := &Config{
-		Name:       "pd",
-		ClientUrls: testutil.AllocTestURL(),
-		PeerUrls:   testutil.AllocTestURL(),
-
-		InitialClusterState: embed.ClusterStateFlagNew,
-
-		LeaderLease:     1,
-		TsoSaveInterval: typeutil.NewDuration(200 * time.Millisecond),
-	}
-
-	cfg.AdvertiseClientUrls = cfg.ClientUrls
-	cfg.AdvertisePeerUrls = cfg.PeerUrls
-	cfg.DataDir, _ = ioutil.TempDir("/tmp", "test_pd")
-	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
-	cfg.disableStrictReconfigCheck = true
-	cfg.tickMs = 100
-	cfg.electionMs = 1000
-
-	cfg.adjust()
-	return cfg
-}
-
-// NewTestMultiConfig is only for test to create multiple pd configurations.
-// Because pd-client also needs this, so export here.
-func NewTestMultiConfig(count int) []*Config {
-	cfgs := make([]*Config, count)
-
-	clusters := []string{}
-	for i := 1; i <= count; i++ {
-		cfg := NewTestSingleConfig()
-		cfg.Name = fmt.Sprintf("pd%d", i)
-
-		clusters = append(clusters, fmt.Sprintf("%s=%s", cfg.Name, cfg.PeerUrls))
-
-		cfgs[i-1] = cfg
-	}
-
-	initialCluster := strings.Join(clusters, ",")
-	for _, cfg := range cfgs {
-		cfg.InitialCluster = initialCluster
-	}
-
-	return cfgs
 }
