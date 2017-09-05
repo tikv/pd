@@ -41,7 +41,7 @@ func NewReplicaChecker(opt Options, cluster Cluster) *ReplicaChecker {
 }
 
 // Check verifies a region's replicas, creating an Operator if need.
-func (r *ReplicaChecker) Check(region *core.RegionInfo) Operator {
+func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 	if op := r.checkDownPeer(region); op != nil {
 		return op
 	}
@@ -50,11 +50,11 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) Operator {
 	}
 
 	if len(region.GetPeers()) < r.opt.GetMaxReplicas() {
-		newPeer := r.SelectBestPeerToAddReplica(region, r.filters...)
-		if newPeer == nil {
+		store, _ := r.SelectBestStoreToAddReplica(region, r.filters...)
+		if store == 0 {
 			return nil
 		}
-		return CreateAddPeerOperator(region, newPeer)
+		return NewOperator("makeUpReplica", region.GetId(), core.RegionKind, AddPeer{ToStore: store})
 	}
 
 	if len(region.GetPeers()) > r.opt.GetMaxReplicas() {
@@ -62,23 +62,10 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) Operator {
 		if oldPeer == nil {
 			return nil
 		}
-		return CreateRemovePeerOperator(region, oldPeer)
+		return CreateRemovePeerOperator("removeExtraReplica", region, oldPeer.GetStoreId())
 	}
 
 	return r.checkBestReplacement(region)
-}
-
-// SelectBestPeerToAddReplica returns a new peer that to be used to add a replica.
-func (r *ReplicaChecker) SelectBestPeerToAddReplica(region *core.RegionInfo, filters ...Filter) *metapb.Peer {
-	storeID, _ := r.SelectBestStoreToAddReplica(region, filters...)
-	if storeID == 0 {
-		return nil
-	}
-	newPeer, err := r.cluster.AllocPeer(storeID)
-	if err != nil {
-		return nil
-	}
-	return newPeer
 }
 
 // SelectBestStoreToAddReplica returns the store to add a replica.
@@ -119,7 +106,7 @@ func (r *ReplicaChecker) selectBestReplacement(region *core.RegionInfo, peer *me
 	return r.SelectBestStoreToAddReplica(newRegion, NewExcludedFilter(nil, region.GetStoreIds()))
 }
 
-func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) Operator {
+func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *Operator {
 	for _, stats := range region.DownPeers {
 		peer := stats.GetPeer()
 		if peer == nil {
@@ -136,12 +123,12 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) Operator {
 		if stats.GetDownSeconds() < uint64(r.opt.GetMaxStoreDownTime().Seconds()) {
 			continue
 		}
-		return CreateRemovePeerOperator(region, peer)
+		return CreateRemovePeerOperator("removeDownReplica", region, peer.GetStoreId())
 	}
 	return nil
 }
 
-func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) Operator {
+func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
 		if store == nil {
@@ -154,20 +141,20 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) Operator {
 
 		// check the number of replicas firstly
 		if len(region.GetPeers()) > r.opt.GetMaxReplicas() {
-			return CreateRemovePeerOperator(region, peer)
+			return CreateRemovePeerOperator("removeExtraOfflineReplica", region, peer.GetStoreId())
 		}
 
-		newPeer := r.SelectBestPeerToAddReplica(region)
-		if newPeer == nil {
+		newStore, _ := r.SelectBestStoreToAddReplica(region)
+		if newStore == 0 {
 			return nil
 		}
-		return CreateMovePeerOperator(region, core.RegionKind, peer, newPeer)
+		return CreateMovePeerOperator("makeUpOfflineReplica", region, core.RegionKind, peer.GetStoreId(), newStore)
 	}
 
 	return nil
 }
 
-func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) Operator {
+func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator {
 	oldPeer, oldScore := r.selectWorstPeer(region)
 	if oldPeer == nil {
 		return nil
@@ -180,9 +167,5 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) Operator 
 	if newScore <= oldScore {
 		return nil
 	}
-	newPeer, err := r.cluster.AllocPeer(storeID)
-	if err != nil {
-		return nil
-	}
-	return CreateMovePeerOperator(region, core.RegionKind, oldPeer, newPeer)
+	return CreateMovePeerOperator("moveToBetterLocation", region, core.RegionKind, oldPeer.GetStoreId(), storeID)
 }

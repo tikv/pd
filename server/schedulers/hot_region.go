@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
@@ -85,22 +84,23 @@ func (h *balanceHotRegionScheduler) Prepare(cluster schedule.Cluster) error { re
 
 func (h *balanceHotRegionScheduler) Cleanup(cluster schedule.Cluster) {}
 
-func (h *balanceHotRegionScheduler) Schedule(cluster schedule.Cluster) schedule.Operator {
+func (h *balanceHotRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
 	h.calcScore(cluster)
 
 	// balance by peer
-	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster)
+	srcRegion, srcStore, destStore := h.balanceByPeer(cluster)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return schedule.CreateMovePeerOperator(srcRegion, core.PriorityKind, srcPeer, destPeer)
+		return schedule.CreateMovePeerOperator("moveHotRegion", srcRegion, core.PriorityKind, srcStore, destStore)
 	}
 
 	// balance by leader
 	srcRegion, newLeader := h.balanceByLeader(cluster)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
-		return newPriorityTransferLeader(srcRegion, newLeader)
+		step := schedule.TransferLeader{FromStore: srcRegion.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
+		return schedule.NewOperator("transferHotLeader", srcRegion.GetId(), core.PriorityKind, step)
 	}
 
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
@@ -160,7 +160,7 @@ func (h *balanceHotRegionScheduler) calcScore(cluster schedule.Cluster) {
 	}
 }
 
-func (h *balanceHotRegionScheduler) balanceByPeer(cluster schedule.Cluster) (*core.RegionInfo, *metapb.Peer, *metapb.Peer) {
+func (h *balanceHotRegionScheduler) balanceByPeer(cluster schedule.Cluster) (region *core.RegionInfo, fromStore, toStore uint64) {
 	var (
 		maxWrittenBytes        uint64
 		srcStoreID             uint64
@@ -177,7 +177,7 @@ func (h *balanceHotRegionScheduler) balanceByPeer(cluster schedule.Cluster) (*co
 		}
 	}
 	if srcStoreID == 0 {
-		return nil, nil, nil
+		return nil, 0, 0
 	}
 
 	stores := cluster.GetStores()
@@ -207,30 +207,11 @@ func (h *balanceHotRegionScheduler) balanceByPeer(cluster schedule.Cluster) (*co
 		if destStoreID != 0 {
 			srcRegion.WrittenBytes = rs.WrittenBytes
 			h.adjustBalanceLimit(srcStoreID, byPeer)
-
-			var srcPeer *metapb.Peer
-			for _, peer := range srcRegion.GetPeers() {
-				if peer.GetStoreId() == srcStoreID {
-					srcPeer = peer
-					break
-				}
-			}
-
-			if srcPeer == nil {
-				return nil, nil, nil
-			}
-
-			destPeer, err := cluster.AllocPeer(destStoreID)
-			if err != nil {
-				log.Errorf("failed to allocate peer: %v", err)
-				return nil, nil, nil
-			}
-
-			return srcRegion, srcPeer, destPeer
+			return srcRegion, srcStoreID, destStoreID
 		}
 	}
 
-	return nil, nil, nil
+	return nil, 0, 0
 }
 
 func (h *balanceHotRegionScheduler) selectDestStoreByPeer(candidateStoreIDs []uint64, srcRegion *core.RegionInfo, srcStoreID uint64) uint64 {
@@ -362,11 +343,6 @@ func (h *balanceHotRegionScheduler) selectDestStoreByLeader(srcRegion *core.Regi
 		}
 	}
 	return destPeer
-}
-
-func newPriorityTransferLeader(region *core.RegionInfo, newLeader *metapb.Peer) schedule.Operator {
-	transferLeader := schedule.NewTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
-	return schedule.NewRegionOperator(region, core.PriorityKind, transferLeader)
 }
 
 func (h *balanceHotRegionScheduler) GetStatus() *core.StoreHotRegionInfos {

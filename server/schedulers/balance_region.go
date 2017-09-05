@@ -73,7 +73,7 @@ func (s *balanceRegionScheduler) Prepare(cluster schedule.Cluster) error { retur
 
 func (s *balanceRegionScheduler) Cleanup(cluster schedule.Cluster) {}
 
-func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) schedule.Operator {
+func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	// Select a peer from the store with most regions.
 	region, oldPeer := scheduleRemovePeer(cluster, s.GetName(), s.selector)
@@ -103,27 +103,27 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) schedule.Ope
 	return op
 }
 
-func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) schedule.Operator {
+func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *schedule.Operator {
 	// scoreGuard guarantees that the distinct score will not decrease.
 	stores := cluster.GetRegionStores(region)
 	source := cluster.GetStore(oldPeer.GetStoreId())
 	scoreGuard := schedule.NewDistinctScoreFilter(s.opt.GetLocationLabels(), stores, source)
 
 	checker := schedule.NewReplicaChecker(s.opt, cluster)
-	newPeer := checker.SelectBestPeerToAddReplica(region, scoreGuard)
-	if newPeer == nil {
+	newStore, _ := checker.SelectBestStoreToAddReplica(region, scoreGuard)
+	if newStore == 0 {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
 		return nil
 	}
 
-	target := cluster.GetStore(newPeer.GetStoreId())
+	target := cluster.GetStore(newStore)
 	if !shouldBalance(source, target, s.GetResourceKind()) {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
 	}
 	s.limit = adjustBalanceLimit(cluster, s.GetResourceKind())
 
-	return schedule.CreateMovePeerOperator(region, core.RegionKind, oldPeer, newPeer)
+	return schedule.CreateMovePeerOperator("balanceRegion", region, core.RegionKind, oldPeer.GetStoreId(), newStore)
 }
 
 // GetCache returns interval id cache in the scheduler. This is for test only.
