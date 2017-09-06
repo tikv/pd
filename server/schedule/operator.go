@@ -180,11 +180,15 @@ func CreateMovePeerOperator(desc string, region *core.RegionInfo, kind core.Reso
 			newLeader = follower.GetStoreId()
 		}
 		steps := []OperatorStep{
-			AddPeer{ToStore: newStore},
+			AddPeer{ToStore: newStore, PeerID: peerID},
 			TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader},
 			RemovePeer{FromStore: oldStore},
 		}
 		return NewOperator(desc, region.GetId(), kind, steps...)
 	}
-	return NewOperator(desc, region.GetId(), kind, AddPeer{ToStore: newStore, PeerID: peerID}, RemovePeer{FromStore: oldStore})
+	steps := []OperatorStep{
+		AddPeer{ToStore: newStore, PeerID: peerID},
+		RemovePeer{FromStore: oldStore},
+	}
+	return NewOperator(desc, region.GetId(), kind, steps...)
 }

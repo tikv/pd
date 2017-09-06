@@ -54,7 +54,8 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 		if newPeer == nil {
 			return nil
 		}
-		return NewOperator("makeUpReplica", region.GetId(), core.RegionKind, AddPeer{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()})
+		step := AddPeer{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()}
+		return NewOperator("makeUpReplica", region.GetId(), core.RegionKind, step)
 	}
 
 	if len(region.GetPeers()) > r.opt.GetMaxReplicas() {
