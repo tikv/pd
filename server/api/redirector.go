@@ -80,9 +80,7 @@ func newCustomReverseProxies(urls []url.URL) *customReverseProxies {
 		client: &http.Client{},
 	}
 
-	for _, u := range urls {
-		p.urls = append(p.urls, u)
-	}
+	p.urls = append(p.urls, urls...)
 
 	return p
 }

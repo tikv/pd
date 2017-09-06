@@ -173,7 +173,7 @@ const defaultStoreDownTime = time.Minute
 
 // IsDown returns whether the store is down
 func (s *StoreInfo) IsDown() bool {
-	return time.Now().Sub(s.LastHeartbeatTS) > defaultStoreDownTime
+	return time.Since(s.LastHeartbeatTS) > defaultStoreDownTime
 }
 
 // GetLabelValue returns a label's value (if exists).

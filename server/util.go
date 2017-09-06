@@ -193,7 +193,7 @@ func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	resp, err := t.Txn.Commit()
 	t.cancel()
 
-	cost := time.Now().Sub(start)
+	cost := time.Since(start)
 	if cost > slowRequestTime {
 		log.Warnf("txn runs too slow, resp: %v, err: %v, cost: %s", resp, err, cost)
 	}
@@ -205,15 +205,6 @@ func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	txnDuration.WithLabelValues(label).Observe(cost.Seconds())
 
 	return resp, errors.Trace(err)
-}
-
-func sliceClone(strs []string) []string {
-	data := make([]string, 0, len(strs))
-	for _, str := range strs {
-		data = append(data, str)
-	}
-
-	return data
 }
 
 // GetMembers return a slice of Members.
