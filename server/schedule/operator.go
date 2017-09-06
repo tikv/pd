@@ -116,8 +116,8 @@ func (o *Operator) ResourceKind() core.ResourceKind {
 	return o.kind
 }
 
-// ElapseTime returns duration since it was created.
-func (o *Operator) ElapseTime() time.Duration {
+// ElapsedTime returns duration since it was created.
+func (o *Operator) ElapsedTime() time.Duration {
 	return time.Since(o.createTime)
 }
 
