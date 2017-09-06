@@ -193,7 +193,7 @@ func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	resp, err := t.Txn.Commit()
 	t.cancel()
 
-	cost := time.Now().Sub(start)
+	cost := time.Since(start)
 	if cost > slowRequestTime {
 		log.Warnf("txn runs too slow, resp: %v, err: %v, cost: %s", resp, err, cost)
 	}
