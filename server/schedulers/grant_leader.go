@@ -72,7 +72,7 @@ func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {
 	cluster.UnblockStore(s.storeID)
 }
 
-func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) schedule.Operator {
+func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region := cluster.RandFollowerRegion(s.storeID)
 	if region == nil {
@@ -80,5 +80,6 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) schedule.Opera
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	return schedule.CreateTransferLeaderOperator(region, region.GetStorePeer(s.storeID))
+	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: s.storeID}
+	return schedule.NewOperator("grantLeader", region.GetId(), core.LeaderKind, step)
 }

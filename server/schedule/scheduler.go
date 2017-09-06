@@ -17,7 +17,6 @@ import (
 	"fmt"
 
 	"github.com/juju/errors"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -38,10 +37,6 @@ type Cluster interface {
 
 	IsRegionHot(id uint64) bool
 	RegionWriteStats() []*core.RegionStat
-
-	// TODO: it should be removed. Schedulers don't need to know anything
-	// about peers.
-	AllocPeer(storeID uint64) (*metapb.Peer, error)
 }
 
 // Scheduler is an interface to schedule resources.
@@ -51,7 +46,7 @@ type Scheduler interface {
 	GetResourceLimit() uint64
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)
-	Schedule(cluster Cluster) Operator
+	Schedule(cluster Cluster) *Operator
 }
 
 // CreateSchedulerFunc is for creating scheudler.

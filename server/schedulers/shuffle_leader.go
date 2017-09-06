@@ -61,7 +61,7 @@ func (s *shuffleLeaderScheduler) Prepare(cluster schedule.Cluster) error { retur
 
 func (s *shuffleLeaderScheduler) Cleanup(cluster schedule.Cluster) {}
 
-func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) schedule.Operator {
+func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	// We shuffle leaders between stores:
 	// 1. select a store randomly.
 	// 2. transfer a leader from the store to another store.
@@ -78,7 +78,8 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) schedule.Ope
 		// Mark the selected store.
 		s.selected = region.Leader
 		schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-		return schedule.CreateTransferLeaderOperator(region, newLeader)
+		step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
+		return schedule.NewOperator("shuffleLeader", region.GetId(), core.LeaderKind, step)
 	}
 
 	// Reset the selected store.
@@ -92,5 +93,6 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) schedule.Ope
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	return schedule.CreateTransferLeaderOperator(region, region.GetStorePeer(storeID))
+	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: storeID}
+	return schedule.NewOperator("shuffleSelectedLeader", region.GetId(), core.LeaderKind, step)
 }

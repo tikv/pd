@@ -17,7 +17,6 @@ import (
 	"math"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/montanaflynn/stats"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
@@ -101,21 +100,13 @@ func scheduleRemovePeer(cluster schedule.Cluster, schedulerName string, s schedu
 }
 
 // scheduleAddPeer schedules a new peer.
-func scheduleAddPeer(cluster schedule.Cluster, s schedule.Selector, filters ...schedule.Filter) *metapb.Peer {
+func scheduleAddPeer(cluster schedule.Cluster, s schedule.Selector, filters ...schedule.Filter) uint64 {
 	stores := cluster.GetStores()
-
 	target := s.SelectTarget(stores, filters...)
 	if target == nil {
-		return nil
+		return 0
 	}
-
-	newPeer, err := cluster.AllocPeer(target.GetId())
-	if err != nil {
-		log.Errorf("failed to allocate peer: %v", err)
-		return nil
-	}
-
-	return newPeer
+	return target.GetId()
 }
 
 func minUint64(a, b uint64) uint64 {
