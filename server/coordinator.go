@@ -98,9 +98,11 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 			return
 		}
 		if op.IsFinish() {
+			log.Infof("[region %v] operator finish: %s", region.GetId(), op)
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 			c.removeOperator(op)
 		} else if timeout {
+			log.Infof("[region %v] operator timeout: %s", region.GetId(), op)
 			operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 			c.removeOperator(op)
 		}
@@ -283,14 +285,14 @@ func (c *coordinator) addOperator(op *schedule.Operator) bool {
 	defer c.Unlock()
 	regionID := op.RegionID()
 
-	log.Infof("[region %v] add operator: %+v", regionID, op)
+	log.Infof("[region %v] add operator: %s", regionID, op)
 
 	if old, ok := c.operators[regionID]; ok {
 		if !isHigherPriorityOperator(op, old) {
-			log.Infof("[region %v] cancel add operator, old: %+v", regionID, old)
+			log.Infof("[region %v] cancel add operator, old: %s", regionID, old)
 			return false
 		}
-		log.Infof("[region %v] replace old operator: %+v", regionID, old)
+		log.Infof("[region %v] replace old operator: %s", regionID, old)
 		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
 		c.removeOperatorLocked(old)
 	}
@@ -380,6 +382,7 @@ func (c *coordinator) getHistoriesOfKind(kind core.ResourceKind) []*schedule.Ope
 }
 
 func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule.OperatorStep) {
+	log.Infof("[region %v] send schedule command: %s", region.GetId(), step)
 	switch s := step.(type) {
 	case schedule.TransferLeader:
 		cmd := &pdpb.RegionHeartbeatResponse{
