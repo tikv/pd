@@ -73,7 +73,7 @@ func (s *balanceRegionScheduler) Prepare(cluster schedule.Cluster) error { retur
 
 func (s *balanceRegionScheduler) Cleanup(cluster schedule.Cluster) {}
 
-func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) schedule.Operator {
+func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	// Select a peer from the store with most regions.
 	region, oldPeer := scheduleRemovePeer(cluster, s.GetName(), s.selector)
@@ -103,7 +103,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) schedule.Ope
 	return op
 }
 
-func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) schedule.Operator {
+func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *schedule.Operator {
 	// scoreGuard guarantees that the distinct score will not decrease.
 	stores := cluster.GetRegionStores(region)
 	source := cluster.GetStore(oldPeer.GetStoreId())
@@ -123,7 +123,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 	s.limit = adjustBalanceLimit(cluster, s.GetResourceKind())
 
-	return schedule.CreateMovePeerOperator(region, core.RegionKind, oldPeer, newPeer)
+	return schedule.CreateMovePeerOperator("balanceRegion", region, core.RegionKind, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }
 
 // GetCache returns interval id cache in the scheduler. This is for test only.

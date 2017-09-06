@@ -51,7 +51,7 @@ type Scheduler interface {
 	GetResourceLimit() uint64
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)
-	Schedule(cluster Cluster) Operator
+	Schedule(cluster Cluster) *Operator
 }
 
 // CreateSchedulerFunc is for creating scheudler.

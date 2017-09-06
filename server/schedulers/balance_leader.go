@@ -61,7 +61,7 @@ func (l *balanceLeaderScheduler) Prepare(cluster schedule.Cluster) error { retur
 
 func (l *balanceLeaderScheduler) Cleanup(cluster schedule.Cluster) {}
 
-func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) schedule.Operator {
+func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 	region, newLeader := scheduleTransferLeader(cluster, l.GetName(), l.selector)
 	if region == nil {
@@ -82,5 +82,6 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) schedule.Ope
 	}
 	l.limit = adjustBalanceLimit(cluster, l.GetResourceKind())
 	schedulerCounter.WithLabelValues(l.GetName(), "new_opeartor").Inc()
-	return schedule.CreateTransferLeaderOperator(region, newLeader)
+	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
+	return schedule.NewOperator("balanceLeader", region.GetId(), core.LeaderKind, step)
 }

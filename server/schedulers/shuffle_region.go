@@ -59,7 +59,7 @@ func (s *shuffleRegionScheduler) Prepare(cluster schedule.Cluster) error { retur
 
 func (s *shuffleRegionScheduler) Cleanup(cluster schedule.Cluster) {}
 
-func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster) schedule.Operator {
+func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region, oldPeer := scheduleRemovePeer(cluster, s.GetName(), s.selector)
 	if region == nil {
@@ -75,5 +75,5 @@ func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster) schedule.Ope
 	}
 
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	return schedule.CreateMovePeerOperator(region, core.RegionKind, oldPeer, newPeer)
+	return schedule.CreateMovePeerOperator("shuffleRegion", region, core.RegionKind, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }
