@@ -209,9 +209,7 @@ func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 
 func sliceClone(strs []string) []string {
 	data := make([]string, 0, len(strs))
-	for _, str := range strs {
-		data = append(data, str)
-	}
+	data = append(data, strs...)
 
 	return data
 }
