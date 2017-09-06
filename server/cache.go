@@ -346,7 +346,7 @@ type clusterInfo struct {
 	regions *regionsInfo
 
 	activeRegions   int
-	writeStatistics *cache.LRU
+	writeStatistics cache.Cache
 }
 
 func newClusterInfo(id IDAllocator) *clusterInfo {
@@ -354,7 +354,7 @@ func newClusterInfo(id IDAllocator) *clusterInfo {
 		id:              id,
 		stores:          newStoresInfo(),
 		regions:         newRegionsInfo(),
-		writeStatistics: cache.NewLRU(writeStatLRUMaxLen),
+		writeStatistics: cache.NewDefaultCache(writeStatLRUMaxLen),
 	}
 }
 

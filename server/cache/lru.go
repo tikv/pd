@@ -99,6 +99,17 @@ func (c *LRU) Remove(key uint64) {
 	}
 }
 
+func (c *LRU) checkAndRemove(key uint64) bool {
+	c.Lock()
+	defer c.Unlock()
+
+	if ele, ok := c.cache[key]; ok {
+		c.removeElement(ele)
+		return true
+	}
+	return false
+}
+
 func (c *LRU) removeOldest() {
 	ele := c.ll.Back()
 	if ele != nil {
@@ -106,10 +117,26 @@ func (c *LRU) removeOldest() {
 	}
 }
 
+func (c *LRU) getAndRemoveOldest() (uint64, interface{}, bool) {
+	ele := c.ll.Back()
+	if ele != nil {
+		c.removeElement(ele)
+		return ele.Value.(*Item).Key, ele.Value.(*Item).Value, true
+	}
+	return 0, nil, false
+}
+
 func (c *LRU) removeElement(ele *list.Element) {
 	c.ll.Remove(ele)
 	kv := ele.Value.(*Item)
 	delete(c.cache, kv.Key)
+}
+
+func (c *LRU) contains(key uint64) bool {
+	c.RLock()
+	defer c.RUnlock()
+	_, ok := c.cache[key]
+	return ok
 }
 
 // Elems return all items in cache.
