@@ -24,12 +24,15 @@ type Cache interface {
 }
 
 const (
+	// LRUCache means use LRU cache
 	LRUCache int = 1
+	// ARCCache means use ARC cache
 	ARCCache int = 2
 )
 
 var (
-	DefaultCache int = ARCCache
+	// DefaultCache set default cache type for NewDefaultCache function
+	DefaultCache = ARCCache
 )
 
 // NewCache create cache by type

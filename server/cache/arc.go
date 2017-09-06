@@ -55,6 +55,7 @@ func NewARC(size int) *ARC {
 	}
 }
 
+// Put puts an item to cache.
 func (c *ARC) Put(key uint64, value interface{}) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -181,6 +182,7 @@ func (c *ARC) replace(b2ContainsKey bool) {
 	}
 }
 
+// Get retrives an item from cache.
 func (c *ARC) Get(key uint64) (interface{}, bool) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -202,6 +204,7 @@ func (c *ARC) Get(key uint64) (interface{}, bool) {
 	return nil, false
 }
 
+// Peek reads an item from cache. The action is no considerd 'Use'.
 func (c *ARC) Peek(key uint64) (interface{}, bool) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
@@ -211,6 +214,7 @@ func (c *ARC) Peek(key uint64) (interface{}, bool) {
 	return c.t2.Peek(key)
 }
 
+// Remove eliminates an item from cache.
 func (c *ARC) Remove(key uint64) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
@@ -228,12 +232,14 @@ func (c *ARC) Remove(key uint64) {
 	}
 }
 
+// Len returns current cache size.
 func (c *ARC) Len() int {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	return c.t1.Len() + c.t2.Len()
 }
 
+// Elems return all items in cache.
 func (c *ARC) Elems() []*Item {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
