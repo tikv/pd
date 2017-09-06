@@ -60,7 +60,7 @@ func showHotRegionsCommandFunc(cmd *cobra.Command, args []string) {
 // NewHotReadRegionCommand return a hot read regions subcommand of hotSpotCmd
 func NewHotReadRegionCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "read region",
+		Use:   "read",
 		Short: "show the hot read regions",
 		Run:   showHotReadRegionsCommandFunc,
 	}

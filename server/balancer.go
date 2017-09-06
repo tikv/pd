@@ -895,32 +895,27 @@ func (h *balanceHotReadRegionScheduler) calcScore(cluster *clusterInfo) {
 
 		regionInfo := cluster.getRegion(r.RegionID)
 		leaderStoreID := regionInfo.Leader.GetStoreId()
-		storeIDs := regionInfo.GetStoreIds()
-		for storeID := range storeIDs {
-			leaderStat, ok := h.statisticsAsLeader[storeID]
-			if !ok {
-				leaderStat = &HotReadRegionsStat{
-					ReadRegionsStat: make(ReadRegionsStat, 0, storeHotRegionsDefaultLen),
-				}
-				h.statisticsAsLeader[storeID] = leaderStat
+		leaderStat, ok := h.statisticsAsLeader[leaderStoreID]
+		if !ok {
+			leaderStat = &HotReadRegionsStat{
+				ReadRegionsStat: make(ReadRegionsStat, 0, storeHotRegionsDefaultLen),
 			}
-
-			stat := ReadRegionStat{
-				RegionID:       r.RegionID,
-				ReadBytes:      r.ReadBytes,
-				HotDegree:      r.HotDegree,
-				LastUpdateTime: r.LastUpdateTime,
-				StoreID:        storeID,
-				antiCount:      r.antiCount,
-				version:        r.version,
-			}
-
-			if storeID == leaderStoreID {
-				leaderStat.ReadBytes += r.ReadBytes
-				leaderStat.RegionsCount++
-				leaderStat.ReadRegionsStat = append(leaderStat.ReadRegionsStat, stat)
-			}
+			h.statisticsAsLeader[leaderStoreID] = leaderStat
 		}
+
+		stat := ReadRegionStat{
+			RegionID:       r.RegionID,
+			ReadBytes:      r.ReadBytes,
+			HotDegree:      r.HotDegree,
+			LastUpdateTime: r.LastUpdateTime,
+			StoreID:        leaderStoreID,
+			antiCount:      r.antiCount,
+			version:        r.version,
+		}
+
+		leaderStat.ReadBytes += r.ReadBytes
+		leaderStat.RegionsCount++
+		leaderStat.ReadRegionsStat = append(leaderStat.ReadRegionsStat, stat)
 	}
 }
 
