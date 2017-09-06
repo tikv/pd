@@ -207,15 +207,6 @@ func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	return resp, errors.Trace(err)
 }
 
-func sliceClone(strs []string) []string {
-	data := make([]string, 0, len(strs))
-	for _, str := range strs {
-		data = append(data, str)
-	}
-
-	return data
-}
-
 // GetMembers return a slice of Members.
 func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
 	listResp, err := etcdutil.ListEtcdMembers(etcdClient)
