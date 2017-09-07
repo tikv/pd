@@ -25,6 +25,7 @@ import (
 // it is roughly 2x the cost, and the extra memory overhead is linear
 // with the size of the cache. ARC has been patented by IBM, but is
 // similar to the TwoQueueCache (2Q) which requires setting parameters.
+// This ARC cache is reference by https://github.com/hashicorp/golang-lru/blob/master/arc.go
 type ARC struct {
 	size int // Size is the total capacity of the cache
 	p    int // P is the dynamic preference towards T1 or T2
