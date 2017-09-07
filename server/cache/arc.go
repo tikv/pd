@@ -63,25 +63,24 @@ func (c *ARC) Put(key uint64, value interface{}) {
 	// Check if the value is contained in T1 (recent), and potentially
 	// promote it to frequent T2
 	if c.t1.contains(key) {
-		c.t1.Remove(key)
-		c.t2.Put(key, value)
+		c.t1.remove(key)
+		c.t2.put(key, value)
 		return
 	}
 
 	// Check if the value is already in T2 (frequent) and update it
 	if c.t2.contains(key) {
-		c.t2.Put(key, value)
+		c.t2.put(key, value)
 		return
 	}
 
-	length := c.t1.Len() + c.t2.Len()
 	// Check if this value was recently evicted as part of the
 	// recently used list
 	if c.b1.contains(key) {
 		// T1 set is too small, increase P appropriately
 		delta := 1
-		b1Size := c.b1.Len()
-		b2Size := c.b2.Len()
+		b1Size := c.b1.size()
+		b2Size := c.b2.size()
 		if b2Size > b1Size {
 			delta = b2Size / b1Size
 		}
@@ -90,27 +89,26 @@ func (c *ARC) Put(key uint64, value interface{}) {
 		} else {
 			c.p += delta
 		}
-		// Remove from B1
-		c.b1.Remove(key)
-
-		// Put the key to the frequently used list
-		c.t2.Put(key, value)
 
 		// Potentially need to make room in the cache
-		for i := 0; i < length; i++ {
-			if c.t1.Len()+c.t2.Len() >= c.size {
-				c.replace(false)
-			}
+		if c.t1.size()+c.t2.size() >= c.size {
+			c.replace(false)
 		}
+		// Remove from B1
+		c.b1.remove(key)
+
+		// Put the key to the frequently used list
+		c.t2.put(key, value)
 		return
 	}
+
 	// Check if this value was recently evicted as part of the
 	// frequently used list
 	if c.b2.contains(key) {
 		// T2 set is too small, decrease P appropriately
 		delta := 1
-		b1Size := c.b1.Len()
-		b2Size := c.b2.Len()
+		b1Size := c.b1.size()
+		b2Size := c.b2.size()
 		if b1Size > b2Size {
 			delta = b1Size / b2Size
 		}
@@ -120,64 +118,51 @@ func (c *ARC) Put(key uint64, value interface{}) {
 			c.p -= delta
 		}
 
+		// Potentially need to make room in the cache
+		if c.t1.size()+c.t2.size() >= c.size {
+			c.replace(true)
+		}
+
 		// Remove from B2
-		c.b2.Remove(key)
+		c.b2.remove(key)
 
 		// Put the key to the frequntly used list
-		c.t2.Put(key, value)
-
-		// Potentially need to make room in the cache
-		for i := 0; i < length; i++ {
-			if c.t1.Len()+c.t2.Len() >= c.size {
-				c.replace(true)
-			}
-		}
+		c.t2.put(key, value)
 		return
 	}
 
-	// Put to the recently seen list
-	c.t1.Put(key, value)
-
 	// Potentially need to make room in the cache
-	for i := 0; i < length; i++ {
-		if c.t1.Len()+c.t2.Len() >= c.size {
-			c.replace(false)
-		} else {
-			break
-		}
+	if c.t1.size()+c.t2.size() >= c.size {
+		c.replace(false)
 	}
 
 	// Keep the size of the ghost buffers trim
-	for i := 0; i < length; i++ {
-		if c.b1.Len() > c.size-c.p {
-			c.b1.removeOldest()
-		} else {
-			break
-		}
+	if c.b1.size() > c.size-c.p {
+		c.b1.removeOldest()
 	}
 
-	for i := 0; i < length; i++ {
-		if c.b2.Len() > c.p {
-			c.b2.removeOldest()
-		} else {
-			break
-		}
+	if c.b2.size() > c.p {
+		c.b2.removeOldest()
 	}
+
+	// Put to the recently seen list
+	c.t1.put(key, value)
+	return
 }
 
 // replace is used to adaptively evict from either T1 or T2
 // based on the current learned value of P
 func (c *ARC) replace(b2ContainsKey bool) {
-	t1Size := c.t1.Len()
+	t1Size := c.t1.size()
 	if t1Size > 0 && (t1Size > c.p || (t1Size == c.p && b2ContainsKey)) {
 		k, _, ok := c.t1.getAndRemoveOldest()
 		if ok {
-			c.b1.Put(k, nil)
+			c.b1.put(k, nil)
 		}
 	} else {
 		k, _, ok := c.t2.getAndRemoveOldest()
 		if ok {
-			c.b2.Put(k, nil)
+			c.b2.put(k, nil)
 		}
 	}
 }
@@ -189,14 +174,14 @@ func (c *ARC) Get(key uint64) (interface{}, bool) {
 
 	// Ff the value is contained in T1 (recent), then
 	// promote it to T2 (frequent)
-	if val, ok := c.t1.Peek(key); ok {
-		c.t1.Remove(key)
-		c.t2.Put(key, val)
+	if val, ok := c.t1.peek(key); ok {
+		c.t1.remove(key)
+		c.t2.put(key, val)
 		return val, ok
 	}
 
 	// Check if the value is contained in T2 (frequent)
-	if val, ok := c.t2.Get(key); ok {
+	if val, ok := c.t2.get(key); ok {
 		return val, ok
 	}
 
@@ -208,10 +193,10 @@ func (c *ARC) Get(key uint64) (interface{}, bool) {
 func (c *ARC) Peek(key uint64) (interface{}, bool) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	if val, ok := c.t1.Peek(key); ok {
+	if val, ok := c.t1.peek(key); ok {
 		return val, ok
 	}
-	return c.t2.Peek(key)
+	return c.t2.peek(key)
 }
 
 // Remove eliminates an item from cache.
@@ -236,7 +221,7 @@ func (c *ARC) Remove(key uint64) {
 func (c *ARC) Len() int {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
-	return c.t1.Len() + c.t2.Len()
+	return c.t1.size() + c.t2.size()
 }
 
 // Elems return all items in cache.
@@ -244,8 +229,8 @@ func (c *ARC) Elems() []*Item {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 
-	elems := make([]*Item, 0, c.Len())
-	elems = append(elems, c.t1.Elems()...)
-	elems = append(elems, c.t2.Elems()...)
+	elems := make([]*Item, 0, c.t1.size()+c.t2.size())
+	elems = append(elems, c.t1.elems()...)
+	elems = append(elems, c.t2.elems()...)
 	return elems
 }

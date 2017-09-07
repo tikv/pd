@@ -180,12 +180,10 @@ func (s *testRegionCacheSuite) TestFifoCache(c *C) {
 }
 
 func (s *testRegionCacheSuite) TestARCCache(c *C) {
-	cache := NewARC(4)
+	cache := NewARC(3)
 	cache.Put(1, "1")
 	cache.Put(2, "2")
 	cache.Put(3, "3")
-
-	c.Assert(cache.Len(), Equals, 3)
 
 	val, ok := cache.Get(3)
 	c.Assert(ok, IsTrue)
@@ -199,7 +197,8 @@ func (s *testRegionCacheSuite) TestARCCache(c *C) {
 	c.Assert(ok, IsTrue)
 	c.Assert(val, DeepEquals, "1")
 
-	cache.Put(4, "4")
+	c.Assert(cache.Len(), Equals, 3)
+
 	cache.Put(4, "4")
 
 	c.Assert(cache.Len(), Equals, 3)
