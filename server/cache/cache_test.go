@@ -79,7 +79,7 @@ func (s *testRegionCacheSuite) TestExpireRegionCache(c *C) {
 }
 
 func (s *testRegionCacheSuite) TestLRUCache(c *C) {
-	cache := NewLRU(3)
+	cache := newLRU(3)
 	cache.Put(1, "1")
 	cache.Put(2, "2")
 	cache.Put(3, "3")
