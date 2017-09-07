@@ -37,8 +37,10 @@ type Cache interface {
 type Type int
 
 const (
-	// LRUCache is LRU cache type
+	// LRUCache is for LRU cache
 	LRUCache Type = 1
+	// TwoQueueCache is for 2Q cache
+	TwoQueueCache Type = 2
 )
 
 var (
@@ -104,6 +106,8 @@ func NewCache(size int, cacheType Type) Cache {
 	switch cacheType {
 	case LRUCache:
 		return newThreadSafeCache(newLRU(size))
+	case TwoQueueCache:
+		return newThreadSafeCache(newTwoQueue(size))
 	default:
 		panic("Unknown cache type")
 	}

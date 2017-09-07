@@ -78,11 +78,22 @@ func (c *LRU) Peek(key uint64) (interface{}, bool) {
 	return nil, false
 }
 
+func (c *LRU) contains(key uint64) bool {
+	_, ok := c.cache[key]
+	return ok
+}
+
 // Remove eliminates an item from cache.
 func (c *LRU) Remove(key uint64) {
+	c.remove(key)
+}
+
+func (c *LRU) remove(key uint64) bool {
 	if ele, ok := c.cache[key]; ok {
 		c.removeElement(ele)
+		return ok
 	}
+	return false
 }
 
 func (c *LRU) removeOldest() {
@@ -90,6 +101,15 @@ func (c *LRU) removeOldest() {
 	if ele != nil {
 		c.removeElement(ele)
 	}
+}
+
+func (c *LRU) getAndRemoveOldest() (uint64, interface{}, bool) {
+	ele := c.ll.Back()
+	if ele != nil {
+		c.removeElement(ele)
+		return ele.Value.(*Item).Key, ele.Value.(*Item).Value, true
+	}
+	return 0, nil, false
 }
 
 func (c *LRU) removeElement(ele *list.Element) {
