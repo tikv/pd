@@ -55,8 +55,8 @@ func (h *operatorHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 	var (
-		results []schedule.Operator
-		ops     []schedule.Operator
+		results []*schedule.Operator
+		ops     []*schedule.Operator
 		err     error
 	)
 

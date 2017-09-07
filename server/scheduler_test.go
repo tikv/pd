@@ -47,13 +47,10 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	tc.addLeaderRegion(4, 1, 2, 3, 4)
 
 	for i := 0; i < 4; i++ {
-		bop := sl.Schedule(cluster)
-		op := bop.(*schedule.RegionOperator).Ops[0].(*schedule.TransferLeaderOperator)
-
-		sourceID := op.OldLeader.GetStoreId()
-
-		bop = sl.Schedule(cluster)
-		op = bop.(*schedule.RegionOperator).Ops[0].(*schedule.TransferLeaderOperator)
-		c.Assert(op.NewLeader.GetStoreId(), Equals, sourceID)
+		op := sl.Schedule(cluster)
+		sourceID := op.Step(0).(schedule.TransferLeader).FromStore
+		op = sl.Schedule(cluster)
+		targetID := op.Step(0).(schedule.TransferLeader).ToStore
+		c.Assert(sourceID, Equals, targetID)
 	}
 }

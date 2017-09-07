@@ -17,32 +17,14 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
 
-type testOperator struct {
-	RegionID uint64
-	Kind     core.ResourceKind
-	State    schedule.OperatorState
-}
-
-func newTestOperator(regionID uint64, kind core.ResourceKind) schedule.Operator {
-	region := core.NewRegionInfo(&metapb.Region{Id: regionID}, nil)
-	op := &testOperator{RegionID: regionID, Kind: kind, State: schedule.OperatorRunning}
-	return schedule.NewRegionOperator(region, kind, op)
-}
-
-func (op *testOperator) GetRegionID() uint64                   { return op.RegionID }
-func (op *testOperator) GetResourceKind() core.ResourceKind    { return op.Kind }
-func (op *testOperator) GetState() schedule.OperatorState      { return op.State }
-func (op *testOperator) SetState(state schedule.OperatorState) { op.State = state }
-func (op *testOperator) GetName() string                       { return "test" }
-func (op *testOperator) Do(region *core.RegionInfo) (*pdpb.RegionHeartbeatResponse, bool) {
-	return nil, false
+func newTestOperator(regionID uint64, kind core.ResourceKind) *schedule.Operator {
+	return schedule.NewOperator("test", regionID, kind)
 }
 
 var _ = Suite(&testCoordinatorSuite{})
@@ -59,19 +41,19 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 
 	op1 := newTestOperator(1, core.LeaderKind)
 	co.addOperator(op1)
-	c.Assert(l.operatorCount(op1.GetResourceKind()), Equals, uint64(1))
-	c.Assert(co.getOperator(1).GetRegionID(), Equals, op1.GetRegionID())
+	c.Assert(l.operatorCount(op1.ResourceKind()), Equals, uint64(1))
+	c.Assert(co.getOperator(1).RegionID(), Equals, op1.RegionID())
 
 	// Region 1 already has an operator, cannot add another one.
 	op2 := newTestOperator(1, core.RegionKind)
 	co.addOperator(op2)
-	c.Assert(l.operatorCount(op2.GetResourceKind()), Equals, uint64(0))
+	c.Assert(l.operatorCount(op2.ResourceKind()), Equals, uint64(0))
 
 	// Remove the operator manually, then we can add a new operator.
 	co.removeOperator(op1)
 	co.addOperator(op2)
-	c.Assert(l.operatorCount(op2.GetResourceKind()), Equals, uint64(1))
-	c.Assert(co.getOperator(1).GetRegionID(), Equals, op2.GetRegionID())
+	c.Assert(l.operatorCount(op2.ResourceKind()), Equals, uint64(1))
+	c.Assert(co.getOperator(1).RegionID(), Equals, op2.RegionID())
 }
 
 type mockHeartbeatStream struct {

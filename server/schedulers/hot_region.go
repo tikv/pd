@@ -85,7 +85,7 @@ func (h *balanceHotRegionScheduler) Prepare(cluster schedule.Cluster) error { re
 
 func (h *balanceHotRegionScheduler) Cleanup(cluster schedule.Cluster) {}
 
-func (h *balanceHotRegionScheduler) Schedule(cluster schedule.Cluster) schedule.Operator {
+func (h *balanceHotRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
 	h.calcScore(cluster)
 
@@ -93,14 +93,15 @@ func (h *balanceHotRegionScheduler) Schedule(cluster schedule.Cluster) schedule.
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return schedule.CreateMovePeerOperator(srcRegion, core.PriorityKind, srcPeer, destPeer)
+		return schedule.CreateMovePeerOperator("moveHotRegion", srcRegion, core.PriorityKind, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 	}
 
 	// balance by leader
 	srcRegion, newLeader := h.balanceByLeader(cluster)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
-		return newPriorityTransferLeader(srcRegion, newLeader)
+		step := schedule.TransferLeader{FromStore: srcRegion.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
+		return schedule.NewOperator("transferHotLeader", srcRegion.GetId(), core.PriorityKind, step)
 	}
 
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
@@ -362,11 +363,6 @@ func (h *balanceHotRegionScheduler) selectDestStoreByLeader(srcRegion *core.Regi
 		}
 	}
 	return destPeer
-}
-
-func newPriorityTransferLeader(region *core.RegionInfo, newLeader *metapb.Peer) schedule.Operator {
-	transferLeader := schedule.NewTransferLeaderOperator(region.GetId(), region.Leader, newLeader)
-	return schedule.NewRegionOperator(region, core.PriorityKind, transferLeader)
 }
 
 func (h *balanceHotRegionScheduler) GetStatus() *core.StoreHotRegionInfos {

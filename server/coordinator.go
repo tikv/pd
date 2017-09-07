@@ -20,6 +20,8 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
@@ -64,7 +66,7 @@ type coordinator struct {
 	opt        *scheduleOption
 	limiter    *scheduleLimiter
 	checker    *schedule.ReplicaChecker
-	operators  map[uint64]schedule.Operator
+	operators  map[uint64]*schedule.Operator
 	schedulers map[string]*scheduleController
 	histories  cache.Cache
 	hbStreams  *heartbeatStreams
@@ -79,7 +81,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 		opt:        opt,
 		limiter:    newScheduleLimiter(),
 		checker:    schedule.NewReplicaChecker(opt, cluster),
-		operators:  make(map[uint64]schedule.Operator),
+		operators:  make(map[uint64]*schedule.Operator),
 		schedulers: make(map[string]*scheduleController),
 		histories:  cache.NewDefaultCache(historiesCacheSize),
 		hbStreams:  hbStreams,
@@ -89,15 +91,21 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 func (c *coordinator) dispatch(region *core.RegionInfo) {
 	// Check existed operator.
 	if op := c.getOperator(region.GetId()); op != nil {
-		res, finished := op.Do(region)
-		if !finished {
-			collectOperatorCounterMetrics(op)
-			if res != nil {
-				c.hbStreams.sendMsg(region, res)
-			}
+		timeout := op.IsTimeout()
+		if step := op.Check(region); step != nil && !timeout {
+			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
+			c.sendScheduleCommand(region, step)
 			return
 		}
-		c.removeOperator(op)
+		if op.IsFinish() {
+			log.Infof("[region %v] operator finish: %s", region.GetId(), op)
+			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
+			c.removeOperator(op)
+		} else if timeout {
+			log.Infof("[region %v] operator timeout: %s", region.GetId(), op)
+			operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
+			c.removeOperator(op)
+		}
 	}
 
 	// Check replica operator.
@@ -272,20 +280,20 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 	}
 }
 
-func (c *coordinator) addOperator(op schedule.Operator) bool {
+func (c *coordinator) addOperator(op *schedule.Operator) bool {
 	c.Lock()
 	defer c.Unlock()
-	regionID := op.GetRegionID()
+	regionID := op.RegionID()
 
-	log.Infof("[region %v] add operator: %+v", regionID, op)
+	log.Infof("[region %v] add operator: %s", regionID, op)
 
 	if old, ok := c.operators[regionID]; ok {
 		if !isHigherPriorityOperator(op, old) {
-			log.Infof("[region %v] cancel add operator, old: %+v", regionID, old)
+			log.Infof("[region %v] cancel add operator, old: %s", regionID, old)
 			return false
 		}
-		log.Infof("[region %v] replace old operator: %+v", regionID, old)
-		old.SetState(schedule.OperatorReplaced)
+		log.Infof("[region %v] replace old operator: %s", regionID, old)
+		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
 		c.removeOperatorLocked(old)
 	}
 
@@ -293,52 +301,52 @@ func (c *coordinator) addOperator(op schedule.Operator) bool {
 	c.limiter.addOperator(op)
 	c.operators[regionID] = op
 
-	if region := c.cluster.GetRegion(op.GetRegionID()); region != nil {
-		if msg, _ := op.Do(region); msg != nil {
-			c.hbStreams.sendMsg(region, msg)
+	if region := c.cluster.GetRegion(op.RegionID()); region != nil {
+		if step := op.Check(region); step != nil {
+			c.sendScheduleCommand(region, step)
 		}
 	}
 
-	collectOperatorCounterMetrics(op)
+	operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
 	return true
 }
 
-func isHigherPriorityOperator(new, old schedule.Operator) bool {
-	if new.GetResourceKind() == core.AdminKind {
+func isHigherPriorityOperator(new, old *schedule.Operator) bool {
+	if new.ResourceKind() == core.AdminKind {
 		return true
 	}
-	if new.GetResourceKind() == core.PriorityKind && old.GetResourceKind() != core.PriorityKind {
+	if new.ResourceKind() == core.PriorityKind && old.ResourceKind() != core.PriorityKind {
 		return true
 	}
 	return false
 }
 
-func (c *coordinator) removeOperator(op schedule.Operator) {
+func (c *coordinator) removeOperator(op *schedule.Operator) {
 	c.Lock()
 	defer c.Unlock()
 	c.removeOperatorLocked(op)
 }
 
-func (c *coordinator) removeOperatorLocked(op schedule.Operator) {
-	regionID := op.GetRegionID()
+func (c *coordinator) removeOperatorLocked(op *schedule.Operator) {
+	regionID := op.RegionID()
 	c.limiter.removeOperator(op)
 	delete(c.operators, regionID)
 
 	c.histories.Put(regionID, op)
-	collectOperatorCounterMetrics(op)
+	operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 }
 
-func (c *coordinator) getOperator(regionID uint64) schedule.Operator {
+func (c *coordinator) getOperator(regionID uint64) *schedule.Operator {
 	c.RLock()
 	defer c.RUnlock()
 	return c.operators[regionID]
 }
 
-func (c *coordinator) getOperators() []schedule.Operator {
+func (c *coordinator) getOperators() []*schedule.Operator {
 	c.RLock()
 	defer c.RUnlock()
 
-	var operators []schedule.Operator
+	var operators []*schedule.Operator
 	for _, op := range c.operators {
 		operators = append(operators, op)
 	}
@@ -346,31 +354,69 @@ func (c *coordinator) getOperators() []schedule.Operator {
 	return operators
 }
 
-func (c *coordinator) getHistories() []schedule.Operator {
+func (c *coordinator) getHistories() []*schedule.Operator {
 	c.RLock()
 	defer c.RUnlock()
 
-	var operators []schedule.Operator
+	var operators []*schedule.Operator
 	for _, elem := range c.histories.Elems() {
-		operators = append(operators, elem.Value.(schedule.Operator))
+		operators = append(operators, elem.Value.(*schedule.Operator))
 	}
 
 	return operators
 }
 
-func (c *coordinator) getHistoriesOfKind(kind core.ResourceKind) []schedule.Operator {
+func (c *coordinator) getHistoriesOfKind(kind core.ResourceKind) []*schedule.Operator {
 	c.RLock()
 	defer c.RUnlock()
 
-	var operators []schedule.Operator
+	var operators []*schedule.Operator
 	for _, elem := range c.histories.Elems() {
-		op := elem.Value.(schedule.Operator)
-		if op.GetResourceKind() == kind {
+		op := elem.Value.(*schedule.Operator)
+		if op.ResourceKind() == kind {
 			operators = append(operators, op)
 		}
 	}
 
 	return operators
+}
+
+func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule.OperatorStep) {
+	log.Infof("[region %v] send schedule command: %s", region.GetId(), step)
+	switch s := step.(type) {
+	case schedule.TransferLeader:
+		cmd := &pdpb.RegionHeartbeatResponse{
+			TransferLeader: &pdpb.TransferLeader{
+				Peer: region.GetStorePeer(s.ToStore),
+			},
+		}
+		c.hbStreams.sendMsg(region, cmd)
+	case schedule.AddPeer:
+		if region.GetStorePeer(s.ToStore) != nil {
+			// The newly added peer is pending.
+			return
+		}
+		cmd := &pdpb.RegionHeartbeatResponse{
+			ChangePeer: &pdpb.ChangePeer{
+				ChangeType: pdpb.ConfChangeType_AddNode,
+				Peer: &metapb.Peer{
+					Id:      s.PeerID,
+					StoreId: s.ToStore,
+				},
+			},
+		}
+		c.hbStreams.sendMsg(region, cmd)
+	case schedule.RemovePeer:
+		cmd := &pdpb.RegionHeartbeatResponse{
+			ChangePeer: &pdpb.ChangePeer{
+				ChangeType: pdpb.ConfChangeType_RemoveNode,
+				Peer:       region.GetStorePeer(s.FromStore),
+			},
+		}
+		c.hbStreams.sendMsg(region, cmd)
+	default:
+		log.Errorf("unknown operatorStep: %v", step)
+	}
 }
 
 type scheduleLimiter struct {
@@ -384,16 +430,16 @@ func newScheduleLimiter() *scheduleLimiter {
 	}
 }
 
-func (l *scheduleLimiter) addOperator(op schedule.Operator) {
+func (l *scheduleLimiter) addOperator(op *schedule.Operator) {
 	l.Lock()
 	defer l.Unlock()
-	l.counts[op.GetResourceKind()]++
+	l.counts[op.ResourceKind()]++
 }
 
-func (l *scheduleLimiter) removeOperator(op schedule.Operator) {
+func (l *scheduleLimiter) removeOperator(op *schedule.Operator) {
 	l.Lock()
 	defer l.Unlock()
-	l.counts[op.GetResourceKind()]--
+	l.counts[op.ResourceKind()]--
 }
 
 func (l *scheduleLimiter) operatorCount(kind core.ResourceKind) uint64 {
@@ -433,7 +479,7 @@ func (s *scheduleController) Stop() {
 	s.cancel()
 }
 
-func (s *scheduleController) Schedule(cluster *clusterInfo) schedule.Operator {
+func (s *scheduleController) Schedule(cluster *clusterInfo) *schedule.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
 		// If we have schedule, reset interval to the minimal interval.
 		if op := s.Scheduler.Schedule(cluster); op != nil {
@@ -454,14 +500,4 @@ func (s *scheduleController) GetInterval() time.Duration {
 
 func (s *scheduleController) AllowSchedule() bool {
 	return s.limiter.operatorCount(s.GetResourceKind()) < s.GetResourceLimit()
-}
-
-func collectOperatorCounterMetrics(op schedule.Operator) {
-	regionOp, ok := op.(*schedule.RegionOperator)
-	if !ok {
-		return
-	}
-	for _, op := range regionOp.Ops {
-		operatorCounter.WithLabelValues(op.GetName(), op.GetState().String()).Add(1)
-	}
 }
