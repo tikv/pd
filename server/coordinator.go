@@ -37,7 +37,7 @@ const (
 	minSlowScheduleInterval   = time.Second * 3
 	scheduleIntervalFactor    = 1.3
 
-	writeStatLRUMaxLen            = 1000
+	writeStatCacheMaxLen          = 1000
 	hotRegionMinWriteRate         = 16 * 1024
 	regionHeartBeatReportInterval = 60
 	regionheartbeatSendChanCap    = 1024
@@ -66,7 +66,7 @@ type coordinator struct {
 	checker    *schedule.ReplicaChecker
 	operators  map[uint64]schedule.Operator
 	schedulers map[string]*scheduleController
-	histories  *cache.LRU
+	histories  cache.Cache
 	hbStreams  *heartbeatStreams
 }
 
@@ -81,7 +81,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 		checker:    schedule.NewReplicaChecker(opt, cluster),
 		operators:  make(map[uint64]schedule.Operator),
 		schedulers: make(map[string]*scheduleController),
-		histories:  cache.NewLRU(historiesCacheSize),
+		histories:  cache.NewDefaultCache(historiesCacheSize),
 		hbStreams:  hbStreams,
 	}
 }

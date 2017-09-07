@@ -346,7 +346,7 @@ type clusterInfo struct {
 	regions *regionsInfo
 
 	activeRegions   int
-	writeStatistics *cache.LRU
+	writeStatistics cache.Cache
 }
 
 func newClusterInfo(id IDAllocator) *clusterInfo {
@@ -354,7 +354,7 @@ func newClusterInfo(id IDAllocator) *clusterInfo {
 		id:              id,
 		stores:          newStoresInfo(),
 		regions:         newRegionsInfo(),
-		writeStatistics: cache.NewLRU(writeStatLRUMaxLen),
+		writeStatistics: cache.NewDefaultCache(writeStatCacheMaxLen),
 	}
 }
 
@@ -786,10 +786,10 @@ func (c *clusterInfo) updateWriteStatus(region *core.RegionInfo) {
 	region.WrittenBytes = WrittenBytesPerSec
 
 	// hotRegionThreshold is use to pick hot region
-	// suppose the number of the hot regions is writeStatLRUMaxLen
+	// suppose the number of the hot regions is writeStatCacheMaxLen
 	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot regions
 	// divide 2 because the store reports data about two times than the region record write to rocksdb
-	divisor := float64(writeStatLRUMaxLen) * 2 * storeHeartBeatReportInterval
+	divisor := float64(writeStatCacheMaxLen) * 2 * storeHeartBeatReportInterval
 	hotRegionThreshold := uint64(float64(c.stores.totalWrittenBytes()) / divisor)
 
 	if hotRegionThreshold < hotRegionMinWriteRate {
