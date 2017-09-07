@@ -135,6 +135,7 @@ func (o *Operator) Step(i int) OperatorStep {
 }
 
 // Check checks if current step is finished, returns next step to take action.
+// It's safe to be called by multiple goroutine concurrently.
 func (o *Operator) Check(region *core.RegionInfo) OperatorStep {
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if o.steps[int(step)].IsFinish(region) {
