@@ -26,6 +26,9 @@ import (
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+
+	// Register schedulers.
+	_ "github.com/pingcap/pd/server/schedulers"
 )
 
 func main() {

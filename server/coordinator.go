@@ -20,7 +20,11 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/cache"
+	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule"
 	"golang.org/x/net/context"
 )
 
@@ -35,10 +39,7 @@ const (
 	minSlowScheduleInterval   = time.Second * 3
 	scheduleIntervalFactor    = 1.3
 
-	writeStatLRUMaxLen            = 1000
-	storeHotRegionsDefaultLen     = 100
-	hotRegionLimitFactor          = 0.75
-	hotRegionScheduleFactor       = 0.9
+	writeStatCacheMaxLen          = 1000
 	hotRegionMinWriteRate         = 16 * 1024
 	regionHeartBeatReportInterval = 60
 	regionheartbeatSendChanCap    = 1024
@@ -65,17 +66,14 @@ type coordinator struct {
 	cluster    *clusterInfo
 	opt        *scheduleOption
 	limiter    *scheduleLimiter
-	checker    *replicaChecker
-	operators  map[uint64]Operator
+	checker    *schedule.ReplicaChecker
+	operators  map[uint64]*schedule.Operator
 	schedulers map[string]*scheduleController
-
-	histories *lruCache
-	events    *fifoCache
-
-	hbStreams *heartbeatStreams
+	histories  cache.Cache
+	hbStreams  *heartbeatStreams
 }
 
-func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
+func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
 		ctx:        ctx,
@@ -83,31 +81,36 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption) *coordinator {
 		cluster:    cluster,
 		opt:        opt,
 		limiter:    newScheduleLimiter(),
-		checker:    newReplicaChecker(opt, cluster),
-		operators:  make(map[uint64]Operator),
+		checker:    schedule.NewReplicaChecker(opt, cluster),
+		operators:  make(map[uint64]*schedule.Operator),
 		schedulers: make(map[string]*scheduleController),
-		histories:  newLRUCache(historiesCacheSize),
-		events:     newFifoCache(eventsCacheSize),
-		hbStreams:  newHeartbeatStreams(ctx, cluster.getClusterID()),
+		histories:  cache.NewDefaultCache(historiesCacheSize),
+		hbStreams:  hbStreams,
 	}
 }
 
-func (c *coordinator) dispatch(region *RegionInfo) {
+func (c *coordinator) dispatch(region *core.RegionInfo) {
 	// Check existed operator.
 	if op := c.getOperator(region.GetId()); op != nil {
-		res, finished := op.Do(region)
-		if !finished {
-			collectOperatorCounterMetrics(op)
-			if res != nil {
-				c.hbStreams.sendMsg(region, res)
-			}
+		timeout := op.IsTimeout()
+		if step := op.Check(region); step != nil && !timeout {
+			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
+			c.sendScheduleCommand(region, step)
 			return
 		}
-		c.removeOperator(op)
+		if op.IsFinish() {
+			log.Infof("[region %v] operator finish: %s", region.GetId(), op)
+			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
+			c.removeOperator(op)
+		} else if timeout {
+			log.Infof("[region %v] operator timeout: %s", region.GetId(), op)
+			operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
+			c.removeOperator(op)
+		}
 	}
 
 	// Check replica operator.
-	if c.limiter.operatorCount(RegionKind) >= c.opt.GetReplicaScheduleLimit() {
+	if c.limiter.operatorCount(core.RegionKind) >= c.opt.GetReplicaScheduleLimit() {
 		return
 	}
 	if op := c.checker.Check(region); op != nil {
@@ -132,10 +135,12 @@ func (c *coordinator) run() {
 		}
 	}
 	log.Info("coordinator: Run scheduler")
-	c.addScheduler(newBalanceLeaderScheduler(c.opt), minScheduleInterval)
-	c.addScheduler(newBalanceRegionScheduler(c.opt), minScheduleInterval)
-	c.addScheduler(newBalanceHotRegionScheduler(c.opt), minSlowScheduleInterval)
-	c.addScheduler(newBalanceHotReadRegionScheduler(c.opt), minSlowScheduleInterval)
+	s, _ := schedule.CreateScheduler("balanceLeader", c.opt)
+	c.addScheduler(s, minScheduleInterval)
+	s, _ = schedule.CreateScheduler("balanceRegion", c.opt)
+	c.addScheduler(s, minScheduleInterval)
+	s, _ = schedule.CreateScheduler("hotRegion", c.opt)
+	c.addScheduler(s, minSlowScheduleInterval)
 }
 
 func (c *coordinator) stop() {
@@ -143,24 +148,36 @@ func (c *coordinator) stop() {
 	c.wg.Wait()
 }
 
-func (c *coordinator) getHotWriteRegions() *StoreHotRegionInfos {
+// Hack to retrive info from scheduler.
+// TODO: remove it.
+type hasHotStatus interface {
+	GetStatus() *core.StoreHotRegionInfos
+}
+
+func (c *coordinator) getHotWriteRegions() *core.StoreHotRegionInfos {
 	c.RLock()
 	defer c.RUnlock()
 	s, ok := c.schedulers[hotRegionScheduleName]
 	if !ok {
 		return nil
 	}
-	return s.Scheduler.(*balanceHotRegionScheduler).GetStatus()
+	if h, ok := s.Scheduler.(hasHotStatus); ok {
+		return h.GetStatus()
+	}
+	return nil
 }
 
-func (c *coordinator) getHotReadRegions() *StoreHotReadRegionInfos {
+func (c *coordinator) getHotReadRegions() *core.StoreHotRegionInfos {
 	c.RLock()
 	defer c.RUnlock()
 	s, ok := c.schedulers[hotReadRegionScheduleName]
 	if !ok {
 		return nil
 	}
-	return s.Scheduler.(*balanceHotReadRegionScheduler).GetStatus()
+	if h, ok := s.Scheduler.(hasHotStatus); ok {
+		return h.GetStatus()
+	}
+	return nil
 }
 
 func (c *coordinator) getSchedulers() []string {
@@ -196,10 +213,10 @@ func (c *coordinator) collectHotSpotMetrics() {
 	if !ok {
 		return
 	}
-	status := s.Scheduler.(*balanceHotRegionScheduler).GetStatus()
+	status := s.Scheduler.(hasHotStatus).GetStatus()
 	for storeID, stat := range status.AsPeer {
 		store := fmt.Sprintf("store_%d", storeID)
-		totalWriteBytes := float64(stat.WrittenBytes)
+		totalWriteBytes := float64(stat.TotalFlowBytes)
 		hotWriteRegionCount := float64(stat.RegionsCount)
 
 		hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_peer").Set(totalWriteBytes)
@@ -207,7 +224,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 	}
 	for storeID, stat := range status.AsLeader {
 		store := fmt.Sprintf("store_%d", storeID)
-		totalWriteBytes := float64(stat.WrittenBytes)
+		totalWriteBytes := float64(stat.TotalFlowBytes)
 		hotWriteRegionCount := float64(stat.RegionsCount)
 
 		hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_leader").Set(totalWriteBytes)
@@ -219,7 +236,7 @@ func (c *coordinator) shouldRun() bool {
 	return c.cluster.isPrepared()
 }
 
-func (c *coordinator) addScheduler(scheduler Scheduler, interval time.Duration) error {
+func (c *coordinator) addScheduler(scheduler schedule.Scheduler, interval time.Duration) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -277,73 +294,73 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 	}
 }
 
-func (c *coordinator) addOperator(op Operator) bool {
+func (c *coordinator) addOperator(op *schedule.Operator) bool {
 	c.Lock()
 	defer c.Unlock()
-	regionID := op.GetRegionID()
+	regionID := op.RegionID()
 
-	log.Infof("[region %v] add operator: %+v", regionID, op)
+	log.Infof("[region %v] add operator: %s", regionID, op)
 
 	if old, ok := c.operators[regionID]; ok {
 		if !isHigherPriorityOperator(op, old) {
-			log.Infof("[region %v] cancel add operator, old: %+v", regionID, old)
+			log.Infof("[region %v] cancel add operator, old: %s", regionID, old)
 			return false
 		}
-		log.Infof("[region %v] replace old operator: %+v", regionID, old)
-		old.SetState(OperatorReplaced)
+		log.Infof("[region %v] replace old operator: %s", regionID, old)
+		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
 		c.removeOperatorLocked(old)
 	}
 
-	c.histories.add(regionID, op)
+	c.histories.Put(regionID, op)
 	c.limiter.addOperator(op)
 	c.operators[regionID] = op
 
-	if region := c.cluster.getRegion(op.GetRegionID()); region != nil {
-		if msg, _ := op.Do(region); msg != nil {
-			c.hbStreams.sendMsg(region, msg)
+	if region := c.cluster.GetRegion(op.RegionID()); region != nil {
+		if step := op.Check(region); step != nil {
+			c.sendScheduleCommand(region, step)
 		}
 	}
 
-	collectOperatorCounterMetrics(op)
+	operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
 	return true
 }
 
-func isHigherPriorityOperator(new Operator, old Operator) bool {
-	if new.GetResourceKind() == AdminKind {
+func isHigherPriorityOperator(new, old *schedule.Operator) bool {
+	if new.ResourceKind() == core.AdminKind {
 		return true
 	}
-	if new.GetResourceKind() == PriorityKind && old.GetResourceKind() != PriorityKind {
+	if new.ResourceKind() == core.PriorityKind && old.ResourceKind() != core.PriorityKind {
 		return true
 	}
 	return false
 }
 
-func (c *coordinator) removeOperator(op Operator) {
+func (c *coordinator) removeOperator(op *schedule.Operator) {
 	c.Lock()
 	defer c.Unlock()
 	c.removeOperatorLocked(op)
 }
 
-func (c *coordinator) removeOperatorLocked(op Operator) {
-	regionID := op.GetRegionID()
+func (c *coordinator) removeOperatorLocked(op *schedule.Operator) {
+	regionID := op.RegionID()
 	c.limiter.removeOperator(op)
 	delete(c.operators, regionID)
 
-	c.histories.add(regionID, op)
-	collectOperatorCounterMetrics(op)
+	c.histories.Put(regionID, op)
+	operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 }
 
-func (c *coordinator) getOperator(regionID uint64) Operator {
+func (c *coordinator) getOperator(regionID uint64) *schedule.Operator {
 	c.RLock()
 	defer c.RUnlock()
 	return c.operators[regionID]
 }
 
-func (c *coordinator) getOperators() []Operator {
+func (c *coordinator) getOperators() []*schedule.Operator {
 	c.RLock()
 	defer c.RUnlock()
 
-	var operators []Operator
+	var operators []*schedule.Operator
 	for _, op := range c.operators {
 		operators = append(operators, op)
 	}
@@ -351,26 +368,26 @@ func (c *coordinator) getOperators() []Operator {
 	return operators
 }
 
-func (c *coordinator) getHistories() []Operator {
+func (c *coordinator) getHistories() []*schedule.Operator {
 	c.RLock()
 	defer c.RUnlock()
 
-	var operators []Operator
-	for _, elem := range c.histories.elems() {
-		operators = append(operators, elem.value.(Operator))
+	var operators []*schedule.Operator
+	for _, elem := range c.histories.Elems() {
+		operators = append(operators, elem.Value.(*schedule.Operator))
 	}
 
 	return operators
 }
 
-func (c *coordinator) getHistoriesOfKind(kind ResourceKind) []Operator {
+func (c *coordinator) getHistoriesOfKind(kind core.ResourceKind) []*schedule.Operator {
 	c.RLock()
 	defer c.RUnlock()
 
-	var operators []Operator
-	for _, elem := range c.histories.elems() {
-		op := elem.value.(Operator)
-		if op.GetResourceKind() == kind {
+	var operators []*schedule.Operator
+	for _, elem := range c.histories.Elems() {
+		op := elem.Value.(*schedule.Operator)
+		if op.ResourceKind() == kind {
 			operators = append(operators, op)
 		}
 	}
@@ -378,37 +395,75 @@ func (c *coordinator) getHistoriesOfKind(kind ResourceKind) []Operator {
 	return operators
 }
 
+func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule.OperatorStep) {
+	log.Infof("[region %v] send schedule command: %s", region.GetId(), step)
+	switch s := step.(type) {
+	case schedule.TransferLeader:
+		cmd := &pdpb.RegionHeartbeatResponse{
+			TransferLeader: &pdpb.TransferLeader{
+				Peer: region.GetStorePeer(s.ToStore),
+			},
+		}
+		c.hbStreams.sendMsg(region, cmd)
+	case schedule.AddPeer:
+		if region.GetStorePeer(s.ToStore) != nil {
+			// The newly added peer is pending.
+			return
+		}
+		cmd := &pdpb.RegionHeartbeatResponse{
+			ChangePeer: &pdpb.ChangePeer{
+				ChangeType: pdpb.ConfChangeType_AddNode,
+				Peer: &metapb.Peer{
+					Id:      s.PeerID,
+					StoreId: s.ToStore,
+				},
+			},
+		}
+		c.hbStreams.sendMsg(region, cmd)
+	case schedule.RemovePeer:
+		cmd := &pdpb.RegionHeartbeatResponse{
+			ChangePeer: &pdpb.ChangePeer{
+				ChangeType: pdpb.ConfChangeType_RemoveNode,
+				Peer:       region.GetStorePeer(s.FromStore),
+			},
+		}
+		c.hbStreams.sendMsg(region, cmd)
+	default:
+		log.Errorf("unknown operatorStep: %v", step)
+	}
+}
+
 type scheduleLimiter struct {
 	sync.RWMutex
-	counts map[ResourceKind]uint64
+	counts map[core.ResourceKind]uint64
 }
 
 func newScheduleLimiter() *scheduleLimiter {
 	return &scheduleLimiter{
-		counts: make(map[ResourceKind]uint64),
+		counts: make(map[core.ResourceKind]uint64),
 	}
 }
 
-func (l *scheduleLimiter) addOperator(op Operator) {
+func (l *scheduleLimiter) addOperator(op *schedule.Operator) {
 	l.Lock()
 	defer l.Unlock()
-	l.counts[op.GetResourceKind()]++
+	l.counts[op.ResourceKind()]++
 }
 
-func (l *scheduleLimiter) removeOperator(op Operator) {
+func (l *scheduleLimiter) removeOperator(op *schedule.Operator) {
 	l.Lock()
 	defer l.Unlock()
-	l.counts[op.GetResourceKind()]--
+	l.counts[op.ResourceKind()]--
 }
 
-func (l *scheduleLimiter) operatorCount(kind ResourceKind) uint64 {
+func (l *scheduleLimiter) operatorCount(kind core.ResourceKind) uint64 {
 	l.RLock()
 	defer l.RUnlock()
 	return l.counts[kind]
 }
 
 type scheduleController struct {
-	Scheduler
+	schedule.Scheduler
 	opt          *scheduleOption
 	limiter      *scheduleLimiter
 	nextInterval time.Duration
@@ -417,7 +472,7 @@ type scheduleController struct {
 	cancel       context.CancelFunc
 }
 
-func newScheduleController(c *coordinator, s Scheduler, minInterval time.Duration) *scheduleController {
+func newScheduleController(c *coordinator, s schedule.Scheduler, minInterval time.Duration) *scheduleController {
 	ctx, cancel := context.WithCancel(c.ctx)
 	return &scheduleController{
 		Scheduler:    s,
@@ -438,7 +493,7 @@ func (s *scheduleController) Stop() {
 	s.cancel()
 }
 
-func (s *scheduleController) Schedule(cluster *clusterInfo) Operator {
+func (s *scheduleController) Schedule(cluster *clusterInfo) *schedule.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
 		// If we have schedule, reset interval to the minimal interval.
 		if op := s.Scheduler.Schedule(cluster); op != nil {
@@ -459,115 +514,4 @@ func (s *scheduleController) GetInterval() time.Duration {
 
 func (s *scheduleController) AllowSchedule() bool {
 	return s.limiter.operatorCount(s.GetResourceKind()) < s.GetResourceLimit()
-}
-
-func collectOperatorCounterMetrics(op Operator) {
-	regionOp, ok := op.(*regionOperator)
-	if !ok {
-		return
-	}
-	for _, op := range regionOp.Ops {
-		operatorCounter.WithLabelValues(op.GetName(), op.GetState().String()).Add(1)
-	}
-}
-
-type heartbeatStream interface {
-	Send(*pdpb.RegionHeartbeatResponse) error
-}
-
-type streamUpdate struct {
-	storeID uint64
-	stream  heartbeatStream
-}
-
-type heartbeatStreams struct {
-	ctx       context.Context
-	clusterID uint64
-	streams   map[uint64]heartbeatStream
-	msgCh     chan *pdpb.RegionHeartbeatResponse
-	streamCh  chan streamUpdate
-}
-
-func newHeartbeatStreams(ctx context.Context, clusterID uint64) *heartbeatStreams {
-	localCtx, _ := context.WithCancel(ctx)
-	hs := &heartbeatStreams{
-		ctx:       localCtx,
-		clusterID: clusterID,
-		streams:   make(map[uint64]heartbeatStream),
-		msgCh:     make(chan *pdpb.RegionHeartbeatResponse, regionheartbeatSendChanCap),
-		streamCh:  make(chan streamUpdate, 1),
-	}
-	go hs.run()
-	return hs
-}
-
-func (s *heartbeatStreams) run() {
-	for {
-		select {
-		case update := <-s.streamCh:
-			s.streams[update.storeID] = update.stream
-		case msg := <-s.msgCh:
-			storeID := msg.GetTargetPeer().GetStoreId()
-			if stream, ok := s.streams[storeID]; ok {
-				if err := stream.Send(msg); err != nil {
-					log.Errorf("[region %v] send heartbeat message fail: %v", msg.RegionId, err)
-					delete(s.streams, storeID)
-					regionHeartbeatCounter.WithLabelValues("push", "err")
-				} else {
-					regionHeartbeatCounter.WithLabelValues("push", "ok")
-				}
-			} else {
-				log.Debugf("[region %v] heartbeat stream not found for store %v, skip send message", msg.RegionId, storeID)
-				regionHeartbeatCounter.WithLabelValues("push", "skip")
-			}
-		case <-s.ctx.Done():
-			return
-		}
-	}
-}
-
-func (s *heartbeatStreams) bindStream(storeID uint64, stream heartbeatStream) {
-	update := streamUpdate{
-		storeID: storeID,
-		stream:  stream,
-	}
-	select {
-	case s.streamCh <- update:
-	case <-s.ctx.Done():
-	}
-}
-
-func (s *heartbeatStreams) sendMsg(region *RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
-	if region.Leader == nil {
-		return
-	}
-
-	msg.Header = &pdpb.ResponseHeader{ClusterId: s.clusterID}
-	msg.RegionId = region.GetId()
-	msg.RegionEpoch = region.GetRegionEpoch()
-	msg.TargetPeer = region.Leader
-
-	select {
-	case s.msgCh <- msg:
-	case <-s.ctx.Done():
-	}
-}
-
-func (s *heartbeatStreams) sendErr(region *RegionInfo, errType pdpb.ErrorType, errMsg string) {
-	regionHeartbeatCounter.WithLabelValues("report", "err")
-
-	msg := &pdpb.RegionHeartbeatResponse{
-		Header: &pdpb.ResponseHeader{
-			ClusterId: s.clusterID,
-			Error: &pdpb.Error{
-				Type:    errType,
-				Message: errMsg,
-			},
-		},
-	}
-
-	select {
-	case s.msgCh <- msg:
-	case <-s.ctx.Done():
-	}
 }

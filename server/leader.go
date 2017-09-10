@@ -193,7 +193,7 @@ func (s *Server) campaignLeader() error {
 	leaseResp, err := lessor.Grant(ctx, s.cfg.LeaderLease)
 	cancel()
 
-	if cost := time.Now().Sub(start); cost > slowRequestTime {
+	if cost := time.Since(start); cost > slowRequestTime {
 		log.Warnf("lessor grants too slow, cost %s", cost)
 	}
 

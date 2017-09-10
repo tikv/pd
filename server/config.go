@@ -370,6 +370,10 @@ func (o *scheduleOption) GetMaxReplicas() int {
 	return o.rep.GetMaxReplicas()
 }
 
+func (o *scheduleOption) GetLocationLabels() []string {
+	return o.rep.GetLocationLabels()
+}
+
 func (o *scheduleOption) SetMaxReplicas(replicas int) {
 	o.rep.SetMaxReplicas(replicas)
 }
@@ -396,6 +400,10 @@ func (o *scheduleOption) GetReplicaScheduleLimit() uint64 {
 
 func (o *scheduleOption) persist(kv *kv) error {
 	return kv.saveScheduleOption(o)
+}
+
+func (o *scheduleOption) GetHotRegionLowThreshold() int {
+	return hotRegionLowThreshold
 }
 
 // ParseUrls parse a string into multiple urls.

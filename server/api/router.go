@@ -59,6 +59,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/store/{id}", storeHandler.Get).Methods("GET")
 	router.HandleFunc("/api/v1/store/{id}", storeHandler.Delete).Methods("DELETE")
 	router.HandleFunc("/api/v1/store/{id}/label", storeHandler.SetLabels).Methods("POST")
+	router.HandleFunc("/api/v1/store/{id}/weight", storeHandler.SetWeight).Methods("POST")
 	router.Handle("/api/v1/stores", newStoresHandler(svr, rd)).Methods("GET")
 
 	labelsHandler := newLabelsHandler(svr, rd)
@@ -69,8 +70,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/hotspot/regions", hotStatusHandler.GetHotRegions).Methods("GET")
 	router.HandleFunc("/api/v1/hotspot/readregions", hotStatusHandler.GetHotReadRegions).Methods("GET")
 	router.HandleFunc("/api/v1/hotspot/stores", hotStatusHandler.GetHotStores).Methods("GET")
-	router.Handle("/api/v1/events", newEventsHandler(svr, rd)).Methods("GET")
-	router.Handle("/api/v1/feed", newFeedHandler(svr, rd)).Methods("GET")
 
 	regionHandler := newRegionHandler(svr, rd)
 	router.HandleFunc("/api/v1/region/id/{id}", regionHandler.GetRegionByID).Methods("GET")

@@ -78,6 +78,8 @@ type Server struct {
 	lastSavedTime time.Time
 	// For resign notify.
 	resignCh chan struct{}
+	// For async region heartbeat.
+	hbStreams *heartbeatStreams
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
@@ -177,6 +179,7 @@ func (s *Server) startServer() error {
 	s.idAlloc = &idAllocator{s: s}
 	s.kv = newKV(s)
 	s.cluster = newRaftCluster(s, s.clusterID)
+	s.hbStreams = newHeartbeatStreams(s.clusterID)
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
@@ -232,6 +235,10 @@ func (s *Server) Close() {
 
 	if s.etcd != nil {
 		s.etcd.Close()
+	}
+
+	if s.hbStreams != nil {
+		s.hbStreams.Close()
 	}
 
 	s.wg.Wait()

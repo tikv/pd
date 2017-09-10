@@ -20,6 +20,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
@@ -336,7 +337,7 @@ func (s *testClusterSuite) testPutStore(c *C, clusterID uint64, store *metapb.St
 func (s *testClusterSuite) resetStoreState(c *C, storeID uint64, state metapb.StoreState) {
 	cluster := s.svr.GetRaftCluster().cachedCluster
 	c.Assert(cluster, NotNil)
-	store := cluster.getStore(storeID)
+	store := cluster.GetStore(storeID)
 	c.Assert(store, NotNil)
 	store.State = state
 	cluster.putStore(store)
@@ -428,7 +429,7 @@ func (s *testClusterSuite) testCheckStores(c *C, clusterID uint64) {
 	// Add a region peer to store.
 	leader := &metapb.Peer{StoreId: store.GetId()}
 	region := s.newRegion(c, 0, []byte{'a'}, []byte{'b'}, []*metapb.Peer{leader}, nil)
-	regionInfo := newRegionInfo(region, leader)
+	regionInfo := core.NewRegionInfo(region, leader)
 	err := cluster.handleRegionHeartbeat(regionInfo)
 	c.Assert(err, IsNil)
 	c.Assert(cluster.cachedCluster.getStoreRegionCount(store.GetId()), Equals, 1)

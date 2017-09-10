@@ -20,6 +20,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 )
 
 var _ = Suite(&testRegionSuite{})
@@ -42,11 +43,11 @@ func (s *testRegionSuite) TestRegionInfo(c *C) {
 	}
 	downPeer, pendingPeer := peers[0], peers[1]
 
-	info := newRegionInfo(region, peers[0])
+	info := core.NewRegionInfo(region, peers[0])
 	info.DownPeers = []*pdpb.PeerStats{{Peer: downPeer}}
 	info.PendingPeers = []*metapb.Peer{pendingPeer}
 
-	r := info.clone()
+	r := info.Clone()
 	c.Assert(r, DeepEquals, info)
 
 	for i := uint64(0); i < n; i++ {
