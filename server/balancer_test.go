@@ -931,20 +931,20 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 }
 
 func (c *testClusterInfo) updateStorageReadBytes(storeID uint64, BytesRead uint64) {
-	store := c.getStore(storeID)
-	store.status.BytesRead = BytesRead
+	store := c.GetStore(storeID)
+	store.Stats.BytesRead = BytesRead
 	c.putStore(store)
 }
 
 func (c *testClusterInfo) addLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
 	region := &metapb.Region{Id: regionID}
-	leader, _ := c.allocPeer(leaderID)
+	leader, _ := c.AllocPeer(leaderID)
 	region.Peers = []*metapb.Peer{leader}
 	for _, id := range followerIds {
-		peer, _ := c.allocPeer(id)
+		peer, _ := c.AllocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	r := newRegionInfo(region, leader)
+	r := core.NewRegionInfo(region, leader)
 	r.ReadBytes = readBytes
 	c.updateReadStatus(r)
 	c.putRegion(r)
@@ -959,7 +959,8 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	hb := newBalanceHotReadRegionScheduler(opt)
+	hb, err := schedule.CreateScheduler("hotReadRegion", opt)
+	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
 	tc.addRegionStore(1, 3)

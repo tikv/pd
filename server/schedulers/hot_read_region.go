@@ -14,7 +14,7 @@ import (
 
 func init() {
 	schedule.RegisterScheduler("hotReadRegion", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
-		return newBalanceHotRegionScheduler(opt), nil
+		return newBalanceHotReadRegionsScheduler(opt), nil
 	})
 }
 
