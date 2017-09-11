@@ -20,7 +20,7 @@ var (
 	// default.
 	DefaultNamespace = "global"
 
-	// DefaultClassifer is a classifier that classifies all Regions and stores to
+	// DefaultClassifer is a classifier that classifies all regions and stores to
 	// DefaultNamespace.
 	DefaultClassifer = defaultClassifer{}
 )
