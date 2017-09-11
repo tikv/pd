@@ -79,9 +79,9 @@ type Config struct {
 	AutoCompactionRetention int `toml:"auto-compaction-retention" json:"auto-compaction-retention"`
 
 	// TickInterval is the interval for etcd Raft tick.
-	TickInterval typeutil.Duration `toml:"tick_interval"`
+	TickInterval typeutil.Duration `toml:"tick-interval"`
 	// ElectionInterval is the interval for etcd Raft election.
-	ElectionInterval typeutil.Duration `toml:"election_interval"`
+	ElectionInterval typeutil.Duration `toml:"election-interval"`
 
 	configFile string
 
