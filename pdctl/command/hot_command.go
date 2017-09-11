@@ -21,9 +21,9 @@ import (
 )
 
 const (
-	hotRegionsPrefix     = "pd/api/v1/hotspot/regions"
-	hotReadRegionsPrefix = "pd/api/v1/hotspot/readregions"
-	hotStoresPrefix      = "pd/api/v1/hotspot/stores"
+	hotReadRegionsPrefix  = "pd/api/v1/hotspot/regions/read"
+	hotWriteRegionsPrefix = "pd/api/v1/hotspot/regions/write"
+	hotStoresPrefix       = "pd/api/v1/hotspot/stores"
 )
 
 // NewHotSpotCommand return a hot subcommand of rootCmd
@@ -41,15 +41,15 @@ func NewHotSpotCommand() *cobra.Command {
 // NewHotRegionCommand return a hot regions subcommand of hotSpotCmd
 func NewHotRegionCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "region",
-		Short: "show the hot regions",
-		Run:   showHotRegionsCommandFunc,
+		Use:   "write",
+		Short: "show the hot write regions",
+		Run:   showHotWriteRegionsCommandFunc,
 	}
 	return cmd
 }
 
-func showHotRegionsCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, hotRegionsPrefix, http.MethodGet)
+func showHotWriteRegionsCommandFunc(cmd *cobra.Command, args []string) {
+	r, err := doRequest(cmd, hotWriteRegionsPrefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get hotspot: %s\n", err)
 		return

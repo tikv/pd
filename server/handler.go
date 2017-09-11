@@ -53,7 +53,7 @@ func (h *Handler) GetSchedulers() ([]string, error) {
 	return c.getSchedulers(), nil
 }
 
-// GetHotWriteRegions gets all hot regions status
+// GetHotWriteRegions gets all hot write regions status
 func (h *Handler) GetHotWriteRegions() *core.StoreHotRegionInfos {
 	c, err := h.getCoordinator()
 	if err != nil {
