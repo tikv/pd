@@ -46,7 +46,7 @@ const (
 	storeHeartBeatReportInterval  = 10
 	minHotRegionReportInterval    = 3
 	hotRegionAntiCount            = 1
-	hotRegionScheduleName         = "balance-hot-region-scheduler"
+	hotWriteRegionScheduleName    = "balance-hot-write-region-scheduler"
 	hotReadRegionScheduleName     = "balance-hot-read-region-scheduler"
 )
 
@@ -159,7 +159,7 @@ type hasHotStatus interface {
 func (c *coordinator) getHotWriteRegions() *core.StoreHotRegionInfos {
 	c.RLock()
 	defer c.RUnlock()
-	s, ok := c.schedulers[hotRegionScheduleName]
+	s, ok := c.schedulers[hotWriteRegionScheduleName]
 	if !ok {
 		return nil
 	}
@@ -211,7 +211,8 @@ func (c *coordinator) collectSchedulerMetrics() {
 func (c *coordinator) collectHotSpotMetrics() {
 	c.RLock()
 	defer c.RUnlock()
-	s, ok := c.schedulers[hotRegionScheduleName]
+	// collect hot write region metrics
+	s, ok := c.schedulers[hotWriteRegionScheduleName]
 	if !ok {
 		return
 	}
@@ -231,6 +232,21 @@ func (c *coordinator) collectHotSpotMetrics() {
 
 		hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_leader").Set(totalWriteBytes)
 		hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_leader").Set(hotWriteRegionCount)
+	}
+
+	// collect hot read region metrics
+	s, ok = c.schedulers[hotReadRegionScheduleName]
+	if !ok {
+		return
+	}
+	status = s.Scheduler.(hasHotStatus).GetStatus()
+	for storeID, stat := range status.AsLeader {
+		store := fmt.Sprintf("store_%d", storeID)
+		totalReadBytes := float64(stat.TotalFlowBytes)
+		hotReadRegionCount := float64(stat.RegionsCount)
+
+		hotSpotStatusGauge.WithLabelValues(store, "total_read_bytes_as_leader").Set(totalReadBytes)
+		hotSpotStatusGauge.WithLabelValues(store, "hot_read_region_as_leader").Set(hotReadRegionCount)
 	}
 }
 

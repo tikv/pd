@@ -308,12 +308,7 @@ func (h *balanceHotReadRegionsScheduler) selectDestStoreByLeader(srcRegion *core
 	return destPeer
 }
 
-// StoreHotReadRegionsInfos : used to get human readable description for hot regions.
-type StoreHotReadRegionsInfos struct {
-	AsLeader map[uint64]*core.HotRegionsStat `json:"as_leader"`
-}
-
-func (h *balanceHotReadRegionsScheduler) GetStatus() *StoreHotReadRegionsInfos {
+func (h *balanceHotReadRegionsScheduler) GetStatus() *core.StoreHotRegionInfos {
 	h.RLock()
 	defer h.RUnlock()
 	asLeader := make(map[uint64]*core.HotRegionsStat, len(h.statisticsAsLeader))
@@ -321,7 +316,7 @@ func (h *balanceHotReadRegionsScheduler) GetStatus() *StoreHotReadRegionsInfos {
 		clone := *stat
 		asLeader[id] = &clone
 	}
-	return &StoreHotReadRegionsInfos{
+	return &core.StoreHotRegionInfos{
 		AsLeader: asLeader,
 	}
 }
