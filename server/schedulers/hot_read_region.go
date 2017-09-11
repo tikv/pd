@@ -57,19 +57,19 @@ func (h *balanceHotReadRegionsScheduler) Schedule(cluster schedule.Cluster) *sch
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
 	h.calcScore(cluster)
 
-	// balance by peer
-	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster)
-	if srcRegion != nil {
-		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return schedule.CreateMovePeerOperator("moveHotReadRegion", srcRegion, core.PriorityKind, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
-	}
-
 	// balance by leader
 	srcRegion, newLeader := h.balanceByLeader(cluster)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 		step := schedule.TransferLeader{FromStore: srcRegion.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
 		return schedule.NewOperator("transferHotReadLeader", srcRegion.GetId(), core.PriorityKind, step)
+	}
+
+	// balance by peer
+	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster)
+	if srcRegion != nil {
+		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
+		return schedule.CreateMovePeerOperator("moveHotReadRegion", srcRegion, core.PriorityKind, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 	}
 
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
@@ -158,7 +158,7 @@ func (h *balanceHotReadRegionsScheduler) balanceByPeer(cluster schedule.Cluster)
 		destStoreID = h.selectDestStoreByPeer(destStoreIDs, srcRegion, srcStoreID)
 		if destStoreID != 0 {
 			srcRegion.ReadBytes = rs.FlowBytes
-			h.adjustBalanceLimit(srcStoreID, byPeer)
+			h.adjustBalanceLimit(srcStoreID, byLeader)
 
 			var srcPeer *metapb.Peer
 			for _, peer := range srcRegion.GetPeers() {

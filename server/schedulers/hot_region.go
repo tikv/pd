@@ -70,7 +70,7 @@ func newBalanceHotRegionScheduler(opt schedule.Options) schedule.Scheduler {
 }
 
 func (h *balanceHotRegionScheduler) GetName() string {
-	return "balance-hot-region-scheduler"
+	return "balance-hot-write-region-scheduler"
 }
 
 func (h *balanceHotRegionScheduler) GetResourceKind() core.ResourceKind {

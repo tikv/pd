@@ -878,7 +878,7 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	hb, err := schedule.CreateScheduler("hotRegion", opt)
+	hb, err := schedule.CreateScheduler("hotWriteRegion", opt)
 	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
@@ -980,33 +980,30 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	//| region_id | leader_sotre | follower_store | follower_store |   read_bytes  |
 	//|-----------|--------------|----------------|----------------|---------------|
 	//|     1     |       1      |        2       |       3        |      512KB    |
-	//|     2     |       1      |        3       |       4        |      512KB    |
-	//|     3     |       1      |        2       |       4        |      512KB    |
+	//|     2     |       2      |        1       |       3        |      512KB    |
+	//|     3     |       1      |        2       |       3        |      512KB    |
 	tc.addLeaderRegionWithReadInfo(1, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
-	tc.addLeaderRegionWithReadInfo(2, 1, 512*1024*regionHeartBeatReportInterval, 3, 4)
-	tc.addLeaderRegionWithReadInfo(3, 1, 512*1024*regionHeartBeatReportInterval, 2, 4)
+	tc.addLeaderRegionWithReadInfo(2, 2, 512*1024*regionHeartBeatReportInterval, 1, 3)
+	tc.addLeaderRegionWithReadInfo(3, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
 	hotRegionLowThreshold = 0
 
-	// Will transfer a hot region from store 1 to store 5, because the total count of peers
+	// Will transfer a hot region leader from store 1 to store 3, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
-	checkTransferPeerWithLeaderTransfer(c, hb.Schedule(cluster), 1, 5)
+	checkTransferLeader(c, hb.Schedule(cluster), 1, 3)
+	// assume handle the operator
+	tc.addLeaderRegionWithReadInfo(3, 3, 512*1024*regionHeartBeatReportInterval, 1, 2)
 
-	// After transfer a hot region from store 1 to store 5
-	//| region_id | leader_sotre | follower_store | follower_store |   read_bytes  |
-	//|-----------|--------------|----------------|----------------|---------------|
-	//|     1     |       1      |        2       |       3        |      512KB    |
-	//|     2     |       1      |        3       |       4        |      512KB    |
-	//|     3     |       5      |        2       |       4        |      512KB    |
+	// After transfer a hot region leader from store 1 to store 3
+	// the tree region leader will be evenly distributed in three stores
 	tc.updateStorageReadBytes(1, 60*1024*1024)
 	tc.updateStorageReadBytes(2, 30*1024*1024)
 	tc.updateStorageReadBytes(3, 60*1024*1024)
 	tc.updateStorageReadBytes(4, 30*1024*1024)
 	tc.updateStorageReadBytes(5, 30*1024*1024)
-	tc.addLeaderRegionWithReadInfo(1, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
-	tc.addLeaderRegionWithReadInfo(2, 1, 512*1024*regionHeartBeatReportInterval, 3, 4)
-	tc.addLeaderRegionWithReadInfo(3, 5, 512*1024*regionHeartBeatReportInterval, 2, 4)
+	tc.addLeaderRegionWithReadInfo(4, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
+	tc.addLeaderRegionWithReadInfo(5, 4, 512*1024*regionHeartBeatReportInterval, 2, 5)
 
-	// We can find that the leader of all hot regions are on store 1,
-	// so one of the leader will transfer to another store.
-	checkTransferLeaderFrom(c, hb.Schedule(cluster), 1)
+	// Now appear two read hot region in store 1 and 4
+	// We will Transfer peer from 1 to 5
+	checkTransferPeerWithLeaderTransfer(c, hb.Schedule(cluster), 1, 5)
 }

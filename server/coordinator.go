@@ -139,7 +139,9 @@ func (c *coordinator) run() {
 	c.addScheduler(s, minScheduleInterval)
 	s, _ = schedule.CreateScheduler("balanceRegion", c.opt)
 	c.addScheduler(s, minScheduleInterval)
-	s, _ = schedule.CreateScheduler("hotRegion", c.opt)
+	s, _ = schedule.CreateScheduler("hotWriteRegion", c.opt)
+	c.addScheduler(s, minSlowScheduleInterval)
+	s, _ = schedule.CreateScheduler("hotReadRegion", c.opt)
 	c.addScheduler(s, minSlowScheduleInterval)
 }
 
