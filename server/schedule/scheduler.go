@@ -38,6 +38,7 @@ type Cluster interface {
 
 	IsRegionHot(id uint64) bool
 	RegionWriteStats() []*core.RegionStat
+	RegionReadStats() []*core.RegionStat
 
 	// TODO: it should be removed. Schedulers don't need to know anything
 	// about peers.

@@ -28,6 +28,7 @@ type RegionInfo struct {
 	DownPeers    []*pdpb.PeerStats
 	PendingPeers []*metapb.Peer
 	WrittenBytes uint64
+	ReadBytes    uint64
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -54,6 +55,7 @@ func (r *RegionInfo) Clone() *RegionInfo {
 		DownPeers:    downPeers,
 		PendingPeers: pendingPeers,
 		WrittenBytes: r.WrittenBytes,
+		ReadBytes:    r.ReadBytes,
 	}
 }
 
@@ -142,8 +144,8 @@ func (r *RegionInfo) GetFollower() *metapb.Peer {
 
 // RegionStat records each hot region's statistics
 type RegionStat struct {
-	RegionID     uint64 `json:"region_id"`
-	WrittenBytes uint64 `json:"written_bytes"`
+	RegionID  uint64 `json:"region_id"`
+	FlowBytes uint64 `json:"flow_bytes"`
 	// HotDegree records the hot region update times
 	HotDegree int `json:"hot_degree"`
 	// LastUpdateTime used to calculate average write
@@ -160,11 +162,11 @@ type RegionsStat []RegionStat
 
 func (m RegionsStat) Len() int           { return len(m) }
 func (m RegionsStat) Swap(i, j int)      { m[i], m[j] = m[j], m[i] }
-func (m RegionsStat) Less(i, j int) bool { return m[i].WrittenBytes < m[j].WrittenBytes }
+func (m RegionsStat) Less(i, j int) bool { return m[i].FlowBytes < m[j].FlowBytes }
 
 // HotRegionsStat records all hot regions statistics
 type HotRegionsStat struct {
-	WrittenBytes uint64      `json:"total_written_bytes"`
-	RegionsCount int         `json:"regions_count"`
-	RegionsStat  RegionsStat `json:"statistics"`
+	TotalFlowBytes uint64      `json:"total_flow_bytes"`
+	RegionsCount   int         `json:"regions_count"`
+	RegionsStat    RegionsStat `json:"statistics"`
 }
