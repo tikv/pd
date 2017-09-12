@@ -108,6 +108,7 @@ func (o *Operator) String() string {
 	return s
 }
 
+// MarshalJSON serialize custom types to JSON
 func (o *Operator) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + o.String() + `"`), nil
 }
