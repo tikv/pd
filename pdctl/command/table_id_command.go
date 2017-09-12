@@ -17,7 +17,6 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"os"
 	"net/http"
 	"io/ioutil"
 	"encoding/json"
@@ -68,7 +67,7 @@ func showTableIdCommandFunc(cmd *cobra.Command, args []string) {
 
 	if err != nil {
 		fmt.Println(err)
-		os.Exit(1)
+		return
 	}
 
 	// fmt.Println(resp)
