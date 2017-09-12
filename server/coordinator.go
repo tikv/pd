@@ -39,7 +39,7 @@ const (
 	minSlowScheduleInterval   = time.Second * 3
 	scheduleIntervalFactor    = 1.3
 
-	writeStatCacheMaxLen          = 1000
+	statCacheMaxLen               = 1000
 	hotRegionMinWriteRate         = 16 * 1024
 	regionHeartBeatReportInterval = 60
 	regionheartbeatSendChanCap    = 1024
