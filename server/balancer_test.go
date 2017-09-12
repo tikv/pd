@@ -869,11 +869,11 @@ func checkTransferLeaderFrom(c *C, op *schedule.Operator, sourceID uint64) {
 	c.Assert(op.Step(0).(schedule.TransferLeader).FromStore, Equals, sourceID)
 }
 
-var _ = Suite(&testBalanceHotRegionSchedulerSuite{})
+var _ = Suite(&testBalanceHotWriteRegionSchedulerSuite{})
 
-type testBalanceHotRegionSchedulerSuite struct{}
+type testBalanceHotWriteRegionSchedulerSuite struct{}
 
-func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
+func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 

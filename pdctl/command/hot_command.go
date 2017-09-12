@@ -32,14 +32,14 @@ func NewHotSpotCommand() *cobra.Command {
 		Use:   "hot",
 		Short: "show the hotspot status of the cluster",
 	}
-	cmd.AddCommand(NewHotRegionCommand())
+	cmd.AddCommand(NewHotWriteRegionCommand())
 	cmd.AddCommand(NewHotReadRegionCommand())
 	cmd.AddCommand(NewHotStoreCommand())
 	return cmd
 }
 
-// NewHotRegionCommand return a hot regions subcommand of hotSpotCmd
-func NewHotRegionCommand() *cobra.Command {
+// NewHotWriteRegionCommand return a hot regions subcommand of hotSpotCmd
+func NewHotWriteRegionCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "write",
 		Short: "show the hot write regions",

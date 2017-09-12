@@ -854,14 +854,14 @@ func (c *clusterInfo) updateWriteStatus(region *core.RegionInfo) {
 	region.WrittenBytes = WrittenBytesPerSec
 
 	// hotRegionThreshold is use to pick hot region
-	// suppose the number of the hot regions is writeStatCacheMaxLen
+	// suppose the number of the hot regions is statCacheMaxLen
 	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot regions
 	// divide 2 because the store reports data about two times than the region record write to rocksdb
 	divisor := float64(statCacheMaxLen) * 2 * storeHeartBeatReportInterval
 	hotRegionThreshold := uint64(float64(c.stores.totalWrittenBytes()) / divisor)
 
-	if hotRegionThreshold < hotRegionMinWriteRate {
-		hotRegionThreshold = hotRegionMinWriteRate
+	if hotRegionThreshold < hotRegionMinFlowRate {
+		hotRegionThreshold = hotRegionMinFlowRate
 	}
 	c.updateWriteStatCache(region, hotRegionThreshold)
 }
@@ -881,13 +881,13 @@ func (c *clusterInfo) updateReadStatus(region *core.RegionInfo) {
 	region.ReadBytes = ReadBytesPerSec
 
 	// hotRegionThreshold is use to pick hot region
-	// suppose the number of the hot regions is writeStatLRUMaxLen
+	// suppose the number of the hot regions is statLRUMaxLen
 	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot regions
 	divisor := float64(statCacheMaxLen) * storeHeartBeatReportInterval
 	hotRegionThreshold := uint64(float64(c.stores.totalReadBytes()) / divisor)
 
-	if hotRegionThreshold < hotRegionMinWriteRate {
-		hotRegionThreshold = hotRegionMinWriteRate
+	if hotRegionThreshold < hotRegionMinFlowRate {
+		hotRegionThreshold = hotRegionMinFlowRate
 	}
 	c.updateReadStatCache(region, hotRegionThreshold)
 }

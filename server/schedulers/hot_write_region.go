@@ -27,7 +27,7 @@ import (
 
 func init() {
 	schedule.RegisterScheduler("hotWriteRegion", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
-		return newBalanceHotRegionScheduler(opt), nil
+		return newBalanceHotWriteRegionScheduler(opt), nil
 	})
 }
 
@@ -45,7 +45,7 @@ const (
 	byLeader
 )
 
-type balanceHotRegionScheduler struct {
+type balanceHotWriteRegionScheduler struct {
 	sync.RWMutex
 	opt   schedule.Options
 	limit uint64
@@ -57,10 +57,10 @@ type balanceHotRegionScheduler struct {
 	r                  *rand.Rand
 }
 
-// newBalanceHotRegionScheduler creates a scheduler that keeps hot regions on
+// newBalanceHotWriteRegionScheduler creates a scheduler that keeps hot regions on
 // each stores balanced.
-func newBalanceHotRegionScheduler(opt schedule.Options) schedule.Scheduler {
-	return &balanceHotRegionScheduler{
+func newBalanceHotWriteRegionScheduler(opt schedule.Options) schedule.Scheduler {
+	return &balanceHotWriteRegionScheduler{
 		opt:                opt,
 		limit:              1,
 		statisticsAsPeer:   make(map[uint64]*core.HotRegionsStat),
@@ -69,23 +69,23 @@ func newBalanceHotRegionScheduler(opt schedule.Options) schedule.Scheduler {
 	}
 }
 
-func (h *balanceHotRegionScheduler) GetName() string {
+func (h *balanceHotWriteRegionScheduler) GetName() string {
 	return "balance-hot-write-region-scheduler"
 }
 
-func (h *balanceHotRegionScheduler) GetResourceKind() core.ResourceKind {
+func (h *balanceHotWriteRegionScheduler) GetResourceKind() core.ResourceKind {
 	return core.PriorityKind
 }
 
-func (h *balanceHotRegionScheduler) GetResourceLimit() uint64 {
+func (h *balanceHotWriteRegionScheduler) GetResourceLimit() uint64 {
 	return h.limit
 }
 
-func (h *balanceHotRegionScheduler) Prepare(cluster schedule.Cluster) error { return nil }
+func (h *balanceHotWriteRegionScheduler) Prepare(cluster schedule.Cluster) error { return nil }
 
-func (h *balanceHotRegionScheduler) Cleanup(cluster schedule.Cluster) {}
+func (h *balanceHotWriteRegionScheduler) Cleanup(cluster schedule.Cluster) {}
 
-func (h *balanceHotRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
+func (h *balanceHotWriteRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
 	h.calcScore(cluster)
 
@@ -108,7 +108,7 @@ func (h *balanceHotRegionScheduler) Schedule(cluster schedule.Cluster) *schedule
 	return nil
 }
 
-func (h *balanceHotRegionScheduler) calcScore(cluster schedule.Cluster) {
+func (h *balanceHotWriteRegionScheduler) calcScore(cluster schedule.Cluster) {
 	h.Lock()
 	defer h.Unlock()
 
@@ -161,7 +161,7 @@ func (h *balanceHotRegionScheduler) calcScore(cluster schedule.Cluster) {
 	}
 }
 
-func (h *balanceHotRegionScheduler) balanceByPeer(cluster schedule.Cluster) (*core.RegionInfo, *metapb.Peer, *metapb.Peer) {
+func (h *balanceHotWriteRegionScheduler) balanceByPeer(cluster schedule.Cluster) (*core.RegionInfo, *metapb.Peer, *metapb.Peer) {
 	var (
 		maxWrittenBytes        uint64
 		srcStoreID             uint64
@@ -234,7 +234,7 @@ func (h *balanceHotRegionScheduler) balanceByPeer(cluster schedule.Cluster) (*co
 	return nil, nil, nil
 }
 
-func (h *balanceHotRegionScheduler) selectDestStoreByPeer(candidateStoreIDs []uint64, srcRegion *core.RegionInfo, srcStoreID uint64) uint64 {
+func (h *balanceHotWriteRegionScheduler) selectDestStoreByPeer(candidateStoreIDs []uint64, srcRegion *core.RegionInfo, srcStoreID uint64) uint64 {
 	sr := h.statisticsAsPeer[srcStoreID]
 	srcWrittenBytes := sr.TotalFlowBytes
 	srcHotRegionsCount := sr.RegionsStat.Len()
@@ -265,7 +265,7 @@ func (h *balanceHotRegionScheduler) selectDestStoreByPeer(candidateStoreIDs []ui
 	return destStoreID
 }
 
-func (h *balanceHotRegionScheduler) adjustBalanceLimit(storeID uint64, t BalanceType) {
+func (h *balanceHotWriteRegionScheduler) adjustBalanceLimit(storeID uint64, t BalanceType) {
 	var srcStatistics *core.HotRegionsStat
 	var allStatistics map[uint64]*core.HotRegionsStat
 	switch t {
@@ -288,7 +288,7 @@ func (h *balanceHotRegionScheduler) adjustBalanceLimit(storeID uint64, t Balance
 	h.limit = maxUint64(1, limit)
 }
 
-func (h *balanceHotRegionScheduler) balanceByLeader(cluster schedule.Cluster) (*core.RegionInfo, *metapb.Peer) {
+func (h *balanceHotWriteRegionScheduler) balanceByLeader(cluster schedule.Cluster) (*core.RegionInfo, *metapb.Peer) {
 	var (
 		maxWrittenBytes        uint64
 		srcStoreID             uint64
@@ -334,7 +334,7 @@ func (h *balanceHotRegionScheduler) balanceByLeader(cluster schedule.Cluster) (*
 	return nil, nil
 }
 
-func (h *balanceHotRegionScheduler) selectDestStoreByLeader(srcRegion *core.RegionInfo) *metapb.Peer {
+func (h *balanceHotWriteRegionScheduler) selectDestStoreByLeader(srcRegion *core.RegionInfo) *metapb.Peer {
 	sr := h.statisticsAsLeader[srcRegion.Leader.GetStoreId()]
 	srcWrittenBytes := sr.TotalFlowBytes
 	srcHotRegionsCount := sr.RegionsStat.Len()
@@ -365,7 +365,7 @@ func (h *balanceHotRegionScheduler) selectDestStoreByLeader(srcRegion *core.Regi
 	return destPeer
 }
 
-func (h *balanceHotRegionScheduler) GetStatus() *core.StoreHotRegionInfos {
+func (h *balanceHotWriteRegionScheduler) GetStatus() *core.StoreHotRegionInfos {
 	h.RLock()
 	defer h.RUnlock()
 	asPeer := make(map[uint64]*core.HotRegionsStat, len(h.statisticsAsPeer))
