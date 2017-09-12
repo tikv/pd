@@ -23,16 +23,21 @@ import (
 	"encoding/json"
 )
 
-var tableIdCmd = NewTableIdCommand()
+var TableIdCmd = NewTableIdCommand()
 
 type tableInfo struct {
 	Name string  `json:"name"`
 	Id int64 `json:"id"`
 }
+
+func (t tableInfo) String() string {
+	return fmt.Sprintf("tableInfo{name: %s, id: %d}", t.Name, t.Id)
+}
+
 // NewPingCommand return a ping subcommand of rootCmd
 func NewTableIdCommand() *cobra.Command {
 	m := &cobra.Command{
-		Use:   "showTableId",
+		Use:   "showTableId <tidb_addr> <db_name> <table_name>",
 		Short: "show the table id given the table name",
 		Run:   showTableIdCommandFunc,
 	}
@@ -40,17 +45,22 @@ func NewTableIdCommand() *cobra.Command {
 }
 
 func showTableIdCommandFunc(cmd *cobra.Command, args []string) {
-	host, err := cmd.Flags().GetString("host")
-	dbName, err := cmd.Flags().GetString("dbName")
-	tableName, err := cmd.Flags().GetString("tableName")
+	if len(args) != 3 {
+		fmt.Println("Usage: showTableId <tidb_addr> <db_name> <table_name>")
+		return
+
+	}
+	host:= args[0]
+	dbName:= args[1]
+	tableName:= args[2]
 
 	if host == "" || dbName == "" || tableName == "" {
 		fmt.Printf("host, dbName and tableName are all required, but now\n " +
 			"host: %s\n dbName: %s\n tableName: %s\n", host, dbName, tableName)
-		os.Exit(1)
+		return
 	}
 
-	urlString := fmt.Sprintf("http://%s/tables/%s/%s/regions", host, dbName, tableName)
+	urlString := fmt.Sprintf("%s/tables/%s/%s/regions", host, dbName, tableName)
 
 	fmt.Println("the url is", urlString)
 
@@ -76,22 +86,5 @@ func showTableIdCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println(err)
 		return
 	}
-	fmt.Println("table info:", ti)
-}
-
-func init() {
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// curlCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// curlCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle"
-
-	tableIdCmd.Flags().StringP("tidb", "tidb", "", "The TiDB host")
-	tableIdCmd.Flags().StringP("dbName", "d", "", "The DB name")
-	tableIdCmd.Flags().StringP("tableName", "t", "", "The Table name")
+	fmt.Println(ti)
 }
