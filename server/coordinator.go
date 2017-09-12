@@ -114,10 +114,11 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	if c.limiter.operatorCount(core.RegionKind) >= c.opt.GetReplicaScheduleLimit() {
 		return
 	}
-	if op := c.checker.Check(region); op != nil {
+	// Generate Operator which moves region to targeted namespace store
+	if op := c.namespace.Check(region); op != nil {
 		c.addOperator(op)
 	}
-	if op := c.namespace.Check(region); op != nil {
+	if op := c.checker.Check(region); op != nil {
 		c.addOperator(op)
 	}
 }
