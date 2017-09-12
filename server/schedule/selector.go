@@ -19,6 +19,11 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
+const (
+	// DefaultNamespace represents global namespace
+	DefaultNamespace = 0
+)
+
 // Selector is an interface to select source and target store to schedule.
 type Selector interface {
 	SelectSource(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo
@@ -123,6 +128,56 @@ func (s *replicaSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filt
 		return nil
 	}
 	return best
+}
+
+type namespaceSelector struct {
+	filters     []Filter
+	namespaceID int64
+}
+
+// NewNamespaceSelector creates a Selector that select source/target store by their
+// namespace based on a region's key range.
+func NewNamespaceSelector(target int64, filters ...Filter) Selector {
+	return &namespaceSelector{
+		filters:     filters,
+		namespaceID: target,
+	}
+}
+
+func (s *namespaceSelector) Select(stores []*core.StoreInfo) *core.StoreInfo {
+	if len(stores) == 0 {
+		return nil
+	}
+	return stores[rand.Int()%len(stores)]
+}
+
+func (s *namespaceSelector) SelectSource(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
+	filters = append(filters, s.filters...)
+	var candidates []*core.StoreInfo
+	for _, store := range stores {
+		if FilterSource(store, filters) {
+			continue
+		}
+		candidates = append(candidates, store)
+	}
+
+	return s.Select(candidates)
+}
+
+func (s *namespaceSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
+	if s.namespaceID == DefaultNamespace {
+		return nil
+	}
+	filters = append(filters, s.filters...)
+	var candidates []*core.StoreInfo
+	for _, store := range stores {
+		if FilterSource(store, filters) {
+			continue
+		}
+		candidates = append(candidates, store)
+	}
+
+	return s.Select(candidates)
 }
 
 type randomSelector struct {

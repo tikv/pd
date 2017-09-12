@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"time"
 
+	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -204,6 +205,28 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (h *storeHandler) SetNamespace(w http.ResponseWriter, r *http.Request) {
+	cluster := h.svr.GetRaftCluster()
+	if cluster == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
+	}
+
+	vars := mux.Vars(r)
+	storeIDStr := vars["id"]
+	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	//TODO combine store_id, namespace, table_id(s) relationship to etcd KV
+	// store_id  <-----> namespace <------> table_id(s)
+	fmt.Println(storeID)
+
+	h.rd.JSON(w, http.StatusOK, nil)
+
 }
 
 func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {

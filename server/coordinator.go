@@ -62,29 +62,31 @@ type coordinator struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	cluster    *clusterInfo
-	opt        *scheduleOption
-	limiter    *scheduleLimiter
-	checker    *schedule.ReplicaChecker
-	operators  map[uint64]*schedule.Operator
-	schedulers map[string]*scheduleController
-	histories  cache.Cache
-	hbStreams  *heartbeatStreams
+	cluster          *clusterInfo
+	opt              *scheduleOption
+	limiter          *scheduleLimiter
+	replicaChecker   *schedule.ReplicaChecker
+	namespaceChecker *schedule.NamespaceChecker
+	operators        map[uint64]*schedule.Operator
+	schedulers       map[string]*scheduleController
+	histories        cache.Cache
+	hbStreams        *heartbeatStreams
 }
 
 func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
-		ctx:        ctx,
-		cancel:     cancel,
-		cluster:    cluster,
-		opt:        opt,
-		limiter:    newScheduleLimiter(),
-		checker:    schedule.NewReplicaChecker(opt, cluster),
-		operators:  make(map[uint64]*schedule.Operator),
-		schedulers: make(map[string]*scheduleController),
-		histories:  cache.NewDefaultCache(historiesCacheSize),
-		hbStreams:  hbStreams,
+		ctx:              ctx,
+		cancel:           cancel,
+		cluster:          cluster,
+		opt:              opt,
+		limiter:          newScheduleLimiter(),
+		replicaChecker:   schedule.NewReplicaChecker(opt, cluster),
+		namespaceChecker: schedule.NewNamespaceChecker(opt, cluster),
+		operators:        make(map[uint64]*schedule.Operator),
+		schedulers:       make(map[string]*scheduleController),
+		histories:        cache.NewDefaultCache(historiesCacheSize),
+		hbStreams:        hbStreams,
 	}
 }
 
@@ -112,7 +114,11 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	if c.limiter.operatorCount(core.RegionKind) >= c.opt.GetReplicaScheduleLimit() {
 		return
 	}
-	if op := c.checker.Check(region); op != nil {
+	// Generate Operator which moves region to targeted namespace store
+	if op := c.namespaceChecker.Check(region); op != nil {
+		c.addOperator(op)
+	}
+	if op := c.replicaChecker.Check(region); op != nil {
 		c.addOperator(op)
 	}
 }
