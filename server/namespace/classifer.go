@@ -15,15 +15,13 @@ package namespace
 
 import "github.com/pingcap/pd/server/core"
 
-var (
-	// DefaultNamespace is the namespace all the store and region belong to by
-	// default.
-	DefaultNamespace = "global"
+// DefaultNamespace is the namespace all the store and region belong to by
+// default.
+const DefaultNamespace = "global"
 
-	// DefaultClassifer is a classifier that classifies all regions and stores to
-	// DefaultNamespace.
-	DefaultClassifer = defaultClassifer{}
-)
+// DefaultClassifer is a classifier that classifies all regions and stores to
+// DefaultNamespace.
+var DefaultClassifer = defaultClassifer{}
 
 // Classifier is used to determine the namespace which the store or region
 // belongs.
