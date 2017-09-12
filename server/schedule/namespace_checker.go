@@ -13,7 +13,10 @@
 
 package schedule
 
-import "github.com/pingcap/pd/server/core"
+import (
+	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/kvproto/pkg/metapb"
+)
 
 // NamespaceChecker ensures region to go to the right place.
 type NamespaceChecker struct {
@@ -36,8 +39,47 @@ func NewNamespaceChecker(opt Options, cluster Cluster) *NamespaceChecker {
 	}
 }
 
-// Check verifies a region's namespace, creating an Operator if nee.
+// Check verifies a region's namespace, creating an Operator if need.
 func (n *NamespaceChecker) Check(region *core.RegionInfo) *Operator {
+	for _, peer := range region.GetPeers() {
+		newPeer := n.SelectBestPeerToRelocate(region, n.filters...)
+		if newPeer == nil {
+			return nil
+		}
+		return CreateMovePeerOperator("makeNamespaceRelocation", region, core.RegionKind, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	}
+
 	return nil
 }
 
+// SelectBestPeerToRelocate return a new peer that to be used to move a region
+func (n *NamespaceChecker) SelectBestPeerToRelocate(region *core.RegionInfo, filters ...Filter) *metapb.Peer {
+	storeID := n.SelectBestStoreToRelocate(region, filters...)
+	if storeID == 0 {
+		return nil
+	}
+	newPeer, err := n.cluster.AllocPeer(storeID)
+	if err != nil {
+		return nil
+	}
+	return newPeer
+}
+
+// SelectBestStoreToRelocate returns the store to relocate
+func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, filters ...Filter) uint64 {
+	newFilters := []Filter{
+		NewStateFilter(n.opt),
+		NewStorageThresholdFilter(n.opt),
+		NewExcludedFilter(nil, region.GetStoreIds()),
+	}
+	filters = append(filters, newFilters...)
+
+	//TODO get namespace by region
+	namespaceID := uint64(0)
+	selector := NewNamespaceSelector(namespaceID, n.filters...)
+	target := selector.SelectTarget(n.cluster.GetStores(), filters...)
+	if target == nil {
+		return 0
+	}
+	return target.GetId()
+}
