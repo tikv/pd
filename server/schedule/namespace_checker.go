@@ -85,5 +85,5 @@ func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, fi
 
 // getRegionNamespace returns namespace of the region, 0 for the global
 func (n *NamespaceChecker) getRegionNamespace(region *core.RegionInfo) uint64 {
-	return uint64(DEFAULT_NAMESPACE)
+	return uint64(DefaultNamespace)
 }
