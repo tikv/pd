@@ -74,12 +74,16 @@ func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, fi
 	}
 	filters = append(filters, newFilters...)
 
-	//TODO get namespace by region
-	namespaceID := uint64(0)
+	namespaceID := n.getRegionNamespace(region)
 	selector := NewNamespaceSelector(namespaceID, n.filters...)
 	target := selector.SelectTarget(n.cluster.GetStores(), filters...)
 	if target == nil {
 		return 0
 	}
 	return target.GetId()
+}
+
+// getRegionNamespace returns namespace of the region, 0 for the global
+func (n *NamespaceChecker) getRegionNamespace(region *core.RegionInfo) uint64 {
+	return uint64(DEFAULT_NAMESPACE)
 }
