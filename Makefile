@@ -1,9 +1,9 @@
 PD_PKG := github.com/pingcap/pd
 VENDOR := $(shell rm -rf _vendor/src/$(PD_PKG) &&\
-				 ln -s `pwd` _vendor/src/$(PD_PKG) &&\
-				 pwd)/_vendor
+                 ln -s `pwd` _vendor/src/$(PD_PKG) &&\
+                 pwd)/_vendor
 TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
-					 uniq | sed -e "s/^\./github.com\/pingcap\/pd/")
+                     uniq | sed -e "s/^\./github.com\/pingcap\/pd/")
 
 GOFILTER := grep -vE 'vendor|testutil'
 GOCHECKER := $(GOFILTER) | awk '{ print } END { if (NR > 0) { exit 1 } }'
