@@ -20,7 +20,8 @@ import (
 )
 
 const (
-	DEFAULT_NAMESPACE = 0
+	// DefaultNamespace represents global namespace
+	DefaultNamespace = 0
 )
 
 // Selector is an interface to select source and target store to schedule.
@@ -165,7 +166,7 @@ func (s *namespaceSelector) SelectSource(stores []*core.StoreInfo, filters ...Fi
 
 func (s *namespaceSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	//
-	if s.namespaceID == DEFAULT_NAMESPACE {
+	if s.namespaceID == DefaultNamespace {
 		return nil
 	}
 	filters = append(filters, s.filters...)
