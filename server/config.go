@@ -78,8 +78,10 @@ type Config struct {
 	// the default retention is 1 hour
 	AutoCompactionRetention int `toml:"auto-compaction-retention" json:"auto-compaction-retention"`
 
-	tickMs     uint64
-	electionMs uint64
+	// TickInterval is the interval for etcd Raft tick.
+	TickInterval typeutil.Duration `toml:"tick-interval"`
+	// ElectionInterval is the interval for etcd Raft election.
+	ElectionInterval typeutil.Duration `toml:"election-interval"`
 
 	configFile string
 
@@ -132,9 +134,9 @@ const (
 	// We can enlarge both a little to reduce the network aggression.
 	// now embed etcd use TickMs for heartbeat, we will update
 	// after embed etcd decouples tick and heartbeat.
-	defaultTickMs = uint64(500)
+	defaultTickInterval = 500 * time.Millisecond
 	// embed etcd has a check that `5 * tick > election`
-	defaultElectionMs = uint64(3000)
+	defaultElectionInterval = 3000 * time.Millisecond
 )
 
 func adjustString(v *string, defValue string) {
@@ -254,8 +256,8 @@ func (c *Config) adjust() error {
 		c.AutoCompactionRetention = defaultAutoCompactionRetention
 	}
 
-	adjustUint64(&c.tickMs, defaultTickMs)
-	adjustUint64(&c.electionMs, defaultElectionMs)
+	adjustDuration(&c.TickInterval, defaultTickInterval)
+	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
 
 	adjustString(&c.Metric.PushJob, c.Name)
 
@@ -433,8 +435,8 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ClusterState = c.InitialClusterState
 	cfg.EnablePprof = true
 	cfg.StrictReconfigCheck = !c.disableStrictReconfigCheck
-	cfg.TickMs = uint(c.tickMs)
-	cfg.ElectionMs = uint(c.electionMs)
+	cfg.TickMs = uint(c.TickInterval.Duration / time.Millisecond)
+	cfg.ElectionMs = uint(c.ElectionInterval.Duration / time.Millisecond)
 	cfg.AutoCompactionRetention = c.AutoCompactionRetention
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
 
