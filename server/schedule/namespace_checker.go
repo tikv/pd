@@ -14,8 +14,8 @@
 package schedule
 
 import (
-	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server/core"
 )
 
 // NamespaceChecker ensures region to go to the right place.
