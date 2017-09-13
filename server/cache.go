@@ -366,7 +366,7 @@ func newClusterInfo(id IDAllocator) *clusterInfo {
 		stores:          newStoresInfo(),
 		regions:         newRegionsInfo(),
 		readStatistics:  cache.NewDefaultCache(statCacheMaxLen),
-		writeStatistics: cache.NewCache(writeStatCacheMaxLen, cache.TwoQueueCache),
+		writeStatistics: cache.NewCache(statCacheMaxLen, cache.TwoQueueCache),
 	}
 }
 
