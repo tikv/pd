@@ -36,3 +36,7 @@ func (h *namespaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	//TODO
 	h.rd.JSON(w, http.StatusOK, "here should display namespace list")
 }
+
+func (h *namespaceHandler) Post(w http.ResponseWriter, r *http.Request) {
+	h.rd.JSON(w, http.StatusOK, "add namespace")
+}

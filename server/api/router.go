@@ -59,6 +59,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/store/{id}", storeHandler.Get).Methods("GET")
 	router.HandleFunc("/api/v1/store/{id}", storeHandler.Delete).Methods("DELETE")
 	router.HandleFunc("/api/v1/store/{id}/label", storeHandler.SetLabels).Methods("POST")
+	router.HandleFunc("/api/v1/store/{id}/namespace", storeHandler.SetNamespace).Methods("POST")
 	router.HandleFunc("/api/v1/store/{id}/weight", storeHandler.SetWeight).Methods("POST")
 	router.Handle("/api/v1/stores", newStoresHandler(svr, rd)).Methods("GET")
 
@@ -89,7 +90,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/leader/transfer/{next_leader}", leaderHandler.Transfer).Methods("POST")
 
 	namespaceHandler := newNamespaceHandler(svr, rd)
-	router.HandleFunc("/api/v1/namespace", namespaceHandler.Get).Methods("GET")
+	router.HandleFunc("/api/v1/namespaces", namespaceHandler.Get).Methods("GET")
+	router.HandleFunc("/api/v1/namespaces", namespaceHandler.Post).Methods("POST")
 
 	router.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 	return router
