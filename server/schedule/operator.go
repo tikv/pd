@@ -98,7 +98,19 @@ func NewOperator(desc string, regionID uint64, kind core.ResourceKind, steps ...
 }
 
 func (o *Operator) String() string {
-	return fmt.Sprintf("%s (kind:%s, region:%v, createAt:%s, currentStep:%v, steps:%v)", o.desc, o.kind, o.regionID, o.createTime, atomic.LoadInt32(&o.currentStep), o.steps)
+	s := fmt.Sprintf("%s (kind:%s, region:%v, createAt:%s, currentStep:%v, steps:%+v) ", o.desc, o.kind, o.regionID, o.createTime, atomic.LoadInt32(&o.currentStep), o.steps)
+	if o.IsTimeout() {
+		s = s + "timeout"
+	}
+	if o.IsFinish() {
+		s = s + "finished"
+	}
+	return s
+}
+
+// MarshalJSON serialize custom types to JSON
+func (o *Operator) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + o.String() + `"`), nil
 }
 
 // Desc returns the operator's short description.

@@ -271,6 +271,7 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 		region.DownPeers = request.GetDownPeers()
 		region.PendingPeers = request.GetPendingPeers()
 		region.WrittenBytes = request.GetBytesWritten()
+		region.ReadBytes = request.GetBytesRead()
 		if region.GetId() == 0 {
 			msg := fmt.Sprintf("invalid request region, %v", request)
 			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg)

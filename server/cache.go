@@ -126,6 +126,16 @@ func (s *storesInfo) totalWrittenBytes() uint64 {
 	return totalWrittenBytes
 }
 
+func (s *storesInfo) totalReadBytes() uint64 {
+	var totalReadBytes uint64
+	for _, s := range s.stores {
+		if s.IsUp() {
+			totalReadBytes += s.Stats.GetBytesRead()
+		}
+	}
+	return totalReadBytes
+}
+
 // regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.
 type regionMap struct {
 	m   map[uint64]*regionEntry
@@ -347,6 +357,7 @@ type clusterInfo struct {
 
 	activeRegions   int
 	writeStatistics cache.Cache
+	readStatistics  cache.Cache
 }
 
 func newClusterInfo(id IDAllocator) *clusterInfo {
@@ -354,6 +365,7 @@ func newClusterInfo(id IDAllocator) *clusterInfo {
 		id:              id,
 		stores:          newStoresInfo(),
 		regions:         newRegionsInfo(),
+		readStatistics:  cache.NewDefaultCache(statCacheMaxLen),
 		writeStatistics: cache.NewCache(writeStatCacheMaxLen, cache.TwoQueueCache),
 	}
 }
@@ -499,6 +511,16 @@ func (c *clusterInfo) getStoresWriteStat() map[uint64]uint64 {
 	return res
 }
 
+func (c *clusterInfo) getStoresReadStat() map[uint64]uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	res := make(map[uint64]uint64)
+	for _, s := range c.stores.stores {
+		res[s.GetId()] = s.Stats.GetBytesRead()
+	}
+	return res
+}
+
 // GetRegions searches for a region by ID.
 func (c *clusterInfo) GetRegion(regionID uint64) *core.RegionInfo {
 	c.RLock()
@@ -513,7 +535,7 @@ func (c *clusterInfo) updateWriteStatCache(region *core.RegionInfo, hotRegionThr
 	value, isExist := c.writeStatistics.Peek(key)
 	newItem := &core.RegionStat{
 		RegionID:       region.GetId(),
-		WrittenBytes:   region.WrittenBytes,
+		FlowBytes:      region.WrittenBytes,
 		LastUpdateTime: time.Now(),
 		StoreID:        region.Leader.GetStoreId(),
 		Version:        region.GetRegionEpoch().GetVersion(),
@@ -536,14 +558,59 @@ func (c *clusterInfo) updateWriteStatCache(region *core.RegionInfo, hotRegionThr
 		// eliminate some noise
 		newItem.HotDegree = v.HotDegree - 1
 		newItem.AntiCount = v.AntiCount - 1
-		newItem.WrittenBytes = v.WrittenBytes
+		newItem.FlowBytes = v.FlowBytes
 	}
 	c.writeStatistics.Put(key, newItem)
+}
+
+// updateReadStatCache updates statistic for a region if it's hot, or remove it from statistics if it cools down
+func (c *clusterInfo) updateReadStatCache(region *core.RegionInfo, hotRegionThreshold uint64) {
+	var v *core.RegionStat
+	key := region.GetId()
+	value, isExist := c.readStatistics.Peek(key)
+	newItem := &core.RegionStat{
+		RegionID:       region.GetId(),
+		FlowBytes:      region.ReadBytes,
+		LastUpdateTime: time.Now(),
+		StoreID:        region.Leader.GetStoreId(),
+		Version:        region.GetRegionEpoch().GetVersion(),
+		AntiCount:      hotRegionAntiCount,
+	}
+
+	if isExist {
+		v = value.(*core.RegionStat)
+		newItem.HotDegree = v.HotDegree + 1
+	}
+
+	if region.ReadBytes < hotRegionThreshold {
+		if !isExist {
+			return
+		}
+		if v.AntiCount <= 0 {
+			c.readStatistics.Remove(key)
+			return
+		}
+		// eliminate some noise
+		newItem.HotDegree = v.HotDegree - 1
+		newItem.AntiCount = v.AntiCount - 1
+		newItem.FlowBytes = v.FlowBytes
+	}
+	c.readStatistics.Put(key, newItem)
 }
 
 // RegionWriteStats returns hot region's write stats.
 func (c *clusterInfo) RegionWriteStats() []*core.RegionStat {
 	elements := c.writeStatistics.Elems()
+	stats := make([]*core.RegionStat, len(elements))
+	for i := range elements {
+		stats[i] = elements[i].Value.(*core.RegionStat)
+	}
+	return stats
+}
+
+// RegionReadStats returns hot region's read stats.
+func (c *clusterInfo) RegionReadStats() []*core.RegionStat {
+	elements := c.readStatistics.Elems()
 	stats := make([]*core.RegionStat, len(elements))
 	for i := range elements {
 		stats[i] = elements[i].Value.(*core.RegionStat)
@@ -708,7 +775,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	var saveKV, saveCache, isNew bool
 	if origin == nil {
 		log.Infof("[region %d] Insert new region {%v}", region.GetId(), region)
-		saveKV, saveCache = true, true
+		saveKV, saveCache, isNew = true, true, true
 	} else {
 		r := region.GetRegionEpoch()
 		o := origin.GetRegionEpoch()
@@ -767,6 +834,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	c.updateWriteStatus(region)
+	c.updateReadStatus(region)
 
 	return nil
 }
@@ -786,14 +854,40 @@ func (c *clusterInfo) updateWriteStatus(region *core.RegionInfo) {
 	region.WrittenBytes = WrittenBytesPerSec
 
 	// hotRegionThreshold is use to pick hot region
-	// suppose the number of the hot regions is writeStatCacheMaxLen
+	// suppose the number of the hot regions is statCacheMaxLen
 	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot regions
 	// divide 2 because the store reports data about two times than the region record write to rocksdb
-	divisor := float64(writeStatCacheMaxLen) * 2 * storeHeartBeatReportInterval
+	divisor := float64(statCacheMaxLen) * 2 * storeHeartBeatReportInterval
 	hotRegionThreshold := uint64(float64(c.stores.totalWrittenBytes()) / divisor)
 
-	if hotRegionThreshold < hotRegionMinWriteRate {
-		hotRegionThreshold = hotRegionMinWriteRate
+	if hotRegionThreshold < hotRegionMinFlowRate {
+		hotRegionThreshold = hotRegionMinFlowRate
 	}
 	c.updateWriteStatCache(region, hotRegionThreshold)
+}
+
+func (c *clusterInfo) updateReadStatus(region *core.RegionInfo) {
+	var ReadBytesPerSec uint64
+	v, isExist := c.readStatistics.Peek(region.GetId())
+	if isExist {
+		interval := time.Now().Sub(v.(*core.RegionStat).LastUpdateTime).Seconds()
+		if interval < minHotRegionReportInterval {
+			return
+		}
+		ReadBytesPerSec = uint64(float64(region.ReadBytes) / interval)
+	} else {
+		ReadBytesPerSec = uint64(float64(region.ReadBytes) / float64(regionHeartBeatReportInterval))
+	}
+	region.ReadBytes = ReadBytesPerSec
+
+	// hotRegionThreshold is use to pick hot region
+	// suppose the number of the hot regions is statLRUMaxLen
+	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot regions
+	divisor := float64(statCacheMaxLen) * storeHeartBeatReportInterval
+	hotRegionThreshold := uint64(float64(c.stores.totalReadBytes()) / divisor)
+
+	if hotRegionThreshold < hotRegionMinFlowRate {
+		hotRegionThreshold = hotRegionMinFlowRate
+	}
+	c.updateReadStatCache(region, hotRegionThreshold)
 }

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
@@ -289,6 +290,11 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 		tc.handleRegionHeartbeat(r)
 		c.Assert(co.shouldRun(), Equals, t.shouldRun)
 	}
+	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
+	newRegion := core.NewRegionInfo(nr, nil)
+	tc.handleRegionHeartbeat(newRegion)
+	c.Assert(co.cluster.activeRegions, Equals, 6)
+
 }
 
 func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
@@ -304,10 +310,11 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	co.run()
 	defer co.stop()
 
-	c.Assert(co.schedulers, HasLen, 3)
+	c.Assert(co.schedulers, HasLen, 4)
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
+	c.Assert(co.removeScheduler("balance-hot-write-region-scheduler"), IsNil)
+	c.Assert(co.removeScheduler("balance-hot-read-region-scheduler"), IsNil)
 	c.Assert(co.schedulers, HasLen, 0)
 
 	stream := newMockHeartbeatStream()

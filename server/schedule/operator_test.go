@@ -14,6 +14,7 @@
 package schedule
 
 import (
+	"encoding/json"
 	"sync/atomic"
 
 	. "github.com/pingcap/check"
@@ -21,10 +22,15 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
+var _ = Suite(&testOperatorSuite{})
+
 type testOperatorSuite struct{}
 
 func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, peers ...[2]uint64) *core.RegionInfo {
-	var region core.RegionInfo
+	var (
+		region metapb.Region
+		leader *metapb.Peer
+	)
 	region.Id = regionID
 	for i := range peers {
 		peer := &metapb.Peer{
@@ -33,10 +39,10 @@ func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, pe
 		}
 		region.Peers = append(region.Peers, peer)
 		if peer.GetId() == leaderPeer {
-			region.Leader = peer
+			leader = peer
 		}
 	}
-	return &region
+	return core.NewRegionInfo(&region, leader)
 }
 
 func (s *testOperatorSuite) TestOperatorStep(c *C) {
@@ -81,10 +87,12 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	}
 	op = s.newTestOperator(1, steps...)
 	s.checkSteps(c, op, steps)
-	c.Assert(atomic.LoadInt32(&op.currentStep), Equals, int32(2))
 	c.Assert(op.Check(region), Equals, RemovePeer{FromStore: 2})
-
+	c.Assert(atomic.LoadInt32(&op.currentStep), Equals, int32(2))
 	c.Assert(op.IsTimeout(), IsFalse)
 	op.createTime = op.createTime.Add(-MaxOperatorWaitTime)
 	c.Assert(op.IsTimeout(), IsTrue)
+	res, err := json.Marshal(op)
+	c.Assert(err, IsNil)
+	c.Assert(len(res), Equals, len(op.String())+2)
 }
