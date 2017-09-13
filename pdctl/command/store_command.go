@@ -37,6 +37,7 @@ func NewStoreCommand() *cobra.Command {
 	s.AddCommand(NewDeleteStoreCommand())
 	s.AddCommand(NewLabelStoreCommand())
 	s.AddCommand(NewSetStoreWeightCommand())
+	s.AddCommand(NewNamespaceStoreCommand())
 	return s
 }
 
@@ -67,6 +68,17 @@ func NewSetStoreWeightCommand() *cobra.Command {
 		Short: "set a store's leader and region balance weight",
 		Run:   setStoreWeightCommandFunc,
 	}
+}
+
+// NewNamespaceStoreCommand returns a namespace subcommand of storeCmd.
+func NewNamespaceStoreCommand() *cobra.Command {
+	n := &cobra.Command{
+		Use:   "namespace <store_id> <namespace>",
+		Short: "set a store's namespace",
+		Run:   namespaceStoreCommandFunc,
+	}
+
+	return n
 }
 
 func showStoreCommandFunc(cmd *cobra.Command, args []string) {
@@ -137,5 +149,22 @@ func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {
 	postJSON(cmd, prefix, map[string]interface{}{
 		"leader": leader,
 		"region": region,
+	})
+}
+
+func namespaceStoreCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 3 {
+		fmt.Println("Usage: store namespace <store_id> <namespace>")
+		return
+	}
+	storeID, err := strconv.Atoi(args[0])
+	if err != nil {
+		fmt.Println("store_id should be a number")
+		return
+	}
+	prefix := fmt.Sprintf(path.Join(storePrefix, "namespace"), args[0])
+	postJSON(cmd, prefix, map[string]interface{}{
+		"store_id":  storeID,
+		"namespace": args[1],
 	})
 }
