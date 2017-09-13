@@ -166,6 +166,9 @@ func (o *Operator) IsFinish() bool {
 
 // IsTimeout checks the operator's create time and determines if it is timeout.
 func (o *Operator) IsTimeout() bool {
+	if o.IsFinish() {
+		return false
+	}
 	return time.Since(o.createTime) > MaxOperatorWaitTime
 }
 

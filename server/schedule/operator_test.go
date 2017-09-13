@@ -78,6 +78,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	s.checkSteps(c, op, steps)
 	c.Assert(op.Check(region), IsNil)
 	c.Assert(op.IsFinish(), IsTrue)
+	c.Assert(op.IsTimeout(), IsFalse)
 
 	// addPeer1, transferLeader1, removePeer2
 	steps = []OperatorStep{
