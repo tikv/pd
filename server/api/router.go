@@ -88,6 +88,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/leader/resign", leaderHandler.Resign).Methods("POST")
 	router.HandleFunc("/api/v1/leader/transfer/{next_leader}", leaderHandler.Transfer).Methods("POST")
 
+	namespaceHandler := newNamespaceHandler(svr, rd)
+	router.HandleFunc("/api/v1/namespace", namespaceHandler.Get).Methods("GET")
+
 	router.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 	return router
 }
