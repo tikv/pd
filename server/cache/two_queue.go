@@ -33,7 +33,7 @@ const (
 // computationally about 2x the cost, and adds some metadata over
 // head. The ARCCache is similar, but does not require setting any
 // parameters.
-// TwoQueue implements is reference by https://github.com/hashicorp/golang-lru/blob/master/2q.go
+// TwoQueue implementation is based on https://github.com/hashicorp/golang-lru/blob/master/2q.go
 type TwoQueue struct {
 	size       int
 	recentSize int
