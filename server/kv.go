@@ -81,6 +81,10 @@ func (kv *kv) storeRegionWeightPath(storeID uint64) string {
 	return path.Join(kv.schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
 }
 
+func (kv *kv) namespacePath(nsID uint64) string {
+	return path.Join(kv.clusterPath, "namespace", fmt.Sprintf("%020d", nsID))
+}
+
 func (kv *kv) getRaftClusterBootstrapTime() (time.Time, error) {
 	data, err := kv.load(kv.clusterStatePath("raft_bootstrap_time"))
 	if err != nil {
@@ -106,6 +110,29 @@ func (kv *kv) loadStore(storeID uint64, store *metapb.Store) (bool, error) {
 
 func (kv *kv) saveStore(store *metapb.Store) error {
 	return kv.saveProto(kv.storePath(store.GetId()), store)
+}
+
+func (kv *kv) loadNamespace(ns *core.Namespace) (bool, error) {
+	value, err := kv.load(kv.namespacePath(ns.GetID()))
+	if err != nil {
+		return false, errors.Trace(err)
+	}
+	if value == nil {
+		return false, nil
+	}
+	err = json.Unmarshal(value, ns)
+	if err != nil {
+		return false, errors.Trace(err)
+	}
+	return true, nil
+}
+
+func (kv *kv) saveNamespace(ns *core.Namespace) error {
+	value, err := json.Marshal(ns)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return kv.save(kv.namespacePath(ns.GetID()), string(value))
 }
 
 func (kv *kv) loadRegion(regionID uint64, region *metapb.Region) (bool, error) {
@@ -251,6 +278,36 @@ func (kv *kv) loadRegions(regions *regionsInfo, rangeLimit int64) error {
 
 			nextID = region.GetId() + 1
 			regions.setRegion(core.NewRegionInfo(region, nil))
+		}
+
+		if len(resp.Kvs) < int(rangeLimit) {
+			return nil
+		}
+	}
+}
+
+func (kv *kv) loadNamespaces(namespaces *namespacesInfo, rangeLimit int64) error {
+	nextID := uint64(0)
+	endNamespace := kv.namespacePath(math.MaxUint64)
+	withRange := clientv3.WithRange(endNamespace)
+	withLimit := clientv3.WithLimit(rangeLimit)
+
+	for {
+		key := kv.namespacePath(nextID)
+		resp, err := kvGet(kv.client, key, withRange, withLimit)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		for _, item := range resp.Kvs {
+			ns := &core.Namespace{}
+			err := json.Unmarshal(item.Value, ns)
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			nextID = ns.GetID() + 1
+			namespaces.setNamespace(ns)
 		}
 
 		if len(resp.Kvs) < int(rangeLimit) {

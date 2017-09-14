@@ -16,9 +16,15 @@ package api
 import (
 	"fmt"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/core"
 	"github.com/unrolled/render"
 	"net/http"
 )
+
+type namespacesInfo struct {
+	Count      int               `json:"count"`
+	Namespaces []*core.Namespace `json:"namespaces"`
+}
 
 type namespaceHandler struct {
 	svr *server.Server
@@ -35,7 +41,18 @@ func newNamespaceHandler(svr *server.Server, rd *render.Render) *namespaceHandle
 // Get list namespace mapping
 func (h *namespaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	//TODO
-	h.rd.JSON(w, http.StatusOK, "here should display namespace list")
+	cluster := h.svr.GetRaftCluster()
+	if cluster == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
+		return
+	}
+
+	namespaces := cluster.GetNamespaces()
+	nsInfos := &namespacesInfo{
+		Count:      len(namespaces),
+		Namespaces: namespaces,
+	}
+	h.rd.JSON(w, http.StatusOK, nsInfos)
 }
 
 // Post create a namespace
@@ -53,7 +70,10 @@ func (h *namespaceHandler) Post(w http.ResponseWriter, r *http.Request) {
 	ns := input["namespace"]
 
 	//TODO create namespace
-	fmt.Println(ns)
+	if err := cluster.CreateNamespace(ns); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("create namespace %s ok", ns))
 }

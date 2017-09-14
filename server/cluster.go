@@ -637,3 +637,37 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 	}
 	return c.cachedCluster.putMeta(meta)
 }
+
+// GetNamespaces returns all the namespace in etc.d
+func (c *RaftCluster) GetNamespaces() []*core.Namespace {
+	return c.cachedCluster.getNamespaces()
+}
+
+// CreateNamespace create a new Namespace
+func (c *RaftCluster) CreateNamespace(namespaceName string) error {
+	id, err := c.s.idAlloc.Alloc()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	ns := &core.Namespace{
+		ID:       id,
+		Name:     namespaceName,
+		TableIDs: make([]int64, 1),
+		StoreIDs: make([]uint64, 3),
+	}
+
+	err = c.putNamespace(ns)
+	return errors.Trace(err)
+}
+
+func (c *RaftCluster) putNamespace(namespace *core.Namespace) error {
+	c.Lock()
+	defer c.Unlock()
+
+	cluster := c.cachedCluster
+
+	// TODO check whether the namespace is exists
+
+	return cluster.putNamespace(namespace)
+}
