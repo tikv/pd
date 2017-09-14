@@ -14,7 +14,6 @@
 package api
 
 import (
-	"fmt"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
 	"github.com/unrolled/render"
