@@ -132,12 +132,12 @@ func (s *replicaSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filt
 
 type namespaceSelector struct {
 	filters     []Filter
-	namespaceID uint64
+	namespaceID int64
 }
 
 // NewNamespaceSelector creates a Selector that select source/target store by their
 // namespace based on a region's key range.
-func NewNamespaceSelector(target uint64, filters ...Filter) Selector {
+func NewNamespaceSelector(target int64, filters ...Filter) Selector {
 	return &namespaceSelector{
 		filters:     filters,
 		namespaceID: target,

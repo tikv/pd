@@ -84,6 +84,12 @@ func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, fi
 }
 
 // getRegionNamespace returns namespace of the region, 0 for the global
-func (n *NamespaceChecker) getRegionNamespace(region *core.RegionInfo) uint64 {
-	return DefaultNamespace
+func (n *NamespaceChecker) getRegionNamespace(region *core.RegionInfo) int64 {
+	startTableID := core.DecodeTableID(region.StartKey)
+	endTableID := core.DecodeTableID(region.EndKey)
+	if startTableID != endTableID {
+		return DefaultNamespace
+	}
+
+	return startTableID
 }
