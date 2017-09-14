@@ -20,6 +20,7 @@ import (
 	"path"
 	"runtime"
 	"strings"
+	"sync"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/pkg/capnslog"
@@ -214,27 +215,31 @@ func InitFileLog(cfg *FileLogConfig) error {
 	return nil
 }
 
+var once sync.Once
+
 // InitLogger initalizes PD's logger.
 func InitLogger(cfg *LogConfig) error {
-	log.SetLevel(stringToLogLevel(cfg.Level))
-	log.AddHook(&contextHook{})
+	var err error
+	once.Do(func() {
+		log.SetLevel(stringToLogLevel(cfg.Level))
+		log.AddHook(&contextHook{})
 
-	if cfg.Format == "" {
-		cfg.Format = defaultLogFormat
-	}
-	log.SetFormatter(stringToLogFormatter(cfg.Format, cfg.DisableTimestamp))
+		if cfg.Format == "" {
+			cfg.Format = defaultLogFormat
+		}
+		log.SetFormatter(stringToLogFormatter(cfg.Format, cfg.DisableTimestamp))
 
-	// etcd log
-	capnslog.SetFormatter(&redirectFormatter{})
+		// etcd log
+		capnslog.SetFormatter(&redirectFormatter{})
 
-	if len(cfg.File.Filename) == 0 {
-		return nil
-	}
+		if len(cfg.File.Filename) == 0 {
+			return
+		}
 
-	err := InitFileLog(&cfg.File)
+		err = InitFileLog(&cfg.File)
+	})
 	if err != nil {
 		return errors.Trace(err)
 	}
-
 	return nil
 }
