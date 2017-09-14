@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"github.com/spf13/cobra"
 	"net/http"
-	"strconv"
 )
 
 const namespacePrefix = "pd/api/v1/namespaces"
@@ -36,7 +35,7 @@ func NewNamespaceCommand() *cobra.Command {
 // NewAddNamespaceCommand return a create sub-command of namespaceCmd
 func NewAddNamespaceCommand() *cobra.Command {
 	d := &cobra.Command{
-		Use:   "create <namespace> <table_id>",
+		Use:   "create <namespace>",
 		Short: "create namespace",
 		Run:   addNamespaceCommandFunc,
 	}
@@ -53,19 +52,13 @@ func showNamespaceCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func addNamespaceCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 2 {
-		fmt.Println(cmd.Usage())
-	}
-
-	tableID, err := strconv.ParseUint(args[1], 10, 64)
-	if err != nil {
-		fmt.Println(err)
+	if len(args) != 1 {
+		fmt.Println("Usage: namespace create <name>")
 		return
 	}
 
 	input := make(map[string]interface{})
 	input["namespace"] = args[0]
-	input["table_id"] = tableID
 
 	postJSON(cmd, namespacePrefix, input)
 }

@@ -14,6 +14,7 @@
 package api
 
 import (
+	"fmt"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 	"net/http"
@@ -37,6 +38,22 @@ func (h *namespaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "here should display namespace list")
 }
 
+// Post create a namespace
 func (h *namespaceHandler) Post(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, "add namespace")
+	cluster := h.svr.GetRaftCluster()
+	if cluster == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
+	}
+
+	var input map[string]string
+	if err := readJSON(r.Body, &input); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ns := input["namespace"]
+
+	//TODO create namespace
+	fmt.Println(ns)
+
+	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("create namespace %s ok", ns))
 }

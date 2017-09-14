@@ -153,7 +153,7 @@ func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func namespaceStoreCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 3 {
+	if len(args) != 2 {
 		fmt.Println("Usage: store namespace <store_id> <namespace>")
 		return
 	}
