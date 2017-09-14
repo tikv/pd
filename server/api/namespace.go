@@ -48,11 +48,11 @@ func (h *namespaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	namespaces := cluster.GetNamespaces()
-	nsInfos := &namespacesInfo{
+	nsInfo := &namespacesInfo{
 		Count:      len(namespaces),
 		Namespaces: namespaces,
 	}
-	h.rd.JSON(w, http.StatusOK, nsInfos)
+	h.rd.JSON(w, http.StatusOK, nsInfo)
 }
 
 // Post create a namespace
@@ -69,11 +69,11 @@ func (h *namespaceHandler) Post(w http.ResponseWriter, r *http.Request) {
 	}
 	ns := input["namespace"]
 
-	//TODO create namespace
+	// create namespace
 	if err := cluster.CreateNamespace(ns); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("create namespace %s ok", ns))
+	h.rd.JSON(w, http.StatusOK, nil)
 }

@@ -653,8 +653,8 @@ func (c *RaftCluster) CreateNamespace(namespaceName string) error {
 	ns := &core.Namespace{
 		ID:       id,
 		Name:     namespaceName,
-		TableIDs: make([]int64, 1),
-		StoreIDs: make([]uint64, 3),
+		TableIDs: make([]int64, 0),
+		StoreIDs: make([]uint64, 0),
 	}
 
 	err = c.putNamespace(ns)

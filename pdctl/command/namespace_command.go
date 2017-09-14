@@ -28,12 +28,12 @@ func NewNamespaceCommand() *cobra.Command {
 		Short: "show the namespace information",
 		Run:   showNamespaceCommandFunc,
 	}
-	s.AddCommand(NewAddNamespaceCommand())
+	s.AddCommand(NewCreateNamespaceCommand())
 	return s
 }
 
-// NewAddNamespaceCommand return a create sub-command of namespaceCmd
-func NewAddNamespaceCommand() *cobra.Command {
+// NewCreateNamespaceCommand return a create sub-command of namespaceCmd
+func NewCreateNamespaceCommand() *cobra.Command {
 	d := &cobra.Command{
 		Use:   "create <namespace>",
 		Short: "create namespace",
