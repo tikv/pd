@@ -17,11 +17,7 @@ import (
 	"math/rand"
 
 	"github.com/pingcap/pd/server/core"
-)
-
-const (
-	// DefaultNamespace represents global namespace
-	DefaultNamespace = 0
+	"github.com/pingcap/pd/server/namespace"
 )
 
 // Selector is an interface to select source and target store to schedule.
@@ -131,16 +127,16 @@ func (s *replicaSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filt
 }
 
 type namespaceSelector struct {
-	filters     []Filter
-	namespaceID int64
+	filters   []Filter
+	namespace string
 }
 
 // NewNamespaceSelector creates a Selector that select source/target store by their
 // namespace based on a region's key range.
-func NewNamespaceSelector(target int64, filters ...Filter) Selector {
+func NewNamespaceSelector(namespace string, filters ...Filter) Selector {
 	return &namespaceSelector{
-		filters:     filters,
-		namespaceID: target,
+		filters:   filters,
+		namespace: namespace,
 	}
 }
 
@@ -165,7 +161,7 @@ func (s *namespaceSelector) SelectSource(stores []*core.StoreInfo, filters ...Fi
 }
 
 func (s *namespaceSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
-	if s.namespaceID == DefaultNamespace {
+	if s.namespace == namespace.DefaultNamespace {
 		return nil
 	}
 	filters = append(filters, s.filters...)

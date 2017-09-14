@@ -16,13 +16,15 @@ package schedule
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
 )
 
 // NamespaceChecker ensures region to go to the right place.
 type NamespaceChecker struct {
-	opt     Options
-	cluster Cluster
-	filters []Filter
+	opt        Options
+	cluster    Cluster
+	filters    []Filter
+	classifier namespace.Classifier
 }
 
 // NewNamespaceChecker creates a namespace checker.
@@ -36,6 +38,8 @@ func NewNamespaceChecker(opt Options, cluster Cluster) *NamespaceChecker {
 		opt:     opt,
 		cluster: cluster,
 		filters: filters,
+		//TODO change it to classifier for namespace
+		classifier: namespace.DefaultClassifer,
 	}
 }
 
@@ -74,22 +78,11 @@ func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, fi
 	}
 	filters = append(filters, newFilters...)
 
-	namespaceID := n.getRegionNamespace(region)
-	selector := NewNamespaceSelector(namespaceID, n.filters...)
+	ns := n.classifier.GetRegionNamespace(region)
+	selector := NewNamespaceSelector(ns, n.filters...)
 	target := selector.SelectTarget(n.cluster.GetStores(), filters...)
 	if target == nil {
 		return 0
 	}
 	return target.GetId()
-}
-
-// getRegionNamespace returns namespace of the region, 0 for the global
-func (n *NamespaceChecker) getRegionNamespace(region *core.RegionInfo) int64 {
-	startTableID := core.DecodeTableID(region.StartKey)
-	endTableID := core.DecodeTableID(region.EndKey)
-	if startTableID != endTableID {
-		return DefaultNamespace
-	}
-
-	return startTableID
 }
