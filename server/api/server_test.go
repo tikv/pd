@@ -14,9 +14,7 @@
 package api
 
 import (
-	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -26,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/core"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
@@ -50,43 +49,21 @@ var (
 		},
 		Peers: peers,
 	}
-	unixClient = newUnixSocketClient()
 )
 
 func TestAPIServer(t *testing.T) {
 	TestingT(t)
 }
 
-func newUnixSocketClient() *http.Client {
-	tr := &http.Transport{
-		Dial: unixDial,
+func newHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 15 * time.Second,
 	}
-	client := &http.Client{
-		Timeout:   15 * time.Second,
-		Transport: tr,
-	}
-
-	return client
 }
-
-func mustUnixAddrToHTTPAddr(c *C, addr string) string {
-	u, err := url.Parse(addr)
-	c.Assert(err, IsNil)
-	u.Scheme = "http"
-	return u.String()
-}
-
-var stripUnix = strings.NewReplacer("unix://", "")
 
 func cleanServer(cfg *server.Config) {
 	// Clean data directory
 	os.RemoveAll(cfg.DataDir)
-
-	// Clean unix sockets
-	os.Remove(stripUnix.Replace(cfg.PeerUrls))
-	os.Remove(stripUnix.Replace(cfg.ClientUrls))
-	os.Remove(stripUnix.Replace(cfg.AdvertisePeerUrls))
-	os.Remove(stripUnix.Replace(cfg.AdvertiseClientUrls))
 }
 
 type cleanUpFunc func()
@@ -103,10 +80,10 @@ func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpF
 	ch := make(chan *server.Server, num)
 	for _, cfg := range cfgs {
 		go func(cfg *server.Config) {
-			s := server.CreateServer(cfg)
-			e := s.StartEtcd(NewHandler(s))
-			c.Assert(e, IsNil)
-			go s.Run()
+			s, err := server.CreateServer(cfg, NewHandler)
+			c.Assert(err, IsNil)
+			err = s.Run()
+			c.Assert(err, IsNil)
 			ch <- s
 		}(cfg)
 	}
@@ -152,16 +129,8 @@ func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 	}
 }
 
-var unixStripper = strings.NewReplacer("unix://", "", "unixs://", "")
-
-func unixGrpcDialer(addr string, timeout time.Duration) (net.Conn, error) {
-	sock, err := net.DialTimeout("unix", unixStripper.Replace(addr), timeout)
-	return sock, err
-}
-
 func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(addr, grpc.WithInsecure(),
-		grpc.WithDialer(unixGrpcDialer))
+	conn, err := grpc.Dial(strings.TrimLeft(addr, "http://"), grpc.WithInsecure())
 
 	c.Assert(err, IsNil)
 	return pdpb.NewPDClient(conn)
@@ -189,7 +158,7 @@ func mustPutStore(c *C, s *server.Server, store *metapb.Store) {
 	c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_OK)
 }
 
-func mustRegionHeartBeat(c *C, client pdpb.PD_RegionHeartbeatClient, clusterID uint64, region *server.RegionInfo) {
+func mustRegionHeartBeat(c *C, client pdpb.PD_RegionHeartbeatClient, clusterID uint64, region *core.RegionInfo) {
 	req := &pdpb.RegionHeartbeatRequest{
 		Header: newRequestHeader(clusterID),
 		Region: region.Region,
@@ -204,7 +173,7 @@ func mustRegionHeartBeat(c *C, client pdpb.PD_RegionHeartbeatClient, clusterID u
 }
 
 func readJSONWithURL(url string, data interface{}) error {
-	resp, err := unixClient.Get(url)
+	resp, err := http.Get(url)
 	if err != nil {
 		return err
 	}

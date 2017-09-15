@@ -14,6 +14,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -24,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/core"
 )
 
 var _ = Suite(&testStoreSuite{})
@@ -66,8 +68,7 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
-	httpAddr := mustUnixAddrToHTTPAddr(c, addr)
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", httpAddr, apiPrefix)
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
 	for _, store := range s.stores {
@@ -100,11 +101,13 @@ func (s *testStoreSuite) TestStoresList(c *C) {
 	checkStoresInfo(c, info.Stores, s.stores[:3])
 
 	url = fmt.Sprintf("%s/stores?state=0", s.urlPrefix)
+	info = new(storesInfo)
 	err = readJSONWithURL(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[:2])
 
 	url = fmt.Sprintf("%s/stores?state=1", s.urlPrefix)
+	info = new(storesInfo)
 	err = readJSONWithURL(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[2:3])
@@ -117,6 +120,45 @@ func (s *testStoreSuite) TestStoreGet(c *C) {
 	err := readJSONWithURL(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, []*storeInfo{info}, s.stores[:1])
+}
+
+func (s *testStoreSuite) TestStoreLabel(c *C) {
+	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
+	var info storeInfo
+	err := readJSONWithURL(url, &info)
+	c.Assert(err, IsNil)
+	c.Assert(info.Store.Labels, HasLen, 0)
+
+	// Test set.
+	labels := map[string]string{"zone": "cn", "host": "local"}
+	b, err := json.Marshal(labels)
+	c.Assert(err, IsNil)
+	err = postJSON(&http.Client{}, url+"/label", b)
+	c.Assert(err, IsNil)
+
+	err = readJSONWithURL(url, &info)
+	c.Assert(err, IsNil)
+	c.Assert(info.Store.Labels, HasLen, len(labels))
+	for _, l := range info.Store.Labels {
+		c.Assert(labels[l.Key], Equals, l.Value)
+	}
+
+	// Test merge.
+	labels = map[string]string{"zack": "zack1", "host": "host1"}
+	b, err = json.Marshal(labels)
+	c.Assert(err, IsNil)
+	err = postJSON(&http.Client{}, url+"/label", b)
+	c.Assert(err, IsNil)
+
+	expectLabel := map[string]string{"zone": "cn", "zack": "zack1", "host": "host1"}
+	err = readJSONWithURL(url, &info)
+	c.Assert(err, IsNil)
+	c.Assert(info.Store.Labels, HasLen, len(expectLabel))
+	for _, l := range info.Store.Labels {
+		c.Assert(expectLabel[l.Key], Equals, l.Value)
+	}
+
+	s.stores[0].Labels = info.Store.Labels
 }
 
 func (s *testStoreSuite) TestStoreDelete(c *C) {
@@ -133,7 +175,7 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 			status: http.StatusInternalServerError,
 		},
 	}
-	client := newUnixSocketClient()
+	client := newHTTPClient()
 	for _, t := range table {
 		req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/store/%d", s.urlPrefix, t.id), nil)
 		c.Assert(err, IsNil)
@@ -188,17 +230,17 @@ func (s *testStoreSuite) TestUrlStoreFilter(c *C) {
 }
 
 func (s *testStoreSuite) TestDownState(c *C) {
-	status := &server.StoreStatus{
-		StoreStats: &pdpb.StoreStats{},
+	store := &core.StoreInfo{
+		Store: &metapb.Store{
+			State: metapb.StoreState_Up,
+		},
+		Stats:           &pdpb.StoreStats{},
+		LastHeartbeatTS: time.Now(),
 	}
-	store := &metapb.Store{
-		State: metapb.StoreState_Up,
-	}
-	status.LastHeartbeatTS = time.Now()
-	storeInfo := newStoreInfo(store, status)
+	storeInfo := newStoreInfo(store)
 	c.Assert(storeInfo.Store.StateName, Equals, metapb.StoreState_Up.String())
 
-	status.LastHeartbeatTS = time.Now().Add(-time.Minute * 2)
-	storeInfo = newStoreInfo(store, status)
+	store.LastHeartbeatTS = time.Now().Add(-time.Minute * 2)
+	storeInfo = newStoreInfo(store)
 	c.Assert(storeInfo.Store.StateName, Equals, downStateName)
 }

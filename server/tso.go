@@ -75,6 +75,8 @@ func (s *Server) saveTimestamp(now time.Time) error {
 }
 
 func (s *Server) syncTimestamp() error {
+	tsoCounter.WithLabelValues("sync").Inc()
+
 	last, err := s.loadTimestamp()
 	if err != nil {
 		return errors.Trace(err)
@@ -85,6 +87,7 @@ func (s *Server) syncTimestamp() error {
 	for {
 		now = time.Now()
 		if wait := subTimeByWallClock(last, now) + updateTimestampGuard; wait > 0 {
+			tsoCounter.WithLabelValues("sync_wait").Inc()
 			log.Warnf("wait %v to guarantee valid generated timestamp", wait)
 			time.Sleep(wait)
 			continue
@@ -97,6 +100,7 @@ func (s *Server) syncTimestamp() error {
 		return errors.Trace(err)
 	}
 
+	tsoCounter.WithLabelValues("sync_ok").Inc()
 	log.Infof("sync and save timestamp: last %v save %v", last, save)
 
 	current := &atomicObject{
@@ -111,12 +115,16 @@ func (s *Server) updateTimestamp() error {
 	prev := s.ts.Load().(*atomicObject).physical
 	now := time.Now()
 
+	tsoCounter.WithLabelValues("save").Inc()
+
 	since := subTimeByWallClock(now, prev)
 	if since > 3*updateTimestampStep {
 		log.Warnf("clock offset: %v, prev: %v, now: %v", since, prev, now)
+		tsoCounter.WithLabelValues("slow_save").Inc()
 	}
 	// Avoid the same physical time stamp
 	if since <= updateTimestampGuard {
+		tsoCounter.WithLabelValues("skip_save").Inc()
 		log.Warnf("invalid physical timestamp, prev: %v, now: %v, re-update later", prev, now)
 		return nil
 	}
@@ -128,6 +136,7 @@ func (s *Server) updateTimestamp() error {
 			return errors.Trace(err)
 		}
 
+		tsoCounter.WithLabelValues("save_ok").Inc()
 		log.Debugf("save timestamp ok: prev %v last %v save %v", prev, last, save)
 	}
 

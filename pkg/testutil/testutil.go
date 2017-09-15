@@ -15,12 +15,68 @@ package testutil
 
 import (
 	"fmt"
-	"sync/atomic"
+	"net"
+	"sync"
+	"time"
+
+	log "github.com/Sirupsen/logrus"
+	check "github.com/pingcap/check"
 )
 
-var unixURLCount uint64 = 1024
+var (
+	testAddrMutex sync.Mutex
+	testAddrMap   = make(map[string]struct{})
+)
 
-// UnixURL returns a unique unix socket url, used for test only.
-func UnixURL() string {
-	return fmt.Sprintf("unix://localhost:%d", atomic.AddUint64(&unixURLCount, 1))
+// AllocTestURL allocates a local URL for testing.
+func AllocTestURL() string {
+	for i := 0; i < 10; i++ {
+		if u := tryAllocTestURL(); u != "" {
+			return u
+		}
+		time.Sleep(time.Second)
+	}
+	log.Fatal("failed to alloc test URL")
+	return ""
+}
+
+func tryAllocTestURL() string {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		log.Fatal(err)
+	}
+	addr := fmt.Sprintf("http://%s", l.Addr())
+	err = l.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	testAddrMutex.Lock()
+	defer testAddrMutex.Unlock()
+	if _, ok := testAddrMap[addr]; ok {
+		return ""
+	}
+	testAddrMap[addr] = struct{}{}
+	return addr
+}
+
+const (
+	waitMaxRetry   = 100
+	waitRetrySleep = time.Millisecond * 50
+)
+
+// CheckFunc is a condition checker that passed to WaitUntil. Its implementation
+// may call c.Fatal() to abort the test, or c.Log() to add more information.
+type CheckFunc func(c *check.C) bool
+
+// WaitUntil repeatly evaluates f() for a period of time, util it returns true.
+func WaitUntil(c *check.C, f CheckFunc) {
+	c.Log("wait start")
+	for i := 0; i < waitMaxRetry; i++ {
+		if f(c) {
+			return
+		}
+		time.Sleep(waitRetrySleep)
+	}
+	c.Fatal("wait timeout")
 }

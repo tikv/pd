@@ -16,6 +16,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -64,13 +65,13 @@ func newMemberDeleteHandler(svr *server.Server, rd *render.Render) *memberDelete
 	}
 }
 
-func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *memberDeleteHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
 	client := h.svr.GetClient()
 
 	// step 1. get etcd id
 	// TODO: GetPDMembers.
 	var id uint64
-	name := (mux.Vars(r))["name"]
+	name := mux.Vars(r)["name"]
 	listResp, err := etcdutil.ListEtcdMembers(client)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -96,6 +97,23 @@ func (h *memberDeleteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %s", name))
 }
 
+func (h *memberDeleteHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
+	idStr := mux.Vars(r)["id"]
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	client := h.svr.GetClient()
+	_, err = etcdutil.RemoveEtcdMember(client, id)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %v", id))
+}
+
 type leaderHandler struct {
 	svr *server.Server
 	rd  *render.Render
@@ -108,7 +126,7 @@ func newLeaderHandler(svr *server.Server, rd *render.Render) *leaderHandler {
 	}
 }
 
-func (h *leaderHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *leaderHandler) Get(w http.ResponseWriter, r *http.Request) {
 	leader, err := h.svr.GetLeader()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -116,4 +134,24 @@ func (h *leaderHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.rd.JSON(w, http.StatusOK, leader)
+}
+
+func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {
+	err := h.svr.ResignLeader("")
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (h *leaderHandler) Transfer(w http.ResponseWriter, r *http.Request) {
+	err := h.svr.ResignLeader(mux.Vars(r)["next_leader"])
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, nil)
 }

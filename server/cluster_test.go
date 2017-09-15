@@ -14,14 +14,13 @@
 package server
 
 import (
-	"net"
 	"strings"
-	"time"
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
@@ -47,7 +46,8 @@ type testClusterSuite struct {
 func (s *testClusterSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
 	s.client = s.svr.client
-	go s.svr.Run()
+	err := s.svr.Run()
+	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 }
@@ -56,16 +56,8 @@ func (s *testClusterSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-var unixStripper = strings.NewReplacer("unix://", "", "unixs://", "")
-
-func unixGrpcDialer(addr string, timeout time.Duration) (net.Conn, error) {
-	sock, err := net.DialTimeout("unix", unixStripper.Replace(addr), timeout)
-	return sock, err
-}
-
 func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(addr, grpc.WithInsecure(),
-		grpc.WithDialer(unixGrpcDialer))
+	conn, err := grpc.Dial(strings.TrimLeft(addr, "http://"), grpc.WithInsecure())
 
 	c.Assert(err, IsNil)
 	return pdpb.NewPDClient(conn)
@@ -345,7 +337,7 @@ func (s *testClusterSuite) testPutStore(c *C, clusterID uint64, store *metapb.St
 func (s *testClusterSuite) resetStoreState(c *C, storeID uint64, state metapb.StoreState) {
 	cluster := s.svr.GetRaftCluster().cachedCluster
 	c.Assert(cluster, NotNil)
-	store := cluster.getStore(storeID)
+	store := cluster.GetStore(storeID)
 	c.Assert(store, NotNil)
 	store.State = state
 	cluster.putStore(store)
@@ -437,7 +429,7 @@ func (s *testClusterSuite) testCheckStores(c *C, clusterID uint64) {
 	// Add a region peer to store.
 	leader := &metapb.Peer{StoreId: store.GetId()}
 	region := s.newRegion(c, 0, []byte{'a'}, []byte{'b'}, []*metapb.Peer{leader}, nil)
-	regionInfo := newRegionInfo(region, leader)
+	regionInfo := core.NewRegionInfo(region, leader)
 	err := cluster.handleRegionHeartbeat(regionInfo)
 	c.Assert(err, IsNil)
 	c.Assert(cluster.cachedCluster.getStoreRegionCount(store.GetId()), Equals, 1)
@@ -474,7 +466,8 @@ func (s *testClusterSuite) testCheckStores(c *C, clusterID uint64) {
 func (s *testClusterSuite) TestClosedChannel(c *C) {
 	svr, cleanup := newTestServer(c)
 	defer cleanup()
-	go svr.Run()
+	err := svr.Run()
+	c.Assert(err, IsNil)
 
 	clusterID := svr.clusterID
 	storeAddr := "127.0.0.1:0"
@@ -486,7 +479,7 @@ func (s *testClusterSuite) TestClosedChannel(c *C) {
 	c.Assert(cluster, NotNil)
 	cluster.stop()
 
-	err := svr.createRaftCluster()
+	err = svr.createRaftCluster()
 	c.Assert(err, IsNil)
 
 	cluster = svr.GetRaftCluster()

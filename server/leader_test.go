@@ -17,7 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"golang.org/x/net/context"
@@ -40,15 +39,11 @@ func (s *testGetLeaderSuite) SetUpSuite(c *C) {
 	go s.sendRequest(c, cfg.ClientUrls)
 	time.Sleep(100 * time.Millisecond)
 
-	svr, err := NewServer(cfg)
+	svr, err := CreateServer(cfg, nil)
 	c.Assert(err, IsNil)
 
-	// There's no leader before the server has started.
-	leader, err := svr.GetLeader()
-	c.Assert(leader, IsNil)
-	c.Assert(errors.Cause(err), Equals, errNoLeader)
-
-	go svr.Run()
+	err = svr.Run()
+	c.Assert(err, IsNil)
 
 	s.svr = svr
 }

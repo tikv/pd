@@ -14,7 +14,6 @@
 package pd
 
 import (
-	"net"
 	"os"
 	"strings"
 	"sync"
@@ -25,7 +24,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/api"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
@@ -58,23 +56,13 @@ var (
 	}
 )
 
-var stripUnix = strings.NewReplacer("unix://", "")
-
 func cleanServer(cfg *server.Config) {
 	// Clean data directory
 	os.RemoveAll(cfg.DataDir)
-
-	// Clean unix sockets
-	os.Remove(stripUnix.Replace(cfg.PeerUrls))
-	os.Remove(stripUnix.Replace(cfg.ClientUrls))
-	os.Remove(stripUnix.Replace(cfg.AdvertisePeerUrls))
-	os.Remove(stripUnix.Replace(cfg.AdvertiseClientUrls))
 }
 
-type cleanupFunc func()
-
 type testClientSuite struct {
-	cleanup cleanupFunc
+	cleanup server.CleanupFunc
 
 	srv             *server.Server
 	client          Client
@@ -83,7 +71,7 @@ type testClientSuite struct {
 }
 
 func (s *testClientSuite) SetUpSuite(c *C) {
-	s.srv, s.cleanup = newServer(c)
+	_, s.srv, s.cleanup = server.NewTestServer(c)
 	s.grpcPDClient = mustNewGrpcClient(c, s.srv.GetAddr())
 
 	mustWaitLeader(c, map[string]*server.Server{s.srv.GetAddr(): s.srv})
@@ -102,34 +90,8 @@ func (s *testClientSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func newServer(c *C) (*server.Server, cleanupFunc) {
-	cfg := server.NewTestSingleConfig()
-
-	s := server.CreateServer(cfg)
-	err := s.StartEtcd(api.NewHandler(s))
-	c.Assert(err, IsNil)
-
-	go s.Run()
-
-	cleanup := func() {
-		s.Close()
-
-		cleanServer(cfg)
-	}
-
-	return s, cleanup
-}
-
-var unixStripper = strings.NewReplacer("unix://", "", "unixs://", "")
-
-func unixGrpcDialer(addr string, timeout time.Duration) (net.Conn, error) {
-	sock, err := net.DialTimeout("unix", unixStripper.Replace(addr), timeout)
-	return sock, err
-}
-
 func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(addr, grpc.WithInsecure(),
-		grpc.WithDialer(unixGrpcDialer))
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
 
 	c.Assert(err, IsNil)
 	return pdpb.NewPDClient(conn)

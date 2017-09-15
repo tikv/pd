@@ -39,7 +39,7 @@ var (
 			Subsystem: "schedule",
 			Name:      "operators_count",
 			Help:      "Counter of schedule operators.",
-		}, []string{"type", "state"})
+		}, []string{"type", "event"})
 
 	clusterStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -80,6 +80,14 @@ var (
 			Name:      "status",
 			Help:      "Status of the hotspot.",
 		}, []string{"store", "type"})
+
+	tsoCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "tso",
+			Help:      "Counter of tso events",
+		}, []string{"type"})
 )
 
 func init() {
@@ -91,4 +99,5 @@ func init() {
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(regionHeartbeatCounter)
 	prometheus.MustRegister(hotSpotStatusGauge)
+	prometheus.MustRegister(tsoCounter)
 }

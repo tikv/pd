@@ -100,8 +100,12 @@ func startPdWith(cfg *Config) (*Server, error) {
 			errCh <- errors.Trace(err)
 			return
 		}
-		svr := CreateServer(cfg)
-		err = svr.StartEtcd(nil)
+		svr, err := CreateServer(cfg, nil)
+		if err != nil {
+			errCh <- errors.Trace(err)
+			return
+		}
+		err = svr.Run()
 		if err != nil {
 			errCh <- errors.Trace(err)
 			svr.Close()
@@ -116,11 +120,10 @@ func startPdWith(cfg *Config) (*Server, error) {
 		}
 
 		svrCh <- svr
-		svr.Run()
 	}()
 
 	// It should be enough for starting a PD.
-	timer := time.NewTimer(etcdutil.DefaultRequestTimeout * 2)
+	timer := time.NewTimer(etcdutil.DefaultRequestTimeout)
 	defer timer.Stop()
 
 	select {

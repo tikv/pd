@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"io"
 	"io/ioutil"
-	"net"
 	"net/http"
 
 	"github.com/juju/errors"
@@ -53,8 +52,4 @@ func postJSON(cli *http.Client, url string, data []byte) error {
 		return errors.New(string(res))
 	}
 	return nil
-}
-
-func unixDial(_, addr string) (net.Conn, error) {
-	return net.Dial("unix", addr)
 }

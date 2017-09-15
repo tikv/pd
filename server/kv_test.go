@@ -106,6 +106,23 @@ func (s *testKVSuite) TestLoadStores(c *C) {
 	}
 }
 
+func (s *testKVSuite) TestStoreWeight(c *C) {
+	kv := newKV(s.server)
+	cache := newStoresInfo()
+	const n = 3
+
+	mustSaveStores(c, kv, n)
+	c.Assert(kv.saveStoreWeight(1, 2.0, 3.0), IsNil)
+	c.Assert(kv.saveStoreWeight(2, 0.2, 0.3), IsNil)
+	c.Assert(kv.loadStores(cache, n), IsNil)
+	leaderWeights := []float64{1.0, 2.0, 0.2}
+	regionWeights := []float64{1.0, 3.0, 0.3}
+	for i := 0; i < n; i++ {
+		c.Assert(cache.getStore(uint64(i)).LeaderWeight, Equals, leaderWeights[i])
+		c.Assert(cache.getStore(uint64(i)).RegionWeight, Equals, regionWeights[i])
+	}
+}
+
 func mustSaveRegions(c *C, kv *kv, n int) []*metapb.Region {
 	regions := make([]*metapb.Region, 0, n)
 	for i := 0; i < n; i++ {

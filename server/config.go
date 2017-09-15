@@ -16,7 +16,6 @@ package server
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"strings"
 	"sync/atomic"
@@ -27,7 +26,6 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
-	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 )
 
@@ -80,8 +78,10 @@ type Config struct {
 	// the default retention is 1 hour
 	AutoCompactionRetention int `toml:"auto-compaction-retention" json:"auto-compaction-retention"`
 
-	tickMs     uint64
-	electionMs uint64
+	// TickInterval is the interval for etcd Raft tick.
+	TickInterval typeutil.Duration `toml:"tick-interval"`
+	// ElectionInterval is the interval for etcd Raft election.
+	ElectionInterval typeutil.Duration `toml:"election-interval"`
 
 	configFile string
 
@@ -134,9 +134,9 @@ const (
 	// We can enlarge both a little to reduce the network aggression.
 	// now embed etcd use TickMs for heartbeat, we will update
 	// after embed etcd decouples tick and heartbeat.
-	defaultTickMs = uint64(500)
+	defaultTickInterval = 500 * time.Millisecond
 	// embed etcd has a check that `5 * tick > election`
-	defaultElectionMs = uint64(3000)
+	defaultElectionInterval = 3000 * time.Millisecond
 )
 
 func adjustString(v *string, defValue string) {
@@ -256,8 +256,8 @@ func (c *Config) adjust() error {
 		c.AutoCompactionRetention = defaultAutoCompactionRetention
 	}
 
-	adjustUint64(&c.tickMs, defaultTickMs)
-	adjustUint64(&c.electionMs, defaultElectionMs)
+	adjustDuration(&c.TickInterval, defaultTickInterval)
+	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
 
 	adjustString(&c.Metric.PushJob, c.Name)
 
@@ -305,7 +305,7 @@ const (
 	defaultMaxReplicas          = 3
 	defaultMaxSnapshotCount     = 3
 	defaultMaxStoreDownTime     = time.Hour
-	defaultLeaderScheduleLimit  = 1024
+	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 16
 )
@@ -372,6 +372,10 @@ func (o *scheduleOption) GetMaxReplicas() int {
 	return o.rep.GetMaxReplicas()
 }
 
+func (o *scheduleOption) GetLocationLabels() []string {
+	return o.rep.GetLocationLabels()
+}
+
 func (o *scheduleOption) SetMaxReplicas(replicas int) {
 	o.rep.SetMaxReplicas(replicas)
 }
@@ -398,6 +402,10 @@ func (o *scheduleOption) GetReplicaScheduleLimit() uint64 {
 
 func (o *scheduleOption) persist(kv *kv) error {
 	return kv.saveScheduleOption(o)
+}
+
+func (o *scheduleOption) GetHotRegionLowThreshold() int {
+	return hotRegionLowThreshold
 }
 
 // ParseUrls parse a string into multiple urls.
@@ -427,8 +435,8 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ClusterState = c.InitialClusterState
 	cfg.EnablePprof = true
 	cfg.StrictReconfigCheck = !c.disableStrictReconfigCheck
-	cfg.TickMs = uint(c.tickMs)
-	cfg.ElectionMs = uint(c.electionMs)
+	cfg.TickMs = uint(c.TickInterval.Duration / time.Millisecond)
+	cfg.ElectionMs = uint(c.ElectionInterval.Duration / time.Millisecond)
 	cfg.AutoCompactionRetention = c.AutoCompactionRetention
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
 
@@ -455,53 +463,4 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	}
 
 	return cfg, nil
-}
-
-// NewTestSingleConfig is only for test to create one pd.
-// Because pd-client also needs this, so export here.
-func NewTestSingleConfig() *Config {
-	cfg := &Config{
-		Name:       "pd",
-		ClientUrls: testutil.UnixURL(),
-		PeerUrls:   testutil.UnixURL(),
-
-		InitialClusterState: embed.ClusterStateFlagNew,
-
-		LeaderLease:     1,
-		TsoSaveInterval: typeutil.NewDuration(200 * time.Millisecond),
-	}
-
-	cfg.AdvertiseClientUrls = cfg.ClientUrls
-	cfg.AdvertisePeerUrls = cfg.PeerUrls
-	cfg.DataDir, _ = ioutil.TempDir("/tmp", "test_pd")
-	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
-	cfg.disableStrictReconfigCheck = true
-	cfg.tickMs = 100
-	cfg.electionMs = 1000
-
-	cfg.adjust()
-	return cfg
-}
-
-// NewTestMultiConfig is only for test to create multiple pd configurations.
-// Because pd-client also needs this, so export here.
-func NewTestMultiConfig(count int) []*Config {
-	cfgs := make([]*Config, count)
-
-	clusters := []string{}
-	for i := 1; i <= count; i++ {
-		cfg := NewTestSingleConfig()
-		cfg.Name = fmt.Sprintf("pd%d", i)
-
-		clusters = append(clusters, fmt.Sprintf("%s=%s", cfg.Name, cfg.PeerUrls))
-
-		cfgs[i-1] = cfg
-	}
-
-	initialCluster := strings.Join(clusters, ",")
-	for _, cfg := range cfgs {
-		cfg.InitialCluster = initialCluster
-	}
-
-	return cfgs
 }

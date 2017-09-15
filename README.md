@@ -11,8 +11,8 @@ PD supports distribution and fault-tolerance by embedding [etcd](https://github.
 
 ## Build
 
-1. Make sure [​*Go*​](https://golang.org/) (version 1.5+) is installed.
-2. Use `make` to install PD. PD is installed in the `bin` directory. 
+1. Make sure [​*Go*​](https://golang.org/) (version 1.8+) is installed.
+2. Use `make` to install PD. PD is installed in the `bin` directory.
 
 ## Usage
 

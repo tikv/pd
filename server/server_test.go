@@ -15,8 +15,6 @@ package server
 
 import (
 	"fmt"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -35,7 +33,7 @@ type cleanupFunc func()
 func newTestServer(c *C) (*Server, cleanUpFunc) {
 	cfg := NewTestSingleConfig()
 
-	svr, err := NewServer(cfg)
+	svr, err := CreateServer(cfg, nil)
 	c.Assert(err, IsNil)
 
 	cleanup := func() {
@@ -48,22 +46,10 @@ func newTestServer(c *C) (*Server, cleanUpFunc) {
 
 func mustRunTestServer(c *C) (*Server, cleanUpFunc) {
 	server, cleanup := newTestServer(c)
-	go server.Run()
+	err := server.Run()
+	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{server})
 	return server, cleanup
-}
-
-var stripUnix = strings.NewReplacer("unix://", "")
-
-func cleanServer(cfg *Config) {
-	// Clean data directory
-	os.RemoveAll(cfg.DataDir)
-
-	// Clean unix sockets
-	os.Remove(stripUnix.Replace(cfg.PeerUrls))
-	os.Remove(stripUnix.Replace(cfg.ClientUrls))
-	os.Remove(stripUnix.Replace(cfg.AdvertisePeerUrls))
-	os.Remove(stripUnix.Replace(cfg.AdvertiseClientUrls))
 }
 
 func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
@@ -75,7 +61,7 @@ func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
 		cfg := cfgs[i]
 
 		go func() {
-			svr, err := NewServer(cfg)
+			svr, err := CreateServer(cfg, nil)
 			c.Assert(err, IsNil)
 			ch <- svr
 		}()
@@ -83,7 +69,8 @@ func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
 
 	for i := 0; i < count; i++ {
 		svr := <-ch
-		go svr.Run()
+		err := svr.Run()
+		c.Assert(err, IsNil)
 		svrs = append(svrs, svr)
 	}
 
@@ -103,16 +90,17 @@ func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
 }
 
 func mustWaitLeader(c *C, svrs []*Server) *Server {
-	for i := 0; i < 500; i++ {
+	var leader *Server
+	testutil.WaitUntil(c, func(c *C) bool {
 		for _, s := range svrs {
 			if s.IsLeader() {
-				return s
+				leader = s
+				return true
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	c.Fatal("no leader")
-	return nil
+		return false
+	})
+	return leader
 }
 
 var _ = Suite(&testLeaderServerSuite{})
@@ -140,7 +128,9 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 		cfg := cfgs[i]
 
 		go func() {
-			svr, err := NewServer(cfg)
+			svr, err := CreateServer(cfg, nil)
+			c.Assert(err, IsNil)
+			err = svr.Run()
 			c.Assert(err, IsNil)
 			ch <- svr
 		}()
@@ -161,10 +151,6 @@ func (s *testLeaderServerSuite) TearDownSuite(c *C) {
 }
 
 func (s *testLeaderServerSuite) TestLeader(c *C) {
-	for _, svr := range s.svrs {
-		go svr.Run()
-	}
-
 	leader1 := mustGetLeader(c, mustGetEtcdClient(c, s.svrs), s.leaderPath)
 	svr, ok := s.svrs[getLeaderAddr(leader1)]
 	c.Assert(ok, IsTrue)
@@ -197,9 +183,10 @@ func newTestServersWithCfgs(c *C, cfgs []*Config) ([]*Server, cleanupFunc) {
 	ch := make(chan *Server)
 	for _, cfg := range cfgs {
 		go func(cfg *Config) {
-			svr, err := NewServer(cfg)
+			svr, err := CreateServer(cfg, nil)
 			c.Assert(err, IsNil)
-			go svr.Run()
+			err = svr.Run()
+			c.Assert(err, IsNil)
 			ch <- svr
 		}(cfg)
 	}
@@ -272,7 +259,7 @@ func (s *testServerSuite) TestUpdateAdvertiseUrls(c *C) {
 	}
 
 	// Little malicious tweak.
-	overlapPeerURL := "," + testutil.UnixURL()
+	overlapPeerURL := "," + testutil.AllocTestURL()
 	for _, cfg := range cfgs {
 		cfg.AdvertisePeerUrls += overlapPeerURL
 	}
@@ -315,6 +302,8 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 
 	// Start pervious cluster, expect an error.
 	cfgA.InitialCluster = originInitial
-	_, err := NewServer(cfgA)
+	svr, err := CreateServer(cfgA, nil)
+	c.Assert(err, IsNil)
+	err = svr.Run()
 	c.Assert(err, NotNil)
 }

@@ -17,8 +17,6 @@ import (
 	"encoding/json"
 	"io"
 	"io/ioutil"
-	"net"
-	"net/http"
 
 	"github.com/juju/errors"
 )
@@ -38,17 +36,4 @@ func ReadJSON(r io.ReadCloser, data interface{}) error {
 	}
 
 	return nil
-}
-
-// NewHTTPTransport returns a proper http.RoundTripper.
-func NewHTTPTransport(scheme string) *http.Transport {
-	tr := &http.Transport{}
-	if scheme == "unix" || scheme == "unixs" {
-		tr.Dial = unixDial
-	}
-	return tr
-}
-
-func unixDial(_, addr string) (net.Conn, error) {
-	return net.Dial("unix", addr)
 }

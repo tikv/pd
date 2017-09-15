@@ -13,7 +13,7 @@ import:
 - package: github.com/cockroachdb/cmux
   version: 112f0506e7743d64a6eb8fedbcff13d9979bbf92
 - package: github.com/coreos/etcd
-  version: ea5f6dab6b1d07e22cf46bf5f5088d567548c124
+  version: v3.2.4
   subpackages:
   - alarm
   - auth
@@ -118,7 +118,7 @@ import:
 - package: github.com/pingcap/check
   version: ce8a2f822ab1e245a4eefcef2996531c79c943f1
 - package: github.com/pingcap/kvproto
-  version: ebe86abfa6519ffefdf2946fba762a894fe88256
+  version: aa89780c80ffbad78c6aaaf0c53829547cf3a5c2
   subpackages:
   - pkg/coprocessor
   - pkg/eraftpb

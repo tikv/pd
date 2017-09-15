@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"strconv"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -25,11 +26,12 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server/core"
 	"golang.org/x/net/context"
 )
 
 const (
-	kvRangeLimit      = 100000
+	kvRangeLimit      = 10000
 	kvRequestTimeout  = time.Second * 10
 	kvSlowRequestTime = time.Second * 1
 )
@@ -40,18 +42,20 @@ var (
 
 // kv wraps all kv operations, keep it stateless.
 type kv struct {
-	s           *Server
-	client      *clientv3.Client
-	clusterPath string
-	configPath  string
+	s            *Server
+	client       *clientv3.Client
+	clusterPath  string
+	configPath   string
+	schedulePath string
 }
 
 func newKV(s *Server) *kv {
 	return &kv{
-		s:           s,
-		client:      s.client,
-		clusterPath: path.Join(s.rootPath, "raft"),
-		configPath:  path.Join(s.rootPath, "config"),
+		s:            s,
+		client:       s.client,
+		clusterPath:  path.Join(s.rootPath, "raft"),
+		configPath:   path.Join(s.rootPath, "config"),
+		schedulePath: path.Join(s.rootPath, "schedule"),
 	}
 }
 
@@ -67,6 +71,14 @@ func (kv *kv) regionPath(regionID uint64) string {
 
 func (kv *kv) clusterStatePath(option string) string {
 	return path.Join(kv.clusterPath, "status", option)
+}
+
+func (kv *kv) storeLeaderWeightPath(storeID uint64) string {
+	return path.Join(kv.schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "leader")
+}
+
+func (kv *kv) storeRegionWeightPath(storeID uint64) string {
+	return path.Join(kv.schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
 }
 
 func (kv *kv) getRaftClusterBootstrapTime() (time.Time, error) {
@@ -169,14 +181,53 @@ func (kv *kv) loadStores(stores *storesInfo, rangeLimit int64) error {
 				return errors.Trace(err)
 			}
 
+			storeInfo := core.NewStoreInfo(store)
+			leaderWeight, err := kv.loadFloatWithDefaultValue(kv.storeLeaderWeightPath(storeInfo.GetId()), 1.0)
+			if err != nil {
+				return errors.Trace(err)
+			}
+			storeInfo.LeaderWeight = leaderWeight
+			regionWeight, err := kv.loadFloatWithDefaultValue(kv.storeRegionWeightPath(storeInfo.GetId()), 1.0)
+			if err != nil {
+				return errors.Trace(err)
+			}
+			storeInfo.RegionWeight = regionWeight
+
 			nextID = store.GetId() + 1
-			stores.setStore(newStoreInfo(store))
+			stores.setStore(storeInfo)
 		}
 
 		if len(resp.Kvs) < int(rangeLimit) {
 			return nil
 		}
 	}
+}
+
+func (kv *kv) saveStoreWeight(storeID uint64, leader, region float64) error {
+	leaderValue := strconv.FormatFloat(leader, 'f', -1, 64)
+	if err := kv.save(kv.storeLeaderWeightPath(storeID), leaderValue); err != nil {
+		return errors.Trace(err)
+	}
+	regionValue := strconv.FormatFloat(region, 'f', -1, 64)
+	if err := kv.save(kv.storeRegionWeightPath(storeID), regionValue); err != nil {
+		return errors.Trace(err)
+	}
+	return nil
+}
+
+func (kv *kv) loadFloatWithDefaultValue(path string, def float64) (float64, error) {
+	res, err := kvGet(kv.client, path)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+	if len(res.Kvs) == 0 {
+		return def, nil
+	}
+	val, err := strconv.ParseFloat(string(res.Kvs[0].Value), 64)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+	return val, nil
 }
 
 func (kv *kv) loadRegions(regions *regionsInfo, rangeLimit int64) error {
@@ -199,7 +250,7 @@ func (kv *kv) loadRegions(regions *regionsInfo, rangeLimit int64) error {
 			}
 
 			nextID = region.GetId() + 1
-			regions.setRegion(newRegionInfo(region, nil))
+			regions.setRegion(core.NewRegionInfo(region, nil))
 		}
 
 		if len(resp.Kvs) < int(rangeLimit) {

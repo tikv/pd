@@ -26,6 +26,9 @@ import (
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+
+	// Register schedulers.
+	_ "github.com/pingcap/pd/server/schedulers"
 )
 
 func main() {
@@ -65,10 +68,9 @@ func main() {
 	if err != nil {
 		log.Fatal("join error ", err)
 	}
-	svr := server.CreateServer(cfg)
-	err = svr.StartEtcd(api.NewHandler(svr))
+	svr, err := server.CreateServer(cfg, api.NewHandler)
 	if err != nil {
-		log.Fatalf("server start etcd failed - %v", errors.Trace(err))
+		log.Fatalf("create server failed: %v", errors.Trace(err))
 	}
 
 	sc := make(chan os.Signal, 1)
@@ -78,7 +80,9 @@ func main() {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 
-	go svr.Run()
+	if err := svr.Run(); err != nil {
+		log.Fatalf("run server failed: %v", err)
+	}
 
 	sig := <-sc
 	svr.Close()

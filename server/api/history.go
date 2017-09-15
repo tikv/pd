@@ -14,12 +14,13 @@
 package api
 
 import (
-	"github.com/juju/errors"
 	"net/http"
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/juju/errors"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/core"
 	"github.com/unrolled/render"
 )
 
@@ -59,8 +60,8 @@ func (h *historyHandler) GetOperatorsOfKind(w http.ResponseWriter, r *http.Reque
 		h.r.JSON(w, http.StatusOK, nil)
 		return
 	}
-	kind := server.ParseResourceKind(k)
-	if kind == server.UnKnownKind {
+	kind := core.ParseResourceKind(k)
+	if kind == core.UnKnownKind {
 		h.r.JSON(w, http.StatusInternalServerError, errUnknownOperatorKind.Error())
 		return
 	}
