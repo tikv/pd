@@ -14,6 +14,8 @@
 package server
 
 import (
+	"math/rand"
+
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
@@ -118,8 +120,9 @@ func (c *namespaceCluster) RegionWriteStats() []*core.RegionStat {
 }
 
 func scheduleByNamespace(cluster schedule.Cluster, classifier namespace.Classifier, scheduler schedule.Scheduler) *schedule.Operator {
-	for _, ns := range classifier.GetAllNamespaces() {
-		nc := newNamespaceCluster(cluster, classifier, ns)
+	namespaces := classifier.GetAllNamespaces()
+	for _, i := range rand.Perm(len(namespaces)) {
+		nc := newNamespaceCluster(cluster, classifier, namespaces[i])
 		if op := scheduler.Schedule(nc); op != nil {
 			return op
 		}
