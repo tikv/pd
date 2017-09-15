@@ -63,31 +63,33 @@ type coordinator struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	cluster    *clusterInfo
-	opt        *scheduleOption
-	limiter    *scheduleLimiter
-	checker    *schedule.ReplicaChecker
-	operators  map[uint64]*schedule.Operator
-	schedulers map[string]*scheduleController
-	classifier namespace.Classifier
-	histories  cache.Cache
-	hbStreams  *heartbeatStreams
+	cluster          *clusterInfo
+	opt              *scheduleOption
+	limiter          *scheduleLimiter
+	checker          *schedule.ReplicaChecker
+	namespaceChecker *schedule.NamespaceChecker
+	operators        map[uint64]*schedule.Operator
+	schedulers       map[string]*scheduleController
+	classifier       namespace.Classifier
+	histories        cache.Cache
+	hbStreams        *heartbeatStreams
 }
 
 func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
-		ctx:        ctx,
-		cancel:     cancel,
-		cluster:    cluster,
-		opt:        opt,
-		limiter:    newScheduleLimiter(),
-		checker:    schedule.NewReplicaChecker(opt, cluster, classifier),
-		operators:  make(map[uint64]*schedule.Operator),
-		schedulers: make(map[string]*scheduleController),
-		classifier: classifier,
-		histories:  cache.NewDefaultCache(historiesCacheSize),
-		hbStreams:  hbStreams,
+		ctx:              ctx,
+		cancel:           cancel,
+		cluster:          cluster,
+		opt:              opt,
+		limiter:          newScheduleLimiter(),
+		checker:          schedule.NewReplicaChecker(opt, cluster, classifier),
+		namespaceChecker: schedule.NewNamespaceChecker(opt, cluster, classifier),
+		operators:        make(map[uint64]*schedule.Operator),
+		schedulers:       make(map[string]*scheduleController),
+		classifier:       classifier,
+		histories:        cache.NewDefaultCache(historiesCacheSize),
+		hbStreams:        hbStreams,
 	}
 }
 
@@ -114,6 +116,10 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	// Check replica operator.
 	if c.limiter.operatorCount(core.RegionKind) >= c.opt.GetReplicaScheduleLimit() {
 		return
+	}
+	// Generate Operator which moves region to targeted namespace store
+	if op := c.namespaceChecker.Check(region); op != nil {
+		c.addOperator(op)
 	}
 	if op := c.checker.Check(region); op != nil {
 		c.addOperator(op)
