@@ -17,7 +17,6 @@ import (
 	"math/rand"
 
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 )
 
 // Selector is an interface to select source and target store to schedule.
@@ -124,56 +123,6 @@ func (s *replicaSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filt
 		return nil
 	}
 	return best
-}
-
-type namespaceSelector struct {
-	filters   []Filter
-	namespace string
-}
-
-// NewNamespaceSelector creates a Selector that select source/target store by their
-// namespace based on a region's key range.
-func NewNamespaceSelector(namespace string, filters ...Filter) Selector {
-	return &namespaceSelector{
-		filters:   filters,
-		namespace: namespace,
-	}
-}
-
-func (s *namespaceSelector) Select(stores []*core.StoreInfo) *core.StoreInfo {
-	if len(stores) == 0 {
-		return nil
-	}
-	return stores[rand.Int()%len(stores)]
-}
-
-func (s *namespaceSelector) SelectSource(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
-	filters = append(filters, s.filters...)
-	var candidates []*core.StoreInfo
-	for _, store := range stores {
-		if FilterSource(store, filters) {
-			continue
-		}
-		candidates = append(candidates, store)
-	}
-
-	return s.Select(candidates)
-}
-
-func (s *namespaceSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
-	if s.namespace == namespace.DefaultNamespace {
-		return nil
-	}
-	filters = append(filters, s.filters...)
-	var candidates []*core.StoreInfo
-	for _, store := range stores {
-		if FilterSource(store, filters) {
-			continue
-		}
-		candidates = append(candidates, store)
-	}
-
-	return s.Select(candidates)
 }
 
 type randomSelector struct {
