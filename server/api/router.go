@@ -92,6 +92,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	namespaceHandler := newNamespaceHandler(svr, rd)
 	router.HandleFunc("/api/v1/namespaces", namespaceHandler.Get).Methods("GET")
 	router.HandleFunc("/api/v1/namespaces", namespaceHandler.Post).Methods("POST")
+	router.HandleFunc("/api/v1/namespaces/add", namespaceHandler.Append).Methods("POST")
 
 	router.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 	return router

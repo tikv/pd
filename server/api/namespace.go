@@ -18,6 +18,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/unrolled/render"
 	"net/http"
+	"strconv"
 )
 
 type namespacesInfo struct {
@@ -59,6 +60,7 @@ func (h *namespaceHandler) Post(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
 		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
+		return
 	}
 
 	var input map[string]string
@@ -70,6 +72,35 @@ func (h *namespaceHandler) Post(w http.ResponseWriter, r *http.Request) {
 
 	// create namespace
 	if err := cluster.CreateNamespace(ns); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (h *namespaceHandler) Append(w http.ResponseWriter, r *http.Request) {
+	cluster := h.svr.GetRaftCluster()
+	if cluster == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
+		return
+	}
+
+	var input map[string]string
+	if err := readJSON(r.Body, &input); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	tableIDStr := input["table_id"]
+	tableID, err := strconv.ParseInt(tableIDStr, 10, 64)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ns := input["namespace"]
+
+	// append table id to namespace
+	if err := cluster.AppendNamespaceTableID(ns, tableID); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

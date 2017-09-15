@@ -511,6 +511,12 @@ func (c *clusterInfo) getNamespaces() []*core.Namespace {
 	return c.namespaces.getNamespaces()
 }
 
+func (c *clusterInfo) getNamespace(name string) *core.Namespace {
+	c.RLock()
+	defer c.RUnlock()
+	return c.namespaces.getNamespace(name)
+}
+
 func (c *clusterInfo) putStoreLocked(store *core.StoreInfo) error {
 	if c.kv != nil {
 		if err := c.kv.saveStore(store.Store); err != nil {

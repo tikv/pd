@@ -78,6 +78,7 @@ func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, fi
 	}
 	filters = append(filters, newFilters...)
 
+	//FIXME we need to compare whether all the peer's store id of the region has already been in the namespace's store id list
 	ns := n.classifier.GetRegionNamespace(region)
 	selector := NewNamespaceSelector(ns, n.filters...)
 	target := selector.SelectTarget(n.cluster.GetStores(), filters...)
