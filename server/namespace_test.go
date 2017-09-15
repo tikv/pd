@@ -89,7 +89,11 @@ func (s *testNamespaceSuite) TestSchedulerBalanceRegion(c *C) {
 	op = scheduleByNamespace(s.tc, s.classifier, sched)
 	c.Assert(op, IsNil)
 
-	// If region is not in the correct namespace, it will not be balanced.
+	// If region is not in the correct namespace, it will not be balanced. The
+	// region should be in 'ns1', but its replica is located in 'ns2', neither
+	// namespace will select it for balance.
+	s.tc.addRegionStore(4, 0)
+	s.classifier.setStore(4, "ns2")
 	s.tc.addLeaderRegion(1, 3)
 	s.classifier.setRegion(1, "ns1")
 	op = scheduleByNamespace(s.tc, s.classifier, sched)
