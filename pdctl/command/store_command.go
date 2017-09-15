@@ -157,14 +157,13 @@ func namespaceStoreCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println("Usage: store namespace <store_id> <namespace>")
 		return
 	}
-	storeID, err := strconv.Atoi(args[0])
+	_, err := strconv.Atoi(args[0])
 	if err != nil {
 		fmt.Println("store_id should be a number")
 		return
 	}
 	prefix := fmt.Sprintf(path.Join(storePrefix, "namespace"), args[0])
 	postJSON(cmd, prefix, map[string]interface{}{
-		"store_id":  storeID,
 		"namespace": args[1],
 	})
 }

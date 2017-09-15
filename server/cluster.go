@@ -674,6 +674,19 @@ func (c *RaftCluster) AppendNamespaceTableID(name string, tableID int64) error {
 	return errors.Trace(err)
 }
 
+// AppendNamespaceStoreID append store id to namespace
+func (c *RaftCluster) AppendNamespaceStoreID(name string, storeID uint64) error {
+	namespace := c.cachedCluster.getNamespace(name)
+	if namespace == nil {
+		return errors.Errorf("invalid namespace name %s, not found", name)
+	}
+
+	// TODO check whether the store id is exists
+	namespace.StoreIDs = append(namespace.StoreIDs, storeID)
+	err := c.putNamespace(namespace)
+	return errors.Trace(err)
+}
+
 func (c *RaftCluster) putNamespace(namespace *core.Namespace) error {
 	c.Lock()
 	defer c.Unlock()

@@ -19,7 +19,6 @@ import (
 	"strconv"
 	"time"
 
-	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -221,9 +220,18 @@ func (h *storeHandler) SetNamespace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//TODO combine store_id, namespace, table_id(s) relationship to etcd KV
-	// store_id  <-----> namespace <------> table_id(s)
-	fmt.Println(storeID)
+	var input map[string]string
+	if err := readJSON(r.Body, &input); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ns := input["namespace"]
+
+	// append store id to namespace
+	if err := cluster.AppendNamespaceStoreID(ns, storeID); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	h.rd.JSON(w, http.StatusOK, nil)
 
