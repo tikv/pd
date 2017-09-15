@@ -39,7 +39,7 @@ func NewNamespaceChecker(opt Options, cluster Cluster) *NamespaceChecker {
 		cluster: cluster,
 		filters: filters,
 		//TODO change it to classifier for namespace
-		classifier: namespace.DefaultClassifer,
+		classifier: namespace.DefaultClassifier,
 	}
 }
 

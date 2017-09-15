@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"golang.org/x/net/context"
 )
@@ -65,15 +66,16 @@ type coordinator struct {
 	cluster          *clusterInfo
 	opt              *scheduleOption
 	limiter          *scheduleLimiter
-	replicaChecker   *schedule.ReplicaChecker
+	checker          *schedule.ReplicaChecker
 	namespaceChecker *schedule.NamespaceChecker
 	operators        map[uint64]*schedule.Operator
 	schedulers       map[string]*scheduleController
+	classifier       namespace.Classifier
 	histories        cache.Cache
 	hbStreams        *heartbeatStreams
 }
 
-func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams) *coordinator {
+func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
 		ctx:              ctx,
@@ -81,10 +83,11 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 		cluster:          cluster,
 		opt:              opt,
 		limiter:          newScheduleLimiter(),
-		replicaChecker:   schedule.NewReplicaChecker(opt, cluster),
+		checker:          schedule.NewReplicaChecker(opt, cluster, classifier),
 		namespaceChecker: schedule.NewNamespaceChecker(opt, cluster),
 		operators:        make(map[uint64]*schedule.Operator),
 		schedulers:       make(map[string]*scheduleController),
+		classifier:       classifier,
 		histories:        cache.NewDefaultCache(historiesCacheSize),
 		hbStreams:        hbStreams,
 	}
@@ -118,7 +121,7 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	if op := c.namespaceChecker.Check(region); op != nil {
 		c.addOperator(op)
 	}
-	if op := c.replicaChecker.Check(region); op != nil {
+	if op := c.checker.Check(region); op != nil {
 		c.addOperator(op)
 	}
 }
@@ -458,6 +461,7 @@ type scheduleController struct {
 	schedule.Scheduler
 	opt          *scheduleOption
 	limiter      *scheduleLimiter
+	classifier   namespace.Classifier
 	nextInterval time.Duration
 	minInterval  time.Duration
 	ctx          context.Context
@@ -470,6 +474,7 @@ func newScheduleController(c *coordinator, s schedule.Scheduler, minInterval tim
 		Scheduler:    s,
 		opt:          c.opt,
 		limiter:      c.limiter,
+		classifier:   c.classifier,
 		nextInterval: minInterval,
 		minInterval:  minInterval,
 		ctx:          ctx,
@@ -485,10 +490,10 @@ func (s *scheduleController) Stop() {
 	s.cancel()
 }
 
-func (s *scheduleController) Schedule(cluster *clusterInfo) *schedule.Operator {
+func (s *scheduleController) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
 		// If we have schedule, reset interval to the minimal interval.
-		if op := s.Scheduler.Schedule(cluster); op != nil {
+		if op := scheduleByNamespace(cluster, s.classifier, s.Scheduler); op != nil {
 			s.nextInterval = s.minInterval
 			return op
 		}
