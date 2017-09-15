@@ -111,6 +111,11 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 		}
 	}
 
+	// Check replica operator.
+	if c.limiter.operatorCount(core.RegionKind) >= c.opt.GetReplicaScheduleLimit() {
+		return
+	}
+
 	if op := c.checker.Check(region); op != nil {
 		c.addOperator(op)
 	}
