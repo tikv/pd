@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 )
 
@@ -37,7 +38,7 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 	_, opt := newTestScheduleConfig()
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	defer hbStreams.Close()
-	co := newCoordinator(cluster, opt, hbStreams)
+	co := newCoordinator(cluster, opt, hbStreams, namespace.DefaultClassifier)
 	l := co.limiter
 
 	op1 := newTestOperator(1, core.LeaderKind)
@@ -88,7 +89,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	defer hbStreams.Close()
 
 	_, opt := newTestScheduleConfig()
-	co := newCoordinator(cluster, opt, hbStreams)
+	co := newCoordinator(cluster, opt, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	defer co.stop()
 
@@ -166,7 +167,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	cfg.LeaderScheduleLimit = 0
 	cfg.RegionScheduleLimit = 0
 
-	co := newCoordinator(cluster, opt, hbStreams)
+	co := newCoordinator(cluster, opt, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	defer co.stop()
 
@@ -217,7 +218,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	defer hbStreams.Close()
 
 	_, opt := newTestScheduleConfig()
-	co := newCoordinator(cluster, opt, hbStreams)
+	co := newCoordinator(cluster, opt, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	defer co.stop()
 
@@ -264,7 +265,7 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	defer hbStreams.Close()
 
 	_, opt := newTestScheduleConfig()
-	co := newCoordinator(cluster, opt, hbStreams)
+	co := newCoordinator(cluster, opt, hbStreams, namespace.DefaultClassifier)
 
 	tc.LoadRegion(1, 1, 2, 3)
 	tc.LoadRegion(2, 1, 2, 3)
@@ -306,7 +307,7 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	cfg, opt := newTestScheduleConfig()
 	cfg.ReplicaScheduleLimit = 0
 
-	co := newCoordinator(cluster, opt, hbStreams)
+	co := newCoordinator(cluster, opt, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	defer co.stop()
 
@@ -376,7 +377,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	region := cluster.GetRegion(1)
 
 	// Add 1 replica on store 2.
-	co := newCoordinator(cluster, opt, hbStreams)
+	co := newCoordinator(cluster, opt, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	stream := newMockHeartbeatStream()
 	resp := dispatchAndRecvHeartbeat(c, co, region, stream)
@@ -385,7 +386,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	co.stop()
 
 	// Recreate coodinator then add another replica on store 3.
-	co = newCoordinator(cluster, opt, hbStreams)
+	co = newCoordinator(cluster, opt, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	resp = dispatchAndRecvHeartbeat(c, co, region, stream)
 	checkAddPeerResp(c, resp, 3)
@@ -445,7 +446,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	cfg, opt := newTestScheduleConfig()
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	defer hbStreams.Close()
-	co := newCoordinator(cluster, opt, hbStreams)
+	co := newCoordinator(cluster, opt, hbStreams, namespace.DefaultClassifier)
 	scheduler, err := schedule.CreateScheduler("balanceLeader", opt)
 	c.Assert(err, IsNil)
 	lb := &mockLimitScheduler{
@@ -502,7 +503,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	_, opt := newTestScheduleConfig()
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	defer hbStreams.Close()
-	co := newCoordinator(cluster, opt, hbStreams)
+	co := newCoordinator(cluster, opt, hbStreams, namespace.DefaultClassifier)
 	lb, err := schedule.CreateScheduler("balanceLeader", opt)
 	c.Assert(err, IsNil)
 	sc := newScheduleController(co, lb, minScheduleInterval)

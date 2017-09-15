@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	_ "github.com/pingcap/pd/server/schedulers" // Register schedulers for tests.
 )
@@ -576,7 +577,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	cfg, opt := newTestScheduleConfig()
-	rc := schedule.NewReplicaChecker(opt, cluster)
+	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
 
 	cfg.MaxSnapshotCount = 2
 
@@ -651,7 +652,7 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 	tc.addRegionStore(2, 1)
 	_, opt := newTestScheduleConfig()
 
-	rc := schedule.NewReplicaChecker(opt, cluster)
+	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
 
 	// now region peer in store 1,2,3.but we just have store 1,2
 	// This happens only in recovering the PD cluster
@@ -669,7 +670,7 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	_, opt := newTestScheduleConfig()
 	opt.rep = newTestReplication(3, "zone", "rack", "host")
 
-	rc := schedule.NewReplicaChecker(opt, cluster)
+	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
 
 	tc.addLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.addLabelsStore(2, 2, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
@@ -724,7 +725,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	_, opt := newTestScheduleConfig()
 	opt.rep = newTestReplication(3, "zone", "rack", "host")
 
-	rc := schedule.NewReplicaChecker(opt, cluster)
+	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
 
 	tc.addLabelsStore(1, 9, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.addLabelsStore(2, 8, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -804,7 +805,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	_, opt := newTestScheduleConfig()
 	opt.rep = newTestReplication(5, "zone", "host")
 
-	rc := schedule.NewReplicaChecker(opt, cluster)
+	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
 
 	tc.addLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "h1"})
 	tc.addLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})

@@ -19,18 +19,23 @@ import "github.com/pingcap/pd/server/core"
 // default.
 const DefaultNamespace = "global"
 
-// DefaultClassifer is a classifier that classifies all regions and stores to
+// DefaultClassifier is a classifier that classifies all regions and stores to
 // DefaultNamespace.
-var DefaultClassifer = defaultClassifer{}
+var DefaultClassifier = defaultClassifer{}
 
 // Classifier is used to determine the namespace which the store or region
 // belongs.
 type Classifier interface {
+	GetAllNamespaces() []string
 	GetStoreNamespace(*core.StoreInfo) string
 	GetRegionNamespace(*core.RegionInfo) string
 }
 
 type defaultClassifer struct{}
+
+func (c defaultClassifer) GetAllNamespaces() []string {
+	return []string{DefaultNamespace}
+}
 
 func (c defaultClassifer) GetStoreNamespace(*core.StoreInfo) string {
 	return DefaultNamespace
