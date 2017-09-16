@@ -51,7 +51,7 @@ func newBalanceRegionScheduler(opt schedule.Options) schedule.Scheduler {
 
 	return &balanceRegionScheduler{
 		opt:      opt,
-		cache:    cache,
+		cache:    ttlCache,
 		limit:    1,
 		selector: schedule.NewBalanceSelector(core.RegionKind, filters),
 	}
