@@ -7,3 +7,4 @@ default.etcd
 default.pd
 *.swp
 .DS_Store
+tags
