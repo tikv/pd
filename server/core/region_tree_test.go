@@ -11,16 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package core
 
 import (
-	"math"
-
-	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
-	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server/core"
+  "github.com/pingcap/kvproto/pkg/metapb"
+  "github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 var _ = Suite(&testRegionSuite{})
@@ -43,7 +39,7 @@ func (s *testRegionSuite) TestRegionInfo(c *C) {
 	}
 	downPeer, pendingPeer := peers[0], peers[1]
 
-	info := core.NewRegionInfo(region, peers[0])
+	info := NewRegionInfo(region, peers[0])
 	info.DownPeers = []*pdpb.PeerStats{{Peer: downPeer}}
 	info.PendingPeers = []*metapb.Peer{pendingPeer}
 
@@ -69,16 +65,16 @@ func (s *testRegionSuite) TestRegionInfo(c *C) {
 		StoreId: n,
 	}
 	r.Peers = append(r.Peers, removePeer)
-	c.Assert(diffRegionPeersInfo(info, r), Matches, "Add peer.*")
-	c.Assert(diffRegionPeersInfo(r, info), Matches, "Remove peer.*")
+	c.Assert(DiffRegionPeersInfo(info, r), Matches, "Add peer.*")
+	c.Assert(DiffRegionPeersInfo(r, info), Matches, "Remove peer.*")
 	c.Assert(r.GetStorePeer(n), DeepEquals, removePeer)
 	r.RemoveStorePeer(n)
-	c.Assert(diffRegionPeersInfo(r, info), Equals, "")
+	c.Assert(DiffRegionPeersInfo(r, info), Equals, "")
 	c.Assert(r.GetStorePeer(n), IsNil)
 	r.Region.StartKey = []byte{0}
-	c.Assert(diffRegionKeyInfo(r, info), Matches, "StartKey Changed.*")
+	c.Assert(DiffRegionKeyInfo(r, info), Matches, "StartKey Changed.*")
 	r.Region.EndKey = []byte{1}
-	c.Assert(diffRegionKeyInfo(r, info), Matches, ".*EndKey Changed.*")
+	c.Assert(DiffRegionKeyInfo(r, info), Matches, ".*EndKey Changed.*")
 
 	stores := r.GetStoreIds()
 	c.Assert(stores, HasLen, int(n))
@@ -117,10 +113,10 @@ func (s *testRegionSuite) TestRegionTree(c *C) {
 
 	c.Assert(tree.search([]byte("a")), IsNil)
 
-	regionA := newRegion([]byte("a"), []byte("b"))
-	regionB := newRegion([]byte("b"), []byte("c"))
-	regionC := newRegion([]byte("c"), []byte("d"))
-	regionD := newRegion([]byte("d"), []byte{})
+	regionA := NewRegion([]byte("a"), []byte("b"))
+	regionB := NewRegion([]byte("b"), []byte("c"))
+	regionC := NewRegion([]byte("c"), []byte("d"))
+	regionD := NewRegion([]byte("d"), []byte{})
 
 	tree.update(regionA)
 	tree.update(regionC)
@@ -168,54 +164,6 @@ func (s *testRegionSuite) TestRegionTree(c *C) {
 	c.Assert(tree.search([]byte("e")), Equals, regionE)
 }
 
-func splitRegions(regions []*metapb.Region) []*metapb.Region {
-	results := make([]*metapb.Region, 0, len(regions)*2)
-	for _, region := range regions {
-		start, end := byte(0), byte(math.MaxUint8)
-		if len(region.StartKey) > 0 {
-			start = region.StartKey[0]
-		}
-		if len(region.EndKey) > 0 {
-			end = region.EndKey[0]
-		}
-		middle := []byte{start/2 + end/2}
-		left := proto.Clone(region).(*metapb.Region)
-		left.Id = region.Id + uint64(len(regions))
-		left.EndKey = middle
-		left.RegionEpoch.Version++
-		right := proto.Clone(region).(*metapb.Region)
-		right.Id = region.Id + uint64(len(regions)*2)
-		right.StartKey = middle
-		right.RegionEpoch.Version++
-		results = append(results, left, right)
-	}
-	return results
-}
-
-func mergeRegions(regions []*metapb.Region) []*metapb.Region {
-	results := make([]*metapb.Region, 0, len(regions)/2)
-	for i := 0; i < len(regions); i += 2 {
-		left := regions[i]
-		right := regions[i]
-		if i+1 < len(regions) {
-			right = regions[i+1]
-		}
-		region := &metapb.Region{
-			Id:       left.Id + uint64(len(regions)),
-			StartKey: left.StartKey,
-			EndKey:   right.EndKey,
-		}
-		if left.RegionEpoch.Version > right.RegionEpoch.Version {
-			region.RegionEpoch = left.RegionEpoch
-		} else {
-			region.RegionEpoch = right.RegionEpoch
-		}
-		region.RegionEpoch.Version++
-		results = append(results, region)
-	}
-	return results
-}
-
 func updateRegions(c *C, tree *regionTree, regions []*metapb.Region) {
 	for _, region := range regions {
 		tree.update(region)
@@ -237,35 +185,27 @@ func (s *testRegionSuite) TestRegionTreeSplitAndMerge(c *C) {
 
 	// Split.
 	for i := 0; i < n; i++ {
-		regions = splitRegions(regions)
+		regions = SplitRegions(regions)
 		updateRegions(c, tree, regions)
 	}
 
 	// Merge.
 	for i := 0; i < n; i++ {
-		regions = mergeRegions(regions)
+		regions = MergeRegions(regions)
 		updateRegions(c, tree, regions)
 	}
 
 	// Split twice and merge once.
 	for i := 0; i < n*2; i++ {
 		if (i+1)%3 == 0 {
-			regions = mergeRegions(regions)
+			regions = MergeRegions(regions)
 		} else {
-			regions = splitRegions(regions)
+			regions = SplitRegions(regions)
 		}
 		updateRegions(c, tree, regions)
 	}
 }
 
-func newRegion(start, end []byte) *metapb.Region {
-	return &metapb.Region{
-		StartKey:    start,
-		EndKey:      end,
-		RegionEpoch: &metapb.RegionEpoch{},
-	}
-}
-
 func newRegionItem(start, end []byte) *regionItem {
-	return &regionItem{region: newRegion(start, end)}
+	return &regionItem{region: NewRegion(start, end)}
 }

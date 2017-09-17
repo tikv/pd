@@ -18,6 +18,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server/core"
 )
 
 var _ = Suite(&testKVSuite{})
@@ -94,21 +95,21 @@ func mustSaveStores(c *C, kv *kv, n int) []*metapb.Store {
 
 func (s *testKVSuite) TestLoadStores(c *C) {
 	kv := newKV(s.server)
-	cache := newStoresInfo()
+	cache := core.NewStoresInfo()
 
 	n := 10
 	stores := mustSaveStores(c, kv, n)
 	c.Assert(kv.loadStores(cache, 3), IsNil)
 
-	c.Assert(cache.getStoreCount(), Equals, n)
-	for _, store := range cache.getMetaStores() {
+	c.Assert(cache.GetStoreCount(), Equals, n)
+	for _, store := range cache.GetMetaStores() {
 		c.Assert(store, DeepEquals, stores[store.GetId()])
 	}
 }
 
 func (s *testKVSuite) TestStoreWeight(c *C) {
 	kv := newKV(s.server)
-	cache := newStoresInfo()
+	cache := core.NewStoresInfo()
 	const n = 3
 
 	mustSaveStores(c, kv, n)
@@ -118,8 +119,8 @@ func (s *testKVSuite) TestStoreWeight(c *C) {
 	leaderWeights := []float64{1.0, 2.0, 0.2}
 	regionWeights := []float64{1.0, 3.0, 0.3}
 	for i := 0; i < n; i++ {
-		c.Assert(cache.getStore(uint64(i)).LeaderWeight, Equals, leaderWeights[i])
-		c.Assert(cache.getStore(uint64(i)).RegionWeight, Equals, regionWeights[i])
+		c.Assert(cache.GetStore(uint64(i)).LeaderWeight, Equals, leaderWeights[i])
+		c.Assert(cache.GetStore(uint64(i)).RegionWeight, Equals, regionWeights[i])
 	}
 }
 
@@ -139,14 +140,14 @@ func mustSaveRegions(c *C, kv *kv, n int) []*metapb.Region {
 
 func (s *testKVSuite) TestLoadRegions(c *C) {
 	kv := newKV(s.server)
-	cache := newRegionsInfo()
+	cache := core.NewRegionsInfo()
 
 	n := 10
 	regions := mustSaveRegions(c, kv, n)
 	c.Assert(kv.loadRegions(cache, 3), IsNil)
 
-	c.Assert(cache.getRegionCount(), Equals, n)
-	for _, region := range cache.getMetaRegions() {
+	c.Assert(cache.GetRegionCount(), Equals, n)
+	for _, region := range cache.GetMetaRegions() {
 		c.Assert(region, DeepEquals, regions[region.GetId()])
 	}
 }
