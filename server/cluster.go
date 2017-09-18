@@ -503,6 +503,23 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	return cluster.putStore(store)
 }
 
+// SetStoreState sets up a store's state.
+func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) error {
+	c.Lock()
+	defer c.Unlock()
+
+	cluster := c.cachedCluster
+
+	store := cluster.getStore(storeID)
+	if store == nil {
+		return errors.Trace(errStoreNotFound(storeID))
+	}
+
+	store.State = state
+	log.Warnf("[store %d] set state to %v", storeID, state.String())
+	return cluster.putStore(store)
+}
+
 func (c *RaftCluster) checkStores() {
 	cluster := c.cachedCluster
 	for _, store := range cluster.getMetaStores() {

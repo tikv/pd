@@ -145,6 +145,35 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 	}
 }
 
+func (s *testStoreSuite) TestStoreSetState(c *C) {
+	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
+	var info storeInfo
+	err := readJSONWithURL(url, &info)
+	c.Assert(err, IsNil)
+	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
+
+	// Set to Offline.
+	err = postJSON(&http.Client{}, url+"/state?state=Offline", nil)
+	c.Assert(err, IsNil)
+	err = readJSONWithURL(url, &info)
+	c.Assert(err, IsNil)
+	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
+
+	// Invalid state.
+	err = postJSON(&http.Client{}, url+"/state?state=Foo", nil)
+	c.Assert(err, NotNil)
+	err = readJSONWithURL(url, &info)
+	c.Assert(err, IsNil)
+	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
+
+	// Set back to Up.
+	err = postJSON(&http.Client{}, url+"/state?state=Up", nil)
+	c.Assert(err, IsNil)
+	err = readJSONWithURL(url, &info)
+	c.Assert(err, IsNil)
+	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
+}
+
 func (s *testStoreSuite) TestUrlStoreFilter(c *C) {
 	table := []struct {
 		u    string
