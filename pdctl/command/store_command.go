@@ -30,12 +30,11 @@ var (
 // NewStoreCommand return a store subcommand of rootCmd
 func NewStoreCommand() *cobra.Command {
 	s := &cobra.Command{
-		Use:   "store [delete|state|label|weight] <store_id>",
+		Use:   "store [delete|label|weight] <store_id>",
 		Short: "show the store status",
 		Run:   showStoreCommandFunc,
 	}
 	s.AddCommand(NewDeleteStoreCommand())
-	s.AddCommand(NewSetStoreStateCommand())
 	s.AddCommand(NewLabelStoreCommand())
 	s.AddCommand(NewSetStoreWeightCommand())
 	return s
@@ -47,16 +46,6 @@ func NewDeleteStoreCommand() *cobra.Command {
 		Use:   "delete <store_id>",
 		Short: "delete the store",
 		Run:   deleteStoreCommandFunc,
-	}
-	return d
-}
-
-// NewSetStoreStateCommand returns a state subcommand of storeCmd.
-func NewSetStoreStateCommand() *cobra.Command {
-	d := &cobra.Command{
-		Use:   "state <store_id> [Up|Offline|Tombstone]",
-		Short: "set the store's state",
-		Run:   setStoreStateCommandFunc,
 	}
 	return d
 }
@@ -111,24 +100,6 @@ func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	_, err := doRequest(cmd, prefix, http.MethodDelete)
 	if err != nil {
 		fmt.Printf("Failed to delete store %s: %s\n", args[0], err)
-		return
-	}
-	fmt.Println("Success!")
-}
-
-func setStoreStateCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 2 {
-		fmt.Println("Usage: store state <store_id> [Up|Offline|Tombstone]")
-		return
-	}
-	if _, err := strconv.Atoi(args[0]); err != nil {
-		fmt.Println("store_id should be a number")
-		return
-	}
-	prefix := fmt.Sprintf(storePrefix+"/state?state=%s", args[0], args[1])
-	_, err := doRequest(cmd, prefix, http.MethodPost)
-	if err != nil {
-		fmt.Printf("Failed to set store state %s: %s\n", args[0], err)
 		return
 	}
 	fmt.Println("Success!")
