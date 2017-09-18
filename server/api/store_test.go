@@ -152,22 +152,24 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
 
+	client := newUnixSocketClient()
+
 	// Set to Offline.
-	err = postJSON(&http.Client{}, url+"/state?state=Offline", nil)
+	err = postJSON(client, url+"/state?state=Offline", nil)
 	c.Assert(err, IsNil)
 	err = readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
 
 	// Invalid state.
-	err = postJSON(&http.Client{}, url+"/state?state=Foo", nil)
+	err = postJSON(client, url+"/state?state=Foo", nil)
 	c.Assert(err, NotNil)
 	err = readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
 
 	// Set back to Up.
-	err = postJSON(&http.Client{}, url+"/state?state=Up", nil)
+	err = postJSON(client, url+"/state?state=Up", nil)
 	c.Assert(err, IsNil)
 	err = readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)
