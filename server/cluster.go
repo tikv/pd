@@ -515,6 +515,23 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	return cluster.putStore(store)
 }
 
+// SetStoreState sets up a store's state.
+func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) error {
+	c.Lock()
+	defer c.Unlock()
+
+	cluster := c.cachedCluster
+
+	store := cluster.GetStore(storeID)
+	if store == nil {
+		return errors.Trace(errStoreNotFound(storeID))
+	}
+
+	store.State = state
+	log.Warnf("[store %d] set state to %v", storeID, state.String())
+	return cluster.putStore(store)
+}
+
 // SetStoreWeight sets up a store's leader/region balance weight.
 func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) error {
 	c.Lock()

@@ -170,6 +170,37 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 
+func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
+	cluster := h.svr.GetRaftCluster()
+	if cluster == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
+		return
+	}
+
+	vars := mux.Vars(r)
+	storeIDStr := vars["id"]
+	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	stateStr := r.URL.Query().Get("state")
+	state, ok := metapb.StoreState_value[stateStr]
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "invalid state")
+		return
+	}
+
+	err = cluster.SetStoreState(storeID, metapb.StoreState(state))
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
 func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
