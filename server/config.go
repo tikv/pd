@@ -307,7 +307,7 @@ type ScheduleConfig struct {
 	// ReplicaScheduleLimit is the max coexist replica schedules.
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit,omitempty" json:"replica-schedule-limit"`
 	// Schedulers support for loding customized schedulers
-	Schedulers SchedulerConfigs `toml:"schedulers, omitempty" json:"schedulers"`
+	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers"`
 
 	// Meta is meta information return from toml.Decode
 	// passing it to scheduler handler for supporting customized arguments

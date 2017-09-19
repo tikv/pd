@@ -134,13 +134,16 @@ func (c *coordinator) run() {
 	log.Info("coordinator: Run scheduler")
 
 	for name := range c.opt.GetSchedulers() {
-		// note: CreateScheduler just need specific scheduler config
+		// note: CreateScheduler just needs specific scheduler config
 		// so schedulers(a map of scheduler configs) wrapped by c.opt has redundant configs
 		s, err := schedule.CreateScheduler(name, c.opt)
 		if err != nil {
-			log.Errorf("can not create scheduler: %v", err)
-		} else if err := c.addScheduler(s, s.GetInterval()); err != nil {
-			log.Errorf("can not add scheduler: %v", err)
+			log.Errorf("can not create scheduler %s: %v", name, err)
+		} else {
+			log.Infof("create scheduler %s", name)
+			if err := c.addScheduler(s, s.GetInterval()); err != nil {
+				log.Errorf("can not add scheduler %s: %v", name, err)
+			}
 		}
 	}
 }
