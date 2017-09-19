@@ -48,8 +48,18 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *Operator {
 	if n.classifier == nil || len(n.classifier.GetAllNamespaces()) == 1 {
 		return nil
 	}
+
+	// get all the stores belong to the namespace
+	targetStores := n.getNamespaceStores(region)
+	if len(targetStores) == 0 {
+		return nil
+	}
 	for _, peer := range region.GetPeers() {
-		newPeer := n.SelectBestPeerToRelocate(region, n.filters...)
+		// check whether the peer has been already located on a store that is belong to the target namespace
+		if n.isExists(targetStores, peer.StoreId) {
+			continue
+		}
+		newPeer := n.SelectBestPeerToRelocate(region, targetStores, n.filters...)
 		if newPeer == nil {
 			return nil
 		}
@@ -60,8 +70,8 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *Operator {
 }
 
 // SelectBestPeerToRelocate return a new peer that to be used to move a region
-func (n *NamespaceChecker) SelectBestPeerToRelocate(region *core.RegionInfo, filters ...Filter) *metapb.Peer {
-	storeID := n.SelectBestStoreToRelocate(region, filters...)
+func (n *NamespaceChecker) SelectBestPeerToRelocate(region *core.RegionInfo, targets []*core.StoreInfo, filters ...Filter) *metapb.Peer {
+	storeID := n.SelectBestStoreToRelocate(region, targets, filters...)
 	if storeID == 0 {
 		return nil
 	}
@@ -72,8 +82,8 @@ func (n *NamespaceChecker) SelectBestPeerToRelocate(region *core.RegionInfo, fil
 	return newPeer
 }
 
-// SelectBestStoreToRelocate returns the store to relocate
-func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, filters ...Filter) uint64 {
+// SelectBestStoreToRelocate randomly returns the store to relocate
+func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, targets []*core.StoreInfo, filters ...Filter) uint64 {
 	newFilters := []Filter{
 		NewStateFilter(n.opt),
 		NewStorageThresholdFilter(n.opt),
@@ -81,15 +91,28 @@ func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, fi
 	}
 	filters = append(filters, newFilters...)
 
-	//TODO here should return Namespace instead of namespace's name
-	ns := n.classifier.GetRegionNamespace(region)
-	filteredStores := n.filter(n.cluster.GetStores(), NewNamespaceFilter(n.classifier, ns))
 	selector := NewRandomSelector(n.filters)
-	target := selector.SelectTarget(filteredStores, filters...)
+	target := selector.SelectTarget(targets, filters...)
 	if target == nil {
 		return 0
 	}
 	return target.GetId()
+}
+
+func (n *NamespaceChecker) isExists(stores []*core.StoreInfo, storeID uint64) bool {
+	for _, store := range stores {
+		if store.Id == storeID {
+			return true
+		}
+	}
+	return false
+}
+
+func (n *NamespaceChecker) getNamespaceStores(region *core.RegionInfo) []*core.StoreInfo {
+	ns := n.classifier.GetRegionNamespace(region)
+	filteredStores := n.filter(n.cluster.GetStores(), NewNamespaceFilter(n.classifier, ns))
+
+	return filteredStores
 }
 
 func (n *NamespaceChecker) filter(stores []*core.StoreInfo, filters ...Filter) []*core.StoreInfo {
