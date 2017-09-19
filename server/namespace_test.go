@@ -98,6 +98,12 @@ func (s *testNamespaceSuite) TestNamespaceChecker(c *C) {
 	s.tc.addLeaderRegion(4, 3)
 	op = checker.Check(s.tc.GetRegion(4))
 	c.Assert(op, IsNil)
+
+	// Move region with multiple peer to the right place
+	s.classifier.setRegion(5, "ns1")
+	s.tc.addLeaderRegion(5, 1, 1, 3)
+	op = checker.Check(s.tc.GetRegion(5))
+	checkTransferPeer(c, op, 3, 2)
 }
 
 func (s *testNamespaceSuite) TestSchedulerBalanceRegion(c *C) {
