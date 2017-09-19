@@ -63,7 +63,7 @@ func (s *testNamespaceSuite) TestReplica(c *C) {
 	c.Assert(op, IsNil)
 }
 
-func (s *testNamespaceSuite) testNamespaceChecker(c *C) {
+func (s *testNamespaceSuite) TestNamespaceChecker(c *C) {
 	// store regionCount namespace
 	//     1           0       ns1
 	//     2          10       ns1
@@ -81,11 +81,11 @@ func (s *testNamespaceSuite) testNamespaceChecker(c *C) {
 	s.classifier.setRegion(1, "ns2")
 	s.tc.addLeaderRegion(1, 1)
 	op := checker.Check(s.tc.GetRegion(1))
-	checkAddPeer(c, op, 3)
+	checkTransferPeer(c, op, 1, 3)
 
 	// Stop move region if namespace is added in the same namespace.
 	s.classifier.setRegion(2, "ns2")
-	s.tc.addLeaderRegion(1, 3)
+	s.tc.addLeaderRegion(2, 3)
 	op = checker.Check(s.tc.GetRegion(2))
 	c.Assert(op, IsNil)
 }
