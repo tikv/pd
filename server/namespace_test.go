@@ -63,6 +63,33 @@ func (s *testNamespaceSuite) TestReplica(c *C) {
 	c.Assert(op, IsNil)
 }
 
+func (s *testNamespaceSuite) testNamespaceChecker(c *C) {
+	// store regionCount namespace
+	//     1           0       ns1
+	//     2          10       ns1
+	//     3           0       ns2
+	s.tc.addRegionStore(1, 0)
+	s.tc.addRegionStore(2, 10)
+	s.tc.addRegionStore(3, 0)
+	s.classifier.setStore(1, "ns1")
+	s.classifier.setStore(2, "ns1")
+	s.classifier.setStore(3, "ns2")
+
+	checker := schedule.NewNamespaceChecker(s.opt, s.tc, s.classifier)
+
+	// Namespace should be added to the store with the same namespace.
+	s.classifier.setRegion(1, "ns2")
+	s.tc.addLeaderRegion(1, 1)
+	op := checker.Check(s.tc.GetRegion(1))
+	checkAddPeer(c, op, 3)
+
+	// Stop move region if namespace is added in the same namespace.
+	s.classifier.setRegion(2, "ns2")
+	s.tc.addLeaderRegion(1, 3)
+	op = checker.Check(s.tc.GetRegion(2))
+	c.Assert(op, IsNil)
+}
+
 func (s *testNamespaceSuite) TestSchedulerBalanceRegion(c *C) {
 	// store regionCount namespace
 	//     1           0       ns1
