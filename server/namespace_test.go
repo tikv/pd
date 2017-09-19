@@ -83,10 +83,20 @@ func (s *testNamespaceSuite) TestNamespaceChecker(c *C) {
 	op := checker.Check(s.tc.GetRegion(1))
 	checkTransferPeer(c, op, 1, 3)
 
-	// Stop move region if namespace is added in the same namespace.
-	s.classifier.setRegion(2, "ns2")
-	s.tc.addLeaderRegion(2, 3)
+	// Move the right region when some region is in the right place while others are not
+	s.classifier.setRegion(2, "ns1")
+	s.tc.addLeaderRegion(2, 1)
+	s.classifier.setRegion(3, "ns2")
+	s.tc.addLeaderRegion(3, 2)
 	op = checker.Check(s.tc.GetRegion(2))
+	c.Assert(op, IsNil)
+	op = checker.Check(s.tc.GetRegion(3))
+	checkTransferPeer(c, op, 2, 3)
+
+	// Stop move region if namespace is added in the same namespace.
+	s.classifier.setRegion(4, "ns2")
+	s.tc.addLeaderRegion(4, 3)
+	op = checker.Check(s.tc.GetRegion(4))
 	c.Assert(op, IsNil)
 }
 
