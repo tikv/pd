@@ -112,7 +112,7 @@ func (kv *kv) saveStore(store *metapb.Store) error {
 	return kv.saveProto(kv.storePath(store.GetId()), store)
 }
 
-func (kv *kv) loadNamespace(ns *core.Namespace) (bool, error) {
+func (kv *kv) loadNamespace(ns *Namespace) (bool, error) {
 	value, err := kv.load(kv.namespacePath(ns.GetID()))
 	if err != nil {
 		return false, errors.Trace(err)
@@ -127,7 +127,7 @@ func (kv *kv) loadNamespace(ns *core.Namespace) (bool, error) {
 	return true, nil
 }
 
-func (kv *kv) saveNamespace(ns *core.Namespace) error {
+func (kv *kv) saveNamespace(ns *Namespace) error {
 	value, err := json.Marshal(ns)
 	if err != nil {
 		return errors.Trace(err)
@@ -300,7 +300,7 @@ func (kv *kv) loadNamespaces(namespaces *namespacesInfo, rangeLimit int64) error
 		}
 
 		for _, item := range resp.Kvs {
-			ns := &core.Namespace{}
+			ns := &Namespace{}
 			err := json.Unmarshal(item.Value, ns)
 			if err != nil {
 				return errors.Trace(err)

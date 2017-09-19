@@ -15,9 +15,10 @@ package command
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"net/http"
 	"strconv"
+
+	"github.com/spf13/cobra"
 )
 
 const (
@@ -51,7 +52,7 @@ func NewCreateNamespaceCommand() *cobra.Command {
 func NewAppendTableIDCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "append <name> <table_id>",
-		Short: "add table id in namespace",
+		Short: "add table id to namespace",
 		Run:   appendTableCommandFunc,
 	}
 	return c
@@ -84,7 +85,7 @@ func appendTableCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	if _, err := strconv.Atoi(args[1]); err != nil {
-		fmt.Println("table_id shoud be  a number")
+		fmt.Println("table_id shoud be a number")
 	}
 
 	input := make(map[string]interface{})

@@ -14,16 +14,16 @@
 package api
 
 import (
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/core"
-	"github.com/unrolled/render"
 	"net/http"
 	"strconv"
+
+	"github.com/pingcap/pd/server"
+	"github.com/unrolled/render"
 )
 
 type namespacesInfo struct {
-	Count      int               `json:"count"`
-	Namespaces []*core.Namespace `json:"namespaces"`
+	Count      int                 `json:"count"`
+	Namespaces []*server.Namespace `json:"namespaces"`
 }
 
 type namespaceHandler struct {
@@ -38,9 +38,8 @@ func newNamespaceHandler(svr *server.Server, rd *render.Render) *namespaceHandle
 	}
 }
 
-// Get list namespace mapping
+// Get lists namespace mapping
 func (h *namespaceHandler) Get(w http.ResponseWriter, r *http.Request) {
-	//TODO
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
 		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
@@ -55,7 +54,7 @@ func (h *namespaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, nsInfo)
 }
 
-// Post create a namespace
+// Post creates a namespace
 func (h *namespaceHandler) Post(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {

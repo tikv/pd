@@ -127,16 +127,16 @@ func (s *storesInfo) totalWrittenBytes() uint64 {
 }
 
 type namespacesInfo struct {
-	namespaces map[string]*core.Namespace
+	namespaces map[string]*Namespace
 }
 
 func newNamespacesInfo() *namespacesInfo {
 	return &namespacesInfo{
-		namespaces: make(map[string]*core.Namespace),
+		namespaces: make(map[string]*Namespace),
 	}
 }
 
-func (ns *namespacesInfo) getNamespace(name string) *core.Namespace {
+func (ns *namespacesInfo) getNamespace(name string) *Namespace {
 	namespace, ok := ns.namespaces[name]
 	if !ok {
 		return nil
@@ -144,7 +144,7 @@ func (ns *namespacesInfo) getNamespace(name string) *core.Namespace {
 	return namespace
 }
 
-func (ns *namespacesInfo) setNamespace(item *core.Namespace) {
+func (ns *namespacesInfo) setNamespace(item *Namespace) {
 	ns.namespaces[item.Name] = item
 }
 
@@ -152,8 +152,8 @@ func (ns *namespacesInfo) getNamespaceCount() int {
 	return len(ns.namespaces)
 }
 
-func (ns *namespacesInfo) getNamespaces() []*core.Namespace {
-	nsList := make([]*core.Namespace, 0, len(ns.namespaces))
+func (ns *namespacesInfo) getNamespaces() []*Namespace {
+	nsList := make([]*Namespace, 0, len(ns.namespaces))
 	for _, item := range ns.namespaces {
 		nsList = append(nsList, item)
 	}
@@ -489,13 +489,13 @@ func (c *clusterInfo) putStore(store *core.StoreInfo) error {
 	return c.putStoreLocked(store.Clone())
 }
 
-func (c *clusterInfo) putNamespace(ns *core.Namespace) error {
+func (c *clusterInfo) putNamespace(ns *Namespace) error {
 	c.Lock()
 	defer c.Unlock()
 	return c.putNamespaceLocked(ns)
 }
 
-func (c *clusterInfo) putNamespaceLocked(ns *core.Namespace) error {
+func (c *clusterInfo) putNamespaceLocked(ns *Namespace) error {
 	if c.kv != nil {
 		if err := c.kv.saveNamespace(ns); err != nil {
 			return errors.Trace(err)
@@ -505,13 +505,13 @@ func (c *clusterInfo) putNamespaceLocked(ns *core.Namespace) error {
 	return nil
 }
 
-func (c *clusterInfo) getNamespaces() []*core.Namespace {
+func (c *clusterInfo) getNamespaces() []*Namespace {
 	c.RLock()
 	defer c.RUnlock()
 	return c.namespaces.getNamespaces()
 }
 
-func (c *clusterInfo) getNamespace(name string) *core.Namespace {
+func (c *clusterInfo) getNamespace(name string) *Namespace {
 	c.RLock()
 	defer c.RUnlock()
 	return c.namespaces.getNamespace(name)
