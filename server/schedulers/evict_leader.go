@@ -16,6 +16,7 @@ package schedulers
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
@@ -60,6 +61,10 @@ func newEvictLeaderScheduler(opt schedule.Options, storeID uint64) schedule.Sche
 
 func (s *evictLeaderScheduler) GetName() string {
 	return s.name
+}
+
+func (s *evictLeaderScheduler) GetInterval() time.Duration {
+	return schedule.MinScheduleInterval
 }
 
 func (s *evictLeaderScheduler) GetResourceKind() core.ResourceKind {

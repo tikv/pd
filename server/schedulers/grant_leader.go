@@ -16,6 +16,7 @@ package schedulers
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
@@ -34,6 +35,8 @@ func init() {
 		return newGrantLeaderScheduler(opt, id), nil
 	})
 }
+
+const scheduleInterval = time.Millisecond * 10
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
 type grantLeaderScheduler struct {
@@ -54,6 +57,10 @@ func newGrantLeaderScheduler(opt schedule.Options, storeID uint64) schedule.Sche
 
 func (s *grantLeaderScheduler) GetName() string {
 	return s.name
+}
+
+func (s *grantLeaderScheduler) GetInterval() time.Duration {
+	return schedule.MinScheduleInterval
 }
 
 func (s *grantLeaderScheduler) GetResourceKind() core.ResourceKind {

@@ -169,6 +169,12 @@ func adjustDuration(v *typeutil.Duration, defValue time.Duration) {
 	}
 }
 
+func adjustSchedulers(v *SchedulerConfigs, defValue SchedulerConfigs) {
+	if len(*v) == 0 {
+		*v = defValue
+	}
+}
+
 // Parse parses flag definitions from the argument list.
 func (c *Config) Parse(arguments []string) error {
 	// Parse first to get config file.
@@ -281,7 +287,8 @@ func (c *Config) String() string {
 
 // configFromFile loads config from file.
 func (c *Config) configFromFile(path string) error {
-	_, err := toml.DecodeFile(path, c)
+	meta, err := toml.DecodeFile(path, c)
+	c.Schedule.Meta = meta
 	return errors.Trace(err)
 }
 
@@ -299,7 +306,16 @@ type ScheduleConfig struct {
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit,omitempty" json:"replica-schedule-limit"`
+	// Schedulers support for loding customized schedulers
+	Schedulers SchedulerConfigs `toml:"schedulers, omitempty" json:"schedulers"`
+
+	// Meta is meta information return from toml.Decode
+	// passing it to scheduler handler for supporting customized arguments
+	Meta toml.MetaData
 }
+
+// SchedulerConfigs is a map of customized scheduler configuration.
+type SchedulerConfigs map[string]toml.Primitive
 
 const (
 	defaultMaxReplicas          = 3
@@ -310,12 +326,20 @@ const (
 	defaultReplicaScheduleLimit = 16
 )
 
+var defaultSchedulers = SchedulerConfigs{
+	"balanceRegion":  toml.Primitive{},
+	"balanceLeader":  toml.Primitive{},
+	"hotWriteRegion": toml.Primitive{},
+	"hotReadRegion":  toml.Primitive{},
+}
+
 func (c *ScheduleConfig) adjust() {
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
 	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
+	adjustSchedulers(&c.Schedulers, defaultSchedulers)
 }
 
 // ReplicationConfig is the replication configuration.
@@ -398,6 +422,14 @@ func (o *scheduleOption) GetRegionScheduleLimit() uint64 {
 
 func (o *scheduleOption) GetReplicaScheduleLimit() uint64 {
 	return o.load().ReplicaScheduleLimit
+}
+
+func (o *scheduleOption) GetSchedulers() SchedulerConfigs {
+	return o.load().Schedulers
+}
+
+func (o *scheduleOption) GetMeta() toml.MetaData {
+	return o.load().Meta
 }
 
 func (o *scheduleOption) persist(kv *kv) error {

@@ -14,6 +14,8 @@
 package schedulers
 
 import (
+	"time"
+
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
@@ -47,6 +49,10 @@ func newBalanceLeaderScheduler(opt schedule.Options) schedule.Scheduler {
 
 func (l *balanceLeaderScheduler) GetName() string {
 	return "balance-leader-scheduler"
+}
+
+func (l *balanceLeaderScheduler) GetInterval() time.Duration {
+	return schedule.MinScheduleInterval
 }
 
 func (l *balanceLeaderScheduler) GetResourceKind() core.ResourceKind {

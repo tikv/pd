@@ -14,6 +14,8 @@
 package schedulers
 
 import (
+	"time"
+
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
@@ -45,6 +47,10 @@ func newShuffleRegionScheduler(opt schedule.Options) schedule.Scheduler {
 
 func (s *shuffleRegionScheduler) GetName() string {
 	return "shuffle-region-scheduler"
+}
+
+func (s *shuffleRegionScheduler) GetInterval() time.Duration {
+	return schedule.MinScheduleInterval
 }
 
 func (s *shuffleRegionScheduler) GetResourceKind() core.ResourceKind {

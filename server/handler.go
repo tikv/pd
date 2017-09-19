@@ -82,7 +82,7 @@ func (h *Handler) AddScheduler(s schedule.Scheduler) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	return errors.Trace(c.addScheduler(s, minScheduleInterval))
+	return errors.Trace(c.addScheduler(s, schedule.MinScheduleInterval))
 }
 
 // RemoveScheduler removes a scheduler by name.

@@ -99,7 +99,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 		sc1 := &server.ScheduleConfig{}
 		readJSON(resp.Body, sc1)
 
-		c.Assert(*sc, Equals, *sc1)
+		c.Assert(*sc, DeepEquals, *sc1)
 	}
 }
 

@@ -14,6 +14,8 @@
 package schedulers
 
 import (
+	"time"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
@@ -47,6 +49,10 @@ func newShuffleLeaderScheduler(opt schedule.Options) schedule.Scheduler {
 
 func (s *shuffleLeaderScheduler) GetName() string {
 	return "shuffle-leader-scheduler"
+}
+
+func (s *shuffleLeaderScheduler) GetInterval() time.Duration {
+	return schedule.MinScheduleInterval
 }
 
 func (s *shuffleLeaderScheduler) GetResourceKind() core.ResourceKind {
