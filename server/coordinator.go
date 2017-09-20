@@ -43,8 +43,7 @@ const (
 	storeHeartBeatReportInterval  = 10
 	minHotRegionReportInterval    = 3
 	hotRegionAntiCount            = 1
-	hotWriteRegionScheduleName    = "balance-hot-write-region-scheduler"
-	hotReadRegionScheduleName     = "balance-hot-read-region-scheduler"
+	hotRegionScheduleName         = "balance-hot-region-scheduler"
 )
 
 var (
@@ -156,18 +155,19 @@ func (c *coordinator) stop() {
 // Hack to retrive info from scheduler.
 // TODO: remove it.
 type hasHotStatus interface {
-	GetStatus() *core.StoreHotRegionInfos
+	GetHotReadStatus() *core.StoreHotRegionInfos
+	GetHotWriteStatus() *core.StoreHotRegionInfos
 }
 
 func (c *coordinator) getHotWriteRegions() *core.StoreHotRegionInfos {
 	c.RLock()
 	defer c.RUnlock()
-	s, ok := c.schedulers[hotWriteRegionScheduleName]
+	s, ok := c.schedulers[hotRegionScheduleName]
 	if !ok {
 		return nil
 	}
 	if h, ok := s.Scheduler.(hasHotStatus); ok {
-		return h.GetStatus()
+		return h.GetHotWriteStatus()
 	}
 	return nil
 }
@@ -175,12 +175,12 @@ func (c *coordinator) getHotWriteRegions() *core.StoreHotRegionInfos {
 func (c *coordinator) getHotReadRegions() *core.StoreHotRegionInfos {
 	c.RLock()
 	defer c.RUnlock()
-	s, ok := c.schedulers[hotReadRegionScheduleName]
+	s, ok := c.schedulers[hotRegionScheduleName]
 	if !ok {
 		return nil
 	}
 	if h, ok := s.Scheduler.(hasHotStatus); ok {
-		return h.GetStatus()
+		return h.GetHotReadStatus()
 	}
 	return nil
 }
@@ -215,11 +215,11 @@ func (c *coordinator) collectHotSpotMetrics() {
 	c.RLock()
 	defer c.RUnlock()
 	// collect hot write region metrics
-	s, ok := c.schedulers[hotWriteRegionScheduleName]
+	s, ok := c.schedulers[hotRegionScheduleName]
 	if !ok {
 		return
 	}
-	status := s.Scheduler.(hasHotStatus).GetStatus()
+	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
 	for storeID, stat := range status.AsPeer {
 		store := fmt.Sprintf("store_%d", storeID)
 		totalWriteBytes := float64(stat.TotalFlowBytes)
@@ -238,11 +238,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 	}
 
 	// collect hot read region metrics
-	s, ok = c.schedulers[hotReadRegionScheduleName]
-	if !ok {
-		return
-	}
-	status = s.Scheduler.(hasHotStatus).GetStatus()
+	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
 	for storeID, stat := range status.AsLeader {
 		store := fmt.Sprintf("store_%d", storeID)
 		totalReadBytes := float64(stat.TotalFlowBytes)
