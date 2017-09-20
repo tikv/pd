@@ -47,17 +47,25 @@ func (d mockTableIDDecoderForGlobal) DecodeTableID(key core.Key) int64 {
 
 func (s *testTableNamespaceSuite) SetUpSuite(c *C) {
 	testNamespace1 := Namespace{
-		ID:       1,
-		Name:     "test1",
-		TableIDs: []int64{targetTableID},
-		StoreIDs: []uint64{targetStoreID},
+		ID:   1,
+		Name: "test1",
+		TableIDs: map[int64]int{
+			targetTableID: 1,
+		},
+		StoreIDs: map[uint64]int{
+			targetStoreID: 1,
+		},
 	}
 
 	testNamespace2 := Namespace{
-		ID:       2,
-		Name:     "test2",
-		TableIDs: []int64{targetTableID + 1},
-		StoreIDs: []uint64{targetStoreID + 1},
+		ID:   2,
+		Name: "test2",
+		TableIDs: map[int64]int{
+			targetTableID + 1: 1,
+		},
+		StoreIDs: map[uint64]int{
+			targetStoreID + 1: 1,
+		},
 	}
 
 	namespaces := newNamespacesInfo()

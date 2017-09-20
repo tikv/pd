@@ -19,17 +19,27 @@ import (
 )
 
 // Namespace defines two things:
-// 1. relation between a name and several tables
-// 2. relation between a name and several stores
+// 1. relation between a Name and several tables
+// 2. relation between a Name and several stores
 // It is used to bind tables with stores
 type Namespace struct {
-	ID       uint64   `json:"id"`
-	Name     string   `json:"name"`
-	TableIDs []int64  `json:"table_ids,omitempty"`
-	StoreIDs []uint64 `json:"store_ids,omitempty"`
+	ID       uint64         `json:"ID"`
+	Name     string         `json:"Name"`
+	TableIDs map[int64]int  `json:"table_ids,omitempty"`
+	StoreIDs map[uint64]int `json:"store_ids,omitempty"`
 }
 
-// GetName returns namespace's name or default 'global' value
+// NewNamespace creates a new namespace
+func NewNamespace(id uint64, name string) *Namespace {
+	return &Namespace{
+		ID:       id,
+		Name:     name,
+		TableIDs: make(map[int64]int),
+		StoreIDs: make(map[uint64]int),
+	}
+}
+
+// GetName returns namespace's Name or default 'global' value
 func (ns *Namespace) GetName() string {
 	if ns != nil {
 		return ns.Name
@@ -43,6 +53,16 @@ func (ns *Namespace) GetID() uint64 {
 		return ns.ID
 	}
 	return 0
+}
+
+// AddTableID adds a tableID to this namespace
+func (ns *Namespace) AddTableID(tableID int64) {
+	ns.TableIDs[tableID] = 1
+}
+
+// AddStoreID adds a storeID to this namespace
+func (ns *Namespace) AddStoreID(storeID uint64) {
+	ns.StoreIDs[storeID] = 1
 }
 
 // tableNamespaceClassifier implements Classifier interface
@@ -68,10 +88,9 @@ func (c tableNamespaceClassifier) GetAllNamespaces() []string {
 
 func (c tableNamespaceClassifier) GetStoreNamespace(storeInfo *core.StoreInfo) string {
 	for name, ns := range c.nsInfo.namespaces {
-		for _, storeID := range ns.StoreIDs {
-			if storeID == storeInfo.Id {
-				return name
-			}
+		_, ok := ns.StoreIDs[storeInfo.Id]
+		if ok {
+			return name
 		}
 	}
 	return namespace.DefaultNamespace
@@ -85,7 +104,7 @@ func (c tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInfo
 	}
 
 	for name, ns := range c.nsInfo.namespaces {
-		for _, tableID := range ns.TableIDs {
+		for tableID := range ns.TableIDs {
 			if tableID == startTable && tableID == endTable {
 				return name
 			}
@@ -128,28 +147,24 @@ func (namespaceInfo *namespacesInfo) getNamespaces() []*Namespace {
 	return nsList
 }
 
-// IsTableIDExist returns true if table id exists in namespacesInfo
+// IsTableIDExist returns true if table ID exists in namespacesInfo
 func (namespaceInfo *namespacesInfo) IsTableIDExist(tableID int64) bool {
 	for _, ns := range namespaceInfo.namespaces {
-		for _, id := range ns.TableIDs {
-			if id == tableID {
-				return true
-			}
+		_, ok := ns.TableIDs[tableID]
+		if ok {
+			return true
 		}
-
 	}
 	return false
 }
 
-// IsStoreIDExist returns true if store id exists in namespacesInfo
+// IsStoreIDExist returns true if store ID exists in namespacesInfo
 func (namespaceInfo *namespacesInfo) IsStoreIDExist(storeID uint64) bool {
 	for _, ns := range namespaceInfo.namespaces {
-		for _, id := range ns.StoreIDs {
-			if id == storeID {
-				return true
-			}
+		_, ok := ns.StoreIDs[storeID]
+		if ok {
+			return true
 		}
-
 	}
 	return false
 }

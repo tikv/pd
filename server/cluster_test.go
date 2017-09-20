@@ -519,41 +519,41 @@ func (s *testClusterSuite) TestNamespaceOperation(c *C) {
 	c.Assert(len(namespaces), Equals, 1)
 	c.Assert(namespaces[0].Name, Equals, "test1")
 
-	// Add the same name
+	// Add the same Name
 	err = raftCluster.CreateNamespace("test1")
 	c.Assert(err, NotNil)
 
 	raftCluster.CreateNamespace("test2")
 
 	// Add tableID
-	err = raftCluster.AppendNamespaceTableID("test1", 1)
+	err = raftCluster.AddNamespaceTableID("test1", 1)
 	namespaces = raftCluster.GetNamespaces()
 	c.Assert(err, IsNil)
 	c.Assert(raftCluster.cachedCluster.namespacesInfo.IsTableIDExist(1), Equals, true)
 
 	// Add storeID
-	err = raftCluster.AppendNamespaceStoreID("test1", 456)
+	err = raftCluster.AddNamespaceStoreID("test1", 456)
 	namespaces = raftCluster.GetNamespaces()
 	c.Assert(err, IsNil)
 	c.Assert(namespacesInfo.IsStoreIDExist(456), Equals, true)
 
 	// Ensure that duplicate tableID cannot exist in one namespace
-	err = raftCluster.AppendNamespaceTableID("test1", 1)
+	err = raftCluster.AddNamespaceTableID("test1", 1)
 	c.Assert(err, NotNil)
 
 	// Ensure that duplicate tableID cannot exist across namespaces
-	err = raftCluster.AppendNamespaceTableID("test2", 1)
+	err = raftCluster.AddNamespaceTableID("test2", 1)
 	c.Assert(err, NotNil)
 
 	// Ensure that duplicate storeID cannot exist in one namespace
-	err = raftCluster.AppendNamespaceStoreID("test1", 456)
+	err = raftCluster.AddNamespaceStoreID("test1", 456)
 	c.Assert(err, NotNil)
 
 	// Ensure that duplicate storeID cannot exist across namespaces
-	err = raftCluster.AppendNamespaceStoreID("test2", 456)
+	err = raftCluster.AddNamespaceStoreID("test2", 456)
 	c.Assert(err, NotNil)
 
 	// Add tableID to a namespace that doesn't exist
-	err = raftCluster.AppendNamespaceTableID("test_not_exist", 2)
+	err = raftCluster.AddNamespaceTableID("test_not_exist", 2)
 	c.Assert(err, NotNil)
 }

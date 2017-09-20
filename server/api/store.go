@@ -228,7 +228,7 @@ func (h *storeHandler) SetNamespace(w http.ResponseWriter, r *http.Request) {
 	ns := input["namespace"]
 
 	// append store id to namespace
-	if err := cluster.AppendNamespaceStoreID(ns, storeID); err != nil {
+	if err := cluster.AddNamespaceStoreID(ns, storeID); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

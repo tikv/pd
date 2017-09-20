@@ -654,12 +654,12 @@ func (c *RaftCluster) CreateNamespace(name string) error {
 	r := regexp.MustCompile(`^\w+$`)
 	matched := r.MatchString(name)
 	if !matched {
-		return errors.New("name should be 0-9, a-z or A-Z")
+		return errors.New("Name should be 0-9, a-z or A-Z")
 	}
 
 	cachedCluster := c.cachedCluster
 	if _, ok := cachedCluster.namespacesInfo.namespaces[name]; ok {
-		return errors.New("Duplicate namespace name")
+		return errors.New("Duplicate namespace Name")
 	}
 
 	id, err := c.s.idAlloc.Alloc()
@@ -667,46 +667,42 @@ func (c *RaftCluster) CreateNamespace(name string) error {
 		return errors.Trace(err)
 	}
 
-	ns := &Namespace{
-		ID:   id,
-		Name: name,
-	}
-
+	ns := NewNamespace(id, name)
 	return cachedCluster.putNamespace(ns)
 }
 
-// AppendNamespaceTableID append table id to namespace
-func (c *RaftCluster) AppendNamespaceTableID(name string, tableID int64) error {
+// AddNamespaceTableID adds table ID to namespace
+func (c *RaftCluster) AddNamespaceTableID(name string, tableID int64) error {
 	c.Lock()
 	defer c.Unlock()
 
 	if c.cachedCluster.namespacesInfo.IsTableIDExist(tableID) {
-		return errors.New("Table id already exists in this cluster")
+		return errors.New("Table ID already exists in this cluster")
 	}
 
 	namespace := c.cachedCluster.getNamespace(name)
 	if namespace == nil {
-		return errors.Errorf("invalid namespace name %s, nod found", name)
+		return errors.Errorf("invalid namespace Name %s, nod found", name)
 	}
 
-	namespace.TableIDs = append(namespace.TableIDs, tableID)
+	namespace.AddTableID(tableID)
 	return c.cachedCluster.putNamespace(namespace)
 }
 
-// AppendNamespaceStoreID append store id to namespace
-func (c *RaftCluster) AppendNamespaceStoreID(name string, storeID uint64) error {
+// AddNamespaceStoreID adds store ID to namespace
+func (c *RaftCluster) AddNamespaceStoreID(name string, storeID uint64) error {
 	c.Lock()
 	defer c.Unlock()
 
 	if c.cachedCluster.namespacesInfo.IsStoreIDExist(storeID) {
-		return errors.New("Store id already exists in this namespace")
+		return errors.New("Store ID already exists in this namespace")
 	}
 
 	namespace := c.cachedCluster.getNamespace(name)
 	if namespace == nil {
-		return errors.Errorf("invalid namespace name %s, not found", name)
+		return errors.Errorf("invalid namespace Name %s, not found", name)
 	}
 
-	namespace.StoreIDs = append(namespace.StoreIDs, storeID)
+	namespace.AddStoreID(storeID)
 	return c.cachedCluster.putNamespace(namespace)
 }

@@ -99,7 +99,7 @@ func (h *namespaceHandler) Append(w http.ResponseWriter, r *http.Request) {
 	ns := input["namespace"]
 
 	// append table id to namespace
-	if err := cluster.AppendNamespaceTableID(ns, tableID); err != nil {
+	if err := cluster.AddNamespaceTableID(ns, tableID); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
