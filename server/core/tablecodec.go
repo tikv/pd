@@ -16,6 +16,7 @@ package core
 import (
 	"bytes"
 	"encoding/binary"
+
 	"github.com/juju/errors"
 )
 
