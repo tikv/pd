@@ -66,7 +66,7 @@ type coordinator struct {
 	cluster          *clusterInfo
 	opt              *scheduleOption
 	limiter          *scheduleLimiter
-	checker          *schedule.ReplicaChecker
+	replicaChecker   *schedule.ReplicaChecker
 	namespaceChecker *schedule.NamespaceChecker
 	operators        map[uint64]*schedule.Operator
 	schedulers       map[string]*scheduleController
@@ -83,7 +83,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 		cluster:          cluster,
 		opt:              opt,
 		limiter:          newScheduleLimiter(),
-		checker:          schedule.NewReplicaChecker(opt, cluster, classifier),
+		replicaChecker:   schedule.NewReplicaChecker(opt, cluster, classifier),
 		namespaceChecker: schedule.NewNamespaceChecker(opt, cluster, classifier),
 		operators:        make(map[uint64]*schedule.Operator),
 		schedulers:       make(map[string]*scheduleController),
@@ -121,7 +121,7 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	if op := c.namespaceChecker.Check(region); op != nil {
 		c.addOperator(op)
 	}
-	if op := c.checker.Check(region); op != nil {
+	if op := c.replicaChecker.Check(region); op != nil {
 		c.addOperator(op)
 	}
 }
