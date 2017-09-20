@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"regexp"
+
 	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/juju/errors"
@@ -648,6 +650,12 @@ func (c *RaftCluster) GetNamespaces() []*Namespace {
 func (c *RaftCluster) CreateNamespace(name string) error {
 	c.Lock()
 	defer c.Unlock()
+
+	r := regexp.MustCompile(`^\w+$`)
+	matched := r.MatchString(name)
+	if !matched {
+		return errors.New("name should be 0-9, a-z or A-Z")
+	}
 
 	cachedCluster := c.cachedCluster
 	if _, ok := cachedCluster.namespacesInfo.namespaces[name]; ok {

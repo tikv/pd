@@ -506,7 +506,11 @@ func (s *testClusterSuite) TestNamespaceOperation(c *C) {
 	s.tryBootstrapCluster(c, s.grpcPDClient, clusterID, storeAddr)
 
 	raftCluster := s.getRaftCluster(c)
-	err := raftCluster.CreateNamespace("test1")
+
+	err := raftCluster.CreateNamespace("(invalid_name")
+	c.Assert(err, NotNil)
+
+	err = raftCluster.CreateNamespace("test1")
 	c.Assert(err, IsNil)
 
 	namespacesInfo := raftCluster.cachedCluster.namespacesInfo
