@@ -45,6 +45,7 @@ func (ns *Namespace) GetID() uint64 {
 	return 0
 }
 
+// tableNamespaceClassifier implements Classifier interface
 type tableNamespaceClassifier struct {
 	nsInfo         *namespacesInfo
 	tableIDDecoder core.TableIDDecoder
@@ -91,4 +92,64 @@ func (c tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInfo
 		}
 	}
 	return namespace.DefaultNamespace
+}
+
+type namespacesInfo struct {
+	namespaces map[string]*Namespace
+}
+
+func newNamespacesInfo() *namespacesInfo {
+	return &namespacesInfo{
+		namespaces: make(map[string]*Namespace),
+	}
+}
+
+func (ns *namespacesInfo) getNamespace(name string) *Namespace {
+	namespace, ok := ns.namespaces[name]
+	if !ok {
+		return nil
+	}
+	return namespace
+}
+
+func (ns *namespacesInfo) setNamespace(item *Namespace) {
+	ns.namespaces[item.Name] = item
+}
+
+func (ns *namespacesInfo) getNamespaceCount() int {
+	return len(ns.namespaces)
+}
+
+func (ns *namespacesInfo) getNamespaces() []*Namespace {
+	nsList := make([]*Namespace, 0, len(ns.namespaces))
+	for _, item := range ns.namespaces {
+		nsList = append(nsList, item)
+	}
+	return nsList
+}
+
+// IsTableIDExist returns true if table id exists in namespacesInfo
+func (nsInfo *namespacesInfo) IsTableIDExist(tableID int64) bool {
+	for _, ns := range nsInfo.namespaces {
+		for _, id := range ns.TableIDs {
+			if id == tableID {
+				return true
+			}
+		}
+
+	}
+	return false
+}
+
+// IsStoreIDExist returns true if store id exists in namespacesInfo
+func (nsInfo *namespacesInfo) IsStoreIDExist(storeID uint64) bool {
+	for _, ns := range nsInfo.namespaces {
+		for _, id := range ns.StoreIDs {
+			if id == storeID {
+				return true
+			}
+		}
+
+	}
+	return false
 }

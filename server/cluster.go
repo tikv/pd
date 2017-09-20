@@ -645,7 +645,15 @@ func (c *RaftCluster) GetNamespaces() []*Namespace {
 }
 
 // CreateNamespace creates a new Namespace
-func (c *RaftCluster) CreateNamespace(namespaceName string) error {
+func (c *RaftCluster) CreateNamespace(name string) error {
+	c.Lock()
+	defer c.Unlock()
+
+	cachedCluster := c.cachedCluster
+	if _, ok := cachedCluster.namespacesInfo.namespaces[name]; ok {
+		return errors.New("Duplicate namespace name")
+	}
+
 	id, err := c.s.idAlloc.Alloc()
 	if err != nil {
 		return errors.Trace(err)
@@ -653,46 +661,44 @@ func (c *RaftCluster) CreateNamespace(namespaceName string) error {
 
 	ns := &Namespace{
 		ID:   id,
-		Name: namespaceName,
+		Name: name,
 	}
 
-	err = c.putNamespace(ns)
-	return errors.Trace(err)
+	return cachedCluster.putNamespace(ns)
 }
 
 // AppendNamespaceTableID append table id to namespace
 func (c *RaftCluster) AppendNamespaceTableID(name string, tableID int64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	if c.cachedCluster.namespacesInfo.IsTableIDExist(tableID) {
+		return errors.New("Table id already exists in this cluster")
+	}
+
 	namespace := c.cachedCluster.getNamespace(name)
 	if namespace == nil {
 		return errors.Errorf("invalid namespace name %s, nod found", name)
 	}
 
-	// TODO check whether the table id is exists
 	namespace.TableIDs = append(namespace.TableIDs, tableID)
-	err := c.putNamespace(namespace)
-	return errors.Trace(err)
+	return c.cachedCluster.putNamespace(namespace)
 }
 
 // AppendNamespaceStoreID append store id to namespace
 func (c *RaftCluster) AppendNamespaceStoreID(name string, storeID uint64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	if c.cachedCluster.namespacesInfo.IsStoreIDExist(storeID) {
+		return errors.New("Store id already exists in this namespace")
+	}
+
 	namespace := c.cachedCluster.getNamespace(name)
 	if namespace == nil {
 		return errors.Errorf("invalid namespace name %s, not found", name)
 	}
 
-	// TODO check whether the store id is exists
 	namespace.StoreIDs = append(namespace.StoreIDs, storeID)
-	err := c.putNamespace(namespace)
-	return errors.Trace(err)
-}
-
-func (c *RaftCluster) putNamespace(namespace *Namespace) error {
-	c.Lock()
-	defer c.Unlock()
-
-	cachedCluster := c.cachedCluster
-
-	// TODO check whether the namespace is exists
-
-	return cachedCluster.putNamespace(namespace)
+	return c.cachedCluster.putNamespace(namespace)
 }
