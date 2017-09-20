@@ -63,6 +63,49 @@ func (s *testNamespaceSuite) TestReplica(c *C) {
 	c.Assert(op, IsNil)
 }
 
+func (s *testNamespaceSuite) TestNamespaceChecker(c *C) {
+	// store regionCount namespace
+	//     1           0       ns1
+	//     2          10       ns1
+	//     3           0       ns2
+	s.tc.addRegionStore(1, 0)
+	s.tc.addRegionStore(2, 10)
+	s.tc.addRegionStore(3, 0)
+	s.classifier.setStore(1, "ns1")
+	s.classifier.setStore(2, "ns1")
+	s.classifier.setStore(3, "ns2")
+
+	checker := schedule.NewNamespaceChecker(s.opt, s.tc, s.classifier)
+
+	// Move the region if it was not in the right store.
+	s.classifier.setRegion(1, "ns2")
+	s.tc.addLeaderRegion(1, 1)
+	op := checker.Check(s.tc.GetRegion(1))
+	checkTransferPeer(c, op, 1, 3)
+
+	// Only move one region if the one was in the right store while the other was not.
+	s.classifier.setRegion(2, "ns1")
+	s.tc.addLeaderRegion(2, 1)
+	s.classifier.setRegion(3, "ns2")
+	s.tc.addLeaderRegion(3, 2)
+	op = checker.Check(s.tc.GetRegion(2))
+	c.Assert(op, IsNil)
+	op = checker.Check(s.tc.GetRegion(3))
+	checkTransferPeer(c, op, 2, 3)
+
+	// Do NOT move the region if it was in the right store.
+	s.classifier.setRegion(4, "ns2")
+	s.tc.addLeaderRegion(4, 3)
+	op = checker.Check(s.tc.GetRegion(4))
+	c.Assert(op, IsNil)
+
+	// Move the peer with questions to the right store if the region has multiple peers.
+	s.classifier.setRegion(5, "ns1")
+	s.tc.addLeaderRegion(5, 1, 1, 3)
+	op = checker.Check(s.tc.GetRegion(5))
+	checkTransferPeer(c, op, 3, 2)
+}
+
 func (s *testNamespaceSuite) TestSchedulerBalanceRegion(c *C) {
 	// store regionCount namespace
 	//     1           0       ns1
