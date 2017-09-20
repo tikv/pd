@@ -480,7 +480,7 @@ func (c *clusterInfo) getNamespaces() []*Namespace {
 func (c *clusterInfo) getNamespace(name string) *Namespace {
 	c.RLock()
 	defer c.RUnlock()
-	return c.namespacesInfo.getNamespace(name)
+	return c.namespacesInfo.getNamespaceByName(name)
 }
 
 func (c *clusterInfo) putStoreLocked(store *core.StoreInfo) error {

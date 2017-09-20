@@ -104,33 +104,33 @@ func newNamespacesInfo() *namespacesInfo {
 	}
 }
 
-func (ns *namespacesInfo) getNamespace(name string) *Namespace {
-	namespace, ok := ns.namespaces[name]
+func (namespaceInfo *namespacesInfo) getNamespaceByName(name string) *Namespace {
+	namespace, ok := namespaceInfo.namespaces[name]
 	if !ok {
 		return nil
 	}
 	return namespace
 }
 
-func (ns *namespacesInfo) setNamespace(item *Namespace) {
-	ns.namespaces[item.Name] = item
+func (namespaceInfo *namespacesInfo) setNamespace(item *Namespace) {
+	namespaceInfo.namespaces[item.Name] = item
 }
 
-func (ns *namespacesInfo) getNamespaceCount() int {
-	return len(ns.namespaces)
+func (namespaceInfo *namespacesInfo) getNamespaceCount() int {
+	return len(namespaceInfo.namespaces)
 }
 
-func (ns *namespacesInfo) getNamespaces() []*Namespace {
-	nsList := make([]*Namespace, 0, len(ns.namespaces))
-	for _, item := range ns.namespaces {
+func (namespaceInfo *namespacesInfo) getNamespaces() []*Namespace {
+	nsList := make([]*Namespace, 0, len(namespaceInfo.namespaces))
+	for _, item := range namespaceInfo.namespaces {
 		nsList = append(nsList, item)
 	}
 	return nsList
 }
 
 // IsTableIDExist returns true if table id exists in namespacesInfo
-func (nsInfo *namespacesInfo) IsTableIDExist(tableID int64) bool {
-	for _, ns := range nsInfo.namespaces {
+func (namespaceInfo *namespacesInfo) IsTableIDExist(tableID int64) bool {
+	for _, ns := range namespaceInfo.namespaces {
 		for _, id := range ns.TableIDs {
 			if id == tableID {
 				return true
@@ -142,8 +142,8 @@ func (nsInfo *namespacesInfo) IsTableIDExist(tableID int64) bool {
 }
 
 // IsStoreIDExist returns true if store id exists in namespacesInfo
-func (nsInfo *namespacesInfo) IsStoreIDExist(storeID uint64) bool {
-	for _, ns := range nsInfo.namespaces {
+func (namespaceInfo *namespacesInfo) IsStoreIDExist(storeID uint64) bool {
+	for _, ns := range namespaceInfo.namespaces {
 		for _, id := range ns.StoreIDs {
 			if id == storeID {
 				return true
