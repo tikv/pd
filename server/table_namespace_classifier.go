@@ -97,17 +97,13 @@ func (c tableNamespaceClassifier) GetStoreNamespace(storeInfo *core.StoreInfo) s
 }
 
 func (c tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInfo) string {
+	// only check startKey to avoid empty region
 	startTable := c.tableIDDecoder.DecodeTableID(regionInfo.StartKey)
-	endTable := c.tableIDDecoder.DecodeTableID(regionInfo.EndKey)
-	if startTable != endTable {
-		return namespace.DefaultNamespace
-	}
 
 	for name, ns := range c.nsInfo.namespaces {
-		for tableID := range ns.TableIDs {
-			if tableID == startTable && tableID == endTable {
-				return name
-			}
+		_, ok := ns.TableIDs[startTable]
+		if ok {
+			return name
 		}
 	}
 	return namespace.DefaultNamespace
