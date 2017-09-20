@@ -49,22 +49,22 @@ func (s *testTableNamespaceSuite) SetUpSuite(c *C) {
 	testNamespace1 := Namespace{
 		ID:   1,
 		Name: "test1",
-		TableIDs: map[int64]int{
-			targetTableID: 1,
+		TableIDs: map[int64]bool{
+			targetTableID: true,
 		},
-		StoreIDs: map[uint64]int{
-			targetStoreID: 1,
+		StoreIDs: map[uint64]bool{
+			targetStoreID: true,
 		},
 	}
 
 	testNamespace2 := Namespace{
 		ID:   2,
 		Name: "test2",
-		TableIDs: map[int64]int{
-			targetTableID + 1: 1,
+		TableIDs: map[int64]bool{
+			targetTableID + 1: true,
 		},
-		StoreIDs: map[uint64]int{
-			targetStoreID + 1: 1,
+		StoreIDs: map[uint64]bool{
+			targetStoreID + 1: true,
 		},
 	}
 

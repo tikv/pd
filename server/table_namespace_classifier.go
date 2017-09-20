@@ -23,10 +23,10 @@ import (
 // 2. relation between a Name and several stores
 // It is used to bind tables with stores
 type Namespace struct {
-	ID       uint64         `json:"ID"`
-	Name     string         `json:"Name"`
-	TableIDs map[int64]int  `json:"table_ids,omitempty"`
-	StoreIDs map[uint64]int `json:"store_ids,omitempty"`
+	ID       uint64          `json:"ID"`
+	Name     string          `json:"Name"`
+	TableIDs map[int64]bool  `json:"table_ids,omitempty"`
+	StoreIDs map[uint64]bool `json:"store_ids,omitempty"`
 }
 
 // NewNamespace creates a new namespace
@@ -34,8 +34,8 @@ func NewNamespace(id uint64, name string) *Namespace {
 	return &Namespace{
 		ID:       id,
 		Name:     name,
-		TableIDs: make(map[int64]int),
-		StoreIDs: make(map[uint64]int),
+		TableIDs: make(map[int64]bool),
+		StoreIDs: make(map[uint64]bool),
 	}
 }
 
@@ -57,12 +57,12 @@ func (ns *Namespace) GetID() uint64 {
 
 // AddTableID adds a tableID to this namespace
 func (ns *Namespace) AddTableID(tableID int64) {
-	ns.TableIDs[tableID] = 1
+	ns.TableIDs[tableID] = true
 }
 
 // AddStoreID adds a storeID to this namespace
 func (ns *Namespace) AddStoreID(storeID uint64) {
-	ns.StoreIDs[storeID] = 1
+	ns.StoreIDs[storeID] = true
 }
 
 // tableNamespaceClassifier implements Classifier interface
