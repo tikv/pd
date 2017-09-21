@@ -63,6 +63,10 @@ func (s *evictLeaderScheduler) GetName() string {
 	return s.name
 }
 
+func (s *evictLeaderScheduler) GetType() string {
+	return "evictLeader"
+}
+
 func (s *evictLeaderScheduler) GetInterval() time.Duration {
 	return schedule.MinScheduleInterval
 }

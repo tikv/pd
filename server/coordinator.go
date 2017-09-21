@@ -68,9 +68,10 @@ type coordinator struct {
 	schedulers map[string]*scheduleController
 	histories  cache.Cache
 	hbStreams  *heartbeatStreams
+	kv         *kv
 }
 
-func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams) *coordinator {
+func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams, kv *kv) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
 		ctx:        ctx,
@@ -83,6 +84,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 		schedulers: make(map[string]*scheduleController),
 		histories:  cache.NewDefaultCache(historiesCacheSize),
 		hbStreams:  hbStreams,
+		kv:         kv,
 	}
 }
 
@@ -133,16 +135,14 @@ func (c *coordinator) run() {
 	}
 	log.Info("coordinator: Run scheduler")
 
-	for name := range c.opt.GetSchedulers() {
-		// note: CreateScheduler just needs specific scheduler config
-		// so schedulers(a map of scheduler configs) wrapped by c.opt has redundant configs
-		s, err := schedule.CreateScheduler(name, c.opt)
+	for _, schedulerCfg := range c.opt.GetSchedulers() {
+		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opt, schedulerCfg.Args...)
 		if err != nil {
-			log.Errorf("can not create scheduler %s: %v", name, err)
+			log.Errorf("can not create scheduler %s: %v", schedulerCfg.Type, err)
 		} else {
-			log.Infof("create scheduler %s", name)
-			if err := c.addScheduler(s, s.GetInterval()); err != nil {
-				log.Errorf("can not add scheduler %s: %v", name, err)
+			log.Infof("create scheduler %s", s.GetName())
+			if err := c.addScheduler(s, s.GetInterval(), schedulerCfg.Args...); err != nil {
+				log.Errorf("can not add scheduler %s: %v", s.GetName(), err)
 			}
 		}
 	}
@@ -257,7 +257,7 @@ func (c *coordinator) shouldRun() bool {
 	return c.cluster.isPrepared()
 }
 
-func (c *coordinator) addScheduler(scheduler schedule.Scheduler, interval time.Duration) error {
+func (c *coordinator) addScheduler(scheduler schedule.Scheduler, interval time.Duration, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -273,6 +273,9 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, interval time.D
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.GetName()] = s
+	if c.opt.AddSchedulerCfg(s.GetType(), args) {
+		c.opt.persist(c.kv)
+	}
 	return nil
 }
 
@@ -287,6 +290,10 @@ func (c *coordinator) removeScheduler(name string) error {
 
 	s.Stop()
 	delete(c.schedulers, name)
+
+	if c.opt.RemoveSchedulerCfg(name) {
+		c.opt.persist(c.kv)
+	}
 	return nil
 }
 

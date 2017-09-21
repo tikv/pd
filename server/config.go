@@ -22,11 +22,13 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/embed"
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/server/schedule"
 )
 
 // Config is the pd server configuration.
@@ -287,8 +289,7 @@ func (c *Config) String() string {
 
 // configFromFile loads config from file.
 func (c *Config) configFromFile(path string) error {
-	meta, err := toml.DecodeFile(path, c)
-	c.Schedule.Meta = meta
+	_, err := toml.DecodeFile(path, c)
 	return errors.Trace(err)
 }
 
@@ -308,14 +309,29 @@ type ScheduleConfig struct {
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit,omitempty" json:"replica-schedule-limit"`
 	// Schedulers support for loding customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers"`
-
-	// Meta is meta information return from toml.Decode
-	// passing it to scheduler handler for supporting customized arguments
-	Meta toml.MetaData
 }
 
-// SchedulerConfigs is a map of customized scheduler configuration.
-type SchedulerConfigs map[string]toml.Primitive
+func (c *ScheduleConfig) clone() *ScheduleConfig {
+	schedulers := make(SchedulerConfigs, len(c.Schedulers))
+	copy(schedulers, c.Schedulers)
+	return &ScheduleConfig{
+		MaxSnapshotCount:     c.MaxSnapshotCount,
+		MaxStoreDownTime:     c.MaxStoreDownTime,
+		LeaderScheduleLimit:  c.LeaderScheduleLimit,
+		RegionScheduleLimit:  c.RegionScheduleLimit,
+		ReplicaScheduleLimit: c.ReplicaScheduleLimit,
+		Schedulers:           schedulers,
+	}
+}
+
+// SchedulerConfigs is a slice of customized scheduler configuration.
+type SchedulerConfigs []SchedulerConfig
+
+// SchedulerConfig is customized scheduler configuration
+type SchedulerConfig struct {
+	Type string   `toml:"type" json:"type"`
+	Args []string `toml:"args,omitempty" json:"args"`
+}
 
 const (
 	defaultMaxReplicas          = 3
@@ -327,10 +343,10 @@ const (
 )
 
 var defaultSchedulers = SchedulerConfigs{
-	"balanceRegion":  toml.Primitive{},
-	"balanceLeader":  toml.Primitive{},
-	"hotWriteRegion": toml.Primitive{},
-	"hotReadRegion":  toml.Primitive{},
+	SchedulerConfig{Type: "balanceRegion"},
+	SchedulerConfig{Type: "balanceLeader"},
+	SchedulerConfig{Type: "hotWriteRegion"},
+	SchedulerConfig{Type: "hotReadRegion"},
 }
 
 func (c *ScheduleConfig) adjust() {
@@ -428,8 +444,52 @@ func (o *scheduleOption) GetSchedulers() SchedulerConfigs {
 	return o.load().Schedulers
 }
 
-func (o *scheduleOption) GetMeta() toml.MetaData {
-	return o.load().Meta
+func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) bool {
+	stringSliceEqual := func(a, b []string) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		if (a == nil) != (b == nil) {
+			return false
+		}
+		for i, v := range a {
+			if v != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	c := o.load()
+	v := c.clone()
+	log.Infof("&&&&&&&&%v %v", len(c.Schedulers), len(v.Schedulers))
+	for _, schedulerCfg := range v.Schedulers {
+		// comparing args is to cover the case that there are schedulers in same type but not with same name
+		// such as two schedulers of type evictLeader,
+		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
+		if schedulerCfg.Type == tp && stringSliceEqual(schedulerCfg.Args, args) {
+			return false
+		}
+	}
+	v.Schedulers = append(v.Schedulers, SchedulerConfig{Type: tp, Args: args})
+	o.store(v)
+	return true
+}
+
+func (o *scheduleOption) RemoveSchedulerCfg(name string) bool {
+	c := o.load()
+	v := c.clone()
+	log.Infof("*************%v %v", len(c.Schedulers), len(v.Schedulers))
+	for i, schedulerCfg := range v.Schedulers {
+		// To create a temporary scheduler is just used to get scheduler's name
+		tmp, _ := schedule.CreateScheduler(schedulerCfg.Type, o, schedulerCfg.Args...)
+		if tmp.GetName() == name {
+			v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
+			o.store(v)
+			return true
+		}
+	}
+	return false
 }
 
 func (o *scheduleOption) persist(kv *kv) error {

@@ -49,6 +49,10 @@ func (s *shuffleRegionScheduler) GetName() string {
 	return "shuffle-region-scheduler"
 }
 
+func (s *shuffleRegionScheduler) GetType() string {
+	return "shuffleRegion"
+}
+
 func (s *shuffleRegionScheduler) GetInterval() time.Duration {
 	return schedule.MinScheduleInterval
 }

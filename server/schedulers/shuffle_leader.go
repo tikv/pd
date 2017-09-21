@@ -51,6 +51,10 @@ func (s *shuffleLeaderScheduler) GetName() string {
 	return "shuffle-leader-scheduler"
 }
 
+func (s *shuffleLeaderScheduler) GetType() string {
+	return "shuffleLeader"
+}
+
 func (s *shuffleLeaderScheduler) GetInterval() time.Duration {
 	return schedule.MinScheduleInterval
 }
