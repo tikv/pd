@@ -443,7 +443,7 @@ func (h *balanceHotRegionsScheduler) GetHotWriteStatus() *core.StoreHotRegionInf
 	defer h.RUnlock()
 	asLeader := make(core.StoreHotRegionsStat, len(h.stats.writeStatAsLeader))
 	asPeer := make(core.StoreHotRegionsStat, len(h.stats.writeStatAsPeer))
-	for id, stat := range h.stats.readStatAsLeader {
+	for id, stat := range h.stats.writeStatAsLeader {
 		clone := *stat
 		asLeader[id] = &clone
 	}

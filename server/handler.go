@@ -76,6 +76,11 @@ func (h *Handler) GetHotWriteStores() map[uint64]uint64 {
 	return h.s.cluster.cachedCluster.getStoresWriteStat()
 }
 
+// GetHotReadStores gets all hot write stores status
+func (h *Handler) GetHotReadStores() map[uint64]uint64 {
+	return h.s.cluster.cachedCluster.getStoresReadStat()
+}
+
 // AddScheduler adds a scheduler.
 func (h *Handler) AddScheduler(s schedule.Scheduler) error {
 	c, err := h.getCoordinator()
