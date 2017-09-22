@@ -97,16 +97,43 @@ func (c tableNamespaceClassifier) GetStoreNamespace(storeInfo *core.StoreInfo) s
 }
 
 func (c tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInfo) string {
-	// only check startKey to avoid empty region
-	startTable := c.tableIDDecoder.DecodeTableID(regionInfo.StartKey)
+	tableID := c.getTableID(regionInfo)
+	if tableID == 0 {
+		return namespace.DefaultNamespace
+	}
 
 	for name, ns := range c.nsInfo.namespaces {
-		_, ok := ns.TableIDs[startTable]
+		_, ok := ns.TableIDs[tableID]
 		if ok {
 			return name
 		}
 	}
 	return namespace.DefaultNamespace
+}
+
+// getTableID returns the meaningful tableID (not 0) only if
+// the region contains only the contents of that table
+// else it returns 0
+func (c tableNamespaceClassifier) getTableID(regionInfo *core.RegionInfo) int64 {
+	startTableID := c.tableIDDecoder.DecodeTableID(regionInfo.StartKey)
+	endTableID := c.tableIDDecoder.DecodeTableID(regionInfo.EndKey)
+	if startTableID == 0 || endTableID == 0 {
+		// The startTableID or endTableID cannot be decoded,
+		// indicating the region contains meta-info or infinite edge
+		return 0
+	}
+
+	if startTableID == endTableID {
+		return startTableID
+	}
+
+	// The startTableID is not equal to the endTableID for regionInfo,
+	// so check whether endKey is the startKey of the next table
+	if (startTableID == endTableID-1) && core.IsPureTableID(regionInfo.EndKey) {
+		return startTableID
+	}
+
+	return 0
 }
 
 type namespacesInfo struct {
