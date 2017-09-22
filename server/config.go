@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/embed"
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/logutil"
@@ -462,7 +461,6 @@ func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) bool {
 
 	c := o.load()
 	v := c.clone()
-	log.Infof("&&&&&&&&%v %v", len(c.Schedulers), len(v.Schedulers))
 	for _, schedulerCfg := range v.Schedulers {
 		// comparing args is to cover the case that there are schedulers in same type but not with same name
 		// such as two schedulers of type evictLeader,
@@ -479,7 +477,6 @@ func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) bool {
 func (o *scheduleOption) RemoveSchedulerCfg(name string) bool {
 	c := o.load()
 	v := c.clone()
-	log.Infof("*************%v %v", len(c.Schedulers), len(v.Schedulers))
 	for i, schedulerCfg := range v.Schedulers {
 		// To create a temporary scheduler is just used to get scheduler's name
 		tmp, _ := schedule.CreateScheduler(schedulerCfg.Type, o, schedulerCfg.Args...)
