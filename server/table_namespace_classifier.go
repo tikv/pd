@@ -129,7 +129,7 @@ func (c tableNamespaceClassifier) getTableID(regionInfo *core.RegionInfo) int64 
 
 	// The startTableID is not equal to the endTableID for regionInfo,
 	// so check whether endKey is the startKey of the next table
-	if (startTableID == endTableID - 1) && core.IsPureTableID(regionInfo.EndKey) {
+	if (startTableID == endTableID-1) && core.IsPureTableID(regionInfo.EndKey) {
 		return startTableID
 	}
 
