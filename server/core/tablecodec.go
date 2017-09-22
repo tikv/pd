@@ -72,5 +72,5 @@ func decodeCmpUintToInt(u uint64) int64 {
 
 // IsPureTableID return true iff b is consist of tablePrefix and 8-byte tableID
 func IsPureTableID(b []byte) bool {
-	return len(b) == len(tablePrefix) + 8
+	return len(b) == len(tablePrefix)+8
 }
