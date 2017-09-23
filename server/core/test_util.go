@@ -17,7 +17,7 @@ import (
 	"math"
 
 	"github.com/gogo/protobuf/proto"
-  "github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
 // SplitRegions split a set of metapb.Region by the middle of regionKey

@@ -444,7 +444,7 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 		}
 	}
 
-    for _, store := range cache.stores.GetStores() {
+	for _, store := range cache.stores.GetStores() {
 		c.Assert(store.LeaderCount, Equals, cache.regions.GetStoreLeaderCount(store.GetId()))
 		c.Assert(store.RegionCount, Equals, cache.regions.GetStoreRegionCount(store.GetId()))
 	}
@@ -568,4 +568,3 @@ func newMockIDAllocator() *mockIDAllocator {
 func (alloc *mockIDAllocator) Alloc() (uint64, error) {
 	return atomic.AddUint64(&alloc.base, 1), nil
 }
-

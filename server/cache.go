@@ -35,7 +35,6 @@ var (
 	}
 )
 
-
 type clusterInfo struct {
 	sync.RWMutex
 
@@ -200,7 +199,7 @@ func (c *clusterInfo) getStoresWriteStat() map[uint64]uint64 {
 func (c *clusterInfo) getStoresReadStat() map[uint64]uint64 {
 	c.RLock()
 	defer c.RUnlock()
-    return c.stores.GetStoresReadStat()
+	return c.stores.GetStoresReadStat()
 }
 
 // GetRegions searches for a region by ID.

@@ -14,13 +14,12 @@
 package core
 
 import (
+	"bytes"
+	"fmt"
 	"math/rand"
+	"reflect"
+	"strings"
 	"time"
-  "fmt"
-  "reflect"
-  "strings"
-  "bytes"
-
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -262,7 +261,7 @@ func NewRegionsInfo() *RegionsInfo {
 	}
 }
 
-// GetRegion return the RegionInfo with regionID 
+// GetRegion return the RegionInfo with regionID
 func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 	region := r.regions.Get(regionID)
 	if region == nil {
@@ -281,12 +280,12 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) {
 
 // Length return the RegionsInfo length
 func (r *RegionsInfo) Length() int {
-    return r.regions.Len()
+	return r.regions.Len()
 }
 
-// TreeLength return the RegionsInfo tree length(now only used in test) 
+// TreeLength return the RegionsInfo tree length(now only used in test)
 func (r *RegionsInfo) TreeLength() int {
-  return r.tree.length()
+	return r.tree.length()
 }
 
 // AddRegion add RegionInfo to regionTree and regionMap, also update leadres and followers by region peers
@@ -400,14 +399,13 @@ func (r *RegionsInfo) RandFollowerRegion(storeID uint64) *RegionInfo {
 
 // GetLeader return leader RegionInfo by storeID and regionID(now only used in test)
 func (r *RegionsInfo) GetLeader(storeID uint64, regionID uint64) *RegionInfo {
-  return r.leaders[storeID].Get(regionID)
+	return r.leaders[storeID].Get(regionID)
 }
 
 // GetFollower return follower RegionInfo by storeID and regionID(now only used in test)
 func (r *RegionsInfo) GetFollower(storeID uint64, regionID uint64) *RegionInfo {
-  return r.followers[storeID].Get(regionID)
+	return r.followers[storeID].Get(regionID)
 }
-
 
 const randomRegionMaxRetry = 10
 
@@ -470,8 +468,3 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 
 	return strings.Join(ret, ",")
 }
-
-
-
-
-

@@ -17,8 +17,8 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
-	"github.com/juju/errors"
 	"github.com/gogo/protobuf/proto"
+	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -227,11 +227,11 @@ type StoreHotRegionInfos struct {
 type StoreHotRegionsStat map[uint64]*HotRegionsStat
 
 var (
-  // ErrStoreNotFound is for log of store no found
+	// ErrStoreNotFound is for log of store no found
 	ErrStoreNotFound = func(storeID uint64) error {
 		return errors.Errorf("store %v not found", storeID)
 	}
-  // ErrStoreIsBlocked is for log of store is blocked 
+	// ErrStoreIsBlocked is for log of store is blocked
 	ErrStoreIsBlocked = func(storeID uint64) error {
 		return errors.Errorf("store %v is blocked", storeID)
 	}
@@ -249,7 +249,7 @@ func NewStoresInfo() *StoresInfo {
 	}
 }
 
-// GetStore return a StoreInfo with storeID 
+// GetStore return a StoreInfo with storeID
 func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 	store, ok := s.stores[storeID]
 	if !ok {
@@ -258,7 +258,7 @@ func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 	return store.Clone()
 }
 
-// SetStore set a StoreInfo with storeID 
+// SetStore set a StoreInfo with storeID
 func (s *StoresInfo) SetStore(store *StoreInfo) {
 	s.stores[store.GetId()] = store
 }
@@ -285,7 +285,7 @@ func (s *StoresInfo) UnblockStore(storeID uint64) {
 	store.Unblock()
 }
 
-// GetStores get a complete set of StoreInfo 
+// GetStores get a complete set of StoreInfo
 func (s *StoresInfo) GetStores() []*StoreInfo {
 	stores := make([]*StoreInfo, 0, len(s.stores))
 	for _, store := range s.stores {
@@ -345,21 +345,19 @@ func (s *StoresInfo) TotalReadBytes() uint64 {
 }
 
 // GetStoresWriteStat return the write stat of all StoreInfo
-func (s* StoresInfo) GetStoresWriteStat() map[uint64]uint64 {
+func (s *StoresInfo) GetStoresWriteStat() map[uint64]uint64 {
 	res := make(map[uint64]uint64)
 	for _, s := range s.stores {
 		res[s.GetId()] = s.Stats.GetBytesWritten()
 	}
-    return res
+	return res
 }
 
 // GetStoresReadStat return the read stat of all StoreInfo
-func (s* StoresInfo) GetStoresReadStat() map[uint64]uint64 {
+func (s *StoresInfo) GetStoresReadStat() map[uint64]uint64 {
 	res := make(map[uint64]uint64)
 	for _, s := range s.stores {
 		res[s.GetId()] = s.Stats.GetBytesRead()
 	}
-    return res
+	return res
 }
-
-
