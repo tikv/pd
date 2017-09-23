@@ -378,7 +378,7 @@ func (r *RegionsInfo) GetStoreLeaderCount(storeID uint64) int {
 	return r.leaders[storeID].Len()
 }
 
-// GetStoreLeaderCount get the total count of a store's follower RegionInfo
+// GetStoreFollowerCount get the total count of a store's follower RegionInfo
 func (r *RegionsInfo) GetStoreFollowerCount(storeID uint64) int {
 	return r.followers[storeID].Len()
 }
@@ -393,7 +393,7 @@ func (r *RegionsInfo) RandLeaderRegion(storeID uint64) *RegionInfo {
 	return randRegion(r.leaders[storeID])
 }
 
-// RandLeaderRegion get a store's follower region by random
+// RandFollowerRegion get a store's follower region by random
 func (r *RegionsInfo) RandFollowerRegion(storeID uint64) *RegionInfo {
 	return randRegion(r.followers[storeID])
 }
@@ -454,7 +454,7 @@ func DiffRegionPeersInfo(origin *RegionInfo, other *RegionInfo) string {
 	return strings.Join(ret, ",")
 }
 
-// DiffRegionPeersInfo return the difference of key info between two RegionInfo
+// DiffRegionKeyInfo return the difference of key info between two RegionInfo
 func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 	var ret []string
 	if !bytes.Equal(origin.Region.StartKey, other.Region.StartKey) {
