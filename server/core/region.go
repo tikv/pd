@@ -252,6 +252,7 @@ type RegionsInfo struct {
 	followers map[uint64]*regionMap // storeID -> regionID -> regionInfo
 }
 
+// NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
 func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
 		tree:      newRegionTree(),
@@ -261,6 +262,7 @@ func NewRegionsInfo() *RegionsInfo {
 	}
 }
 
+// GetRegion return the RegionInfo with regionID 
 func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 	region := r.regions.Get(regionID)
 	if region == nil {
@@ -269,6 +271,7 @@ func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 	return region.Clone()
 }
 
+// SetRegion set the RegionInfo with regionID
 func (r *RegionsInfo) SetRegion(region *RegionInfo) {
 	if origin := r.regions.Get(region.GetId()); origin != nil {
 		r.RemoveRegion(origin)
@@ -276,13 +279,17 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) {
 	r.AddRegion(region)
 }
 
+// Length return the RegionsInfo length
 func (r *RegionsInfo) Length() int {
     return r.regions.Len()
 }
 
+// TreeLength return the RegionsInfo tree length(now only used in test) 
 func (r *RegionsInfo) TreeLength() int {
   return r.tree.length()
 }
+
+// AddRegion add RegionInfo to regionTree and regionMap, also update leadres and followers by region peers
 func (r *RegionsInfo) AddRegion(region *RegionInfo) {
 	// Add to tree and regions.
 	r.tree.update(region.Region)
@@ -315,6 +322,7 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) {
 	}
 }
 
+// RemoveRegion remove RegionInfo from regionTree and regionMap
 func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	// Remove from tree and regions.
 	r.tree.remove(region.Region)
@@ -328,6 +336,7 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	}
 }
 
+// SearchRegion search RegionInfo from regionTree
 func (r *RegionsInfo) SearchRegion(regionKey []byte) *RegionInfo {
 	region := r.tree.search(regionKey)
 	if region == nil {
@@ -336,6 +345,7 @@ func (r *RegionsInfo) SearchRegion(regionKey []byte) *RegionInfo {
 	return r.GetRegion(region.GetId())
 }
 
+// GetRegions get a set of RegionInfo from regionMap
 func (r *RegionsInfo) GetRegions() []*RegionInfo {
 	regions := make([]*RegionInfo, 0, r.regions.Len())
 	for _, region := range r.regions.m {
@@ -344,6 +354,7 @@ func (r *RegionsInfo) GetRegions() []*RegionInfo {
 	return regions
 }
 
+// GetMetaRegions get a set of metapb.Region from regionMap
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	regions := make([]*metapb.Region, 0, r.regions.Len())
 	for _, region := range r.regions.m {
@@ -352,40 +363,47 @@ func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	return regions
 }
 
+// GetRegionCount get the total count of RegionInfo of regionMap
 func (r *RegionsInfo) GetRegionCount() int {
 	return r.regions.Len()
 }
 
+// GetStoreRegionCount get  the total count of  a store's leader and follower RegionInfo by storeID
 func (r *RegionsInfo) GetStoreRegionCount(storeID uint64) int {
 	return r.GetStoreLeaderCount(storeID) + r.GetStoreFollowerCount(storeID)
 }
 
+// GetStoreLeaderCount get the total count of a store's leader RegionInfo
 func (r *RegionsInfo) GetStoreLeaderCount(storeID uint64) int {
 	return r.leaders[storeID].Len()
 }
 
+// GetStoreLeaderCount get the total count of a store's follower RegionInfo
 func (r *RegionsInfo) GetStoreFollowerCount(storeID uint64) int {
 	return r.followers[storeID].Len()
 }
 
+// RandRegion get a region by random
 func (r *RegionsInfo) RandRegion() *RegionInfo {
 	return randRegion(r.regions)
 }
 
+// RandLeaderRegion get a store's leader region by random
 func (r *RegionsInfo) RandLeaderRegion(storeID uint64) *RegionInfo {
 	return randRegion(r.leaders[storeID])
 }
 
+// RandLeaderRegion get a store's follower region by random
 func (r *RegionsInfo) RandFollowerRegion(storeID uint64) *RegionInfo {
 	return randRegion(r.followers[storeID])
 }
 
-// for test
-
+// GetLeader return leader RegionInfo by storeID and regionID(now only used in test)
 func (r *RegionsInfo) GetLeader(storeID uint64, regionID uint64) *RegionInfo {
   return r.leaders[storeID].Get(regionID)
 }
 
+// GetFollower return follower RegionInfo by storeID and regionID(now only used in test)
 func (r *RegionsInfo) GetFollower(storeID uint64, regionID uint64) *RegionInfo {
   return r.followers[storeID].Get(regionID)
 }
@@ -406,6 +424,7 @@ func randRegion(regions *regionMap) *RegionInfo {
 	return nil
 }
 
+// DiffRegionPeersInfo return the difference of peers info  between two RegionInfo
 func DiffRegionPeersInfo(origin *RegionInfo, other *RegionInfo) string {
 	var ret []string
 	for _, a := range origin.Peers {
@@ -435,6 +454,7 @@ func DiffRegionPeersInfo(origin *RegionInfo, other *RegionInfo) string {
 	return strings.Join(ret, ",")
 }
 
+// DiffRegionPeersInfo return the difference of key info between two RegionInfo
 func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 	var ret []string
 	if !bytes.Equal(origin.Region.StartKey, other.Region.StartKey) {

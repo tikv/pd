@@ -227,25 +227,29 @@ type StoreHotRegionInfos struct {
 type StoreHotRegionsStat map[uint64]*HotRegionsStat
 
 var (
+  // ErrStoreNotFound is for log of store no found
 	ErrStoreNotFound = func(storeID uint64) error {
 		return errors.Errorf("store %v not found", storeID)
 	}
+  // ErrStoreIsBlocked is for log of store is blocked 
 	ErrStoreIsBlocked = func(storeID uint64) error {
 		return errors.Errorf("store %v is blocked", storeID)
 	}
 )
 
-// stores info
+// StoresInfo is a map of storeID to StoreInfo
 type StoresInfo struct {
 	stores map[uint64]*StoreInfo
 }
 
+// NewStoresInfo create a StoresInfo with map of storeID to StoreInfo
 func NewStoresInfo() *StoresInfo {
 	return &StoresInfo{
 		stores: make(map[uint64]*StoreInfo),
 	}
 }
 
+// GetStore return a StoreInfo with storeID 
 func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 	store, ok := s.stores[storeID]
 	if !ok {
@@ -254,10 +258,12 @@ func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 	return store.Clone()
 }
 
+// SetStore set a StoreInfo with storeID 
 func (s *StoresInfo) SetStore(store *StoreInfo) {
 	s.stores[store.GetId()] = store
 }
 
+// BlockStore block a StoreInfo with storeID
 func (s *StoresInfo) BlockStore(storeID uint64) error {
 	store, ok := s.stores[storeID]
 	if !ok {
@@ -270,6 +276,7 @@ func (s *StoresInfo) BlockStore(storeID uint64) error {
 	return nil
 }
 
+// UnblockStore unblock a StoreInfo with storeID
 func (s *StoresInfo) UnblockStore(storeID uint64) {
 	store, ok := s.stores[storeID]
 	if !ok {
@@ -278,6 +285,7 @@ func (s *StoresInfo) UnblockStore(storeID uint64) {
 	store.Unblock()
 }
 
+// GetStores get a complete set of StoreInfo 
 func (s *StoresInfo) GetStores() []*StoreInfo {
 	stores := make([]*StoreInfo, 0, len(s.stores))
 	for _, store := range s.stores {
@@ -286,6 +294,7 @@ func (s *StoresInfo) GetStores() []*StoreInfo {
 	return stores
 }
 
+// GetMetaStores get a complete set of metapb.Store
 func (s *StoresInfo) GetMetaStores() []*metapb.Store {
 	stores := make([]*metapb.Store, 0, len(s.stores))
 	for _, store := range s.stores {
@@ -294,22 +303,26 @@ func (s *StoresInfo) GetMetaStores() []*metapb.Store {
 	return stores
 }
 
+// GetStoreCount return the total count of storeInfo
 func (s *StoresInfo) GetStoreCount() int {
 	return len(s.stores)
 }
 
+// SetLeaderCount set the leader count to a storeInfo
 func (s *StoresInfo) SetLeaderCount(storeID uint64, leaderCount int) {
 	if store, ok := s.stores[storeID]; ok {
 		store.LeaderCount = leaderCount
 	}
 }
 
+// SetRegionCount set the region count to a storeInfo
 func (s *StoresInfo) SetRegionCount(storeID uint64, regionCount int) {
 	if store, ok := s.stores[storeID]; ok {
 		store.RegionCount = regionCount
 	}
 }
 
+// TotalWrittenBytes return the total written bytes of all StoreInfo
 func (s *StoresInfo) TotalWrittenBytes() uint64 {
 	var totalWrittenBytes uint64
 	for _, s := range s.stores {
@@ -320,6 +333,7 @@ func (s *StoresInfo) TotalWrittenBytes() uint64 {
 	return totalWrittenBytes
 }
 
+// TotalReadBytes return the total read bytes of all StoreInfo
 func (s *StoresInfo) TotalReadBytes() uint64 {
 	var totalReadBytes uint64
 	for _, s := range s.stores {
@@ -330,6 +344,7 @@ func (s *StoresInfo) TotalReadBytes() uint64 {
 	return totalReadBytes
 }
 
+// GetStoresWriteStat return the write stat of all StoreInfo
 func (s* StoresInfo) GetStoresWriteStat() map[uint64]uint64 {
 	res := make(map[uint64]uint64)
 	for _, s := range s.stores {
@@ -338,6 +353,7 @@ func (s* StoresInfo) GetStoresWriteStat() map[uint64]uint64 {
     return res
 }
 
+// GetStoresReadStat return the read stat of all StoreInfo
 func (s* StoresInfo) GetStoresReadStat() map[uint64]uint64 {
 	res := make(map[uint64]uint64)
 	for _, s := range s.stores {

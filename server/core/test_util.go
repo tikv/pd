@@ -20,6 +20,7 @@ import (
   "github.com/pingcap/kvproto/pkg/metapb"
 )
 
+// SplitRegions split a set of metapb.Region by the middle of regionKey
 func SplitRegions(regions []*metapb.Region) []*metapb.Region {
 	results := make([]*metapb.Region, 0, len(regions)*2)
 	for _, region := range regions {
@@ -44,6 +45,7 @@ func SplitRegions(regions []*metapb.Region) []*metapb.Region {
 	return results
 }
 
+// MergeRegions merge a set of metapb.Region by regionKey
 func MergeRegions(regions []*metapb.Region) []*metapb.Region {
 	results := make([]*metapb.Region, 0, len(regions)/2)
 	for i := 0; i < len(regions); i += 2 {
@@ -68,6 +70,7 @@ func MergeRegions(regions []*metapb.Region) []*metapb.Region {
 	return results
 }
 
+// NewRegion create a metapb.Region
 func NewRegion(start, end []byte) *metapb.Region {
 	return &metapb.Region{
 		StartKey:    start,
