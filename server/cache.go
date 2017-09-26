@@ -541,8 +541,8 @@ func (c *clusterInfo) updateWriteStatus(region *core.RegionInfo) {
 	divisor := float64(statCacheMaxLen) * 2 * storeHeartBeatReportInterval
 	hotRegionThreshold := uint64(float64(c.stores.TotalWrittenBytes()) / divisor)
 
-	if hotRegionThreshold < hotRegionMinFlowRate {
-		hotRegionThreshold = hotRegionMinFlowRate
+	if hotRegionThreshold < hotWriteRegionMinFlowRate {
+		hotRegionThreshold = hotWriteRegionMinFlowRate
 	}
 	c.updateWriteStatCache(region, hotRegionThreshold)
 }
@@ -567,8 +567,8 @@ func (c *clusterInfo) updateReadStatus(region *core.RegionInfo) {
 	divisor := float64(statCacheMaxLen) * storeHeartBeatReportInterval
 	hotRegionThreshold := uint64(float64(c.stores.TotalReadBytes()) / divisor)
 
-	if hotRegionThreshold < hotRegionMinFlowRate {
-		hotRegionThreshold = hotRegionMinFlowRate
+	if hotRegionThreshold < hotReadRegionMinFlowRate {
+		hotRegionThreshold = hotReadRegionMinFlowRate
 	}
 	c.updateReadStatCache(region, hotRegionThreshold)
 }

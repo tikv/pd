@@ -37,7 +37,8 @@ const (
 	scheduleIntervalFactor    = 1.3
 
 	statCacheMaxLen               = 1000
-	hotRegionMinFlowRate          = 16 * 1024
+	hotWriteRegionMinFlowRate     = 16 * 1024
+	hotReadRegionMinFlowRate      = 128 * 1024
 	regionHeartBeatReportInterval = 60
 	regionheartbeatSendChanCap    = 1024
 	storeHeartBeatReportInterval  = 10
