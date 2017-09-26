@@ -390,14 +390,14 @@ func (s *testClusterWorkerSuite) checkSearchRegions(cluster *RaftCluster, keys .
 		defer cluster.cachedCluster.RUnlock()
 
 		cacheRegions := cluster.cachedCluster.regions
-		if cacheRegions.tree.length() != len(keys)/2 {
-			c.Logf("region length not match, expect %v, got %v", len(keys)/2, cacheRegions.tree.length())
+		if cacheRegions.TreeLength() != len(keys)/2 {
+			c.Logf("region length not match, expect %v, got %v", len(keys)/2, cacheRegions.TreeLength())
 			return false
 		}
 
 		for i := 0; i < len(keys); i += 2 {
 			start, end := []byte(keys[i]), []byte(keys[i+1])
-			region := cacheRegions.tree.search(start)
+			region := cacheRegions.SearchRegion(start)
 			if region == nil {
 				c.Logf("region not found for key: %q", start)
 				return false

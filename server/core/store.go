@@ -16,7 +16,9 @@ package core
 import (
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/gogo/protobuf/proto"
+	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -217,6 +219,145 @@ L:
 
 // StoreHotRegionInfos : used to get human readable description for hot regions.
 type StoreHotRegionInfos struct {
-	AsPeer   map[uint64]*HotRegionsStat `json:"as_peer"`
-	AsLeader map[uint64]*HotRegionsStat `json:"as_leader"`
+	AsPeer   StoreHotRegionsStat `json:"as_peer"`
+	AsLeader StoreHotRegionsStat `json:"as_leader"`
+}
+
+// StoreHotRegionsStat used to record the hot region statistics group by store
+type StoreHotRegionsStat map[uint64]*HotRegionsStat
+
+var (
+	// ErrStoreNotFound is for log of store no found
+	ErrStoreNotFound = func(storeID uint64) error {
+		return errors.Errorf("store %v not found", storeID)
+	}
+	// ErrStoreIsBlocked is for log of store is blocked
+	ErrStoreIsBlocked = func(storeID uint64) error {
+		return errors.Errorf("store %v is blocked", storeID)
+	}
+)
+
+// StoresInfo is a map of storeID to StoreInfo
+type StoresInfo struct {
+	stores map[uint64]*StoreInfo
+}
+
+// NewStoresInfo create a StoresInfo with map of storeID to StoreInfo
+func NewStoresInfo() *StoresInfo {
+	return &StoresInfo{
+		stores: make(map[uint64]*StoreInfo),
+	}
+}
+
+// GetStore return a StoreInfo with storeID
+func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
+	store, ok := s.stores[storeID]
+	if !ok {
+		return nil
+	}
+	return store.Clone()
+}
+
+// SetStore set a StoreInfo with storeID
+func (s *StoresInfo) SetStore(store *StoreInfo) {
+	s.stores[store.GetId()] = store
+}
+
+// BlockStore block a StoreInfo with storeID
+func (s *StoresInfo) BlockStore(storeID uint64) error {
+	store, ok := s.stores[storeID]
+	if !ok {
+		return ErrStoreNotFound(storeID)
+	}
+	if store.IsBlocked() {
+		return ErrStoreIsBlocked(storeID)
+	}
+	store.Block()
+	return nil
+}
+
+// UnblockStore unblock a StoreInfo with storeID
+func (s *StoresInfo) UnblockStore(storeID uint64) {
+	store, ok := s.stores[storeID]
+	if !ok {
+		log.Fatalf("store %d is unblocked, but it is not found", storeID)
+	}
+	store.Unblock()
+}
+
+// GetStores get a complete set of StoreInfo
+func (s *StoresInfo) GetStores() []*StoreInfo {
+	stores := make([]*StoreInfo, 0, len(s.stores))
+	for _, store := range s.stores {
+		stores = append(stores, store.Clone())
+	}
+	return stores
+}
+
+// GetMetaStores get a complete set of metapb.Store
+func (s *StoresInfo) GetMetaStores() []*metapb.Store {
+	stores := make([]*metapb.Store, 0, len(s.stores))
+	for _, store := range s.stores {
+		stores = append(stores, proto.Clone(store.Store).(*metapb.Store))
+	}
+	return stores
+}
+
+// GetStoreCount return the total count of storeInfo
+func (s *StoresInfo) GetStoreCount() int {
+	return len(s.stores)
+}
+
+// SetLeaderCount set the leader count to a storeInfo
+func (s *StoresInfo) SetLeaderCount(storeID uint64, leaderCount int) {
+	if store, ok := s.stores[storeID]; ok {
+		store.LeaderCount = leaderCount
+	}
+}
+
+// SetRegionCount set the region count to a storeInfo
+func (s *StoresInfo) SetRegionCount(storeID uint64, regionCount int) {
+	if store, ok := s.stores[storeID]; ok {
+		store.RegionCount = regionCount
+	}
+}
+
+// TotalWrittenBytes return the total written bytes of all StoreInfo
+func (s *StoresInfo) TotalWrittenBytes() uint64 {
+	var totalWrittenBytes uint64
+	for _, s := range s.stores {
+		if s.IsUp() {
+			totalWrittenBytes += s.Stats.GetBytesWritten()
+		}
+	}
+	return totalWrittenBytes
+}
+
+// TotalReadBytes return the total read bytes of all StoreInfo
+func (s *StoresInfo) TotalReadBytes() uint64 {
+	var totalReadBytes uint64
+	for _, s := range s.stores {
+		if s.IsUp() {
+			totalReadBytes += s.Stats.GetBytesRead()
+		}
+	}
+	return totalReadBytes
+}
+
+// GetStoresWriteStat return the write stat of all StoreInfo
+func (s *StoresInfo) GetStoresWriteStat() map[uint64]uint64 {
+	res := make(map[uint64]uint64)
+	for _, s := range s.stores {
+		res[s.GetId()] = s.Stats.GetBytesWritten()
+	}
+	return res
+}
+
+// GetStoresReadStat return the read stat of all StoreInfo
+func (s *StoresInfo) GetStoresReadStat() map[uint64]uint64 {
+	res := make(map[uint64]uint64)
+	for _, s := range s.stores {
+		res[s.GetId()] = s.Stats.GetBytesRead()
+	}
+	return res
 }

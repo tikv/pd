@@ -326,10 +326,10 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	co := newCoordinator(cluster, opt, hbStreams, kv)
 	co.run()
 
-	c.Assert(co.schedulers, HasLen, 4)
+	c.Assert(co.schedulers, HasLen, 3)
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
-	c.Assert(co.schedulers, HasLen, 2)
+	c.Assert(co.schedulers, HasLen, 1)
 	co.stop()
 
 	// make a new coordinator for testing
@@ -337,14 +337,14 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	co = newCoordinator(cluster, opt, hbStreams, kv)
 	co.run()
 	defer co.stop()
-	c.Assert(co.schedulers, HasLen, 2)
+	c.Assert(co.schedulers, HasLen, 1)
 	bls, err := schedule.CreateScheduler("balanceLeader", opt)
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(bls, bls.GetInterval()), IsNil)
 	brs, err := schedule.CreateScheduler("balanceRegion", opt)
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(brs, brs.GetInterval()), IsNil)
-	c.Assert(co.schedulers, HasLen, 4)
+	c.Assert(co.schedulers, HasLen, 3)
 
 	stream := newMockHeartbeatStream()
 

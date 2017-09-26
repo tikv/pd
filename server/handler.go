@@ -76,6 +76,11 @@ func (h *Handler) GetHotWriteStores() map[uint64]uint64 {
 	return h.s.cluster.cachedCluster.getStoresWriteStat()
 }
 
+// GetHotReadStores gets all hot write stores status
+func (h *Handler) GetHotReadStores() map[uint64]uint64 {
+	return h.s.cluster.cachedCluster.getStoresReadStat()
+}
+
 // AddScheduler adds a scheduler.
 func (h *Handler) AddScheduler(s schedule.Scheduler) error {
 	c, err := h.getCoordinator()
@@ -266,7 +271,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 	// Add missing peers.
 	for id := range storeIDs {
 		if c.cluster.GetStore(id) == nil {
-			return errStoreNotFound(id)
+			return core.ErrStoreNotFound(id)
 		}
 		if region.GetStorePeer(id) != nil {
 			continue
@@ -309,7 +314,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 	}
 
 	if c.cluster.GetStore(toStoreID) == nil {
-		return errStoreNotFound(toStoreID)
+		return core.ErrStoreNotFound(toStoreID)
 	}
 	newPeer, err := c.cluster.AllocPeer(toStoreID)
 	if err != nil {

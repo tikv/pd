@@ -162,7 +162,7 @@ func (kv *kv) loadConfig(cfg *Config) (bool, error) {
 	return true, nil
 }
 
-func (kv *kv) loadStores(stores *storesInfo, rangeLimit int64) error {
+func (kv *kv) loadStores(stores *core.StoresInfo, rangeLimit int64) error {
 	nextID := uint64(0)
 	endStore := kv.storePath(math.MaxUint64)
 	withRange := clientv3.WithRange(endStore)
@@ -194,7 +194,7 @@ func (kv *kv) loadStores(stores *storesInfo, rangeLimit int64) error {
 			storeInfo.RegionWeight = regionWeight
 
 			nextID = store.GetId() + 1
-			stores.setStore(storeInfo)
+			stores.SetStore(storeInfo)
 		}
 
 		if len(resp.Kvs) < int(rangeLimit) {
@@ -230,7 +230,7 @@ func (kv *kv) loadFloatWithDefaultValue(path string, def float64) (float64, erro
 	return val, nil
 }
 
-func (kv *kv) loadRegions(regions *regionsInfo, rangeLimit int64) error {
+func (kv *kv) loadRegions(regions *core.RegionsInfo, rangeLimit int64) error {
 	nextID := uint64(0)
 	endRegion := kv.regionPath(math.MaxUint64)
 	withRange := clientv3.WithRange(endRegion)
@@ -250,7 +250,7 @@ func (kv *kv) loadRegions(regions *regionsInfo, rangeLimit int64) error {
 			}
 
 			nextID = region.GetId() + 1
-			regions.setRegion(core.NewRegionInfo(region, nil))
+			regions.SetRegion(core.NewRegionInfo(region, nil))
 		}
 
 		if len(resp.Kvs) < int(rangeLimit) {

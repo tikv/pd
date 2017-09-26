@@ -14,6 +14,11 @@
 package core
 
 import (
+	"bytes"
+	"fmt"
+	"math/rand"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -169,4 +174,297 @@ type HotRegionsStat struct {
 	TotalFlowBytes uint64      `json:"total_flow_bytes"`
 	RegionsCount   int         `json:"regions_count"`
 	RegionsStat    RegionsStat `json:"statistics"`
+}
+
+// regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.
+type regionMap struct {
+	m   map[uint64]*regionEntry
+	ids []uint64
+}
+
+type regionEntry struct {
+	*RegionInfo
+	pos int
+}
+
+func newRegionMap() *regionMap {
+	return &regionMap{
+		m: make(map[uint64]*regionEntry),
+	}
+}
+
+func (rm *regionMap) Len() int {
+	if rm == nil {
+		return 0
+	}
+	return len(rm.m)
+}
+
+func (rm *regionMap) Get(id uint64) *RegionInfo {
+	if rm == nil {
+		return nil
+	}
+	if entry, ok := rm.m[id]; ok {
+		return entry.RegionInfo
+	}
+	return nil
+}
+
+func (rm *regionMap) Put(region *RegionInfo) {
+	if old, ok := rm.m[region.GetId()]; ok {
+		old.RegionInfo = region
+		return
+	}
+	rm.m[region.GetId()] = &regionEntry{
+		RegionInfo: region,
+		pos:        len(rm.ids),
+	}
+	rm.ids = append(rm.ids, region.GetId())
+}
+
+func (rm *regionMap) RandomRegion() *RegionInfo {
+	if rm.Len() == 0 {
+		return nil
+	}
+	return rm.Get(rm.ids[rand.Intn(rm.Len())])
+}
+
+func (rm *regionMap) Delete(id uint64) {
+	if rm == nil {
+		return
+	}
+	if old, ok := rm.m[id]; ok {
+		len := rm.Len()
+		last := rm.m[rm.ids[len-1]]
+		last.pos = old.pos
+		rm.ids[last.pos] = last.GetId()
+		delete(rm.m, id)
+		rm.ids = rm.ids[:len-1]
+	}
+}
+
+// RegionsInfo for export
+type RegionsInfo struct {
+	tree      *regionTree
+	regions   *regionMap            // regionID -> regionInfo
+	leaders   map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	followers map[uint64]*regionMap // storeID -> regionID -> regionInfo
+}
+
+// NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
+func NewRegionsInfo() *RegionsInfo {
+	return &RegionsInfo{
+		tree:      newRegionTree(),
+		regions:   newRegionMap(),
+		leaders:   make(map[uint64]*regionMap),
+		followers: make(map[uint64]*regionMap),
+	}
+}
+
+// GetRegion return the RegionInfo with regionID
+func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
+	region := r.regions.Get(regionID)
+	if region == nil {
+		return nil
+	}
+	return region.Clone()
+}
+
+// SetRegion set the RegionInfo with regionID
+func (r *RegionsInfo) SetRegion(region *RegionInfo) {
+	if origin := r.regions.Get(region.GetId()); origin != nil {
+		r.RemoveRegion(origin)
+	}
+	r.AddRegion(region)
+}
+
+// Length return the RegionsInfo length
+func (r *RegionsInfo) Length() int {
+	return r.regions.Len()
+}
+
+// TreeLength return the RegionsInfo tree length(now only used in test)
+func (r *RegionsInfo) TreeLength() int {
+	return r.tree.length()
+}
+
+// AddRegion add RegionInfo to regionTree and regionMap, also update leadres and followers by region peers
+func (r *RegionsInfo) AddRegion(region *RegionInfo) {
+	// Add to tree and regions.
+	r.tree.update(region.Region)
+	r.regions.Put(region)
+
+	if region.Leader == nil {
+		return
+	}
+
+	// Add to leaders and followers.
+	for _, peer := range region.GetPeers() {
+		storeID := peer.GetStoreId()
+		if peer.GetId() == region.Leader.GetId() {
+			// Add leader peer to leaders.
+			store, ok := r.leaders[storeID]
+			if !ok {
+				store = newRegionMap()
+				r.leaders[storeID] = store
+			}
+			store.Put(region)
+		} else {
+			// Add follower peer to followers.
+			store, ok := r.followers[storeID]
+			if !ok {
+				store = newRegionMap()
+				r.followers[storeID] = store
+			}
+			store.Put(region)
+		}
+	}
+}
+
+// RemoveRegion remove RegionInfo from regionTree and regionMap
+func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
+	// Remove from tree and regions.
+	r.tree.remove(region.Region)
+	r.regions.Delete(region.GetId())
+
+	// Remove from leaders and followers.
+	for _, peer := range region.GetPeers() {
+		storeID := peer.GetStoreId()
+		r.leaders[storeID].Delete(region.GetId())
+		r.followers[storeID].Delete(region.GetId())
+	}
+}
+
+// SearchRegion search RegionInfo from regionTree
+func (r *RegionsInfo) SearchRegion(regionKey []byte) *RegionInfo {
+	region := r.tree.search(regionKey)
+	if region == nil {
+		return nil
+	}
+	return r.GetRegion(region.GetId())
+}
+
+// GetRegions get a set of RegionInfo from regionMap
+func (r *RegionsInfo) GetRegions() []*RegionInfo {
+	regions := make([]*RegionInfo, 0, r.regions.Len())
+	for _, region := range r.regions.m {
+		regions = append(regions, region.Clone())
+	}
+	return regions
+}
+
+// GetMetaRegions get a set of metapb.Region from regionMap
+func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
+	regions := make([]*metapb.Region, 0, r.regions.Len())
+	for _, region := range r.regions.m {
+		regions = append(regions, proto.Clone(region.Region).(*metapb.Region))
+	}
+	return regions
+}
+
+// GetRegionCount get the total count of RegionInfo of regionMap
+func (r *RegionsInfo) GetRegionCount() int {
+	return r.regions.Len()
+}
+
+// GetStoreRegionCount get  the total count of  a store's leader and follower RegionInfo by storeID
+func (r *RegionsInfo) GetStoreRegionCount(storeID uint64) int {
+	return r.GetStoreLeaderCount(storeID) + r.GetStoreFollowerCount(storeID)
+}
+
+// GetStoreLeaderCount get the total count of a store's leader RegionInfo
+func (r *RegionsInfo) GetStoreLeaderCount(storeID uint64) int {
+	return r.leaders[storeID].Len()
+}
+
+// GetStoreFollowerCount get the total count of a store's follower RegionInfo
+func (r *RegionsInfo) GetStoreFollowerCount(storeID uint64) int {
+	return r.followers[storeID].Len()
+}
+
+// RandRegion get a region by random
+func (r *RegionsInfo) RandRegion() *RegionInfo {
+	return randRegion(r.regions)
+}
+
+// RandLeaderRegion get a store's leader region by random
+func (r *RegionsInfo) RandLeaderRegion(storeID uint64) *RegionInfo {
+	return randRegion(r.leaders[storeID])
+}
+
+// RandFollowerRegion get a store's follower region by random
+func (r *RegionsInfo) RandFollowerRegion(storeID uint64) *RegionInfo {
+	return randRegion(r.followers[storeID])
+}
+
+// GetLeader return leader RegionInfo by storeID and regionID(now only used in test)
+func (r *RegionsInfo) GetLeader(storeID uint64, regionID uint64) *RegionInfo {
+	return r.leaders[storeID].Get(regionID)
+}
+
+// GetFollower return follower RegionInfo by storeID and regionID(now only used in test)
+func (r *RegionsInfo) GetFollower(storeID uint64, regionID uint64) *RegionInfo {
+	return r.followers[storeID].Get(regionID)
+}
+
+const randomRegionMaxRetry = 10
+
+func randRegion(regions *regionMap) *RegionInfo {
+	for i := 0; i < randomRegionMaxRetry; i++ {
+		region := regions.RandomRegion()
+		if region == nil {
+			return nil
+		}
+		if len(region.DownPeers) == 0 && len(region.PendingPeers) == 0 {
+			return region.Clone()
+		}
+	}
+	return nil
+}
+
+// DiffRegionPeersInfo return the difference of peers info  between two RegionInfo
+func DiffRegionPeersInfo(origin *RegionInfo, other *RegionInfo) string {
+	var ret []string
+	for _, a := range origin.Peers {
+		both := false
+		for _, b := range other.Peers {
+			if reflect.DeepEqual(a, b) {
+				both = true
+				break
+			}
+		}
+		if !both {
+			ret = append(ret, fmt.Sprintf("Remove peer:{%v}", a))
+		}
+	}
+	for _, b := range other.Peers {
+		both := false
+		for _, a := range origin.Peers {
+			if reflect.DeepEqual(a, b) {
+				both = true
+				break
+			}
+		}
+		if !both {
+			ret = append(ret, fmt.Sprintf("Add peer:{%v}", b))
+		}
+	}
+	return strings.Join(ret, ",")
+}
+
+// DiffRegionKeyInfo return the difference of key info between two RegionInfo
+func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
+	var ret []string
+	if !bytes.Equal(origin.Region.StartKey, other.Region.StartKey) {
+		originKey := &metapb.Region{StartKey: origin.Region.StartKey}
+		otherKey := &metapb.Region{StartKey: other.Region.StartKey}
+		ret = append(ret, fmt.Sprintf("StartKey Changed:{%s} -> {%s}", originKey, otherKey))
+	}
+	if !bytes.Equal(origin.Region.EndKey, other.Region.EndKey) {
+		originKey := &metapb.Region{EndKey: origin.Region.EndKey}
+		otherKey := &metapb.Region{EndKey: other.Region.EndKey}
+		ret = append(ret, fmt.Sprintf("EndKey Changed:{%s} -> {%s}", originKey, otherKey))
+	}
+
+	return strings.Join(ret, ",")
 }
