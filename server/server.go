@@ -177,7 +177,8 @@ func (s *Server) startServer() error {
 	s.leaderValue = s.marshalLeader()
 
 	s.idAlloc = &idAllocator{s: s}
-	s.kv = newKV(s)
+	kvBase := newEtcdKVBase(s)
+	s.kv = newKV(kvBase)
 	s.cluster = newRaftCluster(s, s.clusterID)
 	s.hbStreams = newHeartbeatStreams(s.clusterID)
 
