@@ -248,6 +248,9 @@ type heartbeatServer struct {
 }
 
 func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
+	if atomic.LoadInt32(&s.close) == 1 {
+		return io.EOF
+	}
 	done := make(chan error, 1)
 	go func() { done <- s.stream.Send(m) }()
 	select {
