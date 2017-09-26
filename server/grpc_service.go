@@ -16,6 +16,8 @@ package server
 import (
 	"fmt"
 	"io"
+	"sync/atomic"
+	"time"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
@@ -234,8 +236,47 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 	}, nil
 }
 
+const regionHeartbeatSendTimeout = 5 * time.Second
+
+var errSendRegionHeartbeatTimeout = errors.New("send region heartbeat timeout")
+
+// heartbeatServer wraps PD_RegionHeartbeatServer to ensure when any error
+// occurs on Send() or Recv(), both endpoints will be closed.
+type heartbeatServer struct {
+	stream pdpb.PD_RegionHeartbeatServer
+	close  int32
+}
+
+func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
+	done := make(chan error, 1)
+	go func() { done <- s.stream.Send(m) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			atomic.StoreInt32(&s.close, 1)
+		}
+		return errors.Trace(err)
+	case <-time.After(regionHeartbeatSendTimeout):
+		atomic.StoreInt32(&s.close, 1)
+		return errors.Trace(errSendRegionHeartbeatTimeout)
+	}
+}
+
+func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
+	if atomic.LoadInt32(&s.close) == 1 {
+		return nil, io.EOF
+	}
+	req, err := s.stream.Recv()
+	if err != nil {
+		atomic.StoreInt32(&s.close, 1)
+		return nil, errors.Trace(err)
+	}
+	return req, nil
+}
+
 // RegionHeartbeat implements gRPC PDServer.
-func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
+func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
+	server := &heartbeatServer{stream: stream}
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
 		resp := &pdpb.RegionHeartbeatResponse{
