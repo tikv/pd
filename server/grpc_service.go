@@ -244,11 +244,11 @@ var errSendRegionHeartbeatTimeout = errors.New("send region heartbeat timeout")
 // occurs on Send() or Recv(), both endpoints will be closed.
 type heartbeatServer struct {
 	stream pdpb.PD_RegionHeartbeatServer
-	close  int32
+	closed int32
 }
 
 func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
-	if atomic.LoadInt32(&s.close) == 1 {
+	if atomic.LoadInt32(&s.closed) == 1 {
 		return io.EOF
 	}
 	done := make(chan error, 1)
@@ -256,22 +256,22 @@ func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
 	select {
 	case err := <-done:
 		if err != nil {
-			atomic.StoreInt32(&s.close, 1)
+			atomic.StoreInt32(&s.closed, 1)
 		}
 		return errors.Trace(err)
 	case <-time.After(regionHeartbeatSendTimeout):
-		atomic.StoreInt32(&s.close, 1)
+		atomic.StoreInt32(&s.closed, 1)
 		return errors.Trace(errSendRegionHeartbeatTimeout)
 	}
 }
 
 func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
-	if atomic.LoadInt32(&s.close) == 1 {
+	if atomic.LoadInt32(&s.closed) == 1 {
 		return nil, io.EOF
 	}
 	req, err := s.stream.Recv()
 	if err != nil {
-		atomic.StoreInt32(&s.close, 1)
+		atomic.StoreInt32(&s.closed, 1)
 		return nil, errors.Trace(err)
 	}
 	return req, nil
