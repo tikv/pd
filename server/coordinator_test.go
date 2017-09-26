@@ -325,14 +325,26 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	cfg.ReplicaScheduleLimit = 0
 	co := newCoordinator(cluster, opt, hbStreams, kv)
 	co.run()
-	defer co.stop()
 
 	c.Assert(co.schedulers, HasLen, 4)
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-hot-read-region-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-hot-write-region-scheduler"), IsNil)
-	c.Assert(co.schedulers, HasLen, 0)
+	c.Assert(co.schedulers, HasLen, 2)
+	co.stop()
+
+	// make a new coordinator for testing
+	// whether the schedulers added or removed in dynamic way are recorded in opt
+	co = newCoordinator(cluster, opt, hbStreams, kv)
+	co.run()
+	defer co.stop()
+	c.Assert(co.schedulers, HasLen, 2)
+	bls, err := schedule.CreateScheduler("balanceLeader", opt)
+	c.Assert(err, IsNil)
+	c.Assert(co.addScheduler(bls, bls.GetInterval()), IsNil)
+	brs, err := schedule.CreateScheduler("balanceRegion", opt)
+	c.Assert(err, IsNil)
+	c.Assert(co.addScheduler(brs, brs.GetInterval()), IsNil)
+	c.Assert(co.schedulers, HasLen, 4)
 
 	stream := newMockHeartbeatStream()
 
@@ -349,12 +361,12 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 
 	gls, err := schedule.CreateScheduler("grantLeader", opt, "0")
 	c.Assert(err, IsNil)
-	c.Assert(co.addScheduler(gls, schedule.MinScheduleInterval), NotNil)
+	c.Assert(co.addScheduler(gls, gls.GetInterval()), NotNil)
 	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
 
 	gls, err = schedule.CreateScheduler("grantLeader", opt, "1")
 	c.Assert(err, IsNil)
-	c.Assert(co.addScheduler(gls, schedule.MinScheduleInterval), IsNil)
+	c.Assert(co.addScheduler(gls, gls.GetInterval()), IsNil)
 
 	// Transfer all leaders to store 1.
 	waitOperator(c, co, 2)
@@ -372,31 +384,6 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	region3.Leader = region3.GetStorePeer(1)
 	cluster.putRegion(region3)
 	dispatchHeartbeatNoResp(c, co, region3, stream)
-}
-
-func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
-	svrs, closeFunc := newMultiTestServers(c, 3)
-	defer closeFunc()
-
-	leader := mustWaitLeader(c, svrs)
-	handler := leader.GetHandler()
-	schedulers, err := handler.GetSchedulers()
-	c.Assert(err, IsNil)
-
-	c.Assert(schedulers, HasLen, 4)
-	c.Assert(handler.RemoveScheduler("balance-leader-scheduler"), IsNil)
-	c.Assert(handler.RemoveScheduler("balance-region-scheduler"), IsNil)
-	c.Assert(schedulers, HasLen, 2)
-
-	leader.Close()
-
-	// get new leader to verify whether the scheduler list persist or not
-	newLeader := mustWaitLeader(c, svrs)
-	handler = newLeader.GetHandler()
-	schedulers, err = handler.GetSchedulers()
-	c.Assert(err, IsNil)
-	c.Assert(schedulers, HasLen, 2)
-
 }
 
 func (s *testCoordinatorSuite) TestRestart(c *C) {
