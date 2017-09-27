@@ -511,7 +511,7 @@ func (s *scheduleController) Stop() {
 	s.cancel()
 }
 
-func (s *scheduleController) Schedule(cluster *clusterInfo) *schedule.Operator {
+func (s *scheduleController) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
 		// If we have schedule, reset interval to the minimal interval.
 		if op := s.Scheduler.Schedule(cluster); op != nil {

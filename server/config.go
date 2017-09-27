@@ -327,9 +327,10 @@ const (
 )
 
 var defaultSchedulers = SchedulerConfigs{
-	"balance-region": toml.Primitive{},
-	"balance-leader": toml.Primitive{},
-	"hot-region":     toml.Primitive{},
+	"balance-region":          toml.Primitive{},
+	"balance-leader":          toml.Primitive{},
+	"hot-region":              toml.Primitive{},
+	"balance-adjacent-region": toml.Primitive{},
 }
 
 func (c *ScheduleConfig) adjust() {

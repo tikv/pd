@@ -209,6 +209,13 @@ func (c *clusterInfo) GetRegion(regionID uint64) *core.RegionInfo {
 	return c.regions.GetRegion(regionID)
 }
 
+// ScanRegions scan region with start key, until number greater than limit.
+func (c *clusterInfo) ScanRegions(startKey []byte, limit int) []*core.RegionInfo {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regions.ScanRange(startKey, limit)
+}
+
 // updateWriteStatCache updates statistic for a region if it's hot, or remove it from statistics if it cools down
 func (c *clusterInfo) updateWriteStatCache(region *core.RegionInfo, hotRegionThreshold uint64) {
 	var v *core.RegionStat

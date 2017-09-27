@@ -407,6 +407,17 @@ func (r *RegionsInfo) GetFollower(storeID uint64, regionID uint64) *RegionInfo {
 	return r.followers[storeID].Get(regionID)
 }
 
+// ScanRange scan region with start key, until number greater than limit.
+func (r *RegionsInfo) ScanRange(startKey []byte, limit int) []*RegionInfo {
+	metaRegions := r.tree.scanRange(startKey, limit)
+	res := make([]*RegionInfo, 0, len(metaRegions))
+	for _, m := range metaRegions {
+		region := r.GetRegion(m.region.GetId())
+		res = append(res, region)
+	}
+	return res
+}
+
 const randomRegionMaxRetry = 10
 
 func randRegion(regions *regionMap) *RegionInfo {
