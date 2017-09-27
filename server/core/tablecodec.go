@@ -16,6 +16,8 @@ package core
 import (
 	"bytes"
 	"encoding/binary"
+	"runtime"
+	"unsafe"
 
 	"github.com/juju/errors"
 )
@@ -33,7 +35,17 @@ type defaultTableIDDecoder struct{}
 
 var tablePrefix = []byte{'t'}
 
-const signMask uint64 = 0x8000000000000000
+const (
+	signMask uint64 = 0x8000000000000000
+
+	encGroupSize = 8
+	encMarker    = byte(0xFF)
+	encPad       = byte(0x0)
+
+	// See https://golang.org/src/crypto/cipher/xor.go
+	wordSize          = int(unsafe.Sizeof(uintptr(0)))
+	supportsUnaligned = runtime.GOARCH == "386" || runtime.GOARCH == "amd64"
+)
 
 // Key represents high-level Key type.
 type Key []byte
@@ -45,10 +57,16 @@ func (k Key) HasPrefix(prefix Key) bool {
 
 // DecodeTableID decodes the table ID of the key, if the key is not table key, returns 0.
 func (decoder defaultTableIDDecoder) DecodeTableID(key Key) int64 {
+	_, key, err := decodeBytes(key, false)
+	if err != nil {
+		// should never happen
+		return 0
+	}
 	if !key.HasPrefix(tablePrefix) {
 		return 0
 	}
 	key = key[len(tablePrefix):]
+
 	_, tableID, _ := DecodeInt(key)
 	return tableID
 }
@@ -73,4 +91,80 @@ func decodeCmpUintToInt(u uint64) int64 {
 // IsPureTableID return true iff b is consist of tablePrefix and 8-byte tableID
 func IsPureTableID(b []byte) bool {
 	return len(b) == len(tablePrefix)+8
+}
+
+func decodeBytes(b []byte, reverse bool) ([]byte, []byte, error) {
+	data := make([]byte, 0, len(b))
+	for {
+		if len(b) < encGroupSize+1 {
+			return nil, nil, errors.New("insufficient bytes to decode value")
+		}
+
+		groupBytes := b[:encGroupSize+1]
+
+		group := groupBytes[:encGroupSize]
+		marker := groupBytes[encGroupSize]
+
+		var padCount byte
+		if reverse {
+			padCount = marker
+		} else {
+			padCount = encMarker - marker
+		}
+		if padCount > encGroupSize {
+			return nil, nil, errors.Errorf("invalid marker byte, group bytes %q", groupBytes)
+		}
+
+		realGroupSize := encGroupSize - padCount
+		data = append(data, group[:realGroupSize]...)
+		b = b[encGroupSize+1:]
+
+		if padCount != 0 {
+			var padByte = encPad
+			if reverse {
+				padByte = encMarker
+			}
+			// Check validity of padding bytes.
+			for _, v := range group[realGroupSize:] {
+				if v != padByte {
+					return nil, nil, errors.Errorf("invalid padding byte, group bytes %q", groupBytes)
+				}
+			}
+			break
+		}
+	}
+	if reverse {
+		reverseBytes(data)
+	}
+	return b, data, nil
+}
+
+func reverseBytes(b []byte) {
+	if supportsUnaligned {
+		fastReverseBytes(b)
+		return
+	}
+
+	safeReverseBytes(b)
+}
+
+func fastReverseBytes(b []byte) {
+	n := len(b)
+	w := n / wordSize
+	if w > 0 {
+		bw := *(*[]uintptr)(unsafe.Pointer(&b))
+		for i := 0; i < w; i++ {
+			bw[i] = ^bw[i]
+		}
+	}
+
+	for i := w * wordSize; i < n; i++ {
+		b[i] = ^b[i]
+	}
+}
+
+func safeReverseBytes(b []byte) {
+	for i := range b {
+		b[i] = ^b[i]
+	}
 }
