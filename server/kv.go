@@ -40,64 +40,60 @@ var (
 	errTxnFailed = errors.New("failed to commit transaction")
 )
 
+const (
+	clusterPath  = "raft"
+	configPath   = "config"
+	schedulePath = "schedule"
+)
+
 // kv wraps all kv operations, keep it stateless.
 type kv struct {
-	s            *Server
-	client       *clientv3.Client
-	clusterPath  string
-	configPath   string
-	schedulePath string
+	core.KVBase
 }
 
-func newKV(s *Server) *kv {
+func newKV(base core.KVBase) *kv {
 	return &kv{
-		s:            s,
-		client:       s.client,
-		clusterPath:  path.Join(s.rootPath, "raft"),
-		configPath:   path.Join(s.rootPath, "config"),
-		schedulePath: path.Join(s.rootPath, "schedule"),
+		KVBase: base,
 	}
 }
 
-func (kv *kv) txn(cs ...clientv3.Cmp) clientv3.Txn { return kv.s.leaderTxn(cs...) }
-
 func (kv *kv) storePath(storeID uint64) string {
-	return path.Join(kv.clusterPath, "s", fmt.Sprintf("%020d", storeID))
+	return path.Join(clusterPath, "s", fmt.Sprintf("%020d", storeID))
 }
 
 func (kv *kv) regionPath(regionID uint64) string {
-	return path.Join(kv.clusterPath, "r", fmt.Sprintf("%020d", regionID))
+	return path.Join(clusterPath, "r", fmt.Sprintf("%020d", regionID))
 }
 
 func (kv *kv) clusterStatePath(option string) string {
-	return path.Join(kv.clusterPath, "status", option)
+	return path.Join(clusterPath, "status", option)
 }
 
 func (kv *kv) storeLeaderWeightPath(storeID uint64) string {
-	return path.Join(kv.schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "leader")
+	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "leader")
 }
 
 func (kv *kv) storeRegionWeightPath(storeID uint64) string {
-	return path.Join(kv.schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
+	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
 }
 
 func (kv *kv) getRaftClusterBootstrapTime() (time.Time, error) {
-	data, err := kv.load(kv.clusterStatePath("raft_bootstrap_time"))
+	data, err := kv.Load(kv.clusterStatePath("raft_bootstrap_time"))
 	if err != nil {
 		return zeroTime, errors.Trace(err)
 	}
 	if len(data) == 0 {
 		return zeroTime, nil
 	}
-	return parseTimestamp(data)
+	return parseTimestamp([]byte(data))
 }
 
 func (kv *kv) loadMeta(meta *metapb.Cluster) (bool, error) {
-	return kv.loadProto(kv.clusterPath, meta)
+	return kv.loadProto(clusterPath, meta)
 }
 
 func (kv *kv) saveMeta(meta *metapb.Cluster) error {
-	return kv.saveProto(kv.clusterPath, meta)
+	return kv.saveProto(clusterPath, meta)
 }
 
 func (kv *kv) loadStore(storeID uint64, store *metapb.Store) (bool, error) {
@@ -144,43 +140,38 @@ func (kv *kv) saveConfig(cfg *Config) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	return kv.save(kv.configPath, string(value))
+	return kv.Save(configPath, string(value))
 }
 
 func (kv *kv) loadConfig(cfg *Config) (bool, error) {
-	value, err := kv.load(kv.configPath)
+	value, err := kv.Load(configPath)
 	if err != nil {
 		return false, errors.Trace(err)
 	}
-	if value == nil {
+	if value == "" {
 		return false, nil
 	}
-	err = json.Unmarshal(value, cfg)
+	err = json.Unmarshal([]byte(value), cfg)
 	if err != nil {
 		return false, errors.Trace(err)
 	}
 	return true, nil
 }
 
-func (kv *kv) loadStores(stores *core.StoresInfo, rangeLimit int64) error {
+func (kv *kv) loadStores(stores *core.StoresInfo, rangeLimit int) error {
 	nextID := uint64(0)
-	endStore := kv.storePath(math.MaxUint64)
-	withRange := clientv3.WithRange(endStore)
-	withLimit := clientv3.WithLimit(rangeLimit)
-
+	endKey := kv.storePath(math.MaxUint64)
 	for {
 		key := kv.storePath(nextID)
-		resp, err := kvGet(kv.client, key, withRange, withLimit)
+		res, err := kv.LoadRange(key, endKey, rangeLimit)
 		if err != nil {
 			return errors.Trace(err)
 		}
-
-		for _, item := range resp.Kvs {
+		for _, s := range res {
 			store := &metapb.Store{}
-			if err := store.Unmarshal(item.Value); err != nil {
+			if err := store.Unmarshal([]byte(s)); err != nil {
 				return errors.Trace(err)
 			}
-
 			storeInfo := core.NewStoreInfo(store)
 			leaderWeight, err := kv.loadFloatWithDefaultValue(kv.storeLeaderWeightPath(storeInfo.GetId()), 1.0)
 			if err != nil {
@@ -196,8 +187,7 @@ func (kv *kv) loadStores(stores *core.StoresInfo, rangeLimit int64) error {
 			nextID = store.GetId() + 1
 			stores.SetStore(storeInfo)
 		}
-
-		if len(resp.Kvs) < int(rangeLimit) {
+		if len(res) < rangeLimit {
 			return nil
 		}
 	}
@@ -205,47 +195,45 @@ func (kv *kv) loadStores(stores *core.StoresInfo, rangeLimit int64) error {
 
 func (kv *kv) saveStoreWeight(storeID uint64, leader, region float64) error {
 	leaderValue := strconv.FormatFloat(leader, 'f', -1, 64)
-	if err := kv.save(kv.storeLeaderWeightPath(storeID), leaderValue); err != nil {
+	if err := kv.Save(kv.storeLeaderWeightPath(storeID), leaderValue); err != nil {
 		return errors.Trace(err)
 	}
 	regionValue := strconv.FormatFloat(region, 'f', -1, 64)
-	if err := kv.save(kv.storeRegionWeightPath(storeID), regionValue); err != nil {
+	if err := kv.Save(kv.storeRegionWeightPath(storeID), regionValue); err != nil {
 		return errors.Trace(err)
 	}
 	return nil
 }
 
 func (kv *kv) loadFloatWithDefaultValue(path string, def float64) (float64, error) {
-	res, err := kvGet(kv.client, path)
+	res, err := kv.Load(path)
 	if err != nil {
 		return 0, errors.Trace(err)
 	}
-	if len(res.Kvs) == 0 {
+	if res == "" {
 		return def, nil
 	}
-	val, err := strconv.ParseFloat(string(res.Kvs[0].Value), 64)
+	val, err := strconv.ParseFloat(res, 64)
 	if err != nil {
 		return 0, errors.Trace(err)
 	}
 	return val, nil
 }
 
-func (kv *kv) loadRegions(regions *core.RegionsInfo, rangeLimit int64) error {
+func (kv *kv) loadRegions(regions *core.RegionsInfo, rangeLimit int) error {
 	nextID := uint64(0)
-	endRegion := kv.regionPath(math.MaxUint64)
-	withRange := clientv3.WithRange(endRegion)
-	withLimit := clientv3.WithLimit(rangeLimit)
+	endKey := kv.regionPath(math.MaxUint64)
 
 	for {
 		key := kv.regionPath(nextID)
-		resp, err := kvGet(kv.client, key, withRange, withLimit)
+		res, err := kv.LoadRange(key, endKey, rangeLimit)
 		if err != nil {
 			return errors.Trace(err)
 		}
 
-		for _, item := range resp.Kvs {
+		for _, s := range res {
 			region := &metapb.Region{}
-			if err := region.Unmarshal(item.Value); err != nil {
+			if err := region.Unmarshal([]byte(s)); err != nil {
 				return errors.Trace(err)
 			}
 
@@ -253,21 +241,21 @@ func (kv *kv) loadRegions(regions *core.RegionsInfo, rangeLimit int64) error {
 			regions.SetRegion(core.NewRegionInfo(region, nil))
 		}
 
-		if len(resp.Kvs) < int(rangeLimit) {
+		if len(res) < int(rangeLimit) {
 			return nil
 		}
 	}
 }
 
 func (kv *kv) loadProto(key string, msg proto.Message) (bool, error) {
-	value, err := kv.load(key)
+	value, err := kv.Load(key)
 	if err != nil {
 		return false, errors.Trace(err)
 	}
-	if value == nil {
+	if value == "" {
 		return false, nil
 	}
-	return true, proto.Unmarshal(value, msg)
+	return true, proto.Unmarshal([]byte(value), msg)
 }
 
 func (kv *kv) saveProto(key string, msg proto.Message) error {
@@ -275,31 +263,7 @@ func (kv *kv) saveProto(key string, msg proto.Message) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	return kv.save(key, string(value))
-}
-
-func (kv *kv) load(key string) ([]byte, error) {
-	resp, err := kvGet(kv.client, key)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	if n := len(resp.Kvs); n == 0 {
-		return nil, nil
-	} else if n > 1 {
-		return nil, errors.Errorf("load more than one kvs: key %v kvs %v", key, n)
-	}
-	return resp.Kvs[0].Value, nil
-}
-
-func (kv *kv) save(key, value string) error {
-	resp, err := kv.txn().Then(clientv3.OpPut(key, value)).Commit()
-	if err != nil {
-		return errors.Trace(err)
-	}
-	if !resp.Succeeded {
-		return errors.Trace(errTxnFailed)
-	}
-	return nil
+	return kv.Save(key, string(value))
 }
 
 func kvGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
@@ -313,4 +277,63 @@ func kvGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3
 	}
 
 	return resp, errors.Trace(err)
+}
+
+type etcdKVBase struct {
+	server   *Server
+	client   *clientv3.Client
+	rootPath string
+}
+
+func newEtcdKVBase(s *Server) *etcdKVBase {
+	return &etcdKVBase{
+		server:   s,
+		client:   s.client,
+		rootPath: s.rootPath,
+	}
+}
+
+func (kv *etcdKVBase) Load(key string) (string, error) {
+	key = path.Join(kv.rootPath, key)
+
+	resp, err := kvGet(kv.server.client, key)
+	if err != nil {
+		return "", errors.Trace(err)
+	}
+	if n := len(resp.Kvs); n == 0 {
+		return "", nil
+	} else if n > 1 {
+		return "", errors.Errorf("load more than one kvs: key %v kvs %v", key, n)
+	}
+	return string(resp.Kvs[0].Value), nil
+}
+
+func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, error) {
+	key = path.Join(kv.rootPath, key)
+	endKey = path.Join(kv.rootPath, endKey)
+
+	withRange := clientv3.WithRange(endKey)
+	withLimit := clientv3.WithLimit(int64(limit))
+	resp, err := kvGet(kv.server.client, key, withRange, withLimit)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	res := make([]string, 0, len(resp.Kvs))
+	for _, item := range resp.Kvs {
+		res = append(res, string(item.Value))
+	}
+	return res, nil
+}
+
+func (kv *etcdKVBase) Save(key, value string) error {
+	key = path.Join(kv.rootPath, key)
+
+	resp, err := kv.server.leaderTxn().Then(clientv3.OpPut(key, value)).Commit()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if !resp.Succeeded {
+		return errors.Trace(errTxnFailed)
+	}
+	return nil
 }

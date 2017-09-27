@@ -21,7 +21,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("balanceLeader", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("balance-leader", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
 		return newBalanceLeaderScheduler(opt), nil
 	})
 }
@@ -93,5 +93,5 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Op
 	l.limit = adjustBalanceLimit(cluster, l.GetResourceKind())
 	schedulerCounter.WithLabelValues(l.GetName(), "new_opeartor").Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
-	return schedule.NewOperator("balanceLeader", region.GetId(), core.LeaderKind, step)
+	return schedule.NewOperator("balance-leader", region.GetId(), core.LeaderKind, step)
 }

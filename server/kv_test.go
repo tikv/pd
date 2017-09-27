@@ -14,8 +14,6 @@
 package server
 
 import (
-	"fmt"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
@@ -37,13 +35,10 @@ func (s *testKVSuite) TearDownTest(c *C) {
 }
 
 func (s *testKVSuite) TestBasic(c *C) {
-	kv := newKV(s.server)
+	kv := newKV(newEtcdKVBase(s.server))
 
-	clusterID := s.server.clusterID
-	storePath := fmt.Sprintf("/pd/%v/raft/s/00000000000000000123", clusterID)
-	regionPath := fmt.Sprintf("/pd/%v/raft/r/00000000000000000123", clusterID)
-	c.Assert(kv.storePath(123), Equals, storePath)
-	c.Assert(kv.regionPath(123), Equals, regionPath)
+	c.Assert(kv.storePath(123), Equals, "raft/s/00000000000000000123")
+	c.Assert(kv.regionPath(123), Equals, "raft/r/00000000000000000123")
 
 	meta := &metapb.Cluster{Id: 123}
 	ok, err := kv.loadMeta(meta)
@@ -94,7 +89,7 @@ func mustSaveStores(c *C, kv *kv, n int) []*metapb.Store {
 }
 
 func (s *testKVSuite) TestLoadStores(c *C) {
-	kv := newKV(s.server)
+	kv := newKV(newEtcdKVBase(s.server))
 	cache := core.NewStoresInfo()
 
 	n := 10
@@ -108,7 +103,7 @@ func (s *testKVSuite) TestLoadStores(c *C) {
 }
 
 func (s *testKVSuite) TestStoreWeight(c *C) {
-	kv := newKV(s.server)
+	kv := newKV(newEtcdKVBase(s.server))
 	cache := core.NewStoresInfo()
 	const n = 3
 
@@ -139,7 +134,7 @@ func mustSaveRegions(c *C, kv *kv, n int) []*metapb.Region {
 }
 
 func (s *testKVSuite) TestLoadRegions(c *C) {
-	kv := newKV(s.server)
+	kv := newKV(newEtcdKVBase(s.server))
 	cache := core.NewRegionsInfo()
 
 	n := 10

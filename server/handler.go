@@ -101,7 +101,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
-	s, err := schedule.CreateScheduler("balanceLeader", h.opt)
+	s, err := schedule.CreateScheduler("balance-leader", h.opt)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -110,7 +110,7 @@ func (h *Handler) AddBalanceLeaderScheduler() error {
 
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
-	s, err := schedule.CreateScheduler("grantLeader", h.opt, strconv.FormatUint(storeID, 10))
+	s, err := schedule.CreateScheduler("grant-leader", h.opt, strconv.FormatUint(storeID, 10))
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -119,7 +119,7 @@ func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
 
 // AddEvictLeaderScheduler adds an evict-leader-scheduler.
 func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
-	s, err := schedule.CreateScheduler("evictLeader", h.opt, strconv.FormatUint(storeID, 10))
+	s, err := schedule.CreateScheduler("evict-leader", h.opt, strconv.FormatUint(storeID, 10))
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -128,7 +128,7 @@ func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
 
 // AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.
 func (h *Handler) AddShuffleLeaderScheduler() error {
-	s, err := schedule.CreateScheduler("shuffleLeader", h.opt)
+	s, err := schedule.CreateScheduler("shuffle-leader", h.opt)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -137,7 +137,7 @@ func (h *Handler) AddShuffleLeaderScheduler() error {
 
 // AddShuffleRegionScheduler adds a shuffle-region-scheduler.
 func (h *Handler) AddShuffleRegionScheduler() error {
-	s, err := schedule.CreateScheduler("shuffleRegion", h.opt)
+	s, err := schedule.CreateScheduler("shuffle-region", h.opt)
 	if err != nil {
 		return errors.Trace(err)
 	}

@@ -22,7 +22,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("shuffleLeader", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("shuffle-leader", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
 		return newShuffleLeaderScheduler(opt), nil
 	})
 }
@@ -89,7 +89,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Op
 		s.selected = region.Leader
 		schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 		step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
-		return schedule.NewOperator("shuffleLeader", region.GetId(), core.LeaderKind, step)
+		return schedule.NewOperator("shuffle-leader", region.GetId(), core.LeaderKind, step)
 	}
 
 	// Reset the selected store.

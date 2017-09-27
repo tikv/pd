@@ -342,10 +342,9 @@ const (
 )
 
 var defaultSchedulers = SchedulerConfigs{
-	SchedulerConfig{Type: "balanceRegion"},
-	SchedulerConfig{Type: "balanceLeader"},
-	SchedulerConfig{Type: "hotWriteRegion"},
-	SchedulerConfig{Type: "hotReadRegion"},
+	SchedulerConfig{Type: "balance-region"},
+	SchedulerConfig{Type: "balance-leader"},
+	SchedulerConfig{Type: "hot-region"},
 }
 
 func (c *ScheduleConfig) adjust() {
