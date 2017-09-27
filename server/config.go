@@ -88,6 +88,9 @@ type Config struct {
 	// For all warnings during parsing.
 	WarningMsgs []string
 
+	// Enable namespace isolation.
+	EnableNamespace bool `toml:"enable-namespace" json:"enable-namespace"`
+
 	// Only test can change them.
 	nextRetryDelay             time.Duration
 	disableStrictReconfigCheck bool
@@ -116,6 +119,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.BoolVar(&cfg.Log.File.LogRotate, "log-rotate", true, "rotate log")
+	fs.BoolVar(&cfg.EnableNamespace, "enable-namespace", false, "enable namespace isolation (default 'false')")
 
 	return cfg
 }
