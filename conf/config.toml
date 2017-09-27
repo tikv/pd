@@ -52,15 +52,14 @@ region-schedule-limit = 16
 replica-schedule-limit = 24
 
 # customized schedulers, the format is as below
-# if empty, it will use balanceLeader, balanceRegion, hotReadRegion, hotWriteRegion as default
+# if empty, it will use balance-leader, balance-region, hot-region as default
 [schedule.schedulers]
-# [schedule.schedulers.balanceLeader]
+# [schedule.schedulers.balance-leader]
 #		
-# [schedule.schedulers.balanceRegion]
+# [schedule.schedulers.balance-region]
 #		
-# [schedule.schedulers.hotWriteRegion]
-#
-# [schedule.schedulers.hotReadRegion]
+# [schedule.schedulers.hot-region]
+
 		
 	
 [replication]

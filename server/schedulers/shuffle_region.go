@@ -21,7 +21,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("shuffleRegion", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("shuffle-region", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
 		return newShuffleRegionScheduler(opt), nil
 	})
 }
@@ -81,5 +81,5 @@ func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Op
 	}
 
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	return schedule.CreateMovePeerOperator("shuffleRegion", region, core.RegionKind, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	return schedule.CreateMovePeerOperator("shuffle-region", region, core.RegionKind, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }

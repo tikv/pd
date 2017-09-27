@@ -27,7 +27,7 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	sl, err := schedule.CreateScheduler("shuffleLeader", opt)
+	sl, err := schedule.CreateScheduler("shuffle-leader", opt)
 	c.Assert(err, IsNil)
 	c.Assert(sl.Schedule(cluster), IsNil)
 
