@@ -23,7 +23,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("balanceRegion", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("balance-region", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
 		return newBalanceRegionScheduler(opt), nil
 	})
 }
@@ -127,7 +127,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 	s.limit = adjustBalanceLimit(cluster, s.GetResourceKind())
 
-	return schedule.CreateMovePeerOperator("balanceRegion", region, core.RegionKind, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	return schedule.CreateMovePeerOperator("balance-region", region, core.RegionKind, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }
 
 // GetCache returns interval id cache in the scheduler. This is for test only.

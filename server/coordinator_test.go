@@ -329,12 +329,12 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	// Add regions 3 with leader in store 3 and followers in stores 1,2
 	tc.addLeaderRegion(3, 3, 1, 2)
 
-	gls, err := schedule.CreateScheduler("grantLeader", opt, "0")
+	gls, err := schedule.CreateScheduler("grant-leader", opt, "0")
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls, schedule.MinScheduleInterval), NotNil)
 	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
 
-	gls, err = schedule.CreateScheduler("grantLeader", opt, "1")
+	gls, err = schedule.CreateScheduler("grant-leader", opt, "1")
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls, schedule.MinScheduleInterval), IsNil)
 
@@ -446,7 +446,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	defer hbStreams.Close()
 	co := newCoordinator(cluster, opt, hbStreams)
-	scheduler, err := schedule.CreateScheduler("balanceLeader", opt)
+	scheduler, err := schedule.CreateScheduler("balance-leader", opt)
 	c.Assert(err, IsNil)
 	lb := &mockLimitScheduler{
 		Scheduler: scheduler,
@@ -503,7 +503,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	defer hbStreams.Close()
 	co := newCoordinator(cluster, opt, hbStreams)
-	lb, err := schedule.CreateScheduler("balanceLeader", opt)
+	lb, err := schedule.CreateScheduler("balance-leader", opt)
 	c.Assert(err, IsNil)
 	sc := newScheduleController(co, lb, schedule.MinScheduleInterval)
 

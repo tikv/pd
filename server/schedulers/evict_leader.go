@@ -24,9 +24,9 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("evictLeader", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("evict-leader", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
 		if len(args) != 1 {
-			return nil, errors.New("evictLeader needs 1 argument")
+			return nil, errors.New("evict-leader needs 1 argument")
 		}
 		id, err := strconv.ParseUint(args[0], 10, 64)
 		if err != nil {
@@ -97,5 +97,5 @@ func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Oper
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: target.GetId()}
-	return schedule.NewOperator("evictLeader", region.GetId(), core.LeaderKind, step)
+	return schedule.NewOperator("evict-leader", region.GetId(), core.LeaderKind, step)
 }
