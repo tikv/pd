@@ -16,8 +16,6 @@ package core
 import (
 	"bytes"
 	"encoding/binary"
-	"runtime"
-	"unsafe"
 
 	"github.com/juju/errors"
 )
@@ -41,10 +39,6 @@ const (
 	encGroupSize = 8
 	encMarker    = byte(0xFF)
 	encPad       = byte(0x0)
-
-	// See https://golang.org/src/crypto/cipher/xor.go
-	wordSize          = int(unsafe.Sizeof(uintptr(0)))
-	supportsUnaligned = runtime.GOARCH == "386" || runtime.GOARCH == "amd64"
 )
 
 // Key represents high-level Key type.
@@ -57,7 +51,7 @@ func (k Key) HasPrefix(prefix Key) bool {
 
 // DecodeTableID decodes the table ID of the key, if the key is not table key, returns 0.
 func (decoder defaultTableIDDecoder) DecodeTableID(key Key) int64 {
-	_, key, err := decodeBytes(key, false)
+	_, key, err := decodeBytes(key)
 	if err != nil {
 		// should never happen
 		return 0
@@ -93,7 +87,7 @@ func IsPureTableID(b []byte) bool {
 	return len(b) == len(tablePrefix)+8
 }
 
-func decodeBytes(b []byte, reverse bool) ([]byte, []byte, error) {
+func decodeBytes(b []byte) ([]byte, []byte, error) {
 	data := make([]byte, 0, len(b))
 	for {
 		if len(b) < encGroupSize+1 {
@@ -105,12 +99,7 @@ func decodeBytes(b []byte, reverse bool) ([]byte, []byte, error) {
 		group := groupBytes[:encGroupSize]
 		marker := groupBytes[encGroupSize]
 
-		var padCount byte
-		if reverse {
-			padCount = marker
-		} else {
-			padCount = encMarker - marker
-		}
+		padCount := encMarker - marker
 		if padCount > encGroupSize {
 			return nil, nil, errors.Errorf("invalid marker byte, group bytes %q", groupBytes)
 		}
@@ -121,9 +110,6 @@ func decodeBytes(b []byte, reverse bool) ([]byte, []byte, error) {
 
 		if padCount != 0 {
 			var padByte = encPad
-			if reverse {
-				padByte = encMarker
-			}
 			// Check validity of padding bytes.
 			for _, v := range group[realGroupSize:] {
 				if v != padByte {
@@ -133,38 +119,5 @@ func decodeBytes(b []byte, reverse bool) ([]byte, []byte, error) {
 			break
 		}
 	}
-	if reverse {
-		reverseBytes(data)
-	}
 	return b, data, nil
-}
-
-func reverseBytes(b []byte) {
-	if supportsUnaligned {
-		fastReverseBytes(b)
-		return
-	}
-
-	safeReverseBytes(b)
-}
-
-func fastReverseBytes(b []byte) {
-	n := len(b)
-	w := n / wordSize
-	if w > 0 {
-		bw := *(*[]uintptr)(unsafe.Pointer(&b))
-		for i := 0; i < w; i++ {
-			bw[i] = ^bw[i]
-		}
-	}
-
-	for i := w * wordSize; i < n; i++ {
-		b[i] = ^b[i]
-	}
-}
-
-func safeReverseBytes(b []byte) {
-	for i := range b {
-		b[i] = ^b[i]
-	}
 }
