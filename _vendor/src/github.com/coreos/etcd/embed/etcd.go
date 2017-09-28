@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/etcdserver"
+	"github.com/coreos/etcd/etcdserver/api/etcdhttp"
 	"github.com/coreos/etcd/etcdserver/api/v2http"
 	"github.com/coreos/etcd/pkg/cors"
 	"github.com/coreos/etcd/pkg/debugutil"
@@ -149,17 +150,17 @@ func StartEtcd(inCfg *Config) (e *Etcd, err error) {
 	}
 
 	// configure peer handlers after rafthttp.Transport started
-	ph := v2http.NewPeerHandler(e.Server)
-	for i := range e.Peers {
+	ph := etcdhttp.NewPeerHandler(e.Server)
+	for _, p := range e.Peers {
 		srv := &http.Server{
 			Handler:     ph,
 			ReadTimeout: 5 * time.Minute,
 			ErrorLog:    defaultLog.New(ioutil.Discard, "", 0), // do not log user error
 		}
-		e.Peers[i].serve = func() error {
-			return srv.Serve(e.Peers[i].Listener)
-		}
-		e.Peers[i].close = func(ctx context.Context) error {
+
+		l := p.Listener
+		p.serve = func() error { return srv.Serve(l) }
+		p.close = func(ctx context.Context) error {
 			// gracefully shutdown http.Server
 			// close open listeners, idle connections
 			// until context cancel or time-out
@@ -404,16 +405,19 @@ func (e *Etcd) serve() (err error) {
 	}
 
 	// Start a client server goroutine for each listen address
-	var v2h http.Handler
+	var h http.Handler
 	if e.Config().EnableV2 {
-		v2h = http.Handler(&cors.CORSHandler{
-			Handler: v2http.NewClientHandler(e.Server, e.Server.Cfg.ReqTimeout()),
-			Info:    e.cfg.CorsInfo,
-		})
+		h = v2http.NewClientHandler(e.Server, e.Server.Cfg.ReqTimeout())
+	} else {
+		mux := http.NewServeMux()
+		etcdhttp.HandleBasic(mux, e.Server)
+		h = mux
 	}
+	h = http.Handler(&cors.CORSHandler{Handler: h, Info: e.cfg.CorsInfo})
+
 	for _, sctx := range e.sctxs {
 		go func(s *serveCtx) {
-			e.errHandler(s.serve(e.Server, ctlscfg, v2h, e.errHandler))
+			e.errHandler(s.serve(e.Server, ctlscfg, h, e.errHandler))
 		}(sctx)
 	}
 	return nil
