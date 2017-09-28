@@ -56,9 +56,12 @@ type storeInfo struct {
 	Status *storeStatus `json:"status"`
 }
 
-const downStateName = "Down"
+const (
+	disconnectedName = "Disconnected"
+	downStateName    = "Down"
+)
 
-func newStoreInfo(store *core.StoreInfo) *storeInfo {
+func newStoreInfo(store *core.StoreInfo, maxStoreDownTime time.Duration) *storeInfo {
 	s := &storeInfo{
 		Store: &metaStore{
 			Store:     store.Store,
@@ -92,8 +95,12 @@ func newStoreInfo(store *core.StoreInfo) *storeInfo {
 		s.Status.Uptime = &duration
 	}
 
-	if store.State == metapb.StoreState_Up && store.IsDown() {
-		s.Store.StateName = downStateName
+	if store.State == metapb.StoreState_Up {
+		if store.DownTime() > maxStoreDownTime {
+			s.Store.StateName = downStateName
+		} else if store.IsDisconnected() {
+			s.Store.StateName = disconnectedName
+		}
 	}
 	return s
 }
@@ -122,6 +129,8 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	maxStoreDownTime := h.svr.GetScheduleConfig().MaxStoreDownTime.Duration
+
 	vars := mux.Vars(r)
 	storeIDStr := vars["id"]
 	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
@@ -136,7 +145,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	storeInfo := newStoreInfo(store)
+	storeInfo := newStoreInfo(store, maxStoreDownTime)
 	h.rd.JSON(w, http.StatusOK, storeInfo)
 }
 
@@ -306,6 +315,8 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	maxStoreDownTime := h.svr.GetScheduleConfig().MaxStoreDownTime.Duration
+
 	stores := cluster.GetStores()
 	storesInfo := &storesInfo{
 		Stores: make([]*storeInfo, 0, len(stores)),
@@ -325,7 +336,7 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		storeInfo := newStoreInfo(store)
+		storeInfo := newStoreInfo(store, maxStoreDownTime)
 		storesInfo.Stores = append(storesInfo.Stores, storeInfo)
 	}
 	storesInfo.Count = len(storesInfo.Stores)

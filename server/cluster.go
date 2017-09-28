@@ -590,9 +590,11 @@ func (c *RaftCluster) collectMetrics() {
 	cluster := c.cachedCluster
 
 	storeUpCount := 0
+	storeDisconnectedCount := 0
 	storeDownCount := 0
 	storeOfflineCount := 0
 	storeTombstoneCount := 0
+	storeLowSpaceCount := 0
 	storageSize := uint64(0)
 	storageCapacity := uint64(0)
 	minLeaderScore, maxLeaderScore := math.MaxFloat64, float64(0.0)
@@ -602,7 +604,13 @@ func (c *RaftCluster) collectMetrics() {
 		// Store state.
 		switch s.GetState() {
 		case metapb.StoreState_Up:
-			storeUpCount++
+			if s.DownTime() >= c.coordinator.opt.GetMaxStoreDownTime() {
+				storeDownCount++
+			} else if s.IsDisconnected() {
+				storeDisconnectedCount++
+			} else {
+				storeUpCount++
+			}
 		case metapb.StoreState_Offline:
 			storeOfflineCount++
 		case metapb.StoreState_Tombstone:
@@ -611,8 +619,8 @@ func (c *RaftCluster) collectMetrics() {
 		if s.IsTombstone() {
 			continue
 		}
-		if s.DownTime() >= c.coordinator.opt.GetMaxStoreDownTime() {
-			storeDownCount++
+		if s.LowSpace() {
+			storeLowSpaceCount++
 		}
 
 		// Store stats.
@@ -628,9 +636,11 @@ func (c *RaftCluster) collectMetrics() {
 
 	metrics := make(map[string]float64)
 	metrics["store_up_count"] = float64(storeUpCount)
+	metrics["store_disconnected_count"] = float64(storeDisconnectedCount)
 	metrics["store_down_count"] = float64(storeDownCount)
 	metrics["store_offline_count"] = float64(storeOfflineCount)
 	metrics["store_tombstone_count"] = float64(storeTombstoneCount)
+	metrics["store_low_space_count"] = float64(storeLowSpaceCount)
 	metrics["region_count"] = float64(cluster.getRegionCount())
 	metrics["storage_size"] = float64(storageSize)
 	metrics["storage_capacity"] = float64(storageCapacity)
