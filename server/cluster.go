@@ -112,10 +112,10 @@ func (c *RaftCluster) start() error {
 	c.cachedCluster = cluster
 	var classifier namespace.Classifier
 	if c.s.cfg.EnableNamespace {
-		log.Infoln("use namespace classifier")
+		log.Infoln("use namespace classifier.")
 		classifier = newTableNamespaceClassifier(c.cachedCluster.namespacesInfo, core.DefaultTableIDDecoder)
 	} else {
-		log.Infoln("use default classifier")
+		log.Infoln("use default classifier.")
 		classifier = namespace.DefaultClassifier
 	}
 	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt, c.s.hbStreams, classifier)
@@ -666,7 +666,7 @@ func (c *RaftCluster) CreateNamespace(name string) error {
 	}
 
 	cachedCluster := c.cachedCluster
-	if _, ok := cachedCluster.namespacesInfo.namespaces[name]; ok {
+	if n := cachedCluster.getNamespace(name); n != nil {
 		return errors.New("Duplicate namespace Name")
 	}
 
@@ -688,13 +688,13 @@ func (c *RaftCluster) AddNamespaceTableID(name string, tableID int64) error {
 		return errors.New("Table ID already exists in this cluster")
 	}
 
-	namespace := c.cachedCluster.getNamespace(name)
-	if namespace == nil {
+	n := c.cachedCluster.getNamespace(name)
+	if n == nil {
 		return errors.Errorf("invalid namespace Name %s, nod found", name)
 	}
 
-	namespace.AddTableID(tableID)
-	return c.cachedCluster.putNamespace(namespace)
+	n.AddTableID(tableID)
+	return c.cachedCluster.putNamespace(n)
 }
 
 // AddNamespaceStoreID adds store ID to namespace
@@ -706,11 +706,11 @@ func (c *RaftCluster) AddNamespaceStoreID(name string, storeID uint64) error {
 		return errors.New("Store ID already exists in this namespace")
 	}
 
-	namespace := c.cachedCluster.getNamespace(name)
-	if namespace == nil {
+	n := c.cachedCluster.getNamespace(name)
+	if n == nil {
 		return errors.Errorf("invalid namespace Name %s, not found", name)
 	}
 
-	namespace.AddStoreID(storeID)
-	return c.cachedCluster.putNamespace(namespace)
+	n.AddStoreID(storeID)
+	return c.cachedCluster.putNamespace(n)
 }
