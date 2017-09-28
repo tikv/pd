@@ -112,8 +112,10 @@ func (c *RaftCluster) start() error {
 	c.cachedCluster = cluster
 	var classifier namespace.Classifier
 	if c.s.cfg.EnableNamespace {
+		log.Infoln("use namespace classifier")
 		classifier = newTableNamespaceClassifier(c.cachedCluster.namespacesInfo, core.DefaultTableIDDecoder)
 	} else {
+		log.Infoln("use default classifier")
 		classifier = namespace.DefaultClassifier
 	}
 	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt, c.s.hbStreams, classifier)
