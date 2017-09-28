@@ -271,7 +271,9 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, interval time.D
 	go c.runScheduler(s)
 	c.schedulers[s.GetName()] = s
 	if c.opt.AddSchedulerCfg(s.GetType(), args) {
-		c.opt.persist(c.kv)
+		if err := c.opt.persist(c.kv); err != nil {
+			log.Errorf("can't persist when add scheduler %v: %v", s.GetName(), err)
+		}
 	}
 	return nil
 }
@@ -288,8 +290,15 @@ func (c *coordinator) removeScheduler(name string) error {
 	s.Stop()
 	delete(c.schedulers, name)
 
-	if c.opt.RemoveSchedulerCfg(name) {
-		c.opt.persist(c.kv)
+	ok, err := c.opt.RemoveSchedulerCfg(name)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if ok {
+		if err := c.opt.persist(c.kv); err != nil {
+			log.Errorf("can't persist when remove scheduler %v: %v", s.GetName(), err)
+		}
 	}
 	return nil
 }

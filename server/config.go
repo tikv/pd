@@ -475,19 +475,22 @@ func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) bool {
 	return true
 }
 
-func (o *scheduleOption) RemoveSchedulerCfg(name string) bool {
+func (o *scheduleOption) RemoveSchedulerCfg(name string) (bool, error) {
 	c := o.load()
 	v := c.clone()
 	for i, schedulerCfg := range v.Schedulers {
 		// To create a temporary scheduler is just used to get scheduler's name
-		tmp, _ := schedule.CreateScheduler(schedulerCfg.Type, o, schedulerCfg.Args...)
+		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, o, schedulerCfg.Args...)
+		if err != nil {
+			return false, errors.Trace(err)
+		}
 		if tmp.GetName() == name {
 			v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
 			o.store(v)
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func (o *scheduleOption) persist(kv *kv) error {
