@@ -314,26 +314,13 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	cfg.ReplicaScheduleLimit = 0
 	co := newCoordinator(cluster, opt, hbStreams, kv)
 	co.run()
+	defer co.stop()
 
 	c.Assert(co.schedulers, HasLen, 3)
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
-	c.Assert(co.schedulers, HasLen, 1)
-	co.stop()
-
-	// make a new coordinator for testing
-	// whether the schedulers added or removed in dynamic way are recorded in opt
-	co = newCoordinator(cluster, opt, hbStreams, kv)
-	co.run()
-	defer co.stop()
-	c.Assert(co.schedulers, HasLen, 1)
-	bls, err := schedule.CreateScheduler("balance-leader", opt)
-	c.Assert(err, IsNil)
-	c.Assert(co.addScheduler(bls, bls.GetInterval()), IsNil)
-	brs, err := schedule.CreateScheduler("balance-region", opt)
-	c.Assert(err, IsNil)
-	c.Assert(co.addScheduler(brs, brs.GetInterval()), IsNil)
-	c.Assert(co.schedulers, HasLen, 3)
+	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
+	c.Assert(co.schedulers, HasLen, 0)
 
 	stream := newMockHeartbeatStream()
 
@@ -373,6 +360,53 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	region3.Leader = region3.GetStorePeer(1)
 	cluster.putRegion(region3)
 	dispatchHeartbeatNoResp(c, co, region3, stream)
+}
+
+func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	kv := newKV(core.NewMemoryKV())
+	defer hbStreams.Close()
+
+	cfg, opt := newTestScheduleConfig()
+	cfg.ReplicaScheduleLimit = 0
+	co := newCoordinator(cluster, opt, hbStreams, kv)
+	co.run()
+
+	c.Assert(co.schedulers, HasLen, 3)
+	sls, err := schedule.CreateScheduler("shuffle-leader", opt)
+	c.Assert(err, IsNil)
+	c.Assert(co.addScheduler(sls, sls.GetInterval()), IsNil)
+	c.Assert(co.schedulers, HasLen, 4)
+	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
+	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
+	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
+	c.Assert(co.schedulers, HasLen, 1)
+	co.stop()
+
+	// make a new coordinator for testing
+	// whether the schedulers added or removed in dynamic way are recorded in opt
+	kv.loadScheduleOption(opt)
+	co = newCoordinator(cluster, opt, hbStreams, kv)
+	co.run()
+	c.Assert(co.schedulers, HasLen, 1)
+	bls, err := schedule.CreateScheduler("balance-leader", opt)
+	c.Assert(err, IsNil)
+	c.Assert(co.addScheduler(bls, bls.GetInterval()), IsNil)
+	brs, err := schedule.CreateScheduler("balance-region", opt)
+	c.Assert(err, IsNil)
+	c.Assert(co.addScheduler(brs, brs.GetInterval()), IsNil)
+	c.Assert(co.schedulers, HasLen, 3)
+	c.Assert(co.removeScheduler("shuffle-leader-scheduler"), IsNil)
+	c.Assert(co.schedulers, HasLen, 2)
+	co.stop()
+
+	kv.loadScheduleOption(opt)
+	co = newCoordinator(cluster, opt, hbStreams, kv)
+
+	co.run()
+	defer co.stop()
+	c.Assert(co.schedulers, HasLen, 2)
 }
 
 func (s *testCoordinatorSuite) TestRestart(c *C) {
