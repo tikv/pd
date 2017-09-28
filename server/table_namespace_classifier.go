@@ -55,16 +55,6 @@ func (ns *Namespace) GetID() uint64 {
 	return 0
 }
 
-// AddTableID adds a tableID to this namespace
-func (ns *Namespace) AddTableID(tableID int64) {
-	ns.TableIDs[tableID] = true
-}
-
-// AddStoreID adds a storeID to this namespace
-func (ns *Namespace) AddStoreID(storeID uint64) {
-	ns.StoreIDs[storeID] = true
-}
-
 // tableNamespaceClassifier implements Classifier interface
 type tableNamespaceClassifier struct {
 	nsInfo         *namespacesInfo

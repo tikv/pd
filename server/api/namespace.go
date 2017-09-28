@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/juju/errors"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
@@ -78,7 +79,7 @@ func (h *namespaceHandler) Post(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 
-func (h *namespaceHandler) Append(w http.ResponseWriter, r *http.Request) {
+func (h *namespaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
 		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
@@ -97,10 +98,27 @@ func (h *namespaceHandler) Append(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ns := input["namespace"]
+	action, ok := input["action"]
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, errors.New("missing parameters"))
+		return
+	}
 
-	// append table id to namespace
-	if err := cluster.AddNamespaceTableID(ns, tableID); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	switch action {
+	case "append":
+		// append table id to namespace
+		if err := cluster.AddNamespaceTableID(ns, tableID); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	case "remove":
+		// remove table id from namespace
+		if err := cluster.RemoveNamespaceTableID(ns, tableID); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	default:
+		h.rd.JSON(w, http.StatusBadRequest, errors.New("unknown action"))
 		return
 	}
 

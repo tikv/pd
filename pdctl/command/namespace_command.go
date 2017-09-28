@@ -23,18 +23,19 @@ import (
 
 const (
 	namespacePrefix    = "pd/api/v1/namespaces"
-	namespaceAddPrefix = "pd/api/v1/namespaces/add"
+	namespaceRelPrefix = "pd/api/v1/namespaces/rel"
 )
 
 // NewNamespaceCommand return a namespace sub-command of rootCmd
 func NewNamespaceCommand() *cobra.Command {
 	s := &cobra.Command{
-		Use:   "namespace [create|append]",
+		Use:   "namespace [create|append|remove]",
 		Short: "show the namespace information",
 		Run:   showNamespaceCommandFunc,
 	}
 	s.AddCommand(NewCreateNamespaceCommand())
 	s.AddCommand(NewAppendTableIDCommand())
+	s.AddCommand(NewRemoveTableIDCommand())
 	return s
 }
 
@@ -54,6 +55,16 @@ func NewAppendTableIDCommand() *cobra.Command {
 		Use:   "append <name> <table_id>",
 		Short: "add table id to namespace",
 		Run:   appendTableCommandFunc,
+	}
+	return c
+}
+
+// NewRemoveTableIDCommand returns a remove sub-command of namespaceCmd
+func NewRemoveTableIDCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "remove <name> <table_id>",
+		Short: "remove table id from namespace",
+		Run:   removeTableCommandFunc,
 	}
 	return c
 }
@@ -86,11 +97,31 @@ func appendTableCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	if _, err := strconv.Atoi(args[1]); err != nil {
 		fmt.Println("table_id shoud be a number")
+		return
 	}
 
 	input := make(map[string]interface{})
 	input["namespace"] = args[0]
 	input["table_id"] = args[1]
+	input["action"] = "append"
 
-	postJSON(cmd, namespaceAddPrefix, input)
+	postJSON(cmd, namespaceRelPrefix, input)
+}
+
+func removeTableCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 2 {
+		fmt.Println("Usage: namespace remove <name> <table_id>")
+		return
+	}
+	if _, err := strconv.Atoi(args[1]); err != nil {
+		fmt.Println("table_id shoud be a number")
+		return
+	}
+
+	input := make(map[string]interface{})
+	input["namespace"] = args[0]
+	input["table_id"] = args[1]
+	input["action"] = "remove"
+
+	postJSON(cmd, namespaceRelPrefix, input)
 }

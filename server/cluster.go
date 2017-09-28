@@ -676,7 +676,7 @@ func (c *RaftCluster) CreateNamespace(name string) error {
 	}
 
 	ns := NewNamespace(id, name)
-	return cachedCluster.putNamespace(ns)
+	return cachedCluster.putNamespaceLocked(ns)
 }
 
 // AddNamespaceTableID adds table ID to namespace
@@ -684,17 +684,35 @@ func (c *RaftCluster) AddNamespaceTableID(name string, tableID int64) error {
 	c.Lock()
 	defer c.Unlock()
 
+	n := c.cachedCluster.getNamespace(name)
+	if n == nil {
+		return errors.Errorf("invalid namespace Name %s, not found", name)
+	}
+
 	if c.cachedCluster.namespacesInfo.IsTableIDExist(tableID) {
 		return errors.New("Table ID already exists in this cluster")
 	}
 
+	n.TableIDs[tableID] = true
+	return c.cachedCluster.putNamespaceLocked(n)
+}
+
+// RemoveNamespaceTableID removes table ID from namespace
+func (c *RaftCluster) RemoveNamespaceTableID(name string, tableID int64) error {
+	c.Lock()
+	defer c.Unlock()
+
 	n := c.cachedCluster.getNamespace(name)
 	if n == nil {
-		return errors.Errorf("invalid namespace Name %s, nod found", name)
+		return errors.Errorf("invalid namespace Name %s, not found", name)
 	}
 
-	n.AddTableID(tableID)
-	return c.cachedCluster.putNamespace(n)
+	if _, ok := n.TableIDs[tableID]; !ok {
+		return errors.Errorf("Table ID %d is not belong to %s", tableID, name)
+	}
+
+	delete(n.TableIDs, tableID)
+	return c.cachedCluster.putNamespaceLocked(n)
 }
 
 // AddNamespaceStoreID adds store ID to namespace
@@ -702,15 +720,33 @@ func (c *RaftCluster) AddNamespaceStoreID(name string, storeID uint64) error {
 	c.Lock()
 	defer c.Unlock()
 
+	n := c.cachedCluster.getNamespace(name)
+	if n == nil {
+		return errors.Errorf("invalid namespace Name %s, not found", name)
+	}
+
 	if c.cachedCluster.namespacesInfo.IsStoreIDExist(storeID) {
 		return errors.New("Store ID already exists in this namespace")
 	}
+
+	n.StoreIDs[storeID] = true
+	return c.cachedCluster.putNamespaceLocked(n)
+}
+
+// RemoveNamespaceStoreID removes store ID from namespace
+func (c *RaftCluster) RemoveNamespaceStoreID(name string, storeID uint64) error {
+	c.Lock()
+	defer c.Unlock()
 
 	n := c.cachedCluster.getNamespace(name)
 	if n == nil {
 		return errors.Errorf("invalid namespace Name %s, not found", name)
 	}
 
-	n.AddStoreID(storeID)
-	return c.cachedCluster.putNamespace(n)
+	if _, ok := n.StoreIDs[storeID]; !ok {
+		return errors.Errorf("Store ID %d is not belong to %s", storeID, name)
+	}
+
+	delete(n.StoreIDs, storeID)
+	return c.cachedCluster.putNamespaceLocked(n)
 }

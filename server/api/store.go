@@ -226,10 +226,26 @@ func (h *storeHandler) SetNamespace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ns := input["namespace"]
+	action, ok := input["action"]
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, errors.New("missing parameters"))
+	}
 
-	// append store id to namespace
-	if err := cluster.AddNamespaceStoreID(ns, storeID); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	switch action {
+	case "add":
+		// append store id to namespace
+		if err := cluster.AddNamespaceStoreID(ns, storeID); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	case "remove":
+		// remove store id from namespace
+		if err := cluster.RemoveNamespaceStoreID(ns, storeID); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	default:
+		h.rd.JSON(w, http.StatusBadRequest, errors.New("unknown action"))
 		return
 	}
 
