@@ -30,7 +30,7 @@ var (
 // NewStoreCommand return a store subcommand of rootCmd
 func NewStoreCommand() *cobra.Command {
 	s := &cobra.Command{
-		Use:   "store [delete|label|weight] <store_id>",
+		Use:   "store [delete|label|weight|set_namespace|rm_namespace] <store_id> [namespace]",
 		Short: "show the store status",
 		Run:   showStoreCommandFunc,
 	}
