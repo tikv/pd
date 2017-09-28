@@ -347,6 +347,29 @@ var defaultSchedulers = SchedulerConfigs{
 	SchedulerConfig{Type: "hot-region"},
 }
 
+// Equals is to compare whether two ScheduleConfig is same or not
+func (c *SchedulerConfig) Equals(s SchedulerConfig) bool {
+	stringSliceEqual := func(a, b []string) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		if (a == nil) != (b == nil) {
+			return false
+		}
+		for i, v := range a {
+			if v != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// comparing args is to cover the case that there are schedulers in same type but not with same name
+	// such as two schedulers of type evictLeader,
+	// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
+	return c.Type == s.Type && stringSliceEqual(c.Args, s.Args)
+}
+
 func (c *ScheduleConfig) adjust() {
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
@@ -443,28 +466,10 @@ func (o *scheduleOption) GetSchedulers() SchedulerConfigs {
 }
 
 func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) bool {
-	stringSliceEqual := func(a, b []string) bool {
-		if len(a) != len(b) {
-			return false
-		}
-		if (a == nil) != (b == nil) {
-			return false
-		}
-		for i, v := range a {
-			if v != b[i] {
-				return false
-			}
-		}
-		return true
-	}
-
 	c := o.load()
 	v := c.clone()
 	for _, schedulerCfg := range v.Schedulers {
-		// comparing args is to cover the case that there are schedulers in same type but not with same name
-		// such as two schedulers of type evictLeader,
-		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
-		if schedulerCfg.Type == tp && stringSliceEqual(schedulerCfg.Args, args) {
+		if schedulerCfg.Equals(SchedulerConfig{tp, args}) {
 			return false
 		}
 	}
