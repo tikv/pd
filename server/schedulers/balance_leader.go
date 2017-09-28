@@ -52,7 +52,7 @@ func (l *balanceLeaderScheduler) GetName() string {
 }
 
 func (l *balanceLeaderScheduler) GetType() string {
-	return "balanceLeader"
+	return "balance-leader"
 }
 
 func (l *balanceLeaderScheduler) GetInterval() time.Duration {

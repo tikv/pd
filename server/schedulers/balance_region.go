@@ -62,7 +62,7 @@ func (s *balanceRegionScheduler) GetName() string {
 }
 
 func (s *balanceRegionScheduler) GetType() string {
-	return "balanceLeader"
+	return "balance-region"
 }
 
 func (s *balanceRegionScheduler) GetInterval() time.Duration {

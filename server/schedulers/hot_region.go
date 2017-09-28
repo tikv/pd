@@ -112,7 +112,7 @@ func (h *balanceHotRegionsScheduler) GetName() string {
 }
 
 func (h *balanceHotRegionsScheduler) GetType() string {
-	return "hotRegion"
+	return "hot-region"
 }
 
 func (h *balanceHotRegionsScheduler) GetInterval() time.Duration {

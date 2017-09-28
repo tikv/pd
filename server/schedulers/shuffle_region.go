@@ -50,7 +50,7 @@ func (s *shuffleRegionScheduler) GetName() string {
 }
 
 func (s *shuffleRegionScheduler) GetType() string {
-	return "shuffleRegion"
+	return "shuffle-region"
 }
 
 func (s *shuffleRegionScheduler) GetInterval() time.Duration {

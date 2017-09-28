@@ -60,7 +60,7 @@ func (s *grantLeaderScheduler) GetName() string {
 }
 
 func (s *grantLeaderScheduler) GetType() string {
-	return "grantLeader"
+	return "grant-leader"
 }
 
 func (s *grantLeaderScheduler) GetInterval() time.Duration {

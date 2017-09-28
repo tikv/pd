@@ -52,7 +52,7 @@ func (s *shuffleLeaderScheduler) GetName() string {
 }
 
 func (s *shuffleLeaderScheduler) GetType() string {
-	return "shuffleLeader"
+	return "shuffle-leader"
 }
 
 func (s *shuffleLeaderScheduler) GetInterval() time.Duration {
