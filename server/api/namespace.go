@@ -105,7 +105,7 @@ func (h *namespaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch action {
-	case "append":
+	case "add":
 		// append table id to namespace
 		if err := cluster.AddNamespaceTableID(ns, tableID); err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
