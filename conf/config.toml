@@ -54,15 +54,8 @@ replica-schedule-limit = 24
 # customized schedulers, the format is as below
 # if empty, it will use balance-leader, balance-region, hot-region as default
 # [[schedule.schedulers]]
-# type = "balance-leader"
-# args = ["foo", "bar"]
-#		
-# [[schedule.schedulers]]
-# type = "balance-region"
-#		
-# [[schedule.schedulers]]
-# type = "hot-region"
-#
+# type = "evict-leader"
+# args = ["1"]
 		
 	
 [replication]
