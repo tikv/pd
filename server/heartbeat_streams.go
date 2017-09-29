@@ -14,7 +14,7 @@
 package server
 
 import (
-	"fmt"
+	"strconv"
 	"sync"
 
 	log "github.com/Sirupsen/logrus"
@@ -65,7 +65,7 @@ func (s *heartbeatStreams) run() {
 			s.streams[update.storeID] = update.stream
 		case msg := <-s.msgCh:
 			storeID := msg.GetTargetPeer().GetStoreId()
-			storeLabel := fmt.Sprintf("tikv%d", storeID)
+			storeLabel := strconv.FormatUint(storeID, 10)
 			if stream, ok := s.streams[storeID]; ok {
 				if err := stream.Send(msg); err != nil {
 					log.Errorf("[region %v] send heartbeat message fail: %v", msg.RegionId, err)

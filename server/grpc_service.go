@@ -16,6 +16,7 @@ package server
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -304,7 +305,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		}
 
 		storeID := request.GetLeader().GetStoreId()
-		storeLabel := fmt.Sprintf("tikv%d", storeID)
+		storeLabel := strconv.FormatUint(storeID, 10)
 
 		regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "recv").Inc()
 
