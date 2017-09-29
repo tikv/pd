@@ -71,6 +71,8 @@ func (h *labelsHandler) GetStores(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	maxDownTime := h.svr.GetScheduleConfig().MaxStoreDownTime.Duration
+
 	stores := cluster.GetStores()
 	storesInfo := &storesInfo{
 		Stores: make([]*storeInfo, 0, len(stores)),
@@ -84,7 +86,7 @@ func (h *labelsHandler) GetStores(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		storeInfo := newStoreInfo(store)
+		storeInfo := newStoreInfo(store, maxDownTime)
 		storesInfo.Stores = append(storesInfo.Stores, storeInfo)
 	}
 	storesInfo.Count = len(storesInfo.Stores)
