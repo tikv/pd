@@ -364,6 +364,7 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 
 func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	kv := newKV(core.NewMemoryKV())
 	defer hbStreams.Close()
@@ -373,15 +374,22 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	co := newCoordinator(cluster, opt, hbStreams, kv)
 	co.run()
 
+	// Add stores 1,2
+	tc.addLeaderStore(1, 1)
+	tc.addLeaderStore(2, 1)
+
 	c.Assert(co.schedulers, HasLen, 3)
-	sls, err := schedule.CreateScheduler("shuffle-leader", opt)
+	gls1, err := schedule.CreateScheduler("grant-leader", opt, "1")
 	c.Assert(err, IsNil)
-	c.Assert(co.addScheduler(sls, sls.GetInterval()), IsNil)
-	c.Assert(co.schedulers, HasLen, 4)
+	c.Assert(co.addScheduler(gls1, gls1.GetInterval(), "1"), IsNil)
+	gls2, err := schedule.CreateScheduler("grant-leader", opt, "2")
+	c.Assert(err, IsNil)
+	c.Assert(co.addScheduler(gls2, gls2.GetInterval(), "2"), IsNil)
+	c.Assert(co.schedulers, HasLen, 5)
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
 	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
-	c.Assert(co.schedulers, HasLen, 1)
+	c.Assert(co.schedulers, HasLen, 2)
 	co.stop()
 
 	// make a new coordinator for testing
@@ -389,16 +397,16 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	kv.loadScheduleOption(opt)
 	co = newCoordinator(cluster, opt, hbStreams, kv)
 	co.run()
-	c.Assert(co.schedulers, HasLen, 1)
+	c.Assert(co.schedulers, HasLen, 2)
 	bls, err := schedule.CreateScheduler("balance-leader", opt)
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(bls, bls.GetInterval()), IsNil)
 	brs, err := schedule.CreateScheduler("balance-region", opt)
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(brs, brs.GetInterval()), IsNil)
+	c.Assert(co.schedulers, HasLen, 4)
+	c.Assert(co.removeScheduler("grant-leader-scheduler-1"), IsNil)
 	c.Assert(co.schedulers, HasLen, 3)
-	c.Assert(co.removeScheduler("shuffle-leader-scheduler"), IsNil)
-	c.Assert(co.schedulers, HasLen, 2)
 	co.stop()
 
 	kv.loadScheduleOption(opt)
@@ -406,6 +414,8 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 
 	co.run()
 	defer co.stop()
+	c.Assert(co.schedulers, HasLen, 3)
+	c.Assert(co.removeScheduler("grant-leader-scheduler-2"), IsNil)
 	c.Assert(co.schedulers, HasLen, 2)
 }
 
