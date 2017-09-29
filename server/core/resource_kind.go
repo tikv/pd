@@ -27,6 +27,8 @@ const (
 	RegionKind
 	// PriorityKind indicates the priority kind resource
 	PriorityKind
+	// AdjacentKind indicates the adjacent resource
+	AdjacentKind
 	// OtherKind indicates the other kind resource
 	OtherKind
 )

@@ -24,6 +24,7 @@ import (
 
 const (
 	scanLimit                    = 1000
+	adjacentResourceLimit        = 12
 	minAdjacentSchedulerInterval = time.Second
 	maxAdjacentSchedulerInterval = 20 * time.Second
 )
@@ -52,7 +53,7 @@ func newBalanceAdjacentRegionScheduler(opt schedule.Options) schedule.Scheduler 
 	}
 	return &balanceAdjacentRegionScheduler{
 		opt:      opt,
-		limit:    12,
+		limit:    adjacentResourceLimit,
 		selector: schedule.NewBalanceSelector(core.LeaderKind, filters),
 		lastKey:  []byte(""),
 	}
@@ -72,7 +73,7 @@ func (l *balanceAdjacentRegionScheduler) GetNextInterval(interval time.Duration)
 }
 
 func (l *balanceAdjacentRegionScheduler) GetResourceKind() core.ResourceKind {
-	return core.OtherKind
+	return core.AdjacentKind
 }
 
 func (l *balanceAdjacentRegionScheduler) GetResourceLimit() uint64 {
@@ -169,5 +170,5 @@ func (l *balanceAdjacentRegionScheduler) transferPeer(cluster schedule.Cluster, 
 	// record the store id and exclude it in next time
 	l.ids = append(l.ids, newPeer.GetStoreId())
 
-	return schedule.CreateMovePeerOperator("balance-adjacent-region", region, core.RegionKind, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	return schedule.CreateMovePeerOperator("balance-adjacent-region", region, core.AdjacentKind, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }
