@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -347,26 +348,6 @@ var defaultSchedulers = SchedulerConfigs{
 	SchedulerConfig{Type: "hot-region"},
 }
 
-// Equals is to compare whether two ScheduleConfig is same or not
-func (c *SchedulerConfig) Equals(s SchedulerConfig) bool {
-	stringSliceEqual := func(a, b []string) bool {
-		if len(a) != len(b) {
-			return false
-		}
-		for i, v := range a {
-			if v != b[i] {
-				return false
-			}
-		}
-		return true
-	}
-
-	// comparing args is to cover the case that there are schedulers in same type but not with same name
-	// such as two schedulers of type evictLeader,
-	// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
-	return c.Type == s.Type && stringSliceEqual(c.Args, s.Args)
-}
-
 func (c *ScheduleConfig) adjust() {
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
@@ -466,7 +447,10 @@ func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) bool {
 	c := o.load()
 	v := c.clone()
 	for _, schedulerCfg := range v.Schedulers {
-		if schedulerCfg.Equals(SchedulerConfig{tp, args}) {
+		// comparing args is to cover the case that there are schedulers in same type but not with same name
+		// such as two schedulers of type "evict-leader",
+		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
+		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{tp, args}) {
 			return false
 		}
 	}
