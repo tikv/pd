@@ -39,7 +39,8 @@ var resourceKindToName = map[ResourceKind]string{
 	2: "leader",
 	3: "region",
 	4: "priority",
-	5: "other",
+	5: "adjacent",
+	6: "other",
 }
 
 var resourceNameToValue = map[string]ResourceKind{
@@ -48,6 +49,7 @@ var resourceNameToValue = map[string]ResourceKind{
 	"leader":   LeaderKind,
 	"region":   RegionKind,
 	"priority": PriorityKind,
+	"adjacent": AdjacentKind,
 	"other":    OtherKind,
 }
 
