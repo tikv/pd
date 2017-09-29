@@ -303,10 +303,14 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			return errors.Trace(err)
 		}
 
+		storeID := request.GetLeader().GetStoreId()
+		storeLabel := fmt.Sprintf("tikv%d", storeID)
+
+		regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "recv").Inc()
+
 		hbStreams := cluster.coordinator.hbStreams
 
 		if isNew {
-			storeID := request.GetLeader().GetStoreId()
 			hbStreams.bindStream(storeID, server)
 			isNew = false
 		}
@@ -318,29 +322,29 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		region.ReadBytes = request.GetBytesRead()
 		if region.GetId() == 0 {
 			msg := fmt.Sprintf("invalid request region, %v", request)
-			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg)
+			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)
 			continue
 		}
 		if region.Leader == nil {
 			msg := fmt.Sprintf("invalid request leader, %v", request)
-			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg)
+			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)
 			continue
 		}
 
 		err = cluster.cachedCluster.handleRegionHeartbeat(region)
 		if err != nil {
 			msg := errors.Trace(err).Error()
-			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg)
+			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)
 			continue
 		}
 
 		err = cluster.handleRegionHeartbeat(region)
 		if err != nil {
 			msg := errors.Trace(err).Error()
-			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg)
+			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)
 		}
 
-		regionHeartbeatCounter.WithLabelValues("report", "ok").Inc()
+		regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "ok").Inc()
 	}
 }
 
