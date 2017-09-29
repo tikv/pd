@@ -49,8 +49,12 @@ func (s *shuffleRegionScheduler) GetName() string {
 	return "shuffle-region-scheduler"
 }
 
-func (s *shuffleRegionScheduler) GetInterval() time.Duration {
-	return schedule.MinScheduleInterval
+func (s *shuffleRegionScheduler) GetMinInterval() time.Duration {
+	return MinScheduleInterval
+}
+
+func (s *shuffleRegionScheduler) GetNextInterval(interval time.Duration) time.Duration {
+	return intervalGrow(interval, MaxScheduleInterval, exponentailGrowth)
 }
 
 func (s *shuffleRegionScheduler) GetResourceKind() core.ResourceKind {

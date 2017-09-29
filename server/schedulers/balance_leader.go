@@ -51,8 +51,12 @@ func (l *balanceLeaderScheduler) GetName() string {
 	return "balance-leader-scheduler"
 }
 
-func (l *balanceLeaderScheduler) GetInterval() time.Duration {
-	return schedule.MinScheduleInterval
+func (l *balanceLeaderScheduler) GetMinInterval() time.Duration {
+	return MinScheduleInterval
+}
+
+func (l *balanceLeaderScheduler) GetNextInterval(interval time.Duration) time.Duration {
+	return intervalGrow(interval, MaxScheduleInterval, exponentailGrowth)
 }
 
 func (l *balanceLeaderScheduler) GetResourceKind() core.ResourceKind {

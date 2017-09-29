@@ -34,7 +34,6 @@ const (
 	historiesCacheSize        = 1000
 	eventsCacheSize           = 1000
 	maxScheduleRetries        = 10
-	scheduleIntervalFactor    = 1.3
 
 	statCacheMaxLen               = 1000
 	hotWriteRegionMinFlowRate     = 16 * 1024
@@ -141,7 +140,7 @@ func (c *coordinator) run() {
 			log.Errorf("can not create scheduler %s: %v", name, err)
 		} else {
 			log.Infof("create scheduler %s", name)
-			if err := c.addScheduler(s, s.GetInterval()); err != nil {
+			if err := c.addScheduler(s); err != nil {
 				log.Errorf("can not add scheduler %s: %v", name, err)
 			}
 		}
@@ -254,7 +253,7 @@ func (c *coordinator) shouldRun() bool {
 	return c.cluster.isPrepared()
 }
 
-func (c *coordinator) addScheduler(scheduler schedule.Scheduler, interval time.Duration) error {
+func (c *coordinator) addScheduler(scheduler schedule.Scheduler) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -262,7 +261,7 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, interval time.D
 		return errSchedulerExisted
 	}
 
-	s := newScheduleController(c, scheduler, interval)
+	s := newScheduleController(c, scheduler)
 	if err := s.Prepare(c.cluster); err != nil {
 		return errors.Trace(err)
 	}
@@ -485,19 +484,17 @@ type scheduleController struct {
 	opt          *scheduleOption
 	limiter      *scheduleLimiter
 	nextInterval time.Duration
-	minInterval  time.Duration
 	ctx          context.Context
 	cancel       context.CancelFunc
 }
 
-func newScheduleController(c *coordinator, s schedule.Scheduler, minInterval time.Duration) *scheduleController {
+func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleController {
 	ctx, cancel := context.WithCancel(c.ctx)
 	return &scheduleController{
 		Scheduler:    s,
 		opt:          c.opt,
 		limiter:      c.limiter,
-		nextInterval: minInterval,
-		minInterval:  minInterval,
+		nextInterval: s.GetMinInterval(),
 		ctx:          ctx,
 		cancel:       cancel,
 	}
@@ -515,13 +512,13 @@ func (s *scheduleController) Schedule(cluster schedule.Cluster) *schedule.Operat
 	for i := 0; i < maxScheduleRetries; i++ {
 		// If we have schedule, reset interval to the minimal interval.
 		if op := s.Scheduler.Schedule(cluster); op != nil {
-			s.nextInterval = s.minInterval
+			s.nextInterval = s.Scheduler.GetMinInterval()
 			return op
 		}
 	}
 
 	// If we have no schedule, increase the interval exponentially.
-	s.nextInterval = minDuration(time.Duration(float64(s.nextInterval)*scheduleIntervalFactor), schedule.MaxScheduleInterval)
+	s.nextInterval = s.Scheduler.GetNextInterval(s.nextInterval)
 
 	return nil
 }

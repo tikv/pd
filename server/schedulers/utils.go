@@ -24,6 +24,15 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 )
 
+// options for interval of schedulers
+const (
+	MaxScheduleInterval     = time.Minute
+	MinScheduleInterval     = time.Millisecond * 10
+	MinSlowScheduleInterval = time.Second * 3
+
+	ScheduleIntervalFactor = 1.3
+)
+
 // scheduleTransferLeader schedules a region to transfer leader to the peer.
 func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s schedule.Selector, filters ...schedule.Filter) (*core.RegionInfo, *metapb.Peer) {
 	stores := cluster.GetStores()
@@ -178,4 +187,26 @@ func adjustBalanceLimit(cluster schedule.Cluster, kind core.ResourceKind) uint64
 	}
 	limit, _ := stats.StandardDeviation(stats.Float64Data(counts))
 	return maxUint64(1, uint64(limit))
+}
+
+type intervalGrowthType int
+
+const (
+	exponentailGrowth intervalGrowthType = iota
+	linearGrowth
+	zeroGrowth
+)
+
+func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowthType) time.Duration {
+	switch typ {
+	case exponentailGrowth:
+		return minDuration(time.Duration(float64(x)*ScheduleIntervalFactor), maxInterval)
+	case linearGrowth:
+		return minDuration(x+MinSlowScheduleInterval, maxInterval)
+	case zeroGrowth:
+		return x
+	default:
+		log.Fatal("unKnow interval growth type")
+	}
+	return 0
 }

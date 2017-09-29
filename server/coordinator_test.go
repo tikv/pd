@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedulers"
 )
 
 func newTestOperator(regionID uint64, kind core.ResourceKind) *schedule.Operator {
@@ -331,12 +332,12 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 
 	gls, err := schedule.CreateScheduler("grant-leader", opt, "0")
 	c.Assert(err, IsNil)
-	c.Assert(co.addScheduler(gls, schedule.MinScheduleInterval), NotNil)
+	c.Assert(co.addScheduler(gls), NotNil)
 	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
 
 	gls, err = schedule.CreateScheduler("grant-leader", opt, "1")
 	c.Assert(err, IsNil)
-	c.Assert(co.addScheduler(gls, schedule.MinScheduleInterval), IsNil)
+	c.Assert(co.addScheduler(gls), IsNil)
 
 	// Transfer all leaders to store 1.
 	waitOperator(c, co, 2)
@@ -451,9 +452,9 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	lb := &mockLimitScheduler{
 		Scheduler: scheduler,
 	}
-	sc := newScheduleController(co, lb, schedule.MinScheduleInterval)
+	sc := newScheduleController(co, lb)
 
-	for i := schedule.MinScheduleInterval; sc.GetInterval() != schedule.MaxScheduleInterval; i = time.Duration(float64(i) * scheduleIntervalFactor) {
+	for i := schedulers.MinScheduleInterval; sc.GetInterval() != schedulers.MaxScheduleInterval; i = time.Duration(float64(i) * schedulers.ScheduleIntervalFactor) {
 		c.Assert(sc.GetInterval(), Equals, i)
 		c.Assert(sc.Schedule(cluster), IsNil)
 	}
@@ -505,12 +506,12 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	co := newCoordinator(cluster, opt, hbStreams)
 	lb, err := schedule.CreateScheduler("balance-leader", opt)
 	c.Assert(err, IsNil)
-	sc := newScheduleController(co, lb, schedule.MinScheduleInterval)
+	sc := newScheduleController(co, lb)
 
 	// If no operator for x seconds, the next check should be in x/2 seconds.
 	idleSeconds := []int{5, 10, 20, 30, 60}
 	for _, n := range idleSeconds {
-		sc.nextInterval = schedule.MinScheduleInterval
+		sc.nextInterval = schedulers.MinScheduleInterval
 		for totalSleep := time.Duration(0); totalSleep <= time.Second*time.Duration(n); totalSleep += sc.GetInterval() {
 			c.Assert(sc.Schedule(cluster), IsNil)
 		}

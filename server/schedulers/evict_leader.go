@@ -63,8 +63,12 @@ func (s *evictLeaderScheduler) GetName() string {
 	return s.name
 }
 
-func (s *evictLeaderScheduler) GetInterval() time.Duration {
-	return schedule.MinScheduleInterval
+func (s *evictLeaderScheduler) GetMinInterval() time.Duration {
+	return MinScheduleInterval
+}
+
+func (s *evictLeaderScheduler) GetNextInterval(interval time.Duration) time.Duration {
+	return intervalGrow(interval, MaxScheduleInterval, exponentailGrowth)
 }
 
 func (s *evictLeaderScheduler) GetResourceKind() core.ResourceKind {

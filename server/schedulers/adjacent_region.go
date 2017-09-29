@@ -17,10 +17,15 @@ import (
 	"bytes"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+)
+
+const (
+	scanLimit                    = 1000
+	minAdjacentSchedulerInterval = time.Second
+	maxAdjacentSchedulerInterval = 20 * time.Second
 )
 
 func init() {
@@ -58,8 +63,12 @@ func (l *balanceAdjacentRegionScheduler) GetName() string {
 	return "balance-adjacent-region-scheduler"
 }
 
-func (l *balanceAdjacentRegionScheduler) GetInterval() time.Duration {
-	return schedule.MinScheduleInterval
+func (l *balanceAdjacentRegionScheduler) GetMinInterval() time.Duration {
+	return minAdjacentSchedulerInterval
+}
+
+func (l *balanceAdjacentRegionScheduler) GetNextInterval(interval time.Duration) time.Duration {
+	return intervalGrow(interval, maxAdjacentSchedulerInterval, linearGrowth)
 }
 
 func (l *balanceAdjacentRegionScheduler) GetResourceKind() core.ResourceKind {
@@ -73,8 +82,6 @@ func (l *balanceAdjacentRegionScheduler) GetResourceLimit() uint64 {
 func (l *balanceAdjacentRegionScheduler) Prepare(cluster schedule.Cluster) error { return nil }
 
 func (l *balanceAdjacentRegionScheduler) Cleanup(cluster schedule.Cluster) {}
-
-const scanLimit = 1000
 
 func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	if l.ids == nil {
@@ -101,7 +108,6 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *sch
 			adjacentRegions[0] = r
 		} else {
 			// got adjacent regions
-			log.Infof("Debug got adjacent regions %+v, len: %d", adjacentRegions, len(adjacentRegions))
 			break
 		}
 	}
@@ -119,7 +125,6 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *sch
 
 		r := adjacentRegions[1]
 		op := l.transferPeer(cluster, r, r.Leader)
-		log.Info("Debug got operator: ", op)
 		return op
 	}
 	l.ids = l.ids[:0]
