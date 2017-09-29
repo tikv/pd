@@ -40,6 +40,7 @@ func init() {
 		command.NewConfigCommand(),
 		command.NewRegionCommand(),
 		command.NewStoreCommand(),
+		command.NewStoreNsCommand(),
 		command.NewMemberCommand(),
 		command.NewExitCommand(),
 		command.NewLabelCommand(),

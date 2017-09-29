@@ -59,9 +59,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/store/{id}", storeHandler.Get).Methods("GET")
 	router.HandleFunc("/api/v1/store/{id}", storeHandler.Delete).Methods("DELETE")
 	router.HandleFunc("/api/v1/store/{id}/label", storeHandler.SetLabels).Methods("POST")
-	router.HandleFunc("/api/v1/store/{id}/namespace", storeHandler.SetNamespace).Methods("POST")
 	router.HandleFunc("/api/v1/store/{id}/weight", storeHandler.SetWeight).Methods("POST")
 	router.Handle("/api/v1/stores", newStoresHandler(svr, rd)).Methods("GET")
+
+	storeNsHandler := newStoreNsHandler(svr, rd)
+	router.HandleFunc("/api/v1/store_ns/{id}", storeNsHandler.SetNamespace).Methods("POST")
 
 	labelsHandler := newLabelsHandler(svr, rd)
 	router.HandleFunc("/api/v1/labels", labelsHandler.Get).Methods("GET")

@@ -30,15 +30,13 @@ var (
 // NewStoreCommand return a store subcommand of rootCmd
 func NewStoreCommand() *cobra.Command {
 	s := &cobra.Command{
-		Use:   "store [delete|label|weight|set_namespace|rm_namespace] <store_id> [namespace]",
+		Use:   "store [delete|label|weight] <store_id>",
 		Short: "show the store status",
 		Run:   showStoreCommandFunc,
 	}
 	s.AddCommand(NewDeleteStoreCommand())
 	s.AddCommand(NewLabelStoreCommand())
 	s.AddCommand(NewSetStoreWeightCommand())
-	s.AddCommand(NewSetNamespaceStoreCommand())
-	s.AddCommand(NewRemoveNamespaceStoreCommand())
 	return s
 }
 
@@ -69,28 +67,6 @@ func NewSetStoreWeightCommand() *cobra.Command {
 		Short: "set a store's leader and region balance weight",
 		Run:   setStoreWeightCommandFunc,
 	}
-}
-
-// NewSetNamespaceStoreCommand returns a set_namespace subcommand of storeCmd.
-func NewSetNamespaceStoreCommand() *cobra.Command {
-	n := &cobra.Command{
-		Use:   "set_namespace <store_id> <namespace>",
-		Short: "set namespace to store",
-		Run:   setNamespaceStoreCommandFunc,
-	}
-
-	return n
-}
-
-// NewRemoveNamespaceStoreCommand returns a remove_namespace subcommand of storeCmd.
-func NewRemoveNamespaceStoreCommand() *cobra.Command {
-	n := &cobra.Command{
-		Use:   "rm_namespace <store_id> <namespace>",
-		Short: "remove namespace from store",
-		Run:   removeNamespaceStoreCommandFunc,
-	}
-
-	return n
 }
 
 func showStoreCommandFunc(cmd *cobra.Command, args []string) {
@@ -161,39 +137,5 @@ func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {
 	postJSON(cmd, prefix, map[string]interface{}{
 		"leader": leader,
 		"region": region,
-	})
-}
-
-func setNamespaceStoreCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 2 {
-		fmt.Println("Usage: store set_namespace <store_id> <namespace>")
-		return
-	}
-	_, err := strconv.Atoi(args[0])
-	if err != nil {
-		fmt.Println("store_id should be a number")
-		return
-	}
-	prefix := fmt.Sprintf(path.Join(storePrefix, "namespace"), args[0])
-	postJSON(cmd, prefix, map[string]interface{}{
-		"namespace": args[1],
-		"action":    "add",
-	})
-}
-
-func removeNamespaceStoreCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 2 {
-		fmt.Println("Usage: store rm_namespace <store_id> <namespace>")
-		return
-	}
-	_, err := strconv.Atoi(args[0])
-	if err != nil {
-		fmt.Println("store_id should be a number")
-		return
-	}
-	prefix := fmt.Sprintf(path.Join(storePrefix, "namespace"), args[0])
-	postJSON(cmd, prefix, map[string]interface{}{
-		"namespace": args[1],
-		"action":    "remove",
 	})
 }
