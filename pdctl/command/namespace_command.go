@@ -84,8 +84,9 @@ func createNamespaceCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	input := make(map[string]interface{})
-	input["namespace"] = args[0]
+	input := map[string]interface{}{
+		"namespace": args[0],
+	}
 
 	postJSON(cmd, namespacePrefix, input)
 }
@@ -100,10 +101,11 @@ func addTableCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	input := make(map[string]interface{})
-	input["namespace"] = args[0]
-	input["table_id"] = args[1]
-	input["action"] = "add"
+	input := map[string]interface{}{
+		"namespace": args[0],
+		"table_id":  args[1],
+		"action":    "add",
+	}
 
 	postJSON(cmd, namespaceRelPrefix, input)
 }
@@ -118,10 +120,11 @@ func removeTableCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	input := make(map[string]interface{})
-	input["namespace"] = args[0]
-	input["table_id"] = args[1]
-	input["action"] = "remove"
+	input := map[string]interface{}{
+		"namespace": args[0],
+		"table_id":  args[1],
+		"action":    "remove",
+	}
 
 	postJSON(cmd, namespaceRelPrefix, input)
 }
