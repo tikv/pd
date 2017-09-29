@@ -693,7 +693,7 @@ func (c *RaftCluster) AddNamespaceTableID(name string, tableID int64) error {
 		return errors.New("Table ID already exists in this cluster")
 	}
 
-	n.TableIDs[tableID] = true
+	n.AddTableID(tableID)
 	return c.cachedCluster.putNamespaceLocked(n)
 }
 
@@ -729,7 +729,7 @@ func (c *RaftCluster) AddNamespaceStoreID(name string, storeID uint64) error {
 		return errors.New("Store ID already exists in this namespace")
 	}
 
-	n.StoreIDs[storeID] = true
+	n.AddStoreID(storeID)
 	return c.cachedCluster.putNamespaceLocked(n)
 }
 
