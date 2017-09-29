@@ -619,7 +619,7 @@ func (c *RaftCluster) collectMetrics() {
 		if s.IsTombstone() {
 			continue
 		}
-		if s.LowSpace() {
+		if s.IsLowSpace() {
 			storeLowSpaceCount++
 		}
 

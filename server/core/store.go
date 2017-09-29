@@ -133,11 +133,11 @@ func (s *StoreInfo) AvailableRatio() float64 {
 	return float64(s.Stats.GetAvailable()) / float64(s.Stats.GetCapacity())
 }
 
-const storeSpaceThreshold = 0.2
+const storeLowSpaceThreshold = 0.2
 
-// LowSpace checks if the store is lack of space.
-func (s *StoreInfo) LowSpace() bool {
-	return s.AvailableRatio() < storeSpaceThreshold
+// IsLowSpace checks if the store is lack of space.
+func (s *StoreInfo) IsLowSpace() bool {
+	return s.AvailableRatio() < storeLowSpaceThreshold
 }
 
 // ResourceCount reutrns count of leader/region in the store.
@@ -178,10 +178,10 @@ func (s *StoreInfo) GetUptime() time.Duration {
 	return 0
 }
 
-// If a store's last heartbeat is before now-storeDisconnectDuration, the store
-// will be marked as disconnected state. The value should be greater than tikv's
+// If a store's last heartbeat is storeDisconnectDuration ago, the store will
+// be marked as disconnected state. The value should be greater than tikv's
 // store heartbeat interval (default 10s).
-var storeDisconnectDuration = time.Minute
+var storeDisconnectDuration = 20 * time.Second
 
 // IsDisconnected checks if a store is disconnected, which means PD misses
 // tikv's store heartbeat for a short time, maybe caused by process restart or

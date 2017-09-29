@@ -183,7 +183,7 @@ func (f *storageThresholdFilter) FilterSource(store *core.StoreInfo) bool {
 }
 
 func (f *storageThresholdFilter) FilterTarget(store *core.StoreInfo) bool {
-	return store.LowSpace()
+	return store.IsLowSpace()
 }
 
 // distinctScoreFilter ensures that distinct score will not decrease.
