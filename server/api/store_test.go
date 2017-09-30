@@ -266,10 +266,14 @@ func (s *testStoreSuite) TestDownState(c *C) {
 		Stats:           &pdpb.StoreStats{},
 		LastHeartbeatTS: time.Now(),
 	}
-	storeInfo := newStoreInfo(store)
+	storeInfo := newStoreInfo(store, time.Hour)
 	c.Assert(storeInfo.Store.StateName, Equals, metapb.StoreState_Up.String())
 
 	store.LastHeartbeatTS = time.Now().Add(-time.Minute * 2)
-	storeInfo = newStoreInfo(store)
+	storeInfo = newStoreInfo(store, time.Hour)
+	c.Assert(storeInfo.Store.StateName, Equals, disconnectedName)
+
+	store.LastHeartbeatTS = time.Now().Add(-time.Hour * 2)
+	storeInfo = newStoreInfo(store, time.Hour)
 	c.Assert(storeInfo.Store.StateName, Equals, downStateName)
 }

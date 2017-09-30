@@ -172,8 +172,6 @@ func (f *cacheFilter) FilterTarget(store *core.StoreInfo) bool {
 
 type storageThresholdFilter struct{}
 
-const storageAvailableRatioThreshold = 0.2
-
 // NewStorageThresholdFilter creates a Filter that filters all stores that are
 // almost full.
 func NewStorageThresholdFilter(opt Options) Filter {
@@ -185,7 +183,7 @@ func (f *storageThresholdFilter) FilterSource(store *core.StoreInfo) bool {
 }
 
 func (f *storageThresholdFilter) FilterTarget(store *core.StoreInfo) bool {
-	return store.AvailableRatio() < storageAvailableRatioThreshold
+	return store.IsLowSpace()
 }
 
 // distinctScoreFilter ensures that distinct score will not decrease.
