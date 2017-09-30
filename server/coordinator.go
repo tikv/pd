@@ -135,15 +135,31 @@ func (c *coordinator) run() {
 	}
 	log.Info("coordinator: Run scheduler")
 
-	for _, schedulerCfg := range c.opt.GetSchedulers() {
+	k := 0
+	scheduleCfg := c.opt.load()
+	for _, schedulerCfg := range scheduleCfg.Schedulers {
 		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opt, schedulerCfg.Args...)
 		if err != nil {
 			log.Errorf("can not create scheduler %s: %v", schedulerCfg.Type, err)
 		} else {
 			log.Infof("create scheduler %s", s.GetName())
-			if err := c.addScheduler(s, s.GetInterval(), schedulerCfg.Args...); err != nil {
+			if err = c.addScheduler(s, s.GetInterval(), schedulerCfg.Args...); err != nil {
 				log.Errorf("can not add scheduler %s: %v", s.GetName(), err)
 			}
+		}
+
+		// only record valid scheduler config
+		if err == nil {
+			scheduleCfg.Schedulers[k] = schedulerCfg
+			k++
+		}
+	}
+
+	// remove invalid scheduler config
+	if k != len(scheduleCfg.Schedulers) {
+		scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
+		if err := c.opt.persist(c.kv); err != nil {
+			log.Errorf("can't persist schedule config: %v", err)
 		}
 	}
 }
