@@ -90,6 +90,8 @@ func (h *Handler) AddScheduler(s schedule.Scheduler, args ...string) error {
 	}
 	if err = c.addScheduler(s, s.GetInterval(), args...); err != nil {
 		log.Errorf("can not add scheduler %v: %v", s.GetName(), err)
+	} else if err = c.opt.persist(c.kv); err != nil {
+		log.Errorf("can not persist scheduler config: %v", err)
 	}
 	return errors.Trace(err)
 }
@@ -100,7 +102,12 @@ func (h *Handler) RemoveScheduler(name string) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	return errors.Trace(c.removeScheduler(name))
+	if err = c.removeScheduler(name); err != nil {
+		log.Errorf("can not remove scheduler %v: %v", name, err)
+	} else if err = c.opt.persist(c.kv); err != nil {
+		log.Errorf("can not persist scheduler config: %v", err)
+	}
+	return errors.Trace(err)
 }
 
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
@@ -129,6 +136,7 @@ func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+	log.Infof("create scheduler %s", s.GetName())
 	return h.AddScheduler(s, strconv.FormatUint(storeID, 10))
 }
 

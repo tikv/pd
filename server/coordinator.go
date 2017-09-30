@@ -155,13 +155,12 @@ func (c *coordinator) run() {
 		}
 	}
 
-	// remove invalid scheduler config
-	if k != len(scheduleCfg.Schedulers) {
-		scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-		if err := c.opt.persist(c.kv); err != nil {
-			log.Errorf("can't persist schedule config: %v", err)
-		}
+	// remove invalid scheduler config and persist
+	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
+	if err := c.opt.persist(c.kv); err != nil {
+		log.Errorf("can't persist schedule config: %v", err)
 	}
+
 }
 
 func (c *coordinator) stop() {
@@ -286,11 +285,8 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, interval time.D
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.GetName()] = s
-	if c.opt.AddSchedulerCfg(s.GetType(), args) {
-		if err := c.opt.persist(c.kv); err != nil {
-			log.Errorf("can't persist when add scheduler %v: %v", s.GetName(), err)
-		}
-	}
+	c.opt.AddSchedulerCfg(s.GetType(), args)
+
 	return nil
 }
 
@@ -306,16 +302,10 @@ func (c *coordinator) removeScheduler(name string) error {
 	s.Stop()
 	delete(c.schedulers, name)
 
-	ok, err := c.opt.RemoveSchedulerCfg(name)
-	if err != nil {
+	if err := c.opt.RemoveSchedulerCfg(name); err != nil {
 		return errors.Trace(err)
 	}
 
-	if ok {
-		if err := c.opt.persist(c.kv); err != nil {
-			log.Errorf("can't persist when remove scheduler %v: %v", s.GetName(), err)
-		}
-	}
 	return nil
 }
 

@@ -443,7 +443,7 @@ func (o *scheduleOption) GetSchedulers() SchedulerConfigs {
 	return o.load().Schedulers
 }
 
-func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) bool {
+func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) error {
 	c := o.load()
 	v := c.clone()
 	for _, schedulerCfg := range v.Schedulers {
@@ -451,30 +451,30 @@ func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) bool {
 		// such as two schedulers of type "evict-leader",
 		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
 		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{tp, args}) {
-			return false
+			return nil
 		}
 	}
 	v.Schedulers = append(v.Schedulers, SchedulerConfig{Type: tp, Args: args})
 	o.store(v)
-	return true
+	return nil
 }
 
-func (o *scheduleOption) RemoveSchedulerCfg(name string) (bool, error) {
+func (o *scheduleOption) RemoveSchedulerCfg(name string) error {
 	c := o.load()
 	v := c.clone()
 	for i, schedulerCfg := range v.Schedulers {
 		// To create a temporary scheduler is just used to get scheduler's name
 		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, o, schedulerCfg.Args...)
 		if err != nil {
-			return false, errors.Trace(err)
+			return errors.Trace(err)
 		}
 		if tmp.GetName() == name {
 			v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
 			o.store(v)
-			return true, nil
+			return nil
 		}
 	}
-	return false, nil
+	return nil
 }
 
 func (o *scheduleOption) persist(kv *kv) error {

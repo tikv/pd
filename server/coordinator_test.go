@@ -390,6 +390,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
 	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
 	c.Assert(co.schedulers, HasLen, 2)
+	c.Assert(co.opt.persist(co.kv), IsNil)
 	co.stop()
 
 	// make a new coordinator for testing
@@ -407,6 +408,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(co.schedulers, HasLen, 4)
 	c.Assert(co.removeScheduler("grant-leader-scheduler-1"), IsNil)
 	c.Assert(co.schedulers, HasLen, 3)
+	c.Assert(co.opt.persist(co.kv), IsNil)
 	co.stop()
 
 	kv.loadScheduleOption(opt)
