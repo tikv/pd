@@ -31,6 +31,7 @@ import (
 	"github.com/ngaut/systimemon"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/server/core"
 	"google.golang.org/grpc"
 )
 
@@ -70,7 +71,7 @@ type Server struct {
 	// a unique ID.
 	idAlloc *idAllocator
 	// for kv operation.
-	kv *kv
+	kv *core.KV
 	// for raft cluster
 	cluster *RaftCluster
 	// For tso, set after pd becomes leader.
@@ -178,7 +179,7 @@ func (s *Server) startServer() error {
 
 	s.idAlloc = &idAllocator{s: s}
 	kvBase := newEtcdKVBase(s)
-	s.kv = newKV(kvBase)
+	s.kv = core.NewKV(kvBase)
 	s.cluster = newRaftCluster(s, s.clusterID)
 	s.hbStreams = newHeartbeatStreams(s.clusterID)
 

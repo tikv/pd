@@ -68,10 +68,10 @@ type coordinator struct {
 	schedulers map[string]*scheduleController
 	histories  cache.Cache
 	hbStreams  *heartbeatStreams
-	kv         *kv
+	kv         *core.KV
 }
 
-func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams, kv *kv) *coordinator {
+func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams, kv *core.KV) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
 		ctx:        ctx,

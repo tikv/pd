@@ -39,7 +39,7 @@ type clusterInfo struct {
 	sync.RWMutex
 
 	id      IDAllocator
-	kv      *kv
+	kv      *core.KV
 	meta    *metapb.Cluster
 	stores  *core.StoresInfo
 	regions *core.RegionsInfo
@@ -60,12 +60,12 @@ func newClusterInfo(id IDAllocator) *clusterInfo {
 }
 
 // Return nil if cluster is not bootstrapped.
-func loadClusterInfo(id IDAllocator, kv *kv) (*clusterInfo, error) {
+func loadClusterInfo(id IDAllocator, kv *core.KV) (*clusterInfo, error) {
 	c := newClusterInfo(id)
 	c.kv = kv
 
 	c.meta = &metapb.Cluster{}
-	ok, err := kv.loadMeta(c.meta)
+	ok, err := kv.LoadMeta(c.meta)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -74,13 +74,13 @@ func loadClusterInfo(id IDAllocator, kv *kv) (*clusterInfo, error) {
 	}
 
 	start := time.Now()
-	if err := kv.loadStores(c.stores, kvRangeLimit); err != nil {
+	if err := kv.LoadStores(c.stores, kvRangeLimit); err != nil {
 		return nil, errors.Trace(err)
 	}
 	log.Infof("load %v stores cost %v", c.stores.GetStoreCount(), time.Since(start))
 
 	start = time.Now()
-	if err := kv.loadRegions(c.regions, kvRangeLimit); err != nil {
+	if err := kv.LoadRegions(c.regions, kvRangeLimit); err != nil {
 		return nil, errors.Trace(err)
 	}
 	log.Infof("load %v regions cost %v", c.regions.GetRegionCount(), time.Since(start))
@@ -126,7 +126,7 @@ func (c *clusterInfo) putMeta(meta *metapb.Cluster) error {
 
 func (c *clusterInfo) putMetaLocked(meta *metapb.Cluster) error {
 	if c.kv != nil {
-		if err := c.kv.saveMeta(meta); err != nil {
+		if err := c.kv.SaveMeta(meta); err != nil {
 			return errors.Trace(err)
 		}
 	}
@@ -149,7 +149,7 @@ func (c *clusterInfo) putStore(store *core.StoreInfo) error {
 
 func (c *clusterInfo) putStoreLocked(store *core.StoreInfo) error {
 	if c.kv != nil {
-		if err := c.kv.saveStore(store.Store); err != nil {
+		if err := c.kv.SaveStore(store.Store); err != nil {
 			return errors.Trace(err)
 		}
 	}
@@ -323,7 +323,7 @@ func (c *clusterInfo) putRegion(region *core.RegionInfo) error {
 
 func (c *clusterInfo) putRegionLocked(region *core.RegionInfo) error {
 	if c.kv != nil {
-		if err := c.kv.saveRegion(region.Region); err != nil {
+		if err := c.kv.SaveRegion(region.Region); err != nil {
 			return errors.Trace(err)
 		}
 	}
@@ -488,7 +488,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	if saveKV && c.kv != nil {
-		if err := c.kv.saveRegion(region.Region); err != nil {
+		if err := c.kv.SaveRegion(region.Region); err != nil {
 			return errors.Trace(err)
 		}
 	}

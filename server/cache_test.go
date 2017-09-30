@@ -182,11 +182,11 @@ func checkRegion(c *C, a *core.RegionInfo, b *core.RegionInfo) {
 	}
 }
 
-func checkRegionsKV(c *C, kv *kv, regions []*core.RegionInfo) {
+func checkRegionsKV(c *C, kv *core.KV, regions []*core.RegionInfo) {
 	if kv != nil {
 		for _, region := range regions {
 			var meta metapb.Region
-			ok, err := kv.loadRegion(region.GetId(), &meta)
+			ok, err := kv.LoadRegion(region.GetId(), &meta)
 			c.Assert(ok, IsTrue)
 			c.Assert(err, IsNil)
 			c.Assert(&meta, DeepEquals, region.Region)
@@ -274,7 +274,7 @@ func (s *testClusterInfoSuite) TestLoadClusterInfo(c *C) {
 	// Save meta, stores and regions.
 	n := 10
 	meta := &metapb.Cluster{Id: 123}
-	c.Assert(kv.saveMeta(meta), IsNil)
+	c.Assert(kv.SaveMeta(meta), IsNil)
 	stores := mustSaveStores(c, kv, n)
 	regions := mustSaveRegions(c, kv, n)
 
@@ -325,7 +325,7 @@ func (s *testClusterInfoSuite) testStoreHeartbeat(c *C, cache *clusterInfo) {
 	if kv := cache.kv; kv != nil {
 		for _, store := range stores {
 			tmp := &metapb.Store{}
-			ok, err := kv.loadStore(store.GetId(), tmp)
+			ok, err := kv.LoadStore(store.GetId(), tmp)
 			c.Assert(ok, IsTrue)
 			c.Assert(err, IsNil)
 			c.Assert(tmp, DeepEquals, store.Store)
@@ -453,7 +453,7 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 	if kv := cache.kv; kv != nil {
 		for _, region := range regions {
 			tmp := &metapb.Region{}
-			ok, err := kv.loadRegion(region.GetId(), tmp)
+			ok, err := kv.LoadRegion(region.GetId(), tmp)
 			c.Assert(ok, IsTrue)
 			c.Assert(err, IsNil)
 			c.Assert(tmp, DeepEquals, region.Region)
@@ -567,4 +567,32 @@ func newMockIDAllocator() *mockIDAllocator {
 
 func (alloc *mockIDAllocator) Alloc() (uint64, error) {
 	return atomic.AddUint64(&alloc.base, 1), nil
+}
+
+func mustSaveStores(c *C, kv *core.KV, n int) []*metapb.Store {
+	stores := make([]*metapb.Store, 0, n)
+	for i := 0; i < n; i++ {
+		store := &metapb.Store{Id: uint64(i)}
+		stores = append(stores, store)
+	}
+
+	for _, store := range stores {
+		c.Assert(kv.SaveStore(store), IsNil)
+	}
+
+	return stores
+}
+
+func mustSaveRegions(c *C, kv *core.KV, n int) []*metapb.Region {
+	regions := make([]*metapb.Region, 0, n)
+	for i := 0; i < n; i++ {
+		region := &metapb.Region{Id: uint64(i)}
+		regions = append(regions, region)
+	}
+
+	for _, region := range regions {
+		c.Assert(kv.SaveRegion(region), IsNil)
+	}
+
+	return regions
 }

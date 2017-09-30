@@ -36,7 +36,7 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	_, opt := newTestScheduleConfig()
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
-	kv := newKV(core.NewMemoryKV())
+	kv := core.NewKV(core.NewMemoryKV())
 
 	defer hbStreams.Close()
 	co := newCoordinator(cluster, opt, hbStreams, kv)
@@ -87,7 +87,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
-	kv := newKV(core.NewMemoryKV())
+	kv := core.NewKV(core.NewMemoryKV())
 	defer hbStreams.Close()
 
 	_, opt := newTestScheduleConfig()
@@ -162,7 +162,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
-	kv := newKV(core.NewMemoryKV())
+	kv := core.NewKV(core.NewMemoryKV())
 	defer hbStreams.Close()
 
 	// Turn off balance.
@@ -218,7 +218,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
-	kv := newKV(core.NewMemoryKV())
+	kv := core.NewKV(core.NewMemoryKV())
 	defer hbStreams.Close()
 
 	_, opt := newTestScheduleConfig()
@@ -266,7 +266,7 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
-	kv := newKV(core.NewMemoryKV())
+	kv := core.NewKV(core.NewMemoryKV())
 	defer hbStreams.Close()
 
 	_, opt := newTestScheduleConfig()
@@ -307,7 +307,7 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
-	kv := newKV(core.NewMemoryKV())
+	kv := core.NewKV(core.NewMemoryKV())
 	defer hbStreams.Close()
 
 	cfg, opt := newTestScheduleConfig()
@@ -366,7 +366,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
-	kv := newKV(core.NewMemoryKV())
+	kv := core.NewKV(core.NewMemoryKV())
 	defer hbStreams.Close()
 
 	cfg, opt := newTestScheduleConfig()
@@ -395,7 +395,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 
 	// make a new coordinator for testing
 	// whether the schedulers added or removed in dynamic way are recorded in opt
-	kv.loadScheduleOption(opt)
+	opt.reload(kv)
 	co = newCoordinator(cluster, opt, hbStreams, kv)
 	co.run()
 	c.Assert(co.schedulers, HasLen, 2)
@@ -411,7 +411,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(co.opt.persist(co.kv), IsNil)
 	co.stop()
 
-	kv.loadScheduleOption(opt)
+	opt.reload(kv)
 	co = newCoordinator(cluster, opt, hbStreams, kv)
 
 	co.run()
@@ -425,7 +425,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
-	kv := newKV(core.NewMemoryKV())
+	kv := core.NewKV(core.NewMemoryKV())
 	defer hbStreams.Close()
 
 	// Turn off balance, we test add replica only.
@@ -510,7 +510,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	cfg, opt := newTestScheduleConfig()
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
-	kv := newKV(core.NewMemoryKV())
+	kv := core.NewKV(core.NewMemoryKV())
 	defer hbStreams.Close()
 
 	co := newCoordinator(cluster, opt, hbStreams, kv)
@@ -569,7 +569,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	_, opt := newTestScheduleConfig()
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
-	kv := newKV(core.NewMemoryKV())
+	kv := core.NewKV(core.NewMemoryKV())
 	defer hbStreams.Close()
 
 	co := newCoordinator(cluster, opt, hbStreams, kv)

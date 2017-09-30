@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
 
@@ -477,8 +478,29 @@ func (o *scheduleOption) RemoveSchedulerCfg(name string) error {
 	return nil
 }
 
-func (o *scheduleOption) persist(kv *kv) error {
-	return kv.saveScheduleOption(o)
+func (o *scheduleOption) persist(kv *core.KV) error {
+	cfg := &Config{
+		Schedule:    *o.load(),
+		Replication: *o.rep.load(),
+	}
+	err := kv.SaveConfig(cfg)
+	return errors.Trace(err)
+}
+
+func (o *scheduleOption) reload(kv *core.KV) error {
+	cfg := &Config{
+		Schedule:    *o.load(),
+		Replication: *o.rep.load(),
+	}
+	isExist, err := kv.LoadConfig(cfg)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if isExist {
+		o.store(&cfg.Schedule)
+		o.rep.store(&cfg.Replication)
+	}
+	return nil
 }
 
 func (o *scheduleOption) GetHotRegionLowThreshold() int {

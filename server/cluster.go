@@ -80,13 +80,20 @@ func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 }
 
 func (c *RaftCluster) loadClusterStatus() error {
-	status := &ClusterStatus{}
-	t, err := c.s.kv.getRaftClusterBootstrapTime()
+	data, err := c.s.kv.Load((c.s.kv.ClusterStatePath("raft_bootstrap_time")))
 	if err != nil {
 		return errors.Trace(err)
 	}
-	status.RaftBootstrapTime = t
-	c.status = status
+	if len(data) == 0 {
+		return nil
+	}
+	t, err := parseTimestamp([]byte(data))
+	if err != nil {
+		return errors.Trace(err)
+	}
+	c.status = &ClusterStatus{
+		RaftBootstrapTime: t,
+	}
 	return nil
 }
 
@@ -542,7 +549,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) err
 		return errors.Trace(core.ErrStoreNotFound(storeID))
 	}
 
-	if err := c.s.kv.saveStoreWeight(storeID, leader, region); err != nil {
+	if err := c.s.kv.SaveStoreWeight(storeID, leader, region); err != nil {
 		return errors.Trace(err)
 	}
 
