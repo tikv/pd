@@ -15,6 +15,7 @@ package core
 
 import (
 	"math"
+	"sync/atomic"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -77,4 +78,17 @@ func NewRegion(start, end []byte) *metapb.Region {
 		EndKey:      end,
 		RegionEpoch: &metapb.RegionEpoch{},
 	}
+}
+
+// mockIDAllocator mocks IDAllocator and it is only used for test.
+type MockIDAllocator struct {
+	base uint64
+}
+
+func NewMockIDAllocator() *MockIDAllocator {
+	return &MockIDAllocator{base: 0}
+}
+
+func (alloc *MockIDAllocator) Alloc() (uint64, error) {
+	return atomic.AddUint64(&alloc.base, 1), nil
 }

@@ -373,7 +373,7 @@ func (c *clusterInfo) RandLeaderRegion(storeID uint64) *core.RegionInfo {
 	return c.regions.RandLeaderRegion(storeID)
 }
 
-// RandFolowerRegion returns a random region that has a follower on the store.
+// RandFollowerRegion returns a random region that has a follower on the store.
 func (c *clusterInfo) RandFollowerRegion(storeID uint64) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
@@ -393,14 +393,14 @@ func (c *clusterInfo) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo
 	return stores
 }
 
-// GetRegionStores returns all stores that contains the region's leader peer.
+// GetLeaderStore returns all stores that contains the region's leader peer.
 func (c *clusterInfo) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.stores.GetStore(region.Leader.GetStoreId())
 }
 
-// GetRegionStores returns all stores that contains the region's follower peer.
+// GetFollowerStores returns all stores that contains the region's follower peer.
 func (c *clusterInfo) GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
