@@ -20,26 +20,26 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/cache"
+	"github.com/pingcap/pd/server/core"
 )
 
 type mockCluster struct {
-	id      *core.MockIDAllocator
-  stores  *core.StoresInfo
-  regions *core.RegionsInfo
-  writeStatistics cache.Cache
+	id              *core.MockIDAllocator
+	stores          *core.StoresInfo
+	regions         *core.RegionsInfo
+	writeStatistics cache.Cache
 	readStatistics  cache.Cache
 }
 
-
-func NewMockCluster(id *core.MockIDAllocator) *mockCluster{
+// NewMockCluster creates a new mockCluster
+func newMockCluster(id *core.MockIDAllocator) *mockCluster {
 	return &mockCluster{
-    id:              id,
+		id:              id,
 		stores:          core.NewStoresInfo(),
 		regions:         core.NewRegionsInfo(),
-    readStatistics:  cache.NewCache(10, cache.TwoQueueCache),
-    writeStatistics: cache.NewCache(10, cache.TwoQueueCache),
+		readStatistics:  cache.NewCache(10, cache.TwoQueueCache),
+		writeStatistics: cache.NewCache(10, cache.TwoQueueCache),
 	}
 }
 
@@ -112,7 +112,6 @@ func (mc *mockCluster) IsRegionHot(id uint64) bool {
 	}
 	return false
 }
-
 
 // RegionWriteStats returns hot region's write stats.
 func (mc *mockCluster) RegionWriteStats() []*core.RegionStat {
@@ -314,7 +313,6 @@ const (
 	hotRegionScheduleName         = "balance-hot-region-scheduler"
 )
 
-
 func (mc *mockCluster) updateWriteStatus(region *core.RegionInfo) {
 	var WrittenBytesPerSec uint64
 	v, isExist := mc.writeStatistics.Peek(region.GetId())
@@ -437,7 +435,6 @@ func (mc *mockCluster) updateReadStatCache(region *core.RegionInfo, hotRegionThr
 	mc.readStatistics.Put(key, newItem)
 }
 
-
 func (mc *mockCluster) updateStorageReadBytes(storeID uint64, BytesRead uint64) {
 	store := mc.GetStore(storeID)
 	store.Stats.BytesRead = BytesRead
@@ -458,7 +455,6 @@ func (mc *mockCluster) addLeaderRegionWithReadInfo(regionID uint64, leaderID uin
 	mc.putRegion(r)
 }
 
-
 const (
 	defaultMaxReplicas          = 3
 	defaultMaxSnapshotCount     = 3
@@ -466,58 +462,68 @@ const (
 	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 16
-  hotRegionLowThreshold       = 3
+	hotRegionLowThreshold       = 3
 )
 
+// MockSchedulerOptions is a mock of SchedulerOptions
+// which implements Options interface
 type MockSchedulerOptions struct {
-  RegionScheduleLimit uint64
-  LeaderScheduleLimit uint64
-  MaxSnapshotCount uint64
-  MaxStoreDownTime time.Duration
-  MaxReplicas int
-  LocationLabels []string
-  HotRegionLowThreshold int
+	RegionScheduleLimit   uint64
+	LeaderScheduleLimit   uint64
+	MaxSnapshotCount      uint64
+	MaxStoreDownTime      time.Duration
+	MaxReplicas           int
+	LocationLabels        []string
+	HotRegionLowThreshold int
 }
 
 func newMockSchedulerOptions() *MockSchedulerOptions {
-  mso := &MockSchedulerOptions{}
-  mso.RegionScheduleLimit = defaultRegionScheduleLimit
-  mso.LeaderScheduleLimit = defaultLeaderScheduleLimit
-  mso.MaxSnapshotCount = defaultMaxSnapshotCount
-  mso.MaxStoreDownTime = defaultMaxStoreDownTime
-  mso.MaxReplicas = defaultMaxReplicas
-  mso.HotRegionLowThreshold = hotRegionLowThreshold
-  return mso
+	mso := &MockSchedulerOptions{}
+	mso.RegionScheduleLimit = defaultRegionScheduleLimit
+	mso.LeaderScheduleLimit = defaultLeaderScheduleLimit
+	mso.MaxSnapshotCount = defaultMaxSnapshotCount
+	mso.MaxStoreDownTime = defaultMaxStoreDownTime
+	mso.MaxReplicas = defaultMaxReplicas
+	mso.HotRegionLowThreshold = hotRegionLowThreshold
+	return mso
 }
 
+// GetLeaderScheduleLimit mock method
 func (mso *MockSchedulerOptions) GetLeaderScheduleLimit() uint64 {
-  return mso.LeaderScheduleLimit
+	return mso.LeaderScheduleLimit
 }
 
+// GetRegionScheduleLimit mock method
 func (mso *MockSchedulerOptions) GetRegionScheduleLimit() uint64 {
-  return mso.RegionScheduleLimit
+	return mso.RegionScheduleLimit
 }
 
+// GetMaxSnapshotCount mock method
 func (mso *MockSchedulerOptions) GetMaxSnapshotCount() uint64 {
-  return mso.MaxSnapshotCount
+	return mso.MaxSnapshotCount
 }
 
+// GetMaxStoreDownTime mock method
 func (mso *MockSchedulerOptions) GetMaxStoreDownTime() time.Duration {
-  return mso.MaxStoreDownTime
+	return mso.MaxStoreDownTime
 }
 
+// GetMaxReplicas mock method
 func (mso *MockSchedulerOptions) GetMaxReplicas() int {
-  return mso.MaxReplicas
+	return mso.MaxReplicas
 }
 
+// GetLocationLabels mock method
 func (mso *MockSchedulerOptions) GetLocationLabels() []string {
-  return mso.LocationLabels
+	return mso.LocationLabels
 }
 
+// GetHotRegionLowThreshold mock method
 func (mso *MockSchedulerOptions) GetHotRegionLowThreshold() int {
-  return mso.HotRegionLowThreshold
+	return mso.HotRegionLowThreshold
 }
 
+// SetMaxReplicas mock method
 func (mso *MockSchedulerOptions) SetMaxReplicas(replicas int) {
-  mso.MaxReplicas = replicas
+	mso.MaxReplicas = replicas
 }

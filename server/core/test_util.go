@@ -80,15 +80,17 @@ func NewRegion(start, end []byte) *metapb.Region {
 	}
 }
 
-// mockIDAllocator mocks IDAllocator and it is only used for test.
+// MockIDAllocator mocks IDAllocator and it is only used for test.
 type MockIDAllocator struct {
 	base uint64
 }
 
+// NewMockIDAllocator create a new MockIDAllocator
 func NewMockIDAllocator() *MockIDAllocator {
 	return &MockIDAllocator{base: 0}
 }
 
+// Alloc return a new id
 func (alloc *MockIDAllocator) Alloc() (uint64, error) {
 	return atomic.AddUint64(&alloc.base, 1), nil
 }

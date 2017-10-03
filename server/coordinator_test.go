@@ -80,7 +80,6 @@ func (c *testClusterInfo) addLeaderStore(storeID uint64, leaderCount int) {
 	c.putStore(store)
 }
 
-
 func (c *testClusterInfo) setStoreDown(storeID uint64) {
 	store := c.GetStore(storeID)
 	store.State = metapb.StoreState_Up
@@ -97,9 +96,6 @@ func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) {
 	}
 	c.putRegion(core.NewRegionInfo(region, nil))
 }
-
-
-
 
 var _ = Suite(&testCoordinatorSuite{})
 

@@ -14,25 +14,25 @@
 package schedulers
 
 import (
-	. "github.com/pingcap/check"
+	"github.com/pingcap/check"
 	"github.com/pingcap/pd/server/schedule"
 )
 
-func CheckTransferLeader(c *C, op *schedule.Operator, sourceID, targetID uint64) {
-	c.Assert(op.Len(), Equals, 1)
-	c.Assert(op.Step(0), Equals, schedule.TransferLeader{FromStore: sourceID, ToStore: targetID})
+// CheckTransferLeader check whether leader is transfered
+func CheckTransferLeader(c *check.C, op *schedule.Operator, sourceID, targetID uint64) {
+	c.Assert(op.Len(), check.Equals, 1)
+	c.Assert(op.Step(0), check.Equals, schedule.TransferLeader{FromStore: sourceID, ToStore: targetID})
 }
 
-func CheckTransferPeer(c *C, op *schedule.Operator, sourceID, targetID uint64) {
+// CheckTransferPeer checks peer transfer
+func CheckTransferPeer(c *check.C, op *schedule.Operator, sourceID, targetID uint64) {
 	if op.Len() == 2 {
-		c.Assert(op.Step(0).(schedule.AddPeer).ToStore, Equals, targetID)
-		c.Assert(op.Step(1).(schedule.RemovePeer).FromStore, Equals, sourceID)
+		c.Assert(op.Step(0).(schedule.AddPeer).ToStore, check.Equals, targetID)
+		c.Assert(op.Step(1).(schedule.RemovePeer).FromStore, check.Equals, sourceID)
 	} else {
-		c.Assert(op.Len(), Equals, 3)
-		c.Assert(op.Step(0).(schedule.AddPeer).ToStore, Equals, targetID)
-		c.Assert(op.Step(1).(schedule.TransferLeader).FromStore, Equals, sourceID)
-		c.Assert(op.Step(2).(schedule.RemovePeer).FromStore, Equals, sourceID)
+		c.Assert(op.Len(), check.Equals, 3)
+		c.Assert(op.Step(0).(schedule.AddPeer).ToStore, check.Equals, targetID)
+		c.Assert(op.Step(1).(schedule.TransferLeader).FromStore, check.Equals, sourceID)
+		c.Assert(op.Step(2).(schedule.RemovePeer).FromStore, check.Equals, sourceID)
 	}
 }
-
-

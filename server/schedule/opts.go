@@ -16,6 +16,7 @@ package schedule
 import (
 	"time"
 )
+
 // Options for schedulers.
 type Options interface {
 	GetLeaderScheduleLimit() uint64
