@@ -56,8 +56,6 @@ type Cluster interface {
 // Scheduler is an interface to schedule resources.
 type Scheduler interface {
 	GetName() string
-	// GetType should in accordance with the name passing to schedule.RegisterScheduler()
-	GetType() string
 	GetInterval() time.Duration
 	GetResourceKind() core.ResourceKind
 	GetResourceLimit() uint64

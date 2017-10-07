@@ -59,10 +59,6 @@ func (s *grantLeaderScheduler) GetName() string {
 	return s.name
 }
 
-func (s *grantLeaderScheduler) GetType() string {
-	return "grant-leader"
-}
-
 func (s *grantLeaderScheduler) GetInterval() time.Duration {
 	return schedule.MinScheduleInterval
 }

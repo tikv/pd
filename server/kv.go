@@ -112,20 +112,20 @@ func (kv *kv) saveRegion(region *metapb.Region) error {
 	return kv.saveProto(kv.regionPath(region.GetId()), region)
 }
 
-func (kv *kv) loadScheduleOption(opt *scheduleOption) error {
+func (kv *kv) loadScheduleOption(opt *scheduleOption) (bool, error) {
 	cfg := &Config{}
 	cfg.Schedule = *opt.load()
 	cfg.Replication = *opt.rep.load()
 	isExist, err := kv.loadConfig(cfg)
 	if err != nil {
-		return errors.Trace(err)
+		return false, errors.Trace(err)
 	}
-	if isExist {
-		opt.store(&cfg.Schedule)
-		opt.rep.store(&cfg.Replication)
+	if !isExist {
+		return false, nil
 	}
-
-	return nil
+	opt.store(&cfg.Schedule)
+	opt.rep.store(&cfg.Replication)
+	return true, nil
 }
 
 func (kv *kv) saveScheduleOption(opt *scheduleOption) error {

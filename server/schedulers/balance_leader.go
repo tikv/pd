@@ -51,10 +51,6 @@ func (l *balanceLeaderScheduler) GetName() string {
 	return "balance-leader-scheduler"
 }
 
-func (l *balanceLeaderScheduler) GetType() string {
-	return "balance-leader"
-}
-
 func (l *balanceLeaderScheduler) GetInterval() time.Duration {
 	return schedule.MinScheduleInterval
 }

@@ -368,9 +368,12 @@ func (s *Server) leaderCmp() clientv3.Cmp {
 }
 
 func (s *Server) reloadScheduleOption() error {
-	err := s.kv.loadScheduleOption(s.scheduleOpt)
+	isExist, err := s.kv.loadScheduleOption(s.scheduleOpt)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	return nil
+	if isExist {
+		return nil
+	}
+	return s.kv.saveScheduleOption(s.scheduleOpt)
 }

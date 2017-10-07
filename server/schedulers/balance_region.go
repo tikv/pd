@@ -61,10 +61,6 @@ func (s *balanceRegionScheduler) GetName() string {
 	return "balance-region-scheduler"
 }
 
-func (s *balanceRegionScheduler) GetType() string {
-	return "balance-region"
-}
-
 func (s *balanceRegionScheduler) GetInterval() time.Duration {
 	return schedule.MinScheduleInterval
 }
