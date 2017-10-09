@@ -111,6 +111,10 @@ func (h *balanceHotRegionsScheduler) GetName() string {
 	return "balance-hot-region-scheduler"
 }
 
+func (h *balanceHotRegionsScheduler) GetType() string {
+	return "hot-region"
+}
+
 func (h *balanceHotRegionsScheduler) GetInterval() time.Duration {
 	return schedule.MinSlowScheduleInterval
 }

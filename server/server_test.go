@@ -57,22 +57,21 @@ func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
 	cfgs := NewTestMultiConfig(count)
 
 	ch := make(chan *Server, count)
-	for i := 0; i < count; i++ {
-		cfg := cfgs[i]
-
-		go func() {
+	for _, cfg := range cfgs {
+		go func(cfg *Config) {
 			svr, err := CreateServer(cfg, nil)
 			c.Assert(err, IsNil)
+			err = svr.Run()
+			c.Assert(err, IsNil)
 			ch <- svr
-		}()
+		}(cfg)
 	}
 
 	for i := 0; i < count; i++ {
 		svr := <-ch
-		err := svr.Run()
-		c.Assert(err, IsNil)
 		svrs = append(svrs, svr)
 	}
+	close(ch)
 
 	mustWaitLeader(c, svrs)
 

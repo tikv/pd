@@ -16,6 +16,7 @@ package server
 import (
 	"strconv"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
@@ -82,12 +83,17 @@ func (h *Handler) GetHotReadStores() map[uint64]uint64 {
 }
 
 // AddScheduler adds a scheduler.
-func (h *Handler) AddScheduler(s schedule.Scheduler) error {
+func (h *Handler) AddScheduler(s schedule.Scheduler, args ...string) error {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return errors.Trace(err)
 	}
-	return errors.Trace(c.addScheduler(s, schedule.MinScheduleInterval))
+	if err = c.addScheduler(s, s.GetInterval(), args...); err != nil {
+		log.Errorf("can not add scheduler %v: %v", s.GetName(), err)
+	} else if err = c.opt.persist(c.kv); err != nil {
+		log.Errorf("can not persist scheduler config: %v", err)
+	}
+	return errors.Trace(err)
 }
 
 // RemoveScheduler removes a scheduler by name.
@@ -96,7 +102,12 @@ func (h *Handler) RemoveScheduler(name string) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	return errors.Trace(c.removeScheduler(name))
+	if err = c.removeScheduler(name); err != nil {
+		log.Errorf("can not remove scheduler %v: %v", name, err)
+	} else if err = c.opt.persist(c.kv); err != nil {
+		log.Errorf("can not persist scheduler config: %v", err)
+	}
+	return errors.Trace(err)
 }
 
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
@@ -105,6 +116,7 @@ func (h *Handler) AddBalanceLeaderScheduler() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+	log.Infof("create scheduler %s", s.GetName())
 	return h.AddScheduler(s)
 }
 
@@ -114,7 +126,8 @@ func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	return h.AddScheduler(s)
+	log.Infof("create scheduler %s", s.GetName())
+	return h.AddScheduler(s, strconv.FormatUint(storeID, 10))
 }
 
 // AddEvictLeaderScheduler adds an evict-leader-scheduler.
@@ -123,7 +136,8 @@ func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	return h.AddScheduler(s)
+	log.Infof("create scheduler %s", s.GetName())
+	return h.AddScheduler(s, strconv.FormatUint(storeID, 10))
 }
 
 // AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.
@@ -132,6 +146,7 @@ func (h *Handler) AddShuffleLeaderScheduler() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+	log.Infof("create scheduler %s", s.GetName())
 	return h.AddScheduler(s)
 }
 
@@ -141,6 +156,7 @@ func (h *Handler) AddShuffleRegionScheduler() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+	log.Infof("create scheduler %s", s.GetName())
 	return h.AddScheduler(s)
 }
 

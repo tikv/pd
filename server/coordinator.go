@@ -68,9 +68,10 @@ type coordinator struct {
 	schedulers map[string]*scheduleController
 	histories  cache.Cache
 	hbStreams  *heartbeatStreams
+	kv         *kv
 }
 
-func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams) *coordinator {
+func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams, kv *kv) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
 		ctx:        ctx,
@@ -83,6 +84,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 		schedulers: make(map[string]*scheduleController),
 		histories:  cache.NewDefaultCache(historiesCacheSize),
 		hbStreams:  hbStreams,
+		kv:         kv,
 	}
 }
 
@@ -133,19 +135,32 @@ func (c *coordinator) run() {
 	}
 	log.Info("coordinator: Run scheduler")
 
-	for name := range c.opt.GetSchedulers() {
-		// note: CreateScheduler just needs specific scheduler config
-		// so schedulers(a map of scheduler configs) wrapped by c.opt has redundant configs
-		s, err := schedule.CreateScheduler(name, c.opt)
+	k := 0
+	scheduleCfg := c.opt.load()
+	for _, schedulerCfg := range scheduleCfg.Schedulers {
+		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opt, schedulerCfg.Args...)
 		if err != nil {
-			log.Errorf("can not create scheduler %s: %v", name, err)
+			log.Errorf("can not create scheduler %s: %v", schedulerCfg.Type, err)
 		} else {
-			log.Infof("create scheduler %s", name)
-			if err := c.addScheduler(s, s.GetInterval()); err != nil {
-				log.Errorf("can not add scheduler %s: %v", name, err)
+			log.Infof("create scheduler %s", s.GetName())
+			if err = c.addScheduler(s, s.GetInterval(), schedulerCfg.Args...); err != nil {
+				log.Errorf("can not add scheduler %s: %v", s.GetName(), err)
 			}
 		}
+
+		// only record valid scheduler config
+		if err == nil {
+			scheduleCfg.Schedulers[k] = schedulerCfg
+			k++
+		}
 	}
+
+	// remove invalid scheduler config and persist
+	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
+	if err := c.opt.persist(c.kv); err != nil {
+		log.Errorf("can't persist schedule config: %v", err)
+	}
+
 }
 
 func (c *coordinator) stop() {
@@ -254,7 +269,7 @@ func (c *coordinator) shouldRun() bool {
 	return c.cluster.isPrepared()
 }
 
-func (c *coordinator) addScheduler(scheduler schedule.Scheduler, interval time.Duration) error {
+func (c *coordinator) addScheduler(scheduler schedule.Scheduler, interval time.Duration, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -270,6 +285,8 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, interval time.D
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.GetName()] = s
+	c.opt.AddSchedulerCfg(s.GetType(), args)
+
 	return nil
 }
 
@@ -284,6 +301,11 @@ func (c *coordinator) removeScheduler(name string) error {
 
 	s.Stop()
 	delete(c.schedulers, name)
+
+	if err := c.opt.RemoveSchedulerCfg(name); err != nil {
+		return errors.Trace(err)
+	}
+
 	return nil
 }
 
