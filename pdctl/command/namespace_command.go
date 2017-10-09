@@ -22,8 +22,8 @@ import (
 )
 
 const (
-	namespacePrefix    = "pd/api/v1/namespaces"
-	namespaceRelPrefix = "pd/api/v1/namespaces/rel"
+	namespacePrefix      = "pd/api/v1/namespaces"
+	namespaceTablePrefix = "pd/api/v1/namespaces/table"
 )
 
 // NewNamespaceCommand return a namespace sub-command of rootCmd
@@ -107,7 +107,7 @@ func addTableCommandFunc(cmd *cobra.Command, args []string) {
 		"action":    "add",
 	}
 
-	postJSON(cmd, namespaceRelPrefix, input)
+	postJSON(cmd, namespaceTablePrefix, input)
 }
 
 func removeTableCommandFunc(cmd *cobra.Command, args []string) {
@@ -126,5 +126,5 @@ func removeTableCommandFunc(cmd *cobra.Command, args []string) {
 		"action":    "remove",
 	}
 
-	postJSON(cmd, namespaceRelPrefix, input)
+	postJSON(cmd, namespaceTablePrefix, input)
 }
