@@ -28,7 +28,6 @@ import (
 	"github.com/coreos/etcd/embed"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
-	"github.com/ngaut/systimemon"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server/core"
@@ -258,7 +257,7 @@ var timeMonitorOnce sync.Once
 // Run runs the pd server.
 func (s *Server) Run() error {
 	timeMonitorOnce.Do(func() {
-		go systimemon.StartMonitor(time.Now, func() {
+		go StartMonitor(time.Now, func() {
 			log.Errorf("system time jumps backward")
 			timeJumpBackCounter.Inc()
 		})
