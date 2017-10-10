@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
 	"path"
 	"regexp"
 	"sync"
@@ -88,6 +89,7 @@ type tableNamespaceClassifier struct {
 	tableIDDecoder core.TableIDDecoder
 	kv             *core.KV
 	idAlloc        IDAllocator
+	http.Handler
 }
 
 func newTableNamespaceClassifier(tableIDDecoder core.TableIDDecoder, kv *core.KV, idAlloc IDAllocator) (*tableNamespaceClassifier, error) {
@@ -95,12 +97,14 @@ func newTableNamespaceClassifier(tableIDDecoder core.TableIDDecoder, kv *core.KV
 	if err := nsInfo.loadNamespaces(kv, kvRangeLimit); err != nil {
 		return nil, errors.Trace(err)
 	}
-	return &tableNamespaceClassifier{
+	c := &tableNamespaceClassifier{
 		nsInfo:         nsInfo,
 		tableIDDecoder: tableIDDecoder,
 		kv:             kv,
 		idAlloc:        idAlloc,
-	}, nil
+	}
+	c.Handler = newTableClassifierHandler(c)
+	return c, nil
 }
 
 func (c *tableNamespaceClassifier) GetAllNamespaces() []string {

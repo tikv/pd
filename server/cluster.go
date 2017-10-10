@@ -35,8 +35,7 @@ const (
 
 // Error instances
 var (
-	ErrNotBootstrapped    = errors.New("TiKV cluster is not bootstrapped, please start TiKV first")
-	errNotTableClassifier = errors.New("current classifier is not table classififer")
+	ErrNotBootstrapped = errors.New("TiKV cluster is not bootstrapped, please start TiKV first")
 )
 
 // RaftCluster is used for cluster config management.
@@ -696,65 +695,4 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 // GetNamespaceClassifier returns current namespace classifier.
 func (c *RaftCluster) GetNamespaceClassifier() namespace.Classifier {
 	return c.s.classifier
-}
-
-// GetNamespaces returns all the namespace in etcd.
-// FIXME: remove it after refactor namespace API.
-func (c *RaftCluster) GetNamespaces() []*Namespace {
-	classifier := c.GetNamespaceClassifier()
-	tableClassifier, ok := classifier.(*tableNamespaceClassifier)
-	if !ok {
-		return nil
-	}
-	return tableClassifier.GetNamespaces()
-}
-
-// CreateNamespace creates a new Namespace.
-// FIXME: remove it after refactor namespace API.
-func (c *RaftCluster) CreateNamespace(name string) error {
-	tableClassifier, ok := c.GetNamespaceClassifier().(*tableNamespaceClassifier)
-	if !ok {
-		return errors.Trace(errNotTableClassifier)
-	}
-	return tableClassifier.CreateNamespace(name)
-}
-
-// AddNamespaceTableID adds table ID to namespace.
-// FIXME: remove it after refactor namespace API.
-func (c *RaftCluster) AddNamespaceTableID(name string, tableID int64) error {
-	tableClassifier, ok := c.GetNamespaceClassifier().(*tableNamespaceClassifier)
-	if !ok {
-		return errors.Trace(errNotTableClassifier)
-	}
-	return tableClassifier.AddNamespaceTableID(name, tableID)
-}
-
-// RemoveNamespaceTableID removes table ID from namespace.
-// FIXME: remove it after refactor namespace API.
-func (c *RaftCluster) RemoveNamespaceTableID(name string, tableID int64) error {
-	tableClassifier, ok := c.GetNamespaceClassifier().(*tableNamespaceClassifier)
-	if !ok {
-		return errors.Trace(errNotTableClassifier)
-	}
-	return tableClassifier.RemoveNamespaceTableID(name, tableID)
-}
-
-// AddNamespaceStoreID adds store ID to namespace.
-// FIXME: remove it after refactor namespace API.
-func (c *RaftCluster) AddNamespaceStoreID(name string, storeID uint64) error {
-	tableClassifier, ok := c.GetNamespaceClassifier().(*tableNamespaceClassifier)
-	if !ok {
-		return errors.Trace(errNotTableClassifier)
-	}
-	return tableClassifier.AddNamespaceStoreID(name, storeID)
-}
-
-// RemoveNamespaceStoreID removes store ID from namespace.
-// FIXME: remove it after refactor namespace API.
-func (c *RaftCluster) RemoveNamespaceStoreID(name string, storeID uint64) error {
-	tableClassifier, ok := c.GetNamespaceClassifier().(*tableNamespaceClassifier)
-	if !ok {
-		return errors.Trace(errNotTableClassifier)
-	}
-	return tableClassifier.RemoveNamespaceStoreID(name, storeID)
 }
