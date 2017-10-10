@@ -147,6 +147,25 @@ func (r *RegionInfo) GetFollower() *metapb.Peer {
 	return nil
 }
 
+// GetDiffFollowers return the followers in the store where no the other
+// followers of the another specified region
+func (r *RegionInfo) GetDiffFollowers(other *RegionInfo) []*metapb.Peer {
+	res := make([]*metapb.Peer, 0, len(r.Peers))
+	for _, p := range r.GetFollowers() {
+		diff := true
+		for _, o := range other.GetFollowers() {
+			if p.GetStoreId() == o.GetStoreId() {
+				diff = false
+				break
+			}
+		}
+		if diff {
+			res = append(res, p)
+		}
+	}
+	return res
+}
+
 // RegionStat records each hot region's statistics
 type RegionStat struct {
 	RegionID  uint64 `json:"region_id"`

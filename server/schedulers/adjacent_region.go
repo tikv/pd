@@ -17,14 +17,13 @@ import (
 	"bytes"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
 
 const (
 	scanLimit                    = 1000
-	adjacentResourceLimit        = 12
+	adjacentResourceLimit        = 6
 	minAdjacentSchedulerInterval = time.Second
 	maxAdjacentSchedulerInterval = 20 * time.Second
 )
@@ -50,11 +49,13 @@ func newBalanceAdjacentRegionScheduler(opt schedule.Options) schedule.Scheduler 
 		schedule.NewBlockFilter(),
 		schedule.NewStateFilter(opt),
 		schedule.NewHealthFilter(opt),
+		schedule.NewSnapshotCountFilter(opt),
+		schedule.NewStorageThresholdFilter(opt),
 	}
 	return &balanceAdjacentRegionScheduler{
 		opt:      opt,
 		limit:    adjacentResourceLimit,
-		selector: schedule.NewBalanceSelector(core.LeaderKind, filters),
+		selector: schedule.NewRandomSelector(filters),
 		lastKey:  []byte(""),
 	}
 
@@ -123,21 +124,42 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *sch
 		if adjacentRegions[0].GetId() != regions[0].GetId() {
 			l.ids = l.ids[:0]
 		}
-
-		r := adjacentRegions[1]
-		op := l.transferPeer(cluster, r, r.Leader)
+		r1 := adjacentRegions[0]
+		r2 := adjacentRegions[1]
+		op := l.disperseLeader(cluster, r1, r2)
+		if op == nil {
+			op = l.dispersePeer(cluster, r1)
+		}
+		l.lastKey = r2.StartKey
 		return op
 	}
 	l.ids = l.ids[:0]
 	return nil
 }
 
-func (l *balanceAdjacentRegionScheduler) transferPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *schedule.Operator {
-	// scoreGuard guarantees that the distinct score will not decrease.
-	stores := cluster.GetRegionStores(region)
-	source := cluster.GetStore(oldPeer.GetStoreId())
-	scoreGuard := schedule.NewDistinctScoreFilter(l.opt.GetLocationLabels(), stores, source)
+func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster schedule.Cluster, before *core.RegionInfo, after *core.RegionInfo) *schedule.Operator {
+	diffPeers := before.GetDiffFollowers(after)
+	if len(diffPeers) == 0 {
+		return nil
+	}
+	storesInfo := make([]*core.StoreInfo, 0, len(diffPeers))
+	for _, p := range diffPeers {
+		storesInfo = append(storesInfo, cluster.GetStore(p.GetStoreId()))
+	}
+	target := l.selector.SelectTarget(storesInfo)
+	if target == nil {
+		return nil
+	}
+	step := schedule.TransferLeader{FromStore: before.Leader.GetStoreId(), ToStore: target.GetId()}
+	return schedule.NewOperator("balance-adjacent-leader", before.GetId(), core.AdjacentKind, step)
+}
 
+func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, region *core.RegionInfo) *schedule.Operator {
+	// scoreGuard guarantees that the distinct score will not decrease.
+	leaderStoreID := region.Leader.GetStoreId()
+	stores := cluster.GetRegionStores(region)
+	source := cluster.GetStore(leaderStoreID)
+	scoreGuard := schedule.NewDistinctScoreFilter(l.opt.GetLocationLabels(), stores, source)
 	excludeStores := region.GetStoreIds()
 	for _, storeID := range l.ids {
 		if _, ok := excludeStores[storeID]; !ok {
@@ -146,15 +168,10 @@ func (l *balanceAdjacentRegionScheduler) transferPeer(cluster schedule.Cluster, 
 	}
 
 	filters := []schedule.Filter{
-		schedule.NewHealthFilter(l.opt),
-		schedule.NewSnapshotCountFilter(l.opt),
-		schedule.NewStateFilter(l.opt),
-		schedule.NewStorageThresholdFilter(l.opt),
 		schedule.NewExcludedFilter(nil, excludeStores),
 		scoreGuard,
 	}
-	selector := schedule.NewRandomSelector(filters)
-	target := selector.SelectTarget(cluster.GetStores(), filters...)
+	target := l.selector.SelectTarget(cluster.GetStores(), filters...)
 	if target == nil {
 		return nil
 	}
@@ -170,5 +187,5 @@ func (l *balanceAdjacentRegionScheduler) transferPeer(cluster schedule.Cluster, 
 	// record the store id and exclude it in next time
 	l.ids = append(l.ids, newPeer.GetStoreId())
 
-	return schedule.CreateMovePeerOperator("balance-adjacent-region", region, core.AdjacentKind, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	return schedule.CreateMovePeerOperator("balance-adjacent-peer", region, core.AdjacentKind, leaderStoreID, newPeer.GetStoreId(), newPeer.GetId())
 }
