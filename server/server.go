@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
 	"google.golang.org/grpc"
 )
 
@@ -71,6 +72,8 @@ type Server struct {
 	idAlloc *idAllocator
 	// for kv operation.
 	kv *core.KV
+	// for namespace.
+	classifier namespace.Classifier
 	// for raft cluster
 	cluster *RaftCluster
 	// For tso, set after pd becomes leader.
@@ -181,9 +184,28 @@ func (s *Server) startServer() error {
 	s.kv = core.NewKV(kvBase)
 	s.cluster = newRaftCluster(s, s.clusterID)
 	s.hbStreams = newHeartbeatStreams(s.clusterID)
+	if err := s.initClassifier(); err != nil {
+		return errors.Trace(err)
+	}
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
+	return nil
+}
+
+func (s *Server) initClassifier() error {
+	// TODO: Config by name.
+	if s.cfg.EnableNamespace {
+		log.Infoln("use namespace classifier.")
+		var err error
+		s.classifier, err = newTableNamespaceClassifier(core.DefaultTableIDDecoder, s.kv, s.idAlloc)
+		if err != nil {
+			return errors.Trace(err)
+		}
+	} else {
+		log.Infoln("use default classifier.")
+		s.classifier = namespace.DefaultClassifier
+	}
 	return nil
 }
 

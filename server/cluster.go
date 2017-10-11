@@ -35,10 +35,8 @@ const (
 
 // Error instances
 var (
-	ErrNotBootstrapped = errors.New("TiKV cluster is not bootstrapped, please start TiKV first")
-
-	errNoNamespaceClassifier = errors.New("no namespace classifier")
-	errNotTableClassifier    = errors.New("current classifier is not table classififer")
+	ErrNotBootstrapped    = errors.New("TiKV cluster is not bootstrapped, please start TiKV first")
+	errNotTableClassifier = errors.New("current classifier is not table classififer")
 )
 
 // RaftCluster is used for cluster config management.
@@ -118,18 +116,7 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 	c.cachedCluster = cluster
-	var classifier namespace.Classifier
-	if c.s.cfg.EnableNamespace {
-		log.Infoln("use namespace classifier.")
-		classifier, err = newTableNamespaceClassifier(core.DefaultTableIDDecoder, c.s.kv, c.s.idAlloc)
-		if err != nil {
-			return errors.Trace(err)
-		}
-	} else {
-		log.Infoln("use default classifier.")
-		classifier = namespace.DefaultClassifier
-	}
-	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt, c.s.hbStreams, c.s.kv, classifier)
+	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt, c.s.hbStreams, c.s.kv, c.s.classifier)
 	c.quit = make(chan struct{})
 
 	c.wg.Add(2)
@@ -708,21 +695,13 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 
 // GetNamespaceClassifier returns current namespace classifier.
 func (c *RaftCluster) GetNamespaceClassifier() namespace.Classifier {
-	c.RLock()
-	defer c.RUnlock()
-	if c.coordinator != nil {
-		return c.coordinator.classifier
-	}
-	return nil
+	return c.s.classifier
 }
 
 // GetNamespaces returns all the namespace in etcd.
 // FIXME: remove it after refactor namespace API.
 func (c *RaftCluster) GetNamespaces() []*Namespace {
 	classifier := c.GetNamespaceClassifier()
-	if classifier == nil {
-		return nil
-	}
 	tableClassifier, ok := classifier.(*tableNamespaceClassifier)
 	if !ok {
 		return nil
@@ -733,11 +712,7 @@ func (c *RaftCluster) GetNamespaces() []*Namespace {
 // CreateNamespace creates a new Namespace.
 // FIXME: remove it after refactor namespace API.
 func (c *RaftCluster) CreateNamespace(name string) error {
-	classifier := c.GetNamespaceClassifier()
-	if classifier == nil {
-		return errors.Trace(errNoNamespaceClassifier)
-	}
-	tableClassifier, ok := classifier.(*tableNamespaceClassifier)
+	tableClassifier, ok := c.GetNamespaceClassifier().(*tableNamespaceClassifier)
 	if !ok {
 		return errors.Trace(errNotTableClassifier)
 	}
@@ -747,11 +722,7 @@ func (c *RaftCluster) CreateNamespace(name string) error {
 // AddNamespaceTableID adds table ID to namespace.
 // FIXME: remove it after refactor namespace API.
 func (c *RaftCluster) AddNamespaceTableID(name string, tableID int64) error {
-	classifier := c.GetNamespaceClassifier()
-	if classifier == nil {
-		return errors.Trace(errNoNamespaceClassifier)
-	}
-	tableClassifier, ok := classifier.(*tableNamespaceClassifier)
+	tableClassifier, ok := c.GetNamespaceClassifier().(*tableNamespaceClassifier)
 	if !ok {
 		return errors.Trace(errNotTableClassifier)
 	}
@@ -761,11 +732,7 @@ func (c *RaftCluster) AddNamespaceTableID(name string, tableID int64) error {
 // RemoveNamespaceTableID removes table ID from namespace.
 // FIXME: remove it after refactor namespace API.
 func (c *RaftCluster) RemoveNamespaceTableID(name string, tableID int64) error {
-	classifier := c.GetNamespaceClassifier()
-	if classifier == nil {
-		return errors.Trace(errNoNamespaceClassifier)
-	}
-	tableClassifier, ok := classifier.(*tableNamespaceClassifier)
+	tableClassifier, ok := c.GetNamespaceClassifier().(*tableNamespaceClassifier)
 	if !ok {
 		return errors.Trace(errNotTableClassifier)
 	}
@@ -775,11 +742,7 @@ func (c *RaftCluster) RemoveNamespaceTableID(name string, tableID int64) error {
 // AddNamespaceStoreID adds store ID to namespace.
 // FIXME: remove it after refactor namespace API.
 func (c *RaftCluster) AddNamespaceStoreID(name string, storeID uint64) error {
-	classifier := c.GetNamespaceClassifier()
-	if classifier == nil {
-		return errors.Trace(errNoNamespaceClassifier)
-	}
-	tableClassifier, ok := classifier.(*tableNamespaceClassifier)
+	tableClassifier, ok := c.GetNamespaceClassifier().(*tableNamespaceClassifier)
 	if !ok {
 		return errors.Trace(errNotTableClassifier)
 	}
@@ -789,11 +752,7 @@ func (c *RaftCluster) AddNamespaceStoreID(name string, storeID uint64) error {
 // RemoveNamespaceStoreID removes store ID from namespace.
 // FIXME: remove it after refactor namespace API.
 func (c *RaftCluster) RemoveNamespaceStoreID(name string, storeID uint64) error {
-	classifier := c.GetNamespaceClassifier()
-	if classifier == nil {
-		return errors.Trace(errNoNamespaceClassifier)
-	}
-	tableClassifier, ok := classifier.(*tableNamespaceClassifier)
+	tableClassifier, ok := c.GetNamespaceClassifier().(*tableNamespaceClassifier)
 	if !ok {
 		return errors.Trace(errNotTableClassifier)
 	}
