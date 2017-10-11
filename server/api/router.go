@@ -15,6 +15,7 @@ package api
 
 import (
 	"net/http"
+	"path"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/server"
@@ -63,9 +64,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/store/{id}/weight", storeHandler.SetWeight).Methods("POST")
 	router.Handle("/api/v1/stores", newStoresHandler(svr, rd)).Methods("GET")
 
-	storeNsHandler := newStoreNsHandler(svr, rd)
-	router.HandleFunc("/api/v1/store_ns/{id}", storeNsHandler.SetNamespace).Methods("POST")
-
 	labelsHandler := newLabelsHandler(svr, rd)
 	router.HandleFunc("/api/v1/labels", labelsHandler.Get).Methods("GET")
 	router.HandleFunc("/api/v1/labels/stores", labelsHandler.GetStores).Methods("GET")
@@ -93,10 +91,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/leader/resign", leaderHandler.Resign).Methods("POST")
 	router.HandleFunc("/api/v1/leader/transfer/{next_leader}", leaderHandler.Transfer).Methods("POST")
 
-	namespaceHandler := newNamespaceHandler(svr, rd)
-	router.HandleFunc("/api/v1/namespaces", namespaceHandler.Get).Methods("GET")
-	router.HandleFunc("/api/v1/namespaces", namespaceHandler.Post).Methods("POST")
-	router.HandleFunc("/api/v1/namespaces/table", namespaceHandler.Update).Methods("POST")
+	classifierPrefix := path.Join(prefix, "/api/v1/classifier")
+	classifierHandler := newClassifierHandler(svr, rd, classifierPrefix)
+	router.PathPrefix("/api/v1/classifier/").Handler(classifierHandler)
 
 	router.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 	return router

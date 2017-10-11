@@ -59,7 +59,17 @@ func (s *testStoreNsSuite) SetUpSuite(c *C) {
 		},
 	}
 
-	s.svr, s.cleanup = mustNewServer(c)
+	cfg := server.NewTestSingleConfig()
+	cfg.EnableNamespace = true
+	srv, err := server.CreateServer(cfg, NewHandler)
+	c.Assert(err, IsNil)
+	c.Assert(srv.Run(), IsNil)
+	s.svr = srv
+	s.cleanup = func() {
+		srv.Close()
+		cleanServer(cfg)
+	}
+
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
@@ -75,10 +85,10 @@ func (s *testStoreNsSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func (s *testStoreSuite) TestCreateNamespace(c *C) {
+func (s *testStoreNsSuite) TestCreateNamespace(c *C) {
 	body := map[string]string{"namespace": "test"}
 	b, err := json.Marshal(body)
 	c.Assert(err, IsNil)
-	err = postJSON(&http.Client{}, fmt.Sprintf("%s/namespaces", s.urlPrefix), b)
+	err = postJSON(&http.Client{}, fmt.Sprintf("%s/classifier/namespaces", s.urlPrefix), b)
 	c.Assert(err, IsNil)
 }

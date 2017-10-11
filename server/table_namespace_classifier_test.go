@@ -24,7 +24,6 @@ import (
 var _ = Suite(&testTableNamespaceSuite{})
 
 type testTableNamespaceSuite struct {
-	namespaces *namespacesInfo
 }
 
 type mockTableIDDecoderForTarget struct{}
@@ -45,7 +44,10 @@ func (d mockTableIDDecoderForGlobal) DecodeTableID(key core.Key) int64 {
 	return globalTableID
 }
 
-func (s *testTableNamespaceSuite) SetUpSuite(c *C) {
+func (s *testTableNamespaceSuite) newClassifier(c *C, decoder core.TableIDDecoder) *tableNamespaceClassifier {
+	kv := core.NewKV(core.NewMemoryKV())
+	classifier, err := newTableNamespaceClassifier(decoder, kv, &mockIDAllocator{})
+	c.Assert(err, IsNil)
 	testNamespace1 := Namespace{
 		ID:   1,
 		Name: "test1",
@@ -68,23 +70,20 @@ func (s *testTableNamespaceSuite) SetUpSuite(c *C) {
 		},
 	}
 
-	namespaces := newNamespacesInfo()
-	namespaces.setNamespace(&testNamespace1)
-	namespaces.setNamespace(&testNamespace2)
-	s.namespaces = namespaces
+	classifier.nsInfo.setNamespace(&testNamespace1)
+	classifier.nsInfo.setNamespace(&testNamespace2)
+	return classifier
 }
 
 func (s *testTableNamespaceSuite) TestTableNameSpaceGetAllNamespace(c *C) {
-
-	classifier := newTableNamespaceClassifier(s.namespaces, mockTableIDDecoderForTarget{})
+	classifier := s.newClassifier(c, mockTableIDDecoderForTarget{})
 	ns := classifier.GetAllNamespaces()
 	sort.Strings(ns)
 	c.Assert(ns, DeepEquals, []string{"test1", "test2"})
 }
 
 func (s *testTableNamespaceSuite) TestTableNameSpaceGetStoreNamespace(c *C) {
-
-	classifier := newTableNamespaceClassifier(s.namespaces, mockTableIDDecoderForTarget{})
+	classifier := s.newClassifier(c, mockTableIDDecoderForTarget{})
 
 	// Test store namespace
 	meatapdStore := metapb.Store{Id: targetStoreID}
@@ -98,13 +97,67 @@ func (s *testTableNamespaceSuite) TestTableNameSpaceGetStoreNamespace(c *C) {
 
 func (s *testTableNamespaceSuite) TestTableNameSpaceGetRegionNamespace(c *C) {
 	// Test region namespace when tableIDDecoder returns the region's tableId
-	classifier := newTableNamespaceClassifier(s.namespaces, mockTableIDDecoderForTarget{})
+	classifier := s.newClassifier(c, mockTableIDDecoderForTarget{})
 	regionInfo := core.NewRegionInfo(&metapb.Region{}, &metapb.Peer{})
 	c.Assert(classifier.GetRegionNamespace(regionInfo), Equals, "test1")
 
 	// Test region namespace when tableIDDecoder doesn't return the region's tableId
-	classifier = newTableNamespaceClassifier(s.namespaces, mockTableIDDecoderForGlobal{})
+	classifier = s.newClassifier(c, mockTableIDDecoderForGlobal{})
 	regionInfo = core.NewRegionInfo(&metapb.Region{}, &metapb.Peer{})
 	c.Assert(classifier.GetRegionNamespace(regionInfo), Equals, "global")
+}
 
+func (s *testTableNamespaceSuite) TestNamespaceOperation(c *C) {
+	kv := core.NewKV(core.NewMemoryKV())
+	classifier, err := newTableNamespaceClassifier(mockTableIDDecoderForGlobal{}, kv, &mockIDAllocator{})
+	c.Assert(err, IsNil)
+	nsInfo := classifier.nsInfo
+
+	err = classifier.CreateNamespace("(invalid_name")
+	c.Assert(err, NotNil)
+
+	err = classifier.CreateNamespace("test1")
+	c.Assert(err, IsNil)
+
+	namespaces := classifier.GetNamespaces()
+	c.Assert(len(namespaces), Equals, 1)
+	c.Assert(namespaces[0].Name, Equals, "test1")
+
+	// Add the same Name
+	err = classifier.CreateNamespace("test1")
+	c.Assert(err, NotNil)
+
+	classifier.CreateNamespace("test2")
+
+	// Add tableID
+	err = classifier.AddNamespaceTableID("test1", 1)
+	namespaces = classifier.GetNamespaces()
+	c.Assert(err, IsNil)
+	c.Assert(nsInfo.IsTableIDExist(1), IsTrue)
+
+	// Add storeID
+	err = classifier.AddNamespaceStoreID("test1", 456)
+	namespaces = classifier.GetNamespaces()
+	c.Assert(err, IsNil)
+	c.Assert(nsInfo.IsStoreIDExist(456), IsTrue)
+
+	// Ensure that duplicate tableID cannot exist in one namespace
+	err = classifier.AddNamespaceTableID("test1", 1)
+	c.Assert(err, NotNil)
+
+	// Ensure that duplicate tableID cannot exist across namespaces
+	err = classifier.AddNamespaceTableID("test2", 1)
+	c.Assert(err, NotNil)
+
+	// Ensure that duplicate storeID cannot exist in one namespace
+	err = classifier.AddNamespaceStoreID("test1", 456)
+	c.Assert(err, NotNil)
+
+	// Ensure that duplicate storeID cannot exist across namespaces
+	err = classifier.AddNamespaceStoreID("test2", 456)
+	c.Assert(err, NotNil)
+
+	// Add tableID to a namespace that doesn't exist
+	err = classifier.AddNamespaceTableID("test_not_exist", 2)
+	c.Assert(err, NotNil)
 }

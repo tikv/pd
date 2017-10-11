@@ -43,7 +43,6 @@ type clusterInfo struct {
 	meta            *metapb.Cluster
 	stores          *core.StoresInfo
 	regions         *core.RegionsInfo
-	namespacesInfo  *namespacesInfo
 	activeRegions   int
 	writeStatistics cache.Cache
 	readStatistics  cache.Cache
@@ -54,7 +53,6 @@ func newClusterInfo(id IDAllocator) *clusterInfo {
 		id:              id,
 		stores:          core.NewStoresInfo(),
 		regions:         core.NewRegionsInfo(),
-		namespacesInfo:  newNamespacesInfo(),
 		writeStatistics: cache.NewCache(statCacheMaxLen, cache.TwoQueueCache),
 		readStatistics:  cache.NewCache(statCacheMaxLen, cache.TwoQueueCache),
 	}
@@ -146,34 +144,6 @@ func (c *clusterInfo) putStore(store *core.StoreInfo) error {
 	c.Lock()
 	defer c.Unlock()
 	return c.putStoreLocked(store.Clone())
-}
-
-func (c *clusterInfo) putNamespace(ns *Namespace) error {
-	c.Lock()
-	defer c.Unlock()
-	return c.putNamespaceLocked(ns)
-}
-
-func (c *clusterInfo) putNamespaceLocked(ns *Namespace) error {
-	if c.kv != nil {
-		if err := c.namespacesInfo.saveNamespace(c.kv, ns); err != nil {
-			return errors.Trace(err)
-		}
-	}
-	c.namespacesInfo.setNamespace(ns)
-	return nil
-}
-
-func (c *clusterInfo) getNamespaces() []*Namespace {
-	c.RLock()
-	defer c.RUnlock()
-	return c.namespacesInfo.getNamespaces()
-}
-
-func (c *clusterInfo) getNamespace(name string) *Namespace {
-	c.RLock()
-	defer c.RUnlock()
-	return c.namespacesInfo.getNamespaceByName(name)
 }
 
 func (c *clusterInfo) putStoreLocked(store *core.StoreInfo) error {
