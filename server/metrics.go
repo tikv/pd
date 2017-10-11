@@ -88,6 +88,14 @@ var (
 			Name:      "tso",
 			Help:      "Counter of tso events",
 		}, []string{"type"})
+
+	leaderTickCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "leader_tick_total",
+			Help:      "Counter of leader ts tick count to identify current pd leader.",
+		})
 )
 
 func init() {
@@ -100,4 +108,5 @@ func init() {
 	prometheus.MustRegister(regionHeartbeatCounter)
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(tsoCounter)
+	prometheus.MustRegister(leaderTickCounter)
 }

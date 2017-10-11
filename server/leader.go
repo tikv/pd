@@ -259,6 +259,7 @@ func (s *Server) campaignLeader() error {
 				return nil
 			}
 		case <-tsTicker.C:
+			leaderTickCounter.Inc()
 			if err = s.updateTimestamp(); err != nil {
 				return errors.Trace(err)
 			}
