@@ -341,3 +341,54 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 	c.addOperator(op)
 	return nil
 }
+
+// AddAddPeerOperator adds an operator to add peer.
+func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	region := c.cluster.GetRegion(regionID)
+	if region == nil {
+		return errRegionNotFound(regionID)
+	}
+
+	if region.GetStorePeer(toStoreID) != nil {
+		return errors.Errorf("region already has peer in store %v", toStoreID)
+	}
+
+	if c.cluster.GetStore(toStoreID) == nil {
+		return core.ErrStoreNotFound(toStoreID)
+	}
+	newPeer, err := c.cluster.AllocPeer(toStoreID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	step := schedule.AddPeer{ToStore: toStoreID, PeerID: newPeer.GetId()}
+	op := schedule.NewOperator("adminAddPeer", regionID, core.AdminKind, step)
+	c.addOperator(op)
+	return nil
+}
+
+// AddRemovePeerOperator adds an operator to remove peer.
+func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	region := c.cluster.GetRegion(regionID)
+	if region == nil {
+		return errRegionNotFound(regionID)
+	}
+
+	if region.GetStorePeer(fromStoreID) == nil {
+		return errors.Errorf("region has no peer in store %v", fromStoreID)
+	}
+
+	op := schedule.CreateRemovePeerOperator("adminRemovePeer", region, fromStoreID)
+	c.addOperator(op)
+	return nil
+}
