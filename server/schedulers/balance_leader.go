@@ -59,6 +59,10 @@ func (l *balanceLeaderScheduler) GetNextInterval(interval time.Duration) time.Du
 	return intervalGrow(interval, MaxScheduleInterval, exponentailGrowth)
 }
 
+func (l *balanceLeaderScheduler) GetType() string {
+	return "balance-leader"
+}
+
 func (l *balanceLeaderScheduler) GetResourceKind() core.ResourceKind {
 	return core.LeaderKind
 }

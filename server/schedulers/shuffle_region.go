@@ -57,6 +57,10 @@ func (s *shuffleRegionScheduler) GetNextInterval(interval time.Duration) time.Du
 	return intervalGrow(interval, MaxScheduleInterval, exponentailGrowth)
 }
 
+func (s *shuffleRegionScheduler) GetType() string {
+	return "shuffle-region"
+}
+
 func (s *shuffleRegionScheduler) GetResourceKind() core.ResourceKind {
 	return core.RegionKind
 }

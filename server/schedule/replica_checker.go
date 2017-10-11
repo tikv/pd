@@ -17,26 +17,29 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
 )
 
 // ReplicaChecker ensures region has the best replicas.
 type ReplicaChecker struct {
-	opt     Options
-	cluster Cluster
-	filters []Filter
+	opt        Options
+	cluster    Cluster
+	classifier namespace.Classifier
+	filters    []Filter
 }
 
 // NewReplicaChecker creates a replica checker.
-func NewReplicaChecker(opt Options, cluster Cluster) *ReplicaChecker {
+func NewReplicaChecker(opt Options, cluster Cluster, classifier namespace.Classifier) *ReplicaChecker {
 	filters := []Filter{
 		NewHealthFilter(opt),
 		NewSnapshotCountFilter(opt),
 	}
 
 	return &ReplicaChecker{
-		opt:     opt,
-		cluster: cluster,
-		filters: filters,
+		opt:        opt,
+		cluster:    cluster,
+		classifier: classifier,
+		filters:    filters,
 	}
 }
 
@@ -91,6 +94,10 @@ func (r *ReplicaChecker) SelectBestStoreToAddReplica(region *core.RegionInfo, fi
 		NewExcludedFilter(nil, region.GetStoreIds()),
 	}
 	filters = append(filters, newFilters...)
+
+	if r.classifier != nil {
+		filters = append(filters, NewNamespaceFilter(r.classifier, r.classifier.GetRegionNamespace(region)))
+	}
 
 	regionStores := r.cluster.GetRegionStores(region)
 	selector := NewReplicaSelector(regionStores, r.opt.GetLocationLabels(), r.filters...)

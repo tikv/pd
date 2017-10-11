@@ -29,7 +29,7 @@ const (
 )
 
 func init() {
-	schedule.RegisterScheduler("balance-adjacent-region", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("adjacent-region", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
 		return newBalanceAdjacentRegionScheduler(opt), nil
 	})
 }
@@ -75,6 +75,10 @@ func (l *balanceAdjacentRegionScheduler) GetNextInterval(interval time.Duration)
 
 func (l *balanceAdjacentRegionScheduler) GetResourceKind() core.ResourceKind {
 	return core.AdjacentKind
+}
+
+func (l *balanceAdjacentRegionScheduler) GetType() string {
+	return "adjacent-region"
 }
 
 func (l *balanceAdjacentRegionScheduler) GetResourceLimit() uint64 {

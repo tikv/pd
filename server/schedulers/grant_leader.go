@@ -67,6 +67,10 @@ func (s *grantLeaderScheduler) GetNextInterval(interval time.Duration) time.Dura
 	return intervalGrow(interval, MaxScheduleInterval, exponentailGrowth)
 }
 
+func (s *grantLeaderScheduler) GetType() string {
+	return "grant-leader"
+}
+
 func (s *grantLeaderScheduler) GetResourceKind() core.ResourceKind {
 	return core.LeaderKind
 }

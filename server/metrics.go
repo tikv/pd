@@ -71,7 +71,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "region_heartbeat",
 			Help:      "Counter of region hearbeat.",
-		}, []string{"type", "status"})
+		}, []string{"store", "type", "status"})
 
 	hotSpotStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

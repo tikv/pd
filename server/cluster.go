@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"regexp"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
 )
 
 const (
@@ -80,13 +82,20 @@ func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 }
 
 func (c *RaftCluster) loadClusterStatus() error {
-	status := &ClusterStatus{}
-	t, err := c.s.kv.getRaftClusterBootstrapTime()
+	data, err := c.s.kv.Load((c.s.kv.ClusterStatePath("raft_bootstrap_time")))
 	if err != nil {
 		return errors.Trace(err)
 	}
-	status.RaftBootstrapTime = t
-	c.status = status
+	if len(data) == 0 {
+		return nil
+	}
+	t, err := parseTimestamp([]byte(data))
+	if err != nil {
+		return errors.Trace(err)
+	}
+	c.status = &ClusterStatus{
+		RaftBootstrapTime: t,
+	}
 	return nil
 }
 
@@ -107,7 +116,19 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 	c.cachedCluster = cluster
-	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt, c.s.hbStreams)
+	var classifier namespace.Classifier
+	if c.s.cfg.EnableNamespace {
+		log.Infoln("use namespace classifier.")
+		nsInfo := c.cachedCluster.namespacesInfo
+		if err := nsInfo.loadNamespaces(c.s.kv, kvRangeLimit); err != nil {
+			return errors.Trace(err)
+		}
+		classifier = newTableNamespaceClassifier(nsInfo, core.DefaultTableIDDecoder)
+	} else {
+		log.Infoln("use default classifier.")
+		classifier = namespace.DefaultClassifier
+	}
+	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt, c.s.hbStreams, c.s.kv, classifier)
 	c.quit = make(chan struct{})
 
 	c.wg.Add(2)
@@ -542,7 +563,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) err
 		return errors.Trace(core.ErrStoreNotFound(storeID))
 	}
 
-	if err := c.s.kv.saveStoreWeight(storeID, leader, region); err != nil {
+	if err := c.s.kv.SaveStoreWeight(storeID, leader, region); err != nil {
 		return errors.Trace(err)
 	}
 
@@ -590,9 +611,11 @@ func (c *RaftCluster) collectMetrics() {
 	cluster := c.cachedCluster
 
 	storeUpCount := 0
+	storeDisconnectedCount := 0
 	storeDownCount := 0
 	storeOfflineCount := 0
 	storeTombstoneCount := 0
+	storeLowSpaceCount := 0
 	storageSize := uint64(0)
 	storageCapacity := uint64(0)
 	minLeaderScore, maxLeaderScore := math.MaxFloat64, float64(0.0)
@@ -602,7 +625,13 @@ func (c *RaftCluster) collectMetrics() {
 		// Store state.
 		switch s.GetState() {
 		case metapb.StoreState_Up:
-			storeUpCount++
+			if s.DownTime() >= c.coordinator.opt.GetMaxStoreDownTime() {
+				storeDownCount++
+			} else if s.IsDisconnected() {
+				storeDisconnectedCount++
+			} else {
+				storeUpCount++
+			}
 		case metapb.StoreState_Offline:
 			storeOfflineCount++
 		case metapb.StoreState_Tombstone:
@@ -611,8 +640,8 @@ func (c *RaftCluster) collectMetrics() {
 		if s.IsTombstone() {
 			continue
 		}
-		if s.DownTime() >= c.coordinator.opt.GetMaxStoreDownTime() {
-			storeDownCount++
+		if s.IsLowSpace() {
+			storeLowSpaceCount++
 		}
 
 		// Store stats.
@@ -628,9 +657,11 @@ func (c *RaftCluster) collectMetrics() {
 
 	metrics := make(map[string]float64)
 	metrics["store_up_count"] = float64(storeUpCount)
+	metrics["store_disconnected_count"] = float64(storeDisconnectedCount)
 	metrics["store_down_count"] = float64(storeDownCount)
 	metrics["store_offline_count"] = float64(storeOfflineCount)
 	metrics["store_tombstone_count"] = float64(storeTombstoneCount)
+	metrics["store_low_space_count"] = float64(storeLowSpaceCount)
 	metrics["region_count"] = float64(cluster.getRegionCount())
 	metrics["storage_size"] = float64(storageSize)
 	metrics["storage_capacity"] = float64(storageCapacity)
@@ -672,4 +703,106 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
 	}
 	return c.cachedCluster.putMeta(meta)
+}
+
+// GetNamespaces returns all the namespace in etc.d
+func (c *RaftCluster) GetNamespaces() []*Namespace {
+	return c.cachedCluster.getNamespaces()
+}
+
+// CreateNamespace creates a new Namespace
+func (c *RaftCluster) CreateNamespace(name string) error {
+	c.Lock()
+	defer c.Unlock()
+
+	r := regexp.MustCompile(`^\w+$`)
+	matched := r.MatchString(name)
+	if !matched {
+		return errors.New("Name should be 0-9, a-z or A-Z")
+	}
+
+	cachedCluster := c.cachedCluster
+	if n := cachedCluster.getNamespace(name); n != nil {
+		return errors.New("Duplicate namespace Name")
+	}
+
+	id, err := c.s.idAlloc.Alloc()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	ns := NewNamespace(id, name)
+	return cachedCluster.putNamespaceLocked(ns)
+}
+
+// AddNamespaceTableID adds table ID to namespace
+func (c *RaftCluster) AddNamespaceTableID(name string, tableID int64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	n := c.cachedCluster.getNamespace(name)
+	if n == nil {
+		return errors.Errorf("invalid namespace Name %s, not found", name)
+	}
+
+	if c.cachedCluster.namespacesInfo.IsTableIDExist(tableID) {
+		return errors.New("Table ID already exists in this cluster")
+	}
+
+	n.AddTableID(tableID)
+	return c.cachedCluster.putNamespaceLocked(n)
+}
+
+// RemoveNamespaceTableID removes table ID from namespace
+func (c *RaftCluster) RemoveNamespaceTableID(name string, tableID int64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	n := c.cachedCluster.getNamespace(name)
+	if n == nil {
+		return errors.Errorf("invalid namespace Name %s, not found", name)
+	}
+
+	if _, ok := n.TableIDs[tableID]; !ok {
+		return errors.Errorf("Table ID %d is not belong to %s", tableID, name)
+	}
+
+	delete(n.TableIDs, tableID)
+	return c.cachedCluster.putNamespaceLocked(n)
+}
+
+// AddNamespaceStoreID adds store ID to namespace
+func (c *RaftCluster) AddNamespaceStoreID(name string, storeID uint64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	n := c.cachedCluster.getNamespace(name)
+	if n == nil {
+		return errors.Errorf("invalid namespace Name %s, not found", name)
+	}
+
+	if c.cachedCluster.namespacesInfo.IsStoreIDExist(storeID) {
+		return errors.New("Store ID already exists in this namespace")
+	}
+
+	n.AddStoreID(storeID)
+	return c.cachedCluster.putNamespaceLocked(n)
+}
+
+// RemoveNamespaceStoreID removes store ID from namespace
+func (c *RaftCluster) RemoveNamespaceStoreID(name string, storeID uint64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	n := c.cachedCluster.getNamespace(name)
+	if n == nil {
+		return errors.Errorf("invalid namespace Name %s, not found", name)
+	}
+
+	if _, ok := n.StoreIDs[storeID]; !ok {
+		return errors.Errorf("Store ID %d is not belong to %s", storeID, name)
+	}
+
+	delete(n.StoreIDs, storeID)
+	return c.cachedCluster.putNamespaceLocked(n)
 }

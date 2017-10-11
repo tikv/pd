@@ -71,6 +71,10 @@ func (s *evictLeaderScheduler) GetNextInterval(interval time.Duration) time.Dura
 	return intervalGrow(interval, MaxScheduleInterval, exponentailGrowth)
 }
 
+func (s *evictLeaderScheduler) GetType() string {
+	return "evict-leader"
+}
+
 func (s *evictLeaderScheduler) GetResourceKind() core.ResourceKind {
 	return core.LeaderKind
 }

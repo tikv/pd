@@ -40,6 +40,7 @@ func init() {
 		command.NewConfigCommand(),
 		command.NewRegionCommand(),
 		command.NewStoreCommand(),
+		command.NewStoreNsCommand(),
 		command.NewMemberCommand(),
 		command.NewExitCommand(),
 		command.NewLabelCommand(),
@@ -49,6 +50,7 @@ func init() {
 		command.NewTSOCommand(),
 		command.NewHotSpotCommand(),
 		command.NewClusterCommand(),
+		command.NewNamespaceCommand(),
 	)
 	cobra.EnablePrefixMatching = true
 }

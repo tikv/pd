@@ -52,6 +52,8 @@ type Scheduler interface {
 	GetName() string
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
+	// GetType should in accordance with the name passing to schedule.RegisterScheduler()
+	GetType() string
 	GetResourceKind() core.ResourceKind
 	GetResourceLimit() uint64
 	Prepare(cluster Cluster) error

@@ -1,5 +1,5 @@
-hash: 8230300f7fc65a14a8b20d08f5f909020ed556b9bf745dff56333432e3333d93
-updated: 2017-07-21T10:24:21.756681879+08:00
+hash: 7895e4ce4ab86efd46f3b68d89cbfaa8319cbfbbe33249b8886f23f28415ba05
+updated: 2017-09-28T12:30:34.049912487+08:00
 imports:
 - name: github.com/beorn7/perks
   version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
@@ -16,7 +16,7 @@ imports:
 - name: github.com/cockroachdb/cmux
   version: 112f0506e7743d64a6eb8fedbcff13d9979bbf92
 - name: github.com/coreos/etcd
-  version: c31bec0f29facff13f7c3e3d948e55dd6689ed42
+  version: 9d43462d174c664f5edf313dec0de31e1ef4ed47
   subpackages:
   - alarm
   - auth
@@ -30,6 +30,7 @@ imports:
   - error
   - etcdserver
   - etcdserver/api
+  - etcdserver/api/etcdhttp
   - etcdserver/api/v2http
   - etcdserver/api/v2http/httptypes
   - etcdserver/api/v3client
@@ -140,12 +141,6 @@ imports:
   - pbutil
 - name: github.com/montanaflynn/stats
   version: f8cd06f93c6c1b06028caafb88b540fc820f77c1
-- name: github.com/ngaut/deadline
-  version: fae8f9dfd7048de16575b9d4c255278e38c28a4f
-- name: github.com/ngaut/log
-  version: cec23d3e10b016363780d894a0eb732a12c06e02
-- name: github.com/ngaut/systimemon
-  version: c2ca1c75c6af5556eb6ce67994120adf12f2ccef
 - name: github.com/pingcap/check
   version: ce8a2f822ab1e245a4eefcef2996531c79c943f1
 - name: github.com/pingcap/kvproto

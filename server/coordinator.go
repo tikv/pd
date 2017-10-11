@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"golang.org/x/net/context"
 )
@@ -59,29 +60,35 @@ type coordinator struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	cluster    *clusterInfo
-	opt        *scheduleOption
-	limiter    *scheduleLimiter
-	checker    *schedule.ReplicaChecker
-	operators  map[uint64]*schedule.Operator
-	schedulers map[string]*scheduleController
-	histories  cache.Cache
-	hbStreams  *heartbeatStreams
+	cluster          *clusterInfo
+	opt              *scheduleOption
+	limiter          *scheduleLimiter
+	replicaChecker   *schedule.ReplicaChecker
+	namespaceChecker *schedule.NamespaceChecker
+	operators        map[uint64]*schedule.Operator
+	schedulers       map[string]*scheduleController
+	classifier       namespace.Classifier
+	histories        cache.Cache
+	hbStreams        *heartbeatStreams
+	kv               *core.KV
 }
 
-func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams) *coordinator {
+func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams, kv *core.KV, classifier namespace.Classifier) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
-		ctx:        ctx,
-		cancel:     cancel,
-		cluster:    cluster,
-		opt:        opt,
-		limiter:    newScheduleLimiter(),
-		checker:    schedule.NewReplicaChecker(opt, cluster),
-		operators:  make(map[uint64]*schedule.Operator),
-		schedulers: make(map[string]*scheduleController),
-		histories:  cache.NewDefaultCache(historiesCacheSize),
-		hbStreams:  hbStreams,
+		ctx:              ctx,
+		cancel:           cancel,
+		cluster:          cluster,
+		opt:              opt,
+		limiter:          newScheduleLimiter(),
+		replicaChecker:   schedule.NewReplicaChecker(opt, cluster, classifier),
+		namespaceChecker: schedule.NewNamespaceChecker(opt, cluster, classifier),
+		operators:        make(map[uint64]*schedule.Operator),
+		schedulers:       make(map[string]*scheduleController),
+		classifier:       classifier,
+		histories:        cache.NewDefaultCache(historiesCacheSize),
+		hbStreams:        hbStreams,
+		kv:               kv,
 	}
 }
 
@@ -109,7 +116,11 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	if c.limiter.operatorCount(core.RegionKind) >= c.opt.GetReplicaScheduleLimit() {
 		return
 	}
-	if op := c.checker.Check(region); op != nil {
+	// Generate Operator which moves region to targeted namespace store
+	if op := c.namespaceChecker.Check(region); op != nil {
+		c.addOperator(op)
+	}
+	if op := c.replicaChecker.Check(region); op != nil {
 		c.addOperator(op)
 	}
 }
@@ -132,19 +143,32 @@ func (c *coordinator) run() {
 	}
 	log.Info("coordinator: Run scheduler")
 
-	for name := range c.opt.GetSchedulers() {
-		// note: CreateScheduler just needs specific scheduler config
-		// so schedulers(a map of scheduler configs) wrapped by c.opt has redundant configs
-		s, err := schedule.CreateScheduler(name, c.opt)
+	k := 0
+	scheduleCfg := c.opt.load()
+	for _, schedulerCfg := range scheduleCfg.Schedulers {
+		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opt, schedulerCfg.Args...)
 		if err != nil {
-			log.Errorf("can not create scheduler %s: %v", name, err)
+			log.Errorf("can not create scheduler %s: %v", schedulerCfg.Type, err)
 		} else {
-			log.Infof("create scheduler %s", name)
-			if err := c.addScheduler(s); err != nil {
-				log.Errorf("can not add scheduler %s: %v", name, err)
+			log.Infof("create scheduler %s", s.GetName())
+			if err = c.addScheduler(s, schedulerCfg.Args...); err != nil {
+				log.Errorf("can not add scheduler %s: %v", s.GetName(), err)
 			}
 		}
+
+		// only record valid scheduler config
+		if err == nil {
+			scheduleCfg.Schedulers[k] = schedulerCfg
+			k++
+		}
 	}
+
+	// remove invalid scheduler config and persist
+	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
+	if err := c.opt.persist(c.kv); err != nil {
+		log.Errorf("can't persist schedule config: %v", err)
+	}
+
 }
 
 func (c *coordinator) stop() {
@@ -253,7 +277,7 @@ func (c *coordinator) shouldRun() bool {
 	return c.cluster.isPrepared()
 }
 
-func (c *coordinator) addScheduler(scheduler schedule.Scheduler) error {
+func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -269,6 +293,8 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler) error {
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.GetName()] = s
+	c.opt.AddSchedulerCfg(s.GetType(), args)
+
 	return nil
 }
 
@@ -283,6 +309,11 @@ func (c *coordinator) removeScheduler(name string) error {
 
 	s.Stop()
 	delete(c.schedulers, name)
+
+	if err := c.opt.RemoveSchedulerCfg(name); err != nil {
+		return errors.Trace(err)
+	}
+
 	return nil
 }
 
@@ -318,6 +349,8 @@ func (c *coordinator) addOperator(op *schedule.Operator) bool {
 
 	log.Infof("[region %v] add operator: %s", regionID, op)
 
+	// If the new operator passed in has higher priorities than the old one,
+	// then replace the old operator.
 	if old, ok := c.operators[regionID]; ok {
 		if !isHigherPriorityOperator(op, old) {
 			log.Infof("[region %v] cancel add operator, old: %s", regionID, old)
@@ -483,6 +516,7 @@ type scheduleController struct {
 	schedule.Scheduler
 	opt          *scheduleOption
 	limiter      *scheduleLimiter
+	classifier   namespace.Classifier
 	nextInterval time.Duration
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -495,6 +529,7 @@ func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleContro
 		opt:          c.opt,
 		limiter:      c.limiter,
 		nextInterval: s.GetMinInterval(),
+		classifier:   c.classifier,
 		ctx:          ctx,
 		cancel:       cancel,
 	}
@@ -511,7 +546,7 @@ func (s *scheduleController) Stop() {
 func (s *scheduleController) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
 		// If we have schedule, reset interval to the minimal interval.
-		if op := s.Scheduler.Schedule(cluster); op != nil {
+		if op := scheduleByNamespace(cluster, s.classifier, s.Scheduler); op != nil {
 			s.nextInterval = s.Scheduler.GetMinInterval()
 			return op
 		}

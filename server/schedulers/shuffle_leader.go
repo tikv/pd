@@ -59,6 +59,10 @@ func (s *shuffleLeaderScheduler) GetNextInterval(interval time.Duration) time.Du
 	return intervalGrow(interval, MaxScheduleInterval, exponentailGrowth)
 }
 
+func (s *shuffleLeaderScheduler) GetType() string {
+	return "shuffle-leader"
+}
+
 func (s *shuffleLeaderScheduler) GetResourceKind() core.ResourceKind {
 	return core.LeaderKind
 }

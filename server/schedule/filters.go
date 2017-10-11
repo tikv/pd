@@ -16,6 +16,7 @@ package schedule
 import (
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
 )
 
 // Filter is an interface to filter source and target store.
@@ -172,8 +173,6 @@ func (f *cacheFilter) FilterTarget(store *core.StoreInfo) bool {
 
 type storageThresholdFilter struct{}
 
-const storageAvailableRatioThreshold = 0.2
-
 // NewStorageThresholdFilter creates a Filter that filters all stores that are
 // almost full.
 func NewStorageThresholdFilter(opt Options) Filter {
@@ -185,7 +184,7 @@ func (f *storageThresholdFilter) FilterSource(store *core.StoreInfo) bool {
 }
 
 func (f *storageThresholdFilter) FilterTarget(store *core.StoreInfo) bool {
-	return store.AvailableRatio() < storageAvailableRatioThreshold
+	return store.IsLowSpace()
 }
 
 // distinctScoreFilter ensures that distinct score will not decrease.
@@ -219,4 +218,30 @@ func (f *distinctScoreFilter) FilterSource(store *core.StoreInfo) bool {
 
 func (f *distinctScoreFilter) FilterTarget(store *core.StoreInfo) bool {
 	return DistinctScore(f.labels, f.stores, store) < f.safeScore
+}
+
+type namespaceFilter struct {
+	classifier namespace.Classifier
+	namespace  string
+}
+
+// NewNamespaceFilter creates a Filter that filters all stores that are not
+// belong to a namespace.
+func NewNamespaceFilter(classifier namespace.Classifier, namespace string) Filter {
+	return &namespaceFilter{
+		classifier: classifier,
+		namespace:  namespace,
+	}
+}
+
+func (f *namespaceFilter) filter(store *core.StoreInfo) bool {
+	return f.classifier.GetStoreNamespace(store) != f.namespace
+}
+
+func (f *namespaceFilter) FilterSource(store *core.StoreInfo) bool {
+	return f.filter(store)
+}
+
+func (f *namespaceFilter) FilterTarget(store *core.StoreInfo) bool {
+	return f.filter(store)
 }

@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -27,6 +28,8 @@ import (
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule"
 )
 
 // Config is the pd server configuration.
@@ -88,6 +91,9 @@ type Config struct {
 	// For all warnings during parsing.
 	WarningMsgs []string
 
+	// Enable namespace isolation.
+	EnableNamespace bool `toml:"enable-namespace" json:"enable-namespace"`
+
 	// Only test can change them.
 	nextRetryDelay             time.Duration
 	disableStrictReconfigCheck bool
@@ -116,6 +122,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.BoolVar(&cfg.Log.File.LogRotate, "log-rotate", true, "rotate log")
+	fs.BoolVar(&cfg.EnableNamespace, "enable-namespace", false, "enable namespace isolation (default 'false')")
 
 	return cfg
 }
@@ -287,8 +294,7 @@ func (c *Config) String() string {
 
 // configFromFile loads config from file.
 func (c *Config) configFromFile(path string) error {
-	meta, err := toml.DecodeFile(path, c)
-	c.Schedule.Meta = meta
+	_, err := toml.DecodeFile(path, c)
 	return errors.Trace(err)
 }
 
@@ -307,15 +313,30 @@ type ScheduleConfig struct {
 	// ReplicaScheduleLimit is the max coexist replica schedules.
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit,omitempty" json:"replica-schedule-limit"`
 	// Schedulers support for loding customized schedulers
-	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers"`
-
-	// Meta is meta information return from toml.Decode
-	// passing it to scheduler handler for supporting customized arguments
-	Meta toml.MetaData
+	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 }
 
-// SchedulerConfigs is a map of customized scheduler configuration.
-type SchedulerConfigs map[string]toml.Primitive
+func (c *ScheduleConfig) clone() *ScheduleConfig {
+	schedulers := make(SchedulerConfigs, len(c.Schedulers))
+	copy(schedulers, c.Schedulers)
+	return &ScheduleConfig{
+		MaxSnapshotCount:     c.MaxSnapshotCount,
+		MaxStoreDownTime:     c.MaxStoreDownTime,
+		LeaderScheduleLimit:  c.LeaderScheduleLimit,
+		RegionScheduleLimit:  c.RegionScheduleLimit,
+		ReplicaScheduleLimit: c.ReplicaScheduleLimit,
+		Schedulers:           schedulers,
+	}
+}
+
+// SchedulerConfigs is a slice of customized scheduler configuration.
+type SchedulerConfigs []SchedulerConfig
+
+// SchedulerConfig is customized scheduler configuration
+type SchedulerConfig struct {
+	Type string   `toml:"type" json:"type"`
+	Args []string `toml:"args,omitempty" json:"args"`
+}
 
 const (
 	defaultMaxReplicas          = 3
@@ -327,10 +348,10 @@ const (
 )
 
 var defaultSchedulers = SchedulerConfigs{
-	"balance-region":          toml.Primitive{},
-	"balance-leader":          toml.Primitive{},
-	"hot-region":              toml.Primitive{},
-	"balance-adjacent-region": toml.Primitive{},
+	{Type: "balance-region"},
+	{Type: "balance-leader"},
+	{Type: "hot-region"},
+	{Type: "adjacent-region"},
 }
 
 func (c *ScheduleConfig) adjust() {
@@ -355,7 +376,7 @@ type ReplicationConfig struct {
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {
-	locationLabels := make(typeutil.StringSlice, 0, len(c.LocationLabels))
+	locationLabels := make(typeutil.StringSlice, len(c.LocationLabels))
 	copy(locationLabels, c.LocationLabels)
 	return &ReplicationConfig{
 		MaxReplicas:    c.MaxReplicas,
@@ -428,12 +449,63 @@ func (o *scheduleOption) GetSchedulers() SchedulerConfigs {
 	return o.load().Schedulers
 }
 
-func (o *scheduleOption) GetMeta() toml.MetaData {
-	return o.load().Meta
+func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) error {
+	c := o.load()
+	v := c.clone()
+	for _, schedulerCfg := range v.Schedulers {
+		// comparing args is to cover the case that there are schedulers in same type but not with same name
+		// such as two schedulers of type "evict-leader",
+		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
+		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{tp, args}) {
+			return nil
+		}
+	}
+	v.Schedulers = append(v.Schedulers, SchedulerConfig{Type: tp, Args: args})
+	o.store(v)
+	return nil
 }
 
-func (o *scheduleOption) persist(kv *kv) error {
-	return kv.saveScheduleOption(o)
+func (o *scheduleOption) RemoveSchedulerCfg(name string) error {
+	c := o.load()
+	v := c.clone()
+	for i, schedulerCfg := range v.Schedulers {
+		// To create a temporary scheduler is just used to get scheduler's name
+		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, o, schedulerCfg.Args...)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		if tmp.GetName() == name {
+			v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
+			o.store(v)
+			return nil
+		}
+	}
+	return nil
+}
+
+func (o *scheduleOption) persist(kv *core.KV) error {
+	cfg := &Config{
+		Schedule:    *o.load(),
+		Replication: *o.rep.load(),
+	}
+	err := kv.SaveConfig(cfg)
+	return errors.Trace(err)
+}
+
+func (o *scheduleOption) reload(kv *core.KV) error {
+	cfg := &Config{
+		Schedule:    *o.load(),
+		Replication: *o.rep.load(),
+	}
+	isExist, err := kv.LoadConfig(cfg)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if isExist {
+		o.store(&cfg.Schedule)
+		o.rep.store(&cfg.Replication)
+	}
+	return nil
 }
 
 func (o *scheduleOption) GetHotRegionLowThreshold() int {
