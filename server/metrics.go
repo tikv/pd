@@ -92,7 +92,7 @@ var (
 	leaderTickCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: "pd",
-			Subsystem: "scheduler",
+			Subsystem: "server",
 			Name:      "leader_tick_total",
 			Help:      "Counter of leader ts tick count to identify current pd leader.",
 		})
