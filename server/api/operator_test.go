@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2017 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -25,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
+	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testOperatorSuite{})
