@@ -37,24 +37,24 @@ func (s *testStoreNsSuite) SetUpSuite(c *C) {
 		{
 			// metapb.StoreState_Up == 0
 			Id:      1,
-			Address: "localhost:1",
+			Address: "tikv:1",
 			State:   metapb.StoreState_Up,
 		},
 		{
 			Id:      4,
-			Address: "localhost:4",
+			Address: "tikv:4",
 			State:   metapb.StoreState_Up,
 		},
 		{
 			// metapb.StoreState_Offline == 1
 			Id:      6,
-			Address: "localhost:6",
+			Address: "tikv:6",
 			State:   metapb.StoreState_Offline,
 		},
 		{
 			// metapb.StoreState_Tombstone == 2
 			Id:      7,
-			Address: "localhost:7",
+			Address: "tikv:7",
 			State:   metapb.StoreState_Tombstone,
 		},
 	}
@@ -77,7 +77,7 @@ func (s *testStoreNsSuite) SetUpSuite(c *C) {
 
 	mustBootstrapCluster(c, s.svr)
 	for _, store := range s.stores {
-		mustPutStore(c, s.svr, store)
+		mustPutStore(c, s.svr, store.Id, store.State, nil)
 	}
 }
 
