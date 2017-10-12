@@ -130,6 +130,16 @@ func (h *Handler) AddBalanceRegionScheduler() error {
 	return h.AddScheduler(s)
 }
 
+// AddBalanceHotRegionScheduler adds a balance-hot-region-scheduler.
+func (h *Handler) AddBalanceHotRegionScheduler() error {
+	s, err := schedule.CreateScheduler("hot-region", h.opt)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	log.Infof("create scheduler %s", s.GetName())
+	return h.AddScheduler(s)
+}
+
 // AddBalanceAdjacentRegionScheduler adds a balance-adjacent-region-scheduler.
 func (h *Handler) AddAdjacentRegionScheduler() error {
 	s, err := schedule.CreateScheduler("adjacent-region", h.opt)
