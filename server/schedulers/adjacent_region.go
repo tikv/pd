@@ -74,7 +74,7 @@ func (l *balanceAdjacentRegionScheduler) GetNextInterval(interval time.Duration)
 }
 
 func (l *balanceAdjacentRegionScheduler) GetResourceKind() core.ResourceKind {
-	return core.AdjacentKind
+	return core.AdjacentLeaderKind
 }
 
 func (l *balanceAdjacentRegionScheduler) GetType() string {
@@ -88,6 +88,10 @@ func (l *balanceAdjacentRegionScheduler) GetResourceLimit() uint64 {
 func (l *balanceAdjacentRegionScheduler) Prepare(cluster schedule.Cluster) error { return nil }
 
 func (l *balanceAdjacentRegionScheduler) Cleanup(cluster schedule.Cluster) {}
+
+func (l *balanceAdjacentRegionScheduler) IsAllowSchedule(limiter *schedule.ScheduleLimiter) bool {
+	return limiter.OperatorCount(core.AdjacentLeaderKind) < 64 && limiter.OperatorCount(core.AdjacentPeerKind) < 1
+}
 
 func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	if l.ids == nil {
@@ -155,7 +159,7 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster schedule.Cluster
 		return nil
 	}
 	step := schedule.TransferLeader{FromStore: before.Leader.GetStoreId(), ToStore: target.GetId()}
-	return schedule.NewOperator("balance-adjacent-leader", before.GetId(), core.AdjacentKind, step)
+	return schedule.NewOperator("balance-adjacent-leader", before.GetId(), core.AdjacentLeaderKind, step)
 }
 
 func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, region *core.RegionInfo) *schedule.Operator {
@@ -191,5 +195,5 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, 
 	// record the store id and exclude it in next time
 	l.ids = append(l.ids, newPeer.GetStoreId())
 
-	return schedule.CreateMovePeerOperator("balance-adjacent-peer", region, core.AdjacentKind, leaderStoreID, newPeer.GetStoreId(), newPeer.GetId())
+	return schedule.CreateMovePeerOperator("balance-adjacent-peer", region, core.AdjacentPeerKind, leaderStoreID, newPeer.GetStoreId(), newPeer.GetId())
 }

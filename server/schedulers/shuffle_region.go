@@ -73,6 +73,10 @@ func (s *shuffleRegionScheduler) Prepare(cluster schedule.Cluster) error { retur
 
 func (s *shuffleRegionScheduler) Cleanup(cluster schedule.Cluster) {}
 
+func (s *shuffleRegionScheduler) IsAllowSchedule(limiter *schedule.ScheduleLimiter) bool {
+	return limiter.OperatorCount(s.GetResourceKind()) < s.GetResourceLimit()
+}
+
 func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region, oldPeer := scheduleRemovePeer(cluster, s.GetName(), s.selector)

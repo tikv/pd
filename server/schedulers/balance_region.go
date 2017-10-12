@@ -85,6 +85,10 @@ func (s *balanceRegionScheduler) Prepare(cluster schedule.Cluster) error { retur
 
 func (s *balanceRegionScheduler) Cleanup(cluster schedule.Cluster) {}
 
+func (s *balanceRegionScheduler) IsAllowSchedule(limiter *schedule.ScheduleLimiter) bool {
+	return limiter.OperatorCount(s.GetResourceKind()) < s.GetResourceLimit()
+}
+
 func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	// Select a peer from the store with most regions.

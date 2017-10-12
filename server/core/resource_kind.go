@@ -27,8 +27,10 @@ const (
 	RegionKind
 	// PriorityKind indicates the priority kind resource
 	PriorityKind
-	// AdjacentKind indicates the adjacent resource
-	AdjacentKind
+	// AdjacentLeaderKind indicates the adjacent resource
+	AdjacentLeaderKind
+	// AdjacentPeerKind indicates the adjacent resource
+	AdjacentPeerKind
 	// OtherKind indicates the other kind resource
 	OtherKind
 )
@@ -39,18 +41,20 @@ var resourceKindToName = map[ResourceKind]string{
 	2: "leader",
 	3: "region",
 	4: "priority",
-	5: "adjacent",
-	6: "other",
+	5: "adjacent-leader",
+	6: "adjacent-peer",
+	7: "other",
 }
 
 var resourceNameToValue = map[string]ResourceKind{
-	"unknown":  UnKnownKind,
-	"admin":    AdminKind,
-	"leader":   LeaderKind,
-	"region":   RegionKind,
-	"priority": PriorityKind,
-	"adjacent": AdjacentKind,
-	"other":    OtherKind,
+	"unknown":         UnKnownKind,
+	"admin":           AdminKind,
+	"leader":          LeaderKind,
+	"region":          RegionKind,
+	"priority":        PriorityKind,
+	"adjacent-leader": AdjacentLeaderKind,
+	"adjacent-peer":   AdjacentPeerKind,
+	"other":           OtherKind,
 }
 
 func (k ResourceKind) String() string {

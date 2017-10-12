@@ -75,6 +75,10 @@ func (s *shuffleLeaderScheduler) Prepare(cluster schedule.Cluster) error { retur
 
 func (s *shuffleLeaderScheduler) Cleanup(cluster schedule.Cluster) {}
 
+func (s *shuffleLeaderScheduler) IsAllowSchedule(limiter *schedule.ScheduleLimiter) bool {
+	return limiter.OperatorCount(s.GetResourceKind()) < s.GetResourceLimit()
+}
+
 func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	// We shuffle leaders between stores:
 	// 1. select a store randomly.

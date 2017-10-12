@@ -135,6 +135,10 @@ func (h *balanceHotRegionsScheduler) Prepare(cluster schedule.Cluster) error { r
 
 func (h *balanceHotRegionsScheduler) Cleanup(cluster schedule.Cluster) {}
 
+func (h *balanceHotRegionsScheduler) IsAllowSchedule(limiter *schedule.ScheduleLimiter) bool {
+	return limiter.OperatorCount(h.GetResourceKind()) < h.GetResourceLimit()
+}
+
 func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
 	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster)

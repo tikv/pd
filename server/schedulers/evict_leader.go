@@ -91,6 +91,10 @@ func (s *evictLeaderScheduler) Cleanup(cluster schedule.Cluster) {
 	cluster.UnblockStore(s.storeID)
 }
 
+func (s *evictLeaderScheduler) IsAllowSchedule(limiter *schedule.ScheduleLimiter) bool {
+	return limiter.OperatorCount(s.GetResourceKind()) < s.GetResourceLimit()
+}
+
 func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region := cluster.RandLeaderRegion(s.storeID)

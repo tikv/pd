@@ -15,6 +15,7 @@ package schedule
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/juju/errors"
@@ -59,6 +60,7 @@ type Scheduler interface {
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)
 	Schedule(cluster Cluster) *Operator
+	IsAllowSchedule(limiter *ScheduleLimiter) bool
 }
 
 // CreateSchedulerFunc is for creating scheudler.
@@ -82,4 +84,33 @@ func CreateScheduler(name string, opt Options, args ...string) (Scheduler, error
 		return nil, errors.Errorf("create func of %v is not registered", name)
 	}
 	return fn(opt, args)
+}
+
+type ScheduleLimiter struct {
+	sync.RWMutex
+	counts map[core.ResourceKind]uint64
+}
+
+func NewScheduleLimiter() *ScheduleLimiter {
+	return &ScheduleLimiter{
+		counts: make(map[core.ResourceKind]uint64),
+	}
+}
+
+func (l *ScheduleLimiter) AddOperator(op *Operator) {
+	l.Lock()
+	defer l.Unlock()
+	l.counts[op.ResourceKind()]++
+}
+
+func (l *ScheduleLimiter) RemoveOperator(op *Operator) {
+	l.Lock()
+	defer l.Unlock()
+	l.counts[op.ResourceKind()]--
+}
+
+func (l *ScheduleLimiter) OperatorCount(kind core.ResourceKind) uint64 {
+	l.RLock()
+	defer l.RUnlock()
+	return l.counts[kind]
 }

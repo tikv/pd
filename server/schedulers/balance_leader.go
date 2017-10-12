@@ -75,6 +75,10 @@ func (l *balanceLeaderScheduler) Prepare(cluster schedule.Cluster) error { retur
 
 func (l *balanceLeaderScheduler) Cleanup(cluster schedule.Cluster) {}
 
+func (l *balanceLeaderScheduler) IsAllowSchedule(limiter *schedule.ScheduleLimiter) bool {
+	return limiter.OperatorCount(l.GetResourceKind()) < l.GetResourceLimit()
+}
+
 func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 	region, newLeader := scheduleTransferLeader(cluster, l.GetName(), l.selector)

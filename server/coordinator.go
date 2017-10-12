@@ -62,7 +62,7 @@ type coordinator struct {
 
 	cluster          *clusterInfo
 	opt              *scheduleOption
-	limiter          *scheduleLimiter
+	limiter          *schedule.ScheduleLimiter
 	replicaChecker   *schedule.ReplicaChecker
 	namespaceChecker *schedule.NamespaceChecker
 	operators        map[uint64]*schedule.Operator
@@ -80,7 +80,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 		cancel:           cancel,
 		cluster:          cluster,
 		opt:              opt,
-		limiter:          newScheduleLimiter(),
+		limiter:          schedule.NewScheduleLimiter(),
 		replicaChecker:   schedule.NewReplicaChecker(opt, cluster, classifier),
 		namespaceChecker: schedule.NewNamespaceChecker(opt, cluster, classifier),
 		operators:        make(map[uint64]*schedule.Operator),
@@ -113,7 +113,7 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	}
 
 	// Check replica operator.
-	if c.limiter.operatorCount(core.RegionKind) >= c.opt.GetReplicaScheduleLimit() {
+	if c.limiter.OperatorCount(core.RegionKind) >= c.opt.GetReplicaScheduleLimit() {
 		return
 	}
 	// Generate Operator which moves region to targeted namespace store
@@ -362,7 +362,7 @@ func (c *coordinator) addOperator(op *schedule.Operator) bool {
 	}
 
 	c.histories.Put(regionID, op)
-	c.limiter.addOperator(op)
+	c.limiter.AddOperator(op)
 	c.operators[regionID] = op
 
 	if region := c.cluster.GetRegion(op.RegionID()); region != nil {
@@ -393,7 +393,7 @@ func (c *coordinator) removeOperator(op *schedule.Operator) {
 
 func (c *coordinator) removeOperatorLocked(op *schedule.Operator) {
 	regionID := op.RegionID()
-	c.limiter.removeOperator(op)
+	c.limiter.RemoveOperator(op)
 	delete(c.operators, regionID)
 
 	c.histories.Put(regionID, op)
@@ -483,39 +483,10 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 	}
 }
 
-type scheduleLimiter struct {
-	sync.RWMutex
-	counts map[core.ResourceKind]uint64
-}
-
-func newScheduleLimiter() *scheduleLimiter {
-	return &scheduleLimiter{
-		counts: make(map[core.ResourceKind]uint64),
-	}
-}
-
-func (l *scheduleLimiter) addOperator(op *schedule.Operator) {
-	l.Lock()
-	defer l.Unlock()
-	l.counts[op.ResourceKind()]++
-}
-
-func (l *scheduleLimiter) removeOperator(op *schedule.Operator) {
-	l.Lock()
-	defer l.Unlock()
-	l.counts[op.ResourceKind()]--
-}
-
-func (l *scheduleLimiter) operatorCount(kind core.ResourceKind) uint64 {
-	l.RLock()
-	defer l.RUnlock()
-	return l.counts[kind]
-}
-
 type scheduleController struct {
 	schedule.Scheduler
 	opt          *scheduleOption
-	limiter      *scheduleLimiter
+	limiter      *schedule.ScheduleLimiter
 	classifier   namespace.Classifier
 	nextInterval time.Duration
 	ctx          context.Context
@@ -563,5 +534,5 @@ func (s *scheduleController) GetInterval() time.Duration {
 }
 
 func (s *scheduleController) AllowSchedule() bool {
-	return s.limiter.operatorCount(s.GetResourceKind()) < s.GetResourceLimit()
+	return s.Scheduler.IsAllowSchedule(s.limiter)
 }
