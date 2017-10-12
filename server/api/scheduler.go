@@ -61,6 +61,16 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	case "balance-region-scheduler":
+		if err := h.AddBalanceRegionScheduler(); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	case "balance-adjacent-region-scheduler":
+		if err := h.AddAdjacentRegionScheduler(); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	case "grant-leader-scheduler":
 		storeID, ok := input["store_id"].(float64)
 		if !ok {
