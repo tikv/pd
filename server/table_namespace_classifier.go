@@ -17,7 +17,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
 	"path"
+	"regexp"
+	"sync"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -81,18 +84,33 @@ func (ns *Namespace) AddStoreID(storeID uint64) {
 
 // tableNamespaceClassifier implements Classifier interface
 type tableNamespaceClassifier struct {
+	sync.RWMutex
 	nsInfo         *namespacesInfo
 	tableIDDecoder core.TableIDDecoder
+	kv             *core.KV
+	idAlloc        IDAllocator
+	http.Handler
 }
 
-func newTableNamespaceClassifier(nsInfo *namespacesInfo, tableIDDecoder core.TableIDDecoder) tableNamespaceClassifier {
-	return tableNamespaceClassifier{
-		nsInfo,
-		tableIDDecoder,
+func newTableNamespaceClassifier(tableIDDecoder core.TableIDDecoder, kv *core.KV, idAlloc IDAllocator) (*tableNamespaceClassifier, error) {
+	nsInfo := newNamespacesInfo()
+	if err := nsInfo.loadNamespaces(kv, kvRangeLimit); err != nil {
+		return nil, errors.Trace(err)
 	}
+	c := &tableNamespaceClassifier{
+		nsInfo:         nsInfo,
+		tableIDDecoder: tableIDDecoder,
+		kv:             kv,
+		idAlloc:        idAlloc,
+	}
+	c.Handler = newTableClassifierHandler(c)
+	return c, nil
 }
 
-func (c tableNamespaceClassifier) GetAllNamespaces() []string {
+func (c *tableNamespaceClassifier) GetAllNamespaces() []string {
+	c.RLock()
+	defer c.RUnlock()
+
 	nsList := make([]string, 0, len(c.nsInfo.namespaces))
 	for name := range c.nsInfo.namespaces {
 		nsList = append(nsList, name)
@@ -100,7 +118,10 @@ func (c tableNamespaceClassifier) GetAllNamespaces() []string {
 	return nsList
 }
 
-func (c tableNamespaceClassifier) GetStoreNamespace(storeInfo *core.StoreInfo) string {
+func (c *tableNamespaceClassifier) GetStoreNamespace(storeInfo *core.StoreInfo) string {
+	c.RLock()
+	defer c.RUnlock()
+
 	for name, ns := range c.nsInfo.namespaces {
 		_, ok := ns.StoreIDs[storeInfo.Id]
 		if ok {
@@ -110,7 +131,10 @@ func (c tableNamespaceClassifier) GetStoreNamespace(storeInfo *core.StoreInfo) s
 	return namespace.DefaultNamespace
 }
 
-func (c tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInfo) string {
+func (c *tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInfo) string {
+	c.RLock()
+	defer c.RUnlock()
+
 	tableID := c.getTableID(regionInfo)
 	if tableID == 0 {
 		return namespace.DefaultNamespace
@@ -128,7 +152,7 @@ func (c tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInfo
 // getTableID returns the meaningful tableID (not 0) only if
 // the region contains only the contents of that table
 // else it returns 0
-func (c tableNamespaceClassifier) getTableID(regionInfo *core.RegionInfo) int64 {
+func (c *tableNamespaceClassifier) getTableID(regionInfo *core.RegionInfo) int64 {
 	startTableID := c.tableIDDecoder.DecodeTableID(regionInfo.StartKey)
 	endTableID := c.tableIDDecoder.DecodeTableID(regionInfo.EndKey)
 	if startTableID == 0 || endTableID == 0 {
@@ -148,6 +172,120 @@ func (c tableNamespaceClassifier) getTableID(regionInfo *core.RegionInfo) int64 
 	}
 
 	return 0
+}
+
+// GetNamespaces returns all namespace details.
+func (c *tableNamespaceClassifier) GetNamespaces() []*Namespace {
+	c.RLock()
+	defer c.RUnlock()
+	return c.nsInfo.getNamespaces()
+}
+
+// CreateNamespace creates a new Namespace.
+func (c *tableNamespaceClassifier) CreateNamespace(name string) error {
+	c.Lock()
+	defer c.Unlock()
+
+	r := regexp.MustCompile(`^\w+$`)
+	matched := r.MatchString(name)
+	if !matched {
+		return errors.New("Name should be 0-9, a-z or A-Z")
+	}
+
+	if n := c.nsInfo.getNamespaceByName(name); n != nil {
+		return errors.New("Duplicate namespace Name")
+	}
+
+	id, err := c.idAlloc.Alloc()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	ns := NewNamespace(id, name)
+	err = c.putNamespaceLocked(ns)
+	return errors.Trace(err)
+}
+
+// AddNamespaceTableID adds table ID to namespace.
+func (c *tableNamespaceClassifier) AddNamespaceTableID(name string, tableID int64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	n := c.nsInfo.getNamespaceByName(name)
+	if n == nil {
+		return errors.Errorf("invalid namespace Name %s, not found", name)
+	}
+
+	if c.nsInfo.IsTableIDExist(tableID) {
+		return errors.New("Table ID already exists in this cluster")
+	}
+
+	n.AddTableID(tableID)
+	return c.putNamespaceLocked(n)
+}
+
+// RemoveNamespaceTableID removes table ID from namespace.
+func (c *tableNamespaceClassifier) RemoveNamespaceTableID(name string, tableID int64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	n := c.nsInfo.getNamespaceByName(name)
+	if n == nil {
+		return errors.Errorf("invalid namespace Name %s, not found", name)
+	}
+
+	if _, ok := n.TableIDs[tableID]; !ok {
+		return errors.Errorf("Table ID %d is not belong to %s", tableID, name)
+	}
+
+	delete(n.TableIDs, tableID)
+	return c.putNamespaceLocked(n)
+}
+
+// AddNamespaceStoreID adds store ID to namespace.
+func (c *tableNamespaceClassifier) AddNamespaceStoreID(name string, storeID uint64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	n := c.nsInfo.getNamespaceByName(name)
+	if n == nil {
+		return errors.Errorf("invalid namespace Name %s, not found", name)
+	}
+
+	if c.nsInfo.IsStoreIDExist(storeID) {
+		return errors.New("Store ID already exists in this namespace")
+	}
+
+	n.AddStoreID(storeID)
+	return c.putNamespaceLocked(n)
+}
+
+// RemoveNamespaceStoreID removes store ID from namespace.
+func (c *tableNamespaceClassifier) RemoveNamespaceStoreID(name string, storeID uint64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	n := c.nsInfo.getNamespaceByName(name)
+	if n == nil {
+		return errors.Errorf("invalid namespace Name %s, not found", name)
+	}
+
+	if _, ok := n.StoreIDs[storeID]; !ok {
+		return errors.Errorf("Store ID %d is not belong to %s", storeID, name)
+	}
+
+	delete(n.StoreIDs, storeID)
+	return c.putNamespaceLocked(n)
+}
+
+func (c *tableNamespaceClassifier) putNamespaceLocked(ns *Namespace) error {
+	if c.kv != nil {
+		if err := c.nsInfo.saveNamespace(c.kv, ns); err != nil {
+			return errors.Trace(err)
+		}
+	}
+	c.nsInfo.setNamespace(ns)
+	return nil
 }
 
 type namespacesInfo struct {

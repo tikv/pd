@@ -51,6 +51,7 @@ func init() {
 		command.NewHotSpotCommand(),
 		command.NewClusterCommand(),
 		command.NewNamespaceCommand(),
+		command.NewHealthCommand(),
 	)
 	cobra.EnablePrefixMatching = true
 }

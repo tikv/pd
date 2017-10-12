@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"math"
 	"path"
-	"regexp"
 	"sync"
 	"time"
 
@@ -116,19 +115,7 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 	c.cachedCluster = cluster
-	var classifier namespace.Classifier
-	if c.s.cfg.EnableNamespace {
-		log.Infoln("use namespace classifier.")
-		nsInfo := c.cachedCluster.namespacesInfo
-		if err := nsInfo.loadNamespaces(c.s.kv, kvRangeLimit); err != nil {
-			return errors.Trace(err)
-		}
-		classifier = newTableNamespaceClassifier(nsInfo, core.DefaultTableIDDecoder)
-	} else {
-		log.Infoln("use default classifier.")
-		classifier = namespace.DefaultClassifier
-	}
-	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt, c.s.hbStreams, c.s.kv, classifier)
+	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt, c.s.hbStreams, c.s.kv, c.s.classifier)
 	c.quit = make(chan struct{})
 
 	c.wg.Add(2)
@@ -705,104 +692,7 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 	return c.cachedCluster.putMeta(meta)
 }
 
-// GetNamespaces returns all the namespace in etc.d
-func (c *RaftCluster) GetNamespaces() []*Namespace {
-	return c.cachedCluster.getNamespaces()
-}
-
-// CreateNamespace creates a new Namespace
-func (c *RaftCluster) CreateNamespace(name string) error {
-	c.Lock()
-	defer c.Unlock()
-
-	r := regexp.MustCompile(`^\w+$`)
-	matched := r.MatchString(name)
-	if !matched {
-		return errors.New("Name should be 0-9, a-z or A-Z")
-	}
-
-	cachedCluster := c.cachedCluster
-	if n := cachedCluster.getNamespace(name); n != nil {
-		return errors.New("Duplicate namespace Name")
-	}
-
-	id, err := c.s.idAlloc.Alloc()
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	ns := NewNamespace(id, name)
-	return cachedCluster.putNamespaceLocked(ns)
-}
-
-// AddNamespaceTableID adds table ID to namespace
-func (c *RaftCluster) AddNamespaceTableID(name string, tableID int64) error {
-	c.Lock()
-	defer c.Unlock()
-
-	n := c.cachedCluster.getNamespace(name)
-	if n == nil {
-		return errors.Errorf("invalid namespace Name %s, not found", name)
-	}
-
-	if c.cachedCluster.namespacesInfo.IsTableIDExist(tableID) {
-		return errors.New("Table ID already exists in this cluster")
-	}
-
-	n.AddTableID(tableID)
-	return c.cachedCluster.putNamespaceLocked(n)
-}
-
-// RemoveNamespaceTableID removes table ID from namespace
-func (c *RaftCluster) RemoveNamespaceTableID(name string, tableID int64) error {
-	c.Lock()
-	defer c.Unlock()
-
-	n := c.cachedCluster.getNamespace(name)
-	if n == nil {
-		return errors.Errorf("invalid namespace Name %s, not found", name)
-	}
-
-	if _, ok := n.TableIDs[tableID]; !ok {
-		return errors.Errorf("Table ID %d is not belong to %s", tableID, name)
-	}
-
-	delete(n.TableIDs, tableID)
-	return c.cachedCluster.putNamespaceLocked(n)
-}
-
-// AddNamespaceStoreID adds store ID to namespace
-func (c *RaftCluster) AddNamespaceStoreID(name string, storeID uint64) error {
-	c.Lock()
-	defer c.Unlock()
-
-	n := c.cachedCluster.getNamespace(name)
-	if n == nil {
-		return errors.Errorf("invalid namespace Name %s, not found", name)
-	}
-
-	if c.cachedCluster.namespacesInfo.IsStoreIDExist(storeID) {
-		return errors.New("Store ID already exists in this namespace")
-	}
-
-	n.AddStoreID(storeID)
-	return c.cachedCluster.putNamespaceLocked(n)
-}
-
-// RemoveNamespaceStoreID removes store ID from namespace
-func (c *RaftCluster) RemoveNamespaceStoreID(name string, storeID uint64) error {
-	c.Lock()
-	defer c.Unlock()
-
-	n := c.cachedCluster.getNamespace(name)
-	if n == nil {
-		return errors.Errorf("invalid namespace Name %s, not found", name)
-	}
-
-	if _, ok := n.StoreIDs[storeID]; !ok {
-		return errors.Errorf("Store ID %d is not belong to %s", storeID, name)
-	}
-
-	delete(n.StoreIDs, storeID)
-	return c.cachedCluster.putNamespaceLocked(n)
+// GetNamespaceClassifier returns current namespace classifier.
+func (c *RaftCluster) GetNamespaceClassifier() namespace.Classifier {
+	return c.s.classifier
 }

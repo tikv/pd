@@ -20,7 +20,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const storeNsPrefix = "pd/api/v1/store_ns/%s"
+const storeNsPrefix = "pd/api/v1/classifier/store_ns/%s"
 
 // NewStoreNsCommand return a store_ns subcommand of rootCmd
 func NewStoreNsCommand() *cobra.Command {

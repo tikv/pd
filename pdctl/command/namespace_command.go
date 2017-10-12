@@ -22,8 +22,8 @@ import (
 )
 
 const (
-	namespacePrefix      = "pd/api/v1/namespaces"
-	namespaceTablePrefix = "pd/api/v1/namespaces/table"
+	namespacePrefix      = "pd/api/v1/classifier/namespaces"
+	namespaceTablePrefix = "pd/api/v1/classifier/namespaces/table"
 )
 
 // NewNamespaceCommand return a namespace sub-command of rootCmd
