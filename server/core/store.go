@@ -14,6 +14,7 @@
 package core
 
 import (
+	"strings"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -193,8 +194,8 @@ func (s *StoreInfo) IsDisconnected() bool {
 // GetLabelValue returns a label's value (if exists).
 func (s *StoreInfo) GetLabelValue(key string) string {
 	for _, label := range s.GetLabels() {
-		if label.GetKey() == key {
-			return label.GetValue()
+		if strings.EqualFold(label.GetKey(), key) {
+			return strings.ToLower(label.GetValue())
 		}
 	}
 	return ""
@@ -220,7 +221,7 @@ func (s *StoreInfo) MergeLabels(labels []*metapb.StoreLabel) {
 L:
 	for _, newLabel := range labels {
 		for _, label := range s.Labels {
-			if label.Key == newLabel.Key {
+			if strings.EqualFold(label.Key, newLabel.Key) {
 				label.Value = newLabel.Value
 				continue L
 			}

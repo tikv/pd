@@ -128,7 +128,7 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 		want        []*metapb.Store
 	}{
 		{
-			name: "zone",
+			name: "Zone",
 			want: s.stores[:],
 		},
 		{
@@ -137,22 +137,22 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 		},
 		{
 			name:  "zone",
-			value: "us-west-1",
+			value: "Us-west-1",
 			want:  s.stores[:1],
 		},
 		{
-			name:  "zone",
+			name:  "Zone",
 			value: "west",
 			want:  s.stores[:2],
 		},
 		{
-			name:  "zo",
-			value: "beijing",
+			name:  "Zo",
+			value: "Beijing",
 			want:  s.stores[2:3],
 		},
 		{
-			name:  "zone",
-			value: "ssd",
+			name:  "ZONE",
+			value: "SSD",
 			want:  []*metapb.Store{},
 		},
 	}
