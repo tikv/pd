@@ -16,6 +16,7 @@ package server
 import (
 	"sort"
 
+	"bytes"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
@@ -28,6 +29,8 @@ type testTableNamespaceSuite struct {
 
 type mockTableIDDecoderForTarget struct{}
 type mockTableIDDecoderForGlobal struct{}
+type mockTableIDDecoderForEdge struct{}
+type mockTableIDDecoderForCrossTable struct{}
 
 const (
 	targetTableID = 12345
@@ -36,12 +39,32 @@ const (
 	globalStoreID = 987
 )
 
+var tableStartKey = []byte{'t', 0, 0, 0, '1', 0, 0, 0, 0}
+
 func (d mockTableIDDecoderForTarget) DecodeTableID(key core.Key) int64 {
 	return targetTableID
 }
 
 func (d mockTableIDDecoderForGlobal) DecodeTableID(key core.Key) int64 {
 	return globalTableID
+}
+
+func (d mockTableIDDecoderForEdge) DecodeTableID(key core.Key) int64 {
+	if string(key) == "startKey" || string(key) == "endKey" {
+		return 0
+	}
+	return targetTableID
+}
+
+func (d mockTableIDDecoderForCrossTable) DecodeTableID(key core.Key) int64 {
+	if string(key) == "startKey" {
+		return targetTableID
+	} else if string(key) == "endKey" {
+		return targetTableID + 1
+	} else if bytes.Equal(key, tableStartKey) {
+		return targetTableID + 1
+	}
+	return targetTableID
 }
 
 func (s *testTableNamespaceSuite) newClassifier(c *C, decoder core.TableIDDecoder) *tableNamespaceClassifier {
@@ -160,4 +183,53 @@ func (s *testTableNamespaceSuite) TestNamespaceOperation(c *C) {
 	// Add tableID to a namespace that doesn't exist
 	err = classifier.AddNamespaceTableID("test_not_exist", 2)
 	c.Assert(err, NotNil)
+}
+
+func (s *testTableNamespaceSuite) TestClassifierWithInfiniteEdge(c *C) {
+	// mock the start edge
+	classifier := s.newClassifier(c, mockTableIDDecoderForEdge{})
+	regionInfo := core.NewRegionInfo(&metapb.Region{
+		StartKey: []byte("startKey"),
+	}, &metapb.Peer{})
+	ns := classifier.GetRegionNamespace(regionInfo)
+	c.Assert(ns, Equals, "test1")
+
+	// mock the end edge
+	classifier = s.newClassifier(c, mockTableIDDecoderForEdge{})
+	regionInfo = core.NewRegionInfo(&metapb.Region{
+		EndKey: []byte("endKey"),
+	}, &metapb.Peer{})
+	ns = classifier.GetRegionNamespace(regionInfo)
+	c.Assert(ns, Equals, "test1")
+
+	// mock the region ("", ""), should return global
+	classifier = s.newClassifier(c, mockTableIDDecoderForEdge{})
+	regionInfo = core.NewRegionInfo(&metapb.Region{
+		StartKey: []byte("startKey"),
+		EndKey:   []byte("endKey"),
+	}, &metapb.Peer{})
+	ns = classifier.GetRegionNamespace(regionInfo)
+	c.Assert(ns, Equals, "global")
+}
+
+func (s *testTableNamespaceSuite) TestClassifierWithCrossTable(c *C) {
+	// mock the cross table
+	classifier := s.newClassifier(c, mockTableIDDecoderForCrossTable{})
+	regionInfo := core.NewRegionInfo(&metapb.Region{
+		StartKey: []byte("startKey"),
+		EndKey:   []byte("endKey"),
+	}, &metapb.Peer{})
+	ns := classifier.GetRegionNamespace(regionInfo)
+	c.Assert(ns, Equals, "global")
+}
+
+func (s *testTableNamespaceSuite) TestClassifierWithTableSplit(c *C) {
+	// mock the cross table
+	classifier := s.newClassifier(c, mockTableIDDecoderForCrossTable{})
+	regionInfo := core.NewRegionInfo(&metapb.Region{
+		StartKey: []byte("startKey"),
+		EndKey:   tableStartKey,
+	}, &metapb.Peer{})
+	ns := classifier.GetRegionNamespace(regionInfo)
+	c.Assert(ns, Equals, "test1")
 }
