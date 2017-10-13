@@ -155,10 +155,23 @@ func (c *tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInf
 func (c *tableNamespaceClassifier) getTableID(regionInfo *core.RegionInfo) int64 {
 	startTableID := c.tableIDDecoder.DecodeTableID(regionInfo.StartKey)
 	endTableID := c.tableIDDecoder.DecodeTableID(regionInfo.EndKey)
+
 	if startTableID == 0 || endTableID == 0 {
-		// The startTableID or endTableID cannot be decoded,
-		// indicating the region contains meta-info or infinite edge
+		log.Debugf("Region %s has StartTableID (%d) or EndTableID (%d) of value 0", *regionInfo, startTableID, endTableID)
+	}
+
+	if startTableID == 0 && endTableID == 0 {
+		// The startTableID and endTableID cannot be decoded,
+		// indicating the region contains meta-info
 		return 0
+	}
+	// The [startTableID|endTableID] is 0,
+	// indicating that the region contains infinite edge
+	if startTableID == 0 {
+		return endTableID
+	}
+	if endTableID == 0 {
+		return startTableID
 	}
 
 	if startTableID == endTableID {
