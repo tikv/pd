@@ -195,7 +195,7 @@ func (s *StoreInfo) IsDisconnected() bool {
 func (s *StoreInfo) GetLabelValue(key string) string {
 	for _, label := range s.GetLabels() {
 		if strings.EqualFold(label.GetKey(), key) {
-			return strings.ToLower(label.GetValue())
+			return label.GetValue()
 		}
 	}
 	return ""
@@ -208,7 +208,7 @@ func (s *StoreInfo) CompareLocation(other *StoreInfo, labels []string) int {
 		v1, v2 := s.GetLabelValue(key), other.GetLabelValue(key)
 		// If label is not set, the store is considered at the same location
 		// with any other store.
-		if v1 != "" && v2 != "" && v1 != v2 {
+		if v1 != "" && v2 != "" && !strings.EqualFold(v1, v2) {
 			return i
 		}
 	}

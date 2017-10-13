@@ -144,7 +144,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	}
 
 	// Test merge.
-	labels = map[string]string{"zack": "zack1", "host": "host1"}
+	labels = map[string]string{"zack": "zack1", "Host": "host1"}
 	b, err = json.Marshal(labels)
 	c.Assert(err, IsNil)
 	err = postJSON(&http.Client{}, url+"/label", b)
