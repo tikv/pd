@@ -21,7 +21,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
-	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testRegionSuite{})
@@ -30,9 +29,6 @@ type testRegionSuite struct {
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
-
-	grpcPDClient    pdpb.PDClient
-	regionHeartbeat pdpb.PD_RegionHeartbeatClient
 }
 
 func (s *testRegionSuite) SetUpSuite(c *C) {
@@ -43,11 +39,6 @@ func (s *testRegionSuite) SetUpSuite(c *C) {
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
-
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
-	regionHeartbeat, err := s.grpcPDClient.RegionHeartbeat(context.Background())
-	c.Assert(err, IsNil)
-	s.regionHeartbeat = regionHeartbeat
 }
 
 func (s *testRegionSuite) TearDownSuite(c *C) {
@@ -75,7 +66,7 @@ func newTestRegionInfo(regionID, storeID uint64, start, end []byte) *core.Region
 
 func (s *testRegionSuite) TestRegion(c *C) {
 	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
-	mustRegionHeartBeat(c, s.regionHeartbeat, s.svr.ClusterID(), r)
+	mustRegionHeartbeat(c, s.svr, r)
 	url := fmt.Sprintf("%s/region/id/%d", s.urlPrefix, r.GetId())
 	r1 := &core.RegionInfo{}
 	err := readJSONWithURL(url, r1)

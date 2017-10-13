@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/core"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
@@ -145,31 +144,6 @@ func mustBootstrapCluster(c *C, s *server.Server) {
 	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
 	c.Assert(err, IsNil)
 	c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_OK)
-}
-
-func mustPutStore(c *C, s *server.Server, store *metapb.Store) {
-	grpcPDClient := mustNewGrpcClient(c, s.GetAddr())
-	req := &pdpb.PutStoreRequest{
-		Header: newRequestHeader(s.ClusterID()),
-		Store:  store,
-	}
-	resp, err := grpcPDClient.PutStore(context.Background(), req)
-	c.Assert(err, IsNil)
-	c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_OK)
-}
-
-func mustRegionHeartBeat(c *C, client pdpb.PD_RegionHeartbeatClient, clusterID uint64, region *core.RegionInfo) {
-	req := &pdpb.RegionHeartbeatRequest{
-		Header: newRequestHeader(clusterID),
-		Region: region.Region,
-		Leader: region.Leader,
-	}
-
-	err := client.Send(req)
-	c.Assert(err, IsNil)
-
-	// Sleep a while to make sure the message is processed by server.
-	time.Sleep(time.Millisecond * 200)
 }
 
 func readJSONWithURL(url string, data interface{}) error {
