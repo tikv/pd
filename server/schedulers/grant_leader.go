@@ -24,7 +24,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("grant-leader", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("grant-leader", func(opt schedule.Options, limiter *schedule.ScheduleLimiter, args []string) (schedule.Scheduler, error) {
 		if len(args) != 1 {
 			return nil, errors.New("grant-leader needs 1 argument")
 		}
@@ -32,7 +32,7 @@ func init() {
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return newGrantLeaderScheduler(opt, id), nil
+		return newGrantLeaderScheduler(opt, limiter, id), nil
 	})
 }
 
@@ -40,6 +40,7 @@ const scheduleInterval = time.Millisecond * 10
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
 type grantLeaderScheduler struct {
+	*baseScheduler
 	opt     schedule.Options
 	name    string
 	storeID uint64
@@ -47,11 +48,13 @@ type grantLeaderScheduler struct {
 
 // newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
-func newGrantLeaderScheduler(opt schedule.Options, storeID uint64) schedule.Scheduler {
+func newGrantLeaderScheduler(opt schedule.Options, limiter *schedule.ScheduleLimiter, storeID uint64) schedule.Scheduler {
+	base := newBaseScheduler(limiter, core.LeaderKind)
 	return &grantLeaderScheduler{
-		opt:     opt,
-		name:    fmt.Sprintf("grant-leader-scheduler-%d", storeID),
-		storeID: storeID,
+		baseScheduler: base,
+		opt:           opt,
+		name:          fmt.Sprintf("grant-leader-scheduler-%d", storeID),
+		storeID:       storeID,
 	}
 }
 
@@ -64,7 +67,7 @@ func (s *grantLeaderScheduler) GetType() string {
 }
 
 func (s *grantLeaderScheduler) GetInterval() time.Duration {
-	return schedule.MinScheduleInterval
+	return MinScheduleInterval
 }
 
 func (s *grantLeaderScheduler) GetResourceKind() core.ResourceKind {
@@ -81,6 +84,10 @@ func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
 
 func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {
 	cluster.UnblockStore(s.storeID)
+}
+
+func (s *grantLeaderScheduler) IsAllowSchedule() bool {
+	return s.limiter.OperatorCount(s.GetResourceKind()) < s.GetResourceLimit()
 }
 
 func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {

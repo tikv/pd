@@ -15,18 +15,12 @@ package schedule
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
-)
-
-// options for interval of schedulers
-const (
-	MaxScheduleInterval     = time.Minute
-	MinScheduleInterval     = time.Millisecond * 10
-	MinSlowScheduleInterval = time.Second * 3
 )
 
 // Cluster provides an overview of a cluster's regions distribution.
@@ -58,16 +52,18 @@ type Scheduler interface {
 	GetName() string
 	// GetType should in accordance with the name passing to schedule.RegisterScheduler()
 	GetType() string
-	GetInterval() time.Duration
+	GetMinInterval() time.Duration
+	GetNextInterval(interval time.Duration) time.Duration
 	GetResourceKind() core.ResourceKind
 	GetResourceLimit() uint64
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)
 	Schedule(cluster Cluster) *Operator
+	IsAllowSchedule() bool
 }
 
 // CreateSchedulerFunc is for creating scheudler.
-type CreateSchedulerFunc func(opt Options, args []string) (Scheduler, error)
+type CreateSchedulerFunc func(opt Options, limiter *ScheduleLimiter, args []string) (Scheduler, error)
 
 var schedulerMap = make(map[string]CreateSchedulerFunc)
 
@@ -81,10 +77,39 @@ func RegisterScheduler(name string, createFn CreateSchedulerFunc) {
 }
 
 // CreateScheduler creates a scheduler with registered creator func.
-func CreateScheduler(name string, opt Options, args ...string) (Scheduler, error) {
+func CreateScheduler(name string, opt Options, limiter *ScheduleLimiter, args ...string) (Scheduler, error) {
 	fn, ok := schedulerMap[name]
 	if !ok {
 		return nil, errors.Errorf("create func of %v is not registered", name)
 	}
-	return fn(opt, args)
+	return fn(opt, limiter, args)
+}
+
+type ScheduleLimiter struct {
+	sync.RWMutex
+	counts map[core.ResourceKind]uint64
+}
+
+func NewScheduleLimiter() *ScheduleLimiter {
+	return &ScheduleLimiter{
+		counts: make(map[core.ResourceKind]uint64),
+	}
+}
+
+func (l *ScheduleLimiter) AddOperator(op *Operator) {
+	l.Lock()
+	defer l.Unlock()
+	l.counts[op.ResourceKind()]++
+}
+
+func (l *ScheduleLimiter) RemoveOperator(op *Operator) {
+	l.Lock()
+	defer l.Unlock()
+	l.counts[op.ResourceKind()]--
+}
+
+func (l *ScheduleLimiter) OperatorCount(kind core.ResourceKind) uint64 {
+	l.RLock()
+	defer l.RUnlock()
+	return l.counts[kind]
 }

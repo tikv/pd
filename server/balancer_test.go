@@ -274,7 +274,7 @@ func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
 	s.cluster = newClusterInfo(newMockIDAllocator())
 	s.tc = newTestClusterInfo(s.cluster)
 	_, opt := newTestScheduleConfig()
-	lb, err := schedule.CreateScheduler("balance-leader", opt)
+	lb, err := schedule.CreateScheduler("balance-leader", opt, schedule.NewScheduleLimiter())
 	c.Assert(err, IsNil)
 	s.lb = lb
 }
@@ -408,7 +408,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	sb, err := schedule.CreateScheduler("balance-region", opt)
+	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewScheduleLimiter())
 	c.Assert(err, IsNil)
 
 	opt.SetMaxReplicas(1)
@@ -447,7 +447,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	_, opt := newTestScheduleConfig()
 	opt.rep = newTestReplication(3, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", opt)
+	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewScheduleLimiter())
 	c.Assert(err, IsNil)
 
 	// Store 1 has the largest region score, so the balancer try to replace peer in store 1.
@@ -512,7 +512,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	_, opt := newTestScheduleConfig()
 	opt.rep = newTestReplication(5, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", opt)
+	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewScheduleLimiter())
 	c.Assert(err, IsNil)
 
 	tc.addLabelsStore(1, 4, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -548,7 +548,7 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	sb, err := schedule.CreateScheduler("balance-region", opt)
+	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewScheduleLimiter())
 	c.Assert(err, IsNil)
 	opt.SetMaxReplicas(1)
 
@@ -879,7 +879,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	hb, err := schedule.CreateScheduler("hot-write-region", opt)
+	hb, err := schedule.CreateScheduler("hot-write-region", opt, schedule.NewScheduleLimiter())
 	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
@@ -960,7 +960,7 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	hb, err := schedule.CreateScheduler("hot-read-region", opt)
+	hb, err := schedule.CreateScheduler("hot-read-region", opt, schedule.NewScheduleLimiter())
 	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.

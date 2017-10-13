@@ -23,14 +23,15 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("balance-region", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
-		return newBalanceRegionScheduler(opt), nil
+	schedule.RegisterScheduler("balance-region", func(opt schedule.Options, limiter *schedule.ScheduleLimiter, args []string) (schedule.Scheduler, error) {
+		return newBalanceRegionScheduler(opt, limiter), nil
 	})
 }
 
 const storeCacheInterval = 30 * time.Second
 
 type balanceRegionScheduler struct {
+	*baseScheduler
 	opt      schedule.Options
 	cache    *cache.TTLUint64
 	limit    uint64
@@ -39,7 +40,7 @@ type balanceRegionScheduler struct {
 
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
 // each store balanced.
-func newBalanceRegionScheduler(opt schedule.Options) schedule.Scheduler {
+func newBalanceRegionScheduler(opt schedule.Options, limiter *schedule.ScheduleLimiter) schedule.Scheduler {
 	ttlCache := cache.NewIDTTL(storeCacheInterval, 4*storeCacheInterval)
 	filters := []schedule.Filter{
 		schedule.NewCacheFilter(ttlCache),
@@ -48,12 +49,13 @@ func newBalanceRegionScheduler(opt schedule.Options) schedule.Scheduler {
 		schedule.NewSnapshotCountFilter(opt),
 		schedule.NewStorageThresholdFilter(opt),
 	}
-
+	base := newBaseScheduler(limiter, core.RegionKind)
 	return &balanceRegionScheduler{
-		opt:      opt,
-		cache:    ttlCache,
-		limit:    1,
-		selector: schedule.NewBalanceSelector(core.RegionKind, filters),
+		baseScheduler: base,
+		opt:           opt,
+		cache:         ttlCache,
+		limit:         1,
+		selector:      schedule.NewBalanceSelector(core.RegionKind, filters),
 	}
 }
 
@@ -65,21 +67,13 @@ func (s *balanceRegionScheduler) GetType() string {
 	return "balance-region"
 }
 
-func (s *balanceRegionScheduler) GetInterval() time.Duration {
-	return schedule.MinScheduleInterval
-}
-
-func (s *balanceRegionScheduler) GetResourceKind() core.ResourceKind {
-	return core.RegionKind
-}
-
 func (s *balanceRegionScheduler) GetResourceLimit() uint64 {
 	return minUint64(s.limit, s.opt.GetRegionScheduleLimit())
 }
 
-func (s *balanceRegionScheduler) Prepare(cluster schedule.Cluster) error { return nil }
-
-func (s *balanceRegionScheduler) Cleanup(cluster schedule.Cluster) {}
+func (s *balanceRegionScheduler) IsAllowSchedule() bool {
+	return s.limiter.OperatorCount(s.GetResourceKind()) < s.GetResourceLimit()
+}
 
 func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()

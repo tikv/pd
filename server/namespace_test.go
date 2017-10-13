@@ -118,7 +118,7 @@ func (s *testNamespaceSuite) TestSchedulerBalanceRegion(c *C) {
 	s.classifier.setStore(2, "ns1")
 	s.classifier.setStore(3, "ns2")
 	s.opt.SetMaxReplicas(1)
-	sched, _ := schedule.CreateScheduler("balance-region", s.opt)
+	sched, _ := schedule.CreateScheduler("balance-region", s.opt, schedule.NewScheduleLimiter())
 
 	// Balance is limited within a namespace.
 	s.tc.addLeaderRegion(1, 2)
@@ -157,7 +157,7 @@ func (s *testNamespaceSuite) TestSchedulerBalanceLeader(c *C) {
 	s.classifier.setStore(2, "ns1")
 	s.classifier.setStore(3, "ns2")
 	s.classifier.setStore(4, "ns2")
-	sched, _ := schedule.CreateScheduler("balance-leader", s.opt)
+	sched, _ := schedule.CreateScheduler("balance-leader", s.opt, schedule.NewScheduleLimiter())
 
 	// Balance is limited within a namespace.
 	s.tc.addLeaderRegion(1, 2, 1)

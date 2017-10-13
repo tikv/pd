@@ -469,7 +469,7 @@ func (o *scheduleOption) RemoveSchedulerCfg(name string) error {
 	v := c.clone()
 	for i, schedulerCfg := range v.Schedulers {
 		// To create a temporary scheduler is just used to get scheduler's name
-		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, o, schedulerCfg.Args...)
+		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, o, schedule.NewScheduleLimiter(), schedulerCfg.Args...)
 		if err != nil {
 			return errors.Trace(err)
 		}
