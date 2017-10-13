@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/table"
 	"google.golang.org/grpc"
 )
 
@@ -198,7 +199,7 @@ func (s *Server) initClassifier() error {
 	if s.cfg.EnableNamespace {
 		log.Infoln("use namespace classifier.")
 		var err error
-		s.classifier, err = newTableNamespaceClassifier(core.DefaultTableIDDecoder, s.kv, s.idAlloc)
+		s.classifier, err = table.NewTableNamespaceClassifier(s.kv, s.idAlloc)
 		if err != nil {
 			return errors.Trace(err)
 		}
