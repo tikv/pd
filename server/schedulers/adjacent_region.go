@@ -139,6 +139,9 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *sch
 			op = l.dispersePeer(cluster, r1)
 		}
 		l.lastKey = r2.StartKey
+		if op == nil {
+			l.ids = l.ids[:0]
+		}
 		return op
 	}
 	l.ids = l.ids[:0]
