@@ -14,13 +14,13 @@
 package server
 
 import (
+	"context"
 	"path"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/juju/errors"
-	"golang.org/x/net/context"
 )
 
 const (

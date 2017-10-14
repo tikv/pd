@@ -22,20 +22,23 @@ import (
 )
 
 const (
-	namespacePrefix      = "pd/api/v1/classifier/namespaces"
-	namespaceTablePrefix = "pd/api/v1/classifier/namespaces/table"
+	namespacePrefix      = "pd/api/v1/classifier/table/namespaces"
+	namespaceTablePrefix = "pd/api/v1/classifier/table/namespaces/table"
+	storeNsPrefix        = "pd/api/v1/classifier/table/store_ns/%s"
 )
 
-// NewNamespaceCommand return a namespace sub-command of rootCmd
-func NewNamespaceCommand() *cobra.Command {
+// NewTableNamespaceCommand return a table namespace sub-command of rootCmd
+func NewTableNamespaceCommand() *cobra.Command {
 	s := &cobra.Command{
-		Use:   "namespace [create|add|remove]",
-		Short: "show the namespace information",
+		Use:   "table_ns [create|add|remove|set_store|rm_store]",
+		Short: "show the table namespace information",
 		Run:   showNamespaceCommandFunc,
 	}
 	s.AddCommand(NewCreateNamespaceCommand())
 	s.AddCommand(NewAddTableIDCommand())
 	s.AddCommand(NewRemoveTableIDCommand())
+	s.AddCommand(NewSetNamespaceStoreCommand())
+	s.AddCommand(NewRemoveNamespaceStoreCommand())
 	return s
 }
 
@@ -127,4 +130,60 @@ func removeTableCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	postJSON(cmd, namespaceTablePrefix, input)
+}
+
+// NewSetNamespaceStoreCommand returns a set subcommand of storeNsCmd.
+func NewSetNamespaceStoreCommand() *cobra.Command {
+	n := &cobra.Command{
+		Use:   "set_store <store_id> <namespace>",
+		Short: "set namespace to store",
+		Run:   setNamespaceStoreCommandFunc,
+	}
+
+	return n
+}
+
+// NewRemoveNamespaceStoreCommand returns a rm subcommand of storeNsCmd.
+func NewRemoveNamespaceStoreCommand() *cobra.Command {
+	n := &cobra.Command{
+		Use:   "rm_store <store_id> <namespace>",
+		Short: "remove namespace from store",
+		Run:   removeNamespaceStoreCommandFunc,
+	}
+
+	return n
+}
+
+func setNamespaceStoreCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 2 {
+		fmt.Println("Usage: namespace set_ns <store_id> <namespace>")
+		return
+	}
+	_, err := strconv.Atoi(args[0])
+	if err != nil {
+		fmt.Println("store_id should be a number")
+		return
+	}
+	prefix := fmt.Sprintf(storeNsPrefix, args[0])
+	postJSON(cmd, prefix, map[string]interface{}{
+		"namespace": args[1],
+		"action":    "add",
+	})
+}
+
+func removeNamespaceStoreCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 2 {
+		fmt.Println("Usage: namespace rm_ns <store_id> <namespace>")
+		return
+	}
+	_, err := strconv.Atoi(args[0])
+	if err != nil {
+		fmt.Println("store_id should be a number")
+		return
+	}
+	prefix := fmt.Sprintf(storeNsPrefix, args[0])
+	postJSON(cmd, prefix, map[string]interface{}{
+		"namespace": args[1],
+		"action":    "remove",
+	})
 }

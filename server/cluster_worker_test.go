@@ -15,6 +15,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"math/rand"
 	"net"
 	"sync"
@@ -25,7 +26,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
-	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testClusterWorkerSuite{})

@@ -11,12 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package table
 
 import (
 	"sort"
+	"sync/atomic"
 
 	"bytes"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
@@ -41,22 +43,22 @@ const (
 
 var tableStartKey = []byte{'t', 0, 0, 0, '1', 0, 0, 0, 0}
 
-func (d mockTableIDDecoderForTarget) DecodeTableID(key core.Key) int64 {
+func (d mockTableIDDecoderForTarget) DecodeTableID(key Key) int64 {
 	return targetTableID
 }
 
-func (d mockTableIDDecoderForGlobal) DecodeTableID(key core.Key) int64 {
+func (d mockTableIDDecoderForGlobal) DecodeTableID(key Key) int64 {
 	return globalTableID
 }
 
-func (d mockTableIDDecoderForEdge) DecodeTableID(key core.Key) int64 {
+func (d mockTableIDDecoderForEdge) DecodeTableID(key Key) int64 {
 	if string(key) == "startKey" || string(key) == "endKey" {
 		return 0
 	}
 	return targetTableID
 }
 
-func (d mockTableIDDecoderForCrossTable) DecodeTableID(key core.Key) int64 {
+func (d mockTableIDDecoderForCrossTable) DecodeTableID(key Key) int64 {
 	if string(key) == "startKey" {
 		return targetTableID
 	} else if string(key) == "endKey" {
@@ -67,10 +69,25 @@ func (d mockTableIDDecoderForCrossTable) DecodeTableID(key core.Key) int64 {
 	return targetTableID
 }
 
-func (s *testTableNamespaceSuite) newClassifier(c *C, decoder core.TableIDDecoder) *tableNamespaceClassifier {
+// mockIDAllocator mocks IDAllocator and it is only used for test.
+type mockIDAllocator struct {
+	base uint64
+}
+
+func newMockIDAllocator() *mockIDAllocator {
+	return &mockIDAllocator{base: 0}
+}
+
+func (alloc *mockIDAllocator) Alloc() (uint64, error) {
+	return atomic.AddUint64(&alloc.base, 1), nil
+}
+
+func (s *testTableNamespaceSuite) newClassifier(c *C, decoder IDDecoder) *tableNamespaceClassifier {
 	kv := core.NewKV(core.NewMemoryKV())
-	classifier, err := newTableNamespaceClassifier(decoder, kv, &mockIDAllocator{})
+	classifier, err := NewTableNamespaceClassifier(kv, &mockIDAllocator{})
 	c.Assert(err, IsNil)
+	tableClassifier := classifier.(*tableNamespaceClassifier)
+	tableClassifier.tableIDDecoder = decoder
 	testNamespace1 := Namespace{
 		ID:   1,
 		Name: "test1",
@@ -93,9 +110,9 @@ func (s *testTableNamespaceSuite) newClassifier(c *C, decoder core.TableIDDecode
 		},
 	}
 
-	classifier.nsInfo.setNamespace(&testNamespace1)
-	classifier.nsInfo.setNamespace(&testNamespace2)
-	return classifier
+	tableClassifier.nsInfo.setNamespace(&testNamespace1)
+	tableClassifier.nsInfo.setNamespace(&testNamespace2)
+	return tableClassifier
 }
 
 func (s *testTableNamespaceSuite) TestTableNameSpaceGetAllNamespace(c *C) {
@@ -132,56 +149,58 @@ func (s *testTableNamespaceSuite) TestTableNameSpaceGetRegionNamespace(c *C) {
 
 func (s *testTableNamespaceSuite) TestNamespaceOperation(c *C) {
 	kv := core.NewKV(core.NewMemoryKV())
-	classifier, err := newTableNamespaceClassifier(mockTableIDDecoderForGlobal{}, kv, &mockIDAllocator{})
+	classifier, err := NewTableNamespaceClassifier(kv, &mockIDAllocator{})
 	c.Assert(err, IsNil)
-	nsInfo := classifier.nsInfo
+	tableClassifier := classifier.(*tableNamespaceClassifier)
+	tableClassifier.tableIDDecoder = mockTableIDDecoderForGlobal{}
+	nsInfo := tableClassifier.nsInfo
 
-	err = classifier.CreateNamespace("(invalid_name")
+	err = tableClassifier.CreateNamespace("(invalid_name")
 	c.Assert(err, NotNil)
 
-	err = classifier.CreateNamespace("test1")
+	err = tableClassifier.CreateNamespace("test1")
 	c.Assert(err, IsNil)
 
-	namespaces := classifier.GetNamespaces()
+	namespaces := tableClassifier.GetNamespaces()
 	c.Assert(len(namespaces), Equals, 1)
 	c.Assert(namespaces[0].Name, Equals, "test1")
 
 	// Add the same Name
-	err = classifier.CreateNamespace("test1")
+	err = tableClassifier.CreateNamespace("test1")
 	c.Assert(err, NotNil)
 
-	classifier.CreateNamespace("test2")
+	tableClassifier.CreateNamespace("test2")
 
 	// Add tableID
-	err = classifier.AddNamespaceTableID("test1", 1)
-	namespaces = classifier.GetNamespaces()
+	err = tableClassifier.AddNamespaceTableID("test1", 1)
+	namespaces = tableClassifier.GetNamespaces()
 	c.Assert(err, IsNil)
 	c.Assert(nsInfo.IsTableIDExist(1), IsTrue)
 
 	// Add storeID
-	err = classifier.AddNamespaceStoreID("test1", 456)
-	namespaces = classifier.GetNamespaces()
+	err = tableClassifier.AddNamespaceStoreID("test1", 456)
+	namespaces = tableClassifier.GetNamespaces()
 	c.Assert(err, IsNil)
 	c.Assert(nsInfo.IsStoreIDExist(456), IsTrue)
 
 	// Ensure that duplicate tableID cannot exist in one namespace
-	err = classifier.AddNamespaceTableID("test1", 1)
+	err = tableClassifier.AddNamespaceTableID("test1", 1)
 	c.Assert(err, NotNil)
 
 	// Ensure that duplicate tableID cannot exist across namespaces
-	err = classifier.AddNamespaceTableID("test2", 1)
+	err = tableClassifier.AddNamespaceTableID("test2", 1)
 	c.Assert(err, NotNil)
 
 	// Ensure that duplicate storeID cannot exist in one namespace
-	err = classifier.AddNamespaceStoreID("test1", 456)
+	err = tableClassifier.AddNamespaceStoreID("test1", 456)
 	c.Assert(err, NotNil)
 
 	// Ensure that duplicate storeID cannot exist across namespaces
-	err = classifier.AddNamespaceStoreID("test2", 456)
+	err = tableClassifier.AddNamespaceStoreID("test2", 456)
 	c.Assert(err, NotNil)
 
 	// Add tableID to a namespace that doesn't exist
-	err = classifier.AddNamespaceTableID("test_not_exist", 2)
+	err = tableClassifier.AddNamespaceTableID("test_not_exist", 2)
 	c.Assert(err, NotNil)
 }
 

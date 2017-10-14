@@ -332,14 +332,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			continue
 		}
 
-		err = cluster.cachedCluster.handleRegionHeartbeat(region)
-		if err != nil {
-			msg := errors.Trace(err).Error()
-			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)
-			continue
-		}
-
-		err = cluster.handleRegionHeartbeat(region)
+		err = cluster.HandleRegionHeartbeat(region)
 		if err != nil {
 			msg := errors.Trace(err).Error()
 			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)

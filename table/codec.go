@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package core
+package table
 
 import (
 	"bytes"
@@ -20,16 +20,16 @@ import (
 	"github.com/juju/errors"
 )
 
-// TableIDDecoder defines method to extract tableID from key
-type TableIDDecoder interface {
+// IDDecoder defines method to extract tableID from key
+type IDDecoder interface {
 	DecodeTableID(key Key) int64
 }
 
-// DefaultTableIDDecoder is the default decoder.
+// DefaultIDDecoder is the default decoder.
 // unit test will use other mocked decoder.
-var DefaultTableIDDecoder defaultTableIDDecoder
+var DefaultIDDecoder defaultIDDecoder
 
-type defaultTableIDDecoder struct{}
+type defaultIDDecoder struct{}
 
 var tablePrefix = []byte{'t'}
 
@@ -50,7 +50,7 @@ func (k Key) HasPrefix(prefix Key) bool {
 }
 
 // DecodeTableID decodes the table ID of the key, if the key is not table key, returns 0.
-func (decoder defaultTableIDDecoder) DecodeTableID(key Key) int64 {
+func (decoder defaultIDDecoder) DecodeTableID(key Key) int64 {
 	_, key, err := decodeBytes(key)
 	if err != nil {
 		// should never happen

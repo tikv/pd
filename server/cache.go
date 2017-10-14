@@ -38,7 +38,7 @@ var (
 type clusterInfo struct {
 	sync.RWMutex
 
-	id              IDAllocator
+	id              core.IDAllocator
 	kv              *core.KV
 	meta            *metapb.Cluster
 	stores          *core.StoresInfo
@@ -48,7 +48,7 @@ type clusterInfo struct {
 	readStatistics  cache.Cache
 }
 
-func newClusterInfo(id IDAllocator) *clusterInfo {
+func newClusterInfo(id core.IDAllocator) *clusterInfo {
 	return &clusterInfo{
 		id:              id,
 		stores:          core.NewStoresInfo(),
@@ -59,7 +59,7 @@ func newClusterInfo(id IDAllocator) *clusterInfo {
 }
 
 // Return nil if cluster is not bootstrapped.
-func loadClusterInfo(id IDAllocator, kv *core.KV) (*clusterInfo, error) {
+func loadClusterInfo(id core.IDAllocator, kv *core.KV) (*clusterInfo, error) {
 	c := newClusterInfo(id)
 	c.kv = kv
 

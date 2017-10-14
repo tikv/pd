@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
@@ -25,7 +26,6 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
-	"golang.org/x/net/context"
 )
 
 const (

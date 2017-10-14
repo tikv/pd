@@ -14,13 +14,13 @@
 package server
 
 import (
+	"context"
 	"strconv"
 	"sync"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
-	"golang.org/x/net/context"
 )
 
 type heartbeatStream interface {
