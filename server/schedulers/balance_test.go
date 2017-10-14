@@ -704,9 +704,9 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	//|     1     |       1      |        2       |       3        |      512KB    |
 	//|     2     |       1      |        3       |       4        |      512KB    |
 	//|     3     |       1      |        2       |       4        |      512KB    |
-	tc.addLeaderRegionWithWriteInfo(1, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
-	tc.addLeaderRegionWithWriteInfo(2, 1, 512*1024*regionHeartBeatReportInterval, 3, 4)
-	tc.addLeaderRegionWithWriteInfo(3, 1, 512*1024*regionHeartBeatReportInterval, 2, 4)
+	tc.addLeaderRegionWithWriteInfo(1, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
+	tc.addLeaderRegionWithWriteInfo(2, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 3, 4)
+	tc.addLeaderRegionWithWriteInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 4)
 	opt.HotRegionLowThreshold = 0
 
 	// Will transfer a hot region from store 1 to store 5, because the total count of peers
@@ -724,9 +724,9 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	tc.updateStorageWrittenBytes(3, 60*1024*1024)
 	tc.updateStorageWrittenBytes(4, 30*1024*1024)
 	tc.updateStorageWrittenBytes(5, 30*1024*1024)
-	tc.addLeaderRegionWithWriteInfo(1, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
-	tc.addLeaderRegionWithWriteInfo(2, 1, 512*1024*regionHeartBeatReportInterval, 3, 4)
-	tc.addLeaderRegionWithWriteInfo(3, 5, 512*1024*regionHeartBeatReportInterval, 2, 4)
+	tc.addLeaderRegionWithWriteInfo(1, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
+	tc.addLeaderRegionWithWriteInfo(2, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 3, 4)
+	tc.addLeaderRegionWithWriteInfo(3, 5, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 4)
 
 	// We can find that the leader of all hot regions are on store 1,
 	// so one of the leader will transfer to another store.
@@ -764,16 +764,16 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	//|     1     |       1      |        2       |       3        |      512KB    |
 	//|     2     |       2      |        1       |       3        |      512KB    |
 	//|     3     |       1      |        2       |       3        |      512KB    |
-	tc.addLeaderRegionWithReadInfo(1, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
-	tc.addLeaderRegionWithReadInfo(2, 2, 512*1024*regionHeartBeatReportInterval, 1, 3)
-	tc.addLeaderRegionWithReadInfo(3, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
+	tc.addLeaderRegionWithReadInfo(1, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
+	tc.addLeaderRegionWithReadInfo(2, 2, 512*1024*schedule.RegionHeartBeatReportInterval, 1, 3)
+	tc.addLeaderRegionWithReadInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
 	opt.HotRegionLowThreshold = 0
 
 	// Will transfer a hot region leader from store 1 to store 3, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
 	CheckTransferLeader(c, hb.Schedule(cluster), 1, 3)
 	// assume handle the operator
-	tc.addLeaderRegionWithReadInfo(3, 3, 512*1024*regionHeartBeatReportInterval, 1, 2)
+	tc.addLeaderRegionWithReadInfo(3, 3, 512*1024*schedule.RegionHeartBeatReportInterval, 1, 2)
 
 	// After transfer a hot region leader from store 1 to store 3
 	// the tree region leader will be evenly distributed in three stores
@@ -782,8 +782,8 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	tc.updateStorageReadBytes(3, 60*1024*1024)
 	tc.updateStorageReadBytes(4, 30*1024*1024)
 	tc.updateStorageReadBytes(5, 30*1024*1024)
-	tc.addLeaderRegionWithReadInfo(4, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
-	tc.addLeaderRegionWithReadInfo(5, 4, 512*1024*regionHeartBeatReportInterval, 2, 5)
+	tc.addLeaderRegionWithReadInfo(4, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
+	tc.addLeaderRegionWithReadInfo(5, 4, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 5)
 
 	// Now appear two read hot region in store 1 and 4
 	// We will Transfer peer from 1 to 5

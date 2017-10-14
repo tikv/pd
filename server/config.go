@@ -508,7 +508,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 }
 
 func (o *scheduleOption) GetHotRegionLowThreshold() int {
-	return hotRegionLowThreshold
+	return schedule.HotRegionLowThreshold
 }
 
 // ParseUrls parse a string into multiple urls.

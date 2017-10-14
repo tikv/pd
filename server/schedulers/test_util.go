@@ -23,6 +23,7 @@ func CheckAddPeer(c *check.C, op *schedule.Operator, storeID uint64) {
 	c.Assert(op.Len(), check.Equals, 1)
 	c.Assert(op.Step(0).(schedule.AddPeer).ToStore, check.Equals, storeID)
 }
+
 // CheckTransferLeader check whether leader is transfered
 func CheckTransferLeader(c *check.C, op *schedule.Operator, sourceID, targetID uint64) {
 	c.Assert(op.Len(), check.Equals, 1)
