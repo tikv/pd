@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"strings"
 
 	"github.com/coreos/etcd/clientv3"
@@ -21,7 +22,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
 

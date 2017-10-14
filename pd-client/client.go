@@ -14,6 +14,7 @@
 package pd
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +23,6 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
 

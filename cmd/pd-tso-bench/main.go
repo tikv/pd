@@ -14,6 +14,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -25,7 +26,6 @@ import (
 
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pd-client"
-	"golang.org/x/net/context"
 )
 
 var (

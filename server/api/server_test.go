@@ -14,6 +14,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"strings"
@@ -24,7 +25,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
 

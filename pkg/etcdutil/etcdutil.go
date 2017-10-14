@@ -14,6 +14,7 @@
 package etcdutil
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -22,7 +23,6 @@ import (
 	"github.com/coreos/etcd/etcdserver"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
-	"golang.org/x/net/context"
 )
 
 const (
