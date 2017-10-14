@@ -417,13 +417,8 @@ var _ = Suite(&testReplicaCheckerSuite{})
 type testReplicaCheckerSuite struct{}
 
 func (s *testReplicaCheckerSuite) TestBasic(c *C) {
-<<<<<<< b259dd9d4c5a06f44494d9e28f6658825cc413e1
-    cluster := NewMockCluster(core.NewMockIDAllocator())
-    tc := cluster
-=======
 	cluster := newMockCluster(core.NewMockIDAllocator())
 	tc := cluster
->>>>>>> fix make check problem
 
 	_, opt := newTestScheduleConfig()
 	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
@@ -440,32 +435,32 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 
 	// Region has 2 peers, we need to add a new peer.
 	region := cluster.GetRegion(1)
-	checkAddPeer(c, rc.Check(region), 4)
+	CheckAddPeer(c, rc.Check(region), 4)
 
 	// Test healthFilter.
 	// If store 4 is down, we add to store 3.
 	tc.setStoreDown(4)
-	checkAddPeer(c, rc.Check(region), 3)
+	CheckAddPeer(c, rc.Check(region), 3)
 	tc.setStoreUp(4)
-	checkAddPeer(c, rc.Check(region), 4)
+	CheckAddPeer(c, rc.Check(region), 4)
 
 	// Test snapshotCountFilter.
 	// If snapshotCount > MaxSnapshotCount, we add to store 3.
 	tc.updateSnapshotCount(4, 3)
-	checkAddPeer(c, rc.Check(region), 3)
+	CheckAddPeer(c, rc.Check(region), 3)
 	// If snapshotCount < MaxSnapshotCount, we can add peer again.
 	tc.updateSnapshotCount(4, 1)
-	checkAddPeer(c, rc.Check(region), 4)
+	CheckAddPeer(c, rc.Check(region), 4)
 
 	// Test storageThresholdFilter.
 	// If availableRatio < storageAvailableRatioThreshold(0.2), we can not add peer.
 	tc.updateStorageRatio(4, 0.9, 0.1)
-	checkAddPeer(c, rc.Check(region), 3)
+	CheckAddPeer(c, rc.Check(region), 3)
 	tc.updateStorageRatio(4, 0.5, 0.1)
-	checkAddPeer(c, rc.Check(region), 3)
+	CheckAddPeer(c, rc.Check(region), 3)
 	// If availableRatio > storageAvailableRatioThreshold(0.2), we can add peer again.
 	tc.updateStorageRatio(4, 0.7, 0.3)
-	checkAddPeer(c, rc.Check(region), 4)
+	CheckAddPeer(c, rc.Check(region), 4)
 
 	// Add peer in store 4, and we have enough replicas.
 	peer4, _ := cluster.AllocPeer(4)
@@ -530,12 +525,12 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	region := cluster.GetRegion(1)
 
 	// Store 2 has different zone and smallest region score.
-	checkAddPeer(c, rc.Check(region), 2)
+	CheckAddPeer(c, rc.Check(region), 2)
 	peer2, _ := cluster.AllocPeer(2)
 	region.Peers = append(region.Peers, peer2)
 
 	// Store 3 has different zone and smallest region score.
-	checkAddPeer(c, rc.Check(region), 3)
+	CheckAddPeer(c, rc.Check(region), 3)
 	peer3, _ := cluster.AllocPeer(3)
 	region.Peers = append(region.Peers, peer3)
 
@@ -582,35 +577,35 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	// We need 3 replicas.
 	tc.addLeaderRegion(1, 1)
 	region := tc.GetRegion(1)
-	checkAddPeer(c, rc.Check(region), 2)
+	CheckAddPeer(c, rc.Check(region), 2)
 	peer2, _ := cluster.AllocPeer(2)
 	region.Peers = append(region.Peers, peer2)
 
 	// Store 1,2,3 have the same zone, rack, and host.
 	tc.addLabelsStore(3, 5, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
-	checkAddPeer(c, rc.Check(region), 3)
+	CheckAddPeer(c, rc.Check(region), 3)
 
 	// Store 4 has smaller region score.
 	tc.addLabelsStore(4, 4, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
-	checkAddPeer(c, rc.Check(region), 4)
+	CheckAddPeer(c, rc.Check(region), 4)
 
 	// Store 5 has a different host.
 	tc.addLabelsStore(5, 5, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"})
-	checkAddPeer(c, rc.Check(region), 5)
+	CheckAddPeer(c, rc.Check(region), 5)
 
 	// Store 6 has a different rack.
 	tc.addLabelsStore(6, 6, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
-	checkAddPeer(c, rc.Check(region), 6)
+	CheckAddPeer(c, rc.Check(region), 6)
 
 	// Store 7 has a different zone.
 	tc.addLabelsStore(7, 7, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
-	checkAddPeer(c, rc.Check(region), 7)
+	CheckAddPeer(c, rc.Check(region), 7)
 
 	// Test stateFilter.
 	tc.setStoreOffline(7)
-	checkAddPeer(c, rc.Check(region), 6)
+	CheckAddPeer(c, rc.Check(region), 6)
 	tc.setStoreUp(7)
-	checkAddPeer(c, rc.Check(region), 7)
+	CheckAddPeer(c, rc.Check(region), 7)
 
 	// Add peer to store 7.
 	peer7, _ := cluster.AllocPeer(7)
@@ -666,11 +661,11 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	tc.addLeaderRegion(1, 1, 2, 4)
 	region := cluster.GetRegion(1)
 
-	checkAddPeer(c, rc.Check(region), 6)
+	CheckAddPeer(c, rc.Check(region), 6)
 	peer6, _ := cluster.AllocPeer(6)
 	region.Peers = append(region.Peers, peer6)
 
-	checkAddPeer(c, rc.Check(region), 5)
+	CheckAddPeer(c, rc.Check(region), 5)
 	peer5, _ := cluster.AllocPeer(5)
 	region.Peers = append(region.Peers, peer5)
 
@@ -793,11 +788,6 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	// Now appear two read hot region in store 1 and 4
 	// We will Transfer peer from 1 to 5
 	checkTransferPeerWithLeaderTransfer(c, hb.Schedule(cluster), 1, 5)
-}
-
-func checkAddPeer(c *C, op *schedule.Operator, storeID uint64) {
-	c.Assert(op.Len(), Equals, 1)
-	c.Assert(op.Step(0).(schedule.AddPeer).ToStore, Equals, storeID)
 }
 
 func checkRemovePeer(c *C, op *schedule.Operator, storeID uint64) {
