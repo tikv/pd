@@ -330,6 +330,7 @@ func (c *client) tsLoop() {
 			close(done)
 			requests = requests[:0]
 		case <-loopCtx.Done():
+			cancel()
 			return
 		}
 
