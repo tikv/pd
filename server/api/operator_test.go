@@ -14,6 +14,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -24,7 +25,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
-	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testOperatorSuite{})

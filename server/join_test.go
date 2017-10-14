@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"os"
@@ -22,7 +23,6 @@ import (
 	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/etcdutil"
-	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testJoinServerSuite{})
