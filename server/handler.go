@@ -45,14 +45,6 @@ func (h *Handler) getCoordinator() (*coordinator, error) {
 	return cluster.coordinator, nil
 }
 
-func (h *Handler) getLimiter() (*schedule.ScheduleLimiter, error) {
-	cluster := h.s.GetRaftCluster()
-	if cluster == nil {
-		return nil, errors.Trace(errNotBootstrapped)
-	}
-	return cluster.coordinator.limiter, nil
-}
-
 // GetSchedulers returns all names of schedulers.
 func (h *Handler) GetSchedulers() ([]string, error) {
 	c, err := h.getCoordinator()

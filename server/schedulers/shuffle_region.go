@@ -19,7 +19,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("shuffle-region", func(opt schedule.Options, limiter *schedule.ScheduleLimiter, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("shuffle-region", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
 		return newShuffleRegionScheduler(opt, limiter), nil
 	})
 }
@@ -32,7 +32,7 @@ type shuffleRegionScheduler struct {
 
 // newShuffleRegionScheduler creates an admin scheduler that shuffles regions
 // between stores.
-func newShuffleRegionScheduler(opt schedule.Options, limiter *schedule.ScheduleLimiter) schedule.Scheduler {
+func newShuffleRegionScheduler(opt schedule.Options, limiter *schedule.Limiter) schedule.Scheduler {
 	filters := []schedule.Filter{
 		schedule.NewStateFilter(opt),
 		schedule.NewHealthFilter(opt),

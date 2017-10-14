@@ -23,7 +23,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("balance-region", func(opt schedule.Options, limiter *schedule.ScheduleLimiter, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("balance-region", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
 		return newBalanceRegionScheduler(opt, limiter), nil
 	})
 }
@@ -40,7 +40,7 @@ type balanceRegionScheduler struct {
 
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
 // each store balanced.
-func newBalanceRegionScheduler(opt schedule.Options, limiter *schedule.ScheduleLimiter) schedule.Scheduler {
+func newBalanceRegionScheduler(opt schedule.Options, limiter *schedule.Limiter) schedule.Scheduler {
 	ttlCache := cache.NewIDTTL(storeCacheInterval, 4*storeCacheInterval)
 	filters := []schedule.Filter{
 		schedule.NewCacheFilter(ttlCache),

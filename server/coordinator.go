@@ -63,7 +63,7 @@ type coordinator struct {
 
 	cluster          *clusterInfo
 	opt              *scheduleOption
-	limiter          *schedule.ScheduleLimiter
+	limiter          *schedule.Limiter
 	replicaChecker   *schedule.ReplicaChecker
 	namespaceChecker *schedule.NamespaceChecker
 	operators        map[uint64]*schedule.Operator
@@ -81,7 +81,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 		cancel:           cancel,
 		cluster:          cluster,
 		opt:              opt,
-		limiter:          schedule.NewScheduleLimiter(),
+		limiter:          schedule.NewLimiter(),
 		replicaChecker:   schedule.NewReplicaChecker(opt, cluster, classifier),
 		namespaceChecker: schedule.NewNamespaceChecker(opt, cluster, classifier),
 		operators:        make(map[uint64]*schedule.Operator),
@@ -487,7 +487,7 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 type scheduleController struct {
 	schedule.Scheduler
 	opt          *scheduleOption
-	limiter      *schedule.ScheduleLimiter
+	limiter      *schedule.Limiter
 	classifier   namespace.Classifier
 	nextInterval time.Duration
 	minInterval  time.Duration

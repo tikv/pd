@@ -10,6 +10,7 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package schedulers
 
 import (
@@ -52,11 +53,11 @@ func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowth
 }
 
 type baseScheduler struct {
-	limiter *schedule.ScheduleLimiter
+	limiter *schedule.Limiter
 	kind    core.ResourceKind
 }
 
-func newBaseScheduler(limiter *schedule.ScheduleLimiter, kind core.ResourceKind) *baseScheduler {
+func newBaseScheduler(limiter *schedule.Limiter, kind core.ResourceKind) *baseScheduler {
 	return &baseScheduler{limiter: limiter, kind: kind}
 }
 

@@ -26,14 +26,14 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("hot-region", func(opt schedule.Options, limiter *schedule.ScheduleLimiter, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("hot-region", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
 		return newBalanceHotRegionsScheduler(opt, limiter), nil
 	})
 	// FIXME: remove this two schedule after the balance test move in schedulers package
-	schedule.RegisterScheduler("hot-write-region", func(opt schedule.Options, limiter *schedule.ScheduleLimiter, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("hot-write-region", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
 		return newBalanceHotWriteRegionsScheduler(opt, limiter), nil
 	})
-	schedule.RegisterScheduler("hot-read-region", func(opt schedule.Options, limiter *schedule.ScheduleLimiter, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("hot-read-region", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
 		return newBalanceHotReadRegionsScheduler(opt, limiter), nil
 	})
 }
@@ -78,7 +78,7 @@ type balanceHotRegionsScheduler struct {
 	r     *rand.Rand
 }
 
-func newBalanceHotRegionsScheduler(opt schedule.Options, limiter *schedule.ScheduleLimiter) *balanceHotRegionsScheduler {
+func newBalanceHotRegionsScheduler(opt schedule.Options, limiter *schedule.Limiter) *balanceHotRegionsScheduler {
 	base := newBaseScheduler(limiter, core.PriorityKind)
 	return &balanceHotRegionsScheduler{
 		baseScheduler: base,
@@ -90,7 +90,7 @@ func newBalanceHotRegionsScheduler(opt schedule.Options, limiter *schedule.Sched
 	}
 }
 
-func newBalanceHotReadRegionsScheduler(opt schedule.Options, limiter *schedule.ScheduleLimiter) *balanceHotRegionsScheduler {
+func newBalanceHotReadRegionsScheduler(opt schedule.Options, limiter *schedule.Limiter) *balanceHotRegionsScheduler {
 	base := newBaseScheduler(limiter, core.PriorityKind)
 	return &balanceHotRegionsScheduler{
 		baseScheduler: base,
@@ -102,7 +102,7 @@ func newBalanceHotReadRegionsScheduler(opt schedule.Options, limiter *schedule.S
 	}
 }
 
-func newBalanceHotWriteRegionsScheduler(opt schedule.Options, limiter *schedule.ScheduleLimiter) *balanceHotRegionsScheduler {
+func newBalanceHotWriteRegionsScheduler(opt schedule.Options, limiter *schedule.Limiter) *balanceHotRegionsScheduler {
 	base := newBaseScheduler(limiter, core.PriorityKind)
 	return &balanceHotRegionsScheduler{
 		baseScheduler: base,

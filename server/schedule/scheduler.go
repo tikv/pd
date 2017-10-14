@@ -63,7 +63,7 @@ type Scheduler interface {
 }
 
 // CreateSchedulerFunc is for creating scheudler.
-type CreateSchedulerFunc func(opt Options, limiter *ScheduleLimiter, args []string) (Scheduler, error)
+type CreateSchedulerFunc func(opt Options, limiter *Limiter, args []string) (Scheduler, error)
 
 var schedulerMap = make(map[string]CreateSchedulerFunc)
 
@@ -77,7 +77,7 @@ func RegisterScheduler(name string, createFn CreateSchedulerFunc) {
 }
 
 // CreateScheduler creates a scheduler with registered creator func.
-func CreateScheduler(name string, opt Options, limiter *ScheduleLimiter, args ...string) (Scheduler, error) {
+func CreateScheduler(name string, opt Options, limiter *Limiter, args ...string) (Scheduler, error) {
 	fn, ok := schedulerMap[name]
 	if !ok {
 		return nil, errors.Errorf("create func of %v is not registered", name)
@@ -85,30 +85,35 @@ func CreateScheduler(name string, opt Options, limiter *ScheduleLimiter, args ..
 	return fn(opt, limiter, args)
 }
 
-type ScheduleLimiter struct {
+// Limiter a counter that limits the number of operators
+type Limiter struct {
 	sync.RWMutex
 	counts map[core.ResourceKind]uint64
 }
 
-func NewScheduleLimiter() *ScheduleLimiter {
-	return &ScheduleLimiter{
+// NewLimiter create a schedule limiter
+func NewLimiter() *Limiter {
+	return &Limiter{
 		counts: make(map[core.ResourceKind]uint64),
 	}
 }
 
-func (l *ScheduleLimiter) AddOperator(op *Operator) {
+// AddOperator increase the count by kind
+func (l *Limiter) AddOperator(op *Operator) {
 	l.Lock()
 	defer l.Unlock()
 	l.counts[op.ResourceKind()]++
 }
 
-func (l *ScheduleLimiter) RemoveOperator(op *Operator) {
+// RemoveOperator decrease the count by kind
+func (l *Limiter) RemoveOperator(op *Operator) {
 	l.Lock()
 	defer l.Unlock()
 	l.counts[op.ResourceKind()]--
 }
 
-func (l *ScheduleLimiter) OperatorCount(kind core.ResourceKind) uint64 {
+// OperatorCount get the count by kind
+func (l *Limiter) OperatorCount(kind core.ResourceKind) uint64 {
 	l.RLock()
 	defer l.RUnlock()
 	return l.counts[kind]

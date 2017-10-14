@@ -21,7 +21,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("balance-leader", func(opt schedule.Options, limiter *schedule.ScheduleLimiter, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("balance-leader", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
 		return newBalanceLeaderScheduler(opt, limiter), nil
 	})
 }
@@ -35,7 +35,7 @@ type balanceLeaderScheduler struct {
 
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
-func newBalanceLeaderScheduler(opt schedule.Options, limiter *schedule.ScheduleLimiter) schedule.Scheduler {
+func newBalanceLeaderScheduler(opt schedule.Options, limiter *schedule.Limiter) schedule.Scheduler {
 	filters := []schedule.Filter{
 		schedule.NewBlockFilter(),
 		schedule.NewStateFilter(opt),

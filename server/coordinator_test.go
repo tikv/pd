@@ -474,7 +474,7 @@ var _ = Suite(&testScheduleLimiterSuite{})
 type testScheduleLimiterSuite struct{}
 
 func (s *testScheduleLimiterSuite) TestOperatorCount(c *C) {
-	l := schedule.NewScheduleLimiter()
+	l := schedule.NewLimiter()
 	c.Assert(l.OperatorCount(core.LeaderKind), Equals, uint64(0))
 	c.Assert(l.OperatorCount(core.RegionKind), Equals, uint64(0))
 
@@ -503,7 +503,7 @@ type testScheduleControllerSuite struct{}
 type mockLimitScheduler struct {
 	schedule.Scheduler
 	limit   uint64
-	counter *schedule.ScheduleLimiter
+	counter *schedule.Limiter
 }
 
 func (s *mockLimitScheduler) GetResourceLimit() uint64 {
