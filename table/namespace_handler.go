@@ -29,10 +29,10 @@ func newTableClassifierHandler(classifier *tableNamespaceClassifier) http.Handle
 		rd:         render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/namespaces", h.Get).Methods("GET")
-	router.HandleFunc("/namespaces", h.Post).Methods("POST")
-	router.HandleFunc("/namespaces/table", h.Update).Methods("POST")
-	router.HandleFunc("/store_ns/{id}", h.SetNamespace).Methods("POST")
+	router.HandleFunc("/table/namespaces", h.Get).Methods("GET")
+	router.HandleFunc("/table/namespaces", h.Post).Methods("POST")
+	router.HandleFunc("/table/namespaces/table", h.Update).Methods("POST")
+	router.HandleFunc("/table/store_ns/{id}", h.SetNamespace).Methods("POST")
 	return router
 }
 

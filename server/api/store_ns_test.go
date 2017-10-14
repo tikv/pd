@@ -89,6 +89,6 @@ func (s *testStoreNsSuite) TestCreateNamespace(c *C) {
 	body := map[string]string{"namespace": "test"}
 	b, err := json.Marshal(body)
 	c.Assert(err, IsNil)
-	err = postJSON(&http.Client{}, fmt.Sprintf("%s/classifier/namespaces", s.urlPrefix), b)
+	err = postJSON(&http.Client{}, fmt.Sprintf("%s/classifier/table/namespaces", s.urlPrefix), b)
 	c.Assert(err, IsNil)
 }
