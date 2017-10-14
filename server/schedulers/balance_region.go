@@ -49,7 +49,7 @@ func newBalanceRegionScheduler(opt schedule.Options, limiter *schedule.Limiter) 
 		schedule.NewSnapshotCountFilter(opt),
 		schedule.NewStorageThresholdFilter(opt),
 	}
-	base := newBaseScheduler(limiter, core.RegionKind)
+	base := newBaseScheduler(limiter)
 	return &balanceRegionScheduler{
 		baseScheduler: base,
 		opt:           opt,
@@ -67,12 +67,9 @@ func (s *balanceRegionScheduler) GetType() string {
 	return "balance-region"
 }
 
-func (s *balanceRegionScheduler) GetResourceLimit() uint64 {
-	return minUint64(s.limit, s.opt.GetRegionScheduleLimit())
-}
-
 func (s *balanceRegionScheduler) IsAllowSchedule() bool {
-	return s.limiter.OperatorCount(s.GetResourceKind()) < s.GetResourceLimit()
+	limit := minUint64(s.limit, s.opt.GetRegionScheduleLimit())
+	return s.limiter.OperatorCount(core.RegionKind) < limit
 }
 
 func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
@@ -119,11 +116,11 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 
 	target := cluster.GetStore(newPeer.GetStoreId())
-	if !shouldBalance(source, target, s.GetResourceKind()) {
+	if !shouldBalance(source, target, core.RegionKind) {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
 	}
-	s.limit = adjustBalanceLimit(cluster, s.GetResourceKind())
+	s.limit = adjustBalanceLimit(cluster, core.RegionKind)
 
 	return schedule.CreateMovePeerOperator("balance-region", region, core.RegionKind, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }

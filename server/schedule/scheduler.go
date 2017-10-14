@@ -54,8 +54,6 @@ type Scheduler interface {
 	GetType() string
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
-	GetResourceKind() core.ResourceKind
-	GetResourceLimit() uint64
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)
 	Schedule(cluster Cluster) *Operator

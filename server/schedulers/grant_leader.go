@@ -49,7 +49,7 @@ type grantLeaderScheduler struct {
 // newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
 func newGrantLeaderScheduler(opt schedule.Options, limiter *schedule.Limiter, storeID uint64) schedule.Scheduler {
-	base := newBaseScheduler(limiter, core.LeaderKind)
+	base := newBaseScheduler(limiter)
 	return &grantLeaderScheduler{
 		baseScheduler: base,
 		opt:           opt,
@@ -66,18 +66,6 @@ func (s *grantLeaderScheduler) GetType() string {
 	return "grant-leader"
 }
 
-func (s *grantLeaderScheduler) GetInterval() time.Duration {
-	return MinScheduleInterval
-}
-
-func (s *grantLeaderScheduler) GetResourceKind() core.ResourceKind {
-	return core.LeaderKind
-}
-
-func (s *grantLeaderScheduler) GetResourceLimit() uint64 {
-	return s.opt.GetLeaderScheduleLimit()
-}
-
 func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
 	return errors.Trace(cluster.BlockStore(s.storeID))
 }
@@ -87,7 +75,7 @@ func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {
 }
 
 func (s *grantLeaderScheduler) IsAllowSchedule() bool {
-	return s.limiter.OperatorCount(s.GetResourceKind()) < s.GetResourceLimit()
+	return s.limiter.OperatorCount(core.RegionKind) < s.opt.GetLeaderScheduleLimit()
 }
 
 func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {

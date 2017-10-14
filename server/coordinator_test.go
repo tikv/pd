@@ -504,22 +504,16 @@ type mockLimitScheduler struct {
 	schedule.Scheduler
 	limit   uint64
 	counter *schedule.Limiter
-}
-
-func (s *mockLimitScheduler) GetResourceLimit() uint64 {
-	if s.limit != 0 {
-		return s.limit
-	}
-	return s.Scheduler.GetResourceLimit()
+	kind    core.ResourceKind
 }
 
 func (s *mockLimitScheduler) IsAllowSchedule() bool {
-	return s.counter.OperatorCount(s.GetResourceKind()) < s.GetResourceLimit()
+	return s.counter.OperatorCount(s.kind) < s.limit
 }
 
 func (s *testScheduleControllerSuite) TestController(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
-	cfg, opt := newTestScheduleConfig()
+	_, opt := newTestScheduleConfig()
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	kv := core.NewKV(core.NewMemoryKV())
 	defer hbStreams.Close()
@@ -530,21 +524,15 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	lb := &mockLimitScheduler{
 		Scheduler: scheduler,
 		counter:   co.limiter,
+		kind:      core.LeaderKind,
 	}
+
 	sc := newScheduleController(co, lb)
 
 	for i := schedulers.MinScheduleInterval; sc.GetInterval() != schedulers.MaxScheduleInterval; i = time.Duration(float64(i) * scheduleIntervalFactor) {
 		c.Assert(sc.GetInterval(), Equals, i)
 		c.Assert(sc.Schedule(cluster), IsNil)
 	}
-
-	cfg.LeaderScheduleLimit = 1
-	c.Assert(sc.GetResourceLimit(), Equals, uint64(1))
-	cfg.LeaderScheduleLimit = 0
-	c.Assert(sc.GetResourceLimit(), Equals, uint64(0))
-	cfg.LeaderScheduleLimit = 2
-	c.Assert(sc.GetResourceLimit(), Equals, uint64(1))
-
 	// limit = 2
 	lb.limit = 2
 	// count = 0

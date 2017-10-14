@@ -39,7 +39,7 @@ func newShuffleLeaderScheduler(opt schedule.Options, limiter *schedule.Limiter) 
 		schedule.NewStateFilter(opt),
 		schedule.NewHealthFilter(opt),
 	}
-	base := newBaseScheduler(limiter, core.LeaderKind)
+	base := newBaseScheduler(limiter)
 	return &shuffleLeaderScheduler{
 		baseScheduler: base,
 		opt:           opt,
@@ -55,12 +55,8 @@ func (s *shuffleLeaderScheduler) GetType() string {
 	return "shuffle-leader"
 }
 
-func (s *shuffleLeaderScheduler) GetResourceLimit() uint64 {
-	return s.opt.GetLeaderScheduleLimit()
-}
-
 func (s *shuffleLeaderScheduler) IsAllowSchedule() bool {
-	return s.limiter.OperatorCount(s.GetResourceKind()) < s.GetResourceLimit()
+	return s.limiter.OperatorCount(core.LeaderKind) < s.opt.GetLeaderScheduleLimit()
 }
 
 func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {

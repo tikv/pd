@@ -229,10 +229,7 @@ func (c *coordinator) collectSchedulerMetrics() {
 		if s.AllowSchedule() {
 			allowScheduler = 1
 		}
-		limit := float64(s.GetResourceLimit())
-
 		schedulerStatusGauge.WithLabelValues(s.GetName(), "allow").Set(allowScheduler)
-		schedulerStatusGauge.WithLabelValues(s.GetName(), "limit").Set(limit)
 	}
 }
 

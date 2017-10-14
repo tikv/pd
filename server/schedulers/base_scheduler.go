@@ -17,7 +17,6 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
-	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
 
@@ -54,11 +53,10 @@ func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowth
 
 type baseScheduler struct {
 	limiter *schedule.Limiter
-	kind    core.ResourceKind
 }
 
-func newBaseScheduler(limiter *schedule.Limiter, kind core.ResourceKind) *baseScheduler {
-	return &baseScheduler{limiter: limiter, kind: kind}
+func newBaseScheduler(limiter *schedule.Limiter) *baseScheduler {
+	return &baseScheduler{limiter: limiter}
 }
 
 func (s *baseScheduler) GetMinInterval() time.Duration {
@@ -67,10 +65,6 @@ func (s *baseScheduler) GetMinInterval() time.Duration {
 
 func (s *baseScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	return intervalGrow(interval, MaxScheduleInterval, exponentailGrowth)
-}
-
-func (s *baseScheduler) GetResourceKind() core.ResourceKind {
-	return s.kind
 }
 
 func (s *baseScheduler) Prepare(cluster schedule.Cluster) error { return nil }

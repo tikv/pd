@@ -79,7 +79,7 @@ type balanceHotRegionsScheduler struct {
 }
 
 func newBalanceHotRegionsScheduler(opt schedule.Options, limiter *schedule.Limiter) *balanceHotRegionsScheduler {
-	base := newBaseScheduler(limiter, core.PriorityKind)
+	base := newBaseScheduler(limiter)
 	return &balanceHotRegionsScheduler{
 		baseScheduler: base,
 		opt:           opt,
@@ -91,7 +91,7 @@ func newBalanceHotRegionsScheduler(opt schedule.Options, limiter *schedule.Limit
 }
 
 func newBalanceHotReadRegionsScheduler(opt schedule.Options, limiter *schedule.Limiter) *balanceHotRegionsScheduler {
-	base := newBaseScheduler(limiter, core.PriorityKind)
+	base := newBaseScheduler(limiter)
 	return &balanceHotRegionsScheduler{
 		baseScheduler: base,
 		opt:           opt,
@@ -103,7 +103,7 @@ func newBalanceHotReadRegionsScheduler(opt schedule.Options, limiter *schedule.L
 }
 
 func newBalanceHotWriteRegionsScheduler(opt schedule.Options, limiter *schedule.Limiter) *balanceHotRegionsScheduler {
-	base := newBaseScheduler(limiter, core.PriorityKind)
+	base := newBaseScheduler(limiter)
 	return &balanceHotRegionsScheduler{
 		baseScheduler: base,
 		opt:           opt,
@@ -122,12 +122,8 @@ func (h *balanceHotRegionsScheduler) GetType() string {
 	return "hot-region"
 }
 
-func (h *balanceHotRegionsScheduler) GetResourceLimit() uint64 {
-	return h.limit
-}
-
 func (h *balanceHotRegionsScheduler) IsAllowSchedule() bool {
-	return h.limiter.OperatorCount(h.GetResourceKind()) < h.GetResourceLimit()
+	return h.limiter.OperatorCount(core.PriorityKind) < h.limit
 }
 
 func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
