@@ -29,6 +29,10 @@ import (
 	"github.com/pingcap/pd/server/namespace"
 )
 
+func init() {
+	namespace.RegisterClassifier("table", NewTableNamespaceClassifier)
+}
+
 // Namespace defines two things:
 // 1. relation between a Name and several tables
 // 2. relation between a Name and several stores

@@ -21,6 +21,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
+	_ "github.com/pingcap/pd/table"
 )
 
 var _ = Suite(&testStoreNsSuite{})
@@ -60,7 +61,7 @@ func (s *testStoreNsSuite) SetUpSuite(c *C) {
 	}
 
 	cfg := server.NewTestSingleConfig()
-	cfg.EnableNamespace = true
+	cfg.NamespaceClassifier = "table"
 	srv, err := server.CreateServer(cfg, NewHandler)
 	c.Assert(err, IsNil)
 	c.Assert(srv.Run(), IsNil)
