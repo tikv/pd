@@ -39,10 +39,9 @@ type clusterInfo struct {
 	*schedule.BasicCluster
 	sync.RWMutex
 
-	id            IDAllocator
+	id            core.IDAllocator
 	kv            *core.KV
 	meta          *metapb.Cluster
-    namespacesInfo  *namespacesInfo
 	activeRegions int
 }
 
