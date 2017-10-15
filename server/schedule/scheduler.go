@@ -14,10 +14,10 @@
 package schedule
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
@@ -69,7 +69,7 @@ var schedulerMap = make(map[string]CreateSchedulerFunc)
 // func of a package.
 func RegisterScheduler(name string, createFn CreateSchedulerFunc) {
 	if _, ok := schedulerMap[name]; ok {
-		panic(fmt.Sprintf("duplicated scheduler name: %v", name))
+		log.Fatalf("duplicated scheduler name: %v", name)
 	}
 	schedulerMap[name] = createFn
 }
@@ -107,6 +107,9 @@ func (l *Limiter) AddOperator(op *Operator) {
 func (l *Limiter) RemoveOperator(op *Operator) {
 	l.Lock()
 	defer l.Unlock()
+	if l.counts[op.ResourceKind()] == 0 {
+		log.Fatal("the limiter is already 0, no operators need to remove")
+	}
 	l.counts[op.ResourceKind()]--
 }
 
