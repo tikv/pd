@@ -36,8 +36,8 @@ var (
 )
 
 type clusterInfo struct {
-	*schedule.BasicCluster
 	sync.RWMutex
+	*schedule.BasicCluster
 
 	id            core.IDAllocator
 	kv            *core.KV
@@ -70,13 +70,13 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV) (*clusterInfo, error) {
 	if err := kv.LoadStores(c.Stores, kvRangeLimit); err != nil {
 		return nil, errors.Trace(err)
 	}
-	log.Infof("load %v Stores cost %v", c.Stores.GetStoreCount(), time.Since(start))
+	log.Infof("load %v stores cost %v", c.Stores.GetStoreCount(), time.Since(start))
 
 	start = time.Now()
 	if err := kv.LoadRegions(c.Regions, kvRangeLimit); err != nil {
 		return nil, errors.Trace(err)
 	}
-	log.Infof("load %v Regions cost %v", c.Regions.GetRegionCount(), time.Since(start))
+	log.Infof("load %v regions cost %v", c.Regions.GetRegionCount(), time.Since(start))
 
 	return c, nil
 }
@@ -163,7 +163,7 @@ func (c *clusterInfo) UnblockStore(storeID uint64) {
 	c.BasicCluster.UnblockStore(storeID)
 }
 
-// GetStores returns all Stores in the cluster.
+// GetStores returns all stores in the cluster.
 func (c *clusterInfo) GetStores() []*core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
@@ -279,37 +279,37 @@ func (c *clusterInfo) RandFollowerRegion(storeID uint64) *core.RegionInfo {
 	return c.BasicCluster.RandFollowerRegion(storeID)
 }
 
-// GetRegionStores returns all Stores that contains the region's peer.
+// GetRegionStores returns all stores that contains the region's peer.
 func (c *clusterInfo) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
-	var Stores []*core.StoreInfo
+	var stores []*core.StoreInfo
 	for id := range region.GetStoreIds() {
 		if store := c.Stores.GetStore(id); store != nil {
-			Stores = append(Stores, store)
+			stores = append(stores, store)
 		}
 	}
-	return Stores
+	return stores
 }
 
-// GetLeaderStore returns all Stores that contains the region's leader peer.
+// GetLeaderStore returns all stores that contains the region's leader peer.
 func (c *clusterInfo) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.Stores.GetStore(region.Leader.GetStoreId())
 }
 
-// GetFollowerStores returns all Stores that contains the region's follower peer.
+// GetFollowerStores returns all stores that contains the region's follower peer.
 func (c *clusterInfo) GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
-	var Stores []*core.StoreInfo
+	var stores []*core.StoreInfo
 	for id := range region.GetFollowers() {
 		if store := c.Stores.GetStore(id); store != nil {
-			Stores = append(Stores, store)
+			stores = append(stores, store)
 		}
 	}
-	return Stores
+	return stores
 }
 
 // isPrepared if the cluster information is collected
@@ -401,7 +401,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	if saveCache {
 		c.Regions.SetRegion(region)
 
-		// Update related Stores.
+		// Update related stores.
 		if origin != nil {
 			for _, p := range origin.Peers {
 				c.updateStoreStatus(p.GetStoreId())
