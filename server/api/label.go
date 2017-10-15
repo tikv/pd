@@ -16,6 +16,7 @@ package api
 import (
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -47,8 +48,8 @@ func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	for _, s := range stores {
 		ls := s.GetLabels()
 		for _, l := range ls {
-			if _, ok := m[l.Key+l.Value]; !ok {
-				m[l.Key+l.Value] = struct{}{}
+			if _, ok := m[strings.ToLower(l.Key+l.Value)]; !ok {
+				m[strings.ToLower(l.Key+l.Value)] = struct{}{}
 				labels = append(labels, l)
 			}
 		}
@@ -100,11 +101,12 @@ type storesLabelFilter struct {
 }
 
 func newStoresLabelFilter(name, value string) (*storesLabelFilter, error) {
-	keyPattern, err := regexp.Compile(name)
+	// add (?i) to set a case-insensitive flag
+	keyPattern, err := regexp.Compile("(?i)" + name)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	valuePattern, err := regexp.Compile(value)
+	valuePattern, err := regexp.Compile("(?i)" + value)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

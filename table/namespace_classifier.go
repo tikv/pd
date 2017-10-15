@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package table
 
 import (
 	"encoding/json"
@@ -86,20 +86,24 @@ func (ns *Namespace) AddStoreID(storeID uint64) {
 type tableNamespaceClassifier struct {
 	sync.RWMutex
 	nsInfo         *namespacesInfo
-	tableIDDecoder core.TableIDDecoder
+	tableIDDecoder IDDecoder
 	kv             *core.KV
-	idAlloc        IDAllocator
+	idAlloc        core.IDAllocator
 	http.Handler
 }
 
-func newTableNamespaceClassifier(tableIDDecoder core.TableIDDecoder, kv *core.KV, idAlloc IDAllocator) (*tableNamespaceClassifier, error) {
+const kvRangeLimit = 1000
+
+// NewTableNamespaceClassifier creates a new namespace classifier that
+// classifies stores and regions by table range.
+func NewTableNamespaceClassifier(kv *core.KV, idAlloc core.IDAllocator) (namespace.Classifier, error) {
 	nsInfo := newNamespacesInfo()
 	if err := nsInfo.loadNamespaces(kv, kvRangeLimit); err != nil {
 		return nil, errors.Trace(err)
 	}
 	c := &tableNamespaceClassifier{
 		nsInfo:         nsInfo,
-		tableIDDecoder: tableIDDecoder,
+		tableIDDecoder: DefaultIDDecoder,
 		kv:             kv,
 		idAlloc:        idAlloc,
 	}
@@ -180,7 +184,7 @@ func (c *tableNamespaceClassifier) getTableID(regionInfo *core.RegionInfo) int64
 
 	// The startTableID is not equal to the endTableID for regionInfo,
 	// so check whether endKey is the startKey of the next table
-	if (startTableID == endTableID-1) && core.IsPureTableID(regionInfo.EndKey) {
+	if (startTableID == endTableID-1) && IsPureTableID(regionInfo.EndKey) {
 		return startTableID
 	}
 

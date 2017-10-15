@@ -24,7 +24,12 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
-func (c *RaftCluster) handleRegionHeartbeat(region *core.RegionInfo) error {
+// HandleRegionHeartbeat processes RegionInfo reports from client.
+func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
+	if err := c.cachedCluster.handleRegionHeartbeat(region); err != nil {
+		return errors.Trace(err)
+	}
+
 	// If the region peer count is 0, then we should not handle this.
 	if len(region.GetPeers()) == 0 {
 		log.Warnf("invalid region, zero region peer count - %v", region)
