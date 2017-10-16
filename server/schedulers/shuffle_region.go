@@ -19,27 +19,29 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("shuffleRegion", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
-		return newShuffleRegionScheduler(opt), nil
+	schedule.RegisterScheduler("shuffle-region", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+		return newShuffleRegionScheduler(opt, limiter), nil
 	})
 }
 
 type shuffleRegionScheduler struct {
+	*baseScheduler
 	opt      schedule.Options
 	selector schedule.Selector
 }
 
 // newShuffleRegionScheduler creates an admin scheduler that shuffles regions
 // between stores.
-func newShuffleRegionScheduler(opt schedule.Options) schedule.Scheduler {
+func newShuffleRegionScheduler(opt schedule.Options, limiter *schedule.Limiter) schedule.Scheduler {
 	filters := []schedule.Filter{
 		schedule.NewStateFilter(opt),
 		schedule.NewHealthFilter(opt),
 	}
-
+	base := newBaseScheduler(limiter)
 	return &shuffleRegionScheduler{
-		opt:      opt,
-		selector: schedule.NewRandomSelector(filters),
+		baseScheduler: base,
+		opt:           opt,
+		selector:      schedule.NewRandomSelector(filters),
 	}
 }
 
@@ -47,19 +49,15 @@ func (s *shuffleRegionScheduler) GetName() string {
 	return "shuffle-region-scheduler"
 }
 
-func (s *shuffleRegionScheduler) GetResourceKind() core.ResourceKind {
-	return core.RegionKind
+func (s *shuffleRegionScheduler) GetType() string {
+	return "shuffle-region"
 }
 
-func (s *shuffleRegionScheduler) GetResourceLimit() uint64 {
-	return s.opt.GetRegionScheduleLimit()
+func (s *shuffleRegionScheduler) IsScheduleAllowed() bool {
+	return s.limiter.OperatorCount(core.RegionKind) < s.opt.GetRegionScheduleLimit()
 }
 
-func (s *shuffleRegionScheduler) Prepare(cluster schedule.Cluster) error { return nil }
-
-func (s *shuffleRegionScheduler) Cleanup(cluster schedule.Cluster) {}
-
-func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster) schedule.Operator {
+func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region, oldPeer := scheduleRemovePeer(cluster, s.GetName(), s.selector)
 	if region == nil {
@@ -75,5 +73,5 @@ func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster) schedule.Ope
 	}
 
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	return schedule.CreateMovePeerOperator(region, core.RegionKind, oldPeer, newPeer)
+	return schedule.CreateMovePeerOperator("shuffle-region", region, core.RegionKind, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }

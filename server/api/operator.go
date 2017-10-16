@@ -55,8 +55,8 @@ func (h *operatorHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 	var (
-		results []schedule.Operator
-		ops     []schedule.Operator
+		results []*schedule.Operator
+		ops     []*schedule.Operator
 		err     error
 	)
 
@@ -153,6 +153,36 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := h.AddTransferPeerOperator(uint64(regionID), uint64(fromID), uint64(toID)); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	case "add-peer":
+		regionID, ok := input["region_id"].(float64)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "missing region id")
+			return
+		}
+		storeID, ok := input["store_id"].(float64)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "invalid store id to transfer peer to")
+			return
+		}
+		if err := h.AddAddPeerOperator(uint64(regionID), uint64(storeID)); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	case "remove-peer":
+		regionID, ok := input["region_id"].(float64)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "missing region id")
+			return
+		}
+		storeID, ok := input["store_id"].(float64)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "invalid store id to transfer peer to")
+			return
+		}
+		if err := h.AddRemovePeerOperator(uint64(regionID), uint64(storeID)); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}

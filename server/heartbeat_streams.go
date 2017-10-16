@@ -14,12 +14,13 @@
 package server
 
 import (
+	"context"
+	"strconv"
 	"sync"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
-	"golang.org/x/net/context"
 )
 
 type heartbeatStream interface {
@@ -64,17 +65,18 @@ func (s *heartbeatStreams) run() {
 			s.streams[update.storeID] = update.stream
 		case msg := <-s.msgCh:
 			storeID := msg.GetTargetPeer().GetStoreId()
+			storeLabel := strconv.FormatUint(storeID, 10)
 			if stream, ok := s.streams[storeID]; ok {
 				if err := stream.Send(msg); err != nil {
 					log.Errorf("[region %v] send heartbeat message fail: %v", msg.RegionId, err)
 					delete(s.streams, storeID)
-					regionHeartbeatCounter.WithLabelValues("push", "err").Inc()
+					regionHeartbeatCounter.WithLabelValues(storeLabel, "push", "err").Inc()
 				} else {
-					regionHeartbeatCounter.WithLabelValues("push", "ok").Inc()
+					regionHeartbeatCounter.WithLabelValues(storeLabel, "push", "ok").Inc()
 				}
 			} else {
 				log.Debugf("[region %v] heartbeat stream not found for store %v, skip send message", msg.RegionId, storeID)
-				regionHeartbeatCounter.WithLabelValues("push", "skip").Inc()
+				regionHeartbeatCounter.WithLabelValues(storeLabel, "push", "skip").Inc()
 			}
 		case <-s.ctx.Done():
 			return
@@ -114,8 +116,8 @@ func (s *heartbeatStreams) sendMsg(region *core.RegionInfo, msg *pdpb.RegionHear
 	}
 }
 
-func (s *heartbeatStreams) sendErr(region *core.RegionInfo, errType pdpb.ErrorType, errMsg string) {
-	regionHeartbeatCounter.WithLabelValues("report", "err").Inc()
+func (s *heartbeatStreams) sendErr(region *core.RegionInfo, errType pdpb.ErrorType, errMsg string, storeLabel string) {
+	regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "err").Inc()
 
 	msg := &pdpb.RegionHeartbeatResponse{
 		Header: &pdpb.ResponseHeader{

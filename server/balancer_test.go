@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	_ "github.com/pingcap/pd/server/schedulers" // Register schedulers for tests.
 )
@@ -273,12 +274,12 @@ func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
 	s.cluster = newClusterInfo(newMockIDAllocator())
 	s.tc = newTestClusterInfo(s.cluster)
 	_, opt := newTestScheduleConfig()
-	lb, err := schedule.CreateScheduler("balanceLeader", opt)
+	lb, err := schedule.CreateScheduler("balance-leader", opt, schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	s.lb = lb
 }
 
-func (s *testBalanceLeaderSchedulerSuite) schedule() schedule.Operator {
+func (s *testBalanceLeaderSchedulerSuite) schedule() *schedule.Operator {
 	return s.lb.Schedule(s.cluster)
 }
 
@@ -407,7 +408,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	sb, err := schedule.CreateScheduler("balanceRegion", opt)
+	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewLimiter())
 	c.Assert(err, IsNil)
 
 	opt.SetMaxReplicas(1)
@@ -446,7 +447,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	_, opt := newTestScheduleConfig()
 	opt.rep = newTestReplication(3, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balanceRegion", opt)
+	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewLimiter())
 	c.Assert(err, IsNil)
 
 	// Store 1 has the largest region score, so the balancer try to replace peer in store 1.
@@ -511,7 +512,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	_, opt := newTestScheduleConfig()
 	opt.rep = newTestReplication(5, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balanceRegion", opt)
+	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewLimiter())
 	c.Assert(err, IsNil)
 
 	tc.addLabelsStore(1, 4, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -547,7 +548,7 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	sb, err := schedule.CreateScheduler("balanceRegion", opt)
+	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	opt.SetMaxReplicas(1)
 
@@ -576,7 +577,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	tc := newTestClusterInfo(cluster)
 
 	cfg, opt := newTestScheduleConfig()
-	rc := schedule.NewReplicaChecker(opt, cluster)
+	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
 
 	cfg.MaxSnapshotCount = 2
 
@@ -651,7 +652,7 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 	tc.addRegionStore(2, 1)
 	_, opt := newTestScheduleConfig()
 
-	rc := schedule.NewReplicaChecker(opt, cluster)
+	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
 
 	// now region peer in store 1,2,3.but we just have store 1,2
 	// This happens only in recovering the PD cluster
@@ -669,7 +670,7 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	_, opt := newTestScheduleConfig()
 	opt.rep = newTestReplication(3, "zone", "rack", "host")
 
-	rc := schedule.NewReplicaChecker(opt, cluster)
+	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
 
 	tc.addLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.addLabelsStore(2, 2, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
@@ -724,7 +725,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	_, opt := newTestScheduleConfig()
 	opt.rep = newTestReplication(3, "zone", "rack", "host")
 
-	rc := schedule.NewReplicaChecker(opt, cluster)
+	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
 
 	tc.addLabelsStore(1, 9, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.addLabelsStore(2, 8, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -804,7 +805,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	_, opt := newTestScheduleConfig()
 	opt.rep = newTestReplication(5, "zone", "host")
 
-	rc := schedule.NewReplicaChecker(opt, cluster)
+	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
 
 	tc.addLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "h1"})
 	tc.addLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
@@ -827,95 +828,58 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 }
 
-func checkAddPeer(c *C, bop schedule.Operator, storeID uint64) {
-	var op *schedule.ChangePeerOperator
-	switch t := bop.(type) {
-	case *schedule.ChangePeerOperator:
-		op = t
-	case *schedule.RegionOperator:
-		op = t.Ops[0].(*schedule.ChangePeerOperator)
-	}
-	c.Assert(op.ChangePeer.GetChangeType(), Equals, pdpb.ConfChangeType_AddNode)
-	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
+func checkAddPeer(c *C, op *schedule.Operator, storeID uint64) {
+	c.Assert(op.Len(), Equals, 1)
+	c.Assert(op.Step(0).(schedule.AddPeer).ToStore, Equals, storeID)
 }
 
-func checkRemovePeer(c *C, bop schedule.Operator, storeID uint64) {
-	var op *schedule.ChangePeerOperator
-	switch t := bop.(type) {
-	case *schedule.ChangePeerOperator:
-		op = t
-	case *schedule.RegionOperator:
-		if len(t.Ops) == 1 {
-			op = t.Ops[0].(*schedule.ChangePeerOperator)
-		} else {
-			c.Assert(t.Ops, HasLen, 2)
-			transferLeader := t.Ops[0].(*schedule.TransferLeaderOperator)
-			c.Assert(transferLeader.OldLeader.GetStoreId(), Equals, storeID)
-			op = t.Ops[1].(*schedule.ChangePeerOperator)
-		}
-	}
-	c.Assert(op, NotNil)
-	c.Assert(op.ChangePeer.GetChangeType(), Equals, pdpb.ConfChangeType_RemoveNode)
-	c.Assert(op.ChangePeer.GetPeer().GetStoreId(), Equals, storeID)
-}
-
-func checkTransferPeer(c *C, bop schedule.Operator, sourceID, targetID uint64) {
-	op := bop.(*schedule.RegionOperator)
-	c.Assert(op, NotNil)
-	if len(op.Ops) == 2 {
-		checkAddPeer(c, op.Ops[0], targetID)
-		checkRemovePeer(c, op.Ops[1], sourceID)
+func checkRemovePeer(c *C, op *schedule.Operator, storeID uint64) {
+	if op.Len() == 1 {
+		c.Assert(op.Step(0).(schedule.RemovePeer).FromStore, Equals, storeID)
 	} else {
-		c.Assert(op.Ops, HasLen, 3)
-		checkAddPeer(c, op.Ops[0], targetID)
-		transferLeader := op.Ops[1].(*schedule.TransferLeaderOperator)
-		c.Assert(transferLeader.OldLeader.GetStoreId(), Equals, sourceID)
-		checkRemovePeer(c, op.Ops[2], sourceID)
+		c.Assert(op.Len(), Equals, 2)
+		c.Assert(op.Step(0).(schedule.TransferLeader).FromStore, Equals, storeID)
+		c.Assert(op.Step(1).(schedule.RemovePeer).FromStore, Equals, storeID)
 	}
 }
 
-func checkTransferPeerWithLeaderTransfer(c *C, bop schedule.Operator, sourceID, targetID uint64) {
-	op := bop.(*schedule.RegionOperator)
-	c.Assert(op, NotNil)
-	c.Assert(op.Ops, HasLen, 3)
-	checkTransferPeer(c, bop, sourceID, targetID)
-}
-
-func checkTransferLeader(c *C, bop schedule.Operator, sourceID, targetID uint64) {
-	var op *schedule.TransferLeaderOperator
-	switch t := bop.(type) {
-	case *schedule.TransferLeaderOperator:
-		op = t
-	case *schedule.RegionOperator:
-		op = t.Ops[0].(*schedule.TransferLeaderOperator)
+func checkTransferPeer(c *C, op *schedule.Operator, sourceID, targetID uint64) {
+	if op.Len() == 2 {
+		c.Assert(op.Step(0).(schedule.AddPeer).ToStore, Equals, targetID)
+		c.Assert(op.Step(1).(schedule.RemovePeer).FromStore, Equals, sourceID)
+	} else {
+		c.Assert(op.Len(), Equals, 3)
+		c.Assert(op.Step(0).(schedule.AddPeer).ToStore, Equals, targetID)
+		c.Assert(op.Step(1).(schedule.TransferLeader).FromStore, Equals, sourceID)
+		c.Assert(op.Step(2).(schedule.RemovePeer).FromStore, Equals, sourceID)
 	}
-	c.Assert(op, NotNil)
-	c.Assert(op.OldLeader.GetStoreId(), Equals, sourceID)
-	c.Assert(op.NewLeader.GetStoreId(), Equals, targetID)
 }
 
-func checkTransferLeaderFrom(c *C, bop schedule.Operator, sourceID uint64) {
-	var op *schedule.TransferLeaderOperator
-	switch t := bop.(type) {
-	case *schedule.TransferLeaderOperator:
-		op = t
-	case *schedule.RegionOperator:
-		op = t.Ops[0].(*schedule.TransferLeaderOperator)
-	}
-	c.Assert(op, NotNil)
-	c.Assert(op.OldLeader.GetStoreId(), Equals, sourceID)
+func checkTransferPeerWithLeaderTransfer(c *C, op *schedule.Operator, sourceID, targetID uint64) {
+	c.Assert(op.Len(), Equals, 3)
+	checkTransferPeer(c, op, sourceID, targetID)
 }
 
-var _ = Suite(&testBalanceHotRegionSchedulerSuite{})
+func checkTransferLeader(c *C, op *schedule.Operator, sourceID, targetID uint64) {
+	c.Assert(op.Len(), Equals, 1)
+	c.Assert(op.Step(0), Equals, schedule.TransferLeader{FromStore: sourceID, ToStore: targetID})
+}
 
-type testBalanceHotRegionSchedulerSuite struct{}
+func checkTransferLeaderFrom(c *C, op *schedule.Operator, sourceID uint64) {
+	c.Assert(op.Len(), Equals, 1)
+	c.Assert(op.Step(0).(schedule.TransferLeader).FromStore, Equals, sourceID)
+}
 
-func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
+var _ = Suite(&testBalanceHotWriteRegionSchedulerSuite{})
+
+type testBalanceHotWriteRegionSchedulerSuite struct{}
+
+func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	cluster := newClusterInfo(newMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 
 	_, opt := newTestScheduleConfig()
-	hb, err := schedule.CreateScheduler("hotRegion", opt)
+	hb, err := schedule.CreateScheduler("hot-write-region", opt, schedule.NewLimiter())
 	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
@@ -965,4 +929,82 @@ func (s *testBalanceHotRegionSchedulerSuite) TestBalance(c *C) {
 	// We can find that the leader of all hot regions are on store 1,
 	// so one of the leader will transfer to another store.
 	checkTransferLeaderFrom(c, hb.Schedule(cluster), 1)
+}
+
+func (c *testClusterInfo) updateStorageReadBytes(storeID uint64, BytesRead uint64) {
+	store := c.GetStore(storeID)
+	store.Stats.BytesRead = BytesRead
+	c.putStore(store)
+}
+
+func (c *testClusterInfo) addLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
+	region := &metapb.Region{Id: regionID}
+	leader, _ := c.AllocPeer(leaderID)
+	region.Peers = []*metapb.Peer{leader}
+	for _, id := range followerIds {
+		peer, _ := c.AllocPeer(id)
+		region.Peers = append(region.Peers, peer)
+	}
+	r := core.NewRegionInfo(region, leader)
+	r.ReadBytes = readBytes
+	c.updateReadStatus(r)
+	c.putRegion(r)
+}
+
+var _ = Suite(&testBalanceHotReadRegionSchedulerSuite{})
+
+type testBalanceHotReadRegionSchedulerSuite struct{}
+
+func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
+	cluster := newClusterInfo(newMockIDAllocator())
+	tc := newTestClusterInfo(cluster)
+
+	_, opt := newTestScheduleConfig()
+	hb, err := schedule.CreateScheduler("hot-read-region", opt, schedule.NewLimiter())
+	c.Assert(err, IsNil)
+
+	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
+	tc.addRegionStore(1, 3)
+	tc.addRegionStore(2, 2)
+	tc.addRegionStore(3, 2)
+	tc.addRegionStore(4, 2)
+	tc.addRegionStore(5, 0)
+
+	// Report store read bytes.
+	tc.updateStorageReadBytes(1, 75*1024*1024)
+	tc.updateStorageReadBytes(2, 45*1024*1024)
+	tc.updateStorageReadBytes(3, 45*1024*1024)
+	tc.updateStorageReadBytes(4, 60*1024*1024)
+	tc.updateStorageReadBytes(5, 0)
+
+	// Region 1, 2 and 3 are hot regions.
+	//| region_id | leader_sotre | follower_store | follower_store |   read_bytes  |
+	//|-----------|--------------|----------------|----------------|---------------|
+	//|     1     |       1      |        2       |       3        |      512KB    |
+	//|     2     |       2      |        1       |       3        |      512KB    |
+	//|     3     |       1      |        2       |       3        |      512KB    |
+	tc.addLeaderRegionWithReadInfo(1, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
+	tc.addLeaderRegionWithReadInfo(2, 2, 512*1024*regionHeartBeatReportInterval, 1, 3)
+	tc.addLeaderRegionWithReadInfo(3, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
+	hotRegionLowThreshold = 0
+
+	// Will transfer a hot region leader from store 1 to store 3, because the total count of peers
+	// which is hot for store 1 is more larger than other stores.
+	checkTransferLeader(c, hb.Schedule(cluster), 1, 3)
+	// assume handle the operator
+	tc.addLeaderRegionWithReadInfo(3, 3, 512*1024*regionHeartBeatReportInterval, 1, 2)
+
+	// After transfer a hot region leader from store 1 to store 3
+	// the tree region leader will be evenly distributed in three stores
+	tc.updateStorageReadBytes(1, 60*1024*1024)
+	tc.updateStorageReadBytes(2, 30*1024*1024)
+	tc.updateStorageReadBytes(3, 60*1024*1024)
+	tc.updateStorageReadBytes(4, 30*1024*1024)
+	tc.updateStorageReadBytes(5, 30*1024*1024)
+	tc.addLeaderRegionWithReadInfo(4, 1, 512*1024*regionHeartBeatReportInterval, 2, 3)
+	tc.addLeaderRegionWithReadInfo(5, 4, 512*1024*regionHeartBeatReportInterval, 2, 5)
+
+	// Now appear two read hot region in store 1 and 4
+	// We will Transfer peer from 1 to 5
+	checkTransferPeerWithLeaderTransfer(c, hb.Schedule(cluster), 1, 5)
 }

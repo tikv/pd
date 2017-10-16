@@ -39,7 +39,7 @@ var (
 			Subsystem: "schedule",
 			Name:      "operators_count",
 			Help:      "Counter of schedule operators.",
-		}, []string{"type", "state"})
+		}, []string{"type", "event"})
 
 	clusterStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -71,7 +71,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "region_heartbeat",
 			Help:      "Counter of region hearbeat.",
-		}, []string{"type", "status"})
+		}, []string{"store", "type", "status"})
 
 	hotSpotStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

@@ -14,7 +14,9 @@
 package pd
 
 import (
+	"context"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"time"
 
@@ -23,7 +25,6 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
-	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testLeaderChangeSuite{})
@@ -102,6 +103,19 @@ func (s *testLeaderChangeSuite) TestLeaderConfigChange(c *C) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	c.Assert(changed, IsTrue)
+}
+
+func (s *testLeaderChangeSuite) TestMemberList(c *C) {
+	_, endpoints, closeFunc := s.prepareClusterN(c, 2)
+	defer closeFunc()
+
+	cli, err := NewClient(endpoints[:1])
+	c.Assert(err, IsNil)
+	cli.Close()
+
+	sort.Strings(cli.(*client).urls)
+	sort.Strings(endpoints)
+	c.Assert(cli.(*client).urls, DeepEquals, endpoints)
 }
 
 func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {

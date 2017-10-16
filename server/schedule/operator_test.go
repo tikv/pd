@@ -15,51 +15,86 @@ package schedule
 
 import (
 	"encoding/json"
+	"sync/atomic"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server/core"
 )
 
 var _ = Suite(&testOperatorSuite{})
 
 type testOperatorSuite struct{}
 
-func (o *testOperatorSuite) TestOperatorStateString(c *C) {
-	tbl := []struct {
-		value OperatorState
-		name  string
-	}{
-		{OperatorUnKnownState, "unknown"},
-		{OperatorWaiting, "waiting"},
-		{OperatorRunning, "running"},
-		{OperatorFinished, "finished"},
-		{OperatorTimeOut, "timeout"},
-		{OperatorReplaced, "replaced"},
-		{OperatorState(404), "unknown"},
+func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, peers ...[2]uint64) *core.RegionInfo {
+	var (
+		region metapb.Region
+		leader *metapb.Peer
+	)
+	region.Id = regionID
+	for i := range peers {
+		peer := &metapb.Peer{
+			Id:      peers[i][1],
+			StoreId: peers[i][0],
+		}
+		region.Peers = append(region.Peers, peer)
+		if peer.GetId() == leaderPeer {
+			leader = peer
+		}
 	}
-	for _, t := range tbl {
-		c.Assert(t.value.String(), Equals, t.name)
+	return core.NewRegionInfo(&region, leader)
+}
+
+func (s *testOperatorSuite) TestOperatorStep(c *C) {
+	region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	c.Assert(TransferLeader{FromStore: 1, ToStore: 2}.IsFinish(region), IsFalse)
+	c.Assert(TransferLeader{FromStore: 2, ToStore: 1}.IsFinish(region), IsTrue)
+	c.Assert(AddPeer{ToStore: 3, PeerID: 3}.IsFinish(region), IsFalse)
+	c.Assert(AddPeer{ToStore: 1, PeerID: 1}.IsFinish(region), IsTrue)
+	c.Assert(RemovePeer{FromStore: 1}.IsFinish(region), IsFalse)
+	c.Assert(RemovePeer{FromStore: 3}.IsFinish(region), IsTrue)
+}
+
+func (s *testOperatorSuite) newTestOperator(regionID uint64, steps ...OperatorStep) *Operator {
+	return NewOperator("testOperator", regionID, core.AdminKind, steps...)
+}
+
+func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OperatorStep) {
+	c.Assert(op.Len(), Equals, len(steps))
+	for i := range steps {
+		c.Assert(op.Step(i), Equals, steps[i])
 	}
 }
 
-func (o *testOperatorSuite) TestOperatorStateMarshal(c *C) {
-	tbl := []struct {
-		state  OperatorState
-		except OperatorState
-	}{
-		{OperatorUnKnownState, OperatorUnKnownState},
-		{OperatorWaiting, OperatorWaiting},
-		{OperatorRunning, OperatorRunning},
-		{OperatorFinished, OperatorFinished},
-		{OperatorTimeOut, OperatorTimeOut},
-		{OperatorReplaced, OperatorReplaced},
-		{OperatorState(404), OperatorUnKnownState},
+func (s *testOperatorSuite) TestOperator(c *C) {
+	region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	// addPeer1, transferLeader1, removePeer3
+	steps := []OperatorStep{
+		AddPeer{ToStore: 1, PeerID: 1},
+		TransferLeader{FromStore: 3, ToStore: 1},
+		RemovePeer{FromStore: 3},
 	}
-	for _, t := range tbl {
-		data, err := json.Marshal(t.state)
-		c.Assert(err, IsNil)
-		var newState OperatorState
-		err = json.Unmarshal(data, &newState)
-		c.Assert(err, IsNil)
-		c.Assert(newState, Equals, t.except)
+	op := s.newTestOperator(1, steps...)
+	s.checkSteps(c, op, steps)
+	c.Assert(op.Check(region), IsNil)
+	c.Assert(op.IsFinish(), IsTrue)
+	op.createTime = op.createTime.Add(-MaxOperatorWaitTime)
+	c.Assert(op.IsTimeout(), IsFalse)
+
+	// addPeer1, transferLeader1, removePeer2
+	steps = []OperatorStep{
+		AddPeer{ToStore: 1, PeerID: 1},
+		TransferLeader{FromStore: 2, ToStore: 1},
+		RemovePeer{FromStore: 2},
 	}
+	op = s.newTestOperator(1, steps...)
+	s.checkSteps(c, op, steps)
+	c.Assert(op.Check(region), Equals, RemovePeer{FromStore: 2})
+	c.Assert(atomic.LoadInt32(&op.currentStep), Equals, int32(2))
+	c.Assert(op.IsTimeout(), IsFalse)
+	op.createTime = op.createTime.Add(-MaxOperatorWaitTime)
+	c.Assert(op.IsTimeout(), IsTrue)
+	res, err := json.Marshal(op)
+	c.Assert(err, IsNil)
+	c.Assert(len(res), Equals, len(op.String())+2)
 }

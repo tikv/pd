@@ -51,6 +51,13 @@ leader-schedule-limit = 64
 region-schedule-limit = 16
 replica-schedule-limit = 24
 
+# customized schedulers, the format is as below
+# if empty, it will use balance-leader, balance-region, hot-region as default
+# [[schedule.schedulers]]
+# type = "evict-leader"
+# args = ["1"]
+		
+	
 [replication]
 # The number of replicas for each region.
 max-replicas = 3

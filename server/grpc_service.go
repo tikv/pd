@@ -16,6 +16,9 @@ package server
 import (
 	"fmt"
 	"io"
+	"strconv"
+	"sync/atomic"
+	"time"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
@@ -234,8 +237,50 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 	}, nil
 }
 
+const regionHeartbeatSendTimeout = 5 * time.Second
+
+var errSendRegionHeartbeatTimeout = errors.New("send region heartbeat timeout")
+
+// heartbeatServer wraps PD_RegionHeartbeatServer to ensure when any error
+// occurs on Send() or Recv(), both endpoints will be closed.
+type heartbeatServer struct {
+	stream pdpb.PD_RegionHeartbeatServer
+	closed int32
+}
+
+func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
+	if atomic.LoadInt32(&s.closed) == 1 {
+		return io.EOF
+	}
+	done := make(chan error, 1)
+	go func() { done <- s.stream.Send(m) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			atomic.StoreInt32(&s.closed, 1)
+		}
+		return errors.Trace(err)
+	case <-time.After(regionHeartbeatSendTimeout):
+		atomic.StoreInt32(&s.closed, 1)
+		return errors.Trace(errSendRegionHeartbeatTimeout)
+	}
+}
+
+func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
+	if atomic.LoadInt32(&s.closed) == 1 {
+		return nil, io.EOF
+	}
+	req, err := s.stream.Recv()
+	if err != nil {
+		atomic.StoreInt32(&s.closed, 1)
+		return nil, errors.Trace(err)
+	}
+	return req, nil
+}
+
 // RegionHeartbeat implements gRPC PDServer.
-func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
+func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
+	server := &heartbeatServer{stream: stream}
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
 		resp := &pdpb.RegionHeartbeatResponse{
@@ -259,10 +304,14 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 			return errors.Trace(err)
 		}
 
+		storeID := request.GetLeader().GetStoreId()
+		storeLabel := strconv.FormatUint(storeID, 10)
+
+		regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "recv").Inc()
+
 		hbStreams := cluster.coordinator.hbStreams
 
 		if isNew {
-			storeID := request.GetLeader().GetStoreId()
 			hbStreams.bindStream(storeID, server)
 			isNew = false
 		}
@@ -271,31 +320,25 @@ func (s *Server) RegionHeartbeat(server pdpb.PD_RegionHeartbeatServer) error {
 		region.DownPeers = request.GetDownPeers()
 		region.PendingPeers = request.GetPendingPeers()
 		region.WrittenBytes = request.GetBytesWritten()
+		region.ReadBytes = request.GetBytesRead()
 		if region.GetId() == 0 {
 			msg := fmt.Sprintf("invalid request region, %v", request)
-			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg)
+			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)
 			continue
 		}
 		if region.Leader == nil {
 			msg := fmt.Sprintf("invalid request leader, %v", request)
-			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg)
+			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)
 			continue
 		}
 
-		err = cluster.cachedCluster.handleRegionHeartbeat(region)
+		err = cluster.HandleRegionHeartbeat(region)
 		if err != nil {
 			msg := errors.Trace(err).Error()
-			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg)
-			continue
+			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)
 		}
 
-		err = cluster.handleRegionHeartbeat(region)
-		if err != nil {
-			msg := errors.Trace(err).Error()
-			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg)
-		}
-
-		regionHeartbeatCounter.WithLabelValues("report", "ok").Inc()
+		regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "ok").Inc()
 	}
 }
 

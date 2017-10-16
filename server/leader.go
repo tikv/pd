@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"path"
 	"strconv"
 	"strings"
@@ -26,7 +27,6 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
-	"golang.org/x/net/context"
 )
 
 var (
@@ -193,7 +193,7 @@ func (s *Server) campaignLeader() error {
 	leaseResp, err := lessor.Grant(ctx, s.cfg.LeaderLease)
 	cancel()
 
-	if cost := time.Now().Sub(start); cost > slowRequestTime {
+	if cost := time.Since(start); cost > slowRequestTime {
 		log.Warnf("lessor grants too slow, cost %s", cost)
 	}
 
@@ -224,7 +224,7 @@ func (s *Server) campaignLeader() error {
 	}
 	log.Debugf("campaign leader ok %s", s.Name())
 
-	err = s.reloadScheduleOption()
+	err = s.scheduleOpt.reload(s.kv)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -365,15 +365,4 @@ func (s *Server) deleteLeaderKey() error {
 
 func (s *Server) leaderCmp() clientv3.Cmp {
 	return clientv3.Compare(clientv3.Value(s.getLeaderPath()), "=", s.leaderValue)
-}
-
-func (s *Server) reloadScheduleOption() error {
-	isExist, err := s.kv.loadScheduleOption(s.scheduleOpt)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	if isExist {
-		return nil
-	}
-	return s.kv.saveScheduleOption(s.scheduleOpt)
 }

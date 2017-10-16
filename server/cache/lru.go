@@ -15,7 +15,6 @@ package cache
 
 import (
 	"container/list"
-	"sync"
 )
 
 // Item is the cache entry.
@@ -26,8 +25,6 @@ type Item struct {
 
 // LRU is 'Least-Recently-Used' cache.
 type LRU struct {
-	sync.RWMutex
-
 	// maxCount is the maximum number of items.
 	// 0 means no limit.
 	maxCount int
@@ -36,8 +33,9 @@ type LRU struct {
 	cache map[uint64]*list.Element
 }
 
-// NewLRU returns a new lru cache.
-func NewLRU(maxCount int) *LRU {
+// newLRU returns a new lru cache. And this LRU cache is not thread-safe
+// should not use this function to create LRU cache, use NewCache instead
+func newLRU(maxCount int) *LRU {
 	return &LRU{
 		maxCount: maxCount,
 		ll:       list.New(),
@@ -47,9 +45,6 @@ func NewLRU(maxCount int) *LRU {
 
 // Put puts an item into cache.
 func (c *LRU) Put(key uint64, value interface{}) {
-	c.Lock()
-	defer c.Unlock()
-
 	if ele, ok := c.cache[key]; ok {
 		c.ll.MoveToFront(ele)
 		ele.Value.(*Item).Value = value
@@ -66,9 +61,6 @@ func (c *LRU) Put(key uint64, value interface{}) {
 
 // Get retrives an item from cache.
 func (c *LRU) Get(key uint64) (interface{}, bool) {
-	c.Lock()
-	defer c.Unlock()
-
 	if ele, ok := c.cache[key]; ok {
 		c.ll.MoveToFront(ele)
 		return ele.Value.(*Item).Value, true
@@ -79,9 +71,6 @@ func (c *LRU) Get(key uint64) (interface{}, bool) {
 
 // Peek reads an item from cache. The action is no considerd 'Use'.
 func (c *LRU) Peek(key uint64) (interface{}, bool) {
-	c.RLock()
-	defer c.RUnlock()
-
 	if ele, ok := c.cache[key]; ok {
 		return ele.Value.(*Item).Value, true
 	}
@@ -89,14 +78,22 @@ func (c *LRU) Peek(key uint64) (interface{}, bool) {
 	return nil, false
 }
 
+func (c *LRU) contains(key uint64) bool {
+	_, ok := c.cache[key]
+	return ok
+}
+
 // Remove eliminates an item from cache.
 func (c *LRU) Remove(key uint64) {
-	c.Lock()
-	defer c.Unlock()
+	c.remove(key)
+}
 
+func (c *LRU) remove(key uint64) bool {
 	if ele, ok := c.cache[key]; ok {
 		c.removeElement(ele)
+		return ok
 	}
+	return false
 }
 
 func (c *LRU) removeOldest() {
@@ -104,6 +101,15 @@ func (c *LRU) removeOldest() {
 	if ele != nil {
 		c.removeElement(ele)
 	}
+}
+
+func (c *LRU) getAndRemoveOldest() (uint64, interface{}, bool) {
+	ele := c.ll.Back()
+	if ele != nil {
+		c.removeElement(ele)
+		return ele.Value.(*Item).Key, ele.Value.(*Item).Value, true
+	}
+	return 0, nil, false
 }
 
 func (c *LRU) removeElement(ele *list.Element) {
@@ -114,9 +120,6 @@ func (c *LRU) removeElement(ele *list.Element) {
 
 // Elems return all items in cache.
 func (c *LRU) Elems() []*Item {
-	c.RLock()
-	defer c.RUnlock()
-
 	elems := make([]*Item, 0, c.ll.Len())
 	for ele := c.ll.Front(); ele != nil; ele = ele.Next() {
 		clone := *(ele.Value.(*Item))
@@ -128,8 +131,5 @@ func (c *LRU) Elems() []*Item {
 
 // Len returns current cache size.
 func (c *LRU) Len() int {
-	c.RLock()
-	defer c.RUnlock()
-
 	return c.ll.Len()
 }

@@ -42,24 +42,24 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 		{
 			// metapb.StoreState_Up == 0
 			Id:      1,
-			Address: "localhost:1",
+			Address: "tikv1",
 			State:   metapb.StoreState_Up,
 		},
 		{
 			Id:      4,
-			Address: "localhost:4",
+			Address: "tikv4",
 			State:   metapb.StoreState_Up,
 		},
 		{
 			// metapb.StoreState_Offline == 1
 			Id:      6,
-			Address: "localhost:6",
+			Address: "tikv6",
 			State:   metapb.StoreState_Offline,
 		},
 		{
 			// metapb.StoreState_Tombstone == 2
 			Id:      7,
-			Address: "localhost:7",
+			Address: "tikv7",
 			State:   metapb.StoreState_Tombstone,
 		},
 	}
@@ -71,8 +71,9 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
+
 	for _, store := range s.stores {
-		mustPutStore(c, s.svr, store)
+		mustPutStore(c, s.svr, store.Id, store.State, nil)
 	}
 }
 
@@ -144,7 +145,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	}
 
 	// Test merge.
-	labels = map[string]string{"zack": "zack1", "host": "host1"}
+	labels = map[string]string{"zack": "zack1", "Host": "host1"}
 	b, err = json.Marshal(labels)
 	c.Assert(err, IsNil)
 	err = postJSON(&http.Client{}, url+"/label", b)
@@ -185,6 +186,35 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 		c.Assert(err, IsNil)
 		c.Assert(resp.StatusCode, Equals, t.status)
 	}
+}
+
+func (s *testStoreSuite) TestStoreSetState(c *C) {
+	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
+	var info storeInfo
+	err := readJSONWithURL(url, &info)
+	c.Assert(err, IsNil)
+	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
+
+	// Set to Offline.
+	err = postJSON(&http.Client{}, url+"/state?state=Offline", nil)
+	c.Assert(err, IsNil)
+	err = readJSONWithURL(url, &info)
+	c.Assert(err, IsNil)
+	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
+
+	// Invalid state.
+	err = postJSON(&http.Client{}, url+"/state?state=Foo", nil)
+	c.Assert(err, NotNil)
+	err = readJSONWithURL(url, &info)
+	c.Assert(err, IsNil)
+	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
+
+	// Set back to Up.
+	err = postJSON(&http.Client{}, url+"/state?state=Up", nil)
+	c.Assert(err, IsNil)
+	err = readJSONWithURL(url, &info)
+	c.Assert(err, IsNil)
+	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
 }
 
 func (s *testStoreSuite) TestUrlStoreFilter(c *C) {
@@ -237,10 +267,14 @@ func (s *testStoreSuite) TestDownState(c *C) {
 		Stats:           &pdpb.StoreStats{},
 		LastHeartbeatTS: time.Now(),
 	}
-	storeInfo := newStoreInfo(store)
+	storeInfo := newStoreInfo(store, time.Hour)
 	c.Assert(storeInfo.Store.StateName, Equals, metapb.StoreState_Up.String())
 
 	store.LastHeartbeatTS = time.Now().Add(-time.Minute * 2)
-	storeInfo = newStoreInfo(store)
+	storeInfo = newStoreInfo(store, time.Hour)
+	c.Assert(storeInfo.Store.StateName, Equals, disconnectedName)
+
+	store.LastHeartbeatTS = time.Now().Add(-time.Hour * 2)
+	storeInfo = newStoreInfo(store, time.Hour)
 	c.Assert(storeInfo.Store.StateName, Equals, downStateName)
 }

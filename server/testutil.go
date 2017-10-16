@@ -67,8 +67,8 @@ func NewTestSingleConfig() *Config {
 	cfg.DataDir, _ = ioutil.TempDir("/tmp", "test_pd")
 	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
 	cfg.disableStrictReconfigCheck = true
-	cfg.tickMs = 100
-	cfg.electionMs = 1000
+	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)
+	cfg.ElectionInterval = typeutil.NewDuration(1000 * time.Millisecond)
 
 	cfg.adjust()
 	return cfg

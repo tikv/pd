@@ -34,7 +34,7 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 	s.stores = []*metapb.Store{
 		{
 			Id:      1,
-			Address: "localhost:1",
+			Address: "tikv1",
 			State:   metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{
 				{
@@ -49,7 +49,7 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 		},
 		{
 			Id:      4,
-			Address: "localhost:4",
+			Address: "tikv4",
 			State:   metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{
 				{
@@ -64,7 +64,7 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 		},
 		{
 			Id:      6,
-			Address: "localhost:6",
+			Address: "tikv6",
 			State:   metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{
 				{
@@ -79,7 +79,7 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 		},
 		{
 			Id:      7,
-			Address: "localhost:7",
+			Address: "tikv7",
 			State:   metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{
 				{
@@ -106,7 +106,7 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 
 	mustBootstrapCluster(c, s.svr)
 	for _, store := range s.stores {
-		mustPutStore(c, s.svr, store)
+		mustPutStore(c, s.svr, store.Id, store.State, store.Labels)
 	}
 }
 
@@ -128,7 +128,7 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 		want        []*metapb.Store
 	}{
 		{
-			name: "zone",
+			name: "Zone",
 			want: s.stores[:],
 		},
 		{
@@ -137,22 +137,22 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 		},
 		{
 			name:  "zone",
-			value: "us-west-1",
+			value: "Us-west-1",
 			want:  s.stores[:1],
 		},
 		{
-			name:  "zone",
+			name:  "Zone",
 			value: "west",
 			want:  s.stores[:2],
 		},
 		{
-			name:  "zo",
-			value: "beijing",
+			name:  "Zo",
+			value: "Beijing",
 			want:  s.stores[2:3],
 		},
 		{
-			name:  "zone",
-			value: "ssd",
+			name:  "ZONE",
+			value: "SSD",
 			want:  []*metapb.Store{},
 		},
 	}

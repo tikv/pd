@@ -14,8 +14,10 @@
 package schedule
 
 import (
-	"fmt"
+	"sync"
+	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
@@ -38,6 +40,7 @@ type Cluster interface {
 
 	IsRegionHot(id uint64) bool
 	RegionWriteStats() []*core.RegionStat
+	RegionReadStats() []*core.RegionStat
 
 	// TODO: it should be removed. Schedulers don't need to know anything
 	// about peers.
@@ -47,15 +50,18 @@ type Cluster interface {
 // Scheduler is an interface to schedule resources.
 type Scheduler interface {
 	GetName() string
-	GetResourceKind() core.ResourceKind
-	GetResourceLimit() uint64
+	// GetType should in accordance with the name passing to schedule.RegisterScheduler()
+	GetType() string
+	GetMinInterval() time.Duration
+	GetNextInterval(interval time.Duration) time.Duration
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)
-	Schedule(cluster Cluster) Operator
+	Schedule(cluster Cluster) *Operator
+	IsScheduleAllowed() bool
 }
 
 // CreateSchedulerFunc is for creating scheudler.
-type CreateSchedulerFunc func(opt Options, args []string) (Scheduler, error)
+type CreateSchedulerFunc func(opt Options, limiter *Limiter, args []string) (Scheduler, error)
 
 var schedulerMap = make(map[string]CreateSchedulerFunc)
 
@@ -63,16 +69,53 @@ var schedulerMap = make(map[string]CreateSchedulerFunc)
 // func of a package.
 func RegisterScheduler(name string, createFn CreateSchedulerFunc) {
 	if _, ok := schedulerMap[name]; ok {
-		panic(fmt.Sprintf("duplicated scheduler name: %v", name))
+		log.Fatalf("duplicated scheduler name: %v", name)
 	}
 	schedulerMap[name] = createFn
 }
 
 // CreateScheduler creates a scheduler with registered creator func.
-func CreateScheduler(name string, opt Options, args ...string) (Scheduler, error) {
+func CreateScheduler(name string, opt Options, limiter *Limiter, args ...string) (Scheduler, error) {
 	fn, ok := schedulerMap[name]
 	if !ok {
 		return nil, errors.Errorf("create func of %v is not registered", name)
 	}
-	return fn(opt, args)
+	return fn(opt, limiter, args)
+}
+
+// Limiter a counter that limits the number of operators
+type Limiter struct {
+	sync.RWMutex
+	counts map[core.ResourceKind]uint64
+}
+
+// NewLimiter create a schedule limiter
+func NewLimiter() *Limiter {
+	return &Limiter{
+		counts: make(map[core.ResourceKind]uint64),
+	}
+}
+
+// AddOperator increase the count by kind
+func (l *Limiter) AddOperator(op *Operator) {
+	l.Lock()
+	defer l.Unlock()
+	l.counts[op.ResourceKind()]++
+}
+
+// RemoveOperator decrease the count by kind
+func (l *Limiter) RemoveOperator(op *Operator) {
+	l.Lock()
+	defer l.Unlock()
+	if l.counts[op.ResourceKind()] == 0 {
+		log.Fatal("the limiter is already 0, no operators need to remove")
+	}
+	l.counts[op.ResourceKind()]--
+}
+
+// OperatorCount get the count by kind
+func (l *Limiter) OperatorCount(kind core.ResourceKind) uint64 {
+	l.RLock()
+	defer l.RUnlock()
+	return l.counts[kind]
 }

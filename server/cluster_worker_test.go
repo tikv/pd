@@ -15,6 +15,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"math/rand"
 	"net"
 	"sync"
@@ -25,7 +26,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
-	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testClusterWorkerSuite{})
@@ -390,14 +390,14 @@ func (s *testClusterWorkerSuite) checkSearchRegions(cluster *RaftCluster, keys .
 		defer cluster.cachedCluster.RUnlock()
 
 		cacheRegions := cluster.cachedCluster.regions
-		if cacheRegions.tree.length() != len(keys)/2 {
-			c.Logf("region length not match, expect %v, got %v", len(keys)/2, cacheRegions.tree.length())
+		if cacheRegions.TreeLength() != len(keys)/2 {
+			c.Logf("region length not match, expect %v, got %v", len(keys)/2, cacheRegions.TreeLength())
 			return false
 		}
 
 		for i := 0; i < len(keys); i += 2 {
 			start, end := []byte(keys[i]), []byte(keys[i+1])
-			region := cacheRegions.tree.search(start)
+			region := cacheRegions.SearchRegion(start)
 			if region == nil {
 				c.Logf("region not found for key: %q", start)
 				return false
@@ -640,18 +640,4 @@ func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 
 	resp := s.reportSplit(c, left, right)
 	c.Assert(resp, NotNil)
-
-	regionID := right.GetId()
-	value, ok := cluster.coordinator.histories.Get(regionID)
-	c.Assert(ok, IsTrue)
-
-	op := value.(*splitOperator)
-	c.Assert(op.Left, DeepEquals, left)
-	c.Assert(op.Right, DeepEquals, right)
-	c.Assert(op.Origin.GetId(), Equals, regionID)
-	c.Assert(op.Origin.GetRegionEpoch(), IsNil)
-	c.Assert(op.Origin.GetStartKey(), BytesEquals, left.GetStartKey())
-	c.Assert(op.Origin.GetEndKey(), BytesEquals, right.GetEndKey())
-	c.Assert(op.Origin.GetPeers(), HasLen, 1)
-	c.Assert(op.Origin.GetPeers()[0], DeepEquals, peer)
 }

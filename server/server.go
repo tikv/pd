@@ -28,9 +28,11 @@ import (
 	"github.com/coreos/etcd/embed"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
-	"github.com/ngaut/systimemon"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/table"
 	"google.golang.org/grpc"
 )
 
@@ -70,7 +72,9 @@ type Server struct {
 	// a unique ID.
 	idAlloc *idAllocator
 	// for kv operation.
-	kv *kv
+	kv *core.KV
+	// for namespace.
+	classifier namespace.Classifier
 	// for raft cluster
 	cluster *RaftCluster
 	// For tso, set after pd becomes leader.
@@ -177,12 +181,32 @@ func (s *Server) startServer() error {
 	s.leaderValue = s.marshalLeader()
 
 	s.idAlloc = &idAllocator{s: s}
-	s.kv = newKV(s)
+	kvBase := newEtcdKVBase(s)
+	s.kv = core.NewKV(kvBase)
 	s.cluster = newRaftCluster(s, s.clusterID)
 	s.hbStreams = newHeartbeatStreams(s.clusterID)
+	if err := s.initClassifier(); err != nil {
+		return errors.Trace(err)
+	}
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
+	return nil
+}
+
+func (s *Server) initClassifier() error {
+	// TODO: Config by name.
+	if s.cfg.EnableNamespace {
+		log.Infoln("use namespace classifier.")
+		var err error
+		s.classifier, err = table.NewTableNamespaceClassifier(s.kv, s.idAlloc)
+		if err != nil {
+			return errors.Trace(err)
+		}
+	} else {
+		log.Infoln("use default classifier.")
+		s.classifier = namespace.DefaultClassifier
+	}
 	return nil
 }
 
@@ -256,7 +280,7 @@ var timeMonitorOnce sync.Once
 // Run runs the pd server.
 func (s *Server) Run() error {
 	timeMonitorOnce.Do(func() {
-		go systimemon.StartMonitor(time.Now, func() {
+		go StartMonitor(time.Now, func() {
 			log.Errorf("system time jumps backward")
 			timeJumpBackCounter.Inc()
 		})

@@ -14,6 +14,7 @@
 package pd
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +23,6 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
 
@@ -121,9 +121,15 @@ func NewClient(pdAddrs []string) (Client, error) {
 	go c.tsCancelLoop()
 	go c.leaderLoop()
 
-	// TODO: Update addrs from server continuously by using GetMember.
-
 	return c, nil
+}
+
+func (c *client) updateURLs(members []*pdpb.Member) {
+	urls := make([]string, 0, len(members))
+	for _, m := range members {
+		urls = append(urls, m.GetClientUrls()...)
+	}
+	c.urls = urls
 }
 
 func (c *client) initClusterID() error {
@@ -154,6 +160,7 @@ func (c *client) updateLeader() error {
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
 			continue
 		}
+		c.updateURLs(members.GetMembers())
 		if err = c.switchLeader(members.GetLeader().GetClientUrls()); err != nil {
 			return errors.Trace(err)
 		}
@@ -323,6 +330,7 @@ func (c *client) tsLoop() {
 			close(done)
 			requests = requests[:0]
 		case <-loopCtx.Done():
+			cancel()
 			return
 		}
 
