@@ -507,7 +507,7 @@ type mockLimitScheduler struct {
 	kind    core.ResourceKind
 }
 
-func (s *mockLimitScheduler) IsAllowSchedule() bool {
+func (s *mockLimitScheduler) IsScheduleAllowed() bool {
 	return s.counter.OperatorCount(s.kind) < s.limit
 }
 

@@ -74,7 +74,7 @@ func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {
 	cluster.UnblockStore(s.storeID)
 }
 
-func (s *grantLeaderScheduler) IsAllowSchedule() bool {
+func (s *grantLeaderScheduler) IsScheduleAllowed() bool {
 	return s.limiter.OperatorCount(core.RegionKind) < s.opt.GetLeaderScheduleLimit()
 }
 

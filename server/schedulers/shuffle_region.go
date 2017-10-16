@@ -53,7 +53,7 @@ func (s *shuffleRegionScheduler) GetType() string {
 	return "shuffle-region"
 }
 
-func (s *shuffleRegionScheduler) IsAllowSchedule() bool {
+func (s *shuffleRegionScheduler) IsScheduleAllowed() bool {
 	return s.limiter.OperatorCount(core.RegionKind) < s.opt.GetRegionScheduleLimit()
 }
 

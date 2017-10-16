@@ -122,7 +122,7 @@ func (h *balanceHotRegionsScheduler) GetType() string {
 	return "hot-region"
 }
 
-func (h *balanceHotRegionsScheduler) IsAllowSchedule() bool {
+func (h *balanceHotRegionsScheduler) IsScheduleAllowed() bool {
 	return h.limiter.OperatorCount(core.PriorityKind) < h.limit
 }
 

@@ -67,7 +67,7 @@ func (s *balanceRegionScheduler) GetType() string {
 	return "balance-region"
 }
 
-func (s *balanceRegionScheduler) IsAllowSchedule() bool {
+func (s *balanceRegionScheduler) IsScheduleAllowed() bool {
 	limit := minUint64(s.limit, s.opt.GetRegionScheduleLimit())
 	return s.limiter.OperatorCount(core.RegionKind) < limit
 }

@@ -57,7 +57,7 @@ type Scheduler interface {
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)
 	Schedule(cluster Cluster) *Operator
-	IsAllowSchedule() bool
+	IsScheduleAllowed() bool
 }
 
 // CreateSchedulerFunc is for creating scheudler.

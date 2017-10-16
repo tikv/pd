@@ -62,7 +62,7 @@ func (l *balanceLeaderScheduler) GetInterval() time.Duration {
 	return MinScheduleInterval
 }
 
-func (l *balanceLeaderScheduler) IsAllowSchedule() bool {
+func (l *balanceLeaderScheduler) IsScheduleAllowed() bool {
 	limit := minUint64(l.limit, l.opt.GetLeaderScheduleLimit())
 	return l.limiter.OperatorCount(core.LeaderKind) < limit
 }

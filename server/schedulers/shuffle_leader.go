@@ -55,7 +55,7 @@ func (s *shuffleLeaderScheduler) GetType() string {
 	return "shuffle-leader"
 }
 
-func (s *shuffleLeaderScheduler) IsAllowSchedule() bool {
+func (s *shuffleLeaderScheduler) IsScheduleAllowed() bool {
 	return s.limiter.OperatorCount(core.LeaderKind) < s.opt.GetLeaderScheduleLimit()
 }
 

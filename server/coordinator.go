@@ -530,5 +530,5 @@ func (s *scheduleController) GetInterval() time.Duration {
 }
 
 func (s *scheduleController) AllowSchedule() bool {
-	return s.Scheduler.IsAllowSchedule()
+	return s.Scheduler.IsScheduleAllowed()
 }

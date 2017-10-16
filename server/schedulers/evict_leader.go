@@ -68,7 +68,7 @@ func (s *evictLeaderScheduler) GetType() string {
 	return "evict-leader"
 }
 
-func (s *evictLeaderScheduler) IsAllowSchedule() bool {
+func (s *evictLeaderScheduler) IsScheduleAllowed() bool {
 	return s.limiter.OperatorCount(core.LeaderKind) < s.opt.GetLeaderScheduleLimit()
 }
 
