@@ -36,7 +36,7 @@ func (s *testResouceKindSuite) TestString(c *C) {
 		{AdminKind, "admin"},
 		{LeaderKind, "leader"},
 		{RegionKind, "region"},
-		{PriorityKind, "priority"},
+		{HotRegionKind, "hot"},
 		{OtherKind, "other"},
 		{ResourceKind(404), "unknown"},
 	}
@@ -54,7 +54,7 @@ func (s *testResouceKindSuite) TestParseResouceKind(c *C) {
 		{"admin", AdminKind},
 		{"leader", LeaderKind},
 		{"region", RegionKind},
-		{"priority", PriorityKind},
+		{"hot", HotRegionKind},
 		{"other", OtherKind},
 		{"test", UnKnownKind},
 	}

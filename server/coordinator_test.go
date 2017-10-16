@@ -550,7 +550,8 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	c.Assert(sc.AllowSchedule(), IsTrue)
 
 	// add a PriorityKind operator will remove old operator
-	op3 := newTestOperator(2, core.PriorityKind)
+	op3 := newTestOperator(2, core.HotRegionKind)
+	op3.SetPriorityLevel(core.HighPriority)
 	c.Assert(co.addOperator(op1), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsFalse)
 	c.Assert(co.addOperator(op3), IsTrue)
@@ -561,6 +562,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	c.Assert(co.addOperator(op2), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsFalse)
 	op4 := newTestOperator(2, core.AdminKind)
+	op4.SetPriorityLevel(core.HighPriority)
 	c.Assert(co.addOperator(op4), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsTrue)
 }

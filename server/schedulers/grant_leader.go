@@ -87,5 +87,7 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Oper
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: s.storeID}
-	return schedule.NewOperator("grant-leader", region.GetId(), core.LeaderKind, step)
+	op := schedule.NewOperator("grant-leader", region.GetId(), core.LeaderKind, step)
+	op.SetPriorityLevel(core.HighPriority)
+	return op
 }

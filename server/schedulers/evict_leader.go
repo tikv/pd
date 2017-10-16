@@ -86,5 +86,7 @@ func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Oper
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: target.GetId()}
-	return schedule.NewOperator("evict-leader", region.GetId(), core.LeaderKind, step)
+	op := schedule.NewOperator("evict-leader", region.GetId(), core.LeaderKind, step)
+	op.SetPriorityLevel(core.HighPriority)
+	return op
 }

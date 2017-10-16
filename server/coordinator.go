@@ -374,13 +374,7 @@ func (c *coordinator) addOperator(op *schedule.Operator) bool {
 }
 
 func isHigherPriorityOperator(new, old *schedule.Operator) bool {
-	if new.ResourceKind() == core.AdminKind {
-		return true
-	}
-	if new.ResourceKind() == core.PriorityKind && old.ResourceKind() != core.PriorityKind {
-		return true
-	}
-	return false
+	return new.GetPriorityLevel() < old.GetPriorityLevel()
 }
 
 func (c *coordinator) removeOperator(op *schedule.Operator) {
