@@ -43,7 +43,7 @@ const (
 
 // Version information.
 var (
-	PDReleaseVersion = "0.9.0"
+	PDReleaseVersion = "1.0.0"
 	PDBuildTS        = "None"
 	PDGitHash        = "None"
 	PDGitBranch      = "None"
