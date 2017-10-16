@@ -143,6 +143,27 @@ func stringToLogLevel(level string) log.Level {
 // textFormatter is for compatability with ngaut/log
 type textFormatter struct {
 	DisableTimestamp bool
+	DisableColors    bool
+}
+
+// logTypeToColor converts the Level to a color string.
+func logTypeToColor(level log.Level) string {
+	switch level {
+	case log.DebugLevel:
+		return "[0;37"
+	case log.InfoLevel:
+		return "[0;36"
+	case log.WarnLevel:
+		return "[0;33"
+	case log.ErrorLevel:
+		return "[0;31"
+	case log.FatalLevel:
+		return "[0;31"
+	case log.PanicLevel:
+		return "[0;31"
+	}
+
+	return "[0;37"
 }
 
 // Format implements logrus.Formatter
@@ -159,7 +180,13 @@ func (f *textFormatter) Format(entry *log.Entry) ([]byte, error) {
 	if file, ok := entry.Data["file"]; ok {
 		fmt.Fprintf(b, "%s:%v:", file, entry.Data["line"])
 	}
-	fmt.Fprintf(b, " [%s] %s", entry.Level.String(), entry.Message)
+	if f.DisableColors {
+		fmt.Fprintf(b, " [%s] %s", entry.Level.String(), entry.Message)
+	} else {
+		colorStr := logTypeToColor(entry.Level)
+		s := "\033" + colorStr + "m[" + entry.Level.String() + "] " + entry.Message + "\033[0m"
+		fmt.Fprintf(b, " %s", s)
+	}
 	for k, v := range entry.Data {
 		if k != "file" && k != "line" {
 			fmt.Fprintf(b, " %v=%v", k, v)
@@ -174,6 +201,7 @@ func stringToLogFormatter(format string, disableTimestamp bool) log.Formatter {
 	case "text":
 		return &textFormatter{
 			DisableTimestamp: disableTimestamp,
+			DisableColors:    true,
 		}
 	case "json":
 		return &log.JSONFormatter{
@@ -185,6 +213,7 @@ func stringToLogFormatter(format string, disableTimestamp bool) log.Formatter {
 			FullTimestamp:    true,
 			TimestampFormat:  defaultLogTimeFormat,
 			DisableTimestamp: disableTimestamp,
+			DisableColors:    true,
 		}
 	default:
 		return &textFormatter{}
