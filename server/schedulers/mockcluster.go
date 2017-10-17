@@ -41,6 +41,11 @@ func (mc *mockCluster) allocID() (uint64, error) {
 	return mc.id.Alloc()
 }
 
+// ScanRegions scan region with start key, until number greater than limit.
+func (mc *mockCluster) ScanRegions(startKey []byte, limit int) []*core.RegionInfo {
+	return mc.Regions.ScanRange(startKey, limit)
+}
+
 // AllocPeer allocs a new peer on a store.
 func (mc *mockCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := mc.allocID()

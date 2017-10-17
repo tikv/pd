@@ -120,32 +120,3 @@ func (l *Limiter) OperatorCount(kind core.ResourceKind) uint64 {
 	defer l.RUnlock()
 	return l.counts[kind]
 }
-
-type ScheduleLimiter struct {
-	sync.RWMutex
-	counts map[core.ResourceKind]uint64
-}
-
-func NewScheduleLimiter() *ScheduleLimiter {
-	return &ScheduleLimiter{
-		counts: make(map[core.ResourceKind]uint64),
-	}
-}
-
-func (l *ScheduleLimiter) AddOperator(op *Operator) {
-	l.Lock()
-	defer l.Unlock()
-	l.counts[op.ResourceKind()]++
-}
-
-func (l *ScheduleLimiter) RemoveOperator(op *Operator) {
-	l.Lock()
-	defer l.Unlock()
-	l.counts[op.ResourceKind()]--
-}
-
-func (l *ScheduleLimiter) OperatorCount(kind core.ResourceKind) uint64 {
-	l.RLock()
-	defer l.RUnlock()
-	return l.counts[kind]
-}

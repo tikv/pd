@@ -37,16 +37,17 @@ func init() {
 
 type balanceAdjacentRegionScheduler struct {
 	*baseScheduler
-	opt      schedule.Options
-	limit    uint64
-	selector schedule.Selector
-	lastKey  []byte
-	ids      []uint64
+	opt         schedule.Options
+	selector    schedule.Selector
+	leaderLimit uint64
+	peerLimit   uint64
+	lastKey     []byte
+	ids         []uint64
 }
 
 // newBalanceAdjacentRegionScheduler creates a scheduler that tends to disperse adjacent region
 // on each store.
-func newBalanceAdjacentRegionScheduler(opt schedule.Options, limiter *schedule.Limiter) schedule.Scheduler {
+func newBalanceAdjacentRegionScheduler(opt schedule.Options, limiter *schedule.Limiter, args ...string) schedule.Scheduler {
 	filters := []schedule.Filter{
 		schedule.NewBlockFilter(),
 		schedule.NewStateFilter(opt),
@@ -58,8 +59,9 @@ func newBalanceAdjacentRegionScheduler(opt schedule.Options, limiter *schedule.L
 	return &balanceAdjacentRegionScheduler{
 		baseScheduler: base,
 		opt:           opt,
-		limit:         adjacentResourceLimit,
 		selector:      schedule.NewRandomSelector(filters),
+		leaderLimit:   defaultAdjacentLeaderLimit,
+		peerLimit:     defaultAdjacentPeerLimit,
 		lastKey:       []byte(""),
 	}
 
@@ -82,7 +84,15 @@ func (l *balanceAdjacentRegionScheduler) GetNextInterval(interval time.Duration)
 }
 
 func (l *balanceAdjacentRegionScheduler) IsScheduleAllowed() bool {
-	return l.limiter.OperatorCount(core.AdjacentLeaderKind) < defaultAdjacentLeaderLimit || l.limiter.OperatorCount(core.AdjacentPeerKind) < defaultAdjacentPeerLimit
+	return l.allowBalanceLeader() || l.allowBalanceLeader()
+}
+
+func (l *balanceAdjacentRegionScheduler) allowBalanceLeader() bool {
+	return l.limiter.OperatorCount(core.AdjacentLeaderKind) < l.leaderLimit
+}
+
+func (l *balanceAdjacentRegionScheduler) allowBalancePeer() bool {
+	return l.limiter.OperatorCount(core.AdjacentPeerKind) < l.peerLimit
 }
 
 func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
@@ -109,7 +119,7 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *sch
 		if len(adjacentRegions) == 1 {
 			adjacentRegions[0] = r
 		} else {
-			// got adjacent regions
+			// got an adjacent regions
 			break
 		}
 	}
@@ -126,6 +136,9 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *sch
 		}
 		r1 := adjacentRegions[0]
 		r2 := adjacentRegions[1]
+		if len(r1.GetPeers()) != l.opt.GetMaxReplicas() {
+			return nil
+		}
 		op := l.disperseLeader(cluster, r1, r2)
 		if op == nil {
 			op = l.dispersePeer(cluster, r1)
@@ -141,6 +154,9 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *sch
 }
 
 func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster schedule.Cluster, before *core.RegionInfo, after *core.RegionInfo) *schedule.Operator {
+	if !l.allowBalanceLeader() {
+		return nil
+	}
 	diffPeers := before.GetDiffFollowers(after)
 	if len(diffPeers) == 0 {
 		return nil
@@ -158,6 +174,9 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster schedule.Cluster
 }
 
 func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, region *core.RegionInfo) *schedule.Operator {
+	if !l.allowBalancePeer() {
+		return nil
+	}
 	// scoreGuard guarantees that the distinct score will not decrease.
 	leaderStoreID := region.Leader.GetStoreId()
 	stores := cluster.GetRegionStores(region)
