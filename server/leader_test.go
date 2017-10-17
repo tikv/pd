@@ -14,12 +14,12 @@
 package server
 
 import (
+	"context"
 	"sync"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testGetLeaderSuite{})

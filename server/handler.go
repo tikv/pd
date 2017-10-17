@@ -83,11 +83,16 @@ func (h *Handler) GetHotReadStores() map[uint64]uint64 {
 }
 
 // AddScheduler adds a scheduler.
-func (h *Handler) AddScheduler(s schedule.Scheduler, args ...string) error {
+func (h *Handler) AddScheduler(name string, args ...string) error {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return errors.Trace(err)
 	}
+	s, err := schedule.CreateScheduler(name, h.opt, c.limiter, args...)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	log.Infof("create scheduler %s", s.GetName())
 	if err = c.addScheduler(s, args...); err != nil {
 		log.Errorf("can not add scheduler %v: %v", s.GetName(), err)
 	} else if err = c.opt.persist(c.kv); err != nil {
@@ -112,82 +117,42 @@ func (h *Handler) RemoveScheduler(name string) error {
 
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
-	s, err := schedule.CreateScheduler("balance-leader", h.opt)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	log.Infof("create scheduler %s", s.GetName())
-	return h.AddScheduler(s)
+	return h.AddScheduler("balance-leader")
 }
 
 // AddBalanceRegionScheduler adds a balance-region-scheduler.
 func (h *Handler) AddBalanceRegionScheduler() error {
-	s, err := schedule.CreateScheduler("balance-region", h.opt)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	log.Infof("create scheduler %s", s.GetName())
-	return h.AddScheduler(s)
+	return h.AddScheduler("balance-region")
 }
 
 // AddBalanceHotRegionScheduler adds a balance-hot-region-scheduler.
 func (h *Handler) AddBalanceHotRegionScheduler() error {
-	s, err := schedule.CreateScheduler("hot-region", h.opt)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	log.Infof("create scheduler %s", s.GetName())
-	return h.AddScheduler(s)
+	return h.AddScheduler("hot-region")
 }
 
 // AddBalanceAdjacentRegionScheduler adds a balance-adjacent-region-scheduler.
 func (h *Handler) AddAdjacentRegionScheduler() error {
-	s, err := schedule.CreateScheduler("adjacent-region", h.opt)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	log.Infof("create scheduler %s", s.GetName())
-	return h.AddScheduler(s)
+	return h.AddScheduler("adjacent-region")
 }
 
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
-	s, err := schedule.CreateScheduler("grant-leader", h.opt, strconv.FormatUint(storeID, 10))
-	if err != nil {
-		return errors.Trace(err)
-	}
-	log.Infof("create scheduler %s", s.GetName())
-	return h.AddScheduler(s, strconv.FormatUint(storeID, 10))
+	return h.AddScheduler("grant-leader", strconv.FormatUint(storeID, 10))
 }
 
 // AddEvictLeaderScheduler adds an evict-leader-scheduler.
 func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
-	s, err := schedule.CreateScheduler("evict-leader", h.opt, strconv.FormatUint(storeID, 10))
-	if err != nil {
-		return errors.Trace(err)
-	}
-	log.Infof("create scheduler %s", s.GetName())
-	return h.AddScheduler(s, strconv.FormatUint(storeID, 10))
+	return h.AddScheduler("evict-leader", strconv.FormatUint(storeID, 10))
 }
 
 // AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.
 func (h *Handler) AddShuffleLeaderScheduler() error {
-	s, err := schedule.CreateScheduler("shuffle-leader", h.opt)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	log.Infof("create scheduler %s", s.GetName())
-	return h.AddScheduler(s)
+	return h.AddScheduler("shuffle-leader")
 }
 
 // AddShuffleRegionScheduler adds a shuffle-region-scheduler.
 func (h *Handler) AddShuffleRegionScheduler() error {
-	s, err := schedule.CreateScheduler("shuffle-region", h.opt)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	log.Infof("create scheduler %s", s.GetName())
-	return h.AddScheduler(s)
+	return h.AddScheduler("shuffle-region")
 }
 
 // GetOperator returns the region operator.
@@ -368,6 +333,57 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 	}
 
 	op := schedule.CreateMovePeerOperator("adminMovePeer", region, core.AdminKind, fromStoreID, toStoreID, newPeer.GetId())
+	c.addOperator(op)
+	return nil
+}
+
+// AddAddPeerOperator adds an operator to add peer.
+func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	region := c.cluster.GetRegion(regionID)
+	if region == nil {
+		return errRegionNotFound(regionID)
+	}
+
+	if region.GetStorePeer(toStoreID) != nil {
+		return errors.Errorf("region already has peer in store %v", toStoreID)
+	}
+
+	if c.cluster.GetStore(toStoreID) == nil {
+		return core.ErrStoreNotFound(toStoreID)
+	}
+	newPeer, err := c.cluster.AllocPeer(toStoreID)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	step := schedule.AddPeer{ToStore: toStoreID, PeerID: newPeer.GetId()}
+	op := schedule.NewOperator("adminAddPeer", regionID, core.AdminKind, step)
+	c.addOperator(op)
+	return nil
+}
+
+// AddRemovePeerOperator adds an operator to remove peer.
+func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	region := c.cluster.GetRegion(regionID)
+	if region == nil {
+		return errRegionNotFound(regionID)
+	}
+
+	if region.GetStorePeer(fromStoreID) == nil {
+		return errors.Errorf("region has no peer in store %v", fromStoreID)
+	}
+
+	op := schedule.CreateRemovePeerOperator("adminRemovePeer", region, fromStoreID)
 	c.addOperator(op)
 	return nil
 }

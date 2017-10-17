@@ -13,6 +13,16 @@
 
 package core
 
+// PriorityLevel lower level means higher priority
+type PriorityLevel int
+
+// Built-in priority level
+const (
+	HighPriority PriorityLevel = iota
+	NormalPriority
+	LowPriority
+)
+
 // ResourceKind distinguishes different kinds of resources.
 type ResourceKind int
 
@@ -25,8 +35,8 @@ const (
 	LeaderKind
 	// RegionKind indicates the region kind resource
 	RegionKind
-	// PriorityKind indicates the priority kind resource
-	PriorityKind
+	// HotRegionKind indicates the hot region kind resource
+	HotRegionKind
 	// AdjacentLeaderKind indicates the adjacent resource
 	AdjacentLeaderKind
 	// AdjacentPeerKind indicates the adjacent resource
@@ -40,7 +50,7 @@ var resourceKindToName = map[ResourceKind]string{
 	1: "admin",
 	2: "leader",
 	3: "region",
-	4: "priority",
+	4: "hot",
 	5: "adjacent-leader",
 	6: "adjacent-peer",
 	7: "other",
@@ -51,7 +61,7 @@ var resourceNameToValue = map[string]ResourceKind{
 	"admin":           AdminKind,
 	"leader":          LeaderKind,
 	"region":          RegionKind,
-	"priority":        PriorityKind,
+	"hot":             HotRegionKind,
 	"adjacent-leader": AdjacentLeaderKind,
 	"adjacent-peer":   AdjacentPeerKind,
 	"other":           OtherKind,

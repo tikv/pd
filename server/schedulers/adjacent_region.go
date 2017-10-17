@@ -23,18 +23,20 @@ import (
 
 const (
 	scanLimit                    = 1000
-	adjacentResourceLimit        = 6
+	defaultAdjacentPeerLimit     = 1
+	defaultAdjacentLeaderLimit   = 64
 	minAdjacentSchedulerInterval = time.Second
-	maxAdjacentSchedulerInterval = 20 * time.Second
+	maxAdjacentSchedulerInterval = 30 * time.Second
 )
 
 func init() {
-	schedule.RegisterScheduler("adjacent-region", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
-		return newBalanceAdjacentRegionScheduler(opt), nil
+	schedule.RegisterScheduler("adjacent-region", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+		return newBalanceAdjacentRegionScheduler(opt, limiter), nil
 	})
 }
 
 type balanceAdjacentRegionScheduler struct {
+	*baseScheduler
 	opt      schedule.Options
 	limit    uint64
 	selector schedule.Selector
@@ -44,7 +46,7 @@ type balanceAdjacentRegionScheduler struct {
 
 // newBalanceAdjacentRegionScheduler creates a scheduler that tends to disperse adjacent region
 // on each store.
-func newBalanceAdjacentRegionScheduler(opt schedule.Options) schedule.Scheduler {
+func newBalanceAdjacentRegionScheduler(opt schedule.Options, limiter *schedule.Limiter) schedule.Scheduler {
 	filters := []schedule.Filter{
 		schedule.NewBlockFilter(),
 		schedule.NewStateFilter(opt),
@@ -52,17 +54,23 @@ func newBalanceAdjacentRegionScheduler(opt schedule.Options) schedule.Scheduler 
 		schedule.NewSnapshotCountFilter(opt),
 		schedule.NewStorageThresholdFilter(opt),
 	}
+	base := newBaseScheduler(limiter)
 	return &balanceAdjacentRegionScheduler{
-		opt:      opt,
-		limit:    adjacentResourceLimit,
-		selector: schedule.NewRandomSelector(filters),
-		lastKey:  []byte(""),
+		baseScheduler: base,
+		opt:           opt,
+		limit:         adjacentResourceLimit,
+		selector:      schedule.NewRandomSelector(filters),
+		lastKey:       []byte(""),
 	}
 
 }
 
 func (l *balanceAdjacentRegionScheduler) GetName() string {
 	return "balance-adjacent-region-scheduler"
+}
+
+func (l *balanceAdjacentRegionScheduler) GetType() string {
+	return "adjacent-region"
 }
 
 func (l *balanceAdjacentRegionScheduler) GetMinInterval() time.Duration {
@@ -73,24 +81,8 @@ func (l *balanceAdjacentRegionScheduler) GetNextInterval(interval time.Duration)
 	return intervalGrow(interval, maxAdjacentSchedulerInterval, linearGrowth)
 }
 
-func (l *balanceAdjacentRegionScheduler) GetResourceKind() core.ResourceKind {
-	return core.AdjacentLeaderKind
-}
-
-func (l *balanceAdjacentRegionScheduler) GetType() string {
-	return "adjacent-region"
-}
-
-func (l *balanceAdjacentRegionScheduler) GetResourceLimit() uint64 {
-	return minUint64(l.limit, l.opt.GetRegionScheduleLimit())
-}
-
-func (l *balanceAdjacentRegionScheduler) Prepare(cluster schedule.Cluster) error { return nil }
-
-func (l *balanceAdjacentRegionScheduler) Cleanup(cluster schedule.Cluster) {}
-
-func (l *balanceAdjacentRegionScheduler) IsAllowSchedule(limiter *schedule.ScheduleLimiter) bool {
-	return limiter.OperatorCount(core.AdjacentLeaderKind) < 64 && limiter.OperatorCount(core.AdjacentPeerKind) < 1
+func (l *balanceAdjacentRegionScheduler) IsScheduleAllowed() bool {
+	return l.limiter.OperatorCount(core.AdjacentLeaderKind) < defaultAdjacentLeaderLimit || l.limiter.OperatorCount(core.AdjacentPeerKind) < defaultAdjacentPeerLimit
 }
 
 func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {

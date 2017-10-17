@@ -23,14 +23,15 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("balance-region", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
-		return newBalanceRegionScheduler(opt), nil
+	schedule.RegisterScheduler("balance-region", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+		return newBalanceRegionScheduler(opt, limiter), nil
 	})
 }
 
 const storeCacheInterval = 30 * time.Second
 
 type balanceRegionScheduler struct {
+	*baseScheduler
 	opt      schedule.Options
 	cache    *cache.TTLUint64
 	limit    uint64
@@ -39,7 +40,7 @@ type balanceRegionScheduler struct {
 
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
 // each store balanced.
-func newBalanceRegionScheduler(opt schedule.Options) schedule.Scheduler {
+func newBalanceRegionScheduler(opt schedule.Options, limiter *schedule.Limiter) schedule.Scheduler {
 	ttlCache := cache.NewIDTTL(storeCacheInterval, 4*storeCacheInterval)
 	filters := []schedule.Filter{
 		schedule.NewCacheFilter(ttlCache),
@@ -48,12 +49,13 @@ func newBalanceRegionScheduler(opt schedule.Options) schedule.Scheduler {
 		schedule.NewSnapshotCountFilter(opt),
 		schedule.NewStorageThresholdFilter(opt),
 	}
-
+	base := newBaseScheduler(limiter)
 	return &balanceRegionScheduler{
-		opt:      opt,
-		cache:    ttlCache,
-		limit:    1,
-		selector: schedule.NewBalanceSelector(core.RegionKind, filters),
+		baseScheduler: base,
+		opt:           opt,
+		cache:         ttlCache,
+		limit:         1,
+		selector:      schedule.NewBalanceSelector(core.RegionKind, filters),
 	}
 }
 
@@ -73,20 +75,9 @@ func (s *balanceRegionScheduler) GetType() string {
 	return "balance-region"
 }
 
-func (s *balanceRegionScheduler) GetResourceKind() core.ResourceKind {
-	return core.RegionKind
-}
-
-func (s *balanceRegionScheduler) GetResourceLimit() uint64 {
-	return minUint64(s.limit, s.opt.GetRegionScheduleLimit())
-}
-
-func (s *balanceRegionScheduler) Prepare(cluster schedule.Cluster) error { return nil }
-
-func (s *balanceRegionScheduler) Cleanup(cluster schedule.Cluster) {}
-
-func (s *balanceRegionScheduler) IsAllowSchedule(limiter *schedule.ScheduleLimiter) bool {
-	return limiter.OperatorCount(s.GetResourceKind()) < s.GetResourceLimit()
+func (s *balanceRegionScheduler) IsScheduleAllowed() bool {
+	limit := minUint64(s.limit, s.opt.GetRegionScheduleLimit())
+	return s.limiter.OperatorCount(core.RegionKind) < limit
 }
 
 func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
@@ -133,11 +124,11 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 
 	target := cluster.GetStore(newPeer.GetStoreId())
-	if !shouldBalance(source, target, s.GetResourceKind()) {
+	if !shouldBalance(source, target, core.RegionKind) {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
 	}
-	s.limit = adjustBalanceLimit(cluster, s.GetResourceKind())
+	s.limit = adjustBalanceLimit(cluster, core.RegionKind)
 
 	return schedule.CreateMovePeerOperator("balance-region", region, core.RegionKind, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }

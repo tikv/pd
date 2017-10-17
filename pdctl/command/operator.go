@@ -76,6 +76,8 @@ func NewAddOperatorCommand() *cobra.Command {
 	c.AddCommand(NewTransferLeaderCommand())
 	c.AddCommand(NewTransferRegionCommand())
 	c.AddCommand(NewTransferPeerCommand())
+	c.AddCommand(NewAddPeerCommand())
+	c.AddCommand(NewRemovePeerCommand())
 	return c
 }
 
@@ -164,6 +166,64 @@ func transferPeerCommandFunc(cmd *cobra.Command, args []string) {
 	input["region_id"] = ids[0]
 	input["from_store_id"] = ids[1]
 	input["to_store_id"] = ids[2]
+	postJSON(cmd, operatorsPrefix, input)
+}
+
+// NewAddPeerCommand returns a command to add region peer.
+func NewAddPeerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "add-peer <region_id> <to_store_id>",
+		Short: "add a region peer on specified store",
+		Run:   addPeerCommandFunc,
+	}
+	return c
+}
+
+func addPeerCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 2 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+
+	ids, err := parseUint64s(args)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	input := make(map[string]interface{})
+	input["name"] = cmd.Name()
+	input["region_id"] = ids[0]
+	input["store_id"] = ids[1]
+	postJSON(cmd, operatorsPrefix, input)
+}
+
+// NewRemovePeerCommand returns a command to add region peer.
+func NewRemovePeerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "remove-peer <region_id> <from_store_id>",
+		Short: "remove a region peer on specified store",
+		Run:   removePeerCommandFunc,
+	}
+	return c
+}
+
+func removePeerCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 2 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+
+	ids, err := parseUint64s(args)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	input := make(map[string]interface{})
+	input["name"] = cmd.Name()
+	input["region_id"] = ids[0]
+	input["store_id"] = ids[1]
 	postJSON(cmd, operatorsPrefix, input)
 }
 

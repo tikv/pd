@@ -42,24 +42,24 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 		{
 			// metapb.StoreState_Up == 0
 			Id:      1,
-			Address: "localhost:1",
+			Address: "tikv1",
 			State:   metapb.StoreState_Up,
 		},
 		{
 			Id:      4,
-			Address: "localhost:4",
+			Address: "tikv4",
 			State:   metapb.StoreState_Up,
 		},
 		{
 			// metapb.StoreState_Offline == 1
 			Id:      6,
-			Address: "localhost:6",
+			Address: "tikv6",
 			State:   metapb.StoreState_Offline,
 		},
 		{
 			// metapb.StoreState_Tombstone == 2
 			Id:      7,
-			Address: "localhost:7",
+			Address: "tikv7",
 			State:   metapb.StoreState_Tombstone,
 		},
 	}
@@ -71,8 +71,9 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
+
 	for _, store := range s.stores {
-		mustPutStore(c, s.svr, store)
+		mustPutStore(c, s.svr, store.Id, store.State, nil)
 	}
 }
 
@@ -144,7 +145,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	}
 
 	// Test merge.
-	labels = map[string]string{"zack": "zack1", "host": "host1"}
+	labels = map[string]string{"zack": "zack1", "Host": "host1"}
 	b, err = json.Marshal(labels)
 	c.Assert(err, IsNil)
 	err = postJSON(&http.Client{}, url+"/label", b)

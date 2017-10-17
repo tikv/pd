@@ -15,6 +15,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"math/rand"
 	"net"
 	"sync"
@@ -25,7 +26,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
-	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testClusterWorkerSuite{})
@@ -389,7 +389,7 @@ func (s *testClusterWorkerSuite) checkSearchRegions(cluster *RaftCluster, keys .
 		cluster.cachedCluster.RLock()
 		defer cluster.cachedCluster.RUnlock()
 
-		cacheRegions := cluster.cachedCluster.regions
+		cacheRegions := cluster.cachedCluster.Regions
 		if cacheRegions.TreeLength() != len(keys)/2 {
 			c.Logf("region length not match, expect %v, got %v", len(keys)/2, cacheRegions.TreeLength())
 			return false

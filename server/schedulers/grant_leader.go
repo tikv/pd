@@ -24,7 +24,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("grant-leader", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("grant-leader", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
 		if len(args) != 1 {
 			return nil, errors.New("grant-leader needs 1 argument")
 		}
@@ -32,7 +32,7 @@ func init() {
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		return newGrantLeaderScheduler(opt, id), nil
+		return newGrantLeaderScheduler(opt, limiter, id), nil
 	})
 }
 
@@ -40,6 +40,7 @@ const scheduleInterval = time.Millisecond * 10
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
 type grantLeaderScheduler struct {
+	*baseScheduler
 	opt     schedule.Options
 	name    string
 	storeID uint64
@@ -47,11 +48,13 @@ type grantLeaderScheduler struct {
 
 // newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
-func newGrantLeaderScheduler(opt schedule.Options, storeID uint64) schedule.Scheduler {
+func newGrantLeaderScheduler(opt schedule.Options, limiter *schedule.Limiter, storeID uint64) schedule.Scheduler {
+	base := newBaseScheduler(limiter)
 	return &grantLeaderScheduler{
-		opt:     opt,
-		name:    fmt.Sprintf("grant-leader-scheduler-%d", storeID),
-		storeID: storeID,
+		baseScheduler: base,
+		opt:           opt,
+		name:          fmt.Sprintf("grant-leader-scheduler-%d", storeID),
+		storeID:       storeID,
 	}
 }
 
@@ -70,15 +73,6 @@ func (s *grantLeaderScheduler) GetNextInterval(interval time.Duration) time.Dura
 func (s *grantLeaderScheduler) GetType() string {
 	return "grant-leader"
 }
-
-func (s *grantLeaderScheduler) GetResourceKind() core.ResourceKind {
-	return core.LeaderKind
-}
-
-func (s *grantLeaderScheduler) GetResourceLimit() uint64 {
-	return s.opt.GetLeaderScheduleLimit()
-}
-
 func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
 	return errors.Trace(cluster.BlockStore(s.storeID))
 }
@@ -87,8 +81,8 @@ func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {
 	cluster.UnblockStore(s.storeID)
 }
 
-func (s *grantLeaderScheduler) IsAllowSchedule(limiter *schedule.ScheduleLimiter) bool {
-	return limiter.OperatorCount(s.GetResourceKind()) < s.GetResourceLimit()
+func (s *grantLeaderScheduler) IsScheduleAllowed() bool {
+	return s.limiter.OperatorCount(core.RegionKind) < s.opt.GetLeaderScheduleLimit()
 }
 
 func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
@@ -100,5 +94,7 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Oper
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: s.storeID}
-	return schedule.NewOperator("grant-leader", region.GetId(), core.LeaderKind, step)
+	op := schedule.NewOperator("grant-leader", region.GetId(), core.LeaderKind, step)
+	op.SetPriorityLevel(core.HighPriority)
+	return op
 }

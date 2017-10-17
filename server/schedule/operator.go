@@ -84,6 +84,7 @@ type Operator struct {
 	steps       []OperatorStep
 	currentStep int32
 	createTime  time.Time
+	level       core.PriorityLevel
 }
 
 // NewOperator creates a new operator.
@@ -94,6 +95,7 @@ func NewOperator(desc string, regionID uint64, kind core.ResourceKind, steps ...
 		kind:       kind,
 		steps:      steps,
 		createTime: time.Now(),
+		level:      core.NormalPriority,
 	}
 }
 
@@ -157,6 +159,16 @@ func (o *Operator) Check(region *core.RegionInfo) OperatorStep {
 		}
 	}
 	return nil
+}
+
+// SetPriorityLevel set the priority level for operator
+func (o *Operator) SetPriorityLevel(level core.PriorityLevel) {
+	o.level = level
+}
+
+// GetPriorityLevel get the priority level
+func (o *Operator) GetPriorityLevel() core.PriorityLevel {
+	return o.level
 }
 
 // IsFinish checks if all steps are finished.

@@ -29,6 +29,8 @@ import (
 
 	// Register schedulers.
 	_ "github.com/pingcap/pd/server/schedulers"
+	// Register namespace classifiers.
+	_ "github.com/pingcap/pd/table"
 )
 
 func main() {

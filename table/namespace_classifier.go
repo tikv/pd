@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package table
 
 import (
 	"encoding/json"
@@ -28,6 +28,10 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 )
+
+func init() {
+	namespace.RegisterClassifier("table", NewTableNamespaceClassifier)
+}
 
 // Namespace defines two things:
 // 1. relation between a Name and several tables
@@ -86,20 +90,24 @@ func (ns *Namespace) AddStoreID(storeID uint64) {
 type tableNamespaceClassifier struct {
 	sync.RWMutex
 	nsInfo         *namespacesInfo
-	tableIDDecoder core.TableIDDecoder
+	tableIDDecoder IDDecoder
 	kv             *core.KV
-	idAlloc        IDAllocator
+	idAlloc        core.IDAllocator
 	http.Handler
 }
 
-func newTableNamespaceClassifier(tableIDDecoder core.TableIDDecoder, kv *core.KV, idAlloc IDAllocator) (*tableNamespaceClassifier, error) {
+const kvRangeLimit = 1000
+
+// NewTableNamespaceClassifier creates a new namespace classifier that
+// classifies stores and regions by table range.
+func NewTableNamespaceClassifier(kv *core.KV, idAlloc core.IDAllocator) (namespace.Classifier, error) {
 	nsInfo := newNamespacesInfo()
 	if err := nsInfo.loadNamespaces(kv, kvRangeLimit); err != nil {
 		return nil, errors.Trace(err)
 	}
 	c := &tableNamespaceClassifier{
 		nsInfo:         nsInfo,
-		tableIDDecoder: tableIDDecoder,
+		tableIDDecoder: DefaultIDDecoder,
 		kv:             kv,
 		idAlloc:        idAlloc,
 	}
@@ -155,10 +163,23 @@ func (c *tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInf
 func (c *tableNamespaceClassifier) getTableID(regionInfo *core.RegionInfo) int64 {
 	startTableID := c.tableIDDecoder.DecodeTableID(regionInfo.StartKey)
 	endTableID := c.tableIDDecoder.DecodeTableID(regionInfo.EndKey)
+
 	if startTableID == 0 || endTableID == 0 {
-		// The startTableID or endTableID cannot be decoded,
-		// indicating the region contains meta-info or infinite edge
+		log.Debugf("Region %s has StartTableID (%d) or EndTableID (%d) of value 0", *regionInfo, startTableID, endTableID)
+	}
+
+	if startTableID == 0 && endTableID == 0 {
+		// The startTableID and endTableID cannot be decoded,
+		// indicating the region contains meta-info
 		return 0
+	}
+	// The [startTableID|endTableID] is 0,
+	// indicating that the region contains infinite edge
+	if startTableID == 0 {
+		return endTableID
+	}
+	if endTableID == 0 {
+		return startTableID
 	}
 
 	if startTableID == endTableID {
@@ -167,7 +188,7 @@ func (c *tableNamespaceClassifier) getTableID(regionInfo *core.RegionInfo) int64
 
 	// The startTableID is not equal to the endTableID for regionInfo,
 	// so check whether endKey is the startKey of the next table
-	if (startTableID == endTableID-1) && core.IsPureTableID(regionInfo.EndKey) {
+	if (startTableID == endTableID-1) && IsPureTableID(regionInfo.EndKey) {
 		return startTableID
 	}
 

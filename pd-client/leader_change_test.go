@@ -14,6 +14,7 @@
 package pd
 
 import (
+	"context"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -24,7 +25,6 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
-	"golang.org/x/net/context"
 )
 
 var _ = Suite(&testLeaderChangeSuite{})

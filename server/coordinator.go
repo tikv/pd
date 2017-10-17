@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -26,7 +27,6 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
-	"golang.org/x/net/context"
 )
 
 const (
@@ -36,21 +36,13 @@ const (
 	eventsCacheSize           = 1000
 	maxScheduleRetries        = 10
 
-	statCacheMaxLen               = 1000
-	hotWriteRegionMinFlowRate     = 16 * 1024
-	hotReadRegionMinFlowRate      = 128 * 1024
-	regionHeartBeatReportInterval = 60
-	regionheartbeatSendChanCap    = 1024
-	storeHeartBeatReportInterval  = 10
-	minHotRegionReportInterval    = 3
-	hotRegionAntiCount            = 1
-	hotRegionScheduleName         = "balance-hot-region-scheduler"
+	regionheartbeatSendChanCap = 1024
+	hotRegionScheduleName      = "balance-hot-region-scheduler"
 )
 
 var (
-	hotRegionLowThreshold = 3
-	errSchedulerExisted   = errors.New("scheduler existed")
-	errSchedulerNotFound  = errors.New("scheduler not found")
+	errSchedulerExisted  = errors.New("scheduler existed")
+	errSchedulerNotFound = errors.New("scheduler not found")
 )
 
 type coordinator struct {
@@ -62,7 +54,7 @@ type coordinator struct {
 
 	cluster          *clusterInfo
 	opt              *scheduleOption
-	limiter          *schedule.ScheduleLimiter
+	limiter          *schedule.Limiter
 	replicaChecker   *schedule.ReplicaChecker
 	namespaceChecker *schedule.NamespaceChecker
 	operators        map[uint64]*schedule.Operator
@@ -80,7 +72,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 		cancel:           cancel,
 		cluster:          cluster,
 		opt:              opt,
-		limiter:          schedule.NewScheduleLimiter(),
+		limiter:          schedule.NewLimiter(),
 		replicaChecker:   schedule.NewReplicaChecker(opt, cluster, classifier),
 		namespaceChecker: schedule.NewNamespaceChecker(opt, cluster, classifier),
 		operators:        make(map[uint64]*schedule.Operator),
@@ -146,7 +138,7 @@ func (c *coordinator) run() {
 	k := 0
 	scheduleCfg := c.opt.load()
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
-		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opt, schedulerCfg.Args...)
+		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opt, c.limiter, schedulerCfg.Args...)
 		if err != nil {
 			log.Errorf("can not create scheduler %s: %v", schedulerCfg.Type, err)
 		} else {
@@ -228,10 +220,7 @@ func (c *coordinator) collectSchedulerMetrics() {
 		if s.AllowSchedule() {
 			allowScheduler = 1
 		}
-		limit := float64(s.GetResourceLimit())
-
 		schedulerStatusGauge.WithLabelValues(s.GetName(), "allow").Set(allowScheduler)
-		schedulerStatusGauge.WithLabelValues(s.GetName(), "limit").Set(limit)
 	}
 }
 
@@ -376,13 +365,7 @@ func (c *coordinator) addOperator(op *schedule.Operator) bool {
 }
 
 func isHigherPriorityOperator(new, old *schedule.Operator) bool {
-	if new.ResourceKind() == core.AdminKind {
-		return true
-	}
-	if new.ResourceKind() == core.PriorityKind && old.ResourceKind() != core.PriorityKind {
-		return true
-	}
-	return false
+	return new.GetPriorityLevel() < old.GetPriorityLevel()
 }
 
 func (c *coordinator) removeOperator(op *schedule.Operator) {
@@ -486,7 +469,7 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 type scheduleController struct {
 	schedule.Scheduler
 	opt          *scheduleOption
-	limiter      *schedule.ScheduleLimiter
+	limiter      *schedule.Limiter
 	classifier   namespace.Classifier
 	nextInterval time.Duration
 	ctx          context.Context
@@ -522,10 +505,7 @@ func (s *scheduleController) Schedule(cluster schedule.Cluster) *schedule.Operat
 			return op
 		}
 	}
-
-	// If we have no schedule, increase the interval exponentially.
 	s.nextInterval = s.Scheduler.GetNextInterval(s.nextInterval)
-
 	return nil
 }
 
@@ -534,5 +514,5 @@ func (s *scheduleController) GetInterval() time.Duration {
 }
 
 func (s *scheduleController) AllowSchedule() bool {
-	return s.Scheduler.IsAllowSchedule(s.limiter)
+	return s.Scheduler.IsScheduleAllowed()
 }
