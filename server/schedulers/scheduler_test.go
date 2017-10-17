@@ -11,10 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package schedulers
 
 import (
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
 
@@ -23,13 +24,12 @@ var _ = Suite(&testShuffleLeaderSuite{})
 type testShuffleLeaderSuite struct{}
 
 func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
-	cluster := newClusterInfo(newMockIDAllocator())
-	tc := newTestClusterInfo(cluster)
+	tc := newMockCluster(core.NewMockIDAllocator())
 
 	_, opt := newTestScheduleConfig()
 	sl, err := schedule.CreateScheduler("shuffle-leader", opt, schedule.NewLimiter())
 	c.Assert(err, IsNil)
-	c.Assert(sl.Schedule(cluster), IsNil)
+	c.Assert(sl.Schedule(tc), IsNil)
 
 	// Add stores 1,2,3,4
 	tc.addLeaderStore(1, 6)
@@ -47,9 +47,9 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	tc.addLeaderRegion(4, 1, 2, 3, 4)
 
 	for i := 0; i < 4; i++ {
-		op := sl.Schedule(cluster)
+		op := sl.Schedule(tc)
 		sourceID := op.Step(0).(schedule.TransferLeader).FromStore
-		op = sl.Schedule(cluster)
+		op = sl.Schedule(tc)
 		targetID := op.Step(0).(schedule.TransferLeader).ToStore
 		c.Assert(sourceID, Equals, targetID)
 	}

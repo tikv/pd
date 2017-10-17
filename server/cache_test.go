@@ -15,7 +15,6 @@ package server
 
 import (
 	"math/rand"
-	"sync/atomic"
 
 	"github.com/juju/errors"
 	. "github.com/pingcap/check"
@@ -243,7 +242,7 @@ func (s *testClusterInfoSuite) Test(c *C) {
 	// Test without kv.
 	{
 		for _, test := range tests {
-			cluster := newClusterInfo(newMockIDAllocator())
+			cluster := newClusterInfo(core.NewMockIDAllocator())
 			test(c, cluster)
 		}
 	}
@@ -554,19 +553,6 @@ func (s *testClusterUtilSuite) TestCheckStaleRegion(c *C) {
 	region.RegionEpoch.Version--
 	c.Assert(checkStaleRegion(origin, region), IsNil)
 	c.Assert(checkStaleRegion(region, origin), NotNil)
-}
-
-// mockIDAllocator mocks IDAllocator and it is only used for test.
-type mockIDAllocator struct {
-	base uint64
-}
-
-func newMockIDAllocator() *mockIDAllocator {
-	return &mockIDAllocator{base: 0}
-}
-
-func (alloc *mockIDAllocator) Alloc() (uint64, error) {
-	return atomic.AddUint64(&alloc.base, 1), nil
 }
 
 func mustSaveStores(c *C, kv *core.KV, n int) []*metapb.Store {
