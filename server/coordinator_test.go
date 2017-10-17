@@ -31,6 +31,73 @@ func newTestOperator(regionID uint64, kind core.ResourceKind) *schedule.Operator
 	return schedule.NewOperator("test", regionID, kind)
 }
 
+func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption) {
+	cfg := NewConfig()
+	cfg.adjust()
+	opt := newScheduleOption(cfg)
+	return &cfg.Schedule, opt
+}
+
+type testClusterInfo struct {
+	*clusterInfo
+}
+
+func newTestClusterInfo(cluster *clusterInfo) *testClusterInfo {
+	return &testClusterInfo{clusterInfo: cluster}
+}
+
+func (c *testClusterInfo) addRegionStore(storeID uint64, regionCount int) {
+	store := core.NewStoreInfo(&metapb.Store{Id: storeID})
+	store.Stats = &pdpb.StoreStats{}
+	store.LastHeartbeatTS = time.Now()
+	store.RegionCount = regionCount
+	store.Stats.Capacity = uint64(1024)
+	store.Stats.Available = store.Stats.Capacity
+	c.putStore(store)
+}
+
+func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
+	region := &metapb.Region{Id: regionID}
+	leader, _ := c.AllocPeer(leaderID)
+	region.Peers = []*metapb.Peer{leader}
+	for _, id := range followerIds {
+		peer, _ := c.AllocPeer(id)
+		region.Peers = append(region.Peers, peer)
+	}
+	c.putRegion(core.NewRegionInfo(region, leader))
+}
+
+func (c *testClusterInfo) updateLeaderCount(storeID uint64, leaderCount int) {
+	store := c.GetStore(storeID)
+	store.LeaderCount = leaderCount
+	c.putStore(store)
+}
+
+func (c *testClusterInfo) addLeaderStore(storeID uint64, leaderCount int) {
+	store := core.NewStoreInfo(&metapb.Store{Id: storeID})
+	store.Stats = &pdpb.StoreStats{}
+	store.LastHeartbeatTS = time.Now()
+	store.LeaderCount = leaderCount
+	c.putStore(store)
+}
+
+func (c *testClusterInfo) setStoreDown(storeID uint64) {
+	store := c.GetStore(storeID)
+	store.State = metapb.StoreState_Up
+	store.LastHeartbeatTS = time.Time{}
+	c.putStore(store)
+}
+func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) {
+	//  regions load from etcd will have no leader
+	region := &metapb.Region{Id: regionID}
+	region.Peers = []*metapb.Peer{}
+	for _, id := range followerIds {
+		peer, _ := c.AllocPeer(id)
+		region.Peers = append(region.Peers, peer)
+	}
+	c.putRegion(core.NewRegionInfo(region, nil))
+}
+
 var _ = Suite(&testCoordinatorSuite{})
 
 type testCoordinatorSuite struct{}
@@ -114,10 +181,10 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 
 	// Wait for schedule and turn off balance.
 	waitOperator(c, co, 1)
-	checkTransferPeer(c, co.getOperator(1), 4, 1)
+	schedulers.CheckTransferPeer(c, co.getOperator(1), 4, 1)
 	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
 	waitOperator(c, co, 2)
-	checkTransferLeader(c, co.getOperator(2), 4, 2)
+	schedulers.CheckTransferLeader(c, co.getOperator(2), 4, 2)
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 
 	stream := newMockHeartbeatStream()
@@ -240,7 +307,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 
 	// Wait for schedule.
 	waitOperator(c, co, 1)
-	checkTransferPeer(c, co.getOperator(1), 4, 1)
+	schedulers.CheckTransferPeer(c, co.getOperator(1), 4, 1)
 
 	region := cluster.GetRegion(1)
 

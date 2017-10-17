@@ -389,7 +389,7 @@ func (s *testClusterWorkerSuite) checkSearchRegions(cluster *RaftCluster, keys .
 		cluster.cachedCluster.RLock()
 		defer cluster.cachedCluster.RUnlock()
 
-		cacheRegions := cluster.cachedCluster.regions
+		cacheRegions := cluster.cachedCluster.Regions
 		if cacheRegions.TreeLength() != len(keys)/2 {
 			c.Logf("region length not match, expect %v, got %v", len(keys)/2, cacheRegions.TreeLength())
 			return false
