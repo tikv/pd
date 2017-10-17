@@ -170,7 +170,9 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster schedule.Cluster
 		return nil
 	}
 	step := schedule.TransferLeader{FromStore: before.Leader.GetStoreId(), ToStore: target.GetId()}
-	return schedule.NewOperator("balance-adjacent-leader", before.GetId(), core.AdjacentLeaderKind, step)
+	op := schedule.NewOperator("balance-adjacent-leader", before.GetId(), core.AdjacentLeaderKind, step)
+	op.SetPriorityLevel(core.LowPriority)
+	return op
 }
 
 func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, region *core.RegionInfo) *schedule.Operator {
@@ -209,5 +211,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, 
 	// record the store id and exclude it in next time
 	l.ids = append(l.ids, newPeer.GetStoreId())
 
-	return schedule.CreateMovePeerOperator("balance-adjacent-peer", region, core.AdjacentPeerKind, leaderStoreID, newPeer.GetStoreId(), newPeer.GetId())
+	op := schedule.CreateMovePeerOperator("balance-adjacent-peer", region, core.AdjacentPeerKind, leaderStoreID, newPeer.GetStoreId(), newPeer.GetId())
+	op.SetPriorityLevel(core.LowPriority)
+	return op
 }
