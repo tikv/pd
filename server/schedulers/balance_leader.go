@@ -21,12 +21,13 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("balance-leader", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
-		return newBalanceLeaderScheduler(opt), nil
+	schedule.RegisterScheduler("balance-leader", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+		return newBalanceLeaderScheduler(opt, limiter), nil
 	})
 }
 
 type balanceLeaderScheduler struct {
+	*baseScheduler
 	opt      schedule.Options
 	limit    uint64
 	selector schedule.Selector
@@ -34,16 +35,18 @@ type balanceLeaderScheduler struct {
 
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
-func newBalanceLeaderScheduler(opt schedule.Options) schedule.Scheduler {
+func newBalanceLeaderScheduler(opt schedule.Options, limiter *schedule.Limiter) schedule.Scheduler {
 	filters := []schedule.Filter{
 		schedule.NewBlockFilter(),
 		schedule.NewStateFilter(opt),
 		schedule.NewHealthFilter(opt),
 	}
+	base := newBaseScheduler(limiter)
 	return &balanceLeaderScheduler{
-		opt:      opt,
-		limit:    1,
-		selector: schedule.NewBalanceSelector(core.LeaderKind, filters),
+		baseScheduler: base,
+		opt:           opt,
+		limit:         1,
+		selector:      schedule.NewBalanceSelector(core.LeaderKind, filters),
 	}
 }
 
@@ -56,20 +59,13 @@ func (l *balanceLeaderScheduler) GetType() string {
 }
 
 func (l *balanceLeaderScheduler) GetInterval() time.Duration {
-	return schedule.MinScheduleInterval
+	return MinScheduleInterval
 }
 
-func (l *balanceLeaderScheduler) GetResourceKind() core.ResourceKind {
-	return core.LeaderKind
+func (l *balanceLeaderScheduler) IsScheduleAllowed() bool {
+	limit := minUint64(l.limit, l.opt.GetLeaderScheduleLimit())
+	return l.limiter.OperatorCount(core.LeaderKind) < limit
 }
-
-func (l *balanceLeaderScheduler) GetResourceLimit() uint64 {
-	return minUint64(l.limit, l.opt.GetLeaderScheduleLimit())
-}
-
-func (l *balanceLeaderScheduler) Prepare(cluster schedule.Cluster) error { return nil }
-
-func (l *balanceLeaderScheduler) Cleanup(cluster schedule.Cluster) {}
 
 func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
@@ -86,11 +82,11 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Op
 
 	source := cluster.GetStore(region.Leader.GetStoreId())
 	target := cluster.GetStore(newLeader.GetStoreId())
-	if !shouldBalance(source, target, l.GetResourceKind()) {
+	if !shouldBalance(source, target, core.LeaderKind) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}
-	l.limit = adjustBalanceLimit(cluster, l.GetResourceKind())
+	l.limit = adjustBalanceLimit(cluster, core.LeaderKind)
 	schedulerCounter.WithLabelValues(l.GetName(), "new_opeartor").Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
 	return schedule.NewOperator("balance-leader", region.GetId(), core.LeaderKind, step)

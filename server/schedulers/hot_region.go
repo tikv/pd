@@ -26,15 +26,15 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("hot-region", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
-		return newBalanceHotRegionsScheduler(opt), nil
+	schedule.RegisterScheduler("hot-region", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+		return newBalanceHotRegionsScheduler(opt, limiter), nil
 	})
 	// FIXME: remove this two schedule after the balance test move in schedulers package
-	schedule.RegisterScheduler("hot-write-region", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
-		return newBalanceHotWriteRegionsScheduler(opt), nil
+	schedule.RegisterScheduler("hot-write-region", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+		return newBalanceHotWriteRegionsScheduler(opt, limiter), nil
 	})
-	schedule.RegisterScheduler("hot-read-region", func(opt schedule.Options, args []string) (schedule.Scheduler, error) {
-		return newBalanceHotReadRegionsScheduler(opt), nil
+	schedule.RegisterScheduler("hot-read-region", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+		return newBalanceHotReadRegionsScheduler(opt, limiter), nil
 	})
 }
 
@@ -67,6 +67,7 @@ func newStoreStaticstics() *storeStatistics {
 }
 
 type balanceHotRegionsScheduler struct {
+	*baseScheduler
 	sync.RWMutex
 	opt   schedule.Options
 	limit uint64
@@ -77,33 +78,39 @@ type balanceHotRegionsScheduler struct {
 	r     *rand.Rand
 }
 
-func newBalanceHotRegionsScheduler(opt schedule.Options) *balanceHotRegionsScheduler {
+func newBalanceHotRegionsScheduler(opt schedule.Options, limiter *schedule.Limiter) *balanceHotRegionsScheduler {
+	base := newBaseScheduler(limiter)
 	return &balanceHotRegionsScheduler{
-		opt:   opt,
-		limit: 1,
-		stats: newStoreStaticstics(),
-		types: []BalanceType{hotWriteRegionBalance, hotReadRegionBalance},
-		r:     rand.New(rand.NewSource(time.Now().UnixNano())),
+		baseScheduler: base,
+		opt:           opt,
+		limit:         1,
+		stats:         newStoreStaticstics(),
+		types:         []BalanceType{hotWriteRegionBalance, hotReadRegionBalance},
+		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
-func newBalanceHotReadRegionsScheduler(opt schedule.Options) *balanceHotRegionsScheduler {
+func newBalanceHotReadRegionsScheduler(opt schedule.Options, limiter *schedule.Limiter) *balanceHotRegionsScheduler {
+	base := newBaseScheduler(limiter)
 	return &balanceHotRegionsScheduler{
-		opt:   opt,
-		limit: 1,
-		stats: newStoreStaticstics(),
-		types: []BalanceType{hotReadRegionBalance},
-		r:     rand.New(rand.NewSource(time.Now().UnixNano())),
+		baseScheduler: base,
+		opt:           opt,
+		limit:         1,
+		stats:         newStoreStaticstics(),
+		types:         []BalanceType{hotReadRegionBalance},
+		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
-func newBalanceHotWriteRegionsScheduler(opt schedule.Options) *balanceHotRegionsScheduler {
+func newBalanceHotWriteRegionsScheduler(opt schedule.Options, limiter *schedule.Limiter) *balanceHotRegionsScheduler {
+	base := newBaseScheduler(limiter)
 	return &balanceHotRegionsScheduler{
-		opt:   opt,
-		limit: 1,
-		stats: newStoreStaticstics(),
-		types: []BalanceType{hotWriteRegionBalance},
-		r:     rand.New(rand.NewSource(time.Now().UnixNano())),
+		baseScheduler: base,
+		opt:           opt,
+		limit:         1,
+		stats:         newStoreStaticstics(),
+		types:         []BalanceType{hotWriteRegionBalance},
+		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -115,21 +122,9 @@ func (h *balanceHotRegionsScheduler) GetType() string {
 	return "hot-region"
 }
 
-func (h *balanceHotRegionsScheduler) GetInterval() time.Duration {
-	return schedule.MinSlowScheduleInterval
+func (h *balanceHotRegionsScheduler) IsScheduleAllowed() bool {
+	return h.limiter.OperatorCount(core.HotRegionKind) < h.limit
 }
-
-func (h *balanceHotRegionsScheduler) GetResourceKind() core.ResourceKind {
-	return core.PriorityKind
-}
-
-func (h *balanceHotRegionsScheduler) GetResourceLimit() uint64 {
-	return h.limit
-}
-
-func (h *balanceHotRegionsScheduler) Prepare(cluster schedule.Cluster) error { return nil }
-
-func (h *balanceHotRegionsScheduler) Cleanup(cluster schedule.Cluster) {}
 
 func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
@@ -157,14 +152,14 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 		step := schedule.TransferLeader{FromStore: srcRegion.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
-		return schedule.NewOperator("transferHotReadLeader", srcRegion.GetId(), core.PriorityKind, step)
+		return schedule.NewOperator("transferHotReadLeader", srcRegion.GetId(), core.HotRegionKind, step)
 	}
 
 	// balance by peer
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return schedule.CreateMovePeerOperator("moveHotReadRegion", srcRegion, core.PriorityKind, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
+		return schedule.CreateMovePeerOperator("moveHotReadRegion", srcRegion, core.HotRegionKind, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 	}
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 	return nil
@@ -175,7 +170,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return schedule.CreateMovePeerOperator("moveHotWriteRegion", srcRegion, core.PriorityKind, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
+		return schedule.CreateMovePeerOperator("moveHotWriteRegion", srcRegion, core.HotRegionKind, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 	}
 
 	// balance by leader
@@ -183,7 +178,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 		step := schedule.TransferLeader{FromStore: srcRegion.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
-		return schedule.NewOperator("transferHotWriteLeader", srcRegion.GetId(), core.PriorityKind, step)
+		return schedule.NewOperator("transferHotWriteLeader", srcRegion.GetId(), core.HotRegionKind, step)
 	}
 
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()

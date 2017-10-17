@@ -37,21 +37,13 @@ const (
 	maxScheduleRetries        = 10
 	scheduleIntervalFactor    = 1.3
 
-	statCacheMaxLen               = 1000
-	hotWriteRegionMinFlowRate     = 16 * 1024
-	hotReadRegionMinFlowRate      = 128 * 1024
-	regionHeartBeatReportInterval = 60
-	regionheartbeatSendChanCap    = 1024
-	storeHeartBeatReportInterval  = 10
-	minHotRegionReportInterval    = 3
-	hotRegionAntiCount            = 1
-	hotRegionScheduleName         = "balance-hot-region-scheduler"
+	regionheartbeatSendChanCap = 1024
+	hotRegionScheduleName      = "balance-hot-region-scheduler"
 )
 
 var (
-	hotRegionLowThreshold = 3
-	errSchedulerExisted   = errors.New("scheduler existed")
-	errSchedulerNotFound  = errors.New("scheduler not found")
+	errSchedulerExisted  = errors.New("scheduler existed")
+	errSchedulerNotFound = errors.New("scheduler not found")
 )
 
 type coordinator struct {
@@ -63,7 +55,7 @@ type coordinator struct {
 
 	cluster          *clusterInfo
 	opt              *scheduleOption
-	limiter          *scheduleLimiter
+	limiter          *schedule.Limiter
 	replicaChecker   *schedule.ReplicaChecker
 	namespaceChecker *schedule.NamespaceChecker
 	operators        map[uint64]*schedule.Operator
@@ -81,7 +73,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 		cancel:           cancel,
 		cluster:          cluster,
 		opt:              opt,
-		limiter:          newScheduleLimiter(),
+		limiter:          schedule.NewLimiter(),
 		replicaChecker:   schedule.NewReplicaChecker(opt, cluster, classifier),
 		namespaceChecker: schedule.NewNamespaceChecker(opt, cluster, classifier),
 		operators:        make(map[uint64]*schedule.Operator),
@@ -114,7 +106,7 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	}
 
 	// Check replica operator.
-	if c.limiter.operatorCount(core.RegionKind) >= c.opt.GetReplicaScheduleLimit() {
+	if c.limiter.OperatorCount(core.RegionKind) >= c.opt.GetReplicaScheduleLimit() {
 		return
 	}
 	// Generate Operator which moves region to targeted namespace store
@@ -147,12 +139,12 @@ func (c *coordinator) run() {
 	k := 0
 	scheduleCfg := c.opt.load()
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
-		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opt, schedulerCfg.Args...)
+		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opt, c.limiter, schedulerCfg.Args...)
 		if err != nil {
 			log.Errorf("can not create scheduler %s: %v", schedulerCfg.Type, err)
 		} else {
 			log.Infof("create scheduler %s", s.GetName())
-			if err = c.addScheduler(s, s.GetInterval(), schedulerCfg.Args...); err != nil {
+			if err = c.addScheduler(s, schedulerCfg.Args...); err != nil {
 				log.Errorf("can not add scheduler %s: %v", s.GetName(), err)
 			}
 		}
@@ -229,10 +221,7 @@ func (c *coordinator) collectSchedulerMetrics() {
 		if s.AllowSchedule() {
 			allowScheduler = 1
 		}
-		limit := float64(s.GetResourceLimit())
-
 		schedulerStatusGauge.WithLabelValues(s.GetName(), "allow").Set(allowScheduler)
-		schedulerStatusGauge.WithLabelValues(s.GetName(), "limit").Set(limit)
 	}
 }
 
@@ -278,7 +267,7 @@ func (c *coordinator) shouldRun() bool {
 	return c.cluster.isPrepared()
 }
 
-func (c *coordinator) addScheduler(scheduler schedule.Scheduler, interval time.Duration, args ...string) error {
+func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -286,7 +275,7 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, interval time.D
 		return errSchedulerExisted
 	}
 
-	s := newScheduleController(c, scheduler, interval)
+	s := newScheduleController(c, scheduler)
 	if err := s.Prepare(c.cluster); err != nil {
 		return errors.Trace(err)
 	}
@@ -363,7 +352,7 @@ func (c *coordinator) addOperator(op *schedule.Operator) bool {
 	}
 
 	c.histories.Put(regionID, op)
-	c.limiter.addOperator(op)
+	c.limiter.AddOperator(op)
 	c.operators[regionID] = op
 
 	if region := c.cluster.GetRegion(op.RegionID()); region != nil {
@@ -377,13 +366,7 @@ func (c *coordinator) addOperator(op *schedule.Operator) bool {
 }
 
 func isHigherPriorityOperator(new, old *schedule.Operator) bool {
-	if new.ResourceKind() == core.AdminKind {
-		return true
-	}
-	if new.ResourceKind() == core.PriorityKind && old.ResourceKind() != core.PriorityKind {
-		return true
-	}
-	return false
+	return new.GetPriorityLevel() < old.GetPriorityLevel()
 }
 
 func (c *coordinator) removeOperator(op *schedule.Operator) {
@@ -394,7 +377,7 @@ func (c *coordinator) removeOperator(op *schedule.Operator) {
 
 func (c *coordinator) removeOperatorLocked(op *schedule.Operator) {
 	regionID := op.RegionID()
-	c.limiter.removeOperator(op)
+	c.limiter.RemoveOperator(op)
 	delete(c.operators, regionID)
 
 	c.histories.Put(regionID, op)
@@ -484,39 +467,10 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 	}
 }
 
-type scheduleLimiter struct {
-	sync.RWMutex
-	counts map[core.ResourceKind]uint64
-}
-
-func newScheduleLimiter() *scheduleLimiter {
-	return &scheduleLimiter{
-		counts: make(map[core.ResourceKind]uint64),
-	}
-}
-
-func (l *scheduleLimiter) addOperator(op *schedule.Operator) {
-	l.Lock()
-	defer l.Unlock()
-	l.counts[op.ResourceKind()]++
-}
-
-func (l *scheduleLimiter) removeOperator(op *schedule.Operator) {
-	l.Lock()
-	defer l.Unlock()
-	l.counts[op.ResourceKind()]--
-}
-
-func (l *scheduleLimiter) operatorCount(kind core.ResourceKind) uint64 {
-	l.RLock()
-	defer l.RUnlock()
-	return l.counts[kind]
-}
-
 type scheduleController struct {
 	schedule.Scheduler
 	opt          *scheduleOption
-	limiter      *scheduleLimiter
+	limiter      *schedule.Limiter
 	classifier   namespace.Classifier
 	nextInterval time.Duration
 	minInterval  time.Duration
@@ -524,15 +478,14 @@ type scheduleController struct {
 	cancel       context.CancelFunc
 }
 
-func newScheduleController(c *coordinator, s schedule.Scheduler, minInterval time.Duration) *scheduleController {
+func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleController {
 	ctx, cancel := context.WithCancel(c.ctx)
 	return &scheduleController{
 		Scheduler:    s,
 		opt:          c.opt,
 		limiter:      c.limiter,
 		classifier:   c.classifier,
-		nextInterval: minInterval,
-		minInterval:  minInterval,
+		nextInterval: s.GetMinInterval(),
 		ctx:          ctx,
 		cancel:       cancel,
 	}
@@ -550,14 +503,11 @@ func (s *scheduleController) Schedule(cluster schedule.Cluster) *schedule.Operat
 	for i := 0; i < maxScheduleRetries; i++ {
 		// If we have schedule, reset interval to the minimal interval.
 		if op := scheduleByNamespace(cluster, s.classifier, s.Scheduler); op != nil {
-			s.nextInterval = s.minInterval
+			s.nextInterval = s.Scheduler.GetMinInterval()
 			return op
 		}
 	}
-
-	// If we have no schedule, increase the interval exponentially.
-	s.nextInterval = minDuration(time.Duration(float64(s.nextInterval)*scheduleIntervalFactor), schedule.MaxScheduleInterval)
-
+	s.nextInterval = s.Scheduler.GetNextInterval(s.nextInterval)
 	return nil
 }
 
@@ -566,5 +516,5 @@ func (s *scheduleController) GetInterval() time.Duration {
 }
 
 func (s *scheduleController) AllowSchedule() bool {
-	return s.limiter.operatorCount(s.GetResourceKind()) < s.GetResourceLimit()
+	return s.Scheduler.IsScheduleAllowed()
 }

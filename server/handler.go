@@ -83,12 +83,17 @@ func (h *Handler) GetHotReadStores() map[uint64]uint64 {
 }
 
 // AddScheduler adds a scheduler.
-func (h *Handler) AddScheduler(s schedule.Scheduler, args ...string) error {
+func (h *Handler) AddScheduler(name string, args ...string) error {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if err = c.addScheduler(s, s.GetInterval(), args...); err != nil {
+	s, err := schedule.CreateScheduler(name, h.opt, c.limiter, args...)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	log.Infof("create scheduler %s", s.GetName())
+	if err = c.addScheduler(s, args...); err != nil {
 		log.Errorf("can not add scheduler %v: %v", s.GetName(), err)
 	} else if err = c.opt.persist(c.kv); err != nil {
 		log.Errorf("can not persist scheduler config: %v", err)
@@ -112,52 +117,27 @@ func (h *Handler) RemoveScheduler(name string) error {
 
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
-	s, err := schedule.CreateScheduler("balance-leader", h.opt)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	log.Infof("create scheduler %s", s.GetName())
-	return h.AddScheduler(s)
+	return h.AddScheduler("balance-leader")
 }
 
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
-	s, err := schedule.CreateScheduler("grant-leader", h.opt, strconv.FormatUint(storeID, 10))
-	if err != nil {
-		return errors.Trace(err)
-	}
-	log.Infof("create scheduler %s", s.GetName())
-	return h.AddScheduler(s, strconv.FormatUint(storeID, 10))
+	return h.AddScheduler("grant-leader", strconv.FormatUint(storeID, 10))
 }
 
 // AddEvictLeaderScheduler adds an evict-leader-scheduler.
 func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
-	s, err := schedule.CreateScheduler("evict-leader", h.opt, strconv.FormatUint(storeID, 10))
-	if err != nil {
-		return errors.Trace(err)
-	}
-	log.Infof("create scheduler %s", s.GetName())
-	return h.AddScheduler(s, strconv.FormatUint(storeID, 10))
+	return h.AddScheduler("evict-leader", strconv.FormatUint(storeID, 10))
 }
 
 // AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.
 func (h *Handler) AddShuffleLeaderScheduler() error {
-	s, err := schedule.CreateScheduler("shuffle-leader", h.opt)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	log.Infof("create scheduler %s", s.GetName())
-	return h.AddScheduler(s)
+	return h.AddScheduler("shuffle-leader")
 }
 
 // AddShuffleRegionScheduler adds a shuffle-region-scheduler.
 func (h *Handler) AddShuffleRegionScheduler() error {
-	s, err := schedule.CreateScheduler("shuffle-region", h.opt)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	log.Infof("create scheduler %s", s.GetName())
-	return h.AddScheduler(s)
+	return h.AddScheduler("shuffle-region")
 }
 
 // GetOperator returns the region operator.
