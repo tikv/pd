@@ -598,7 +598,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 	sc := newScheduleController(co, lb)
 
-	for i := schedulers.MinScheduleInterval; sc.GetInterval() != schedulers.MaxScheduleInterval; i = sc.GetNextInterval(sc.GetInterval()) {
+	for i := schedulers.MinScheduleInterval; sc.GetInterval() != schedulers.MaxScheduleInterval; i = sc.GetNextInterval(i) {
 		c.Assert(sc.GetInterval(), Equals, i)
 		c.Assert(sc.Schedule(cluster), IsNil)
 	}
