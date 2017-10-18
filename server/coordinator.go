@@ -37,21 +37,13 @@ const (
 	maxScheduleRetries        = 10
 	scheduleIntervalFactor    = 1.3
 
-	statCacheMaxLen               = 1000
-	hotWriteRegionMinFlowRate     = 16 * 1024
-	hotReadRegionMinFlowRate      = 128 * 1024
-	regionHeartBeatReportInterval = 60
-	regionheartbeatSendChanCap    = 1024
-	storeHeartBeatReportInterval  = 10
-	minHotRegionReportInterval    = 3
-	hotRegionAntiCount            = 1
-	hotRegionScheduleName         = "balance-hot-region-scheduler"
+	regionheartbeatSendChanCap = 1024
+	hotRegionScheduleName      = "balance-hot-region-scheduler"
 )
 
 var (
-	hotRegionLowThreshold = 3
-	errSchedulerExisted   = errors.New("scheduler existed")
-	errSchedulerNotFound  = errors.New("scheduler not found")
+	errSchedulerExisted  = errors.New("scheduler existed")
+	errSchedulerNotFound = errors.New("scheduler not found")
 )
 
 type coordinator struct {
@@ -374,13 +366,7 @@ func (c *coordinator) addOperator(op *schedule.Operator) bool {
 }
 
 func isHigherPriorityOperator(new, old *schedule.Operator) bool {
-	if new.ResourceKind() == core.AdminKind {
-		return true
-	}
-	if new.ResourceKind() == core.PriorityKind && old.ResourceKind() != core.PriorityKind {
-		return true
-	}
-	return false
+	return new.GetPriorityLevel() < old.GetPriorityLevel()
 }
 
 func (c *coordinator) removeOperator(op *schedule.Operator) {

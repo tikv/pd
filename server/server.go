@@ -32,7 +32,6 @@ import (
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	"github.com/pingcap/pd/table"
 	"google.golang.org/grpc"
 )
 
@@ -172,7 +171,8 @@ func (s *Server) startEtcd() error {
 }
 
 func (s *Server) startServer() error {
-	if err := s.initClusterID(); err != nil {
+	var err error
+	if err = s.initClusterID(); err != nil {
 		return errors.Trace(err)
 	}
 	log.Infof("init cluster id %v", s.clusterID)
@@ -185,28 +185,12 @@ func (s *Server) startServer() error {
 	s.kv = core.NewKV(kvBase)
 	s.cluster = newRaftCluster(s, s.clusterID)
 	s.hbStreams = newHeartbeatStreams(s.clusterID)
-	if err := s.initClassifier(); err != nil {
+	if s.classifier, err = namespace.CreateClassifier(s.cfg.NamespaceClassifier, s.kv, s.idAlloc); err != nil {
 		return errors.Trace(err)
 	}
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
-	return nil
-}
-
-func (s *Server) initClassifier() error {
-	// TODO: Config by name.
-	if s.cfg.EnableNamespace {
-		log.Infoln("use namespace classifier.")
-		var err error
-		s.classifier, err = table.NewTableNamespaceClassifier(s.kv, s.idAlloc)
-		if err != nil {
-			return errors.Trace(err)
-		}
-	} else {
-		log.Infoln("use default classifier.")
-		s.classifier = namespace.DefaultClassifier
-	}
 	return nil
 }
 

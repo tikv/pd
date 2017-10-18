@@ -91,8 +91,9 @@ type Config struct {
 	// For all warnings during parsing.
 	WarningMsgs []string
 
-	// Enable namespace isolation.
-	EnableNamespace bool `toml:"enable-namespace" json:"enable-namespace"`
+	// NamespaceClassifier is for classifying stores/regions into different
+	// namespaces.
+	NamespaceClassifier string `toml:"namespace-classifier" json:"namespace-classifier"`
 
 	// Only test can change them.
 	nextRetryDelay             time.Duration
@@ -122,7 +123,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.BoolVar(&cfg.Log.File.LogRotate, "log-rotate", true, "rotate log")
-	fs.BoolVar(&cfg.EnableNamespace, "enable-namespace", false, "enable namespace isolation (default 'false')")
+	fs.StringVar(&cfg.NamespaceClassifier, "namespace-classifier", "default", "namespace classifier (default 'default')")
 
 	return cfg
 }
@@ -271,6 +272,8 @@ func (c *Config) adjust() error {
 
 	adjustDuration(&c.TickInterval, defaultTickInterval)
 	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
+
+	adjustString(&c.NamespaceClassifier, "default")
 
 	adjustString(&c.Metric.PushJob, c.Name)
 
@@ -508,7 +511,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 }
 
 func (o *scheduleOption) GetHotRegionLowThreshold() int {
-	return hotRegionLowThreshold
+	return schedule.HotRegionLowThreshold
 }
 
 // ParseUrls parse a string into multiple urls.
