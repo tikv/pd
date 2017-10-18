@@ -174,25 +174,29 @@ func (f *textFormatter) Format(entry *log.Entry) ([]byte, error) {
 	} else {
 		b = &bytes.Buffer{}
 	}
+
+	if !f.DisableColors {
+		colorStr := logTypeToColor(entry.Level)
+		fmt.Fprintf(b, "\033%sm[%s] ", colorStr, entry.Level.String())
+	}
+
 	if !f.DisableTimestamp {
 		fmt.Fprintf(b, "%s ", entry.Time.Format(defaultLogTimeFormat))
 	}
 	if file, ok := entry.Data["file"]; ok {
 		fmt.Fprintf(b, "%s:%v:", file, entry.Data["line"])
 	}
-	if f.DisableColors {
-		fmt.Fprintf(b, " [%s] %s", entry.Level.String(), entry.Message)
-	} else {
-		colorStr := logTypeToColor(entry.Level)
-		s := "\033" + colorStr + "m[" + entry.Level.String() + "] " + entry.Message + "\033[0m"
-		fmt.Fprintf(b, " %s", s)
-	}
+	fmt.Fprintf(b, " [%s] %s", entry.Level.String(), entry.Message)
 	for k, v := range entry.Data {
 		if k != "file" && k != "line" {
 			fmt.Fprintf(b, " %v=%v", k, v)
 		}
 	}
 	b.WriteByte('\n')
+
+	if !f.DisableColors {
+		b.WriteString("\033[0m")
+	}
 	return b.Bytes(), nil
 }
 
@@ -214,6 +218,10 @@ func stringToLogFormatter(format string, disableTimestamp bool) log.Formatter {
 			TimestampFormat:  defaultLogTimeFormat,
 			DisableTimestamp: disableTimestamp,
 			DisableColors:    true,
+		}
+	case "highlight":
+		return &textFormatter{
+			DisableTimestamp: disableTimestamp,
 		}
 	default:
 		return &textFormatter{}
