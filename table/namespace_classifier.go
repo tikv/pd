@@ -123,6 +123,7 @@ func (c *tableNamespaceClassifier) GetAllNamespaces() []string {
 	for name := range c.nsInfo.namespaces {
 		nsList = append(nsList, name)
 	}
+	nsList = append(nsList, namespace.DefaultNamespace)
 	return nsList
 }
 
