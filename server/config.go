@@ -354,7 +354,6 @@ var defaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
 	{Type: "hot-region"},
-	{Type: "adjacent-region"},
 }
 
 func (c *ScheduleConfig) adjust() {

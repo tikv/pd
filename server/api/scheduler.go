@@ -73,7 +73,18 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "balance-adjacent-region-scheduler":
-		if err := h.AddAdjacentRegionScheduler(); err != nil {
+		var args []string
+		leaderLimit, ok := input["leader_limit"].(string)
+		if ok {
+			args = append(args, leaderLimit)
+		}
+		peerLimit, ok := input["peer_limit"].(string)
+		if ok {
+			args = append(args, peerLimit)
+		} else {
+			args = args[:0]
+		}
+		if err := h.AddAdjacentRegionScheduler(args...); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}

@@ -131,8 +131,8 @@ func (h *Handler) AddBalanceHotRegionScheduler() error {
 }
 
 // AddAdjacentRegionScheduler adds a balance-adjacent-region-scheduler.
-func (h *Handler) AddAdjacentRegionScheduler() error {
-	return h.AddScheduler("adjacent-region")
+func (h *Handler) AddAdjacentRegionScheduler(args ...string) error {
+	return h.AddScheduler("adjacent-region", args...)
 }
 
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
