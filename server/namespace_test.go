@@ -31,7 +31,7 @@ type testNamespaceSuite struct {
 
 func (s *testNamespaceSuite) SetUpTest(c *C) {
 	s.classifier = newMapClassifer()
-	s.tc = newTestClusterInfo(newClusterInfo(newMockIDAllocator()))
+	s.tc = newTestClusterInfo(newClusterInfo(core.NewMockIDAllocator()))
 	_, s.opt = newTestScheduleConfig()
 }
 

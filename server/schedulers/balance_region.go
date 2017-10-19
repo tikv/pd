@@ -124,9 +124,3 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 
 	return schedule.CreateMovePeerOperator("balance-region", region, core.RegionKind, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }
-
-// GetCache returns interval id cache in the scheduler. This is for test only.
-// TODO: remove it after moving tests into this directory.
-func (s *balanceRegionScheduler) GetCache() *cache.TTLUint64 {
-	return s.cache
-}

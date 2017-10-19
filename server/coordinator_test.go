@@ -103,7 +103,7 @@ var _ = Suite(&testCoordinatorSuite{})
 type testCoordinatorSuite struct{}
 
 func (s *testCoordinatorSuite) TestBasic(c *C) {
-	cluster := newClusterInfo(newMockIDAllocator())
+	cluster := newClusterInfo(core.NewMockIDAllocator())
 	_, opt := newTestScheduleConfig()
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	kv := core.NewKV(core.NewMemoryKV())
@@ -154,7 +154,7 @@ func newMockHeartbeatStream() *mockHeartbeatStream {
 }
 
 func (s *testCoordinatorSuite) TestDispatch(c *C) {
-	cluster := newClusterInfo(newMockIDAllocator())
+	cluster := newClusterInfo(core.NewMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	kv := core.NewKV(core.NewMemoryKV())
@@ -229,7 +229,7 @@ func dispatchAndRecvHeartbeat(c *C, co *coordinator, region *core.RegionInfo, st
 }
 
 func (s *testCoordinatorSuite) TestReplica(c *C) {
-	cluster := newClusterInfo(newMockIDAllocator())
+	cluster := newClusterInfo(core.NewMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	kv := core.NewKV(core.NewMemoryKV())
@@ -285,7 +285,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestPeerState(c *C) {
-	cluster := newClusterInfo(newMockIDAllocator())
+	cluster := newClusterInfo(core.NewMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	kv := core.NewKV(core.NewMemoryKV())
@@ -333,7 +333,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestShouldRun(c *C) {
-	cluster := newClusterInfo(newMockIDAllocator())
+	cluster := newClusterInfo(core.NewMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	kv := core.NewKV(core.NewMemoryKV())
@@ -374,7 +374,7 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
-	cluster := newClusterInfo(newMockIDAllocator())
+	cluster := newClusterInfo(core.NewMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	kv := core.NewKV(core.NewMemoryKV())
@@ -433,7 +433,7 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
-	cluster := newClusterInfo(newMockIDAllocator())
+	cluster := newClusterInfo(core.NewMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	kv := core.NewKV(core.NewMemoryKV())
@@ -494,7 +494,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestRestart(c *C) {
-	cluster := newClusterInfo(newMockIDAllocator())
+	cluster := newClusterInfo(core.NewMockIDAllocator())
 	tc := newTestClusterInfo(cluster)
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	kv := core.NewKV(core.NewMemoryKV())
@@ -579,7 +579,7 @@ func (s *mockLimitScheduler) IsScheduleAllowed() bool {
 }
 
 func (s *testScheduleControllerSuite) TestController(c *C) {
-	cluster := newClusterInfo(newMockIDAllocator())
+	cluster := newClusterInfo(core.NewMockIDAllocator())
 	_, opt := newTestScheduleConfig()
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	kv := core.NewKV(core.NewMemoryKV())
@@ -635,7 +635,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 }
 
 func (s *testScheduleControllerSuite) TestInterval(c *C) {
-	cluster := newClusterInfo(newMockIDAllocator())
+	cluster := newClusterInfo(core.NewMockIDAllocator())
 	_, opt := newTestScheduleConfig()
 	hbStreams := newHeartbeatStreams(cluster.getClusterID())
 	kv := core.NewKV(core.NewMemoryKV())

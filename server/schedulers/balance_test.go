@@ -14,13 +14,13 @@
 package schedulers
 
 import (
+	"math"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
-	"math"
 )
 
 func newTestScheduleConfig() (string, *MockSchedulerOptions) {
@@ -236,17 +236,6 @@ var _ = Suite(&testBalanceRegionSchedulerSuite{})
 
 type testBalanceRegionSchedulerSuite struct{}
 
-// TODO: remove it after moving tests to schedulers directory.
-func (s *testBalanceRegionSchedulerSuite) getCache(scheduler schedule.Scheduler) *cache.TTLUint64 {
-	type hasCache interface {
-		GetCache() *cache.TTLUint64
-	}
-	if c, ok := scheduler.(hasCache); ok {
-		return c.GetCache()
-	}
-	return nil
-}
-
 func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	cluster := newMockCluster(core.NewMockIDAllocator())
 	tc := cluster
@@ -254,6 +243,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	_, opt := newTestScheduleConfig()
 	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewLimiter())
 	c.Assert(err, IsNil)
+	cache := sb.(*balanceRegionScheduler).cache
 
 	opt.SetMaxReplicas(1)
 
@@ -272,7 +262,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	c.Assert(sb.Schedule(cluster), IsNil)
 	// 9 - 6 >= 2
 	tc.updateRegionCount(2, 6)
-	s.getCache(sb).Remove(4)
+	cache.Remove(4)
 	// When store 1 is offline, it will be filtered,
 	// store 2 becomes the store with least regions.
 	CheckTransferPeer(c, sb.Schedule(cluster), 4, 2)
@@ -293,6 +283,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 
 	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewLimiter())
 	c.Assert(err, IsNil)
+	cache := sb.(*balanceRegionScheduler).cache
 
 	// Store 1 has the largest region score, so the balancer try to replace peer in store 1.
 	tc.addLabelsStore(1, 6, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -303,7 +294,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	// This schedule try to replace peer in store 1, but we have no other stores,
 	// so store 1 will be set in the cache and skipped next schedule.
 	c.Assert(sb.Schedule(cluster), IsNil)
-	c.Assert(s.getCache(sb).Exists(1), IsTrue)
+	c.Assert(cache.Exists(1), IsTrue)
 
 	// Store 4 has smaller region score than store 2.
 	tc.addLabelsStore(4, 2, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
@@ -311,7 +302,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 
 	// Store 5 has smaller region score than store 1.
 	tc.addLabelsStore(5, 2, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
-	s.getCache(sb).Remove(1) // Delete store 1 from cache, or it will be skipped.
+	cache.Remove(1) // Delete store 1 from cache, or it will be skipped.
 	CheckTransferPeer(c, sb.Schedule(cluster), 1, 5)
 
 	// Store 6 has smaller region score than store 5.
@@ -325,10 +316,10 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	// If store 7 is not available, we wait.
 	tc.setStoreDown(7)
 	c.Assert(sb.Schedule(cluster), IsNil)
-	c.Assert(s.getCache(sb).Exists(1), IsTrue)
+	c.Assert(cache.Exists(1), IsTrue)
 	tc.setStoreUp(7)
 	CheckTransferPeer(c, sb.Schedule(cluster), 2, 7)
-	s.getCache(sb).Remove(1)
+	cache.Remove(1)
 	CheckTransferPeer(c, sb.Schedule(cluster), 1, 7)
 
 	// Store 8 has smaller region score than store 7, but the distinct score decrease.
@@ -341,8 +332,8 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	tc.setStoreDown(6)
 	tc.setStoreDown(7)
 	c.Assert(sb.Schedule(cluster), IsNil)
-	c.Assert(s.getCache(sb).Exists(1), IsTrue)
-	s.getCache(sb).Remove(1)
+	c.Assert(cache.Exists(1), IsTrue)
+	cache.Remove(1)
 
 	// Store 9 has different zone with other stores but larger region score than store 1.
 	tc.addLabelsStore(9, 9, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
