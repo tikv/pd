@@ -1,7 +1,6 @@
 language: go
 
 go:
-  - 1.8.x
   - 1.9.x
 
 script:
@@ -9,15 +8,6 @@ script:
 
 matrix:
   include:
-  - go: 1.8.x
-    install:
-      - go get github.com/mattn/goveralls
-    env:
-      - TRAVIS_COVERAGE=1
-    script:
-      - make dev
-    after_success:
-      - travis_wait make travis_coverage
   - go: 1.9.x
     install:
       - go get github.com/mattn/goveralls
