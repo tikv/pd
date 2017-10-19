@@ -62,14 +62,6 @@ func (s *grantLeaderScheduler) GetName() string {
 	return s.name
 }
 
-func (s *grantLeaderScheduler) GetMinInterval() time.Duration {
-	return MinScheduleInterval
-}
-
-func (s *grantLeaderScheduler) GetNextInterval(interval time.Duration) time.Duration {
-	return intervalGrow(interval, MaxScheduleInterval, exponentailGrowth)
-}
-
 func (s *grantLeaderScheduler) GetType() string {
 	return "grant-leader"
 }
