@@ -214,6 +214,10 @@ func (c *tableNamespaceClassifier) CreateNamespace(name string) error {
 		return errors.New("Name should be 0-9, a-z or A-Z")
 	}
 
+	if name == namespace.DefaultNamespace {
+		return errors.Errorf("%s is reserved as default namespace", name)
+	}
+
 	if n := c.nsInfo.getNamespaceByName(name); n != nil {
 		return errors.New("Duplicate namespace Name")
 	}
