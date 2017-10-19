@@ -92,6 +92,8 @@ func (mc *mockCluster) addLeaderStore(storeID uint64, leaderCount int) {
 	store.Stats = &pdpb.StoreStats{}
 	store.LastHeartbeatTS = time.Now()
 	store.LeaderCount = leaderCount
+	store.Stats.Capacity = uint64(1024)
+	store.Stats.Available = store.Stats.Capacity
 	mc.PutStore(store)
 }
 
@@ -135,6 +137,20 @@ func (mc *mockCluster) addLeaderRegion(regionID uint64, leaderID uint64, followe
 		region.Peers = append(region.Peers, peer)
 	}
 	mc.PutRegion(core.NewRegionInfo(region, leader))
+}
+
+func (mc *mockCluster) addLeaderRegionWithRange(regionID uint64, startKey string, endKey string, leaderID uint64, followerIds ...uint64) {
+	region := &metapb.Region{Id: regionID}
+	leader, _ := mc.AllocPeer(leaderID)
+	region.Peers = []*metapb.Peer{leader}
+	for _, id := range followerIds {
+		peer, _ := mc.AllocPeer(id)
+		region.Peers = append(region.Peers, peer)
+	}
+	r := core.NewRegionInfo(region, leader)
+	r.StartKey = []byte(startKey)
+	r.EndKey = []byte(endKey)
+	mc.PutRegion(r)
 }
 
 func (mc *mockCluster) LoadRegion(regionID uint64, followerIds ...uint64) {

@@ -54,3 +54,40 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 		c.Assert(sourceID, Equals, targetID)
 	}
 }
+
+var _ = Suite(&testBalanceAdjacentRegionSuite{})
+
+type testBalanceAdjacentRegionSuite struct{}
+
+func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
+	tc := newMockCluster(core.NewMockIDAllocator())
+
+	_, opt := newTestScheduleConfig()
+	sc, err := schedule.CreateScheduler("adjacent-region", opt, schedule.NewLimiter())
+	c.Assert(err, IsNil)
+	c.Assert(sc.Schedule(tc), IsNil)
+
+	// Add stores 1,2,3,4
+	tc.addLeaderStore(1, 5)
+	tc.addLeaderStore(2, 0)
+	tc.addLeaderStore(3, 0)
+	tc.addLeaderStore(4, 0)
+	// Add regions
+	tc.addLeaderRegionWithRange(1, "", "a", 1, 2, 3)
+	tc.addLeaderRegionWithRange(2, "a", "b", 1, 2, 3)
+	tc.addLeaderRegionWithRange(3, "b", "c", 1, 3, 4)
+	tc.addLeaderRegionWithRange(4, "c", "d", 1, 2, 3)
+	tc.addLeaderRegionWithRange(5, "e", "", 1, 2, 3)
+
+	// check and do operator
+	checkTransferPeerWithLeaderTransfer(c, sc.Schedule(tc), 1, 4)
+	tc.addLeaderRegionWithRange(1, "", "a", 2, 3, 4)
+
+	CheckTransferLeader(c, sc.Schedule(tc), 1, 2)
+	tc.addLeaderRegionWithRange(2, "a", "b", 2, 1, 3)
+
+	CheckTransferLeader(c, sc.Schedule(tc), 1, 4)
+	tc.addLeaderRegionWithRange(3, "b", "c", 4, 1, 3)
+
+	c.Assert(sc.Schedule(tc), IsNil)
+}
