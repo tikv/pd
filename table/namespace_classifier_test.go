@@ -16,7 +16,6 @@ package table
 import (
 	"bytes"
 	"sort"
-	"sync/atomic"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -68,22 +67,9 @@ func (d mockTableIDDecoderForCrossTable) DecodeTableID(key Key) int64 {
 	return targetTableID
 }
 
-// mockIDAllocator mocks IDAllocator and it is only used for test.
-type mockIDAllocator struct {
-	base uint64
-}
-
-func newMockIDAllocator() *mockIDAllocator {
-	return &mockIDAllocator{base: 0}
-}
-
-func (alloc *mockIDAllocator) Alloc() (uint64, error) {
-	return atomic.AddUint64(&alloc.base, 1), nil
-}
-
 func (s *testTableNamespaceSuite) newClassifier(c *C, decoder IDDecoder) *tableNamespaceClassifier {
 	kv := core.NewKV(core.NewMemoryKV())
-	classifier, err := NewTableNamespaceClassifier(kv, &mockIDAllocator{})
+	classifier, err := NewTableNamespaceClassifier(kv, core.NewMockIDAllocator())
 	c.Assert(err, IsNil)
 	tableClassifier := classifier.(*tableNamespaceClassifier)
 	tableClassifier.tableIDDecoder = decoder
@@ -148,7 +134,7 @@ func (s *testTableNamespaceSuite) TestTableNameSpaceGetRegionNamespace(c *C) {
 
 func (s *testTableNamespaceSuite) TestNamespaceOperation(c *C) {
 	kv := core.NewKV(core.NewMemoryKV())
-	classifier, err := NewTableNamespaceClassifier(kv, &mockIDAllocator{})
+	classifier, err := NewTableNamespaceClassifier(kv, core.NewMockIDAllocator())
 	c.Assert(err, IsNil)
 	tableClassifier := classifier.(*tableNamespaceClassifier)
 	tableClassifier.tableIDDecoder = mockTableIDDecoderForGlobal{}
