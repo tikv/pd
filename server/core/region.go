@@ -147,8 +147,8 @@ func (r *RegionInfo) GetFollower() *metapb.Peer {
 	return nil
 }
 
-// GetDiffFollowers return the followers in the store where no the other
-// followers of the another specified region
+// GetDiffFollowers returns the followers which is not located in the same
+// store as any other followers of the another specified region.
 func (r *RegionInfo) GetDiffFollowers(other *RegionInfo) []*metapb.Peer {
 	res := make([]*metapb.Peer, 0, len(r.Peers))
 	for _, p := range r.GetFollowers() {
@@ -426,7 +426,7 @@ func (r *RegionsInfo) GetFollower(storeID uint64, regionID uint64) *RegionInfo {
 	return r.followers[storeID].Get(regionID)
 }
 
-// ScanRange scan region with start key, until number greater than limit.
+// ScanRange scans region with start key, until number greater than limit.
 func (r *RegionsInfo) ScanRange(startKey []byte, limit int) []*RegionInfo {
 	metaRegions := r.tree.scanRange(startKey, limit)
 	res := make([]*RegionInfo, 0, len(metaRegions))

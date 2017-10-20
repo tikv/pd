@@ -194,7 +194,7 @@ func (c *clusterInfo) getStoresReadStat() map[uint64]uint64 {
 	return c.Stores.GetStoresReadStat()
 }
 
-// ScanRegions scan region with start key, until number greater than limit.
+// ScanRegions scans region with start key, until number greater than limit.
 func (c *clusterInfo) ScanRegions(startKey []byte, limit int) []*core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
