@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
@@ -50,12 +51,28 @@ func init() {
 
 type balanceAdjacentRegionScheduler struct {
 	*baseScheduler
-	opt         schedule.Options
-	selector    schedule.Selector
-	leaderLimit uint64
-	peerLimit   uint64
-	lastKey     []byte
-	ids         []uint64
+	opt          schedule.Options
+	selector     schedule.Selector
+	leaderLimit  uint64
+	peerLimit    uint64
+	lastKey      []byte
+	cacheRegions *adjacentState
+}
+
+type adjacentState struct {
+	assignedStoreIds []uint64
+	regions          []*core.RegionInfo
+	head             int
+}
+
+func (a *adjacentState) clear() {
+	a.assignedStoreIds = a.assignedStoreIds[:0]
+	a.regions = a.regions[:0]
+	a.head = 0
+}
+
+func (a *adjacentState) len() int {
+	return len(a.regions) - a.head
 }
 
 // newBalanceAdjacentRegionScheduler creates a scheduler that tends to disperse adjacent region
@@ -113,52 +130,74 @@ func (l *balanceAdjacentRegionScheduler) allowBalancePeer() bool {
 }
 
 func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
-	if l.ids == nil {
-		l.ids = make([]uint64, 0, len(cluster.GetStores()))
+	if l.cacheRegions == nil {
+		l.cacheRegions = &adjacentState{
+			assignedStoreIds: make([]uint64, 0, len(cluster.GetStores())),
+			regions:          make([]*core.RegionInfo, 0, scanLimit),
+			head:             0,
+		}
+	}
+	// we will process cache firstly
+	if l.cacheRegions.len() >= 2 {
+		return l.process(cluster)
 	}
 
+	l.cacheRegions.clear()
 	regions := cluster.ScanRegions(l.lastKey, scanLimit)
+	// scan to the end
+	if len(regions) <= 1 {
+		l.lastKey = []byte("")
+		return nil
+	}
+
+	// calculate max adjacentRegions and record to the cache
 	adjacentRegions := make([]*core.RegionInfo, 0, scanLimit)
-	for _, r := range regions {
+	adjacentRegions = append(adjacentRegions, regions[0])
+	maxLen := 0
+	for i, r := range regions[1:] {
 		l.lastKey = r.StartKey
-		if len(adjacentRegions) == 0 {
-			adjacentRegions = append(adjacentRegions, r)
-			continue
-		}
 
 		// append if the region are adjacent
 		lastRegion := adjacentRegions[len(adjacentRegions)-1]
 		if lastRegion.Leader.GetStoreId() == r.Leader.GetStoreId() && bytes.Equal(lastRegion.EndKey, r.StartKey) {
 			adjacentRegions = append(adjacentRegions, r)
-			continue
+			if i != len(regions)-2 {
+				continue
+			}
 		}
 
 		if len(adjacentRegions) == 1 {
 			adjacentRegions[0] = r
 		} else {
-			// got an adjacent regions
-			break
+			// got an max length adjacent regions in this range
+			if maxLen < len(adjacentRegions) {
+				l.cacheRegions.clear()
+				maxLen = len(adjacentRegions)
+				l.cacheRegions.regions = append(l.cacheRegions.regions, adjacentRegions...)
+				adjacentRegions = adjacentRegions[:0]
+				adjacentRegions = append(adjacentRegions, r)
+			}
 		}
 	}
 
-	// scan to the end
-	if len(regions) <= 1 {
-		l.lastKey = []byte("")
-	}
+	return l.process(cluster)
+}
 
-	// no adjacent regions
-	if len(adjacentRegions) < 2 {
-		schedulerCounter.WithLabelValues(l.GetName(), "no_adjacent").Inc()
-		l.ids = l.ids[:0]
+func (l *balanceAdjacentRegionScheduler) process(cluster schedule.Cluster) *schedule.Operator {
+	if l.cacheRegions.len() < 2 {
 		return nil
 	}
+	head := l.cacheRegions.head
+	r1 := l.cacheRegions.regions[head]
+	r2 := l.cacheRegions.regions[head+1]
 
-	// There is no more continuous adjacent region with last region
-	if adjacentRegions[0].GetId() != regions[0].GetId() {
-		l.ids = l.ids[:0]
-	}
-	r1 := adjacentRegions[0]
-	r2 := adjacentRegions[1]
+	defer func() {
+		if l.cacheRegions.len() < 0 {
+			log.Fatalf("[%s]the cache overflow should never happen", l.GetName())
+		}
+		l.cacheRegions.head = head + 1
+		l.lastKey = r2.StartKey
+	}()
 	if l.unsafeToBalance(cluster, r1) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
@@ -168,13 +207,11 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *sch
 		schedulerCounter.WithLabelValues(l.GetName(), "no_leader").Inc()
 		op = l.dispersePeer(cluster, r1)
 	}
-	l.lastKey = r2.StartKey
 	if op == nil {
 		schedulerCounter.WithLabelValues(l.GetName(), "no_peer").Inc()
-		l.ids = l.ids[:0]
+		l.cacheRegions.assignedStoreIds = l.cacheRegions.assignedStoreIds[:0]
 	}
 	return op
-
 }
 
 func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster schedule.Cluster, region *core.RegionInfo) bool {
@@ -222,7 +259,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, 
 	source := cluster.GetStore(leaderStoreID)
 	scoreGuard := schedule.NewDistinctScoreFilter(l.opt.GetLocationLabels(), stores, source)
 	excludeStores := region.GetStoreIds()
-	for _, storeID := range l.ids {
+	for _, storeID := range l.cacheRegions.assignedStoreIds {
 		if _, ok := excludeStores[storeID]; !ok {
 			excludeStores[storeID] = struct{}{}
 		}
@@ -246,7 +283,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, 
 	}
 
 	// record the store id and exclude it in next time
-	l.ids = append(l.ids, newPeer.GetStoreId())
+	l.cacheRegions.assignedStoreIds = append(l.cacheRegions.assignedStoreIds, newPeer.GetStoreId())
 
 	op := schedule.CreateMovePeerOperator("balance-adjacent-peer", region, core.AdjacentPeerKind, leaderStoreID, newPeer.GetStoreId(), newPeer.GetId())
 	op.SetPriorityLevel(core.LowPriority)

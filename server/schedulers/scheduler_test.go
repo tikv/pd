@@ -77,7 +77,9 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	tc.addLeaderRegionWithRange(2, "a", "b", 1, 2, 3)
 	tc.addLeaderRegionWithRange(3, "b", "c", 1, 3, 4)
 	tc.addLeaderRegionWithRange(4, "c", "d", 1, 2, 3)
-	tc.addLeaderRegionWithRange(5, "e", "", 1, 2, 3)
+	tc.addLeaderRegionWithRange(5, "e", "f", 1, 2, 3)
+	tc.addLeaderRegionWithRange(6, "f", "g", 1, 2, 3)
+	tc.addLeaderRegionWithRange(7, "z", "", 1, 2, 3)
 
 	// check and do operator
 	checkTransferPeerWithLeaderTransfer(c, sc.Schedule(tc), 1, 4)
@@ -89,5 +91,14 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	CheckTransferLeader(c, sc.Schedule(tc), 1, 4)
 	tc.addLeaderRegionWithRange(3, "b", "c", 4, 1, 3)
 
+	checkTransferPeerWithLeaderTransfer(c, sc.Schedule(tc), 1, 4)
+	tc.addLeaderRegionWithRange(5, "e", "f", 2, 3, 4)
+
 	c.Assert(sc.Schedule(tc), IsNil)
+	c.Assert(sc.Schedule(tc), IsNil)
+	CheckTransferLeader(c, sc.Schedule(tc), 2, 4)
+	tc.addLeaderRegionWithRange(1, "", "a", 4, 2, 3)
+	for i := 0; i < 10; i++ {
+		c.Assert(sc.Schedule(tc), IsNil)
+	}
 }
