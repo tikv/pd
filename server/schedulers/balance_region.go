@@ -97,6 +97,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Op
 		// We can't transfer peer from this store now, so we add it to the cache
 		// and skip it for a while.
 		s.cache.Put(oldPeer.GetStoreId())
+		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	return op

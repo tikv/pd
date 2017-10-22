@@ -87,7 +87,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Op
 		return nil
 	}
 	l.limit = adjustBalanceLimit(cluster, core.LeaderKind)
-	schedulerCounter.WithLabelValues(l.GetName(), "new_opeartor").Inc()
+	schedulerCounter.WithLabelValues(l.GetName(), "new_operator").Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
 	return schedule.NewOperator("balance-leader", region.GetId(), core.LeaderKind, step)
 }
