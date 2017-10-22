@@ -640,6 +640,12 @@ func (c *RaftCluster) collectMetrics() {
 		maxLeaderScore = math.Max(maxLeaderScore, s.LeaderScore())
 		minRegionScore = math.Min(minRegionScore, s.RegionScore())
 		maxRegionScore = math.Max(maxRegionScore, s.RegionScore())
+
+		store := fmt.Sprintf("store_%d", s.GetId())
+		storeStatusGauge.WithLabelValues(store, "region_size").Set(float64(s.RegionSize))
+		storeStatusGauge.WithLabelValues(store, "region_count").Set(float64(s.RegionCount))
+		storeStatusGauge.WithLabelValues(store, "leader_size").Set(float64(s.LeaderSize))
+		storeStatusGauge.WithLabelValues(store, "leader_count").Set(float64(s.LeaderCount))
 	}
 
 	metrics := make(map[string]float64)
