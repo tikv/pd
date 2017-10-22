@@ -14,6 +14,7 @@
 package server
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -73,6 +74,12 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	id := strconv.FormatUint(store.GetId(), 10)
 	balanceScoreGauge.WithLabelValues(s.namespace, id, "region").Set(store.RegionScore())
 	balanceScoreGauge.WithLabelValues(s.namespace, id, "leader").Set(store.LeaderScore())
+
+	storeId := fmt.Sprintf("store_%d", store.GetId())
+	storeStatusGauge.WithLabelValues(storeId, "region_size").Set(float64(store.RegionSize))
+	storeStatusGauge.WithLabelValues(storeId, "region_count").Set(float64(store.RegionCount))
+	storeStatusGauge.WithLabelValues(storeId, "leader_size").Set(float64(store.LeaderSize))
+	storeStatusGauge.WithLabelValues(storeId, "leader_count").Set(float64(store.LeaderCount))
 }
 
 func (s *storeStatistics) Collect() {

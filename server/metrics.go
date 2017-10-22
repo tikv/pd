@@ -96,6 +96,14 @@ var (
 			Name:      "tso",
 			Help:      "Counter of tso events",
 		}, []string{"type"})
+
+	storeStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "store_status",
+			Help:      "Store status for schedule",
+		}, []string{"store", "type"})
 )
 
 func init() {
@@ -109,4 +117,5 @@ func init() {
 	prometheus.MustRegister(regionHeartbeatCounter)
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(tsoCounter)
+	prometheus.MustRegister(storeStatusGauge)
 }
