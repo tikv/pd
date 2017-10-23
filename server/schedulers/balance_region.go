@@ -48,6 +48,7 @@ func newBalanceRegionScheduler(opt schedule.Options, limiter *schedule.Limiter) 
 		schedule.NewHealthFilter(opt),
 		schedule.NewSnapshotCountFilter(opt),
 		schedule.NewStorageThresholdFilter(opt),
+		schedule.NewPendingPeerCountFilter(opt),
 	}
 	base := newBaseScheduler(limiter)
 	return &balanceRegionScheduler{

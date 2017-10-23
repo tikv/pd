@@ -528,6 +528,44 @@ func (s *testClusterInfoSuite) testRegionSplitAndMerge(c *C, cache *clusterInfo)
 	}
 }
 
+func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
+	cluster := newClusterInfo(core.NewMockIDAllocator())
+	stores := newTestStores(5)
+	for _, s := range stores {
+		cluster.putStore(s)
+	}
+	origin := []*metapb.Peer{
+		{
+			Id:      1,
+			StoreId: 1,
+		},
+		{
+			Id:      2,
+			StoreId: 1,
+		},
+	}
+	cluster.updateStorePendingPeerCount(nil, origin)
+	s1 := cluster.Stores.GetStore(1)
+	c.Assert(s1.PendingCount, Equals, 2)
+	new := []*metapb.Peer{
+		{
+			Id:      1,
+			StoreId: 2,
+		},
+		{
+			Id:      2,
+			StoreId: 3,
+		},
+	}
+	cluster.updateStorePendingPeerCount(origin, new)
+	s1 = cluster.Stores.GetStore(1)
+	c.Assert(s1.PendingCount, Equals, 0)
+	s2 := cluster.Stores.GetStore(2)
+	c.Assert(s2.PendingCount, Equals, 1)
+	s3 := cluster.Stores.GetStore(3)
+	c.Assert(s3.PendingCount, Equals, 1)
+}
+
 var _ = Suite(&testClusterUtilSuite{})
 
 type testClusterUtilSuite struct{}

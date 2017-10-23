@@ -23,6 +23,7 @@ type Options interface {
 	GetRegionScheduleLimit() uint64
 
 	GetMaxSnapshotCount() uint64
+	GetMaxPendingPeerCount() uint64
 	GetMaxStoreDownTime() time.Duration
 
 	GetMaxReplicas() int

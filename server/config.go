@@ -305,7 +305,8 @@ func (c *Config) configFromFile(path string) error {
 type ScheduleConfig struct {
 	// If the snapshot count of one store is greater than this value,
 	// it will never be used as a source or target store.
-	MaxSnapshotCount uint64 `toml:"max-snapshot-count,omitempty" json:"max-snapshot-count"`
+	MaxSnapshotCount    uint64 `toml:"max-snapshot-count,omitempty" json:"max-snapshot-count"`
+	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count,omitempty" json:"max-pending-peer-count"`
 	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
@@ -344,6 +345,7 @@ type SchedulerConfig struct {
 const (
 	defaultMaxReplicas          = 3
 	defaultMaxSnapshotCount     = 3
+	defaultMaxPendingPeerCount  = 16
 	defaultMaxStoreDownTime     = time.Hour
 	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
@@ -358,6 +360,7 @@ var defaultSchedulers = SchedulerConfigs{
 
 func (c *ScheduleConfig) adjust() {
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
+	adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
@@ -429,6 +432,10 @@ func (o *scheduleOption) SetMaxReplicas(replicas int) {
 
 func (o *scheduleOption) GetMaxSnapshotCount() uint64 {
 	return o.load().MaxSnapshotCount
+}
+
+func (o *scheduleOption) GetMaxPendingPeerCount() uint64 {
+	return o.load().MaxPendingPeerCount
 }
 
 func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {

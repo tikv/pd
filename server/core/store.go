@@ -32,6 +32,7 @@ type StoreInfo struct {
 	blocked         bool
 	LeaderCount     int
 	RegionCount     int
+	PendingCount    int
 	LastHeartbeatTS time.Time
 	LeaderWeight    float64
 	RegionWeight    float64
@@ -54,6 +55,7 @@ func (s *StoreInfo) Clone() *StoreInfo {
 		blocked:         s.blocked,
 		LeaderCount:     s.LeaderCount,
 		RegionCount:     s.RegionCount,
+		PendingCount:    s.PendingCount,
 		LastHeartbeatTS: s.LastHeartbeatTS,
 		LeaderWeight:    s.LeaderWeight,
 		RegionWeight:    s.RegionWeight,
@@ -332,6 +334,13 @@ func (s *StoresInfo) SetLeaderCount(storeID uint64, leaderCount int) {
 func (s *StoresInfo) SetRegionCount(storeID uint64, regionCount int) {
 	if store, ok := s.stores[storeID]; ok {
 		store.RegionCount = regionCount
+	}
+}
+
+// UpdatePendingPeerCount updates the pengding count to a storeInfo
+func (s *StoresInfo) UpdatePendingPeerCount(storeID uint64, num int) {
+	if store, ok := s.stores[storeID]; ok {
+		store.PendingCount += num
 	}
 }
 
