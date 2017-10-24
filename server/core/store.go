@@ -29,13 +29,13 @@ type StoreInfo struct {
 	*metapb.Store
 	Stats *pdpb.StoreStats
 	// Blocked means that the store is blocked from balance.
-	blocked         bool
-	LeaderCount     int
-	RegionCount     int
-	PendingCount    int
-	LastHeartbeatTS time.Time
-	LeaderWeight    float64
-	RegionWeight    float64
+	blocked          bool
+	LeaderCount      int
+	RegionCount      int
+	PendingPeerCount int
+	LastHeartbeatTS  time.Time
+	LeaderWeight     float64
+	RegionWeight     float64
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -50,15 +50,15 @@ func NewStoreInfo(store *metapb.Store) *StoreInfo {
 // Clone creates a copy of current StoreInfo.
 func (s *StoreInfo) Clone() *StoreInfo {
 	return &StoreInfo{
-		Store:           proto.Clone(s.Store).(*metapb.Store),
-		Stats:           proto.Clone(s.Stats).(*pdpb.StoreStats),
-		blocked:         s.blocked,
-		LeaderCount:     s.LeaderCount,
-		RegionCount:     s.RegionCount,
-		PendingCount:    s.PendingCount,
-		LastHeartbeatTS: s.LastHeartbeatTS,
-		LeaderWeight:    s.LeaderWeight,
-		RegionWeight:    s.RegionWeight,
+		Store:            proto.Clone(s.Store).(*metapb.Store),
+		Stats:            proto.Clone(s.Stats).(*pdpb.StoreStats),
+		blocked:          s.blocked,
+		LeaderCount:      s.LeaderCount,
+		RegionCount:      s.RegionCount,
+		PendingPeerCount: s.PendingPeerCount,
+		LastHeartbeatTS:  s.LastHeartbeatTS,
+		LeaderWeight:     s.LeaderWeight,
+		RegionWeight:     s.RegionWeight,
 	}
 }
 
@@ -337,10 +337,10 @@ func (s *StoresInfo) SetRegionCount(storeID uint64, regionCount int) {
 	}
 }
 
-// UpdatePendingPeerCount updates the pengding count to a storeInfo
-func (s *StoresInfo) UpdatePendingPeerCount(storeID uint64, num int) {
+// SetPendingPeerCount sets the pengding count to a storeInfo
+func (s *StoresInfo) SetPendingPeerCount(storeID uint64, pendingPeerCount int) {
 	if store, ok := s.stores[storeID]; ok {
-		store.PendingCount += num
+		store.PendingPeerCount = pendingPeerCount
 	}
 }
 

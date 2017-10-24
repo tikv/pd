@@ -534,36 +534,45 @@ func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
 	for _, s := range stores {
 		cluster.putStore(s)
 	}
-	origin := []*metapb.Peer{
-		{
-			Id:      1,
-			StoreId: 1,
-		},
+	peers := []*metapb.Peer{
 		{
 			Id:      2,
 			StoreId: 1,
 		},
-	}
-	cluster.updateStorePendingPeerCount(nil, origin)
-	s1 := cluster.Stores.GetStore(1)
-	c.Assert(s1.PendingCount, Equals, 2)
-	new := []*metapb.Peer{
 		{
-			Id:      1,
+			Id:      3,
 			StoreId: 2,
 		},
 		{
-			Id:      2,
+			Id:      3,
 			StoreId: 3,
 		},
+		{
+			Id:      4,
+			StoreId: 4,
+		},
 	}
-	cluster.updateStorePendingPeerCount(origin, new)
-	s1 = cluster.Stores.GetStore(1)
-	c.Assert(s1.PendingCount, Equals, 0)
-	s2 := cluster.Stores.GetStore(2)
-	c.Assert(s2.PendingCount, Equals, 1)
-	s3 := cluster.Stores.GetStore(3)
-	c.Assert(s3.PendingCount, Equals, 1)
+	origin := &core.RegionInfo{
+		Region:       &metapb.Region{Id: 1, Peers: peers[:3]},
+		Leader:       peers[0],
+		PendingPeers: peers[1:3],
+	}
+	cluster.handleRegionHeartbeat(origin)
+	checkPendingPeerCount([]int{0, 1, 1, 0}, cluster, c)
+	newRegion := &core.RegionInfo{
+		Region:       &metapb.Region{Id: 1, Peers: peers[1:]},
+		Leader:       peers[1],
+		PendingPeers: peers[3:4],
+	}
+	cluster.handleRegionHeartbeat(newRegion)
+	checkPendingPeerCount([]int{0, 0, 0, 1}, cluster, c)
+}
+
+func checkPendingPeerCount(except []int, cache *clusterInfo, c *C) {
+	for i, e := range except {
+		s := cache.Stores.GetStore(uint64(i + 1))
+		c.Assert(s.PendingPeerCount, Equals, e)
+	}
 }
 
 var _ = Suite(&testClusterUtilSuite{})

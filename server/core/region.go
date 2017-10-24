@@ -245,19 +245,21 @@ func (rm *regionMap) Delete(id uint64) {
 
 // RegionsInfo for export
 type RegionsInfo struct {
-	tree      *regionTree
-	regions   *regionMap            // regionID -> regionInfo
-	leaders   map[uint64]*regionMap // storeID -> regionID -> regionInfo
-	followers map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	tree         *regionTree
+	regions      *regionMap            // regionID -> regionInfo
+	leaders      map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	followers    map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	pendingPeers map[uint64]*regionMap // storeID -> regionID -> regionInfo
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
 func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
-		tree:      newRegionTree(),
-		regions:   newRegionMap(),
-		leaders:   make(map[uint64]*regionMap),
-		followers: make(map[uint64]*regionMap),
+		tree:         newRegionTree(),
+		regions:      newRegionMap(),
+		leaders:      make(map[uint64]*regionMap),
+		followers:    make(map[uint64]*regionMap),
+		pendingPeers: make(map[uint64]*regionMap),
 	}
 }
 
@@ -319,6 +321,16 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) {
 			store.Put(region)
 		}
 	}
+
+	for _, peer := range region.PendingPeers {
+		storeID := peer.GetStoreId()
+		store, ok := r.pendingPeers[storeID]
+		if !ok {
+			store = newRegionMap()
+			r.pendingPeers[storeID] = store
+		}
+		store.Put(region)
+	}
 }
 
 // RemoveRegion remove RegionInfo from regionTree and regionMap
@@ -332,6 +344,10 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 		storeID := peer.GetStoreId()
 		r.leaders[storeID].Delete(region.GetId())
 		r.followers[storeID].Delete(region.GetId())
+	}
+	for _, peer := range region.PendingPeers {
+		storeID := peer.GetStoreId()
+		r.pendingPeers[storeID].Delete(region.GetId())
 	}
 }
 
@@ -370,6 +386,11 @@ func (r *RegionsInfo) GetRegionCount() int {
 // GetStoreRegionCount get  the total count of  a store's leader and follower RegionInfo by storeID
 func (r *RegionsInfo) GetStoreRegionCount(storeID uint64) int {
 	return r.GetStoreLeaderCount(storeID) + r.GetStoreFollowerCount(storeID)
+}
+
+// GetStorePendingPeerCount gets the total count of  a store's region that includes pending peer
+func (r *RegionsInfo) GetStorePendingPeerCount(storeID uint64) int {
+	return r.pendingPeers[storeID].Len()
 }
 
 // GetStoreLeaderCount get the total count of a store's leader RegionInfo

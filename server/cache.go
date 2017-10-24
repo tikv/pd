@@ -339,27 +339,7 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 func (c *clusterInfo) updateStoreStatus(id uint64) {
 	c.Stores.SetLeaderCount(id, c.Regions.GetStoreLeaderCount(id))
 	c.Stores.SetRegionCount(id, c.Regions.GetStoreRegionCount(id))
-}
-
-func (c *clusterInfo) updateStorePendingPeerCount(origin []*metapb.Peer, new []*metapb.Peer) {
-	m := make(map[uint64]int)
-	for _, o := range origin {
-		if num, ok := m[o.GetStoreId()]; ok {
-			m[o.GetStoreId()] = num - 1
-		} else {
-			m[o.GetStoreId()] = -1
-		}
-	}
-	for _, n := range new {
-		if num, ok := m[n.GetStoreId()]; ok {
-			m[n.GetStoreId()] = num + 1
-		} else {
-			m[n.GetStoreId()] = 1
-		}
-	}
-	for storeID, v := range m {
-		c.Stores.UpdatePendingPeerCount(storeID, v)
-	}
+	c.Stores.SetPendingPeerCount(id, c.Regions.GetStorePendingPeerCount(id))
 }
 
 // handleRegionHeartbeat updates the region information.
@@ -426,9 +406,6 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		if origin != nil {
 			for _, p := range origin.Peers {
 				c.updateStoreStatus(p.GetStoreId())
-			}
-			if len(origin.PendingPeers) > 0 || len(region.PendingPeers) > 0 {
-				c.updateStorePendingPeerCount(origin.PendingPeers, region.PendingPeers)
 			}
 		}
 		for _, p := range region.Peers {
