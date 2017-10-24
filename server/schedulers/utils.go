@@ -140,32 +140,40 @@ func minDuration(a, b time.Duration) time.Duration {
 }
 
 const (
-	bootstrapBalanceCount = 10
-	bootstrapBalanceDiff  = 2
+	varianceDecreaseRatio = 0.9
+	maxDiffRatio          = 0.1
 )
-
-// minBalanceDiff returns the minimal diff to do balance. The formula is based
-// on experience to let the diff increase alone with the count slowly.
-func minBalanceDiff(count uint64) float64 {
-	if count < bootstrapBalanceCount {
-		return bootstrapBalanceDiff
-	}
-	return math.Sqrt(float64(count))
-}
 
 // shouldBalance returns true if we should balance the source and target store.
 // The min balance diff provides a buffer to make the cluster stable, so that we
 // don't need to schedule very frequently.
-func shouldBalance(source, target *core.StoreInfo, kind core.ResourceKind) bool {
-	sourceCount := source.ResourceCount(kind)
+func shouldBalance(source, target *core.StoreInfo, kind core.ResourceKind, region *core.RegionInfo) bool {
+	variance := func(score1 float64, score2 float64) float64 {
+		avg := (score1 + score2) / 2
+		sum := math.Pow(score1-avg, 2) + math.Pow(score2-avg, 2)
+		return math.Sqrt(sum)
+	}
+
 	sourceScore := source.ResourceScore(kind)
 	targetScore := target.ResourceScore(kind)
 	if targetScore >= sourceScore {
 		return false
 	}
-	diffRatio := 1 - targetScore/sourceScore
-	diffCount := diffRatio * float64(sourceCount)
-	return diffCount >= minBalanceDiff(sourceCount)
+	size := region.ApproximateSize
+	sourceNextScore := source.EstimateResourceScore(kind, -int64(size))
+	targetNextScore := target.EstimateResourceScore(kind, int64(size))
+
+	diffRatio := float64(size) / float64(source.ResourceSize(kind))
+	// when size is small, should balance if targetScore will not exceed sourceScore after moving
+	if diffRatio < maxDiffRatio {
+		return sourceNextScore >= targetNextScore
+	}
+
+	// when region size is large enough, to avoid large region moving between two store over and over
+	// just balance if variance decrease make progress
+	preV := variance(float64(sourceScore), float64(targetScore))
+	nextV := variance(float64(sourceNextScore), float64(targetNextScore))
+	return nextV < preV*varianceDecreaseRatio
 }
 
 func adjustBalanceLimit(cluster schedule.Cluster, kind core.ResourceKind) uint64 {
