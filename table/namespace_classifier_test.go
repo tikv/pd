@@ -14,9 +14,8 @@
 package table
 
 import (
-	"sort"
-
 	"bytes"
+	"sort"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -40,7 +39,7 @@ const (
 	globalStoreID = 987
 )
 
-var tableStartKey = []byte{'t', 0, 0, 0, '1', 0, 0, 0, 0}
+var tableStartKey = encodeBytes([]byte{'t', 0, 0, 0, '1', 0, 0, 0, 0})
 
 func (d mockTableIDDecoderForTarget) DecodeTableID(key Key) int64 {
 	return targetTableID
@@ -105,7 +104,7 @@ func (s *testTableNamespaceSuite) TestTableNameSpaceGetAllNamespace(c *C) {
 	classifier := s.newClassifier(c, mockTableIDDecoderForTarget{})
 	ns := classifier.GetAllNamespaces()
 	sort.Strings(ns)
-	c.Assert(ns, DeepEquals, []string{"test1", "test2"})
+	c.Assert(ns, DeepEquals, []string{"global", "test1", "test2"})
 }
 
 func (s *testTableNamespaceSuite) TestTableNameSpaceGetStoreNamespace(c *C) {

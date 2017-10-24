@@ -123,6 +123,7 @@ func (c *tableNamespaceClassifier) GetAllNamespaces() []string {
 	for name := range c.nsInfo.namespaces {
 		nsList = append(nsList, name)
 	}
+	nsList = append(nsList, namespace.DefaultNamespace)
 	return nsList
 }
 
@@ -211,6 +212,10 @@ func (c *tableNamespaceClassifier) CreateNamespace(name string) error {
 	matched := r.MatchString(name)
 	if !matched {
 		return errors.New("Name should be 0-9, a-z or A-Z")
+	}
+
+	if name == namespace.DefaultNamespace {
+		return errors.Errorf("%s is reserved as default namespace", name)
 	}
 
 	if n := c.nsInfo.getNamespaceByName(name); n != nil {
