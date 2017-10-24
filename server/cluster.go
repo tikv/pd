@@ -597,64 +597,7 @@ func (c *RaftCluster) collectMetrics() {
 	cluster := c.cachedCluster
 	statsMap := newStoreStatisticsMap(c.coordinator.opt, c.GetNamespaceClassifier())
 	for _, s := range cluster.GetStores() {
-<<<<<<< HEAD
 		statsMap.Observe(s)
-=======
-		// Store state.
-		switch s.GetState() {
-		case metapb.StoreState_Up:
-			if s.DownTime() >= c.coordinator.opt.GetMaxStoreDownTime() {
-				storeDownCount++
-			} else if s.IsDisconnected() {
-				storeDisconnectedCount++
-			} else {
-				storeUpCount++
-			}
-		case metapb.StoreState_Offline:
-			storeOfflineCount++
-		case metapb.StoreState_Tombstone:
-			storeTombstoneCount++
-		}
-		if s.IsTombstone() {
-			continue
-		}
-		if s.IsLowSpace() {
-			storeLowSpaceCount++
-		}
-
-		// Store stats.
-		storageSize += s.StorageSize()
-		storageCapacity += s.Stats.GetCapacity()
-
-		// Balance score.
-		minLeaderScore = math.Min(minLeaderScore, s.LeaderScore())
-		maxLeaderScore = math.Max(maxLeaderScore, s.LeaderScore())
-		minRegionScore = math.Min(minRegionScore, s.RegionScore())
-		maxRegionScore = math.Max(maxRegionScore, s.RegionScore())
-
-		store := fmt.Sprintf("store_%d", s.GetId())
-		storeStatusGauge.WithLabelValues(store, "region_size").Set(float64(s.RegionSize))
-		storeStatusGauge.WithLabelValues(store, "region_count").Set(float64(s.RegionCount))
-		storeStatusGauge.WithLabelValues(store, "leader_size").Set(float64(s.LeaderSize))
-		storeStatusGauge.WithLabelValues(store, "leader_count").Set(float64(s.LeaderCount))
-	}
-
-	metrics := make(map[string]float64)
-	metrics["store_up_count"] = float64(storeUpCount)
-	metrics["store_disconnected_count"] = float64(storeDisconnectedCount)
-	metrics["store_down_count"] = float64(storeDownCount)
-	metrics["store_offline_count"] = float64(storeOfflineCount)
-	metrics["store_tombstone_count"] = float64(storeTombstoneCount)
-	metrics["store_low_space_count"] = float64(storeLowSpaceCount)
-	metrics["region_count"] = float64(cluster.getRegionCount())
-	metrics["storage_size"] = float64(storageSize)
-	metrics["storage_capacity"] = float64(storageCapacity)
-	metrics["leader_balance_ratio"] = 1 - minLeaderScore/maxLeaderScore
-	metrics["region_balance_ratio"] = 1 - minRegionScore/maxRegionScore
-
-	for label, value := range metrics {
-		clusterStatusGauge.WithLabelValues(label).Set(value)
->>>>>>> bc2f853... add metrics
 	}
 	statsMap.Collect()
 
