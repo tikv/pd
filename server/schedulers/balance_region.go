@@ -117,7 +117,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 
 	target := cluster.GetStore(newPeer.GetStoreId())
-	if !shouldBalance(source, target, core.RegionKind) {
+	if !shouldBalance(source, target, core.RegionKind, region) {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
 	}

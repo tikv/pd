@@ -445,8 +445,8 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 	}
 
 	for _, store := range cache.Stores.GetStores() {
-		c.Assert(store.LeaderCount, Equals, cache.Regions.GetStoreLeaderCount(store.GetId()))
-		c.Assert(store.RegionCount, Equals, cache.Regions.GetStoreRegionCount(store.GetId()))
+		c.Assert(store.LeaderSize, Equals, cache.Regions.GetStoreLeaderRegionSize(store.GetId()))
+		c.Assert(store.RegionSize, Equals, cache.Regions.GetStoreRegionSize(store.GetId()))
 	}
 
 	// Test with kv.

@@ -29,11 +29,12 @@ import (
 // RegionInfo records detail region info.
 type RegionInfo struct {
 	*metapb.Region
-	Leader       *metapb.Peer
-	DownPeers    []*pdpb.PeerStats
-	PendingPeers []*metapb.Peer
-	WrittenBytes uint64
-	ReadBytes    uint64
+	Leader          *metapb.Peer
+	DownPeers       []*pdpb.PeerStats
+	PendingPeers    []*metapb.Peer
+	WrittenBytes    uint64
+	ReadBytes       uint64
+	ApproximateSize uint64
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -55,12 +56,13 @@ func (r *RegionInfo) Clone() *RegionInfo {
 		pendingPeers = append(pendingPeers, proto.Clone(peer).(*metapb.Peer))
 	}
 	return &RegionInfo{
-		Region:       proto.Clone(r.Region).(*metapb.Region),
-		Leader:       proto.Clone(r.Leader).(*metapb.Peer),
-		DownPeers:    downPeers,
-		PendingPeers: pendingPeers,
-		WrittenBytes: r.WrittenBytes,
-		ReadBytes:    r.ReadBytes,
+		Region:          proto.Clone(r.Region).(*metapb.Region),
+		Leader:          proto.Clone(r.Leader).(*metapb.Peer),
+		DownPeers:       downPeers,
+		PendingPeers:    pendingPeers,
+		WrittenBytes:    r.WrittenBytes,
+		ReadBytes:       r.ReadBytes,
+		ApproximateSize: r.ApproximateSize,
 	}
 }
 
@@ -178,8 +180,9 @@ type HotRegionsStat struct {
 
 // regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.
 type regionMap struct {
-	m   map[uint64]*regionEntry
-	ids []uint64
+	m         map[uint64]*regionEntry
+	ids       []uint64
+	totalSize uint64
 }
 
 type regionEntry struct {
@@ -189,7 +192,8 @@ type regionEntry struct {
 
 func newRegionMap() *regionMap {
 	return &regionMap{
-		m: make(map[uint64]*regionEntry),
+		m:         make(map[uint64]*regionEntry),
+		totalSize: 0,
 	}
 }
 
@@ -212,6 +216,7 @@ func (rm *regionMap) Get(id uint64) *RegionInfo {
 
 func (rm *regionMap) Put(region *RegionInfo) {
 	if old, ok := rm.m[region.GetId()]; ok {
+		rm.totalSize += region.ApproximateSize - old.ApproximateSize
 		old.RegionInfo = region
 		return
 	}
@@ -220,6 +225,7 @@ func (rm *regionMap) Put(region *RegionInfo) {
 		pos:        len(rm.ids),
 	}
 	rm.ids = append(rm.ids, region.GetId())
+	rm.totalSize += region.ApproximateSize
 }
 
 func (rm *regionMap) RandomRegion() *RegionInfo {
@@ -240,7 +246,15 @@ func (rm *regionMap) Delete(id uint64) {
 		rm.ids[last.pos] = last.GetId()
 		delete(rm.m, id)
 		rm.ids = rm.ids[:len-1]
+		rm.totalSize -= old.ApproximateSize
 	}
+}
+
+func (rm *regionMap) TotalSize() uint64 {
+	if rm.Len() == 0 {
+		return 0
+	}
+	return rm.totalSize
 }
 
 // RegionsInfo for export
@@ -351,6 +365,22 @@ func (r *RegionsInfo) GetRegions() []*RegionInfo {
 		regions = append(regions, region.Clone())
 	}
 	return regions
+}
+
+// GetStoreLeaderRegionSize get total size of store's leader regions
+func (r *RegionsInfo) GetStoreLeaderRegionSize(storeID uint64) uint64 {
+	return r.leaders[storeID].TotalSize()
+}
+
+// GetStoreFollowerRegionSize get total size of store's follower regions
+func (r *RegionsInfo) GetStoreFollowerRegionSize(storeID uint64) uint64 {
+	return r.followers[storeID].TotalSize()
+}
+
+// GetStoreRegionSize get total size of store's regions
+func (r *RegionsInfo) GetStoreRegionSize(storeID uint64) uint64 {
+
+	return r.GetStoreLeaderRegionSize(storeID) + r.GetStoreFollowerRegionSize(storeID)
 }
 
 // GetMetaRegions get a set of metapb.Region from regionMap

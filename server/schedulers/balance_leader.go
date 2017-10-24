@@ -82,7 +82,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Op
 
 	source := cluster.GetStore(region.Leader.GetStoreId())
 	target := cluster.GetStore(newLeader.GetStoreId())
-	if !shouldBalance(source, target, core.LeaderKind) {
+	if !shouldBalance(source, target, core.LeaderKind, region) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}

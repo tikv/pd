@@ -32,6 +32,8 @@ type StoreInfo struct {
 	blocked         bool
 	LeaderCount     int
 	RegionCount     int
+	LeaderSize      uint64
+	RegionSize      uint64
 	LastHeartbeatTS time.Time
 	LeaderWeight    float64
 	RegionWeight    float64
@@ -54,6 +56,8 @@ func (s *StoreInfo) Clone() *StoreInfo {
 		blocked:         s.blocked,
 		LeaderCount:     s.LeaderCount,
 		RegionCount:     s.RegionCount,
+		LeaderSize:      s.LeaderSize,
+		RegionSize:      s.RegionSize,
 		LastHeartbeatTS: s.LastHeartbeatTS,
 		LeaderWeight:    s.LeaderWeight,
 		RegionWeight:    s.RegionWeight,
@@ -95,30 +99,22 @@ func (s *StoreInfo) DownTime() time.Duration {
 	return time.Since(s.LastHeartbeatTS)
 }
 
-func (s *StoreInfo) leaderCount() uint64 {
-	return uint64(s.LeaderCount)
-}
-
 const minWeight = 1e-6
 
 // LeaderScore returns the store's leader score: leaderCount / leaderWeight.
 func (s *StoreInfo) LeaderScore() float64 {
 	if s.LeaderWeight <= 0 {
-		return float64(s.LeaderCount) / minWeight
+		return float64(s.LeaderSize) / minWeight
 	}
-	return float64(s.LeaderCount) / s.LeaderWeight
+	return float64(s.LeaderSize) / s.LeaderWeight
 }
 
-func (s *StoreInfo) regionCount() uint64 {
-	return uint64(s.RegionCount)
-}
-
-// RegionScore returns the store's region score: regionCount / regionWeight.
+// RegionScore returns the store's region score: regionSize / regionWeight.
 func (s *StoreInfo) RegionScore() float64 {
 	if s.RegionWeight <= 0 {
-		return float64(s.RegionCount) / minWeight
+		return float64(s.RegionSize / minWeight
 	}
-	return float64(s.RegionCount) / s.RegionWeight
+	return float64(s.RegionSize / s.RegionWeight
 }
 
 // StorageSize returns store's used storage size reported from tikv.
@@ -145,9 +141,21 @@ func (s *StoreInfo) IsLowSpace() bool {
 func (s *StoreInfo) ResourceCount(kind ResourceKind) uint64 {
 	switch kind {
 	case LeaderKind:
-		return s.leaderCount()
+		return uint64(s.LeaderCount)
 	case RegionKind:
-		return s.regionCount()
+		return uint64(s.RegionCount)
+	default:
+		return 0
+	}
+}
+
+// ResourceSize returns size of leader/region in the store
+func (s *StoreInfo) ResourceSize(kind ResourceKind) uint64 {
+	switch kind {
+	case LeaderKind:
+		return s.LeaderSize
+	case RegionKind:
+		return s.RegionSize
 	default:
 		return 0
 	}
@@ -159,6 +167,32 @@ func (s *StoreInfo) ResourceScore(kind ResourceKind) float64 {
 	case LeaderKind:
 		return s.LeaderScore()
 	case RegionKind:
+		return s.RegionScore()
+	default:
+		return 0
+	}
+}
+
+// EstimateResourceScore returns score of leader/region in the score if plus or minus diffSize
+func (s *StoreInfo) EstimateResourceScore(kind ResourceKind, diffSize int64) float64 {
+	switch kind {
+	case LeaderKind:
+		oldLeaderSize := s.LeaderSize
+		if diffSize < 0 {
+			s.LeaderSize -= uint64(-diffSize)
+		} else {
+			s.LeaderSize += uint64(diffSize)
+		}
+		defer func() { s.LeaderSize = oldLeaderSize }()
+		return s.LeaderScore()
+	case RegionKind:
+		oldRegionSize := s.RegionSize
+		if diffSize < 0 {
+			s.RegionSize -= uint64(-diffSize)
+		} else {
+			s.RegionSize += uint64(diffSize)
+		}
+		defer func() { s.RegionSize = oldRegionSize }()
 		return s.RegionScore()
 	default:
 		return 0
@@ -332,6 +366,20 @@ func (s *StoresInfo) SetLeaderCount(storeID uint64, leaderCount int) {
 func (s *StoresInfo) SetRegionCount(storeID uint64, regionCount int) {
 	if store, ok := s.stores[storeID]; ok {
 		store.RegionCount = regionCount
+	}
+}
+
+// SetLeaderSize set the leader count to a storeInfo
+func (s *StoresInfo) SetLeaderSize(storeID uint64, leaderSize uint64) {
+	if store, ok := s.stores[storeID]; ok {
+		store.LeaderSize = leaderSize
+	}
+}
+
+// SetRegionSize set the region count to a storeInfo
+func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize uint64) {
+	if store, ok := s.stores[storeID]; ok {
+		store.RegionSize = regionSize
 	}
 }
 
