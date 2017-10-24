@@ -120,6 +120,16 @@ func (h *Handler) AddBalanceLeaderScheduler() error {
 	return h.AddScheduler("balance-leader")
 }
 
+// AddBalanceRegionScheduler adds a balance-region-scheduler.
+func (h *Handler) AddBalanceRegionScheduler() error {
+	return h.AddScheduler("balance-region")
+}
+
+// AddBalanceHotRegionScheduler adds a balance-hot-region-scheduler.
+func (h *Handler) AddBalanceHotRegionScheduler() error {
+	return h.AddScheduler("hot-region")
+}
+
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
 	return h.AddScheduler("grant-leader", strconv.FormatUint(storeID, 10))
