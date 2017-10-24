@@ -42,7 +42,9 @@ func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, pe
 			leader = peer
 		}
 	}
-	return core.NewRegionInfo(&region, leader)
+	regionInfo := core.NewRegionInfo(&region, leader)
+	regionInfo.ApproximateSize = 10
+	return regionInfo
 }
 
 func (s *testOperatorSuite) TestOperatorStep(c *C) {
@@ -97,4 +99,71 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	res, err := json.Marshal(op)
 	c.Assert(err, IsNil)
 	c.Assert(len(res), Equals, len(op.String())+2)
+}
+
+func (s *testOperatorSuite) TestInfluence(c *C) {
+	region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	stores := core.NewStoresInfo()
+	stores.SetStore(&core.StoreInfo{
+		Store:       &metapb.Store{Id: 1},
+		LeaderSize:  20,
+		LeaderCount: 2,
+		RegionSize:  45,
+		RegionCount: 3,
+	})
+	stores.SetStore(&core.StoreInfo{
+		Store:       &metapb.Store{Id: 2},
+		LeaderSize:  0,
+		LeaderCount: 0,
+		RegionSize:  30,
+		RegionCount: 1,
+	})
+
+	AddPeer{ToStore: 2, PeerID: 2}.Influence(stores, region)
+	c.Assert(stores.GetStore(2).OpInfluence, DeepEquals, core.StoreDiff{
+		LeaderSize:  0,
+		LeaderCount: 0,
+		RegionSize:  10,
+		RegionCount: 1,
+	})
+
+	TransferLeader{FromStore: 1, ToStore: 2}.Influence(stores, region)
+	c.Assert(stores.GetStore(1).OpInfluence, DeepEquals, core.StoreDiff{
+		LeaderSize:  -10,
+		LeaderCount: -1,
+		RegionSize:  0,
+		RegionCount: 0,
+	})
+	c.Assert(stores.GetStore(2).OpInfluence, DeepEquals, core.StoreDiff{
+		LeaderSize:  10,
+		LeaderCount: 1,
+		RegionSize:  10,
+		RegionCount: 1,
+	})
+
+	RemovePeer{FromStore: 1}.Influence(stores, region)
+	c.Assert(stores.GetStore(1).OpInfluence, DeepEquals, core.StoreDiff{
+		LeaderSize:  -10,
+		LeaderCount: -1,
+		RegionSize:  -10,
+		RegionCount: -1,
+	})
+	c.Assert(stores.GetStore(2).OpInfluence, DeepEquals, core.StoreDiff{
+		LeaderSize:  10,
+		LeaderCount: 1,
+		RegionSize:  10,
+		RegionCount: 1,
+	})
+
+	store := stores.GetStore(1)
+	c.Assert(store.ResourceSize(core.LeaderKind), Equals, uint64(10))
+	c.Assert(store.ResourceCount(core.LeaderKind), Equals, uint64(1))
+	c.Assert(store.ResourceSize(core.RegionKind), Equals, uint64(35))
+	c.Assert(store.ResourceCount(core.RegionKind), Equals, uint64(2))
+
+	store = stores.GetStore(2)
+	c.Assert(store.ResourceSize(core.LeaderKind), Equals, uint64(10))
+	c.Assert(store.ResourceCount(core.LeaderKind), Equals, uint64(1))
+	c.Assert(store.ResourceSize(core.RegionKind), Equals, uint64(40))
+	c.Assert(store.ResourceCount(core.RegionKind), Equals, uint64(2))
 }

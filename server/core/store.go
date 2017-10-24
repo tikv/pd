@@ -37,6 +37,22 @@ type StoreInfo struct {
 	LastHeartbeatTS time.Time
 	LeaderWeight    float64
 	RegionWeight    float64
+	OpInfluence     StoreDiff
+}
+
+// StoreDiff record influence that unfinished oeprators make
+type StoreDiff struct {
+	RegionSize  int
+	RegionCount int
+	LeaderSize  int
+	LeaderCount int
+}
+
+func (s StoreDiff) clear() {
+	s.RegionSize = 0
+	s.RegionCount = 0
+	s.LeaderSize = 0
+	s.LeaderCount = 0
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -61,6 +77,7 @@ func (s *StoreInfo) Clone() *StoreInfo {
 		LastHeartbeatTS: s.LastHeartbeatTS,
 		LeaderWeight:    s.LeaderWeight,
 		RegionWeight:    s.RegionWeight,
+		OpInfluence:     s.OpInfluence,
 	}
 }
 
@@ -99,22 +116,44 @@ func (s *StoreInfo) DownTime() time.Duration {
 	return time.Since(s.LastHeartbeatTS)
 }
 
+func (s *StoreInfo) leaderCount() uint64 {
+	return uint64(s.LeaderCount + s.OpInfluence.LeaderCount)
+}
+
+func (s *StoreInfo) leaderSize() uint64 {
+	if s.OpInfluence.LeaderSize < 0 {
+		return s.LeaderSize - uint64(-s.OpInfluence.LeaderSize)
+	}
+	return s.LeaderSize + uint64(s.OpInfluence.LeaderSize)
+}
+
+func (s *StoreInfo) regionCount() uint64 {
+	return uint64(s.RegionCount + s.OpInfluence.RegionCount)
+}
+
+func (s *StoreInfo) regionSize() uint64 {
+	if s.OpInfluence.RegionSize < 0 {
+		return s.RegionSize - uint64(-s.OpInfluence.RegionSize)
+	}
+	return s.RegionSize + uint64(s.OpInfluence.RegionSize)
+}
+
 const minWeight = 1e-6
 
 // LeaderScore returns the store's leader score: leaderCount / leaderWeight.
 func (s *StoreInfo) LeaderScore() float64 {
 	if s.LeaderWeight <= 0 {
-		return float64(s.LeaderSize) / minWeight
+		return float64(s.leaderSize()) / minWeight
 	}
-	return float64(s.LeaderSize) / s.LeaderWeight
+	return float64(s.leaderSize()) / s.LeaderWeight
 }
 
 // RegionScore returns the store's region score: regionSize / regionWeight.
 func (s *StoreInfo) RegionScore() float64 {
 	if s.RegionWeight <= 0 {
-		return float64(s.RegionSize / minWeight
+		return float64(s.regionSize()) / minWeight
 	}
-	return float64(s.RegionSize / s.RegionWeight
+	return float64(s.regionSize()) / s.RegionWeight
 }
 
 // StorageSize returns store's used storage size reported from tikv.
@@ -141,9 +180,9 @@ func (s *StoreInfo) IsLowSpace() bool {
 func (s *StoreInfo) ResourceCount(kind ResourceKind) uint64 {
 	switch kind {
 	case LeaderKind:
-		return uint64(s.LeaderCount)
+		return s.leaderCount()
 	case RegionKind:
-		return uint64(s.RegionCount)
+		return s.regionCount()
 	default:
 		return 0
 	}
@@ -153,9 +192,9 @@ func (s *StoreInfo) ResourceCount(kind ResourceKind) uint64 {
 func (s *StoreInfo) ResourceSize(kind ResourceKind) uint64 {
 	switch kind {
 	case LeaderKind:
-		return s.LeaderSize
+		return s.leaderSize()
 	case RegionKind:
-		return s.RegionSize
+		return s.regionSize()
 	default:
 		return 0
 	}
@@ -366,6 +405,13 @@ func (s *StoresInfo) SetLeaderCount(storeID uint64, leaderCount int) {
 func (s *StoresInfo) SetRegionCount(storeID uint64, regionCount int) {
 	if store, ok := s.stores[storeID]; ok {
 		store.RegionCount = regionCount
+	}
+}
+
+// ClearOpInfluence reset storeDiff to zero
+func (s *StoresInfo) ClearOpInfluence() {
+	for _, store := range s.stores {
+		store.OpInfluence.clear()
 	}
 }
 

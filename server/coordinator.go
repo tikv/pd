@@ -86,6 +86,9 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 }
 
 func (c *coordinator) dispatch(region *core.RegionInfo) {
+	// Recalculate opInfluence based on existed operator but not finished
+	c.cluster.recalculateOpInfluence(c.getOperators())
+
 	// Check existed operator.
 	if op := c.getOperator(region.GetId()); op != nil {
 		timeout := op.IsTimeout()
@@ -357,6 +360,7 @@ func (c *coordinator) addOperator(op *schedule.Operator) bool {
 
 	if region := c.cluster.GetRegion(op.RegionID()); region != nil {
 		if step := op.Check(region); step != nil {
+			c.cluster.opInfluence(op)
 			c.sendScheduleCommand(region, step)
 		}
 	}

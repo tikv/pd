@@ -65,14 +65,14 @@ func (s *testBalanceSpeedSuite) TestBalanceSpeed(c *C) {
 		{10000, 9901, false},
 	}
 
-	// s.testBalanceSpeed(c, testCases, 1)
-	// s.testBalanceSpeed(c, testCases, 10)
-	// s.testBalanceSpeed(c, testCases, 100)
-	// s.testBalanceSpeed(c, testCases, 1000)
+	s.testBalanceSpeed(c, testCases, 1)
+	s.testBalanceSpeed(c, testCases, 10)
+	s.testBalanceSpeed(c, testCases, 100)
+	s.testBalanceSpeed(c, testCases, 1000)
 }
 
 func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedCase, capaGB uint64) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	// tc := newMockCluster(core.NewMockIDAllocator())
 
 	// for _, t := range tests {
 	// 	tc.addLeaderStore(1, int(t.sourceCount))

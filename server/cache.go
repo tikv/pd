@@ -343,6 +343,28 @@ func (c *clusterInfo) updateStoreStatus(id uint64) {
 	c.Stores.SetRegionSize(id, c.Regions.GetStoreFollowerRegionSize(id))
 }
 
+func (c *clusterInfo) opInfluence(op *schedule.Operator) {
+	c.Lock()
+	defer c.Unlock()
+
+	c.opInfluenceLocked(op)
+}
+
+func (c *clusterInfo) opInfluenceLocked(op *schedule.Operator) {
+	op.Influence(c.Stores, c.BasicCluster.GetRegion(op.RegionID()))
+}
+
+func (c *clusterInfo) recalculateOpInfluence(operators []*schedule.Operator) {
+	c.Lock()
+	defer c.Unlock()
+
+	for _, op := range operators {
+		if !op.IsTimeout() && !op.IsFinish() {
+			c.opInfluenceLocked(op)
+		}
+	}
+}
+
 // handleRegionHeartbeat updates the region information.
 func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	region = region.Clone()
@@ -415,6 +437,9 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		for _, p := range region.Peers {
 			c.updateStoreStatus(p.GetStoreId())
 		}
+
+		c.Stores.ClearOpInfluence()
+		operatorCounter.WithLabelValues("opinfluence", "clear").Inc()
 	}
 
 	c.BasicCluster.UpdateWriteStatus(region)
