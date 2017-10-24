@@ -15,7 +15,6 @@ package server
 
 import (
 	"fmt"
-	"math"
 	"path"
 	"sync"
 	"time"
@@ -596,68 +595,11 @@ func (c *RaftCluster) storeIsEmpty(storeID uint64) bool {
 
 func (c *RaftCluster) collectMetrics() {
 	cluster := c.cachedCluster
-
-	storeUpCount := 0
-	storeDisconnectedCount := 0
-	storeDownCount := 0
-	storeOfflineCount := 0
-	storeTombstoneCount := 0
-	storeLowSpaceCount := 0
-	storageSize := uint64(0)
-	storageCapacity := uint64(0)
-	minLeaderScore, maxLeaderScore := math.MaxFloat64, float64(0.0)
-	minRegionScore, maxRegionScore := math.MaxFloat64, float64(0.0)
-
+	statsMap := newStoreStatisticsMap(c.coordinator.opt, c.GetNamespaceClassifier())
 	for _, s := range cluster.GetStores() {
-		// Store state.
-		switch s.GetState() {
-		case metapb.StoreState_Up:
-			if s.DownTime() >= c.coordinator.opt.GetMaxStoreDownTime() {
-				storeDownCount++
-			} else if s.IsDisconnected() {
-				storeDisconnectedCount++
-			} else {
-				storeUpCount++
-			}
-		case metapb.StoreState_Offline:
-			storeOfflineCount++
-		case metapb.StoreState_Tombstone:
-			storeTombstoneCount++
-		}
-		if s.IsTombstone() {
-			continue
-		}
-		if s.IsLowSpace() {
-			storeLowSpaceCount++
-		}
-
-		// Store stats.
-		storageSize += s.StorageSize()
-		storageCapacity += s.Stats.GetCapacity()
-
-		// Balance score.
-		minLeaderScore = math.Min(minLeaderScore, s.LeaderScore())
-		maxLeaderScore = math.Max(maxLeaderScore, s.LeaderScore())
-		minRegionScore = math.Min(minRegionScore, s.RegionScore())
-		maxRegionScore = math.Max(maxRegionScore, s.RegionScore())
+		statsMap.Observe(s)
 	}
-
-	metrics := make(map[string]float64)
-	metrics["store_up_count"] = float64(storeUpCount)
-	metrics["store_disconnected_count"] = float64(storeDisconnectedCount)
-	metrics["store_down_count"] = float64(storeDownCount)
-	metrics["store_offline_count"] = float64(storeOfflineCount)
-	metrics["store_tombstone_count"] = float64(storeTombstoneCount)
-	metrics["store_low_space_count"] = float64(storeLowSpaceCount)
-	metrics["region_count"] = float64(cluster.getRegionCount())
-	metrics["storage_size"] = float64(storageSize)
-	metrics["storage_capacity"] = float64(storageCapacity)
-	metrics["leader_balance_ratio"] = 1 - minLeaderScore/maxLeaderScore
-	metrics["region_balance_ratio"] = 1 - minRegionScore/maxRegionScore
-
-	for label, value := range metrics {
-		clusterStatusGauge.WithLabelValues(label).Set(value)
-	}
+	statsMap.Collect()
 
 	c.coordinator.collectSchedulerMetrics()
 	c.coordinator.collectHotSpotMetrics()
