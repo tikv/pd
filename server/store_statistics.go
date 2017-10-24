@@ -93,13 +93,9 @@ func (s *storeStatistics) Collect() {
 	}
 }
 
-// It is used for counting up stats of all namespaces.
-const allNamespace = "_all"
-
 type storeStatisticsMap struct {
 	opt        *scheduleOption
 	classifier namespace.Classifier
-	all        *storeStatistics
 	stats      map[string]*storeStatistics
 }
 
@@ -107,7 +103,6 @@ func newStoreStatisticsMap(opt *scheduleOption, classifier namespace.Classifier)
 	return &storeStatisticsMap{
 		opt:        opt,
 		classifier: classifier,
-		all:        newStoreStatistics(opt, allNamespace),
 		stats:      make(map[string]*storeStatistics),
 	}
 }
@@ -120,11 +115,9 @@ func (m *storeStatisticsMap) Observe(store *core.StoreInfo) {
 		m.stats[namespace] = stat
 	}
 	stat.Observe(store)
-	m.all.Observe(store)
 }
 
 func (m *storeStatisticsMap) Collect() {
-	m.all.Collect()
 	for _, s := range m.stats {
 		s.Collect()
 	}
