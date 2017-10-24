@@ -568,8 +568,8 @@ func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
 	checkPendingPeerCount([]int{0, 0, 0, 1}, cluster, c)
 }
 
-func checkPendingPeerCount(except []int, cache *clusterInfo, c *C) {
-	for i, e := range except {
+func checkPendingPeerCount(expect []int, cache *clusterInfo, c *C) {
+	for i, e := range expect {
 		s := cache.Stores.GetStore(uint64(i + 1))
 		c.Assert(s.PendingPeerCount, Equals, e)
 	}

@@ -344,9 +344,6 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 		storeID := peer.GetStoreId()
 		r.leaders[storeID].Delete(region.GetId())
 		r.followers[storeID].Delete(region.GetId())
-	}
-	for _, peer := range region.PendingPeers {
-		storeID := peer.GetStoreId()
 		r.pendingPeers[storeID].Delete(region.GetId())
 	}
 }
