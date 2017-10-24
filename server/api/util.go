@@ -53,3 +53,16 @@ func postJSON(cli *http.Client, url string, data []byte) error {
 	}
 	return nil
 }
+
+func doDelete(url string) error {
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return err
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	res.Body.Close()
+	return nil
+}
