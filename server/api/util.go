@@ -60,6 +60,6 @@ func doDelete(url string) error {
 		return err
 	}
 	res, err := http.DefaultClient.Do(req)
-	defer res.Body.Close()
+	res.Body.Close()
 	return err
 }

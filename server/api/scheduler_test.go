@@ -97,7 +97,7 @@ func (s *testScheduleSuite) testAddAndRemoveScheduler(name, createdName string, 
 	c.Assert(err, IsNil)
 	c.Assert(sches[0], Equals, createdName)
 
-	deleteUrl := fmt.Sprintf("%s/%s", s.urlPrefix, createdName)
-	err = doDelete(deleteUrl)
+	deleteURL := fmt.Sprintf("%s/%s", s.urlPrefix, createdName)
+	err = doDelete(deleteURL)
 	c.Assert(err, IsNil)
 }
