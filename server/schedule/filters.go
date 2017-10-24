@@ -141,10 +141,7 @@ func NewPendingPeerCountFilter(opt Options) Filter {
 }
 
 func (p *pendingPeerCountFilter) filter(store *core.StoreInfo) bool {
-	if store != nil {
-		return store.PendingPeerCount > int(p.opt.GetMaxPendingPeerCount())
-	}
-	return true
+	return store.PendingPeerCount > int(p.opt.GetMaxPendingPeerCount())
 }
 
 func (p *pendingPeerCountFilter) FilterSource(store *core.StoreInfo) bool {
