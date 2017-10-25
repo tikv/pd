@@ -319,6 +319,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			if !s.AllowSchedule() {
 				continue
 			}
+			c.cluster.recalculateInfluence(c.getOperators())
 			if op := s.Schedule(c.cluster); op != nil {
 				c.addOperator(op)
 			}

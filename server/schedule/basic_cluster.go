@@ -47,6 +47,32 @@ type BasicCluster struct {
 	Regions         *core.RegionsInfo
 	WriteStatistics cache.Cache
 	ReadStatistics  cache.Cache
+	OpInfluence     map[uint64]*StoreDiff
+}
+
+// StoreDiff record influence that unfinished oeprators make
+type StoreDiff struct {
+	RegionSize  int
+	RegionCount int
+	LeaderSize  int
+	LeaderCount int
+}
+
+// Clear set storeDiff to zero
+func (d *StoreDiff) Clear() {
+	d.RegionSize = 0
+	d.RegionCount = 0
+	d.LeaderSize = 0
+	d.LeaderCount = 0
+}
+
+func (d *StoreDiff) clone() *StoreDiff {
+	return &StoreDiff{
+		RegionSize:  d.RegionSize,
+		RegionCount: d.RegionCount,
+		LeaderSize:  d.LeaderSize,
+		LeaderCount: d.LeaderCount,
+	}
 }
 
 // NewBasicCluster creates a BasicCluster
@@ -56,6 +82,7 @@ func NewBasicCluster() *BasicCluster {
 		Regions:         core.NewRegionsInfo(),
 		ReadStatistics:  cache.NewCache(statCacheMaxLen, cache.TwoQueueCache),
 		WriteStatistics: cache.NewCache(statCacheMaxLen, cache.TwoQueueCache),
+		OpInfluence:     make(map[uint64]*StoreDiff),
 	}
 }
 
@@ -99,6 +126,15 @@ func (bc *BasicCluster) GetFollowerStores(region *core.RegionInfo) []*core.Store
 // GetLeaderStore returns all Stores that contains the region's leader peer.
 func (bc *BasicCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
 	return bc.Stores.GetStore(region.Leader.GetStoreId())
+}
+
+// GetStoreInfluence returns influence that unfinished operators make on specific store
+func (bc *BasicCluster) GetStoreInfluence(id uint64) *StoreDiff {
+	diff, ok := bc.OpInfluence[id]
+	if !ok {
+		return &StoreDiff{}
+	}
+	return diff.clone()
 }
 
 // BlockStore stops balancer from selecting the store.
