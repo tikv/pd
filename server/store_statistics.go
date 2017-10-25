@@ -14,7 +14,6 @@
 package server
 
 import (
-	"fmt"
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -72,14 +71,12 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	s.LeaderCount += store.LeaderCount
 
 	id := strconv.FormatUint(store.GetId(), 10)
-	balanceScoreGauge.WithLabelValues(s.namespace, id, "region").Set(store.RegionScore())
-	balanceScoreGauge.WithLabelValues(s.namespace, id, "leader").Set(store.LeaderScore())
-
-	storeID := fmt.Sprintf("store_%d", store.GetId())
-	storeStatusGauge.WithLabelValues(storeID, "region_size").Set(float64(store.RegionSize))
-	storeStatusGauge.WithLabelValues(storeID, "region_count").Set(float64(store.RegionCount))
-	storeStatusGauge.WithLabelValues(storeID, "leader_size").Set(float64(store.LeaderSize))
-	storeStatusGauge.WithLabelValues(storeID, "leader_count").Set(float64(store.LeaderCount))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "region_score").Set(store.RegionScore())
+	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_score").Set(store.LeaderScore())
+	storeStatusGauge.WithLabelValues(s.namespace, id, "region_size").Set(float64(store.RegionSize))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "region_count").Set(float64(store.RegionCount))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_size").Set(float64(store.LeaderSize))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_count").Set(float64(store.LeaderCount))
 }
 
 func (s *storeStatistics) Collect() {
