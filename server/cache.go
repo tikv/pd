@@ -341,7 +341,7 @@ func (c *clusterInfo) updateStoreStatus(id uint64) {
 	c.Stores.SetRegionCount(id, c.Regions.GetStoreRegionCount(id))
 	c.Stores.SetPendingPeerCount(id, c.Regions.GetStorePendingPeerCount(id))
 	c.Stores.SetLeaderSize(id, c.Regions.GetStoreLeaderRegionSize(id))
-	c.Stores.SetRegionSize(id, c.Regions.GetStoreFollowerRegionSize(id))
+	c.Stores.SetRegionSize(id, c.Regions.GetStoreRegionSize(id))
 }
 
 func (c *clusterInfo) recalculateInfluence(operators []*schedule.Operator) {
