@@ -392,7 +392,6 @@ func (r *RegionsInfo) GetStoreFollowerRegionSize(storeID uint64) uint64 {
 
 // GetStoreRegionSize get total size of store's regions
 func (r *RegionsInfo) GetStoreRegionSize(storeID uint64) uint64 {
-
 	return r.GetStoreLeaderRegionSize(storeID) + r.GetStoreFollowerRegionSize(storeID)
 }
 
