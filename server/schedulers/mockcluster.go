@@ -232,6 +232,7 @@ func (mc *mockCluster) addLeaderRegionWithReadInfo(regionID uint64, leaderID uin
 const (
 	defaultMaxReplicas          = 3
 	defaultMaxSnapshotCount     = 3
+	defaultMaxPendingPeerCount  = 16
 	defaultMaxStoreDownTime     = time.Hour
 	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
@@ -244,6 +245,7 @@ type MockSchedulerOptions struct {
 	RegionScheduleLimit   uint64
 	LeaderScheduleLimit   uint64
 	MaxSnapshotCount      uint64
+	MaxPendingPeerCount   uint64
 	MaxStoreDownTime      time.Duration
 	MaxReplicas           int
 	LocationLabels        []string
@@ -258,6 +260,7 @@ func newMockSchedulerOptions() *MockSchedulerOptions {
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
 	mso.HotRegionLowThreshold = schedule.HotRegionLowThreshold
+	mso.MaxPendingPeerCount = defaultMaxPendingPeerCount
 	return mso
 }
 
@@ -274,6 +277,11 @@ func (mso *MockSchedulerOptions) GetRegionScheduleLimit() uint64 {
 // GetMaxSnapshotCount mock method
 func (mso *MockSchedulerOptions) GetMaxSnapshotCount() uint64 {
 	return mso.MaxSnapshotCount
+}
+
+// GetMaxPendingPeerCount mock method
+func (mso *MockSchedulerOptions) GetMaxPendingPeerCount() uint64 {
+	return mso.MaxPendingPeerCount
 }
 
 // GetMaxStoreDownTime mock method
