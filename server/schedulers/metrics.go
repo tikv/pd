@@ -23,6 +23,15 @@ var schedulerCounter = prometheus.NewCounterVec(
 		Help:      "Counter of scheduler events.",
 	}, []string{"type", "name"})
 
+var schedulerStatus = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "status",
+		Help:      "Status of scheduler events.",
+	}, []string{"type", "name"})
+
 func init() {
 	prometheus.MustRegister(schedulerCounter)
+	prometheus.MustRegister(schedulerStatus)
 }

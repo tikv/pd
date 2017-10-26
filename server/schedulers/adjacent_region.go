@@ -51,12 +51,13 @@ func init() {
 
 type balanceAdjacentRegionScheduler struct {
 	*baseScheduler
-	opt          schedule.Options
-	selector     schedule.Selector
-	leaderLimit  uint64
-	peerLimit    uint64
-	lastKey      []byte
-	cacheRegions *adjacentState
+	opt                  schedule.Options
+	selector             schedule.Selector
+	leaderLimit          uint64
+	peerLimit            uint64
+	lastKey              []byte
+	cacheRegions         *adjacentState
+	adjacentRegionsCount int
 }
 
 type adjacentState struct {
@@ -146,6 +147,8 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *sch
 	regions := cluster.ScanRegions(l.lastKey, scanLimit)
 	// scan to the end
 	if len(regions) <= 1 {
+		l.adjacentRegionsCount = 0
+		schedulerStatus.WithLabelValues(l.GetName(), "adjacent_count").Set(float64(l.adjacentRegionsCount))
 		l.lastKey = []byte("")
 		return nil
 	}
@@ -161,7 +164,7 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *sch
 		lastRegion := adjacentRegions[len(adjacentRegions)-1]
 		if lastRegion.Leader.GetStoreId() == r.Leader.GetStoreId() && bytes.Equal(lastRegion.EndKey, r.StartKey) {
 			adjacentRegions = append(adjacentRegions, r)
-			if i != len(regions)-2 {
+			if i != len(regions)-2 { // not the last element
 				continue
 			}
 		}
@@ -180,6 +183,7 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) *sch
 		}
 	}
 
+	l.adjacentRegionsCount += maxLen
 	return l.process(cluster)
 }
 
