@@ -49,6 +49,11 @@ func init() {
 	})
 }
 
+// balanceAdjacentRegionScheduler will disperse adjacent regions.
+// we will scan a part regions order by key, then select the longest
+// adjacent regions and disperse them. finally, we will guarantee
+// 1. any two adjacent regions' leader will not in the same store
+// 2. the two regions' leader will not in the public store of this two regions
 type balanceAdjacentRegionScheduler struct {
 	*baseScheduler
 	opt                  schedule.Options
@@ -85,6 +90,7 @@ func newBalanceAdjacentRegionScheduler(opt schedule.Options, limiter *schedule.L
 		schedule.NewHealthFilter(opt),
 		schedule.NewSnapshotCountFilter(opt),
 		schedule.NewStorageThresholdFilter(opt),
+		schedule.NewPendingPeerCountFilter(opt),
 	}
 	base := newBaseScheduler(limiter)
 	s := &balanceAdjacentRegionScheduler{
@@ -220,6 +226,11 @@ func (l *balanceAdjacentRegionScheduler) process(cluster schedule.Cluster) *sche
 
 func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster schedule.Cluster, region *core.RegionInfo) bool {
 	if len(region.GetPeers()) != l.opt.GetMaxReplicas() {
+		return true
+	}
+	store := cluster.GetStore(region.Leader.GetStoreId())
+	s := l.selector.SelectSource([]*core.StoreInfo{store})
+	if s == nil {
 		return true
 	}
 	// Skip hot regions.

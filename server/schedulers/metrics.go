@@ -27,8 +27,8 @@ var schedulerStatus = prometheus.NewGaugeVec(
 	prometheus.GaugeOpts{
 		Namespace: "pd",
 		Subsystem: "scheduler",
-		Name:      "status",
-		Help:      "Status of scheduler events.",
+		Name:      "inner_status",
+		Help:      "Inner status of the scheduler.",
 	}, []string{"type", "name"})
 
 func init() {

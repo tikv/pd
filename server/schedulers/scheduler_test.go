@@ -82,15 +82,24 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	tc.addLeaderRegionWithRange(7, "z", "", 1, 2, 3)
 
 	// check and do operator
+	// transfer peer from store 1 to 4 for region 1 because the distribution of
+	// the two regions is same, we will transfer the peer, which is leader now,
+	// to a new store
 	checkTransferPeerWithLeaderTransfer(c, sc.Schedule(tc), 1, 4)
+	// suppose we add peer in store 4, transfer leader to store 2, remove peer in store 1
 	tc.addLeaderRegionWithRange(1, "", "a", 2, 3, 4)
 
+	// transfer leader from store 1 to store 2 for region 2 because we have a different peer location,
+	// we can directly transfer leader to peer 2. we priority to transfer leader because less overhead
 	CheckTransferLeader(c, sc.Schedule(tc), 1, 2)
 	tc.addLeaderRegionWithRange(2, "a", "b", 2, 1, 3)
 
+	// transfer leader from store 1 to store 2 for region 3
 	CheckTransferLeader(c, sc.Schedule(tc), 1, 4)
 	tc.addLeaderRegionWithRange(3, "b", "c", 4, 1, 3)
 
+	// transfer peer from store 1 to store 4 for region 5
+	// the region 5 just adjacent the region 6
 	checkTransferPeerWithLeaderTransfer(c, sc.Schedule(tc), 1, 4)
 	tc.addLeaderRegionWithRange(5, "e", "f", 2, 3, 4)
 
