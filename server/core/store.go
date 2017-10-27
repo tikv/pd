@@ -32,6 +32,8 @@ type StoreInfo struct {
 	blocked          bool
 	LeaderCount      int
 	RegionCount      int
+	LeaderSize       uint64
+	RegionSize       uint64
 	PendingPeerCount int
 	LastHeartbeatTS  time.Time
 	LeaderWeight     float64
@@ -55,6 +57,8 @@ func (s *StoreInfo) Clone() *StoreInfo {
 		blocked:          s.blocked,
 		LeaderCount:      s.LeaderCount,
 		RegionCount:      s.RegionCount,
+		LeaderSize:       s.LeaderSize,
+		RegionSize:       s.RegionSize,
 		PendingPeerCount: s.PendingPeerCount,
 		LastHeartbeatTS:  s.LastHeartbeatTS,
 		LeaderWeight:     s.LeaderWeight,
@@ -97,10 +101,6 @@ func (s *StoreInfo) DownTime() time.Duration {
 	return time.Since(s.LastHeartbeatTS)
 }
 
-func (s *StoreInfo) leaderCount() uint64 {
-	return uint64(s.LeaderCount)
-}
-
 const minWeight = 1e-6
 
 // LeaderScore returns the store's leader score: leaderCount / leaderWeight.
@@ -111,11 +111,7 @@ func (s *StoreInfo) LeaderScore() float64 {
 	return float64(s.LeaderCount) / s.LeaderWeight
 }
 
-func (s *StoreInfo) regionCount() uint64 {
-	return uint64(s.RegionCount)
-}
-
-// RegionScore returns the store's region score: regionCount / regionWeight.
+// RegionScore returns the store's region score: regionSize / regionWeight.
 func (s *StoreInfo) RegionScore() float64 {
 	if s.RegionWeight <= 0 {
 		return float64(s.RegionCount) / minWeight
@@ -147,9 +143,21 @@ func (s *StoreInfo) IsLowSpace() bool {
 func (s *StoreInfo) ResourceCount(kind ResourceKind) uint64 {
 	switch kind {
 	case LeaderKind:
-		return s.leaderCount()
+		return uint64(s.LeaderCount)
 	case RegionKind:
-		return s.regionCount()
+		return uint64(s.RegionCount)
+	default:
+		return 0
+	}
+}
+
+// ResourceSize returns size of leader/region in the store
+func (s *StoreInfo) ResourceSize(kind ResourceKind) uint64 {
+	switch kind {
+	case LeaderKind:
+		return s.LeaderSize
+	case RegionKind:
+		return s.RegionSize
 	default:
 		return 0
 	}
@@ -341,6 +349,20 @@ func (s *StoresInfo) SetRegionCount(storeID uint64, regionCount int) {
 func (s *StoresInfo) SetPendingPeerCount(storeID uint64, pendingPeerCount int) {
 	if store, ok := s.stores[storeID]; ok {
 		store.PendingPeerCount = pendingPeerCount
+	}
+}
+
+// SetLeaderSize set the leader count to a storeInfo
+func (s *StoresInfo) SetLeaderSize(storeID uint64, leaderSize uint64) {
+	if store, ok := s.stores[storeID]; ok {
+		store.LeaderSize = leaderSize
+	}
+}
+
+// SetRegionSize set the region count to a storeInfo
+func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize uint64) {
+	if store, ok := s.stores[storeID]; ok {
+		store.RegionSize = regionSize
 	}
 }
 
