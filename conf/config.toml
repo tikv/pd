@@ -46,6 +46,7 @@ address = ""
 
 [schedule]
 max-snapshot-count = 3
+max-pending-peer-count = 16
 max-store-down-time = "1h"
 leader-schedule-limit = 64
 region-schedule-limit = 16

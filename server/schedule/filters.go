@@ -130,6 +130,28 @@ func (f *healthFilter) FilterTarget(store *core.StoreInfo) bool {
 	return f.filter(store)
 }
 
+type pendingPeerCountFilter struct {
+	opt Options
+}
+
+// NewPendingPeerCountFilter creates a Filter that filters all stores that are
+// currently handling too many pengding peers.
+func NewPendingPeerCountFilter(opt Options) Filter {
+	return &pendingPeerCountFilter{opt: opt}
+}
+
+func (p *pendingPeerCountFilter) filter(store *core.StoreInfo) bool {
+	return store.PendingPeerCount > int(p.opt.GetMaxPendingPeerCount())
+}
+
+func (p *pendingPeerCountFilter) FilterSource(store *core.StoreInfo) bool {
+	return p.filter(store)
+}
+
+func (p *pendingPeerCountFilter) FilterTarget(store *core.StoreInfo) bool {
+	return p.filter(store)
+}
+
 type snapshotCountFilter struct {
 	opt Options
 }

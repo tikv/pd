@@ -446,6 +446,8 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 	for _, store := range cache.Stores.GetStores() {
 		c.Assert(store.LeaderCount, Equals, cache.Regions.GetStoreLeaderCount(store.GetId()))
 		c.Assert(store.RegionCount, Equals, cache.Regions.GetStoreRegionCount(store.GetId()))
+		c.Assert(store.LeaderSize, Equals, cache.Regions.GetStoreLeaderRegionSize(store.GetId()))
+		c.Assert(store.RegionSize, Equals, cache.Regions.GetStoreRegionSize(store.GetId()))
 	}
 
 	// Test with kv.
@@ -525,6 +527,53 @@ func (s *testClusterInfoSuite) testRegionSplitAndMerge(c *C, cache *clusterInfo)
 			regions = core.SplitRegions(regions)
 		}
 		heartbeatRegions(c, cache, regions)
+	}
+}
+
+func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
+	cluster := newClusterInfo(core.NewMockIDAllocator())
+	stores := newTestStores(5)
+	for _, s := range stores {
+		cluster.putStore(s)
+	}
+	peers := []*metapb.Peer{
+		{
+			Id:      2,
+			StoreId: 1,
+		},
+		{
+			Id:      3,
+			StoreId: 2,
+		},
+		{
+			Id:      3,
+			StoreId: 3,
+		},
+		{
+			Id:      4,
+			StoreId: 4,
+		},
+	}
+	origin := &core.RegionInfo{
+		Region:       &metapb.Region{Id: 1, Peers: peers[:3]},
+		Leader:       peers[0],
+		PendingPeers: peers[1:3],
+	}
+	cluster.handleRegionHeartbeat(origin)
+	checkPendingPeerCount([]int{0, 1, 1, 0}, cluster, c)
+	newRegion := &core.RegionInfo{
+		Region:       &metapb.Region{Id: 1, Peers: peers[1:]},
+		Leader:       peers[1],
+		PendingPeers: peers[3:4],
+	}
+	cluster.handleRegionHeartbeat(newRegion)
+	checkPendingPeerCount([]int{0, 0, 0, 1}, cluster, c)
+}
+
+func checkPendingPeerCount(expect []int, cache *clusterInfo, c *C) {
+	for i, e := range expect {
+		s := cache.Stores.GetStore(uint64(i + 1))
+		c.Assert(s.PendingPeerCount, Equals, e)
 	}
 }
 

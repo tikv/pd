@@ -63,10 +63,9 @@ type coordinator struct {
 	classifier       namespace.Classifier
 	histories        cache.Cache
 	hbStreams        *heartbeatStreams
-	kv               *core.KV
 }
 
-func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams, kv *core.KV, classifier namespace.Classifier) *coordinator {
+func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
 		ctx:              ctx,
@@ -81,7 +80,6 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 		classifier:       classifier,
 		histories:        cache.NewDefaultCache(historiesCacheSize),
 		hbStreams:        hbStreams,
-		kv:               kv,
 	}
 }
 
@@ -158,7 +156,7 @@ func (c *coordinator) run() {
 
 	// remove invalid scheduler config and persist
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-	if err := c.opt.persist(c.kv); err != nil {
+	if err := c.opt.persist(c.cluster.kv); err != nil {
 		log.Errorf("can't persist schedule config: %v", err)
 	}
 

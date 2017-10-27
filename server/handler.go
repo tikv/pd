@@ -95,7 +95,7 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	log.Infof("create scheduler %s", s.GetName())
 	if err = c.addScheduler(s, args...); err != nil {
 		log.Errorf("can not add scheduler %v: %v", s.GetName(), err)
-	} else if err = c.opt.persist(c.kv); err != nil {
+	} else if err = c.opt.persist(c.cluster.kv); err != nil {
 		log.Errorf("can not persist scheduler config: %v", err)
 	}
 	return errors.Trace(err)
@@ -109,7 +109,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 	}
 	if err = c.removeScheduler(name); err != nil {
 		log.Errorf("can not remove scheduler %v: %v", name, err)
-	} else if err = c.opt.persist(c.kv); err != nil {
+	} else if err = c.opt.persist(c.cluster.kv); err != nil {
 		log.Errorf("can not persist scheduler config: %v", err)
 	}
 	return errors.Trace(err)
@@ -118,6 +118,16 @@ func (h *Handler) RemoveScheduler(name string) error {
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
 	return h.AddScheduler("balance-leader")
+}
+
+// AddBalanceRegionScheduler adds a balance-region-scheduler.
+func (h *Handler) AddBalanceRegionScheduler() error {
+	return h.AddScheduler("balance-region")
+}
+
+// AddBalanceHotRegionScheduler adds a balance-hot-region-scheduler.
+func (h *Handler) AddBalanceHotRegionScheduler() error {
+	return h.AddScheduler("hot-region")
 }
 
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
