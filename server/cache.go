@@ -350,7 +350,9 @@ func (c *clusterInfo) recalculateInfluence(operators []*schedule.Operator) {
 
 	c.clearOpInfluence()
 	for _, op := range operators {
-		op.Influence(c.OpInfluence, c.BasicCluster.GetRegion(op.RegionID()))
+		if !op.IsTimeout() && !op.IsFinish() {
+			op.Influence(c.OpInfluence, c.BasicCluster.GetRegion(op.RegionID()))
+		}
 	}
 }
 
