@@ -201,7 +201,7 @@ func (c *clusterInfo) ScanRegions(startKey []byte, limit int) []*core.RegionInfo
 	return c.Regions.ScanRange(startKey, limit)
 }
 
-// GetRegions searches for a region by ID.
+// GetRegion searches for a region by ID.
 func (c *clusterInfo) GetRegion(regionID uint64) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
@@ -347,6 +347,8 @@ func (c *clusterInfo) updateStoreStatus(id uint64) {
 	c.Stores.SetLeaderCount(id, c.Regions.GetStoreLeaderCount(id))
 	c.Stores.SetRegionCount(id, c.Regions.GetStoreRegionCount(id))
 	c.Stores.SetPendingPeerCount(id, c.Regions.GetStorePendingPeerCount(id))
+	c.Stores.SetLeaderSize(id, c.Regions.GetStoreLeaderRegionSize(id))
+	c.Stores.SetRegionSize(id, c.Regions.GetStoreFollowerRegionSize(id))
 }
 
 // handleRegionHeartbeat updates the region information.
@@ -389,6 +391,9 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			saveCache = true
 		}
 		if len(origin.DownPeers) > 0 || len(origin.PendingPeers) > 0 {
+			saveCache = true
+		}
+		if region.ApproximateSize != origin.ApproximateSize {
 			saveCache = true
 		}
 	}
