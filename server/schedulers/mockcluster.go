@@ -87,7 +87,7 @@ func (mc *mockCluster) addLeaderStore(storeID uint64, leaderCount int) {
 	store.Stats = &pdpb.StoreStats{}
 	store.LastHeartbeatTS = time.Now()
 	store.LeaderCount = leaderCount
-	store.LeaderSize = uint64(leaderCount) * 10
+	store.LeaderSize = int64(leaderCount) * 10
 	mc.PutStore(store)
 }
 
@@ -96,7 +96,7 @@ func (mc *mockCluster) addRegionStore(storeID uint64, regionCount int) {
 	store.Stats = &pdpb.StoreStats{}
 	store.LastHeartbeatTS = time.Now()
 	store.RegionCount = regionCount
-	store.RegionSize = uint64(regionCount) * 10
+	store.RegionSize = int64(regionCount) * 10
 	store.Stats.Capacity = uint64(1024)
 	store.Stats.Available = store.Stats.Capacity
 	mc.PutStore(store)
@@ -164,14 +164,14 @@ func (mc *mockCluster) addLeaderRegionWithWriteInfo(regionID uint64, leaderID ui
 func (mc *mockCluster) updateLeaderCount(storeID uint64, leaderCount int) {
 	store := mc.GetStore(storeID)
 	store.LeaderCount = leaderCount
-	store.LeaderSize = uint64(leaderCount) * 10
+	store.LeaderSize = int64(leaderCount) * 10
 	mc.PutStore(store)
 }
 
 func (mc *mockCluster) updateRegionCount(storeID uint64, regionCount int) {
 	store := mc.GetStore(storeID)
 	store.RegionCount = regionCount
-	store.RegionSize = uint64(regionCount) * 10
+	store.RegionSize = int64(regionCount) * 10
 	mc.PutStore(store)
 }
 

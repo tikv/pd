@@ -90,6 +90,6 @@ func (s *testReplicationSuite) newStoreInfo(id uint64, regionCount int, labels m
 		Labels: storeLabels,
 	})
 	store.RegionCount = regionCount
-	store.RegionSize = uint64(regionCount) * 10
+	store.RegionSize = int64(regionCount) * 10
 	return store
 }

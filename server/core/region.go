@@ -34,7 +34,7 @@ type RegionInfo struct {
 	PendingPeers    []*metapb.Peer
 	WrittenBytes    uint64
 	ReadBytes       uint64
-	ApproximateSize uint64
+	ApproximateSize int64
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -182,7 +182,7 @@ type HotRegionsStat struct {
 type regionMap struct {
 	m         map[uint64]*regionEntry
 	ids       []uint64
-	totalSize uint64
+	totalSize int64
 }
 
 type regionEntry struct {
@@ -250,7 +250,7 @@ func (rm *regionMap) Delete(id uint64) {
 	}
 }
 
-func (rm *regionMap) TotalSize() uint64 {
+func (rm *regionMap) TotalSize() int64 {
 	if rm.Len() == 0 {
 		return 0
 	}
@@ -381,17 +381,17 @@ func (r *RegionsInfo) GetRegions() []*RegionInfo {
 }
 
 // GetStoreLeaderRegionSize get total size of store's leader regions
-func (r *RegionsInfo) GetStoreLeaderRegionSize(storeID uint64) uint64 {
+func (r *RegionsInfo) GetStoreLeaderRegionSize(storeID uint64) int64 {
 	return r.leaders[storeID].TotalSize()
 }
 
 // GetStoreFollowerRegionSize get total size of store's follower regions
-func (r *RegionsInfo) GetStoreFollowerRegionSize(storeID uint64) uint64 {
+func (r *RegionsInfo) GetStoreFollowerRegionSize(storeID uint64) int64 {
 	return r.followers[storeID].TotalSize()
 }
 
 // GetStoreRegionSize get total size of store's regions
-func (r *RegionsInfo) GetStoreRegionSize(storeID uint64) uint64 {
+func (r *RegionsInfo) GetStoreRegionSize(storeID uint64) int64 {
 	return r.GetStoreLeaderRegionSize(storeID) + r.GetStoreFollowerRegionSize(storeID)
 }
 

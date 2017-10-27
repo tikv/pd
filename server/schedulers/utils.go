@@ -156,18 +156,8 @@ func minBalanceDiff(count uint64) float64 {
 func takeInfluence(store *core.StoreInfo, storeDiff *schedule.StoreDiff) {
 	store.LeaderCount += storeDiff.LeaderCount
 	store.RegionCount += storeDiff.RegionCount
-
-	if storeDiff.LeaderSize < 0 {
-		store.LeaderSize -= uint64(-storeDiff.LeaderSize)
-	} else {
-		store.LeaderSize += uint64(storeDiff.LeaderSize)
-	}
-
-	if storeDiff.RegionSize < 0 {
-		store.RegionSize -= uint64(-storeDiff.RegionSize)
-	} else {
-		store.RegionSize += uint64(storeDiff.RegionSize)
-	}
+	store.LeaderSize += int64(storeDiff.LeaderSize)
+	store.RegionSize += int64(storeDiff.RegionSize)
 }
 
 // shouldBalance returns true if we should balance the source and target store.

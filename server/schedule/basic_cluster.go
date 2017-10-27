@@ -41,7 +41,7 @@ const (
 	hotRegionAntiCount           = 1
 )
 
-// BasicCluster provides basic data member and interface for a tikv cluster
+// BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
 	Stores          *core.StoresInfo
 	Regions         *core.RegionsInfo
@@ -49,7 +49,7 @@ type BasicCluster struct {
 	ReadStatistics  cache.Cache
 }
 
-// NewDiffMap creates a DiffMap
+// NewDiffMap creates a DiffMap.
 func NewDiffMap(operators []*Operator, cluster Cluster) DiffMap {
 	m := make(map[uint64]*StoreDiff)
 
@@ -62,17 +62,10 @@ func NewDiffMap(operators []*Operator, cluster Cluster) DiffMap {
 	return m
 }
 
-// DiffMap is a map of StoreDiff
+// DiffMap is a map of StoreDiff.
 type DiffMap map[uint64]*StoreDiff
 
-// Clear sets all storeDiffs to zero
-func (m DiffMap) Clear() {
-	for _, storeDiff := range m {
-		storeDiff.Clear()
-	}
-}
-
-// GetStoreDiff get storeDiff of specific store
+// GetStoreDiff get storeDiff of specific store.
 func (m DiffMap) GetStoreDiff(id uint64) *StoreDiff {
 	storeDiff, ok := m[id]
 	if !ok {
@@ -82,7 +75,7 @@ func (m DiffMap) GetStoreDiff(id uint64) *StoreDiff {
 	return storeDiff
 }
 
-// StoreDiff records influences that pending operators will make
+// StoreDiff records influences that pending operators will make.
 type StoreDiff struct {
 	RegionSize  int
 	RegionCount int
@@ -90,15 +83,7 @@ type StoreDiff struct {
 	LeaderCount int
 }
 
-// Clear set storeDiff to zero
-func (d *StoreDiff) Clear() {
-	d.RegionSize = 0
-	d.RegionCount = 0
-	d.LeaderSize = 0
-	d.LeaderCount = 0
-}
-
-// NewBasicCluster creates a BasicCluster
+// NewBasicCluster creates a BasicCluster.
 func NewBasicCluster() *BasicCluster {
 	return &BasicCluster{
 		Stores:          core.NewStoresInfo(),

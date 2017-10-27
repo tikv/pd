@@ -39,11 +39,11 @@ type storeStatus struct {
 	LeaderCount        int                `json:"leader_count,omitempty"`
 	LeaderWeight       float64            `json:"leader_weight,omitempty"`
 	LeaderScore        float64            `json:"leader_score,omitempty"`
-	LeaderSize         uint64             `json:"leader_size,omitempty"`
+	LeaderSize         int64              `json:"leader_size,omitempty"`
 	RegionCount        int                `json:"region_count,omitempty"`
 	RegionWeight       float64            `json:"region_weight,omitempty"`
 	RegionScore        float64            `json:"region_score,omitempty"`
-	RegionSize         uint64             `json:"region_size,omitempty"`
+	RegionSize         int64              `json:"region_size,omitempty"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
 	ApplyingSnapCount  uint32             `json:"applying_snap_count,omitempty"`
