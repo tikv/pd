@@ -34,7 +34,6 @@ type Cluster interface {
 	GetRegionStores(region *core.RegionInfo) []*core.StoreInfo
 	GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo
 	GetLeaderStore(region *core.RegionInfo) *core.StoreInfo
-	GetStoreInfluence(id uint64) *StoreDiff
 
 	BlockStore(id uint64) error
 	UnblockStore(id uint64)
@@ -57,7 +56,7 @@ type Scheduler interface {
 	GetNextInterval(interval time.Duration) time.Duration
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)
-	Schedule(cluster Cluster) *Operator
+	Schedule(cluster Cluster, opInfluence DiffMap) *Operator
 	IsScheduleAllowed() bool
 }
 

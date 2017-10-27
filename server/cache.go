@@ -344,31 +344,6 @@ func (c *clusterInfo) updateStoreStatus(id uint64) {
 	c.Stores.SetRegionSize(id, c.Regions.GetStoreRegionSize(id))
 }
 
-func (c *clusterInfo) recalculateInfluence(operators []*schedule.Operator) {
-	c.Lock()
-	defer c.Unlock()
-
-	c.clearOpInfluence()
-	for _, op := range operators {
-		if !op.IsTimeout() && !op.IsFinish() {
-			op.Influence(c.OpInfluence, c.BasicCluster.GetRegion(op.RegionID()))
-		}
-	}
-}
-
-func (c *clusterInfo) GetStoreInfluence(id uint64) *schedule.StoreDiff {
-	c.RLock()
-	defer c.RUnlock()
-
-	return c.BasicCluster.GetStoreInfluence(id)
-}
-
-func (c *clusterInfo) clearOpInfluence() {
-	for _, storeDiff := range c.OpInfluence {
-		storeDiff.Clear()
-	}
-}
-
 // handleRegionHeartbeat updates the region information.
 func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	region = region.Clone()

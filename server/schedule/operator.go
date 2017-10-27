@@ -29,7 +29,7 @@ const MaxOperatorWaitTime = 5 * time.Minute
 type OperatorStep interface {
 	fmt.Stringer
 	IsFinish(region *core.RegionInfo) bool
-	Influence(OpInfluence map[uint64]*StoreDiff, region *core.RegionInfo)
+	Influence(opInfluence DiffMap, region *core.RegionInfo)
 }
 
 // TransferLeader is an OperatorStep that transfers a region's leader.
@@ -47,17 +47,9 @@ func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
 }
 
 // Influence calculates the store difference that current step make
-func (tl TransferLeader) Influence(OpInfluence map[uint64]*StoreDiff, region *core.RegionInfo) {
-	from, ok := OpInfluence[tl.FromStore]
-	if !ok {
-		OpInfluence[tl.FromStore] = &StoreDiff{}
-		from = OpInfluence[tl.FromStore]
-	}
-	to, ok := OpInfluence[tl.ToStore]
-	if !ok {
-		OpInfluence[tl.ToStore] = &StoreDiff{}
-		to = OpInfluence[tl.ToStore]
-	}
+func (tl TransferLeader) Influence(opInfluence DiffMap, region *core.RegionInfo) {
+	from := opInfluence.GetStoreDiff(tl.FromStore)
+	to := opInfluence.GetStoreDiff(tl.ToStore)
 
 	from.LeaderSize -= int(region.ApproximateSize)
 	from.LeaderCount--
@@ -83,12 +75,8 @@ func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
 }
 
 // Influence calculates the store difference that current step make
-func (ap AddPeer) Influence(OpInfluence map[uint64]*StoreDiff, region *core.RegionInfo) {
-	to, ok := OpInfluence[ap.ToStore]
-	if !ok {
-		OpInfluence[ap.ToStore] = &StoreDiff{}
-		to = OpInfluence[ap.ToStore]
-	}
+func (ap AddPeer) Influence(opInfluence DiffMap, region *core.RegionInfo) {
+	to := opInfluence.GetStoreDiff(ap.ToStore)
 
 	to.RegionSize += int(region.ApproximateSize)
 	to.RegionCount++
@@ -109,12 +97,8 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 }
 
 // Influence calculates the store difference that current step make
-func (rp RemovePeer) Influence(OpInfluence map[uint64]*StoreDiff, region *core.RegionInfo) {
-	from, ok := OpInfluence[rp.FromStore]
-	if !ok {
-		OpInfluence[rp.FromStore] = &StoreDiff{}
-		from = OpInfluence[rp.FromStore]
-	}
+func (rp RemovePeer) Influence(opInfluence DiffMap, region *core.RegionInfo) {
+	from := opInfluence.GetStoreDiff(rp.FromStore)
 
 	from.RegionSize -= int(region.ApproximateSize)
 	from.RegionCount--
@@ -229,14 +213,10 @@ func (o *Operator) IsTimeout() bool {
 }
 
 // Influence calculates the store difference which unfinished operator steps make
-func (o *Operator) Influence(OpInfluence map[uint64]*StoreDiff, region *core.RegionInfo) {
-	if o.IsTimeout() {
-		return
-	}
-
+func (o *Operator) Influence(opInfluence DiffMap, region *core.RegionInfo) {
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if !o.steps[int(step)].IsFinish(region) {
-			o.steps[int(step)].Influence(OpInfluence, region)
+			o.steps[int(step)].Influence(opInfluence, region)
 		}
 	}
 }

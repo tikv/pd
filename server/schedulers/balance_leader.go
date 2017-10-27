@@ -67,7 +67,7 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed() bool {
 	return l.limiter.OperatorCount(core.LeaderKind) < limit
 }
 
-func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
+func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.DiffMap) *schedule.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 	region, newLeader := scheduleTransferLeader(cluster, l.GetName(), l.selector)
 	if region == nil {
@@ -82,7 +82,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Op
 
 	source := cluster.GetStore(region.Leader.GetStoreId())
 	target := cluster.GetStore(newLeader.GetStoreId())
-	if !shouldBalance(source, target, core.LeaderKind, cluster) {
+	if !shouldBalance(source, target, core.LeaderKind, opInfluence) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}

@@ -29,7 +29,7 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	_, opt := newTestScheduleConfig()
 	sl, err := schedule.CreateScheduler("shuffle-leader", opt, schedule.NewLimiter())
 	c.Assert(err, IsNil)
-	c.Assert(sl.Schedule(tc), IsNil)
+	c.Assert(sl.Schedule(tc, schedule.DiffMap{}), IsNil)
 
 	// Add stores 1,2,3,4
 	tc.addLeaderStore(1, 6)
@@ -47,9 +47,9 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	tc.addLeaderRegion(4, 1, 2, 3, 4)
 
 	for i := 0; i < 4; i++ {
-		op := sl.Schedule(tc)
+		op := sl.Schedule(tc, schedule.NewDiffMap(nil, tc))
 		sourceID := op.Step(0).(schedule.TransferLeader).FromStore
-		op = sl.Schedule(tc)
+		op = sl.Schedule(tc, schedule.NewDiffMap(nil, tc))
 		targetID := op.Step(0).(schedule.TransferLeader).ToStore
 		c.Assert(sourceID, Equals, targetID)
 	}

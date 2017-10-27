@@ -124,13 +124,13 @@ func (s *testNamespaceSuite) TestSchedulerBalanceRegion(c *C) {
 	// Balance is limited within a namespace.
 	s.tc.addLeaderRegion(1, 2)
 	s.classifier.setRegion(1, "ns1")
-	op := scheduleByNamespace(s.tc, s.classifier, sched)
+	op := scheduleByNamespace(s.tc, s.classifier, sched, schedule.NewDiffMap(nil, s.tc))
 	schedulers.CheckTransferPeer(c, op, 2, 1)
 
 	// If no more store in the namespace, balance stops.
 	s.tc.addLeaderRegion(1, 3)
 	s.classifier.setRegion(1, "ns2")
-	op = scheduleByNamespace(s.tc, s.classifier, sched)
+	op = scheduleByNamespace(s.tc, s.classifier, sched, schedule.NewDiffMap(nil, s.tc))
 	c.Assert(op, IsNil)
 
 	// If region is not in the correct namespace, it will not be balanced. The
@@ -140,7 +140,7 @@ func (s *testNamespaceSuite) TestSchedulerBalanceRegion(c *C) {
 	s.classifier.setStore(4, "ns2")
 	s.tc.addLeaderRegion(1, 3)
 	s.classifier.setRegion(1, "ns1")
-	op = scheduleByNamespace(s.tc, s.classifier, sched)
+	op = scheduleByNamespace(s.tc, s.classifier, sched, schedule.NewDiffMap(nil, s.tc))
 	c.Assert(op, IsNil)
 }
 
@@ -163,13 +163,13 @@ func (s *testNamespaceSuite) TestSchedulerBalanceLeader(c *C) {
 	// Balance is limited within a namespace.
 	s.tc.addLeaderRegion(1, 2, 1)
 	s.classifier.setRegion(1, "ns1")
-	op := scheduleByNamespace(s.tc, s.classifier, sched)
+	op := scheduleByNamespace(s.tc, s.classifier, sched, schedule.NewDiffMap(nil, s.tc))
 	schedulers.CheckTransferLeader(c, op, 2, 1)
 
 	// If region is not in the correct namespace, it will not be balanced.
 	s.tc.addLeaderRegion(1, 4, 1)
 	s.classifier.setRegion(1, "ns1")
-	op = scheduleByNamespace(s.tc, s.classifier, sched)
+	op = scheduleByNamespace(s.tc, s.classifier, sched, schedule.NewDiffMap(nil, s.tc))
 	c.Assert(op, IsNil)
 }
 

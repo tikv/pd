@@ -126,7 +126,7 @@ func (h *balanceHotRegionsScheduler) IsScheduleAllowed() bool {
 	return h.limiter.OperatorCount(core.HotRegionKind) < h.limit
 }
 
-func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
+func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.DiffMap) *schedule.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
 	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster)
 }
