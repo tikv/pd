@@ -196,7 +196,7 @@ func (s *testTableNamespaceSuite) TestClassifierWithInfiniteEdge(c *C) {
 		StartKey: []byte("startKey"),
 	}, &metapb.Peer{})
 	ns := classifier.GetRegionNamespace(regionInfo)
-	c.Assert(ns, Equals, "test1")
+	c.Assert(ns, Equals, "global")
 
 	// mock the end edge
 	classifier = s.newClassifier(c, mockTableIDDecoderForEdge{})
@@ -224,7 +224,7 @@ func (s *testTableNamespaceSuite) TestClassifierWithCrossTable(c *C) {
 		EndKey:   []byte("endKey"),
 	}, &metapb.Peer{})
 	ns := classifier.GetRegionNamespace(regionInfo)
-	c.Assert(ns, Equals, "global")
+	c.Assert(ns, Equals, "test1")
 }
 
 func (s *testTableNamespaceSuite) TestClassifierWithTableSplit(c *C) {

@@ -25,6 +25,11 @@ type hotStatusHandler struct {
 	rd *render.Render
 }
 
+type hotStoreStats struct {
+	WriteStats map[uint64]uint64 `json:"write,omitempty"`
+	ReadStats  map[uint64]uint64 `json:"read,omitempty"`
+}
+
 func newHotStatusHandler(handler *server.Handler, rd *render.Render) *hotStatusHandler {
 	return &hotStatusHandler{
 		Handler: handler,
@@ -41,6 +46,11 @@ func (h *hotStatusHandler) GetHotReadRegions(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, h.GetHotWriteStores())
-	h.rd.JSON(w, http.StatusOK, h.GetHotReadStores())
+	readStats := h.GetHotReadStores()
+	writeStats := h.GetHotWriteStores()
+	stats := hotStoreStats{
+		WriteStats: writeStats,
+		ReadStats:  readStats,
+	}
+	h.rd.JSON(w, http.StatusOK, stats)
 }
