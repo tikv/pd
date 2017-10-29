@@ -39,37 +39,71 @@ type testBalanceSpeedSuite struct{}
 type testBalanceSpeedCase struct {
 	sourceCount    uint64
 	targetCount    uint64
+	diff           int
 	expectedResult bool
 }
 
 func (s *testBalanceSpeedSuite) TestBalanceSpeed(c *C) {
 	testCases := []testBalanceSpeedCase{
 		// diff >= 2
-		{1, 0, false},
-		{2, 0, true},
-		{2, 1, false},
-		{9, 0, true},
-		{9, 6, true},
-		{9, 8, false},
+		{1, 0, 0, false},
+		{2, 0, 0, true},
+		{2, 0, 1, false},
+		{2, 1, 0, false},
+		{9, 0, 0, true},
+		{9, 0, 8, false},
+		{9, 6, 0, true},
+		{9, 6, 2, false},
+		{9, 8, 0, false},
 		// diff >= sqrt(10) = 3.16
-		{10, 0, true},
-		{10, 6, true},
-		{10, 7, false},
+		{10, 0, 0, true},
+		{10, 0, 5, false},
+		{10, 6, 0, true},
+		{10, 6, 4, false},
+		{10, 7, 0, false},
 		// diff >= sqrt(100) = 10
-		{100, 89, true},
-		{100, 91, false},
+		{100, 89, 0, true},
+		{100, 89, 2, false},
+		{100, 91, 0, false},
 		// diff >= sqrt(1000) = 31.6
-		{1000, 968, true},
-		{1000, 969, false},
+		{1000, 968, 0, true},
+		{1000, 968, 20, false},
+		{1000, 969, 0, false},
 		// diff >= sqrt(10000) = 100
-		{10000, 9899, true},
-		{10000, 9901, false},
+		{10000, 9899, 0, true},
+		{10000, 9899, 100, false},
+		{10000, 9901, 0, false},
 	}
 
 	s.testBalanceSpeed(c, testCases, 1)
 	s.testBalanceSpeed(c, testCases, 10)
 	s.testBalanceSpeed(c, testCases, 100)
 	s.testBalanceSpeed(c, testCases, 1000)
+}
+
+func newTestDiffMap(source uint64, target uint64, kind core.ResourceKind, countDiff int) schedule.DiffMap {
+	m := make(map[uint64]*schedule.StoreDiff)
+	if kind == core.LeaderKind {
+		m[source] = &schedule.StoreDiff{
+			LeaderCount: -countDiff,
+			LeaderSize:  -countDiff * 10,
+		}
+		m[target] = &schedule.StoreDiff{
+			LeaderCount: countDiff,
+			LeaderSize:  countDiff * 10,
+		}
+	} else if kind == core.RegionKind {
+		m[source] = &schedule.StoreDiff{
+			RegionCount: -countDiff,
+			RegionSize:  -countDiff * 10,
+		}
+		m[target] = &schedule.StoreDiff{
+			RegionCount: countDiff,
+			RegionSize:  countDiff * 10,
+		}
+	}
+
+	return m
 }
 
 func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedCase, capaGB uint64) {
@@ -80,7 +114,7 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 		tc.addLeaderStore(2, int(t.targetCount))
 		source := tc.GetStore(1)
 		target := tc.GetStore(2)
-		c.Assert(shouldBalance(source, target, core.LeaderKind, schedule.NewDiffMap(nil, tc)), Equals, t.expectedResult)
+		c.Assert(shouldBalance(source, target, core.LeaderKind, newTestDiffMap(1, 2, core.LeaderKind, t.diff)), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -88,7 +122,7 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 		tc.addRegionStore(2, int(t.targetCount))
 		source := tc.GetStore(1)
 		target := tc.GetStore(2)
-		c.Assert(shouldBalance(source, target, core.RegionKind, schedule.NewDiffMap(nil, tc)), Equals, t.expectedResult)
+		c.Assert(shouldBalance(source, target, core.RegionKind, newTestDiffMap(1, 2, core.RegionKind, t.diff)), Equals, t.expectedResult)
 	}
 }
 
@@ -123,8 +157,8 @@ func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
 	s.lb = lb
 }
 
-func (s *testBalanceLeaderSchedulerSuite) schedule() *schedule.Operator {
-	return s.lb.Schedule(s.cluster, schedule.NewDiffMap(nil, s.cluster))
+func (s *testBalanceLeaderSchedulerSuite) schedule(operators []*schedule.Operator) *schedule.Operator {
+	return s.lb.Schedule(s.cluster, schedule.NewDiffMap(operators, s.cluster))
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
@@ -137,13 +171,13 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
 	s.tc.addLeaderStore(4, 0)
 	s.tc.addLeaderRegion(1, 1, 2, 3, 4)
 	// Test min balance diff (>=2).
-	c.Check(s.schedule(), IsNil)
+	c.Check(s.schedule(nil), IsNil)
 
 	// Stores:     1    2    3    4
 	// Leaders:    2    0    0    0
 	// Region1:    L    F    F    F
 	s.tc.updateLeaderCount(1, 2)
-	c.Check(s.schedule(), NotNil)
+	c.Check(s.schedule(nil), NotNil)
 
 	// Stores:     1    2    3    4
 	// Leaders:    7    8    9   10
@@ -154,14 +188,38 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
 	s.tc.updateLeaderCount(4, 10)
 	s.tc.addLeaderRegion(1, 4, 1, 2, 3)
 	// Min balance diff is 4. Now is 10-7=3.
-	c.Check(s.schedule(), IsNil)
+	c.Check(s.schedule(nil), IsNil)
 
 	// Stores:     1    2    3    4
 	// Leaders:    7    8    9   16
 	// Region1:    F    F    F    L
 	s.tc.updateLeaderCount(4, 16)
 	// Min balance diff is 4. Now is 16-7=9.
-	c.Check(s.schedule(), NotNil)
+	c.Check(s.schedule(nil), NotNil)
+}
+
+func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
+	// Stores:     1    2    3    4
+	// Leaders:    7    8    9   11
+	// Region1:    F    F    F    L
+	s.tc.addLeaderStore(1, 7)
+	s.tc.addLeaderStore(2, 8)
+	s.tc.addLeaderStore(3, 9)
+	s.tc.addLeaderStore(4, 11)
+	s.tc.addLeaderRegion(1, 4, 1, 2, 3)
+	op := s.schedule(nil)
+	c.Check(op, NotNil)
+	c.Check(s.schedule([]*schedule.Operator{op}), IsNil)
+
+	// Stores:     1    2    3    4
+	// Leaders:    8    8    9   10
+	// Region1:    F    F    F    L
+	s.tc.updateLeaderCount(1, 8)
+	s.tc.updateLeaderCount(2, 8)
+	s.tc.updateLeaderCount(3, 9)
+	s.tc.updateLeaderCount(4, 10)
+	s.tc.addLeaderRegion(1, 4, 1, 2, 3)
+	c.Check(s.schedule(nil), IsNil)
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
@@ -174,18 +232,18 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
 	s.tc.addLeaderStore(4, 10)
 	s.tc.addLeaderRegion(1, 4, 1, 2, 3)
 
-	CheckTransferLeader(c, s.schedule(), 4, 1)
+	CheckTransferLeader(c, s.schedule(nil), 4, 1)
 	// Test stateFilter.
 	// If store 1 is down, it will be filtered,
 	// store 2 becomes the store with least leaders.
 	s.tc.setStoreDown(1)
-	CheckTransferLeader(c, s.schedule(), 4, 2)
+	CheckTransferLeader(c, s.schedule(nil), 4, 2)
 
 	// Test healthFilter.
 	// If store 2 is busy, it will be filtered,
 	// store 3 becomes the store with least leaders.
 	s.tc.setStoreBusy(2, true)
-	CheckTransferLeader(c, s.schedule(), 4, 3)
+	CheckTransferLeader(c, s.schedule(nil), 4, 3)
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestLeaderWeight(c *C) {
@@ -203,9 +261,9 @@ func (s *testBalanceLeaderSchedulerSuite) TestLeaderWeight(c *C) {
 	s.tc.updateStoreLeaderWeight(3, 1)
 	s.tc.updateStoreLeaderWeight(4, 2)
 	s.tc.addLeaderRegion(1, 1, 2, 3, 4)
-	CheckTransferLeader(c, s.schedule(), 1, 4)
+	CheckTransferLeader(c, s.schedule(nil), 1, 4)
 	s.tc.updateLeaderCount(4, 30)
-	CheckTransferLeader(c, s.schedule(), 1, 3)
+	CheckTransferLeader(c, s.schedule(nil), 1, 3)
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
@@ -220,7 +278,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	s.tc.addLeaderRegion(1, 4, 2, 3)
 	s.tc.addLeaderRegion(2, 3, 1, 2)
 	// Average leader is 4. Select store 4 as source.
-	CheckTransferLeader(c, s.schedule(), 4, 2)
+	CheckTransferLeader(c, s.schedule(nil), 4, 2)
 
 	// Stores:     1    2    3    4
 	// Leaders:    1    8    9   10
@@ -229,7 +287,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	s.tc.updateLeaderCount(2, 8)
 	s.tc.updateLeaderCount(3, 9)
 	// Average leader is 7. Select store 1 as target.
-	CheckTransferLeader(c, s.schedule(), 3, 1)
+	CheckTransferLeader(c, s.schedule(nil), 3, 1)
 }
 
 var _ = Suite(&testBalanceRegionSchedulerSuite{})
