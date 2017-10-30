@@ -122,7 +122,7 @@ func (c *namespaceCluster) RegionWriteStats() []*core.RegionStat {
 	return stats
 }
 
-func scheduleByNamespace(cluster schedule.Cluster, classifier namespace.Classifier, scheduler schedule.Scheduler, opInfluence schedule.DiffMap) *schedule.Operator {
+func scheduleByNamespace(cluster schedule.Cluster, classifier namespace.Classifier, scheduler schedule.Scheduler, opInfluence schedule.OpInfluence) *schedule.Operator {
 	namespaces := classifier.GetAllNamespaces()
 	for _, i := range rand.Perm(len(namespaces)) {
 		nc := newNamespaceCluster(cluster, classifier, namespaces[i])

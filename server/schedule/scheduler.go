@@ -57,7 +57,7 @@ type Scheduler interface {
 	GetNextInterval(interval time.Duration) time.Duration
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)
-	Schedule(cluster Cluster, opInfluence DiffMap) *Operator
+	Schedule(cluster Cluster, opInfluence OpInfluence) *Operator
 	IsScheduleAllowed() bool
 }
 

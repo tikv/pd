@@ -29,7 +29,7 @@ const MaxOperatorWaitTime = 5 * time.Minute
 type OperatorStep interface {
 	fmt.Stringer
 	IsFinish(region *core.RegionInfo) bool
-	Influence(opInfluence DiffMap, region *core.RegionInfo)
+	Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
 
 // TransferLeader is an OperatorStep that transfers a region's leader.
@@ -47,9 +47,9 @@ func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
 }
 
 // Influence calculates the store difference that current step make
-func (tl TransferLeader) Influence(opInfluence DiffMap, region *core.RegionInfo) {
-	from := opInfluence.GetStoreDiff(tl.FromStore)
-	to := opInfluence.GetStoreDiff(tl.ToStore)
+func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+	from := opInfluence.GetStoreInfluence(tl.FromStore)
+	to := opInfluence.GetStoreInfluence(tl.ToStore)
 
 	from.LeaderSize -= int(region.ApproximateSize)
 	from.LeaderCount--
@@ -75,8 +75,8 @@ func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
 }
 
 // Influence calculates the store difference that current step make
-func (ap AddPeer) Influence(opInfluence DiffMap, region *core.RegionInfo) {
-	to := opInfluence.GetStoreDiff(ap.ToStore)
+func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+	to := opInfluence.GetStoreInfluence(ap.ToStore)
 
 	to.RegionSize += int(region.ApproximateSize)
 	to.RegionCount++
@@ -97,8 +97,8 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 }
 
 // Influence calculates the store difference that current step make
-func (rp RemovePeer) Influence(opInfluence DiffMap, region *core.RegionInfo) {
-	from := opInfluence.GetStoreDiff(rp.FromStore)
+func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+	from := opInfluence.GetStoreInfluence(rp.FromStore)
 
 	from.RegionSize -= int(region.ApproximateSize)
 	from.RegionCount--
@@ -213,7 +213,7 @@ func (o *Operator) IsTimeout() bool {
 }
 
 // Influence calculates the store difference which unfinished operator steps make
-func (o *Operator) Influence(opInfluence DiffMap, region *core.RegionInfo) {
+func (o *Operator) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if !o.steps[int(step)].IsFinish(region) {
 			o.steps[int(step)].Influence(opInfluence, region)

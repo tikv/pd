@@ -49,9 +49,9 @@ type BasicCluster struct {
 	ReadStatistics  cache.Cache
 }
 
-// NewDiffMap creates a DiffMap.
-func NewDiffMap(operators []*Operator, cluster Cluster) DiffMap {
-	m := make(map[uint64]*StoreDiff)
+// NewOpInfluence creates a OpInfluence.
+func NewOpInfluence(operators []*Operator, cluster Cluster) OpInfluence {
+	m := make(map[uint64]*StoreInfluence)
 
 	for _, op := range operators {
 		if !op.IsTimeout() && !op.IsFinish() {
@@ -62,21 +62,21 @@ func NewDiffMap(operators []*Operator, cluster Cluster) DiffMap {
 	return m
 }
 
-// DiffMap is a map of StoreDiff.
-type DiffMap map[uint64]*StoreDiff
+// OpInfluence is a map of StoreInfluence.
+type OpInfluence map[uint64]*StoreInfluence
 
-// GetStoreDiff get storeDiff of specific store.
-func (m DiffMap) GetStoreDiff(id uint64) *StoreDiff {
-	storeDiff, ok := m[id]
+// GetStoreInfluence get storeInfluence of specific store.
+func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
+	storeInfluence, ok := m[id]
 	if !ok {
-		storeDiff = &StoreDiff{}
-		m[id] = storeDiff
+		storeInfluence = &StoreInfluence{}
+		m[id] = storeInfluence
 	}
-	return storeDiff
+	return storeInfluence
 }
 
-// StoreDiff records influences that pending operators will make.
-type StoreDiff struct {
+// StoreInfluence records influences that pending operators will make.
+type StoreInfluence struct {
 	RegionSize  int
 	RegionCount int
 	LeaderSize  int

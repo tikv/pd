@@ -59,7 +59,7 @@ func (s *shuffleLeaderScheduler) IsScheduleAllowed() bool {
 	return s.limiter.OperatorCount(core.LeaderKind) < s.opt.GetLeaderScheduleLimit()
 }
 
-func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.DiffMap) *schedule.Operator {
+func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
 	// We shuffle leaders between stores:
 	// 1. select a store randomly.
 	// 2. transfer a leader from the store to another store.

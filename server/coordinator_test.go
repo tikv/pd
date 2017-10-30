@@ -601,7 +601,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 	for i := schedulers.MinScheduleInterval; sc.GetInterval() != schedulers.MaxScheduleInterval; i = sc.GetNextInterval(i) {
 		c.Assert(sc.GetInterval(), Equals, i)
-		c.Assert(sc.Schedule(cluster, schedule.NewDiffMap(nil, cluster)), IsNil)
+		c.Assert(sc.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), IsNil)
 	}
 	// limit = 2
 	lb.limit = 2
@@ -654,7 +654,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	for _, n := range idleSeconds {
 		sc.nextInterval = schedulers.MinScheduleInterval
 		for totalSleep := time.Duration(0); totalSleep <= time.Second*time.Duration(n); totalSleep += sc.GetInterval() {
-			c.Assert(sc.Schedule(cluster, schedule.NewDiffMap(nil, cluster)), IsNil)
+			c.Assert(sc.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), IsNil)
 		}
 		c.Assert(sc.GetInterval(), Less, time.Second*time.Duration(n/2))
 	}
