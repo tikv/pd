@@ -400,7 +400,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 
 	if saveKV && c.kv != nil {
 		if err := c.kv.SaveRegion(region.Region); err != nil {
-			return errors.Trace(err)
+			log.Errorf("[region %d] fail to save kv: %v", region.GetId(), err)
 		}
 	}
 
