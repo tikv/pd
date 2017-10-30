@@ -400,6 +400,8 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 
 	if saveKV && c.kv != nil {
 		if err := c.kv.SaveRegion(region.Region); err != nil {
+			// Not successfully saved to kv is not fatal, it only leads to longer warm-up
+			// after restart. Here we only log the error then go on updating cache.
 			log.Errorf("[region %d] fail to save kv: %v", region.GetId(), err)
 		}
 	}
