@@ -14,8 +14,6 @@
 package schedulers
 
 import (
-	"time"
-
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
@@ -56,10 +54,6 @@ func (l *balanceLeaderScheduler) GetName() string {
 
 func (l *balanceLeaderScheduler) GetType() string {
 	return "balance-leader"
-}
-
-func (l *balanceLeaderScheduler) GetInterval() time.Duration {
-	return MinScheduleInterval
 }
 
 func (l *balanceLeaderScheduler) IsScheduleAllowed() bool {

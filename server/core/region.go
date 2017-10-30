@@ -149,6 +149,25 @@ func (r *RegionInfo) GetFollower() *metapb.Peer {
 	return nil
 }
 
+// GetDiffFollowers returns the followers which is not located in the same
+// store as any other followers of the another specified region.
+func (r *RegionInfo) GetDiffFollowers(other *RegionInfo) []*metapb.Peer {
+	res := make([]*metapb.Peer, 0, len(r.Peers))
+	for _, p := range r.GetFollowers() {
+		diff := true
+		for _, o := range other.GetFollowers() {
+			if p.GetStoreId() == o.GetStoreId() {
+				diff = false
+				break
+			}
+		}
+		if diff {
+			res = append(res, p)
+		}
+	}
+	return res
+}
+
 // RegionStat records each hot region's statistics
 type RegionStat struct {
 	RegionID  uint64 `json:"region_id"`
@@ -452,6 +471,17 @@ func (r *RegionsInfo) GetLeader(storeID uint64, regionID uint64) *RegionInfo {
 // GetFollower return follower RegionInfo by storeID and regionID(now only used in test)
 func (r *RegionsInfo) GetFollower(storeID uint64, regionID uint64) *RegionInfo {
 	return r.followers[storeID].Get(regionID)
+}
+
+// ScanRange scans region with start key, until number greater than limit.
+func (r *RegionsInfo) ScanRange(startKey []byte, limit int) []*RegionInfo {
+	metaRegions := r.tree.scanRange(startKey, limit)
+	res := make([]*RegionInfo, 0, len(metaRegions))
+	for _, m := range metaRegions {
+		region := r.GetRegion(m.region.GetId())
+		res = append(res, region)
+	}
+	return res
 }
 
 const randomRegionMaxRetry = 10

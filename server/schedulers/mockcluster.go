@@ -41,6 +41,11 @@ func (mc *mockCluster) allocID() (uint64, error) {
 	return mc.id.Alloc()
 }
 
+// ScanRegions scan region with start key, until number greater than limit.
+func (mc *mockCluster) ScanRegions(startKey []byte, limit int) []*core.RegionInfo {
+	return mc.Regions.ScanRange(startKey, limit)
+}
+
 // AllocPeer allocs a new peer on a store.
 func (mc *mockCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := mc.allocID()
@@ -87,6 +92,8 @@ func (mc *mockCluster) addLeaderStore(storeID uint64, leaderCount int) {
 	store.Stats = &pdpb.StoreStats{}
 	store.LastHeartbeatTS = time.Now()
 	store.LeaderCount = leaderCount
+	store.Stats.Capacity = uint64(1024)
+	store.Stats.Available = store.Stats.Capacity
 	store.LeaderSize = int64(leaderCount) * 10
 	mc.PutStore(store)
 }
@@ -134,6 +141,20 @@ func (mc *mockCluster) addLeaderRegion(regionID uint64, leaderID uint64, followe
 	regionInfo := core.NewRegionInfo(region, leader)
 	regionInfo.ApproximateSize = 10
 	mc.PutRegion(regionInfo)
+}
+
+func (mc *mockCluster) addLeaderRegionWithRange(regionID uint64, startKey string, endKey string, leaderID uint64, followerIds ...uint64) {
+	region := &metapb.Region{Id: regionID}
+	leader, _ := mc.AllocPeer(leaderID)
+	region.Peers = []*metapb.Peer{leader}
+	for _, id := range followerIds {
+		peer, _ := mc.AllocPeer(id)
+		region.Peers = append(region.Peers, peer)
+	}
+	r := core.NewRegionInfo(region, leader)
+	r.StartKey = []byte(startKey)
+	r.EndKey = []byte(endKey)
+	mc.PutRegion(r)
 }
 
 func (mc *mockCluster) LoadRegion(regionID uint64, followerIds ...uint64) {

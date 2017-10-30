@@ -68,6 +68,14 @@ func (s *evictLeaderScheduler) GetType() string {
 	return "evict-leader"
 }
 
+func (s *evictLeaderScheduler) Prepare(cluster schedule.Cluster) error {
+	return errors.Trace(cluster.BlockStore(s.storeID))
+}
+
+func (s *evictLeaderScheduler) Cleanup(cluster schedule.Cluster) {
+	cluster.UnblockStore(s.storeID)
+}
+
 func (s *evictLeaderScheduler) IsScheduleAllowed() bool {
 	return s.limiter.OperatorCount(core.LeaderKind) < s.opt.GetLeaderScheduleLimit()
 }

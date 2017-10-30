@@ -237,13 +237,6 @@ func maxUint64(a, b uint64) uint64 {
 	return b
 }
 
-func minDuration(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func parseTimestamp(data []byte) (time.Time, error) {
 	nano, err := bytesToUint64(data)
 	if err != nil {

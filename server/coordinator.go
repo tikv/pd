@@ -35,7 +35,6 @@ const (
 	historiesCacheSize        = 1000
 	eventsCacheSize           = 1000
 	maxScheduleRetries        = 10
-	scheduleIntervalFactor    = 1.3
 
 	regionheartbeatSendChanCap = 1024
 	hotRegionScheduleName      = "balance-hot-region-scheduler"
@@ -472,7 +471,6 @@ type scheduleController struct {
 	limiter      *schedule.Limiter
 	classifier   namespace.Classifier
 	nextInterval time.Duration
-	minInterval  time.Duration
 	ctx          context.Context
 	cancel       context.CancelFunc
 }
@@ -483,8 +481,8 @@ func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleContro
 		Scheduler:    s,
 		opt:          c.opt,
 		limiter:      c.limiter,
-		classifier:   c.classifier,
 		nextInterval: s.GetMinInterval(),
+		classifier:   c.classifier,
 		ctx:          ctx,
 		cancel:       cancel,
 	}

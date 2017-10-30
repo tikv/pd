@@ -65,7 +65,6 @@ func (s *grantLeaderScheduler) GetName() string {
 func (s *grantLeaderScheduler) GetType() string {
 	return "grant-leader"
 }
-
 func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
 	return errors.Trace(cluster.BlockStore(s.storeID))
 }

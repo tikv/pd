@@ -144,7 +144,7 @@ func (c *tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInf
 	c.RLock()
 	defer c.RUnlock()
 
-	tableID := c.getTableID(regionInfo)
+	tableID := c.tableIDDecoder.DecodeTableID(regionInfo.StartKey)
 	if tableID == 0 {
 		return namespace.DefaultNamespace
 	}
@@ -156,44 +156,6 @@ func (c *tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInf
 		}
 	}
 	return namespace.DefaultNamespace
-}
-
-// getTableID returns the meaningful tableID (not 0) only if
-// the region contains only the contents of that table
-// else it returns 0
-func (c *tableNamespaceClassifier) getTableID(regionInfo *core.RegionInfo) int64 {
-	startTableID := c.tableIDDecoder.DecodeTableID(regionInfo.StartKey)
-	endTableID := c.tableIDDecoder.DecodeTableID(regionInfo.EndKey)
-
-	if startTableID == 0 || endTableID == 0 {
-		log.Debugf("Region %s has StartTableID (%d) or EndTableID (%d) of value 0", *regionInfo, startTableID, endTableID)
-	}
-
-	if startTableID == 0 && endTableID == 0 {
-		// The startTableID and endTableID cannot be decoded,
-		// indicating the region contains meta-info
-		return 0
-	}
-	// The [startTableID|endTableID] is 0,
-	// indicating that the region contains infinite edge
-	if startTableID == 0 {
-		return endTableID
-	}
-	if endTableID == 0 {
-		return startTableID
-	}
-
-	if startTableID == endTableID {
-		return startTableID
-	}
-
-	// The startTableID is not equal to the endTableID for regionInfo,
-	// so check whether endKey is the startKey of the next table
-	if (startTableID == endTableID-1) && IsPureTableID(regionInfo.EndKey) {
-		return startTableID
-	}
-
-	return 0
 }
 
 // GetNamespaces returns all namespace details.
