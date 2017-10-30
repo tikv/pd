@@ -69,8 +69,8 @@ type DiffMap map[uint64]*StoreDiff
 func (m DiffMap) GetStoreDiff(id uint64) *StoreDiff {
 	storeDiff, ok := m[id]
 	if !ok {
-		m[id] = &StoreDiff{}
-		storeDiff = m[id]
+		storeDiff = &StoreDiff{}
+		m[id] = storeDiff
 	}
 	return storeDiff
 }
