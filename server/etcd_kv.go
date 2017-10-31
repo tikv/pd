@@ -84,6 +84,7 @@ func (kv *etcdKVBase) Save(key, value string) error {
 
 	resp, err := kv.server.leaderTxn().Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
+		log.Errorf("save to etcd error: %v", err)
 		return errors.Trace(err)
 	}
 	if !resp.Succeeded {
@@ -98,6 +99,9 @@ func kvGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3
 
 	start := time.Now()
 	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
+	if err != nil {
+		log.Errorf("load from etcd error: %v", err)
+	}
 	if cost := time.Since(start); cost > kvSlowRequestTime {
 		log.Warnf("kv gets too slow: key %v cost %v err %v", key, cost, err)
 	}
