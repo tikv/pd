@@ -20,7 +20,9 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
+	"github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/juju/errors"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"google.golang.org/grpc"
@@ -212,7 +214,10 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 		return conn, nil
 	}
 
-	cc, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure()) // TODO: Support HTTPS.
+	cc, err := grpc.Dial(strings.TrimPrefix(addr, "http://"),
+		grpc.WithInsecure(), // TODO: Support HTTPS.
+		grpc.WithUnaryInterceptor(grpc_opentracing.UnaryClientInterceptor()),
+		grpc.WithStreamInterceptor(grpc_opentracing.StreamClientInterceptor()))
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -378,6 +383,9 @@ func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical
 	for i := 0; i < len(requests); i++ {
 		requests[i].physical, requests[i].logical = physical, firstLogical+int64(i)
 		requests[i].done <- err
+		if span := opentracing.SpanFromContext(requests[i].ctx); span != nil {
+			span.Finish()
+		}
 	}
 }
 
@@ -431,9 +439,10 @@ var tsoReqPool = sync.Pool{
 }
 
 func (c *client) GetTSAsync(ctx context.Context) TSFuture {
+	_, ctx1 := opentracing.StartSpanFromContext(ctx, "GetTSAsync")
 	req := tsoReqPool.Get().(*tsoRequest)
 	req.start = time.Now()
-	req.ctx = ctx
+	req.ctx = ctx1
 	req.physical = 0
 	req.logical = 0
 	c.tsoRequests <- req

@@ -22,6 +22,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/juju/errors"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/server"
@@ -61,6 +62,8 @@ func main() {
 		log.Warn(msg)
 	}
 
+	setupTracing(cfg)
+
 	// TODO: Make it configurable if it has big impact on performance.
 	grpc_prometheus.EnableHandlingTimeHistogram()
 
@@ -95,4 +98,13 @@ func main() {
 	default:
 		os.Exit(1)
 	}
+}
+
+func setupTracing(cfg *server.Config) {
+	tracingCfg := cfg.OpenTracing.ToTracingConfig()
+	tracer, _, err := tracingCfg.New("Pd")
+	if err != nil {
+		log.Fatal("cannot initialize Jaeger Tracer", err)
+	}
+	opentracing.SetGlobalTracer(tracer)
 }
