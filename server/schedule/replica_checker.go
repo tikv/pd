@@ -153,16 +153,24 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
 		if store == nil {
-			log.Infof("lost the store %d,maybe you are recovering the PD cluster.", peer.GetStoreId())
+			log.Infof("lost the store %d, maybe you are recovering the PD cluster.", peer.GetStoreId())
 			return nil
 		}
 		if store.IsUp() {
 			continue
 		}
 
-		// check the number of replicas firstly
+		// Check the number of replicas first.
 		if len(region.GetPeers()) > r.opt.GetMaxReplicas() {
 			return CreateRemovePeerOperator("removeExtraOfflineReplica", region, peer.GetStoreId())
+		}
+
+		// Consider we have 3 peers (A, B, C), we set the store that contains C to
+		// offline while C is pending. If we generate an operator that adds a replica
+		// D then removes C, D will not be successfully added util C is normal again.
+		// So it's better to remove C directly.
+		if region.GetPendingPeer(peer.GetId()) != nil {
+			return CreateRemovePeerOperator("removePendingOfflineReplica", region, peer.GetStoreId())
 		}
 
 		newPeer := r.SelectBestPeerToAddReplica(region)
