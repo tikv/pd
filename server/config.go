@@ -30,7 +30,6 @@ import (
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
-	tracing "github.com/uber/jaeger-client-go/config"
 )
 
 // Config is the pd server configuration.
@@ -99,9 +98,6 @@ type Config struct {
 	// Only test can change them.
 	nextRetryDelay             time.Duration
 	disableStrictReconfigCheck bool
-
-	// OpenTracing config.
-	OpenTracing OpenTracing `toml:"opentracing" json:"opentracing"`
 }
 
 // NewConfig creates a new config.
@@ -580,52 +576,4 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	}
 
 	return cfg, nil
-}
-
-// OpenTracing is the opentracing section of the config.
-type OpenTracing struct {
-	Enable     bool                `toml:"enable" json:"enbale"`
-	Sampler    OpenTracingSampler  `toml:"sampler" json:"sampler"`
-	Reporter   OpenTracingReporter `toml:"reporter" json:"reporter"`
-	RPCMetrics bool                `toml:"rpc-metrics" json:"rpc-metrics"`
-}
-
-// OpenTracingSampler is the config for opentracing sampler.
-// See https://godoc.org/github.com/uber/jaeger-client-go/config#SamplerConfig
-type OpenTracingSampler struct {
-	Type                    string        `toml:"type" json:"type"`
-	Param                   float64       `toml:"param" json:"param"`
-	SamplingServerURL       string        `toml:"sampling-server-url" json:"sampling-server-url"`
-	MaxOperations           int           `toml:"max-operations" json:"max-operations"`
-	SamplingRefreshInterval time.Duration `toml:"sampling-refresh-interval" json:"sampling-refresh-interval"`
-}
-
-// OpenTracingReporter is the config for opentracing reporter.
-// See https://godoc.org/github.com/uber/jaeger-client-go/config#ReporterConfig
-type OpenTracingReporter struct {
-	QueueSize           int           `toml:"queue-size" json:"queue-size"`
-	BufferFlushInterval time.Duration `toml:"buffer-flush-interval" json:"buffer-flush-interval"`
-	LogSpans            bool          `toml:"log-spans" json:"log-spans"`
-	LocalAgentHostPort  string        `toml:"local-agent-host-port" json:"local-agent-host-port"`
-}
-
-// ToTracingConfig converts *OpenTracing to *tracing.Configuration.
-func (t *OpenTracing) ToTracingConfig() *tracing.Configuration {
-	ret := &tracing.Configuration{
-		Disabled:   !t.Enable,
-		RPCMetrics: t.RPCMetrics,
-		Reporter:   &tracing.ReporterConfig{},
-		Sampler:    &tracing.SamplerConfig{},
-	}
-	ret.Reporter.QueueSize = t.Reporter.QueueSize
-	ret.Reporter.BufferFlushInterval = t.Reporter.BufferFlushInterval
-	ret.Reporter.LogSpans = t.Reporter.LogSpans
-	ret.Reporter.LocalAgentHostPort = t.Reporter.LocalAgentHostPort
-
-	ret.Sampler.Type = t.Sampler.Type
-	ret.Sampler.Param = t.Sampler.Param
-	ret.Sampler.SamplingServerURL = t.Sampler.SamplingServerURL
-	ret.Sampler.MaxOperations = t.Sampler.MaxOperations
-	ret.Sampler.SamplingRefreshInterval = t.Sampler.SamplingRefreshInterval
-	return ret
 }
