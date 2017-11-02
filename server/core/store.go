@@ -386,15 +386,15 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 
 // AverageResourceScore return the total resource score of all StoreInfo
 func (s *StoresInfo) AverageResourceScore(kind ResourceKind) float64 {
-	var totalResourceScore float64
-	var count int
+	var totalResourceSize int64
+	var totalResourceWeight float64
 	for _, s := range s.stores {
 		if s.IsUp() {
-			count++
-			totalResourceScore += s.ResourceScore(kind)
+			totalResourceWeight += s.ResourceWeight(kind)
+			totalResourceSize += s.ResourceSize(kind)
 		}
 	}
-	return totalResourceScore / float64(count)
+	return float64(totalResourceSize) / totalResourceWeight
 }
 
 // TotalWrittenBytes return the total written bytes of all StoreInfo
