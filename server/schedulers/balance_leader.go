@@ -76,7 +76,8 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 
 	source := cluster.GetStore(region.Leader.GetStoreId())
 	target := cluster.GetStore(newLeader.GetStoreId())
-	if !shouldBalance(source, target, core.LeaderKind, opInfluence) {
+	avgScore := cluster.GetStoresAverageScore(core.LeaderKind)
+	if !shouldBalance(source, target, avgScore, core.LeaderKind, region, opInfluence) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}

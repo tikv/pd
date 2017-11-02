@@ -170,6 +170,13 @@ func (c *clusterInfo) GetStores() []*core.StoreInfo {
 	return c.BasicCluster.GetStores()
 }
 
+// GetStoresAverageScore returns the total resource score of all StoreInfo
+func (c *clusterInfo) GetStoresAverageScore(kind core.ResourceKind) float64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.BasicCluster.GetStoresAverageScore(kind)
+}
+
 func (c *clusterInfo) getMetaStores() []*metapb.Store {
 	c.RLock()
 	defer c.RUnlock()

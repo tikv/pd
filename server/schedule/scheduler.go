@@ -34,6 +34,7 @@ type Cluster interface {
 	GetRegionStores(region *core.RegionInfo) []*core.StoreInfo
 	GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo
 	GetLeaderStore(region *core.RegionInfo) *core.StoreInfo
+	GetStoresAverageScore(kind core.ResourceKind) float64
 	ScanRegions(startKey []byte, limit int) []*core.RegionInfo
 
 	BlockStore(id uint64) error

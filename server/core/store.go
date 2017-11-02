@@ -106,17 +106,17 @@ const minWeight = 1e-6
 // LeaderScore returns the store's leader score: leaderCount / leaderWeight.
 func (s *StoreInfo) LeaderScore() float64 {
 	if s.LeaderWeight <= 0 {
-		return float64(s.LeaderCount) / minWeight
+		return float64(s.LeaderSize) / minWeight
 	}
-	return float64(s.LeaderCount) / s.LeaderWeight
+	return float64(s.LeaderSize) / s.LeaderWeight
 }
 
 // RegionScore returns the store's region score: regionSize / regionWeight.
 func (s *StoreInfo) RegionScore() float64 {
 	if s.RegionWeight <= 0 {
-		return float64(s.RegionCount) / minWeight
+		return float64(s.RegionSize) / minWeight
 	}
-	return float64(s.RegionCount) / s.RegionWeight
+	return float64(s.RegionSize) / s.RegionWeight
 }
 
 // StorageSize returns store's used storage size reported from tikv.
@@ -170,6 +170,24 @@ func (s *StoreInfo) ResourceScore(kind ResourceKind) float64 {
 		return s.LeaderScore()
 	case RegionKind:
 		return s.RegionScore()
+	default:
+		return 0
+	}
+}
+
+// ResourceWeight returns weight of leader/region in the score
+func (s *StoreInfo) ResourceWeight(kind ResourceKind) float64 {
+	switch kind {
+	case LeaderKind:
+		if s.LeaderWeight <= 0 {
+			return minWeight
+		}
+		return s.LeaderWeight
+	case RegionKind:
+		if s.RegionWeight <= 0 {
+			return minWeight
+		}
+		return s.RegionWeight
 	default:
 		return 0
 	}
@@ -364,6 +382,19 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 	if store, ok := s.stores[storeID]; ok {
 		store.RegionSize = regionSize
 	}
+}
+
+// AverageResourceScore return the total resource score of all StoreInfo
+func (s *StoresInfo) AverageResourceScore(kind ResourceKind) float64 {
+	var totalResourceScore float64
+	var count int
+	for _, s := range s.stores {
+		if s.IsUp() {
+			count++
+			totalResourceScore += s.ResourceScore(kind)
+		}
+	}
+	return totalResourceScore / float64(count)
 }
 
 // TotalWrittenBytes return the total written bytes of all StoreInfo

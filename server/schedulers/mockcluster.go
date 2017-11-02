@@ -121,6 +121,18 @@ func (mc *mockCluster) updateStoreRegionWeight(storeID uint64, weight float64) {
 	mc.PutStore(store)
 }
 
+func (mc *mockCluster) updateStoreLeaderSize(storeID uint64, size int64) {
+	store := mc.GetStore(storeID)
+	store.LeaderSize = size
+	mc.PutStore(store)
+}
+
+func (mc *mockCluster) updateStoreRegionSize(storeID uint64, size int64) {
+	store := mc.GetStore(storeID)
+	store.RegionSize = size
+	mc.PutStore(store)
+}
+
 func (mc *mockCluster) addLabelsStore(storeID uint64, regionCount int, labels map[string]string) {
 	mc.addRegionStore(storeID, regionCount)
 	store := mc.GetStore(storeID)
