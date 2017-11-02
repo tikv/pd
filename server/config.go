@@ -316,6 +316,8 @@ type ScheduleConfig struct {
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit,omitempty" json:"replica-schedule-limit"`
+	// BalanceTolerantRatio is the ratio of buffer size for balance scheduler.
+	BalanceTolerantRatio float64 `toml:"balance-tolerant-ratio,omitempty" json:"balance-tolerant-ratio"`
 	// Schedulers support for loding customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 }
@@ -329,6 +331,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		LeaderScheduleLimit:  c.LeaderScheduleLimit,
 		RegionScheduleLimit:  c.RegionScheduleLimit,
 		ReplicaScheduleLimit: c.ReplicaScheduleLimit,
+		BalanceTolerantRatio: c.BalanceTolerantRatio,
 		Schedulers:           schedulers,
 	}
 }
@@ -350,6 +353,7 @@ const (
 	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 16
+	defaultBalanceTolerantRatio = 2.5
 )
 
 var defaultSchedulers = SchedulerConfigs{
@@ -365,6 +369,7 @@ func (c *ScheduleConfig) adjust() {
 	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
 	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
+	adjustFloat64(&c.BalanceTolerantRatio, defaultBalanceTolerantRatio)
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
 }
 
@@ -452,6 +457,10 @@ func (o *scheduleOption) GetRegionScheduleLimit() uint64 {
 
 func (o *scheduleOption) GetReplicaScheduleLimit() uint64 {
 	return o.load().ReplicaScheduleLimit
+}
+
+func (o *scheduleOption) GetBalanceTolerantRatio() float64 {
+	return o.load().BalanceTolerantRatio
 }
 
 func (o *scheduleOption) GetSchedulers() SchedulerConfigs {

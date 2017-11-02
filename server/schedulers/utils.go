@@ -139,10 +139,6 @@ func minDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-const (
-	tolerantRatio = 2.5
-)
-
 func takeInfluence(store *core.StoreInfo, storeInfluence *schedule.StoreInfluence) {
 	store.LeaderCount += storeInfluence.LeaderCount
 	store.RegionCount += storeInfluence.RegionCount
@@ -153,7 +149,7 @@ func takeInfluence(store *core.StoreInfo, storeInfluence *schedule.StoreInfluenc
 // shouldBalance returns true if we should balance the source and target store.
 // The tolerantRatio provides a buffer to make the cluster stable, so that we
 // don't need to schedule very frequently.
-func shouldBalance(source, target *core.StoreInfo, avgScore float64, kind core.ResourceKind, region *core.RegionInfo, opInfluence schedule.OpInfluence) bool {
+func shouldBalance(source, target *core.StoreInfo, avgScore float64, kind core.ResourceKind, region *core.RegionInfo, opInfluence schedule.OpInfluence, tolerantRatio float64) bool {
 	takeInfluence(source, opInfluence.GetStoreInfluence(source.GetId()))
 	takeInfluence(target, opInfluence.GetStoreInfluence(target.GetId()))
 

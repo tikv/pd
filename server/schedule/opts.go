@@ -21,6 +21,7 @@ import (
 type Options interface {
 	GetLeaderScheduleLimit() uint64
 	GetRegionScheduleLimit() uint64
+	GetBalanceTolerantRatio() float64
 
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
