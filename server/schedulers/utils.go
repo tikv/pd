@@ -170,7 +170,7 @@ func shouldBalance(source, target *core.StoreInfo, avgScore float64, kind core.R
 	sourceSizeDiff := (sourceScore - avgScore) * source.ResourceWeight(kind)
 	targetSizeDiff := (avgScore - targetScore) * target.ResourceWeight(kind)
 
-	return math.Min(sourceSizeDiff, targetSizeDiff) > float64(region.ApproximateSize)*tolerantRatio
+	return math.Min(sourceSizeDiff, targetSizeDiff) >= float64(region.ApproximateSize)*tolerantRatio
 }
 
 func adjustBalanceLimit(cluster schedule.Cluster, kind core.ResourceKind) uint64 {
