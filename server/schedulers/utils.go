@@ -153,10 +153,20 @@ func minBalanceDiff(count uint64) float64 {
 	return math.Sqrt(float64(count))
 }
 
+func takeInfluence(store *core.StoreInfo, storeInfluence *schedule.StoreInfluence) {
+	store.LeaderCount += storeInfluence.LeaderCount
+	store.RegionCount += storeInfluence.RegionCount
+	store.LeaderSize += int64(storeInfluence.LeaderSize)
+	store.RegionSize += int64(storeInfluence.RegionSize)
+}
+
 // shouldBalance returns true if we should balance the source and target store.
 // The min balance diff provides a buffer to make the cluster stable, so that we
 // don't need to schedule very frequently.
-func shouldBalance(source, target *core.StoreInfo, kind core.ResourceKind) bool {
+func shouldBalance(source, target *core.StoreInfo, kind core.ResourceKind, opInfluence schedule.OpInfluence) bool {
+	takeInfluence(source, opInfluence.GetStoreInfluence(source.GetId()))
+	takeInfluence(target, opInfluence.GetStoreInfluence(target.GetId()))
+
 	sourceCount := source.ResourceCount(kind)
 	sourceScore := source.ResourceScore(kind)
 	targetScore := target.ResourceScore(kind)

@@ -32,8 +32,8 @@ type StoreInfo struct {
 	blocked          bool
 	LeaderCount      int
 	RegionCount      int
-	LeaderSize       uint64
-	RegionSize       uint64
+	LeaderSize       int64
+	RegionSize       int64
 	PendingPeerCount int
 	LastHeartbeatTS  time.Time
 	LeaderWeight     float64
@@ -152,7 +152,7 @@ func (s *StoreInfo) ResourceCount(kind ResourceKind) uint64 {
 }
 
 // ResourceSize returns size of leader/region in the store
-func (s *StoreInfo) ResourceSize(kind ResourceKind) uint64 {
+func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 	switch kind {
 	case LeaderKind:
 		return s.LeaderSize
@@ -353,14 +353,14 @@ func (s *StoresInfo) SetPendingPeerCount(storeID uint64, pendingPeerCount int) {
 }
 
 // SetLeaderSize set the leader count to a storeInfo
-func (s *StoresInfo) SetLeaderSize(storeID uint64, leaderSize uint64) {
+func (s *StoresInfo) SetLeaderSize(storeID uint64, leaderSize int64) {
 	if store, ok := s.stores[storeID]; ok {
 		store.LeaderSize = leaderSize
 	}
 }
 
 // SetRegionSize set the region count to a storeInfo
-func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize uint64) {
+func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 	if store, ok := s.stores[storeID]; ok {
 		store.RegionSize = regionSize
 	}

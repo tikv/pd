@@ -322,7 +322,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		region.PendingPeers = request.GetPendingPeers()
 		region.WrittenBytes = request.GetBytesWritten()
 		region.ReadBytes = request.GetBytesRead()
-		region.ApproximateSize = uint64(math.Ceil(float64(request.GetApproximateSize()) / 1e6)) // use size of Mb as unit
+		region.ApproximateSize = int64(math.Ceil(float64(request.GetApproximateSize()) / 1e6)) // use size of Mb as unit
 		if region.GetId() == 0 {
 			msg := fmt.Sprintf("invalid request region, %v", request)
 			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)

@@ -318,7 +318,8 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			if !s.AllowSchedule() {
 				continue
 			}
-			if op := s.Schedule(c.cluster); op != nil {
+			opInfluence := schedule.NewOpInfluence(c.getOperators(), c.cluster)
+			if op := s.Schedule(c.cluster, opInfluence); op != nil {
 				c.addOperator(op)
 			}
 
@@ -495,10 +496,10 @@ func (s *scheduleController) Stop() {
 	s.cancel()
 }
 
-func (s *scheduleController) Schedule(cluster schedule.Cluster) *schedule.Operator {
+func (s *scheduleController) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
 		// If we have schedule, reset interval to the minimal interval.
-		if op := scheduleByNamespace(cluster, s.classifier, s.Scheduler); op != nil {
+		if op := scheduleByNamespace(cluster, s.classifier, s.Scheduler, opInfluence); op != nil {
 			s.nextInterval = s.Scheduler.GetMinInterval()
 			return op
 		}

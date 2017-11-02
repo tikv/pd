@@ -41,7 +41,7 @@ const (
 	hotRegionAntiCount           = 1
 )
 
-// BasicCluster provides basic data member and interface for a tikv cluster
+// BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
 	Stores          *core.StoresInfo
 	Regions         *core.RegionsInfo
@@ -49,7 +49,41 @@ type BasicCluster struct {
 	ReadStatistics  cache.Cache
 }
 
-// NewBasicCluster creates a BasicCluster
+// NewOpInfluence creates a OpInfluence.
+func NewOpInfluence(operators []*Operator, cluster Cluster) OpInfluence {
+	m := make(map[uint64]*StoreInfluence)
+
+	for _, op := range operators {
+		if !op.IsTimeout() && !op.IsFinish() {
+			op.Influence(m, cluster.GetRegion(op.RegionID()))
+		}
+	}
+
+	return m
+}
+
+// OpInfluence is a map of StoreInfluence.
+type OpInfluence map[uint64]*StoreInfluence
+
+// GetStoreInfluence get storeInfluence of specific store.
+func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
+	storeInfluence, ok := m[id]
+	if !ok {
+		storeInfluence = &StoreInfluence{}
+		m[id] = storeInfluence
+	}
+	return storeInfluence
+}
+
+// StoreInfluence records influences that pending operators will make.
+type StoreInfluence struct {
+	RegionSize  int
+	RegionCount int
+	LeaderSize  int
+	LeaderCount int
+}
+
+// NewBasicCluster creates a BasicCluster.
 func NewBasicCluster() *BasicCluster {
 	return &BasicCluster{
 		Stores:          core.NewStoresInfo(),

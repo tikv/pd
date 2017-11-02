@@ -73,7 +73,7 @@ func (s *balanceRegionScheduler) IsScheduleAllowed() bool {
 	return s.limiter.OperatorCount(core.RegionKind) < limit
 }
 
-func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Operator {
+func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	// Select a peer from the store with most regions.
 	region, oldPeer := scheduleRemovePeer(cluster, s.GetName(), s.selector)
@@ -93,7 +93,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Op
 		return nil
 	}
 
-	op := s.transferPeer(cluster, region, oldPeer)
+	op := s.transferPeer(cluster, region, oldPeer, opInfluence)
 	if op == nil {
 		// We can't transfer peer from this store now, so we add it to the cache
 		// and skip it for a while.
@@ -104,7 +104,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) *schedule.Op
 	return op
 }
 
-func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *schedule.Operator {
+func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer, opInfluence schedule.OpInfluence) *schedule.Operator {
 	// scoreGuard guarantees that the distinct score will not decrease.
 	stores := cluster.GetRegionStores(region)
 	source := cluster.GetStore(oldPeer.GetStoreId())
@@ -118,7 +118,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 
 	target := cluster.GetStore(newPeer.GetStoreId())
-	if !shouldBalance(source, target, core.RegionKind) {
+	if !shouldBalance(source, target, core.RegionKind, opInfluence) {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
 	}
