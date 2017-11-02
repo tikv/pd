@@ -14,13 +14,14 @@
 package pd
 
 import (
-	"context"
+	"golang.org/x/net/context"
 	"strings"
 	"sync"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"google.golang.org/grpc"
@@ -344,11 +345,20 @@ func (c *client) tsLoop() {
 }
 
 func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoRequest) error {
+	opts := make([]opentracing.StartSpanOption, 0, len(requests))
+	for _, req := range requests {
+		span := opentracing.SpanFromContext(req.ctx)
+		opts = append(opts, opentracing.ChildOf(span.Context()))
+	}
+	span := opentracing.StartSpan("pdclient.processTSORequests", opts...)
+	defer span.Finish()
+
 	start := time.Now()
 	req := &pdpb.TsoRequest{
 		Header: c.requestHeader(),
 		Count:  uint32(len(requests)),
 	}
+
 	if err := stream.Send(req); err != nil {
 		c.finishTSORequest(requests, 0, 0, err)
 		return errors.Trace(err)
@@ -376,6 +386,9 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 
 func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical int64, err error) {
 	for i := 0; i < len(requests); i++ {
+		if span := opentracing.SpanFromContext(requests[i].ctx); span != nil {
+			span.Finish()
+		}
 		requests[i].physical, requests[i].logical = physical, firstLogical+int64(i)
 		requests[i].done <- err
 	}
@@ -431,6 +444,7 @@ var tsoReqPool = sync.Pool{
 }
 
 func (c *client) GetTSAsync(ctx context.Context) TSFuture {
+	_, ctx = opentracing.StartSpanFromContext(ctx, "GetTSAsync")
 	req := tsoReqPool.Get().(*tsoRequest)
 	req.start = time.Now()
 	req.ctx = ctx
@@ -469,8 +483,13 @@ func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
 }
 
 func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span := opentracing.StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds()) }()
+
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().GetRegion(ctx, &pdpb.GetRegionRequest{
 		Header:    c.requestHeader(),
@@ -488,8 +507,13 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 }
 
 func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Region, *metapb.Peer, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span := opentracing.StartSpan("pdclient.GetRegionByID", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("get_region_byid").Observe(time.Since(start).Seconds()) }()
+
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().GetRegionByID(ctx, &pdpb.GetRegionByIDRequest{
 		Header:   c.requestHeader(),
@@ -507,8 +531,13 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Re
 }
 
 func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span := opentracing.StartSpan("pdclient.GetStore", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
 	start := time.Now()
 	defer func() { cmdDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds()) }()
+
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().GetStore(ctx, &pdpb.GetStoreRequest{
 		Header:  c.requestHeader(),
