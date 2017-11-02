@@ -14,7 +14,6 @@
 package pd
 
 import (
-	"golang.org/x/net/context"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +23,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
 
@@ -484,7 +484,7 @@ func (c *client) GetTS(ctx context.Context) (int64, int64, error) {
 
 func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span := opentracing.StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
+		span = opentracing.StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
@@ -508,7 +508,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 
 func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Region, *metapb.Peer, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span := opentracing.StartSpan("pdclient.GetRegionByID", opentracing.ChildOf(span.Context()))
+		span = opentracing.StartSpan("pdclient.GetRegionByID", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
@@ -532,7 +532,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Re
 
 func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span := opentracing.StartSpan("pdclient.GetStore", opentracing.ChildOf(span.Context()))
+		span = opentracing.StartSpan("pdclient.GetStore", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
