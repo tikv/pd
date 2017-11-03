@@ -231,32 +231,48 @@ func (c *coordinator) collectHotSpotMetrics() {
 		return
 	}
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
-	for storeID, stat := range status.AsPeer {
-		store := fmt.Sprintf("store_%d", storeID)
-		totalWriteBytes := float64(stat.TotalFlowBytes)
-		hotWriteRegionCount := float64(stat.RegionsCount)
+	for _, s := range c.cluster.GetStores() {
+		store := fmt.Sprintf("store_%d", s.GetId())
+		stat, ok := status.AsPeer[s.GetId()]
+		if ok {
+			totalWriteBytes := float64(stat.TotalFlowBytes)
+			hotWriteRegionCount := float64(stat.RegionsCount)
 
-		hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_peer").Set(totalWriteBytes)
-		hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_peer").Set(hotWriteRegionCount)
-	}
-	for storeID, stat := range status.AsLeader {
-		store := fmt.Sprintf("store_%d", storeID)
-		totalWriteBytes := float64(stat.TotalFlowBytes)
-		hotWriteRegionCount := float64(stat.RegionsCount)
+			hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_peer").Set(totalWriteBytes)
+			hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_peer").Set(hotWriteRegionCount)
+		} else {
+			hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_peer").Set(0)
+			hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_peer").Set(0)
+		}
 
-		hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_leader").Set(totalWriteBytes)
-		hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_leader").Set(hotWriteRegionCount)
+		stat, ok = status.AsLeader[s.GetId()]
+		if ok {
+			totalWriteBytes := float64(stat.TotalFlowBytes)
+			hotWriteRegionCount := float64(stat.RegionsCount)
+
+			hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_leader").Set(totalWriteBytes)
+			hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_leader").Set(hotWriteRegionCount)
+		} else {
+			hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_leader").Set(0)
+		}
 	}
 
 	// collect hot read region metrics
 	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
-	for storeID, stat := range status.AsLeader {
-		store := fmt.Sprintf("store_%d", storeID)
-		totalReadBytes := float64(stat.TotalFlowBytes)
-		hotReadRegionCount := float64(stat.RegionsCount)
+	for _, s := range c.cluster.GetStores() {
+		store := fmt.Sprintf("store_%d", s.GetId())
+		stat, ok := status.AsLeader[s.GetId()]
+		if ok {
+			totalReadBytes := float64(stat.TotalFlowBytes)
+			hotReadRegionCount := float64(stat.RegionsCount)
 
-		hotSpotStatusGauge.WithLabelValues(store, "total_read_bytes_as_leader").Set(totalReadBytes)
-		hotSpotStatusGauge.WithLabelValues(store, "hot_read_region_as_leader").Set(hotReadRegionCount)
+			hotSpotStatusGauge.WithLabelValues(store, "total_read_bytes_as_leader").Set(totalReadBytes)
+			hotSpotStatusGauge.WithLabelValues(store, "hot_read_region_as_leader").Set(hotReadRegionCount)
+		} else {
+			hotSpotStatusGauge.WithLabelValues(store, "total_read_bytes_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(store, "hot_read_region_as_leader").Set(0)
+		}
 	}
 }
 
