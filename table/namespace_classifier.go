@@ -42,6 +42,7 @@ type Namespace struct {
 	Name     string          `json:"Name"`
 	TableIDs map[int64]bool  `json:"table_ids,omitempty"`
 	StoreIDs map[uint64]bool `json:"store_ids,omitempty"`
+	Meta     bool            `json:"meta,omitempty"`
 }
 
 // NewNamespace creates a new namespace
@@ -142,14 +143,15 @@ func (c *tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInf
 	c.RLock()
 	defer c.RUnlock()
 
+	isMeta := Key(regionInfo.StartKey).IsMeta()
 	tableID := Key(regionInfo.StartKey).TableID()
-	if tableID == 0 {
+	if tableID == 0 && !isMeta {
 		return namespace.DefaultNamespace
 	}
 
 	for name, ns := range c.nsInfo.namespaces {
 		_, ok := ns.TableIDs[tableID]
-		if ok {
+		if ok || (isMeta && ns.Meta) {
 			return name
 		}
 	}
@@ -225,6 +227,39 @@ func (c *tableNamespaceClassifier) RemoveNamespaceTableID(name string, tableID i
 	}
 
 	delete(n.TableIDs, tableID)
+	return c.putNamespaceLocked(n)
+}
+
+// AddMetaToNamespace adds meta to a namespace.
+func (c *tableNamespaceClassifier) AddMetaToNamespace(name string) error {
+	c.Lock()
+	defer c.Unlock()
+
+	n := c.nsInfo.getNamespaceByName(name)
+	if n == nil {
+		return errors.Errorf("invalid namespace Name %s, not found", name)
+	}
+	if c.nsInfo.IsMetaExist() {
+		return errors.New("meta is already set")
+	}
+
+	n.Meta = true
+	return c.putNamespaceLocked(n)
+}
+
+// RemoveMeta removes meta from a namespace.
+func (c *tableNamespaceClassifier) RemoveMeta(name string) error {
+	c.Lock()
+	defer c.Unlock()
+
+	n := c.nsInfo.getNamespaceByName(name)
+	if n == nil {
+		return errors.Errorf("invalid namespace Name %s, not found", name)
+	}
+	if !n.Meta {
+		return errors.Errorf("meta is not belong to %s", name)
+	}
+	n.Meta = false
 	return c.putNamespaceLocked(n)
 }
 
@@ -324,6 +359,16 @@ func (namespaceInfo *namespacesInfo) IsStoreIDExist(storeID uint64) bool {
 	for _, ns := range namespaceInfo.namespaces {
 		_, ok := ns.StoreIDs[storeID]
 		if ok {
+			return true
+		}
+	}
+	return false
+}
+
+// IsMetaExist returns true if meta is binded to a namespace.
+func (namespaceInfo *namespacesInfo) IsMetaExist() bool {
+	for _, ns := range namespaceInfo.namespaces {
+		if ns.Meta {
 			return true
 		}
 	}
