@@ -123,13 +123,9 @@ func (t *regionTree) find(region *metapb.Region) *regionItem {
 	return result
 }
 
-func (t *regionTree) scanRange(startKey []byte, limit int) []*regionItem {
-	region := &metapb.Region{StartKey: startKey}
-	item := &regionItem{region: region}
-	res := make([]*regionItem, 0, limit)
-	t.tree.DescendLessOrEqual(item, func(i btree.Item) bool {
-		res = append(res, i.(*regionItem))
-		return len(res) < int(limit)
+func (t *regionTree) scanRange(startKey []byte, f func(*metapb.Region) bool) {
+	startItem := &regionItem{region: &metapb.Region{StartKey: startKey}}
+	t.tree.DescendLessOrEqual(startItem, func(item btree.Item) bool {
+		return f(item.(*regionItem).region)
 	})
-	return res
 }

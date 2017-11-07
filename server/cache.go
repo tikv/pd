@@ -267,6 +267,12 @@ func (c *clusterInfo) getRegionCount() int {
 	return c.Regions.GetRegionCount()
 }
 
+func (c *clusterInfo) getRegionStats(startKey, endKey []byte) *core.RegionStats {
+	c.RLock()
+	defer c.RUnlock()
+	return c.Regions.GetRegionStats(startKey, endKey)
+}
+
 func (c *clusterInfo) getStoreRegionCount(storeID uint64) int {
 	c.RLock()
 	defer c.RUnlock()
