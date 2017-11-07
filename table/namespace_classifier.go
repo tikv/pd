@@ -89,10 +89,9 @@ func (ns *Namespace) AddStoreID(storeID uint64) {
 // tableNamespaceClassifier implements Classifier interface
 type tableNamespaceClassifier struct {
 	sync.RWMutex
-	nsInfo         *namespacesInfo
-	tableIDDecoder IDDecoder
-	kv             *core.KV
-	idAlloc        core.IDAllocator
+	nsInfo  *namespacesInfo
+	kv      *core.KV
+	idAlloc core.IDAllocator
 	http.Handler
 }
 
@@ -106,10 +105,9 @@ func NewTableNamespaceClassifier(kv *core.KV, idAlloc core.IDAllocator) (namespa
 		return nil, errors.Trace(err)
 	}
 	c := &tableNamespaceClassifier{
-		nsInfo:         nsInfo,
-		tableIDDecoder: DefaultIDDecoder,
-		kv:             kv,
-		idAlloc:        idAlloc,
+		nsInfo:  nsInfo,
+		kv:      kv,
+		idAlloc: idAlloc,
 	}
 	c.Handler = newTableClassifierHandler(c)
 	return c, nil
@@ -144,7 +142,7 @@ func (c *tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInf
 	c.RLock()
 	defer c.RUnlock()
 
-	tableID := c.tableIDDecoder.DecodeTableID(regionInfo.StartKey)
+	tableID := Key(regionInfo.StartKey).TableID()
 	if tableID == 0 {
 		return namespace.DefaultNamespace
 	}

@@ -20,18 +20,10 @@ import (
 	"github.com/juju/errors"
 )
 
-// IDDecoder defines method to extract tableID from key
-type IDDecoder interface {
-	DecodeTableID(key Key) int64
-}
-
-// DefaultIDDecoder is the default decoder.
-// unit test will use other mocked decoder.
-var DefaultIDDecoder defaultIDDecoder
-
-type defaultIDDecoder struct{}
-
-var tablePrefix = []byte{'t'}
+var (
+	tablePrefix = []byte{'t'}
+	metaPrefix  = []byte{'m'}
+)
 
 const (
 	signMask uint64 = 0x8000000000000000
@@ -44,25 +36,29 @@ const (
 // Key represents high-level Key type.
 type Key []byte
 
-// HasPrefix tests whether the Key begins with prefix.
-func (k Key) HasPrefix(prefix Key) bool {
-	return bytes.HasPrefix(k, prefix)
-}
-
-// DecodeTableID decodes the table ID of the key, if the key is not table key, returns 0.
-func (decoder defaultIDDecoder) DecodeTableID(key Key) int64 {
-	_, key, err := decodeBytes(key)
+// TableID returns the table ID of the key, if the key is not table key, returns 0.
+func (k Key) TableID() int64 {
+	_, key, err := decodeBytes(k)
 	if err != nil {
 		// should never happen
 		return 0
 	}
-	if !key.HasPrefix(tablePrefix) {
+	if !bytes.HasPrefix(key, tablePrefix) {
 		return 0
 	}
 	key = key[len(tablePrefix):]
 
 	_, tableID, _ := DecodeInt(key)
 	return tableID
+}
+
+// IsMeta returns if the key is a meta key.
+func (k Key) IsMeta() bool {
+	_, key, err := decodeBytes(k)
+	if err != nil {
+		return false
+	}
+	return bytes.HasPrefix(key, metaPrefix)
 }
 
 // DecodeInt decodes value encoded by EncodeInt before.
@@ -80,15 +76,6 @@ func DecodeInt(b []byte) ([]byte, int64, error) {
 
 func decodeCmpUintToInt(u uint64) int64 {
 	return int64(u ^ signMask)
-}
-
-// IsPureTableID returns true if b is consist of tablePrefix and 8-byte tableID
-func IsPureTableID(b []byte) bool {
-	_, key, err := decodeBytes(b)
-	if err != nil {
-		return false
-	}
-	return len(key) == len(tablePrefix)+8
 }
 
 func decodeBytes(b []byte) ([]byte, []byte, error) {
