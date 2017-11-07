@@ -109,7 +109,7 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 		source := tc.GetStore(1)
 		target := tc.GetStore(2)
 		region := &core.RegionInfo{ApproximateSize: t.regionSize}
-		c.Assert(shouldBalance(source, target, t.avgScore, core.LeaderKind, region, newTestOpInfluence(1, 2, core.LeaderKind, t.diff), defaultBalanceTolerantRatio), Equals, t.expectedResult)
+		c.Assert(shouldBalance(source, target, t.avgScore, core.LeaderKind, region, newTestOpInfluence(1, 2, core.LeaderKind, t.diff), defaultTolerantSizeRatio), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -118,7 +118,7 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 		source := tc.GetStore(1)
 		target := tc.GetStore(2)
 		region := &core.RegionInfo{ApproximateSize: t.regionSize}
-		c.Assert(shouldBalance(source, target, t.avgScore, core.RegionKind, region, newTestOpInfluence(1, 2, core.RegionKind, t.diff), defaultBalanceTolerantRatio), Equals, t.expectedResult)
+		c.Assert(shouldBalance(source, target, t.avgScore, core.RegionKind, region, newTestOpInfluence(1, 2, core.RegionKind, t.diff), defaultTolerantSizeRatio), Equals, t.expectedResult)
 	}
 }
 

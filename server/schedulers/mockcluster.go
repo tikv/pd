@@ -255,7 +255,7 @@ const (
 	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 16
-	defaultBalanceTolerantRatio = 2.5
+	defaultTolerantSizeRatio    = 2.5
 )
 
 // MockSchedulerOptions is a mock of SchedulerOptions
@@ -269,7 +269,7 @@ type MockSchedulerOptions struct {
 	MaxReplicas           int
 	LocationLabels        []string
 	HotRegionLowThreshold int
-	BalanceTolerantRatio  float64
+	TolerantSizeRatio     float64
 }
 
 func newMockSchedulerOptions() *MockSchedulerOptions {
@@ -281,7 +281,7 @@ func newMockSchedulerOptions() *MockSchedulerOptions {
 	mso.MaxReplicas = defaultMaxReplicas
 	mso.HotRegionLowThreshold = schedule.HotRegionLowThreshold
 	mso.MaxPendingPeerCount = defaultMaxPendingPeerCount
-	mso.BalanceTolerantRatio = defaultBalanceTolerantRatio
+	mso.TolerantSizeRatio = defaultTolerantSizeRatio
 	return mso
 }
 
@@ -325,9 +325,9 @@ func (mso *MockSchedulerOptions) GetHotRegionLowThreshold() int {
 	return mso.HotRegionLowThreshold
 }
 
-// GetBalanceTolerantRatio mock method
-func (mso *MockSchedulerOptions) GetBalanceTolerantRatio() float64 {
-	return mso.BalanceTolerantRatio
+// GetTolerantSizeRatio mock method
+func (mso *MockSchedulerOptions) GetTolerantSizeRatio() float64 {
+	return mso.TolerantSizeRatio
 }
 
 // SetMaxReplicas mock method

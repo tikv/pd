@@ -149,6 +149,7 @@ func takeInfluence(store *core.StoreInfo, storeInfluence *schedule.StoreInfluenc
 // shouldBalance returns true if we should balance the source and target store.
 // The tolerantRatio provides a buffer to make the cluster stable, so that we
 // don't need to schedule very frequently.
+// TODO: simplify the arguments
 func shouldBalance(source, target *core.StoreInfo, avgScore float64, kind core.ResourceKind, region *core.RegionInfo, opInfluence schedule.OpInfluence, tolerantRatio float64) bool {
 	takeInfluence(source, opInfluence.GetStoreInfluence(source.GetId()))
 	takeInfluence(target, opInfluence.GetStoreInfluence(target.GetId()))

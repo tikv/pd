@@ -119,7 +119,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 
 	target := cluster.GetStore(newPeer.GetStoreId())
 	avgScore := cluster.GetStoresAverageScore(core.RegionKind)
-	if !shouldBalance(source, target, avgScore, core.RegionKind, region, opInfluence, s.opt.GetBalanceTolerantRatio()) {
+	if !shouldBalance(source, target, avgScore, core.RegionKind, region, opInfluence, s.opt.GetTolerantSizeRatio()) {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
 	}
