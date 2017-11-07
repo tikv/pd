@@ -394,6 +394,10 @@ func (s *StoresInfo) AverageResourceScore(kind ResourceKind) float64 {
 			totalResourceSize += s.ResourceSize(kind)
 		}
 	}
+
+	if totalResourceWeight == 0 {
+		return 0
+	}
 	return float64(totalResourceSize) / totalResourceWeight
 }
 
