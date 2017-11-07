@@ -51,7 +51,7 @@ max-store-down-time = "1h"
 leader-schedule-limit = 64
 region-schedule-limit = 16
 replica-schedule-limit = 24
-tolerate-size-ratio = 2.5
+tolerant-size-ratio = 2.5
 
 # customized schedulers, the format is as below
 # if empty, it will use balance-leader, balance-region, hot-region as default
