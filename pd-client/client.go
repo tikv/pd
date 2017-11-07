@@ -345,13 +345,15 @@ func (c *client) tsLoop() {
 }
 
 func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoRequest) error {
-	opts := make([]opentracing.StartSpanOption, 0, len(requests))
-	for _, req := range requests {
-		span := opentracing.SpanFromContext(req.ctx)
-		opts = append(opts, opentracing.ChildOf(span.Context()))
+	if len(requests) > 0 && opentracing.SpanFromContext(requests[0].ctx) != nil {
+		opts := make([]opentracing.StartSpanOption, 0, len(requests))
+		for _, req := range requests {
+			span := opentracing.SpanFromContext(req.ctx)
+			opts = append(opts, opentracing.ChildOf(span.Context()))
+		}
+		span := opentracing.StartSpan("pdclient.processTSORequests", opts...)
+		defer span.Finish()
 	}
-	span := opentracing.StartSpan("pdclient.processTSORequests", opts...)
-	defer span.Finish()
 
 	start := time.Now()
 	req := &pdpb.TsoRequest{
@@ -444,7 +446,10 @@ var tsoReqPool = sync.Pool{
 }
 
 func (c *client) GetTSAsync(ctx context.Context) TSFuture {
-	_, ctx = opentracing.StartSpanFromContext(ctx, "GetTSAsync")
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("GetTSAsync", opentracing.ChildOf(span.Context()))
+		ctx = opentracing.ContextWithSpan(ctx, span)
+	}
 	req := tsoReqPool.Get().(*tsoRequest)
 	req.start = time.Now()
 	req.ctx = ctx
