@@ -48,6 +48,7 @@ address = ""
 max-snapshot-count = 3
 max-pending-peer-count = 16
 max-store-down-time = "1h"
+max-merge-region-size = 1
 leader-schedule-limit = 64
 region-schedule-limit = 16
 replica-schedule-limit = 24

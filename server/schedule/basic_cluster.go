@@ -135,6 +135,11 @@ func (bc *BasicCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo 
 	return bc.Stores.GetStore(region.Leader.GetStoreId())
 }
 
+// GetAdjacentRegions returns region's info that is adjacent with specific region
+func (bc *BasicCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo) {
+	return bc.Regions.GetAdjacentRegions(region)
+}
+
 // BlockStore stops balancer from selecting the store.
 func (bc *BasicCluster) BlockStore(storeID uint64) error {
 	return errors.Trace(bc.Stores.BlockStore(storeID))

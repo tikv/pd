@@ -240,6 +240,7 @@ const (
 	defaultMaxSnapshotCount     = 3
 	defaultMaxPendingPeerCount  = 16
 	defaultMaxStoreDownTime     = time.Hour
+	defaultMaxMergeRegionSize   = 1
 	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 16
@@ -254,6 +255,7 @@ type MockSchedulerOptions struct {
 	MaxPendingPeerCount   uint64
 	MaxStoreDownTime      time.Duration
 	MaxReplicas           int
+	MaxMergeRegionSize    uint64
 	LocationLabels        []string
 	HotRegionLowThreshold int
 }
@@ -267,6 +269,7 @@ func newMockSchedulerOptions() *MockSchedulerOptions {
 	mso.MaxReplicas = defaultMaxReplicas
 	mso.HotRegionLowThreshold = schedule.HotRegionLowThreshold
 	mso.MaxPendingPeerCount = defaultMaxPendingPeerCount
+	mso.MaxMergeRegionSize = defaultMaxMergeRegionSize
 	return mso
 }
 
@@ -298,6 +301,11 @@ func (mso *MockSchedulerOptions) GetMaxStoreDownTime() time.Duration {
 // GetMaxReplicas mock method
 func (mso *MockSchedulerOptions) GetMaxReplicas() int {
 	return mso.MaxReplicas
+}
+
+// GetMaxMergeRegionSize mock method
+func (mso *MockSchedulerOptions) GetMaxMergeRegionSize() uint64 {
+	return mso.MaxMergeRegionSize
 }
 
 // GetLocationLabels mock method

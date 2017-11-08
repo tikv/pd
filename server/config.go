@@ -307,6 +307,9 @@ type ScheduleConfig struct {
 	// it will never be used as a source or target store.
 	MaxSnapshotCount    uint64 `toml:"max-snapshot-count,omitempty" json:"max-snapshot-count"`
 	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count,omitempty" json:"max-pending-peer-count"`
+	// If the size of region is smaller than this value,
+	// it will try to merge with adjacent regions.
+	MaxMergeRegionSize uint64 `toml:"max-merge-region-size,omitempty" json:"max-merge-region-size"`
 	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
@@ -326,6 +329,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 	return &ScheduleConfig{
 		MaxSnapshotCount:     c.MaxSnapshotCount,
 		MaxStoreDownTime:     c.MaxStoreDownTime,
+		MaxMergeRegionSize:   c.MaxMergeRegionSize,
 		LeaderScheduleLimit:  c.LeaderScheduleLimit,
 		RegionScheduleLimit:  c.RegionScheduleLimit,
 		ReplicaScheduleLimit: c.ReplicaScheduleLimit,
@@ -347,6 +351,7 @@ const (
 	defaultMaxSnapshotCount     = 3
 	defaultMaxPendingPeerCount  = 16
 	defaultMaxStoreDownTime     = time.Hour
+	defaultMaxMergeRegionSize   = 1
 	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 16
@@ -362,6 +367,7 @@ func (c *ScheduleConfig) adjust() {
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
+	adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
 	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
 	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
@@ -440,6 +446,10 @@ func (o *scheduleOption) GetMaxPendingPeerCount() uint64 {
 
 func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
 	return o.load().MaxStoreDownTime.Duration
+}
+
+func (o *scheduleOption) GetMaxMergeRegionSize() uint64 {
+	return o.load().MaxMergeRegionSize
 }
 
 func (o *scheduleOption) GetLeaderScheduleLimit() uint64 {

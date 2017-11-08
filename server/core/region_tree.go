@@ -133,3 +133,18 @@ func (t *regionTree) scanRange(startKey []byte, limit int) []*regionItem {
 	})
 	return res
 }
+
+func (t *regionTree) getAdjacentRegions(region *metapb.Region) (*regionItem, *regionItem) {
+	item := &regionItem{region: &metapb.Region{StartKey: region.EndKey}}
+	var prev, next *regionItem
+	t.tree.DescendLessOrEqual(item, func(i btree.Item) bool {
+		next = i.(*regionItem)
+		return false
+	})
+	item = &regionItem{region: &metapb.Region{StartKey: region.StartKey}}
+	t.tree.DescendGreaterThan(item, func(i btree.Item) bool {
+		prev = i.(*regionItem)
+		return false
+	})
+	return prev, next
+}

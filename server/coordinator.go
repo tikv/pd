@@ -57,6 +57,7 @@ type coordinator struct {
 	limiter          *schedule.Limiter
 	replicaChecker   *schedule.ReplicaChecker
 	namespaceChecker *schedule.NamespaceChecker
+	mergeChecker     *schedule.MergeChecker
 	operators        map[uint64]*schedule.Operator
 	schedulers       map[string]*scheduleController
 	classifier       namespace.Classifier
@@ -74,6 +75,7 @@ func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartb
 		limiter:          schedule.NewLimiter(),
 		replicaChecker:   schedule.NewReplicaChecker(opt, cluster, classifier),
 		namespaceChecker: schedule.NewNamespaceChecker(opt, cluster, classifier),
+		mergeChecker:     schedule.NewMergeChecker(opt, cluster, classifier),
 		operators:        make(map[uint64]*schedule.Operator),
 		schedulers:       make(map[string]*scheduleController),
 		classifier:       classifier,
@@ -105,6 +107,14 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	// Check replica operator.
 	if c.limiter.OperatorCount(core.RegionKind) >= c.opt.GetReplicaScheduleLimit() {
 		return
+	}
+
+	if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
+		if c.addOperator(op1) == true {
+			if c.addOperator(op2) == false {
+				c.removeOperator(op1)
+			}
+		}
 	}
 	// Generate Operator which moves region to targeted namespace store
 	if op := c.namespaceChecker.Check(region); op != nil {
@@ -475,6 +485,14 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 				Peer:       region.GetStorePeer(s.FromStore),
 			},
 		}
+		c.hbStreams.sendMsg(region, cmd)
+	case schedule.MergeRegion:
+		if s.IsFake == true {
+			return
+		}
+		// TODO: wait protobuf
+		cmd := &pdpb.RegionHeartbeatResponse{}
+
 		c.hbStreams.sendMsg(region, cmd)
 	default:
 		log.Errorf("unknown operatorStep: %v", step)

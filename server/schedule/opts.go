@@ -25,6 +25,7 @@ type Options interface {
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
 	GetMaxStoreDownTime() time.Duration
+	GetMaxMergeRegionSize() uint64
 
 	GetMaxReplicas() int
 	GetLocationLabels() []string

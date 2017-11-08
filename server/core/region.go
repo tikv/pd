@@ -484,6 +484,19 @@ func (r *RegionsInfo) ScanRange(startKey []byte, limit int) []*RegionInfo {
 	return res
 }
 
+// GetAdjacentRegions returns region's info that is adjacent with specific region
+func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo) {
+	metaPrev, metaNext := r.tree.getAdjacentRegions(region.Region)
+	var prev, next *RegionInfo
+	if metaPrev != nil {
+		prev = r.GetRegion(metaPrev.region.GetId())
+	}
+	if metaNext != nil {
+		next = r.GetRegion(metaNext.region.GetId())
+	}
+	return prev, next
+}
+
 const randomRegionMaxRetry = 10
 
 func randRegion(regions *regionMap) *RegionInfo {

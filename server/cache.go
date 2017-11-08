@@ -201,6 +201,13 @@ func (c *clusterInfo) ScanRegions(startKey []byte, limit int) []*core.RegionInfo
 	return c.Regions.ScanRange(startKey, limit)
 }
 
+// GetAdjacentRegions returns region's info that is adjacent with specific region
+func (c *clusterInfo) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.BasicCluster.GetAdjacentRegions(region)
+}
+
 // GetRegion searches for a region by ID.
 func (c *clusterInfo) GetRegion(regionID uint64) *core.RegionInfo {
 	c.RLock()
