@@ -135,14 +135,20 @@ func (t *regionTree) scanRange(startKey []byte, limit int) []*regionItem {
 }
 
 func (t *regionTree) getAdjacentRegions(region *metapb.Region) (*regionItem, *regionItem) {
-	item := &regionItem{region: &metapb.Region{StartKey: region.EndKey}}
+	item := &regionItem{region: &metapb.Region{StartKey: region.StartKey}}
 	var prev, next *regionItem
 	t.tree.DescendLessOrEqual(item, func(i btree.Item) bool {
+		if bytes.Compare(item.region.StartKey, i.(*regionItem).region.StartKey) == 0 {
+			return true
+		}
 		next = i.(*regionItem)
 		return false
 	})
 	item = &regionItem{region: &metapb.Region{StartKey: region.StartKey}}
-	t.tree.DescendGreaterThan(item, func(i btree.Item) bool {
+	t.tree.AscendGreaterOrEqual(item, func(i btree.Item) bool {
+		if bytes.Compare(item.region.StartKey, i.(*regionItem).region.StartKey) == 0 {
+			return true
+		}
 		prev = i.(*regionItem)
 		return false
 	})
