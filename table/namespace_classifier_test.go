@@ -60,6 +60,7 @@ func (s *testTableNamespaceSuite) newClassifier(c *C) *tableNamespaceClassifier 
 		StoreIDs: map[uint64]bool{
 			testStore2: true,
 		},
+		Meta: true,
 	}
 
 	tableClassifier.nsInfo.setNamespace(&testNamespace1)
@@ -106,7 +107,7 @@ func (s *testTableNamespaceSuite) TestTableNameSpaceGetRegionNamespace(c *C) {
 		{false, "t\x80\x00\x00\x00\x00\x00\x00\x02", "t\x80\x00\x00\x00\x00\x00\x00\x02\x01", testTable2, false, "ns2"},
 		{false, "t\x80\x00\x00\x00\x00\x00\x00\x02", "", testTable2, false, "ns2"},
 		{false, "t\x80\x00\x00\x00\x00\x00\x00\x03", "t\x80\x00\x00\x00\x00\x00\x00\x04", 3, false, "global"},
-		{false, "m\x80\x00\x00\x00\x00\x00\x00\x01", "", 0, true, "global"},
+		{false, "m\x80\x00\x00\x00\x00\x00\x00\x01", "", 0, true, "ns2"},
 		{false, "", "m\x80\x00\x00\x00\x00\x00\x00\x01", 0, false, "global"},
 		{true, string(encodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\x01"))), "", testTable1, false, "ns1"},
 		{true, "t\x80\x00\x00\x00\x00\x00\x00\x01", "", 0, false, "global"}, // decode error
@@ -182,4 +183,13 @@ func (s *testTableNamespaceSuite) TestNamespaceOperation(c *C) {
 	// Add tableID to a namespace that doesn't exist
 	err = tableClassifier.AddNamespaceTableID("test_not_exist", 2)
 	c.Assert(err, NotNil)
+
+	// Test set meta.
+	c.Assert(tableClassifier.AddMetaToNamespace("test1"), IsNil)
+	// Can't be set again.
+	c.Assert(tableClassifier.AddMetaToNamespace("test1"), NotNil)
+	c.Assert(tableClassifier.AddMetaToNamespace("test2"), NotNil)
+	// Remove from test1.
+	c.Assert(tableClassifier.RemoveMeta("test1"), IsNil)
+	c.Assert(tableClassifier.AddMetaToNamespace("test2"), IsNil)
 }
