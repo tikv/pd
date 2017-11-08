@@ -32,6 +32,7 @@ func newTableClassifierHandler(classifier *tableNamespaceClassifier) http.Handle
 	router.HandleFunc("/table/namespaces", h.Get).Methods("GET")
 	router.HandleFunc("/table/namespaces", h.Post).Methods("POST")
 	router.HandleFunc("/table/namespaces/table", h.Update).Methods("POST")
+	router.HandleFunc("/table/namespaces/meta", h.SetMetaNamespace).Methods("POST")
 	router.HandleFunc("/table/store_ns/{id}", h.SetNamespace).Methods("POST")
 	return router
 }
@@ -110,6 +111,31 @@ func (h *tableNamespaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (h *tableNamespaceHandler) SetMetaNamespace(w http.ResponseWriter, r *http.Request) {
+	var input map[string]string
+	if err := apiutil.ReadJSON(r.Body, &input); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ns := input["namespace"]
+	switch input["action"] {
+	case "add":
+		if err := h.classifier.AddMetaToNamespace(ns); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	case "remove":
+		if err := h.classifier.RemoveMeta(ns); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	default:
+		h.rd.JSON(w, http.StatusBadRequest, errors.New("unknown action"))
+		return
+	}
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 
