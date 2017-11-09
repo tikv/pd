@@ -95,6 +95,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	classifierHandler := newClassifierHandler(svr, rd, classifierPrefix)
 	router.PathPrefix("/api/v1/classifier/").Handler(classifierHandler)
 
+	statsHandler := newStatsHandler(svr, rd)
+	router.HandleFunc("/api/v1/stats/region", statsHandler.Region).Methods("GET")
+
 	router.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 	return router
 }

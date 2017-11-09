@@ -391,6 +391,11 @@ func (c *RaftCluster) GetRegions() []*metapb.Region {
 	return c.cachedCluster.getMetaRegions()
 }
 
+// GetRegionStats returns region statistics from cluster.
+func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *core.RegionStats {
+	return c.cachedCluster.getRegionStats(startKey, endKey)
+}
+
 // GetStores gets stores from cluster.
 func (c *RaftCluster) GetStores() []*metapb.Store {
 	return c.cachedCluster.getMetaStores()

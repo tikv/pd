@@ -139,20 +139,6 @@ func minDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-const (
-	bootstrapBalanceCount = 10
-	bootstrapBalanceDiff  = 2
-)
-
-// minBalanceDiff returns the minimal diff to do balance. The formula is based
-// on experience to let the diff increase alone with the count slowly.
-func minBalanceDiff(count uint64) float64 {
-	if count < bootstrapBalanceCount {
-		return bootstrapBalanceDiff
-	}
-	return math.Sqrt(float64(count))
-}
-
 func takeInfluence(store *core.StoreInfo, storeInfluence *schedule.StoreInfluence) {
 	store.LeaderCount += storeInfluence.LeaderCount
 	store.RegionCount += storeInfluence.RegionCount
@@ -161,21 +147,27 @@ func takeInfluence(store *core.StoreInfo, storeInfluence *schedule.StoreInfluenc
 }
 
 // shouldBalance returns true if we should balance the source and target store.
-// The min balance diff provides a buffer to make the cluster stable, so that we
+// The tolerantRatio provides a buffer to make the cluster stable, so that we
 // don't need to schedule very frequently.
-func shouldBalance(source, target *core.StoreInfo, kind core.ResourceKind, opInfluence schedule.OpInfluence) bool {
+// TODO: simplify the arguments
+func shouldBalance(source, target *core.StoreInfo, avgScore float64, kind core.ResourceKind, region *core.RegionInfo, opInfluence schedule.OpInfluence, tolerantRatio float64) bool {
 	takeInfluence(source, opInfluence.GetStoreInfluence(source.GetId()))
 	takeInfluence(target, opInfluence.GetStoreInfluence(target.GetId()))
 
-	sourceCount := source.ResourceCount(kind)
 	sourceScore := source.ResourceScore(kind)
 	targetScore := target.ResourceScore(kind)
 	if targetScore >= sourceScore {
 		return false
 	}
-	diffRatio := 1 - targetScore/sourceScore
-	diffCount := diffRatio * float64(sourceCount)
-	return diffCount >= minBalanceDiff(sourceCount)
+
+	// avgScore is the goal for every store
+	// in expection, sourceScore > avgScore > targetScore
+	// if not, moving region is not necessary
+	// In this case, either sourceSizeDiff or targetSizeDiff will be negative, then obviously return false
+	sourceSizeDiff := (sourceScore - avgScore) * source.ResourceWeight(kind)
+	targetSizeDiff := (avgScore - targetScore) * target.ResourceWeight(kind)
+
+	return math.Min(sourceSizeDiff, targetSizeDiff) >= float64(region.ApproximateSize)*tolerantRatio
 }
 
 func adjustBalanceLimit(cluster schedule.Cluster, kind core.ResourceKind) uint64 {
