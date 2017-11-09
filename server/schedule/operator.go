@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -108,6 +109,7 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 type MergeRegion struct {
 	FromRegion uint64
 	ToRegion   uint64
+	Direction  pdpb.MergeDirection
 	IsFake     bool
 }
 
@@ -283,10 +285,10 @@ func CreateMovePeerOperator(desc string, region *core.RegionInfo, kind core.Reso
 }
 
 // CreateMergeRegionOperator creates an Operator that merge two region into one
-func CreateMergeRegionOperator(desc string, source *core.RegionInfo, target *core.RegionInfo, kind core.ResourceKind, steps []OperatorStep) (*Operator, *Operator) {
-	steps = append(steps, MergeRegion{FromRegion: source.GetId(), ToRegion: target.GetId(), IsFake: false})
+func CreateMergeRegionOperator(desc string, source *core.RegionInfo, target *core.RegionInfo, direction pdpb.MergeDirection, kind core.ResourceKind, steps []OperatorStep) (*Operator, *Operator) {
+	steps = append(steps, MergeRegion{FromRegion: source.GetId(), ToRegion: target.GetId(), Direction: direction, IsFake: false})
 	op1 := NewOperator(desc, source.GetId(), kind, steps...)
-	op2 := NewOperator(desc, target.GetId(), kind, MergeRegion{FromRegion: source.GetId(), ToRegion: target.GetId(), IsFake: true})
+	op2 := NewOperator(desc, target.GetId(), kind, MergeRegion{FromRegion: source.GetId(), ToRegion: target.GetId(), Direction: direction, IsFake: true})
 
 	return op1, op2
 }

@@ -18,6 +18,7 @@ import (
 
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 )
@@ -69,11 +70,13 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 
 	namespace := m.classifier.GetRegionNamespace(region)
 	peerCount := len(region.Region.GetPeers())
+	var direction pdpb.MergeDirection
 	// if is not hot region and under same namesapce
 	if prev != nil && !m.cluster.IsRegionHot(prev.GetId()) && m.classifier.GetRegionNamespace(prev) == namespace {
 		// peer count should equal
 		if peerCount == len(prev.Region.GetPeers()) {
 			target = prev
+			direction = pdpb.MergeDirection_Up
 		}
 	}
 	if next != nil && !m.cluster.IsRegionHot(next.GetId()) && m.classifier.GetRegionNamespace(next) == namespace {
@@ -82,6 +85,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 			// peer count should equal
 			if peerCount == len(next.Region.GetPeers()) {
 				target = next
+				direction = pdpb.MergeDirection_Down
 			}
 		}
 	}
@@ -94,7 +98,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	if err != nil {
 		return nil, nil
 	}
-	op1, op2 := CreateMergeRegionOperator("merge-region", region, target, core.RegionKind, steps)
+	op1, op2 := CreateMergeRegionOperator("merge-region", region, target, direction, core.RegionKind, steps)
 	op1.SetPriorityLevel(core.HighPriority)
 	op2.SetPriorityLevel(core.HighPriority)
 

@@ -490,9 +490,11 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 		if s.IsFake == true {
 			return
 		}
-		// TODO: wait protobuf
-		cmd := &pdpb.RegionHeartbeatResponse{}
-
+		cmd := &pdpb.RegionHeartbeatResponse{
+			Merge: &pdpb.Merge{
+				Direction: s.Direction,
+			},
+		}
 		c.hbStreams.sendMsg(region, cmd)
 	default:
 		log.Errorf("unknown operatorStep: %v", step)

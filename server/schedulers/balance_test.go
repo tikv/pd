@@ -828,10 +828,10 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 		schedule.AddPeer{ToStore: 4, PeerID: 2},
 		schedule.TransferLeader{FromStore: 6, ToStore: 4},
 		schedule.RemovePeer{FromStore: 6},
-		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: false},
+		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: false, Direction: pdpb.MergeDirection_Up},
 	})
 	s.checkSteps(c, op2, []schedule.OperatorStep{
-		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: true},
+		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: true, Direction: pdpb.MergeDirection_Up},
 	})
 
 	// partial store overlap including leader
@@ -841,10 +841,10 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.checkSteps(c, op1, []schedule.OperatorStep{
 		schedule.AddPeer{ToStore: 4, PeerID: 3},
 		schedule.RemovePeer{FromStore: 6},
-		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: false},
+		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: false, Direction: pdpb.MergeDirection_Up},
 	})
 	s.checkSteps(c, op2, []schedule.OperatorStep{
-		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: true},
+		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: true, Direction: pdpb.MergeDirection_Up},
 	})
 
 	// all store overlap
@@ -856,10 +856,10 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.cluster.PutRegion(s.regions[2])
 	op1, op2 = s.mc.Check(s.regions[2])
 	s.checkSteps(c, op1, []schedule.OperatorStep{
-		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: false},
+		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: false, Direction: pdpb.MergeDirection_Up},
 	})
 	s.checkSteps(c, op2, []schedule.OperatorStep{
-		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: true},
+		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: true, Direction: pdpb.MergeDirection_Up},
 	})
 }
 
