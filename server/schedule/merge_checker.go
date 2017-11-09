@@ -60,34 +60,33 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	var target *core.RegionInfo
 	prev, next := m.cluster.GetAdjacentRegions(region)
 	// check key to avoid key range hole
-	if prev != nil && bytes.Compare(prev.Region.EndKey, region.Region.StartKey) == 0 {
+	if prev != nil && bytes.Compare(prev.Region.EndKey, region.Region.StartKey) != 0 {
 		prev = nil
 	}
-	if next != nil && bytes.Compare(region.Region.EndKey, next.Region.StartKey) == 0 {
+	if next != nil && bytes.Compare(region.Region.EndKey, next.Region.StartKey) != 0 {
 		next = nil
 	}
 
 	namespace := m.classifier.GetRegionNamespace(region)
+	peerCount := len(region.Region.GetPeers())
 	// if is not hot region and under same namesapce
 	if prev != nil && !m.cluster.IsRegionHot(prev.GetId()) && m.classifier.GetRegionNamespace(prev) == namespace {
-		target = prev
+		// peer count should equal
+		if peerCount == len(prev.Region.GetPeers()) {
+			target = prev
+		}
 	}
 	if next != nil && !m.cluster.IsRegionHot(next.GetId()) && m.classifier.GetRegionNamespace(next) == namespace {
 		// if both region is not hot, prefer the one with smaller size
 		if target == nil || target.ApproximateSize > next.ApproximateSize {
-			target = next
+			// peer count should equal
+			if peerCount == len(next.Region.GetPeers()) {
+				target = next
+			}
 		}
 	}
 
 	if target == nil {
-		return nil, nil
-	}
-
-	sourcePeers := region.Region.GetPeers()
-	targetPeers := target.Region.GetPeers()
-
-	// when peer count is not equal, don't merge
-	if len(sourcePeers) != len(targetPeers) {
 		return nil, nil
 	}
 

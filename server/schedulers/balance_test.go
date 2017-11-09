@@ -17,6 +17,7 @@ import (
 	"math"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
@@ -719,6 +720,147 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	region.Peers = append(region.Peers, peer5)
 
 	c.Assert(rc.Check(region), IsNil)
+}
+
+var _ = Suite(&testMergeCheckerSuite{})
+
+type testMergeCheckerSuite struct {
+	cluster *mockCluster
+	opt     *MockSchedulerOptions
+	mc      *schedule.MergeChecker
+	regions []*core.RegionInfo
+}
+
+func (s *testMergeCheckerSuite) SetUpSuite(c *C) {
+	s.cluster = newMockCluster(core.NewMockIDAllocator())
+	_, s.opt = newTestScheduleConfig()
+	s.regions = []*core.RegionInfo{
+		{
+			Region: &metapb.Region{
+				Id:       1,
+				StartKey: []byte(""),
+				EndKey:   []byte("a"),
+				Peers: []*metapb.Peer{
+					{Id: 101, StoreId: 1},
+					{Id: 102, StoreId: 2},
+				},
+			},
+			Leader:          &metapb.Peer{Id: 101, StoreId: 1},
+			ApproximateSize: 1,
+		},
+		{
+			Region: &metapb.Region{
+				Id:       2,
+				StartKey: []byte("a"),
+				EndKey:   []byte("t"),
+				Peers: []*metapb.Peer{
+					{Id: 103, StoreId: 1},
+					{Id: 104, StoreId: 4},
+					{Id: 105, StoreId: 5},
+				},
+			},
+			Leader:          &metapb.Peer{Id: 104, StoreId: 4},
+			ApproximateSize: 200,
+		},
+		{
+			Region: &metapb.Region{
+				Id:       3,
+				StartKey: []byte("t"),
+				EndKey:   []byte("x"),
+				Peers: []*metapb.Peer{
+					{Id: 106, StoreId: 1},
+					{Id: 107, StoreId: 5},
+					{Id: 108, StoreId: 6},
+				},
+			},
+			Leader:          &metapb.Peer{Id: 108, StoreId: 6},
+			ApproximateSize: 1,
+		},
+		{
+			Region: &metapb.Region{
+				Id:       4,
+				StartKey: []byte("x"),
+				EndKey:   []byte(""),
+				Peers: []*metapb.Peer{
+					{Id: 109, StoreId: 4},
+				},
+			},
+			Leader:          &metapb.Peer{Id: 109, StoreId: 4},
+			ApproximateSize: 10,
+		},
+	}
+
+	for _, region := range s.regions {
+		c.Assert(s.cluster.PutRegion(region), IsNil)
+	}
+
+	s.mc = schedule.NewMergeChecker(s.opt, s.cluster, namespace.DefaultClassifier)
+}
+
+func (s *testMergeCheckerSuite) TestBasic(c *C) {
+	// should with same peer count
+	op1, op2 := s.mc.Check(s.regions[0])
+	c.Assert(op1, IsNil)
+	c.Assert(op2, IsNil)
+	// size should be small enough
+	op1, op2 = s.mc.Check(s.regions[1])
+	c.Assert(op1, IsNil)
+	c.Assert(op2, IsNil)
+	op1, op2 = s.mc.Check(s.regions[2])
+	c.Assert(op1, NotNil)
+	c.Assert(op2, NotNil)
+	op1, op2 = s.mc.Check(s.regions[3])
+	c.Assert(op1, IsNil)
+	c.Assert(op2, IsNil)
+}
+
+func (s *testMergeCheckerSuite) checkSteps(c *C, op *schedule.Operator, steps []schedule.OperatorStep) {
+	c.Assert(op.Len(), Equals, len(steps))
+	for i := range steps {
+		c.Assert(op.Step(i), Equals, steps[i])
+	}
+}
+
+func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
+	// partial store overlap not including leader
+	op1, op2 := s.mc.Check(s.regions[2])
+	s.checkSteps(c, op1, []schedule.OperatorStep{
+		schedule.AddPeer{ToStore: 4, PeerID: 2},
+		schedule.TransferLeader{FromStore: 6, ToStore: 4},
+		schedule.RemovePeer{FromStore: 6},
+		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: false},
+	})
+	s.checkSteps(c, op2, []schedule.OperatorStep{
+		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: true},
+	})
+
+	// partial store overlap including leader
+	s.regions[2].Leader = &metapb.Peer{Id: 106, StoreId: 1}
+	s.cluster.PutRegion(s.regions[2])
+	op1, op2 = s.mc.Check(s.regions[2])
+	s.checkSteps(c, op1, []schedule.OperatorStep{
+		schedule.AddPeer{ToStore: 4, PeerID: 3},
+		schedule.RemovePeer{FromStore: 6},
+		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: false},
+	})
+	s.checkSteps(c, op2, []schedule.OperatorStep{
+		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: true},
+	})
+
+	// all store overlap
+	s.regions[2].Peers = []*metapb.Peer{
+		{Id: 106, StoreId: 1},
+		{Id: 107, StoreId: 5},
+		{Id: 108, StoreId: 4},
+	}
+	s.cluster.PutRegion(s.regions[2])
+	op1, op2 = s.mc.Check(s.regions[2])
+	s.checkSteps(c, op1, []schedule.OperatorStep{
+		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: false},
+	})
+	s.checkSteps(c, op2, []schedule.OperatorStep{
+		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: true},
+	})
 }
 
 var _ = Suite(&testBalanceHotWriteRegionSchedulerSuite{})
