@@ -450,6 +450,9 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	} else {
 		// Update an existed store.
 		s.Address = store.Address
+		if (s.State == metapb.StoreState_Up) && (s.State != store.State) {
+			s.State = store.State
+		}
 		s.MergeLabels(store.Labels)
 	}
 

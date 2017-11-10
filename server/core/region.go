@@ -399,6 +399,15 @@ func (r *RegionsInfo) GetRegions() []*RegionInfo {
 	return regions
 }
 
+// GetStoreLeaderRegions get a set of RegionInfo from regionMap
+func (r *RegionsInfo) GetStoreLeaderRegions(storeID uint64) []*RegionInfo {
+	regions := make([]*RegionInfo, 0, r.GetStoreLeaderCount(storeID))
+	for _, region := range r.leaders[storeID].m {
+		regions = append(regions, region.Clone())
+	}
+	return regions
+}
+
 // GetStoreLeaderRegionSize get total size of store's leader regions
 func (r *RegionsInfo) GetStoreLeaderRegionSize(storeID uint64) int64 {
 	return r.leaders[storeID].TotalSize()

@@ -48,6 +48,21 @@ func NewTestServer(c *check.C) (*Config, *Server, CleanupFunc) {
 	return cfg, s, cleanup
 }
 
+// NewSingleServer creates a pd server for testing.
+func NewSingleServer() (*Config, *Server, CleanupFunc) {
+	cfg := NewTestSingleConfig()
+	s, err := CreateServer(cfg, nil)
+	if err != nil {
+		panic("create server failed")
+	}
+
+	cleanup := func() {
+		s.Close()
+		cleanServer(cfg)
+	}
+	return cfg, s, cleanup
+}
+
 // NewTestSingleConfig is only for test to create one pd.
 // Because pd-client also needs this, so export here.
 func NewTestSingleConfig() *Config {
