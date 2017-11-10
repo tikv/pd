@@ -505,10 +505,11 @@ func (r *RegionsInfo) ScanRange(startKey []byte, limit int) []*RegionInfo {
 func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo) {
 	metaPrev, metaNext := r.tree.getAdjacentRegions(region.Region)
 	var prev, next *RegionInfo
-	if metaPrev != nil {
+	// check key to avoid key range hole
+	if metaPrev != nil && bytes.Compare(metaPrev.region.EndKey, region.Region.StartKey) == 0 {
 		prev = r.GetRegion(metaPrev.region.GetId())
 	}
-	if metaNext != nil {
+	if metaNext != nil && bytes.Compare(region.Region.EndKey, metaNext.region.StartKey) == 0 {
 		next = r.GetRegion(metaNext.region.GetId())
 	}
 	return prev, next

@@ -14,8 +14,6 @@
 package schedule
 
 import (
-	"bytes"
-
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -60,13 +58,6 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 
 	var target *core.RegionInfo
 	prev, next := m.cluster.GetAdjacentRegions(region)
-	// check key to avoid key range hole
-	if prev != nil && bytes.Compare(prev.Region.EndKey, region.Region.StartKey) != 0 {
-		prev = nil
-	}
-	if next != nil && bytes.Compare(region.Region.EndKey, next.Region.StartKey) != 0 {
-		next = nil
-	}
 
 	namespace := m.classifier.GetRegionNamespace(region)
 	peerCount := len(region.Region.GetPeers())
