@@ -18,7 +18,6 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
 )
@@ -58,9 +57,7 @@ func newTestRegionInfo(regionID, storeID uint64, start, end []byte) *core.Region
 			EndKey:   end,
 			Peers:    []*metapb.Peer{leader},
 		},
-		Leader:       leader,
-		DownPeers:    make([]*pdpb.PeerStats, 0),
-		PendingPeers: make([]*metapb.Peer, 0),
+		Leader: leader,
 	}
 }
 
@@ -68,14 +65,14 @@ func (s *testRegionSuite) TestRegion(c *C) {
 	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	mustRegionHeartbeat(c, s.svr, r)
 	url := fmt.Sprintf("%s/region/id/%d", s.urlPrefix, r.GetId())
-	r1 := &core.RegionInfo{}
+	r1 := &regionInfo{}
 	err := readJSONWithURL(url, r1)
 	c.Assert(err, IsNil)
-	c.Assert(r1, DeepEquals, r)
+	c.Assert(r1, DeepEquals, newRegionInfo(r))
 
 	url = fmt.Sprintf("%s/region/key/%s", s.urlPrefix, "a")
-	r2 := &core.RegionInfo{}
+	r2 := &regionInfo{}
 	err = readJSONWithURL(url, r2)
 	c.Assert(err, IsNil)
-	c.Assert(r2, DeepEquals, r)
+	c.Assert(r2, DeepEquals, newRegionInfo(r))
 }

@@ -16,6 +16,7 @@ package core
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"math/rand"
 	"reflect"
 	"strings"
@@ -42,6 +43,23 @@ func NewRegionInfo(region *metapb.Region, leader *metapb.Peer) *RegionInfo {
 	return &RegionInfo{
 		Region: region,
 		Leader: leader,
+	}
+}
+
+// EmptyRegionApproximateSize is the region approximate size of an empty region
+// (heartbeat size <= 1MB).
+const EmptyRegionApproximateSize = 1
+
+// RegionFromHeartbeat constructs a Region from region heartbeat.
+func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
+	return &RegionInfo{
+		Region:          heartbeat.GetRegion(),
+		Leader:          heartbeat.GetLeader(),
+		DownPeers:       heartbeat.GetDownPeers(),
+		PendingPeers:    heartbeat.GetPendingPeers(),
+		WrittenBytes:    heartbeat.GetBytesWritten(),
+		ReadBytes:       heartbeat.GetBytesRead(),
+		ApproximateSize: int64(math.Ceil(float64(heartbeat.GetApproximateSize()) / 1e6)), // use size of MB as unit
 	}
 }
 
@@ -484,13 +502,65 @@ func (r *RegionsInfo) GetFollower(storeID uint64, regionID uint64) *RegionInfo {
 
 // ScanRange scans region with start key, until number greater than limit.
 func (r *RegionsInfo) ScanRange(startKey []byte, limit int) []*RegionInfo {
-	metaRegions := r.tree.scanRange(startKey, limit)
-	res := make([]*RegionInfo, 0, len(metaRegions))
-	for _, m := range metaRegions {
-		region := r.GetRegion(m.region.GetId())
-		res = append(res, region)
-	}
+	res := make([]*RegionInfo, 0, limit)
+	r.tree.scanRange(startKey, func(region *metapb.Region) bool {
+		res = append(res, r.GetRegion(region.GetId()))
+		return len(res) < limit
+	})
 	return res
+}
+
+// RegionStats records a list of regions' statistics and distribution status.
+type RegionStats struct {
+	Count            int              `json:"count"`
+	EmptyCount       int              `json:"empty_count"`
+	StorageSize      int64            `json:"storage_size"`
+	StoreLeaderCount map[uint64]int   `json:"store_leader_count"`
+	StorePeerCount   map[uint64]int   `json:"store_peer_count"`
+	StoreLeaderSize  map[uint64]int64 `json:"store_leader_size"`
+	StorePeerSize    map[uint64]int64 `json:"store_peer_size"`
+}
+
+func newRegionStats() *RegionStats {
+	return &RegionStats{
+		StoreLeaderCount: make(map[uint64]int),
+		StorePeerCount:   make(map[uint64]int),
+		StoreLeaderSize:  make(map[uint64]int64),
+		StorePeerSize:    make(map[uint64]int64),
+	}
+}
+
+// Observe adds a region's statistics into RegionStats.
+func (s *RegionStats) Observe(r *RegionInfo) {
+	s.Count++
+	if r.ApproximateSize <= EmptyRegionApproximateSize {
+		s.EmptyCount++
+	}
+	s.StorageSize += r.ApproximateSize
+	if r.Leader != nil {
+		s.StoreLeaderCount[r.Leader.GetStoreId()]++
+		s.StoreLeaderSize[r.Leader.GetStoreId()] += r.ApproximateSize
+	}
+	for _, p := range r.Peers {
+		s.StorePeerCount[p.GetStoreId()]++
+		s.StorePeerSize[p.GetStoreId()] += r.ApproximateSize
+	}
+}
+
+// GetRegionStats scans regions that inside range [startKey, endKey) and sums up
+// their statistics.
+func (r *RegionsInfo) GetRegionStats(startKey, endKey []byte) *RegionStats {
+	stats := newRegionStats()
+	r.tree.scanRange(startKey, func(meta *metapb.Region) bool {
+		if len(endKey) > 0 && (len(meta.EndKey) == 0 || bytes.Compare(meta.EndKey, endKey) >= 0) {
+			return false
+		}
+		if region := r.GetRegion(meta.GetId()); region != nil {
+			stats.Observe(region)
+		}
+		return true
+	})
+	return stats
 }
 
 const randomRegionMaxRetry = 10

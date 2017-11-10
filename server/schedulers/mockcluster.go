@@ -121,6 +121,18 @@ func (mc *mockCluster) updateStoreRegionWeight(storeID uint64, weight float64) {
 	mc.PutStore(store)
 }
 
+func (mc *mockCluster) updateStoreLeaderSize(storeID uint64, size int64) {
+	store := mc.GetStore(storeID)
+	store.LeaderSize = size
+	mc.PutStore(store)
+}
+
+func (mc *mockCluster) updateStoreRegionSize(storeID uint64, size int64) {
+	store := mc.GetStore(storeID)
+	store.RegionSize = size
+	mc.PutStore(store)
+}
+
 func (mc *mockCluster) addLabelsStore(storeID uint64, regionCount int, labels map[string]string) {
 	mc.addRegionStore(storeID, regionCount)
 	store := mc.GetStore(storeID)
@@ -243,6 +255,7 @@ const (
 	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 16
+	defaultTolerantSizeRatio    = 2.5
 )
 
 // MockSchedulerOptions is a mock of SchedulerOptions
@@ -256,6 +269,7 @@ type MockSchedulerOptions struct {
 	MaxReplicas           int
 	LocationLabels        []string
 	HotRegionLowThreshold int
+	TolerantSizeRatio     float64
 }
 
 func newMockSchedulerOptions() *MockSchedulerOptions {
@@ -267,6 +281,7 @@ func newMockSchedulerOptions() *MockSchedulerOptions {
 	mso.MaxReplicas = defaultMaxReplicas
 	mso.HotRegionLowThreshold = schedule.HotRegionLowThreshold
 	mso.MaxPendingPeerCount = defaultMaxPendingPeerCount
+	mso.TolerantSizeRatio = defaultTolerantSizeRatio
 	return mso
 }
 
@@ -308,6 +323,11 @@ func (mso *MockSchedulerOptions) GetLocationLabels() []string {
 // GetHotRegionLowThreshold mock method
 func (mso *MockSchedulerOptions) GetHotRegionLowThreshold() int {
 	return mso.HotRegionLowThreshold
+}
+
+// GetTolerantSizeRatio mock method
+func (mso *MockSchedulerOptions) GetTolerantSizeRatio() float64 {
+	return mso.TolerantSizeRatio
 }
 
 // SetMaxReplicas mock method

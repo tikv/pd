@@ -135,6 +135,11 @@ func (bc *BasicCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo 
 	return bc.Stores.GetStore(region.Leader.GetStoreId())
 }
 
+// GetStoresAverageScore returns the total resource score of all StoreInfo
+func (bc *BasicCluster) GetStoresAverageScore(kind core.ResourceKind) float64 {
+	return bc.Stores.AverageResourceScore(kind)
+}
+
 // BlockStore stops balancer from selecting the store.
 func (bc *BasicCluster) BlockStore(storeID uint64) error {
 	return errors.Trace(bc.Stores.BlockStore(storeID))
