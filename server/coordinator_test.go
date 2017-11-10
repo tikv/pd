@@ -213,6 +213,14 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	checkRemovePeerResp(c, resp, 4)
 	region.RemoveStorePeer(4)
 	dispatchHeartbeatNoResp(c, co, region, stream)
+
+	// Remove offline peer directly when it's pending.
+	tc.addLeaderRegion(3, 1, 2, 3)
+	tc.setStoreOffline(3)
+	region = tc.GetRegion(3)
+	region.PendingPeers = []*metapb.Peer{region.GetStorePeer(3)}
+	resp = dispatchAndRecvHeartbeat(c, co, region, stream)
+	checkRemovePeerResp(c, resp, 3)
 }
 
 func (s *testCoordinatorSuite) TestPeerState(c *C) {
