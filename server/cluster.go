@@ -579,6 +579,19 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
+func (c *RaftCluster) checkOperators() {
+	co := c.coordinator
+	for _, op := range co.getOperators() {
+		// after region is merged, it will not heartbeat anymore
+		// the operator of merged region will not timeout actively
+		if op.IsTimeout() {
+			log.Infof("[region %v] operator timeout: %s", op.RegionID(), op)
+			operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
+			co.removeOperator(op)
+		}
+	}
+}
+
 func (c *RaftCluster) storeIsEmpty(storeID uint64) bool {
 	cluster := c.cachedCluster
 	if cluster.getStoreRegionCount(storeID) > 0 {
@@ -621,6 +634,7 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 		case <-c.quit:
 			return
 		case <-ticker.C:
+			c.checkOperators()
 			c.checkStores()
 			c.collectMetrics()
 		}
