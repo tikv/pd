@@ -106,14 +106,14 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 }
 
 func (m *MergeChecker) matchPeers(source *core.RegionInfo, target *core.RegionInfo) ([]OperatorStep, error) {
-	storeIDs := make(map[uint64]bool)
+	storeIDs := make(map[uint64]struct{})
 	var steps []OperatorStep
 
 	sourcePeers := source.Region.GetPeers()
 	targetPeers := target.Region.GetPeers()
 
 	for _, peer := range targetPeers {
-		storeIDs[peer.GetStoreId()] = true
+		storeIDs[peer.GetStoreId()] = struct{}{}
 	}
 
 	// Add missing peers.

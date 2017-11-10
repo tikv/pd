@@ -110,8 +110,8 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	}
 
 	if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
-		if c.addOperator(op1) == true {
-			if c.addOperator(op2) == false {
+		if c.addOperator(op1) {
+			if !c.addOperator(op2) {
 				c.removeOperator(op1)
 			}
 		}
@@ -487,7 +487,7 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 		}
 		c.hbStreams.sendMsg(region, cmd)
 	case schedule.MergeRegion:
-		if s.IsFake == true {
+		if s.IsFake {
 			return
 		}
 		cmd := &pdpb.RegionHeartbeatResponse{
