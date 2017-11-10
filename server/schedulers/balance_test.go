@@ -807,7 +807,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 func (s *testMergeCheckerSuite) checkSteps(c *C, op *schedule.Operator, steps []schedule.OperatorStep) {
 	c.Assert(op.Len(), Equals, len(steps))
 	for i := range steps {
-		c.Assert(op.Step(i), Equals, steps[i])
+		c.Assert(op.Step(i), DeepEquals, steps[i])
 	}
 }
 
@@ -818,10 +818,24 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 		schedule.AddPeer{ToStore: 4, PeerID: 2},
 		schedule.TransferLeader{FromStore: 6, ToStore: 4},
 		schedule.RemovePeer{FromStore: 6},
-		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: false, Direction: pdpb.MergeDirection_Up},
+		schedule.MergeRegion{
+			FromRegion:  3,
+			ToRegion:    2,
+			IsPassive:   false,
+			Direction:   pdpb.MergeDirection_Up,
+			OldStartKey: []byte("t"),
+			OldEndKey:   []byte("x"),
+		},
 	})
 	s.checkSteps(c, op2, []schedule.OperatorStep{
-		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: true, Direction: pdpb.MergeDirection_Up},
+		schedule.MergeRegion{
+			FromRegion:  3,
+			ToRegion:    2,
+			IsPassive:   true,
+			Direction:   pdpb.MergeDirection_Up,
+			OldStartKey: []byte("a"),
+			OldEndKey:   []byte("t"),
+		},
 	})
 
 	// partial store overlap including leader
@@ -831,10 +845,24 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.checkSteps(c, op1, []schedule.OperatorStep{
 		schedule.AddPeer{ToStore: 4, PeerID: 3},
 		schedule.RemovePeer{FromStore: 6},
-		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: false, Direction: pdpb.MergeDirection_Up},
+		schedule.MergeRegion{
+			FromRegion:  3,
+			ToRegion:    2,
+			IsPassive:   false,
+			Direction:   pdpb.MergeDirection_Up,
+			OldStartKey: []byte("t"),
+			OldEndKey:   []byte("x"),
+		},
 	})
 	s.checkSteps(c, op2, []schedule.OperatorStep{
-		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: true, Direction: pdpb.MergeDirection_Up},
+		schedule.MergeRegion{
+			FromRegion:  3,
+			ToRegion:    2,
+			IsPassive:   true,
+			Direction:   pdpb.MergeDirection_Up,
+			OldStartKey: []byte("a"),
+			OldEndKey:   []byte("t"),
+		},
 	})
 
 	// all store overlap
@@ -846,10 +874,24 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.cluster.PutRegion(s.regions[2])
 	op1, op2 = s.mc.Check(s.regions[2])
 	s.checkSteps(c, op1, []schedule.OperatorStep{
-		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: false, Direction: pdpb.MergeDirection_Up},
+		schedule.MergeRegion{
+			FromRegion:  3,
+			ToRegion:    2,
+			IsPassive:   false,
+			Direction:   pdpb.MergeDirection_Up,
+			OldStartKey: []byte("t"),
+			OldEndKey:   []byte("x"),
+		},
 	})
 	s.checkSteps(c, op2, []schedule.OperatorStep{
-		schedule.MergeRegion{FromRegion: 3, ToRegion: 2, IsFake: true, Direction: pdpb.MergeDirection_Up},
+		schedule.MergeRegion{
+			FromRegion:  3,
+			ToRegion:    2,
+			IsPassive:   true,
+			Direction:   pdpb.MergeDirection_Up,
+			OldStartKey: []byte("a"),
+			OldEndKey:   []byte("t"),
+		},
 	})
 }
 

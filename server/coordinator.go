@@ -489,7 +489,7 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 		}
 		c.hbStreams.sendMsg(region, cmd)
 	case schedule.MergeRegion:
-		if s.IsFake {
+		if s.IsPassive {
 			return
 		}
 		cmd := &pdpb.RegionHeartbeatResponse{

@@ -14,6 +14,7 @@
 package schedule
 
 import (
+	"bytes"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -110,7 +111,15 @@ type MergeRegion struct {
 	FromRegion uint64
 	ToRegion   uint64
 	Direction  pdpb.MergeDirection
-	IsFake     bool
+	// there are two regions involved in merge process,
+	// so to keep them from other scheduler,
+	// both of them should add MerRegion operatorStep.
+	// But actually, tikv just need the region want to be merged to get the merge request,
+	// thus use a IsPssive mark to indicate that
+	// this region doesn't need to send merge request to tikv.
+	IsPassive   bool
+	OldStartKey []byte
+	OldEndKey   []byte
 }
 
 func (mr MergeRegion) String() string {
@@ -119,9 +128,10 @@ func (mr MergeRegion) String() string {
 
 // IsFinish checks if cuurent step is finished
 func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
-	// In view of pd doesn't know merge is success or not
-	// this step will not finish, so just let operator timeout and then be removed
-	return false
+	if mr.Direction == pdpb.MergeDirection_Down {
+		return bytes.Compare(region.Region.StartKey, mr.OldStartKey) < 0
+	}
+	return bytes.Compare(region.Region.EndKey, mr.OldEndKey) > 0
 }
 
 // Influence calculates the store difference that current step make
@@ -286,9 +296,23 @@ func CreateMovePeerOperator(desc string, region *core.RegionInfo, kind core.Reso
 
 // CreateMergeRegionOperator creates an Operator that merge two region into one
 func CreateMergeRegionOperator(desc string, source *core.RegionInfo, target *core.RegionInfo, direction pdpb.MergeDirection, kind core.ResourceKind, steps []OperatorStep) (*Operator, *Operator) {
-	steps = append(steps, MergeRegion{FromRegion: source.GetId(), ToRegion: target.GetId(), Direction: direction, IsFake: false})
+	steps = append(steps, MergeRegion{
+		FromRegion:  source.GetId(),
+		ToRegion:    target.GetId(),
+		Direction:   direction,
+		IsPassive:   false,
+		OldStartKey: source.Region.StartKey,
+		OldEndKey:   source.Region.EndKey,
+	})
 	op1 := NewOperator(desc, source.GetId(), kind, steps...)
-	op2 := NewOperator(desc, target.GetId(), kind, MergeRegion{FromRegion: source.GetId(), ToRegion: target.GetId(), Direction: direction, IsFake: true})
+	op2 := NewOperator(desc, target.GetId(), kind, MergeRegion{
+		FromRegion:  source.GetId(),
+		ToRegion:    target.GetId(),
+		Direction:   direction,
+		IsPassive:   true,
+		OldStartKey: target.Region.StartKey,
+		OldEndKey:   target.Region.EndKey,
+	})
 
 	return op1, op2
 }
