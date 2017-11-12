@@ -399,8 +399,8 @@ func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical
 		}
 		req := requests[i]
 		req.physical, req.logical = physical, firstLogical+int64(i)
-		req.done <- err
 		cmdDuration.WithLabelValues("tso").Observe(time.Since(req.start).Seconds())
+		req.done <- err
 	}
 }
 
