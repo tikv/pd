@@ -397,8 +397,10 @@ func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical
 		if span := opentracing.SpanFromContext(requests[i].ctx); span != nil {
 			span.Finish()
 		}
-		requests[i].physical, requests[i].logical = physical, firstLogical+int64(i)
-		requests[i].done <- err
+		req := requests[i]
+		req.physical, req.logical = physical, firstLogical+int64(i)
+		req.done <- err
+		cmdDuration.WithLabelValues("tso").Observe(time.Since(req.start).Seconds())
 	}
 }
 
@@ -477,11 +479,9 @@ func (req *tsoRequest) Wait() (int64, int64, error) {
 	case err := <-req.done:
 		defer tsoReqPool.Put(req)
 		if err != nil {
-			cmdFailedDuration.WithLabelValues("tso").Observe(time.Since(req.start).Seconds())
 			return 0, 0, errors.Trace(err)
 		}
 		physical, logical := req.physical, req.logical
-		cmdDuration.WithLabelValues("tso").Observe(time.Since(req.start).Seconds())
 		return physical, logical, err
 	case <-req.ctx.Done():
 		return 0, 0, errors.Trace(req.ctx.Err())
