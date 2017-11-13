@@ -207,7 +207,9 @@ func (c *mapClassifer) GetAllNamespaces() []string {
 	for _, ns := range c.regions {
 		all[ns] = struct{}{}
 	}
-	var nss []string
+
+	nss := make([]string, 0, len(all))
+
 	for ns := range all {
 		nss = append(nss, ns)
 	}

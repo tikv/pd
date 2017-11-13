@@ -203,7 +203,7 @@ func (c *coordinator) getSchedulers() []string {
 	c.RLock()
 	defer c.RUnlock()
 
-	var names []string
+	names := make([]string, 0, len(c.schedulers))
 	for name := range c.schedulers {
 		names = append(names, name)
 	}
@@ -408,7 +408,7 @@ func (c *coordinator) getOperators() []*schedule.Operator {
 	c.RLock()
 	defer c.RUnlock()
 
-	var operators []*schedule.Operator
+	operators := make([]*schedule.Operator, 0, len(c.operators))
 	for _, op := range c.operators {
 		operators = append(operators, op)
 	}
