@@ -1,3 +1,16 @@
+// Copyright 2017 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package faketikv
 
 import (
@@ -11,7 +24,7 @@ import (
 type Driver struct {
 	clusterInfo             *ClusterInfo
 	client                  Client
-	reciveRegionHeartbeatCh chan *pdpb.RegionHeartbeatResponse
+	reciveRegionHeartbeatCh <-chan *pdpb.RegionHeartbeatResponse
 }
 
 func NewDriver(addrs []string) *Driver {
@@ -19,10 +32,10 @@ func NewDriver(addrs []string) *Driver {
 	if err != nil {
 		log.Fatal(err)
 	}
-	return &Driver{client: client}
+	return &Driver{client: client, reciveRegionHeartbeatCh: reciveRegionHeartbeatCh}
 }
 
-func (c *Driver) Start() {
+func (c *Driver) Prepare() error {
 	initCase := NewTiltCase()
 	clusterInfo := initCase.Init(c.client, "./case1.toml")
 	c.clusterInfo = clusterInfo
@@ -32,14 +45,21 @@ func (c *Driver) Start() {
 	err := c.client.Bootstrap(ctx, store, region)
 	cancel()
 	if err != nil {
-		panic("bootstrapped error")
+		return err
 	}
+	for _, n := range clusterInfo.Nodes {
+		err = n.Prepare()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Driver) reciveRegionHeartbeat(ctx context.Context) {
 	for {
 		select {
-		case resp := c.reciveRegionHeartbeat():
+		case resp := <-c.reciveRegionHeartbeatCh:
 			c.dispatch(resp)
 		case <-ctx.Done():
 		}
@@ -57,10 +77,10 @@ func (c *Driver) Tick() {
 
 func (c *Driver) AddNode() {
 	id, err := c.client.AllocID(context.Background())
-	n, err := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), c.client)
 	if err != nil {
-		log.Info("Add Node Failed")
+		log.Info("Add node error:", err)
 	}
+	n := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), c.client)
 	c.clusterInfo.Nodes[n.Id] = n
 }
 

@@ -1,3 +1,16 @@
+// Copyright 2017 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package faketikv
 
 import (
@@ -5,6 +18,7 @@ import (
 	"fmt"
 
 	"github.com/BurntSushi/toml"
+	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 )
@@ -20,18 +34,6 @@ type localAlloc struct {
 func (l *localAlloc) AllocID() (uint64, error) {
 	l.id++
 	return l.id, nil
-}
-
-type ClusterInfo struct {
-	*core.RegionsInfo
-	Nodes       map[uint64]*Node
-	firstRegion *core.RegionInfo
-}
-
-func (c *ClusterInfo) GetBootstrapInfo() (*metapb.Store, *metapb.Region) {
-	storeID := c.firstRegion.Leader.GetStoreId()
-	store := c.Nodes[storeID]
-	return store.Store, c.firstRegion.Region
 }
 
 type Initializer interface {
@@ -52,7 +54,7 @@ func (c *TiltCase) Init(client Client, args ...string) *ClusterInfo {
 	path := args[0]
 	err := c.Parser(path)
 	if err != nil {
-		panic("initalize failed: parser config")
+		log.Fatal("initalize failed: ", err)
 	}
 	nodes := make(map[uint64]*Node)
 	regions := core.NewRegionsInfo()
@@ -60,12 +62,9 @@ func (c *TiltCase) Init(client Client, args ...string) *ClusterInfo {
 	for i := 0; i < c.NodeNumber; i++ {
 		id, err1 := c.alloc.AllocID()
 		if err1 != nil {
-			panic("alloc failed")
+			log.Fatal("alloc failed", err)
 		}
-		nodes[id], err1 = NewNode(id, fmt.Sprintf("mock://tikv-%d", id), client)
-		if err1 != nil {
-			panic("new node failed")
-		}
+		nodes[id] = NewNode(id, fmt.Sprintf("mock://tikv-%d", id), client)
 		if len(ids) < 3 {
 			ids = append(ids, id)
 		}
@@ -76,14 +75,17 @@ func (c *TiltCase) Init(client Client, args ...string) *ClusterInfo {
 		region := c.genRegion(ids, start)
 		regions.SetRegion(region)
 		if i == 0 {
-			firstRegion = region
+			firstRegion = region.Clone()
+			firstRegion.StartKey = []byte("")
+			firstRegion.EndKey = []byte("")
+			firstRegion.Peers = firstRegion.Peers[:1]
 		}
 	}
 	// TODO: remove this
 	for i := 0; i < c.NodeNumber+c.RegionNumber+10; i++ {
 		_, err = client.AllocID(context.Background())
 		if err != nil {
-			panic("initalize failed: alloc ID")
+			log.Fatal("initalize failed when alloc ID: ", err)
 		}
 	}
 
@@ -112,7 +114,7 @@ func (c *TiltCase) genRegion(ids []uint64, start int) *core.RegionInfo {
 	for _, storeID := range ids {
 		id, err := c.alloc.AllocID()
 		if err != nil {
-			panic("alloc failed")
+			log.Fatal("initalize failed when alloc ID: ", err)
 		}
 		peer := &metapb.Peer{
 			Id:      id,
@@ -120,11 +122,13 @@ func (c *TiltCase) genRegion(ids []uint64, start int) *core.RegionInfo {
 		}
 		peers = append(peers, peer)
 	}
-	region := &metapb.Region{
+	regionMeta := &metapb.Region{
 		Id:       regionID,
 		StartKey: []byte(fmt.Sprintf("zt_%d", start)),
 		EndKey:   []byte(fmt.Sprintf("zt_%d", start+1000)),
 		Peers:    peers,
 	}
-	return core.NewRegionInfo(region, peers[0])
+	region := core.NewRegionInfo(regionMeta, peers[0])
+	region.ApproximateSize = 96 * 1000 * 1000
+	return region
 }

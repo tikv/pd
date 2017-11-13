@@ -1,3 +1,16 @@
+// Copyright 2017 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package faketikv
 
 import (
@@ -73,7 +86,7 @@ func NewClient(pdAddrs []string) (Client, <-chan *pdpb.RegionHeartbeatResponse, 
 	c := &client{
 		urls:                    addrsToUrls(pdAddrs),
 		checkLeaderCh:           make(chan struct{}, 1),
-		reportRegionHeartbeatCh: make(chan *core.RegionInfo, 100),
+		reportRegionHeartbeatCh: make(chan *core.RegionInfo, 1),
 		reciveRegionHeartbeatCh: make(chan *pdpb.RegionHeartbeatResponse, 100),
 		ctx:    ctx,
 		cancel: cancel,
@@ -180,8 +193,7 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 	if ok {
 		return conn, nil
 	}
-
-	cc, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure()) // TODO: Support HTTPS.
+	cc, err := grpc.Dial(strings.TrimLeft(addr, "http://"), grpc.WithInsecure()) // TODO: Support HTTPS.
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -267,6 +279,7 @@ func (c *client) reciveRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regio
 			log.Errorf("[pd] recive regionHeartbeat error: %v", err)
 			return
 		}
+		log.Infof("recive:%v\n", resp)
 		select {
 		case c.reciveRegionHeartbeatCh <- resp:
 		case <-ctx.Done():
@@ -279,6 +292,7 @@ func (c *client) reportRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regio
 	for {
 		select {
 		case region := <-c.reportRegionHeartbeatCh:
+			//	start := time.Now()
 			request := &pdpb.RegionHeartbeatRequest{
 				Header:          c.requestHeader(),
 				Region:          region.Region,
@@ -295,6 +309,7 @@ func (c *client) reportRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regio
 				log.Errorf("[pd] report regionHeartbeat error: %v", err)
 				c.scheduleCheckLeader()
 			}
+		//	log.Infof("Debug: report region %+v Sepend: %v", region, time.Since(start))
 		case <-ctx.Done():
 			return
 		}
