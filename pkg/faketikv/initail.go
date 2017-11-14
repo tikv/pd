@@ -128,10 +128,11 @@ func (c *TiltCase) genRegion(ids []uint64, start int) *core.RegionInfo {
 		peers = append(peers, peer)
 	}
 	regionMeta := &metapb.Region{
-		Id:       regionID,
-		StartKey: []byte(fmt.Sprintf("zt_%d", start)),
-		EndKey:   []byte(fmt.Sprintf("zt_%d", start+1000)),
-		Peers:    peers,
+		Id:          regionID,
+		StartKey:    []byte(fmt.Sprintf("zt_%d", start)),
+		EndKey:      []byte(fmt.Sprintf("zt_%d", start+1000)),
+		Peers:       peers,
+		RegionEpoch: &metapb.RegionEpoch{},
 	}
 	region := core.NewRegionInfo(regionMeta, peers[0])
 	region.ApproximateSize = 96 * 1000 * 1000

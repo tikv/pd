@@ -14,6 +14,7 @@
 package faketikv
 
 import (
+	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 )
@@ -62,17 +63,22 @@ func (c *ClusterInfo) stepLeader(region *core.RegionInfo) {
 	}
 	for _, peer := range region.Peers {
 		if peer.GetStoreId() == newLeaderStoreID {
+			log.Info("[region %d]elect new leader: %+v,old leader: %+v", region.GetId(), peer, region.Leader)
 			region.Leader = peer
-			region.RegionEpoch.Version++
+			region.RegionEpoch.ConfVer++
 			break
 		}
 	}
 	c.SetRegion(region)
+	c.reportRegionChange(region.GetId())
 }
 
-func (c *ClusterInfo) addPeer() {}
-
-func (c *ClusterInfo) deletePeer() {}
+func (c *ClusterInfo) reportRegionChange(regionID uint64) {
+	region := c.GetRegion(regionID)
+	if n, ok := c.Nodes[region.Leader.GetStoreId()]; ok {
+		n.reportRegionChange(region.GetId())
+	}
+}
 
 func (c *ClusterInfo) stepRegions() {
 	regions := c.GetRegions()
@@ -80,6 +86,8 @@ func (c *ClusterInfo) stepRegions() {
 		c.stepLeader(region)
 	}
 }
-func (c *ClusterInfo) Step() {
-	c.stepRegions()
+
+func (c *ClusterInfo) AddTask(task Task) {
+	storeID := task.ChangeStoreID()
+	c.Nodes[storeID].AddTask(task)
 }

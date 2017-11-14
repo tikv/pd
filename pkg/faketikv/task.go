@@ -14,48 +14,188 @@
 package faketikv
 
 import (
+	"fmt"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 type Task interface {
+	Desc() string
+	RegionID() uint64
 	Step(cluster *ClusterInfo)
+	ChangeStoreID() uint64
 	IsFinished() bool
+}
+
+func responseToTask(resp *pdpb.RegionHeartbeatResponse, clusterInfo *ClusterInfo) Task {
+	regionID := resp.GetRegionId()
+	region := clusterInfo.GetRegion(regionID)
+	epoch := resp.GetRegionEpoch()
+
+	//  change peer
+	if resp.GetChangePeer() != nil {
+		changePeer := resp.GetChangePeer()
+		switch changePeer.GetChangeType() {
+		case pdpb.ConfChangeType_AddNode:
+			return &addPeer{
+				regionID: regionID,
+				size:     region.ApproximateSize,
+				speed:    100 * 1000 * 1000,
+				epoch:    epoch,
+				peer:     changePeer.GetPeer(),
+			}
+		case pdpb.ConfChangeType_RemoveNode:
+			return &removePeer{
+				regionID: regionID,
+				size:     region.ApproximateSize,
+				speed:    100 * 1000 * 1000,
+				epoch:    epoch,
+				peer:     changePeer.GetPeer(),
+			}
+		}
+	} else if resp.GetTransferLeader() != nil {
+		changePeer := resp.GetTransferLeader().GetPeer()
+		fromPeer := region.Leader
+		return &transferLeader{
+			regionID: regionID,
+			epoch:    epoch,
+			fromPeer: fromPeer,
+			peer:     changePeer,
+		}
+	}
+	return nil
+}
+
+type transferLeader struct {
+	regionID uint64
+	epoch    *metapb.RegionEpoch
+	fromPeer *metapb.Peer
+	peer     *metapb.Peer
+	finished bool
+}
+
+func (t *transferLeader) Desc() string {
+	return fmt.Sprintf("transfer leader from store %d to store %d", t.fromPeer.GetStoreId(), t.peer.GetStoreId())
+}
+
+func (t *transferLeader) Step(cluster *ClusterInfo) {
+	if t.finished {
+		return
+	}
+	region := cluster.GetRegion(t.regionID)
+	if region.RegionEpoch.Version > t.epoch.Version || region.RegionEpoch.ConfVer > t.epoch.ConfVer {
+		t.finished = true
+		return
+	}
+	if region.GetPeer(t.peer.GetId()) != nil {
+		region.Leader = t.peer
+	}
+	t.finished = true
+	cluster.SetRegion(region)
+}
+
+func (t *transferLeader) ChangeStoreID() uint64 {
+	return t.fromPeer.GetStoreId()
+}
+
+func (t *transferLeader) RegionID() uint64 {
+	return t.regionID
+}
+
+func (t *transferLeader) IsFinished() bool {
+	return t.finished
 }
 
 type addPeer struct {
 	regionID uint64
-	peerID   uint64
-	storeID  uint64
-	name     string
-	size     uint64
-	speed    uint64
+	size     int64
+	speed    int64
+	epoch    *metapb.RegionEpoch
+	peer     *metapb.Peer
+	finished bool
+}
+
+func (a *addPeer) Desc() string {
+	return fmt.Sprintf("add peer %+v for region %d", a.peer, a.regionID)
 }
 
 func (a *addPeer) Step(cluster *ClusterInfo) {
+	if a.finished {
+		return
+	}
+	region := cluster.GetRegion(a.regionID)
+	if region.RegionEpoch.Version > a.epoch.Version || region.RegionEpoch.ConfVer > a.epoch.ConfVer {
+		a.finished = true
+		return
+	}
+
 	a.size -= a.speed
 	if a.size < 0 {
-		region := cluster.GetRegion(a.regionID)
-		if region.GetPeer(a.peerID) == nil {
-			peer := &metapb.Peer{
-				Id:      a.peerID,
-				StoreId: a.storeID,
-			}
-			region.Peers = append(region.Peers, peer)
+		if region.GetPeer(a.peer.GetId()) == nil {
+			region.Peers = append(region.Peers, a.peer)
+			region.RegionEpoch.ConfVer += 1
 			cluster.SetRegion(region)
 		}
 	}
 }
 
+func (a *addPeer) ChangeStoreID() uint64 {
+	return a.peer.GetStoreId()
+}
+
+func (a *addPeer) RegionID() uint64 {
+	return a.regionID
+}
+
 func (a *addPeer) IsFinished() bool {
-	return a.size < 0
+	return a.finished
 }
 
-type deletePeer struct {
+type removePeer struct {
 	regionID uint64
-	peerID   uint64
-	name     string
-	size     uint64
-	speed    uint64
+	size     int64
+	speed    int64
+	epoch    *metapb.RegionEpoch
+	peer     *metapb.Peer
+	finished bool
 }
 
-type transferLeader struct{}
+func (a *removePeer) Desc() string {
+	return fmt.Sprintf("remove peer %+v for region %d", a.peer, a.regionID)
+}
+
+func (a *removePeer) Step(cluster *ClusterInfo) {
+	if a.finished {
+		return
+	}
+	region := cluster.GetRegion(a.regionID)
+	if region.RegionEpoch.Version > a.epoch.Version || region.RegionEpoch.ConfVer > a.epoch.ConfVer {
+		a.finished = true
+		return
+	}
+
+	a.size -= a.speed
+	if a.size < 0 {
+		for i, peer := range region.GetPeers() {
+			if peer.GetId() == a.peer.GetId() {
+				region.Peers = append(region.Peers[:i], region.Peers[i+1:]...)
+				region.RegionEpoch.ConfVer += 1
+				cluster.SetRegion(region)
+				break
+			}
+		}
+	}
+}
+
+func (a *removePeer) ChangeStoreID() uint64 {
+	return a.peer.GetStoreId()
+}
+
+func (a *removePeer) RegionID() uint64 {
+	return a.regionID
+}
+
+func (a *removePeer) IsFinished() bool {
+	return a.finished
+}

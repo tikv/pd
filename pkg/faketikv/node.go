@@ -30,7 +30,7 @@ type Node struct {
 	storeTick               int
 	regionTick              int
 	wg                      sync.WaitGroup
-	tasks                   []Task
+	tasks                   map[uint64]Task
 	client                  Client
 	reciveRegionHeartbeatCh <-chan *pdpb.RegionHeartbeatResponse
 	ctx                     context.Context
@@ -50,13 +50,22 @@ func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
 		StoreId:   id,
 		Capacity:  1000000000000,
 		Available: 1000000000000,
-		StartTime: uint32(time.Now().Second()),
+		StartTime: uint32(time.Now().Unix()),
 	}
 	client, reciveRegionHeartbeatCh, err := NewClient(pdAddr)
 	if err != nil {
 		return nil, err
 	}
-	return &Node{Store: store, stats: stats, client: client, reciveRegionHeartbeatCh: reciveRegionHeartbeatCh, ctx: ctx, cancel: cancel, isBlock: true}, nil
+	return &Node{
+		Store:   store,
+		stats:   stats,
+		client:  client,
+		ctx:     ctx,
+		cancel:  cancel,
+		isBlock: true,
+		tasks:   make(map[uint64]Task),
+		reciveRegionHeartbeatCh: reciveRegionHeartbeatCh,
+	}, nil
 }
 
 func (n *Node) Start() error {
@@ -77,7 +86,10 @@ func (n *Node) reciveRegionHeartbeat() {
 	for {
 		select {
 		case resp := <-n.reciveRegionHeartbeatCh:
-			log.Infof("[node %d]Debug: recive %+v", n.Id, resp)
+			task := responseToTask(resp, n.clusterInfo)
+			if task != nil {
+				n.clusterInfo.AddTask(task)
+			}
 		case <-n.ctx.Done():
 			return
 		}
@@ -88,19 +100,28 @@ func (n *Node) Tick() {
 	if n.isBlock {
 		return
 	}
-	n.processHeartBeat()
-	n.processTask()
-	n.clusterInfo.Step()
+	n.stepHeartBeat()
+	n.stepTask()
+	n.clusterInfo.stepRegions()
 	n.tick++
 }
 
-func (n *Node) processTask() {
+func (n *Node) stepTask() {
+	ids := make([]uint64, 0, len(n.tasks))
 	for _, task := range n.tasks {
 		task.Step(n.clusterInfo)
+		if task.IsFinished() {
+			n.clusterInfo.reportRegionChange(task.RegionID())
+			ids = append(ids, task.RegionID())
+			log.Infof("[store %d] task finished: %s", n.GetId(), task.Desc())
+		}
+	}
+	for _, id := range ids {
+		delete(n.tasks, id)
 	}
 }
 
-func (n *Node) processHeartBeat() {
+func (n *Node) stepHeartBeat() {
 	n.storeTick = (n.storeTick + 1) % 10
 	n.regionTick = (n.regionTick + 1) % 60
 	if n.storeTick == 0 {
@@ -134,11 +155,29 @@ func (n *Node) regionHeartBeat() {
 	}
 }
 
-func (n *Node) AddTask(task Task) {}
+func (n *Node) reportRegionChange(regionID uint64) {
+	region := n.clusterInfo.GetRegion(regionID)
+	if region.Leader.GetStoreId() == n.Id {
+		ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
+		err := n.client.RegionHeartbeat(ctx, region)
+		if err != nil {
+			log.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetId(), err)
+		}
+		cancel()
+	}
+}
+
+func (n *Node) AddTask(task Task) {
+	if t, ok := n.tasks[task.RegionID()]; ok {
+		log.Infof("[node %d] already exists task in region %d: %s", n.Id, task.RegionID(), t.Desc())
+		return
+	}
+	n.tasks[task.RegionID()] = task
+}
 
 func (n *Node) Stop() {
 	n.cancel()
 	n.client.Close()
 	n.wg.Wait()
-	log.Info("node %d stoped", n.Id)
+	log.Infof("node %d stoped", n.Id)
 }
