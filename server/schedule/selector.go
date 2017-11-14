@@ -99,7 +99,7 @@ func (s *replicaSelector) SelectSource(cluster Cluster, stores []*core.StoreInfo
 			best, bestScore = store, score
 		}
 	}
-	if best == nil || FilterSource(cluster, best, filters) {
+	if best == nil || FilterSource(cluster, best, s.filters) {
 		return nil
 	}
 	return best
@@ -119,7 +119,7 @@ func (s *replicaSelector) SelectTarget(cluster Cluster, stores []*core.StoreInfo
 			best, bestScore = store, score
 		}
 	}
-	if best == nil || FilterTarget(cluster, best, filters) {
+	if best == nil || FilterTarget(cluster, best, s.filters) {
 		return nil
 	}
 	return best
