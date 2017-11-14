@@ -244,7 +244,7 @@ func (s *testClusterInfoSuite) Test(c *C) {
 	// Test without kv.
 	{
 		for _, test := range tests {
-			cluster := newClusterInfo(core.NewMockIDAllocator(), opt)
+			cluster := newClusterInfo(core.NewMockIDAllocator(), opt, nil)
 			test(c, cluster)
 		}
 	}
@@ -254,8 +254,7 @@ func (s *testClusterInfoSuite) Test(c *C) {
 		for _, test := range tests {
 			server, cleanup := mustRunTestServer(c)
 			defer cleanup()
-			cluster := newClusterInfo(server.idAlloc, opt)
-			cluster.kv = server.kv
+			cluster := newClusterInfo(server.idAlloc, opt, server.kv)
 			test(c, cluster)
 		}
 	}
@@ -535,7 +534,7 @@ func (s *testClusterInfoSuite) testRegionSplitAndMerge(c *C, cache *clusterInfo)
 
 func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
 	_, opt := newTestScheduleConfig()
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt)
+	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
 	stores := newTestStores(5)
 	for _, s := range stores {
 		cluster.putStore(s)

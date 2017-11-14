@@ -46,18 +46,18 @@ type clusterInfo struct {
 	opt           *scheduleOption
 }
 
-func newClusterInfo(id core.IDAllocator, opt *scheduleOption) *clusterInfo {
+func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clusterInfo {
 	return &clusterInfo{
 		BasicCluster: schedule.NewBasicCluster(),
 		id:           id,
 		opt:          opt,
+		kv:           kv,
 	}
 }
 
 // Return nil if cluster is not bootstrapped.
 func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*clusterInfo, error) {
-	c := newClusterInfo(id, opt)
-	c.kv = kv
+	c := newClusterInfo(id, opt, kv)
 
 	c.meta = &metapb.Cluster{}
 	ok, err := kv.LoadMeta(c.meta)
