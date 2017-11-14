@@ -23,10 +23,6 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
-type Alloc interface {
-	AllocID() (uint64, error)
-}
-
 type localAlloc struct {
 	id uint64
 }
@@ -36,23 +32,28 @@ func (l *localAlloc) AllocID() (uint64, error) {
 	return l.id, nil
 }
 
+// Initializer define an Init interface.
+// we can implements differet case to initailize cluster.
 type Initializer interface {
 	Init(args ...string) *ClusterInfo
 }
 
+// TiltCase will initailize cluster with all regions distributed in 3 node.
 type TiltCase struct {
 	NodeNumber   int `toml:"node-number" json:"node-number"`
 	RegionNumber int `toml:"region-number" json:"region-number"`
 	alloc        *localAlloc
 }
 
+// NewTiltCase returns tiltCase.
 func NewTiltCase() *TiltCase {
 	return &TiltCase{alloc: &localAlloc{}}
 }
 
+// Init implement Initializer
 func (c *TiltCase) Init(addr string, args ...string) *ClusterInfo {
 	path := args[0]
-	err := c.Parser(path)
+	err := c.parser(path)
 	if err != nil {
 		log.Fatal("initalize failed: ", err)
 	}
@@ -62,11 +63,11 @@ func (c *TiltCase) Init(addr string, args ...string) *ClusterInfo {
 	for i := 0; i < c.NodeNumber; i++ {
 		id, err1 := c.alloc.AllocID()
 		if err1 != nil {
-			log.Fatal("alloc failed", err)
+			log.Fatal("alloc failed", err1)
 		}
-		node, err := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), addr)
+		node, err1 := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), addr)
 		if err != nil {
-			log.Fatal("New node failed", err)
+			log.Fatal("New node failed", err1)
 		}
 		nodes[id] = node
 		if len(ids) < 3 {
@@ -105,7 +106,7 @@ func (c *TiltCase) Init(addr string, args ...string) *ClusterInfo {
 	return cluster
 }
 
-func (c *TiltCase) Parser(path string) error {
+func (c *TiltCase) parser(path string) error {
 	_, err := toml.DecodeFile(path, c)
 	return err
 }

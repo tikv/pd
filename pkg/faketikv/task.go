@@ -20,11 +20,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
+// Task running in node
 type Task interface {
 	Desc() string
 	RegionID() uint64
 	Step(cluster *ClusterInfo)
-	ChangeStoreID() uint64
+	TargetStoreID() uint64
 	IsFinished() bool
 }
 
@@ -95,7 +96,7 @@ func (t *transferLeader) Step(cluster *ClusterInfo) {
 	cluster.SetRegion(region)
 }
 
-func (t *transferLeader) ChangeStoreID() uint64 {
+func (t *transferLeader) TargetStoreID() uint64 {
 	return t.fromPeer.GetStoreId()
 }
 
@@ -134,13 +135,13 @@ func (a *addPeer) Step(cluster *ClusterInfo) {
 	if a.size < 0 {
 		if region.GetPeer(a.peer.GetId()) == nil {
 			region.Peers = append(region.Peers, a.peer)
-			region.RegionEpoch.ConfVer += 1
+			region.RegionEpoch.ConfVer++
 			cluster.SetRegion(region)
 		}
 	}
 }
 
-func (a *addPeer) ChangeStoreID() uint64 {
+func (a *addPeer) TargetStoreID() uint64 {
 	return a.peer.GetStoreId()
 }
 
@@ -180,7 +181,7 @@ func (a *removePeer) Step(cluster *ClusterInfo) {
 		for i, peer := range region.GetPeers() {
 			if peer.GetId() == a.peer.GetId() {
 				region.Peers = append(region.Peers[:i], region.Peers[i+1:]...)
-				region.RegionEpoch.ConfVer += 1
+				region.RegionEpoch.ConfVer++
 				cluster.SetRegion(region)
 				break
 			}
@@ -188,7 +189,7 @@ func (a *removePeer) Step(cluster *ClusterInfo) {
 	}
 }
 
-func (a *removePeer) ChangeStoreID() uint64 {
+func (a *removePeer) TargetStoreID() uint64 {
 	return a.peer.GetStoreId()
 }
 

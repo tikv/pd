@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
+// Node means a tikv
 type Node struct {
 	*metapb.Store
 	stats                   *pdpb.StoreStats
@@ -40,6 +41,7 @@ type Node struct {
 	clusterInfo *ClusterInfo
 }
 
+// NewNode returns a Node
 func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	store := &metapb.Store{
@@ -54,6 +56,7 @@ func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
 	}
 	client, reciveRegionHeartbeatCh, err := NewClient(pdAddr)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	return &Node{
@@ -68,6 +71,7 @@ func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
 	}, nil
 }
 
+// Start starts the node
 func (n *Node) Start() error {
 	ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 	err := n.client.PutStore(ctx, n.Store)
@@ -96,6 +100,7 @@ func (n *Node) reciveRegionHeartbeat() {
 	}
 }
 
+// Tick steps node status change
 func (n *Node) Tick() {
 	if n.isBlock {
 		return
@@ -167,6 +172,7 @@ func (n *Node) reportRegionChange(regionID uint64) {
 	}
 }
 
+// AddTask adds task in this node
 func (n *Node) AddTask(task Task) {
 	if t, ok := n.tasks[task.RegionID()]; ok {
 		log.Infof("[node %d] already exists task in region %d: %s", n.Id, task.RegionID(), t.Desc())
@@ -175,6 +181,7 @@ func (n *Node) AddTask(task Task) {
 	n.tasks[task.RegionID()] = task
 }
 
+// Stop stops this node
 func (n *Node) Stop() {
 	n.cancel()
 	n.client.Close()

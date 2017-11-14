@@ -105,7 +105,6 @@ func (c *client) initClusterID() error {
 		}
 		c.clusterID = members.GetHeader().GetClusterId()
 		return nil
-		time.Sleep(time.Second)
 	}
 
 	return errors.Trace(errFailInitClusterID)
