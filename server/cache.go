@@ -43,18 +43,20 @@ type clusterInfo struct {
 	kv            *core.KV
 	meta          *metapb.Cluster
 	activeRegions int
+	opt           *scheduleOption
 }
 
-func newClusterInfo(id core.IDAllocator) *clusterInfo {
+func newClusterInfo(id core.IDAllocator, opt *scheduleOption) *clusterInfo {
 	return &clusterInfo{
 		BasicCluster: schedule.NewBasicCluster(),
 		id:           id,
+		opt:          opt,
 	}
 }
 
 // Return nil if cluster is not bootstrapped.
-func loadClusterInfo(id core.IDAllocator, kv *core.KV) (*clusterInfo, error) {
-	c := newClusterInfo(id)
+func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*clusterInfo, error) {
+	c := newClusterInfo(id, opt)
 	c.kv = kv
 
 	c.meta = &metapb.Cluster{}
@@ -445,4 +447,44 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	c.BasicCluster.UpdateReadStatus(region)
 
 	return nil
+}
+
+func (c *clusterInfo) GetLeaderScheduleLimit() uint64 {
+	return c.opt.GetLeaderScheduleLimit()
+}
+
+func (c *clusterInfo) GetRegionScheduleLimit() uint64 {
+	return c.opt.GetRegionScheduleLimit()
+}
+
+func (c *clusterInfo) GetReplicaScheduleLimit() uint64 {
+	return c.opt.GetReplicaScheduleLimit()
+}
+
+func (c *clusterInfo) GetTolerantSizeRatio() float64 {
+	return c.opt.GetTolerantSizeRatio()
+}
+
+func (c *clusterInfo) GetMaxSnapshotCount() uint64 {
+	return c.opt.GetMaxSnapshotCount()
+}
+
+func (c *clusterInfo) GetMaxPendingPeerCount() uint64 {
+	return c.opt.GetMaxPendingPeerCount()
+}
+
+func (c *clusterInfo) GetMaxStoreDownTime() time.Duration {
+	return c.opt.GetMaxStoreDownTime()
+}
+
+func (c *clusterInfo) GetMaxReplicas() int {
+	return c.opt.GetMaxReplicas()
+}
+
+func (c *clusterInfo) GetLocationLabels() []string {
+	return c.opt.GetLocationLabels()
+}
+
+func (c *clusterInfo) GetHotRegionLowThreshold() int {
+	return c.opt.GetHotRegionLowThreshold()
 }

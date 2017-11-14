@@ -22,21 +22,19 @@ import (
 
 // ReplicaChecker ensures region has the best replicas.
 type ReplicaChecker struct {
-	opt        Options
 	cluster    Cluster
 	classifier namespace.Classifier
 	filters    []Filter
 }
 
 // NewReplicaChecker creates a replica checker.
-func NewReplicaChecker(opt Options, cluster Cluster, classifier namespace.Classifier) *ReplicaChecker {
+func NewReplicaChecker(cluster Cluster, classifier namespace.Classifier) *ReplicaChecker {
 	filters := []Filter{
-		NewHealthFilter(opt),
-		NewSnapshotCountFilter(opt),
+		NewHealthFilter(),
+		NewSnapshotCountFilter(),
 	}
 
 	return &ReplicaChecker{
-		opt:        opt,
 		cluster:    cluster,
 		classifier: classifier,
 		filters:    filters,
@@ -52,7 +50,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 		return op
 	}
 
-	if len(region.GetPeers()) < r.opt.GetMaxReplicas() {
+	if len(region.GetPeers()) < r.cluster.GetMaxReplicas() {
 		newPeer := r.SelectBestPeerToAddReplica(region, r.filters...)
 		if newPeer == nil {
 			return nil
@@ -61,7 +59,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 		return NewOperator("makeUpReplica", region.GetId(), core.RegionKind, step)
 	}
 
-	if len(region.GetPeers()) > r.opt.GetMaxReplicas() {
+	if len(region.GetPeers()) > r.cluster.GetMaxReplicas() {
 		oldPeer, _ := r.selectWorstPeer(region)
 		if oldPeer == nil {
 			return nil
@@ -89,8 +87,8 @@ func (r *ReplicaChecker) SelectBestPeerToAddReplica(region *core.RegionInfo, fil
 func (r *ReplicaChecker) SelectBestStoreToAddReplica(region *core.RegionInfo, filters ...Filter) (uint64, float64) {
 	// Add some must have filters.
 	newFilters := []Filter{
-		NewStateFilter(r.opt),
-		NewStorageThresholdFilter(r.opt),
+		NewStateFilter(),
+		NewStorageThresholdFilter(),
 		NewExcludedFilter(nil, region.GetStoreIds()),
 	}
 	filters = append(filters, newFilters...)
@@ -100,23 +98,23 @@ func (r *ReplicaChecker) SelectBestStoreToAddReplica(region *core.RegionInfo, fi
 	}
 
 	regionStores := r.cluster.GetRegionStores(region)
-	selector := NewReplicaSelector(regionStores, r.opt.GetLocationLabels(), r.filters...)
-	target := selector.SelectTarget(r.cluster.GetStores(), filters...)
+	selector := NewReplicaSelector(regionStores, r.cluster.GetLocationLabels(), r.filters...)
+	target := selector.SelectTarget(r.cluster.GetStores(), r.cluster, filters...)
 	if target == nil {
 		return 0, 0
 	}
-	return target.GetId(), DistinctScore(r.opt.GetLocationLabels(), regionStores, target)
+	return target.GetId(), DistinctScore(r.cluster.GetLocationLabels(), regionStores, target)
 }
 
 // selectWorstPeer returns the worst peer in the region.
 func (r *ReplicaChecker) selectWorstPeer(region *core.RegionInfo) (*metapb.Peer, float64) {
 	regionStores := r.cluster.GetRegionStores(region)
-	selector := NewReplicaSelector(regionStores, r.opt.GetLocationLabels(), r.filters...)
-	worstStore := selector.SelectSource(regionStores)
+	selector := NewReplicaSelector(regionStores, r.cluster.GetLocationLabels(), r.filters...)
+	worstStore := selector.SelectSource(regionStores, r.cluster)
 	if worstStore == nil {
 		return nil, 0
 	}
-	return region.GetStorePeer(worstStore.GetId()), DistinctScore(r.opt.GetLocationLabels(), regionStores, worstStore)
+	return region.GetStorePeer(worstStore.GetId()), DistinctScore(r.cluster.GetLocationLabels(), regionStores, worstStore)
 }
 
 // selectBestReplacement returns the best store to replace the region peer.
@@ -138,10 +136,10 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *Operator {
 			log.Infof("lost the store %d,maybe you are recovering the PD cluster.", peer.GetStoreId())
 			return nil
 		}
-		if store.DownTime() < r.opt.GetMaxStoreDownTime() {
+		if store.DownTime() < r.cluster.GetMaxStoreDownTime() {
 			continue
 		}
-		if stats.GetDownSeconds() < uint64(r.opt.GetMaxStoreDownTime().Seconds()) {
+		if stats.GetDownSeconds() < uint64(r.cluster.GetMaxStoreDownTime().Seconds()) {
 			continue
 		}
 		return CreateRemovePeerOperator("removeDownReplica", region, peer.GetStoreId())
@@ -161,7 +159,7 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 		}
 
 		// Check the number of replicas first.
-		if len(region.GetPeers()) > r.opt.GetMaxReplicas() {
+		if len(region.GetPeers()) > r.cluster.GetMaxReplicas() {
 			return CreateRemovePeerOperator("removeExtraOfflineReplica", region, peer.GetStoreId())
 		}
 

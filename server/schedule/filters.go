@@ -22,15 +22,15 @@ import (
 // Filter is an interface to filter source and target store.
 type Filter interface {
 	// Return true if the store should not be used as a source store.
-	FilterSource(store *core.StoreInfo) bool
+	FilterSource(store *core.StoreInfo, cluster Cluster) bool
 	// Return true if the store should not be used as a target store.
-	FilterTarget(store *core.StoreInfo) bool
+	FilterTarget(store *core.StoreInfo, cluster Cluster) bool
 }
 
 // FilterSource checks if store can pass all Filters as source store.
-func FilterSource(store *core.StoreInfo, filters []Filter) bool {
+func FilterSource(store *core.StoreInfo, cluster Cluster, filters []Filter) bool {
 	for _, filter := range filters {
-		if filter.FilterSource(store) {
+		if filter.FilterSource(store, cluster) {
 			return true
 		}
 	}
@@ -38,9 +38,9 @@ func FilterSource(store *core.StoreInfo, filters []Filter) bool {
 }
 
 // FilterTarget checks if store can pass all Filters as target store.
-func FilterTarget(store *core.StoreInfo, filters []Filter) bool {
+func FilterTarget(store *core.StoreInfo, cluster Cluster, filters []Filter) bool {
 	for _, filter := range filters {
-		if filter.FilterTarget(store) {
+		if filter.FilterTarget(store, cluster) {
 			return true
 		}
 	}
@@ -60,12 +60,12 @@ func NewExcludedFilter(sources, targets map[uint64]struct{}) Filter {
 	}
 }
 
-func (f *excludedFilter) FilterSource(store *core.StoreInfo) bool {
+func (f *excludedFilter) FilterSource(store *core.StoreInfo, cluster Cluster) bool {
 	_, ok := f.sources[store.GetId()]
 	return ok
 }
 
-func (f *excludedFilter) FilterTarget(store *core.StoreInfo) bool {
+func (f *excludedFilter) FilterTarget(store *core.StoreInfo, cluster Cluster) bool {
 	_, ok := f.targets[store.GetId()]
 	return ok
 }
@@ -77,103 +77,95 @@ func NewBlockFilter() Filter {
 	return &blockFilter{}
 }
 
-func (f *blockFilter) FilterSource(store *core.StoreInfo) bool {
+func (f *blockFilter) FilterSource(store *core.StoreInfo, cluster Cluster) bool {
 	return store.IsBlocked()
 }
 
-func (f *blockFilter) FilterTarget(store *core.StoreInfo) bool {
+func (f *blockFilter) FilterTarget(store *core.StoreInfo, cluster Cluster) bool {
 	return store.IsBlocked()
 }
 
-type stateFilter struct {
-	opt Options
-}
+type stateFilter struct{}
 
 // NewStateFilter creates a Filter that filters all stores that are not UP.
-func NewStateFilter(opt Options) Filter {
-	return &stateFilter{opt: opt}
+func NewStateFilter() Filter {
+	return &stateFilter{}
 }
 
 func (f *stateFilter) filter(store *core.StoreInfo) bool {
 	return !store.IsUp()
 }
 
-func (f *stateFilter) FilterSource(store *core.StoreInfo) bool {
+func (f *stateFilter) FilterSource(store *core.StoreInfo, cluster Cluster) bool {
 	return f.filter(store)
 }
 
-func (f *stateFilter) FilterTarget(store *core.StoreInfo) bool {
+func (f *stateFilter) FilterTarget(store *core.StoreInfo, cluster Cluster) bool {
 	return f.filter(store)
 }
 
-type healthFilter struct {
-	opt Options
-}
+type healthFilter struct{}
 
 // NewHealthFilter creates a Filter that filters all stores that are Busy or Down.
-func NewHealthFilter(opt Options) Filter {
-	return &healthFilter{opt: opt}
+func NewHealthFilter() Filter {
+	return &healthFilter{}
 }
 
-func (f *healthFilter) filter(store *core.StoreInfo) bool {
+func (f *healthFilter) filter(store *core.StoreInfo, cluster Cluster) bool {
 	if store.Stats.GetIsBusy() {
 		return true
 	}
-	return store.DownTime() > f.opt.GetMaxStoreDownTime()
+	return store.DownTime() > cluster.GetMaxStoreDownTime()
 }
 
-func (f *healthFilter) FilterSource(store *core.StoreInfo) bool {
-	return f.filter(store)
+func (f *healthFilter) FilterSource(store *core.StoreInfo, cluster Cluster) bool {
+	return f.filter(store, cluster)
 }
 
-func (f *healthFilter) FilterTarget(store *core.StoreInfo) bool {
-	return f.filter(store)
+func (f *healthFilter) FilterTarget(store *core.StoreInfo, cluster Cluster) bool {
+	return f.filter(store, cluster)
 }
 
-type pendingPeerCountFilter struct {
-	opt Options
-}
+type pendingPeerCountFilter struct{}
 
 // NewPendingPeerCountFilter creates a Filter that filters all stores that are
 // currently handling too many pengding peers.
-func NewPendingPeerCountFilter(opt Options) Filter {
-	return &pendingPeerCountFilter{opt: opt}
+func NewPendingPeerCountFilter() Filter {
+	return &pendingPeerCountFilter{}
 }
 
-func (p *pendingPeerCountFilter) filter(store *core.StoreInfo) bool {
-	return store.PendingPeerCount > int(p.opt.GetMaxPendingPeerCount())
+func (p *pendingPeerCountFilter) filter(store *core.StoreInfo, cluster Cluster) bool {
+	return store.PendingPeerCount > int(cluster.GetMaxPendingPeerCount())
 }
 
-func (p *pendingPeerCountFilter) FilterSource(store *core.StoreInfo) bool {
-	return p.filter(store)
+func (p *pendingPeerCountFilter) FilterSource(store *core.StoreInfo, cluster Cluster) bool {
+	return p.filter(store, cluster)
 }
 
-func (p *pendingPeerCountFilter) FilterTarget(store *core.StoreInfo) bool {
-	return p.filter(store)
+func (p *pendingPeerCountFilter) FilterTarget(store *core.StoreInfo, cluster Cluster) bool {
+	return p.filter(store, cluster)
 }
 
-type snapshotCountFilter struct {
-	opt Options
-}
+type snapshotCountFilter struct{}
 
 // NewSnapshotCountFilter creates a Filter that filters all stores that are
 // currently handling too many snapshots.
-func NewSnapshotCountFilter(opt Options) Filter {
-	return &snapshotCountFilter{opt: opt}
+func NewSnapshotCountFilter() Filter {
+	return &snapshotCountFilter{}
 }
 
-func (f *snapshotCountFilter) filter(store *core.StoreInfo) bool {
-	return uint64(store.Stats.GetSendingSnapCount()) > f.opt.GetMaxSnapshotCount() ||
-		uint64(store.Stats.GetReceivingSnapCount()) > f.opt.GetMaxSnapshotCount() ||
-		uint64(store.Stats.GetApplyingSnapCount()) > f.opt.GetMaxSnapshotCount()
+func (f *snapshotCountFilter) filter(store *core.StoreInfo, cluster Cluster) bool {
+	return uint64(store.Stats.GetSendingSnapCount()) > cluster.GetMaxSnapshotCount() ||
+		uint64(store.Stats.GetReceivingSnapCount()) > cluster.GetMaxSnapshotCount() ||
+		uint64(store.Stats.GetApplyingSnapCount()) > cluster.GetMaxSnapshotCount()
 }
 
-func (f *snapshotCountFilter) FilterSource(store *core.StoreInfo) bool {
-	return f.filter(store)
+func (f *snapshotCountFilter) FilterSource(store *core.StoreInfo, cluster Cluster) bool {
+	return f.filter(store, cluster)
 }
 
-func (f *snapshotCountFilter) FilterTarget(store *core.StoreInfo) bool {
-	return f.filter(store)
+func (f *snapshotCountFilter) FilterTarget(store *core.StoreInfo, cluster Cluster) bool {
+	return f.filter(store, cluster)
 }
 
 type cacheFilter struct {
@@ -185,11 +177,11 @@ func NewCacheFilter(cache *cache.TTLUint64) Filter {
 	return &cacheFilter{cache: cache}
 }
 
-func (f *cacheFilter) FilterSource(store *core.StoreInfo) bool {
+func (f *cacheFilter) FilterSource(store *core.StoreInfo, cluster Cluster) bool {
 	return f.cache.Exists(store.GetId())
 }
 
-func (f *cacheFilter) FilterTarget(store *core.StoreInfo) bool {
+func (f *cacheFilter) FilterTarget(store *core.StoreInfo, cluster Cluster) bool {
 	return false
 }
 
@@ -197,15 +189,15 @@ type storageThresholdFilter struct{}
 
 // NewStorageThresholdFilter creates a Filter that filters all stores that are
 // almost full.
-func NewStorageThresholdFilter(opt Options) Filter {
+func NewStorageThresholdFilter() Filter {
 	return &storageThresholdFilter{}
 }
 
-func (f *storageThresholdFilter) FilterSource(store *core.StoreInfo) bool {
+func (f *storageThresholdFilter) FilterSource(store *core.StoreInfo, cluster Cluster) bool {
 	return false
 }
 
-func (f *storageThresholdFilter) FilterTarget(store *core.StoreInfo) bool {
+func (f *storageThresholdFilter) FilterTarget(store *core.StoreInfo, cluster Cluster) bool {
 	return store.IsLowSpace()
 }
 
@@ -234,11 +226,11 @@ func NewDistinctScoreFilter(labels []string, stores []*core.StoreInfo, source *c
 	}
 }
 
-func (f *distinctScoreFilter) FilterSource(store *core.StoreInfo) bool {
+func (f *distinctScoreFilter) FilterSource(store *core.StoreInfo, cluster Cluster) bool {
 	return false
 }
 
-func (f *distinctScoreFilter) FilterTarget(store *core.StoreInfo) bool {
+func (f *distinctScoreFilter) FilterTarget(store *core.StoreInfo, cluster Cluster) bool {
 	return DistinctScore(f.labels, f.stores, store) < f.safeScore
 }
 
@@ -260,10 +252,10 @@ func (f *namespaceFilter) filter(store *core.StoreInfo) bool {
 	return f.classifier.GetStoreNamespace(store) != f.namespace
 }
 
-func (f *namespaceFilter) FilterSource(store *core.StoreInfo) bool {
+func (f *namespaceFilter) FilterSource(store *core.StoreInfo, cluster Cluster) bool {
 	return f.filter(store)
 }
 
-func (f *namespaceFilter) FilterTarget(store *core.StoreInfo) bool {
+func (f *namespaceFilter) FilterTarget(store *core.StoreInfo, cluster Cluster) bool {
 	return f.filter(store)
 }
