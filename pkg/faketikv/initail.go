@@ -50,7 +50,7 @@ func NewTiltCase() *TiltCase {
 	return &TiltCase{alloc: &localAlloc{}}
 }
 
-func (c *TiltCase) Init(client Client, args ...string) *ClusterInfo {
+func (c *TiltCase) Init(addr string, args ...string) *ClusterInfo {
 	path := args[0]
 	err := c.Parser(path)
 	if err != nil {
@@ -64,7 +64,11 @@ func (c *TiltCase) Init(client Client, args ...string) *ClusterInfo {
 		if err1 != nil {
 			log.Fatal("alloc failed", err)
 		}
-		nodes[id] = NewNode(id, fmt.Sprintf("mock://tikv-%d", id), client)
+		node, err := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), addr)
+		if err != nil {
+			log.Fatal("New node failed", err)
+		}
+		nodes[id] = node
 		if len(ids) < 3 {
 			ids = append(ids, id)
 		}
@@ -82,6 +86,7 @@ func (c *TiltCase) Init(client Client, args ...string) *ClusterInfo {
 		}
 	}
 	// TODO: remove this
+	client := nodes[firstRegion.Leader.GetStoreId()].client
 	for i := 0; i < c.NodeNumber+c.RegionNumber+10; i++ {
 		_, err = client.AllocID(context.Background())
 		if err != nil {

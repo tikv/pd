@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -25,8 +24,7 @@ func main() {
 		log.Fatal("run server error:", err)
 	}
 	addr := local.GetAddr()
-	addrs := strings.Split(addr, ",")
-	driver := faketikv.NewDriver(addrs)
+	driver := faketikv.NewDriver(addr)
 	err = driver.Prepare()
 	if err != nil {
 		log.Fatal("simulator prepare error:", err)
@@ -44,6 +42,7 @@ func main() {
 		case <-tick.C:
 			driver.Tick()
 		case <-sc:
+			driver.Stop()
 			clean()
 			return
 		}
