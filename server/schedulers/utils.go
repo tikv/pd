@@ -37,8 +37,8 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 		averageLeader += float64(s.LeaderScore()) / float64(len(stores))
 	}
 
-	mostLeaderStore := s.SelectSource(stores, cluster, filters...)
-	leastLeaderStore := s.SelectTarget(stores, cluster, filters...)
+	mostLeaderStore := s.SelectSource(cluster, stores, filters...)
+	leastLeaderStore := s.SelectTarget(cluster, stores, filters...)
 
 	var mostLeaderDistance, leastLeaderDistance float64
 	if mostLeaderStore != nil {
@@ -60,7 +60,7 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 			return nil, nil
 		}
 		targetStores := cluster.GetFollowerStores(region)
-		target := s.SelectTarget(targetStores, cluster)
+		target := s.SelectTarget(cluster, targetStores)
 		if target == nil {
 			schedulerCounter.WithLabelValues(schedulerName, "no_target_store").Inc()
 			return nil, nil
@@ -82,7 +82,7 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 func scheduleRemovePeer(cluster schedule.Cluster, schedulerName string, s schedule.Selector, filters ...schedule.Filter) (*core.RegionInfo, *metapb.Peer) {
 	stores := cluster.GetStores()
 
-	source := s.SelectSource(stores, cluster, filters...)
+	source := s.SelectSource(cluster, stores, filters...)
 	if source == nil {
 		schedulerCounter.WithLabelValues(schedulerName, "no_store").Inc()
 		return nil, nil
@@ -104,7 +104,7 @@ func scheduleRemovePeer(cluster schedule.Cluster, schedulerName string, s schedu
 func scheduleAddPeer(cluster schedule.Cluster, s schedule.Selector, filters ...schedule.Filter) *metapb.Peer {
 	stores := cluster.GetStores()
 
-	target := s.SelectTarget(stores, cluster, filters...)
+	target := s.SelectTarget(cluster, stores, filters...)
 	if target == nil {
 		return nil
 	}

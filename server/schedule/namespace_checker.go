@@ -90,7 +90,7 @@ func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, ta
 	filters = append(filters, newFilters...)
 
 	selector := NewRandomSelector(n.filters)
-	target := selector.SelectTarget(targets, n.cluster, filters...)
+	target := selector.SelectTarget(n.cluster, targets, filters...)
 	if target == nil {
 		return 0
 	}
@@ -117,7 +117,7 @@ func (n *NamespaceChecker) filter(stores []*core.StoreInfo, filters ...Filter) [
 	result := make([]*core.StoreInfo, 0)
 
 	for _, store := range stores {
-		if FilterTarget(store, n.cluster, filters) {
+		if FilterTarget(n.cluster, store, filters) {
 			continue
 		}
 		result = append(result, store)

@@ -99,7 +99,7 @@ func (r *ReplicaChecker) SelectBestStoreToAddReplica(region *core.RegionInfo, fi
 
 	regionStores := r.cluster.GetRegionStores(region)
 	selector := NewReplicaSelector(regionStores, r.cluster.GetLocationLabels(), r.filters...)
-	target := selector.SelectTarget(r.cluster.GetStores(), r.cluster, filters...)
+	target := selector.SelectTarget(r.cluster, r.cluster.GetStores(), filters...)
 	if target == nil {
 		return 0, 0
 	}
@@ -110,7 +110,7 @@ func (r *ReplicaChecker) SelectBestStoreToAddReplica(region *core.RegionInfo, fi
 func (r *ReplicaChecker) selectWorstPeer(region *core.RegionInfo) (*metapb.Peer, float64) {
 	regionStores := r.cluster.GetRegionStores(region)
 	selector := NewReplicaSelector(regionStores, r.cluster.GetLocationLabels(), r.filters...)
-	worstStore := selector.SelectSource(regionStores, r.cluster)
+	worstStore := selector.SelectSource(r.cluster, regionStores)
 	if worstStore == nil {
 		return nil, 0
 	}

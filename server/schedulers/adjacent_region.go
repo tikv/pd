@@ -227,7 +227,7 @@ func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster schedule.Cluste
 		return true
 	}
 	store := cluster.GetStore(region.Leader.GetStoreId())
-	s := l.selector.SelectSource([]*core.StoreInfo{store}, cluster)
+	s := l.selector.SelectSource(cluster, []*core.StoreInfo{store})
 	if s == nil {
 		return true
 	}
@@ -251,7 +251,7 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster schedule.Cluster
 	for _, p := range diffPeers {
 		storesInfo = append(storesInfo, cluster.GetStore(p.GetStoreId()))
 	}
-	target := l.selector.SelectTarget(storesInfo, cluster)
+	target := l.selector.SelectTarget(cluster, storesInfo)
 	if target == nil {
 		return nil
 	}
@@ -282,7 +282,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, 
 		schedule.NewExcludedFilter(nil, excludeStores),
 		scoreGuard,
 	}
-	target := l.selector.SelectTarget(cluster.GetStores(), cluster, filters...)
+	target := l.selector.SelectTarget(cluster, cluster.GetStores(), filters...)
 	if target == nil {
 		return nil
 	}
