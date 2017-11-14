@@ -239,10 +239,12 @@ func (s *testClusterInfoSuite) Test(c *C) {
 	tests = append(tests, s.testRegionHeartbeat)
 	tests = append(tests, s.testRegionSplitAndMerge)
 
+	_, opt := newTestScheduleConfig()
+
 	// Test without kv.
 	{
 		for _, test := range tests {
-			cluster := newClusterInfo(core.NewMockIDAllocator())
+			cluster := newClusterInfo(core.NewMockIDAllocator(), opt)
 			test(c, cluster)
 		}
 	}
@@ -252,7 +254,7 @@ func (s *testClusterInfoSuite) Test(c *C) {
 		for _, test := range tests {
 			server, cleanup := mustRunTestServer(c)
 			defer cleanup()
-			cluster := newClusterInfo(server.idAlloc)
+			cluster := newClusterInfo(server.idAlloc, opt)
 			cluster.kv = server.kv
 			test(c, cluster)
 		}
@@ -264,9 +266,10 @@ func (s *testClusterInfoSuite) TestLoadClusterInfo(c *C) {
 	defer cleanup()
 
 	kv := server.kv
+	_, opt := newTestScheduleConfig()
 
 	// Cluster is not bootstrapped.
-	cluster, err := loadClusterInfo(server.idAlloc, kv)
+	cluster, err := loadClusterInfo(server.idAlloc, kv, opt)
 	c.Assert(err, IsNil)
 	c.Assert(cluster, IsNil)
 
@@ -277,7 +280,7 @@ func (s *testClusterInfoSuite) TestLoadClusterInfo(c *C) {
 	stores := mustSaveStores(c, kv, n)
 	regions := mustSaveRegions(c, kv, n)
 
-	cluster, err = loadClusterInfo(server.idAlloc, kv)
+	cluster, err = loadClusterInfo(server.idAlloc, kv, opt)
 	c.Assert(err, IsNil)
 	c.Assert(cluster, NotNil)
 
@@ -531,7 +534,8 @@ func (s *testClusterInfoSuite) testRegionSplitAndMerge(c *C, cache *clusterInfo)
 }
 
 func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
-	cluster := newClusterInfo(core.NewMockIDAllocator())
+	_, opt := newTestScheduleConfig()
+	cluster := newClusterInfo(core.NewMockIDAllocator(), opt)
 	stores := newTestStores(5)
 	for _, s := range stores {
 		cluster.putStore(s)
