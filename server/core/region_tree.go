@@ -140,7 +140,6 @@ func (t *regionTree) getAdjacentRegions(region *metapb.Region) (*regionItem, *re
 		next = i.(*regionItem)
 		return false
 	})
-	item = &regionItem{region: &metapb.Region{StartKey: region.StartKey}}
 	t.tree.AscendGreaterOrEqual(item, func(i btree.Item) bool {
 		if bytes.Compare(item.region.StartKey, i.(*regionItem).region.StartKey) == 0 {
 			return true
