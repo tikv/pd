@@ -31,10 +31,10 @@ type mockCluster struct {
 }
 
 // NewMockCluster creates a new mockCluster
-func newMockCluster(id *core.MockIDAllocator, opt *MockSchedulerOptions) *mockCluster {
+func newMockCluster(opt *MockSchedulerOptions) *mockCluster {
 	return &mockCluster{
 		BasicCluster: schedule.NewBasicCluster(),
-		id:           id,
+		id:           core.NewMockIDAllocator(),
 		opt:          opt,
 	}
 }

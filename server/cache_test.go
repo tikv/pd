@@ -534,7 +534,7 @@ func (s *testClusterInfoSuite) testRegionSplitAndMerge(c *C, cache *clusterInfo)
 
 func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
 	_, opt := newTestScheduleConfig()
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
+	cluster := newTestClusterInfo(opt)
 	stores := newTestStores(5)
 	for _, s := range stores {
 		cluster.putStore(s)

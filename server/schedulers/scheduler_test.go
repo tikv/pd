@@ -15,7 +15,6 @@ package schedulers
 
 import (
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
 
@@ -25,7 +24,7 @@ type testShuffleLeaderSuite struct{}
 
 func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	opt := newTestScheduleConfig()
-	tc := newMockCluster(core.NewMockIDAllocator(), opt)
+	tc := newMockCluster(opt)
 
 	sl, err := schedule.CreateScheduler("shuffle-leader", schedule.NewLimiter())
 	c.Assert(err, IsNil)
@@ -61,7 +60,7 @@ type testBalanceAdjacentRegionSuite struct{}
 
 func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	opt := newTestScheduleConfig()
-	tc := newMockCluster(core.NewMockIDAllocator(), opt)
+	tc := newMockCluster(opt)
 
 	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)

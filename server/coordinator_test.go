@@ -42,8 +42,12 @@ type testClusterInfo struct {
 	*clusterInfo
 }
 
-func newTestClusterInfo(cluster *clusterInfo) *testClusterInfo {
-	return &testClusterInfo{clusterInfo: cluster}
+func newTestClusterInfo(opt *scheduleOption) *testClusterInfo {
+	return &testClusterInfo{clusterInfo: newClusterInfo(
+		core.NewMockIDAllocator(),
+		opt,
+		core.NewKV(core.NewMemoryKV()),
+	)}
 }
 
 func (c *testClusterInfo) addRegionStore(storeID uint64, regionCount int) {
@@ -114,11 +118,11 @@ type testCoordinatorSuite struct{}
 
 func (s *testCoordinatorSuite) TestBasic(c *C) {
 	_, opt := newTestScheduleConfig()
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
-	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	tc := newTestClusterInfo(opt)
+	hbStreams := newHeartbeatStreams(tc.clusterInfo.getClusterID())
 	defer hbStreams.Close()
 
-	co := newCoordinator(cluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	l := co.limiter
 
 	op1 := newTestOperator(1, core.LeaderKind)
@@ -164,12 +168,11 @@ func newMockHeartbeatStream() *mockHeartbeatStream {
 
 func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	_, opt := newTestScheduleConfig()
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
-	tc := newTestClusterInfo(cluster)
-	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	tc := newTestClusterInfo(opt)
+	hbStreams := newHeartbeatStreams(tc.getClusterID())
 	defer hbStreams.Close()
 
-	co := newCoordinator(cluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	defer co.stop()
 
@@ -198,23 +201,23 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	stream := newMockHeartbeatStream()
 
 	// Transfer peer.
-	region := cluster.GetRegion(1)
+	region := tc.GetRegion(1)
 	resp := dispatchAndRecvHeartbeat(c, co, region, stream)
 	checkAddPeerResp(c, resp, 1)
 	region.Peers = append(region.Peers, resp.GetChangePeer().GetPeer())
-	cluster.putRegion(region)
+	tc.putRegion(region)
 	resp = dispatchAndRecvHeartbeat(c, co, region, stream)
 	checkRemovePeerResp(c, resp, 4)
 	region.RemoveStorePeer(4)
-	cluster.putRegion(region)
+	tc.putRegion(region)
 	dispatchHeartbeatNoResp(c, co, region, stream)
 
 	// Transfer leader.
-	region = cluster.GetRegion(2)
+	region = tc.GetRegion(2)
 	resp = dispatchAndRecvHeartbeat(c, co, region, stream)
 	checkTransferLeaderResp(c, resp, 2)
 	region.Leader = resp.GetTransferLeader().GetPeer()
-	cluster.putRegion(region)
+	tc.putRegion(region)
 	dispatchHeartbeatNoResp(c, co, region, stream)
 }
 
@@ -242,12 +245,11 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	cfg.LeaderScheduleLimit = 0
 	cfg.RegionScheduleLimit = 0
 
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
-	tc := newTestClusterInfo(cluster)
-	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	tc := newTestClusterInfo(opt)
+	hbStreams := newHeartbeatStreams(tc.getClusterID())
 	defer hbStreams.Close()
 
-	co := newCoordinator(cluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	defer co.stop()
 
@@ -260,7 +262,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 
 	// Add peer to store 1.
 	tc.addLeaderRegion(1, 2, 3)
-	region := cluster.GetRegion(1)
+	region := tc.GetRegion(1)
 	resp := dispatchAndRecvHeartbeat(c, co, region, stream)
 	checkAddPeerResp(c, resp, 1)
 	region.Peers = append(region.Peers, resp.GetChangePeer().GetPeer())
@@ -284,7 +286,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 
 	// Remove peer from store 4.
 	tc.addLeaderRegion(2, 1, 2, 3, 4)
-	region = cluster.GetRegion(2)
+	region = tc.GetRegion(2)
 	resp = dispatchAndRecvHeartbeat(c, co, region, stream)
 	checkRemovePeerResp(c, resp, 4)
 	region.RemoveStorePeer(4)
@@ -301,12 +303,11 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 
 func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	_, opt := newTestScheduleConfig()
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
-	tc := newTestClusterInfo(cluster)
-	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	tc := newTestClusterInfo(opt)
+	hbStreams := newHeartbeatStreams(tc.getClusterID())
 	defer hbStreams.Close()
 
-	co := newCoordinator(cluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	defer co.stop()
 
@@ -323,7 +324,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	waitOperator(c, co, 1)
 	schedulers.CheckTransferPeer(c, co.getOperator(1), 4, 1)
 
-	region := cluster.GetRegion(1)
+	region := tc.GetRegion(1)
 
 	// Add new peer.
 	resp := dispatchAndRecvHeartbeat(c, co, region, stream)
@@ -342,18 +343,17 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	resp = dispatchAndRecvHeartbeat(c, co, region, stream)
 	checkRemovePeerResp(c, resp, 4)
 	tc.addLeaderRegion(1, 1, 2, 3)
-	region = cluster.GetRegion(1)
+	region = tc.GetRegion(1)
 	dispatchHeartbeatNoResp(c, co, region, stream)
 }
 
 func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	_, opt := newTestScheduleConfig()
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
-	tc := newTestClusterInfo(cluster)
-	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	tc := newTestClusterInfo(opt)
+	hbStreams := newHeartbeatStreams(tc.getClusterID())
 	defer hbStreams.Close()
 
-	co := newCoordinator(cluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 
 	tc.LoadRegion(1, 1, 2, 3)
 	tc.LoadRegion(2, 1, 2, 3)
@@ -390,11 +390,10 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	cfg, opt := newTestScheduleConfig()
 	cfg.ReplicaScheduleLimit = 0
 
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
-	tc := newTestClusterInfo(cluster)
-	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	tc := newTestClusterInfo(opt)
+	hbStreams := newHeartbeatStreams(tc.getClusterID())
 	defer hbStreams.Close()
-	co := newCoordinator(cluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	defer co.stop()
 
@@ -428,19 +427,19 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 
 	// Transfer all leaders to store 1.
 	waitOperator(c, co, 2)
-	region2 := cluster.GetRegion(2)
+	region2 := tc.GetRegion(2)
 	resp := dispatchAndRecvHeartbeat(c, co, region2, stream)
 	checkTransferLeaderResp(c, resp, 1)
 	region2.Leader = region2.GetStorePeer(1)
-	cluster.putRegion(region2)
+	tc.putRegion(region2)
 	dispatchHeartbeatNoResp(c, co, region2, stream)
 
 	waitOperator(c, co, 3)
-	region3 := cluster.GetRegion(3)
+	region3 := tc.GetRegion(3)
 	resp = dispatchAndRecvHeartbeat(c, co, region3, stream)
 	checkTransferLeaderResp(c, resp, 1)
 	region3.Leader = region3.GetStorePeer(1)
-	cluster.putRegion(region3)
+	tc.putRegion(region3)
 	dispatchHeartbeatNoResp(c, co, region3, stream)
 }
 
@@ -448,12 +447,11 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	cfg, opt := newTestScheduleConfig()
 	cfg.ReplicaScheduleLimit = 0
 
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
-	tc := newTestClusterInfo(cluster)
-	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	tc := newTestClusterInfo(opt)
+	hbStreams := newHeartbeatStreams(tc.getClusterID())
 	defer hbStreams.Close()
 
-	co := newCoordinator(cluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
 
 	// Add stores 1,2
@@ -480,7 +478,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// whether the schedulers added or removed in dynamic way are recorded in opt
 	opt.reload(co.cluster.kv)
 
-	co = newCoordinator(cluster, hbStreams, namespace.DefaultClassifier)
+	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	c.Assert(co.schedulers, HasLen, 2)
 	bls, err := schedule.CreateScheduler("balance-leader", co.limiter)
@@ -496,7 +494,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	co.stop()
 
 	opt.reload(co.cluster.kv)
-	co = newCoordinator(cluster, hbStreams, namespace.DefaultClassifier)
+	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 
 	co.run()
 	defer co.stop()
@@ -511,9 +509,8 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	cfg.LeaderScheduleLimit = 0
 	cfg.RegionScheduleLimit = 0
 
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
-	tc := newTestClusterInfo(cluster)
-	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	tc := newTestClusterInfo(opt)
+	hbStreams := newHeartbeatStreams(tc.getClusterID())
 	defer hbStreams.Close()
 
 	// Add 3 stores (1, 2, 3) and a region with 1 replica on store 1.
@@ -521,11 +518,11 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	tc.addRegionStore(2, 2)
 	tc.addRegionStore(3, 3)
 	tc.addLeaderRegion(1, 1)
-	cluster.activeRegions = 1
-	region := cluster.GetRegion(1)
+	tc.activeRegions = 1
+	region := tc.GetRegion(1)
 
 	// Add 1 replica on store 2.
-	co := newCoordinator(cluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	stream := newMockHeartbeatStream()
 	resp := dispatchAndRecvHeartbeat(c, co, region, stream)
@@ -534,7 +531,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	co.stop()
 
 	// Recreate coodinator then add another replica on store 3.
-	co = newCoordinator(cluster, hbStreams, namespace.DefaultClassifier)
+	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	resp = dispatchAndRecvHeartbeat(c, co, region, stream)
 	checkAddPeerResp(c, resp, 3)
@@ -591,11 +588,11 @@ func (s *mockLimitScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 
 func (s *testScheduleControllerSuite) TestController(c *C) {
 	_, opt := newTestScheduleConfig()
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
-	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	tc := newTestClusterInfo(opt)
+	hbStreams := newHeartbeatStreams(tc.getClusterID())
 	defer hbStreams.Close()
 
-	co := newCoordinator(cluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	scheduler, err := schedule.CreateScheduler("balance-leader", co.limiter)
 	c.Assert(err, IsNil)
 	lb := &mockLimitScheduler{
@@ -608,7 +605,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 	for i := schedulers.MinScheduleInterval; sc.GetInterval() != schedulers.MaxScheduleInterval; i = sc.GetNextInterval(i) {
 		c.Assert(sc.GetInterval(), Equals, i)
-		c.Assert(sc.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), IsNil)
+		c.Assert(sc.Schedule(tc.clusterInfo, schedule.NewOpInfluence(nil, tc.clusterInfo)), IsNil)
 	}
 	// limit = 2
 	lb.limit = 2
@@ -646,11 +643,11 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	_, opt := newTestScheduleConfig()
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
-	hbStreams := newHeartbeatStreams(cluster.getClusterID())
+	tc := newTestClusterInfo(opt)
+	hbStreams := newHeartbeatStreams(tc.getClusterID())
 	defer hbStreams.Close()
 
-	co := newCoordinator(cluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	lb, err := schedule.CreateScheduler("balance-leader", co.limiter)
 	c.Assert(err, IsNil)
 	sc := newScheduleController(co, lb)
@@ -660,7 +657,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	for _, n := range idleSeconds {
 		sc.nextInterval = schedulers.MinScheduleInterval
 		for totalSleep := time.Duration(0); totalSleep <= time.Second*time.Duration(n); totalSleep += sc.GetInterval() {
-			c.Assert(sc.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), IsNil)
+			c.Assert(sc.Schedule(tc.clusterInfo, schedule.NewOpInfluence(nil, tc.clusterInfo)), IsNil)
 		}
 		c.Assert(sc.GetInterval(), Less, time.Second*time.Duration(n/2))
 	}

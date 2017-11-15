@@ -32,7 +32,7 @@ type testNamespaceSuite struct {
 func (s *testNamespaceSuite) SetUpTest(c *C) {
 	s.classifier = newMapClassifer()
 	_, s.opt = newTestScheduleConfig()
-	s.tc = newTestClusterInfo(newClusterInfo(core.NewMockIDAllocator(), s.opt, core.NewKV(core.NewMemoryKV())))
+	s.tc = newTestClusterInfo(s.opt)
 }
 
 func (s *testNamespaceSuite) TestReplica(c *C) {
