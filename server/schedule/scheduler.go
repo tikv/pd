@@ -44,17 +44,8 @@ type Cluster interface {
 	RegionWriteStats() []*core.RegionStat
 	RegionReadStats() []*core.RegionStat
 
-	// config
-	GetLeaderScheduleLimit() uint64
-	GetRegionScheduleLimit() uint64
-	GetReplicaScheduleLimit() uint64
-	GetTolerantSizeRatio() float64
-	GetMaxSnapshotCount() uint64
-	GetMaxPendingPeerCount() uint64
-	GetMaxStoreDownTime() time.Duration
-	GetMaxReplicas() int
-	GetLocationLabels() []string
-	GetHotRegionLowThreshold() int
+	// get config methods
+	Options
 
 	// TODO: it should be removed. Schedulers don't need to know anything
 	// about peers.
