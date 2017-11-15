@@ -26,6 +26,7 @@ import (
 // Node means a tikv
 type Node struct {
 	*metapb.Store
+	sync.RWMutex
 	stats                   *pdpb.StoreStats
 	tick                    uint64
 	storeTick               int
@@ -112,17 +113,15 @@ func (n *Node) Tick() {
 }
 
 func (n *Node) stepTask() {
-	ids := make([]uint64, 0, len(n.tasks))
+	n.Lock()
+	defer n.Unlock()
 	for _, task := range n.tasks {
 		task.Step(n.clusterInfo)
 		if task.IsFinished() {
+			log.Infof("[store %d][region %d] task finished: %s", n.GetId(), task.RegionID(), task.Desc())
 			n.clusterInfo.reportRegionChange(task.RegionID())
-			ids = append(ids, task.RegionID())
-			log.Infof("[store %d] task finished: %s", n.GetId(), task.Desc())
+			delete(n.tasks, task.RegionID())
 		}
-	}
-	for _, id := range ids {
-		delete(n.tasks, id)
 	}
 }
 
@@ -170,15 +169,19 @@ func (n *Node) reportRegionChange(regionID uint64) {
 		}
 		cancel()
 	}
+	log.Infof("[node %d][region %d]report immidiatly", n.Id, region.GetId())
 }
 
 // AddTask adds task in this node
 func (n *Node) AddTask(task Task) {
+	n.Lock()
+	defer n.Unlock()
 	if t, ok := n.tasks[task.RegionID()]; ok {
-		log.Infof("[node %d] already exists task in region %d: %s", n.Id, task.RegionID(), t.Desc())
+		log.Infof("[node %d][region %d] already exists task : %s", n.Id, task.RegionID(), t.Desc())
 		return
 	}
 	n.tasks[task.RegionID()] = task
+	log.Infof("[node %d][region %d] add task : %s", n.Id, task.RegionID(), task.Desc())
 }
 
 // Stop stops this node
