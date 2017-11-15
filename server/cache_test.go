@@ -534,10 +534,10 @@ func (s *testClusterInfoSuite) testRegionSplitAndMerge(c *C, cache *clusterInfo)
 
 func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
 	_, opt := newTestScheduleConfig()
-	cluster := newTestClusterInfo(opt)
+	tc := newTestClusterInfo(opt)
 	stores := newTestStores(5)
 	for _, s := range stores {
-		cluster.putStore(s)
+		tc.putStore(s)
 	}
 	peers := []*metapb.Peer{
 		{
@@ -562,15 +562,15 @@ func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
 		Leader:       peers[0],
 		PendingPeers: peers[1:3],
 	}
-	cluster.handleRegionHeartbeat(origin)
-	checkPendingPeerCount([]int{0, 1, 1, 0}, cluster, c)
+	tc.handleRegionHeartbeat(origin)
+	checkPendingPeerCount([]int{0, 1, 1, 0}, tc.clusterInfo, c)
 	newRegion := &core.RegionInfo{
 		Region:       &metapb.Region{Id: 1, Peers: peers[1:]},
 		Leader:       peers[1],
 		PendingPeers: peers[3:4],
 	}
-	cluster.handleRegionHeartbeat(newRegion)
-	checkPendingPeerCount([]int{0, 0, 0, 1}, cluster, c)
+	tc.handleRegionHeartbeat(newRegion)
+	checkPendingPeerCount([]int{0, 0, 0, 1}, tc.clusterInfo, c)
 }
 
 func checkPendingPeerCount(expect []int, cache *clusterInfo, c *C) {
