@@ -234,7 +234,8 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	var labels []*metapb.StoreLabel
+
+	labels := make([]*metapb.StoreLabel, 0, len(input))
 	for k, v := range input {
 		labels = append(labels, &metapb.StoreLabel{
 			Key:   k,

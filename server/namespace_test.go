@@ -31,8 +31,8 @@ type testNamespaceSuite struct {
 
 func (s *testNamespaceSuite) SetUpTest(c *C) {
 	s.classifier = newMapClassifer()
-	s.tc = newTestClusterInfo(newClusterInfo(core.NewMockIDAllocator()))
 	_, s.opt = newTestScheduleConfig()
+	s.tc = newTestClusterInfo(s.opt)
 }
 
 func (s *testNamespaceSuite) TestReplica(c *C) {
@@ -47,7 +47,7 @@ func (s *testNamespaceSuite) TestReplica(c *C) {
 	s.classifier.setStore(2, "ns1")
 	s.classifier.setStore(3, "ns2")
 
-	checker := schedule.NewReplicaChecker(s.opt, s.tc, s.classifier)
+	checker := schedule.NewReplicaChecker(s.tc, s.classifier)
 
 	// Replica should be added to the store with the same namespace.
 	s.classifier.setRegion(1, "ns1")
@@ -76,7 +76,7 @@ func (s *testNamespaceSuite) TestNamespaceChecker(c *C) {
 	s.classifier.setStore(2, "ns1")
 	s.classifier.setStore(3, "ns2")
 
-	checker := schedule.NewNamespaceChecker(s.opt, s.tc, s.classifier)
+	checker := schedule.NewNamespaceChecker(s.tc, s.classifier)
 
 	// Move the region if it was not in the right store.
 	s.classifier.setRegion(1, "ns2")
@@ -119,7 +119,7 @@ func (s *testNamespaceSuite) TestSchedulerBalanceRegion(c *C) {
 	s.classifier.setStore(2, "ns1")
 	s.classifier.setStore(3, "ns2")
 	s.opt.SetMaxReplicas(1)
-	sched, _ := schedule.CreateScheduler("balance-region", s.opt, schedule.NewLimiter())
+	sched, _ := schedule.CreateScheduler("balance-region", schedule.NewLimiter())
 
 	// Balance is limited within a namespace.
 	s.tc.addLeaderRegion(1, 2)
@@ -158,7 +158,7 @@ func (s *testNamespaceSuite) TestSchedulerBalanceLeader(c *C) {
 	s.classifier.setStore(2, "ns1")
 	s.classifier.setStore(3, "ns2")
 	s.classifier.setStore(4, "ns2")
-	sched, _ := schedule.CreateScheduler("balance-leader", s.opt, schedule.NewLimiter())
+	sched, _ := schedule.CreateScheduler("balance-leader", schedule.NewLimiter())
 
 	// Balance is limited within a namespace.
 	s.tc.addLeaderRegion(1, 2, 1)
@@ -207,7 +207,9 @@ func (c *mapClassifer) GetAllNamespaces() []string {
 	for _, ns := range c.regions {
 		all[ns] = struct{}{}
 	}
-	var nss []string
+
+	nss := make([]string, 0, len(all))
+
 	for ns := range all {
 		nss = append(nss, ns)
 	}

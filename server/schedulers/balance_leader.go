@@ -19,30 +19,28 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("balance-leader", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
-		return newBalanceLeaderScheduler(opt, limiter), nil
+	schedule.RegisterScheduler("balance-leader", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+		return newBalanceLeaderScheduler(limiter), nil
 	})
 }
 
 type balanceLeaderScheduler struct {
 	*baseScheduler
-	opt      schedule.Options
 	limit    uint64
 	selector schedule.Selector
 }
 
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
-func newBalanceLeaderScheduler(opt schedule.Options, limiter *schedule.Limiter) schedule.Scheduler {
+func newBalanceLeaderScheduler(limiter *schedule.Limiter) schedule.Scheduler {
 	filters := []schedule.Filter{
 		schedule.NewBlockFilter(),
-		schedule.NewStateFilter(opt),
-		schedule.NewHealthFilter(opt),
+		schedule.NewStateFilter(),
+		schedule.NewHealthFilter(),
 	}
 	base := newBaseScheduler(limiter)
 	return &balanceLeaderScheduler{
 		baseScheduler: base,
-		opt:           opt,
 		limit:         1,
 		selector:      schedule.NewBalanceSelector(core.LeaderKind, filters),
 	}
@@ -56,8 +54,8 @@ func (l *balanceLeaderScheduler) GetType() string {
 	return "balance-leader"
 }
 
-func (l *balanceLeaderScheduler) IsScheduleAllowed() bool {
-	limit := minUint64(l.limit, l.opt.GetLeaderScheduleLimit())
+func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+	limit := minUint64(l.limit, cluster.GetLeaderScheduleLimit())
 	return l.limiter.OperatorCount(core.LeaderKind) < limit
 }
 
@@ -77,7 +75,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 	source := cluster.GetStore(region.Leader.GetStoreId())
 	target := cluster.GetStore(newLeader.GetStoreId())
 	avgScore := cluster.GetStoresAverageScore(core.LeaderKind)
-	if !shouldBalance(source, target, avgScore, core.LeaderKind, region, opInfluence, l.opt.GetTolerantSizeRatio()) {
+	if !shouldBalance(source, target, avgScore, core.LeaderKind, region, opInfluence, cluster.GetTolerantSizeRatio()) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}

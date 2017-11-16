@@ -21,8 +21,8 @@ import (
 
 // Selector is an interface to select source and target store to schedule.
 type Selector interface {
-	SelectSource(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo
-	SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo
+	SelectSource(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo
+	SelectTarget(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo
 }
 
 type balanceSelector struct {
@@ -39,12 +39,12 @@ func NewBalanceSelector(kind core.ResourceKind, filters []Filter) Selector {
 	}
 }
 
-func (s *balanceSelector) SelectSource(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
+func (s *balanceSelector) SelectSource(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 
 	var result *core.StoreInfo
 	for _, store := range stores {
-		if FilterSource(store, filters) {
+		if FilterSource(opt, store, filters) {
 			continue
 		}
 		if result == nil || result.ResourceScore(s.kind) < store.ResourceScore(s.kind) {
@@ -54,12 +54,12 @@ func (s *balanceSelector) SelectSource(stores []*core.StoreInfo, filters ...Filt
 	return result
 }
 
-func (s *balanceSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
+func (s *balanceSelector) SelectTarget(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 
 	var result *core.StoreInfo
 	for _, store := range stores {
-		if FilterTarget(store, filters) {
+		if FilterTarget(opt, store, filters) {
 			continue
 		}
 		if result == nil || result.ResourceScore(s.kind) > store.ResourceScore(s.kind) {
@@ -85,13 +85,13 @@ func NewReplicaSelector(regionStores []*core.StoreInfo, labels []string, filters
 	}
 }
 
-func (s *replicaSelector) SelectSource(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
+func (s *replicaSelector) SelectSource(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	var (
 		best      *core.StoreInfo
 		bestScore float64
 	)
 	for _, store := range stores {
-		if FilterSource(store, filters) {
+		if FilterSource(opt, store, filters) {
 			continue
 		}
 		score := DistinctScore(s.labels, s.regionStores, store)
@@ -99,19 +99,19 @@ func (s *replicaSelector) SelectSource(stores []*core.StoreInfo, filters ...Filt
 			best, bestScore = store, score
 		}
 	}
-	if best == nil || FilterSource(best, s.filters) {
+	if best == nil || FilterSource(opt, best, s.filters) {
 		return nil
 	}
 	return best
 }
 
-func (s *replicaSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
+func (s *replicaSelector) SelectTarget(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	var (
 		best      *core.StoreInfo
 		bestScore float64
 	)
 	for _, store := range stores {
-		if FilterTarget(store, filters) {
+		if FilterTarget(opt, store, filters) {
 			continue
 		}
 		score := DistinctScore(s.labels, s.regionStores, store)
@@ -119,7 +119,7 @@ func (s *replicaSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filt
 			best, bestScore = store, score
 		}
 	}
-	if best == nil || FilterTarget(best, s.filters) {
+	if best == nil || FilterTarget(opt, best, s.filters) {
 		return nil
 	}
 	return best
@@ -141,12 +141,12 @@ func (s *randomSelector) Select(stores []*core.StoreInfo) *core.StoreInfo {
 	return stores[rand.Int()%len(stores)]
 }
 
-func (s *randomSelector) SelectSource(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
+func (s *randomSelector) SelectSource(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 
 	var candidates []*core.StoreInfo
 	for _, store := range stores {
-		if FilterSource(store, filters) {
+		if FilterSource(opt, store, filters) {
 			continue
 		}
 		candidates = append(candidates, store)
@@ -154,12 +154,12 @@ func (s *randomSelector) SelectSource(stores []*core.StoreInfo, filters ...Filte
 	return s.Select(candidates)
 }
 
-func (s *randomSelector) SelectTarget(stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
+func (s *randomSelector) SelectTarget(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 
 	var candidates []*core.StoreInfo
 	for _, store := range stores {
-		if FilterTarget(store, filters) {
+		if FilterTarget(opt, store, filters) {
 			continue
 		}
 		candidates = append(candidates, store)

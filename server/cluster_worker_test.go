@@ -330,8 +330,8 @@ func updateRegionRange(r *metapb.Region, start, end []byte) {
 }
 
 func splitRegion(c *C, old *metapb.Region, splitKey []byte, newRegionID uint64, newPeerIDs []uint64) *metapb.Region {
-	var peers []*metapb.Peer
 	c.Assert(len(old.Peers), Equals, len(newPeerIDs))
+	peers := make([]*metapb.Peer, 0, len(old.Peers))
 	for i, peer := range old.Peers {
 		peers = append(peers, &metapb.Peer{
 			Id:      newPeerIDs[i],

@@ -23,10 +23,11 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 )
 
-func newTestScheduleConfig() (string, *MockSchedulerOptions) {
+func newTestScheduleConfig() *MockSchedulerOptions {
 	mso := newMockSchedulerOptions()
-	return "abc", mso
+	return mso
 }
+
 func newTestReplication(mso *MockSchedulerOptions, maxReplicas int, locationLabels ...string) {
 	mso.MaxReplicas = maxReplicas
 	mso.LocationLabels = locationLabels
@@ -101,7 +102,8 @@ func newTestOpInfluence(source uint64, target uint64, kind core.ResourceKind, co
 }
 
 func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedCase, capaGB uint64) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
 	for _, t := range tests {
 		tc.addLeaderStore(1, int(t.sourceCount))
@@ -123,7 +125,8 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 }
 
 func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 	tc.addLeaderStore(1, 10)
 	tc.addLeaderStore(2, 20)
 	tc.addLeaderStore(3, 30)
@@ -139,22 +142,20 @@ func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
 var _ = Suite(&testBalanceLeaderSchedulerSuite{})
 
 type testBalanceLeaderSchedulerSuite struct {
-	cluster *mockCluster
-	tc      *mockCluster
-	lb      schedule.Scheduler
+	tc *mockCluster
+	lb schedule.Scheduler
 }
 
 func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
-	s.cluster = newMockCluster(core.NewMockIDAllocator())
-	s.tc = s.cluster
-	_, opt := newTestScheduleConfig()
-	lb, err := schedule.CreateScheduler("balance-leader", opt, schedule.NewLimiter())
+	opt := newTestScheduleConfig()
+	s.tc = newMockCluster(opt)
+	lb, err := schedule.CreateScheduler("balance-leader", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	s.lb = lb
 }
 
 func (s *testBalanceLeaderSchedulerSuite) schedule(operators []*schedule.Operator) *schedule.Operator {
-	return s.lb.Schedule(s.cluster, schedule.NewOpInfluence(operators, s.cluster))
+	return s.lb.Schedule(s.tc, schedule.NewOpInfluence(operators, s.tc))
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
@@ -288,11 +289,10 @@ var _ = Suite(&testBalanceRegionSchedulerSuite{})
 type testBalanceRegionSchedulerSuite struct{}
 
 func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
-	cluster := newMockCluster(core.NewMockIDAllocator())
-	tc := cluster
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
-	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewLimiter())
+	sb, err := schedule.CreateScheduler("balance-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	cache := sb.(*balanceRegionScheduler).cache
 
@@ -305,7 +305,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	tc.addRegionStore(4, 16)
 	// Add region 1 with leader in store 4.
 	tc.addLeaderRegion(1, 4)
-	CheckTransferPeer(c, sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 4, 1)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 4, 1)
 
 	// Test stateFilter.
 	tc.setStoreOffline(1)
@@ -313,23 +313,22 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	cache.Remove(4)
 	// When store 1 is offline, it will be filtered,
 	// store 2 becomes the store with least regions.
-	CheckTransferPeer(c, sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 4, 2)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 4, 2)
 
 	// Test MaxReplicas.
 	opt.SetMaxReplicas(3)
-	c.Assert(sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), IsNil)
+	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
 	opt.SetMaxReplicas(1)
-	c.Assert(sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), NotNil)
+	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), NotNil)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
-	cluster := newMockCluster(core.NewMockIDAllocator())
-	tc := cluster
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewLimiter())
+	sb, err := schedule.CreateScheduler("balance-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	cache := sb.(*balanceRegionScheduler).cache
 
@@ -341,61 +340,60 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	tc.addLeaderRegion(1, 1, 2, 3)
 	// This schedule try to replace peer in store 1, but we have no other stores,
 	// so store 1 will be set in the cache and skipped next schedule.
-	c.Assert(sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), IsNil)
+	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
 	c.Assert(cache.Exists(1), IsTrue)
 
 	// Store 4 has smaller region score than store 2.
 	tc.addLabelsStore(4, 2, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
-	CheckTransferPeer(c, sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 2, 4)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 2, 4)
 
 	// Store 5 has smaller region score than store 1.
 	tc.addLabelsStore(5, 2, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	cache.Remove(1) // Delete store 1 from cache, or it will be skipped.
-	CheckTransferPeer(c, sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 1, 5)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 1, 5)
 
 	// Store 6 has smaller region score than store 5.
 	tc.addLabelsStore(6, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
-	CheckTransferPeer(c, sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 1, 6)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 1, 6)
 
 	// Store 7 has the same region score with store 6, but in a different host.
 	tc.addLabelsStore(7, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"})
-	CheckTransferPeer(c, sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 1, 7)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 1, 7)
 
 	// If store 7 is not available, we wait.
 	tc.setStoreDown(7)
-	c.Assert(sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), IsNil)
+	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
 	c.Assert(cache.Exists(1), IsTrue)
 	tc.setStoreUp(7)
-	CheckTransferPeer(c, sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 2, 7)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 2, 7)
 	cache.Remove(1)
-	CheckTransferPeer(c, sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 1, 7)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 1, 7)
 
 	// Store 8 has smaller region score than store 7, but the distinct score decrease.
 	tc.addLabelsStore(8, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h3"})
-	CheckTransferPeer(c, sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 1, 7)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 1, 7)
 
 	// Take down 4,5,6,7
 	tc.setStoreDown(4)
 	tc.setStoreDown(5)
 	tc.setStoreDown(6)
 	tc.setStoreDown(7)
-	c.Assert(sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), IsNil)
+	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
 	c.Assert(cache.Exists(1), IsTrue)
 	cache.Remove(1)
 
 	// Store 9 has different zone with other stores but larger region score than store 1.
 	tc.addLabelsStore(9, 9, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
-	c.Assert(sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), IsNil)
+	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
-	cluster := newMockCluster(core.NewMockIDAllocator())
-	tc := cluster
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
 	newTestReplication(opt, 5, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewLimiter())
+	sb, err := schedule.CreateScheduler("balance-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 
 	tc.addLabelsStore(1, 4, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -408,30 +406,29 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 
 	// Store 6 has smaller region score.
 	tc.addLabelsStore(6, 1, map[string]string{"zone": "z5", "rack": "r2", "host": "h1"})
-	CheckTransferPeer(c, sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 5, 6)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 5, 6)
 
 	// Store 7 has smaller region score and higher distinct score.
 	tc.addLabelsStore(7, 5, map[string]string{"zone": "z6", "rack": "r1", "host": "h1"})
-	CheckTransferPeer(c, sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 5, 7)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 5, 7)
 
 	// Store 1 has smaller region score and higher distinct score.
 	tc.addLeaderRegion(1, 2, 3, 4, 5, 6)
-	CheckTransferPeer(c, sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 5, 1)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 5, 1)
 
 	// Store 6 has smaller region score and higher distinct score.
 	tc.addLabelsStore(11, 29, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
 	tc.addLabelsStore(12, 8, map[string]string{"zone": "z2", "rack": "r2", "host": "h1"})
 	tc.addLabelsStore(13, 7, map[string]string{"zone": "z3", "rack": "r2", "host": "h1"})
 	tc.addLeaderRegion(1, 2, 3, 11, 12, 13)
-	CheckTransferPeer(c, sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 11, 6)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 11, 6)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
-	cluster := newMockCluster(core.NewMockIDAllocator())
-	tc := cluster
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
-	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewLimiter())
+	sb, err := schedule.CreateScheduler("balance-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	opt.SetMaxReplicas(1)
 
@@ -445,10 +442,10 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	tc.updateStoreRegionWeight(4, 2.0)
 
 	tc.addLeaderRegion(1, 1)
-	CheckTransferPeer(c, sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 1, 4)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 1, 4)
 
 	tc.updateRegionCount(4, 30)
-	CheckTransferPeer(c, sb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 1, 3)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 1, 3)
 }
 
 var _ = Suite(&testReplicaCheckerSuite{})
@@ -456,11 +453,10 @@ var _ = Suite(&testReplicaCheckerSuite{})
 type testReplicaCheckerSuite struct{}
 
 func (s *testReplicaCheckerSuite) TestBasic(c *C) {
-	cluster := newMockCluster(core.NewMockIDAllocator())
-	tc := cluster
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
-	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
+	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	opt.MaxSnapshotCount = 2
 
@@ -473,7 +469,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	tc.addLeaderRegion(1, 1, 2)
 
 	// Region has 2 peers, we need to add a new peer.
-	region := cluster.GetRegion(1)
+	region := tc.GetRegion(1)
 	CheckAddPeer(c, rc.Check(region), 4)
 
 	// Test healthFilter.
@@ -502,12 +498,12 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	CheckAddPeer(c, rc.Check(region), 4)
 
 	// Add peer in store 4, and we have enough replicas.
-	peer4, _ := cluster.AllocPeer(4)
+	peer4, _ := tc.AllocPeer(4)
 	region.Peers = append(region.Peers, peer4)
 	c.Assert(rc.Check(region), IsNil)
 
 	// Add peer in store 3, and we have redundant replicas.
-	peer3, _ := cluster.AllocPeer(3)
+	peer3, _ := tc.AllocPeer(3)
 	region.Peers = append(region.Peers, peer3)
 	checkRemovePeer(c, rc.Check(region), 1)
 	region.RemoveStorePeer(1)
@@ -529,31 +525,30 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 }
 
 func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
-	cluster := newMockCluster(core.NewMockIDAllocator())
-	tc := cluster
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
+
 	tc.addRegionStore(1, 1)
 	tc.addRegionStore(2, 1)
-	_, opt := newTestScheduleConfig()
 
-	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
+	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	// now region peer in store 1,2,3.but we just have store 1,2
-	// This happens only in recovering the PD cluster
+	// This happens only in recovering the PD tc
 	// should not panic
 	tc.addLeaderRegion(1, 1, 2, 3)
-	region := cluster.GetRegion(1)
+	region := tc.GetRegion(1)
 	op := rc.Check(region)
 	c.Assert(op, IsNil)
 }
 
 func (s *testReplicaCheckerSuite) TestOffline(c *C) {
-	cluster := newMockCluster(core.NewMockIDAllocator())
-	tc := cluster
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
+	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	tc.addLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.addLabelsStore(2, 2, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
@@ -561,20 +556,20 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	tc.addLabelsStore(4, 4, map[string]string{"zone": "z3", "rack": "r2", "host": "h1"})
 
 	tc.addLeaderRegion(1, 1)
-	region := cluster.GetRegion(1)
+	region := tc.GetRegion(1)
 
 	// Store 2 has different zone and smallest region score.
 	CheckAddPeer(c, rc.Check(region), 2)
-	peer2, _ := cluster.AllocPeer(2)
+	peer2, _ := tc.AllocPeer(2)
 	region.Peers = append(region.Peers, peer2)
 
 	// Store 3 has different zone and smallest region score.
 	CheckAddPeer(c, rc.Check(region), 3)
-	peer3, _ := cluster.AllocPeer(3)
+	peer3, _ := tc.AllocPeer(3)
 	region.Peers = append(region.Peers, peer3)
 
 	// Store 4 has the same zone with store 3 and larger region score.
-	peer4, _ := cluster.AllocPeer(4)
+	peer4, _ := tc.AllocPeer(4)
 	region.Peers = append(region.Peers, peer4)
 	checkRemovePeer(c, rc.Check(region), 4)
 
@@ -602,13 +597,12 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 }
 
 func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
-	cluster := newMockCluster(core.NewMockIDAllocator())
-	tc := cluster
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
+	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	tc.addLabelsStore(1, 9, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.addLabelsStore(2, 8, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -617,7 +611,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	tc.addLeaderRegion(1, 1)
 	region := tc.GetRegion(1)
 	CheckAddPeer(c, rc.Check(region), 2)
-	peer2, _ := cluster.AllocPeer(2)
+	peer2, _ := tc.AllocPeer(2)
 	region.Peers = append(region.Peers, peer2)
 
 	// Store 1,2,3 have the same zone, rack, and host.
@@ -647,12 +641,12 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	CheckAddPeer(c, rc.Check(region), 7)
 
 	// Add peer to store 7.
-	peer7, _ := cluster.AllocPeer(7)
+	peer7, _ := tc.AllocPeer(7)
 	region.Peers = append(region.Peers, peer7)
 
 	// Replace peer in store 1 with store 6 because it has a different rack.
 	CheckTransferPeer(c, rc.Check(region), 1, 6)
-	peer6, _ := cluster.AllocPeer(6)
+	peer6, _ := tc.AllocPeer(6)
 	region.Peers = append(region.Peers, peer6)
 	checkRemovePeer(c, rc.Check(region), 1)
 	region.RemoveStorePeer(1)
@@ -674,7 +668,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	// So replace peer in store 2 with store 10.
 	tc.addLabelsStore(10, 1, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
 	CheckTransferPeer(c, rc.Check(region), 2, 10)
-	peer10, _ := cluster.AllocPeer(10)
+	peer10, _ := tc.AllocPeer(10)
 	region.Peers = append(region.Peers, peer10)
 	checkRemovePeer(c, rc.Check(region), 2)
 	region.RemoveStorePeer(2)
@@ -682,13 +676,12 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 }
 
 func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
-	cluster := newMockCluster(core.NewMockIDAllocator())
-	tc := cluster
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
 	newTestReplication(opt, 5, "zone", "host")
 
-	rc := schedule.NewReplicaChecker(opt, cluster, namespace.DefaultClassifier)
+	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	tc.addLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "h1"})
 	tc.addLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
@@ -698,14 +691,14 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	tc.addLabelsStore(6, 1, map[string]string{"zone": "z3", "host": "h1"})
 
 	tc.addLeaderRegion(1, 1, 2, 4)
-	region := cluster.GetRegion(1)
+	region := tc.GetRegion(1)
 
 	CheckAddPeer(c, rc.Check(region), 6)
-	peer6, _ := cluster.AllocPeer(6)
+	peer6, _ := tc.AllocPeer(6)
 	region.Peers = append(region.Peers, peer6)
 
 	CheckAddPeer(c, rc.Check(region), 5)
-	peer5, _ := cluster.AllocPeer(5)
+	peer5, _ := tc.AllocPeer(5)
 	region.Peers = append(region.Peers, peer5)
 
 	c.Assert(rc.Check(region), IsNil)
@@ -716,11 +709,10 @@ var _ = Suite(&testBalanceHotWriteRegionSchedulerSuite{})
 type testBalanceHotWriteRegionSchedulerSuite struct{}
 
 func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
-	cluster := newMockCluster(core.NewMockIDAllocator())
-	tc := cluster
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
-	hb, err := schedule.CreateScheduler("hot-write-region", opt, schedule.NewLimiter())
+	hb, err := schedule.CreateScheduler("hot-write-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
@@ -750,7 +742,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 
 	// Will transfer a hot region from store 1 to store 5, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
-	checkTransferPeerWithLeaderTransfer(c, hb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 1, 5)
+	checkTransferPeerWithLeaderTransfer(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 1, 5)
 
 	// After transfer a hot region from store 1 to store 5
 	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
@@ -769,7 +761,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 
 	// We can find that the leader of all hot regions are on store 1,
 	// so one of the leader will transfer to another store.
-	checkTransferLeaderFrom(c, hb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 1)
+	checkTransferLeaderFrom(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 1)
 }
 
 var _ = Suite(&testBalanceHotReadRegionSchedulerSuite{})
@@ -777,10 +769,9 @@ var _ = Suite(&testBalanceHotReadRegionSchedulerSuite{})
 type testBalanceHotReadRegionSchedulerSuite struct{}
 
 func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
-	cluster := newMockCluster(core.NewMockIDAllocator())
-	tc := cluster
-	_, opt := newTestScheduleConfig()
-	hb, err := schedule.CreateScheduler("hot-read-region", opt, schedule.NewLimiter())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
+	hb, err := schedule.CreateScheduler("hot-read-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
@@ -810,7 +801,7 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 
 	// Will transfer a hot region leader from store 1 to store 3, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
-	CheckTransferLeader(c, hb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 1, 3)
+	CheckTransferLeader(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 1, 3)
 	// assume handle the operator
 	tc.addLeaderRegionWithReadInfo(3, 3, 512*1024*schedule.RegionHeartBeatReportInterval, 1, 2)
 
@@ -826,7 +817,7 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 
 	// Now appear two read hot region in store 1 and 4
 	// We will Transfer peer from 1 to 5
-	checkTransferPeerWithLeaderTransfer(c, hb.Schedule(cluster, schedule.NewOpInfluence(nil, cluster)), 1, 5)
+	checkTransferPeerWithLeaderTransfer(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 1, 5)
 }
 
 func checkRemovePeer(c *C, op *schedule.Operator, storeID uint64) {

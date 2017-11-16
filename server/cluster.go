@@ -106,7 +106,7 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 
-	cluster, err := loadClusterInfo(c.s.idAlloc, c.s.kv)
+	cluster, err := loadClusterInfo(c.s.idAlloc, c.s.kv, c.s.scheduleOpt)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -114,7 +114,7 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 	c.cachedCluster = cluster
-	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt, c.s.hbStreams, c.s.classifier)
+	c.coordinator = newCoordinator(c.cachedCluster, c.s.hbStreams, c.s.classifier)
 	c.quit = make(chan struct{})
 
 	c.wg.Add(2)
@@ -600,7 +600,7 @@ func (c *RaftCluster) storeIsEmpty(storeID uint64) bool {
 
 func (c *RaftCluster) collectMetrics() {
 	cluster := c.cachedCluster
-	statsMap := newStoreStatisticsMap(c.coordinator.opt, c.GetNamespaceClassifier())
+	statsMap := newStoreStatisticsMap(c.cachedCluster.opt, c.GetNamespaceClassifier())
 	for _, s := range cluster.GetStores() {
 		statsMap.Observe(s)
 	}
