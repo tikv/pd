@@ -26,6 +26,7 @@ import (
 // NodeState node's state
 type NodeState int
 
+// some state
 const (
 	Up NodeState = iota
 	Down
@@ -125,6 +126,7 @@ func (n *Node) Tick() {
 	n.tick++
 }
 
+// GetState returns current node state
 func (n *Node) GetState() NodeState {
 	return n.state
 }
@@ -154,6 +156,9 @@ func (n *Node) stepHeartBeat() {
 }
 
 func (n *Node) storeHeartBeat() {
+	if n.state != Up {
+		return
+	}
 	ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 	err := n.client.StoreHeartbeat(ctx, n.stats)
 	if err != nil {
@@ -165,7 +170,7 @@ func (n *Node) storeHeartBeat() {
 func (n *Node) regionHeartBeat() {
 	regions := n.clusterInfo.GetRegions()
 	for _, region := range regions {
-		if region.Leader.GetStoreId() == n.Id {
+		if region.Leade != nil && region.Leader.GetStoreId() == n.Id {
 			ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 			err := n.client.RegionHeartbeat(ctx, region)
 			if err != nil {
