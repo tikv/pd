@@ -15,6 +15,7 @@ package server
 
 import (
 	"math/rand"
+	"time"
 
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
@@ -131,4 +132,44 @@ func scheduleByNamespace(cluster schedule.Cluster, classifier namespace.Classifi
 		}
 	}
 	return nil
+}
+
+func (c *namespaceCluster) GetLeaderScheduleLimit() uint64 {
+	return c.Cluster.(*clusterInfo).opt.GetLeaderScheduleLimit(c.namespace)
+}
+
+func (c *namespaceCluster) GetRegionScheduleLimit() uint64 {
+	return c.Cluster.(*clusterInfo).opt.GetRegionScheduleLimit(c.namespace)
+}
+
+func (c *namespaceCluster) GetReplicaScheduleLimit() uint64 {
+	return c.Cluster.(*clusterInfo).opt.GetReplicaScheduleLimit(c.namespace)
+}
+
+func (c *namespaceCluster) GetTolerantSizeRatio() float64 {
+	return c.Cluster.GetTolerantSizeRatio()
+}
+
+func (c *namespaceCluster) GetMaxSnapshotCount() uint64 {
+	return c.Cluster.GetMaxSnapshotCount()
+}
+
+func (c *namespaceCluster) GetMaxPendingPeerCount() uint64 {
+	return c.Cluster.GetMaxPendingPeerCount()
+}
+
+func (c *namespaceCluster) GetMaxStoreDownTime() time.Duration {
+	return c.Cluster.GetMaxStoreDownTime()
+}
+
+func (c *namespaceCluster) GetMaxReplicas() int {
+	return c.Cluster.(*clusterInfo).opt.GetMaxReplicas(c.namespace)
+}
+
+func (c *namespaceCluster) GetLocationLabels() []string {
+	return c.Cluster.GetLocationLabels()
+}
+
+func (c *namespaceCluster) GetHotRegionLowThreshold() int {
+	return c.Cluster.GetHotRegionLowThreshold()
 }

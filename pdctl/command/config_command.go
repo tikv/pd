@@ -24,9 +24,10 @@ import (
 )
 
 var (
-	configPrefix    = "pd/api/v1/config"
-	schedulePrefix  = "pd/api/v1/config/schedule"
-	replicatePrefix = "pd/api/v1/config/replicate"
+	configPrefix      = "pd/api/v1/config"
+	schedulePrefix    = "pd/api/v1/config/schedule"
+	replicationPrefix = "pd/api/v1/config/replicate"
+	namespacePrefix   = "pd/api/v1/config/namespace/%s"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
@@ -43,11 +44,23 @@ func NewConfigCommand() *cobra.Command {
 // NewShowConfigCommand return a show subcommand of configCmd
 func NewShowConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "show",
-		Short: "show config of PD",
+		Use:   "show [namespace|replication|all]",
+		Short: "show schedule config of PD",
 		Run:   showConfigCommandFunc,
 	}
 	sc.AddCommand(NewShowAllConfigCommand())
+	sc.AddCommand(NewShowNamespaceConfigCommand())
+	sc.AddCommand(NewShowReplicationConfigCommand())
+	return sc
+}
+
+// NewShowNamespaceConfigCommand return a show all subcommand of show subcommand
+func NewShowNamespaceConfigCommand() *cobra.Command {
+	sc := &cobra.Command{
+		Use:   "namespace <name>",
+		Short: "show namespace config of PD",
+		Run:   showNamespaceConfigCommandFunc,
+	}
 	return sc
 }
 
@@ -61,12 +74,33 @@ func NewShowAllConfigCommand() *cobra.Command {
 	return sc
 }
 
+// NewShowReplicationConfigCommand return a show all subcommand of show subcommand
+func NewShowReplicationConfigCommand() *cobra.Command {
+	sc := &cobra.Command{
+		Use:   "replication",
+		Short: "show replication config of PD",
+		Run:   showReplicationConfigCommandFunc,
+	}
+	return sc
+}
+
 // NewSetConfigCommand return a set subcommand of configCmd
 func NewSetConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "set <option> <value>",
+		Use:   "set [namespace <name>] <option> <value> ",
 		Short: "set the option with value",
 		Run:   setConfigCommandFunc,
+	}
+	sc.AddCommand(NewSetNamespaceConfigCommand())
+	return sc
+}
+
+// NewSetNamespaceConfigCommand a set subcommand of set subcommand
+func NewSetNamespaceConfigCommand() *cobra.Command {
+	sc := &cobra.Command{
+		Use:   "namespace <name> <option> <value>",
+		Short: "show namespace config of PD",
+		Run:   setNamespaceConfigCommandFunc,
 	}
 	return sc
 }
@@ -80,8 +114,31 @@ func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 	fmt.Println(r)
 }
 
+func showReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {
+	r, err := doRequest(cmd, replicationPrefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get config: %s\n", err)
+		return
+	}
+	fmt.Println(r)
+}
+
 func showAllConfigCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, configPrefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get config: %s\n", err)
+		return
+	}
+	fmt.Println(r)
+}
+
+func showNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+	prefix := fmt.Sprintf(namespacePrefix, args[0])
+	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get config: %s\n", err)
 		return
@@ -118,6 +175,21 @@ func setConfigCommandFunc(cmd *cobra.Command, args []string) {
 	err := postConfigDataWithPath(cmd, opt, val, configPrefix)
 	if err != nil {
 		fmt.Printf("Failed to set config: %s\n", err)
+		return
+	}
+	fmt.Println("Success!")
+}
+
+func setNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 3 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+	name, opt, val := args[0], args[1], args[2]
+	prefix := fmt.Sprintf(namespacePrefix, name)
+	err := postConfigDataWithPath(cmd, opt, val, prefix)
+	if err != nil {
+		fmt.Printf("Failed to set namespace:%s config: %s\n", name, err)
 		return
 	}
 	fmt.Println("Success!")

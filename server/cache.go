@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 )
 
@@ -450,15 +451,15 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 }
 
 func (c *clusterInfo) GetLeaderScheduleLimit() uint64 {
-	return c.opt.GetLeaderScheduleLimit()
+	return c.opt.GetLeaderScheduleLimit(namespace.DefaultNamespace)
 }
 
 func (c *clusterInfo) GetRegionScheduleLimit() uint64 {
-	return c.opt.GetRegionScheduleLimit()
+	return c.opt.GetRegionScheduleLimit(namespace.DefaultNamespace)
 }
 
 func (c *clusterInfo) GetReplicaScheduleLimit() uint64 {
-	return c.opt.GetReplicaScheduleLimit()
+	return c.opt.GetReplicaScheduleLimit(namespace.DefaultNamespace)
 }
 
 func (c *clusterInfo) GetTolerantSizeRatio() float64 {
@@ -478,7 +479,7 @@ func (c *clusterInfo) GetMaxStoreDownTime() time.Duration {
 }
 
 func (c *clusterInfo) GetMaxReplicas() int {
-	return c.opt.GetMaxReplicas()
+	return c.opt.GetMaxReplicas(namespace.DefaultNamespace)
 }
 
 func (c *clusterInfo) GetLocationLabels() []string {

@@ -22,6 +22,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/pd/server/namespace"
+
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/etcd/embed"
 	"github.com/juju/errors"
@@ -74,6 +76,8 @@ type Config struct {
 
 	Replication ReplicationConfig `toml:"replication" json:"replication"`
 
+	Namespace map[string]NamespaceConfig `json:"name"`
+
 	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
 	// the default size is 2GB, the maximum is 8GB.
 	QuotaBackendBytes typeutil.ByteSize `toml:"quota-backend-bytes" json:"quota-backend-bytes"`
@@ -124,6 +128,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.BoolVar(&cfg.Log.File.LogRotate, "log-rotate", true, "rotate log")
 	fs.StringVar(&cfg.NamespaceClassifier, "namespace-classifier", "default", "namespace classifier (default 'default')")
+	cfg.Namespace = make(map[string]NamespaceConfig)
 
 	return cfg
 }
@@ -398,15 +403,87 @@ func (c *ReplicationConfig) adjust() {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 }
 
+// NamespaceConfig is to cover the global setting for specific namespace
+type NamespaceConfig struct {
+	// LeaderScheduleLimit is the max coexist leader schedules.
+	LeaderScheduleLimit uint64 `json:"leader-schedule-limit"`
+	// RegionScheduleLimit is the max coexist region schedules.
+	RegionScheduleLimit uint64 `json:"region-schedule-limit"`
+	// ReplicaScheduleLimit is the max coexist replica schedules.
+	ReplicaScheduleLimit uint64 `json:"replica-schedule-limit"`
+	// MaxReplicas is the number of replicas for each region.
+	MaxReplicas uint64 `json:"max-replicas"`
+}
+
+func (c *NamespaceConfig) clone() *NamespaceConfig {
+	return &NamespaceConfig{
+		LeaderScheduleLimit:  c.LeaderScheduleLimit,
+		RegionScheduleLimit:  c.RegionScheduleLimit,
+		ReplicaScheduleLimit: c.ReplicaScheduleLimit,
+		MaxReplicas:          c.MaxReplicas,
+	}
+}
+
+func (c *NamespaceConfig) adjust(opt *scheduleOption) {
+	adjustUint64(&c.LeaderScheduleLimit, opt.GetLeaderScheduleLimit(namespace.DefaultNamespace))
+	adjustUint64(&c.RegionScheduleLimit, opt.GetRegionScheduleLimit(namespace.DefaultNamespace))
+	adjustUint64(&c.ReplicaScheduleLimit, opt.GetReplicaScheduleLimit(namespace.DefaultNamespace))
+	adjustUint64(&c.MaxReplicas, uint64(opt.GetMaxReplicas(namespace.DefaultNamespace)))
+}
+
 // scheduleOption is a wrapper to access the configuration safely.
 type scheduleOption struct {
 	v   atomic.Value
 	rep *Replication
+	ns  map[string]*namespaceOption
+}
+
+type namespaceOption struct {
+	namespaceCfg atomic.Value
+}
+
+func newNamespaceOption(cfg *NamespaceConfig) *namespaceOption {
+	n := &namespaceOption{}
+	n.store(cfg)
+	return n
+}
+
+func (n *namespaceOption) load() *NamespaceConfig {
+	return n.namespaceCfg.Load().(*NamespaceConfig)
+}
+
+func (n *namespaceOption) store(cfg *NamespaceConfig) {
+	n.namespaceCfg.Store(cfg)
+}
+
+// GetMaxReplicas returns the number of replicas for each region.
+func (n *namespaceOption) GetMaxReplicas() int {
+	return int(n.load().MaxReplicas)
+}
+
+// GetLeaderScheduleLimit returns the number of replicas for each region.
+func (n *namespaceOption) GetLeaderScheduleLimit() uint64 {
+	return n.load().LeaderScheduleLimit
+}
+
+// GetRegionScheduleLimit returns the number of replicas for each region.
+func (n *namespaceOption) GetRegionScheduleLimit() uint64 {
+	return n.load().RegionScheduleLimit
+}
+
+// GetReplicaScheduleLimit returns the number of replicas for each region.
+func (n *namespaceOption) GetReplicaScheduleLimit() uint64 {
+	return n.load().ReplicaScheduleLimit
 }
 
 func newScheduleOption(cfg *Config) *scheduleOption {
 	o := &scheduleOption{}
 	o.store(&cfg.Schedule)
+	o.ns = make(map[string]*namespaceOption)
+	for name, nsCfg := range cfg.Namespace {
+		nsCfg := nsCfg
+		o.ns[name] = newNamespaceOption(&nsCfg)
+	}
 	o.rep = newReplication(&cfg.Replication)
 	return o
 }
@@ -423,16 +500,22 @@ func (o *scheduleOption) GetReplication() *Replication {
 	return o.rep
 }
 
-func (o *scheduleOption) GetMaxReplicas() int {
-	return o.rep.GetMaxReplicas()
-}
-
-func (o *scheduleOption) GetLocationLabels() []string {
-	return o.rep.GetLocationLabels()
+func (o *scheduleOption) GetMaxReplicas(name string) int {
+	if name == namespace.DefaultNamespace {
+		return o.rep.GetMaxReplicas()
+	}
+	if n, ok := o.ns[name]; ok {
+		return n.GetMaxReplicas()
+	}
+	return 0
 }
 
 func (o *scheduleOption) SetMaxReplicas(replicas int) {
 	o.rep.SetMaxReplicas(replicas)
+}
+
+func (o *scheduleOption) GetLocationLabels() []string {
+	return o.rep.GetLocationLabels()
 }
 
 func (o *scheduleOption) GetMaxSnapshotCount() uint64 {
@@ -447,16 +530,34 @@ func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
 	return o.load().MaxStoreDownTime.Duration
 }
 
-func (o *scheduleOption) GetLeaderScheduleLimit() uint64 {
-	return o.load().LeaderScheduleLimit
+func (o *scheduleOption) GetLeaderScheduleLimit(name string) uint64 {
+	if name == namespace.DefaultNamespace {
+		return o.load().LeaderScheduleLimit
+	}
+	if n, ok := o.ns[name]; ok {
+		return n.GetLeaderScheduleLimit()
+	}
+	return 0
 }
 
-func (o *scheduleOption) GetRegionScheduleLimit() uint64 {
-	return o.load().RegionScheduleLimit
+func (o *scheduleOption) GetRegionScheduleLimit(name string) uint64 {
+	if name == namespace.DefaultNamespace {
+		return o.load().RegionScheduleLimit
+	}
+	if n, ok := o.ns[name]; ok {
+		return n.GetRegionScheduleLimit()
+	}
+	return 0
 }
 
-func (o *scheduleOption) GetReplicaScheduleLimit() uint64 {
-	return o.load().ReplicaScheduleLimit
+func (o *scheduleOption) GetReplicaScheduleLimit(name string) uint64 {
+	if name == namespace.DefaultNamespace {
+		return o.load().ReplicaScheduleLimit
+	}
+	if n, ok := o.ns[name]; ok {
+		return n.GetReplicaScheduleLimit()
+	}
+	return 0
 }
 
 func (o *scheduleOption) GetTolerantSizeRatio() float64 {
@@ -502,18 +603,28 @@ func (o *scheduleOption) RemoveSchedulerCfg(name string) error {
 }
 
 func (o *scheduleOption) persist(kv *core.KV) error {
+	namespaces := make(map[string]NamespaceConfig)
+	for name, ns := range o.ns {
+		namespaces[name] = *ns.load()
+	}
 	cfg := &Config{
 		Schedule:    *o.load(),
 		Replication: *o.rep.load(),
+		Namespace:   namespaces,
 	}
 	err := kv.SaveConfig(cfg)
 	return errors.Trace(err)
 }
 
 func (o *scheduleOption) reload(kv *core.KV) error {
+	namespaces := make(map[string]NamespaceConfig)
+	for name, ns := range o.ns {
+		namespaces[name] = *ns.load()
+	}
 	cfg := &Config{
 		Schedule:    *o.load(),
 		Replication: *o.rep.load(),
+		Namespace:   namespaces,
 	}
 	isExist, err := kv.LoadConfig(cfg)
 	if err != nil {
@@ -522,6 +633,10 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 	if isExist {
 		o.store(&cfg.Schedule)
 		o.rep.store(&cfg.Replication)
+		for name, nsCfg := range cfg.Namespace {
+			nsCfg := nsCfg
+			o.ns[name] = newNamespaceOption(&nsCfg)
+		}
 	}
 	return nil
 }
