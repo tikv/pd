@@ -36,7 +36,7 @@ endif
 
 test:
 	# testing..
-	@GOPATH=$(VENDOR) ENABLE_CGO=1 go test -race -cover $(TEST_PKGS)
+	@GOPATH=$(VENDOR) CGO_ENABLED=1 go test -race -cover $(TEST_PKGS)
 
 check:
 	go get github.com/golang/lint/golint
