@@ -20,14 +20,14 @@ import (
 	log "github.com/Sirupsen/logrus"
 )
 
-// Driver promotes the cluster status change
+// Driver promotes the cluster status change.
 type Driver struct {
 	clusterInfo *ClusterInfo
 	addr        string
 	client      Client
 }
 
-// NewDriver returns a driver
+// NewDriver returns a driver.
 func NewDriver(addr string) *Driver {
 	return &Driver{addr: addr}
 }
@@ -58,21 +58,21 @@ func (c *Driver) Prepare() error {
 	return nil
 }
 
-// Tick invokes nodes' Tick
+// Tick invokes nodes' Tick.
 func (c *Driver) Tick() {
 	for _, n := range c.clusterInfo.Nodes {
 		n.Tick()
 	}
 }
 
-// Stop stops all nodes
+// Stop stops all nodes.
 func (c *Driver) Stop() {
 	for _, n := range c.clusterInfo.Nodes {
 		n.Stop()
 	}
 }
 
-// AddNode will add new node
+// AddNode adds new node.
 func (c *Driver) AddNode() {
 	id, err := c.client.AllocID(context.Background())
 	n, err := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), c.addr)
@@ -89,7 +89,5 @@ func (c *Driver) AddNode() {
 	c.clusterInfo.Nodes[n.Id] = n
 }
 
-// DeleteNode will delete a node
-func (c *Driver) DeleteNode() {
-
-}
+// DeleteNode deletes a node.
+func (c *Driver) DeleteNode() {}

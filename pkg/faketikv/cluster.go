@@ -19,14 +19,14 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
-// ClusterInfo records all cluster information
+// ClusterInfo records all cluster information.
 type ClusterInfo struct {
 	*core.RegionsInfo
 	Nodes       map[uint64]*Node
 	firstRegion *core.RegionInfo
 }
 
-// GetBootstrapInfo returns first region and it's leader store
+// GetBootstrapInfo returns first region and its leader store.
 func (c *ClusterInfo) GetBootstrapInfo() (*metapb.Store, *metapb.Region) {
 	storeID := c.firstRegion.Leader.GetStoreId()
 	store := c.Nodes[storeID]
@@ -70,14 +70,13 @@ func (c *ClusterInfo) stepLeader(region *core.RegionInfo) {
 		return
 	}
 	newLeader := c.electNewLeader(region)
+	region.Leader = newLeader
+	c.SetRegion(region)
 	if newLeader == nil {
-		c.SetRegion(region)
 		log.Infof("[region %d] no leader", region.GetId())
 		return
 	}
-
 	log.Info("[region %d] elect new leader: %+v,old leader: %+v", region.GetId(), newLeader, region.Leader)
-	c.SetRegion(region)
 	c.reportRegionChange(region.GetId())
 }
 
@@ -95,8 +94,10 @@ func (c *ClusterInfo) stepRegions() {
 	}
 }
 
-// AddTask adds task in specify node
+// AddTask adds task in specify node.
 func (c *ClusterInfo) AddTask(task Task) {
 	storeID := task.TargetStoreID()
-	c.Nodes[storeID].AddTask(task)
+	if n, ok := c.Nodes[storeID]; ok {
+		n.AddTask(task)
+	}
 }

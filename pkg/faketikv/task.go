@@ -20,7 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-// Task running in node
+// Task running in node.
 type Task interface {
 	Desc() string
 	RegionID() uint64

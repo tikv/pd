@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-// NodeState node's state
+// NodeState node's state.
 type NodeState int
 
 // some state
@@ -31,9 +31,10 @@ const (
 	Up NodeState = iota
 	Down
 	LossConnect
+	Block
 )
 
-// Node simulates a TiKV
+// Node simulates a TiKV.
 type Node struct {
 	*metapb.Store
 	sync.RWMutex
@@ -47,13 +48,12 @@ type Node struct {
 	reciveRegionHeartbeatCh <-chan *pdpb.RegionHeartbeatResponse
 	ctx                     context.Context
 	cancel                  context.CancelFunc
-	isBlock                 bool
 	state                   NodeState
 	// share cluster information
 	clusterInfo *ClusterInfo
 }
 
-// NewNode returns a Node
+// NewNode returns a Node.
 func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	store := &metapb.Store{
@@ -73,19 +73,18 @@ func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
 		return nil, err
 	}
 	return &Node{
-		Store:   store,
-		stats:   stats,
-		client:  client,
-		ctx:     ctx,
-		cancel:  cancel,
-		isBlock: true,
-		tasks:   make(map[uint64]Task),
-		state:   Up,
+		Store:  store,
+		stats:  stats,
+		client: client,
+		ctx:    ctx,
+		cancel: cancel,
+		tasks:  make(map[uint64]Task),
+		state:  Down,
 		reciveRegionHeartbeatCh: reciveRegionHeartbeatCh,
 	}, nil
 }
 
-// Start starts the node
+// Start starts the node.
 func (n *Node) Start() error {
 	ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 	err := n.client.PutStore(ctx, n.Store)
@@ -95,7 +94,7 @@ func (n *Node) Start() error {
 	}
 	n.wg.Add(1)
 	go n.reciveRegionHeartbeat()
-	n.isBlock = false
+	n.state = Up
 	return nil
 }
 
@@ -114,9 +113,9 @@ func (n *Node) reciveRegionHeartbeat() {
 	}
 }
 
-// Tick steps node status change
+// Tick steps node status change.
 func (n *Node) Tick() {
-	if n.isBlock {
+	if n.state != Up {
 		return
 	}
 	n.stepHeartBeat()
@@ -126,7 +125,7 @@ func (n *Node) Tick() {
 	n.tick++
 }
 
-// GetState returns current node state
+// GetState returns current node state.
 func (n *Node) GetState() NodeState {
 	return n.state
 }
@@ -193,7 +192,7 @@ func (n *Node) reportRegionChange(regionID uint64) {
 	}
 }
 
-// AddTask adds task in this node
+// AddTask adds task in this node.
 func (n *Node) AddTask(task Task) {
 	n.Lock()
 	defer n.Unlock()
@@ -204,7 +203,7 @@ func (n *Node) AddTask(task Task) {
 	n.tasks[task.RegionID()] = task
 }
 
-// Stop stops this node
+// Stop stops this node.
 func (n *Node) Stop() {
 	n.cancel()
 	n.client.Close()
