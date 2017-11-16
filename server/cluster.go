@@ -172,8 +172,8 @@ func (s *Server) GetScheduleConfig() *ScheduleConfig {
 func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
 	s.scheduleOpt.store(&cfg)
 	s.scheduleOpt.persist(s.kv)
-	s.cfg.Schedule = cfg
 	log.Infof("schedule config is updated: %+v, old: %+v", cfg, s.cfg.Schedule)
+	s.cfg.Schedule = cfg
 }
 
 // GetReplicationConfig get the replication config
@@ -187,8 +187,8 @@ func (s *Server) GetReplicationConfig() *ReplicationConfig {
 func (s *Server) SetReplicationConfig(cfg ReplicationConfig) {
 	s.scheduleOpt.rep.store(&cfg)
 	s.scheduleOpt.persist(s.kv)
+	log.Infof("replication config is updated: %+v, old: %+v", cfg, s.cfg.Replication)
 	s.cfg.Replication = cfg
-	log.Infof("replication is updated: %+v, old: %+v", cfg, s.cfg.Replication)
 }
 
 func (s *Server) getClusterRootPath() string {

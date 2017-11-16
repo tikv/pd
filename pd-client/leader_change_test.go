@@ -96,7 +96,7 @@ func (s *testLeaderChangeSuite) TestLeaderConfigChange(c *C) {
 		if newLeader != leader {
 			s.verifyLeader(c, cli.(*client), newLeader)
 			changed = true
-			nr := svrs[newLeader].GetConfig().Replication.MaxReplicas
+			nr := svrs[newLeader].GetReplicationConfig().MaxReplicas
 			c.Assert(nr, Equals, uint64(5))
 			break
 		}
