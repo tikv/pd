@@ -32,7 +32,7 @@ func NewDriver(addr string) *Driver {
 	return &Driver{addr: addr}
 }
 
-// Prepare will initialize cluster information, bootstraps cluster and starts nodes.
+// Prepare initializes cluster information, bootstraps cluster and starts nodes.
 func (c *Driver) Prepare() error {
 	initCase := NewTiltCase()
 	// TODO: initialize accoring config
@@ -78,10 +78,12 @@ func (c *Driver) AddNode() {
 	n, err := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), c.addr)
 	if err != nil {
 		log.Info("Add node failed:", err)
+		return
 	}
 	err = n.Start()
 	if err != nil {
 		log.Info("Start node failed:", err)
+		return
 	}
 	n.clusterInfo = c.clusterInfo
 	c.clusterInfo.Nodes[n.Id] = n

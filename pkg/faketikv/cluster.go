@@ -38,39 +38,45 @@ func (c *ClusterInfo) nodeHealth(storeID uint64) bool {
 	if !ok {
 		return false
 	}
-	return n.Store.GetState() == metapb.StoreState_Up
+	return n.Store.GetState() == Up
 }
 
-func (c *ClusterInfo) stepLeader(region *core.RegionInfo) {
-	if c.nodeHealth(region.Leader.GetStoreId()) {
-		return
-	}
+func (c ClusterInfo) electNewLeader(region *core.RegionInfo) *metapb.Peer {
 	var (
-		newLeaderStoreID uint64
 		unhealth         int
+		newLeaderStoreID uint64
 	)
-
 	ids := region.GetStoreIds()
 	for id := range ids {
 		if c.nodeHealth(id) {
 			newLeaderStoreID = id
-			break
 		} else {
 			unhealth++
 		}
 	}
-	// TODO:records no leader region
 	if unhealth > len(ids)/2 {
-		return
+		return nil
 	}
 	for _, peer := range region.Peers {
 		if peer.GetStoreId() == newLeaderStoreID {
-			log.Info("[region %d]elect new leader: %+v,old leader: %+v", region.GetId(), peer, region.Leader)
-			region.Leader = peer
-			region.RegionEpoch.ConfVer++
-			break
+			return peer
 		}
 	}
+
+}
+
+func (c *ClusterInfo) stepLeader(region *core.RegionInfo) {
+	if region.Leader != nil && c.nodeHealth(region.Leader.GetStoreId()) {
+		return
+	}
+	newLeader := c.electNewLeader(region)
+	if newLeader == nil {
+		c.SetRegion(region)
+		log.Infof("[region %d] no leader", region.GetId())
+		return
+	}
+
+	log.Info("[region %d] elect new leader: %+v,old leader: %+v", region.GetId(), newLeader, region.Leader)
 	c.SetRegion(region)
 	c.reportRegionChange(region.GetId())
 }

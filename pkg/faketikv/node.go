@@ -23,7 +23,16 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-// Node means a TiKV
+// NodeState node's state
+type NodeState int
+
+const (
+	Up NodeState = iota
+	Down
+	LossConnect
+)
+
+// Node simulates a TiKV
 type Node struct {
 	*metapb.Store
 	sync.RWMutex
@@ -38,6 +47,7 @@ type Node struct {
 	ctx                     context.Context
 	cancel                  context.CancelFunc
 	isBlock                 bool
+	state                   NodeState
 	// share cluster information
 	clusterInfo *ClusterInfo
 }
@@ -69,6 +79,7 @@ func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
 		cancel:  cancel,
 		isBlock: true,
 		tasks:   make(map[uint64]Task),
+		state:   Up,
 		reciveRegionHeartbeatCh: reciveRegionHeartbeatCh,
 	}, nil
 }
@@ -112,6 +123,10 @@ func (n *Node) Tick() {
 	// step regions will step region status. like elect a leader, split region and so on.
 	n.clusterInfo.stepRegions()
 	n.tick++
+}
+
+func (n *Node) GetState() NodeState {
+	return n.state
 }
 
 func (n *Node) stepTask() {
