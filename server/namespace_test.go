@@ -216,6 +216,20 @@ func (c *mapClassifer) GetAllNamespaces() []string {
 	return nss
 }
 
+func (c *mapClassifer) IsNamespaceExist(name string) bool {
+	for _, ns := range c.stores {
+		if ns == name {
+			return true
+		}
+	}
+	for _, ns := range c.regions {
+		if ns == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *mapClassifer) setStore(id uint64, namespace string) {
 	c.stores[id] = namespace
 }

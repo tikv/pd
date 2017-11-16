@@ -450,6 +450,10 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	return nil
 }
 
+func (c *clusterInfo) GetOpt() schedule.NamespaceOptions {
+	return c.opt
+}
+
 func (c *clusterInfo) GetLeaderScheduleLimit() uint64 {
 	return c.opt.GetLeaderScheduleLimit(namespace.DefaultNamespace)
 }

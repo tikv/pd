@@ -76,7 +76,7 @@ type Config struct {
 
 	Replication ReplicationConfig `toml:"replication" json:"replication"`
 
-	Namespace map[string]NamespaceConfig `json:"name"`
+	Namespace map[string]NamespaceConfig `json:"namespace"`
 
 	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
 	// the default size is 2GB, the maximum is 8GB.
@@ -461,9 +461,19 @@ func (n *namespaceOption) GetMaxReplicas() int {
 	return int(n.load().MaxReplicas)
 }
 
+// IsMaxReplicasValid returns the validation of field
+func (n *namespaceOption) IsMaxReplicasValid() bool {
+	return n.GetMaxReplicas() != 0
+}
+
 // GetLeaderScheduleLimit returns the number of replicas for each region.
 func (n *namespaceOption) GetLeaderScheduleLimit() uint64 {
 	return n.load().LeaderScheduleLimit
+}
+
+// IsLeaderScheduleLimitValid returns the validation of field
+func (n *namespaceOption) IsLeaderScheduleLimitValid() bool {
+	return n.GetLeaderScheduleLimit() != 0
 }
 
 // GetRegionScheduleLimit returns the number of replicas for each region.
@@ -471,9 +481,19 @@ func (n *namespaceOption) GetRegionScheduleLimit() uint64 {
 	return n.load().RegionScheduleLimit
 }
 
+// IsRegionScheduleLimitValid returns the validation of field
+func (n *namespaceOption) IsRegionScheduleLimitValid() bool {
+	return n.GetRegionScheduleLimit() != 0
+}
+
 // GetReplicaScheduleLimit returns the number of replicas for each region.
 func (n *namespaceOption) GetReplicaScheduleLimit() uint64 {
 	return n.load().ReplicaScheduleLimit
+}
+
+// IsReplicaScheduleLimitValid returns the validation of field
+func (n *namespaceOption) IsReplicaScheduleLimitValid() bool {
+	return n.GetReplicaScheduleLimit() != 0
 }
 
 func newScheduleOption(cfg *Config) *scheduleOption {
@@ -501,13 +521,10 @@ func (o *scheduleOption) GetReplication() *Replication {
 }
 
 func (o *scheduleOption) GetMaxReplicas(name string) int {
-	if name == namespace.DefaultNamespace {
-		return o.rep.GetMaxReplicas()
-	}
-	if n, ok := o.ns[name]; ok {
+	if n, ok := o.ns[name]; ok && n.IsMaxReplicasValid() {
 		return n.GetMaxReplicas()
 	}
-	return 0
+	return o.rep.GetMaxReplicas()
 }
 
 func (o *scheduleOption) SetMaxReplicas(replicas int) {
@@ -531,33 +548,24 @@ func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
 }
 
 func (o *scheduleOption) GetLeaderScheduleLimit(name string) uint64 {
-	if name == namespace.DefaultNamespace {
-		return o.load().LeaderScheduleLimit
-	}
-	if n, ok := o.ns[name]; ok {
+	if n, ok := o.ns[name]; ok && n.IsLeaderScheduleLimitValid() {
 		return n.GetLeaderScheduleLimit()
 	}
-	return 0
+	return o.load().LeaderScheduleLimit
 }
 
 func (o *scheduleOption) GetRegionScheduleLimit(name string) uint64 {
-	if name == namespace.DefaultNamespace {
-		return o.load().RegionScheduleLimit
-	}
-	if n, ok := o.ns[name]; ok {
+	if n, ok := o.ns[name]; ok && n.IsRegionScheduleLimitValid() {
 		return n.GetRegionScheduleLimit()
 	}
-	return 0
+	return o.load().RegionScheduleLimit
 }
 
 func (o *scheduleOption) GetReplicaScheduleLimit(name string) uint64 {
-	if name == namespace.DefaultNamespace {
-		return o.load().ReplicaScheduleLimit
-	}
-	if n, ok := o.ns[name]; ok {
+	if n, ok := o.ns[name]; ok && n.IsReplicaScheduleLimitValid() {
 		return n.GetReplicaScheduleLimit()
 	}
-	return 0
+	return o.load().ReplicaScheduleLimit
 }
 
 func (o *scheduleOption) GetTolerantSizeRatio() float64 {
