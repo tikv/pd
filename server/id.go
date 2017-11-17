@@ -14,7 +14,6 @@
 package server
 
 import (
-	"path"
 	"sync"
 
 	log "github.com/Sirupsen/logrus"
@@ -90,8 +89,4 @@ func (alloc *idAllocator) generate() (uint64, error) {
 
 	log.Infof("idAllocator allocates a new id: %d", end)
 	return end, nil
-}
-
-func (s *Server) getAllocIDPath() string {
-	return path.Join(s.rootPath, "alloc_id")
 }
