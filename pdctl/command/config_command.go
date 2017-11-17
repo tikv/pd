@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -27,7 +28,7 @@ var (
 	configPrefix      = "pd/api/v1/config"
 	schedulePrefix    = "pd/api/v1/config/schedule"
 	replicationPrefix = "pd/api/v1/config/replicate"
-	namespacePrefix   = "pd/api/v1/config/namespace/%s"
+	namespacePrefix   = "pd/api/v1/config/namespace"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
@@ -137,7 +138,7 @@ func showNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println(cmd.UsageString())
 		return
 	}
-	prefix := fmt.Sprintf(namespacePrefix, args[0])
+	prefix := path.Join(namespacePrefix, args[0])
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get config: %s\n", err)
@@ -186,7 +187,7 @@ func setNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	name, opt, val := args[0], args[1], args[2]
-	prefix := fmt.Sprintf(namespacePrefix, name)
+	prefix := path.Join(namespacePrefix, name)
 	err := postConfigDataWithPath(cmd, opt, val, prefix)
 	if err != nil {
 		fmt.Printf("Failed to set namespace:%s config: %s\n", name, err)
