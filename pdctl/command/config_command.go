@@ -43,8 +43,8 @@ func NewConfigCommand() *cobra.Command {
 // NewShowConfigCommand return a show subcommand of configCmd
 func NewShowConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "show",
-		Short: "show config of PD",
+		Use:   "show [all]",
+		Short: "show schedule config of PD",
 		Run:   showConfigCommandFunc,
 	}
 	sc.AddCommand(NewShowAllConfigCommand())
