@@ -20,7 +20,6 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
-	"github.com/coreos/etcd/clientv3"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -106,7 +105,7 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 
-	cluster, err := loadClusterInfo(c.s.idAlloc, c.s.kv)
+	cluster, err := loadClusterInfo(c.s.idAlloc, c.s.kv, c.s.scheduleOpt)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -114,7 +113,7 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 	c.cachedCluster = cluster
-	c.coordinator = newCoordinator(c.cachedCluster, c.s.scheduleOpt, c.s.hbStreams, c.s.classifier)
+	c.coordinator = newCoordinator(c.cachedCluster, c.s.hbStreams, c.s.classifier)
 	c.quit = make(chan struct{})
 
 	c.wg.Add(2)
@@ -151,90 +150,6 @@ func (c *RaftCluster) isRunning() bool {
 	defer c.RUnlock()
 
 	return c.running
-}
-
-// GetConfig gets the config information.
-func (s *Server) GetConfig() *Config {
-	cfg := s.cfg.clone()
-	cfg.Schedule = *s.scheduleOpt.load()
-	cfg.Replication = *s.scheduleOpt.rep.load()
-	return cfg
-}
-
-// GetScheduleConfig gets the balance config information.
-func (s *Server) GetScheduleConfig() *ScheduleConfig {
-	cfg := &ScheduleConfig{}
-	*cfg = *s.scheduleOpt.load()
-	return cfg
-}
-
-// SetScheduleConfig sets the balance config information.
-func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
-	s.scheduleOpt.store(&cfg)
-	s.scheduleOpt.persist(s.kv)
-	s.cfg.Schedule = cfg
-	log.Infof("schedule config is updated: %+v, old: %+v", cfg, s.cfg.Schedule)
-}
-
-// GetReplicationConfig get the replication config
-func (s *Server) GetReplicationConfig() *ReplicationConfig {
-	cfg := &ReplicationConfig{}
-	*cfg = *s.scheduleOpt.rep.load()
-	return cfg
-}
-
-// SetReplicationConfig sets the replication config
-func (s *Server) SetReplicationConfig(cfg ReplicationConfig) {
-	s.scheduleOpt.rep.store(&cfg)
-	s.scheduleOpt.persist(s.kv)
-	s.cfg.Replication = cfg
-	log.Infof("replication is updated: %+v, old: %+v", cfg, s.cfg.Replication)
-}
-
-func (s *Server) getClusterRootPath() string {
-	return path.Join(s.rootPath, "raft")
-}
-
-// GetRaftCluster gets raft cluster.
-// If cluster has not been bootstrapped, return nil.
-func (s *Server) GetRaftCluster() *RaftCluster {
-	if s.isClosed() || !s.cluster.isRunning() {
-		return nil
-	}
-	return s.cluster
-}
-
-// GetCluster gets cluster
-func (s *Server) GetCluster() *metapb.Cluster {
-	return &metapb.Cluster{
-		Id:           s.clusterID,
-		MaxPeerCount: uint32(s.cfg.Replication.MaxReplicas),
-	}
-}
-
-// GetClusterStatus gets cluster status
-func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
-	s.cluster.Lock()
-	defer s.cluster.Unlock()
-	err := s.cluster.loadClusterStatus()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	clone := &ClusterStatus{}
-	*clone = *s.cluster.status
-	return clone, nil
-}
-
-func (s *Server) createRaftCluster() error {
-	if s.cluster.isRunning() {
-		return nil
-	}
-
-	return s.cluster.start()
-}
-
-func (s *Server) stopRaftCluster() {
-	s.cluster.stop()
 }
 
 func makeStoreKey(clusterRootPath string, storeID uint64) string {
@@ -287,75 +202,6 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 	}
 
 	return nil
-}
-
-func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
-	clusterID := s.clusterID
-
-	log.Infof("try to bootstrap raft cluster %d with %v", clusterID, req)
-
-	if err := checkBootstrapRequest(clusterID, req); err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	clusterMeta := metapb.Cluster{
-		Id:           clusterID,
-		MaxPeerCount: uint32(s.cfg.Replication.MaxReplicas),
-	}
-
-	// Set cluster meta
-	clusterValue, err := clusterMeta.Marshal()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	clusterRootPath := s.getClusterRootPath()
-
-	var ops []clientv3.Op
-	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
-
-	// Set bootstrap time
-	bootstrapKey := makeBootstrapTimeKey(clusterRootPath)
-	nano := time.Now().UnixNano()
-
-	timeData := uint64ToBytes(uint64(nano))
-	ops = append(ops, clientv3.OpPut(bootstrapKey, string(timeData)))
-
-	// Set store meta
-	storeMeta := req.GetStore()
-	storePath := makeStoreKey(clusterRootPath, storeMeta.GetId())
-	storeValue, err := storeMeta.Marshal()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	ops = append(ops, clientv3.OpPut(storePath, string(storeValue)))
-
-	regionValue, err := req.GetRegion().Marshal()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	// Set region meta with region id.
-	regionPath := makeRegionKey(clusterRootPath, req.GetRegion().GetId())
-	ops = append(ops, clientv3.OpPut(regionPath, string(regionValue)))
-
-	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
-	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
-	resp, err := s.txn().If(bootstrapCmp).Then(ops...).Commit()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	if !resp.Succeeded {
-		log.Warnf("cluster %d already bootstrapped", clusterID)
-		return nil, errors.Errorf("cluster %d already bootstrapped", clusterID)
-	}
-
-	log.Infof("bootstrap cluster %d ok", clusterID)
-
-	if err := s.cluster.start(); err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	return &pdpb.BootstrapResponse{}, nil
 }
 
 // GetRegionByKey gets region and leader peer by region key from cluster.
@@ -600,7 +446,7 @@ func (c *RaftCluster) storeIsEmpty(storeID uint64) bool {
 
 func (c *RaftCluster) collectMetrics() {
 	cluster := c.cachedCluster
-	statsMap := newStoreStatisticsMap(c.coordinator.opt, c.GetNamespaceClassifier())
+	statsMap := newStoreStatisticsMap(c.cachedCluster.opt, c.GetNamespaceClassifier())
 	for _, s := range cluster.GetStores() {
 		statsMap.Observe(s)
 	}

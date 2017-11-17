@@ -88,14 +88,14 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	s, err := schedule.CreateScheduler(name, h.opt, c.limiter, args...)
+	s, err := schedule.CreateScheduler(name, c.limiter, args...)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	log.Infof("create scheduler %s", s.GetName())
 	if err = c.addScheduler(s, args...); err != nil {
 		log.Errorf("can not add scheduler %v: %v", s.GetName(), err)
-	} else if err = c.opt.persist(c.cluster.kv); err != nil {
+	} else if err = h.opt.persist(c.cluster.kv); err != nil {
 		log.Errorf("can not persist scheduler config: %v", err)
 	}
 	return errors.Trace(err)
@@ -109,7 +109,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 	}
 	if err = c.removeScheduler(name); err != nil {
 		log.Errorf("can not remove scheduler %v: %v", name, err)
-	} else if err = c.opt.persist(c.cluster.kv); err != nil {
+	} else if err = h.opt.persist(c.cluster.kv); err != nil {
 		log.Errorf("can not persist scheduler config: %v", err)
 	}
 	return errors.Trace(err)

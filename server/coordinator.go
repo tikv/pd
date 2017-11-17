@@ -53,7 +53,6 @@ type coordinator struct {
 	cancel context.CancelFunc
 
 	cluster          *clusterInfo
-	opt              *scheduleOption
 	limiter          *schedule.Limiter
 	replicaChecker   *schedule.ReplicaChecker
 	namespaceChecker *schedule.NamespaceChecker
@@ -64,16 +63,15 @@ type coordinator struct {
 	hbStreams        *heartbeatStreams
 }
 
-func newCoordinator(cluster *clusterInfo, opt *scheduleOption, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
+func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
 		ctx:              ctx,
 		cancel:           cancel,
 		cluster:          cluster,
-		opt:              opt,
 		limiter:          schedule.NewLimiter(),
-		replicaChecker:   schedule.NewReplicaChecker(opt, cluster, classifier),
-		namespaceChecker: schedule.NewNamespaceChecker(opt, cluster, classifier),
+		replicaChecker:   schedule.NewReplicaChecker(cluster, classifier),
+		namespaceChecker: schedule.NewNamespaceChecker(cluster, classifier),
 		operators:        make(map[uint64]*schedule.Operator),
 		schedulers:       make(map[string]*scheduleController),
 		classifier:       classifier,
@@ -103,7 +101,7 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	}
 
 	// Check replica operator.
-	if c.limiter.OperatorCount(core.RegionKind) >= c.opt.GetReplicaScheduleLimit() {
+	if c.limiter.OperatorCount(core.RegionKind) >= c.cluster.GetReplicaScheduleLimit() {
 		return
 	}
 	// Generate Operator which moves region to targeted namespace store
@@ -134,9 +132,9 @@ func (c *coordinator) run() {
 	log.Info("coordinator: Run scheduler")
 
 	k := 0
-	scheduleCfg := c.opt.load()
+	scheduleCfg := c.cluster.opt.load()
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
-		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opt, c.limiter, schedulerCfg.Args...)
+		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.limiter, schedulerCfg.Args...)
 		if err != nil {
 			log.Errorf("can not create scheduler %s: %v", schedulerCfg.Type, err)
 		} else {
@@ -155,7 +153,7 @@ func (c *coordinator) run() {
 
 	// remove invalid scheduler config and persist
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-	if err := c.opt.persist(c.cluster.kv); err != nil {
+	if err := c.cluster.opt.persist(c.cluster.kv); err != nil {
 		log.Errorf("can't persist schedule config: %v", err)
 	}
 
@@ -296,7 +294,7 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.GetName()] = s
-	c.opt.AddSchedulerCfg(s.GetType(), args)
+	c.cluster.opt.AddSchedulerCfg(s.GetType(), args)
 
 	return nil
 }
@@ -313,7 +311,7 @@ func (c *coordinator) removeScheduler(name string) error {
 	s.Stop()
 	delete(c.schedulers, name)
 
-	if err := c.opt.RemoveSchedulerCfg(name); err != nil {
+	if err := c.cluster.opt.RemoveSchedulerCfg(name); err != nil {
 		return errors.Trace(err)
 	}
 
@@ -483,7 +481,7 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 
 type scheduleController struct {
 	schedule.Scheduler
-	opt          *scheduleOption
+	cluster      *clusterInfo
 	limiter      *schedule.Limiter
 	classifier   namespace.Classifier
 	nextInterval time.Duration
@@ -495,7 +493,7 @@ func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleContro
 	ctx, cancel := context.WithCancel(c.ctx)
 	return &scheduleController{
 		Scheduler:    s,
-		opt:          c.opt,
+		cluster:      c.cluster,
 		limiter:      c.limiter,
 		nextInterval: s.GetMinInterval(),
 		classifier:   c.classifier,
@@ -529,5 +527,5 @@ func (s *scheduleController) GetInterval() time.Duration {
 }
 
 func (s *scheduleController) AllowSchedule() bool {
-	return s.Scheduler.IsScheduleAllowed()
+	return s.Scheduler.IsScheduleAllowed(s.cluster)
 }

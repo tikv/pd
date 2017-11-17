@@ -23,10 +23,11 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 )
 
-func newTestScheduleConfig() (string, *MockSchedulerOptions) {
+func newTestScheduleConfig() *MockSchedulerOptions {
 	mso := newMockSchedulerOptions()
-	return "abc", mso
+	return mso
 }
+
 func newTestReplication(mso *MockSchedulerOptions, maxReplicas int, locationLabels ...string) {
 	mso.MaxReplicas = maxReplicas
 	mso.LocationLabels = locationLabels
@@ -101,7 +102,8 @@ func newTestOpInfluence(source uint64, target uint64, kind core.ResourceKind, co
 }
 
 func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedCase, capaGB uint64) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
 	for _, t := range tests {
 		tc.addLeaderStore(1, int(t.sourceCount))
@@ -123,7 +125,8 @@ func (s *testBalanceSpeedSuite) testBalanceSpeed(c *C, tests []testBalanceSpeedC
 }
 
 func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 	tc.addLeaderStore(1, 10)
 	tc.addLeaderStore(2, 20)
 	tc.addLeaderStore(3, 30)
@@ -144,9 +147,9 @@ type testBalanceLeaderSchedulerSuite struct {
 }
 
 func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
-	s.tc = newMockCluster(core.NewMockIDAllocator())
-	_, opt := newTestScheduleConfig()
-	lb, err := schedule.CreateScheduler("balance-leader", opt, schedule.NewLimiter())
+	opt := newTestScheduleConfig()
+	s.tc = newMockCluster(opt)
+	lb, err := schedule.CreateScheduler("balance-leader", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	s.lb = lb
 }
@@ -286,10 +289,10 @@ var _ = Suite(&testBalanceRegionSchedulerSuite{})
 type testBalanceRegionSchedulerSuite struct{}
 
 func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
-	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewLimiter())
+	sb, err := schedule.CreateScheduler("balance-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	cache := sb.(*balanceRegionScheduler).cache
 
@@ -320,12 +323,12 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewLimiter())
+	sb, err := schedule.CreateScheduler("balance-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	cache := sb.(*balanceRegionScheduler).cache
 
@@ -385,12 +388,12 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
 	newTestReplication(opt, 5, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewLimiter())
+	sb, err := schedule.CreateScheduler("balance-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 
 	tc.addLabelsStore(1, 4, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -422,10 +425,10 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
-	sb, err := schedule.CreateScheduler("balance-region", opt, schedule.NewLimiter())
+	sb, err := schedule.CreateScheduler("balance-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	opt.SetMaxReplicas(1)
 
@@ -450,10 +453,10 @@ var _ = Suite(&testReplicaCheckerSuite{})
 type testReplicaCheckerSuite struct{}
 
 func (s *testReplicaCheckerSuite) TestBasic(c *C) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
-	rc := schedule.NewReplicaChecker(opt, tc, namespace.DefaultClassifier)
+	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	opt.MaxSnapshotCount = 2
 
@@ -522,12 +525,13 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 }
 
 func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
+
 	tc.addRegionStore(1, 1)
 	tc.addRegionStore(2, 1)
-	_, opt := newTestScheduleConfig()
 
-	rc := schedule.NewReplicaChecker(opt, tc, namespace.DefaultClassifier)
+	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	// now region peer in store 1,2,3.but we just have store 1,2
 	// This happens only in recovering the PD tc
@@ -539,12 +543,12 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 }
 
 func (s *testReplicaCheckerSuite) TestOffline(c *C) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	rc := schedule.NewReplicaChecker(opt, tc, namespace.DefaultClassifier)
+	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	tc.addLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.addLabelsStore(2, 2, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
@@ -593,12 +597,12 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 }
 
 func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	rc := schedule.NewReplicaChecker(opt, tc, namespace.DefaultClassifier)
+	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	tc.addLabelsStore(1, 9, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.addLabelsStore(2, 8, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -672,12 +676,12 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 }
 
 func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
 	newTestReplication(opt, 5, "zone", "host")
 
-	rc := schedule.NewReplicaChecker(opt, tc, namespace.DefaultClassifier)
+	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	tc.addLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "h1"})
 	tc.addLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
@@ -705,10 +709,10 @@ var _ = Suite(&testBalanceHotWriteRegionSchedulerSuite{})
 type testBalanceHotWriteRegionSchedulerSuite struct{}
 
 func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
-	hb, err := schedule.CreateScheduler("hot-write-region", opt, schedule.NewLimiter())
+	hb, err := schedule.CreateScheduler("hot-write-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
@@ -765,9 +769,9 @@ var _ = Suite(&testBalanceHotReadRegionSchedulerSuite{})
 type testBalanceHotReadRegionSchedulerSuite struct{}
 
 func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
-	tc := newMockCluster(core.NewMockIDAllocator())
-	_, opt := newTestScheduleConfig()
-	hb, err := schedule.CreateScheduler("hot-read-region", opt, schedule.NewLimiter())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
+	hb, err := schedule.CreateScheduler("hot-read-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.

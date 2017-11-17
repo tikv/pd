@@ -15,7 +15,6 @@ package schedulers
 
 import (
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
 
@@ -24,10 +23,10 @@ var _ = Suite(&testShuffleLeaderSuite{})
 type testShuffleLeaderSuite struct{}
 
 func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
-	sl, err := schedule.CreateScheduler("shuffle-leader", opt, schedule.NewLimiter())
+	sl, err := schedule.CreateScheduler("shuffle-leader", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	c.Assert(sl.Schedule(tc, schedule.OpInfluence{}), IsNil)
 
@@ -60,10 +59,10 @@ var _ = Suite(&testBalanceAdjacentRegionSuite{})
 type testBalanceAdjacentRegionSuite struct{}
 
 func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
-	tc := newMockCluster(core.NewMockIDAllocator())
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
 
-	_, opt := newTestScheduleConfig()
-	sc, err := schedule.CreateScheduler("adjacent-region", opt, schedule.NewLimiter())
+	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	c.Assert(sc.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
 

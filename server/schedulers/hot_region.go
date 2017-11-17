@@ -26,15 +26,15 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("hot-region", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
-		return newBalanceHotRegionsScheduler(opt, limiter), nil
+	schedule.RegisterScheduler("hot-region", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+		return newBalanceHotRegionsScheduler(limiter), nil
 	})
 	// FIXME: remove this two schedule after the balance test move in schedulers package
-	schedule.RegisterScheduler("hot-write-region", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
-		return newBalanceHotWriteRegionsScheduler(opt, limiter), nil
+	schedule.RegisterScheduler("hot-write-region", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+		return newBalanceHotWriteRegionsScheduler(limiter), nil
 	})
-	schedule.RegisterScheduler("hot-read-region", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
-		return newBalanceHotReadRegionsScheduler(opt, limiter), nil
+	schedule.RegisterScheduler("hot-read-region", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+		return newBalanceHotReadRegionsScheduler(limiter), nil
 	})
 }
 
@@ -69,7 +69,6 @@ func newStoreStaticstics() *storeStatistics {
 type balanceHotRegionsScheduler struct {
 	*baseScheduler
 	sync.RWMutex
-	opt   schedule.Options
 	limit uint64
 	types []BalanceType
 
@@ -78,11 +77,10 @@ type balanceHotRegionsScheduler struct {
 	r     *rand.Rand
 }
 
-func newBalanceHotRegionsScheduler(opt schedule.Options, limiter *schedule.Limiter) *balanceHotRegionsScheduler {
+func newBalanceHotRegionsScheduler(limiter *schedule.Limiter) *balanceHotRegionsScheduler {
 	base := newBaseScheduler(limiter)
 	return &balanceHotRegionsScheduler{
 		baseScheduler: base,
-		opt:           opt,
 		limit:         1,
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotWriteRegionBalance, hotReadRegionBalance},
@@ -90,11 +88,10 @@ func newBalanceHotRegionsScheduler(opt schedule.Options, limiter *schedule.Limit
 	}
 }
 
-func newBalanceHotReadRegionsScheduler(opt schedule.Options, limiter *schedule.Limiter) *balanceHotRegionsScheduler {
+func newBalanceHotReadRegionsScheduler(limiter *schedule.Limiter) *balanceHotRegionsScheduler {
 	base := newBaseScheduler(limiter)
 	return &balanceHotRegionsScheduler{
 		baseScheduler: base,
-		opt:           opt,
 		limit:         1,
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotReadRegionBalance},
@@ -102,11 +99,10 @@ func newBalanceHotReadRegionsScheduler(opt schedule.Options, limiter *schedule.L
 	}
 }
 
-func newBalanceHotWriteRegionsScheduler(opt schedule.Options, limiter *schedule.Limiter) *balanceHotRegionsScheduler {
+func newBalanceHotWriteRegionsScheduler(limiter *schedule.Limiter) *balanceHotRegionsScheduler {
 	base := newBaseScheduler(limiter)
 	return &balanceHotRegionsScheduler{
 		baseScheduler: base,
-		opt:           opt,
 		limit:         1,
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotWriteRegionBalance},
@@ -122,7 +118,7 @@ func (h *balanceHotRegionsScheduler) GetType() string {
 	return "hot-region"
 }
 
-func (h *balanceHotRegionsScheduler) IsScheduleAllowed() bool {
+func (h *balanceHotRegionsScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	return h.limiter.OperatorCount(core.HotRegionKind) < h.limit
 }
 
@@ -188,7 +184,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 func (h *balanceHotRegionsScheduler) calcScore(items []*core.RegionStat, cluster schedule.Cluster, isCountReplica bool) core.StoreHotRegionsStat {
 	stats := make(core.StoreHotRegionsStat)
 	for _, r := range items {
-		if r.HotDegree < h.opt.GetHotRegionLowThreshold() {
+		if r.HotDegree < cluster.GetHotRegionLowThreshold() {
 			continue
 		}
 
@@ -265,13 +261,13 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 
 		filters := []schedule.Filter{
 			schedule.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
-			schedule.NewDistinctScoreFilter(h.opt.GetLocationLabels(), stores, cluster.GetLeaderStore(srcRegion)),
-			schedule.NewStateFilter(h.opt),
-			schedule.NewStorageThresholdFilter(h.opt),
+			schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), stores, cluster.GetLeaderStore(srcRegion)),
+			schedule.NewStateFilter(),
+			schedule.NewStorageThresholdFilter(),
 		}
 		destStoreIDs := make([]uint64, 0, len(stores))
 		for _, store := range stores {
-			if schedule.FilterTarget(store, filters) {
+			if schedule.FilterTarget(cluster, store, filters) {
 				continue
 			}
 			destStoreIDs = append(destStoreIDs, store.GetId())

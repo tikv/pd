@@ -21,7 +21,7 @@ import (
 type Options interface {
 	GetLeaderScheduleLimit() uint64
 	GetRegionScheduleLimit() uint64
-	GetTolerantSizeRatio() float64
+	GetReplicaScheduleLimit() uint64
 
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
@@ -31,4 +31,5 @@ type Options interface {
 	GetLocationLabels() []string
 
 	GetHotRegionLowThreshold() int
+	GetTolerantSizeRatio() float64
 }

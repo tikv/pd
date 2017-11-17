@@ -62,7 +62,7 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, &h.svr.GetConfig().Schedule)
+	h.rd.JSON(w, http.StatusOK, h.svr.GetScheduleConfig())
 }
 
 func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +78,7 @@ func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *confHandler) GetReplication(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, &h.svr.GetConfig().Replication)
+	h.rd.JSON(w, http.StatusOK, h.svr.GetReplicationConfig())
 }
 
 func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
