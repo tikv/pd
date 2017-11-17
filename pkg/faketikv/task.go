@@ -138,6 +138,7 @@ func (a *addPeer) Step(cluster *ClusterInfo) {
 			region.RegionEpoch.ConfVer++
 			cluster.SetRegion(region)
 		}
+		a.finished = true
 	}
 }
 
@@ -186,6 +187,7 @@ func (a *removePeer) Step(cluster *ClusterInfo) {
 				break
 			}
 		}
+		a.finished = true
 	}
 }
 

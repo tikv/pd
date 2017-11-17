@@ -71,12 +71,13 @@ func (c *ClusterInfo) stepLeader(region *core.RegionInfo) {
 	}
 	newLeader := c.electNewLeader(region)
 	region.Leader = newLeader
-	c.SetRegion(region)
 	if newLeader == nil {
+		c.SetRegion(region)
 		log.Infof("[region %d] no leader", region.GetId())
 		return
 	}
 	log.Info("[region %d] elect new leader: %+v,old leader: %+v", region.GetId(), newLeader, region.Leader)
+	c.SetRegion(region)
 	c.reportRegionChange(region.GetId())
 }
 
