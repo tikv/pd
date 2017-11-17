@@ -22,8 +22,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/pd/server/namespace"
-
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/etcd/embed"
 	"github.com/juju/errors"
@@ -31,6 +29,7 @@ import (
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 )
 
@@ -403,7 +402,7 @@ func (c *ReplicationConfig) adjust() {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 }
 
-// NamespaceConfig is to cover the global setting for specific namespace
+// NamespaceConfig is to overwrite the global setting for specific namespace
 type NamespaceConfig struct {
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `json:"leader-schedule-limit"`
@@ -438,6 +437,7 @@ type scheduleOption struct {
 	ns  map[string]*namespaceOption
 }
 
+// namespaceOption is a wrapper to access the configuration safely.
 type namespaceOption struct {
 	namespaceCfg atomic.Value
 }

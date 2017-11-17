@@ -99,7 +99,7 @@ func NewSetConfigCommand() *cobra.Command {
 func NewSetNamespaceConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
 		Use:   "namespace <name> <option> <value>",
-		Short: "show namespace config of PD",
+		Short: "set the namespace config's option with value",
 		Run:   setNamespaceConfigCommandFunc,
 	}
 	return sc

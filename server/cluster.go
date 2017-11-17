@@ -181,14 +181,14 @@ func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
 	s.cfg.Schedule = cfg
 }
 
-// GetReplicationConfig get the replication config
+// GetReplicationConfig get the replication config.
 func (s *Server) GetReplicationConfig() *ReplicationConfig {
 	cfg := &ReplicationConfig{}
 	*cfg = *s.scheduleOpt.rep.load()
 	return cfg
 }
 
-// SetReplicationConfig sets the replication config
+// SetReplicationConfig sets the replication config.
 func (s *Server) SetReplicationConfig(cfg ReplicationConfig) {
 	s.scheduleOpt.rep.store(&cfg)
 	s.scheduleOpt.persist(s.kv)
@@ -196,8 +196,12 @@ func (s *Server) SetReplicationConfig(cfg ReplicationConfig) {
 	s.cfg.Replication = cfg
 }
 
-// GetNamespaceConfig get the namespace config
+// GetNamespaceConfig get the namespace config.
 func (s *Server) GetNamespaceConfig(name string) *NamespaceConfig {
+	if _, ok := s.scheduleOpt.ns[name]; !ok {
+		return &NamespaceConfig{}
+	}
+
 	cfg := &NamespaceConfig{
 		LeaderScheduleLimit:  s.scheduleOpt.GetLeaderScheduleLimit(name),
 		RegionScheduleLimit:  s.scheduleOpt.GetRegionScheduleLimit(name),
@@ -208,14 +212,14 @@ func (s *Server) GetNamespaceConfig(name string) *NamespaceConfig {
 	return cfg
 }
 
-// GetNamespaceConfigWithAdjust get the namespace config that replace zero value with global config value
+// GetNamespaceConfigWithAdjust get the namespace config that replace zero value with global config value.
 func (s *Server) GetNamespaceConfigWithAdjust(name string) *NamespaceConfig {
 	cfg := s.GetNamespaceConfig(name)
 	cfg.adjust(s.scheduleOpt)
 	return cfg
 }
 
-// SetNamespaceConfig sets the replication config
+// SetNamespaceConfig sets the replication config.
 func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) {
 	if n, ok := s.scheduleOpt.ns[name]; ok {
 		n.store(&cfg)
@@ -230,7 +234,7 @@ func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) {
 	s.cfg.Namespace[name] = cfg
 }
 
-// IsNamespaceExist returns
+// IsNamespaceExist returns whether the namespace exists.
 func (s *Server) IsNamespaceExist(name string) bool {
 	return s.classifier.IsNamespaceExist(name)
 }
@@ -248,7 +252,7 @@ func (s *Server) GetRaftCluster() *RaftCluster {
 	return s.cluster
 }
 
-// GetCluster gets cluster
+// GetCluster gets cluster.
 func (s *Server) GetCluster() *metapb.Cluster {
 	return &metapb.Cluster{
 		Id:           s.clusterID,
@@ -256,7 +260,7 @@ func (s *Server) GetCluster() *metapb.Cluster {
 	}
 }
 
-// GetClusterStatus gets cluster status
+// GetClusterStatus gets cluster status.
 func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
 	s.cluster.Lock()
 	defer s.cluster.Unlock()
