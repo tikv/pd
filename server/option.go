@@ -55,7 +55,7 @@ func (o *scheduleOption) GetReplication() *Replication {
 }
 
 func (o *scheduleOption) GetMaxReplicas(name string) int {
-	if n, ok := o.ns[name]; ok && n.IsMaxReplicasValid() {
+	if n, ok := o.ns[name]; ok {
 		return n.GetMaxReplicas()
 	}
 	return o.rep.GetMaxReplicas()
@@ -82,21 +82,21 @@ func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
 }
 
 func (o *scheduleOption) GetLeaderScheduleLimit(name string) uint64 {
-	if n, ok := o.ns[name]; ok && n.IsLeaderScheduleLimitValid() {
+	if n, ok := o.ns[name]; ok {
 		return n.GetLeaderScheduleLimit()
 	}
 	return o.load().LeaderScheduleLimit
 }
 
 func (o *scheduleOption) GetRegionScheduleLimit(name string) uint64 {
-	if n, ok := o.ns[name]; ok && n.IsRegionScheduleLimitValid() {
+	if n, ok := o.ns[name]; ok {
 		return n.GetRegionScheduleLimit()
 	}
 	return o.load().RegionScheduleLimit
 }
 
 func (o *scheduleOption) GetReplicaScheduleLimit(name string) uint64 {
-	if n, ok := o.ns[name]; ok && n.IsReplicaScheduleLimitValid() {
+	if n, ok := o.ns[name]; ok {
 		return n.GetReplicaScheduleLimit()
 	}
 	return o.load().ReplicaScheduleLimit
@@ -248,19 +248,9 @@ func (n *namespaceOption) GetMaxReplicas() int {
 	return int(n.load().MaxReplicas)
 }
 
-// IsMaxReplicasValid returns the validation of field
-func (n *namespaceOption) IsMaxReplicasValid() bool {
-	return n.GetMaxReplicas() != 0
-}
-
 // GetLeaderScheduleLimit returns the number of replicas for each region.
 func (n *namespaceOption) GetLeaderScheduleLimit() uint64 {
 	return n.load().LeaderScheduleLimit
-}
-
-// IsLeaderScheduleLimitValid returns the validation of field
-func (n *namespaceOption) IsLeaderScheduleLimitValid() bool {
-	return n.GetLeaderScheduleLimit() != 0
 }
 
 // GetRegionScheduleLimit returns the number of replicas for each region.
@@ -268,17 +258,7 @@ func (n *namespaceOption) GetRegionScheduleLimit() uint64 {
 	return n.load().RegionScheduleLimit
 }
 
-// IsRegionScheduleLimitValid returns the validation of field
-func (n *namespaceOption) IsRegionScheduleLimitValid() bool {
-	return n.GetRegionScheduleLimit() != 0
-}
-
 // GetReplicaScheduleLimit returns the number of replicas for each region.
 func (n *namespaceOption) GetReplicaScheduleLimit() uint64 {
 	return n.load().ReplicaScheduleLimit
-}
-
-// IsReplicaScheduleLimitValid returns the validation of field
-func (n *namespaceOption) IsReplicaScheduleLimitValid() bool {
-	return n.GetReplicaScheduleLimit() != 0
 }

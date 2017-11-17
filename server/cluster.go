@@ -16,7 +16,6 @@ package server
 import (
 	"fmt"
 	"path"
-	"reflect"
 	"sync"
 	"time"
 
@@ -242,23 +241,6 @@ func (s *Server) DeleteNamespaceConfig(name string) {
 		s.scheduleOpt.persist(s.kv)
 		log.Infof("namespace:%v config is deleted: %+v", name, *cfg)
 	}
-}
-
-// DeleteNamespaceConfigOption deletes the namespace config.
-func (s *Server) DeleteNamespaceConfigOption(name string, option string) error {
-	if n, ok := s.scheduleOpt.ns[name]; ok {
-		old := n.load()
-		cfg := old.clone()
-		val := reflect.Indirect(reflect.ValueOf(cfg)).FieldByName(name)
-		if !val.IsValid() {
-			return errors.Errorf("invalid option name %s", name)
-		}
-		val.SetUint(0)
-		n.store(cfg)
-		s.scheduleOpt.persist(s.kv)
-		log.Infof("namespace:%v config is updated: %+v, old: %+v", name, *cfg, old)
-	}
-	return nil
 }
 
 // IsNamespaceExist returns whether the namespace exists.

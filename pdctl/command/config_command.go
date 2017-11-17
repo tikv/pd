@@ -218,15 +218,21 @@ func setNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func deleteNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) == 1 {
-		args = append(args, "")
-	} else if len(args) != 2 {
+	if len(args) != 1 && len(args) != 2 {
 		fmt.Println(cmd.UsageString())
 		return
 	}
 	name, opt := args[0], args[1]
-	prefix := path.Join(namespacePrefix, name, opt)
-	_, err := doRequest(cmd, prefix, http.MethodDelete)
+	prefix := path.Join(namespacePrefix, name)
+
+	var err error
+	if len(args) == 2 {
+		// delete namespace config's option equals to set the option with zero value
+		err = postConfigDataWithPath(cmd, opt, "0", prefix)
+	} else {
+		_, err = doRequest(cmd, prefix, http.MethodDelete)
+	}
+
 	if err != nil {
 		fmt.Printf("Failed to delete namespace:%s config %s: %s\n", name, opt, err)
 		return
