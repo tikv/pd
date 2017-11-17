@@ -34,14 +34,17 @@ const (
 	Block
 )
 
+const (
+	storeHeartBeatPeriod  = 10
+	regionHeartBeatPeriod = 60
+)
+
 // Node simulates a TiKV.
 type Node struct {
 	*metapb.Store
 	sync.RWMutex
 	stats                   *pdpb.StoreStats
 	tick                    uint64
-	storeTick               int
-	regionTick              int
 	wg                      sync.WaitGroup
 	tasks                   map[uint64]Task
 	client                  Client
@@ -144,12 +147,10 @@ func (n *Node) stepTask() {
 }
 
 func (n *Node) stepHeartBeat() {
-	n.storeTick = (n.storeTick + 1) % 10
-	n.regionTick = (n.regionTick + 1) % 60
-	if n.storeTick == 0 {
+	if n.tick%storeHeartBeatPeriod == 0 {
 		n.storeHeartBeat()
 	}
-	if n.regionTick == 0 {
+	if n.tick%regionHeartBeatPeriod == 0 {
 		n.regionHeartBeat()
 	}
 }
