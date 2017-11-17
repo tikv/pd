@@ -128,3 +128,34 @@ func (h *confHandler) SetNamespace(w http.ResponseWriter, r *http.Request) {
 	h.svr.SetNamespaceConfig(name, *config)
 	h.rd.JSON(w, http.StatusOK, nil)
 }
+
+func (h *confHandler) DeleteNamespace(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	name := vars["name"]
+
+	if !h.svr.IsNamespaceExist(name) {
+		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("invalid namespace Name %s, not found", name))
+		return
+	}
+	h.svr.DeleteNamespaceConfig(name)
+
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (h *confHandler) DeleteNamespaceOption(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	name := vars["name"]
+	option := vars["option"]
+
+	if !h.svr.IsNamespaceExist(name) {
+		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("invalid namespace Name %s, not found", name))
+		return
+	}
+	err := h.svr.DeleteNamespaceConfigOption(name, option)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, nil)
+}

@@ -16,6 +16,7 @@ package server
 import (
 	"fmt"
 	"path"
+	"reflect"
 	"sync"
 	"time"
 
@@ -175,10 +176,10 @@ func (s *Server) GetScheduleConfig() *ScheduleConfig {
 
 // SetScheduleConfig sets the balance config information.
 func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
+	old := s.scheduleOpt.load()
 	s.scheduleOpt.store(&cfg)
 	s.scheduleOpt.persist(s.kv)
-	log.Infof("schedule config is updated: %+v, old: %+v", cfg, s.cfg.Schedule)
-	s.cfg.Schedule = cfg
+	log.Infof("schedule config is updated: %+v, old: %+v", cfg, old)
 }
 
 // GetReplicationConfig get the replication config.
@@ -190,10 +191,10 @@ func (s *Server) GetReplicationConfig() *ReplicationConfig {
 
 // SetReplicationConfig sets the replication config.
 func (s *Server) SetReplicationConfig(cfg ReplicationConfig) {
+	old := s.scheduleOpt.rep.load()
 	s.scheduleOpt.rep.store(&cfg)
 	s.scheduleOpt.persist(s.kv)
-	log.Infof("replication config is updated: %+v, old: %+v", cfg, s.cfg.Replication)
-	s.cfg.Replication = cfg
+	log.Infof("replication config is updated: %+v, old: %+v", cfg, old)
 }
 
 // GetNamespaceConfig get the namespace config.
@@ -219,19 +220,45 @@ func (s *Server) GetNamespaceConfigWithAdjust(name string) *NamespaceConfig {
 	return cfg
 }
 
-// SetNamespaceConfig sets the replication config.
+// SetNamespaceConfig sets the namespace config.
 func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) {
 	if n, ok := s.scheduleOpt.ns[name]; ok {
+		old := s.scheduleOpt.ns[name].load()
 		n.store(&cfg)
 		s.scheduleOpt.persist(s.kv)
-		log.Infof("namespace:%v config is updated: %+v, old: %+v", name, cfg, s.cfg.Namespace[name])
+		log.Infof("namespace:%v config is updated: %+v, old: %+v", name, cfg, old)
 	} else {
 		s.scheduleOpt.ns[name] = newNamespaceOption(&cfg)
 		s.scheduleOpt.persist(s.kv)
 		log.Infof("namespace:%v config is added: %+v", name, cfg)
 	}
+}
 
-	s.cfg.Namespace[name] = cfg
+// DeleteNamespaceConfig deletes the namespace config.
+func (s *Server) DeleteNamespaceConfig(name string) {
+	if n, ok := s.scheduleOpt.ns[name]; ok {
+		cfg := n.load()
+		delete(s.scheduleOpt.ns, name)
+		s.scheduleOpt.persist(s.kv)
+		log.Infof("namespace:%v config is deleted: %+v", name, *cfg)
+	}
+}
+
+// DeleteNamespaceConfigOption deletes the namespace config.
+func (s *Server) DeleteNamespaceConfigOption(name string, option string) error {
+	if n, ok := s.scheduleOpt.ns[name]; ok {
+		old := n.load()
+		cfg := old.clone()
+		val := reflect.Indirect(reflect.ValueOf(cfg)).FieldByName(name)
+		if !val.IsValid() {
+			return errors.Errorf("invalid option name %s", name)
+		}
+		val.SetUint(0)
+		n.store(cfg)
+		s.scheduleOpt.persist(s.kv)
+		log.Infof("namespace:%v config is updated: %+v, old: %+v", name, *cfg, old)
+	}
+	return nil
 }
 
 // IsNamespaceExist returns whether the namespace exists.

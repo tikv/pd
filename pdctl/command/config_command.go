@@ -39,6 +39,7 @@ func NewConfigCommand() *cobra.Command {
 	}
 	conf.AddCommand(NewShowConfigCommand())
 	conf.AddCommand(NewSetConfigCommand())
+	conf.AddCommand(NewDeleteConfigCommand())
 	return conf
 }
 
@@ -88,7 +89,7 @@ func NewShowReplicationConfigCommand() *cobra.Command {
 // NewSetConfigCommand return a set subcommand of configCmd
 func NewSetConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "set [namespace <name>] <option> <value> ",
+		Use:   "set [namespace <name>] <option> <value>",
 		Short: "set the option with value",
 		Run:   setConfigCommandFunc,
 	}
@@ -102,6 +103,26 @@ func NewSetNamespaceConfigCommand() *cobra.Command {
 		Use:   "namespace <name> <option> <value>",
 		Short: "set the namespace config's option with value",
 		Run:   setNamespaceConfigCommandFunc,
+	}
+	return sc
+}
+
+// NewDeleteConfigCommand a set subcommand of cfgCmd
+func NewDeleteConfigCommand() *cobra.Command {
+	sc := &cobra.Command{
+		Use:   "delete namespace <name> [<option>]",
+		Short: "delete the config option",
+	}
+	sc.AddCommand(NewDeleteNamespaceConfigCommand())
+	return sc
+}
+
+// NewDeleteNamespaceConfigCommand a set subcommand of delete subcommand
+func NewDeleteNamespaceConfigCommand() *cobra.Command {
+	sc := &cobra.Command{
+		Use:   "namespace <name> [<option>]",
+		Short: "delete the namespace config's all options or given option",
+		Run:   deleteNamespaceConfigCommandFunc,
 	}
 	return sc
 }
@@ -191,6 +212,23 @@ func setNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 	err := postConfigDataWithPath(cmd, opt, val, prefix)
 	if err != nil {
 		fmt.Printf("Failed to set namespace:%s config: %s\n", name, err)
+		return
+	}
+	fmt.Println("Success!")
+}
+
+func deleteNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) == 1 {
+		args = append(args, "")
+	} else if len(args) != 2 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+	name, opt := args[0], args[1]
+	prefix := path.Join(namespacePrefix, name, opt)
+	_, err := doRequest(cmd, prefix, http.MethodDelete)
+	if err != nil {
+		fmt.Printf("Failed to delete namespace:%s config %s: %s\n", name, opt, err)
 		return
 	}
 	fmt.Println("Success!")
