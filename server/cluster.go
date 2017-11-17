@@ -283,7 +283,7 @@ func (s *Server) GetRaftCluster() *RaftCluster {
 func (s *Server) GetCluster() *metapb.Cluster {
 	return &metapb.Cluster{
 		Id:           s.clusterID,
-		MaxPeerCount: uint32(s.cfg.Replication.MaxReplicas),
+		MaxPeerCount: uint32(s.cluster.cachedCluster.GetMaxReplicas()),
 	}
 }
 
@@ -375,7 +375,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 
 	clusterMeta := metapb.Cluster{
 		Id:           clusterID,
-		MaxPeerCount: uint32(s.cfg.Replication.MaxReplicas),
+		MaxPeerCount: uint32(s.cluster.cachedCluster.GetMaxReplicas()),
 	}
 
 	// Set cluster meta
@@ -534,7 +534,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	}
 
 	// Check location labels.
-	for _, k := range c.s.cfg.Replication.LocationLabels {
+	for _, k := range c.cachedCluster.GetLocationLabels() {
 		if v := s.GetLabelValue(k); len(v) == 0 {
 			log.Warnf("missing location label %q in store %v", k, s)
 		}
