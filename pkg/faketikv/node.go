@@ -170,7 +170,7 @@ func (n *Node) storeHeartBeat() {
 func (n *Node) regionHeartBeat() {
 	regions := n.clusterInfo.GetRegions()
 	for _, region := range regions {
-		if region.Leade != nil && region.Leader.GetStoreId() == n.Id {
+		if region.Leader != nil && region.Leader.GetStoreId() == n.Id {
 			ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 			err := n.client.RegionHeartbeat(ctx, region)
 			if err != nil {
