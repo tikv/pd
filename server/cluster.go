@@ -265,7 +265,7 @@ func (s *Server) GetRaftCluster() *RaftCluster {
 func (s *Server) GetCluster() *metapb.Cluster {
 	return &metapb.Cluster{
 		Id:           s.clusterID,
-		MaxPeerCount: uint32(s.cluster.cachedCluster.GetMaxReplicas()),
+		MaxPeerCount: uint32(s.scheduleOpt.rep.GetMaxReplicas()),
 	}
 }
 
@@ -357,7 +357,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 
 	clusterMeta := metapb.Cluster{
 		Id:           clusterID,
-		MaxPeerCount: uint32(s.cluster.cachedCluster.GetMaxReplicas()),
+		MaxPeerCount: uint32(s.scheduleOpt.rep.GetMaxReplicas()),
 	}
 
 	// Set cluster meta
