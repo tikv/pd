@@ -87,8 +87,9 @@ func main() {
 	}
 
 	sig := <-sc
-	svr.Close()
 	log.Infof("Got signal [%d] to exit.", sig)
+
+	svr.Close()
 	switch sig {
 	case syscall.SIGTERM:
 		os.Exit(0)
