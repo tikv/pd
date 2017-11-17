@@ -190,12 +190,13 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 
 func (s *testStoreSuite) TestStoreSetState(c *C) {
 	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
-	var info storeInfo
+	info := storeInfo{}
 	err := readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
 
 	// Set to Offline.
+	info = storeInfo{}
 	err = postJSON(&http.Client{}, url+"/state?state=Offline", nil)
 	c.Assert(err, IsNil)
 	err = readJSONWithURL(url, &info)
@@ -203,6 +204,7 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
 
 	// Invalid state.
+	info = storeInfo{}
 	err = postJSON(&http.Client{}, url+"/state?state=Foo", nil)
 	c.Assert(err, NotNil)
 	err = readJSONWithURL(url, &info)
@@ -210,6 +212,7 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
 
 	// Set back to Up.
+	info = storeInfo{}
 	err = postJSON(&http.Client{}, url+"/state?state=Up", nil)
 	c.Assert(err, IsNil)
 	err = readJSONWithURL(url, &info)
