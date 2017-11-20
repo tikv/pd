@@ -227,7 +227,7 @@ func deleteNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 
 	var err error
 	if len(args) == 2 {
-		// delete namespace config's option equals to set the option with zero value
+		// delete namespace config's option by setting the option with zero value
 		err = postConfigDataWithPath(cmd, opt, "0", prefix)
 	} else {
 		_, err = doRequest(cmd, prefix, http.MethodDelete)
