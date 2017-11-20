@@ -33,3 +33,11 @@ type Options interface {
 	GetHotRegionLowThreshold() int
 	GetTolerantSizeRatio() float64
 }
+
+// NamespaceOptions for namespace cluster
+type NamespaceOptions interface {
+	GetLeaderScheduleLimit(name string) uint64
+	GetRegionScheduleLimit(name string) uint64
+	GetReplicaScheduleLimit(name string) uint64
+	GetMaxReplicas(name string) int
+}

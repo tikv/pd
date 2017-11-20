@@ -295,7 +295,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 
 	clusterMeta := metapb.Cluster{
 		Id:           clusterID,
-		MaxPeerCount: uint32(s.cfg.Replication.MaxReplicas),
+		MaxPeerCount: uint32(s.scheduleOpt.rep.GetMaxReplicas()),
 	}
 
 	// Set cluster meta
@@ -417,6 +417,11 @@ func (s *Server) GetConfig() *Config {
 	cfg := s.cfg.clone()
 	cfg.Schedule = *s.scheduleOpt.load()
 	cfg.Replication = *s.scheduleOpt.rep.load()
+	namespaces := make(map[string]NamespaceConfig)
+	for name, opt := range s.scheduleOpt.ns {
+		namespaces[name] = *opt.load()
+	}
+	cfg.Namespace = namespaces
 	return cfg
 }
 
@@ -429,25 +434,77 @@ func (s *Server) GetScheduleConfig() *ScheduleConfig {
 
 // SetScheduleConfig sets the balance config information.
 func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
+	old := s.scheduleOpt.load()
 	s.scheduleOpt.store(&cfg)
 	s.scheduleOpt.persist(s.kv)
-	log.Infof("schedule config is updated: %+v, old: %+v", cfg, s.cfg.Schedule)
-	s.cfg.Schedule = cfg
+	log.Infof("schedule config is updated: %+v, old: %+v", cfg, old)
 }
 
-// GetReplicationConfig get the replication config
+// GetReplicationConfig get the replication config.
 func (s *Server) GetReplicationConfig() *ReplicationConfig {
 	cfg := &ReplicationConfig{}
 	*cfg = *s.scheduleOpt.rep.load()
 	return cfg
 }
 
-// SetReplicationConfig sets the replication config
+// SetReplicationConfig sets the replication config.
 func (s *Server) SetReplicationConfig(cfg ReplicationConfig) {
+	old := s.scheduleOpt.rep.load()
 	s.scheduleOpt.rep.store(&cfg)
 	s.scheduleOpt.persist(s.kv)
-	log.Infof("replication config is updated: %+v, old: %+v", cfg, s.cfg.Replication)
-	s.cfg.Replication = cfg
+	log.Infof("replication config is updated: %+v, old: %+v", cfg, old)
+}
+
+// GetNamespaceConfig get the namespace config.
+func (s *Server) GetNamespaceConfig(name string) *NamespaceConfig {
+	if _, ok := s.scheduleOpt.ns[name]; !ok {
+		return &NamespaceConfig{}
+	}
+
+	cfg := &NamespaceConfig{
+		LeaderScheduleLimit:  s.scheduleOpt.GetLeaderScheduleLimit(name),
+		RegionScheduleLimit:  s.scheduleOpt.GetRegionScheduleLimit(name),
+		ReplicaScheduleLimit: s.scheduleOpt.GetReplicaScheduleLimit(name),
+		MaxReplicas:          uint64(s.scheduleOpt.GetMaxReplicas(name)),
+	}
+
+	return cfg
+}
+
+// GetNamespaceConfigWithAdjust get the namespace config that replace zero value with global config value.
+func (s *Server) GetNamespaceConfigWithAdjust(name string) *NamespaceConfig {
+	cfg := s.GetNamespaceConfig(name)
+	cfg.adjust(s.scheduleOpt)
+	return cfg
+}
+
+// SetNamespaceConfig sets the namespace config.
+func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) {
+	if n, ok := s.scheduleOpt.ns[name]; ok {
+		old := s.scheduleOpt.ns[name].load()
+		n.store(&cfg)
+		s.scheduleOpt.persist(s.kv)
+		log.Infof("namespace:%v config is updated: %+v, old: %+v", name, cfg, old)
+	} else {
+		s.scheduleOpt.ns[name] = newNamespaceOption(&cfg)
+		s.scheduleOpt.persist(s.kv)
+		log.Infof("namespace:%v config is added: %+v", name, cfg)
+	}
+}
+
+// DeleteNamespaceConfig deletes the namespace config.
+func (s *Server) DeleteNamespaceConfig(name string) {
+	if n, ok := s.scheduleOpt.ns[name]; ok {
+		cfg := n.load()
+		delete(s.scheduleOpt.ns, name)
+		s.scheduleOpt.persist(s.kv)
+		log.Infof("namespace:%v config is deleted: %+v", name, *cfg)
+	}
+}
+
+// IsNamespaceExist returns whether the namespace exists.
+func (s *Server) IsNamespaceExist(name string) bool {
+	return s.classifier.IsNamespaceExist(name)
 }
 
 func (s *Server) getClusterRootPath() string {
@@ -463,15 +520,15 @@ func (s *Server) GetRaftCluster() *RaftCluster {
 	return s.cluster
 }
 
-// GetCluster gets cluster
+// GetCluster gets cluster.
 func (s *Server) GetCluster() *metapb.Cluster {
 	return &metapb.Cluster{
 		Id:           s.clusterID,
-		MaxPeerCount: uint32(s.cfg.Replication.MaxReplicas),
+		MaxPeerCount: uint32(s.scheduleOpt.rep.GetMaxReplicas()),
 	}
 }
 
-// GetClusterStatus gets cluster status
+// GetClusterStatus gets cluster status.
 func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
 	s.cluster.Lock()
 	defer s.cluster.Unlock()

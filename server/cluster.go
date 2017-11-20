@@ -305,7 +305,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	}
 
 	// Check location labels.
-	for _, k := range c.s.cfg.Replication.LocationLabels {
+	for _, k := range c.cachedCluster.GetLocationLabels() {
 		if v := s.GetLabelValue(k); len(v) == 0 {
 			log.Warnf("missing location label %q in store %v", k, s)
 		}
