@@ -28,6 +28,7 @@ import (
 	"github.com/coreos/etcd/embed"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server/core"
@@ -283,6 +284,87 @@ func (s *Server) Run() error {
 	return nil
 }
 
+func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
+	clusterID := s.clusterID
+
+	log.Infof("try to bootstrap raft cluster %d with %v", clusterID, req)
+
+	if err := checkBootstrapRequest(clusterID, req); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	clusterMeta := metapb.Cluster{
+		Id:           clusterID,
+		MaxPeerCount: uint32(s.cfg.Replication.MaxReplicas),
+	}
+
+	// Set cluster meta
+	clusterValue, err := clusterMeta.Marshal()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	clusterRootPath := s.getClusterRootPath()
+
+	var ops []clientv3.Op
+	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
+
+	// Set bootstrap time
+	bootstrapKey := makeBootstrapTimeKey(clusterRootPath)
+	nano := time.Now().UnixNano()
+
+	timeData := uint64ToBytes(uint64(nano))
+	ops = append(ops, clientv3.OpPut(bootstrapKey, string(timeData)))
+
+	// Set store meta
+	storeMeta := req.GetStore()
+	storePath := makeStoreKey(clusterRootPath, storeMeta.GetId())
+	storeValue, err := storeMeta.Marshal()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	ops = append(ops, clientv3.OpPut(storePath, string(storeValue)))
+
+	regionValue, err := req.GetRegion().Marshal()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// Set region meta with region id.
+	regionPath := makeRegionKey(clusterRootPath, req.GetRegion().GetId())
+	ops = append(ops, clientv3.OpPut(regionPath, string(regionValue)))
+
+	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
+	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
+	resp, err := s.txn().If(bootstrapCmp).Then(ops...).Commit()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if !resp.Succeeded {
+		log.Warnf("cluster %d already bootstrapped", clusterID)
+		return nil, errors.Errorf("cluster %d already bootstrapped", clusterID)
+	}
+
+	log.Infof("bootstrap cluster %d ok", clusterID)
+
+	if err := s.cluster.start(); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return &pdpb.BootstrapResponse{}, nil
+}
+
+func (s *Server) createRaftCluster() error {
+	if s.cluster.isRunning() {
+		return nil
+	}
+
+	return s.cluster.start()
+}
+
+func (s *Server) stopRaftCluster() {
+	s.cluster.stop()
+}
+
 // GetAddr returns the server urls for clients.
 func (s *Server) GetAddr() string {
 	return s.cfg.AdvertiseClientUrls
@@ -328,4 +410,80 @@ func (s *Server) txn() clientv3.Txn {
 // the transaction can be executed only if the server is leader.
 func (s *Server) leaderTxn(cs ...clientv3.Cmp) clientv3.Txn {
 	return s.txn().If(append(cs, s.leaderCmp())...)
+}
+
+// GetConfig gets the config information.
+func (s *Server) GetConfig() *Config {
+	cfg := s.cfg.clone()
+	cfg.Schedule = *s.scheduleOpt.load()
+	cfg.Replication = *s.scheduleOpt.rep.load()
+	return cfg
+}
+
+// GetScheduleConfig gets the balance config information.
+func (s *Server) GetScheduleConfig() *ScheduleConfig {
+	cfg := &ScheduleConfig{}
+	*cfg = *s.scheduleOpt.load()
+	return cfg
+}
+
+// SetScheduleConfig sets the balance config information.
+func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
+	s.scheduleOpt.store(&cfg)
+	s.scheduleOpt.persist(s.kv)
+	log.Infof("schedule config is updated: %+v, old: %+v", cfg, s.cfg.Schedule)
+	s.cfg.Schedule = cfg
+}
+
+// GetReplicationConfig get the replication config
+func (s *Server) GetReplicationConfig() *ReplicationConfig {
+	cfg := &ReplicationConfig{}
+	*cfg = *s.scheduleOpt.rep.load()
+	return cfg
+}
+
+// SetReplicationConfig sets the replication config
+func (s *Server) SetReplicationConfig(cfg ReplicationConfig) {
+	s.scheduleOpt.rep.store(&cfg)
+	s.scheduleOpt.persist(s.kv)
+	log.Infof("replication config is updated: %+v, old: %+v", cfg, s.cfg.Replication)
+	s.cfg.Replication = cfg
+}
+
+func (s *Server) getClusterRootPath() string {
+	return path.Join(s.rootPath, "raft")
+}
+
+// GetRaftCluster gets raft cluster.
+// If cluster has not been bootstrapped, return nil.
+func (s *Server) GetRaftCluster() *RaftCluster {
+	if s.isClosed() || !s.cluster.isRunning() {
+		return nil
+	}
+	return s.cluster
+}
+
+// GetCluster gets cluster
+func (s *Server) GetCluster() *metapb.Cluster {
+	return &metapb.Cluster{
+		Id:           s.clusterID,
+		MaxPeerCount: uint32(s.cfg.Replication.MaxReplicas),
+	}
+}
+
+// GetClusterStatus gets cluster status
+func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
+	s.cluster.Lock()
+	defer s.cluster.Unlock()
+	err := s.cluster.loadClusterStatus()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	clone := &ClusterStatus{}
+	*clone = *s.cluster.status
+	return clone, nil
+}
+
+func (s *Server) getAllocIDPath() string {
+	return path.Join(s.rootPath, "alloc_id")
 }
