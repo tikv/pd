@@ -54,7 +54,6 @@ type client struct {
 	tag        uint64
 	clusterID  uint64
 	clientConn *grpc.ClientConn
-	pdClient   pdpb.PDClient
 
 	reportRegionHeartbeatCh  chan *core.RegionInfo
 	receiveRegionHeartbeatCh chan *pdpb.RegionHeartbeatResponse
@@ -80,7 +79,6 @@ func NewClient(pdAddr string, tag uint64) (Client, <-chan *pdpb.RegionHeartbeatR
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
-	c.pdClient = pdpb.NewPDClient(cc)
 	c.clientConn = cc
 	if err := c.initClusterID(); err != nil {
 		return nil, nil, errors.Trace(err)
@@ -90,6 +88,10 @@ func NewClient(pdAddr string, tag uint64) (Client, <-chan *pdpb.RegionHeartbeatR
 	go c.heartbeatStreamLoop()
 
 	return c, c.receiveRegionHeartbeatCh, nil
+}
+
+func (c *client) pdClient() pdpb.PDClient {
+	return pdpb.NewPDClient(c.clientConn)
 }
 
 func (c *client) initClusterID() error {
@@ -109,7 +111,7 @@ func (c *client) initClusterID() error {
 }
 
 func (c *client) getMembers(ctx context.Context) (*pdpb.GetMembersResponse, error) {
-	members, err := c.pdClient.GetMembers(ctx, &pdpb.GetMembersRequest{})
+	members, err := c.pdClient().GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -133,7 +135,7 @@ func (c *client) createHeartbeatStream() (pdpb.PD_RegionHeartbeatClient, context
 	)
 	for {
 		ctx, cancel = context.WithCancel(c.ctx)
-		stream, err = c.pdClient.RegionHeartbeat(ctx)
+		stream, err = c.pdClient().RegionHeartbeat(ctx)
 		if err != nil {
 			log.Errorf("[store %d][pd] create region heartbeat stream error: %v", c.tag, err)
 			cancel()
@@ -231,7 +233,7 @@ func (c *client) GetClusterID(context.Context) uint64 {
 
 func (c *client) AllocID(ctx context.Context) (uint64, error) {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	resp, err := c.pdClient.AllocID(ctx, &pdpb.AllocIDRequest{
+	resp, err := c.pdClient().AllocID(ctx, &pdpb.AllocIDRequest{
 		Header: c.requestHeader(),
 	})
 	cancel()
@@ -243,7 +245,7 @@ func (c *client) AllocID(ctx context.Context) (uint64, error) {
 
 func (c *client) Bootstrap(ctx context.Context, store *metapb.Store, region *metapb.Region) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	_, err := c.pdClient.Bootstrap(ctx, &pdpb.BootstrapRequest{
+	_, err := c.pdClient().Bootstrap(ctx, &pdpb.BootstrapRequest{
 		Header: c.requestHeader(),
 		Store:  store,
 		Region: region,
@@ -257,7 +259,7 @@ func (c *client) Bootstrap(ctx context.Context, store *metapb.Store, region *met
 
 func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	resp, err := c.pdClient.PutStore(ctx, &pdpb.PutStoreRequest{
+	resp, err := c.pdClient().PutStore(ctx, &pdpb.PutStoreRequest{
 		Header: c.requestHeader(),
 		Store:  store,
 	})
@@ -274,7 +276,7 @@ func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 
 func (c *client) StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	resp, err := c.pdClient.StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{
+	resp, err := c.pdClient().StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{
 		Header: c.requestHeader(),
 		Stats:  stats,
 	})
