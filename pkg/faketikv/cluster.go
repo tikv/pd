@@ -19,14 +19,14 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
-// ClusterInfo records all cluster information
+// ClusterInfo records all cluster information.
 type ClusterInfo struct {
 	*core.RegionsInfo
 	Nodes       map[uint64]*Node
 	firstRegion *core.RegionInfo
 }
 
-// GetBootstrapInfo returns first region and it's leader store
+// GetBootstrapInfo returns first region and its leader store.
 func (c *ClusterInfo) GetBootstrapInfo() (*metapb.Store, *metapb.Region) {
 	storeID := c.firstRegion.Leader.GetStoreId()
 	store := c.Nodes[storeID]
@@ -38,39 +38,46 @@ func (c *ClusterInfo) nodeHealth(storeID uint64) bool {
 	if !ok {
 		return false
 	}
-	return n.Store.GetState() == metapb.StoreState_Up
+
+	return n.GetState() == Up
 }
 
-func (c *ClusterInfo) stepLeader(region *core.RegionInfo) {
-	if c.nodeHealth(region.Leader.GetStoreId()) {
-		return
-	}
+func (c ClusterInfo) electNewLeader(region *core.RegionInfo) *metapb.Peer {
 	var (
-		newLeaderStoreID uint64
 		unhealth         int
+		newLeaderStoreID uint64
 	)
-
 	ids := region.GetStoreIds()
 	for id := range ids {
 		if c.nodeHealth(id) {
 			newLeaderStoreID = id
-			break
 		} else {
 			unhealth++
 		}
 	}
-	// TODO:records no leader region
 	if unhealth > len(ids)/2 {
-		return
+		return nil
 	}
 	for _, peer := range region.Peers {
 		if peer.GetStoreId() == newLeaderStoreID {
-			log.Info("[region %d]elect new leader: %+v,old leader: %+v", region.GetId(), peer, region.Leader)
-			region.Leader = peer
-			region.RegionEpoch.ConfVer++
-			break
+			return peer
 		}
 	}
+	return nil
+}
+
+func (c *ClusterInfo) stepLeader(region *core.RegionInfo) {
+	if region.Leader != nil && c.nodeHealth(region.Leader.GetStoreId()) {
+		return
+	}
+	newLeader := c.electNewLeader(region)
+	region.Leader = newLeader
+	if newLeader == nil {
+		c.SetRegion(region)
+		log.Infof("[region %d] no leader", region.GetId())
+		return
+	}
+	log.Info("[region %d] elect new leader: %+v,old leader: %+v", region.GetId(), newLeader, region.Leader)
 	c.SetRegion(region)
 	c.reportRegionChange(region.GetId())
 }
@@ -89,8 +96,10 @@ func (c *ClusterInfo) stepRegions() {
 	}
 }
 
-// AddTask adds task in specify node
+// AddTask adds task in specify node.
 func (c *ClusterInfo) AddTask(task Task) {
 	storeID := task.TargetStoreID()
-	c.Nodes[storeID].AddTask(task)
+	if n, ok := c.Nodes[storeID]; ok {
+		n.AddTask(task)
+	}
 }

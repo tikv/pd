@@ -32,8 +32,8 @@ func (l *localAlloc) AllocID() (uint64, error) {
 	return l.id, nil
 }
 
-// Initializer define an Init interface.
-// we can implements differet case to initailize cluster.
+// Initializer defines an Init interface.
+// we can implement different case to initialize cluster.
 type Initializer interface {
 	Init(args ...string) *ClusterInfo
 }
@@ -50,7 +50,7 @@ func NewTiltCase() *TiltCase {
 	return &TiltCase{alloc: &localAlloc{}}
 }
 
-// Init implement Initializer
+// Init implement Initializer.
 func (c *TiltCase) Init(addr string, args ...string) *ClusterInfo {
 	path := args[0]
 	err := c.parser(path)

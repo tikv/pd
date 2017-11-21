@@ -44,6 +44,10 @@ type Cluster interface {
 	RegionWriteStats() []*core.RegionStat
 	RegionReadStats() []*core.RegionStat
 
+	// get config methods
+	GetOpt() NamespaceOptions
+	Options
+
 	// TODO: it should be removed. Schedulers don't need to know anything
 	// about peers.
 	AllocPeer(storeID uint64) (*metapb.Peer, error)
@@ -59,11 +63,11 @@ type Scheduler interface {
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)
 	Schedule(cluster Cluster, opInfluence OpInfluence) *Operator
-	IsScheduleAllowed() bool
+	IsScheduleAllowed(cluster Cluster) bool
 }
 
 // CreateSchedulerFunc is for creating scheudler.
-type CreateSchedulerFunc func(opt Options, limiter *Limiter, args []string) (Scheduler, error)
+type CreateSchedulerFunc func(limiter *Limiter, args []string) (Scheduler, error)
 
 var schedulerMap = make(map[string]CreateSchedulerFunc)
 
@@ -77,12 +81,12 @@ func RegisterScheduler(name string, createFn CreateSchedulerFunc) {
 }
 
 // CreateScheduler creates a scheduler with registered creator func.
-func CreateScheduler(name string, opt Options, limiter *Limiter, args ...string) (Scheduler, error) {
+func CreateScheduler(name string, limiter *Limiter, args ...string) (Scheduler, error) {
 	fn, ok := schedulerMap[name]
 	if !ok {
 		return nil, errors.Errorf("create func of %v is not registered", name)
 	}
-	return fn(opt, limiter, args)
+	return fn(limiter, args)
 }
 
 // Limiter a counter that limits the number of operators

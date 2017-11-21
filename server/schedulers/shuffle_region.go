@@ -19,28 +19,26 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("shuffle-region", func(opt schedule.Options, limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
-		return newShuffleRegionScheduler(opt, limiter), nil
+	schedule.RegisterScheduler("shuffle-region", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+		return newShuffleRegionScheduler(limiter), nil
 	})
 }
 
 type shuffleRegionScheduler struct {
 	*baseScheduler
-	opt      schedule.Options
 	selector schedule.Selector
 }
 
 // newShuffleRegionScheduler creates an admin scheduler that shuffles regions
 // between stores.
-func newShuffleRegionScheduler(opt schedule.Options, limiter *schedule.Limiter) schedule.Scheduler {
+func newShuffleRegionScheduler(limiter *schedule.Limiter) schedule.Scheduler {
 	filters := []schedule.Filter{
-		schedule.NewStateFilter(opt),
-		schedule.NewHealthFilter(opt),
+		schedule.NewStateFilter(),
+		schedule.NewHealthFilter(),
 	}
 	base := newBaseScheduler(limiter)
 	return &shuffleRegionScheduler{
 		baseScheduler: base,
-		opt:           opt,
 		selector:      schedule.NewRandomSelector(filters),
 	}
 }
@@ -53,8 +51,8 @@ func (s *shuffleRegionScheduler) GetType() string {
 	return "shuffle-region"
 }
 
-func (s *shuffleRegionScheduler) IsScheduleAllowed() bool {
-	return s.limiter.OperatorCount(core.RegionKind) < s.opt.GetRegionScheduleLimit()
+func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+	return s.limiter.OperatorCount(core.RegionKind) < cluster.GetRegionScheduleLimit()
 }
 
 func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {

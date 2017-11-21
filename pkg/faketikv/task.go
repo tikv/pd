@@ -20,7 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-// Task running in node
+// Task running in node.
 type Task interface {
 	Desc() string
 	RegionID() uint64
@@ -138,6 +138,7 @@ func (a *addPeer) Step(cluster *ClusterInfo) {
 			region.RegionEpoch.ConfVer++
 			cluster.SetRegion(region)
 		}
+		a.finished = true
 	}
 }
 
@@ -186,6 +187,7 @@ func (a *removePeer) Step(cluster *ClusterInfo) {
 				break
 			}
 		}
+		a.finished = true
 	}
 }
 
@@ -200,3 +202,7 @@ func (a *removePeer) RegionID() uint64 {
 func (a *removePeer) IsFinished() bool {
 	return a.finished
 }
+
+type writeRegion struct{}
+
+type readRegion struct{}

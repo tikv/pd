@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 )
 
@@ -43,19 +44,21 @@ type clusterInfo struct {
 	kv            *core.KV
 	meta          *metapb.Cluster
 	activeRegions int
+	opt           *scheduleOption
 }
 
-func newClusterInfo(id core.IDAllocator) *clusterInfo {
+func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clusterInfo {
 	return &clusterInfo{
 		BasicCluster: schedule.NewBasicCluster(),
 		id:           id,
+		opt:          opt,
+		kv:           kv,
 	}
 }
 
 // Return nil if cluster is not bootstrapped.
-func loadClusterInfo(id core.IDAllocator, kv *core.KV) (*clusterInfo, error) {
-	c := newClusterInfo(id)
-	c.kv = kv
+func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*clusterInfo, error) {
+	c := newClusterInfo(id, opt, kv)
 
 	c.meta = &metapb.Cluster{}
 	ok, err := kv.LoadMeta(c.meta)
@@ -445,4 +448,48 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	c.BasicCluster.UpdateReadStatus(region)
 
 	return nil
+}
+
+func (c *clusterInfo) GetOpt() schedule.NamespaceOptions {
+	return c.opt
+}
+
+func (c *clusterInfo) GetLeaderScheduleLimit() uint64 {
+	return c.opt.GetLeaderScheduleLimit(namespace.DefaultNamespace)
+}
+
+func (c *clusterInfo) GetRegionScheduleLimit() uint64 {
+	return c.opt.GetRegionScheduleLimit(namespace.DefaultNamespace)
+}
+
+func (c *clusterInfo) GetReplicaScheduleLimit() uint64 {
+	return c.opt.GetReplicaScheduleLimit(namespace.DefaultNamespace)
+}
+
+func (c *clusterInfo) GetTolerantSizeRatio() float64 {
+	return c.opt.GetTolerantSizeRatio()
+}
+
+func (c *clusterInfo) GetMaxSnapshotCount() uint64 {
+	return c.opt.GetMaxSnapshotCount()
+}
+
+func (c *clusterInfo) GetMaxPendingPeerCount() uint64 {
+	return c.opt.GetMaxPendingPeerCount()
+}
+
+func (c *clusterInfo) GetMaxStoreDownTime() time.Duration {
+	return c.opt.GetMaxStoreDownTime()
+}
+
+func (c *clusterInfo) GetMaxReplicas() int {
+	return c.opt.GetMaxReplicas(namespace.DefaultNamespace)
+}
+
+func (c *clusterInfo) GetLocationLabels() []string {
+	return c.opt.GetLocationLabels()
+}
+
+func (c *clusterInfo) GetHotRegionLowThreshold() int {
+	return c.opt.GetHotRegionLowThreshold()
 }

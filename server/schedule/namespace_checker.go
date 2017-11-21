@@ -21,21 +21,19 @@ import (
 
 // NamespaceChecker ensures region to go to the right place.
 type NamespaceChecker struct {
-	opt        Options
 	cluster    Cluster
 	filters    []Filter
 	classifier namespace.Classifier
 }
 
 // NewNamespaceChecker creates a namespace checker.
-func NewNamespaceChecker(opt Options, cluster Cluster, classifier namespace.Classifier) *NamespaceChecker {
+func NewNamespaceChecker(cluster Cluster, classifier namespace.Classifier) *NamespaceChecker {
 	filters := []Filter{
-		NewHealthFilter(opt),
-		NewSnapshotCountFilter(opt),
+		NewHealthFilter(),
+		NewSnapshotCountFilter(),
 	}
 
 	return &NamespaceChecker{
-		opt:        opt,
 		cluster:    cluster,
 		filters:    filters,
 		classifier: classifier,
@@ -85,14 +83,14 @@ func (n *NamespaceChecker) SelectBestPeerToRelocate(region *core.RegionInfo, tar
 // SelectBestStoreToRelocate randomly returns the store to relocate
 func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, targets []*core.StoreInfo, filters ...Filter) uint64 {
 	newFilters := []Filter{
-		NewStateFilter(n.opt),
-		NewStorageThresholdFilter(n.opt),
+		NewStateFilter(),
+		NewStorageThresholdFilter(),
 		NewExcludedFilter(nil, region.GetStoreIds()),
 	}
 	filters = append(filters, newFilters...)
 
 	selector := NewRandomSelector(n.filters)
-	target := selector.SelectTarget(targets, filters...)
+	target := selector.SelectTarget(n.cluster, targets, filters...)
 	if target == nil {
 		return 0
 	}
@@ -119,7 +117,7 @@ func (n *NamespaceChecker) filter(stores []*core.StoreInfo, filters ...Filter) [
 	result := make([]*core.StoreInfo, 0)
 
 	for _, store := range stores {
-		if FilterTarget(store, filters) {
+		if FilterTarget(n.cluster, store, filters) {
 			continue
 		}
 		result = append(result, store)

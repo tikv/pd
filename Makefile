@@ -8,6 +8,7 @@ TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
 GOFILTER := grep -vE 'vendor|testutil'
 GOCHECKER := $(GOFILTER) | awk '{ print } END { if (NR > 0) { exit 1 } }'
 
+LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --dirty)"
 LDFLAGS += -X "$(PD_PKG)/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "$(PD_PKG)/server.PDGitHash=$(shell git rev-parse HEAD)"
 LDFLAGS += -X "$(PD_PKG)/server.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
@@ -25,17 +26,17 @@ dev: build check test
 
 build:
 ifeq ("$(WITH_RACE)", "1")
-	GOPATH=$(VENDOR) ENABLE_CGO=1 go build -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	GOPATH=$(VENDOR) CGO_ENABLED=1 go build -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 else
-	GOPATH=$(VENDOR) go build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	GOPATH=$(VENDOR) CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
-	GOPATH=$(VENDOR) go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl cmd/pd-ctl/main.go
-	GOPATH=$(VENDOR) go build -o bin/pd-tso-bench cmd/pd-tso-bench/main.go
-	GOPATH=$(VENDOR) go build -o bin/pd-recover cmd/pd-recover/main.go
+	GOPATH=$(VENDOR) CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl cmd/pd-ctl/main.go
+	GOPATH=$(VENDOR) CGO_ENABLED=0 go build -o bin/pd-tso-bench cmd/pd-tso-bench/main.go
+	GOPATH=$(VENDOR) CGO_ENABLED=0 go build -o bin/pd-recover cmd/pd-recover/main.go
 
 test:
 	# testing..
-	@GOPATH=$(VENDOR) ENABLE_CGO=1 go test -race -cover $(TEST_PKGS)
+	@GOPATH=$(VENDOR) CGO_ENABLED=1 go test -race -cover $(TEST_PKGS)
 
 check:
 	go get github.com/golang/lint/golint
