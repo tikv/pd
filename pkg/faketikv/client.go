@@ -147,7 +147,7 @@ func (c *client) createHeartbeatStream() (pdpb.PD_RegionHeartbeatClient, context
 					continue
 				case <-c.ctx.Done():
 					log.Info("cancel create stream loop")
-					return nil, ctx, context
+					return nil, ctx, cacel
 				}
 			}
 		}
@@ -181,11 +181,7 @@ func (c *client) heartbeatStreamLoop() {
 }
 
 func (c *client) receiveRegionHeartbeat(ctx context.Context, stream pdpb.PD_RegionHeartbeatClient, errCh chan error, wg *sync.WaitGroup) {
-	log.Infof("[store %d] create receive goroutine", c.tag)
-	defer func() {
-		wg.Done()
-		log.Infof("[store %d] exit receive goroutine", c.tag)
-	}()
+	defer wg.Done()
 	for {
 		resp, err := stream.Recv()
 		if err != nil {
@@ -201,11 +197,7 @@ func (c *client) receiveRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regi
 }
 
 func (c *client) reportRegionHeartbeat(ctx context.Context, stream pdpb.PD_RegionHeartbeatClient, errCh chan error, wg *sync.WaitGroup) {
-	log.Infof("[store %d] create report goroutine", c.tag)
-	defer func() {
-		wg.Done()
-		log.Infof("[store %d] exit report goroutine", c.tag)
-	}()
+	defer wg.Done()
 	for {
 		select {
 		case region := <-c.reportRegionHeartbeatCh:
