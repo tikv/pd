@@ -47,10 +47,6 @@ const (
 var (
 	// errFailInitClusterID is returned when failed to load clusterID from all supplied PD addresses.
 	errFailInitClusterID = errors.New("[pd] failed to get cluster id")
-	// errClosing is returned when request is canceled when client is closing.
-	errClosing = errors.New("[pd] closing")
-	// errTSOLength is returned when the number of response timestamps is inconsistent with request.
-	errTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
 )
 
 type client struct {
@@ -136,19 +132,17 @@ func (c *client) createHeartbeatStream() (pdpb.PD_RegionHeartbeatClient, context
 		ctx    context.Context
 	)
 	for {
-		if stream == nil {
-			ctx, cancel = context.WithCancel(c.ctx)
-			stream, err = c.pdClient.RegionHeartbeat(ctx)
-			if err != nil {
-				log.Errorf("[store %d][pd] create region heartbeat stream error: %v", c.tag, err)
-				cancel()
-				select {
-				case <-time.After(time.Second):
-					continue
-				case <-c.ctx.Done():
-					log.Info("cancel create stream loop")
-					return nil, ctx, cancel
-				}
+		ctx, cancel = context.WithCancel(c.ctx)
+		stream, err = c.pdClient.RegionHeartbeat(ctx)
+		if err != nil {
+			log.Errorf("[store %d][pd] create region heartbeat stream error: %v", c.tag, err)
+			cancel()
+			select {
+			case <-time.After(time.Second):
+				continue
+			case <-c.ctx.Done():
+				log.Info("cancel create stream loop")
+				return nil, ctx, cancel
 			}
 		}
 		break
