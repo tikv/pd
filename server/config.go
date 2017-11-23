@@ -17,9 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
-	"reflect"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -28,8 +26,7 @@ import (
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/namespace"
 )
 
 // Config is the pd server configuration.
@@ -73,6 +70,8 @@ type Config struct {
 	Schedule ScheduleConfig `toml:"schedule" json:"schedule"`
 
 	Replication ReplicationConfig `toml:"replication" json:"replication"`
+
+	Namespace map[string]NamespaceConfig `json:"namespace"`
 
 	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
 	// the default size is 2GB, the maximum is 8GB.
@@ -124,6 +123,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.BoolVar(&cfg.Log.File.LogRotate, "log-rotate", true, "rotate log")
 	fs.StringVar(&cfg.NamespaceClassifier, "namespace-classifier", "default", "namespace classifier (default 'default')")
+	cfg.Namespace = make(map[string]NamespaceConfig)
 
 	return cfg
 }
@@ -398,136 +398,32 @@ func (c *ReplicationConfig) adjust() {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 }
 
-// scheduleOption is a wrapper to access the configuration safely.
-type scheduleOption struct {
-	v   atomic.Value
-	rep *Replication
+// NamespaceConfig is to overwrite the global setting for specific namespace
+type NamespaceConfig struct {
+	// LeaderScheduleLimit is the max coexist leader schedules.
+	LeaderScheduleLimit uint64 `json:"leader-schedule-limit"`
+	// RegionScheduleLimit is the max coexist region schedules.
+	RegionScheduleLimit uint64 `json:"region-schedule-limit"`
+	// ReplicaScheduleLimit is the max coexist replica schedules.
+	ReplicaScheduleLimit uint64 `json:"replica-schedule-limit"`
+	// MaxReplicas is the number of replicas for each region.
+	MaxReplicas uint64 `json:"max-replicas"`
 }
 
-func newScheduleOption(cfg *Config) *scheduleOption {
-	o := &scheduleOption{}
-	o.store(&cfg.Schedule)
-	o.rep = newReplication(&cfg.Replication)
-	return o
-}
-
-func (o *scheduleOption) load() *ScheduleConfig {
-	return o.v.Load().(*ScheduleConfig)
-}
-
-func (o *scheduleOption) store(cfg *ScheduleConfig) {
-	o.v.Store(cfg)
-}
-
-func (o *scheduleOption) GetReplication() *Replication {
-	return o.rep
-}
-
-func (o *scheduleOption) GetMaxReplicas() int {
-	return o.rep.GetMaxReplicas()
-}
-
-func (o *scheduleOption) GetLocationLabels() []string {
-	return o.rep.GetLocationLabels()
-}
-
-func (o *scheduleOption) SetMaxReplicas(replicas int) {
-	o.rep.SetMaxReplicas(replicas)
-}
-
-func (o *scheduleOption) GetMaxSnapshotCount() uint64 {
-	return o.load().MaxSnapshotCount
-}
-
-func (o *scheduleOption) GetMaxPendingPeerCount() uint64 {
-	return o.load().MaxPendingPeerCount
-}
-
-func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
-	return o.load().MaxStoreDownTime.Duration
-}
-
-func (o *scheduleOption) GetLeaderScheduleLimit() uint64 {
-	return o.load().LeaderScheduleLimit
-}
-
-func (o *scheduleOption) GetRegionScheduleLimit() uint64 {
-	return o.load().RegionScheduleLimit
-}
-
-func (o *scheduleOption) GetReplicaScheduleLimit() uint64 {
-	return o.load().ReplicaScheduleLimit
-}
-
-func (o *scheduleOption) GetTolerantSizeRatio() float64 {
-	return o.load().TolerantSizeRatio
-}
-
-func (o *scheduleOption) GetSchedulers() SchedulerConfigs {
-	return o.load().Schedulers
-}
-
-func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) error {
-	c := o.load()
-	v := c.clone()
-	for _, schedulerCfg := range v.Schedulers {
-		// comparing args is to cover the case that there are schedulers in same type but not with same name
-		// such as two schedulers of type "evict-leader",
-		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
-		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{tp, args}) {
-			return nil
-		}
+func (c *NamespaceConfig) clone() *NamespaceConfig {
+	return &NamespaceConfig{
+		LeaderScheduleLimit:  c.LeaderScheduleLimit,
+		RegionScheduleLimit:  c.RegionScheduleLimit,
+		ReplicaScheduleLimit: c.ReplicaScheduleLimit,
+		MaxReplicas:          c.MaxReplicas,
 	}
-	v.Schedulers = append(v.Schedulers, SchedulerConfig{Type: tp, Args: args})
-	o.store(v)
-	return nil
 }
 
-func (o *scheduleOption) RemoveSchedulerCfg(name string) error {
-	c := o.load()
-	v := c.clone()
-	for i, schedulerCfg := range v.Schedulers {
-		// To create a temporary scheduler is just used to get scheduler's name
-		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, schedule.NewLimiter(), schedulerCfg.Args...)
-		if err != nil {
-			return errors.Trace(err)
-		}
-		if tmp.GetName() == name {
-			v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
-			o.store(v)
-			return nil
-		}
-	}
-	return nil
-}
-
-func (o *scheduleOption) persist(kv *core.KV) error {
-	cfg := &Config{
-		Schedule:    *o.load(),
-		Replication: *o.rep.load(),
-	}
-	err := kv.SaveConfig(cfg)
-	return errors.Trace(err)
-}
-
-func (o *scheduleOption) reload(kv *core.KV) error {
-	cfg := &Config{
-		Schedule:    *o.load(),
-		Replication: *o.rep.load(),
-	}
-	isExist, err := kv.LoadConfig(cfg)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	if isExist {
-		o.store(&cfg.Schedule)
-		o.rep.store(&cfg.Replication)
-	}
-	return nil
-}
-
-func (o *scheduleOption) GetHotRegionLowThreshold() int {
-	return schedule.HotRegionLowThreshold
+func (c *NamespaceConfig) adjust(opt *scheduleOption) {
+	adjustUint64(&c.LeaderScheduleLimit, opt.GetLeaderScheduleLimit(namespace.DefaultNamespace))
+	adjustUint64(&c.RegionScheduleLimit, opt.GetRegionScheduleLimit(namespace.DefaultNamespace))
+	adjustUint64(&c.ReplicaScheduleLimit, opt.GetReplicaScheduleLimit(namespace.DefaultNamespace))
+	adjustUint64(&c.MaxReplicas, uint64(opt.GetMaxReplicas(namespace.DefaultNamespace)))
 }
 
 // ParseUrls parse a string into multiple urls.

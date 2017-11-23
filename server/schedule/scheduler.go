@@ -45,6 +45,7 @@ type Cluster interface {
 	RegionReadStats() []*core.RegionStat
 
 	// get config methods
+	GetOpt() NamespaceOptions
 	Options
 
 	// TODO: it should be removed. Schedulers don't need to know anything
