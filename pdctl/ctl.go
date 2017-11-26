@@ -68,7 +68,7 @@ func Start(args []string) {
 	rootCmd.SetUsageTemplate(command.UsageTemplate)
 
 	if len(commandFlags.tlsCAPath) != 0 {
-		if err := command.InitHttpsClient(commandFlags.tlsCAPath, commandFlags.tlsCertPath, commandFlags.tlsKeyPath); err != nil {
+		if err := command.InitHTTPSClient(commandFlags.tlsCAPath, commandFlags.tlsCertPath, commandFlags.tlsKeyPath); err != nil {
 			fmt.Println(err)
 			return
 		}

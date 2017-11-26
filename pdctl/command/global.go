@@ -36,8 +36,8 @@ var (
 	errInvalidAddr = errors.New("Invalid pd address, Cannot get connect to it")
 )
 
-// InitHttpsClient creates https client with ca file
-func InitHttpsClient(tlsCAPath, tlsCertPath, tlsKeyPath string) error {
+// InitHTTPSClient creates https client with ca file
+func InitHTTPSClient(tlsCAPath, tlsCertPath, tlsKeyPath string) error {
 	certificates := []tls.Certificate{}
 	if len(tlsCertPath) != 0 && len(tlsKeyPath) != 0 {
 		// Load the client certificates from disk
