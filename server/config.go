@@ -85,6 +85,13 @@ type Config struct {
 	// ElectionInterval is the interval for etcd Raft election.
 	ElectionInterval typeutil.Duration `toml:"election-interval"`
 
+	TLSCAPath         string `json:"tls-ca-path" toml:"tls-ca-path"`
+	TLSCertPath       string `json:"tls-cert-path" toml:"tls-cert-path"`
+	TLSKeyPath        string `json:"tls-key-path" toml:"tls-key-path"`
+	ClientCertAuth    bool   `json:"client-cert-auth" toml:"client-cert-auth"`
+	TLSClientCertPath string `json:"tls-client-cert-path" toml:"tls-client-cert-path"`
+	TLSClientKeyPath  string `json:"tls-client-key-path" toml:"tls-client-key-path"`
+
 	configFile string
 
 	// For all warnings during parsing.
@@ -123,6 +130,14 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.BoolVar(&cfg.Log.File.LogRotate, "log-rotate", true, "rotate log")
 	fs.StringVar(&cfg.NamespaceClassifier, "namespace-classifier", "default", "namespace classifier (default 'default')")
+
+	fs.StringVar(&cfg.TLSCAPath, "tls-ca", "", "Path of file that contains list of trusted TLS CAs")
+	fs.StringVar(&cfg.TLSCertPath, "tls-cert", "", "Path of file that contains X509 certificate in PEM format")
+	fs.StringVar(&cfg.TLSKeyPath, "tls-key", "", "Path of file that contains X509 key in PEM format")
+	fs.BoolVar(&cfg.ClientCertAuth, "client-cert-auth", false, "whether client authentication is enabled")
+	fs.StringVar(&cfg.TLSClientCertPath, "tls-client-cert", "", "Path of file that contains X509 certificate in PEM format")
+	fs.StringVar(&cfg.TLSClientKeyPath, "tls-client-key", "", "Path of file that contains X509 key in PEM format")
+
 	cfg.Namespace = make(map[string]NamespaceConfig)
 
 	return cfg
@@ -457,6 +472,12 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ElectionMs = uint(c.ElectionInterval.Duration / time.Millisecond)
 	cfg.AutoCompactionRetention = c.AutoCompactionRetention
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
+
+	cfg.ClientTLSInfo.ClientCertAuth = c.ClientCertAuth
+	cfg.ClientTLSInfo.TrustedCAFile = c.TLSCAPath
+	cfg.ClientTLSInfo.CertFile = c.TLSCertPath
+	cfg.ClientTLSInfo.KeyFile = c.TLSKeyPath
+	cfg.PeerAutoTLS = len(c.TLSCAPath) != 0
 
 	var err error
 

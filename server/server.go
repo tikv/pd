@@ -14,6 +14,7 @@
 package server
 
 import (
+	"crypto/tls"
 	"math/rand"
 	"net/http"
 	"path"
@@ -26,6 +27,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/embed"
+	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -120,6 +122,10 @@ func (s *Server) startEtcd() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+
+	// Wait until etcd is ready for use
+	<-etcd.Server.ReadyNotify()
+
 	// Check cluster ID
 	urlmap, err := types.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
@@ -131,14 +137,19 @@ func (s *Server) startEtcd() error {
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
 	log.Infof("create etcd v3 client with endpoints %v", endpoints)
+
+	tlsConfig, err := s.GetTLSConfig()
+	if err != nil {
+		return errors.Trace(err)
+	}
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: etcdTimeout,
+		TLS:         tlsConfig,
 	})
 	if err != nil {
 		return errors.Trace(err)
 	}
-
 	if err = etcdutil.WaitEtcdStart(client, endpoints[0]); err != nil {
 		// See https://github.com/coreos/etcd/issues/6067
 		// Here may return "not capable" error because we don't start
@@ -543,4 +554,18 @@ func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
 
 func (s *Server) getAllocIDPath() string {
 	return path.Join(s.rootPath, "alloc_id")
+}
+
+// GetTLSConfig gets tls config.
+func (s *Server) GetTLSConfig() (*tls.Config, error) {
+	tlsInfo := transport.TLSInfo{
+		CertFile:      s.cfg.TLSClientCertPath,
+		KeyFile:       s.cfg.TLSClientKeyPath,
+		TrustedCAFile: s.cfg.TLSCAPath,
+	}
+	tlsConfig, err := tlsInfo.ClientConfig()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return tlsConfig, nil
 }

@@ -17,6 +17,19 @@ initial-cluster-state = "new"
 lease = 3
 tso-save-interval = "3s"
 
+# Path of file that contains list of trusted SSL CAs.
+tls-ca-path = ""
+# Path of file that contains X509 certificate in PEM format.
+tls-cert-path = ""
+# Path of file that contains X509 key in PEM format.
+tls-key-path = ""
+# enable client certificate auth, if true following two settings shouldn't be empty
+client-cert-auth = false
+# Path of file that contains X509 certificate in PEM format for client auth.
+# tls-client-cert-path = ""
+# Path of file that contains X509 key in PEM format for client auth.
+# tls-client-key-path = ""
+
 [log]
 level = "info"
 
@@ -68,3 +81,4 @@ max-replicas = 3
 # For example, ["zone", "rack"] means that we should place replicas to
 # different zones first, then to different racks if we don't have enough zones.
 location-labels = []
+

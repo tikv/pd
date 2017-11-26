@@ -15,6 +15,8 @@ package command
 
 import (
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,19 +25,51 @@ import (
 	"net/url"
 	"os"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
-	"github.com/pingcap/pd/pd-client"
 	"github.com/spf13/cobra"
 )
 
 var (
-	pdClient   pd.Client
 	dailClient = &http.Client{}
 
 	pingPrefix     = "pd/ping"
 	errInvalidAddr = errors.New("Invalid pd address, Cannot get connect to it")
 )
+
+// InitHttpsClient creates https client with ca file
+func InitHttpsClient(tlsCAPath, tlsCertPath, tlsKeyPath string) error {
+	certificates := []tls.Certificate{}
+	if len(tlsCertPath) != 0 && len(tlsKeyPath) != 0 {
+		// Load the client certificates from disk
+		certificate, err := tls.LoadX509KeyPair(tlsCertPath, tlsKeyPath)
+		if err != nil {
+			return errors.Errorf("could not load client key pair: %s", err)
+		}
+		certificates = append(certificates, certificate)
+	}
+
+	// Create a certificate pool from the certificate authority
+	certPool := x509.NewCertPool()
+	ca, err := ioutil.ReadFile(tlsCAPath)
+	if err != nil {
+		return errors.Errorf("could not read ca certificate: %s", err)
+	}
+
+	// Append the certificates from the CA
+	if ok := certPool.AppendCertsFromPEM(ca); !ok {
+		return errors.New("failed to append ca certs")
+	}
+
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			Certificates: certificates,
+			RootCAs:      certPool,
+		},
+	}
+	dailClient = &http.Client{Transport: tr}
+
+	return nil
+}
 
 func getRequest(cmd *cobra.Command, prefix string, method string, bodyType string, body io.Reader) (*http.Request, error) {
 	if method == "" {
@@ -80,34 +114,6 @@ func doRequest(cmd *cobra.Command, prefix string, method string) (string, error)
 func genResponseError(r *http.Response) error {
 	res, _ := ioutil.ReadAll(r.Body)
 	return errors.Errorf("[%d] %s", r.StatusCode, res)
-}
-
-// InitPDClient initialize pd client from cmd
-func InitPDClient(cmd *cobra.Command) error {
-	addr, err := cmd.Flags().GetString("pd")
-	if err != nil {
-		return err
-	}
-	log.SetOutput(ioutil.Discard)
-	if pdClient != nil {
-		return nil
-	}
-	err = validPDAddr(addr)
-	if err != nil {
-		return err
-	}
-	pdClient, err = pd.NewClient([]string{addr})
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func getClient() (pd.Client, error) {
-	if pdClient == nil {
-		return nil, errors.New("Must initialized pdClient firstly")
-	}
-	return pdClient, nil
 }
 
 func getAddressFromCmd(cmd *cobra.Command, prefix string) string {

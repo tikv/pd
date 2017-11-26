@@ -14,6 +14,10 @@
 package pd
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"io/ioutil"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 // Client is a PD (Placement Driver) client.
@@ -93,10 +98,14 @@ type client struct {
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	tlsCAPath   string
+	tlsCertPath string
+	tlsKeyPath  string
 }
 
 // NewClient creates a PD client.
-func NewClient(pdAddrs []string) (Client, error) {
+func NewClient(pdAddrs []string, tlsCAPath, tlsCertPath, tlsKeyPath string) (Client, error) {
 	log.Infof("[pd] create pd client with endpoints %v", pdAddrs)
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &client{
@@ -106,6 +115,9 @@ func NewClient(pdAddrs []string) (Client, error) {
 		checkLeaderCh: make(chan struct{}, 1),
 		ctx:           ctx,
 		cancel:        cancel,
+		tlsCAPath:     tlsCAPath,
+		tlsCertPath:   tlsCertPath,
+		tlsKeyPath:    tlsKeyPath,
 	}
 	c.connMu.clientConns = make(map[string]*grpc.ClientConn)
 
@@ -213,11 +225,46 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 		return conn, nil
 	}
 
-	cc, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure()) // TODO: Support HTTPS.
+	opt := grpc.WithInsecure()
+	if len(c.tlsCAPath) != 0 {
+
+		certificates := []tls.Certificate{}
+		if len(c.tlsCertPath) != 0 && len(c.tlsKeyPath) != 0 {
+			// Load the client certificates from disk
+			certificate, err := tls.LoadX509KeyPair(c.tlsCertPath, c.tlsKeyPath)
+			if err != nil {
+				return nil, errors.Errorf("could not load client key pair: %s", err)
+			}
+			certificates = append(certificates, certificate)
+		}
+
+		// Create a certificate pool from the certificate authority
+		certPool := x509.NewCertPool()
+		ca, err := ioutil.ReadFile(c.tlsCAPath)
+		if err != nil {
+			return nil, errors.Errorf("could not read ca certificate: %s", err)
+		}
+
+		// Append the certificates from the CA
+		if ok := certPool.AppendCertsFromPEM(ca); !ok {
+			return nil, errors.New("failed to append ca certs")
+		}
+
+		creds := credentials.NewTLS(&tls.Config{
+			Certificates: certificates,
+			RootCAs:      certPool,
+		})
+
+		opt = grpc.WithTransportCredentials(creds)
+	}
+	u, err := url.Parse(addr)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-
+	cc, err := grpc.Dial(u.Host, opt)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
 	if old, ok := c.connMu.clientConns[addr]; ok {
