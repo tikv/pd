@@ -99,13 +99,18 @@ type client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	tlsCAPath   string
-	tlsCertPath string
-	tlsKeyPath  string
+	security SecurityOption
+}
+
+// SecurityOption records options about tls
+type SecurityOption struct {
+	TlsCAPath   string
+	TlsCertPath string
+	TlsKeyPath  string
 }
 
 // NewClient creates a PD client.
-func NewClient(pdAddrs []string, tlsCAPath, tlsCertPath, tlsKeyPath string) (Client, error) {
+func NewClient(pdAddrs []string, security SecurityOption) (Client, error) {
 	log.Infof("[pd] create pd client with endpoints %v", pdAddrs)
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &client{
@@ -115,9 +120,7 @@ func NewClient(pdAddrs []string, tlsCAPath, tlsCertPath, tlsKeyPath string) (Cli
 		checkLeaderCh: make(chan struct{}, 1),
 		ctx:           ctx,
 		cancel:        cancel,
-		tlsCAPath:     tlsCAPath,
-		tlsCertPath:   tlsCertPath,
-		tlsKeyPath:    tlsKeyPath,
+		security:      security,
 	}
 	c.connMu.clientConns = make(map[string]*grpc.ClientConn)
 
@@ -226,12 +229,12 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 	}
 
 	opt := grpc.WithInsecure()
-	if len(c.tlsCAPath) != 0 {
+	if len(c.security.TlsCAPath) != 0 {
 
 		certificates := []tls.Certificate{}
-		if len(c.tlsCertPath) != 0 && len(c.tlsKeyPath) != 0 {
+		if len(c.security.TlsCertPath) != 0 && len(c.security.TlsKeyPath) != 0 {
 			// Load the client certificates from disk
-			certificate, err := tls.LoadX509KeyPair(c.tlsCertPath, c.tlsKeyPath)
+			certificate, err := tls.LoadX509KeyPair(c.security.TlsCertPath, c.security.TlsKeyPath)
 			if err != nil {
 				return nil, errors.Errorf("could not load client key pair: %s", err)
 			}
@@ -240,7 +243,7 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 
 		// Create a certificate pool from the certificate authority
 		certPool := x509.NewCertPool()
-		ca, err := ioutil.ReadFile(c.tlsCAPath)
+		ca, err := ioutil.ReadFile(c.security.TlsCAPath)
 		if err != nil {
 			return nil, errors.Errorf("could not read ca certificate: %s", err)
 		}

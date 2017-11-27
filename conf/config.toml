@@ -18,15 +18,15 @@ lease = 3
 tso-save-interval = "3s"
 
 # Path of file that contains list of trusted SSL CAs. if set, following four settings shouldn't be empty
-tls-cacert-path = "/Users/Connor/cfssl/ca.pem"
+tls-cacert-path = ""
 # Path of file that contains X509 certificate in PEM format.
-tls-cert-path = "/Users/Connor/cfssl/server.pem"
+tls-cert-path = ""
 # Path of file that contains X509 key in PEM format.
-tls-key-path = "/Users/Connor/cfssl/server-key.pem"
+tls-key-path = ""
 # Path of file that contains X509 certificate in PEM format for client auth.
-tls-client-cert-path = "/Users/Connor/cfssl/client.pem"
+tls-client-cert-path = ""
 # Path of file that contains X509 key in PEM format for client auth.
-tls-client-key-path = "/Users/Connor/cfssl/client-key.pem"
+tls-client-key-path = ""
 
 [log]
 level = "info"
