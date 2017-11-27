@@ -475,6 +475,9 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ClientTLSInfo.TrustedCAFile = c.TLSCAPath
 	cfg.ClientTLSInfo.CertFile = c.TLSCertPath
 	cfg.ClientTLSInfo.KeyFile = c.TLSKeyPath
+	cfg.PeerTLSInfo.TrustedCAFile = c.TLSCAPath
+	cfg.PeerTLSInfo.CertFile = c.TLSCertPath
+	cfg.PeerTLSInfo.KeyFile = c.TLSKeyPath
 
 	var err error
 
