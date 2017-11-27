@@ -88,7 +88,6 @@ type Config struct {
 	TLSCAPath         string `toml:"tls-cacert-path" json:"tls-cacert-path"`
 	TLSCertPath       string `toml:"tls-cert-path" json:"tls-cert-path"`
 	TLSKeyPath        string `toml:"tls-key-path" json:"tls-key-path"`
-	ClientCertAuth    bool   `toml:"client-cert-auth" json:"client-cert-auth"`
 	TLSClientCertPath string `toml:"tls-client-cert-path" json:"tls-client-cert-path"`
 	TLSClientKeyPath  string `toml:"tls-client-key-path" json:"tls-client-key-path"`
 
@@ -134,7 +133,6 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.TLSCAPath, "tls-cacert", "", "Path of file that contains list of trusted TLS CAs")
 	fs.StringVar(&cfg.TLSCertPath, "tls-cert", "", "Path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.TLSKeyPath, "tls-key", "", "Path of file that contains X509 key in PEM format")
-	fs.BoolVar(&cfg.ClientCertAuth, "client-cert-auth", false, "whether client authentication is enabled")
 	fs.StringVar(&cfg.TLSClientCertPath, "tls-client-cert", "", "Path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.TLSClientKeyPath, "tls-client-key", "", "Path of file that contains X509 key in PEM format")
 
@@ -473,11 +471,10 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.AutoCompactionRetention = c.AutoCompactionRetention
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
 
-	cfg.ClientTLSInfo.ClientCertAuth = c.ClientCertAuth
+	cfg.ClientTLSInfo.ClientCertAuth = len(c.TLSCAPath) != 0
 	cfg.ClientTLSInfo.TrustedCAFile = c.TLSCAPath
 	cfg.ClientTLSInfo.CertFile = c.TLSCertPath
 	cfg.ClientTLSInfo.KeyFile = c.TLSKeyPath
-	cfg.PeerAutoTLS = len(c.TLSCAPath) != 0
 
 	var err error
 
