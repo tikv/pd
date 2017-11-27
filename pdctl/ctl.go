@@ -38,7 +38,7 @@ var (
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&commandFlags.URL, "pd", "u", "http://127.0.0.1:2379", "pd address")
-	rootCmd.Flags().StringVar(&commandFlags.tlsCAPath, "ca", "", "path of file that contains list of trusted SSL CAs.")
+	rootCmd.Flags().StringVar(&commandFlags.tlsCAPath, "cacert", "", "path of file that contains list of trusted SSL CAs.")
 	rootCmd.Flags().StringVar(&commandFlags.tlsCertPath, "cert", "", "path of file that contains X509 certificate in PEM format.")
 	rootCmd.Flags().StringVar(&commandFlags.tlsKeyPath, "key", "", "path of file that contains X509 key in PEM format.")
 	rootCmd.AddCommand(

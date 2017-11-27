@@ -17,18 +17,16 @@ initial-cluster-state = "new"
 lease = 3
 tso-save-interval = "3s"
 
-# Path of file that contains list of trusted SSL CAs.
-tls-ca-path = ""
+# Path of file that contains list of trusted SSL CAs. if set, following four settings shouldn't be empty
+tls-cacert-path = "/Users/Connor/cfssl/ca.pem"
 # Path of file that contains X509 certificate in PEM format.
-tls-cert-path = ""
+tls-cert-path = "/Users/Connor/cfssl/server.pem"
 # Path of file that contains X509 key in PEM format.
-tls-key-path = ""
-# enable client certificate auth, if true following two settings shouldn't be empty
-client-cert-auth = false
+tls-key-path = "/Users/Connor/cfssl/server-key.pem"
 # Path of file that contains X509 certificate in PEM format for client auth.
-# tls-client-cert-path = ""
+tls-client-cert-path = "/Users/Connor/cfssl/client.pem"
 # Path of file that contains X509 key in PEM format for client auth.
-# tls-client-key-path = ""
+tls-client-key-path = "/Users/Connor/cfssl/client-key.pem"
 
 [log]
 level = "info"

@@ -85,12 +85,12 @@ type Config struct {
 	// ElectionInterval is the interval for etcd Raft election.
 	ElectionInterval typeutil.Duration `toml:"election-interval"`
 
-	TLSCAPath         string `json:"tls-ca-path" toml:"tls-ca-path"`
-	TLSCertPath       string `json:"tls-cert-path" toml:"tls-cert-path"`
-	TLSKeyPath        string `json:"tls-key-path" toml:"tls-key-path"`
-	ClientCertAuth    bool   `json:"client-cert-auth" toml:"client-cert-auth"`
-	TLSClientCertPath string `json:"tls-client-cert-path" toml:"tls-client-cert-path"`
-	TLSClientKeyPath  string `json:"tls-client-key-path" toml:"tls-client-key-path"`
+	TLSCAPath         string `toml:"tls-cacert-path" json:"tls-cacert-path"`
+	TLSCertPath       string `toml:"tls-cert-path" json:"tls-cert-path"`
+	TLSKeyPath        string `toml:"tls-key-path" json:"tls-key-path"`
+	ClientCertAuth    bool   `toml:"client-cert-auth" json:"client-cert-auth"`
+	TLSClientCertPath string `toml:"tls-client-cert-path" json:"tls-client-cert-path"`
+	TLSClientKeyPath  string `toml:"tls-client-key-path" json:"tls-client-key-path"`
 
 	configFile string
 
@@ -131,7 +131,7 @@ func NewConfig() *Config {
 	fs.BoolVar(&cfg.Log.File.LogRotate, "log-rotate", true, "rotate log")
 	fs.StringVar(&cfg.NamespaceClassifier, "namespace-classifier", "default", "namespace classifier (default 'default')")
 
-	fs.StringVar(&cfg.TLSCAPath, "tls-ca", "", "Path of file that contains list of trusted TLS CAs")
+	fs.StringVar(&cfg.TLSCAPath, "tls-cacert", "", "Path of file that contains list of trusted TLS CAs")
 	fs.StringVar(&cfg.TLSCertPath, "tls-cert", "", "Path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.TLSKeyPath, "tls-key", "", "Path of file that contains X509 key in PEM format")
 	fs.BoolVar(&cfg.ClientCertAuth, "client-cert-auth", false, "whether client authentication is enabled")
