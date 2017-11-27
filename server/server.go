@@ -123,9 +123,6 @@ func (s *Server) startEtcd() error {
 		return errors.Trace(err)
 	}
 
-	// Wait until etcd is ready for use
-	<-etcd.Server.ReadyNotify()
-
 	// Check cluster ID
 	urlmap, err := types.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
@@ -134,6 +131,8 @@ func (s *Server) startEtcd() error {
 	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap); err != nil {
 		return errors.Trace(err)
 	}
+	// Wait etcd until it is ready to use
+	<-etcd.Server.ReadyNotify()
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
 	log.Infof("create etcd v3 client with endpoints %v", endpoints)
@@ -149,14 +148,6 @@ func (s *Server) startEtcd() error {
 	})
 	if err != nil {
 		return errors.Trace(err)
-	}
-	if err = etcdutil.WaitEtcdStart(client, endpoints[0]); err != nil {
-		// See https://github.com/coreos/etcd/issues/6067
-		// Here may return "not capable" error because we don't start
-		// all etcds in initial_cluster at same time, so here just log
-		// an error.
-		// Note that pd can not work correctly if we don't start all etcds.
-		log.Errorf("etcd start failed, err %v", err)
 	}
 
 	etcdServerID := uint64(etcd.Server.ID())
