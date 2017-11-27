@@ -43,9 +43,9 @@ func main() {
 	flag.Parse()
 
 	pdCli, err := pd.NewClient([]string{*pdAddrs}, pd.SecurityOption{
-		TlsCAPath:   *tlsCAPath,
-		TlsCertPath: *tlsCertPath,
-		TlsKeyPath:  *tlsKeyPath,
+		TLSCAPath:   *tlsCAPath,
+		TLSCertPath: *tlsCertPath,
+		TLSKeyPath:  *tlsKeyPath,
 	})
 	if err != nil {
 		log.Fatal(err)
