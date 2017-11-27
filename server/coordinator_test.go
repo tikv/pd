@@ -18,6 +18,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
@@ -665,13 +666,13 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 
 func checkAddPeerResp(c *C, resp *pdpb.RegionHeartbeatResponse, storeID uint64) {
 	changePeer := resp.GetChangePeer()
-	c.Assert(changePeer.GetChangeType(), Equals, pdpb.ConfChangeType_AddNode)
+	c.Assert(changePeer.GetChangeType(), Equals, eraftpb.ConfChangeType_AddNode)
 	c.Assert(changePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
 func checkRemovePeerResp(c *C, resp *pdpb.RegionHeartbeatResponse, storeID uint64) {
 	changePeer := resp.GetChangePeer()
-	c.Assert(changePeer.GetChangeType(), Equals, pdpb.ConfChangeType_RemoveNode)
+	c.Assert(changePeer.GetChangeType(), Equals, eraftpb.ConfChangeType_RemoveNode)
 	c.Assert(changePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
