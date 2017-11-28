@@ -282,6 +282,15 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	s.tc.updateLeaderCount(3, 15)
 	// Average leader is 11.5. Select store 1 as target.
 	CheckTransferLeader(c, s.schedule(nil), 3, 1)
+
+	// Stores:     1    2    3    4
+	// Leaders:    1    2    15   16
+	// Region1:    -    F    F    L
+	// Region2:    -    F    L    F
+	s.tc.addLeaderRegion(2, 3, 2, 4)
+	s.tc.addLeaderStore(2, 2)
+	// Unable to find a region in store 1. Transfer a leader out of store 4 instead.
+	CheckTransferLeader(c, s.schedule(nil), 4, 2)
 }
 
 var _ = Suite(&testBalanceRegionSchedulerSuite{})

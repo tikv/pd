@@ -51,10 +51,9 @@ var (
 
 type client struct {
 	url        string
-	tag        uint64
+	tag        string
 	clusterID  uint64
 	clientConn *grpc.ClientConn
-	pdClient   pdpb.PDClient
 
 	reportRegionHeartbeatCh  chan *core.RegionInfo
 	receiveRegionHeartbeatCh chan *pdpb.RegionHeartbeatResponse
@@ -65,31 +64,34 @@ type client struct {
 }
 
 // NewClient creates a PD client.
-func NewClient(pdAddr string, tag uint64) (Client, <-chan *pdpb.RegionHeartbeatResponse, error) {
-	log.Infof("[store %d][pd] create pd client with endpoints %v", tag, pdAddr)
+func NewClient(pdAddr string, tag string) (Client, <-chan *pdpb.RegionHeartbeatResponse, error) {
+	log.Infof("[%s][pd] create pd client with endpoints %v", tag, pdAddr)
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &client{
-		url: addrsToUrls(pdAddr),
+		url: pdAddr,
 		reportRegionHeartbeatCh:  make(chan *core.RegionInfo, 1),
 		receiveRegionHeartbeatCh: make(chan *pdpb.RegionHeartbeatResponse, 1),
 		ctx:    ctx,
 		cancel: cancel,
 		tag:    tag,
 	}
-	cc, err := c.createGRPCConn()
+	cc, err := c.createConn()
 	if err != nil {
 		return nil, nil, errors.Trace(err)
 	}
-	c.pdClient = pdpb.NewPDClient(cc)
 	c.clientConn = cc
 	if err := c.initClusterID(); err != nil {
 		return nil, nil, errors.Trace(err)
 	}
-	log.Infof("[store %d][pd] init cluster id %v", tag, c.clusterID)
+	log.Infof("[%s][pd] init cluster id %v", tag, c.clusterID)
 	c.wg.Add(1)
 	go c.heartbeatStreamLoop()
 
 	return c, c.receiveRegionHeartbeatCh, nil
+}
+
+func (c *client) pdClient() pdpb.PDClient {
+	return pdpb.NewPDClient(c.clientConn)
 }
 
 func (c *client) initClusterID() error {
@@ -98,7 +100,7 @@ func (c *client) initClusterID() error {
 	for i := 0; i < maxInitClusterRetries; i++ {
 		members, err := c.getMembers(ctx)
 		if err != nil || members.GetHeader() == nil {
-			log.Errorf("[store %d][pd] failed to get cluster id: %v", c.tag, err)
+			log.Errorf("[%s][pd] failed to get cluster id: %v", c.tag, err)
 			continue
 		}
 		c.clusterID = members.GetHeader().GetClusterId()
@@ -109,14 +111,14 @@ func (c *client) initClusterID() error {
 }
 
 func (c *client) getMembers(ctx context.Context) (*pdpb.GetMembersResponse, error) {
-	members, err := c.pdClient.GetMembers(ctx, &pdpb.GetMembersRequest{})
+	members, err := c.pdClient().GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 	return members, nil
 }
 
-func (c *client) createGRPCConn() (*grpc.ClientConn, error) {
+func (c *client) createConn() (*grpc.ClientConn, error) {
 	cc, err := grpc.Dial(strings.TrimLeft(c.url, "http://"), grpc.WithInsecure())
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -133,9 +135,9 @@ func (c *client) createHeartbeatStream() (pdpb.PD_RegionHeartbeatClient, context
 	)
 	for {
 		ctx, cancel = context.WithCancel(c.ctx)
-		stream, err = c.pdClient.RegionHeartbeat(ctx)
+		stream, err = c.pdClient().RegionHeartbeat(ctx)
 		if err != nil {
-			log.Errorf("[store %d][pd] create region heartbeat stream error: %v", c.tag, err)
+			log.Errorf("[%s][pd] create region heartbeat stream error: %v", c.tag, err)
 			cancel()
 			select {
 			case <-time.After(time.Second):
@@ -164,7 +166,7 @@ func (c *client) heartbeatStreamLoop() {
 		go c.receiveRegionHeartbeat(ctx, stream, errCh, wg)
 		select {
 		case err := <-errCh:
-			log.Infof("[store %d][pd] heartbeat stream get error: %s ", c.tag, err)
+			log.Infof("[%s][pd] heartbeat stream get error: %s ", c.tag, err)
 			cancel()
 		case <-c.ctx.Done():
 			log.Info("cancel heartbeat stream loop")
@@ -175,11 +177,7 @@ func (c *client) heartbeatStreamLoop() {
 }
 
 func (c *client) receiveRegionHeartbeat(ctx context.Context, stream pdpb.PD_RegionHeartbeatClient, errCh chan error, wg *sync.WaitGroup) {
-	log.Infof("[store %d] create receive goroutine", c.tag)
-	defer func() {
-		wg.Done()
-		log.Infof("[store %d] exit receive goroutine", c.tag)
-	}()
+	defer wg.Done()
 	for {
 		resp, err := stream.Recv()
 		if err != nil {
@@ -195,11 +193,7 @@ func (c *client) receiveRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regi
 }
 
 func (c *client) reportRegionHeartbeat(ctx context.Context, stream pdpb.PD_RegionHeartbeatClient, errCh chan error, wg *sync.WaitGroup) {
-	log.Infof("[store %d] create report goroutine", c.tag)
-	defer func() {
-		wg.Done()
-		log.Infof("[store %d] exit report goroutine", c.tag)
-	}()
+	defer wg.Done()
 	for {
 		select {
 		case region := <-c.reportRegionHeartbeatCh:
@@ -216,7 +210,7 @@ func (c *client) reportRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regio
 			err := stream.Send(request)
 			if err != nil {
 				errCh <- err
-				log.Errorf("[store %d][pd] report regionHeartbeat error: %v", c.tag, err)
+				log.Errorf("[%s][pd] report regionHeartbeat error: %v", c.tag, err)
 			}
 		case <-ctx.Done():
 			return
@@ -229,7 +223,7 @@ func (c *client) Close() {
 	c.wg.Wait()
 
 	if err := c.clientConn.Close(); err != nil {
-		log.Errorf("[store %d][pd] failed close grpc clientConn: %v", c.tag, err)
+		log.Errorf("[%s][pd] failed close grpc clientConn: %v", c.tag, err)
 	}
 }
 
@@ -239,7 +233,7 @@ func (c *client) GetClusterID(context.Context) uint64 {
 
 func (c *client) AllocID(ctx context.Context) (uint64, error) {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	resp, err := c.pdClient.AllocID(ctx, &pdpb.AllocIDRequest{
+	resp, err := c.pdClient().AllocID(ctx, &pdpb.AllocIDRequest{
 		Header: c.requestHeader(),
 	})
 	cancel()
@@ -251,7 +245,7 @@ func (c *client) AllocID(ctx context.Context) (uint64, error) {
 
 func (c *client) Bootstrap(ctx context.Context, store *metapb.Store, region *metapb.Region) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	_, err := c.pdClient.Bootstrap(ctx, &pdpb.BootstrapRequest{
+	_, err := c.pdClient().Bootstrap(ctx, &pdpb.BootstrapRequest{
 		Header: c.requestHeader(),
 		Store:  store,
 		Region: region,
@@ -265,7 +259,7 @@ func (c *client) Bootstrap(ctx context.Context, store *metapb.Store, region *met
 
 func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	resp, err := c.pdClient.PutStore(ctx, &pdpb.PutStoreRequest{
+	resp, err := c.pdClient().PutStore(ctx, &pdpb.PutStoreRequest{
 		Header: c.requestHeader(),
 		Store:  store,
 	})
@@ -282,7 +276,7 @@ func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 
 func (c *client) StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	resp, err := c.pdClient.StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{
+	resp, err := c.pdClient().StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{
 		Header: c.requestHeader(),
 		Stats:  stats,
 	})
@@ -306,12 +300,4 @@ func (c *client) requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
 		ClusterId: c.clusterID,
 	}
-}
-
-func addrsToUrls(addr string) string {
-	// Add default schema "http://" to addrs.
-	if !strings.Contains(addr, "://") {
-		addr = "http://" + addr
-	}
-	return addr
 }

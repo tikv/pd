@@ -15,6 +15,7 @@ package faketikv
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -70,7 +71,8 @@ func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
 		Available: 1000000000000,
 		StartTime: uint32(time.Now().Unix()),
 	}
-	client, reciveRegionHeartbeatCh, err := NewClient(pdAddr, id)
+	tag := fmt.Sprintf("store %d", id)
+	client, reciveRegionHeartbeatCh, err := NewClient(pdAddr, tag)
 	if err != nil {
 		cancel()
 		return nil, err

@@ -41,7 +41,7 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 // Create n stores (0..n).
 func newTestStores(n uint64) []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, n)
-	for i := uint64(0); i < n; i++ {
+	for i := uint64(1); i <= n; i++ {
 		store := &metapb.Store{
 			Id: i,
 		}
@@ -55,25 +55,26 @@ func (s *testStoresInfoSuite) TestStores(c *C) {
 	cache := core.NewStoresInfo()
 	stores := newTestStores(n)
 
-	for i := uint64(0); i < n; i++ {
-		c.Assert(cache.GetStore(i), IsNil)
-		c.Assert(cache.BlockStore(i), NotNil)
-		cache.SetStore(stores[i])
-		c.Assert(cache.GetStore(i), DeepEquals, stores[i])
+	for i, store := range stores {
+		id := store.GetId()
+		c.Assert(cache.GetStore(id), IsNil)
+		c.Assert(cache.BlockStore(id), NotNil)
+		cache.SetStore(store)
+		c.Assert(cache.GetStore(id), DeepEquals, store)
 		c.Assert(cache.GetStoreCount(), Equals, int(i+1))
-		c.Assert(cache.BlockStore(i), IsNil)
-		c.Assert(cache.GetStore(i).IsBlocked(), IsTrue)
-		c.Assert(cache.BlockStore(i), NotNil)
-		cache.UnblockStore(i)
-		c.Assert(cache.GetStore(i).IsBlocked(), IsFalse)
+		c.Assert(cache.BlockStore(id), IsNil)
+		c.Assert(cache.GetStore(id).IsBlocked(), IsTrue)
+		c.Assert(cache.BlockStore(id), NotNil)
+		cache.UnblockStore(id)
+		c.Assert(cache.GetStore(id).IsBlocked(), IsFalse)
 	}
 	c.Assert(cache.GetStoreCount(), Equals, int(n))
 
 	for _, store := range cache.GetStores() {
-		c.Assert(store, DeepEquals, stores[store.GetId()])
+		c.Assert(store, DeepEquals, stores[store.GetId()-1])
 	}
 	for _, store := range cache.GetMetaStores() {
-		c.Assert(store, DeepEquals, stores[store.GetId()].Store)
+		c.Assert(store, DeepEquals, stores[store.GetId()-1].Store)
 	}
 
 	c.Assert(cache.GetStoreCount(), Equals, int(n))
