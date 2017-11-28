@@ -249,7 +249,7 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 		}
 
 		// Append the certificates from the CA
-		if ok := certPool.AppendCertsFromPEM(ca); !ok {
+		if !certPool.AppendCertsFromPEM(ca) {
 			return nil, errors.New("failed to append ca certs")
 		}
 

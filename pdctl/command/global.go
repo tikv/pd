@@ -56,7 +56,7 @@ func InitHTTPSClient(tlsCAPath, tlsCertPath, tlsKeyPath string) error {
 	}
 
 	// Append the certificates from the CA
-	if ok := certPool.AppendCertsFromPEM(ca); !ok {
+	if !certPool.AppendCertsFromPEM(ca) {
 		return errors.New("failed to append ca certs")
 	}
 
