@@ -31,14 +31,13 @@ import (
 )
 
 func main() {
-	/*	_, local, clean := NewSingleServer()
-		err := local.Run()
-		if err != nil {
-			log.Fatal("run server error:", err)
-		}*/
-	addr := "http://127.0.0.1:2379"
-	driver := faketikv.NewDriver(addr)
-	err := driver.Prepare()
+	_, local, clean := NewSingleServer()
+	err := local.Run()
+	if err != nil {
+		log.Fatal("run server error:", err)
+	}
+	driver := faketikv.NewDriver(local.GetAddr())
+	err = driver.Prepare()
 	if err != nil {
 		log.Fatal("simulator prepare error:", err)
 	}
@@ -56,7 +55,7 @@ func main() {
 			driver.Tick()
 		case <-sc:
 			driver.Stop()
-			//			clean()
+			clean()
 			return
 		}
 	}
