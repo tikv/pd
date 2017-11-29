@@ -85,11 +85,9 @@ type Config struct {
 	// ElectionInterval is the interval for etcd Raft election.
 	ElectionInterval typeutil.Duration `toml:"election-interval"`
 
-	TLSCAPath         string `toml:"tls-cacert-path" json:"tls-cacert-path"`
-	TLSCertPath       string `toml:"tls-cert-path" json:"tls-cert-path"`
-	TLSKeyPath        string `toml:"tls-key-path" json:"tls-key-path"`
-	TLSClientCertPath string `toml:"tls-client-cert-path" json:"tls-client-cert-path"`
-	TLSClientKeyPath  string `toml:"tls-client-key-path" json:"tls-client-key-path"`
+	TLSCAPath   string `toml:"tls-cacert-path" json:"tls-cacert-path"`
+	TLSCertPath string `toml:"tls-cert-path" json:"tls-cert-path"`
+	TLSKeyPath  string `toml:"tls-key-path" json:"tls-key-path"`
 
 	configFile string
 
@@ -133,8 +131,6 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.TLSCAPath, "tls-cacert", "", "Path of file that contains list of trusted TLS CAs")
 	fs.StringVar(&cfg.TLSCertPath, "tls-cert", "", "Path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.TLSKeyPath, "tls-key", "", "Path of file that contains X509 key in PEM format")
-	fs.StringVar(&cfg.TLSClientCertPath, "tls-client-cert", "", "Path of file that contains X509 certificate in PEM format")
-	fs.StringVar(&cfg.TLSClientKeyPath, "tls-client-key", "", "Path of file that contains X509 key in PEM format")
 
 	cfg.Namespace = make(map[string]NamespaceConfig)
 

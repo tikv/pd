@@ -23,10 +23,6 @@ tls-cacert-path = ""
 tls-cert-path = ""
 # Path of file that contains X509 key in PEM format.
 tls-key-path = ""
-# Path of file that contains X509 certificate in PEM format for client auth.
-tls-client-cert-path = ""
-# Path of file that contains X509 key in PEM format for client auth.
-tls-client-key-path = ""
 
 [log]
 level = "info"

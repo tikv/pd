@@ -128,19 +128,20 @@ func (s *Server) startEtcd() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap); err != nil {
+	tlsConfig, err := s.GetTLSConfig()
+	if err != nil {
 		return errors.Trace(err)
 	}
+	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap, tlsConfig); err != nil {
+		return errors.Trace(err)
+	}
+
 	// Wait etcd until it is ready to use
 	<-etcd.Server.ReadyNotify()
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
 	log.Infof("create etcd v3 client with endpoints %v", endpoints)
 
-	tlsConfig, err := s.GetTLSConfig()
-	if err != nil {
-		return errors.Trace(err)
-	}
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: etcdTimeout,
@@ -550,8 +551,8 @@ func (s *Server) getAllocIDPath() string {
 // GetTLSConfig gets tls config.
 func (s *Server) GetTLSConfig() (*tls.Config, error) {
 	tlsInfo := transport.TLSInfo{
-		CertFile:      s.cfg.TLSClientCertPath,
-		KeyFile:       s.cfg.TLSClientKeyPath,
+		CertFile:      s.cfg.TLSCertPath,
+		KeyFile:       s.cfg.TLSKeyPath,
 		TrustedCAFile: s.cfg.TLSCAPath,
 	}
 	tlsConfig, err := tlsInfo.ClientConfig()
