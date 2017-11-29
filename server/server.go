@@ -17,11 +17,14 @@ import (
 	"crypto/tls"
 	"math/rand"
 	"net/http"
+	"os"
+	"os/signal"
 	"path"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -136,8 +139,19 @@ func (s *Server) startEtcd() error {
 		return errors.Trace(err)
 	}
 
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+
+	select {
 	// Wait etcd until it is ready to use
-	<-etcd.Server.ReadyNotify()
+	case <-etcd.Server.ReadyNotify():
+	case sig := <-sc:
+		return errors.Errorf("receive signal %v when waiting embed etcd to be ready", sig)
+	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
 	log.Infof("create etcd v3 client with endpoints %v", endpoints)
