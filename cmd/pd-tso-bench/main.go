@@ -33,9 +33,9 @@ var (
 	concurrency = flag.Int("C", 1000, "concurrency")
 	sleep       = flag.Duration("sleep", time.Millisecond, "sleep time after a request, used to adjust pressure")
 	interval    = flag.Duration("interval", time.Second, "interval to output the statistics")
-	tlsCAPath   = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
-	tlsCertPath = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")
-	tlsKeyPath  = flag.String("key", "", "path of file that contains X509 key in PEM format.")
+	CAPath      = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
+	CertPath    = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")
+	KeyPath     = flag.String("key", "", "path of file that contains X509 key in PEM format.")
 	wg          sync.WaitGroup
 )
 
@@ -43,9 +43,9 @@ func main() {
 	flag.Parse()
 
 	pdCli, err := pd.NewClient([]string{*pdAddrs}, pd.SecurityOption{
-		TLSCAPath:   *tlsCAPath,
-		TLSCertPath: *tlsCertPath,
-		TLSKeyPath:  *tlsKeyPath,
+		CAPath:   *CAPath,
+		CertPath: *CertPath,
+		KeyPath:  *KeyPath,
 	})
 	if err != nil {
 		log.Fatal(err)

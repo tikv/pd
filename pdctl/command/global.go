@@ -37,11 +37,11 @@ var (
 )
 
 // InitHTTPSClient creates https client with ca file
-func InitHTTPSClient(tlsCAPath, tlsCertPath, tlsKeyPath string) error {
+func InitHTTPSClient(CAPath, CertPath, KeyPath string) error {
 	certificates := []tls.Certificate{}
-	if len(tlsCertPath) != 0 && len(tlsKeyPath) != 0 {
+	if len(CertPath) != 0 && len(KeyPath) != 0 {
 		// Load the client certificates from disk
-		certificate, err := tls.LoadX509KeyPair(tlsCertPath, tlsKeyPath)
+		certificate, err := tls.LoadX509KeyPair(CertPath, KeyPath)
 		if err != nil {
 			return errors.Errorf("could not load client key pair: %s", err)
 		}
@@ -50,7 +50,7 @@ func InitHTTPSClient(tlsCAPath, tlsCertPath, tlsKeyPath string) error {
 
 	// Create a certificate pool from the certificate authority
 	certPool := x509.NewCertPool()
-	ca, err := ioutil.ReadFile(tlsCAPath)
+	ca, err := ioutil.ReadFile(CAPath)
 	if err != nil {
 		return errors.Errorf("could not read ca certificate: %s", err)
 	}

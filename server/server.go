@@ -565,9 +565,9 @@ func (s *Server) getAllocIDPath() string {
 // GetTLSConfig gets tls config.
 func (s *Server) GetTLSConfig() (*tls.Config, error) {
 	tlsInfo := transport.TLSInfo{
-		CertFile:      s.cfg.TLSCertPath,
-		KeyFile:       s.cfg.TLSKeyPath,
-		TrustedCAFile: s.cfg.TLSCAPath,
+		CertFile:      s.cfg.Security.CertPath,
+		KeyFile:       s.cfg.Security.KeyPath,
+		TrustedCAFile: s.cfg.Security.CAPath,
 	}
 	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {

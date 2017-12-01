@@ -104,9 +104,9 @@ type client struct {
 
 // SecurityOption records options about tls
 type SecurityOption struct {
-	TLSCAPath   string
-	TLSCertPath string
-	TLSKeyPath  string
+	CAPath   string
+	CertPath string
+	KeyPath  string
 }
 
 // NewClient creates a PD client.
@@ -229,12 +229,12 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 	}
 
 	opt := grpc.WithInsecure()
-	if len(c.security.TLSCAPath) != 0 {
+	if len(c.security.CAPath) != 0 {
 
 		certificates := []tls.Certificate{}
-		if len(c.security.TLSCertPath) != 0 && len(c.security.TLSKeyPath) != 0 {
+		if len(c.security.CertPath) != 0 && len(c.security.KeyPath) != 0 {
 			// Load the client certificates from disk
-			certificate, err := tls.LoadX509KeyPair(c.security.TLSCertPath, c.security.TLSKeyPath)
+			certificate, err := tls.LoadX509KeyPair(c.security.CertPath, c.security.KeyPath)
 			if err != nil {
 				return nil, errors.Errorf("could not load client key pair: %s", err)
 			}
@@ -243,7 +243,7 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 
 		// Create a certificate pool from the certificate authority
 		certPool := x509.NewCertPool()
-		ca, err := ioutil.ReadFile(c.security.TLSCAPath)
+		ca, err := ioutil.ReadFile(c.security.CAPath)
 		if err != nil {
 			return nil, errors.Errorf("could not read ca certificate: %s", err)
 		}

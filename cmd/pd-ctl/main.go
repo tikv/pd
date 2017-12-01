@@ -29,21 +29,21 @@ import (
 )
 
 var (
-	url         string
-	detach      bool
-	version     bool
-	tlsCAPath   string
-	tlsCertPath string
-	tlsKeyPath  string
+	url      string
+	detach   bool
+	version  bool
+	CAPath   string
+	CertPath string
+	KeyPath  string
 )
 
 func init() {
 	flag.StringVarP(&url, "pd", "u", "http://127.0.0.1:2379", "The pd address")
 	flag.BoolVarP(&detach, "detach", "d", false, "Run pdctl without readline")
 	flag.BoolVarP(&version, "version", "V", false, "print version information and exit")
-	flag.StringVar(&tlsCAPath, "cacert", "", "path of file that contains list of trusted SSL CAs.")
-	flag.StringVar(&tlsCertPath, "cert", "", "path of file that contains X509 certificate in PEM format.")
-	flag.StringVar(&tlsKeyPath, "key", "", "path of file that contains X509 key in PEM format.")
+	flag.StringVar(&CAPath, "cacert", "", "path of file that contains list of trusted SSL CAs.")
+	flag.StringVar(&CertPath, "cert", "", "path of file that contains X509 certificate in PEM format.")
+	flag.StringVar(&KeyPath, "key", "", "path of file that contains X509 key in PEM format.")
 }
 
 func main() {
@@ -121,9 +121,9 @@ func loop() {
 		}
 		args := strings.Split(strings.TrimSpace(line), " ")
 		args = append(args, "-u", url)
-		args = append(args, "--cacert", tlsCAPath)
-		args = append(args, "--cert", tlsCertPath)
-		args = append(args, "--key", tlsKeyPath)
+		args = append(args, "--cacert", CAPath)
+		args = append(args, "--cert", CertPath)
+		args = append(args, "--key", KeyPath)
 		pdctl.Start(args)
 	}
 }
