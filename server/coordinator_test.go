@@ -554,21 +554,26 @@ func (s *testScheduleLimiterSuite) TestOperatorCount(c *C) {
 	c.Assert(l.OperatorCount(core.LeaderKind), Equals, uint64(0))
 	c.Assert(l.OperatorCount(core.RegionKind), Equals, uint64(0))
 
-	leaderOP := newTestOperator(1, core.LeaderKind)
-	l.AddOperator(leaderOP)
-	c.Assert(l.OperatorCount(core.LeaderKind), Equals, uint64(1))
-	l.AddOperator(leaderOP)
-	c.Assert(l.OperatorCount(core.LeaderKind), Equals, uint64(2))
-	l.RemoveOperator(leaderOP)
-	c.Assert(l.OperatorCount(core.LeaderKind), Equals, uint64(1))
+	operators := make(map[uint64]*schedule.Operator)
 
-	regionOP := newTestOperator(1, core.RegionKind)
-	l.AddOperator(regionOP)
-	c.Assert(l.OperatorCount(core.RegionKind), Equals, uint64(1))
-	l.AddOperator(regionOP)
-	c.Assert(l.OperatorCount(core.RegionKind), Equals, uint64(2))
-	l.RemoveOperator(regionOP)
-	c.Assert(l.OperatorCount(core.RegionKind), Equals, uint64(1))
+	operators[1] = newTestOperator(1, core.LeaderKind)
+	l.UpdateCounts(operators)
+	c.Assert(l.OperatorCount(core.LeaderKind), Equals, uint64(1)) // 1:leader
+	operators[2] = newTestOperator(2, core.LeaderKind)
+	l.UpdateCounts(operators)
+	c.Assert(l.OperatorCount(core.LeaderKind), Equals, uint64(2)) // 1:leader, 2:leader
+	delete(operators, 1)
+	l.UpdateCounts(operators)
+	c.Assert(l.OperatorCount(core.LeaderKind), Equals, uint64(1)) // 2:leader
+
+	operators[1] = newTestOperator(1, core.RegionKind)
+	l.UpdateCounts(operators)
+	c.Assert(l.OperatorCount(core.RegionKind), Equals, uint64(1)) // 1:region 2:leader
+	c.Assert(l.OperatorCount(core.LeaderKind), Equals, uint64(1))
+	operators[2] = newTestOperator(2, core.RegionKind)
+	l.UpdateCounts(operators)
+	c.Assert(l.OperatorCount(core.RegionKind), Equals, uint64(2)) // 1:region 2:region
+	c.Assert(l.OperatorCount(core.LeaderKind), Equals, uint64(0))
 }
 
 var _ = Suite(&testScheduleControllerSuite{})
