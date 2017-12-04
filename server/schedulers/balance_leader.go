@@ -56,7 +56,7 @@ func (l *balanceLeaderScheduler) GetType() string {
 
 func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	limit := minUint64(l.limit, cluster.GetLeaderScheduleLimit())
-	return l.limiter.OperatorCount(core.LeaderKind) < limit
+	return l.limiter.OperatorCount(schedule.OpLeader) < limit
 }
 
 func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
@@ -82,5 +82,5 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 	l.limit = adjustBalanceLimit(cluster, core.LeaderKind)
 	schedulerCounter.WithLabelValues(l.GetName(), "new_operator").Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
-	return schedule.NewOperator("balance-leader", region.GetId(), core.LeaderKind, step)
+	return schedule.NewOperator("balance-leader", region.GetId(), schedule.OpBalance|schedule.OpLeader, step)
 }

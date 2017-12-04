@@ -68,7 +68,7 @@ func (s *balanceRegionScheduler) GetType() string {
 
 func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	limit := minUint64(s.limit, cluster.GetRegionScheduleLimit())
-	return s.limiter.OperatorCount(core.RegionKind) < limit
+	return s.limiter.OperatorCount(schedule.OpRegion) < limit
 }
 
 func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
@@ -123,5 +123,5 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 	s.limit = adjustBalanceLimit(cluster, core.RegionKind)
 
-	return schedule.CreateMovePeerOperator("balance-region", region, core.RegionKind, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	return schedule.CreateMovePeerOperator("balance-region", region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }

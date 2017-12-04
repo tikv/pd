@@ -92,13 +92,13 @@ func CreateScheduler(name string, limiter *Limiter, args ...string) (Scheduler, 
 // Limiter a counter that limits the number of operators
 type Limiter struct {
 	sync.RWMutex
-	counts map[core.ResourceKind]uint64
+	counts map[OperatorKind]uint64
 }
 
 // NewLimiter create a schedule limiter
 func NewLimiter() *Limiter {
 	return &Limiter{
-		counts: make(map[core.ResourceKind]uint64),
+		counts: make(map[OperatorKind]uint64),
 	}
 }
 
@@ -107,16 +107,22 @@ func (l *Limiter) UpdateCounts(operators map[uint64]*Operator) {
 	l.Lock()
 	defer l.Unlock()
 	for k := range l.counts {
-		l.counts[k] = 0
+		delete(l.counts, k)
 	}
 	for _, op := range operators {
-		l.counts[op.ResourceKind()]++
+		l.counts[op.Kind()]++
 	}
 }
 
 // OperatorCount get the count by kind
-func (l *Limiter) OperatorCount(kind core.ResourceKind) uint64 {
+func (l *Limiter) OperatorCount(kind OperatorKind) uint64 {
 	l.RLock()
 	defer l.RUnlock()
-	return l.counts[kind]
+	var total uint64
+	for k, count := range l.counts {
+		if k&kind != 0 {
+			total += count
+		}
+	}
+	return total
 }

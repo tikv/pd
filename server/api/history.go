@@ -20,7 +20,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule"
 	"github.com/unrolled/render"
 )
 
@@ -60,9 +60,9 @@ func (h *historyHandler) GetOperatorsOfKind(w http.ResponseWriter, r *http.Reque
 		h.r.JSON(w, http.StatusOK, nil)
 		return
 	}
-	kind := core.ParseResourceKind(k)
-	if kind == core.UnKnownKind {
-		h.r.JSON(w, http.StatusInternalServerError, errUnknownOperatorKind.Error())
+	kind, err := schedule.ParseOperatorKind(k)
+	if err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	ops, err := h.GetHistoryOperatorsOfKind(kind)

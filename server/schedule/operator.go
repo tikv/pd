@@ -108,7 +108,7 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 type Operator struct {
 	desc        string
 	regionID    uint64
-	kind        core.ResourceKind
+	kind        OperatorKind
 	steps       []OperatorStep
 	currentStep int32
 	createTime  time.Time
@@ -116,7 +116,7 @@ type Operator struct {
 }
 
 // NewOperator creates a new operator.
-func NewOperator(desc string, regionID uint64, kind core.ResourceKind, steps ...OperatorStep) *Operator {
+func NewOperator(desc string, regionID uint64, kind OperatorKind, steps ...OperatorStep) *Operator {
 	return &Operator{
 		desc:       desc,
 		regionID:   regionID,
@@ -153,8 +153,8 @@ func (o *Operator) RegionID() uint64 {
 	return o.regionID
 }
 
-// ResourceKind returns operator's resource kind.
-func (o *Operator) ResourceKind() core.ResourceKind {
+// Kind returns operator's kind.
+func (o *Operator) Kind() OperatorKind {
 	return o.kind
 }
 
@@ -223,22 +223,22 @@ func (o *Operator) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 
 // CreateRemovePeerOperator creates an Operator that removes a peer from region.
 // It prevents removing leader by tranfer its leadership first.
-func CreateRemovePeerOperator(desc string, region *core.RegionInfo, storeID uint64) *Operator {
+func CreateRemovePeerOperator(desc string, kind OperatorKind, region *core.RegionInfo, storeID uint64) *Operator {
 	if region.Leader != nil && region.Leader.GetStoreId() == storeID {
 		if follower := region.GetFollower(); follower != nil {
 			steps := []OperatorStep{
 				TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: follower.GetStoreId()},
 				RemovePeer{FromStore: storeID},
 			}
-			return NewOperator(desc, region.GetId(), core.RegionKind, steps...)
+			return NewOperator(desc, region.GetId(), kind|OpRegion|OpLeader, steps...)
 		}
 	}
-	return NewOperator(desc, region.GetId(), core.RegionKind, RemovePeer{FromStore: storeID})
+	return NewOperator(desc, region.GetId(), kind|OpRegion, RemovePeer{FromStore: storeID})
 }
 
 // CreateMovePeerOperator creates an Operator that replaces an old peer with a
 // new peer. It prevents removing leader by transfer its leadership first.
-func CreateMovePeerOperator(desc string, region *core.RegionInfo, kind core.ResourceKind, oldStore, newStore uint64, peerID uint64) *Operator {
+func CreateMovePeerOperator(desc string, region *core.RegionInfo, kind OperatorKind, oldStore, newStore uint64, peerID uint64) *Operator {
 	if region.Leader != nil && region.Leader.GetStoreId() == oldStore {
 		newLeader := newStore
 		if follower := region.GetFollower(); follower != nil {
@@ -249,11 +249,11 @@ func CreateMovePeerOperator(desc string, region *core.RegionInfo, kind core.Reso
 			TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader},
 			RemovePeer{FromStore: oldStore},
 		}
-		return NewOperator(desc, region.GetId(), kind, steps...)
+		return NewOperator(desc, region.GetId(), kind|OpRegion|OpLeader, steps...)
 	}
 	steps := []OperatorStep{
 		AddPeer{ToStore: newStore, PeerID: peerID},
 		RemovePeer{FromStore: oldStore},
 	}
-	return NewOperator(desc, region.GetId(), kind, steps...)
+	return NewOperator(desc, region.GetId(), kind|OpRegion, steps...)
 }

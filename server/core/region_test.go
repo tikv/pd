@@ -14,9 +14,15 @@
 package core
 
 import (
+	"testing"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
+
+func TestCore(t *testing.T) {
+	TestingT(t)
+}
 
 var _ = Suite(&testRegionMapSuite{})
 

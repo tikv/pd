@@ -27,59 +27,8 @@ const (
 type ResourceKind int
 
 const (
-	// UnKnownKind indicates the unknown kind resource
-	UnKnownKind ResourceKind = iota
-	// AdminKind indicates that specify by admin
-	AdminKind
 	// LeaderKind indicates the leader kind resource
-	LeaderKind
+	LeaderKind = iota
 	// RegionKind indicates the region kind resource
 	RegionKind
-	// HotRegionKind indicates the hot region kind resource
-	HotRegionKind
-	// AdjacentLeaderKind indicates the adjacent resource
-	AdjacentLeaderKind
-	// AdjacentPeerKind indicates the adjacent resource
-	AdjacentPeerKind
-	// OtherKind indicates the other kind resource
-	OtherKind
 )
-
-var resourceKindToName = map[ResourceKind]string{
-	0: "unknown",
-	1: "admin",
-	2: "leader",
-	3: "region",
-	4: "hot",
-	5: "adjacent-leader",
-	6: "adjacent-peer",
-	7: "other",
-}
-
-var resourceNameToValue = map[string]ResourceKind{
-	"unknown":         UnKnownKind,
-	"admin":           AdminKind,
-	"leader":          LeaderKind,
-	"region":          RegionKind,
-	"hot":             HotRegionKind,
-	"adjacent-leader": AdjacentLeaderKind,
-	"adjacent-peer":   AdjacentPeerKind,
-	"other":           OtherKind,
-}
-
-func (k ResourceKind) String() string {
-	s, ok := resourceKindToName[k]
-	if ok {
-		return s
-	}
-	return resourceKindToName[UnKnownKind]
-}
-
-// ParseResourceKind convert string to ResourceKind
-func ParseResourceKind(name string) ResourceKind {
-	k, ok := resourceNameToValue[name]
-	if ok {
-		return k
-	}
-	return UnKnownKind
-}

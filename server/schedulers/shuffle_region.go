@@ -52,7 +52,7 @@ func (s *shuffleRegionScheduler) GetType() string {
 }
 
 func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return s.limiter.OperatorCount(core.RegionKind) < cluster.GetRegionScheduleLimit()
+	return s.limiter.OperatorCount(schedule.OpRegion) < cluster.GetRegionScheduleLimit()
 }
 
 func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
@@ -71,7 +71,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 	}
 
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	op := schedule.CreateMovePeerOperator("shuffle-region", region, core.RegionKind, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	op := schedule.CreateMovePeerOperator("shuffle-region", region, schedule.OpAdmin, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 	op.SetPriorityLevel(core.HighPriority)
 	return op
 }

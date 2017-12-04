@@ -102,7 +102,7 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	}
 
 	// Check replica operator.
-	if c.limiter.OperatorCount(core.RegionKind) >= c.cluster.GetReplicaScheduleLimit() {
+	if c.limiter.OperatorCount(schedule.OpReplica) >= c.cluster.GetReplicaScheduleLimit() {
 		return
 	}
 	// Generate Operator which moves region to targeted namespace store
@@ -426,14 +426,14 @@ func (c *coordinator) getHistories() []*schedule.Operator {
 	return operators
 }
 
-func (c *coordinator) getHistoriesOfKind(kind core.ResourceKind) []*schedule.Operator {
+func (c *coordinator) getHistoriesOfKind(kind schedule.OperatorKind) []*schedule.Operator {
 	c.RLock()
 	defer c.RUnlock()
 
 	var operators []*schedule.Operator
 	for _, elem := range c.histories.Elems() {
 		op := elem.Value.(*schedule.Operator)
-		if op.ResourceKind() == kind {
+		if op.Kind()&kind != 0 {
 			operators = append(operators, op)
 		}
 	}
