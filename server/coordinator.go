@@ -386,13 +386,12 @@ func (c *coordinator) removeOperator(op *schedule.Operator) {
 	c.Lock()
 	defer c.Unlock()
 	c.removeOperatorLocked(op)
-	c.limiter.UpdateCounts(c.operators)
 }
 
 func (c *coordinator) removeOperatorLocked(op *schedule.Operator) {
 	regionID := op.RegionID()
 	delete(c.operators, regionID)
-
+	c.limiter.UpdateCounts(c.operators)
 	c.histories.Put(regionID, op)
 	operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 }
