@@ -78,7 +78,7 @@ func (s *testLeaderChangeSuite) TestLeaderConfigChange(c *C) {
 	svrs, endpoints, closeFunc := s.prepareClusterN(c, 3)
 	defer closeFunc()
 
-	cli, err := NewClient(endpoints)
+	cli, err := NewClient(endpoints, SecurityOption{})
 	c.Assert(err, IsNil)
 	defer cli.Close()
 
@@ -109,7 +109,7 @@ func (s *testLeaderChangeSuite) TestMemberList(c *C) {
 	_, endpoints, closeFunc := s.prepareClusterN(c, 2)
 	defer closeFunc()
 
-	cli, err := NewClient(endpoints[:1])
+	cli, err := NewClient(endpoints[:1], SecurityOption{})
 	c.Assert(err, IsNil)
 	cli.Close()
 
@@ -122,7 +122,7 @@ func (s *testLeaderChangeSuite) TestLeaderChange(c *C) {
 	svrs, endpoints, closeFunc := s.prepareClusterN(c, 3)
 	defer closeFunc()
 
-	cli, err := NewClient(endpoints)
+	cli, err := NewClient(endpoints, SecurityOption{})
 	c.Assert(err, IsNil)
 	defer cli.Close()
 
@@ -163,7 +163,7 @@ func (s *testLeaderChangeSuite) TestLeaderTransfer(c *C) {
 	servers, endpoints, closeFunc := s.prepareClusterN(c, 2)
 	defer closeFunc()
 
-	cli, err := NewClient(endpoints)
+	cli, err := NewClient(endpoints, SecurityOption{})
 	c.Assert(err, IsNil)
 	defer cli.Close()
 

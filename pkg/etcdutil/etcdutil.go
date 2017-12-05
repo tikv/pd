@@ -15,6 +15,7 @@ package etcdutil
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"time"
 
@@ -43,7 +44,7 @@ const (
 
 // CheckClusterID checks Etcd's cluster ID, returns an error if mismatch.
 // This function will never block even quorum is not satisfied.
-func CheckClusterID(localClusterID types.ID, um types.URLsMap) error {
+func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Config) error {
 	if len(um) == 0 {
 		return nil
 	}
@@ -54,7 +55,9 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap) error {
 	}
 
 	for _, u := range peerURLs {
-		trp := &http.Transport{}
+		trp := &http.Transport{
+			TLSClientConfig: tlsConfig,
+		}
 		remoteCluster, gerr := etcdserver.GetClusterFromRemotePeers([]string{u}, trp)
 		trp.CloseIdleConnections()
 		if gerr != nil {

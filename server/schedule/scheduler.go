@@ -102,21 +102,16 @@ func NewLimiter() *Limiter {
 	}
 }
 
-// AddOperator increase the count by kind
-func (l *Limiter) AddOperator(op *Operator) {
+// UpdateCounts updates resouce counts using current pending operators.
+func (l *Limiter) UpdateCounts(operators map[uint64]*Operator) {
 	l.Lock()
 	defer l.Unlock()
-	l.counts[op.ResourceKind()]++
-}
-
-// RemoveOperator decrease the count by kind
-func (l *Limiter) RemoveOperator(op *Operator) {
-	l.Lock()
-	defer l.Unlock()
-	if l.counts[op.ResourceKind()] == 0 {
-		log.Fatal("the limiter is already 0, no operators need to remove")
+	for k := range l.counts {
+		l.counts[k] = 0
 	}
-	l.counts[op.ResourceKind()]--
+	for _, op := range operators {
+		l.counts[op.ResourceKind()]++
+	}
 }
 
 // OperatorCount get the count by kind

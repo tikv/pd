@@ -85,6 +85,8 @@ type Config struct {
 	// ElectionInterval is the interval for etcd Raft election.
 	ElectionInterval typeutil.Duration `toml:"election-interval"`
 
+	Security SecurityConfig `toml:"security" json:"security"`
+
 	configFile string
 
 	// For all warnings during parsing.
@@ -123,6 +125,11 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.BoolVar(&cfg.Log.File.LogRotate, "log-rotate", true, "rotate log")
 	fs.StringVar(&cfg.NamespaceClassifier, "namespace-classifier", "default", "namespace classifier (default 'default')")
+
+	fs.StringVar(&cfg.Security.CAPath, "cacert", "", "Path of file that contains list of trusted TLS CAs")
+	fs.StringVar(&cfg.Security.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format")
+	fs.StringVar(&cfg.Security.KeyPath, "key", "", "Path of file that contains X509 key in PEM format")
+
 	cfg.Namespace = make(map[string]NamespaceConfig)
 
 	return cfg
@@ -426,6 +433,16 @@ func (c *NamespaceConfig) adjust(opt *scheduleOption) {
 	adjustUint64(&c.MaxReplicas, uint64(opt.GetMaxReplicas(namespace.DefaultNamespace)))
 }
 
+// SecurityConfig is the configuration for supporting tls.
+type SecurityConfig struct {
+	// CAPath is the path of file that contains list of trusted SSL CAs. if set, following four settings shouldn't be empty
+	CAPath string `toml:"cacert-path" json:"cacert-path"`
+	// CertPath is the path of file that contains X509 certificate in PEM format.
+	CertPath string `toml:"cert-path" json:"cert-path"`
+	// KeyPath is the path of file that contains X509 key in PEM format.
+	KeyPath string `toml:"key-path" json:"key-path"`
+}
+
 // ParseUrls parse a string into multiple urls.
 // Export for api.
 func ParseUrls(s string) ([]url.URL, error) {
@@ -457,6 +474,14 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ElectionMs = uint(c.ElectionInterval.Duration / time.Millisecond)
 	cfg.AutoCompactionRetention = c.AutoCompactionRetention
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
+
+	cfg.ClientTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
+	cfg.ClientTLSInfo.TrustedCAFile = c.Security.CAPath
+	cfg.ClientTLSInfo.CertFile = c.Security.CertPath
+	cfg.ClientTLSInfo.KeyFile = c.Security.KeyPath
+	cfg.PeerTLSInfo.TrustedCAFile = c.Security.CAPath
+	cfg.PeerTLSInfo.CertFile = c.Security.CertPath
+	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
 
 	var err error
 

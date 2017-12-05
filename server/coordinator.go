@@ -365,8 +365,8 @@ func (c *coordinator) addOperator(op *schedule.Operator) bool {
 	}
 
 	c.histories.Put(regionID, op)
-	c.limiter.AddOperator(op)
 	c.operators[regionID] = op
+	c.limiter.UpdateCounts(c.operators)
 
 	if region := c.cluster.GetRegion(op.RegionID()); region != nil {
 		if step := op.Check(region); step != nil {
@@ -390,9 +390,8 @@ func (c *coordinator) removeOperator(op *schedule.Operator) {
 
 func (c *coordinator) removeOperatorLocked(op *schedule.Operator) {
 	regionID := op.RegionID()
-	c.limiter.RemoveOperator(op)
 	delete(c.operators, regionID)
-
+	c.limiter.UpdateCounts(c.operators)
 	c.histories.Put(regionID, op)
 	operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 }
