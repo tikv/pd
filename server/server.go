@@ -14,18 +14,23 @@
 package server
 
 import (
+	"crypto/tls"
 	"math/rand"
 	"net/http"
+	"os"
+	"os/signal"
 	"path"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/embed"
+	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -120,23 +125,41 @@ func (s *Server) startEtcd() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+
 	// Check cluster ID
 	urlmap, err := types.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap); err != nil {
+	tlsConfig, err := s.GetTLSConfig()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap, tlsConfig); err != nil {
 		return errors.Trace(err)
 	}
 
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+
+	select {
 	// Wait etcd until it is ready to use
-	<-etcd.Server.ReadyNotify()
+	case <-etcd.Server.ReadyNotify():
+	case sig := <-sc:
+		return errors.Errorf("receive signal %v when waiting embed etcd to be ready", sig)
+	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
 	log.Infof("create etcd v3 client with endpoints %v", endpoints)
+
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: etcdTimeout,
+		TLS:         tlsConfig,
 	})
 	if err != nil {
 		return errors.Trace(err)
@@ -537,4 +560,18 @@ func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
 
 func (s *Server) getAllocIDPath() string {
 	return path.Join(s.rootPath, "alloc_id")
+}
+
+// GetTLSConfig gets tls config.
+func (s *Server) GetTLSConfig() (*tls.Config, error) {
+	tlsInfo := transport.TLSInfo{
+		CertFile:      s.cfg.Security.CertPath,
+		KeyFile:       s.cfg.Security.KeyPath,
+		TrustedCAFile: s.cfg.Security.CAPath,
+	}
+	tlsConfig, err := tlsInfo.ClientConfig()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return tlsConfig, nil
 }
