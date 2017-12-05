@@ -64,13 +64,13 @@ func (k OperatorKind) String() string {
 	if len(flagNames) == 0 {
 		return "unknown"
 	}
-	return strings.Join(flagNames, "+")
+	return strings.Join(flagNames, ",")
 }
 
-// ParseOperatorKind converts string (flag name list concat by '+') to OperatorKind.
+// ParseOperatorKind converts string (flag name list concat by ',') to OperatorKind.
 func ParseOperatorKind(str string) (OperatorKind, error) {
 	var k OperatorKind
-	for _, flagName := range strings.Split(str, "+") {
+	for _, flagName := range strings.Split(str, ",") {
 		flag, ok := nameToFlag[flagName]
 		if !ok {
 			return 0, errors.Errorf("unknown flag name: %s", flagName)
