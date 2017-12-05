@@ -20,7 +20,7 @@ import (
 )
 
 // OperatorKind is a bit field to identify operator types.
-type OperatorKind int
+type OperatorKind uint32
 
 // Flags for operators.
 const (
