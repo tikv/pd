@@ -22,7 +22,7 @@ default: build
 
 all: dev
 
-dev: build check test
+dev: build simulator check test
 
 build:
 ifeq ("$(WITH_RACE)", "1")
