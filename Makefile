@@ -71,4 +71,7 @@ endif
 	mkdir -p _vendor
 	mv vendor _vendor/src
 
+simulator:
+	GOPATH=$(VENDOR) CGO_ENABLED=0 go build -o bin/simulator cmd/simulator/main.go
+
 .PHONY: update clean

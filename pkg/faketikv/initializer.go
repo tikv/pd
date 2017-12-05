@@ -130,8 +130,8 @@ func (c *TiltCase) genRegion(ids []uint64, start int) *core.RegionInfo {
 	}
 	regionMeta := &metapb.Region{
 		Id:          regionID,
-		StartKey:    []byte(fmt.Sprintf("zt_%20d", start)),
-		EndKey:      []byte(fmt.Sprintf("zt_%20d", start+1000)),
+		StartKey:    []byte(fmt.Sprintf("zt_%020d", start)),
+		EndKey:      []byte(fmt.Sprintf("zt_%020d", start+1000)),
 		Peers:       peers,
 		RegionEpoch: &metapb.RegionEpoch{},
 	}
