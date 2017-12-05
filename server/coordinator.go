@@ -426,14 +426,14 @@ func (c *coordinator) getHistories() []*schedule.Operator {
 	return operators
 }
 
-func (c *coordinator) getHistoriesOfKind(kind schedule.OperatorKind) []*schedule.Operator {
+func (c *coordinator) getHistoriesOfKind(mask schedule.OperatorKind) []*schedule.Operator {
 	c.RLock()
 	defer c.RUnlock()
 
 	var operators []*schedule.Operator
 	for _, elem := range c.histories.Elems() {
 		op := elem.Value.(*schedule.Operator)
-		if op.Kind()&kind != 0 {
+		if op.Kind()&mask != 0 {
 			operators = append(operators, op)
 		}
 	}

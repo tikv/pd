@@ -211,14 +211,14 @@ func (h *Handler) GetRegionOperators() ([]*schedule.Operator, error) {
 }
 
 // GetOperatorsOfKind returns the running operators of the kind.
-func (h *Handler) GetOperatorsOfKind(kind schedule.OperatorKind) ([]*schedule.Operator, error) {
+func (h *Handler) GetOperatorsOfKind(mask schedule.OperatorKind) ([]*schedule.Operator, error) {
 	ops, err := h.GetOperators()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 	var results []*schedule.Operator
 	for _, op := range ops {
-		if op.Kind()&kind != 0 {
+		if op.Kind()&mask != 0 {
 			results = append(results, op)
 		}
 	}
@@ -235,12 +235,12 @@ func (h *Handler) GetHistoryOperators() ([]*schedule.Operator, error) {
 }
 
 // GetHistoryOperatorsOfKind returns history operators by Kind
-func (h *Handler) GetHistoryOperatorsOfKind(kind schedule.OperatorKind) ([]*schedule.Operator, error) {
+func (h *Handler) GetHistoryOperatorsOfKind(mask schedule.OperatorKind) ([]*schedule.Operator, error) {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	return c.getHistoriesOfKind(kind), nil
+	return c.getHistoriesOfKind(mask), nil
 }
 
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.

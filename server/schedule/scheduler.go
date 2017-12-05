@@ -114,13 +114,13 @@ func (l *Limiter) UpdateCounts(operators map[uint64]*Operator) {
 	}
 }
 
-// OperatorCount get the count by kind
-func (l *Limiter) OperatorCount(kind OperatorKind) uint64 {
+// OperatorCount gets the count of operators filtered by mask.
+func (l *Limiter) OperatorCount(mask OperatorKind) uint64 {
 	l.RLock()
 	defer l.RUnlock()
 	var total uint64
 	for k, count := range l.counts {
-		if k&kind != 0 {
+		if k&mask != 0 {
 			total += count
 		}
 	}
