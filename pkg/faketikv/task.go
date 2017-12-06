@@ -16,6 +16,7 @@ package faketikv
 import (
 	"fmt"
 
+	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -38,7 +39,7 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, clusterInfo *ClusterInfo
 	if resp.GetChangePeer() != nil {
 		changePeer := resp.GetChangePeer()
 		switch changePeer.GetChangeType() {
-		case pdpb.ConfChangeType_AddNode:
+		case eraftpb.ConfChangeType_AddNode:
 			return &addPeer{
 				regionID: regionID,
 				size:     region.ApproximateSize,
@@ -46,7 +47,7 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, clusterInfo *ClusterInfo
 				epoch:    epoch,
 				peer:     changePeer.GetPeer(),
 			}
-		case pdpb.ConfChangeType_RemoveNode:
+		case eraftpb.ConfChangeType_RemoveNode:
 			return &removePeer{
 				regionID: regionID,
 				size:     region.ApproximateSize,

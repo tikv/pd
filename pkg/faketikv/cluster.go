@@ -38,7 +38,8 @@ func (c *ClusterInfo) nodeHealth(storeID uint64) bool {
 	if !ok {
 		return false
 	}
-	return n.Store.GetState() == Up
+
+	return n.GetState() == Up
 }
 
 func (c ClusterInfo) electNewLeader(region *core.RegionInfo) *metapb.Peer {
@@ -62,7 +63,7 @@ func (c ClusterInfo) electNewLeader(region *core.RegionInfo) *metapb.Peer {
 			return peer
 		}
 	}
-
+	return nil
 }
 
 func (c *ClusterInfo) stepLeader(region *core.RegionInfo) {

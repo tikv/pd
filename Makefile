@@ -22,7 +22,7 @@ default: build
 
 all: dev
 
-dev: build check test
+dev: build simulator check test
 
 build:
 ifeq ("$(WITH_RACE)", "1")
@@ -70,5 +70,8 @@ endif
 	glide vc --only-code --no-tests
 	mkdir -p _vendor
 	mv vendor _vendor/src
+
+simulator:
+	GOPATH=$(VENDOR) CGO_ENABLED=0 go build -o bin/simulator cmd/simulator/main.go
 
 .PHONY: update clean

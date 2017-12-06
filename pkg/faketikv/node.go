@@ -141,7 +141,7 @@ func (n *Node) stepTask() {
 	for _, task := range n.tasks {
 		task.Step(n.clusterInfo)
 		if task.IsFinished() {
-			log.Infof("[store %d][region %d] task finished: %s", n.GetId(), task.RegionID(), task.Desc())
+			log.Infof("[store %d][region %d] task finished: %s final: %v", n.GetId(), task.RegionID(), task.Desc(), n.clusterInfo.GetRegion(task.RegionID()))
 			n.clusterInfo.reportRegionChange(task.RegionID())
 			delete(n.tasks, task.RegionID())
 		}
@@ -170,6 +170,9 @@ func (n *Node) storeHeartBeat() {
 }
 
 func (n *Node) regionHeartBeat() {
+	if n.state != Up {
+		return
+	}
 	regions := n.clusterInfo.GetRegions()
 	for _, region := range regions {
 		if region.Leader != nil && region.Leader.GetStoreId() == n.Id {
