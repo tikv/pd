@@ -15,8 +15,6 @@ package command
 
 import (
 	"bytes"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +23,7 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/coreos/etcd/pkg/transport"
 	"github.com/juju/errors"
 	"github.com/spf13/cobra"
 )
@@ -38,35 +37,19 @@ var (
 
 // InitHTTPSClient creates https client with ca file
 func InitHTTPSClient(CAPath, CertPath, KeyPath string) error {
-	certificates := []tls.Certificate{}
-	if len(CertPath) != 0 && len(KeyPath) != 0 {
-		// Load the client certificates from disk
-		certificate, err := tls.LoadX509KeyPair(CertPath, KeyPath)
-		if err != nil {
-			return errors.Errorf("could not load client key pair: %s", err)
-		}
-		certificates = append(certificates, certificate)
+	tlsInfo := transport.TLSInfo{
+		CertFile:      CertPath,
+		KeyFile:       KeyPath,
+		TrustedCAFile: CAPath,
 	}
-
-	// Create a certificate pool from the certificate authority
-	certPool := x509.NewCertPool()
-	ca, err := ioutil.ReadFile(CAPath)
+	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {
-		return errors.Errorf("could not read ca certificate: %s", err)
+		return errors.Trace(err)
 	}
 
-	// Append the certificates from the CA
-	if !certPool.AppendCertsFromPEM(ca) {
-		return errors.New("failed to append ca certs")
-	}
-
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			Certificates: certificates,
-			RootCAs:      certPool,
-		},
-	}
-	dailClient = &http.Client{Transport: tr}
+	dailClient = &http.Client{Transport: &http.Transport{
+		TLSClientConfig: tlsConfig,
+	}}
 
 	return nil
 }
