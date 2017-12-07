@@ -81,6 +81,10 @@ func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
 	return o.load().MaxStoreDownTime.Duration
 }
 
+func (o *scheduleOption) GetMaxMergeRegionSize() uint64 {
+	return o.load().MaxMergeRegionSize
+}
+
 func (o *scheduleOption) GetLeaderScheduleLimit(name string) uint64 {
 	if n, ok := o.ns[name]; ok {
 		return n.GetLeaderScheduleLimit()

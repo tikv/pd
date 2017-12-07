@@ -21,7 +21,6 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
-	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/cache"
@@ -470,7 +469,7 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 		}
 		cmd := &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
-				ChangeType: eraftpb.ConfChangeType_AddNode,
+				ChangeType: pdpb.ConfChangeType_AddNode,
 				Peer: &metapb.Peer{
 					Id:      s.PeerID,
 					StoreId: s.ToStore,
@@ -481,7 +480,7 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 	case schedule.RemovePeer:
 		cmd := &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
-				ChangeType: eraftpb.ConfChangeType_RemoveNode,
+				ChangeType: pdpb.ConfChangeType_RemoveNode,
 				Peer:       region.GetStorePeer(s.FromStore),
 			},
 		}

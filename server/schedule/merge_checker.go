@@ -23,21 +23,19 @@ import (
 
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
-	opt        Options
 	cluster    Cluster
 	classifier namespace.Classifier
 	filters    []Filter
 }
 
 // NewMergeChecker creates a merge checker.
-func NewMergeChecker(opt Options, cluster Cluster, classifier namespace.Classifier) *MergeChecker {
+func NewMergeChecker(cluster Cluster, classifier namespace.Classifier) *MergeChecker {
 	filters := []Filter{
-		NewHealthFilter(opt),
-		NewSnapshotCountFilter(opt),
+		NewHealthFilter(),
+		NewSnapshotCountFilter(),
 	}
 
 	return &MergeChecker{
-		opt:        opt,
 		cluster:    cluster,
 		classifier: classifier,
 		filters:    filters,
@@ -47,7 +45,7 @@ func NewMergeChecker(opt Options, cluster Cluster, classifier namespace.Classifi
 // Check verifies a region's replicas, creating an Operator if need.
 func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	// region size is not small enough
-	if region.ApproximateSize > int64(m.opt.GetMaxMergeRegionSize()) {
+	if region.ApproximateSize > int64(m.cluster.GetMaxMergeRegionSize()) {
 		return nil, nil
 	}
 
@@ -89,7 +87,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	if err != nil {
 		return nil, nil
 	}
-	op1, op2 := CreateMergeRegionOperator("merge-region", region, target, direction, core.RegionKind, steps)
+	op1, op2 := CreateMergeRegionOperator("merge-region", region, target, direction, OpMerge, steps)
 	op1.SetPriorityLevel(core.HighPriority)
 	op2.SetPriorityLevel(core.HighPriority)
 

@@ -299,7 +299,7 @@ func CreateMovePeerOperator(desc string, region *core.RegionInfo, kind OperatorK
 }
 
 // CreateMergeRegionOperator creates an Operator that merge two region into one
-func CreateMergeRegionOperator(desc string, source *core.RegionInfo, target *core.RegionInfo, direction pdpb.MergeDirection, kind core.ResourceKind, steps []OperatorStep) (*Operator, *Operator) {
+func CreateMergeRegionOperator(desc string, source *core.RegionInfo, target *core.RegionInfo, direction pdpb.MergeDirection, kind OperatorKind, steps []OperatorStep) (*Operator, *Operator) {
 	steps = append(steps, MergeRegion{
 		FromRegion:  source.GetId(),
 		ToRegion:    target.GetId(),

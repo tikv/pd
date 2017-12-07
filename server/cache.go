@@ -485,6 +485,10 @@ func (c *clusterInfo) GetMaxPendingPeerCount() uint64 {
 	return c.opt.GetMaxPendingPeerCount()
 }
 
+func (c *clusterInfo) GetMaxMergeRegionSize() uint64 {
+	return c.opt.GetMaxMergeRegionSize()
+}
+
 func (c *clusterInfo) GetMaxStoreDownTime() time.Duration {
 	return c.opt.GetMaxStoreDownTime()
 }
