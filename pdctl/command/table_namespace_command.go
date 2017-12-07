@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	namespacePrefix      = "pd/api/v1/classifier/table/namespaces"
+	namespacesPrefix     = "pd/api/v1/classifier/table/namespaces"
 	namespaceTablePrefix = "pd/api/v1/classifier/table/namespaces/table"
 	namespaceMetaPrefix  = "pd/api/v1/classifier/table/namespaces/meta"
 	storeNsPrefix        = "pd/api/v1/classifier/table/store_ns/%s"
@@ -76,7 +76,7 @@ func NewRemoveTableIDCommand() *cobra.Command {
 }
 
 func showNamespaceCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, namespacePrefix, http.MethodGet)
+	r, err := doRequest(cmd, namespacesPrefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get the namespace information: %s\n", err)
 		return
@@ -94,7 +94,7 @@ func createNamespaceCommandFunc(cmd *cobra.Command, args []string) {
 		"namespace": args[0],
 	}
 
-	postJSON(cmd, namespacePrefix, input)
+	postJSON(cmd, namespacesPrefix, input)
 }
 
 func addTableCommandFunc(cmd *cobra.Command, args []string) {

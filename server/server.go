@@ -14,20 +14,26 @@
 package server
 
 import (
+	"crypto/tls"
 	"math/rand"
 	"net/http"
+	"os"
+	"os/signal"
 	"path"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/embed"
+	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server/core"
@@ -119,32 +125,44 @@ func (s *Server) startEtcd() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+
 	// Check cluster ID
 	urlmap, err := types.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap); err != nil {
+	tlsConfig, err := s.GetTLSConfig()
+	if err != nil {
 		return errors.Trace(err)
+	}
+	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap, tlsConfig); err != nil {
+		return errors.Trace(err)
+	}
+
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+
+	select {
+	// Wait etcd until it is ready to use
+	case <-etcd.Server.ReadyNotify():
+	case sig := <-sc:
+		return errors.Errorf("receive signal %v when waiting embed etcd to be ready", sig)
 	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
 	log.Infof("create etcd v3 client with endpoints %v", endpoints)
+
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: etcdTimeout,
+		TLS:         tlsConfig,
 	})
 	if err != nil {
 		return errors.Trace(err)
-	}
-
-	if err = etcdutil.WaitEtcdStart(client, endpoints[0]); err != nil {
-		// See https://github.com/coreos/etcd/issues/6067
-		// Here may return "not capable" error because we don't start
-		// all etcds in initial_cluster at same time, so here just log
-		// an error.
-		// Note that pd can not work correctly if we don't start all etcds.
-		log.Errorf("etcd start failed, err %v", err)
 	}
 
 	etcdServerID := uint64(etcd.Server.ID())
@@ -283,6 +301,87 @@ func (s *Server) Run() error {
 	return nil
 }
 
+func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
+	clusterID := s.clusterID
+
+	log.Infof("try to bootstrap raft cluster %d with %v", clusterID, req)
+
+	if err := checkBootstrapRequest(clusterID, req); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	clusterMeta := metapb.Cluster{
+		Id:           clusterID,
+		MaxPeerCount: uint32(s.scheduleOpt.rep.GetMaxReplicas()),
+	}
+
+	// Set cluster meta
+	clusterValue, err := clusterMeta.Marshal()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	clusterRootPath := s.getClusterRootPath()
+
+	var ops []clientv3.Op
+	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
+
+	// Set bootstrap time
+	bootstrapKey := makeBootstrapTimeKey(clusterRootPath)
+	nano := time.Now().UnixNano()
+
+	timeData := uint64ToBytes(uint64(nano))
+	ops = append(ops, clientv3.OpPut(bootstrapKey, string(timeData)))
+
+	// Set store meta
+	storeMeta := req.GetStore()
+	storePath := makeStoreKey(clusterRootPath, storeMeta.GetId())
+	storeValue, err := storeMeta.Marshal()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	ops = append(ops, clientv3.OpPut(storePath, string(storeValue)))
+
+	regionValue, err := req.GetRegion().Marshal()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	// Set region meta with region id.
+	regionPath := makeRegionKey(clusterRootPath, req.GetRegion().GetId())
+	ops = append(ops, clientv3.OpPut(regionPath, string(regionValue)))
+
+	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
+	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
+	resp, err := s.txn().If(bootstrapCmp).Then(ops...).Commit()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if !resp.Succeeded {
+		log.Warnf("cluster %d already bootstrapped", clusterID)
+		return nil, errors.Errorf("cluster %d already bootstrapped", clusterID)
+	}
+
+	log.Infof("bootstrap cluster %d ok", clusterID)
+
+	if err := s.cluster.start(); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return &pdpb.BootstrapResponse{}, nil
+}
+
+func (s *Server) createRaftCluster() error {
+	if s.cluster.isRunning() {
+		return nil
+	}
+
+	return s.cluster.start()
+}
+
+func (s *Server) stopRaftCluster() {
+	s.cluster.stop()
+}
+
 // GetAddr returns the server urls for clients.
 func (s *Server) GetAddr() string {
 	return s.cfg.AdvertiseClientUrls
@@ -328,4 +427,151 @@ func (s *Server) txn() clientv3.Txn {
 // the transaction can be executed only if the server is leader.
 func (s *Server) leaderTxn(cs ...clientv3.Cmp) clientv3.Txn {
 	return s.txn().If(append(cs, s.leaderCmp())...)
+}
+
+// GetConfig gets the config information.
+func (s *Server) GetConfig() *Config {
+	cfg := s.cfg.clone()
+	cfg.Schedule = *s.scheduleOpt.load()
+	cfg.Replication = *s.scheduleOpt.rep.load()
+	namespaces := make(map[string]NamespaceConfig)
+	for name, opt := range s.scheduleOpt.ns {
+		namespaces[name] = *opt.load()
+	}
+	cfg.Namespace = namespaces
+	return cfg
+}
+
+// GetScheduleConfig gets the balance config information.
+func (s *Server) GetScheduleConfig() *ScheduleConfig {
+	cfg := &ScheduleConfig{}
+	*cfg = *s.scheduleOpt.load()
+	return cfg
+}
+
+// SetScheduleConfig sets the balance config information.
+func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
+	old := s.scheduleOpt.load()
+	s.scheduleOpt.store(&cfg)
+	s.scheduleOpt.persist(s.kv)
+	log.Infof("schedule config is updated: %+v, old: %+v", cfg, old)
+}
+
+// GetReplicationConfig get the replication config.
+func (s *Server) GetReplicationConfig() *ReplicationConfig {
+	cfg := &ReplicationConfig{}
+	*cfg = *s.scheduleOpt.rep.load()
+	return cfg
+}
+
+// SetReplicationConfig sets the replication config.
+func (s *Server) SetReplicationConfig(cfg ReplicationConfig) {
+	old := s.scheduleOpt.rep.load()
+	s.scheduleOpt.rep.store(&cfg)
+	s.scheduleOpt.persist(s.kv)
+	log.Infof("replication config is updated: %+v, old: %+v", cfg, old)
+}
+
+// GetNamespaceConfig get the namespace config.
+func (s *Server) GetNamespaceConfig(name string) *NamespaceConfig {
+	if _, ok := s.scheduleOpt.ns[name]; !ok {
+		return &NamespaceConfig{}
+	}
+
+	cfg := &NamespaceConfig{
+		LeaderScheduleLimit:  s.scheduleOpt.GetLeaderScheduleLimit(name),
+		RegionScheduleLimit:  s.scheduleOpt.GetRegionScheduleLimit(name),
+		ReplicaScheduleLimit: s.scheduleOpt.GetReplicaScheduleLimit(name),
+		MaxReplicas:          uint64(s.scheduleOpt.GetMaxReplicas(name)),
+	}
+
+	return cfg
+}
+
+// GetNamespaceConfigWithAdjust get the namespace config that replace zero value with global config value.
+func (s *Server) GetNamespaceConfigWithAdjust(name string) *NamespaceConfig {
+	cfg := s.GetNamespaceConfig(name)
+	cfg.adjust(s.scheduleOpt)
+	return cfg
+}
+
+// SetNamespaceConfig sets the namespace config.
+func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) {
+	if n, ok := s.scheduleOpt.ns[name]; ok {
+		old := s.scheduleOpt.ns[name].load()
+		n.store(&cfg)
+		s.scheduleOpt.persist(s.kv)
+		log.Infof("namespace:%v config is updated: %+v, old: %+v", name, cfg, old)
+	} else {
+		s.scheduleOpt.ns[name] = newNamespaceOption(&cfg)
+		s.scheduleOpt.persist(s.kv)
+		log.Infof("namespace:%v config is added: %+v", name, cfg)
+	}
+}
+
+// DeleteNamespaceConfig deletes the namespace config.
+func (s *Server) DeleteNamespaceConfig(name string) {
+	if n, ok := s.scheduleOpt.ns[name]; ok {
+		cfg := n.load()
+		delete(s.scheduleOpt.ns, name)
+		s.scheduleOpt.persist(s.kv)
+		log.Infof("namespace:%v config is deleted: %+v", name, *cfg)
+	}
+}
+
+// IsNamespaceExist returns whether the namespace exists.
+func (s *Server) IsNamespaceExist(name string) bool {
+	return s.classifier.IsNamespaceExist(name)
+}
+
+func (s *Server) getClusterRootPath() string {
+	return path.Join(s.rootPath, "raft")
+}
+
+// GetRaftCluster gets raft cluster.
+// If cluster has not been bootstrapped, return nil.
+func (s *Server) GetRaftCluster() *RaftCluster {
+	if s.isClosed() || !s.cluster.isRunning() {
+		return nil
+	}
+	return s.cluster
+}
+
+// GetCluster gets cluster.
+func (s *Server) GetCluster() *metapb.Cluster {
+	return &metapb.Cluster{
+		Id:           s.clusterID,
+		MaxPeerCount: uint32(s.scheduleOpt.rep.GetMaxReplicas()),
+	}
+}
+
+// GetClusterStatus gets cluster status.
+func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
+	s.cluster.Lock()
+	defer s.cluster.Unlock()
+	err := s.cluster.loadClusterStatus()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	clone := &ClusterStatus{}
+	*clone = *s.cluster.status
+	return clone, nil
+}
+
+func (s *Server) getAllocIDPath() string {
+	return path.Join(s.rootPath, "alloc_id")
+}
+
+// GetTLSConfig gets tls config.
+func (s *Server) GetTLSConfig() (*tls.Config, error) {
+	tlsInfo := transport.TLSInfo{
+		CertFile:      s.cfg.Security.CertPath,
+		KeyFile:       s.cfg.Security.KeyPath,
+		TrustedCAFile: s.cfg.Security.CAPath,
+	}
+	tlsConfig, err := tlsInfo.ClientConfig()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return tlsConfig, nil
 }

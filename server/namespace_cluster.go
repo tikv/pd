@@ -132,3 +132,19 @@ func scheduleByNamespace(cluster schedule.Cluster, classifier namespace.Classifi
 	}
 	return nil
 }
+
+func (c *namespaceCluster) GetLeaderScheduleLimit() uint64 {
+	return c.GetOpt().GetLeaderScheduleLimit(c.namespace)
+}
+
+func (c *namespaceCluster) GetRegionScheduleLimit() uint64 {
+	return c.GetOpt().GetRegionScheduleLimit(c.namespace)
+}
+
+func (c *namespaceCluster) GetReplicaScheduleLimit() uint64 {
+	return c.GetOpt().GetReplicaScheduleLimit(c.namespace)
+}
+
+func (c *namespaceCluster) GetMaxReplicas() int {
+	return c.GetOpt().GetMaxReplicas(c.namespace)
+}

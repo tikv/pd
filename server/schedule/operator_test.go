@@ -58,7 +58,7 @@ func (s *testOperatorSuite) TestOperatorStep(c *C) {
 }
 
 func (s *testOperatorSuite) newTestOperator(regionID uint64, steps ...OperatorStep) *Operator {
-	return NewOperator("testOperator", regionID, core.AdminKind, steps...)
+	return NewOperator("testOperator", regionID, OpAdmin, steps...)
 }
 
 func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OperatorStep) {
@@ -170,4 +170,16 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		RegionSize:  10,
 		RegionCount: 0,
 	})
+}
+
+func (s *testOperatorSuite) TestOperatorKind(c *C) {
+	c.Assert((OpLeader | OpReplica).String(), Equals, "leader,replica")
+	c.Assert(OperatorKind(0).String(), Equals, "unknown")
+	k, err := ParseOperatorKind("balance,region,leader")
+	c.Assert(err, IsNil)
+	c.Assert(k, Equals, OpBalance|OpRegion|OpLeader)
+	_, err = ParseOperatorKind("leader,region")
+	c.Assert(err, IsNil)
+	_, err = ParseOperatorKind("foobar")
+	c.Assert(err, NotNil)
 }

@@ -25,7 +25,7 @@ import (
 )
 
 // scheduleTransferLeader schedules a region to transfer leader to the peer.
-func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s schedule.Selector, filters ...schedule.Filter) (*core.RegionInfo, *metapb.Peer) {
+func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s schedule.Selector, filters ...schedule.Filter) (region *core.RegionInfo, peer *metapb.Peer) {
 	stores := cluster.GetStores()
 	if len(stores) == 0 {
 		schedulerCounter.WithLabelValues(schedulerName, "no_store").Inc()
@@ -37,8 +37,8 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 		averageLeader += float64(s.LeaderScore()) / float64(len(stores))
 	}
 
-	mostLeaderStore := s.SelectSource(stores, filters...)
-	leastLeaderStore := s.SelectTarget(stores, filters...)
+	mostLeaderStore := s.SelectSource(cluster, stores, filters...)
+	leastLeaderStore := s.SelectTarget(cluster, stores, filters...)
 
 	var mostLeaderDistance, leastLeaderDistance float64
 	if mostLeaderStore != nil {
@@ -53,36 +53,52 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 	}
 
 	if mostLeaderDistance > leastLeaderDistance {
-		// Transfer a leader out of mostLeaderStore.
-		region := cluster.RandLeaderRegion(mostLeaderStore.GetId())
+		region, peer = scheduleRemoveLeader(cluster, schedulerName, mostLeaderStore.GetId(), s)
 		if region == nil {
-			schedulerCounter.WithLabelValues(schedulerName, "no_leader_region").Inc()
-			return nil, nil
+			region, peer = scheduleAddLeader(cluster, schedulerName, leastLeaderStore.GetId())
 		}
-		targetStores := cluster.GetFollowerStores(region)
-		target := s.SelectTarget(targetStores)
-		if target == nil {
-			schedulerCounter.WithLabelValues(schedulerName, "no_target_store").Inc()
-			return nil, nil
+	} else {
+		region, peer = scheduleAddLeader(cluster, schedulerName, leastLeaderStore.GetId())
+		if region == nil {
+			region, peer = scheduleRemoveLeader(cluster, schedulerName, mostLeaderStore.GetId(), s)
 		}
-
-		return region, region.GetStorePeer(target.GetId())
 	}
 
-	// Transfer a leader into leastLeaderStore.
-	region := cluster.RandFollowerRegion(leastLeaderStore.GetId())
+	return region, peer
+}
+
+// scheduleAddLeader transfers a leader into the store.
+func scheduleAddLeader(cluster schedule.Cluster, schedulerName string, storeID uint64) (*core.RegionInfo, *metapb.Peer) {
+	region := cluster.RandFollowerRegion(storeID)
 	if region == nil {
 		schedulerCounter.WithLabelValues(schedulerName, "no_target_peer").Inc()
 		return nil, nil
 	}
-	return region, region.GetStorePeer(leastLeaderStore.GetId())
+	return region, region.GetStorePeer(storeID)
+}
+
+// scheduleRemoveLeader transfers a leader out of the store.
+func scheduleRemoveLeader(cluster schedule.Cluster, schedulerName string, storeID uint64, s schedule.Selector) (*core.RegionInfo, *metapb.Peer) {
+	region := cluster.RandLeaderRegion(storeID)
+	if region == nil {
+		schedulerCounter.WithLabelValues(schedulerName, "no_leader_region").Inc()
+		return nil, nil
+	}
+	targetStores := cluster.GetFollowerStores(region)
+	target := s.SelectTarget(cluster, targetStores)
+	if target == nil {
+		schedulerCounter.WithLabelValues(schedulerName, "no_target_store").Inc()
+		return nil, nil
+	}
+
+	return region, region.GetStorePeer(target.GetId())
 }
 
 // scheduleRemovePeer schedules a region to remove the peer.
 func scheduleRemovePeer(cluster schedule.Cluster, schedulerName string, s schedule.Selector, filters ...schedule.Filter) (*core.RegionInfo, *metapb.Peer) {
 	stores := cluster.GetStores()
 
-	source := s.SelectSource(stores, filters...)
+	source := s.SelectSource(cluster, stores, filters...)
 	if source == nil {
 		schedulerCounter.WithLabelValues(schedulerName, "no_store").Inc()
 		return nil, nil
@@ -104,7 +120,7 @@ func scheduleRemovePeer(cluster schedule.Cluster, schedulerName string, s schedu
 func scheduleAddPeer(cluster schedule.Cluster, s schedule.Selector, filters ...schedule.Filter) *metapb.Peer {
 	stores := cluster.GetStores()
 
-	target := s.SelectTarget(stores, filters...)
+	target := s.SelectTarget(cluster, stores, filters...)
 	if target == nil {
 		return nil
 	}

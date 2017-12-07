@@ -165,6 +165,13 @@ func (c *tableNamespaceClassifier) GetNamespaces() []*Namespace {
 	return c.nsInfo.getNamespaces()
 }
 
+// GetNamespaceByName returns whether namespace exists
+func (c *tableNamespaceClassifier) IsNamespaceExist(name string) bool {
+	c.RLock()
+	defer c.RUnlock()
+	return c.nsInfo.getNamespaceByName(name) != nil
+}
+
 // CreateNamespace creates a new Namespace.
 func (c *tableNamespaceClassifier) CreateNamespace(name string) error {
 	c.Lock()

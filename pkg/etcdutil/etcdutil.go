@@ -15,6 +15,7 @@ package etcdutil
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"time"
 
@@ -43,7 +44,7 @@ const (
 
 // CheckClusterID checks Etcd's cluster ID, returns an error if mismatch.
 // This function will never block even quorum is not satisfied.
-func CheckClusterID(localClusterID types.ID, um types.URLsMap) error {
+func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Config) error {
 	if len(um) == 0 {
 		return nil
 	}
@@ -54,7 +55,9 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap) error {
 	}
 
 	for _, u := range peerURLs {
-		trp := &http.Transport{}
+		trp := &http.Transport{
+			TLSClientConfig: tlsConfig,
+		}
 		remoteCluster, gerr := etcdserver.GetClusterFromRemotePeers([]string{u}, trp)
 		trp.CloseIdleConnections()
 		if gerr != nil {
@@ -93,37 +96,4 @@ func RemoveEtcdMember(client *clientv3.Client, id uint64) (*clientv3.MemberRemov
 	rmResp, err := client.MemberRemove(ctx, id)
 	cancel()
 	return rmResp, errors.Trace(err)
-}
-
-// WaitEtcdStart checks etcd starts ok or not
-func WaitEtcdStart(c *clientv3.Client, endpoint string) error {
-	var err error
-	for i := 0; i < maxCheckEtcdRunningCount; i++ {
-		// etcd may not start ok, we should wait and check again
-		_, err = endpointStatus(c, endpoint)
-		if err == nil {
-			return nil
-		}
-
-		time.Sleep(checkEtcdRunningDelay)
-		continue
-	}
-
-	return errors.Trace(err)
-}
-
-// endpointStatus checks whether current etcd is running.
-func endpointStatus(c *clientv3.Client, endpoint string) (*clientv3.StatusResponse, error) {
-	m := clientv3.NewMaintenance(c)
-
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(c.Ctx(), DefaultRequestTimeout)
-	resp, err := m.Status(ctx, endpoint)
-	cancel()
-
-	if cost := time.Since(start); cost > DefaultSlowRequestTime {
-		log.Warnf("check etcd %s status, resp: %v, err: %v, cost: %s", endpoint, resp, err, cost)
-	}
-
-	return resp, errors.Trace(err)
 }

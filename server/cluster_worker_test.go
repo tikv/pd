@@ -23,6 +23,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
@@ -289,13 +290,13 @@ func (s *testClusterWorkerSuite) onChangePeerRes(c *C, res *pdpb.ChangePeer, reg
 	store, ok := s.stores[peer.GetStoreId()]
 	c.Assert(ok, IsTrue)
 	switch res.GetChangeType() {
-	case pdpb.ConfChangeType_AddNode:
+	case eraftpb.ConfChangeType_AddNode:
 		if _, ok := store.peers[peer.GetId()]; ok {
 			return
 		}
 		store.addPeer(c, peer)
 		addRegionPeer(c, region, peer)
-	case pdpb.ConfChangeType_RemoveNode:
+	case eraftpb.ConfChangeType_RemoveNode:
 		if _, ok := store.peers[peer.GetId()]; !ok {
 			return
 		}
@@ -330,8 +331,8 @@ func updateRegionRange(r *metapb.Region, start, end []byte) {
 }
 
 func splitRegion(c *C, old *metapb.Region, splitKey []byte, newRegionID uint64, newPeerIDs []uint64) *metapb.Region {
-	var peers []*metapb.Peer
 	c.Assert(len(old.Peers), Equals, len(newPeerIDs))
+	peers := make([]*metapb.Peer, 0, len(old.Peers))
 	for i, peer := range old.Peers {
 		peers = append(peers, &metapb.Peer{
 			Id:      newPeerIDs[i],
@@ -485,7 +486,7 @@ func (s *testClusterWorkerSuite) waitAddNode(c *C, r *metapb.Region, leader *met
 			c.Log("no response")
 			return false
 		}
-		if res.GetChangePeer() == nil || res.GetChangePeer().GetChangeType() != pdpb.ConfChangeType_AddNode {
+		if res.GetChangePeer() == nil || res.GetChangePeer().GetChangeType() != eraftpb.ConfChangeType_AddNode {
 			c.Log("response is not AddNode")
 			return false
 		}
@@ -557,7 +558,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 				leaderPeer = transferLeader.GetPeer()
 				return false
 			}
-			if res.GetChangePeer() == nil || res.GetChangePeer().GetChangeType() != pdpb.ConfChangeType_RemoveNode {
+			if res.GetChangePeer() == nil || res.GetChangePeer().GetChangeType() != eraftpb.ConfChangeType_RemoveNode {
 				c.Log("response is not RemoveNode")
 				return false
 			}

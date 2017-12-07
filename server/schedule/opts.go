@@ -21,7 +21,7 @@ import (
 type Options interface {
 	GetLeaderScheduleLimit() uint64
 	GetRegionScheduleLimit() uint64
-	GetTolerantSizeRatio() float64
+	GetReplicaScheduleLimit() uint64
 
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
@@ -32,4 +32,13 @@ type Options interface {
 	GetLocationLabels() []string
 
 	GetHotRegionLowThreshold() int
+	GetTolerantSizeRatio() float64
+}
+
+// NamespaceOptions for namespace cluster
+type NamespaceOptions interface {
+	GetLeaderScheduleLimit(name string) uint64
+	GetRegionScheduleLimit(name string) uint64
+	GetReplicaScheduleLimit(name string) uint64
+	GetMaxReplicas(name string) int
 }

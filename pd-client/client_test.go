@@ -78,7 +78,7 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 	bootstrapServer(c, newHeader(s.srv), s.grpcPDClient)
 
 	var err error
-	s.client, err = NewClient(s.srv.GetEndpoints())
+	s.client, err = NewClient(s.srv.GetEndpoints(), SecurityOption{})
 	c.Assert(err, IsNil)
 	s.regionHeartbeat, err = s.grpcPDClient.RegionHeartbeat(context.Background())
 	c.Assert(err, IsNil)

@@ -14,6 +14,7 @@
 package etcdutil
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io/ioutil"
 	"net/url"
@@ -71,9 +72,7 @@ func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {
 	})
 	c.Assert(err, IsNil)
 
-	// Test WaitEtcdStart
-	err = WaitEtcdStart(client1, ep1)
-	c.Assert(err, IsNil)
+	<-etcd1.Server.ReadyNotify()
 
 	// Test ListEtcdMembers
 	listResp1, err := ListEtcdMembers(client1)
@@ -104,7 +103,7 @@ func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {
 	})
 	c.Assert(err, IsNil)
 
-	err = WaitEtcdStart(client2, ep2)
+	<-etcd2.Server.ReadyNotify()
 	c.Assert(err, IsNil)
 
 	listResp2, err := ListEtcdMembers(client2)
@@ -122,7 +121,7 @@ func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {
 	// Test CheckClusterID
 	urlmap, err := types.NewURLsMap(cfg2.InitialCluster)
 	c.Assert(err, IsNil)
-	err = CheckClusterID(etcd1.Server.Cluster().ID(), urlmap)
+	err = CheckClusterID(etcd1.Server.Cluster().ID(), urlmap, &tls.Config{})
 	c.Assert(err, IsNil)
 
 	// Test RemoveEtcdMember
