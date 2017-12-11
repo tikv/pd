@@ -344,7 +344,11 @@ func (r *RegionsInfo) TreeLength() int {
 // AddRegion add RegionInfo to regionTree and regionMap, also update leadres and followers by region peers
 func (r *RegionsInfo) AddRegion(region *RegionInfo) {
 	// Add to tree and regions.
-	r.tree.update(region.Region)
+	overlaps := r.tree.update(region.Region)
+	for _, item := range overlaps {
+		r.RemoveRegion(r.GetRegion(item.region.Id))
+	}
+
 	r.regions.Put(region)
 
 	if region.Leader == nil {

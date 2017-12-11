@@ -123,7 +123,7 @@ type MergeRegion struct {
 }
 
 func (mr MergeRegion) String() string {
-	return fmt.Sprintf("merge region %v with region %v", mr.FromRegion, mr.ToRegion)
+	return fmt.Sprintf("merge region %v into region %v", mr.FromRegion, mr.ToRegion)
 }
 
 // IsFinish checks if cuurent step is finished

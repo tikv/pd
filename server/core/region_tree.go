@@ -15,6 +15,7 @@ package core
 import (
 	"bytes"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/google/btree"
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
@@ -59,7 +60,7 @@ func (t *regionTree) length() int {
 // update updates the tree with the region.
 // It finds and deletes all the overlapped regions first, and then
 // insert the region.
-func (t *regionTree) update(region *metapb.Region) {
+func (t *regionTree) update(region *metapb.Region) []*regionItem {
 	item := &regionItem{region: region}
 
 	result := t.find(region)
@@ -78,10 +79,13 @@ func (t *regionTree) update(region *metapb.Region) {
 	})
 
 	for _, item := range overlaps {
+		log.Infof("[region %d] delete region {%v}, cause overlapping with region {%v}", item.region.GetId(), item.region, region)
 		t.tree.Delete(item)
 	}
 
 	t.tree.ReplaceOrInsert(item)
+
+	return overlaps
 }
 
 // remove removes a region if the region is in the tree.

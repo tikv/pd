@@ -65,7 +65,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 		// peer count should equal
 		if peerCount == len(prev.Region.GetPeers()) {
 			target = prev
-			direction = pdpb.MergeDirection_Up
+			direction = pdpb.MergeDirection_Down
 		}
 	}
 	if next != nil && !m.cluster.IsRegionHot(next.GetId()) && m.classifier.GetRegionNamespace(next) == namespace {
@@ -74,7 +74,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 			// peer count should equal
 			if peerCount == len(next.Region.GetPeers()) {
 				target = next
-				direction = pdpb.MergeDirection_Down
+				direction = pdpb.MergeDirection_Up
 			}
 		}
 	}
