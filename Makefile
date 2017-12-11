@@ -1,8 +1,5 @@
 PD_PKG := github.com/pingcap/pd
-VENDOR := $(shell rm -rf _vendor/src/$(PD_PKG) &&\
-                 ln -s `pwd` _vendor/src/$(PD_PKG) &&\
-                 pwd)/_vendor
-TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
+TEST_PKGS := $(shell find . -iname "*_test.go" -not -path "./vendor/*" -exec dirname {} \; | \
                      uniq | sed -e "s/^\./github.com\/pingcap\/pd/")
 
 GOFILTER := grep -vE 'vendor|testutil'
@@ -26,17 +23,17 @@ dev: build simulator check test
 
 build:
 ifeq ("$(WITH_RACE)", "1")
-	GOPATH=$(VENDOR) CGO_ENABLED=1 go build -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=1 go build -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 else
-	GOPATH=$(VENDOR) CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
-	GOPATH=$(VENDOR) CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl cmd/pd-ctl/main.go
-	GOPATH=$(VENDOR) CGO_ENABLED=0 go build -o bin/pd-tso-bench cmd/pd-tso-bench/main.go
-	GOPATH=$(VENDOR) CGO_ENABLED=0 go build -o bin/pd-recover cmd/pd-recover/main.go
+	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl cmd/pd-ctl/main.go
+	CGO_ENABLED=0 go build -o bin/pd-tso-bench cmd/pd-tso-bench/main.go
+	CGO_ENABLED=0 go build -o bin/pd-recover cmd/pd-recover/main.go
 
 test:
-	# testing..
-	@GOPATH=$(VENDOR) CGO_ENABLED=1 go test -race -cover $(TEST_PKGS)
+# testing..
+	CGO_ENABLED=1 go test -race -cover $(TEST_PKGS)
 
 check:
 	go get github.com/golang/lint/golint
@@ -51,7 +48,7 @@ check:
 
 travis_coverage:
 ifeq ("$(TRAVIS_COVERAGE)", "1")
-	GOPATH=$(VENDOR) $(HOME)/gopath/bin/goveralls -service=travis-ci -ignore $(COVERIGNORE)
+	$(HOME)/gopath/bin/goveralls -service=travis-ci -ignore $(COVERIGNORE)
 else
 	@echo "coverage only runs in travis."
 endif
@@ -72,6 +69,6 @@ endif
 	mv vendor _vendor/src
 
 simulator:
-	GOPATH=$(VENDOR) CGO_ENABLED=0 go build -o bin/simulator cmd/simulator/main.go
+	CGO_ENABLED=0 go build -o bin/simulator cmd/simulator/main.go
 
 .PHONY: update clean
