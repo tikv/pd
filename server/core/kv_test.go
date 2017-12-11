@@ -14,6 +14,8 @@
 package core
 
 import (
+	"fmt"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
@@ -111,7 +113,11 @@ func (s *testKVSuite) TestStoreWeight(c *C) {
 func mustSaveRegions(c *C, kv *KV, n int) []*metapb.Region {
 	regions := make([]*metapb.Region, 0, n)
 	for i := 0; i < n; i++ {
-		region := &metapb.Region{Id: uint64(i)}
+		region := &metapb.Region{
+			Id:       uint64(i),
+			StartKey: []byte(fmt.Sprintf("%d", i)),
+			EndKey:   []byte(fmt.Sprintf("%d", i+1)),
+		}
 		regions = append(regions, region)
 	}
 

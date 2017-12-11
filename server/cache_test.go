@@ -14,6 +14,7 @@
 package server
 
 import (
+	"fmt"
 	"math/rand"
 
 	"github.com/juju/errors"
@@ -625,7 +626,11 @@ func mustSaveStores(c *C, kv *core.KV, n int) []*metapb.Store {
 func mustSaveRegions(c *C, kv *core.KV, n int) []*metapb.Region {
 	regions := make([]*metapb.Region, 0, n)
 	for i := 0; i < n; i++ {
-		region := &metapb.Region{Id: uint64(i)}
+		region := &metapb.Region{
+			Id:       uint64(i),
+			StartKey: []byte(fmt.Sprintf("%d", i)),
+			EndKey:   []byte(fmt.Sprintf("%d", i+1)),
+		}
 		regions = append(regions, region)
 	}
 
