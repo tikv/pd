@@ -55,7 +55,10 @@ func NewOpInfluence(operators []*Operator, cluster Cluster) OpInfluence {
 
 	for _, op := range operators {
 		if !op.IsTimeout() && !op.IsFinish() {
-			op.Influence(m, cluster.GetRegion(op.RegionID()))
+			region := cluster.GetRegion(op.RegionID())
+			if region != nil {
+				op.Influence(m, region)
+			}
 		}
 	}
 
