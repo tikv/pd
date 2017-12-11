@@ -22,6 +22,9 @@ all: dev
 dev: build simulator check test
 
 build:
+	go get -u github.com/golang/dep/cmd/dep
+	dep ensure
+	dep prune
 ifeq ("$(WITH_RACE)", "1")
 	CGO_ENABLED=1 go build -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 else
@@ -33,9 +36,6 @@ endif
 
 test:
 # testing..
-	go get -u github.com/golang/dep/cmd/dep
-	dep ensure
-	dep prune
 	CGO_ENABLED=1 go test -race -cover $(TEST_PKGS)
 
 check:
