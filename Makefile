@@ -33,6 +33,9 @@ endif
 
 test:
 # testing..
+	go get -u github.com/golang/dep/cmd/dep
+	dep ensure
+	dep prune
 	CGO_ENABLED=1 go test -race -cover $(TEST_PKGS)
 
 check:
