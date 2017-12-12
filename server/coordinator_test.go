@@ -65,8 +65,8 @@ func (c *testClusterInfo) addRegionStore(storeID uint64, regionCount int) {
 func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
 	region := &metapb.Region{
 		Id:       regionID,
-		StartKey: []byte(fmt.Sprintf("%d", regionID)),
-		EndKey:   []byte(fmt.Sprintf("%d", regionID+1)),
+		StartKey: []byte(fmt.Sprintf("%20d", regionID)),
+		EndKey:   []byte(fmt.Sprintf("%20d", regionID+1)),
 	}
 	leader, _ := c.AllocPeer(leaderID)
 	region.Peers = []*metapb.Peer{leader}
@@ -110,8 +110,8 @@ func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) {
 	//  regions load from etcd will have no leader
 	region := &metapb.Region{
 		Id:       regionID,
-		StartKey: []byte(fmt.Sprintf("%d", regionID)),
-		EndKey:   []byte(fmt.Sprintf("%d", regionID+1)),
+		StartKey: []byte(fmt.Sprintf("%20d", regionID)),
+		EndKey:   []byte(fmt.Sprintf("%20d", regionID+1)),
 	}
 	region.Peers = []*metapb.Peer{}
 	for _, id := range followerIds {

@@ -628,8 +628,8 @@ func mustSaveRegions(c *C, kv *core.KV, n int) []*metapb.Region {
 	for i := 0; i < n; i++ {
 		region := &metapb.Region{
 			Id:       uint64(i),
-			StartKey: []byte(fmt.Sprintf("%d", i)),
-			EndKey:   []byte(fmt.Sprintf("%d", i+1)),
+			StartKey: []byte(fmt.Sprintf("%20d", i)),
+			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
 		}
 		regions = append(regions, region)
 	}
