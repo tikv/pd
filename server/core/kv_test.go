@@ -113,11 +113,7 @@ func (s *testKVSuite) TestStoreWeight(c *C) {
 func mustSaveRegions(c *C, kv *KV, n int) []*metapb.Region {
 	regions := make([]*metapb.Region, 0, n)
 	for i := 0; i < n; i++ {
-		region := &metapb.Region{
-			Id:       uint64(i),
-			StartKey: []byte(fmt.Sprintf("%20d", i)),
-			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
-		}
+		region := newTestRegionMeta(uint64(i))
 		regions = append(regions, region)
 	}
 
@@ -139,5 +135,13 @@ func (s *testKVSuite) TestLoadRegions(c *C) {
 	c.Assert(cache.GetRegionCount(), Equals, n)
 	for _, region := range cache.GetMetaRegions() {
 		c.Assert(region, DeepEquals, regions[region.GetId()])
+	}
+}
+
+func newTestRegionMeta(regionID uint64) *metapb.Region {
+	return &metapb.Region{
+		Id:       regionID,
+		StartKey: []byte(fmt.Sprintf("%20d", regionID)),
+		EndKey:   []byte(fmt.Sprintf("%20d", regionID+1)),
 	}
 }
