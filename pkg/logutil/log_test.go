@@ -18,9 +18,9 @@ import (
 	"strings"
 	"testing"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/coreos/pkg/capnslog"
 	. "github.com/pingcap/check"
+	log "github.com/sirupsen/logrus"
 )
 
 const (

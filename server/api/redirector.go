@@ -20,8 +20,8 @@ import (
 	"net/url"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/pingcap/pd/server"
+	log "github.com/sirupsen/logrus"
 )
 
 const (

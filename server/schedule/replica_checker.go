@@ -14,10 +14,10 @@
 package schedule
 
 import (
-	log "github.com/sirupsen/logrus"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	log "github.com/sirupsen/logrus"
 )
 
 // ReplicaChecker ensures region has the best replicas.

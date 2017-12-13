@@ -19,10 +19,10 @@ import (
 	"syscall"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/pingcap/pd/pkg/faketikv"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	log "github.com/sirupsen/logrus"
 
 	// Register schedulers.
 	_ "github.com/pingcap/pd/server/schedulers"

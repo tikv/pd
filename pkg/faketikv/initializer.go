@@ -18,9 +18,9 @@ import (
 	"fmt"
 
 	"github.com/BurntSushi/toml"
-	log "github.com/sirupsen/logrus"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	log "github.com/sirupsen/logrus"
 )
 
 type localAlloc struct {

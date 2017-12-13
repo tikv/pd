@@ -18,10 +18,10 @@ import (
 	"testing"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/testutil"
+	log "github.com/sirupsen/logrus"
 )
 
 func TestServer(t *testing.T) {

@@ -18,9 +18,9 @@ import (
 	"path"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/juju/errors"
+	log "github.com/sirupsen/logrus"
 )
 
 const (

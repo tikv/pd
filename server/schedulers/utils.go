@@ -17,11 +17,11 @@ import (
 	"math"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/montanaflynn/stats"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	log "github.com/sirupsen/logrus"
 )
 
 // scheduleTransferLeader schedules a region to transfer leader to the peer.

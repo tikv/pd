@@ -17,10 +17,10 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	log "github.com/sirupsen/logrus"
 )
 
 // Cluster provides an overview of a cluster's regions distribution.

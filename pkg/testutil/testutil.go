@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	check "github.com/pingcap/check"
+	log "github.com/sirupsen/logrus"
 )
 
 var (
