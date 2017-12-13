@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/coreos/pkg/capnslog"
 	. "github.com/pingcap/check"
 )
