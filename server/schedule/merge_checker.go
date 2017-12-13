@@ -57,18 +57,17 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	var target *core.RegionInfo
 	prev, next := m.cluster.GetAdjacentRegions(region)
 
-	namespace := m.classifier.GetRegionNamespace(region)
 	peerCount := len(region.Region.GetPeers())
 	var direction pdpb.MergeDirection
 	// if is not hot region and under same namesapce
-	if prev != nil && !m.cluster.IsRegionHot(prev.GetId()) && m.classifier.GetRegionNamespace(prev) == namespace {
+	if prev != nil && !m.cluster.IsRegionHot(prev.GetId()) && m.classifier.AllowMerge(region, prev) {
 		// peer count should equal
 		if peerCount == len(prev.Region.GetPeers()) {
 			target = prev
 			direction = pdpb.MergeDirection_Down
 		}
 	}
-	if next != nil && !m.cluster.IsRegionHot(next.GetId()) && m.classifier.GetRegionNamespace(next) == namespace {
+	if next != nil && !m.cluster.IsRegionHot(next.GetId()) && m.classifier.AllowMerge(region, next) {
 		// if both region is not hot, prefer the one with smaller size
 		if target == nil || target.ApproximateSize > next.ApproximateSize {
 			// peer count should equal
