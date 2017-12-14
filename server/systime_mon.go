@@ -16,7 +16,7 @@ package server
 import (
 	"time"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 )
 
 // StartMonitor calls systimeErrHandler if system time jump backward.
