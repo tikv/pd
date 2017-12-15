@@ -68,7 +68,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		return
 	}
 
-	tlsConfig, err := h.s.GetTLSConfig()
+	tlsConfig, err := h.s.GetSecurityConfig().ToTLSConfig()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

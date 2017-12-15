@@ -24,15 +24,6 @@ import (
 	"github.com/pingcap/pd/pkg/etcdutil"
 )
 
-// TODO: support HTTPS
-func genClientV3Config(cfg *Config) clientv3.Config {
-	endpoints := strings.Split(cfg.Join, ",")
-	return clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: etcdutil.DefaultDialTimeout,
-	}
-}
-
 // PrepareJoinCluster sends MemberAdd command to PD cluster,
 // and returns the initial configuration of the PD cluster.
 //
@@ -90,8 +81,15 @@ func PrepareJoinCluster(cfg *Config) error {
 	}
 
 	// Below are cases without data directory.
-
-	client, err := clientv3.New(genClientV3Config(cfg))
+	tlsConfig, err := cfg.Security.ToTLSConfig()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:   strings.Split(cfg.Join, ","),
+		DialTimeout: etcdutil.DefaultDialTimeout,
+		TLS:         tlsConfig,
+	})
 	if err != nil {
 		return errors.Trace(err)
 	}
