@@ -387,3 +387,56 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 	c.addOperator(op)
 	return nil
 }
+
+// AddRelocateRegionOperator adds an operator to relocate a region.
+func (h *Handler) AddRelocateRegionOperator(regionID uint64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if c.cluster.IsRegionHot(regionID) {
+		return nil
+	}
+
+	region := c.cluster.GetRegion(regionID)
+	if region == nil {
+		return errRegionNotFound(regionID)
+	}
+
+	namespace := h.s.classifier.GetRegionNamespace(region)
+	namespaceFilter := schedule.NewNamespaceFilter(h.s.classifier, namespace)
+	targets := schedule.SelectStoresToRelocate(c.cluster.GetStores(), c.opt, namespaceFilter)
+	if len(targets) < c.opt.GetMaxReplicas() {
+		return errors.New("unable to find enough store to relocate")
+	}
+
+	storeIDs := make(map[uint64]struct{}, len(targets))
+	for _, store := range targets {
+		storeIDs[store.GetId()] = struct{}{}
+	}
+
+	var steps []schedule.OperatorStep
+	// Add missing peers.
+	for id := range storeIDs {
+		if region.GetStorePeer(id) != nil {
+			continue
+		}
+		peer, err := c.cluster.AllocPeer(id)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		steps = append(steps, schedule.AddPeer{ToStore: id, PeerID: peer.Id})
+	}
+	// Remove redundant peers.
+	for _, peer := range region.GetPeers() {
+		if _, ok := storeIDs[peer.GetStoreId()]; ok {
+			continue
+		}
+		steps = append(steps, schedule.RemovePeer{FromStore: peer.GetStoreId()})
+	}
+
+	op := schedule.NewOperator("adminRelocateRegion", regionID, core.AdminKind, steps...)
+	c.addOperator(op)
+	return nil
+}

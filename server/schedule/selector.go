@@ -166,3 +166,41 @@ func (s *randomSelector) SelectTarget(opt Options, stores []*core.StoreInfo, fil
 	}
 	return s.Select(candidates)
 }
+
+// SelectStoresToRelocate selects stores to relocate a region. It randomly
+// selects the target stores while satisfying the constraints of replica
+// placement to the maximum extent.
+func SelectStoresToRelocate(stores []*core.StoreInfo, opt Options, filters ...Filter) []*core.StoreInfo {
+	stateFilters := []Filter{
+		NewStateFilter(opt),
+		NewHealthFilter(opt),
+		NewStorageThresholdFilter(opt),
+	}
+	filters = append(stateFilters, filters...)
+
+	targets := make(map[uint64]*core.StoreInfo, len(stores))
+	for _, store := range stores {
+		if !FilterTarget(store, filters) {
+			targets[store.GetId()] = store
+		}
+	}
+
+	results := make([]*core.StoreInfo, 0, opt.GetMaxReplicas())
+	for len(results) < opt.GetMaxReplicas() {
+		var maxScore float64
+		candidates := make([]*core.StoreInfo, 0, len(targets))
+		for _, store := range targets {
+			if score := DistinctScore(opt.GetLocationLabels(), results, store); score >= maxScore {
+				candidates = append(candidates, store)
+				maxScore = score
+			}
+		}
+		if len(candidates) == 0 {
+			return results
+		}
+		selected := candidates[rand.Intn(len(candidates))]
+		results = append(results, selected)
+		delete(targets, selected.GetId())
+	}
+	return results
+}
