@@ -15,7 +15,9 @@ package schedulers
 
 import (
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	log "github.com/sirupsen/logrus"
 )
 
 var _ = Suite(&testShuffleLeaderSuite{})
@@ -108,5 +110,50 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	tc.addLeaderRegionWithRange(1, "", "a", 4, 2, 3)
 	for i := 0; i < 10; i++ {
 		c.Assert(sc.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
+	}
+}
+
+var _ = Suite(&testScatterRegionSuite{})
+
+type testScatterRegionSuite struct{}
+
+func (s *testScatterRegionSuite) TestScatter(c *C) {
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
+
+	// Add stores 1~6.
+	tc.addRegionStore(1, 0)
+	tc.addRegionStore(2, 0)
+	tc.addRegionStore(3, 0)
+	tc.addRegionStore(4, 0)
+	tc.addRegionStore(5, 0)
+	tc.addRegionStore(6, 0)
+
+	// Add regions 1~4.
+	tc.addLeaderRegion(1, 1, 2, 3)
+	tc.addLeaderRegion(2, 2, 3, 4)
+	tc.addLeaderRegion(3, 3, 4, 5)
+	tc.addLeaderRegion(4, 4, 5, 6)
+
+	scatterer := schedule.NewRegionScatterer(tc, namespace.DefaultClassifier)
+
+	for i := uint64(1); i <= uint64(4); i++ {
+		if op := scatterer.Scatter(i); op != nil {
+			log.Info(op)
+			tc.applyOperator(op)
+		}
+	}
+
+	countPeers := make(map[uint64]int)
+	for i := uint64(1); i <= uint64(4); i++ {
+		region := tc.GetRegion(i)
+		for _, peer := range region.GetPeers() {
+			countPeers[peer.GetStoreId()]++
+		}
+	}
+
+	// Each store should have 2 peers.
+	for _, count := range countPeers {
+		c.Assert(count, Equals, 2)
 	}
 }

@@ -56,6 +56,7 @@ type coordinator struct {
 	cluster          *clusterInfo
 	limiter          *schedule.Limiter
 	replicaChecker   *schedule.ReplicaChecker
+	regionScatterer  *schedule.RegionScatterer
 	namespaceChecker *schedule.NamespaceChecker
 	operators        map[uint64]*schedule.Operator
 	schedulers       map[string]*scheduleController
@@ -72,6 +73,7 @@ func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifie
 		cluster:          cluster,
 		limiter:          schedule.NewLimiter(),
 		replicaChecker:   schedule.NewReplicaChecker(cluster, classifier),
+		regionScatterer:  schedule.NewRegionScatterer(cluster, classifier),
 		namespaceChecker: schedule.NewNamespaceChecker(cluster, classifier),
 		operators:        make(map[uint64]*schedule.Operator),
 		schedulers:       make(map[string]*scheduleController),
