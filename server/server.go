@@ -552,13 +552,7 @@ func (s *Server) GetCluster() *metapb.Cluster {
 func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
 	s.cluster.Lock()
 	defer s.cluster.Unlock()
-	err := s.cluster.loadClusterStatus()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	clone := &ClusterStatus{}
-	*clone = *s.cluster.status
-	return clone, nil
+	return s.cluster.loadClusterStatus()
 }
 
 func (s *Server) getAllocIDPath() string {
