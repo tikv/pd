@@ -18,9 +18,9 @@ import (
 	"strconv"
 	"sync"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
+	log "github.com/sirupsen/logrus"
 )
 
 type heartbeatStream interface {

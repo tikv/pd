@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/pkg/transport"
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
@@ -20,6 +21,9 @@ var (
 	allocID     = flag.Uint64("alloc-id", 0, "please make sure alloced ID is safe")
 	clusterID   = flag.Uint64("cluster-id", 0, "please make cluster ID match with tikv")
 	maxReplicas = flag.Int("max-replicas", 3, "max replicas is the number of replicas for each region")
+	caPath      = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
+	certPath    = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")
+	keyPath     = flag.String("key", "", "path of file that contains X509 key in PEM format.")
 )
 
 const (
@@ -51,9 +55,22 @@ func main() {
 	raftBootstrapTimeKey := path.Join(clusterRootPath, "status", "raft_bootstrap_time")
 
 	urls := strings.Split(*endpoints, ",")
+
+	tlsInfo := transport.TLSInfo{
+		CertFile:      *certPath,
+		KeyFile:       *keyPath,
+		TrustedCAFile: *caPath,
+	}
+	tlsConfig, err := tlsInfo.ClientConfig()
+	if err != nil {
+		fmt.Println("failed to connect: err")
+		return
+	}
+
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   urls,
 		DialTimeout: etcdTimeout,
+		TLS:         tlsConfig,
 	})
 	if err != nil {
 		exitErr(err)

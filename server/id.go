@@ -16,9 +16,9 @@ package server
 import (
 	"sync"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/juju/errors"
+	log "github.com/sirupsen/logrus"
 )
 
 const (

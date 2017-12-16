@@ -16,8 +16,8 @@ package schedulers
 import (
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/pd/server/schedule"
+	log "github.com/sirupsen/logrus"
 )
 
 // options for interval of schedulers

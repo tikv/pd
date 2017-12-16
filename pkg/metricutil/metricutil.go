@@ -17,10 +17,10 @@ import (
 	"time"
 	"unicode"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
+	log "github.com/sirupsen/logrus"
 )
 
 var (

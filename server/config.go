@@ -14,6 +14,7 @@
 package server
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"net/url"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/etcd/embed"
+	"github.com/coreos/etcd/pkg/transport"
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
@@ -448,6 +450,20 @@ type SecurityConfig struct {
 	CertPath string `toml:"cert-path" json:"cert-path"`
 	// KeyPath is the path of file that contains X509 key in PEM format.
 	KeyPath string `toml:"key-path" json:"key-path"`
+}
+
+// ToTLSConfig generatres tls config.
+func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
+	tlsInfo := transport.TLSInfo{
+		CertFile:      s.CertPath,
+		KeyFile:       s.KeyPath,
+		TrustedCAFile: s.CAPath,
+	}
+	tlsConfig, err := tlsInfo.ClientConfig()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return tlsConfig, nil
 }
 
 // ParseUrls parse a string into multiple urls.

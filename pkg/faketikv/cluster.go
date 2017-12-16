@@ -14,9 +14,9 @@
 package faketikv
 
 import (
-	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	log "github.com/sirupsen/logrus"
 )
 
 // ClusterInfo records all cluster information.
