@@ -128,7 +128,7 @@ func (mr MergeRegion) String() string {
 
 // IsFinish checks if cuurent step is finished
 func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
-	if mr.Direction == pdpb.MergeDirection_Down {
+	if mr.Direction == pdpb.MergeDirection_Up {
 		return bytes.Compare(region.Region.StartKey, mr.OldStartKey) < 0
 	}
 	return bytes.Compare(region.Region.EndKey, mr.OldEndKey) > 0
