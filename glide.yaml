@@ -114,7 +114,7 @@ import:
 - package: github.com/pingcap/check
   version: ce8a2f822ab1e245a4eefcef2996531c79c943f1
 - package: github.com/pingcap/kvproto
-  version: f709f02f535eb688307593aa218dd57749168180
+  version: ce11e17b241f092210b5198d90773433d48dacbe
   subpackages:
   - pkg/coprocessor
   - pkg/eraftpb

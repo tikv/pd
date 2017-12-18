@@ -113,47 +113,73 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	}
 }
 
+type sequencer struct {
+	maxID uint64
+	curID uint64
+}
+
+func newSequencer(maxID uint64) *sequencer {
+	return &sequencer{
+		maxID: maxID,
+		curID: 0,
+	}
+}
+
+func (s *sequencer) next() uint64 {
+	s.curID++
+	if s.curID > s.maxID {
+		s.curID = 1
+	}
+	return s.curID
+}
+
 var _ = Suite(&testScatterRegionSuite{})
 
 type testScatterRegionSuite struct{}
 
-func (s *testScatterRegionSuite) TestScatter(c *C) {
+func (s *testScatterRegionSuite) TestSixStores(c *C) {
+	s.scatter(c, 6, 4)
+}
+
+func (s *testScatterRegionSuite) TestFiveStores(c *C) {
+	s.scatter(c, 5, 5)
+}
+
+func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 	opt := newTestScheduleConfig()
 	tc := newMockCluster(opt)
 
 	// Add stores 1~6.
-	tc.addRegionStore(1, 0)
-	tc.addRegionStore(2, 0)
-	tc.addRegionStore(3, 0)
-	tc.addRegionStore(4, 0)
-	tc.addRegionStore(5, 0)
-	tc.addRegionStore(6, 0)
+	for i := uint64(1); i <= numStores; i++ {
+		tc.addRegionStore(i, 0)
+	}
 
 	// Add regions 1~4.
-	tc.addLeaderRegion(1, 1, 2, 3)
-	tc.addLeaderRegion(2, 2, 3, 4)
-	tc.addLeaderRegion(3, 3, 4, 5)
-	tc.addLeaderRegion(4, 4, 5, 6)
+	seq := newSequencer(numStores)
+	for i := uint64(1); i <= numRegions; i++ {
+		tc.addLeaderRegion(i, seq.next(), seq.next(), seq.next())
+	}
 
 	scatterer := schedule.NewRegionScatterer(tc, namespace.DefaultClassifier)
 
-	for i := uint64(1); i <= uint64(4); i++ {
-		if op := scatterer.Scatter(i); op != nil {
+	for i := uint64(1); i <= numRegions; i++ {
+		region := tc.GetRegion(i)
+		if op := scatterer.Scatter(region); op != nil {
 			log.Info(op)
 			tc.applyOperator(op)
 		}
 	}
 
-	countPeers := make(map[uint64]int)
-	for i := uint64(1); i <= uint64(4); i++ {
+	countPeers := make(map[uint64]uint64)
+	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
 		for _, peer := range region.GetPeers() {
 			countPeers[peer.GetStoreId()]++
 		}
 	}
 
-	// Each store should have 2 peers.
+	// Each store should have the same number of peers.
 	for _, count := range countPeers {
-		c.Assert(count, Equals, 2)
+		c.Assert(count, Equals, numRegions*3/numStores)
 	}
 }

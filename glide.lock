@@ -1,5 +1,5 @@
-hash: 68c7beb08b9d6ac3385441c5a6a39c6753a72080dcba25c276fb40a3cd92e495
-updated: 2017-12-15T16:09:02.479147061+08:00
+hash: 335ec27bc51bc2e51cb7e9dc5cb49ea4d309282d29d225dacc70c2651b596ce3
+updated: 2017-12-17T22:23:28.300793681+08:00
 imports:
 - name: github.com/apache/thrift
   version: b2a4d4ae21c789b689dd162deb819665567f481c
@@ -160,7 +160,7 @@ imports:
 - name: github.com/pingcap/check
   version: ce8a2f822ab1e245a4eefcef2996531c79c943f1
 - name: github.com/pingcap/kvproto
-  version: f709f02f535eb688307593aa218dd57749168180
+  version: e913ae1b69e152c0cc5fe8f92095473838c6c824
   subpackages:
   - pkg/coprocessor
   - pkg/eraftpb

@@ -84,27 +84,29 @@ func NewRegionScatterer(cluster Cluster, classifier namespace.Classifier) *Regio
 }
 
 // Scatter relocates the region.
-func (r *RegionScatterer) Scatter(regionID uint64) *Operator {
-	if r.cluster.IsRegionHot(regionID) {
+func (r *RegionScatterer) Scatter(region *core.RegionInfo) *Operator {
+	if r.cluster.IsRegionHot(region.GetId()) {
 		return nil
 	}
 
-	region := r.cluster.GetRegion(regionID)
-	if region == nil {
-		return nil
-	}
 	if len(region.GetPeers()) != r.cluster.GetMaxReplicas() {
 		return nil
 	}
 
-	return r.relocateRegion(region)
+	return r.scatterRegion(region)
 }
 
-func (r *RegionScatterer) relocateRegion(region *core.RegionInfo) *Operator {
+func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
 	steps := make([]OperatorStep, 0, len(region.GetPeers()))
 
 	stores := r.collectAvailableStores(region)
 	for _, peer := range region.GetPeers() {
+		if len(stores) == 0 {
+			// Reset selected stores if we have no available stores.
+			r.selected.reset()
+			stores = r.collectAvailableStores(region)
+		}
+
 		if r.selected.put(peer.GetStoreId()) {
 			delete(stores, peer.GetStoreId())
 			continue
@@ -118,20 +120,15 @@ func (r *RegionScatterer) relocateRegion(region *core.RegionInfo) *Operator {
 		delete(stores, newPeer.GetStoreId())
 		r.selected.put(newPeer.GetStoreId())
 
-		op := CreateMovePeerOperator("RelocatePeer", region, OpAdmin,
+		op := CreateMovePeerOperator("scatter-peer", region, OpAdmin,
 			peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 		steps = append(steps, op.steps...)
 	}
 
-	if len(stores) == 0 {
-		// Reset selected stores if we can't relocate any more.
-		r.selected.reset()
-	}
 	if len(steps) == 0 {
 		return nil
 	}
-
-	return NewOperator("RelocateRegion", region.GetId(), OpAdmin, steps...)
+	return NewOperator("scatter-region", region.GetId(), OpAdmin, steps...)
 }
 
 func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {

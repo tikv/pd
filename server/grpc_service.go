@@ -472,8 +472,16 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		return &pdpb.ScatterRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
+	region := cluster.GetRegionInfoByID(request.GetRegionId())
+	if region == nil {
+		if request.GetRegion() == nil {
+			return nil, errors.Errorf("region %d not found", request.GetRegionId())
+		}
+		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
+	}
+
 	co := cluster.coordinator
-	if op := co.regionScatterer.Scatter(request.GetRegionId()); op != nil {
+	if op := co.regionScatterer.Scatter(region); op != nil {
 		co.addOperator(op)
 	}
 
