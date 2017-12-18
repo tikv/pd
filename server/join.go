@@ -22,6 +22,7 @@ import (
 	"github.com/coreos/etcd/wal"
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	log "github.com/sirupsen/logrus"
 )
 
 // PrepareJoinCluster sends MemberAdd command to PD cluster,
@@ -79,6 +80,8 @@ func PrepareJoinCluster(cfg *Config) error {
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
 		return nil
 	}
+
+	log.Infof("start join, cfg: %s", cfg)
 
 	// Below are cases without data directory.
 	tlsConfig, err := cfg.Security.ToTLSConfig()
