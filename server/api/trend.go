@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/juju/errors"
+	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
 	"github.com/unrolled/render"
@@ -31,11 +32,17 @@ type Trend struct {
 }
 
 type trendStore struct {
-	ID                  uint64   `json:"id"`
-	Capacity            uint64   `json:"capacity"`
-	Available           uint64   `json:"available"`
-	RegionCount         int      `json:"region_count"`
-	LeaderCount         int      `json:"leader_count"`
+	ID              uint64             `json:"id"`
+	Address         string             `json:"address"`
+	StateName       string             `json:"state_name"`
+	Capacity        uint64             `json:"capacity"`
+	Available       uint64             `json:"available"`
+	RegionCount     int                `json:"region_count"`
+	LeaderCount     int                `json:"leader_count"`
+	StartTS         *time.Time         `json:"start_ts,omitempty"`
+	LastHeartbeatTS *time.Time         `json:"last_heartbeat_ts,omitempty"`
+	Uptime          *typeutil.Duration `json:"uptime,omitempty"`
+
 	HotWriteFlow        uint64   `json:"hot_write_flow"`
 	HotWriteRegionFlows []uint64 `json:"hot_write_region_flows"`
 	HotReadFlow         uint64   `json:"hot_read_flow"`
@@ -57,12 +64,14 @@ type trendHistoryEntry struct {
 
 type trendHandler struct {
 	*server.Handler
-	rd *render.Render
+	svr *server.Server
+	rd  *render.Render
 }
 
-func newTrendHandler(h *server.Handler, rd *render.Render) *trendHandler {
+func newTrendHandler(s *server.Server, rd *render.Render) *trendHandler {
 	return &trendHandler{
-		Handler: h,
+		Handler: s.GetHandler(),
+		svr:     s,
 		rd:      rd,
 	}
 }
@@ -98,6 +107,8 @@ func (h *trendHandler) Handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *trendHandler) getTrendStores() ([]trendStore, error) {
+	maxStoreDownTime := h.svr.GetScheduleConfig().MaxStoreDownTime.Duration
+
 	var readStats, writeStats core.StoreHotRegionsStat
 	if hotRead := h.GetHotReadRegions(); hotRead != nil {
 		readStats = hotRead.AsLeader
@@ -112,12 +123,18 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 
 	trendStores := make([]trendStore, 0, len(stores))
 	for _, store := range stores {
+		info := newStoreInfo(store, maxStoreDownTime)
 		s := trendStore{
-			ID:          store.GetId(),
-			Capacity:    store.Stats.GetCapacity(),
-			Available:   store.Stats.GetAvailable(),
-			RegionCount: store.RegionCount,
-			LeaderCount: store.LeaderCount,
+			ID:              info.Store.GetId(),
+			Address:         info.Store.GetAddress(),
+			StateName:       info.Store.StateName,
+			Capacity:        uint64(info.Status.Capacity),
+			Available:       uint64(info.Status.Available),
+			RegionCount:     info.Status.RegionCount,
+			LeaderCount:     info.Status.LeaderCount,
+			StartTS:         info.Status.StartTS,
+			LastHeartbeatTS: info.Status.LastHeartbeatTS,
+			Uptime:          info.Status.Uptime,
 		}
 		s.HotReadFlow, s.HotReadRegionFlows = h.getStoreFlow(readStats, store.GetId())
 		s.HotWriteFlow, s.HotWriteRegionFlows = h.getStoreFlow(writeStats, store.GetId())
