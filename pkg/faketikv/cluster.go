@@ -42,7 +42,7 @@ func (c *ClusterInfo) nodeHealth(storeID uint64) bool {
 	return n.GetState() == Up
 }
 
-func (c ClusterInfo) electNewLeader(region *core.RegionInfo) *metapb.Peer {
+func (c *ClusterInfo) electNewLeader(region *core.RegionInfo) *metapb.Peer {
 	var (
 		unhealth         int
 		newLeaderStoreID uint64
