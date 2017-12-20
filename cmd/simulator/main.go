@@ -14,6 +14,7 @@
 package main
 
 import (
+	"flag"
 	"os"
 	"os/signal"
 	"syscall"
@@ -30,13 +31,17 @@ import (
 	_ "github.com/pingcap/pd/table"
 )
 
+var confName = flag.String("conf", "", "config name")
+
 func main() {
+	flag.Parse()
+
 	_, local, clean := NewSingleServer()
 	err := local.Run()
 	if err != nil {
 		log.Fatal("run server error:", err)
 	}
-	driver := faketikv.NewDriver(local.GetAddr())
+	driver := faketikv.NewDriver(local.GetAddr(), *confName)
 	err = driver.Prepare()
 	if err != nil {
 		log.Fatal("simulator prepare error:", err)
@@ -49,16 +54,26 @@ func main() {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 
+	simResult := "FAIL"
+
+EXIT:
 	for {
 		select {
 		case <-tick.C:
 			driver.Tick()
+			if driver.Check() {
+				simResult = "OK"
+				break EXIT
+			}
 		case <-sc:
-			driver.Stop()
-			clean()
-			return
+			break EXIT
 		}
 	}
+
+	driver.Stop()
+	clean()
+
+	log.Infof("Simulation finish. Conf: %s, TotalTick: %d, Result: %s", *confName, driver.TickCount(), simResult)
 }
 
 // NewSingleServer creates a pd server for simulator.
