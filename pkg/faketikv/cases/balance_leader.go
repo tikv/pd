@@ -35,9 +35,9 @@ func newBalanceLeader() *Conf {
 	id.setMaxID(3)
 	for i := 0; i < 1000; i++ {
 		peers := []*metapb.Peer{
-			&metapb.Peer{Id: id.nextID(), StoreId: 1},
-			&metapb.Peer{Id: id.nextID(), StoreId: 2},
-			&metapb.Peer{Id: id.nextID(), StoreId: 3},
+			{Id: id.nextID(), StoreId: 1},
+			{Id: id.nextID(), StoreId: 2},
+			{Id: id.nextID(), StoreId: 3},
 		}
 		conf.Regions = append(conf.Regions, Region{
 			ID:     id.nextID(),

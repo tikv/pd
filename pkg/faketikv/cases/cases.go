@@ -42,6 +42,7 @@ type Conf struct {
 	Stores  []Store
 	Regions []Region
 	MaxID   uint64
+
 	Checker func(*core.RegionsInfo) bool // To check the schedule is finished.
 }
 
