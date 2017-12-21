@@ -14,15 +14,16 @@
 package schedulers
 
 import (
+	"fmt"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	log "github.com/sirupsen/logrus"
 )
 
 type mockCluster struct {
@@ -146,27 +147,13 @@ func (mc *mockCluster) addLabelsStore(storeID uint64, regionCount int, labels ma
 }
 
 func (mc *mockCluster) addLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
-	region := &metapb.Region{Id: regionID}
-	leader, _ := mc.AllocPeer(leaderID)
-	region.Peers = []*metapb.Peer{leader}
-	for _, id := range followerIds {
-		peer, _ := mc.AllocPeer(id)
-		region.Peers = append(region.Peers, peer)
-	}
-	regionInfo := core.NewRegionInfo(region, leader)
+	regionInfo := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	regionInfo.ApproximateSize = 10
 	mc.PutRegion(regionInfo)
 }
 
 func (mc *mockCluster) addLeaderRegionWithRange(regionID uint64, startKey string, endKey string, leaderID uint64, followerIds ...uint64) {
-	region := &metapb.Region{Id: regionID}
-	leader, _ := mc.AllocPeer(leaderID)
-	region.Peers = []*metapb.Peer{leader}
-	for _, id := range followerIds {
-		peer, _ := mc.AllocPeer(id)
-		region.Peers = append(region.Peers, peer)
-	}
-	r := core.NewRegionInfo(region, leader)
+	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r.StartKey = []byte(startKey)
 	r.EndKey = []byte(endKey)
 	mc.PutRegion(r)
@@ -174,24 +161,13 @@ func (mc *mockCluster) addLeaderRegionWithRange(regionID uint64, startKey string
 
 func (mc *mockCluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 	//  regions load from etcd will have no leader
-	region := &metapb.Region{Id: regionID}
-	region.Peers = []*metapb.Peer{}
-	for _, id := range followerIds {
-		peer, _ := mc.AllocPeer(id)
-		region.Peers = append(region.Peers, peer)
-	}
-	mc.PutRegion(core.NewRegionInfo(region, nil))
+	r := mc.newMockRegionInfo(regionID, 0, followerIds...)
+	r.Leader = nil
+	mc.PutRegion(r)
 }
 
 func (mc *mockCluster) addLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
-	region := &metapb.Region{Id: regionID}
-	leader, _ := mc.AllocPeer(leaderID)
-	region.Peers = []*metapb.Peer{leader}
-	for _, id := range followerIds {
-		peer, _ := mc.AllocPeer(id)
-		region.Peers = append(region.Peers, peer)
-	}
-	r := core.NewRegionInfo(region, leader)
+	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r.WrittenBytes = writtenBytes
 	mc.BasicCluster.UpdateWriteStatus(r)
 	mc.PutRegion(r)
@@ -237,17 +213,26 @@ func (mc *mockCluster) updateStorageReadBytes(storeID uint64, BytesRead uint64) 
 }
 
 func (mc *mockCluster) addLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
-	region := &metapb.Region{Id: regionID}
+	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+	r.ReadBytes = readBytes
+	mc.BasicCluster.UpdateReadStatus(r)
+	mc.PutRegion(r)
+}
+
+func (mc *mockCluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerIds ...uint64) *core.RegionInfo {
+	region := &metapb.Region{
+		Id:       regionID,
+		StartKey: []byte(fmt.Sprintf("%20d", regionID)),
+		EndKey:   []byte(fmt.Sprintf("%20d", regionID+1)),
+	}
 	leader, _ := mc.AllocPeer(leaderID)
 	region.Peers = []*metapb.Peer{leader}
 	for _, id := range followerIds {
 		peer, _ := mc.AllocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	r := core.NewRegionInfo(region, leader)
-	r.ReadBytes = readBytes
-	mc.BasicCluster.UpdateReadStatus(r)
-	mc.PutRegion(r)
+
+	return core.NewRegionInfo(region, leader)
 }
 
 func (mc *mockCluster) GetOpt() schedule.NamespaceOptions {

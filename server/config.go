@@ -14,6 +14,7 @@
 package server
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"net/url"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/etcd/embed"
+	"github.com/coreos/etcd/pkg/transport"
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
@@ -266,6 +268,12 @@ func (c *Config) adjust() error {
 
 	adjustString(&c.InitialClusterState, defualtInitialClusterState)
 
+	if len(c.Join) > 0 {
+		if _, err := url.Parse(c.Join); err != nil {
+			return errors.Errorf("failed to parse join addr:%s, err:%v", c.Join, err)
+		}
+	}
+
 	adjustInt64(&c.LeaderLease, defaultLeaderLease)
 
 	adjustDuration(&c.TsoSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
@@ -441,6 +449,23 @@ type SecurityConfig struct {
 	CertPath string `toml:"cert-path" json:"cert-path"`
 	// KeyPath is the path of file that contains X509 key in PEM format.
 	KeyPath string `toml:"key-path" json:"key-path"`
+}
+
+// ToTLSConfig generatres tls config.
+func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
+	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
+		return nil, nil
+	}
+	tlsInfo := transport.TLSInfo{
+		CertFile:      s.CertPath,
+		KeyFile:       s.KeyPath,
+		TrustedCAFile: s.CAPath,
+	}
+	tlsConfig, err := tlsInfo.ClientConfig()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return tlsConfig, nil
 }
 
 // ParseUrls parse a string into multiple urls.

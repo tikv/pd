@@ -16,7 +16,7 @@ package schedule
 import (
 	"time"
 
-	//log "github.com/Sirupsen/logrus"
+	//log "github.com/sirupsen/logrus"
 	"github.com/juju/errors"
 	//"github.com/pingcap/kvproto/pkg/metapb"
 	//"github.com/pingcap/kvproto/pkg/pdpb"
@@ -55,7 +55,10 @@ func NewOpInfluence(operators []*Operator, cluster Cluster) OpInfluence {
 
 	for _, op := range operators {
 		if !op.IsTimeout() && !op.IsFinish() {
-			op.Influence(m, cluster.GetRegion(op.RegionID()))
+			region := cluster.GetRegion(op.RegionID())
+			if region != nil {
+				op.Influence(m, region)
+			}
 		}
 	}
 

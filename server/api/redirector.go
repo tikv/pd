@@ -20,8 +20,8 @@ import (
 	"net/url"
 	"strings"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/pd/server"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -68,7 +68,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		return
 	}
 
-	tlsConfig, err := h.s.GetTLSConfig()
+	tlsConfig, err := h.s.GetSecurityConfig().ToTLSConfig()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
