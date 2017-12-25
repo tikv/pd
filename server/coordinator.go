@@ -379,8 +379,8 @@ func (c *coordinator) addOperator(op *schedule.Operator) bool {
 	}
 
 	c.histories.Put(regionID, op)
-	c.limiter.addOperator(op)
 	c.operators[regionID] = op
+	c.limiter.updateCounts(c.operators)
 
 	if region := c.cluster.GetRegion(op.RegionID()); region != nil {
 		if step := op.Check(region); step != nil {
@@ -410,9 +410,8 @@ func (c *coordinator) removeOperator(op *schedule.Operator) {
 
 func (c *coordinator) removeOperatorLocked(op *schedule.Operator) {
 	regionID := op.RegionID()
-	c.limiter.removeOperator(op)
 	delete(c.operators, regionID)
-
+	c.limiter.updateCounts(c.operators)
 	c.histories.Put(regionID, op)
 	operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 }
@@ -511,16 +510,17 @@ func newScheduleLimiter() *scheduleLimiter {
 	}
 }
 
-func (l *scheduleLimiter) addOperator(op *schedule.Operator) {
+// updateCounts updates resouce counts using current pending operators.
+func (l *scheduleLimiter) updateCounts(operators map[uint64]*schedule.Operator) {
 	l.Lock()
 	defer l.Unlock()
-	l.counts[op.ResourceKind()]++
-}
 
-func (l *scheduleLimiter) removeOperator(op *schedule.Operator) {
-	l.Lock()
-	defer l.Unlock()
-	l.counts[op.ResourceKind()]--
+	for k := range l.counts {
+		l.counts[k] = 0
+	}
+	for _, op := range operators {
+		l.counts[op.ResourceKind()]++
+	}
 }
 
 func (l *scheduleLimiter) operatorCount(kind core.ResourceKind) uint64 {
