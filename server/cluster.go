@@ -62,8 +62,6 @@ type RaftCluster struct {
 
 	wg   sync.WaitGroup
 	quit chan struct{}
-
-	status *ClusterStatus
 }
 
 // ClusterStatus saves some state information
@@ -80,22 +78,19 @@ func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 	}
 }
 
-func (c *RaftCluster) loadClusterStatus() error {
+func (c *RaftCluster) loadClusterStatus() (*ClusterStatus, error) {
 	data, err := c.s.kv.Load((c.s.kv.ClusterStatePath("raft_bootstrap_time")))
 	if err != nil {
-		return errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 	if len(data) == 0 {
-		return nil
+		return &ClusterStatus{}, nil
 	}
 	t, err := parseTimestamp([]byte(data))
 	if err != nil {
-		return errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
-	c.status = &ClusterStatus{
-		RaftBootstrapTime: t,
-	}
-	return nil
+	return &ClusterStatus{RaftBootstrapTime: t}, nil
 }
 
 func (c *RaftCluster) start() error {
@@ -217,13 +212,7 @@ func (s *Server) GetCluster() *metapb.Cluster {
 func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
 	s.cluster.Lock()
 	defer s.cluster.Unlock()
-	err := s.cluster.loadClusterStatus()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	clone := &ClusterStatus{}
-	*clone = *s.cluster.status
-	return clone, nil
+	return s.cluster.loadClusterStatus()
 }
 
 func (s *Server) createRaftCluster() error {
