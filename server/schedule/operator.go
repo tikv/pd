@@ -131,6 +131,12 @@ func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 	if mr.Direction == pdpb.MergeDirection_Up {
 		return bytes.Compare(region.Region.StartKey, mr.OldStartKey) < 0
 	}
+	// for the case that the region endkey change to "" after merge
+	// note that "" is smaller than any key, comapring to old endkey it will not regared as finished.
+	// so it need a special judge
+	if bytes.Compare(region.Region.EndKey, []byte("")) == 0 && bytes.Compare(mr.OldEndKey,[]byte("")) != 0 {
+		return true
+	}
 	return bytes.Compare(region.Region.EndKey, mr.OldEndKey) > 0
 }
 

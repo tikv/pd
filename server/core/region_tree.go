@@ -15,9 +15,9 @@ package core
 import (
 	"bytes"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/google/btree"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	log "github.com/sirupsen/logrus"
 )
 
 var _ btree.Item = &regionItem{}
