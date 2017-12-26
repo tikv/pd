@@ -15,7 +15,9 @@ package schedulers
 
 import (
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	log "github.com/sirupsen/logrus"
 )
 
 var _ = Suite(&testShuffleLeaderSuite{})
@@ -108,5 +110,76 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	tc.addLeaderRegionWithRange(1, "", "a", 4, 2, 3)
 	for i := 0; i < 10; i++ {
 		c.Assert(sc.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
+	}
+}
+
+type sequencer struct {
+	maxID uint64
+	curID uint64
+}
+
+func newSequencer(maxID uint64) *sequencer {
+	return &sequencer{
+		maxID: maxID,
+		curID: 0,
+	}
+}
+
+func (s *sequencer) next() uint64 {
+	s.curID++
+	if s.curID > s.maxID {
+		s.curID = 1
+	}
+	return s.curID
+}
+
+var _ = Suite(&testScatterRegionSuite{})
+
+type testScatterRegionSuite struct{}
+
+func (s *testScatterRegionSuite) TestSixStores(c *C) {
+	s.scatter(c, 6, 4)
+}
+
+func (s *testScatterRegionSuite) TestFiveStores(c *C) {
+	s.scatter(c, 5, 5)
+}
+
+func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
+
+	// Add stores 1~6.
+	for i := uint64(1); i <= numStores; i++ {
+		tc.addRegionStore(i, 0)
+	}
+
+	// Add regions 1~4.
+	seq := newSequencer(numStores)
+	for i := uint64(1); i <= numRegions; i++ {
+		tc.addLeaderRegion(i, seq.next(), seq.next(), seq.next())
+	}
+
+	scatterer := schedule.NewRegionScatterer(tc, namespace.DefaultClassifier)
+
+	for i := uint64(1); i <= numRegions; i++ {
+		region := tc.GetRegion(i)
+		if op := scatterer.Scatter(region); op != nil {
+			log.Info(op)
+			tc.applyOperator(op)
+		}
+	}
+
+	countPeers := make(map[uint64]uint64)
+	for i := uint64(1); i <= numRegions; i++ {
+		region := tc.GetRegion(i)
+		for _, peer := range region.GetPeers() {
+			countPeers[peer.GetStoreId()]++
+		}
+	}
+
+	// Each store should have the same number of peers.
+	for _, count := range countPeers {
+		c.Assert(count, Equals, numRegions*3/numStores)
 	}
 }
