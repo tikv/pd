@@ -434,7 +434,7 @@ func (c *coordinator) getOperators() []*schedule.Operator {
 func (c *coordinator) getHistory(start time.Time) []schedule.OperatorHistory {
 	c.RLock()
 	defer c.RUnlock()
-	var histories []schedule.OperatorHistory
+	histories := make([]schedule.OperatorHistory, 0, c.histories.Len())
 	for p := c.histories.Front(); p != nil; p = p.Next() {
 		history := p.Value.(schedule.OperatorHistory)
 		if history.FinishTime.Before(start) {
