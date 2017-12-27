@@ -90,8 +90,6 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 
 	log.Infof("try to merge region {%v} into region {%v}", region, target)
 	op1, op2 := CreateMergeRegionOperator("merge-region", region, target, direction, OpMerge, steps)
-	op1.SetPriorityLevel(core.HighPriority)
-	op2.SetPriorityLevel(core.HighPriority)
 
 	return op1, op2
 }
