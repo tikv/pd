@@ -61,7 +61,7 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *Operator {
 		if newPeer == nil {
 			return nil
 		}
-		return CreateMovePeerOperator("makeNamespaceRelocation", region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+		return CreateMovePeerOperator("makeNamespaceRelocation", region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId(), n.cluster.IsEnableRaftLearner())
 	}
 
 	return nil

@@ -342,7 +342,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return errors.Trace(err)
 	}
 
-	op := schedule.CreateMovePeerOperator("adminMovePeer", region, schedule.OpAdmin, fromStoreID, toStoreID, newPeer.GetId())
+	op := schedule.CreateMovePeerOperator("adminMovePeer", region, schedule.OpAdmin, fromStoreID, toStoreID, newPeer.GetId(), c.cluster.IsEnableRaftLearner())
 	c.addOperator(op)
 	return nil
 }
@@ -371,7 +371,17 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		return errors.Trace(err)
 	}
 
-	step := schedule.AddPeer{ToStore: toStoreID, PeerID: newPeer.GetId()}
+	var step []OperatorStep
+	if c.cluster.IsEnableRaftLearner() {
+		step = []OperatorStep{
+			AddLearnerPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
+			PromoteLearnerPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
+		}
+	} else {
+		step = []OperatorStep{
+			AddPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
+		}
+	}
 	op := schedule.NewOperator("adminAddPeer", regionID, schedule.OpAdmin|schedule.OpRegion, step)
 	c.addOperator(op)
 	return nil

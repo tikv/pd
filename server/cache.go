@@ -403,10 +403,10 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			}
 			saveCache = true
 		}
-		if len(region.DownPeers) > 0 || len(region.PendingPeers) > 0 {
+		if len(region.DownPeers) > 0 || len(region.PendingPeers) > 0 || len(region.PendingLearnerPeers) > 0 || len(region.CompleteLearnerPeers) > 0 {
 			saveCache = true
 		}
-		if len(origin.DownPeers) > 0 || len(origin.PendingPeers) > 0 {
+		if len(origin.DownPeers) > 0 || len(origin.PendingPeers) > 0 || len(origin.PendingLearnerPeers) > 0 || len(origin.CompleteLearnerPeers) > 0 {
 			saveCache = true
 		}
 		if region.ApproximateSize != origin.ApproximateSize {
@@ -492,4 +492,8 @@ func (c *clusterInfo) GetLocationLabels() []string {
 
 func (c *clusterInfo) GetHotRegionLowThreshold() int {
 	return c.opt.GetHotRegionLowThreshold()
+}
+
+func (c *clusterInfo) IsEnableRaftLearner() bool {
+	return c.opt.IsEnableRaftLearner()
 }

@@ -333,6 +333,8 @@ type ScheduleConfig struct {
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit,omitempty" json:"replica-schedule-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
+	// EnableRaftLearner is the switch for using AddLearnerNode instead of AddNode
+	EnableRaftLearner bool `toml:"enable-raft-learner" json:"enable-raft-learner"`
 	// Schedulers support for loding customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 }

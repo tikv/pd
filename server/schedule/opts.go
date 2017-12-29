@@ -32,6 +32,8 @@ type Options interface {
 
 	GetHotRegionLowThreshold() int
 	GetTolerantSizeRatio() float64
+
+	IsEnableRaftLearner() bool
 }
 
 // NamespaceOptions for namespace cluster

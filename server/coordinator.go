@@ -472,6 +472,32 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 			},
 		}
 		c.hbStreams.sendMsg(region, cmd)
+	case schedule.AddLearnerPeer:
+		if region.GetStorePeer(s.ToStore) != nil {
+			// The newly added peer is pending.
+			return
+		}
+		cmd := &pdpb.RegionHeartbeatResponse{
+			ChangePeer: &pdpb.ChangePeer{
+				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
+				Peer: &metapb.Peer{
+					Id:      s.PeerID,
+					StoreId: s.ToStore,
+				},
+			},
+		}
+		c.hbStreams.sendMsg(region, cmd)
+	case schedule.PromoteLearnerPeer:
+		cmd := &pdpb.RegionHeartbeatResponse{
+			ChangePeer: &pdpb.ChangePeer{
+				ChangeType: eraftpb.ConfChangeType_PromoteLearnerNode,
+				Peer: &metapb.Peer{
+					Id:      s.PeerID,
+					StoreId: s.ToStore,
+				},
+			},
+		}
+		c.hbStreams.sendMsg(region, cmd)
 	case schedule.RemovePeer:
 		cmd := &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{

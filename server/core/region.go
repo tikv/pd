@@ -30,12 +30,14 @@ import (
 // RegionInfo records detail region info.
 type RegionInfo struct {
 	*metapb.Region
-	Leader          *metapb.Peer
-	DownPeers       []*pdpb.PeerStats
-	PendingPeers    []*metapb.Peer
-	WrittenBytes    uint64
-	ReadBytes       uint64
-	ApproximateSize int64
+	Leader               *metapb.Peer
+	DownPeers            []*pdpb.PeerStats
+	PendingPeers         []*metapb.Peer
+	PendingLearnerPeers  []*metapb.Peer
+	CompleteLearnerPeers []*metapb.Peer
+	WrittenBytes         uint64
+	ReadBytes            uint64
+	ApproximateSize      int64
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -107,6 +109,26 @@ func (r *RegionInfo) GetDownPeer(peerID uint64) *metapb.Peer {
 // GetPendingPeer returns the pending peer with specified peer id.
 func (r *RegionInfo) GetPendingPeer(peerID uint64) *metapb.Peer {
 	for _, peer := range r.PendingPeers {
+		if peer.GetId() == peerID {
+			return peer
+		}
+	}
+	return nil
+}
+
+// GetPendingLearnerPeer returns the pending learner peer with specified peer id.
+func (r *RegionInfo) GetPendingLearnerPeer(peerID uint64) *metapb.Peer {
+	for _, peer := range r.PendingLearnerPeers {
+		if peer.GetId() == peerID {
+			return peer
+		}
+	}
+	return nil
+}
+
+// GetCompleteLearnerPeer returns the complete learner peer with specified peer id.
+func (r *RegionInfo) GetCompleteLearnerPeer(peerID uint64) *metapb.Peer {
+	for _, peer := range r.CompleteLearnerPeers {
 		if peer.GetId() == peerID {
 			return peer
 		}

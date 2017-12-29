@@ -82,6 +82,53 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to.RegionCount++
 }
 
+// AddLearnerPeer is an OperatorStep that adds a region learner peer.
+type AddLearnerPeer struct {
+	ToStore, PeerID uint64
+}
+
+func (alp AddLearnerPeer) String() string {
+	return fmt.Sprintf("add learner peer %v on store %v", alp.PeerID, alp.ToStore)
+}
+
+// IsFinish checks if current step is finished.
+func (alp AddLearnerPeer) IsFinish(region *core.RegionInfo) bool {
+	if p := region.GetStorePeer(alp.ToStore); p != nil {
+		return region.GetPendingLearnerPeer(p.GetId()) == nil && region.GetCompleteLearnerPeer(p.GetId()) != nil
+	}
+	return false
+}
+
+// Influence calculates the store difference that current step make
+func (alp AddLearnerPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+	to := opInfluence.GetStoreInfluence(alp.ToStore)
+
+	to.RegionSize += int(region.ApproximateSize)
+	to.RegionCount++
+}
+
+// PromoteLearnerPeer is an OperatorStep that promotes a region learner peer to normal voter.
+type PromoteLearnerPeer struct {
+	ToStore, PeerID uint64
+}
+
+func (plp PromoteLearnerPeer) String() string {
+	return fmt.Sprintf("promote learner peer %v on store %v to voter", plp.PeerID, plp.ToStore)
+}
+
+// IsFinish checks if current step is finished.
+func (plp PromoteLearnerPeer) IsFinish(region *core.RegionInfo) bool {
+	if p := region.GetStorePeer(plp.ToStore); p != nil {
+		return region.GetPendingLearnerPeer(p.GetId()) == nil && region.GetCompleteLearnerPeer(p.GetId()) == nil
+	}
+	return false
+}
+
+// Influence calculates the store difference that current step make
+func (plp PromoteLearnerPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+	return
+}
+
 // RemovePeer is an OperatorStep that removes a region peer.
 type RemovePeer struct {
 	FromStore uint64
@@ -278,22 +325,27 @@ func CreateRemovePeerOperator(desc string, kind OperatorKind, region *core.Regio
 
 // CreateMovePeerOperator creates an Operator that replaces an old peer with a
 // new peer. It prevents removing leader by transfer its leadership first.
-func CreateMovePeerOperator(desc string, region *core.RegionInfo, kind OperatorKind, oldStore, newStore uint64, peerID uint64) *Operator {
+func CreateMovePeerOperator(desc string, region *core.RegionInfo, kind OperatorKind, oldStore, newStore uint64, peerID uint64, isEnableLearner bool) *Operator {
+	var steps []OperatorStep
+	if isEnableLearner {
+		steps = []OperatorStep{
+			AddLearnerPeer{ToStore: newStore, PeerID: peerID},
+			PromoteLearnerPeer{ToStore: newStore, PeerID: peerID},
+		}
+	} else {
+		steps = []OperatorStep{
+			AddPeer{ToStore: newStore, PeerID: peerID},
+		}
+	}
+
 	if region.Leader != nil && region.Leader.GetStoreId() == oldStore {
 		newLeader := newStore
 		if follower := region.GetFollower(); follower != nil {
 			newLeader = follower.GetStoreId()
 		}
-		steps := []OperatorStep{
-			AddPeer{ToStore: newStore, PeerID: peerID},
-			TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader},
-			RemovePeer{FromStore: oldStore},
-		}
-		return NewOperator(desc, region.GetId(), kind|OpRegion|OpLeader, steps...)
+		steps = append(steps, TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader})
+		kind = kind | OpLeader
 	}
-	steps := []OperatorStep{
-		AddPeer{ToStore: newStore, PeerID: peerID},
-		RemovePeer{FromStore: oldStore},
-	}
+	steps = append(steps, RemovePeer{FromStore: oldStore})
 	return NewOperator(desc, region.GetId(), kind|OpRegion, steps...)
 }

@@ -55,9 +55,19 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 		if newPeer == nil {
 			return nil
 		}
-		step := AddPeer{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()}
-		return NewOperator("makeUpReplica", region.GetId(), OpReplica|OpRegion, step)
-	}
+		var steps []OperatorStep
+		if r.cluster.IsEnableRaftLearner() {
+			steps = []OperatorStep{
+				AddLearnerPeer{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()},
+				PromoteLearnerPeer{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()},
+			}
+		} else {
+			steps = []OperatorStep{
+				AddPeer{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()},
+			}
+		}
+		return NewOperator("makeUpReplica", region.GetId(), OpReplica|OpRegion, steps...)
+		}
 
 	if len(region.GetPeers()) > r.cluster.GetMaxReplicas() {
 		oldPeer, _ := r.selectWorstPeer(region)
@@ -175,8 +185,8 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 		if newPeer == nil {
 			return nil
 		}
-		return CreateMovePeerOperator("makeUpOfflineReplica", region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
-	}
+		return CreateMovePeerOperator("makeUpOfflineReplica", region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId(), r.cluster.IsEnableRaftLearner())
+		}
 
 	return nil
 }
@@ -198,5 +208,5 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator
 	if err != nil {
 		return nil
 	}
-	return CreateMovePeerOperator("moveToBetterLocation", region, OpReplica, oldPeer.GetStoreId(), storeID, newPeer.GetId())
-}
+	return CreateMovePeerOperator("moveToBetterLocation", region, OpReplica	, oldPeer.GetStoreId(), storeID, newPeer.GetId(), r.cluster.IsEnableRaftLearner())
+	}
