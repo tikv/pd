@@ -47,14 +47,14 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRegionWithKeyCommand())
 
 	topRead := &cobra.Command{
-		Use:   "region topread <limit>",
+		Use:   "topread <limit>",
 		Short: "show regions with top read flow",
 		Run:   showRegionTopReadCommandFunc,
 	}
 	r.AddCommand(topRead)
 
 	topWrite := &cobra.Command{
-		Use:   "region topwrite <limit>",
+		Use:   "topwrite <limit>",
 		Short: "show regions with top write flow",
 		Run:   showRegionTopWriteCommandFunc,
 	}
