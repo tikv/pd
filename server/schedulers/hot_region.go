@@ -169,7 +169,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 		return schedule.CreateMovePeerOperator("moveHotWriteRegion", srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId(), cluster.IsEnableRaftLearner())
 	}
 
-		// balance by leader
+	// balance by leader
 	srcRegion, newLeader := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()

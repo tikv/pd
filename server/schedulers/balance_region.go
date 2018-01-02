@@ -123,5 +123,5 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 	s.limit = adjustBalanceLimit(cluster, core.RegionKind)
 
-	return schedule.CreateMovePeerOperator("balance-region", region, schedule.OpBalance	, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId(), cluster.IsEnableRaftLearner())
-	}
+	return schedule.CreateMovePeerOperator("balance-region", region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId(), cluster.IsEnableRaftLearner())
+}
