@@ -145,33 +145,14 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 const defaultRegionLimit = 16
 
 func (h *regionsHandler) GetTopWriteFlow(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
-	limit := defaultRegionLimit
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		var err error
-		limit, err = strconv.Atoi(limitStr)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-	regions := h.TopNRegions(cluster.GetRegions(), func(a, b *core.RegionInfo) bool { return a.WrittenBytes < b.WrittenBytes }, limit)
-	regionInfos := make([]*regionInfo, len(regions))
-	for i, r := range regions {
-		regionInfos[i] = newRegionInfo(r)
-	}
-	res := &regionsInfo{
-		Count:   len(regions),
-		Regions: regionInfos,
-	}
-	h.rd.JSON(w, http.StatusOK, res)
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.WrittenBytes < b.WrittenBytes })
 }
 
 func (h *regionsHandler) GetTopReadFlow(w http.ResponseWriter, r *http.Request) {
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.ReadBytes < b.ReadBytes })
+}
+
+func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
 		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
@@ -186,7 +167,7 @@ func (h *regionsHandler) GetTopReadFlow(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	regions := h.TopNRegions(cluster.GetRegions(), func(a, b *core.RegionInfo) bool { return a.ReadBytes < b.ReadBytes }, limit)
+	regions := h.TopNRegions(cluster.GetRegions(), less, limit)
 	regionInfos := make([]*regionInfo, len(regions))
 	for i, r := range regions {
 		regionInfos[i] = newRegionInfo(r)
