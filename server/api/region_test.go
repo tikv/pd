@@ -15,6 +15,7 @@ package api
 
 import (
 	"fmt"
+	"math/rand"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -99,5 +100,27 @@ func (s *testRegionSuite) checkTopFlow(c *C, url string, regionIDs []uint64) {
 	c.Assert(regions.Count, Equals, len(regionIDs))
 	for i, r := range regions.Regions {
 		c.Assert(r.ID, Equals, regionIDs[i])
+	}
+}
+
+func (s *testRegionSuite) TestTopN(c *C) {
+	writtenBytes := []uint64{10, 10, 9, 5, 3, 2, 2, 1, 0, 0}
+	for n := 0; n <= len(writtenBytes)+1; n++ {
+		regions := make([]*core.RegionInfo, 0, len(writtenBytes))
+		for _, i := range rand.Perm(len(writtenBytes)) {
+			id := uint64(i + 1)
+			region := newTestRegionInfo(id, id, nil, nil)
+			region.WrittenBytes = uint64(writtenBytes[i])
+			regions = append(regions, region)
+		}
+		topN := topNRegions(regions, func(a, b *core.RegionInfo) bool { return a.WrittenBytes < b.WrittenBytes }, n)
+		if n > len(writtenBytes) {
+			c.Assert(len(topN), Equals, len(writtenBytes))
+		} else {
+			c.Assert(len(topN), Equals, n)
+		}
+		for i := range topN {
+			c.Assert(topN[i].WrittenBytes, Equals, writtenBytes[i])
+		}
 	}
 }

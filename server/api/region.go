@@ -167,7 +167,7 @@ func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 	}
-	regions := h.TopNRegions(cluster.GetRegions(), less, limit)
+	regions := topNRegions(cluster.GetRegions(), less, limit)
 	regionInfos := make([]*regionInfo, len(regions))
 	for i, r := range regions {
 		regionInfos[i] = newRegionInfo(r)
@@ -211,7 +211,7 @@ func (h *RegionHeap) Min() *core.RegionInfo {
 	return h.regions[0]
 }
 
-func (h *regionsHandler) TopNRegions(regions []*core.RegionInfo, less func(a, b *core.RegionInfo) bool, n int) []*core.RegionInfo {
+func topNRegions(regions []*core.RegionInfo, less func(a, b *core.RegionInfo) bool, n int) []*core.RegionInfo {
 	if n <= 0 {
 		return nil
 	}
