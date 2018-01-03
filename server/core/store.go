@@ -14,6 +14,7 @@
 package core
 
 import (
+	"math"
 	"strings"
 	"time"
 
@@ -105,18 +106,20 @@ const minWeight = 1e-6
 
 // LeaderScore returns the store's leader score: leaderCount / leaderWeight.
 func (s *StoreInfo) LeaderScore() float64 {
+	size := math.Min(1, float64(s.LeaderSize))
 	if s.LeaderWeight <= 0 {
-		return float64(s.LeaderSize) / minWeight
+		return size / minWeight
 	}
-	return float64(s.LeaderSize) / s.LeaderWeight
+	return size / s.LeaderWeight
 }
 
 // RegionScore returns the store's region score: regionSize / regionWeight.
 func (s *StoreInfo) RegionScore() float64 {
+	size := math.Min(1, float64(s.RegionSize))
 	if s.RegionWeight <= 0 {
-		return float64(s.RegionSize) / minWeight
+		return size / minWeight
 	}
-	return float64(s.RegionSize) / s.RegionWeight
+	return size / s.RegionWeight
 }
 
 // StorageSize returns store's used storage size reported from tikv.
