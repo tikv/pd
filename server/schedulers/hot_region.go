@@ -340,7 +340,7 @@ func (h *balanceHotRegionsScheduler) selectDestStoreByPeer(candidateStoreIDs []u
 
 func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, storesStat core.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer) {
 	var (
-		maxReadBytes           uint64
+		maxFlowBytes           uint64
 		srcStoreID             uint64
 		maxHotStoreRegionCount int
 	)
@@ -353,13 +353,13 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 
 		if maxHotStoreRegionCount < statistics.RegionsStat.Len() {
 			maxHotStoreRegionCount = statistics.RegionsStat.Len()
-			maxReadBytes = statistics.TotalFlowBytes
+			maxFlowBytes = statistics.TotalFlowBytes
 			srcStoreID = storeID
 			continue
 		}
 
-		if maxHotStoreRegionCount == statistics.RegionsStat.Len() && maxReadBytes < statistics.TotalFlowBytes {
-			maxReadBytes = statistics.TotalFlowBytes
+		if maxHotStoreRegionCount == statistics.RegionsStat.Len() && maxFlowBytes < statistics.TotalFlowBytes {
+			maxFlowBytes = statistics.TotalFlowBytes
 			srcStoreID = storeID
 		}
 	}
