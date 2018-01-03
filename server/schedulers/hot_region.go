@@ -144,7 +144,7 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.
 
 func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Cluster) *schedule.Operator {
 	// balance by leader
-	srcRegion, newLeader := h.balanceByLeader(cluster, hotReadRegionBalance, h.stats.readStatAsLeader)
+	srcRegion, newLeader := h.balanceByLeader(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 		step := schedule.TransferLeader{FromStore: srcRegion.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
@@ -152,7 +152,7 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 	}
 
 	// balance by peer
-	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, hotReadRegionBalance, h.stats.readStatAsLeader)
+	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
 		return schedule.CreateMovePeerOperator("moveHotReadRegion", srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
@@ -163,14 +163,14 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 
 func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Cluster) *schedule.Operator {
 	// balance by peer
-	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, hotWriteRegionBalance, h.stats.writeStatAsPeer)
+	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
 		return schedule.CreateMovePeerOperator("moveHotWriteRegion", srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 	}
 
 	// balance by leader
-	srcRegion, newLeader := h.balanceByLeader(cluster, hotWriteRegionBalance, h.stats.writeStatAsLeader)
+	srcRegion, newLeader := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 		step := schedule.TransferLeader{FromStore: srcRegion.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
@@ -225,7 +225,7 @@ func (h *balanceHotRegionsScheduler) calcScore(items []*core.RegionStat, cluster
 	return stats
 }
 
-func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, typ BalanceType, storesStat core.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer, *metapb.Peer) {
+func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, storesStat core.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer, *metapb.Peer) {
 	srcStoreID := h.selectSrcStore(storesStat)
 	if srcStoreID == 0 {
 		return nil, nil, nil
@@ -288,7 +288,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, typ
 	return nil, nil, nil
 }
 
-func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, typ BalanceType, storesStat core.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer) {
+func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, storesStat core.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer) {
 	srcStoreID := h.selectSrcStore(storesStat)
 	if srcStoreID == 0 {
 		return nil, nil
