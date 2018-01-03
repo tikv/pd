@@ -55,13 +55,15 @@ const EmptyRegionApproximateSize = 1
 // RegionFromHeartbeat constructs a Region from region heartbeat.
 func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 	return &RegionInfo{
-		Region:          heartbeat.GetRegion(),
-		Leader:          heartbeat.GetLeader(),
-		DownPeers:       heartbeat.GetDownPeers(),
-		PendingPeers:    heartbeat.GetPendingPeers(),
-		WrittenBytes:    heartbeat.GetBytesWritten(),
-		ReadBytes:       heartbeat.GetBytesRead(),
-		ApproximateSize: int64(math.Ceil(float64(heartbeat.GetApproximateSize()) / 1e6)), // use size of MB as unit
+		Region:               heartbeat.GetRegion(),
+		Leader:               heartbeat.GetLeader(),
+		DownPeers:            heartbeat.GetDownPeers(),
+		PendingPeers:         heartbeat.GetPendingPeers(),
+		PendingLearnerPeers:  heartbeat.GetPendingLearnerPeer(),
+		CompleteLearnerPeers: heartbeat.GetCompleteLearnerPeer(),
+		WrittenBytes:         heartbeat.GetBytesWritten(),
+		ReadBytes:            heartbeat.GetBytesRead(),
+		ApproximateSize:      int64(math.Ceil(float64(heartbeat.GetApproximateSize()) / 1e6)), // use size of MB as unit
 	}
 }
 
@@ -75,14 +77,24 @@ func (r *RegionInfo) Clone() *RegionInfo {
 	for _, peer := range r.PendingPeers {
 		pendingPeers = append(pendingPeers, proto.Clone(peer).(*metapb.Peer))
 	}
+	pendingLearnerPeers := make([]*metapb.Peer, 0, len(r.PendingLearnerPeers))
+	for _, peer := range r.PendingLearnerPeers {
+		pendingLearnerPeers = append(pendingLearnerPeers, proto.Clone(peer).(*metapb.Peer))
+	}
+	completeLearnerPeers := make([]*metapb.Peer, 0, len(r.CompleteLearnerPeers))
+	for _, peer := range r.CompleteLearnerPeers {
+		completeLearnerPeers = append(completeLearnerPeers, proto.Clone(peer).(*metapb.Peer))
+	}
 	return &RegionInfo{
-		Region:          proto.Clone(r.Region).(*metapb.Region),
-		Leader:          proto.Clone(r.Leader).(*metapb.Peer),
-		DownPeers:       downPeers,
-		PendingPeers:    pendingPeers,
-		WrittenBytes:    r.WrittenBytes,
-		ReadBytes:       r.ReadBytes,
-		ApproximateSize: r.ApproximateSize,
+		Region:               proto.Clone(r.Region).(*metapb.Region),
+		Leader:               proto.Clone(r.Leader).(*metapb.Peer),
+		DownPeers:            downPeers,
+		PendingPeers:         pendingPeers,
+		PendingLearnerPeers:  pendingLearnerPeers,
+		CompleteLearnerPeers: completeLearnerPeers,
+		WrittenBytes:         r.WrittenBytes,
+		ReadBytes:            r.ReadBytes,
+		ApproximateSize:      r.ApproximateSize,
 	}
 }
 
@@ -318,11 +330,13 @@ func (rm *regionMap) TotalSize() int64 {
 
 // RegionsInfo for export
 type RegionsInfo struct {
-	tree         *regionTree
-	regions      *regionMap            // regionID -> regionInfo
-	leaders      map[uint64]*regionMap // storeID -> regionID -> regionInfo
-	followers    map[uint64]*regionMap // storeID -> regionID -> regionInfo
-	pendingPeers map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	tree                *regionTree
+	regions             *regionMap            // regionID -> regionInfo
+	leaders             map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	followers           map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	pendingPeers        map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	pendingLearnerPeers map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	completeLearnerPeers map[uint64]&regionMap // storeID -> regionID -> regionInfo
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
@@ -333,6 +347,8 @@ func NewRegionsInfo() *RegionsInfo {
 		leaders:      make(map[uint64]*regionMap),
 		followers:    make(map[uint64]*regionMap),
 		pendingPeers: make(map[uint64]*regionMap),
+		pendingLearnerPeers: make(map[uint64]*regionMap),
+		completeLearnerPeers: make(map[uint64]*regionMap),
 	}
 }
 
@@ -408,6 +424,26 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) {
 		}
 		store.Put(region)
 	}
+
+	for _, peer := range region.PendingLearnerPeers {
+		storeID := peer.GetStoreId()
+		store, ok := r.pendingLearnerPeers[storeID]
+		if !ok {
+			store = newRegionMap()
+			r.pendingLearnerPeers[storeID] = store
+		}
+		store.Put(region)
+	}
+
+	for _, peer := range region.CompleteLearnerPeers {
+		storeID := peer.GetStoreId()
+		store, ok := r.completeLearnerPeers[storeID]
+		if !ok {
+			store = newRegionMap()
+			r.completeLearnerPeers[storeID] = store
+		}
+		store.Put(region)
+	}
 }
 
 // RemoveRegion remove RegionInfo from regionTree and regionMap
@@ -422,6 +458,8 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 		r.leaders[storeID].Delete(region.GetId())
 		r.followers[storeID].Delete(region.GetId())
 		r.pendingPeers[storeID].Delete(region.GetId())
+		r.pendingLearnerPeers[storeID].Delete(region.GetId())
+		r.completeLearnerPeers[storeID].Delete(region.GetId())
 	}
 }
 
@@ -472,14 +510,24 @@ func (r *RegionsInfo) GetRegionCount() int {
 	return r.regions.Len()
 }
 
-// GetStoreRegionCount get  the total count of  a store's leader and follower RegionInfo by storeID
+// GetStoreRegionCount get  the total count of a store's leader and follower RegionInfo by storeID
 func (r *RegionsInfo) GetStoreRegionCount(storeID uint64) int {
 	return r.GetStoreLeaderCount(storeID) + r.GetStoreFollowerCount(storeID)
 }
 
-// GetStorePendingPeerCount gets the total count of  a store's region that includes pending peer
+// GetStorePendingPeerCount gets the total count of a store's region that includes pending peer
 func (r *RegionsInfo) GetStorePendingPeerCount(storeID uint64) int {
 	return r.pendingPeers[storeID].Len()
+}
+
+// GetStorePendingLearnerPeerCount gets the total count of a store's region that includes pending learner peer
+func (r *RegionsInfo) GetStorePendingLearnerPeerCount(storeID uint64) int {
+	return r.pendingLearnerPeers[storeID].Len()
+}
+
+// GetStoreCompleteLearnerPeerCount gets the total count of a store's region that includes complete learner peer
+func (r *RegionsInfo) GetStoreCompleteLearnerPeerCount(storeID uint64) int {
+	return r.CompleteLearnerPeers[storeID].Len()
 }
 
 // GetStoreLeaderCount get the total count of a store's leader RegionInfo
@@ -588,7 +636,7 @@ func randRegion(regions *regionMap) *RegionInfo {
 		if region == nil {
 			return nil
 		}
-		if len(region.DownPeers) == 0 && len(region.PendingPeers) == 0 {
+		if len(region.DownPeers) == 0 && len(region.PendingPeers) == 0 && len(region.PendingLearnerPeers) == 0 && len(region.CompleteLearnerPeers) == 0 {
 			return region.Clone()
 		}
 	}

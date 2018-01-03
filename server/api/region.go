@@ -34,12 +34,14 @@ type regionInfo struct {
 	RegionEpoch *metapb.RegionEpoch `json:"epoch,omitempty"`
 	Peers       []*metapb.Peer      `json:"peers,omitempty"`
 
-	Leader          *metapb.Peer      `json:"leader,omitempty"`
-	DownPeers       []*pdpb.PeerStats `json:"down_peers,omitempty"`
-	PendingPeers    []*metapb.Peer    `json:"pending_peers,omitempty"`
-	WrittenBytes    uint64            `json:"written_bytes,omitempty"`
-	ReadBytes       uint64            `json:"read_bytes,omitempty"`
-	ApproximateSize int64             `json:"approximate_size,omitempty"`
+	Leader               *metapb.Peer      `json:"leader,omitempty"`
+	DownPeers            []*pdpb.PeerStats `json:"down_peers,omitempty"`
+	PendingPeers         []*metapb.Peer    `json:"pending_peers,omitempty"`
+	PendingLearnerPeers  []*metapb.Peer    `json:"pending_learner_peers,omitempty"`
+	CompleteLearnerPeers []*metapb.Peer    `json:"complete_learner_peers,omitempty"`
+	WrittenBytes         uint64            `json:"written_bytes,omitempty"`
+	ReadBytes            uint64            `json:"read_bytes,omitempty"`
+	ApproximateSize      int64             `json:"approximate_size,omitempty"`
 }
 
 func newRegionInfo(r *core.RegionInfo) *regionInfo {
@@ -53,12 +55,14 @@ func newRegionInfo(r *core.RegionInfo) *regionInfo {
 		RegionEpoch: r.RegionEpoch,
 		Peers:       r.Peers,
 
-		Leader:          r.Leader,
-		DownPeers:       r.DownPeers,
-		PendingPeers:    r.PendingPeers,
-		WrittenBytes:    r.WrittenBytes,
-		ReadBytes:       r.ReadBytes,
-		ApproximateSize: r.ApproximateSize,
+		Leader:               r.Leader,
+		DownPeers:            r.DownPeers,
+		PendingPeers:         r.PendingPeers,
+		PendingLearnerPeers:  r.PendingLearnerPeers,
+		CompleteLearnerPeers: r.CompleteLearnerPeers,
+		WrittenBytes:         r.WrittenBytes,
+		ReadBytes:            r.ReadBytes,
+		ApproximateSize:      r.ApproximateSize,
 	}
 }
 
