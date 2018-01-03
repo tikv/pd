@@ -14,22 +14,22 @@
 package server
 
 import (
-	"time"
-
-	log "github.com/sirupsen/logrus"
+	. "github.com/pingcap/check"
 )
 
-// StartMonitor calls systimeErrHandler if system time jump backward.
-func StartMonitor(now func() time.Time, systimeErrHandler func()) {
-	log.Info("start system time monitor")
-	tick := time.NewTicker(100 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		last := now().UnixNano()
-		<-tick.C
-		if now().UnixNano() < last {
-			log.Errorf("system time jump backward, last:%v", last)
-			systimeErrHandler()
-		}
-	}
+var _ = Suite(&testConfigSuite{})
+
+type testConfigSuite struct{}
+
+func (s *testConfigSuite) TestTLS(c *C) {
+	cfg := NewConfig()
+	tls, err := cfg.Security.ToTLSConfig()
+	c.Assert(err, IsNil)
+	c.Assert(tls, IsNil)
+}
+
+func (s *testConfigSuite) TestBadFormatJoinAddr(c *C) {
+	cfg := NewTestSingleConfig()
+	cfg.Join = "127.0.0.1:2379" // Wrong join addr without scheme.
+	c.Assert(cfg.adjust(), NotNil)
 }

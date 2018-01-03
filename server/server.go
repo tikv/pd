@@ -14,7 +14,6 @@
 package server
 
 import (
-	"crypto/tls"
 	"math/rand"
 	"net/http"
 	"os"
@@ -27,10 +26,8 @@ import (
 	"syscall"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/embed"
-	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -38,6 +35,7 @@ import (
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
 
@@ -131,7 +129,7 @@ func (s *Server) startEtcd() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	tlsConfig, err := s.GetTLSConfig()
+	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -519,6 +517,11 @@ func (s *Server) DeleteNamespaceConfig(name string) {
 	}
 }
 
+// GetSecurityConfig get the security config.
+func (s *Server) GetSecurityConfig() *SecurityConfig {
+	return &s.cfg.Security
+}
+
 // IsNamespaceExist returns whether the namespace exists.
 func (s *Server) IsNamespaceExist(name string) bool {
 	return s.classifier.IsNamespaceExist(name)
@@ -549,29 +552,9 @@ func (s *Server) GetCluster() *metapb.Cluster {
 func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
 	s.cluster.Lock()
 	defer s.cluster.Unlock()
-	err := s.cluster.loadClusterStatus()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	clone := &ClusterStatus{}
-	*clone = *s.cluster.status
-	return clone, nil
+	return s.cluster.loadClusterStatus()
 }
 
 func (s *Server) getAllocIDPath() string {
 	return path.Join(s.rootPath, "alloc_id")
-}
-
-// GetTLSConfig gets tls config.
-func (s *Server) GetTLSConfig() (*tls.Config, error) {
-	tlsInfo := transport.TLSInfo{
-		CertFile:      s.cfg.Security.CertPath,
-		KeyFile:       s.cfg.Security.KeyPath,
-		TrustedCAFile: s.cfg.Security.CAPath,
-	}
-	tlsConfig, err := tlsInfo.ClientConfig()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return tlsConfig, nil
 }

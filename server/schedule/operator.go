@@ -221,6 +221,46 @@ func (o *Operator) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	}
 }
 
+// OperatorHistory is used to log and visualize completed operators.
+type OperatorHistory struct {
+	FinishTime time.Time
+	From, To   uint64
+	Kind       core.ResourceKind
+}
+
+// History transfers the operator's steps to operator histories.
+func (o *Operator) History() []OperatorHistory {
+	now := time.Now()
+	var histories []OperatorHistory
+	var addPeerStores, removePeerStores []uint64
+	for _, step := range o.steps {
+		switch s := step.(type) {
+		case TransferLeader:
+			histories = append(histories, OperatorHistory{
+				FinishTime: now,
+				From:       s.FromStore,
+				To:         s.ToStore,
+				Kind:       core.LeaderKind,
+			})
+		case AddPeer:
+			addPeerStores = append(addPeerStores, s.ToStore)
+		case RemovePeer:
+			removePeerStores = append(removePeerStores, s.FromStore)
+		}
+	}
+	for i := range addPeerStores {
+		if i < len(removePeerStores) {
+			histories = append(histories, OperatorHistory{
+				FinishTime: now,
+				From:       removePeerStores[i],
+				To:         addPeerStores[i],
+				Kind:       core.RegionKind,
+			})
+		}
+	}
+	return histories
+}
+
 // CreateRemovePeerOperator creates an Operator that removes a peer from region.
 // It prevents removing leader by tranfer its leadership first.
 func CreateRemovePeerOperator(desc string, kind OperatorKind, region *core.RegionInfo, storeID uint64) *Operator {

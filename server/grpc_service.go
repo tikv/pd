@@ -20,11 +20,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -457,6 +457,35 @@ func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb.PutClusterC
 	log.Infof("put cluster config ok - %v", conf)
 
 	return &pdpb.PutClusterConfigResponse{
+		Header: s.header(),
+	}, nil
+}
+
+// ScatterRegion implements gRPC PDServer.
+func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionRequest) (*pdpb.ScatterRegionResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &pdpb.ScatterRegionResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	region := cluster.GetRegionInfoByID(request.GetRegionId())
+	if region == nil {
+		if request.GetRegion() == nil {
+			return nil, errors.Errorf("region %d not found", request.GetRegionId())
+		}
+		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
+	}
+
+	co := cluster.coordinator
+	if op := co.regionScatterer.Scatter(region); op != nil {
+		co.addOperator(op)
+	}
+
+	return &pdpb.ScatterRegionResponse{
 		Header: s.header(),
 	}, nil
 }
