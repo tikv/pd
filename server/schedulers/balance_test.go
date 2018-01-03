@@ -170,9 +170,9 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
 	c.Check(s.schedule(nil), IsNil)
 
 	// Stores:     1    2    3    4
-	// Leaders:    10   0    0    0
+	// Leaders:    16   0    0    0
 	// Region1:    L    F    F    F
-	s.tc.updateLeaderCount(1, 10)
+	s.tc.updateLeaderCount(1, 16)
 	c.Check(s.schedule(nil), NotNil)
 
 	// Stores:     1    2    3    4
