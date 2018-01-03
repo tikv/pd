@@ -53,12 +53,13 @@ type Node struct {
 	ctx                     context.Context
 	cancel                  context.CancelFunc
 	state                   NodeState
+	logger                  *log.Logger
 	// share cluster information
 	clusterInfo *ClusterInfo
 }
 
 // NewNode returns a Node.
-func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
+func NewNode(id uint64, addr string, pdAddr string, logger *log.Logger) (*Node, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	store := &metapb.Store{
 		Id:      id,
@@ -72,7 +73,7 @@ func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
 		StartTime: uint32(time.Now().Unix()),
 	}
 	tag := fmt.Sprintf("store %d", id)
-	client, reciveRegionHeartbeatCh, err := NewClient(pdAddr, tag)
+	client, reciveRegionHeartbeatCh, err := NewClient(pdAddr, tag, logger)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -86,6 +87,7 @@ func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
 		tasks:  make(map[uint64]Task),
 		state:  Down,
 		reciveRegionHeartbeatCh: reciveRegionHeartbeatCh,
+		logger:                  logger,
 	}, nil
 }
 
@@ -141,7 +143,7 @@ func (n *Node) stepTask() {
 	for _, task := range n.tasks {
 		task.Step(n.clusterInfo)
 		if task.IsFinished() {
-			log.Infof("[store %d][region %d] task finished: %s final: %v", n.GetId(), task.RegionID(), task.Desc(), n.clusterInfo.GetRegion(task.RegionID()))
+			n.logger.Infof("[store %d][region %d] task finished: %s final: %v", n.GetId(), task.RegionID(), task.Desc(), n.clusterInfo.GetRegion(task.RegionID()))
 			n.clusterInfo.reportRegionChange(task.RegionID())
 			delete(n.tasks, task.RegionID())
 		}
@@ -164,7 +166,7 @@ func (n *Node) storeHeartBeat() {
 	ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 	err := n.client.StoreHeartbeat(ctx, n.stats)
 	if err != nil {
-		log.Infof("[store %d] report heartbeat error: %s", n.GetId(), err)
+		n.logger.Infof("[store %d] report heartbeat error: %s", n.GetId(), err)
 	}
 	cancel()
 }
@@ -179,7 +181,7 @@ func (n *Node) regionHeartBeat() {
 			ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 			err := n.client.RegionHeartbeat(ctx, region)
 			if err != nil {
-				log.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetId(), err)
+				n.logger.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetId(), err)
 			}
 			cancel()
 		}
@@ -192,7 +194,7 @@ func (n *Node) reportRegionChange(regionID uint64) {
 		ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 		err := n.client.RegionHeartbeat(ctx, region)
 		if err != nil {
-			log.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetId(), err)
+			n.logger.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetId(), err)
 		}
 		cancel()
 	}
@@ -203,7 +205,7 @@ func (n *Node) AddTask(task Task) {
 	n.Lock()
 	defer n.Unlock()
 	if t, ok := n.tasks[task.RegionID()]; ok {
-		log.Infof("[node %d][region %d] already exists task : %s", n.Id, task.RegionID(), t.Desc())
+		n.logger.Infof("[node %d][region %d] already exists task : %s", n.Id, task.RegionID(), t.Desc())
 		return
 	}
 	n.tasks[task.RegionID()] = task
@@ -214,5 +216,5 @@ func (n *Node) Stop() {
 	n.cancel()
 	n.client.Close()
 	n.wg.Wait()
-	log.Infof("node %d stoped", n.Id)
+	n.logger.Infof("node %d stoped", n.Id)
 }

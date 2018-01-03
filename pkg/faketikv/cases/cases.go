@@ -16,6 +16,7 @@ package cases
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	log "github.com/sirupsen/logrus"
 )
 
 // Store is the config to simulate tikv.
@@ -43,7 +44,7 @@ type Conf struct {
 	Regions []Region
 	MaxID   uint64
 
-	Checker func(*core.RegionsInfo) bool // To check the schedule is finished.
+	Checker func(*core.RegionsInfo, *log.Logger) bool // To check the schedule is finished.
 }
 
 const (

@@ -28,18 +28,20 @@ import (
 // ClusterInfo records all cluster information.
 type ClusterInfo struct {
 	*core.RegionsInfo
-	Nodes map[uint64]*Node
+	Nodes  map[uint64]*Node
+	logger *log.Logger
 }
 
 // NewClusterInfo creates the initialized cluster with config.
-func NewClusterInfo(pdAddr string, conf *cases.Conf) (*ClusterInfo, error) {
+func NewClusterInfo(pdAddr string, conf *cases.Conf, logger *log.Logger) (*ClusterInfo, error) {
 	cluster := &ClusterInfo{
 		RegionsInfo: core.NewRegionsInfo(),
 		Nodes:       make(map[uint64]*Node),
+		logger:      logger,
 	}
 
 	for _, store := range conf.Stores {
-		node, err := NewNode(store.ID, fmt.Sprintf("mock:://tikv-%d", store.ID), pdAddr)
+		node, err := NewNode(store.ID, fmt.Sprintf("mock:://tikv-%d", store.ID), pdAddr, logger)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -128,10 +130,10 @@ func (c *ClusterInfo) stepLeader(region *core.RegionInfo) {
 	region.Leader = newLeader
 	if newLeader == nil {
 		c.SetRegion(region)
-		log.Infof("[region %d] no leader", region.GetId())
+		c.logger.Infof("[region %d] no leader", region.GetId())
 		return
 	}
-	log.Info("[region %d] elect new leader: %+v,old leader: %+v", region.GetId(), newLeader, region.Leader)
+	c.logger.Info("[region %d] elect new leader: %+v,old leader: %+v", region.GetId(), newLeader, region.Leader)
 	c.SetRegion(region)
 	c.reportRegionChange(region.GetId())
 }

@@ -24,8 +24,10 @@ import (
 
 // Driver promotes the cluster status change.
 type Driver struct {
-	addr        string
-	confName    string
+	addr     string
+	confName string
+	logger   *log.Logger
+
 	conf        *cases.Conf
 	clusterInfo *ClusterInfo
 	client      Client
@@ -33,10 +35,11 @@ type Driver struct {
 }
 
 // NewDriver returns a driver.
-func NewDriver(addr string, confName string) *Driver {
+func NewDriver(addr string, confName string, logger *log.Logger) *Driver {
 	return &Driver{
 		addr:     addr,
 		confName: confName,
+		logger:   logger,
 	}
 }
 
@@ -47,7 +50,7 @@ func (d *Driver) Prepare() error {
 		return errors.Errorf("failed to create conf %s", d.confName)
 	}
 
-	clusterInfo, err := NewClusterInfo(d.addr, d.conf)
+	clusterInfo, err := NewClusterInfo(d.addr, d.conf, d.logger)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -64,9 +67,9 @@ func (d *Driver) Prepare() error {
 	err = d.client.Bootstrap(ctx, store, region)
 	cancel()
 	if err != nil {
-		log.Fatal("bootstrapped error: ", err)
+		d.logger.Fatal("bootstrapped error: ", err)
 	} else {
-		log.Info("Bootstrap sucess")
+		d.logger.Debug("Bootstrap sucess")
 	}
 
 	// Setup alloc id.
@@ -99,7 +102,7 @@ func (d *Driver) Tick() {
 
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
-	return d.conf.Checker(d.clusterInfo.RegionsInfo)
+	return d.conf.Checker(d.clusterInfo.RegionsInfo, d.logger)
 }
 
 // Stop stops all nodes.
@@ -117,14 +120,14 @@ func (d *Driver) TickCount() int64 {
 // AddNode adds new node.
 func (d *Driver) AddNode() {
 	id, err := d.client.AllocID(context.Background())
-	n, err := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), d.addr)
+	n, err := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), d.addr, d.logger)
 	if err != nil {
-		log.Info("Add node failed:", err)
+		d.logger.Debug("Add node failed:", err)
 		return
 	}
 	err = n.Start()
 	if err != nil {
-		log.Info("Start node failed:", err)
+		d.logger.Debug("Start node failed:", err)
 		return
 	}
 	n.clusterInfo = d.clusterInfo
