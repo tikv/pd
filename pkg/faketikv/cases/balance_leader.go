@@ -15,8 +15,8 @@ package cases
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
 	"github.com/pingcap/pd/server/core"
-	log "github.com/sirupsen/logrus"
 )
 
 func newBalanceLeader() *Conf {
@@ -48,11 +48,11 @@ func newBalanceLeader() *Conf {
 	}
 	conf.MaxID = id.maxID
 
-	conf.Checker = func(regions *core.RegionsInfo, logger *log.Logger) bool {
+	conf.Checker = func(regions *core.RegionsInfo) bool {
 		count1 := regions.GetStoreLeaderCount(1)
 		count2 := regions.GetStoreLeaderCount(2)
 		count3 := regions.GetStoreLeaderCount(3)
-		logger.Infof("leader counts: %v %v %v", count1, count2, count3)
+		simutil.Logger.Infof("leader counts: %v %v %v", count1, count2, count3)
 
 		return count1 <= 350 &&
 			count2 >= 300 &&

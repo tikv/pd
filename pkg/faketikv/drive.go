@@ -19,15 +19,13 @@ import (
 
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/faketikv/cases"
-	log "github.com/sirupsen/logrus"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
 )
 
 // Driver promotes the cluster status change.
 type Driver struct {
-	addr     string
-	confName string
-	logger   *log.Logger
-
+	addr        string
+	confName    string
 	conf        *cases.Conf
 	clusterInfo *ClusterInfo
 	client      Client
@@ -35,11 +33,10 @@ type Driver struct {
 }
 
 // NewDriver returns a driver.
-func NewDriver(addr string, confName string, logger *log.Logger) *Driver {
+func NewDriver(addr string, confName string) *Driver {
 	return &Driver{
 		addr:     addr,
 		confName: confName,
-		logger:   logger,
 	}
 }
 
@@ -50,7 +47,7 @@ func (d *Driver) Prepare() error {
 		return errors.Errorf("failed to create conf %s", d.confName)
 	}
 
-	clusterInfo, err := NewClusterInfo(d.addr, d.conf, d.logger)
+	clusterInfo, err := NewClusterInfo(d.addr, d.conf)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -67,9 +64,9 @@ func (d *Driver) Prepare() error {
 	err = d.client.Bootstrap(ctx, store, region)
 	cancel()
 	if err != nil {
-		d.logger.Fatal("bootstrapped error: ", err)
+		simutil.Logger.Fatal("bootstrapped error: ", err)
 	} else {
-		d.logger.Debug("Bootstrap sucess")
+		simutil.Logger.Debug("Bootstrap sucess")
 	}
 
 	// Setup alloc id.
@@ -102,7 +99,7 @@ func (d *Driver) Tick() {
 
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
-	return d.conf.Checker(d.clusterInfo.RegionsInfo, d.logger)
+	return d.conf.Checker(d.clusterInfo.RegionsInfo)
 }
 
 // Stop stops all nodes.
@@ -120,14 +117,14 @@ func (d *Driver) TickCount() int64 {
 // AddNode adds new node.
 func (d *Driver) AddNode() {
 	id, err := d.client.AllocID(context.Background())
-	n, err := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), d.addr, d.logger)
+	n, err := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), d.addr)
 	if err != nil {
-		d.logger.Debug("Add node failed:", err)
+		simutil.Logger.Debug("Add node failed:", err)
 		return
 	}
 	err = n.Start()
 	if err != nil {
-		d.logger.Debug("Start node failed:", err)
+		simutil.Logger.Debug("Start node failed:", err)
 		return
 	}
 	n.clusterInfo = d.clusterInfo

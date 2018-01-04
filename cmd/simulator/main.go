@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/pingcap/pd/pkg/faketikv"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
@@ -42,20 +43,19 @@ var (
 func main() {
 	flag.Parse()
 
-	logger := log.New()
-	logger.Level = logutil.StringToLogLevel(*simLogLevel)
+	simutil.InitLogger(*simLogLevel)
 
 	start := time.Now()
 
 	_, local, clean := NewSingleServer()
 	err := local.Run()
 	if err != nil {
-		logger.Fatal("run server error:", err)
+		simutil.Logger.Fatal("run server error:", err)
 	}
-	driver := faketikv.NewDriver(local.GetAddr(), *confName, logger)
+	driver := faketikv.NewDriver(local.GetAddr(), *confName)
 	err = driver.Prepare()
 	if err != nil {
-		logger.Fatal("simulator prepare error:", err)
+		simutil.Logger.Fatal("simulator prepare error:", err)
 	}
 	tick := time.NewTicker(100 * time.Millisecond)
 	sc := make(chan os.Signal, 1)

@@ -21,27 +21,25 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/faketikv/cases"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
 	"github.com/pingcap/pd/server/core"
-	log "github.com/sirupsen/logrus"
 )
 
 // ClusterInfo records all cluster information.
 type ClusterInfo struct {
 	*core.RegionsInfo
-	Nodes  map[uint64]*Node
-	logger *log.Logger
+	Nodes map[uint64]*Node
 }
 
 // NewClusterInfo creates the initialized cluster with config.
-func NewClusterInfo(pdAddr string, conf *cases.Conf, logger *log.Logger) (*ClusterInfo, error) {
+func NewClusterInfo(pdAddr string, conf *cases.Conf) (*ClusterInfo, error) {
 	cluster := &ClusterInfo{
 		RegionsInfo: core.NewRegionsInfo(),
 		Nodes:       make(map[uint64]*Node),
-		logger:      logger,
 	}
 
 	for _, store := range conf.Stores {
-		node, err := NewNode(store.ID, fmt.Sprintf("mock:://tikv-%d", store.ID), pdAddr, logger)
+		node, err := NewNode(store.ID, fmt.Sprintf("mock:://tikv-%d", store.ID), pdAddr)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -130,10 +128,10 @@ func (c *ClusterInfo) stepLeader(region *core.RegionInfo) {
 	region.Leader = newLeader
 	if newLeader == nil {
 		c.SetRegion(region)
-		c.logger.Infof("[region %d] no leader", region.GetId())
+		simutil.Logger.Infof("[region %d] no leader", region.GetId())
 		return
 	}
-	c.logger.Info("[region %d] elect new leader: %+v,old leader: %+v", region.GetId(), newLeader, region.Leader)
+	simutil.Logger.Info("[region %d] elect new leader: %+v,old leader: %+v", region.GetId(), newLeader, region.Leader)
 	c.SetRegion(region)
 	c.reportRegionChange(region.GetId())
 }
