@@ -19,7 +19,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func newAddNode() *Conf {
+func newAddNodes() *Conf {
 	var conf Conf
 
 	for i := 1; i <= 3; i++ {
@@ -67,24 +67,23 @@ func newAddNode() *Conf {
 		count5 := regions.GetStoreLeaderCount(5)
 		log.Infof("leader counts: %v %v %v %v %v", count1, count2, count3, count4, count5)
 
-		return nil, count1 <= 250 &&
-			count2 >= 200 &&
-			count3 >= 200 &&
-			count4 >= 200 &&
-			count5 >= 200
+		return nil, count1 <= 220 &&
+			count2 >= 190 &&
+			count3 >= 190 &&
+			count4 >= 190 &&
+			count5 >= 190
 	}
 	index := 0
 	conf.Checker = func(regions *core.RegionsInfo) (ChangeTask, bool) {
 		if index == 1 {
 			return checkers[index](regions)
-		} else {
-			task, res := checkers[index](regions)
-			if res {
-				index++
-				return task, false
-			}
-			return nil, false
 		}
+		task, res := checkers[index](regions)
+		if res {
+			index++
+			return task, false
+		}
+		return nil, false
 	}
 	return &conf
 }

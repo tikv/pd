@@ -20,14 +20,17 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
+// ChangeTask changes the nodes of the cluster.
 type ChangeTask interface {
 	Desc() string
 }
 
+// AddNode adds new nodes.
 type AddNode struct {
 	IDs []uint64
 }
 
+// Desc implements ChangeTask.
 func (a *AddNode) Desc() string {
 	return fmt.Sprintf("add node:%v nodes", a.IDs)
 }
@@ -51,6 +54,7 @@ type Region struct {
 	Size   int64
 }
 
+// CheckerFunc checks if the scheduler is finished.
 type CheckerFunc func(*core.RegionsInfo) (ChangeTask, bool)
 
 // Conf represents a test suite for simulator.
@@ -83,7 +87,7 @@ func (a *idAllocator) setMaxID(id uint64) {
 
 var confMap = map[string]func() *Conf{
 	"balance-leader": newBalanceLeader,
-	"add-node":       newAddNode,
+	"add-nodes":      newAddNodes,
 }
 
 // NewConf creates a config to initialize simulator cluster.
