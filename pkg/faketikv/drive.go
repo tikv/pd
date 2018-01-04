@@ -99,7 +99,19 @@ func (d *Driver) Tick() {
 
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
-	return d.conf.Checker(d.clusterInfo.RegionsInfo)
+	task, completed := d.conf.Checker(d.clusterInfo.RegionsInfo)
+	if completed {
+		return true
+	}
+	if task != nil {
+		switch t := task.(type) {
+		case *cases.AddNode:
+			for _, id := range t.IDs {
+				d.AddNode(id)
+			}
+		}
+	}
+	return false
 }
 
 // Stop stops all nodes.
@@ -115,8 +127,11 @@ func (d *Driver) TickCount() int64 {
 }
 
 // AddNode adds new node.
-func (d *Driver) AddNode() {
-	id, err := d.client.AllocID(context.Background())
+func (d *Driver) AddNode(id uint64) {
+	if _, ok := d.clusterInfo.Nodes[id]; ok {
+		log.Infof("Node %d already existed", id)
+		return
+	}
 	n, err := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), d.addr)
 	if err != nil {
 		log.Info("Add node failed:", err)

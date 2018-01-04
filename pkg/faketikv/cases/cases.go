@@ -14,9 +14,23 @@
 package cases
 
 import (
+	"fmt"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 )
+
+type ChangeTask interface {
+	Desc() string
+}
+
+type AddNode struct {
+	IDs []uint64
+}
+
+func (a *AddNode) Desc() string {
+	return fmt.Sprintf("add node:%v nodes", a.IDs)
+}
 
 // Store is the config to simulate tikv.
 type Store struct {
@@ -37,13 +51,15 @@ type Region struct {
 	Size   int64
 }
 
+type CheckerFunc func(*core.RegionsInfo) (ChangeTask, bool)
+
 // Conf represents a test suite for simulator.
 type Conf struct {
 	Stores  []Store
 	Regions []Region
 	MaxID   uint64
 
-	Checker func(*core.RegionsInfo) bool // To check the schedule is finished.
+	Checker CheckerFunc // To check the schedule is finished.
 }
 
 const (
@@ -67,6 +83,7 @@ func (a *idAllocator) setMaxID(id uint64) {
 
 var confMap = map[string]func() *Conf{
 	"balance-leader": newBalanceLeader,
+	"add-node":       newAddNode,
 }
 
 // NewConf creates a config to initialize simulator cluster.
