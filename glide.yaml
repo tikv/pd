@@ -205,7 +205,7 @@ import:
 - package: github.com/elazarl/go-bindata-assetfs
 - package: github.com/montanaflynn/stats
   version: f8cd06f93c6c1b06028caafb88b540fc820f77c1
-- package: github.com/Sirupsen/logrus
+- package: github.com/sirupsen/logrus
   version: v0.11.5
 - package: gopkg.in/natefinch/lumberjack.v2
   version: v2
