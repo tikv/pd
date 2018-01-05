@@ -1,7 +1,5 @@
 PD_PKG := github.com/pingcap/pd
-VENDOR := $(shell rm -rf vendor/src/$(PD_PKG) &&\
-                 ln -s `pwd` vendor/src/$(PD_PKG) &&\
-                 pwd)/vendor
+
 TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
                      uniq | sed -e "s/^\./github.com\/pingcap\/pd/")
 
@@ -26,17 +24,17 @@ dev: build simulator check test
 
 build:
 ifeq ("$(WITH_RACE)", "1")
-	GOPATH=$(VENDOR) CGO_ENABLED=1 go build -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=1 go build -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 else
-	GOPATH=$(VENDOR) CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
-	GOPATH=$(VENDOR) CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl cmd/pd-ctl/main.go
-	GOPATH=$(VENDOR) CGO_ENABLED=0 go build -o bin/pd-tso-bench cmd/pd-tso-bench/main.go
-	GOPATH=$(VENDOR) CGO_ENABLED=0 go build -o bin/pd-recover cmd/pd-recover/main.go
+	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl cmd/pd-ctl/main.go
+	CGO_ENABLED=0 go build -o bin/pd-tso-bench cmd/pd-tso-bench/main.go
+	CGO_ENABLED=0 go build -o bin/pd-recover cmd/pd-recover/main.go
 
 test:
 	# testing..
-	@GOPATH=$(VENDOR) CGO_ENABLED=1 go test -race -cover $(TEST_PKGS)
+	CGO_ENABLED=1 go test -race -cover $(TEST_PKGS)
 
 check:
 	go get github.com/golang/lint/golint
