@@ -1,5 +1,4 @@
 bin
-/vendor
 _vendor/pkg
 _vendor/src/github.com/pingcap/pd
 *.iml
