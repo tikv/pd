@@ -22,7 +22,7 @@ import (
 func newAddNodes() *Conf {
 	var conf Conf
 
-	for i := 1; i <= 3; i++ {
+	for i := 1; i <= 8; i++ {
 		conf.Stores = append(conf.Stores, Store{
 			ID:        uint64(i),
 			Status:    metapb.StoreState_Up,
@@ -32,12 +32,12 @@ func newAddNodes() *Conf {
 	}
 
 	var id idAllocator
-	id.setMaxID(100)
+	id.setMaxID(20)
 	for i := 0; i < 1000; i++ {
 		peers := []*metapb.Peer{
-			{Id: id.nextID(), StoreId: 1},
-			{Id: id.nextID(), StoreId: 2},
-			{Id: id.nextID(), StoreId: 3},
+			{Id: id.nextID(), StoreId: uint64(i)%4 + 1},
+			{Id: id.nextID(), StoreId: uint64(i+1)%4 + 1},
+			{Id: id.nextID(), StoreId: uint64(i+2)%4 + 1},
 		}
 		conf.Regions = append(conf.Regions, Region{
 			ID:     id.nextID(),
@@ -47,43 +47,19 @@ func newAddNodes() *Conf {
 		})
 	}
 	conf.MaxID = id.maxID
-	checkers := make([]CheckerFunc, 2)
-	checkers[0] = func(regions *core.RegionsInfo) (ChangeTask, bool) {
-		count1 := regions.GetStoreLeaderCount(1)
-		count2 := regions.GetStoreLeaderCount(2)
-		count3 := regions.GetStoreLeaderCount(3)
-		log.Infof("leader counts: %v %v %v", count1, count2, count3)
-		task := &AddNode{[]uint64{4, 5}}
-		return task, count1 <= 350 &&
-			count2 >= 300 &&
-			count3 >= 300
-	}
 
-	checkers[1] = func(regions *core.RegionsInfo) (ChangeTask, bool) {
-		count1 := regions.GetStoreLeaderCount(1)
-		count2 := regions.GetStoreLeaderCount(2)
-		count3 := regions.GetStoreLeaderCount(3)
-		count4 := regions.GetStoreLeaderCount(4)
-		count5 := regions.GetStoreLeaderCount(5)
-		log.Infof("leader counts: %v %v %v %v %v", count1, count2, count3, count4, count5)
-
-		return nil, count1 <= 220 &&
-			count2 >= 190 &&
-			count3 >= 190 &&
-			count4 >= 190 &&
-			count5 >= 190
-	}
-	index := 0
-	conf.Checker = func(regions *core.RegionsInfo) (ChangeTask, bool) {
-		if index == 1 {
-			return checkers[index](regions)
+	conf.Checker = func(regions *core.RegionsInfo) bool {
+		res := true
+		counts := make([]int, 0, 8)
+		for i := 1; i <= 8; i++ {
+			count := regions.GetStoreLeaderCount(uint64(i))
+			counts = append(counts, count)
+			if count > 130 || count < 120 {
+				res = false
+			}
 		}
-		task, res := checkers[index](regions)
-		if res {
-			index++
-			return task, false
-		}
-		return nil, false
+		log.Infof("leader counts: %v", counts)
+		return res
 	}
 	return &conf
 }

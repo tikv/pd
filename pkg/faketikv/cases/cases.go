@@ -14,26 +14,9 @@
 package cases
 
 import (
-	"fmt"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 )
-
-// ChangeTask changes the nodes of the cluster.
-type ChangeTask interface {
-	Desc() string
-}
-
-// AddNode adds new nodes.
-type AddNode struct {
-	IDs []uint64
-}
-
-// Desc implements ChangeTask.
-func (a *AddNode) Desc() string {
-	return fmt.Sprintf("add node:%v nodes", a.IDs)
-}
 
 // Store is the config to simulate tikv.
 type Store struct {
@@ -55,7 +38,7 @@ type Region struct {
 }
 
 // CheckerFunc checks if the scheduler is finished.
-type CheckerFunc func(*core.RegionsInfo) (ChangeTask, bool)
+type CheckerFunc func(*core.RegionsInfo) bool
 
 // Conf represents a test suite for simulator.
 type Conf struct {

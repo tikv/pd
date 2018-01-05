@@ -99,19 +99,7 @@ func (d *Driver) Tick() {
 
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
-	task, completed := d.conf.Checker(d.clusterInfo.RegionsInfo)
-	if completed {
-		return true
-	}
-	if task != nil {
-		switch t := task.(type) {
-		case *cases.AddNode:
-			for _, id := range t.IDs {
-				d.AddNode(id)
-			}
-		}
-	}
-	return false
+	return d.conf.Checker(d.clusterInfo.RegionsInfo)
 }
 
 // Stop stops all nodes.

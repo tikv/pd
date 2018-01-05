@@ -48,13 +48,13 @@ func newBalanceLeader() *Conf {
 	}
 	conf.MaxID = id.maxID
 
-	conf.Checker = func(regions *core.RegionsInfo) (ChangeTask, bool) {
+	conf.Checker = func(regions *core.RegionsInfo) bool {
 		count1 := regions.GetStoreLeaderCount(1)
 		count2 := regions.GetStoreLeaderCount(2)
 		count3 := regions.GetStoreLeaderCount(3)
 		log.Infof("leader counts: %v %v %v", count1, count2, count3)
 
-		return nil, count1 <= 350 &&
+		return count1 <= 350 &&
 			count2 >= 300 &&
 			count3 >= 300
 	}
