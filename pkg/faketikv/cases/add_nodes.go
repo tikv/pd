@@ -3,8 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
+// //     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -50,23 +49,23 @@ func newAddNodes() *Conf {
 
 	conf.Checker = func(regions *core.RegionsInfo) bool {
 		res := true
-		leader_counts := make([]int, 0, 8)
-		region_counts := make([]int, 0, 8)
+		leaderCounts := make([]int, 0, 8)
+		regionCounts := make([]int, 0, 8)
 		for i := 1; i <= 8; i++ {
-			leader_count := regions.GetStoreLeaderCount(uint64(i))
-			region_count := regions.GetStoreRegionCount(uint64(i))
-			leader_counts = append(leader_counts, leader_count)
-			region_counts = append(region_counts, region_count)
-			if leader_count > 130 || leader_count < 120 {
+			leaderCount := regions.GetStoreLeaderCount(uint64(i))
+			regionCount := regions.GetStoreRegionCount(uint64(i))
+			leaderCounts = append(leaderCounts, leaderCount)
+			regionCounts = append(regionCounts, regionCount)
+			if leaderCount > 130 || leaderCount < 120 {
 				res = false
 			}
-			if region_count > 380 || region_count < 360 {
+			if regionCount > 380 || regionCount < 360 {
 				res = false
 			}
 
 		}
-		log.Infof("leader counts: %v", leader_counts)
-		log.Infof("region counts: %v", region_counts)
+		log.Infof("leader counts: %v", leaderCounts)
+		log.Infof("region counts: %v", regionCounts)
 		return res
 	}
 	return &conf
