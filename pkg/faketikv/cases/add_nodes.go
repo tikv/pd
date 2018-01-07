@@ -50,15 +50,23 @@ func newAddNodes() *Conf {
 
 	conf.Checker = func(regions *core.RegionsInfo) bool {
 		res := true
-		counts := make([]int, 0, 8)
+		leader_counts := make([]int, 0, 8)
+		region_counts := make([]int, 0, 8)
 		for i := 1; i <= 8; i++ {
-			count := regions.GetStoreLeaderCount(uint64(i))
-			counts = append(counts, count)
-			if count > 130 || count < 120 {
+			leader_count := regions.GetStoreLeaderCount(uint64(i))
+			region_count := regions.GetStoreRegionCount(uint64(i))
+			leader_counts = append(leader_counts, leader_count)
+			region_counts = append(region_counts, region_count)
+			if leader_count > 130 || leader_count < 120 {
 				res = false
 			}
+			if region_count > 380 || region_count < 360 {
+				res = false
+			}
+
 		}
-		log.Infof("leader counts: %v", counts)
+		log.Infof("leader counts: %v", leader_counts)
+		log.Infof("region counts: %v", region_counts)
 		return res
 	}
 	return &conf
