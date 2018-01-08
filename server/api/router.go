@@ -100,6 +100,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	trendHandler := newTrendHandler(svr, rd)
 	router.HandleFunc("/api/v1/trend", trendHandler.Handle).Methods("GET")
 
+	debugHanler := newDebugHandler(svr, rd)
+	router.HandleFunc("/api/v1/debug", debugHanler.Handle).Methods("POST")
+
 	router.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 	return router
 }

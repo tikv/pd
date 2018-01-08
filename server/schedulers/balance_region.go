@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	log "github.com/sirupsen/logrus"
 )
 
 func init() {
@@ -117,6 +118,8 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 
 	target := cluster.GetStore(newPeer.GetStoreId())
 	avgScore := cluster.GetStoresAverageScore(core.RegionKind)
+	log.Debugf("[balance region] source store is %v", source)
+	log.Debugf("[balance region] target store is %v", target)
 	if !shouldBalance(source, target, avgScore, core.RegionKind, region, opInfluence, cluster.GetTolerantSizeRatio()) {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil

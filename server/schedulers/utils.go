@@ -39,6 +39,8 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 
 	mostLeaderStore := s.SelectSource(cluster, stores, filters...)
 	leastLeaderStore := s.SelectTarget(cluster, stores, filters...)
+	log.Debugf("mostLeaderStore is %v", mostLeaderStore)
+	log.Debugf("leastLeaderStore is %v", leastLeaderStore)
 
 	var mostLeaderDistance, leastLeaderDistance float64
 	if mostLeaderStore != nil {
@@ -47,6 +49,8 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 	if leastLeaderStore != nil {
 		leastLeaderDistance = math.Abs(leastLeaderStore.LeaderScore() - averageLeader)
 	}
+	log.Debugf("mostLeaderDistance is %v", mostLeaderDistance)
+	log.Debugf("leastLeaderDistance is %v", leastLeaderDistance)
 	if mostLeaderDistance == 0 && leastLeaderDistance == 0 {
 		schedulerCounter.WithLabelValues(schedulerName, "already_balanced").Inc()
 		return nil, nil
@@ -63,7 +67,7 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 			region, peer = scheduleRemoveLeader(cluster, schedulerName, mostLeaderStore.GetId(), s)
 		}
 	}
-
+	log.Debugf("transfer leader select %v to be new leader for region %v", peer, region)
 	return region, peer
 }
 
@@ -173,6 +177,7 @@ func shouldBalance(source, target *core.StoreInfo, avgScore float64, kind core.R
 	sourceScore := source.ResourceScore(kind)
 	targetScore := target.ResourceScore(kind)
 	if targetScore >= sourceScore {
+		log.Debugf("should balance return false cause targetScore %v >= sourceScore %v", targetScore, sourceScore)
 		return false
 	}
 
@@ -183,6 +188,7 @@ func shouldBalance(source, target *core.StoreInfo, avgScore float64, kind core.R
 	sourceSizeDiff := (sourceScore - avgScore) * source.ResourceWeight(kind)
 	targetSizeDiff := (avgScore - targetScore) * target.ResourceWeight(kind)
 
+	log.Debugf("size diff is %v and region size is %v", math.Min(sourceSizeDiff, targetSizeDiff), float64(region.ApproximateSize)*tolerantRatio)
 	return math.Min(sourceSizeDiff, targetSizeDiff) >= float64(region.ApproximateSize)*tolerantRatio
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	log "github.com/sirupsen/logrus"
 )
 
 // Filter is an interface to filter source and target store.
@@ -31,6 +32,7 @@ type Filter interface {
 func FilterSource(opt Options, store *core.StoreInfo, filters []Filter) bool {
 	for _, filter := range filters {
 		if filter.FilterSource(opt, store) {
+			log.Debugf("filter %T filtes store %v from source", filter, store)
 			return true
 		}
 	}
@@ -41,6 +43,7 @@ func FilterSource(opt Options, store *core.StoreInfo, filters []Filter) bool {
 func FilterTarget(opt Options, store *core.StoreInfo, filters []Filter) bool {
 	for _, filter := range filters {
 		if filter.FilterTarget(opt, store) {
+			log.Debugf("filter %T filtes store %v from target", filter, store)
 			return true
 		}
 	}
