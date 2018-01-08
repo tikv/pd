@@ -55,19 +55,15 @@ else
 endif
 
 update:
-	which glide >/dev/null || curl https://glide.sh/get | sh
-	which glide-vc || go get -v -u github.com/sgotti/glide-vc
-	rm -rf vendor && mv _vendor/src vendor || true
-	rm -rf _vendor
+	which dep 2>/dev/null || go get -u github.com/golang/dep/cmd/dep
 ifdef PKG
-	glide get --strip-vendor --skip-test ${PKG}
+	dep ensure -add ${PKG}
 else
-	glide update --strip-vendor --skip-test
+	dep ensure -update
 endif
 	@echo "removing test files"
-	glide vc --only-code --no-tests
-	mkdir -p _vendor
-	mv vendor _vendor/src
+	dep prune
+	bash ./hack/clean_vendor.sh
 
 simulator:
 	CGO_ENABLED=0 go build -o bin/simulator cmd/simulator/main.go
