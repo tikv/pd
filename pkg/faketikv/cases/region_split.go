@@ -19,9 +19,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func newBalanceLeader() *Conf {
+func newRegionSplit() *Conf {
 	var conf Conf
-
 	for i := 1; i <= 3; i++ {
 		conf.Stores = append(conf.Stores, Store{
 			ID:        uint64(i),
@@ -30,33 +29,28 @@ func newBalanceLeader() *Conf {
 			Available: 9 * gb,
 		})
 	}
-
-	var id idAllocator
-	id.setMaxID(3)
-	for i := 0; i < 1000; i++ {
-		peers := []*metapb.Peer{
-			{Id: id.nextID(), StoreId: 1},
-			{Id: id.nextID(), StoreId: 2},
-			{Id: id.nextID(), StoreId: 3},
-		}
-		conf.Regions = append(conf.Regions, Region{
-			ID:     id.nextID(),
-			Peers:  peers,
-			Leader: peers[0],
-			Size:   96 * mb,
-		})
+	peers := []*metapb.Peer{
+		{Id: 4, StoreId: 1},
 	}
-	conf.MaxID = id.maxID
+	conf.Regions = append(conf.Regions, Region{
+		ID:     5,
+		Peers:  peers,
+		Leader: peers[0],
+		Size:   1 * mb,
+	})
+	conf.MaxID = 5
 	conf.RegionSplitSize = 128 * mb
+	conf.WrittenBytes = func(tick int64) map[string]int64 {
+		return map[string]int64{
+			"foobar": 8 * mb,
+		}
+	}
 	conf.Checker = func(regions *core.RegionsInfo) bool {
-		count1 := regions.GetStoreLeaderCount(1)
-		count2 := regions.GetStoreLeaderCount(2)
-		count3 := regions.GetStoreLeaderCount(3)
-		log.Infof("leader counts: %v %v %v", count1, count2, count3)
-
-		return count1 <= 350 &&
-			count2 >= 300 &&
-			count3 >= 300
+		count1 := regions.GetStoreRegionCount(1)
+		count2 := regions.GetStoreRegionCount(2)
+		count3 := regions.GetStoreRegionCount(3)
+		log.Infof("region counts: %v %v %v", count1, count2, count3)
+		return count1 > 5 && count2 > 5 && count3 > 5
 	}
 	return &conf
 }

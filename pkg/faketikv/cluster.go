@@ -14,6 +14,7 @@
 package faketikv
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -27,6 +28,7 @@ import (
 
 // ClusterInfo records all cluster information.
 type ClusterInfo struct {
+	conf *cases.Conf
 	*core.RegionsInfo
 	Nodes map[uint64]*Node
 }
@@ -34,6 +36,7 @@ type ClusterInfo struct {
 // NewClusterInfo creates the initialized cluster with config.
 func NewClusterInfo(pdAddr string, conf *cases.Conf) (*ClusterInfo, error) {
 	cluster := &ClusterInfo{
+		conf:        conf,
 		RegionsInfo: core.NewRegionsInfo(),
 		Nodes:       make(map[uint64]*Node),
 	}
@@ -136,6 +139,42 @@ func (c *ClusterInfo) stepLeader(region *core.RegionInfo) {
 	c.reportRegionChange(region.GetId())
 }
 
+func (c *ClusterInfo) stepSplit(region *core.RegionInfo) {
+	if region.Leader == nil {
+		return
+	}
+	if region.ApproximateSize < c.conf.RegionSplitSize {
+		return
+	}
+	ids := make([]uint64, 1+len(region.Peers))
+	for i := range ids {
+		var err error
+		ids[i], err = c.allocID(region.Leader.GetStoreId())
+		if err != nil {
+			log.Infof("alloc id failed: %s", err)
+			return
+		}
+	}
+
+	region.RegionEpoch.Version++
+	region.ApproximateSize /= 2
+
+	newRegion := region.Clone()
+	newRegion.PendingPeers, newRegion.DownPeers = nil, nil
+	for i, peer := range newRegion.Peers {
+		peer.Id = ids[i]
+	}
+	newRegion.Id = ids[len(ids)-1]
+
+	splitKey := generateSplitKey(region.StartKey, region.EndKey)
+	newRegion.EndKey, region.StartKey = splitKey, splitKey
+
+	c.SetRegion(region)
+	c.SetRegion(newRegion)
+	c.reportRegionChange(region.Id)
+	c.reportRegionChange(newRegion.Id)
+}
+
 func (c *ClusterInfo) reportRegionChange(regionID uint64) {
 	region := c.GetRegion(regionID)
 	if n, ok := c.Nodes[region.Leader.GetStoreId()]; ok {
@@ -147,6 +186,19 @@ func (c *ClusterInfo) stepRegions() {
 	regions := c.GetRegions()
 	for _, region := range regions {
 		c.stepLeader(region)
+		c.stepSplit(region)
+	}
+}
+
+func (c *ClusterInfo) updateRegionSize(writtenBytes map[string]int64) {
+	for key, size := range writtenBytes {
+		region := c.SearchRegion([]byte(key))
+		if region == nil {
+			log.Errorf("region not found for key %q", key)
+			continue
+		}
+		region.ApproximateSize += size
+		c.SetRegion(region)
 	}
 }
 
@@ -156,6 +208,15 @@ func (c *ClusterInfo) AddTask(task Task) {
 	if n, ok := c.Nodes[storeID]; ok {
 		n.AddTask(task)
 	}
+}
+
+func (c *ClusterInfo) allocID(storeID uint64) (uint64, error) {
+	node, ok := c.Nodes[storeID]
+	if !ok {
+		return 0, errors.Errorf("node %d not found", storeID)
+	}
+	id, err := node.client.AllocID(context.Background())
+	return id, errors.Trace(err)
 }
 
 const (
@@ -181,4 +242,27 @@ func generateKeys(size int) []string {
 	}
 	sort.Sort(sort.StringSlice(v))
 	return v
+}
+
+func generateSplitKey(start, end []byte) []byte {
+	var key []byte
+	// lessThanEnd is set as true when the key is already less than end key.
+	lessThanEnd := len(end) == 0
+	for i, s := range start {
+		e := byte('z')
+		if !lessThanEnd {
+			e = end[i]
+		}
+		c := (s + e) / 2
+		key = append(key, c)
+		// case1: s = c < e. Continue with lessThanEnd=true.
+		// case2: s < c < e. return key.
+		// case3: s = c = e. Continue with lessThanEnd=false.
+		lessThanEnd = c < e
+		if c > s && c < e {
+			return key
+		}
+	}
+	key = append(key, ('a'+'z')/2)
+	return key
 }

@@ -92,6 +92,10 @@ func (d *Driver) Prepare() error {
 // Tick invokes nodes' Tick.
 func (d *Driver) Tick() {
 	d.tickCount++
+	d.clusterInfo.stepRegions()
+	if d.conf.WrittenBytes != nil {
+		d.clusterInfo.updateRegionSize(d.conf.WrittenBytes(d.tickCount))
+	}
 	for _, n := range d.clusterInfo.Nodes {
 		n.Tick()
 	}
