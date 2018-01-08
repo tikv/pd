@@ -37,13 +37,16 @@ type Region struct {
 	Size   int64
 }
 
+// CheckerFunc checks if the scheduler is finished.
+type CheckerFunc func(*core.RegionsInfo) bool
+
 // Conf represents a test suite for simulator.
 type Conf struct {
 	Stores  []Store
 	Regions []Region
 	MaxID   uint64
 
-	Checker func(*core.RegionsInfo) bool // To check the schedule is finished.
+	Checker CheckerFunc // To check the schedule is finished.
 }
 
 const (
@@ -67,6 +70,7 @@ func (a *idAllocator) setMaxID(id uint64) {
 
 var confMap = map[string]func() *Conf{
 	"balance-leader": newBalanceLeader,
+	"add-nodes":      newAddNodes,
 }
 
 // NewConf creates a config to initialize simulator cluster.

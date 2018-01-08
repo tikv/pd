@@ -115,8 +115,11 @@ func (d *Driver) TickCount() int64 {
 }
 
 // AddNode adds new node.
-func (d *Driver) AddNode() {
-	id, err := d.client.AllocID(context.Background())
+func (d *Driver) AddNode(id uint64) {
+	if _, ok := d.clusterInfo.Nodes[id]; ok {
+		log.Infof("Node %d already existed", id)
+		return
+	}
 	n, err := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), d.addr)
 	if err != nil {
 		log.Info("Add node failed:", err)
