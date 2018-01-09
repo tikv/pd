@@ -124,6 +124,7 @@ func (hook *contextHook) Levels() []log.Level {
 	return log.AllLevels
 }
 
+// StringToLogLevel converts string to relative log.Level.
 func StringToLogLevel(level string) log.Level {
 	switch strings.ToLower(level) {
 	case "fatal":
