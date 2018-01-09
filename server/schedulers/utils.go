@@ -39,8 +39,7 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 
 	mostLeaderStore := s.SelectSource(cluster, stores, filters...)
 	leastLeaderStore := s.SelectTarget(cluster, stores, filters...)
-	log.Debugf("mostLeaderStore is %v", mostLeaderStore)
-	log.Debugf("leastLeaderStore is %v", leastLeaderStore)
+	log.Debugf("[%v] mostLeaderStore is %v, leastLeaderStore is %v", schedulerName, mostLeaderStore, leastLeaderStore)
 
 	var mostLeaderDistance, leastLeaderDistance float64
 	if mostLeaderStore != nil {
@@ -49,8 +48,7 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 	if leastLeaderStore != nil {
 		leastLeaderDistance = math.Abs(leastLeaderStore.LeaderScore() - averageLeader)
 	}
-	log.Debugf("mostLeaderDistance is %v", mostLeaderDistance)
-	log.Debugf("leastLeaderDistance is %v", leastLeaderDistance)
+	log.Debugf("[%v] mostLeaderDistance is %v, leastLeaderDistance is %v", schedulerName, mostLeaderDistance, leastLeaderDistance)
 	if mostLeaderDistance == 0 && leastLeaderDistance == 0 {
 		schedulerCounter.WithLabelValues(schedulerName, "already_balanced").Inc()
 		return nil, nil
@@ -67,7 +65,7 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 			region, peer = scheduleRemoveLeader(cluster, schedulerName, mostLeaderStore.GetId(), s)
 		}
 	}
-	log.Debugf("transfer leader select %v to be new leader for region %v", peer, region)
+	log.Debugf("[%v][region %v] select %v to be new leader", schedulerName, region.GetId(), peer)
 	return region, peer
 }
 
