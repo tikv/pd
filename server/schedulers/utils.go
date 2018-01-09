@@ -68,7 +68,7 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 	if region == nil {
 		log.Debugf("[%v] select no region", schedulerName)
 	} else {
-		log.Debugf("[%v][region %v] select %v to be new leader", schedulerName, region.GetId(), peer)
+		log.Debugf("[region %v][%v] select %v to be new leader", schedulerName, region.GetId(), peer)
 	}
 	return region, peer
 }
