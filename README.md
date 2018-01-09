@@ -92,10 +92,7 @@ docker run -d -p 2379:2379 -p 2380:2380 --name pd pingcap/pd \
           --name="pd" \
           --data-dir="pd" \
           --client-urls="http://0.0.0.0:2379" \
-          --advertise-client-urls="http://0.0.0.0:2379" \
           --peer-urls="http://0.0.0.0:2380" \
-          --advertise-peer-urls="http://0.0.0.0:2380" \
-          --log-file=pd.log
 ```
 
 ### Cluster
