@@ -88,11 +88,17 @@ docker pull pingcap/pd
 Run a single node with Docker: 
 
 ```bash
+# Set correct HostIP here. 
+export HostIP="192.168.199.105"
+
 docker run -d -p 2379:2379 -p 2380:2380 --name pd pingcap/pd \
           --name="pd" \
           --data-dir="pd" \
           --client-urls="http://0.0.0.0:2379" \
+          --advertise-client-urls="http://${HostIP}:2379" \
           --peer-urls="http://0.0.0.0:2380" \
+          --advertise-peer-urls="http://${HostIP}:2380" \
+          --log-file=pd.log
 ```
 
 ### Cluster
