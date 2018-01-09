@@ -18,49 +18,44 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 
 	"github.com/spf13/cobra"
 )
 
 var (
-	debugPrefix = "pd/api/v1/debug"
+	logPrefix = "pd/api/v1/log"
 )
 
-// NewDebugCommand New a debug subcommand of the rootCmd
-func NewDebugCommand() *cobra.Command {
+// NewLogCommand New a log subcommand of the rootCmd
+func NewLogCommand() *cobra.Command {
 	conf := &cobra.Command{
-		Use:   "debug <is_enable>",
-		Short: "enable debug info",
-		Run:   debugCommandFunc,
+		Use:   "log [fatal|error|warn|info|debug]",
+		Short: "set log level",
+		Run:   logCommandFunc,
 	}
 	return conf
 }
 
-func debugCommandFunc(cmd *cobra.Command, args []string) {
-	var debug bool
+func logCommandFunc(cmd *cobra.Command, args []string) {
 	var err error
 	if len(args) != 1 {
 		fmt.Println(cmd.UsageString())
 		return
-	} else if debug, err = strconv.ParseBool(args[0]); err != nil {
-		fmt.Println("argument should be a bool var")
-		return
 	}
 
-	data, err := json.Marshal(debug)
+	data, err := json.Marshal(args[0])
 	if err != nil {
-		fmt.Printf("Failed to set debug mode: %s\n", err)
+		fmt.Printf("Failed to set log level: %s\n", err)
 		return
 	}
-	req, err := getRequest(cmd, debugPrefix, http.MethodPost, "application/json", bytes.NewBuffer(data))
+	req, err := getRequest(cmd, logPrefix, http.MethodPost, "application/json", bytes.NewBuffer(data))
 	if err != nil {
-		fmt.Printf("Failed to set debug mode: %s\n", err)
+		fmt.Printf("Failed to set log level: %s\n", err)
 		return
 	}
 	_, err = dail(req)
 	if err != nil {
-		fmt.Printf("Failed to set debug mode: %s\n", err)
+		fmt.Printf("Failed to set log level: %s\n", err)
 		return
 	}
 	fmt.Println("Success!")

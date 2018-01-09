@@ -56,7 +56,7 @@ func init() {
 		command.NewClusterCommand(),
 		command.NewTableNamespaceCommand(),
 		command.NewHealthCommand(),
-		command.NewDebugCommand(),
+		command.NewLogCommand(),
 	)
 	cobra.EnablePrefixMatching = true
 }

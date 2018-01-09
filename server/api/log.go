@@ -24,36 +24,32 @@ import (
 	"github.com/unrolled/render"
 )
 
-type debugHandler struct {
+type logHandler struct {
 	svr *server.Server
 	rd  *render.Render
 }
 
-func newDebugHandler(svr *server.Server, rd *render.Render) *debugHandler {
-	return &debugHandler{
+func newlogHandler(svr *server.Server, rd *render.Render) *logHandler {
+	return &logHandler{
 		svr: svr,
 		rd:  rd,
 	}
 }
 
-func (h *debugHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	var debug bool
+func (h *logHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	var level string
 	data, err := ioutil.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	err = json.Unmarshal(data, &debug)
+	err = json.Unmarshal(data, &level)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	level := "info"
-	if debug {
-		level = "debug"
-	}
 	h.svr.SetLogLevel(level)
 	log.SetLevel(logutil.StringToLogLevel(level))
 
