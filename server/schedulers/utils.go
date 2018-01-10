@@ -39,7 +39,7 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 
 	mostLeaderStore := s.SelectSource(cluster, stores, filters...)
 	leastLeaderStore := s.SelectTarget(cluster, stores, filters...)
-	log.Debugf("[%v] mostLeaderStore is %v, leastLeaderStore is %v", schedulerName, mostLeaderStore, leastLeaderStore)
+	log.Debugf("[%s] mostLeaderStore is %v, leastLeaderStore is %v", schedulerName, mostLeaderStore, leastLeaderStore)
 
 	var mostLeaderDistance, leastLeaderDistance float64
 	if mostLeaderStore != nil {
@@ -48,7 +48,7 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 	if leastLeaderStore != nil {
 		leastLeaderDistance = math.Abs(leastLeaderStore.LeaderScore() - averageLeader)
 	}
-	log.Debugf("[%v] mostLeaderDistance is %v, leastLeaderDistance is %v", schedulerName, mostLeaderDistance, leastLeaderDistance)
+	log.Debugf("[%s] mostLeaderDistance is %v, leastLeaderDistance is %v", schedulerName, mostLeaderDistance, leastLeaderDistance)
 	if mostLeaderDistance == 0 && leastLeaderDistance == 0 {
 		schedulerCounter.WithLabelValues(schedulerName, "already_balanced").Inc()
 		return nil, nil
