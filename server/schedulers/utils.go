@@ -68,7 +68,7 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 	if region == nil {
 		log.Debugf("[%v] select no region", schedulerName)
 	} else {
-		log.Debugf("[region %v][%v] select %v to be new leader", schedulerName, region.GetId(), peer)
+		log.Debugf("[region %v][%v] select %v to be new leader", region.GetId(), schedulerName, peer)
 	}
 	return region, peer
 }
@@ -190,7 +190,7 @@ func shouldBalance(source, target *core.StoreInfo, avgScore float64, kind core.R
 	sourceSizeDiff := (sourceScore - avgScore) * source.ResourceWeight(kind)
 	targetSizeDiff := (avgScore - targetScore) * target.ResourceWeight(kind)
 
-	log.Debugf("size diff is %v and region size is %v", math.Min(sourceSizeDiff, targetSizeDiff), float64(region.ApproximateSize)*tolerantRatio)
+	log.Debugf("[region %d] size diff is %v and tolerant size is %v", region.GetId(), math.Min(sourceSizeDiff, targetSizeDiff), float64(region.ApproximateSize)*tolerantRatio)
 	return math.Min(sourceSizeDiff, targetSizeDiff) >= float64(region.ApproximateSize)*tolerantRatio
 }
 
