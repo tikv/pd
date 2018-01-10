@@ -134,7 +134,7 @@ func (c *ClusterInfo) stepLeader(region *core.RegionInfo) {
 		simutil.Logger.Infof("[region %d] no leader", region.GetId())
 		return
 	}
-	simutil.Logger.Info("[region %d] elect new leader: %+v,old leader: %+v", region.GetId(), newLeader, region.Leader)
+	simutil.Logger.Infof("[region %d] elect new leader: %+v,old leader: %+v", region.GetId(), newLeader, region.Leader)
 	c.SetRegion(region)
 	c.reportRegionChange(region.GetId())
 }
@@ -151,7 +151,7 @@ func (c *ClusterInfo) stepSplit(region *core.RegionInfo) {
 		var err error
 		ids[i], err = c.allocID(region.Leader.GetStoreId())
 		if err != nil {
-			log.Infof("alloc id failed: %s", err)
+			simutil.Logger.Infof("alloc id failed: %s", err)
 			return
 		}
 	}
@@ -194,7 +194,7 @@ func (c *ClusterInfo) updateRegionSize(writtenBytes map[string]int64) {
 	for key, size := range writtenBytes {
 		region := c.SearchRegion([]byte(key))
 		if region == nil {
-			log.Errorf("region not found for key %q", key)
+			simutil.Logger.Errorf("region not found for key %q", key)
 			continue
 		}
 		region.ApproximateSize += size
