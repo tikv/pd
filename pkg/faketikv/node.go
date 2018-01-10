@@ -125,8 +125,6 @@ func (n *Node) Tick() {
 	}
 	n.stepHeartBeat()
 	n.stepTask()
-	// step regions will step region status. like elect a leader, split region and so on.
-	n.clusterInfo.stepRegions()
 	n.tick++
 }
 

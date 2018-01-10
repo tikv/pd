@@ -47,7 +47,7 @@ func newBalanceLeader() *Conf {
 		})
 	}
 	conf.MaxID = id.maxID
-
+	conf.RegionSplitSize = 128 * mb
 	conf.Checker = func(regions *core.RegionsInfo) bool {
 		count1 := regions.GetStoreLeaderCount(1)
 		count2 := regions.GetStoreLeaderCount(2)

@@ -92,6 +92,10 @@ func (d *Driver) Prepare() error {
 // Tick invokes nodes' Tick.
 func (d *Driver) Tick() {
 	d.tickCount++
+	d.clusterInfo.stepRegions()
+	if d.conf.WrittenBytes != nil {
+		d.clusterInfo.updateRegionSize(d.conf.WrittenBytes(d.tickCount))
+	}
 	for _, n := range d.clusterInfo.Nodes {
 		n.Tick()
 	}
@@ -115,8 +119,11 @@ func (d *Driver) TickCount() int64 {
 }
 
 // AddNode adds new node.
-func (d *Driver) AddNode() {
-	id, err := d.client.AllocID(context.Background())
+func (d *Driver) AddNode(id uint64) {
+	if _, ok := d.clusterInfo.Nodes[id]; ok {
+		log.Infof("Node %d already existed", id)
+		return
+	}
 	n, err := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), d.addr)
 	if err != nil {
 		simutil.Logger.Debug("Add node failed:", err)
