@@ -204,7 +204,7 @@ func (bc *BasicCluster) PutRegion(region *core.RegionInfo) error {
 func (bc *BasicCluster) UpdateWriteStatus(region *core.RegionInfo) {
 	var WrittenBytesPerSec uint64
 	v, isExist := bc.WriteStatistics.Peek(region.GetId())
-	if isExist {
+	if isExist && !Simulating {
 		interval := time.Since(v.(*core.RegionStat).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
 			return
