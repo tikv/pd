@@ -142,7 +142,10 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
-const defaultRegionLimit = 16
+const (
+	defaultRegionLimit = 16
+	maxRegionLimit     = 10240
+)
 
 func (h *regionsHandler) GetTopWriteFlow(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.WrittenBytes < b.WrittenBytes })
@@ -166,6 +169,9 @@ func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, 
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
+	}
+	if limit > maxRegionLimit {
+		limit = maxRegionLimit
 	}
 	regions := topNRegions(cluster.GetRegions(), less, limit)
 	regionInfos := make([]*regionInfo, len(regions))
@@ -216,7 +222,10 @@ func topNRegions(regions []*core.RegionInfo, less func(a, b *core.RegionInfo) bo
 		return nil
 	}
 
-	hp := &RegionHeap{less: less}
+	hp := &RegionHeap{
+		regions: make([]*core.RegionInfo, 0, n),
+		less:    less,
+	}
 	for _, r := range regions {
 		if hp.Len() < n {
 			heap.Push(hp, r)
