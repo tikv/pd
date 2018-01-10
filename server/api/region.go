@@ -14,6 +14,7 @@
 package api
 
 import (
+	"container/heap"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -122,14 +123,14 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 	}
 }
 
-func (h *regionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
 		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
 		return
 	}
 
-	regions := cluster.GetRegions()
+	regions := cluster.GetMetaRegions()
 	regionInfos := make([]*regionInfo, len(regions))
 	for i, r := range regions {
 		regionInfos[i] = newRegionInfo(&core.RegionInfo{Region: r})
@@ -139,4 +140,106 @@ func (h *regionsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Regions: regionInfos,
 	}
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
+}
+
+const (
+	defaultRegionLimit = 16
+	maxRegionLimit     = 10240
+)
+
+func (h *regionsHandler) GetTopWriteFlow(w http.ResponseWriter, r *http.Request) {
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.WrittenBytes < b.WrittenBytes })
+}
+
+func (h *regionsHandler) GetTopReadFlow(w http.ResponseWriter, r *http.Request) {
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.ReadBytes < b.ReadBytes })
+}
+
+func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {
+	cluster := h.svr.GetRaftCluster()
+	if cluster == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
+		return
+	}
+	limit := defaultRegionLimit
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if limit > maxRegionLimit {
+		limit = maxRegionLimit
+	}
+	regions := topNRegions(cluster.GetRegions(), less, limit)
+	regionInfos := make([]*regionInfo, len(regions))
+	for i, r := range regions {
+		regionInfos[i] = newRegionInfo(r)
+	}
+	res := &regionsInfo{
+		Count:   len(regions),
+		Regions: regionInfos,
+	}
+	h.rd.JSON(w, http.StatusOK, res)
+}
+
+// RegionHeap implements heap.Interface, used for selecting top n regions.
+type RegionHeap struct {
+	regions []*core.RegionInfo
+	less    func(a, b *core.RegionInfo) bool
+}
+
+func (h *RegionHeap) Len() int           { return len(h.regions) }
+func (h *RegionHeap) Less(i, j int) bool { return h.less(h.regions[i], h.regions[j]) }
+func (h *RegionHeap) Swap(i, j int)      { h.regions[i], h.regions[j] = h.regions[j], h.regions[i] }
+
+// Push pushes an element x onto the heap.
+func (h *RegionHeap) Push(x interface{}) {
+	h.regions = append(h.regions, x.(*core.RegionInfo))
+}
+
+// Pop removes the minimum element (according to Less) from the heap and returns
+// it.
+func (h *RegionHeap) Pop() interface{} {
+	pos := len(h.regions) - 1
+	x := h.regions[pos]
+	h.regions = h.regions[:pos]
+	return x
+}
+
+// Min returns the minimum region from the heap.
+func (h *RegionHeap) Min() *core.RegionInfo {
+	if h.Len() == 0 {
+		return nil
+	}
+	return h.regions[0]
+}
+
+func topNRegions(regions []*core.RegionInfo, less func(a, b *core.RegionInfo) bool, n int) []*core.RegionInfo {
+	if n <= 0 {
+		return nil
+	}
+
+	hp := &RegionHeap{
+		regions: make([]*core.RegionInfo, 0, n),
+		less:    less,
+	}
+	for _, r := range regions {
+		if hp.Len() < n {
+			heap.Push(hp, r)
+			continue
+		}
+		if less(hp.Min(), r) {
+			heap.Pop(hp)
+			heap.Push(hp, r)
+		}
+	}
+
+	res := make([]*core.RegionInfo, hp.Len())
+	for i := hp.Len() - 1; i >= 0; i-- {
+		res[i] = heap.Pop(hp).(*core.RegionInfo)
+	}
+	return res
 }
