@@ -21,7 +21,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/sirupsen/logrus"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
 )
 
 // NodeState node's state.
@@ -125,8 +125,6 @@ func (n *Node) Tick() {
 	}
 	n.stepHeartBeat()
 	n.stepTask()
-	// step regions will step region status. like elect a leader, split region and so on.
-	n.clusterInfo.stepRegions()
 	n.tick++
 }
 
@@ -141,7 +139,7 @@ func (n *Node) stepTask() {
 	for _, task := range n.tasks {
 		task.Step(n.clusterInfo)
 		if task.IsFinished() {
-			log.Infof("[store %d][region %d] task finished: %s final: %v", n.GetId(), task.RegionID(), task.Desc(), n.clusterInfo.GetRegion(task.RegionID()))
+			simutil.Logger.Infof("[store %d][region %d] task finished: %s final: %v", n.GetId(), task.RegionID(), task.Desc(), n.clusterInfo.GetRegion(task.RegionID()))
 			n.clusterInfo.reportRegionChange(task.RegionID())
 			delete(n.tasks, task.RegionID())
 		}
@@ -164,7 +162,7 @@ func (n *Node) storeHeartBeat() {
 	ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 	err := n.client.StoreHeartbeat(ctx, n.stats)
 	if err != nil {
-		log.Infof("[store %d] report heartbeat error: %s", n.GetId(), err)
+		simutil.Logger.Infof("[store %d] report heartbeat error: %s", n.GetId(), err)
 	}
 	cancel()
 }
@@ -179,7 +177,7 @@ func (n *Node) regionHeartBeat() {
 			ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 			err := n.client.RegionHeartbeat(ctx, region)
 			if err != nil {
-				log.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetId(), err)
+				simutil.Logger.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetId(), err)
 			}
 			cancel()
 		}
@@ -192,7 +190,7 @@ func (n *Node) reportRegionChange(regionID uint64) {
 		ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 		err := n.client.RegionHeartbeat(ctx, region)
 		if err != nil {
-			log.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetId(), err)
+			simutil.Logger.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetId(), err)
 		}
 		cancel()
 	}
@@ -203,7 +201,7 @@ func (n *Node) AddTask(task Task) {
 	n.Lock()
 	defer n.Unlock()
 	if t, ok := n.tasks[task.RegionID()]; ok {
-		log.Infof("[node %d][region %d] already exists task : %s", n.Id, task.RegionID(), t.Desc())
+		simutil.Logger.Infof("[node %d][region %d] already exists task : %s", n.Id, task.RegionID(), t.Desc())
 		return
 	}
 	n.tasks[task.RegionID()] = task
@@ -214,5 +212,5 @@ func (n *Node) Stop() {
 	n.cancel()
 	n.client.Close()
 	n.wg.Wait()
-	log.Infof("node %d stoped", n.Id)
+	simutil.Logger.Infof("node %d stoped", n.Id)
 }

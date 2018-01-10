@@ -15,6 +15,7 @@ package api
 
 import (
 	"fmt"
+	"math/rand"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -75,4 +76,51 @@ func (s *testRegionSuite) TestRegion(c *C) {
 	err = readJSONWithURL(url, r2)
 	c.Assert(err, IsNil)
 	c.Assert(r2, DeepEquals, newRegionInfo(r))
+}
+
+func (s *testRegionSuite) TestTopFlow(c *C) {
+	r1 := newTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	r1.WrittenBytes, r1.ReadBytes = 1000, 1000
+	mustRegionHeartbeat(c, s.svr, r1)
+	r2 := newTestRegionInfo(2, 1, []byte("b"), []byte("c"))
+	r2.WrittenBytes, r2.ReadBytes = 2000, 0
+	mustRegionHeartbeat(c, s.svr, r2)
+	r3 := newTestRegionInfo(3, 1, []byte("c"), []byte("d"))
+	r3.WrittenBytes, r3.ReadBytes = 500, 800
+	mustRegionHeartbeat(c, s.svr, r3)
+	s.checkTopFlow(c, fmt.Sprintf("%s/regions/writeflow", s.urlPrefix), []uint64{2, 1, 3})
+	s.checkTopFlow(c, fmt.Sprintf("%s/regions/readflow", s.urlPrefix), []uint64{1, 3, 2})
+	s.checkTopFlow(c, fmt.Sprintf("%s/regions/writeflow?limit=2", s.urlPrefix), []uint64{2, 1})
+}
+
+func (s *testRegionSuite) checkTopFlow(c *C, url string, regionIDs []uint64) {
+	regions := &regionsInfo{}
+	err := readJSONWithURL(url, regions)
+	c.Assert(err, IsNil)
+	c.Assert(regions.Count, Equals, len(regionIDs))
+	for i, r := range regions.Regions {
+		c.Assert(r.ID, Equals, regionIDs[i])
+	}
+}
+
+func (s *testRegionSuite) TestTopN(c *C) {
+	writtenBytes := []uint64{10, 10, 9, 5, 3, 2, 2, 1, 0, 0}
+	for n := 0; n <= len(writtenBytes)+1; n++ {
+		regions := make([]*core.RegionInfo, 0, len(writtenBytes))
+		for _, i := range rand.Perm(len(writtenBytes)) {
+			id := uint64(i + 1)
+			region := newTestRegionInfo(id, id, nil, nil)
+			region.WrittenBytes = uint64(writtenBytes[i])
+			regions = append(regions, region)
+		}
+		topN := topNRegions(regions, func(a, b *core.RegionInfo) bool { return a.WrittenBytes < b.WrittenBytes }, n)
+		if n > len(writtenBytes) {
+			c.Assert(len(topN), Equals, len(writtenBytes))
+		} else {
+			c.Assert(len(topN), Equals, n)
+		}
+		for i := range topN {
+			c.Assert(topN[i].WrittenBytes, Equals, writtenBytes[i])
+		}
+	}
 }

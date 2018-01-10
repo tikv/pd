@@ -42,9 +42,12 @@ type CheckerFunc func(*core.RegionsInfo) bool
 
 // Conf represents a test suite for simulator.
 type Conf struct {
-	Stores  []Store
-	Regions []Region
-	MaxID   uint64
+	Stores          []Store
+	Regions         []Region
+	MaxID           uint64
+	RegionSplitSize int64
+
+	WrittenBytes func(tick int64) map[string]int64 // To simulate region grow.
 
 	Checker CheckerFunc // To check the schedule is finished.
 }
@@ -71,6 +74,7 @@ func (a *idAllocator) setMaxID(id uint64) {
 var confMap = map[string]func() *Conf{
 	"balance-leader": newBalanceLeader,
 	"add-nodes":      newAddNodes,
+	"region-split":   newRegionSplit,
 }
 
 // NewConf creates a config to initialize simulator cluster.
