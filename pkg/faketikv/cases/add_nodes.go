@@ -14,8 +14,8 @@ package cases
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
 	"github.com/pingcap/pd/server/core"
-	log "github.com/sirupsen/logrus"
 )
 
 func newAddNodes() *Conf {
@@ -64,8 +64,8 @@ func newAddNodes() *Conf {
 			}
 
 		}
-		log.Infof("leader counts: %v", leaderCounts)
-		log.Infof("region counts: %v", regionCounts)
+		simutil.Logger.Infof("leader counts: %v", leaderCounts)
+		simutil.Logger.Infof("region counts: %v", regionCounts)
 		return res
 	}
 	return &conf

@@ -15,8 +15,8 @@ package cases
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
 	"github.com/pingcap/pd/server/core"
-	log "github.com/sirupsen/logrus"
 )
 
 func newRegionSplit() *Conf {
@@ -49,7 +49,7 @@ func newRegionSplit() *Conf {
 		count1 := regions.GetStoreRegionCount(1)
 		count2 := regions.GetStoreRegionCount(2)
 		count3 := regions.GetStoreRegionCount(3)
-		log.Infof("region counts: %v %v %v", count1, count2, count3)
+		simutil.Logger.Infof("region counts: %v %v %v", count1, count2, count3)
 		return count1 > 5 && count2 > 5 && count3 > 5
 	}
 	return &conf

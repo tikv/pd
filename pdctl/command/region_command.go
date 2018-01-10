@@ -25,9 +25,11 @@ import (
 )
 
 var (
-	regionsPrefix   = "pd/api/v1/regions"
-	regionIDPrefix  = "pd/api/v1/region/id"
-	regionKeyPrefix = "pd/api/v1/region/key"
+	regionsPrefix          = "pd/api/v1/regions"
+	regionsWriteflowPrefix = "pd/api/v1/regions/writeflow"
+	regionsReadflowPrefix  = "pd/api/v1/regions/readflow"
+	regionIDPrefix         = "pd/api/v1/region/id"
+	regionKeyPrefix        = "pd/api/v1/region/key"
 )
 
 type regionInfo struct {
@@ -43,6 +45,21 @@ func NewRegionCommand() *cobra.Command {
 		Run:   showRegionCommandFunc,
 	}
 	r.AddCommand(NewRegionWithKeyCommand())
+
+	topRead := &cobra.Command{
+		Use:   "topread <limit>",
+		Short: "show regions with top read flow",
+		Run:   showRegionTopReadCommandFunc,
+	}
+	r.AddCommand(topRead)
+
+	topWrite := &cobra.Command{
+		Use:   "topwrite <limit>",
+		Short: "show regions with top write flow",
+		Run:   showRegionTopWriteCommandFunc,
+	}
+	r.AddCommand(topWrite)
+
 	return r
 }
 
@@ -59,6 +76,40 @@ func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get region: %s\n", err)
+		return
+	}
+	fmt.Println(r)
+}
+
+func showRegionTopWriteCommandFunc(cmd *cobra.Command, args []string) {
+	prefix := regionsWriteflowPrefix
+	if len(args) == 1 {
+		if _, err := strconv.Atoi(args[0]); err != nil {
+			fmt.Println("limit should be a number")
+			return
+		}
+		prefix += "?limit=" + args[0]
+	}
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get regions: %s\n", err)
+		return
+	}
+	fmt.Println(r)
+}
+
+func showRegionTopReadCommandFunc(cmd *cobra.Command, args []string) {
+	prefix := regionsReadflowPrefix
+	if len(args) == 1 {
+		if _, err := strconv.Atoi(args[0]); err != nil {
+			fmt.Println("limit should be a number")
+			return
+		}
+		prefix += "?limit=" + args[0]
+	}
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get regions: %s\n", err)
 		return
 	}
 	fmt.Println(r)
