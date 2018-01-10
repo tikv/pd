@@ -18,6 +18,7 @@ import (
 
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	log "github.com/sirupsen/logrus"
 )
 
 func init() {
@@ -86,6 +87,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) *schedule.Op
 
 	source := cluster.GetStore(region.Leader.GetStoreId())
 	target := cluster.GetStore(newLeader.GetStoreId())
+	log.Debugf("[region %d] source store id is %v, target store id is %v", region.GetId(), source.GetId(), target.GetId())
 	if !shouldBalance(source, target, l.GetResourceKind()) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil

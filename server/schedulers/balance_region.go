@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	log "github.com/sirupsen/logrus"
 )
 
 func init() {
@@ -125,6 +126,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 
 	target := cluster.GetStore(newPeer.GetStoreId())
+	log.Debugf("[region %d] source store id is %v, target store id is %v", region.GetId(), source.GetId(), target.GetId())
 	if !shouldBalance(source, target, s.GetResourceKind()) {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil

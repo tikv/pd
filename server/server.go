@@ -345,3 +345,8 @@ func (s *Server) txn() clientv3.Txn {
 func (s *Server) leaderTxn(cs ...clientv3.Cmp) clientv3.Txn {
 	return s.txn().If(append(cs, s.leaderCmp())...)
 }
+
+// SetLogLevel sets log level.
+func (s *Server) SetLogLevel(level string) {
+	s.cfg.Log.Level = level
+}

@@ -39,6 +39,7 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 
 	mostLeaderStore := s.SelectSource(stores, filters...)
 	leastLeaderStore := s.SelectTarget(stores, filters...)
+	log.Debugf("[%s] mostLeaderStore is %v, leastLeaderStore is %v", schedulerName, mostLeaderStore, leastLeaderStore)
 
 	var mostLeaderDistance, leastLeaderDistance float64
 	if mostLeaderStore != nil {
@@ -47,6 +48,7 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 	if leastLeaderStore != nil {
 		leastLeaderDistance = math.Abs(leastLeaderStore.LeaderScore() - averageLeader)
 	}
+	log.Debugf("[%s] mostLeaderDistance is %v, leastLeaderDistance is %v", schedulerName, mostLeaderDistance, leastLeaderDistance)
 	if mostLeaderDistance == 0 && leastLeaderDistance == 0 {
 		schedulerCounter.WithLabelValues(schedulerName, "already_balanced").Inc()
 		return nil, nil
@@ -62,6 +64,11 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 		if region == nil {
 			region, peer = scheduleRemoveLeader(cluster, schedulerName, mostLeaderStore.GetId(), s)
 		}
+	}
+	if region == nil {
+		log.Debugf("[%v] select no region", schedulerName)
+	} else {
+		log.Debugf("[region %v][%v] select %v to be new leader", region.GetId(), schedulerName, peer)
 	}
 	return region, peer
 }
@@ -176,10 +183,12 @@ func shouldBalance(source, target *core.StoreInfo, kind core.ResourceKind) bool 
 	sourceScore := source.ResourceScore(kind)
 	targetScore := target.ResourceScore(kind)
 	if targetScore >= sourceScore {
+		log.Debugf("should balance return false cause targetScore %v >= sourceScore %v", targetScore, sourceScore)
 		return false
 	}
 	diffRatio := 1 - targetScore/sourceScore
 	diffCount := diffRatio * float64(sourceCount)
+	log.Debugf("[region %d] count diff is %v and balance diff is %v", region.GetId(), diffCount, minBalanceDiff(sourceCount))
 	return diffCount >= minBalanceDiff(sourceCount)
 }
 
