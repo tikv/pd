@@ -23,8 +23,8 @@ import (
 	"github.com/pingcap/pd/pkg/faketikv"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"github.com/pingcap/pd/server/schedule"
 	log "github.com/sirupsen/logrus"
-
 	// Register schedulers.
 	_ "github.com/pingcap/pd/server/schedulers"
 	// Register namespace classifiers.
@@ -36,6 +36,7 @@ var confName = flag.String("conf", "", "config name")
 func main() {
 	flag.Parse()
 
+	schedule.Simulating = true
 	_, local, clean := NewSingleServer()
 	err := local.Run()
 	if err != nil {

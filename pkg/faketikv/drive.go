@@ -96,6 +96,12 @@ func (d *Driver) Tick() {
 	if d.conf.WrittenBytes != nil {
 		d.clusterInfo.updateRegionSize(d.conf.WrittenBytes(d.tickCount))
 	}
+	if d.conf.RegionReadBytes != nil {
+		d.clusterInfo.updateRegionReadBytes(d.conf.RegionReadBytes(d.tickCount))
+	}
+	if d.conf.RegionWriteBytes != nil {
+		d.clusterInfo.updateRegionWriteBytes(d.conf.RegionWriteBytes(d.tickCount))
+	}
 	for _, n := range d.clusterInfo.Nodes {
 		n.Tick()
 	}

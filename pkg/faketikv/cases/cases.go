@@ -49,6 +49,9 @@ type Conf struct {
 
 	WrittenBytes func(tick int64) map[string]int64 // To simulate region grow.
 
+	RegionWriteBytes func(tick int64) map[uint64]int64 // To simulate write flow.
+	RegionReadBytes  func(tick int64) map[uint64]int64 // To simulate read flow.
+
 	Checker CheckerFunc // To check the schedule is finished.
 }
 
@@ -75,6 +78,8 @@ var confMap = map[string]func() *Conf{
 	"balance-leader": newBalanceLeader,
 	"add-nodes":      newAddNodes,
 	"region-split":   newRegionSplit,
+	"hot-read":       newHotRead,
+	"hot-write":      newHotWrite,
 }
 
 // NewConf creates a config to initialize simulator cluster.
