@@ -22,8 +22,8 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/faketikv/cases"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
 	"github.com/pingcap/pd/server/core"
-	log "github.com/sirupsen/logrus"
 )
 
 // ClusterInfo records all cluster information.
@@ -131,10 +131,10 @@ func (c *ClusterInfo) stepLeader(region *core.RegionInfo) {
 	region.Leader = newLeader
 	if newLeader == nil {
 		c.SetRegion(region)
-		log.Infof("[region %d] no leader", region.GetId())
+		simutil.Logger.Infof("[region %d] no leader", region.GetId())
 		return
 	}
-	log.Info("[region %d] elect new leader: %+v,old leader: %+v", region.GetId(), newLeader, region.Leader)
+	simutil.Logger.Infof("[region %d] elect new leader: %+v,old leader: %+v", region.GetId(), newLeader, region.Leader)
 	c.SetRegion(region)
 	c.reportRegionChange(region.GetId())
 }
@@ -151,7 +151,7 @@ func (c *ClusterInfo) stepSplit(region *core.RegionInfo) {
 		var err error
 		ids[i], err = c.allocID(region.Leader.GetStoreId())
 		if err != nil {
-			log.Infof("alloc id failed: %s", err)
+			simutil.Logger.Infof("alloc id failed: %s", err)
 			return
 		}
 	}
@@ -194,7 +194,7 @@ func (c *ClusterInfo) updateRegionSize(writtenBytes map[string]int64) {
 	for key, size := range writtenBytes {
 		region := c.SearchRegion([]byte(key))
 		if region == nil {
-			log.Errorf("region not found for key %q", key)
+			simutil.Logger.Errorf("region not found for key %q", key)
 			continue
 		}
 		region.ApproximateSize += size
@@ -206,7 +206,7 @@ func (c *ClusterInfo) updateRegionWriteBytes(writeBytes map[uint64]int64) {
 	for id, bytes := range writeBytes {
 		region := c.GetRegion(id)
 		if region == nil {
-			log.Errorf("region %d not found", id)
+			simutil.Logger.Errorf("region %d not found", id)
 			continue
 		}
 		region.WrittenBytes = uint64(bytes)
@@ -218,7 +218,7 @@ func (c *ClusterInfo) updateRegionReadBytes(readBytes map[uint64]int64) {
 	for id, bytes := range readBytes {
 		region := c.GetRegion(id)
 		if region == nil {
-			log.Errorf("region %d not found", id)
+			simutil.Logger.Errorf("region %d not found", id)
 			continue
 		}
 		region.ReadBytes = uint64(bytes)

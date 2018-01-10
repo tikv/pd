@@ -15,8 +15,8 @@ package cases
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
 	"github.com/pingcap/pd/server/core"
-	log "github.com/sirupsen/logrus"
 )
 
 func newBalanceLeader() *Conf {
@@ -51,7 +51,7 @@ func newBalanceLeader() *Conf {
 		count1 := regions.GetStoreLeaderCount(1)
 		count2 := regions.GetStoreLeaderCount(2)
 		count3 := regions.GetStoreLeaderCount(3)
-		log.Infof("leader counts: %v %v %v", count1, count2, count3)
+		simutil.Logger.Infof("leader counts: %v %v %v", count1, count2, count3)
 
 		return count1 <= 350 &&
 			count2 >= 300 &&
