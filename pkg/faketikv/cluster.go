@@ -206,7 +206,7 @@ func (c *ClusterInfo) updateRegionWriteBytes(writeBytes map[uint64]int64) {
 	for id, bytes := range writeBytes {
 		region := c.GetRegion(id)
 		if region == nil {
-			log.Errorf("region %d not found", id)
+			simutil.Logger.Errorf("region %d not found", id)
 			continue
 		}
 		region.WrittenBytes = uint64(bytes)
@@ -218,7 +218,7 @@ func (c *ClusterInfo) updateRegionReadBytes(readBytes map[uint64]int64) {
 	for id, bytes := range readBytes {
 		region := c.GetRegion(id)
 		if region == nil {
-			log.Errorf("region %d not found", id)
+			simutil.Logger.Errorf("region %d not found", id)
 			continue
 		}
 		region.ReadBytes = uint64(bytes)

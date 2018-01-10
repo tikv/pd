@@ -17,8 +17,8 @@ import (
 	"math/rand"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
 	"github.com/pingcap/pd/server/core"
-	log "github.com/sirupsen/logrus"
 )
 
 func newHotWrite() *Conf {
@@ -71,7 +71,7 @@ func newHotWrite() *Conf {
 				peerCount[int(p.GetStoreId()-1)]++
 			}
 		}
-		log.Infof("hot region leader count: %v, peer count: %v", leaderCount, peerCount)
+		simutil.Logger.Infof("hot region leader count: %v, peer count: %v", leaderCount, peerCount)
 
 		// check count diff <= 2.
 		var minLeader, maxLeader, minPeer, maxPeer int

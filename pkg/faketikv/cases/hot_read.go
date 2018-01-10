@@ -17,8 +17,8 @@ import (
 	"math/rand"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
 	"github.com/pingcap/pd/server/core"
-	log "github.com/sirupsen/logrus"
 )
 
 func newHotRead() *Conf {
@@ -68,7 +68,7 @@ func newHotRead() *Conf {
 			leaderStore := regions.GetRegion(id).Leader.GetStoreId()
 			leaderCount[int(leaderStore-1)]++
 		}
-		log.Infof("hot region count: %v", leaderCount)
+		simutil.Logger.Infof("hot region count: %v", leaderCount)
 
 		// check count diff < 2.
 		var min, max int
