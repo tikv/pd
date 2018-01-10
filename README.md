@@ -40,15 +40,15 @@ pd-server --name="pd" \
 Using `curl` to see PD member:
 
 ```bash
-curl ${HostIP}:2379/v2/members
+curl http://${HostIP}:2379/v2/members
 
-{"members":[{"id":"f62e88a6e81c149","name":"default","peerURLs":["http://192.168.199.105:2380"],"clientURLs":["http://192.168.199.105:2379"]}]}
+{"members":[{"id":"f62e88a6e81c149","name":"pd","peerURLs":["http://192.168.199.105:2380"],"clientURLs":["http://192.168.199.105:2379"]}]}
 ```
 
 A better tool [httpie](https://github.com/jkbrzt/httpie) is recommended:
 
 ```bash
-http ${HostIP}:2379/v2/members
+http http://${HostIP}:2379/v2/members
 HTTP/1.1 200 OK
 Content-Length: 144
 Content-Type: application/json
@@ -62,7 +62,7 @@ X-Etcd-Cluster-Id: 33dc747581249309
                 "http://192.168.199.105:2379"
             ], 
             "id": "f62e88a6e81c149", 
-            "name": "default", 
+            "name": "pd", 
             "peerURLs": [
                 "http://192.168.199.105:2380"
             ]
