@@ -15,12 +15,15 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/pingcap/pd/pkg/faketikv"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
+	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	log "github.com/sirupsen/logrus"
@@ -31,20 +34,28 @@ import (
 	_ "github.com/pingcap/pd/table"
 )
 
-var confName = flag.String("conf", "", "config name")
+var (
+	confName       = flag.String("conf", "", "config name")
+	serverLogLevel = flag.String("serverLog", "fatal", "pd server log level.")
+	simLogLevel    = flag.String("simLog", "fatal", "simulator log level.")
+)
 
 func main() {
 	flag.Parse()
 
+	simutil.InitLogger(*simLogLevel)
+
+	start := time.Now()
+
 	_, local, clean := NewSingleServer()
 	err := local.Run()
 	if err != nil {
-		log.Fatal("run server error:", err)
+		simutil.Logger.Fatal("run server error:", err)
 	}
 	driver := faketikv.NewDriver(local.GetAddr(), *confName)
 	err = driver.Prepare()
 	if err != nil {
-		log.Fatal("simulator prepare error:", err)
+		simutil.Logger.Fatal("simulator prepare error:", err)
 	}
 	tick := time.NewTicker(100 * time.Millisecond)
 	sc := make(chan os.Signal, 1)
@@ -73,12 +84,22 @@ EXIT:
 	driver.Stop()
 	clean()
 
-	log.Infof("Simulation finish. Conf: %s, TotalTick: %d, Result: %s", *confName, driver.TickCount(), simResult)
+	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, *confName, driver.TickCount(), time.Since(start))
+
+	if simResult != "OK" {
+		os.Exit(1)
+	}
 }
 
 // NewSingleServer creates a pd server for simulator.
 func NewSingleServer() (*server.Config, *server.Server, server.CleanupFunc) {
 	cfg := server.NewTestSingleConfig()
+	cfg.Log.Level = *serverLogLevel
+	err := logutil.InitLogger(&cfg.Log)
+	if err != nil {
+		log.Fatalf("initalize logger error: %s\n", err)
+	}
+
 	s, err := server.CreateServer(cfg, api.NewHandler)
 	if err != nil {
 		panic("create server failed")
