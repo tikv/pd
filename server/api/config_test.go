@@ -96,6 +96,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 		c.Assert(err, IsNil)
 
 		resp, err = s.hc.Get(addr)
+		c.Assert(err, IsNil)
 		sc1 := &server.ScheduleConfig{}
 		readJSON(resp.Body, sc1)
 
@@ -131,6 +132,7 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 		err = postJSON(s.hc, postAddr, postData)
 
 		resp, err = s.hc.Get(addr)
+		c.Assert(err, IsNil)
 		rc3 := &server.ReplicationConfig{}
 		err = readJSON(resp.Body, rc3)
 
