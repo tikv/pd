@@ -184,7 +184,7 @@ func shouldBalance(source, target *core.StoreInfo, avgScore float64, kind core.R
 	}
 
 	// avgScore is the goal for every store
-	// in expection, sourceScore > avgScore > targetScore
+	// in expectation, sourceScore > avgScore > targetScore
 	// if not, moving region is not necessary
 	// In this case, either sourceSizeDiff or targetSizeDiff will be negative, then obviously return false
 	sourceSizeDiff := (sourceScore - avgScore) * source.ResourceWeight(kind)

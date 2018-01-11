@@ -66,7 +66,7 @@ func (d *Driver) Prepare() error {
 	if err != nil {
 		simutil.Logger.Fatal("bootstrapped error: ", err)
 	} else {
-		simutil.Logger.Debug("Bootstrap sucess")
+		simutil.Logger.Debug("Bootstrap success")
 	}
 
 	// Setup alloc id.

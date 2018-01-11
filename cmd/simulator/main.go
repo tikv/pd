@@ -97,7 +97,7 @@ func NewSingleServer() (*server.Config, *server.Server, server.CleanupFunc) {
 	cfg.Log.Level = *serverLogLevel
 	err := logutil.InitLogger(&cfg.Log)
 	if err != nil {
-		log.Fatalf("initalize logger error: %s\n", err)
+		log.Fatalf("initialize logger error: %s\n", err)
 	}
 
 	s, err := server.CreateServer(cfg, api.NewHandler)
