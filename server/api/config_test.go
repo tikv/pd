@@ -134,7 +134,9 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 		resp, err = s.hc.Get(addr)
 		c.Assert(err, IsNil)
 		rc3 := &server.ReplicationConfig{}
+
 		err = readJSON(resp.Body, rc3)
+		c.Assert(err, IsNil)
 
 		c.Assert(*rc, DeepEquals, *rc3)
 	}
