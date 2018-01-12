@@ -299,7 +299,7 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 	_, cleanB := newTestServersWithCfgs(c, []*Config{cfgB})
 	defer cleanB()
 
-	// Start pervious cluster, expect an error.
+	// Start previous cluster, expect an error.
 	cfgA.InitialCluster = originInitial
 	svr, err := CreateServer(cfgA, nil)
 	c.Assert(err, IsNil)

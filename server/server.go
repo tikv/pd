@@ -558,3 +558,8 @@ func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
 func (s *Server) getAllocIDPath() string {
 	return path.Join(s.rootPath, "alloc_id")
 }
+
+// SetLogLevel sets log level.
+func (s *Server) SetLogLevel(level string) {
+	s.cfg.Log.Level = level
+}

@@ -55,6 +55,7 @@ func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 	err = tsoClient.Send(req)
 	c.Assert(err, IsNil)
 	resp, err := tsoClient.Recv()
+	c.Assert(err, IsNil)
 	c.Assert(resp.GetCount(), Equals, uint32(n))
 
 	res := resp.GetTimestamp()

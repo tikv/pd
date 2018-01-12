@@ -1,33 +1,18 @@
 /*
  *
- * Copyright 2014, Google Inc.
- * All rights reserved.
+ * Copyright 2014 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
@@ -40,6 +25,7 @@ import (
 
 	"golang.org/x/net/context"
 	"golang.org/x/net/trace"
+	"google.golang.org/grpc/balancer"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/stats"
@@ -89,9 +75,6 @@ func recvResponse(ctx context.Context, dopts dialOptions, t transport.ClientTran
 		dopts.copts.StatsHandler.HandleRPC(ctx, inPayload)
 	}
 	c.trailerMD = stream.Trailer()
-	if peer, ok := peer.FromContext(stream.Context()); ok {
-		c.peer = peer
-	}
 	return nil
 }
 
@@ -117,17 +100,17 @@ func sendRequest(ctx context.Context, dopts dialOptions, compressor Compressor, 
 			Client: true,
 		}
 	}
-	outBuf, err := encode(dopts.codec, args, compressor, cbuf, outPayload)
+	hdr, data, err := encode(dopts.codec, args, compressor, cbuf, outPayload)
 	if err != nil {
 		return err
 	}
 	if c.maxSendMessageSize == nil {
 		return Errorf(codes.Internal, "callInfo maxSendMessageSize field uninitialized(nil)")
 	}
-	if len(outBuf) > *c.maxSendMessageSize {
-		return Errorf(codes.ResourceExhausted, "grpc: trying to send message larger than max (%d vs. %d)", len(outBuf), *c.maxSendMessageSize)
+	if len(data) > *c.maxSendMessageSize {
+		return Errorf(codes.ResourceExhausted, "grpc: trying to send message larger than max (%d vs. %d)", len(data), *c.maxSendMessageSize)
 	}
-	err = t.Write(stream, outBuf, opts)
+	err = t.Write(stream, hdr, data, opts)
 	if err == nil && outPayload != nil {
 		outPayload.SentTime = time.Now()
 		dopts.copts.StatsHandler.HandleRPC(ctx, outPayload)
@@ -153,7 +136,7 @@ func Invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 }
 
 func invoke(ctx context.Context, method string, args, reply interface{}, cc *ClientConn, opts ...CallOption) (e error) {
-	c := defaultCallInfo
+	c := defaultCallInfo()
 	mc := cc.GetMethodConfig(method)
 	if mc.WaitForReady != nil {
 		c.failFast = !*mc.WaitForReady
@@ -167,13 +150,13 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 
 	opts = append(cc.dopts.callOptions, opts...)
 	for _, o := range opts {
-		if err := o.before(&c); err != nil {
+		if err := o.before(c); err != nil {
 			return toRPCErr(err)
 		}
 	}
 	defer func() {
 		for _, o := range opts {
-			o.after(&c)
+			o.after(c)
 		}
 	}()
 
@@ -196,7 +179,7 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 			}
 		}()
 	}
-	ctx = newContextWithRPCInfo(ctx)
+	ctx = newContextWithRPCInfo(ctx, c.failFast)
 	sh := cc.dopts.copts.StatsHandler
 	if sh != nil {
 		ctx = sh.TagRPC(ctx, &stats.RPCTagInfo{FullMethodName: method, FailFast: c.failFast})
@@ -224,9 +207,9 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 			err    error
 			t      transport.ClientTransport
 			stream *transport.Stream
-			// Record the put handler from Balancer.Get(...). It is called once the
+			// Record the done handler from Balancer.Get(...). It is called once the
 			// RPC has completed or failed.
-			put func()
+			done func(balancer.DoneInfo)
 		)
 		// TODO(zhaoq): Need a formal spec of fail-fast.
 		callHdr := &transport.CallHdr{
@@ -240,10 +223,7 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 			callHdr.Creds = c.creds
 		}
 
-		gopts := BalancerGetOptions{
-			BlockingWait: !c.failFast,
-		}
-		t, put, err = cc.getTransport(ctx, gopts)
+		t, done, err = cc.getTransport(ctx, c.failFast)
 		if err != nil {
 			// TODO(zhaoq): Probably revisit the error handling.
 			if _, ok := status.FromError(err); ok {
@@ -263,28 +243,31 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 		}
 		stream, err = t.NewStream(ctx, callHdr)
 		if err != nil {
-			if put != nil {
+			if done != nil {
 				if _, ok := err.(transport.ConnectionError); ok {
 					// If error is connection error, transport was sending data on wire,
 					// and we are not sure if anything has been sent on wire.
 					// If error is not connection error, we are sure nothing has been sent.
 					updateRPCInfoInContext(ctx, rpcInfo{bytesSent: true, bytesReceived: false})
 				}
-				put()
+				done(balancer.DoneInfo{Err: err})
 			}
 			if _, ok := err.(transport.ConnectionError); (ok || err == transport.ErrStreamDrain) && !c.failFast {
 				continue
 			}
 			return toRPCErr(err)
 		}
-		err = sendRequest(ctx, cc.dopts, cc.dopts.cp, &c, callHdr, stream, t, args, topts)
+		if peer, ok := peer.FromContext(stream.Context()); ok {
+			c.peer = peer
+		}
+		err = sendRequest(ctx, cc.dopts, cc.dopts.cp, c, callHdr, stream, t, args, topts)
 		if err != nil {
-			if put != nil {
+			if done != nil {
 				updateRPCInfoInContext(ctx, rpcInfo{
 					bytesSent:     stream.BytesSent(),
 					bytesReceived: stream.BytesReceived(),
 				})
-				put()
+				done(balancer.DoneInfo{Err: err})
 			}
 			// Retry a non-failfast RPC when
 			// i) there is a connection error; or
@@ -294,14 +277,14 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 			}
 			return toRPCErr(err)
 		}
-		err = recvResponse(ctx, cc.dopts, t, &c, stream, reply)
+		err = recvResponse(ctx, cc.dopts, t, c, stream, reply)
 		if err != nil {
-			if put != nil {
+			if done != nil {
 				updateRPCInfoInContext(ctx, rpcInfo{
 					bytesSent:     stream.BytesSent(),
 					bytesReceived: stream.BytesReceived(),
 				})
-				put()
+				done(balancer.DoneInfo{Err: err})
 			}
 			if _, ok := err.(transport.ConnectionError); (ok || err == transport.ErrStreamDrain) && !c.failFast {
 				continue
@@ -312,12 +295,12 @@ func invoke(ctx context.Context, method string, args, reply interface{}, cc *Cli
 			c.traceInfo.tr.LazyLog(&payload{sent: false, msg: reply}, true)
 		}
 		t.CloseStream(stream, nil)
-		if put != nil {
+		if done != nil {
 			updateRPCInfoInContext(ctx, rpcInfo{
 				bytesSent:     stream.BytesSent(),
 				bytesReceived: stream.BytesReceived(),
 			})
-			put()
+			done(balancer.DoneInfo{Err: err})
 		}
 		return stream.Status().Err()
 	}
