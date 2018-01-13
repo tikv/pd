@@ -22,7 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	bolt "github.com/coreos/bbolt"
+	"github.com/boltdb/bolt"
 )
 
 type BatchTx interface {

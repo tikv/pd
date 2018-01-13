@@ -13,7 +13,6 @@ import (
 	"math/big"
 	"reflect"
 	"strconv"
-	"strings"
 )
 
 // These are SSH message type numbers. They are scattered around several
@@ -23,6 +22,10 @@ const (
 	msgUnimplemented = 3
 	msgDebug         = 4
 	msgNewKeys       = 21
+
+	// Standard authentication messages
+	msgUserAuthSuccess = 52
+	msgUserAuthBanner  = 53
 )
 
 // SSH messages:
@@ -133,18 +136,6 @@ type userAuthFailureMsg struct {
 	PartialSuccess bool
 }
 
-// See RFC 4252, section 5.1
-const msgUserAuthSuccess = 52
-
-// See RFC 4252, section 5.4
-const msgUserAuthBanner = 53
-
-type userAuthBannerMsg struct {
-	Message string `sshtype:"53"`
-	// unused, but required to allow message parsing
-	Language string
-}
-
 // See RFC 4256, section 3.2
 const msgUserAuthInfoRequest = 60
 const msgUserAuthInfoResponse = 61
@@ -162,7 +153,7 @@ const msgChannelOpen = 90
 
 type channelOpenMsg struct {
 	ChanType         string `sshtype:"90"`
-	PeersID          uint32
+	PeersId          uint32
 	PeersWindow      uint32
 	MaxPacketSize    uint32
 	TypeSpecificData []byte `ssh:"rest"`
@@ -173,7 +164,7 @@ const msgChannelData = 94
 
 // Used for debug print outs of packets.
 type channelDataMsg struct {
-	PeersID uint32 `sshtype:"94"`
+	PeersId uint32 `sshtype:"94"`
 	Length  uint32
 	Rest    []byte `ssh:"rest"`
 }
@@ -182,8 +173,8 @@ type channelDataMsg struct {
 const msgChannelOpenConfirm = 91
 
 type channelOpenConfirmMsg struct {
-	PeersID          uint32 `sshtype:"91"`
-	MyID             uint32
+	PeersId          uint32 `sshtype:"91"`
+	MyId             uint32
 	MyWindow         uint32
 	MaxPacketSize    uint32
 	TypeSpecificData []byte `ssh:"rest"`
@@ -193,7 +184,7 @@ type channelOpenConfirmMsg struct {
 const msgChannelOpenFailure = 92
 
 type channelOpenFailureMsg struct {
-	PeersID  uint32 `sshtype:"92"`
+	PeersId  uint32 `sshtype:"92"`
 	Reason   RejectionReason
 	Message  string
 	Language string
@@ -202,7 +193,7 @@ type channelOpenFailureMsg struct {
 const msgChannelRequest = 98
 
 type channelRequestMsg struct {
-	PeersID             uint32 `sshtype:"98"`
+	PeersId             uint32 `sshtype:"98"`
 	Request             string
 	WantReply           bool
 	RequestSpecificData []byte `ssh:"rest"`
@@ -212,28 +203,28 @@ type channelRequestMsg struct {
 const msgChannelSuccess = 99
 
 type channelRequestSuccessMsg struct {
-	PeersID uint32 `sshtype:"99"`
+	PeersId uint32 `sshtype:"99"`
 }
 
 // See RFC 4254, section 5.4.
 const msgChannelFailure = 100
 
 type channelRequestFailureMsg struct {
-	PeersID uint32 `sshtype:"100"`
+	PeersId uint32 `sshtype:"100"`
 }
 
 // See RFC 4254, section 5.3
 const msgChannelClose = 97
 
 type channelCloseMsg struct {
-	PeersID uint32 `sshtype:"97"`
+	PeersId uint32 `sshtype:"97"`
 }
 
 // See RFC 4254, section 5.3
 const msgChannelEOF = 96
 
 type channelEOFMsg struct {
-	PeersID uint32 `sshtype:"96"`
+	PeersId uint32 `sshtype:"96"`
 }
 
 // See RFC 4254, section 4
@@ -263,7 +254,7 @@ type globalRequestFailureMsg struct {
 const msgChannelWindowAdjust = 93
 
 type windowAdjustMsg struct {
-	PeersID         uint32 `sshtype:"93"`
+	PeersId         uint32 `sshtype:"93"`
 	AdditionalBytes uint32
 }
 
@@ -275,19 +266,17 @@ type userAuthPubKeyOkMsg struct {
 	PubKey []byte
 }
 
-// typeTags returns the possible type bytes for the given reflect.Type, which
-// should be a struct. The possible values are separated by a '|' character.
-func typeTags(structType reflect.Type) (tags []byte) {
-	tagStr := structType.Field(0).Tag.Get("sshtype")
-
-	for _, tag := range strings.Split(tagStr, "|") {
-		i, err := strconv.Atoi(tag)
-		if err == nil {
-			tags = append(tags, byte(i))
-		}
+// typeTag returns the type byte for the given type. The type should
+// be struct.
+func typeTag(structType reflect.Type) byte {
+	var tag byte
+	var tagStr string
+	tagStr = structType.Field(0).Tag.Get("sshtype")
+	i, err := strconv.Atoi(tagStr)
+	if err == nil {
+		tag = byte(i)
 	}
-
-	return tags
+	return tag
 }
 
 func fieldError(t reflect.Type, field int, problem string) error {
@@ -301,34 +290,19 @@ var errShortRead = errors.New("ssh: short read")
 
 // Unmarshal parses data in SSH wire format into a structure. The out
 // argument should be a pointer to struct. If the first member of the
-// struct has the "sshtype" tag set to a '|'-separated set of numbers
-// in decimal, the packet must start with one of those numbers. In
-// case of error, Unmarshal returns a ParseError or
-// UnexpectedMessageError.
+// struct has the "sshtype" tag set to a number in decimal, the packet
+// must start that number.  In case of error, Unmarshal returns a
+// ParseError or UnexpectedMessageError.
 func Unmarshal(data []byte, out interface{}) error {
 	v := reflect.ValueOf(out).Elem()
 	structType := v.Type()
-	expectedTypes := typeTags(structType)
-
-	var expectedType byte
-	if len(expectedTypes) > 0 {
-		expectedType = expectedTypes[0]
-	}
-
+	expectedType := typeTag(structType)
 	if len(data) == 0 {
 		return parseError(expectedType)
 	}
-
-	if len(expectedTypes) > 0 {
-		goodType := false
-		for _, e := range expectedTypes {
-			if e > 0 && data[0] == e {
-				goodType = true
-				break
-			}
-		}
-		if !goodType {
-			return fmt.Errorf("ssh: unexpected message type %d (expected one of %v)", data[0], expectedTypes)
+	if expectedType > 0 {
+		if data[0] != expectedType {
+			return unexpectedMessageError(expectedType, data[0])
 		}
 		data = data[1:]
 	}
@@ -412,7 +386,7 @@ func Unmarshal(data []byte, out interface{}) error {
 				return fieldError(structType, i, "pointer to unsupported type")
 			}
 		default:
-			return fieldError(structType, i, fmt.Sprintf("unsupported type: %v", t))
+			return fieldError(structType, i, "unsupported type")
 		}
 	}
 
@@ -435,9 +409,9 @@ func Marshal(msg interface{}) []byte {
 
 func marshalStruct(out []byte, msg interface{}) []byte {
 	v := reflect.Indirect(reflect.ValueOf(msg))
-	msgTypes := typeTags(v.Type())
-	if len(msgTypes) > 0 {
-		out = append(out, msgTypes[0])
+	msgType := typeTag(v.Type())
+	if msgType > 0 {
+		out = append(out, msgType)
 	}
 
 	for i, n := 0, v.NumField(); i < n; i++ {

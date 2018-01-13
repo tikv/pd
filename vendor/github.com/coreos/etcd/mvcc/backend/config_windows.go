@@ -16,7 +16,7 @@
 
 package backend
 
-import bolt "github.com/coreos/bbolt"
+import "github.com/boltdb/bolt"
 
 var boltOpenOptions *bolt.Options = nil
 

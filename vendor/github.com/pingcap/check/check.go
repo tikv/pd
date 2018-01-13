@@ -86,7 +86,6 @@ type C struct {
 	logb      *logger
 	logw      io.Writer
 	done      chan *C
-	parallel  chan *C
 	reason    string
 	mustFail  bool
 	tempDir   *tempDir
@@ -534,7 +533,6 @@ type RunConf struct {
 	BenchmarkTime time.Duration // Defaults to 1 second
 	BenchmarkMem  bool
 	KeepWorkDir   bool
-	Exclude       string
 }
 
 // Create a new suiteRunner able to run all methods in the given suite.
@@ -579,17 +577,6 @@ func newSuiteRunner(suite interface{}, runConf *RunConf) *suiteRunner {
 		}
 	}
 
-	var excludeRegexp *regexp.Regexp
-	if conf.Exclude != "" {
-		if regexp, err := regexp.Compile(conf.Exclude); err != nil {
-			msg := "Bad exclude expression: " + err.Error()
-			runner.tracker.result.RunError = errors.New(msg)
-			return runner
-		} else {
-			excludeRegexp = regexp
-		}
-	}
-
 	for i := 0; i != suiteNumMethods; i++ {
 		method := newMethod(suiteValue, i)
 		switch method.Info.Name {
@@ -610,9 +597,7 @@ func newSuiteRunner(suite interface{}, runConf *RunConf) *suiteRunner {
 				continue
 			}
 			if filterRegexp == nil || method.matches(filterRegexp) {
-				if excludeRegexp == nil || !method.matches(excludeRegexp) {
-					runner.tests = append(runner.tests, method)
-				}
+				runner.tests = append(runner.tests, method)
 			}
 		}
 	}
@@ -626,22 +611,12 @@ func (runner *suiteRunner) run() *Result {
 		if runner.checkFixtureArgs() {
 			c := runner.runFixture(runner.setUpSuite, "", nil)
 			if c == nil || c.status() == succeededSt {
-				var delayedC []*C
 				for i := 0; i != len(runner.tests); i++ {
-					c := runner.forkTest(runner.tests[i])
-					select {
-					case <-c.done:
-					case <-c.parallel:
-						delayedC = append(delayedC, c)
-					}
+					c := runner.runTest(runner.tests[i])
 					if c.status() == fixturePanickedSt {
 						runner.skipTests(missedSt, runner.tests[i+1:])
 						break
 					}
-				}
-				// Wait those parallel tests finish.
-				for _, delayed := range delayedC {
-					<-delayed.done
 				}
 			} else if c != nil && c.status() == skippedSt {
 				runner.skipTests(skippedSt, runner.tests)
@@ -680,7 +655,6 @@ func (runner *suiteRunner) forkCall(method *methodType, kind funcKind, testName 
 		logw:      logw,
 		tempDir:   runner.tempDir,
 		done:      make(chan *C, 1),
-		parallel:  make(chan *C, 1),
 		timer:     timer{benchTime: runner.benchTime},
 		startTime: time.Now(),
 		benchMem:  runner.benchMem,
