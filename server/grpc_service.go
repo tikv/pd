@@ -290,7 +290,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		return errors.Trace(err)
 	}
 
-	isNew := true
+	var lastBind time.Time
 	for {
 		request, err := server.Recv()
 		if err == io.EOF {
@@ -311,9 +311,10 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		hbStreams := cluster.coordinator.hbStreams
 
-		if isNew {
+		if time.Since(lastBind) > s.cfg.heartbeatStreamBindInterval.Duration {
+			regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "bind").Inc()
 			hbStreams.bindStream(storeID, server)
-			isNew = false
+			lastBind = time.Now()
 		}
 
 		region := core.NewRegionInfo(request.GetRegion(), request.GetLeader())

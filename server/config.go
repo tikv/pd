@@ -97,6 +97,8 @@ type Config struct {
 	// Only test can change them.
 	nextRetryDelay             time.Duration
 	disableStrictReconfigCheck bool
+
+	heartbeatStreamBindInterval typeutil.Duration
 }
 
 // NewConfig creates a new config.
@@ -144,6 +146,8 @@ const (
 	defaultTickInterval = 500 * time.Millisecond
 	// embed etcd has a check that `5 * tick > election`
 	defaultElectionInterval = 3000 * time.Millisecond
+
+	defaultHeartbeatStreamRebindInterval = time.Minute
 )
 
 func adjustString(v *string, defValue string) {
@@ -276,6 +280,8 @@ func (c *Config) adjust() error {
 
 	c.Schedule.adjust()
 	c.Replication.adjust()
+
+	adjustDuration(&c.heartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
 	return nil
 }
 
