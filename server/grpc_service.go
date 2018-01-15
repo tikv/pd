@@ -237,7 +237,11 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 	}, nil
 }
 
-const regionHeartbeatSendTimeout = 5 * time.Second
+const (
+	regionHeartbeatSendTimeout          = 5 * time.Second
+	regionHeartbeatStreamMaxIdleTime    = 10 * time.Minute
+	regionHeartbeatStreamRebindInterval = 5 * time.Second
+)
 
 var errSendRegionHeartbeatTimeout = errors.New("send region heartbeat timeout")
 
@@ -246,6 +250,25 @@ var errSendRegionHeartbeatTimeout = errors.New("send region heartbeat timeout")
 type heartbeatServer struct {
 	stream pdpb.PD_RegionHeartbeatServer
 	closed int32
+	active int32
+}
+
+func newHeartbeatServer(stream pdpb.PD_RegionHeartbeatServer) *heartbeatServer {
+	s := &heartbeatServer{stream: stream}
+	go func() {
+		for {
+			time.Sleep(regionHeartbeatStreamMaxIdleTime)
+			if atomic.LoadInt32(&s.closed) == 1 {
+				return
+			}
+			if atomic.SwapInt32(&s.active, 0) == 0 {
+				log.Error("closing inactive heartbeat stream.")
+				atomic.StoreInt32(&s.closed, 1)
+				return
+			}
+		}
+	}()
+	return s
 }
 
 func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
@@ -275,6 +298,7 @@ func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 		atomic.StoreInt32(&s.closed, 1)
 		return nil, errors.Trace(err)
 	}
+	atomic.StoreInt32(&s.active, 1)
 	return req, nil
 }
 
@@ -290,7 +314,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		return errors.Trace(err)
 	}
 
-	isNew := true
+	var lastBind time.Time
 	for {
 		request, err := server.Recv()
 		if err == io.EOF {
@@ -311,9 +335,9 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		hbStreams := cluster.coordinator.hbStreams
 
-		if isNew {
+		if time.Since(lastBind) > regionHeartbeatStreamRebindInterval {
 			hbStreams.bindStream(storeID, server)
-			isNew = false
+			lastBind = time.Now()
 		}
 
 		region := core.RegionFromHeartbeat(request)
