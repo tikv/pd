@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/juju/errors"
+	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
@@ -475,7 +476,7 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 		}
 		cmd := &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
-				ChangeType: pdpb.ConfChangeType_AddNode,
+				ChangeType: eraftpb.ConfChangeType_AddNode,
 				Peer: &metapb.Peer{
 					Id:      s.PeerID,
 					StoreId: s.ToStore,
@@ -486,7 +487,7 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 	case schedule.RemovePeer:
 		cmd := &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
-				ChangeType: pdpb.ConfChangeType_RemoveNode,
+				ChangeType: eraftpb.ConfChangeType_RemoveNode,
 				Peer:       region.GetStorePeer(s.FromStore),
 			},
 		}

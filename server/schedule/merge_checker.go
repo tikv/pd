@@ -16,7 +16,6 @@ package schedule
 import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	log "github.com/sirupsen/logrus"
@@ -59,13 +58,13 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	prev, next := m.cluster.GetAdjacentRegions(region)
 
 	peerCount := len(region.Region.GetPeers())
-	var direction pdpb.MergeDirection
+	var direction metapb.MergeDirection
 	// if is not hot region and under same namesapce
 	if prev != nil && !m.cluster.IsRegionHot(prev.GetId()) && m.classifier.AllowMerge(region, prev) {
 		// peer count should equal
 		if peerCount == len(prev.Region.GetPeers()) {
 			target = prev
-			direction = pdpb.MergeDirection_Down
+			direction = metapb.MergeDirection_Backward
 		}
 	}
 	if next != nil && !m.cluster.IsRegionHot(next.GetId()) && m.classifier.AllowMerge(region, next) {
@@ -74,7 +73,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 			// peer count should equal
 			if peerCount == len(next.Region.GetPeers()) {
 				target = next
-				direction = pdpb.MergeDirection_Up
+				direction = metapb.MergeDirection_Forward
 			}
 		}
 	}

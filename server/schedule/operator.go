@@ -19,7 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -110,7 +110,7 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 type MergeRegion struct {
 	FromRegion uint64
 	ToRegion   uint64
-	Direction  pdpb.MergeDirection
+	Direction  metapb.MergeDirection
 	// there are two regions involved in merge process,
 	// so to keep them from other scheduler,
 	// both of them should add MerRegion operatorStep.
@@ -128,7 +128,7 @@ func (mr MergeRegion) String() string {
 
 // IsFinish checks if cuurent step is finished
 func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
-	if mr.Direction == pdpb.MergeDirection_Up {
+	if mr.Direction == metapb.MergeDirection_Forward {
 		return bytes.Compare(region.Region.StartKey, mr.OldStartKey) < 0
 	}
 	// for the case that the region endkey change to "" after merge
@@ -345,7 +345,7 @@ func CreateMovePeerOperator(desc string, region *core.RegionInfo, kind OperatorK
 }
 
 // CreateMergeRegionOperator creates an Operator that merge two region into one
-func CreateMergeRegionOperator(desc string, source *core.RegionInfo, target *core.RegionInfo, direction pdpb.MergeDirection, kind OperatorKind, steps []OperatorStep) (*Operator, *Operator) {
+func CreateMergeRegionOperator(desc string, source *core.RegionInfo, target *core.RegionInfo, direction metapb.MergeDirection, kind OperatorKind, steps []OperatorStep) (*Operator, *Operator) {
 	steps = append(steps, MergeRegion{
 		FromRegion:  source.GetId(),
 		ToRegion:    target.GetId(),
