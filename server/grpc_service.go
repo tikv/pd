@@ -239,8 +239,6 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 
 const regionHeartbeatSendTimeout = 5 * time.Second
 
-var heartbeatStreamRebindInterval = time.Minute
-
 var errSendRegionHeartbeatTimeout = errors.New("send region heartbeat timeout")
 
 // heartbeatServer wraps PD_RegionHeartbeatServer to ensure when any error
@@ -313,7 +311,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		hbStreams := cluster.coordinator.hbStreams
 
-		if time.Since(lastBind) > heartbeatStreamRebindInterval {
+		if time.Since(lastBind) > s.cfg.heartbeatStreamBindInterval.Duration {
 			regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "bind").Inc()
 			hbStreams.bindStream(storeID, server)
 			lastBind = time.Now()

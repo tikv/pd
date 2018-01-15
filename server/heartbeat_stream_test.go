@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/pkg/typeutil"
 )
 
 var _ = Suite(&testHeartbeatStreamSuite{})
@@ -31,6 +32,7 @@ type testHeartbeatStreamSuite struct {
 
 func (s *testHeartbeatStreamSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
+	s.svr.cfg.heartbeatStreamBindInterval = typeutil.NewDuration(time.Second)
 	err := s.svr.Run()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
@@ -47,8 +49,6 @@ func (s *testHeartbeatStreamSuite) TearDownSuite(c *C) {
 }
 
 func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
-	heartbeatStreamRebindInterval = 3 * time.Second
-
 	// Add a new store and an addPeer operator.
 	storeID, err := s.svr.idAlloc.Alloc()
 	c.Assert(err, IsNil)
