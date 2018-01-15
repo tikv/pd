@@ -324,8 +324,7 @@ type ScheduleConfig struct {
 	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count,omitempty" json:"max-pending-peer-count"`
 	// If the size of region is smaller than this value,
 	// it will try to merge with adjacent regions.
-	// TODO: make it configurable after pd can know tikv's max-region-size
-	MaxMergeRegionSize uint64 `json:"max-merge-region-size"`
+	MaxMergeRegionSize uint64 `toml:"max-merge-region-size,omitempty" json:"max-merge-region-size"`
 	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
@@ -370,7 +369,7 @@ const (
 	defaultMaxSnapshotCount     = 3
 	defaultMaxPendingPeerCount  = 16
 	defaultMaxStoreDownTime     = time.Hour
-	defaultMaxMergeRegionSize   = 1
+	defaultMaxMergeRegionSize   = 0
 	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 16

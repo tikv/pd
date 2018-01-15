@@ -289,7 +289,7 @@ const (
 	defaultMaxSnapshotCount     = 3
 	defaultMaxPendingPeerCount  = 16
 	defaultMaxStoreDownTime     = time.Hour
-	defaultMaxMergeRegionSize   = 1
+	defaultMaxMergeRegionSize   = 0
 	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 16

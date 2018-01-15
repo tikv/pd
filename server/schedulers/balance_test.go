@@ -718,14 +718,14 @@ var _ = Suite(&testMergeCheckerSuite{})
 
 type testMergeCheckerSuite struct {
 	cluster *mockCluster
-	opt     *MockSchedulerOptions
 	mc      *schedule.MergeChecker
 	regions []*core.RegionInfo
 }
 
 func (s *testMergeCheckerSuite) SetUpSuite(c *C) {
-	s.cluster = newMockCluster(core.NewMockIDAllocator())
-	_, s.opt = newTestScheduleConfig()
+	cfg := newTestScheduleConfig()
+	cfg.MaxMergeRegionSize = 2
+	s.cluster = newMockCluster(cfg)
 	s.regions = []*core.RegionInfo{
 		{
 			Region: &metapb.Region{
@@ -786,7 +786,7 @@ func (s *testMergeCheckerSuite) SetUpSuite(c *C) {
 		c.Assert(s.cluster.PutRegion(region), IsNil)
 	}
 
-	s.mc = schedule.NewMergeChecker(s.opt, s.cluster, namespace.DefaultClassifier)
+	s.mc = schedule.NewMergeChecker(s.cluster, namespace.DefaultClassifier)
 }
 
 func (s *testMergeCheckerSuite) TestBasic(c *C) {
@@ -807,6 +807,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 }
 
 func (s *testMergeCheckerSuite) checkSteps(c *C, op *schedule.Operator, steps []schedule.OperatorStep) {
+	c.Assert(steps, NotNil)
 	c.Assert(op.Len(), Equals, len(steps))
 	for i := range steps {
 		c.Assert(op.Step(i), DeepEquals, steps[i])
@@ -824,7 +825,7 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 			FromRegion:  3,
 			ToRegion:    2,
 			IsPassive:   false,
-			Direction:   metapb.MergeDirection_Forward,
+			Direction:   metapb.MergeDirection_Backward,
 			OldStartKey: []byte("t"),
 			OldEndKey:   []byte("x"),
 		},
@@ -834,7 +835,7 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 			FromRegion:  3,
 			ToRegion:    2,
 			IsPassive:   true,
-			Direction:   metapb.MergeDirection_Forward,
+			Direction:   metapb.MergeDirection_Backward,
 			OldStartKey: []byte("a"),
 			OldEndKey:   []byte("t"),
 		},
@@ -851,7 +852,7 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 			FromRegion:  3,
 			ToRegion:    2,
 			IsPassive:   false,
-			Direction:   metapb.MergeDirection_Forward,
+			Direction:   metapb.MergeDirection_Backward,
 			OldStartKey: []byte("t"),
 			OldEndKey:   []byte("x"),
 		},
@@ -861,7 +862,7 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 			FromRegion:  3,
 			ToRegion:    2,
 			IsPassive:   true,
-			Direction:   metapb.MergeDirection_Forward,
+			Direction:   metapb.MergeDirection_Backward,
 			OldStartKey: []byte("a"),
 			OldEndKey:   []byte("t"),
 		},
@@ -880,7 +881,7 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 			FromRegion:  3,
 			ToRegion:    2,
 			IsPassive:   false,
-			Direction:   metapb.MergeDirection_Forward,
+			Direction:   metapb.MergeDirection_Backward,
 			OldStartKey: []byte("t"),
 			OldEndKey:   []byte("x"),
 		},
@@ -890,7 +891,7 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 			FromRegion:  3,
 			ToRegion:    2,
 			IsPassive:   true,
-			Direction:   metapb.MergeDirection_Forward,
+			Direction:   metapb.MergeDirection_Backward,
 			OldStartKey: []byte("a"),
 			OldEndKey:   []byte("t"),
 		},

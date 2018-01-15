@@ -45,7 +45,7 @@ func NewMergeChecker(cluster Cluster, classifier namespace.Classifier) *MergeChe
 // Check verifies a region's replicas, creating an Operator if need.
 func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	// region size is not small enough
-	if region.ApproximateSize > int64(m.cluster.GetMaxMergeRegionSize()) {
+	if region.ApproximateSize >= int64(m.cluster.GetMaxMergeRegionSize()) {
 		return nil, nil
 	}
 
