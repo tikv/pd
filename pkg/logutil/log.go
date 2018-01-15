@@ -124,7 +124,8 @@ func (hook *contextHook) Levels() []log.Level {
 	return log.AllLevels
 }
 
-func stringToLogLevel(level string) log.Level {
+// StringToLogLevel translates log level string to log level.
+func StringToLogLevel(level string) log.Level {
 	switch strings.ToLower(level) {
 	case "fatal":
 		return log.FatalLevel
@@ -221,7 +222,7 @@ var once sync.Once
 func InitLogger(cfg *LogConfig) error {
 	var err error
 	once.Do(func() {
-		log.SetLevel(stringToLogLevel(cfg.Level))
+		log.SetLevel(StringToLogLevel(cfg.Level))
 		log.AddHook(&contextHook{})
 
 		if cfg.Format == "" {

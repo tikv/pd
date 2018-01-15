@@ -188,7 +188,7 @@ func shouldBalance(source, target *core.StoreInfo, kind core.ResourceKind) bool 
 	}
 	diffRatio := 1 - targetScore/sourceScore
 	diffCount := diffRatio * float64(sourceCount)
-	log.Debugf("[region %d] count diff is %v and balance diff is %v", region.GetId(), diffCount, minBalanceDiff(sourceCount))
+	log.Debugf("count diff is %v and balance diff is %v", diffCount, minBalanceDiff(sourceCount))
 	return diffCount >= minBalanceDiff(sourceCount)
 }
 
