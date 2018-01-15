@@ -390,7 +390,7 @@ func (s *Server) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest) (*
 		return &pdpb.AskSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 	if request.GetRegion() == nil {
-		return nil, errors.New("missing region key for split")
+		return nil, errors.New("missing region for split")
 	}
 	req := &pdpb.AskSplitRequest{
 		Region: request.Region,
