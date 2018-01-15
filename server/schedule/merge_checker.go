@@ -25,20 +25,13 @@ import (
 type MergeChecker struct {
 	cluster    Cluster
 	classifier namespace.Classifier
-	filters    []Filter
 }
 
 // NewMergeChecker creates a merge checker.
 func NewMergeChecker(cluster Cluster, classifier namespace.Classifier) *MergeChecker {
-	filters := []Filter{
-		NewHealthFilter(),
-		NewSnapshotCountFilter(),
-	}
-
 	return &MergeChecker{
 		cluster:    cluster,
 		classifier: classifier,
-		filters:    filters,
 	}
 }
 
@@ -87,7 +80,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 		return nil, nil
 	}
 
-	log.Infof("try to merge region {%v} into region {%v}", region, target)
+	log.Debugf("try to merge region {%v} into region {%v}", region, target)
 	op1, op2 := CreateMergeRegionOperator("merge-region", region, target, direction, OpMerge, steps)
 
 	return op1, op2

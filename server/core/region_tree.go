@@ -79,7 +79,7 @@ func (t *regionTree) update(region *metapb.Region) []*regionItem {
 	})
 
 	for _, item := range overlaps {
-		log.Infof("[region %d] delete region {%v}, cause overlapping with region {%v}", item.region.GetId(), item.region, region)
+		log.Debugf("[region %d] delete region {%v}, cause overlapping with region {%v}", item.region.GetId(), item.region, region)
 		t.tree.Delete(item)
 	}
 
