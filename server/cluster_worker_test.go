@@ -411,6 +411,27 @@ func (s *testClusterWorkerSuite) checkSearchRegions(cluster *RaftCluster, keys .
 	}
 }
 
+func (s *testClusterWorkerSuite) TestEmptyRegionKey(c *C) {
+	cluster := s.svr.GetRaftCluster()
+	c.Assert(cluster, NotNil)
+	r1, _ := cluster.GetRegionByKey([]byte("a"))
+	// Bootstrap region is ["", "").
+	c.Assert(r1.StartKey, HasLen, 0)
+	c.Assert(r1.EndKey, HasLen, 0)
+	// For the region key, nil is the same as "".
+	r1.StartKey, r1.EndKey = nil, nil
+	req := &pdpb.AskSplitRequest{
+		Header: newRequestHeader(s.clusterID),
+		Region: r1,
+	}
+	_, err := s.grpcPDClient.AskSplit(context.Background(), req)
+	c.Assert(err, IsNil)
+	// Without region will get an error.
+	req.Region = nil
+	_, err = s.grpcPDClient.AskSplit(context.Background(), req)
+	c.Assert(err, NotNil)
+}
+
 func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
