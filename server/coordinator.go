@@ -14,6 +14,7 @@
 package server
 
 import (
+	"container/list"
 	"context"
 	"fmt"
 	"sync"
@@ -22,7 +23,6 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
@@ -32,8 +32,7 @@ import (
 const (
 	runSchedulerCheckInterval = 3 * time.Second
 	collectFactor             = 0.8
-	historiesCacheSize        = 1000
-	eventsCacheSize           = 1000
+	historyKeepTime           = 5 * time.Minute
 	maxScheduleRetries        = 10
 
 	regionheartbeatSendChanCap = 1024
@@ -55,12 +54,13 @@ type coordinator struct {
 	cluster          *clusterInfo
 	limiter          *schedule.Limiter
 	replicaChecker   *schedule.ReplicaChecker
+	regionScatterer  *schedule.RegionScatterer
 	namespaceChecker *schedule.NamespaceChecker
 	mergeChecker     *schedule.MergeChecker
 	operators        map[uint64]*schedule.Operator
 	schedulers       map[string]*scheduleController
 	classifier       namespace.Classifier
-	histories        cache.Cache
+	histories        *list.List
 	hbStreams        *heartbeatStreams
 }
 
@@ -72,12 +72,13 @@ func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifie
 		cluster:          cluster,
 		limiter:          schedule.NewLimiter(),
 		replicaChecker:   schedule.NewReplicaChecker(cluster, classifier),
+		regionScatterer:  schedule.NewRegionScatterer(cluster, classifier),
 		namespaceChecker: schedule.NewNamespaceChecker(cluster, classifier),
 		mergeChecker:     schedule.NewMergeChecker(cluster, classifier),
 		operators:        make(map[uint64]*schedule.Operator),
 		schedulers:       make(map[string]*scheduleController),
 		classifier:       classifier,
-		histories:        cache.NewDefaultCache(historiesCacheSize),
+		histories:        list.New(),
 		hbStreams:        hbStreams,
 	}
 }
@@ -94,6 +95,7 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 		if op.IsFinish() {
 			log.Infof("[region %v] operator finish: %s", region.GetId(), op)
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
+			c.pushHistory(op)
 			c.removeOperator(op)
 		} else if timeout {
 			log.Infof("[region %v] operator timeout: %s", region.GetId(), op)
@@ -375,7 +377,6 @@ func (c *coordinator) addOperator(op *schedule.Operator) bool {
 		c.removeOperatorLocked(old)
 	}
 
-	c.histories.Put(regionID, op)
 	c.operators[regionID] = op
 	c.limiter.UpdateCounts(c.operators)
 
@@ -393,6 +394,25 @@ func isHigherPriorityOperator(new, old *schedule.Operator) bool {
 	return new.GetPriorityLevel() < old.GetPriorityLevel()
 }
 
+func (c *coordinator) pushHistory(op *schedule.Operator) {
+	c.Lock()
+	defer c.Unlock()
+	for _, h := range op.History() {
+		c.histories.PushFront(h)
+	}
+}
+
+func (c *coordinator) pruneHistory() {
+	c.Lock()
+	defer c.Unlock()
+	p := c.histories.Back()
+	for p != nil && time.Since(p.Value.(schedule.OperatorHistory).FinishTime) > historyKeepTime {
+		prev := p.Prev()
+		c.histories.Remove(p)
+		p = prev
+	}
+}
+
 func (c *coordinator) removeOperator(op *schedule.Operator) {
 	c.Lock()
 	defer c.Unlock()
@@ -403,7 +423,6 @@ func (c *coordinator) removeOperatorLocked(op *schedule.Operator) {
 	regionID := op.RegionID()
 	delete(c.operators, regionID)
 	c.limiter.UpdateCounts(c.operators)
-	c.histories.Put(regionID, op)
 	operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 }
 
@@ -425,31 +444,18 @@ func (c *coordinator) getOperators() []*schedule.Operator {
 	return operators
 }
 
-func (c *coordinator) getHistories() []*schedule.Operator {
+func (c *coordinator) getHistory(start time.Time) []schedule.OperatorHistory {
 	c.RLock()
 	defer c.RUnlock()
-
-	var operators []*schedule.Operator
-	for _, elem := range c.histories.Elems() {
-		operators = append(operators, elem.Value.(*schedule.Operator))
-	}
-
-	return operators
-}
-
-func (c *coordinator) getHistoriesOfKind(mask schedule.OperatorKind) []*schedule.Operator {
-	c.RLock()
-	defer c.RUnlock()
-
-	var operators []*schedule.Operator
-	for _, elem := range c.histories.Elems() {
-		op := elem.Value.(*schedule.Operator)
-		if op.Kind()&mask != 0 {
-			operators = append(operators, op)
+	histories := make([]schedule.OperatorHistory, 0, c.histories.Len())
+	for p := c.histories.Front(); p != nil; p = p.Next() {
+		history := p.Value.(schedule.OperatorHistory)
+		if history.FinishTime.Before(start) {
+			break
 		}
+		histories = append(histories, history)
 	}
-
-	return operators
+	return histories
 }
 
 func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule.OperatorStep) {

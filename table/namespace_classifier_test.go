@@ -143,25 +143,31 @@ func (s *testTableNamespaceSuite) TestNamespaceOperation(c *C) {
 	c.Assert(err, IsNil)
 
 	namespaces := tableClassifier.GetNamespaces()
-	c.Assert(len(namespaces), Equals, 1)
+	c.Assert(namespaces, HasLen, 1)
 	c.Assert(namespaces[0].Name, Equals, "test1")
 
 	// Add the same Name
 	err = tableClassifier.CreateNamespace("test1")
 	c.Assert(err, NotNil)
 
-	tableClassifier.CreateNamespace("test2")
+	// Add a new Namespace
+	err = tableClassifier.CreateNamespace("test2")
+	c.Assert(err, IsNil)
 
 	// Add tableID
 	err = tableClassifier.AddNamespaceTableID("test1", 1)
-	namespaces = tableClassifier.GetNamespaces()
 	c.Assert(err, IsNil)
+
+	namespaces = tableClassifier.GetNamespaces()
+	c.Assert(namespaces, HasLen, 2)
 	c.Assert(nsInfo.IsTableIDExist(1), IsTrue)
 
 	// Add storeID
 	err = tableClassifier.AddNamespaceStoreID("test1", 456)
-	namespaces = tableClassifier.GetNamespaces()
 	c.Assert(err, IsNil)
+
+	namespaces = tableClassifier.GetNamespaces()
+	c.Assert(namespaces, HasLen, 2)
 	c.Assert(nsInfo.IsStoreIDExist(456), IsTrue)
 
 	// Ensure that duplicate tableID cannot exist in one namespace

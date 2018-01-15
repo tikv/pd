@@ -42,13 +42,13 @@ func (s *testLogSuite) SetUpSuite(c *C) {
 }
 
 func (s *testLogSuite) TestStringToLogLevel(c *C) {
-	c.Assert(stringToLogLevel("fatal"), Equals, log.FatalLevel)
-	c.Assert(stringToLogLevel("ERROR"), Equals, log.ErrorLevel)
-	c.Assert(stringToLogLevel("warn"), Equals, log.WarnLevel)
-	c.Assert(stringToLogLevel("warning"), Equals, log.WarnLevel)
-	c.Assert(stringToLogLevel("debug"), Equals, log.DebugLevel)
-	c.Assert(stringToLogLevel("info"), Equals, log.InfoLevel)
-	c.Assert(stringToLogLevel("whatever"), Equals, log.InfoLevel)
+	c.Assert(StringToLogLevel("fatal"), Equals, log.FatalLevel)
+	c.Assert(StringToLogLevel("ERROR"), Equals, log.ErrorLevel)
+	c.Assert(StringToLogLevel("warn"), Equals, log.WarnLevel)
+	c.Assert(StringToLogLevel("warning"), Equals, log.WarnLevel)
+	c.Assert(StringToLogLevel("debug"), Equals, log.DebugLevel)
+	c.Assert(StringToLogLevel("info"), Equals, log.InfoLevel)
+	c.Assert(StringToLogLevel("whatever"), Equals, log.InfoLevel)
 }
 
 // TestLogging assure log format and log redirection works.

@@ -227,9 +227,14 @@ func (c *RaftCluster) GetRegionInfoByID(regionID uint64) *core.RegionInfo {
 	return c.cachedCluster.GetRegion(regionID)
 }
 
-// GetRegions gets regions from cluster.
-func (c *RaftCluster) GetRegions() []*metapb.Region {
+// GetMetaRegions gets regions from cluster.
+func (c *RaftCluster) GetMetaRegions() []*metapb.Region {
 	return c.cachedCluster.getMetaRegions()
+}
+
+// GetRegions returns all regions info in detail.
+func (c *RaftCluster) GetRegions() []*core.RegionInfo {
+	return c.cachedCluster.getRegions()
 }
 
 // GetRegionStats returns region statistics from cluster.
@@ -476,6 +481,7 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 			c.checkOperators()
 			c.checkStores()
 			c.collectMetrics()
+			c.coordinator.pruneHistory()
 		}
 	}
 }

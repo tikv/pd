@@ -235,6 +235,35 @@ func (mc *mockCluster) newMockRegionInfo(regionID uint64, leaderID uint64, follo
 	return core.NewRegionInfo(region, leader)
 }
 
+func (mc *mockCluster) applyOperator(op *schedule.Operator) {
+	region := mc.GetRegion(op.RegionID())
+	for !op.IsFinish() {
+		if step := op.Check(region); step != nil {
+			switch s := step.(type) {
+			case schedule.TransferLeader:
+				region.Leader = region.GetStorePeer(s.ToStore)
+			case schedule.AddPeer:
+				if region.GetStorePeer(s.ToStore) != nil {
+					panic("Add peer that exists")
+				}
+				peer := &metapb.Peer{
+					Id:      s.PeerID,
+					StoreId: s.ToStore,
+				}
+				region.Peers = append(region.Peers, peer)
+			case schedule.RemovePeer:
+				if region.GetStorePeer(s.FromStore) == nil {
+					panic("Remove peer that doesn't exist")
+				}
+				region.RemoveStorePeer(s.FromStore)
+			default:
+				panic("Unknown operator step")
+			}
+		}
+	}
+	mc.PutRegion(region)
+}
+
 func (mc *mockCluster) GetOpt() schedule.NamespaceOptions {
 	return mc.MockSchedulerOptions
 }

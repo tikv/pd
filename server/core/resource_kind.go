@@ -32,3 +32,14 @@ const (
 	// RegionKind indicates the region kind resource
 	RegionKind
 )
+
+func (k ResourceKind) String() string {
+	switch k {
+	case LeaderKind:
+		return "leader"
+	case RegionKind:
+		return "region"
+	default:
+		return "unknown"
+	}
+}

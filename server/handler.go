@@ -15,6 +15,7 @@ package server
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
@@ -52,6 +53,24 @@ func (h *Handler) GetSchedulers() ([]string, error) {
 		return nil, errors.Trace(err)
 	}
 	return c.getSchedulers(), nil
+}
+
+// GetStores returns all stores in the cluster.
+func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
+	cluster := h.s.GetRaftCluster()
+	if cluster == nil {
+		return nil, errors.Trace(errNotBootstrapped)
+	}
+	storeMetas := cluster.GetStores()
+	stores := make([]*core.StoreInfo, 0, len(storeMetas))
+	for _, s := range storeMetas {
+		store, err := cluster.GetStore(s.GetId())
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		stores = append(stores, store)
+	}
+	return stores, nil
 }
 
 // GetHotWriteRegions gets all hot write regions status
@@ -225,22 +244,13 @@ func (h *Handler) GetOperatorsOfKind(mask schedule.OperatorKind) ([]*schedule.Op
 	return results, nil
 }
 
-// GetHistoryOperators returns history operators
-func (h *Handler) GetHistoryOperators() ([]*schedule.Operator, error) {
+// GetHistory returns finished operators' history since start.
+func (h *Handler) GetHistory(start time.Time) ([]schedule.OperatorHistory, error) {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	return c.getHistories(), nil
-}
-
-// GetHistoryOperatorsOfKind returns history operators by Kind
-func (h *Handler) GetHistoryOperatorsOfKind(mask schedule.OperatorKind) ([]*schedule.Operator, error) {
-	c, err := h.getCoordinator()
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return c.getHistoriesOfKind(mask), nil
+	return c.getHistory(start), nil
 }
 
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.

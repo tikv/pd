@@ -106,7 +106,7 @@ const minWeight = 1e-6
 
 // LeaderScore returns the store's leader score: leaderCount / leaderWeight.
 func (s *StoreInfo) LeaderScore() float64 {
-	size := math.Min(1, float64(s.LeaderSize))
+	size := math.Max(1, float64(s.LeaderSize))
 	if s.LeaderWeight <= 0 {
 		return size / minWeight
 	}
@@ -115,7 +115,7 @@ func (s *StoreInfo) LeaderScore() float64 {
 
 // RegionScore returns the store's region score: regionSize / regionWeight.
 func (s *StoreInfo) RegionScore() float64 {
-	size := math.Min(1, float64(s.RegionSize))
+	size := math.Max(1, float64(s.RegionSize))
 	if s.RegionWeight <= 0 {
 		return size / minWeight
 	}

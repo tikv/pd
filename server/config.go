@@ -268,6 +268,12 @@ func (c *Config) adjust() error {
 
 	adjustString(&c.InitialClusterState, defualtInitialClusterState)
 
+	if len(c.Join) > 0 {
+		if _, err := url.Parse(c.Join); err != nil {
+			return errors.Errorf("failed to parse join addr:%s, err:%v", c.Join, err)
+		}
+	}
+
 	adjustInt64(&c.LeaderLease, defaultLeaderLease)
 
 	adjustDuration(&c.TsoSaveInterval, time.Duration(defaultLeaderLease)*time.Second)
@@ -454,6 +460,9 @@ type SecurityConfig struct {
 
 // ToTLSConfig generatres tls config.
 func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
+	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
+		return nil, nil
+	}
 	tlsInfo := transport.TLSInfo{
 		CertFile:      s.CertPath,
 		KeyFile:       s.KeyPath,
