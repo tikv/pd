@@ -14,10 +14,10 @@
 package schedule
 
 import (
+	log "github.com/Sirupsen/logrus"
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	log "github.com/Sirupsen/logrus"
 )
 
 // Filter is an interface to filter source and target store.
