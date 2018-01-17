@@ -125,9 +125,7 @@ func (plp PromoteLearnerPeer) IsFinish(region *core.RegionInfo) bool {
 }
 
 // Influence calculates the store difference that current step make
-func (plp PromoteLearnerPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
-	return
-}
+func (plp PromoteLearnerPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
 
 // RemovePeer is an OperatorStep that removes a region peer.
 type RemovePeer struct {
