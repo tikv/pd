@@ -69,7 +69,7 @@ func (c *LRU) Get(key uint64) (interface{}, bool) {
 	return nil, false
 }
 
-// Peek reads an item from cache. The action is no considerd 'Use'.
+// Peek reads an item from cache. The action is no considered 'Use'.
 func (c *LRU) Peek(key uint64) (interface{}, bool) {
 	if ele, ok := c.cache[key]; ok {
 		return ele.Value.(*Item).Value, true

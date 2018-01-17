@@ -21,7 +21,7 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 )
 
-// namespaceCluster is part of a global cluster that contains stores and reigons
+// namespaceCluster is part of a global cluster that contains stores and regions
 // within a specific namespace.
 type namespaceCluster struct {
 	schedule.Cluster

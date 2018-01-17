@@ -19,7 +19,7 @@ import (
 
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/faketikv/cases"
-	log "github.com/sirupsen/logrus"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
 )
 
 // Driver promotes the cluster status change.
@@ -64,9 +64,9 @@ func (d *Driver) Prepare() error {
 	err = d.client.Bootstrap(ctx, store, region)
 	cancel()
 	if err != nil {
-		log.Fatal("bootstrapped error: ", err)
+		simutil.Logger.Fatal("bootstrapped error: ", err)
 	} else {
-		log.Info("Bootstrap sucess")
+		simutil.Logger.Debug("Bootstrap success")
 	}
 
 	// Setup alloc id.
@@ -92,6 +92,10 @@ func (d *Driver) Prepare() error {
 // Tick invokes nodes' Tick.
 func (d *Driver) Tick() {
 	d.tickCount++
+	d.clusterInfo.stepRegions()
+	if d.conf.WrittenBytes != nil {
+		d.clusterInfo.updateRegionSize(d.conf.WrittenBytes(d.tickCount))
+	}
 	for _, n := range d.clusterInfo.Nodes {
 		n.Tick()
 	}
@@ -115,16 +119,19 @@ func (d *Driver) TickCount() int64 {
 }
 
 // AddNode adds new node.
-func (d *Driver) AddNode() {
-	id, err := d.client.AllocID(context.Background())
+func (d *Driver) AddNode(id uint64) {
+	if _, ok := d.clusterInfo.Nodes[id]; ok {
+		simutil.Logger.Infof("Node %d already existed", id)
+		return
+	}
 	n, err := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), d.addr)
 	if err != nil {
-		log.Info("Add node failed:", err)
+		simutil.Logger.Debug("Add node failed:", err)
 		return
 	}
 	err = n.Start()
 	if err != nil {
-		log.Info("Start node failed:", err)
+		simutil.Logger.Debug("Start node failed:", err)
 		return
 	}
 	n.clusterInfo = d.clusterInfo
