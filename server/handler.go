@@ -371,18 +371,18 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		return errors.Trace(err)
 	}
 
-	var step []OperatorStep
+	var steps []schedule.OperatorStep
 	if c.cluster.IsEnableRaftLearner() {
-		step = []OperatorStep{
-			AddLearnerPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
-			PromoteLearnerPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
+		steps = []schedule.OperatorStep{
+			schedule.AddLearnerPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
+			schedule.PromoteLearnerPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
 		}
 	} else {
-		step = []OperatorStep{
-			AddPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
+		steps = []schedule.OperatorStep {
+			schedule.AddPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
 		}
 	}
-	op := schedule.NewOperator("adminAddPeer", regionID, schedule.OpAdmin|schedule.OpRegion, step)
+	op := schedule.NewOperator("adminAddPeer", regionID, schedule.OpAdmin|schedule.OpRegion, steps...)
 	c.addOperator(op)
 	return nil
 }

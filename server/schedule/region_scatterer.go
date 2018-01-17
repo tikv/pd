@@ -121,7 +121,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
 		r.selected.put(newPeer.GetStoreId())
 
 		op := CreateMovePeerOperator("scatter-peer", region, OpAdmin,
-			peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+			peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId(), r.cluster.IsEnableRaftLearner())
 		steps = append(steps, op.steps...)
 	}
 

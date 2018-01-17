@@ -59,8 +59,8 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		Leader:               heartbeat.GetLeader(),
 		DownPeers:            heartbeat.GetDownPeers(),
 		PendingPeers:         heartbeat.GetPendingPeers(),
-		PendingLearnerPeers:  heartbeat.GetPendingLearnerPeer(),
-		CompleteLearnerPeers: heartbeat.GetCompleteLearnerPeer(),
+		PendingLearnerPeers:  heartbeat.GetPendingLearnerPeers(),
+		CompleteLearnerPeers: heartbeat.GetCompleteLearnerPeers(),
 		WrittenBytes:         heartbeat.GetBytesWritten(),
 		ReadBytes:            heartbeat.GetBytesRead(),
 		ApproximateSize:      int64(math.Ceil(float64(heartbeat.GetApproximateSize()) / 1e6)), // use size of MB as unit
@@ -527,7 +527,7 @@ func (r *RegionsInfo) GetStorePendingLearnerPeerCount(storeID uint64) int {
 
 // GetStoreCompleteLearnerPeerCount gets the total count of a store's region that includes complete learner peer
 func (r *RegionsInfo) GetStoreCompleteLearnerPeerCount(storeID uint64) int {
-	return r.CompleteLearnerPeers[storeID].Len()
+	return r.completeLearnerPeers[storeID].Len()
 }
 
 // GetStoreLeaderCount get the total count of a store's leader RegionInfo
