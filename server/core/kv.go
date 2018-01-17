@@ -207,7 +207,12 @@ func (kv *KV) LoadRegions(regions *RegionsInfo, rangeLimit int) error {
 			}
 
 			nextID = region.GetId() + 1
-			regions.SetRegion(NewRegionInfo(region, nil))
+			overlaps := regions.SetRegion(NewRegionInfo(region, nil))
+			for _, item := range overlaps {
+				if err := kv.DeleteRegion(item); err != nil {
+					return errors.Trace(err)
+				}
+			}
 		}
 
 		if len(res) < int(rangeLimit) {

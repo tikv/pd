@@ -15,7 +15,7 @@ package server
 
 import (
 	"math/rand"
-	
+
 	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
