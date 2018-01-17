@@ -38,7 +38,6 @@ const (
 	CharTranspose = 20
 	CharCtrlU     = 21
 	CharCtrlW     = 23
-	CharCtrlY     = 25
 	CharCtrlZ     = 26
 	CharEsc       = 27
 	CharEscapeEx  = 91
@@ -83,9 +82,7 @@ func Restore(fd int, state *State) error {
 	if err != nil {
 		// errno 0 means everything is ok :)
 		if err.Error() == "errno 0" {
-			return nil
-		} else {
-			return err
+			err = nil
 		}
 	}
 	return nil

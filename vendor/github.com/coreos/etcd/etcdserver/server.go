@@ -82,8 +82,7 @@ const (
 	releaseDelayAfterSnapshot = 30 * time.Second
 
 	// maxPendingRevokes is the maximum number of outstanding expired lease revocations.
-	maxPendingRevokes          = 16
-	recommendedMaxRequestBytes = 10 * 1024 * 1024
+	maxPendingRevokes = 16
 )
 
 var (
@@ -259,10 +258,6 @@ func NewServer(cfg *ServerConfig) (srv *EtcdServer, err error) {
 		id types.ID
 		cl *membership.RaftCluster
 	)
-
-	if cfg.MaxRequestBytes > recommendedMaxRequestBytes {
-		plog.Warningf("MaxRequestBytes %v exceeds maximum recommended size %v", cfg.MaxRequestBytes, recommendedMaxRequestBytes)
-	}
 
 	if terr := fileutil.TouchDirAll(cfg.DataDir); terr != nil {
 		return nil, fmt.Errorf("cannot access data directory: %v", terr)
@@ -1362,7 +1357,8 @@ func (s *EtcdServer) applyEntryNormal(e *raftpb.Entry) {
 			Action:   pb.AlarmRequest_ACTIVATE,
 			Alarm:    pb.AlarmType_NOSPACE,
 		}
-		s.raftRequest(s.ctx, pb.InternalRaftRequest{Alarm: a})
+		r := pb.InternalRaftRequest{Alarm: a}
+		s.processInternalRaftRequest(s.ctx, r)
 		s.w.Trigger(id, ar)
 	})
 }

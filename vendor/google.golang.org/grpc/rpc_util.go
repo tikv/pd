@@ -1,18 +1,33 @@
 /*
  *
- * Copyright 2014 gRPC authors.
+ * Copyright 2014, Google Inc.
+ * All rights reserved.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met:
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     * Redistributions of source code must retain the above copyright
+ * notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above
+ * copyright notice, this list of conditions and the following disclaimer
+ * in the documentation and/or other materials provided with the
+ * distribution.
+ *     * Neither the name of Google Inc. nor the names of its
+ * contributors may be used to endorse or promote products derived from
+ * this software without specific prior written permission.
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
 
@@ -21,12 +36,10 @@ package grpc
 import (
 	"bytes"
 	"compress/gzip"
-	stdctx "context"
 	"encoding/binary"
 	"io"
 	"io/ioutil"
 	"math"
-	"os"
 	"sync"
 	"time"
 
@@ -65,7 +78,6 @@ func NewGZIPCompressor() Compressor {
 
 func (c *gzipCompressor) Do(w io.Writer, p []byte) error {
 	z := c.pool.Get().(*gzip.Writer)
-	defer c.pool.Put(z)
 	z.Reset(w)
 	if _, err := z.Write(p); err != nil {
 		return err
@@ -134,9 +146,7 @@ type callInfo struct {
 	creds                 credentials.PerRPCCredentials
 }
 
-func defaultCallInfo() *callInfo {
-	return &callInfo{failFast: true}
-}
+var defaultCallInfo = callInfo{failFast: true}
 
 // CallOption configures a Call before it starts or extracts information from
 // a Call after it completes.
@@ -249,7 +259,7 @@ type parser struct {
 	r io.Reader
 
 	// The header of a gRPC message. Find more detail
-	// at https://grpc.io/docs/guides/wire.html.
+	// at http://www.grpc.io/docs/guides/wire.html.
 	header [5]byte
 }
 
@@ -292,20 +302,19 @@ func (p *parser) recvMsg(maxReceiveMessageSize int) (pf payloadFormat, msg []byt
 	return pf, msg, nil
 }
 
-// encode serializes msg and returns a buffer of message header and a buffer of msg.
-// If msg is nil, it generates the message header and an empty msg buffer.
-func encode(c Codec, msg interface{}, cp Compressor, cbuf *bytes.Buffer, outPayload *stats.OutPayload) ([]byte, []byte, error) {
-	var b []byte
-	const (
-		payloadLen = 1
-		sizeLen    = 4
+// encode serializes msg and prepends the message header. If msg is nil, it
+// generates the message header of 0 message length.
+func encode(c Codec, msg interface{}, cp Compressor, cbuf *bytes.Buffer, outPayload *stats.OutPayload) ([]byte, error) {
+	var (
+		b      []byte
+		length uint
 	)
-
 	if msg != nil {
 		var err error
+		// TODO(zhaoq): optimize to reduce memory alloc and copying.
 		b, err = c.Marshal(msg)
 		if err != nil {
-			return nil, nil, Errorf(codes.Internal, "grpc: error while marshaling: %v", err.Error())
+			return nil, Errorf(codes.Internal, "grpc: error while marshaling: %v", err.Error())
 		}
 		if outPayload != nil {
 			outPayload.Payload = msg
@@ -315,28 +324,39 @@ func encode(c Codec, msg interface{}, cp Compressor, cbuf *bytes.Buffer, outPayl
 		}
 		if cp != nil {
 			if err := cp.Do(cbuf, b); err != nil {
-				return nil, nil, Errorf(codes.Internal, "grpc: error while compressing: %v", err.Error())
+				return nil, Errorf(codes.Internal, "grpc: error while compressing: %v", err.Error())
 			}
 			b = cbuf.Bytes()
 		}
+		length = uint(len(b))
+	}
+	if length > math.MaxUint32 {
+		return nil, Errorf(codes.ResourceExhausted, "grpc: message too large (%d bytes)", length)
 	}
 
-	if uint(len(b)) > math.MaxUint32 {
-		return nil, nil, Errorf(codes.ResourceExhausted, "grpc: message too large (%d bytes)", len(b))
-	}
+	const (
+		payloadLen = 1
+		sizeLen    = 4
+	)
 
-	bufHeader := make([]byte, payloadLen+sizeLen)
+	var buf = make([]byte, payloadLen+sizeLen+len(b))
+
+	// Write payload format
 	if cp == nil {
-		bufHeader[0] = byte(compressionNone)
+		buf[0] = byte(compressionNone)
 	} else {
-		bufHeader[0] = byte(compressionMade)
+		buf[0] = byte(compressionMade)
 	}
 	// Write length of b into buf
-	binary.BigEndian.PutUint32(bufHeader[payloadLen:], uint32(len(b)))
+	binary.BigEndian.PutUint32(buf[1:], uint32(length))
+	// Copy encoded msg to buf
+	copy(buf[5:], b)
+
 	if outPayload != nil {
-		outPayload.WireLength = payloadLen + sizeLen + len(b)
+		outPayload.WireLength = len(buf)
 	}
-	return bufHeader, b, nil
+
+	return buf, nil
 }
 
 func checkRecvPayload(pf payloadFormat, recvCompress string, dc Decompressor) error {
@@ -388,15 +408,14 @@ func recv(p *parser, c Codec, s *transport.Stream, dc Decompressor, m interface{
 }
 
 type rpcInfo struct {
-	failfast      bool
 	bytesSent     bool
 	bytesReceived bool
 }
 
 type rpcInfoContextKey struct{}
 
-func newContextWithRPCInfo(ctx context.Context, failfast bool) context.Context {
-	return context.WithValue(ctx, rpcInfoContextKey{}, &rpcInfo{failfast: failfast})
+func newContextWithRPCInfo(ctx context.Context) context.Context {
+	return context.WithValue(ctx, rpcInfoContextKey{}, &rpcInfo{})
 }
 
 func rpcInfoFromContext(ctx context.Context) (s *rpcInfo, ok bool) {
@@ -406,61 +425,9 @@ func rpcInfoFromContext(ctx context.Context) (s *rpcInfo, ok bool) {
 
 func updateRPCInfoInContext(ctx context.Context, s rpcInfo) {
 	if ss, ok := rpcInfoFromContext(ctx); ok {
-		ss.bytesReceived = s.bytesReceived
-		ss.bytesSent = s.bytesSent
+		*ss = s
 	}
 	return
-}
-
-// toRPCErr converts an error into an error from the status package.
-func toRPCErr(err error) error {
-	if _, ok := status.FromError(err); ok {
-		return err
-	}
-	switch e := err.(type) {
-	case transport.StreamError:
-		return status.Error(e.Code, e.Desc)
-	case transport.ConnectionError:
-		return status.Error(codes.Unavailable, e.Desc)
-	default:
-		switch err {
-		case context.DeadlineExceeded, stdctx.DeadlineExceeded:
-			return status.Error(codes.DeadlineExceeded, err.Error())
-		case context.Canceled, stdctx.Canceled:
-			return status.Error(codes.Canceled, err.Error())
-		case ErrClientConnClosing:
-			return status.Error(codes.FailedPrecondition, err.Error())
-		}
-	}
-	return status.Error(codes.Unknown, err.Error())
-}
-
-// convertCode converts a standard Go error into its canonical code. Note that
-// this is only used to translate the error returned by the server applications.
-func convertCode(err error) codes.Code {
-	switch err {
-	case nil:
-		return codes.OK
-	case io.EOF:
-		return codes.OutOfRange
-	case io.ErrClosedPipe, io.ErrNoProgress, io.ErrShortBuffer, io.ErrShortWrite, io.ErrUnexpectedEOF:
-		return codes.FailedPrecondition
-	case os.ErrInvalid:
-		return codes.InvalidArgument
-	case context.Canceled, stdctx.Canceled:
-		return codes.Canceled
-	case context.DeadlineExceeded, stdctx.DeadlineExceeded:
-		return codes.DeadlineExceeded
-	}
-	switch {
-	case os.IsExist(err):
-		return codes.AlreadyExists
-	case os.IsNotExist(err):
-		return codes.NotFound
-	case os.IsPermission(err):
-		return codes.PermissionDenied
-	}
-	return codes.Unknown
 }
 
 // Code returns the error code for err if it was produced by the rpc system.
@@ -509,7 +476,7 @@ type MethodConfig struct {
 	// MaxReqSize is the maximum allowed payload size for an individual request in a
 	// stream (client->server) in bytes. The size which is measured is the serialized
 	// payload after per-message compression (but before stream compression) in bytes.
-	// The actual value used is the minimum of the value specified here and the value set
+	// The actual value used is the minumum of the value specified here and the value set
 	// by the application via the gRPC client API. If either one is not set, then the other
 	// will be used.  If neither is set, then the built-in default is used.
 	MaxReqSize *int
@@ -552,12 +519,6 @@ func getMaxSize(mcMax, doptMax *int, defaultVal int) *int {
 	return doptMax
 }
 
-// SupportPackageIsVersion3 is referenced from generated protocol buffer files.
-// The latest support package version is 4.
-// SupportPackageIsVersion3 is kept for compatibility. It will be removed in the
-// next support package version update.
-const SupportPackageIsVersion3 = true
-
 // SupportPackageIsVersion4 is referenced from generated protocol buffer files
 // to assert that that code is compatible with this version of the grpc package.
 //
@@ -567,6 +528,6 @@ const SupportPackageIsVersion3 = true
 const SupportPackageIsVersion4 = true
 
 // Version is the current grpc version.
-const Version = "1.7.5"
+const Version = "1.4.2"
 
 const grpcUA = "grpc-go/" + Version

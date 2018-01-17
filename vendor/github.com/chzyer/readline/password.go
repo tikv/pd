@@ -25,7 +25,6 @@ func (o *opPassword) PasswordConfig() *Config {
 		InterruptPrompt: "\n",
 		EOFPrompt:       "\n",
 		HistoryLimit:    -1,
-		Painter:         &defaultPainter{},
 
 		Stdout: o.o.cfg.Stdout,
 		Stderr: o.o.cfg.Stderr,

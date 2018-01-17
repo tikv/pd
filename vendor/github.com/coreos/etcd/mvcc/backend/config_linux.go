@@ -17,7 +17,7 @@ package backend
 import (
 	"syscall"
 
-	bolt "github.com/coreos/bbolt"
+	"github.com/boltdb/bolt"
 )
 
 // syscall.MAP_POPULATE on linux 2.6.23+ does sequential read-ahead

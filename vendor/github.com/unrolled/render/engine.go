@@ -5,13 +5,12 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"html/template"
-	"io"
 	"net/http"
 )
 
 // Engine is the generic interface for all responses.
 type Engine interface {
-	Render(io.Writer, interface{}) error
+	Render(http.ResponseWriter, interface{}) error
 }
 
 // Head defines the basic ContentType and Status fields.
@@ -67,21 +66,19 @@ func (h Head) Write(w http.ResponseWriter) {
 }
 
 // Render a data response.
-func (d Data) Render(w io.Writer, v interface{}) error {
-	if hw, ok := w.(http.ResponseWriter); ok {
-		c := hw.Header().Get(ContentType)
-		if c != "" {
-			d.Head.ContentType = c
-		}
-		d.Head.Write(hw)
+func (d Data) Render(w http.ResponseWriter, v interface{}) error {
+	c := w.Header().Get(ContentType)
+	if c != "" {
+		d.Head.ContentType = c
 	}
 
+	d.Head.Write(w)
 	w.Write(v.([]byte))
 	return nil
 }
 
 // Render a HTML response.
-func (h HTML) Render(w io.Writer, binding interface{}) error {
+func (h HTML) Render(w http.ResponseWriter, binding interface{}) error {
 	// Retrieve a buffer from the pool to write to.
 	out := bufPool.Get()
 	err := h.Templates.ExecuteTemplate(out, h.Name, binding)
@@ -89,9 +86,7 @@ func (h HTML) Render(w io.Writer, binding interface{}) error {
 		return err
 	}
 
-	if hw, ok := w.(http.ResponseWriter); ok {
-		h.Head.Write(hw)
-	}
+	h.Head.Write(w)
 	out.WriteTo(w)
 
 	// Return the buffer to the pool.
@@ -100,7 +95,7 @@ func (h HTML) Render(w io.Writer, binding interface{}) error {
 }
 
 // Render a JSON response.
-func (j JSON) Render(w io.Writer, v interface{}) error {
+func (j JSON) Render(w http.ResponseWriter, v interface{}) error {
 	if j.StreamingJSON {
 		return j.renderStreamingJSON(w, v)
 	}
@@ -126,9 +121,7 @@ func (j JSON) Render(w io.Writer, v interface{}) error {
 	}
 
 	// JSON marshaled fine, write out the result.
-	if hw, ok := w.(http.ResponseWriter); ok {
-		j.Head.Write(hw)
-	}
+	j.Head.Write(w)
 	if len(j.Prefix) > 0 {
 		w.Write(j.Prefix)
 	}
@@ -136,10 +129,8 @@ func (j JSON) Render(w io.Writer, v interface{}) error {
 	return nil
 }
 
-func (j JSON) renderStreamingJSON(w io.Writer, v interface{}) error {
-	if hw, ok := w.(http.ResponseWriter); ok {
-		j.Head.Write(hw)
-	}
+func (j JSON) renderStreamingJSON(w http.ResponseWriter, v interface{}) error {
+	j.Head.Write(w)
 	if len(j.Prefix) > 0 {
 		w.Write(j.Prefix)
 	}
@@ -148,7 +139,7 @@ func (j JSON) renderStreamingJSON(w io.Writer, v interface{}) error {
 }
 
 // Render a JSONP response.
-func (j JSONP) Render(w io.Writer, v interface{}) error {
+func (j JSONP) Render(w http.ResponseWriter, v interface{}) error {
 	var result []byte
 	var err error
 
@@ -162,9 +153,7 @@ func (j JSONP) Render(w io.Writer, v interface{}) error {
 	}
 
 	// JSON marshaled fine, write out the result.
-	if hw, ok := w.(http.ResponseWriter); ok {
-		j.Head.Write(hw)
-	}
+	j.Head.Write(w)
 	w.Write([]byte(j.Callback + "("))
 	w.Write(result)
 	w.Write([]byte(");"))
@@ -177,21 +166,19 @@ func (j JSONP) Render(w io.Writer, v interface{}) error {
 }
 
 // Render a text response.
-func (t Text) Render(w io.Writer, v interface{}) error {
-	if hw, ok := w.(http.ResponseWriter); ok {
-		c := hw.Header().Get(ContentType)
-		if c != "" {
-			t.Head.ContentType = c
-		}
-		t.Head.Write(hw)
+func (t Text) Render(w http.ResponseWriter, v interface{}) error {
+	c := w.Header().Get(ContentType)
+	if c != "" {
+		t.Head.ContentType = c
 	}
 
+	t.Head.Write(w)
 	w.Write([]byte(v.(string)))
 	return nil
 }
 
 // Render an XML response.
-func (x XML) Render(w io.Writer, v interface{}) error {
+func (x XML) Render(w http.ResponseWriter, v interface{}) error {
 	var result []byte
 	var err error
 
@@ -206,9 +193,7 @@ func (x XML) Render(w io.Writer, v interface{}) error {
 	}
 
 	// XML marshaled fine, write out the result.
-	if hw, ok := w.(http.ResponseWriter); ok {
-		x.Head.Write(hw)
-	}
+	x.Head.Write(w)
 	if len(x.Prefix) > 0 {
 		w.Write(x.Prefix)
 	}

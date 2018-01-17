@@ -372,7 +372,12 @@ func (c *httpClusterClient) Do(ctx context.Context, act httpAction) (*http.Respo
 			if err == context.Canceled || err == context.DeadlineExceeded {
 				return nil, nil, err
 			}
-		} else if resp.StatusCode/100 == 5 {
+			if isOneShot {
+				return nil, nil, err
+			}
+			continue
+		}
+		if resp.StatusCode/100 == 5 {
 			switch resp.StatusCode {
 			case http.StatusInternalServerError, http.StatusServiceUnavailable:
 				// TODO: make sure this is a no leader response
@@ -380,16 +385,10 @@ func (c *httpClusterClient) Do(ctx context.Context, act httpAction) (*http.Respo
 			default:
 				cerr.Errors = append(cerr.Errors, fmt.Errorf("client: etcd member %s returns server error [%s]", eps[k].String(), http.StatusText(resp.StatusCode)))
 			}
-			err = cerr.Errors[0]
-		}
-		if err != nil {
-			if !isOneShot {
-				continue
+			if isOneShot {
+				return nil, nil, cerr.Errors[0]
 			}
-			c.Lock()
-			c.pinned = (k + 1) % leps
-			c.Unlock()
-			return nil, nil, err
+			continue
 		}
 		if k != pinned {
 			c.Lock()

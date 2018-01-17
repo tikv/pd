@@ -1,18 +1,32 @@
 /*
+ * Copyright 2016, Google Inc.
+ * All rights reserved.
  *
- * Copyright 2016 gRPC authors.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met:
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ *     * Redistributions of source code must retain the above copyright
+ * notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above
+ * copyright notice, this list of conditions and the following disclaimer
+ * in the documentation and/or other materials provided with the
+ * distribution.
+ *     * Neither the name of Google Inc. nor the names of its
+ * contributors may be used to endorse or promote products derived from
+ * this software without specific prior written permission.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
 
@@ -33,7 +47,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"golang.org/x/net/context"
 	"golang.org/x/net/http2"
 	"google.golang.org/grpc/codes"
@@ -122,10 +135,6 @@ type serverHandlerTransport struct {
 	// ServeHTTP (HandleStreams) goroutine. The channel is closed
 	// when WriteStatus is called.
 	writes chan func()
-
-	// block concurrent WriteStatus calls
-	// e.g. grpc/(*serverStream).SendMsg/RecvMsg
-	writeStatusMu sync.Mutex
 }
 
 func (ht *serverHandlerTransport) Close() error {
@@ -172,13 +181,11 @@ func (ht *serverHandlerTransport) do(fn func()) error {
 		case <-ht.closedCh:
 			return ErrConnClosing
 		}
+
 	}
 }
 
 func (ht *serverHandlerTransport) WriteStatus(s *Stream, st *status.Status) error {
-	ht.writeStatusMu.Lock()
-	defer ht.writeStatusMu.Unlock()
-
 	err := ht.do(func() {
 		ht.writeCommonHeaders(s)
 
@@ -193,15 +200,7 @@ func (ht *serverHandlerTransport) WriteStatus(s *Stream, st *status.Status) erro
 			h.Set("Grpc-Message", encodeGrpcMessage(m))
 		}
 
-		if p := st.Proto(); p != nil && len(p.Details) > 0 {
-			stBytes, err := proto.Marshal(p)
-			if err != nil {
-				// TODO: return error instead, when callers are able to handle it.
-				panic(err)
-			}
-
-			h.Set("Grpc-Status-Details-Bin", encodeBinHeader(stBytes))
-		}
+		// TODO: Support Grpc-Status-Details-Bin
 
 		if md := s.Trailer(); len(md) > 0 {
 			for k, vv := range md {
@@ -217,11 +216,7 @@ func (ht *serverHandlerTransport) WriteStatus(s *Stream, st *status.Status) erro
 			}
 		}
 	})
-
-	if err == nil { // transport has not been closed
-		ht.Close()
-		close(ht.writes)
-	}
+	close(ht.writes)
 	return err
 }
 
@@ -244,17 +239,16 @@ func (ht *serverHandlerTransport) writeCommonHeaders(s *Stream) {
 	// and https://golang.org/pkg/net/http/#example_ResponseWriter_trailers
 	h.Add("Trailer", "Grpc-Status")
 	h.Add("Trailer", "Grpc-Message")
-	h.Add("Trailer", "Grpc-Status-Details-Bin")
+	// TODO: Support Grpc-Status-Details-Bin
 
 	if s.sendCompress != "" {
 		h.Set("Grpc-Encoding", s.sendCompress)
 	}
 }
 
-func (ht *serverHandlerTransport) Write(s *Stream, hdr []byte, data []byte, opts *Options) error {
+func (ht *serverHandlerTransport) Write(s *Stream, data []byte, opts *Options) error {
 	return ht.do(func() {
 		ht.writeCommonHeaders(s)
-		ht.rw.Write(hdr)
 		ht.rw.Write(data)
 		if !opts.Delay {
 			ht.rw.(http.Flusher).Flush()
@@ -345,11 +339,11 @@ func (ht *serverHandlerTransport) HandleStreams(startStream func(*Stream), trace
 		for buf := make([]byte, readSize); ; {
 			n, err := req.Body.Read(buf)
 			if n > 0 {
-				s.buf.put(recvMsg{data: buf[:n:n]})
+				s.buf.put(&recvMsg{data: buf[:n:n]})
 				buf = buf[n:]
 			}
 			if err != nil {
-				s.buf.put(recvMsg{err: mapRecvMsgError(err)})
+				s.buf.put(&recvMsg{err: mapRecvMsgError(err)})
 				return
 			}
 			if len(buf) == 0 {

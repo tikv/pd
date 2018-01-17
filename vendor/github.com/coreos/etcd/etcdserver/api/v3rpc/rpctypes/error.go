@@ -17,7 +17,6 @@ package rpctypes
 import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 var (
@@ -188,11 +187,4 @@ func Error(err error) error {
 		return err
 	}
 	return EtcdError{code: grpc.Code(verr), desc: grpc.ErrorDesc(verr)}
-}
-
-func ErrorDesc(err error) string {
-	if s, ok := status.FromError(err); ok {
-		return s.Message()
-	}
-	return err.Error()
 }

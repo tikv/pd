@@ -42,10 +42,7 @@ var (
 	newBenchMem    = flag.Bool("check.bmem", false, "Report memory benchmarks")
 	newListFlag    = flag.Bool("check.list", false, "List the names of all tests that will be run")
 	newWorkFlag    = flag.Bool("check.work", false, "Display and do not remove the test working directory")
-	newExcludeFlag = flag.String("check.exclude", "", "Regular expression to exclude tests to run")
 )
-
-var CustomVerboseFlag bool
 
 // TestingT runs all test suites registered with the Suite function,
 // printing results to stdout, and reporting any failures back to
@@ -57,13 +54,12 @@ func TestingT(testingT *testing.T) {
 	}
 	conf := &RunConf{
 		Filter:        *oldFilterFlag + *newFilterFlag,
-		Verbose:       *oldVerboseFlag || *newVerboseFlag || CustomVerboseFlag,
+		Verbose:       *oldVerboseFlag || *newVerboseFlag,
 		Stream:        *oldStreamFlag || *newStreamFlag,
 		Benchmark:     *oldBenchFlag || *newBenchFlag,
 		BenchmarkTime: benchTime,
 		BenchmarkMem:  *newBenchMem,
 		KeepWorkDir:   *oldWorkFlag || *newWorkFlag,
-		Exclude:       *newExcludeFlag,
 	}
 	if *oldListFlag || *newListFlag {
 		w := bufio.NewWriter(os.Stdout)
