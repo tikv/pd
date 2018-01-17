@@ -330,24 +330,24 @@ func (rm *regionMap) TotalSize() int64 {
 
 // RegionsInfo for export
 type RegionsInfo struct {
-	tree                *regionTree
-	regions             *regionMap            // regionID -> regionInfo
-	leaders             map[uint64]*regionMap // storeID -> regionID -> regionInfo
-	followers           map[uint64]*regionMap // storeID -> regionID -> regionInfo
-	pendingPeers        map[uint64]*regionMap // storeID -> regionID -> regionInfo
-	pendingLearnerPeers map[uint64]*regionMap // storeID -> regionID -> regionInfo
-	completeLearnerPeers map[uint64]&regionMap // storeID -> regionID -> regionInfo
+	tree                 *regionTree
+	regions              *regionMap            // regionID -> regionInfo
+	leaders              map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	followers            map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	pendingPeers         map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	pendingLearnerPeers  map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	completeLearnerPeers map[uint64]*regionMap // storeID -> regionID -> regionInfo
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
 func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
-		tree:         newRegionTree(),
-		regions:      newRegionMap(),
-		leaders:      make(map[uint64]*regionMap),
-		followers:    make(map[uint64]*regionMap),
-		pendingPeers: make(map[uint64]*regionMap),
-		pendingLearnerPeers: make(map[uint64]*regionMap),
+		tree:                 newRegionTree(),
+		regions:              newRegionMap(),
+		leaders:              make(map[uint64]*regionMap),
+		followers:            make(map[uint64]*regionMap),
+		pendingPeers:         make(map[uint64]*regionMap),
+		pendingLearnerPeers:  make(map[uint64]*regionMap),
 		completeLearnerPeers: make(map[uint64]*regionMap),
 	}
 }
