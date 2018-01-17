@@ -386,7 +386,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	// Mark isNew if the region in cache does not have leader.
 	var saveKV, saveCache, isNew bool
 	if origin == nil {
-		log.Infof("[region %d] Insert new region {%v}, size is %d", region.GetId(), region, region.ApproximateSize)
+		log.Infof("[region %d] Insert new region {%v}", region.GetId(), region)
 		saveKV, saveCache, isNew = true, true, true
 	} else {
 		r := region.GetRegionEpoch()
@@ -396,7 +396,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			return errors.Trace(errRegionIsStale(region.Region, origin.Region))
 		}
 		if r.GetVersion() > o.GetVersion() {
-			log.Infof("[region %d] %s, Version changed from {%d} to {%d}, size is %d ", region.GetId(), core.DiffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion(), region.ApproximateSize)
+			log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetId(), core.DiffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion())
 			saveKV, saveCache = true, true
 		}
 		if r.GetConfVer() > o.GetConfVer() {

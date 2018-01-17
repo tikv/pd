@@ -112,8 +112,8 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 
 	if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
 		// make sure two operators can add successfully altogether
-		if old, ok := c.operators[op1.RegionID()]; !ok || isHigherPriorityOperator(op1, old) {
-			if old, ok = c.operators[op2.RegionID()]; !ok || isHigherPriorityOperator(op2, old) {
+		if old := c.getOperator(op1.RegionID()); old == nil || isHigherPriorityOperator(op1, old) {
+			if old = c.getOperator(op2.RegionID()); old == nil || isHigherPriorityOperator(op2, old) {
 				c.addOperator(op1)
 				c.addOperator(op2)
 			}

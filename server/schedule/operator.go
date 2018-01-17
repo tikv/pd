@@ -354,8 +354,9 @@ func CreateMergeRegionOperator(desc string, source *core.RegionInfo, target *cor
 		OldStartKey: source.Region.StartKey,
 		OldEndKey:   source.Region.EndKey,
 	})
-	op1 := NewOperator(desc, source.GetId(), kind, steps...)
-	op2 := NewOperator(desc, target.GetId(), kind, MergeRegion{
+
+	op1 := NewOperator(desc, source.GetId(), OpMerge|kind, steps...)
+	op2 := NewOperator(desc, target.GetId(), OpMerge, MergeRegion{
 		FromRegion:  source.GetId(),
 		ToRegion:    target.GetId(),
 		Direction:   direction,

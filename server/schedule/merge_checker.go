@@ -75,20 +75,21 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 		return nil, nil
 	}
 
-	steps, err := m.matchPeers(region, target)
+	steps, kind, err := m.matchPeers(region, target)
 	if err != nil {
 		return nil, nil
 	}
 
 	log.Debugf("try to merge region {%v} into region {%v}", region, target)
-	op1, op2 := CreateMergeRegionOperator("merge-region", region, target, direction, OpMerge, steps)
+	op1, op2 := CreateMergeRegionOperator("merge-region", region, target, direction, kind, steps)
 
 	return op1, op2
 }
 
-func (m *MergeChecker) matchPeers(source *core.RegionInfo, target *core.RegionInfo) ([]OperatorStep, error) {
+func (m *MergeChecker) matchPeers(source *core.RegionInfo, target *core.RegionInfo) ([]OperatorStep, OperatorKind, error) {
 	storeIDs := make(map[uint64]struct{})
 	var steps []OperatorStep
+	var kind OperatorKind
 
 	sourcePeers := source.Region.GetPeers()
 	targetPeers := target.Region.GetPeers()
@@ -104,9 +105,10 @@ func (m *MergeChecker) matchPeers(source *core.RegionInfo, target *core.RegionIn
 		}
 		peer, err := m.cluster.AllocPeer(id)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, kind, errors.Trace(err)
 		}
 		steps = append(steps, AddPeer{ToStore: id, PeerID: peer.Id})
+		kind |= OpRegion
 	}
 
 	// Check whether to transfer leader or not
@@ -119,8 +121,9 @@ func (m *MergeChecker) matchPeers(source *core.RegionInfo, target *core.RegionIn
 			break
 		}
 	}
-	if isFound == false {
+	if !isFound {
 		steps = append(steps, TransferLeader{FromStore: source.Leader.GetStoreId(), ToStore: target.Leader.GetStoreId()})
+		kind |= OpLeader
 	}
 
 	// Remove redundant peers.
@@ -129,23 +132,23 @@ func (m *MergeChecker) matchPeers(source *core.RegionInfo, target *core.RegionIn
 			continue
 		}
 		steps = append(steps, RemovePeer{FromStore: peer.GetStoreId()})
+		kind |= OpRegion
 	}
 
-	return steps, nil
+	return steps, kind, nil
 }
 
 func (m *MergeChecker) getIntersectionStores(a []*metapb.Peer, b []*metapb.Peer) []uint64 {
 	set := make([]uint64, 0)
-	hash := make(map[uint64]bool)
+	hash := make(map[uint64]struct{})
 
 	for _, peer := range a {
-		hash[peer.GetStoreId()] = true
+		hash[peer.GetStoreId()] = struct{}{}
 	}
 
 	for _, peer := range b {
 		if _, found := hash[peer.GetStoreId()]; found {
 			set = append(set, peer.GetStoreId())
-			delete(hash, peer.GetStoreId())
 		}
 	}
 
