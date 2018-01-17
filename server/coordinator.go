@@ -105,11 +105,23 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 		}
 	}
 
+	// Generate Operator which moves region to targeted namespace store
+	if op := c.namespaceChecker.Check(region); op != nil {
+		c.addOperator(op)
+	}
+
 	// Check replica operator.
 	if c.limiter.OperatorCount(schedule.OpReplica) >= c.cluster.GetReplicaScheduleLimit() {
 		return
 	}
+	if op := c.replicaChecker.Check(region); op != nil {
+		c.addOperator(op)
+	}
 
+	// Check merge operator.
+	if c.limiter.OperatorCount(schedule.OpMerge) >= c.cluster.GetMergeScheduleLimit() {
+		return
+	}
 	if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
 		// make sure two operators can add successfully altogether
 		if old := c.getOperator(op1.RegionID()); old == nil || isHigherPriorityOperator(op1, old) {
@@ -118,13 +130,6 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 				c.addOperator(op2)
 			}
 		}
-	}
-	// Generate Operator which moves region to targeted namespace store
-	if op := c.namespaceChecker.Check(region); op != nil {
-		c.addOperator(op)
-	}
-	if op := c.replicaChecker.Check(region); op != nil {
-		c.addOperator(op)
 	}
 }
 

@@ -340,6 +340,8 @@ type ScheduleConfig struct {
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit,omitempty" json:"replica-schedule-limit"`
+	// MergeScheduleLimit is the max coexist merge schedules.
+	MergeScheduleLimit uint64 `toml:"merge-schedule-limit,omitempty" json:"merge-schedule-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
 	// Schedulers support for loding customized schedulers
@@ -356,6 +358,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		LeaderScheduleLimit:  c.LeaderScheduleLimit,
 		RegionScheduleLimit:  c.RegionScheduleLimit,
 		ReplicaScheduleLimit: c.ReplicaScheduleLimit,
+		MergeScheduleLimit:   c.MergeScheduleLimit,
 		TolerantSizeRatio:    c.TolerantSizeRatio,
 		Schedulers:           schedulers,
 	}
@@ -379,6 +382,7 @@ const (
 	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 16
+	defaultMergeScheduleLimit   = 20
 	defaultTolerantSizeRatio    = 2.5
 )
 
@@ -396,6 +400,7 @@ func (c *ScheduleConfig) adjust() {
 	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
 	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
+	adjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
 	adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
 }
@@ -433,6 +438,8 @@ type NamespaceConfig struct {
 	RegionScheduleLimit uint64 `json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
 	ReplicaScheduleLimit uint64 `json:"replica-schedule-limit"`
+	// MergeScheduleLimit is the max coexist merge schedules.
+	MergeScheduleLimit uint64 `json:"merge-schedule-limit"`
 	// MaxReplicas is the number of replicas for each region.
 	MaxReplicas uint64 `json:"max-replicas"`
 }
@@ -442,6 +449,7 @@ func (c *NamespaceConfig) clone() *NamespaceConfig {
 		LeaderScheduleLimit:  c.LeaderScheduleLimit,
 		RegionScheduleLimit:  c.RegionScheduleLimit,
 		ReplicaScheduleLimit: c.ReplicaScheduleLimit,
+		MergeScheduleLimit:   c.MergeScheduleLimit,
 		MaxReplicas:          c.MaxReplicas,
 	}
 }
@@ -450,6 +458,7 @@ func (c *NamespaceConfig) adjust(opt *scheduleOption) {
 	adjustUint64(&c.LeaderScheduleLimit, opt.GetLeaderScheduleLimit(namespace.DefaultNamespace))
 	adjustUint64(&c.RegionScheduleLimit, opt.GetRegionScheduleLimit(namespace.DefaultNamespace))
 	adjustUint64(&c.ReplicaScheduleLimit, opt.GetReplicaScheduleLimit(namespace.DefaultNamespace))
+	adjustUint64(&c.MergeScheduleLimit, opt.GetMergeScheduleLimit(namespace.DefaultNamespace))
 	adjustUint64(&c.MaxReplicas, uint64(opt.GetMaxReplicas(namespace.DefaultNamespace)))
 }
 

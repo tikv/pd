@@ -40,5 +40,6 @@ type NamespaceOptions interface {
 	GetLeaderScheduleLimit(name string) uint64
 	GetRegionScheduleLimit(name string) uint64
 	GetReplicaScheduleLimit(name string) uint64
+	GetMergeScheduleLimit(name string) uint64
 	GetMaxReplicas(name string) int
 }

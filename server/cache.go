@@ -473,6 +473,10 @@ func (c *clusterInfo) GetReplicaScheduleLimit() uint64 {
 	return c.opt.GetReplicaScheduleLimit(namespace.DefaultNamespace)
 }
 
+func (c *clusterInfo) GetMergeScheduleLimit() uint64 {
+	return c.opt.GetMergeScheduleLimit(namespace.DefaultNamespace)
+}
+
 func (c *clusterInfo) GetTolerantSizeRatio() float64 {
 	return c.opt.GetTolerantSizeRatio()
 }
