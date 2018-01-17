@@ -34,7 +34,7 @@ func newHotRead() *Conf {
 	var id idAllocator
 	id.setMaxID(5)
 	for i := 0; i < 500; i++ {
-		storeIDs := rand.Perm(10)
+		storeIDs := rand.Perm(5)
 		peers := []*metapb.Peer{
 			{Id: id.nextID(), StoreId: uint64(storeIDs[0] + 1)},
 			{Id: id.nextID(), StoreId: uint64(storeIDs[1] + 1)},
