@@ -378,7 +378,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 			schedule.PromoteLearnerPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
 		}
 	} else {
-		steps = []schedule.OperatorStep {
+		steps = []schedule.OperatorStep{
 			schedule.AddPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
 		}
 	}
