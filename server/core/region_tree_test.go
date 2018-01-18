@@ -42,6 +42,8 @@ func (s *testRegionSuite) TestRegionInfo(c *C) {
 	info := NewRegionInfo(region, peers[0])
 	info.DownPeers = []*pdpb.PeerStats{{Peer: downPeer}}
 	info.PendingPeers = []*metapb.Peer{pendingPeer}
+	info.PendingLearnerPeers = []*metapb.Peer{}
+	info.CompleteLearnerPeers = []*metapb.Peer{}
 
 	r := info.Clone()
 	c.Assert(r, DeepEquals, info)

@@ -308,6 +308,7 @@ type MockSchedulerOptions struct {
 	LocationLabels        []string
 	HotRegionLowThreshold int
 	TolerantSizeRatio     float64
+	EnableRaftLearner     bool
 }
 
 func newMockSchedulerOptions() *MockSchedulerOptions {
@@ -377,4 +378,9 @@ func (mso *MockSchedulerOptions) GetTolerantSizeRatio() float64 {
 // SetMaxReplicas mock method
 func (mso *MockSchedulerOptions) SetMaxReplicas(replicas int) {
 	mso.MaxReplicas = replicas
+}
+
+// IsEnableRaftLearner mock method
+func (mso *MockSchedulerOptions) IsEnableRaftLearner() bool {
+	return mso.EnableRaftLearner
 }
