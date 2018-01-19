@@ -16,10 +16,7 @@ package schedule
 import (
 	"time"
 
-	//log "github.com/sirupsen/logrus"
 	"github.com/juju/errors"
-	//"github.com/pingcap/kvproto/pkg/metapb"
-	//"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 )
@@ -207,7 +204,7 @@ func (bc *BasicCluster) PutRegion(region *core.RegionInfo) error {
 func (bc *BasicCluster) UpdateWriteStatus(region *core.RegionInfo) {
 	var WrittenBytesPerSec uint64
 	v, isExist := bc.WriteStatistics.Peek(region.GetId())
-	if isExist {
+	if isExist && !Simulating {
 		interval := time.Since(v.(*core.RegionStat).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
 			return
@@ -270,7 +267,7 @@ func (bc *BasicCluster) UpdateWriteStatCache(region *core.RegionInfo, hotRegionT
 func (bc *BasicCluster) UpdateReadStatus(region *core.RegionInfo) {
 	var ReadBytesPerSec uint64
 	v, isExist := bc.ReadStatistics.Peek(region.GetId())
-	if isExist {
+	if isExist && !Simulating { // When simulating, we can't calculate it using physical time.
 		interval := time.Now().Sub(v.(*core.RegionStat).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
 			return
@@ -279,6 +276,7 @@ func (bc *BasicCluster) UpdateReadStatus(region *core.RegionInfo) {
 	} else {
 		ReadBytesPerSec = uint64(float64(region.ReadBytes) / float64(RegionHeartBeatReportInterval))
 	}
+
 	region.ReadBytes = ReadBytesPerSec
 
 	// hotRegionThreshold is use to pick hot region
