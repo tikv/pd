@@ -281,11 +281,11 @@ func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 }
 
 // SetRegion set the RegionInfo with regionID
-func (r *RegionsInfo) SetRegion(region *RegionInfo) {
+func (r *RegionsInfo) SetRegion(region *RegionInfo) []*metapb.Region {
 	if origin := r.regions.Get(region.GetId()); origin != nil {
 		r.RemoveRegion(origin)
 	}
-	r.AddRegion(region)
+	return r.AddRegion(region)
 }
 
 // Length return the RegionsInfo length
@@ -299,17 +299,17 @@ func (r *RegionsInfo) TreeLength() int {
 }
 
 // AddRegion add RegionInfo to regionTree and regionMap, also update leadres and followers by region peers
-func (r *RegionsInfo) AddRegion(region *RegionInfo) {
+func (r *RegionsInfo) AddRegion(region *RegionInfo) []*metapb.Region {
 	// Add to tree and regions.
 	overlaps := r.tree.update(region.Region)
 	for _, item := range overlaps {
-		r.RemoveRegion(r.GetRegion(item.region.Id))
+		r.RemoveRegion(r.GetRegion(item.Id))
 	}
 
 	r.regions.Put(region)
 
 	if region.Leader == nil {
-		return
+		return overlaps
 	}
 
 	// Add to leaders and followers.
@@ -333,6 +333,7 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) {
 			store.Put(region)
 		}
 	}
+	return overlaps
 }
 
 // RemoveRegion remove RegionInfo from regionTree and regionMap

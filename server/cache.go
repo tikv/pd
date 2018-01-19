@@ -509,7 +509,14 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	if saveCache {
-		c.regions.SetRegion(region)
+		overlaps := c.regions.SetRegion(region)
+		if c.kv != nil {
+			for _, item := range overlaps {
+				if err := c.kv.DeleteRegion(item); err != nil {
+					log.Errorf("[region %d] fail to delete region %v: %v", item.GetId(), item, err)
+				}
+			}
+		}
 
 		// Update related stores.
 		if origin != nil {

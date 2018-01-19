@@ -94,6 +94,11 @@ func (kv *KV) SaveRegion(region *metapb.Region) error {
 	return kv.saveProto(kv.regionPath(region.GetId()), region)
 }
 
+// DeleteRegion deletes one region from KV.
+func (kv *KV) DeleteRegion(region *metapb.Region) error {
+	return kv.Delete(kv.regionPath(region.GetId()))
+}
+
 // SaveConfig stores marshalable cfg to the configPath.
 func (kv *KV) SaveConfig(cfg interface{}) error {
 	value, err := json.Marshal(cfg)
@@ -202,7 +207,12 @@ func (kv *KV) LoadRegions(regions *RegionsInfo, rangeLimit int) error {
 			}
 
 			nextID = region.GetId() + 1
-			regions.SetRegion(NewRegionInfo(region, nil))
+			overlaps := regions.SetRegion(NewRegionInfo(region, nil))
+			for _, item := range overlaps {
+				if err := kv.DeleteRegion(item); err != nil {
+					return errors.Trace(err)
+				}
+			}
 		}
 
 		if len(res) < int(rangeLimit) {
