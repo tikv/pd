@@ -203,7 +203,3 @@ func (a *removePeer) RegionID() uint64 {
 func (a *removePeer) IsFinished() bool {
 	return a.finished
 }
-
-type writeRegion struct{}
-
-type readRegion struct{}

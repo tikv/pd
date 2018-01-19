@@ -30,6 +30,7 @@ type Driver struct {
 	clusterInfo *ClusterInfo
 	client      Client
 	tickCount   int64
+	eventRunner *EventRunner
 }
 
 // NewDriver returns a driver.
@@ -86,6 +87,7 @@ func (d *Driver) Prepare() error {
 			return err
 		}
 	}
+	d.eventRunner = NewEventRunner(d.conf.Events)
 	return nil
 }
 
@@ -93,15 +95,7 @@ func (d *Driver) Prepare() error {
 func (d *Driver) Tick() {
 	d.tickCount++
 	d.clusterInfo.stepRegions()
-	if d.conf.WrittenBytes != nil {
-		d.clusterInfo.updateRegionSize(d.conf.WrittenBytes(d.tickCount))
-	}
-	if d.conf.RegionReadBytes != nil {
-		d.clusterInfo.updateRegionReadBytes(d.conf.RegionReadBytes(d.tickCount))
-	}
-	if d.conf.RegionWriteBytes != nil {
-		d.clusterInfo.updateRegionWriteBytes(d.conf.RegionWriteBytes(d.tickCount))
-	}
+	d.eventRunner.Tick(d.tickCount, d.clusterInfo)
 	for _, n := range d.clusterInfo.Nodes {
 		n.Tick()
 	}

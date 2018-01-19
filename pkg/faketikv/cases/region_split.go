@@ -21,6 +21,7 @@ import (
 
 func newRegionSplit() *Conf {
 	var conf Conf
+	// Initialize the cluster
 	for i := 1; i <= 3; i++ {
 		conf.Stores = append(conf.Stores, Store{
 			ID:        uint64(i),
@@ -40,11 +41,16 @@ func newRegionSplit() *Conf {
 	})
 	conf.MaxID = 5
 	conf.RegionSplitSize = 128 * mb
-	conf.WrittenBytes = func(tick int64) map[string]int64 {
+	// Events description
+	e := &WriteFlowOnSpotInner{}
+	e.Step = func(tick int64) map[string]int64 {
 		return map[string]int64{
 			"foobar": 8 * mb,
 		}
 	}
+	conf.Events = []EventInner{e}
+
+	// Checker description
 	conf.Checker = func(regions *core.RegionsInfo) bool {
 		count1 := regions.GetStoreRegionCount(1)
 		count2 := regions.GetStoreRegionCount(2)

@@ -46,11 +46,7 @@ type Conf struct {
 	Regions         []Region
 	MaxID           uint64
 	RegionSplitSize int64
-
-	WrittenBytes func(tick int64) map[string]int64 // To simulate region grow.
-
-	RegionWriteBytes func(tick int64) map[uint64]int64 // To simulate write flow.
-	RegionReadBytes  func(tick int64) map[uint64]int64 // To simulate read flow.
+	Events          []EventInner
 
 	Checker CheckerFunc // To check the schedule is finished.
 }

@@ -23,6 +23,7 @@ import (
 
 func newHotRead() *Conf {
 	var conf Conf
+	// Initialize the cluster
 	for i := 1; i <= 5; i++ {
 		conf.Stores = append(conf.Stores, Store{
 			ID:        uint64(i),
@@ -49,7 +50,8 @@ func newHotRead() *Conf {
 	}
 	conf.MaxID = id.maxID
 
-	// select 20 regions on store 1 as hot read regions.
+	// Events description
+	// select 20 reigons on store 1 as hot read regions.
 	readFlow := make(map[uint64]int64, 20)
 	for _, r := range conf.Regions {
 		if r.Leader.GetStoreId() == 1 {
@@ -59,10 +61,12 @@ func newHotRead() *Conf {
 			}
 		}
 	}
-	conf.RegionReadBytes = func(tikc int64) map[uint64]int64 {
+	e := &ReadFlowOnRegionInner{}
+	e.Step = func(tikc int64) map[uint64]int64 {
 		return readFlow
 	}
-
+	conf.Events = []EventInner{e}
+	// Checker description
 	conf.Checker = func(regions *core.RegionsInfo) bool {
 		var leaderCount [5]int
 		for id := range readFlow {
