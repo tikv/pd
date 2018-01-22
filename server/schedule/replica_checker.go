@@ -43,27 +43,34 @@ func NewReplicaChecker(cluster Cluster, classifier namespace.Classifier) *Replic
 
 // Check verifies a region's replicas, creating an Operator if need.
 func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
+	checkerCounter.WithLabelValues("replica_checker", "check").Inc()
 	if op := r.checkDownPeer(region); op != nil {
+		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
 		return op
 	}
 	if op := r.checkOfflinePeer(region); op != nil {
+		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
 		return op
 	}
 
 	if len(region.GetPeers()) < r.cluster.GetMaxReplicas() {
 		newPeer := r.SelectBestPeerToAddReplica(region, r.filters...)
 		if newPeer == nil {
+			checkerCounter.WithLabelValues("replica_checker", "no_target_store").Inc()
 			return nil
 		}
 		step := AddPeer{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()}
+		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
 		return NewOperator("makeUpReplica", region.GetId(), OpReplica|OpRegion, step)
 	}
 
 	if len(region.GetPeers()) > r.cluster.GetMaxReplicas() {
 		oldPeer, _ := r.selectWorstPeer(region)
 		if oldPeer == nil {
+			checkerCounter.WithLabelValues("replica_checker", "no_worst_peer").Inc()
 			return nil
 		}
+		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
 		return CreateRemovePeerOperator("removeExtraReplica", OpReplica, region, oldPeer.GetStoreId())
 	}
 
@@ -184,19 +191,23 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator {
 	oldPeer, oldScore := r.selectWorstPeer(region)
 	if oldPeer == nil {
+		checkerCounter.WithLabelValues("replica_checker", "all_right")
 		return nil
 	}
 	storeID, newScore := r.selectBestReplacement(region, oldPeer)
 	if storeID == 0 {
+		checkerCounter.WithLabelValues("replica_checker", "no_replacement_store")
 		return nil
 	}
 	// Make sure the new peer is better than the old peer.
 	if newScore <= oldScore {
+		checkerCounter.WithLabelValues("replica_checker", "not_better")
 		return nil
 	}
 	newPeer, err := r.cluster.AllocPeer(storeID)
 	if err != nil {
 		return nil
 	}
+	checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
 	return CreateMovePeerOperator("moveToBetterLocation", region, OpReplica, oldPeer.GetStoreId(), storeID, newPeer.GetId())
 }

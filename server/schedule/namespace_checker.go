@@ -42,14 +42,18 @@ func NewNamespaceChecker(cluster Cluster, classifier namespace.Classifier) *Name
 
 // Check verifies a region's namespace, creating an Operator if need.
 func (n *NamespaceChecker) Check(region *core.RegionInfo) *Operator {
+	checkerCounter.WithLabelValues("namespace_checker", "no_target_store").Inc()
+
 	// fail-fast if there is only ONE namespace
 	if n.classifier == nil || len(n.classifier.GetAllNamespaces()) == 1 {
+		checkerCounter.WithLabelValues("namespace_checker", "no_namespace").Inc()
 		return nil
 	}
 
 	// get all the stores belong to the namespace
 	targetStores := n.getNamespaceStores(region)
 	if len(targetStores) == 0 {
+		checkerCounter.WithLabelValues("namespace_checker", "no_target_store").Inc()
 		return nil
 	}
 	for _, peer := range region.GetPeers() {
@@ -59,11 +63,14 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *Operator {
 		}
 		newPeer := n.SelectBestPeerToRelocate(region, targetStores, n.filters...)
 		if newPeer == nil {
+			checkerCounter.WithLabelValues("namespace_checker", "no_target_peer").Inc()
 			return nil
 		}
+		checkerCounter.WithLabelValues("namespace_checker", "new_operator").Inc()
 		return CreateMovePeerOperator("makeNamespaceRelocation", region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 	}
 
+	checkerCounter.WithLabelValues("namespace_checker", "all_right").Inc()
 	return nil
 }
 
