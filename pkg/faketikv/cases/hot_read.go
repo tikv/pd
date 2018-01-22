@@ -62,7 +62,7 @@ func newHotRead() *Conf {
 		}
 	}
 	e := &ReadFlowOnRegionInner{}
-	e.Step = func(tikc int64) map[uint64]int64 {
+	e.Step = func(tick int64) map[uint64]int64 {
 		return readFlow
 	}
 	conf.Events = []EventInner{e}

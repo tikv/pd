@@ -62,7 +62,7 @@ func newHotWrite() *Conf {
 		}
 	}
 	e := &WriteFlowOnRegionInner{}
-	e.Step = func(tikc int64) map[uint64]int64 {
+	e.Step = func(tick int64) map[uint64]int64 {
 		return writeFlow
 	}
 
