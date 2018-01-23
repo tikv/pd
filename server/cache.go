@@ -422,14 +422,12 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		}
 	}
 
-	c.Lock()
-	defer c.Unlock()
-
 	if isNew {
 		c.activeRegions++
 	}
 
 	if saveCache {
+		c.Lock()
 		overlaps := c.Regions.SetRegion(region)
 		if c.kv != nil {
 			for _, item := range overlaps {
@@ -448,13 +446,38 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		for _, p := range region.Peers {
 			c.updateStoreStatus(p.GetStoreId())
 		}
+		c.Unlock()
+	}
+	c.updateFlowStats(region)
+	return nil
+}
 
+func (c *clusterInfo) updateFlowStats(region *core.RegionInfo) {
+	c.RLock()
+	isUpdate, key, writeItem := c.IsUpdateWriteStatus(region)
+	c.RUnlock()
+	if isUpdate {
+		c.Lock()
+		if writeItem == nil {
+			c.WriteStatistics.Remove(key)
+		} else {
+			c.WriteStatistics.Put(key, writeItem)
+		}
+		c.Unlock()
+	}
+	c.RLock()
+	isUpdate, key, readItem := c.IsUpdateReadStatus(region)
+	c.RUnlock()
+	if isUpdate {
+		c.Lock()
+		if readItem == nil {
+			c.ReadStatistics.Remove(key)
+		} else {
+			c.ReadStatistics.Put(key, writeItem)
+		}
+		c.Unlock()
 	}
 
-	c.BasicCluster.UpdateWriteStatus(region)
-	c.BasicCluster.UpdateReadStatus(region)
-
-	return nil
 }
 
 func (c *clusterInfo) GetOpt() schedule.NamespaceOptions {
