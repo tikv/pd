@@ -372,6 +372,8 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	region = region.Clone()
 	c.RLock()
 	origin := c.Regions.GetRegion(region.GetId())
+	isWriteUpdate, key, writeItem := c.IsUpdateWriteStatus(region.Clone())
+	isReadUpdate, key, readItem := c.IsUpdateReadStatus(region.Clone())
 	c.RUnlock()
 
 	// Save to KV if meta is updated.
@@ -421,13 +423,16 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			log.Errorf("[region %d] fail to save region %v: %v", region.GetId(), region, err)
 		}
 	}
+	if !isWriteUpdate && !isReadUpdate && !saveCache && !isNew {
+		return nil
+	}
 
+	c.Lock()
 	if isNew {
 		c.activeRegions++
 	}
 
 	if saveCache {
-		c.Lock()
 		overlaps := c.Regions.SetRegion(region)
 		if c.kv != nil {
 			for _, item := range overlaps {
@@ -446,21 +451,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		for _, p := range region.Peers {
 			c.updateStoreStatus(p.GetStoreId())
 		}
-		c.Unlock()
 	}
-	c.updateFlowStats(region)
-	return nil
-}
-
-func (c *clusterInfo) updateFlowStats(region *core.RegionInfo) {
-	c.RLock()
-	isWriteUpdate, key, writeItem := c.IsUpdateWriteStatus(region)
-	isReadUpdate, key, readItem := c.IsUpdateReadStatus(region)
-	c.RUnlock()
-	if !isWriteUpdate && !isReadUpdate {
-		return
-	}
-	c.Lock()
 	if isWriteUpdate {
 		if writeItem == nil {
 			c.WriteStatistics.Remove(key)
@@ -476,6 +467,7 @@ func (c *clusterInfo) updateFlowStats(region *core.RegionInfo) {
 		}
 	}
 	c.Unlock()
+	return nil
 }
 
 func (c *clusterInfo) GetOpt() schedule.NamespaceOptions {
