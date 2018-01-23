@@ -122,14 +122,10 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	if c.limiter.OperatorCount(schedule.OpMerge) >= c.cluster.GetMergeScheduleLimit() {
 		return
 	}
+	
 	if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
 		// make sure two operators can add successfully altogether
-		if old := c.getOperator(op1.RegionID()); old == nil || isHigherPriorityOperator(op1, old) {
-			if old = c.getOperator(op2.RegionID()); old == nil || isHigherPriorityOperator(op2, old) {
-				c.addOperator(op1)
-				c.addOperator(op2)
-			}
-		}
+		c.addOperators(op1, op2)
 	}
 }
 
@@ -364,9 +360,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 	}
 }
 
-func (c *coordinator) addOperator(op *schedule.Operator) bool {
-	c.Lock()
-	defer c.Unlock()
+func (c *coordinator) addOperatorLocked(op *schedule.Operator) bool {
 	regionID := op.RegionID()
 
 	log.Infof("[region %v] add operator: %s", regionID, op)
@@ -393,6 +387,29 @@ func (c *coordinator) addOperator(op *schedule.Operator) bool {
 	}
 
 	operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
+	return true
+}
+
+func (c *coordinator) addOperator(op *schedule.Operator) bool {
+	c.Lock()
+	defer c.Unlock()
+	
+	return c.addOperatorLocked(op)
+}
+
+func (c *coordinator) addOperators(ops ...*schedule.Operator) bool {
+	c.Lock()
+	defer c.Unlock()
+
+	for _, op := range ops {
+		if old := c.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
+			return false
+		}
+	}
+	for _, op := range ops {
+		c.addOperatorLocked(op)
+	}
+
 	return true
 }
 
