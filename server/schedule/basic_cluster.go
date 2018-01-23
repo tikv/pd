@@ -263,7 +263,7 @@ func (bc *BasicCluster) isNeedUpdateWriteStatCache(region *core.RegionInfo, hotR
 }
 
 // IsUpdateReadStatus update the read status
-func (bc *BasicCluster) IsUpdateReadStatus(region *core.RegionInfo) (isUpdate bool, key uint64, item *core.RegionStat) {
+func (bc *BasicCluster) IsUpdateReadStatus(region *core.RegionInfo) (bool, uint64, *core.RegionStat) {
 	var ReadBytesPerSec uint64
 	v, isExist := bc.ReadStatistics.Peek(region.GetId())
 	if isExist && !Simulating { // When simulating, we can't calculate it using physical time.

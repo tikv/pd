@@ -454,30 +454,28 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 
 func (c *clusterInfo) updateFlowStats(region *core.RegionInfo) {
 	c.RLock()
-	isUpdate, key, writeItem := c.IsUpdateWriteStatus(region)
+	isWriteUpdate, key, writeItem := c.IsUpdateWriteStatus(region)
+	isReadUpdate, key, readItem := c.IsUpdateReadStatus(region)
 	c.RUnlock()
-	if isUpdate {
-		c.Lock()
+	if !isWriteUpdate && !isReadUpdate {
+		return
+	}
+	c.Lock()
+	if isWriteUpdate {
 		if writeItem == nil {
 			c.WriteStatistics.Remove(key)
 		} else {
 			c.WriteStatistics.Put(key, writeItem)
 		}
-		c.Unlock()
 	}
-	c.RLock()
-	isUpdate, key, readItem := c.IsUpdateReadStatus(region)
-	c.RUnlock()
-	if isUpdate {
-		c.Lock()
+	if isReadUpdate {
 		if readItem == nil {
 			c.ReadStatistics.Remove(key)
 		} else {
 			c.ReadStatistics.Put(key, writeItem)
 		}
-		c.Unlock()
 	}
-
+	c.Unlock()
 }
 
 func (c *clusterInfo) GetOpt() schedule.NamespaceOptions {
