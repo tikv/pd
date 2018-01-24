@@ -200,8 +200,8 @@ func (bc *BasicCluster) PutRegion(region *core.RegionInfo) error {
 	return nil
 }
 
-// IsUpdateWriteStatus update the write status
-func (bc *BasicCluster) IsUpdateWriteStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
+// CheckWriteStatus checks the write status, return whether need update statistics and item
+func (bc *BasicCluster) CheckWriteStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
 	var WrittenBytesPerSec uint64
 	v, isExist := bc.WriteStatistics.Peek(region.GetId())
 	if isExist && !Simulating {
@@ -262,8 +262,8 @@ func (bc *BasicCluster) isNeedUpdateWriteStatCache(region *core.RegionInfo, hotR
 	return true, newItem
 }
 
-// IsUpdateReadStatus update the read status
-func (bc *BasicCluster) IsUpdateReadStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
+// CheckReadStatus checks the read status, return whether need update statistics and item
+func (bc *BasicCluster) CheckReadStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
 	var ReadBytesPerSec uint64
 	v, isExist := bc.ReadStatistics.Peek(region.GetId())
 	if isExist && !Simulating { // When simulating, we can't calculate it using physical time.

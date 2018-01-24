@@ -169,7 +169,7 @@ func (mc *mockCluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 func (mc *mockCluster) addLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r.WrittenBytes = writtenBytes
-	isUpdate, item := mc.BasicCluster.IsUpdateWriteStatus(r)
+	isUpdate, item := mc.BasicCluster.CheckWriteStatus(r)
 	if isUpdate {
 		if item == nil {
 			mc.BasicCluster.WriteStatistics.Remove(regionID)
@@ -222,7 +222,7 @@ func (mc *mockCluster) updateStorageReadBytes(storeID uint64, BytesRead uint64) 
 func (mc *mockCluster) addLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r.ReadBytes = readBytes
-	isUpdate, item := mc.BasicCluster.IsUpdateReadStatus(r)
+	isUpdate, item := mc.BasicCluster.CheckReadStatus(r)
 	if isUpdate {
 		if item == nil {
 			mc.BasicCluster.ReadStatistics.Remove(regionID)
