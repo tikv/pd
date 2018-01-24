@@ -372,8 +372,8 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	region = region.Clone()
 	c.RLock()
 	origin := c.Regions.GetRegion(region.GetId())
-	isWriteUpdate, key, writeItem := c.IsUpdateWriteStatus(region)
-	isReadUpdate, key, readItem := c.IsUpdateReadStatus(region)
+	isWriteUpdate, writeItem := c.IsUpdateWriteStatus(region)
+	isReadUpdate, readItem := c.IsUpdateReadStatus(region)
 	c.RUnlock()
 
 	// Save to KV if meta is updated.
@@ -452,6 +452,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			c.updateStoreStatus(p.GetStoreId())
 		}
 	}
+	key := region.GetId()
 	if isWriteUpdate {
 		if writeItem == nil {
 			c.WriteStatistics.Remove(key)

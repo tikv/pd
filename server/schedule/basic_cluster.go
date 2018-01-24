@@ -201,13 +201,13 @@ func (bc *BasicCluster) PutRegion(region *core.RegionInfo) error {
 }
 
 // IsUpdateWriteStatus update the write status
-func (bc *BasicCluster) IsUpdateWriteStatus(region *core.RegionInfo) (bool, uint64, *core.RegionStat) {
+func (bc *BasicCluster) IsUpdateWriteStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
 	var WrittenBytesPerSec uint64
 	v, isExist := bc.WriteStatistics.Peek(region.GetId())
 	if isExist && !Simulating {
 		interval := time.Since(v.(*core.RegionStat).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
-			return false, region.GetId(), nil
+			return false, nil
 		}
 		WrittenBytesPerSec = uint64(float64(region.WrittenBytes) / interval)
 	} else {
@@ -229,7 +229,7 @@ func (bc *BasicCluster) IsUpdateWriteStatus(region *core.RegionInfo) (bool, uint
 }
 
 // IsNeedUpdateWriteStatCache updates statistic for a region if it's hot, or remove it from statistics if it cools down
-func (bc *BasicCluster) isNeedUpdateWriteStatCache(region *core.RegionInfo, hotRegionThreshold uint64) (bool, uint64, *core.RegionStat) {
+func (bc *BasicCluster) isNeedUpdateWriteStatCache(region *core.RegionInfo, hotRegionThreshold uint64) (bool, *core.RegionStat) {
 	var v *core.RegionStat
 	key := region.GetId()
 	value, isExist := bc.WriteStatistics.Peek(key)
@@ -249,27 +249,27 @@ func (bc *BasicCluster) isNeedUpdateWriteStatCache(region *core.RegionInfo, hotR
 
 	if region.WrittenBytes < hotRegionThreshold {
 		if !isExist {
-			return false, key, newItem
+			return false, newItem
 		}
 		if v.AntiCount <= 0 {
-			return true, key, nil
+			return true, nil
 		}
 		// eliminate some noise
 		newItem.HotDegree = v.HotDegree - 1
 		newItem.AntiCount = v.AntiCount - 1
 		newItem.FlowBytes = v.FlowBytes
 	}
-	return true, key, newItem
+	return true, newItem
 }
 
 // IsUpdateReadStatus update the read status
-func (bc *BasicCluster) IsUpdateReadStatus(region *core.RegionInfo) (bool, uint64, *core.RegionStat) {
+func (bc *BasicCluster) IsUpdateReadStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
 	var ReadBytesPerSec uint64
 	v, isExist := bc.ReadStatistics.Peek(region.GetId())
 	if isExist && !Simulating { // When simulating, we can't calculate it using physical time.
 		interval := time.Now().Sub(v.(*core.RegionStat).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
-			return false, region.GetId(), nil
+			return false, nil
 		}
 		ReadBytesPerSec = uint64(float64(region.ReadBytes) / interval)
 	} else {
@@ -290,7 +290,7 @@ func (bc *BasicCluster) IsUpdateReadStatus(region *core.RegionInfo) (bool, uint6
 	return bc.isNeedUpdateReadStatCache(region, hotRegionThreshold)
 }
 
-func (bc *BasicCluster) isNeedUpdateReadStatCache(region *core.RegionInfo, hotRegionThreshold uint64) (bool, uint64, *core.RegionStat) {
+func (bc *BasicCluster) isNeedUpdateReadStatCache(region *core.RegionInfo, hotRegionThreshold uint64) (bool, *core.RegionStat) {
 	var v *core.RegionStat
 	key := region.GetId()
 	value, isExist := bc.ReadStatistics.Peek(key)
@@ -310,15 +310,15 @@ func (bc *BasicCluster) isNeedUpdateReadStatCache(region *core.RegionInfo, hotRe
 
 	if region.ReadBytes < hotRegionThreshold {
 		if !isExist {
-			return false, key, newItem
+			return false, newItem
 		}
 		if v.AntiCount <= 0 {
-			return true, key, nil
+			return true, nil
 		}
 		// eliminate some noise
 		newItem.HotDegree = v.HotDegree - 1
 		newItem.AntiCount = v.AntiCount - 1
 		newItem.FlowBytes = v.FlowBytes
 	}
-	return true, key, newItem
+	return true, newItem
 }
