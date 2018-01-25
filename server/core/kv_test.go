@@ -63,6 +63,11 @@ func (s *testKVSuite) TestBasic(c *C) {
 	c.Assert(ok, IsTrue)
 	c.Assert(err, IsNil)
 	c.Assert(newRegion, DeepEquals, region)
+	err = kv.DeleteRegion(region)
+	c.Assert(err, IsNil)
+	ok, err = kv.LoadRegion(123, newRegion)
+	c.Assert(ok, IsFalse)
+	c.Assert(err, IsNil)
 }
 
 func mustSaveStores(c *C, kv *KV, n int) []*metapb.Store {

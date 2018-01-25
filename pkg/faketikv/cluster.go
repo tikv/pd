@@ -143,7 +143,7 @@ func (c *ClusterInfo) stepSplit(region *core.RegionInfo) {
 	if region.Leader == nil {
 		return
 	}
-	if region.ApproximateSize < c.conf.RegionSplitSize {
+	if c.conf.RegionSplitSize == 0 || region.ApproximateSize < c.conf.RegionSplitSize {
 		return
 	}
 	ids := make([]uint64, 1+len(region.Peers))
@@ -198,6 +198,30 @@ func (c *ClusterInfo) updateRegionSize(writtenBytes map[string]int64) {
 			continue
 		}
 		region.ApproximateSize += size
+		c.SetRegion(region)
+	}
+}
+
+func (c *ClusterInfo) updateRegionWriteBytes(writeBytes map[uint64]int64) {
+	for id, bytes := range writeBytes {
+		region := c.GetRegion(id)
+		if region == nil {
+			simutil.Logger.Errorf("region %d not found", id)
+			continue
+		}
+		region.WrittenBytes = uint64(bytes)
+		c.SetRegion(region)
+	}
+}
+
+func (c *ClusterInfo) updateRegionReadBytes(readBytes map[uint64]int64) {
+	for id, bytes := range readBytes {
+		region := c.GetRegion(id)
+		if region == nil {
+			simutil.Logger.Errorf("region %d not found", id)
+			continue
+		}
+		region.ReadBytes = uint64(bytes)
 		c.SetRegion(region)
 	}
 }

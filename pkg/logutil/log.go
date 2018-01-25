@@ -221,6 +221,7 @@ var once sync.Once
 // InitLogger initializes PD's logger.
 func InitLogger(cfg *LogConfig) error {
 	var err error
+
 	once.Do(func() {
 		log.SetLevel(StringToLogLevel(cfg.Level))
 		log.AddHook(&contextHook{})

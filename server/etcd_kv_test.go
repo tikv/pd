@@ -49,4 +49,12 @@ func (s *testEtcdKVSuite) TestEtcdKV(c *C) {
 	values, err = kv.LoadRange(keys[0], keys[3], 100)
 	c.Assert(err, IsNil)
 	c.Assert(values, DeepEquals, vals[:3])
+
+	v, err = kv.Load(keys[1])
+	c.Assert(err, IsNil)
+	c.Assert(v, Equals, "val2")
+	c.Assert(kv.Delete(keys[1]), IsNil)
+	v, err = kv.Load(keys[1])
+	c.Assert(err, IsNil)
+	c.Assert(v, Equals, "")
 }

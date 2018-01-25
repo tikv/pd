@@ -469,6 +469,23 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 			c.Assert(err, IsNil)
 			c.Assert(tmp, DeepEquals, region.Region)
 		}
+
+		// check overlap
+		overlapRegion := regions[n-1].Clone()
+		overlapRegion.StartKey = regions[n-2].StartKey
+		overlapRegion.Region.Id = overlapRegion.Region.Id + 1
+		c.Assert(cache.handleRegionHeartbeat(overlapRegion), IsNil)
+		region := &metapb.Region{}
+		ok, err := kv.LoadRegion(regions[n-1].GetId(), region)
+		c.Assert(ok, IsFalse)
+		c.Assert(err, IsNil)
+		ok, err = kv.LoadRegion(regions[n-2].GetId(), region)
+		c.Assert(ok, IsFalse)
+		c.Assert(err, IsNil)
+		ok, err = kv.LoadRegion(overlapRegion.GetId(), region)
+		c.Assert(ok, IsTrue)
+		c.Assert(err, IsNil)
+		c.Assert(region, DeepEquals, overlapRegion.Region)
 	}
 }
 
