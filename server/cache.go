@@ -428,6 +428,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	c.Lock()
+	defer c.Unlock()
 	if isNew {
 		c.activeRegions++
 	}
@@ -467,7 +468,6 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			c.ReadStatistics.Put(key, writeItem)
 		}
 	}
-	c.Unlock()
 	return nil
 }
 

@@ -200,7 +200,7 @@ func (bc *BasicCluster) PutRegion(region *core.RegionInfo) error {
 	return nil
 }
 
-// CheckWriteStatus checks the write status, return whether need update statistics and item
+// CheckWriteStatus checks the write status, returns whether need update statistics and item
 func (bc *BasicCluster) CheckWriteStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
 	var WrittenBytesPerSec uint64
 	v, isExist := bc.WriteStatistics.Peek(region.GetId())
@@ -262,7 +262,7 @@ func (bc *BasicCluster) isNeedUpdateWriteStatCache(region *core.RegionInfo, hotR
 	return true, newItem
 }
 
-// CheckReadStatus checks the read status, return whether need update statistics and item
+// CheckReadStatus checks the read status, returns whether need update statistics and item
 func (bc *BasicCluster) CheckReadStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
 	var ReadBytesPerSec uint64
 	v, isExist := bc.ReadStatistics.Peek(region.GetId())
