@@ -122,7 +122,7 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	if c.limiter.OperatorCount(schedule.OpMerge) >= c.cluster.GetMergeScheduleLimit() {
 		return
 	}
-	
+
 	if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
 		// make sure two operators can add successfully altogether
 		c.addOperators(op1, op2)
@@ -393,7 +393,7 @@ func (c *coordinator) addOperatorLocked(op *schedule.Operator) bool {
 func (c *coordinator) addOperator(op *schedule.Operator) bool {
 	c.Lock()
 	defer c.Unlock()
-	
+
 	return c.addOperatorLocked(op)
 }
 
