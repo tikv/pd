@@ -37,13 +37,17 @@ func NewMergeChecker(cluster Cluster, classifier namespace.Classifier) *MergeChe
 
 // Check verifies a region's replicas, creating an Operator if need.
 func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
+	checkerCounter.WithLabelValues("merge_checker", "check").Inc()
+
 	// region size is not small enough
 	if region.ApproximateSize >= int64(m.cluster.GetMaxMergeRegionSize()) {
+		checkerCounter.WithLabelValues("merge_checker", "small_size").Inc()
 		return nil, nil
 	}
 
 	// skip hot region
 	if m.cluster.IsRegionHot(region.GetId()) {
+		checkerCounter.WithLabelValues("merge_checker", "hot_region").Inc()
 		return nil, nil
 	}
 
@@ -72,6 +76,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	}
 
 	if target == nil {
+		checkerCounter.WithLabelValues("merge_checker", "no_target").Inc()
 		return nil, nil
 	}
 
@@ -80,6 +85,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 		return nil, nil
 	}
 
+	checkerCounter.WithLabelValues("merge_checker", "new_operator").Inc()
 	log.Debugf("try to merge region {%v} into region {%v}", region, target)
 	op1, op2 := CreateMergeRegionOperator("merge-region", region, target, direction, kind, steps)
 
@@ -105,6 +111,7 @@ func (m *MergeChecker) matchPeers(source *core.RegionInfo, target *core.RegionIn
 		}
 		peer, err := m.cluster.AllocPeer(id)
 		if err != nil {
+			log.Debugf("peer alloc failed: %v", err)
 			return nil, kind, errors.Trace(err)
 		}
 		steps = append(steps, AddPeer{ToStore: id, PeerID: peer.Id})
