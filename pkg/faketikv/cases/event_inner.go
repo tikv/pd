@@ -54,7 +54,7 @@ type AddNode struct {
 	NodeID uint64
 }
 
-// RemoveNode remove a node
+// RemoveNode removes a node
 type RemoveNode struct {
 	Tick   int64
 	NodeID uint64
