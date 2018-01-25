@@ -276,6 +276,14 @@ func (c *clusterInfo) getRegionStats(startKey, endKey []byte) *core.RegionStats 
 	return c.Regions.GetRegionStats(startKey, endKey)
 }
 
+func (c *clusterInfo) dropRegion(id uint64) {
+	c.Lock()
+	defer c.Unlock()
+	if region := c.BasicCluster.GetRegion(id); region != nil {
+		c.Regions.RemoveRegion(region)
+	}
+}
+
 func (c *clusterInfo) getStoreRegionCount(storeID uint64) int {
 	c.RLock()
 	defer c.RUnlock()
