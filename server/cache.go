@@ -473,7 +473,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		if readItem == nil {
 			c.ReadStatistics.Remove(key)
 		} else {
-			c.ReadStatistics.Put(key, writeItem)
+			c.ReadStatistics.Put(key, readItem)
 		}
 	}
 	return nil

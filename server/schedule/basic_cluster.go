@@ -205,11 +205,7 @@ func (bc *BasicCluster) CheckWriteStatus(region *core.RegionInfo) (bool, *core.R
 	var WrittenBytesPerSec uint64
 	v, isExist := bc.WriteStatistics.Peek(region.GetId())
 	if isExist && !Simulating {
-		value, ok := v.(*core.RegionStat)
-		if !ok {
-			return false, nil
-		}
-		interval := time.Since(value.LastUpdateTime).Seconds()
+		interval := time.Since(v.(*core.RegionStat).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
 			return false, nil
 		}
@@ -271,11 +267,7 @@ func (bc *BasicCluster) CheckReadStatus(region *core.RegionInfo) (bool, *core.Re
 	var ReadBytesPerSec uint64
 	v, isExist := bc.ReadStatistics.Peek(region.GetId())
 	if isExist && !Simulating { // When simulating, we can't calculate it using physical time.
-		value, ok := v.(*core.RegionStat)
-		if !ok {
-			return false, nil
-		}
-		interval := time.Since(value.LastUpdateTime).Seconds()
+		interval := time.Since(v.(*core.RegionStat).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
 			return false, nil
 		}
