@@ -143,7 +143,14 @@ func (c *testClusterInfo) addLeaderRegionWithWriteInfo(regionID uint64, leaderID
 	}
 	r := core.NewRegionInfo(region, leader)
 	r.WrittenBytes = writtenBytes
-	c.updateWriteStatus(r)
+	isUpdate, item := c.checkWriteStatus(r)
+	if isUpdate {
+		if item == nil {
+			c.writeStatistics.Remove(region.GetId())
+		} else {
+			c.writeStatistics.Put(region.GetId(), item)
+		}
+	}
 	c.putRegion(r)
 }
 
@@ -956,7 +963,14 @@ func (c *testClusterInfo) addLeaderRegionWithReadInfo(regionID uint64, leaderID 
 	}
 	r := core.NewRegionInfo(region, leader)
 	r.ReadBytes = readBytes
-	c.updateReadStatus(r)
+	isUpdate, item := c.checkReadStatus(r)
+	if isUpdate {
+		if item == nil {
+			c.readStatistics.Remove(region.GetId())
+		} else {
+			c.readStatistics.Put(region.GetId(), item)
+		}
+	}
 	c.putRegion(r)
 }
 

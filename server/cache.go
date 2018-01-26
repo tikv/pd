@@ -208,8 +208,7 @@ func (c *clusterInfo) GetRegion(regionID uint64) *core.RegionInfo {
 	return c.regions.GetRegion(regionID)
 }
 
-// updateWriteStatCache updates statistic for a region if it's hot, or remove it from statistics if it cools down
-func (c *clusterInfo) updateWriteStatCache(region *core.RegionInfo, hotRegionThreshold uint64) {
+func (c *clusterInfo) isNeedUpdateWriteStatCache(region *core.RegionInfo, hotRegionThreshold uint64) (bool, *core.RegionStat) {
 	var v *core.RegionStat
 	key := region.GetId()
 	value, isExist := c.writeStatistics.Peek(key)
@@ -229,22 +228,20 @@ func (c *clusterInfo) updateWriteStatCache(region *core.RegionInfo, hotRegionThr
 
 	if region.WrittenBytes < hotRegionThreshold {
 		if !isExist {
-			return
+			return false, nil
 		}
 		if v.AntiCount <= 0 {
-			c.writeStatistics.Remove(key)
-			return
+			return true, nil
 		}
 		// eliminate some noise
 		newItem.HotDegree = v.HotDegree - 1
 		newItem.AntiCount = v.AntiCount - 1
 		newItem.FlowBytes = v.FlowBytes
 	}
-	c.writeStatistics.Put(key, newItem)
+	return true, newItem
 }
 
-// updateReadStatCache updates statistic for a region if it's hot, or remove it from statistics if it cools down
-func (c *clusterInfo) updateReadStatCache(region *core.RegionInfo, hotRegionThreshold uint64) {
+func (c *clusterInfo) isNeedUpdateReadStatCache(region *core.RegionInfo, hotRegionThreshold uint64) (bool, *core.RegionStat) {
 	var v *core.RegionStat
 	key := region.GetId()
 	value, isExist := c.readStatistics.Peek(key)
@@ -264,18 +261,17 @@ func (c *clusterInfo) updateReadStatCache(region *core.RegionInfo, hotRegionThre
 
 	if region.ReadBytes < hotRegionThreshold {
 		if !isExist {
-			return
+			return false, nil
 		}
 		if v.AntiCount <= 0 {
-			c.readStatistics.Remove(key)
-			return
+			return true, nil
 		}
 		// eliminate some noise
 		newItem.HotDegree = v.HotDegree - 1
 		newItem.AntiCount = v.AntiCount - 1
 		newItem.FlowBytes = v.FlowBytes
 	}
-	c.readStatistics.Put(key, newItem)
+	return true, newItem
 }
 
 // RegionWriteStats returns hot region's write stats.
@@ -447,6 +443,8 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	region = region.Clone()
 	c.RLock()
 	origin := c.regions.GetRegion(region.GetId())
+	isWriteUpdate, writeItem := c.checkWriteStatus(region)
+	isReadUpdate, readItem := c.checkReadStatus(region)
 	c.RUnlock()
 
 	// Save to KV if meta is updated.
@@ -493,10 +491,12 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			log.Errorf("[region %d] fail to save region %v: %v", region.GetId(), region, err)
 		}
 	}
+	if !isWriteUpdate && !isReadUpdate && !saveCache && !isNew {
+		return nil
+	}
 
 	c.Lock()
 	defer c.Unlock()
-
 	if isNew {
 		c.activeRegions++
 	}
@@ -514,20 +514,31 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			c.updateStoreStatus(p.GetStoreId())
 		}
 	}
-
-	c.updateWriteStatus(region)
-	c.updateReadStatus(region)
-
+	key := region.GetId()
+	if isWriteUpdate {
+		if writeItem == nil {
+			c.writeStatistics.Remove(key)
+		} else {
+			c.writeStatistics.Put(key, writeItem)
+		}
+	}
+	if isReadUpdate {
+		if readItem == nil {
+			c.readStatistics.Remove(key)
+		} else {
+			c.readStatistics.Put(key, readItem)
+		}
+	}
 	return nil
 }
 
-func (c *clusterInfo) updateWriteStatus(region *core.RegionInfo) {
+func (c *clusterInfo) checkWriteStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
 	var WrittenBytesPerSec uint64
 	v, isExist := c.writeStatistics.Peek(region.GetId())
 	if isExist {
 		interval := time.Since(v.(*core.RegionStat).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
-			return
+			return false, nil
 		}
 		WrittenBytesPerSec = uint64(float64(region.WrittenBytes) / interval)
 	} else {
@@ -545,16 +556,16 @@ func (c *clusterInfo) updateWriteStatus(region *core.RegionInfo) {
 	if hotRegionThreshold < hotWriteRegionMinFlowRate {
 		hotRegionThreshold = hotWriteRegionMinFlowRate
 	}
-	c.updateWriteStatCache(region, hotRegionThreshold)
+	return c.isNeedUpdateWriteStatCache(region, hotRegionThreshold)
 }
 
-func (c *clusterInfo) updateReadStatus(region *core.RegionInfo) {
+func (c *clusterInfo) checkReadStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
 	var ReadBytesPerSec uint64
 	v, isExist := c.readStatistics.Peek(region.GetId())
 	if isExist {
 		interval := time.Now().Sub(v.(*core.RegionStat).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
-			return
+			return false, nil
 		}
 		ReadBytesPerSec = uint64(float64(region.ReadBytes) / interval)
 	} else {
@@ -571,5 +582,5 @@ func (c *clusterInfo) updateReadStatus(region *core.RegionInfo) {
 	if hotRegionThreshold < hotReadRegionMinFlowRate {
 		hotRegionThreshold = hotReadRegionMinFlowRate
 	}
-	c.updateReadStatCache(region, hotRegionThreshold)
+	return c.isNeedUpdateReadStatCache(region, hotRegionThreshold)
 }
