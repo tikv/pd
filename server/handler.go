@@ -397,3 +397,35 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 	c.addOperator(op)
 	return nil
 }
+
+// GetDownPeerRegions gets the region with down peer.
+func (h *Handler) GetDownPeerRegions() map[string]map[uint64]*core.RegionInfo {
+	if h.s.cluster.regionStats != nil {
+		return h.s.cluster.regionStats.downPeers
+	}
+	return nil
+}
+
+// GetMorePeerRegions gets the region exceeds the specified number of peers.
+func (h *Handler) GetMorePeerRegions() map[string]map[uint64]*core.RegionInfo {
+	if h.s.cluster.regionStats != nil {
+		return h.s.cluster.regionStats.morePeers
+	}
+	return nil
+}
+
+// GetMissPeerRegions gets the region less than the specified number of peers.
+func (h *Handler) GetMissPeerRegions() map[string]map[uint64]*core.RegionInfo {
+	if h.s.cluster.regionStats != nil {
+		return h.s.cluster.regionStats.missPeers
+	}
+	return nil
+}
+
+// GetPendingPeerRegions gets the region with pending peer.
+func (h *Handler) GetPendingPeerRegions() map[string]map[uint64]*core.RegionInfo {
+	if h.s.cluster.regionStats != nil {
+		return h.s.cluster.regionStats.pendingPeers
+	}
+	return nil
+}

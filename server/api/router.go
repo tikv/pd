@@ -80,6 +80,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/regions", regionsHandler.GetAll).Methods("GET")
 	router.HandleFunc("/api/v1/regions/writeflow", regionsHandler.GetTopWriteFlow).Methods("GET")
 	router.HandleFunc("/api/v1/regions/readflow", regionsHandler.GetTopReadFlow).Methods("GET")
+	router.HandleFunc("/api/v1/regions/check-peer/miss", regionsHandler.GetMissPeerRegions).Methods("GET")
+	router.HandleFunc("/api/v1/regions/check-peer/more", regionsHandler.GetMorePeerRegions).Methods("GET")
+	router.HandleFunc("/api/v1/regions/check-peer/pending", regionsHandler.GetPendingPeerRegions).Methods("GET")
+	router.HandleFunc("/api/v1/regions/check-peer/down", regionsHandler.GetDownPeerRegions).Methods("GET")
 
 	router.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")
 	router.Handle("/api/v1/status", newStatusHandler(rd)).Methods("GET")

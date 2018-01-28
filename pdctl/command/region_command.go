@@ -26,6 +26,7 @@ import (
 
 var (
 	regionsPrefix          = "pd/api/v1/regions"
+	regionsCheckPrefix     = "pd/api/v1/regions/check"
 	regionsWriteflowPrefix = "pd/api/v1/regions/writeflow"
 	regionsReadflowPrefix  = "pd/api/v1/regions/readflow"
 	regionIDPrefix         = "pd/api/v1/region/id"
@@ -45,6 +46,7 @@ func NewRegionCommand() *cobra.Command {
 		Run:   showRegionCommandFunc,
 	}
 	r.AddCommand(NewRegionWithKeyCommand())
+	r.AddCommand(NewRegionWithCheckCommand())
 
 	topRead := &cobra.Command{
 		Use:   "topread <limit>",
@@ -182,4 +184,32 @@ func decodeProtobufText(text string) (string, error) {
 		buf = append(buf, c)
 	}
 	return string(buf), nil
+}
+
+// NewRegionWithCheckCommand return a region with check subcommand of regionCmd
+func NewRegionWithCheckCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "check [miss|more|down|pending] <key>",
+		Short: "show the region with check specific status",
+		Run:   showRegionWithCheckCommandFunc,
+	}
+	return r
+}
+
+func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+
+	state := args[0]
+
+	prefix := regionsCheckPrefix + "/" + state
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get region: %s\n", err)
+		return
+	}
+	fmt.Println(r)
+
 }
