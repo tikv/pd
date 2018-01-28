@@ -173,6 +173,13 @@ func (c *clusterInfo) GetStores() []*core.StoreInfo {
 	return c.BasicCluster.GetStores()
 }
 
+// GetRegions returns all regions in the cluster.
+func (c *clusterInfo) GetRegions() []*core.RegionInfo {
+	c.RLock()
+	defer c.RUnlock()
+	return c.BasicCluster.GetRegions()
+}
+
 // GetStoresAverageScore returns the total resource score of all StoreInfo
 func (c *clusterInfo) GetStoresAverageScore(kind core.ResourceKind) float64 {
 	c.RLock()

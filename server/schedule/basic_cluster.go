@@ -98,6 +98,11 @@ func (bc *BasicCluster) GetStores() []*core.StoreInfo {
 	return bc.Stores.GetStores()
 }
 
+// GetRegions returns all Regions in the cluster.
+func (bc *BasicCluster) GetRegions() []*core.RegionInfo {
+	return bc.Regions.GetRegions()
+}
+
 // GetStore searches for a store by ID.
 func (bc *BasicCluster) GetStore(storeID uint64) *core.StoreInfo {
 	return bc.Stores.GetStore(storeID)
