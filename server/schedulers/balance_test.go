@@ -724,7 +724,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	hb, err := schedule.CreateScheduler("hot-write-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 
-	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
+	// Add stores 1, 2, 3, 4, 5, 6  with region counts 3, 2, 2, 2, 0, 0.
 
 	tc.addLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
 	tc.addLabelsStore(2, 2, map[string]string{"zone": "z2", "host": "h2"})
@@ -752,7 +752,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	tc.addLeaderRegionWithWriteInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 4)
 	opt.HotRegionLowThreshold = 0
 
-	// Will transfer a hot region from store 1 to store 5, because the total count of peers
+	// Will transfer a hot region from store 1 to store 6, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
 	op := hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 	c.Assert(op, NotNil)
