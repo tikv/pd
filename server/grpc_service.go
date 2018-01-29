@@ -207,6 +207,23 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}, nil
 }
 
+// GetAllStores implements gRPC PDServer.
+func (s *Server) GetAllStores(ctx context.Context, request *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &pdpb.GetAllStoresResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	return &pdpb.GetAllStoresResponse{
+		Header: s.header(),
+		Stores: cluster.GetStores(),
+	}, nil
+}
+
 // StoreHeartbeat implements gRPC PDServer.
 func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbeatRequest) (*pdpb.StoreHeartbeatResponse, error) {
 	if err := s.validateRequest(request.GetHeader()); err != nil {
