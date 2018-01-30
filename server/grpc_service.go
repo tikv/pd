@@ -321,6 +321,8 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			return errors.Trace(err)
 		}
 
+		regionHeartbeatLatency.Observe(time.Now().Second() - int(request.GetTimestamp()))
+
 		storeID := request.GetLeader().GetStoreId()
 		storeLabel := strconv.FormatUint(storeID, 10)
 
