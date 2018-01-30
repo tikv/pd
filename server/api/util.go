@@ -66,3 +66,14 @@ func doDelete(url string) error {
 	res.Body.Close()
 	return nil
 }
+
+func doGet(url string) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return errors.Errorf("http get url %s return code %d", url, resp.StatusCode)
+	}
+	return nil
+}
