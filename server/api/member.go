@@ -127,7 +127,7 @@ func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.R
 	}
 
 	var input map[string]interface{}
-	if err := readJSON(r.Body, &input); err != nil {
+	if err = readJSON(r.Body, &input); err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
