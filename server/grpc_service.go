@@ -43,6 +43,13 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 	if err != nil {
 		return nil, grpc.Errorf(codes.Unknown, err.Error())
 	}
+	for _, m := range members {
+		leaderPriority, err := s.GetMemberLeaderPriority(m.GetMemberId())
+		if err != nil {
+			return nil, grpc.Errorf(codes.Unknown, err.Error())
+		}
+		m.LeaderPriority = int32(leaderPriority)
+	}
 
 	leader, err := s.GetLeader()
 	if err != nil {

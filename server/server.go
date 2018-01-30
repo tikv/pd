@@ -14,6 +14,7 @@
 package server
 
 import (
+	"fmt"
 	"math/rand"
 	"net/http"
 	"os"
@@ -557,6 +558,40 @@ func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
 
 func (s *Server) getAllocIDPath() string {
 	return path.Join(s.rootPath, "alloc_id")
+}
+
+func (s *Server) getMemberLeaderPriorityPath(id uint64) string {
+	return path.Join(s.rootPath, fmt.Sprintf("member/%d/leader_priority", id))
+}
+
+// SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
+func (s *Server) SetMemberLeaderPriority(id uint64, priority int) error {
+	key := s.getMemberLeaderPriorityPath(id)
+	res, err := s.leaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if !res.Succeeded {
+		return errors.New("save leader priority failed, maybe not leader")
+	}
+	return nil
+}
+
+// GetMemberLeaderPriority loads a member's priority to be elected as the etcd leader.
+func (s *Server) GetMemberLeaderPriority(id uint64) (int, error) {
+	key := s.getMemberLeaderPriorityPath(id)
+	res, err := kvGet(s.client, key)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+	if len(res.Kvs) == 0 {
+		return 0, nil
+	}
+	priority, err := strconv.ParseInt(string(res.Kvs[0].Value), 10, 32)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+	return int(priority), nil
 }
 
 // SetLogLevel sets log level.
