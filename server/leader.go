@@ -57,8 +57,20 @@ func (s *Server) getNextLeaderPath() string {
 	return path.Join(s.rootPath, "next_leader")
 }
 
+func (s *Server) startLeaderLoop() {
+	s.leaderLoopCtx, s.leaderLoopCancel = context.WithCancel(context.Background())
+	s.leaderLoopWg.Add(2)
+	go s.leaderLoop()
+	go s.etcdLeaderLoop()
+}
+
+func (s *Server) stopLeaderLoop() {
+	s.leaderLoopCancel()
+	s.leaderLoopWg.Wait()
+}
+
 func (s *Server) leaderLoop() {
-	defer s.wg.Done()
+	defer s.leaderLoopWg.Done()
 
 	for {
 		if s.isClosed() {
@@ -105,6 +117,42 @@ func (s *Server) leaderLoop() {
 
 		if err = s.campaignLeader(); err != nil {
 			log.Errorf("campaign leader err %s", errors.ErrorStack(err))
+		}
+	}
+}
+
+func (s *Server) etcdLeaderLoop() {
+	defer s.leaderLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.leaderLoopCtx)
+	defer cancel()
+	for {
+		select {
+		case <-time.After(s.cfg.leaderPriorityCheckInterval.Duration):
+			etcdLeader := s.etcd.Server.Lead()
+			if etcdLeader == s.ID() {
+				break
+			}
+			myPriority, err := s.GetMemberLeaderPriority(s.ID())
+			if err != nil {
+				log.Errorf("failed to load leader priority: %v", err)
+				break
+			}
+			leaderPriority, err := s.GetMemberLeaderPriority(etcdLeader)
+			if err != nil {
+				log.Errorf("failed to load leader priority: %v", err)
+				break
+			}
+			if myPriority > leaderPriority {
+				err := s.etcd.Server.MoveLeader(ctx, etcdLeader, s.ID())
+				if err != nil {
+					log.Errorf("failed to transfer etcd leader: %v", err)
+				} else {
+					log.Infof("etcd leader moved from %v to %v", etcdLeader, s.ID())
+				}
+			}
+		case <-ctx.Done():
+			return
 		}
 	}
 }
@@ -215,7 +263,7 @@ func (s *Server) campaignLeader() error {
 	}
 
 	// Make the leader keepalived.
-	ctx, cancel = context.WithCancel(s.client.Ctx())
+	ctx, cancel = context.WithCancel(s.leaderLoopCtx)
 	defer cancel()
 
 	ch, err := lessor.KeepAlive(ctx, clientv3.LeaseID(leaseResp.ID))
@@ -275,7 +323,7 @@ func (s *Server) watchLeader() {
 	watcher := clientv3.NewWatcher(s.client)
 	defer watcher.Close()
 
-	ctx, cancel := context.WithCancel(s.client.Ctx())
+	ctx, cancel := context.WithCancel(s.leaderLoopCtx)
 	defer cancel()
 
 	for {

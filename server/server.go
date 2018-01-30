@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -60,7 +61,9 @@ type Server struct {
 	scheduleOpt *scheduleOption
 	handler     *Handler
 
-	wg sync.WaitGroup
+	leaderLoopCtx    context.Context
+	leaderLoopCancel func()
+	leaderLoopWg     sync.WaitGroup
 
 	// Etcd and cluster informations.
 	etcd        *embed.Etcd
@@ -252,7 +255,7 @@ func (s *Server) Close() {
 
 	log.Info("closing server")
 
-	s.enableLeader(false)
+	s.stopLeaderLoop()
 
 	if s.client != nil {
 		s.client.Close()
@@ -265,8 +268,6 @@ func (s *Server) Close() {
 	if s.hbStreams != nil {
 		s.hbStreams.Close()
 	}
-
-	s.wg.Wait()
 
 	log.Info("close server")
 }
@@ -295,8 +296,8 @@ func (s *Server) Run() error {
 		return errors.Trace(err)
 	}
 
-	s.wg.Add(1)
-	go s.leaderLoop()
+	s.startLeaderLoop()
+
 	return nil
 }
 

@@ -103,6 +103,8 @@ type Config struct {
 	disableStrictReconfigCheck bool
 
 	heartbeatStreamBindInterval typeutil.Duration
+
+	leaderPriorityCheckInterval typeutil.Duration
 }
 
 // NewConfig creates a new config.
@@ -158,6 +160,8 @@ const (
 	defaultElectionInterval = 3000 * time.Millisecond
 
 	defaultHeartbeatStreamRebindInterval = time.Minute
+
+	defaultLeaderPriorityCheckInterval = time.Minute
 )
 
 func adjustString(v *string, defValue string) {
@@ -300,6 +304,8 @@ func (c *Config) adjust() error {
 	c.Replication.adjust()
 
 	adjustDuration(&c.heartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
+
+	adjustDuration(&c.leaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
 	return nil
 }
 
