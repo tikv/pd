@@ -14,6 +14,7 @@
 package server
 
 import (
+	"net/http"
 	"strconv"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	log "github.com/sirupsen/logrus"
+	"github.com/unrolled/render"
 )
 
 var (
@@ -398,34 +400,51 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 	return nil
 }
 
-// GetDownPeerRegions gets the region with down peer.
-func (h *Handler) GetDownPeerRegions() map[string]map[uint64]*core.RegionInfo {
-	if h.s.cluster.regionStats != nil {
-		return h.s.cluster.regionStats.downPeers
+// ResponseDownPeerRegions gets the region with down peer.
+func (h *Handler) ResponseDownPeerRegions(w http.ResponseWriter, rd *render.Render) {
+	c, err := h.getCoordinator()
+	if err != nil {
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
-	return nil
+	c.RLock()
+	rd.JSON(w, http.StatusOK, c.regionStats.downPeers)
+	c.RUnlock()
+
 }
 
-// GetMorePeerRegions gets the region exceeds the specified number of peers.
-func (h *Handler) GetMorePeerRegions() map[string]map[uint64]*core.RegionInfo {
-	if h.s.cluster.regionStats != nil {
-		return h.s.cluster.regionStats.morePeers
+// ResponseMorePeerRegions gets the region exceeds the specified number of peers.
+func (h *Handler) ResponseMorePeerRegions(w http.ResponseWriter, rd *render.Render) {
+	c, err := h.getCoordinator()
+	if err != nil {
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
-	return nil
+	c.RLock()
+	rd.JSON(w, http.StatusOK, c.regionStats.morePeers)
+	c.RUnlock()
 }
 
-// GetMissPeerRegions gets the region less than the specified number of peers.
-func (h *Handler) GetMissPeerRegions() map[string]map[uint64]*core.RegionInfo {
-	if h.s.cluster.regionStats != nil {
-		return h.s.cluster.regionStats.missPeers
+// ResponseMissPeerRegions gets the region less than the specified number of peers.
+func (h *Handler) ResponseMissPeerRegions(w http.ResponseWriter, rd *render.Render) {
+	c, err := h.getCoordinator()
+	if err != nil {
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
-	return nil
+	c.RLock()
+	rd.JSON(w, http.StatusOK, c.regionStats.missPeers)
+	c.RUnlock()
 }
 
-// GetPendingPeerRegions gets the region with pending peer.
-func (h *Handler) GetPendingPeerRegions() map[string]map[uint64]*core.RegionInfo {
-	if h.s.cluster.regionStats != nil {
-		return h.s.cluster.regionStats.pendingPeers
+// ResponsePendingPeerRegions gets the region with pending peer.
+func (h *Handler) ResponsePendingPeerRegions(w http.ResponseWriter, rd *render.Render) {
+	c, err := h.getCoordinator()
+	if err != nil {
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
-	return nil
+	c.RLock()
+	rd.JSON(w, http.StatusOK, c.regionStats.pendingPeers)
+	c.RUnlock()
 }

@@ -144,26 +144,22 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 
 func (h *regionsHandler) GetMissPeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	res := handler.GetMissPeerRegions()
-	h.rd.JSON(w, http.StatusOK, res)
+	handler.ResponseMissPeerRegions(w, h.rd)
 }
 
 func (h *regionsHandler) GetMorePeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	res := handler.GetMorePeerRegions()
-	h.rd.JSON(w, http.StatusOK, res)
+	handler.ResponseMorePeerRegions(w, h.rd)
 }
 
 func (h *regionsHandler) GetPendingPeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	res := handler.GetPendingPeerRegions()
-	h.rd.JSON(w, http.StatusOK, res)
+	handler.ResponsePendingPeerRegions(w, h.rd)
 }
 
 func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	res := handler.GetDownPeerRegions()
-	h.rd.JSON(w, http.StatusOK, res)
+	handler.ResponseDownPeerRegions(w, h.rd)
 }
 
 const (

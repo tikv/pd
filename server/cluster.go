@@ -57,7 +57,6 @@ type RaftCluster struct {
 	cachedCluster *clusterInfo
 
 	coordinator *coordinator
-	regionStats *regionStatistics
 
 	wg   sync.WaitGroup
 	quit chan struct{}
@@ -453,13 +452,6 @@ func (c *RaftCluster) collectMetrics() {
 	}
 	statsMap.Collect()
 
-	regionStats := newRegionStatistics(c.cachedCluster.opt, c.coordinator.classifier)
-	for _, r := range cluster.GetRegions() {
-		regionStats.Observe(r)
-	}
-	regionStats.Collect()
-
-	c.regionStats = regionStats
 	c.coordinator.collectSchedulerMetrics()
 	c.coordinator.collectHotSpotMetrics()
 }

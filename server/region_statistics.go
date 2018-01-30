@@ -38,41 +38,67 @@ func newRegionStatistics(opt *scheduleOption, classifier namespace.Classifier) *
 	}
 }
 
+func putRegion(stats map[string]map[uint64]*core.RegionInfo, namespace string, region *core.RegionInfo) {
+	regionID := region.GetId()
+	if m, ok := stats[namespace]; !ok {
+		mm := make(map[uint64]*core.RegionInfo)
+		stats[namespace] = mm
+		mm[regionID] = region
+	} else {
+		m[regionID] = region
+	}
+
+}
+
+func putMetrics(stats map[string]map[string]float64, namespace, key string, value float64) {
+	if m, ok := stats[namespace]; !ok {
+		mm := make(map[string]float64)
+		stats[namespace] = mm
+		mm[key] = value
+	} else {
+		m[key] = value
+	}
+}
+
 func (r *regionStatistics) Observe(region *core.RegionInfo) {
 	// Region state.
-	regionID := region.GetId()
 	namespace := r.classifier.GetRegionNamespace(region)
 	if len(region.Peers) < r.opt.GetMaxReplicas(namespace) {
-		r.missPeers[namespace][regionID] = region
+		putRegion(r.missPeers, namespace, region)
 	} else if len(region.Peers) > r.opt.GetMaxReplicas(namespace) {
-		r.morePeers[namespace][regionID] = region
+		putRegion(r.morePeers, namespace, region)
 	}
 
 	if len(region.DownPeers) > 0 {
-		r.downPeers[namespace][regionID] = region
+		putRegion(r.downPeers, namespace, region)
 	}
 	if len(region.PendingPeers) > 0 {
-		r.pendingPeers[namespace][regionID] = region
+		putRegion(r.pendingPeers, namespace, region)
 	}
 }
 
 func (r *regionStatistics) Collect() {
 	metrics := make(map[string]map[string]float64)
 	for namespace := range r.missPeers {
-		metrics[namespace]["miss_peer_region_count"] = float64(len(r.missPeers[namespace]))
+		putMetrics(metrics, namespace, "miss_peer_region_count", float64(len(r.missPeers[namespace])))
+
 	}
 	for namespace := range r.morePeers {
-		metrics[namespace]["more_peer_region_count"] = float64(len(r.morePeers[namespace]))
+		putMetrics(metrics, namespace, "more_peer_region_count", float64(len(r.morePeers[namespace])))
 	}
 	for namespace := range r.downPeers {
-		metrics[namespace]["down_peer_region_count"] = float64(len(r.downPeers[namespace]))
+		putMetrics(metrics, namespace, "down_peer_region_count", float64(len(r.downPeers[namespace])))
 	}
 	for namespace := range r.pendingPeers {
-		metrics[namespace]["pending_peer_region_count"] = float64(len(r.pendingPeers[namespace]))
+		putMetrics(metrics, namespace, "pending_peer_region_count", float64(len(r.pendingPeers[namespace])))
 	}
 	for namespace, m := range metrics {
 		for label, value := range m {
 			clusterStatusGauge.WithLabelValues(label, namespace).Set(value)
 		}
 	}
+	r.missPeers = make(map[string]map[uint64]*core.RegionInfo)
+	r.morePeers = make(map[string]map[uint64]*core.RegionInfo)
+	r.downPeers = make(map[string]map[uint64]*core.RegionInfo)
+	r.pendingPeers = make(map[string]map[uint64]*core.RegionInfo)
 }
