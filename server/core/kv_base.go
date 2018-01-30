@@ -24,6 +24,7 @@ type KVBase interface {
 	Load(key string) (string, error)
 	LoadRange(key, endKey string, limit int) ([]string, error)
 	Save(key, value string) error
+	Delete(key string) error
 }
 
 type memoryKV struct {
@@ -71,5 +72,13 @@ func (kv *memoryKV) Save(key, value string) error {
 	kv.Lock()
 	defer kv.Unlock()
 	kv.tree.ReplaceOrInsert(memoryKVItem{key, value})
+	return nil
+}
+
+func (kv *memoryKV) Delete(key string) error {
+	kv.Lock()
+	defer kv.Unlock()
+
+	kv.tree.Delete(memoryKVItem{key, ""})
 	return nil
 }
