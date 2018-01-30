@@ -14,6 +14,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -41,16 +42,13 @@ func newMemberListHandler(svr *server.Server, rd *render.Render) *memberListHand
 }
 
 func (h *memberListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	client := h.svr.GetClient()
-
-	members, err := server.GetMembers(client)
+	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: h.svr.ClusterID()}}
+	members, err := h.svr.GetMembers(context.TODO(), req)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ret := make(map[string][]*pdpb.Member)
-	ret["members"] = members
-	h.rd.JSON(w, http.StatusOK, ret)
+	h.rd.JSON(w, http.StatusOK, members)
 }
 
 type memberDeleteHandler struct {
