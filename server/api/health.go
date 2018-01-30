@@ -27,10 +27,10 @@ type healthHandler struct {
 }
 
 type health struct {
-	Name      string `json:"name"`
-	MemberId  uint64 `json:"member_id"`
-	ClientURL string `json:"client_url"`
-	Health    bool   `json:"health"`
+	Name       string   `json:"name"`
+	MemberId   uint64   `json:"member_id"`
+	ClientUrls []string `json:"client_urls"`
+	Health     bool     `json:"health"`
 }
 
 func newHealthHandler(svr *server.Server, rd *render.Render) *healthHandler {
@@ -50,12 +50,15 @@ func (h *healthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	healths := []health{}
 	for _, member := range members {
 		h := health{
-			Name:      member.Name,
-			MemberId:  member.MemberId,
-			ClientURL: member.ClientUrls[0],
+			Name:       member.Name,
+			MemberId:   member.MemberId,
+			ClientUrls: member.ClientUrls,
+			Health:     true,
 		}
-		if err := doGet(fmt.Sprintf("%s%s%s", member.ClientUrls[0], apiPrefix, pingAPI)); err == nil {
-			h.Health = true
+		for _, cUrl := range member.ClientUrls {
+			if err := doGet(fmt.Sprintf("%s%s%s", cUrl, apiPrefix, pingAPI)); err != nil {
+				h.Health = false
+			}
 		}
 		healths = append(healths, h)
 	}
