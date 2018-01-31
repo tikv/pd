@@ -28,7 +28,7 @@ type healthHandler struct {
 
 type health struct {
 	Name       string   `json:"name"`
-	MemberId   uint64   `json:"member_id"`
+	MemberID   uint64   `json:"member_id"`
 	ClientUrls []string `json:"client_urls"`
 	Health     bool     `json:"health"`
 }
@@ -51,12 +51,12 @@ func (h *healthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, member := range members {
 		h := health{
 			Name:       member.Name,
-			MemberId:   member.MemberId,
+			MemberID:   member.MemberId,
 			ClientUrls: member.ClientUrls,
 			Health:     true,
 		}
-		for _, cUrl := range member.ClientUrls {
-			if err := doGet(fmt.Sprintf("%s%s%s", cUrl, apiPrefix, pingAPI)); err != nil {
+		for _, cURL := range member.ClientUrls {
+			if err := doGet(fmt.Sprintf("%s%s%s", cURL, apiPrefix, pingAPI)); err != nil {
 				h.Health = false
 			}
 		}
