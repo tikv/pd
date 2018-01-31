@@ -14,7 +14,6 @@
 package server
 
 import (
-	"net/http"
 	"strconv"
 	"time"
 
@@ -22,7 +21,6 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	log "github.com/sirupsen/logrus"
-	"github.com/unrolled/render"
 )
 
 var (
@@ -401,70 +399,47 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 	return nil
 }
 
-// ResponseDownPeerRegions gets the region with down peer.
-func (h *Handler) ResponseDownPeerRegions(w http.ResponseWriter, rd *render.Render) {
+// GetDownPeerRegions gets the region with down peer.
+func (h *Handler) GetDownPeerRegions() (map[string]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped)
-		return
+		return nil, errNotBootstrapped
 	}
-	cluster := c.cachedCluster
-	if cluster.regionStats == nil {
-		rd.JSON(w, http.StatusInternalServerError, errRegionStatsNotFound)
-		return
-	}
-	cluster.RLock()
-	rd.JSON(w, http.StatusOK, cluster.regionStats.stats[downPeer])
-	c.RUnlock()
+	return c.cachedCluster.GetRegionStatsByType(downPeer), nil
 }
 
-// ResponseMorePeerRegions gets the region exceeds the specified number of peers.
-func (h *Handler) ResponseMorePeerRegions(w http.ResponseWriter, rd *render.Render) {
+// GetMorePeerRegions gets the region exceeds the specified number of peers.
+func (h *Handler) GetMorePeerRegions() (map[string]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped)
-		return
+		return nil, errNotBootstrapped
 	}
-	cluster := c.cachedCluster
-	if cluster.regionStats == nil {
-		rd.JSON(w, http.StatusInternalServerError, errRegionStatsNotFound)
-		return
-	}
-	cluster.RLock()
-	rd.JSON(w, http.StatusOK, cluster.regionStats.stats[morePeer])
-	c.RUnlock()
+	return c.cachedCluster.GetRegionStatsByType(morePeer), nil
 }
 
-// ResponseMissPeerRegions gets the region less than the specified number of peers.
-func (h *Handler) ResponseMissPeerRegions(w http.ResponseWriter, rd *render.Render) {
+// GetMissPeerRegions gets the region less than the specified number of peers.
+func (h *Handler) GetMissPeerRegions() (map[string]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped)
-		return
+		return nil, errNotBootstrapped
 	}
-	cluster := c.cachedCluster
-	if cluster.regionStats == nil {
-		rd.JSON(w, http.StatusInternalServerError, errRegionStatsNotFound)
-		return
-	}
-	cluster.RLock()
-	rd.JSON(w, http.StatusOK, cluster.regionStats.stats[missPeer])
-	c.RUnlock()
+	return c.cachedCluster.GetRegionStatsByType(missPeer), nil
 }
 
-// ResponsePendingPeerRegions gets the region with pending peer.
-func (h *Handler) ResponsePendingPeerRegions(w http.ResponseWriter, rd *render.Render) {
+// GetPendingPeerRegions gets the region with pending peer.
+func (h *Handler) GetPendingPeerRegions() (map[string]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped)
-		return
+		return nil, errNotBootstrapped
 	}
-	cluster := c.cachedCluster
-	if cluster.regionStats == nil {
-		rd.JSON(w, http.StatusInternalServerError, errRegionStatsNotFound)
-		return
+	return c.cachedCluster.GetRegionStatsByType(pendingPeer), nil
+}
+
+// GetIncorrectNamespaceRegions gets the region with pending peer.
+func (h *Handler) GetIncorrectNamespaceRegions() (map[string]*core.RegionInfo, error) {
+	c := h.s.GetRaftCluster()
+	if c == nil {
+		return nil, errNotBootstrapped
 	}
-	cluster.RLock()
-	rd.JSON(w, http.StatusOK, cluster.regionStats.stats[pendingPeer])
-	c.RUnlock()
+	return c.cachedCluster.GetRegionStatsByType(incorrectNamespace), nil
 }

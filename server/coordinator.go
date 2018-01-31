@@ -213,8 +213,8 @@ func (c *coordinator) getSchedulers() []string {
 }
 
 func (c *coordinator) collectSchedulerMetrics() {
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	defer c.RUnlock()
 	for _, s := range c.schedulers {
 		var allowScheduler float64
 		if s.AllowSchedule() {

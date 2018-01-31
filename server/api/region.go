@@ -144,22 +144,47 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 
 func (h *regionsHandler) GetMissPeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	handler.ResponseMissPeerRegions(w, h.rd)
+	res, err := handler.GetMissPeerRegions()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	}
+	h.rd.JSON(w, http.StatusOK, res)
 }
 
 func (h *regionsHandler) GetMorePeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	handler.ResponseMorePeerRegions(w, h.rd)
+	res, err := handler.GetMorePeerRegions()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	}
+	h.rd.JSON(w, http.StatusOK, res)
 }
 
 func (h *regionsHandler) GetPendingPeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	handler.ResponsePendingPeerRegions(w, h.rd)
+	res, err := handler.GetPendingPeerRegions()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	}
+	h.rd.JSON(w, http.StatusOK, res)
 }
 
 func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	handler.ResponseDownPeerRegions(w, h.rd)
+	res, err := handler.GetDownPeerRegions()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	}
+	h.rd.JSON(w, http.StatusOK, res)
+}
+
+func (h *regionsHandler) GetIncorrectNamespaceRegions(w http.ResponseWriter, r *http.Request) {
+	handler := h.svr.GetHandler()
+	res, err := handler.GetIncorrectNamespaceRegions()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	}
+	h.rd.JSON(w, http.StatusOK, res)
 }
 
 const (

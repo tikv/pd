@@ -315,6 +315,10 @@ func (c *clusterInfo) RandFollowerRegion(storeID uint64) *core.RegionInfo {
 func (c *clusterInfo) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
+	return c.getRegionStores(region)
+}
+
+func (c *clusterInfo) getRegionStores(region *core.RegionInfo) []*core.StoreInfo {
 	var stores []*core.StoreInfo
 	for id := range region.GetStoreIds() {
 		if store := c.Stores.GetStore(id); store != nil {
@@ -468,7 +472,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	if c.regionStats != nil {
-		c.regionStats.Observe(region)
+		c.regionStats.Observe(region, c.getRegionStores(region))
 	}
 
 	key := region.GetId()
@@ -490,9 +494,22 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 }
 
 func (c *clusterInfo) collectMetrics() {
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	defer c.RUnlock()
 	c.regionStats.Collect()
+}
+
+func (c *clusterInfo) GetRegionStatsByType(typ regionStatisticType) map[string]*core.RegionInfo {
+	if c.regionStats == nil {
+		return nil
+	}
+	res := make(map[string]*core.RegionInfo)
+	c.RLock()
+	defer c.RUnlock()
+	for k, r := range c.regionStats.stats[typ] {
+		res[k] = r.Clone()
+	}
+	return res
 }
 
 func (c *clusterInfo) GetOpt() schedule.NamespaceOptions {

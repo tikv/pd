@@ -189,7 +189,7 @@ func decodeProtobufText(text string) (string, error) {
 // NewRegionWithCheckCommand return a region with check subcommand of regionCmd
 func NewRegionWithCheckCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "check [miss|more|down|pending]",
+		Use:   "check [miss|more|down|pending|incorrect-ns]",
 		Short: "show the region with check specific status",
 		Run:   showRegionWithCheckCommandFunc,
 	}

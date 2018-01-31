@@ -29,7 +29,7 @@ const (
 	morePeer
 	downPeer
 	pendingPeer
-	incorrectNameSpace
+	incorrectNamespace
 )
 
 type regionStatistics struct {
@@ -51,7 +51,7 @@ func newRegionStatistics(opt *scheduleOption, classifier namespace.Classifier) *
 	r.stats[morePeer] = make(map[string]*core.RegionInfo)
 	r.stats[downPeer] = make(map[string]*core.RegionInfo)
 	r.stats[pendingPeer] = make(map[string]*core.RegionInfo)
-	r.stats[incorrectNameSpace] = make(map[string]*core.RegionInfo)
+	r.stats[incorrectNamespace] = make(map[string]*core.RegionInfo)
 	return r
 }
 
@@ -59,7 +59,6 @@ func (r *regionStatistics) putRegion(typ regionStatisticType, namespace string, 
 	regionID := region.GetId()
 	key := fmt.Sprintf("%s-%d", namespace, regionID)
 	r.stats[typ][key] = region
-
 }
 
 func addMetrics(stats map[string]map[string]float64, key, typ string) {
@@ -87,7 +86,7 @@ func (r *regionStatistics) deleteEntry(deleteIndex regionStatisticType, namespac
 	}
 }
 
-func (r *regionStatistics) Observe(region *core.RegionInfo) {
+func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo) {
 	// Region state.
 	namespace := r.classifier.GetRegionNamespace(region)
 	var (
@@ -97,12 +96,10 @@ func (r *regionStatistics) Observe(region *core.RegionInfo) {
 	if len(region.Peers) < r.opt.GetMaxReplicas(namespace) {
 		r.putRegion(missPeer, namespace, region)
 		peerTypeIndex |= missPeer
-
 	} else if len(region.Peers) > r.opt.GetMaxReplicas(namespace) {
 		r.putRegion(morePeer, namespace, region)
 		peerTypeIndex |= morePeer
 	}
-
 	if len(region.DownPeers) > 0 {
 		r.putRegion(downPeer, namespace, region)
 		peerTypeIndex |= downPeer
@@ -111,8 +108,17 @@ func (r *regionStatistics) Observe(region *core.RegionInfo) {
 		r.putRegion(pendingPeer, namespace, region)
 		peerTypeIndex |= pendingPeer
 	}
-	oldIndex, ok := r.index[region.GetId()]
-	if ok {
+	for _, store := range stores {
+		ns := r.classifier.GetStoreNamespace(store)
+		if ns == namespace {
+			continue
+		}
+		r.putRegion(incorrectNamespace, namespace, region)
+		peerTypeIndex |= pendingPeer
+		break
+	}
+
+	if oldIndex, ok := r.index[region.GetId()]; ok {
 		deleteIndex = oldIndex &^ peerTypeIndex
 	}
 	r.deleteEntry(deleteIndex, namespace, region.GetId())
@@ -122,7 +128,7 @@ func (r *regionStatistics) Observe(region *core.RegionInfo) {
 func (r *regionStatistics) Collect() {
 	metrics := make(map[string]map[string]float64)
 	for key := range r.stats[missPeer] {
-		addMetrics(metrics, key, "more_peer_region_count")
+		addMetrics(metrics, key, "miss_peer_region_count")
 	}
 	for key := range r.stats[morePeer] {
 		addMetrics(metrics, key, "more_peer_region_count")
@@ -133,6 +139,10 @@ func (r *regionStatistics) Collect() {
 	for key := range r.stats[pendingPeer] {
 		addMetrics(metrics, key, "pending_peer_region_count")
 	}
+	for key := range r.stats[incorrectNamespace] {
+		addMetrics(metrics, key, "incorrect_namespace_region_count")
+	}
+
 	for namespace, m := range metrics {
 		for label, value := range m {
 			clusterStatusGauge.WithLabelValues(label, namespace).Set(value)
