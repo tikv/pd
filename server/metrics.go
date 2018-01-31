@@ -82,14 +82,14 @@ var (
 			Help:      "Counter of region hearbeat.",
 		}, []string{"store", "type", "status"})
 
-	regionHeartbeatLatency = prometheus.NewHistogram(
+	regionHeartbeatLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "region_heartbeat_latency_seconds",
 			Help:      "Bucketed histogram of latency (s) of receiving heartbeat.",
-			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 12),
-		})
+			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 15),
+		}, []string{"store"})
 
 	storeStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
