@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2018 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,12 @@
 package api
 
 import (
+	"encoding/json"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
-	"sort"
 	"strings"
 
-	"encoding/json"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
 )
@@ -35,16 +34,6 @@ func (s *testHealthAPISuite) SetUpSuite(c *C) {
 	s.hc = newHTTPClient()
 }
 
-func checkEqualStings(c *C, a, b []string) {
-	sort.Strings(a)
-	sortedStringA := strings.Join(a, "")
-
-	sort.Strings(b)
-	sortedStringB := strings.Join(b, "")
-
-	c.Assert(sortedStringA, Equals, sortedStringB)
-}
-
 func checkSliceResponse(c *C, body []byte, cfgs []*server.Config) {
 	got := []health{}
 	json.Unmarshal(body, &got)
@@ -56,7 +45,7 @@ func checkSliceResponse(c *C, body []byte, cfgs []*server.Config) {
 			if h.Name != cfg.Name {
 				continue
 			}
-			checkEqualStings(c, h.ClientUrls, strings.Split(cfg.ClientUrls, ","))
+			relaxEqualStings(c, h.ClientUrls, strings.Split(cfg.ClientUrls, ","))
 		}
 	}
 }
