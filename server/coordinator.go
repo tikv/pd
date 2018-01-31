@@ -94,6 +94,7 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 		if op.IsFinish() {
 			log.Infof("[region %v] operator finish: %s", region.GetId(), op)
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
+			operatorDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 			c.pushHistory(op)
 			c.removeOperator(op)
 		} else if timeout {
