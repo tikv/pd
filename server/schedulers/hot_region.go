@@ -243,10 +243,11 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 			continue
 		}
 
+		srcStore := cluster.GetStore(srcStoreID)
 		filters := []schedule.Filter{
 			schedule.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
-			schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), stores, cluster.GetLeaderStore(srcRegion)),
 			schedule.NewStateFilter(),
+			schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
 			schedule.NewStorageThresholdFilter(),
 		}
 		destStoreIDs := make([]uint64, 0, len(stores))

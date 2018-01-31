@@ -244,6 +244,11 @@ func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *core.RegionStats 
 	return c.cachedCluster.getRegionStats(startKey, endKey)
 }
 
+// DropCacheRegion removes a region from the cache.
+func (c *RaftCluster) DropCacheRegion(id uint64) {
+	c.cachedCluster.dropRegion(id)
+}
+
 // GetStores gets stores from cluster.
 func (c *RaftCluster) GetStores() []*metapb.Store {
 	return c.cachedCluster.getMetaStores()

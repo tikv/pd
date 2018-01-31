@@ -277,6 +277,14 @@ func (c *clusterInfo) getRegionStats(startKey, endKey []byte) *core.RegionStats 
 	return c.Regions.GetRegionStats(startKey, endKey)
 }
 
+func (c *clusterInfo) dropRegion(id uint64) {
+	c.Lock()
+	defer c.Unlock()
+	if region := c.BasicCluster.GetRegion(id); region != nil {
+		c.Regions.RemoveRegion(region)
+	}
+}
+
 func (c *clusterInfo) getStoreRegionCount(storeID uint64) int {
 	c.RLock()
 	defer c.RUnlock()
@@ -377,6 +385,8 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	region = region.Clone()
 	c.RLock()
 	origin := c.Regions.GetRegion(region.GetId())
+	isWriteUpdate, writeItem := c.CheckWriteStatus(region)
+	isReadUpdate, readItem := c.CheckReadStatus(region)
 	c.RUnlock()
 
 	// Save to KV if meta is updated.
@@ -426,10 +436,12 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			log.Errorf("[region %d] fail to save region %v: %v", region.GetId(), region, err)
 		}
 	}
+	if !isWriteUpdate && !isReadUpdate && !saveCache && !isNew {
+		return nil
+	}
 
 	c.Lock()
 	defer c.Unlock()
-
 	if isNew {
 		c.activeRegions++
 	}
@@ -453,14 +465,27 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		for _, p := range region.Peers {
 			c.updateStoreStatus(p.GetStoreId())
 		}
-
 	}
+
 	if c.regionStats != nil {
 		c.regionStats.Observe(region)
 	}
-	c.BasicCluster.UpdateWriteStatus(region)
-	c.BasicCluster.UpdateReadStatus(region)
 
+	key := region.GetId()
+	if isWriteUpdate {
+		if writeItem == nil {
+			c.WriteStatistics.Remove(key)
+		} else {
+			c.WriteStatistics.Put(key, writeItem)
+		}
+	}
+	if isReadUpdate {
+		if readItem == nil {
+			c.ReadStatistics.Remove(key)
+		} else {
+			c.ReadStatistics.Put(key, readItem)
+		}
+	}
 	return nil
 }
 
