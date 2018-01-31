@@ -62,7 +62,6 @@ type coordinator struct {
 	classifier       namespace.Classifier
 	histories        *list.List
 	hbStreams        *heartbeatStreams
-	regionStats      *regionStatistics
 }
 
 func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
@@ -80,7 +79,6 @@ func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifie
 		classifier:       classifier,
 		histories:        list.New(),
 		hbStreams:        hbStreams,
-		regionStats:      newRegionStatistics(cluster.opt, classifier),
 	}
 }
 
@@ -116,8 +114,6 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	if op := c.replicaChecker.Check(region); op != nil {
 		c.addOperator(op)
 	}
-
-	c.regionStats.Observe(region)
 }
 
 func (c *coordinator) run() {
@@ -225,7 +221,6 @@ func (c *coordinator) collectSchedulerMetrics() {
 		}
 		schedulerStatusGauge.WithLabelValues(s.GetName(), "allow").Set(allowScheduler)
 	}
-	c.regionStats.Collect()
 }
 
 func (c *coordinator) collectHotSpotMetrics() {

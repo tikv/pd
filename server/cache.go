@@ -45,6 +45,7 @@ type clusterInfo struct {
 	meta          *metapb.Cluster
 	activeRegions int
 	opt           *scheduleOption
+	regionStats   *regionStatistics
 }
 
 func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clusterInfo {
@@ -367,6 +368,10 @@ func (c *clusterInfo) updateStoreStatus(id uint64) {
 	c.Stores.SetRegionSize(id, c.Regions.GetStoreRegionSize(id))
 }
 
+func (c *clusterInfo) bindRegionStatistics(regionStats *regionStatistics) {
+	c.regionStats = regionStats
+}
+
 // handleRegionHeartbeat updates the region information.
 func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	region = region.Clone()
@@ -450,11 +455,19 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		}
 
 	}
-
+	if c.regionStats != nil {
+		c.regionStats.Observe(region)
+	}
 	c.BasicCluster.UpdateWriteStatus(region)
 	c.BasicCluster.UpdateReadStatus(region)
 
 	return nil
+}
+
+func (c *clusterInfo) collectMetrics() {
+	c.Lock()
+	defer c.Unlock()
+	c.regionStats.Collect()
 }
 
 func (c *clusterInfo) GetOpt() schedule.NamespaceOptions {

@@ -26,8 +26,9 @@ import (
 )
 
 var (
-	errNotBootstrapped  = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
-	errOperatorNotFound = errors.New("operator not found")
+	errNotBootstrapped     = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
+	errOperatorNotFound    = errors.New("operator not found")
+	errRegionStatsNotFound = errors.New("region statistic not found")
 )
 
 // Handler is a helper to export methods to handle API/RPC requests.
@@ -402,49 +403,68 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 
 // ResponseDownPeerRegions gets the region with down peer.
 func (h *Handler) ResponseDownPeerRegions(w http.ResponseWriter, rd *render.Render) {
-	c, err := h.getCoordinator()
-	if err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err.Error())
+	c := h.s.GetRaftCluster()
+	if c == nil {
+		rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped)
 		return
 	}
-	c.RLock()
-	rd.JSON(w, http.StatusOK, c.regionStats.downPeers)
+	cluster := c.cachedCluster
+	if cluster.regionStats == nil {
+		rd.JSON(w, http.StatusInternalServerError, errRegionStatsNotFound)
+		return
+	}
+	cluster.RLock()
+	rd.JSON(w, http.StatusOK, cluster.regionStats.stats[downPeer])
 	c.RUnlock()
-
 }
 
 // ResponseMorePeerRegions gets the region exceeds the specified number of peers.
 func (h *Handler) ResponseMorePeerRegions(w http.ResponseWriter, rd *render.Render) {
-	c, err := h.getCoordinator()
-	if err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err.Error())
+	c := h.s.GetRaftCluster()
+	if c == nil {
+		rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped)
 		return
 	}
-	c.RLock()
-	rd.JSON(w, http.StatusOK, c.regionStats.morePeers)
+	cluster := c.cachedCluster
+	if cluster.regionStats == nil {
+		rd.JSON(w, http.StatusInternalServerError, errRegionStatsNotFound)
+		return
+	}
+	cluster.RLock()
+	rd.JSON(w, http.StatusOK, cluster.regionStats.stats[morePeer])
 	c.RUnlock()
 }
 
 // ResponseMissPeerRegions gets the region less than the specified number of peers.
 func (h *Handler) ResponseMissPeerRegions(w http.ResponseWriter, rd *render.Render) {
-	c, err := h.getCoordinator()
-	if err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err.Error())
+	c := h.s.GetRaftCluster()
+	if c == nil {
+		rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped)
 		return
 	}
-	c.RLock()
-	rd.JSON(w, http.StatusOK, c.regionStats.missPeers)
+	cluster := c.cachedCluster
+	if cluster.regionStats == nil {
+		rd.JSON(w, http.StatusInternalServerError, errRegionStatsNotFound)
+		return
+	}
+	cluster.RLock()
+	rd.JSON(w, http.StatusOK, cluster.regionStats.stats[missPeer])
 	c.RUnlock()
 }
 
 // ResponsePendingPeerRegions gets the region with pending peer.
 func (h *Handler) ResponsePendingPeerRegions(w http.ResponseWriter, rd *render.Render) {
-	c, err := h.getCoordinator()
-	if err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err.Error())
+	c := h.s.GetRaftCluster()
+	if c == nil {
+		rd.JSON(w, http.StatusInternalServerError, errNotBootstrapped)
 		return
 	}
-	c.RLock()
-	rd.JSON(w, http.StatusOK, c.regionStats.pendingPeers)
+	cluster := c.cachedCluster
+	if cluster.regionStats == nil {
+		rd.JSON(w, http.StatusInternalServerError, errRegionStatsNotFound)
+		return
+	}
+	cluster.RLock()
+	rd.JSON(w, http.StatusOK, cluster.regionStats.stats[pendingPeer])
 	c.RUnlock()
 }
