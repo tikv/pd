@@ -73,6 +73,6 @@ func (s *testHealthAPISuite) TestHealthSlice(c *C) {
 		c.Assert(err, IsNil)
 		buf, err := ioutil.ReadAll(resp.Body)
 		c.Assert(err, IsNil)
-		checkListResponse(c, buf, cfgs)
+		checkSliceResponse(c, buf, cfgs)
 	}
 }
