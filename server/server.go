@@ -578,6 +578,19 @@ func (s *Server) SetMemberLeaderPriority(id uint64, priority int) error {
 	return nil
 }
 
+// DeleteMemberLeaderPriority removes a member's priority config.
+func (s *Server) DeleteMemberLeaderPriority(id uint64) error {
+	key := s.getMemberLeaderPriorityPath(id)
+	res, err := s.leaderTxn().Then(clientv3.OpDelete(key)).Commit()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if !res.Succeeded {
+		return errors.New("delete leader priority failed, maybe not leader")
+	}
+	return nil
+}
+
 // GetMemberLeaderPriority loads a member's priority to be elected as the etcd leader.
 func (s *Server) GetMemberLeaderPriority(id uint64) (int, error) {
 	key := s.getMemberLeaderPriorityPath(id)

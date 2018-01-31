@@ -80,7 +80,14 @@ func (h *memberHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// step 2. remove member by id
+	// Delete config.
+	err = h.svr.DeleteMemberLeaderPriority(id)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Remove member by id
 	_, err = etcdutil.RemoveEtcdMember(client, id)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -92,6 +99,13 @@ func (h *memberHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
 func (h *memberHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["id"]
 	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Delete config.
+	err = h.svr.DeleteMemberLeaderPriority(id)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
