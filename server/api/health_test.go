@@ -22,7 +22,6 @@ import (
 
 	"encoding/json"
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 )
 
