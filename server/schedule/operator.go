@@ -93,8 +93,8 @@ func (alp AddLearnerPeer) String() string {
 
 // IsFinish checks if current step is finished.
 func (alp AddLearnerPeer) IsFinish(region *core.RegionInfo) bool {
-	if p := region.GetStorePeer(alp.ToStore); p != nil {
-		return region.GetPendingLearnerPeer(p.GetId()) == nil && region.GetCompleteLearnerPeer(p.GetId()) != nil
+	if p := region.GetStoreLearner(alp.ToStore); p != nil {
+		return region.GetPendingLearner(p.GetId()) == nil
 	}
 	return false
 }
@@ -119,7 +119,7 @@ func (plp PromoteLearnerPeer) String() string {
 // IsFinish checks if current step is finished.
 func (plp PromoteLearnerPeer) IsFinish(region *core.RegionInfo) bool {
 	if p := region.GetStorePeer(plp.ToStore); p != nil {
-		return region.GetPendingLearnerPeer(p.GetId()) == nil && region.GetCompleteLearnerPeer(p.GetId()) == nil
+		return p.GetId() == plp.PeerID
 	}
 	return false
 }

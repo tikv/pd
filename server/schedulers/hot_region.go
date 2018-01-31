@@ -239,7 +239,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 	for _, i := range h.r.Perm(storesStat[srcStoreID].RegionsStat.Len()) {
 		rs := storesStat[srcStoreID].RegionsStat[i]
 		srcRegion := cluster.GetRegion(rs.RegionID)
-		if len(srcRegion.DownPeers) != 0 || len(srcRegion.PendingPeers) != 0 || len(srcRegion.PendingLearnerPeers) != 0 || len(srcRegion.CompleteLearnerPeers) != 0 {
+		if len(srcRegion.DownPeers) != 0 || len(srcRegion.PendingPeers) != 0 || len(srcRegion.Region.GetLearners()) == 0 {
 			continue
 		}
 
@@ -299,7 +299,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 	for _, i := range h.r.Perm(storesStat[srcStoreID].RegionsStat.Len()) {
 		rs := storesStat[srcStoreID].RegionsStat[i]
 		srcRegion := cluster.GetRegion(rs.RegionID)
-		if len(srcRegion.DownPeers) != 0 || len(srcRegion.PendingPeers) != 0 || len(srcRegion.PendingLearnerPeers) != 0 || len(srcRegion.CompleteLearnerPeers) != 0 {
+		if len(srcRegion.DownPeers) != 0 || len(srcRegion.PendingPeers) != 0 || len(srcRegion.Region.GetLearners()) == 0 {
 			continue
 		}
 
