@@ -435,7 +435,7 @@ func (h *Handler) GetPendingPeerRegions() (map[string]*core.RegionInfo, error) {
 	return c.cachedCluster.GetRegionStatsByType(pendingPeer), nil
 }
 
-// GetIncorrectNamespaceRegions gets the region with pending peer.
+// GetIncorrectNamespaceRegions gets the region with incorrect namespace peer.
 func (h *Handler) GetIncorrectNamespaceRegions() (map[string]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {

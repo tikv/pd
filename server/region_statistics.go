@@ -114,7 +114,7 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 			continue
 		}
 		r.putRegion(incorrectNamespace, namespace, region)
-		peerTypeIndex |= pendingPeer
+		peerTypeIndex |= incorrectNamespace
 		break
 	}
 

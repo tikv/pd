@@ -65,10 +65,12 @@ func (t *testRegionStatistcs) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.stats[missPeer]), Equals, 0)
 	c.Assert(len(regionStats.stats[downPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[pendingPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 0)
 	region2.DownPeers = downPeers[0:1]
 	regionStats.Observe(region2, stores[0:2])
 	c.Assert(len(regionStats.stats[morePeer]), Equals, 0)
 	c.Assert(len(regionStats.stats[missPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[downPeer]), Equals, 2)
 	c.Assert(len(regionStats.stats[pendingPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 0)
 }
