@@ -147,6 +147,7 @@ func (h *regionsHandler) GetMissPeerRegions(w http.ResponseWriter, r *http.Reque
 	res, err := handler.GetMissPeerRegions()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	h.rd.JSON(w, http.StatusOK, res)
 }
@@ -156,6 +157,7 @@ func (h *regionsHandler) GetMorePeerRegions(w http.ResponseWriter, r *http.Reque
 	res, err := handler.GetMorePeerRegions()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	h.rd.JSON(w, http.StatusOK, res)
 }
@@ -165,6 +167,7 @@ func (h *regionsHandler) GetPendingPeerRegions(w http.ResponseWriter, r *http.Re
 	res, err := handler.GetPendingPeerRegions()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	h.rd.JSON(w, http.StatusOK, res)
 }
@@ -174,6 +177,7 @@ func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, r *http.Reque
 	res, err := handler.GetDownPeerRegions()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	h.rd.JSON(w, http.StatusOK, res)
 }
@@ -183,6 +187,7 @@ func (h *regionsHandler) GetIncorrectNamespaceRegions(w http.ResponseWriter, r *
 	res, err := handler.GetIncorrectNamespaceRegions()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	h.rd.JSON(w, http.StatusOK, res)
 }
