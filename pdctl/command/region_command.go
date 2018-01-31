@@ -201,9 +201,7 @@ func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println(cmd.UsageString())
 		return
 	}
-
 	state := args[0]
-
 	prefix := regionsCheckPrefix + "/" + state
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
@@ -211,5 +209,4 @@ func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	fmt.Println(r)
-
 }

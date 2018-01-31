@@ -142,7 +142,6 @@ func (r *regionStatistics) Collect() {
 	for key := range r.stats[incorrectNamespace] {
 		addMetrics(metrics, key, "incorrect_namespace_region_count")
 	}
-
 	for namespace, m := range metrics {
 		for label, value := range m {
 			clusterStatusGauge.WithLabelValues(label, namespace).Set(value)
