@@ -34,6 +34,8 @@ var (
 	errRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
 		return errors.Errorf("region is stale: region %v origin %v", region, origin)
 	}
+
+	errRegionStatsNotFound = errors.New("region statistic not found")
 )
 
 type clusterInfo struct {
@@ -500,7 +502,7 @@ func (c *clusterInfo) collectMetrics() {
 
 func (c *clusterInfo) GetRegionStatsByType(typ regionStatisticType) []*core.RegionInfo {
 	if c.regionStats == nil {
-		return nil
+		return errRegionStatsNotFound
 	}
 	c.RLock()
 	defer c.RUnlock()

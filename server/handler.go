@@ -24,9 +24,8 @@ import (
 )
 
 var (
-	errNotBootstrapped     = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
-	errOperatorNotFound    = errors.New("operator not found")
-	errRegionStatsNotFound = errors.New("region statistic not found")
+	errNotBootstrapped  = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
+	errOperatorNotFound = errors.New("operator not found")
 )
 
 // Handler is a helper to export methods to handle API/RPC requests.
