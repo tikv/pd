@@ -33,7 +33,6 @@ const (
 )
 
 type regionStatistics struct {
-	sync.RWMutex
 	opt        *scheduleOption
 	classifier namespace.Classifier
 	stats      map[regionStatisticType]map[string]*core.RegionInfo
