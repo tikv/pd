@@ -206,7 +206,7 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator
 	}
 	// Make sure the new peer is better than the old peer.
 	if newScore <= oldScore {
-		log.Debugf("[region %d] newScore %d is not better than oldScore %d", region.GetId(), newScore, oldScore)
+		log.Debugf("[region %d] newScore %f is not better than oldScore %f", region.GetId(), newScore, oldScore)
 		checkerCounter.WithLabelValues("replica_checker", "not_better")
 		return nil
 	}
