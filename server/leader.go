@@ -21,12 +21,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/pd/pkg/etcdutil"
-
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/etcdutil"
 	log "github.com/sirupsen/logrus"
 )
 
