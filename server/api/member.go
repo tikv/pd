@@ -60,8 +60,7 @@ func (h *memberHandler) listMembers() (*pdpb.GetMembersResponse, error) {
 func (h *memberHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
 	client := h.svr.GetClient()
 
-	// step 1. get etcd id
-	// TODO: GetPDMembers.
+	// Get etcd ID by name.
 	var id uint64
 	name := mux.Vars(r)["name"]
 	listResp, err := etcdutil.ListEtcdMembers(client)
