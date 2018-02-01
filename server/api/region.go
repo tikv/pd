@@ -152,9 +152,9 @@ func (h *regionsHandler) GetMissPeerRegions(w http.ResponseWriter, r *http.Reque
 	h.rd.JSON(w, http.StatusOK, res)
 }
 
-func (h *regionsHandler) GetMorePeerRegions(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) GetExtraPeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	res, err := handler.GetMorePeerRegions()
+	res, err := handler.GetExtraPeerRegions()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

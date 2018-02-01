@@ -58,6 +58,14 @@ var (
 			Help:      "Status of the cluster.",
 		}, []string{"type", "namespace"})
 
+	regionStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "regions",
+			Name:      "status",
+			Help:      "Status of the regions.",
+		}, []string{"type"})
+
 	timeJumpBackCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -119,4 +127,5 @@ func init() {
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(tsoCounter)
 	prometheus.MustRegister(storeStatusGauge)
+	prometheus.MustRegister(regionStatusGauge)
 }

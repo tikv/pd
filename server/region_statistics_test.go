@@ -76,19 +76,19 @@ func (t *testRegionStatistcs) TestRegionStatistics(c *C) {
 	region2 := core.NewRegionInfo(r2, peers[0])
 	regionStats := newRegionStatistics(opt, mockClassifier{})
 	regionStats.Observe(region1, stores)
-	c.Assert(len(regionStats.stats[morePeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[extraPeer]), Equals, 1)
 	region1.DownPeers = downPeers
 	region1.PendingPeers = peers[0:1]
 	region1.Peers = peers[0:3]
 	regionStats.Observe(region1, stores)
-	c.Assert(len(regionStats.stats[morePeer]), Equals, 0)
+	c.Assert(len(regionStats.stats[extraPeer]), Equals, 0)
 	c.Assert(len(regionStats.stats[missPeer]), Equals, 0)
 	c.Assert(len(regionStats.stats[downPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[pendingPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 1)
 	region2.DownPeers = downPeers[0:1]
 	regionStats.Observe(region2, stores[0:2])
-	c.Assert(len(regionStats.stats[morePeer]), Equals, 0)
+	c.Assert(len(regionStats.stats[extraPeer]), Equals, 0)
 	c.Assert(len(regionStats.stats[missPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[downPeer]), Equals, 2)
 	c.Assert(len(regionStats.stats[pendingPeer]), Equals, 1)

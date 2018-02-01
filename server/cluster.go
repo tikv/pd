@@ -109,8 +109,7 @@ func (c *RaftCluster) start() error {
 	}
 	c.cachedCluster = cluster
 	c.coordinator = newCoordinator(c.cachedCluster, c.s.hbStreams, c.s.classifier)
-	regionStats := newRegionStatistics(c.s.scheduleOpt, c.s.classifier)
-	c.cachedCluster.bindRegionStatistics(regionStats)
+	c.cachedCluster.regionStats = newRegionStatistics(c.s.scheduleOpt, c.s.classifier)
 	c.quit = make(chan struct{})
 
 	c.wg.Add(2)

@@ -380,10 +380,6 @@ func (c *clusterInfo) updateStoreStatus(id uint64) {
 	c.Stores.SetRegionSize(id, c.Regions.GetStoreRegionSize(id))
 }
 
-func (c *clusterInfo) bindRegionStatistics(regionStats *regionStatistics) {
-	c.regionStats = regionStats
-}
-
 // handleRegionHeartbeat updates the region information.
 func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	region = region.Clone()
@@ -494,22 +490,21 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 }
 
 func (c *clusterInfo) collectMetrics() {
+	if c.regionStats == nil {
+		return
+	}
 	c.RLock()
 	defer c.RUnlock()
 	c.regionStats.Collect()
 }
 
-func (c *clusterInfo) GetRegionStatsByType(typ regionStatisticType) map[string]*core.RegionInfo {
+func (c *clusterInfo) GetRegionStatsByType(typ regionStatisticType) []*core.RegionInfo {
 	if c.regionStats == nil {
 		return nil
 	}
-	res := make(map[string]*core.RegionInfo)
 	c.RLock()
 	defer c.RUnlock()
-	for k, r := range c.regionStats.stats[typ] {
-		res[k] = r.Clone()
-	}
-	return res
+	return c.regionStats.getRegionStatsByType(typ)
 }
 
 func (c *clusterInfo) GetOpt() schedule.NamespaceOptions {
