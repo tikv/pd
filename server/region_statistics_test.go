@@ -18,8 +18,28 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 )
+
+type mockClassifier struct{}
+
+func (c mockClassifier) GetAllNamespaces() []string {
+	return []string{"global", "unknown"}
+}
+
+func (c mockClassifier) GetStoreNamespace(store *core.StoreInfo) string {
+	if store.GetId() < 5 {
+		return "global"
+	}
+	return "unknown"
+}
+
+func (c mockClassifier) GetRegionNamespace(*core.RegionInfo) string {
+	return "global"
+}
+
+func (c mockClassifier) IsNamespaceExist(name string) bool {
+	return true
+}
 
 var _ = Suite(&testRegionStatistcs{})
 
@@ -54,7 +74,7 @@ func (t *testRegionStatistcs) TestRegionStatistics(c *C) {
 	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
 	region1 := core.NewRegionInfo(r1, peers[0])
 	region2 := core.NewRegionInfo(r2, peers[0])
-	regionStats := newRegionStatistics(opt, namespace.DefaultClassifier)
+	regionStats := newRegionStatistics(opt, mockClassifier{})
 	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[morePeer]), Equals, 1)
 	region1.DownPeers = downPeers
@@ -65,12 +85,12 @@ func (t *testRegionStatistcs) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.stats[missPeer]), Equals, 0)
 	c.Assert(len(regionStats.stats[downPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[pendingPeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 0)
+	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 1)
 	region2.DownPeers = downPeers[0:1]
 	regionStats.Observe(region2, stores[0:2])
 	c.Assert(len(regionStats.stats[morePeer]), Equals, 0)
 	c.Assert(len(regionStats.stats[missPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[downPeer]), Equals, 2)
 	c.Assert(len(regionStats.stats[pendingPeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 0)
+	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 1)
 }
