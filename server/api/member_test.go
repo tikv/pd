@@ -14,8 +14,11 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -24,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
@@ -207,16 +211,34 @@ func (s *testMemberAPISuite) TestLeaderResign(c *C) {
 	leader1, err := svrs[0].GetLeader()
 	c.Assert(err, IsNil)
 
-	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/leader/resign")
+	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/leader/resign", nil)
 	leader2 := s.waitLeaderChange(c, svrs[0], leader1)
-	s.post(c, addrs[leader2.GetMemberId()]+apiPrefix+"/api/v1/leader/transfer/"+leader1.GetName())
+	s.post(c, addrs[leader2.GetMemberId()]+apiPrefix+"/api/v1/leader/transfer/"+leader1.GetName(), nil)
 	leader3 := s.waitLeaderChange(c, svrs[0], leader2)
 	c.Assert(leader3.GetMemberId(), Equals, leader1.GetMemberId())
 }
 
-func (s *testMemberAPISuite) post(c *C, url string) {
+func (s *testMemberAPISuite) TestEtcdLeaderPriority(c *C) {
+	cfgs, svrs, clean := mustNewCluster(c, 3)
+	defer clean()
+
+	addrs := make(map[uint64]string)
+	for i := range cfgs {
+		addrs[svrs[i].ID()] = cfgs[i].ClientUrls
+	}
+
+	leader1, err := s.getEtcdLeader(svrs[0])
+	c.Assert(err, IsNil)
+	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/members/name/"+leader1.GetName(), bytes.NewBufferString(`{"leader-priority": -1}`))
+	leader2 := s.waitEtcdLeaderChange(c, svrs[0], leader1)
+	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/members/name/"+leader1.GetName(), bytes.NewBufferString(`{"leader-priority": 100}`))
+	leader3 := s.waitEtcdLeaderChange(c, svrs[0], leader2)
+	c.Assert(leader3.GetMemberId(), Equals, leader1.GetMemberId())
+}
+
+func (s *testMemberAPISuite) post(c *C, url string, body io.Reader) {
 	for i := 0; i < 5; i++ {
-		res, err := http.Post(url, "", nil)
+		res, err := http.Post(url, "", body)
 		c.Assert(err, IsNil)
 		if res.StatusCode == http.StatusOK {
 			return
@@ -237,6 +259,33 @@ func (s *testMemberAPISuite) waitLeaderChange(c *C, svr *server.Server, old *pdp
 		}
 		if leader.GetMemberId() == old.GetMemberId() {
 			c.Log("leader not change")
+			return false
+		}
+		return true
+	})
+	return leader
+}
+
+func (s *testMemberAPISuite) getEtcdLeader(svr *server.Server) (*pdpb.Member, error) {
+	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()}}
+	members, err := svr.GetMembers(context.Background(), req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return members.GetEtcdLeader(), nil
+}
+
+func (s *testMemberAPISuite) waitEtcdLeaderChange(c *C, svr *server.Server, old *pdpb.Member) *pdpb.Member {
+	var leader *pdpb.Member
+	testutil.WaitUntil(c, func(c *C) bool {
+		var err error
+		leader, err = s.getEtcdLeader(svr)
+		if err != nil {
+			c.Log(err)
+			return false
+		}
+		if leader.GetMemberId() == old.GetMemberId() {
+			c.Log("etcd leader not changed")
 			return false
 		}
 		return true
