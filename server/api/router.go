@@ -22,6 +22,8 @@ import (
 	"github.com/unrolled/render"
 )
 
+const pingAPI = "/ping"
+
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := render.New(render.Options{
 		IndentJSON: true,
@@ -111,6 +113,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	logHanler := newlogHandler(svr, rd)
 	router.HandleFunc("/api/v1/log", logHanler.Handle).Methods("POST")
 
-	router.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
+	router.HandleFunc(pingAPI, func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
+	router.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
 	return router
 }

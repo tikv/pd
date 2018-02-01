@@ -21,14 +21,14 @@ import (
 )
 
 var (
-	healthPrefix = "health"
+	healthPrefix = "pd/health"
 )
 
 // NewHealthCommand return a health subcommand of rootCmd
 func NewHealthCommand() *cobra.Command {
 	m := &cobra.Command{
 		Use:   "health",
-		Short: "show the health information",
+		Short: "show all node's health information of the pd cluster",
 		Run:   showHealthCommandFunc,
 	}
 	return m
