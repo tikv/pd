@@ -82,6 +82,15 @@ var (
 			Help:      "Counter of region hearbeat.",
 		}, []string{"store", "type", "status"})
 
+	regionHeartbeatLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "region_heartbeat_latency_seconds",
+			Help:      "Bucketed histogram of latency (s) of receiving heartbeat.",
+			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 15),
+		}, []string{"store"})
+
 	storeStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -116,6 +125,7 @@ func init() {
 	prometheus.MustRegister(timeJumpBackCounter)
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(regionHeartbeatCounter)
+	prometheus.MustRegister(regionHeartbeatLatency)
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(tsoCounter)
 	prometheus.MustRegister(storeStatusGauge)
