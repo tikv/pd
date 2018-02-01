@@ -59,14 +59,10 @@ func (r *regionStatistics) getRegionStatsByType(typ regionStatisticType) []*core
 }
 
 func (r *regionStatistics) deleteEntry(deleteIndex regionStatisticType, regionID uint64) {
-	index := regionStatisticType(1)
-	for deleteIndex > 0 {
-		needDelete := deleteIndex & 1
-		if needDelete == 1 {
-			delete(r.stats[index], regionID)
+	for typ := regionStatisticType(1); typ <= deleteIndex; typ <<= 1 {
+		if deleteIndex&typ != 0 {
+			delete(r.stats[typ], regionID)
 		}
-		deleteIndex = deleteIndex >> 1
-		index = index << 1
 	}
 }
 
@@ -111,13 +107,9 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 }
 
 func (r *regionStatistics) Collect() {
-	metrics := make(map[string]float64)
-	metrics["miss_peer_region_count"] = float64(len(r.stats[missPeer]))
-	metrics["extra_peer_region_count"] = float64(len(r.stats[extraPeer]))
-	metrics["down_peer_region_count"] = float64(len(r.stats[downPeer]))
-	metrics["pending_peer_region_count"] = float64(len(r.stats[pendingPeer]))
-	metrics["incorrect_namespace_region_count"] = float64(len(r.stats[incorrectNamespace]))
-	for label, value := range metrics {
-		regionStatusGauge.WithLabelValues(label).Set(value)
-	}
+	regionStatusGauge.WithLabelValues("miss_peer_region_count").Set(float64(len(r.stats[missPeer])))
+	regionStatusGauge.WithLabelValues("extra_peer_region_count").Set(float64(len(r.stats[extraPeer])))
+	regionStatusGauge.WithLabelValues("down_peer_region_count").Set(float64(len(r.stats[downPeer])))
+	regionStatusGauge.WithLabelValues("pending_peer_region_count").Set(float64(len(r.stats[pendingPeer])))
+	regionStatusGauge.WithLabelValues("pending_peer_region_count").Set(float64(len(r.stats[incorrectNamespace])))
 }
