@@ -16,7 +16,6 @@ package server
 import (
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
