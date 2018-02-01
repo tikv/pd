@@ -111,5 +111,5 @@ func (r *regionStatistics) Collect() {
 	regionStatusGauge.WithLabelValues("extra_peer_region_count").Set(float64(len(r.stats[extraPeer])))
 	regionStatusGauge.WithLabelValues("down_peer_region_count").Set(float64(len(r.stats[downPeer])))
 	regionStatusGauge.WithLabelValues("pending_peer_region_count").Set(float64(len(r.stats[pendingPeer])))
-	regionStatusGauge.WithLabelValues("pending_peer_region_count").Set(float64(len(r.stats[incorrectNamespace])))
+	regionStatusGauge.WithLabelValues("incorrect_namespace_region_count").Set(float64(len(r.stats[incorrectNamespace])))
 }
