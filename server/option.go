@@ -19,15 +19,17 @@ import (
 	"time"
 
 	"github.com/juju/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
 
 // scheduleOption is a wrapper to access the configuration safely.
 type scheduleOption struct {
-	v   atomic.Value
-	rep *Replication
-	ns  map[string]*namespaceOption
+	v             atomic.Value
+	rep           *Replication
+	ns            map[string]*namespaceOption
+	labelProperty LabelPropertyConfig
 }
 
 func newScheduleOption(cfg *Config) *scheduleOption {
@@ -39,6 +41,7 @@ func newScheduleOption(cfg *Config) *scheduleOption {
 		o.ns[name] = newNamespaceOption(&nsCfg)
 	}
 	o.rep = newReplication(&cfg.Replication)
+	o.labelProperty = cfg.LabelProperty
 	return o
 }
 
@@ -185,6 +188,17 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 
 func (o *scheduleOption) GetHotRegionLowThreshold() int {
 	return schedule.HotRegionLowThreshold
+}
+
+func (o *scheduleOption) IsRejectLeader(labels []*metapb.StoreLabel) bool {
+	for _, cfg := range o.labelProperty.RejectLeader {
+		for _, l := range labels {
+			if l.Key == cfg.Key && l.Value == cfg.Value {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Replication provides some help to do replication.

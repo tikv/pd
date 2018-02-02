@@ -15,6 +15,8 @@ package schedule
 
 import (
 	"time"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
 // Simulating is an option to overpass the impact of accelerated time. Should
@@ -36,9 +38,12 @@ type Options interface {
 
 	GetHotRegionLowThreshold() int
 	GetTolerantSizeRatio() float64
+
+	// IsRejectLeader checks if a store is not allow to have region leaders.
+	IsRejectLeader(labels []*metapb.StoreLabel) bool
 }
 
-// NamespaceOptions for namespace cluster
+// NamespaceOptions for namespace cluster.
 type NamespaceOptions interface {
 	GetLeaderScheduleLimit(name string) uint64
 	GetRegionScheduleLimit(name string) uint64

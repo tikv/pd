@@ -38,6 +38,7 @@ func newBalanceLeaderScheduler(limiter *schedule.Limiter) schedule.Scheduler {
 		schedule.NewBlockFilter(),
 		schedule.NewStateFilter(),
 		schedule.NewHealthFilter(),
+		schedule.NewRejectLeaderFilter(),
 	}
 	base := newBaseScheduler(limiter)
 	return &balanceLeaderScheduler{

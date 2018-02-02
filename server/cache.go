@@ -550,3 +550,7 @@ func (c *clusterInfo) GetLocationLabels() []string {
 func (c *clusterInfo) GetHotRegionLowThreshold() int {
 	return c.opt.GetHotRegionLowThreshold()
 }
+
+func (c *clusterInfo) IsRejectLeader(labels []*metapb.StoreLabel) bool {
+	return c.opt.IsRejectLeader(labels)
+}
