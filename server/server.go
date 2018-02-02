@@ -14,6 +14,8 @@
 package server
 
 import (
+	"context"
+	"fmt"
 	"math/rand"
 	"net/http"
 	"os"
@@ -59,7 +61,9 @@ type Server struct {
 	scheduleOpt *scheduleOption
 	handler     *Handler
 
-	wg sync.WaitGroup
+	leaderLoopCtx    context.Context
+	leaderLoopCancel func()
+	leaderLoopWg     sync.WaitGroup
 
 	// Etcd and cluster informations.
 	etcd        *embed.Etcd
@@ -251,7 +255,7 @@ func (s *Server) Close() {
 
 	log.Info("closing server")
 
-	s.enableLeader(false)
+	s.stopLeaderLoop()
 
 	if s.client != nil {
 		s.client.Close()
@@ -264,8 +268,6 @@ func (s *Server) Close() {
 	if s.hbStreams != nil {
 		s.hbStreams.Close()
 	}
-
-	s.wg.Wait()
 
 	log.Info("close server")
 }
@@ -294,8 +296,8 @@ func (s *Server) Run() error {
 		return errors.Trace(err)
 	}
 
-	s.wg.Add(1)
-	go s.leaderLoop()
+	s.startLeaderLoop()
+
 	return nil
 }
 
@@ -557,6 +559,53 @@ func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
 
 func (s *Server) getAllocIDPath() string {
 	return path.Join(s.rootPath, "alloc_id")
+}
+
+func (s *Server) getMemberLeaderPriorityPath(id uint64) string {
+	return path.Join(s.rootPath, fmt.Sprintf("member/%d/leader_priority", id))
+}
+
+// SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
+func (s *Server) SetMemberLeaderPriority(id uint64, priority int) error {
+	key := s.getMemberLeaderPriorityPath(id)
+	res, err := s.leaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if !res.Succeeded {
+		return errors.New("save leader priority failed, maybe not leader")
+	}
+	return nil
+}
+
+// DeleteMemberLeaderPriority removes a member's priority config.
+func (s *Server) DeleteMemberLeaderPriority(id uint64) error {
+	key := s.getMemberLeaderPriorityPath(id)
+	res, err := s.leaderTxn().Then(clientv3.OpDelete(key)).Commit()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if !res.Succeeded {
+		return errors.New("delete leader priority failed, maybe not leader")
+	}
+	return nil
+}
+
+// GetMemberLeaderPriority loads a member's priority to be elected as the etcd leader.
+func (s *Server) GetMemberLeaderPriority(id uint64) (int, error) {
+	key := s.getMemberLeaderPriorityPath(id)
+	res, err := kvGet(s.client, key)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+	if len(res.Kvs) == 0 {
+		return 0, nil
+	}
+	priority, err := strconv.ParseInt(string(res.Kvs[0].Value), 10, 32)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+	return int(priority), nil
 }
 
 // SetLogLevel sets log level.

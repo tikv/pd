@@ -22,6 +22,8 @@ import (
 	"github.com/unrolled/render"
 )
 
+const pingAPI = "/ping"
+
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := render.New(render.Options{
 		IndentJSON: true,
@@ -89,10 +91,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")
 	router.Handle("/api/v1/status", newStatusHandler(rd)).Methods("GET")
 
-	router.Handle("/api/v1/members", newMemberListHandler(svr, rd)).Methods("GET")
-	memberDeleteHandler := newMemberDeleteHandler(svr, rd)
-	router.HandleFunc("/api/v1/members/name/{name}", memberDeleteHandler.DeleteByName).Methods("DELETE")
-	router.HandleFunc("/api/v1/members/id/{id}", memberDeleteHandler.DeleteByID).Methods("DELETE")
+	memberHandler := newMemberHandler(svr, rd)
+	router.HandleFunc("/api/v1/members", memberHandler.ListMembers).Methods("GET")
+	router.HandleFunc("/api/v1/members/name/{name}", memberHandler.DeleteByName).Methods("DELETE")
+	router.HandleFunc("/api/v1/members/id/{id}", memberHandler.DeleteByID).Methods("DELETE")
+	router.HandleFunc("/api/v1/members/name/{name}", memberHandler.SetMemberPropertyByName).Methods("POST")
 
 	leaderHandler := newLeaderHandler(svr, rd)
 	router.HandleFunc("/api/v1/leader", leaderHandler.Get).Methods("GET")
@@ -115,6 +118,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	logHanler := newlogHandler(svr, rd)
 	router.HandleFunc("/api/v1/log", logHanler.Handle).Methods("POST")
 
-	router.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
+	router.HandleFunc(pingAPI, func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
+	router.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
 	return router
 }

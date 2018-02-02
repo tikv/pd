@@ -15,8 +15,8 @@ package server
 
 import (
 	"context"
+	"math/rand"
 	"path"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -53,12 +53,20 @@ func (s *Server) getLeaderPath() string {
 	return path.Join(s.rootPath, "leader")
 }
 
-func (s *Server) getNextLeaderPath() string {
-	return path.Join(s.rootPath, "next_leader")
+func (s *Server) startLeaderLoop() {
+	s.leaderLoopCtx, s.leaderLoopCancel = context.WithCancel(context.Background())
+	s.leaderLoopWg.Add(2)
+	go s.leaderLoop()
+	go s.etcdLeaderLoop()
+}
+
+func (s *Server) stopLeaderLoop() {
+	s.leaderLoopCancel()
+	s.leaderLoopWg.Wait()
 }
 
 func (s *Server) leaderLoop() {
-	defer s.wg.Done()
+	defer s.leaderLoopWg.Done()
 
 	for {
 		if s.isClosed() {
@@ -89,22 +97,50 @@ func (s *Server) leaderLoop() {
 			}
 		}
 
-		// Check if current pd is expected to be next leader.
-		nextLeaders, err := getNextLeaders(s.client, s.getNextLeaderPath())
-		if err != nil {
-			log.Errorf("check next leader failed: %v", err)
+		etcdLeader := s.etcd.Server.Lead()
+		if etcdLeader != s.ID() {
 			time.Sleep(200 * time.Millisecond)
 			continue
-		}
-		if len(nextLeaders) > 0 {
-			if _, ok := nextLeaders[s.id]; !ok {
-				time.Sleep(200 * time.Millisecond)
-				continue
-			}
 		}
 
 		if err = s.campaignLeader(); err != nil {
 			log.Errorf("campaign leader err %s", errors.ErrorStack(err))
+		}
+	}
+}
+
+func (s *Server) etcdLeaderLoop() {
+	defer s.leaderLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.leaderLoopCtx)
+	defer cancel()
+	for {
+		select {
+		case <-time.After(s.cfg.leaderPriorityCheckInterval.Duration):
+			etcdLeader := s.etcd.Server.Lead()
+			if etcdLeader == s.ID() {
+				break
+			}
+			myPriority, err := s.GetMemberLeaderPriority(s.ID())
+			if err != nil {
+				log.Errorf("failed to load leader priority: %v", err)
+				break
+			}
+			leaderPriority, err := s.GetMemberLeaderPriority(etcdLeader)
+			if err != nil {
+				log.Errorf("failed to load leader priority: %v", err)
+				break
+			}
+			if myPriority > leaderPriority {
+				err := s.etcd.Server.MoveLeader(ctx, etcdLeader, s.ID())
+				if err != nil {
+					log.Errorf("failed to transfer etcd leader: %v", err)
+				} else {
+					log.Infof("etcd leader moved from %v to %v", etcdLeader, s.ID())
+				}
+			}
+		case <-ctx.Done():
+			return
 		}
 	}
 }
@@ -125,25 +161,6 @@ func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, error) {
 	}
 
 	return leader, nil
-}
-
-func getNextLeaders(c *clientv3.Client, path string) (map[uint64]struct{}, error) {
-	val, err := getValue(c, path)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	if len(val) == 0 {
-		return nil, nil
-	}
-	ids := make(map[uint64]struct{})
-	for _, idStr := range strings.Split(string(val), ",") {
-		id, err := strconv.ParseUint(idStr, 10, 64)
-		if err != nil {
-			return nil, errors.Trace(err)
-		}
-		ids[id] = struct{}{}
-	}
-	return ids, nil
 }
 
 // GetLeader gets pd cluster leader.
@@ -215,7 +232,7 @@ func (s *Server) campaignLeader() error {
 	}
 
 	// Make the leader keepalived.
-	ctx, cancel = context.WithCancel(s.client.Ctx())
+	ctx, cancel = context.WithCancel(s.leaderLoopCtx)
 	defer cancel()
 
 	ch, err := lessor.KeepAlive(ctx, clientv3.LeaseID(leaseResp.ID))
@@ -275,7 +292,7 @@ func (s *Server) watchLeader() {
 	watcher := clientv3.NewWatcher(s.client)
 	defer watcher.Close()
 
-	ctx, cancel := context.WithCancel(s.client.Ctx())
+	ctx, cancel := context.WithCancel(s.leaderLoopCtx)
 	defer cancel()
 
 	for {
@@ -307,39 +324,25 @@ func (s *Server) watchLeader() {
 func (s *Server) ResignLeader(nextLeader string) error {
 	log.Infof("%s tries to resign leader with next leader directive: %v", s.Name(), nextLeader)
 	// Determine next leaders.
-	var leaderIDs []string
+	var leaderIDs []uint64
 	res, err := etcdutil.ListEtcdMembers(s.client)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	for _, member := range res.Members {
 		if (nextLeader == "" && member.ID != s.id) || (nextLeader != "" && member.Name == nextLeader) {
-			leaderIDs = append(leaderIDs, strconv.FormatUint(member.ID, 10))
+			leaderIDs = append(leaderIDs, member.GetID())
 		}
 	}
-	nextLeaderValue := strings.Join(leaderIDs, ",")
-
-	// Save expect leader(s) to etcd.
-	lease := clientv3.NewLease(s.client)
-	defer lease.Close()
-	ctx, cancel := context.WithTimeout(s.client.Ctx(), requestTimeout)
-	leaseRes, err := lease.Grant(ctx, int64(nextLeaderTTL))
-	cancel()
+	if len(leaderIDs) == 0 {
+		return errors.New("no valid pd to transfer leader")
+	}
+	nextLeaderID := leaderIDs[rand.Intn(len(leaderIDs))]
+	log.Infof("%s ready to resign leader, next leader: %v", s.Name(), nextLeaderID)
+	err = s.etcd.Server.MoveLeader(s.leaderLoopCtx, s.ID(), nextLeaderID)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	resp, err := s.leaderTxn().
-		Then(clientv3.OpPut(s.getNextLeaderPath(), nextLeaderValue, clientv3.WithLease(clientv3.LeaseID(leaseRes.ID)))).
-		Commit()
-	if err != nil {
-		return errors.Trace(err)
-	}
-	if !resp.Succeeded {
-		return errors.New("save next leader failed, maybe lost leadership")
-	}
-
-	log.Infof("%s ready to resign leader, expect next leaders: %v", s.Name(), nextLeaderValue)
-
 	// Resign leader.
 	select {
 	case s.resignCh <- struct{}{}:
