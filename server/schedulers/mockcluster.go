@@ -298,6 +298,10 @@ func (mc *mockCluster) GetMaxReplicas() int {
 	return mc.MockSchedulerOptions.GetMaxReplicas(namespace.DefaultNamespace)
 }
 
+func (mc *mockCluster) IsRejectLeader([]*metapb.StoreLabel) bool {
+	return false
+}
+
 const (
 	defaultMaxReplicas          = 3
 	defaultMaxSnapshotCount     = 3
