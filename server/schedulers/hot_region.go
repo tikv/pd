@@ -303,9 +303,19 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 			continue
 		}
 
+		filters := []schedule.Filter{
+			schedule.NewStateFilter(),
+			schedule.NewBlockFilter(),
+			schedule.NewRejectLeaderFilter(),
+		}
 		candidateStoreIDs := make([]uint64, 0, len(srcRegion.Peers)-1)
-		for id := range srcRegion.GetFollowers() {
-			candidateStoreIDs = append(candidateStoreIDs, id)
+		for _, store := range cluster.GetFollowerStores(srcRegion) {
+			if !schedule.FilterTarget(cluster, store, filters) {
+				candidateStoreIDs = append(candidateStoreIDs, store.GetId())
+			}
+		}
+		if len(candidateStoreIDs) == 0 {
+			continue
 		}
 		destStoreID := h.selectDestStore(candidateStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
 		if destStoreID == 0 {
