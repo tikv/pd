@@ -78,6 +78,7 @@ func NewAddOperatorCommand() *cobra.Command {
 	c.AddCommand(NewTransferPeerCommand())
 	c.AddCommand(NewAddPeerCommand())
 	c.AddCommand(NewRemovePeerCommand())
+	c.AddCommand(NewSplitRegionCommand())
 	return c
 }
 
@@ -224,6 +225,34 @@ func removePeerCommandFunc(cmd *cobra.Command, args []string) {
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
 	input["store_id"] = ids[1]
+	postJSON(cmd, operatorsPrefix, input)
+}
+
+// NewSplitRegionCommand returns a command to split a region.
+func NewSplitRegionCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "remove-peer <region_id>",
+		Short: "split a region",
+		Run:   splitRegionCommandFunc,
+	}
+	return c
+}
+
+func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+
+	ids, err := parseUint64s(args)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	input := make(map[string]interface{})
+	input["name"] = cmd.Name()
+	input["region_id"] = ids[0]
 	postJSON(cmd, operatorsPrefix, input)
 }
 

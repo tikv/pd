@@ -398,6 +398,24 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 	return nil
 }
 
+// AddSplitRegionOperator adds an operator to split a region.
+func (h *Handler) AddSplitRegionOperator(regionID uint64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	region := c.cluster.GetRegion(regionID)
+	if region == nil {
+		return errRegionNotFound(regionID)
+	}
+
+	step := schedule.SplitRegion{StartKey: region.StartKey, EndKey: region.EndKey}
+	op := schedule.NewOperator("adminSplitRegion", regionID, schedule.OpAdmin, step)
+	c.addOperator(op)
+	return nil
+}
+
 // GetDownPeerRegions gets the region with down peer.
 func (h *Handler) GetDownPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
