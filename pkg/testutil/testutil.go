@@ -61,8 +61,8 @@ func tryAllocTestURL() string {
 }
 
 const (
-	waitMaxRetry   = 100
-	waitRetrySleep = time.Millisecond * 50
+	waitMaxRetry   = 200
+	waitRetrySleep = time.Millisecond * 100
 )
 
 // CheckFunc is a condition checker that passed to WaitUntil. Its implementation
