@@ -519,6 +519,33 @@ func (s *Server) DeleteNamespaceConfig(name string) {
 	}
 }
 
+// SetLabelProperty inserts a label property config.
+func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
+	s.scheduleOpt.SetLabelProperty(typ, labelKey, labelValue)
+	err := s.scheduleOpt.persist(s.kv)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	log.Infof("label property config is updated: %+v", s.scheduleOpt.loadLabelPropertyConfig())
+	return nil
+}
+
+// DeleteLabelProperty deletes a label property config.
+func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
+	s.scheduleOpt.DeleteLabelProperty(typ, labelKey, labelValue)
+	err := s.scheduleOpt.persist(s.kv)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	log.Infof("label property config is updated: %+v", s.scheduleOpt.loadLabelPropertyConfig())
+	return nil
+}
+
+// GetLabelProperty returns the whole label property config.
+func (s *Server) GetLabelProperty() LabelPropertyConfig {
+	return s.scheduleOpt.loadLabelPropertyConfig().clone()
+}
+
 // GetSecurityConfig get the security config.
 func (s *Server) GetSecurityConfig() *SecurityConfig {
 	return &s.cfg.Security

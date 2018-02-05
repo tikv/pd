@@ -39,8 +39,7 @@ type Options interface {
 	GetHotRegionLowThreshold() int
 	GetTolerantSizeRatio() float64
 
-	// IsRejectLeader checks if a store is not allow to have region leaders.
-	IsRejectLeader(labels []*metapb.StoreLabel) bool
+	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 }
 
 // NamespaceOptions for namespace cluster.
@@ -50,3 +49,9 @@ type NamespaceOptions interface {
 	GetReplicaScheduleLimit(name string) uint64
 	GetMaxReplicas(name string) int
 }
+
+const (
+	// RejectLeader is the label property type that sugguests a store should not
+	// have any region leaders.
+	RejectLeader = "reject-leader"
+)

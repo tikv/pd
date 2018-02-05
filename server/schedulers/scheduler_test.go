@@ -191,7 +191,9 @@ type testRejectLeaderSuite struct{}
 
 func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	opt := newTestScheduleConfig()
-	opt.RejectLeaderLabels = []*metapb.StoreLabel{{Key: "noleader", Value: "true"}}
+	opt.LabelProperties = map[string][]*metapb.StoreLabel{
+		schedule.RejectLeader: {{Key: "noleader", Value: "true"}},
+	}
 	tc := newMockCluster(opt)
 
 	// Add 2 stores 1,2.

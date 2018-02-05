@@ -298,10 +298,10 @@ func (mc *mockCluster) GetMaxReplicas() int {
 	return mc.MockSchedulerOptions.GetMaxReplicas(namespace.DefaultNamespace)
 }
 
-func (mc *mockCluster) IsRejectLeader(labels []*metapb.StoreLabel) bool {
-	for _, c := range mc.MockSchedulerOptions.RejectLeaderLabels {
+func (mc *mockCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
+	for _, cfg := range mc.LabelProperties[typ] {
 		for _, l := range labels {
-			if c.Key == l.Key && c.Value == l.Value {
+			if l.Key == cfg.Key && l.Value == cfg.Value {
 				return true
 			}
 		}
@@ -333,7 +333,7 @@ type MockSchedulerOptions struct {
 	LocationLabels        []string
 	HotRegionLowThreshold int
 	TolerantSizeRatio     float64
-	RejectLeaderLabels    []*metapb.StoreLabel
+	LabelProperties       map[string][]*metapb.StoreLabel
 }
 
 func newMockSchedulerOptions() *MockSchedulerOptions {

@@ -551,6 +551,6 @@ func (c *clusterInfo) GetHotRegionLowThreshold() int {
 	return c.opt.GetHotRegionLowThreshold()
 }
 
-func (c *clusterInfo) IsRejectLeader(labels []*metapb.StoreLabel) bool {
-	return c.opt.IsRejectLeader(labels)
+func (c *clusterInfo) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
+	return c.opt.CheckLabelProperty(typ, labels)
 }

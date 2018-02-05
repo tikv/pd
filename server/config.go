@@ -490,8 +490,16 @@ type StoreLabel struct {
 }
 
 // LabelPropertyConfig is the config section to set properties to store labels.
-type LabelPropertyConfig struct {
-	RejectLeader []StoreLabel `toml:"reject-leader" json:"reject-leader"`
+type LabelPropertyConfig map[string][]StoreLabel
+
+func (c LabelPropertyConfig) clone() LabelPropertyConfig {
+	m := make(map[string][]StoreLabel, len(c))
+	for k, sl := range c {
+		sl2 := make([]StoreLabel, 0, len(sl))
+		sl2 = append(sl2, sl...)
+		m[k] = sl2
+	}
+	return m
 }
 
 // ParseUrls parse a string into multiple urls.

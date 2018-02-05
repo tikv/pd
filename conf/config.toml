@@ -78,7 +78,6 @@ location-labels = []
 
 [label-property]
 # Do not assign region leaders to stores that have these tags.
-reject-leader = [
-# { key = "zone", value = "cn1"},
-# { key = "disk", value = "hdd"}
-]
+#  [[label-property.reject-leader]]
+#  key = "zone"
+#  value = "cn1
