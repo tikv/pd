@@ -82,6 +82,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/regions", regionsHandler.GetAll).Methods("GET")
 	router.HandleFunc("/api/v1/regions/writeflow", regionsHandler.GetTopWriteFlow).Methods("GET")
 	router.HandleFunc("/api/v1/regions/readflow", regionsHandler.GetTopReadFlow).Methods("GET")
+	router.HandleFunc("/api/v1/regions/check/miss-replica", regionsHandler.GetMissPeerRegions).Methods("GET")
+	router.HandleFunc("/api/v1/regions/check/extra-replica", regionsHandler.GetExtraPeerRegions).Methods("GET")
+	router.HandleFunc("/api/v1/regions/check/pending-replica", regionsHandler.GetPendingPeerRegions).Methods("GET")
+	router.HandleFunc("/api/v1/regions/check/down-replica", regionsHandler.GetDownPeerRegions).Methods("GET")
+	router.HandleFunc("/api/v1/regions/check/incorrect-ns", regionsHandler.GetIncorrectNamespaceRegions).Methods("GET")
 
 	router.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")
 	router.Handle("/api/v1/status", newStatusHandler(rd)).Methods("GET")
