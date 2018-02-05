@@ -231,7 +231,7 @@ func removePeerCommandFunc(cmd *cobra.Command, args []string) {
 // NewSplitRegionCommand returns a command to split a region.
 func NewSplitRegionCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "remove-peer <region_id>",
+		Use:   "split-region <region_id>",
 		Short: "split a region",
 		Run:   splitRegionCommandFunc,
 	}
