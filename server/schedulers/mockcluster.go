@@ -50,6 +50,25 @@ func (mc *mockCluster) ScanRegions(startKey []byte, limit int) []*core.RegionInf
 	return mc.Regions.ScanRange(startKey, limit)
 }
 
+// GetStoresAverageScore returns the total resource score of all unfiltered stores.
+func (mc *mockCluster) GetStoresAverageScore(kind core.ResourceKind, filters ...schedule.Filter) float64 {
+	var totalResourceSize int64
+	var totalResourceWeight float64
+	for _, s := range mc.BasicCluster.GetStores() {
+		if schedule.FilterSource(mc, s, filters) {
+			continue
+		}
+
+		totalResourceWeight += s.ResourceWeight(kind)
+		totalResourceSize += s.ResourceSize(kind)
+	}
+
+	if totalResourceWeight == 0 {
+		return 0
+	}
+	return float64(totalResourceSize) / totalResourceWeight
+}
+
 // AllocPeer allocs a new peer on a store.
 func (mc *mockCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := mc.allocID()

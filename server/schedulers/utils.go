@@ -185,6 +185,7 @@ func shouldBalance(source, target *core.StoreInfo, avgScore float64, kind core.R
 
 	sourceScore := source.ResourceScore(kind)
 	targetScore := target.ResourceScore(kind)
+	log.Debugf("[region %d] source score is %v and target score is %v", region.GetId(), sourceScore, targetScore)
 	if targetScore >= sourceScore {
 		log.Debugf("should balance return false cause targetScore %v >= sourceScore %v", targetScore, sourceScore)
 		return false

@@ -173,11 +173,26 @@ func (c *clusterInfo) GetStores() []*core.StoreInfo {
 	return c.BasicCluster.GetStores()
 }
 
-// GetStoresAverageScore returns the total resource score of all StoreInfo
-func (c *clusterInfo) GetStoresAverageScore(kind core.ResourceKind) float64 {
+// GetStoresAverageScore returns the total resource score of all unfiltered stores.
+func (c *clusterInfo) GetStoresAverageScore(kind core.ResourceKind, filters ...schedule.Filter) float64 {
 	c.RLock()
 	defer c.RUnlock()
-	return c.BasicCluster.GetStoresAverageScore(kind)
+
+	var totalResourceSize int64
+	var totalResourceWeight float64
+	for _, s := range c.BasicCluster.GetStores() {
+		if schedule.FilterSource(c, s, filters) {
+			continue
+		}
+
+		totalResourceWeight += s.ResourceWeight(kind)
+		totalResourceSize += s.ResourceSize(kind)
+	}
+
+	if totalResourceWeight == 0 {
+		return 0
+	}
+	return float64(totalResourceSize) / totalResourceWeight
 }
 
 func (c *clusterInfo) getMetaStores() []*metapb.Store {
