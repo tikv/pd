@@ -262,38 +262,32 @@ func (o *Operator) History() []OperatorHistory {
 }
 
 // CreateRemovePeerOperator creates an Operator that removes a peer from region.
-// It prevents removing leader by tranfer its leadership first.
-func CreateRemovePeerOperator(desc string, kind OperatorKind, region *core.RegionInfo, storeID uint64) *Operator {
-	if region.Leader != nil && region.Leader.GetStoreId() == storeID {
-		if follower := region.GetFollower(); follower != nil {
-			steps := []OperatorStep{
-				TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: follower.GetStoreId()},
-				RemovePeer{FromStore: storeID},
-			}
-			return NewOperator(desc, region.GetId(), kind|OpRegion|OpLeader, steps...)
-		}
-	}
-	return NewOperator(desc, region.GetId(), kind|OpRegion, RemovePeer{FromStore: storeID})
+func CreateRemovePeerOperator(desc string, cluster Cluster, kind OperatorKind, region *core.RegionInfo, storeID uint64) *Operator {
+	kind, steps := removePeerSteps(cluster, region, storeID)
+	return NewOperator(desc, region.GetId(), kind, steps...)
 }
 
 // CreateMovePeerOperator creates an Operator that replaces an old peer with a
-// new peer. It prevents removing leader by transfer its leadership first.
-func CreateMovePeerOperator(desc string, region *core.RegionInfo, kind OperatorKind, oldStore, newStore uint64, peerID uint64) *Operator {
-	if region.Leader != nil && region.Leader.GetStoreId() == oldStore {
-		newLeader := newStore
-		if follower := region.GetFollower(); follower != nil {
-			newLeader = follower.GetStoreId()
-		}
-		steps := []OperatorStep{
-			AddPeer{ToStore: newStore, PeerID: peerID},
-			TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader},
-			RemovePeer{FromStore: oldStore},
-		}
-		return NewOperator(desc, region.GetId(), kind|OpRegion|OpLeader, steps...)
-	}
-	steps := []OperatorStep{
-		AddPeer{ToStore: newStore, PeerID: peerID},
-		RemovePeer{FromStore: oldStore},
-	}
+// new peer
+func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OperatorKind, oldStore, newStore uint64, peerID uint64) *Operator {
+	kind, steps := removePeerSteps(cluster, region, oldStore)
+	steps = append([]OperatorStep{AddPeer{ToStore: newStore, PeerID: peerID}}, steps...)
 	return NewOperator(desc, region.GetId(), kind|OpRegion, steps...)
+}
+
+// removePeerSteps returns the steps to safely remove a peer. It prevents removing leader by transfer its leadership first.
+func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64) (kind OperatorKind, steps []OperatorStep) {
+	if region.Leader != nil && region.Leader.GetStoreId() == storeID {
+		for id := range region.GetFollowers() {
+			follower := cluster.GetStore(id)
+			if follower != nil && !cluster.IsRejectLeader(follower.Labels) {
+				steps = append(steps, TransferLeader{FromStore: storeID, ToStore: id})
+				kind = OpLeader
+				break
+			}
+		}
+	}
+	steps = append(steps, RemovePeer{FromStore: storeID})
+	kind |= OpRegion
+	return
 }
