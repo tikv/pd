@@ -66,7 +66,7 @@ func (r *regionStatistics) deleteEntry(deleteIndex regionStatisticType, regionID
 	}
 }
 
-func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo) {
+func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo, labels []string) {
 	// Region state.
 	regionID := region.GetId()
 	namespace := r.classifier.GetRegionNamespace(region)
@@ -104,6 +104,16 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	}
 	r.deleteEntry(deleteIndex, regionID)
 	r.index[regionID] = peerTypeIndex
+
+	for _, store := range stores {
+		for _, other := range stores {
+			if other.GetId() == store.GetId() {
+				continue
+			}
+			level := store.CompareLocation(other, labels)
+			regionLabelLevelHistogram.Observe(float64(level))
+		}
+	}
 }
 
 func (r *regionStatistics) Collect() {
