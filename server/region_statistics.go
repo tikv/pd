@@ -119,9 +119,9 @@ func getRegionLabelIsolationLevel(stores []*core.StoreInfo, labels []string) int
 	for level, label := range labels {
 		newQueueStores := make([][]*core.StoreInfo, 0, len(stores))
 		for _, stores := range queueStores {
-			higherStores := higherLabelLeverStores(stores, label)
-			if len(higherStores) > 0 {
-				newQueueStores = append(newQueueStores, higherStores...)
+			notIsolatedStores := notIsolatedStoresWithLabel(stores, label)
+			if len(notIsolatedStores) > 0 {
+				newQueueStores = append(newQueueStores, notIsolatedStores...)
 			}
 		}
 		queueStores = newQueueStores
@@ -132,19 +132,14 @@ func getRegionLabelIsolationLevel(stores []*core.StoreInfo, labels []string) int
 	return -1
 }
 
-func higherLabelLeverStores(stores []*core.StoreInfo, label string) [][]*core.StoreInfo {
+func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*core.StoreInfo {
 	m := make(map[string][]*core.StoreInfo)
 	for _, s := range stores {
 		labelValue := s.GetLabelValue(label)
 		if labelValue == "" {
 			continue
 		}
-		groupStores, ok := m[labelValue]
-		if !ok {
-			groupStores = make([]*core.StoreInfo, 0, defaultMaxReplicas)
-		}
-		groupStores = append(groupStores, s)
-		m[labelValue] = groupStores
+		m[labelValue] = append(m[labelValue], s)
 	}
 	var res [][]*core.StoreInfo
 	for _, stores := range m {
