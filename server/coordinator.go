@@ -104,6 +104,23 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 		}
 	}
 
+	// If PD has restarted, it need to check learners added before and promote them.
+	if c.cluster.IsEnableRaftLearner() && len(region.Region.GetLearners()) != 0 {
+		if op := c.getOperator(region.GetId()); op == nil {
+			for _, p := range region.Region.GetLearners() {
+				if region.GetPendingLearner(p.GetId()) != nil {
+					continue
+				}
+				step := schedule.PromoteLearnerPeer{
+					ToStore: p.GetStoreId(),
+					PeerID:  p.GetId(),
+				}
+				op := schedule.NewOperator("promoteLearner", region.GetId(), schedule.OpRegion, step)
+				c.addOperator(op)
+			}
+		}
+	}
+
 	// Check replica operator.
 	if c.limiter.OperatorCount(schedule.OpReplica) >= c.cluster.GetReplicaScheduleLimit() {
 		return
