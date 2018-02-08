@@ -107,24 +107,55 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	if len(stores) == 0 {
 		return
 	}
-	regionLabelLevel := getRegionLabelLevel(stores, labels)
+	regionLabelLevel := getRegionLabelIsolationLevel(stores, labels)
 	regionLabelLevelHistogram.Observe(float64(regionLabelLevel))
 }
 
-func getRegionLabelLevel(stores []*core.StoreInfo, labels []string) int {
+func getRegionLabelIsolationLevel(stores []*core.StoreInfo, labels []string) int {
+	if len(stores) == 0 || len(labels) == 0 {
+		return -1
+	}
+	var queueStores [][]*core.StoreInfo
+	queueStores = append(queueStores, stores)
 	for level, label := range labels {
-		var labelValue string
-		for i, store := range stores {
-			if i == 0 {
-				labelValue = store.GetLabelValue(label)
-				continue
-			}
-			if labelValue != store.GetLabelValue(label) {
-				return level
+		dequeNumber := len(queueStores)
+		isInLabelIsolation := true
+		for _, stores := range queueStores {
+			higherStores := higherLabelLeverStores(stores, label)
+			if len(higherStores) > 0 {
+				isInLabelIsolation = false
+				queueStores = append(queueStores, higherStores...)
 			}
 		}
+		queueStores = queueStores[dequeNumber:]
+		if isInLabelIsolation {
+			return level
+		}
 	}
-	return 0
+	return -1
+}
+
+func higherLabelLeverStores(stores []*core.StoreInfo, label string) [][]*core.StoreInfo {
+	m := make(map[string][]*core.StoreInfo)
+	for _, s := range stores {
+		labelValue := s.GetLabelValue(label)
+		if labelValue == "" {
+			continue
+		}
+		groupStores, ok := m[labelValue]
+		if !ok {
+			groupStores = make([]*core.StoreInfo, 0, defaultMaxReplicas)
+		}
+		groupStores = append(groupStores, s)
+		m[labelValue] = groupStores
+	}
+	var res [][]*core.StoreInfo
+	for _, stores := range m {
+		if len(stores) > 1 {
+			res = append(res, stores)
+		}
+	}
+	return res
 }
 
 func (r *regionStatistics) Collect() {

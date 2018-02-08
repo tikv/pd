@@ -93,3 +93,61 @@ func (t *testRegionStatistcs) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.stats[pendingPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 1)
 }
+
+func (t *testRegionStatistcs) TestRegionLabelIsolationLevel(c *C) {
+	labelsSet := [][]map[string]string{
+		{
+			{"zone": "z1", "rack": "r1", "host": "h1"},
+			{"zone": "z2", "rack": "r1", "host": "h2"},
+			{"zone": "z2", "rack": "r2", "host": "h3"},
+		},
+		{
+			{"zone": "z1", "rack": "r1", "host": "h1"},
+			{"zone": "z2", "rack": "r2", "host": "h2"},
+			{"zone": "z2", "rack": "r2", "host": "h3"},
+		},
+		{
+			{"zone": "z1", "rack": "r1", "host": "h1"},
+			{"zone": "z2", "rack": "r2", "host": "h2"},
+			{"zone": "z3", "rack": "r2", "host": "h3"},
+		},
+		{
+			{"zone": "z1", "rack": "r1", "host": "h1"},
+			{"zone": "z1", "rack": "r2", "host": "h2"},
+			{"zone": "z1", "rack": "r3", "host": "h3"},
+		},
+		{
+			{"zone": "z1", "rack": "r1", "host": "h1"},
+			{"zone": "z1", "rack": "r2", "host": "h2"},
+			{"zone": "z1", "rack": "r2", "host": "h2"},
+		},
+	}
+	res := []int{1, 2, 0, 1, -1}
+	f := func(labels []map[string]string, res int) {
+		metaStores := []*metapb.Store{
+			{Id: 1, Address: "mock://tikv-1"},
+			{Id: 2, Address: "mock://tikv-2"},
+			{Id: 3, Address: "mock://tikv-3"},
+		}
+		stores := make([]*core.StoreInfo, 0, len(labels))
+		for i, m := range metaStores {
+			s := core.NewStoreInfo(m)
+			for k, v := range labels[i] {
+				s.Labels = append(s.Labels, &metapb.StoreLabel{Key: k, Value: v})
+			}
+			stores = append(stores, s)
+		}
+		level := getRegionLabelIsolationLevel(stores, []string{"zone", "rack", "host"})
+		c.Assert(level, Equals, res)
+	}
+
+	for i, labels := range labelsSet {
+		f(labels, res[i])
+
+	}
+	level := getRegionLabelIsolationLevel(nil, []string{"zone", "rack", "host"})
+	c.Assert(level, Equals, -1)
+	level = getRegionLabelIsolationLevel(nil, nil)
+	c.Assert(level, Equals, -1)
+
+}
