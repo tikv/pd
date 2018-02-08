@@ -147,4 +147,5 @@ func init() {
 	prometheus.MustRegister(tsoCounter)
 	prometheus.MustRegister(storeStatusGauge)
 	prometheus.MustRegister(regionStatusGauge)
+	prometheus.MustRegister(regionLabelLevelHistogram)
 }

@@ -115,20 +115,17 @@ func getRegionLabelIsolationLevel(stores []*core.StoreInfo, labels []string) int
 	if len(stores) == 0 || len(labels) == 0 {
 		return -1
 	}
-	var queueStores [][]*core.StoreInfo
-	queueStores = append(queueStores, stores)
+	queueStores := [][]*core.StoreInfo{stores}
 	for level, label := range labels {
-		dequeNumber := len(queueStores)
-		isInLabelIsolation := true
+		newQueueStores := make([][]*core.StoreInfo, 0, len(stores))
 		for _, stores := range queueStores {
 			higherStores := higherLabelLeverStores(stores, label)
 			if len(higherStores) > 0 {
-				isInLabelIsolation = false
-				queueStores = append(queueStores, higherStores...)
+				newQueueStores = append(newQueueStores, higherStores...)
 			}
 		}
-		queueStores = queueStores[dequeNumber:]
-		if isInLabelIsolation {
+		queueStores = newQueueStores
+		if len(queueStores) == 0 {
 			return level
 		}
 	}
