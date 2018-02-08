@@ -155,7 +155,7 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return schedule.CreateMovePeerOperator("moveHotReadRegion", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId(), cluster.IsEnableRaftLearner())
+		return schedule.CreateMovePeerOperator("moveHotReadRegion", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 	}
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 	return nil
@@ -166,7 +166,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return schedule.CreateMovePeerOperator("moveHotWriteRegion", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId(), cluster.IsEnableRaftLearner())
+		return schedule.CreateMovePeerOperator("moveHotWriteRegion", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 	}
 
 	// balance by leader
@@ -239,7 +239,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 	for _, i := range h.r.Perm(storesStat[srcStoreID].RegionsStat.Len()) {
 		rs := storesStat[srcStoreID].RegionsStat[i]
 		srcRegion := cluster.GetRegion(rs.RegionID)
-		if len(srcRegion.DownPeers) != 0 || len(srcRegion.PendingPeers) != 0 || len(srcRegion.Region.GetLearners()) == 0 {
+		if len(srcRegion.DownPeers) != 0 || len(srcRegion.PendingPeers) != 0 || len(srcRegion.Region.GetLearners()) != 0 {
 			continue
 		}
 
@@ -299,7 +299,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 	for _, i := range h.r.Perm(storesStat[srcStoreID].RegionsStat.Len()) {
 		rs := storesStat[srcStoreID].RegionsStat[i]
 		srcRegion := cluster.GetRegion(rs.RegionID)
-		if len(srcRegion.DownPeers) != 0 || len(srcRegion.PendingPeers) != 0 || len(srcRegion.Region.GetLearners()) == 0 {
+		if len(srcRegion.DownPeers) != 0 || len(srcRegion.PendingPeers) != 0 || len(srcRegion.Region.GetLearners()) != 0 {
 			continue
 		}
 

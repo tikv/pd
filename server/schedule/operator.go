@@ -313,10 +313,10 @@ func CreateRemovePeerOperator(desc string, cluster Cluster, kind OperatorKind, r
 }
 
 // CreateMovePeerOperator creates an Operator that replaces an old peer with a new peer.
-func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OperatorKind, oldStore, newStore uint64, peerID uint64, isEnableLearner bool) *Operator {
+func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OperatorKind, oldStore, newStore uint64, peerID uint64) *Operator {
 	kind, steps := removePeerSteps(cluster, region, oldStore)
 	var st []OperatorStep
-	if isEnableLearner {
+	if cluster.IsEnableRaftLearner() {
 		st = []OperatorStep{
 			AddLearnerPeer{ToStore: newStore, PeerID: peerID},
 			PromoteLearnerPeer{ToStore: newStore, PeerID: peerID},

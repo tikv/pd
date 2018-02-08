@@ -30,15 +30,16 @@ type StoreInfo struct {
 	*metapb.Store
 	Stats *pdpb.StoreStats
 	// Blocked means that the store is blocked from balance.
-	blocked          bool
-	LeaderCount      int
-	RegionCount      int
-	LeaderSize       int64
-	RegionSize       int64
-	PendingPeerCount int
-	LastHeartbeatTS  time.Time
-	LeaderWeight     float64
-	RegionWeight     float64
+	blocked             bool
+	LeaderCount         int
+	RegionCount         int
+	LeaderSize          int64
+	RegionSize          int64
+	PendingPeerCount    int
+	PendingLearnerCount int
+	LastHeartbeatTS     time.Time
+	LeaderWeight        float64
+	RegionWeight        float64
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -370,6 +371,13 @@ func (s *StoresInfo) SetRegionCount(storeID uint64, regionCount int) {
 func (s *StoresInfo) SetPendingPeerCount(storeID uint64, pendingPeerCount int) {
 	if store, ok := s.stores[storeID]; ok {
 		store.PendingPeerCount = pendingPeerCount
+	}
+}
+
+// SetPendingLearnerCount sets the pengding count to a storeInfo
+func (s *StoresInfo) SetPendingLearnerCount(storeID uint64, pendingLearnerCount int) {
+	if store, ok := s.stores[storeID]; ok {
+		store.PendingLearnerCount = pendingLearnerCount
 	}
 }
 

@@ -197,7 +197,7 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 			log.Debugf("[region %d] no best peer to add replica", region.GetId())
 			return nil
 		}
-		return CreateMovePeerOperator("makeUpOfflineReplica", r.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId(), r.cluster.IsEnableRaftLearner())
+		return CreateMovePeerOperator("makeUpOfflineReplica", r.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 	}
 
 	return nil
@@ -225,5 +225,5 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator
 		return nil
 	}
 	checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
-	return CreateMovePeerOperator("moveToBetterLocation", r.cluster, region, OpReplica, oldPeer.GetStoreId(), storeID, newPeer.GetId(), r.cluster.IsEnableRaftLearner())
+	return CreateMovePeerOperator("moveToBetterLocation", r.cluster, region, OpReplica, oldPeer.GetStoreId(), storeID, newPeer.GetId())
 }
