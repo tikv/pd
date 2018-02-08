@@ -107,8 +107,24 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	if len(stores) == 0 {
 		return
 	}
-	regionLabelLevel := stores[0].GetRegionLabelLevel(stores, labels)
+	regionLabelLevel := getRegionLabelLevel(stores, labels)
 	regionLabelLevelHistogram.Observe(float64(regionLabelLevel))
+}
+
+func getRegionLabelLevel(stores []*core.StoreInfo, labels []string) int {
+	for level, label := range labels {
+		var labelValue string
+		for i, store := range stores {
+			if i == 0 {
+				labelValue = store.GetLabelValue(label)
+				continue
+			}
+			if labelValue != store.GetLabelValue(label) {
+				return level
+			}
+		}
+	}
+	return 0
 }
 
 func (r *regionStatistics) Collect() {
