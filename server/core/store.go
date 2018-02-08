@@ -246,6 +246,21 @@ func (s *StoreInfo) CompareLocation(other *StoreInfo, labels []string) int {
 	return -1
 }
 
+// GetRegionLabelLevel gets the minimum label level of the region.
+func (s *StoreInfo) GetRegionLabelLevel(others []*StoreInfo, labels []string) int {
+	level := math.MaxInt32
+	for _, store := range others {
+		if store.GetId() == s.GetId() {
+			continue
+		}
+		l := s.CompareLocation(store, labels)
+		if level > l {
+			level = l
+		}
+	}
+	return level
+}
+
 // MergeLabels merges the passed in labels with origins, overriding duplicated
 // ones.
 func (s *StoreInfo) MergeLabels(labels []*metapb.StoreLabel) {

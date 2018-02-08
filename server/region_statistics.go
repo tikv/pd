@@ -104,16 +104,11 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	}
 	r.deleteEntry(deleteIndex, regionID)
 	r.index[regionID] = peerTypeIndex
-
-	for _, store := range stores {
-		for _, other := range stores {
-			if other.GetId() == store.GetId() {
-				continue
-			}
-			level := store.CompareLocation(other, labels)
-			regionLabelLevelHistogram.Observe(float64(level))
-		}
+	if len(stores) == 0 {
+		return
 	}
+	regionLabelLevel := stores[0].GetRegionLabelLevel(stores, labels)
+	regionLabelLevelHistogram.Observe(float64(regionLabelLevel))
 }
 
 func (r *regionStatistics) Collect() {
