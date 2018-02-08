@@ -262,3 +262,19 @@ func (f *namespaceFilter) FilterSource(opt Options, store *core.StoreInfo) bool 
 func (f *namespaceFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
 	return f.filter(store)
 }
+
+type rejectLeaderFilter struct{}
+
+// NewRejectLeaderFilter creates a Filter that filters stores that marked as
+// rejectLeader from being the target of leader transfer.
+func NewRejectLeaderFilter() Filter {
+	return rejectLeaderFilter{}
+}
+
+func (f rejectLeaderFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
+	return false
+}
+
+func (f rejectLeaderFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
+	return opt.IsRejectLeader(store.Labels)
+}

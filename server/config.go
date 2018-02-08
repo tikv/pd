@@ -89,6 +89,8 @@ type Config struct {
 
 	Security SecurityConfig `toml:"security" json:"security"`
 
+	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
+
 	configFile string
 
 	// For all warnings during parsing.
@@ -387,6 +389,7 @@ var defaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
 	{Type: "hot-region"},
+	{Type: "label"},
 }
 
 func (c *ScheduleConfig) adjust() {
@@ -478,6 +481,17 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 		return nil, errors.Trace(err)
 	}
 	return tlsConfig, nil
+}
+
+// StoreLabel is the config item of LabelPropertyConfig.
+type StoreLabel struct {
+	Key   string `toml:"key" json:"key"`
+	Value string `toml:"value" json:"value"`
+}
+
+// LabelPropertyConfig is the config section to set properties to store labels.
+type LabelPropertyConfig struct {
+	RejectLeader []StoreLabel `toml:"reject-leader" json:"reject-leader"`
 }
 
 // ParseUrls parse a string into multiple urls.
