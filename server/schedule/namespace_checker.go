@@ -69,7 +69,7 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *Operator {
 			return nil
 		}
 		checkerCounter.WithLabelValues("namespace_checker", "new_operator").Inc()
-		return CreateMovePeerOperator("makeNamespaceRelocation", region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId(), n.cluster.IsEnableRaftLearner())
+		return CreateMovePeerOperator("makeNamespaceRelocation", n.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId(), n.cluster.IsEnableRaftLearner())
 	}
 
 	checkerCounter.WithLabelValues("namespace_checker", "all_right").Inc()

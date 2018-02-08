@@ -14,6 +14,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"math/rand"
 	"net/http"
@@ -140,4 +141,51 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 
 		c.Assert(*rc, DeepEquals, *rc3)
 	}
+}
+
+func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
+	svr, cleanup := mustNewServer(c)
+	defer cleanup()
+	addr := svr.GetAddr() + apiPrefix + "/api/v1/config/label-property"
+
+	loadProperties := func() server.LabelPropertyConfig {
+		res, err := s.hc.Get(addr)
+		c.Assert(err, IsNil)
+		var cfg server.LabelPropertyConfig
+		err = readJSON(res.Body, &cfg)
+		c.Assert(err, IsNil)
+		return cfg
+	}
+
+	cfg := loadProperties()
+	c.Assert(cfg, HasLen, 0)
+
+	cmds := []string{
+		`{"type": "foo", "action": "set", "label-key": "zone", "label-value": "cn1"}`,
+		`{"type": "foo", "action": "set", "label-key": "zone", "label-value": "cn2"}`,
+		`{"type": "bar", "action": "set", "label-key": "host", "label-value": "h1"}`,
+	}
+	for _, cmd := range cmds {
+		_, err := s.hc.Post(addr, "application/json", bytes.NewBufferString(cmd))
+		c.Assert(err, IsNil)
+	}
+	cfg = loadProperties()
+	c.Assert(cfg, HasLen, 2)
+	c.Assert(cfg["foo"], DeepEquals, []server.StoreLabel{
+		{Key: "zone", Value: "cn1"},
+		{Key: "zone", Value: "cn2"},
+	})
+	c.Assert(cfg["bar"], DeepEquals, []server.StoreLabel{{Key: "host", Value: "h1"}})
+
+	cmds = []string{
+		`{"type": "foo", "action": "delete", "label-key": "zone", "label-value": "cn1"}`,
+		`{"type": "bar", "action": "delete", "label-key": "host", "label-value": "h1"}`,
+	}
+	for _, cmd := range cmds {
+		_, err := s.hc.Post(addr, "application/json", bytes.NewBufferString(cmd))
+		c.Assert(err, IsNil)
+	}
+	cfg = loadProperties()
+	c.Assert(cfg, HasLen, 1)
+	c.Assert(cfg["foo"], DeepEquals, []server.StoreLabel{{Key: "zone", Value: "cn2"}})
 }

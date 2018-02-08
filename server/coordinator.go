@@ -249,8 +249,9 @@ func (c *coordinator) collectHotSpotMetrics() {
 	if !ok {
 		return
 	}
+	stores := c.cluster.GetStores()
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
-	for _, s := range c.cluster.GetStores() {
+	for _, s := range stores {
 		store := fmt.Sprintf("store_%d", s.GetId())
 		stat, ok := status.AsPeer[s.GetId()]
 		if ok {
@@ -279,7 +280,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 
 	// collect hot read region metrics
 	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
-	for _, s := range c.cluster.GetStores() {
+	for _, s := range stores {
 		store := fmt.Sprintf("store_%d", s.GetId())
 		stat, ok := status.AsLeader[s.GetId()]
 		if ok {

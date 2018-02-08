@@ -14,8 +14,11 @@
 package command
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/spf13/cobra"
 )
@@ -28,12 +31,18 @@ var (
 // NewMemberCommand return a member subcommand of rootCmd
 func NewMemberCommand() *cobra.Command {
 	m := &cobra.Command{
-		Use:   "member [leader|delete]",
+		Use:   "member [leader|delete|leader_priority]",
 		Short: "show the pd member status",
 		Run:   showMemberCommandFunc,
 	}
 	m.AddCommand(NewLeaderMemberCommand())
 	m.AddCommand(NewDeleteMemberCommand())
+
+	m.AddCommand(&cobra.Command{
+		Use:   "leader_priority <member_name> <priority>",
+		Short: "set the member's priority to be elected as etcd leader",
+		Run:   setLeaderPriorityFunc,
+	})
 	return m
 }
 
@@ -145,6 +154,32 @@ func transferPDLeaderCommandFunc(cmd *cobra.Command, args []string) {
 	_, err := doRequest(cmd, prefix, http.MethodPost)
 	if err != nil {
 		fmt.Printf("Failed to trasfer leadership: %s\n", err)
+		return
+	}
+	fmt.Println("Success!")
+}
+
+func setLeaderPriorityFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 2 {
+		fmt.Println("Usage: leader_priority <member_name> <priority>")
+		return
+	}
+	prefix := membersPrefix + "/name/" + args[0]
+	priority, err := strconv.ParseFloat(args[1], 64)
+	if err != nil {
+		fmt.Printf("failed to parse priority: %v\n", err)
+		return
+	}
+	data := map[string]interface{}{"leader-priority": priority}
+	reqData, _ := json.Marshal(data)
+	req, err := getRequest(cmd, prefix, http.MethodPost, "application/json", bytes.NewBuffer(reqData))
+	if err != nil {
+		fmt.Printf("failed to set leader priority: %v\n", err)
+		return
+	}
+	_, err = dail(req)
+	if err != nil {
+		fmt.Printf("failed to set leader priority: %v\n", err)
 		return
 	}
 	fmt.Println("Success!")

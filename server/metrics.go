@@ -58,6 +58,14 @@ var (
 			Help:      "Status of the cluster.",
 		}, []string{"type", "namespace"})
 
+	regionStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "regions",
+			Name:      "status",
+			Help:      "Status of the regions.",
+		}, []string{"type"})
+
 	timeJumpBackCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -81,6 +89,15 @@ var (
 			Name:      "region_heartbeat",
 			Help:      "Counter of region hearbeat.",
 		}, []string{"store", "type", "status"})
+
+	regionHeartbeatLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "region_heartbeat_latency_seconds",
+			Help:      "Bucketed histogram of latency (s) of receiving heartbeat.",
+			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 15),
+		}, []string{"store"})
 
 	storeStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -116,7 +133,9 @@ func init() {
 	prometheus.MustRegister(timeJumpBackCounter)
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(regionHeartbeatCounter)
+	prometheus.MustRegister(regionHeartbeatLatency)
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(tsoCounter)
 	prometheus.MustRegister(storeStatusGauge)
+	prometheus.MustRegister(regionStatusGauge)
 }

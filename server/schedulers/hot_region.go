@@ -155,7 +155,7 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return schedule.CreateMovePeerOperator("moveHotReadRegion", srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId(), cluster.IsEnableRaftLearner())
+		return schedule.CreateMovePeerOperator("moveHotReadRegion", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId(), cluster.IsEnableRaftLearner())
 	}
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 	return nil
@@ -166,7 +166,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return schedule.CreateMovePeerOperator("moveHotWriteRegion", srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId(), cluster.IsEnableRaftLearner())
+		return schedule.CreateMovePeerOperator("moveHotWriteRegion", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId(), cluster.IsEnableRaftLearner())
 	}
 
 	// balance by leader
@@ -303,9 +303,19 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 			continue
 		}
 
+		filters := []schedule.Filter{
+			schedule.NewStateFilter(),
+			schedule.NewBlockFilter(),
+			schedule.NewRejectLeaderFilter(),
+		}
 		candidateStoreIDs := make([]uint64, 0, len(srcRegion.Peers)-1)
-		for id := range srcRegion.GetFollowers() {
-			candidateStoreIDs = append(candidateStoreIDs, id)
+		for _, store := range cluster.GetFollowerStores(srcRegion) {
+			if !schedule.FilterTarget(cluster, store, filters) {
+				candidateStoreIDs = append(candidateStoreIDs, store.GetId())
+			}
+		}
+		if len(candidateStoreIDs) == 0 {
+			continue
 		}
 		destStoreID := h.selectDestStore(candidateStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
 		if destStoreID == 0 {

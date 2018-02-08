@@ -71,7 +71,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 	}
 
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	op := schedule.CreateMovePeerOperator("shuffle-region", region, schedule.OpAdmin, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId(), cluster.IsEnableRaftLearner())
+	op := schedule.CreateMovePeerOperator("shuffle-region", cluster, region, schedule.OpAdmin, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId(), cluster.IsEnableRaftLearner())
 	op.SetPriorityLevel(core.HighPriority)
 	return op
 }

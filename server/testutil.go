@@ -69,6 +69,7 @@ func NewTestSingleConfig() *Config {
 	cfg.disableStrictReconfigCheck = true
 	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)
 	cfg.ElectionInterval = typeutil.NewDuration(1000 * time.Millisecond)
+	cfg.leaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
 
 	cfg.adjust()
 	return cfg

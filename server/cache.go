@@ -45,6 +45,7 @@ type clusterInfo struct {
 	meta          *metapb.Cluster
 	activeRegions int
 	opt           *scheduleOption
+	regionStats   *regionStatistics
 }
 
 func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clusterInfo {
@@ -173,11 +174,26 @@ func (c *clusterInfo) GetStores() []*core.StoreInfo {
 	return c.BasicCluster.GetStores()
 }
 
-// GetStoresAverageScore returns the total resource score of all StoreInfo
-func (c *clusterInfo) GetStoresAverageScore(kind core.ResourceKind) float64 {
+// GetStoresAverageScore returns the total resource score of all unfiltered stores.
+func (c *clusterInfo) GetStoresAverageScore(kind core.ResourceKind, filters ...schedule.Filter) float64 {
 	c.RLock()
 	defer c.RUnlock()
-	return c.BasicCluster.GetStoresAverageScore(kind)
+
+	var totalResourceSize int64
+	var totalResourceWeight float64
+	for _, s := range c.BasicCluster.GetStores() {
+		if schedule.FilterSource(c, s, filters) {
+			continue
+		}
+
+		totalResourceWeight += s.ResourceWeight(kind)
+		totalResourceSize += s.ResourceSize(kind)
+	}
+
+	if totalResourceWeight == 0 {
+		return 0
+	}
+	return float64(totalResourceSize) / totalResourceWeight
 }
 
 func (c *clusterInfo) getMetaStores() []*metapb.Store {
@@ -314,6 +330,10 @@ func (c *clusterInfo) RandFollowerRegion(storeID uint64) *core.RegionInfo {
 func (c *clusterInfo) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
+	return c.getRegionStores(region)
+}
+
+func (c *clusterInfo) getRegionStores(region *core.RegionInfo) []*core.StoreInfo {
 	var stores []*core.StoreInfo
 	for id := range region.GetStoreIds() {
 		if store := c.Stores.GetStore(id); store != nil {
@@ -461,6 +481,11 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			c.updateStoreStatus(p.GetStoreId())
 		}
 	}
+
+	if c.regionStats != nil {
+		c.regionStats.Observe(region, c.getRegionStores(region))
+	}
+
 	key := region.GetId()
 	if isWriteUpdate {
 		if writeItem == nil {
@@ -477,6 +502,24 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		}
 	}
 	return nil
+}
+
+func (c *clusterInfo) collectMetrics() {
+	if c.regionStats == nil {
+		return
+	}
+	c.RLock()
+	defer c.RUnlock()
+	c.regionStats.Collect()
+}
+
+func (c *clusterInfo) GetRegionStatsByType(typ regionStatisticType) []*core.RegionInfo {
+	if c.regionStats == nil {
+		return nil
+	}
+	c.RLock()
+	defer c.RUnlock()
+	return c.regionStats.getRegionStatsByType(typ)
 }
 
 func (c *clusterInfo) GetOpt() schedule.NamespaceOptions {
@@ -525,4 +568,8 @@ func (c *clusterInfo) GetHotRegionLowThreshold() int {
 
 func (c *clusterInfo) IsEnableRaftLearner() bool {
 	return c.opt.IsEnableRaftLearner()
+}
+
+func (c *clusterInfo) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
+	return c.opt.CheckLabelProperty(typ, labels)
 }
