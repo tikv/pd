@@ -342,7 +342,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		storeLabel := strconv.FormatUint(storeID, 10)
 
 		regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "recv").Inc()
-		regionHeartbeatLatency.WithLabelValues(storeLabel).Observe(float64(time.Now().Second()) - float64(request.GetTimestamp()))
+		regionHeartbeatLatency.WithLabelValues(storeLabel).Observe(float64(time.Now().UnixNano()/int64(time.Millisecond)) - float64(request.GetTimestamp()))
 
 		hbStreams := cluster.coordinator.hbStreams
 

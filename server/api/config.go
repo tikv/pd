@@ -20,6 +20,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/juju/errors"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
@@ -139,5 +140,31 @@ func (h *confHandler) DeleteNamespace(w http.ResponseWriter, r *http.Request) {
 	}
 	h.svr.DeleteNamespaceConfig(name)
 
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (h *confHandler) GetLabelProperty(w http.ResponseWriter, r *http.Request) {
+	h.rd.JSON(w, http.StatusOK, h.svr.GetLabelProperty())
+}
+
+func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
+	input := make(map[string]string)
+	err := readJSON(r.Body, &input)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	switch input["action"] {
+	case "set":
+		err = h.svr.SetLabelProperty(input["type"], input["label-key"], input["label-value"])
+	case "delete":
+		err = h.svr.DeleteLabelProperty(input["type"], input["label-key"], input["label-value"])
+	default:
+		err = errors.Errorf("unknown action %v", input["action"])
+	}
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	h.rd.JSON(w, http.StatusOK, nil)
 }
