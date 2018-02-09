@@ -60,7 +60,7 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule
 	stores := cluster.GetStores()
 	rejectLeaderStores := make(map[uint64]struct{})
 	for _, s := range stores {
-		if cluster.IsRejectLeader(s.Labels) {
+		if cluster.CheckLabelProperty(schedule.RejectLeader, s.Labels) {
 			rejectLeaderStores[s.GetId()] = struct{}{}
 		}
 	}

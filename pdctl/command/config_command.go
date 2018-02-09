@@ -25,10 +25,11 @@ import (
 )
 
 var (
-	configPrefix      = "pd/api/v1/config"
-	schedulePrefix    = "pd/api/v1/config/schedule"
-	replicationPrefix = "pd/api/v1/config/replicate"
-	namespacePrefix   = "pd/api/v1/config/namespace"
+	configPrefix        = "pd/api/v1/config"
+	schedulePrefix      = "pd/api/v1/config/schedule"
+	replicationPrefix   = "pd/api/v1/config/replicate"
+	namespacePrefix     = "pd/api/v1/config/namespace"
+	labelPropertyPrefix = "pd/api/v1/config/label-property"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
@@ -46,13 +47,14 @@ func NewConfigCommand() *cobra.Command {
 // NewShowConfigCommand return a show subcommand of configCmd
 func NewShowConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "show [namespace|replication|all]",
+		Use:   "show [namespace|replication|label-property|all]",
 		Short: "show schedule config of PD",
 		Run:   showConfigCommandFunc,
 	}
 	sc.AddCommand(NewShowAllConfigCommand())
 	sc.AddCommand(NewShowNamespaceConfigCommand())
 	sc.AddCommand(NewShowReplicationConfigCommand())
+	sc.AddCommand(NewShowLabelPropertyCommand())
 	return sc
 }
 
@@ -86,14 +88,25 @@ func NewShowReplicationConfigCommand() *cobra.Command {
 	return sc
 }
 
+// NewShowLabelPropertyCommand returns a show label property subcommand of show subcommand.
+func NewShowLabelPropertyCommand() *cobra.Command {
+	sc := &cobra.Command{
+		Use:   "label-property",
+		Short: "show label property config",
+		Run:   showLabelPropertyConfigCommandFunc,
+	}
+	return sc
+}
+
 // NewSetConfigCommand return a set subcommand of configCmd
 func NewSetConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "set [namespace <name>] <option> <value>",
+		Use:   "set <option> <value>, set namespace <name> <option> <value>, set label-property <type> <key> <value>",
 		Short: "set the option with value",
 		Run:   setConfigCommandFunc,
 	}
 	sc.AddCommand(NewSetNamespaceConfigCommand())
+	sc.AddCommand(NewSetLabelPropertyCommand())
 	return sc
 }
 
@@ -107,22 +120,43 @@ func NewSetNamespaceConfigCommand() *cobra.Command {
 	return sc
 }
 
+// NewSetLabelPropertyCommand creates a set subcommand of set subcommand
+func NewSetLabelPropertyCommand() *cobra.Command {
+	sc := &cobra.Command{
+		Use:   "label-property <type> <key> <value>",
+		Short: "set a label property config item",
+		Run:   setLabelPropertyConfigCommandFunc,
+	}
+	return sc
+}
+
 // NewDeleteConfigCommand a set subcommand of cfgCmd
 func NewDeleteConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "delete namespace <name> [<option>]",
+		Use:   "delete namespace|label-property",
 		Short: "delete the config option",
 	}
 	sc.AddCommand(NewDeleteNamespaceConfigCommand())
+	sc.AddCommand(NewDeleteLabelPropertyConfigCommand())
 	return sc
 }
 
 // NewDeleteNamespaceConfigCommand a set subcommand of delete subcommand
 func NewDeleteNamespaceConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "namespace <name> [<option>]",
+		Use:   "namespace <name>",
 		Short: "delete the namespace config's all options or given option",
 		Run:   deleteNamespaceConfigCommandFunc,
+	}
+	return sc
+}
+
+// NewDeleteLabelPropertyConfigCommand a set subcommand of delete subcommand.
+func NewDeleteLabelPropertyConfigCommand() *cobra.Command {
+	sc := &cobra.Command{
+		Use:   "label-property <type> <key> <value>",
+		Short: "delete a label property config item",
+		Run:   deleteLabelPropertyConfigCommandFunc,
 	}
 	return sc
 }
@@ -138,6 +172,15 @@ func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 
 func showReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, replicationPrefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get config: %s\n", err)
+		return
+	}
+	fmt.Println(r)
+}
+
+func showLabelPropertyConfigCommandFunc(cmd *cobra.Command, args []string) {
+	r, err := doRequest(cmd, labelPropertyPrefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get config: %s\n", err)
 		return
@@ -238,4 +281,27 @@ func deleteNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	fmt.Println("Success!")
+}
+
+func setLabelPropertyConfigCommandFunc(cmd *cobra.Command, args []string) {
+	postLabelProperty(cmd, "set", args)
+}
+
+func deleteLabelPropertyConfigCommandFunc(cmd *cobra.Command, args []string) {
+	postLabelProperty(cmd, "delete", args)
+}
+
+func postLabelProperty(cmd *cobra.Command, action string, args []string) {
+	if len(args) != 3 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+	input := map[string]interface{}{
+		"type":        args[0],
+		"action":      action,
+		"label-key":   args[1],
+		"label-value": args[2],
+	}
+	prefix := path.Join(labelPropertyPrefix)
+	postJSON(cmd, prefix, input)
 }

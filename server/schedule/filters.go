@@ -276,5 +276,5 @@ func (f rejectLeaderFilter) FilterSource(opt Options, store *core.StoreInfo) boo
 }
 
 func (f rejectLeaderFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
-	return opt.IsRejectLeader(store.Labels)
+	return opt.CheckLabelProperty(RejectLeader, store.Labels)
 }

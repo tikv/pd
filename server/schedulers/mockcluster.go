@@ -50,6 +50,25 @@ func (mc *mockCluster) ScanRegions(startKey []byte, limit int) []*core.RegionInf
 	return mc.Regions.ScanRange(startKey, limit)
 }
 
+// GetStoresAverageScore returns the total resource score of all unfiltered stores.
+func (mc *mockCluster) GetStoresAverageScore(kind core.ResourceKind, filters ...schedule.Filter) float64 {
+	var totalResourceSize int64
+	var totalResourceWeight float64
+	for _, s := range mc.BasicCluster.GetStores() {
+		if schedule.FilterSource(mc, s, filters) {
+			continue
+		}
+
+		totalResourceWeight += s.ResourceWeight(kind)
+		totalResourceSize += s.ResourceSize(kind)
+	}
+
+	if totalResourceWeight == 0 {
+		return 0
+	}
+	return float64(totalResourceSize) / totalResourceWeight
+}
+
 // AllocPeer allocs a new peer on a store.
 func (mc *mockCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := mc.allocID()
@@ -298,10 +317,10 @@ func (mc *mockCluster) GetMaxReplicas() int {
 	return mc.MockSchedulerOptions.GetMaxReplicas(namespace.DefaultNamespace)
 }
 
-func (mc *mockCluster) IsRejectLeader(labels []*metapb.StoreLabel) bool {
-	for _, c := range mc.MockSchedulerOptions.RejectLeaderLabels {
+func (mc *mockCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
+	for _, cfg := range mc.LabelProperties[typ] {
 		for _, l := range labels {
-			if c.Key == l.Key && c.Value == l.Value {
+			if l.Key == cfg.Key && l.Value == cfg.Value {
 				return true
 			}
 		}
@@ -333,7 +352,7 @@ type MockSchedulerOptions struct {
 	LocationLabels        []string
 	HotRegionLowThreshold int
 	TolerantSizeRatio     float64
-	RejectLeaderLabels    []*metapb.StoreLabel
+	LabelProperties       map[string][]*metapb.StoreLabel
 }
 
 func newMockSchedulerOptions() *MockSchedulerOptions {

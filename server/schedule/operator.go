@@ -280,7 +280,7 @@ func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64) (
 	if region.Leader != nil && region.Leader.GetStoreId() == storeID {
 		for id := range region.GetFollowers() {
 			follower := cluster.GetStore(id)
-			if follower != nil && !cluster.IsRejectLeader(follower.Labels) {
+			if follower != nil && !cluster.CheckLabelProperty(RejectLeader, follower.Labels) {
 				steps = append(steps, TransferLeader{FromStore: storeID, ToStore: id})
 				kind = OpLeader
 				break

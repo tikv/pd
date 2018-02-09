@@ -23,6 +23,7 @@ import (
 type Selector interface {
 	SelectSource(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo
 	SelectTarget(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo
+	GetFilters() []Filter
 }
 
 type balanceSelector struct {
@@ -67,6 +68,10 @@ func (s *balanceSelector) SelectTarget(opt Options, stores []*core.StoreInfo, fi
 		}
 	}
 	return result
+}
+
+func (s *balanceSelector) GetFilters() []Filter {
+	return s.filters
 }
 
 type replicaSelector struct {
@@ -125,6 +130,10 @@ func (s *replicaSelector) SelectTarget(opt Options, stores []*core.StoreInfo, fi
 	return best
 }
 
+func (s *replicaSelector) GetFilters() []Filter {
+	return s.filters
+}
+
 type randomSelector struct {
 	filters []Filter
 }
@@ -165,4 +174,8 @@ func (s *randomSelector) SelectTarget(opt Options, stores []*core.StoreInfo, fil
 		candidates = append(candidates, store)
 	}
 	return s.Select(candidates)
+}
+
+func (s *randomSelector) GetFilters() []Filter {
+	return s.filters
 }
