@@ -122,7 +122,7 @@ func (t *testRegionStatistcs) TestRegionLabelIsolationLevel(c *C) {
 			{"zone": "z1", "rack": "r2", "host": "h2"},
 		},
 	}
-	res := []int{1, 2, 0, 1, -1}
+	res := []int{2, 3, 1, 2, 0}
 	f := func(labels []map[string]string, res int) {
 		metaStores := []*metapb.Store{
 			{Id: 1, Address: "mock://tikv-1"},
@@ -146,8 +146,8 @@ func (t *testRegionStatistcs) TestRegionLabelIsolationLevel(c *C) {
 
 	}
 	level := getRegionLabelIsolationLevel(nil, []string{"zone", "rack", "host"})
-	c.Assert(level, Equals, -1)
+	c.Assert(level, Equals, 0)
 	level = getRegionLabelIsolationLevel(nil, nil)
-	c.Assert(level, Equals, -1)
+	c.Assert(level, Equals, 0)
 
 }

@@ -113,7 +113,7 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 
 func getRegionLabelIsolationLevel(stores []*core.StoreInfo, labels []string) int {
 	if len(stores) == 0 || len(labels) == 0 {
-		return -1
+		return 0
 	}
 	queueStores := [][]*core.StoreInfo{stores}
 	for level, label := range labels {
@@ -126,10 +126,10 @@ func getRegionLabelIsolationLevel(stores []*core.StoreInfo, labels []string) int
 		}
 		queueStores = newQueueStores
 		if len(queueStores) == 0 {
-			return level
+			return level + 1
 		}
 	}
-	return -1
+	return 0
 }
 
 func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*core.StoreInfo {
