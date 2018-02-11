@@ -131,6 +131,14 @@ var (
 			Name:      "tso",
 			Help:      "Counter of tso events",
 		}, []string{"type"})
+
+	metadataGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "metadata",
+			Help:      "Record critical metadata.",
+		}, []string{"type"})
 )
 
 func init() {
@@ -148,4 +156,5 @@ func init() {
 	prometheus.MustRegister(storeStatusGauge)
 	prometheus.MustRegister(regionStatusGauge)
 	prometheus.MustRegister(regionLabelLevelHistogram)
+	prometheus.MustRegister(metadataGauge)
 }

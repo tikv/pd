@@ -88,5 +88,6 @@ func (alloc *idAllocator) generate() (uint64, error) {
 	}
 
 	log.Infof("idAllocator allocates a new id: %d", end)
+	metadataGauge.WithLabelValues("idalloc").Set(float64(end))
 	return end, nil
 }

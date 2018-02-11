@@ -196,6 +196,9 @@ func (s *Server) startServer() error {
 		return errors.Trace(err)
 	}
 	log.Infof("init cluster id %v", s.clusterID)
+	// It may lose accuracy if use float64 to store uint64. So we store the
+	// cluster id in label.
+	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
 
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	s.leaderValue = s.marshalLeader()
