@@ -14,8 +14,6 @@
 package schedule
 
 import (
-	"github.com/juju/errors"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	log "github.com/sirupsen/logrus"
@@ -62,15 +60,12 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 		return nil, nil
 	}
 
-	steps, kind, err := m.matchPeers(region, target)
+	checkerCounter.WithLabelValues("merge_checker", "new_operator").Inc()
+	log.Debugf("try to merge region {%v} into region {%v}", region, target)
+	op1, op2, err := CreateMergeRegionOperator("merge-region", m.cluster, region, target, OpMerge)
 	if err != nil {
 		return nil, nil
 	}
-
-	checkerCounter.WithLabelValues("merge_checker", "new_operator").Inc()
-	log.Debugf("try to merge region {%v} into region {%v}", region, target)
-	op1, op2 := CreateMergeRegionOperator("merge-region", region, target, kind, steps)
-
 	return op1, op2
 }
 
@@ -88,74 +83,4 @@ func (m *MergeChecker) checkTarget(region, adjacent, target *core.RegionInfo) *c
 		}
 	}
 	return target
-}
-
-func (m *MergeChecker) matchPeers(source *core.RegionInfo, target *core.RegionInfo) ([]OperatorStep, OperatorKind, error) {
-	storeIDs := make(map[uint64]struct{})
-	var steps []OperatorStep
-	var kind OperatorKind
-
-	sourcePeers := source.Region.GetPeers()
-	targetPeers := target.Region.GetPeers()
-
-	for _, peer := range targetPeers {
-		storeIDs[peer.GetStoreId()] = struct{}{}
-	}
-
-	// Add missing peers.
-	for id := range storeIDs {
-		if source.GetStorePeer(id) != nil {
-			continue
-		}
-		peer, err := m.cluster.AllocPeer(id)
-		if err != nil {
-			log.Debugf("peer alloc failed: %v", err)
-			return nil, kind, errors.Trace(err)
-		}
-		steps = append(steps, AddPeer{ToStore: id, PeerID: peer.Id})
-		kind |= OpRegion
-	}
-
-	// Check whether to transfer leader or not
-	intersection := m.getIntersectionStores(sourcePeers, targetPeers)
-	leaderID := source.Leader.GetStoreId()
-	isFound := false
-	for _, storeID := range intersection {
-		if storeID == leaderID {
-			isFound = true
-			break
-		}
-	}
-	if !isFound {
-		steps = append(steps, TransferLeader{FromStore: source.Leader.GetStoreId(), ToStore: target.Leader.GetStoreId()})
-		kind |= OpLeader
-	}
-
-	// Remove redundant peers.
-	for _, peer := range sourcePeers {
-		if _, ok := storeIDs[peer.GetStoreId()]; ok {
-			continue
-		}
-		steps = append(steps, RemovePeer{FromStore: peer.GetStoreId()})
-		kind |= OpRegion
-	}
-
-	return steps, kind, nil
-}
-
-func (m *MergeChecker) getIntersectionStores(a []*metapb.Peer, b []*metapb.Peer) []uint64 {
-	set := make([]uint64, 0)
-	hash := make(map[uint64]struct{})
-
-	for _, peer := range a {
-		hash[peer.GetStoreId()] = struct{}{}
-	}
-
-	for _, peer := range b {
-		if _, found := hash[peer.GetStoreId()]; found {
-			set = append(set, peer.GetStoreId())
-		}
-	}
-
-	return set
 }

@@ -26,6 +26,7 @@ import (
 var (
 	errNotBootstrapped  = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
 	errOperatorNotFound = errors.New("operator not found")
+	errAddOperator      = errors.New("failed to add operator, maybe already have one")
 )
 
 // Handler is a helper to export methods to handle API/RPC requests.
@@ -400,6 +401,33 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 
 	op := schedule.CreateRemovePeerOperator("adminRemovePeer", c.cluster, schedule.OpAdmin, region, fromStoreID)
 	c.addOperator(op)
+	return nil
+}
+
+// AddMergeRegionOperator adds an operator to merge region.
+func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	region := c.cluster.GetRegion(regionID)
+	if region == nil {
+		return errRegionNotFound(regionID)
+	}
+
+	target := c.cluster.GetRegion(targetID)
+	if target == nil {
+		return errRegionNotFound(targetID)
+	}
+
+	op1, op2, err := schedule.CreateMergeRegionOperator("merge-region", c.cluster, region, target, schedule.OpAdmin)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if ok := c.addOperators(op1, op2); !ok {
+		return errors.Trace(errAddOperator)
+	}
 	return nil
 }
 

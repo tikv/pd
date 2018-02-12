@@ -19,7 +19,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/pingcap/pd/server/core"
 )
@@ -328,19 +330,96 @@ func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64) (
 }
 
 // CreateMergeRegionOperator creates an Operator that merge two region into one
-func CreateMergeRegionOperator(desc string, source *core.RegionInfo, target *core.RegionInfo, kind OperatorKind, steps []OperatorStep) (*Operator, *Operator) {
+func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.RegionInfo, target *core.RegionInfo, kind OperatorKind) (*Operator, *Operator, error) {
+	steps, kinds, err := matchPeerSteps(cluster, source, target)
+	if err != nil {
+		return nil, nil, errors.Trace(err)
+	}
+
 	steps = append(steps, MergeRegion{
 		FromRegion: source.Region,
 		ToRegion:   target.Region,
 		IsPassive:  false,
 	})
 
-	op1 := NewOperator(desc, source.GetId(), OpMerge|kind, steps...)
-	op2 := NewOperator(desc, target.GetId(), OpMerge, MergeRegion{
+	op1 := NewOperator(desc, source.GetId(), kinds|kind, steps...)
+	op2 := NewOperator(desc, target.GetId(), kind, MergeRegion{
 		FromRegion: source.Region,
 		ToRegion:   target.Region,
 		IsPassive:  true,
 	})
 
-	return op1, op2
+	return op1, op2, nil
+}
+
+// matchPeerSteps returns the steps to match the location of peer stores of source region with target's.
+func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.RegionInfo) ([]OperatorStep, OperatorKind, error) {
+	storeIDs := make(map[uint64]struct{})
+	var steps []OperatorStep
+	var kind OperatorKind
+
+	sourcePeers := source.Region.GetPeers()
+	targetPeers := target.Region.GetPeers()
+
+	for _, peer := range targetPeers {
+		storeIDs[peer.GetStoreId()] = struct{}{}
+	}
+
+	// Add missing peers.
+	for id := range storeIDs {
+		if source.GetStorePeer(id) != nil {
+			continue
+		}
+		peer, err := cluster.AllocPeer(id)
+		if err != nil {
+			log.Debugf("peer alloc failed: %v", err)
+			return nil, kind, errors.Trace(err)
+		}
+		steps = append(steps, AddPeer{ToStore: id, PeerID: peer.Id})
+		kind |= OpRegion
+	}
+
+	// Check whether to transfer leader or not
+	intersection := getIntersectionStores(sourcePeers, targetPeers)
+	leaderID := source.Leader.GetStoreId()
+	isFound := false
+	for _, storeID := range intersection {
+		if storeID == leaderID {
+			isFound = true
+			break
+		}
+	}
+	if !isFound {
+		steps = append(steps, TransferLeader{FromStore: source.Leader.GetStoreId(), ToStore: target.Leader.GetStoreId()})
+		kind |= OpLeader
+	}
+
+	// Remove redundant peers.
+	for _, peer := range sourcePeers {
+		if _, ok := storeIDs[peer.GetStoreId()]; ok {
+			continue
+		}
+		steps = append(steps, RemovePeer{FromStore: peer.GetStoreId()})
+		kind |= OpRegion
+	}
+
+	return steps, kind, nil
+}
+
+// getIntersectionStores returns the stores included in two region's peers.
+func getIntersectionStores(a []*metapb.Peer, b []*metapb.Peer) []uint64 {
+	set := make([]uint64, 0)
+	hash := make(map[uint64]struct{})
+
+	for _, peer := range a {
+		hash[peer.GetStoreId()] = struct{}{}
+	}
+
+	for _, peer := range b {
+		if _, found := hash[peer.GetStoreId()]; found {
+			set = append(set, peer.GetStoreId())
+		}
+	}
+
+	return set
 }

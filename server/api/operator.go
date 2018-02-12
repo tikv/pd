@@ -186,6 +186,21 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	case "merge-region":
+		regionID, ok := input["source_region_id"].(float64)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "missing region id")
+			return
+		}
+		targetID, ok := input["target_region_id"].(float64)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "invalid target region id to merge to")
+			return
+		}
+		if err := h.AddMergeRegionOperator(uint64(regionID), uint64(targetID)); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	default:
 		h.r.JSON(w, http.StatusBadRequest, "unknown operator")
 		return
