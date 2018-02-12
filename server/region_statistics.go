@@ -66,7 +66,7 @@ func (r *regionStatistics) deleteEntry(deleteIndex regionStatisticType, regionID
 	}
 }
 
-func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo) {
+func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo, labels []string) {
 	// Region state.
 	regionID := region.GetId()
 	namespace := r.classifier.GetRegionNamespace(region)
@@ -104,6 +104,50 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	}
 	r.deleteEntry(deleteIndex, regionID)
 	r.index[regionID] = peerTypeIndex
+	if len(stores) == 0 {
+		return
+	}
+	regionLabelLevel := getRegionLabelIsolationLevel(stores, labels)
+	regionLabelLevelHistogram.Observe(float64(regionLabelLevel))
+}
+
+func getRegionLabelIsolationLevel(stores []*core.StoreInfo, labels []string) int {
+	if len(stores) == 0 || len(labels) == 0 {
+		return 0
+	}
+	queueStores := [][]*core.StoreInfo{stores}
+	for level, label := range labels {
+		newQueueStores := make([][]*core.StoreInfo, 0, len(stores))
+		for _, stores := range queueStores {
+			notIsolatedStores := notIsolatedStoresWithLabel(stores, label)
+			if len(notIsolatedStores) > 0 {
+				newQueueStores = append(newQueueStores, notIsolatedStores...)
+			}
+		}
+		queueStores = newQueueStores
+		if len(queueStores) == 0 {
+			return level + 1
+		}
+	}
+	return 0
+}
+
+func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*core.StoreInfo {
+	m := make(map[string][]*core.StoreInfo)
+	for _, s := range stores {
+		labelValue := s.GetLabelValue(label)
+		if labelValue == "" {
+			continue
+		}
+		m[labelValue] = append(m[labelValue], s)
+	}
+	var res [][]*core.StoreInfo
+	for _, stores := range m {
+		if len(stores) > 1 {
+			res = append(res, stores)
+		}
+	}
+	return res
 }
 
 func (r *regionStatistics) Collect() {

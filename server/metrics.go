@@ -66,6 +66,15 @@ var (
 			Help:      "Status of the regions.",
 		}, []string{"type"})
 
+	regionLabelLevelHistogram = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "regions",
+			Name:      "label_level",
+			Help:      "Bucketed histogram of the label level of the region.",
+			Buckets:   prometheus.LinearBuckets(0, 1, 8),
+		})
+
 	timeJumpBackCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -122,6 +131,14 @@ var (
 			Name:      "tso",
 			Help:      "Counter of tso events",
 		}, []string{"type"})
+
+	metadataGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "metadata",
+			Help:      "Record critical metadata.",
+		}, []string{"type"})
 )
 
 func init() {
@@ -138,4 +155,6 @@ func init() {
 	prometheus.MustRegister(tsoCounter)
 	prometheus.MustRegister(storeStatusGauge)
 	prometheus.MustRegister(regionStatusGauge)
+	prometheus.MustRegister(regionLabelLevelHistogram)
+	prometheus.MustRegister(metadataGauge)
 }
