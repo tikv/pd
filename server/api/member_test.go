@@ -237,7 +237,7 @@ func (s *testMemberAPISuite) TestEtcdLeaderPriority(c *C) {
 }
 
 func (s *testMemberAPISuite) post(c *C, url string, body io.Reader) {
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 10; i++ {
 		res, err := http.Post(url, "", body)
 		c.Assert(err, IsNil)
 		if res.StatusCode == http.StatusOK {
@@ -245,7 +245,7 @@ func (s *testMemberAPISuite) post(c *C, url string, body io.Reader) {
 		}
 		time.Sleep(time.Millisecond * 500)
 	}
-	c.Fatal("failed to send query after retry 5 times")
+	c.Fatal("failed to send query after retry 10 times")
 }
 
 func (s *testMemberAPISuite) waitLeaderChange(c *C, svr *server.Server, old *pdpb.Member) *pdpb.Member {
