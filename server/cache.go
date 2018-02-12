@@ -490,7 +490,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	if c.regionStats != nil {
-		c.regionStats.Observe(region, c.getRegionStores(region))
+		c.regionStats.Observe(region, c.getRegionStores(region), c.GetLocationLabels())
 	}
 
 	key := region.GetId()
