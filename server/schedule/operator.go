@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -108,33 +109,24 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 
 // MergeRegion is an OperatorStep that merge two regions.
 type MergeRegion struct {
-	FromRegion uint64
-	ToRegion   uint64
-	Direction  metapb.MergeDirection
+	FromRegion *metapb.Region
+	ToRegion   *metapb.Region
 	// there are two regions involved in merge process,
 	// so to keep them from other scheduler,
 	// both of them should add MerRegion operatorStep.
 	// But actually, tikv just need the region want to be merged to get the merge request,
 	// thus use a IsPssive mark to indicate that
 	// this region doesn't need to send merge request to tikv.
-	IsPassive   bool
-	OldStartKey []byte
-	OldEndKey   []byte
+	IsPassive bool
 }
 
 func (mr MergeRegion) String() string {
-	return fmt.Sprintf("merge region %v into region %v", mr.FromRegion, mr.ToRegion)
+	return fmt.Sprintf("merge region %v into region %v", mr.FromRegion.GetId(), mr.ToRegion.GetId())
 }
 
-// IsFinish checks if cuurent step is finished
+// IsFinish checks if current step is finished
 func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
-	if mr.Direction == metapb.MergeDirection_Forward {
-		return bytes.Compare(region.Region.StartKey, mr.OldStartKey) < 0
-	}
-	// for the case that the region endkey change to "" after merge
-	// note that "" is smaller than any key, comapring to old endkey it will not regared as finished.
-	// so it need a special judge
-	return bytes.Compare(region.Region.EndKey, []byte("")) == 0 || bytes.Compare(region.Region.EndKey, mr.OldEndKey) > 0
+	return bytes.Compare(region.Region.StartKey, mr.ToRegion.StartKey) != 0 || bytes.Compare(region.Region.EndKey, mr.ToRegion.EndKey) != 0
 }
 
 // Influence calculates the store difference that current step make
@@ -336,24 +328,18 @@ func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64) (
 }
 
 // CreateMergeRegionOperator creates an Operator that merge two region into one
-func CreateMergeRegionOperator(desc string, source *core.RegionInfo, target *core.RegionInfo, direction metapb.MergeDirection, kind OperatorKind, steps []OperatorStep) (*Operator, *Operator) {
+func CreateMergeRegionOperator(desc string, source *core.RegionInfo, target *core.RegionInfo, kind OperatorKind, steps []OperatorStep) (*Operator, *Operator) {
 	steps = append(steps, MergeRegion{
-		FromRegion:  source.GetId(),
-		ToRegion:    target.GetId(),
-		Direction:   direction,
-		IsPassive:   false,
-		OldStartKey: source.Region.StartKey,
-		OldEndKey:   source.Region.EndKey,
+		FromRegion: source.Region,
+		ToRegion:   target.Region,
+		IsPassive:  false,
 	})
 
 	op1 := NewOperator(desc, source.GetId(), OpMerge|kind, steps...)
 	op2 := NewOperator(desc, target.GetId(), OpMerge, MergeRegion{
-		FromRegion:  source.GetId(),
-		ToRegion:    target.GetId(),
-		Direction:   direction,
-		IsPassive:   true,
-		OldStartKey: target.Region.StartKey,
-		OldEndKey:   target.Region.EndKey,
+		FromRegion: source.Region,
+		ToRegion:   target.Region,
+		IsPassive:  true,
 	})
 
 	return op1, op2

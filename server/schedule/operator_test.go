@@ -143,7 +143,7 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		RegionCount: 1,
 	})
 
-	MergeRegion{FromRegion: 1, ToRegion: 2, IsPassive: false}.Influence(opInfluence, region)
+	MergeRegion{IsPassive: false}.Influence(opInfluence, region)
 	c.Assert(*opInfluence[1], DeepEquals, StoreInfluence{
 		LeaderSize:  -10,
 		LeaderCount: -1,
@@ -157,7 +157,7 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		RegionCount: 1,
 	})
 
-	MergeRegion{FromRegion: 1, ToRegion: 2, IsPassive: true}.Influence(opInfluence, region)
+	MergeRegion{IsPassive: true}.Influence(opInfluence, region)
 	c.Assert(*opInfluence[1], DeepEquals, StoreInfluence{
 		LeaderSize:  -10,
 		LeaderCount: -1,

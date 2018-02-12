@@ -55,13 +55,11 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	prev, next := m.cluster.GetAdjacentRegions(region)
 
 	peerCount := len(region.Region.GetPeers())
-	var direction metapb.MergeDirection
 	// if is not hot region and under same namesapce
 	if prev != nil && !m.cluster.IsRegionHot(prev.GetId()) && m.classifier.AllowMerge(region, prev) {
 		// peer count should equal
 		if peerCount == len(prev.Region.GetPeers()) {
 			target = prev
-			direction = metapb.MergeDirection_Backward
 		}
 	}
 	if next != nil && !m.cluster.IsRegionHot(next.GetId()) && m.classifier.AllowMerge(region, next) {
@@ -70,7 +68,6 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 			// peer count should equal
 			if peerCount == len(next.Region.GetPeers()) {
 				target = next
-				direction = metapb.MergeDirection_Forward
 			}
 		}
 	}
@@ -87,7 +84,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 
 	checkerCounter.WithLabelValues("merge_checker", "new_operator").Inc()
 	log.Debugf("try to merge region {%v} into region {%v}", region, target)
-	op1, op2 := CreateMergeRegionOperator("merge-region", region, target, direction, kind, steps)
+	op1, op2 := CreateMergeRegionOperator("merge-region", region, target, kind, steps)
 
 	return op1, op2
 }

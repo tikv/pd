@@ -822,22 +822,16 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 		schedule.TransferLeader{FromStore: 6, ToStore: 4},
 		schedule.RemovePeer{FromStore: 6},
 		schedule.MergeRegion{
-			FromRegion:  3,
-			ToRegion:    2,
-			IsPassive:   false,
-			Direction:   metapb.MergeDirection_Backward,
-			OldStartKey: []byte("t"),
-			OldEndKey:   []byte("x"),
+			FromRegion: s.regions[2].Region,
+			ToRegion:   s.regions[1].Region,
+			IsPassive:  false,
 		},
 	})
 	s.checkSteps(c, op2, []schedule.OperatorStep{
 		schedule.MergeRegion{
-			FromRegion:  3,
-			ToRegion:    2,
-			IsPassive:   true,
-			Direction:   metapb.MergeDirection_Backward,
-			OldStartKey: []byte("a"),
-			OldEndKey:   []byte("t"),
+			FromRegion: s.regions[2].Region,
+			ToRegion:   s.regions[1].Region,
+			IsPassive:  true,
 		},
 	})
 
@@ -849,22 +843,16 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 		schedule.AddPeer{ToStore: 4, PeerID: 3},
 		schedule.RemovePeer{FromStore: 6},
 		schedule.MergeRegion{
-			FromRegion:  3,
-			ToRegion:    2,
-			IsPassive:   false,
-			Direction:   metapb.MergeDirection_Backward,
-			OldStartKey: []byte("t"),
-			OldEndKey:   []byte("x"),
+			FromRegion: s.regions[2].Region,
+			ToRegion:   s.regions[1].Region,
+			IsPassive:  false,
 		},
 	})
 	s.checkSteps(c, op2, []schedule.OperatorStep{
 		schedule.MergeRegion{
-			FromRegion:  3,
-			ToRegion:    2,
-			IsPassive:   true,
-			Direction:   metapb.MergeDirection_Backward,
-			OldStartKey: []byte("a"),
-			OldEndKey:   []byte("t"),
+			FromRegion: s.regions[2].Region,
+			ToRegion:   s.regions[1].Region,
+			IsPassive:  true,
 		},
 	})
 
@@ -878,22 +866,16 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	op1, op2 = s.mc.Check(s.regions[2])
 	s.checkSteps(c, op1, []schedule.OperatorStep{
 		schedule.MergeRegion{
-			FromRegion:  3,
-			ToRegion:    2,
-			IsPassive:   false,
-			Direction:   metapb.MergeDirection_Backward,
-			OldStartKey: []byte("t"),
-			OldEndKey:   []byte("x"),
+			FromRegion: s.regions[2].Region,
+			ToRegion:   s.regions[1].Region,
+			IsPassive:  false,
 		},
 	})
 	s.checkSteps(c, op2, []schedule.OperatorStep{
 		schedule.MergeRegion{
-			FromRegion:  3,
-			ToRegion:    2,
-			IsPassive:   true,
-			Direction:   metapb.MergeDirection_Backward,
-			OldStartKey: []byte("a"),
-			OldEndKey:   []byte("t"),
+			FromRegion: s.regions[2].Region,
+			ToRegion:   s.regions[1].Region,
+			IsPassive:  true,
 		},
 	})
 }

@@ -522,7 +522,7 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 		}
 		cmd := &pdpb.RegionHeartbeatResponse{
 			Merge: &pdpb.Merge{
-				Direction: s.Direction,
+				Target: s.ToRegion,
 			},
 		}
 		c.hbStreams.sendMsg(region, cmd)
