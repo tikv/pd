@@ -41,7 +41,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 
 	// region size is not small enough
 	if region.ApproximateSize >= int64(m.cluster.GetMaxMergeRegionSize()) {
-		checkerCounter.WithLabelValues("merge_checker", "small_size").Inc()
+		checkerCounter.WithLabelValues("merge_checker", "no_need").Inc()
 		return nil, nil
 	}
 
@@ -54,23 +54,8 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	var target *core.RegionInfo
 	prev, next := m.cluster.GetAdjacentRegions(region)
 
-	peerCount := len(region.Region.GetPeers())
-	// if is not hot region and under same namesapce
-	if prev != nil && !m.cluster.IsRegionHot(prev.GetId()) && m.classifier.AllowMerge(region, prev) {
-		// peer count should equal
-		if peerCount == len(prev.Region.GetPeers()) {
-			target = prev
-		}
-	}
-	if next != nil && !m.cluster.IsRegionHot(next.GetId()) && m.classifier.AllowMerge(region, next) {
-		// if both region is not hot, prefer the one with smaller size
-		if target == nil || target.ApproximateSize > next.ApproximateSize {
-			// peer count should equal
-			if peerCount == len(next.Region.GetPeers()) {
-				target = next
-			}
-		}
-	}
+	target = m.checkTarget(region, prev, target)
+	target = m.checkTarget(region, next, target)
 
 	if target == nil {
 		checkerCounter.WithLabelValues("merge_checker", "no_target").Inc()
@@ -87,6 +72,22 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	op1, op2 := CreateMergeRegionOperator("merge-region", region, target, kind, steps)
 
 	return op1, op2
+}
+
+func (m *MergeChecker) checkTarget(region, adjacent, target *core.RegionInfo) *core.RegionInfo {
+	peerCount := len(region.Region.GetPeers())
+
+	// if is not hot region and under same namesapce
+	if adjacent != nil && !m.cluster.IsRegionHot(adjacent.GetId()) && m.classifier.AllowMerge(region, adjacent) {
+		// if both region is not hot, prefer the one with smaller size
+		if target == nil || target.ApproximateSize > adjacent.ApproximateSize {
+			// peer count should equal
+			if peerCount == len(adjacent.Region.GetPeers()) {
+				target = adjacent
+			}
+		}
+	}
+	return target
 }
 
 func (m *MergeChecker) matchPeers(source *core.RegionInfo, target *core.RegionInfo) ([]OperatorStep, OperatorKind, error) {
