@@ -49,7 +49,7 @@ func newHotWrite() *Conf {
 	}
 	conf.MaxID = id.maxID
 
-	// select 5 reigons on store 1 as hot write regions.
+	// select 5 regions on store 1 as hot write regions.
 	writeFlow := make(map[uint64]int64, 5)
 	for _, r := range conf.Regions {
 		if r.Leader.GetStoreId() == 1 {
