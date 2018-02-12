@@ -50,6 +50,25 @@ func (mc *mockCluster) ScanRegions(startKey []byte, limit int) []*core.RegionInf
 	return mc.Regions.ScanRange(startKey, limit)
 }
 
+// GetStoresAverageScore returns the total resource score of all unfiltered stores.
+func (mc *mockCluster) GetStoresAverageScore(kind core.ResourceKind, filters ...schedule.Filter) float64 {
+	var totalResourceSize int64
+	var totalResourceWeight float64
+	for _, s := range mc.BasicCluster.GetStores() {
+		if schedule.FilterSource(mc, s, filters) {
+			continue
+		}
+
+		totalResourceWeight += s.ResourceWeight(kind)
+		totalResourceSize += s.ResourceSize(kind)
+	}
+
+	if totalResourceWeight == 0 {
+		return 0
+	}
+	return float64(totalResourceSize) / totalResourceWeight
+}
+
 // AllocPeer allocs a new peer on a store.
 func (mc *mockCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := mc.allocID()
@@ -169,7 +188,14 @@ func (mc *mockCluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 func (mc *mockCluster) addLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r.WrittenBytes = writtenBytes
-	mc.BasicCluster.UpdateWriteStatus(r)
+	isUpdate, item := mc.BasicCluster.CheckWriteStatus(r)
+	if isUpdate {
+		if item == nil {
+			mc.BasicCluster.WriteStatistics.Remove(regionID)
+		} else {
+			mc.BasicCluster.WriteStatistics.Put(regionID, item)
+		}
+	}
 	mc.PutRegion(r)
 }
 
@@ -215,7 +241,14 @@ func (mc *mockCluster) updateStorageReadBytes(storeID uint64, BytesRead uint64) 
 func (mc *mockCluster) addLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r.ReadBytes = readBytes
-	mc.BasicCluster.UpdateReadStatus(r)
+	isUpdate, item := mc.BasicCluster.CheckReadStatus(r)
+	if isUpdate {
+		if item == nil {
+			mc.BasicCluster.ReadStatistics.Remove(regionID)
+		} else {
+			mc.BasicCluster.ReadStatistics.Put(regionID, item)
+		}
+	}
 	mc.PutRegion(r)
 }
 
@@ -284,6 +317,17 @@ func (mc *mockCluster) GetMaxReplicas() int {
 	return mc.MockSchedulerOptions.GetMaxReplicas(namespace.DefaultNamespace)
 }
 
+func (mc *mockCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
+	for _, cfg := range mc.LabelProperties[typ] {
+		for _, l := range labels {
+			if l.Key == cfg.Key && l.Value == cfg.Value {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 const (
 	defaultMaxReplicas          = 3
 	defaultMaxSnapshotCount     = 3
@@ -312,6 +356,7 @@ type MockSchedulerOptions struct {
 	LocationLabels        []string
 	HotRegionLowThreshold int
 	TolerantSizeRatio     float64
+	LabelProperties       map[string][]*metapb.StoreLabel
 }
 
 func newMockSchedulerOptions() *MockSchedulerOptions {

@@ -25,6 +25,8 @@
 		GetStoreResponse
 		PutStoreRequest
 		PutStoreResponse
+		GetAllStoresRequest
+		GetAllStoresResponse
 		GetRegionRequest
 		GetRegionResponse
 		GetRegionByIDRequest
@@ -472,6 +474,46 @@ func (m *PutStoreResponse) GetHeader() *ResponseHeader {
 	return nil
 }
 
+type GetAllStoresRequest struct {
+	Header *RequestHeader `protobuf:"bytes,1,opt,name=header" json:"header,omitempty"`
+}
+
+func (m *GetAllStoresRequest) Reset()                    { *m = GetAllStoresRequest{} }
+func (m *GetAllStoresRequest) String() string            { return proto.CompactTextString(m) }
+func (*GetAllStoresRequest) ProtoMessage()               {}
+func (*GetAllStoresRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{16} }
+
+func (m *GetAllStoresRequest) GetHeader() *RequestHeader {
+	if m != nil {
+		return m.Header
+	}
+	return nil
+}
+
+type GetAllStoresResponse struct {
+	Header *ResponseHeader `protobuf:"bytes,1,opt,name=header" json:"header,omitempty"`
+	Stores []*metapb.Store `protobuf:"bytes,2,rep,name=stores" json:"stores,omitempty"`
+}
+
+func (m *GetAllStoresResponse) Reset()                    { *m = GetAllStoresResponse{} }
+func (m *GetAllStoresResponse) String() string            { return proto.CompactTextString(m) }
+func (*GetAllStoresResponse) ProtoMessage()               {}
+func (*GetAllStoresResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{17} }
+
+func (m *GetAllStoresResponse) GetHeader() *ResponseHeader {
+	if m != nil {
+		return m.Header
+	}
+	return nil
+}
+
+func (m *GetAllStoresResponse) GetStores() []*metapb.Store {
+	if m != nil {
+		return m.Stores
+	}
+	return nil
+}
+
 type GetRegionRequest struct {
 	Header    *RequestHeader `protobuf:"bytes,1,opt,name=header" json:"header,omitempty"`
 	RegionKey []byte         `protobuf:"bytes,2,opt,name=region_key,json=regionKey,proto3" json:"region_key,omitempty"`
@@ -480,7 +522,7 @@ type GetRegionRequest struct {
 func (m *GetRegionRequest) Reset()                    { *m = GetRegionRequest{} }
 func (m *GetRegionRequest) String() string            { return proto.CompactTextString(m) }
 func (*GetRegionRequest) ProtoMessage()               {}
-func (*GetRegionRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{16} }
+func (*GetRegionRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{18} }
 
 func (m *GetRegionRequest) GetHeader() *RequestHeader {
 	if m != nil {
@@ -505,7 +547,7 @@ type GetRegionResponse struct {
 func (m *GetRegionResponse) Reset()                    { *m = GetRegionResponse{} }
 func (m *GetRegionResponse) String() string            { return proto.CompactTextString(m) }
 func (*GetRegionResponse) ProtoMessage()               {}
-func (*GetRegionResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{17} }
+func (*GetRegionResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{19} }
 
 func (m *GetRegionResponse) GetHeader() *ResponseHeader {
 	if m != nil {
@@ -536,7 +578,7 @@ type GetRegionByIDRequest struct {
 func (m *GetRegionByIDRequest) Reset()                    { *m = GetRegionByIDRequest{} }
 func (m *GetRegionByIDRequest) String() string            { return proto.CompactTextString(m) }
 func (*GetRegionByIDRequest) ProtoMessage()               {}
-func (*GetRegionByIDRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{18} }
+func (*GetRegionByIDRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{20} }
 
 func (m *GetRegionByIDRequest) GetHeader() *RequestHeader {
 	if m != nil {
@@ -559,7 +601,7 @@ type GetClusterConfigRequest struct {
 func (m *GetClusterConfigRequest) Reset()                    { *m = GetClusterConfigRequest{} }
 func (m *GetClusterConfigRequest) String() string            { return proto.CompactTextString(m) }
 func (*GetClusterConfigRequest) ProtoMessage()               {}
-func (*GetClusterConfigRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{19} }
+func (*GetClusterConfigRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{21} }
 
 func (m *GetClusterConfigRequest) GetHeader() *RequestHeader {
 	if m != nil {
@@ -576,7 +618,7 @@ type GetClusterConfigResponse struct {
 func (m *GetClusterConfigResponse) Reset()                    { *m = GetClusterConfigResponse{} }
 func (m *GetClusterConfigResponse) String() string            { return proto.CompactTextString(m) }
 func (*GetClusterConfigResponse) ProtoMessage()               {}
-func (*GetClusterConfigResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{20} }
+func (*GetClusterConfigResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{22} }
 
 func (m *GetClusterConfigResponse) GetHeader() *ResponseHeader {
 	if m != nil {
@@ -600,7 +642,7 @@ type PutClusterConfigRequest struct {
 func (m *PutClusterConfigRequest) Reset()                    { *m = PutClusterConfigRequest{} }
 func (m *PutClusterConfigRequest) String() string            { return proto.CompactTextString(m) }
 func (*PutClusterConfigRequest) ProtoMessage()               {}
-func (*PutClusterConfigRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{21} }
+func (*PutClusterConfigRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{23} }
 
 func (m *PutClusterConfigRequest) GetHeader() *RequestHeader {
 	if m != nil {
@@ -623,7 +665,7 @@ type PutClusterConfigResponse struct {
 func (m *PutClusterConfigResponse) Reset()                    { *m = PutClusterConfigResponse{} }
 func (m *PutClusterConfigResponse) String() string            { return proto.CompactTextString(m) }
 func (*PutClusterConfigResponse) ProtoMessage()               {}
-func (*PutClusterConfigResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{22} }
+func (*PutClusterConfigResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{24} }
 
 func (m *PutClusterConfigResponse) GetHeader() *ResponseHeader {
 	if m != nil {
@@ -636,15 +678,16 @@ type Member struct {
 	// name is the name of the PD member.
 	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// member_id is the unique id of the PD member.
-	MemberId   uint64   `protobuf:"varint,2,opt,name=member_id,json=memberId,proto3" json:"member_id,omitempty"`
-	PeerUrls   []string `protobuf:"bytes,3,rep,name=peer_urls,json=peerUrls" json:"peer_urls,omitempty"`
-	ClientUrls []string `protobuf:"bytes,4,rep,name=client_urls,json=clientUrls" json:"client_urls,omitempty"`
+	MemberId       uint64   `protobuf:"varint,2,opt,name=member_id,json=memberId,proto3" json:"member_id,omitempty"`
+	PeerUrls       []string `protobuf:"bytes,3,rep,name=peer_urls,json=peerUrls" json:"peer_urls,omitempty"`
+	ClientUrls     []string `protobuf:"bytes,4,rep,name=client_urls,json=clientUrls" json:"client_urls,omitempty"`
+	LeaderPriority int32    `protobuf:"varint,5,opt,name=leader_priority,json=leaderPriority,proto3" json:"leader_priority,omitempty"`
 }
 
 func (m *Member) Reset()                    { *m = Member{} }
 func (m *Member) String() string            { return proto.CompactTextString(m) }
 func (*Member) ProtoMessage()               {}
-func (*Member) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{23} }
+func (*Member) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{25} }
 
 func (m *Member) GetName() string {
 	if m != nil {
@@ -674,6 +717,13 @@ func (m *Member) GetClientUrls() []string {
 	return nil
 }
 
+func (m *Member) GetLeaderPriority() int32 {
+	if m != nil {
+		return m.LeaderPriority
+	}
+	return 0
+}
+
 type GetMembersRequest struct {
 	Header *RequestHeader `protobuf:"bytes,1,opt,name=header" json:"header,omitempty"`
 }
@@ -681,7 +731,7 @@ type GetMembersRequest struct {
 func (m *GetMembersRequest) Reset()                    { *m = GetMembersRequest{} }
 func (m *GetMembersRequest) String() string            { return proto.CompactTextString(m) }
 func (*GetMembersRequest) ProtoMessage()               {}
-func (*GetMembersRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{24} }
+func (*GetMembersRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{26} }
 
 func (m *GetMembersRequest) GetHeader() *RequestHeader {
 	if m != nil {
@@ -691,15 +741,16 @@ func (m *GetMembersRequest) GetHeader() *RequestHeader {
 }
 
 type GetMembersResponse struct {
-	Header  *ResponseHeader `protobuf:"bytes,1,opt,name=header" json:"header,omitempty"`
-	Members []*Member       `protobuf:"bytes,2,rep,name=members" json:"members,omitempty"`
-	Leader  *Member         `protobuf:"bytes,3,opt,name=leader" json:"leader,omitempty"`
+	Header     *ResponseHeader `protobuf:"bytes,1,opt,name=header" json:"header,omitempty"`
+	Members    []*Member       `protobuf:"bytes,2,rep,name=members" json:"members,omitempty"`
+	Leader     *Member         `protobuf:"bytes,3,opt,name=leader" json:"leader,omitempty"`
+	EtcdLeader *Member         `protobuf:"bytes,4,opt,name=etcd_leader,json=etcdLeader" json:"etcd_leader,omitempty"`
 }
 
 func (m *GetMembersResponse) Reset()                    { *m = GetMembersResponse{} }
 func (m *GetMembersResponse) String() string            { return proto.CompactTextString(m) }
 func (*GetMembersResponse) ProtoMessage()               {}
-func (*GetMembersResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{25} }
+func (*GetMembersResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{27} }
 
 func (m *GetMembersResponse) GetHeader() *ResponseHeader {
 	if m != nil {
@@ -722,6 +773,13 @@ func (m *GetMembersResponse) GetLeader() *Member {
 	return nil
 }
 
+func (m *GetMembersResponse) GetEtcdLeader() *Member {
+	if m != nil {
+		return m.EtcdLeader
+	}
+	return nil
+}
+
 type PeerStats struct {
 	Peer        *metapb.Peer `protobuf:"bytes,1,opt,name=peer" json:"peer,omitempty"`
 	DownSeconds uint64       `protobuf:"varint,2,opt,name=down_seconds,json=downSeconds,proto3" json:"down_seconds,omitempty"`
@@ -730,7 +788,7 @@ type PeerStats struct {
 func (m *PeerStats) Reset()                    { *m = PeerStats{} }
 func (m *PeerStats) String() string            { return proto.CompactTextString(m) }
 func (*PeerStats) ProtoMessage()               {}
-func (*PeerStats) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{26} }
+func (*PeerStats) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{28} }
 
 func (m *PeerStats) GetPeer() *metapb.Peer {
 	if m != nil {
@@ -764,12 +822,14 @@ type RegionHeartbeatRequest struct {
 	KeysRead    uint64 `protobuf:"varint,9,opt,name=keys_read,json=keysRead,proto3" json:"keys_read,omitempty"`
 	// Approximate region size.
 	ApproximateSize uint64 `protobuf:"varint,10,opt,name=approximate_size,json=approximateSize,proto3" json:"approximate_size,omitempty"`
+	// Unix timestamp when send the heartbeat.
+	Timestamp uint64 `protobuf:"varint,11,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 }
 
 func (m *RegionHeartbeatRequest) Reset()                    { *m = RegionHeartbeatRequest{} }
 func (m *RegionHeartbeatRequest) String() string            { return proto.CompactTextString(m) }
 func (*RegionHeartbeatRequest) ProtoMessage()               {}
-func (*RegionHeartbeatRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{27} }
+func (*RegionHeartbeatRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{29} }
 
 func (m *RegionHeartbeatRequest) GetHeader() *RequestHeader {
 	if m != nil {
@@ -841,6 +901,13 @@ func (m *RegionHeartbeatRequest) GetApproximateSize() uint64 {
 	return 0
 }
 
+func (m *RegionHeartbeatRequest) GetTimestamp() uint64 {
+	if m != nil {
+		return m.Timestamp
+	}
+	return 0
+}
+
 type ChangePeer struct {
 	Peer       *metapb.Peer           `protobuf:"bytes,1,opt,name=peer" json:"peer,omitempty"`
 	ChangeType eraftpb.ConfChangeType `protobuf:"varint,2,opt,name=change_type,json=changeType,proto3,enum=eraftpb.ConfChangeType" json:"change_type,omitempty"`
@@ -849,7 +916,7 @@ type ChangePeer struct {
 func (m *ChangePeer) Reset()                    { *m = ChangePeer{} }
 func (m *ChangePeer) String() string            { return proto.CompactTextString(m) }
 func (*ChangePeer) ProtoMessage()               {}
-func (*ChangePeer) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{28} }
+func (*ChangePeer) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{30} }
 
 func (m *ChangePeer) GetPeer() *metapb.Peer {
 	if m != nil {
@@ -872,7 +939,7 @@ type TransferLeader struct {
 func (m *TransferLeader) Reset()                    { *m = TransferLeader{} }
 func (m *TransferLeader) String() string            { return proto.CompactTextString(m) }
 func (*TransferLeader) ProtoMessage()               {}
-func (*TransferLeader) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{29} }
+func (*TransferLeader) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{31} }
 
 func (m *TransferLeader) GetPeer() *metapb.Peer {
 	if m != nil {
@@ -927,7 +994,11 @@ type RegionHeartbeatResponse struct {
 func (m *RegionHeartbeatResponse) Reset()                    { *m = RegionHeartbeatResponse{} }
 func (m *RegionHeartbeatResponse) String() string            { return proto.CompactTextString(m) }
 func (*RegionHeartbeatResponse) ProtoMessage()               {}
+<<<<<<< HEAD
 func (*RegionHeartbeatResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{31} }
+=======
+func (*RegionHeartbeatResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{32} }
+>>>>>>> master
 
 func (m *RegionHeartbeatResponse) GetHeader() *ResponseHeader {
 	if m != nil {
@@ -986,7 +1057,11 @@ type AskSplitRequest struct {
 func (m *AskSplitRequest) Reset()                    { *m = AskSplitRequest{} }
 func (m *AskSplitRequest) String() string            { return proto.CompactTextString(m) }
 func (*AskSplitRequest) ProtoMessage()               {}
+<<<<<<< HEAD
 func (*AskSplitRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{32} }
+=======
+func (*AskSplitRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{33} }
+>>>>>>> master
 
 func (m *AskSplitRequest) GetHeader() *RequestHeader {
 	if m != nil {
@@ -1015,7 +1090,11 @@ type AskSplitResponse struct {
 func (m *AskSplitResponse) Reset()                    { *m = AskSplitResponse{} }
 func (m *AskSplitResponse) String() string            { return proto.CompactTextString(m) }
 func (*AskSplitResponse) ProtoMessage()               {}
+<<<<<<< HEAD
 func (*AskSplitResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{33} }
+=======
+func (*AskSplitResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{34} }
+>>>>>>> master
 
 func (m *AskSplitResponse) GetHeader() *ResponseHeader {
 	if m != nil {
@@ -1047,7 +1126,11 @@ type ReportSplitRequest struct {
 func (m *ReportSplitRequest) Reset()                    { *m = ReportSplitRequest{} }
 func (m *ReportSplitRequest) String() string            { return proto.CompactTextString(m) }
 func (*ReportSplitRequest) ProtoMessage()               {}
+<<<<<<< HEAD
 func (*ReportSplitRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{34} }
+=======
+func (*ReportSplitRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{35} }
+>>>>>>> master
 
 func (m *ReportSplitRequest) GetHeader() *RequestHeader {
 	if m != nil {
@@ -1077,7 +1160,11 @@ type ReportSplitResponse struct {
 func (m *ReportSplitResponse) Reset()                    { *m = ReportSplitResponse{} }
 func (m *ReportSplitResponse) String() string            { return proto.CompactTextString(m) }
 func (*ReportSplitResponse) ProtoMessage()               {}
+<<<<<<< HEAD
 func (*ReportSplitResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{35} }
+=======
+func (*ReportSplitResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{36} }
+>>>>>>> master
 
 func (m *ReportSplitResponse) GetHeader() *ResponseHeader {
 	if m != nil {
@@ -1119,7 +1206,11 @@ type StoreStats struct {
 func (m *StoreStats) Reset()                    { *m = StoreStats{} }
 func (m *StoreStats) String() string            { return proto.CompactTextString(m) }
 func (*StoreStats) ProtoMessage()               {}
+<<<<<<< HEAD
 func (*StoreStats) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{36} }
+=======
+func (*StoreStats) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{37} }
+>>>>>>> master
 
 func (m *StoreStats) GetStoreId() uint64 {
 	if m != nil {
@@ -1227,7 +1318,11 @@ type StoreHeartbeatRequest struct {
 func (m *StoreHeartbeatRequest) Reset()                    { *m = StoreHeartbeatRequest{} }
 func (m *StoreHeartbeatRequest) String() string            { return proto.CompactTextString(m) }
 func (*StoreHeartbeatRequest) ProtoMessage()               {}
+<<<<<<< HEAD
 func (*StoreHeartbeatRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{37} }
+=======
+func (*StoreHeartbeatRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{38} }
+>>>>>>> master
 
 func (m *StoreHeartbeatRequest) GetHeader() *RequestHeader {
 	if m != nil {
@@ -1250,7 +1345,11 @@ type StoreHeartbeatResponse struct {
 func (m *StoreHeartbeatResponse) Reset()                    { *m = StoreHeartbeatResponse{} }
 func (m *StoreHeartbeatResponse) String() string            { return proto.CompactTextString(m) }
 func (*StoreHeartbeatResponse) ProtoMessage()               {}
+<<<<<<< HEAD
 func (*StoreHeartbeatResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{38} }
+=======
+func (*StoreHeartbeatResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{39} }
+>>>>>>> master
 
 func (m *StoreHeartbeatResponse) GetHeader() *ResponseHeader {
 	if m != nil {
@@ -1271,7 +1370,11 @@ type ScatterRegionRequest struct {
 func (m *ScatterRegionRequest) Reset()                    { *m = ScatterRegionRequest{} }
 func (m *ScatterRegionRequest) String() string            { return proto.CompactTextString(m) }
 func (*ScatterRegionRequest) ProtoMessage()               {}
+<<<<<<< HEAD
 func (*ScatterRegionRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{39} }
+=======
+func (*ScatterRegionRequest) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{40} }
+>>>>>>> master
 
 func (m *ScatterRegionRequest) GetHeader() *RequestHeader {
 	if m != nil {
@@ -1308,7 +1411,11 @@ type ScatterRegionResponse struct {
 func (m *ScatterRegionResponse) Reset()                    { *m = ScatterRegionResponse{} }
 func (m *ScatterRegionResponse) String() string            { return proto.CompactTextString(m) }
 func (*ScatterRegionResponse) ProtoMessage()               {}
+<<<<<<< HEAD
 func (*ScatterRegionResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{40} }
+=======
+func (*ScatterRegionResponse) Descriptor() ([]byte, []int) { return fileDescriptorPdpb, []int{41} }
+>>>>>>> master
 
 func (m *ScatterRegionResponse) GetHeader() *ResponseHeader {
 	if m != nil {
@@ -1334,6 +1441,8 @@ func init() {
 	proto.RegisterType((*GetStoreResponse)(nil), "pdpb.GetStoreResponse")
 	proto.RegisterType((*PutStoreRequest)(nil), "pdpb.PutStoreRequest")
 	proto.RegisterType((*PutStoreResponse)(nil), "pdpb.PutStoreResponse")
+	proto.RegisterType((*GetAllStoresRequest)(nil), "pdpb.GetAllStoresRequest")
+	proto.RegisterType((*GetAllStoresResponse)(nil), "pdpb.GetAllStoresResponse")
 	proto.RegisterType((*GetRegionRequest)(nil), "pdpb.GetRegionRequest")
 	proto.RegisterType((*GetRegionResponse)(nil), "pdpb.GetRegionResponse")
 	proto.RegisterType((*GetRegionByIDRequest)(nil), "pdpb.GetRegionByIDRequest")
@@ -1382,6 +1491,7 @@ type PDClient interface {
 	AllocID(ctx context.Context, in *AllocIDRequest, opts ...grpc.CallOption) (*AllocIDResponse, error)
 	GetStore(ctx context.Context, in *GetStoreRequest, opts ...grpc.CallOption) (*GetStoreResponse, error)
 	PutStore(ctx context.Context, in *PutStoreRequest, opts ...grpc.CallOption) (*PutStoreResponse, error)
+	GetAllStores(ctx context.Context, in *GetAllStoresRequest, opts ...grpc.CallOption) (*GetAllStoresResponse, error)
 	StoreHeartbeat(ctx context.Context, in *StoreHeartbeatRequest, opts ...grpc.CallOption) (*StoreHeartbeatResponse, error)
 	RegionHeartbeat(ctx context.Context, opts ...grpc.CallOption) (PD_RegionHeartbeatClient, error)
 	GetRegion(ctx context.Context, in *GetRegionRequest, opts ...grpc.CallOption) (*GetRegionResponse, error)
@@ -1480,6 +1590,15 @@ func (c *pDClient) GetStore(ctx context.Context, in *GetStoreRequest, opts ...gr
 func (c *pDClient) PutStore(ctx context.Context, in *PutStoreRequest, opts ...grpc.CallOption) (*PutStoreResponse, error) {
 	out := new(PutStoreResponse)
 	err := grpc.Invoke(ctx, "/pdpb.PD/PutStore", in, out, c.cc, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pDClient) GetAllStores(ctx context.Context, in *GetAllStoresRequest, opts ...grpc.CallOption) (*GetAllStoresResponse, error) {
+	out := new(GetAllStoresResponse)
+	err := grpc.Invoke(ctx, "/pdpb.PD/GetAllStores", in, out, c.cc, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1601,6 +1720,7 @@ type PDServer interface {
 	AllocID(context.Context, *AllocIDRequest) (*AllocIDResponse, error)
 	GetStore(context.Context, *GetStoreRequest) (*GetStoreResponse, error)
 	PutStore(context.Context, *PutStoreRequest) (*PutStoreResponse, error)
+	GetAllStores(context.Context, *GetAllStoresRequest) (*GetAllStoresResponse, error)
 	StoreHeartbeat(context.Context, *StoreHeartbeatRequest) (*StoreHeartbeatResponse, error)
 	RegionHeartbeat(PD_RegionHeartbeatServer) error
 	GetRegion(context.Context, *GetRegionRequest) (*GetRegionResponse, error)
@@ -1746,6 +1866,24 @@ func _PD_PutStore_Handler(srv interface{}, ctx context.Context, dec func(interfa
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(PDServer).PutStore(ctx, req.(*PutStoreRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PD_GetAllStores_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAllStoresRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PDServer).GetAllStores(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/pdpb.PD/GetAllStores",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PDServer).GetAllStores(ctx, req.(*GetAllStoresRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1947,6 +2085,10 @@ var _PD_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PutStore",
 			Handler:    _PD_PutStore_Handler,
+		},
+		{
+			MethodName: "GetAllStores",
+			Handler:    _PD_GetAllStores_Handler,
 		},
 		{
 			MethodName: "StoreHeartbeat",
@@ -2527,6 +2669,74 @@ func (m *PutStoreResponse) MarshalTo(dAtA []byte) (int, error) {
 	return i, nil
 }
 
+func (m *GetAllStoresRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetAllStoresRequest) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if m.Header != nil {
+		dAtA[i] = 0xa
+		i++
+		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
+		n19, err := m.Header.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n19
+	}
+	return i, nil
+}
+
+func (m *GetAllStoresResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetAllStoresResponse) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if m.Header != nil {
+		dAtA[i] = 0xa
+		i++
+		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
+		n20, err := m.Header.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n20
+	}
+	if len(m.Stores) > 0 {
+		for _, msg := range m.Stores {
+			dAtA[i] = 0x12
+			i++
+			i = encodeVarintPdpb(dAtA, i, uint64(msg.Size()))
+			n, err := msg.MarshalTo(dAtA[i:])
+			if err != nil {
+				return 0, err
+			}
+			i += n
+		}
+	}
+	return i, nil
+}
+
 func (m *GetRegionRequest) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -2546,11 +2756,11 @@ func (m *GetRegionRequest) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
-		n19, err := m.Header.MarshalTo(dAtA[i:])
+		n21, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n19
+		i += n21
 	}
 	if len(m.RegionKey) > 0 {
 		dAtA[i] = 0x12
@@ -2580,31 +2790,31 @@ func (m *GetRegionResponse) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
-		n20, err := m.Header.MarshalTo(dAtA[i:])
+		n22, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n20
+		i += n22
 	}
 	if m.Region != nil {
 		dAtA[i] = 0x12
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Region.Size()))
-		n21, err := m.Region.MarshalTo(dAtA[i:])
+		n23, err := m.Region.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n21
+		i += n23
 	}
 	if m.Leader != nil {
 		dAtA[i] = 0x1a
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Leader.Size()))
-		n22, err := m.Leader.MarshalTo(dAtA[i:])
+		n24, err := m.Leader.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n22
+		i += n24
 	}
 	return i, nil
 }
@@ -2628,11 +2838,11 @@ func (m *GetRegionByIDRequest) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
-		n23, err := m.Header.MarshalTo(dAtA[i:])
+		n25, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n23
+		i += n25
 	}
 	if m.RegionId != 0 {
 		dAtA[i] = 0x10
@@ -2661,11 +2871,11 @@ func (m *GetClusterConfigRequest) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
-		n24, err := m.Header.MarshalTo(dAtA[i:])
+		n26, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n24
+		i += n26
 	}
 	return i, nil
 }
@@ -2681,44 +2891,6 @@ func (m *GetClusterConfigResponse) Marshal() (dAtA []byte, err error) {
 }
 
 func (m *GetClusterConfigResponse) MarshalTo(dAtA []byte) (int, error) {
-	var i int
-	_ = i
-	var l int
-	_ = l
-	if m.Header != nil {
-		dAtA[i] = 0xa
-		i++
-		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
-		n25, err := m.Header.MarshalTo(dAtA[i:])
-		if err != nil {
-			return 0, err
-		}
-		i += n25
-	}
-	if m.Cluster != nil {
-		dAtA[i] = 0x12
-		i++
-		i = encodeVarintPdpb(dAtA, i, uint64(m.Cluster.Size()))
-		n26, err := m.Cluster.MarshalTo(dAtA[i:])
-		if err != nil {
-			return 0, err
-		}
-		i += n26
-	}
-	return i, nil
-}
-
-func (m *PutClusterConfigRequest) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalTo(dAtA)
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *PutClusterConfigRequest) MarshalTo(dAtA []byte) (int, error) {
 	var i int
 	_ = i
 	var l int
@@ -2746,6 +2918,44 @@ func (m *PutClusterConfigRequest) MarshalTo(dAtA []byte) (int, error) {
 	return i, nil
 }
 
+func (m *PutClusterConfigRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalTo(dAtA)
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *PutClusterConfigRequest) MarshalTo(dAtA []byte) (int, error) {
+	var i int
+	_ = i
+	var l int
+	_ = l
+	if m.Header != nil {
+		dAtA[i] = 0xa
+		i++
+		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
+		n29, err := m.Header.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n29
+	}
+	if m.Cluster != nil {
+		dAtA[i] = 0x12
+		i++
+		i = encodeVarintPdpb(dAtA, i, uint64(m.Cluster.Size()))
+		n30, err := m.Cluster.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n30
+	}
+	return i, nil
+}
+
 func (m *PutClusterConfigResponse) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -2765,11 +2975,11 @@ func (m *PutClusterConfigResponse) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
-		n29, err := m.Header.MarshalTo(dAtA[i:])
+		n31, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n29
+		i += n31
 	}
 	return i, nil
 }
@@ -2830,6 +3040,11 @@ func (m *Member) MarshalTo(dAtA []byte) (int, error) {
 			i += copy(dAtA[i:], s)
 		}
 	}
+	if m.LeaderPriority != 0 {
+		dAtA[i] = 0x28
+		i++
+		i = encodeVarintPdpb(dAtA, i, uint64(m.LeaderPriority))
+	}
 	return i, nil
 }
 
@@ -2852,11 +3067,11 @@ func (m *GetMembersRequest) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
-		n30, err := m.Header.MarshalTo(dAtA[i:])
+		n32, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n30
+		i += n32
 	}
 	return i, nil
 }
@@ -2880,11 +3095,11 @@ func (m *GetMembersResponse) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
-		n31, err := m.Header.MarshalTo(dAtA[i:])
+		n33, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n31
+		i += n33
 	}
 	if len(m.Members) > 0 {
 		for _, msg := range m.Members {
@@ -2902,11 +3117,21 @@ func (m *GetMembersResponse) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0x1a
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Leader.Size()))
-		n32, err := m.Leader.MarshalTo(dAtA[i:])
+		n34, err := m.Leader.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n32
+		i += n34
+	}
+	if m.EtcdLeader != nil {
+		dAtA[i] = 0x22
+		i++
+		i = encodeVarintPdpb(dAtA, i, uint64(m.EtcdLeader.Size()))
+		n35, err := m.EtcdLeader.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n35
 	}
 	return i, nil
 }
@@ -2930,11 +3155,11 @@ func (m *PeerStats) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Peer.Size()))
-		n33, err := m.Peer.MarshalTo(dAtA[i:])
+		n36, err := m.Peer.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n33
+		i += n36
 	}
 	if m.DownSeconds != 0 {
 		dAtA[i] = 0x10
@@ -2963,31 +3188,31 @@ func (m *RegionHeartbeatRequest) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
-		n34, err := m.Header.MarshalTo(dAtA[i:])
+		n37, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n34
+		i += n37
 	}
 	if m.Region != nil {
 		dAtA[i] = 0x12
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Region.Size()))
-		n35, err := m.Region.MarshalTo(dAtA[i:])
+		n38, err := m.Region.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n35
+		i += n38
 	}
 	if m.Leader != nil {
 		dAtA[i] = 0x1a
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Leader.Size()))
-		n36, err := m.Leader.MarshalTo(dAtA[i:])
+		n39, err := m.Leader.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n36
+		i += n39
 	}
 	if len(m.DownPeers) > 0 {
 		for _, msg := range m.DownPeers {
@@ -3038,6 +3263,11 @@ func (m *RegionHeartbeatRequest) MarshalTo(dAtA []byte) (int, error) {
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.ApproximateSize))
 	}
+	if m.Timestamp != 0 {
+		dAtA[i] = 0x58
+		i++
+		i = encodeVarintPdpb(dAtA, i, uint64(m.Timestamp))
+	}
 	return i, nil
 }
 
@@ -3060,11 +3290,11 @@ func (m *ChangePeer) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Peer.Size()))
-		n37, err := m.Peer.MarshalTo(dAtA[i:])
+		n40, err := m.Peer.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n37
+		i += n40
 	}
 	if m.ChangeType != 0 {
 		dAtA[i] = 0x10
@@ -3093,11 +3323,11 @@ func (m *TransferLeader) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Peer.Size()))
-		n38, err := m.Peer.MarshalTo(dAtA[i:])
+		n41, err := m.Peer.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n38
+		i += n41
 	}
 	return i, nil
 }
@@ -3144,31 +3374,31 @@ func (m *RegionHeartbeatResponse) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
-		n39, err := m.Header.MarshalTo(dAtA[i:])
+		n42, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n39
+		i += n42
 	}
 	if m.ChangePeer != nil {
 		dAtA[i] = 0x12
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.ChangePeer.Size()))
-		n40, err := m.ChangePeer.MarshalTo(dAtA[i:])
+		n43, err := m.ChangePeer.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n40
+		i += n43
 	}
 	if m.TransferLeader != nil {
 		dAtA[i] = 0x1a
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.TransferLeader.Size()))
-		n41, err := m.TransferLeader.MarshalTo(dAtA[i:])
+		n44, err := m.TransferLeader.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n41
+		i += n44
 	}
 	if m.RegionId != 0 {
 		dAtA[i] = 0x20
@@ -3179,21 +3409,21 @@ func (m *RegionHeartbeatResponse) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0x2a
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.RegionEpoch.Size()))
-		n42, err := m.RegionEpoch.MarshalTo(dAtA[i:])
+		n45, err := m.RegionEpoch.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n42
+		i += n45
 	}
 	if m.TargetPeer != nil {
 		dAtA[i] = 0x32
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.TargetPeer.Size()))
-		n43, err := m.TargetPeer.MarshalTo(dAtA[i:])
+		n46, err := m.TargetPeer.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
-		i += n43
+		i += n46
 	}
 	if m.Merge != nil {
 		dAtA[i] = 0x3a
@@ -3227,21 +3457,37 @@ func (m *AskSplitRequest) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
+<<<<<<< HEAD
 		n45, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
 		i += n45
+=======
+		n47, err := m.Header.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n47
+>>>>>>> master
 	}
 	if m.Region != nil {
 		dAtA[i] = 0x12
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Region.Size()))
+<<<<<<< HEAD
 		n46, err := m.Region.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
 		i += n46
+=======
+		n48, err := m.Region.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n48
+>>>>>>> master
 	}
 	return i, nil
 }
@@ -3265,11 +3511,19 @@ func (m *AskSplitResponse) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
+<<<<<<< HEAD
 		n47, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
 		i += n47
+=======
+		n49, err := m.Header.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n49
+>>>>>>> master
 	}
 	if m.NewRegionId != 0 {
 		dAtA[i] = 0x10
@@ -3277,6 +3531,7 @@ func (m *AskSplitResponse) MarshalTo(dAtA []byte) (int, error) {
 		i = encodeVarintPdpb(dAtA, i, uint64(m.NewRegionId))
 	}
 	if len(m.NewPeerIds) > 0 {
+<<<<<<< HEAD
 		dAtA49 := make([]byte, len(m.NewPeerIds)*10)
 		var j48 int
 		for _, num := range m.NewPeerIds {
@@ -3292,6 +3547,23 @@ func (m *AskSplitResponse) MarshalTo(dAtA []byte) (int, error) {
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(j48))
 		i += copy(dAtA[i:], dAtA49[:j48])
+=======
+		dAtA51 := make([]byte, len(m.NewPeerIds)*10)
+		var j50 int
+		for _, num := range m.NewPeerIds {
+			for num >= 1<<7 {
+				dAtA51[j50] = uint8(uint64(num)&0x7f | 0x80)
+				num >>= 7
+				j50++
+			}
+			dAtA51[j50] = uint8(num)
+			j50++
+		}
+		dAtA[i] = 0x1a
+		i++
+		i = encodeVarintPdpb(dAtA, i, uint64(j50))
+		i += copy(dAtA[i:], dAtA51[:j50])
+>>>>>>> master
 	}
 	return i, nil
 }
@@ -3315,31 +3587,55 @@ func (m *ReportSplitRequest) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
+<<<<<<< HEAD
 		n50, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
 		i += n50
+=======
+		n52, err := m.Header.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n52
+>>>>>>> master
 	}
 	if m.Left != nil {
 		dAtA[i] = 0x12
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Left.Size()))
+<<<<<<< HEAD
 		n51, err := m.Left.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
 		i += n51
+=======
+		n53, err := m.Left.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n53
+>>>>>>> master
 	}
 	if m.Right != nil {
 		dAtA[i] = 0x1a
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Right.Size()))
+<<<<<<< HEAD
 		n52, err := m.Right.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
 		i += n52
+=======
+		n54, err := m.Right.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n54
+>>>>>>> master
 	}
 	return i, nil
 }
@@ -3363,11 +3659,19 @@ func (m *ReportSplitResponse) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
+<<<<<<< HEAD
 		n53, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
 		i += n53
+=======
+		n55, err := m.Header.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n55
+>>>>>>> master
 	}
 	return i, nil
 }
@@ -3484,21 +3788,37 @@ func (m *StoreHeartbeatRequest) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
+<<<<<<< HEAD
 		n54, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
 		i += n54
+=======
+		n56, err := m.Header.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n56
+>>>>>>> master
 	}
 	if m.Stats != nil {
 		dAtA[i] = 0x12
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Stats.Size()))
+<<<<<<< HEAD
 		n55, err := m.Stats.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
 		i += n55
+=======
+		n57, err := m.Stats.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n57
+>>>>>>> master
 	}
 	return i, nil
 }
@@ -3522,11 +3842,19 @@ func (m *StoreHeartbeatResponse) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
+<<<<<<< HEAD
 		n56, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
 		i += n56
+=======
+		n58, err := m.Header.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n58
+>>>>>>> master
 	}
 	return i, nil
 }
@@ -3550,11 +3878,19 @@ func (m *ScatterRegionRequest) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
+<<<<<<< HEAD
 		n57, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
 		i += n57
+=======
+		n59, err := m.Header.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n59
+>>>>>>> master
 	}
 	if m.RegionId != 0 {
 		dAtA[i] = 0x10
@@ -3565,21 +3901,37 @@ func (m *ScatterRegionRequest) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0x1a
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Region.Size()))
+<<<<<<< HEAD
 		n58, err := m.Region.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
 		i += n58
+=======
+		n60, err := m.Region.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n60
+>>>>>>> master
 	}
 	if m.Leader != nil {
 		dAtA[i] = 0x22
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Leader.Size()))
+<<<<<<< HEAD
 		n59, err := m.Leader.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
 		i += n59
+=======
+		n61, err := m.Leader.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n61
+>>>>>>> master
 	}
 	return i, nil
 }
@@ -3603,11 +3955,19 @@ func (m *ScatterRegionResponse) MarshalTo(dAtA []byte) (int, error) {
 		dAtA[i] = 0xa
 		i++
 		i = encodeVarintPdpb(dAtA, i, uint64(m.Header.Size()))
+<<<<<<< HEAD
 		n60, err := m.Header.MarshalTo(dAtA[i:])
 		if err != nil {
 			return 0, err
 		}
 		i += n60
+=======
+		n62, err := m.Header.MarshalTo(dAtA[i:])
+		if err != nil {
+			return 0, err
+		}
+		i += n62
+>>>>>>> master
 	}
 	return i, nil
 }
@@ -3841,6 +4201,32 @@ func (m *PutStoreResponse) Size() (n int) {
 	return n
 }
 
+func (m *GetAllStoresRequest) Size() (n int) {
+	var l int
+	_ = l
+	if m.Header != nil {
+		l = m.Header.Size()
+		n += 1 + l + sovPdpb(uint64(l))
+	}
+	return n
+}
+
+func (m *GetAllStoresResponse) Size() (n int) {
+	var l int
+	_ = l
+	if m.Header != nil {
+		l = m.Header.Size()
+		n += 1 + l + sovPdpb(uint64(l))
+	}
+	if len(m.Stores) > 0 {
+		for _, e := range m.Stores {
+			l = e.Size()
+			n += 1 + l + sovPdpb(uint64(l))
+		}
+	}
+	return n
+}
+
 func (m *GetRegionRequest) Size() (n int) {
 	var l int
 	_ = l
@@ -3956,6 +4342,9 @@ func (m *Member) Size() (n int) {
 			n += 1 + l + sovPdpb(uint64(l))
 		}
 	}
+	if m.LeaderPriority != 0 {
+		n += 1 + sovPdpb(uint64(m.LeaderPriority))
+	}
 	return n
 }
 
@@ -3984,6 +4373,10 @@ func (m *GetMembersResponse) Size() (n int) {
 	}
 	if m.Leader != nil {
 		l = m.Leader.Size()
+		n += 1 + l + sovPdpb(uint64(l))
+	}
+	if m.EtcdLeader != nil {
+		l = m.EtcdLeader.Size()
 		n += 1 + l + sovPdpb(uint64(l))
 	}
 	return n
@@ -4043,6 +4436,9 @@ func (m *RegionHeartbeatRequest) Size() (n int) {
 	}
 	if m.ApproximateSize != 0 {
 		n += 1 + sovPdpb(uint64(m.ApproximateSize))
+	}
+	if m.Timestamp != 0 {
+		n += 1 + sovPdpb(uint64(m.Timestamp))
 	}
 	return n
 }
@@ -5904,6 +6300,203 @@ func (m *PutStoreResponse) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
+func (m *GetAllStoresRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowPdpb
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetAllStoresRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetAllStoresRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Header", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPdpb
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthPdpb
+			}
+			postIndex := iNdEx + msglen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Header == nil {
+				m.Header = &RequestHeader{}
+			}
+			if err := m.Header.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipPdpb(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthPdpb
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetAllStoresResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowPdpb
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetAllStoresResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetAllStoresResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Header", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPdpb
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthPdpb
+			}
+			postIndex := iNdEx + msglen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Header == nil {
+				m.Header = &ResponseHeader{}
+			}
+			if err := m.Header.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Stores", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPdpb
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthPdpb
+			}
+			postIndex := iNdEx + msglen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Stores = append(m.Stores, &metapb.Store{})
+			if err := m.Stores[len(m.Stores)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipPdpb(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthPdpb
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
 func (m *GetRegionRequest) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
@@ -6802,6 +7395,25 @@ func (m *Member) Unmarshal(dAtA []byte) error {
 			}
 			m.ClientUrls = append(m.ClientUrls, string(dAtA[iNdEx:postIndex]))
 			iNdEx = postIndex
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field LeaderPriority", wireType)
+			}
+			m.LeaderPriority = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPdpb
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.LeaderPriority |= (int32(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipPdpb(dAtA[iNdEx:])
@@ -7029,6 +7641,39 @@ func (m *GetMembersResponse) Unmarshal(dAtA []byte) error {
 				m.Leader = &Member{}
 			}
 			if err := m.Leader.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EtcdLeader", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPdpb
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthPdpb
+			}
+			postIndex := iNdEx + msglen
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.EtcdLeader == nil {
+				m.EtcdLeader = &Member{}
+			}
+			if err := m.EtcdLeader.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
@@ -7436,6 +8081,25 @@ func (m *RegionHeartbeatRequest) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.ApproximateSize |= (uint64(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 11:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Timestamp", wireType)
+			}
+			m.Timestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowPdpb
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Timestamp |= (uint64(b) & 0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -9369,6 +10033,7 @@ var (
 func init() { proto.RegisterFile("pdpb.proto", fileDescriptorPdpb) }
 
 var fileDescriptorPdpb = []byte{
+<<<<<<< HEAD
 	// 1834 bytes of a gzipped FileDescriptorProto
 	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xb4, 0x59, 0x4b, 0x73, 0x23, 0xb7,
 	0xf1, 0xd7, 0xf0, 0x25, 0xb2, 0xf9, 0x5c, 0xac, 0x1e, 0x34, 0x77, 0xa5, 0xbf, 0x8c, 0x75, 0xfd,
@@ -9486,3 +10151,126 @@ var fileDescriptorPdpb = []byte{
 	0xdf, 0xf4, 0xaf, 0xdf, 0xc8, 0xff, 0x03, 0x2e, 0x2a, 0xf2, 0xe7, 0x27, 0xff, 0x0a, 0x00, 0x00,
 	0xff, 0xff, 0x94, 0xda, 0x5b, 0xaf, 0x5d, 0x18, 0x00, 0x00,
 }
+=======
+	// 1889 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xb4, 0x19, 0xcb, 0x72, 0x23, 0x49,
+	0xd1, 0x2d, 0x4b, 0xb2, 0x94, 0x7a, 0x4e, 0xf9, 0xa5, 0xd1, 0x8c, 0x8d, 0xb7, 0x66, 0x01, 0xef,
+	0xb2, 0x2b, 0x66, 0x4d, 0x04, 0xb1, 0x11, 0x1b, 0x4b, 0xac, 0xfc, 0x98, 0x19, 0x33, 0x3b, 0x96,
+	0xa3, 0xa4, 0x8d, 0x8d, 0xbd, 0x20, 0xda, 0x52, 0x59, 0x6e, 0xdc, 0xea, 0xee, 0xed, 0x2a, 0x8d,
+	0xd1, 0x9c, 0x38, 0x71, 0x81, 0x08, 0xae, 0x1c, 0xb9, 0x13, 0xc1, 0x1f, 0x10, 0x1c, 0xb8, 0x70,
+	0xe4, 0x13, 0x88, 0xe1, 0xcc, 0x3f, 0x10, 0xf5, 0xe8, 0xa7, 0x64, 0x63, 0x7a, 0xe0, 0xa4, 0xae,
+	0xcc, 0xac, 0xac, 0xcc, 0xac, 0xcc, 0xac, 0xcc, 0x14, 0x80, 0x37, 0xf6, 0x2e, 0x3a, 0x9e, 0xef,
+	0x72, 0x17, 0xe5, 0xc5, 0x77, 0xbb, 0x3a, 0xa5, 0xdc, 0x0c, 0x60, 0xed, 0x1a, 0xf5, 0xcd, 0x4b,
+	0x1e, 0x2e, 0x37, 0x26, 0xee, 0xc4, 0x95, 0x9f, 0x3f, 0x14, 0x5f, 0x0a, 0x8a, 0x3b, 0x50, 0x23,
+	0xf4, 0xdb, 0x19, 0x65, 0xfc, 0x05, 0x35, 0xc7, 0xd4, 0x47, 0x3b, 0x00, 0x23, 0x7b, 0xc6, 0x38,
+	0xf5, 0x87, 0xd6, 0xb8, 0x65, 0xec, 0x19, 0xfb, 0x79, 0x52, 0xd6, 0x90, 0xd3, 0x31, 0x26, 0x50,
+	0x27, 0x94, 0x79, 0xae, 0xc3, 0xe8, 0xbd, 0x36, 0xa0, 0xf7, 0xa0, 0x40, 0x7d, 0xdf, 0xf5, 0x5b,
+	0xb9, 0x3d, 0x63, 0xbf, 0x72, 0x50, 0xe9, 0x48, 0xa9, 0x4f, 0x04, 0x88, 0x28, 0x0c, 0x7e, 0x06,
+	0x05, 0xb9, 0x46, 0x4f, 0x20, 0xcf, 0xe7, 0x1e, 0x95, 0x4c, 0xea, 0x07, 0x8d, 0x18, 0xe9, 0x60,
+	0xee, 0x51, 0x22, 0x91, 0xa8, 0x05, 0x6b, 0x53, 0xca, 0x98, 0x39, 0xa1, 0x92, 0x65, 0x99, 0x04,
+	0x4b, 0xdc, 0x03, 0x18, 0x30, 0x57, 0xab, 0x83, 0x7e, 0x00, 0xc5, 0x2b, 0x29, 0xa1, 0x64, 0x57,
+	0x39, 0x58, 0x57, 0xec, 0x12, 0xda, 0x12, 0x4d, 0x82, 0x36, 0xa0, 0x30, 0x72, 0x67, 0x0e, 0x97,
+	0x2c, 0x6b, 0x44, 0x2d, 0x70, 0x17, 0xca, 0x03, 0x6b, 0x4a, 0x19, 0x37, 0xa7, 0x1e, 0x6a, 0x43,
+	0xc9, 0xbb, 0x9a, 0x33, 0x6b, 0x64, 0xda, 0x92, 0xe3, 0x2a, 0x09, 0xd7, 0x42, 0x26, 0xdb, 0x9d,
+	0x48, 0x54, 0x4e, 0xa2, 0x82, 0x25, 0xfe, 0x95, 0x01, 0x15, 0x29, 0x94, 0xb2, 0x19, 0xfa, 0x28,
+	0x25, 0xd5, 0x46, 0x20, 0x55, 0xdc, 0xa6, 0x77, 0x8b, 0x85, 0x3e, 0x86, 0x32, 0x0f, 0xc4, 0x6a,
+	0xad, 0x4a, 0x36, 0xda, 0x56, 0xa1, 0xb4, 0x24, 0xa2, 0xc0, 0xbf, 0x35, 0xa0, 0x79, 0xe8, 0xba,
+	0x9c, 0x71, 0xdf, 0xf4, 0x32, 0x59, 0xe7, 0x09, 0x14, 0x18, 0x77, 0x7d, 0xaa, 0xef, 0xb0, 0xd6,
+	0xd1, 0x7e, 0xd6, 0x17, 0x40, 0xa2, 0x70, 0xe8, 0x7b, 0x50, 0xf4, 0xe9, 0xc4, 0x72, 0x1d, 0x2d,
+	0x52, 0x3d, 0xa0, 0x22, 0x12, 0x4a, 0x34, 0x16, 0x77, 0xe1, 0x41, 0x4c, 0x9a, 0x2c, 0x66, 0xc1,
+	0xc7, 0xb0, 0x79, 0xca, 0x42, 0x26, 0x1e, 0x1d, 0x67, 0xd1, 0x0a, 0xff, 0x02, 0xb6, 0xd2, 0x5c,
+	0x32, 0x5d, 0x12, 0x86, 0xea, 0x45, 0x8c, 0x8b, 0x34, 0x52, 0x89, 0x24, 0x60, 0xf8, 0x73, 0xa8,
+	0x77, 0x6d, 0xdb, 0x1d, 0x9d, 0x1e, 0x67, 0x12, 0xb5, 0x07, 0x8d, 0x70, 0x7b, 0x26, 0x19, 0xeb,
+	0x90, 0xb3, 0x94, 0x64, 0x79, 0x92, 0xb3, 0xc6, 0xf8, 0x1b, 0x68, 0x3c, 0xa7, 0x5c, 0xdd, 0x5f,
+	0x16, 0x8f, 0x78, 0x08, 0x25, 0x79, 0xeb, 0xc3, 0x90, 0xeb, 0x9a, 0x5c, 0x9f, 0x8e, 0x31, 0x85,
+	0x66, 0xc4, 0x3a, 0x93, 0xb0, 0xf7, 0x71, 0x37, 0x3c, 0x82, 0xc6, 0xf9, 0xec, 0x1d, 0x34, 0xb8,
+	0xd7, 0x21, 0x5f, 0x40, 0x33, 0x3a, 0x24, 0x93, 0xab, 0x1e, 0xc2, 0xfa, 0x73, 0xca, 0xbb, 0xb6,
+	0x2d, 0x99, 0xb0, 0x4c, 0xb7, 0x7f, 0x0d, 0x1b, 0x49, 0x1e, 0x99, 0xac, 0xfa, 0x5d, 0x28, 0x4a,
+	0xa5, 0x58, 0x2b, 0xb7, 0xb7, 0xba, 0xa8, 0xb1, 0x46, 0xe2, 0x9f, 0xc9, 0xeb, 0xd3, 0x31, 0x9b,
+	0xc5, 0xb0, 0x3b, 0x00, 0x2a, 0xd2, 0x87, 0xd7, 0x74, 0x2e, 0xad, 0x5b, 0x25, 0x65, 0x05, 0x79,
+	0x49, 0xe7, 0xf8, 0x77, 0x06, 0x3c, 0x88, 0x1d, 0x90, 0x49, 0x95, 0x28, 0xd5, 0xe4, 0xee, 0x4a,
+	0x35, 0xe8, 0x7d, 0x28, 0xda, 0x8a, 0xab, 0x4a, 0x49, 0xd5, 0x80, 0xee, 0x9c, 0x0a, 0x6e, 0x0a,
+	0x87, 0x7f, 0x2e, 0xcd, 0xab, 0xb6, 0x1e, 0xce, 0xb3, 0x45, 0x28, 0x7a, 0x04, 0x5a, 0xc7, 0x28,
+	0x22, 0x4a, 0x0a, 0x70, 0x3a, 0xc6, 0xcf, 0x60, 0xfb, 0x39, 0xe5, 0x47, 0xea, 0x4d, 0x3c, 0x72,
+	0x9d, 0x4b, 0x6b, 0x92, 0xc9, 0x11, 0x18, 0xb4, 0x16, 0xf9, 0x64, 0xb2, 0xe0, 0x07, 0xb0, 0xa6,
+	0x9f, 0x68, 0x6d, 0xc2, 0x46, 0x60, 0x1a, 0xcd, 0x9d, 0x04, 0x78, 0xfc, 0x2d, 0x6c, 0x9f, 0xcf,
+	0xde, 0x5d, 0xf8, 0xff, 0xe6, 0xc8, 0x17, 0xd0, 0x5a, 0x3c, 0x32, 0x53, 0xf8, 0xfd, 0xc1, 0x80,
+	0xe2, 0x2b, 0x3a, 0xbd, 0xa0, 0x3e, 0x42, 0x90, 0x77, 0xcc, 0xa9, 0x2a, 0x2e, 0xca, 0x44, 0x7e,
+	0x8b, 0x5b, 0x9b, 0x4a, 0x6c, 0xec, 0xd6, 0x14, 0xe0, 0x74, 0x2c, 0x90, 0x1e, 0xa5, 0xfe, 0x70,
+	0xe6, 0xdb, 0xac, 0xb5, 0xba, 0xb7, 0xba, 0x5f, 0x26, 0x25, 0x01, 0xf8, 0xca, 0xb7, 0x19, 0xfa,
+	0x0e, 0x54, 0x46, 0xb6, 0x45, 0x1d, 0xae, 0xd0, 0x79, 0x89, 0x06, 0x05, 0x92, 0x04, 0xdf, 0x87,
+	0x86, 0xf2, 0xaf, 0xa1, 0xe7, 0x5b, 0xae, 0x6f, 0xf1, 0x79, 0xab, 0xb0, 0x67, 0xec, 0x17, 0x48,
+	0x5d, 0x81, 0xcf, 0x35, 0x14, 0x7f, 0x21, 0xe3, 0x41, 0x09, 0x99, 0x2d, 0x3f, 0xfc, 0xc5, 0x00,
+	0x14, 0x67, 0x91, 0x31, 0xa6, 0xd6, 0x94, 0xe6, 0x41, 0x7e, 0xa8, 0x2a, 0x72, 0xc5, 0x95, 0x04,
+	0xc8, 0x25, 0x31, 0x15, 0x27, 0xd3, 0x38, 0xf4, 0x31, 0x54, 0x28, 0x1f, 0x8d, 0x87, 0x9a, 0x34,
+	0xbf, 0x84, 0x14, 0x04, 0xc1, 0x97, 0x4a, 0x83, 0x73, 0x28, 0x8b, 0x90, 0xec, 0x73, 0x93, 0x33,
+	0xb4, 0x07, 0x79, 0x61, 0x66, 0x2d, 0x75, 0x32, 0x66, 0x25, 0x06, 0xbd, 0x07, 0xd5, 0xb1, 0x7b,
+	0xe3, 0x0c, 0x19, 0x1d, 0xb9, 0xce, 0x98, 0xe9, 0x9b, 0xab, 0x08, 0x58, 0x5f, 0x81, 0xf0, 0x5f,
+	0x57, 0x61, 0x4b, 0x85, 0xf4, 0x0b, 0x6a, 0xfa, 0xfc, 0x82, 0x9a, 0x3c, 0x93, 0xd7, 0xfe, 0x4f,
+	0x53, 0x0d, 0xea, 0x00, 0x48, 0xc1, 0x85, 0x16, 0xca, 0x69, 0xc2, 0xd2, 0x2d, 0xd4, 0x9f, 0x94,
+	0x05, 0x89, 0x58, 0x32, 0xf4, 0x09, 0xd4, 0x3c, 0xea, 0x8c, 0x2d, 0x67, 0xa2, 0xb7, 0x14, 0xf4,
+	0xd5, 0xc4, 0x99, 0x57, 0x35, 0x89, 0xda, 0xf2, 0x04, 0x6a, 0x17, 0x73, 0x4e, 0xd9, 0xf0, 0xc6,
+	0xb7, 0x38, 0xa7, 0x4e, 0xab, 0x28, 0x8d, 0x53, 0x95, 0xc0, 0xaf, 0x15, 0x4c, 0xe4, 0x68, 0x45,
+	0xe4, 0x53, 0x73, 0xdc, 0x5a, 0x53, 0x35, 0xbb, 0x84, 0x10, 0x6a, 0x8a, 0x9a, 0xbd, 0x7a, 0x4d,
+	0xe7, 0x11, 0x8b, 0x92, 0xb2, 0xaf, 0x80, 0x05, 0x1c, 0x1e, 0x41, 0x59, 0x92, 0x48, 0x06, 0x65,
+	0x15, 0x39, 0x02, 0x20, 0xf7, 0x7f, 0x00, 0x4d, 0xd3, 0xf3, 0x7c, 0xf7, 0x97, 0xd6, 0xd4, 0xe4,
+	0x74, 0xc8, 0xac, 0x37, 0xb4, 0x05, 0x92, 0xa6, 0x11, 0x83, 0xf7, 0xad, 0x37, 0x14, 0x3d, 0x8e,
+	0xd7, 0xb2, 0x15, 0x25, 0x48, 0x54, 0xba, 0x5e, 0x01, 0x1c, 0x5d, 0x99, 0xce, 0x84, 0x0a, 0xdd,
+	0xee, 0xe1, 0x18, 0x9f, 0x42, 0x65, 0x24, 0xe9, 0x87, 0xb2, 0x8f, 0xc8, 0xc9, 0x3e, 0x62, 0xbb,
+	0x13, 0x34, 0x42, 0x22, 0x95, 0x28, 0x7e, 0xb2, 0x9f, 0x80, 0x51, 0xf8, 0x8d, 0x0f, 0xa0, 0x3e,
+	0xf0, 0x4d, 0x87, 0x5d, 0x52, 0x5f, 0xf9, 0xe4, 0x7f, 0x3e, 0x0d, 0xff, 0x39, 0x07, 0xdb, 0x0b,
+	0x3e, 0x96, 0x29, 0xf8, 0x3e, 0x09, 0xe5, 0x96, 0x47, 0x2a, 0x57, 0x6b, 0xaa, 0x2d, 0x91, 0x01,
+	0x02, 0x81, 0xa5, 0x31, 0x3e, 0x87, 0x06, 0xd7, 0x02, 0x0f, 0x13, 0x9e, 0xa7, 0x4f, 0x4a, 0x6a,
+	0x43, 0xea, 0x3c, 0xa9, 0x5d, 0xe2, 0xbd, 0xca, 0x27, 0xdf, 0x2b, 0xf4, 0x63, 0xa8, 0x6a, 0x24,
+	0xf5, 0xdc, 0xd1, 0x95, 0x4c, 0x5c, 0x22, 0x4e, 0x12, 0xae, 0x7f, 0x22, 0x50, 0xa4, 0xe2, 0x47,
+	0x0b, 0x11, 0xf5, 0xdc, 0xf4, 0x27, 0x94, 0x2b, 0x35, 0x8a, 0x4b, 0x2c, 0x07, 0x8a, 0x40, 0x7c,
+	0xe3, 0x4b, 0x68, 0x74, 0xd9, 0x75, 0xdf, 0xb3, 0xad, 0xff, 0x6b, 0x6c, 0xe2, 0x5f, 0x1b, 0xd0,
+	0x8c, 0x0e, 0xca, 0x58, 0xe3, 0xd7, 0x1c, 0x7a, 0x33, 0x4c, 0x3f, 0xf1, 0x15, 0x87, 0xde, 0x90,
+	0xc0, 0x6a, 0x7b, 0x50, 0x15, 0x34, 0xf2, 0xcd, 0xb0, 0xc6, 0xea, 0xc9, 0xc8, 0x13, 0x70, 0xe8,
+	0x8d, 0xd0, 0xf6, 0x74, 0xcc, 0xf0, 0x6f, 0x0c, 0x40, 0x84, 0x7a, 0xae, 0xcf, 0xb3, 0x2b, 0x8d,
+	0x21, 0x6f, 0xd3, 0x4b, 0x7e, 0x8b, 0xca, 0x12, 0x87, 0xde, 0x87, 0x82, 0x6f, 0x4d, 0xae, 0xf8,
+	0x2d, 0x9d, 0x98, 0x42, 0xe2, 0x23, 0x58, 0x4f, 0x08, 0x93, 0xe9, 0x81, 0xfd, 0xd7, 0x2a, 0x80,
+	0x2c, 0x20, 0x55, 0xee, 0x8e, 0xf7, 0x05, 0x46, 0xa2, 0x2f, 0x10, 0xfd, 0xf3, 0xc8, 0xf4, 0xcc,
+	0x91, 0x78, 0x09, 0xf5, 0x53, 0x1b, 0xac, 0x45, 0x16, 0x30, 0x5f, 0x9b, 0x96, 0x6d, 0x5e, 0xd8,
+	0x54, 0x0a, 0x9d, 0x27, 0x11, 0x40, 0xa4, 0x23, 0x6d, 0x78, 0xd5, 0x0c, 0xe7, 0x65, 0x33, 0xac,
+	0x3d, 0xef, 0x48, 0xb6, 0xc4, 0x1f, 0x01, 0x62, 0x3a, 0x51, 0x32, 0xc7, 0xf4, 0x34, 0x61, 0x41,
+	0x12, 0x36, 0x35, 0xa6, 0xef, 0x98, 0x9e, 0xa2, 0x7e, 0x0a, 0x1b, 0x3e, 0x1d, 0x51, 0xeb, 0x75,
+	0x8a, 0xbe, 0x28, 0xe9, 0x51, 0x88, 0x8b, 0x76, 0xec, 0x00, 0x30, 0x6e, 0xfa, 0x7c, 0x28, 0x72,
+	0x93, 0x4c, 0x98, 0x35, 0x52, 0x96, 0x10, 0xd1, 0x72, 0xa3, 0x0e, 0xac, 0x9b, 0x9e, 0x67, 0xcf,
+	0x53, 0xfc, 0x4a, 0x92, 0xee, 0x41, 0x80, 0x8a, 0xd8, 0x6d, 0xc3, 0x9a, 0xc5, 0x86, 0x17, 0x33,
+	0x36, 0x97, 0xb9, 0xb3, 0x44, 0x8a, 0x16, 0x3b, 0x9c, 0xb1, 0xb9, 0x08, 0xcb, 0x19, 0xa3, 0xe3,
+	0x78, 0xca, 0x2c, 0x09, 0x80, 0xcc, 0x95, 0x0b, 0xa9, 0xbd, 0xb2, 0x24, 0xb5, 0xa7, 0x73, 0x77,
+	0x75, 0x31, 0x77, 0x27, 0xb3, 0x7f, 0x2d, 0x9d, 0xfd, 0x13, 0xa9, 0xbd, 0x9e, 0x4c, 0xed, 0xd8,
+	0x86, 0x4d, 0x79, 0xdd, 0xef, 0xfa, 0xaa, 0x16, 0x98, 0xf0, 0x97, 0x64, 0xa6, 0x8b, 0xfc, 0x88,
+	0x28, 0x34, 0x7e, 0x06, 0x5b, 0xe9, 0xd3, 0x32, 0x79, 0xe9, 0x9f, 0x0c, 0xd8, 0xe8, 0x8f, 0x4c,
+	0x2e, 0xaa, 0xcc, 0xec, 0x9d, 0xcd, 0x5d, 0x35, 0xfe, 0x7d, 0xc7, 0x1f, 0xb1, 0x42, 0x21, 0x7f,
+	0x47, 0x4f, 0x72, 0x02, 0x9b, 0x29, 0x79, 0xb3, 0xe8, 0xfd, 0x21, 0x85, 0x72, 0x38, 0x3e, 0x43,
+	0x45, 0xc8, 0xf5, 0x5e, 0x36, 0x57, 0x50, 0x05, 0xd6, 0xbe, 0x3a, 0x7b, 0x79, 0xd6, 0xfb, 0xfa,
+	0xac, 0x69, 0xa0, 0x0d, 0x68, 0x9e, 0xf5, 0x06, 0xc3, 0xc3, 0x5e, 0x6f, 0xd0, 0x1f, 0x90, 0xee,
+	0xf9, 0xf9, 0xc9, 0x71, 0x33, 0x87, 0xd6, 0xa1, 0xd1, 0x1f, 0xf4, 0xc8, 0xc9, 0x70, 0xd0, 0x7b,
+	0x75, 0xd8, 0x1f, 0xf4, 0xce, 0x4e, 0x9a, 0xab, 0xa8, 0x05, 0x1b, 0xdd, 0x2f, 0xc9, 0x49, 0xf7,
+	0xf8, 0x9b, 0x24, 0x79, 0xfe, 0xe0, 0x8f, 0x65, 0xc8, 0x9d, 0x1f, 0xa3, 0x2e, 0x40, 0x54, 0x86,
+	0xa2, 0x6d, 0x25, 0xd9, 0x42, 0x6d, 0xdb, 0x6e, 0x2d, 0x22, 0x94, 0xf0, 0x78, 0x05, 0x3d, 0x85,
+	0xd5, 0x01, 0x73, 0x91, 0x76, 0x88, 0x68, 0x9a, 0xd7, 0x7e, 0x10, 0x83, 0x04, 0xd4, 0xfb, 0xc6,
+	0x53, 0x03, 0xfd, 0x04, 0xca, 0xe1, 0x0c, 0x07, 0x6d, 0x29, 0xaa, 0xf4, 0xb4, 0xab, 0xbd, 0xbd,
+	0x00, 0x0f, 0x4f, 0x7c, 0x05, 0xf5, 0xe4, 0x14, 0x08, 0x3d, 0x52, 0xc4, 0x4b, 0x27, 0x4c, 0xed,
+	0xc7, 0xcb, 0x91, 0x21, 0xbb, 0x4f, 0x61, 0x4d, 0x4f, 0x6a, 0x90, 0xbe, 0x9a, 0xe4, 0xdc, 0xa7,
+	0xbd, 0x99, 0x82, 0x86, 0x3b, 0x3f, 0x83, 0x52, 0x30, 0x37, 0x41, 0x9b, 0xa1, 0x89, 0xe2, 0x03,
+	0x8e, 0xf6, 0x56, 0x1a, 0x1c, 0xdf, 0x1c, 0x0c, 0x2a, 0x82, 0xcd, 0xa9, 0xe9, 0x48, 0xb0, 0x39,
+	0x3d, 0xcf, 0xc0, 0x2b, 0xe8, 0x39, 0x54, 0xe3, 0xf3, 0x05, 0xf4, 0x30, 0x3c, 0x26, 0x3d, 0xb7,
+	0x68, 0xb7, 0x97, 0xa1, 0xe2, 0xb6, 0x4c, 0x86, 0x6b, 0x60, 0xcb, 0xa5, 0x29, 0x23, 0xb0, 0xe5,
+	0xf2, 0x08, 0xc7, 0x2b, 0x68, 0x00, 0x8d, 0x54, 0x79, 0x85, 0x1e, 0x07, 0xee, 0xbe, 0xac, 0xb2,
+	0x6f, 0xef, 0xdc, 0x82, 0x4d, 0x3b, 0x4c, 0xd8, 0xee, 0xa3, 0xc8, 0xa2, 0x89, 0xbc, 0xd0, 0xde,
+	0x5e, 0x80, 0x87, 0x52, 0x3d, 0x83, 0x5a, 0x62, 0x5c, 0x80, 0xda, 0x29, 0xda, 0xd8, 0x0c, 0xe1,
+	0x2e, 0x3e, 0x9f, 0x41, 0x29, 0x28, 0x4a, 0x82, 0x2b, 0x4b, 0x55, 0x43, 0xc1, 0x95, 0xa5, 0x6b,
+	0x17, 0xbc, 0x82, 0x8e, 0xa1, 0x12, 0x7b, 0xbb, 0x51, 0x2b, 0x50, 0x3c, 0x5d, 0x5b, 0xb4, 0x1f,
+	0x2e, 0xc1, 0x84, 0x5c, 0xfa, 0x72, 0xd6, 0x93, 0xe8, 0xb3, 0xd1, 0x4e, 0x28, 0xf1, 0xb2, 0x96,
+	0xbf, 0xbd, 0x7b, 0x1b, 0x3a, 0xce, 0x34, 0xdd, 0xbc, 0x07, 0x4c, 0x6f, 0x99, 0x23, 0x04, 0x4c,
+	0x6f, 0xeb, 0xf9, 0xf1, 0x0a, 0xfa, 0x29, 0xd4, 0x12, 0xf9, 0x30, 0x30, 0xfa, 0xb2, 0xa4, 0xde,
+	0x7e, 0xb4, 0x14, 0x17, 0xf0, 0x3a, 0xfc, 0xf0, 0x6f, 0x6f, 0x77, 0x8d, 0xbf, 0xbf, 0xdd, 0x35,
+	0xfe, 0xf1, 0x76, 0xd7, 0xf8, 0xfd, 0x3f, 0x77, 0x57, 0xa0, 0x35, 0x72, 0xa7, 0x1d, 0xcf, 0x72,
+	0x26, 0x23, 0xd3, 0xeb, 0x70, 0xeb, 0xfa, 0x75, 0xe7, 0xfa, 0xb5, 0xfc, 0x7b, 0xe4, 0xa2, 0x28,
+	0x7f, 0x7e, 0xf4, 0xef, 0x00, 0x00, 0x00, 0xff, 0xff, 0xab, 0x35, 0x0b, 0x39, 0x6c, 0x19, 0x00,
+	0x00,
+}
+>>>>>>> master

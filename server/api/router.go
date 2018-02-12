@@ -22,6 +22,8 @@ import (
 	"github.com/unrolled/render"
 )
 
+const pingAPI = "/ping"
+
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := render.New(render.Options{
 		IndentJSON: true,
@@ -54,6 +56,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/config/namespace/{name}", confHandler.GetNamespace).Methods("GET")
 	router.HandleFunc("/api/v1/config/namespace/{name}", confHandler.SetNamespace).Methods("POST")
 	router.HandleFunc("/api/v1/config/namespace/{name}", confHandler.DeleteNamespace).Methods("DELETE")
+	router.HandleFunc("/api/v1/config/label-property", confHandler.GetLabelProperty).Methods("GET")
+	router.HandleFunc("/api/v1/config/label-property", confHandler.SetLabelProperty).Methods("POST")
 
 	storeHandler := newStoreHandler(svr, rd)
 	router.HandleFunc("/api/v1/store/{id}", storeHandler.Get).Methods("GET")
@@ -80,14 +84,20 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/regions", regionsHandler.GetAll).Methods("GET")
 	router.HandleFunc("/api/v1/regions/writeflow", regionsHandler.GetTopWriteFlow).Methods("GET")
 	router.HandleFunc("/api/v1/regions/readflow", regionsHandler.GetTopReadFlow).Methods("GET")
+	router.HandleFunc("/api/v1/regions/check/miss-replica", regionsHandler.GetMissPeerRegions).Methods("GET")
+	router.HandleFunc("/api/v1/regions/check/extra-replica", regionsHandler.GetExtraPeerRegions).Methods("GET")
+	router.HandleFunc("/api/v1/regions/check/pending-replica", regionsHandler.GetPendingPeerRegions).Methods("GET")
+	router.HandleFunc("/api/v1/regions/check/down-replica", regionsHandler.GetDownPeerRegions).Methods("GET")
+	router.HandleFunc("/api/v1/regions/check/incorrect-ns", regionsHandler.GetIncorrectNamespaceRegions).Methods("GET")
 
 	router.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")
 	router.Handle("/api/v1/status", newStatusHandler(rd)).Methods("GET")
 
-	router.Handle("/api/v1/members", newMemberListHandler(svr, rd)).Methods("GET")
-	memberDeleteHandler := newMemberDeleteHandler(svr, rd)
-	router.HandleFunc("/api/v1/members/name/{name}", memberDeleteHandler.DeleteByName).Methods("DELETE")
-	router.HandleFunc("/api/v1/members/id/{id}", memberDeleteHandler.DeleteByID).Methods("DELETE")
+	memberHandler := newMemberHandler(svr, rd)
+	router.HandleFunc("/api/v1/members", memberHandler.ListMembers).Methods("GET")
+	router.HandleFunc("/api/v1/members/name/{name}", memberHandler.DeleteByName).Methods("DELETE")
+	router.HandleFunc("/api/v1/members/id/{id}", memberHandler.DeleteByID).Methods("DELETE")
+	router.HandleFunc("/api/v1/members/name/{name}", memberHandler.SetMemberPropertyByName).Methods("POST")
 
 	leaderHandler := newLeaderHandler(svr, rd)
 	router.HandleFunc("/api/v1/leader", leaderHandler.Get).Methods("GET")
@@ -104,9 +114,13 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	trendHandler := newTrendHandler(svr, rd)
 	router.HandleFunc("/api/v1/trend", trendHandler.Handle).Methods("GET")
 
+	adminHandler := newAdminHandler(svr, rd)
+	router.HandleFunc("/api/v1/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion).Methods("DELETE")
+
 	logHanler := newlogHandler(svr, rd)
 	router.HandleFunc("/api/v1/log", logHanler.Handle).Methods("POST")
 
-	router.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
+	router.HandleFunc(pingAPI, func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
+	router.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
 	return router
 }

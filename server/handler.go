@@ -149,6 +149,11 @@ func (h *Handler) AddBalanceHotRegionScheduler() error {
 	return h.AddScheduler("hot-region")
 }
 
+// AddLabelScheduler adds a label-scheduler.
+func (h *Handler) AddLabelScheduler() error {
+	return h.AddScheduler("label")
+}
+
 // AddAdjacentRegionScheduler adds a balance-adjacent-region-scheduler.
 func (h *Handler) AddAdjacentRegionScheduler(args ...string) error {
 	return h.AddScheduler("adjacent-region", args...)
@@ -342,7 +347,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return errors.Trace(err)
 	}
 
-	op := schedule.CreateMovePeerOperator("adminMovePeer", region, schedule.OpAdmin, fromStoreID, toStoreID, newPeer.GetId())
+	op := schedule.CreateMovePeerOperator("adminMovePeer", c.cluster, region, schedule.OpAdmin, fromStoreID, toStoreID, newPeer.GetId())
 	c.addOperator(op)
 	return nil
 }
@@ -393,7 +398,52 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 		return errors.Errorf("region has no peer in store %v", fromStoreID)
 	}
 
-	op := schedule.CreateRemovePeerOperator("adminRemovePeer", schedule.OpAdmin, region, fromStoreID)
+	op := schedule.CreateRemovePeerOperator("adminRemovePeer", c.cluster, schedule.OpAdmin, region, fromStoreID)
 	c.addOperator(op)
 	return nil
+}
+
+// GetDownPeerRegions gets the region with down peer.
+func (h *Handler) GetDownPeerRegions() ([]*core.RegionInfo, error) {
+	c := h.s.GetRaftCluster()
+	if c == nil {
+		return nil, errNotBootstrapped
+	}
+	return c.cachedCluster.GetRegionStatsByType(downPeer), nil
+}
+
+// GetExtraPeerRegions gets the region exceeds the specified number of peers.
+func (h *Handler) GetExtraPeerRegions() ([]*core.RegionInfo, error) {
+	c := h.s.GetRaftCluster()
+	if c == nil {
+		return nil, errNotBootstrapped
+	}
+	return c.cachedCluster.GetRegionStatsByType(extraPeer), nil
+}
+
+// GetMissPeerRegions gets the region less than the specified number of peers.
+func (h *Handler) GetMissPeerRegions() ([]*core.RegionInfo, error) {
+	c := h.s.GetRaftCluster()
+	if c == nil {
+		return nil, errNotBootstrapped
+	}
+	return c.cachedCluster.GetRegionStatsByType(missPeer), nil
+}
+
+// GetPendingPeerRegions gets the region with pending peer.
+func (h *Handler) GetPendingPeerRegions() ([]*core.RegionInfo, error) {
+	c := h.s.GetRaftCluster()
+	if c == nil {
+		return nil, errNotBootstrapped
+	}
+	return c.cachedCluster.GetRegionStatsByType(pendingPeer), nil
+}
+
+// GetIncorrectNamespaceRegions gets the region with incorrect namespace peer.
+func (h *Handler) GetIncorrectNamespaceRegions() ([]*core.RegionInfo, error) {
+	c := h.s.GetRaftCluster()
+	if c == nil {
+		return nil, errNotBootstrapped
+	}
+	return c.cachedCluster.GetRegionStatsByType(incorrectNamespace), nil
 }

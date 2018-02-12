@@ -43,16 +43,33 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 	if err != nil {
 		return nil, grpc.Errorf(codes.Unknown, err.Error())
 	}
+	for _, m := range members {
+		leaderPriority, e := s.GetMemberLeaderPriority(m.GetMemberId())
+		if e != nil {
+			return nil, grpc.Errorf(codes.Unknown, e.Error())
+		}
+		m.LeaderPriority = int32(leaderPriority)
+	}
 
 	leader, err := s.GetLeader()
 	if err != nil {
 		return nil, grpc.Errorf(codes.Unknown, err.Error())
 	}
 
+	var etcdLeader *pdpb.Member
+	leadID := s.etcd.Server.Lead()
+	for _, m := range members {
+		if m.MemberId == leadID {
+			etcdLeader = m
+			break
+		}
+	}
+
 	return &pdpb.GetMembersResponse{
-		Header:  s.header(),
-		Members: members,
-		Leader:  leader,
+		Header:     s.header(),
+		Members:    members,
+		Leader:     leader,
+		EtcdLeader: etcdLeader,
 	}, nil
 }
 
@@ -207,6 +224,23 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}, nil
 }
 
+// GetAllStores implements gRPC PDServer.
+func (s *Server) GetAllStores(ctx context.Context, request *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &pdpb.GetAllStoresResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	return &pdpb.GetAllStoresResponse{
+		Header: s.header(),
+		Stores: cluster.GetStores(),
+	}, nil
+}
+
 // StoreHeartbeat implements gRPC PDServer.
 func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbeatRequest) (*pdpb.StoreHeartbeatResponse, error) {
 	if err := s.validateRequest(request.GetHeader()); err != nil {
@@ -308,6 +342,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		storeLabel := strconv.FormatUint(storeID, 10)
 
 		regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "recv").Inc()
+		regionHeartbeatLatency.WithLabelValues(storeLabel).Observe(float64(time.Now().UnixNano()/int64(time.Millisecond)) - float64(request.GetTimestamp()))
 
 		hbStreams := cluster.coordinator.hbStreams
 

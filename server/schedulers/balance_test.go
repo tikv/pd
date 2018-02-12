@@ -904,17 +904,19 @@ type testBalanceHotWriteRegionSchedulerSuite struct{}
 
 func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	opt := newTestScheduleConfig()
+	newTestReplication(opt, 3, "zone", "host")
 	tc := newMockCluster(opt)
-
 	hb, err := schedule.CreateScheduler("hot-write-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 
-	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
-	tc.addRegionStore(1, 3)
-	tc.addRegionStore(2, 2)
-	tc.addRegionStore(3, 2)
-	tc.addRegionStore(4, 2)
-	tc.addRegionStore(5, 0)
+	// Add stores 1, 2, 3, 4, 5, 6  with region counts 3, 2, 2, 2, 0, 0.
+
+	tc.addLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
+	tc.addLabelsStore(2, 2, map[string]string{"zone": "z2", "host": "h2"})
+	tc.addLabelsStore(3, 2, map[string]string{"zone": "z3", "host": "h3"})
+	tc.addLabelsStore(4, 2, map[string]string{"zone": "z4", "host": "h4"})
+	tc.addLabelsStore(5, 0, map[string]string{"zone": "z2", "host": "h5"})
+	tc.addLabelsStore(6, 0, map[string]string{"zone": "z5", "host": "h6"})
 
 	// Report store written bytes.
 	tc.updateStorageWrittenBytes(1, 75*1024*1024)
@@ -922,6 +924,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	tc.updateStorageWrittenBytes(3, 45*1024*1024)
 	tc.updateStorageWrittenBytes(4, 60*1024*1024)
 	tc.updateStorageWrittenBytes(5, 0)
+	tc.updateStorageWrittenBytes(6, 0)
 
 	// Region 1, 2 and 3 are hot regions.
 	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
@@ -934,25 +937,35 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	tc.addLeaderRegionWithWriteInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 4)
 	opt.HotRegionLowThreshold = 0
 
-	// Will transfer a hot region from store 1 to store 5, because the total count of peers
+	// Will transfer a hot region from store 1 to store 6, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
-	checkTransferPeerWithLeaderTransfer(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 1, 5)
+	op := hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+	c.Assert(op, NotNil)
+	if op.RegionID() == 2 {
+		checkTransferPeerWithLeaderTransferFrom(c, op, 1)
+	} else {
+		checkTransferPeerWithLeaderTransfer(c, op, 1, 6)
+	}
 
 	// After transfer a hot region from store 1 to store 5
 	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
 	//|-----------|--------------|----------------|----------------|---------------|
 	//|     1     |       1      |        2       |       3        |      512KB    |
 	//|     2     |       1      |        3       |       4        |      512KB    |
-	//|     3     |       5      |        2       |       4        |      512KB    |
+	//|     3     |       6      |        2       |       4        |      512KB    |
+	//|     4     |       5      |        6       |       1        |      512KB    |
+	//|     5     |       3      |        4       |       5        |      512KB    |
 	tc.updateStorageWrittenBytes(1, 60*1024*1024)
 	tc.updateStorageWrittenBytes(2, 30*1024*1024)
 	tc.updateStorageWrittenBytes(3, 60*1024*1024)
 	tc.updateStorageWrittenBytes(4, 30*1024*1024)
-	tc.updateStorageWrittenBytes(5, 30*1024*1024)
+	tc.updateStorageWrittenBytes(5, 0*1024*1024)
+	tc.updateStorageWrittenBytes(6, 30*1024*1024)
 	tc.addLeaderRegionWithWriteInfo(1, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
-	tc.addLeaderRegionWithWriteInfo(2, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 3, 4)
-	tc.addLeaderRegionWithWriteInfo(3, 5, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 4)
-
+	tc.addLeaderRegionWithWriteInfo(2, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
+	tc.addLeaderRegionWithWriteInfo(3, 6, 512*1024*schedule.RegionHeartBeatReportInterval, 1, 4)
+	tc.addLeaderRegionWithWriteInfo(4, 5, 512*1024*schedule.RegionHeartBeatReportInterval, 6, 4)
+	tc.addLeaderRegionWithWriteInfo(5, 3, 512*1024*schedule.RegionHeartBeatReportInterval, 4, 5)
 	// We can find that the leader of all hot regions are on store 1,
 	// so one of the leader will transfer to another store.
 	checkTransferLeaderFrom(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 1)
@@ -1032,4 +1045,9 @@ func checkTransferPeerWithLeaderTransfer(c *C, op *schedule.Operator, sourceID, 
 func checkTransferLeaderFrom(c *C, op *schedule.Operator, sourceID uint64) {
 	c.Assert(op.Len(), Equals, 1)
 	c.Assert(op.Step(0).(schedule.TransferLeader).FromStore, Equals, sourceID)
+}
+
+func checkTransferPeerWithLeaderTransferFrom(c *C, op *schedule.Operator, sourceID uint64) {
+	c.Assert(op.Len(), Equals, 3)
+	c.Assert(op.Step(2).(schedule.RemovePeer).FromStore, Equals, sourceID)
 }

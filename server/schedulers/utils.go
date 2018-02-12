@@ -33,9 +33,16 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 	}
 
 	var averageLeader float64
+	count := 0
 	for _, s := range stores {
-		averageLeader += float64(s.LeaderScore()) / float64(len(stores))
+		if schedule.FilterSource(cluster, s, filters) {
+			continue
+		}
+		averageLeader += float64(s.LeaderScore())
+		count++
 	}
+	averageLeader /= float64(count)
+	log.Debugf("[%s] averageLeader is %v", schedulerName, averageLeader)
 
 	mostLeaderStore := s.SelectSource(cluster, stores, filters...)
 	leastLeaderStore := s.SelectTarget(cluster, stores, filters...)
@@ -178,6 +185,7 @@ func shouldBalance(source, target *core.StoreInfo, avgScore float64, kind core.R
 
 	sourceScore := source.ResourceScore(kind)
 	targetScore := target.ResourceScore(kind)
+	log.Debugf("[region %d] source score is %v and target score is %v", region.GetId(), sourceScore, targetScore)
 	if targetScore >= sourceScore {
 		log.Debugf("should balance return false cause targetScore %v >= sourceScore %v", targetScore, sourceScore)
 		return false
