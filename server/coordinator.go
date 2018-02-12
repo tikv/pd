@@ -94,6 +94,7 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 		if op.IsFinish() {
 			log.Infof("[region %v] operator finish: %s", region.GetId(), op)
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
+			operatorDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 			c.pushHistory(op)
 			c.removeOperator(op)
 		} else if timeout {
@@ -231,8 +232,9 @@ func (c *coordinator) collectHotSpotMetrics() {
 	if !ok {
 		return
 	}
+	stores := c.cluster.GetStores()
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
-	for _, s := range c.cluster.GetStores() {
+	for _, s := range stores {
 		store := fmt.Sprintf("store_%d", s.GetId())
 		stat, ok := status.AsPeer[s.GetId()]
 		if ok {
@@ -261,7 +263,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 
 	// collect hot read region metrics
 	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
-	for _, s := range c.cluster.GetStores() {
+	for _, s := range stores {
 		store := fmt.Sprintf("store_%d", s.GetId())
 		stat, ok := status.AsLeader[s.GetId()]
 		if ok {

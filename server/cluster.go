@@ -109,6 +109,7 @@ func (c *RaftCluster) start() error {
 	}
 	c.cachedCluster = cluster
 	c.coordinator = newCoordinator(c.cachedCluster, c.s.hbStreams, c.s.classifier)
+	c.cachedCluster.regionStats = newRegionStatistics(c.s.scheduleOpt, c.s.classifier)
 	c.quit = make(chan struct{})
 
 	c.wg.Add(2)
@@ -240,6 +241,11 @@ func (c *RaftCluster) GetRegions() []*core.RegionInfo {
 // GetRegionStats returns region statistics from cluster.
 func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *core.RegionStats {
 	return c.cachedCluster.getRegionStats(startKey, endKey)
+}
+
+// DropCacheRegion removes a region from the cache.
+func (c *RaftCluster) DropCacheRegion(id uint64) {
+	c.cachedCluster.dropRegion(id)
 }
 
 // GetStores gets stores from cluster.
@@ -454,6 +460,7 @@ func (c *RaftCluster) collectMetrics() {
 
 	c.coordinator.collectSchedulerMetrics()
 	c.coordinator.collectHotSpotMetrics()
+	cluster.collectMetrics()
 }
 
 func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {

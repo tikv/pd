@@ -93,6 +93,20 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	return nil
 }
 
+func (kv *etcdKVBase) Delete(key string) error {
+	key = path.Join(kv.rootPath, key)
+
+	resp, err := kv.server.leaderTxn().Then(clientv3.OpDelete(key)).Commit()
+	if err != nil {
+		log.Errorf("delete from etcd error: %v", err)
+		return errors.Trace(err)
+	}
+	if !resp.Succeeded {
+		return errors.Trace(errTxnFailed)
+	}
+	return nil
+}
+
 func kvGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
 	ctx, cancel := context.WithTimeout(c.Ctx(), kvRequestTimeout)
 	defer cancel()

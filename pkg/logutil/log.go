@@ -141,7 +141,7 @@ func StringToLogLevel(level string) log.Level {
 	return defaultLogLevel
 }
 
-// textFormatter is for compatability with ngaut/log
+// textFormatter is for compatibility with ngaut/log
 type textFormatter struct {
 	DisableTimestamp bool
 }
@@ -218,9 +218,10 @@ func InitFileLog(cfg *FileLogConfig) error {
 
 var once sync.Once
 
-// InitLogger initalizes PD's logger.
+// InitLogger initializes PD's logger.
 func InitLogger(cfg *LogConfig) error {
 	var err error
+
 	once.Do(func() {
 		log.SetLevel(StringToLogLevel(cfg.Level))
 		log.AddHook(&contextHook{})

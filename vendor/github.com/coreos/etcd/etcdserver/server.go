@@ -82,7 +82,8 @@ const (
 	releaseDelayAfterSnapshot = 30 * time.Second
 
 	// maxPendingRevokes is the maximum number of outstanding expired lease revocations.
-	maxPendingRevokes = 16
+	maxPendingRevokes          = 16
+	recommendedMaxRequestBytes = 10 * 1024 * 1024
 )
 
 var (
@@ -258,6 +259,10 @@ func NewServer(cfg *ServerConfig) (srv *EtcdServer, err error) {
 		id types.ID
 		cl *membership.RaftCluster
 	)
+
+	if cfg.MaxRequestBytes > recommendedMaxRequestBytes {
+		plog.Warningf("MaxRequestBytes %v exceeds maximum recommended size %v", cfg.MaxRequestBytes, recommendedMaxRequestBytes)
+	}
 
 	if terr := fileutil.TouchDirAll(cfg.DataDir); terr != nil {
 		return nil, fmt.Errorf("cannot access data directory: %v", terr)
@@ -922,9 +927,8 @@ func (s *EtcdServer) isLeader() bool {
 	return uint64(s.ID()) == s.Lead()
 }
 
-// transferLeadership transfers the leader to the given transferee.
-// TODO: maybe expose to client?
-func (s *EtcdServer) transferLeadership(ctx context.Context, lead, transferee uint64) error {
+// MoveLeader transfers the leader to the given transferee.
+func (s *EtcdServer) MoveLeader(ctx context.Context, lead, transferee uint64) error {
 	now := time.Now()
 	interval := time.Duration(s.Cfg.TickMs) * time.Millisecond
 
@@ -963,7 +967,7 @@ func (s *EtcdServer) TransferLeadership() error {
 
 	tm := s.Cfg.ReqTimeout()
 	ctx, cancel := context.WithTimeout(s.ctx, tm)
-	err := s.transferLeadership(ctx, s.Lead(), uint64(transferee))
+	err := s.MoveLeader(ctx, s.Lead(), uint64(transferee))
 	cancel()
 	return err
 }
@@ -1357,8 +1361,7 @@ func (s *EtcdServer) applyEntryNormal(e *raftpb.Entry) {
 			Action:   pb.AlarmRequest_ACTIVATE,
 			Alarm:    pb.AlarmType_NOSPACE,
 		}
-		r := pb.InternalRaftRequest{Alarm: a}
-		s.processInternalRaftRequest(s.ctx, r)
+		s.raftRequest(s.ctx, pb.InternalRaftRequest{Alarm: a})
 		s.w.Trigger(id, ar)
 	})
 }

@@ -127,7 +127,7 @@ func (c *TwoQueue) Get(key uint64) (interface{}, bool) {
 	return nil, false
 }
 
-// Peek reads an item from cache. The action is no considerd 'Use'.
+// Peek reads an item from cache. The action is no considered 'Use'.
 func (c *TwoQueue) Peek(key uint64) (interface{}, bool) {
 	if val, ok := c.frequent.Peek(key); ok {
 		return val, ok

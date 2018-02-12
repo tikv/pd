@@ -14,12 +14,14 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server"
@@ -28,48 +30,37 @@ import (
 
 const defaultDialTimeout = 5 * time.Second
 
-type memberListHandler struct {
+type memberHandler struct {
 	svr *server.Server
 	rd  *render.Render
 }
 
-func newMemberListHandler(svr *server.Server, rd *render.Render) *memberListHandler {
-	return &memberListHandler{
+func newMemberHandler(svr *server.Server, rd *render.Render) *memberHandler {
+	return &memberHandler{
 		svr: svr,
 		rd:  rd,
 	}
 }
 
-func (h *memberListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	client := h.svr.GetClient()
-
-	members, err := server.GetMembers(client)
+func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
+	members, err := h.listMembers()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ret := make(map[string][]*pdpb.Member)
-	ret["members"] = members
-	h.rd.JSON(w, http.StatusOK, ret)
+	h.rd.JSON(w, http.StatusOK, members)
 }
 
-type memberDeleteHandler struct {
-	svr *server.Server
-	rd  *render.Render
+func (h *memberHandler) listMembers() (*pdpb.GetMembersResponse, error) {
+	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: h.svr.ClusterID()}}
+	members, err := h.svr.GetMembers(context.Background(), req)
+	return members, errors.Trace(err)
 }
 
-func newMemberDeleteHandler(svr *server.Server, rd *render.Render) *memberDeleteHandler {
-	return &memberDeleteHandler{
-		svr: svr,
-		rd:  rd,
-	}
-}
-
-func (h *memberDeleteHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
+func (h *memberHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
 	client := h.svr.GetClient()
 
-	// step 1. get etcd id
-	// TODO: GetPDMembers.
+	// Get etcd ID by name.
 	var id uint64
 	name := mux.Vars(r)["name"]
 	listResp, err := etcdutil.ListEtcdMembers(client)
@@ -88,7 +79,14 @@ func (h *memberDeleteHandler) DeleteByName(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// step 2. remove member by id
+	// Delete config.
+	err = h.svr.DeleteMemberLeaderPriority(id)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Remove member by id
 	_, err = etcdutil.RemoveEtcdMember(client, id)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -97,9 +95,16 @@ func (h *memberDeleteHandler) DeleteByName(w http.ResponseWriter, r *http.Reques
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %s", name))
 }
 
-func (h *memberDeleteHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
+func (h *memberHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["id"]
 	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Delete config.
+	err = h.svr.DeleteMemberLeaderPriority(id)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -112,6 +117,49 @@ func (h *memberDeleteHandler) DeleteByID(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %v", id))
+}
+
+func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.Request) {
+	members, err := h.listMembers()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var memberID uint64
+	name := mux.Vars(r)["name"]
+	for _, m := range members.GetMembers() {
+		if m.GetName() == name {
+			memberID = m.GetMemberId()
+			break
+		}
+	}
+	if memberID == 0 {
+		h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("not found, pd: %s", name))
+		return
+	}
+
+	var input map[string]interface{}
+	if err = readJSON(r.Body, &input); err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	for k, v := range input {
+		switch k {
+		case "leader-priority":
+			priority, ok := v.(float64)
+			if !ok {
+				h.rd.JSON(w, http.StatusBadRequest, "bad format leader priority")
+				return
+			}
+			err = h.svr.SetMemberLeaderPriority(memberID, int(priority))
+			if err != nil {
+				h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+	}
+	h.rd.JSON(w, http.StatusOK, "success")
 }
 
 type leaderHandler struct {

@@ -15,6 +15,7 @@ package server
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/coreos/etcd/clientv3"
@@ -72,9 +73,8 @@ func PrepareJoinCluster(cfg *Config) error {
 	}
 
 	// Cases with data directory.
-
 	initialCluster := ""
-	if wal.Exist(cfg.DataDir) {
+	if wal.Exist(path.Join(cfg.DataDir, "member")) {
 		cfg.InitialCluster = initialCluster
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
 		return nil

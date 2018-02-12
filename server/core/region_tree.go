@@ -59,7 +59,7 @@ func (t *regionTree) length() int {
 // update updates the tree with the region.
 // It finds and deletes all the overlapped regions first, and then
 // insert the region.
-func (t *regionTree) update(region *metapb.Region) []*regionItem {
+func (t *regionTree) update(region *metapb.Region) []*metapb.Region {
 	item := &regionItem{region: region}
 
 	result := t.find(region)
@@ -67,18 +67,18 @@ func (t *regionTree) update(region *metapb.Region) []*regionItem {
 		result = item
 	}
 
-	var overlaps []*regionItem
+	var overlaps []*metapb.Region
 	t.tree.DescendLessOrEqual(result, func(i btree.Item) bool {
 		over := i.(*regionItem)
 		if len(region.EndKey) > 0 && bytes.Compare(region.EndKey, over.region.StartKey) <= 0 {
 			return false
 		}
-		overlaps = append(overlaps, over)
+		overlaps = append(overlaps, over.region)
 		return true
 	})
 
 	for _, item := range overlaps {
-		t.tree.Delete(item)
+		t.tree.Delete(&regionItem{item})
 	}
 
 	t.tree.ReplaceOrInsert(item)

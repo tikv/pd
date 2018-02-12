@@ -41,6 +41,15 @@ var (
 			Help:      "Counter of schedule operators.",
 		}, []string{"type", "event"})
 
+	operatorDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "finish_operators_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of finished operator.",
+			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 16),
+		}, []string{"type"})
+
 	clusterStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -48,6 +57,23 @@ var (
 			Name:      "status",
 			Help:      "Status of the cluster.",
 		}, []string{"type", "namespace"})
+
+	regionStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "regions",
+			Name:      "status",
+			Help:      "Status of the regions.",
+		}, []string{"type"})
+
+	regionLabelLevelHistogram = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "regions",
+			Name:      "label_level",
+			Help:      "Bucketed histogram of the label level of the region.",
+			Buckets:   prometheus.LinearBuckets(0, 1, 8),
+		})
 
 	timeJumpBackCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
@@ -73,6 +99,15 @@ var (
 			Help:      "Counter of region hearbeat.",
 		}, []string{"store", "type", "status"})
 
+	regionHeartbeatLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "region_heartbeat_latency_seconds",
+			Help:      "Bucketed histogram of latency (s) of receiving heartbeat.",
+			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 15),
+		}, []string{"store"})
+
 	storeStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -96,17 +131,30 @@ var (
 			Name:      "tso",
 			Help:      "Counter of tso events",
 		}, []string{"type"})
+
+	metadataGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "metadata",
+			Help:      "Record critical metadata.",
+		}, []string{"type"})
 )
 
 func init() {
 	prometheus.MustRegister(txnCounter)
 	prometheus.MustRegister(txnDuration)
 	prometheus.MustRegister(operatorCounter)
+	prometheus.MustRegister(operatorDuration)
 	prometheus.MustRegister(clusterStatusGauge)
 	prometheus.MustRegister(timeJumpBackCounter)
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(regionHeartbeatCounter)
+	prometheus.MustRegister(regionHeartbeatLatency)
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(tsoCounter)
 	prometheus.MustRegister(storeStatusGauge)
+	prometheus.MustRegister(regionStatusGauge)
+	prometheus.MustRegister(regionLabelLevelHistogram)
+	prometheus.MustRegister(metadataGauge)
 }

@@ -66,7 +66,7 @@ func (d *Driver) Prepare() error {
 	if err != nil {
 		simutil.Logger.Fatal("bootstrapped error: ", err)
 	} else {
-		simutil.Logger.Debug("Bootstrap sucess")
+		simutil.Logger.Debug("Bootstrap success")
 	}
 
 	// Setup alloc id.
@@ -95,6 +95,12 @@ func (d *Driver) Tick() {
 	d.clusterInfo.stepRegions()
 	if d.conf.WrittenBytes != nil {
 		d.clusterInfo.updateRegionSize(d.conf.WrittenBytes(d.tickCount))
+	}
+	if d.conf.RegionReadBytes != nil {
+		d.clusterInfo.updateRegionReadBytes(d.conf.RegionReadBytes(d.tickCount))
+	}
+	if d.conf.RegionWriteBytes != nil {
+		d.clusterInfo.updateRegionWriteBytes(d.conf.RegionWriteBytes(d.tickCount))
 	}
 	for _, n := range d.clusterInfo.Nodes {
 		n.Tick()

@@ -89,6 +89,8 @@ type Config struct {
 
 	Security SecurityConfig `toml:"security" json:"security"`
 
+	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
+
 	configFile string
 
 	// For all warnings during parsing.
@@ -101,6 +103,10 @@ type Config struct {
 	// Only test can change them.
 	nextRetryDelay             time.Duration
 	disableStrictReconfigCheck bool
+
+	heartbeatStreamBindInterval typeutil.Duration
+
+	leaderPriorityCheckInterval typeutil.Duration
 }
 
 // NewConfig creates a new config.
@@ -154,6 +160,10 @@ const (
 	defaultTickInterval = 500 * time.Millisecond
 	// embed etcd has a check that `5 * tick > election`
 	defaultElectionInterval = 3000 * time.Millisecond
+
+	defaultHeartbeatStreamRebindInterval = time.Minute
+
+	defaultLeaderPriorityCheckInterval = time.Minute
 )
 
 func adjustString(v *string, defValue string) {
@@ -294,6 +304,10 @@ func (c *Config) adjust() error {
 
 	c.Schedule.adjust()
 	c.Replication.adjust()
+
+	adjustDuration(&c.heartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
+
+	adjustDuration(&c.leaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
 	return nil
 }
 
@@ -364,7 +378,7 @@ const (
 	defaultMaxReplicas          = 3
 	defaultMaxSnapshotCount     = 3
 	defaultMaxPendingPeerCount  = 16
-	defaultMaxStoreDownTime     = time.Hour
+	defaultMaxStoreDownTime     = 30 * time.Minute
 	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 16
@@ -375,6 +389,7 @@ var defaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
 	{Type: "hot-region"},
+	{Type: "label"},
 }
 
 func (c *ScheduleConfig) adjust() {
@@ -466,6 +481,25 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 		return nil, errors.Trace(err)
 	}
 	return tlsConfig, nil
+}
+
+// StoreLabel is the config item of LabelPropertyConfig.
+type StoreLabel struct {
+	Key   string `toml:"key" json:"key"`
+	Value string `toml:"value" json:"value"`
+}
+
+// LabelPropertyConfig is the config section to set properties to store labels.
+type LabelPropertyConfig map[string][]StoreLabel
+
+func (c LabelPropertyConfig) clone() LabelPropertyConfig {
+	m := make(map[string][]StoreLabel, len(c))
+	for k, sl := range c {
+		sl2 := make([]StoreLabel, 0, len(sl))
+		sl2 = append(sl2, sl...)
+		m[k] = sl2
+	}
+	return m
 }
 
 // ParseUrls parse a string into multiple urls.
