@@ -14,6 +14,7 @@
 package server
 
 import (
+	"bytes"
 	"strconv"
 	"time"
 
@@ -24,9 +25,10 @@ import (
 )
 
 var (
-	errNotBootstrapped  = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
-	errOperatorNotFound = errors.New("operator not found")
-	errAddOperator      = errors.New("failed to add operator, maybe already have one")
+	errNotBootstrapped   = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
+	errOperatorNotFound  = errors.New("operator not found")
+	errAddOperator       = errors.New("failed to add operator, maybe already have one")
+	errRegionNotAdjacent = errors.New("two regions are not adjacent")
 )
 
 // Handler is a helper to export methods to handle API/RPC requests.
@@ -419,6 +421,10 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 	target := c.cluster.GetRegion(targetID)
 	if target == nil {
 		return errRegionNotFound(targetID)
+	}
+
+	if bytes.Compare(region.StartKey, target.EndKey) != 0 && bytes.Compare(region.EndKey, target.StartKey) != 0 {
+		return errRegionNotAdjacent
 	}
 
 	op1, op2, err := schedule.CreateMergeRegionOperator("merge-region", c.cluster, region, target, schedule.OpAdmin)

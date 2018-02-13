@@ -128,7 +128,10 @@ func (mr MergeRegion) String() string {
 
 // IsFinish checks if current step is finished
 func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
-	return bytes.Compare(region.Region.StartKey, mr.ToRegion.StartKey) != 0 || bytes.Compare(region.Region.EndKey, mr.ToRegion.EndKey) != 0
+	if mr.IsPassive {
+		return bytes.Compare(region.Region.StartKey, mr.ToRegion.StartKey) != 0 || bytes.Compare(region.Region.EndKey, mr.ToRegion.EndKey) != 0
+	}
+	return false
 }
 
 // Influence calculates the store difference that current step make
