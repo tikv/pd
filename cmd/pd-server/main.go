@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 
@@ -43,6 +44,12 @@ func main() {
 		server.PrintPDInfo()
 		os.Exit(0)
 	}
+
+	defer func() {
+		if e := recover(); e != nil {
+			log.Fatalf("panic: %s", string(debug.Stack()))
+		}
+	}()
 
 	switch errors.Cause(err) {
 	case nil:
