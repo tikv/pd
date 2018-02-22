@@ -47,7 +47,7 @@ func main() {
 
 	defer func() {
 		if e := recover(); e != nil {
-			log.Fatalf("panic: %s", string(debug.Stack()))
+			log.Fatalf("server panic, err: %v, stack: %s", e, string(debug.Stack()))
 		}
 	}()
 
