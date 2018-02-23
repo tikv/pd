@@ -732,6 +732,8 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	tc.addLabelsStore(4, 2, map[string]string{"zone": "z4", "host": "h4"})
 	tc.addLabelsStore(5, 0, map[string]string{"zone": "z2", "host": "h5"})
 	tc.addLabelsStore(6, 0, map[string]string{"zone": "z5", "host": "h6"})
+	tc.addLabelsStore(7, 0, map[string]string{"zone": "z5", "host": "h7"})
+	tc.setStoreDown(7)
 
 	// Report store written bytes.
 	tc.updateStorageWrittenBytes(1, 75*1024*1024)

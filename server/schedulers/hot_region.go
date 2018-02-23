@@ -248,8 +248,10 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 
 		srcStore := cluster.GetStore(srcStoreID)
 		filters := []schedule.Filter{
-			schedule.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
+			schedule.NewHealthFilter(),
 			schedule.NewStateFilter(),
+			schedule.NewSnapshotCountFilter(),
+			schedule.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
 			schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
 			schedule.NewStorageThresholdFilter(),
 		}
@@ -307,6 +309,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 		}
 
 		filters := []schedule.Filter{
+			schedule.NewHealthFilter(),
 			schedule.NewStateFilter(),
 			schedule.NewBlockFilter(),
 			schedule.NewRejectLeaderFilter(),
