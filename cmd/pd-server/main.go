@@ -17,6 +17,7 @@ import (
 	"flag"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 
 	log "github.com/Sirupsen/logrus"
@@ -39,6 +40,12 @@ func main() {
 		server.PrintPDInfo()
 		os.Exit(0)
 	}
+
+	defer func() {
+		if e := recover(); e != nil {
+			log.Fatalf("server panic, err: %v, stack: %s", e, string(debug.Stack()))
+		}
+	}()
 
 	switch errors.Cause(err) {
 	case nil:

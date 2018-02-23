@@ -961,6 +961,12 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	// We can find that the leader of all hot regions are on store 1,
 	// so one of the leader will transfer to another store.
 	checkTransferLeaderFrom(c, hb.Schedule(cluster), 1)
+
+	// Should not panic if region not found.
+	for i := uint64(1); i <= 3; i++ {
+		tc.clusterInfo.regions.RemoveRegion(tc.GetRegion(i))
+	}
+	hb.Schedule(cluster)
 }
 
 func (c *testClusterInfo) updateStorageReadBytes(storeID uint64, BytesRead uint64) {
@@ -1046,6 +1052,12 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	// Now appear two read hot region in store 1 and 4
 	// We will Transfer peer from 1 to 5
 	checkTransferPeerWithLeaderTransfer(c, hb.Schedule(cluster), 1, 5)
+
+	// Should not panic if region not found.
+	for i := uint64(1); i <= 3; i++ {
+		tc.clusterInfo.regions.RemoveRegion(tc.GetRegion(i))
+	}
+	hb.Schedule(cluster)
 }
 
 func checkTransferPeerWithLeaderTransferFrom(c *C, op *schedule.Operator, sourceID uint64) {
