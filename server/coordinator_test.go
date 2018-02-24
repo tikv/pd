@@ -691,11 +691,27 @@ func checkRemovePeerResp(c *C, resp *pdpb.RegionHeartbeatResponse, storeID uint6
 	c.Assert(changePeer.GetPeer().GetStoreId(), Equals, storeID)
 }
 
-func checkTransferLeaderResp(c *C, resp *pdpb.RegionHeartbeatResponse, storeID uint64) {
-	c.Assert(resp.GetTransferLeader().GetPeer().GetStoreId(), Equals, storeID)
+func waitTransferLeader(c *C, stream *mockHeartbeatStream, regionID, storeID uint64) {
+	testutil.WaitUntil(c, func(c *C) bool {
+		if res := stream.Recv(); res != nil {
+			return res.GetRegionId() == regionID && res.GetTransferLeader().GetPeer().GetStoreId() == storeID
+		}
+		return false
+	})
 }
 
-func checkTransferPeerResp(c *C, resp *pdpb.RegionHeartbeatResponse, sourceID, targetID uint64) {
-	checkAddPeerResp(c, resp, targetID)
-	checkRemovePeerResp(c, resp, sourceID)
+func waitTransferLeader(c *C, stream *mockHeartbeatStream, regionID, storeID uint64) {
+	testutil.WaitUntil(c, func(c *C) bool {
+		if res := stream.Recv(); res != nil {
+			return res.GetRegionId() == regionID && res.GetTransferLeader().GetPeer().GetStoreId() == storeID
+		}
+		return false
+	})
+}
+
+func waitNoResponse(c *C, stream *mockHeartbeatStream) {
+	testutil.WaitUntil(c, func(c *C) bool {
+		res := stream.Recv()
+		return res == nil
+	})
 }
