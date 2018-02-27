@@ -139,7 +139,7 @@ const storeLowSpaceThreshold = 0.2
 
 // IsLowSpace checks if the store is lack of space.
 func (s *StoreInfo) IsLowSpace() bool {
-	return s.AvailableRatio() < storeLowSpaceThreshold
+	return s.Stats != nil && s.AvailableRatio() < storeLowSpaceThreshold
 }
 
 // ResourceCount reutrns count of leader/region in the store.
