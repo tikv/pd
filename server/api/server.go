@@ -38,5 +38,10 @@ func NewHandler(svr *server.Server) http.Handler {
 
 	engine.UseHandler(router)
 
+	tlsConfig, _ := svr.GetSecurityConfig().ToTLSConfig()
+	client = &http.Client{Transport: &http.Transport{
+		TLSClientConfig: tlsConfig,
+	}}
+
 	return engine
 }

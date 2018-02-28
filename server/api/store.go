@@ -28,12 +28,14 @@ import (
 	"github.com/unrolled/render"
 )
 
-type metaStore struct {
+// MetaStore contains meta information about a store.
+type MetaStore struct {
 	*metapb.Store
 	StateName string `json:"state_name"`
 }
 
-type storeStatus struct {
+// StoreStatus contains status about a store.
+type StoreStatus struct {
 	Capacity           typeutil.ByteSize  `json:"capacity,omitempty"`
 	Available          typeutil.ByteSize  `json:"available,omitempty"`
 	LeaderCount        int                `json:"leader_count,omitempty"`
@@ -53,9 +55,10 @@ type storeStatus struct {
 	Uptime             *typeutil.Duration `json:"uptime,omitempty"`
 }
 
-type storeInfo struct {
-	Store  *metaStore   `json:"store"`
-	Status *storeStatus `json:"status"`
+// StoreInfo contains information about a store.
+type StoreInfo struct {
+	Store  *MetaStore   `json:"store"`
+	Status *StoreStatus `json:"status"`
 }
 
 const (
@@ -63,13 +66,13 @@ const (
 	downStateName    = "Down"
 )
 
-func newStoreInfo(store *core.StoreInfo, maxStoreDownTime time.Duration) *storeInfo {
-	s := &storeInfo{
-		Store: &metaStore{
+func newStoreInfo(store *core.StoreInfo, maxStoreDownTime time.Duration) *StoreInfo {
+	s := &StoreInfo{
+		Store: &MetaStore{
 			Store:     store.Store,
 			StateName: store.State.String(),
 		},
-		Status: &storeStatus{
+		Status: &StoreStatus{
 			Capacity:           typeutil.ByteSize(store.Stats.GetCapacity()),
 			Available:          typeutil.ByteSize(store.Stats.GetAvailable()),
 			LeaderCount:        store.LeaderCount,
@@ -111,7 +114,7 @@ func newStoreInfo(store *core.StoreInfo, maxStoreDownTime time.Duration) *storeI
 
 type storesInfo struct {
 	Count  int          `json:"count"`
-	Stores []*storeInfo `json:"stores"`
+	Stores []*StoreInfo `json:"stores"`
 }
 
 type storeHandler struct {
@@ -324,7 +327,7 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	stores := cluster.GetStores()
 	storesInfo := &storesInfo{
-		Stores: make([]*storeInfo, 0, len(stores)),
+		Stores: make([]*StoreInfo, 0, len(stores)),
 	}
 
 	urlFilter, err := newStoreStateFilter(r.URL)

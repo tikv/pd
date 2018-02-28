@@ -23,6 +23,8 @@ import (
 	"github.com/juju/errors"
 )
 
+var client = &http.Client{}
+
 func readJSON(r io.ReadCloser, data interface{}) error {
 	defer r.Close()
 
@@ -38,8 +40,8 @@ func readJSON(r io.ReadCloser, data interface{}) error {
 	return nil
 }
 
-func postJSON(cli *http.Client, url string, data []byte) error {
-	resp, err := cli.Post(url, "application/json", bytes.NewBuffer(data))
+func postJSON(url string, data []byte) error {
+	resp, err := client.Post(url, "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -59,7 +61,7 @@ func doDelete(url string) error {
 	if err != nil {
 		return err
 	}
-	res, err := http.DefaultClient.Do(req)
+	res, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -68,7 +70,11 @@ func doDelete(url string) error {
 }
 
 func doGet(url string) error {
-	resp, err := http.Get(url)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return errors.Trace(err)
 	}
