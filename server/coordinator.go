@@ -46,6 +46,9 @@ const (
 	minHotRegionReportInterval    = 3
 	hotRegionAntiCount            = 1
 	hotRegionScheduleName         = "balance-hot-region-scheduler"
+
+	patrolRegionInterval  = time.Millisecond * 100
+	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
 )
 
 var (
@@ -112,17 +115,47 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 			c.removeOperator(op)
 		}
 	}
+}
 
-	// Check replica operator.
-	if c.limiter.operatorCount(core.RegionKind) >= c.opt.GetReplicaScheduleLimit() {
-		return
-	}
-	// Generate Operator which moves region to targeted namespace store
-	if op := c.namespaceChecker.Check(region); op != nil {
-		c.addOperator(op)
-	}
-	if op := c.replicaChecker.Check(region); op != nil {
-		c.addOperator(op)
+func (c *coordinator) patrolRegions() {
+	defer c.wg.Done()
+	ticker := time.NewTicker(patrolRegionInterval)
+	defer ticker.Stop()
+
+	log.Info("coordinator: start patrol regions")
+
+	var key []byte
+	for {
+		select {
+		case <-ticker.C:
+		case <-c.ctx.Done():
+			return
+		}
+
+		if c.limiter.operatorCount(core.RegionKind) >= c.opt.GetReplicaScheduleLimit() {
+			continue
+		}
+
+		regions := c.cluster.ScanRegions(key, patrolScanRegionLimit)
+		if len(regions) == 0 {
+			// reset scan key.
+			key = nil
+			continue
+		}
+
+		for _, region := range regions {
+			key = region.GetEndKey()
+
+			if op := c.namespaceChecker.Check(region); op != nil {
+				c.addOperator(op)
+				break
+			}
+
+			if op := c.replicaChecker.Check(region); op != nil {
+				c.addOperator(op)
+				break
+			}
+		}
 	}
 }
 
@@ -170,6 +203,8 @@ func (c *coordinator) run() {
 		log.Errorf("can't persist schedule config: %v", err)
 	}
 
+	c.wg.Add(1)
+	go c.patrolRegions()
 }
 
 func (c *coordinator) stop() {
