@@ -348,7 +348,7 @@ type ScheduleConfig struct {
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
 	// EnableRaftLearner is the option for using AddLearnerNode instead of AddNode
-	EnableRaftLearner bool `toml:"enable-raft-learner" json:"enable-raft-learner"`
+	EnableRaftLearner bool `toml:"enable-raft-learner" json:"enable-raft-learner,string"`
 	// Schedulers support for loding customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 }
