@@ -81,7 +81,7 @@ func (s *testStoreSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func checkStoresInfo(c *C, ss []*StoreInfo, want []*metapb.Store) {
+func checkStoresInfo(c *C, ss []*storeInfo, want []*metapb.Store) {
 	c.Assert(len(ss), Equals, len(want))
 	mapWant := make(map[uint64]*metapb.Store)
 	for _, s := range want {
@@ -117,15 +117,15 @@ func (s *testStoreSuite) TestStoresList(c *C) {
 
 func (s *testStoreSuite) TestStoreGet(c *C) {
 	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
-	info := new(StoreInfo)
+	info := new(storeInfo)
 	err := readJSONWithURL(url, info)
 	c.Assert(err, IsNil)
-	checkStoresInfo(c, []*StoreInfo{info}, s.stores[:1])
+	checkStoresInfo(c, []*storeInfo{info}, s.stores[:1])
 }
 
 func (s *testStoreSuite) TestStoreLabel(c *C) {
 	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
-	var info StoreInfo
+	var info storeInfo
 	err := readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.Labels, HasLen, 0)
@@ -134,7 +134,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	labels := map[string]string{"zone": "cn", "host": "local"}
 	b, err := json.Marshal(labels)
 	c.Assert(err, IsNil)
-	err = postJSON(url+"/label", b)
+	err = postJSON(&http.Client{}, url+"/label", b)
 	c.Assert(err, IsNil)
 
 	err = readJSONWithURL(url, &info)
@@ -148,7 +148,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	labels = map[string]string{"zack": "zack1", "Host": "host1"}
 	b, err = json.Marshal(labels)
 	c.Assert(err, IsNil)
-	err = postJSON(url+"/label", b)
+	err = postJSON(&http.Client{}, url+"/label", b)
 	c.Assert(err, IsNil)
 
 	expectLabel := map[string]string{"zone": "cn", "zack": "zack1", "host": "host1"}
@@ -190,30 +190,30 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 
 func (s *testStoreSuite) TestStoreSetState(c *C) {
 	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
-	info := StoreInfo{}
+	info := storeInfo{}
 	err := readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
 
 	// Set to Offline.
-	info = StoreInfo{}
-	err = postJSON(url+"/state?state=Offline", nil)
+	info = storeInfo{}
+	err = postJSON(&http.Client{}, url+"/state?state=Offline", nil)
 	c.Assert(err, IsNil)
 	err = readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
 
 	// Invalid state.
-	info = StoreInfo{}
-	err = postJSON(url+"/state?state=Foo", nil)
+	info = storeInfo{}
+	err = postJSON(&http.Client{}, url+"/state?state=Foo", nil)
 	c.Assert(err, NotNil)
 	err = readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
 
 	// Set back to Up.
-	info = StoreInfo{}
-	err = postJSON(url+"/state?state=Up", nil)
+	info = storeInfo{}
+	err = postJSON(&http.Client{}, url+"/state?state=Up", nil)
 	c.Assert(err, IsNil)
 	err = readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)

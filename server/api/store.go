@@ -28,14 +28,14 @@ import (
 	"github.com/unrolled/render"
 )
 
-// MetaStore contains meta information about a store.
-type MetaStore struct {
+// metaStore contains meta information about a store.
+type metaStore struct {
 	*metapb.Store
 	StateName string `json:"state_name"`
 }
 
-// StoreStatus contains status about a store.
-type StoreStatus struct {
+// storeStatus contains status about a store.
+type storeStatus struct {
 	Capacity           typeutil.ByteSize  `json:"capacity,omitempty"`
 	Available          typeutil.ByteSize  `json:"available,omitempty"`
 	LeaderCount        int                `json:"leader_count,omitempty"`
@@ -55,10 +55,10 @@ type StoreStatus struct {
 	Uptime             *typeutil.Duration `json:"uptime,omitempty"`
 }
 
-// StoreInfo contains information about a store.
-type StoreInfo struct {
-	Store  *MetaStore   `json:"store"`
-	Status *StoreStatus `json:"status"`
+// storeInfo contains information about a store.
+type storeInfo struct {
+	Store  *metaStore   `json:"store"`
+	Status *storeStatus `json:"status"`
 }
 
 const (
@@ -66,13 +66,13 @@ const (
 	downStateName    = "Down"
 )
 
-func newStoreInfo(store *core.StoreInfo, maxStoreDownTime time.Duration) *StoreInfo {
-	s := &StoreInfo{
-		Store: &MetaStore{
+func newStoreInfo(store *core.StoreInfo, maxStoreDownTime time.Duration) *storeInfo {
+	s := &storeInfo{
+		Store: &metaStore{
 			Store:     store.Store,
 			StateName: store.State.String(),
 		},
-		Status: &StoreStatus{
+		Status: &storeStatus{
 			Capacity:           typeutil.ByteSize(store.Stats.GetCapacity()),
 			Available:          typeutil.ByteSize(store.Stats.GetAvailable()),
 			LeaderCount:        store.LeaderCount,
@@ -114,7 +114,7 @@ func newStoreInfo(store *core.StoreInfo, maxStoreDownTime time.Duration) *StoreI
 
 type storesInfo struct {
 	Count  int          `json:"count"`
-	Stores []*StoreInfo `json:"stores"`
+	Stores []*storeInfo `json:"stores"`
 }
 
 type storeHandler struct {
@@ -327,7 +327,7 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	stores := cluster.GetStores()
 	storesInfo := &storesInfo{
-		Stores: make([]*StoreInfo, 0, len(stores)),
+		Stores: make([]*storeInfo, 0, len(stores)),
 	}
 
 	urlFilter, err := newStoreStateFilter(r.URL)
