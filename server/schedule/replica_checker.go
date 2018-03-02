@@ -46,10 +46,12 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 	checkerCounter.WithLabelValues("replica_checker", "check").Inc()
 	if op := r.checkDownPeer(region); op != nil {
 		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
+		op.SetPriorityLevel(core.HighPriority)
 		return op
 	}
 	if op := r.checkOfflinePeer(region); op != nil {
 		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
+		op.SetPriorityLevel(core.HighPriority)
 		return op
 	}
 

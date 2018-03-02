@@ -732,6 +732,8 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	tc.addLabelsStore(4, 2, map[string]string{"zone": "z4", "host": "h4"})
 	tc.addLabelsStore(5, 0, map[string]string{"zone": "z2", "host": "h5"})
 	tc.addLabelsStore(6, 0, map[string]string{"zone": "z5", "host": "h6"})
+	tc.addLabelsStore(7, 0, map[string]string{"zone": "z5", "host": "h7"})
+	tc.setStoreDown(7)
 
 	// Report store written bytes.
 	tc.updateStorageWrittenBytes(1, 75*1024*1024)
@@ -784,6 +786,12 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	// We can find that the leader of all hot regions are on store 1,
 	// so one of the leader will transfer to another store.
 	checkTransferLeaderFrom(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 1)
+
+	// Should not panic if region not found.
+	for i := uint64(1); i <= 3; i++ {
+		tc.Regions.RemoveRegion(tc.GetRegion(i))
+	}
+	hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 }
 
 var _ = Suite(&testBalanceHotReadRegionSchedulerSuite{})
@@ -840,6 +848,12 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	// Now appear two read hot region in store 1 and 4
 	// We will Transfer peer from 1 to 5
 	checkTransferPeerWithLeaderTransfer(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 1, 5)
+
+	// Should not panic if region not found.
+	for i := uint64(1); i <= 3; i++ {
+		tc.Regions.RemoveRegion(tc.GetRegion(i))
+	}
+	hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 }
 
 func checkRemovePeer(c *C, op *schedule.Operator, storeID uint64) {

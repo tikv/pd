@@ -380,10 +380,10 @@ const (
 	defaultMaxReplicas          = 3
 	defaultMaxSnapshotCount     = 3
 	defaultMaxPendingPeerCount  = 16
-	defaultMaxStoreDownTime     = time.Hour
+	defaultMaxStoreDownTime     = 30 * time.Minute
 	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
-	defaultReplicaScheduleLimit = 16
+	defaultReplicaScheduleLimit = 32
 	defaultTolerantSizeRatio    = 2.5
 )
 
