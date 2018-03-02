@@ -86,6 +86,7 @@ func newCustomReverseProxies(urls []url.URL, tlsConfig *tls.Config) *customRever
 		client: &http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig: tlsConfig,
+				DisableKeepAlives: true,
 			},
 		},
 	}
