@@ -76,7 +76,7 @@ func (h *labelsHandler) GetStores(w http.ResponseWriter, r *http.Request) {
 
 	stores := cluster.GetStores()
 	storesInfo := &storesInfo{
-		Stores: make([]*StoreInfo, 0, len(stores)),
+		Stores: make([]*storeInfo, 0, len(stores)),
 	}
 
 	stores = filter.filter(stores)
