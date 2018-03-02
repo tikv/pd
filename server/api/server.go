@@ -17,6 +17,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/juju/errors"
 	"github.com/pingcap/pd/server"
 	"github.com/urfave/negroni"
 )
@@ -38,10 +39,18 @@ func NewHandler(svr *server.Server) http.Handler {
 
 	engine.UseHandler(router)
 
-	tlsConfig, _ := svr.GetSecurityConfig().ToTLSConfig()
+	return engine
+}
+
+// InitHTTPClient initials a http client for api handler.
+func InitHTTPClient(svr *server.Server) error {
+	tlsConfig, err := svr.GetSecurityConfig().ToTLSConfig()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
 	client = &http.Client{Transport: &http.Transport{
 		TLSClientConfig: tlsConfig,
 	}}
-
-	return engine
+	return nil
 }

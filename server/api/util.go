@@ -69,17 +69,17 @@ func doDelete(url string) error {
 	return nil
 }
 
-func doGet(url string) error {
+func doGet(url string) (*http.Response, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return errors.Errorf("http get url %s return code %d", url, resp.StatusCode)
+		return nil, errors.Errorf("http get url %s return code %d", url, resp.StatusCode)
 	}
-	return nil
+	return resp, nil
 }
