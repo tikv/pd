@@ -24,7 +24,11 @@ import (
 
 const apiPrefix = "/pd"
 
-var dialClient = &http.Client{}
+var dialClient = &http.Client{
+	Transport: &http.Transport{
+		DisableKeepAlives: true,
+	},
+}
 
 // NewHandler creates a HTTP handler for API.
 func NewHandler(svr *server.Server) http.Handler {
