@@ -147,6 +147,16 @@ func (r *RegionInfo) GetFollower() *metapb.Peer {
 	return nil
 }
 
+// ScanRange scans region with start key, until number greater than limit.
+func (r *RegionsInfo) ScanRange(startKey []byte, limit int) []*RegionInfo {
+	res := make([]*RegionInfo, 0, limit)
+	r.tree.scanRange(startKey, func(region *metapb.Region) bool {
+		res = append(res, r.GetRegion(region.GetId()))
+		return len(res) < limit
+	})
+	return res
+}
+
 // RegionStat records each hot region's statistics
 type RegionStat struct {
 	RegionID  uint64 `json:"region_id"`

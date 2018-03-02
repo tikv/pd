@@ -201,6 +201,13 @@ func (c *clusterInfo) getStoresReadStat() map[uint64]uint64 {
 	return c.stores.GetStoresReadStat()
 }
 
+// ScanRegions scans region with start key, until number greater than limit.
+func (c *clusterInfo) ScanRegions(startKey []byte, limit int) []*core.RegionInfo {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regions.ScanRange(startKey, limit)
+}
+
 // GetRegions searches for a region by ID.
 func (c *clusterInfo) GetRegion(regionID uint64) *core.RegionInfo {
 	c.RLock()
