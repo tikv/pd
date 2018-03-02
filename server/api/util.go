@@ -23,8 +23,6 @@ import (
 	"github.com/juju/errors"
 )
 
-var client = &http.Client{}
-
 func readJSON(r io.ReadCloser, data interface{}) error {
 	defer r.Close()
 
@@ -41,7 +39,7 @@ func readJSON(r io.ReadCloser, data interface{}) error {
 }
 
 func postJSON(url string, data []byte) error {
-	resp, err := client.Post(url, "application/json", bytes.NewBuffer(data))
+	resp, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -61,7 +59,7 @@ func doDelete(url string) error {
 	if err != nil {
 		return err
 	}
-	res, err := client.Do(req)
+	res, err := dialClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -74,7 +72,7 @@ func doGet(url string) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.Do(req)
+	resp, err := dialClient.Do(req)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

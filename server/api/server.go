@@ -24,6 +24,8 @@ import (
 
 const apiPrefix = "/pd"
 
+var dialClient = &http.Client{}
+
 // NewHandler creates a HTTP handler for API.
 func NewHandler(svr *server.Server) http.Handler {
 	engine := negroni.New()
@@ -49,8 +51,9 @@ func InitHTTPClient(svr *server.Server) error {
 		return errors.Trace(err)
 	}
 
-	client = &http.Client{Transport: &http.Transport{
-		TLSClientConfig: tlsConfig,
+	dialClient = &http.Client{Transport: &http.Transport{
+		TLSClientConfig:   tlsConfig,
+		DisableKeepAlives: true,
 	}}
 	return nil
 }
