@@ -19,6 +19,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 
@@ -244,4 +245,12 @@ func InitLogger(cfg *LogConfig) error {
 		return errors.Trace(err)
 	}
 	return nil
+}
+
+// LogPanic logs the panic reason and stack, then exit the process.
+// Commonly used with a `defer`.
+func LogPanic() {
+	if e := recover(); e != nil {
+		log.Fatalf("panic: %v, stack: %s", e, string(debug.Stack()))
+	}
 }
