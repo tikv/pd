@@ -22,6 +22,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	log "github.com/sirupsen/logrus"
@@ -122,6 +123,8 @@ func (c *RaftCluster) start() error {
 }
 
 func (c *RaftCluster) runCoordinator() {
+	defer logutil.LogPanic()
+
 	c.coordinator.run()
 	c.wg.Done()
 }
@@ -464,6 +467,7 @@ func (c *RaftCluster) collectMetrics() {
 }
 
 func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
+	defer logutil.LogPanic()
 	defer c.wg.Done()
 
 	ticker := time.NewTicker(interval)
