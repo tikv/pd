@@ -134,7 +134,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	labels := map[string]string{"zone": "cn", "host": "local"}
 	b, err := json.Marshal(labels)
 	c.Assert(err, IsNil)
-	err = postJSON(&http.Client{}, url+"/label", b)
+	err = postJSON(url+"/label", b)
 	c.Assert(err, IsNil)
 
 	err = readJSONWithURL(url, &info)
@@ -148,7 +148,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	labels = map[string]string{"zack": "zack1", "Host": "host1"}
 	b, err = json.Marshal(labels)
 	c.Assert(err, IsNil)
-	err = postJSON(&http.Client{}, url+"/label", b)
+	err = postJSON(url+"/label", b)
 	c.Assert(err, IsNil)
 
 	expectLabel := map[string]string{"zone": "cn", "zack": "zack1", "host": "host1"}
@@ -197,7 +197,7 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 
 	// Set to Offline.
 	info = StoreInfo{}
-	err = postJSON(&http.Client{}, url+"/state?state=Offline", nil)
+	err = postJSON(url+"/state?state=Offline", nil)
 	c.Assert(err, IsNil)
 	err = readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)
@@ -205,7 +205,7 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 
 	// Invalid state.
 	info = StoreInfo{}
-	err = postJSON(&http.Client{}, url+"/state?state=Foo", nil)
+	err = postJSON(url+"/state?state=Foo", nil)
 	c.Assert(err, NotNil)
 	err = readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)
@@ -213,7 +213,7 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 
 	// Set back to Up.
 	info = StoreInfo{}
-	err = postJSON(&http.Client{}, url+"/state?state=Up", nil)
+	err = postJSON(url+"/state?state=Up", nil)
 	c.Assert(err, IsNil)
 	err = readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)
