@@ -70,7 +70,7 @@ func doDelete(url string) error {
 func doGet(url string) (*http.Response, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.Trace(err)
 	}
 	resp, err := dialClient.Do(req)
 	if err != nil {
