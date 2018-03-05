@@ -158,7 +158,7 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 	}
 	for _, t := range table {
 		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", s.urlPrefix, t.name, t.value)
-		info := new(storesInfo)
+		info := new(StoresInfo)
 		err := readJSONWithURL(url, info)
 		c.Assert(err, IsNil)
 		checkStoresInfo(c, info.Stores, t.want)

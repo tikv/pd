@@ -75,8 +75,8 @@ func (h *labelsHandler) GetStores(w http.ResponseWriter, r *http.Request) {
 	maxDownTime := h.svr.GetScheduleConfig().MaxStoreDownTime.Duration
 
 	stores := cluster.GetStores()
-	storesInfo := &storesInfo{
-		Stores: make([]*storeInfo, 0, len(stores)),
+	storesInfo := &StoresInfo{
+		Stores: make([]*StoreInfo, 0, len(stores)),
 	}
 
 	stores = filter.filter(stores)
