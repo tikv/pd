@@ -68,7 +68,7 @@ func NewTestSingleConfig() *Config {
 	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
 	cfg.disableStrictReconfigCheck = true
 	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)
-	cfg.ElectionInterval = typeutil.NewDuration(1000 * time.Millisecond)
+	cfg.ElectionInterval = typeutil.NewDuration(3000 * time.Millisecond)
 	cfg.leaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
 
 	cfg.adjust()

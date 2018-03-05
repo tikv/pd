@@ -26,6 +26,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/pkg/logutil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -66,6 +67,7 @@ func (s *Server) stopLeaderLoop() {
 }
 
 func (s *Server) leaderLoop() {
+	defer logutil.LogPanic()
 	defer s.leaderLoopWg.Done()
 
 	for {
@@ -110,6 +112,7 @@ func (s *Server) leaderLoop() {
 }
 
 func (s *Server) etcdLeaderLoop() {
+	defer logutil.LogPanic()
 	defer s.leaderLoopWg.Done()
 
 	ctx, cancel := context.WithCancel(s.leaderLoopCtx)
