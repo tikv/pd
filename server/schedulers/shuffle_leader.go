@@ -57,7 +57,7 @@ func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 	return s.limiter.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
+func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	// We shuffle leaders between stores:
 	// 1. select a store randomly.
 	// 2. transfer a leader from the store to another store.
@@ -75,7 +75,8 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 		s.selected = region.Leader
 		schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 		step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
-		return schedule.NewOperator("shuffle-leader", region.GetId(), schedule.OpAdmin|schedule.OpLeader, step)
+		op := schedule.NewOperator("shuffle-leader", region.GetId(), schedule.OpAdmin|schedule.OpLeader, step)
+		return []*schedule.Operator{op}
 	}
 
 	// Reset the selected store.
@@ -92,5 +93,5 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: storeID}
 	op := schedule.NewOperator("shuffleSelectedLeader", region.GetId(), schedule.OpAdmin|schedule.OpLeader, step)
 	op.SetPriorityLevel(core.HighPriority)
-	return op
+	return []*schedule.Operator{op}
 }

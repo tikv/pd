@@ -72,7 +72,7 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 	return s.limiter.OperatorCount(schedule.OpRegion) < limit
 }
 
-func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
+func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	// Select a peer from the store with most regions.
 	region, oldPeer := scheduleRemovePeer(cluster, s.GetName(), s.selector)
@@ -100,7 +100,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	return op
+	return []*schedule.Operator{op}
 }
 
 func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer, opInfluence schedule.OpInfluence) *schedule.Operator {

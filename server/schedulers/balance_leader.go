@@ -61,7 +61,7 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 	return l.limiter.OperatorCount(schedule.OpLeader) < limit
 }
 
-func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
+func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 	region, newLeader := scheduleTransferLeader(cluster, l.GetName(), l.selector)
 	if region == nil {
@@ -85,5 +85,6 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 	l.limit = adjustBalanceLimit(cluster, core.LeaderKind)
 	schedulerCounter.WithLabelValues(l.GetName(), "new_operator").Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
-	return schedule.NewOperator("balance-leader", region.GetId(), schedule.OpBalance|schedule.OpLeader, step)
+	op := schedule.NewOperator("balance-leader", region.GetId(), schedule.OpBalance|schedule.OpLeader, step)
+	return []*schedule.Operator{op}
 }

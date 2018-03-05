@@ -386,7 +386,11 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			}
 			opInfluence := schedule.NewOpInfluence(c.getOperators(), c.cluster)
 			if op := s.Schedule(c.cluster, opInfluence); op != nil {
-				c.addOperator(op)
+				if len(op) == 1 {
+					c.addOperator(op[0])
+				} else {
+					c.addOperators(op...)
+				}
 			}
 
 		case <-s.Ctx().Done():
@@ -439,6 +443,7 @@ func (c *coordinator) addOperators(ops ...*schedule.Operator) bool {
 
 	for _, op := range ops {
 		if old := c.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
+			log.Infof("[region %v] cancel add operators, old: %s", op.RegionID(), old)
 			return false
 		}
 	}
@@ -596,7 +601,7 @@ func (s *scheduleController) Stop() {
 	s.cancel()
 }
 
-func (s *scheduleController) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
+func (s *scheduleController) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
 		// If we have schedule, reset interval to the minimal interval.
 		if op := scheduleByNamespace(cluster, s.classifier, s.Scheduler, opInfluence); op != nil {

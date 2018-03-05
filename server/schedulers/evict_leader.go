@@ -78,7 +78,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 	return s.limiter.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
+func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region := cluster.RandLeaderRegion(s.storeID)
 	if region == nil {
@@ -94,5 +94,5 @@ func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence sc
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: target.GetId()}
 	op := schedule.NewOperator("evict-leader", region.GetId(), schedule.OpLeader, step)
 	op.SetPriorityLevel(core.HighPriority)
-	return op
+	return []*schedule.Operator{op}
 }

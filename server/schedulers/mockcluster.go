@@ -313,6 +313,10 @@ func (mc *mockCluster) GetReplicaScheduleLimit() uint64 {
 	return mc.MockSchedulerOptions.GetReplicaScheduleLimit(namespace.DefaultNamespace)
 }
 
+func (mc *mockCluster) GetMergeScheduleLimit() uint64 {
+	return mc.MockSchedulerOptions.GetMergeScheduleLimit(namespace.DefaultNamespace)
+}
+
 func (mc *mockCluster) GetMaxReplicas() int {
 	return mc.MockSchedulerOptions.GetMaxReplicas(namespace.DefaultNamespace)
 }

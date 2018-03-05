@@ -182,6 +182,11 @@ func (h *Handler) AddShuffleRegionScheduler() error {
 	return h.AddScheduler("shuffle-region")
 }
 
+// AddRandomMergeScheduler adds a random-merge-scheduler.
+func (h *Handler) AddRandomMergeScheduler() error {
+	return h.AddScheduler("random-merge")
+}
+
 // GetOperator returns the region operator.
 func (h *Handler) GetOperator(regionID uint64) (*schedule.Operator, error) {
 	c, err := h.getCoordinator()

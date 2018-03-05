@@ -28,6 +28,7 @@ type Options interface {
 	GetLeaderScheduleLimit() uint64
 	GetRegionScheduleLimit() uint64
 	GetReplicaScheduleLimit() uint64
+	GetMergeScheduleLimit() uint64
 
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
