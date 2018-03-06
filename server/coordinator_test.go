@@ -14,6 +14,7 @@
 package server
 
 import (
+	"fmt"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -27,6 +28,14 @@ import (
 
 func newTestOperator(regionID uint64, kind core.ResourceKind) *schedule.Operator {
 	return schedule.NewOperator("test", regionID, kind)
+}
+
+func newTestRegionMeta(regionID uint64) *metapb.Region {
+	return &metapb.Region{
+		Id:       regionID,
+		StartKey: []byte(fmt.Sprintf("%20d", regionID)),
+		EndKey:   []byte(fmt.Sprintf("%20d", regionID+1)),
+	}
 }
 
 var _ = Suite(&testCoordinatorSuite{})

@@ -112,7 +112,7 @@ func (c *testClusterInfo) addLabelsStore(storeID uint64, regionCount int, labels
 }
 
 func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
-	region := &metapb.Region{Id: regionID}
+	region := newTestRegionMeta(regionID)
 	leader, _ := c.AllocPeer(leaderID)
 	region.Peers = []*metapb.Peer{leader}
 	for _, id := range followerIds {
@@ -124,7 +124,7 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 
 func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) {
 	//  regions load from etcd will have no leader
-	region := &metapb.Region{Id: regionID}
+	region := newTestRegionMeta(regionID)
 	region.Peers = []*metapb.Peer{}
 	for _, id := range followerIds {
 		peer, _ := c.AllocPeer(id)
@@ -134,7 +134,7 @@ func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) {
 }
 
 func (c *testClusterInfo) addLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
-	region := &metapb.Region{Id: regionID}
+	region := newTestRegionMeta(regionID)
 	leader, _ := c.AllocPeer(leaderID)
 	region.Peers = []*metapb.Peer{leader}
 	for _, id := range followerIds {
@@ -976,7 +976,7 @@ func (c *testClusterInfo) updateStorageReadBytes(storeID uint64, BytesRead uint6
 }
 
 func (c *testClusterInfo) addLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
-	region := &metapb.Region{Id: regionID}
+	region := newTestRegionMeta(regionID)
 	leader, _ := c.AllocPeer(leaderID)
 	region.Peers = []*metapb.Peer{leader}
 	for _, id := range followerIds {

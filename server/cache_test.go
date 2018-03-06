@@ -156,6 +156,13 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 		c.Assert(region.GetStorePeer(i), NotNil)
 	}
 
+	// check overlaps
+	overlapRegion := regions[n-1]
+	overlapRegion.StartKey = regions[n-2].StartKey
+	cache.AddRegion(overlapRegion)
+	c.Assert(cache.GetRegion(n-2), IsNil)
+	c.Assert(cache.GetRegion(n-1), NotNil)
+
 	// All regions will be filtered out if they have pending peers.
 	for i := uint64(0); i < n; i++ {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
@@ -586,7 +593,7 @@ func mustSaveStores(c *C, kv *core.KV, n int) []*metapb.Store {
 func mustSaveRegions(c *C, kv *core.KV, n int) []*metapb.Region {
 	regions := make([]*metapb.Region, 0, n)
 	for i := 0; i < n; i++ {
-		region := &metapb.Region{Id: uint64(i)}
+		region := newTestRegionMeta(uint64(i))
 		regions = append(regions, region)
 	}
 
