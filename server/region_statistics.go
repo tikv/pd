@@ -14,6 +14,8 @@
 package server
 
 import (
+	"fmt"
+
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 )
@@ -29,18 +31,20 @@ const (
 )
 
 type regionStatistics struct {
-	opt        *scheduleOption
-	classifier namespace.Classifier
-	stats      map[regionStatisticType]map[uint64]*core.RegionInfo
-	index      map[uint64]regionStatisticType
+	opt             *scheduleOption
+	classifier      namespace.Classifier
+	stats           map[regionStatisticType]map[uint64]*core.RegionInfo
+	index           map[uint64]regionStatisticType
+	labelLevelStats *labelLevelStatistics
 }
 
 func newRegionStatistics(opt *scheduleOption, classifier namespace.Classifier) *regionStatistics {
 	r := &regionStatistics{
-		opt:        opt,
-		classifier: classifier,
-		stats:      make(map[regionStatisticType]map[uint64]*core.RegionInfo),
-		index:      make(map[uint64]regionStatisticType),
+		opt:             opt,
+		classifier:      classifier,
+		stats:           make(map[regionStatisticType]map[uint64]*core.RegionInfo),
+		index:           make(map[uint64]regionStatisticType),
+		labelLevelStats: newLabelLevlStatistics(),
 	}
 	r.stats[missPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[extraPeer] = make(map[uint64]*core.RegionInfo)
@@ -107,8 +111,47 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	if len(stores) == 0 {
 		return
 	}
+	r.labelLevelStats.Observe(region, stores, labels)
+}
+
+func (r *regionStatistics) Collect() {
+	regionStatusGauge.WithLabelValues("miss_peer_region_count").Set(float64(len(r.stats[missPeer])))
+	regionStatusGauge.WithLabelValues("extra_peer_region_count").Set(float64(len(r.stats[extraPeer])))
+	regionStatusGauge.WithLabelValues("down_peer_region_count").Set(float64(len(r.stats[downPeer])))
+	regionStatusGauge.WithLabelValues("pending_peer_region_count").Set(float64(len(r.stats[pendingPeer])))
+	regionStatusGauge.WithLabelValues("incorrect_namespace_region_count").Set(float64(len(r.stats[incorrectNamespace])))
+	r.labelLevelStats.Collect()
+}
+
+type labelLevelStatistics struct {
+	regionLabelLevelStats map[uint64]int
+	labelLevelCounter     map[int]int
+}
+
+func newLabelLevlStatistics() *labelLevelStatistics {
+	return &labelLevelStatistics{
+		regionLabelLevelStats: make(map[uint64]int),
+		labelLevelCounter:     make(map[int]int),
+	}
+}
+
+func (l *labelLevelStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo, labels []string) {
+	regionID := region.GetId()
 	regionLabelLevel := getRegionLabelIsolationLevel(stores, labels)
-	regionLabelLevelHistogram.Observe(float64(regionLabelLevel))
+	if level, ok := l.regionLabelLevelStats[regionID]; ok {
+		if level == regionLabelLevel {
+			return
+		}
+		l.labelLevelCounter[level]--
+	}
+	l.regionLabelLevelStats[regionID] = regionLabelLevel
+	l.labelLevelCounter[regionLabelLevel]++
+}
+func (l *labelLevelStatistics) Collect() {
+	for level, count := range l.labelLevelCounter {
+		typ := fmt.Sprintf("level_%d", level)
+		regionStatusGauge.WithLabelValues(typ).Set(float64(count))
+	}
 }
 
 func getRegionLabelIsolationLevel(stores []*core.StoreInfo, labels []string) int {
@@ -148,12 +191,4 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 		}
 	}
 	return res
-}
-
-func (r *regionStatistics) Collect() {
-	regionStatusGauge.WithLabelValues("miss_peer_region_count").Set(float64(len(r.stats[missPeer])))
-	regionStatusGauge.WithLabelValues("extra_peer_region_count").Set(float64(len(r.stats[extraPeer])))
-	regionStatusGauge.WithLabelValues("down_peer_region_count").Set(float64(len(r.stats[downPeer])))
-	regionStatusGauge.WithLabelValues("pending_peer_region_count").Set(float64(len(r.stats[pendingPeer])))
-	regionStatusGauge.WithLabelValues("incorrect_namespace_region_count").Set(float64(len(r.stats[incorrectNamespace])))
 }
