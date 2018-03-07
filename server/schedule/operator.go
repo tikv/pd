@@ -125,6 +125,7 @@ func NewOperator(desc string, regionID uint64, kind OperatorKind, steps ...Opera
 		kind:       kind,
 		steps:      steps,
 		createTime: time.Now(),
+		stepTime:   time.Now(),
 		level:      core.NormalPriority,
 	}
 }
@@ -185,8 +186,8 @@ func (o *Operator) Check(region *core.RegionInfo) OperatorStep {
 		if o.steps[int(step)].IsFinish(region) {
 			operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).Observe(time.Since(o.stepTime).Seconds())
 			atomic.StoreInt32(&o.currentStep, step+1)
-		} else {
 			o.stepTime = time.Now()
+		} else {
 			return o.steps[int(step)]
 		}
 	}
