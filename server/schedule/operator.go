@@ -113,7 +113,7 @@ type Operator struct {
 	steps       []OperatorStep
 	currentStep int32
 	createTime  time.Time
-	stepTime    time.Time
+	stepTime    int64
 	level       core.PriorityLevel
 }
 
@@ -125,7 +125,7 @@ func NewOperator(desc string, regionID uint64, kind OperatorKind, steps ...Opera
 		kind:       kind,
 		steps:      steps,
 		createTime: time.Now(),
-		stepTime:   time.Now(),
+		stepTime:   time.Now().UnixNano(),
 		level:      core.NormalPriority,
 	}
 }
@@ -184,9 +184,11 @@ func (o *Operator) Step(i int) OperatorStep {
 func (o *Operator) Check(region *core.RegionInfo) OperatorStep {
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if o.steps[int(step)].IsFinish(region) {
-			operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).Observe(time.Since(o.stepTime).Seconds())
+			operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).
+				Observe(time.Since(time.Unix(0, atomic.LoadInt64(&o.stepTime))).Seconds())
 			atomic.StoreInt32(&o.currentStep, step+1)
-			o.stepTime = time.Now()
+			atomic.StoreInt64(&o.stepTime, time.Now().UnixNano())
+			time.Unix(0, 0)
 		} else {
 			return o.steps[int(step)]
 		}
