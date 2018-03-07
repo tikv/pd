@@ -229,10 +229,10 @@ func (s *testLeaderChangeSuite) mustGetLeader(c *C, cli *client, urls []string) 
 }
 
 func (s *testLeaderChangeSuite) verifyLeader(c *C, cli *client, leader string) {
-	cli.scheduleCheckLeader()
-	time.Sleep(time.Millisecond * 500)
-
-	cli.connMu.RLock()
-	defer cli.connMu.RUnlock()
-	c.Assert(cli.connMu.leader, Equals, leader)
+	testutil.WaitUntil(c, func(c *C) bool {
+		cli.scheduleCheckLeader()
+		cli.connMu.RLock()
+		defer cli.connMu.RUnlock()
+		return cli.connMu.leader == leader
+	})
 }

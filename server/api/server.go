@@ -17,11 +17,18 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/juju/errors"
 	"github.com/pingcap/pd/server"
 	"github.com/urfave/negroni"
 )
 
 const apiPrefix = "/pd"
+
+var dialClient = &http.Client{
+	Transport: &http.Transport{
+		DisableKeepAlives: true,
+	},
+}
 
 // NewHandler creates a HTTP handler for API.
 func NewHandler(svr *server.Server) http.Handler {
@@ -39,4 +46,18 @@ func NewHandler(svr *server.Server) http.Handler {
 	engine.UseHandler(router)
 
 	return engine
+}
+
+// InitHTTPClient initials a http client for api handler.
+func InitHTTPClient(svr *server.Server) error {
+	tlsConfig, err := svr.GetSecurityConfig().ToTLSConfig()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	dialClient = &http.Client{Transport: &http.Transport{
+		TLSClientConfig:   tlsConfig,
+		DisableKeepAlives: true,
+	}}
+	return nil
 }
