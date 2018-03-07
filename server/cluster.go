@@ -440,7 +440,14 @@ func (c *RaftCluster) checkOperators() {
 		// after region is merged, it will not heartbeat anymore
 		// the operator of merged region will not timeout actively
 		if c.cachedCluster.GetRegion(op.RegionID()) == nil {
-			log.Debugf("remove operator $v cause region %d is merged", op, op.RegionID)
+			log.Debugf("remove operator %v cause region %d is merged", op, op.RegionID)
+			co.removeOperator(op)
+			continue
+		}
+
+		if op.IsTimeout() {
+			log.Infof("[region %v] operator timeout: %s", op.RegionID, op)
+			operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 			co.removeOperator(op)
 		}
 	}

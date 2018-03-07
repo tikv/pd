@@ -109,16 +109,6 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 			c.removeOperator(op)
 		}
 	}
-
-	// Check merge operator.
-	if c.limiter.OperatorCount(schedule.OpMerge) >= c.cluster.GetMergeScheduleLimit() {
-		return
-	}
-
-	if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
-		// make sure two operators can add successfully altogether
-		c.addOperators(op1, op2)
-	}
 }
 
 func (c *coordinator) patrolRegions() {
@@ -142,6 +132,11 @@ func (c *coordinator) patrolRegions() {
 			continue
 		}
 
+		// Check merge operator.
+		if c.limiter.OperatorCount(schedule.OpMerge) >= c.cluster.GetMergeScheduleLimit() {
+			continue
+		}
+
 		regions := c.cluster.ScanRegions(key, patrolScanRegionLimit)
 		if len(regions) == 0 {
 			// reset scan key.
@@ -161,7 +156,14 @@ func (c *coordinator) patrolRegions() {
 				c.addOperator(op)
 				break
 			}
+
+			if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
+				// make sure two operators can add successfully altogether
+				c.addOperators(op1, op2)
+				break
+			}
 		}
+
 	}
 }
 
