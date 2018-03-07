@@ -114,6 +114,13 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	r.labelLevelStats.Observe(region, stores, labels)
 }
 
+func (r *regionStatistics) clearDefunctRegion(regionID uint64) {
+	if oldIndex, ok := r.index[regionID]; ok {
+		r.deleteEntry(oldIndex, regionID)
+	}
+	r.labelLevelStats.clearDefunctRegion(regionID)
+}
+
 func (r *regionStatistics) Collect() {
 	regionStatusGauge.WithLabelValues("miss_peer_region_count").Set(float64(len(r.stats[missPeer])))
 	regionStatusGauge.WithLabelValues("extra_peer_region_count").Set(float64(len(r.stats[extraPeer])))
@@ -147,10 +154,18 @@ func (l *labelLevelStatistics) Observe(region *core.RegionInfo, stores []*core.S
 	l.regionLabelLevelStats[regionID] = regionLabelLevel
 	l.labelLevelCounter[regionLabelLevel]++
 }
+
 func (l *labelLevelStatistics) Collect() {
 	for level, count := range l.labelLevelCounter {
 		typ := fmt.Sprintf("level_%d", level)
 		regionStatusGauge.WithLabelValues(typ).Set(float64(count))
+	}
+}
+
+func (l *labelLevelStatistics) clearDefunctRegion(regionID uint64) {
+	if level, ok := l.regionLabelLevelStats[regionID]; ok {
+		l.labelLevelCounter[level]--
+		delete(l.regionLabelLevelStats, regionID)
 	}
 }
 

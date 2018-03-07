@@ -470,6 +470,11 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 				}
 			}
 		}
+		if c.regionStats != nil {
+			for _, item := range overlaps {
+				c.regionStats.clearDefunctRegion(item.GetId())
+			}
+		}
 
 		// Update related stores.
 		if origin != nil {
