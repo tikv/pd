@@ -66,6 +66,10 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, opInfluence sc
 		return nil
 	}
 	region := cluster.RandLeaderRegion(store.GetId())
+	if region == nil {
+		schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
+		return nil
+	}
 
 	target, other := cluster.GetAdjacentRegions(region)
 	if (rand.Int()%2 == 0 && other != nil) || target == nil {
