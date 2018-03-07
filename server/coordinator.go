@@ -128,15 +128,6 @@ func (c *coordinator) patrolRegions() {
 			return
 		}
 
-		if c.limiter.OperatorCount(schedule.OpReplica) >= c.cluster.GetReplicaScheduleLimit() {
-			continue
-		}
-
-		// Check merge operator.
-		if c.limiter.OperatorCount(schedule.OpMerge) >= c.cluster.GetMergeScheduleLimit() {
-			continue
-		}
-
 		regions := c.cluster.ScanRegions(key, patrolScanRegionLimit)
 		if len(regions) == 0 {
 			// reset scan key.
@@ -151,19 +142,20 @@ func (c *coordinator) patrolRegions() {
 				c.addOperator(op)
 				break
 			}
-
-			if op := c.replicaChecker.Check(region); op != nil {
-				c.addOperator(op)
-				break
+			if c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+				if op := c.replicaChecker.Check(region); op != nil {
+					c.addOperator(op)
+					break
+				}
 			}
-
-			if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
-				// make sure two operators can add successfully altogether
-				c.addOperators(op1, op2)
-				break
+			if c.limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
+				if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
+					// make sure two operators can add successfully altogether
+					c.addOperators(op1, op2)
+					break
+				}
 			}
 		}
-
 	}
 }
 
