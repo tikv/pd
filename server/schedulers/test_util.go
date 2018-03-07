@@ -19,21 +19,25 @@ import (
 )
 
 // CheckAddPeer check add peer
-func CheckAddPeer(c *check.C, op *schedule.Operator, storeID uint64) {
+func CheckAddPeer(c *check.C, op *schedule.Operator, kind schedule.OperatorKind, storeID uint64) {
 	c.Assert(op, check.NotNil)
 	c.Assert(op.Len(), check.Equals, 1)
 	c.Assert(op.Step(0).(schedule.AddPeer).ToStore, check.Equals, storeID)
+	kind |= schedule.OpRegion
+	c.Assert(op.Kind()&kind, check.Equals, kind)
 }
 
 // CheckTransferLeader check whether leader is transferred
-func CheckTransferLeader(c *check.C, op *schedule.Operator, sourceID, targetID uint64) {
+func CheckTransferLeader(c *check.C, op *schedule.Operator, kind schedule.OperatorKind, sourceID, targetID uint64) {
 	c.Assert(op, check.NotNil)
 	c.Assert(op.Len(), check.Equals, 1)
 	c.Assert(op.Step(0), check.Equals, schedule.TransferLeader{FromStore: sourceID, ToStore: targetID})
+	kind |= schedule.OpLeader
+	c.Assert(op.Kind()&kind, check.Equals, kind)
 }
 
 // CheckTransferPeer checks peer transfer
-func CheckTransferPeer(c *check.C, op *schedule.Operator, sourceID, targetID uint64) {
+func CheckTransferPeer(c *check.C, op *schedule.Operator, kind schedule.OperatorKind, sourceID, targetID uint64) {
 	c.Assert(op, check.NotNil)
 	if op.Len() == 2 {
 		c.Assert(op.Step(0).(schedule.AddPeer).ToStore, check.Equals, targetID)
@@ -43,5 +47,8 @@ func CheckTransferPeer(c *check.C, op *schedule.Operator, sourceID, targetID uin
 		c.Assert(op.Step(0).(schedule.AddPeer).ToStore, check.Equals, targetID)
 		c.Assert(op.Step(1).(schedule.TransferLeader).FromStore, check.Equals, sourceID)
 		c.Assert(op.Step(2).(schedule.RemovePeer).FromStore, check.Equals, sourceID)
+		kind |= schedule.OpLeader
 	}
+	kind |= schedule.OpRegion
+	c.Assert(op.Kind()&kind, check.Equals, kind)
 }

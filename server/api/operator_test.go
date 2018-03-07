@@ -64,7 +64,7 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	c.Assert(strings.Contains(operator, "operator not found"), IsTrue)
 
 	mustPutStore(c, s.svr, 3, metapb.StoreState_Up, nil)
-	err := postJSON(&http.Client{}, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`))
+	err := postJSON(fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`))
 	c.Assert(err, IsNil)
 	operator = mustReadURL(c, regionURL)
 	c.Assert(strings.Contains(operator, "add peer 1 on store 3"), IsTrue)
@@ -72,7 +72,7 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	err = doDelete(regionURL)
 	c.Assert(err, IsNil)
 
-	err = postJSON(&http.Client{}, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"remove-peer", "region_id": 1, "store_id": 2}`))
+	err = postJSON(fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"remove-peer", "region_id": 1, "store_id": 2}`))
 	c.Assert(err, IsNil)
 	operator = mustReadURL(c, regionURL)
 	c.Log(operator)
