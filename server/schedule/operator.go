@@ -26,38 +26,6 @@ import (
 // the operator is considered timeout.
 const MaxOperatorWaitTime = 5 * time.Minute
 
-// OperatorStepWrapper is a time warpper for OperatorStep
-type OperatorStepWrapper struct {
-	OperatorStep
-	beginTime time.Time
-}
-
-// NewOperatorStepWrapper creates a operator step wrapped by a time recorder
-func NewOperatorStepWrapper(step OperatorStep) OperatorStepWrapper {
-	return OperatorStepWrapper{
-		OperatorStep: step,
-	}
-}
-
-// Tic starts the time.
-func (w OperatorStepWrapper) Tic() {
-	w.beginTime = time.Now()
-}
-
-// ElapsedTime returns duration since it was created.
-func (w OperatorStepWrapper) ElapsedTime() time.Duration {
-	return time.Since(w.beginTime)
-}
-
-// Name returns the name of step type
-func (w OperatorStepWrapper) Name() string {
-	return reflect.TypeOf(w.OperatorStep).Name()
-}
-
-func (w OperatorStepWrapper) unwrap() OperatorStep {
-	return w.OperatorStep
-}
-
 // OperatorStep describes the basic scheduling steps that can not be subdivided.
 type OperatorStep interface {
 	fmt.Stringer
@@ -142,24 +110,20 @@ type Operator struct {
 	desc        string
 	regionID    uint64
 	kind        OperatorKind
-	steps       []OperatorStepWrapper
+	steps       []OperatorStep
 	currentStep int32
 	createTime  time.Time
+	stepTime    time.Time
 	level       core.PriorityLevel
 }
 
 // NewOperator creates a new operator.
 func NewOperator(desc string, regionID uint64, kind OperatorKind, steps ...OperatorStep) *Operator {
-	wrappedSteps := make([]OperatorStepWrapper, 0, len(steps))
-	for _, step := range steps {
-		wrappedSteps = append(wrappedSteps, NewOperatorStepWrapper(step))
-	}
-
 	return &Operator{
 		desc:       desc,
 		regionID:   regionID,
 		kind:       kind,
-		steps:      wrappedSteps,
+		steps:      steps,
 		createTime: time.Now(),
 		level:      core.NormalPriority,
 	}
@@ -209,31 +173,21 @@ func (o *Operator) Len() int {
 // Step returns the i-th step.
 func (o *Operator) Step(i int) OperatorStep {
 	if i >= 0 && i < len(o.steps) {
-		return o.steps[i].unwrap()
+		return o.steps[i]
 	}
 	return nil
-}
-
-// Steps returns all steps.
-func (o *Operator) Steps() []OperatorStep {
-	steps := make([]OperatorStep, 0, len(o.steps))
-	for _, wrappedStep := range o.steps {
-		steps = append(steps, wrappedStep.unwrap())
-	}
-	return steps
 }
 
 // Check checks if current step is finished, returns next step to take action.
 // It's safe to be called by multiple goroutine concurrently.
 func (o *Operator) Check(region *core.RegionInfo) OperatorStep {
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
-		stepAction := o.steps[int(step)]
-		if stepAction.IsFinish(region) {
-			operatorStepDuration.WithLabelValues(stepAction.Name()).Observe(stepAction.ElapsedTime().Seconds())
+		if o.steps[int(step)].IsFinish(region) {
+			operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).Observe(time.Since(o.stepTime).Seconds())
 			atomic.StoreInt32(&o.currentStep, step+1)
 		} else {
-			stepAction.Tic()
-			return stepAction.unwrap()
+			o.stepTime = time.Now()
+			return o.steps[int(step)]
 		}
 	}
 	return nil
@@ -284,7 +238,7 @@ func (o *Operator) History() []OperatorHistory {
 	var histories []OperatorHistory
 	var addPeerStores, removePeerStores []uint64
 	for _, step := range o.steps {
-		switch s := step.unwrap().(type) {
+		switch s := step.(type) {
 		case TransferLeader:
 			histories = append(histories, OperatorHistory{
 				FinishTime: now,
