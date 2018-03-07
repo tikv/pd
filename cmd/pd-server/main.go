@@ -18,7 +18,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime/debug"
 	"strings"
 	"syscall"
 
@@ -45,11 +44,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	defer func() {
-		if e := recover(); e != nil {
-			log.Fatalf("server panic, err: %v, stack: %s", e, string(debug.Stack()))
-		}
-	}()
+	defer logutil.LogPanic()
 
 	switch errors.Cause(err) {
 	case nil:
@@ -89,6 +84,10 @@ func main() {
 	svr, err := server.CreateServer(cfg, api.NewHandler)
 	if err != nil {
 		log.Fatalf("create server failed: %v", errors.ErrorStack(err))
+	}
+
+	if err = api.InitHTTPClient(svr); err != nil {
+		log.Fatalf("initial http client for api handler failed: %v", errors.ErrorStack(err))
 	}
 
 	sc := make(chan os.Signal, 1)

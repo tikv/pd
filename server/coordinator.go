@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
@@ -124,6 +125,8 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 }
 
 func (c *coordinator) patrolRegions() {
+	defer logutil.LogPanic()
+
 	defer c.wg.Done()
 	ticker := time.NewTicker(patrolRegionInterval)
 	defer ticker.Stop()
@@ -374,6 +377,7 @@ func (c *coordinator) removeScheduler(name string) error {
 }
 
 func (c *coordinator) runScheduler(s *scheduleController) {
+	defer logutil.LogPanic()
 	defer c.wg.Done()
 	defer s.Cleanup(c.cluster)
 

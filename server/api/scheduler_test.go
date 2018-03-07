@@ -16,7 +16,6 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -90,7 +89,7 @@ func (s *testScheduleSuite) testAddAndRemoveScheduler(name, createdName string, 
 	if createdName == "" {
 		createdName = name
 	}
-	err := postJSON(&http.Client{}, s.urlPrefix, body)
+	err := postJSON(s.urlPrefix, body)
 	c.Assert(err, IsNil)
 	handler := s.svr.GetHandler()
 	sches, err := handler.GetSchedulers()

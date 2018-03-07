@@ -308,13 +308,13 @@ func (o *Operator) History() []OperatorHistory {
 
 // CreateRemovePeerOperator creates an Operator that removes a peer from region.
 func CreateRemovePeerOperator(desc string, cluster Cluster, kind OperatorKind, region *core.RegionInfo, storeID uint64) *Operator {
-	kind, steps := removePeerSteps(cluster, region, storeID)
-	return NewOperator(desc, region.GetId(), kind, steps...)
+	removeKind, steps := removePeerSteps(cluster, region, storeID)
+	return NewOperator(desc, region.GetId(), removeKind|kind, steps...)
 }
 
 // CreateMovePeerOperator creates an Operator that replaces an old peer with a new peer.
 func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OperatorKind, oldStore, newStore uint64, peerID uint64) *Operator {
-	kind, steps := removePeerSteps(cluster, region, oldStore)
+	removeKind, steps := removePeerSteps(cluster, region, oldStore)
 	var st []OperatorStep
 	if cluster.IsEnableRaftLearner() {
 		st = []OperatorStep{
@@ -327,7 +327,7 @@ func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInf
 		}
 	}
 	steps = append(st, steps...)
-	return NewOperator(desc, region.GetId(), kind|OpRegion, steps...)
+	return NewOperator(desc, region.GetId(), removeKind|kind|OpRegion, steps...)
 }
 
 // removePeerSteps returns the steps to safely remove a peer. It prevents removing leader by transfer its leadership first.

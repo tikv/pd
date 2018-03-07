@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	log "github.com/sirupsen/logrus"
 )
@@ -58,6 +59,8 @@ func newHeartbeatStreams(clusterID uint64) *heartbeatStreams {
 }
 
 func (s *heartbeatStreams) run() {
+	defer logutil.LogPanic()
+
 	defer s.wg.Done()
 	for {
 		select {
