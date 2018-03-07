@@ -190,6 +190,12 @@ func adjustFloat64(v *float64, defValue float64) {
 	}
 }
 
+func adjustBoolean(v *bool, defValue bool) {
+	if *v == false {
+		*v = defValue
+	}
+}
+
 func adjustDuration(v *typeutil.Duration, defValue time.Duration) {
 	if v.Duration == 0 {
 		v.Duration = defValue
@@ -363,6 +369,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		RegionScheduleLimit:  c.RegionScheduleLimit,
 		ReplicaScheduleLimit: c.ReplicaScheduleLimit,
 		TolerantSizeRatio:    c.TolerantSizeRatio,
+		EnableRaftLearner:    c.EnableRaftLearner,
 		Schedulers:           schedulers,
 	}
 }
@@ -385,6 +392,7 @@ const (
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 32
 	defaultTolerantSizeRatio    = 2.5
+	defaultEnableRaftLearner    = false
 )
 
 var defaultSchedulers = SchedulerConfigs{
@@ -402,6 +410,7 @@ func (c *ScheduleConfig) adjust() {
 	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
 	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
 	adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
+	adjustBoolean(&c.EnableRaftLearner, defaultEnableRaftLearner)
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
 }
 
