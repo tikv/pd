@@ -23,7 +23,7 @@ import (
 
 // MaxOperatorWaitTime is the duration that if an operator lives longer that it,
 // the operator is considered timeout.
-const MaxOperatorWaitTime = 5 * time.Minute
+const MaxOperatorWaitTime = 10 * time.Minute
 
 // OperatorStep describes the basic scheduling steps that can not be subdivided.
 type OperatorStep interface {
