@@ -365,22 +365,17 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	tc.addLabelsStore(6, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpBalance, 1, 6)
 
-	// Store 7 has the same region score with store 6, but in a different host.
+	// Store 7 has the same region score with store 6.
 	tc.addLabelsStore(7, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"})
-	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpBalance, 1, 7)
+	CheckTransferPeerFrom(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpBalance, 1)
 
-	// If store 7 is not available, we wait.
+	// If store 7 is not available, will choose store 6.
 	tc.setStoreDown(7)
-	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
-	c.Assert(cache.Exists(1), IsTrue)
-	tc.setStoreUp(7)
-	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpBalance, 2, 7)
-	cache.Remove(1)
-	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpBalance, 1, 7)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpBalance, 1, 6)
 
 	// Store 8 has smaller region score than store 7, but the distinct score decrease.
 	tc.addLabelsStore(8, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h3"})
-	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpBalance, 1, 7)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpBalance, 1, 6)
 
 	// Take down 4,5,6,7
 	tc.setStoreDown(4)
@@ -417,9 +412,9 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	tc.addLabelsStore(6, 1, map[string]string{"zone": "z5", "rack": "r2", "host": "h1"})
 	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpBalance, 5, 6)
 
-	// Store 7 has smaller region score and higher distinct score.
+	// Store 7 has larger region score and same distinct score with Store6.
 	tc.addLabelsStore(7, 5, map[string]string{"zone": "z6", "rack": "r1", "host": "h1"})
-	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpBalance, 5, 7)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpBalance, 5, 6)
 
 	// Store 1 has smaller region score and higher distinct score.
 	tc.addLeaderRegion(1, 2, 3, 4, 5, 6)
@@ -598,10 +593,13 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	// Transfer peer to store 4.
 	CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 3, 4)
 
-	// Store 5 has a different zone, we can keep it safe.
+	// Store 5 has a different zone,but score same with store 4,we can choose one.
 	tc.addLabelsStore(5, 5, map[string]string{"zone": "z4", "rack": "r1", "host": "h1"})
-	CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 3, 5)
+	CheckTransferPeerFrom(c, rc.Check(region), schedule.OpReplica, 3)
+	// Store 5 has too many snapshots, choose store 4
 	tc.updateSnapshotCount(5, 10)
+	CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 3, 4)
+	tc.updatePendingPeerCount(4, 30)
 	c.Assert(rc.Check(region), IsNil)
 }
 
