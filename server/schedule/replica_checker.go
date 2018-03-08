@@ -57,7 +57,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 
 	if len(region.GetPeers()) < r.cluster.GetMaxReplicas() {
 		log.Debugf("[region %d] has %d peers fewer than max replicas", region.GetId(), len(region.GetPeers()))
-		newPeer := r.SelectBestPeerToAddReplica(region, r.filters...)
+		newPeer := r.SelectBestPeerToAddReplica(region)
 		if newPeer == nil {
 			checkerCounter.WithLabelValues("replica_checker", "no_target_store").Inc()
 			return nil
@@ -103,6 +103,7 @@ func (r *ReplicaChecker) SelectBestStoreToAddReplica(region *core.RegionInfo, fi
 		NewStorageThresholdFilter(),
 		NewExcludedFilter(nil, region.GetStoreIds()),
 	}
+	filters = append(filters, r.filters...)
 	filters = append(filters, newFilters...)
 
 	if r.classifier != nil {
@@ -135,7 +136,7 @@ func (r *ReplicaChecker) selectBestReplacement(region *core.RegionInfo, peer *me
 	// Get a new region without the peer we are going to replace.
 	newRegion := region.Clone()
 	newRegion.RemoveStorePeer(peer.GetStoreId())
-	return r.SelectBestStoreToAddReplica(newRegion, NewExcludedFilter(nil, region.GetStoreIds()))
+	return r.SelectBestStoreToAddReplica(newRegion)
 }
 
 func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *Operator {
