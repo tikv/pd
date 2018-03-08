@@ -188,7 +188,6 @@ func (o *Operator) Check(region *core.RegionInfo) OperatorStep {
 				Observe(time.Since(time.Unix(0, atomic.LoadInt64(&o.stepTime))).Seconds())
 			atomic.StoreInt32(&o.currentStep, step+1)
 			atomic.StoreInt64(&o.stepTime, time.Now().UnixNano())
-			time.Unix(0, 0)
 		} else {
 			return o.steps[int(step)]
 		}
