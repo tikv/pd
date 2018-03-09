@@ -228,7 +228,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
 
 	CheckTransferLeader(c, s.schedule(nil), schedule.OpBalance, 4, 1)
 	// Test stateFilter.
-	// if store 4 if offline, we schould consider it
+	// if store 4 is offline, we schould consider it
 	// because it still provides services
 	s.tc.setStoreOffline(4)
 	CheckTransferLeader(c, s.schedule(nil), schedule.OpBalance, 4, 1)
