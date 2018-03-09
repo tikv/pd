@@ -15,14 +15,26 @@ package schedule
 
 import "github.com/prometheus/client_golang/prometheus"
 
-var checkerCounter = prometheus.NewCounterVec(
-	prometheus.CounterOpts{
-		Namespace: "pd",
-		Subsystem: "checker",
-		Name:      "event_count",
-		Help:      "Counter of checker events.",
-	}, []string{"type", "name"})
+var (
+	checkerCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "checker",
+			Name:      "event_count",
+			Help:      "Counter of checker events.",
+		}, []string{"type", "name"})
+
+	operatorStepDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "finish_operator_steps_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of finished operator step.",
+			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 16),
+		}, []string{"type"})
+)
 
 func init() {
 	prometheus.MustRegister(checkerCounter)
+	prometheus.MustRegister(operatorStepDuration)
 }
