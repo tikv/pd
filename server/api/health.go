@@ -56,9 +56,11 @@ func (h *healthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Health:     true,
 		}
 		for _, cURL := range member.ClientUrls {
-			if err := doGet(fmt.Sprintf("%s%s%s", cURL, apiPrefix, pingAPI)); err != nil {
+			resp, err := doGet(fmt.Sprintf("%s%s%s", cURL, apiPrefix, pingAPI))
+			if err != nil {
 				h.Health = false
 			}
+			resp.Body.Close()
 		}
 		healths = append(healths, h)
 	}

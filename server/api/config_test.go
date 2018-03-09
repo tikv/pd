@@ -14,10 +14,8 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"math/rand"
-	"net/http"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -27,11 +25,6 @@ import (
 var _ = Suite(&testConfigSuite{})
 
 type testConfigSuite struct {
-	hc *http.Client
-}
-
-func (s *testConfigSuite) SetUpSuite(c *C) {
-	s.hc = newHTTPClient()
 }
 
 func checkConfigResponse(c *C, body []byte, cfgs []*server.Config) {
@@ -47,7 +40,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 		defer clean()
 
 		addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/config"
-		resp, err := s.hc.Get(addr)
+		resp, err := doGet(addr)
 		c.Assert(err, IsNil)
 		cfg := &server.Config{}
 		err = readJSON(resp.Body, cfg)
@@ -56,7 +49,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 		r := map[string]int{"max-replicas": 5}
 		postData, err := json.Marshal(r)
 		c.Assert(err, IsNil)
-		err = postJSON(s.hc, addr, postData)
+		err = postJSON(addr, postData)
 		c.Assert(err, IsNil)
 		l := map[string]interface{}{
 			"location-labels":       "zone,rack",
@@ -64,10 +57,10 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 		}
 		postData, err = json.Marshal(l)
 		c.Assert(err, IsNil)
-		err = postJSON(s.hc, addr, postData)
+		err = postJSON(addr, postData)
 		c.Assert(err, IsNil)
 
-		resp, err = s.hc.Get(addr)
+		resp, err = doGet(addr)
 		newCfg := &server.Config{}
 		err = readJSON(resp.Body, newCfg)
 		c.Assert(err, IsNil)
@@ -85,7 +78,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 		defer clean()
 
 		addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/config/schedule"
-		resp, err := s.hc.Get(addr)
+		resp, err := doGet(addr)
 		c.Assert(err, IsNil)
 		sc := &server.ScheduleConfig{}
 		readJSON(resp.Body, sc)
@@ -93,10 +86,10 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 		sc.MaxStoreDownTime.Duration = time.Second
 		postData, err := json.Marshal(sc)
 		postAddr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/config/schedule"
-		err = postJSON(s.hc, postAddr, postData)
+		err = postJSON(postAddr, postData)
 		c.Assert(err, IsNil)
 
-		resp, err = s.hc.Get(addr)
+		resp, err = doGet(addr)
 		c.Assert(err, IsNil)
 		sc1 := &server.ScheduleConfig{}
 		readJSON(resp.Body, sc1)
@@ -112,7 +105,7 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 		defer clean()
 
 		addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/config/replicate"
-		resp, err := s.hc.Get(addr)
+		resp, err := doGet(addr)
 		c.Assert(err, IsNil)
 
 		rc := &server.ReplicationConfig{}
@@ -124,15 +117,15 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 		rc1 := map[string]int{"max-replicas": 5}
 		postData, err := json.Marshal(rc1)
 		postAddr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/config/replicate"
-		err = postJSON(s.hc, postAddr, postData)
+		err = postJSON(postAddr, postData)
 		c.Assert(err, IsNil)
 		rc.LocationLabels = []string{"zone", "rack"}
 
 		rc2 := map[string]string{"location-labels": "zone,rack"}
 		postData, err = json.Marshal(rc2)
-		err = postJSON(s.hc, postAddr, postData)
+		err = postJSON(postAddr, postData)
 
-		resp, err = s.hc.Get(addr)
+		resp, err = doGet(addr)
 		c.Assert(err, IsNil)
 		rc3 := &server.ReplicationConfig{}
 
@@ -149,7 +142,7 @@ func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 	addr := svr.GetAddr() + apiPrefix + "/api/v1/config/label-property"
 
 	loadProperties := func() server.LabelPropertyConfig {
-		res, err := s.hc.Get(addr)
+		res, err := doGet(addr)
 		c.Assert(err, IsNil)
 		var cfg server.LabelPropertyConfig
 		err = readJSON(res.Body, &cfg)
@@ -166,7 +159,7 @@ func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 		`{"type": "bar", "action": "set", "label-key": "host", "label-value": "h1"}`,
 	}
 	for _, cmd := range cmds {
-		_, err := s.hc.Post(addr, "application/json", bytes.NewBufferString(cmd))
+		err := postJSON(addr, []byte(cmd))
 		c.Assert(err, IsNil)
 	}
 	cfg = loadProperties()
@@ -182,7 +175,7 @@ func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 		`{"type": "bar", "action": "delete", "label-key": "host", "label-value": "h1"}`,
 	}
 	for _, cmd := range cmds {
-		_, err := s.hc.Post(addr, "application/json", bytes.NewBufferString(cmd))
+		err := postJSON(addr, []byte(cmd))
 		c.Assert(err, IsNil)
 	}
 	cfg = loadProperties()
