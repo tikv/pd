@@ -228,11 +228,14 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
 
 	CheckTransferLeader(c, s.schedule(nil), 4, 1)
 	// Test stateFilter.
+	// if store 4 if offline, we schould consider it
+	// because it still providers services
+	s.tc.setStoreOffline(4)
+	CheckTransferLeader(c, s.schedule(nil), 4, 1)
 	// If store 1 is down, it will be filtered,
 	// store 2 becomes the store with least leaders.
 	s.tc.setStoreDown(1)
 	CheckTransferLeader(c, s.schedule(nil), 4, 2)
-
 	// Test healthFilter.
 	// If store 2 is busy, it will be filtered,
 	// store 3 becomes the store with least leaders.

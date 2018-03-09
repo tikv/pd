@@ -100,10 +100,7 @@ func (f *stateFilter) filter(store *core.StoreInfo) bool {
 }
 
 func (f *stateFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
-	if store.IsOffline() {
-		return false
-	}
-	return f.filter(store)
+	return store.IsTombstone()
 }
 
 func (f *stateFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
