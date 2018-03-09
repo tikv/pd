@@ -201,10 +201,10 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 
 	// Wait for schedule and turn off balance.
 	waitOperator(c, co, 1)
-	schedulers.CheckTransferPeer(c, co.getOperator(1), 4, 1)
+	schedulers.CheckTransferPeer(c, co.getOperator(1), schedule.OpBalance, 4, 1)
 	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
 	waitOperator(c, co, 2)
-	schedulers.CheckTransferLeader(c, co.getOperator(2), 4, 2)
+	schedulers.CheckTransferLeader(c, co.getOperator(2), schedule.OpBalance, 4, 2)
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 
 	stream := newMockHeartbeatStream()
@@ -316,7 +316,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 
 	// Wait for schedule.
 	waitOperator(c, co, 1)
-	schedulers.CheckTransferPeer(c, co.getOperator(1), 4, 1)
+	schedulers.CheckTransferPeer(c, co.getOperator(1), schedule.OpBalance, 4, 1)
 
 	region := tc.GetRegion(1)
 
