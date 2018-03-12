@@ -232,7 +232,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
 	// if store 4 is offline, we schould consider it
 	// because it still provides services
 	s.tc.setStoreOffline(4)
-	CheckTransferLeader(c, s.schedule(nil), schedule.OpBalance, 4, 1)
+	CheckTransferLeader(c, s.schedule(nil)[0], schedule.OpBalance, 4, 1)
 	// If store 1 is down, it will be filtered,
 	// store 2 becomes the store with least leaders.
 	s.tc.setStoreDown(1)
