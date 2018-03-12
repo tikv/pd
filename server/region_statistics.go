@@ -25,6 +25,7 @@ const (
 	extraPeer
 	downPeer
 	pendingPeer
+	offlinePeer
 	incorrectNamespace
 )
 
@@ -46,6 +47,7 @@ func newRegionStatistics(opt *scheduleOption, classifier namespace.Classifier) *
 	r.stats[extraPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[downPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[pendingPeer] = make(map[uint64]*core.RegionInfo)
+	r.stats[offlinePeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[incorrectNamespace] = make(map[uint64]*core.RegionInfo)
 	return r
 }
@@ -90,6 +92,13 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		peerTypeIndex |= pendingPeer
 	}
 	for _, store := range stores {
+		if store.IsOffline() {
+			peer := region.GetStorePeer(store.GetId())
+			if peer != nil {
+				r.stats[offlinePeer][regionID] = region
+				peerTypeIndex |= offlinePeer
+			}
+		}
 		ns := r.classifier.GetStoreNamespace(store)
 		if ns == namespace {
 			continue
@@ -155,5 +164,6 @@ func (r *regionStatistics) Collect() {
 	regionStatusGauge.WithLabelValues("extra_peer_region_count").Set(float64(len(r.stats[extraPeer])))
 	regionStatusGauge.WithLabelValues("down_peer_region_count").Set(float64(len(r.stats[downPeer])))
 	regionStatusGauge.WithLabelValues("pending_peer_region_count").Set(float64(len(r.stats[pendingPeer])))
+	regionStatusGauge.WithLabelValues("offline_peer_region_count").Set(float64(len(r.stats[offlinePeer])))
 	regionStatusGauge.WithLabelValues("incorrect_namespace_region_count").Set(float64(len(r.stats[incorrectNamespace])))
 }
