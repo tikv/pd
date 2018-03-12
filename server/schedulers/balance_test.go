@@ -412,7 +412,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	tc.addLabelsStore(6, 1, map[string]string{"zone": "z5", "rack": "r2", "host": "h1"})
 	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpBalance, 5, 6)
 
-	// Store 7 has larger region score and same distinct score with Store6.
+	// Store 7 has larger region score and same distinct score with store 6.
 	tc.addLabelsStore(7, 5, map[string]string{"zone": "z6", "rack": "r1", "host": "h1"})
 	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpBalance, 5, 6)
 
@@ -593,7 +593,7 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	// Transfer peer to store 4.
 	CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 3, 4)
 
-	// Store 5 has a different zone,but score same with store 4,we can choose one.
+	// Store 5 has a different zone,but score same with store 4, we can choose one.
 	tc.addLabelsStore(5, 5, map[string]string{"zone": "z4", "rack": "r1", "host": "h1"})
 	CheckTransferPeerFrom(c, rc.Check(region), schedule.OpReplica, 3)
 	// Store 5 has too many snapshots, choose store 4

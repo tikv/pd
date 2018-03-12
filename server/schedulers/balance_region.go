@@ -110,7 +110,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	scoreGuard := schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), stores, source)
 
 	checker := schedule.NewReplicaChecker(cluster, nil)
-	newPeer, _ := checker.SelectBestReplacedPeerToAddReplica(region, oldPeer, scoreGuard)
+	newPeer := checker.SelectBestReplacedPeerToAddReplica(region, oldPeer, scoreGuard)
 	if newPeer == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
 		return nil
