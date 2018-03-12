@@ -52,18 +52,3 @@ func CheckTransferPeer(c *check.C, op *schedule.Operator, kind schedule.Operator
 	kind |= schedule.OpRegion
 	c.Assert(op.Kind()&kind, check.Equals, kind)
 }
-
-// CheckTransferPeerFrom checks peer transfer
-func CheckTransferPeerFrom(c *check.C, op *schedule.Operator, kind schedule.OperatorKind, sourceID uint64) {
-	c.Assert(op, check.NotNil)
-	if op.Len() == 2 {
-		c.Assert(op.Step(1).(schedule.RemovePeer).FromStore, check.Equals, sourceID)
-	} else {
-		c.Assert(op.Len(), check.Equals, 3)
-		c.Assert(op.Step(1).(schedule.TransferLeader).FromStore, check.Equals, sourceID)
-		c.Assert(op.Step(2).(schedule.RemovePeer).FromStore, check.Equals, sourceID)
-		kind |= schedule.OpLeader
-	}
-	kind |= schedule.OpRegion
-	c.Assert(op.Kind()&kind, check.Equals, kind)
-}
