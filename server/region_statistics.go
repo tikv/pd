@@ -31,20 +31,18 @@ const (
 )
 
 type regionStatistics struct {
-	opt             *scheduleOption
-	classifier      namespace.Classifier
-	stats           map[regionStatisticType]map[uint64]*core.RegionInfo
-	index           map[uint64]regionStatisticType
-	labelLevelStats *labelLevelStatistics
+	opt        *scheduleOption
+	classifier namespace.Classifier
+	stats      map[regionStatisticType]map[uint64]*core.RegionInfo
+	index      map[uint64]regionStatisticType
 }
 
 func newRegionStatistics(opt *scheduleOption, classifier namespace.Classifier) *regionStatistics {
 	r := &regionStatistics{
-		opt:             opt,
-		classifier:      classifier,
-		stats:           make(map[regionStatisticType]map[uint64]*core.RegionInfo),
-		index:           make(map[uint64]regionStatisticType),
-		labelLevelStats: newLabelLevlStatistics(),
+		opt:        opt,
+		classifier: classifier,
+		stats:      make(map[regionStatisticType]map[uint64]*core.RegionInfo),
+		index:      make(map[uint64]regionStatisticType),
 	}
 	r.stats[missPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[extraPeer] = make(map[uint64]*core.RegionInfo)
@@ -70,7 +68,7 @@ func (r *regionStatistics) deleteEntry(deleteIndex regionStatisticType, regionID
 	}
 }
 
-func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo, labels []string) {
+func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo) {
 	// Region state.
 	regionID := region.GetId()
 	namespace := r.classifier.GetRegionNamespace(region)
@@ -108,17 +106,12 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	}
 	r.deleteEntry(deleteIndex, regionID)
 	r.index[regionID] = peerTypeIndex
-	if len(stores) == 0 {
-		return
-	}
-	r.labelLevelStats.Observe(region, stores, labels)
 }
 
 func (r *regionStatistics) clearDefunctRegion(regionID uint64) {
 	if oldIndex, ok := r.index[regionID]; ok {
 		r.deleteEntry(oldIndex, regionID)
 	}
-	r.labelLevelStats.clearDefunctRegion(regionID)
 }
 
 func (r *regionStatistics) Collect() {
@@ -127,7 +120,6 @@ func (r *regionStatistics) Collect() {
 	regionStatusGauge.WithLabelValues("down_peer_region_count").Set(float64(len(r.stats[downPeer])))
 	regionStatusGauge.WithLabelValues("pending_peer_region_count").Set(float64(len(r.stats[pendingPeer])))
 	regionStatusGauge.WithLabelValues("incorrect_namespace_region_count").Set(float64(len(r.stats[incorrectNamespace])))
-	r.labelLevelStats.Collect()
 }
 
 type labelLevelStatistics struct {
@@ -135,7 +127,7 @@ type labelLevelStatistics struct {
 	labelLevelCounter     map[int]int
 }
 
-func newLabelLevlStatistics() *labelLevelStatistics {
+func newLabelLevelStatistics() *labelLevelStatistics {
 	return &labelLevelStatistics{
 		regionLabelLevelStats: make(map[uint64]int),
 		labelLevelCounter:     make(map[int]int),

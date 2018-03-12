@@ -75,18 +75,18 @@ func (t *testRegionStatistcs) TestRegionStatistics(c *C) {
 	region1 := core.NewRegionInfo(r1, peers[0])
 	region2 := core.NewRegionInfo(r2, peers[0])
 	regionStats := newRegionStatistics(opt, mockClassifier{})
-	regionStats.Observe(region1, stores, nil)
+	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[extraPeer]), Equals, 1)
 	region1.DownPeers = downPeers
 	region1.PendingPeers = peers[0:1]
-	regionStats.Observe(region1, stores, nil)
+	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[extraPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[missPeer]), Equals, 0)
 	c.Assert(len(regionStats.stats[downPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[pendingPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 1)
 	region2.DownPeers = downPeers[0:1]
-	regionStats.Observe(region2, stores[0:2], nil)
+	regionStats.Observe(region2, stores[0:2])
 	c.Assert(len(regionStats.stats[extraPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[missPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[downPeer]), Equals, 2)
@@ -95,7 +95,7 @@ func (t *testRegionStatistcs) TestRegionStatistics(c *C) {
 }
 
 func (t *testRegionStatistcs) TestRegionLabelIsolationLevel(c *C) {
-	labelLevelStats := newLabelLevlStatistics()
+	labelLevelStats := newLabelLevelStatistics()
 	labelsSet := [][]map[string]string{
 		{
 			{"zone": "z1", "rack": "r1", "host": "h1"},
