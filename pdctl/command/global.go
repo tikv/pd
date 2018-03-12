@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	dailClient = &http.Client{}
+	dialClient = &http.Client{}
 
 	pingPrefix     = "pd/ping"
 	errInvalidAddr = errors.New("Invalid pd address, Cannot get connect to it")
@@ -47,7 +47,7 @@ func InitHTTPSClient(CAPath, CertPath, KeyPath string) error {
 		return errors.Trace(err)
 	}
 
-	dailClient = &http.Client{Transport: &http.Transport{
+	dialClient = &http.Client{Transport: &http.Transport{
 		TLSClientConfig: tlsConfig,
 	}}
 
@@ -69,7 +69,7 @@ func getRequest(cmd *cobra.Command, prefix string, method string, bodyType strin
 
 func dail(req *http.Request) (string, error) {
 	var res string
-	reps, err := dailClient.Do(req)
+	reps, err := dialClient.Do(req)
 	if err != nil {
 		return res, err
 	}
@@ -131,7 +131,7 @@ func validPDAddr(pd string) error {
 		u.Scheme = "http"
 	}
 	addr := u.String()
-	reps, err := http.Get(fmt.Sprintf("%s/%s", addr, pingPrefix))
+	reps, err := dialClient.Get(fmt.Sprintf("%s/%s", addr, pingPrefix))
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 	}
 
 	url := getAddressFromCmd(cmd, prefix)
-	r, err := http.Post(url, "application/json", bytes.NewBuffer(data))
+	r, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -178,7 +178,7 @@ Examples:
 Available Commands:{{range .Commands}}{{if .IsAvailableCommand}}
   {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{ if .HasAvailableLocalFlags}}
 
-Additional help topics:{{range .Commands}}{{if .IsHelpCommand}}
+Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
   {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{ if .HasAvailableSubCommands }}
 
 Use "{{if .HasParent}}help {{.Name}} [command] {{else}}help [command]{{end}}" for more information about a command.{{end}}

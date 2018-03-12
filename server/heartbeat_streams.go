@@ -17,12 +17,15 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	log "github.com/sirupsen/logrus"
 )
+
+const heartbeatStreamKeepAliveInterval = time.Minute
 
 type heartbeatStream interface {
 	Send(*pdpb.RegionHeartbeatResponse) error
@@ -62,6 +65,12 @@ func (s *heartbeatStreams) run() {
 	defer logutil.LogPanic()
 
 	defer s.wg.Done()
+
+	keepAliveTicker := time.NewTicker(heartbeatStreamKeepAliveInterval)
+	defer keepAliveTicker.Stop()
+
+	keepAlive := &pdpb.RegionHeartbeatResponse{Header: &pdpb.ResponseHeader{ClusterId: s.clusterID}}
+
 	for {
 		select {
 		case update := <-s.streamCh:
@@ -80,6 +89,17 @@ func (s *heartbeatStreams) run() {
 			} else {
 				log.Debugf("[region %v] heartbeat stream not found for store %v, skip send message", msg.RegionId, storeID)
 				regionHeartbeatCounter.WithLabelValues(storeLabel, "push", "skip").Inc()
+			}
+		case <-keepAliveTicker.C:
+			for storeID, stream := range s.streams {
+				storeLabel := strconv.FormatUint(storeID, 10)
+				if err := stream.Send(keepAlive); err != nil {
+					log.Errorf("[store %v] send keepalive message fail: %v", storeID, err)
+					delete(s.streams, storeID)
+					regionHeartbeatCounter.WithLabelValues(storeLabel, "keepalive", "err").Inc()
+				} else {
+					regionHeartbeatCounter.WithLabelValues(storeLabel, "keepalive", "ok").Inc()
+				}
 			}
 		case <-s.ctx.Done():
 			return

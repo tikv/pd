@@ -16,6 +16,7 @@ package schedule
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 	"sync/atomic"
 	"time"
 
@@ -28,7 +29,7 @@ import (
 
 // MaxOperatorWaitTime is the duration that if an operator lives longer that it,
 // the operator is considered timeout.
-const MaxOperatorWaitTime = 5 * time.Minute
+const MaxOperatorWaitTime = 10 * time.Minute
 
 // OperatorStep describes the basic scheduling steps that can not be subdivided.
 type OperatorStep interface {
@@ -152,6 +153,7 @@ type Operator struct {
 	steps       []OperatorStep
 	currentStep int32
 	createTime  time.Time
+	stepTime    int64
 	level       core.PriorityLevel
 }
 
@@ -163,6 +165,7 @@ func NewOperator(desc string, regionID uint64, kind OperatorKind, steps ...Opera
 		kind:       kind,
 		steps:      steps,
 		createTime: time.Now(),
+		stepTime:   time.Now().UnixNano(),
 		level:      core.NormalPriority,
 	}
 }
@@ -221,7 +224,10 @@ func (o *Operator) Step(i int) OperatorStep {
 func (o *Operator) Check(region *core.RegionInfo) OperatorStep {
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if o.steps[int(step)].IsFinish(region) {
+			operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).
+				Observe(time.Since(time.Unix(0, atomic.LoadInt64(&o.stepTime))).Seconds())
 			atomic.StoreInt32(&o.currentStep, step+1)
+			atomic.StoreInt64(&o.stepTime, time.Now().UnixNano())
 		} else {
 			return o.steps[int(step)]
 		}
