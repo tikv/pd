@@ -70,6 +70,7 @@ func (t *testRegionStatistcs) TestRegionStatistics(c *C) {
 		{Peer: peers[0], DownSeconds: 3608},
 		{Peer: peers[1], DownSeconds: 3608},
 	}
+	stores[3].State = metapb.StoreState_Offline
 	r1 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("aa"), EndKey: []byte("bb")}
 	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
 	region1 := core.NewRegionInfo(r1, peers[0])
@@ -91,7 +92,11 @@ func (t *testRegionStatistcs) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.stats[missPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[downPeer]), Equals, 2)
 	c.Assert(len(regionStats.stats[pendingPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[offlinePeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 1)
+	stores[3].State = metapb.StoreState_Up
+	regionStats.Observe(region1, stores, nil)
+	c.Assert(len(regionStats.stats[offlinePeer]), Equals, 0)
 }
 
 func (t *testRegionStatistcs) TestRegionLabelIsolationLevel(c *C) {
