@@ -21,6 +21,7 @@ import (
 	"net/http"
 
 	"github.com/juju/errors"
+	"github.com/pingcap/pd/server"
 )
 
 func readJSON(r io.ReadCloser, data interface{}) error {
@@ -39,7 +40,7 @@ func readJSON(r io.ReadCloser, data interface{}) error {
 }
 
 func postJSON(url string, data []byte) error {
-	resp, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
+	resp, err := server.DialClient.Post(url, "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -59,7 +60,7 @@ func doDelete(url string) error {
 	if err != nil {
 		return err
 	}
-	res, err := dialClient.Do(req)
+	res, err := server.DialClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -72,7 +73,7 @@ func doGet(url string) (*http.Response, error) {
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	resp, err := dialClient.Do(req)
+	resp, err := server.DialClient.Do(req)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
