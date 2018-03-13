@@ -35,3 +35,7 @@
 [[constraint]]
   name = "github.com/chzyer/readline"
   branch = "master"
+
+[[constraint]]
+  name = "github.com/wentaoxu/kvproto"
+  branch = "do_gc_distributedly"

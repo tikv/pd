@@ -29,6 +29,7 @@ const (
 	clusterPath  = "raft"
 	configPath   = "config"
 	schedulePath = "schedule"
+	userPath     = "user"
 )
 
 // KV wraps all kv operations, keep it stateless.
@@ -238,4 +239,19 @@ func (kv *KV) saveProto(key string, msg proto.Message) error {
 		return errors.Trace(err)
 	}
 	return kv.Save(key, string(value))
+}
+
+// GetUserKV get key from pd under dir 'user'.
+func (kv *KV) GetUserKV(key string) (string, error) {
+	return kv.Load(path.Join(userPath, key))
+}
+
+// PutUserKV put key to pd under dir 'user'.
+func (kv *KV) PutUserKV(key string, value string) error {
+	return kv.Save(path.Join(userPath, key), value)
+}
+
+// DeleteUserKV delete key from pd under dir 'user'.
+func (kv *KV) DeleteUserKV(key string) error {
+	return kv.Delete(path.Join(userPath, key))
 }
