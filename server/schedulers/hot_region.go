@@ -155,7 +155,7 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return schedule.CreateMovePeerOperator("moveHotReadRegion", srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
+		return schedule.CreateMovePeerOperator("moveHotReadRegion", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 	}
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 	return nil
@@ -166,7 +166,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return schedule.CreateMovePeerOperator("moveHotWriteRegion", srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
+		return schedule.CreateMovePeerOperator("moveHotWriteRegion", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 	}
 
 	// balance by leader
@@ -189,6 +189,9 @@ func (h *balanceHotRegionsScheduler) calcScore(items []*core.RegionStat, cluster
 		}
 
 		regionInfo := cluster.GetRegion(r.RegionID)
+		if regionInfo == nil {
+			continue
+		}
 
 		var storeIDs []uint64
 		if isCountReplica {
@@ -239,14 +242,16 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 	for _, i := range h.r.Perm(storesStat[srcStoreID].RegionsStat.Len()) {
 		rs := storesStat[srcStoreID].RegionsStat[i]
 		srcRegion := cluster.GetRegion(rs.RegionID)
-		if len(srcRegion.DownPeers) != 0 || len(srcRegion.PendingPeers) != 0 {
+		if srcRegion == nil || len(srcRegion.DownPeers) != 0 || len(srcRegion.PendingPeers) != 0 {
 			continue
 		}
 
 		srcStore := cluster.GetStore(srcStoreID)
 		filters := []schedule.Filter{
-			schedule.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
+			schedule.NewHealthFilter(),
 			schedule.NewStateFilter(),
+			schedule.NewSnapshotCountFilter(),
+			schedule.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
 			schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
 			schedule.NewStorageThresholdFilter(),
 		}
@@ -299,13 +304,24 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 	for _, i := range h.r.Perm(storesStat[srcStoreID].RegionsStat.Len()) {
 		rs := storesStat[srcStoreID].RegionsStat[i]
 		srcRegion := cluster.GetRegion(rs.RegionID)
-		if len(srcRegion.DownPeers) != 0 || len(srcRegion.PendingPeers) != 0 {
+		if srcRegion == nil || len(srcRegion.DownPeers) != 0 || len(srcRegion.PendingPeers) != 0 {
 			continue
 		}
 
+		filters := []schedule.Filter{
+			schedule.NewHealthFilter(),
+			schedule.NewStateFilter(),
+			schedule.NewBlockFilter(),
+			schedule.NewRejectLeaderFilter(),
+		}
 		candidateStoreIDs := make([]uint64, 0, len(srcRegion.Peers)-1)
-		for id := range srcRegion.GetFollowers() {
-			candidateStoreIDs = append(candidateStoreIDs, id)
+		for _, store := range cluster.GetFollowerStores(srcRegion) {
+			if !schedule.FilterTarget(cluster, store, filters) {
+				candidateStoreIDs = append(candidateStoreIDs, store.GetId())
+			}
+		}
+		if len(candidateStoreIDs) == 0 {
+			continue
 		}
 		destStoreID := h.selectDestStore(candidateStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
 		if destStoreID == 0 {

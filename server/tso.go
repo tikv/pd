@@ -144,6 +144,7 @@ func (s *Server) updateTimestamp() error {
 		physical: now,
 	}
 	s.ts.Store(current)
+	metadataGauge.WithLabelValues("tso").Set(float64(now.Unix()))
 
 	return nil
 }

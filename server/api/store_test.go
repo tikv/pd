@@ -81,7 +81,7 @@ func (s *testStoreSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func checkStoresInfo(c *C, ss []*storeInfo, want []*metapb.Store) {
+func checkStoresInfo(c *C, ss []*StoreInfo, want []*metapb.Store) {
 	c.Assert(len(ss), Equals, len(want))
 	mapWant := make(map[uint64]*metapb.Store)
 	for _, s := range want {
@@ -96,19 +96,19 @@ func checkStoresInfo(c *C, ss []*storeInfo, want []*metapb.Store) {
 
 func (s *testStoreSuite) TestStoresList(c *C) {
 	url := fmt.Sprintf("%s/stores", s.urlPrefix)
-	info := new(storesInfo)
+	info := new(StoresInfo)
 	err := readJSONWithURL(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[:3])
 
 	url = fmt.Sprintf("%s/stores?state=0", s.urlPrefix)
-	info = new(storesInfo)
+	info = new(StoresInfo)
 	err = readJSONWithURL(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[:2])
 
 	url = fmt.Sprintf("%s/stores?state=1", s.urlPrefix)
-	info = new(storesInfo)
+	info = new(StoresInfo)
 	err = readJSONWithURL(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[2:3])
@@ -117,15 +117,15 @@ func (s *testStoreSuite) TestStoresList(c *C) {
 
 func (s *testStoreSuite) TestStoreGet(c *C) {
 	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
-	info := new(storeInfo)
+	info := new(StoreInfo)
 	err := readJSONWithURL(url, info)
 	c.Assert(err, IsNil)
-	checkStoresInfo(c, []*storeInfo{info}, s.stores[:1])
+	checkStoresInfo(c, []*StoreInfo{info}, s.stores[:1])
 }
 
 func (s *testStoreSuite) TestStoreLabel(c *C) {
 	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
-	var info storeInfo
+	var info StoreInfo
 	err := readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.Labels, HasLen, 0)
@@ -134,7 +134,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	labels := map[string]string{"zone": "cn", "host": "local"}
 	b, err := json.Marshal(labels)
 	c.Assert(err, IsNil)
-	err = postJSON(&http.Client{}, url+"/label", b)
+	err = postJSON(url+"/label", b)
 	c.Assert(err, IsNil)
 
 	err = readJSONWithURL(url, &info)
@@ -148,7 +148,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	labels = map[string]string{"zack": "zack1", "Host": "host1"}
 	b, err = json.Marshal(labels)
 	c.Assert(err, IsNil)
-	err = postJSON(&http.Client{}, url+"/label", b)
+	err = postJSON(url+"/label", b)
 	c.Assert(err, IsNil)
 
 	expectLabel := map[string]string{"zone": "cn", "zack": "zack1", "host": "host1"}
@@ -190,30 +190,30 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 
 func (s *testStoreSuite) TestStoreSetState(c *C) {
 	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
-	info := storeInfo{}
+	info := StoreInfo{}
 	err := readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
 
 	// Set to Offline.
-	info = storeInfo{}
-	err = postJSON(&http.Client{}, url+"/state?state=Offline", nil)
+	info = StoreInfo{}
+	err = postJSON(url+"/state?state=Offline", nil)
 	c.Assert(err, IsNil)
 	err = readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
 
 	// Invalid state.
-	info = storeInfo{}
-	err = postJSON(&http.Client{}, url+"/state?state=Foo", nil)
+	info = StoreInfo{}
+	err = postJSON(url+"/state?state=Foo", nil)
 	c.Assert(err, NotNil)
 	err = readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
 
 	// Set back to Up.
-	info = storeInfo{}
-	err = postJSON(&http.Client{}, url+"/state?state=Up", nil)
+	info = StoreInfo{}
+	err = postJSON(url+"/state?state=Up", nil)
 	c.Assert(err, IsNil)
 	err = readJSONWithURL(url, &info)
 	c.Assert(err, IsNil)

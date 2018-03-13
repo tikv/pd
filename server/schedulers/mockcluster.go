@@ -50,6 +50,25 @@ func (mc *mockCluster) ScanRegions(startKey []byte, limit int) []*core.RegionInf
 	return mc.Regions.ScanRange(startKey, limit)
 }
 
+// GetStoresAverageScore returns the total resource score of all unfiltered stores.
+func (mc *mockCluster) GetStoresAverageScore(kind core.ResourceKind, filters ...schedule.Filter) float64 {
+	var totalResourceSize int64
+	var totalResourceWeight float64
+	for _, s := range mc.BasicCluster.GetStores() {
+		if schedule.FilterSource(mc, s, filters) {
+			continue
+		}
+
+		totalResourceWeight += s.ResourceWeight(kind)
+		totalResourceSize += s.ResourceSize(kind)
+	}
+
+	if totalResourceWeight == 0 {
+		return 0
+	}
+	return float64(totalResourceSize) / totalResourceWeight
+}
+
 // AllocPeer allocs a new peer on a store.
 func (mc *mockCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := mc.allocID()
@@ -298,14 +317,25 @@ func (mc *mockCluster) GetMaxReplicas() int {
 	return mc.MockSchedulerOptions.GetMaxReplicas(namespace.DefaultNamespace)
 }
 
+func (mc *mockCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
+	for _, cfg := range mc.LabelProperties[typ] {
+		for _, l := range labels {
+			if l.Key == cfg.Key && l.Value == cfg.Value {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 const (
 	defaultMaxReplicas          = 3
 	defaultMaxSnapshotCount     = 3
 	defaultMaxPendingPeerCount  = 16
-	defaultMaxStoreDownTime     = time.Hour
+	defaultMaxStoreDownTime     = 30 * time.Minute
 	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
-	defaultReplicaScheduleLimit = 16
+	defaultReplicaScheduleLimit = 32
 	defaultTolerantSizeRatio    = 2.5
 )
 
@@ -322,6 +352,7 @@ type MockSchedulerOptions struct {
 	LocationLabels        []string
 	HotRegionLowThreshold int
 	TolerantSizeRatio     float64
+	LabelProperties       map[string][]*metapb.StoreLabel
 }
 
 func newMockSchedulerOptions() *MockSchedulerOptions {

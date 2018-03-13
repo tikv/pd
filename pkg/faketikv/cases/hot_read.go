@@ -49,7 +49,7 @@ func newHotRead() *Conf {
 	}
 	conf.MaxID = id.maxID
 
-	// select 20 reigons on store 1 as hot read regions.
+	// select 20 regions on store 1 as hot read regions.
 	readFlow := make(map[uint64]int64, 20)
 	for _, r := range conf.Regions {
 		if r.Leader.GetStoreId() == 1 {

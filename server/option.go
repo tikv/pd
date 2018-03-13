@@ -19,15 +19,17 @@ import (
 	"time"
 
 	"github.com/juju/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
 
 // scheduleOption is a wrapper to access the configuration safely.
 type scheduleOption struct {
-	v   atomic.Value
-	rep *Replication
-	ns  map[string]*namespaceOption
+	v             atomic.Value
+	rep           *Replication
+	ns            map[string]*namespaceOption
+	labelProperty atomic.Value
 }
 
 func newScheduleOption(cfg *Config) *scheduleOption {
@@ -39,6 +41,7 @@ func newScheduleOption(cfg *Config) *scheduleOption {
 		o.ns[name] = newNamespaceOption(&nsCfg)
 	}
 	o.rep = newReplication(&cfg.Replication)
+	o.labelProperty.Store(cfg.LabelProperty)
 	return o
 }
 
@@ -144,15 +147,47 @@ func (o *scheduleOption) RemoveSchedulerCfg(name string) error {
 	return nil
 }
 
+func (o *scheduleOption) SetLabelProperty(typ, labelKey, labelValue string) {
+	cfg := o.loadLabelPropertyConfig().clone()
+	for _, l := range cfg[typ] {
+		if l.Key == labelKey && l.Value == labelValue {
+			return
+		}
+	}
+	cfg[typ] = append(cfg[typ], StoreLabel{Key: labelKey, Value: labelValue})
+	o.labelProperty.Store(cfg)
+}
+
+func (o *scheduleOption) DeleteLabelProperty(typ, labelKey, labelValue string) {
+	cfg := o.loadLabelPropertyConfig().clone()
+	oldLabels := cfg[typ]
+	cfg[typ] = []StoreLabel{}
+	for _, l := range oldLabels {
+		if l.Key == labelKey && l.Value == labelValue {
+			continue
+		}
+		cfg[typ] = append(cfg[typ], l)
+	}
+	if len(cfg[typ]) == 0 {
+		delete(cfg, typ)
+	}
+	o.labelProperty.Store(cfg)
+}
+
+func (o *scheduleOption) loadLabelPropertyConfig() LabelPropertyConfig {
+	return o.labelProperty.Load().(LabelPropertyConfig)
+}
+
 func (o *scheduleOption) persist(kv *core.KV) error {
 	namespaces := make(map[string]NamespaceConfig)
 	for name, ns := range o.ns {
 		namespaces[name] = *ns.load()
 	}
 	cfg := &Config{
-		Schedule:    *o.load(),
-		Replication: *o.rep.load(),
-		Namespace:   namespaces,
+		Schedule:      *o.load(),
+		Replication:   *o.rep.load(),
+		Namespace:     namespaces,
+		LabelProperty: o.loadLabelPropertyConfig(),
 	}
 	err := kv.SaveConfig(cfg)
 	return errors.Trace(err)
@@ -164,9 +199,10 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		namespaces[name] = *ns.load()
 	}
 	cfg := &Config{
-		Schedule:    *o.load(),
-		Replication: *o.rep.load(),
-		Namespace:   namespaces,
+		Schedule:      *o.load(),
+		Replication:   *o.rep.load(),
+		Namespace:     namespaces,
+		LabelProperty: o.loadLabelPropertyConfig().clone(),
 	}
 	isExist, err := kv.LoadConfig(cfg)
 	if err != nil {
@@ -179,12 +215,25 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 			nsCfg := nsCfg
 			o.ns[name] = newNamespaceOption(&nsCfg)
 		}
+		o.labelProperty.Store(cfg.LabelProperty)
 	}
 	return nil
 }
 
 func (o *scheduleOption) GetHotRegionLowThreshold() int {
 	return schedule.HotRegionLowThreshold
+}
+
+func (o *scheduleOption) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
+	pc := o.labelProperty.Load().(LabelPropertyConfig)
+	for _, cfg := range pc[typ] {
+		for _, l := range labels {
+			if l.Key == cfg.Key && l.Value == cfg.Value {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Replication provides some help to do replication.

@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
@@ -38,6 +39,9 @@ const (
 
 	regionheartbeatSendChanCap = 1024
 	hotRegionScheduleName      = "balance-hot-region-scheduler"
+
+	patrolRegionInterval  = time.Millisecond * 100
+	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
 )
 
 var (
@@ -103,17 +107,49 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 			c.removeOperator(op)
 		}
 	}
+}
 
-	// Check replica operator.
-	if c.limiter.OperatorCount(schedule.OpReplica) >= c.cluster.GetReplicaScheduleLimit() {
-		return
-	}
-	// Generate Operator which moves region to targeted namespace store
-	if op := c.namespaceChecker.Check(region); op != nil {
-		c.addOperator(op)
-	}
-	if op := c.replicaChecker.Check(region); op != nil {
-		c.addOperator(op)
+func (c *coordinator) patrolRegions() {
+	defer logutil.LogPanic()
+
+	defer c.wg.Done()
+	ticker := time.NewTicker(patrolRegionInterval)
+	defer ticker.Stop()
+
+	log.Info("coordinator: start patrol regions")
+
+	var key []byte
+	for {
+		select {
+		case <-ticker.C:
+		case <-c.ctx.Done():
+			return
+		}
+
+		if c.limiter.OperatorCount(schedule.OpReplica) >= c.cluster.GetReplicaScheduleLimit() {
+			continue
+		}
+
+		regions := c.cluster.ScanRegions(key, patrolScanRegionLimit)
+		if len(regions) == 0 {
+			// reset scan key.
+			key = nil
+			continue
+		}
+
+		for _, region := range regions {
+			key = region.GetEndKey()
+
+			if op := c.namespaceChecker.Check(region); op != nil {
+				c.addOperator(op)
+				break
+			}
+
+			if op := c.replicaChecker.Check(region); op != nil {
+				c.addOperator(op)
+				break
+			}
+		}
 	}
 }
 
@@ -161,6 +197,8 @@ func (c *coordinator) run() {
 		log.Errorf("can't persist schedule config: %v", err)
 	}
 
+	c.wg.Add(1)
+	go c.patrolRegions()
 }
 
 func (c *coordinator) stop() {
@@ -232,8 +270,9 @@ func (c *coordinator) collectHotSpotMetrics() {
 	if !ok {
 		return
 	}
+	stores := c.cluster.GetStores()
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
-	for _, s := range c.cluster.GetStores() {
+	for _, s := range stores {
 		store := fmt.Sprintf("store_%d", s.GetId())
 		stat, ok := status.AsPeer[s.GetId()]
 		if ok {
@@ -262,7 +301,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 
 	// collect hot read region metrics
 	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
-	for _, s := range c.cluster.GetStores() {
+	for _, s := range stores {
 		store := fmt.Sprintf("store_%d", s.GetId())
 		stat, ok := status.AsLeader[s.GetId()]
 		if ok {
@@ -323,6 +362,7 @@ func (c *coordinator) removeScheduler(name string) error {
 }
 
 func (c *coordinator) runScheduler(s *scheduleController) {
+	defer logutil.LogPanic()
 	defer c.wg.Done()
 	defer s.Cleanup(c.cluster)
 

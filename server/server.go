@@ -196,6 +196,9 @@ func (s *Server) startServer() error {
 		return errors.Trace(err)
 	}
 	log.Infof("init cluster id %v", s.clusterID)
+	// It may lose accuracy if use float64 to store uint64. So we store the
+	// cluster id in label.
+	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
 
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	s.leaderValue = s.marshalLeader()
@@ -517,6 +520,33 @@ func (s *Server) DeleteNamespaceConfig(name string) {
 		s.scheduleOpt.persist(s.kv)
 		log.Infof("namespace:%v config is deleted: %+v", name, *cfg)
 	}
+}
+
+// SetLabelProperty inserts a label property config.
+func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
+	s.scheduleOpt.SetLabelProperty(typ, labelKey, labelValue)
+	err := s.scheduleOpt.persist(s.kv)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	log.Infof("label property config is updated: %+v", s.scheduleOpt.loadLabelPropertyConfig())
+	return nil
+}
+
+// DeleteLabelProperty deletes a label property config.
+func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
+	s.scheduleOpt.DeleteLabelProperty(typ, labelKey, labelValue)
+	err := s.scheduleOpt.persist(s.kv)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	log.Infof("label property config is updated: %+v", s.scheduleOpt.loadLabelPropertyConfig())
+	return nil
+}
+
+// GetLabelProperty returns the whole label property config.
+func (s *Server) GetLabelProperty() LabelPropertyConfig {
+	return s.scheduleOpt.loadLabelPropertyConfig().clone()
 }
 
 // GetSecurityConfig get the security config.

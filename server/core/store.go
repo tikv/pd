@@ -139,7 +139,7 @@ const storeLowSpaceThreshold = 0.2
 
 // IsLowSpace checks if the store is lack of space.
 func (s *StoreInfo) IsLowSpace() bool {
-	return s.AvailableRatio() < storeLowSpaceThreshold
+	return s.Stats != nil && s.AvailableRatio() < storeLowSpaceThreshold
 }
 
 // ResourceCount reutrns count of leader/region in the store.
@@ -210,16 +210,24 @@ func (s *StoreInfo) GetUptime() time.Duration {
 	return 0
 }
 
-// If a store's last heartbeat is storeDisconnectDuration ago, the store will
-// be marked as disconnected state. The value should be greater than tikv's
-// store heartbeat interval (default 10s).
-var storeDisconnectDuration = 20 * time.Second
+var (
+	// If a store's last heartbeat is storeDisconnectDuration ago, the store will
+	// be marked as disconnected state. The value should be greater than tikv's
+	// store heartbeat interval (default 10s).
+	storeDisconnectDuration = 20 * time.Second
+	storeUnhealthDuration   = 10 * time.Minute
+)
 
 // IsDisconnected checks if a store is disconnected, which means PD misses
 // tikv's store heartbeat for a short time, maybe caused by process restart or
 // temporary network failure.
 func (s *StoreInfo) IsDisconnected() bool {
 	return s.DownTime() > storeDisconnectDuration
+}
+
+// IsUnhealth checks if a store is unhealth.
+func (s *StoreInfo) IsUnhealth() bool {
+	return s.DownTime() > storeUnhealthDuration
 }
 
 // GetLabelValue returns a label's value (if exists).
@@ -385,23 +393,6 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 	if store, ok := s.stores[storeID]; ok {
 		store.RegionSize = regionSize
 	}
-}
-
-// AverageResourceScore return the total resource score of all StoreInfo
-func (s *StoresInfo) AverageResourceScore(kind ResourceKind) float64 {
-	var totalResourceSize int64
-	var totalResourceWeight float64
-	for _, s := range s.stores {
-		if s.IsUp() {
-			totalResourceWeight += s.ResourceWeight(kind)
-			totalResourceSize += s.ResourceSize(kind)
-		}
-	}
-
-	if totalResourceWeight == 0 {
-		return 0
-	}
-	return float64(totalResourceSize) / totalResourceWeight
 }
 
 // TotalWrittenBytes return the total written bytes of all StoreInfo
