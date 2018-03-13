@@ -69,11 +69,7 @@ func doDelete(url string) error {
 }
 
 func doGet(url string) (*http.Response, error) {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	resp, err := server.DialClient.Do(req)
+	resp, err := server.DialClient.Get(url)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
