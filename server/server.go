@@ -645,17 +645,18 @@ func (s *Server) SetLogLevel(level string) {
 
 var healthURL = "/pd/ping"
 
-// CheckHealth checks if members are health
+// CheckHealth checks if members are healthy
 func (s *Server) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
 	unhealthMembers := make(map[uint64]*pdpb.Member)
 	for _, member := range members {
 		for _, cURL := range member.ClientUrls {
 			resp, err := DialClient.Get(fmt.Sprintf("%s%s", cURL, healthURL))
-			if err != nil || resp.StatusCode != http.StatusOK {
-				unhealthMembers[member.GetMemberId()] = member
-			}
 			if resp != nil {
 				resp.Body.Close()
+			}
+			if err != nil || resp.StatusCode != http.StatusOK {
+				unhealthMembers[member.GetMemberId()] = member
+				break
 			}
 		}
 	}
