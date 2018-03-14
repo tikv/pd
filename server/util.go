@@ -18,6 +18,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
@@ -48,6 +49,13 @@ var (
 	PDGitHash        = "None"
 	PDGitBranch      = "None"
 )
+
+// DialClient used to dail http request.
+var DialClient = &http.Client{
+	Transport: &http.Transport{
+		DisableKeepAlives: true,
+	},
+}
 
 // LogPDInfo prints the PD version information.
 func LogPDInfo() {
@@ -248,4 +256,18 @@ func parseTimestamp(data []byte) (time.Time, error) {
 
 func subTimeByWallClock(after time.Time, before time.Time) time.Duration {
 	return time.Duration(after.UnixNano() - before.UnixNano())
+}
+
+// InitHTTPClient initials a http client.
+func InitHTTPClient(svr *Server) error {
+	tlsConfig, err := svr.GetSecurityConfig().ToTLSConfig()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	DialClient = &http.Client{Transport: &http.Transport{
+		TLSClientConfig:   tlsConfig,
+		DisableKeepAlives: true,
+	}}
+	return nil
 }
