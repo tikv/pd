@@ -29,14 +29,19 @@ type CommandFlags struct {
 }
 
 var (
-	rootCmd = &cobra.Command{
-		Use:   "pdctl",
-		Short: "Placement Driver control",
-	}
 	commandFlags = CommandFlags{}
 )
 
 func init() {
+	cobra.EnablePrefixMatching = true
+}
+
+// Start run Command
+func Start(args []string) {
+	rootCmd := &cobra.Command{
+		Use:   "pdctl",
+		Short: "Placement Driver control",
+	}
 	rootCmd.PersistentFlags().StringVarP(&commandFlags.URL, "pd", "u", "http://127.0.0.1:2379", "pd address")
 	rootCmd.Flags().StringVar(&commandFlags.CAPath, "cacert", "", "path of file that contains list of trusted SSL CAs.")
 	rootCmd.Flags().StringVar(&commandFlags.CertPath, "cert", "", "path of file that contains X509 certificate in PEM format.")
@@ -58,11 +63,7 @@ func init() {
 		command.NewHealthCommand(),
 		command.NewLogCommand(),
 	)
-	cobra.EnablePrefixMatching = true
-}
 
-// Start run Command
-func Start(args []string) {
 	rootCmd.SetArgs(args)
 	rootCmd.SilenceErrors = true
 	rootCmd.ParseFlags(args)
