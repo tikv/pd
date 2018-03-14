@@ -168,38 +168,15 @@ func minDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-func takeInfluence(store *core.StoreInfo, storeInfluence *schedule.StoreInfluence) {
-	store.LeaderCount += storeInfluence.LeaderCount
-	store.RegionCount += storeInfluence.RegionCount
-	store.LeaderSize += int64(storeInfluence.LeaderSize)
-	store.RegionSize += int64(storeInfluence.RegionSize)
-}
-
-// shouldBalance returns true if we should balance the source and target store.
-// The tolerantRatio provides a buffer to make the cluster stable, so that we
-// don't need to schedule very frequently.
-// TODO: simplify the arguments
-func shouldBalance(source, target *core.StoreInfo, avgScore float64, kind core.ResourceKind, region *core.RegionInfo, opInfluence schedule.OpInfluence, tolerantRatio float64) bool {
-	takeInfluence(source, opInfluence.GetStoreInfluence(source.GetId()))
-	takeInfluence(target, opInfluence.GetStoreInfluence(target.GetId()))
-
-	sourceScore := source.ResourceScore(kind)
-	targetScore := target.ResourceScore(kind)
-	log.Debugf("[region %d] source score is %v and target score is %v", region.GetId(), sourceScore, targetScore)
-	if targetScore >= sourceScore {
-		log.Debugf("should balance return false cause targetScore %v >= sourceScore %v", targetScore, sourceScore)
+func shouldBalance(sourceSize int64, sourceWeight float64, targetSize int64, targetWeight float64, moveSize float64) bool {
+	if targetWeight == 0 {
 		return false
 	}
-
-	// avgScore is the goal for every store
-	// in expectation, sourceScore > avgScore > targetScore
-	// if not, moving region is not necessary
-	// In this case, either sourceSizeDiff or targetSizeDiff will be negative, then obviously return false
-	sourceSizeDiff := (sourceScore - avgScore) * source.ResourceWeight(kind)
-	targetSizeDiff := (avgScore - targetScore) * target.ResourceWeight(kind)
-
-	log.Debugf("[region %d] size diff is %v and tolerant size is %v", region.GetId(), math.Min(sourceSizeDiff, targetSizeDiff), float64(region.ApproximateSize)*tolerantRatio)
-	return math.Min(sourceSizeDiff, targetSizeDiff) >= float64(region.ApproximateSize)*tolerantRatio
+	if sourceWeight == 0 {
+		return true
+	}
+	// Make sure after move, source score is still greater than target score.
+	return (float64(sourceSize)-moveSize)/sourceWeight > (float64(targetSize)+moveSize)/targetWeight
 }
 
 func adjustBalanceLimit(cluster schedule.Cluster, kind core.ResourceKind) uint64 {
