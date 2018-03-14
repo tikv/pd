@@ -14,7 +14,6 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/pingcap/pd/server"
@@ -47,6 +46,7 @@ func (h *healthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	unhealthMembers := h.svr.CheckHealth(members)
 	healths := []health{}
 	for _, member := range members {
 		h := health{
@@ -55,12 +55,8 @@ func (h *healthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			ClientUrls: member.ClientUrls,
 			Health:     true,
 		}
-		for _, cURL := range member.ClientUrls {
-			resp, err := doGet(fmt.Sprintf("%s%s%s", cURL, apiPrefix, pingAPI))
-			if err != nil {
-				h.Health = false
-			}
-			resp.Body.Close()
+		if _, ok := unhealthMembers[member.GetMemberId()]; ok {
+			h.Health = false
 		}
 		healths = append(healths, h)
 	}

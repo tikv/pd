@@ -58,6 +58,14 @@ var (
 			Help:      "Status of the cluster.",
 		}, []string{"type", "namespace"})
 
+	healthStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "health_status",
+			Help:      "Status of the cluster.",
+		}, []string{"name"})
+
 	regionStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
