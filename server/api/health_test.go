@@ -16,7 +16,6 @@ package api
 import (
 	"encoding/json"
 	"io/ioutil"
-	"math/rand"
 	"net/http"
 	"strings"
 
@@ -34,7 +33,7 @@ func (s *testHealthAPISuite) SetUpSuite(c *C) {
 	s.hc = newHTTPClient()
 }
 
-func checkSliceResponse(c *C, body []byte, cfgs []*server.Config) {
+func checkSliceResponse(c *C, body []byte, cfgs []*server.Config, unhealth string) {
 	got := []health{}
 	json.Unmarshal(body, &got)
 
@@ -47,21 +46,31 @@ func checkSliceResponse(c *C, body []byte, cfgs []*server.Config) {
 			}
 			relaxEqualStings(c, h.ClientUrls, strings.Split(cfg.ClientUrls, ","))
 		}
+		if h.Name == unhealth {
+			c.Assert(h.Health, IsFalse)
+			continue
+		}
+		c.Assert(h.Health, IsTrue)
 	}
 }
 
 func (s *testHealthAPISuite) TestHealthSlice(c *C) {
-	healths := []int{1, 3}
+	cfgs, svrs, clean := mustNewCluster(c, 3)
+	defer clean()
+	var leader, follow *server.Server
 
-	for _, num := range healths {
-		cfgs, _, clean := mustNewCluster(c, num)
-		defer clean()
-
-		addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/health"
-		resp, err := s.hc.Get(addr)
-		c.Assert(err, IsNil)
-		buf, err := ioutil.ReadAll(resp.Body)
-		c.Assert(err, IsNil)
-		checkSliceResponse(c, buf, cfgs)
+	for _, svr := range svrs {
+		if svr.IsLeader() {
+			leader = svr
+		} else {
+			follow = svr
+		}
 	}
+	addr := leader.GetConfig().ClientUrls + apiPrefix + "/health"
+	follow.Close()
+	resp, err := s.hc.Get(addr)
+	c.Assert(err, IsNil)
+	buf, err := ioutil.ReadAll(resp.Body)
+	c.Assert(err, IsNil)
+	checkSliceResponse(c, buf, cfgs, follow.GetConfig().Name)
 }
