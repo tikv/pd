@@ -84,6 +84,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 	targetSize := target.LeaderSize + int64(opInfluence.GetStoreInfluence(target.GetId()).LeaderSize)
 	regionSize := math.Max(1.0, float64(region.ApproximateSize)) * cluster.GetTolerantSizeRatio()
 	if !shouldBalance(sourceSize, source.LeaderWeight, targetSize, target.LeaderWeight, regionSize) {
+		log.Debugf("[%s] skip balance region%d, source size: %v, source weight: %v, target size: %v, target weight: %v, region size: %v", l.GetName(), region.GetId(), sourceSize, source.LeaderWeight, targetSize, target.LeaderWeight, region.ApproximateSize)
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}
