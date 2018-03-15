@@ -546,6 +546,7 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 	case schedule.PromoteLearnerPeer:
 		cmd := &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
+				// reuse AddNode type
 				ChangeType: eraftpb.ConfChangeType_AddNode,
 				Peer: &metapb.Peer{
 					Id:      s.PeerID,

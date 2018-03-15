@@ -44,6 +44,11 @@ func NewReplicaChecker(cluster Cluster, classifier namespace.Classifier) *Replic
 // Check verifies a region's replicas, creating an Operator if need.
 func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 	checkerCounter.WithLabelValues("replica_checker", "check").Inc()
+	if op := r.checkDownLearner(region); op != nil {
+		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
+		op.SetPriorityLevel(core.HighPriority)
+		return op
+	}
 	if op := r.checkDownPeer(region); op != nil {
 		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
 		op.SetPriorityLevel(core.HighPriority)
@@ -166,6 +171,26 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *Operator {
 			continue
 		}
 		return CreateRemovePeerOperator("removeDownReplica", r.cluster, OpReplica, region, peer.GetStoreId())
+	}
+	return nil
+}
+
+func (r *ReplicaChecker) checkDownLearner(region *core.RegionInfo) *Operator {
+	if !r.cluster.IsEnableRaftLearner() {
+		return nil
+	}
+
+	for _, stats := range region.DownLearners {
+		peer := stats.GetPeer()
+		if peer == nil {
+			continue
+		}
+		store := r.cluster.GetStore(peer.GetStoreId())
+		if store == nil {
+			log.Infof("lost the store %d, maybe you are recovering the PD cluster.", peer.GetStoreId())
+			return nil
+		}
+		return CreateRemovePeerOperator("removeDownLearner", r.cluster, OpReplica, region, peer.GetStoreId())
 	}
 	return nil
 }

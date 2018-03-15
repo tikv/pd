@@ -27,6 +27,8 @@ const (
 	pendingPeer
 	offlinePeer
 	incorrectNamespace
+	downLearner
+	pendingLearner
 )
 
 type regionStatistics struct {
@@ -90,6 +92,14 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	if len(region.PendingPeers) > 0 {
 		r.stats[pendingPeer][regionID] = region
 		peerTypeIndex |= pendingPeer
+	}
+	if len(region.DownLearners) > 0 {
+		r.stats[downLearner][regionID] = region
+		peerTypeIndex |= downLearner
+	}
+	if len(region.PendingLearners) > 0 {
+		r.stats[pendingLearner][regionID] = region
+		peerTypeIndex |= pendingLearner
 	}
 	for _, store := range stores {
 		if store.IsOffline() {
@@ -166,4 +176,6 @@ func (r *regionStatistics) Collect() {
 	regionStatusGauge.WithLabelValues("pending_peer_region_count").Set(float64(len(r.stats[pendingPeer])))
 	regionStatusGauge.WithLabelValues("offline_peer_region_count").Set(float64(len(r.stats[offlinePeer])))
 	regionStatusGauge.WithLabelValues("incorrect_namespace_region_count").Set(float64(len(r.stats[incorrectNamespace])))
+	regionStatusGauge.WithLabelValues("down_learner_region_count").Set(float64(len(r.stats[downLearner])))
+	regionStatusGauge.WithLabelValues("pending_learner_region_count").Set(float64(len(r.stats[pendingLearner])))
 }

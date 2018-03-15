@@ -32,6 +32,7 @@ type RegionInfo struct {
 	*metapb.Region
 	Leader          *metapb.Peer
 	DownPeers       []*pdpb.PeerStats
+	DownLearners    []*pdpb.PeerStats
 	PendingPeers    []*metapb.Peer
 	PendingLearners []*metapb.Peer
 	WrittenBytes    uint64
@@ -57,6 +58,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		Region:          heartbeat.GetRegion(),
 		Leader:          heartbeat.GetLeader(),
 		DownPeers:       heartbeat.GetDownPeers(),
+		DownLearners:    heartbeat.GetDownLearners(),
 		PendingPeers:    heartbeat.GetPendingPeers(),
 		PendingLearners: heartbeat.GetPendingLearners(),
 		WrittenBytes:    heartbeat.GetBytesWritten(),
@@ -71,6 +73,10 @@ func (r *RegionInfo) Clone() *RegionInfo {
 	for _, peer := range r.DownPeers {
 		downPeers = append(downPeers, proto.Clone(peer).(*pdpb.PeerStats))
 	}
+	downLearners := make([]*pdpb.PeerStats, 0, len(r.DownLearners))
+	for _, peer := range r.DownLearners {
+		downLearners = append(downLearners, proto.Clone(peer).(*pdpb.PeerStats))
+	}
 	pendingPeers := make([]*metapb.Peer, 0, len(r.PendingPeers))
 	for _, peer := range r.PendingPeers {
 		pendingPeers = append(pendingPeers, proto.Clone(peer).(*metapb.Peer))
@@ -83,6 +89,7 @@ func (r *RegionInfo) Clone() *RegionInfo {
 		Region:          proto.Clone(r.Region).(*metapb.Region),
 		Leader:          proto.Clone(r.Leader).(*metapb.Peer),
 		DownPeers:       downPeers,
+		DownLearners:    downLearners,
 		PendingPeers:    pendingPeers,
 		PendingLearners: pendingLearners,
 		WrittenBytes:    r.WrittenBytes,
@@ -101,9 +108,19 @@ func (r *RegionInfo) GetPeer(peerID uint64) *metapb.Peer {
 	return nil
 }
 
-// GetDownPeer returns the down peers with specified peer id.
+// GetDownPeer returns the down peer with specified peer id.
 func (r *RegionInfo) GetDownPeer(peerID uint64) *metapb.Peer {
 	for _, down := range r.DownPeers {
+		if down.GetPeer().GetId() == peerID {
+			return down.GetPeer()
+		}
+	}
+	return nil
+}
+
+// GetDownLearner returns the down learner with soecified peer id.
+func (r *RegionInfo) GetDownLearner(peerID uint64) *metapb.Peer {
+	for _, down := range r.DownLearners {
 		if down.GetPeer().GetId() == peerID {
 			return down.GetPeer()
 		}
