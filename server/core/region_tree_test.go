@@ -42,6 +42,7 @@ func (s *testRegionSuite) TestRegionInfo(c *C) {
 	info := NewRegionInfo(region, peers[0])
 	info.DownPeers = []*pdpb.PeerStats{{Peer: downPeer}}
 	info.PendingPeers = []*metapb.Peer{pendingPeer}
+	info.DownLearners = []*pdpb.PeerStats{}
 	info.PendingLearners = []*metapb.Peer{}
 
 	r := info.Clone()
