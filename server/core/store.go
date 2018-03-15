@@ -106,20 +106,12 @@ const minWeight = 1e-6
 
 // LeaderScore returns the store's leader score: leaderCount / leaderWeight.
 func (s *StoreInfo) LeaderScore() float64 {
-	size := math.Max(1, float64(s.LeaderSize))
-	if s.LeaderWeight <= 0 {
-		return size / minWeight
-	}
-	return size / s.LeaderWeight
+	return float64(s.LeaderSize) / math.Max(s.LeaderWeight, minWeight)
 }
 
 // RegionScore returns the store's region score: regionSize / regionWeight.
 func (s *StoreInfo) RegionScore() float64 {
-	size := math.Max(1, float64(s.RegionSize))
-	if s.RegionWeight <= 0 {
-		return size / minWeight
-	}
-	return size / s.RegionWeight
+	return float64(s.RegionSize) / math.Max(s.RegionWeight, minWeight)
 }
 
 // StorageSize returns store's used storage size reported from tikv.
