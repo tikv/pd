@@ -555,3 +555,56 @@ func (s *Server) notBootstrappedHeader() *pdpb.ResponseHeader {
 		Message: "cluster is not bootstrapped",
 	})
 }
+
+// GetUserKV get key from pd under dir 'user'.
+func (s *Server) GetUserKV(ctx context.Context, request *pdpb.GetUserKVRequest) (*pdpb.GetUserKVResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	value, err := s.kv.GetUserKV(request.GetKey())
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return &pdpb.GetUserKVResponse{
+		Header: s.header(),
+		Key:    request.GetKey(),
+		Value:  value,
+	}, nil
+}
+
+// PutUserKV put key to pd under dir 'user'.
+func (s *Server) PutUserKV(ctx context.Context, request *pdpb.PutUserKVRequest) (*pdpb.PutUserKVResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	err := s.kv.PutUserKV(request.GetKey(), request.GetValue())
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return &pdpb.PutUserKVResponse{
+		Header: s.header(),
+		Key:    request.GetKey(),
+		Value:  request.GetValue(),
+	}, nil
+}
+
+// DeleteUserKV delete key from pd under dir 'user'.
+func (s *Server) DeleteUserKV(ctx context.Context, request *pdpb.DeleteUserKVRequest) (*pdpb.DeleteUserKVResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	err := s.kv.DeleteUserKV(request.GetKey())
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return &pdpb.DeleteUserKVResponse{
+		Header: s.header(),
+		Key:    request.GetKey(),
+	}, nil
+}

@@ -248,14 +248,14 @@
   revision = "1c287c953996ab3a0bf535dba9d53d809d3dc0b6"
 
 [[projects]]
-  branch = "master"
-  name = "github.com/pingcap/kvproto"
+  branch = "do_gc_distributedly"
+  name = "github.com/wentaoxu/kvproto"
   packages = [
     "pkg/eraftpb",
     "pkg/metapb",
     "pkg/pdpb"
   ]
-  revision = "7fe0eb69e3e6d5e03c2222651b065ecfe3e1ae31"
+  revision = "f8f9cd36a80ac771d00b6b682d93cef834f4e473"
 
 [[projects]]
   name = "github.com/prometheus/client_golang"
