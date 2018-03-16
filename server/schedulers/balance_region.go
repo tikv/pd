@@ -14,7 +14,6 @@
 package schedulers
 
 import (
-	"math"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -122,7 +121,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 
 	sourceSize := source.RegionSize + int64(opInfluence.GetStoreInfluence(source.GetId()).RegionSize)
 	targetSize := target.RegionSize + int64(opInfluence.GetStoreInfluence(target.GetId()).RegionSize)
-	regionSize := math.Max(1.0, float64(region.ApproximateSize)) * cluster.GetTolerantSizeRatio()
+	regionSize := float64(region.ApproximateSize) * cluster.GetTolerantSizeRatio()
 	if !shouldBalance(sourceSize, source.RegionWeight, targetSize, target.RegionWeight, regionSize) {
 		log.Debugf("[%s] skip balance region%d, source size: %v, source weight: %v, target size: %v, target weight: %v, region size: %v", s.GetName(), region.GetId(), sourceSize, source.RegionWeight, targetSize, target.RegionWeight, region.ApproximateSize)
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
