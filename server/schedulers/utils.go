@@ -14,98 +14,15 @@
 package schedulers
 
 import (
-	"math"
 	"time"
 
 	"github.com/montanaflynn/stats"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	log "github.com/sirupsen/logrus"
 )
-
-// scheduleTransferLeader schedules a region to transfer leader to the peer.
-func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s schedule.Selector, filters ...schedule.Filter) (region *core.RegionInfo, peer *metapb.Peer) {
-	stores := cluster.GetStores()
-	if len(stores) == 0 {
-		schedulerCounter.WithLabelValues(schedulerName, "no_store").Inc()
-		return nil, nil
-	}
-
-	var averageLeader float64
-	count := 0
-	for _, s := range stores {
-		if schedule.FilterSource(cluster, s, filters) {
-			continue
-		}
-		averageLeader += float64(s.LeaderScore())
-		count++
-	}
-	averageLeader /= float64(count)
-	log.Debugf("[%s] averageLeader is %v", schedulerName, averageLeader)
-
-	mostLeaderStore := s.SelectSource(cluster, stores, filters...)
-	leastLeaderStore := s.SelectTarget(cluster, stores, filters...)
-	log.Debugf("[%s] mostLeaderStore is %v, leastLeaderStore is %v", schedulerName, mostLeaderStore, leastLeaderStore)
-
-	var mostLeaderDistance, leastLeaderDistance float64
-	if mostLeaderStore != nil {
-		mostLeaderDistance = math.Abs(mostLeaderStore.LeaderScore() - averageLeader)
-	}
-	if leastLeaderStore != nil {
-		leastLeaderDistance = math.Abs(leastLeaderStore.LeaderScore() - averageLeader)
-	}
-	log.Debugf("[%s] mostLeaderDistance is %v, leastLeaderDistance is %v", schedulerName, mostLeaderDistance, leastLeaderDistance)
-	if mostLeaderDistance == 0 && leastLeaderDistance == 0 {
-		schedulerCounter.WithLabelValues(schedulerName, "already_balanced").Inc()
-		return nil, nil
-	}
-
-	if mostLeaderDistance > leastLeaderDistance {
-		region, peer = scheduleRemoveLeader(cluster, schedulerName, mostLeaderStore.GetId(), s)
-		if region == nil {
-			region, peer = scheduleAddLeader(cluster, schedulerName, leastLeaderStore.GetId())
-		}
-	} else {
-		region, peer = scheduleAddLeader(cluster, schedulerName, leastLeaderStore.GetId())
-		if region == nil {
-			region, peer = scheduleRemoveLeader(cluster, schedulerName, mostLeaderStore.GetId(), s)
-		}
-	}
-	if region == nil {
-		log.Debugf("[%v] select no region", schedulerName)
-	} else {
-		log.Debugf("[region %v][%v] select %v to be new leader", region.GetId(), schedulerName, peer)
-	}
-	return region, peer
-}
-
-// scheduleAddLeader transfers a leader into the store.
-func scheduleAddLeader(cluster schedule.Cluster, schedulerName string, storeID uint64) (*core.RegionInfo, *metapb.Peer) {
-	region := cluster.RandFollowerRegion(storeID)
-	if region == nil {
-		schedulerCounter.WithLabelValues(schedulerName, "no_target_peer").Inc()
-		return nil, nil
-	}
-	return region, region.GetStorePeer(storeID)
-}
-
-// scheduleRemoveLeader transfers a leader out of the store.
-func scheduleRemoveLeader(cluster schedule.Cluster, schedulerName string, storeID uint64, s schedule.Selector) (*core.RegionInfo, *metapb.Peer) {
-	region := cluster.RandLeaderRegion(storeID)
-	if region == nil {
-		schedulerCounter.WithLabelValues(schedulerName, "no_leader_region").Inc()
-		return nil, nil
-	}
-	targetStores := cluster.GetFollowerStores(region)
-	target := s.SelectTarget(cluster, targetStores)
-	if target == nil {
-		schedulerCounter.WithLabelValues(schedulerName, "no_target_store").Inc()
-		return nil, nil
-	}
-
-	return region, region.GetStorePeer(target.GetId())
-}
 
 // scheduleRemovePeer schedules a region to remove the peer.
 func scheduleRemovePeer(cluster schedule.Cluster, schedulerName string, s schedule.Selector, filters ...schedule.Filter) (*core.RegionInfo, *metapb.Peer) {
@@ -189,4 +106,14 @@ func adjustBalanceLimit(cluster schedule.Cluster, kind core.ResourceKind) uint64
 	}
 	limit, _ := stats.StandardDeviation(stats.Float64Data(counts))
 	return maxUint64(1, uint64(limit))
+}
+
+const (
+	taintCacheGCInterval = time.Second * 5
+	taintCacheTTL        = time.Minute * 5
+)
+
+//
+func newTaintCache() *cache.TTLUint64 {
+	return cache.NewIDTTL(taintCacheGCInterval, taintCacheTTL)
 }
