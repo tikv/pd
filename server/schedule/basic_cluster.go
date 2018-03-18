@@ -14,10 +14,7 @@
 package schedule
 
 import (
-	"time"
-
 	"github.com/juju/errors"
-	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -40,10 +37,9 @@ const (
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
-	Stores          *core.StoresInfo
-	Regions         *core.RegionsInfo
-	WriteStatistics cache.Cache
-	ReadStatistics  cache.Cache
+	Stores  *core.StoresInfo
+	Regions *core.RegionsInfo
+	HotNet  *HotSpotNet
 }
 
 // NewOpInfluence creates a OpInfluence.
@@ -86,10 +82,9 @@ type StoreInfluence struct {
 // NewBasicCluster creates a BasicCluster.
 func NewBasicCluster() *BasicCluster {
 	return &BasicCluster{
-		Stores:          core.NewStoresInfo(),
-		Regions:         core.NewRegionsInfo(),
-		ReadStatistics:  cache.NewCache(statCacheMaxLen, cache.TwoQueueCache),
-		WriteStatistics: cache.NewCache(statCacheMaxLen, cache.TwoQueueCache),
+		Stores:  core.NewStoresInfo(),
+		Regions: core.NewRegionsInfo(),
+		HotNet:  newHotSpotNet(),
 	}
 }
 
@@ -156,31 +151,18 @@ func (bc *BasicCluster) RandLeaderRegion(storeID uint64) *core.RegionInfo {
 }
 
 // IsRegionHot checks if a region is in hot state.
-func (bc *BasicCluster) IsRegionHot(id uint64) bool {
-	if stat, ok := bc.WriteStatistics.Peek(id); ok {
-		return stat.(*core.RegionStat).HotDegree >= HotRegionLowThreshold
-	}
-	return false
+func (bc *BasicCluster) IsRegionHot(id uint64, hotThreshold int) bool {
+	return bc.HotNet.isRegionHot(id, hotThreshold)
 }
 
 // RegionWriteStats returns hot region's write stats.
 func (bc *BasicCluster) RegionWriteStats() []*core.RegionStat {
-	elements := bc.WriteStatistics.Elems()
-	stats := make([]*core.RegionStat, len(elements))
-	for i := range elements {
-		stats[i] = elements[i].Value.(*core.RegionStat)
-	}
-	return stats
+	return bc.HotNet.regionStats(WriteFlow)
 }
 
 // RegionReadStats returns hot region's read stats.
 func (bc *BasicCluster) RegionReadStats() []*core.RegionStat {
-	elements := bc.ReadStatistics.Elems()
-	stats := make([]*core.RegionStat, len(elements))
-	for i := range elements {
-		stats[i] = elements[i].Value.(*core.RegionStat)
-	}
-	return stats
+	return bc.HotNet.regionStats(ReadFlow)
 }
 
 // PutStore put a store
@@ -195,125 +177,12 @@ func (bc *BasicCluster) PutRegion(region *core.RegionInfo) error {
 	return nil
 }
 
-// CheckWriteStatus checks the write status, returns whether need update statistics and item
+// CheckWriteStatus checks the write status, returns whether need update statistics and item.
 func (bc *BasicCluster) CheckWriteStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
-	var WrittenBytesPerSec uint64
-	v, isExist := bc.WriteStatistics.Peek(region.GetId())
-	if isExist && !Simulating {
-		interval := time.Since(v.(*core.RegionStat).LastUpdateTime).Seconds()
-		if interval < minHotRegionReportInterval {
-			return false, nil
-		}
-		WrittenBytesPerSec = uint64(float64(region.WrittenBytes) / interval)
-	} else {
-		WrittenBytesPerSec = uint64(float64(region.WrittenBytes) / float64(RegionHeartBeatReportInterval))
-	}
-	region.WrittenBytes = WrittenBytesPerSec
-
-	// hotRegionThreshold is use to pick hot region
-	// suppose the number of the hot Regions is statCacheMaxLen
-	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
-	// divide 2 because the store reports data about two times than the region record write to rocksdb
-	divisor := float64(statCacheMaxLen) * 2 * storeHeartBeatReportInterval
-	hotRegionThreshold := uint64(float64(bc.Stores.TotalWrittenBytes()) / divisor)
-
-	if hotRegionThreshold < hotWriteRegionMinFlowRate {
-		hotRegionThreshold = hotWriteRegionMinFlowRate
-	}
-	return bc.isNeedUpdateWriteStatCache(region, hotRegionThreshold)
+	return bc.HotNet.CheckWrite(region, bc.Stores)
 }
 
-// IsNeedUpdateWriteStatCache updates statistic for a region if it's hot, or remove it from statistics if it cools down
-func (bc *BasicCluster) isNeedUpdateWriteStatCache(region *core.RegionInfo, hotRegionThreshold uint64) (bool, *core.RegionStat) {
-	var v *core.RegionStat
-	key := region.GetId()
-	value, isExist := bc.WriteStatistics.Peek(key)
-	newItem := &core.RegionStat{
-		RegionID:       region.GetId(),
-		FlowBytes:      region.WrittenBytes,
-		LastUpdateTime: time.Now(),
-		StoreID:        region.Leader.GetStoreId(),
-		Version:        region.GetRegionEpoch().GetVersion(),
-		AntiCount:      hotRegionAntiCount,
-	}
-
-	if isExist {
-		v = value.(*core.RegionStat)
-		newItem.HotDegree = v.HotDegree + 1
-	}
-
-	if region.WrittenBytes < hotRegionThreshold {
-		if !isExist {
-			return false, newItem
-		}
-		if v.AntiCount <= 0 {
-			return true, nil
-		}
-		// eliminate some noise
-		newItem.HotDegree = v.HotDegree - 1
-		newItem.AntiCount = v.AntiCount - 1
-		newItem.FlowBytes = v.FlowBytes
-	}
-	return true, newItem
-}
-
-// CheckReadStatus checks the read status, returns whether need update statistics and item
+// CheckReadStatus checks the read status, returns whether need update statistics and item.
 func (bc *BasicCluster) CheckReadStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
-	var ReadBytesPerSec uint64
-	v, isExist := bc.ReadStatistics.Peek(region.GetId())
-	if isExist && !Simulating { // When simulating, we can't calculate it using physical time.
-		interval := time.Since(v.(*core.RegionStat).LastUpdateTime).Seconds()
-		if interval < minHotRegionReportInterval {
-			return false, nil
-		}
-		ReadBytesPerSec = uint64(float64(region.ReadBytes) / interval)
-	} else {
-		ReadBytesPerSec = uint64(float64(region.ReadBytes) / float64(RegionHeartBeatReportInterval))
-	}
-
-	region.ReadBytes = ReadBytesPerSec
-
-	// hotRegionThreshold is use to pick hot region
-	// suppose the number of the hot Regions is statLRUMaxLen
-	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
-	divisor := float64(statCacheMaxLen) * storeHeartBeatReportInterval
-	hotRegionThreshold := uint64(float64(bc.Stores.TotalReadBytes()) / divisor)
-
-	if hotRegionThreshold < hotReadRegionMinFlowRate {
-		hotRegionThreshold = hotReadRegionMinFlowRate
-	}
-	return bc.isNeedUpdateReadStatCache(region, hotRegionThreshold)
-}
-
-func (bc *BasicCluster) isNeedUpdateReadStatCache(region *core.RegionInfo, hotRegionThreshold uint64) (bool, *core.RegionStat) {
-	var v *core.RegionStat
-	key := region.GetId()
-	value, isExist := bc.ReadStatistics.Peek(key)
-	newItem := &core.RegionStat{
-		RegionID:       region.GetId(),
-		FlowBytes:      region.ReadBytes,
-		LastUpdateTime: time.Now(),
-		StoreID:        region.Leader.GetStoreId(),
-		Version:        region.GetRegionEpoch().GetVersion(),
-		AntiCount:      hotRegionAntiCount,
-	}
-
-	if isExist {
-		v = value.(*core.RegionStat)
-		newItem.HotDegree = v.HotDegree + 1
-	}
-
-	if region.ReadBytes < hotRegionThreshold {
-		if !isExist {
-			return false, newItem
-		}
-		if v.AntiCount <= 0 {
-			return true, nil
-		}
-		// eliminate some noise
-		newItem.HotDegree = v.HotDegree - 1
-		newItem.AntiCount = v.AntiCount - 1
-		newItem.FlowBytes = v.FlowBytes
-	}
-	return true, newItem
+	return bc.HotNet.CheckRead(region, bc.Stores)
 }

@@ -69,6 +69,17 @@ func (mc *mockCluster) GetStoresAverageScore(kind core.ResourceKind, filters ...
 	return float64(totalResourceSize) / totalResourceWeight
 }
 
+// IsRegionHot checks if the region is hot
+func (mc *mockCluster) IsRegionHot(id uint64) bool {
+	return mc.BasicCluster.IsRegionHot(id, mc.GetHotRegionLowThreshold())
+}
+
+// RandomHotRegionFromStore random picks a hot region in specify store.
+func (mc *mockCluster) RandomHotRegionFromStore(store uint64, kind schedule.FlowKind) *core.RegionInfo {
+	r := mc.HotNet.RandomHotRegionFromStore(store, kind, mc.GetHotRegionLowThreshold())
+	return mc.GetRegion(r.RegionID)
+}
+
 // AllocPeer allocs a new peer on a store.
 func (mc *mockCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := mc.allocID()
@@ -190,11 +201,7 @@ func (mc *mockCluster) addLeaderRegionWithWriteInfo(regionID uint64, leaderID ui
 	r.WrittenBytes = writtenBytes
 	isUpdate, item := mc.BasicCluster.CheckWriteStatus(r)
 	if isUpdate {
-		if item == nil {
-			mc.BasicCluster.WriteStatistics.Remove(regionID)
-		} else {
-			mc.BasicCluster.WriteStatistics.Put(regionID, item)
-		}
+		mc.HotNet.Update(regionID, item, schedule.WriteFlow)
 	}
 	mc.PutRegion(r)
 }
@@ -249,11 +256,7 @@ func (mc *mockCluster) addLeaderRegionWithReadInfo(regionID uint64, leaderID uin
 	r.ReadBytes = readBytes
 	isUpdate, item := mc.BasicCluster.CheckReadStatus(r)
 	if isUpdate {
-		if item == nil {
-			mc.BasicCluster.ReadStatistics.Remove(regionID)
-		} else {
-			mc.BasicCluster.ReadStatistics.Put(regionID, item)
-		}
+		mc.HotNet.Update(regionID, item, schedule.ReadFlow)
 	}
 	mc.PutRegion(r)
 }

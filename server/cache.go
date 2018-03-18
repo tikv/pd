@@ -240,7 +240,15 @@ func (c *clusterInfo) GetRegion(regionID uint64) *core.RegionInfo {
 func (c *clusterInfo) IsRegionHot(id uint64) bool {
 	c.RLock()
 	defer c.RUnlock()
-	return c.BasicCluster.IsRegionHot(id)
+	return c.BasicCluster.IsRegionHot(id, c.GetHotRegionLowThreshold())
+}
+
+// RandomHotRegionFromStore random picks a hot region in specify store.
+func (c *clusterInfo) RandomHotRegionFromStore(store uint64, kind schedule.FlowKind) *core.RegionInfo {
+	c.RLock()
+	defer c.RUnlock()
+	r := c.HotNet.RandomHotRegionFromStore(store, kind, c.GetHotRegionLowThreshold())
+	return c.GetRegion(r.RegionID)
 }
 
 func (c *clusterInfo) searchRegion(regionKey []byte) *core.RegionInfo {
@@ -496,18 +504,10 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 
 	key := region.GetId()
 	if isWriteUpdate {
-		if writeItem == nil {
-			c.WriteStatistics.Remove(key)
-		} else {
-			c.WriteStatistics.Put(key, writeItem)
-		}
+		c.HotNet.Update(key, writeItem, schedule.WriteFlow)
 	}
 	if isReadUpdate {
-		if readItem == nil {
-			c.ReadStatistics.Remove(key)
-		} else {
-			c.ReadStatistics.Put(key, readItem)
-		}
+		c.HotNet.Update(key, readItem, schedule.ReadFlow)
 	}
 	return nil
 }
