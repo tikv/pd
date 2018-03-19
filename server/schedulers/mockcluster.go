@@ -77,6 +77,9 @@ func (mc *mockCluster) IsRegionHot(id uint64) bool {
 // RandomHotRegionFromStore random picks a hot region in specify store.
 func (mc *mockCluster) RandomHotRegionFromStore(store uint64, kind schedule.FlowKind) *core.RegionInfo {
 	r := mc.HotCache.RandomHotRegionFromStore(store, kind, mc.GetHotRegionLowThreshold())
+	if r == nil {
+		return nil
+	}
 	return mc.GetRegion(r.RegionID)
 }
 

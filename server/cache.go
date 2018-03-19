@@ -248,6 +248,9 @@ func (c *clusterInfo) RandomHotRegionFromStore(store uint64, kind schedule.FlowK
 	c.RLock()
 	defer c.RUnlock()
 	r := c.HotCache.RandomHotRegionFromStore(store, kind, c.GetHotRegionLowThreshold())
+	if r == nil {
+		return nil
+	}
 	return c.BasicCluster.GetRegion(r.RegionID)
 }
 

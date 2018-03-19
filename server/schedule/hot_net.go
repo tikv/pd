@@ -195,7 +195,9 @@ func (w *HotSpotCache) RandomHotRegionFromStore(storeID uint64, kind FlowKind, h
 
 func (w *HotSpotCache) isRegionHot(id uint64, hotThreshold int) bool {
 	if stat, ok := w.writeFlow.Peek(id); ok {
-		return stat.(*core.RegionStat).HotDegree >= hotThreshold
+		if stat.(*core.RegionStat).HotDegree >= hotThreshold {
+			return true
+		}
 	}
 	if stat, ok := w.readFlow.Peek(id); ok {
 		return stat.(*core.RegionStat).HotDegree >= hotThreshold
