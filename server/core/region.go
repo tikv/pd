@@ -486,7 +486,7 @@ func (r *RegionsInfo) GetStoreRegionSize(storeID uint64) int64 {
 	return r.GetStoreLeaderRegionSize(storeID) + r.GetStoreFollowerRegionSize(storeID)
 }
 
-// GetMetaRegions get a set of metapb.Region from regionMap
+// GetMetaRegions gets a set of metapb.Region from regionMap
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	regions := make([]*metapb.Region, 0, r.regions.Len())
 	for _, region := range r.regions.m {
@@ -495,12 +495,12 @@ func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	return regions
 }
 
-// GetRegionCount get the total count of RegionInfo of regionMap
+// GetRegionCount gets the total count of RegionInfo of regionMap
 func (r *RegionsInfo) GetRegionCount() int {
 	return r.regions.Len()
 }
 
-// GetStoreRegionCount get  the total count of a store's leader and follower RegionInfo by storeID
+// GetStoreRegionCount gets the total count of a store's leader and follower RegionInfo by storeID
 func (r *RegionsInfo) GetStoreRegionCount(storeID uint64) int {
 	return r.GetStoreLeaderCount(storeID) + r.GetStoreFollowerCount(storeID)
 }
