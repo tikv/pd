@@ -182,8 +182,8 @@ func (w *HotSpotCache) regionStats(kind FlowKind) []*core.RegionStat {
 	return stats
 }
 
-// RandomHotRegionFromStore random picks a hot region in specify store.
-func (w *HotSpotCache) RandomHotRegionFromStore(storeID uint64, kind FlowKind, hotThreshold int) *core.RegionStat {
+// RandHotRegionFromStore random picks a hot region in specify store.
+func (w *HotSpotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hotThreshold int) *core.RegionStat {
 	stats := w.regionStats(kind)
 	for _, i := range rand.Perm(len(stats)) {
 		if stats[i].HotDegree > hotThreshold && stats[i].StoreID == storeID {
