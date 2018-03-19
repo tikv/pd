@@ -37,9 +37,9 @@ const (
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
-	Stores  *core.StoresInfo
-	Regions *core.RegionsInfo
-	HotNet  *HotSpotNet
+	Stores   *core.StoresInfo
+	Regions  *core.RegionsInfo
+	HotCache *HotSpotCache
 }
 
 // NewOpInfluence creates a OpInfluence.
@@ -82,9 +82,9 @@ type StoreInfluence struct {
 // NewBasicCluster creates a BasicCluster.
 func NewBasicCluster() *BasicCluster {
 	return &BasicCluster{
-		Stores:  core.NewStoresInfo(),
-		Regions: core.NewRegionsInfo(),
-		HotNet:  newHotSpotNet(),
+		Stores:   core.NewStoresInfo(),
+		Regions:  core.NewRegionsInfo(),
+		HotCache: newHotSpotCache(),
 	}
 }
 
@@ -152,17 +152,17 @@ func (bc *BasicCluster) RandLeaderRegion(storeID uint64) *core.RegionInfo {
 
 // IsRegionHot checks if a region is in hot state.
 func (bc *BasicCluster) IsRegionHot(id uint64, hotThreshold int) bool {
-	return bc.HotNet.isRegionHot(id, hotThreshold)
+	return bc.HotCache.isRegionHot(id, hotThreshold)
 }
 
 // RegionWriteStats returns hot region's write stats.
 func (bc *BasicCluster) RegionWriteStats() []*core.RegionStat {
-	return bc.HotNet.regionStats(WriteFlow)
+	return bc.HotCache.regionStats(WriteFlow)
 }
 
 // RegionReadStats returns hot region's read stats.
 func (bc *BasicCluster) RegionReadStats() []*core.RegionStat {
-	return bc.HotNet.regionStats(ReadFlow)
+	return bc.HotCache.regionStats(ReadFlow)
 }
 
 // PutStore put a store
@@ -179,10 +179,10 @@ func (bc *BasicCluster) PutRegion(region *core.RegionInfo) error {
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.
 func (bc *BasicCluster) CheckWriteStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
-	return bc.HotNet.CheckWrite(region, bc.Stores)
+	return bc.HotCache.CheckWrite(region, bc.Stores)
 }
 
 // CheckReadStatus checks the read status, returns whether need update statistics and item.
 func (bc *BasicCluster) CheckReadStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
-	return bc.HotNet.CheckRead(region, bc.Stores)
+	return bc.HotCache.CheckRead(region, bc.Stores)
 }

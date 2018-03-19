@@ -76,7 +76,7 @@ func (mc *mockCluster) IsRegionHot(id uint64) bool {
 
 // RandomHotRegionFromStore random picks a hot region in specify store.
 func (mc *mockCluster) RandomHotRegionFromStore(store uint64, kind schedule.FlowKind) *core.RegionInfo {
-	r := mc.HotNet.RandomHotRegionFromStore(store, kind, mc.GetHotRegionLowThreshold())
+	r := mc.HotCache.RandomHotRegionFromStore(store, kind, mc.GetHotRegionLowThreshold())
 	return mc.GetRegion(r.RegionID)
 }
 
@@ -201,7 +201,7 @@ func (mc *mockCluster) addLeaderRegionWithWriteInfo(regionID uint64, leaderID ui
 	r.WrittenBytes = writtenBytes
 	isUpdate, item := mc.BasicCluster.CheckWriteStatus(r)
 	if isUpdate {
-		mc.HotNet.Update(regionID, item, schedule.WriteFlow)
+		mc.HotCache.Update(regionID, item, schedule.WriteFlow)
 	}
 	mc.PutRegion(r)
 }
@@ -256,7 +256,7 @@ func (mc *mockCluster) addLeaderRegionWithReadInfo(regionID uint64, leaderID uin
 	r.ReadBytes = readBytes
 	isUpdate, item := mc.BasicCluster.CheckReadStatus(r)
 	if isUpdate {
-		mc.HotNet.Update(regionID, item, schedule.ReadFlow)
+		mc.HotCache.Update(regionID, item, schedule.ReadFlow)
 	}
 	mc.PutRegion(r)
 }

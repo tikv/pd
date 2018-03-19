@@ -30,21 +30,21 @@ const (
 	ReadFlow
 )
 
-// HotSpotNet is a cache hold hot regions.
-type HotSpotNet struct {
+// HotSpotCache is a cache hold hot regions.
+type HotSpotCache struct {
 	writeFlow cache.Cache
 	readFlow  cache.Cache
 }
 
-func newHotSpotNet() *HotSpotNet {
-	return &HotSpotNet{
+func newHotSpotCache() *HotSpotCache {
+	return &HotSpotCache{
 		writeFlow: cache.NewCache(statCacheMaxLen, cache.TwoQueueCache),
 		readFlow:  cache.NewCache(statCacheMaxLen, cache.TwoQueueCache),
 	}
 }
 
 // CheckWrite checks the write status, returns whether need update statistics and item.
-func (w *HotSpotNet) CheckWrite(region *core.RegionInfo, stores *core.StoresInfo) (bool, *core.RegionStat) {
+func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stores *core.StoresInfo) (bool, *core.RegionStat) {
 	var WrittenBytesPerSec uint64
 	v, isExist := w.writeFlow.Peek(region.GetId())
 	if isExist && !Simulating {
@@ -72,7 +72,7 @@ func (w *HotSpotNet) CheckWrite(region *core.RegionInfo, stores *core.StoresInfo
 }
 
 // CheckRead checks the read status, returns whether need update statistics and item.
-func (w *HotSpotNet) CheckRead(region *core.RegionInfo, stores *core.StoresInfo) (bool, *core.RegionStat) {
+func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stores *core.StoresInfo) (bool, *core.RegionStat) {
 	var ReadBytesPerSec uint64
 	v, isExist := w.readFlow.Peek(region.GetId())
 	if isExist && !Simulating {
@@ -98,7 +98,7 @@ func (w *HotSpotNet) CheckRead(region *core.RegionInfo, stores *core.StoresInfo)
 	return w.isNeedUpdateStatCache(region, hotRegionThreshold, ReadFlow)
 }
 
-func (w *HotSpotNet) isNeedUpdateStatCache(region *core.RegionInfo, hotRegionThreshold uint64, kind FlowKind) (bool, *core.RegionStat) {
+func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, hotRegionThreshold uint64, kind FlowKind) (bool, *core.RegionStat) {
 	var (
 		v       *core.RegionStat
 		value   interface{}
@@ -150,7 +150,7 @@ func (w *HotSpotNet) isNeedUpdateStatCache(region *core.RegionInfo, hotRegionThr
 }
 
 // Update updates the cache.
-func (w *HotSpotNet) Update(key uint64, item *core.RegionStat, kind FlowKind) {
+func (w *HotSpotCache) Update(key uint64, item *core.RegionStat, kind FlowKind) {
 	switch kind {
 	case WriteFlow:
 		if item == nil {
@@ -167,7 +167,7 @@ func (w *HotSpotNet) Update(key uint64, item *core.RegionStat, kind FlowKind) {
 	}
 }
 
-func (w *HotSpotNet) regionStats(kind FlowKind) []*core.RegionStat {
+func (w *HotSpotCache) regionStats(kind FlowKind) []*core.RegionStat {
 	var elements []*cache.Item
 	switch kind {
 	case WriteFlow:
@@ -183,7 +183,7 @@ func (w *HotSpotNet) regionStats(kind FlowKind) []*core.RegionStat {
 }
 
 // RandomHotRegionFromStore random picks a hot region in specify store.
-func (w *HotSpotNet) RandomHotRegionFromStore(storeID uint64, kind FlowKind, hotThreshold int) *core.RegionStat {
+func (w *HotSpotCache) RandomHotRegionFromStore(storeID uint64, kind FlowKind, hotThreshold int) *core.RegionStat {
 	stats := w.regionStats(kind)
 	for _, i := range rand.Perm(len(stats)) {
 		if stats[i].HotDegree > hotThreshold && stats[i].StoreID == storeID {
@@ -193,7 +193,7 @@ func (w *HotSpotNet) RandomHotRegionFromStore(storeID uint64, kind FlowKind, hot
 	return nil
 }
 
-func (w *HotSpotNet) isRegionHot(id uint64, hotThreshold int) bool {
+func (w *HotSpotCache) isRegionHot(id uint64, hotThreshold int) bool {
 	if stat, ok := w.writeFlow.Peek(id); ok {
 		return stat.(*core.RegionStat).HotDegree >= hotThreshold
 	}
