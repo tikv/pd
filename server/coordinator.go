@@ -109,7 +109,10 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	}
 	// If PD has restarted, it need to check learners added before and promote them.
 	if c.cluster.IsEnableRaftLearner() && c.getOperator(region.GetId()) == nil {
-		for _, p := range region.Region.GetLearners() {
+		for _, p := range region.Region.GetPeers() {
+			if !p.IsLearner {
+				continue
+			}
 			if region.GetPendingLearner(p.GetId()) != nil {
 				continue
 			}

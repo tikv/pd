@@ -449,6 +449,24 @@ func (h *Handler) GetPendingPeerRegions() ([]*core.RegionInfo, error) {
 	return c.cachedCluster.GetRegionStatsByType(pendingPeer), nil
 }
 
+// GetPendingLearnerRegions gets the region with pending peer.
+func (h *Handler) GetPendingLearnerRegions() ([]*core.RegionInfo, error) {
+	c := h.s.GetRaftCluster()
+	if c == nil {
+		return nil, errNotBootstrapped
+	}
+	return c.cachedCluster.GetRegionStatsByType(pendingLearner), nil
+}
+
+// GetDownLearnerRegions gets the region with down peer.
+func (h *Handler) GetDownLearnerRegions() ([]*core.RegionInfo, error) {
+	c := h.s.GetRaftCluster()
+	if c == nil {
+		return nil, errNotBootstrapped
+	}
+	return c.cachedCluster.GetRegionStatsByType(downLearner), nil
+}
+
 // GetIncorrectNamespaceRegions gets the region with incorrect namespace peer.
 func (h *Handler) GetIncorrectNamespaceRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()

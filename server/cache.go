@@ -436,10 +436,10 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			}
 			saveCache = true
 		}
-		if len(region.DownPeers) > 0 || len(region.PendingPeers) > 0 || len(region.PendingLearners) > 0 || len(region.DownLearners) > 0 {
+		if len(region.DownPeers) > 0 || len(region.PendingPeers) > 0 {
 			saveCache = true
 		}
-		if len(origin.DownPeers) > 0 || len(origin.PendingPeers) > 0 || len(origin.PendingLearners) > 0 || len(origin.DownLearners) > 0 {
+		if len(origin.DownPeers) > 0 || len(origin.PendingPeers) > 0 {
 			saveCache = true
 		}
 		if region.ApproximateSize != origin.ApproximateSize {

@@ -53,6 +53,8 @@ func newRegionStatistics(opt *scheduleOption, classifier namespace.Classifier) *
 	r.stats[pendingPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[offlinePeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[incorrectNamespace] = make(map[uint64]*core.RegionInfo)
+	r.stats[downLearner] = make(map[uint64]*core.RegionInfo)
+	r.stats[pendingLearner] = make(map[uint64]*core.RegionInfo)
 	return r
 }
 
@@ -87,22 +89,27 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		r.stats[extraPeer][regionID] = region
 		peerTypeIndex |= extraPeer
 	}
-	if len(region.DownPeers) > 0 {
-		r.stats[downPeer][regionID] = region
-		peerTypeIndex |= downPeer
+
+	for _, peer := range region.PendingPeers {
+		if peer.IsLearner {
+			r.stats[pendingLearner][regionID] = region
+			peerTypeIndex |= pendingLearner
+		} else {
+			r.stats[pendingPeer][regionID] = region
+			peerTypeIndex |= pendingPeer
+		}
 	}
-	if len(region.PendingPeers) > 0 {
-		r.stats[pendingPeer][regionID] = region
-		peerTypeIndex |= pendingPeer
+
+	for _, down := range region.DownPeers {
+		if down.GetPeer().IsLearner {
+			r.stats[downLearner][regionID] = region
+			peerTypeIndex |= downLearner
+		} else {
+			r.stats[downPeer][regionID] = region
+			peerTypeIndex |= downPeer
+		}
 	}
-	if len(region.DownLearners) > 0 {
-		r.stats[downLearner][regionID] = region
-		peerTypeIndex |= downLearner
-	}
-	if len(region.PendingLearners) > 0 {
-		r.stats[pendingLearner][regionID] = region
-		peerTypeIndex |= pendingLearner
-	}
+
 	for _, store := range stores {
 		if store.IsOffline() {
 			peer := region.GetStorePeer(store.GetId())

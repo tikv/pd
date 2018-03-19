@@ -38,7 +38,6 @@ type regionInfo struct {
 	Leader          *metapb.Peer      `json:"leader,omitempty"`
 	DownPeers       []*pdpb.PeerStats `json:"down_peers,omitempty"`
 	PendingPeers    []*metapb.Peer    `json:"pending_peers,omitempty"`
-	PendingLearners []*metapb.Peer    `json:"pending_learners,omitempty"`
 	WrittenBytes    uint64            `json:"written_bytes,omitempty"`
 	ReadBytes       uint64            `json:"read_bytes,omitempty"`
 	ApproximateSize int64             `json:"approximate_size,omitempty"`
@@ -57,7 +56,6 @@ func newRegionInfo(r *core.RegionInfo) *regionInfo {
 		Leader:          r.Leader,
 		DownPeers:       r.DownPeers,
 		PendingPeers:    r.PendingPeers,
-		PendingLearners: r.PendingLearners,
 		WrittenBytes:    r.WrittenBytes,
 		ReadBytes:       r.ReadBytes,
 		ApproximateSize: r.ApproximateSize,
