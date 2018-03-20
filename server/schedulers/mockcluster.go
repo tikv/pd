@@ -219,6 +219,12 @@ func (mc *mockCluster) updateSnapshotCount(storeID uint64, snapshotCount int) {
 	mc.PutStore(store)
 }
 
+func (mc *mockCluster) updatePendingPeerCount(storeID uint64, pendingPeerCount int) {
+	store := mc.GetStore(storeID)
+	store.PendingPeerCount = pendingPeerCount
+	mc.PutStore(store)
+}
+
 func (mc *mockCluster) updateStorageRatio(storeID uint64, usedRatio, availableRatio float64) {
 	store := mc.GetStore(storeID)
 	store.Stats.Capacity = uint64(1024)

@@ -483,6 +483,23 @@ func (c *RaftCluster) collectMetrics() {
 	c.coordinator.collectSchedulerMetrics()
 	c.coordinator.collectHotSpotMetrics()
 	cluster.collectMetrics()
+	c.collectHealthStatus()
+}
+
+func (c *RaftCluster) collectHealthStatus() {
+	client := c.s.GetClient()
+	members, err := GetMembers(client)
+	if err != nil {
+		log.Info("get members error:", err)
+	}
+	unhealth := c.s.CheckHealth(members)
+	for _, member := range members {
+		if _, ok := unhealth[member.GetMemberId()]; ok {
+			healthStatusGauge.WithLabelValues(member.GetName()).Set(0)
+			continue
+		}
+		healthStatusGauge.WithLabelValues(member.GetName()).Set(1)
+	}
 }
 
 func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {

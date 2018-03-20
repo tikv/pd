@@ -86,7 +86,7 @@ func main() {
 		log.Fatalf("create server failed: %v", errors.ErrorStack(err))
 	}
 
-	if err = api.InitHTTPClient(svr); err != nil {
+	if err = server.InitHTTPClient(svr); err != nil {
 		log.Fatalf("initial http client for api handler failed: %v", errors.ErrorStack(err))
 	}
 

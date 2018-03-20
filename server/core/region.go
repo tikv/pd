@@ -16,7 +16,6 @@ package core
 import (
 	"bytes"
 	"fmt"
-	"math"
 	"math/rand"
 	"reflect"
 	"strings"
@@ -52,6 +51,12 @@ const EmptyRegionApproximateSize = 1
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
 func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
+	// Convert unit to MB.
+	// If region is empty or less than 1MB, use 1MB instead.
+	regionSize := heartbeat.GetApproximateSize() / (1 << 20)
+	if regionSize < EmptyRegionApproximateSize {
+		regionSize = EmptyRegionApproximateSize
+	}
 	return &RegionInfo{
 		Region:          heartbeat.GetRegion(),
 		Leader:          heartbeat.GetLeader(),
@@ -59,7 +64,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		PendingPeers:    heartbeat.GetPendingPeers(),
 		WrittenBytes:    heartbeat.GetBytesWritten(),
 		ReadBytes:       heartbeat.GetBytesRead(),
-		ApproximateSize: int64(math.Ceil(float64(heartbeat.GetApproximateSize()) / 1e6)), // use size of MB as unit
+		ApproximateSize: int64(regionSize),
 	}
 }
 

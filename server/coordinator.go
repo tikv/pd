@@ -156,6 +156,8 @@ func (c *coordinator) patrolRegions() {
 				}
 			}
 		}
+		// update label level isolation statistics.
+		c.cluster.updateRegionsLabelLevelStats(regions)
 	}
 }
 

@@ -76,9 +76,13 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 
 	source := cluster.GetStore(region.Leader.GetStoreId())
 	target := cluster.GetStore(newLeader.GetStoreId())
-	avgScore := cluster.GetStoresAverageScore(core.LeaderKind, l.selector.GetFilters()...)
-	log.Debugf("[region %d] source store id is %v, target store id is %v, average store score is %f", region.GetId(), source.GetId(), target.GetId(), avgScore)
-	if !shouldBalance(source, target, avgScore, core.LeaderKind, region, opInfluence, cluster.GetTolerantSizeRatio()) {
+	log.Debugf("[region %d] source store id is %v, target store id is %v", region.GetId(), source.GetId(), target.GetId())
+
+	sourceSize := source.LeaderSize + int64(opInfluence.GetStoreInfluence(source.GetId()).LeaderSize)
+	targetSize := target.LeaderSize + int64(opInfluence.GetStoreInfluence(target.GetId()).LeaderSize)
+	regionSize := float64(region.ApproximateSize) * cluster.GetTolerantSizeRatio()
+	if !shouldBalance(sourceSize, source.LeaderWeight, targetSize, target.LeaderWeight, regionSize) {
+		log.Debugf("[%s] skip balance region%d, source size: %v, source weight: %v, target size: %v, target weight: %v, region size: %v", l.GetName(), region.GetId(), sourceSize, source.LeaderWeight, targetSize, target.LeaderWeight, region.ApproximateSize)
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}

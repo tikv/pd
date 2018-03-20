@@ -14,6 +14,8 @@
 package server
 
 import (
+	"fmt"
+
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 )
@@ -68,7 +70,7 @@ func (r *regionStatistics) deleteEntry(deleteIndex regionStatisticType, regionID
 	}
 }
 
-func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo, labels []string) {
+func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo) {
 	// Region state.
 	regionID := region.GetId()
 	namespace := r.classifier.GetRegionNamespace(region)
@@ -113,11 +115,60 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	}
 	r.deleteEntry(deleteIndex, regionID)
 	r.index[regionID] = peerTypeIndex
-	if len(stores) == 0 {
-		return
+}
+
+func (r *regionStatistics) clearDefunctRegion(regionID uint64) {
+	if oldIndex, ok := r.index[regionID]; ok {
+		r.deleteEntry(oldIndex, regionID)
 	}
+}
+
+func (r *regionStatistics) Collect() {
+	regionStatusGauge.WithLabelValues("miss_peer_region_count").Set(float64(len(r.stats[missPeer])))
+	regionStatusGauge.WithLabelValues("extra_peer_region_count").Set(float64(len(r.stats[extraPeer])))
+	regionStatusGauge.WithLabelValues("down_peer_region_count").Set(float64(len(r.stats[downPeer])))
+	regionStatusGauge.WithLabelValues("pending_peer_region_count").Set(float64(len(r.stats[pendingPeer])))
+	regionStatusGauge.WithLabelValues("offline_peer_region_count").Set(float64(len(r.stats[offlinePeer])))
+	regionStatusGauge.WithLabelValues("incorrect_namespace_region_count").Set(float64(len(r.stats[incorrectNamespace])))
+}
+
+type labelLevelStatistics struct {
+	regionLabelLevelStats map[uint64]int
+	labelLevelCounter     map[int]int
+}
+
+func newLabelLevelStatistics() *labelLevelStatistics {
+	return &labelLevelStatistics{
+		regionLabelLevelStats: make(map[uint64]int),
+		labelLevelCounter:     make(map[int]int),
+	}
+}
+
+func (l *labelLevelStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo, labels []string) {
+	regionID := region.GetId()
 	regionLabelLevel := getRegionLabelIsolationLevel(stores, labels)
-	regionLabelLevelHistogram.Observe(float64(regionLabelLevel))
+	if level, ok := l.regionLabelLevelStats[regionID]; ok {
+		if level == regionLabelLevel {
+			return
+		}
+		l.labelLevelCounter[level]--
+	}
+	l.regionLabelLevelStats[regionID] = regionLabelLevel
+	l.labelLevelCounter[regionLabelLevel]++
+}
+
+func (l *labelLevelStatistics) Collect() {
+	for level, count := range l.labelLevelCounter {
+		typ := fmt.Sprintf("level_%d", level)
+		regionStatusGauge.WithLabelValues(typ).Set(float64(count))
+	}
+}
+
+func (l *labelLevelStatistics) clearDefunctRegion(regionID uint64) {
+	if level, ok := l.regionLabelLevelStats[regionID]; ok {
+		l.labelLevelCounter[level]--
+		delete(l.regionLabelLevelStats, regionID)
+	}
 }
 
 func getRegionLabelIsolationLevel(stores []*core.StoreInfo, labels []string) int {
@@ -157,13 +208,4 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 		}
 	}
 	return res
-}
-
-func (r *regionStatistics) Collect() {
-	regionStatusGauge.WithLabelValues("miss_peer_region_count").Set(float64(len(r.stats[missPeer])))
-	regionStatusGauge.WithLabelValues("extra_peer_region_count").Set(float64(len(r.stats[extraPeer])))
-	regionStatusGauge.WithLabelValues("down_peer_region_count").Set(float64(len(r.stats[downPeer])))
-	regionStatusGauge.WithLabelValues("pending_peer_region_count").Set(float64(len(r.stats[pendingPeer])))
-	regionStatusGauge.WithLabelValues("offline_peer_region_count").Set(float64(len(r.stats[offlinePeer])))
-	regionStatusGauge.WithLabelValues("incorrect_namespace_region_count").Set(float64(len(r.stats[incorrectNamespace])))
 }

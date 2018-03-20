@@ -40,20 +40,14 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	tc.addLeaderStore(4, 9)
 	// Add regions 1,2,3,4 with leaders in stores 1,2,3,4
 	tc.addLeaderRegion(1, 1, 2, 3, 4)
-	tc.addLeaderRegion(1, 2, 3, 4, 1)
 	tc.addLeaderRegion(2, 2, 3, 4, 1)
-	tc.addLeaderRegion(2, 3, 4, 1, 2)
 	tc.addLeaderRegion(3, 3, 4, 1, 2)
-	tc.addLeaderRegion(3, 4, 1, 2, 3)
 	tc.addLeaderRegion(4, 4, 1, 2, 3)
-	tc.addLeaderRegion(4, 1, 2, 3, 4)
 
 	for i := 0; i < 4; i++ {
 		op := sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
-		sourceID := op[0].Step(0).(schedule.TransferLeader).FromStore
-		op = sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
-		targetID := op[0].Step(0).(schedule.TransferLeader).ToStore
-		c.Assert(sourceID, Equals, targetID)
+		c.Assert(op, NotNil)
+		c.Assert(op.Kind(), Equals, schedule.OpLeader|schedule.OpAdmin)
 	}
 }
 

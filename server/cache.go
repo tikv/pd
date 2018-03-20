@@ -31,20 +31,22 @@ type clusterInfo struct {
 	sync.RWMutex
 	*schedule.BasicCluster
 
-	id            core.IDAllocator
-	kv            *core.KV
-	meta          *metapb.Cluster
-	activeRegions int
-	opt           *scheduleOption
-	regionStats   *regionStatistics
+	id              core.IDAllocator
+	kv              *core.KV
+	meta            *metapb.Cluster
+	activeRegions   int
+	opt             *scheduleOption
+	regionStats     *regionStatistics
+	labelLevelStats *labelLevelStatistics
 }
 
 func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clusterInfo {
 	return &clusterInfo{
-		BasicCluster: schedule.NewBasicCluster(),
-		id:           id,
-		opt:          opt,
-		kv:           kv,
+		BasicCluster:    schedule.NewBasicCluster(),
+		id:              id,
+		opt:             opt,
+		kv:              kv,
+		labelLevelStats: newLabelLevelStatistics(),
 	}
 }
 
@@ -468,6 +470,12 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 				}
 			}
 		}
+		for _, item := range overlaps {
+			if c.regionStats != nil {
+				c.regionStats.clearDefunctRegion(item.GetId())
+			}
+			c.labelLevelStats.clearDefunctRegion(item.GetId())
+		}
 
 		// Update related stores.
 		if origin != nil {
@@ -481,7 +489,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	if c.regionStats != nil {
-		c.regionStats.Observe(region, c.getRegionStores(region), c.GetLocationLabels())
+		c.regionStats.Observe(region, c.getRegionStores(region))
 	}
 
 	key := region.GetId()
@@ -502,6 +510,14 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	return nil
 }
 
+func (c *clusterInfo) updateRegionsLabelLevelStats(regions []*core.RegionInfo) {
+	c.Lock()
+	defer c.Unlock()
+	for _, region := range regions {
+		c.labelLevelStats.Observe(region, c.getRegionStores(region), c.GetLocationLabels())
+	}
+}
+
 func (c *clusterInfo) collectMetrics() {
 	if c.regionStats == nil {
 		return
@@ -509,6 +525,7 @@ func (c *clusterInfo) collectMetrics() {
 	c.RLock()
 	defer c.RUnlock()
 	c.regionStats.Collect()
+	c.labelLevelStats.Collect()
 }
 
 func (c *clusterInfo) GetRegionStatsByType(typ regionStatisticType) []*core.RegionInfo {
