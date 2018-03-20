@@ -43,6 +43,18 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 		return nil, nil
 	}
 
+	// skip region has down peers
+	if len(region.DownPeers) > 0 {
+		checkerCounter.WithLabelValues("merge_checker", "down_peers").Inc()
+		return nil, nil
+	}
+
+	// skip region has pending peers
+	if len(region.PendingPeers) > 0 {
+		checkerCounter.WithLabelValues("merge_checker", "pending_peers").Inc()
+		return nil, nil
+	}
+
 	// skip hot region
 	if m.cluster.IsRegionHot(region.GetId()) {
 		checkerCounter.WithLabelValues("merge_checker", "hot_region").Inc()
