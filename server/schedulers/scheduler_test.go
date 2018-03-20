@@ -47,7 +47,7 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	for i := 0; i < 4; i++ {
 		op := sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 		c.Assert(op, NotNil)
-		c.Assert(op.Kind(), Equals, schedule.OpLeader|schedule.OpAdmin)
+		c.Assert(op[0].Kind(), Equals, schedule.OpLeader|schedule.OpAdmin)
 	}
 }
 

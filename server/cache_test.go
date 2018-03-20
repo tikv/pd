@@ -32,7 +32,7 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 	e := region.GetRegionEpoch()
 
 	if e.GetVersion() < o.GetVersion() || e.GetConfVer() < o.GetConfVer() {
-		return errors.Trace(errRegionIsStale(region, origin))
+		return errors.Trace(ErrRegionIsStale(region, origin))
 	}
 
 	return nil

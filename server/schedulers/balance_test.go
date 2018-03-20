@@ -327,7 +327,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 
 	// Store 8 has smaller region score than store 7, but the distinct score decrease.
 	tc.addLabelsStore(8, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h3"})
-	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpBalance, 1, 6)
+	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 1, 6)
 
 	// Take down 4,5,6,7
 	tc.setStoreDown(4)
