@@ -250,6 +250,32 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	// store4 and store1 are marked taint.
 	// Now source and target are store3 and store2.
 	CheckTransferLeader(c, s.schedule(nil), schedule.OpBalance, 3, 2)
+
+	// Stores:     1    2    3    4
+	// Leaders:    9    10   10   11
+	// Region1:    -    F    F    L
+	// Region2:    L    F    F    -
+	s.tc.addLeaderStore(1, 10)
+	s.tc.addLeaderStore(2, 10)
+	s.tc.addLeaderStore(3, 10)
+	s.tc.addLeaderStore(4, 10)
+	s.tc.addLeaderRegion(1, 4, 2, 3)
+	s.tc.addLeaderRegion(2, 1, 2, 3)
+	// The cluster is balanced.
+	c.Assert(s.schedule(nil), IsNil) // store1, store4 are marked taint.
+	c.Assert(s.schedule(nil), IsNil) // store2, store3 are marked taint.
+
+	// store3's leader drops:
+	// Stores:     1    2    3    4
+	// Leaders:    11   13   0    16
+	// Region1:    -    F    F    L
+	// Region2:    L    F    F    -
+	s.tc.addLeaderStore(1, 11)
+	s.tc.addLeaderStore(2, 13)
+	s.tc.addLeaderStore(3, 0)
+	s.tc.addLeaderStore(4, 16)
+	c.Assert(s.schedule(nil), IsNil)                                  // All stores are marked taint.
+	CheckTransferLeader(c, s.schedule(nil), schedule.OpBalance, 4, 3) // The taint store will be clear.
 }
 
 var _ = Suite(&testBalanceRegionSchedulerSuite{})
