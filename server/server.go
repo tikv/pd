@@ -156,6 +156,9 @@ func (s *Server) startEtcd() error {
 	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
+	if s.cfg.Join != "" {
+		endpoints = append(endpoints, strings.Split(s.cfg.Join, ",")...)
+	}
 	log.Infof("create etcd v3 client with endpoints %v", endpoints)
 
 	client, err := clientv3.New(clientv3.Config{
