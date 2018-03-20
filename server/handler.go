@@ -26,13 +26,19 @@ import (
 )
 
 var (
-	ErrNotBootstrapped   = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
-	ErrOperatorNotFound  = errors.New("operator not found")
-	ErrAddOperator       = errors.New("failed to add operator, maybe already have one")
+	// ErrNotBootstrapped is error info for cluster not bootstrapped
+	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
+	// ErrOperatorNotFound is error info for operator not found
+	ErrOperatorNotFound = errors.New("operator not found")
+	// ErrAddOperator is error info for already have an operator when adding operator
+	ErrAddOperator = errors.New("failed to add operator, maybe already have one")
+	// ErrRegionNotAdjacent is error info for region not adjacent
 	ErrRegionNotAdjacent = errors.New("two regions are not adjacent")
-	ErrRegionNotFound    = func(regionID uint64) error {
+	// ErrRegionNotFound is error info for region not found
+	ErrRegionNotFound = func(regionID uint64) error {
 		return errors.Errorf("region %v not found", regionID)
 	}
+	// ErrRegionIsStale is error info for region is stale
 	ErrRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
 		return errors.Errorf("region is stale: region %v origin %v", region, origin)
 	}
