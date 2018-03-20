@@ -32,11 +32,6 @@ const (
 	backgroundJobInterval = time.Minute
 )
 
-// Error instances
-var (
-	ErrNotBootstrapped = errors.New("TiKV cluster is not bootstrapped, please start TiKV first")
-)
-
 // RaftCluster is used for cluster config management.
 // Raft cluster key format:
 // cluster 1 -> /1/raft, value is metapb.Cluster
@@ -267,6 +262,11 @@ func (c *RaftCluster) GetStore(storeID uint64) (*core.StoreInfo, error) {
 		return nil, errors.Errorf("invalid store ID %d, not found", storeID)
 	}
 	return store, nil
+}
+
+// GetAdjacentRegions returns region's info that is adjacent with specific region id.
+func (c *RaftCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo) {
+	return c.cachedCluster.GetAdjacentRegions(region)
 }
 
 // UpdateStoreLabels updates a store's location labels.

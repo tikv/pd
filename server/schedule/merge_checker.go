@@ -38,7 +38,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	checkerCounter.WithLabelValues("merge_checker", "check").Inc()
 
 	// region size is not small enough
-	if region.ApproximateSize >= int64(m.cluster.GetMaxMergeRegionSize()) {
+	if region.ApproximateSize > int64(m.cluster.GetMaxMergeRegionSize()) {
 		checkerCounter.WithLabelValues("merge_checker", "no_need").Inc()
 		return nil, nil
 	}

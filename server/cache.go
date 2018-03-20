@@ -27,15 +27,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-var (
-	errRegionNotFound = func(regionID uint64) error {
-		return errors.Errorf("region %v not found", regionID)
-	}
-	errRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
-		return errors.Errorf("region is stale: region %v origin %v", region, origin)
-	}
-)
-
 type clusterInfo struct {
 	sync.RWMutex
 	*schedule.BasicCluster
@@ -423,7 +414,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		o := origin.GetRegionEpoch()
 		// Region meta is stale, return an error.
 		if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
-			return errors.Trace(errRegionIsStale(region.Region, origin.Region))
+			return errors.Trace(ErrRegionIsStale(region.Region, origin.Region))
 		}
 		if r.GetVersion() > o.GetVersion() {
 			log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetId(), core.DiffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion())

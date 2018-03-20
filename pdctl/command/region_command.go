@@ -29,6 +29,7 @@ var (
 	regionsCheckPrefix     = "pd/api/v1/regions/check"
 	regionsWriteflowPrefix = "pd/api/v1/regions/writeflow"
 	regionsReadflowPrefix  = "pd/api/v1/regions/readflow"
+	regionsSiblingPrefix   = "pd/api/v1/regions/sibling"
 	regionIDPrefix         = "pd/api/v1/region/id"
 	regionKeyPrefix        = "pd/api/v1/region/key"
 )
@@ -47,6 +48,7 @@ func NewRegionCommand() *cobra.Command {
 	}
 	r.AddCommand(NewRegionWithKeyCommand())
 	r.AddCommand(NewRegionWithCheckCommand())
+	r.AddCommand(NewRegionWithSiblingCommand())
 
 	topRead := &cobra.Command{
 		Use:   "topread <limit>",
@@ -206,6 +208,31 @@ func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get region: %s\n", err)
+		return
+	}
+	fmt.Println(r)
+}
+
+// NewRegionWithSiblingCommand return a region with check subcommand of regionCmd
+func NewRegionWithSiblingCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "sibling <region_id>",
+		Short: "show the sibling region of specific region",
+		Run:   showRegionWithSiblingCommandFunc,
+	}
+	return r
+}
+
+func showRegionWithSiblingCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+	regionID := args[0]
+	prefix := regionsSiblingPrefix + "/" + regionID
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get region sibling: %s\n", err)
 		return
 	}
 	fmt.Println(r)

@@ -199,7 +199,7 @@ func addPeerCommandFunc(cmd *cobra.Command, args []string) {
 	postJSON(cmd, operatorsPrefix, input)
 }
 
-// NewMergeRegionCommand returns a command to transfer leader.
+// NewMergeRegionCommand returns a command to merge two regions.
 func NewMergeRegionCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "merge-region <source_region_id> <target_region_id>",
