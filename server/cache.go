@@ -243,7 +243,7 @@ func (c *clusterInfo) IsRegionHot(id uint64) bool {
 	return c.BasicCluster.IsRegionHot(id, c.GetHotRegionLowThreshold())
 }
 
-// RandHotRegionFromStore random picks a hot region in specify store.
+// RandHotRegionFromStore randomly picks a hot region in specified store.
 func (c *clusterInfo) RandHotRegionFromStore(store uint64, kind schedule.FlowKind) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
