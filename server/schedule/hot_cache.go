@@ -100,21 +100,24 @@ func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stores *core.StoresInf
 
 func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, hotRegionThreshold uint64, kind FlowKind) (bool, *core.RegionStat) {
 	var (
-		v       *core.RegionStat
-		value   interface{}
-		isExist bool
+		v         *core.RegionStat
+		value     interface{}
+		isExist   bool
+		flowBytes uint64
 	)
 	key := region.GetId()
 
 	switch kind {
 	case WriteFlow:
 		value, isExist = w.writeFlow.Peek(key)
+		flowBytes = region.WrittenBytes
 	case ReadFlow:
 		value, isExist = w.readFlow.Peek(key)
+		flowBytes = region.ReadBytes
 	}
 	newItem := &core.RegionStat{
 		RegionID:       region.GetId(),
-		FlowBytes:      region.WrittenBytes,
+		FlowBytes:      flowBytes,
 		LastUpdateTime: time.Now(),
 		StoreID:        region.Leader.GetStoreId(),
 		Version:        region.GetRegionEpoch().GetVersion(),
