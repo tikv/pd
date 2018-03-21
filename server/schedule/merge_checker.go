@@ -37,6 +37,11 @@ func NewMergeChecker(cluster Cluster, classifier namespace.Classifier) *MergeChe
 func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	checkerCounter.WithLabelValues("merge_checker", "check").Inc()
 
+	if len(region.Region.GetPeers()) != m.cluster.GetMaxReplicas() {
+		checkerCounter.WithLabelValues("merge_checker", "abnormal_replica").Inc()
+		return nil, nil
+	}
+
 	// when pd just started, it will load region meta from etcd
 	// but the size for these loaded region info is 0
 	// pd don't the real size of one region until the first heartbeat of the region

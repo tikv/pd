@@ -217,7 +217,7 @@ func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
 func NewRegionWithSiblingCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   "sibling <region_id>",
-		Short: "show the sibling region of specific region",
+		Short: "show the sibling regions of specific region",
 		Run:   showRegionWithSiblingCommandFunc,
 	}
 	return r
