@@ -96,14 +96,14 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 }
 
 func (m *MergeChecker) checkTarget(region, adjacent, target *core.RegionInfo) *core.RegionInfo {
-	peerCount := len(region.Region.GetPeers())
-
 	// if is not hot region and under same namesapce
-	if adjacent != nil && !m.cluster.IsRegionHot(adjacent.GetId()) && m.classifier.AllowMerge(region, adjacent) {
+	if adjacent != nil && !m.cluster.IsRegionHot(adjacent.GetId()) &&
+		m.classifier.AllowMerge(region, adjacent) &&
+		len(adjacent.DownPeers) == 0 && len(adjacent.PendingPeers) == 0 {
 		// if both region is not hot, prefer the one with smaller size
 		if target == nil || target.ApproximateSize > adjacent.ApproximateSize {
 			// peer count should equal
-			if peerCount == len(adjacent.Region.GetPeers()) {
+			if len(adjacent.Region.GetPeers()) == m.cluster.GetMaxReplicas() {
 				target = adjacent
 			}
 		}
