@@ -96,17 +96,13 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 	balanceLeaderCounter.WithLabelValues("low_score", targetStoreLabel).Inc()
 
 	for i := 0; i < balanceLeaderRetryLimit; i++ {
-		if source != nil {
-			if op := l.transferLeaderOut(source, cluster, opInfluence); op != nil {
-				balanceLeaderCounter.WithLabelValues("transfer_out", sourceStoreLabel).Inc()
-				return op
-			}
+		if op := l.transferLeaderOut(source, cluster, opInfluence); op != nil {
+			balanceLeaderCounter.WithLabelValues("transfer_out", sourceStoreLabel).Inc()
+			return op
 		}
-		if target != nil {
-			if op := l.transferLeaderIn(target, cluster, opInfluence); op != nil {
-				balanceLeaderCounter.WithLabelValues("transfer_in", targetStoreLabel).Inc()
-				return op
-			}
+		if op := l.transferLeaderIn(target, cluster, opInfluence); op != nil {
+			balanceLeaderCounter.WithLabelValues("transfer_in", targetStoreLabel).Inc()
+			return op
 		}
 	}
 
@@ -154,7 +150,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluste
 func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source, target *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
 	log.Debugf("[%s] verify balance region %d, from: %d, to: %d", l.GetName(), region.GetId(), source.GetId(), target.GetId())
 	if cluster.IsRegionHot(region.GetId()) {
-		log.Debugf("[%s] region %d is hot region, ignore it", region.GetId())
+		log.Debugf("[%s] region %d is hot region, ignore it", l.GetName(), region.GetId())
 		schedulerCounter.WithLabelValues(l.GetName(), "region_hot").Inc()
 		return nil
 	}
