@@ -170,7 +170,8 @@ func (w *HotSpotCache) Update(key uint64, item *core.RegionStat, kind FlowKind) 
 	}
 }
 
-func (w *HotSpotCache) regionStats(kind FlowKind) []*core.RegionStat {
+// RegionStats returns hot items according to kind
+func (w *HotSpotCache) RegionStats(kind FlowKind) []*core.RegionStat {
 	var elements []*cache.Item
 	switch kind {
 	case WriteFlow:
@@ -187,9 +188,9 @@ func (w *HotSpotCache) regionStats(kind FlowKind) []*core.RegionStat {
 
 // RandHotRegionFromStore random picks a hot region in specify store.
 func (w *HotSpotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hotThreshold int) *core.RegionStat {
-	stats := w.regionStats(kind)
+	stats := w.RegionStats(kind)
 	for _, i := range rand.Perm(len(stats)) {
-		if stats[i].HotDegree > hotThreshold && stats[i].StoreID == storeID {
+		if stats[i].HotDegree >= hotThreshold && stats[i].StoreID == storeID {
 			return stats[i]
 		}
 	}

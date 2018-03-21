@@ -157,12 +157,12 @@ func (bc *BasicCluster) IsRegionHot(id uint64, hotThreshold int) bool {
 
 // RegionWriteStats returns hot region's write stats.
 func (bc *BasicCluster) RegionWriteStats() []*core.RegionStat {
-	return bc.HotCache.regionStats(WriteFlow)
+	return bc.HotCache.RegionStats(WriteFlow)
 }
 
 // RegionReadStats returns hot region's read stats.
 func (bc *BasicCluster) RegionReadStats() []*core.RegionStat {
-	return bc.HotCache.regionStats(ReadFlow)
+	return bc.HotCache.RegionStats(ReadFlow)
 }
 
 // PutStore put a store
