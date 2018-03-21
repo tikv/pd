@@ -92,8 +92,8 @@ func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stores *core.StoresInf
 	divisor := float64(statCacheMaxLen) * storeHeartBeatReportInterval
 	hotRegionThreshold := uint64(float64(stores.TotalReadBytes()) / divisor)
 
-	if hotRegionThreshold < hotWriteRegionMinFlowRate {
-		hotRegionThreshold = hotWriteRegionMinFlowRate
+	if hotRegionThreshold < hotReadRegionMinFlowRate {
+		hotRegionThreshold = hotReadRegionMinFlowRate
 	}
 	return w.isNeedUpdateStatCache(region, hotRegionThreshold, ReadFlow)
 }
