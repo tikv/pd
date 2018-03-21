@@ -113,7 +113,8 @@ const (
 	taintCacheTTL        = time.Minute * 5
 )
 
-//
+// newTaintCache creates a TTL cache to hold stores that are not able to
+// schedule operators.
 func newTaintCache() *cache.TTLUint64 {
 	return cache.NewIDTTL(taintCacheGCInterval, taintCacheTTL)
 }

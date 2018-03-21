@@ -83,7 +83,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 		schedulerCounter.WithLabelValues(l.GetName(), "no_store").Inc()
 		// When the cluster is balanced, all stores will be added to the cache once
 		// all of them have been selected. This will cause the scheduler to not adapt
-		// to sudden change of a store's leader. Here we clear the tarint cache and
+		// to sudden change of a store's leader. Here we clear the taint cache and
 		// re-iterate.
 		l.taintStores.Clear()
 		return nil
