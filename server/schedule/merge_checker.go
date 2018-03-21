@@ -37,6 +37,15 @@ func NewMergeChecker(cluster Cluster, classifier namespace.Classifier) *MergeChe
 func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	checkerCounter.WithLabelValues("merge_checker", "check").Inc()
 
+	// when pd just started, it will load region meta from etcd
+	// but the size for these loaded region info is 0
+	// pd don't the real size of one region until the first heartbeat of the region
+	// thus here when size is 0, just skip.
+	if region.ApproximateSize == 0 {
+		checkerCounter.WithLabelValues("merge_checker", "skip").Inc()
+		return nil, nil
+	}
+
 	// region size is not small enough
 	if region.ApproximateSize > int64(m.cluster.GetMaxMergeRegionSize()) {
 		checkerCounter.WithLabelValues("merge_checker", "no_need").Inc()
