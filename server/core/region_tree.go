@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/btree"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	log "github.com/sirupsen/logrus"
 )
 
 var _ btree.Item = &regionItem{}
@@ -83,6 +84,7 @@ func (t *regionTree) update(region *metapb.Region) []*metapb.Region {
 	})
 
 	for _, item := range overlaps {
+		log.Debugf("[region %d] delete region {%v}, cause overlapping with region {%v}", item.GetId(), item, region)
 		t.tree.Delete(&regionItem{item})
 	}
 
@@ -136,4 +138,25 @@ func (t *regionTree) scanRange(startKey []byte, f func(*metapb.Region) bool) {
 	t.tree.AscendGreaterOrEqual(startItem, func(item btree.Item) bool {
 		return f(item.(*regionItem).region)
 	})
+}
+
+func (t *regionTree) getAdjacentRegions(region *metapb.Region) (*regionItem, *regionItem) {
+	item := &regionItem{region: &metapb.Region{StartKey: region.StartKey}}
+	var prev, next *regionItem
+	// note that the item store in region_tree is in reversed order
+	t.tree.DescendLessOrEqual(item, func(i btree.Item) bool {
+		if bytes.Compare(item.region.StartKey, i.(*regionItem).region.StartKey) == 0 {
+			return true
+		}
+		next = i.(*regionItem)
+		return false
+	})
+	t.tree.AscendGreaterOrEqual(item, func(i btree.Item) bool {
+		if bytes.Compare(item.region.StartKey, i.(*regionItem).region.StartKey) == 0 {
+			return true
+		}
+		prev = i.(*regionItem)
+		return false
+	})
+	return prev, next
 }

@@ -122,7 +122,7 @@ func (c *namespaceCluster) RegionWriteStats() []*core.RegionStat {
 	return stats
 }
 
-func scheduleByNamespace(cluster schedule.Cluster, classifier namespace.Classifier, scheduler schedule.Scheduler, opInfluence schedule.OpInfluence) *schedule.Operator {
+func scheduleByNamespace(cluster schedule.Cluster, classifier namespace.Classifier, scheduler schedule.Scheduler, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	namespaces := classifier.GetAllNamespaces()
 	for _, i := range rand.Perm(len(namespaces)) {
 		nc := newNamespaceCluster(cluster, classifier, namespaces[i])
@@ -143,6 +143,10 @@ func (c *namespaceCluster) GetRegionScheduleLimit() uint64 {
 
 func (c *namespaceCluster) GetReplicaScheduleLimit() uint64 {
 	return c.GetOpt().GetReplicaScheduleLimit(c.namespace)
+}
+
+func (c *namespaceCluster) GetMergeScheduleLimit() uint64 {
+	return c.GetOpt().GetMergeScheduleLimit(c.namespace)
 }
 
 func (c *namespaceCluster) GetMaxReplicas() int {

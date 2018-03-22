@@ -135,6 +135,20 @@ func (s *testRegionSuite) TestRegionTree(c *C) {
 	c.Assert(tree.search([]byte("c")), IsNil)
 	c.Assert(tree.search([]byte("d")), Equals, regionD)
 
+	// check get adjacent regions
+	prev, next := tree.getAdjacentRegions(regionA)
+	c.Assert(prev, IsNil)
+	c.Assert(next.region, Equals, regionB)
+	prev, next = tree.getAdjacentRegions(regionB)
+	c.Assert(prev.region, Equals, regionA)
+	c.Assert(next.region, Equals, regionD)
+	prev, next = tree.getAdjacentRegions(regionC)
+	c.Assert(prev.region, Equals, regionB)
+	c.Assert(next.region, Equals, regionD)
+	prev, next = tree.getAdjacentRegions(regionD)
+	c.Assert(prev.region, Equals, regionB)
+	c.Assert(next, IsNil)
+
 	// region with the same range and different region id will not be delete.
 	region0 := newRegionItem([]byte{}, []byte("a")).region
 	tree.update(region0)
