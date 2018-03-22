@@ -87,6 +87,7 @@ func (r *RegionInfo) Clone() *RegionInfo {
 // GetPeer returns the peer with specified peer id.
 func (r *RegionInfo) GetPeer(peerID uint64) *metapb.Peer {
 	for _, peer := range r.GetPeers() {
+		//		fmt.Println("debug get peer:", peer)
 		if peer.GetId() == peerID {
 			return peer
 		}
@@ -184,6 +185,29 @@ func (r *RegionInfo) GetDiffFollowers(other *RegionInfo) []*metapb.Peer {
 		}
 	}
 	return res
+}
+
+// HealthPeerCount counts the health peers
+func (r *RegionInfo) HealthPeerCount() int {
+	h := make(map[uint64]struct{})
+	for _, peer := range r.GetPeers() {
+		h[peer.GetId()] = struct{}{}
+	}
+	for _, peerStat := range r.DownPeers {
+		peer := peerStat.GetPeer()
+		if peer == nil {
+			continue
+		}
+		if _, ok := h[peer.GetId()]; ok {
+			delete(h, peer.GetId())
+		}
+	}
+	for _, peer := range r.PendingPeers {
+		if _, ok := h[peer.GetId()]; ok {
+			delete(h, peer.GetId())
+		}
+	}
+	return len(h)
 }
 
 // RegionStat records each hot region's statistics
@@ -473,18 +497,18 @@ func (r *RegionsInfo) GetStoreFollowerCount(storeID uint64) int {
 }
 
 // RandRegion get a region by random
-func (r *RegionsInfo) RandRegion() *RegionInfo {
-	return randRegion(r.regions)
+func (r *RegionsInfo) RandRegion(skipUnhealth bool) *RegionInfo {
+	return randRegion(r.regions, skipUnhealth)
 }
 
 // RandLeaderRegion get a store's leader region by random
-func (r *RegionsInfo) RandLeaderRegion(storeID uint64) *RegionInfo {
-	return randRegion(r.leaders[storeID])
+func (r *RegionsInfo) RandLeaderRegion(storeID uint64, skipUnhealth bool) *RegionInfo {
+	return randRegion(r.leaders[storeID], skipUnhealth)
 }
 
 // RandFollowerRegion get a store's follower region by random
-func (r *RegionsInfo) RandFollowerRegion(storeID uint64) *RegionInfo {
-	return randRegion(r.followers[storeID])
+func (r *RegionsInfo) RandFollowerRegion(storeID uint64, skipUnhealth bool) *RegionInfo {
+	return randRegion(r.followers[storeID], skipUnhealth)
 }
 
 // GetLeader return leader RegionInfo by storeID and regionID(now only used in test)
@@ -562,13 +586,17 @@ func (r *RegionsInfo) GetRegionStats(startKey, endKey []byte) *RegionStats {
 
 const randomRegionMaxRetry = 10
 
-func randRegion(regions *regionMap) *RegionInfo {
+func randRegion(regions *regionMap, skipUnhealth bool) *RegionInfo {
 	for i := 0; i < randomRegionMaxRetry; i++ {
 		region := regions.RandomRegion()
 		if region == nil {
 			return nil
 		}
-		if len(region.DownPeers) == 0 && len(region.PendingPeers) == 0 {
+		if skipUnhealth {
+			if len(region.DownPeers) == 0 && len(region.PendingPeers) == 0 {
+				return region.Clone()
+			}
+		} else {
 			return region.Clone()
 		}
 	}

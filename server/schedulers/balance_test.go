@@ -456,6 +456,59 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpBalance, 1, 3)
 }
 
+var _ = Suite(&testBalanceFailOverSuite{})
+
+type testBalanceFailOverSuite struct{}
+
+func (s *testBalanceFailOverSuite) TestBasic(c *C) {
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
+
+	fo, err := schedule.CreateScheduler("fail-over", schedule.NewLimiter())
+	c.Assert(err, IsNil)
+
+	opt.MaxSnapshotCount = 2
+
+	// Add stores 1,2,3,4.
+	tc.addRegionStore(1, 4)
+	tc.addRegionStore(2, 3)
+	tc.addRegionStore(3, 2)
+	tc.addRegionStore(4, 1)
+	// Add region 1 with leader in store 1 and follower in store 3.
+	tc.addLeaderRegion(1, 1, 3)
+
+	// Region has 2 peers, we need to add a new peer.
+	region := tc.GetRegion(1)
+
+	// Peer in store 3 is down, remove it.
+	tc.setStoreDown(3)
+	downPeer := &pdpb.PeerStats{
+		Peer:        region.GetStorePeer(3),
+		DownSeconds: 24 * 60 * 60,
+	}
+	region.DownPeers = append(region.DownPeers, downPeer)
+	tc.PutRegion(region)
+	c.Assert(fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
+	//	checkRemovePeer(c, rc.Check(region), 2)
+	//	region.DownPeers = nil
+	// Add peer in store 2
+	peer3, _ := tc.AllocPeer(2)
+	region.Peers = append(region.Peers, peer3)
+	tc.PutRegion(region)
+	checkRemovePeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 3)
+	region.DownPeers = nil
+	tc.setStoreUp(3)
+	tc.PutRegion(region)
+
+	// Peer in store 2 is offline, transfer peer to store 4.
+	tc.setStoreOffline(2)
+	CheckTransferPeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpReplica, 2, 4)
+	// Add peer in store 4, now we have 4 replica
+	peer4, _ := tc.AllocPeer(4)
+	region.Peers = append(region.Peers, peer4)
+	checkRemovePeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 2)
+}
+
 var _ = Suite(&testReplicaCheckerSuite{})
 
 type testReplicaCheckerSuite struct{}
@@ -516,20 +569,6 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	checkRemovePeer(c, rc.Check(region), 1)
 	region.RemoveStorePeer(1)
 
-	// Peer in store 2 is down, remove it.
-	tc.setStoreDown(2)
-	downPeer := &pdpb.PeerStats{
-		Peer:        region.GetStorePeer(2),
-		DownSeconds: 24 * 60 * 60,
-	}
-	region.DownPeers = append(region.DownPeers, downPeer)
-	checkRemovePeer(c, rc.Check(region), 2)
-	region.DownPeers = nil
-	c.Assert(rc.Check(region), IsNil)
-
-	// Peer in store 3 is offline, transfer peer to store 1.
-	tc.setStoreOffline(3)
-	CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 3, 1)
 }
 
 func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
@@ -550,7 +589,7 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 	c.Assert(op, IsNil)
 }
 
-func (s *testReplicaCheckerSuite) TestOffline(c *C) {
+func (s *testReplicaCheckerSuite) TestReplacePeer(c *C) {
 	opt := newTestScheduleConfig()
 	tc := newMockCluster(opt)
 
@@ -587,23 +626,20 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	tc.setStoreBusy(4, false)
 	checkRemovePeer(c, rc.Check(region), 4)
 
-	// Test offline
-	// the number of region peers more than the maxReplicas
-	// remove the peer
-	tc.setStoreOffline(3)
-	checkRemovePeer(c, rc.Check(region), 3)
-	region.RemoveStorePeer(4)
+	// Test checkBestReplacement
 	// the number of region peers equals the maxReplicas
-	// Transfer peer to store 4.
-	CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 3, 4)
+	// but two peers in same label level
+	region.RemoveStorePeer(2)
+	// Transfer peer from store 4.
+	CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 4, 2)
 
 	// Store 5 has a same label score with store 4,but the region score smaller than store 4, we will choose store 5.
-	tc.addLabelsStore(5, 3, map[string]string{"zone": "z4", "rack": "r1", "host": "h1"})
-	CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 3, 5)
-	// Store 5 has too many snapshots, choose store 4
+	tc.addLabelsStore(5, 1, map[string]string{"zone": "z4", "rack": "r1", "host": "h1"})
+	CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 4, 5)
+	// Store 5 has too many snapshots, choose store 2
 	tc.updateSnapshotCount(5, 10)
-	CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 3, 4)
-	tc.updatePendingPeerCount(4, 30)
+	CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 4, 2)
+	tc.updatePendingPeerCount(2, 30)
 	c.Assert(rc.Check(region), IsNil)
 }
 

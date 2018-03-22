@@ -270,10 +270,10 @@ func (c *clusterInfo) getRegions() []*core.RegionInfo {
 	return c.Regions.GetRegions()
 }
 
-func (c *clusterInfo) randomRegion() *core.RegionInfo {
+func (c *clusterInfo) randomRegion(skipUnhealth bool) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
-	return c.Regions.RandRegion()
+	return c.Regions.RandRegion(skipUnhealth)
 }
 
 func (c *clusterInfo) getMetaRegions() []*metapb.Region {
@@ -315,17 +315,17 @@ func (c *clusterInfo) getStoreLeaderCount(storeID uint64) int {
 }
 
 // RandLeaderRegion returns a random region that has leader on the store.
-func (c *clusterInfo) RandLeaderRegion(storeID uint64) *core.RegionInfo {
+func (c *clusterInfo) RandLeaderRegion(storeID uint64, skipUnhealth bool) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
-	return c.BasicCluster.RandLeaderRegion(storeID)
+	return c.BasicCluster.RandLeaderRegion(storeID, skipUnhealth)
 }
 
 // RandFollowerRegion returns a random region that has a follower on the store.
-func (c *clusterInfo) RandFollowerRegion(storeID uint64) *core.RegionInfo {
+func (c *clusterInfo) RandFollowerRegion(storeID uint64, skipUnhealth bool) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
-	return c.BasicCluster.RandFollowerRegion(storeID)
+	return c.BasicCluster.RandFollowerRegion(storeID, skipUnhealth)
 }
 
 // GetRegionStores returns all stores that contains the region's peer.

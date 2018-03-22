@@ -83,7 +83,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 	s.selected = nil
 
 	// Transfer a leader to the selected store.
-	region := cluster.RandFollowerRegion(storeID)
+	region := cluster.RandFollowerRegion(storeID, true)
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_follower").Inc()
 		return nil

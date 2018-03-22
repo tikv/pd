@@ -80,7 +80,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 
 func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	region := cluster.RandLeaderRegion(s.storeID)
+	region := cluster.RandLeaderRegion(s.storeID, true)
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_leader").Inc()
 		return nil

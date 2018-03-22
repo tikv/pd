@@ -82,7 +82,7 @@ func scheduleTransferLeader(cluster schedule.Cluster, schedulerName string, s sc
 
 // scheduleAddLeader transfers a leader into the store.
 func scheduleAddLeader(cluster schedule.Cluster, schedulerName string, storeID uint64) (*core.RegionInfo, *metapb.Peer) {
-	region := cluster.RandFollowerRegion(storeID)
+	region := cluster.RandFollowerRegion(storeID, true)
 	if region == nil {
 		schedulerCounter.WithLabelValues(schedulerName, "no_target_peer").Inc()
 		return nil, nil
@@ -92,7 +92,7 @@ func scheduleAddLeader(cluster schedule.Cluster, schedulerName string, storeID u
 
 // scheduleRemoveLeader transfers a leader out of the store.
 func scheduleRemoveLeader(cluster schedule.Cluster, schedulerName string, storeID uint64, s schedule.Selector) (*core.RegionInfo, *metapb.Peer) {
-	region := cluster.RandLeaderRegion(storeID)
+	region := cluster.RandLeaderRegion(storeID, true)
 	if region == nil {
 		schedulerCounter.WithLabelValues(schedulerName, "no_leader_region").Inc()
 		return nil, nil
@@ -117,9 +117,9 @@ func scheduleRemovePeer(cluster schedule.Cluster, schedulerName string, s schedu
 		return nil, nil
 	}
 
-	region := cluster.RandFollowerRegion(source.GetId())
+	region := cluster.RandFollowerRegion(source.GetId(), true)
 	if region == nil {
-		region = cluster.RandLeaderRegion(source.GetId())
+		region = cluster.RandLeaderRegion(source.GetId(), true)
 	}
 	if region == nil {
 		schedulerCounter.WithLabelValues(schedulerName, "no_region").Inc()
