@@ -27,17 +27,26 @@ func init() {
 
 type failOverScheduler struct {
 	*baseScheduler
+	leaderSelector schedule.Selector
 }
 
 func newFailOverScheduler(limiter *schedule.Limiter) schedule.Scheduler {
+	filters := []schedule.Filter{
+		schedule.NewStateFilter(),
+		schedule.NewHealthFilter(),
+		schedule.NewSnapshotCountFilter(),
+		schedule.NewStorageThresholdFilter(),
+		schedule.NewPendingPeerCountFilter(),
+	}
 	base := newBaseScheduler(limiter)
 	return &failOverScheduler{
-		baseScheduler: base,
+		baseScheduler:  base,
+		leaderSelector: schedule.NewBalanceSelector(core.RegionKind, filters),
 	}
 }
 
 func (f *failOverScheduler) GetName() string {
-	return "fail-over-balance"
+	return "fail-over-scheduler"
 }
 
 func (f *failOverScheduler) GetType() string {
@@ -79,7 +88,8 @@ func (f *failOverScheduler) Schedule(cluster schedule.Cluster, opInfluence sched
 func (f *failOverScheduler) handleDownStore(cluster schedule.Cluster, store *core.StoreInfo) *schedule.Operator {
 	region := cluster.RandLeaderRegion(store.GetId(), false)
 	if region != nil {
-		log.Warnf("[region %d] Down Store [%v] have leader region, Mabye have network problem.", region.GetId(), store)
+		log.Warnf("[region %d] Down Store [%v] have leader region, Maybe have network problem.", region.GetId(), store)
+		schedulerCounter.WithLabelValues(f.GetName(), "down_leader").Inc()
 		return nil
 	}
 	region = cluster.RandFollowerRegion(store.GetId(), false)
@@ -88,6 +98,7 @@ func (f *failOverScheduler) handleDownStore(cluster schedule.Cluster, store *cor
 	}
 	if region.HealthPeerCount() < cluster.GetMaxReplicas()/2+1 {
 		log.Errorf("[region %d] region unhealth: %s", region.GetId(), region)
+		schedulerCounter.WithLabelValues(f.GetName(), "unhealth").Inc()
 		return nil
 	}
 
@@ -102,25 +113,22 @@ func (f *failOverScheduler) handleDownStore(cluster schedule.Cluster, store *cor
 	return schedule.CreateRemovePeerOperator("removeDownReplica", cluster, schedule.OpReplica, region, peer.GetStoreId())
 }
 
-func (f *failOverScheduler) transferOutHotRegion(cluster schedule.Cluster, store *core.StoreInfo) *schedule.Operator {
-	region := cluster.RandHotRegionFromStore(store.GetId(), schedule.ReadFlow)
-	if region != nil {
-
-	}
-	return nil
-}
-
 func (f *failOverScheduler) handleOfflineStore(cluster schedule.Cluster, store *core.StoreInfo) *schedule.Operator {
+	op := f.transferOutHotRegion(cluster, store)
+	if op != nil {
+		return op
+	}
 	region := cluster.RandLeaderRegion(store.GetId(), false)
 	if region == nil {
 		region = cluster.RandFollowerRegion(store.GetId(), false)
 	}
 	if region == nil {
-		log.Info("offline region nil")
+		schedulerCounter.WithLabelValues(f.GetName(), "no_offine_region").Inc()
 		return nil
 	}
 	if region.HealthPeerCount() < cluster.GetMaxReplicas()/2+1 {
-		log.Errorf("[region %d] region unhealth: %v", region)
+		log.Errorf("[region %d] region unhealth: %v", region.GetId(), region)
+		schedulerCounter.WithLabelValues(f.GetName(), "unhealth").Inc()
 		return nil
 	}
 	peer := region.GetStorePeer(store.GetId())
@@ -145,11 +153,40 @@ func (f *failOverScheduler) handleOfflineStore(cluster schedule.Cluster, store *
 	newPeer := checker.SelectBestReplacedPeerToAddReplica(region, peer)
 	if newPeer == nil {
 		log.Debugf("[region %d] no best peer to add replica", region.GetId())
+		schedulerCounter.WithLabelValues(f.GetName(), "no_peer").Inc()
 		return nil
 	}
 	return schedule.CreateMovePeerOperator("makeUpOfflineReplica", cluster, region, schedule.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }
 
 func (f *failOverScheduler) handleLowSpaceStore(cluster schedule.Cluster, store *core.StoreInfo) *schedule.Operator {
+	return f.transferOutHotRegion(cluster, store)
+}
+
+func (f *failOverScheduler) transferOutHotRegion(cluster schedule.Cluster, store *core.StoreInfo) *schedule.Operator {
+	region := cluster.RandHotRegionFromStore(store.GetId(), schedule.ReadFlow)
+	if region != nil && region.Leader.GetStoreId() == store.GetId() {
+		target := f.leaderSelector.SelectTarget(cluster, cluster.GetFollowerStores(region))
+		if target != nil {
+			step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: target.GetId()}
+			return schedule.NewOperator("transferOutHotRead", region.GetId(), schedule.OpBalance|schedule.OpLeader|schedule.OpReplica, step)
+		}
+		schedulerCounter.WithLabelValues(f.GetName(), "no_target_hot_read").Inc()
+	}
+	region = cluster.RandHotRegionFromStore(store.GetId(), schedule.WriteFlow)
+	if region != nil {
+		peer := region.GetStorePeer(store.GetId())
+		if region.GetDownPeer(peer.GetId()) != nil || region.GetPendingPeer(peer.GetId()) != nil {
+			return schedule.CreateRemovePeerOperator("removeUnhealthHotPeer", cluster, schedule.OpBalance|schedule.OpReplica, region, store.GetId())
+		}
+		checker := schedule.NewReplicaChecker(cluster, nil)
+		newPeer := checker.SelectBestReplacedPeerToAddReplica(region, peer)
+		if newPeer == nil {
+			schedulerCounter.WithLabelValues(f.GetName(), "no_target_hot_write").Inc()
+			return nil
+		}
+		return schedule.CreateMovePeerOperator("transferOutHotWrite", cluster, region, schedule.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+
+	}
 	return nil
 }

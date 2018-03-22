@@ -490,6 +490,104 @@ func (s *testBalanceFailOverSuite) TestBasic(c *C) {
 	checkRemovePeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 2)
 }
 
+func (s *testBalanceFailOverSuite) TestStoreDown(c *C) {
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
+
+	newTestReplication(opt, 3, "zone", "rack", "host")
+	fo, err := schedule.CreateScheduler("fail-over", schedule.NewLimiter())
+	c.Assert(err, IsNil)
+
+	tc.addLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
+	tc.addLabelsStore(2, 2, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
+	tc.addLabelsStore(3, 3, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
+	tc.addLabelsStore(4, 4, map[string]string{"zone": "z3", "rack": "r2", "host": "h1"})
+
+	tc.addLeaderRegion(1, 1, 2)
+	region := tc.GetRegion(1)
+
+	// Test Store Down
+	tc.setStoreDown(2)
+	downPeer := &pdpb.PeerStats{
+		Peer:        region.GetStorePeer(2),
+		DownSeconds: 24 * 60 * 60,
+	}
+	region.DownPeers = append(region.DownPeers, downPeer)
+	tc.PutRegion(region)
+	// unHealth to removepeer
+	c.Assert(fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
+	peer3, _ := tc.AllocPeer(3)
+	region.Peers = append(region.Peers, peer3)
+	tc.PutRegion(region)
+	checkRemovePeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 2)
+}
+
+func (s *testBalanceFailOverSuite) TestOffline(c *C) {
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
+
+	newTestReplication(opt, 3, "zone", "rack", "host")
+	fo, err := schedule.CreateScheduler("fail-over", schedule.NewLimiter())
+	c.Assert(err, IsNil)
+
+	tc.addLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
+	tc.addLabelsStore(2, 3, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
+	tc.addLabelsStore(3, 5, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
+	tc.addLabelsStore(4, 10, map[string]string{"zone": "z3", "rack": "r2", "host": "h1"})
+
+	tc.addLeaderRegion(1, 1, 2)
+
+	// TestOffilne
+	tc.setStoreOffline(2)
+	CheckTransferPeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpReplica, 2, 3)
+	region := tc.GetRegion(1)
+	downPeer := &pdpb.PeerStats{
+		Peer:        region.GetStorePeer(2),
+		DownSeconds: 24 * 60 * 60,
+	}
+	region.DownPeers = append(region.DownPeers, downPeer)
+	tc.PutRegion(region)
+	// region unhealth
+	c.Assert(fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
+
+	region.DownPeers = nil
+	peer3, _ := tc.AllocPeer(3)
+	region.Peers = append(region.Peers, peer3)
+	CheckTransferPeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpReplica, 2, 4)
+	peer4, _ := tc.AllocPeer(4)
+	region.Peers = append(region.Peers, peer4)
+	checkRemovePeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 2)
+
+	tc.addLeaderRegionWithWriteInfo(2, 2, 512*1024*schedule.RegionHeartBeatReportInterval, 3, 4)
+	opt.HotRegionLowThreshold = 0
+	CheckTransferPeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpReplica, 2, 1)
+	tc.addLeaderRegionWithReadInfo(3, 2, 512*1024*schedule.RegionHeartBeatReportInterval, 3, 4)
+	CheckTransferLeader(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpReplica, 2, 3)
+}
+
+func (s *testBalanceFailOverSuite) TestLowSpace(c *C) {
+	opt := newTestScheduleConfig()
+	tc := newMockCluster(opt)
+
+	newTestReplication(opt, 3, "zone", "rack", "host")
+	fo, err := schedule.CreateScheduler("fail-over", schedule.NewLimiter())
+	c.Assert(err, IsNil)
+
+	tc.addLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
+	tc.addLabelsStore(2, 2, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
+	tc.addLabelsStore(3, 3, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
+	tc.addLabelsStore(4, 4, map[string]string{"zone": "z3", "rack": "r2", "host": "h1"})
+
+	tc.addLeaderRegion(1, 1, 2, 3)
+	c.Assert(fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
+
+	// TestLowSpace
+	tc.setStoreLowSpace(3)
+	tc.addLeaderRegionWithReadInfo(2, 3, 512*1024*schedule.RegionHeartBeatReportInterval, 1, 2)
+	opt.HotRegionLowThreshold = 0
+	CheckTransferLeader(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpReplica, 3, 1)
+}
+
 var _ = Suite(&testReplicaCheckerSuite{})
 
 type testReplicaCheckerSuite struct{}
