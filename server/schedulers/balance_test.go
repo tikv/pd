@@ -288,7 +288,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 
 	sb, err := schedule.CreateScheduler("balance-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
-	cache := sb.(*balanceRegionScheduler).cache
+	cache := sb.(*balanceRegionScheduler).taintStores
 
 	opt.SetMaxReplicas(1)
 
@@ -312,6 +312,8 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	// Test MaxReplicas.
 	opt.SetMaxReplicas(3)
 	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
+
+	cache.Clear()
 	opt.SetMaxReplicas(1)
 	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), NotNil)
 }
@@ -324,7 +326,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 
 	sb, err := schedule.CreateScheduler("balance-region", schedule.NewLimiter())
 	c.Assert(err, IsNil)
-	cache := sb.(*balanceRegionScheduler).cache
+	cache := sb.(*balanceRegionScheduler).taintStores
 
 	// Store 1 has the largest region score, so the balancer try to replace peer in store 1.
 	tc.addLabelsStore(1, 16, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
