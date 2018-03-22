@@ -57,28 +57,28 @@ func (f *failOverScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	return f.limiter.OperatorCount(schedule.OpReplica) < cluster.GetReplicaScheduleLimit()
 }
 
-func (f *failOverScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
+func (f *failOverScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	stores := cluster.GetStores()
 	for _, store := range stores {
 		if store.DownTime() > cluster.GetMaxStoreDownTime() {
 			op := f.handleDownStore(cluster, store)
 			if op != nil {
 				op.SetPriorityLevel(core.HighPriority)
-				return op
+				return []*schedule.Operator{op}
 			}
 		}
 		if store.IsOffline() {
 			op := f.handleOfflineStore(cluster, store)
 			if op != nil {
 				op.SetPriorityLevel(core.HighPriority)
-				return op
+				return []*schedule.Operator{op}
 			}
 		}
 		if store.IsLowSpace() {
 			op := f.handleLowSpaceStore(cluster, store)
 			if op != nil {
 				op.SetPriorityLevel(core.HighPriority)
-				return op
+				return []*schedule.Operator{op}
 			}
 		}
 	}
