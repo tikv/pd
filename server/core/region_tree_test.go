@@ -93,9 +93,9 @@ func (s *testRegionSuite) TestRegionInfo(c *C) {
 func (s *testRegionSuite) TestRegionItem(c *C) {
 	item := newRegionItem([]byte("b"), []byte{})
 
-	c.Assert(item.Less(newRegionItem([]byte("a"), []byte{})), IsTrue)
+	c.Assert(item.Less(newRegionItem([]byte("a"), []byte{})), IsFalse)
 	c.Assert(item.Less(newRegionItem([]byte("b"), []byte{})), IsFalse)
-	c.Assert(item.Less(newRegionItem([]byte("c"), []byte{})), IsFalse)
+	c.Assert(item.Less(newRegionItem([]byte("c"), []byte{})), IsTrue)
 
 	c.Assert(item.Contains([]byte("a")), IsFalse)
 	c.Assert(item.Contains([]byte("b")), IsTrue)
