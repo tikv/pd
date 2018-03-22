@@ -810,8 +810,22 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	tc.addLeaderRegionWithReadInfo(1, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
 	tc.addLeaderRegionWithReadInfo(2, 2, 512*1024*schedule.RegionHeartBeatReportInterval, 1, 3)
 	tc.addLeaderRegionWithReadInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
+	// lower than hot read flow rate, but higher than write flow rate
+	tc.addLeaderRegionWithReadInfo(11, 1, 24*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
 	opt.HotRegionLowThreshold = 0
-
+	c.Assert(tc.IsRegionHot(1), IsTrue)
+	c.Assert(tc.IsRegionHot(11), IsFalse)
+	// check randomly pick hot region
+	r := tc.RandHotRegionFromStore(2, schedule.ReadFlow)
+	c.Assert(r, NotNil)
+	c.Assert(r.GetId(), Equals, uint64(2))
+	c.Assert(r.ReadBytes, Equals, uint64(512*1024))
+	// check hot items
+	stats := tc.HotCache.RegionStats(schedule.ReadFlow)
+	c.Assert(len(stats), Equals, 3)
+	for _, s := range stats {
+		c.Assert(s.FlowBytes, Equals, uint64(512*1024))
+	}
 	// Will transfer a hot region leader from store 1 to store 3, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
 	CheckTransferLeader(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpHotRegion, 1, 3)
