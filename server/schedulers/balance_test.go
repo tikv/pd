@@ -275,7 +275,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	s.tc.addLeaderStore(2, 13)
 	s.tc.addLeaderStore(3, 0)
 	s.tc.addLeaderStore(4, 16)
-	c.Assert(s.schedule(nil), IsNil)                                  // All stores are marked taint.
+	c.Assert(s.schedule(nil), IsNil)                                     // All stores are marked taint.
 	CheckTransferLeader(c, s.schedule(nil)[0], schedule.OpBalance, 4, 3) // The taint store will be clear.
 }
 
