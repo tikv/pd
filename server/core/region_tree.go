@@ -62,6 +62,12 @@ func (t *regionTree) length() int {
 func (t *regionTree) update(region *metapb.Region) []*metapb.Region {
 	item := &regionItem{region: region}
 
+	// note that find() gets the first item equals or greater to the region
+	// in the case: |_______a_______|_____b_____|___c___|
+	// new region is     |______d______|
+	// find() will return regionItem of region_a
+	// and both startKey of region_a and region_b are less than endKey of region_d,
+	// thus they are regarded as overlapped regions.
 	result := t.find(region)
 	if result == nil {
 		result = item
