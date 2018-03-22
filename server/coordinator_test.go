@@ -278,11 +278,11 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	dispatchHeartbeat(c, co, region, stream)
 	waitNoResponse(c, stream)
 
-	// Remove peer from store 4.
+	// Remove peer from store 3 because store is down.
 	tc.addLeaderRegion(2, 1, 2, 3, 4)
 	region = tc.GetRegion(2)
 	dispatchHeartbeat(c, co, region, stream)
-	waitRemovePeer(c, stream, region, 4)
+	waitRemovePeer(c, stream, region, 3)
 	dispatchHeartbeat(c, co, region, stream)
 	waitNoResponse(c, stream)
 

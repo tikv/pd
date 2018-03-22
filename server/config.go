@@ -389,6 +389,7 @@ var defaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
 	{Type: "hot-region"},
+	{Type: "fail-over"},
 	{Type: "label"},
 }
 

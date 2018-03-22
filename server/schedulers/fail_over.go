@@ -49,7 +49,6 @@ func (f *failOverScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 }
 
 func (f *failOverScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
-	log.Info("debug begion")
 	stores := cluster.GetStores()
 	for _, store := range stores {
 		if store.DownTime() > cluster.GetMaxStoreDownTime() {
@@ -84,7 +83,6 @@ func (f *failOverScheduler) handleDownStore(cluster schedule.Cluster, store *cor
 		return nil
 	}
 	region = cluster.RandFollowerRegion(store.GetId(), false)
-	log.Infof("debug region %+v,store", region, store)
 	if region == nil {
 		return nil
 	}
@@ -101,8 +99,15 @@ func (f *failOverScheduler) handleDownStore(cluster schedule.Cluster, store *cor
 	if downPeer == nil {
 		log.Warnf("[region %d] peer %v not down in down store", region.GetId(), peer)
 	}
-
 	return schedule.CreateRemovePeerOperator("removeDownReplica", cluster, schedule.OpReplica, region, peer.GetStoreId())
+}
+
+func (f *failOverScheduler) transferOutHotRegion(cluster schedule.Cluster, store *core.StoreInfo) *schedule.Operator {
+	region := cluster.RandHotRegionFromStore(store.GetId(), schedule.ReadFlow)
+	if region != nil {
+
+	}
+	return nil
 }
 
 func (f *failOverScheduler) handleOfflineStore(cluster schedule.Cluster, store *core.StoreInfo) *schedule.Operator {
@@ -114,13 +119,11 @@ func (f *failOverScheduler) handleOfflineStore(cluster schedule.Cluster, store *
 		log.Info("offline region nil")
 		return nil
 	}
-	log.Info("offline region:", region)
 	if region.HealthPeerCount() < cluster.GetMaxReplicas()/2+1 {
 		log.Errorf("[region %d] region unhealth: %v", region)
 		return nil
 	}
 	peer := region.GetStorePeer(store.GetId())
-	log.Info("offline peer:", peer)
 	if peer == nil {
 		return nil
 	}
@@ -138,17 +141,13 @@ func (f *failOverScheduler) handleOfflineStore(cluster schedule.Cluster, store *
 	if region.GetDownPeer(peer.GetId()) != nil {
 		return schedule.CreateRemovePeerOperator("removeDownOfflineReplica", cluster, schedule.OpReplica, region, peer.GetStoreId())
 	}
-
-	log.Info("offline check")
 	checker := schedule.NewReplicaChecker(cluster, nil)
 	newPeer := checker.SelectBestReplacedPeerToAddReplica(region, peer)
 	if newPeer == nil {
 		log.Debugf("[region %d] no best peer to add replica", region.GetId())
 		return nil
 	}
-	op := schedule.CreateMovePeerOperator("makeUpOfflineReplica", cluster, region, schedule.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
-	log.Println("offline op:", op)
-	return op
+	return schedule.CreateMovePeerOperator("makeUpOfflineReplica", cluster, region, schedule.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }
 
 func (f *failOverScheduler) handleLowSpaceStore(cluster schedule.Cluster, store *core.StoreInfo) *schedule.Operator {
