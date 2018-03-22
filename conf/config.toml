@@ -53,12 +53,14 @@ interval = "15s"
 address = ""
 
 [schedule]
+max-merge-region-size = 0
 max-snapshot-count = 3
 max-pending-peer-count = 16
 max-store-down-time = "1h"
 leader-schedule-limit = 64
 region-schedule-limit = 16
 replica-schedule-limit = 24
+merge-schedule-limit = 20
 tolerant-size-ratio = 2.5
 
 # customized schedulers, the format is as below

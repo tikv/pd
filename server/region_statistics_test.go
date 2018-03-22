@@ -41,6 +41,10 @@ func (c mockClassifier) IsNamespaceExist(name string) bool {
 	return true
 }
 
+func (c mockClassifier) AllowMerge(*core.RegionInfo, *core.RegionInfo) bool {
+	return true
+}
+
 var _ = Suite(&testRegionStatistcs{})
 
 type testRegionStatistcs struct{}

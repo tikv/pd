@@ -31,6 +31,7 @@ const (
 	OpAdjacent                           // Initiated by adjacent region scheduler.
 	OpReplica                            // Initiated by replica checkers.
 	OpBalance                            // Initiated by balancers.
+	OpMerge                              // Initiated by merge checkers.
 	opMax
 )
 
@@ -42,6 +43,7 @@ var flagToName = map[OperatorKind]string{
 	OpAdjacent:  "adjacent",
 	OpReplica:   "replica",
 	OpBalance:   "balance",
+	OpMerge:     "merge",
 }
 
 var nameToFlag = map[string]OperatorKind{
@@ -52,6 +54,7 @@ var nameToFlag = map[string]OperatorKind{
 	"adjacent":  OpAdjacent,
 	"replica":   OpReplica,
 	"balance":   OpBalance,
+	"merge":     OpMerge,
 }
 
 func (k OperatorKind) String() string {

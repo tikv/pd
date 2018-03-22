@@ -68,7 +68,7 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 	return l.limiter.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
+func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
 	stores := cluster.GetStores()
@@ -147,7 +147,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluste
 	return l.createOperator(region, source, target, cluster, opInfluence)
 }
 
-func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source, target *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
+func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source, target *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	log.Debugf("[%s] verify balance region %d, from: %d, to: %d", l.GetName(), region.GetId(), source.GetId(), target.GetId())
 	if cluster.IsRegionHot(region.GetId()) {
 		log.Debugf("[%s] region %d is hot region, ignore it", l.GetName(), region.GetId())
@@ -165,5 +165,6 @@ func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source,
 	schedulerCounter.WithLabelValues(l.GetName(), "new_operator").Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: target.GetId()}
 	log.Debugf("[%s] start balance region %d, from: %d, to: %d", l.GetName(), region.GetId(), source.GetId(), target.GetId())
-	return schedule.NewOperator("balanceLeader", region.GetId(), schedule.OpBalance|schedule.OpLeader, step)
+	op := schedule.NewOperator("balanceLeader", region.GetId(), schedule.OpBalance|schedule.OpLeader, step)
+	return []*schedule.Operator{op}
 }
