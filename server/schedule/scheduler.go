@@ -43,6 +43,7 @@ type Cluster interface {
 	IsRegionHot(id uint64) bool
 	RegionWriteStats() []*core.RegionStat
 	RegionReadStats() []*core.RegionStat
+	RandHotRegionFromStore(store uint64, kind FlowKind) *core.RegionInfo
 
 	// get config methods
 	GetOpt() NamespaceOptions

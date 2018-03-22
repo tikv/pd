@@ -31,7 +31,16 @@ var schedulerStatus = prometheus.NewGaugeVec(
 		Help:      "Inner status of the scheduler.",
 	}, []string{"type", "name"})
 
+var balanceLeaderCounter = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "balance_leader",
+		Help:      "Counter of balance leader scheduler.",
+	}, []string{"type", "store"})
+
 func init() {
 	prometheus.MustRegister(schedulerCounter)
 	prometheus.MustRegister(schedulerStatus)
+	prometheus.MustRegister(balanceLeaderCounter)
 }
