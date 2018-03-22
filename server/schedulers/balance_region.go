@@ -70,7 +70,7 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 	return s.limiter.OperatorCount(schedule.OpRegion) < cluster.GetRegionScheduleLimit()
 }
 
-func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
+func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
 	stores := cluster.GetStores()
@@ -119,7 +119,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 		oldPeer := region.GetStorePeer(source.GetId())
 		if op := s.transferPeer(cluster, region, oldPeer, opInfluence); op != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-			return op
+			return []*schedule.Operator{op}
 		}
 	}
 

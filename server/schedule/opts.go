@@ -28,10 +28,12 @@ type Options interface {
 	GetLeaderScheduleLimit() uint64
 	GetRegionScheduleLimit() uint64
 	GetReplicaScheduleLimit() uint64
+	GetMergeScheduleLimit() uint64
 
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
 	GetMaxStoreDownTime() time.Duration
+	GetMaxMergeRegionSize() uint64
 
 	GetMaxReplicas() int
 	GetLocationLabels() []string
@@ -47,6 +49,7 @@ type NamespaceOptions interface {
 	GetLeaderScheduleLimit(name string) uint64
 	GetRegionScheduleLimit(name string) uint64
 	GetReplicaScheduleLimit(name string) uint64
+	GetMergeScheduleLimit(name string) uint64
 	GetMaxReplicas(name string) int
 }
 
