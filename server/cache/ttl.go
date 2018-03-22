@@ -95,6 +95,16 @@ func (c *TTL) Len() int {
 	return len(c.items)
 }
 
+// Clear removes all items in the ttl cache.
+func (c *TTL) Clear() {
+	c.Lock()
+	defer c.Unlock()
+
+	for k := range c.items {
+		delete(c.items, k)
+	}
+}
+
 func (c *TTL) doGC() {
 	ticker := time.NewTicker(c.gcInterval)
 	defer ticker.Stop()
