@@ -62,7 +62,7 @@ func (t *regionTree) length() int {
 func (t *regionTree) update(region *metapb.Region) []*metapb.Region {
 	item := &regionItem{region: region}
 
-	// note that find() gets the first item equals or greater to the region
+	// note that find() gets the last item that is less or equal than the region.
 	// in the case: |_______a_______|_____b_____|___c___|
 	// new region is     |______d______|
 	// find() will return regionItem of region_a
