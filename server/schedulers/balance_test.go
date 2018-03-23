@@ -474,18 +474,18 @@ func (s *testBalanceFailOverSuite) TestBasic(c *C) {
 	peer3, _ := tc.AllocPeer(2)
 	region.Peers = append(region.Peers, peer3)
 	tc.PutRegion(region)
-	checkRemovePeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 3)
+	checkRemovePeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], 3)
 	region.DownPeers = nil
 	tc.setStoreUp(3)
 	tc.PutRegion(region)
 
 	// Peer in store 2 is offline, transfer peer to store 4.
 	tc.setStoreOffline(2)
-	CheckTransferPeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpReplica, 2, 4)
+	CheckTransferPeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpReplica, 2, 4)
 	// Add peer in store 4, now we have 4 replica
 	peer4, _ := tc.AllocPeer(4)
 	region.Peers = append(region.Peers, peer4)
-	checkRemovePeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 2)
+	checkRemovePeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], 2)
 }
 
 func (s *testBalanceFailOverSuite) TestStoreDown(c *C) {
@@ -517,7 +517,7 @@ func (s *testBalanceFailOverSuite) TestStoreDown(c *C) {
 	peer3, _ := tc.AllocPeer(3)
 	region.Peers = append(region.Peers, peer3)
 	tc.PutRegion(region)
-	checkRemovePeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 2)
+	checkRemovePeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], 2)
 }
 
 func (s *testBalanceFailOverSuite) TestOffline(c *C) {
@@ -537,7 +537,7 @@ func (s *testBalanceFailOverSuite) TestOffline(c *C) {
 
 	// TestOffilne
 	tc.setStoreOffline(2)
-	CheckTransferPeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpReplica, 2, 3)
+	CheckTransferPeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpReplica, 2, 3)
 	region := tc.GetRegion(1)
 	downPeer := &pdpb.PeerStats{
 		Peer:        region.GetStorePeer(2),
@@ -551,16 +551,16 @@ func (s *testBalanceFailOverSuite) TestOffline(c *C) {
 	region.DownPeers = nil
 	peer3, _ := tc.AllocPeer(3)
 	region.Peers = append(region.Peers, peer3)
-	CheckTransferPeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpReplica, 2, 4)
+	CheckTransferPeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpReplica, 2, 4)
 	peer4, _ := tc.AllocPeer(4)
 	region.Peers = append(region.Peers, peer4)
-	checkRemovePeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), 2)
+	checkRemovePeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], 2)
 
 	tc.addLeaderRegionWithWriteInfo(2, 2, 512*1024*schedule.RegionHeartBeatReportInterval, 3, 4)
 	opt.HotRegionLowThreshold = 0
-	CheckTransferPeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpReplica, 2, 1)
+	CheckTransferPeer(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpReplica, 2, 1)
 	tc.addLeaderRegionWithReadInfo(3, 2, 512*1024*schedule.RegionHeartBeatReportInterval, 3, 4)
-	CheckTransferLeader(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpReplica, 2, 3)
+	CheckTransferLeader(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpReplica, 2, 3)
 }
 
 func (s *testBalanceFailOverSuite) TestLowSpace(c *C) {
@@ -583,7 +583,7 @@ func (s *testBalanceFailOverSuite) TestLowSpace(c *C) {
 	tc.setStoreLowSpace(3)
 	tc.addLeaderRegionWithReadInfo(2, 3, 512*1024*schedule.RegionHeartBeatReportInterval, 1, 2)
 	opt.HotRegionLowThreshold = 0
-	CheckTransferLeader(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), schedule.OpReplica, 3, 1)
+	CheckTransferLeader(c, fo.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpReplica, 3, 1)
 }
 
 var _ = Suite(&testReplicaCheckerSuite{})
