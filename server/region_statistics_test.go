@@ -41,6 +41,10 @@ func (c mockClassifier) IsNamespaceExist(name string) bool {
 	return true
 }
 
+func (c mockClassifier) AllowMerge(*core.RegionInfo, *core.RegionInfo) bool {
+	return true
+}
+
 var _ = Suite(&testRegionStatistcs{})
 
 type testRegionStatistcs struct{}
@@ -70,31 +74,37 @@ func (t *testRegionStatistcs) TestRegionStatistics(c *C) {
 		{Peer: peers[0], DownSeconds: 3608},
 		{Peer: peers[1], DownSeconds: 3608},
 	}
+	stores[3].State = metapb.StoreState_Offline
 	r1 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("aa"), EndKey: []byte("bb")}
 	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
 	region1 := core.NewRegionInfo(r1, peers[0])
 	region2 := core.NewRegionInfo(r2, peers[0])
 	regionStats := newRegionStatistics(opt, mockClassifier{})
-	regionStats.Observe(region1, stores, nil)
+	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[extraPeer]), Equals, 1)
 	region1.DownPeers = downPeers
 	region1.PendingPeers = peers[0:1]
-	regionStats.Observe(region1, stores, nil)
+	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[extraPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[missPeer]), Equals, 0)
 	c.Assert(len(regionStats.stats[downPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[pendingPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 1)
 	region2.DownPeers = downPeers[0:1]
-	regionStats.Observe(region2, stores[0:2], nil)
+	regionStats.Observe(region2, stores[0:2])
 	c.Assert(len(regionStats.stats[extraPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[missPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[downPeer]), Equals, 2)
 	c.Assert(len(regionStats.stats[pendingPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[offlinePeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 1)
+	stores[3].State = metapb.StoreState_Up
+	regionStats.Observe(region1, stores)
+	c.Assert(len(regionStats.stats[offlinePeer]), Equals, 0)
 }
 
 func (t *testRegionStatistcs) TestRegionLabelIsolationLevel(c *C) {
+	labelLevelStats := newLabelLevelStatistics()
 	labelsSet := [][]map[string]string{
 		{
 			{"zone": "z1", "rack": "r1", "host": "h1"},
@@ -123,6 +133,8 @@ func (t *testRegionStatistcs) TestRegionLabelIsolationLevel(c *C) {
 		},
 	}
 	res := []int{2, 3, 1, 2, 0}
+	counter := []int{1, 1, 2, 1, 0}
+	regionID := 1
 	f := func(labels []map[string]string, res int) {
 		metaStores := []*metapb.Store{
 			{Id: 1, Address: "mock://tikv-1"},
@@ -137,14 +149,20 @@ func (t *testRegionStatistcs) TestRegionLabelIsolationLevel(c *C) {
 			}
 			stores = append(stores, s)
 		}
+		region := core.NewRegionInfo(&metapb.Region{Id: uint64(regionID)}, nil)
 		level := getRegionLabelIsolationLevel(stores, []string{"zone", "rack", "host"})
+		labelLevelStats.Observe(region, stores, []string{"zone", "rack", "host"})
 		c.Assert(level, Equals, res)
+		regionID++
 	}
 
 	for i, labels := range labelsSet {
 		f(labels, res[i])
-
 	}
+	for i, res := range counter {
+		c.Assert(labelLevelStats.labelLevelCounter[i], Equals, res)
+	}
+
 	level := getRegionLabelIsolationLevel(nil, []string{"zone", "rack", "host"})
 	c.Assert(level, Equals, 0)
 	level = getRegionLabelIsolationLevel(nil, nil)

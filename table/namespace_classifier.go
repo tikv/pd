@@ -158,6 +158,10 @@ func (c *tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInf
 	return namespace.DefaultNamespace
 }
 
+func (c *tableNamespaceClassifier) AllowMerge(one *core.RegionInfo, other *core.RegionInfo) bool {
+	return Key(one.StartKey).TableID() == Key(other.StartKey).TableID()
+}
+
 // GetNamespaces returns all namespace details.
 func (c *tableNamespaceClassifier) GetNamespaces() []*Namespace {
 	c.RLock()

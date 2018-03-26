@@ -14,7 +14,6 @@
 package schedulers
 
 import (
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
@@ -28,15 +27,16 @@ func init() {
 type shuffleLeaderScheduler struct {
 	*baseScheduler
 	selector schedule.Selector
-	selected *metapb.Peer
 }
 
 // newShuffleLeaderScheduler creates an admin scheduler that shuffles leaders
 // between stores.
 func newShuffleLeaderScheduler(limiter *schedule.Limiter) schedule.Scheduler {
 	filters := []schedule.Filter{
+		schedule.NewBlockFilter(),
 		schedule.NewStateFilter(),
 		schedule.NewHealthFilter(),
+		schedule.NewRejectLeaderFilter(),
 	}
 	base := newBaseScheduler(limiter)
 	return &shuffleLeaderScheduler{
@@ -57,40 +57,25 @@ func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 	return s.limiter.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
-	// We shuffle leaders between stores:
-	// 1. select a store randomly.
-	// 2. transfer a leader from the store to another store.
-	// 3. transfer a leader to the store from another store.
-	// These will not change store's leader count, but swap leaders between stores.
-
+func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
+	// We shuffle leaders between stores by:
+	// 1. random select a valid store.
+	// 2. transfer a leader to the store.
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	// Select a store and transfer a leader from it.
-	if s.selected == nil {
-		region, newLeader := scheduleTransferLeader(cluster, s.GetName(), s.selector)
-		if region == nil {
-			return nil
-		}
-		// Mark the selected store.
-		s.selected = region.Leader
-		schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-		step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
-		return schedule.NewOperator("shuffle-leader", region.GetId(), schedule.OpAdmin|schedule.OpLeader, step)
+	stores := cluster.GetStores()
+	targetStore := s.selector.SelectTarget(cluster, stores)
+	if targetStore == nil {
+		schedulerCounter.WithLabelValues(s.GetName(), "no_target_store").Inc()
+		return nil
 	}
-
-	// Reset the selected store.
-	storeID := s.selected.GetStoreId()
-	s.selected = nil
-
-	// Transfer a leader to the selected store.
-	region := cluster.RandFollowerRegion(storeID)
+	region := cluster.RandFollowerRegion(targetStore.GetId())
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_follower").Inc()
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: storeID}
-	op := schedule.NewOperator("shuffleSelectedLeader", region.GetId(), schedule.OpAdmin|schedule.OpLeader, step)
+	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: targetStore.GetId()}
+	op := schedule.NewOperator("shuffleLeader", region.GetId(), schedule.OpAdmin|schedule.OpLeader, step)
 	op.SetPriorityLevel(core.HighPriority)
-	return op
+	return []*schedule.Operator{op}
 }

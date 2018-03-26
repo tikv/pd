@@ -16,7 +16,6 @@ package core
 import (
 	"bytes"
 	"fmt"
-	"math"
 	"math/rand"
 	"reflect"
 	"strings"
@@ -52,6 +51,12 @@ const EmptyRegionApproximateSize = 1
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
 func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
+	// Convert unit to MB.
+	// If region is empty or less than 1MB, use 1MB instead.
+	regionSize := heartbeat.GetApproximateSize() / (1 << 20)
+	if regionSize < EmptyRegionApproximateSize {
+		regionSize = EmptyRegionApproximateSize
+	}
 	return &RegionInfo{
 		Region:          heartbeat.GetRegion(),
 		Leader:          heartbeat.GetLeader(),
@@ -59,7 +64,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		PendingPeers:    heartbeat.GetPendingPeers(),
 		WrittenBytes:    heartbeat.GetBytesWritten(),
 		ReadBytes:       heartbeat.GetBytesRead(),
-		ApproximateSize: int64(math.Ceil(float64(heartbeat.GetApproximateSize()) / 1e6)), // use size of MB as unit
+		ApproximateSize: int64(regionSize),
 	}
 }
 
@@ -505,6 +510,20 @@ func (r *RegionsInfo) ScanRange(startKey []byte, limit int) []*RegionInfo {
 		return len(res) < limit
 	})
 	return res
+}
+
+// GetAdjacentRegions returns region's info that is adjacent with specific region
+func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo) {
+	metaPrev, metaNext := r.tree.getAdjacentRegions(region.Region)
+	var prev, next *RegionInfo
+	// check key to avoid key range hole
+	if metaPrev != nil && bytes.Compare(metaPrev.region.EndKey, region.Region.StartKey) == 0 {
+		prev = r.GetRegion(metaPrev.region.GetId())
+	}
+	if metaNext != nil && bytes.Compare(region.Region.EndKey, metaNext.region.StartKey) == 0 {
+		next = r.GetRegion(metaNext.region.GetId())
+	}
+	return prev, next
 }
 
 // RegionStats records a list of regions' statistics and distribution status.

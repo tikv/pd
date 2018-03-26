@@ -34,6 +34,7 @@ type Cluster interface {
 	GetRegionStores(region *core.RegionInfo) []*core.StoreInfo
 	GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo
 	GetLeaderStore(region *core.RegionInfo) *core.StoreInfo
+	GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo)
 	GetStoresAverageScore(kind core.ResourceKind, filters ...Filter) float64
 	ScanRegions(startKey []byte, limit int) []*core.RegionInfo
 
@@ -43,6 +44,7 @@ type Cluster interface {
 	IsRegionHot(id uint64) bool
 	RegionWriteStats() []*core.RegionStat
 	RegionReadStats() []*core.RegionStat
+	RandHotRegionFromStore(store uint64, kind FlowKind) *core.RegionInfo
 
 	// get config methods
 	GetOpt() NamespaceOptions
@@ -62,7 +64,7 @@ type Scheduler interface {
 	GetNextInterval(interval time.Duration) time.Duration
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)
-	Schedule(cluster Cluster, opInfluence OpInfluence) *Operator
+	Schedule(cluster Cluster, opInfluence OpInfluence) []*Operator
 	IsScheduleAllowed(cluster Cluster) bool
 }
 

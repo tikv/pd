@@ -35,6 +35,7 @@ type Classifier interface {
 	GetStoreNamespace(*core.StoreInfo) string
 	GetRegionNamespace(*core.RegionInfo) string
 	IsNamespaceExist(name string) bool
+	AllowMerge(*core.RegionInfo, *core.RegionInfo) bool
 }
 
 type defaultClassifier struct{}
@@ -53,6 +54,10 @@ func (c defaultClassifier) GetRegionNamespace(*core.RegionInfo) string {
 
 func (c defaultClassifier) IsNamespaceExist(name string) bool {
 	return name == DefaultNamespace
+}
+
+func (c defaultClassifier) AllowMerge(one *core.RegionInfo, other *core.RegionInfo) bool {
+	return true
 }
 
 // CreateClassifierFunc is for creating namespace classifier.

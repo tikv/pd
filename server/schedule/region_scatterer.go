@@ -123,6 +123,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
 		op := CreateMovePeerOperator("scatter-peer", r.cluster, region, OpAdmin,
 			peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 		steps = append(steps, op.steps...)
+		steps = append(steps, TransferLeader{ToStore: newPeer.GetStoreId()})
 	}
 
 	if len(steps) == 0 {

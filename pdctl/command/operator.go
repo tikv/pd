@@ -78,6 +78,7 @@ func NewAddOperatorCommand() *cobra.Command {
 	c.AddCommand(NewTransferPeerCommand())
 	c.AddCommand(NewAddPeerCommand())
 	c.AddCommand(NewRemovePeerCommand())
+	c.AddCommand(NewMergeRegionCommand())
 	c.AddCommand(NewSplitRegionCommand())
 	return c
 }
@@ -196,6 +197,35 @@ func addPeerCommandFunc(cmd *cobra.Command, args []string) {
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
 	input["store_id"] = ids[1]
+	postJSON(cmd, operatorsPrefix, input)
+}
+
+// NewMergeRegionCommand returns a command to merge two regions.
+func NewMergeRegionCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "merge-region <source_region_id> <target_region_id>",
+		Short: "merge source region into target reigon",
+		Run:   mergeRegionCommandFunc,
+	}
+	return c
+}
+
+func mergeRegionCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 2 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+
+	ids, err := parseUint64s(args)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	input := make(map[string]interface{})
+	input["name"] = cmd.Name()
+	input["source_region_id"] = ids[0]
+	input["merge_region_id"] = ids[1]
 	postJSON(cmd, operatorsPrefix, input)
 }
 

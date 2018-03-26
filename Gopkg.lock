@@ -255,7 +255,7 @@
     "pkg/metapb",
     "pkg/pdpb"
   ]
-  revision = "7fe0eb69e3e6d5e03c2222651b065ecfe3e1ae31"
+  revision = "340ba9feaf29e9be3404be5b891999746330f677"
 
 [[projects]]
   name = "github.com/prometheus/client_golang"
