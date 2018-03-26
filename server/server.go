@@ -442,6 +442,7 @@ func (s *Server) GetConfig() *Config {
 		namespaces[name] = *opt.load()
 	}
 	cfg.Namespace = namespaces
+	cfg.LabelProperty = s.scheduleOpt.loadLabelPropertyConfig().clone()
 	return cfg
 }
 
