@@ -109,10 +109,7 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 	}
 	// If PD has restarted, it need to check learners added before and promote them.
 	if c.cluster.IsEnableRaftLearner() && c.getOperator(region.GetId()) == nil {
-		for _, p := range region.Region.GetPeers() {
-			if !p.IsLearner {
-				continue
-			}
+		for _, p := range region.GetLearners() {
 			if region.GetPendingLearner(p.GetId()) != nil {
 				continue
 			}
@@ -533,7 +530,7 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 			},
 		}
 		c.hbStreams.sendMsg(region, cmd)
-	case schedule.AddLearnerPeer:
+	case schedule.AddLearner:
 		if region.GetStorePeer(s.ToStore) != nil {
 			// The newly added peer is pending.
 			return

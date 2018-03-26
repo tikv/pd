@@ -269,9 +269,9 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 	if region == nil {
 		return errRegionNotFound(regionID)
 	}
-	newLeader := region.GetStorePeer(storeID)
+	newLeader := region.GetStoreVoter(storeID)
 	if newLeader == nil {
-		return errors.Errorf("region has no peer in store %v", storeID)
+		return errors.Errorf("region has no voter in store %v", storeID)
 	}
 
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
@@ -306,7 +306,14 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		if err != nil {
 			return errors.Trace(err)
 		}
-		steps = append(steps, schedule.AddPeer{ToStore: id, PeerID: peer.Id})
+		if c.cluster.IsEnableRaftLearner() {
+			steps = append(steps,
+				schedule.AddLearner{ToStore: id, PeerID: peer.Id},
+				schedule.PromoteLearnerPeer{ToStore: id, PeerID: peer.Id},
+			)
+		} else {
+			steps = append(steps, schedule.AddPeer{ToStore: id, PeerID: peer.Id})
+		}
 	}
 
 	// Remove redundant peers.
@@ -379,7 +386,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 	var steps []schedule.OperatorStep
 	if c.cluster.IsEnableRaftLearner() {
 		steps = []schedule.OperatorStep{
-			schedule.AddLearnerPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
+			schedule.AddLearner{ToStore: toStoreID, PeerID: newPeer.GetId()},
 			schedule.PromoteLearnerPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
 		}
 	} else {

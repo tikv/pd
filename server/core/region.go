@@ -29,6 +29,8 @@ import (
 // RegionInfo records detail region info.
 type RegionInfo struct {
 	*metapb.Region
+	Learners        []*metapb.Peer
+	Voters          []*metapb.Peer
 	Leader          *metapb.Peer
 	DownPeers       []*pdpb.PeerStats
 	PendingPeers    []*metapb.Peer
@@ -39,9 +41,21 @@ type RegionInfo struct {
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
 func NewRegionInfo(region *metapb.Region, leader *metapb.Peer) *RegionInfo {
+	learners := make([]*metapb.Peer, 0, 1)
+	voters := make([]*metapb.Peer, 0, len(region.Peers))
+	for _, p := range region.Peers {
+		if p.IsLearner {
+			learners = append(learners, p)
+		} else {
+			voters = append(voters, p)
+		}
+	}
+
 	return &RegionInfo{
-		Region: region,
-		Leader: leader,
+		Region:   region,
+		Leader:   leader,
+		Learners: learners,
+		Voters:   voters,
 	}
 }
 
@@ -57,9 +71,23 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 	if regionSize < EmptyRegionApproximateSize {
 		regionSize = EmptyRegionApproximateSize
 	}
+
+	peers := heartbeat.GetRegion().Peers
+	learners := make([]*metapb.Peer, 0, 1)
+	voters := make([]*metapb.Peer, 0, len(peers))
+	for _, p := range peers {
+		if p.IsLearner {
+			learners = append(learners, p)
+		} else {
+			voters = append(voters, p)
+		}
+	}
+
 	return &RegionInfo{
 		Region:          heartbeat.GetRegion(),
 		Leader:          heartbeat.GetLeader(),
+		Learners:        learners,
+		Voters:          voters,
 		DownPeers:       heartbeat.GetDownPeers(),
 		PendingPeers:    heartbeat.GetPendingPeers(),
 		WrittenBytes:    heartbeat.GetBytesWritten(),
@@ -89,6 +117,14 @@ func (r *RegionInfo) Clone() *RegionInfo {
 	}
 }
 
+func (r *RegionInfo) GetLearners() []*metapb.Peer {
+	return r.Learners
+}
+
+func (r *RegionInfo) GetVoters() []*metapb.Peer {
+	return r.Voters
+}
+
 // GetPeer returns the peer with specified peer id.
 func (r *RegionInfo) GetPeer(peerID uint64) *metapb.Peer {
 	for _, peer := range r.GetPeers() {
@@ -101,6 +137,16 @@ func (r *RegionInfo) GetPeer(peerID uint64) *metapb.Peer {
 
 // GetDownPeer returns the down peer with specified peer id.
 func (r *RegionInfo) GetDownPeer(peerID uint64) *metapb.Peer {
+	for _, down := range r.DownPeers {
+		if down.GetPeer().GetId() == peerID {
+			return down.GetPeer()
+		}
+	}
+	return nil
+}
+
+// GetDownVoter returns the down peer with specified peer id.
+func (r *RegionInfo) GetDownVoter(peerID uint64) *metapb.Peer {
 	for _, down := range r.DownPeers {
 		if down.GetPeer().GetId() == peerID && !down.GetPeer().IsLearner {
 			return down.GetPeer()
@@ -122,6 +168,16 @@ func (r *RegionInfo) GetDownLearner(peerID uint64) *metapb.Peer {
 // GetPendingPeer returns the pending peer with specified peer id.
 func (r *RegionInfo) GetPendingPeer(peerID uint64) *metapb.Peer {
 	for _, peer := range r.PendingPeers {
+		if peer.GetId() == peerID {
+			return peer
+		}
+	}
+	return nil
+}
+
+// GetPendingVoter returns the pending voter with specified peer id.
+func (r *RegionInfo) GetPendingVoter(peerID uint64) *metapb.Peer {
+	for _, peer := range r.PendingPeers {
 		if peer.GetId() == peerID && !peer.IsLearner {
 			return peer
 		}
@@ -142,7 +198,17 @@ func (r *RegionInfo) GetPendingLearner(peerID uint64) *metapb.Peer {
 // GetStorePeer returns the peer in specified store.
 func (r *RegionInfo) GetStorePeer(storeID uint64) *metapb.Peer {
 	for _, peer := range r.GetPeers() {
-		if peer.GetStoreId() == storeID && !peer.IsLearner {
+		if peer.GetStoreId() == storeID {
+			return peer
+		}
+	}
+	return nil
+}
+
+// GetStoreVoter returns the voter in specified store.
+func (r *RegionInfo) GetStoreVoter(storeID uint64) *metapb.Peer {
+	for _, peer := range r.Voters {
+		if peer.GetStoreId() == storeID {
 			return peer
 		}
 	}
@@ -151,8 +217,8 @@ func (r *RegionInfo) GetStorePeer(storeID uint64) *metapb.Peer {
 
 // GetStoreLearner returns the learner peer in specified store.
 func (r *RegionInfo) GetStoreLearner(storeID uint64) *metapb.Peer {
-	for _, peer := range r.GetPeers() {
-		if peer.GetStoreId() == storeID && peer.IsLearner {
+	for _, peer := range r.Learners {
+		if peer.GetStoreId() == storeID {
 			return peer
 		}
 	}
@@ -182,7 +248,7 @@ func (r *RegionInfo) GetStoreIds() map[uint64]struct{} {
 
 // GetFollowers returns a map indicate the follow peers distributed.
 func (r *RegionInfo) GetFollowers() map[uint64]*metapb.Peer {
-	peers := r.GetPeers()
+	peers := r.GetVoters()
 	followers := make(map[uint64]*metapb.Peer, len(peers))
 	for _, peer := range peers {
 		if r.Leader == nil || r.Leader.GetId() != peer.GetId() {
@@ -194,7 +260,7 @@ func (r *RegionInfo) GetFollowers() map[uint64]*metapb.Peer {
 
 // GetFollower randomly returns a follow peer.
 func (r *RegionInfo) GetFollower() *metapb.Peer {
-	for _, peer := range r.GetPeers() {
+	for _, peer := range r.GetVoters() {
 		if r.Leader == nil || r.Leader.GetId() != peer.GetId() {
 			return peer
 		}
@@ -335,6 +401,7 @@ type RegionsInfo struct {
 	regions         *regionMap            // regionID -> regionInfo
 	leaders         map[uint64]*regionMap // storeID -> regionID -> regionInfo
 	followers       map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	learners        map[uint64]*regionMap // storeID -> regionID -> regionInfo
 	pendingPeers    map[uint64]*regionMap // storeID -> regionID -> regionInfo
 	pendingLearners map[uint64]*regionMap // storeID -> regionID -> regionInfo
 }
@@ -346,6 +413,7 @@ func NewRegionsInfo() *RegionsInfo {
 		regions:         newRegionMap(),
 		leaders:         make(map[uint64]*regionMap),
 		followers:       make(map[uint64]*regionMap),
+		learners:        make(map[uint64]*regionMap),
 		pendingPeers:    make(map[uint64]*regionMap),
 		pendingLearners: make(map[uint64]*regionMap),
 	}
@@ -393,7 +461,7 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*metapb.Region {
 	}
 
 	// Add to leaders and followers.
-	for _, peer := range region.GetPeers() {
+	for _, peer := range region.GetVoters() {
 		storeID := peer.GetStoreId()
 		if peer.GetId() == region.Leader.GetId() {
 			// Add leader peer to leaders.
@@ -412,6 +480,17 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*metapb.Region {
 			}
 			store.Put(region)
 		}
+	}
+
+	// Add to learners.
+	for _, peer := range region.GetLearners() {
+		storeID := peer.GetStoreId()
+		store, ok := r.learners[storeID]
+		if !ok {
+			store = newRegionMap()
+			r.learners[storeID] = store
+		}
+		store.Put(region)
 	}
 
 	for _, peer := range region.PendingPeers {
@@ -453,6 +532,7 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 		storeID := peer.GetStoreId()
 		r.leaders[storeID].Delete(region.GetId())
 		r.followers[storeID].Delete(region.GetId())
+		r.learners[storeID].Delete(region.GetId())
 		r.pendingPeers[storeID].Delete(region.GetId())
 		r.pendingLearners[storeID].Delete(region.GetId())
 	}
@@ -486,9 +566,14 @@ func (r *RegionsInfo) GetStoreFollowerRegionSize(storeID uint64) int64 {
 	return r.followers[storeID].TotalSize()
 }
 
+// GetStoreLearnerRegionSize get total size of store's learner regions
+func (r *RegionsInfo) GetStoreLearnerRegionSize(storeID uint64) int64 {
+	return r.learners[storeID].TotalSize()
+}
+
 // GetStoreRegionSize get total size of store's regions
 func (r *RegionsInfo) GetStoreRegionSize(storeID uint64) int64 {
-	return r.GetStoreLeaderRegionSize(storeID) + r.GetStoreFollowerRegionSize(storeID)
+	return r.GetStoreLeaderRegionSize(storeID) + r.GetStoreFollowerRegionSize(storeID) + r.GetStoreLearnerRegionSize(storeID)
 }
 
 // GetMetaRegions gets a set of metapb.Region from regionMap
@@ -507,7 +592,7 @@ func (r *RegionsInfo) GetRegionCount() int {
 
 // GetStoreRegionCount gets the total count of a store's leader and follower RegionInfo by storeID
 func (r *RegionsInfo) GetStoreRegionCount(storeID uint64) int {
-	return r.GetStoreLeaderCount(storeID) + r.GetStoreFollowerCount(storeID)
+	return r.GetStoreLeaderCount(storeID) + r.GetStoreFollowerCount(storeID) + r.GetStoreLearnerCount(storeID)
 }
 
 // GetStorePendingPeerCount gets the total count of a store's region that includes pending peer
@@ -528,6 +613,11 @@ func (r *RegionsInfo) GetStoreLeaderCount(storeID uint64) int {
 // GetStoreFollowerCount get the total count of a store's follower RegionInfo
 func (r *RegionsInfo) GetStoreFollowerCount(storeID uint64) int {
 	return r.followers[storeID].Len()
+}
+
+// GetStoreLearnerCount get the total count of a store's learner RegionInfo
+func (r *RegionsInfo) GetStoreLearnerCount(storeID uint64) int {
+	return r.learners[storeID].Len()
 }
 
 // RandRegion get a region by random

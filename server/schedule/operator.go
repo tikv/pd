@@ -69,8 +69,8 @@ func (ap AddPeer) String() string {
 
 // IsFinish checks if current step is finished.
 func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
-	if p := region.GetStorePeer(ap.ToStore); p != nil {
-		return region.GetPendingPeer(p.GetId()) == nil
+	if p := region.GetStoreVoter(ap.ToStore); p != nil {
+		return region.GetPendingVoter(p.GetId()) == nil
 	}
 	return false
 }
@@ -83,26 +83,26 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to.RegionCount++
 }
 
-// AddLearnerPeer is an OperatorStep that adds a region learner peer.
-type AddLearnerPeer struct {
+// AddLearner is an OperatorStep that adds a region learner peer.
+type AddLearner struct {
 	ToStore, PeerID uint64
 }
 
-func (alp AddLearnerPeer) String() string {
-	return fmt.Sprintf("add learner peer %v on store %v", alp.PeerID, alp.ToStore)
+func (al AddLearner) String() string {
+	return fmt.Sprintf("add learner peer %v on store %v", al.PeerID, al.ToStore)
 }
 
 // IsFinish checks if current step is finished.
-func (alp AddLearnerPeer) IsFinish(region *core.RegionInfo) bool {
-	if p := region.GetStoreLearner(alp.ToStore); p != nil {
+func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
+	if p := region.GetStoreLearner(al.ToStore); p != nil {
 		return region.GetPendingLearner(p.GetId()) == nil
 	}
 	return false
 }
 
 // Influence calculates the store difference that current step make
-func (alp AddLearnerPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
-	to := opInfluence.GetStoreInfluence(alp.ToStore)
+func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+	to := opInfluence.GetStoreInfluence(al.ToStore)
 
 	to.RegionSize += int(region.ApproximateSize)
 	to.RegionCount++
@@ -119,7 +119,7 @@ func (plp PromoteLearnerPeer) String() string {
 
 // IsFinish checks if current step is finished.
 func (plp PromoteLearnerPeer) IsFinish(region *core.RegionInfo) bool {
-	if p := region.GetStorePeer(plp.ToStore); p != nil {
+	if p := region.GetStoreVoter(plp.ToStore); p != nil {
 		return p.GetId() == plp.PeerID
 	}
 	return false
@@ -324,7 +324,7 @@ func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInf
 	var st []OperatorStep
 	if cluster.IsEnableRaftLearner() {
 		st = []OperatorStep{
-			AddLearnerPeer{ToStore: newStore, PeerID: peerID},
+			AddLearner{ToStore: newStore, PeerID: peerID},
 			PromoteLearnerPeer{ToStore: newStore, PeerID: peerID},
 		}
 	} else {

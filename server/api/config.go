@@ -59,6 +59,11 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	err = json.Unmarshal(data, &config.LabelProperty)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	h.svr.SetScheduleConfig(config.Schedule)
 	h.svr.SetReplicationConfig(config.Replication)
 	h.rd.JSON(w, http.StatusOK, nil)

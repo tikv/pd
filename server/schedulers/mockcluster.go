@@ -301,6 +301,16 @@ func (mc *mockCluster) applyOperator(op *schedule.Operator) {
 					panic("Remove peer that doesn't exist")
 				}
 				region.RemoveStorePeer(s.FromStore)
+			case schedule.AddLearner:
+				if region.GetStorePeer(s.ToStore) != nil {
+					panic("Add learner that exists")
+				}
+				peer := &metapb.Peer{
+					Id:        s.PeerID,
+					StoreId:   s.ToStore,
+					IsLearner: true,
+				}
+				region.Peers = append(region.Peers, peer)
 			default:
 				panic("Unknown operator step")
 			}

@@ -65,7 +65,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 		var steps []OperatorStep
 		if r.cluster.IsEnableRaftLearner() {
 			steps = []OperatorStep{
-				AddLearnerPeer{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()},
+				AddLearner{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()},
 				PromoteLearnerPeer{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()},
 			}
 		} else {
