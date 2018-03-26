@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -55,6 +56,7 @@ const (
 )
 
 var (
+	mapLock     sync.RWMutex
 	diagnoseMap = diagnoseKV{
 		memberOneInstance:           [4]string{modMember, levelWarning, "only one PD instance is running", "please add PD instance"},
 		memberEvenInstance:          [4]string{modMember, levelMinor, "PD instances is even number", "the recommended number of PD's instances is odd"},
@@ -90,28 +92,11 @@ type Recommended struct {
 }
 
 func diagnosePD(key diagnoseType) *Recommended {
-	var d [4]string
-	switch key {
-	case memberOneInstance:
-		d = diagnoseMap[memberOneInstance]
-	case memberEvenInstance:
-		d = diagnoseMap[memberEvenInstance]
-	case memberLostPeers:
-		d = diagnoseMap[memberLostPeers]
-	case memberLostPeersMoreThanHalf:
-		d = diagnoseMap[memberLostPeersMoreThanHalf]
-	case memberLeaderChanged:
-		d = diagnoseMap[memberLeaderChanged]
-	case tikvCap70:
-		d = diagnoseMap[tikvCap70]
-	case tikvCap80:
-		d = diagnoseMap[tikvCap80]
-	case tikvCap90:
-		d = diagnoseMap[tikvCap90]
-	case tikvLostPeers:
-		d = diagnoseMap[tikvLostPeers]
-	case tikvLostPeersLongTime:
-		d = diagnoseMap[tikvLostPeersLongTime]
+	mapLock.RLock()
+	defer mapLock.RUnlock()
+	d, ok := diagnoseMap[key]
+	if !ok {
+		return &Recommended{}
 	}
 	return &Recommended{
 		Module:      d[0],

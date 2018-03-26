@@ -15,8 +15,9 @@ package api
 
 import (
 	"fmt"
-	"github.com/juju/errors"
 	"time"
+
+	"github.com/juju/errors"
 )
 
 const (
@@ -25,6 +26,7 @@ const (
 	etcdPeerStatsAPI = "/v2/stats/self"
 )
 
+//PeerStats show peer stats
 type PeerStats struct {
 	Name       string    `json:"name"`
 	ID         string    `json:"id"`
