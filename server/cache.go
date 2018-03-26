@@ -324,17 +324,17 @@ func (c *clusterInfo) getStoreLeaderCount(storeID uint64) int {
 }
 
 // RandLeaderRegion returns a random region that has leader on the store.
-func (c *clusterInfo) RandLeaderRegion(storeID uint64, ops ...core.RegionOption) *core.RegionInfo {
+func (c *clusterInfo) RandLeaderRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
-	return c.BasicCluster.RandLeaderRegion(storeID, ops...)
+	return c.BasicCluster.RandLeaderRegion(storeID, opts...)
 }
 
 // RandFollowerRegion returns a random region that has a follower on the store.
-func (c *clusterInfo) RandFollowerRegion(storeID uint64, ops ...core.RegionOption) *core.RegionInfo {
+func (c *clusterInfo) RandFollowerRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
-	return c.BasicCluster.RandFollowerRegion(storeID, ops...)
+	return c.BasicCluster.RandFollowerRegion(storeID, opts...)
 }
 
 // GetRegionStores returns all stores that contains the region's peer.

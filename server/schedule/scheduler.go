@@ -25,8 +25,8 @@ import (
 
 // Cluster provides an overview of a cluster's regions distribution.
 type Cluster interface {
-	RandFollowerRegion(storeID uint64, ops ...core.RegionOption) *core.RegionInfo
-	RandLeaderRegion(storeID uint64, ops ...core.RegionOption) *core.RegionInfo
+	RandFollowerRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo
+	RandLeaderRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo
 
 	GetStores() []*core.StoreInfo
 	GetStore(id uint64) *core.StoreInfo
