@@ -32,11 +32,6 @@ const (
 	backgroundJobInterval = time.Minute
 )
 
-// Error instances
-var (
-	ErrNotBootstrapped = errors.New("TiKV cluster is not bootstrapped, please start TiKV first")
-)
-
 // RaftCluster is used for cluster config management.
 // Raft cluster key format:
 // cluster 1 -> /1/raft, value is metapb.Cluster
@@ -269,6 +264,11 @@ func (c *RaftCluster) GetStore(storeID uint64) (*core.StoreInfo, error) {
 	return store, nil
 }
 
+// GetAdjacentRegions returns region's info that is adjacent with specific region id.
+func (c *RaftCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo) {
+	return c.cachedCluster.GetAdjacentRegions(region)
+}
+
 // UpdateStoreLabels updates a store's location labels.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel) error {
 	store := c.cachedCluster.GetStore(storeID)
@@ -434,6 +434,25 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
+func (c *RaftCluster) checkOperators() {
+	co := c.coordinator
+	for _, op := range co.getOperators() {
+		// after region is merged, it will not heartbeat anymore
+		// the operator of merged region will not timeout actively
+		if c.cachedCluster.GetRegion(op.RegionID()) == nil {
+			log.Debugf("remove operator %v cause region %d is merged", op, op.RegionID)
+			co.removeOperator(op)
+			continue
+		}
+
+		if op.IsTimeout() {
+			log.Infof("[region %v] operator timeout: %s", op.RegionID, op)
+			operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
+			co.removeOperator(op)
+		}
+	}
+}
+
 func (c *RaftCluster) storeIsEmpty(storeID uint64) bool {
 	cluster := c.cachedCluster
 	if cluster.getStoreRegionCount(storeID) > 0 {
@@ -495,6 +514,7 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 		case <-c.quit:
 			return
 		case <-ticker.C:
+			c.checkOperators()
 			c.checkStores()
 			c.collectMetrics()
 			c.coordinator.pruneHistory()

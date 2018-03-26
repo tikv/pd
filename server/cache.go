@@ -27,15 +27,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-var (
-	errRegionNotFound = func(regionID uint64) error {
-		return errors.Errorf("region %v not found", regionID)
-	}
-	errRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
-		return errors.Errorf("region is stale: region %v origin %v", region, origin)
-	}
-)
-
 type clusterInfo struct {
 	sync.RWMutex
 	*schedule.BasicCluster
@@ -227,6 +218,13 @@ func (c *clusterInfo) ScanRegions(startKey []byte, limit int) []*core.RegionInfo
 	c.RLock()
 	defer c.RUnlock()
 	return c.Regions.ScanRange(startKey, limit)
+}
+
+// GetAdjacentRegions returns region's info that is adjacent with specific region
+func (c *clusterInfo) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.BasicCluster.GetAdjacentRegions(region)
 }
 
 // GetRegion searches for a region by ID.
@@ -430,7 +428,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		o := origin.GetRegionEpoch()
 		// Region meta is stale, return an error.
 		if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
-			return errors.Trace(errRegionIsStale(region.Region, origin.Region))
+			return errors.Trace(ErrRegionIsStale(region.Region, origin.Region))
 		}
 		if r.GetVersion() > o.GetVersion() {
 			log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetId(), core.DiffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion())
@@ -559,6 +557,10 @@ func (c *clusterInfo) GetReplicaScheduleLimit() uint64 {
 	return c.opt.GetReplicaScheduleLimit(namespace.DefaultNamespace)
 }
 
+func (c *clusterInfo) GetMergeScheduleLimit() uint64 {
+	return c.opt.GetMergeScheduleLimit(namespace.DefaultNamespace)
+}
+
 func (c *clusterInfo) GetTolerantSizeRatio() float64 {
 	return c.opt.GetTolerantSizeRatio()
 }
@@ -569,6 +571,10 @@ func (c *clusterInfo) GetMaxSnapshotCount() uint64 {
 
 func (c *clusterInfo) GetMaxPendingPeerCount() uint64 {
 	return c.opt.GetMaxPendingPeerCount()
+}
+
+func (c *clusterInfo) GetMaxMergeRegionSize() uint64 {
+	return c.opt.GetMaxMergeRegionSize()
 }
 
 func (c *clusterInfo) GetMaxStoreDownTime() time.Duration {

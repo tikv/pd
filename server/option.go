@@ -84,6 +84,10 @@ func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
 	return o.load().MaxStoreDownTime.Duration
 }
 
+func (o *scheduleOption) GetMaxMergeRegionSize() uint64 {
+	return o.load().MaxMergeRegionSize
+}
+
 func (o *scheduleOption) GetLeaderScheduleLimit(name string) uint64 {
 	if n, ok := o.ns[name]; ok {
 		return n.GetLeaderScheduleLimit()
@@ -103,6 +107,13 @@ func (o *scheduleOption) GetReplicaScheduleLimit(name string) uint64 {
 		return n.GetReplicaScheduleLimit()
 	}
 	return o.load().ReplicaScheduleLimit
+}
+
+func (o *scheduleOption) GetMergeScheduleLimit(name string) uint64 {
+	if n, ok := o.ns[name]; ok {
+		return n.GetMergeScheduleLimit()
+	}
+	return o.load().MergeScheduleLimit
 }
 
 func (o *scheduleOption) GetTolerantSizeRatio() float64 {
@@ -301,17 +312,22 @@ func (n *namespaceOption) GetMaxReplicas() int {
 	return int(n.load().MaxReplicas)
 }
 
-// GetLeaderScheduleLimit returns the number of replicas for each region.
+// GetLeaderScheduleLimit returns the limit for leader schedule.
 func (n *namespaceOption) GetLeaderScheduleLimit() uint64 {
 	return n.load().LeaderScheduleLimit
 }
 
-// GetRegionScheduleLimit returns the number of replicas for each region.
+// GetRegionScheduleLimit returns the limit for region schedule.
 func (n *namespaceOption) GetRegionScheduleLimit() uint64 {
 	return n.load().RegionScheduleLimit
 }
 
-// GetReplicaScheduleLimit returns the number of replicas for each region.
+// GetReplicaScheduleLimit returns the limit for replica schedule.
 func (n *namespaceOption) GetReplicaScheduleLimit() uint64 {
 	return n.load().ReplicaScheduleLimit
+}
+
+// GetMergeScheduleLimit returns the limit for merge schedule.
+func (n *namespaceOption) GetMergeScheduleLimit() uint64 {
+	return n.load().MergeScheduleLimit
 }

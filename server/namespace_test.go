@@ -125,7 +125,7 @@ func (s *testNamespaceSuite) TestSchedulerBalanceRegion(c *C) {
 	s.tc.addLeaderRegion(1, 2)
 	s.classifier.setRegion(1, "ns1")
 	op := scheduleByNamespace(s.tc, s.classifier, sched, schedule.NewOpInfluence(nil, s.tc))
-	schedulers.CheckTransferPeer(c, op, schedule.OpBalance, 2, 1)
+	schedulers.CheckTransferPeer(c, op[0], schedule.OpBalance, 2, 1)
 
 	// If no more store in the namespace, balance stops.
 	s.tc.addLeaderRegion(1, 3)
@@ -164,7 +164,7 @@ func (s *testNamespaceSuite) TestSchedulerBalanceLeader(c *C) {
 	s.tc.addLeaderRegion(1, 2, 1)
 	s.classifier.setRegion(1, "ns1")
 	op := scheduleByNamespace(s.tc, s.classifier, sched, schedule.NewOpInfluence(nil, s.tc))
-	schedulers.CheckTransferLeader(c, op, schedule.OpBalance, 2, 1)
+	schedulers.CheckTransferLeader(c, op[0], schedule.OpBalance, 2, 1)
 
 	// If region is not in the correct namespace, it will not be balanced.
 	s.tc.addLeaderRegion(1, 4, 1)
@@ -228,6 +228,10 @@ func (c *mapClassifer) IsNamespaceExist(name string) bool {
 		}
 	}
 	return false
+}
+
+func (c *mapClassifer) AllowMerge(one *core.RegionInfo, other *core.RegionInfo) bool {
+	return c.GetRegionNamespace(one) == c.GetRegionNamespace(other)
 }
 
 func (c *mapClassifer) setStore(id uint64, namespace string) {

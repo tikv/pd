@@ -14,18 +14,34 @@
 package server
 
 import (
+	"bytes"
 	"strconv"
 	"time"
 
 	"github.com/juju/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	log "github.com/sirupsen/logrus"
 )
 
 var (
-	errNotBootstrapped  = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
-	errOperatorNotFound = errors.New("operator not found")
+	// ErrNotBootstrapped is error info for cluster not bootstrapped
+	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
+	// ErrOperatorNotFound is error info for operator not found
+	ErrOperatorNotFound = errors.New("operator not found")
+	// ErrAddOperator is error info for already have an operator when adding operator
+	ErrAddOperator = errors.New("failed to add operator, maybe already have one")
+	// ErrRegionNotAdjacent is error info for region not adjacent
+	ErrRegionNotAdjacent = errors.New("two regions are not adjacent")
+	// ErrRegionNotFound is error info for region not found
+	ErrRegionNotFound = func(regionID uint64) error {
+		return errors.Errorf("region %v not found", regionID)
+	}
+	// ErrRegionIsStale is error info for region is stale
+	ErrRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
+		return errors.Errorf("region is stale: region %v origin %v", region, origin)
+	}
 )
 
 // Handler is a helper to export methods to handle API/RPC requests.
@@ -41,7 +57,7 @@ func newHandler(s *Server) *Handler {
 func (h *Handler) getCoordinator() (*coordinator, error) {
 	cluster := h.s.GetRaftCluster()
 	if cluster == nil {
-		return nil, errors.Trace(errNotBootstrapped)
+		return nil, errors.Trace(ErrNotBootstrapped)
 	}
 	return cluster.coordinator, nil
 }
@@ -59,7 +75,7 @@ func (h *Handler) GetSchedulers() ([]string, error) {
 func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 	cluster := h.s.GetRaftCluster()
 	if cluster == nil {
-		return nil, errors.Trace(errNotBootstrapped)
+		return nil, errors.Trace(ErrNotBootstrapped)
 	}
 	storeMetas := cluster.GetStores()
 	stores := make([]*core.StoreInfo, 0, len(storeMetas))
@@ -179,6 +195,11 @@ func (h *Handler) AddShuffleRegionScheduler() error {
 	return h.AddScheduler("shuffle-region")
 }
 
+// AddRandomMergeScheduler adds a random-merge-scheduler.
+func (h *Handler) AddRandomMergeScheduler() error {
+	return h.AddScheduler("random-merge")
+}
+
 // GetOperator returns the region operator.
 func (h *Handler) GetOperator(regionID uint64) (*schedule.Operator, error) {
 	c, err := h.getCoordinator()
@@ -188,7 +209,7 @@ func (h *Handler) GetOperator(regionID uint64) (*schedule.Operator, error) {
 
 	op := c.getOperator(regionID)
 	if op == nil {
-		return nil, errOperatorNotFound
+		return nil, ErrOperatorNotFound
 	}
 
 	return op, nil
@@ -203,7 +224,7 @@ func (h *Handler) RemoveOperator(regionID uint64) error {
 
 	op := c.getOperator(regionID)
 	if op == nil {
-		return errOperatorNotFound
+		return ErrOperatorNotFound
 	}
 
 	c.removeOperator(op)
@@ -267,7 +288,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 
 	region := c.cluster.GetRegion(regionID)
 	if region == nil {
-		return errRegionNotFound(regionID)
+		return ErrRegionNotFound(regionID)
 	}
 	newLeader := region.GetStoreVoter(storeID)
 	if newLeader == nil {
@@ -289,7 +310,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 
 	region := c.cluster.GetRegion(regionID)
 	if region == nil {
-		return errRegionNotFound(regionID)
+		return ErrRegionNotFound(regionID)
 	}
 
 	var steps []schedule.OperatorStep
@@ -338,7 +359,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 
 	region := c.cluster.GetRegion(regionID)
 	if region == nil {
-		return errRegionNotFound(regionID)
+		return ErrRegionNotFound(regionID)
 	}
 
 	oldPeer := region.GetStorePeer(fromStoreID)
@@ -368,7 +389,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 
 	region := c.cluster.GetRegion(regionID)
 	if region == nil {
-		return errRegionNotFound(regionID)
+		return ErrRegionNotFound(regionID)
 	}
 
 	if region.GetStorePeer(toStoreID) != nil {
@@ -408,7 +429,7 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 
 	region := c.cluster.GetRegion(regionID)
 	if region == nil {
-		return errRegionNotFound(regionID)
+		return ErrRegionNotFound(regionID)
 	}
 
 	if region.GetStorePeer(fromStoreID) == nil {
@@ -420,11 +441,44 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 	return nil
 }
 
+// AddMergeRegionOperator adds an operator to merge region.
+func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	region := c.cluster.GetRegion(regionID)
+	if region == nil {
+		return ErrRegionNotFound(regionID)
+	}
+
+	target := c.cluster.GetRegion(targetID)
+	if target == nil {
+		return ErrRegionNotFound(targetID)
+	}
+
+	// for the case first region (start key is nil) with the last region (end key is nil) but not adjacent
+	if (bytes.Compare(region.StartKey, target.EndKey) != 0 || len(region.StartKey) == 0) &&
+		(bytes.Compare(region.EndKey, target.StartKey) != 0 || len(region.EndKey) == 0) {
+		return ErrRegionNotAdjacent
+	}
+
+	op1, op2, err := schedule.CreateMergeRegionOperator("merge-region", c.cluster, region, target, schedule.OpAdmin)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if ok := c.addOperators(op1, op2); !ok {
+		return errors.Trace(ErrAddOperator)
+	}
+	return nil
+}
+
 // GetDownPeerRegions gets the region with down peer.
 func (h *Handler) GetDownPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, errNotBootstrapped
+		return nil, ErrNotBootstrapped
 	}
 	return c.cachedCluster.GetRegionStatsByType(downPeer), nil
 }
@@ -433,7 +487,7 @@ func (h *Handler) GetDownPeerRegions() ([]*core.RegionInfo, error) {
 func (h *Handler) GetExtraPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, errNotBootstrapped
+		return nil, ErrNotBootstrapped
 	}
 	return c.cachedCluster.GetRegionStatsByType(extraPeer), nil
 }
@@ -442,7 +496,7 @@ func (h *Handler) GetExtraPeerRegions() ([]*core.RegionInfo, error) {
 func (h *Handler) GetMissPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, errNotBootstrapped
+		return nil, ErrNotBootstrapped
 	}
 	return c.cachedCluster.GetRegionStatsByType(missPeer), nil
 }
@@ -451,7 +505,7 @@ func (h *Handler) GetMissPeerRegions() ([]*core.RegionInfo, error) {
 func (h *Handler) GetPendingPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, errNotBootstrapped
+		return nil, ErrNotBootstrapped
 	}
 	return c.cachedCluster.GetRegionStatsByType(pendingPeer), nil
 }
@@ -478,7 +532,7 @@ func (h *Handler) GetDownLearnerRegions() ([]*core.RegionInfo, error) {
 func (h *Handler) GetIncorrectNamespaceRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, errNotBootstrapped
+		return nil, ErrNotBootstrapped
 	}
 	return c.cachedCluster.GetRegionStatsByType(incorrectNamespace), nil
 }

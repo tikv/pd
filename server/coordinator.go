@@ -61,6 +61,7 @@ type coordinator struct {
 	replicaChecker   *schedule.ReplicaChecker
 	regionScatterer  *schedule.RegionScatterer
 	namespaceChecker *schedule.NamespaceChecker
+	mergeChecker     *schedule.MergeChecker
 	operators        map[uint64]*schedule.Operator
 	schedulers       map[string]*scheduleController
 	classifier       namespace.Classifier
@@ -78,6 +79,7 @@ func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifie
 		replicaChecker:   schedule.NewReplicaChecker(cluster, classifier),
 		regionScatterer:  schedule.NewRegionScatterer(cluster, classifier),
 		namespaceChecker: schedule.NewNamespaceChecker(cluster, classifier),
+		mergeChecker:     schedule.NewMergeChecker(cluster, classifier),
 		operators:        make(map[uint64]*schedule.Operator),
 		schedulers:       make(map[string]*scheduleController),
 		classifier:       classifier,
@@ -141,10 +143,6 @@ func (c *coordinator) patrolRegions() {
 			return
 		}
 
-		if c.limiter.OperatorCount(schedule.OpReplica) >= c.cluster.GetReplicaScheduleLimit() {
-			continue
-		}
-
 		regions := c.cluster.ScanRegions(key, patrolScanRegionLimit)
 		if len(regions) == 0 {
 			// reset scan key.
@@ -159,10 +157,18 @@ func (c *coordinator) patrolRegions() {
 				c.addOperator(op)
 				break
 			}
-
-			if op := c.replicaChecker.Check(region); op != nil {
-				c.addOperator(op)
-				break
+			if c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+				if op := c.replicaChecker.Check(region); op != nil {
+					c.addOperator(op)
+					break
+				}
+			}
+			if c.limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
+				if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
+					// make sure two operators can add successfully altogether
+					c.addOperators(op1, op2)
+					break
+				}
 			}
 		}
 		// update label level isolation statistics.
@@ -395,7 +401,11 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			}
 			opInfluence := schedule.NewOpInfluence(c.getOperators(), c.cluster)
 			if op := s.Schedule(c.cluster, opInfluence); op != nil {
-				c.addOperator(op)
+				if len(op) == 1 {
+					c.addOperator(op[0])
+				} else {
+					c.addOperators(op...)
+				}
 			}
 
 		case <-s.Ctx().Done():
@@ -405,9 +415,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 	}
 }
 
-func (c *coordinator) addOperator(op *schedule.Operator) bool {
-	c.Lock()
-	defer c.Unlock()
+func (c *coordinator) addOperatorLocked(op *schedule.Operator) bool {
 	regionID := op.RegionID()
 
 	log.Infof("[region %v] add operator: %s", regionID, op)
@@ -434,6 +442,30 @@ func (c *coordinator) addOperator(op *schedule.Operator) bool {
 	}
 
 	operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
+	return true
+}
+
+func (c *coordinator) addOperator(op *schedule.Operator) bool {
+	c.Lock()
+	defer c.Unlock()
+
+	return c.addOperatorLocked(op)
+}
+
+func (c *coordinator) addOperators(ops ...*schedule.Operator) bool {
+	c.Lock()
+	defer c.Unlock()
+
+	for _, op := range ops {
+		if old := c.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
+			log.Infof("[region %v] cancel add operators, old: %s", op.RegionID(), old)
+			return false
+		}
+	}
+	for _, op := range ops {
+		c.addOperatorLocked(op)
+	}
+
 	return true
 }
 
@@ -565,6 +597,16 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 			},
 		}
 		c.hbStreams.sendMsg(region, cmd)
+	case schedule.MergeRegion:
+		if s.IsPassive {
+			return
+		}
+		cmd := &pdpb.RegionHeartbeatResponse{
+			Merge: &pdpb.Merge{
+				Target: s.ToRegion,
+			},
+		}
+		c.hbStreams.sendMsg(region, cmd)
 	default:
 		log.Errorf("unknown operatorStep: %v", step)
 	}
@@ -601,7 +643,7 @@ func (s *scheduleController) Stop() {
 	s.cancel()
 }
 
-func (s *scheduleController) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) *schedule.Operator {
+func (s *scheduleController) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
 		// If we have schedule, reset interval to the minimal interval.
 		if op := scheduleByNamespace(cluster, s.classifier, s.Scheduler, opInfluence); op != nil {

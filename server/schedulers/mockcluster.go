@@ -335,6 +335,10 @@ func (mc *mockCluster) GetReplicaScheduleLimit() uint64 {
 	return mc.MockSchedulerOptions.GetReplicaScheduleLimit(namespace.DefaultNamespace)
 }
 
+func (mc *mockCluster) GetMergeScheduleLimit() uint64 {
+	return mc.MockSchedulerOptions.GetMergeScheduleLimit(namespace.DefaultNamespace)
+}
+
 func (mc *mockCluster) GetMaxReplicas() int {
 	return mc.MockSchedulerOptions.GetMaxReplicas(namespace.DefaultNamespace)
 }
@@ -355,9 +359,11 @@ const (
 	defaultMaxSnapshotCount     = 3
 	defaultMaxPendingPeerCount  = 16
 	defaultMaxStoreDownTime     = 30 * time.Minute
+	defaultMaxMergeRegionSize   = 0
 	defaultLeaderScheduleLimit  = 64
 	defaultRegionScheduleLimit  = 12
 	defaultReplicaScheduleLimit = 32
+	defaultMergeScheduleLimit   = 20
 	defaultTolerantSizeRatio    = 2.5
 )
 
@@ -367,10 +373,12 @@ type MockSchedulerOptions struct {
 	RegionScheduleLimit   uint64
 	LeaderScheduleLimit   uint64
 	ReplicaScheduleLimit  uint64
+	MergeScheduleLimit    uint64
 	MaxSnapshotCount      uint64
 	MaxPendingPeerCount   uint64
 	MaxStoreDownTime      time.Duration
 	MaxReplicas           int
+	MaxMergeRegionSize    uint64
 	LocationLabels        []string
 	HotRegionLowThreshold int
 	TolerantSizeRatio     float64
@@ -383,11 +391,13 @@ func newMockSchedulerOptions() *MockSchedulerOptions {
 	mso.RegionScheduleLimit = defaultRegionScheduleLimit
 	mso.LeaderScheduleLimit = defaultLeaderScheduleLimit
 	mso.ReplicaScheduleLimit = defaultReplicaScheduleLimit
+	mso.MergeScheduleLimit = defaultMergeScheduleLimit
 	mso.MaxSnapshotCount = defaultMaxSnapshotCount
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
 	mso.HotRegionLowThreshold = schedule.HotRegionLowThreshold
 	mso.MaxPendingPeerCount = defaultMaxPendingPeerCount
+	mso.MaxMergeRegionSize = defaultMaxMergeRegionSize
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
 	return mso
 }
@@ -405,6 +415,11 @@ func (mso *MockSchedulerOptions) GetRegionScheduleLimit(name string) uint64 {
 // GetReplicaScheduleLimit mock method
 func (mso *MockSchedulerOptions) GetReplicaScheduleLimit(name string) uint64 {
 	return mso.ReplicaScheduleLimit
+}
+
+// GetMergeScheduleLimit mock method
+func (mso *MockSchedulerOptions) GetMergeScheduleLimit(name string) uint64 {
+	return mso.MergeScheduleLimit
 }
 
 // GetMaxSnapshotCount mock method
@@ -425,6 +440,11 @@ func (mso *MockSchedulerOptions) GetMaxStoreDownTime() time.Duration {
 // GetMaxReplicas mock method
 func (mso *MockSchedulerOptions) GetMaxReplicas(name string) int {
 	return mso.MaxReplicas
+}
+
+// GetMaxMergeRegionSize mock method
+func (mso *MockSchedulerOptions) GetMaxMergeRegionSize() uint64 {
+	return mso.MaxMergeRegionSize
 }
 
 // GetLocationLabels mock method
