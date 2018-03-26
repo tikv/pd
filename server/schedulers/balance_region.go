@@ -92,9 +92,9 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 	balanceRegionCounter.WithLabelValues("source_store", sourceLabel).Inc()
 
 	for i := 0; i < balanceRegionRetryLimit; i++ {
-		region := cluster.RandFollowerRegion(source.GetId())
+		region := cluster.RandFollowerRegion(source.GetId(), core.HealthRegion())
 		if region == nil {
-			region = cluster.RandLeaderRegion(source.GetId())
+			region = cluster.RandLeaderRegion(source.GetId(), core.HealthRegion())
 		}
 		if region == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()

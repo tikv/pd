@@ -16,6 +16,7 @@ package schedulers
 import (
 	"math/rand"
 
+	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
 
@@ -65,7 +66,7 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, opInfluence sc
 		schedulerCounter.WithLabelValues(s.GetName(), "no_store").Inc()
 		return nil
 	}
-	region := cluster.RandLeaderRegion(store.GetId())
+	region := cluster.RandLeaderRegion(store.GetId(), core.HealthRegion())
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
 		return nil

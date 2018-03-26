@@ -146,13 +146,13 @@ func (bc *BasicCluster) UnblockStore(storeID uint64) {
 }
 
 // RandFollowerRegion returns a random region that has a follower on the store.
-func (bc *BasicCluster) RandFollowerRegion(storeID uint64) *core.RegionInfo {
-	return bc.Regions.RandFollowerRegion(storeID)
+func (bc *BasicCluster) RandFollowerRegion(storeID uint64, ops ...core.RegionOption) *core.RegionInfo {
+	return bc.Regions.RandFollowerRegion(storeID, ops...)
 }
 
 // RandLeaderRegion returns a random region that has leader on the store.
-func (bc *BasicCluster) RandLeaderRegion(storeID uint64) *core.RegionInfo {
-	return bc.Regions.RandLeaderRegion(storeID)
+func (bc *BasicCluster) RandLeaderRegion(storeID uint64, ops ...core.RegionOption) *core.RegionInfo {
+	return bc.Regions.RandLeaderRegion(storeID, ops...)
 }
 
 // IsRegionHot checks if a region is in hot state.
