@@ -279,10 +279,10 @@ func (c *clusterInfo) getRegions() []*core.RegionInfo {
 	return c.Regions.GetRegions()
 }
 
-func (c *clusterInfo) randomRegion(ops ...core.RegionOption) *core.RegionInfo {
+func (c *clusterInfo) randomRegion(opts ...core.RegionOption) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
-	return c.Regions.RandRegion(ops...)
+	return c.Regions.RandRegion(opts...)
 }
 
 func (c *clusterInfo) getMetaRegions() []*metapb.Region {
