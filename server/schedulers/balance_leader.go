@@ -116,7 +116,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 }
 
 func (l *balanceLeaderScheduler) transferLeaderOut(source *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
-	region := cluster.RandLeaderRegion(source.GetId(), true)
+	region := cluster.RandLeaderRegion(source.GetId(), core.HealthRegion())
 	if region == nil {
 		log.Debugf("[%s] store%d has no leader", l.GetName(), source.GetId())
 		schedulerCounter.WithLabelValues(l.GetName(), "no_leader_region").Inc()
@@ -132,7 +132,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(source *core.StoreInfo, clust
 }
 
 func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
-	region := cluster.RandFollowerRegion(target.GetId(), true)
+	region := cluster.RandFollowerRegion(target.GetId(), core.HealthRegion())
 	if region == nil {
 		log.Debugf("[%s] store%d has no follower", l.GetName(), target.GetId())
 		schedulerCounter.WithLabelValues(l.GetName(), "no_follower_region").Inc()

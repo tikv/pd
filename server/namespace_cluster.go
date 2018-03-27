@@ -60,9 +60,9 @@ func (c *namespaceCluster) checkRegion(region *core.RegionInfo) bool {
 const randRegionMaxRetry = 10
 
 // RandFollowerRegion returns a random region that has a follower on the store.
-func (c *namespaceCluster) RandFollowerRegion(storeID uint64, skipUnhealth bool) *core.RegionInfo {
+func (c *namespaceCluster) RandFollowerRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
 	for i := 0; i < randRegionMaxRetry; i++ {
-		r := c.Cluster.RandFollowerRegion(storeID, skipUnhealth)
+		r := c.Cluster.RandFollowerRegion(storeID, opts...)
 		if r == nil {
 			return nil
 		}
@@ -74,9 +74,9 @@ func (c *namespaceCluster) RandFollowerRegion(storeID uint64, skipUnhealth bool)
 }
 
 // RandLeaderRegion returns a random region that has leader on the store.
-func (c *namespaceCluster) RandLeaderRegion(storeID uint64, skipUnhealth bool) *core.RegionInfo {
+func (c *namespaceCluster) RandLeaderRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
 	for i := 0; i < randRegionMaxRetry; i++ {
-		r := c.Cluster.RandLeaderRegion(storeID, skipUnhealth)
+		r := c.Cluster.RandLeaderRegion(storeID, opts...)
 		if r == nil {
 			return nil
 		}

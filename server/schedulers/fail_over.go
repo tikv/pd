@@ -86,13 +86,13 @@ func (f *failOverScheduler) Schedule(cluster schedule.Cluster, opInfluence sched
 }
 
 func (f *failOverScheduler) handleDownStore(cluster schedule.Cluster, store *core.StoreInfo) *schedule.Operator {
-	region := cluster.RandLeaderRegion(store.GetId(), false)
+	region := cluster.RandLeaderRegion(store.GetId())
 	if region != nil {
 		log.Warnf("[region %d] Down Store [%v] have leader region, Maybe have network problem.", region.GetId(), store)
 		schedulerCounter.WithLabelValues(f.GetName(), "down_leader").Inc()
 		return nil
 	}
-	region = cluster.RandFollowerRegion(store.GetId(), false)
+	region = cluster.RandFollowerRegion(store.GetId())
 	if region == nil {
 		return nil
 	}
@@ -118,9 +118,9 @@ func (f *failOverScheduler) handleOfflineStore(cluster schedule.Cluster, store *
 	if op != nil {
 		return op
 	}
-	region := cluster.RandLeaderRegion(store.GetId(), false)
+	region := cluster.RandLeaderRegion(store.GetId())
 	if region == nil {
-		region = cluster.RandFollowerRegion(store.GetId(), false)
+		region = cluster.RandFollowerRegion(store.GetId())
 	}
 	if region == nil {
 		schedulerCounter.WithLabelValues(f.GetName(), "no_offine_region").Inc()

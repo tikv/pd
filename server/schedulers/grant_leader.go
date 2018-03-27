@@ -77,7 +77,7 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 
 func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	region := cluster.RandFollowerRegion(s.storeID, true)
+	region := cluster.RandFollowerRegion(s.storeID, core.HealthRegion())
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_follower").Inc()
 		return nil

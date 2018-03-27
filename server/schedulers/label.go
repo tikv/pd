@@ -70,7 +70,7 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule
 	}
 	log.Debugf("label scheduler reject leader store list: %v", rejectLeaderStores)
 	for id := range rejectLeaderStores {
-		if region := cluster.RandLeaderRegion(id, true); region != nil {
+		if region := cluster.RandLeaderRegion(id, core.HealthRegion()); region != nil {
 			log.Debugf("label scheduler selects region %d to transfer leader", region.GetId())
 			target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region))
 			if target == nil {

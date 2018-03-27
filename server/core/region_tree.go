@@ -26,12 +26,11 @@ type regionItem struct {
 	region *metapb.Region
 }
 
-// Less returns true if the region start key is greater than the other.
-// So we will sort the region with start key reversely.
+// Less returns true if the region start key is less than the other.
 func (r *regionItem) Less(other btree.Item) bool {
 	left := r.region.GetStartKey()
 	right := other.(*regionItem).region.GetStartKey()
-	return bytes.Compare(left, right) > 0
+	return bytes.Compare(left, right) < 0
 }
 
 func (r *regionItem) Contains(key []byte) bool {
@@ -63,7 +62,7 @@ func (t *regionTree) length() int {
 func (t *regionTree) update(region *metapb.Region) []*metapb.Region {
 	item := &regionItem{region: region}
 
-	// note that find() gets the first item equals or greater to the region
+	// note that find() gets the last item that is less or equal than the region.
 	// in the case: |_______a_______|_____b_____|___c___|
 	// new region is     |______d______|
 	// find() will return regionItem of region_a
@@ -75,7 +74,7 @@ func (t *regionTree) update(region *metapb.Region) []*metapb.Region {
 	}
 
 	var overlaps []*metapb.Region
-	t.tree.DescendLessOrEqual(result, func(i btree.Item) bool {
+	t.tree.AscendGreaterOrEqual(result, func(i btree.Item) bool {
 		over := i.(*regionItem)
 		if len(region.EndKey) > 0 && bytes.Compare(region.EndKey, over.region.StartKey) <= 0 {
 			return false
@@ -116,12 +115,13 @@ func (t *regionTree) search(regionKey []byte) *metapb.Region {
 	return result.region
 }
 
-// This is a helper function to find an item.
+// find is a helper function to find an item that contains the regions start
+// key.
 func (t *regionTree) find(region *metapb.Region) *regionItem {
 	item := &regionItem{region: region}
 
 	var result *regionItem
-	t.tree.AscendGreaterOrEqual(item, func(i btree.Item) bool {
+	t.tree.DescendLessOrEqual(item, func(i btree.Item) bool {
 		result = i.(*regionItem)
 		return false
 	})
@@ -135,7 +135,7 @@ func (t *regionTree) find(region *metapb.Region) *regionItem {
 
 func (t *regionTree) scanRange(startKey []byte, f func(*metapb.Region) bool) {
 	startItem := &regionItem{region: &metapb.Region{StartKey: startKey}}
-	t.tree.DescendLessOrEqual(startItem, func(item btree.Item) bool {
+	t.tree.AscendGreaterOrEqual(startItem, func(item btree.Item) bool {
 		return f(item.(*regionItem).region)
 	})
 }
@@ -143,15 +143,14 @@ func (t *regionTree) scanRange(startKey []byte, f func(*metapb.Region) bool) {
 func (t *regionTree) getAdjacentRegions(region *metapb.Region) (*regionItem, *regionItem) {
 	item := &regionItem{region: &metapb.Region{StartKey: region.StartKey}}
 	var prev, next *regionItem
-	// note that the item store in region_tree is in reversed order
-	t.tree.DescendLessOrEqual(item, func(i btree.Item) bool {
+	t.tree.AscendGreaterOrEqual(item, func(i btree.Item) bool {
 		if bytes.Compare(item.region.StartKey, i.(*regionItem).region.StartKey) == 0 {
 			return true
 		}
 		next = i.(*regionItem)
 		return false
 	})
-	t.tree.AscendGreaterOrEqual(item, func(i btree.Item) bool {
+	t.tree.DescendLessOrEqual(item, func(i btree.Item) bool {
 		if bytes.Compare(item.region.StartKey, i.(*regionItem).region.StartKey) == 0 {
 			return true
 		}
