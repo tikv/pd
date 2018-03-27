@@ -47,6 +47,7 @@ func getEtcdPeerStats(etcdClientURL string) (*PeerStats, error) {
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
+	defer resp.Body.Close()
 	if err := readJSON(resp.Body, ps); err != nil {
 		return nil, errors.Trace(err)
 	}
