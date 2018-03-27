@@ -15,6 +15,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
@@ -24,10 +25,9 @@ import (
 )
 
 type diagnoseType int
-type diagnoseKV map[diagnoseType]Recommended
 
-//Recommended return detail
-type Recommended struct {
+// Recommendation return detail
+type Recommendation struct {
 	Module      string `json:"module"`
 	Level       string `json:"level"`
 	Description string `json:"description"`
@@ -35,7 +35,7 @@ type Recommended struct {
 }
 
 const (
-	//analyze level
+	// analyze levels
 	levelNormal   = "Normal"
 	levelWarning  = "Warning"
 	levelMinor    = "Minor"
@@ -43,12 +43,12 @@ const (
 	levelCritical = "Critical"
 	levelFatal    = "Fatal"
 
-	//analyze module
+	// analyze module
 	modMember   = "member"
 	modTiKV     = "TiKV"
 	modReplica  = "Replic"
 	modSchedule = "Schedule"
-	modDefault  = "indefinite"
+	modDefault  = "Default"
 
 	memberOneInstance diagnoseType = iota
 	memberEvenInstance
@@ -63,17 +63,17 @@ const (
 )
 
 var (
-	diagnoseMap = diagnoseKV{
-		memberOneInstance:           Recommended{modMember, levelWarning, "only one PD instance is running", "please add PD instance"},
-		memberEvenInstance:          Recommended{modMember, levelMinor, "PD instances is even number", "the recommended number of PD's instances is odd"},
-		memberLostPeers:             Recommended{modMember, levelMajor, "some PD instances is down", "please check host load and traffic"},
-		memberLostPeersMoreThanHalf: Recommended{modMember, levelCritical, "more than half PD instances is down", "please check host load and traffic"},
-		memberLeaderChanged:         Recommended{modMember, levelMinor, "PD cluster leader is changed", "please check host load and traffic"},
-		tikvCap70:                   Recommended{modTiKV, levelWarning, "some TiKV stroage used more than 70%", "plase add TiKV node"},
-		tikvCap80:                   Recommended{modTiKV, levelMinor, "some TiKV stroage used more than 80%", "plase add TiKV node"},
-		tikvCap90:                   Recommended{modTiKV, levelMajor, "some TiKV stroage used more than 90%", "plase add TiKV node"},
-		tikvLostPeers:               Recommended{modTiKV, levelWarning, "some TiKV lost connect", "plase check network"},
-		tikvLostPeersLongTime:       Recommended{modTiKV, levelMajor, "some TiKV lost connect more than 1h", "plase check network"},
+	diagnoseMap = map[diagnoseType]Recommendation{
+		memberOneInstance:           {modMember, levelWarning, "only one PD instance is running.", "please add PD instance."},
+		memberEvenInstance:          {modMember, levelMinor, "PD instances is even number.", "the recommended number of PD's instances is odd."},
+		memberLostPeers:             {modMember, levelMajor, "some PD instances is down.", "please check host load and traffic."},
+		memberLostPeersMoreThanHalf: {modMember, levelCritical, "more than half PD instances is down.", "please check host load and traffic."},
+		memberLeaderChanged:         {modMember, levelMinor, "PD cluster leader is changed.", "please check host load and traffic."},
+		tikvCap70:                   {modTiKV, levelWarning, "some TiKV stroage used more than 70%.", "plase add TiKV node."},
+		tikvCap80:                   {modTiKV, levelMinor, "some TiKV stroage used more than 80%.", "plase add TiKV node."},
+		tikvCap90:                   {modTiKV, levelMajor, "some TiKV stroage used more than 90%.", "plase add TiKV node."},
+		tikvLostPeers:               {modTiKV, levelWarning, "some TiKV lost connect.", "plase check network."},
+		tikvLostPeersLongTime:       {modTiKV, levelMajor, "some TiKV lost connect more than 1h.", "plase check network."},
 	}
 )
 
@@ -89,65 +89,81 @@ func newDiagnoseHandler(svr *server.Server, rd *render.Render) *diagnoseHandler 
 	}
 }
 
-func diagnosePD(key diagnoseType) *Recommended {
+func diagnosePD(key diagnoseType, descAdd, instAdd string) *Recommendation {
 	d, ok := diagnoseMap[key]
 	if !ok {
-		return &Recommended{}
+		return &Recommendation{
+			Module:      modDefault,
+			Description: descAdd,
+			Instruction: instAdd,
+		}
+	}
+	if descAdd != "" {
+		d.Description = fmt.Sprintf("%s %s", d.Description, descAdd)
+	}
+	if instAdd != "" {
+		d.Instruction = fmt.Sprintf("%s %s", d.Instruction, instAdd)
 	}
 	return &d
 }
 
-func (d *diagnoseHandler) membersDiagnose(rdd *[]*Recommended) error {
-	var lenMembers, lostMembers int
-	var changedLeaderLess1Min bool
+func (d *diagnoseHandler) membersDiagnose(rdd *[]*Recommendation) error {
+	var lostMemberIDs, runningMemberIDs []uint64
+	var newLeaderID uint64
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: d.svr.ClusterID()}}
 	members, err := d.svr.GetMembers(context.Background(), req)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	lenMembers = len(members.Members)
+	lenMembers := len(members.Members)
 	if lenMembers > 0 {
 		for _, m := range members.Members {
 			pm, err := getEtcdPeerStats(m.ClientUrls[0])
 			if err != nil {
-				//get peer etcd failed
-				lostMembers++
+				// get peer etcd failed
+				lostMemberIDs = append(lostMemberIDs, m.MemberId)
 				continue
 			}
-			if time.Now().Sub(pm.LeaderInfo.StartTime) < time.Duration(3*time.Minute) {
-				changedLeaderLess1Min = true
+			runningMemberIDs = append(runningMemberIDs, m.MemberId)
+			if time.Since(pm.LeaderInfo.StartTime) < time.Duration(time.Minute) {
+				newLeaderID = m.MemberId
 			}
 		}
 	} else {
 		return errors.Errorf("get PD member error")
 	}
-	if changedLeaderLess1Min {
-		*rdd = append(*rdd, diagnosePD(memberLeaderChanged))
+	lenLostMembers := len(lostMemberIDs)
+	if newLeaderID != 0 {
+		*rdd = append(*rdd, diagnosePD(memberLeaderChanged, fmt.Sprintf("new leader %d", newLeaderID), ""))
 	}
-	if lenMembers-lostMembers == 1 {
+	if len(runningMemberIDs) == 1 {
 		// only one pd running
-		*rdd = append(*rdd, diagnosePD(memberOneInstance))
+		*rdd = append(*rdd, diagnosePD(memberOneInstance, fmt.Sprintf("running PD member ID %d", runningMemberIDs[0]), ""))
 	}
-	if lostMembers > 0 {
-		// some pd can not connect
-		*rdd = append(*rdd, diagnosePD(memberLostPeers))
+	if lenLostMembers > 0 {
+		// some pds can not connect
+		stringID := "lost members ID "
+		for _, m := range lostMemberIDs {
+			stringID = fmt.Sprintf("%s %d,", stringID, m)
+		}
+		*rdd = append(*rdd, diagnosePD(memberLostPeers, stringID, ""))
 	}
-	if (lenMembers-lostMembers)%2 == 0 {
+	if len(runningMemberIDs)%2 == 0 {
 		// alived pd numbers is even
-		*rdd = append(*rdd, diagnosePD(memberEvenInstance))
+		*rdd = append(*rdd, diagnosePD(memberEvenInstance, "", ""))
 	}
-	if float64(lenMembers)/2 < float64(lostMembers) {
-		*rdd = append(*rdd, diagnosePD(memberLostPeersMoreThanHalf))
+	if float64(lenMembers)/2 < float64(lenLostMembers) {
+		*rdd = append(*rdd, diagnosePD(memberLostPeersMoreThanHalf, "", ""))
 	}
 	return nil
 }
 
-func (d *diagnoseHandler) tikvDiagnose(rdd *[]*Recommended) error {
+func (d *diagnoseHandler) tikvDiagnose(rdd *[]*Recommendation) error {
 	return nil
 }
 
 func (d *diagnoseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	rdd := []*Recommended{}
+	rdd := []*Recommendation{}
 	if err := d.membersDiagnose(&rdd); err != nil {
 		d.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

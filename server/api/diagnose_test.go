@@ -33,7 +33,7 @@ func (s *testDiagnoseAPISuite) SetUpSuite(c *C) {
 }
 
 func checkDiagnoseResponse(c *C, body []byte) {
-	got := []Recommended{}
+	got := []Recommendation{}
 	json.Unmarshal(body, &got)
 	for _, r := range got {
 		c.Assert(len(r.Module) != 0, IsTrue)
