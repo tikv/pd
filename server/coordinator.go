@@ -607,6 +607,11 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 			},
 		}
 		c.hbStreams.sendMsg(region, cmd)
+	case schedule.SplitRegion:
+		cmd := &pdpb.RegionHeartbeatResponse{
+			SplitRegion: &pdpb.SplitRegion{},
+		}
+		c.hbStreams.sendMsg(region, cmd)
 	default:
 		log.Errorf("unknown operatorStep: %v", step)
 	}

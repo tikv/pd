@@ -34,9 +34,9 @@ func scheduleRemovePeer(cluster schedule.Cluster, schedulerName string, s schedu
 		return nil, nil
 	}
 
-	region := cluster.RandFollowerRegion(source.GetId())
+	region := cluster.RandFollowerRegion(source.GetId(), core.HealthRegion())
 	if region == nil {
-		region = cluster.RandLeaderRegion(source.GetId())
+		region = cluster.RandLeaderRegion(source.GetId(), core.HealthRegion())
 	}
 	if region == nil {
 		schedulerCounter.WithLabelValues(schedulerName, "no_region").Inc()

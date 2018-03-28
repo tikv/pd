@@ -279,6 +279,8 @@ func (h *Handler) GetHistory(start time.Time) ([]schedule.OperatorHistory, error
 	return c.getHistory(start), nil
 }
 
+var errAddOperator = errors.New("failed to add operator, maybe already have one")
+
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.
 func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) error {
 	c, err := h.getCoordinator()
@@ -297,7 +299,9 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
 	op := schedule.NewOperator("adminTransferLeader", regionID, schedule.OpAdmin|schedule.OpLeader, step)
-	c.addOperator(op)
+	if ok := c.addOperator(op); !ok {
+		return errors.Trace(errAddOperator)
+	}
 	return nil
 }
 
@@ -346,7 +350,9 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 	}
 
 	op := schedule.NewOperator("adminMoveRegion", regionID, schedule.OpAdmin|schedule.OpRegion, steps...)
-	c.addOperator(op)
+	if ok := c.addOperator(op); !ok {
+		return errors.Trace(errAddOperator)
+	}
 	return nil
 }
 
@@ -376,7 +382,9 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 	}
 
 	op := schedule.CreateMovePeerOperator("adminMovePeer", c.cluster, region, schedule.OpAdmin, fromStoreID, toStoreID, newPeer.GetId())
-	c.addOperator(op)
+	if ok := c.addOperator(op); !ok {
+		return errors.Trace(errAddOperator)
+	}
 	return nil
 }
 
@@ -416,7 +424,9 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		}
 	}
 	op := schedule.NewOperator("adminAddPeer", regionID, schedule.OpAdmin|schedule.OpRegion, steps...)
-	c.addOperator(op)
+	if ok := c.addOperator(op); !ok {
+		return errors.Trace(errAddOperator)
+	}
 	return nil
 }
 
@@ -437,7 +447,9 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 	}
 
 	op := schedule.CreateRemovePeerOperator("adminRemovePeer", c.cluster, schedule.OpAdmin, region, fromStoreID)
-	c.addOperator(op)
+	if ok := c.addOperator(op); !ok {
+		return errors.Trace(errAddOperator)
+	}
 	return nil
 }
 
@@ -470,6 +482,26 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 	}
 	if ok := c.addOperators(op1, op2); !ok {
 		return errors.Trace(ErrAddOperator)
+	}
+	return nil
+}
+
+// AddSplitRegionOperator adds an operator to split a region.
+func (h *Handler) AddSplitRegionOperator(regionID uint64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	region := c.cluster.GetRegion(regionID)
+	if region == nil {
+		return ErrRegionNotFound(regionID)
+	}
+
+	step := schedule.SplitRegion{StartKey: region.StartKey, EndKey: region.EndKey}
+	op := schedule.NewOperator("adminSplitRegion", regionID, schedule.OpAdmin, step)
+	if ok := c.addOperator(op); !ok {
+		return errors.Trace(errAddOperator)
 	}
 	return nil
 }

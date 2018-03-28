@@ -237,15 +237,11 @@ func (s *testMemberAPISuite) TestEtcdLeaderPriority(c *C) {
 }
 
 func (s *testMemberAPISuite) post(c *C, url string, body io.Reader) {
-	for i := 0; i < 20; i++ {
+	testutil.WaitUntil(c, func(c *C) bool {
 		res, err := http.Post(url, "", body)
 		c.Assert(err, IsNil)
-		if res.StatusCode == http.StatusOK {
-			return
-		}
-		time.Sleep(time.Millisecond * 500)
-	}
-	c.Fatal("failed to send query after retry 20 times")
+		return res.StatusCode == http.StatusOK
+	})
 }
 
 func (s *testMemberAPISuite) waitLeaderChange(c *C, svr *server.Server, old *pdpb.Member) *pdpb.Member {

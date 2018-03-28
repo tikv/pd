@@ -26,6 +26,16 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
+// RegionOption used to select region
+type RegionOption func(region *RegionInfo) bool
+
+// HealthRegion checks if the region is healthy
+func HealthRegion() RegionOption {
+	return func(region *RegionInfo) bool {
+		return len(region.DownPeers) == 0 && len(region.PendingPeers) == 0
+	}
+}
+
 // RegionInfo records detail region info.
 type RegionInfo struct {
 	*metapb.Region
@@ -632,18 +642,18 @@ func (r *RegionsInfo) GetStoreLearnerCount(storeID uint64) int {
 }
 
 // RandRegion get a region by random
-func (r *RegionsInfo) RandRegion() *RegionInfo {
-	return randRegion(r.regions)
+func (r *RegionsInfo) RandRegion(opts ...RegionOption) *RegionInfo {
+	return randRegion(r.regions, opts...)
 }
 
 // RandLeaderRegion get a store's leader region by random
-func (r *RegionsInfo) RandLeaderRegion(storeID uint64) *RegionInfo {
-	return randRegion(r.leaders[storeID])
+func (r *RegionsInfo) RandLeaderRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
+	return randRegion(r.leaders[storeID], opts...)
 }
 
 // RandFollowerRegion get a store's follower region by random
-func (r *RegionsInfo) RandFollowerRegion(storeID uint64) *RegionInfo {
-	return randRegion(r.followers[storeID])
+func (r *RegionsInfo) RandFollowerRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
+	return randRegion(r.followers[storeID], opts...)
 }
 
 // GetLeader return leader RegionInfo by storeID and regionID(now only used in test)
@@ -735,14 +745,21 @@ func (r *RegionsInfo) GetRegionStats(startKey, endKey []byte) *RegionStats {
 
 const randomRegionMaxRetry = 10
 
-func randRegion(regions *regionMap) *RegionInfo {
+func randRegion(regions *regionMap, opts ...RegionOption) *RegionInfo {
 	for i := 0; i < randomRegionMaxRetry; i++ {
 		region := regions.RandomRegion()
 		if region == nil {
 			return nil
 		}
-		if len(region.DownPeers) == 0 && len(region.PendingPeers) == 0 {
-			return region.Clone()
+		isSelect := true
+		for _, opt := range opts {
+			if !opt(region) {
+				isSelect = false
+				break
+			}
+		}
+		if isSelect {
+			return region
 		}
 	}
 	return nil
