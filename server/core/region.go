@@ -106,9 +106,20 @@ func (r *RegionInfo) Clone() *RegionInfo {
 	for _, peer := range r.PendingPeers {
 		pendingPeers = append(pendingPeers, proto.Clone(peer).(*metapb.Peer))
 	}
+	learners := make([]*metapb.Peer, 0, len(r.Learners))
+	for _, peer := range r.Learners {
+		learners = append(learners, proto.Clone(peer).(*metapb.Peer))
+	}
+	voters := make([]*metapb.Peer, 0, len(r.Learners))
+	for _, peer := range r.Voters {
+		voters = append(voters, proto.Clone(peer).(*metapb.Peer))
+	}
+
 	return &RegionInfo{
 		Region:          proto.Clone(r.Region).(*metapb.Region),
 		Leader:          proto.Clone(r.Leader).(*metapb.Peer),
+		Learners:        learners,
+		Voters:          voters,
 		DownPeers:       downPeers,
 		PendingPeers:    pendingPeers,
 		WrittenBytes:    r.WrittenBytes,

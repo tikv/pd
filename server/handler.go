@@ -514,7 +514,7 @@ func (h *Handler) GetPendingPeerRegions() ([]*core.RegionInfo, error) {
 func (h *Handler) GetPendingLearnerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, errNotBootstrapped
+		return nil, ErrNotBootstrapped
 	}
 	return c.cachedCluster.GetRegionStatsByType(pendingLearner), nil
 }
@@ -523,7 +523,7 @@ func (h *Handler) GetPendingLearnerRegions() ([]*core.RegionInfo, error) {
 func (h *Handler) GetDownLearnerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, errNotBootstrapped
+		return nil, ErrNotBootstrapped
 	}
 	return c.cachedCluster.GetRegionStatsByType(downLearner), nil
 }

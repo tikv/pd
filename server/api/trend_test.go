@@ -88,14 +88,14 @@ func (s *testTrendSuite) newRegionInfo(id uint64, startKey, endKey string, confV
 		}
 		peers = append(peers, p)
 	}
-	return &core.RegionInfo{
-		Region: &metapb.Region{
+	return core.NewRegionInfo(
+		&metapb.Region{
 			Id:          id,
 			StartKey:    []byte(startKey),
 			EndKey:      []byte(endKey),
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: confVer, Version: ver},
 			Peers:       peers,
 		},
-		Leader: leader,
-	}
+		leader,
+	)
 }

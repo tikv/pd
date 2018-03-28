@@ -267,12 +267,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 		if destStoreID != 0 {
 			h.adjustBalanceLimit(srcStoreID, storesStat)
 
-			var srcPeer *metapb.Peer
-			if peer := srcRegion.GetStorePeer(srcStoreID); peer != nil {
-				srcPeer = peer
-				break
-			}
-
+			srcPeer := srcRegion.GetStorePeer(srcStoreID)
 			if srcPeer == nil {
 				return nil, nil, nil
 			}
