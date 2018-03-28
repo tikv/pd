@@ -68,8 +68,8 @@ func (c *threadSafeCache) Put(key uint64, value interface{}) {
 
 // Get retrives an item from cache.
 func (c *threadSafeCache) Get(key uint64) (interface{}, bool) {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	return c.cache.Get(key)
 }
 
