@@ -584,9 +584,8 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 				// reuse AddNode type
 				ChangeType: eraftpb.ConfChangeType_AddNode,
 				Peer: &metapb.Peer{
-					Id:        s.PeerID,
-					StoreId:   s.ToStore,
-					IsLearner: true,
+					Id:      s.PeerID,
+					StoreId: s.ToStore,
 				},
 			},
 		}
