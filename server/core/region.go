@@ -138,10 +138,12 @@ func (r *RegionInfo) Clone() *RegionInfo {
 	}
 }
 
+// GetLearners returns the learners.
 func (r *RegionInfo) GetLearners() []*metapb.Peer {
 	return r.Learners
 }
 
+// GetVoters returns the voters.
 func (r *RegionInfo) GetVoters() []*metapb.Peer {
 	return r.Voters
 }
@@ -249,12 +251,21 @@ func (r *RegionInfo) GetStoreLearner(storeID uint64) *metapb.Peer {
 // RemoveStorePeer removes the peer in specified store.
 func (r *RegionInfo) RemoveStorePeer(storeID uint64) {
 	var peers []*metapb.Peer
+	var learners []*metapb.Peer
+	var voters []*metapb.Peer
 	for _, peer := range r.GetPeers() {
 		if peer.GetStoreId() != storeID {
 			peers = append(peers, peer)
+			if peer.IsLearner {
+				learners = append(learners, peer)
+			} else {
+				voters = append(voters, peer)
+			}
 		}
 	}
 	r.Peers = peers
+	r.Learners = learners
+	r.Voters = voters
 }
 
 // GetStoreIds returns a map indicate the region distributed.
