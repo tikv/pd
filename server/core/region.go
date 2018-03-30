@@ -248,7 +248,7 @@ func (r *RegionInfo) GetStoreLearner(storeID uint64) *metapb.Peer {
 	return nil
 }
 
-// RemoveStorePeer removes the peer in specified store.
+// RemoveStorePeer removes the peer in specified store for test use.
 func (r *RegionInfo) RemoveStorePeer(storeID uint64) {
 	var peers []*metapb.Peer
 	var learners []*metapb.Peer
@@ -266,6 +266,16 @@ func (r *RegionInfo) RemoveStorePeer(storeID uint64) {
 	r.Peers = peers
 	r.Learners = learners
 	r.Voters = voters
+}
+
+// AddPeer adds the peer in region info for test use.
+func (r *RegionInfo) AddPeer(peer *metapb.Peer) {
+	r.Peers = append(r.Peers, peer)
+	if peer.IsLearner {
+		r.Learners = append(r.Learners, peer)
+	} else {
+		r.Voters = append(r.Voters, peer)
+	}
 }
 
 // GetStoreIds returns a map indicate the region distributed.
