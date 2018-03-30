@@ -137,11 +137,11 @@ func (d *diagnoseHandler) membersDiagnose(rdd *[]*Recommendation) error {
 		*rdd = append(*rdd, diagnosePD(memberLeaderChanged, fmt.Sprintf("new leader %d", newLeaderID), ""))
 	}
 	if len(runningMemberIDs) == 1 {
-		// only one pd running
+		// only one pd peer running
 		*rdd = append(*rdd, diagnosePD(memberOneInstance, fmt.Sprintf("running PD member ID %d", runningMemberIDs[0]), ""))
 	}
 	if lenLostMembers > 0 {
-		// some pds can not connect
+		// some pd's peers can not be connected
 		stringID := "lost members ID "
 		for _, m := range lostMemberIDs {
 			stringID = fmt.Sprintf("%s %d,", stringID, m)
@@ -149,7 +149,7 @@ func (d *diagnoseHandler) membersDiagnose(rdd *[]*Recommendation) error {
 		*rdd = append(*rdd, diagnosePD(memberLostPeers, stringID, ""))
 	}
 	if len(runningMemberIDs)%2 == 0 {
-		// alived pd numbers is even
+		// alived pd's numbers is even
 		*rdd = append(*rdd, diagnosePD(memberEvenInstance, "", ""))
 	}
 	if float64(lenMembers)/2 < float64(lenLostMembers) {
