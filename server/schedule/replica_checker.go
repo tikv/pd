@@ -223,18 +223,18 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator {
 	oldPeer, oldScore := r.selectWorstPeer(region)
 	if oldPeer == nil {
-		checkerCounter.WithLabelValues("replica_checker", "all_right")
+		checkerCounter.WithLabelValues("replica_checker", "all_right").Inc()
 		return nil
 	}
 	storeID, newScore := r.selectBestReplacementStore(region, oldPeer)
 	if storeID == 0 {
-		checkerCounter.WithLabelValues("replica_checker", "no_replacement_store")
+		checkerCounter.WithLabelValues("replica_checker", "no_replacement_store").Inc()
 		return nil
 	}
 	// Make sure the new peer is better than the old peer.
 	if newScore <= oldScore {
 		log.Debugf("[region %d] newScore %f is not better than oldScore %f", region.GetId(), newScore, oldScore)
-		checkerCounter.WithLabelValues("replica_checker", "not_better")
+		checkerCounter.WithLabelValues("replica_checker", "not_better").Inc()
 		return nil
 	}
 	newPeer, err := r.cluster.AllocPeer(storeID)
