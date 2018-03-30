@@ -123,5 +123,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	router.HandleFunc(pingAPI, func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 	router.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
+	router.Handle("/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 	return router
 }
