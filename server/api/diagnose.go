@@ -26,7 +26,7 @@ import (
 
 type diagnoseType int
 
-// Recommendation return detail
+// Recommendation contains a potential problem and possible way to deal with it.
 type Recommendation struct {
 	Module      string `json:"module"`
 	Level       string `json:"level"`
@@ -43,7 +43,7 @@ const (
 	levelCritical = "Critical"
 	levelFatal    = "Fatal"
 
-	// analyze module
+	// analyze modules
 	modMember   = "member"
 	modTiKV     = "TiKV"
 	modReplica  = "Replic"

@@ -26,7 +26,7 @@ const (
 	etcdPeerStatsAPI = "/v2/stats/self"
 )
 
-// PeerStats is show peer status
+// PeerStats is the etcd peers' stats.
 type PeerStats struct {
 	Name       string    `json:"name"`
 	ID         string    `json:"id"`
