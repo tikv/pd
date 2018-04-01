@@ -377,8 +377,9 @@ type SchedulerConfigs []SchedulerConfig
 
 // SchedulerConfig is customized scheduler configuration
 type SchedulerConfig struct {
-	Type string   `toml:"type" json:"type"`
-	Args []string `toml:"args,omitempty" json:"args"`
+	Type    string   `toml:"type" json:"type"`
+	Args    []string `toml:"args,omitempty" json:"args"`
+	Disable bool     `toml:"disable" json:"disable"`
 }
 
 const (
