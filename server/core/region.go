@@ -102,7 +102,6 @@ func (r *RegionInfo) Clone() *RegionInfo {
 // GetPeer returns the peer with specified peer id.
 func (r *RegionInfo) GetPeer(peerID uint64) *metapb.Peer {
 	for _, peer := range r.GetPeers() {
-		//		fmt.Println("debug get peer:", peer)
 		if peer.GetId() == peerID {
 			return peer
 		}
@@ -202,27 +201,19 @@ func (r *RegionInfo) GetDiffFollowers(other *RegionInfo) []*metapb.Peer {
 	return res
 }
 
-// HealthPeerCount counts the health peers
+// HealthPeerCount counts the health peers.
 func (r *RegionInfo) HealthPeerCount() int {
-	h := make(map[uint64]struct{})
+	count := len(r.GetPeers())
 	for _, peer := range r.GetPeers() {
-		h[peer.GetId()] = struct{}{}
-	}
-	for _, peerStat := range r.DownPeers {
-		peer := peerStat.GetPeer()
-		if peer == nil {
+		if p := r.GetDownPeer(peer.GetId()); p != nil {
+			count--
 			continue
 		}
-		if _, ok := h[peer.GetId()]; ok {
-			delete(h, peer.GetId())
+		if p := r.GetPendingPeer(peer.GetId()); p != nil {
+			count--
 		}
 	}
-	for _, peer := range r.PendingPeers {
-		if _, ok := h[peer.GetId()]; ok {
-			delete(h, peer.GetId())
-		}
-	}
-	return len(h)
+	return count
 }
 
 // RegionStat records each hot region's statistics

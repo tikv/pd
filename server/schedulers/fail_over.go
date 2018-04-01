@@ -88,7 +88,7 @@ func (f *failOverScheduler) Schedule(cluster schedule.Cluster, opInfluence sched
 func (f *failOverScheduler) handleDownStore(cluster schedule.Cluster, store *core.StoreInfo) *schedule.Operator {
 	region := cluster.RandLeaderRegion(store.GetId())
 	if region != nil {
-		log.Warnf("[region %d] Down Store [%v] have leader region, Maybe have network problem.", region.GetId(), store)
+		log.Warnf("[region %d] Down Store [%v] has leader region, Maybe has network problem.", region.GetId(), store)
 		schedulerCounter.WithLabelValues(f.GetName(), "down_leader").Inc()
 		return nil
 	}
@@ -108,7 +108,7 @@ func (f *failOverScheduler) handleDownStore(cluster schedule.Cluster, store *cor
 	}
 	downPeer := region.GetDownPeer(peer.GetId())
 	if downPeer == nil {
-		log.Warnf("[region %d] peer %v not down in down store", region.GetId(), peer)
+		log.Warnf("[region %d] peer %v not down in down store %d", region.GetId(), peer, peer.GetStoreId())
 	}
 	return schedule.CreateRemovePeerOperator("removeDownReplica", cluster, schedule.OpReplica, region, peer.GetStoreId())
 }

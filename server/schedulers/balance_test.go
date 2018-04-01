@@ -514,6 +514,7 @@ func (s *testBalanceFailOverSuite) TestStoreDown(c *C) {
 		DownSeconds: 24 * 60 * 60,
 	}
 	region.DownPeers = append(region.DownPeers, downPeer)
+	region.PendingPeers = append(region.PendingPeers, region.GetStorePeer(2))
 	tc.PutRegion(region)
 	// unHealth to removepeer
 	c.Assert(fo.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
