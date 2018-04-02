@@ -331,10 +331,10 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		if err != nil {
 			return errors.Trace(err)
 		}
-		if c.cluster.IsEnableRaftLearner() {
+		if c.cluster.IsRaftLearnerEnabled() {
 			steps = append(steps,
 				schedule.AddLearner{ToStore: id, PeerID: peer.Id},
-				schedule.PromoteLearnerPeer{ToStore: id, PeerID: peer.Id},
+				schedule.PromoteLearner{ToStore: id, PeerID: peer.Id},
 			)
 		} else {
 			steps = append(steps, schedule.AddPeer{ToStore: id, PeerID: peer.Id})
@@ -413,10 +413,10 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 	}
 
 	var steps []schedule.OperatorStep
-	if c.cluster.IsEnableRaftLearner() {
+	if c.cluster.IsRaftLearnerEnabled() {
 		steps = []schedule.OperatorStep{
 			schedule.AddLearner{ToStore: toStoreID, PeerID: newPeer.GetId()},
-			schedule.PromoteLearnerPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
+			schedule.PromoteLearner{ToStore: toStoreID, PeerID: newPeer.GetId()},
 		}
 	} else {
 		steps = []schedule.OperatorStep{

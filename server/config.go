@@ -190,12 +190,6 @@ func adjustFloat64(v *float64, defValue float64) {
 	}
 }
 
-func adjustBoolean(v *bool, defValue bool) {
-	if *v == false {
-		*v = defValue
-	}
-}
-
 func adjustDuration(v *typeutil.Duration, defValue time.Duration) {
 	if v.Duration == 0 {
 		v.Duration = defValue
@@ -421,7 +415,6 @@ func (c *ScheduleConfig) adjust() {
 	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
 	adjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
 	adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
-	adjustBoolean(&c.EnableRaftLearner, defaultEnableRaftLearner)
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
 }
 

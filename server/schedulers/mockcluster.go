@@ -467,7 +467,7 @@ func (mso *MockSchedulerOptions) SetMaxReplicas(replicas int) {
 	mso.MaxReplicas = replicas
 }
 
-// IsEnableRaftLearner mock method
-func (mso *MockSchedulerOptions) IsEnableRaftLearner() bool {
+// IsRaftLearnerEnabled mock method
+func (mso *MockSchedulerOptions) IsRaftLearnerEnabled() bool {
 	return mso.EnableRaftLearner
 }

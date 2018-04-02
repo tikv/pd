@@ -51,6 +51,17 @@ type RegionInfo struct {
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
 func NewRegionInfo(region *metapb.Region, leader *metapb.Peer) *RegionInfo {
+	regionInfo := &RegionInfo{
+		Region: region,
+		Leader: leader,
+	}
+
+	ClassifyVoterAndLearner(regionInfo)
+	return regionInfo
+}
+
+// ClassifyVoterAndLearner sorts out voter and learner from peers into different slice.
+func ClassifyVoterAndLearner(region *RegionInfo) {
 	learners := make([]*metapb.Peer, 0, 1)
 	voters := make([]*metapb.Peer, 0, len(region.Peers))
 	for _, p := range region.Peers {
@@ -60,13 +71,8 @@ func NewRegionInfo(region *metapb.Region, leader *metapb.Peer) *RegionInfo {
 			voters = append(voters, p)
 		}
 	}
-
-	return &RegionInfo{
-		Region:   region,
-		Leader:   leader,
-		Learners: learners,
-		Voters:   voters,
-	}
+	region.Learners = learners
+	region.Voters = voters
 }
 
 // EmptyRegionApproximateSize is the region approximate size of an empty region
@@ -82,28 +88,18 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		regionSize = EmptyRegionApproximateSize
 	}
 
-	peers := heartbeat.GetRegion().Peers
-	learners := make([]*metapb.Peer, 0, 1)
-	voters := make([]*metapb.Peer, 0, len(peers))
-	for _, p := range peers {
-		if p.IsLearner {
-			learners = append(learners, p)
-		} else {
-			voters = append(voters, p)
-		}
-	}
-
-	return &RegionInfo{
+	region := &RegionInfo{
 		Region:          heartbeat.GetRegion(),
 		Leader:          heartbeat.GetLeader(),
-		Learners:        learners,
-		Voters:          voters,
 		DownPeers:       heartbeat.GetDownPeers(),
 		PendingPeers:    heartbeat.GetPendingPeers(),
 		WrittenBytes:    heartbeat.GetBytesWritten(),
 		ReadBytes:       heartbeat.GetBytesRead(),
 		ApproximateSize: int64(regionSize),
 	}
+
+	ClassifyVoterAndLearner(region)
+	return region
 }
 
 // Clone returns a copy of current regionInfo.
@@ -116,26 +112,19 @@ func (r *RegionInfo) Clone() *RegionInfo {
 	for _, peer := range r.PendingPeers {
 		pendingPeers = append(pendingPeers, proto.Clone(peer).(*metapb.Peer))
 	}
-	learners := make([]*metapb.Peer, 0, len(r.Learners))
-	for _, peer := range r.Learners {
-		learners = append(learners, proto.Clone(peer).(*metapb.Peer))
-	}
-	voters := make([]*metapb.Peer, 0, len(r.Learners))
-	for _, peer := range r.Voters {
-		voters = append(voters, proto.Clone(peer).(*metapb.Peer))
-	}
 
-	return &RegionInfo{
+	region := &RegionInfo{
 		Region:          proto.Clone(r.Region).(*metapb.Region),
 		Leader:          proto.Clone(r.Leader).(*metapb.Peer),
-		Learners:        learners,
-		Voters:          voters,
 		DownPeers:       downPeers,
 		PendingPeers:    pendingPeers,
 		WrittenBytes:    r.WrittenBytes,
 		ReadBytes:       r.ReadBytes,
 		ApproximateSize: r.ApproximateSize,
 	}
+
+	ClassifyVoterAndLearner(region)
+	return region
 }
 
 // GetLearners returns the learners.
@@ -251,21 +240,13 @@ func (r *RegionInfo) GetStoreLearner(storeID uint64) *metapb.Peer {
 // RemoveStorePeer removes the peer in specified store for test use.
 func (r *RegionInfo) RemoveStorePeer(storeID uint64) {
 	var peers []*metapb.Peer
-	var learners []*metapb.Peer
-	var voters []*metapb.Peer
 	for _, peer := range r.GetPeers() {
 		if peer.GetStoreId() != storeID {
 			peers = append(peers, peer)
-			if peer.IsLearner {
-				learners = append(learners, peer)
-			} else {
-				voters = append(voters, peer)
-			}
 		}
 	}
 	r.Peers = peers
-	r.Learners = learners
-	r.Voters = voters
+	ClassifyVoterAndLearner(r)
 }
 
 // AddPeer adds the peer in region info for test use.

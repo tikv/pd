@@ -113,25 +113,25 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	to.RegionCount++
 }
 
-// PromoteLearnerPeer is an OperatorStep that promotes a region learner peer to normal voter.
-type PromoteLearnerPeer struct {
+// PromoteLearner is an OperatorStep that promotes a region learner peer to normal voter.
+type PromoteLearner struct {
 	ToStore, PeerID uint64
 }
 
-func (plp PromoteLearnerPeer) String() string {
-	return fmt.Sprintf("promote learner peer %v on store %v to voter", plp.PeerID, plp.ToStore)
+func (pl PromoteLearner) String() string {
+	return fmt.Sprintf("promote learner peer %v on store %v to voter", pl.PeerID, pl.ToStore)
 }
 
 // IsFinish checks if current step is finished.
-func (plp PromoteLearnerPeer) IsFinish(region *core.RegionInfo) bool {
-	if p := region.GetStoreVoter(plp.ToStore); p != nil {
-		return p.GetId() == plp.PeerID
+func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
+	if p := region.GetStoreVoter(pl.ToStore); p != nil {
+		return p.GetId() == pl.PeerID
 	}
 	return false
 }
 
 // Influence calculates the store difference that current step make
-func (plp PromoteLearnerPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
+func (pl PromoteLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
 
 // RemovePeer is an OperatorStep that removes a region peer.
 type RemovePeer struct {
@@ -387,10 +387,10 @@ func CreateRemovePeerOperator(desc string, cluster Cluster, kind OperatorKind, r
 func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OperatorKind, oldStore, newStore uint64, peerID uint64) *Operator {
 	removeKind, steps := removePeerSteps(cluster, region, oldStore)
 	var st []OperatorStep
-	if cluster.IsEnableRaftLearner() {
+	if cluster.IsRaftLearnerEnabled() {
 		st = []OperatorStep{
 			AddLearner{ToStore: newStore, PeerID: peerID},
-			PromoteLearnerPeer{ToStore: newStore, PeerID: peerID},
+			PromoteLearner{ToStore: newStore, PeerID: peerID},
 		}
 	} else {
 		st = []OperatorStep{

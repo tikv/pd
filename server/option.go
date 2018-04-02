@@ -120,7 +120,7 @@ func (o *scheduleOption) GetTolerantSizeRatio() float64 {
 	return o.load().TolerantSizeRatio
 }
 
-func (o *scheduleOption) IsEnableRaftLearner() bool {
+func (o *scheduleOption) IsRaftLearnerEnabled() bool {
 	return o.load().EnableRaftLearner
 }
 

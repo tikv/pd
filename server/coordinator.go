@@ -110,12 +110,12 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 		}
 	}
 	// If PD has restarted, it need to check learners added before and promote them.
-	if c.cluster.IsEnableRaftLearner() && c.getOperator(region.GetId()) == nil {
+	if c.cluster.IsRaftLearnerEnabled() && c.getOperator(region.GetId()) == nil {
 		for _, p := range region.GetLearners() {
 			if region.GetPendingLearner(p.GetId()) != nil {
 				continue
 			}
-			step := schedule.PromoteLearnerPeer{
+			step := schedule.PromoteLearner{
 				ToStore: p.GetStoreId(),
 				PeerID:  p.GetId(),
 			}
@@ -581,7 +581,7 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 			},
 		}
 		c.hbStreams.sendMsg(region, cmd)
-	case schedule.PromoteLearnerPeer:
+	case schedule.PromoteLearner:
 		cmd := &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
 				// reuse AddNode type
