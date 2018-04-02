@@ -67,9 +67,11 @@ func (c *threadSafeCache) Put(key uint64, value interface{}) {
 }
 
 // Get retrives an item from cache.
+// When Get method called, LRU and TwoQueue cache will rearrange entries
+// so we must use write lock.
 func (c *threadSafeCache) Get(key uint64) (interface{}, bool) {
-	c.lock.RLock()
-	defer c.lock.RUnlock()
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	return c.cache.Get(key)
 }
 
