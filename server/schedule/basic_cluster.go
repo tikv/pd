@@ -27,7 +27,8 @@ const (
 	// RegionHeartBeatReportInterval is the heartbeat report interval of a region
 	RegionHeartBeatReportInterval = 60
 
-	statCacheMaxLen              = 1000
+	statCacheMaxLen              = 100
+	totalCacheLen                = 1000
 	hotWriteRegionMinFlowRate    = 16 * 1024
 	hotReadRegionMinFlowRate     = 128 * 1024
 	storeHeartBeatReportInterval = 10
@@ -183,11 +184,11 @@ func (bc *BasicCluster) PutRegion(region *core.RegionInfo) error {
 }
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.
-func (bc *BasicCluster) CheckWriteStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
-	return bc.HotCache.CheckWrite(region, bc.Stores)
+func (bc *BasicCluster) CheckWriteStatus(origin, region *core.RegionInfo) (bool, *core.RegionStat) {
+	return bc.HotCache.CheckWrite(origin, region, bc.Stores.ZoreGetStore(region.Leader.GetStoreId()))
 }
 
 // CheckReadStatus checks the read status, returns whether need update statistics and item.
-func (bc *BasicCluster) CheckReadStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
-	return bc.HotCache.CheckRead(region, bc.Stores)
+func (bc *BasicCluster) CheckReadStatus(origin, region *core.RegionInfo) (bool, *core.RegionStat) {
+	return bc.HotCache.CheckRead(origin, region, bc.Stores.ZoreGetStore(region.Leader.GetStoreId()))
 }

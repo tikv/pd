@@ -302,6 +302,15 @@ func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 	return store.Clone()
 }
 
+// ZoreGetStore return a StoreInfo with storeID
+func (s *StoresInfo) ZoreGetStore(storeID uint64) *StoreInfo {
+	store, ok := s.stores[storeID]
+	if !ok {
+		return nil
+	}
+	return store
+}
+
 // SetStore set a StoreInfo with storeID
 func (s *StoresInfo) SetStore(store *StoreInfo) {
 	s.stores[store.GetId()] = store
