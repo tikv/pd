@@ -29,8 +29,6 @@ const (
 	pendingPeer
 	offlinePeer
 	incorrectNamespace
-	downLearner
-	pendingLearner
 )
 
 type regionStatistics struct {
@@ -53,8 +51,6 @@ func newRegionStatistics(opt *scheduleOption, classifier namespace.Classifier) *
 	r.stats[pendingPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[offlinePeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[incorrectNamespace] = make(map[uint64]*core.RegionInfo)
-	r.stats[downLearner] = make(map[uint64]*core.RegionInfo)
-	r.stats[pendingLearner] = make(map[uint64]*core.RegionInfo)
 	return r
 }
 
@@ -90,24 +86,14 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		peerTypeIndex |= extraPeer
 	}
 
-	for _, peer := range region.PendingPeers {
-		if peer.IsLearner {
-			r.stats[pendingLearner][regionID] = region
-			peerTypeIndex |= pendingLearner
-		} else {
-			r.stats[pendingPeer][regionID] = region
-			peerTypeIndex |= pendingPeer
-		}
+	if len(region.DownPeers) > 0 {
+		r.stats[downPeer][regionID] = region
+		peerTypeIndex |= downPeer
 	}
 
-	for _, down := range region.DownPeers {
-		if down.GetPeer().IsLearner {
-			r.stats[downLearner][regionID] = region
-			peerTypeIndex |= downLearner
-		} else {
-			r.stats[downPeer][regionID] = region
-			peerTypeIndex |= downPeer
-		}
+	if len(region.PendingPeers) > 0 {
+		r.stats[pendingPeer][regionID] = region
+		peerTypeIndex |= pendingPeer
 	}
 
 	for _, store := range stores {
@@ -147,8 +133,6 @@ func (r *regionStatistics) Collect() {
 	regionStatusGauge.WithLabelValues("pending_peer_region_count").Set(float64(len(r.stats[pendingPeer])))
 	regionStatusGauge.WithLabelValues("offline_peer_region_count").Set(float64(len(r.stats[offlinePeer])))
 	regionStatusGauge.WithLabelValues("incorrect_namespace_region_count").Set(float64(len(r.stats[incorrectNamespace])))
-	regionStatusGauge.WithLabelValues("down_learner_region_count").Set(float64(len(r.stats[downLearner])))
-	regionStatusGauge.WithLabelValues("pending_learner_region_count").Set(float64(len(r.stats[pendingLearner])))
 }
 
 type labelLevelStatistics struct {

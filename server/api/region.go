@@ -171,26 +171,6 @@ func (h *regionsHandler) GetPendingPeerRegions(w http.ResponseWriter, r *http.Re
 	h.rd.JSON(w, http.StatusOK, res)
 }
 
-func (h *regionsHandler) GetDownLearnerRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	res, err := handler.GetDownLearnerRegions()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	h.rd.JSON(w, http.StatusOK, res)
-}
-
-func (h *regionsHandler) GetPendingLearnerRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	res, err := handler.GetPendingLearnerRegions()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	h.rd.JSON(w, http.StatusOK, res)
-}
-
 func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
 	res, err := handler.GetDownPeerRegions()

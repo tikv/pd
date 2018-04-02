@@ -191,7 +191,7 @@ func decodeProtobufText(text string) (string, error) {
 // NewRegionWithCheckCommand return a region with check subcommand of regionCmd
 func NewRegionWithCheckCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "check [miss-peer|extra-peer|down-peer|pending-peer|down-learner|pending-learner|incorrect-ns]",
+		Use:   "check [miss-peer|extra-peer|down-peer|pending-peer|incorrect-ns]",
 		Short: "show the region with check specific status",
 		Run:   showRegionWithCheckCommandFunc,
 	}
