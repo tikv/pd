@@ -124,6 +124,14 @@ func (mc *mockCluster) setStoreBusy(storeID uint64, busy bool) {
 	mc.PutStore(store)
 }
 
+func (mc *mockCluster) setStoreLowSpace(storeID uint64) {
+	store := mc.GetStore(storeID)
+	store.Stats.Available = 10
+	store.Stats.Capacity = 100
+	store.LastHeartbeatTS = time.Now()
+	mc.PutStore(store)
+}
+
 func (mc *mockCluster) addLeaderStore(storeID uint64, leaderCount int) {
 	store := core.NewStoreInfo(&metapb.Store{Id: storeID})
 	store.Stats = &pdpb.StoreStats{}

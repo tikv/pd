@@ -201,6 +201,21 @@ func (r *RegionInfo) GetDiffFollowers(other *RegionInfo) []*metapb.Peer {
 	return res
 }
 
+// HealthPeerCount counts the health peers.
+func (r *RegionInfo) HealthPeerCount() int {
+	count := len(r.GetPeers())
+	for _, peer := range r.GetPeers() {
+		if p := r.GetDownPeer(peer.GetId()); p != nil {
+			count--
+			continue
+		}
+		if p := r.GetPendingPeer(peer.GetId()); p != nil {
+			count--
+		}
+	}
+	return count
+}
+
 // RegionStat records each hot region's statistics
 type RegionStat struct {
 	RegionID  uint64 `json:"region_id"`

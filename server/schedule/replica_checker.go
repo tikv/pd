@@ -44,17 +44,6 @@ func NewReplicaChecker(cluster Cluster, classifier namespace.Classifier) *Replic
 // Check verifies a region's replicas, creating an Operator if need.
 func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 	checkerCounter.WithLabelValues("replica_checker", "check").Inc()
-	if op := r.checkDownPeer(region); op != nil {
-		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
-		op.SetPriorityLevel(core.HighPriority)
-		return op
-	}
-	if op := r.checkOfflinePeer(region); op != nil {
-		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
-		op.SetPriorityLevel(core.HighPriority)
-		return op
-	}
-
 	if len(region.GetPeers()) < r.cluster.GetMaxReplicas() {
 		log.Debugf("[region %d] has %d peers fewer than max replicas", region.GetId(), len(region.GetPeers()))
 		newPeer, _ := r.selectBestPeerToAddReplica(region)
@@ -67,7 +56,9 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 		return NewOperator("makeUpReplica", region.GetId(), OpReplica|OpRegion, step)
 	}
 
-	if len(region.GetPeers()) > r.cluster.GetMaxReplicas() {
+	// Only remove extra replica for enough healthy region
+	// unHealth peer fail-over balance will handle it.
+	if region.HealthPeerCount() > r.cluster.GetMaxReplicas() {
 		log.Debugf("[region %d] has %d peers more than max replicas", region.GetId(), len(region.GetPeers()))
 		oldPeer, _ := r.selectWorstPeer(region)
 		if oldPeer == nil {
@@ -149,63 +140,6 @@ func (r *ReplicaChecker) selectWorstPeer(region *core.RegionInfo) (*metapb.Peer,
 		return nil, 0
 	}
 	return region.GetStorePeer(worstStore.GetId()), DistinctScore(r.cluster.GetLocationLabels(), regionStores, worstStore)
-}
-
-func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *Operator {
-	for _, stats := range region.DownPeers {
-		peer := stats.GetPeer()
-		if peer == nil {
-			continue
-		}
-		store := r.cluster.GetStore(peer.GetStoreId())
-		if store == nil {
-			log.Infof("lost the store %d, maybe you are recovering the PD cluster.", peer.GetStoreId())
-			return nil
-		}
-		if store.DownTime() < r.cluster.GetMaxStoreDownTime() {
-			continue
-		}
-		if stats.GetDownSeconds() < uint64(r.cluster.GetMaxStoreDownTime().Seconds()) {
-			continue
-		}
-		return CreateRemovePeerOperator("removeDownReplica", r.cluster, OpReplica, region, peer.GetStoreId())
-	}
-	return nil
-}
-
-func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
-	for _, peer := range region.GetPeers() {
-		store := r.cluster.GetStore(peer.GetStoreId())
-		if store == nil {
-			log.Infof("lost the store %d, maybe you are recovering the PD cluster.", peer.GetStoreId())
-			return nil
-		}
-		if store.IsUp() {
-			continue
-		}
-
-		// Check the number of replicas first.
-		if len(region.GetPeers()) > r.cluster.GetMaxReplicas() {
-			return CreateRemovePeerOperator("removeExtraOfflineReplica", r.cluster, OpReplica, region, peer.GetStoreId())
-		}
-
-		// Consider we have 3 peers (A, B, C), we set the store that contains C to
-		// offline while C is pending. If we generate an operator that adds a replica
-		// D then removes C, D will not be successfully added util C is normal again.
-		// So it's better to remove C directly.
-		if region.GetPendingPeer(peer.GetId()) != nil {
-			return CreateRemovePeerOperator("removePendingOfflineReplica", r.cluster, OpReplica, region, peer.GetStoreId())
-		}
-
-		newPeer := r.SelectBestReplacedPeerToAddReplica(region, peer)
-		if newPeer == nil {
-			log.Debugf("[region %d] no best peer to add replica", region.GetId())
-			return nil
-		}
-		return CreateMovePeerOperator("makeUpOfflineReplica", r.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
-	}
-
-	return nil
 }
 
 func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator {
