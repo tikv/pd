@@ -517,9 +517,6 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*metapb.Region {
 	}
 
 	for _, peer := range region.PendingPeers {
-		if peer.IsLearner {
-			continue
-		}
 		storeID := peer.GetStoreId()
 		store, ok := r.pendingPeers[storeID]
 		if !ok {
@@ -529,18 +526,6 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*metapb.Region {
 		store.Put(region)
 	}
 
-	for _, peer := range region.PendingPeers {
-		if !peer.IsLearner {
-			continue
-		}
-		storeID := peer.GetStoreId()
-		store, ok := r.pendingLearners[storeID]
-		if !ok {
-			store = newRegionMap()
-			r.pendingLearners[storeID] = store
-		}
-		store.Put(region)
-	}
 	return overlaps
 }
 
@@ -621,11 +606,6 @@ func (r *RegionsInfo) GetStoreRegionCount(storeID uint64) int {
 // GetStorePendingPeerCount gets the total count of a store's region that includes pending peer
 func (r *RegionsInfo) GetStorePendingPeerCount(storeID uint64) int {
 	return r.pendingPeers[storeID].Len()
-}
-
-// GetStorePendingLearnerCount gets the total count of a store's region that includes pending learner peer
-func (r *RegionsInfo) GetStorePendingLearnerCount(storeID uint64) int {
-	return r.pendingLearners[storeID].Len()
 }
 
 // GetStoreLeaderCount get the total count of a store's leader RegionInfo
