@@ -464,7 +464,14 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 			log.Debugf("peer alloc failed: %v", err)
 			return nil, kind, errors.Trace(err)
 		}
-		steps = append(steps, AddPeer{ToStore: id, PeerID: peer.Id})
+		if cluster.IsRaftLearnerEnabled() {
+			steps = append(steps,
+				AddLearner{ToStore: id, PeerID: peer.Id},
+				PromoteLearner{ToStore: id, PeerID: peer.Id},
+			)
+		} else {
+			steps = append(steps, AddPeer{ToStore: id, PeerID: peer.Id})
+		}
 		kind |= OpRegion
 	}
 

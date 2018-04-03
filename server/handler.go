@@ -38,6 +38,10 @@ var (
 	ErrRegionNotFound = func(regionID uint64) error {
 		return errors.Errorf("region %v not found", regionID)
 	}
+	// ErrRegionAbnormalPeer is error info for region has abonormal peer
+	ErrRegionAbnormalPeer = func(regionID uint64) error {
+		return errors.Errorf("region %v has abnormal peer", regionID)
+	}
 	// ErrRegionIsStale is error info for region is stale
 	ErrRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
 		return errors.Errorf("region is stale: region %v origin %v", region, origin)
@@ -470,13 +474,23 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotFound(targetID)
 	}
 
+	if len(region.DownPeers) > 0 || len(region.PendingPeers) > 0 || len(region.Learners) > 0 ||
+		len(region.Region.GetPeers()) != c.cluster.GetMaxReplicas() {
+		return ErrRegionAbnormalPeer(regionID)
+	}
+
+	if len(target.DownPeers) > 0 || len(target.PendingPeers) > 0 || len(target.Learners) > 0 ||
+		len(target.Region.GetPeers()) != c.cluster.GetMaxReplicas() {
+		return ErrRegionAbnormalPeer(targetID)
+	}
+
 	// for the case first region (start key is nil) with the last region (end key is nil) but not adjacent
 	if (bytes.Compare(region.StartKey, target.EndKey) != 0 || len(region.StartKey) == 0) &&
 		(bytes.Compare(region.EndKey, target.StartKey) != 0 || len(region.EndKey) == 0) {
 		return ErrRegionNotAdjacent
 	}
 
-	op1, op2, err := schedule.CreateMergeRegionOperator("merge-region", c.cluster, region, target, schedule.OpAdmin)
+	op1, op2, err := schedule.CreateMergeRegionOperator("adminMergeRegion", c.cluster, region, target, schedule.OpAdmin)
 	if err != nil {
 		return errors.Trace(err)
 	}

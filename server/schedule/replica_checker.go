@@ -186,6 +186,11 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *Operator {
 }
 
 func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
+	// just skip learner
+	if len(region.Learners) != 0 {
+		return nil
+	}
+
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
 		if store == nil {

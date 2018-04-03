@@ -395,7 +395,6 @@ const (
 	defaultReplicaScheduleLimit = 32
 	defaultMergeScheduleLimit   = 20
 	defaultTolerantSizeRatio    = 2.5
-	defaultEnableRaftLearner    = false
 )
 
 var defaultSchedulers = SchedulerConfigs{

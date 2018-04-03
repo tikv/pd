@@ -32,7 +32,7 @@ type RegionOption func(region *RegionInfo) bool
 // HealthRegion checks if the region is healthy
 func HealthRegion() RegionOption {
 	return func(region *RegionInfo) bool {
-		return len(region.DownPeers) == 0 && len(region.PendingPeers) == 0
+		return len(region.DownPeers) == 0 && len(region.PendingPeers) == 0 && len(region.Learners) == 0
 	}
 }
 
@@ -56,12 +56,12 @@ func NewRegionInfo(region *metapb.Region, leader *metapb.Peer) *RegionInfo {
 		Leader: leader,
 	}
 
-	ClassifyVoterAndLearner(regionInfo)
+	classifyVoterAndLearner(regionInfo)
 	return regionInfo
 }
 
-// ClassifyVoterAndLearner sorts out voter and learner from peers into different slice.
-func ClassifyVoterAndLearner(region *RegionInfo) {
+// classifyVoterAndLearner sorts out voter and learner from peers into different slice.
+func classifyVoterAndLearner(region *RegionInfo) {
 	learners := make([]*metapb.Peer, 0, 1)
 	voters := make([]*metapb.Peer, 0, len(region.Peers))
 	for _, p := range region.Peers {
@@ -98,7 +98,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		ApproximateSize: int64(regionSize),
 	}
 
-	ClassifyVoterAndLearner(region)
+	classifyVoterAndLearner(region)
 	return region
 }
 
@@ -123,7 +123,7 @@ func (r *RegionInfo) Clone() *RegionInfo {
 		ApproximateSize: r.ApproximateSize,
 	}
 
-	ClassifyVoterAndLearner(region)
+	classifyVoterAndLearner(region)
 	return region
 }
 
@@ -157,7 +157,7 @@ func (r *RegionInfo) GetDownPeer(peerID uint64) *metapb.Peer {
 	return nil
 }
 
-// GetDownVoter returns the down peer with specified peer id.
+// GetDownVoter returns the down voter with specified peer id.
 func (r *RegionInfo) GetDownVoter(peerID uint64) *metapb.Peer {
 	for _, down := range r.DownPeers {
 		if down.GetPeer().GetId() == peerID && !down.GetPeer().IsLearner {
@@ -246,7 +246,7 @@ func (r *RegionInfo) RemoveStorePeer(storeID uint64) {
 		}
 	}
 	r.Peers = peers
-	ClassifyVoterAndLearner(r)
+	classifyVoterAndLearner(r)
 }
 
 // AddPeer adds the peer in region info for test use.
