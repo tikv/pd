@@ -185,10 +185,10 @@ func (bc *BasicCluster) PutRegion(region *core.RegionInfo) error {
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.
 func (bc *BasicCluster) CheckWriteStatus(origin, region *core.RegionInfo) (bool, *core.RegionStat) {
-	return bc.HotCache.CheckWrite(origin, region, bc.Stores.ZeroGetStore(region.Leader.GetStoreId()))
+	return bc.HotCache.CheckWrite(origin, region, bc.Stores.GetStoreNotClone(region.Leader.GetStoreId()))
 }
 
 // CheckReadStatus checks the read status, returns whether need update statistics and item.
 func (bc *BasicCluster) CheckReadStatus(origin, region *core.RegionInfo) (bool, *core.RegionStat) {
-	return bc.HotCache.CheckRead(origin, region, bc.Stores.ZeroGetStore(region.Leader.GetStoreId()))
+	return bc.HotCache.CheckRead(origin, region, bc.Stores.GetStoreNotClone(region.Leader.GetStoreId()))
 }
