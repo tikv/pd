@@ -58,12 +58,14 @@ func (w *HotSpotCache) CheckWrite(origin *core.RegionInfo, region *core.RegionIn
 	}
 	storeID = origin.Leader.GetStoreId()
 	writeFlowCache, ok := w.writeFlow[storeID]
-	if !ok {
-		writeFlowCache = cache.NewCache(statCacheMaxLen, cache.TwoQueueCache)
-		w.writeFlow[storeID] = writeFlowCache
+	var (
+		WrittenBytesPerSec uint64
+		v                  interface{}
+		isExist            bool
+	)
+	if ok {
+		v, isExist = writeFlowCache.Peek(region.GetId())
 	}
-	var WrittenBytesPerSec uint64
-	v, isExist := writeFlowCache.Peek(region.GetId())
 	if isExist && !Simulating {
 		interval := time.Since(v.(*core.RegionStat).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
@@ -76,17 +78,16 @@ func (w *HotSpotCache) CheckWrite(origin *core.RegionInfo, region *core.RegionIn
 	region.WrittenBytes = WrittenBytesPerSec
 
 	// hotRegionThreshold is use to pick hot region
-	// suppose the number of the hot Regions is statCacheMaxLen
+	// suppose the number of the hot Regions is cacheLenPerStore
 	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
 	// divide 2 because the store reports data about two times than the region record write to rocksdb
-	divisor := float64(statCacheMaxLen) * 2 * storeHeartBeatReportInterval
+	divisor := float64(cacheLenPerStore) * 2 * storeHeartBeatReportInterval
 	hotRegionThreshold := uint64(float64(store.Stats.GetBytesWritten()) / divisor)
 
 	if hotRegionThreshold < hotWriteRegionMinFlowRate {
 		hotRegionThreshold = hotWriteRegionMinFlowRate
 	}
-	needDeleteOrigin := origin.Leader.GetStoreId() != region.Leader.GetStoreId()
-	return w.isNeedUpdateStatCache(region, hotRegionThreshold, writeFlowCache, needDeleteOrigin, WriteFlow)
+	return w.isNeedUpdateStatCache(region, hotRegionThreshold, v, isExist, WriteFlow)
 }
 
 // CheckRead checks the read status, returns whether need update statistics and item.
@@ -102,12 +103,14 @@ func (w *HotSpotCache) CheckRead(origin, region *core.RegionInfo, store *core.St
 	}
 	storeID := origin.Leader.GetStoreId()
 	readFlowCache, ok := w.readFlow[storeID]
-	if !ok {
-		readFlowCache = cache.NewCache(statCacheMaxLen, cache.TwoQueueCache)
-		w.readFlow[storeID] = readFlowCache
+	var (
+		ReadBytesPerSec uint64
+		v               interface{}
+		isExist         bool
+	)
+	if ok {
+		v, isExist = readFlowCache.Peek(region.GetId())
 	}
-	var ReadBytesPerSec uint64
-	v, isExist := readFlowCache.Peek(region.GetId())
 	if isExist && !Simulating {
 		interval := time.Since(v.(*core.RegionStat).LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
@@ -122,35 +125,25 @@ func (w *HotSpotCache) CheckRead(origin, region *core.RegionInfo, store *core.St
 	// hotRegionThreshold is use to pick hot region
 	// suppose the number of the hot Regions is statLRUMaxLen
 	// and we use total Read Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
-	divisor := float64(statCacheMaxLen) * storeHeartBeatReportInterval
+	divisor := float64(cacheLenPerStore) * storeHeartBeatReportInterval
 	hotRegionThreshold := uint64(float64(store.Stats.GetBytesRead()) / divisor)
 
 	if hotRegionThreshold < hotReadRegionMinFlowRate {
 		hotRegionThreshold = hotReadRegionMinFlowRate
 	}
-	needDeleteOrigin := origin.Leader.GetStoreId() != region.Leader.GetStoreId()
-	return w.isNeedUpdateStatCache(region, hotRegionThreshold, readFlowCache, needDeleteOrigin, ReadFlow)
+	return w.isNeedUpdateStatCache(region, hotRegionThreshold, v, isExist, ReadFlow)
 }
 
-func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, hotRegionThreshold uint64, cache cache.Cache, needDelete bool, kind FlowKind) (bool, *core.RegionStat) {
+func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, hotRegionThreshold uint64, value interface{}, isExist bool, kind FlowKind) (bool, *core.RegionStat) {
 	var (
 		v         *core.RegionStat
-		value     interface{}
-		isExist   bool
 		flowBytes uint64
 	)
-	key := region.GetId()
-
 	switch kind {
 	case WriteFlow:
-		value, isExist = cache.Peek(key)
 		flowBytes = region.WrittenBytes
 	case ReadFlow:
-		value, isExist = cache.Peek(key)
 		flowBytes = region.ReadBytes
-	}
-	if needDelete {
-		cache.Remove(region.GetId())
 	}
 	newItem := &core.RegionStat{
 		RegionID:       region.GetId(),
@@ -192,27 +185,40 @@ func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, hotRegionT
 }
 
 // Update updates the cache.
-func (w *HotSpotCache) Update(key uint64, item *core.RegionStat, kind FlowKind) {
+func (w *HotSpotCache) Update(origin, region *core.RegionInfo, item *core.RegionStat, kind FlowKind) {
+	needDelete := origin != nil && origin.Leader != nil && origin.Leader.GetStoreId() != region.Leader.GetStoreId()
 	switch kind {
 	case WriteFlow:
-		cache, ok := w.writeFlow[item.StoreID]
+		if needDelete {
+			if oldCacheFlow, ok := w.writeFlow[origin.Leader.GetStoreId()]; ok {
+				oldCacheFlow.Remove(origin.GetId())
+			}
+		}
+		cacheFlow, ok := w.writeFlow[item.StoreID]
 		if !ok {
-			panic("no cache create!")
+			cacheFlow = cache.NewCache(cacheLenPerStore, cache.TwoQueueCache)
+			w.writeFlow[item.StoreID] = cacheFlow
 		}
 		if item == nil {
-			cache.Remove(key)
+			cacheFlow.Remove(region.GetId())
 		} else {
-			cache.Put(key, item)
+			cacheFlow.Put(region.GetId(), item)
 		}
 	case ReadFlow:
-		cache, ok := w.readFlow[item.StoreID]
+		if needDelete {
+			if oldCacheFlow, ok := w.readFlow[origin.Leader.GetStoreId()]; ok {
+				oldCacheFlow.Remove(origin.GetId())
+			}
+		}
+		cacheFlow, ok := w.readFlow[item.StoreID]
 		if !ok {
-			panic("no cache create!")
+			cacheFlow = cache.NewCache(cacheLenPerStore, cache.TwoQueueCache)
+			w.readFlow[item.StoreID] = cacheFlow
 		}
 		if item == nil {
-			cache.Remove(key)
+			cacheFlow.Remove(region.GetId())
 		} else {
-			cache.Put(key, item)
+			cacheFlow.Put(region.GetId(), item)
 		}
 	}
 }

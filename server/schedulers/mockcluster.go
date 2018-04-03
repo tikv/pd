@@ -205,7 +205,7 @@ func (mc *mockCluster) addLeaderRegionWithWriteInfo(regionID uint64, leaderID ui
 	r.WrittenBytes = writtenBytes
 	isUpdate, item := mc.BasicCluster.CheckWriteStatus(o, r)
 	if isUpdate {
-		mc.HotCache.Update(regionID, item, schedule.WriteFlow)
+		mc.HotCache.Update(o, r, item, schedule.WriteFlow)
 	}
 	mc.PutRegion(r)
 }
@@ -261,7 +261,7 @@ func (mc *mockCluster) addLeaderRegionWithReadInfo(regionID uint64, leaderID uin
 	r.ReadBytes = readBytes
 	isUpdate, item := mc.BasicCluster.CheckReadStatus(o, r)
 	if isUpdate {
-		mc.HotCache.Update(regionID, item, schedule.ReadFlow)
+		mc.HotCache.Update(o, r, item, schedule.ReadFlow)
 	}
 	mc.PutRegion(r)
 }

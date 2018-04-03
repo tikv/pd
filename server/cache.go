@@ -503,12 +503,11 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		c.regionStats.Observe(region, c.getRegionStores(region))
 	}
 
-	key := region.GetId()
 	if isWriteUpdate {
-		c.HotCache.Update(key, writeItem, schedule.WriteFlow)
+		c.HotCache.Update(origin, region, writeItem, schedule.WriteFlow)
 	}
 	if isReadUpdate {
-		c.HotCache.Update(key, readItem, schedule.ReadFlow)
+		c.HotCache.Update(origin, region, readItem, schedule.ReadFlow)
 	}
 	return nil
 }
