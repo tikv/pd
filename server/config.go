@@ -422,7 +422,7 @@ const (
 	defaultMaxReplicas          = 3
 	defaultMaxSnapshotCount     = 3
 	defaultMaxPendingPeerCount  = 16
-	defaultMaxMergeRegionSize   = 0
+	defaultMaxMergeRegionSize   = 20
 	defaultSplitMergeInterval   = 1 * time.Hour
 	defaultMaxStoreDownTime     = 30 * time.Minute
 	defaultLeaderScheduleLimit  = 4
