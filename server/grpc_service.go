@@ -151,7 +151,6 @@ func (s *Server) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) (*pd
 	if err != nil {
 		return nil, grpc.Errorf(codes.Unknown, err.Error())
 	}
-	log.Warnln("Alloc Warn:", id)
 	return &pdpb.AllocIDResponse{
 		Header: s.header(),
 		Id:     id,
