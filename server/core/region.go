@@ -420,25 +420,23 @@ func (rm *regionMap) TotalSize() int64 {
 
 // RegionsInfo for export
 type RegionsInfo struct {
-	tree            *regionTree
-	regions         *regionMap            // regionID -> regionInfo
-	leaders         map[uint64]*regionMap // storeID -> regionID -> regionInfo
-	followers       map[uint64]*regionMap // storeID -> regionID -> regionInfo
-	learners        map[uint64]*regionMap // storeID -> regionID -> regionInfo
-	pendingPeers    map[uint64]*regionMap // storeID -> regionID -> regionInfo
-	pendingLearners map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	tree         *regionTree
+	regions      *regionMap            // regionID -> regionInfo
+	leaders      map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	followers    map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	learners     map[uint64]*regionMap // storeID -> regionID -> regionInfo
+	pendingPeers map[uint64]*regionMap // storeID -> regionID -> regionInfo
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
 func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
-		tree:            newRegionTree(),
-		regions:         newRegionMap(),
-		leaders:         make(map[uint64]*regionMap),
-		followers:       make(map[uint64]*regionMap),
-		learners:        make(map[uint64]*regionMap),
-		pendingPeers:    make(map[uint64]*regionMap),
-		pendingLearners: make(map[uint64]*regionMap),
+		tree:         newRegionTree(),
+		regions:      newRegionMap(),
+		leaders:      make(map[uint64]*regionMap),
+		followers:    make(map[uint64]*regionMap),
+		learners:     make(map[uint64]*regionMap),
+		pendingPeers: make(map[uint64]*regionMap),
 	}
 }
 
@@ -542,7 +540,6 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 		r.followers[storeID].Delete(region.GetId())
 		r.learners[storeID].Delete(region.GetId())
 		r.pendingPeers[storeID].Delete(region.GetId())
-		r.pendingLearners[storeID].Delete(region.GetId())
 	}
 }
 
