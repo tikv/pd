@@ -194,7 +194,7 @@ func (w *HotSpotCache) Update(origin, region *core.RegionInfo, item *core.Region
 				oldCacheFlow.Remove(origin.GetId())
 			}
 		}
-		cacheFlow, ok := w.writeFlow[item.StoreID]
+		cacheFlow, ok := w.writeFlow[region.Leader.GetStoreId()]
 		if !ok {
 			cacheFlow = cache.NewCache(cacheLenPerStore, cache.TwoQueueCache)
 			w.writeFlow[item.StoreID] = cacheFlow
@@ -210,7 +210,7 @@ func (w *HotSpotCache) Update(origin, region *core.RegionInfo, item *core.Region
 				oldCacheFlow.Remove(origin.GetId())
 			}
 		}
-		cacheFlow, ok := w.readFlow[item.StoreID]
+		cacheFlow, ok := w.readFlow[region.Leader.GetStoreId()]
 		if !ok {
 			cacheFlow = cache.NewCache(cacheLenPerStore, cache.TwoQueueCache)
 			w.readFlow[item.StoreID] = cacheFlow
@@ -241,12 +241,12 @@ func (w *HotSpotCache) RegionStats(kind FlowKind) []*core.RegionStat {
 		stats[i] = *elements[i].Value.(*core.RegionStat)
 	}
 	sort.Sort(core.RegionsStat(stats))
-	len := len(stats)
-	if len > totalCacheLen {
-		len = totalCacheLen
+	length := len(stats)
+	if length > totalCacheLen {
+		length = totalCacheLen
 	}
-	res := make([]*core.RegionStat, len)
-	for i := 0; i < len; i++ {
+	res := make([]*core.RegionStat, length)
+	for i := 0; i < length; i++ {
 		res[i] = &stats[i]
 	}
 	return res
@@ -266,7 +266,7 @@ func (w *HotSpotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hot
 func (w *HotSpotCache) isRegionHot(id uint64, hotThreshold int) bool {
 	stats := w.RegionStats(WriteFlow)
 	for _, stat := range stats {
-		if stat.RegionID == id && stat.HotDegree > hotThreshold {
+		if stat.RegionID == id && stat.HotDegree >= hotThreshold {
 			return true
 		}
 	}
