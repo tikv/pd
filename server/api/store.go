@@ -66,7 +66,7 @@ const (
 	downStateName    = "Down"
 )
 
-func newStoreInfo(store *core.StoreInfo, maxStoreDownTime time.Duration) *StoreInfo {
+func newStoreInfo(opt *server.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 	s := &StoreInfo{
 		Store: &MetaStore{
 			Store:     store.Store,
@@ -77,11 +77,11 @@ func newStoreInfo(store *core.StoreInfo, maxStoreDownTime time.Duration) *StoreI
 			Available:          typeutil.ByteSize(store.Stats.GetAvailable()),
 			LeaderCount:        store.LeaderCount,
 			LeaderWeight:       store.LeaderWeight,
-			LeaderScore:        store.LeaderScore(),
+			LeaderScore:        store.LeaderScore(opt.HighSpaceRatio, opt.LowSpaceRatio),
 			LeaderSize:         store.LeaderSize,
 			RegionCount:        store.RegionCount,
 			RegionWeight:       store.RegionWeight,
-			RegionScore:        store.RegionScore(),
+			RegionScore:        store.RegionScore(opt.HighSpaceRatio, opt.LowSpaceRatio),
 			RegionSize:         store.RegionSize,
 			SendingSnapCount:   store.Stats.GetSendingSnapCount(),
 			ReceivingSnapCount: store.Stats.GetReceivingSnapCount(),
@@ -103,7 +103,7 @@ func newStoreInfo(store *core.StoreInfo, maxStoreDownTime time.Duration) *StoreI
 	}
 
 	if store.State == metapb.StoreState_Up {
-		if store.DownTime() > maxStoreDownTime {
+		if store.DownTime() > opt.MaxStoreDownTime.Duration {
 			s.Store.StateName = downStateName
 		} else if store.IsDisconnected() {
 			s.Store.StateName = disconnectedName
@@ -137,8 +137,6 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	maxStoreDownTime := h.svr.GetScheduleConfig().MaxStoreDownTime.Duration
-
 	vars := mux.Vars(r)
 	storeIDStr := vars["id"]
 	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
@@ -153,7 +151,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	storeInfo := newStoreInfo(store, maxStoreDownTime)
+	storeInfo := newStoreInfo(h.svr.GetScheduleConfig(), store)
 	h.rd.JSON(w, http.StatusOK, storeInfo)
 }
 
@@ -324,8 +322,6 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	maxStoreDownTime := h.svr.GetScheduleConfig().MaxStoreDownTime.Duration
-
 	stores := cluster.GetStores()
 	StoresInfo := &StoresInfo{
 		Stores: make([]*StoreInfo, 0, len(stores)),
@@ -345,7 +341,7 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		storeInfo := newStoreInfo(store, maxStoreDownTime)
+		storeInfo := newStoreInfo(h.svr.GetScheduleConfig(), store)
 		StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
 	}
 	StoresInfo.Count = len(StoresInfo.Stores)

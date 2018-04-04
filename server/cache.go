@@ -564,6 +564,14 @@ func (c *clusterInfo) GetTolerantSizeRatio() float64 {
 	return c.opt.GetTolerantSizeRatio()
 }
 
+func (c *clusterInfo) GetLowSpaceRatio() float64 {
+	return c.opt.GetLowSpaceRatio()
+}
+
+func (c *clusterInfo) GetHighSpaceRatio() float64 {
+	return c.opt.GetHighSpaceRatio()
+}
+
 func (c *clusterInfo) GetMaxSnapshotCount() uint64 {
 	return c.opt.GetMaxSnapshotCount()
 }

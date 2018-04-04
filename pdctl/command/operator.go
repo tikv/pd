@@ -225,7 +225,7 @@ func mergeRegionCommandFunc(cmd *cobra.Command, args []string) {
 	input := make(map[string]interface{})
 	input["name"] = cmd.Name()
 	input["source_region_id"] = ids[0]
-	input["merge_region_id"] = ids[1]
+	input["target_region_id"] = ids[1]
 	postJSON(cmd, operatorsPrefix, input)
 }
 

@@ -121,7 +121,6 @@ func (r *ReplicaChecker) selectBestStoreToAddReplica(region *core.RegionInfo, fi
 	// Add some must have filters.
 	newFilters := []Filter{
 		NewStateFilter(),
-		NewStorageThresholdFilter(),
 		NewPendingPeerCountFilter(),
 		NewExcludedFilter(nil, region.GetStoreIds()),
 	}

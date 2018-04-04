@@ -40,6 +40,8 @@ type Options interface {
 
 	GetHotRegionLowThreshold() int
 	GetTolerantSizeRatio() float64
+	GetLowSpaceRatio() float64
+	GetHighSpaceRatio() float64
 
 	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 }

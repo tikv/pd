@@ -47,7 +47,6 @@ func newBalanceRegionScheduler(limiter *schedule.Limiter) schedule.Scheduler {
 		schedule.NewStateFilter(),
 		schedule.NewHealthFilter(),
 		schedule.NewSnapshotCountFilter(),
-		schedule.NewStorageThresholdFilter(),
 		schedule.NewPendingPeerCountFilter(),
 	}
 	base := newBaseScheduler(limiter)

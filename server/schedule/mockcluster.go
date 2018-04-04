@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedulers
+package schedule
 
 import (
 	"fmt"
@@ -22,40 +22,39 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	"github.com/pingcap/pd/server/schedule"
 	log "github.com/sirupsen/logrus"
 )
 
-type mockCluster struct {
-	*schedule.BasicCluster
+type MockCluster struct {
+	*BasicCluster
 	id *core.MockIDAllocator
 	*MockSchedulerOptions
 }
 
-// NewMockCluster creates a new mockCluster
-func newMockCluster(opt *MockSchedulerOptions) *mockCluster {
-	return &mockCluster{
-		BasicCluster:         schedule.NewBasicCluster(),
+// NewMockCluster creates a new MockCluster
+func NewMockCluster(opt *MockSchedulerOptions) *MockCluster {
+	return &MockCluster{
+		BasicCluster:         NewBasicCluster(),
 		id:                   core.NewMockIDAllocator(),
 		MockSchedulerOptions: opt,
 	}
 }
 
-func (mc *mockCluster) allocID() (uint64, error) {
+func (mc *MockCluster) allocID() (uint64, error) {
 	return mc.id.Alloc()
 }
 
 // ScanRegions scan region with start key, until number greater than limit.
-func (mc *mockCluster) ScanRegions(startKey []byte, limit int) []*core.RegionInfo {
+func (mc *MockCluster) ScanRegions(startKey []byte, limit int) []*core.RegionInfo {
 	return mc.Regions.ScanRange(startKey, limit)
 }
 
 // GetStoresAverageScore returns the total resource score of all unfiltered stores.
-func (mc *mockCluster) GetStoresAverageScore(kind core.ResourceKind, filters ...schedule.Filter) float64 {
+func (mc *MockCluster) GetStoresAverageScore(kind core.ResourceKind, filters ...Filter) float64 {
 	var totalResourceSize int64
 	var totalResourceWeight float64
 	for _, s := range mc.BasicCluster.GetStores() {
-		if schedule.FilterSource(mc, s, filters) {
+		if FilterSource(mc, s, filters) {
 			continue
 		}
 
@@ -70,12 +69,12 @@ func (mc *mockCluster) GetStoresAverageScore(kind core.ResourceKind, filters ...
 }
 
 // IsRegionHot checks if the region is hot
-func (mc *mockCluster) IsRegionHot(id uint64) bool {
+func (mc *MockCluster) IsRegionHot(id uint64) bool {
 	return mc.BasicCluster.IsRegionHot(id, mc.GetHotRegionLowThreshold())
 }
 
 // RandHotRegionFromStore random picks a hot region in specify store.
-func (mc *mockCluster) RandHotRegionFromStore(store uint64, kind schedule.FlowKind) *core.RegionInfo {
+func (mc *MockCluster) RandHotRegionFromStore(store uint64, kind FlowKind) *core.RegionInfo {
 	r := mc.HotCache.RandHotRegionFromStore(store, kind, mc.GetHotRegionLowThreshold())
 	if r == nil {
 		return nil
@@ -84,7 +83,7 @@ func (mc *mockCluster) RandHotRegionFromStore(store uint64, kind schedule.FlowKi
 }
 
 // AllocPeer allocs a new peer on a store.
-func (mc *mockCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
+func (mc *MockCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := mc.allocID()
 	if err != nil {
 		log.Errorf("failed to alloc peer: %v", err)
@@ -97,34 +96,34 @@ func (mc *mockCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	return peer, nil
 }
 
-func (mc *mockCluster) setStoreUp(storeID uint64) {
+func (mc *MockCluster) SetStoreUp(storeID uint64) {
 	store := mc.GetStore(storeID)
 	store.State = metapb.StoreState_Up
 	store.LastHeartbeatTS = time.Now()
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) setStoreDown(storeID uint64) {
+func (mc *MockCluster) SetStoreDown(storeID uint64) {
 	store := mc.GetStore(storeID)
 	store.State = metapb.StoreState_Up
 	store.LastHeartbeatTS = time.Time{}
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) setStoreOffline(storeID uint64) {
+func (mc *MockCluster) SetStoreOffline(storeID uint64) {
 	store := mc.GetStore(storeID)
 	store.State = metapb.StoreState_Offline
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) setStoreBusy(storeID uint64, busy bool) {
+func (mc *MockCluster) SetStoreBusy(storeID uint64, busy bool) {
 	store := mc.GetStore(storeID)
 	store.Stats.IsBusy = busy
 	store.LastHeartbeatTS = time.Now()
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) addLeaderStore(storeID uint64, leaderCount int) {
+func (mc *MockCluster) AddLeaderStore(storeID uint64, leaderCount int) {
 	store := core.NewStoreInfo(&metapb.Store{Id: storeID})
 	store.Stats = &pdpb.StoreStats{}
 	store.LastHeartbeatTS = time.Now()
@@ -135,7 +134,7 @@ func (mc *mockCluster) addLeaderStore(storeID uint64, leaderCount int) {
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) addRegionStore(storeID uint64, regionCount int) {
+func (mc *MockCluster) AddRegionStore(storeID uint64, regionCount int) {
 	store := core.NewStoreInfo(&metapb.Store{Id: storeID})
 	store.Stats = &pdpb.StoreStats{}
 	store.LastHeartbeatTS = time.Now()
@@ -146,32 +145,32 @@ func (mc *mockCluster) addRegionStore(storeID uint64, regionCount int) {
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) updateStoreLeaderWeight(storeID uint64, weight float64) {
+func (mc *MockCluster) UpdateStoreLeaderWeight(storeID uint64, weight float64) {
 	store := mc.GetStore(storeID)
 	store.LeaderWeight = weight
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) updateStoreRegionWeight(storeID uint64, weight float64) {
+func (mc *MockCluster) UpdateStoreRegionWeight(storeID uint64, weight float64) {
 	store := mc.GetStore(storeID)
 	store.RegionWeight = weight
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) updateStoreLeaderSize(storeID uint64, size int64) {
+func (mc *MockCluster) UpdateStoreLeaderSize(storeID uint64, size int64) {
 	store := mc.GetStore(storeID)
 	store.LeaderSize = size
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) updateStoreRegionSize(storeID uint64, size int64) {
+func (mc *MockCluster) UpdateStoreRegionSize(storeID uint64, size int64) {
 	store := mc.GetStore(storeID)
 	store.RegionSize = size
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) addLabelsStore(storeID uint64, regionCount int, labels map[string]string) {
-	mc.addRegionStore(storeID, regionCount)
+func (mc *MockCluster) AddLabelsStore(storeID uint64, regionCount int, labels map[string]string) {
+	mc.AddRegionStore(storeID, regionCount)
 	store := mc.GetStore(storeID)
 	for k, v := range labels {
 		store.Labels = append(store.Labels, &metapb.StoreLabel{Key: k, Value: v})
@@ -179,63 +178,63 @@ func (mc *mockCluster) addLabelsStore(storeID uint64, regionCount int, labels ma
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) addLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
+func (mc *MockCluster) AddLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
 	regionInfo := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	regionInfo.ApproximateSize = 10
 	mc.PutRegion(regionInfo)
 }
 
-func (mc *mockCluster) addLeaderRegionWithRange(regionID uint64, startKey string, endKey string, leaderID uint64, followerIds ...uint64) {
+func (mc *MockCluster) AddLeaderRegionWithRange(regionID uint64, startKey string, endKey string, leaderID uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r.StartKey = []byte(startKey)
 	r.EndKey = []byte(endKey)
 	mc.PutRegion(r)
 }
 
-func (mc *mockCluster) LoadRegion(regionID uint64, followerIds ...uint64) {
+func (mc *MockCluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 	//  regions load from etcd will have no leader
 	r := mc.newMockRegionInfo(regionID, 0, followerIds...)
 	r.Leader = nil
 	mc.PutRegion(r)
 }
 
-func (mc *mockCluster) addLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
+func (mc *MockCluster) AddLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r.WrittenBytes = writtenBytes
 	isUpdate, item := mc.BasicCluster.CheckWriteStatus(r)
 	if isUpdate {
-		mc.HotCache.Update(regionID, item, schedule.WriteFlow)
+		mc.HotCache.Update(regionID, item, WriteFlow)
 	}
 	mc.PutRegion(r)
 }
 
-func (mc *mockCluster) updateLeaderCount(storeID uint64, leaderCount int) {
+func (mc *MockCluster) UpdateLeaderCount(storeID uint64, leaderCount int) {
 	store := mc.GetStore(storeID)
 	store.LeaderCount = leaderCount
 	store.LeaderSize = int64(leaderCount) * 10
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) updateRegionCount(storeID uint64, regionCount int) {
+func (mc *MockCluster) UpdateRegionCount(storeID uint64, regionCount int) {
 	store := mc.GetStore(storeID)
 	store.RegionCount = regionCount
 	store.RegionSize = int64(regionCount) * 10
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) updateSnapshotCount(storeID uint64, snapshotCount int) {
+func (mc *MockCluster) UpdateSnapshotCount(storeID uint64, snapshotCount int) {
 	store := mc.GetStore(storeID)
 	store.Stats.ApplyingSnapCount = uint32(snapshotCount)
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) updatePendingPeerCount(storeID uint64, pendingPeerCount int) {
+func (mc *MockCluster) UpdatePendingPeerCount(storeID uint64, pendingPeerCount int) {
 	store := mc.GetStore(storeID)
 	store.PendingPeerCount = pendingPeerCount
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) updateStorageRatio(storeID uint64, usedRatio, availableRatio float64) {
+func (mc *MockCluster) UpdateStorageRatio(storeID uint64, usedRatio, availableRatio float64) {
 	store := mc.GetStore(storeID)
 	store.Stats.Capacity = uint64(1024)
 	store.Stats.UsedSize = uint64(float64(store.Stats.Capacity) * usedRatio)
@@ -243,28 +242,28 @@ func (mc *mockCluster) updateStorageRatio(storeID uint64, usedRatio, availableRa
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) updateStorageWrittenBytes(storeID uint64, BytesWritten uint64) {
+func (mc *MockCluster) UpdateStorageWrittenBytes(storeID uint64, BytesWritten uint64) {
 	store := mc.GetStore(storeID)
 	store.Stats.BytesWritten = BytesWritten
 	mc.PutStore(store)
 }
-func (mc *mockCluster) updateStorageReadBytes(storeID uint64, BytesRead uint64) {
+func (mc *MockCluster) UpdateStorageReadBytes(storeID uint64, BytesRead uint64) {
 	store := mc.GetStore(storeID)
 	store.Stats.BytesRead = BytesRead
 	mc.PutStore(store)
 }
 
-func (mc *mockCluster) addLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
+func (mc *MockCluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r.ReadBytes = readBytes
 	isUpdate, item := mc.BasicCluster.CheckReadStatus(r)
 	if isUpdate {
-		mc.HotCache.Update(regionID, item, schedule.ReadFlow)
+		mc.HotCache.Update(regionID, item, ReadFlow)
 	}
 	mc.PutRegion(r)
 }
 
-func (mc *mockCluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerIds ...uint64) *core.RegionInfo {
+func (mc *MockCluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerIds ...uint64) *core.RegionInfo {
 	region := &metapb.Region{
 		Id:       regionID,
 		StartKey: []byte(fmt.Sprintf("%20d", regionID)),
@@ -280,14 +279,14 @@ func (mc *mockCluster) newMockRegionInfo(regionID uint64, leaderID uint64, follo
 	return core.NewRegionInfo(region, leader)
 }
 
-func (mc *mockCluster) applyOperator(op *schedule.Operator) {
+func (mc *MockCluster) ApplyOperator(op *Operator) {
 	region := mc.GetRegion(op.RegionID())
 	for !op.IsFinish() {
 		if step := op.Check(region); step != nil {
 			switch s := step.(type) {
-			case schedule.TransferLeader:
+			case TransferLeader:
 				region.Leader = region.GetStorePeer(s.ToStore)
-			case schedule.AddPeer:
+			case AddPeer:
 				if region.GetStorePeer(s.ToStore) != nil {
 					panic("Add peer that exists")
 				}
@@ -296,7 +295,7 @@ func (mc *mockCluster) applyOperator(op *schedule.Operator) {
 					StoreId: s.ToStore,
 				}
 				region.Peers = append(region.Peers, peer)
-			case schedule.RemovePeer:
+			case RemovePeer:
 				if region.GetStorePeer(s.FromStore) == nil {
 					panic("Remove peer that doesn't exist")
 				}
@@ -309,31 +308,31 @@ func (mc *mockCluster) applyOperator(op *schedule.Operator) {
 	mc.PutRegion(region)
 }
 
-func (mc *mockCluster) GetOpt() schedule.NamespaceOptions {
+func (mc *MockCluster) GetOpt() NamespaceOptions {
 	return mc.MockSchedulerOptions
 }
 
-func (mc *mockCluster) GetLeaderScheduleLimit() uint64 {
+func (mc *MockCluster) GetLeaderScheduleLimit() uint64 {
 	return mc.MockSchedulerOptions.GetLeaderScheduleLimit(namespace.DefaultNamespace)
 }
 
-func (mc *mockCluster) GetRegionScheduleLimit() uint64 {
+func (mc *MockCluster) GetRegionScheduleLimit() uint64 {
 	return mc.MockSchedulerOptions.GetRegionScheduleLimit(namespace.DefaultNamespace)
 }
 
-func (mc *mockCluster) GetReplicaScheduleLimit() uint64 {
+func (mc *MockCluster) GetReplicaScheduleLimit() uint64 {
 	return mc.MockSchedulerOptions.GetReplicaScheduleLimit(namespace.DefaultNamespace)
 }
 
-func (mc *mockCluster) GetMergeScheduleLimit() uint64 {
+func (mc *MockCluster) GetMergeScheduleLimit() uint64 {
 	return mc.MockSchedulerOptions.GetMergeScheduleLimit(namespace.DefaultNamespace)
 }
 
-func (mc *mockCluster) GetMaxReplicas() int {
+func (mc *MockCluster) GetMaxReplicas() int {
 	return mc.MockSchedulerOptions.GetMaxReplicas(namespace.DefaultNamespace)
 }
 
-func (mc *mockCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
+func (mc *MockCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
 	for _, cfg := range mc.LabelProperties[typ] {
 		for _, l := range labels {
 			if l.Key == cfg.Key && l.Value == cfg.Value {
@@ -355,6 +354,8 @@ const (
 	defaultReplicaScheduleLimit = 32
 	defaultMergeScheduleLimit   = 20
 	defaultTolerantSizeRatio    = 2.5
+	defaultLowSpaceRatio        = 0.8
+	defaultHighSpaceRatio       = 0.5
 )
 
 // MockSchedulerOptions is a mock of SchedulerOptions
@@ -372,10 +373,12 @@ type MockSchedulerOptions struct {
 	LocationLabels        []string
 	HotRegionLowThreshold int
 	TolerantSizeRatio     float64
+	LowSpaceRatio         float64
+	HighSpaceRatio        float64
 	LabelProperties       map[string][]*metapb.StoreLabel
 }
 
-func newMockSchedulerOptions() *MockSchedulerOptions {
+func NewMockSchedulerOptions() *MockSchedulerOptions {
 	mso := &MockSchedulerOptions{}
 	mso.RegionScheduleLimit = defaultRegionScheduleLimit
 	mso.LeaderScheduleLimit = defaultLeaderScheduleLimit
@@ -384,7 +387,7 @@ func newMockSchedulerOptions() *MockSchedulerOptions {
 	mso.MaxSnapshotCount = defaultMaxSnapshotCount
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
-	mso.HotRegionLowThreshold = schedule.HotRegionLowThreshold
+	mso.HotRegionLowThreshold = HotRegionLowThreshold
 	mso.MaxPendingPeerCount = defaultMaxPendingPeerCount
 	mso.MaxMergeRegionSize = defaultMaxMergeRegionSize
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
@@ -449,6 +452,16 @@ func (mso *MockSchedulerOptions) GetHotRegionLowThreshold() int {
 // GetTolerantSizeRatio mock method
 func (mso *MockSchedulerOptions) GetTolerantSizeRatio() float64 {
 	return mso.TolerantSizeRatio
+}
+
+// GetLowSpaceRatio mock method
+func (mso *MockSchedulerOptions) GetLowSpaceRatio() float64 {
+	return mso.LowSpaceRatio
+}
+
+// GetHighSpaceRatio mock method
+func (mso *MockSchedulerOptions) GetHighSpaceRatio() float64 {
+	return mso.HighSpaceRatio
 }
 
 // SetMaxReplicas mock method

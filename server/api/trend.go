@@ -107,8 +107,6 @@ func (h *trendHandler) Handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *trendHandler) getTrendStores() ([]trendStore, error) {
-	maxStoreDownTime := h.svr.GetScheduleConfig().MaxStoreDownTime.Duration
-
 	var readStats, writeStats core.StoreHotRegionsStat
 	if hotRead := h.GetHotReadRegions(); hotRead != nil {
 		readStats = hotRead.AsLeader
@@ -123,7 +121,7 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 
 	trendStores := make([]trendStore, 0, len(stores))
 	for _, store := range stores {
-		info := newStoreInfo(store, maxStoreDownTime)
+		info := newStoreInfo(h.svr.GetScheduleConfig(), store)
 		s := trendStore{
 			ID:              info.Store.GetId(),
 			Address:         info.Store.GetAddress(),

@@ -103,15 +103,33 @@ func (s *StoreInfo) DownTime() time.Duration {
 }
 
 const minWeight = 1e-6
+const maxScore = 10000
+
+func (s *StoreInfo) score(size, highSpaceRatio, lowSpaceRatio float64) float64 {
+	capacity := float64(s.Stats.GetCapacity())
+	available := float64(s.Stats.GetAvailable())
+
+	if available > highSpaceRatio*capacity {
+		return size
+	}
+
+	if available < lowSpaceRatio*capacity {
+		return maxScore - available
+	}
+
+	k := (maxScore + (lowSpaceRatio-1-highSpaceRatio)*capacity) / ((lowSpaceRatio - highSpaceRatio) * capacity)
+	b := highSpaceRatio*capacity - k*highSpaceRatio*capacity
+	return k*size + b
+}
 
 // LeaderScore returns the store's leader score: leaderCount / leaderWeight.
-func (s *StoreInfo) LeaderScore() float64 {
-	return float64(s.LeaderSize) / math.Max(s.LeaderWeight, minWeight)
+func (s *StoreInfo) LeaderScore(highSpaceRatio, lowSpaceRatio float64) float64 {
+	return s.score(float64(s.LeaderSize), highSpaceRatio, lowSpaceRatio) / math.Max(s.LeaderWeight, minWeight)
 }
 
 // RegionScore returns the store's region score: regionSize / regionWeight.
-func (s *StoreInfo) RegionScore() float64 {
-	return float64(s.RegionSize) / math.Max(s.RegionWeight, minWeight)
+func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64) float64 {
+	return s.score(float64(s.RegionSize), highSpaceRatio, lowSpaceRatio) / math.Max(s.RegionWeight, minWeight)
 }
 
 // StorageSize returns store's used storage size reported from tikv.
@@ -159,12 +177,12 @@ func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 }
 
 // ResourceScore reutrns score of leader/region in the store.
-func (s *StoreInfo) ResourceScore(kind ResourceKind) float64 {
+func (s *StoreInfo) ResourceScore(kind ResourceKind, highSpaceRatio, lowSpaceRatio float64) float64 {
 	switch kind {
 	case LeaderKind:
-		return s.LeaderScore()
+		return s.LeaderScore(highSpaceRatio, lowSpaceRatio)
 	case RegionKind:
-		return s.RegionScore()
+		return s.RegionScore(highSpaceRatio, lowSpaceRatio)
 	default:
 		return 0
 	}

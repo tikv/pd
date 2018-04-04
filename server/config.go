@@ -352,6 +352,10 @@ type ScheduleConfig struct {
 	MergeScheduleLimit uint64 `toml:"merge-schedule-limit,omitempty" json:"merge-schedule-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
+	// LowSpaceRatio is the lowest ratio of store used size which regraded as low space.
+	LowSpaceRatio float64 `toml:"low-space-ratio,omitempty" json:"low-space-ratio"`
+	// HighSpaceRatio is the highest ratio of store used size which regraded as high space.
+	HighSpaceRatio float64 `toml:"high-space-ratio,omitempty" json:"high-space-ratio"`
 	// Schedulers support for loding customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 }
@@ -368,6 +372,8 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		ReplicaScheduleLimit: c.ReplicaScheduleLimit,
 		MergeScheduleLimit:   c.MergeScheduleLimit,
 		TolerantSizeRatio:    c.TolerantSizeRatio,
+		LowSpaceRatio:        c.LowSpaceRatio,
+		HighSpaceRatio:       c.HighSpaceRatio,
 		Schedulers:           schedulers,
 	}
 }
@@ -392,6 +398,8 @@ const (
 	defaultReplicaScheduleLimit = 32
 	defaultMergeScheduleLimit   = 20
 	defaultTolerantSizeRatio    = 2.5
+	defaultLowSpaceRatio        = 0.8
+	defaultHighSpaceRatio       = 0.5
 )
 
 var defaultSchedulers = SchedulerConfigs{
@@ -411,6 +419,8 @@ func (c *ScheduleConfig) adjust() {
 	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
 	adjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
 	adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
+	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
+	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
 }
 
