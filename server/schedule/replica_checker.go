@@ -191,7 +191,7 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 		}
 		newPeer, err := r.cluster.AllocPeer(storeID)
 		if err != nil {
-			log.Info("alloc peer meet error:", err)
+			log.Error("alloc peer meet error:", err)
 			return nil
 		}
 		return CreateMovePeerOperator("makeUpOfflineReplica", r.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
@@ -219,7 +219,7 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator
 	}
 	newPeer, err := r.cluster.AllocPeer(storeID)
 	if err != nil {
-		log.Info("alloc peer meet error:", err)
+		log.Error("alloc peer meet error:", err)
 		return nil
 	}
 	checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
