@@ -83,7 +83,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 
 // SelectBestReplacedPeerToAddReplica returns a new peer that to be used to replace the old peer and distinct score.
 func (r *ReplicaChecker) SelectBestReplacedPeerToAddReplica(region *core.RegionInfo, oldPeer *metapb.Peer, filters ...Filter) *metapb.Peer {
-	storeID, _ := r.selectBestReplacementStore(region, oldPeer, filters...)
+	storeID, _ := r.SelectBestReplacementStore(region, oldPeer, filters...)
 	if storeID == 0 {
 		log.Debugf("[region %d] no best store to add replica", region.GetId())
 		return nil
@@ -95,7 +95,8 @@ func (r *ReplicaChecker) SelectBestReplacedPeerToAddReplica(region *core.RegionI
 	return newPeer
 }
 
-func (r *ReplicaChecker) selectBestReplacementStore(region *core.RegionInfo, oldPeer *metapb.Peer, filters ...Filter) (uint64, float64) {
+// SelectBestReplacementStore returns a store id that to be used to replace the old peer and distinct score.
+func (r *ReplicaChecker) SelectBestReplacementStore(region *core.RegionInfo, oldPeer *metapb.Peer, filters ...Filter) (uint64, float64) {
 	filters = append(filters, NewExcludedFilter(nil, region.GetStoreIds()))
 	newRegion := region.Clone()
 	newRegion.RemoveStorePeer(oldPeer.GetStoreId())
@@ -214,7 +215,7 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator
 		checkerCounter.WithLabelValues("replica_checker", "all_right").Inc()
 		return nil
 	}
-	storeID, newScore := r.selectBestReplacementStore(region, oldPeer)
+	storeID, newScore := r.SelectBestReplacementStore(region, oldPeer)
 	if storeID == 0 {
 		checkerCounter.WithLabelValues("replica_checker", "no_replacement_store").Inc()
 		return nil
