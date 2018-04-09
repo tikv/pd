@@ -157,6 +157,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	newPeer, err := cluster.AllocPeer(storeID)
 	if err != nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
+		return nil
 	}
 
 	return schedule.CreateMovePeerOperator("balance-region", cluster, region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
