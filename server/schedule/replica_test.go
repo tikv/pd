@@ -18,6 +18,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -98,5 +99,8 @@ func (s *testReplicationSuite) newStoreInfo(id uint64, regionCount int, labels m
 	})
 	store.RegionCount = regionCount
 	store.RegionSize = int64(regionCount) * 10
+	store.Stats = &pdpb.StoreStats{}
+	store.Stats.Capacity = uint64(1024)
+	store.Stats.Available = store.Stats.Capacity
 	return store
 }

@@ -63,7 +63,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 		s.Tombstone++
 		return
 	}
-	if store.IsLowSpace() {
+	if store.IsLowSpace(s.opt.GetLowSpaceRatio()) {
 		s.LowSpace++
 	}
 

@@ -66,7 +66,7 @@ func (s *balanceSelector) SelectTarget(opt Options, stores []*core.StoreInfo, fi
 			continue
 		}
 		if result == nil ||
-			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio()) <
+			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio()) >
 				store.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio()) {
 			result = store
 		}

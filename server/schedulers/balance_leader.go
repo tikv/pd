@@ -89,7 +89,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 		return nil
 	}
 
-	log.Debugf("[%s] store%d has the max leader score, store%d has the min leader score", l.GetName(), source.GetId(), target.GetId())
+	log.Debugf("[%s] store%d has the max leader score, store%d has the min leader score\n", l.GetName(), source.GetId(), target.GetId())
 	sourceStoreLabel := strconv.FormatUint(source.GetId(), 10)
 	targetStoreLabel := strconv.FormatUint(target.GetId(), 10)
 	balanceLeaderCounter.WithLabelValues("high_score", sourceStoreLabel).Inc()

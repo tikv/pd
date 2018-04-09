@@ -354,7 +354,7 @@ const (
 	defaultReplicaScheduleLimit = 32
 	defaultMergeScheduleLimit   = 20
 	defaultTolerantSizeRatio    = 2.5
-	defaultLowSpaceRatio        = 0.8
+	defaultLowSpaceRatio        = 0.2
 	defaultHighSpaceRatio       = 0.5
 )
 

@@ -45,6 +45,7 @@ type StoreInfo struct {
 func NewStoreInfo(store *metapb.Store) *StoreInfo {
 	return &StoreInfo{
 		Store:        store,
+		Stats:        &pdpb.StoreStats{},
 		LeaderWeight: 1.0,
 		RegionWeight: 1.0,
 	}
@@ -106,19 +107,24 @@ const minWeight = 1e-6
 const maxScore = 10000
 
 func (s *StoreInfo) score(size, highSpaceRatio, lowSpaceRatio float64) float64 {
-	capacity := float64(s.Stats.GetCapacity())
-	available := float64(s.Stats.GetAvailable())
+	capacity := float64(s.Stats.GetCapacity()) / (1 << 20)
+	available := float64(s.Stats.GetAvailable()) / (1 << 20)
 
-	if available > highSpaceRatio*capacity {
+	// lowSpaceRatio shouldn't greater than highSpaceRatio
+	if lowSpaceRatio > highSpaceRatio {
+		lowSpaceRatio = highSpaceRatio
+	}
+
+	if available >= highSpaceRatio*capacity {
 		return size
 	}
 
-	if available < lowSpaceRatio*capacity {
+	if available <= lowSpaceRatio*capacity {
 		return maxScore - available
 	}
 
-	k := (maxScore + (lowSpaceRatio-1-highSpaceRatio)*capacity) / ((lowSpaceRatio - highSpaceRatio) * capacity)
-	b := highSpaceRatio*capacity - k*highSpaceRatio*capacity
+	k := (maxScore - (lowSpaceRatio+highSpaceRatio)*capacity) / ((1 - lowSpaceRatio - highSpaceRatio) * capacity)
+	b := (1 - k) * highSpaceRatio * capacity
 	return k*size + b
 }
 
@@ -145,11 +151,9 @@ func (s *StoreInfo) AvailableRatio() float64 {
 	return float64(s.Stats.GetAvailable()) / float64(s.Stats.GetCapacity())
 }
 
-const storeLowSpaceThreshold = 0.2
-
 // IsLowSpace checks if the store is lack of space.
-func (s *StoreInfo) IsLowSpace() bool {
-	return s.Stats != nil && s.AvailableRatio() < storeLowSpaceThreshold
+func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
+	return s.Stats != nil && s.AvailableRatio() < lowSpaceRatio
 }
 
 // ResourceCount reutrns count of leader/region in the store.

@@ -352,9 +352,9 @@ type ScheduleConfig struct {
 	MergeScheduleLimit uint64 `toml:"merge-schedule-limit,omitempty" json:"merge-schedule-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
-	// LowSpaceRatio is the lowest ratio of store used size which regraded as low space.
+	// LowSpaceRatio is the lowest available ratio of store which regraded as low space.
 	LowSpaceRatio float64 `toml:"low-space-ratio,omitempty" json:"low-space-ratio"`
-	// HighSpaceRatio is the highest ratio of store used size which regraded as high space.
+	// HighSpaceRatio is the highest available ratio of store which regraded as high space.
 	HighSpaceRatio float64 `toml:"high-space-ratio,omitempty" json:"high-space-ratio"`
 	// Schedulers support for loding customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
@@ -398,7 +398,7 @@ const (
 	defaultReplicaScheduleLimit = 32
 	defaultMergeScheduleLimit   = 20
 	defaultTolerantSizeRatio    = 2.5
-	defaultLowSpaceRatio        = 0.8
+	defaultLowSpaceRatio        = 0.2
 	defaultHighSpaceRatio       = 0.5
 )
 

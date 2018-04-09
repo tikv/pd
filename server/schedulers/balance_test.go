@@ -472,16 +472,6 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	tc.UpdateSnapshotCount(4, 1)
 	CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 4)
 
-	// Test storageThresholdFilter.
-	// If availableRatio < storageAvailableRatioThreshold(0.2), we can not add peer.
-	tc.UpdateStorageRatio(4, 0.9, 0.1)
-	CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 3)
-	tc.UpdateStorageRatio(4, 0.5, 0.1)
-	CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 3)
-	// If availableRatio > storageAvailableRatioThreshold(0.2), we can add peer again.
-	tc.UpdateStorageRatio(4, 0.7, 0.3)
-	CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 4)
-
 	// Add peer in store 4, and we have enough replicas.
 	peer4, _ := tc.AllocPeer(4)
 	region.Peers = append(region.Peers, peer4)
@@ -644,11 +634,6 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	// Store 1 has the same zone and different rack with store 6.
 	// So store 8 and store 1 are equivalent.
 	tc.AddLabelsStore(8, 1, map[string]string{"zone": "z2", "rack": "r2", "host": "h1"})
-	c.Assert(rc.Check(region), IsNil)
-
-	// Store 9 has a different zone, but it is almost full.
-	tc.AddLabelsStore(9, 1, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
-	tc.UpdateStorageRatio(9, 0.9, 0.1)
 	c.Assert(rc.Check(region), IsNil)
 
 	// Store 10 has a different zone.
