@@ -16,13 +16,6 @@ import (
 	"unsafe"
 )
 
-// SyscallNoError may be used instead of Syscall for syscalls that don't fail.
-func SyscallNoError(trap, a1, a2, a3 uintptr) (r1, r2 uintptr)
-
-// RawSyscallNoError may be used instead of RawSyscall for syscalls that don't
-// fail.
-func RawSyscallNoError(trap, a1, a2, a3 uintptr) (r1, r2 uintptr)
-
 /*
  * Wrapped
  */
@@ -789,43 +782,9 @@ func Getsockname(fd int) (sa Sockaddr, err error) {
 	return anyToSockaddr(&rsa)
 }
 
-func GetsockoptInet4Addr(fd, level, opt int) (value [4]byte, err error) {
-	vallen := _Socklen(4)
-	err = getsockopt(fd, level, opt, unsafe.Pointer(&value[0]), &vallen)
-	return value, err
-}
-
-func GetsockoptIPMreq(fd, level, opt int) (*IPMreq, error) {
-	var value IPMreq
-	vallen := _Socklen(SizeofIPMreq)
-	err := getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
-	return &value, err
-}
-
 func GetsockoptIPMreqn(fd, level, opt int) (*IPMreqn, error) {
 	var value IPMreqn
 	vallen := _Socklen(SizeofIPMreqn)
-	err := getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
-	return &value, err
-}
-
-func GetsockoptIPv6Mreq(fd, level, opt int) (*IPv6Mreq, error) {
-	var value IPv6Mreq
-	vallen := _Socklen(SizeofIPv6Mreq)
-	err := getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
-	return &value, err
-}
-
-func GetsockoptIPv6MTUInfo(fd, level, opt int) (*IPv6MTUInfo, error) {
-	var value IPv6MTUInfo
-	vallen := _Socklen(SizeofIPv6MTUInfo)
-	err := getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
-	return &value, err
-}
-
-func GetsockoptICMPv6Filter(fd, level, opt int) (*ICMPv6Filter, error) {
-	var value ICMPv6Filter
-	vallen := _Socklen(SizeofICMPv6Filter)
 	err := getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
 	return &value, err
 }

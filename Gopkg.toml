@@ -21,7 +21,7 @@
 
 [[constraint]]
   name = "github.com/coreos/etcd"
-  version = "=3.2.14"
+  version = "=3.2.18"
 
 [[override]]
   name = "github.com/grpc-ecosystem/grpc-gateway"
