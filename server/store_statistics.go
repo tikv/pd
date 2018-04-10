@@ -75,7 +75,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 
 	id := strconv.FormatUint(store.GetId(), 10)
 	storeStatusGauge.WithLabelValues(s.namespace, id, "region_score").Set(store.RegionScore(s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio()))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_score").Set(store.LeaderScore(s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio()))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_score").Set(store.LeaderScore())
 	storeStatusGauge.WithLabelValues(s.namespace, id, "region_size").Set(float64(store.RegionSize))
 	storeStatusGauge.WithLabelValues(s.namespace, id, "region_count").Set(float64(store.RegionCount))
 	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_size").Set(float64(store.LeaderSize))

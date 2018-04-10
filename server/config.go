@@ -353,8 +353,10 @@ type ScheduleConfig struct {
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
 	// LowSpaceRatio is the lowest available ratio of store which regraded as low space.
+	// When in low space, store region score increases to very large and varies inversely with available size.
 	LowSpaceRatio float64 `toml:"low-space-ratio,omitempty" json:"low-space-ratio"`
 	// HighSpaceRatio is the highest available ratio of store which regraded as high space.
+	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
 	HighSpaceRatio float64 `toml:"high-space-ratio,omitempty" json:"high-space-ratio"`
 	// Schedulers support for loding customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade

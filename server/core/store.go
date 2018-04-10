@@ -104,38 +104,39 @@ func (s *StoreInfo) DownTime() time.Duration {
 }
 
 const minWeight = 1e-6
-const maxScore = 10000
+const maxScore = 100000
 
-func (s *StoreInfo) score(size, highSpaceRatio, lowSpaceRatio float64) float64 {
+// LeaderScore returns the store's leader score: leaderSize / leaderWeight.
+func (s *StoreInfo) LeaderScore() float64 {
+	return float64(s.LeaderSize) / math.Max(s.LeaderWeight, minWeight)
+}
+
+// RegionScore returns the store's region score.
+func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64) float64 {
 	capacity := float64(s.Stats.GetCapacity()) / (1 << 20)
 	available := float64(s.Stats.GetAvailable()) / (1 << 20)
 
+	var score float64
 	// lowSpaceRatio shouldn't greater than highSpaceRatio
 	if lowSpaceRatio > highSpaceRatio {
 		lowSpaceRatio = highSpaceRatio
 	}
-
 	if available >= highSpaceRatio*capacity {
-		return size
+		score = float64(s.RegionSize)
+	} else if available <= lowSpaceRatio*capacity {
+		score = maxScore - available
+	} else {
+		// to make the score function continuous, we should linear function y = k * x + b as trainsition period
+		// from above we know that there two points on the function
+		// p1((1-highSpaceRatio)*capacity, (1-highSpaceRatio)*capacity) and
+		// p2((1-lowSpaceRatio)*capacity), maxScore-(1-lowSpaceRatio)*capacity)
+		// so k = (y2 - y1) / (x2 - x1)
+		k := (maxScore - (2-highSpaceRatio-lowSpaceRatio)*capacity) / ((highSpaceRatio - lowSpaceRatio) * capacity)
+		b := (1 - k) * highSpaceRatio * capacity
+		score = k*float64(s.RegionSize) + b
 	}
 
-	if available <= lowSpaceRatio*capacity {
-		return maxScore - available
-	}
-
-	k := (maxScore - (lowSpaceRatio+highSpaceRatio)*capacity) / ((1 - lowSpaceRatio - highSpaceRatio) * capacity)
-	b := (1 - k) * highSpaceRatio * capacity
-	return k*size + b
-}
-
-// LeaderScore returns the store's leader score: leaderCount / leaderWeight.
-func (s *StoreInfo) LeaderScore(highSpaceRatio, lowSpaceRatio float64) float64 {
-	return s.score(float64(s.LeaderSize), highSpaceRatio, lowSpaceRatio) / math.Max(s.LeaderWeight, minWeight)
-}
-
-// RegionScore returns the store's region score: regionSize / regionWeight.
-func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64) float64 {
-	return s.score(float64(s.RegionSize), highSpaceRatio, lowSpaceRatio) / math.Max(s.RegionWeight, minWeight)
+	return score / math.Max(s.RegionWeight, minWeight)
 }
 
 // StorageSize returns store's used storage size reported from tikv.
@@ -184,7 +185,7 @@ func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 func (s *StoreInfo) ResourceScore(kind ResourceKind, highSpaceRatio, lowSpaceRatio float64) float64 {
 	switch kind {
 	case LeaderKind:
-		return s.LeaderScore(highSpaceRatio, lowSpaceRatio)
+		return s.LeaderScore()
 	case RegionKind:
 		return s.RegionScore(highSpaceRatio, lowSpaceRatio)
 	default:
