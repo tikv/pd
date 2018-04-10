@@ -81,21 +81,8 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 	return r.checkBestReplacement(region)
 }
 
-// SelectBestReplacedPeerToAddReplica returns a new peer that to be used to replace the old peer and distinct score.
-func (r *ReplicaChecker) SelectBestReplacedPeerToAddReplica(region *core.RegionInfo, oldPeer *metapb.Peer, filters ...Filter) *metapb.Peer {
-	storeID, _ := r.selectBestReplacementStore(region, oldPeer, filters...)
-	if storeID == 0 {
-		log.Debugf("[region %d] no best store to add replica", region.GetId())
-		return nil
-	}
-	newPeer, err := r.cluster.AllocPeer(storeID)
-	if err != nil {
-		return nil
-	}
-	return newPeer
-}
-
-func (r *ReplicaChecker) selectBestReplacementStore(region *core.RegionInfo, oldPeer *metapb.Peer, filters ...Filter) (uint64, float64) {
+// SelectBestReplacementStore returns a store id that to be used to replace the old peer and distinct score.
+func (r *ReplicaChecker) SelectBestReplacementStore(region *core.RegionInfo, oldPeer *metapb.Peer, filters ...Filter) (uint64, float64) {
 	filters = append(filters, NewExcludedFilter(nil, region.GetStoreIds()))
 	newRegion := region.Clone()
 	newRegion.RemoveStorePeer(oldPeer.GetStoreId())
@@ -197,9 +184,13 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 			return CreateRemovePeerOperator("removePendingOfflineReplica", r.cluster, OpReplica, region, peer.GetStoreId())
 		}
 
-		newPeer := r.SelectBestReplacedPeerToAddReplica(region, peer)
-		if newPeer == nil {
-			log.Debugf("[region %d] no best peer to add replica", region.GetId())
+		storeID, _ := r.SelectBestReplacementStore(region, peer)
+		if storeID == 0 {
+			log.Debugf("[region %d] no best store to add replica", region.GetId())
+			return nil
+		}
+		newPeer, err := r.cluster.AllocPeer(storeID)
+		if err != nil {
 			return nil
 		}
 		return CreateMovePeerOperator("makeUpOfflineReplica", r.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
@@ -214,7 +205,7 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator
 		checkerCounter.WithLabelValues("replica_checker", "all_right").Inc()
 		return nil
 	}
-	storeID, newScore := r.selectBestReplacementStore(region, oldPeer)
+	storeID, newScore := r.SelectBestReplacementStore(region, oldPeer)
 	if storeID == 0 {
 		checkerCounter.WithLabelValues("replica_checker", "no_replacement_store").Inc()
 		return nil
