@@ -906,6 +906,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 
 	// Will transfer a hot region from store 1 to store 6, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
+
 	op := hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 	c.Assert(op, NotNil)
 	if op[0].RegionID() == 2 {
