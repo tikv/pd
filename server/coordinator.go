@@ -200,6 +200,9 @@ func (c *coordinator) run() {
 	k := 0
 	scheduleCfg := c.cluster.opt.load()
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
+		if schedulerCfg.Disable {
+			continue
+		}
 		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.limiter, schedulerCfg.Args...)
 		if err != nil {
 			log.Errorf("can not create scheduler %s: %v", schedulerCfg.Type, err)

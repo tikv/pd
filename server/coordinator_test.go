@@ -467,34 +467,61 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(co.schedulers, HasLen, 2)
 	c.Assert(co.cluster.opt.persist(co.cluster.kv), IsNil)
 	co.stop()
-
 	// make a new coordinator for testing
 	// whether the schedulers added or removed in dynamic way are recorded in opt
-	opt.reload(co.cluster.kv)
+	_, newOpt := newTestScheduleConfig()
+	_, err = schedule.CreateScheduler("adjacent-region", co.limiter)
+	c.Assert(err, IsNil)
+	// suppose we add a new default enable scheduler
+	newOpt.AddSchedulerCfg("adjacent-region", []string{})
+	c.Assert(newOpt.GetSchedulers(), HasLen, 5)
+	newOpt.reload(co.cluster.kv)
+	c.Assert(newOpt.GetSchedulers(), HasLen, 7)
+	tc.clusterInfo.opt = newOpt
 
 	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
-	c.Assert(co.schedulers, HasLen, 2)
+	c.Assert(co.schedulers, HasLen, 3)
 	bls, err := schedule.CreateScheduler("balance-leader", co.limiter)
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(bls), IsNil)
 	brs, err := schedule.CreateScheduler("balance-region", co.limiter)
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(brs), IsNil)
-	c.Assert(co.schedulers, HasLen, 4)
+	c.Assert(co.schedulers, HasLen, 5)
 	c.Assert(co.removeScheduler("grant-leader-scheduler-1"), IsNil)
-	c.Assert(co.schedulers, HasLen, 3)
+	c.Assert(co.schedulers, HasLen, 4)
 	c.Assert(co.cluster.opt.persist(co.cluster.kv), IsNil)
 	co.stop()
 
 	opt.reload(co.cluster.kv)
+	tc.clusterInfo.opt = opt
 	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 
 	co.run()
 	defer co.stop()
-	c.Assert(co.schedulers, HasLen, 3)
+	c.Assert(co.schedulers, HasLen, 4)
 	c.Assert(co.removeScheduler("grant-leader-scheduler-2"), IsNil)
-	c.Assert(co.schedulers, HasLen, 2)
+	c.Assert(co.schedulers, HasLen, 3)
+}
+
+func (s *testCoordinatorSuite) TestAddDefaultScheduler(c *C) {
+	_, opt := newTestScheduleConfig()
+	kv := core.NewKV(core.NewMemoryKV())
+	opt.persist(kv)
+
+	// suppose we add a new default enable scheduler "adjacent-region"
+	defaultSchedulers := []string{"balance-region", "balance-leader", "hot-region", "label", "adjacent-region"}
+	_, newOpt := newTestScheduleConfig()
+	newOpt.AddSchedulerCfg("adjacent-region", []string{})
+	newOpt.reload(kv)
+	schedulers := newOpt.GetSchedulers()
+	c.Assert(schedulers, HasLen, 5)
+	for i, s := range schedulers {
+		c.Assert(s.Type, Equals, defaultSchedulers[i])
+		c.Assert(s.Disable, IsFalse)
+	}
+
 }
 
 func (s *testCoordinatorSuite) TestRestart(c *C) {

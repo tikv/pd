@@ -131,15 +131,22 @@ func (o *scheduleOption) GetSchedulers() SchedulerConfigs {
 func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) error {
 	c := o.load()
 	v := c.clone()
-	for _, schedulerCfg := range v.Schedulers {
+	for i, schedulerCfg := range v.Schedulers {
 		// comparing args is to cover the case that there are schedulers in same type but not with same name
 		// such as two schedulers of type "evict-leader",
 		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
-		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{tp, args}) {
+		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{Type: tp, Args: args, Disable: false}) {
+			return nil
+		}
+
+		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{Type: tp, Args: args, Disable: true}) {
+			schedulerCfg.Disable = false
+			v.Schedulers[i] = schedulerCfg
+			o.store(v)
 			return nil
 		}
 	}
-	v.Schedulers = append(v.Schedulers, SchedulerConfig{Type: tp, Args: args})
+	v.Schedulers = append(v.Schedulers, SchedulerConfig{Type: tp, Args: args, Disable: false})
 	o.store(v)
 	return nil
 }
@@ -154,7 +161,8 @@ func (o *scheduleOption) RemoveSchedulerCfg(name string) error {
 			return errors.Trace(err)
 		}
 		if tmp.GetName() == name {
-			v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
+			schedulerCfg.Disable = true
+			v.Schedulers[i] = schedulerCfg
 			o.store(v)
 			return nil
 		}
@@ -214,7 +222,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		namespaces[name] = *ns.load()
 	}
 	cfg := &Config{
-		Schedule:      *o.load(),
+		Schedule:      *o.load().clone(),
 		Replication:   *o.rep.load(),
 		Namespace:     namespaces,
 		LabelProperty: o.loadLabelPropertyConfig().clone(),
@@ -224,7 +232,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		return errors.Trace(err)
 	}
 	if isExist {
-		o.store(&cfg.Schedule)
+		o.store(o.checkoutScheduleCfg(cfg))
 		o.rep.store(&cfg.Replication)
 		for name, nsCfg := range cfg.Namespace {
 			nsCfg := nsCfg
@@ -233,6 +241,33 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		o.labelProperty.Store(cfg.LabelProperty)
 	}
 	return nil
+}
+
+func (o *scheduleOption) checkoutScheduleCfg(persistentCfg *Config) *ScheduleConfig {
+	scheduleCfg := *o.load()
+	for i, s := range scheduleCfg.Schedulers {
+		for _, ps := range persistentCfg.Schedule.Schedulers {
+			if s.Type == ps.Type && reflect.DeepEqual(s.Args, ps.Args) {
+				scheduleCfg.Schedulers[i].Disable = ps.Disable
+				break
+			}
+		}
+	}
+	restoredSchedulers := make([]SchedulerConfig, 0, len(persistentCfg.Schedule.Schedulers))
+	for _, ps := range persistentCfg.Schedule.Schedulers {
+		needRestore := true
+		for _, s := range scheduleCfg.Schedulers {
+			if s.Type == ps.Type && reflect.DeepEqual(s.Args, ps.Args) {
+				needRestore = false
+				break
+			}
+		}
+		if needRestore {
+			restoredSchedulers = append(restoredSchedulers, ps)
+		}
+	}
+	scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, restoredSchedulers...)
+	return &scheduleCfg
 }
 
 func (o *scheduleOption) GetHotRegionLowThreshold() int {
