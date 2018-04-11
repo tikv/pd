@@ -79,7 +79,7 @@ func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
 			log.Warnf("expect %v, but obtain voter %v", ap.String(), p.GetId())
 			return false
 		}
-		return region.GetPendingVoter(p.GetId()) == nil && p.GetId() != ap.PeerID
+		return region.GetPendingVoter(p.GetId()) == nil
 	}
 	return false
 }
