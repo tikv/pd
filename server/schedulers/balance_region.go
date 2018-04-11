@@ -75,15 +75,10 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 
 	stores := cluster.GetStores()
 
-	// source is the store with highest leade score in the list that can be selected as balance source.
+	// source is the store with highest region score in the list that can be selected as balance source.
 	source := s.selector.SelectSource(cluster, stores)
 	if source == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_store").Inc()
-		// When the cluster is balanced, all stores will be added to the cache once
-		// all of them have been selected. This will cause the scheduler to not adapt
-		// to sudden change of a store's leader. Here we clear the taint cache and
-		// re-iterate.
-		s.taintStores.Clear()
 		return nil
 	}
 
