@@ -361,6 +361,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 	copy(schedulers, c.Schedulers)
 	return &ScheduleConfig{
 		MaxSnapshotCount:     c.MaxSnapshotCount,
+		MaxPendingPeerCount:  c.MaxPendingPeerCount,
 		MaxStoreDownTime:     c.MaxStoreDownTime,
 		MaxMergeRegionSize:   c.MaxMergeRegionSize,
 		LeaderScheduleLimit:  c.LeaderScheduleLimit,
