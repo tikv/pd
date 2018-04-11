@@ -75,7 +75,11 @@ func (ap AddPeer) String() string {
 // IsFinish checks if current step is finished.
 func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
 	if p := region.GetStoreVoter(ap.ToStore); p != nil {
-		return region.GetPendingVoter(p.GetId()) == nil
+		if p.GetId() != ap.PeerID {
+			log.Warnf("expect %v, but obtain voter %v", ap.String(), p.GetId())
+			return false
+		}
+		return region.GetPendingVoter(p.GetId()) == nil && p.GetId() != ap.PeerID
 	}
 	return false
 }
@@ -100,6 +104,10 @@ func (al AddLearner) String() string {
 // IsFinish checks if current step is finished.
 func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 	if p := region.GetStoreLearner(al.ToStore); p != nil {
+		if p.GetId() != al.PeerID {
+			log.Warnf("expect %v, but obtain learner %v", al.String(), p.GetId())
+			return false
+		}
 		return region.GetPendingLearner(p.GetId()) == nil
 	}
 	return false
@@ -125,6 +133,9 @@ func (pl PromoteLearner) String() string {
 // IsFinish checks if current step is finished.
 func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 	if p := region.GetStoreVoter(pl.ToStore); p != nil {
+		if p.GetId() != pl.PeerID {
+			log.Warnf("expect %v, but obtain voter %v", pl.String(), p.GetId())
+		}
 		return p.GetId() == pl.PeerID
 	}
 	return false
