@@ -79,6 +79,9 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 	source := s.selector.SelectSource(cluster, stores)
 	if source == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_store").Inc()
+		// Unlike the balanceLeaderScheduler, we don't need to clear the taintCache
+		// here. Because normally region score won't change rapidly, and the region
+		// balance requires lower sensitivity compare to leader balance.
 		return nil
 	}
 
