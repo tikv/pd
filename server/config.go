@@ -361,6 +361,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 	copy(schedulers, c.Schedulers)
 	return &ScheduleConfig{
 		MaxSnapshotCount:     c.MaxSnapshotCount,
+		MaxPendingPeerCount:  c.MaxPendingPeerCount,
 		MaxStoreDownTime:     c.MaxStoreDownTime,
 		MaxMergeRegionSize:   c.MaxMergeRegionSize,
 		LeaderScheduleLimit:  c.LeaderScheduleLimit,
@@ -388,10 +389,10 @@ const (
 	defaultMaxPendingPeerCount  = 16
 	defaultMaxMergeRegionSize   = 0
 	defaultMaxStoreDownTime     = 30 * time.Minute
-	defaultLeaderScheduleLimit  = 64
-	defaultRegionScheduleLimit  = 12
-	defaultReplicaScheduleLimit = 32
-	defaultMergeScheduleLimit   = 20
+	defaultLeaderScheduleLimit  = 4
+	defaultRegionScheduleLimit  = 4
+	defaultReplicaScheduleLimit = 8
+	defaultMergeScheduleLimit   = 8
 	defaultTolerantSizeRatio    = 2.5
 )
 
