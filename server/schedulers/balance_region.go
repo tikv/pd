@@ -136,13 +136,13 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	scoreGuard := schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), stores, source)
 
 	checker := schedule.NewReplicaChecker(cluster, nil)
-	newPeer := checker.SelectBestReplacedPeerToAddReplica(region, oldPeer, scoreGuard)
-	if newPeer == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
+	storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard)
+	if storeID == 0 {
+		schedulerCounter.WithLabelValues(s.GetName(), "no_store").Inc()
 		return nil
 	}
 
-	target := cluster.GetStore(newPeer.GetStoreId())
+	target := cluster.GetStore(storeID)
 	log.Debugf("[region %d] source store id is %v, target store id is %v", region.GetId(), source.GetId(), target.GetId())
 
 	regionSize := int64(float64(region.ApproximateSize) * cluster.GetTolerantSizeRatio())
@@ -152,6 +152,11 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 		log.Debugf("[%s] skip balance region%d, source size: %v, source score: %v, target size: %v, target score: %v, region size: %v", s.GetName(), region.GetId(),
 			source.RegionSize, source.RegionWeight, target.RegionSize, target.RegionWeight, region.ApproximateSize)
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
+		return nil
+	}
+	newPeer, err := cluster.AllocPeer(storeID)
+	if err != nil {
+		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
 		return nil
 	}
 
