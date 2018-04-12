@@ -410,6 +410,7 @@ func (c *coordinator) addOperatorLocked(op *schedule.Operator) bool {
 	if old, ok := c.operators[regionID]; ok {
 		if !isHigherPriorityOperator(op, old) {
 			log.Infof("[region %v] cancel add operator, old: %s", regionID, old)
+			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
 			return false
 		}
 		log.Infof("[region %v] replace old operator: %s", regionID, old)

@@ -74,7 +74,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 
 	stores := cluster.GetStores()
 
-	// source is the store with highest leade score in the list that can be selected as balance source.
+	// source is the store with highest leader score in the list that can be selected as balance source.
 	source := s.selector.SelectSource(cluster, stores)
 	if source == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_store").Inc()
@@ -145,11 +145,12 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	target := cluster.GetStore(newPeer.GetStoreId())
 	log.Debugf("[region %d] source store id is %v, target store id is %v", region.GetId(), source.GetId(), target.GetId())
 
-	sourceSize := source.RegionSize + int64(opInfluence.GetStoreInfluence(source.GetId()).RegionSize)
-	targetSize := target.RegionSize + int64(opInfluence.GetStoreInfluence(target.GetId()).RegionSize)
-	regionSize := float64(region.ApproximateSize) * cluster.GetTolerantSizeRatio()
-	if !shouldBalance(sourceSize, source.RegionWeight, targetSize, target.RegionWeight, regionSize) {
-		log.Debugf("[%s] skip balance region%d, source size: %v, source weight: %v, target size: %v, target weight: %v, region size: %v", s.GetName(), region.GetId(), sourceSize, source.RegionWeight, targetSize, target.RegionWeight, region.ApproximateSize)
+	regionSize := int64(float64(region.ApproximateSize) * cluster.GetTolerantSizeRatio())
+	source.RegionSize += int64(opInfluence.GetStoreInfluence(source.GetId()).RegionSize) - regionSize
+	target.RegionSize += int64(opInfluence.GetStoreInfluence(target.GetId()).RegionSize) + regionSize
+	if !shouldBalance(cluster, source, target, core.RegionKind) {
+		log.Debugf("[%s] skip balance region%d, source size: %v, source score: %v, target size: %v, target score: %v, region size: %v", s.GetName(), region.GetId(),
+			source.RegionSize, source.RegionWeight, target.RegionSize, target.RegionWeight, region.ApproximateSize)
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
 	}

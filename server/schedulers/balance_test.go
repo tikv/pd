@@ -62,7 +62,11 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		{100, 0, 500, 1, 50, true}, // sourceWeight=0
 	}
 
+	opt := schedule.NewMockSchedulerOptions()
+	tc := schedule.NewMockCluster(opt)
+
 	for _, t := range testCases {
+		r := core.RegionInfo{}
 		c.Assert(shouldBalance(t.sourceSize, t.sourceWeight, t.targetSize, t.targetWeight, t.moveSize), Equals, t.result)
 	}
 }
