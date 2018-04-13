@@ -11,7 +11,7 @@
   branch = "master"
   name = "github.com/beorn7/perks"
   packages = ["quantile"]
-  revision = "4c0e84591b9aa9e6dcfdf3e020114cd81f89d5f9"
+  revision = "3a771d992973f24aa725d07868b467d1ddfceafb"
 
 [[projects]]
   branch = "master"
@@ -102,8 +102,8 @@
     "wal",
     "wal/walpb"
   ]
-  revision = "fb5cd6f1c72c2b98e0c4453444cdfba306da867b"
-  version = "v3.2.14"
+  revision = "eddf599c689ec85f4752060edff5a72e81e9106a"
+  version = "v3.2.18"
 
 [[projects]]
   name = "github.com/coreos/go-semver"
@@ -114,8 +114,8 @@
 [[projects]]
   name = "github.com/coreos/go-systemd"
   packages = ["journal"]
-  revision = "d2196463941895ee908e13531a23a39feb9e1243"
-  version = "v15"
+  revision = "40e2722dffead74698ca12a750f64ef313ddce05"
+  version = "v16"
 
 [[projects]]
   name = "github.com/coreos/pkg"
@@ -126,8 +126,8 @@
 [[projects]]
   name = "github.com/dgrijalva/jwt-go"
   packages = ["."]
-  revision = "dbeaa9332f19a944acb5736b4456cfcc02140e29"
-  version = "v3.1.0"
+  revision = "06ea1031745cb8b3dab3f6a236daf2b0aa468b7e"
+  version = "v3.2.0"
 
 [[projects]]
   branch = "master"
@@ -144,8 +144,8 @@
 [[projects]]
   name = "github.com/gogo/protobuf"
   packages = ["proto"]
-  revision = "342cbe0a04158f6dcb03ca0079991a51a4248c02"
-  version = "v0.5"
+  revision = "1adfc126b41513cc696b209667c8656ea7aac67c"
+  version = "v1.0.0"
 
 [[projects]]
   name = "github.com/golang/protobuf"
@@ -280,7 +280,7 @@
     "internal/bitbucket.org/ww/goautoneg",
     "model"
   ]
-  revision = "89604d197083d4781071d3c65855d24ecfb0a563"
+  revision = "38c53a9f4bfcd932d1b00bfc65e256a7fba6b37a"
 
 [[projects]]
   branch = "master"
@@ -291,19 +291,19 @@
     "nfs",
     "xfs"
   ]
-  revision = "cb4147076ac75738c9a7d279075a253c0cc5acbd"
+  revision = "8b1c2da0d56deffdbb9e48d4414b4e674bd8083e"
 
 [[projects]]
   name = "github.com/sirupsen/logrus"
   packages = ["."]
-  revision = "d682213848ed68c0a260ca37d6dd5ace8423f5ba"
-  version = "v1.0.4"
+  revision = "c155da19408a8799da419ed3eeb0cb5db0ad5dbc"
+  version = "v1.0.5"
 
 [[projects]]
   name = "github.com/spf13/cobra"
   packages = ["."]
-  revision = "7b2c5ac9fc04fc5efafb60700713d4fa609b777b"
-  version = "v0.0.1"
+  revision = "a1f051bc3eba734da4772d60e2d677f47cf93ef4"
+  version = "v0.0.2"
 
 [[projects]]
   name = "github.com/spf13/pflag"
@@ -343,7 +343,7 @@
     "blowfish",
     "ssh/terminal"
   ]
-  revision = "1875d0a70c90e57f11972aefd42276df65e895b9"
+  revision = "b2aa35443fbc700ab74c586ae79b81c171851023"
 
 [[projects]]
   branch = "master"
@@ -357,7 +357,7 @@
     "lex/httplex",
     "trace"
   ]
-  revision = "0ed95abb35c445290478a5348a7b38bb154135fd"
+  revision = "61147c48b25b599e5b561d2e9c4f3e1ef489ca41"
 
 [[projects]]
   branch = "master"
@@ -366,10 +366,9 @@
     "unix",
     "windows"
   ]
-  revision = "3dbebcf8efb6a5011a60c2b4591c1022a759af8a"
+  revision = "3b87a42e500a6dc65dae1a55d0b641295971163e"
 
 [[projects]]
-  branch = "master"
   name = "golang.org/x/text"
   packages = [
     "collate",
@@ -387,7 +386,8 @@
     "unicode/norm",
     "unicode/rangetable"
   ]
-  revision = "e19ae1496984b1c655b8044a65c0300a3c878dd3"
+  revision = "f21a4dfb5e38f5895301dc265a8def02365cc3d0"
+  version = "v0.3.0"
 
 [[projects]]
   branch = "master"
@@ -396,7 +396,7 @@
     "googleapis/api/annotations",
     "googleapis/rpc/status"
   ]
-  revision = "4eb30f4778eed4c258ba66527a0d4f9ec8a36c45"
+  revision = "ce84044298496ef4b54b4a0a0909ba593cc60e30"
 
 [[projects]]
   name = "google.golang.org/grpc"
@@ -431,14 +431,14 @@
   version = "v2.1"
 
 [[projects]]
-  branch = "v2"
   name = "gopkg.in/yaml.v2"
   packages = ["."]
-  revision = "d670f9405373e636a5a2765eea47fac0c9bc91a4"
+  revision = "5420a8b6744d3b0345ab293f6fcba19c978f1183"
+  version = "v2.2.1"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "cb02044c52cc81e2ad2707c769a53a957b1881030e57233415290de5a3d4d5bc"
+  inputs-digest = "90d6c5f0363899fabe09ffbf7acca19afa8c0812d9947ec28026e7f8f18cf30a"
   solver-name = "gps-cdcl"
   solver-version = 1
