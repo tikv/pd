@@ -80,6 +80,9 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	storeStatusGauge.WithLabelValues(s.namespace, id, "region_count").Set(float64(store.RegionCount))
 	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_size").Set(float64(store.LeaderSize))
 	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_count").Set(float64(store.LeaderCount))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "storage_available").Set(float64(store.Stats.GetAvailable()))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "storage_capacity").Set(float64(store.Stats.GetCapacity()))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "storage_used").Set(float64(store.Stats.GetUsedSize()))
 }
 
 func (s *storeStatistics) Collect() {

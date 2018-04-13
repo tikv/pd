@@ -448,6 +448,7 @@ func (c *coordinator) addOperators(ops ...*schedule.Operator) bool {
 	for _, op := range ops {
 		if old := c.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
 			log.Infof("[region %v] cancel add operators, old: %s", op.RegionID(), old)
+			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
 			return false
 		}
 	}
