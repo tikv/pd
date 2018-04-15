@@ -128,7 +128,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(source *core.StoreInfo, clust
 		schedulerCounter.WithLabelValues(l.GetName(), "no_target_store").Inc()
 		return nil
 	}
-	return l.createOperator(region, source, target, cluster, opInfluence)
+	return l.createOperator(region, source.Clone(), target, cluster, opInfluence)
 }
 
 func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
@@ -144,7 +144,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluste
 		schedulerCounter.WithLabelValues(l.GetName(), "no_leader").Inc()
 		return nil
 	}
-	return l.createOperator(region, source, target, cluster, opInfluence)
+	return l.createOperator(region, source, target.Clone(), cluster, opInfluence)
 }
 
 func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source, target *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
@@ -154,15 +154,17 @@ func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source,
 		schedulerCounter.WithLabelValues(l.GetName(), "region_hot").Inc()
 		return nil
 	}
+
 	regionSize := int64(float64(region.ApproximateSize) * cluster.GetTolerantSizeRatio())
 	source.LeaderSize += int64(opInfluence.GetStoreInfluence(source.GetId()).LeaderSize) - regionSize
 	target.LeaderSize += int64(opInfluence.GetStoreInfluence(target.GetId()).LeaderSize) + regionSize
 	if !shouldBalance(cluster, source, target, core.LeaderKind) {
 		log.Debugf("[%s] skip balance region%d, source size: %v, source score: %v, target size: %v, target score: %v, region size: %v", l.GetName(), region.GetId(),
-			source.LeaderSize, source.LeaderWeight, target.LeaderSize, target.LeaderWeight, region.ApproximateSize)
+			source.LeaderSize, source.LeaderScore(), target.LeaderSize, target.LeaderScore(), region.ApproximateSize)
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}
+
 	schedulerCounter.WithLabelValues(l.GetName(), "new_operator").Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: target.GetId()}
 	log.Debugf("[%s] start balance region %d, from: %d, to: %d", l.GetName(), region.GetId(), source.GetId(), target.GetId())
