@@ -37,14 +37,9 @@ func NewMergeChecker(cluster Cluster, classifier namespace.Classifier) *MergeChe
 func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	checkerCounter.WithLabelValues("merge_checker", "check").Inc()
 
-	if len(region.Region.GetPeers()) != m.cluster.GetMaxReplicas() {
-		checkerCounter.WithLabelValues("merge_checker", "abnormal_replica").Inc()
-		return nil, nil
-	}
-
 	// when pd just started, it will load region meta from etcd
 	// but the size for these loaded region info is 0
-	// pd don't the real size of one region until the first heartbeat of the region
+	// pd don't know the real size of one region until the first heartbeat of the region
 	// thus here when size is 0, just skip.
 	if region.ApproximateSize == 0 {
 		checkerCounter.WithLabelValues("merge_checker", "skip").Inc()
@@ -57,15 +52,14 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 		return nil, nil
 	}
 
-	// skip region has down peers
-	if len(region.DownPeers) > 0 {
-		checkerCounter.WithLabelValues("merge_checker", "down_peers").Inc()
+	// skip region has down peers or pending peers or learner peers
+	if len(region.DownPeers) > 0 || len(region.PendingPeers) > 0 || len(region.Learners) > 0 {
+		checkerCounter.WithLabelValues("merge_checker", "special_peer").Inc()
 		return nil, nil
 	}
 
-	// skip region has pending peers
-	if len(region.PendingPeers) > 0 {
-		checkerCounter.WithLabelValues("merge_checker", "pending_peers").Inc()
+	if len(region.Region.GetPeers()) != m.cluster.GetMaxReplicas() {
+		checkerCounter.WithLabelValues("merge_checker", "abnormal_replica").Inc()
 		return nil, nil
 	}
 
@@ -99,7 +93,7 @@ func (m *MergeChecker) checkTarget(region, adjacent, target *core.RegionInfo) *c
 	// if is not hot region and under same namesapce
 	if adjacent != nil && !m.cluster.IsRegionHot(adjacent.GetId()) &&
 		m.classifier.AllowMerge(region, adjacent) &&
-		len(adjacent.DownPeers) == 0 && len(adjacent.PendingPeers) == 0 {
+		len(adjacent.DownPeers) == 0 && len(adjacent.PendingPeers) == 0 && len(adjacent.Learners) == 0 {
 		// if both region is not hot, prefer the one with smaller size
 		if target == nil || target.ApproximateSize > adjacent.ApproximateSize {
 			// peer count should equal

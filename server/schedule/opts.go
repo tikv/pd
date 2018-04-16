@@ -41,6 +41,7 @@ type Options interface {
 	GetHotRegionLowThreshold() int
 	GetTolerantSizeRatio() float64
 
+	IsRaftLearnerEnabled() bool
 	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 }
 

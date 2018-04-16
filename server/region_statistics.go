@@ -85,14 +85,17 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		r.stats[extraPeer][regionID] = region
 		peerTypeIndex |= extraPeer
 	}
+
 	if len(region.DownPeers) > 0 {
 		r.stats[downPeer][regionID] = region
 		peerTypeIndex |= downPeer
 	}
+
 	if len(region.PendingPeers) > 0 {
 		r.stats[pendingPeer][regionID] = region
 		peerTypeIndex |= pendingPeer
 	}
+
 	for _, store := range stores {
 		if store.IsOffline() {
 			peer := region.GetStorePeer(store.GetId())

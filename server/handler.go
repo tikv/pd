@@ -38,6 +38,10 @@ var (
 	ErrRegionNotFound = func(regionID uint64) error {
 		return errors.Errorf("region %v not found", regionID)
 	}
+	// ErrRegionAbnormalPeer is error info for region has abonormal peer
+	ErrRegionAbnormalPeer = func(regionID uint64) error {
+		return errors.Errorf("region %v has abnormal peer", regionID)
+	}
 	// ErrRegionIsStale is error info for region is stale
 	ErrRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
 		return errors.Errorf("region is stale: region %v origin %v", region, origin)
@@ -292,9 +296,9 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 	if region == nil {
 		return ErrRegionNotFound(regionID)
 	}
-	newLeader := region.GetStorePeer(storeID)
+	newLeader := region.GetStoreVoter(storeID)
 	if newLeader == nil {
-		return errors.Errorf("region has no peer in store %v", storeID)
+		return errors.Errorf("region has no voter in store %v", storeID)
 	}
 
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
@@ -331,7 +335,14 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		if err != nil {
 			return errors.Trace(err)
 		}
-		steps = append(steps, schedule.AddPeer{ToStore: id, PeerID: peer.Id})
+		if c.cluster.IsRaftLearnerEnabled() {
+			steps = append(steps,
+				schedule.AddLearner{ToStore: id, PeerID: peer.Id},
+				schedule.PromoteLearner{ToStore: id, PeerID: peer.Id},
+			)
+		} else {
+			steps = append(steps, schedule.AddPeer{ToStore: id, PeerID: peer.Id})
+		}
 	}
 
 	// Remove redundant peers.
@@ -405,8 +416,18 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		return errors.Trace(err)
 	}
 
-	step := schedule.AddPeer{ToStore: toStoreID, PeerID: newPeer.GetId()}
-	op := schedule.NewOperator("adminAddPeer", regionID, schedule.OpAdmin|schedule.OpRegion, step)
+	var steps []schedule.OperatorStep
+	if c.cluster.IsRaftLearnerEnabled() {
+		steps = []schedule.OperatorStep{
+			schedule.AddLearner{ToStore: toStoreID, PeerID: newPeer.GetId()},
+			schedule.PromoteLearner{ToStore: toStoreID, PeerID: newPeer.GetId()},
+		}
+	} else {
+		steps = []schedule.OperatorStep{
+			schedule.AddPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
+		}
+	}
+	op := schedule.NewOperator("adminAddPeer", regionID, schedule.OpAdmin|schedule.OpRegion, steps...)
 	if ok := c.addOperator(op); !ok {
 		return errors.Trace(errAddOperator)
 	}
@@ -453,13 +474,23 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotFound(targetID)
 	}
 
+	if len(region.DownPeers) > 0 || len(region.PendingPeers) > 0 || len(region.Learners) > 0 ||
+		len(region.Region.GetPeers()) != c.cluster.GetMaxReplicas() {
+		return ErrRegionAbnormalPeer(regionID)
+	}
+
+	if len(target.DownPeers) > 0 || len(target.PendingPeers) > 0 || len(target.Learners) > 0 ||
+		len(target.Region.GetPeers()) != c.cluster.GetMaxReplicas() {
+		return ErrRegionAbnormalPeer(targetID)
+	}
+
 	// for the case first region (start key is nil) with the last region (end key is nil) but not adjacent
 	if (bytes.Compare(region.StartKey, target.EndKey) != 0 || len(region.StartKey) == 0) &&
 		(bytes.Compare(region.EndKey, target.StartKey) != 0 || len(region.EndKey) == 0) {
 		return ErrRegionNotAdjacent
 	}
 
-	op1, op2, err := schedule.CreateMergeRegionOperator("merge-region", c.cluster, region, target, schedule.OpAdmin)
+	op1, op2, err := schedule.CreateMergeRegionOperator("adminMergeRegion", c.cluster, region, target, schedule.OpAdmin)
 	if err != nil {
 		return errors.Trace(err)
 	}
