@@ -14,6 +14,7 @@
 package schedulers
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -143,13 +144,14 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	target := cluster.GetStore(storeID)
 	log.Debugf("[region %d] source store id is %v, target store id is %v", region.GetId(), source.GetId(), target.GetId())
 
-	regionSize := int64(float64(region.ApproximateSize) * cluster.GetTolerantSizeRatio())
-	source.RegionSize += int64(opInfluence.GetStoreInfluence(source.GetId()).RegionSize) - regionSize
-	target.RegionSize += int64(opInfluence.GetStoreInfluence(target.GetId()).RegionSize) + regionSize
-	if !shouldBalance(cluster, source, target, core.RegionKind) {
+	log.Debugf("[%s] balance region%d, origin source size: %v, origin source score: %v, origin target size: %v, origin target score: %v", s.GetName(), region.GetId(),
+		source.RegionSize, source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
+		target.RegionSize, target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0))
+
+	if !shouldBalance(cluster, source, target, core.RegionKind, region, opInfluence) {
 		log.Debugf("[%s] skip balance region%d, source size: %v, source score: %v, target size: %v, target score: %v, region size: %v", s.GetName(), region.GetId(),
-			source.RegionSize, source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio()),
-			target.RegionSize, target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio()), region.ApproximateSize)
+			source.RegionSize, source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
+			target.RegionSize, target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0), region.ApproximateSize)
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
 	}
@@ -159,5 +161,6 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
 		return nil
 	}
+	balanceRegionCounter.WithLabelValues("move_peer", fmt.Sprintf("store%d-to-store%d", source.GetId(), target.GetId())).Inc()
 	return schedule.CreateMovePeerOperator("balance-region", cluster, region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }

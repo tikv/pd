@@ -85,10 +85,14 @@ func minDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, kind core.ResourceKind) bool {
+func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, kind core.ResourceKind, region *core.RegionInfo, opInfluence schedule.OpInfluence) bool {
+	regionSize := int64(float64(region.ApproximateSize) * cluster.GetTolerantSizeRatio())
+	sourceDelta := int64(opInfluence.GetStoreInfluence(source.GetId()).LeaderSize) - regionSize
+	targetDelta := int64(opInfluence.GetStoreInfluence(target.GetId()).LeaderSize) + regionSize
+
 	// Make sure after move, source score is still greater than target score.
-	return source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio()) >
-		target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio())
+	return source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceDelta) >
+		target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetDelta)
 }
 
 func adjustBalanceLimit(cluster schedule.Cluster, kind core.ResourceKind) uint64 {

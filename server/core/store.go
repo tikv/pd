@@ -107,12 +107,12 @@ const minWeight = 1e-6
 const maxScore = 1024 * 1024 * 1024
 
 // LeaderScore returns the store's leader score: leaderSize / leaderWeight.
-func (s *StoreInfo) LeaderScore() float64 {
-	return float64(s.LeaderSize) / math.Max(s.LeaderWeight, minWeight)
+func (s *StoreInfo) LeaderScore(delta int64) float64 {
+	return float64(s.LeaderSize+delta) / math.Max(s.LeaderWeight, minWeight)
 }
 
 // RegionScore returns the store's region score.
-func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64) float64 {
+func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	capacity := float64(s.Stats.GetCapacity()) / (1 << 20)
 	available := float64(s.Stats.GetAvailable()) / (1 << 20)
 
@@ -125,10 +125,10 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64) float64 {
 
 	amplifier := float64(s.RegionSize) / (float64(s.Stats.GetUsedSize()) / (1 << 20))
 
-	if available >= highSpaceRatio*capacity || lowSpaceRatio < 0 || lowSpaceRatio > 1 {
-		score = float64(s.RegionSize)
-	} else if available <= lowSpaceRatio*capacity || highSpaceRatio < 0 || highSpaceRatio > 1 {
-		score = maxScore - available
+	if available-float64(delta)/amplifier >= highSpaceRatio*capacity || lowSpaceRatio < 0 || lowSpaceRatio > 1 {
+		score = float64(s.RegionSize + delta)
+	} else if available-float64(delta)/amplifier <= lowSpaceRatio*capacity || highSpaceRatio < 0 || highSpaceRatio > 1 {
+		score = maxScore - (available - float64(delta)/amplifier)
 	} else {
 		// to make the score function continuous, we use linear function y = k * x + b as transition period
 		// from above we know that there are two points must on the function image
@@ -140,7 +140,7 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64) float64 {
 
 		k := (y2 - y1) / (x2 - x1)
 		b := y1 - k*x1
-		score = k*float64(s.RegionSize) + b
+		score = k*float64(s.RegionSize+delta) + b
 	}
 
 	return score / math.Max(s.RegionWeight, minWeight)
@@ -189,12 +189,12 @@ func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 }
 
 // ResourceScore reutrns score of leader/region in the store.
-func (s *StoreInfo) ResourceScore(kind ResourceKind, highSpaceRatio, lowSpaceRatio float64) float64 {
+func (s *StoreInfo) ResourceScore(kind ResourceKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	switch kind {
 	case LeaderKind:
-		return s.LeaderScore()
+		return s.LeaderScore(delta)
 	case RegionKind:
-		return s.RegionScore(highSpaceRatio, lowSpaceRatio)
+		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta)
 	default:
 		return 0
 	}

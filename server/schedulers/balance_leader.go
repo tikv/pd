@@ -14,6 +14,7 @@
 package schedulers
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/pingcap/pd/server/cache"
@@ -128,7 +129,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(source *core.StoreInfo, clust
 		schedulerCounter.WithLabelValues(l.GetName(), "no_target_store").Inc()
 		return nil
 	}
-	return l.createOperator(region, source.Clone(), target, cluster, opInfluence)
+	return l.createOperator(region, source, target, cluster, opInfluence)
 }
 
 func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
@@ -144,30 +145,26 @@ func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluste
 		schedulerCounter.WithLabelValues(l.GetName(), "no_leader").Inc()
 		return nil
 	}
-	return l.createOperator(region, source, target.Clone(), cluster, opInfluence)
+	return l.createOperator(region, source, target, cluster, opInfluence)
 }
 
 func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source, target *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
-	log.Debugf("[%s] verify balance region %d, from: %d, to: %d", l.GetName(), region.GetId(), source.GetId(), target.GetId())
 	if cluster.IsRegionHot(region.GetId()) {
 		log.Debugf("[%s] region %d is hot region, ignore it", l.GetName(), region.GetId())
 		schedulerCounter.WithLabelValues(l.GetName(), "region_hot").Inc()
 		return nil
 	}
 
-	regionSize := int64(float64(region.ApproximateSize) * cluster.GetTolerantSizeRatio())
-	source.LeaderSize += int64(opInfluence.GetStoreInfluence(source.GetId()).LeaderSize) - regionSize
-	target.LeaderSize += int64(opInfluence.GetStoreInfluence(target.GetId()).LeaderSize) + regionSize
-	if !shouldBalance(cluster, source, target, core.LeaderKind) {
+	if !shouldBalance(cluster, source, target, core.LeaderKind, region, opInfluence) {
 		log.Debugf("[%s] skip balance region%d, source size: %v, source score: %v, target size: %v, target score: %v, region size: %v", l.GetName(), region.GetId(),
-			source.LeaderSize, source.LeaderScore(), target.LeaderSize, target.LeaderScore(), region.ApproximateSize)
+			source.LeaderSize, source.LeaderScore(0), target.LeaderSize, target.LeaderScore(0), region.ApproximateSize)
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}
 
 	schedulerCounter.WithLabelValues(l.GetName(), "new_operator").Inc()
+	balanceRegionCounter.WithLabelValues("move_leader", fmt.Sprintf("store%d-to-store%d", source.GetId(), target.GetId())).Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: target.GetId()}
-	log.Debugf("[%s] start balance region %d, from: %d, to: %d", l.GetName(), region.GetId(), source.GetId(), target.GetId())
 	op := schedule.NewOperator("balance-leader", region.GetId(), schedule.OpBalance|schedule.OpLeader, step)
 	return []*schedule.Operator{op}
 }

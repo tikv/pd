@@ -49,12 +49,12 @@ func compareStoreScore(opt Options, storeA *core.StoreInfo, scoreA float64, stor
 		return -1
 	}
 	// The store with lower region score is better.
-	if storeA.RegionScore(opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio()) <
-		storeB.RegionScore(opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio()) {
+	if storeA.RegionScore(opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) <
+		storeB.RegionScore(opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) {
 		return 1
 	}
-	if storeA.RegionScore(opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio()) >
-		storeB.RegionScore(opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio()) {
+	if storeA.RegionScore(opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) >
+		storeB.RegionScore(opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) {
 		return -1
 	}
 	return 0
