@@ -352,6 +352,12 @@ type ScheduleConfig struct {
 	MergeScheduleLimit uint64 `toml:"merge-schedule-limit,omitempty" json:"merge-schedule-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
+	//
+	//     high space period         transition period           low space period
+	//   |--------------------|-----------------------------|-------------------------|
+	//   ^                    ^                             ^                         ^
+	//   0   (1 - LowSpaceRatio) * capacity       (1 - SpaceRatio) * capacity      capacity
+	//
 	// LowSpaceRatio is the lowest available ratio of store which regraded as low space.
 	// When in low space, store region score increases to very large and varies inversely with available size.
 	LowSpaceRatio float64 `toml:"low-space-ratio,omitempty" json:"low-space-ratio"`

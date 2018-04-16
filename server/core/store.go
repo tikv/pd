@@ -104,7 +104,7 @@ func (s *StoreInfo) DownTime() time.Duration {
 }
 
 const minWeight = 1e-6
-const maxScore = 1000 * 1000 * 1000
+const maxScore = 1024 * 1024 * 1024
 
 // LeaderScore returns the store's leader score: leaderSize / leaderWeight.
 func (s *StoreInfo) LeaderScore() float64 {
@@ -117,22 +117,23 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64) float64 {
 	available := float64(s.Stats.GetAvailable()) / (1 << 20)
 
 	var score float64
+
 	// lowSpaceRatio shouldn't greater than highSpaceRatio
 	if lowSpaceRatio > highSpaceRatio {
 		lowSpaceRatio = highSpaceRatio
 	}
 
-	amplifier := float64(s.RegionSize) / float64(s.Stats.GetUsedSize())
+	amplifier := float64(s.RegionSize) / (float64(s.Stats.GetUsedSize()) / (1 << 20))
 
-	if available >= highSpaceRatio*capacity {
+	if available >= highSpaceRatio*capacity || lowSpaceRatio < 0 || lowSpaceRatio > 1 {
 		score = float64(s.RegionSize)
-	} else if available <= lowSpaceRatio*capacity {
+	} else if available <= lowSpaceRatio*capacity || highSpaceRatio < 0 || highSpaceRatio > 1 {
 		score = maxScore - available
 	} else {
-		// to make the score function continuous, we should linear function y = k * x + b as trainsition period
+		// to make the score function continuous, we use linear function y = k * x + b as transition period
 		// from above we know that there are two points must on the function image
 		// p1((1-highSpaceRatio)*capacity, (1-highSpaceRatio)*capacity) and
-		// p2((1-lowSpaceRatio)*capacity, maxScore-(1-lowSpaceRatio)*capacity)
+		// p2((1-lowSpaceRatio)*capacity, maxScore-lowSpaceRatio*capacity)
 		// so k = (y2 - y1) / (x2 - x1)
 		x1, y1 := (1-highSpaceRatio)*capacity*amplifier, (1-highSpaceRatio)*capacity*amplifier
 		x2, y2 := (1-lowSpaceRatio)*capacity*amplifier, maxScore-lowSpaceRatio*capacity

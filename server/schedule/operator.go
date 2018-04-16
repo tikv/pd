@@ -138,9 +138,12 @@ func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 // Influence calculates the store difference that current step make
 func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	if mr.IsPassive {
-		for _, peer := range region.GetPeers() {
-			o := opInfluence.GetStoreInfluence(peer.GetStoreId())
+		for _, p := range region.GetPeers() {
+			o := opInfluence.GetStoreInfluence(p.GetStoreId())
 			o.RegionCount--
+			if region.Leader.GetId() == p.GetId() {
+				o.LeaderCount--
+			}
 		}
 	}
 }

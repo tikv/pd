@@ -136,7 +136,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	checker := schedule.NewReplicaChecker(cluster, nil)
 	storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard)
 	if storeID == 0 {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_store").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no_replacement").Inc()
 		return nil
 	}
 
@@ -148,15 +148,16 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	target.RegionSize += int64(opInfluence.GetStoreInfluence(target.GetId()).RegionSize) + regionSize
 	if !shouldBalance(cluster, source, target, core.RegionKind) {
 		log.Debugf("[%s] skip balance region%d, source size: %v, source score: %v, target size: %v, target score: %v, region size: %v", s.GetName(), region.GetId(),
-			source.RegionSize, source.RegionWeight, target.RegionSize, target.RegionWeight, region.ApproximateSize)
+			source.RegionSize, source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio()),
+			target.RegionSize, target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio()), region.ApproximateSize)
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
 	}
+
 	newPeer, err := cluster.AllocPeer(storeID)
 	if err != nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
 		return nil
 	}
-
 	return schedule.CreateMovePeerOperator("balance-region", cluster, region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }
