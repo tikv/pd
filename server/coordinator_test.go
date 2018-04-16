@@ -505,29 +505,6 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(co.schedulers, HasLen, 3)
 }
 
-func (s *testCoordinatorSuite) TestAddDefaultScheduler(c *C) {
-	_, opt := newTestScheduleConfig()
-	kv := core.NewKV(core.NewMemoryKV())
-	scheduleCfg := opt.load()
-	scheduleCfg.MaxSnapshotCount = 10
-	opt.SetMaxReplicas(5)
-	opt.persist(kv)
-
-	// suppose we add a new default enable scheduler "adjacent-region"
-	defaultSchedulers := []string{"balance-region", "balance-leader", "hot-region", "label", "adjacent-region"}
-	_, newOpt := newTestScheduleConfig()
-	newOpt.AddSchedulerCfg("adjacent-region", []string{})
-	newOpt.reload(kv)
-	schedulers := newOpt.GetSchedulers()
-	c.Assert(schedulers, HasLen, 5)
-	for i, s := range schedulers {
-		c.Assert(s.Type, Equals, defaultSchedulers[i])
-		c.Assert(s.Disable, IsFalse)
-	}
-	c.Assert(newOpt.GetMaxReplicas("default"), Equals, 5)
-	c.Assert(newOpt.GetMaxSnapshotCount(), Equals, uint64(10))
-}
-
 func (s *testCoordinatorSuite) TestRestart(c *C) {
 	// Turn off balance, we test add replica only.
 	cfg, opt := newTestScheduleConfig()
