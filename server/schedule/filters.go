@@ -128,7 +128,7 @@ func (f *healthFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
 type pendingPeerCountFilter struct{}
 
 // NewPendingPeerCountFilter creates a Filter that filters all stores that are
-// currently handling too many pengding peers.
+// currently handling too many pending peers.
 func NewPendingPeerCountFilter() Filter {
 	return &pendingPeerCountFilter{}
 }

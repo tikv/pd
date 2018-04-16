@@ -578,6 +578,10 @@ func (c *clusterInfo) GetHotRegionLowThreshold() int {
 	return c.opt.GetHotRegionLowThreshold()
 }
 
+func (c *clusterInfo) IsRaftLearnerEnabled() bool {
+	return c.opt.IsRaftLearnerEnabled()
+}
+
 func (c *clusterInfo) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
 	return c.opt.CheckLabelProperty(typ, labels)
 }

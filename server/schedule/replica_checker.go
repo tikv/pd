@@ -62,12 +62,24 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 			checkerCounter.WithLabelValues("replica_checker", "no_target_store").Inc()
 			return nil
 		}
-		step := AddPeer{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()}
+		var steps []OperatorStep
+		if r.cluster.IsRaftLearnerEnabled() {
+			steps = []OperatorStep{
+				AddLearner{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()},
+				PromoteLearner{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()},
+			}
+		} else {
+			steps = []OperatorStep{
+				AddPeer{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()},
+			}
+		}
 		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
-		return NewOperator("makeUpReplica", region.GetId(), OpReplica|OpRegion, step)
+		return NewOperator("makeUpReplica", region.GetId(), OpReplica|OpRegion, steps...)
 	}
 
-	if len(region.GetPeers()) > r.cluster.GetMaxReplicas() {
+	// when add learner peer, the number of peer will exceed max replicas for a wille,
+	// just comparing the the number of voters to avoid too many cancel add operator log.
+	if len(region.GetVoters()) > r.cluster.GetMaxReplicas() {
 		log.Debugf("[region %d] has %d peers more than max replicas", region.GetId(), len(region.GetPeers()))
 		oldPeer, _ := r.selectWorstPeer(region)
 		if oldPeer == nil {
@@ -160,6 +172,11 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *Operator {
 }
 
 func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
+	// just skip learner
+	if len(region.Learners) != 0 {
+		return nil
+	}
+
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
 		if store == nil {

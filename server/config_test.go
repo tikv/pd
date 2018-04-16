@@ -15,6 +15,7 @@ package server
 
 import (
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/server/core"
 )
 
 var _ = Suite(&testConfigSuite{})
@@ -32,4 +33,27 @@ func (s *testConfigSuite) TestBadFormatJoinAddr(c *C) {
 	cfg := NewTestSingleConfig()
 	cfg.Join = "127.0.0.1:2379" // Wrong join addr without scheme.
 	c.Assert(cfg.adjust(), NotNil)
+}
+
+func (s *testConfigSuite) TestReloadConfig(c *C) {
+	_, opt := newTestScheduleConfig()
+	kv := core.NewKV(core.NewMemoryKV())
+	scheduleCfg := opt.load()
+	scheduleCfg.MaxSnapshotCount = 10
+	opt.SetMaxReplicas(5)
+	opt.persist(kv)
+
+	// suppose we add a new default enable scheduler "adjacent-region"
+	defaultSchedulers := []string{"balance-region", "balance-leader", "hot-region", "label", "adjacent-region"}
+	_, newOpt := newTestScheduleConfig()
+	newOpt.AddSchedulerCfg("adjacent-region", []string{})
+	newOpt.reload(kv)
+	schedulers := newOpt.GetSchedulers()
+	c.Assert(schedulers, HasLen, 5)
+	for i, s := range schedulers {
+		c.Assert(s.Type, Equals, defaultSchedulers[i])
+		c.Assert(s.Disable, IsFalse)
+	}
+	c.Assert(newOpt.GetMaxReplicas("default"), Equals, 5)
+	c.Assert(newOpt.GetMaxSnapshotCount(), Equals, uint64(10))
 }

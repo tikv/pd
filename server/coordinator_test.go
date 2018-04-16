@@ -505,25 +505,6 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(co.schedulers, HasLen, 3)
 }
 
-func (s *testCoordinatorSuite) TestAddDefaultScheduler(c *C) {
-	_, opt := newTestScheduleConfig()
-	kv := core.NewKV(core.NewMemoryKV())
-	opt.persist(kv)
-
-	// suppose we add a new default enable scheduler "adjacent-region"
-	defaultSchedulers := []string{"balance-region", "balance-leader", "hot-region", "label", "adjacent-region"}
-	_, newOpt := newTestScheduleConfig()
-	newOpt.AddSchedulerCfg("adjacent-region", []string{})
-	newOpt.reload(kv)
-	schedulers := newOpt.GetSchedulers()
-	c.Assert(schedulers, HasLen, 5)
-	for i, s := range schedulers {
-		c.Assert(s.Type, Equals, defaultSchedulers[i])
-		c.Assert(s.Disable, IsFalse)
-	}
-
-}
-
 func (s *testCoordinatorSuite) TestRestart(c *C) {
 	// Turn off balance, we test add replica only.
 	cfg, opt := newTestScheduleConfig()
@@ -698,7 +679,7 @@ func waitAddPeer(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, sto
 		}
 		return false
 	})
-	region.Peers = append(region.Peers, res.GetChangePeer().GetPeer())
+	region.AddPeer(res.GetChangePeer().GetPeer())
 	region.RegionEpoch = &metapb.RegionEpoch{
 		ConfVer: region.GetRegionEpoch().GetConfVer() + 1,
 		Version: region.GetRegionEpoch().GetVersion(),

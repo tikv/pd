@@ -396,7 +396,7 @@ func (s *StoresInfo) SetRegionCount(storeID uint64, regionCount int) {
 	}
 }
 
-// SetPendingPeerCount sets the pengding count to a storeInfo
+// SetPendingPeerCount sets the pending count to a storeInfo
 func (s *StoresInfo) SetPendingPeerCount(storeID uint64, pendingPeerCount int) {
 	if store, ok := s.stores[storeID]; ok {
 		store.PendingPeerCount = pendingPeerCount

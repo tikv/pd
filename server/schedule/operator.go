@@ -74,8 +74,12 @@ func (ap AddPeer) String() string {
 
 // IsFinish checks if current step is finished.
 func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
-	if p := region.GetStorePeer(ap.ToStore); p != nil {
-		return region.GetPendingPeer(p.GetId()) == nil
+	if p := region.GetStoreVoter(ap.ToStore); p != nil {
+		if p.GetId() != ap.PeerID {
+			log.Warnf("expect %v, but obtain voter %v", ap.String(), p.GetId())
+			return false
+		}
+		return region.GetPendingVoter(p.GetId()) == nil
 	}
 	return false
 }
@@ -87,6 +91,58 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to.RegionSize += int(region.ApproximateSize)
 	to.RegionCount++
 }
+
+// AddLearner is an OperatorStep that adds a region learner peer.
+type AddLearner struct {
+	ToStore, PeerID uint64
+}
+
+func (al AddLearner) String() string {
+	return fmt.Sprintf("add learner peer %v on store %v", al.PeerID, al.ToStore)
+}
+
+// IsFinish checks if current step is finished.
+func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
+	if p := region.GetStoreLearner(al.ToStore); p != nil {
+		if p.GetId() != al.PeerID {
+			log.Warnf("expect %v, but obtain learner %v", al.String(), p.GetId())
+			return false
+		}
+		return region.GetPendingLearner(p.GetId()) == nil
+	}
+	return false
+}
+
+// Influence calculates the store difference that current step make
+func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+	to := opInfluence.GetStoreInfluence(al.ToStore)
+
+	to.RegionSize += int(region.ApproximateSize)
+	to.RegionCount++
+}
+
+// PromoteLearner is an OperatorStep that promotes a region learner peer to normal voter.
+type PromoteLearner struct {
+	ToStore, PeerID uint64
+}
+
+func (pl PromoteLearner) String() string {
+	return fmt.Sprintf("promote learner peer %v on store %v to voter", pl.PeerID, pl.ToStore)
+}
+
+// IsFinish checks if current step is finished.
+func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
+	if p := region.GetStoreVoter(pl.ToStore); p != nil {
+		if p.GetId() != pl.PeerID {
+			log.Warnf("expect %v, but obtain voter %v", pl.String(), p.GetId())
+		}
+		return p.GetId() == pl.PeerID
+	}
+	return false
+}
+
+// Influence calculates the store difference that current step make
+func (pl PromoteLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
 
 // RemovePeer is an OperatorStep that removes a region peer.
 type RemovePeer struct {
@@ -341,11 +397,21 @@ func CreateRemovePeerOperator(desc string, cluster Cluster, kind OperatorKind, r
 	return NewOperator(desc, region.GetId(), removeKind|kind, steps...)
 }
 
-// CreateMovePeerOperator creates an Operator that replaces an old peer with a
-// new peer
+// CreateMovePeerOperator creates an Operator that replaces an old peer with a new peer.
 func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OperatorKind, oldStore, newStore uint64, peerID uint64) *Operator {
 	removeKind, steps := removePeerSteps(cluster, region, oldStore)
-	steps = append([]OperatorStep{AddPeer{ToStore: newStore, PeerID: peerID}}, steps...)
+	var st []OperatorStep
+	if cluster.IsRaftLearnerEnabled() {
+		st = []OperatorStep{
+			AddLearner{ToStore: newStore, PeerID: peerID},
+			PromoteLearner{ToStore: newStore, PeerID: peerID},
+		}
+	} else {
+		st = []OperatorStep{
+			AddPeer{ToStore: newStore, PeerID: peerID},
+		}
+	}
+	steps = append(st, steps...)
 	return NewOperator(desc, region.GetId(), removeKind|kind|OpRegion, steps...)
 }
 
@@ -412,7 +478,14 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 			log.Debugf("peer alloc failed: %v", err)
 			return nil, kind, errors.Trace(err)
 		}
-		steps = append(steps, AddPeer{ToStore: id, PeerID: peer.Id})
+		if cluster.IsRaftLearnerEnabled() {
+			steps = append(steps,
+				AddLearner{ToStore: id, PeerID: peer.Id},
+				PromoteLearner{ToStore: id, PeerID: peer.Id},
+			)
+		} else {
+			steps = append(steps, AddPeer{ToStore: id, PeerID: peer.Id})
+		}
 		kind |= OpRegion
 	}
 

@@ -43,6 +43,7 @@ type Options interface {
 	GetLowSpaceRatio() float64
 	GetHighSpaceRatio() float64
 
+	IsRaftLearnerEnabled() bool
 	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 }
 
