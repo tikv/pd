@@ -109,6 +109,21 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 			c.removeOperator(op)
 		}
 	}
+	// If PD has restarted, it need to check learners added before and promote them.
+	if c.cluster.IsRaftLearnerEnabled() && c.getOperator(region.GetId()) == nil {
+		for _, p := range region.GetLearners() {
+			if region.GetPendingLearner(p.GetId()) != nil {
+				continue
+			}
+			step := schedule.PromoteLearner{
+				ToStore: p.GetStoreId(),
+				PeerID:  p.GetId(),
+			}
+			op := schedule.NewOperator("promoteLearner", region.GetId(), schedule.OpRegion, step)
+			c.addOperator(op)
+			break
+		}
+	}
 }
 
 func (c *coordinator) patrolRegions() {
@@ -139,20 +154,23 @@ func (c *coordinator) patrolRegions() {
 			key = region.GetEndKey()
 
 			if op := c.namespaceChecker.Check(region); op != nil {
-				c.addOperator(op)
-				break
+				if c.addOperator(op) {
+					break
+				}
 			}
 			if c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 				if op := c.replicaChecker.Check(region); op != nil {
-					c.addOperator(op)
-					break
+					if c.addOperator(op) {
+						break
+					}
 				}
 			}
 			if c.limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 				if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
 					// make sure two operators can add successfully altogether
-					c.addOperators(op1, op2)
-					break
+					if c.addOperators(op1, op2) {
+						break
+					}
 				}
 			}
 		}
@@ -542,6 +560,34 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 		}
 		cmd := &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
+				ChangeType: eraftpb.ConfChangeType_AddNode,
+				Peer: &metapb.Peer{
+					Id:      s.PeerID,
+					StoreId: s.ToStore,
+				},
+			},
+		}
+		c.hbStreams.sendMsg(region, cmd)
+	case schedule.AddLearner:
+		if region.GetStorePeer(s.ToStore) != nil {
+			// The newly added peer is pending.
+			return
+		}
+		cmd := &pdpb.RegionHeartbeatResponse{
+			ChangePeer: &pdpb.ChangePeer{
+				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
+				Peer: &metapb.Peer{
+					Id:        s.PeerID,
+					StoreId:   s.ToStore,
+					IsLearner: true,
+				},
+			},
+		}
+		c.hbStreams.sendMsg(region, cmd)
+	case schedule.PromoteLearner:
+		cmd := &pdpb.RegionHeartbeatResponse{
+			ChangePeer: &pdpb.ChangePeer{
+				// reuse AddNode type
 				ChangeType: eraftpb.ConfChangeType_AddNode,
 				Peer: &metapb.Peer{
 					Id:      s.PeerID,

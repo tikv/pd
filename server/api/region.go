@@ -48,12 +48,11 @@ func newRegionInfo(r *core.RegionInfo) *regionInfo {
 		return nil
 	}
 	return &regionInfo{
-		ID:          r.Id,
-		StartKey:    strings.Trim(fmt.Sprintf("%q", r.StartKey), "\""),
-		EndKey:      strings.Trim(fmt.Sprintf("%q", r.EndKey), "\""),
-		RegionEpoch: r.RegionEpoch,
-		Peers:       r.Peers,
-
+		ID:              r.Id,
+		StartKey:        strings.Trim(fmt.Sprintf("%q", r.StartKey), "\""),
+		EndKey:          strings.Trim(fmt.Sprintf("%q", r.EndKey), "\""),
+		RegionEpoch:     r.RegionEpoch,
+		Peers:           r.Peers,
 		Leader:          r.Leader,
 		DownPeers:       r.DownPeers,
 		PendingPeers:    r.PendingPeers,
