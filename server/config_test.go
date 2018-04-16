@@ -35,7 +35,7 @@ func (s *testConfigSuite) TestBadFormatJoinAddr(c *C) {
 	c.Assert(cfg.adjust(), NotNil)
 }
 
-func (s *testConfigSuite) TestAddDefaultScheduler(c *C) {
+func (s *testConfigSuite) TestReloadConfig(c *C) {
 	_, opt := newTestScheduleConfig()
 	kv := core.NewKV(core.NewMemoryKV())
 	scheduleCfg := opt.load()
