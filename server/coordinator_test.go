@@ -508,6 +508,9 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 func (s *testCoordinatorSuite) TestAddDefaultScheduler(c *C) {
 	_, opt := newTestScheduleConfig()
 	kv := core.NewKV(core.NewMemoryKV())
+	scheduleCfg := opt.load()
+	scheduleCfg.MaxSnapshotCount = 10
+	opt.SetMaxReplicas(5)
 	opt.persist(kv)
 
 	// suppose we add a new default enable scheduler "adjacent-region"
@@ -521,7 +524,8 @@ func (s *testCoordinatorSuite) TestAddDefaultScheduler(c *C) {
 		c.Assert(s.Type, Equals, defaultSchedulers[i])
 		c.Assert(s.Disable, IsFalse)
 	}
-
+	c.Assert(newOpt.GetMaxReplicas("default"), Equals, 5)
+	c.Assert(newOpt.GetMaxSnapshotCount(), Equals, uint64(10))
 }
 
 func (s *testCoordinatorSuite) TestRestart(c *C) {
