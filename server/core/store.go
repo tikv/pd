@@ -113,6 +113,10 @@ func (s *StoreInfo) LeaderScore(delta int64) float64 {
 
 // RegionScore returns the store's region score.
 func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
+	if s.RegionSize == 0 {
+		return 0
+	}
+
 	capacity := float64(s.Stats.GetCapacity()) / (1 << 20)
 	available := float64(s.Stats.GetAvailable()) / (1 << 20)
 
