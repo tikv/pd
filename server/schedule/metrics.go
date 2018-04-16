@@ -32,9 +32,17 @@ var (
 			Help:      "Bucketed histogram of processing time (s) of finished operator step.",
 			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 16),
 		}, []string{"type"})
+	hotCacheStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "hotcache",
+			Name:      "status",
+			Help:      "Status of the hotspot.",
+		}, []string{"name", "type"})
 )
 
 func init() {
 	prometheus.MustRegister(checkerCounter)
 	prometheus.MustRegister(operatorStepDuration)
+	prometheus.MustRegister(hotCacheStatusGauge)
 }

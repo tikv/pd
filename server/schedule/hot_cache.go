@@ -45,10 +45,14 @@ func newHotSpotCache() *HotSpotCache {
 
 // CheckWrite checks the write status, returns whether need update statistics and item.
 func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stores *core.StoresInfo) (bool, *core.RegionStat) {
-	var WrittenBytesPerSec uint64
+	var (
+		WrittenBytesPerSec uint64
+		value              *core.RegionStat
+	)
 	v, isExist := w.writeFlow.Peek(region.GetId())
 	if isExist && !Simulating {
-		interval := time.Since(v.(*core.RegionStat).LastUpdateTime).Seconds()
+		value = v.(*core.RegionStat)
+		interval := time.Since(value.LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
 			return false, nil
 		}
@@ -56,7 +60,6 @@ func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stores *core.StoresIn
 	} else {
 		WrittenBytesPerSec = uint64(float64(region.WrittenBytes) / float64(RegionHeartBeatReportInterval))
 	}
-	region.WrittenBytes = WrittenBytesPerSec
 
 	// hotRegionThreshold is use to pick hot region
 	// suppose the number of the hot Regions is statCacheMaxLen
@@ -68,15 +71,19 @@ func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stores *core.StoresIn
 	if hotRegionThreshold < hotWriteRegionMinFlowRate {
 		hotRegionThreshold = hotWriteRegionMinFlowRate
 	}
-	return w.isNeedUpdateStatCache(region, hotRegionThreshold, WriteFlow)
+	return w.isNeedUpdateStatCache(region, WrittenBytesPerSec, hotRegionThreshold, value, WriteFlow)
 }
 
 // CheckRead checks the read status, returns whether need update statistics and item.
 func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stores *core.StoresInfo) (bool, *core.RegionStat) {
-	var ReadBytesPerSec uint64
+	var (
+		ReadBytesPerSec uint64
+		value           *core.RegionStat
+	)
 	v, isExist := w.readFlow.Peek(region.GetId())
 	if isExist && !Simulating {
-		interval := time.Since(v.(*core.RegionStat).LastUpdateTime).Seconds()
+		value = v.(*core.RegionStat)
+		interval := time.Since(value.LastUpdateTime).Seconds()
 		if interval < minHotRegionReportInterval {
 			return false, nil
 		}
@@ -95,26 +102,19 @@ func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stores *core.StoresInf
 	if hotRegionThreshold < hotReadRegionMinFlowRate {
 		hotRegionThreshold = hotReadRegionMinFlowRate
 	}
-	return w.isNeedUpdateStatCache(region, hotRegionThreshold, ReadFlow)
+	return w.isNeedUpdateStatCache(region, ReadBytesPerSec, hotRegionThreshold, value, ReadFlow)
 }
 
-func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, hotRegionThreshold uint64, kind FlowKind) (bool, *core.RegionStat) {
-	var (
-		v         *core.RegionStat
-		value     interface{}
-		isExist   bool
-		flowBytes uint64
-	)
-	key := region.GetId()
-
+func (w *HotSpotCache) incMetrics(name string, kind FlowKind) {
 	switch kind {
 	case WriteFlow:
-		value, isExist = w.writeFlow.Peek(key)
-		flowBytes = region.WrittenBytes
+		hotCacheStatusGauge.WithLabelValues(name, "write").Inc()
 	case ReadFlow:
-		value, isExist = w.readFlow.Peek(key)
-		flowBytes = region.ReadBytes
+		hotCacheStatusGauge.WithLabelValues(name, "read").Inc()
 	}
+}
+
+func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes uint64, hotRegionThreshold uint64, v *core.RegionStat, kind FlowKind) (bool, *core.RegionStat) {
 	newItem := &core.RegionStat{
 		RegionID:       region.GetId(),
 		FlowBytes:      flowBytes,
@@ -124,22 +124,18 @@ func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, hotRegionT
 		AntiCount:      hotRegionAntiCount,
 	}
 
-	if isExist {
-		v = value.(*core.RegionStat)
+	if v != nil {
 		newItem.HotDegree = v.HotDegree + 1
 	}
-	switch kind {
-	case WriteFlow:
-		if region.WrittenBytes >= hotRegionThreshold {
-			return true, newItem
+	if flowBytes >= hotRegionThreshold {
+		if v == nil {
+			w.incMetrics("add_item", kind)
 		}
-	case ReadFlow:
-		if region.ReadBytes >= hotRegionThreshold {
-			return true, newItem
-		}
+		return true, newItem
 	}
 	// smaller than hotReionThreshold
-	if !isExist {
+	if v == nil {
+		w.incMetrics("remove_item", kind)
 		return false, newItem
 	}
 	if v.AntiCount <= 0 {
@@ -160,12 +156,14 @@ func (w *HotSpotCache) Update(key uint64, item *core.RegionStat, kind FlowKind) 
 			w.writeFlow.Remove(key)
 		} else {
 			w.writeFlow.Put(key, item)
+			w.incMetrics("update_item", kind)
 		}
 	case ReadFlow:
 		if item == nil {
 			w.readFlow.Remove(key)
 		} else {
 			w.readFlow.Put(key, item)
+			w.incMetrics("update_item", kind)
 		}
 	}
 }
@@ -195,6 +193,12 @@ func (w *HotSpotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hot
 		}
 	}
 	return nil
+}
+
+// CollectMetrics collect the hot cache metrics
+func (w *HotSpotCache) CollectMetrics() {
+	hotCacheStatusGauge.WithLabelValues("total_length", "write").Set(float64(w.writeFlow.Len()))
+	hotCacheStatusGauge.WithLabelValues("total_length", "read").Set(float64(w.readFlow.Len()))
 }
 
 func (w *HotSpotCache) isRegionHot(id uint64, hotThreshold int) bool {
