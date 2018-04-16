@@ -163,7 +163,7 @@ func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source,
 	}
 
 	schedulerCounter.WithLabelValues(l.GetName(), "new_operator").Inc()
-	balanceRegionCounter.WithLabelValues("move_leader", fmt.Sprintf("store%d-to-store%d", source.GetId(), target.GetId())).Inc()
+	balanceLeaderCounter.WithLabelValues("move_leader", fmt.Sprintf("store%d-to-store%d", source.GetId(), target.GetId())).Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: target.GetId()}
 	op := schedule.NewOperator("balance-leader", region.GetId(), schedule.OpBalance|schedule.OpLeader, step)
 	return []*schedule.Operator{op}

@@ -160,7 +160,7 @@ func (l *labelLevelStatistics) Observe(region *core.RegionInfo, stores []*core.S
 func (l *labelLevelStatistics) Collect() {
 	for level, count := range l.labelLevelCounter {
 		typ := fmt.Sprintf("level_%d", level)
-		regionStatusGauge.WithLabelValues(typ).Set(float64(count))
+		regionLabelLevelGauge.WithLabelValues(typ).Set(float64(count))
 	}
 }
 
