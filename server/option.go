@@ -231,8 +231,9 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+	o.adjustScheduleCfg(cfg)
 	if isExist {
-		o.store(o.checkoutScheduleCfg(cfg))
+		o.store(&cfg.Schedule)
 		o.rep.store(&cfg.Replication)
 		for name, nsCfg := range cfg.Namespace {
 			nsCfg := nsCfg
@@ -243,7 +244,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 	return nil
 }
 
-func (o *scheduleOption) checkoutScheduleCfg(persistentCfg *Config) *ScheduleConfig {
+func (o *scheduleOption) adjustScheduleCfg(persistentCfg *Config) {
 	scheduleCfg := *o.load()
 	for i, s := range scheduleCfg.Schedulers {
 		for _, ps := range persistentCfg.Schedule.Schedulers {
@@ -267,7 +268,7 @@ func (o *scheduleOption) checkoutScheduleCfg(persistentCfg *Config) *ScheduleCon
 		}
 	}
 	scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, restoredSchedulers...)
-	return &scheduleCfg
+	persistentCfg.Schedule.Schedulers = scheduleCfg.Schedulers
 }
 
 func (o *scheduleOption) GetHotRegionLowThreshold() int {
