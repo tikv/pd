@@ -702,7 +702,7 @@ func waitAddPeer(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, sto
 		}
 		return false
 	})
-	region.Peers = append(region.Peers, res.GetChangePeer().GetPeer())
+	region.AddPeer(res.GetChangePeer().GetPeer())
 	region.RegionEpoch = &metapb.RegionEpoch{
 		ConfVer: region.GetRegionEpoch().GetConfVer() + 1,
 		Version: region.GetRegionEpoch().GetVersion(),

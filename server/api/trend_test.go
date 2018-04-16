@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule"
 )
 
 var _ = Suite(&testTrendSuite{})
@@ -48,11 +49,22 @@ func (s *testTrendSuite) TestTend(c *C) {
 
 	// Complete the operators.
 	mustRegionHeartbeat(c, svr, s.newRegionInfo(4, "", "a", 2, 2, []uint64{1, 2}, 2))
-	mustRegionHeartbeat(c, svr, s.newRegionInfo(5, "a", "b", 3, 2, []uint64{1, 3}, 1))
-	mustRegionHeartbeat(c, svr, s.newRegionInfo(6, "b", "", 3, 2, []uint64{2, 3}, 2))
+	region := s.newRegionInfo(5, "a", "b", 3, 2, []uint64{1, 3}, 1)
+	op, err := svr.GetHandler().GetOperator(5)
+	c.Assert(op, NotNil)
+	region.Peers[1].Id = op.Step(0).(schedule.AddPeer).PeerID
+	region.Voters[1].Id = op.Step(0).(schedule.AddPeer).PeerID
+	mustRegionHeartbeat(c, svr, region)
+
+	op, err = svr.GetHandler().GetOperator(6)
+	c.Assert(op, NotNil)
+	region = s.newRegionInfo(6, "b", "", 3, 2, []uint64{2, 3}, 2)
+	region.Peers[1].Id = op.Step(0).(schedule.AddPeer).PeerID
+	region.Voters[1].Id = op.Step(0).(schedule.AddPeer).PeerID
+	mustRegionHeartbeat(c, svr, region)
 
 	var trend Trend
-	err := readJSONWithURL(fmt.Sprintf("%s%s/api/v1/trend", svr.GetAddr(), apiPrefix), &trend)
+	err = readJSONWithURL(fmt.Sprintf("%s%s/api/v1/trend", svr.GetAddr(), apiPrefix), &trend)
 	c.Assert(err, IsNil)
 
 	// Check store states.
@@ -82,20 +94,20 @@ func (s *testTrendSuite) newRegionInfo(id uint64, startKey, endKey string, confV
 		leader *metapb.Peer
 	)
 	for _, id := range stores {
-		p := &metapb.Peer{Id: id, StoreId: id}
+		p := &metapb.Peer{Id: 10 + id, StoreId: id}
 		if id == leaderStore {
 			leader = p
 		}
 		peers = append(peers, p)
 	}
-	return &core.RegionInfo{
-		Region: &metapb.Region{
+	return core.NewRegionInfo(
+		&metapb.Region{
 			Id:          id,
 			StartKey:    []byte(startKey),
 			EndKey:      []byte(endKey),
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: confVer, Version: ver},
 			Peers:       peers,
 		},
-		Leader: leader,
-	}
+		leader,
+	)
 }
