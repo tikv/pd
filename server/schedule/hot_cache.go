@@ -82,7 +82,6 @@ func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stores *core.StoresInf
 	} else {
 		ReadBytesPerSec = uint64(float64(region.ReadBytes) / float64(RegionHeartBeatReportInterval))
 	}
-	region.ReadBytes = ReadBytesPerSec
 	hotRegionThreshold := calculateReadHotThreshold(stores)
 	return w.isNeedUpdateStatCache(region, ReadBytesPerSec, hotRegionThreshold, value, ReadFlow)
 }
@@ -123,7 +122,7 @@ func calculateReadHotThreshold(stores *core.StoresInfo) uint64 {
 	return hotRegionThreshold
 }
 
-func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes uint64, hotRegionThreshold uint64, v *core.RegionStat, kind FlowKind) (bool, *core.RegionStat) {
+func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes uint64, hotRegionThreshold uint64, oldItem *core.RegionStat, kind FlowKind) (bool, *core.RegionStat) {
 	newItem := &core.RegionStat{
 		RegionID:       region.GetId(),
 		FlowBytes:      flowBytes,
@@ -133,27 +132,27 @@ func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes 
 		AntiCount:      hotRegionAntiCount,
 	}
 
-	if v != nil {
-		newItem.HotDegree = v.HotDegree + 1
+	if oldItem != nil {
+		newItem.HotDegree = oldItem.HotDegree + 1
 	}
 	if flowBytes >= hotRegionThreshold {
-		if v == nil {
+		if oldItem == nil {
 			w.incMetrics("add_item", kind)
 		}
 		return true, newItem
 	}
 	// smaller than hotReionThreshold
-	if v == nil {
+	if oldItem == nil {
 		return false, newItem
 	}
-	if v.AntiCount <= 0 {
+	if oldItem.AntiCount <= 0 {
 		w.incMetrics("remove_item", kind)
 		return true, nil
 	}
 	// eliminate some noise
-	newItem.HotDegree = v.HotDegree - 1
-	newItem.AntiCount = v.AntiCount - 1
-	newItem.FlowBytes = v.FlowBytes
+	newItem.HotDegree = oldItem.HotDegree - 1
+	newItem.AntiCount = oldItem.AntiCount - 1
+	newItem.FlowBytes = oldItem.FlowBytes
 	return true, newItem
 }
 
