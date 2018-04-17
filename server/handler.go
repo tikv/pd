@@ -533,6 +533,9 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64) error {
 	}
 
 	op := c.regionScatterer.Scatter(region)
+	if op == nil {
+		return nil
+	}
 	if ok := c.addOperator(op); !ok {
 		return errors.Trace(errAddOperator)
 	}
