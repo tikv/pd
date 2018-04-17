@@ -114,7 +114,7 @@ func (s *StoreInfo) LeaderScore(delta int64) float64 {
 // RegionScore returns the store's region score.
 func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	if s.RegionSize == 0 {
-		return 0
+		return float64(delta)
 	}
 
 	capacity := float64(s.Stats.GetCapacity()) / (1 << 20)
@@ -127,20 +127,20 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 		lowSpaceRatio = highSpaceRatio
 	}
 
-	amplifier := float64(s.RegionSize) / (float64(s.Stats.GetUsedSize()) / (1 << 20))
+	amplification := float64(s.RegionSize) / (float64(s.Stats.GetUsedSize()) / (1 << 20))
 
-	if available-float64(delta)/amplifier >= highSpaceRatio*capacity || lowSpaceRatio < 0 || lowSpaceRatio > 1 {
+	if available-float64(delta)/amplification >= highSpaceRatio*capacity || lowSpaceRatio < 0 || lowSpaceRatio > 1 {
 		score = float64(s.RegionSize + delta)
-	} else if available-float64(delta)/amplifier <= lowSpaceRatio*capacity || highSpaceRatio < 0 || highSpaceRatio > 1 {
-		score = maxScore - (available - float64(delta)/amplifier)
+	} else if available-float64(delta)/amplification <= lowSpaceRatio*capacity || highSpaceRatio < 0 || highSpaceRatio > 1 {
+		score = maxScore - (available - float64(delta)/amplification)
 	} else {
 		// to make the score function continuous, we use linear function y = k * x + b as transition period
 		// from above we know that there are two points must on the function image
-		// p1((1-highSpaceRatio)*capacity, (1-highSpaceRatio)*capacity) and
-		// p2((1-lowSpaceRatio)*capacity, maxScore-lowSpaceRatio*capacity)
+		// p1((1-highSpaceRatio)*capacity*amplification, (1-highSpaceRatio)*capacity*amplification) and
+		// p2((1-lowSpaceRatio)*capacity*amplification, maxScore-lowSpaceRatio*capacity)
 		// so k = (y2 - y1) / (x2 - x1)
-		x1, y1 := (1-highSpaceRatio)*capacity*amplifier, (1-highSpaceRatio)*capacity*amplifier
-		x2, y2 := (1-lowSpaceRatio)*capacity*amplifier, maxScore-lowSpaceRatio*capacity
+		x1, y1 := (1-highSpaceRatio)*capacity*amplification, (1-highSpaceRatio)*capacity*amplification
+		x2, y2 := (1-lowSpaceRatio)*capacity*amplification, maxScore-lowSpaceRatio*capacity
 
 		k := (y2 - y1) / (x2 - x1)
 		b := y1 - k*x1

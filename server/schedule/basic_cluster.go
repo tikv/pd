@@ -73,10 +73,22 @@ func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
 
 // StoreInfluence records influences that pending operators will make.
 type StoreInfluence struct {
-	RegionSize  int
-	RegionCount int
-	LeaderSize  int
-	LeaderCount int
+	RegionSize  int64
+	RegionCount int64
+	LeaderSize  int64
+	LeaderCount int64
+}
+
+// ResourceSize returns delta size of leader/region by influence.
+func (s StoreInfluence) ResourceSize(kind core.ResourceKind) int64 {
+	switch kind {
+	case core.LeaderKind:
+		return s.LeaderSize
+	case core.RegionKind:
+		return s.RegionSize
+	default:
+		return 0
+	}
 }
 
 // NewBasicCluster creates a BasicCluster.
