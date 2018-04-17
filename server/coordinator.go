@@ -346,7 +346,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 	}
 
 	// collect hot cache metrics
-	c.cluster.HotCache.CollectMetrics()
+	c.cluster.HotCache.CollectMetrics(c.cluster.Stores)
 }
 
 func (c *coordinator) shouldRun() bool {

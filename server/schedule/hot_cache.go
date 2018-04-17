@@ -61,16 +61,7 @@ func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stores *core.StoresIn
 		WrittenBytesPerSec = uint64(float64(region.WrittenBytes) / float64(RegionHeartBeatReportInterval))
 	}
 
-	// hotRegionThreshold is use to pick hot region
-	// suppose the number of the hot Regions is statCacheMaxLen
-	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
-	// divide 2 because the store reports data about two times than the region record write to rocksdb
-	divisor := float64(statCacheMaxLen) * 2 * storeHeartBeatReportInterval
-	hotRegionThreshold := uint64(float64(stores.TotalWrittenBytes()) / divisor)
-
-	if hotRegionThreshold < hotWriteRegionMinFlowRate {
-		hotRegionThreshold = hotWriteRegionMinFlowRate
-	}
+	hotRegionThreshold := calculateWriteHotThreshold(stores)
 	return w.isNeedUpdateStatCache(region, WrittenBytesPerSec, hotRegionThreshold, value, WriteFlow)
 }
 
@@ -92,16 +83,7 @@ func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stores *core.StoresInf
 		ReadBytesPerSec = uint64(float64(region.ReadBytes) / float64(RegionHeartBeatReportInterval))
 	}
 	region.ReadBytes = ReadBytesPerSec
-
-	// hotRegionThreshold is use to pick hot region
-	// suppose the number of the hot Regions is statLRUMaxLen
-	// and we use total Read Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
-	divisor := float64(statCacheMaxLen) * storeHeartBeatReportInterval
-	hotRegionThreshold := uint64(float64(stores.TotalReadBytes()) / divisor)
-
-	if hotRegionThreshold < hotReadRegionMinFlowRate {
-		hotRegionThreshold = hotReadRegionMinFlowRate
-	}
+	hotRegionThreshold := calculateReadHotThreshold(stores)
 	return w.isNeedUpdateStatCache(region, ReadBytesPerSec, hotRegionThreshold, value, ReadFlow)
 }
 
@@ -112,6 +94,33 @@ func (w *HotSpotCache) incMetrics(name string, kind FlowKind) {
 	case ReadFlow:
 		hotCacheStatusGauge.WithLabelValues(name, "read").Inc()
 	}
+}
+
+func calculateWriteHotThreshold(stores *core.StoresInfo) uint64 {
+	// hotRegionThreshold is use to pick hot region
+	// suppose the number of the hot Regions is statCacheMaxLen
+	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
+	// divide 2 because the store reports data about two times than the region record write to rocksdb
+	divisor := float64(statCacheMaxLen) * 2 * storeHeartBeatReportInterval
+	hotRegionThreshold := uint64(float64(stores.TotalWrittenBytes()) / divisor)
+
+	if hotRegionThreshold < hotWriteRegionMinFlowRate {
+		hotRegionThreshold = hotWriteRegionMinFlowRate
+	}
+	return hotRegionThreshold
+}
+
+func calculateReadHotThreshold(stores *core.StoresInfo) uint64 {
+	// hotRegionThreshold is use to pick hot region
+	// suppose the number of the hot Regions is statLRUMaxLen
+	// and we use total Read Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
+	divisor := float64(statCacheMaxLen) * storeHeartBeatReportInterval
+	hotRegionThreshold := uint64(float64(stores.TotalReadBytes()) / divisor)
+
+	if hotRegionThreshold < hotReadRegionMinFlowRate {
+		hotRegionThreshold = hotReadRegionMinFlowRate
+	}
+	return hotRegionThreshold
 }
 
 func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes uint64, hotRegionThreshold uint64, v *core.RegionStat, kind FlowKind) (bool, *core.RegionStat) {
@@ -135,10 +144,10 @@ func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes 
 	}
 	// smaller than hotReionThreshold
 	if v == nil {
-		w.incMetrics("remove_item", kind)
 		return false, newItem
 	}
 	if v.AntiCount <= 0 {
+		w.incMetrics("remove_item", kind)
 		return true, nil
 	}
 	// eliminate some noise
@@ -196,9 +205,13 @@ func (w *HotSpotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hot
 }
 
 // CollectMetrics collect the hot cache metrics
-func (w *HotSpotCache) CollectMetrics() {
+func (w *HotSpotCache) CollectMetrics(stores *core.StoresInfo) {
 	hotCacheStatusGauge.WithLabelValues("total_length", "write").Set(float64(w.writeFlow.Len()))
 	hotCacheStatusGauge.WithLabelValues("total_length", "read").Set(float64(w.readFlow.Len()))
+	threshold := calculateWriteHotThreshold(stores)
+	hotCacheStatusGauge.WithLabelValues("hotThreshold", "write").Set(float64(threshold))
+	threshold = calculateReadHotThreshold(stores)
+	hotCacheStatusGauge.WithLabelValues("hotThreshold", "read").Set(float64(threshold))
 }
 
 func (w *HotSpotCache) isRegionHot(id uint64, hotThreshold int) bool {
