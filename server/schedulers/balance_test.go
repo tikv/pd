@@ -36,37 +36,58 @@ type testBalanceSpeedSuite struct{}
 type testBalanceSpeedCase struct {
 	sourceCount    uint64
 	targetCount    uint64
-	avgScore       float64
 	regionSize     int64
-	diff           int
 	expectedResult bool
 }
 
-func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
-	testCases := []struct {
-		sourceSize   int64
-		sourceWeight float64
-		targetSize   int64
-		targetWeight float64
-		moveSize     float64
-		result       bool
-	}{
-		{100, 1, 80, 1, 5, true},
-		{100, 1, 80, 1, 15, false},
-		{100, 1, 120, 2, 10, true},
-		{100, 1, 180, 2, 10, false},
-		{100, 0.5, 180, 1, 10, false},
-		{100, 0.5, 180, 1, 5, true},
-		{100, 1, 10, 0, 10, false}, // targetWeight=0
-		{100, 0, 10, 0, 10, false},
-		{100, 0, 500, 1, 50, true}, // sourceWeight=0
+func (s *testBalanceSpeedSuite) TestBalanceSpeed(c *C) {
+	tests := []testBalanceSpeedCase{
+		// all store capacity is 1024MB
+		// size = count * 10
+
+		// target size is zero
+		{2, 0, 1, true},
+		{2, 0, 10, false},
+		// all in high space stage
+		{10, 5, 1, true},
+		{10, 5, 20, false},
+		{10, 10, 1, false},
+		{10, 10, 20, false},
+		// all in transition stage
+		{60, 50, 1, true},
+		{60, 50, 50, false},
+		{60, 60, 1, false},
+		// all in low space stage
+		{90, 80, 1, true},
+		{90, 80, 50, false},
+		{90, 90, 1, false},
+		// one in high space stage, other in transition stage
+		{55, 45, 5, true},
+		{55, 40, 50, false},
+		// one in transition space stage, other in low space stage
+		{80, 75, 5, true},
+		{80, 75, 50, false},
 	}
 
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
 
-	for _, t := range testCases {
-		c.Assert(shouldBalance(t.sourceSize, t.sourceWeight, t.targetSize, t.targetWeight, t.moveSize), Equals, t.result)
+	for _, t := range tests {
+		tc.AddLeaderStore(1, int(t.sourceCount))
+		tc.AddLeaderStore(2, int(t.targetCount))
+		source := tc.GetStore(1)
+		target := tc.GetStore(2)
+		region := &core.RegionInfo{ApproximateSize: t.regionSize}
+		c.Assert(shouldBalance(tc, source, target, core.LeaderKind, region, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
+	}
+
+	for _, t := range tests {
+		tc.AddRegionStore(1, int(t.sourceCount))
+		tc.AddRegionStore(2, int(t.targetCount))
+		source := tc.GetStore(1)
+		target := tc.GetStore(2)
+		region := &core.RegionInfo{ApproximateSize: t.regionSize}
+		c.Assert(shouldBalance(tc, source, target, core.RegionKind, region, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
 	}
 }
 

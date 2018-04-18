@@ -353,7 +353,7 @@ type ScheduleConfig struct {
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
 	//
-	//     high space period         transition period           low space period
+	//     high space stage         transition stage           low space stage
 	//   |--------------------|-----------------------------|-------------------------|
 	//   ^                    ^                             ^                         ^
 	//   0   (1 - LowSpaceRatio) * capacity       (1 - SpaceRatio) * capacity      capacity

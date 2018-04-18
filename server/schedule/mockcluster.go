@@ -49,6 +49,13 @@ func (mc *MockCluster) ScanRegions(startKey []byte, limit int) []*core.RegionInf
 	return mc.Regions.ScanRange(startKey, limit)
 }
 
+func (mc *MockCluster) LoadRegion(regionID uint64, followerIds ...uint64) {
+	//  regions load from etcd will have no leader
+	r := mc.newMockRegionInfo(regionID, 0, followerIds...)
+	r.Leader = nil
+	mc.PutRegion(r)
+}
+
 // IsRegionHot checks if the region is hot
 func (mc *MockCluster) IsRegionHot(id uint64) bool {
 	return mc.BasicCluster.IsRegionHot(id, mc.GetHotRegionLowThreshold())
@@ -109,9 +116,9 @@ func (mc *MockCluster) AddLeaderStore(storeID uint64, leaderCount int) {
 	store.Stats = &pdpb.StoreStats{}
 	store.LastHeartbeatTS = time.Now()
 	store.LeaderCount = leaderCount
-	store.Stats.Capacity = uint64(1024)
-	store.Stats.Available = store.Stats.Capacity
 	store.LeaderSize = int64(leaderCount) * 10
+	store.Stats.Capacity = 1000 * (1 << 20)
+	store.Stats.Available = store.Stats.Capacity - uint64(store.LeaderSize)
 	mc.PutStore(store)
 }
 
@@ -121,32 +128,8 @@ func (mc *MockCluster) AddRegionStore(storeID uint64, regionCount int) {
 	store.LastHeartbeatTS = time.Now()
 	store.RegionCount = regionCount
 	store.RegionSize = int64(regionCount) * 10
-	store.Stats.Capacity = uint64(1024)
-	store.Stats.Available = store.Stats.Capacity
-	mc.PutStore(store)
-}
-
-func (mc *MockCluster) UpdateStoreLeaderWeight(storeID uint64, weight float64) {
-	store := mc.GetStore(storeID)
-	store.LeaderWeight = weight
-	mc.PutStore(store)
-}
-
-func (mc *MockCluster) UpdateStoreRegionWeight(storeID uint64, weight float64) {
-	store := mc.GetStore(storeID)
-	store.RegionWeight = weight
-	mc.PutStore(store)
-}
-
-func (mc *MockCluster) UpdateStoreLeaderSize(storeID uint64, size int64) {
-	store := mc.GetStore(storeID)
-	store.LeaderSize = size
-	mc.PutStore(store)
-}
-
-func (mc *MockCluster) UpdateStoreRegionSize(storeID uint64, size int64) {
-	store := mc.GetStore(storeID)
-	store.RegionSize = size
+	store.Stats.Capacity = 1000 * (1 << 20)
+	store.Stats.Available = store.Stats.Capacity - uint64(store.RegionSize)
 	mc.PutStore(store)
 }
 
@@ -172,10 +155,13 @@ func (mc *MockCluster) AddLeaderRegionWithRange(regionID uint64, startKey string
 	mc.PutRegion(r)
 }
 
-func (mc *MockCluster) LoadRegion(regionID uint64, followerIds ...uint64) {
-	//  regions load from etcd will have no leader
-	r := mc.newMockRegionInfo(regionID, 0, followerIds...)
-	r.Leader = nil
+func (mc *MockCluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
+	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+	r.ReadBytes = readBytes
+	isUpdate, item := mc.BasicCluster.CheckReadStatus(r)
+	if isUpdate {
+		mc.HotCache.Update(regionID, item, ReadFlow)
+	}
 	mc.PutRegion(r)
 }
 
@@ -187,6 +173,32 @@ func (mc *MockCluster) AddLeaderRegionWithWriteInfo(regionID uint64, leaderID ui
 		mc.HotCache.Update(regionID, item, WriteFlow)
 	}
 	mc.PutRegion(r)
+}
+
+func (mc *MockCluster) UpdateStoreLeaderWeight(storeID uint64, weight float64) {
+	store := mc.GetStore(storeID)
+	store.LeaderWeight = weight
+	mc.PutStore(store)
+}
+
+func (mc *MockCluster) UpdateStoreRegionWeight(storeID uint64, weight float64) {
+	store := mc.GetStore(storeID)
+	store.RegionWeight = weight
+	mc.PutStore(store)
+}
+
+func (mc *MockCluster) UpdateStoreLeaderSize(storeID uint64, size int64) {
+	store := mc.GetStore(storeID)
+	store.LeaderSize = size
+	store.Stats.Available = store.Stats.Capacity - uint64(store.LeaderSize)
+	mc.PutStore(store)
+}
+
+func (mc *MockCluster) UpdateStoreRegionSize(storeID uint64, size int64) {
+	store := mc.GetStore(storeID)
+	store.RegionSize = size
+	store.Stats.Available = store.Stats.Capacity - uint64(store.RegionSize)
+	mc.PutStore(store)
 }
 
 func (mc *MockCluster) UpdateLeaderCount(storeID uint64, leaderCount int) {
@@ -217,7 +229,7 @@ func (mc *MockCluster) UpdatePendingPeerCount(storeID uint64, pendingPeerCount i
 
 func (mc *MockCluster) UpdateStorageRatio(storeID uint64, usedRatio, availableRatio float64) {
 	store := mc.GetStore(storeID)
-	store.Stats.Capacity = uint64(1024)
+	store.Stats.Capacity = 1000 * (1 << 20)
 	store.Stats.UsedSize = uint64(float64(store.Stats.Capacity) * usedRatio)
 	store.Stats.Available = uint64(float64(store.Stats.Capacity) * availableRatio)
 	mc.PutStore(store)
@@ -228,20 +240,11 @@ func (mc *MockCluster) UpdateStorageWrittenBytes(storeID uint64, BytesWritten ui
 	store.Stats.BytesWritten = BytesWritten
 	mc.PutStore(store)
 }
+
 func (mc *MockCluster) UpdateStorageReadBytes(storeID uint64, BytesRead uint64) {
 	store := mc.GetStore(storeID)
 	store.Stats.BytesRead = BytesRead
 	mc.PutStore(store)
-}
-
-func (mc *MockCluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
-	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
-	r.ReadBytes = readBytes
-	isUpdate, item := mc.BasicCluster.CheckReadStatus(r)
-	if isUpdate {
-		mc.HotCache.Update(regionID, item, ReadFlow)
-	}
-	mc.PutRegion(r)
 }
 
 func (mc *MockCluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerIds ...uint64) *core.RegionInfo {

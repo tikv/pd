@@ -145,9 +145,13 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	log.Debugf("[region %d] source store id is %v, target store id is %v", region.GetId(), source.GetId(), target.GetId())
 
 	if !shouldBalance(cluster, source, target, core.RegionKind, region, opInfluence) {
-		log.Debugf("[%s] skip balance region%d, source size: %v, source score: %v, target size: %v, target score: %v, region size: %v", s.GetName(), region.GetId(),
+		log.Debugf(`[%s] skip balance region%d, source size: %v, source score: %v, source influence: %v, 
+			target size: %v, target score: %v, target influence: %v, region size: %v`, s.GetName(), region.GetId(),
 			source.RegionSize, source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
-			target.RegionSize, target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0), region.ApproximateSize)
+			opInfluence.GetStoreInfluence(source.GetId()).ResourceSize(core.RegionKind),
+			target.RegionSize, target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
+			opInfluence.GetStoreInfluence(target.GetId()).ResourceSize(core.RegionKind),
+			region.ApproximateSize)
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
 	}

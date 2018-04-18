@@ -160,7 +160,7 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 	MergeRegion{IsPassive: true}.Influence(opInfluence, region)
 	c.Assert(*opInfluence[1], DeepEquals, StoreInfluence{
 		LeaderSize:  -10,
-		LeaderCount: -1,
+		LeaderCount: -2,
 		RegionSize:  -10,
 		RegionCount: -2,
 	})
