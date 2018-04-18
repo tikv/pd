@@ -40,7 +40,7 @@ type testBalanceSpeedCase struct {
 	expectedResult bool
 }
 
-func (s *testBalanceSpeedSuite) TestBalanceSpeed(c *C) {
+func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 	tests := []testBalanceSpeedCase{
 		// all store capacity is 1024MB
 		// size = count * 10

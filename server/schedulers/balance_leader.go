@@ -90,7 +90,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 		return nil
 	}
 
-	log.Debugf("[%s] store%d has the max leader score, store%d has the min leader score\n", l.GetName(), source.GetId(), target.GetId())
+	log.Debugf("[%s] store%d has the max leader score, store%d has the min leader score", l.GetName(), source.GetId(), target.GetId())
 	sourceStoreLabel := strconv.FormatUint(source.GetId(), 10)
 	targetStoreLabel := strconv.FormatUint(target.GetId(), 10)
 	balanceLeaderCounter.WithLabelValues("high_score", sourceStoreLabel).Inc()
@@ -156,7 +156,7 @@ func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source,
 	}
 
 	if !shouldBalance(cluster, source, target, core.LeaderKind, region, opInfluence) {
-		log.Debugf(`[%s] skip balance region%d, source size: %v, source score: %v, source influence: %v, 
+		log.Debugf(`[%s] skip balance region%d, source size: %v, source score: %v, source influence: %v,
 			target size: %v, target score: %v, target influence: %v, region size: %v`, l.GetName(), region.GetId(),
 			source.LeaderSize, source.LeaderScore(0), opInfluence.GetStoreInfluence(source.GetId()).ResourceSize(core.LeaderKind),
 			target.LeaderSize, target.LeaderScore(0), opInfluence.GetStoreInfluence(target.GetId()).ResourceSize(core.LeaderKind),
