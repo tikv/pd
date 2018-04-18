@@ -80,6 +80,7 @@ func NewAddOperatorCommand() *cobra.Command {
 	c.AddCommand(NewRemovePeerCommand())
 	c.AddCommand(NewMergeRegionCommand())
 	c.AddCommand(NewSplitRegionCommand())
+	c.AddCommand(NewScatterRegionCommand())
 	return c
 }
 
@@ -269,6 +270,34 @@ func NewSplitRegionCommand() *cobra.Command {
 }
 
 func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+
+	ids, err := parseUint64s(args)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	input := make(map[string]interface{})
+	input["name"] = cmd.Name()
+	input["region_id"] = ids[0]
+	postJSON(cmd, operatorsPrefix, input)
+}
+
+// NewScatterRegionCommand returns a command to scatter a region.
+func NewScatterRegionCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "scatter-region <region_id>",
+		Short: "scatter a region",
+		Run:   scatterRegionCommandFunc,
+	}
+	return c
+}
+
+func scatterRegionCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		fmt.Println(cmd.UsageString())
 		return
