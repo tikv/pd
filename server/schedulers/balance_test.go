@@ -904,16 +904,24 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	tc.addLeaderRegionWithWriteInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 4)
 	opt.HotRegionLowThreshold = 0
 
-	// Will transfer a hot region from store 1 to store 6, because the total count of peers
+	// Will transfer a hot region from store 1, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
 	op := hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 	c.Assert(op, NotNil)
-	if op[0].RegionID() == 2 {
-		checkTransferPeerWithLeaderTransferFrom(c, op[0], schedule.OpHotRegion, 1)
-	} else {
-		checkTransferPeerWithLeaderTransfer(c, op[0], schedule.OpHotRegion, 1, 6)
+	switch op[0].Len() {
+	case 1:
+		// balance by leader selected
+		checkTransferLeaderFrom(c, op[0], schedule.OpHotRegion, 1)
+	case 3:
+		// balance by peer selected
+		if op[0].RegionID() == 2 {
+			// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
+			checkTransferPeerWithLeaderTransferFrom(c, op[0], schedule.OpHotRegion, 1)
+		} else {
+			// peer in store 1 of the region 1,2 can only transfer to store 6
+			checkTransferPeerWithLeaderTransfer(c, op[0], schedule.OpHotRegion, 1, 6)
+		}
 	}
-
 	// After transfer a hot region from store 1 to store 5
 	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
 	//|-----------|--------------|----------------|----------------|---------------|
