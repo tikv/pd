@@ -151,6 +151,11 @@ func (c *coordinator) patrolRegions() {
 		}
 
 		for _, region := range regions {
+			// Skip the region if there is already a pending operator.
+			if c.getOperator(region.GetId()) != nil {
+				continue
+			}
+
 			key = region.GetEndKey()
 
 			if op := c.namespaceChecker.Check(region); op != nil {
