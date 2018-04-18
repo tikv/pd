@@ -11,4 +11,3 @@ RUN cd /go/src/github.com/pingcap/pd/ && \
 EXPOSE 2379 2380
 
 ENTRYPOINT ["pd-server"]
-
