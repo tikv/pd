@@ -54,19 +54,19 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		{10, 10, 1, false},
 		{10, 10, 20, false},
 		// all in transition stage
-		{60, 50, 1, true},
-		{60, 50, 50, false},
-		{60, 60, 1, false},
+		{70, 50, 1, true},
+		{70, 50, 50, false},
+		{70, 70, 1, false},
 		// all in low space stage
 		{90, 80, 1, true},
 		{90, 80, 50, false},
 		{90, 90, 1, false},
 		// one in high space stage, other in transition stage
-		{55, 45, 5, true},
-		{55, 40, 50, false},
+		{65, 55, 5, true},
+		{65, 50, 50, false},
 		// one in transition space stage, other in low space stage
-		{80, 75, 5, true},
-		{80, 75, 50, false},
+		{80, 70, 5, true},
+		{80, 70, 50, false},
 	}
 
 	opt := schedule.NewMockSchedulerOptions()
