@@ -25,7 +25,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// MockCluster is to mock clusterInfo for test use
+// MockCluster is used to mock clusterInfo for test use
 type MockCluster struct {
 	*BasicCluster
 	id *core.MockIDAllocator

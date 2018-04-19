@@ -66,7 +66,7 @@ func (c *testClusterInfo) addRegionStore(storeID uint64, regionCount int) {
 	store.RegionCount = regionCount
 	store.RegionSize = int64(regionCount) * 10
 	store.Stats.Capacity = 1000 * (1 << 20)
-	store.Stats.Available = store.Stats.Capacity - uint64(store.LeaderSize)
+	store.Stats.Available = store.Stats.Capacity - uint64(store.RegionSize)
 	c.putStore(store)
 }
 
