@@ -122,17 +122,12 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 
 	var score float64
 
-	// lowSpaceRatio shouldn't greater than highSpaceRatio
-	if lowSpaceRatio > highSpaceRatio {
-		lowSpaceRatio = highSpaceRatio
-	}
-
 	// because of rocksdb compression, region size is larger than actual used size
 	amplification := float64(s.RegionSize) / (float64(s.Stats.GetUsedSize()) / (1 << 20))
 
-	if available-float64(delta)/amplification >= highSpaceRatio*capacity || lowSpaceRatio < 0 || lowSpaceRatio > 1 {
+	if available-float64(delta)/amplification >= (1-highSpaceRatio)*capacity {
 		score = float64(s.RegionSize + delta)
-	} else if available-float64(delta)/amplification <= lowSpaceRatio*capacity || highSpaceRatio < 0 || highSpaceRatio > 1 {
+	} else if available-float64(delta)/amplification <= (1-lowSpaceRatio)*capacity {
 		score = maxScore - (available - float64(delta)/amplification)
 	} else {
 		// to make the score function continuous, we use linear function y = k * x + b as transition period
@@ -140,8 +135,8 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 		// p1((1-highSpaceRatio)*capacity*amplification, (1-highSpaceRatio)*capacity*amplification) and
 		// p2((1-lowSpaceRatio)*capacity*amplification, maxScore-lowSpaceRatio*capacity)
 		// so k = (y2 - y1) / (x2 - x1)
-		x1, y1 := (1-highSpaceRatio)*capacity*amplification, (1-highSpaceRatio)*capacity*amplification
-		x2, y2 := (1-lowSpaceRatio)*capacity*amplification, maxScore-lowSpaceRatio*capacity
+		x1, y1 := highSpaceRatio*capacity*amplification, highSpaceRatio*capacity*amplification
+		x2, y2 := lowSpaceRatio*capacity*amplification, maxScore-(1-lowSpaceRatio)*capacity
 
 		k := (y2 - y1) / (x2 - x1)
 		b := y1 - k*x1
@@ -166,7 +161,7 @@ func (s *StoreInfo) AvailableRatio() float64 {
 
 // IsLowSpace checks if the store is lack of space.
 func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
-	return s.Stats != nil && s.AvailableRatio() < lowSpaceRatio
+	return s.Stats != nil && s.AvailableRatio() < 1-lowSpaceRatio
 }
 
 // ResourceCount reutrns count of leader/region in the store.

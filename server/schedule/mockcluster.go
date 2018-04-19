@@ -379,9 +379,9 @@ const (
 	defaultRegionScheduleLimit  = 4
 	defaultReplicaScheduleLimit = 8
 	defaultMergeScheduleLimit   = 8
-	defaultTolerantSizeRatio    = 2.5
-	defaultLowSpaceRatio        = 0.2
-	defaultHighSpaceRatio       = 0.5
+	defaultTolerantSizeRatio    = 5
+	defaultLowSpaceRatio        = 0.8
+	defaultHighSpaceRatio       = 0.6
 )
 
 // MockSchedulerOptions is a mock of SchedulerOptions

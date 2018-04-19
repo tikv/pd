@@ -353,15 +353,15 @@ type ScheduleConfig struct {
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
 	//
-	//     high space stage         transition stage           low space stage
+	//      high space stage         transition stage           low space stage
 	//   |--------------------|-----------------------------|-------------------------|
 	//   ^                    ^                             ^                         ^
-	//   0   (1 - LowSpaceRatio) * capacity       (1 - SpaceRatio) * capacity      capacity
+	//   0       HighSpaceRatio * capacity       LowSpaceRatio * capacity          capacity
 	//
-	// LowSpaceRatio is the lowest available ratio of store which regraded as low space.
+	// LowSpaceRatio is the lowest usage ratio of store which regraded as low space.
 	// When in low space, store region score increases to very large and varies inversely with available size.
 	LowSpaceRatio float64 `toml:"low-space-ratio,omitempty" json:"low-space-ratio"`
-	// HighSpaceRatio is the highest available ratio of store which regraded as high space.
+	// HighSpaceRatio is the highest usage ratio of store which regraded as high space.
 	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
 	HighSpaceRatio float64 `toml:"high-space-ratio,omitempty" json:"high-space-ratio"`
 	// EnableRaftLearner is the option for using AddLearnerNode instead of AddNode
@@ -410,9 +410,9 @@ const (
 	defaultRegionScheduleLimit  = 4
 	defaultReplicaScheduleLimit = 8
 	defaultMergeScheduleLimit   = 8
-	defaultTolerantSizeRatio    = 2.5
-	defaultLowSpaceRatio        = 0.2
-	defaultHighSpaceRatio       = 0.5
+	defaultTolerantSizeRatio    = 5
+	defaultLowSpaceRatio        = 0.8
+	defaultHighSpaceRatio       = 0.6
 )
 
 var defaultSchedulers = SchedulerConfigs{
