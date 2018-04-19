@@ -132,8 +132,8 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	} else {
 		// to make the score function continuous, we use linear function y = k * x + b as transition period
 		// from above we know that there are two points must on the function image
-		// p1((1-highSpaceRatio)*capacity*amplification, (1-highSpaceRatio)*capacity*amplification) and
-		// p2((1-lowSpaceRatio)*capacity*amplification, maxScore-lowSpaceRatio*capacity)
+		// p1(highSpaceRatio*capacity*amplification, highSpaceRatio*capacity*amplification) and
+		// p2(lowSpaceRatio*capacity*amplification, maxScore-(1-lowSpaceRatio)*capacity)
 		// so k = (y2 - y1) / (x2 - x1)
 		x1, y1 := highSpaceRatio*capacity*amplification, highSpaceRatio*capacity*amplification
 		x2, y2 := lowSpaceRatio*capacity*amplification, maxScore-(1-lowSpaceRatio)*capacity
