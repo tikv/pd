@@ -14,6 +14,7 @@
 package schedulers
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -47,7 +48,6 @@ func newBalanceRegionScheduler(limiter *schedule.Limiter) schedule.Scheduler {
 		schedule.NewStateFilter(),
 		schedule.NewHealthFilter(),
 		schedule.NewSnapshotCountFilter(),
-		schedule.NewStorageThresholdFilter(),
 		schedule.NewPendingPeerCountFilter(),
 	}
 	base := newBaseScheduler(limiter)
@@ -137,26 +137,30 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	checker := schedule.NewReplicaChecker(cluster, nil)
 	storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard)
 	if storeID == 0 {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_store").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no_replacement").Inc()
 		return nil
 	}
 
 	target := cluster.GetStore(storeID)
 	log.Debugf("[region %d] source store id is %v, target store id is %v", region.GetId(), source.GetId(), target.GetId())
 
-	sourceSize := source.RegionSize + int64(opInfluence.GetStoreInfluence(source.GetId()).RegionSize)
-	targetSize := target.RegionSize + int64(opInfluence.GetStoreInfluence(target.GetId()).RegionSize)
-	regionSize := float64(region.ApproximateSize) * cluster.GetTolerantSizeRatio()
-	if !shouldBalance(sourceSize, source.RegionWeight, targetSize, target.RegionWeight, regionSize) {
-		log.Debugf("[%s] skip balance region%d, source size: %v, source weight: %v, target size: %v, target weight: %v, region size: %v", s.GetName(), region.GetId(), sourceSize, source.RegionWeight, targetSize, target.RegionWeight, region.ApproximateSize)
+	if !shouldBalance(cluster, source, target, core.RegionKind, region, opInfluence) {
+		log.Debugf(`[%s] skip balance region%d, source size: %v, source score: %v, source influence: %v, 
+			target size: %v, target score: %v, target influence: %v, region size: %v`, s.GetName(), region.GetId(),
+			source.RegionSize, source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
+			opInfluence.GetStoreInfluence(source.GetId()).ResourceSize(core.RegionKind),
+			target.RegionSize, target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
+			opInfluence.GetStoreInfluence(target.GetId()).ResourceSize(core.RegionKind),
+			region.ApproximateSize)
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
 	}
+
 	newPeer, err := cluster.AllocPeer(storeID)
 	if err != nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
 		return nil
 	}
-
+	balanceRegionCounter.WithLabelValues("move_peer", fmt.Sprintf("store%d-to-store%d", source.GetId(), target.GetId())).Inc()
 	return schedule.CreateMovePeerOperator("balance-region", cluster, region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }

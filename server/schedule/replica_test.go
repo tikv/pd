@@ -18,6 +18,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -27,7 +28,14 @@ func TestSchedule(t *testing.T) {
 
 var _ = Suite(&testReplicationSuite{})
 
-type testReplicationSuite struct{}
+type testReplicationSuite struct {
+	tc *MockCluster
+}
+
+func (s *testReplicationSuite) SetUpSuite(c *C) {
+	opt := NewMockSchedulerOptions()
+	s.tc = NewMockCluster(opt)
+}
 
 func (s *testReplicationSuite) TestDistinctScore(c *C) {
 	labels := []string{"zone", "rack", "host"}
@@ -68,13 +76,13 @@ func (s *testReplicationSuite) TestCompareStoreScore(c *C) {
 	store2 := s.newStoreInfo(2, 1, nil)
 	store3 := s.newStoreInfo(3, 3, nil)
 
-	c.Assert(compareStoreScore(store1, 2, store2, 1), Equals, 1)
-	c.Assert(compareStoreScore(store1, 1, store2, 1), Equals, 0)
-	c.Assert(compareStoreScore(store1, 1, store2, 2), Equals, -1)
+	c.Assert(compareStoreScore(s.tc, store1, 2, store2, 1), Equals, 1)
+	c.Assert(compareStoreScore(s.tc, store1, 1, store2, 1), Equals, 0)
+	c.Assert(compareStoreScore(s.tc, store1, 1, store2, 2), Equals, -1)
 
-	c.Assert(compareStoreScore(store1, 2, store3, 1), Equals, 1)
-	c.Assert(compareStoreScore(store1, 1, store3, 1), Equals, 1)
-	c.Assert(compareStoreScore(store1, 1, store3, 2), Equals, -1)
+	c.Assert(compareStoreScore(s.tc, store1, 2, store3, 1), Equals, 1)
+	c.Assert(compareStoreScore(s.tc, store1, 1, store3, 1), Equals, 1)
+	c.Assert(compareStoreScore(s.tc, store1, 1, store3, 2), Equals, -1)
 }
 
 func (s *testReplicationSuite) newStoreInfo(id uint64, regionCount int, labels map[string]string) *core.StoreInfo {
@@ -91,5 +99,8 @@ func (s *testReplicationSuite) newStoreInfo(id uint64, regionCount int, labels m
 	})
 	store.RegionCount = regionCount
 	store.RegionSize = int64(regionCount) * 10
+	store.Stats = &pdpb.StoreStats{}
+	store.Stats.Capacity = uint64(1024)
+	store.Stats.Available = store.Stats.Capacity
 	return store
 }

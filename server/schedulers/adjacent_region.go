@@ -88,7 +88,6 @@ func newBalanceAdjacentRegionScheduler(limiter *schedule.Limiter, args ...uint64
 		schedule.NewStateFilter(),
 		schedule.NewHealthFilter(),
 		schedule.NewSnapshotCountFilter(),
-		schedule.NewStorageThresholdFilter(),
 		schedule.NewPendingPeerCountFilter(),
 		schedule.NewRejectLeaderFilter(),
 	}

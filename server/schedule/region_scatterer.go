@@ -72,7 +72,6 @@ func NewRegionScatterer(cluster Cluster, classifier namespace.Classifier) *Regio
 	filters := []Filter{
 		NewStateFilter(),
 		NewHealthFilter(),
-		NewStorageThresholdFilter(),
 	}
 
 	return &RegionScatterer{
