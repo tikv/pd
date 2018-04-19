@@ -120,7 +120,7 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	var score float64
 	available := float64(s.Stats.GetAvailable()) / (1 << 20)
 	used := float64(s.Stats.GetUsedSize()) / (1 << 20)
-	capacity := available + used
+	capacity := float64(s.Stats.GetCapacity()) / (1 << 20)
 
 	// because of rocksdb compression, region size is larger than actual used size
 	amplification := float64(s.RegionSize) / used
@@ -132,11 +132,17 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	} else {
 		// to make the score function continuous, we use linear function y = k * x + b as transition period
 		// from above we know that there are two points must on the function image
-		// p1(highSpaceRatio*capacity*amplification, highSpaceRatio*capacity*amplification) and
-		// p2(lowSpaceRatio*capacity*amplification, maxScore-(1-lowSpaceRatio)*capacity)
-		// so k = (y2 - y1) / (x2 - x1)
-		x1, y1 := highSpaceRatio*capacity*amplification, highSpaceRatio*capacity*amplification
-		x2, y2 := lowSpaceRatio*capacity*amplification, maxScore-(1-lowSpaceRatio)*capacity
+		// note that it is possible that other irrelative files occupy a lot of storage, so capacity == available + used + irrelative
+		// and we regarded as irrelative as fixed value.
+		// Then amp = size / used = size / (capacity - irrelative - available)
+		//
+		// when available == (1 - highSpaceRatio) * capacity
+		// we can conclude that size = (capacity - irrelative - (1 - highSpaceRatio) * capacity) * amp = (used+available-(1-highSpaceRatio)*capacity)*amp
+		// Similarly, when available == (1 - lowSpaceRatio) * capacity
+		// we can conclude that size = (capacity - irrelative - (1 - highSpaceRatio) * capacity) * amp = (used+available-(1-lowSpaceRatio)*capacity)*amp
+		// These are the two fixed points' x-coordinates, and y-coordinates can easily get from the above two functions.
+		x1, y1 := (used+available-(1-highSpaceRatio)*capacity)*amplification, (used+available-(1-highSpaceRatio)*capacity)*amplification
+		x2, y2 := (used+available-(1-lowSpaceRatio)*capacity)*amplification, maxScore-(1-lowSpaceRatio)*capacity
 
 		k := (y2 - y1) / (x2 - x1)
 		b := y1 - k*x1
@@ -153,11 +159,10 @@ func (s *StoreInfo) StorageSize() uint64 {
 
 // AvailableRatio is store's freeSpace/capacity.
 func (s *StoreInfo) AvailableRatio() float64 {
-	capacity := float64(s.Stats.GetUsedSize()) + float64(s.Stats.GetAvailable())
-	if capacity == 0 {
+	if float64(s.Stats.GetCapacity()) == 0 {
 		return 0
 	}
-	return float64(s.Stats.GetAvailable()) / capacity
+	return float64(s.Stats.GetAvailable()) / float64(s.Stats.GetCapacity())
 }
 
 // IsLowSpace checks if the store is lack of space.
