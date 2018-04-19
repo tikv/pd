@@ -161,20 +161,28 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 	return nil
 }
 
-func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Cluster) []*schedule.Operator {
-	// balance by peer
-	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
-	if srcRegion != nil {
-		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return []*schedule.Operator{schedule.CreateMovePeerOperator("moveHotWriteRegion", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())}
-	}
+// balanceHotRetryLimit is the limit to retry schedule for selected balance strategy.
+const balanceHotRetryLimit = 10
 
-	// balance by leader
-	srcRegion, newLeader := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
-	if srcRegion != nil {
-		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
-		step := schedule.TransferLeader{FromStore: srcRegion.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
-		return []*schedule.Operator{schedule.NewOperator("transferHotWriteLeader", srcRegion.GetId(), schedule.OpHotRegion|schedule.OpLeader, step)}
+func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Cluster) []*schedule.Operator {
+	for i := 0; i < balanceHotRetryLimit; i++ {
+		switch h.r.Int() % 2 {
+		case 0:
+			// balance by peer
+			srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
+			if srcRegion != nil {
+				schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
+				return []*schedule.Operator{schedule.CreateMovePeerOperator("moveHotWriteRegion", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())}
+			}
+		case 1:
+			// balance by leader
+			srcRegion, newLeader := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
+			if srcRegion != nil {
+				schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
+				step := schedule.TransferLeader{FromStore: srcRegion.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
+				return []*schedule.Operator{schedule.NewOperator("transferHotWriteLeader", srcRegion.GetId(), schedule.OpHotRegion|schedule.OpLeader, step)}
+			}
+		}
 	}
 
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
