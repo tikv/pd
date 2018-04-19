@@ -159,7 +159,7 @@ func (s *StoreInfo) StorageSize() uint64 {
 
 // AvailableRatio is store's freeSpace/capacity.
 func (s *StoreInfo) AvailableRatio() float64 {
-	if float64(s.Stats.GetCapacity()) == 0 {
+	if s.Stats.GetCapacity() == 0 {
 		return 0
 	}
 	return float64(s.Stats.GetAvailable()) / float64(s.Stats.GetCapacity())
