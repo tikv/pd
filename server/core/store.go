@@ -114,16 +114,16 @@ func (s *StoreInfo) LeaderScore(delta int64) float64 {
 // RegionScore returns the store's region score.
 func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	if s.RegionSize == 0 {
-		return float64(delta)
+		return float64(delta) / math.Max(s.RegionWeight, minWeight)
 	}
 
-	capacity := float64(s.Stats.GetCapacity()) / (1 << 20)
-	available := float64(s.Stats.GetAvailable()) / (1 << 20)
-
 	var score float64
+	available := float64(s.Stats.GetAvailable()) / (1 << 20)
+	used := float64(s.Stats.GetUsedSize()) / (1 << 20)
+	capacity := available + used
 
 	// because of rocksdb compression, region size is larger than actual used size
-	amplification := float64(s.RegionSize) / (float64(s.Stats.GetUsedSize()) / (1 << 20))
+	amplification := float64(s.RegionSize) / used
 
 	if available-float64(delta)/amplification >= (1-highSpaceRatio)*capacity {
 		score = float64(s.RegionSize + delta)
@@ -153,10 +153,11 @@ func (s *StoreInfo) StorageSize() uint64 {
 
 // AvailableRatio is store's freeSpace/capacity.
 func (s *StoreInfo) AvailableRatio() float64 {
-	if s.Stats.GetCapacity() == 0 {
+	capacity := float64(s.Stats.GetUsedSize()) + float64(s.Stats.GetAvailable())
+	if capacity == 0 {
 		return 0
 	}
-	return float64(s.Stats.GetAvailable()) / float64(s.Stats.GetCapacity())
+	return float64(s.Stats.GetAvailable()) / capacity
 }
 
 // IsLowSpace checks if the store is lack of space.
