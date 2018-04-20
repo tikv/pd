@@ -113,17 +113,18 @@ func (s *StoreInfo) LeaderScore(delta int64) float64 {
 
 // RegionScore returns the store's region score.
 func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
-	if s.RegionSize == 0 {
-		return float64(delta) / math.Max(s.RegionWeight, minWeight)
-	}
-
 	var score float64
+	var amplification float64
 	available := float64(s.Stats.GetAvailable()) / (1 << 20)
 	used := float64(s.Stats.GetUsedSize()) / (1 << 20)
 	capacity := float64(s.Stats.GetCapacity()) / (1 << 20)
 
-	// because of rocksdb compression, region size is larger than actual used size
-	amplification := float64(s.RegionSize) / used
+	if s.RegionSize == 0 {
+		amplification = 1
+	} else {
+		// because of rocksdb compression, region size is larger than actual used size
+		amplification = float64(s.RegionSize) / used
+	}
 
 	if available-float64(delta)/amplification >= (1-highSpaceRatio)*capacity {
 		score = float64(s.RegionSize + delta)
