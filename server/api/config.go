@@ -49,18 +49,22 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	err = json.Unmarshal(data, &config.Schedule)
-	if err != nil {
+	if err := json.Unmarshal(data, &config.Schedule); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	err = json.Unmarshal(data, &config.Replication)
-	if err != nil {
+	if err := json.Unmarshal(data, &config.Replication); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.svr.SetScheduleConfig(config.Schedule)
-	h.svr.SetReplicationConfig(config.Replication)
+	if err := h.svr.SetScheduleConfig(config.Schedule); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := h.svr.SetReplicationConfig(config.Replication); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 
@@ -76,7 +80,10 @@ func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.svr.SetScheduleConfig(*config)
+	if err := h.svr.SetScheduleConfig(*config); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 

@@ -18,6 +18,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -248,16 +249,32 @@ func (c *Config) validate() error {
 	if c.Join != "" && c.InitialCluster != "" {
 		return errors.New("-initial-cluster and -join can not be provided at the same time")
 	}
+	dataDir, err := filepath.Abs(c.DataDir)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	logFile, err := filepath.Abs(c.Log.File.Filename)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	rel, err := filepath.Rel(dataDir, filepath.Dir(logFile))
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if !strings.HasPrefix(rel, "..") {
+		return errors.New("log directory shouldn't be the subdirectory of data directory")
+	}
+
 	return nil
 }
 
 func (c *Config) adjust() error {
+	adjustString(&c.Name, defaultName)
+	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
+
 	if err := c.validate(); err != nil {
 		return errors.Trace(err)
 	}
-
-	adjustString(&c.Name, defaultName)
-	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 
 	adjustString(&c.ClientUrls, defaultClientUrls)
 	adjustString(&c.AdvertiseClientUrls, c.ClientUrls)
@@ -302,7 +319,9 @@ func (c *Config) adjust() error {
 
 	adjustString(&c.Metric.PushJob, c.Name)
 
-	c.Schedule.adjust()
+	if err := c.Schedule.adjust(); err != nil {
+		return errors.Trace(err)
+	}
 	c.Replication.adjust()
 
 	adjustDuration(&c.heartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
@@ -390,6 +409,39 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 	}
 }
 
+func (c *ScheduleConfig) adjust() error {
+	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
+	adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
+	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
+	adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
+	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
+	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
+	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
+	adjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
+	adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
+	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
+	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
+	adjustSchedulers(&c.Schedulers, defaultSchedulers)
+
+	return c.validate()
+}
+
+func (c *ScheduleConfig) validate() error {
+	if c.TolerantSizeRatio < 0 {
+		return errors.New("tolerant-size-ratio should be nonnegative")
+	}
+	if c.LowSpaceRatio < 0 || c.LowSpaceRatio > 1 {
+		return errors.New("low-space-ratio should between 0 and 1")
+	}
+	if c.HighSpaceRatio < 0 || c.HighSpaceRatio > 1 {
+		return errors.New("high-space-ratio should between 0 and 1")
+	}
+	if c.LowSpaceRatio <= c.HighSpaceRatio {
+		return errors.New("low-space-ratio should be larger than high-space-ratio")
+	}
+	return nil
+}
+
 // SchedulerConfigs is a slice of customized scheduler configuration.
 type SchedulerConfigs []SchedulerConfig
 
@@ -420,21 +472,6 @@ var defaultSchedulers = SchedulerConfigs{
 	{Type: "balance-leader"},
 	{Type: "hot-region"},
 	{Type: "label"},
-}
-
-func (c *ScheduleConfig) adjust() {
-	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
-	adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
-	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
-	adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
-	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
-	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
-	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
-	adjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
-	adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
-	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
-	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
-	adjustSchedulers(&c.Schedulers, defaultSchedulers)
 }
 
 // ReplicationConfig is the replication configuration.
