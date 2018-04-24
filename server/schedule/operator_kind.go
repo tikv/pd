@@ -32,6 +32,7 @@ const (
 	OpReplica                            // Initiated by replica checkers.
 	OpBalance                            // Initiated by balancers.
 	OpMerge                              // Initiated by merge checkers.
+	OpRange
 	opMax
 )
 
@@ -44,6 +45,7 @@ var flagToName = map[OperatorKind]string{
 	OpReplica:   "replica",
 	OpBalance:   "balance",
 	OpMerge:     "merge",
+	OpRange:     "range",
 }
 
 var nameToFlag = map[string]OperatorKind{
@@ -55,6 +57,7 @@ var nameToFlag = map[string]OperatorKind{
 	"replica":   OpReplica,
 	"balance":   OpBalance,
 	"merge":     OpMerge,
+	"range":     OpRange,
 }
 
 func (k OperatorKind) String() string {

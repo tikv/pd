@@ -76,6 +76,21 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	case "scatter-range-leader":
+		var args []string
+		startKey, ok := input["start_key"].(string)
+		if ok {
+			args = append(args, startKey)
+		}
+		endKey, ok := input["end_key"].(string)
+		if ok {
+			args = append(args, endKey)
+		}
+		if err := h.AddScatterRangeLeaderScheduler(args...); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
 	case "balance-adjacent-region-scheduler":
 		var args []string
 		leaderLimit, ok := input["leader_limit"].(string)
