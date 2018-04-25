@@ -15,6 +15,7 @@ package schedulers
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 
 	"github.com/juju/errors"
@@ -24,8 +25,8 @@ import (
 
 func init() {
 	schedule.RegisterScheduler("scatter-range-leader", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
-		if len(args) != 2 {
-			return nil, errors.New("should specify the range")
+		if len(args) != 3 {
+			return nil, errors.New("should specify the range and the name")
 		}
 		return newScatterRangeLeaderScheduler(limiter, args), nil
 	})
@@ -33,6 +34,8 @@ func init() {
 
 type scatterRangeLeaderScheduler struct {
 	*baseScheduler
+	name     string
+	filters  []schedule.Filter
 	startKey []byte
 	endKey   []byte
 }
@@ -41,15 +44,24 @@ type scatterRangeLeaderScheduler struct {
 // each store balanced.
 func newScatterRangeLeaderScheduler(limiter *schedule.Limiter, args []string) schedule.Scheduler {
 	base := newBaseScheduler(limiter)
+	filters := []schedule.Filter{
+		schedule.NewBlockFilter(),
+		schedule.NewStateFilter(),
+		schedule.NewHealthFilter(),
+		schedule.NewSnapshotCountFilter(),
+		schedule.NewPendingPeerCountFilter(),
+	}
 	return &scatterRangeLeaderScheduler{
 		baseScheduler: base,
 		startKey:      []byte(args[0]),
 		endKey:        []byte(args[1]),
+		name:          fmt.Sprintf("scatter-range-leader-%s", args[2]),
+		filters:       filters,
 	}
 }
 
 func (l *scatterRangeLeaderScheduler) GetName() string {
-	return "scatter-range-leader-scheduler"
+	return l.name
 }
 
 func (l *scatterRangeLeaderScheduler) GetType() string {
@@ -86,14 +98,24 @@ func (l *scatterRangeLeaderScheduler) Schedule(cluster schedule.Cluster, opInflu
 		source *core.StoreInfo
 		target *core.StoreInfo
 	)
-	maxScore := math.MinInt32
-	minScore := math.MaxInt32
+	maxScore := int64(math.MinInt32)
+	minScore := int64(math.MaxInt32)
 	for _, s := range stores {
-		score := regions.GetStoreLeaderCount(s.GetId())
+		score := regions.GetStoreLeaderRegionSize(s.GetId())
 		if score > maxScore {
 			maxScore = score
 			source = s
 		}
+	}
+	for _, s := range stores {
+		if schedule.FilterTarget(cluster, s, l.filters) {
+			continue
+		}
+		scoreGuard := schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), stores, source)
+		if scoreGuard.FilterTarget(cluster, s) {
+			continue
+		}
+		score := regions.GetStoreLeaderRegionSize(s.GetId())
 		if score < minScore {
 			minScore = score
 			target = s
