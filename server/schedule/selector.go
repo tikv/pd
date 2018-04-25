@@ -48,7 +48,9 @@ func (s *balanceSelector) SelectSource(opt Options, stores []*core.StoreInfo, fi
 		if FilterSource(opt, store, filters) {
 			continue
 		}
-		if result == nil || result.ResourceScore(s.kind) < store.ResourceScore(s.kind) {
+		if result == nil ||
+			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) <
+				store.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) {
 			result = store
 		}
 	}
@@ -63,7 +65,9 @@ func (s *balanceSelector) SelectTarget(opt Options, stores []*core.StoreInfo, fi
 		if FilterTarget(opt, store, filters) {
 			continue
 		}
-		if result == nil || result.ResourceScore(s.kind) > store.ResourceScore(s.kind) {
+		if result == nil ||
+			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) >
+				store.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) {
 			result = store
 		}
 	}
@@ -100,7 +104,7 @@ func (s *replicaSelector) SelectSource(opt Options, stores []*core.StoreInfo, fi
 			continue
 		}
 		score := DistinctScore(s.labels, s.regionStores, store)
-		if best == nil || compareStoreScore(store, score, best, bestScore) < 0 {
+		if best == nil || compareStoreScore(opt, store, score, best, bestScore) < 0 {
 			best, bestScore = store, score
 		}
 	}
@@ -120,7 +124,7 @@ func (s *replicaSelector) SelectTarget(opt Options, stores []*core.StoreInfo, fi
 			continue
 		}
 		score := DistinctScore(s.labels, s.regionStores, store)
-		if best == nil || compareStoreScore(store, score, best, bestScore) > 0 {
+		if best == nil || compareStoreScore(opt, store, score, best, bestScore) > 0 {
 			best, bestScore = store, score
 		}
 	}

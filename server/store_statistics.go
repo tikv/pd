@@ -63,7 +63,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 		s.Tombstone++
 		return
 	}
-	if store.IsLowSpace() {
+	if store.IsLowSpace(s.opt.GetLowSpaceRatio()) {
 		s.LowSpace++
 	}
 
@@ -74,12 +74,15 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	s.LeaderCount += store.LeaderCount
 
 	id := strconv.FormatUint(store.GetId(), 10)
-	storeStatusGauge.WithLabelValues(s.namespace, id, "region_score").Set(store.RegionScore())
-	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_score").Set(store.LeaderScore())
+	storeStatusGauge.WithLabelValues(s.namespace, id, "region_score").Set(store.RegionScore(s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_score").Set(store.LeaderScore(0))
 	storeStatusGauge.WithLabelValues(s.namespace, id, "region_size").Set(float64(store.RegionSize))
 	storeStatusGauge.WithLabelValues(s.namespace, id, "region_count").Set(float64(store.RegionCount))
 	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_size").Set(float64(store.LeaderSize))
 	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_count").Set(float64(store.LeaderCount))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "store_available").Set(float64(store.Stats.GetAvailable()))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "store_used").Set(float64(store.Stats.GetUsedSize()))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "store_capacity").Set(float64(store.Stats.GetCapacity()))
 }
 
 func (s *storeStatistics) Collect() {

@@ -197,7 +197,7 @@ func (f *storageThresholdFilter) FilterSource(opt Options, store *core.StoreInfo
 }
 
 func (f *storageThresholdFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
-	return store.IsLowSpace()
+	return store.IsLowSpace(opt.GetLowSpaceRatio())
 }
 
 // distinctScoreFilter ensures that distinct score will not decrease.

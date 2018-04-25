@@ -45,6 +45,7 @@ type StoreInfo struct {
 func NewStoreInfo(store *metapb.Store) *StoreInfo {
 	return &StoreInfo{
 		Store:        store,
+		Stats:        &pdpb.StoreStats{},
 		LeaderWeight: 1.0,
 		RegionWeight: 1.0,
 	}
@@ -103,15 +104,53 @@ func (s *StoreInfo) DownTime() time.Duration {
 }
 
 const minWeight = 1e-6
+const maxScore = 1024 * 1024 * 1024
 
-// LeaderScore returns the store's leader score: leaderCount / leaderWeight.
-func (s *StoreInfo) LeaderScore() float64 {
-	return float64(s.LeaderSize) / math.Max(s.LeaderWeight, minWeight)
+// LeaderScore returns the store's leader score: leaderSize / leaderWeight.
+func (s *StoreInfo) LeaderScore(delta int64) float64 {
+	return float64(s.LeaderSize+delta) / math.Max(s.LeaderWeight, minWeight)
 }
 
-// RegionScore returns the store's region score: regionSize / regionWeight.
-func (s *StoreInfo) RegionScore() float64 {
-	return float64(s.RegionSize) / math.Max(s.RegionWeight, minWeight)
+// RegionScore returns the store's region score.
+func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
+	var score float64
+	var amplification float64
+	available := float64(s.Stats.GetAvailable()) / (1 << 20)
+	used := float64(s.Stats.GetUsedSize()) / (1 << 20)
+	capacity := float64(s.Stats.GetCapacity()) / (1 << 20)
+
+	if s.RegionSize == 0 {
+		amplification = 1
+	} else {
+		// because of rocksdb compression, region size is larger than actual used size
+		amplification = float64(s.RegionSize) / used
+	}
+
+	if available-float64(delta)/amplification >= (1-highSpaceRatio)*capacity {
+		score = float64(s.RegionSize + delta)
+	} else if available-float64(delta)/amplification <= (1-lowSpaceRatio)*capacity {
+		score = maxScore - (available - float64(delta)/amplification)
+	} else {
+		// to make the score function continuous, we use linear function y = k * x + b as transition period
+		// from above we know that there are two points must on the function image
+		// note that it is possible that other irrelative files occupy a lot of storage, so capacity == available + used + irrelative
+		// and we regarded as irrelative as fixed value.
+		// Then amp = size / used = size / (capacity - irrelative - available)
+		//
+		// when available == (1 - highSpaceRatio) * capacity
+		// we can conclude that size = (capacity - irrelative - (1 - highSpaceRatio) * capacity) * amp = (used+available-(1-highSpaceRatio)*capacity)*amp
+		// Similarly, when available == (1 - lowSpaceRatio) * capacity
+		// we can conclude that size = (capacity - irrelative - (1 - highSpaceRatio) * capacity) * amp = (used+available-(1-lowSpaceRatio)*capacity)*amp
+		// These are the two fixed points' x-coordinates, and y-coordinates can easily get from the above two functions.
+		x1, y1 := (used+available-(1-highSpaceRatio)*capacity)*amplification, (used+available-(1-highSpaceRatio)*capacity)*amplification
+		x2, y2 := (used+available-(1-lowSpaceRatio)*capacity)*amplification, maxScore-(1-lowSpaceRatio)*capacity
+
+		k := (y2 - y1) / (x2 - x1)
+		b := y1 - k*x1
+		score = k*float64(s.RegionSize+delta) + b
+	}
+
+	return score / math.Max(s.RegionWeight, minWeight)
 }
 
 // StorageSize returns store's used storage size reported from tikv.
@@ -127,11 +166,9 @@ func (s *StoreInfo) AvailableRatio() float64 {
 	return float64(s.Stats.GetAvailable()) / float64(s.Stats.GetCapacity())
 }
 
-const storeLowSpaceThreshold = 0.2
-
 // IsLowSpace checks if the store is lack of space.
-func (s *StoreInfo) IsLowSpace() bool {
-	return s.Stats != nil && s.AvailableRatio() < storeLowSpaceThreshold
+func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
+	return s.Stats != nil && s.AvailableRatio() < 1-lowSpaceRatio
 }
 
 // ResourceCount reutrns count of leader/region in the store.
@@ -159,12 +196,12 @@ func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 }
 
 // ResourceScore reutrns score of leader/region in the store.
-func (s *StoreInfo) ResourceScore(kind ResourceKind) float64 {
+func (s *StoreInfo) ResourceScore(kind ResourceKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	switch kind {
 	case LeaderKind:
-		return s.LeaderScore()
+		return s.LeaderScore(delta)
 	case RegionKind:
-		return s.RegionScore()
+		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta)
 	default:
 		return 0
 	}

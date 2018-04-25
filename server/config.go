@@ -18,6 +18,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -248,16 +249,32 @@ func (c *Config) validate() error {
 	if c.Join != "" && c.InitialCluster != "" {
 		return errors.New("-initial-cluster and -join can not be provided at the same time")
 	}
+	dataDir, err := filepath.Abs(c.DataDir)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	logFile, err := filepath.Abs(c.Log.File.Filename)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	rel, err := filepath.Rel(dataDir, filepath.Dir(logFile))
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if !strings.HasPrefix(rel, "..") {
+		return errors.New("log directory shouldn't be the subdirectory of data directory")
+	}
+
 	return nil
 }
 
 func (c *Config) adjust() error {
+	adjustString(&c.Name, defaultName)
+	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
+
 	if err := c.validate(); err != nil {
 		return errors.Trace(err)
 	}
-
-	adjustString(&c.Name, defaultName)
-	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 
 	adjustString(&c.ClientUrls, defaultClientUrls)
 	adjustString(&c.AdvertiseClientUrls, c.ClientUrls)
@@ -302,7 +319,9 @@ func (c *Config) adjust() error {
 
 	adjustString(&c.Metric.PushJob, c.Name)
 
-	c.Schedule.adjust()
+	if err := c.Schedule.adjust(); err != nil {
+		return errors.Trace(err)
+	}
 	c.Replication.adjust()
 
 	adjustDuration(&c.heartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
@@ -352,6 +371,18 @@ type ScheduleConfig struct {
 	MergeScheduleLimit uint64 `toml:"merge-schedule-limit,omitempty" json:"merge-schedule-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
+	//
+	//      high space stage         transition stage           low space stage
+	//   |--------------------|-----------------------------|-------------------------|
+	//   ^                    ^                             ^                         ^
+	//   0       HighSpaceRatio * capacity       LowSpaceRatio * capacity          capacity
+	//
+	// LowSpaceRatio is the lowest usage ratio of store which regraded as low space.
+	// When in low space, store region score increases to very large and varies inversely with available size.
+	LowSpaceRatio float64 `toml:"low-space-ratio,omitempty" json:"low-space-ratio"`
+	// HighSpaceRatio is the highest usage ratio of store which regraded as high space.
+	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
+	HighSpaceRatio float64 `toml:"high-space-ratio,omitempty" json:"high-space-ratio"`
 	// EnableRaftLearner is the option for using AddLearnerNode instead of AddNode
 	EnableRaftLearner bool `toml:"enable-raft-learner" json:"enable-raft-learner,string"`
 	// Schedulers support for loding customized schedulers
@@ -371,9 +402,44 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		ReplicaScheduleLimit: c.ReplicaScheduleLimit,
 		MergeScheduleLimit:   c.MergeScheduleLimit,
 		TolerantSizeRatio:    c.TolerantSizeRatio,
+		LowSpaceRatio:        c.LowSpaceRatio,
+		HighSpaceRatio:       c.HighSpaceRatio,
 		EnableRaftLearner:    c.EnableRaftLearner,
 		Schedulers:           schedulers,
 	}
+}
+
+func (c *ScheduleConfig) adjust() error {
+	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
+	adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
+	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
+	adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
+	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
+	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
+	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
+	adjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
+	adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
+	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
+	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
+	adjustSchedulers(&c.Schedulers, defaultSchedulers)
+
+	return c.validate()
+}
+
+func (c *ScheduleConfig) validate() error {
+	if c.TolerantSizeRatio < 0 {
+		return errors.New("tolerant-size-ratio should be nonnegative")
+	}
+	if c.LowSpaceRatio < 0 || c.LowSpaceRatio > 1 {
+		return errors.New("low-space-ratio should between 0 and 1")
+	}
+	if c.HighSpaceRatio < 0 || c.HighSpaceRatio > 1 {
+		return errors.New("high-space-ratio should between 0 and 1")
+	}
+	if c.LowSpaceRatio <= c.HighSpaceRatio {
+		return errors.New("low-space-ratio should be larger than high-space-ratio")
+	}
+	return nil
 }
 
 // SchedulerConfigs is a slice of customized scheduler configuration.
@@ -396,7 +462,9 @@ const (
 	defaultRegionScheduleLimit  = 4
 	defaultReplicaScheduleLimit = 8
 	defaultMergeScheduleLimit   = 8
-	defaultTolerantSizeRatio    = 2.5
+	defaultTolerantSizeRatio    = 5
+	defaultLowSpaceRatio        = 0.8
+	defaultHighSpaceRatio       = 0.6
 )
 
 var defaultSchedulers = SchedulerConfigs{
@@ -404,19 +472,6 @@ var defaultSchedulers = SchedulerConfigs{
 	{Type: "balance-leader"},
 	{Type: "hot-region"},
 	{Type: "label"},
-}
-
-func (c *ScheduleConfig) adjust() {
-	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
-	adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
-	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
-	adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
-	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
-	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
-	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
-	adjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
-	adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
-	adjustSchedulers(&c.Schedulers, defaultSchedulers)
 }
 
 // ReplicationConfig is the replication configuration.

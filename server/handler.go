@@ -520,6 +520,28 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64) error {
 	return nil
 }
 
+// AddScatterRegionOperator adds an operator to scatter a region.
+func (h *Handler) AddScatterRegionOperator(regionID uint64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	region := c.cluster.GetRegion(regionID)
+	if region == nil {
+		return ErrRegionNotFound(regionID)
+	}
+
+	op := c.regionScatterer.Scatter(region)
+	if op == nil {
+		return nil
+	}
+	if ok := c.addOperator(op); !ok {
+		return errors.Trace(errAddOperator)
+	}
+	return nil
+}
+
 // GetDownPeerRegions gets the region with down peer.
 func (h *Handler) GetDownPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()

@@ -61,7 +61,7 @@ leader-schedule-limit = 4
 region-schedule-limit = 4
 replica-schedule-limit = 8
 merge-schedule-limit = 8
-tolerant-size-ratio = 2.5
+tolerant-size-ratio = 5
 
 # customized schedulers, the format is as below
 # if empty, it will use balance-leader, balance-region, hot-region as default

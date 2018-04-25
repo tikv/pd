@@ -151,6 +151,11 @@ func (c *coordinator) patrolRegions() {
 		}
 
 		for _, region := range regions {
+			// Skip the region if there is already a pending operator.
+			if c.getOperator(region.GetId()) != nil {
+				continue
+			}
+
 			key = region.GetEndKey()
 
 			if op := c.namespaceChecker.Check(region); op != nil {
@@ -434,6 +439,7 @@ func (c *coordinator) addOperatorLocked(op *schedule.Operator) bool {
 	if old, ok := c.operators[regionID]; ok {
 		if !isHigherPriorityOperator(op, old) {
 			log.Infof("[region %v] cancel add operator, old: %s", regionID, old)
+			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
 			return false
 		}
 		log.Infof("[region %v] replace old operator: %s", regionID, old)
@@ -468,6 +474,7 @@ func (c *coordinator) addOperators(ops ...*schedule.Operator) bool {
 	for _, op := range ops {
 		if old := c.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
 			log.Infof("[region %v] cancel add operators, old: %s", op.RegionID(), old)
+			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
 			return false
 		}
 	}

@@ -94,7 +94,6 @@ func (n *NamespaceChecker) SelectBestPeerToRelocate(region *core.RegionInfo, tar
 func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, targets []*core.StoreInfo, filters ...Filter) uint64 {
 	newFilters := []Filter{
 		NewStateFilter(),
-		NewStorageThresholdFilter(),
 		NewExcludedFilter(nil, region.GetStoreIds()),
 	}
 	filters = append(filters, newFilters...)
