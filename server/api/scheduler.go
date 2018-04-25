@@ -86,6 +86,10 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 		if ok {
 			args = append(args, endKey)
 		}
+		name, ok := input["range_name"].(string)
+		if ok {
+			args = append(args, name)
+		}
 		if err := h.AddScatterRangeLeaderScheduler(args...); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
