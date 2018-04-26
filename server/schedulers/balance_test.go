@@ -1063,6 +1063,8 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 		})
 		id += 4
 	}
+	// empty case
+	regions[49].EndKey = []byte("")
 	for _, meta := range regions {
 		leader := rand.Intn(4) % 3
 		regionInfo := core.NewRegionInfo(meta, meta.Peers[leader])
