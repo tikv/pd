@@ -14,6 +14,8 @@
 package server
 
 import (
+	"path"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server/core"
 )
@@ -56,4 +58,26 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	}
 	c.Assert(newOpt.GetMaxReplicas("default"), Equals, 5)
 	c.Assert(newOpt.GetMaxSnapshotCount(), Equals, uint64(10))
+}
+
+func (s *testConfigSuite) TestValidation(c *C) {
+	cfg := NewConfig()
+	c.Assert(cfg.adjust(), IsNil)
+
+	cfg.Log.File.Filename = path.Join(cfg.DataDir, "test")
+	c.Assert(cfg.validate(), NotNil)
+
+	// check schedule config
+	cfg.Schedule.HighSpaceRatio = -0.1
+	c.Assert(cfg.Schedule.validate(), NotNil)
+	cfg.Schedule.HighSpaceRatio = 0.6
+	c.Assert(cfg.Schedule.validate(), IsNil)
+	cfg.Schedule.LowSpaceRatio = 1.1
+	c.Assert(cfg.Schedule.validate(), NotNil)
+	cfg.Schedule.LowSpaceRatio = 0.4
+	c.Assert(cfg.Schedule.validate(), NotNil)
+	cfg.Schedule.LowSpaceRatio = 0.8
+	c.Assert(cfg.Schedule.validate(), IsNil)
+	cfg.Schedule.TolerantSizeRatio = -0.6
+	c.Assert(cfg.Schedule.validate(), NotNil)
 }
