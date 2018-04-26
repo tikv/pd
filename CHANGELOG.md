@@ -1,4 +1,14 @@
 # PD Change Log
+
+## v2.0.0-GA
+### New Features
+* Support using pd-ctl to scatter spcified Regions for manual adjust hotspot regions in some cases
+### Improves
+* More configuration check rules to prevent unreasonable configurations
+* Optimize scheduling strategy when TiKV node has insufficient space, try the best to prevent disk from becoming full
+* Optimize hot-region scheduler execution efficiency and add more metrics
+* Optimize Region health check logic to avoid generating redundant schedule operators
+
 ## v2.0.0-rc.5
 ### New Features
 * Support adding the learner node
