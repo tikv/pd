@@ -312,8 +312,7 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 					Id:      s.PeerID,
 					StoreId: s.ToStore,
 				}
-				region.Peers = append(region.Peers, peer)
-				region.Voters = region.Peers
+				region.AddPeer(peer)
 			case RemovePeer:
 				if region.GetStorePeer(s.FromStore) == nil {
 					panic("Remove peer that doesn't exist")
@@ -328,8 +327,7 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 					StoreId:   s.ToStore,
 					IsLearner: true,
 				}
-				region.Peers = append(region.Peers, peer)
-				region.Learners = append(region.Learners, peer)
+				region.AddPeer(peer)
 			default:
 				panic("Unknown operator step")
 			}

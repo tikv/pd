@@ -106,7 +106,6 @@ func (l *scatterRangeLeaderScheduler) Schedule(cluster schedule.Cluster, opInflu
 			}
 			startKey = r.EndKey
 		}
-
 	}
 	var (
 		source *core.StoreInfo

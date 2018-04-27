@@ -960,7 +960,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 
 type testBalanceHotReadRegionSchedulerSuite struct{}
 
-func (s *testBalanceHotReadRegionSchedulerSuite) TestBalanc(c *C) {
+func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
 	hb, err := schedule.CreateScheduler("hot-read-region", schedule.NewLimiter())
