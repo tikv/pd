@@ -13,7 +13,9 @@ PD supports distribution and fault-tolerance by embedding [etcd](https://github.
 ## Build
 
 1. Make sure [​*Go*​](https://golang.org/) (version 1.8+) is installed.
-2. Use `make` to install PD. PD is installed in the `bin` directory.
+2. Ensure your `$GOPATH` is set. (For example, `export GOPATH=$HOME/go`)
+3. Clone the repository with `git clone git@github.com:pingcap/pd.git $GOPATH/src/github.com/pingcap/pd`.
+4. Use `make` to install PD. PD is installed in the `bin` directory.
 
 ## Usage
 
