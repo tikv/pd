@@ -174,9 +174,9 @@ func (h *Handler) AddLabelScheduler() error {
 	return h.AddScheduler("label")
 }
 
-// AddScatterRangeLeaderScheduler adds a balance-range-leader-scheduler
-func (h *Handler) AddScatterRangeLeaderScheduler(args ...string) error {
-	return h.AddScheduler("scatter-range-leader", args...)
+// AddScatterRangeScheduler adds a balance-range-leader-scheduler
+func (h *Handler) AddScatterRangeScheduler(args ...string) error {
+	return h.AddScheduler("scatter-range", args...)
 }
 
 // AddAdjacentRegionScheduler adds a balance-adjacent-region-scheduler.

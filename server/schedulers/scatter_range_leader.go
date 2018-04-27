@@ -14,18 +14,15 @@
 package schedulers
 
 import (
-	"bytes"
 	"fmt"
-	"math"
 	"net/url"
 
 	"github.com/juju/errors"
-	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
 
 func init() {
-	schedule.RegisterScheduler("scatter-range-leader", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("scatter-range", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
 		if len(args) != 3 {
 			return nil, errors.New("should specify the range and the name")
 		}
@@ -38,21 +35,23 @@ func init() {
 			return nil, err
 		}
 		name := args[2]
-		return newScatterRangeLeaderScheduler(limiter, []string{startKey, endKey, name}), nil
+		return newScatterRangeScheduler(limiter, []string{startKey, endKey, name}), nil
 	})
 }
 
-type scatterRangeLeaderScheduler struct {
+type scatterRangeScheduler struct {
 	*baseScheduler
-	name     string
-	filters  []schedule.Filter
-	startKey []byte
-	endKey   []byte
+	name          string
+	filters       []schedule.Filter
+	startKey      []byte
+	endKey        []byte
+	balanceLeader schedule.Scheduler
+	balanceRegion schedule.Scheduler
 }
 
-// newScatterRangeLeaderScheduler creates a scheduler that tends to keep leaders on
+// newScatterRangeScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
-func newScatterRangeLeaderScheduler(limiter *schedule.Limiter, args []string) schedule.Scheduler {
+func newScatterRangeScheduler(limiter *schedule.Limiter, args []string) schedule.Scheduler {
 	base := newBaseScheduler(limiter)
 	filters := []schedule.Filter{
 		schedule.NewBlockFilter(),
@@ -61,125 +60,44 @@ func newScatterRangeLeaderScheduler(limiter *schedule.Limiter, args []string) sc
 		schedule.NewSnapshotCountFilter(),
 		schedule.NewPendingPeerCountFilter(),
 	}
-	return &scatterRangeLeaderScheduler{
+	return &scatterRangeScheduler{
 		baseScheduler: base,
 		startKey:      []byte(args[0]),
 		endKey:        []byte(args[1]),
 		name:          fmt.Sprintf("scatter-range-leader-%s", args[2]),
 		filters:       filters,
+		balanceLeader: newBalanceLeaderScheduler(limiter),
+		balanceRegion: newBalanceRegionScheduler(limiter),
 	}
 }
 
-func (l *scatterRangeLeaderScheduler) GetName() string {
+func (l *scatterRangeScheduler) GetName() string {
 	return l.name
 }
 
-func (l *scatterRangeLeaderScheduler) GetType() string {
+func (l *scatterRangeScheduler) GetType() string {
 	return "scatter-range-leader"
 }
 
-func (l *scatterRangeLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (l *scatterRangeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	return l.limiter.OperatorCount(schedule.OpRange) < 1
 }
 
-func (l *scatterRangeLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
+func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
-	stores := cluster.GetStores()
-	regions := core.NewRegionsInfo()
-	startKey := l.startKey
-	loopEnd := false
-	for !loopEnd {
-		collect := cluster.ScanRegions(startKey, scanLimit)
-		if len(collect) == 0 {
-			break
-		}
-		for _, r := range collect {
-			if bytes.Compare(r.StartKey, l.endKey) < 0 {
-				regions.SetRegion(r)
-			} else {
-				loopEnd = true
-				break
-			}
-			if string(r.EndKey) == "" {
-				loopEnd = true
-				break
-			}
-			startKey = r.EndKey
-		}
+	c := schedule.GenRangeCluster(cluster, l.startKey, l.endKey)
+	c.SetTolerantSizeRatio(2)
+	ops := l.balanceLeader.Schedule(c, schedule.NewOpInfluence(nil, cluster))
+	if len(ops) > 0 {
+		ops[0].SetDesc("scatter-range-leader")
+		ops[0].AttachKind(schedule.OpRange)
+		return ops
 	}
-	var (
-		source *core.StoreInfo
-		target *core.StoreInfo
-	)
-	maxScore := int64(math.MinInt32)
-	minScore := int64(math.MaxInt32)
-	for _, s := range stores {
-		score := regions.GetStoreLeaderRegionSize(s.GetId())
-		if score > maxScore {
-			maxScore = score
-			source = s
-		}
+	ops = l.balanceRegion.Schedule(c, schedule.NewOpInfluence(nil, cluster))
+	if len(ops) > 0 {
+		ops[0].SetDesc("scatter-range-region")
+		ops[0].AttachKind(schedule.OpRange)
+		return ops
 	}
-	for _, s := range stores {
-		if schedule.FilterTarget(cluster, s, l.filters) {
-			continue
-		}
-		scoreGuard := schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), stores, source)
-		if scoreGuard.FilterTarget(cluster, s) {
-			continue
-		}
-		score := regions.GetStoreLeaderRegionSize(s.GetId())
-		if score < minScore {
-			minScore = score
-			target = s
-		}
-	}
-
-	if source == target {
-		schedulerCounter.WithLabelValues(l.GetName(), "no_need").Inc()
-		return nil
-	}
-	sourceRegion := regions.RandLeaderRegion(source.GetId())
-	if sourceRegion == nil {
-		schedulerCounter.WithLabelValues(l.GetName(), "no_source_region").Inc()
-		return nil
-	}
-
-	var steps []schedule.OperatorStep
-	followers := sourceRegion.GetFollowers()
-	for storeID := range followers {
-		if l.shouldBalance(source.GetId(), storeID, sourceRegion, regions) {
-			target = cluster.GetStore(storeID)
-			break
-		}
-	}
-	if _, ok := followers[target.GetId()]; ok {
-		step := schedule.TransferLeader{FromStore: source.GetId(), ToStore: target.GetId()}
-		op := schedule.NewOperator("scatter-range-leader", sourceRegion.GetId(), schedule.OpRange|schedule.OpLeader, step)
-		return []*schedule.Operator{op}
-	}
-	peer, err := cluster.AllocPeer(target.GetId())
-	if err != nil {
-		if _, ok := followers[target.GetId()]; ok {
-			step := schedule.TransferLeader{FromStore: source.GetId(), ToStore: target.GetId()}
-			op := schedule.NewOperator("scatter-range-leader", sourceRegion.GetId(), schedule.OpRange|schedule.OpLeader, step)
-			return []*schedule.Operator{op}
-		}
-		return nil
-	}
-	steps = append(steps, schedule.AddPeer{ToStore: target.GetId(), PeerID: peer.GetId()})
-	steps = append(steps, schedule.TransferLeader{FromStore: source.GetId(), ToStore: target.GetId()})
-	steps = append(steps, schedule.RemovePeer{FromStore: source.GetId()})
-	op := schedule.NewOperator("scatter-range-leader", sourceRegion.GetId(), schedule.OpRange|schedule.OpLeader|schedule.OpBalance, steps...)
-	return []*schedule.Operator{op}
-}
-func (l *scatterRangeLeaderScheduler) shouldBalance(sourceID, targetID uint64, sourceRegion *core.RegionInfo, regions *core.RegionsInfo) bool {
-	// more smaller TolerantSizeRatio
-	// use 2 in here
-	tolerantSizeRatio := 2
-	sourceScore, targetScore := regions.GetStoreLeaderRegionSize(sourceID), regions.GetStoreLeaderRegionSize(targetID)
-	if sourceScore-targetScore < sourceRegion.ApproximateSize*int64(tolerantSizeRatio) {
-		return false
-	}
-	return true
+	return nil
 }

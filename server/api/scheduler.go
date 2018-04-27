@@ -76,7 +76,7 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "scatter-range-leader":
+	case "scatter-range":
 		var args []string
 		startKey, ok := input["start_key"].(string)
 		if ok {
@@ -90,7 +90,7 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 		if ok {
 			args = append(args, name)
 		}
-		if err := h.AddScatterRangeLeaderScheduler(args...); err != nil {
+		if err := h.AddScatterRangeScheduler(args...); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}

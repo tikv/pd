@@ -1077,11 +1077,11 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 		tc.UpdateStoreStatus(uint64(i))
 	}
 
-	hb, err := schedule.CreateScheduler("scatter-range-leader", schedule.NewLimiter(), "s_00", "s_50", "t")
+	hb, err := schedule.CreateScheduler("scatter-range", schedule.NewLimiter(), "s_00", "s_50", "t")
 	c.Assert(err, IsNil)
 	limit := 0
 	for {
-		if limit > 10 {
+		if limit > 100 {
 			break
 		}
 
@@ -1093,8 +1093,10 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 		tc.ApplyOperator(ops[0])
 	}
 	for i := 1; i <= 5; i++ {
-		count := tc.Regions.GetStoreLeaderCount(uint64(i))
-		c.Assert(count, Equals, 10)
+		leaderCount := tc.Regions.GetStoreLeaderCount(uint64(i))
+		c.Assert(leaderCount, LessEqual, 12)
+		regionCount := tc.Regions.GetStoreRegionCount(uint64(i))
+		c.Assert(regionCount, LessEqual, 32)
 	}
 }
 
