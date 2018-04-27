@@ -282,6 +282,11 @@ func (s *Server) campaignLeader() error {
 			if err = s.updateTimestamp(); err != nil {
 				return errors.Trace(err)
 			}
+			etcdLeader := s.etcd.Server.Lead()
+			if etcdLeader != s.ID() {
+				log.Info("etcd leader changed, %s resigns leadership", s.Name())
+				return nil
+			}
 		case <-s.resignCh:
 			log.Infof("%s resigns leadership", s.Name())
 			return nil

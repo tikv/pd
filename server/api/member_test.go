@@ -218,7 +218,7 @@ func (s *testMemberAPISuite) TestLeaderResign(c *C) {
 	c.Assert(leader3.GetMemberId(), Equals, leader1.GetMemberId())
 }
 
-func (s *testMemberAPISuite) TestEtcdLeaderPriority(c *C) {
+func (s *testMemberAPISuite) TestLeaderPriority(c *C) {
 	cfgs, svrs, clean := mustNewCluster(c, 3)
 	defer clean()
 
@@ -229,10 +229,13 @@ func (s *testMemberAPISuite) TestEtcdLeaderPriority(c *C) {
 
 	leader1, err := s.getEtcdLeader(svrs[0])
 	c.Assert(err, IsNil)
+	s.waitLeaderSync(c, svrs[0], leader1)
 	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/members/name/"+leader1.GetName(), bytes.NewBufferString(`{"leader-priority": -1}`))
 	leader2 := s.waitEtcdLeaderChange(c, svrs[0], leader1)
+	s.waitLeaderSync(c, svrs[0], leader2)
 	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/members/name/"+leader1.GetName(), bytes.NewBufferString(`{"leader-priority": 100}`))
 	leader3 := s.waitEtcdLeaderChange(c, svrs[0], leader2)
+	s.waitLeaderSync(c, svrs[0], leader3)
 	c.Assert(leader3.GetMemberId(), Equals, leader1.GetMemberId())
 }
 
@@ -287,4 +290,12 @@ func (s *testMemberAPISuite) waitEtcdLeaderChange(c *C, svr *server.Server, old 
 		return true
 	})
 	return leader
+}
+
+func (s *testMemberAPISuite) waitLeaderSync(c *C, svr *server.Server, etcdLeader *pdpb.Member) {
+	testutil.WaitUntil(c, func(c *C) bool {
+		leader, err := svr.GetLeader()
+		c.Assert(err, IsNil)
+		return leader.GetMemberId() == etcdLeader.GetMemberId()
+	})
 }
