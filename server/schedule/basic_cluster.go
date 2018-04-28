@@ -58,7 +58,7 @@ func NewOpInfluence(operators []*Operator, cluster Cluster) OpInfluence {
 				op.Influence(influence, region)
 			}
 		}
-		influence.regionsInfluence[op.RegionID()] = op.Clone()
+		influence.regionsInfluence[op.RegionID()] = op
 	}
 
 	return influence
