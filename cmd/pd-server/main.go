@@ -49,12 +49,12 @@ func main() {
 	case flag.ErrHelp:
 		os.Exit(0)
 	default:
-		log.Fatalf("parse cmd flags error: %s\n", err)
+		log.Fatalf("parse cmd flags error: %s\n", errors.ErrorStack(err))
 	}
 
 	err = logutil.InitLogger(&cfg.Log)
 	if err != nil {
-		log.Fatalf("initialize logger error: %s\n", err)
+		log.Fatalf("initialize logger error: %s\n", errors.ErrorStack(err))
 	}
 
 	server.LogPDInfo()
