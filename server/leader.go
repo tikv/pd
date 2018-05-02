@@ -100,6 +100,7 @@ func (s *Server) leaderLoop() {
 
 		etcdLeader := s.etcd.Server.Lead()
 		if etcdLeader != s.ID() {
+			log.Infof("%v is not etcd leader, skip campaign leader and check later", s.Name())
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
