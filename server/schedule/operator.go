@@ -275,12 +275,12 @@ func (o *Operator) Desc() string {
 	return o.desc
 }
 
-// SetDesc set the description for the operator.
+// SetDesc sets the description for the operator.
 func (o *Operator) SetDesc(desc string) {
 	o.desc = desc
 }
 
-// AttachKind attach a operator kind for the operator.
+// AttachKind attaches an operator kind for the operator.
 func (o *Operator) AttachKind(kind OperatorKind) {
 	o.kind |= kind
 }

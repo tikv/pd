@@ -14,8 +14,6 @@
 package schedule
 
 import (
-	"bytes"
-
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
 )
@@ -64,7 +62,7 @@ func NewOpInfluence(operators []*Operator, cluster Cluster) OpInfluence {
 	return influence
 }
 
-// OpInfluence is a map of StoreInfluence.
+// OpInfluence records the influence of the cluster.
 type OpInfluence struct {
 	storesInfluence  map[uint64]*StoreInfluence
 	regionsInfluence map[uint64]*Operator
@@ -80,8 +78,8 @@ func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
 	return storeInfluence
 }
 
-// GetRegionInfluence gets regionInfluence of specific region.
-func (m OpInfluence) GetRegionInfluence() map[uint64]*Operator {
+// GetRegionsInfluence gets regionInfluence of specific region.
+func (m OpInfluence) GetRegionsInfluence() map[uint64]*Operator {
 	return m.regionsInfluence
 }
 
@@ -216,81 +214,4 @@ func (bc *BasicCluster) CheckWriteStatus(region *core.RegionInfo) (bool, *core.R
 // CheckReadStatus checks the read status, returns whether need update statistics and item.
 func (bc *BasicCluster) CheckReadStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
 	return bc.HotCache.CheckRead(region, bc.Stores)
-}
-
-// RangeCluster isolates the cluster by range.
-type RangeCluster struct {
-	Cluster
-	regions           *core.RegionsInfo
-	tolerantSizeRatio float64
-}
-
-const scanLimit = 128
-
-// GenRangeCluster gets a range cluster by specifying start key and end key.
-func GenRangeCluster(cluster Cluster, startKey, endKey []byte) *RangeCluster {
-	regions := core.NewRegionsInfo()
-	scanKey := startKey
-	loopEnd := false
-	for !loopEnd {
-		collect := cluster.ScanRegions(scanKey, scanLimit)
-		if len(collect) == 0 {
-			break
-		}
-		for _, r := range collect {
-			if bytes.Compare(r.StartKey, endKey) < 0 {
-				regions.SetRegion(r)
-			} else {
-				loopEnd = true
-				break
-			}
-			if string(r.EndKey) == "" {
-				loopEnd = true
-				break
-			}
-			scanKey = r.EndKey
-		}
-	}
-	return &RangeCluster{
-		Cluster: cluster,
-		regions: regions,
-	}
-}
-
-func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) {
-	id := s.GetId()
-	s.LeaderCount = r.regions.GetStoreLeaderCount(id)
-	s.LeaderSize = r.regions.GetStoreLeaderRegionSize(id)
-	s.RegionCount = r.regions.GetStoreRegionCount(id)
-	s.RegionSize = r.regions.GetStoreRegionSize(id)
-	s.PendingPeerCount = r.regions.GetStorePendingPeerCount(id)
-}
-
-// GetStore searches for a store by ID.
-func (r *RangeCluster) GetStore(id uint64) *core.StoreInfo {
-	s := r.Cluster.GetStore(id)
-	r.updateStoreInfo(s)
-	return s
-}
-
-// GetStores returns all Stores in the cluster.
-func (r *RangeCluster) GetStores() []*core.StoreInfo {
-	stores := r.Cluster.GetStores()
-	for _, s := range stores {
-		r.updateStoreInfo(s)
-	}
-	return stores
-}
-
-// SetTolerantSizeRatio sets the tolerant size ratio.
-func (r *RangeCluster) SetTolerantSizeRatio(ratio float64) {
-	r.tolerantSizeRatio = ratio
-}
-
-// GetTolerantSizeRatio gets the tolerant size ratio.
-func (r *RangeCluster) GetTolerantSizeRatio() float64 {
-	if r.tolerantSizeRatio != 0 {
-		return r.tolerantSizeRatio
-	}
-	return r.Cluster.GetTolerantSizeRatio()
 }

@@ -48,26 +48,17 @@ type scatterRangeScheduler struct {
 	endKey        []byte
 	balanceLeader schedule.Scheduler
 	balanceRegion schedule.Scheduler
-	operators     []*schedule.Operator
 }
 
 // newScatterRangeScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
 func newScatterRangeScheduler(limiter *schedule.Limiter, args []string) schedule.Scheduler {
 	base := newBaseScheduler(limiter)
-	filters := []schedule.Filter{
-		schedule.NewBlockFilter(),
-		schedule.NewStateFilter(),
-		schedule.NewHealthFilter(),
-		schedule.NewSnapshotCountFilter(),
-		schedule.NewPendingPeerCountFilter(),
-	}
 	return &scatterRangeScheduler{
 		baseScheduler: base,
 		startKey:      []byte(args[0]),
 		endKey:        []byte(args[1]),
 		rangeName:     args[2],
-		filters:       filters,
 		balanceLeader: newBalanceLeaderScheduler(limiter),
 		balanceRegion: newBalanceRegionScheduler(limiter),
 	}
@@ -78,7 +69,7 @@ func (l *scatterRangeScheduler) GetName() string {
 }
 
 func (l *scatterRangeScheduler) GetType() string {
-	return "scatter-range-leader"
+	return "scatter-range"
 }
 
 func (l *scatterRangeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
@@ -87,9 +78,9 @@ func (l *scatterRangeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool
 
 func (l *scatterRangeScheduler) getOperators(opInfuence schedule.OpInfluence) []*schedule.Operator {
 	var res []*schedule.Operator
-	ops := opInfuence.GetRegionInfluence()
+	ops := opInfuence.GetRegionsInfluence()
 	for _, op := range ops {
-		if strings.Contains(op.Desc(), l.rangeName) {
+		if strings.HasSuffix(op.Desc(), l.rangeName) {
 			res = append(res, op)
 		}
 	}
@@ -105,13 +96,16 @@ func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster, opInfluence s
 	if len(ops) > 0 {
 		ops[0].SetDesc(fmt.Sprintf("scatter-range-leader-%s", l.rangeName))
 		ops[0].AttachKind(schedule.OpRange)
+		schedulerCounter.WithLabelValues(l.GetName(), "new-leader-operator").Inc()
 		return ops
 	}
 	ops = l.balanceRegion.Schedule(c, schedule.NewOpInfluence(influence, cluster))
 	if len(ops) > 0 {
 		ops[0].SetDesc(fmt.Sprintf("scatter-range-region-%s", l.rangeName))
 		ops[0].AttachKind(schedule.OpRange)
+		schedulerCounter.WithLabelValues(l.GetName(), "new-region-operator").Inc()
 		return ops
 	}
+	schedulerCounter.WithLabelValues(l.GetName(), "no-need").Inc()
 	return nil
 }

@@ -278,6 +278,12 @@ func (mc *MockCluster) UpdateStoreStatus(id uint64) {
 	mc.Stores.SetPendingPeerCount(id, mc.Regions.GetStorePendingPeerCount(id))
 	mc.Stores.SetLeaderSize(id, mc.Regions.GetStoreLeaderRegionSize(id))
 	mc.Stores.SetRegionSize(id, mc.Regions.GetStoreRegionSize(id))
+	store := mc.Stores.GetStore(id)
+	store.Stats = &pdpb.StoreStats{}
+	store.Stats.Capacity = 1000 * (1 << 20)
+	store.Stats.Available = store.Stats.Capacity - uint64(store.RegionSize)
+	store.Stats.UsedSize = uint64(store.RegionSize)
+	mc.PutStore(store)
 }
 
 func (mc *MockCluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerIds ...uint64) *core.RegionInfo {

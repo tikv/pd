@@ -32,7 +32,7 @@ const (
 	OpReplica                            // Initiated by replica checkers.
 	OpBalance                            // Initiated by balancers.
 	OpMerge                              // Initiated by merge checkers.
-	OpRange
+	OpRange                              // Initiated by range scheduler.
 	opMax
 )
 
