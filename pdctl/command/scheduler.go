@@ -145,10 +145,10 @@ func addSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	postJSON(cmd, schedulersPrefix, input)
 }
 
-// NewScatterRangeSchedulerCommand returns a command to add a scatter-range-leader-scheduler.
+// NewScatterRangeSchedulerCommand returns a command to add a scatter-range-scheduler.
 func NewScatterRangeSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "scatter-range-leader <start_key> <end_key> <range_name>",
+		Use:   "scatter-range <start_key> <end_key> <range_name>",
 		Short: "add a scheduler to scatter range",
 		Run:   addSchedulerForScatterRangeCommandFunc,
 	}
