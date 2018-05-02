@@ -242,6 +242,7 @@ func (s *testMemberAPISuite) TestLeaderPriority(c *C) {
 func (s *testMemberAPISuite) post(c *C, url string, body io.Reader) {
 	testutil.WaitUntil(c, func(c *C) bool {
 		res, err := http.Post(url, "", body)
+		c.Logf("post res: %v, err: %v", res.StatusCode, err)
 		c.Assert(err, IsNil)
 		return res.StatusCode == http.StatusOK
 	})
