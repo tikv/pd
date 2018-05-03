@@ -106,12 +106,22 @@ func (r *RangeCluster) GetTolerantSizeRatio() float64 {
 
 // RandFollowerRegion returns a random region that has a follower on the store.
 func (r *RangeCluster) RandFollowerRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
+<<<<<<< HEAD
 	return r.regions.RandFollowerRegion(storeID, opts...)
+=======
+	region := r.regions.RandFollowerRegion(storeID, opts...)
+	return region
+>>>>>>> origin/scatter-range
 }
 
 // RandLeaderRegion returns a random region that has leader on the store.
 func (r *RangeCluster) RandLeaderRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
+<<<<<<< HEAD
 	return r.regions.RandLeaderRegion(storeID, opts...)
+=======
+	region := r.regions.RandLeaderRegion(storeID, opts...)
+	return region
+>>>>>>> origin/scatter-range
 }
 
 // GetRegionStores returns all stores that contains the region's peer.

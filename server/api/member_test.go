@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -211,14 +210,14 @@ func (s *testMemberAPISuite) TestLeaderResign(c *C) {
 	leader1, err := svrs[0].GetLeader()
 	c.Assert(err, IsNil)
 
-	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/leader/resign", nil)
+	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/leader/resign", "")
 	leader2 := s.waitLeaderChange(c, svrs[0], leader1)
-	s.post(c, addrs[leader2.GetMemberId()]+apiPrefix+"/api/v1/leader/transfer/"+leader1.GetName(), nil)
+	s.post(c, addrs[leader2.GetMemberId()]+apiPrefix+"/api/v1/leader/transfer/"+leader1.GetName(), "")
 	leader3 := s.waitLeaderChange(c, svrs[0], leader2)
 	c.Assert(leader3.GetMemberId(), Equals, leader1.GetMemberId())
 }
 
-func (s *testMemberAPISuite) TestEtcdLeaderPriority(c *C) {
+func (s *testMemberAPISuite) TestLeaderPriority(c *C) {
 	cfgs, svrs, clean := mustNewCluster(c, 3)
 	defer clean()
 
@@ -229,17 +228,24 @@ func (s *testMemberAPISuite) TestEtcdLeaderPriority(c *C) {
 
 	leader1, err := s.getEtcdLeader(svrs[0])
 	c.Assert(err, IsNil)
-	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/members/name/"+leader1.GetName(), bytes.NewBufferString(`{"leader-priority": -1}`))
+	s.waitLeaderSync(c, svrs[0], leader1)
+	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/members/name/"+leader1.GetName(), `{"leader-priority": -1}`)
 	leader2 := s.waitEtcdLeaderChange(c, svrs[0], leader1)
-	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/members/name/"+leader1.GetName(), bytes.NewBufferString(`{"leader-priority": 100}`))
+	s.waitLeaderSync(c, svrs[0], leader2)
+	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/members/name/"+leader1.GetName(), `{"leader-priority": 100}`)
 	leader3 := s.waitEtcdLeaderChange(c, svrs[0], leader2)
+	s.waitLeaderSync(c, svrs[0], leader3)
 	c.Assert(leader3.GetMemberId(), Equals, leader1.GetMemberId())
 }
 
-func (s *testMemberAPISuite) post(c *C, url string, body io.Reader) {
+func (s *testMemberAPISuite) post(c *C, url string, body string) {
 	testutil.WaitUntil(c, func(c *C) bool {
-		res, err := http.Post(url, "", body)
+		res, err := http.Post(url, "", bytes.NewBufferString(body))
 		c.Assert(err, IsNil)
+		b, err := ioutil.ReadAll(res.Body)
+		res.Body.Close()
+		c.Assert(err, IsNil)
+		c.Logf("post %s, status: %v res: %s", url, res.StatusCode, string(b))
 		return res.StatusCode == http.StatusOK
 	})
 }
@@ -287,4 +293,16 @@ func (s *testMemberAPISuite) waitEtcdLeaderChange(c *C, svr *server.Server, old 
 		return true
 	})
 	return leader
+}
+
+func (s *testMemberAPISuite) waitLeaderSync(c *C, svr *server.Server, etcdLeader *pdpb.Member) {
+	testutil.WaitUntil(c, func(c *C) bool {
+		leader, err := svr.GetLeader()
+		if err != nil {
+			c.Logf("GetLeader err: %v", err)
+			return false
+		}
+		c.Logf("leader is %v", leader.GetMemberId())
+		return leader.GetMemberId() == etcdLeader.GetMemberId()
+	})
 }
