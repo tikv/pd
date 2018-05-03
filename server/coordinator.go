@@ -208,7 +208,7 @@ func (c *coordinator) run() {
 		if schedulerCfg.Disable {
 			scheduleCfg.Schedulers[k] = schedulerCfg
 			k++
-			log.Warning("skip create ", schedulerCfg.Type)
+			log.Info("skip create ", schedulerCfg.Type)
 			continue
 		}
 		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.limiter, schedulerCfg.Args...)
