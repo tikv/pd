@@ -156,8 +156,8 @@ func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source,
 	}
 
 	if !shouldBalance(cluster, source, target, core.LeaderKind, region, opInfluence) {
-		log.Debugf(`[%s] skip balance region%d, source size: %v, source score: %v, source influence: %v,
-			target size: %v, target score: %v, target influence: %v, region size: %v`, l.GetName(), region.GetId(),
+		log.Debugf(`[%s] skip balance region %d, source %d to target %d, source size: %v, source score: %v, source influence: %v,
+			target size: %v, target score: %v, target influence: %v, region size: %v`, l.GetName(), region.GetId(), source.GetId(), target.GetId(),
 			source.LeaderSize, source.LeaderScore(0), opInfluence.GetStoreInfluence(source.GetId()).ResourceSize(core.LeaderKind),
 			target.LeaderSize, target.LeaderScore(0), opInfluence.GetStoreInfluence(target.GetId()).ResourceSize(core.LeaderKind),
 			region.ApproximateSize)

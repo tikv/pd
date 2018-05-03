@@ -271,6 +271,21 @@ func (mc *MockCluster) UpdateStorageReadBytes(storeID uint64, BytesRead uint64) 
 	mc.PutStore(store)
 }
 
+// UpdateStoreStatus updates store status.
+func (mc *MockCluster) UpdateStoreStatus(id uint64) {
+	mc.Stores.SetLeaderCount(id, mc.Regions.GetStoreLeaderCount(id))
+	mc.Stores.SetRegionCount(id, mc.Regions.GetStoreRegionCount(id))
+	mc.Stores.SetPendingPeerCount(id, mc.Regions.GetStorePendingPeerCount(id))
+	mc.Stores.SetLeaderSize(id, mc.Regions.GetStoreLeaderRegionSize(id))
+	mc.Stores.SetRegionSize(id, mc.Regions.GetStoreRegionSize(id))
+	store := mc.Stores.GetStore(id)
+	store.Stats = &pdpb.StoreStats{}
+	store.Stats.Capacity = 1000 * (1 << 20)
+	store.Stats.Available = store.Stats.Capacity - uint64(store.RegionSize)
+	store.Stats.UsedSize = uint64(store.RegionSize)
+	mc.PutStore(store)
+}
+
 func (mc *MockCluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerIds ...uint64) *core.RegionInfo {
 	region := &metapb.Region{
 		Id:       regionID,
@@ -303,7 +318,7 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 					Id:      s.PeerID,
 					StoreId: s.ToStore,
 				}
-				region.Peers = append(region.Peers, peer)
+				region.AddPeer(peer)
 			case RemovePeer:
 				if region.GetStorePeer(s.FromStore) == nil {
 					panic("Remove peer that doesn't exist")
@@ -318,13 +333,16 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 					StoreId:   s.ToStore,
 					IsLearner: true,
 				}
-				region.Peers = append(region.Peers, peer)
+				region.AddPeer(peer)
 			default:
 				panic("Unknown operator step")
 			}
 		}
 	}
 	mc.PutRegion(region)
+	for id := range region.GetStoreIds() {
+		mc.UpdateStoreStatus(id)
+	}
 }
 
 // GetOpt mocks method.

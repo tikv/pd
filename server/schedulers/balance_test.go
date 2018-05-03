@@ -14,7 +14,9 @@
 package schedulers
 
 import (
+	"fmt"
 	"math"
+	"math/rand"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -956,8 +958,6 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 }
 
-var _ = Suite(&testBalanceHotReadRegionSchedulerSuite{})
-
 type testBalanceHotReadRegionSchedulerSuite struct{}
 
 func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
@@ -1029,6 +1029,75 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 		tc.Regions.RemoveRegion(tc.GetRegion(i))
 	}
 	hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+}
+
+var _ = Suite(&testScatterRangeLeaderSuite{})
+
+type testScatterRangeLeaderSuite struct{}
+
+func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	tc := schedule.NewMockCluster(opt)
+	// Add stores 1,2,3,4,5.
+	tc.AddRegionStore(1, 0)
+	tc.AddRegionStore(2, 0)
+	tc.AddRegionStore(3, 0)
+	tc.AddRegionStore(4, 0)
+	tc.AddRegionStore(5, 0)
+	var (
+		id      uint64
+		regions []*metapb.Region
+	)
+	for i := 0; i < 50; i++ {
+		peers := []*metapb.Peer{
+			{Id: id + 1, StoreId: 1},
+			{Id: id + 2, StoreId: 2},
+			{Id: id + 3, StoreId: 3},
+		}
+		regions = append(regions, &metapb.Region{
+			Id:       id + 4,
+			Peers:    peers,
+			StartKey: []byte(fmt.Sprintf("s_%02d", i)),
+			EndKey:   []byte(fmt.Sprintf("s_%02d", i+1)),
+		})
+		id += 4
+	}
+	// empty case
+	regions[49].EndKey = []byte("")
+	for _, meta := range regions {
+		leader := rand.Intn(4) % 3
+		regionInfo := core.NewRegionInfo(meta, meta.Peers[leader])
+		regionInfo.ApproximateSize = 96
+		tc.Regions.SetRegion(regionInfo)
+	}
+	for i := 0; i < 100; i++ {
+		tc.AllocPeer(1)
+	}
+	for i := 1; i <= 5; i++ {
+		tc.UpdateStoreStatus(uint64(i))
+	}
+
+	hb, err := schedule.CreateScheduler("scatter-range", schedule.NewLimiter(), "s_00", "s_50", "t")
+	c.Assert(err, IsNil)
+	limit := 0
+	for {
+		if limit > 100 {
+			break
+		}
+
+		ops := hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+		if ops == nil {
+			limit++
+			continue
+		}
+		tc.ApplyOperator(ops[0])
+	}
+	for i := 1; i <= 5; i++ {
+		leaderCount := tc.Regions.GetStoreLeaderCount(uint64(i))
+		c.Assert(leaderCount, LessEqual, 12)
+		regionCount := tc.Regions.GetStoreRegionCount(uint64(i))
+		c.Assert(regionCount, LessEqual, 32)
+	}
 }
 
 func checkRemovePeer(c *C, op *schedule.Operator, storeID uint64) {

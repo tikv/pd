@@ -322,6 +322,16 @@ func (o *Operator) Desc() string {
 	return o.desc
 }
 
+// SetDesc sets the description for the operator.
+func (o *Operator) SetDesc(desc string) {
+	o.desc = desc
+}
+
+// AttachKind attaches an operator kind for the operator.
+func (o *Operator) AttachKind(kind OperatorKind) {
+	o.kind |= kind
+}
+
 // RegionID returns the region that operator is targeted.
 func (o *Operator) RegionID() uint64 {
 	return o.regionID
