@@ -31,9 +31,8 @@ import (
 )
 
 var (
-	errNoLeader         = errors.New("no leader")
-	resignLeaderTimeout = time.Second * 5
-	nextLeaderTTL       = 10 // in seconds
+	errNoLeader   = errors.New("no leader")
+	nextLeaderTTL = 10 // in seconds
 )
 
 // IsLeader returns whether server is leader or not.
@@ -101,6 +100,7 @@ func (s *Server) leaderLoop() {
 
 		etcdLeader := s.etcd.Server.Lead()
 		if etcdLeader != s.ID() {
+			log.Infof("%v is not etcd leader, skip campaign leader and check later", s.Name())
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -282,9 +282,11 @@ func (s *Server) campaignLeader() error {
 			if err = s.updateTimestamp(); err != nil {
 				return errors.Trace(err)
 			}
-		case <-s.resignCh:
-			log.Infof("%s resigns leadership", s.Name())
-			return nil
+			etcdLeader := s.etcd.Server.Lead()
+			if etcdLeader != s.ID() {
+				log.Infof("etcd leader changed, %s resigns leadership", s.Name())
+				return nil
+			}
 		case <-ctx.Done():
 			return errors.New("server closed")
 		}
@@ -343,16 +345,7 @@ func (s *Server) ResignLeader(nextLeader string) error {
 	nextLeaderID := leaderIDs[rand.Intn(len(leaderIDs))]
 	log.Infof("%s ready to resign leader, next leader: %v", s.Name(), nextLeaderID)
 	err = s.etcd.Server.MoveLeader(s.leaderLoopCtx, s.ID(), nextLeaderID)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	// Resign leader.
-	select {
-	case s.resignCh <- struct{}{}:
-		return nil
-	case <-time.After(resignLeaderTimeout):
-		return errors.Errorf("failed to send resign signal, maybe not leader")
-	}
+	return errors.Trace(err)
 }
 
 func (s *Server) deleteLeaderKey() error {
