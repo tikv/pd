@@ -450,19 +450,20 @@ func (c *coordinator) addOperatorLocked(op *schedule.Operator) bool {
 		}
 		c.removeOperatorLocked(old)
 	}
-	c.operators[regionID] = op
 
 	if region := c.cluster.GetRegion(op.RegionID()); region != nil {
+		c.operators[regionID] = op
 		if step := op.Check(region); step != nil {
 			c.sendScheduleCommand(region, step)
 		}
 		c.limiter.UpdateCounts(op, region)
 		operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
-	} else {
-		log.Warnf("add operator %v on nonexistent region %d", op, regionID)
-		operatorCounter.WithLabelValues(op.Desc(), "no_region").Inc()
+		return true
 	}
-	return true
+
+	log.Warnf("add operator %v on nonexistent region %d", op, regionID)
+	operatorCounter.WithLabelValues(op.Desc(), "no_region").Inc()
+	return false
 }
 
 func (c *coordinator) addOperator(op *schedule.Operator) bool {
