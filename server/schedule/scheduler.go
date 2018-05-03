@@ -88,4 +88,3 @@ func CreateScheduler(name string, limiter *Limiter, args ...string) (Scheduler, 
 	}
 	return fn(limiter, args)
 }
-
