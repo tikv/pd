@@ -44,31 +44,43 @@ type BasicCluster struct {
 
 // NewOpInfluence creates a OpInfluence.
 func NewOpInfluence(operators []*Operator, cluster Cluster) OpInfluence {
-	m := make(map[uint64]*StoreInfluence)
+	influence := OpInfluence{
+		storesInfluence:  make(map[uint64]*StoreInfluence),
+		regionsInfluence: make(map[uint64]*Operator),
+	}
 
 	for _, op := range operators {
 		if !op.IsTimeout() && !op.IsFinish() {
 			region := cluster.GetRegion(op.RegionID())
 			if region != nil {
-				op.Influence(m, region)
+				op.Influence(influence, region)
 			}
 		}
+		influence.regionsInfluence[op.RegionID()] = op
 	}
 
-	return m
+	return influence
 }
 
-// OpInfluence is a map of StoreInfluence.
-type OpInfluence map[uint64]*StoreInfluence
+// OpInfluence records the influence of the cluster.
+type OpInfluence struct {
+	storesInfluence  map[uint64]*StoreInfluence
+	regionsInfluence map[uint64]*Operator
+}
 
 // GetStoreInfluence get storeInfluence of specific store.
 func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
-	storeInfluence, ok := m[id]
+	storeInfluence, ok := m.storesInfluence[id]
 	if !ok {
 		storeInfluence = &StoreInfluence{}
-		m[id] = storeInfluence
+		m.storesInfluence[id] = storeInfluence
 	}
 	return storeInfluence
+}
+
+// GetRegionsInfluence gets regionInfluence of specific region.
+func (m OpInfluence) GetRegionsInfluence() map[uint64]*Operator {
+	return m.regionsInfluence
 }
 
 // StoreInfluence records influences that pending operators will make.
