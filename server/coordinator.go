@@ -352,6 +352,9 @@ func (c *coordinator) collectHotSpotMetrics() {
 			hotSpotStatusGauge.WithLabelValues(store, "hot_read_region_as_leader").Set(0)
 		}
 	}
+
+	// collect hot cache metrics
+	c.cluster.HotCache.CollectMetrics(c.cluster.Stores)
 }
 
 func (c *coordinator) shouldRun() bool {

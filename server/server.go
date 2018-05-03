@@ -87,8 +87,6 @@ type Server struct {
 	// For tso, set after pd becomes leader.
 	ts            atomic.Value
 	lastSavedTime time.Time
-	// For resign notify.
-	resignCh chan struct{}
 	// For async region heartbeat.
 	hbStreams *heartbeatStreams
 }
@@ -101,7 +99,6 @@ func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server,
 	s := &Server{
 		cfg:         cfg,
 		scheduleOpt: newScheduleOption(cfg),
-		resignCh:    make(chan struct{}),
 	}
 	s.handler = newHandler(s)
 
@@ -438,11 +435,17 @@ func (s *Server) GetScheduleConfig() *ScheduleConfig {
 }
 
 // SetScheduleConfig sets the balance config information.
-func (s *Server) SetScheduleConfig(cfg ScheduleConfig) {
+func (s *Server) SetScheduleConfig(cfg ScheduleConfig) error {
+	if err := cfg.validate(); err != nil {
+		return errors.Trace(err)
+	}
 	old := s.scheduleOpt.load()
 	s.scheduleOpt.store(&cfg)
-	s.scheduleOpt.persist(s.kv)
+	if err := s.scheduleOpt.persist(s.kv); err != nil {
+		return errors.Trace(err)
+	}
 	log.Infof("schedule config is updated: %+v, old: %+v", cfg, old)
+	return nil
 }
 
 // GetReplicationConfig get the replication config.
@@ -453,11 +456,15 @@ func (s *Server) GetReplicationConfig() *ReplicationConfig {
 }
 
 // SetReplicationConfig sets the replication config.
-func (s *Server) SetReplicationConfig(cfg ReplicationConfig) {
+func (s *Server) SetReplicationConfig(cfg ReplicationConfig) error {
 	old := s.scheduleOpt.rep.load()
 	s.scheduleOpt.rep.store(&cfg)
 	s.scheduleOpt.persist(s.kv)
+	if err := s.scheduleOpt.persist(s.kv); err != nil {
+		return errors.Trace(err)
+	}
 	log.Infof("replication config is updated: %+v, old: %+v", cfg, old)
+	return nil
 }
 
 // GetNamespaceConfig get the namespace config.

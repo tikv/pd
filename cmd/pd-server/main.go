@@ -17,8 +17,6 @@ import (
 	"flag"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
 
 	"github.com/grpc-ecosystem/go-grpc-prometheus"
@@ -51,19 +49,12 @@ func main() {
 	case flag.ErrHelp:
 		os.Exit(0)
 	default:
-		log.Fatalf("parse cmd flags error: %s\n", err)
-	}
-
-	dataDir, err := filepath.Abs(cfg.DataDir)
-	logFile, err := filepath.Abs(cfg.Log.File.Filename)
-	rel, err := filepath.Rel(dataDir, filepath.Dir(logFile))
-	if !strings.HasPrefix(rel, "..") {
-		log.Fatalf("initialize logger error: log directory shouldn't be the subdirectory of data directory")
+		log.Fatalf("parse cmd flags error: %s\n", errors.ErrorStack(err))
 	}
 
 	err = logutil.InitLogger(&cfg.Log)
 	if err != nil {
-		log.Fatalf("initialize logger error: %s\n", err)
+		log.Fatalf("initialize logger error: %s\n", errors.ErrorStack(err))
 	}
 
 	server.LogPDInfo()
