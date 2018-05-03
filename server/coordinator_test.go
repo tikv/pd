@@ -132,22 +132,20 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 	defer hbStreams.Close()
 
 	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
-	l := co.limiter
+
+	tc.addLeaderRegion(1, 1, 2)
 
 	op1 := newTestOperator(1, schedule.OpLeader, schedule.TransferLeader{FromStore: 1, ToStore: 2})
-	co.addOperator(op1)
-	c.Assert(l.OperatorCount(op1.Kind()), Equals, uint64(1))
+	c.Assert(co.addOperator(op1), IsTrue)
 	c.Assert(co.getOperator(1).RegionID(), Equals, op1.RegionID())
 
 	// Region 1 already has an operator, cannot add another one.
-	op2 := newTestOperator(1, schedule.OpLeader, schedule.TransferLeader{FromStore: 2, ToStore: 1})
-	co.addOperator(op2)
-	c.Assert(l.OperatorCount(op2.Kind()), Equals, uint64(0))
+	op2 := newTestOperator(1, schedule.OpLeader, schedule.TransferLeader{FromStore: 1, ToStore: 3})
+	c.Assert(co.addOperator(op2), IsFalse)
 
 	// Remove the operator manually, then we can add a new operator.
 	co.removeOperator(op1)
-	co.addOperator(op2)
-	c.Assert(l.OperatorCount(op2.Kind()), Equals, uint64(1))
+	c.Assert(co.addOperator(op2), IsTrue)
 	c.Assert(co.getOperator(1).RegionID(), Equals, op2.RegionID())
 }
 

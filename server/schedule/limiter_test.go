@@ -62,7 +62,7 @@ func (s *testLimiterSuite) TestUpdateCounts(c *C) {
 
 	// wait for ttl
 	// cause there is an unfinished operator updating the counts, so expire updated.
-	time.Sleep(time.Second * 2)
+	time.Sleep(time.Millisecond * 150)
 	c.Assert(l.OperatorCount(OpLeader), Equals, uint64(1))
 	c.Assert(l.StoreOperatorCount(OpLeader, 1), Equals, uint64(1))
 	c.Assert(l.StoreOperatorCount(OpLeader, 2), Equals, uint64(0))
@@ -70,7 +70,7 @@ func (s *testLimiterSuite) TestUpdateCounts(c *C) {
 	c.Assert(l.StoreOperatorCount(OpLeader, 4), Equals, uint64(1))
 
 	// wait for ttl
-	time.Sleep(time.Second * 2)
+	time.Sleep(time.Millisecond * 100)
 	c.Assert(l.OperatorCount(OpLeader), Equals, uint64(0))
 	c.Assert(l.StoreOperatorCount(OpLeader, 1), Equals, uint64(0))
 	c.Assert(l.StoreOperatorCount(OpLeader, 2), Equals, uint64(0))
