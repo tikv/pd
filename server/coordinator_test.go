@@ -482,6 +482,14 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	c.Assert(co.schedulers, HasLen, 3)
+	co.stop()
+	// suppose restart PD again
+	_, newOpt = newTestScheduleConfig()
+	newOpt.reload(tc.kv)
+	tc.clusterInfo.opt = newOpt
+	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co.run()
+	c.Assert(co.schedulers, HasLen, 3)
 	bls, err := schedule.CreateScheduler("balance-leader", co.limiter)
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(bls), IsNil)
