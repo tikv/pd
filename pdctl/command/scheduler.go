@@ -16,6 +16,7 @@ package command
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -71,6 +72,7 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewEvictLeaderSchedulerCommand())
 	c.AddCommand(NewShuffleLeaderSchedulerCommand())
 	c.AddCommand(NewShuffleRegionSchedulerCommand())
+	c.AddCommand(NewScatterRangeSchedulerCommand())
 	return c
 }
 
@@ -140,6 +142,30 @@ func addSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 
 	input := make(map[string]interface{})
 	input["name"] = cmd.Name()
+	postJSON(cmd, schedulersPrefix, input)
+}
+
+// NewScatterRangeSchedulerCommand returns a command to add a scatter-range-scheduler.
+func NewScatterRangeSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "scatter-range <start_key> <end_key> <range_name>",
+		Short: "add a scheduler to scatter range",
+		Run:   addSchedulerForScatterRangeCommandFunc,
+	}
+	return c
+}
+
+func addSchedulerForScatterRangeCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 3 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+
+	input := make(map[string]interface{})
+	input["name"] = cmd.Name()
+	input["start_key"] = url.QueryEscape(args[0])
+	input["end_key"] = url.QueryEscape(args[1])
+	input["range_name"] = args[2]
 	postJSON(cmd, schedulersPrefix, input)
 }
 
