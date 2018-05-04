@@ -86,7 +86,8 @@ type Config struct {
 	// If no time unit is provided and compaction mode is 'periodic',
 	// the unit defaults to hour. For example, '5' translates into 5-hour.
 	// The default retention is 1 hour.
-	AutoCompactionRetention string `toml:"auto-compaction-retention" json:"auto-compaction-retention"`
+	// Before etcd v3.3.x, the type of retention is int. We add 'v2' suffix to make it backward compatible.
+	AutoCompactionRetention string `toml:"auto-compaction-retention" json:"auto-compaction-retention-v2"`
 
 	// TickInterval is the interval for etcd Raft tick.
 	TickInterval typeutil.Duration `toml:"tick-interval"`
