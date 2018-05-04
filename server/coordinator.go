@@ -206,6 +206,9 @@ func (c *coordinator) run() {
 	scheduleCfg := c.cluster.opt.load()
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
 		if schedulerCfg.Disable {
+			scheduleCfg.Schedulers[k] = schedulerCfg
+			k++
+			log.Info("skip create ", schedulerCfg.Type)
 			continue
 		}
 		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.limiter, schedulerCfg.Args...)
