@@ -20,6 +20,11 @@
 #  version = "2.4.0"
 
 [[constraint]]
+  name = "github.com/pingcap/kvproto"
+  branch = "split-time"
+  source = "github.com/Connor1996/kvproto"
+
+[[constraint]]
   name = "github.com/coreos/etcd"
   version = "=3.2.18"
 
