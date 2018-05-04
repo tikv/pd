@@ -79,9 +79,14 @@ type Config struct {
 	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
 	// the default size is 2GB, the maximum is 8GB.
 	QuotaBackendBytes typeutil.ByteSize `toml:"quota-backend-bytes" json:"quota-backend-bytes"`
-	// AutoCompactionRetention for mvcc key value store in hour. 0 means disable auto compaction.
-	// the default retention is 1 hour
-	AutoCompactionRetention int `toml:"auto-compaction-retention" json:"auto-compaction-retention"`
+	// AutoCompactionMode is either 'periodic' or 'revision'. The default value is 'periodic'.
+	AutoCompactionMode string `toml:"auto-compaction-mode" json:"auto-compaction-mode"`
+	// AutoCompactionRetention is either duration string with time unit
+	// (e.g. '5m' for 5-minute), or revision unit (e.g. '5000').
+	// If no time unit is provided and compaction mode is 'periodic',
+	// the unit defaults to hour. For example, '5' translates into 5-hour.
+	// The default retention is 1 hour.
+	AutoCompactionRetention string `toml:"auto-compaction-retention" json:"auto-compaction-retention"`
 
 	// TickInterval is the interval for etcd Raft tick.
 	TickInterval typeutil.Duration `toml:"tick-interval"`
@@ -147,7 +152,8 @@ func NewConfig() *Config {
 const (
 	defaultLeaderLease             = int64(3)
 	defaultNextRetryDelay          = time.Second
-	defaultAutoCompactionRetention = 1
+	defaultCompactionMode          = "periodic"
+	defaultAutoCompactionRetention = "1h"
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
@@ -308,10 +314,9 @@ func (c *Config) adjust() error {
 	if c.nextRetryDelay == 0 {
 		c.nextRetryDelay = defaultNextRetryDelay
 	}
-	if c.AutoCompactionRetention == 0 {
-		c.AutoCompactionRetention = defaultAutoCompactionRetention
-	}
 
+	adjustString(&c.AutoCompactionMode, defaultCompactionMode)
+	adjustString(&c.AutoCompactionRetention, defaultAutoCompactionRetention)
 	adjustDuration(&c.TickInterval, defaultTickInterval)
 	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
 
@@ -606,6 +611,7 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.StrictReconfigCheck = !c.disableStrictReconfigCheck
 	cfg.TickMs = uint(c.TickInterval.Duration / time.Millisecond)
 	cfg.ElectionMs = uint(c.ElectionInterval.Duration / time.Millisecond)
+	cfg.AutoCompactionMode = c.AutoCompactionMode
 	cfg.AutoCompactionRetention = c.AutoCompactionRetention
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
 
