@@ -444,9 +444,6 @@ func (c *coordinator) addOperatorLocked(op *schedule.Operator) bool {
 		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
 		if region := c.cluster.GetRegion(old.RegionID()); region != nil {
 			c.limiter.Remove(old, region)
-		} else {
-			log.Warnf("add operator %v on nonexistent region %d", op, regionID)
-			operatorCounter.WithLabelValues(old.Desc(), "no_region").Inc()
 		}
 		c.removeOperatorLocked(old)
 	}

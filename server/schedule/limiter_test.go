@@ -24,8 +24,8 @@ var _ = Suite(&testLimiterSuite{})
 type testLimiterSuite struct{}
 
 func (s testLimiterSuite) SetUpSuite(c *C) {
-	limiterCacheGCInterval = time.Second * 1
-	limiterCacheTTL = time.Second * 2
+	limiterCacheGCInterval = time.Millisecond * 100
+	limiterCacheTTL = time.Millisecond * 500
 }
 
 func (s *testLimiterSuite) TestUpdateCounts(c *C) {
@@ -46,7 +46,7 @@ func (s *testLimiterSuite) TestUpdateCounts(c *C) {
 	c.Assert(l.StoreOperatorCount(OpLeader, 3), Equals, uint64(1))
 	c.Assert(l.StoreOperatorCount(OpLeader, 4), Equals, uint64(1))
 
-	time.Sleep(time.Second * 1)
+	time.Sleep(time.Millisecond * 200)
 	// operator not finished
 	op := newTestOperator(3, OpLeader, TransferLeader{FromStore: 4, ToStore: 1})
 	region := newTestRegion(3, 4, [2]uint64{1, 1}, [2]uint64{4, 4})
@@ -62,7 +62,7 @@ func (s *testLimiterSuite) TestUpdateCounts(c *C) {
 
 	// wait for ttl
 	// cause there is an unfinished operator updating the counts, so expire updated.
-	time.Sleep(time.Millisecond * 150)
+	time.Sleep(time.Millisecond * 500)
 	c.Assert(l.OperatorCount(OpLeader), Equals, uint64(1))
 	c.Assert(l.StoreOperatorCount(OpLeader, 1), Equals, uint64(1))
 	c.Assert(l.StoreOperatorCount(OpLeader, 2), Equals, uint64(0))
@@ -70,7 +70,7 @@ func (s *testLimiterSuite) TestUpdateCounts(c *C) {
 	c.Assert(l.StoreOperatorCount(OpLeader, 4), Equals, uint64(1))
 
 	// wait for ttl
-	time.Sleep(time.Millisecond * 100)
+	time.Sleep(time.Millisecond * 500)
 	c.Assert(l.OperatorCount(OpLeader), Equals, uint64(0))
 	c.Assert(l.StoreOperatorCount(OpLeader, 1), Equals, uint64(0))
 	c.Assert(l.StoreOperatorCount(OpLeader, 2), Equals, uint64(0))

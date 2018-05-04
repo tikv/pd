@@ -410,6 +410,10 @@ func (o *Operator) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 
 // InvolvedStores returns the stores invloved in operator steps.
 func (o *Operator) InvolvedStores(region *core.RegionInfo) []uint64 {
+	if region == nil || region.Leader == nil {
+		return nil
+	}
+
 	res := []uint64{}
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if !o.steps[int(step)].IsFinish(region) {
