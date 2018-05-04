@@ -1,14 +1,14 @@
 language: go
 
 go:
-  - 1.9.x
+  - 1.10.x
 
 script:
   - make dev
 
 matrix:
   include:
-  - go: 1.9.x
+  - go: 1.10.x
     install:
       - go get github.com/mattn/goveralls
     env:
