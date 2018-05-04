@@ -62,7 +62,6 @@ else
 	dep ensure -update
 endif
 	@echo "removing test files"
-	dep prune
 	bash ./hack/clean_vendor.sh
 
 simulator:
