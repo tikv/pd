@@ -21,7 +21,11 @@
 
 [[constraint]]
   name = "github.com/coreos/etcd"
-  version = "=3.2.18"
+  version = "=3.3.4"
+
+[[override]]
+  name = "github.com/coreos/bbolt"
+  version = "=v1.3.1-coreos.6"
 
 [[override]]
   name = "github.com/grpc-ecosystem/grpc-gateway"
@@ -35,3 +39,7 @@
 [[constraint]]
   name = "github.com/chzyer/readline"
   branch = "master"
+
+[[constraint]]
+  name = "github.com/pingcap/kvproto"
+  revision = "05b1d9675489f16f81b7c950ed039cf5fdc93055"
