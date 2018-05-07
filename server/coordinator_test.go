@@ -610,10 +610,14 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	// count = 2
 	c.Assert(sc.AllowSchedule(), IsFalse)
 	co.removeOperator(op1)
+	// count = 1
+	c.Assert(sc.AllowSchedule(), IsTrue)
 
 	// add a PriorityKind operator will remove old operator
-	op3 := newTestOperator(2, schedule.OpHotRegion)
+	op3 := newTestOperator(2, schedule.OpHotRegion|schedule.OpLeader)
 	op3.SetPriorityLevel(core.HighPriority)
+	c.Assert(co.addOperator(op1), IsTrue)
+	c.Assert(sc.AllowSchedule(), IsFalse)
 	c.Assert(co.addOperator(op3), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsTrue)
 	co.removeOperator(op3)
@@ -621,7 +625,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	// add a admin operator will remove old operator
 	c.Assert(co.addOperator(op2), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsFalse)
-	op4 := newTestOperator(2, schedule.OpAdmin)
+	op4 := newTestOperator(2, schedule.OpAdmin|schedule.OpLeader)
 	op4.SetPriorityLevel(core.HighPriority)
 	c.Assert(co.addOperator(op4), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsTrue)
