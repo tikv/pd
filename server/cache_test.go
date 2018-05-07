@@ -178,6 +178,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 }
 
 func checkRegion(c *C, a *core.RegionInfo, b *core.RegionInfo) {
+	a.Region.LastSplitTimestamp = 0
 	c.Assert(a.Region, DeepEquals, b.Region)
 	c.Assert(a.Leader, DeepEquals, b.Leader)
 	c.Assert(a.Peers, DeepEquals, b.Peers)
@@ -196,6 +197,7 @@ func checkRegionsKV(c *C, kv *core.KV, regions []*core.RegionInfo) {
 			ok, err := kv.LoadRegion(region.GetId(), &meta)
 			c.Assert(ok, IsTrue)
 			c.Assert(err, IsNil)
+			meta.LastSplitTimestamp = 0
 			c.Assert(&meta, DeepEquals, region.Region)
 		}
 	}
@@ -485,6 +487,7 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 		ok, err = kv.LoadRegion(overlapRegion.GetId(), region)
 		c.Assert(ok, IsTrue)
 		c.Assert(err, IsNil)
+		region.LastSplitTimestamp = 0
 		c.Assert(region, DeepEquals, overlapRegion.Region)
 	}
 }
@@ -531,6 +534,9 @@ func (s *testClusterInfoSuite) testRegionSplitAndMerge(c *C, cache *clusterInfo)
 		},
 	}
 
+	cache.PutRegion(core.NewRegionInfo(regions[0], nil))
+	c.Assert(cache.GetRegion(regions[0].Id).LastSplitTimestamp, Equals, int64(0))
+
 	// Byte will underflow/overflow if n > 7.
 	n := 7
 
@@ -540,11 +546,17 @@ func (s *testClusterInfoSuite) testRegionSplitAndMerge(c *C, cache *clusterInfo)
 		heartbeatRegions(c, cache, regions)
 	}
 
+	ts := cache.GetRegion(regions[0].Id).LastSplitTimestamp
+	c.Assert(ts, Not(Equals), int64(0))
+	c.Assert(cache.GetRegion(regions[1].Id).LastSplitTimestamp, Not(Equals), int64(0))
+
 	// Merge.
 	for i := 0; i < n; i++ {
 		regions = core.MergeRegions(regions)
 		heartbeatRegions(c, cache, regions)
 	}
+
+	c.Assert(cache.GetRegion(regions[0].Id).LastSplitTimestamp, Equals, ts)
 
 	// Split twice and merge once.
 	for i := 0; i < n*2; i++ {

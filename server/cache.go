@@ -394,8 +394,6 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	isReadUpdate, readItem := c.CheckReadStatus(region)
 	c.RUnlock()
 
-	// cause tikv doesn't fill this field, we need to copy this manually.
-	region.Region.LastSplitTimestamp = origin.Region.LastSplitTimestamp
 	// Save to KV if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
@@ -406,6 +404,8 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		region.Region.LastSplitTimestamp = time.Now().Unix()
 		saveKV, saveCache, isNew = true, true, true
 	} else {
+		// cause tikv doesn't fill this field, we need to copy this manually.
+		region.Region.LastSplitTimestamp = origin.Region.LastSplitTimestamp
 		r := region.GetRegionEpoch()
 		o := origin.GetRegionEpoch()
 		// Region meta is stale, return an error.
@@ -416,7 +416,8 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetId(), core.DiffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion())
 			// when split or merge, version increases
 			// if key range shrinks, region must has split.
-			if bytes.Compare(region.Region.StartKey, origin.Region.StartKey) > 0 || bytes.Compare(region.Region.EndKey, origin.Region.EndKey) < 0 {
+			if bytes.Compare(region.Region.StartKey, origin.Region.StartKey) > 0 ||
+				(bytes.Compare(region.Region.EndKey, origin.Region.EndKey) < 0 && bytes.Compare(region.Region.EndKey, []byte("")) != 0) {
 				region.Region.LastSplitTimestamp = time.Now().Unix()
 			}
 			saveKV, saveCache = true, true

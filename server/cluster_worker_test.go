@@ -382,6 +382,9 @@ func (s *testClusterWorkerSuite) reportSplit(c *C, left *metapb.Region, right *m
 
 func mustGetRegion(c *C, cluster *RaftCluster, key []byte, expect *metapb.Region) {
 	r, _ := cluster.GetRegionByKey(key)
+	if r != nil {
+		r.LastSplitTimestamp = 0
+	}
 	c.Assert(r, DeepEquals, expect)
 }
 
