@@ -18,47 +18,20 @@ import (
 	"sync/atomic"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/server/core"
 )
 
 var _ = Suite(&testOperatorSuite{})
 
 type testOperatorSuite struct{}
 
-func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, peers ...[2]uint64) *core.RegionInfo {
-	var (
-		region metapb.Region
-		leader *metapb.Peer
-	)
-	region.Id = regionID
-	for i := range peers {
-		peer := &metapb.Peer{
-			Id:      peers[i][1],
-			StoreId: peers[i][0],
-		}
-		region.Peers = append(region.Peers, peer)
-		if peer.GetId() == leaderPeer {
-			leader = peer
-		}
-	}
-	regionInfo := core.NewRegionInfo(&region, leader)
-	regionInfo.ApproximateSize = 10
-	return regionInfo
-}
-
 func (s *testOperatorSuite) TestOperatorStep(c *C) {
-	region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
 	c.Assert(TransferLeader{FromStore: 1, ToStore: 2}.IsFinish(region), IsFalse)
 	c.Assert(TransferLeader{FromStore: 2, ToStore: 1}.IsFinish(region), IsTrue)
 	c.Assert(AddPeer{ToStore: 3, PeerID: 3}.IsFinish(region), IsFalse)
 	c.Assert(AddPeer{ToStore: 1, PeerID: 1}.IsFinish(region), IsTrue)
 	c.Assert(RemovePeer{FromStore: 1}.IsFinish(region), IsFalse)
 	c.Assert(RemovePeer{FromStore: 3}.IsFinish(region), IsTrue)
-}
-
-func (s *testOperatorSuite) newTestOperator(regionID uint64, steps ...OperatorStep) *Operator {
-	return NewOperator("testOperator", regionID, OpAdmin, steps...)
 }
 
 func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OperatorStep) {
@@ -69,14 +42,14 @@ func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OperatorStep)
 }
 
 func (s *testOperatorSuite) TestOperator(c *C) {
-	region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
 	// addPeer1, transferLeader1, removePeer3
 	steps := []OperatorStep{
 		AddPeer{ToStore: 1, PeerID: 1},
 		TransferLeader{FromStore: 3, ToStore: 1},
 		RemovePeer{FromStore: 3},
 	}
-	op := s.newTestOperator(1, steps...)
+	op := newTestOperator(1, OpAdmin, steps...)
 	s.checkSteps(c, op, steps)
 	c.Assert(op.Check(region), IsNil)
 	c.Assert(op.IsFinish(), IsTrue)
@@ -89,7 +62,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 		TransferLeader{FromStore: 2, ToStore: 1},
 		RemovePeer{FromStore: 2},
 	}
-	op = s.newTestOperator(1, steps...)
+	op = newTestOperator(1, OpAdmin, steps...)
 	s.checkSteps(c, op, steps)
 	c.Assert(op.Check(region), Equals, RemovePeer{FromStore: 2})
 	c.Assert(atomic.LoadInt32(&op.currentStep), Equals, int32(2))
@@ -102,7 +75,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 }
 
 func (s *testOperatorSuite) TestInfluence(c *C) {
-	region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
 	opInfluence := OpInfluence{storesInfluence: make(map[uint64]*StoreInfluence)}
 	storeOpInfluence := opInfluence.storesInfluence
 	storeOpInfluence[1] = &StoreInfluence{}
