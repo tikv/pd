@@ -415,7 +415,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		if r.GetVersion() > o.GetVersion() {
 			log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetId(), core.DiffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion())
 			// when split or merge, version increases
-			// if key range shrinks, region must has split.
+			// if key range shrinks, region must have split.
 			if bytes.Compare(region.Region.StartKey, origin.Region.StartKey) > 0 ||
 				(bytes.Compare(region.Region.EndKey, origin.Region.EndKey) < 0 && len(region.Region.EndKey) > 0) {
 				region.Region.LastSplitTimestamp = time.Now().Unix()
