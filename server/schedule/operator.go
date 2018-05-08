@@ -36,6 +36,7 @@ type OperatorStep interface {
 	fmt.Stringer
 	IsFinish(region *core.RegionInfo) bool
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
+	InvolvedStores(region *core.RegionInfo) []uint64
 }
 
 // TransferLeader is an OperatorStep that transfers a region's leader.
@@ -52,7 +53,7 @@ func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
 	return region.Leader.GetStoreId() == tl.ToStore
 }
 
-// Influence calculates the store difference that current step make
+// Influence calculates the store difference that current step make.
 func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(tl.FromStore)
 	to := opInfluence.GetStoreInfluence(tl.ToStore)
@@ -61,6 +62,11 @@ func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionI
 	from.LeaderCount--
 	to.LeaderSize += region.ApproximateSize
 	to.LeaderCount++
+}
+
+// InvolvedStores returns the stores invloved in this operator step.
+func (tl TransferLeader) InvolvedStores(region *core.RegionInfo) []uint64 {
+	return []uint64{tl.FromStore, tl.ToStore}
 }
 
 // AddPeer is an OperatorStep that adds a region peer.
@@ -84,12 +90,17 @@ func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// Influence calculates the store difference that current step make
+// Influence calculates the store difference that current step make.
 func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(ap.ToStore)
 
 	to.RegionSize += region.ApproximateSize
 	to.RegionCount++
+}
+
+// InvolvedStores returns the stores invloved in this operator step.
+func (ap AddPeer) InvolvedStores(region *core.RegionInfo) []uint64 {
+	return []uint64{region.Leader.StoreId, ap.ToStore}
 }
 
 // AddLearner is an OperatorStep that adds a region learner peer.
@@ -113,12 +124,17 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// Influence calculates the store difference that current step make
+// Influence calculates the store difference that current step make.
 func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(al.ToStore)
 
 	to.RegionSize += region.ApproximateSize
 	to.RegionCount++
+}
+
+// InvolvedStores returns the stores invloved in this operator step.
+func (al AddLearner) InvolvedStores(region *core.RegionInfo) []uint64 {
+	return []uint64{region.Leader.StoreId, al.ToStore}
 }
 
 // PromoteLearner is an OperatorStep that promotes a region learner peer to normal voter.
@@ -141,8 +157,13 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// Influence calculates the store difference that current step make
+// Influence calculates the store difference that current step make.
 func (pl PromoteLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
+
+// InvolvedStores returns the stores invloved in this operator step.
+func (pl PromoteLearner) InvolvedStores(region *core.RegionInfo) []uint64 {
+	return []uint64{pl.ToStore}
+}
 
 // RemovePeer is an OperatorStep that removes a region peer.
 type RemovePeer struct {
@@ -158,12 +179,17 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 	return region.GetStorePeer(rp.FromStore) == nil
 }
 
-// Influence calculates the store difference that current step make
+// Influence calculates the store difference that current step make.
 func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(rp.FromStore)
 
 	from.RegionSize -= region.ApproximateSize
 	from.RegionCount--
+}
+
+// InvolvedStores returns the stores invloved in this operator step.
+func (rp RemovePeer) InvolvedStores(region *core.RegionInfo) []uint64 {
+	return []uint64{rp.FromStore}
 }
 
 // MergeRegion is an OperatorStep that merge two regions.
@@ -183,7 +209,7 @@ func (mr MergeRegion) String() string {
 	return fmt.Sprintf("merge region %v into region %v", mr.FromRegion.GetId(), mr.ToRegion.GetId())
 }
 
-// IsFinish checks if current step is finished
+// IsFinish checks if current step is finished.
 func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 	if mr.IsPassive {
 		return bytes.Compare(region.Region.StartKey, mr.ToRegion.StartKey) != 0 || bytes.Compare(region.Region.EndKey, mr.ToRegion.EndKey) != 0
@@ -191,7 +217,7 @@ func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// Influence calculates the store difference that current step make
+// Influence calculates the store difference that current step make.
 func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	if mr.IsPassive {
 		for _, p := range region.GetPeers() {
@@ -202,6 +228,18 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 			}
 		}
 	}
+}
+
+// InvolvedStores returns the stores invloved in this operator step.
+func (mr MergeRegion) InvolvedStores(region *core.RegionInfo) []uint64 {
+	if mr.IsPassive {
+		res := []uint64{}
+		for _, p := range region.GetPeers() {
+			res = append(res, p.StoreId)
+		}
+		return res
+	}
+	return nil
 }
 
 // SplitRegion is an OperatorStep that splits a region.
@@ -227,6 +265,15 @@ func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 			inf.LeaderCount++
 		}
 	}
+}
+
+// InvolvedStores returns the stores invloved in this operator step.
+func (sr SplitRegion) InvolvedStores(region *core.RegionInfo) []uint64 {
+	res := []uint64{}
+	for _, p := range region.GetPeers() {
+		res = append(res, p.StoreId)
+	}
+	return res
 }
 
 // Operator contains execution steps generated by scheduler.
@@ -359,6 +406,21 @@ func (o *Operator) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 			o.steps[int(step)].Influence(opInfluence, region)
 		}
 	}
+}
+
+// InvolvedStores returns the stores invloved in operator steps.
+func (o *Operator) InvolvedStores(region *core.RegionInfo) []uint64 {
+	if region == nil || region.Leader == nil {
+		return nil
+	}
+
+	res := []uint64{}
+	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
+		if !o.steps[int(step)].IsFinish(region) {
+			res = append(res, o.steps[int(step)].InvolvedStores(region)...)
+		}
+	}
+	return res
 }
 
 // OperatorHistory is used to log and visualize completed operators.

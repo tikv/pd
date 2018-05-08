@@ -393,10 +393,10 @@ const (
 	defaultMaxPendingPeerCount  = 16
 	defaultMaxStoreDownTime     = 30 * time.Minute
 	defaultMaxMergeRegionSize   = 0
-	defaultLeaderScheduleLimit  = 4
-	defaultRegionScheduleLimit  = 4
-	defaultReplicaScheduleLimit = 8
-	defaultMergeScheduleLimit   = 8
+	defaultLeaderScheduleLimit  = 1000
+	defaultRegionScheduleLimit  = 30
+	defaultReplicaScheduleLimit = 30
+	defaultMergeScheduleLimit   = 10
 	defaultTolerantSizeRatio    = 2.5
 	defaultLowSpaceRatio        = 0.8
 	defaultHighSpaceRatio       = 0.6

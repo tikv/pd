@@ -94,6 +94,7 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 		timeout := op.IsTimeout()
 		if step := op.Check(region); step != nil && !timeout {
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
+			c.limiter.UpdateCounts(op, region)
 			c.sendScheduleCommand(region, step)
 			return
 		}
@@ -106,6 +107,7 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 		} else if timeout {
 			log.Infof("[region %v] operator timeout: %s", region.GetId(), op)
 			operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
+			c.limiter.Remove(op, region)
 			c.removeOperator(op)
 		}
 	}
@@ -418,11 +420,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			}
 			opInfluence := schedule.NewOpInfluence(c.getOperators(), c.cluster)
 			if op := s.Schedule(c.cluster, opInfluence); op != nil {
-				if len(op) == 1 {
-					c.addOperator(op[0])
-				} else {
-					c.addOperators(op...)
-				}
+				c.addOperators(op...)
 			}
 
 		case <-s.Ctx().Done():
@@ -447,20 +445,25 @@ func (c *coordinator) addOperatorLocked(op *schedule.Operator) bool {
 		}
 		log.Infof("[region %v] replace old operator: %s", regionID, old)
 		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
+		if region := c.cluster.GetRegion(old.RegionID()); region != nil {
+			c.limiter.Remove(old, region)
+		}
 		c.removeOperatorLocked(old)
 	}
 
-	c.operators[regionID] = op
-	c.limiter.UpdateCounts(c.operators)
-
 	if region := c.cluster.GetRegion(op.RegionID()); region != nil {
+		c.operators[regionID] = op
 		if step := op.Check(region); step != nil {
 			c.sendScheduleCommand(region, step)
 		}
+		c.limiter.UpdateCounts(op, region)
+		operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
+		return true
 	}
 
-	operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
-	return true
+	log.Warnf("add operator %v on nonexistent region %d", op, regionID)
+	operatorCounter.WithLabelValues(op.Desc(), "no_region").Inc()
+	return false
 }
 
 func (c *coordinator) addOperator(op *schedule.Operator) bool {
@@ -518,9 +521,7 @@ func (c *coordinator) removeOperator(op *schedule.Operator) {
 }
 
 func (c *coordinator) removeOperatorLocked(op *schedule.Operator) {
-	regionID := op.RegionID()
-	delete(c.operators, regionID)
-	c.limiter.UpdateCounts(c.operators)
+	delete(c.operators, op.RegionID())
 	operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 }
 

@@ -367,13 +367,13 @@ type ScheduleConfig struct {
 	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
-	// LeaderScheduleLimit is the max coexist leader schedules.
+	// LeaderScheduleLimit is the max coexist leader schedules for one store within one minute.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
-	// RegionScheduleLimit is the max coexist region schedules.
+	// RegionScheduleLimit is the max coexist region schedules for one store within one minute.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
-	// ReplicaScheduleLimit is the max coexist replica schedules.
+	// ReplicaScheduleLimit is the max coexist replica schedules for one store within one minute.
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit,omitempty" json:"replica-schedule-limit"`
-	// MergeScheduleLimit is the max coexist merge schedules.
+	// MergeScheduleLimit is the max coexist merge schedules for one store within one minute.
 	MergeScheduleLimit uint64 `toml:"merge-schedule-limit,omitempty" json:"merge-schedule-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
@@ -464,10 +464,10 @@ const (
 	defaultMaxPendingPeerCount  = 16
 	defaultMaxMergeRegionSize   = 0
 	defaultMaxStoreDownTime     = 30 * time.Minute
-	defaultLeaderScheduleLimit  = 4
-	defaultRegionScheduleLimit  = 4
-	defaultReplicaScheduleLimit = 8
-	defaultMergeScheduleLimit   = 8
+	defaultLeaderScheduleLimit  = 1000
+	defaultRegionScheduleLimit  = 30
+	defaultReplicaScheduleLimit = 30
+	defaultMergeScheduleLimit   = 10
 	defaultTolerantSizeRatio    = 5
 	defaultLowSpaceRatio        = 0.8
 	defaultHighSpaceRatio       = 0.6
