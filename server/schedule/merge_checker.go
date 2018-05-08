@@ -56,7 +56,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 
 	last := time.Unix(region.GetLastSplitTimestamp(), 0)
 	if time.Since(last) < m.cluster.GetSplitMergeInterval() {
-		checkerCounter.WithLabelValues("merge_checker", "too_frequent").Inc()
+		checkerCounter.WithLabelValues("merge_checker", "recently_split").Inc()
 		return nil, nil
 	}
 
