@@ -18,11 +18,21 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 )
 
-// CheckAddPeer check add peer
+// CheckAddPeer checks add peer
 func CheckAddPeer(c *check.C, op *schedule.Operator, kind schedule.OperatorKind, storeID uint64) {
 	c.Assert(op, check.NotNil)
 	c.Assert(op.Len(), check.Equals, 1)
 	c.Assert(op.Step(0).(schedule.AddPeer).ToStore, check.Equals, storeID)
+	kind |= schedule.OpRegion
+	c.Assert(op.Kind()&kind, check.Equals, kind)
+}
+
+// CheckAddPeerWithLearner checks add peer with learner
+func CheckAddPeerWithLearner(c *check.C, op *schedule.Operator, kind schedule.OperatorKind, storeID uint64) {
+	c.Assert(op, check.NotNil)
+	c.Assert(op.Len(), check.Equals, 2)
+	c.Assert(op.Step(0).(schedule.AddLearner).ToStore, check.Equals, storeID)
+	c.Assert(op.Step(1).(schedule.PromoteLearner).ToStore, check.Equals, storeID)
 	kind |= schedule.OpRegion
 	c.Assert(op.Kind()&kind, check.Equals, kind)
 }
