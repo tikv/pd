@@ -80,12 +80,16 @@ func (o *scheduleOption) GetMaxPendingPeerCount() uint64 {
 	return o.load().MaxPendingPeerCount
 }
 
-func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
-	return o.load().MaxStoreDownTime.Duration
-}
-
 func (o *scheduleOption) GetMaxMergeRegionSize() uint64 {
 	return o.load().MaxMergeRegionSize
+}
+
+func (o *scheduleOption) GetSplitMergeInterval() time.Duration {
+	return o.load().SplitMergeInterval.Duration
+}
+
+func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
+	return o.load().MaxStoreDownTime.Duration
 }
 
 func (o *scheduleOption) GetLeaderScheduleLimit(name string) uint64 {

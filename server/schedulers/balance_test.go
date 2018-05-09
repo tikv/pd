@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -779,6 +780,8 @@ func (s *testMergeCheckerSuite) SetUpSuite(c *C) {
 }
 
 func (s *testMergeCheckerSuite) TestBasic(c *C) {
+	s.cluster.MockSchedulerOptions.SplitMergeInterval = time.Hour
+
 	// should with same peer count
 	op1, op2 := s.mc.Check(s.regions[0])
 	c.Assert(op1, IsNil)
@@ -790,6 +793,11 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	op1, op2 = s.mc.Check(s.regions[2])
 	c.Assert(op1, NotNil)
 	c.Assert(op2, NotNil)
+	// Skip recently split regions.
+	s.mc.RecordRegionSplit(s.regions[2].GetId())
+	op1, op2 = s.mc.Check(s.regions[2])
+	c.Assert(op1, IsNil)
+	c.Assert(op2, IsNil)
 	op1, op2 = s.mc.Check(s.regions[3])
 	c.Assert(op1, IsNil)
 	c.Assert(op2, IsNil)
