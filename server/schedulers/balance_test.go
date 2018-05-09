@@ -712,7 +712,7 @@ type testMergeCheckerSuite struct {
 	regions []*core.RegionInfo
 }
 
-func (s *testMergeCheckerSuite) SetUpSuite(c *C) {
+func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	cfg := schedule.NewMockSchedulerOptions()
 	cfg.MaxMergeRegionSize = 2
 	s.cluster = schedule.NewMockCluster(cfg)
@@ -815,7 +815,7 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	// partial store overlap not including leader
 	op1, op2 := s.mc.Check(s.regions[2])
 	s.checkSteps(c, op1, []schedule.OperatorStep{
-		schedule.AddPeer{ToStore: 4, PeerID: 2},
+		schedule.AddPeer{ToStore: 4, PeerID: 1},
 		schedule.TransferLeader{FromStore: 6, ToStore: 4},
 		schedule.RemovePeer{FromStore: 6},
 		schedule.MergeRegion{
@@ -837,7 +837,7 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.cluster.PutRegion(s.regions[2])
 	op1, op2 = s.mc.Check(s.regions[2])
 	s.checkSteps(c, op1, []schedule.OperatorStep{
-		schedule.AddPeer{ToStore: 4, PeerID: 3},
+		schedule.AddPeer{ToStore: 4, PeerID: 2},
 		schedule.RemovePeer{FromStore: 6},
 		schedule.MergeRegion{
 			FromRegion: s.regions[2].Region,
