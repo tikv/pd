@@ -14,6 +14,7 @@
 package schedule
 
 import (
+	"math"
 	"math/rand"
 	"time"
 
@@ -134,7 +135,12 @@ func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes 
 
 	if oldItem != nil {
 		newItem.HotDegree = oldItem.HotDegree + 1
+		// denosing
+		if newItem.StoreID != oldItem.StoreID && math.Floor(math.Log10(float64(oldItem.FlowBytes))) != math.Floor(math.Log10(float64(newItem.FlowBytes))) {
+			newItem.FlowBytes = oldItem.FlowBytes
+		}
 	}
+
 	if flowBytes >= hotRegionThreshold {
 		if oldItem == nil {
 			w.incMetrics("add_item", kind)

@@ -359,6 +359,8 @@ func (c *clusterInfo) isPrepared() bool {
 	return float64(c.Regions.Length())*collectFactor <= float64(c.activeRegions)
 }
 
+const minStoreHeartbeatInterval = 1
+
 // handleStoreHeartbeat updates the store status.
 func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.Lock()
@@ -369,8 +371,16 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	if store == nil {
 		return errors.Trace(core.ErrStoreNotFound(storeID))
 	}
+	lastStats := store.Stats
 	store.Stats = proto.Clone(stats).(*pdpb.StoreStats)
 	store.LastHeartbeatTS = time.Now()
+	// denosing
+	if store.Stats.GetInterval().GetEndTimestamp()-store.Stats.GetInterval().GetStartTimestamp() < minStoreHeartbeatInterval {
+		store.Stats.BytesRead = lastStats.BytesRead
+		store.Stats.BytesWritten = lastStats.BytesWritten
+		store.Stats.KeysRead = lastStats.KeysRead
+		store.Stats.KeysWritten = lastStats.KeysWritten
+	}
 
 	c.Stores.SetStore(store)
 	return nil
@@ -399,7 +409,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	var saveKV, saveCache, isNew bool
 	if origin == nil {
 		log.Infof("[region %d] Insert new region {%v}", region.GetId(), region)
-		saveKV, saveCache, isNew = true, true, true
+		saveKV, saveCache, isNew, isWriteUpdate, isReadUpdate = true, true, true, false, false
 	} else {
 		r := region.GetRegionEpoch()
 		o := origin.GetRegionEpoch()
