@@ -54,6 +54,7 @@ address = ""
 
 [schedule]
 max-merge-region-size = 0
+split-merge-interval = "1h"
 max-snapshot-count = 3
 max-pending-peer-count = 16
 max-store-down-time = "30m"
