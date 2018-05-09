@@ -34,7 +34,7 @@ func SplitRegions(regions []*metapb.Region) []*metapb.Region {
 		}
 		middle := []byte{start/2 + end/2}
 		left := proto.Clone(region).(*metapb.Region)
-		left.Id = region.Id + uint64(len(regions))
+		left.Id = region.Id
 		left.EndKey = middle
 		left.RegionEpoch.Version++
 		right := proto.Clone(region).(*metapb.Region)
@@ -56,7 +56,7 @@ func MergeRegions(regions []*metapb.Region) []*metapb.Region {
 			right = regions[i+1]
 		}
 		region := &metapb.Region{
-			Id:       left.Id + uint64(len(regions)),
+			Id:       left.Id,
 			StartKey: left.StartKey,
 			EndKey:   right.EndKey,
 		}

@@ -14,6 +14,7 @@
 package server
 
 import (
+	"bytes"
 	"sync"
 	"time"
 
@@ -399,8 +400,12 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	var saveKV, saveCache, isNew bool
 	if origin == nil {
 		log.Infof("[region %d] Insert new region {%v}", region.GetId(), region)
+		// new region must be derived from split
+		region.Region.LastSplitTimestamp = time.Now().Unix()
 		saveKV, saveCache, isNew = true, true, true
 	} else {
+		// cause tikv doesn't fill this field, we need to copy this manually.
+		region.Region.LastSplitTimestamp = origin.Region.LastSplitTimestamp
 		r := region.GetRegionEpoch()
 		o := origin.GetRegionEpoch()
 		// Region meta is stale, return an error.
@@ -409,6 +414,12 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		}
 		if r.GetVersion() > o.GetVersion() {
 			log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetId(), core.DiffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion())
+			// when split or merge, version increases
+			// if key range shrinks, region must have split.
+			if bytes.Compare(region.Region.StartKey, origin.Region.StartKey) > 0 ||
+				(bytes.Compare(region.Region.EndKey, origin.Region.EndKey) < 0 && len(region.Region.EndKey) > 0) {
+				region.Region.LastSplitTimestamp = time.Now().Unix()
+			}
 			saveKV, saveCache = true, true
 		}
 		if r.GetConfVer() > o.GetConfVer() {
@@ -560,6 +571,10 @@ func (c *clusterInfo) GetMaxPendingPeerCount() uint64 {
 
 func (c *clusterInfo) GetMaxMergeRegionSize() uint64 {
 	return c.opt.GetMaxMergeRegionSize()
+}
+
+func (c *clusterInfo) GetSplitMergeInterval() time.Duration {
+	return c.opt.GetSplitMergeInterval()
 }
 
 func (c *clusterInfo) GetMaxStoreDownTime() time.Duration {

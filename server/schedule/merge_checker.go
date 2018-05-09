@@ -14,6 +14,8 @@
 package schedule
 
 import (
+	"time"
+
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	log "github.com/sirupsen/logrus"
@@ -49,6 +51,12 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	// region size is not small enough
 	if region.ApproximateSize > int64(m.cluster.GetMaxMergeRegionSize()) {
 		checkerCounter.WithLabelValues("merge_checker", "no_need").Inc()
+		return nil, nil
+	}
+
+	last := time.Unix(region.GetLastSplitTimestamp(), 0)
+	if time.Since(last) < m.cluster.GetSplitMergeInterval() {
+		checkerCounter.WithLabelValues("merge_checker", "recently_split").Inc()
 		return nil, nil
 	}
 
