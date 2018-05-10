@@ -321,7 +321,7 @@ func (c *Config) adjust() error {
 	adjustDuration(&c.TickInterval, defaultTickInterval)
 	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
 
-	adjustString(&c.NamespaceClassifier, "default")
+	adjustString(&c.NamespaceClassifier, "table")
 
 	adjustString(&c.Metric.PushJob, c.Name)
 
