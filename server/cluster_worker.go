@@ -65,6 +65,10 @@ func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 		}
 	}
 
+	// Disable merge for the 2 regions in a period of time.
+	c.coordinator.mergeChecker.RecordRegionSplit(reqRegion.GetId())
+	c.coordinator.mergeChecker.RecordRegionSplit(newRegionID)
+
 	split := &pdpb.AskSplitResponse{
 		NewRegionId: newRegionID,
 		NewPeerIds:  peerIDs,

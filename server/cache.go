@@ -562,6 +562,10 @@ func (c *clusterInfo) GetMaxMergeRegionSize() uint64 {
 	return c.opt.GetMaxMergeRegionSize()
 }
 
+func (c *clusterInfo) GetSplitMergeInterval() time.Duration {
+	return c.opt.GetSplitMergeInterval()
+}
+
 func (c *clusterInfo) GetMaxStoreDownTime() time.Duration {
 	return c.opt.GetMaxStoreDownTime()
 }

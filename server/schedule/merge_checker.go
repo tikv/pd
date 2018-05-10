@@ -14,27 +14,54 @@
 package schedule
 
 import (
+	"time"
+
+	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	log "github.com/sirupsen/logrus"
 )
 
+// As region split history is not persisted. We put a special marker into
+// splitCache to prevent merging any regions when server is recently started.
+const mergeBlockMarker = 0
+
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
 	cluster    Cluster
 	classifier namespace.Classifier
+	splitCache *cache.TTLUint64
 }
 
 // NewMergeChecker creates a merge checker.
 func NewMergeChecker(cluster Cluster, classifier namespace.Classifier) *MergeChecker {
+	splitCache := cache.NewIDTTL(time.Minute, cluster.GetSplitMergeInterval())
+	splitCache.Put(mergeBlockMarker)
 	return &MergeChecker{
 		cluster:    cluster,
 		classifier: classifier,
+		splitCache: splitCache,
 	}
+}
+
+// RecordRegionSplit put the recently splitted region into cache. MergeChecker
+// will skip check it for a while.
+func (m *MergeChecker) RecordRegionSplit(regionID uint64) {
+	m.splitCache.PutWithTTL(regionID, nil, m.cluster.GetSplitMergeInterval())
 }
 
 // Check verifies a region's replicas, creating an Operator if need.
 func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
+	if m.splitCache.Exists(mergeBlockMarker) {
+		checkerCounter.WithLabelValues("merge_checker", "recently_start").Inc()
+		return nil, nil
+	}
+
+	if m.splitCache.Exists(region.GetId()) {
+		checkerCounter.WithLabelValues("merge_checker", "recently_split").Inc()
+		return nil, nil
+	}
+
 	checkerCounter.WithLabelValues("merge_checker", "check").Inc()
 
 	// when pd just started, it will load region meta from etcd
