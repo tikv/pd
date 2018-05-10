@@ -24,6 +24,8 @@ import (
 	"github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/pkg/typeutil"
+	// Register namespace classifiers.
+	_ "github.com/pingcap/pd/table"
 )
 
 // CleanupFunc closes test pd server(s) and deletes any files left behind.
