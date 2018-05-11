@@ -4,7 +4,7 @@
 ### Improvements
 * Optimize the scheduling of Merge Region to prevent the newly split Region from being merged
 * Add Learner related metrics
-### Bug Fix
+### Bug Fixes
 * Fix the issue that the scheduler is mistakenly deleted after restart
 * Fix the error that occurs when parsing the configuration file
 * Fix the issue that the etcd leader and the PD leader are not synchronized
