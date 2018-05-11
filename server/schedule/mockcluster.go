@@ -421,7 +421,7 @@ type MockSchedulerOptions struct {
 	TolerantSizeRatio     float64
 	LowSpaceRatio         float64
 	HighSpaceRatio        float64
-	EnableRaftLearner     bool
+	DisableLearner        bool
 	LabelProperties       map[string][]*metapb.StoreLabel
 }
 
@@ -527,5 +527,5 @@ func (mso *MockSchedulerOptions) SetMaxReplicas(replicas int) {
 
 // IsRaftLearnerEnabled mock method
 func (mso *MockSchedulerOptions) IsRaftLearnerEnabled() bool {
-	return mso.EnableRaftLearner
+	return !mso.DisableLearner
 }
