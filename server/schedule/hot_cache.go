@@ -132,11 +132,15 @@ func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes 
 		Version:        region.GetRegionEpoch().GetVersion(),
 		AntiCount:      hotRegionAntiCount,
 	}
+	// notSameMagnitude to judge that two numbers are not in the same order of magnitude
+	notSameMagnitude := func(a, b float64) bool {
+		return math.Abs(math.Log10(a)-math.Log10(b)) >= 1
+	}
 
 	if oldItem != nil {
 		newItem.HotDegree = oldItem.HotDegree + 1
 		// denosing
-		if newItem.StoreID != oldItem.StoreID && math.Floor(math.Log10(float64(oldItem.FlowBytes))) != math.Floor(math.Log10(float64(newItem.FlowBytes))) {
+		if newItem.StoreID != oldItem.StoreID && notSameMagnitude(float64(oldItem.FlowBytes), float64(newItem.FlowBytes)) {
 			newItem.FlowBytes = oldItem.FlowBytes
 		}
 	}
