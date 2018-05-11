@@ -34,7 +34,7 @@
 [[constraint]]
   name = "google.golang.org/grpc"
   source = "https://github.com/grpc/grpc-go.git"
-  version = "=1.7.5"
+  version = "1.12.0"
 
 [[constraint]]
   name = "github.com/chzyer/readline"
