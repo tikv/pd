@@ -334,6 +334,16 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 					IsLearner: true,
 				}
 				region.AddPeer(peer)
+			case PromoteLearner:
+				if region.GetStoreLearner(s.ToStore) == nil {
+					panic("promote peer that doesn't exist")
+				}
+				region.RemoveStorePeer(s.ToStore)
+				peer := &metapb.Peer{
+					Id:      s.PeerID,
+					StoreId: s.ToStore,
+				}
+				region.AddPeer(peer)
 			default:
 				panic("Unknown operator step")
 			}

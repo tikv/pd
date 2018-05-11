@@ -21,8 +21,9 @@ import (
 // CheckAddPeer checks add peer
 func CheckAddPeer(c *check.C, op *schedule.Operator, kind schedule.OperatorKind, storeID uint64) {
 	c.Assert(op, check.NotNil)
-	c.Assert(op.Len(), check.Equals, 1)
-	c.Assert(op.Step(0).(schedule.AddPeer).ToStore, check.Equals, storeID)
+	c.Assert(op.Len(), check.Equals, 2)
+	c.Assert(op.Step(0).(schedule.AddLearner).ToStore, check.Equals, storeID)
+	c.Assert(op.Step(1), check.FitsTypeOf, schedule.PromoteLearner{})
 	kind |= schedule.OpRegion
 	c.Assert(op.Kind()&kind, check.Equals, kind)
 }
@@ -49,14 +50,16 @@ func CheckTransferLeader(c *check.C, op *schedule.Operator, kind schedule.Operat
 // CheckTransferPeer checks peer transfer
 func CheckTransferPeer(c *check.C, op *schedule.Operator, kind schedule.OperatorKind, sourceID, targetID uint64) {
 	c.Assert(op, check.NotNil)
-	if op.Len() == 2 {
-		c.Assert(op.Step(0).(schedule.AddPeer).ToStore, check.Equals, targetID)
-		c.Assert(op.Step(1).(schedule.RemovePeer).FromStore, check.Equals, sourceID)
-	} else {
-		c.Assert(op.Len(), check.Equals, 3)
-		c.Assert(op.Step(0).(schedule.AddPeer).ToStore, check.Equals, targetID)
-		c.Assert(op.Step(1).(schedule.TransferLeader).FromStore, check.Equals, sourceID)
+	if op.Len() == 3 {
+		c.Assert(op.Step(0).(schedule.AddLearner).ToStore, check.Equals, targetID)
+		c.Assert(op.Step(1), check.FitsTypeOf, schedule.PromoteLearner{})
 		c.Assert(op.Step(2).(schedule.RemovePeer).FromStore, check.Equals, sourceID)
+	} else {
+		c.Assert(op.Len(), check.Equals, 4)
+		c.Assert(op.Step(0).(schedule.AddLearner).ToStore, check.Equals, targetID)
+		c.Assert(op.Step(1), check.FitsTypeOf, schedule.PromoteLearner{})
+		c.Assert(op.Step(2).(schedule.TransferLeader).FromStore, check.Equals, sourceID)
+		c.Assert(op.Step(3).(schedule.RemovePeer).FromStore, check.Equals, sourceID)
 		kind |= schedule.OpLeader
 	}
 	kind |= schedule.OpRegion
