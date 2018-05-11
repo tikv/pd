@@ -1,5 +1,15 @@
 # PD Change Log
 
+## v2.0.1
+### Improvements
+* Optimize the scheduling of Merge Region to prevent the newly split Region from being merged
+* Add Learner related metrics
+### Bug Fix
+* Fix the issue that the scheduler is mistakenly deleted after restart
+* Fix the error that occurs when parsing the configuration file
+* Fix the issue that the etcd leader and the PD leader are not synchronized
+* Fix the issue that Learner still appears after it is closed
+
 ## v2.0.0-GA
 ### New Feature
 * Support using pd-ctl to scatter specified Regions for manually adjusting hotspot Regions in some cases
