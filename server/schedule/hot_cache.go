@@ -14,7 +14,6 @@
 package schedule
 
 import (
-	"math"
 	"math/rand"
 	"time"
 
@@ -123,7 +122,10 @@ func calculateReadHotThreshold(stores *core.StoresInfo) uint64 {
 	return hotRegionThreshold
 }
 
+const rollingWindowsSize = 5
+
 func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes uint64, hotRegionThreshold uint64, oldItem *core.RegionStat, kind FlowKind) (bool, *core.RegionStat) {
+	needUpdate := false
 	newItem := &core.RegionStat{
 		RegionID:       region.GetId(),
 		FlowBytes:      flowBytes,
@@ -132,38 +134,43 @@ func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes 
 		Version:        region.GetRegionEpoch().GetVersion(),
 		AntiCount:      hotRegionAntiCount,
 	}
-	// notSameMagnitude to judge that two numbers are not in the same order of magnitude
-	notSameMagnitude := func(a, b float64) bool {
-		return math.Abs(math.Log10(a)-math.Log10(b)) >= 1
-	}
+	defer func() {
+		if !needUpdate {
+			return
+		}
+		if oldItem == nil {
+			newItem.Stats = core.NewRollingStats(rollingWindowsSize)
+		} else {
+			newItem.Stats = oldItem.Stats
+		}
+		newItem.Stats.Add(float64(flowBytes))
+	}()
 
 	if oldItem != nil {
 		newItem.HotDegree = oldItem.HotDegree + 1
-		// denosing
-		if newItem.StoreID != oldItem.StoreID && notSameMagnitude(float64(oldItem.FlowBytes), float64(newItem.FlowBytes)) {
-			newItem.FlowBytes = oldItem.FlowBytes
-		}
 	}
-
 	if flowBytes >= hotRegionThreshold {
 		if oldItem == nil {
 			w.incMetrics("add_item", kind)
 		}
-		return true, newItem
+		needUpdate = true
+		return needUpdate, newItem
 	}
 	// smaller than hotReionThreshold
 	if oldItem == nil {
-		return false, newItem
+		return needUpdate, newItem
 	}
 	if oldItem.AntiCount <= 0 {
 		w.incMetrics("remove_item", kind)
-		return true, nil
+		needUpdate = true
+		return needUpdate, nil
 	}
 	// eliminate some noise
 	newItem.HotDegree = oldItem.HotDegree - 1
 	newItem.AntiCount = oldItem.AntiCount - 1
 	newItem.FlowBytes = oldItem.FlowBytes
-	return true, newItem
+	needUpdate = true
+	return needUpdate, newItem
 }
 
 // Update updates the cache.

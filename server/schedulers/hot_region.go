@@ -221,7 +221,7 @@ func (h *balanceHotRegionsScheduler) calcScore(items []*core.RegionStat, cluster
 
 			s := core.RegionStat{
 				RegionID:       r.RegionID,
-				FlowBytes:      r.FlowBytes,
+				FlowBytes:      uint64(r.Stats.Median()),
 				HotDegree:      r.HotDegree,
 				LastUpdateTime: r.LastUpdateTime,
 				StoreID:        storeID,
