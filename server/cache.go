@@ -64,13 +64,13 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 	}
 
 	start := time.Now()
-	if err := kv.LoadStores(c.Stores, kvRangeLimit); err != nil {
+	if err := kv.LoadStores(c.Stores); err != nil {
 		return nil, errors.Trace(err)
 	}
 	log.Infof("load %v stores cost %v", c.Stores.GetStoreCount(), time.Since(start))
 
 	start = time.Now()
-	if err := kv.LoadRegions(c.Regions, kvRangeLimit); err != nil {
+	if err := kv.LoadRegions(c.Regions); err != nil {
 		return nil, errors.Trace(err)
 	}
 	log.Infof("load %v regions cost %v", c.Regions.GetRegionCount(), time.Since(start))
