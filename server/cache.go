@@ -179,16 +179,28 @@ func (c *clusterInfo) getStoreCount() int {
 	return c.Stores.GetStoreCount()
 }
 
-func (c *clusterInfo) getStoresWriteStat() map[uint64]uint64 {
+func (c *clusterInfo) getStoresBytesWriteStat() map[uint64]uint64 {
 	c.RLock()
 	defer c.RUnlock()
-	return c.Stores.GetStoresWriteStat()
+	return c.Stores.GetStoresBytesWriteStat()
 }
 
-func (c *clusterInfo) getStoresReadStat() map[uint64]uint64 {
+func (c *clusterInfo) getStoresBytesReadStat() map[uint64]uint64 {
 	c.RLock()
 	defer c.RUnlock()
-	return c.Stores.GetStoresReadStat()
+	return c.Stores.GetStoresBytesReadStat()
+}
+
+func (c *clusterInfo) getStoresKeysWriteStat() map[uint64]uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.Stores.GetStoresKeysWriteStat()
+}
+
+func (c *clusterInfo) getStoresKeysReadStat() map[uint64]uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.Stores.GetStoresKeysReadStat()
 }
 
 // ScanRegions scans region with start key, until number greater than limit.
@@ -371,16 +383,8 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	if store == nil {
 		return errors.Trace(core.ErrStoreNotFound(storeID))
 	}
-	lastStats := store.Stats
 	store.Stats = proto.Clone(stats).(*pdpb.StoreStats)
 	store.LastHeartbeatTS = time.Now()
-	// denosing
-	if store.Stats.GetInterval().GetEndTimestamp()-store.Stats.GetInterval().GetStartTimestamp() < minStoreHeartbeatInterval {
-		store.Stats.BytesRead = lastStats.BytesRead
-		store.Stats.BytesWritten = lastStats.BytesWritten
-		store.Stats.KeysRead = lastStats.KeysRead
-		store.Stats.KeysWritten = lastStats.KeysWritten
-	}
 
 	c.Stores.SetStore(store)
 	return nil

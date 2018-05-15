@@ -100,8 +100,8 @@ func calculateWriteHotThreshold(stores *core.StoresInfo) uint64 {
 	// suppose the number of the hot Regions is statCacheMaxLen
 	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
 	// divide 2 because the store reports data about two times than the region record write to rocksdb
-	divisor := float64(statCacheMaxLen) * 2 * storeHeartBeatReportInterval
-	hotRegionThreshold := uint64(float64(stores.TotalWrittenBytes()) / divisor)
+	divisor := float64(statCacheMaxLen) * 2
+	hotRegionThreshold := uint64(float64(stores.TotalBytesWrittenRate()) / divisor)
 
 	if hotRegionThreshold < hotWriteRegionMinFlowRate {
 		hotRegionThreshold = hotWriteRegionMinFlowRate
@@ -113,8 +113,8 @@ func calculateReadHotThreshold(stores *core.StoresInfo) uint64 {
 	// hotRegionThreshold is use to pick hot region
 	// suppose the number of the hot Regions is statLRUMaxLen
 	// and we use total Read Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
-	divisor := float64(statCacheMaxLen) * storeHeartBeatReportInterval
-	hotRegionThreshold := uint64(float64(stores.TotalReadBytes()) / divisor)
+	divisor := float64(statCacheMaxLen)
+	hotRegionThreshold := uint64(float64(stores.TotalBytesReadRate()) / divisor)
 
 	if hotRegionThreshold < hotReadRegionMinFlowRate {
 		hotRegionThreshold = hotReadRegionMinFlowRate
@@ -134,25 +134,17 @@ func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes 
 		Version:        region.GetRegionEpoch().GetVersion(),
 		AntiCount:      hotRegionAntiCount,
 	}
-	defer func() {
-		if !needUpdate {
-			return
-		}
-		if oldItem == nil {
-			newItem.Stats = core.NewRollingStats(rollingWindowsSize)
-		} else {
-			newItem.Stats = oldItem.Stats
-		}
-		newItem.Stats.Add(float64(flowBytes))
-	}()
 
 	if oldItem != nil {
 		newItem.HotDegree = oldItem.HotDegree + 1
+		newItem.Stats = oldItem.Stats
 	}
 	if flowBytes >= hotRegionThreshold {
 		if oldItem == nil {
 			w.incMetrics("add_item", kind)
+			newItem.Stats = core.NewRollingStats(rollingWindowsSize)
 		}
+		newItem.Stats.Add(float64(flowBytes))
 		needUpdate = true
 		return needUpdate, newItem
 	}

@@ -261,12 +261,18 @@ func (mc *MockCluster) UpdateStorageRatio(storeID uint64, usedRatio, availableRa
 func (mc *MockCluster) UpdateStorageWrittenBytes(storeID uint64, BytesWritten uint64) {
 	store := mc.GetStore(storeID)
 	store.Stats.BytesWritten = BytesWritten
+	now := time.Now().Second()
+	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - storeHeartBeatReportInterval), EndTimestamp: uint64(now)}
+	store.Stats.Interval = interval
 	mc.PutStore(store)
 }
 
 // UpdateStorageReadBytes updates store read bytes.
 func (mc *MockCluster) UpdateStorageReadBytes(storeID uint64, BytesRead uint64) {
 	store := mc.GetStore(storeID)
+	now := time.Now().Second()
+	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - storeHeartBeatReportInterval), EndTimestamp: uint64(now)}
+	store.Stats.Interval = interval
 	store.Stats.BytesRead = BytesRead
 	mc.PutStore(store)
 }
