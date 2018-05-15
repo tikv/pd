@@ -413,7 +413,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	var saveKV, saveCache, isNew bool
 	if origin == nil {
 		log.Infof("[region %d] Insert new region {%v}", region.GetId(), region)
-		saveKV, saveCache, isNew, isWriteUpdate, isReadUpdate = true, true, true, false, false
+		saveKV, saveCache, isNew = true, true, true
 	} else {
 		r := region.GetRegionEpoch()
 		o := origin.GetRegionEpoch()

@@ -17,7 +17,9 @@ import (
 	"github.com/montanaflynn/stats"
 )
 
-// RollingStats is a rolling statistics.
+// RollingStats provides rolling statistics with specified windows size.
+// There have windows size records used for calculating. it provides Rolling
+// `Median` now, which used to filter noise in some situation.
 type RollingStats struct {
 	records  []float64
 	size     int
