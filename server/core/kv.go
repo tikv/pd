@@ -31,6 +31,11 @@ const (
 	schedulePath = "schedule"
 )
 
+const (
+	maxKVRangeLimit = 10000
+	minKVRangeLimit = 100
+)
+
 // KV wraps all kv operations, keep it stateless.
 type KV struct {
 	KVBase
@@ -125,12 +130,12 @@ func (kv *KV) LoadConfig(cfg interface{}) (bool, error) {
 }
 
 // LoadStores loads all stores from KV to StoresInfo.
-func (kv *KV) LoadStores(stores *StoresInfo, rangeLimit int) error {
+func (kv *KV) LoadStores(stores *StoresInfo) error {
 	nextID := uint64(0)
 	endKey := kv.storePath(math.MaxUint64)
 	for {
 		key := kv.storePath(nextID)
-		res, err := kv.LoadRange(key, endKey, rangeLimit)
+		res, err := kv.LoadRange(key, endKey, minKVRangeLimit)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -154,7 +159,7 @@ func (kv *KV) LoadStores(stores *StoresInfo, rangeLimit int) error {
 			nextID = store.GetId() + 1
 			stores.SetStore(storeInfo)
 		}
-		if len(res) < rangeLimit {
+		if len(res) < minKVRangeLimit {
 			return nil
 		}
 	}
@@ -189,14 +194,22 @@ func (kv *KV) loadFloatWithDefaultValue(path string, def float64) (float64, erro
 }
 
 // LoadRegions loads all regions from KV to RegionsInfo.
-func (kv *KV) LoadRegions(regions *RegionsInfo, rangeLimit int) error {
+func (kv *KV) LoadRegions(regions *RegionsInfo) error {
 	nextID := uint64(0)
 	endKey := kv.regionPath(math.MaxUint64)
+
+	// Since the region key may be very long, using a larger rangeLimit will cause
+	// the message packet to exceed the grpc message size limit (4MB). Here we use
+	// a variable rangeLimit to work around.
+	rangeLimit := maxKVRangeLimit
 
 	for {
 		key := kv.regionPath(nextID)
 		res, err := kv.LoadRange(key, endKey, rangeLimit)
 		if err != nil {
+			if rangeLimit /= 2; rangeLimit >= minKVRangeLimit {
+				continue
+			}
 			return errors.Trace(err)
 		}
 
