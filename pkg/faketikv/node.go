@@ -44,15 +44,15 @@ const (
 type Node struct {
 	*metapb.Store
 	sync.RWMutex
-	stats                   *pdpb.StoreStats
-	tick                    uint64
-	wg                      sync.WaitGroup
-	tasks                   map[uint64]Task
-	client                  Client
-	reciveRegionHeartbeatCh <-chan *pdpb.RegionHeartbeatResponse
-	ctx                     context.Context
-	cancel                  context.CancelFunc
-	state                   NodeState
+	stats                    *pdpb.StoreStats
+	tick                     uint64
+	wg                       sync.WaitGroup
+	tasks                    map[uint64]Task
+	client                   Client
+	receiveRegionHeartbeatCh <-chan *pdpb.RegionHeartbeatResponse
+	ctx                      context.Context
+	cancel                   context.CancelFunc
+	state                    NodeState
 	// share cluster information
 	clusterInfo *ClusterInfo
 }
@@ -72,7 +72,7 @@ func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
 		StartTime: uint32(time.Now().Unix()),
 	}
 	tag := fmt.Sprintf("store %d", id)
-	client, reciveRegionHeartbeatCh, err := NewClient(pdAddr, tag)
+	client, receiveRegionHeartbeatCh, err := NewClient(pdAddr, tag)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -85,7 +85,7 @@ func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
 		cancel: cancel,
 		tasks:  make(map[uint64]Task),
 		state:  Down,
-		reciveRegionHeartbeatCh: reciveRegionHeartbeatCh,
+		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
 	}, nil
 }
 
@@ -98,16 +98,16 @@ func (n *Node) Start() error {
 		return err
 	}
 	n.wg.Add(1)
-	go n.reciveRegionHeartbeat()
+	go n.receiveRegionHeartbeat()
 	n.state = Up
 	return nil
 }
 
-func (n *Node) reciveRegionHeartbeat() {
+func (n *Node) receiveRegionHeartbeat() {
 	defer n.wg.Done()
 	for {
 		select {
-		case resp := <-n.reciveRegionHeartbeatCh:
+		case resp := <-n.receiveRegionHeartbeatCh:
 			task := responseToTask(resp, n.clusterInfo)
 			if task != nil {
 				n.clusterInfo.AddTask(task)
@@ -212,5 +212,5 @@ func (n *Node) Stop() {
 	n.cancel()
 	n.client.Close()
 	n.wg.Wait()
-	simutil.Logger.Infof("node %d stoped", n.Id)
+	simutil.Logger.Infof("node %d stopped", n.Id)
 }
