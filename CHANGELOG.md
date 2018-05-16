@@ -1,6 +1,8 @@
 # PD Change Log
 
 ## v2.0.1
+### New Feature
+* Add the `Scatter Range` scheduler to balance Regions with the specified key range
 ### Improvements
 * Optimize the scheduling of Merge Region to prevent the newly split Region from being merged
 * Add Learner related metrics
@@ -9,6 +11,7 @@
 * Fix the error that occurs when parsing the configuration file
 * Fix the issue that the etcd leader and the PD leader are not synchronized
 * Fix the issue that Learner still appears after it is closed
+* Fix the issue that Regions fail to load because the packet size is too large
 
 ## v2.0.0-GA
 ### New Feature
