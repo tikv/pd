@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -14,16 +15,17 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/pkg/transport"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server"
 )
 
 var (
-	endpoints   = flag.String("endpoints", "http://127.0.0.1:2379", "endpoints urls")
-	allocID     = flag.Uint64("alloc-id", 0, "please make sure alloced ID is safe")
-	clusterID   = flag.Uint64("cluster-id", 0, "please make cluster ID match with tikv")
-	maxReplicas = flag.Int("max-replicas", 3, "max replicas is the number of replicas for each region")
-	caPath      = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
-	certPath    = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")
-	keyPath     = flag.String("key", "", "path of file that contains X509 key in PEM format.")
+	endpoints  = flag.String("endpoints", "http://127.0.0.1:2379", "endpoints urls")
+	allocID    = flag.Uint64("alloc-id", 0, "please make sure alloced ID is safe")
+	clusterID  = flag.Uint64("cluster-id", 0, "please make cluster ID match with tikv")
+	configFile = flag.String("config", "", "config file")
+	caPath     = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
+	certPath   = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")
+	keyPath    = flag.String("key", "", "path of file that contains X509 key in PEM format.")
 )
 
 const (
@@ -49,9 +51,22 @@ func main() {
 		fmt.Println("please specify safe alloc-id")
 		return
 	}
+	if *configFile == "" {
+		fmt.Println("please specify config file")
+		return
+	}
 
+	cfg := server.NewConfig()
+	err := cfg.LoadConfigFromFile(*configFile)
+	if err != nil {
+		exitErr(err)
+	}
+	for _, warnMsg := range cfg.WarningMsgs {
+		fmt.Println(warnMsg)
+	}
 	rootPath := path.Join(pdRootPath, strconv.FormatUint(*clusterID, 10))
 	clusterRootPath := path.Join(rootPath, "raft")
+	configPath := path.Join(rootPath, "config")
 	raftBootstrapTimeKey := path.Join(clusterRootPath, "status", "raft_bootstrap_time")
 
 	urls := strings.Split(*endpoints, ",")
@@ -89,14 +104,25 @@ func main() {
 	// recover meta of cluster
 	clusterMeta := metapb.Cluster{
 		Id:           *clusterID,
-		MaxPeerCount: uint32(*maxReplicas),
+		MaxPeerCount: uint32(cfg.Replication.MaxReplicas),
 	}
 	clusterValue, err := clusterMeta.Marshal()
 	if err != nil {
 		exitErr(err)
 	}
 	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
-
+	// specify config
+	pesistCfg := &server.Config{
+		Schedule:      cfg.Schedule,
+		Replication:   cfg.Replication,
+		Namespace:     cfg.Namespace,
+		LabelProperty: cfg.LabelProperty,
+	}
+	pesistCfgValue, err := json.Marshal(pesistCfg)
+	if err != nil {
+		exitErr(err)
+	}
+	ops = append(ops, clientv3.OpPut(configPath, string(pesistCfgValue)))
 	// set raft bootstrap time
 	nano := time.Now().UnixNano()
 	timeData := uint64ToBytes(uint64(nano))
