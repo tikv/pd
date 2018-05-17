@@ -216,4 +216,9 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	c.Assert(err, IsNil)
 	op = sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 	c.Assert(op, IsNil)
+	// Can't evict leader from store2, neither.
+	sl, err = schedule.CreateScheduler("evict-leader", schedule.NewLimiter(), "2")
+	c.Assert(err, IsNil)
+	op = sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+	c.Assert(op, IsNil)
 }
