@@ -190,21 +190,28 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	}
 	tc := schedule.NewMockCluster(opt)
 
-	// Add 2 stores 1,2.
+	// Add 3 stores 1,2,3.
 	tc.AddLabelsStore(1, 1, map[string]string{"noleader": "true"})
 	tc.UpdateLeaderCount(1, 1)
 	tc.AddLeaderStore(2, 10)
+	tc.AddLeaderStore(3, 0)
 	// Add 2 regions with leader on 1 and 2.
-	tc.AddLeaderRegion(1, 1, 2)
-	tc.AddLeaderRegion(2, 2, 1)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.AddLeaderRegion(2, 2, 1, 3)
 
 	// The label scheduler transfers leader out of store1.
 	sl, err := schedule.CreateScheduler("label", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	op := sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+	CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 3)
+
+	tc.SetStoreDisconnect(3)
+	// Transfer leader to store 2 instead.
+	op = sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 	CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
 
-	// Balancer will not transfer leaders into store1.
+	// As store3 is disconnected, store1 rejects leader. Balancer will not create
+	// any operators.
 	sl, err = schedule.CreateScheduler("balance-leader", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	op = sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))

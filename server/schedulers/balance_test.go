@@ -215,6 +215,11 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
 	// store 3 becomes the store with least leaders.
 	s.tc.SetStoreBusy(2, true)
 	CheckTransferLeader(c, s.schedule(nil)[0], schedule.OpBalance, 4, 3)
+
+	// Test disconnectFilter.
+	// If store 3 is disconnected, no operator can be created.
+	s.tc.SetStoreDisconnect(3)
+	c.Assert(s.schedule(nil), HasLen, 0)
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestLeaderWeight(c *C) {

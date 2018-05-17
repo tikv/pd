@@ -311,6 +311,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 		filters := []schedule.Filter{
 			schedule.NewHealthFilter(),
 			schedule.NewStateFilter(),
+			schedule.NewDisconnectFilter(),
 			schedule.NewBlockFilter(),
 			schedule.NewRejectLeaderFilter(),
 		}

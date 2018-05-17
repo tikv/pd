@@ -94,6 +94,14 @@ func (mc *MockCluster) SetStoreUp(storeID uint64) {
 	mc.PutStore(store)
 }
 
+// SetStoreDisconnect changes a store's state to disconnected.
+func (mc *MockCluster) SetStoreDisconnect(storeID uint64) {
+	store := mc.GetStore(storeID)
+	store.State = metapb.StoreState_Up
+	store.LastHeartbeatTS = time.Now().Add(-time.Second * 30)
+	mc.PutStore(store)
+}
+
 // SetStoreDown sets store down.
 func (mc *MockCluster) SetStoreDown(storeID uint64) {
 	store := mc.GetStore(storeID)
