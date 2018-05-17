@@ -36,6 +36,7 @@ func newShuffleLeaderScheduler(limiter *schedule.Limiter) schedule.Scheduler {
 		schedule.NewBlockFilter(),
 		schedule.NewStateFilter(),
 		schedule.NewHealthFilter(),
+		schedule.NewDisconnectFilter(),
 		schedule.NewRejectLeaderFilter(),
 	}
 	base := newBaseScheduler(limiter)
