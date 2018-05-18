@@ -205,15 +205,28 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	op := sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 	CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 3)
 
+	// If store3 is disconnected, transfer leader to store 2 instead.
 	tc.SetStoreDisconnect(3)
-	// Transfer leader to store 2 instead.
 	op = sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 	CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
 
 	// As store3 is disconnected, store1 rejects leader. Balancer will not create
 	// any operators.
-	sl, err = schedule.CreateScheduler("balance-leader", schedule.NewLimiter())
+	bs, err := schedule.CreateScheduler("balance-leader", schedule.NewLimiter())
 	c.Assert(err, IsNil)
-	op = sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+	op = bs.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 	c.Assert(op, IsNil)
+
+	// If the peer on store3 is pending, not trasnfer to store3 neither.
+	tc.SetStoreUp(3)
+	region := tc.Regions.GetRegion(1)
+	for _, p := range region.Peers {
+		if p.GetStoreId() == 3 {
+			region.PendingPeers = append(region.PendingPeers, p)
+			break
+		}
+	}
+	tc.Regions.AddRegion(region)
+	op = sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+	CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
 }

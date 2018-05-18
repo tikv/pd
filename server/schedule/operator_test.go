@@ -57,8 +57,8 @@ func (s *testOperatorSuite) TestOperatorStep(c *C) {
 	c.Assert(RemovePeer{FromStore: 3}.IsFinish(region), IsTrue)
 }
 
-func (s *testOperatorSuite) newTestOperator(regionID uint64, steps ...OperatorStep) *Operator {
-	return NewOperator("testOperator", regionID, OpAdmin, steps...)
+func (s *testOperatorSuite) newTestOperator(regionID uint64, kind OperatorKind, steps ...OperatorStep) *Operator {
+	return NewOperator("testOperator", regionID, OpAdmin|kind, steps...)
 }
 
 func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OperatorStep) {
@@ -76,11 +76,11 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 		TransferLeader{FromStore: 3, ToStore: 1},
 		RemovePeer{FromStore: 3},
 	}
-	op := s.newTestOperator(1, steps...)
+	op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
 	s.checkSteps(c, op, steps)
 	c.Assert(op.Check(region), IsNil)
 	c.Assert(op.IsFinish(), IsTrue)
-	op.createTime = op.createTime.Add(-MaxOperatorWaitTime)
+	op.createTime = op.createTime.Add(-RegionOperatorWaitTime)
 	c.Assert(op.IsTimeout(), IsFalse)
 
 	// addPeer1, transferLeader1, removePeer2
@@ -89,16 +89,25 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 		TransferLeader{FromStore: 2, ToStore: 1},
 		RemovePeer{FromStore: 2},
 	}
-	op = s.newTestOperator(1, steps...)
+	op = s.newTestOperator(1, OpLeader|OpRegion, steps...)
 	s.checkSteps(c, op, steps)
 	c.Assert(op.Check(region), Equals, RemovePeer{FromStore: 2})
 	c.Assert(atomic.LoadInt32(&op.currentStep), Equals, int32(2))
 	c.Assert(op.IsTimeout(), IsFalse)
-	op.createTime = op.createTime.Add(-MaxOperatorWaitTime)
+	op.createTime = op.createTime.Add(-LeaderOperatorWaitTime)
+	c.Assert(op.IsTimeout(), IsFalse)
+	op.createTime = op.createTime.Add(-RegionOperatorWaitTime)
 	c.Assert(op.IsTimeout(), IsTrue)
 	res, err := json.Marshal(op)
 	c.Assert(err, IsNil)
 	c.Assert(len(res), Equals, len(op.String())+2)
+
+	// check short timeout for transfer leader only operators.
+	steps = []OperatorStep{TransferLeader{FromStore: 2, ToStore: 1}}
+	op = s.newTestOperator(1, OpLeader, steps...)
+	c.Assert(op.IsTimeout(), IsFalse)
+	op.createTime = op.createTime.Add(-LeaderOperatorWaitTime)
+	c.Assert(op.IsTimeout(), IsTrue)
 }
 
 func (s *testOperatorSuite) TestInfluence(c *C) {
