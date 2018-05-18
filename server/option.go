@@ -133,7 +133,7 @@ func (o *scheduleOption) GetHighSpaceRatio() float64 {
 }
 
 func (o *scheduleOption) IsRaftLearnerEnabled() bool {
-	return o.load().EnableRaftLearner
+	return !o.load().DisableLearner
 }
 
 func (o *scheduleOption) GetSchedulers() SchedulerConfigs {

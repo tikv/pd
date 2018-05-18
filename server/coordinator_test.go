@@ -212,7 +212,9 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	// Transfer peer.
 	region := tc.GetRegion(1)
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddPeer(c, stream, region, 1)
+	waitAddLearner(c, stream, region, 1)
+	dispatchHeartbeat(c, co, region, stream)
+	waitPromoteLearner(c, stream, region, 1)
 	dispatchHeartbeat(c, co, region, stream)
 	waitRemovePeer(c, stream, region, 4)
 	region.RemoveStorePeer(4)
@@ -236,7 +238,7 @@ func dispatchHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream *m
 
 func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	cfg, opt := newTestScheduleConfig()
-	cfg.EnableRaftLearner = true
+	cfg.DisableLearner = false
 	tc := newTestClusterInfo(opt)
 	hbStreams := newHeartbeatStreams(tc.getClusterID())
 	defer hbStreams.Close()
@@ -263,7 +265,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	co.stop()
 
 	// new cluster with learner disabled
-	cfg.EnableRaftLearner = false
+	cfg.DisableLearner = true
 	tc = newTestClusterInfo(opt)
 	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
@@ -310,7 +312,9 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	tc.addLeaderRegion(1, 2, 3)
 	region := tc.GetRegion(1)
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddPeer(c, stream, region, 1)
+	waitAddLearner(c, stream, region, 1)
+	dispatchHeartbeat(c, co, region, stream)
+	waitPromoteLearner(c, stream, region, 1)
 	dispatchHeartbeat(c, co, region, stream)
 	waitNoResponse(c, stream)
 
@@ -325,7 +329,9 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	waitRemovePeer(c, stream, region, 3)
 	region.DownPeers = nil
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddPeer(c, stream, region, 4)
+	waitAddLearner(c, stream, region, 4)
+	dispatchHeartbeat(c, co, region, stream)
+	waitPromoteLearner(c, stream, region, 4)
 	dispatchHeartbeat(c, co, region, stream)
 	waitNoResponse(c, stream)
 
@@ -373,7 +379,9 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 
 	// Add new peer.
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddPeer(c, stream, region, 1)
+	waitAddLearner(c, stream, region, 1)
+	dispatchHeartbeat(c, co, region, stream)
+	waitPromoteLearner(c, stream, region, 1)
 
 	// If the new peer is pending, the operator will not finish.
 	region.PendingPeers = append(region.PendingPeers, region.GetStorePeer(1))
@@ -587,14 +595,18 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	co.run()
 	stream := newMockHeartbeatStream()
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddPeer(c, stream, region, 2)
+	waitAddLearner(c, stream, region, 2)
+	dispatchHeartbeat(c, co, region, stream)
+	waitPromoteLearner(c, stream, region, 2)
 	co.stop()
 
 	// Recreate coodinator then add another replica on store 3.
 	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddPeer(c, stream, region, 3)
+	waitAddLearner(c, stream, region, 3)
+	dispatchHeartbeat(c, co, region, stream)
+	waitPromoteLearner(c, stream, region, 3)
 	co.stop()
 }
 
@@ -728,12 +740,12 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	}
 }
 
-func waitAddPeer(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {
+func waitAddLearner(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
 			return res.GetRegionId() == region.GetId() &&
-				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddNode &&
+				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddLearnerNode &&
 				res.GetChangePeer().GetPeer().GetStoreId() == storeID
 		}
 		return false
@@ -743,6 +755,21 @@ func waitAddPeer(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, sto
 		ConfVer: region.GetRegionEpoch().GetConfVer() + 1,
 		Version: region.GetRegionEpoch().GetVersion(),
 	}
+}
+
+func waitPromoteLearner(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {
+	var res *pdpb.RegionHeartbeatResponse
+	testutil.WaitUntil(c, func(c *C) bool {
+		if res = stream.Recv(); res != nil {
+			return res.GetRegionId() == region.GetId() &&
+				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddNode &&
+				res.GetChangePeer().GetPeer().GetStoreId() == storeID
+		}
+		return false
+	})
+	// Remove learner than add voter.
+	region.RemoveStorePeer(storeID)
+	region.AddPeer(res.GetChangePeer().GetPeer())
 }
 
 func waitRemovePeer(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {

@@ -215,6 +215,11 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
 	// store 3 becomes the store with least leaders.
 	s.tc.SetStoreBusy(2, true)
 	CheckTransferLeader(c, s.schedule(nil)[0], schedule.OpBalance, 4, 3)
+
+	// Test disconnectFilter.
+	// If store 3 is disconnected, no operator can be created.
+	s.tc.SetStoreDisconnect(3)
+	c.Assert(s.schedule(nil), HasLen, 0)
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestLeaderWeight(c *C) {
@@ -815,7 +820,8 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	// partial store overlap not including leader
 	op1, op2 := s.mc.Check(s.regions[2])
 	s.checkSteps(c, op1, []schedule.OperatorStep{
-		schedule.AddPeer{ToStore: 4, PeerID: 1},
+		schedule.AddLearner{ToStore: 4, PeerID: 1},
+		schedule.PromoteLearner{ToStore: 4, PeerID: 1},
 		schedule.TransferLeader{FromStore: 6, ToStore: 4},
 		schedule.RemovePeer{FromStore: 6},
 		schedule.MergeRegion{
@@ -837,7 +843,8 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.cluster.PutRegion(s.regions[2])
 	op1, op2 = s.mc.Check(s.regions[2])
 	s.checkSteps(c, op1, []schedule.OperatorStep{
-		schedule.AddPeer{ToStore: 4, PeerID: 2},
+		schedule.AddLearner{ToStore: 4, PeerID: 2},
+		schedule.PromoteLearner{ToStore: 4, PeerID: 2},
 		schedule.RemovePeer{FromStore: 6},
 		schedule.MergeRegion{
 			FromRegion: s.regions[2].Region,
@@ -1119,7 +1126,7 @@ func checkRemovePeer(c *C, op *schedule.Operator, storeID uint64) {
 }
 
 func checkTransferPeerWithLeaderTransfer(c *C, op *schedule.Operator, kind schedule.OperatorKind, sourceID, targetID uint64) {
-	c.Assert(op.Len(), Equals, 3)
+	c.Assert(op.Len(), Equals, 4)
 	CheckTransferPeer(c, op, kind, sourceID, targetID)
 }
 
@@ -1131,8 +1138,8 @@ func checkTransferLeaderFrom(c *C, op *schedule.Operator, kind schedule.Operator
 }
 
 func checkTransferPeerWithLeaderTransferFrom(c *C, op *schedule.Operator, kind schedule.OperatorKind, sourceID uint64) {
-	c.Assert(op.Len(), Equals, 3)
-	c.Assert(op.Step(2).(schedule.RemovePeer).FromStore, Equals, sourceID)
+	c.Assert(op.Len(), Equals, 4)
+	c.Assert(op.Step(3).(schedule.RemovePeer).FromStore, Equals, sourceID)
 	kind |= (schedule.OpRegion | schedule.OpLeader)
 	c.Assert(op.Kind()&kind, Equals, kind)
 }

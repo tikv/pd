@@ -391,8 +391,8 @@ type ScheduleConfig struct {
 	// HighSpaceRatio is the highest usage ratio of store which regraded as high space.
 	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
 	HighSpaceRatio float64 `toml:"high-space-ratio,omitempty" json:"high-space-ratio"`
-	// EnableRaftLearner is the option for using AddLearnerNode instead of AddNode
-	EnableRaftLearner bool `toml:"enable-raft-learner" json:"enable-raft-learner,string"`
+	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode
+	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string"`
 	// Schedulers support for loding customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 }
@@ -413,7 +413,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		TolerantSizeRatio:    c.TolerantSizeRatio,
 		LowSpaceRatio:        c.LowSpaceRatio,
 		HighSpaceRatio:       c.HighSpaceRatio,
-		EnableRaftLearner:    c.EnableRaftLearner,
+		DisableLearner:       c.DisableLearner,
 		Schedulers:           schedulers,
 	}
 }

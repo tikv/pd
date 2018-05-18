@@ -39,31 +39,13 @@ type mockRaftStore struct {
 	listener net.Listener
 
 	store *metapb.Store
-
-	// peerID -> Peer
-	peers map[uint64]*metapb.Peer
-}
-
-func (s *mockRaftStore) addPeer(c *C, peer *metapb.Peer) {
-	s.Lock()
-	defer s.Unlock()
-
-	c.Assert(s.peers, Not(HasKey), peer.GetId())
-	s.peers[peer.GetId()] = peer
-}
-
-func (s *mockRaftStore) removePeer(c *C, peer *metapb.Peer) {
-	s.Lock()
-	defer s.Unlock()
-
-	c.Assert(s.peers, HasKey, peer.GetId())
-	delete(s.peers, peer.GetId())
 }
 
 func addRegionPeer(c *C, region *metapb.Region, peer *metapb.Peer) {
-	for _, p := range region.Peers {
-		if p.GetId() == peer.GetId() || p.GetStoreId() == peer.GetStoreId() {
-			c.Fatalf("new peer %v conflict with existed peer %v", peer, p)
+	for i, p := range region.Peers {
+		if p.GetId() == peer.GetId() {
+			region.Peers[i] = peer
+			return
 		}
 	}
 	region.Peers = append(region.Peers, peer)
@@ -163,7 +145,6 @@ func (s *testClusterWorkerSuite) bootstrap(c *C) *mockRaftStore {
 
 	raftStore := s.newMockRaftStore(c, store)
 	c.Assert(region.Peers, HasLen, 1)
-	raftStore.addPeer(c, region.Peers[0])
 	return raftStore
 }
 
@@ -181,7 +162,6 @@ func (s *testClusterWorkerSuite) newMockRaftStore(c *C, metaStore *metapb.Store)
 		s:        s,
 		listener: l,
 		store:    metaStore,
-		peers:    make(map[uint64]*metapb.Peer),
 	}
 
 	cluster := s.svr.GetRaftCluster()
@@ -287,20 +267,10 @@ func (s *testClusterWorkerSuite) onChangePeerRes(c *C, res *pdpb.ChangePeer, reg
 	}
 	peer := res.GetPeer()
 	c.Assert(peer, NotNil)
-	store, ok := s.stores[peer.GetStoreId()]
-	c.Assert(ok, IsTrue)
 	switch res.GetChangeType() {
-	case eraftpb.ConfChangeType_AddNode:
-		if _, ok := store.peers[peer.GetId()]; ok {
-			return
-		}
-		store.addPeer(c, peer)
+	case eraftpb.ConfChangeType_AddNode, eraftpb.ConfChangeType_AddLearnerNode:
 		addRegionPeer(c, region, peer)
 	case eraftpb.ConfChangeType_RemoveNode:
-		if _, ok := store.peers[peer.GetId()]; !ok {
-			return
-		}
-		store.removePeer(c, peer)
 		removeRegionPeer(c, region, peer)
 	default:
 		c.Fatalf("invalid conf change type, %v", res.GetChangeType())
@@ -356,7 +326,7 @@ func (s *testClusterWorkerSuite) heartbeatRegion(c *C, clusterID uint64, region 
 		Region: region,
 	}
 	heartbeatClient := s.heartbeatClients[leader.GetStoreId()]
-	return heartbeatClient.SendRecv(req, time.Millisecond*10)
+	return heartbeatClient.SendRecv(req, time.Millisecond*100)
 }
 
 func (s *testClusterWorkerSuite) heartbeatStore(c *C, stats *pdpb.StoreStats) *pdpb.StoreHeartbeatResponse {
@@ -486,12 +456,13 @@ func (s *testClusterWorkerSuite) waitAddNode(c *C, r *metapb.Region, leader *met
 			c.Log("no response")
 			return false
 		}
-		if res.GetChangePeer() == nil || res.GetChangePeer().GetChangeType() != eraftpb.ConfChangeType_AddNode {
-			c.Log("response is not AddNode")
+		if res.GetChangePeer() == nil {
+			c.Log("response is not ChangePeer")
 			return false
 		}
 		s.onChangePeerRes(c, res.GetChangePeer(), r)
-		return true
+		// The type could be AddLearnerNode. Return false to retry until we get AddNode.
+		return res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddNode
 	})
 }
 
@@ -538,7 +509,7 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 			return false
 		}
 		if res.GetChangePeer() != nil {
-			c.Fatal("should be no more ChangePeer commands.")
+			c.Fatal("should be no more ChangePeer commands.", res)
 		}
 		return false
 	})
