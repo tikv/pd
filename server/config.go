@@ -159,7 +159,7 @@ const (
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
 	defaultPeerUrls            = "http://127.0.0.1:2380"
-	defualtInitialClusterState = embed.ClusterStateFlagNew
+	defaultInitialClusterState = embed.ClusterStateFlagNew
 
 	// etcd use 100ms for heartbeat and 1s for election timeout.
 	// We can enlarge both a little to reduce the network aggression.
@@ -300,7 +300,7 @@ func (c *Config) adjust() error {
 		}
 	}
 
-	adjustString(&c.InitialClusterState, defualtInitialClusterState)
+	adjustString(&c.InitialClusterState, defaultInitialClusterState)
 
 	if len(c.Join) > 0 {
 		if _, err := url.Parse(c.Join); err != nil {
