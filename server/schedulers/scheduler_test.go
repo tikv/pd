@@ -217,6 +217,12 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	op = bs.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 	c.Assert(op, IsNil)
 
+	// Can't evict leader from store2, neither.
+	el, err := schedule.CreateScheduler("evict-leader", schedule.NewLimiter(), "2")
+	c.Assert(err, IsNil)
+	op = el.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+	c.Assert(op, IsNil)
+
 	// If the peer on store3 is pending, not trasnfer to store3 neither.
 	tc.SetStoreUp(3)
 	region := tc.Regions.GetRegion(1)

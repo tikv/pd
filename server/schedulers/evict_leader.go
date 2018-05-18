@@ -49,6 +49,7 @@ func newEvictLeaderScheduler(limiter *schedule.Limiter, storeID uint64) schedule
 		schedule.NewStateFilter(),
 		schedule.NewHealthFilter(),
 		schedule.NewDisconnectFilter(),
+		schedule.NewRejectLeaderFilter(),
 	}
 	base := newBaseScheduler(limiter)
 	return &evictLeaderScheduler{
