@@ -218,7 +218,7 @@ func (c *Config) Parse(arguments []string) error {
 		return errors.Trace(err)
 	}
 
-	if err := c.LoadConfigFromFile(c.configFile); err != nil {
+	if err = c.LoadConfigFromFile(c.configFile); err != nil {
 		return err
 	}
 	// Parse again to replace with command line options.

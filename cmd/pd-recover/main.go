@@ -19,13 +19,14 @@ import (
 )
 
 var (
-	endpoints  = flag.String("endpoints", "http://127.0.0.1:2379", "endpoints urls")
-	allocID    = flag.Uint64("alloc-id", 0, "please make sure alloced ID is safe")
-	clusterID  = flag.Uint64("cluster-id", 0, "please make cluster ID match with tikv")
-	configFile = flag.String("config", "", "config file")
-	caPath     = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
-	certPath   = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")
-	keyPath    = flag.String("key", "", "path of file that contains X509 key in PEM format.")
+	flagSet    = flag.NewFlagSet("recover", flag.ContinueOnError)
+	endpoints  = flagSet.String("endpoints", "http://127.0.0.1:2379", "endpoints urls")
+	allocID    = flagSet.Uint64("alloc-id", 0, "please make sure alloced ID is safe")
+	clusterID  = flagSet.Uint64("cluster-id", 0, "please make cluster ID match with tikv")
+	configFile = flagSet.String("config", "", "config file")
+	caPath     = flagSet.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
+	certPath   = flagSet.String("cert", "", "path of file that contains X509 certificate in PEM format..")
+	keyPath    = flagSet.String("key", "", "path of file that contains X509 key in PEM format.")
 )
 
 const (
@@ -42,7 +43,7 @@ func exitErr(err error) {
 }
 
 func main() {
-	flag.Parse()
+	flagSet.Parse(os.Args[1:])
 	if *clusterID == 0 {
 		fmt.Println("please specify safe cluster-id")
 		return
