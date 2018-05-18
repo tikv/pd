@@ -218,9 +218,28 @@ func (c *Config) Parse(arguments []string) error {
 		return errors.Trace(err)
 	}
 
+	if err = c.LoadConfigFromFile(c.configFile); err != nil {
+		return err
+	}
+	// Parse again to replace with command line options.
+	err = c.FlagSet.Parse(arguments)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	if len(c.FlagSet.Args()) != 0 {
+		return errors.Errorf("'%s' is an invalid flag", c.FlagSet.Arg(0))
+	}
+
+	err = c.adjust()
+	return errors.Trace(err)
+}
+
+// LoadConfigFromFile parses config form the specified file.
+func (c *Config) LoadConfigFromFile(configFile string) error {
 	// Load config file if specified.
-	if c.configFile != "" {
-		err = c.configFromFile(c.configFile)
+	if configFile != "" {
+		err := c.configFromFile(configFile)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -237,19 +256,7 @@ func (c *Config) Parse(arguments []string) error {
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 		}
 	}
-
-	// Parse again to replace with command line options.
-	err = c.FlagSet.Parse(arguments)
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	if len(c.FlagSet.Args()) != 0 {
-		return errors.Errorf("'%s' is an invalid flag", c.FlagSet.Arg(0))
-	}
-
-	err = c.adjust()
-	return errors.Trace(err)
+	return nil
 }
 
 func (c *Config) validate() error {
