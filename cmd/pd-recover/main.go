@@ -86,13 +86,7 @@ func main() {
 
 	// recover bootstrap
 	// recover meta of cluster
-	const bootstrapPeerCount = 3
-	clusterMeta := metapb.Cluster{
-		Id: *clusterID,
-		// MaxPeerCount actually unless, it is a question left over by history.
-		// use a const in here.
-		MaxPeerCount: bootstrapPeerCount,
-	}
+	clusterMeta := metapb.Cluster{Id: *clusterID}
 	clusterValue, err := clusterMeta.Marshal()
 	if err != nil {
 		exitErr(err)
