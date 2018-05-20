@@ -146,6 +146,14 @@ var (
 			Name:      "metadata",
 			Help:      "Record critical metadata.",
 		}, []string{"type"})
+	patrolCheckRegionsHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "patrol",
+			Name:      "checks_regions",
+			Help:      "Bucketed histogram of time spend(s) of patrol checks region.",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 15),
+		}, []string{"type"})
 )
 
 func init() {
@@ -164,4 +172,5 @@ func init() {
 	prometheus.MustRegister(regionStatusGauge)
 	prometheus.MustRegister(regionLabelLevelGauge)
 	prometheus.MustRegister(metadataGauge)
+	prometheus.MustRegister(patrolCheckRegionsHistogram)
 }

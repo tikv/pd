@@ -121,13 +121,13 @@ func (c *coordinator) patrolRegions() {
 	log.Info("coordinator: start patrol regions")
 
 	var key []byte
+	start := time.Now()
 	for {
 		select {
 		case <-ticker.C:
 		case <-c.ctx.Done():
 			return
 		}
-
 		regions := c.cluster.ScanRegions(key, patrolScanRegionLimit)
 		if len(regions) == 0 {
 			// reset scan key.
@@ -143,12 +143,14 @@ func (c *coordinator) patrolRegions() {
 
 			key = region.GetEndKey()
 
-			if c.checkRegion(region) {
-				break
-			}
+			c.checkRegion(region)
 		}
 		// update label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
+		if len(key) == 0 {
+			patrolCheckRegionsHistogram.WithLabelValues("circle_finished").Observe(time.Since(start).Seconds())
+			start = time.Now()
+		}
 	}
 }
 
