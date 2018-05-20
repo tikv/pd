@@ -148,7 +148,7 @@ func (c *coordinator) patrolRegions() {
 		// update label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
 		if len(key) == 0 {
-			patrolCheckRegionsHistogram.WithLabelValues("circle_finished").Observe(time.Since(start).Seconds())
+			patrolCheckRegionsHistogram.Observe(time.Since(start).Seconds())
 			start = time.Now()
 		}
 	}
