@@ -35,6 +35,7 @@ func newLabelScheduler(limiter *schedule.Limiter) schedule.Scheduler {
 		schedule.NewBlockFilter(),
 		schedule.NewStateFilter(),
 		schedule.NewHealthFilter(),
+		schedule.NewDisconnectFilter(),
 		schedule.NewRejectLeaderFilter(),
 	}
 	return &labelScheduler{
@@ -70,9 +71,17 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule
 	}
 	log.Debugf("label scheduler reject leader store list: %v", rejectLeaderStores)
 	for id := range rejectLeaderStores {
-		if region := cluster.RandLeaderRegion(id, core.HealthRegion()); region != nil {
+		if region := cluster.RandLeaderRegion(id); region != nil {
 			log.Debugf("label scheduler selects region %d to transfer leader", region.GetId())
-			target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region))
+			excludeStores := make(map[uint64]struct{})
+			for _, p := range region.DownPeers {
+				excludeStores[p.GetPeer().GetStoreId()] = struct{}{}
+			}
+			for _, p := range region.PendingPeers {
+				excludeStores[p.GetStoreId()] = struct{}{}
+			}
+			filter := schedule.NewExcludedFilter(nil, excludeStores)
+			target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region), filter)
 			if target == nil {
 				log.Debugf("label scheduler no target found for region %d", region.GetId())
 				schedulerCounter.WithLabelValues(s.GetName(), "no_target").Inc()

@@ -159,7 +159,7 @@ const (
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
 	defaultPeerUrls            = "http://127.0.0.1:2380"
-	defualtInitialClusterState = embed.ClusterStateFlagNew
+	defaultInitialClusterState = embed.ClusterStateFlagNew
 
 	// etcd use 100ms for heartbeat and 1s for election timeout.
 	// We can enlarge both a little to reduce the network aggression.
@@ -300,7 +300,7 @@ func (c *Config) adjust() error {
 		}
 	}
 
-	adjustString(&c.InitialClusterState, defualtInitialClusterState)
+	adjustString(&c.InitialClusterState, defaultInitialClusterState)
 
 	if len(c.Join) > 0 {
 		if _, err := url.Parse(c.Join); err != nil {
@@ -391,8 +391,8 @@ type ScheduleConfig struct {
 	// HighSpaceRatio is the highest usage ratio of store which regraded as high space.
 	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
 	HighSpaceRatio float64 `toml:"high-space-ratio,omitempty" json:"high-space-ratio"`
-	// EnableRaftLearner is the option for using AddLearnerNode instead of AddNode
-	EnableRaftLearner bool `toml:"enable-raft-learner" json:"enable-raft-learner,string"`
+	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode
+	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string"`
 	// Schedulers support for loding customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 }
@@ -413,7 +413,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		TolerantSizeRatio:    c.TolerantSizeRatio,
 		LowSpaceRatio:        c.LowSpaceRatio,
 		HighSpaceRatio:       c.HighSpaceRatio,
-		EnableRaftLearner:    c.EnableRaftLearner,
+		DisableLearner:       c.DisableLearner,
 		Schedulers:           schedulers,
 	}
 }

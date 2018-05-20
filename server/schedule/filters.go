@@ -125,6 +125,21 @@ func (f *healthFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
 	return f.filter(opt, store)
 }
 
+type disconnectFilter struct{}
+
+// NewDisconnectFilter creates a Filter that filters all stores that are disconnected.
+func NewDisconnectFilter() Filter {
+	return &disconnectFilter{}
+}
+
+func (f *disconnectFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
+	return store.IsDisconnected()
+}
+
+func (f *disconnectFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
+	return store.IsDisconnected()
+}
+
 type pendingPeerCountFilter struct{}
 
 // NewPendingPeerCountFilter creates a Filter that filters all stores that are

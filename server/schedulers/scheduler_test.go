@@ -190,23 +190,49 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	}
 	tc := schedule.NewMockCluster(opt)
 
-	// Add 2 stores 1,2.
+	// Add 3 stores 1,2,3.
 	tc.AddLabelsStore(1, 1, map[string]string{"noleader": "true"})
 	tc.UpdateLeaderCount(1, 1)
 	tc.AddLeaderStore(2, 10)
+	tc.AddLeaderStore(3, 0)
 	// Add 2 regions with leader on 1 and 2.
-	tc.AddLeaderRegion(1, 1, 2)
-	tc.AddLeaderRegion(2, 2, 1)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.AddLeaderRegion(2, 2, 1, 3)
 
 	// The label scheduler transfers leader out of store1.
 	sl, err := schedule.CreateScheduler("label", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	op := sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+	CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 3)
+
+	// If store3 is disconnected, transfer leader to store 2 instead.
+	tc.SetStoreDisconnect(3)
+	op = sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 	CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
 
-	// Balancer will not transfer leaders into store1.
-	sl, err = schedule.CreateScheduler("balance-leader", schedule.NewLimiter())
+	// As store3 is disconnected, store1 rejects leader. Balancer will not create
+	// any operators.
+	bs, err := schedule.CreateScheduler("balance-leader", schedule.NewLimiter())
 	c.Assert(err, IsNil)
-	op = sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+	op = bs.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 	c.Assert(op, IsNil)
+
+	// Can't evict leader from store2, neither.
+	el, err := schedule.CreateScheduler("evict-leader", schedule.NewLimiter(), "2")
+	c.Assert(err, IsNil)
+	op = el.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+	c.Assert(op, IsNil)
+
+	// If the peer on store3 is pending, not trasnfer to store3 neither.
+	tc.SetStoreUp(3)
+	region := tc.Regions.GetRegion(1)
+	for _, p := range region.Peers {
+		if p.GetStoreId() == 3 {
+			region.PendingPeers = append(region.PendingPeers, p)
+			break
+		}
+	}
+	tc.Regions.AddRegion(region)
+	op = sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+	CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
 }
