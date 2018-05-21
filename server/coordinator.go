@@ -142,8 +142,9 @@ func (c *coordinator) patrolRegions() {
 			}
 
 			key = region.GetEndKey()
-
-			c.checkRegion(region)
+			if !c.checkRegion(region) {
+				break
+			}
 		}
 		// update label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
