@@ -155,9 +155,11 @@ func (c *coordinator) patrolRegions() {
 	}
 }
 
+// checkRegion returns false if region produced an operator and fail to add the operator.
 func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it may be disable learner feature but still some learners to promote.
+	var op, op1, op2 *schedule.Operator
 	for _, p := range region.GetLearners() {
 		if region.GetPendingLearner(p.GetId()) != nil {
 			continue
@@ -166,13 +168,13 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 			ToStore: p.GetStoreId(),
 			PeerID:  p.GetId(),
 		}
-		op := schedule.NewOperator("promoteLearner", region.GetId(), schedule.OpRegion, step)
+		op = schedule.NewOperator("promoteLearner", region.GetId(), schedule.OpRegion, step)
 		if c.addOperator(op) {
 			return true
 		}
 	}
 
-	if op := c.namespaceChecker.Check(region); op != nil {
+	if op = c.namespaceChecker.Check(region); op != nil {
 		if c.addOperator(op) {
 			return true
 		}
@@ -191,6 +193,9 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 				return true
 			}
 		}
+	}
+	if op == nil && op1 == nil && op2 == nil {
+		return true
 	}
 	return false
 }
