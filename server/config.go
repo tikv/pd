@@ -366,6 +366,8 @@ type ScheduleConfig struct {
 	MaxMergeRegionSize uint64 `toml:"max-merge-region-size,omitempty" json:"max-merge-region-size"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval,omitempty" json:"split-merge-interval"`
+	// PatrolRegionInterval is the interval for scanning region during patrol.
+	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval,omitempty" json:"patrol-region-interval"`
 	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
@@ -405,6 +407,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		MaxPendingPeerCount:  c.MaxPendingPeerCount,
 		MaxMergeRegionSize:   c.MaxMergeRegionSize,
 		SplitMergeInterval:   c.SplitMergeInterval,
+		PatrolRegionInterval: c.PatrolRegionInterval,
 		MaxStoreDownTime:     c.MaxStoreDownTime,
 		LeaderScheduleLimit:  c.LeaderScheduleLimit,
 		RegionScheduleLimit:  c.RegionScheduleLimit,
@@ -424,6 +427,7 @@ const (
 	defaultMaxPendingPeerCount  = 16
 	defaultMaxMergeRegionSize   = 20
 	defaultSplitMergeInterval   = 1 * time.Hour
+	defaultPatrolRegionInterval = 100 * time.Millisecond
 	defaultMaxStoreDownTime     = 30 * time.Minute
 	defaultLeaderScheduleLimit  = 4
 	defaultRegionScheduleLimit  = 4
@@ -439,6 +443,7 @@ func (c *ScheduleConfig) adjust() error {
 	adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
 	adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
 	adjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
+	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)

@@ -40,7 +40,6 @@ const (
 	regionheartbeatSendChanCap = 1024
 	hotRegionScheduleName      = "balance-hot-region-scheduler"
 
-	patrolRegionInterval  = time.Millisecond * 100
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
 )
 
@@ -115,15 +114,16 @@ func (c *coordinator) patrolRegions() {
 	defer logutil.LogPanic()
 
 	defer c.wg.Done()
-	ticker := time.NewTicker(patrolRegionInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(c.cluster.GetPatrolRegionInterval())
+	defer timer.Stop()
 
 	log.Info("coordinator: start patrol regions")
-
+	start := time.Now()
 	var key []byte
 	for {
 		select {
-		case <-ticker.C:
+		case <-timer.C:
+			timer.Reset(c.cluster.GetPatrolRegionInterval())
 		case <-c.ctx.Done():
 			return
 		}
@@ -149,6 +149,10 @@ func (c *coordinator) patrolRegions() {
 		}
 		// update label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
+		if len(key) == 0 {
+			patrolCheckRegionsHistogram.Observe(time.Since(start).Seconds())
+			start = time.Now()
+		}
 	}
 }
 
