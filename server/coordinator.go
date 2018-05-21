@@ -141,10 +141,10 @@ func (c *coordinator) patrolRegions() {
 				continue
 			}
 
+			key = region.GetEndKey()
 			if !c.checkRegion(region) {
 				break
 			}
-			key = region.GetEndKey()
 		}
 		// update label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
@@ -159,7 +159,7 @@ func (c *coordinator) patrolRegions() {
 func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it may be disable learner feature but still some learners to promote.
-	var needCheckAgain bool
+	var notPass bool
 	for _, p := range region.GetLearners() {
 		if region.GetPendingLearner(p.GetId()) != nil {
 			continue
@@ -172,14 +172,14 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 		if c.addOperator(op) {
 			return true
 		}
-		needCheckAgain = true
+		notPass = true
 	}
 
 	if op := c.namespaceChecker.Check(region); op != nil {
 		if c.addOperator(op) {
 			return true
 		}
-		needCheckAgain = true
+		notPass = true
 	}
 	if c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.replicaChecker.Check(region); op != nil {
@@ -187,7 +187,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 				return true
 			}
 		}
-		needCheckAgain = true
+		notPass = true
 	}
 	if c.limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 		if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
@@ -195,10 +195,10 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 			if c.addOperators(op1, op2) {
 				return true
 			}
-			needCheckAgain = true
+			notPass = true
 		}
 	}
-	if needCheckAgain {
+	if notPass {
 		return false
 	}
 	return true
