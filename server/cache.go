@@ -566,6 +566,10 @@ func (c *clusterInfo) GetSplitMergeInterval() time.Duration {
 	return c.opt.GetSplitMergeInterval()
 }
 
+func (c *clusterInfo) GetPatrolRegionInterval() time.Duration {
+	return c.opt.GetPatrolRegionInterval()
+}
+
 func (c *clusterInfo) GetMaxStoreDownTime() time.Duration {
 	return c.opt.GetMaxStoreDownTime()
 }

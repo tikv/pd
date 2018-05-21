@@ -88,6 +88,10 @@ func (o *scheduleOption) GetSplitMergeInterval() time.Duration {
 	return o.load().SplitMergeInterval.Duration
 }
 
+func (o *scheduleOption) GetPatrolRegionInterval() time.Duration {
+	return o.load().PatrolRegionInterval.Duration
+}
+
 func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
 	return o.load().MaxStoreDownTime.Duration
 }
