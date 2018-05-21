@@ -155,11 +155,11 @@ func (c *coordinator) patrolRegions() {
 	}
 }
 
-// checkRegion returns false if region produced an operator and fail to add the operator.
+// checkRegion returns if pass the checking.
 func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it may be disable learner feature but still some learners to promote.
-	var op, op1, op2 *schedule.Operator
+	var needCheckAgain bool
 	for _, p := range region.GetLearners() {
 		if region.GetPendingLearner(p.GetId()) != nil {
 			continue
@@ -168,16 +168,18 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 			ToStore: p.GetStoreId(),
 			PeerID:  p.GetId(),
 		}
-		op = schedule.NewOperator("promoteLearner", region.GetId(), schedule.OpRegion, step)
+		op := schedule.NewOperator("promoteLearner", region.GetId(), schedule.OpRegion, step)
 		if c.addOperator(op) {
 			return true
 		}
+		needCheckAgain = true
 	}
 
-	if op = c.namespaceChecker.Check(region); op != nil {
+	if op := c.namespaceChecker.Check(region); op != nil {
 		if c.addOperator(op) {
 			return true
 		}
+		needCheckAgain = true
 	}
 	if c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.replicaChecker.Check(region); op != nil {
@@ -185,6 +187,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 				return true
 			}
 		}
+		needCheckAgain = true
 	}
 	if c.limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 		if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
@@ -192,12 +195,13 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 			if c.addOperators(op1, op2) {
 				return true
 			}
+			needCheckAgain = true
 		}
 	}
-	if op == nil && op1 == nil && op2 == nil {
-		return true
+	if needCheckAgain {
+		return false
 	}
-	return false
+	return true
 }
 
 func (c *coordinator) run() {
