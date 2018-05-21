@@ -121,13 +121,13 @@ func (c *coordinator) patrolRegions() {
 	log.Info("coordinator: start patrol regions")
 
 	var key []byte
+	start := time.Now()
 	for {
 		select {
 		case <-ticker.C:
 		case <-c.ctx.Done():
 			return
 		}
-
 		regions := c.cluster.ScanRegions(key, patrolScanRegionLimit)
 		if len(regions) == 0 {
 			// reset scan key.
@@ -142,19 +142,24 @@ func (c *coordinator) patrolRegions() {
 			}
 
 			key = region.GetEndKey()
-
-			if c.checkRegion(region) {
+			if !c.checkRegion(region) {
 				break
 			}
 		}
 		// update label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
+		if len(key) == 0 {
+			patrolCheckRegionsHistogram.Observe(time.Since(start).Seconds())
+			start = time.Now()
+		}
 	}
 }
 
+// checkRegion returns if pass the checking.
 func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it may be disable learner feature but still some learners to promote.
+	var notPass bool
 	for _, p := range region.GetLearners() {
 		if region.GetPendingLearner(p.GetId()) != nil {
 			continue
@@ -167,12 +172,14 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 		if c.addOperator(op) {
 			return true
 		}
+		notPass = true
 	}
 
 	if op := c.namespaceChecker.Check(region); op != nil {
 		if c.addOperator(op) {
 			return true
 		}
+		notPass = true
 	}
 	if c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.replicaChecker.Check(region); op != nil {
@@ -180,6 +187,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 				return true
 			}
 		}
+		notPass = true
 	}
 	if c.limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 		if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
@@ -187,9 +195,13 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 			if c.addOperators(op1, op2) {
 				return true
 			}
+			notPass = true
 		}
 	}
-	return false
+	if notPass {
+		return false
+	}
+	return true
 }
 
 func (c *coordinator) run() {
