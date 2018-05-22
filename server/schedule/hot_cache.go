@@ -125,7 +125,6 @@ func calculateReadHotThreshold(stores *core.StoresInfo) uint64 {
 const rollingWindowsSize = 5
 
 func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes uint64, hotRegionThreshold uint64, oldItem *core.RegionStat, kind FlowKind) (bool, *core.RegionStat) {
-	needUpdate := false
 	newItem := &core.RegionStat{
 		RegionID:       region.GetId(),
 		FlowBytes:      flowBytes,
@@ -145,24 +144,21 @@ func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes 
 			newItem.Stats = core.NewRollingStats(rollingWindowsSize)
 		}
 		newItem.Stats.Add(float64(flowBytes))
-		needUpdate = true
-		return needUpdate, newItem
+		return true, newItem
 	}
 	// smaller than hotReionThreshold
 	if oldItem == nil {
-		return needUpdate, newItem
+		return false, newItem
 	}
 	if oldItem.AntiCount <= 0 {
 		w.incMetrics("remove_item", kind)
-		needUpdate = true
-		return needUpdate, nil
+		return true, nil
 	}
 	// eliminate some noise
 	newItem.HotDegree = oldItem.HotDegree - 1
 	newItem.AntiCount = oldItem.AntiCount - 1
-	newItem.FlowBytes = oldItem.FlowBytes
-	needUpdate = true
-	return needUpdate, newItem
+	newItem.Stats.Add(float64(flowBytes))
+	return true, newItem
 }
 
 // Update updates the cache.

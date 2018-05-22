@@ -507,7 +507,7 @@ func newRollingStoreStats() *RollingStoreStats {
 	}
 }
 
-// Observe records current statistics
+// Observe records current statistics.
 func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	interval := stats.GetInterval().GetEndTimestamp() - stats.GetInterval().GetStartTimestamp()
 	if interval == 0 {

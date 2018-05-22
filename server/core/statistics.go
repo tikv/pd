@@ -44,7 +44,7 @@ func (r *RollingStats) Add(n float64) {
 // it can be used to filter noise.
 // References: https://en.wikipedia.org/wiki/Median_filter.
 func (r *RollingStats) Median() float64 {
-	if len(r.records) == 0 {
+	if r.count == 0 {
 		return 0
 	}
 	records := r.records
