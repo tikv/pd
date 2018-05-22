@@ -429,7 +429,7 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 	}
 }
 
-// TotalBytesWrittenRate return the total written bytes rate of all StoreInfo.
+// TotalBytesWrittenRate returns the total written bytes rate of all StoreInfo.
 func (s *StoresInfo) TotalBytesWrittenRate() float64 {
 	var totalWrittenBytes float64
 	for _, s := range s.stores {
@@ -440,7 +440,7 @@ func (s *StoresInfo) TotalBytesWrittenRate() float64 {
 	return totalWrittenBytes
 }
 
-// TotalBytesReadRate return the total read bytes rate of all StoreInfo.
+// TotalBytesReadRate returns the total read bytes rate of all StoreInfo.
 func (s *StoresInfo) TotalBytesReadRate() float64 {
 	var totalReadBytes float64
 	for _, s := range s.stores {
@@ -451,36 +451,36 @@ func (s *StoresInfo) TotalBytesReadRate() float64 {
 	return totalReadBytes
 }
 
-// GetStoresBytesWriteStat return the bytes write stat of all StoreInfo.
+// GetStoresBytesWriteStat returns the bytes write stat of all StoreInfo.
 func (s *StoresInfo) GetStoresBytesWriteStat() map[uint64]uint64 {
-	res := make(map[uint64]uint64)
+	res := make(map[uint64]uint64, len(s.stores))
 	for _, s := range s.stores {
 		res[s.GetId()] = uint64(s.RollingStoreStats.GetBytesWriteRate())
 	}
 	return res
 }
 
-// GetStoresBytesReadStat return the bytes read stat of all StoreInfo.
+// GetStoresBytesReadStat returns the bytes read stat of all StoreInfo.
 func (s *StoresInfo) GetStoresBytesReadStat() map[uint64]uint64 {
-	res := make(map[uint64]uint64)
+	res := make(map[uint64]uint64, len(s.stores))
 	for _, s := range s.stores {
 		res[s.GetId()] = uint64(s.RollingStoreStats.GetBytesReadRate())
 	}
 	return res
 }
 
-// GetStoresKeysWriteStat return the keys write stat of all StoreInfo.
+// GetStoresKeysWriteStat returns the keys write stat of all StoreInfo.
 func (s *StoresInfo) GetStoresKeysWriteStat() map[uint64]uint64 {
-	res := make(map[uint64]uint64)
+	res := make(map[uint64]uint64, len(s.stores))
 	for _, s := range s.stores {
 		res[s.GetId()] = uint64(s.RollingStoreStats.GetKeysWriteRate())
 	}
 	return res
 }
 
-// GetStoresKeysReadStat return the bytes read stat of all StoreInfo.
+// GetStoresKeysReadStat returns the bytes read stat of all StoreInfo.
 func (s *StoresInfo) GetStoresKeysReadStat() map[uint64]uint64 {
-	res := make(map[uint64]uint64)
+	res := make(map[uint64]uint64, len(s.stores))
 	for _, s := range s.stores {
 		res[s.GetId()] = uint64(s.RollingStoreStats.GetKeysReadRate())
 	}

@@ -323,7 +323,7 @@ type RegionStat struct {
 	AntiCount int
 	// Version used to check the region split times
 	Version uint64
-	// Stats maintain a windows's statistics
+	// Stats is a rolling statistics, recorded some recently added records.
 	Stats *RollingStats
 }
 

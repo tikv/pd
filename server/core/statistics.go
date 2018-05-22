@@ -17,42 +17,39 @@ import (
 	"github.com/montanaflynn/stats"
 )
 
-// RollingStats provides rolling statistics with specified windows size.
-// There have windows size records used for calculating. it provides Rolling
-// `Median` now, which used to filter noise in some situation.
+// RollingStats provides rolling statistics with specified window size.
+// There are window size records for calculating.
 type RollingStats struct {
-	records  []float64
-	size     int
-	pos      int
-	filledUp bool
+	records []float64
+	size    int
+	pos     int
+	count   int
 }
 
 // NewRollingStats returns a RollingStats.
 func NewRollingStats(size int) *RollingStats {
 	return &RollingStats{
-		records:  make([]float64, size),
-		size:     size,
-		filledUp: false,
+		records: make([]float64, size),
+		size:    size,
 	}
 }
 
 // Add adds an element.
 func (r *RollingStats) Add(n float64) {
-	r.records[r.pos] = n
-	r.pos = (r.pos + 1) % r.size
-	if !r.filledUp && r.pos == 0 {
-		r.filledUp = true
-	}
+	r.records[r.count%r.size] = n
+	r.count++
 }
 
 // Median returns the median of the records.
+// it can be used to filter noise.
+// References: https://en.wikipedia.org/wiki/Median_filter.
 func (r *RollingStats) Median() float64 {
 	if len(r.records) == 0 {
 		return 0
 	}
 	records := r.records
-	if !r.filledUp {
-		records = r.records[:r.pos]
+	if r.count < r.size {
+		records = r.records[:r.count]
 	}
 	median, _ := stats.Median(records)
 	return median

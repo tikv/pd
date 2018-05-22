@@ -371,8 +371,6 @@ func (c *clusterInfo) isPrepared() bool {
 	return float64(c.Regions.Length())*collectFactor <= float64(c.activeRegions)
 }
 
-const minStoreHeartbeatInterval = 1
-
 // handleStoreHeartbeat updates the store status.
 func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.Lock()
