@@ -78,7 +78,9 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 		peer, _ := c.AllocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	c.putRegion(core.NewRegionInfo(region, leader))
+	regionInfo := core.NewRegionInfo(region, leader)
+	regionInfo.ApproximateSize = 10
+	c.putRegion(regionInfo)
 }
 
 func (c *testClusterInfo) updateLeaderCount(storeID uint64, leaderCount int) {
@@ -186,17 +188,17 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	defer co.stop()
 
 	// Transfer peer from store 4 to store 1.
-	tc.addRegionStore(4, 4)
-	tc.addRegionStore(3, 3)
-	tc.addRegionStore(2, 2)
-	tc.addRegionStore(1, 1)
+	tc.addRegionStore(4, 40)
+	tc.addRegionStore(3, 30)
+	tc.addRegionStore(2, 20)
+	tc.addRegionStore(1, 10)
 	tc.addLeaderRegion(1, 2, 3, 4)
 
 	// Transfer leader from store 4 to store 2.
-	tc.updateLeaderCount(4, 5)
-	tc.updateLeaderCount(3, 3)
-	tc.updateLeaderCount(2, 2)
-	tc.updateLeaderCount(1, 1)
+	tc.updateLeaderCount(4, 50)
+	tc.updateLeaderCount(3, 30)
+	tc.updateLeaderCount(2, 20)
+	tc.updateLeaderCount(1, 10)
 	tc.addLeaderRegion(2, 4, 3, 2)
 
 	// Wait for schedule and turn off balance.
@@ -363,10 +365,10 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	defer co.stop()
 
 	// Transfer peer from store 4 to store 1.
-	tc.addRegionStore(1, 1)
-	tc.addRegionStore(2, 2)
-	tc.addRegionStore(3, 3)
-	tc.addRegionStore(4, 4)
+	tc.addRegionStore(1, 10)
+	tc.addRegionStore(2, 20)
+	tc.addRegionStore(3, 30)
+	tc.addRegionStore(4, 40)
 	tc.addLeaderRegion(1, 2, 3, 4)
 
 	stream := newMockHeartbeatStream()
