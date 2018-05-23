@@ -85,8 +85,8 @@ func minDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, kind core.ResourceKind, region *core.RegionInfo, opInfluence schedule.OpInfluence) bool {
-	regionSize := int64(float64(region.ApproximateSize) * cluster.GetTolerantSizeRatio())
+func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, kind core.ResourceKind, opInfluence schedule.OpInfluence) bool {
+	regionSize := int64(float64(cluster.GetAverageRegionSize()) * cluster.GetTolerantSizeRatio())
 	sourceDelta := opInfluence.GetStoreInfluence(source.GetId()).ResourceSize(kind) - regionSize
 	targetDelta := opInfluence.GetStoreInfluence(target.GetId()).ResourceSize(kind) + regionSize
 
