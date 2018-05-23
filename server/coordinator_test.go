@@ -262,7 +262,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	p := &metapb.Peer{Id: 1, StoreId: 1, IsLearner: true}
 	r.AddPeer(p)
 	r.PendingPeers = append(r.PendingPeers, p)
-	tc.PutRegion(r)
+	tc.putRegion(r)
 	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
 	co.stop()
 
@@ -277,10 +277,10 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	tc.addRegionStore(3, 3)
 	tc.addRegionStore(2, 2)
 	tc.addRegionStore(1, 1)
-	tc.PutRegion(r)
+	tc.putRegion(r)
 	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
 	r.PendingPeers = nil
-	tc.PutRegion(r)
+	tc.putRegion(r)
 	c.Assert(co.checkRegion(tc.GetRegion(1)), IsTrue)
 	waitOperator(c, co, 1)
 	op := co.getOperator(1)
