@@ -73,11 +73,11 @@ func NewClusterInfo(pdAddr string, conf *cases.Conf) (*ClusterInfo, error) {
 
 // GetBootstrapInfo returns a valid bootstrap store and region.
 func (c *ClusterInfo) GetBootstrapInfo() (*metapb.Store, *metapb.Region, error) {
-	origion := c.RegionsInfo.RandRegion()
-	if origion == nil {
+	origin := c.RegionsInfo.RandRegion()
+	if origin == nil {
 		return nil, nil, errors.New("no region found for bootstrap")
 	}
-	region := origion.Clone()
+	region := origin.Clone()
 	if region.Leader == nil {
 		return nil, nil, errors.New("bootstrap region has no leader")
 	}
