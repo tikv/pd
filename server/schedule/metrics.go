@@ -40,10 +40,19 @@ var (
 			Name:      "status",
 			Help:      "Status of the hotspot.",
 		}, []string{"name", "type"})
+
+	filterCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "filter",
+			Help:      "Counter of the filter",
+		}, []string{"action", "store", "type"})
 )
 
 func init() {
 	prometheus.MustRegister(checkerCounter)
 	prometheus.MustRegister(operatorStepDuration)
 	prometheus.MustRegister(hotCacheStatusGauge)
+	prometheus.MustRegister(filterCounter)
 }
