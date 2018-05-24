@@ -146,6 +146,7 @@ var (
 			Name:      "metadata",
 			Help:      "Record critical metadata.",
 		}, []string{"type"})
+
 	patrolCheckRegionsHistogram = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
