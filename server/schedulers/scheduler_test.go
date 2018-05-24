@@ -16,6 +16,7 @@ package schedulers
 import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	log "github.com/sirupsen/logrus"
@@ -87,11 +88,11 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 
 	// transfer leader from store 1 to store 2 for region 2 because we have a different peer location,
 	// we can directly transfer leader to peer 2. we priority to transfer leader because less overhead
-	CheckTransferLeader(c, sc.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpAdjacent, 1, 2)
+	testutil.CheckTransferLeader(c, sc.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpAdjacent, 1, 2)
 	tc.AddLeaderRegionWithRange(2, "a", "b", 2, 1, 3)
 
 	// transfer leader from store 1 to store 2 for region 3
-	CheckTransferLeader(c, sc.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpAdjacent, 1, 4)
+	testutil.CheckTransferLeader(c, sc.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpAdjacent, 1, 4)
 	tc.AddLeaderRegionWithRange(3, "b", "c", 4, 1, 3)
 
 	// transfer peer from store 1 to store 4 for region 5
@@ -101,7 +102,7 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 
 	c.Assert(sc.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
 	c.Assert(sc.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
-	CheckTransferLeader(c, sc.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpAdjacent, 2, 4)
+	testutil.CheckTransferLeader(c, sc.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpAdjacent, 2, 4)
 	tc.AddLeaderRegionWithRange(1, "", "a", 4, 2, 3)
 	for i := 0; i < 10; i++ {
 		c.Assert(sc.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
@@ -203,12 +204,12 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	sl, err := schedule.CreateScheduler("label", schedule.NewLimiter())
 	c.Assert(err, IsNil)
 	op := sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
-	CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 3)
+	testutil.CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 3)
 
 	// If store3 is disconnected, transfer leader to store 2 instead.
 	tc.SetStoreDisconnect(3)
 	op = sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
-	CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
+	testutil.CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
 
 	// As store3 is disconnected, store1 rejects leader. Balancer will not create
 	// any operators.
@@ -234,5 +235,5 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	}
 	tc.Regions.AddRegion(region)
 	op = sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
-	CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
+	testutil.CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
 }
