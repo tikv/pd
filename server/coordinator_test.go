@@ -557,10 +557,10 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(co.addScheduler(brs), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
 	// the scheduler option should contain 7 items
-	// the `hot scheduler` and `label scheduler` are disable
+	// the `hot scheduler` and `label scheduler` are disabled
 	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 7)
 	c.Assert(co.removeScheduler("grant-leader-scheduler-1"), IsNil)
-	// the scheduler that is not enable by default will completely delete
+	// the scheduler that is not enable by default will be completely deleted
 	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 6)
 	c.Assert(co.schedulers, HasLen, 4)
 	c.Assert(co.cluster.opt.persist(co.cluster.kv), IsNil)
