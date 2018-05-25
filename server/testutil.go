@@ -21,8 +21,8 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/embed"
-	"github.com/pingcap/check"
-	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/juju/errors"
+	"github.com/pingcap/pd/pkg/tempurl"
 	"github.com/pingcap/pd/pkg/typeutil"
 	// Register namespace classifiers.
 	_ "github.com/pingcap/pd/table"
@@ -37,17 +37,21 @@ func cleanServer(cfg *Config) {
 }
 
 // NewTestServer creates a pd server for testing.
-func NewTestServer(c *check.C) (*Config, *Server, CleanupFunc) {
+func NewTestServer() (*Config, *Server, CleanupFunc, error) {
 	cfg := NewTestSingleConfig()
 	s, err := CreateServer(cfg, nil)
-	c.Assert(err, check.IsNil)
-	c.Assert(s.Run(), check.IsNil)
+	if err != nil {
+		return nil, nil, nil, errors.Trace(err)
+	}
+	if err = s.Run(); err != nil {
+		return nil, nil, nil, errors.Trace(err)
+	}
 
 	cleanup := func() {
 		s.Close()
 		cleanServer(cfg)
 	}
-	return cfg, s, cleanup
+	return cfg, s, cleanup, nil
 }
 
 // NewTestSingleConfig is only for test to create one pd.
@@ -55,8 +59,8 @@ func NewTestServer(c *check.C) (*Config, *Server, CleanupFunc) {
 func NewTestSingleConfig() *Config {
 	cfg := &Config{
 		Name:       "pd",
-		ClientUrls: testutil.AllocTestURL(),
-		PeerUrls:   testutil.AllocTestURL(),
+		ClientUrls: tempurl.Alloc(),
+		PeerUrls:   tempurl.Alloc(),
 
 		InitialClusterState: embed.ClusterStateFlagNew,
 
