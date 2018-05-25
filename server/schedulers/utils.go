@@ -85,8 +85,16 @@ func minDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, kind core.ResourceKind, opInfluence schedule.OpInfluence) bool {
-	regionSize := int64(float64(cluster.GetAverageRegionSize()) * cluster.GetTolerantSizeRatio())
+func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ResourceKind, opInfluence schedule.OpInfluence) bool {
+	// The reason we use max(regionSize, averageRegionSize) to check is:
+	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
+	// 2. prevent moving huge regions, leading to over balance.
+	regionSize := region.ApproximateSize
+	if regionSize < cluster.GetAverageRegionSize() {
+		regionSize = cluster.GetAverageRegionSize()
+	}
+
+	regionSize = int64(float64(regionSize) * cluster.GetTolerantSizeRatio())
 	sourceDelta := opInfluence.GetStoreInfluence(source.GetId()).ResourceSize(kind) - regionSize
 	targetDelta := opInfluence.GetStoreInfluence(target.GetId()).ResourceSize(kind) + regionSize
 

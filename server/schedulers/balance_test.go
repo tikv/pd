@@ -85,7 +85,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		region := tc.GetRegion(1)
 		region.ApproximateSize = t.regionSize
 		tc.PutRegion(region.Clone())
-		c.Assert(shouldBalance(tc, source, target, core.LeaderKind, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
+		c.Assert(shouldBalance(tc, source, target, region, core.LeaderKind, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -96,7 +96,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		region := tc.GetRegion(1)
 		region.ApproximateSize = t.regionSize
 		tc.PutRegion(region)
-		c.Assert(shouldBalance(tc, source, target, core.RegionKind, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
+		c.Assert(shouldBalance(tc, source, target, region, core.RegionKind, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
 	}
 }
 
