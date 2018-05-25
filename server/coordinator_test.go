@@ -15,6 +15,7 @@ package server
 
 import (
 	"fmt"
+	"math/rand"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -234,6 +235,29 @@ func dispatchHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream *m
 	co.hbStreams.bindStream(region.Leader.GetStoreId(), stream)
 	co.cluster.putRegion(region)
 	co.dispatch(region)
+}
+
+func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
+	_, opt := newTestScheduleConfig()
+	tc := newTestClusterInfo(opt)
+	hbStreams := newHeartbeatStreams(tc.getClusterID())
+	defer hbStreams.Close()
+
+	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co.run()
+	// Make sure there are no problem when concurrent write and read
+	for i := 0; i <= 10; i++ {
+		go func(i int) {
+			for j := 0; j < 10000; j++ {
+				tc.addRegionStore(uint64(i%5), rand.Intn(200))
+			}
+		}(i)
+	}
+	for i := 0; i < 1000; i++ {
+		co.collectHotSpotMetrics()
+		co.collectSchedulerMetrics()
+		co.cluster.collectMetrics()
+	}
 }
 
 func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
