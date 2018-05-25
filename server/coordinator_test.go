@@ -15,6 +15,7 @@ package server
 
 import (
 	"fmt"
+	"math/rand"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -201,10 +202,10 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 
 	// Wait for schedule and turn off balance.
 	waitOperator(c, co, 1)
-	schedulers.CheckTransferPeer(c, co.getOperator(1), schedule.OpBalance, 4, 1)
+	testutil.CheckTransferPeer(c, co.getOperator(1), schedule.OpBalance, 4, 1)
 	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
 	waitOperator(c, co, 2)
-	schedulers.CheckTransferLeader(c, co.getOperator(2), schedule.OpBalance, 4, 2)
+	testutil.CheckTransferLeader(c, co.getOperator(2), schedule.OpBalance, 4, 2)
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 
 	stream := newMockHeartbeatStream()
@@ -236,6 +237,29 @@ func dispatchHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream *m
 	co.dispatch(region)
 }
 
+func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
+	_, opt := newTestScheduleConfig()
+	tc := newTestClusterInfo(opt)
+	hbStreams := newHeartbeatStreams(tc.getClusterID())
+	defer hbStreams.Close()
+
+	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co.run()
+	// Make sure there are no problem when concurrent write and read
+	for i := 0; i <= 10; i++ {
+		go func(i int) {
+			for j := 0; j < 10000; j++ {
+				tc.addRegionStore(uint64(i%5), rand.Intn(200))
+			}
+		}(i)
+	}
+	for i := 0; i < 1000; i++ {
+		co.collectHotSpotMetrics()
+		co.collectSchedulerMetrics()
+		co.cluster.collectMetrics()
+	}
+}
+
 func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	cfg, opt := newTestScheduleConfig()
 	cfg.DisableLearner = false
@@ -253,7 +277,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	tc.addLeaderRegion(1, 2, 3)
 	c.Assert(co.checkRegion(tc.GetRegion(1)), IsTrue)
 	waitOperator(c, co, 1)
-	schedulers.CheckAddPeerWithLearner(c, co.getOperator(1), schedule.OpReplica, 1)
+	testutil.CheckAddPeer(c, co.getOperator(1), schedule.OpReplica, 1)
 	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
 
 	r := tc.GetRegion(1)
@@ -373,7 +397,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 
 	// Wait for schedule.
 	waitOperator(c, co, 1)
-	schedulers.CheckTransferPeer(c, co.getOperator(1), schedule.OpBalance, 4, 1)
+	testutil.CheckTransferPeer(c, co.getOperator(1), schedule.OpBalance, 4, 1)
 
 	region := tc.GetRegion(1)
 

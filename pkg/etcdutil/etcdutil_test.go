@@ -25,7 +25,7 @@ import (
 	"github.com/coreos/etcd/embed"
 	"github.com/coreos/etcd/pkg/types"
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/pkg/tempurl"
 )
 
 func Test(t *testing.T) {
@@ -43,10 +43,10 @@ func newTestSingleConfig() *embed.Config {
 	cfg.Dir, _ = ioutil.TempDir("/tmp", "test_etcd")
 	cfg.WalDir = ""
 
-	pu, _ := url.Parse(testutil.AllocTestURL())
+	pu, _ := url.Parse(tempurl.Alloc())
 	cfg.LPUrls = []url.URL{*pu}
 	cfg.APUrls = cfg.LPUrls
-	cu, _ := url.Parse(testutil.AllocTestURL())
+	cu, _ := url.Parse(tempurl.Alloc())
 	cfg.LCUrls = []url.URL{*cu}
 	cfg.ACUrls = cfg.LCUrls
 

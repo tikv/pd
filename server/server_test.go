@@ -20,6 +20,7 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/pkg/tempurl"
 	"github.com/pingcap/pd/pkg/testutil"
 	log "github.com/sirupsen/logrus"
 )
@@ -258,7 +259,7 @@ func (s *testServerSuite) TestUpdateAdvertiseUrls(c *C) {
 	}
 
 	// Little malicious tweak.
-	overlapPeerURL := "," + testutil.AllocTestURL()
+	overlapPeerURL := "," + tempurl.Alloc()
 	for _, cfg := range cfgs {
 		cfg.AdvertisePeerUrls += overlapPeerURL
 	}
