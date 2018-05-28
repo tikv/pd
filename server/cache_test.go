@@ -355,12 +355,12 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 	for i, region := range regions {
 		// region does not exist.
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
-		checkRegions(c, cache.Regions, regions[:i+1])
+		checkRegions(c, cache.core.Regions, regions[:i+1])
 		checkRegionsKV(c, cache.kv, regions[:i+1])
 
 		// region is the same, not updated.
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
-		checkRegions(c, cache.Regions, regions[:i+1])
+		checkRegions(c, cache.core.Regions, regions[:i+1])
 		checkRegionsKV(c, cache.kv, regions[:i+1])
 
 		epoch := region.Clone().GetRegionEpoch()
@@ -370,7 +370,7 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 			Version: epoch.GetVersion() + 1,
 		}
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
-		checkRegions(c, cache.Regions, regions[:i+1])
+		checkRegions(c, cache.core.Regions, regions[:i+1])
 		checkRegionsKV(c, cache.kv, regions[:i+1])
 
 		// region is stale (Version).
@@ -379,7 +379,7 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 			ConfVer: epoch.GetConfVer() + 1,
 		}
 		c.Assert(cache.handleRegionHeartbeat(stale), NotNil)
-		checkRegions(c, cache.Regions, regions[:i+1])
+		checkRegions(c, cache.core.Regions, regions[:i+1])
 		checkRegionsKV(c, cache.kv, regions[:i+1])
 
 		// region is updated.
@@ -388,7 +388,7 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 			ConfVer: epoch.GetConfVer() + 1,
 		}
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
-		checkRegions(c, cache.Regions, regions[:i+1])
+		checkRegions(c, cache.core.Regions, regions[:i+1])
 		checkRegionsKV(c, cache.kv, regions[:i+1])
 
 		// region is stale (ConfVer).
@@ -397,7 +397,7 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 			Version: epoch.GetVersion() + 1,
 		}
 		c.Assert(cache.handleRegionHeartbeat(stale), NotNil)
-		checkRegions(c, cache.Regions, regions[:i+1])
+		checkRegions(c, cache.core.Regions, regions[:i+1])
 		checkRegionsKV(c, cache.kv, regions[:i+1])
 
 		// Add a down peer.
@@ -408,22 +408,22 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 			},
 		}
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
-		checkRegions(c, cache.Regions, regions[:i+1])
+		checkRegions(c, cache.core.Regions, regions[:i+1])
 
 		// Add a pending peer.
 		region.PendingPeers = []*metapb.Peer{region.Peers[rand.Intn(len(region.Peers))]}
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
-		checkRegions(c, cache.Regions, regions[:i+1])
+		checkRegions(c, cache.core.Regions, regions[:i+1])
 
 		// Clear down peers.
 		region.DownPeers = nil
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
-		checkRegions(c, cache.Regions, regions[:i+1])
+		checkRegions(c, cache.core.Regions, regions[:i+1])
 
 		// Clear pending peers.
 		region.PendingPeers = nil
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
-		checkRegions(c, cache.Regions, regions[:i+1])
+		checkRegions(c, cache.core.Regions, regions[:i+1])
 	}
 
 	regionCounts := make(map[uint64]int)
@@ -453,11 +453,11 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 		}
 	}
 
-	for _, store := range cache.Stores.GetStores() {
-		c.Assert(store.LeaderCount, Equals, cache.Regions.GetStoreLeaderCount(store.GetId()))
-		c.Assert(store.RegionCount, Equals, cache.Regions.GetStoreRegionCount(store.GetId()))
-		c.Assert(store.LeaderSize, Equals, cache.Regions.GetStoreLeaderRegionSize(store.GetId()))
-		c.Assert(store.RegionSize, Equals, cache.Regions.GetStoreRegionSize(store.GetId()))
+	for _, store := range cache.core.Stores.GetStores() {
+		c.Assert(store.LeaderCount, Equals, cache.core.Regions.GetStoreLeaderCount(store.GetId()))
+		c.Assert(store.RegionCount, Equals, cache.core.Regions.GetStoreRegionCount(store.GetId()))
+		c.Assert(store.LeaderSize, Equals, cache.core.Regions.GetStoreLeaderRegionSize(store.GetId()))
+		c.Assert(store.RegionSize, Equals, cache.core.Regions.GetStoreRegionSize(store.GetId()))
 	}
 
 	// Test with kv.
@@ -600,7 +600,7 @@ func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
 
 func checkPendingPeerCount(expect []int, cache *clusterInfo, c *C) {
 	for i, e := range expect {
-		s := cache.Stores.GetStore(uint64(i + 1))
+		s := cache.core.Stores.GetStore(uint64(i + 1))
 		c.Assert(s.PendingPeerCount, Equals, e)
 	}
 }
