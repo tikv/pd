@@ -54,9 +54,10 @@ func newTestClusterInfo(opt *scheduleOption) *testClusterInfo {
 
 func newTestRegionMeta(regionID uint64) *metapb.Region {
 	return &metapb.Region{
-		Id:       regionID,
-		StartKey: []byte(fmt.Sprintf("%20d", regionID)),
-		EndKey:   []byte(fmt.Sprintf("%20d", regionID+1)),
+		Id:          regionID,
+		StartKey:    []byte(fmt.Sprintf("%20d", regionID)),
+		EndKey:      []byte(fmt.Sprintf("%20d", regionID+1)),
+		RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
 	}
 }
 
@@ -753,6 +754,24 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	op4.SetPriorityLevel(core.HighPriority)
 	c.Assert(co.addOperator(op4), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsTrue)
+	co.removeOperator(op4)
+
+	// test wrong region id.
+	op5 := newTestOperator(3, &metapb.RegionEpoch{}, schedule.OpHotRegion)
+	c.Assert(co.addOperator(op5), IsFalse)
+
+	// test wrong region epoch.
+	co.removeOperator(op1)
+	epoch := &metapb.RegionEpoch{
+		Version: tc.GetRegion(1).GetRegionEpoch().GetVersion() + 1,
+		ConfVer: tc.GetRegion(1).GetRegionEpoch().GetConfVer(),
+	}
+	op6 := newTestOperator(1, epoch, schedule.OpLeader)
+	c.Assert(co.addOperator(op6), IsFalse)
+	epoch.Version--
+	op6 = newTestOperator(1, epoch, schedule.OpLeader)
+	c.Assert(co.addOperator(op6), IsTrue)
+	co.removeOperator(op6)
 }
 
 func (s *testScheduleControllerSuite) TestInterval(c *C) {
