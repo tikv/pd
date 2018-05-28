@@ -27,6 +27,7 @@ import (
 type Cluster interface {
 	RandFollowerRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo
 	RandLeaderRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo
+	GetAverageRegionSize() int64
 
 	GetStores() []*core.StoreInfo
 	GetStore(id uint64) *core.StoreInfo

@@ -114,6 +114,11 @@ func (r *RangeCluster) RandLeaderRegion(storeID uint64, opts ...core.RegionOptio
 	return r.regions.RandLeaderRegion(storeID, opts...)
 }
 
+// GetAverageRegionSize returns the average region approximate size.
+func (r *RangeCluster) GetAverageRegionSize() int64 {
+	return r.regions.GetAverageRegionSize()
+}
+
 // GetRegionStores returns all stores that contains the region's peer.
 func (r *RangeCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
 	stores := r.Cluster.GetRegionStores(region)

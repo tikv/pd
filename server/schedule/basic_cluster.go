@@ -179,6 +179,11 @@ func (bc *BasicCluster) RandLeaderRegion(storeID uint64, opts ...core.RegionOpti
 	return bc.Regions.RandLeaderRegion(storeID, opts...)
 }
 
+// GetAverageRegionSize returns the average region approximate size.
+func (bc *BasicCluster) GetAverageRegionSize() int64 {
+	return bc.Regions.GetAverageRegionSize()
+}
+
 // IsRegionHot checks if a region is in hot state.
 func (bc *BasicCluster) IsRegionHot(id uint64, hotThreshold int) bool {
 	return bc.HotCache.isRegionHot(id, hotThreshold)

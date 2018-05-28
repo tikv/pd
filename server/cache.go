@@ -315,6 +315,13 @@ func (c *clusterInfo) RandFollowerRegion(storeID uint64, opts ...core.RegionOpti
 	return c.BasicCluster.RandFollowerRegion(storeID, opts...)
 }
 
+// GetAverageRegionSize returns the average region approximate size.
+func (c *clusterInfo) GetAverageRegionSize() int64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.BasicCluster.GetAverageRegionSize()
+}
+
 // GetRegionStores returns all stores that contains the region's peer.
 func (c *clusterInfo) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
 	c.RLock()
