@@ -429,15 +429,15 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 	}
 }
 
-// TotalBytesWrittenRate returns the total written bytes rate of all StoreInfo.
-func (s *StoresInfo) TotalBytesWrittenRate() float64 {
-	var totalWrittenBytes float64
+// TotalBytesWriteRate returns the total written bytes rate of all StoreInfo.
+func (s *StoresInfo) TotalBytesWriteRate() float64 {
+	var totalWriteBytes float64
 	for _, s := range s.stores {
 		if s.IsUp() {
-			totalWrittenBytes += s.RollingStoreStats.GetBytesWriteRate()
+			totalWriteBytes += s.RollingStoreStats.GetBytesWriteRate()
 		}
 	}
-	return totalWrittenBytes
+	return totalWriteBytes
 }
 
 // TotalBytesReadRate returns the total read bytes rate of all StoreInfo.

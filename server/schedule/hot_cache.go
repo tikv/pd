@@ -101,7 +101,7 @@ func calculateWriteHotThreshold(stores *core.StoresInfo) uint64 {
 	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
 	// divide 2 because the store reports data about two times than the region record write to rocksdb
 	divisor := float64(statCacheMaxLen) * 2
-	hotRegionThreshold := uint64(float64(stores.TotalBytesWrittenRate()) / divisor)
+	hotRegionThreshold := uint64(float64(stores.TotalBytesWriteRate()) / divisor)
 
 	if hotRegionThreshold < hotWriteRegionMinFlowRate {
 		hotRegionThreshold = hotWriteRegionMinFlowRate
