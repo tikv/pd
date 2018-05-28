@@ -177,8 +177,12 @@ func (o *scheduleOption) RemoveSchedulerCfg(name string) error {
 			return errors.Trace(err)
 		}
 		if tmp.GetName() == name {
-			schedulerCfg.Disable = true
-			v.Schedulers[i] = schedulerCfg
+			if IsDefaultScheduler(tmp.GetType()) {
+				schedulerCfg.Disable = true
+				v.Schedulers[i] = schedulerCfg
+			} else {
+				v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
+			}
 			o.store(v)
 			return nil
 		}

@@ -71,13 +71,14 @@ type testClientSuite struct {
 }
 
 func (s *testClientSuite) SetUpSuite(c *C) {
-	_, s.srv, s.cleanup = server.NewTestServer(c)
+	var err error
+	_, s.srv, s.cleanup, err = server.NewTestServer()
+	c.Assert(err, IsNil)
 	s.grpcPDClient = mustNewGrpcClient(c, s.srv.GetAddr())
 
 	mustWaitLeader(c, map[string]*server.Server{s.srv.GetAddr(): s.srv})
 	bootstrapServer(c, newHeader(s.srv), s.grpcPDClient)
 
-	var err error
 	s.client, err = NewClient(s.srv.GetEndpoints(), SecurityOption{})
 	c.Assert(err, IsNil)
 	s.regionHeartbeat, err = s.grpcPDClient.RegionHeartbeat(context.Background())

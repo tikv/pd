@@ -14,6 +14,8 @@
 package schedule
 
 import (
+	"fmt"
+
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
@@ -22,6 +24,7 @@ import (
 
 // Filter is an interface to filter source and target store.
 type Filter interface {
+	Type() string
 	// Return true if the store should not be used as a source store.
 	FilterSource(opt Options, store *core.StoreInfo) bool
 	// Return true if the store should not be used as a target store.
@@ -30,9 +33,11 @@ type Filter interface {
 
 // FilterSource checks if store can pass all Filters as source store.
 func FilterSource(opt Options, store *core.StoreInfo, filters []Filter) bool {
+	storeID := fmt.Sprintf("store%d", store.GetId())
 	for _, filter := range filters {
 		if filter.FilterSource(opt, store) {
 			log.Debugf("[filter %T] filters store %v from source", filter, store)
+			filterCounter.WithLabelValues("filter-source", storeID, filter.Type()).Inc()
 			return true
 		}
 	}
@@ -41,9 +46,11 @@ func FilterSource(opt Options, store *core.StoreInfo, filters []Filter) bool {
 
 // FilterTarget checks if store can pass all Filters as target store.
 func FilterTarget(opt Options, store *core.StoreInfo, filters []Filter) bool {
+	storeID := fmt.Sprintf("store%d", store.GetId())
 	for _, filter := range filters {
 		if filter.FilterTarget(opt, store) {
 			log.Debugf("[filter %T] filters store %v from target", filter, store)
+			filterCounter.WithLabelValues("filter-target", storeID, filter.Type()).Inc()
 			return true
 		}
 	}
@@ -63,6 +70,10 @@ func NewExcludedFilter(sources, targets map[uint64]struct{}) Filter {
 	}
 }
 
+func (f *excludedFilter) Type() string {
+	return "exclude-filter"
+}
+
 func (f *excludedFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
 	_, ok := f.sources[store.GetId()]
 	return ok
@@ -80,6 +91,10 @@ func NewBlockFilter() Filter {
 	return &blockFilter{}
 }
 
+func (f *blockFilter) Type() string {
+	return "block-filter"
+}
+
 func (f *blockFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
 	return store.IsBlocked()
 }
@@ -95,6 +110,10 @@ func NewStateFilter() Filter {
 	return &stateFilter{}
 }
 
+func (f *stateFilter) Type() string {
+	return "state-filter"
+}
+
 func (f *stateFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
 	return store.IsTombstone()
 }
@@ -108,6 +127,10 @@ type healthFilter struct{}
 // NewHealthFilter creates a Filter that filters all stores that are Busy or Down.
 func NewHealthFilter() Filter {
 	return &healthFilter{}
+}
+
+func (f *healthFilter) Type() string {
+	return "health-filter"
 }
 
 func (f *healthFilter) filter(opt Options, store *core.StoreInfo) bool {
@@ -132,6 +155,10 @@ func NewDisconnectFilter() Filter {
 	return &disconnectFilter{}
 }
 
+func (f *disconnectFilter) Type() string {
+	return "disconnect-filter"
+}
+
 func (f *disconnectFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
 	return store.IsDisconnected()
 }
@@ -146,6 +173,10 @@ type pendingPeerCountFilter struct{}
 // currently handling too many pending peers.
 func NewPendingPeerCountFilter() Filter {
 	return &pendingPeerCountFilter{}
+}
+
+func (p *pendingPeerCountFilter) Type() string {
+	return "pending-peer-filter"
 }
 
 func (p *pendingPeerCountFilter) filter(opt Options, store *core.StoreInfo) bool {
@@ -166,6 +197,10 @@ type snapshotCountFilter struct{}
 // currently handling too many snapshots.
 func NewSnapshotCountFilter() Filter {
 	return &snapshotCountFilter{}
+}
+
+func (f *snapshotCountFilter) Type() string {
+	return "snapshot-filter"
 }
 
 func (f *snapshotCountFilter) filter(opt Options, store *core.StoreInfo) bool {
@@ -191,6 +226,10 @@ func NewCacheFilter(cache *cache.TTLUint64) Filter {
 	return &cacheFilter{cache: cache}
 }
 
+func (f *cacheFilter) Type() string {
+	return "cache-filter"
+}
+
 func (f *cacheFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
 	return f.cache.Exists(store.GetId())
 }
@@ -205,6 +244,10 @@ type storageThresholdFilter struct{}
 // almost full.
 func NewStorageThresholdFilter() Filter {
 	return &storageThresholdFilter{}
+}
+
+func (f *storageThresholdFilter) Type() string {
+	return "storage-threshold-filter"
 }
 
 func (f *storageThresholdFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
@@ -240,6 +283,10 @@ func NewDistinctScoreFilter(labels []string, stores []*core.StoreInfo, source *c
 	}
 }
 
+func (f *distinctScoreFilter) Type() string {
+	return "distinct-filter"
+}
+
 func (f *distinctScoreFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
 	return false
 }
@@ -262,6 +309,10 @@ func NewNamespaceFilter(classifier namespace.Classifier, namespace string) Filte
 	}
 }
 
+func (f *namespaceFilter) Type() string {
+	return "namespace-filter"
+}
+
 func (f *namespaceFilter) filter(store *core.StoreInfo) bool {
 	return f.classifier.GetStoreNamespace(store) != f.namespace
 }
@@ -280,6 +331,10 @@ type rejectLeaderFilter struct{}
 // rejectLeader from being the target of leader transfer.
 func NewRejectLeaderFilter() Filter {
 	return rejectLeaderFilter{}
+}
+
+func (f rejectLeaderFilter) Type() string {
+	return "reject-leader-filter"
 }
 
 func (f rejectLeaderFilter) FilterSource(opt Options, store *core.StoreInfo) bool {

@@ -514,6 +514,8 @@ func (c *clusterInfo) collectMetrics() {
 	defer c.RUnlock()
 	c.regionStats.Collect()
 	c.labelLevelStats.Collect()
+	// collect hot cache metrics
+	c.HotCache.CollectMetrics(c.Stores)
 }
 
 func (c *clusterInfo) GetRegionStatsByType(typ regionStatisticType) []*core.RegionInfo {
