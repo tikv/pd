@@ -90,7 +90,7 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule
 
 			schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 			step := schedule.TransferLeader{FromStore: id, ToStore: target.GetId()}
-			op := schedule.NewOperator("label-reject-leader", region.GetId(), schedule.OpLeader, step)
+			op := schedule.NewOperator("label-reject-leader", region.GetId(), region.GetRegionEpoch(), schedule.OpLeader, step)
 			return []*schedule.Operator{op}
 		}
 	}

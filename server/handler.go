@@ -307,7 +307,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 	}
 
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
-	op := schedule.NewOperator("adminTransferLeader", regionID, schedule.OpAdmin|schedule.OpLeader, step)
+	op := schedule.NewOperator("adminTransferLeader", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpLeader, step)
 	if ok := c.addOperator(op); !ok {
 		return errors.Trace(errAddOperator)
 	}
@@ -358,7 +358,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		steps = append(steps, schedule.RemovePeer{FromStore: peer.GetStoreId()})
 	}
 
-	op := schedule.NewOperator("adminMoveRegion", regionID, schedule.OpAdmin|schedule.OpRegion, steps...)
+	op := schedule.NewOperator("adminMoveRegion", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
 	if ok := c.addOperator(op); !ok {
 		return errors.Trace(errAddOperator)
 	}
@@ -432,7 +432,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 			schedule.AddPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
 		}
 	}
-	op := schedule.NewOperator("adminAddPeer", regionID, schedule.OpAdmin|schedule.OpRegion, steps...)
+	op := schedule.NewOperator("adminAddPeer", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
 	if ok := c.addOperator(op); !ok {
 		return errors.Trace(errAddOperator)
 	}
@@ -499,7 +499,7 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 	if err != nil {
 		return errors.Trace(err)
 	}
-	if ok := c.addOperators(op1, op2); !ok {
+	if ok := c.addOperator(op1, op2); !ok {
 		return errors.Trace(ErrAddOperator)
 	}
 	return nil
@@ -518,7 +518,7 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64) error {
 	}
 
 	step := schedule.SplitRegion{StartKey: region.StartKey, EndKey: region.EndKey}
-	op := schedule.NewOperator("adminSplitRegion", regionID, schedule.OpAdmin, step)
+	op := schedule.NewOperator("adminSplitRegion", regionID, region.GetRegionEpoch(), schedule.OpAdmin, step)
 	if ok := c.addOperator(op); !ok {
 		return errors.Trace(errAddOperator)
 	}

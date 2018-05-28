@@ -167,7 +167,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 			ToStore: p.GetStoreId(),
 			PeerID:  p.GetId(),
 		}
-		op := schedule.NewOperator("promoteLearner", region.GetId(), schedule.OpRegion, step)
+		op := schedule.NewOperator("promoteLearner", region.GetId(), region.GetRegionEpoch(), schedule.OpRegion, step)
 		if c.addOperator(op) {
 			return true
 		}
@@ -188,7 +188,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 	if c.limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 		if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
 			// make sure two operators can add successfully altogether
-			if c.addOperators(op1, op2) {
+			if c.addOperator(op1, op2) {
 				return true
 			}
 		}
@@ -428,11 +428,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			}
 			opInfluence := schedule.NewOpInfluence(c.getOperators(), c.cluster)
 			if op := s.Schedule(c.cluster, opInfluence); op != nil {
-				if len(op) == 1 {
-					c.addOperator(op[0])
-				} else {
-					c.addOperators(op...)
-				}
+				c.addOperator(op...)
 			}
 
 		case <-s.Ctx().Done():
@@ -447,14 +443,9 @@ func (c *coordinator) addOperatorLocked(op *schedule.Operator) bool {
 
 	log.Infof("[region %v] add operator: %s", regionID, op)
 
-	// If the new operator passed in has higher priorities than the old one,
-	// then replace the old operator.
+	// If there is an old operator, replace it. The priority should be checked
+	// already.
 	if old, ok := c.operators[regionID]; ok {
-		if !isHigherPriorityOperator(op, old) {
-			log.Infof("[region %v] cancel add operator, old: %s", regionID, old)
-			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
-			return false
-		}
 		log.Infof("[region %v] replace old operator: %s", regionID, old)
 		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
 		c.removeOperatorLocked(old)
@@ -473,20 +464,12 @@ func (c *coordinator) addOperatorLocked(op *schedule.Operator) bool {
 	return true
 }
 
-func (c *coordinator) addOperator(op *schedule.Operator) bool {
-	c.Lock()
-	defer c.Unlock()
-
-	return c.addOperatorLocked(op)
-}
-
-func (c *coordinator) addOperators(ops ...*schedule.Operator) bool {
+func (c *coordinator) addOperator(ops ...*schedule.Operator) bool {
 	c.Lock()
 	defer c.Unlock()
 
 	for _, op := range ops {
-		if old := c.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
-			log.Infof("[region %v] cancel add operators, old: %s", op.RegionID(), old)
+		if !c.checkAddOperator(op) {
 			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
 			return false
 		}
@@ -495,6 +478,23 @@ func (c *coordinator) addOperators(ops ...*schedule.Operator) bool {
 		c.addOperatorLocked(op)
 	}
 
+	return true
+}
+
+func (c *coordinator) checkAddOperator(op *schedule.Operator) bool {
+	region := c.cluster.GetRegion(op.RegionID())
+	if region == nil {
+		log.Debugf("[region %v] region not found, cancel add operator", op.RegionID())
+		return false
+	}
+	if region.GetRegionEpoch().GetVersion() != op.RegionEpoch().GetVersion() || region.GetRegionEpoch().GetConfVer() != op.RegionEpoch().GetConfVer() {
+		log.Debugf("[region %v] region epoch not match, %v vs %v, cancel add operator", op.RegionID(), region.GetRegionEpoch(), op.RegionEpoch())
+		return false
+	}
+	if old := c.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
+		log.Debugf("[region %v] already have operator %s, cancel add operator", op.RegionID(), old)
+		return false
+	}
 	return true
 }
 
