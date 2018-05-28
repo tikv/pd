@@ -671,6 +671,14 @@ func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *Regi
 	return prev, next
 }
 
+// GetAverageRegionSize returns the average region approximate size.
+func (r *RegionsInfo) GetAverageRegionSize() int64 {
+	if r.regions.Len() == 0 {
+		return 0
+	}
+	return r.regions.TotalSize() / int64(r.regions.Len())
+}
+
 // RegionStats records a list of regions' statistics and distribution status.
 type RegionStats struct {
 	Count            int              `json:"count"`

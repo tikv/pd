@@ -64,13 +64,13 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 	}
 
 	start := time.Now()
-	if err := kv.LoadStores(c.Stores, kvRangeLimit); err != nil {
+	if err := kv.LoadStores(c.Stores); err != nil {
 		return nil, errors.Trace(err)
 	}
 	log.Infof("load %v stores cost %v", c.Stores.GetStoreCount(), time.Since(start))
 
 	start = time.Now()
-	if err := kv.LoadRegions(c.Regions, kvRangeLimit); err != nil {
+	if err := kv.LoadRegions(c.Regions); err != nil {
 		return nil, errors.Trace(err)
 	}
 	log.Infof("load %v regions cost %v", c.Regions.GetRegionCount(), time.Since(start))
@@ -327,6 +327,13 @@ func (c *clusterInfo) RandFollowerRegion(storeID uint64, opts ...core.RegionOpti
 	return c.BasicCluster.RandFollowerRegion(storeID, opts...)
 }
 
+// GetAverageRegionSize returns the average region approximate size.
+func (c *clusterInfo) GetAverageRegionSize() int64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.BasicCluster.GetAverageRegionSize()
+}
+
 // GetRegionStores returns all stores that contains the region's peer.
 func (c *clusterInfo) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
 	c.RLock()
@@ -519,6 +526,8 @@ func (c *clusterInfo) collectMetrics() {
 	defer c.RUnlock()
 	c.regionStats.Collect()
 	c.labelLevelStats.Collect()
+	// collect hot cache metrics
+	c.HotCache.CollectMetrics(c.Stores)
 }
 
 func (c *clusterInfo) GetRegionStatsByType(typ regionStatisticType) []*core.RegionInfo {
@@ -572,6 +581,14 @@ func (c *clusterInfo) GetMaxPendingPeerCount() uint64 {
 
 func (c *clusterInfo) GetMaxMergeRegionSize() uint64 {
 	return c.opt.GetMaxMergeRegionSize()
+}
+
+func (c *clusterInfo) GetSplitMergeInterval() time.Duration {
+	return c.opt.GetSplitMergeInterval()
+}
+
+func (c *clusterInfo) GetPatrolRegionInterval() time.Duration {
+	return c.opt.GetPatrolRegionInterval()
 }
 
 func (c *clusterInfo) GetMaxStoreDownTime() time.Duration {

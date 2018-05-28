@@ -87,6 +87,19 @@ func (c *namespaceCluster) RandLeaderRegion(storeID uint64, opts ...core.RegionO
 	return nil
 }
 
+// GetAverageRegionSize returns the average region approximate size.
+func (c *namespaceCluster) GetAverageRegionSize() int64 {
+	var totalCount, totalSize int64
+	for _, s := range c.stores {
+		totalCount += int64(s.RegionCount)
+		totalSize += s.RegionSize
+	}
+	if totalCount == 0 {
+		return 0
+	}
+	return totalSize / totalCount
+}
+
 // GetStores returns all stores in the namespace.
 func (c *namespaceCluster) GetStores() []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, len(c.stores))

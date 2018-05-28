@@ -17,6 +17,8 @@ initial-cluster-state = "new"
 lease = 3
 tso-save-interval = "3s"
 
+namespace-classifier = "table"
+
 [security]
 # Path of file that contains list of trusted SSL CAs. if set, following four settings shouldn't be empty
 cacert-path = ""
@@ -54,6 +56,7 @@ address = ""
 
 [schedule]
 max-merge-region-size = 0
+split-merge-interval = "1h"
 max-snapshot-count = 3
 max-pending-peer-count = 16
 max-store-down-time = "30m"

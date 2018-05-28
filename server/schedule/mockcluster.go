@@ -94,6 +94,14 @@ func (mc *MockCluster) SetStoreUp(storeID uint64) {
 	mc.PutStore(store)
 }
 
+// SetStoreDisconnect changes a store's state to disconnected.
+func (mc *MockCluster) SetStoreDisconnect(storeID uint64) {
+	store := mc.GetStore(storeID)
+	store.State = metapb.StoreState_Up
+	store.LastHeartbeatTS = time.Now().Add(-time.Second * 30)
+	mc.PutStore(store)
+}
+
 // SetStoreDown sets store down.
 func (mc *MockCluster) SetStoreDown(storeID uint64) {
 	store := mc.GetStore(storeID)
@@ -340,6 +348,16 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 					IsLearner: true,
 				}
 				region.AddPeer(peer)
+			case PromoteLearner:
+				if region.GetStoreLearner(s.ToStore) == nil {
+					panic("promote peer that doesn't exist")
+				}
+				region.RemoveStorePeer(s.ToStore)
+				peer := &metapb.Peer{
+					Id:      s.PeerID,
+					StoreId: s.ToStore,
+				}
+				region.AddPeer(peer)
 			default:
 				panic("Unknown operator step")
 			}
@@ -397,8 +415,9 @@ const (
 	defaultMaxReplicas          = 3
 	defaultMaxSnapshotCount     = 3
 	defaultMaxPendingPeerCount  = 16
-	defaultMaxStoreDownTime     = 30 * time.Minute
 	defaultMaxMergeRegionSize   = 0
+	defaultSplitMergeInterval   = 0
+	defaultMaxStoreDownTime     = 30 * time.Minute
 	defaultLeaderScheduleLimit  = 4
 	defaultRegionScheduleLimit  = 4
 	defaultReplicaScheduleLimit = 8
@@ -417,15 +436,16 @@ type MockSchedulerOptions struct {
 	MergeScheduleLimit    uint64
 	MaxSnapshotCount      uint64
 	MaxPendingPeerCount   uint64
+	MaxMergeRegionSize    uint64
+	SplitMergeInterval    time.Duration
 	MaxStoreDownTime      time.Duration
 	MaxReplicas           int
-	MaxMergeRegionSize    uint64
 	LocationLabels        []string
 	HotRegionLowThreshold int
 	TolerantSizeRatio     float64
 	LowSpaceRatio         float64
 	HighSpaceRatio        float64
-	EnableRaftLearner     bool
+	DisableLearner        bool
 	LabelProperties       map[string][]*metapb.StoreLabel
 }
 
@@ -437,11 +457,12 @@ func NewMockSchedulerOptions() *MockSchedulerOptions {
 	mso.ReplicaScheduleLimit = defaultReplicaScheduleLimit
 	mso.MergeScheduleLimit = defaultMergeScheduleLimit
 	mso.MaxSnapshotCount = defaultMaxSnapshotCount
+	mso.MaxMergeRegionSize = defaultMaxMergeRegionSize
+	mso.SplitMergeInterval = defaultSplitMergeInterval
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
 	mso.HotRegionLowThreshold = HotRegionLowThreshold
 	mso.MaxPendingPeerCount = defaultMaxPendingPeerCount
-	mso.MaxMergeRegionSize = defaultMaxMergeRegionSize
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
 	mso.LowSpaceRatio = defaultLowSpaceRatio
 	mso.HighSpaceRatio = defaultHighSpaceRatio
@@ -478,6 +499,16 @@ func (mso *MockSchedulerOptions) GetMaxPendingPeerCount() uint64 {
 	return mso.MaxPendingPeerCount
 }
 
+// GetMaxMergeRegionSize mock method
+func (mso *MockSchedulerOptions) GetMaxMergeRegionSize() uint64 {
+	return mso.MaxMergeRegionSize
+}
+
+// GetSplitMergeInterval mock method
+func (mso *MockSchedulerOptions) GetSplitMergeInterval() time.Duration {
+	return mso.SplitMergeInterval
+}
+
 // GetMaxStoreDownTime mock method
 func (mso *MockSchedulerOptions) GetMaxStoreDownTime() time.Duration {
 	return mso.MaxStoreDownTime
@@ -486,11 +517,6 @@ func (mso *MockSchedulerOptions) GetMaxStoreDownTime() time.Duration {
 // GetMaxReplicas mock method
 func (mso *MockSchedulerOptions) GetMaxReplicas(name string) int {
 	return mso.MaxReplicas
-}
-
-// GetMaxMergeRegionSize mock method
-func (mso *MockSchedulerOptions) GetMaxMergeRegionSize() uint64 {
-	return mso.MaxMergeRegionSize
 }
 
 // GetLocationLabels mock method
@@ -525,5 +551,5 @@ func (mso *MockSchedulerOptions) SetMaxReplicas(replicas int) {
 
 // IsRaftLearnerEnabled mock method
 func (mso *MockSchedulerOptions) IsRaftLearnerEnabled() bool {
-	return mso.EnableRaftLearner
+	return !mso.DisableLearner
 }

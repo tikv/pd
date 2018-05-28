@@ -139,7 +139,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.BoolVar(&cfg.Log.File.LogRotate, "log-rotate", true, "rotate log")
-	fs.StringVar(&cfg.NamespaceClassifier, "namespace-classifier", "default", "namespace classifier (default 'default')")
+	fs.StringVar(&cfg.NamespaceClassifier, "namespace-classifier", "table", "namespace classifier (default 'table')")
 
 	fs.StringVar(&cfg.Security.CAPath, "cacert", "", "Path of file that contains list of trusted TLS CAs")
 	fs.StringVar(&cfg.Security.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format")
@@ -159,7 +159,7 @@ const (
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
 	defaultPeerUrls            = "http://127.0.0.1:2380"
-	defualtInitialClusterState = embed.ClusterStateFlagNew
+	defaultInitialClusterState = embed.ClusterStateFlagNew
 
 	// etcd use 100ms for heartbeat and 1s for election timeout.
 	// We can enlarge both a little to reduce the network aggression.
@@ -300,7 +300,7 @@ func (c *Config) adjust() error {
 		}
 	}
 
-	adjustString(&c.InitialClusterState, defualtInitialClusterState)
+	adjustString(&c.InitialClusterState, defaultInitialClusterState)
 
 	if len(c.Join) > 0 {
 		if _, err := url.Parse(c.Join); err != nil {
@@ -321,7 +321,7 @@ func (c *Config) adjust() error {
 	adjustDuration(&c.TickInterval, defaultTickInterval)
 	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
 
-	adjustString(&c.NamespaceClassifier, "default")
+	adjustString(&c.NamespaceClassifier, "table")
 
 	adjustString(&c.Metric.PushJob, c.Name)
 
@@ -364,6 +364,10 @@ type ScheduleConfig struct {
 	// If the size of region is smaller than this value,
 	// it will try to merge with adjacent regions.
 	MaxMergeRegionSize uint64 `toml:"max-merge-region-size,omitempty" json:"max-merge-region-size"`
+	// SplitMergeInterval is the minimum interval time to permit merge after split.
+	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval,omitempty" json:"split-merge-interval"`
+	// PatrolRegionInterval is the interval for scanning region during patrol.
+	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval,omitempty" json:"patrol-region-interval"`
 	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
@@ -389,8 +393,8 @@ type ScheduleConfig struct {
 	// HighSpaceRatio is the highest usage ratio of store which regraded as high space.
 	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
 	HighSpaceRatio float64 `toml:"high-space-ratio,omitempty" json:"high-space-ratio"`
-	// EnableRaftLearner is the option for using AddLearnerNode instead of AddNode
-	EnableRaftLearner bool `toml:"enable-raft-learner" json:"enable-raft-learner,string"`
+	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode
+	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string"`
 	// Schedulers support for loding customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 }
@@ -401,8 +405,10 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 	return &ScheduleConfig{
 		MaxSnapshotCount:     c.MaxSnapshotCount,
 		MaxPendingPeerCount:  c.MaxPendingPeerCount,
-		MaxStoreDownTime:     c.MaxStoreDownTime,
 		MaxMergeRegionSize:   c.MaxMergeRegionSize,
+		SplitMergeInterval:   c.SplitMergeInterval,
+		PatrolRegionInterval: c.PatrolRegionInterval,
+		MaxStoreDownTime:     c.MaxStoreDownTime,
 		LeaderScheduleLimit:  c.LeaderScheduleLimit,
 		RegionScheduleLimit:  c.RegionScheduleLimit,
 		ReplicaScheduleLimit: c.ReplicaScheduleLimit,
@@ -410,16 +416,35 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		TolerantSizeRatio:    c.TolerantSizeRatio,
 		LowSpaceRatio:        c.LowSpaceRatio,
 		HighSpaceRatio:       c.HighSpaceRatio,
-		EnableRaftLearner:    c.EnableRaftLearner,
+		DisableLearner:       c.DisableLearner,
 		Schedulers:           schedulers,
 	}
 }
 
+const (
+	defaultMaxReplicas          = 3
+	defaultMaxSnapshotCount     = 3
+	defaultMaxPendingPeerCount  = 16
+	defaultMaxMergeRegionSize   = 20
+	defaultSplitMergeInterval   = 1 * time.Hour
+	defaultPatrolRegionInterval = 100 * time.Millisecond
+	defaultMaxStoreDownTime     = 30 * time.Minute
+	defaultLeaderScheduleLimit  = 4
+	defaultRegionScheduleLimit  = 4
+	defaultReplicaScheduleLimit = 8
+	defaultMergeScheduleLimit   = 8
+	defaultTolerantSizeRatio    = 5
+	defaultLowSpaceRatio        = 0.8
+	defaultHighSpaceRatio       = 0.6
+)
+
 func (c *ScheduleConfig) adjust() error {
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
-	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
+	adjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
+	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
+	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
 	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
@@ -458,26 +483,21 @@ type SchedulerConfig struct {
 	Disable bool     `toml:"disable" json:"disable"`
 }
 
-const (
-	defaultMaxReplicas          = 3
-	defaultMaxSnapshotCount     = 3
-	defaultMaxPendingPeerCount  = 16
-	defaultMaxMergeRegionSize   = 0
-	defaultMaxStoreDownTime     = 30 * time.Minute
-	defaultLeaderScheduleLimit  = 4
-	defaultRegionScheduleLimit  = 4
-	defaultReplicaScheduleLimit = 8
-	defaultMergeScheduleLimit   = 8
-	defaultTolerantSizeRatio    = 5
-	defaultLowSpaceRatio        = 0.8
-	defaultHighSpaceRatio       = 0.6
-)
-
 var defaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
 	{Type: "hot-region"},
 	{Type: "label"},
+}
+
+// IsDefaultScheduler checks whether the scheduler is enable by default.
+func IsDefaultScheduler(typ string) bool {
+	for _, c := range defaultSchedulers {
+		if typ == c.Type {
+			return true
+		}
+	}
+	return false
 }
 
 // ReplicationConfig is the replication configuration.

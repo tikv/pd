@@ -40,7 +40,6 @@ const (
 	regionheartbeatSendChanCap = 1024
 	hotRegionScheduleName      = "balance-hot-region-scheduler"
 
-	patrolRegionInterval  = time.Millisecond * 100
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
 )
 
@@ -109,36 +108,22 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 			c.removeOperator(op)
 		}
 	}
-	// If PD has restarted, it need to check learners added before and promote them.
-	if c.cluster.IsRaftLearnerEnabled() && c.getOperator(region.GetId()) == nil {
-		for _, p := range region.GetLearners() {
-			if region.GetPendingLearner(p.GetId()) != nil {
-				continue
-			}
-			step := schedule.PromoteLearner{
-				ToStore: p.GetStoreId(),
-				PeerID:  p.GetId(),
-			}
-			op := schedule.NewOperator("promoteLearner", region.GetId(), schedule.OpRegion, step)
-			c.addOperator(op)
-			break
-		}
-	}
 }
 
 func (c *coordinator) patrolRegions() {
 	defer logutil.LogPanic()
 
 	defer c.wg.Done()
-	ticker := time.NewTicker(patrolRegionInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(c.cluster.GetPatrolRegionInterval())
+	defer timer.Stop()
 
 	log.Info("coordinator: start patrol regions")
-
+	start := time.Now()
 	var key []byte
 	for {
 		select {
-		case <-ticker.C:
+		case <-timer.C:
+			timer.Reset(c.cluster.GetPatrolRegionInterval())
 		case <-c.ctx.Done():
 			return
 		}
@@ -158,30 +143,57 @@ func (c *coordinator) patrolRegions() {
 
 			key = region.GetEndKey()
 
-			if op := c.namespaceChecker.Check(region); op != nil {
-				if c.addOperator(op) {
-					break
-				}
-			}
-			if c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
-				if op := c.replicaChecker.Check(region); op != nil {
-					if c.addOperator(op) {
-						break
-					}
-				}
-			}
-			if c.limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
-				if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
-					// make sure two operators can add successfully altogether
-					if c.addOperators(op1, op2) {
-						break
-					}
-				}
+			if c.checkRegion(region) {
+				break
 			}
 		}
 		// update label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
+		if len(key) == 0 {
+			patrolCheckRegionsHistogram.Observe(time.Since(start).Seconds())
+			start = time.Now()
+		}
 	}
+}
+
+func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
+	// If PD has restarted, it need to check learners added before and promote them.
+	// Don't check isRaftLearnerEnabled cause it may be disable learner feature but still some learners to promote.
+	for _, p := range region.GetLearners() {
+		if region.GetPendingLearner(p.GetId()) != nil {
+			continue
+		}
+		step := schedule.PromoteLearner{
+			ToStore: p.GetStoreId(),
+			PeerID:  p.GetId(),
+		}
+		op := schedule.NewOperator("promoteLearner", region.GetId(), schedule.OpRegion, step)
+		if c.addOperator(op) {
+			return true
+		}
+	}
+
+	if op := c.namespaceChecker.Check(region); op != nil {
+		if c.addOperator(op) {
+			return true
+		}
+	}
+	if c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+		if op := c.replicaChecker.Check(region); op != nil {
+			if c.addOperator(op) {
+				return true
+			}
+		}
+	}
+	if c.limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
+		if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
+			// make sure two operators can add successfully altogether
+			if c.addOperators(op1, op2) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (c *coordinator) run() {
@@ -353,8 +365,6 @@ func (c *coordinator) collectHotSpotMetrics() {
 		}
 	}
 
-	// collect hot cache metrics
-	c.cluster.HotCache.CollectMetrics(c.cluster.Stores)
 }
 
 func (c *coordinator) shouldRun() bool {

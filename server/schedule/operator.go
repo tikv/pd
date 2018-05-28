@@ -27,9 +27,14 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
-// MaxOperatorWaitTime is the duration that if an operator lives longer that it,
-// the operator is considered timeout.
-const MaxOperatorWaitTime = 10 * time.Minute
+const (
+	// LeaderOperatorWaitTime is the duration that when a leader operator lives
+	// longer than it, the operator will be considered timeout.
+	LeaderOperatorWaitTime = 10 * time.Second
+	// RegionOperatorWaitTime is the duration that when a region operator lives
+	// longer than it, the operator will be considered timeout.
+	RegionOperatorWaitTime = 10 * time.Minute
+)
 
 // OperatorStep describes the basic scheduling steps that can not be subdivided.
 type OperatorStep interface {
@@ -349,7 +354,10 @@ func (o *Operator) IsTimeout() bool {
 	if o.IsFinish() {
 		return false
 	}
-	return time.Since(o.createTime) > MaxOperatorWaitTime
+	if o.kind&OpRegion != 0 {
+		return time.Since(o.createTime) > RegionOperatorWaitTime
+	}
+	return time.Since(o.createTime) > LeaderOperatorWaitTime
 }
 
 // Influence calculates the store difference which unfinished operator steps make
@@ -383,6 +391,8 @@ func (o *Operator) History() []OperatorHistory {
 				Kind:       core.LeaderKind,
 			})
 		case AddPeer:
+			addPeerStores = append(addPeerStores, s.ToStore)
+		case AddLearner:
 			addPeerStores = append(addPeerStores, s.ToStore)
 		case RemovePeer:
 			removePeerStores = append(removePeerStores, s.FromStore)
