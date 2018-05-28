@@ -319,10 +319,10 @@ func (c *clusterInfo) RandFollowerRegion(storeID uint64, opts ...core.RegionOpti
 func (c *clusterInfo) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
-	return c.getRegionStores(region)
+	return c.getRegionStoresLocked(region)
 }
 
-func (c *clusterInfo) getRegionStores(region *core.RegionInfo) []*core.StoreInfo {
+func (c *clusterInfo) getRegionStoresLocked(region *core.RegionInfo) []*core.StoreInfo {
 	var stores []*core.StoreInfo
 	for id := range region.GetStoreIds() {
 		if store := c.core.Stores.GetStore(id); store != nil {
@@ -376,7 +376,7 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	return nil
 }
 
-func (c *clusterInfo) updateStoreStatus(id uint64) {
+func (c *clusterInfo) updateStoreStatusLocked(id uint64) {
 	c.core.Stores.SetLeaderCount(id, c.core.Regions.GetStoreLeaderCount(id))
 	c.core.Stores.SetRegionCount(id, c.core.Regions.GetStoreRegionCount(id))
 	c.core.Stores.SetPendingPeerCount(id, c.core.Regions.GetStorePendingPeerCount(id))
@@ -469,16 +469,16 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		// Update related stores.
 		if origin != nil {
 			for _, p := range origin.Peers {
-				c.updateStoreStatus(p.GetStoreId())
+				c.updateStoreStatusLocked(p.GetStoreId())
 			}
 		}
 		for _, p := range region.Peers {
-			c.updateStoreStatus(p.GetStoreId())
+			c.updateStoreStatusLocked(p.GetStoreId())
 		}
 	}
 
 	if c.regionStats != nil {
-		c.regionStats.Observe(region, c.getRegionStores(region))
+		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 	}
 
 	key := region.GetId()
@@ -495,7 +495,7 @@ func (c *clusterInfo) updateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	c.Lock()
 	defer c.Unlock()
 	for _, region := range regions {
-		c.labelLevelStats.Observe(region, c.getRegionStores(region), c.GetLocationLabels())
+		c.labelLevelStats.Observe(region, c.getRegionStoresLocked(region), c.GetLocationLabels())
 	}
 }
 
@@ -598,10 +598,12 @@ func (c *clusterInfo) CheckLabelProperty(typ string, labels []*metapb.StoreLabel
 
 // RegionReadStats returns hot region's read stats.
 func (c *clusterInfo) RegionReadStats() []*core.RegionStat {
+	// RegionStats is a thread-safe method
 	return c.core.HotCache.RegionStats(schedule.ReadFlow)
 }
 
 // RegionWriteStats returns hot region's write stats.
 func (c *clusterInfo) RegionWriteStats() []*core.RegionStat {
+	// RegionStats is a thread-safe method
 	return c.core.HotCache.RegionStats(schedule.WriteFlow)
 }
