@@ -75,14 +75,18 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
+	// create a region to control average region size.
+	tc.AddLeaderRegion(1, 1, 2)
 
 	for _, t := range tests {
 		tc.AddLeaderStore(1, int(t.sourceCount))
 		tc.AddLeaderStore(2, int(t.targetCount))
 		source := tc.GetStore(1)
 		target := tc.GetStore(2)
-		region := &core.RegionInfo{ApproximateSize: t.regionSize}
-		c.Assert(shouldBalance(tc, source, target, core.LeaderKind, region, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
+		region := tc.GetRegion(1)
+		region.ApproximateSize = t.regionSize
+		tc.PutRegion(region.Clone())
+		c.Assert(shouldBalance(tc, source, target, region, core.LeaderKind, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -90,8 +94,10 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		tc.AddRegionStore(2, int(t.targetCount))
 		source := tc.GetStore(1)
 		target := tc.GetStore(2)
-		region := &core.RegionInfo{ApproximateSize: t.regionSize}
-		c.Assert(shouldBalance(tc, source, target, core.RegionKind, region, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
+		region := tc.GetRegion(1)
+		region.ApproximateSize = t.regionSize
+		tc.PutRegion(region)
+		c.Assert(shouldBalance(tc, source, target, region, core.RegionKind, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
 	}
 }
 
