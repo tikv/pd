@@ -179,16 +179,28 @@ func (c *clusterInfo) getStoreCount() int {
 	return c.core.Stores.GetStoreCount()
 }
 
-func (c *clusterInfo) getStoresWriteStat() map[uint64]uint64 {
+func (c *clusterInfo) getStoresBytesWriteStat() map[uint64]uint64 {
 	c.RLock()
 	defer c.RUnlock()
-	return c.core.Stores.GetStoresWriteStat()
+	return c.core.Stores.GetStoresBytesWriteStat()
 }
 
-func (c *clusterInfo) getStoresReadStat() map[uint64]uint64 {
+func (c *clusterInfo) getStoresBytesReadStat() map[uint64]uint64 {
 	c.RLock()
 	defer c.RUnlock()
-	return c.core.Stores.GetStoresReadStat()
+	return c.core.Stores.GetStoresBytesReadStat()
+}
+
+func (c *clusterInfo) getStoresKeysWriteStat() map[uint64]uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.core.Stores.GetStoresKeysWriteStat()
+}
+
+func (c *clusterInfo) getStoresKeysReadStat() map[uint64]uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.core.Stores.GetStoresKeysReadStat()
 }
 
 // ScanRegions scans region with start key, until number greater than limit.

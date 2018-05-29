@@ -82,7 +82,7 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	// transfer peer from store 1 to 4 for region 1 because the distribution of
 	// the two regions is same, we will transfer the peer, which is leader now,
 	// to a new store
-	checkTransferPeerWithLeaderTransfer(c, sc.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpAdjacent, 1, 4)
+	testutil.CheckTransferPeerWithLeaderTransfer(c, sc.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpAdjacent, 1, 4)
 	// suppose we add peer in store 4, transfer leader to store 2, remove peer in store 1
 	tc.AddLeaderRegionWithRange(1, "", "a", 2, 3, 4)
 
@@ -97,7 +97,7 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 
 	// transfer peer from store 1 to store 4 for region 5
 	// the region 5 just adjacent the region 6
-	checkTransferPeerWithLeaderTransfer(c, sc.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpAdjacent, 1, 4)
+	testutil.CheckTransferPeerWithLeaderTransfer(c, sc.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpAdjacent, 1, 4)
 	tc.AddLeaderRegionWithRange(5, "e", "f", 2, 3, 4)
 
 	c.Assert(sc.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)

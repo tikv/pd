@@ -93,7 +93,7 @@ func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 	return stores, nil
 }
 
-// GetHotWriteRegions gets all hot write regions status
+// GetHotWriteRegions gets all hot write regions stats.
 func (h *Handler) GetHotWriteRegions() *core.StoreHotRegionInfos {
 	c, err := h.getCoordinator()
 	if err != nil {
@@ -102,7 +102,7 @@ func (h *Handler) GetHotWriteRegions() *core.StoreHotRegionInfos {
 	return c.getHotWriteRegions()
 }
 
-// GetHotReadRegions gets all hot read regions status
+// GetHotReadRegions gets all hot read regions stats.
 func (h *Handler) GetHotReadRegions() *core.StoreHotRegionInfos {
 	c, err := h.getCoordinator()
 	if err != nil {
@@ -111,14 +111,24 @@ func (h *Handler) GetHotReadRegions() *core.StoreHotRegionInfos {
 	return c.getHotReadRegions()
 }
 
-// GetHotWriteStores gets all hot write stores status
-func (h *Handler) GetHotWriteStores() map[uint64]uint64 {
-	return h.s.cluster.cachedCluster.getStoresWriteStat()
+// GetHotBytesWriteStores gets all hot write stores stats.
+func (h *Handler) GetHotBytesWriteStores() map[uint64]uint64 {
+	return h.s.cluster.cachedCluster.getStoresBytesWriteStat()
 }
 
-// GetHotReadStores gets all hot write stores status
-func (h *Handler) GetHotReadStores() map[uint64]uint64 {
-	return h.s.cluster.cachedCluster.getStoresReadStat()
+// GetHotBytesReadStores gets all hot write stores stats.
+func (h *Handler) GetHotBytesReadStores() map[uint64]uint64 {
+	return h.s.cluster.cachedCluster.getStoresBytesReadStat()
+}
+
+// GetHotKeysWriteStores gets all hot write stores stats.
+func (h *Handler) GetHotKeysWriteStores() map[uint64]uint64 {
+	return h.s.cluster.cachedCluster.getStoresKeysWriteStat()
+}
+
+// GetHotKeysReadStores gets all hot write stores stats.
+func (h *Handler) GetHotKeysReadStores() map[uint64]uint64 {
+	return h.s.cluster.cachedCluster.getStoresKeysReadStat()
 }
 
 // AddScheduler adds a scheduler.
