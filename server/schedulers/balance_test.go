@@ -519,7 +519,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	// Add peer in store 3, and we have redundant replicas.
 	peer3, _ := tc.AllocPeer(3)
 	region.AddPeer(peer3)
-	checkRemovePeer(c, rc.Check(region), 1)
+	testutil.CheckRemovePeer(c, rc.Check(region), 1)
 	region.RemoveStorePeer(1)
 
 	// Peer in store 2 is down, remove it.
@@ -529,7 +529,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 		DownSeconds: 24 * 60 * 60,
 	}
 	region.DownPeers = append(region.DownPeers, downPeer)
-	checkRemovePeer(c, rc.Check(region), 2)
+	testutil.CheckRemovePeer(c, rc.Check(region), 2)
 	region.DownPeers = nil
 	c.Assert(rc.Check(region), IsNil)
 
@@ -585,19 +585,19 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	// Store 4 has the same zone with store 3 and larger region score.
 	peer4, _ := tc.AllocPeer(4)
 	region.AddPeer(peer4)
-	checkRemovePeer(c, rc.Check(region), 4)
+	testutil.CheckRemovePeer(c, rc.Check(region), 4)
 
 	// Test healthFilter.
 	tc.SetStoreBusy(4, true)
 	c.Assert(rc.Check(region), IsNil)
 	tc.SetStoreBusy(4, false)
-	checkRemovePeer(c, rc.Check(region), 4)
+	testutil.CheckRemovePeer(c, rc.Check(region), 4)
 
 	// Test offline
 	// the number of region peers more than the maxReplicas
 	// remove the peer
 	tc.SetStoreOffline(3)
-	checkRemovePeer(c, rc.Check(region), 3)
+	testutil.CheckRemovePeer(c, rc.Check(region), 3)
 	region.RemoveStorePeer(4)
 	// the number of region peers equals the maxReplicas
 	// Transfer peer to store 4.
@@ -665,7 +665,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 1, 6)
 	peer6, _ := tc.AllocPeer(6)
 	region.AddPeer(peer6)
-	checkRemovePeer(c, rc.Check(region), 1)
+	testutil.CheckRemovePeer(c, rc.Check(region), 1)
 	region.RemoveStorePeer(1)
 	c.Assert(rc.Check(region), IsNil)
 
@@ -682,7 +682,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 2, 10)
 	peer10, _ := tc.AllocPeer(10)
 	region.AddPeer(peer10)
-	checkRemovePeer(c, rc.Check(region), 2)
+	testutil.CheckRemovePeer(c, rc.Check(region), 2)
 	region.RemoveStorePeer(2)
 	c.Assert(rc.Check(region), IsNil)
 }
@@ -939,15 +939,15 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	switch op[0].Len() {
 	case 1:
 		// balance by leader selected
-		checkTransferLeaderFrom(c, op[0], schedule.OpHotRegion, 1)
+		testutil.CheckTransferLeaderFrom(c, op[0], schedule.OpHotRegion, 1)
 	case 3:
 		// balance by peer selected
 		if op[0].RegionID() == 2 {
 			// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
-			checkTransferPeerWithLeaderTransferFrom(c, op[0], schedule.OpHotRegion, 1)
+			testutil.CheckTransferPeerWithLeaderTransferFrom(c, op[0], schedule.OpHotRegion, 1)
 		} else {
 			// peer in store 1 of the region 1,2 can only transfer to store 6
-			checkTransferPeerWithLeaderTransfer(c, op[0], schedule.OpHotRegion, 1, 6)
+			testutil.CheckTransferPeerWithLeaderTransfer(c, op[0], schedule.OpHotRegion, 1, 6)
 		}
 	}
 	// After transfer a hot region from store 1 to store 5
@@ -971,7 +971,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*1024*schedule.RegionHeartBeatReportInterval, 4, 5)
 	// We can find that the leader of all hot regions are on store 1,
 	// so one of the leader will transfer to another store.
-	checkTransferLeaderFrom(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpHotRegion, 1)
+	testutil.CheckTransferLeaderFrom(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpHotRegion, 1)
 
 	// Should not panic if region not found.
 	for i := uint64(1); i <= 3; i++ {
@@ -1044,7 +1044,7 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 
 	// Now appear two read hot region in store 1 and 4
 	// We will Transfer peer from 1 to 5
-	checkTransferPeerWithLeaderTransfer(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpHotRegion, 1, 5)
+	testutil.CheckTransferPeerWithLeaderTransfer(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpHotRegion, 1, 5)
 
 	// Should not panic if region not found.
 	for i := uint64(1); i <= 3; i++ {
@@ -1120,33 +1120,4 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 		regionCount := tc.Regions.GetStoreRegionCount(uint64(i))
 		c.Assert(regionCount, LessEqual, 32)
 	}
-}
-
-func checkRemovePeer(c *C, op *schedule.Operator, storeID uint64) {
-	if op.Len() == 1 {
-		c.Assert(op.Step(0).(schedule.RemovePeer).FromStore, Equals, storeID)
-	} else {
-		c.Assert(op.Len(), Equals, 2)
-		c.Assert(op.Step(0).(schedule.TransferLeader).FromStore, Equals, storeID)
-		c.Assert(op.Step(1).(schedule.RemovePeer).FromStore, Equals, storeID)
-	}
-}
-
-func checkTransferPeerWithLeaderTransfer(c *C, op *schedule.Operator, kind schedule.OperatorKind, sourceID, targetID uint64) {
-	c.Assert(op.Len(), Equals, 4)
-	testutil.CheckTransferPeer(c, op, kind, sourceID, targetID)
-}
-
-func checkTransferLeaderFrom(c *C, op *schedule.Operator, kind schedule.OperatorKind, sourceID uint64) {
-	c.Assert(op.Len(), Equals, 1)
-	c.Assert(op.Step(0).(schedule.TransferLeader).FromStore, Equals, sourceID)
-	kind |= schedule.OpLeader
-	c.Assert(op.Kind()&kind, Equals, kind)
-}
-
-func checkTransferPeerWithLeaderTransferFrom(c *C, op *schedule.Operator, kind schedule.OperatorKind, sourceID uint64) {
-	c.Assert(op.Len(), Equals, 4)
-	c.Assert(op.Step(3).(schedule.RemovePeer).FromStore, Equals, sourceID)
-	kind |= (schedule.OpRegion | schedule.OpLeader)
-	c.Assert(op.Kind()&kind, Equals, kind)
 }
