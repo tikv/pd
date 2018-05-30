@@ -74,7 +74,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 			}
 		}
 		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
-		return NewOperator("makeUpReplica", region.GetId(), OpReplica|OpRegion, steps...)
+		return NewOperator("makeUpReplica", region.GetId(), region.GetRegionEpoch(), OpReplica|OpRegion, steps...)
 	}
 
 	// when add learner peer, the number of peer will exceed max replicas for a wille,

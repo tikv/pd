@@ -58,7 +58,7 @@ func (s *testOperatorSuite) TestOperatorStep(c *C) {
 }
 
 func (s *testOperatorSuite) newTestOperator(regionID uint64, kind OperatorKind, steps ...OperatorStep) *Operator {
-	return NewOperator("testOperator", regionID, OpAdmin|kind, steps...)
+	return NewOperator("testOperator", regionID, &metapb.RegionEpoch{}, OpAdmin|kind, steps...)
 }
 
 func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OperatorStep) {
