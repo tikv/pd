@@ -32,14 +32,6 @@ import (
 const (
 	requestTimeout  = etcdutil.DefaultRequestTimeout
 	slowRequestTime = etcdutil.DefaultSlowRequestTime
-
-	defaultLogTimeFormat = "2006/01/02 15:04:05"
-	defaultLogMaxSize    = 300 // MB
-	defaultLogMaxBackups = 3
-	defaultLogMaxAge     = 28 // days
-	defaultLogLevel      = log.InfoLevel
-
-	logDirMode = 0755
 )
 
 // Version information.
@@ -229,20 +221,6 @@ func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
 	}
 
 	return members, nil
-}
-
-func minUint64(a, b uint64) uint64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxUint64(a, b uint64) uint64 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func parseTimestamp(data []byte) (time.Time, error) {

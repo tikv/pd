@@ -31,8 +31,7 @@ import (
 )
 
 var (
-	errNoLeader   = errors.New("no leader")
-	nextLeaderTTL = 10 // in seconds
+	errNoLeader = errors.New("no leader")
 )
 
 // IsLeader returns whether server is leader or not.

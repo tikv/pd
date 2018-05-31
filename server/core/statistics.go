@@ -22,7 +22,6 @@ import (
 type RollingStats struct {
 	records []float64
 	size    int
-	pos     int
 	count   int
 }
 

@@ -27,12 +27,6 @@ var _ = Suite(&testConfigSuite{})
 type testConfigSuite struct {
 }
 
-func checkConfigResponse(c *C, body []byte, cfgs []*server.Config) {
-	got := &server.Config{}
-	err := json.Unmarshal(body, &got)
-	c.Assert(err, IsNil)
-}
-
 func (s *testConfigSuite) TestConfigAll(c *C) {
 	numbers := []int{1, 3}
 	for _, num := range numbers {
