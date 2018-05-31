@@ -283,6 +283,7 @@ func (s *testJoinServerSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 
 	cfgs[target].InitialCluster = ""
 	_, err := startPdWith(cfgs[target])
+	fmt.Println(":Debug", err)
 	// A deleted PD will not start successfully.
 	c.Assert(err, Equals, errTimeout)
 
