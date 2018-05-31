@@ -53,42 +53,6 @@ func mustRunTestServer(c *C) (*Server, cleanUpFunc) {
 	return server, cleanup
 }
 
-func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
-	svrs := make([]*Server, 0, count)
-	cfgs := NewTestMultiConfig(count)
-
-	ch := make(chan *Server, count)
-	for _, cfg := range cfgs {
-		go func(cfg *Config) {
-			svr, err := CreateServer(cfg, nil)
-			c.Assert(err, IsNil)
-			err = svr.Run()
-			c.Assert(err, IsNil)
-			ch <- svr
-		}(cfg)
-	}
-
-	for i := 0; i < count; i++ {
-		svr := <-ch
-		svrs = append(svrs, svr)
-	}
-	close(ch)
-
-	mustWaitLeader(c, svrs)
-
-	cleanup := func() {
-		for _, svr := range svrs {
-			svr.Close()
-		}
-
-		for _, cfg := range cfgs {
-			cleanServer(cfg)
-		}
-	}
-
-	return svrs, cleanup
-}
-
 func mustWaitLeader(c *C, svrs []*Server) *Server {
 	var leader *Server
 	testutil.WaitUntil(c, func(c *C) bool {
