@@ -278,7 +278,7 @@ func (s *testClusterInfoSuite) TestLoadClusterInfo(c *C) {
 
 func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	_, opt := newTestScheduleConfig()
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, nil)
+	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
 
 	n, np := uint64(3), uint64(3)
 	stores := newTestStores(n)
@@ -290,7 +290,12 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	c.Assert(cluster.getRegionCount(), Equals, int(n))
 
 	for i, store := range stores {
-		storeStats := &pdpb.StoreStats{StoreId: store.GetId()}
+		storeStats := &pdpb.StoreStats{
+			StoreId:     store.GetId(),
+			Capacity:    100,
+			Available:   50,
+			RegionCount: 1,
+		}
 		c.Assert(cluster.handleStoreHeartbeat(storeStats), NotNil)
 
 		c.Assert(cluster.putStore(store), IsNil)
@@ -302,6 +307,7 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 
 		s := cluster.GetStore(store.GetId())
 		c.Assert(s.LastHeartbeatTS.IsZero(), IsFalse)
+		c.Assert(s.Stats, DeepEquals, storeStats)
 	}
 
 	c.Assert(cluster.getStoreCount(), Equals, int(n))
@@ -495,6 +501,38 @@ func heartbeatRegions(c *C, cluster *clusterInfo, regions []*metapb.Region) {
 			c.Assert(result.GetId(), Not(Equals), r.GetId())
 		}
 	}
+}
+
+func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
+	_, opt := newTestScheduleConfig()
+	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, nil)
+
+	// 1: [nil, nil)
+	region1 := core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
+	c.Assert(cluster.handleRegionHeartbeat(region1), IsNil)
+	checkRegion(c, cluster.searchRegion([]byte("foo")), region1)
+
+	// split 1 to 2: [nil, m) 1: [m, nil), sync 2 first.
+	region1.StartKey, region1.RegionEpoch.Version = []byte("m"), 2
+	region2 := core.NewRegionInfo(&metapb.Region{Id: 2, EndKey: []byte("m"), RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
+	c.Assert(cluster.handleRegionHeartbeat(region2), IsNil)
+	checkRegion(c, cluster.searchRegion([]byte("a")), region2)
+	// [m, nil) is missing before r1's heartbeat.
+	c.Assert(cluster.searchRegion([]byte("z")), IsNil)
+
+	c.Assert(cluster.handleRegionHeartbeat(region1), IsNil)
+	checkRegion(c, cluster.searchRegion([]byte("z")), region1)
+
+	// split 1 to 3: [m, q) 1: [q, nil), sync 1 first.
+	region1.StartKey, region1.RegionEpoch.Version = []byte("q"), 3
+	region3 := core.NewRegionInfo(&metapb.Region{Id: 3, StartKey: []byte("m"), EndKey: []byte("q"), RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
+	c.Assert(cluster.handleRegionHeartbeat(region1), IsNil)
+	checkRegion(c, cluster.searchRegion([]byte("z")), region1)
+	checkRegion(c, cluster.searchRegion([]byte("a")), region2)
+	// [m, q) is missing before r3's heartbeat.
+	c.Assert(cluster.searchRegion([]byte("n")), IsNil)
+	c.Assert(cluster.handleRegionHeartbeat(region3), IsNil)
+	checkRegion(c, cluster.searchRegion([]byte("n")), region3)
 }
 
 func (s *testClusterInfoSuite) TestRegionSplitAndMerge(c *C) {

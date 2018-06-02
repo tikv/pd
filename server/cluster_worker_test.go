@@ -382,73 +382,6 @@ func (s *testClusterWorkerSuite) checkSearchRegions(cluster *RaftCluster, keys .
 	}
 }
 
-func (s *testClusterWorkerSuite) TestHeartbeatSplit(c *C) {
-	cluster := s.svr.GetRaftCluster()
-	c.Assert(cluster, NotNil)
-
-	r1, _ := cluster.GetRegionByKey([]byte("a"))
-	// 1: [nil, nil)
-	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", ""))
-
-	// split 1 to 2: [nil, m) 1: [m, nil), sync 2 first
-	r2ID, r2PeerIDs := s.askSplit(c, r1)
-	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)
-	leaderPeer2 := s.chooseRegionLeader(c, r2)
-	s.heartbeatRegion(c, s.clusterID, r2, leaderPeer2)
-	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", "m"))
-	mustGetRegion(c, cluster, []byte("a"), r2)
-	// [m, nil) is missing before r1's heartbeat.
-	mustGetRegion(c, cluster, []byte("z"), nil)
-
-	leaderPeer1 := s.chooseRegionLeader(c, r1)
-	s.heartbeatRegion(c, s.clusterID, r1, leaderPeer1)
-	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", "m", "m", ""))
-	mustGetRegion(c, cluster, []byte("z"), r1)
-
-	// split 1 to 3: [m, q) 1: [q, nil), sync 1 first
-	r3ID, r3PeerIDs := s.askSplit(c, r1)
-	r3 := splitRegion(c, r1, []byte("q"), r3ID, r3PeerIDs)
-	s.heartbeatRegion(c, s.clusterID, r1, leaderPeer1)
-	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", "m", "q", ""))
-	mustGetRegion(c, cluster, []byte("z"), r1)
-	mustGetRegion(c, cluster, []byte("a"), r2)
-	// [m, q) is missing before r3's heartbeat.
-	mustGetRegion(c, cluster, []byte("n"), nil)
-	leaderPeer3 := s.chooseRegionLeader(c, r3)
-	s.heartbeatRegion(c, s.clusterID, r3, leaderPeer3)
-	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", "m", "m", "q", "q", ""))
-	mustGetRegion(c, cluster, []byte("n"), r3)
-}
-
-func (s *testClusterWorkerSuite) TestHeartbeatSplit2(c *C) {
-	s.svr.scheduleOpt.SetMaxReplicas(5)
-
-	cluster := s.svr.GetRaftCluster()
-	c.Assert(cluster, NotNil)
-
-	r1, _ := cluster.GetRegionByKey([]byte("a"))
-	leaderPeer := s.chooseRegionLeader(c, r1)
-
-	// Set MaxPeerCount to 10.
-	meta := cluster.GetConfig()
-	meta.MaxPeerCount = 10
-	err := cluster.putConfig(meta)
-	c.Assert(err, IsNil)
-
-	// Add Peers util all stores are used up.
-	testutil.WaitUntil(c, func(c *C) bool {
-		s.waitAddNode(c, r1, leaderPeer)
-		return len(r1.Peers) == len(s.stores)
-	})
-
-	// Split.
-	r2ID, r2PeerIDs := s.askSplit(c, r1)
-	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)
-	leaderPeer2 := s.chooseRegionLeader(c, r2)
-	s.heartbeatRegion(c, s.clusterID, r2, leaderPeer2)
-	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", "m"))
-}
-
 func (s *testClusterWorkerSuite) waitAddNode(c *C, r *metapb.Region, leader *metapb.Peer) {
 	testutil.WaitUntil(c, func(c *C) bool {
 		res := s.heartbeatRegion(c, s.clusterID, r, leader)
@@ -542,60 +475,6 @@ func (s *testClusterWorkerSuite) TestHeartbeatChangePeer(c *C) {
 			return s.checkRegionPeerCount(c, regionKey, peerCount-1)
 		})
 	}
-}
-
-func (s *testClusterWorkerSuite) TestHeartbeatSplitAddPeer(c *C) {
-	s.svr.scheduleOpt.SetMaxReplicas(2)
-	// Stop schedulers.
-	scheduleCfg := s.svr.GetScheduleConfig()
-	scheduleCfg.LeaderScheduleLimit = 0
-	scheduleCfg.RegionScheduleLimit = 0
-	s.svr.SetScheduleConfig(*scheduleCfg)
-
-	cluster := s.svr.GetRaftCluster()
-	c.Assert(cluster, NotNil)
-
-	r1, _ := cluster.GetRegionByKey([]byte("a"))
-	leaderPeer1 := s.chooseRegionLeader(c, r1)
-
-	// Wait for AddPeer command.
-	s.waitAddNode(c, r1, leaderPeer1)
-	// Split 1 to 2: [nil, m) 1: [m, nil).
-	r2ID, r2PeerIDs := s.askSplit(c, r1)
-	r2 := splitRegion(c, r1, []byte("m"), r2ID, r2PeerIDs)
-
-	// Sync r1 with both ConfVer and Version updated.
-	s.heartbeatRegion(c, s.clusterID, r1, leaderPeer1)
-	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "m", ""))
-	mustGetRegion(c, cluster, []byte("z"), r1)
-	mustGetRegion(c, cluster, []byte("a"), nil)
-	// Sync r2.
-	leaderPeer2 := s.chooseRegionLeader(c, r2)
-	s.heartbeatRegion(c, s.clusterID, r2, leaderPeer2)
-	testutil.WaitUntil(c, s.checkSearchRegions(cluster, "", "m", "m", ""))
-}
-
-func (s *testClusterWorkerSuite) TestStoreHeartbeat(c *C) {
-	cluster := s.svr.GetRaftCluster()
-	c.Assert(cluster, NotNil)
-
-	stores := cluster.GetStores()
-	c.Assert(stores, HasLen, 5)
-
-	// Mock a store stats.
-	storeID := stores[0].GetId()
-	stats := &pdpb.StoreStats{
-		StoreId:     storeID,
-		Capacity:    100,
-		Available:   50,
-		RegionCount: 1,
-	}
-
-	resp := s.heartbeatStore(c, stats)
-	c.Assert(resp, NotNil)
-
-	store := cluster.cachedCluster.GetStore(storeID)
-	c.Assert(stats, DeepEquals, store.Stats)
 }
 
 func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
