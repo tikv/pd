@@ -52,32 +52,32 @@ func newTestStores(n uint64) []*core.StoreInfo {
 
 func (s *testStoresInfoSuite) TestStores(c *C) {
 	n := uint64(10)
-	cluster := core.NewStoresInfo()
+	cache := core.NewStoresInfo()
 	stores := newTestStores(n)
 
 	for i, store := range stores {
 		id := store.GetId()
-		c.Assert(cluster.GetStore(id), IsNil)
-		c.Assert(cluster.BlockStore(id), NotNil)
-		cluster.SetStore(store)
-		c.Assert(cluster.GetStore(id), DeepEquals, store)
-		c.Assert(cluster.GetStoreCount(), Equals, int(i+1))
-		c.Assert(cluster.BlockStore(id), IsNil)
-		c.Assert(cluster.GetStore(id).IsBlocked(), IsTrue)
-		c.Assert(cluster.BlockStore(id), NotNil)
-		cluster.UnblockStore(id)
-		c.Assert(cluster.GetStore(id).IsBlocked(), IsFalse)
+		c.Assert(cache.GetStore(id), IsNil)
+		c.Assert(cache.BlockStore(id), NotNil)
+		cache.SetStore(store)
+		c.Assert(cache.GetStore(id), DeepEquals, store)
+		c.Assert(cache.GetStoreCount(), Equals, int(i+1))
+		c.Assert(cache.BlockStore(id), IsNil)
+		c.Assert(cache.GetStore(id).IsBlocked(), IsTrue)
+		c.Assert(cache.BlockStore(id), NotNil)
+		cache.UnblockStore(id)
+		c.Assert(cache.GetStore(id).IsBlocked(), IsFalse)
 	}
-	c.Assert(cluster.GetStoreCount(), Equals, int(n))
+	c.Assert(cache.GetStoreCount(), Equals, int(n))
 
-	for _, store := range cluster.GetStores() {
+	for _, store := range cache.GetStores() {
 		c.Assert(store, DeepEquals, stores[store.GetId()-1])
 	}
-	for _, store := range cluster.GetMetaStores() {
+	for _, store := range cache.GetMetaStores() {
 		c.Assert(store, DeepEquals, stores[store.GetId()-1].Store)
 	}
 
-	c.Assert(cluster.GetStoreCount(), Equals, int(n))
+	c.Assert(cache.GetStoreCount(), Equals, int(n))
 }
 
 var _ = Suite(&testRegionsInfoSuite{})
@@ -110,47 +110,47 @@ func newTestRegions(n, np uint64) []*core.RegionInfo {
 
 func (s *testRegionsInfoSuite) Test(c *C) {
 	n, np := uint64(10), uint64(3)
-	cluster := core.NewRegionsInfo()
+	cache := core.NewRegionsInfo()
 	regions := newTestRegions(n, np)
 
 	for i := uint64(0); i < n; i++ {
 		region := regions[i]
 		regionKey := []byte{byte(i)}
 
-		c.Assert(cluster.GetRegion(i), IsNil)
-		c.Assert(cluster.SearchRegion(regionKey), IsNil)
-		checkRegions(c, cluster, regions[0:i])
+		c.Assert(cache.GetRegion(i), IsNil)
+		c.Assert(cache.SearchRegion(regionKey), IsNil)
+		checkRegions(c, cache, regions[0:i])
 
-		cluster.AddRegion(region)
-		checkRegion(c, cluster.GetRegion(i), region)
-		checkRegion(c, cluster.SearchRegion(regionKey), region)
-		checkRegions(c, cluster, regions[0:(i+1)])
+		cache.AddRegion(region)
+		checkRegion(c, cache.GetRegion(i), region)
+		checkRegion(c, cache.SearchRegion(regionKey), region)
+		checkRegions(c, cache, regions[0:(i+1)])
 
 		// Update leader to peer np-1.
 		region.Leader = region.Peers[np-1]
-		cluster.SetRegion(region)
-		checkRegion(c, cluster.GetRegion(i), region)
-		checkRegion(c, cluster.SearchRegion(regionKey), region)
-		checkRegions(c, cluster, regions[0:(i+1)])
+		cache.SetRegion(region)
+		checkRegion(c, cache.GetRegion(i), region)
+		checkRegion(c, cache.SearchRegion(regionKey), region)
+		checkRegions(c, cache, regions[0:(i+1)])
 
-		cluster.RemoveRegion(region)
-		c.Assert(cluster.GetRegion(i), IsNil)
-		c.Assert(cluster.SearchRegion(regionKey), IsNil)
-		checkRegions(c, cluster, regions[0:i])
+		cache.RemoveRegion(region)
+		c.Assert(cache.GetRegion(i), IsNil)
+		c.Assert(cache.SearchRegion(regionKey), IsNil)
+		checkRegions(c, cache, regions[0:i])
 
 		// Reset leader to peer 0.
 		region.Leader = region.Peers[0]
-		cluster.AddRegion(region)
-		checkRegion(c, cluster.GetRegion(i), region)
-		checkRegions(c, cluster, regions[0:(i+1)])
-		checkRegion(c, cluster.SearchRegion(regionKey), region)
+		cache.AddRegion(region)
+		checkRegion(c, cache.GetRegion(i), region)
+		checkRegions(c, cache, regions[0:(i+1)])
+		checkRegion(c, cache.SearchRegion(regionKey), region)
 	}
 
 	for i := uint64(0); i < n; i++ {
-		region := cluster.RandLeaderRegion(i, core.HealthRegion())
+		region := cache.RandLeaderRegion(i, core.HealthRegion())
 		c.Assert(region.Leader.GetStoreId(), Equals, i)
 
-		region = cluster.RandFollowerRegion(i, core.HealthRegion())
+		region = cache.RandFollowerRegion(i, core.HealthRegion())
 		c.Assert(region.Leader.GetStoreId(), Not(Equals), i)
 
 		c.Assert(region.GetStorePeer(i), NotNil)
@@ -159,21 +159,21 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	// check overlaps
 	overlapRegion := regions[n-1]
 	overlapRegion.StartKey = regions[n-2].StartKey
-	cluster.AddRegion(overlapRegion)
-	c.Assert(cluster.GetRegion(n-2), IsNil)
-	c.Assert(cluster.GetRegion(n-1), NotNil)
+	cache.AddRegion(overlapRegion)
+	c.Assert(cache.GetRegion(n-2), IsNil)
+	c.Assert(cache.GetRegion(n-1), NotNil)
 
 	// All regions will be filtered out if they have pending peers.
 	for i := uint64(0); i < n; i++ {
-		for j := 0; j < cluster.GetStoreLeaderCount(i); j++ {
-			region := cluster.RandLeaderRegion(i, core.HealthRegion())
+		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
+			region := cache.RandLeaderRegion(i, core.HealthRegion())
 			region.PendingPeers = region.Peers
-			cluster.SetRegion(region)
+			cache.SetRegion(region)
 		}
-		c.Assert(cluster.RandLeaderRegion(i, core.HealthRegion()), IsNil)
+		c.Assert(cache.RandLeaderRegion(i, core.HealthRegion()), IsNil)
 	}
 	for i := uint64(0); i < n; i++ {
-		c.Assert(cluster.RandFollowerRegion(i, core.HealthRegion()), IsNil)
+		c.Assert(cache.RandFollowerRegion(i, core.HealthRegion()), IsNil)
 	}
 }
 
@@ -201,7 +201,7 @@ func checkRegionsKV(c *C, kv *core.KV, regions []*core.RegionInfo) {
 	}
 }
 
-func checkRegions(c *C, cluster *core.RegionsInfo, regions []*core.RegionInfo) {
+func checkRegions(c *C, cache *core.RegionsInfo, regions []*core.RegionInfo) {
 	regionCount := make(map[uint64]int)
 	leaderCount := make(map[uint64]int)
 	followerCount := make(map[uint64]int)
@@ -210,29 +210,29 @@ func checkRegions(c *C, cluster *core.RegionsInfo, regions []*core.RegionInfo) {
 			regionCount[peer.StoreId]++
 			if peer.Id == region.Leader.Id {
 				leaderCount[peer.StoreId]++
-				checkRegion(c, cluster.GetLeader(peer.StoreId, region.Id), region)
+				checkRegion(c, cache.GetLeader(peer.StoreId, region.Id), region)
 			} else {
 				followerCount[peer.StoreId]++
-				checkRegion(c, cluster.GetFollower(peer.StoreId, region.Id), region)
+				checkRegion(c, cache.GetFollower(peer.StoreId, region.Id), region)
 			}
 		}
 	}
 
-	c.Assert(cluster.GetRegionCount(), Equals, len(regions))
+	c.Assert(cache.GetRegionCount(), Equals, len(regions))
 	for id, count := range regionCount {
-		c.Assert(cluster.GetStoreRegionCount(id), Equals, count)
+		c.Assert(cache.GetStoreRegionCount(id), Equals, count)
 	}
 	for id, count := range leaderCount {
-		c.Assert(cluster.GetStoreLeaderCount(id), Equals, count)
+		c.Assert(cache.GetStoreLeaderCount(id), Equals, count)
 	}
 	for id, count := range followerCount {
-		c.Assert(cluster.GetStoreFollowerCount(id), Equals, count)
+		c.Assert(cache.GetStoreFollowerCount(id), Equals, count)
 	}
 
-	for _, region := range cluster.GetRegions() {
+	for _, region := range cache.GetRegions() {
 		checkRegion(c, region, regions[region.GetId()])
 	}
-	for _, region := range cluster.GetMetaRegions() {
+	for _, region := range cache.GetMetaRegions() {
 		c.Assert(region, DeepEquals, regions[region.GetId()].Region)
 	}
 }
