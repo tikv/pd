@@ -1,5 +1,17 @@
 # PD Change Log
 
+## v2.0.3
+### Bug Fixes
+* Fix the issue about scheduling of the obsolete Regions
+* Fix the panic issue when collecting the hot-cache metrics in specific conditions
+## v2.0.2
+### Improvements
+* Make the balance leader scheduler filter the disconnected nodes
+* Make the tick interval of patrol Regions configurable
+* Modify the timeout of the transfer leader operator to 10s
+### Bug Fixes
+* Fix the issue that the label scheduler does not schedule when the cluster Regions are in an unhealthy state
+* Fix the improper scheduling issue of `evict leader scheduler`
 ## v2.0.1
 ### New Feature
 * Add the `Scatter Range` scheduler to balance Regions with the specified key range

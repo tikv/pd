@@ -29,8 +29,7 @@ import (
 )
 
 var (
-	clusterID = uint64(time.Now().Unix())
-	store     = &metapb.Store{
+	store = &metapb.Store{
 		Id:      1,
 		Address: "localhost",
 	}
