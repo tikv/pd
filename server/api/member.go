@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/juju/errors"
@@ -27,8 +26,6 @@ import (
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
-
-const defaultDialTimeout = 5 * time.Second
 
 type memberHandler struct {
 	svr *server.Server

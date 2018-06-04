@@ -117,13 +117,6 @@ func (c *regionHeartbeatClient) SendRecv(msg *pdpb.RegionHeartbeatRequest, timeo
 	}
 }
 
-func (s *testClusterWorkerSuite) clearRegionLeader(c *C, regionID uint64) {
-	s.regionLeaderLock.Lock()
-	defer s.regionLeaderLock.Unlock()
-
-	delete(s.regionLeaders, regionID)
-}
-
 func (s *testClusterWorkerSuite) chooseRegionLeader(c *C, region *metapb.Region) *metapb.Peer {
 	// Randomly select a peer in the region as the leader.
 	peer := region.Peers[rand.Intn(len(region.Peers))]
@@ -228,22 +221,6 @@ func (s *testClusterWorkerSuite) SetUpTest(c *C) {
 	for _, store := range stores {
 		s.heartbeatClients[store.GetId()] = newRegionheartbeatClient(c, s.grpcPDClient)
 	}
-}
-
-func (s *testClusterWorkerSuite) runHeartbeatReceiver(c *C) (pdpb.PD_RegionHeartbeatClient, chan *pdpb.RegionHeartbeatResponse) {
-	client, err := s.grpcPDClient.RegionHeartbeat(context.Background())
-	c.Assert(err, IsNil)
-	ch := make(chan *pdpb.RegionHeartbeatResponse)
-	go func() {
-		for {
-			res, err := client.Recv()
-			if err != nil {
-				return
-			}
-			ch <- res
-		}
-	}()
-	return client, ch
 }
 
 func (s *testClusterWorkerSuite) TearDownTest(c *C) {
