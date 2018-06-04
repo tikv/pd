@@ -43,6 +43,7 @@ func NewTestServer() (*Config, *Server, CleanupFunc, error) {
 	if err != nil {
 		return nil, nil, nil, errors.Trace(err)
 	}
+	s.SetUpTestMode()
 	if err = s.Run(); err != nil {
 		return nil, nil, nil, errors.Trace(err)
 	}

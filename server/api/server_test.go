@@ -81,6 +81,7 @@ func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpF
 		go func(cfg *server.Config) {
 			s, err := server.CreateServer(cfg, NewHandler)
 			c.Assert(err, IsNil)
+			s.SetUpTestMode()
 			err = s.Run()
 			c.Assert(err, IsNil)
 			ch <- s

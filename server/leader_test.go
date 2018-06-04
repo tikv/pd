@@ -33,16 +33,15 @@ type testGetLeaderSuite struct {
 func (s *testGetLeaderSuite) SetUpSuite(c *C) {
 	cfg := NewTestSingleConfig()
 
-	// Send requests before server has started.
 	s.wg.Add(1)
 	s.done = make(chan bool)
-	go s.sendRequest(c, cfg.ClientUrls)
-	time.Sleep(100 * time.Millisecond)
-
 	svr, err := CreateServer(cfg, nil)
 	c.Assert(err, IsNil)
-
+	svr.SetUpTestMode()
 	err = svr.Run()
+	// Send requests after server has started.
+	go s.sendRequest(c, cfg.ClientUrls)
+	time.Sleep(100 * time.Millisecond)
 	c.Assert(err, IsNil)
 
 	s.svr = svr

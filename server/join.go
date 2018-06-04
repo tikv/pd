@@ -73,8 +73,10 @@ func PrepareJoinCluster(cfg *Config) error {
 	}
 
 	// Cases with data directory.
+	// The path change from "member" to "member/wal"
+	// Reference: https://github.com/coreos/etcd/pull/9733
 	initialCluster := ""
-	if wal.Exist(path.Join(cfg.DataDir, "member")) {
+	if wal.Exist(path.Join(cfg.DataDir, "member/wal")) {
 		cfg.InitialCluster = initialCluster
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
 		return nil

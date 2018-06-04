@@ -36,6 +36,7 @@ func newTestServer(c *C) (*Server, cleanUpFunc) {
 
 	svr, err := CreateServer(cfg, nil)
 	c.Assert(err, IsNil)
+	svr.SetUpTestMode()
 
 	cleanup := func() {
 		svr.Close()
@@ -62,6 +63,7 @@ func newMultiTestServers(c *C, count int) ([]*Server, cleanupFunc) {
 		go func(cfg *Config) {
 			svr, err := CreateServer(cfg, nil)
 			c.Assert(err, IsNil)
+			svr.SetUpTestMode()
 			err = svr.Run()
 			c.Assert(err, IsNil)
 			ch <- svr
@@ -130,6 +132,7 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 		go func() {
 			svr, err := CreateServer(cfg, nil)
 			c.Assert(err, IsNil)
+			svr.SetUpTestMode()
 			err = svr.Run()
 			c.Assert(err, IsNil)
 			ch <- svr
@@ -185,6 +188,7 @@ func newTestServersWithCfgs(c *C, cfgs []*Config) ([]*Server, cleanupFunc) {
 		go func(cfg *Config) {
 			svr, err := CreateServer(cfg, nil)
 			c.Assert(err, IsNil)
+			svr.SetUpTestMode()
 			err = svr.Run()
 			c.Assert(err, IsNil)
 			ch <- svr
@@ -304,6 +308,7 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 	cfgA.InitialCluster = originInitial
 	svr, err := CreateServer(cfgA, nil)
 	c.Assert(err, IsNil)
+	svr.SetUpTestMode()
 	err = svr.Run()
 	c.Assert(err, NotNil)
 }

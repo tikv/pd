@@ -105,6 +105,7 @@ func startPdWith(cfg *Config) (*Server, error) {
 			errCh <- errors.Trace(err)
 			return
 		}
+		svr.SetUpTestMode()
 		err = svr.Run()
 		if err != nil {
 			errCh <- errors.Trace(err)
