@@ -15,14 +15,15 @@ package server
 
 import (
 	"fmt"
+	"os"
 	"path"
 	"strings"
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/embed"
-	"github.com/coreos/etcd/wal"
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	log "github.com/sirupsen/logrus"
 )
 
 // PrepareJoinCluster sends MemberAdd command to PD cluster,
@@ -73,10 +74,8 @@ func PrepareJoinCluster(cfg *Config) error {
 	}
 
 	// Cases with data directory.
-	// The path change from "member" to "member/wal"
-	// Reference: https://github.com/coreos/etcd/pull/9733
 	initialCluster := ""
-	if wal.Exist(path.Join(cfg.DataDir, "member/wal")) {
+	if isDataExist(path.Join(cfg.DataDir, "member")) {
 		cfg.InitialCluster = initialCluster
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
 		return nil
@@ -140,4 +139,20 @@ func PrepareJoinCluster(cfg *Config) error {
 	cfg.InitialCluster = initialCluster
 	cfg.InitialClusterState = embed.ClusterStateFlagExisting
 	return nil
+}
+
+func isDataExist(d string) bool {
+	dir, err := os.Open(d)
+	if err != nil {
+		log.Error("failed to open:", err)
+		return false
+	}
+	defer dir.Close()
+
+	names, err := dir.Readdirnames(-1)
+	if err != nil {
+		log.Error("failed to list:", err)
+		return false
+	}
+	return len(names) != 0
 }
