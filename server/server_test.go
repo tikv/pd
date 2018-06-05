@@ -34,9 +34,8 @@ type cleanupFunc func()
 func newTestServer(c *C) (*Server, cleanUpFunc) {
 	cfg := NewTestSingleConfig()
 
-	svr, err := CreateServer(cfg, nil)
+	svr, err := CreateServer(cfg, nil, TestMode())
 	c.Assert(err, IsNil)
-	svr.SetUpTestMode()
 
 	cleanup := func() {
 		svr.Close()
@@ -93,9 +92,8 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 		cfg := cfgs[i]
 
 		go func() {
-			svr, err := CreateServer(cfg, nil)
+			svr, err := CreateServer(cfg, nil, TestMode())
 			c.Assert(err, IsNil)
-			svr.SetUpTestMode()
 			err = svr.Run()
 			c.Assert(err, IsNil)
 			ch <- svr
@@ -149,9 +147,8 @@ func newTestServersWithCfgs(c *C, cfgs []*Config) ([]*Server, cleanupFunc) {
 	ch := make(chan *Server)
 	for _, cfg := range cfgs {
 		go func(cfg *Config) {
-			svr, err := CreateServer(cfg, nil)
+			svr, err := CreateServer(cfg, nil, TestMode())
 			c.Assert(err, IsNil)
-			svr.SetUpTestMode()
 			err = svr.Run()
 			c.Assert(err, IsNil)
 			ch <- svr
@@ -269,9 +266,8 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 
 	// Start previous cluster, expect an error.
 	cfgA.InitialCluster = originInitial
-	svr, err := CreateServer(cfgA, nil)
+	svr, err := CreateServer(cfgA, nil, TestMode())
 	c.Assert(err, IsNil)
-	svr.SetUpTestMode()
 	err = svr.Run()
 	c.Assert(err, NotNil)
 }

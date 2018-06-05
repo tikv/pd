@@ -100,12 +100,11 @@ func startPdWith(cfg *Config) (*Server, error) {
 			errCh <- errors.Trace(err)
 			return
 		}
-		svr, err := CreateServer(cfg, nil)
+		svr, err := CreateServer(cfg, nil, TestMode())
 		if err != nil {
 			errCh <- errors.Trace(err)
 			return
 		}
-		svr.SetUpTestMode()
 		err = svr.Run()
 		if err != nil {
 			errCh <- errors.Trace(err)
