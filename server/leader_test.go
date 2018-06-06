@@ -35,7 +35,7 @@ func (s *testGetLeaderSuite) SetUpSuite(c *C) {
 
 	s.wg.Add(1)
 	s.done = make(chan bool)
-	svr, err := CreateServer(cfg, nil, TestMode())
+	svr, err := CreateServer(cfg, nil)
 	c.Assert(err, IsNil)
 	err = svr.Run()
 	// Send requests after server has started.

@@ -39,7 +39,7 @@ func cleanServer(cfg *Config) {
 // NewTestServer creates a pd server for testing.
 func NewTestServer() (*Config, *Server, CleanupFunc, error) {
 	cfg := NewTestSingleConfig()
-	s, err := CreateServer(cfg, nil, TestMode())
+	s, err := CreateServer(cfg, nil)
 	if err != nil {
 		return nil, nil, nil, errors.Trace(err)
 	}

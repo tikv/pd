@@ -39,7 +39,7 @@ func (s *testLeaderChangeSuite) prepareClusterN(c *C, n int) (svrs map[string]*s
 	for i := 0; i < n; i++ {
 		cfg := cfgs[i]
 		go func() {
-			svr, err := server.CreateServer(cfg, api.NewHandler, server.TestMode())
+			svr, err := server.CreateServer(cfg, api.NewHandler)
 			c.Assert(err, IsNil)
 			err = svr.Run()
 			c.Assert(err, IsNil)

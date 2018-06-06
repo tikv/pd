@@ -49,6 +49,9 @@ const (
 	pdClusterIDPath = "/pd/cluster_id"
 )
 
+// EnableZap enable the zap logger in embed etcd.
+var EnableZap = false
+
 // Server is the pd server.
 type Server struct {
 	// Server state.
@@ -91,22 +94,8 @@ type Server struct {
 	hbStreams *heartbeatStreams
 }
 
-// CreateServerOption configures server when creating.
-type CreateServerOption func(*Server)
-
-// TestMode for testing.
-func TestMode() CreateServerOption {
-	// The etcd master version has removed embed.Config.SetupLogging.
-	// Now logger is set up automatically based on embed.Config.Logger, embed.Config.LogOutputs, embed.Config.Debug fields.
-	// Use zap logger in the test, otherwise will panic. Reference: https://github.com/coreos/etcd/blob/master/embed/config_logging.go#L45
-	return func(s *Server) {
-		s.etcdCfg.Logger = "zap"
-		s.etcdCfg.LogOutputs = []string{"stdout"}
-	}
-}
-
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler, ops ...CreateServerOption) (*Server, error) {
+func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server, error) {
 	log.Infof("PD config - %v", cfg)
 	rand.Seed(time.Now().UnixNano())
 
@@ -128,8 +117,12 @@ func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler, ops ...Cr
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) { pdpb.RegisterPDServer(gs, s) }
 	s.etcdCfg = etcdCfg
-	for _, op := range ops {
-		op(s)
+	if EnableZap {
+		// The etcd master version has removed embed.Config.SetupLogging.
+		// Now logger is set up automatically based on embed.Config.Logger, embed.Config.LogOutputs, embed.Config.Debug fields.
+		// Use zap logger in the test, otherwise will panic. Reference: https://github.com/coreos/etcd/blob/master/embed/config_logging.go#L45
+		s.etcdCfg.Logger = "zap"
+		s.etcdCfg.LogOutputs = []string{"stdout"}
 	}
 	return s, nil
 }
