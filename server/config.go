@@ -93,6 +93,11 @@ type Config struct {
 	TickInterval typeutil.Duration `toml:"tick-interval"`
 	// ElectionInterval is the interval for etcd Raft election.
 	ElectionInterval typeutil.Duration `toml:"election-interval"`
+	// DisablePrevote is true to disable Raft Pre-Vote.
+	// If enabled, Raft runs an additional election phase
+	// to check whether it would get enough votes to win
+	// an election, thus minimizing disruptions.
+	DisablePreVote bool `json:"disable-pre-vote"`
 
 	Security SecurityConfig `toml:"security" json:"security"`
 
@@ -629,6 +634,7 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.InitialCluster = c.InitialCluster
 	cfg.ClusterState = c.InitialClusterState
 	cfg.EnablePprof = true
+	cfg.PreVote = !c.DisablePreVote
 	cfg.StrictReconfigCheck = !c.disableStrictReconfigCheck
 	cfg.TickMs = uint(c.TickInterval.Duration / time.Millisecond)
 	cfg.ElectionMs = uint(c.ElectionInterval.Duration / time.Millisecond)
