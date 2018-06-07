@@ -61,12 +61,12 @@ func (s *testStoreNsSuite) SetUpSuite(c *C) {
 
 	cfg := server.NewTestSingleConfig()
 	cfg.NamespaceClassifier = "table"
-	srv, err := server.CreateServer(cfg, NewHandler)
+	svr, err := server.CreateServer(cfg, NewHandler)
 	c.Assert(err, IsNil)
-	c.Assert(srv.Run(), IsNil)
-	s.svr = srv
+	c.Assert(svr.Run(), IsNil)
+	s.svr = svr
 	s.cleanup = func() {
-		srv.Close()
+		svr.Close()
 		cleanServer(cfg)
 	}
 

@@ -17,32 +17,27 @@ package etcdserver
 import (
 	"encoding/json"
 	"expvar"
+	"log"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"github.com/coreos/etcd/etcdserver/api/membership"
+	"github.com/coreos/etcd/etcdserver/api/rafthttp"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
-	"github.com/coreos/etcd/etcdserver/membership"
 	"github.com/coreos/etcd/pkg/contention"
+	"github.com/coreos/etcd/pkg/logutil"
 	"github.com/coreos/etcd/pkg/pbutil"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/raft/raftpb"
-	"github.com/coreos/etcd/rafthttp"
 	"github.com/coreos/etcd/wal"
 	"github.com/coreos/etcd/wal/walpb"
-	"github.com/coreos/pkg/capnslog"
+
+	"go.uber.org/zap"
 )
 
 const (
-	// Number of entries for slow follower to catch-up after compacting
-	// the raft storage entries.
-	// We expect the follower has a millisecond level latency with the leader.
-	// The max throughput is around 10K. Keep a 5K entries is enough for helping
-	// follower to catch up.
-	numberOfCatchUpEntries = 5000
-
 	// The max throughput of etcd will not exceed 100MB/s (100K * 1KB value).
 	// Assuming the RTT is around 10ms, 1MB max size is large enough.
 	maxSizePerMsg = 1 * 1024 * 1024
@@ -63,17 +58,30 @@ var (
 )
 
 func init() {
-	raft.SetLogger(capnslog.NewPackageLogger("github.com/coreos/etcd", "raft"))
+	lcfg := &zap.Config{
+		Level:       zap.NewAtomicLevelAt(zap.InfoLevel),
+		Development: false,
+		Sampling: &zap.SamplingConfig{
+			Initial:    100,
+			Thereafter: 100,
+		},
+		Encoding:      "json",
+		EncoderConfig: zap.NewProductionEncoderConfig(),
+
+		OutputPaths:      []string{"stderr"},
+		ErrorOutputPaths: []string{"stderr"},
+	}
+	lg, err := logutil.NewRaftLogger(lcfg)
+	if err != nil {
+		log.Fatalf("cannot create raft logger %v", err)
+	}
+	raft.SetLogger(lg)
+
 	expvar.Publish("raft.status", expvar.Func(func() interface{} {
 		raftStatusMu.Lock()
 		defer raftStatusMu.Unlock()
 		return raftStatus()
 	}))
-}
-
-type RaftTimer interface {
-	Index() uint64
-	Term() uint64
 }
 
 // apply contains entries, snapshot to be applied. Once
@@ -88,12 +96,7 @@ type apply struct {
 }
 
 type raftNode struct {
-	// Cache of the latest raft index and raft term the server has seen.
-	// These three unit64 fields must be the first elements to keep 64-bit
-	// alignment for atomic access to the fields.
-	index uint64
-	term  uint64
-	lead  uint64
+	lg *zap.Logger
 
 	tickMu *sync.Mutex
 	raftNodeConfig
@@ -117,6 +120,8 @@ type raftNode struct {
 }
 
 type raftNodeConfig struct {
+	lg *zap.Logger
+
 	// to check if msg receiver is removed from cluster
 	isIDRemoved func(id uint64) bool
 	raft.Node
@@ -132,6 +137,7 @@ type raftNodeConfig struct {
 
 func newRaftNode(cfg raftNodeConfig) *raftNode {
 	r := &raftNode{
+		lg:             cfg.lg,
 		tickMu:         new(sync.Mutex),
 		raftNodeConfig: cfg,
 		// set up contention detectors for raft heartbeat message.
@@ -173,7 +179,7 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 				r.tick()
 			case rd := <-r.Ready():
 				if rd.SoftState != nil {
-					newLeader := rd.SoftState.Lead != raft.None && atomic.LoadUint64(&r.lead) != rd.SoftState.Lead
+					newLeader := rd.SoftState.Lead != raft.None && rh.getLead() != rd.SoftState.Lead
 					if newLeader {
 						leaderChanges.Inc()
 					}
@@ -184,7 +190,7 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 						hasLeader.Set(1)
 					}
 
-					atomic.StoreUint64(&r.lead, rd.SoftState.Lead)
+					rh.updateLead(rd.SoftState.Lead)
 					islead = rd.RaftState == raft.StateLeader
 					if islead {
 						isLeader.Set(1)
@@ -199,7 +205,11 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 					select {
 					case r.readStateC <- rd.ReadStates[len(rd.ReadStates)-1]:
 					case <-time.After(internalTimeout):
-						plog.Warningf("timed out sending read state")
+						if r.lg != nil {
+							r.lg.Warn("timed out sending read state", zap.Duration("timeout", internalTimeout))
+						} else {
+							plog.Warningf("timed out sending read state")
+						}
 					case <-r.stopped:
 						return
 					}
@@ -230,7 +240,11 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 
 				// gofail: var raftBeforeSave struct{}
 				if err := r.storage.Save(rd.HardState, rd.Entries); err != nil {
-					plog.Fatalf("raft save state and entries error: %v", err)
+					if r.lg != nil {
+						r.lg.Fatal("failed to save Raft hard state and entries", zap.Error(err))
+					} else {
+						plog.Fatalf("raft save state and entries error: %v", err)
+					}
 				}
 				if !raft.IsEmptyHardState(rd.HardState) {
 					proposalsCommitted.Set(float64(rd.HardState.Commit))
@@ -240,14 +254,22 @@ func (r *raftNode) start(rh *raftReadyHandler) {
 				if !raft.IsEmptySnap(rd.Snapshot) {
 					// gofail: var raftBeforeSaveSnap struct{}
 					if err := r.storage.SaveSnap(rd.Snapshot); err != nil {
-						plog.Fatalf("raft save snapshot error: %v", err)
+						if r.lg != nil {
+							r.lg.Fatal("failed to save Raft snapshot", zap.Error(err))
+						} else {
+							plog.Fatalf("raft save snapshot error: %v", err)
+						}
 					}
 					// etcdserver now claim the snapshot has been persisted onto the disk
 					notifyc <- struct{}{}
 
 					// gofail: var raftAfterSaveSnap struct{}
 					r.raftStorage.ApplySnapshot(rd.Snapshot)
-					plog.Infof("raft applied incoming snapshot at index %d", rd.Snapshot.Metadata.Index)
+					if r.lg != nil {
+						r.lg.Info("applied incoming Raft snapshot", zap.Uint64("snapshot-index", rd.Snapshot.Metadata.Index))
+					} else {
+						plog.Infof("raft applied incoming snapshot at index %d", rd.Snapshot.Metadata.Index)
+					}
 					// gofail: var raftAfterApplySnap struct{}
 				}
 
@@ -344,8 +366,18 @@ func (r *raftNode) processMessages(ms []raftpb.Message) []raftpb.Message {
 			ok, exceed := r.td.Observe(ms[i].To)
 			if !ok {
 				// TODO: limit request rate.
-				plog.Warningf("failed to send out heartbeat on time (exceeded the %v timeout for %v)", r.heartbeat, exceed)
-				plog.Warningf("server is likely overloaded")
+				if r.lg != nil {
+					r.lg.Warn(
+						"leader failed to send out heartbeat on time; took too long, leader is overloaded likely from slow disk",
+						zap.Duration("heartbeat-interval", r.heartbeat),
+						zap.Duration("expected-duration", 2*r.heartbeat),
+						zap.Duration("exceeded-duration", exceed),
+					)
+				} else {
+					plog.Warningf("failed to send out heartbeat on time (exceeded the %v timeout for %v)", r.heartbeat, exceed)
+					plog.Warningf("server is likely overloaded")
+				}
+				heartbeatSendFailures.Inc()
 			}
 		}
 	}
@@ -366,7 +398,11 @@ func (r *raftNode) onStop() {
 	r.ticker.Stop()
 	r.transport.Stop()
 	if err := r.storage.Close(); err != nil {
-		plog.Panicf("raft close storage error: %v", err)
+		if r.lg != nil {
+			r.lg.Panic("failed to close Raft storage", zap.Error(err))
+		} else {
+			plog.Panicf("raft close storage error: %v", err)
+		}
 	}
 	close(r.done)
 }
@@ -401,19 +437,36 @@ func startNode(cfg ServerConfig, cl *membership.RaftCluster, ids []types.ID) (id
 			ClusterID: uint64(cl.ID()),
 		},
 	)
-	if w, err = wal.Create(cfg.WALDir(), metadata); err != nil {
-		plog.Fatalf("create wal error: %v", err)
+	if w, err = wal.Create(cfg.Logger, cfg.WALDir(), metadata); err != nil {
+		if cfg.Logger != nil {
+			cfg.Logger.Fatal("failed to create WAL", zap.Error(err))
+		} else {
+			plog.Fatalf("create wal error: %v", err)
+		}
 	}
 	peers := make([]raft.Peer, len(ids))
 	for i, id := range ids {
-		ctx, err := json.Marshal((*cl).Member(id))
+		var ctx []byte
+		ctx, err = json.Marshal((*cl).Member(id))
 		if err != nil {
-			plog.Panicf("marshal member should never fail: %v", err)
+			if cfg.Logger != nil {
+				cfg.Logger.Panic("failed to marshal member", zap.Error(err))
+			} else {
+				plog.Panicf("marshal member should never fail: %v", err)
+			}
 		}
 		peers[i] = raft.Peer{ID: uint64(id), Context: ctx}
 	}
 	id = member.ID
-	plog.Infof("starting member %s in cluster %s", id, cl.ID())
+	if cfg.Logger != nil {
+		cfg.Logger.Info(
+			"starting local member",
+			zap.String("local-member-id", id.String()),
+			zap.String("cluster-id", cl.ID().String()),
+		)
+	} else {
+		plog.Infof("starting member %s in cluster %s", id, cl.ID())
+	}
 	s = raft.NewMemoryStorage()
 	c := &raft.Config{
 		ID:              uint64(id),
@@ -423,6 +476,18 @@ func startNode(cfg ServerConfig, cl *membership.RaftCluster, ids []types.ID) (id
 		MaxSizePerMsg:   maxSizePerMsg,
 		MaxInflightMsgs: maxInflightMsgs,
 		CheckQuorum:     true,
+		PreVote:         cfg.PreVote,
+	}
+	if cfg.Logger != nil {
+		// called after capnslog setting in "init" function
+		if cfg.LoggerConfig != nil {
+			c.Logger, err = logutil.NewRaftLogger(cfg.LoggerConfig)
+			if err != nil {
+				log.Fatalf("cannot create raft logger %v", err)
+			}
+		} else if cfg.LoggerCore != nil && cfg.LoggerWriteSyncer != nil {
+			c.Logger = logutil.NewRaftLoggerFromZapCore(cfg.LoggerCore, cfg.LoggerWriteSyncer)
+		}
 	}
 
 	n = raft.StartNode(c, peers)
@@ -437,11 +502,20 @@ func restartNode(cfg ServerConfig, snapshot *raftpb.Snapshot) (types.ID, *member
 	if snapshot != nil {
 		walsnap.Index, walsnap.Term = snapshot.Metadata.Index, snapshot.Metadata.Term
 	}
-	w, id, cid, st, ents := readWAL(cfg.WALDir(), walsnap)
+	w, id, cid, st, ents := readWAL(cfg.Logger, cfg.WALDir(), walsnap)
 
-	plog.Infof("restarting member %s in cluster %s at commit index %d", id, cid, st.Commit)
-	cl := membership.NewCluster("")
-	cl.SetID(cid)
+	if cfg.Logger != nil {
+		cfg.Logger.Info(
+			"restarting local member",
+			zap.String("cluster-id", cid.String()),
+			zap.String("local-member-id", id.String()),
+			zap.Uint64("commit-index", st.Commit),
+		)
+	} else {
+		plog.Infof("restarting member %s in cluster %s at commit index %d", id, cid, st.Commit)
+	}
+	cl := membership.NewCluster(cfg.Logger, "")
+	cl.SetID(id, cid)
 	s := raft.NewMemoryStorage()
 	if snapshot != nil {
 		s.ApplySnapshot(*snapshot)
@@ -456,6 +530,19 @@ func restartNode(cfg ServerConfig, snapshot *raftpb.Snapshot) (types.ID, *member
 		MaxSizePerMsg:   maxSizePerMsg,
 		MaxInflightMsgs: maxInflightMsgs,
 		CheckQuorum:     true,
+		PreVote:         cfg.PreVote,
+	}
+	if cfg.Logger != nil {
+		// called after capnslog setting in "init" function
+		var err error
+		if cfg.LoggerConfig != nil {
+			c.Logger, err = logutil.NewRaftLogger(cfg.LoggerConfig)
+			if err != nil {
+				log.Fatalf("cannot create raft logger %v", err)
+			}
+		} else if cfg.LoggerCore != nil && cfg.LoggerWriteSyncer != nil {
+			c.Logger = logutil.NewRaftLoggerFromZapCore(cfg.LoggerCore, cfg.LoggerWriteSyncer)
+		}
 	}
 
 	n := raft.RestartNode(c)
@@ -470,33 +557,62 @@ func restartAsStandaloneNode(cfg ServerConfig, snapshot *raftpb.Snapshot) (types
 	if snapshot != nil {
 		walsnap.Index, walsnap.Term = snapshot.Metadata.Index, snapshot.Metadata.Term
 	}
-	w, id, cid, st, ents := readWAL(cfg.WALDir(), walsnap)
+	w, id, cid, st, ents := readWAL(cfg.Logger, cfg.WALDir(), walsnap)
 
 	// discard the previously uncommitted entries
 	for i, ent := range ents {
 		if ent.Index > st.Commit {
-			plog.Infof("discarding %d uncommitted WAL entries ", len(ents)-i)
+			if cfg.Logger != nil {
+				cfg.Logger.Info(
+					"discarding uncommitted WAL entries",
+					zap.Uint64("entry-index", ent.Index),
+					zap.Uint64("commit-index-from-wal", st.Commit),
+					zap.Int("number-of-discarded-entries", len(ents)-i),
+				)
+			} else {
+				plog.Infof("discarding %d uncommitted WAL entries ", len(ents)-i)
+			}
 			ents = ents[:i]
 			break
 		}
 	}
 
 	// force append the configuration change entries
-	toAppEnts := createConfigChangeEnts(getIDs(snapshot, ents), uint64(id), st.Term, st.Commit)
+	toAppEnts := createConfigChangeEnts(
+		cfg.Logger,
+		getIDs(cfg.Logger, snapshot, ents),
+		uint64(id),
+		st.Term,
+		st.Commit,
+	)
 	ents = append(ents, toAppEnts...)
 
 	// force commit newly appended entries
 	err := w.Save(raftpb.HardState{}, toAppEnts)
 	if err != nil {
-		plog.Fatalf("%v", err)
+		if cfg.Logger != nil {
+			cfg.Logger.Fatal("failed to save hard state and entries", zap.Error(err))
+		} else {
+			plog.Fatalf("%v", err)
+		}
 	}
 	if len(ents) != 0 {
 		st.Commit = ents[len(ents)-1].Index
 	}
 
-	plog.Printf("forcing restart of member %s in cluster %s at commit index %d", id, cid, st.Commit)
-	cl := membership.NewCluster("")
-	cl.SetID(cid)
+	if cfg.Logger != nil {
+		cfg.Logger.Info(
+			"forcing restart member",
+			zap.String("cluster-id", cid.String()),
+			zap.String("local-member-id", id.String()),
+			zap.Uint64("commit-index", st.Commit),
+		)
+	} else {
+		plog.Printf("forcing restart of member %s in cluster %s at commit index %d", id, cid, st.Commit)
+	}
+
+	cl := membership.NewCluster(cfg.Logger, "")
+	cl.SetID(id, cid)
 	s := raft.NewMemoryStorage()
 	if snapshot != nil {
 		s.ApplySnapshot(*snapshot)
@@ -511,7 +627,20 @@ func restartAsStandaloneNode(cfg ServerConfig, snapshot *raftpb.Snapshot) (types
 		MaxSizePerMsg:   maxSizePerMsg,
 		MaxInflightMsgs: maxInflightMsgs,
 		CheckQuorum:     true,
+		PreVote:         cfg.PreVote,
 	}
+	if cfg.Logger != nil {
+		// called after capnslog setting in "init" function
+		if cfg.LoggerConfig != nil {
+			c.Logger, err = logutil.NewRaftLogger(cfg.LoggerConfig)
+			if err != nil {
+				log.Fatalf("cannot create raft logger %v", err)
+			}
+		} else if cfg.LoggerCore != nil && cfg.LoggerWriteSyncer != nil {
+			c.Logger = logutil.NewRaftLoggerFromZapCore(cfg.LoggerCore, cfg.LoggerWriteSyncer)
+		}
+	}
+
 	n := raft.RestartNode(c)
 	raftStatus = n.Status
 	return id, cl, n, s, w
@@ -522,7 +651,7 @@ func restartAsStandaloneNode(cfg ServerConfig, snapshot *raftpb.Snapshot) (types
 // ID-related entry:
 // - ConfChangeAddNode, in which case the contained ID will be added into the set.
 // - ConfChangeRemoveNode, in which case the contained ID will be removed from the set.
-func getIDs(snap *raftpb.Snapshot, ents []raftpb.Entry) []uint64 {
+func getIDs(lg *zap.Logger, snap *raftpb.Snapshot, ents []raftpb.Entry) []uint64 {
 	ids := make(map[uint64]bool)
 	if snap != nil {
 		for _, id := range snap.Metadata.ConfState.Nodes {
@@ -543,7 +672,11 @@ func getIDs(snap *raftpb.Snapshot, ents []raftpb.Entry) []uint64 {
 		case raftpb.ConfChangeUpdateNode:
 			// do nothing
 		default:
-			plog.Panicf("ConfChange Type should be either ConfChangeAddNode or ConfChangeRemoveNode!")
+			if lg != nil {
+				lg.Panic("unknown ConfChange Type", zap.String("type", cc.Type.String()))
+			} else {
+				plog.Panicf("ConfChange Type should be either ConfChangeAddNode or ConfChangeRemoveNode!")
+			}
 		}
 	}
 	sids := make(types.Uint64Slice, 0, len(ids))
@@ -559,7 +692,7 @@ func getIDs(snap *raftpb.Snapshot, ents []raftpb.Entry) []uint64 {
 // `self` is _not_ removed, even if present in the set.
 // If `self` is not inside the given ids, it creates a Raft entry to add a
 // default member with the given `self`.
-func createConfigChangeEnts(ids []uint64, self uint64, term, index uint64) []raftpb.Entry {
+func createConfigChangeEnts(lg *zap.Logger, ids []uint64, self uint64, term, index uint64) []raftpb.Entry {
 	ents := make([]raftpb.Entry, 0)
 	next := index + 1
 	found := false
@@ -588,7 +721,11 @@ func createConfigChangeEnts(ids []uint64, self uint64, term, index uint64) []raf
 		}
 		ctx, err := json.Marshal(m)
 		if err != nil {
-			plog.Panicf("marshal member should never fail: %v", err)
+			if lg != nil {
+				lg.Panic("failed to marshal member", zap.Error(err))
+			} else {
+				plog.Panicf("marshal member should never fail: %v", err)
+			}
 		}
 		cc := &raftpb.ConfChange{
 			Type:    raftpb.ConfChangeAddNode,

@@ -50,6 +50,7 @@ var (
 )
 
 func TestAPIServer(t *testing.T) {
+	server.EnableZap = true
 	TestingT(t)
 }
 

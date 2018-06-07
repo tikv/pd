@@ -26,25 +26,34 @@
   version = "v1.3.1-coreos.6"
 
 [[projects]]
+  branch = "master"
   name = "github.com/coreos/etcd"
   packages = [
-    "alarm",
     "auth",
     "auth/authpb",
     "client",
     "clientv3",
+    "clientv3/balancer",
     "clientv3/concurrency",
-    "compactor",
-    "discovery",
     "embed",
-    "error",
     "etcdserver",
     "etcdserver/api",
     "etcdserver/api/etcdhttp",
+    "etcdserver/api/membership",
+    "etcdserver/api/rafthttp",
+    "etcdserver/api/snap",
+    "etcdserver/api/snap/snappb",
+    "etcdserver/api/v2auth",
+    "etcdserver/api/v2discovery",
+    "etcdserver/api/v2error",
     "etcdserver/api/v2http",
     "etcdserver/api/v2http/httptypes",
+    "etcdserver/api/v2stats",
+    "etcdserver/api/v2store",
     "etcdserver/api/v2v3",
+    "etcdserver/api/v3alarm",
     "etcdserver/api/v3client",
+    "etcdserver/api/v3compactor",
     "etcdserver/api/v3election",
     "etcdserver/api/v3election/v3electionpb",
     "etcdserver/api/v3election/v3electionpb/gw",
@@ -53,11 +62,8 @@
     "etcdserver/api/v3lock/v3lockpb/gw",
     "etcdserver/api/v3rpc",
     "etcdserver/api/v3rpc/rpctypes",
-    "etcdserver/auth",
     "etcdserver/etcdserverpb",
     "etcdserver/etcdserverpb/gw",
-    "etcdserver/membership",
-    "etcdserver/stats",
     "lease",
     "lease/leasehttp",
     "lease/leasepb",
@@ -66,11 +72,11 @@
     "mvcc/mvccpb",
     "pkg/adt",
     "pkg/contention",
-    "pkg/cors",
     "pkg/cpuutil",
     "pkg/crc",
     "pkg/debugutil",
     "pkg/fileutil",
+    "pkg/flags",
     "pkg/httputil",
     "pkg/idutil",
     "pkg/ioutil",
@@ -81,6 +87,7 @@
     "pkg/runtime",
     "pkg/schedule",
     "pkg/srv",
+    "pkg/systemd",
     "pkg/tlsutil",
     "pkg/transport",
     "pkg/types",
@@ -88,16 +95,11 @@
     "proxy/grpcproxy/adapter",
     "raft",
     "raft/raftpb",
-    "rafthttp",
-    "snap",
-    "snap/snappb",
-    "store",
     "version",
     "wal",
     "wal/walpb"
   ]
-  revision = "fdde8705f5bf9a6d9dbfb0220caf2ee1ac816be8"
-  version = "v3.3.4"
+  revision = "2b3aa7e1d49dd8484138c95ac9ab7dfc8e1e7dc0"
 
 [[projects]]
   name = "github.com/coreos/go-semver"
@@ -196,8 +198,8 @@
     "runtime/internal",
     "utilities"
   ]
-  revision = "07f5e79768022f9a3265235f0db4ac8c3f675fec"
-  version = "v1.3.1"
+  revision = "92583770e3f01b09a0d3e9bdf64321d8bebd48f2"
+  version = "v1.4.1"
 
 [[projects]]
   name = "github.com/inconshreveable/mousetrap"
@@ -352,6 +354,31 @@
   version = "0.0.1"
 
 [[projects]]
+  name = "go.uber.org/atomic"
+  packages = ["."]
+  revision = "1ea20fb1cbb1cc08cbd0d913a96dead89aa18289"
+  version = "v1.3.2"
+
+[[projects]]
+  name = "go.uber.org/multierr"
+  packages = ["."]
+  revision = "3c4937480c32f4c13a875a1829af76c98ca3d40a"
+  version = "v1.1.0"
+
+[[projects]]
+  name = "go.uber.org/zap"
+  packages = [
+    ".",
+    "buffer",
+    "internal/bufferpool",
+    "internal/color",
+    "internal/exit",
+    "zapcore"
+  ]
+  revision = "eeedf312bc6c57391d84767a4cd413f02a917974"
+  version = "v1.8.0"
+
+[[projects]]
   branch = "master"
   name = "golang.org/x/crypto"
   packages = [
@@ -467,6 +494,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "393867c705e95be098e4903c1a899c9a19ed9886865997b6e986fb4c564f6da9"
+  inputs-digest = "da8bdc8144bcc6b679548cc3eb0de72258f9a9d480a789c2f43b77be8b5a0087"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -23,6 +23,7 @@ import (
 )
 
 func TestServer(t *testing.T) {
+	EnableZap = true
 	TestingT(t)
 }
 
