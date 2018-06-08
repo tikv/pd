@@ -97,7 +97,7 @@ type Config struct {
 	// If enabled, Raft runs an additional election phase
 	// to check whether it would get enough votes to win
 	// an election, thus minimizing disruptions.
-	PreVote bool `toml:"pre-vote"`
+	PreVote bool `toml:"enable-prevote"`
 
 	Security SecurityConfig `toml:"security" json:"security"`
 
@@ -341,7 +341,7 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	adjustDuration(&c.leaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
 
 	// enable PreVote by default
-	if meta == nil || !meta.IsDefined("pre-vote") {
+	if meta == nil || !meta.IsDefined("enable-prevote") {
 		c.PreVote = true
 	}
 	return nil
