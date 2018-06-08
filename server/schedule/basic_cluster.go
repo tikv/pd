@@ -86,8 +86,10 @@ func (m OpInfluence) GetRegionsInfluence() map[uint64]*Operator {
 // StoreInfluence records influences that pending operators will make.
 type StoreInfluence struct {
 	RegionSize  int64
+	RegionRows  int64
 	RegionCount int64
 	LeaderSize  int64
+	LeaderRows  int64
 	LeaderCount int64
 }
 

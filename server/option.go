@@ -84,6 +84,10 @@ func (o *scheduleOption) GetMaxMergeRegionSize() uint64 {
 	return o.load().MaxMergeRegionSize
 }
 
+func (o *scheduleOption) GetMaxMergeRegionRows() uint64 {
+	return o.load().MaxMergeRegionRows
+}
+
 func (o *scheduleOption) GetSplitMergeInterval() time.Duration {
 	return o.load().SplitMergeInterval.Duration
 }
