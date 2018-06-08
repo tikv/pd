@@ -19,6 +19,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/tempurl"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/server"
 )
 
 func TestAll(t *testing.T) {
@@ -28,6 +29,10 @@ func TestAll(t *testing.T) {
 var _ = Suite(&integrationTestSuite{})
 
 type integrationTestSuite struct{}
+
+func (s *integrationTestSuite) SetUpSuite(c *C) {
+	server.EnableZap = true
+}
 
 func (s *integrationTestSuite) TestUpdateAdvertiseUrls(c *C) {
 	c.Parallel()

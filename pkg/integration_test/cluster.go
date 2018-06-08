@@ -19,9 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
-
 	"github.com/juju/errors"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 )
