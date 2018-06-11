@@ -15,6 +15,7 @@ package server
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/url"
@@ -343,10 +344,11 @@ func (c *Config) clone() *Config {
 }
 
 func (c *Config) String() string {
-	if c == nil {
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("Config(%+v)", *c)
+	return string(data)
 }
 
 // configFromFile loads config from file.
