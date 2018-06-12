@@ -4,7 +4,7 @@ go:
   - 1.10.x
 
 script:
-  - make dev
+  - make ci
 
 matrix:
   include:
