@@ -163,28 +163,31 @@ func newTestCluster(initialServerCount int) (*testCluster, error) {
 	}, nil
 }
 
-func (c *testCluster) RunAll() error {
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(c.servers))
-	for _, s := range c.servers {
-		wg.Add(1)
-		go func(s *testServer) {
-			defer wg.Done()
-			if err := s.Run(make(chan os.Signal)); err != nil {
-				errCh <- err
-			}
-		}(s)
+func (c *testCluster) RunServer(server *testServer, sigC <-chan os.Signal) <-chan error {
+	resC := make(chan error)
+	go func() { resC <- server.Run(sigC) }()
+	return resC
+}
+
+func (c *testCluster) RunServers(servers []*testServer, sigC <-chan os.Signal) error {
+	res := make([]<-chan error, len(servers))
+	for i, s := range servers {
+		res[i] = c.RunServer(s, sigC)
 	}
-	wg.Wait()
-	close(errCh)
-	var errs []error
-	for err := range errCh {
-		errs = append(errs, err)
-	}
-	if len(errs) != 0 {
-		return errors.Errorf("run server error(s): %v", errs)
+	for _, c := range res {
+		if err := <-c; err != nil {
+			return errors.Trace(err)
+		}
 	}
 	return nil
+}
+
+func (c *testCluster) RunInitialServers() error {
+	var servers []*testServer
+	for _, conf := range c.config.InitialServers {
+		servers = append(servers, c.GetServer(conf.Name))
+	}
+	return c.RunServers(servers, make(<-chan os.Signal))
 }
 
 func (c *testCluster) StopAll() error {

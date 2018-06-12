@@ -33,7 +33,7 @@ func (s *integrationTestSuite) TestMemberDelete(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destory()
 
-	err = cluster.RunAll()
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	clientURL := cluster.GetServer("pd1").GetConfig().ClientUrls
@@ -102,7 +102,7 @@ func (s *integrationTestSuite) TestLeaderPriority(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destory()
 
-	err = cluster.RunAll()
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	cluster.WaitLeader()
@@ -161,7 +161,7 @@ func (s *integrationTestSuite) TestLeaderResign(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destory()
 
-	err = cluster.RunAll()
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	leader1 := cluster.WaitLeader()
