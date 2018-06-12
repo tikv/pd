@@ -15,6 +15,7 @@ package server
 
 import (
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/coreos/etcd/clientv3"
@@ -45,7 +46,7 @@ func newTestServer(c *C) (*Server, cleanUpFunc) {
 
 func mustRunTestServer(c *C) (*Server, cleanUpFunc) {
 	server, cleanup := newTestServer(c)
-	err := server.Run()
+	err := server.Run(make(chan os.Signal))
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{server})
 	return server, cleanup
@@ -92,7 +93,7 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 		go func() {
 			svr, err := CreateServer(cfg, nil)
 			c.Assert(err, IsNil)
-			err = svr.Run()
+			err = svr.Run(make(chan os.Signal))
 			c.Assert(err, IsNil)
 			ch <- svr
 		}()
@@ -124,7 +125,7 @@ func newTestServersWithCfgs(c *C, cfgs []*Config) ([]*Server, cleanupFunc) {
 		go func(cfg *Config) {
 			svr, err := CreateServer(cfg, nil)
 			c.Assert(err, IsNil)
-			err = svr.Run()
+			err = svr.Run(make(chan os.Signal))
 			c.Assert(err, IsNil)
 			ch <- svr
 		}(cfg)
@@ -177,6 +178,6 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 	cfgA.InitialCluster = originInitial
 	svr, err := CreateServer(cfgA, nil)
 	c.Assert(err, IsNil)
-	err = svr.Run()
+	err = svr.Run(make(chan os.Signal))
 	c.Assert(err, NotNil)
 }

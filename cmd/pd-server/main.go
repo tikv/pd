@@ -88,7 +88,7 @@ func main() {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 
-	if err := svr.Run(); err != nil {
+	if err := svr.Run(sc); err != nil {
 		log.Fatalf("run server failed: %v", errors.ErrorStack(err))
 	}
 

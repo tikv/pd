@@ -43,7 +43,7 @@ func NewTestServer() (*Config, *Server, CleanupFunc, error) {
 	if err != nil {
 		return nil, nil, nil, errors.Trace(err)
 	}
-	if err = s.Run(); err != nil {
+	if err = s.Run(make(chan os.Signal)); err != nil {
 		return nil, nil, nil, errors.Trace(err)
 	}
 

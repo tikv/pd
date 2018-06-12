@@ -105,7 +105,7 @@ func startPdWith(cfg *Config) (*Server, error) {
 			errCh <- errors.Trace(err)
 			return
 		}
-		err = svr.Run()
+		err = svr.Run(make(chan os.Signal))
 		if err != nil {
 			errCh <- errors.Trace(err)
 			svr.Close()

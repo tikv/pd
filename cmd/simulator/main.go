@@ -48,7 +48,7 @@ func main() {
 
 	schedule.Simulating = true
 	_, local, clean := NewSingleServer()
-	err := local.Run()
+	err := local.Run(make(chan os.Signal))
 	if err != nil {
 		simutil.Logger.Fatal("run server error:", err)
 	}

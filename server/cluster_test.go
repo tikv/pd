@@ -15,6 +15,7 @@ package server
 
 import (
 	"context"
+	"os"
 	"strings"
 
 	"github.com/coreos/etcd/clientv3"
@@ -46,7 +47,7 @@ type testClusterSuite struct {
 func (s *testClusterSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
 	s.client = s.svr.client
-	err := s.svr.Run()
+	err := s.svr.Run(make(chan os.Signal))
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
@@ -466,7 +467,7 @@ func (s *testClusterSuite) testCheckStores(c *C, clusterID uint64) {
 func (s *testClusterSuite) TestClosedChannel(c *C) {
 	svr, cleanup := newTestServer(c)
 	defer cleanup()
-	err := svr.Run()
+	err := svr.Run(make(chan os.Signal))
 	c.Assert(err, IsNil)
 
 	clusterID := svr.clusterID

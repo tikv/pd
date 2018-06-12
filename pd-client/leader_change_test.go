@@ -15,6 +15,7 @@ package pd
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -41,7 +42,7 @@ func (s *testLeaderChangeSuite) prepareClusterN(c *C, n int) (svrs map[string]*s
 		go func() {
 			svr, err := server.CreateServer(cfg, api.NewHandler)
 			c.Assert(err, IsNil)
-			err = svr.Run()
+			err = svr.Run(make(chan os.Signal))
 			c.Assert(err, IsNil)
 			ch <- svr
 		}()

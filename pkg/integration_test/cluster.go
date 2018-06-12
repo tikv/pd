@@ -62,13 +62,13 @@ func newTestServer(cfg *server.Config) (*testServer, error) {
 	}, nil
 }
 
-func (s *testServer) Run() error {
+func (s *testServer) Run(sigC <-chan os.Signal) error {
 	s.Lock()
 	defer s.Unlock()
 	if s.state != Initial && s.state != Stop {
 		return errors.Errorf("server(state%d) cannot run", s.state)
 	}
-	if err := s.server.Run(); err != nil {
+	if err := s.server.Run(sigC); err != nil {
 		return errors.Trace(err)
 	}
 	s.state = Running
@@ -170,7 +170,7 @@ func (c *testCluster) RunAll() error {
 		wg.Add(1)
 		go func(s *testServer) {
 			defer wg.Done()
-			if err := s.Run(); err != nil {
+			if err := s.Run(make(chan os.Signal)); err != nil {
 				errCh <- err
 			}
 		}(s)
