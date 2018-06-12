@@ -63,10 +63,8 @@ func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionI
 	to := opInfluence.GetStoreInfluence(tl.ToStore)
 
 	from.LeaderSize -= region.ApproximateSize
-	from.LeaderRows -= region.ApproximateRows
 	from.LeaderCount--
 	to.LeaderSize += region.ApproximateSize
-	to.LeaderRows += region.ApproximateRows
 	to.LeaderCount++
 }
 
@@ -96,7 +94,6 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(ap.ToStore)
 
 	to.RegionSize += region.ApproximateSize
-	to.RegionRows += region.ApproximateRows
 	to.RegionCount++
 }
 
@@ -126,7 +123,6 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	to := opInfluence.GetStoreInfluence(al.ToStore)
 
 	to.RegionSize += region.ApproximateSize
-	to.RegionRows += region.ApproximateRows
 	to.RegionCount++
 }
 
@@ -172,7 +168,6 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	from := opInfluence.GetStoreInfluence(rp.FromStore)
 
 	from.RegionSize -= region.ApproximateSize
-	from.RegionRows -= region.ApproximateRows
 	from.RegionCount--
 }
 
