@@ -49,6 +49,9 @@ const (
 	pdClusterIDPath = "/pd/cluster_id"
 )
 
+// EnableZap enable the zap logger in embed etcd.
+var EnableZap = false
+
 // Server is the pd server.
 type Server struct {
 	// Server state.
@@ -114,7 +117,13 @@ func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server,
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) { pdpb.RegisterPDServer(gs, s) }
 	s.etcdCfg = etcdCfg
-
+	if EnableZap {
+		// The etcd master version has removed embed.Config.SetupLogging.
+		// Now logger is set up automatically based on embed.Config.Logger, embed.Config.LogOutputs, embed.Config.Debug fields.
+		// Use zap logger in the test, otherwise will panic. Reference: https://github.com/coreos/etcd/blob/master/embed/config_logging.go#L45
+		s.etcdCfg.Logger = "zap"
+		s.etcdCfg.LogOutputs = []string{"stdout"}
+	}
 	return s, nil
 }
 

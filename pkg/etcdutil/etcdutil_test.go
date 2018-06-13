@@ -42,6 +42,8 @@ func newTestSingleConfig() *embed.Config {
 	cfg.Name = "test_etcd"
 	cfg.Dir, _ = ioutil.TempDir("/tmp", "test_etcd")
 	cfg.WalDir = ""
+	cfg.Logger = "zap"
+	cfg.LogOutputs = []string{"stdout"}
 
 	pu, _ := url.Parse(tempurl.Alloc())
 	cfg.LPUrls = []url.URL{*pu}

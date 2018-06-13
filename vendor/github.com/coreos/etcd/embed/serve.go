@@ -16,6 +16,7 @@ package embed
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	defaultLog "log"
 	"net"
@@ -33,19 +34,23 @@ import (
 	"github.com/coreos/etcd/etcdserver/api/v3rpc"
 	etcdservergw "github.com/coreos/etcd/etcdserver/etcdserverpb/gw"
 	"github.com/coreos/etcd/pkg/debugutil"
+	"github.com/coreos/etcd/pkg/httputil"
 	"github.com/coreos/etcd/pkg/transport"
 
 	gw "github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"github.com/soheilhy/cmux"
 	"github.com/tmc/grpc-websocket-proxy/wsproxy"
+	"go.uber.org/zap"
 	"golang.org/x/net/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
 
 type serveCtx struct {
+	lg       *zap.Logger
 	l        net.Listener
 	addr     string
+	network  string
 	secure   bool
 	insecure bool
 
@@ -63,10 +68,14 @@ type servers struct {
 	http   *http.Server
 }
 
-func newServeCtx() *serveCtx {
+func newServeCtx(lg *zap.Logger) *serveCtx {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &serveCtx{ctx: ctx, cancel: cancel, userHandlers: make(map[string]http.Handler),
-		serversC: make(chan *servers, 2), // in case sctx.insecure,sctx.secure true
+	return &serveCtx{
+		lg:           lg,
+		ctx:          ctx,
+		cancel:       cancel,
+		userHandlers: make(map[string]http.Handler),
+		serversC:     make(chan *servers, 2), // in case sctx.insecure,sctx.secure true
 	}
 }
 
@@ -81,7 +90,10 @@ func (sctx *serveCtx) serve(
 	gopts ...grpc.ServerOption) (err error) {
 	logger := defaultLog.New(ioutil.Discard, "etcdhttp", 0)
 	<-s.ReadyNotify()
-	plog.Info("ready to serve client requests")
+
+	if sctx.lg == nil {
+		plog.Info("ready to serve client requests")
+	}
 
 	m := cmux.New(sctx.l)
 	v3c := v3client.New(s)
@@ -114,14 +126,21 @@ func (sctx *serveCtx) serve(
 		httpmux := sctx.createMux(gwmux, handler)
 
 		srvhttp := &http.Server{
-			Handler:  wrapMux(httpmux),
+			Handler:  createAccessController(sctx.lg, s, httpmux),
 			ErrorLog: logger, // do not log user error
 		}
 		httpl := m.Match(cmux.HTTP1())
 		go func() { errHandler(srvhttp.Serve(httpl)) }()
 
 		sctx.serversC <- &servers{grpc: gs, http: srvhttp}
-		plog.Noticef("serving insecure client requests on %s, this is strongly discouraged!", sctx.l.Addr().String())
+		if sctx.lg != nil {
+			sctx.lg.Info(
+				"serving client traffic insecurely; this is strongly discouraged!",
+				zap.String("address", sctx.l.Addr().String()),
+			)
+		} else {
+			plog.Noticef("serving insecure client requests on %s, this is strongly discouraged!", sctx.l.Addr().String())
+		}
 	}
 
 	if sctx.secure {
@@ -157,14 +176,21 @@ func (sctx *serveCtx) serve(
 		httpmux := sctx.createMux(gwmux, handler)
 
 		srv := &http.Server{
-			Handler:   wrapMux(httpmux),
+			Handler:   createAccessController(sctx.lg, s, httpmux),
 			TLSConfig: tlscfg,
 			ErrorLog:  logger, // do not log user error
 		}
 		go func() { errHandler(srv.Serve(tlsl)) }()
 
 		sctx.serversC <- &servers{secure: true, grpc: gs, http: srv}
-		plog.Infof("serving client requests on %s", sctx.l.Addr().String())
+		if sctx.lg != nil {
+			sctx.lg.Info(
+				"serving client traffic insecurely",
+				zap.String("address", sctx.l.Addr().String()),
+			)
+		} else {
+			plog.Infof("serving client requests on %s", sctx.l.Addr().String())
+		}
 	}
 
 	close(sctx.serversC)
@@ -192,7 +218,14 @@ type registerHandlerFunc func(context.Context, *gw.ServeMux, *grpc.ClientConn) e
 
 func (sctx *serveCtx) registerGateway(opts []grpc.DialOption) (*gw.ServeMux, error) {
 	ctx := sctx.ctx
-	conn, err := grpc.DialContext(ctx, sctx.addr, opts...)
+
+	addr := sctx.addr
+	if network := sctx.network; network == "unix" {
+		// explicitly define unix network for gRPC socket support
+		addr = fmt.Sprintf("%s://%s", network, addr)
+	}
+
+	conn, err := grpc.DialContext(ctx, addr, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +249,15 @@ func (sctx *serveCtx) registerGateway(opts []grpc.DialOption) (*gw.ServeMux, err
 	go func() {
 		<-ctx.Done()
 		if cerr := conn.Close(); cerr != nil {
-			plog.Warningf("failed to close conn to %s: %v", sctx.l.Addr().String(), cerr)
+			if sctx.lg != nil {
+				sctx.lg.Warn(
+					"failed to close connection",
+					zap.String("address", sctx.l.Addr().String()),
+					zap.Error(cerr),
+				)
+			} else {
+				plog.Warningf("failed to close conn to %s: %v", sctx.l.Addr().String(), cerr)
+			}
 		}
 	}()
 
@@ -230,7 +271,7 @@ func (sctx *serveCtx) createMux(gwmux *gw.ServeMux, handler http.Handler) *http.
 	}
 
 	httpmux.Handle(
-		"/v3beta/",
+		"/v3/",
 		wsproxy.WebsocketProxy(
 			gwmux,
 			wsproxy.WithRequestMutator(
@@ -248,24 +289,116 @@ func (sctx *serveCtx) createMux(gwmux *gw.ServeMux, handler http.Handler) *http.
 	return httpmux
 }
 
-// wraps HTTP multiplexer to mute requests to /v3alpha
-// TODO: deprecate this in 3.4 release
-func wrapMux(mux *http.ServeMux) http.Handler { return &v3alphaMutator{mux: mux} }
+// createAccessController wraps HTTP multiplexer:
+// - mutate gRPC gateway request paths
+// - check hostname whitelist
+// client HTTP requests goes here first
+func createAccessController(lg *zap.Logger, s *etcdserver.EtcdServer, mux *http.ServeMux) http.Handler {
+	return &accessController{lg: lg, s: s, mux: mux}
+}
 
-type v3alphaMutator struct {
+type accessController struct {
+	lg  *zap.Logger
+	s   *etcdserver.EtcdServer
 	mux *http.ServeMux
 }
 
-func (m *v3alphaMutator) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	if req != nil && req.URL != nil && strings.HasPrefix(req.URL.Path, "/v3alpha/") {
-		req.URL.Path = strings.Replace(req.URL.Path, "/v3alpha/", "/v3beta/", 1)
+func (ac *accessController) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	// redirect for backward compatibilities
+	if req != nil && req.URL != nil && strings.HasPrefix(req.URL.Path, "/v3beta/") {
+		req.URL.Path = strings.Replace(req.URL.Path, "/v3beta/", "/v3/", 1)
 	}
-	m.mux.ServeHTTP(rw, req)
+
+	if req.TLS == nil { // check origin if client connection is not secure
+		host := httputil.GetHostname(req)
+		if !ac.s.AccessController.IsHostWhitelisted(host) {
+			if ac.lg != nil {
+				ac.lg.Warn(
+					"rejecting HTTP request to prevent DNS rebinding attacks",
+					zap.String("host", host),
+				)
+			} else {
+				plog.Warningf("rejecting HTTP request from %q to prevent DNS rebinding attacks", host)
+			}
+			// TODO: use Go's "http.StatusMisdirectedRequest" (421)
+			// https://github.com/golang/go/commit/4b8a7eafef039af1834ef9bfa879257c4a72b7b5
+			http.Error(rw, errCVE20185702(host), 421)
+			return
+		}
+	}
+
+	// Write CORS header.
+	if ac.s.AccessController.OriginAllowed("*") {
+		addCORSHeader(rw, "*")
+	} else if origin := req.Header.Get("Origin"); ac.s.OriginAllowed(origin) {
+		addCORSHeader(rw, origin)
+	}
+
+	if req.Method == "OPTIONS" {
+		rw.WriteHeader(http.StatusOK)
+		return
+	}
+
+	ac.mux.ServeHTTP(rw, req)
+}
+
+// addCORSHeader adds the correct cors headers given an origin
+func addCORSHeader(w http.ResponseWriter, origin string) {
+	w.Header().Add("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+	w.Header().Add("Access-Control-Allow-Origin", origin)
+	w.Header().Add("Access-Control-Allow-Headers", "accept, content-type, authorization")
+}
+
+// https://github.com/transmission/transmission/pull/468
+func errCVE20185702(host string) string {
+	return fmt.Sprintf(`
+etcd received your request, but the Host header was unrecognized.
+
+To fix this, choose one of the following options:
+- Enable TLS, then any HTTPS request will be allowed.
+- Add the hostname you want to use to the whitelist in settings.
+  - e.g. etcd --host-whitelist %q
+
+This requirement has been added to help prevent "DNS Rebinding" attacks (CVE-2018-5702).
+`, host)
+}
+
+// WrapCORS wraps existing handler with CORS.
+// TODO: deprecate this after v2 proxy deprecate
+func WrapCORS(cors map[string]struct{}, h http.Handler) http.Handler {
+	return &corsHandler{
+		ac: &etcdserver.AccessController{CORS: cors},
+		h:  h,
+	}
+}
+
+type corsHandler struct {
+	ac *etcdserver.AccessController
+	h  http.Handler
+}
+
+func (ch *corsHandler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	if ch.ac.OriginAllowed("*") {
+		addCORSHeader(rw, "*")
+	} else if origin := req.Header.Get("Origin"); ch.ac.OriginAllowed(origin) {
+		addCORSHeader(rw, origin)
+	}
+
+	if req.Method == "OPTIONS" {
+		rw.WriteHeader(http.StatusOK)
+		return
+	}
+
+	ch.h.ServeHTTP(rw, req)
 }
 
 func (sctx *serveCtx) registerUserHandler(s string, h http.Handler) {
 	if sctx.userHandlers[s] != nil {
-		plog.Warningf("path %s already registered by user handler", s)
+		if sctx.lg != nil {
+			sctx.lg.Warn("path is already registered by user handler", zap.String("path", s))
+		} else {
+			plog.Warningf("path %s already registered by user handler", s)
+		}
 		return
 	}
 	sctx.userHandlers[s] = h
