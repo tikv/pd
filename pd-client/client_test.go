@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"google.golang.org/grpc"
+	"math"
 )
 
 func TestClient(t *testing.T) {
@@ -220,4 +221,22 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	n, err = s.client.GetStore(context.Background(), store.GetId())
 	c.Assert(err, IsNil)
 	c.Assert(n, IsNil)
+}
+
+func (s *testClientSuite) checkGCSafePoint(c *C, expectedSafePoint uint64) {
+	req := &pdpb.GetGCSafePointRequest{
+		Header: newHeader(s.srv),
+	}
+	resp, err := s.srv.GetGCSafePoint(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.SafePoint, Equals, expectedSafePoint)
+}
+
+func (s *testClientSuite) TestUpdateGCSafePoint(c *C) {
+	s.checkGCSafePoint(c, 0)
+	for _, safePoint := range []uint64{0, 1, 2, 3, 233, 23333, 233333333333, math.MaxUint64} {
+		err := s.client.UpdateGCSafePoint(context.Background(), safePoint)
+		c.Assert(err, IsNil)
+		s.checkGCSafePoint(c, safePoint)
+	}
 }
