@@ -238,11 +238,8 @@ func (kv *KV) LoadRegions(regions *RegionsInfo) error {
 // SaveGCSafePoint saves new GC safe point to KV
 func (kv *KV) SaveGCSafePoint(safePoint uint64) error {
 	key := path.Join(gcPath, "safe_point")
-	value, err := json.Marshal(safePoint)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	if err := kv.Save(key, string(value)); err != nil {
+	value := strconv.FormatUint(safePoint, 16)
+	if err := kv.Save(key, value); err != nil {
 		return errors.Trace(err)
 	}
 	return nil
@@ -258,8 +255,8 @@ func (kv *KV) LoadGCSafePoint() (uint64, error) {
 	if value == "" {
 		return 0, nil
 	}
-	var safePoint uint64
-	if err := json.Unmarshal([]byte(value), &safePoint); err != nil {
+	safePoint, err := strconv.ParseUint(value, 16, 64)
+	if err != nil {
 		return 0, errors.Trace(err)
 	}
 	return safePoint, nil
