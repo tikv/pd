@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coreos/etcd/clientv3"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
@@ -136,6 +137,12 @@ func (s *testServer) GetEtcdLeader() (string, error) {
 		return "", errors.Trace(err)
 	}
 	return members.GetEtcdLeader().GetName(), nil
+}
+
+func (s *testServer) GetEtcdClient() *clientv3.Client {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetClient()
 }
 
 type testCluster struct {
