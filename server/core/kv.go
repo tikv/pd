@@ -235,7 +235,7 @@ func (kv *KV) LoadRegions(regions *RegionsInfo) error {
 	}
 }
 
-// SaveGCSafePoint saves new GC safe point to KV
+// SaveGCSafePoint saves new GC safe point to KV.
 func (kv *KV) SaveGCSafePoint(safePoint uint64) error {
 	key := path.Join(gcPath, "safe_point")
 	value := strconv.FormatUint(safePoint, 16)
@@ -245,7 +245,7 @@ func (kv *KV) SaveGCSafePoint(safePoint uint64) error {
 	return nil
 }
 
-// LoadGCSafePoint loads current GC safe point from KV
+// LoadGCSafePoint loads current GC safe point from KV.
 func (kv *KV) LoadGCSafePoint() (uint64, error) {
 	key := path.Join(gcPath, "safe_point")
 	value, err := kv.Load(key)
