@@ -239,4 +239,8 @@ func (s *testClientSuite) TestUpdateGCSafePoint(c *C) {
 		c.Assert(err, IsNil)
 		s.checkGCSafePoint(c, safePoint)
 	}
+	// If the new safe point is less than the old one, it should not be updated.
+	err := s.client.UpdateGCSafePoint(context.Background(), 1)
+	c.Assert(err, IsNil)
+	s.checkGCSafePoint(c, math.MaxUint64)
 }
