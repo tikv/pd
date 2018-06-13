@@ -25,115 +25,106 @@ import (
 var _ = Suite(&testConfigSuite{})
 
 type testConfigSuite struct {
+	cfgs    []*server.Config
+	servers []*server.Server
+	clean   func()
+}
+
+func (s *testConfigSuite) SetUpSuite(c *C) {
+	s.cfgs, s.servers, s.clean = mustNewCluster(c, 3)
+}
+
+func (s *testConfigSuite) TearDownSuite(c *C) {
+	s.clean()
 }
 
 func (s *testConfigSuite) TestConfigAll(c *C) {
-	numbers := []int{1, 3}
-	for _, num := range numbers {
-		cfgs, _, clean := mustNewCluster(c, num)
-		defer clean()
+	addr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/config"
+	resp, err := doGet(addr)
+	c.Assert(err, IsNil)
+	cfg := &server.Config{}
+	err = readJSON(resp.Body, cfg)
+	c.Assert(err, IsNil)
 
-		addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/config"
-		resp, err := doGet(addr)
-		c.Assert(err, IsNil)
-		cfg := &server.Config{}
-		err = readJSON(resp.Body, cfg)
-		c.Assert(err, IsNil)
-
-		r := map[string]int{"max-replicas": 5}
-		postData, err := json.Marshal(r)
-		c.Assert(err, IsNil)
-		err = postJSON(addr, postData)
-		c.Assert(err, IsNil)
-		l := map[string]interface{}{
-			"location-labels":       "zone,rack",
-			"region-schedule-limit": 10,
-		}
-		postData, err = json.Marshal(l)
-		c.Assert(err, IsNil)
-		err = postJSON(addr, postData)
-		c.Assert(err, IsNil)
-
-		resp, err = doGet(addr)
-		newCfg := &server.Config{}
-		err = readJSON(resp.Body, newCfg)
-		c.Assert(err, IsNil)
-		cfg.Replication.MaxReplicas = 5
-		cfg.Replication.LocationLabels = []string{"zone", "rack"}
-		cfg.Schedule.RegionScheduleLimit = 10
-		c.Assert(cfg, DeepEquals, newCfg)
+	r := map[string]int{"max-replicas": 5}
+	postData, err := json.Marshal(r)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(err, IsNil)
+	l := map[string]interface{}{
+		"location-labels":       "zone,rack",
+		"region-schedule-limit": 10,
 	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(err, IsNil)
+
+	resp, err = doGet(addr)
+	newCfg := &server.Config{}
+	err = readJSON(resp.Body, newCfg)
+	c.Assert(err, IsNil)
+	cfg.Replication.MaxReplicas = 5
+	cfg.Replication.LocationLabels = []string{"zone", "rack"}
+	cfg.Schedule.RegionScheduleLimit = 10
+	c.Assert(cfg, DeepEquals, newCfg)
 }
 
 func (s *testConfigSuite) TestConfigSchedule(c *C) {
-	numbers := []int{1, 3}
-	for _, num := range numbers {
-		cfgs, _, clean := mustNewCluster(c, num)
-		defer clean()
+	addr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/config/schedule"
+	resp, err := doGet(addr)
+	c.Assert(err, IsNil)
+	sc := &server.ScheduleConfig{}
+	readJSON(resp.Body, sc)
 
-		addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/config/schedule"
-		resp, err := doGet(addr)
-		c.Assert(err, IsNil)
-		sc := &server.ScheduleConfig{}
-		readJSON(resp.Body, sc)
+	sc.MaxStoreDownTime.Duration = time.Second
+	postData, err := json.Marshal(sc)
+	postAddr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/config/schedule"
+	err = postJSON(postAddr, postData)
+	c.Assert(err, IsNil)
 
-		sc.MaxStoreDownTime.Duration = time.Second
-		postData, err := json.Marshal(sc)
-		postAddr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/config/schedule"
-		err = postJSON(postAddr, postData)
-		c.Assert(err, IsNil)
+	resp, err = doGet(addr)
+	c.Assert(err, IsNil)
+	sc1 := &server.ScheduleConfig{}
+	readJSON(resp.Body, sc1)
 
-		resp, err = doGet(addr)
-		c.Assert(err, IsNil)
-		sc1 := &server.ScheduleConfig{}
-		readJSON(resp.Body, sc1)
-
-		c.Assert(*sc, DeepEquals, *sc1)
-	}
+	c.Assert(*sc, DeepEquals, *sc1)
 }
 
 func (s *testConfigSuite) TestConfigReplication(c *C) {
-	numbers := []int{1, 3}
-	for _, num := range numbers {
-		cfgs, _, clean := mustNewCluster(c, num)
-		defer clean()
+	addr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/config/replicate"
+	resp, err := doGet(addr)
+	c.Assert(err, IsNil)
 
-		addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/config/replicate"
-		resp, err := doGet(addr)
-		c.Assert(err, IsNil)
+	rc := &server.ReplicationConfig{}
+	err = readJSON(resp.Body, rc)
+	c.Assert(err, IsNil)
 
-		rc := &server.ReplicationConfig{}
-		err = readJSON(resp.Body, rc)
-		c.Assert(err, IsNil)
+	rc.MaxReplicas = 5
 
-		rc.MaxReplicas = 5
+	rc1 := map[string]int{"max-replicas": 5}
+	postData, err := json.Marshal(rc1)
+	postAddr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/config/replicate"
+	err = postJSON(postAddr, postData)
+	c.Assert(err, IsNil)
+	rc.LocationLabels = []string{"zone", "rack"}
 
-		rc1 := map[string]int{"max-replicas": 5}
-		postData, err := json.Marshal(rc1)
-		postAddr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/config/replicate"
-		err = postJSON(postAddr, postData)
-		c.Assert(err, IsNil)
-		rc.LocationLabels = []string{"zone", "rack"}
+	rc2 := map[string]string{"location-labels": "zone,rack"}
+	postData, err = json.Marshal(rc2)
+	err = postJSON(postAddr, postData)
 
-		rc2 := map[string]string{"location-labels": "zone,rack"}
-		postData, err = json.Marshal(rc2)
-		err = postJSON(postAddr, postData)
+	resp, err = doGet(addr)
+	c.Assert(err, IsNil)
+	rc3 := &server.ReplicationConfig{}
 
-		resp, err = doGet(addr)
-		c.Assert(err, IsNil)
-		rc3 := &server.ReplicationConfig{}
+	err = readJSON(resp.Body, rc3)
+	c.Assert(err, IsNil)
 
-		err = readJSON(resp.Body, rc3)
-		c.Assert(err, IsNil)
-
-		c.Assert(*rc, DeepEquals, *rc3)
-	}
+	c.Assert(*rc, DeepEquals, *rc3)
 }
 
 func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
-	svr, cleanup := mustNewServer(c)
-	defer cleanup()
-	addr := svr.GetAddr() + apiPrefix + "/api/v1/config/label-property"
+	addr := s.servers[0].GetAddr() + apiPrefix + "/api/v1/config/label-property"
 
 	loadProperties := func() server.LabelPropertyConfig {
 		res, err := doGet(addr)

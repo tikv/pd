@@ -29,11 +29,19 @@ import (
 var _ = Suite(&testMemberAPISuite{})
 
 type testMemberAPISuite struct {
-	hc *http.Client
+	hc      *http.Client
+	cfgs    []*server.Config
+	servers []*server.Server
+	clean   func()
 }
 
 func (s *testMemberAPISuite) SetUpSuite(c *C) {
 	s.hc = newHTTPClient()
+	s.cfgs, s.servers, s.clean = mustNewCluster(c, 3)
+}
+
+func (s *testMemberAPISuite) TearDownSuite(c *C) {
+	s.clean()
 }
 
 func relaxEqualStings(c *C, a, b []string) {
@@ -65,29 +73,21 @@ func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
 }
 
 func (s *testMemberAPISuite) TestMemberList(c *C) {
-	numbers := []int{1, 3}
-
-	for _, num := range numbers {
-		cfgs, _, clean := mustNewCluster(c, num)
-		defer clean()
-
-		addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/members"
+	for _, cfg := range s.cfgs {
+		addr := cfg.ClientUrls + apiPrefix + "/api/v1/members"
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
 		buf, err := ioutil.ReadAll(resp.Body)
 		c.Assert(err, IsNil)
-		checkListResponse(c, buf, cfgs)
+		checkListResponse(c, buf, s.cfgs)
 	}
 }
 
 func (s *testMemberAPISuite) TestMemberLeader(c *C) {
-	cfgs, svrs, clean := mustNewCluster(c, 3)
-	defer clean()
-
-	leader, err := svrs[0].GetLeader()
+	leader, err := s.servers[0].GetLeader()
 	c.Assert(err, IsNil)
 
-	addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/leader"
+	addr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/leader"
 	c.Assert(err, IsNil)
 	resp, err := s.hc.Get(addr)
 	c.Assert(err, IsNil)
