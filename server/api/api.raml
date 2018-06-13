@@ -64,13 +64,13 @@ types:
       split-merge-interval?: integer
       patrol-region-interval?: string
       max-store-down-time?: string
-      leader-schedule-limit?: string
-      region-schedule-limit?: string
-      replica-schedule-limit?: string
-      merge-schedule-limit?: string
-      tolerant-size-ratio?: string
-      low-space-ratio?: string
-      high-space-ratio?: string
+      leader-schedule-limit?: integer
+      region-schedule-limit?: integer
+      replica-schedule-limit?: integer
+      merge-schedule-limit?: integer
+      tolerant-size-ratio?: number
+      low-space-ratio?: number
+      high-space-ratio?: number
       disable-raft-learner?: boolean
       schedulers-v2?: SchedulerConfigs # FIXME: now the output is a map.
   SchedulerConfigs:
