@@ -569,6 +569,7 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 		if err := s.kv.SaveGCSafePoint(request.SafePoint); err != nil {
 			return nil, errors.Trace(err)
 		}
+		log.Infof("updated gc safe point to %d", request.SafePoint)
 	}
 
 	return &pdpb.UpdateGCSafePointResponse{
