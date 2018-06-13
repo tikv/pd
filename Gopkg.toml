@@ -26,4 +26,5 @@
 
 [[constraint]]
   name = "github.com/pingcap/kvproto"
-  branch = "master"
+  source = "https://github.com/MyonKeminta/kvproto"
+  branch = "misono/upload-gc-safepoint"
