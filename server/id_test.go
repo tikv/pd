@@ -29,7 +29,7 @@ type testAllocIDSuite struct {
 	client       *clientv3.Client
 	alloc        *idAllocator
 	svr          *Server
-	cleanup      cleanUpFunc
+	cleanup      cleanupFunc
 	grpcPDClient pdpb.PDClient
 }
 

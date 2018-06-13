@@ -36,7 +36,7 @@ var _ = Suite(&testClusterSuite{})
 type testClusterBaseSuite struct {
 	client       *clientv3.Client
 	svr          *Server
-	cleanup      cleanUpFunc
+	cleanup      cleanupFunc
 	grpcPDClient pdpb.PDClient
 }
 

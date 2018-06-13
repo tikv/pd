@@ -30,7 +30,7 @@ func TestServer(t *testing.T) {
 
 type cleanupFunc func()
 
-func newTestServer(c *C) (*Server, cleanUpFunc) {
+func newTestServer(c *C) (*Server, cleanupFunc) {
 	cfg := NewTestSingleConfig()
 
 	svr, err := CreateServer(cfg, nil)
@@ -44,7 +44,7 @@ func newTestServer(c *C) (*Server, cleanUpFunc) {
 	return svr, cleanup
 }
 
-func mustRunTestServer(c *C) (*Server, cleanUpFunc) {
+func mustRunTestServer(c *C) (*Server, cleanupFunc) {
 	server, cleanup := newTestServer(c)
 	err := server.Run(make(chan os.Signal))
 	c.Assert(err, IsNil)

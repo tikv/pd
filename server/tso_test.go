@@ -28,7 +28,7 @@ var _ = Suite(&testTsoSuite{})
 type testTsoSuite struct {
 	client       *clientv3.Client
 	svr          *Server
-	cleanup      cleanUpFunc
+	cleanup      cleanupFunc
 	grpcPDClient pdpb.PDClient
 }
 
