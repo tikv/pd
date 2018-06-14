@@ -77,7 +77,7 @@ func NewTestSingleConfig() *Config {
 	cfg.ElectionInterval = typeutil.NewDuration(3000 * time.Millisecond)
 	cfg.leaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
 
-	cfg.adjust()
+	cfg.adjust(nil)
 	return cfg
 }
 
