@@ -30,8 +30,9 @@ func (s *testReplicationSuite) TestPendingPeerFilter(c *C) {
 	c.Assert(filter.FilterSource(tc, store), IsFalse)
 	store.PendingPeerCount = 30
 	c.Assert(filter.FilterSource(tc, store), IsTrue)
+	c.Assert(filter.FilterTarget(tc, store), IsTrue)
 	// set to 0 means no limit
 	opt.MaxPendingPeerCount = 0
 	c.Assert(filter.FilterSource(tc, store), IsFalse)
-	c.Assert(filter.FilterSource(tc, store), IsFalse)
+	c.Assert(filter.FilterTarget(tc, store), IsFalse)
 }
