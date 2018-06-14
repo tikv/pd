@@ -15,6 +15,7 @@ package pd
 
 import (
 	"context"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -26,7 +27,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"google.golang.org/grpc"
-	"math"
 )
 
 func TestClient(t *testing.T) {
