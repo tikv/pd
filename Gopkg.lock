@@ -253,14 +253,14 @@
   revision = "1c287c953996ab3a0bf535dba9d53d809d3dc0b6"
 
 [[projects]]
-  branch = "master"
+  branch = "batch-split"
   name = "github.com/pingcap/kvproto"
   packages = [
     "pkg/eraftpb",
     "pkg/metapb",
     "pkg/pdpb"
   ]
-  revision = "b7ba8ea1c0b4915d333a146eb0e674fb5b33854f"
+  revision = "592f63bfb3ab3ef7e55dc2ee57dbb97594930811"
 
 [[projects]]
   name = "github.com/prometheus/client_golang"
@@ -494,6 +494,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "da8bdc8144bcc6b679548cc3eb0de72258f9a9d480a789c2f43b77be8b5a0087"
+  inputs-digest = "cef70abdcf1674473089991abf1d41fb771013ac22e5bc73ba85675d718de61c"
   solver-name = "gps-cdcl"
   solver-version = 1
