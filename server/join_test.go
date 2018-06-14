@@ -90,7 +90,7 @@ func startPdWith(cfg *Config) (*Server, error) {
 	abortCh := make(chan struct{}, 1)
 
 	go func() {
-		err := cfg.adjust()
+		err := cfg.adjust(nil)
 		if err != nil {
 			errCh <- errors.Trace(err)
 			return

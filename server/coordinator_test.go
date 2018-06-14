@@ -35,7 +35,7 @@ func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind sche
 
 func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption) {
 	cfg := NewConfig()
-	cfg.adjust()
+	cfg.adjust(nil)
 	opt := newScheduleOption(cfg)
 	return &cfg.Schedule, opt
 }
@@ -82,6 +82,7 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 	}
 	regionInfo := core.NewRegionInfo(region, leader)
 	regionInfo.ApproximateSize = 10
+	regionInfo.ApproximateRows = 10
 	c.putRegion(regionInfo)
 }
 
