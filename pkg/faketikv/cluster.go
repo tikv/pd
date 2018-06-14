@@ -65,6 +65,7 @@ func NewClusterInfo(pdAddr string, conf *cases.Conf) (*ClusterInfo, error) {
 		}
 		regionInfo := core.NewRegionInfo(meta, region.Leader)
 		regionInfo.ApproximateSize = region.Size
+		regionInfo.ApproximateRows = region.Rows
 		cluster.RegionsInfo.SetRegion(regionInfo)
 	}
 
@@ -144,7 +145,7 @@ func (c *ClusterInfo) stepSplit(region *core.RegionInfo) {
 	if region.Leader == nil {
 		return
 	}
-	if c.conf.RegionSplitSize == 0 || region.ApproximateSize < c.conf.RegionSplitSize {
+	if !c.conf.NeedSplit(region.ApproximateSize, region.ApproximateRows) {
 		return
 	}
 	ids := make([]uint64, 1+len(region.Peers))
@@ -159,6 +160,7 @@ func (c *ClusterInfo) stepSplit(region *core.RegionInfo) {
 
 	region.RegionEpoch.Version++
 	region.ApproximateSize /= 2
+	region.ApproximateRows /= 2
 
 	newRegion := region.Clone()
 	newRegion.PendingPeers, newRegion.DownPeers = nil, nil

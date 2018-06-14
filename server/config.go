@@ -15,6 +15,7 @@ package server
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/url"
@@ -354,10 +355,11 @@ func (c *Config) clone() *Config {
 }
 
 func (c *Config) String() string {
-	if c == nil {
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("Config(%+v)", *c)
+	return string(data)
 }
 
 // configFromFile loads config from file.
@@ -372,9 +374,11 @@ type ScheduleConfig struct {
 	// it will never be used as a source or target store.
 	MaxSnapshotCount    uint64 `toml:"max-snapshot-count,omitempty" json:"max-snapshot-count"`
 	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count,omitempty" json:"max-pending-peer-count"`
-	// If the size of region is smaller than this value,
+	// If both the size of region is smaller than MaxMergeRegionSize
+	// and the number of rows in region is smaller than MaxMergeRegionRows,
 	// it will try to merge with adjacent regions.
 	MaxMergeRegionSize uint64 `toml:"max-merge-region-size,omitempty" json:"max-merge-region-size"`
+	MaxMergeRegionRows uint64 `toml:"max-merge-region-rows,omitempty" json:"max-merge-region-rows"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval,omitempty" json:"split-merge-interval"`
 	// PatrolRegionInterval is the interval for scanning region during patrol.
@@ -417,6 +421,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		MaxSnapshotCount:     c.MaxSnapshotCount,
 		MaxPendingPeerCount:  c.MaxPendingPeerCount,
 		MaxMergeRegionSize:   c.MaxMergeRegionSize,
+		MaxMergeRegionRows:   c.MaxMergeRegionRows,
 		SplitMergeInterval:   c.SplitMergeInterval,
 		PatrolRegionInterval: c.PatrolRegionInterval,
 		MaxStoreDownTime:     c.MaxStoreDownTime,
@@ -437,6 +442,7 @@ const (
 	defaultMaxSnapshotCount     = 3
 	defaultMaxPendingPeerCount  = 16
 	defaultMaxMergeRegionSize   = 20
+	defaultMaxMergeRegionRows   = 200000
 	defaultSplitMergeInterval   = 1 * time.Hour
 	defaultPatrolRegionInterval = 100 * time.Millisecond
 	defaultMaxStoreDownTime     = 30 * time.Minute
@@ -453,6 +459,7 @@ func (c *ScheduleConfig) adjust() error {
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
 	adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
+	adjustUint64(&c.MaxMergeRegionRows, defaultMaxMergeRegionRows)
 	adjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
 	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
