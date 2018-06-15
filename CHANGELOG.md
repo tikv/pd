@@ -1,7 +1,7 @@
 # PD Change Log
 
 ## V2.0.4
-### Improvements
+### Improvement
 * Improve the behavior of the unset scheduling argument `max-pending-peer-count` by changing it to no limit for the maximum number of `PendingPeer`s
 
 ## v2.0.3
