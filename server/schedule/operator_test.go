@@ -109,6 +109,13 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	c.Assert(op.IsTimeout(), IsFalse)
 	op.createTime = op.createTime.Add(-LeaderOperatorWaitTime)
 	c.Assert(op.IsTimeout(), IsTrue)
+	// check timeout for split region.
+	op = CreateSplitRegionOperator("testSplitRegion", region, OpAdmin)
+	c.Assert(op.IsTimeout(), IsFalse)
+	op.createTime = op.createTime.Add(-LeaderOperatorWaitTime)
+	c.Assert(op.IsTimeout(), IsFalse)
+	op.createTime = op.createTime.Add(-RegionOperatorWaitTime)
+	c.Assert(op.IsTimeout(), IsTrue)
 }
 
 func (s *testOperatorSuite) TestInfluence(c *C) {
