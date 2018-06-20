@@ -15,7 +15,6 @@ package server
 
 import (
 	"context"
-	"os"
 	"sync"
 
 	"github.com/coreos/etcd/clientv3"
@@ -35,7 +34,7 @@ type testAllocIDSuite struct {
 
 func (s *testAllocIDSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
-	err := s.svr.Run(make(chan os.Signal))
+	err := s.svr.Run(context.TODO())
 	c.Assert(err, IsNil)
 	s.client = s.svr.client
 	s.alloc = s.svr.idAlloc

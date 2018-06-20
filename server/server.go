@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
-	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -125,7 +124,7 @@ func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server,
 	return s, nil
 }
 
-func (s *Server) startEtcd(sigC <-chan os.Signal) error {
+func (s *Server) startEtcd(ctx context.Context) error {
 	log.Info("start embed etcd")
 	etcd, err := embed.StartEtcd(s.etcdCfg)
 	if err != nil {
@@ -148,8 +147,8 @@ func (s *Server) startEtcd(sigC <-chan os.Signal) error {
 	select {
 	// Wait etcd until it is ready to use
 	case <-etcd.Server.ReadyNotify():
-	case sig := <-sigC:
-		return errors.Errorf("receive signal %v when waiting embed etcd to be ready", sig)
+	case <-ctx.Done():
+		return errors.Errorf("canceled when waiting embed etcd to be ready")
 	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
@@ -264,7 +263,7 @@ func (s *Server) isClosed() bool {
 var timeMonitorOnce sync.Once
 
 // Run runs the pd server.
-func (s *Server) Run(sigC <-chan os.Signal) error {
+func (s *Server) Run(ctx context.Context) error {
 	timeMonitorOnce.Do(func() {
 		go StartMonitor(time.Now, func() {
 			log.Errorf("system time jumps backward")
@@ -272,7 +271,7 @@ func (s *Server) Run(sigC <-chan os.Signal) error {
 		})
 	})
 
-	if err := s.startEtcd(sigC); err != nil {
+	if err := s.startEtcd(ctx); err != nil {
 		return errors.Trace(err)
 	}
 

@@ -14,9 +14,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -64,7 +64,7 @@ func (s *testStoreNsSuite) SetUpSuite(c *C) {
 	cfg.NamespaceClassifier = "table"
 	svr, err := server.CreateServer(cfg, NewHandler)
 	c.Assert(err, IsNil)
-	c.Assert(svr.Run(make(chan os.Signal)), IsNil)
+	c.Assert(svr.Run(context.TODO()), IsNil)
 	s.svr = svr
 	s.cleanup = func() {
 		svr.Close()

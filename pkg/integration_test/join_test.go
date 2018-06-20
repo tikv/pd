@@ -15,8 +15,6 @@ package integration
 
 import (
 	"context"
-	"os"
-	"syscall"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -44,7 +42,7 @@ func (s *integrationTestSuite) TestSimpleJoin(c *C) {
 	// Join the second PD.
 	pd2, err := cluster.Join()
 	c.Assert(err, IsNil)
-	err = pd2.Run(make(chan os.Signal))
+	err = pd2.Run(context.TODO())
 	c.Assert(err, IsNil)
 	members, err = etcdutil.ListEtcdMembers(client)
 	c.Assert(err, IsNil)
@@ -57,7 +55,7 @@ func (s *integrationTestSuite) TestSimpleJoin(c *C) {
 	// Join another PD.
 	pd3, err := cluster.Join()
 	c.Assert(err, IsNil)
-	err = pd3.Run(make(chan os.Signal))
+	err = pd3.Run(context.TODO())
 	c.Assert(err, IsNil)
 	members, err = etcdutil.ListEtcdMembers(client)
 	c.Assert(err, IsNil)
@@ -89,12 +87,12 @@ func (s *integrationTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) 
 	c.Assert(err, IsNil)
 
 	// The server should not successfully start.
-	sigC := make(chan os.Signal)
+	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		time.Sleep(10 * time.Second)
-		sigC <- syscall.SIGKILL
+		cancel()
 	}()
-	res := cluster.RunServer(pd3, sigC)
+	res := cluster.RunServer(ctx, pd3)
 	c.Assert(<-res, NotNil)
 
 	members, err := etcdutil.ListEtcdMembers(client)
@@ -125,12 +123,12 @@ func (s *integrationTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 	c.Assert(err, IsNil)
 
 	// The server should not successfully start.
-	sigC := make(chan os.Signal)
+	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		time.Sleep(10 * time.Second)
-		sigC <- syscall.SIGKILL
+		cancel()
 	}()
-	res := cluster.RunServer(pd3, sigC)
+	res := cluster.RunServer(ctx, pd3)
 	c.Assert(<-res, NotNil)
 
 	members, err := etcdutil.ListEtcdMembers(client)
@@ -152,7 +150,7 @@ func (s *integrationTestSuite) TestFailedPDJoinsPreviousCluster(c *C) {
 	// Join the second PD.
 	pd2, err := cluster.Join()
 	c.Assert(err, IsNil)
-	err = pd2.Run(make(chan os.Signal))
+	err = pd2.Run(context.TODO())
 	c.Assert(err, IsNil)
 	err = pd2.Stop()
 	c.Assert(err, IsNil)

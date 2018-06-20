@@ -63,13 +63,13 @@ func newTestServer(cfg *server.Config) (*testServer, error) {
 	}, nil
 }
 
-func (s *testServer) Run(sigC <-chan os.Signal) error {
+func (s *testServer) Run(ctx context.Context) error {
 	s.Lock()
 	defer s.Unlock()
 	if s.state != Initial && s.state != Stop {
 		return errors.Errorf("server(state%d) cannot run", s.state)
 	}
-	if err := s.server.Run(sigC); err != nil {
+	if err := s.server.Run(ctx); err != nil {
 		return errors.Trace(err)
 	}
 	s.state = Running
@@ -170,16 +170,16 @@ func newTestCluster(initialServerCount int) (*testCluster, error) {
 	}, nil
 }
 
-func (c *testCluster) RunServer(server *testServer, sigC <-chan os.Signal) <-chan error {
+func (c *testCluster) RunServer(ctx context.Context, server *testServer) <-chan error {
 	resC := make(chan error)
-	go func() { resC <- server.Run(sigC) }()
+	go func() { resC <- server.Run(ctx) }()
 	return resC
 }
 
-func (c *testCluster) RunServers(servers []*testServer, sigC <-chan os.Signal) error {
+func (c *testCluster) RunServers(ctx context.Context, servers []*testServer) error {
 	res := make([]<-chan error, len(servers))
 	for i, s := range servers {
-		res[i] = c.RunServer(s, sigC)
+		res[i] = c.RunServer(ctx, s)
 	}
 	for _, c := range res {
 		if err := <-c; err != nil {
@@ -194,7 +194,7 @@ func (c *testCluster) RunInitialServers() error {
 	for _, conf := range c.config.InitialServers {
 		servers = append(servers, c.GetServer(conf.Name))
 	}
-	return c.RunServers(servers, make(<-chan os.Signal))
+	return c.RunServers(context.Background(), servers)
 }
 
 func (c *testCluster) StopAll() error {

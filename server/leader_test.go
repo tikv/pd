@@ -15,7 +15,6 @@ package server
 
 import (
 	"context"
-	"os"
 	"sync"
 	"time"
 
@@ -38,7 +37,7 @@ func (s *testGetLeaderSuite) SetUpSuite(c *C) {
 	s.done = make(chan bool)
 	svr, err := CreateServer(cfg, nil)
 	c.Assert(err, IsNil)
-	err = svr.Run(make(chan os.Signal))
+	err = svr.Run(context.TODO())
 	// Send requests after server has started.
 	go s.sendRequest(c, cfg.ClientUrls)
 	time.Sleep(100 * time.Millisecond)
