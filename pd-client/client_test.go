@@ -235,12 +235,14 @@ func (s *testClientSuite) checkGCSafePoint(c *C, expectedSafePoint uint64) {
 func (s *testClientSuite) TestUpdateGCSafePoint(c *C) {
 	s.checkGCSafePoint(c, 0)
 	for _, safePoint := range []uint64{0, 1, 2, 3, 233, 23333, 233333333333, math.MaxUint64} {
-		err := s.client.UpdateGCSafePoint(context.Background(), safePoint)
+		newSafePoint, err := s.client.UpdateGCSafePoint(context.Background(), safePoint)
 		c.Assert(err, IsNil)
+		c.Assert(newSafePoint, Equals, safePoint)
 		s.checkGCSafePoint(c, safePoint)
 	}
 	// If the new safe point is less than the old one, it should not be updated.
-	err := s.client.UpdateGCSafePoint(context.Background(), 1)
+	newSafePoint, err := s.client.UpdateGCSafePoint(context.Background(), 1)
+	c.Assert(newSafePoint, Equals, uint64(math.MaxUint64))
 	c.Assert(err, IsNil)
 	s.checkGCSafePoint(c, math.MaxUint64)
 }

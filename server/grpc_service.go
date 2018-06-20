@@ -564,16 +564,22 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 		return nil, errors.Trace(err)
 	}
 
+	newSafePoint := request.SafePoint
+
 	// Only save the safe point if it's greater than the previous one
-	if request.SafePoint > oldSafePoint {
-		if err := s.kv.SaveGCSafePoint(request.SafePoint); err != nil {
+	if newSafePoint > oldSafePoint {
+		if err := s.kv.SaveGCSafePoint(newSafePoint); err != nil {
 			return nil, errors.Trace(err)
 		}
-		log.Infof("updated gc safe point to %d", request.SafePoint)
+		log.Infof("updated gc safe point to %d", newSafePoint)
+	} else if newSafePoint < oldSafePoint {
+		log.Warn("trying to update gc safe point from %d to %d", oldSafePoint, newSafePoint)
+		newSafePoint = oldSafePoint
 	}
 
 	return &pdpb.UpdateGCSafePointResponse{
-		Header: s.header(),
+		Header:       s.header(),
+		NewSafePoint: newSafePoint,
 	}, nil
 }
 
