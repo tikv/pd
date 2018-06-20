@@ -418,6 +418,12 @@ func (o *Operator) History() []OperatorHistory {
 	return histories
 }
 
+// CreateSplitRegionOperator creates an Operator that splits the specify region.
+func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OperatorKind) *Operator {
+	step := SplitRegion{StartKey: region.StartKey, EndKey: region.EndKey}
+	return NewOperator(desc, region.GetId(), region.GetRegionEpoch(), OpRegion|kind, step)
+}
+
 // CreateRemovePeerOperator creates an Operator that removes a peer from region.
 func CreateRemovePeerOperator(desc string, cluster Cluster, kind OperatorKind, region *core.RegionInfo, storeID uint64) *Operator {
 	removeKind, steps := removePeerSteps(cluster, region, storeID)
