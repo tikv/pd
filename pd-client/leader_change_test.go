@@ -41,7 +41,7 @@ func (s *testLeaderChangeSuite) prepareClusterN(c *C, n int) (svrs map[string]*s
 		go func() {
 			svr, err := server.CreateServer(cfg, api.NewHandler)
 			c.Assert(err, IsNil)
-			err = svr.Run()
+			err = svr.Run(context.TODO())
 			c.Assert(err, IsNil)
 			ch <- svr
 		}()

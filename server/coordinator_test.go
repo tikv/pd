@@ -18,6 +18,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -163,7 +164,11 @@ type mockHeartbeatStream struct {
 }
 
 func (s *mockHeartbeatStream) Send(m *pdpb.RegionHeartbeatResponse) error {
-	s.ch <- m
+	select {
+	case <-time.After(time.Second):
+		return errors.New("timeout")
+	case s.ch <- m:
+	}
 	return nil
 }
 

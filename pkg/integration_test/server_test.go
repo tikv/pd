@@ -41,7 +41,7 @@ func (s *integrationTestSuite) TestUpdateAdvertiseUrls(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destory()
 
-	err = cluster.RunAll()
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	// AdvertisePeerUrls should equals to PeerUrls.
@@ -66,7 +66,7 @@ func (s *integrationTestSuite) TestUpdateAdvertiseUrls(c *C) {
 		c.Assert(e, IsNil)
 		cluster.servers[conf.Name] = s
 	}
-	err = cluster.RunAll()
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	for _, conf := range cluster.config.InitialServers {
 		serverConf := cluster.GetServer(conf.Name).GetConfig()
@@ -81,7 +81,7 @@ func (s *integrationTestSuite) TestClusterID(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destory()
 
-	err = cluster.RunAll()
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	clusterID := cluster.GetServer("pd1").GetClusterID()
@@ -92,7 +92,7 @@ func (s *integrationTestSuite) TestClusterID(c *C) {
 	// Restart all PDs.
 	err = cluster.StopAll()
 	c.Assert(err, IsNil)
-	err = cluster.RunAll()
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	// All PDs should have the same cluster ID as before.
@@ -108,7 +108,7 @@ func (s *integrationTestSuite) TestLeader(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destory()
 
-	err = cluster.RunAll()
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	leader1 := cluster.WaitLeader()

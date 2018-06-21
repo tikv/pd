@@ -35,7 +35,7 @@ var _ = Suite(&testClusterSuite{})
 type testClusterBaseSuite struct {
 	client       *clientv3.Client
 	svr          *Server
-	cleanup      cleanUpFunc
+	cleanup      cleanupFunc
 	grpcPDClient pdpb.PDClient
 }
 
@@ -46,7 +46,7 @@ type testClusterSuite struct {
 func (s *testClusterSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
 	s.client = s.svr.client
-	err := s.svr.Run()
+	err := s.svr.Run(context.TODO())
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
@@ -466,7 +466,7 @@ func (s *testClusterSuite) testCheckStores(c *C, clusterID uint64) {
 func (s *testClusterSuite) TestClosedChannel(c *C) {
 	svr, cleanup := newTestServer(c)
 	defer cleanup()
-	err := svr.Run()
+	err := svr.Run(context.TODO())
 	c.Assert(err, IsNil)
 
 	clusterID := svr.clusterID

@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -29,7 +30,7 @@ func TestServer(t *testing.T) {
 
 type cleanupFunc func()
 
-func newTestServer(c *C) (*Server, cleanUpFunc) {
+func newTestServer(c *C) (*Server, cleanupFunc) {
 	cfg := NewTestSingleConfig()
 
 	svr, err := CreateServer(cfg, nil)
@@ -43,9 +44,9 @@ func newTestServer(c *C) (*Server, cleanUpFunc) {
 	return svr, cleanup
 }
 
-func mustRunTestServer(c *C) (*Server, cleanUpFunc) {
+func mustRunTestServer(c *C) (*Server, cleanupFunc) {
 	server, cleanup := newTestServer(c)
-	err := server.Run()
+	err := server.Run(context.TODO())
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{server})
 	return server, cleanup
@@ -92,7 +93,7 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 		go func() {
 			svr, err := CreateServer(cfg, nil)
 			c.Assert(err, IsNil)
-			err = svr.Run()
+			err = svr.Run(context.TODO())
 			c.Assert(err, IsNil)
 			ch <- svr
 		}()
@@ -124,7 +125,7 @@ func newTestServersWithCfgs(c *C, cfgs []*Config) ([]*Server, cleanupFunc) {
 		go func(cfg *Config) {
 			svr, err := CreateServer(cfg, nil)
 			c.Assert(err, IsNil)
-			err = svr.Run()
+			err = svr.Run(context.TODO())
 			c.Assert(err, IsNil)
 			ch <- svr
 		}(cfg)
@@ -177,6 +178,6 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 	cfgA.InitialCluster = originInitial
 	svr, err := CreateServer(cfgA, nil)
 	c.Assert(err, IsNil)
-	err = svr.Run()
+	err = svr.Run(context.TODO())
 	c.Assert(err, NotNil)
 }
