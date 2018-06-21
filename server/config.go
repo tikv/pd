@@ -94,6 +94,11 @@ type Config struct {
 	TickInterval typeutil.Duration `toml:"tick-interval"`
 	// ElectionInterval is the interval for etcd Raft election.
 	ElectionInterval typeutil.Duration `toml:"election-interval"`
+	// Prevote is true to enable Raft Pre-Vote.
+	// If enabled, Raft runs an additional election phase
+	// to check whether it would get enough votes to win
+	// an election, thus minimizing disruptions.
+	PreVote bool `toml:"enable-prevote"`
 
 	Security SecurityConfig `toml:"security" json:"security"`
 
@@ -220,8 +225,9 @@ func (c *Config) Parse(arguments []string) error {
 	}
 
 	// Load config file if specified.
+	var meta *toml.MetaData
 	if c.configFile != "" {
-		err = c.configFromFile(c.configFile)
+		meta, err = c.configFromFile(c.configFile)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -249,7 +255,7 @@ func (c *Config) Parse(arguments []string) error {
 		return errors.Errorf("'%s' is an invalid flag", c.FlagSet.Arg(0))
 	}
 
-	err = c.adjust()
+	err = c.adjust(meta)
 	return errors.Trace(err)
 }
 
@@ -276,7 +282,7 @@ func (c *Config) validate() error {
 	return nil
 }
 
-func (c *Config) adjust() error {
+func (c *Config) adjust(meta *toml.MetaData) error {
 	adjustString(&c.Name, defaultName)
 	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 
@@ -334,6 +340,11 @@ func (c *Config) adjust() error {
 	adjustDuration(&c.heartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
 
 	adjustDuration(&c.leaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
+
+	// enable PreVote by default
+	if meta == nil || !meta.IsDefined("enable-prevote") {
+		c.PreVote = true
+	}
 	return nil
 }
 
@@ -352,9 +363,9 @@ func (c *Config) String() string {
 }
 
 // configFromFile loads config from file.
-func (c *Config) configFromFile(path string) error {
-	_, err := toml.DecodeFile(path, c)
-	return errors.Trace(err)
+func (c *Config) configFromFile(path string) (*toml.MetaData, error) {
+	meta, err := toml.DecodeFile(path, c)
+	return &meta, errors.Trace(err)
 }
 
 // ScheduleConfig is the schedule configuration.
@@ -363,9 +374,11 @@ type ScheduleConfig struct {
 	// it will never be used as a source or target store.
 	MaxSnapshotCount    uint64 `toml:"max-snapshot-count,omitempty" json:"max-snapshot-count"`
 	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count,omitempty" json:"max-pending-peer-count"`
-	// If the size of region is smaller than this value,
+	// If both the size of region is smaller than MaxMergeRegionSize
+	// and the number of rows in region is smaller than MaxMergeRegionRows,
 	// it will try to merge with adjacent regions.
 	MaxMergeRegionSize uint64 `toml:"max-merge-region-size,omitempty" json:"max-merge-region-size"`
+	MaxMergeRegionRows uint64 `toml:"max-merge-region-rows,omitempty" json:"max-merge-region-rows"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval,omitempty" json:"split-merge-interval"`
 	// PatrolRegionInterval is the interval for scanning region during patrol.
@@ -408,6 +421,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		MaxSnapshotCount:     c.MaxSnapshotCount,
 		MaxPendingPeerCount:  c.MaxPendingPeerCount,
 		MaxMergeRegionSize:   c.MaxMergeRegionSize,
+		MaxMergeRegionRows:   c.MaxMergeRegionRows,
 		SplitMergeInterval:   c.SplitMergeInterval,
 		PatrolRegionInterval: c.PatrolRegionInterval,
 		MaxStoreDownTime:     c.MaxStoreDownTime,
@@ -428,6 +442,7 @@ const (
 	defaultMaxSnapshotCount     = 3
 	defaultMaxPendingPeerCount  = 16
 	defaultMaxMergeRegionSize   = 20
+	defaultMaxMergeRegionRows   = 200000
 	defaultSplitMergeInterval   = 1 * time.Hour
 	defaultPatrolRegionInterval = 100 * time.Millisecond
 	defaultMaxStoreDownTime     = 30 * time.Minute
@@ -444,6 +459,7 @@ func (c *ScheduleConfig) adjust() error {
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
 	adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
+	adjustUint64(&c.MaxMergeRegionRows, defaultMaxMergeRegionRows)
 	adjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
 	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
@@ -631,6 +647,7 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.InitialCluster = c.InitialCluster
 	cfg.ClusterState = c.InitialClusterState
 	cfg.EnablePprof = true
+	cfg.PreVote = c.PreVote
 	cfg.StrictReconfigCheck = !c.disableStrictReconfigCheck
 	cfg.TickMs = uint(c.TickInterval.Duration / time.Millisecond)
 	cfg.ElectionMs = uint(c.ElectionInterval.Duration / time.Millisecond)

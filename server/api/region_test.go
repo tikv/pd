@@ -60,6 +60,7 @@ func newTestRegionInfo(regionID, storeID uint64, start, end []byte) *core.Region
 		},
 		Leader:          leader,
 		ApproximateSize: 10,
+		ApproximateRows: 10,
 	}
 }
 

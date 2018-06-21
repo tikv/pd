@@ -14,6 +14,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -63,7 +64,7 @@ func (s *testStoreNsSuite) SetUpSuite(c *C) {
 	cfg.NamespaceClassifier = "table"
 	svr, err := server.CreateServer(cfg, NewHandler)
 	c.Assert(err, IsNil)
-	c.Assert(svr.Run(), IsNil)
+	c.Assert(svr.Run(context.TODO()), IsNil)
 	s.svr = svr
 	s.cleanup = func() {
 		svr.Close()

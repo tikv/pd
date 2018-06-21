@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -43,7 +44,7 @@ func NewTestServer() (*Config, *Server, CleanupFunc, error) {
 	if err != nil {
 		return nil, nil, nil, errors.Trace(err)
 	}
-	if err = s.Run(); err != nil {
+	if err = s.Run(context.TODO()); err != nil {
 		return nil, nil, nil, errors.Trace(err)
 	}
 
@@ -77,7 +78,7 @@ func NewTestSingleConfig() *Config {
 	cfg.ElectionInterval = typeutil.NewDuration(3000 * time.Millisecond)
 	cfg.leaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
 
-	cfg.adjust()
+	cfg.adjust(nil)
 	return cfg
 }
 
