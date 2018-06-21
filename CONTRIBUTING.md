@@ -56,7 +56,7 @@ second line is always blank, and other lines should be wrapped at 80 characters.
 This allows the message to be easier to read on GitHub as well as in various
 git tools.
 
-If the change affects more than one subsystem, you can use comma to separate them like `server,pd-cilent:`.
+If the change affects more than one subsystem, you can use comma to separate them like `server, pd-cilent:`.
 
 If the change affects many subsystems, you can use ```*``` instead, like ```*:```.
 
