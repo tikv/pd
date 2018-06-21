@@ -74,7 +74,9 @@ func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 func (c *RaftCluster) validRequestRegion(reqRegion *metapb.Region) error {
 	startKey := reqRegion.GetStartKey()
 	region, _ := c.GetRegionByKey(startKey)
-
+	if region == nil {
+		return errors.Errorf("region not found, request region: %v", reqRegion)
+	}
 	// If the request epoch is less than current region epoch, then returns an error.
 	reqRegionEpoch := reqRegion.GetRegionEpoch()
 	regionEpoch := region.GetRegionEpoch()
@@ -93,6 +95,9 @@ func (c *RaftCluster) handleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 		return nil, errors.Trace(err)
 	}
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
+
+	// Disable merge the regions in a period of time.
+	c.coordinator.mergeChecker.RecordRegionSplit(reqRegion.GetId())
 	for i := 0; i < int(splitCount); i++ {
 		newRegionID, err := c.s.idAlloc.Alloc()
 		if err != nil {
@@ -106,8 +111,6 @@ func (c *RaftCluster) handleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 			}
 		}
 
-		// Disable merge for the 2 regions in a period of time.
-		c.coordinator.mergeChecker.RecordRegionSplit(reqRegion.GetId())
 		c.coordinator.mergeChecker.RecordRegionSplit(newRegionID)
 		splitIDs = append(splitIDs, &pdpb.SplitID{
 			NewRegionId: newRegionID,
