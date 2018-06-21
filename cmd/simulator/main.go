@@ -14,6 +14,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -48,7 +49,7 @@ func main() {
 
 	schedule.Simulating = true
 	_, local, clean := NewSingleServer()
-	err := local.Run()
+	err := local.Run(context.Background())
 	if err != nil {
 		simutil.Logger.Fatal("run server error:", err)
 	}

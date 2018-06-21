@@ -33,7 +33,7 @@ func (s *integrationTestSuite) TestMemberDelete(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destory()
 
-	err = cluster.RunAll()
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	clientURL := cluster.GetServer("pd1").GetConfig().ClientUrls
@@ -50,6 +50,7 @@ func (s *integrationTestSuite) TestMemberDelete(c *C) {
 		{path: "id/" + pd3ID, status: http.StatusOK},
 	}
 	for _, t := range table {
+		c.Log(time.Now(), "try to delete:", t.path)
 		testutil.WaitUntil(c, func(c *C) bool {
 			addr := clientURL + "/pd/api/v1/members/" + t.path
 			req, err := http.NewRequest("DELETE", addr, nil)
@@ -57,6 +58,7 @@ func (s *integrationTestSuite) TestMemberDelete(c *C) {
 			res, err := httpClient.Do(req)
 			c.Assert(err, IsNil)
 			defer res.Body.Close()
+			c.Log(time.Now(), "delete response:", res)
 			if res.StatusCode != t.status {
 				time.Sleep(time.Second)
 				return false
@@ -65,10 +67,12 @@ func (s *integrationTestSuite) TestMemberDelete(c *C) {
 		})
 	}
 	testutil.WaitUntil(c, func(c *C) bool {
+		c.Log(time.Now(), "load members")
 		addr := clientURL + "/pd/api/v1/members"
 		res, err := httpClient.Get(addr)
 		c.Assert(err, IsNil)
 		defer res.Body.Close()
+		c.Log(time.Now(), "load member response:", res)
 		if res.StatusCode != http.StatusOK {
 			time.Sleep(time.Second)
 			return false
@@ -102,7 +106,7 @@ func (s *integrationTestSuite) TestLeaderPriority(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destory()
 
-	err = cluster.RunAll()
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	cluster.WaitLeader()
@@ -161,7 +165,7 @@ func (s *integrationTestSuite) TestLeaderResign(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destory()
 
-	err = cluster.RunAll()
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	leader1 := cluster.WaitLeader()
