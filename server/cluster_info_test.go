@@ -323,7 +323,7 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt := newTestScheduleConfig()
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, nil)
+	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
 
 	n, np := uint64(3), uint64(3)
 
@@ -406,6 +406,18 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		region.PendingPeers = nil
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
+
+		// Remove  peers.
+		origin := region.Clone()
+		region.Peers = region.Peers[:1]
+		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		// Add peers.
+		region.Peers = origin.Peers
+		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegionsKV(c, cluster.kv, regions[:i+1])
 	}
 
 	regionCounts := make(map[uint64]int)
