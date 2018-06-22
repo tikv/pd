@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	backgroundJobInterval = time.Minute
+	backgroundJobInterval = time.Second * 10
 )
 
 // RaftCluster is used for cluster config management.
