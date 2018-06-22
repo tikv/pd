@@ -348,7 +348,7 @@ func (c *client) tsLoop() {
 			stream, err = c.leaderClient().Tso(ctx)
 			if err != nil {
 				log.Errorf("[pd] create tso stream error: %v", err)
-				c.scheduleCheckLeader()
+				c.ScheduleCheckLeader()
 				cancel()
 				c.revokeTSORequest(err)
 				select {
@@ -389,7 +389,7 @@ func (c *client) tsLoop() {
 
 		if err != nil {
 			log.Errorf("[pd] getTS error: %v", err)
-			c.scheduleCheckLeader()
+			c.ScheduleCheckLeader()
 			cancel()
 			stream, cancel = nil, nil
 		}
@@ -482,7 +482,7 @@ func (c *client) leaderClient() pdpb.PDClient {
 	return pdpb.NewPDClient(c.connMu.clientConns[c.connMu.leader])
 }
 
-func (c *client) scheduleCheckLeader() {
+func (c *client) ScheduleCheckLeader() {
 	select {
 	case c.checkLeaderCh <- struct{}{}:
 	default:
@@ -491,6 +491,18 @@ func (c *client) scheduleCheckLeader() {
 
 func (c *client) GetClusterID(context.Context) uint64 {
 	return c.clusterID
+}
+
+// For testing use.
+func (c *client) GetLeaderAddr() string {
+	c.connMu.RLock()
+	defer c.connMu.RUnlock()
+	return c.connMu.leader
+}
+
+// For testing use. It should only be called when the client is closed.
+func (c *client) GetURLs() []string {
+	return c.urls
 }
 
 var tsoReqPool = sync.Pool{
@@ -561,7 +573,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds())
-		c.scheduleCheckLeader()
+		c.ScheduleCheckLeader()
 		return nil, nil, errors.Trace(err)
 	}
 	return resp.GetRegion(), resp.GetLeader(), nil
@@ -585,7 +597,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Re
 
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_region_byid").Observe(time.Since(start).Seconds())
-		c.scheduleCheckLeader()
+		c.ScheduleCheckLeader()
 		return nil, nil, errors.Trace(err)
 	}
 	return resp.GetRegion(), resp.GetLeader(), nil
@@ -609,7 +621,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds())
-		c.scheduleCheckLeader()
+		c.ScheduleCheckLeader()
 		return nil, errors.Trace(err)
 	}
 	store := resp.GetStore()
