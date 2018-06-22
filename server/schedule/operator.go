@@ -361,6 +361,9 @@ func (o *Operator) IsTimeout() bool {
 	if o.IsFinish() {
 		return false
 	}
+	if o.desc == "removeDownReplica" {
+		return time.Since(o.createTime) > 5*time.Second
+	}
 	if o.kind&OpRegion != 0 {
 		return time.Since(o.createTime) > RegionOperatorWaitTime
 	}
