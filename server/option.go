@@ -269,7 +269,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 }
 
 func (o *scheduleOption) adjustScheduleCfg(persistentCfg *Config) {
-	scheduleCfg := *o.load()
+	scheduleCfg := o.load().clone()
 	for i, s := range scheduleCfg.Schedulers {
 		for _, ps := range persistentCfg.Schedule.Schedulers {
 			if s.Type == ps.Type && reflect.DeepEqual(s.Args, ps.Args) {
@@ -293,6 +293,7 @@ func (o *scheduleOption) adjustScheduleCfg(persistentCfg *Config) {
 	}
 	scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, restoredSchedulers...)
 	persistentCfg.Schedule.Schedulers = scheduleCfg.Schedulers
+	o.store(scheduleCfg)
 }
 
 func (o *scheduleOption) GetHotRegionLowThreshold() int {

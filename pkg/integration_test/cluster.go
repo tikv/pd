@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coreos/etcd/clientv3"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
@@ -62,13 +63,13 @@ func newTestServer(cfg *server.Config) (*testServer, error) {
 	}, nil
 }
 
-func (s *testServer) Run() error {
+func (s *testServer) Run(ctx context.Context) error {
 	s.Lock()
 	defer s.Unlock()
 	if s.state != Initial && s.state != Stop {
 		return errors.Errorf("server(state%d) cannot run", s.state)
 	}
-	if err := s.server.Run(); err != nil {
+	if err := s.server.Run(ctx); err != nil {
 		return errors.Trace(err)
 	}
 	s.state = Running
@@ -138,6 +139,12 @@ func (s *testServer) GetEtcdLeader() (string, error) {
 	return members.GetEtcdLeader().GetName(), nil
 }
 
+func (s *testServer) GetEtcdClient() *clientv3.Client {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetClient()
+}
+
 type testCluster struct {
 	config  *clusterConfig
 	servers map[string]*testServer
@@ -163,28 +170,31 @@ func newTestCluster(initialServerCount int) (*testCluster, error) {
 	}, nil
 }
 
-func (c *testCluster) RunAll() error {
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(c.servers))
-	for _, s := range c.servers {
-		wg.Add(1)
-		go func(s *testServer) {
-			defer wg.Done()
-			if err := s.Run(); err != nil {
-				errCh <- err
-			}
-		}(s)
+func (c *testCluster) RunServer(ctx context.Context, server *testServer) <-chan error {
+	resC := make(chan error)
+	go func() { resC <- server.Run(ctx) }()
+	return resC
+}
+
+func (c *testCluster) RunServers(ctx context.Context, servers []*testServer) error {
+	res := make([]<-chan error, len(servers))
+	for i, s := range servers {
+		res[i] = c.RunServer(ctx, s)
 	}
-	wg.Wait()
-	close(errCh)
-	var errs []error
-	for err := range errCh {
-		errs = append(errs, err)
-	}
-	if len(errs) != 0 {
-		return errors.Errorf("run server error(s): %v", errs)
+	for _, c := range res {
+		if err := <-c; err != nil {
+			return errors.Trace(err)
+		}
 	}
 	return nil
+}
+
+func (c *testCluster) RunInitialServers() error {
+	var servers []*testServer
+	for _, conf := range c.config.InitialServers {
+		servers = append(servers, c.GetServer(conf.Name))
+	}
+	return c.RunServers(context.Background(), servers)
 }
 
 func (c *testCluster) StopAll() error {

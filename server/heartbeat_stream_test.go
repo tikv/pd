@@ -34,7 +34,7 @@ type testHeartbeatStreamSuite struct {
 func (s *testHeartbeatStreamSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
 	s.svr.cfg.heartbeatStreamBindInterval = typeutil.NewDuration(time.Second)
-	err := s.svr.Run()
+	err := s.svr.Run(context.TODO())
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
