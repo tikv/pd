@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/error_code"
 	"github.com/unrolled/render"
 )
 
@@ -130,6 +131,20 @@ func newStoreHandler(svr *server.Server, rd *render.Render) *storeHandler {
 	}
 }
 
+func (h *storeHandler) errorResp(w http.ResponseWriter, err error) {
+	if err == nil {
+		// TODO: log this condition
+		h.rd.JSON(w, http.StatusInternalServerError, "nil error")
+		return
+	}
+	errCode, ok := err.(errcode.ErrorCode)
+	if ok {
+		w.Header().Set("Tidb-Error-Code", string(errCode.Code()))
+	}
+	h.rd.JSON(w, http.StatusBadRequest, err.Error())
+	return
+}
+
 func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
@@ -178,7 +193,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		h.errorResp(w, err)
 		return
 	}
 
