@@ -43,7 +43,7 @@ type regionInfo struct {
 // NewRegionCommand return a region subcommand of rootCmd
 func NewRegionCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "region <region_id>",
+		Use:   `region <region_id> [-jq="<query string>"]`,
 		Short: "show the region status",
 		Run:   showRegionCommandFunc,
 	}
