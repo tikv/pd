@@ -709,6 +709,39 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 }
 
+func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	opt.LocationLabels = []string{"zone"}
+	tc := schedule.NewMockCluster(opt)
+	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
+
+	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	tc.UpdateStorageRatio(1, 0.5, 0.5)
+	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	tc.UpdateStorageRatio(1, 0.1, 0.9)
+	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3"})
+
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+
+	// Move peer to better location.
+	tc.UpdateStorageRatio(4, 0, 1)
+	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 1, 4)
+	// If store4 is almost full, do not add peer on it.
+	tc.UpdateStorageRatio(4, 0.9, 0.1)
+	c.Assert(rc.Check(region), IsNil)
+
+	tc.AddLeaderRegion(2, 1, 3)
+	region = tc.GetRegion(2)
+	// Add peer on store4.
+	tc.UpdateStorageRatio(4, 0, 1)
+	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 4)
+	// If store4 is almost full, do not add peer on it.
+	tc.UpdateStorageRatio(4, 0.8, 0)
+	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 2)
+}
+
 var _ = Suite(&testMergeCheckerSuite{})
 
 type testMergeCheckerSuite struct {
