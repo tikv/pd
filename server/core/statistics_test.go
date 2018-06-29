@@ -14,7 +14,10 @@
 package core
 
 import (
+	"time"
+
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 var _ = Suite(&testRollingStats{})
@@ -29,4 +32,23 @@ func (t *testRollingStats) TestRollingMedian(c *C) {
 		stats.Add(e)
 		c.Assert(stats.Median(), Equals, expected[i])
 	}
+}
+
+var _ = Suite(&testRollingStoreStats{})
+
+type testRollingStoreStats struct{}
+
+func (t *testRollingStoreStats) TestObserve(c *C) {
+	s := newRollingStoreStats()
+	now := time.Now()
+	stats := &pdpb.StoreStats{
+		StoreId:      1,
+		BytesWritten: 512 * 1024 * 60,
+		Interval: &pdpb.TimeInterval{
+			StartTimestamp: uint64(now.Add(-60*time.Second).UnixNano() / int64(time.Millisecond)),
+			EndTimestamp:   uint64(now.UnixNano() / int64(time.Millisecond)),
+		},
+	}
+	s.Observe(stats)
+	c.Assert(s.GetBytesWriteRate(), Equals, 512.0*1024)
 }
