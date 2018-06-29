@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
@@ -41,13 +42,14 @@ func (s *integrationTestSuite) TestMemberDelete(c *C) {
 	httpClient := &http.Client{Timeout: 15 * time.Second}
 
 	var table = []struct {
-		path   string
-		status int
+		path    string
+		status  int
+		members []*serverConfig
 	}{
 		{path: "name/foobar", status: http.StatusNotFound},
-		{path: "name/pd2", status: http.StatusOK},
+		{path: "name/pd2", members: []*serverConfig{cluster.config.InitialServers[0], cluster.config.InitialServers[1]}},
 		{path: "name/pd2", status: http.StatusNotFound},
-		{path: "id/" + pd3ID, status: http.StatusOK},
+		{path: "id/" + pd3ID, members: []*serverConfig{cluster.config.InitialServers[0]}},
 	}
 	for _, t := range table {
 		c.Log(time.Now(), "try to delete:", t.path)
@@ -58,37 +60,42 @@ func (s *integrationTestSuite) TestMemberDelete(c *C) {
 			res, err := httpClient.Do(req)
 			c.Assert(err, IsNil)
 			defer res.Body.Close()
-			c.Log(time.Now(), "delete response:", res)
-			if res.StatusCode != t.status {
+			// Check by status.
+			if t.status != 0 {
+				if res.StatusCode != t.status {
+					time.Sleep(time.Second)
+					return false
+				}
+				return true
+			}
+			// Check by member list.
+			cluster.WaitLeader()
+			if err = s.checkMemberList(c, clientURL, t.members); err != nil {
+				c.Logf("check member fail: %v", err)
 				time.Sleep(time.Second)
 				return false
 			}
 			return true
 		})
 	}
-	testutil.WaitUntil(c, func(c *C) bool {
-		c.Log(time.Now(), "load members")
-		addr := clientURL + "/pd/api/v1/members"
-		res, err := httpClient.Get(addr)
-		c.Assert(err, IsNil)
-		defer res.Body.Close()
-		c.Log(time.Now(), "load member response:", res)
-		if res.StatusCode != http.StatusOK {
-			time.Sleep(time.Second)
-			return false
-		}
-		buf, err := ioutil.ReadAll(res.Body)
-		c.Assert(err, IsNil)
-		expectMemberList := []*serverConfig{cluster.config.InitialServers[0]}
-		s.checkMemberList(c, buf, expectMemberList)
-		return true
-	})
 }
 
-func (s *integrationTestSuite) checkMemberList(c *C, body []byte, configs []*serverConfig) {
+func (s *integrationTestSuite) checkMemberList(c *C, clientURL string, configs []*serverConfig) error {
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+	addr := clientURL + "/pd/api/v1/members"
+	res, err := httpClient.Get(addr)
+	c.Assert(err, IsNil)
+	defer res.Body.Close()
+	buf, err := ioutil.ReadAll(res.Body)
+	c.Assert(err, IsNil)
+	if res.StatusCode != http.StatusOK {
+		return errors.Errorf("load members failed, status: %v, data: %q", res.StatusCode, buf)
+	}
 	data := make(map[string][]*pdpb.Member)
-	json.Unmarshal(body, &data)
-	c.Assert(len(data["members"]), Equals, len(configs))
+	json.Unmarshal(buf, &data)
+	if len(data["members"]) != len(configs) {
+		return errors.Errorf("member length not match, %v vs %v", len(data["members"]), len(configs))
+	}
 	for _, member := range data["members"] {
 		for _, cfg := range configs {
 			if member.GetName() == cfg.Name {
@@ -97,6 +104,7 @@ func (s *integrationTestSuite) checkMemberList(c *C, body []byte, configs []*ser
 			}
 		}
 	}
+	return nil
 }
 
 func (s *integrationTestSuite) TestLeaderPriority(c *C) {
