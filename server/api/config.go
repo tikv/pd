@@ -74,9 +74,7 @@ func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
 
 func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetScheduleConfig()
-	err := readJSON(r.Body, config)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	if err := jsonRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
 	}
 
@@ -93,9 +91,7 @@ func (h *confHandler) GetReplication(w http.ResponseWriter, r *http.Request) {
 
 func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetReplicationConfig()
-	err := readJSON(r.Body, config)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	if err := jsonRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
 	}
 
@@ -108,7 +104,7 @@ func (h *confHandler) GetNamespace(w http.ResponseWriter, r *http.Request) {
 	name := vars["name"]
 
 	if !h.svr.IsNamespaceExist(name) {
-		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("invalid namespace Name %s, not found", name))
+		h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("invalid namespace Name %s, not found", name))
 		return
 	}
 
@@ -122,14 +118,12 @@ func (h *confHandler) SetNamespace(w http.ResponseWriter, r *http.Request) {
 	name := vars["name"]
 
 	if !h.svr.IsNamespaceExist(name) {
-		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("invalid namespace Name %s, not found", name))
+		h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("invalid namespace Name %s, not found", name))
 		return
 	}
 
 	config := h.svr.GetNamespaceConfig(name)
-	err := readJSON(r.Body, config)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	if err := jsonRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
 	}
 
@@ -142,7 +136,7 @@ func (h *confHandler) DeleteNamespace(w http.ResponseWriter, r *http.Request) {
 	name := vars["name"]
 
 	if !h.svr.IsNamespaceExist(name) {
-		h.rd.JSON(w, http.StatusInternalServerError, fmt.Sprintf("invalid namespace Name %s, not found", name))
+		h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("invalid namespace Name %s, not found", name))
 		return
 	}
 	h.svr.DeleteNamespaceConfig(name)
@@ -156,11 +150,10 @@ func (h *confHandler) GetLabelProperty(w http.ResponseWriter, r *http.Request) {
 
 func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
 	input := make(map[string]string)
-	err := readJSON(r.Body, &input)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	if err := jsonRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
+	var err error
 	switch input["action"] {
 	case "set":
 		err = h.svr.SetLabelProperty(input["type"], input["label-key"], input["label-value"])

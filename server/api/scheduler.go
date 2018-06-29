@@ -44,8 +44,7 @@ func (h *schedulerHandler) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
-	if err := readJSON(r.Body, &input); err != nil {
-		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+	if err := jsonRespondError(h.r, w, r.Body, &input); err != nil {
 		return
 	}
 

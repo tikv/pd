@@ -96,7 +96,7 @@ func (h *memberHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["id"]
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -117,9 +117,9 @@ func (h *memberHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.Request) {
-	members, err := h.listMembers()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	members, membersErr := h.listMembers()
+	if membersErr != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, membersErr.Error())
 		return
 	}
 
@@ -137,8 +137,7 @@ func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.R
 	}
 
 	var input map[string]interface{}
-	if err = readJSON(r.Body, &input); err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+	if err := jsonRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 	for k, v := range input {
@@ -149,7 +148,7 @@ func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.R
 				h.rd.JSON(w, http.StatusBadRequest, "bad format leader priority")
 				return
 			}
-			err = h.svr.SetMemberLeaderPriority(memberID, int(priority))
+			err := h.svr.SetMemberLeaderPriority(memberID, int(priority))
 			if err != nil {
 				h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return

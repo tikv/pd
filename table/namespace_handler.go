@@ -14,6 +14,7 @@
 package table
 
 import (
+	"io"
 	"net/http"
 	"strconv"
 
@@ -56,11 +57,23 @@ func (h *tableNamespaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, nsInfo)
 }
 
+func jsonRespondError(r *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) (err error) {
+	if err = apiutil.ReadJSON(body, &data); err != nil {
+		switch err.(type) {
+		case apiutil.JSONError:
+			r.JSON(w, http.StatusBadRequest, err.Error())
+		default:
+			r.JSON(w, http.StatusInternalServerError, err.Error())
+
+		}
+	}
+	return
+}
+
 // Post creates a namespace.
 func (h *tableNamespaceHandler) Post(w http.ResponseWriter, r *http.Request) {
 	var input map[string]string
-	if err := apiutil.ReadJSON(r.Body, &input); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	if err := jsonRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 	ns := input["namespace"]
@@ -76,8 +89,7 @@ func (h *tableNamespaceHandler) Post(w http.ResponseWriter, r *http.Request) {
 
 func (h *tableNamespaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var input map[string]string
-	if err := apiutil.ReadJSON(r.Body, &input); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	if err := jsonRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 	tableIDStr := input["table_id"]
@@ -116,8 +128,7 @@ func (h *tableNamespaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 func (h *tableNamespaceHandler) SetMetaNamespace(w http.ResponseWriter, r *http.Request) {
 	var input map[string]string
-	if err := apiutil.ReadJSON(r.Body, &input); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	if err := jsonRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 	ns := input["namespace"]
@@ -149,8 +160,7 @@ func (h *tableNamespaceHandler) SetNamespace(w http.ResponseWriter, r *http.Requ
 	}
 
 	var input map[string]string
-	if err := apiutil.ReadJSON(r.Body, &input); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	if err := jsonRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 	ns := input["namespace"]

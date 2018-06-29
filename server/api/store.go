@@ -141,7 +141,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	storeIDStr := vars["id"]
 	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -166,7 +166,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	storeIDStr := vars["id"]
 	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -196,7 +196,7 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 	storeIDStr := vars["id"]
 	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -227,13 +227,12 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 	storeIDStr := vars["id"]
 	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	var input map[string]string
-	if err := readJSON(r.Body, &input); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	if err := jsonRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 
@@ -264,13 +263,12 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 	storeIDStr := vars["id"]
 	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	var input map[string]interface{}
-	if err := readJSON(r.Body, &input); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	if err := jsonRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 
