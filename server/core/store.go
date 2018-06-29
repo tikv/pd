@@ -507,9 +507,12 @@ func newRollingStoreStats() *RollingStoreStats {
 	}
 }
 
+const msToSec = uint64(time.Second / time.Millisecond)
+
 // Observe records current statistics.
 func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
-	interval := stats.GetInterval().GetEndTimestamp() - stats.GetInterval().GetStartTimestamp()
+	interval := (stats.GetInterval().GetEndTimestamp() - stats.GetInterval().GetStartTimestamp()) / msToSec
+
 	if interval == 0 {
 		return
 	}
