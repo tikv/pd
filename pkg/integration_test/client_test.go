@@ -67,6 +67,7 @@ func (s *integrationTestSuite) TestClientLeaderChange(c *C) {
 	err = cluster.GetServer(leader).Stop()
 	c.Assert(err, IsNil)
 	leader = cluster.WaitLeader()
+	c.Assert(leader, Not(Equals), "")
 	s.waitLeader(c, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
 
 	// Check TS won't fall back after leader changed.
