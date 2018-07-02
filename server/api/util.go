@@ -26,17 +26,18 @@ import (
 	"github.com/unrolled/render"
 )
 
-func jsonRespondError(r *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) (err error) {
-	if err = apiutil.ReadJSON(body, data); err != nil {
-		switch err.(type) {
-		case apiutil.JSONError:
-			r.JSON(w, http.StatusBadRequest, err.Error())
-		default:
-			r.JSON(w, http.StatusInternalServerError, err.Error())
-
-		}
+func jsonRespondError(r *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) error {
+	err := apiutil.ReadJSON(body, data)
+	if err == nil {
+		return nil
 	}
-	return
+	switch err.(type) {
+	case apiutil.JSONError:
+		r.JSON(w, http.StatusBadRequest, err.Error())
+	default:
+		r.JSON(w, http.StatusInternalServerError, err.Error())
+	}
+	return err
 }
 
 func readJSON(r io.ReadCloser, data interface{}) error {

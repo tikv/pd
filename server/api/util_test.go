@@ -15,7 +15,7 @@ package api
 
 import (
 	"bytes"
-	"io"
+	"io/ioutil"
 	"net/http/httptest"
 
 	. "github.com/pingcap/check"
@@ -26,18 +26,12 @@ var _ = Suite(&testUtilSuite{})
 
 type testUtilSuite struct{}
 
-type nopCloser struct {
-	io.Reader
-}
-
-func (nopCloser) Close() error { return nil }
-
 func (s *testUtilSuite) TestJsonRespondErrorOk(c *C) {
 	rd := render.New(render.Options{
 		IndentJSON: true,
 	})
 	response := httptest.NewRecorder()
-	body := nopCloser{bytes.NewBufferString("{\"zone\":\"cn\", \"host\":\"local\"}")}
+	body := ioutil.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\", \"host\":\"local\"}"))
 	var input map[string]string
 	output := map[string]string{"zone": "cn", "host": "local"}
 	err := jsonRespondError(rd, response, body, &input)
@@ -53,7 +47,7 @@ func (s *testUtilSuite) TestJsonRespondErrorBadInput(c *C) {
 		IndentJSON: true,
 	})
 	response := httptest.NewRecorder()
-	body := nopCloser{bytes.NewBufferString("{\"zone\":\"cn\", \"host\":\"local\"}")}
+	body := ioutil.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\", \"host\":\"local\"}"))
 	var input []string
 	err := jsonRespondError(rd, response, body, &input)
 	c.Assert(err, NotNil)
@@ -62,7 +56,7 @@ func (s *testUtilSuite) TestJsonRespondErrorBadInput(c *C) {
 	c.Assert(result.StatusCode, Equals, 400)
 
 	{
-		body := nopCloser{bytes.NewBufferString("{\"zone\":\"cn\",")}
+		body := ioutil.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\","))
 		var input []string
 		err := jsonRespondError(rd, response, body, &input)
 		c.Assert(err, NotNil)
