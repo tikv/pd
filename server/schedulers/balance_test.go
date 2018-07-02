@@ -724,8 +724,10 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	tc.UpdateStorageRatio(1, 0.5, 0.5)
+	tc.UpdateStoreRegionSize(1, 500*1024*1024)
 	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
-	tc.UpdateStorageRatio(1, 0.1, 0.9)
+	tc.UpdateStorageRatio(2, 0.1, 0.9)
+	tc.UpdateStoreRegionSize(2, 100*1024*1024)
 	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
 	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3"})
 
