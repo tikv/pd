@@ -184,7 +184,7 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 		},
 		{
 			id:     7,
-			status: http.StatusBadRequest,
+			status: http.StatusGone,
 		},
 	}
 	client := newHTTPClient()

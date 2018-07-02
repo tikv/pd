@@ -1,81 +1,99 @@
-// Package errcode reserves error codes with specific names
+// Package errcode is designed to create standardized API error codes.
+// The goal is that clients can reliably check against immutable error codes
+//
+// Two approaches can be takend
+// 1) centralized: define all errors in one module
+// 2) modular: define errors where they occur
+//
+// The centralized approach helps organize information.
+// All errors can be found in one file, and changes can be carefully reviewed.
+// The downside of centralized is the potential need to import types from other packages.
+//
+// A RegisteredCode should never be modified once committed (and released)
+//
+// TODO: separate out actual PD codes
 package errcode
 
-import "fmt"
-
-// Code helps document that we want a registered error code and not any unit16
-type Code uint16
-
-const (
-	// InternalError means the operation placed the system is in an inconsistent or unrecoverable state
-	// Essentially a handled panic.
-	// This is the same as a HTTP 500, so it is not necessary to send this code when using HTTP.k
-	InternalError Code = 5
-	// StoreTombstoned is an invalid operation was attempted on a store which is in a removed state
-	StoreTombstoned Code = 100
+import (
+	"fmt"
+	"net/http"
 )
 
-// Every ErrorCode should be associated with a detailed error message
-var errorMessages = map[Code]string{
-	StoreTombstoned: "The store has been removed",
-	InternalError:   "The system has encountered an unrecoverable error",
+// RegisteredCode helps document that we are using a registered error code that must never change
+type RegisteredCode string
+
+const (
+	// InternalErrorCode means the operation placed the system is in an inconsistent or unrecoverable state
+	// Essentially a handled panic.
+	// This is the same as a HTTP 500, so it is not necessary to send this code when using HTTP.k
+	// This error code is not specific to the PD server
+	InternalErrorCode RegisteredCode = "internal"
+	// StoreTombstonedCode is an invalid operation was attempted on a store which is in a removed state.
+	StoreTombstonedCode RegisteredCode = "store.state.tombstoned"
+)
+
+// ErrorCode defines constant code functions Code() and HTTPCode().
+// Code returns a RegisteredCode defined in this module.
+// Most implementations of HTTPCode() will return the DefaultHTTPCode.
+// The Error() function is not constant: it converts the underlying struct data into a detailed string message.
+// The underlying struct data will also be returned as JSON, see ErrorCodeJSON.
+type ErrorCode interface {
+	Error() string // The Error interface
+	HTTPCode() int
+	Code() RegisteredCode
 }
 
-// An ErrorCode may be mappable to a HTTP error code other than 400
-var httpCodes = map[Code]uint16{
-	StoreTombstoned: 410,
-	InternalError:   500,
+// JSONFormat is a standard way to serilalize an ErrorCode to JSON.
+// Msg is the string from Error().
+type JSONFormat struct {
+	Data ErrorCode      `json:"data"`
+	Msg  string         `json:"msg"`
+	Code RegisteredCode `json:"code"`
 }
 
-// HTTPCode returns an appropriate HTTP error code for the given Code.
-// If no HTTP error code is registered here, the default error code is 400
-func HTTPCode(code Code) uint16 {
-	httpCode, found := httpCodes[code]
-	if !found {
-		httpCode = 400
-	}
-	return httpCode
+// DefaultHTTPCode is the default used by an ErrorCode
+const DefaultHTTPCode int = http.StatusBadRequest
+
+// StoreTombstoned is an invalid operation was attempted on a store which is in a removed state.
+type StoreTombstoned struct {
+	StoreID   uint64 `json:"storeId"`
+	Operation string `json:"operation"`
 }
 
-// ErrorCode is an Error that contains a Code.
-type ErrorCode struct {
-	code Code
-	// Optionally add site-specific or dynamic information
-	detail string
-	// Optionally add an error
-	err error
+var _ ErrorCode = (*StoreTombstoned)(nil) // assert implements interface
+
+func (e StoreTombstoned) Error() string {
+	return fmt.Sprintf("The store %020d has been removed and the operation %s is invalid", e.StoreID, e.Operation)
 }
 
-// Code makes the ErrorCode code field accessible
-func (e ErrorCode) Code() Code {
-	return e.code
+// HTTPCode returns 410
+func (e StoreTombstoned) HTTPCode() int {
+	return http.StatusGone
 }
 
-func (e ErrorCode) Error() string {
-	msg, found := errorMessages[e.code]
-	if !found {
-		msg = "error message not found for code"
-	}
-	return fmt.Sprintf("code %d: %s. %s %v", e.code, msg, e.detail, e.err)
+// Code returns StoreTombstonedCode
+func (e StoreTombstoned) Code() RegisteredCode {
+	return StoreTombstonedCode
 }
 
-// NewCode constructs an error code based error
-// To give a site-specific error message, an optional string argument can be given
-func NewCode(code Code, message ...string) ErrorCode {
-	var detail string
-	if message != nil && len(message) > 0 {
-		detail = message[0]
-	}
-	return ErrorCode{code: code, detail: detail, err: nil}
+// InternalError attaches additional data to InternalErrorCode.
+type InternalError struct {
+	Detail string `json:"detail"`
+	Err    error  `json:"err"`
 }
 
-// NewCodeError constructs an error code based error
-// An additional site-specific error is attached
-// To give a site-specific error message, an optional string argument can be given
-func NewCodeError(code Code, err error, message ...string) ErrorCode {
-	var detail string
-	if message != nil && len(message) > 0 {
-		detail = message[0]
-	}
-	return ErrorCode{code: code, detail: detail, err: err}
+var _ ErrorCode = (*InternalError)(nil) // assert implements interface
+
+func (e InternalError) Error() string {
+	return fmt.Sprintf("An internal error occurred: %s %v", e.Detail, e.Err)
+}
+
+// HTTPCode returns 500
+func (e InternalError) HTTPCode() int {
+	return 500
+}
+
+// Code returns InternalErrorCode
+func (e InternalError) Code() RegisteredCode {
+	return InternalErrorCode
 }
