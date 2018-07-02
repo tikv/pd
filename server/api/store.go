@@ -232,7 +232,7 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var input map[string]string
-	if err := jsonRespondError(h.rd, w, r.Body, &input); err != nil {
+	if err := readJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 
@@ -268,7 +268,7 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var input map[string]interface{}
-	if err := jsonRespondError(h.rd, w, r.Body, &input); err != nil {
+	if err := readJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 

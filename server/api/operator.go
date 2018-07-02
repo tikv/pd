@@ -90,7 +90,7 @@ func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
-	if err := jsonRespondError(h.r, w, r.Body, &input); err != nil {
+	if err := readJSONRespondError(h.r, w, r.Body, &input); err != nil {
 		return
 	}
 

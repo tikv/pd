@@ -34,7 +34,7 @@ func (s *testUtilSuite) TestJsonRespondErrorOk(c *C) {
 	body := ioutil.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\", \"host\":\"local\"}"))
 	var input map[string]string
 	output := map[string]string{"zone": "cn", "host": "local"}
-	err := jsonRespondError(rd, response, body, &input)
+	err := readJSONRespondError(rd, response, body, &input)
 	c.Assert(err, IsNil)
 	c.Assert(input["zone"], Equals, output["zone"])
 	c.Assert(input["host"], Equals, output["host"])
@@ -49,7 +49,7 @@ func (s *testUtilSuite) TestJsonRespondErrorBadInput(c *C) {
 	response := httptest.NewRecorder()
 	body := ioutil.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\", \"host\":\"local\"}"))
 	var input []string
-	err := jsonRespondError(rd, response, body, &input)
+	err := readJSONRespondError(rd, response, body, &input)
 	c.Assert(err, NotNil)
 	c.Assert(err.Error(), Equals, "json: cannot unmarshal object into Go value of type []string")
 	result := response.Result()
@@ -58,7 +58,7 @@ func (s *testUtilSuite) TestJsonRespondErrorBadInput(c *C) {
 	{
 		body := ioutil.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\","))
 		var input []string
-		err := jsonRespondError(rd, response, body, &input)
+		err := readJSONRespondError(rd, response, body, &input)
 		c.Assert(err, NotNil)
 		c.Assert(err.Error(), Equals, "unexpected end of JSON input")
 		result := response.Result()

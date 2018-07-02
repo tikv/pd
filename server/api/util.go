@@ -26,7 +26,7 @@ import (
 	"github.com/unrolled/render"
 )
 
-func jsonRespondError(r *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) error {
+func readJSONRespondError(r *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) error {
 	err := apiutil.ReadJSON(body, data)
 	if err == nil {
 		return nil

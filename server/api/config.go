@@ -74,7 +74,7 @@ func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
 
 func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetScheduleConfig()
-	if err := jsonRespondError(h.rd, w, r.Body, &config); err != nil {
+	if err := readJSONRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
 	}
 
@@ -91,7 +91,7 @@ func (h *confHandler) GetReplication(w http.ResponseWriter, r *http.Request) {
 
 func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetReplicationConfig()
-	if err := jsonRespondError(h.rd, w, r.Body, &config); err != nil {
+	if err := readJSONRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
 	}
 
@@ -123,7 +123,7 @@ func (h *confHandler) SetNamespace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	config := h.svr.GetNamespaceConfig(name)
-	if err := jsonRespondError(h.rd, w, r.Body, &config); err != nil {
+	if err := readJSONRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
 	}
 
@@ -150,7 +150,7 @@ func (h *confHandler) GetLabelProperty(w http.ResponseWriter, r *http.Request) {
 
 func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
 	input := make(map[string]string)
-	if err := jsonRespondError(h.rd, w, r.Body, &input); err != nil {
+	if err := readJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 	var err error

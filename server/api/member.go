@@ -137,7 +137,7 @@ func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.R
 	}
 
 	var input map[string]interface{}
-	if err := jsonRespondError(h.rd, w, r.Body, &input); err != nil {
+	if err := readJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 	for k, v := range input {
