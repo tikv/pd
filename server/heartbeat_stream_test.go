@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -33,7 +34,7 @@ type testHeartbeatStreamSuite struct {
 func (s *testHeartbeatStreamSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
 	s.svr.cfg.heartbeatStreamBindInterval = typeutil.NewDuration(time.Second)
-	err := s.svr.Run()
+	err := s.svr.Run(context.TODO())
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
@@ -83,4 +84,42 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 		stream1.stream.Send(req)
 		return checkActiveStream() == 1
 	})
+}
+
+type regionHeartbeatClient struct {
+	stream pdpb.PD_RegionHeartbeatClient
+	respCh chan *pdpb.RegionHeartbeatResponse
+}
+
+func newRegionheartbeatClient(c *C, grpcClient pdpb.PDClient) *regionHeartbeatClient {
+	stream, err := grpcClient.RegionHeartbeat(context.Background())
+	c.Assert(err, IsNil)
+	ch := make(chan *pdpb.RegionHeartbeatResponse)
+	go func() {
+		for {
+			res, err := stream.Recv()
+			if err != nil {
+				return
+			}
+			ch <- res
+		}
+	}()
+	return &regionHeartbeatClient{
+		stream: stream,
+		respCh: ch,
+	}
+}
+
+func (c *regionHeartbeatClient) close() {
+	c.stream.CloseSend()
+}
+
+func (c *regionHeartbeatClient) SendRecv(msg *pdpb.RegionHeartbeatRequest, timeout time.Duration) *pdpb.RegionHeartbeatResponse {
+	c.stream.Send(msg)
+	select {
+	case <-time.After(timeout):
+		return nil
+	case res := <-c.respCh:
+		return res
+	}
 }

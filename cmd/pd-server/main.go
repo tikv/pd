@@ -14,6 +14,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 	"os/signal"
@@ -88,11 +89,18 @@ func main() {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 
-	if err := svr.Run(); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	var sig os.Signal
+	go func() {
+		sig = <-sc
+		cancel()
+	}()
+
+	if err := svr.Run(ctx); err != nil {
 		log.Fatalf("run server failed: %v", errors.ErrorStack(err))
 	}
 
-	sig := <-sc
+	<-ctx.Done()
 	log.Infof("Got signal [%d] to exit.", sig)
 
 	svr.Close()

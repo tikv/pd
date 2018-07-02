@@ -15,17 +15,21 @@
 package auth
 
 import (
+	"context"
 	"crypto/rsa"
 	"io/ioutil"
+	"time"
 
 	jwt "github.com/dgrijalva/jwt-go"
-	"golang.org/x/net/context"
+	"go.uber.org/zap"
 )
 
 type tokenJWT struct {
+	lg         *zap.Logger
 	signMethod string
 	signKey    *rsa.PrivateKey
 	verifyKey  *rsa.PublicKey
+	ttl        time.Duration
 }
 
 func (t *tokenJWT) enable()                         {}
@@ -47,7 +51,11 @@ func (t *tokenJWT) info(ctx context.Context, token string, rev uint64) (*AuthInf
 	switch err.(type) {
 	case nil:
 		if !parsed.Valid {
-			plog.Warningf("invalid jwt token: %s", token)
+			if t.lg != nil {
+				t.lg.Warn("invalid JWT token", zap.String("token", token))
+			} else {
+				plog.Warningf("invalid jwt token: %s", token)
+			}
 			return nil, false
 		}
 
@@ -56,7 +64,15 @@ func (t *tokenJWT) info(ctx context.Context, token string, rev uint64) (*AuthInf
 		username = claims["username"].(string)
 		revision = uint64(claims["revision"].(float64))
 	default:
-		plog.Warningf("failed to parse jwt token: %s", err)
+		if t.lg != nil {
+			t.lg.Warn(
+				"failed to parse a JWT token",
+				zap.String("token", token),
+				zap.Error(err),
+			)
+		} else {
+			plog.Warningf("failed to parse jwt token: %s", err)
+		}
 		return nil, false
 	}
 
@@ -70,20 +86,38 @@ func (t *tokenJWT) assign(ctx context.Context, username string, revision uint64)
 		jwt.MapClaims{
 			"username": username,
 			"revision": revision,
+			"exp":      time.Now().Add(t.ttl).Unix(),
 		})
 
 	token, err := tk.SignedString(t.signKey)
 	if err != nil {
-		plog.Debugf("failed to sign jwt token: %s", err)
+		if t.lg != nil {
+			t.lg.Warn(
+				"failed to sign a JWT token",
+				zap.String("user-name", username),
+				zap.Uint64("revision", revision),
+				zap.Error(err),
+			)
+		} else {
+			plog.Debugf("failed to sign jwt token: %s", err)
+		}
 		return "", err
 	}
 
-	plog.Debugf("jwt token: %s", token)
-
+	if t.lg != nil {
+		t.lg.Info(
+			"created/assigned a new JWT token",
+			zap.String("user-name", username),
+			zap.Uint64("revision", revision),
+			zap.String("token", token),
+		)
+	} else {
+		plog.Debugf("jwt token: %s", token)
+	}
 	return token, err
 }
 
-func prepareOpts(opts map[string]string) (jwtSignMethod, jwtPubKeyPath, jwtPrivKeyPath string, err error) {
+func prepareOpts(lg *zap.Logger, opts map[string]string) (jwtSignMethod, jwtPubKeyPath, jwtPrivKeyPath string, ttl time.Duration, err error) {
 	for k, v := range opts {
 		switch k {
 		case "sign-method":
@@ -92,44 +126,103 @@ func prepareOpts(opts map[string]string) (jwtSignMethod, jwtPubKeyPath, jwtPrivK
 			jwtPubKeyPath = v
 		case "priv-key":
 			jwtPrivKeyPath = v
+		case "ttl":
+			ttl, err = time.ParseDuration(v)
+			if err != nil {
+				if lg != nil {
+					lg.Warn(
+						"failed to parse JWT TTL option",
+						zap.String("ttl-value", v),
+						zap.Error(err),
+					)
+				} else {
+					plog.Errorf("failed to parse ttl option (%s)", err)
+				}
+				return "", "", "", 0, ErrInvalidAuthOpts
+			}
 		default:
-			plog.Errorf("unknown token specific option: %s", k)
-			return "", "", "", ErrInvalidAuthOpts
+			if lg != nil {
+				lg.Warn("unknown JWT token option", zap.String("option", k))
+			} else {
+				plog.Errorf("unknown token specific option: %s", k)
+			}
+			return "", "", "", 0, ErrInvalidAuthOpts
 		}
 	}
-
-	return jwtSignMethod, jwtPubKeyPath, jwtPrivKeyPath, nil
+	if len(jwtSignMethod) == 0 {
+		return "", "", "", 0, ErrInvalidAuthOpts
+	}
+	return jwtSignMethod, jwtPubKeyPath, jwtPrivKeyPath, ttl, nil
 }
 
-func newTokenProviderJWT(opts map[string]string) (*tokenJWT, error) {
-	jwtSignMethod, jwtPubKeyPath, jwtPrivKeyPath, err := prepareOpts(opts)
+func newTokenProviderJWT(lg *zap.Logger, opts map[string]string) (*tokenJWT, error) {
+	jwtSignMethod, jwtPubKeyPath, jwtPrivKeyPath, ttl, err := prepareOpts(lg, opts)
 	if err != nil {
 		return nil, ErrInvalidAuthOpts
 	}
 
-	t := &tokenJWT{}
+	if ttl == 0 {
+		ttl = 5 * time.Minute
+	}
+
+	t := &tokenJWT{
+		lg:  lg,
+		ttl: ttl,
+	}
 
 	t.signMethod = jwtSignMethod
 
 	verifyBytes, err := ioutil.ReadFile(jwtPubKeyPath)
 	if err != nil {
-		plog.Errorf("failed to read public key (%s) for jwt: %s", jwtPubKeyPath, err)
+		if lg != nil {
+			lg.Warn(
+				"failed to read JWT public key",
+				zap.String("public-key-path", jwtPubKeyPath),
+				zap.Error(err),
+			)
+		} else {
+			plog.Errorf("failed to read public key (%s) for jwt: %s", jwtPubKeyPath, err)
+		}
 		return nil, err
 	}
 	t.verifyKey, err = jwt.ParseRSAPublicKeyFromPEM(verifyBytes)
 	if err != nil {
-		plog.Errorf("failed to parse public key (%s): %s", jwtPubKeyPath, err)
+		if lg != nil {
+			lg.Warn(
+				"failed to parse JWT public key",
+				zap.String("public-key-path", jwtPubKeyPath),
+				zap.Error(err),
+			)
+		} else {
+			plog.Errorf("failed to parse public key (%s): %s", jwtPubKeyPath, err)
+		}
 		return nil, err
 	}
 
 	signBytes, err := ioutil.ReadFile(jwtPrivKeyPath)
 	if err != nil {
-		plog.Errorf("failed to read private key (%s) for jwt: %s", jwtPrivKeyPath, err)
+		if lg != nil {
+			lg.Warn(
+				"failed to read JWT private key",
+				zap.String("private-key-path", jwtPrivKeyPath),
+				zap.Error(err),
+			)
+		} else {
+			plog.Errorf("failed to read private key (%s) for jwt: %s", jwtPrivKeyPath, err)
+		}
 		return nil, err
 	}
 	t.signKey, err = jwt.ParseRSAPrivateKeyFromPEM(signBytes)
 	if err != nil {
-		plog.Errorf("failed to parse private key (%s): %s", jwtPrivKeyPath, err)
+		if lg != nil {
+			lg.Warn(
+				"failed to parse JWT private key",
+				zap.String("private-key-path", jwtPrivKeyPath),
+				zap.Error(err),
+			)
+		} else {
+			plog.Errorf("failed to parse private key (%s): %s", jwtPrivKeyPath, err)
+		}
 		return nil, err
 	}
 

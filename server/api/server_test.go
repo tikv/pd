@@ -29,8 +29,7 @@ import (
 )
 
 var (
-	clusterID = uint64(time.Now().Unix())
-	store     = &metapb.Store{
+	store = &metapb.Store{
 		Id:      1,
 		Address: "localhost",
 	}
@@ -51,6 +50,7 @@ var (
 )
 
 func TestAPIServer(t *testing.T) {
+	server.EnableZap = true
 	TestingT(t)
 }
 
@@ -81,7 +81,7 @@ func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpF
 		go func(cfg *server.Config) {
 			s, err := server.CreateServer(cfg, NewHandler)
 			c.Assert(err, IsNil)
-			err = s.Run()
+			err = s.Run(context.TODO())
 			c.Assert(err, IsNil)
 			ch <- s
 		}(cfg)

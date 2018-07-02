@@ -46,6 +46,7 @@ func newBalanceLeaderScheduler(limiter *schedule.Limiter) schedule.Scheduler {
 		schedule.NewBlockFilter(),
 		schedule.NewStateFilter(),
 		schedule.NewHealthFilter(),
+		schedule.NewDisconnectFilter(),
 		schedule.NewRejectLeaderFilter(),
 		schedule.NewCacheFilter(taintStores),
 	}
@@ -155,12 +156,12 @@ func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source,
 		return nil
 	}
 
-	if !shouldBalance(cluster, source, target, core.LeaderKind, region, opInfluence) {
+	if !shouldBalance(cluster, source, target, region, core.LeaderKind, opInfluence) {
 		log.Debugf(`[%s] skip balance region %d, source %d to target %d, source size: %v, source score: %v, source influence: %v,
-			target size: %v, target score: %v, target influence: %v, region size: %v`, l.GetName(), region.GetId(), source.GetId(), target.GetId(),
+			target size: %v, target score: %v, target influence: %v, average region size: %v`, l.GetName(), region.GetId(), source.GetId(), target.GetId(),
 			source.LeaderSize, source.LeaderScore(0), opInfluence.GetStoreInfluence(source.GetId()).ResourceSize(core.LeaderKind),
 			target.LeaderSize, target.LeaderScore(0), opInfluence.GetStoreInfluence(target.GetId()).ResourceSize(core.LeaderKind),
-			region.ApproximateSize)
+			cluster.GetAverageRegionSize())
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}
@@ -169,6 +170,6 @@ func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source,
 	balanceLeaderCounter.WithLabelValues("move_leader", fmt.Sprintf("store%d-out", source.GetId())).Inc()
 	balanceLeaderCounter.WithLabelValues("move_leader", fmt.Sprintf("store%d-in", target.GetId())).Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: target.GetId()}
-	op := schedule.NewOperator("balance-leader", region.GetId(), schedule.OpBalance|schedule.OpLeader, step)
+	op := schedule.NewOperator("balance-leader", region.GetId(), region.GetRegionEpoch(), schedule.OpBalance|schedule.OpLeader, step)
 	return []*schedule.Operator{op}
 }

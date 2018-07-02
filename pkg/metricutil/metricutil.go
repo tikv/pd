@@ -23,10 +23,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-var (
-	cmdLabels = make(map[string]string)
-)
-
 const zeroDuration = time.Duration(0)
 
 // MetricConfig is the metric configuration.

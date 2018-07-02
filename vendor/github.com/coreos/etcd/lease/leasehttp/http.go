@@ -62,7 +62,7 @@ func (h *leaseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case LeasePrefix:
 		lreq := pb.LeaseKeepAliveRequest{}
-		if err := lreq.Unmarshal(b); err != nil {
+		if uerr := lreq.Unmarshal(b); uerr != nil {
 			http.Error(w, "error unmarshalling request", http.StatusBadRequest)
 			return
 		}
@@ -72,14 +72,14 @@ func (h *leaseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, ErrLeaseHTTPTimeout.Error(), http.StatusRequestTimeout)
 			return
 		}
-		ttl, err := h.l.Renew(lease.LeaseID(lreq.ID))
-		if err != nil {
-			if err == lease.ErrLeaseNotFound {
-				http.Error(w, err.Error(), http.StatusNotFound)
+		ttl, rerr := h.l.Renew(lease.LeaseID(lreq.ID))
+		if rerr != nil {
+			if rerr == lease.ErrLeaseNotFound {
+				http.Error(w, rerr.Error(), http.StatusNotFound)
 				return
 			}
 
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, rerr.Error(), http.StatusBadRequest)
 			return
 		}
 		// TODO: fill out ResponseHeader
@@ -92,7 +92,7 @@ func (h *leaseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case LeaseInternalPrefix:
 		lreq := leasepb.LeaseInternalRequest{}
-		if err := lreq.Unmarshal(b); err != nil {
+		if lerr := lreq.Unmarshal(b); lerr != nil {
 			http.Error(w, "error unmarshalling request", http.StatusBadRequest)
 			return
 		}
@@ -191,7 +191,12 @@ func RenewHTTP(ctx context.Context, id lease.LeaseID, url string, rt http.RoundT
 // TimeToLiveHTTP retrieves lease information of the given lease ID.
 func TimeToLiveHTTP(ctx context.Context, id lease.LeaseID, keys bool, url string, rt http.RoundTripper) (*leasepb.LeaseInternalResponse, error) {
 	// will post lreq protobuf to leader
-	lreq, err := (&leasepb.LeaseInternalRequest{&pb.LeaseTimeToLiveRequest{ID: int64(id), Keys: keys}}).Marshal()
+	lreq, err := (&leasepb.LeaseInternalRequest{
+		LeaseTimeToLiveRequest: &pb.LeaseTimeToLiveRequest{
+			ID:   int64(id),
+			Keys: keys,
+		},
+	}).Marshal()
 	if err != nil {
 		return nil, err
 	}

@@ -36,6 +36,7 @@ func newShuffleLeaderScheduler(limiter *schedule.Limiter) schedule.Scheduler {
 		schedule.NewBlockFilter(),
 		schedule.NewStateFilter(),
 		schedule.NewHealthFilter(),
+		schedule.NewDisconnectFilter(),
 		schedule.NewRejectLeaderFilter(),
 	}
 	base := newBaseScheduler(limiter)
@@ -75,7 +76,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: targetStore.GetId()}
-	op := schedule.NewOperator("shuffleLeader", region.GetId(), schedule.OpAdmin|schedule.OpLeader, step)
+	op := schedule.NewOperator("shuffleLeader", region.GetId(), region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpLeader, step)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*schedule.Operator{op}
 }

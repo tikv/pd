@@ -18,11 +18,35 @@ import (
 	"sync/atomic"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server/core"
 )
 
 var _ = Suite(&testOperatorSuite{})
 
 type testOperatorSuite struct{}
+
+func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, peers ...[2]uint64) *core.RegionInfo {
+	var (
+		region metapb.Region
+		leader *metapb.Peer
+	)
+	region.Id = regionID
+	for i := range peers {
+		peer := &metapb.Peer{
+			Id:      peers[i][1],
+			StoreId: peers[i][0],
+		}
+		region.Peers = append(region.Peers, peer)
+		if peer.GetId() == leaderPeer {
+			leader = peer
+		}
+	}
+	regionInfo := core.NewRegionInfo(&region, leader)
+	regionInfo.ApproximateSize = 10
+	regionInfo.ApproximateRows = 10
+	return regionInfo
+}
 
 func (s *testOperatorSuite) TestOperatorStep(c *C) {
 	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
@@ -32,6 +56,10 @@ func (s *testOperatorSuite) TestOperatorStep(c *C) {
 	c.Assert(AddPeer{ToStore: 1, PeerID: 1}.IsFinish(region), IsTrue)
 	c.Assert(RemovePeer{FromStore: 1}.IsFinish(region), IsFalse)
 	c.Assert(RemovePeer{FromStore: 3}.IsFinish(region), IsTrue)
+}
+
+func (s *testOperatorSuite) newTestOperator(regionID uint64, kind OperatorKind, steps ...OperatorStep) *Operator {
+	return NewOperator("testOperator", regionID, &metapb.RegionEpoch{}, OpAdmin|kind, steps...)
 }
 
 func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OperatorStep) {
@@ -49,11 +77,11 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 		TransferLeader{FromStore: 3, ToStore: 1},
 		RemovePeer{FromStore: 3},
 	}
-	op := newTestOperator(1, OpAdmin, steps...)
+	op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
 	s.checkSteps(c, op, steps)
 	c.Assert(op.Check(region), IsNil)
 	c.Assert(op.IsFinish(), IsTrue)
-	op.createTime = op.createTime.Add(-MaxOperatorWaitTime)
+	op.createTime = op.createTime.Add(-RegionOperatorWaitTime)
 	c.Assert(op.IsTimeout(), IsFalse)
 
 	// addPeer1, transferLeader1, removePeer2
@@ -62,16 +90,25 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 		TransferLeader{FromStore: 2, ToStore: 1},
 		RemovePeer{FromStore: 2},
 	}
-	op = newTestOperator(1, OpAdmin, steps...)
+	op = s.newTestOperator(1, OpLeader|OpRegion, steps...)
 	s.checkSteps(c, op, steps)
 	c.Assert(op.Check(region), Equals, RemovePeer{FromStore: 2})
 	c.Assert(atomic.LoadInt32(&op.currentStep), Equals, int32(2))
 	c.Assert(op.IsTimeout(), IsFalse)
-	op.createTime = op.createTime.Add(-MaxOperatorWaitTime)
+	op.createTime = op.createTime.Add(-LeaderOperatorWaitTime)
+	c.Assert(op.IsTimeout(), IsFalse)
+	op.createTime = op.createTime.Add(-RegionOperatorWaitTime)
 	c.Assert(op.IsTimeout(), IsTrue)
 	res, err := json.Marshal(op)
 	c.Assert(err, IsNil)
 	c.Assert(len(res), Equals, len(op.String())+2)
+
+	// check short timeout for transfer leader only operators.
+	steps = []OperatorStep{TransferLeader{FromStore: 2, ToStore: 1}}
+	op = s.newTestOperator(1, OpLeader, steps...)
+	c.Assert(op.IsTimeout(), IsFalse)
+	op.createTime = op.createTime.Add(-LeaderOperatorWaitTime)
+	c.Assert(op.IsTimeout(), IsTrue)
 }
 
 func (s *testOperatorSuite) TestInfluence(c *C) {

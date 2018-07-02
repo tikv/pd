@@ -35,6 +35,7 @@ type Region struct {
 	Peers  []*metapb.Peer
 	Leader *metapb.Peer
 	Size   int64
+	Rows   int64
 }
 
 // CheckerFunc checks if the scheduler is finished.
@@ -46,11 +47,8 @@ type Conf struct {
 	Regions         []Region
 	MaxID           uint64
 	RegionSplitSize int64
-
-	WrittenBytes func(tick int64) map[string]int64 // To simulate region grow.
-
-	RegionWriteBytes func(tick int64) map[uint64]int64 // To simulate write flow.
-	RegionReadBytes  func(tick int64) map[uint64]int64 // To simulate read flow.
+	RegionSplitRows int64
+	Events          []EventInner
 
 	Checker CheckerFunc // To check the schedule is finished.
 }
@@ -88,4 +86,16 @@ func NewConf(name string) *Conf {
 		return f()
 	}
 	return nil
+}
+
+// NeedSplit checks whether the region need to split according it's size
+// and rows.
+func (c *Conf) NeedSplit(size, rows int64) bool {
+	if c.RegionSplitSize != 0 && size >= c.RegionSplitSize {
+		return true
+	}
+	if c.RegionSplitRows != 0 && rows >= c.RegionSplitRows {
+		return true
+	}
+	return false
 }

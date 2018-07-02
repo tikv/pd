@@ -57,7 +57,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 
 	if len(region.GetPeers()) < r.cluster.GetMaxReplicas() {
 		log.Debugf("[region %d] has %d peers fewer than max replicas", region.GetId(), len(region.GetPeers()))
-		newPeer, _ := r.selectBestPeerToAddReplica(region)
+		newPeer, _ := r.selectBestPeerToAddReplica(region, NewStorageThresholdFilter())
 		if newPeer == nil {
 			checkerCounter.WithLabelValues("replica_checker", "no_target_store").Inc()
 			return nil
@@ -74,7 +74,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 			}
 		}
 		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
-		return NewOperator("makeUpReplica", region.GetId(), OpReplica|OpRegion, steps...)
+		return NewOperator("makeUpReplica", region.GetId(), region.GetRegionEpoch(), OpReplica|OpRegion, steps...)
 	}
 
 	// when add learner peer, the number of peer will exceed max replicas for a wille,
@@ -200,7 +200,7 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 			return CreateRemovePeerOperator("removePendingOfflineReplica", r.cluster, OpReplica, region, peer.GetStoreId())
 		}
 
-		storeID, _ := r.SelectBestReplacementStore(region, peer)
+		storeID, _ := r.SelectBestReplacementStore(region, peer, NewStorageThresholdFilter())
 		if storeID == 0 {
 			log.Debugf("[region %d] no best store to add replica", region.GetId())
 			return nil
@@ -221,7 +221,7 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator
 		checkerCounter.WithLabelValues("replica_checker", "all_right").Inc()
 		return nil
 	}
-	storeID, newScore := r.SelectBestReplacementStore(region, oldPeer)
+	storeID, newScore := r.SelectBestReplacementStore(region, oldPeer, NewStorageThresholdFilter())
 	if storeID == 0 {
 		checkerCounter.WithLabelValues("replica_checker", "no_replacement_store").Inc()
 		return nil

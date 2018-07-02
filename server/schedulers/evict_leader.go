@@ -48,6 +48,8 @@ func newEvictLeaderScheduler(limiter *schedule.Limiter, storeID uint64) schedule
 	filters := []schedule.Filter{
 		schedule.NewStateFilter(),
 		schedule.NewHealthFilter(),
+		schedule.NewDisconnectFilter(),
+		schedule.NewRejectLeaderFilter(),
 	}
 	base := newBaseScheduler(limiter)
 	return &evictLeaderScheduler{
@@ -92,7 +94,7 @@ func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence sc
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: target.GetId()}
-	op := schedule.NewOperator("evict-leader", region.GetId(), schedule.OpLeader, step)
+	op := schedule.NewOperator("evict-leader", region.GetId(), region.GetRegionEpoch(), schedule.OpLeader, step)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*schedule.Operator{op}
 }

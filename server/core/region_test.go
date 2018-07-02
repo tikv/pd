@@ -59,6 +59,8 @@ func (s *testRegionMapSuite) regionInfo(id uint64) *RegionInfo {
 		Region: &metapb.Region{
 			Id: id,
 		},
+		ApproximateSize: int64(id),
+		ApproximateRows: int64(id),
 	}
 }
 
@@ -88,4 +90,10 @@ func (s *testRegionMapSuite) check(c *C, rm *regionMap, ids ...uint64) {
 	}
 	c.Assert(set1, DeepEquals, expect)
 	c.Assert(set2, DeepEquals, expect)
+	// Check region size.
+	var total int64
+	for _, id := range ids {
+		total += int64(id)
+	}
+	c.Assert(rm.TotalSize(), Equals, total)
 }

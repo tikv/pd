@@ -15,7 +15,6 @@ package api
 
 import (
 	"net/http"
-	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
@@ -24,75 +23,29 @@ import (
 var _ = Suite(&testRedirectorSuite{})
 
 type testRedirectorSuite struct {
+	servers []*server.Server
+	cleanup func()
 }
 
 func (s *testRedirectorSuite) SetUpSuite(c *C) {
+	_, s.servers, s.cleanup = mustNewCluster(c, 3)
 }
 
 func (s *testRedirectorSuite) TearDownSuite(c *C) {
+	s.cleanup()
 }
 
 func (s *testRedirectorSuite) TestRedirect(c *C) {
-	_, svrs, cleanup := mustNewCluster(c, 3)
-	defer cleanup()
-
-	for _, svr := range svrs {
+	for _, svr := range s.servers {
 		mustRequestSuccess(c, svr)
-	}
-}
-
-func (s *testRedirectorSuite) TestReconnect(c *C) {
-	_, svrs, cleanup := mustNewCluster(c, 3)
-	defer cleanup()
-
-	// Collect two followers.
-	var followers []*server.Server
-	leader := mustWaitLeader(c, svrs)
-	for _, svr := range svrs {
-		if svr != leader {
-			followers = append(followers, svr)
-		}
-	}
-
-	// Make connections to followers.
-	// Make sure they proxy requests to the leader.
-	for i := 0; i < 2; i++ {
-		svr := followers[i]
-		mustRequestSuccess(c, svr)
-	}
-
-	// Close the leader and wait for a new one.
-	leader.Close()
-	newLeader := mustWaitLeader(c, followers)
-
-	// Make sure they proxy requests to the new leader.
-	for i := 0; i < 2; i++ {
-		svr := followers[i]
-		mustRequestSuccess(c, svr)
-	}
-
-	// Close the new leader and then we have only one node.
-	newLeader.Close()
-	time.Sleep(time.Second)
-
-	// Request will fail with no leader.
-	for i := 0; i < 2; i++ {
-		svr := followers[i]
-		if svr != newLeader {
-			resp := mustRequest(c, svr)
-			c.Assert(resp.StatusCode, Equals, http.StatusInternalServerError)
-		}
 	}
 }
 
 func (s *testRedirectorSuite) TestNotLeader(c *C) {
-	_, svrs, cleanup := mustNewCluster(c, 3)
-	defer cleanup()
-
 	// Find a follower.
 	var follower *server.Server
-	leader := mustWaitLeader(c, svrs)
-	for _, svr := range svrs {
+	leader := mustWaitLeader(c, s.servers)
+	for _, svr := range s.servers {
 		if svr != leader {
 			follower = svr
 			break

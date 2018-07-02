@@ -14,33 +14,34 @@
 package api
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
-	"time"
 
-	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 )
 
 var _ = Suite(&testMemberAPISuite{})
 
 type testMemberAPISuite struct {
-	hc *http.Client
+	hc      *http.Client
+	cfgs    []*server.Config
+	servers []*server.Server
+	clean   func()
 }
 
 func (s *testMemberAPISuite) SetUpSuite(c *C) {
 	s.hc = newHTTPClient()
+	s.cfgs, s.servers, s.clean = mustNewCluster(c, 3)
+}
+
+func (s *testMemberAPISuite) TearDownSuite(c *C) {
+	s.clean()
 }
 
 func relaxEqualStings(c *C, a, b []string) {
@@ -72,119 +73,21 @@ func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
 }
 
 func (s *testMemberAPISuite) TestMemberList(c *C) {
-	numbers := []int{1, 3}
-
-	for _, num := range numbers {
-		cfgs, _, clean := mustNewCluster(c, num)
-		defer clean()
-
-		addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/members"
+	for _, cfg := range s.cfgs {
+		addr := cfg.ClientUrls + apiPrefix + "/api/v1/members"
 		resp, err := s.hc.Get(addr)
 		c.Assert(err, IsNil)
 		buf, err := ioutil.ReadAll(resp.Body)
 		c.Assert(err, IsNil)
-		checkListResponse(c, buf, cfgs)
-	}
-}
-
-func (s *testMemberAPISuite) TestMemberDelete(c *C) {
-	s.testMemberDelete(c, true)
-	s.testMemberDelete(c, false)
-}
-
-func (s *testMemberAPISuite) testMemberDelete(c *C, byName bool) {
-	cfgs, svrs, clean := mustNewCluster(c, 3)
-	defer clean()
-
-	target := rand.Intn(len(svrs))
-	server := svrs[target]
-
-	for i, cfg := range cfgs {
-		if cfg.Name == server.Name() {
-			cfgs = append(cfgs[:i], cfgs[i+1:]...)
-			break
-		}
-	}
-	for i, svr := range svrs {
-		if svr.Name() == server.Name() {
-			svrs = append(svrs[:i], svrs[i+1:]...)
-			break
-		}
-	}
-	clientURL := cfgs[rand.Intn(len(cfgs))].ClientUrls
-
-	server.Close()
-	time.Sleep(5 * time.Second)
-	mustWaitLeader(c, svrs)
-
-	var table = []struct {
-		name    string
-		id      uint64
-		checker Checker
-		status  int
-	}{
-		{
-			// delete a nonexistent pd
-			name:    fmt.Sprintf("test-%d", rand.Int63()),
-			checker: Equals,
-			status:  http.StatusNotFound,
-		},
-		{
-			// delete a pd randomly
-			name:    server.Name(),
-			id:      server.ID(),
-			checker: Equals,
-			status:  http.StatusOK,
-		},
-		{
-			// delete it again
-			name:    server.Name(),
-			id:      server.ID(),
-			checker: Equals,
-			status:  http.StatusNotFound,
-		},
-	}
-
-	for _, t := range table {
-		var addr string
-		if byName {
-			addr = clientURL + apiPrefix + "/api/v1/members/name/" + t.name
-		} else {
-			addr = clientURL + apiPrefix + "/api/v1/members/id/" + strconv.FormatUint(t.id, 10)
-		}
-		req, err := http.NewRequest("DELETE", addr, nil)
-		c.Assert(err, IsNil)
-		resp, err := s.hc.Do(req)
-		c.Assert(err, IsNil)
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusInternalServerError {
-			c.Assert(resp.StatusCode, t.checker, t.status)
-		}
-	}
-
-	for i := 0; i < 10; i++ {
-		addr := clientURL + apiPrefix + "/api/v1/members"
-		resp, err := s.hc.Get(addr)
-		c.Assert(err, IsNil)
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusInternalServerError {
-			time.Sleep(1)
-			continue
-		}
-		buf, err := ioutil.ReadAll(resp.Body)
-		c.Assert(err, IsNil)
-		checkListResponse(c, buf, cfgs)
+		checkListResponse(c, buf, s.cfgs)
 	}
 }
 
 func (s *testMemberAPISuite) TestMemberLeader(c *C) {
-	cfgs, svrs, clean := mustNewCluster(c, 3)
-	defer clean()
-
-	leader, err := svrs[0].GetLeader()
+	leader, err := s.servers[0].GetLeader()
 	c.Assert(err, IsNil)
 
-	addr := cfgs[rand.Intn(len(cfgs))].ClientUrls + apiPrefix + "/api/v1/leader"
+	addr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/leader"
 	c.Assert(err, IsNil)
 	resp, err := s.hc.Get(addr)
 	c.Assert(err, IsNil)
@@ -196,113 +99,4 @@ func (s *testMemberAPISuite) TestMemberLeader(c *C) {
 	json.Unmarshal(buf, &got)
 	c.Assert(got.GetClientUrls(), DeepEquals, leader.GetClientUrls())
 	c.Assert(got.GetMemberId(), Equals, leader.GetMemberId())
-}
-
-func (s *testMemberAPISuite) TestLeaderResign(c *C) {
-	cfgs, svrs, clean := mustNewCluster(c, 3)
-	defer clean()
-
-	addrs := make(map[uint64]string)
-	for i := range cfgs {
-		addrs[svrs[i].ID()] = cfgs[i].ClientUrls
-	}
-
-	leader1, err := svrs[0].GetLeader()
-	c.Assert(err, IsNil)
-
-	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/leader/resign", "")
-	leader2 := s.waitLeaderChange(c, svrs[0], leader1)
-	s.post(c, addrs[leader2.GetMemberId()]+apiPrefix+"/api/v1/leader/transfer/"+leader1.GetName(), "")
-	leader3 := s.waitLeaderChange(c, svrs[0], leader2)
-	c.Assert(leader3.GetMemberId(), Equals, leader1.GetMemberId())
-}
-
-func (s *testMemberAPISuite) TestLeaderPriority(c *C) {
-	cfgs, svrs, clean := mustNewCluster(c, 3)
-	defer clean()
-
-	addrs := make(map[uint64]string)
-	for i := range cfgs {
-		addrs[svrs[i].ID()] = cfgs[i].ClientUrls
-	}
-
-	leader1, err := s.getEtcdLeader(svrs[0])
-	c.Assert(err, IsNil)
-	s.waitLeaderSync(c, svrs[0], leader1)
-	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/members/name/"+leader1.GetName(), `{"leader-priority": -1}`)
-	leader2 := s.waitEtcdLeaderChange(c, svrs[0], leader1)
-	s.waitLeaderSync(c, svrs[0], leader2)
-	s.post(c, addrs[leader1.GetMemberId()]+apiPrefix+"/api/v1/members/name/"+leader1.GetName(), `{"leader-priority": 100}`)
-	leader3 := s.waitEtcdLeaderChange(c, svrs[0], leader2)
-	s.waitLeaderSync(c, svrs[0], leader3)
-	c.Assert(leader3.GetMemberId(), Equals, leader1.GetMemberId())
-}
-
-func (s *testMemberAPISuite) post(c *C, url string, body string) {
-	testutil.WaitUntil(c, func(c *C) bool {
-		res, err := http.Post(url, "", bytes.NewBufferString(body))
-		c.Assert(err, IsNil)
-		b, err := ioutil.ReadAll(res.Body)
-		res.Body.Close()
-		c.Assert(err, IsNil)
-		c.Logf("post %s, status: %v res: %s", url, res.StatusCode, string(b))
-		return res.StatusCode == http.StatusOK
-	})
-}
-
-func (s *testMemberAPISuite) waitLeaderChange(c *C, svr *server.Server, old *pdpb.Member) *pdpb.Member {
-	var leader *pdpb.Member
-	testutil.WaitUntil(c, func(c *C) bool {
-		var err error
-		leader, err = svr.GetLeader()
-		if err != nil {
-			c.Log(err)
-			return false
-		}
-		if leader.GetMemberId() == old.GetMemberId() {
-			c.Log("leader not change")
-			return false
-		}
-		return true
-	})
-	return leader
-}
-
-func (s *testMemberAPISuite) getEtcdLeader(svr *server.Server) (*pdpb.Member, error) {
-	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()}}
-	members, err := svr.GetMembers(context.Background(), req)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return members.GetEtcdLeader(), nil
-}
-
-func (s *testMemberAPISuite) waitEtcdLeaderChange(c *C, svr *server.Server, old *pdpb.Member) *pdpb.Member {
-	var leader *pdpb.Member
-	testutil.WaitUntil(c, func(c *C) bool {
-		var err error
-		leader, err = s.getEtcdLeader(svr)
-		if err != nil {
-			c.Log(err)
-			return false
-		}
-		if leader.GetMemberId() == old.GetMemberId() {
-			c.Log("etcd leader not changed")
-			return false
-		}
-		return true
-	})
-	return leader
-}
-
-func (s *testMemberAPISuite) waitLeaderSync(c *C, svr *server.Server, etcdLeader *pdpb.Member) {
-	testutil.WaitUntil(c, func(c *C) bool {
-		leader, err := svr.GetLeader()
-		if err != nil {
-			c.Logf("GetLeader err: %v", err)
-			return false
-		}
-		c.Logf("leader is %v", leader.GetMemberId())
-		return leader.GetMemberId() == etcdLeader.GetMemberId()
-	})
 }

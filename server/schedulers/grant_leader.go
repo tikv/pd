@@ -16,7 +16,6 @@ package schedulers
 import (
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
@@ -35,8 +34,6 @@ func init() {
 		return newGrantLeaderScheduler(limiter, id), nil
 	})
 }
-
-const scheduleInterval = time.Millisecond * 10
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
 type grantLeaderScheduler struct {
@@ -84,7 +81,7 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence sc
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: s.storeID}
-	op := schedule.NewOperator("grant-leader", region.GetId(), schedule.OpLeader, step)
+	op := schedule.NewOperator("grant-leader", region.GetId(), region.GetRegionEpoch(), schedule.OpLeader, step)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*schedule.Operator{op}
 }

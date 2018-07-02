@@ -43,7 +43,6 @@ func init() {
 type scatterRangeScheduler struct {
 	*baseScheduler
 	rangeName     string
-	filters       []schedule.Filter
 	startKey      []byte
 	endKey        []byte
 	balanceLeader schedule.Scheduler

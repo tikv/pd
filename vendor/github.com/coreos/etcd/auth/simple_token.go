@@ -18,6 +18,7 @@ package auth
 // JWT based mechanism will be added in the near future.
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"math/big"
@@ -26,7 +27,7 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/net/context"
+	"go.uber.org/zap"
 )
 
 const (
@@ -95,6 +96,7 @@ func (tm *simpleTokenTTLKeeper) run() {
 }
 
 type tokenSimple struct {
+	lg                *zap.Logger
 	indexWaiter       func(uint64) <-chan struct{}
 	simpleTokenKeeper *simpleTokenTTLKeeper
 	simpleTokensMu    sync.Mutex
@@ -118,14 +120,26 @@ func (t *tokenSimple) genTokenPrefix() (string, error) {
 
 func (t *tokenSimple) assignSimpleTokenToUser(username, token string) {
 	t.simpleTokensMu.Lock()
+	defer t.simpleTokensMu.Unlock()
+	if t.simpleTokenKeeper == nil {
+		return
+	}
+
 	_, ok := t.simpleTokens[token]
 	if ok {
-		plog.Panicf("token %s is alredy used", token)
+		if t.lg != nil {
+			t.lg.Panic(
+				"failed to assign already-used simple token to a user",
+				zap.String("user-name", username),
+				zap.String("token", token),
+			)
+		} else {
+			plog.Panicf("token %s is alredy used", token)
+		}
 	}
 
 	t.simpleTokens[token] = username
 	t.simpleTokenKeeper.addSimpleToken(token)
-	t.simpleTokensMu.Unlock()
 }
 
 func (t *tokenSimple) invalidateUser(username string) {
@@ -134,7 +148,7 @@ func (t *tokenSimple) invalidateUser(username string) {
 	}
 	t.simpleTokensMu.Lock()
 	for token, name := range t.simpleTokens {
-		if strings.Compare(name, username) == 0 {
+		if name == username {
 			delete(t.simpleTokens, token)
 			t.simpleTokenKeeper.deleteSimpleToken(token)
 		}
@@ -145,7 +159,15 @@ func (t *tokenSimple) invalidateUser(username string) {
 func (t *tokenSimple) enable() {
 	delf := func(tk string) {
 		if username, ok := t.simpleTokens[tk]; ok {
-			plog.Infof("deleting token %s for user %s", tk, username)
+			if t.lg != nil {
+				t.lg.Info(
+					"deleted a simple token",
+					zap.String("user-name", username),
+					zap.String("token", tk),
+				)
+			} else {
+				plog.Infof("deleting token %s for user %s", tk, username)
+			}
 			delete(t.simpleTokens, tk)
 		}
 	}
@@ -185,9 +207,9 @@ func (t *tokenSimple) info(ctx context.Context, token string, revision uint64) (
 
 func (t *tokenSimple) assign(ctx context.Context, username string, rev uint64) (string, error) {
 	// rev isn't used in simple token, it is only used in JWT
-	index := ctx.Value("index").(uint64)
-	simpleToken := ctx.Value("simpleToken").(string)
-	token := fmt.Sprintf("%s.%d", simpleToken, index)
+	index := ctx.Value(AuthenticateParamIndex{}).(uint64)
+	simpleTokenPrefix := ctx.Value(AuthenticateParamSimpleTokenPrefix{}).(string)
+	token := fmt.Sprintf("%s.%d", simpleTokenPrefix, index)
 	t.assignSimpleTokenToUser(username, token)
 
 	return token, nil
@@ -212,8 +234,9 @@ func (t *tokenSimple) isValidSimpleToken(ctx context.Context, token string) bool
 	return false
 }
 
-func newTokenProviderSimple(indexWaiter func(uint64) <-chan struct{}) *tokenSimple {
+func newTokenProviderSimple(lg *zap.Logger, indexWaiter func(uint64) <-chan struct{}) *tokenSimple {
 	return &tokenSimple{
+		lg:           lg,
 		simpleTokens: make(map[string]string),
 		indexWaiter:  indexWaiter,
 	}

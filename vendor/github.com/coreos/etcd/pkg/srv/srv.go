@@ -32,7 +32,7 @@ var (
 
 // GetCluster gets the cluster information via DNS discovery.
 // Also sees each entry as a separate instance.
-func GetCluster(service, name, dns string, apurls types.URLs) ([]string, error) {
+func GetCluster(serviceScheme, service, name, dns string, apurls types.URLs) ([]string, error) {
 	tempName := int(0)
 	tcp2ap := make(map[string]url.URL)
 
@@ -71,9 +71,10 @@ func GetCluster(service, name, dns string, apurls types.URLs) ([]string, error) 
 			// SRV records have a trailing dot but URL shouldn't.
 			shortHost := strings.TrimSuffix(srv.Target, ".")
 			urlHost := net.JoinHostPort(shortHost, port)
-			stringParts = append(stringParts, fmt.Sprintf("%s=%s://%s", n, scheme, urlHost))
 			if ok && url.Scheme != scheme {
 				err = fmt.Errorf("bootstrap at %s from DNS for %s has scheme mismatch with expected peer %s", scheme+"://"+urlHost, service, url.String())
+			} else {
+				stringParts = append(stringParts, fmt.Sprintf("%s=%s://%s", n, scheme, urlHost))
 			}
 		}
 		if len(stringParts) == 0 {
@@ -82,20 +83,9 @@ func GetCluster(service, name, dns string, apurls types.URLs) ([]string, error) 
 		return nil
 	}
 
-	failCount := 0
-	err := updateNodeMap(service+"-ssl", "https")
-	srvErr := make([]string, 2)
+	err := updateNodeMap(service, serviceScheme)
 	if err != nil {
-		srvErr[0] = fmt.Sprintf("error querying DNS SRV records for _%s-ssl %s", service, err)
-		failCount++
-	}
-	err = updateNodeMap(service, "http")
-	if err != nil {
-		srvErr[1] = fmt.Sprintf("error querying DNS SRV records for _%s %s", service, err)
-		failCount++
-	}
-	if failCount == 2 {
-		return nil, fmt.Errorf("srv: too many errors querying DNS SRV records (%q, %q)", srvErr[0], srvErr[1])
+		return nil, fmt.Errorf("error querying DNS SRV records for _%s %s", service, err)
 	}
 	return stringParts, nil
 }

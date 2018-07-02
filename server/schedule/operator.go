@@ -27,9 +27,14 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
-// MaxOperatorWaitTime is the duration that if an operator lives longer that it,
-// the operator is considered timeout.
-const MaxOperatorWaitTime = 10 * time.Minute
+const (
+	// LeaderOperatorWaitTime is the duration that when a leader operator lives
+	// longer than it, the operator will be considered timeout.
+	LeaderOperatorWaitTime = 10 * time.Second
+	// RegionOperatorWaitTime is the duration that when a region operator lives
+	// longer than it, the operator will be considered timeout.
+	RegionOperatorWaitTime = 10 * time.Minute
+)
 
 // OperatorStep describes the basic scheduling steps that can not be subdivided.
 type OperatorStep interface {
@@ -280,6 +285,7 @@ func (sr SplitRegion) InvolvedStores(region *core.RegionInfo) []uint64 {
 type Operator struct {
 	desc        string
 	regionID    uint64
+	regionEpoch *metapb.RegionEpoch
 	kind        OperatorKind
 	steps       []OperatorStep
 	currentStep int32
@@ -290,20 +296,21 @@ type Operator struct {
 }
 
 // NewOperator creates a new operator.
-func NewOperator(desc string, regionID uint64, kind OperatorKind, steps ...OperatorStep) *Operator {
+func NewOperator(desc string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OperatorKind, steps ...OperatorStep) *Operator {
 	return &Operator{
-		desc:       desc,
-		regionID:   regionID,
-		kind:       kind,
-		steps:      steps,
-		createTime: time.Now(),
-		stepTime:   time.Now().UnixNano(),
-		level:      core.NormalPriority,
+		desc:        desc,
+		regionID:    regionID,
+		regionEpoch: regionEpoch,
+		kind:        kind,
+		steps:       steps,
+		createTime:  time.Now(),
+		stepTime:    time.Now().UnixNano(),
+		level:       core.NormalPriority,
 	}
 }
 
 func (o *Operator) String() string {
-	s := fmt.Sprintf("%s (kind:%s, region:%v, createAt:%s, currentStep:%v, steps:%+v) ", o.desc, o.kind, o.regionID, o.createTime, atomic.LoadInt32(&o.currentStep), o.steps)
+	s := fmt.Sprintf("%s (kind:%s, region:%v(%v,%v), createAt:%s, currentStep:%v, steps:%+v) ", o.desc, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.createTime, atomic.LoadInt32(&o.currentStep), o.steps)
 	if o.IsTimeout() {
 		s = s + "timeout"
 	}
@@ -336,6 +343,11 @@ func (o *Operator) AttachKind(kind OperatorKind) {
 // RegionID returns the region that operator is targeted.
 func (o *Operator) RegionID() uint64 {
 	return o.regionID
+}
+
+// RegionEpoch returns the region's epoch that is attched to the operator.
+func (o *Operator) RegionEpoch() *metapb.RegionEpoch {
+	return o.regionEpoch
 }
 
 // Kind returns operator's kind.
@@ -397,7 +409,10 @@ func (o *Operator) IsTimeout() bool {
 	if o.IsFinish() {
 		return false
 	}
-	return time.Since(o.createTime) > MaxOperatorWaitTime
+	if o.kind&OpRegion != 0 {
+		return time.Since(o.createTime) > RegionOperatorWaitTime
+	}
+	return time.Since(o.createTime) > LeaderOperatorWaitTime
 }
 
 // Influence calculates the store difference which unfinished operator steps make
@@ -456,6 +471,8 @@ func (o *Operator) History() []OperatorHistory {
 			})
 		case AddPeer:
 			addPeerStores = append(addPeerStores, s.ToStore)
+		case AddLearner:
+			addPeerStores = append(addPeerStores, s.ToStore)
 		case RemovePeer:
 			removePeerStores = append(removePeerStores, s.FromStore)
 		}
@@ -476,7 +493,7 @@ func (o *Operator) History() []OperatorHistory {
 // CreateRemovePeerOperator creates an Operator that removes a peer from region.
 func CreateRemovePeerOperator(desc string, cluster Cluster, kind OperatorKind, region *core.RegionInfo, storeID uint64) *Operator {
 	removeKind, steps := removePeerSteps(cluster, region, storeID)
-	return NewOperator(desc, region.GetId(), removeKind|kind, steps...)
+	return NewOperator(desc, region.GetId(), region.GetRegionEpoch(), removeKind|kind, steps...)
 }
 
 // CreateMovePeerOperator creates an Operator that replaces an old peer with a new peer.
@@ -494,7 +511,7 @@ func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInf
 		}
 	}
 	steps = append(st, steps...)
-	return NewOperator(desc, region.GetId(), removeKind|kind|OpRegion, steps...)
+	return NewOperator(desc, region.GetId(), region.GetRegionEpoch(), removeKind|kind|OpRegion, steps...)
 }
 
 // removePeerSteps returns the steps to safely remove a peer. It prevents removing leader by transfer its leadership first.
@@ -527,8 +544,8 @@ func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.Region
 		IsPassive:  false,
 	})
 
-	op1 := NewOperator(desc, source.GetId(), kinds|kind, steps...)
-	op2 := NewOperator(desc, target.GetId(), kind, MergeRegion{
+	op1 := NewOperator(desc, source.GetId(), source.GetRegionEpoch(), kinds|kind, steps...)
+	op2 := NewOperator(desc, target.GetId(), target.GetRegionEpoch(), kind, MergeRegion{
 		FromRegion: source.Region,
 		ToRegion:   target.Region,
 		IsPassive:  true,

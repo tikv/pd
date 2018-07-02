@@ -27,7 +27,7 @@ var _ = Suite(&testTrendSuite{})
 
 type testTrendSuite struct{}
 
-func (s *testTrendSuite) TestTend(c *C) {
+func (s *testTrendSuite) TestTrend(c *C) {
 	svr, cleanup := mustNewServer(c)
 	defer cleanup()
 	mustWaitLeader(c, []*server.Server{svr})
@@ -38,9 +38,9 @@ func (s *testTrendSuite) TestTend(c *C) {
 	}
 
 	// Create 3 regions, all peers on store1 and store2, and the leaders are all on store1.
-	mustRegionHeartbeat(c, svr, s.newRegionInfo(4, "", "a", 2, 2, []uint64{1, 2}, 1))
-	mustRegionHeartbeat(c, svr, s.newRegionInfo(5, "a", "b", 2, 2, []uint64{1, 2}, 1))
-	mustRegionHeartbeat(c, svr, s.newRegionInfo(6, "b", "", 2, 2, []uint64{1, 2}, 1))
+	mustRegionHeartbeat(c, svr, s.newRegionInfo(4, "", "a", 2, 2, []uint64{1, 2}, nil, 1))
+	mustRegionHeartbeat(c, svr, s.newRegionInfo(5, "a", "b", 2, 2, []uint64{1, 2}, nil, 1))
+	mustRegionHeartbeat(c, svr, s.newRegionInfo(6, "b", "", 2, 2, []uint64{1, 2}, nil, 1))
 
 	// Create 3 operators that transfers leader, moves follower, moves leader.
 	svr.GetHandler().AddTransferLeaderOperator(4, 2)
@@ -48,19 +48,26 @@ func (s *testTrendSuite) TestTend(c *C) {
 	svr.GetHandler().AddTransferPeerOperator(6, 1, 3)
 
 	// Complete the operators.
-	mustRegionHeartbeat(c, svr, s.newRegionInfo(4, "", "a", 2, 2, []uint64{1, 2}, 2))
-	region := s.newRegionInfo(5, "a", "b", 3, 2, []uint64{1, 3}, 1)
+	mustRegionHeartbeat(c, svr, s.newRegionInfo(4, "", "a", 2, 2, []uint64{1, 2}, nil, 2))
+
 	op, err := svr.GetHandler().GetOperator(5)
 	c.Assert(op, NotNil)
-	region.Peers[1].Id = op.Step(0).(schedule.AddPeer).PeerID
-	region.Voters[1].Id = op.Step(0).(schedule.AddPeer).PeerID
+	newPeerID := op.Step(0).(schedule.AddLearner).PeerID
+	region := s.newRegionInfo(5, "a", "b", 3, 2, []uint64{1, 2}, []uint64{3}, 1)
+	region.Learners[0].Id = newPeerID
+	mustRegionHeartbeat(c, svr, region)
+	region = s.newRegionInfo(5, "a", "b", 4, 2, []uint64{1, 3}, nil, 1)
+	region.Peers[1].Id = newPeerID
 	mustRegionHeartbeat(c, svr, region)
 
 	op, err = svr.GetHandler().GetOperator(6)
 	c.Assert(op, NotNil)
-	region = s.newRegionInfo(6, "b", "", 3, 2, []uint64{2, 3}, 2)
-	region.Peers[1].Id = op.Step(0).(schedule.AddPeer).PeerID
-	region.Voters[1].Id = op.Step(0).(schedule.AddPeer).PeerID
+	newPeerID = op.Step(0).(schedule.AddLearner).PeerID
+	region = s.newRegionInfo(6, "b", "", 3, 2, []uint64{1, 2}, []uint64{3}, 1)
+	region.Learners[0].Id = newPeerID
+	mustRegionHeartbeat(c, svr, region)
+	region = s.newRegionInfo(6, "b", "", 4, 2, []uint64{2, 3}, nil, 2)
+	region.Peers[1].Id = newPeerID
 	mustRegionHeartbeat(c, svr, region)
 
 	var trend Trend
@@ -88,16 +95,20 @@ func (s *testTrendSuite) TestTend(c *C) {
 	}
 }
 
-func (s *testTrendSuite) newRegionInfo(id uint64, startKey, endKey string, confVer, ver uint64, stores []uint64, leaderStore uint64) *core.RegionInfo {
+func (s *testTrendSuite) newRegionInfo(id uint64, startKey, endKey string, confVer, ver uint64, voters []uint64, learners []uint64, leaderStore uint64) *core.RegionInfo {
 	var (
 		peers  []*metapb.Peer
 		leader *metapb.Peer
 	)
-	for _, id := range stores {
+	for _, id := range voters {
 		p := &metapb.Peer{Id: 10 + id, StoreId: id}
 		if id == leaderStore {
 			leader = p
 		}
+		peers = append(peers, p)
+	}
+	for _, id := range learners {
+		p := &metapb.Peer{Id: 10 + id, StoreId: id, IsLearner: true}
 		peers = append(peers, p)
 	}
 	return core.NewRegionInfo(

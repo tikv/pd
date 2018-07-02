@@ -2,6 +2,7 @@ PD_PKG := github.com/pingcap/pd
 
 TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
                      uniq | sed -e "s/^\./github.com\/pingcap\/pd/")
+BASIC_TEST_PKGS := $(filter-out github.com/pingcap/pd/pkg/integration_test,$(TEST_PKGS))
 
 GOFILTER := grep -vE 'vendor|testutil'
 GOCHECKER := $(GOFILTER) | awk '{ print } END { if (NR > 0) { exit 1 } }'
@@ -22,6 +23,8 @@ all: dev
 
 dev: build simulator check test
 
+ci: build simulator check basic_test
+
 build:
 ifeq ("$(WITH_RACE)", "1")
 	CGO_ENABLED=1 go build -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
@@ -35,6 +38,9 @@ endif
 test:
 	# testing..
 	CGO_ENABLED=1 go test -race -cover $(TEST_PKGS)
+
+basic_test:
+	go test $(BASIC_TEST_PKGS)
 
 check:
 	go get github.com/golang/lint/golint

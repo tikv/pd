@@ -15,8 +15,10 @@ package server
 
 import (
 	"fmt"
+	"math/rand"
 	"time"
 
+	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -28,13 +30,13 @@ import (
 	"github.com/pingcap/pd/server/schedulers"
 )
 
-func newTestOperator(regionID uint64, kind schedule.OperatorKind, steps ...schedule.OperatorStep) *schedule.Operator {
-	return schedule.NewOperator("test", regionID, kind, steps...)
+func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind schedule.OperatorKind) *schedule.Operator {
+	return schedule.NewOperator("test", regionID, regionEpoch, kind)
 }
 
 func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption) {
 	cfg := NewConfig()
-	cfg.adjust()
+	cfg.adjust(nil)
 	opt := newScheduleOption(cfg)
 	return &cfg.Schedule, opt
 }
@@ -53,9 +55,10 @@ func newTestClusterInfo(opt *scheduleOption) *testClusterInfo {
 
 func newTestRegionMeta(regionID uint64) *metapb.Region {
 	return &metapb.Region{
-		Id:       regionID,
-		StartKey: []byte(fmt.Sprintf("%20d", regionID)),
-		EndKey:   []byte(fmt.Sprintf("%20d", regionID+1)),
+		Id:          regionID,
+		StartKey:    []byte(fmt.Sprintf("%20d", regionID)),
+		EndKey:      []byte(fmt.Sprintf("%20d", regionID+1)),
+		RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
 	}
 }
 
@@ -78,7 +81,10 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 		peer, _ := c.AllocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	c.putRegion(core.NewRegionInfo(region, leader))
+	regionInfo := core.NewRegionInfo(region, leader)
+	regionInfo.ApproximateSize = 10
+	regionInfo.ApproximateRows = 10
+	c.putRegion(regionInfo)
 }
 
 func (c *testClusterInfo) updateLeaderCount(storeID uint64, leaderCount int) {
@@ -133,15 +139,17 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 
 	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 
-	tc.addLeaderRegion(1, 1, 2)
+	tc.addLeaderRegion(1, 1)
 
-	op1 := newTestOperator(1, schedule.OpLeader, schedule.TransferLeader{FromStore: 1, ToStore: 2})
-	c.Assert(co.addOperator(op1), IsTrue)
+	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), schedule.OpLeader)
+	co.addOperator(op1)
+	c.Assert(l.OperatorCount(op1.Kind()), Equals, uint64(1))
 	c.Assert(co.getOperator(1).RegionID(), Equals, op1.RegionID())
 
 	// Region 1 already has an operator, cannot add another one.
-	op2 := newTestOperator(1, schedule.OpLeader, schedule.TransferLeader{FromStore: 1, ToStore: 3})
-	c.Assert(co.addOperator(op2), IsFalse)
+	op2 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), schedule.OpRegion)
+	co.addOperator(op2)
+	c.Assert(l.OperatorCount(op2.Kind()), Equals, uint64(0))
 
 	// Remove the operator manually, then we can add a new operator.
 	co.removeOperator(op1)
@@ -154,7 +162,11 @@ type mockHeartbeatStream struct {
 }
 
 func (s *mockHeartbeatStream) Send(m *pdpb.RegionHeartbeatResponse) error {
-	s.ch <- m
+	select {
+	case <-time.After(time.Second):
+		return errors.New("timeout")
+	case s.ch <- m:
+	}
 	return nil
 }
 
@@ -184,25 +196,25 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	defer co.stop()
 
 	// Transfer peer from store 4 to store 1.
-	tc.addRegionStore(4, 4)
-	tc.addRegionStore(3, 3)
-	tc.addRegionStore(2, 2)
-	tc.addRegionStore(1, 1)
+	tc.addRegionStore(4, 40)
+	tc.addRegionStore(3, 30)
+	tc.addRegionStore(2, 20)
+	tc.addRegionStore(1, 10)
 	tc.addLeaderRegion(1, 2, 3, 4)
 
 	// Transfer leader from store 4 to store 2.
-	tc.updateLeaderCount(4, 5)
-	tc.updateLeaderCount(3, 3)
-	tc.updateLeaderCount(2, 2)
-	tc.updateLeaderCount(1, 1)
+	tc.updateLeaderCount(4, 50)
+	tc.updateLeaderCount(3, 30)
+	tc.updateLeaderCount(2, 20)
+	tc.updateLeaderCount(1, 10)
 	tc.addLeaderRegion(2, 4, 3, 2)
 
 	// Wait for schedule and turn off balance.
 	waitOperator(c, co, 1)
-	schedulers.CheckTransferPeer(c, co.getOperator(1), schedule.OpBalance, 4, 1)
+	testutil.CheckTransferPeer(c, co.getOperator(1), schedule.OpBalance, 4, 1)
 	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
 	waitOperator(c, co, 2)
-	schedulers.CheckTransferLeader(c, co.getOperator(2), schedule.OpBalance, 4, 2)
+	testutil.CheckTransferLeader(c, co.getOperator(2), schedule.OpBalance, 4, 2)
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 
 	stream := newMockHeartbeatStream()
@@ -210,7 +222,9 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	// Transfer peer.
 	region := tc.GetRegion(1)
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddPeer(c, stream, region, 1)
+	waitAddLearner(c, stream, region, 1)
+	dispatchHeartbeat(c, co, region, stream)
+	waitPromoteLearner(c, stream, region, 1)
 	dispatchHeartbeat(c, co, region, stream)
 	waitRemovePeer(c, stream, region, 4)
 	region.RemoveStorePeer(4)
@@ -230,6 +244,80 @@ func dispatchHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream *m
 	co.hbStreams.bindStream(region.Leader.GetStoreId(), stream)
 	co.cluster.putRegion(region)
 	co.dispatch(region)
+}
+
+func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
+	_, opt := newTestScheduleConfig()
+	tc := newTestClusterInfo(opt)
+	hbStreams := newHeartbeatStreams(tc.getClusterID())
+	defer hbStreams.Close()
+
+	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co.run()
+	// Make sure there are no problem when concurrent write and read
+	for i := 0; i <= 10; i++ {
+		go func(i int) {
+			for j := 0; j < 10000; j++ {
+				tc.addRegionStore(uint64(i%5), rand.Intn(200))
+			}
+		}(i)
+	}
+	for i := 0; i < 1000; i++ {
+		co.collectHotSpotMetrics()
+		co.collectSchedulerMetrics()
+		co.cluster.collectMetrics()
+	}
+}
+
+func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
+	cfg, opt := newTestScheduleConfig()
+	cfg.DisableLearner = false
+	tc := newTestClusterInfo(opt)
+	hbStreams := newHeartbeatStreams(tc.getClusterID())
+	defer hbStreams.Close()
+
+	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co.run()
+
+	tc.addRegionStore(4, 4)
+	tc.addRegionStore(3, 3)
+	tc.addRegionStore(2, 2)
+	tc.addRegionStore(1, 1)
+	tc.addLeaderRegion(1, 2, 3)
+	c.Assert(co.checkRegion(tc.GetRegion(1)), IsTrue)
+	waitOperator(c, co, 1)
+	testutil.CheckAddPeer(c, co.getOperator(1), schedule.OpReplica, 1)
+	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
+
+	r := tc.GetRegion(1)
+	p := &metapb.Peer{Id: 1, StoreId: 1, IsLearner: true}
+	r.AddPeer(p)
+	r.PendingPeers = append(r.PendingPeers, p)
+	tc.putRegion(r)
+	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
+	co.stop()
+
+	// new cluster with learner disabled
+	cfg.DisableLearner = true
+	tc = newTestClusterInfo(opt)
+	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co.run()
+	defer co.stop()
+
+	tc.addRegionStore(4, 4)
+	tc.addRegionStore(3, 3)
+	tc.addRegionStore(2, 2)
+	tc.addRegionStore(1, 1)
+	tc.putRegion(r)
+	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
+	r.PendingPeers = nil
+	tc.putRegion(r)
+	c.Assert(co.checkRegion(tc.GetRegion(1)), IsTrue)
+	waitOperator(c, co, 1)
+	op := co.getOperator(1)
+	c.Assert(op.Len(), Equals, 1)
+	c.Assert(op.Step(0).(schedule.PromoteLearner).ToStore, Equals, uint64(1))
+	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
 }
 
 func (s *testCoordinatorSuite) TestReplica(c *C) {
@@ -257,7 +345,9 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	tc.addLeaderRegion(1, 2, 3)
 	region := tc.GetRegion(1)
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddPeer(c, stream, region, 1)
+	waitAddLearner(c, stream, region, 1)
+	dispatchHeartbeat(c, co, region, stream)
+	waitPromoteLearner(c, stream, region, 1)
 	dispatchHeartbeat(c, co, region, stream)
 	waitNoResponse(c, stream)
 
@@ -272,7 +362,9 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	waitRemovePeer(c, stream, region, 3)
 	region.DownPeers = nil
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddPeer(c, stream, region, 4)
+	waitAddLearner(c, stream, region, 4)
+	dispatchHeartbeat(c, co, region, stream)
+	waitPromoteLearner(c, stream, region, 4)
 	dispatchHeartbeat(c, co, region, stream)
 	waitNoResponse(c, stream)
 
@@ -304,23 +396,25 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	defer co.stop()
 
 	// Transfer peer from store 4 to store 1.
-	tc.addRegionStore(1, 1)
-	tc.addRegionStore(2, 2)
-	tc.addRegionStore(3, 3)
-	tc.addRegionStore(4, 4)
+	tc.addRegionStore(1, 10)
+	tc.addRegionStore(2, 20)
+	tc.addRegionStore(3, 30)
+	tc.addRegionStore(4, 40)
 	tc.addLeaderRegion(1, 2, 3, 4)
 
 	stream := newMockHeartbeatStream()
 
 	// Wait for schedule.
 	waitOperator(c, co, 1)
-	schedulers.CheckTransferPeer(c, co.getOperator(1), schedule.OpBalance, 4, 1)
+	testutil.CheckTransferPeer(c, co.getOperator(1), schedule.OpBalance, 4, 1)
 
 	region := tc.GetRegion(1)
 
 	// Add new peer.
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddPeer(c, stream, region, 1)
+	waitAddLearner(c, stream, region, 1)
+	dispatchHeartbeat(c, co, region, stream)
+	waitPromoteLearner(c, stream, region, 1)
 
 	// If the new peer is pending, the operator will not finish.
 	region.PendingPeers = append(region.PendingPeers, region.GetStorePeer(1))
@@ -495,13 +589,19 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(brs), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
+	// the scheduler option should contain 7 items
+	// the `hot scheduler` and `label scheduler` are disabled
+	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 7)
 	c.Assert(co.removeScheduler("grant-leader-scheduler-1"), IsNil)
+	// the scheduler that is not enable by default will be completely deleted
+	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 6)
 	c.Assert(co.schedulers, HasLen, 4)
 	c.Assert(co.cluster.opt.persist(co.cluster.kv), IsNil)
 	co.stop()
 
-	opt.reload(co.cluster.kv)
-	tc.clusterInfo.opt = opt
+	_, newOpt = newTestScheduleConfig()
+	newOpt.reload(co.cluster.kv)
+	tc.clusterInfo.opt = newOpt
 	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 
 	co.run()
@@ -534,14 +634,18 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	co.run()
 	stream := newMockHeartbeatStream()
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddPeer(c, stream, region, 2)
+	waitAddLearner(c, stream, region, 2)
+	dispatchHeartbeat(c, co, region, stream)
+	waitPromoteLearner(c, stream, region, 2)
 	co.stop()
 
 	// Recreate coodinator then add another replica on store 3.
 	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddPeer(c, stream, region, 3)
+	waitAddLearner(c, stream, region, 3)
+	dispatchHeartbeat(c, co, region, stream)
+	waitPromoteLearner(c, stream, region, 3)
 	co.stop()
 }
 
@@ -549,6 +653,37 @@ func waitOperator(c *C, co *coordinator, regionID uint64) {
 	testutil.WaitUntil(c, func(c *C) bool {
 		return co.getOperator(regionID) != nil
 	})
+}
+
+var _ = Suite(&testScheduleLimiterSuite{})
+
+type testScheduleLimiterSuite struct{}
+
+func (s *testScheduleLimiterSuite) TestOperatorCount(c *C) {
+	l := schedule.NewLimiter()
+	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(0))
+	c.Assert(l.OperatorCount(schedule.OpRegion), Equals, uint64(0))
+
+	operators := make(map[uint64]*schedule.Operator)
+
+	operators[1] = newTestOperator(1, nil, schedule.OpLeader)
+	l.UpdateCounts(operators)
+	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(1)) // 1:leader
+	operators[2] = newTestOperator(2, nil, schedule.OpLeader)
+	l.UpdateCounts(operators)
+	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(2)) // 1:leader, 2:leader
+	delete(operators, 1)
+	l.UpdateCounts(operators)
+	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(1)) // 2:leader
+
+	operators[1] = newTestOperator(1, nil, schedule.OpRegion)
+	l.UpdateCounts(operators)
+	c.Assert(l.OperatorCount(schedule.OpRegion), Equals, uint64(1)) // 1:region 2:leader
+	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(1))
+	operators[2] = newTestOperator(2, nil, schedule.OpRegion)
+	l.UpdateCounts(operators)
+	c.Assert(l.OperatorCount(schedule.OpRegion), Equals, uint64(2)) // 1:region 2:region
+	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(0))
 }
 
 var _ = Suite(&testScheduleControllerSuite{})
@@ -577,6 +712,9 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	hbStreams := newHeartbeatStreams(tc.getClusterID())
 	defer hbStreams.Close()
 
+	tc.addLeaderRegion(1, 1)
+	tc.addLeaderRegion(2, 2)
+
 	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	scheduler, err := schedule.CreateScheduler("balance-leader", co.limiter)
 	c.Assert(err, IsNil)
@@ -601,11 +739,11 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 	// count = 0
 	c.Assert(sc.AllowSchedule(), IsTrue)
-	op1 := newTestOperator(1, schedule.OpLeader, schedule.TransferLeader{FromStore: 1, ToStore: 2})
+	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), schedule.OpLeader)
 	c.Assert(co.addOperator(op1), IsTrue)
 	// count = 1
 	c.Assert(sc.AllowSchedule(), IsTrue)
-	op2 := newTestOperator(2, schedule.OpLeader, schedule.TransferLeader{FromStore: 2, ToStore: 1})
+	op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), schedule.OpLeader)
 	c.Assert(co.addOperator(op2), IsTrue)
 	// count = 2
 	c.Assert(sc.AllowSchedule(), IsFalse)
@@ -614,7 +752,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	c.Assert(sc.AllowSchedule(), IsTrue)
 
 	// add a PriorityKind operator will remove old operator
-	op3 := newTestOperator(2, schedule.OpHotRegion|schedule.OpLeader)
+	op3 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), schedule.OpHotRegion)
 	op3.SetPriorityLevel(core.HighPriority)
 	c.Assert(co.addOperator(op1), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsFalse)
@@ -625,10 +763,28 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	// add a admin operator will remove old operator
 	c.Assert(co.addOperator(op2), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsFalse)
-	op4 := newTestOperator(2, schedule.OpAdmin|schedule.OpLeader)
+	op4 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), schedule.OpAdmin)
 	op4.SetPriorityLevel(core.HighPriority)
 	c.Assert(co.addOperator(op4), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsTrue)
+	co.removeOperator(op4)
+
+	// test wrong region id.
+	op5 := newTestOperator(3, &metapb.RegionEpoch{}, schedule.OpHotRegion)
+	c.Assert(co.addOperator(op5), IsFalse)
+
+	// test wrong region epoch.
+	co.removeOperator(op1)
+	epoch := &metapb.RegionEpoch{
+		Version: tc.GetRegion(1).GetRegionEpoch().GetVersion() + 1,
+		ConfVer: tc.GetRegion(1).GetRegionEpoch().GetConfVer(),
+	}
+	op6 := newTestOperator(1, epoch, schedule.OpLeader)
+	c.Assert(co.addOperator(op6), IsFalse)
+	epoch.Version--
+	op6 = newTestOperator(1, epoch, schedule.OpLeader)
+	c.Assert(co.addOperator(op6), IsTrue)
+	co.removeOperator(op6)
 }
 
 func (s *testScheduleControllerSuite) TestInterval(c *C) {
@@ -653,12 +809,12 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	}
 }
 
-func waitAddPeer(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {
+func waitAddLearner(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
 			return res.GetRegionId() == region.GetId() &&
-				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddNode &&
+				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddLearnerNode &&
 				res.GetChangePeer().GetPeer().GetStoreId() == storeID
 		}
 		return false
@@ -668,6 +824,21 @@ func waitAddPeer(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, sto
 		ConfVer: region.GetRegionEpoch().GetConfVer() + 1,
 		Version: region.GetRegionEpoch().GetVersion(),
 	}
+}
+
+func waitPromoteLearner(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {
+	var res *pdpb.RegionHeartbeatResponse
+	testutil.WaitUntil(c, func(c *C) bool {
+		if res = stream.Recv(); res != nil {
+			return res.GetRegionId() == region.GetId() &&
+				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddNode &&
+				res.GetChangePeer().GetPeer().GetStoreId() == storeID
+		}
+		return false
+	})
+	// Remove learner than add voter.
+	region.RemoveStorePeer(storeID)
+	region.AddPeer(res.GetChangePeer().GetPeer())
 }
 
 func waitRemovePeer(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {

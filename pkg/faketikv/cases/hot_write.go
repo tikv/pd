@@ -23,6 +23,7 @@ import (
 
 func newHotWrite() *Conf {
 	var conf Conf
+	// Initialize the cluster
 	for i := 1; i <= 10; i++ {
 		conf.Stores = append(conf.Stores, Store{
 			ID:        uint64(i),
@@ -45,11 +46,13 @@ func newHotWrite() *Conf {
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * mb,
+			Rows:   960000,
 		})
 	}
 	conf.MaxID = id.maxID
 
-	// select 5 regions on store 1 as hot write regions.
+	// Events description
+	// select 5 reigons on store 1 as hot write regions.
 	writeFlow := make(map[uint64]int64, 5)
 	for _, r := range conf.Regions {
 		if r.Leader.GetStoreId() == 1 {
@@ -59,10 +62,14 @@ func newHotWrite() *Conf {
 			}
 		}
 	}
-	conf.RegionWriteBytes = func(tikc int64) map[uint64]int64 {
+	e := &WriteFlowOnRegionInner{}
+	e.Step = func(tick int64) map[uint64]int64 {
 		return writeFlow
 	}
 
+	conf.Events = []EventInner{e}
+
+	// Checker description
 	conf.Checker = func(regions *core.RegionsInfo) bool {
 		var leaderCount, peerCount [10]int
 		for id := range writeFlow {

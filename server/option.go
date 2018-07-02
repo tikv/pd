@@ -80,12 +80,24 @@ func (o *scheduleOption) GetMaxPendingPeerCount() uint64 {
 	return o.load().MaxPendingPeerCount
 }
 
-func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
-	return o.load().MaxStoreDownTime.Duration
-}
-
 func (o *scheduleOption) GetMaxMergeRegionSize() uint64 {
 	return o.load().MaxMergeRegionSize
+}
+
+func (o *scheduleOption) GetMaxMergeRegionRows() uint64 {
+	return o.load().MaxMergeRegionRows
+}
+
+func (o *scheduleOption) GetSplitMergeInterval() time.Duration {
+	return o.load().SplitMergeInterval.Duration
+}
+
+func (o *scheduleOption) GetPatrolRegionInterval() time.Duration {
+	return o.load().PatrolRegionInterval.Duration
+}
+
+func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
+	return o.load().MaxStoreDownTime.Duration
 }
 
 func (o *scheduleOption) GetLeaderScheduleLimit(name string) uint64 {
@@ -129,7 +141,7 @@ func (o *scheduleOption) GetHighSpaceRatio() float64 {
 }
 
 func (o *scheduleOption) IsRaftLearnerEnabled() bool {
-	return o.load().EnableRaftLearner
+	return !o.load().DisableLearner
 }
 
 func (o *scheduleOption) GetSchedulers() SchedulerConfigs {
@@ -169,8 +181,12 @@ func (o *scheduleOption) RemoveSchedulerCfg(name string) error {
 			return errors.Trace(err)
 		}
 		if tmp.GetName() == name {
-			schedulerCfg.Disable = true
-			v.Schedulers[i] = schedulerCfg
+			if IsDefaultScheduler(tmp.GetType()) {
+				schedulerCfg.Disable = true
+				v.Schedulers[i] = schedulerCfg
+			} else {
+				v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
+			}
 			o.store(v)
 			return nil
 		}
@@ -253,7 +269,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 }
 
 func (o *scheduleOption) adjustScheduleCfg(persistentCfg *Config) {
-	scheduleCfg := *o.load()
+	scheduleCfg := o.load().clone()
 	for i, s := range scheduleCfg.Schedulers {
 		for _, ps := range persistentCfg.Schedule.Schedulers {
 			if s.Type == ps.Type && reflect.DeepEqual(s.Args, ps.Args) {
@@ -277,6 +293,7 @@ func (o *scheduleOption) adjustScheduleCfg(persistentCfg *Config) {
 	}
 	scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, restoredSchedulers...)
 	persistentCfg.Schedule.Schedulers = scheduleCfg.Schedulers
+	o.store(scheduleCfg)
 }
 
 func (o *scheduleOption) GetHotRegionLowThreshold() int {

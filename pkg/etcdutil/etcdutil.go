@@ -37,9 +37,6 @@ const (
 	// DefaultSlowRequestTime 1s for the threshold for normal request, for those
 	// longer then 1s, they are considered as slow requests.
 	DefaultSlowRequestTime = 1 * time.Second
-
-	maxCheckEtcdRunningCount = 60
-	checkEtcdRunningDelay    = 1 * time.Second
 )
 
 // CheckClusterID checks Etcd's cluster ID, returns an error if mismatch.
@@ -58,7 +55,7 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Co
 		trp := &http.Transport{
 			TLSClientConfig: tlsConfig,
 		}
-		remoteCluster, gerr := etcdserver.GetClusterFromRemotePeers([]string{u}, trp)
+		remoteCluster, gerr := etcdserver.GetClusterFromRemotePeers(nil, []string{u}, trp)
 		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.

@@ -47,6 +47,7 @@ type RegionInfo struct {
 	WrittenBytes    uint64
 	ReadBytes       uint64
 	ApproximateSize int64
+	ApproximateRows int64
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -96,6 +97,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		WrittenBytes:    heartbeat.GetBytesWritten(),
 		ReadBytes:       heartbeat.GetBytesRead(),
 		ApproximateSize: int64(regionSize),
+		ApproximateRows: int64(heartbeat.GetApproximateRows()),
 	}
 
 	classifyVoterAndLearner(region)
@@ -121,6 +123,7 @@ func (r *RegionInfo) Clone() *RegionInfo {
 		WrittenBytes:    r.WrittenBytes,
 		ReadBytes:       r.ReadBytes,
 		ApproximateSize: r.ApproximateSize,
+		ApproximateRows: r.ApproximateRows,
 	}
 
 	classifyVoterAndLearner(region)
@@ -323,6 +326,8 @@ type RegionStat struct {
 	AntiCount int
 	// Version used to check the region split times
 	Version uint64
+	// Stats is a rolling statistics, recording some recently added records.
+	Stats *RollingStats
 }
 
 // RegionsStat is a list of a group region state type
@@ -344,6 +349,7 @@ type regionMap struct {
 	m         map[uint64]*regionEntry
 	ids       []uint64
 	totalSize int64
+	totalRows int64
 }
 
 type regionEntry struct {
@@ -378,6 +384,7 @@ func (rm *regionMap) Get(id uint64) *RegionInfo {
 func (rm *regionMap) Put(region *RegionInfo) {
 	if old, ok := rm.m[region.GetId()]; ok {
 		rm.totalSize += region.ApproximateSize - old.ApproximateSize
+		rm.totalRows += region.ApproximateRows - old.ApproximateRows
 		old.RegionInfo = region
 		return
 	}
@@ -387,6 +394,7 @@ func (rm *regionMap) Put(region *RegionInfo) {
 	}
 	rm.ids = append(rm.ids, region.GetId())
 	rm.totalSize += region.ApproximateSize
+	rm.totalRows += region.ApproximateRows
 }
 
 func (rm *regionMap) RandomRegion() *RegionInfo {
@@ -408,6 +416,7 @@ func (rm *regionMap) Delete(id uint64) {
 		delete(rm.m, id)
 		rm.ids = rm.ids[:len-1]
 		rm.totalSize -= old.ApproximateSize
+		rm.totalRows -= old.ApproximateRows
 	}
 }
 
@@ -669,15 +678,26 @@ func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *Regi
 	return prev, next
 }
 
+// GetAverageRegionSize returns the average region approximate size.
+func (r *RegionsInfo) GetAverageRegionSize() int64 {
+	if r.regions.Len() == 0 {
+		return 0
+	}
+	return r.regions.TotalSize() / int64(r.regions.Len())
+}
+
 // RegionStats records a list of regions' statistics and distribution status.
 type RegionStats struct {
 	Count            int              `json:"count"`
 	EmptyCount       int              `json:"empty_count"`
 	StorageSize      int64            `json:"storage_size"`
+	StorageRows      int64            `json:"storage_rows"`
 	StoreLeaderCount map[uint64]int   `json:"store_leader_count"`
 	StorePeerCount   map[uint64]int   `json:"store_peer_count"`
 	StoreLeaderSize  map[uint64]int64 `json:"store_leader_size"`
+	StoreLeaderRows  map[uint64]int64 `json:"store_leader_rows"`
 	StorePeerSize    map[uint64]int64 `json:"store_peer_size"`
+	StorePeerRows    map[uint64]int64 `json:"store_peer_rows"`
 }
 
 func newRegionStats() *RegionStats {
@@ -685,7 +705,9 @@ func newRegionStats() *RegionStats {
 		StoreLeaderCount: make(map[uint64]int),
 		StorePeerCount:   make(map[uint64]int),
 		StoreLeaderSize:  make(map[uint64]int64),
+		StoreLeaderRows:  make(map[uint64]int64),
 		StorePeerSize:    make(map[uint64]int64),
+		StorePeerRows:    make(map[uint64]int64),
 	}
 }
 
@@ -696,13 +718,16 @@ func (s *RegionStats) Observe(r *RegionInfo) {
 		s.EmptyCount++
 	}
 	s.StorageSize += r.ApproximateSize
+	s.StorageRows += r.ApproximateRows
 	if r.Leader != nil {
 		s.StoreLeaderCount[r.Leader.GetStoreId()]++
 		s.StoreLeaderSize[r.Leader.GetStoreId()] += r.ApproximateSize
+		s.StoreLeaderRows[r.Leader.GetStoreId()] += r.ApproximateRows
 	}
 	for _, p := range r.Peers {
 		s.StorePeerCount[p.GetStoreId()]++
 		s.StorePeerSize[p.GetStoreId()] += r.ApproximateSize
+		s.StorePeerRows[p.GetStoreId()] += r.ApproximateRows
 	}
 }
 

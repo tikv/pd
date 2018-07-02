@@ -15,17 +15,20 @@
 package v3rpc
 
 import (
+	"context"
 	"crypto/sha256"
 	"io"
 
 	"github.com/coreos/etcd/auth"
 	"github.com/coreos/etcd/etcdserver"
+	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/mvcc"
 	"github.com/coreos/etcd/mvcc/backend"
-	"github.com/coreos/etcd/pkg/types"
+	"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/version"
-	"golang.org/x/net/context"
+
+	"go.uber.org/zap"
 )
 
 type KVGetter interface {
@@ -37,13 +40,14 @@ type BackendGetter interface {
 }
 
 type Alarmer interface {
+	// Alarms is implemented in Server interface located in etcdserver/server.go
+	// It returns a list of alarms present in the AlarmStore
+	Alarms() []*pb.AlarmMember
 	Alarm(ctx context.Context, ar *pb.AlarmRequest) (*pb.AlarmResponse, error)
 }
 
-type RaftStatusGetter interface {
-	Index() uint64
-	Term() uint64
-	Leader() types.ID
+type LeaderTransferrer interface {
+	MoveLeader(ctx context.Context, lead, target uint64) error
 }
 
 type AuthGetter interface {
@@ -52,26 +56,40 @@ type AuthGetter interface {
 }
 
 type maintenanceServer struct {
-	rg  RaftStatusGetter
+	lg  *zap.Logger
+	rg  etcdserver.RaftStatusGetter
 	kg  KVGetter
 	bg  BackendGetter
 	a   Alarmer
+	lt  LeaderTransferrer
 	hdr header
 }
 
 func NewMaintenanceServer(s *etcdserver.EtcdServer) pb.MaintenanceServer {
-	srv := &maintenanceServer{rg: s, kg: s, bg: s, a: s, hdr: newHeader(s)}
+	srv := &maintenanceServer{lg: s.Cfg.Logger, rg: s, kg: s, bg: s, a: s, lt: s, hdr: newHeader(s)}
 	return &authMaintenanceServer{srv, s}
 }
 
 func (ms *maintenanceServer) Defragment(ctx context.Context, sr *pb.DefragmentRequest) (*pb.DefragmentResponse, error) {
-	plog.Noticef("starting to defragment the storage backend...")
+	if ms.lg != nil {
+		ms.lg.Info("starting defragment")
+	} else {
+		plog.Noticef("starting to defragment the storage backend...")
+	}
 	err := ms.bg.Backend().Defrag()
 	if err != nil {
-		plog.Errorf("failed to defragment the storage backend (%v)", err)
+		if ms.lg != nil {
+			ms.lg.Warn("failed to defragment", zap.Error(err))
+		} else {
+			plog.Errorf("failed to defragment the storage backend (%v)", err)
+		}
 		return nil, err
 	}
-	plog.Noticef("finished defragmenting the storage backend")
+	if ms.lg != nil {
+		ms.lg.Info("finished defragment")
+	} else {
+		plog.Noticef("finished defragmenting the storage backend")
+	}
 	return &pb.DefragmentResponse{}, nil
 }
 
@@ -84,7 +102,11 @@ func (ms *maintenanceServer) Snapshot(sr *pb.SnapshotRequest, srv pb.Maintenance
 	go func() {
 		snap.WriteTo(pw)
 		if err := snap.Close(); err != nil {
-			plog.Errorf("error closing snapshot (%v)", err)
+			if ms.lg != nil {
+				ms.lg.Warn("failed to close snapshot", zap.Error(err))
+			} else {
+				plog.Errorf("error closing snapshot (%v)", err)
+			}
 		}
 		pw.Close()
 	}()
@@ -130,21 +152,52 @@ func (ms *maintenanceServer) Hash(ctx context.Context, r *pb.HashRequest) (*pb.H
 	return resp, nil
 }
 
+func (ms *maintenanceServer) HashKV(ctx context.Context, r *pb.HashKVRequest) (*pb.HashKVResponse, error) {
+	h, rev, compactRev, err := ms.kg.KV().HashByRev(r.Revision)
+	if err != nil {
+		return nil, togRPCError(err)
+	}
+
+	resp := &pb.HashKVResponse{Header: &pb.ResponseHeader{Revision: rev}, Hash: h, CompactRevision: compactRev}
+	ms.hdr.fill(resp.Header)
+	return resp, nil
+}
+
 func (ms *maintenanceServer) Alarm(ctx context.Context, ar *pb.AlarmRequest) (*pb.AlarmResponse, error) {
 	return ms.a.Alarm(ctx, ar)
 }
 
 func (ms *maintenanceServer) Status(ctx context.Context, ar *pb.StatusRequest) (*pb.StatusResponse, error) {
+	hdr := &pb.ResponseHeader{}
+	ms.hdr.fill(hdr)
 	resp := &pb.StatusResponse{
-		Header:    &pb.ResponseHeader{Revision: ms.hdr.rev()},
-		Version:   version.Version,
-		DbSize:    ms.bg.Backend().Size(),
-		Leader:    uint64(ms.rg.Leader()),
-		RaftIndex: ms.rg.Index(),
-		RaftTerm:  ms.rg.Term(),
+		Header:           hdr,
+		Version:          version.Version,
+		Leader:           uint64(ms.rg.Leader()),
+		RaftIndex:        ms.rg.CommittedIndex(),
+		RaftAppliedIndex: ms.rg.AppliedIndex(),
+		RaftTerm:         ms.rg.Term(),
+		DbSize:           ms.bg.Backend().Size(),
+		DbSizeInUse:      ms.bg.Backend().SizeInUse(),
 	}
-	ms.hdr.fill(resp.Header)
+	if resp.Leader == raft.None {
+		resp.Errors = append(resp.Errors, etcdserver.ErrNoLeader.Error())
+	}
+	for _, a := range ms.a.Alarms() {
+		resp.Errors = append(resp.Errors, a.String())
+	}
 	return resp, nil
+}
+
+func (ms *maintenanceServer) MoveLeader(ctx context.Context, tr *pb.MoveLeaderRequest) (*pb.MoveLeaderResponse, error) {
+	if ms.rg.ID() != ms.rg.Leader() {
+		return nil, rpctypes.ErrGRPCNotLeader
+	}
+
+	if err := ms.lt.MoveLeader(ctx, uint64(ms.rg.Leader()), tr.TargetID); err != nil {
+		return nil, togRPCError(err)
+	}
+	return &pb.MoveLeaderResponse{}, nil
 }
 
 type authMaintenanceServer struct {
@@ -185,6 +238,17 @@ func (ams *authMaintenanceServer) Hash(ctx context.Context, r *pb.HashRequest) (
 	return ams.maintenanceServer.Hash(ctx, r)
 }
 
+func (ams *authMaintenanceServer) HashKV(ctx context.Context, r *pb.HashKVRequest) (*pb.HashKVResponse, error) {
+	if err := ams.isAuthenticated(ctx); err != nil {
+		return nil, err
+	}
+	return ams.maintenanceServer.HashKV(ctx, r)
+}
+
 func (ams *authMaintenanceServer) Status(ctx context.Context, ar *pb.StatusRequest) (*pb.StatusResponse, error) {
 	return ams.maintenanceServer.Status(ctx, ar)
+}
+
+func (ams *authMaintenanceServer) MoveLeader(ctx context.Context, tr *pb.MoveLeaderRequest) (*pb.MoveLeaderResponse, error) {
+	return ams.maintenanceServer.MoveLeader(ctx, tr)
 }

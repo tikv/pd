@@ -100,8 +100,8 @@ func calculateWriteHotThreshold(stores *core.StoresInfo) uint64 {
 	// suppose the number of the hot Regions is statCacheMaxLen
 	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
 	// divide 2 because the store reports data about two times than the region record write to rocksdb
-	divisor := float64(statCacheMaxLen) * 2 * storeHeartBeatReportInterval
-	hotRegionThreshold := uint64(float64(stores.TotalWrittenBytes()) / divisor)
+	divisor := float64(statCacheMaxLen) * 2
+	hotRegionThreshold := uint64(float64(stores.TotalBytesWriteRate()) / divisor)
 
 	if hotRegionThreshold < hotWriteRegionMinFlowRate {
 		hotRegionThreshold = hotWriteRegionMinFlowRate
@@ -113,14 +113,16 @@ func calculateReadHotThreshold(stores *core.StoresInfo) uint64 {
 	// hotRegionThreshold is use to pick hot region
 	// suppose the number of the hot Regions is statLRUMaxLen
 	// and we use total Read Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
-	divisor := float64(statCacheMaxLen) * storeHeartBeatReportInterval
-	hotRegionThreshold := uint64(float64(stores.TotalReadBytes()) / divisor)
+	divisor := float64(statCacheMaxLen)
+	hotRegionThreshold := uint64(float64(stores.TotalBytesReadRate()) / divisor)
 
 	if hotRegionThreshold < hotReadRegionMinFlowRate {
 		hotRegionThreshold = hotReadRegionMinFlowRate
 	}
 	return hotRegionThreshold
 }
+
+const rollingWindowsSize = 5
 
 func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes uint64, hotRegionThreshold uint64, oldItem *core.RegionStat, kind FlowKind) (bool, *core.RegionStat) {
 	newItem := &core.RegionStat{
@@ -134,11 +136,14 @@ func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes 
 
 	if oldItem != nil {
 		newItem.HotDegree = oldItem.HotDegree + 1
+		newItem.Stats = oldItem.Stats
 	}
 	if flowBytes >= hotRegionThreshold {
 		if oldItem == nil {
 			w.incMetrics("add_item", kind)
+			newItem.Stats = core.NewRollingStats(rollingWindowsSize)
 		}
+		newItem.Stats.Add(float64(flowBytes))
 		return true, newItem
 	}
 	// smaller than hotReionThreshold
@@ -152,7 +157,7 @@ func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes 
 	// eliminate some noise
 	newItem.HotDegree = oldItem.HotDegree - 1
 	newItem.AntiCount = oldItem.AntiCount - 1
-	newItem.FlowBytes = oldItem.FlowBytes
+	newItem.Stats.Add(float64(flowBytes))
 	return true, newItem
 }
 

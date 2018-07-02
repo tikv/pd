@@ -40,7 +40,6 @@ const (
 	regionheartbeatSendChanCap = 1024
 	hotRegionScheduleName      = "balance-hot-region-scheduler"
 
-	patrolRegionInterval  = time.Millisecond * 100
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
 )
 
@@ -109,36 +108,22 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 			c.removeOperator(op)
 		}
 	}
-	// If PD has restarted, it need to check learners added before and promote them.
-	if c.cluster.IsRaftLearnerEnabled() && c.getOperator(region.GetId()) == nil {
-		for _, p := range region.GetLearners() {
-			if region.GetPendingLearner(p.GetId()) != nil {
-				continue
-			}
-			step := schedule.PromoteLearner{
-				ToStore: p.GetStoreId(),
-				PeerID:  p.GetId(),
-			}
-			op := schedule.NewOperator("promoteLearner", region.GetId(), schedule.OpRegion, step)
-			c.addOperator(op)
-			break
-		}
-	}
 }
 
 func (c *coordinator) patrolRegions() {
 	defer logutil.LogPanic()
 
 	defer c.wg.Done()
-	ticker := time.NewTicker(patrolRegionInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(c.cluster.GetPatrolRegionInterval())
+	defer timer.Stop()
 
 	log.Info("coordinator: start patrol regions")
-
+	start := time.Now()
 	var key []byte
 	for {
 		select {
-		case <-ticker.C:
+		case <-timer.C:
+			timer.Reset(c.cluster.GetPatrolRegionInterval())
 		case <-c.ctx.Done():
 			return
 		}
@@ -158,30 +143,57 @@ func (c *coordinator) patrolRegions() {
 
 			key = region.GetEndKey()
 
-			if op := c.namespaceChecker.Check(region); op != nil {
-				if c.addOperator(op) {
-					break
-				}
-			}
-			if c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
-				if op := c.replicaChecker.Check(region); op != nil {
-					if c.addOperator(op) {
-						break
-					}
-				}
-			}
-			if c.limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
-				if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
-					// make sure two operators can add successfully altogether
-					if c.addOperators(op1, op2) {
-						break
-					}
-				}
+			if c.checkRegion(region) {
+				break
 			}
 		}
 		// update label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
+		if len(key) == 0 {
+			patrolCheckRegionsHistogram.Observe(time.Since(start).Seconds())
+			start = time.Now()
+		}
 	}
+}
+
+func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
+	// If PD has restarted, it need to check learners added before and promote them.
+	// Don't check isRaftLearnerEnabled cause it may be disable learner feature but still some learners to promote.
+	for _, p := range region.GetLearners() {
+		if region.GetPendingLearner(p.GetId()) != nil {
+			continue
+		}
+		step := schedule.PromoteLearner{
+			ToStore: p.GetStoreId(),
+			PeerID:  p.GetId(),
+		}
+		op := schedule.NewOperator("promoteLearner", region.GetId(), region.GetRegionEpoch(), schedule.OpRegion, step)
+		if c.addOperator(op) {
+			return true
+		}
+	}
+
+	if op := c.namespaceChecker.Check(region); op != nil {
+		if c.addOperator(op) {
+			return true
+		}
+	}
+	if c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+		if op := c.replicaChecker.Check(region); op != nil {
+			if c.addOperator(op) {
+				return true
+			}
+		}
+	}
+	if c.limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
+		if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
+			// make sure two operators can add successfully altogether
+			if c.addOperator(op1, op2) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (c *coordinator) run() {
@@ -353,8 +365,6 @@ func (c *coordinator) collectHotSpotMetrics() {
 		}
 	}
 
-	// collect hot cache metrics
-	c.cluster.HotCache.CollectMetrics(c.cluster.Stores)
 }
 
 func (c *coordinator) shouldRun() bool {
@@ -417,8 +427,8 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 				continue
 			}
 			opInfluence := schedule.NewOpInfluence(c.getOperators(), c.cluster)
-			if ops := s.Schedule(c.cluster, opInfluence); ops != nil {
-				c.addOperators(ops...)
+			if op := s.Schedule(c.cluster, opInfluence); op != nil {
+				c.addOperator(op...)
 			}
 
 		case <-s.Ctx().Done():
@@ -433,14 +443,9 @@ func (c *coordinator) addOperatorLocked(op *schedule.Operator) bool {
 
 	log.Infof("[region %v] add operator: %s", regionID, op)
 
-	// If the new operator passed in has higher priorities than the old one,
-	// then replace the old operator.
+	// If there is an old operator, replace it. The priority should be checked
+	// already.
 	if old, ok := c.operators[regionID]; ok {
-		if !isHigherPriorityOperator(op, old) {
-			log.Infof("[region %v] cancel add operator, old: %s", regionID, old)
-			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
-			return false
-		}
 		log.Infof("[region %v] replace old operator: %s", regionID, old)
 		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
 		c.removeOperatorLocked(old)
@@ -461,20 +466,12 @@ func (c *coordinator) addOperatorLocked(op *schedule.Operator) bool {
 	return false
 }
 
-func (c *coordinator) addOperator(op *schedule.Operator) bool {
-	c.Lock()
-	defer c.Unlock()
-
-	return c.addOperatorLocked(op)
-}
-
-func (c *coordinator) addOperators(ops ...*schedule.Operator) bool {
+func (c *coordinator) addOperator(ops ...*schedule.Operator) bool {
 	c.Lock()
 	defer c.Unlock()
 
 	for _, op := range ops {
-		if old := c.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
-			log.Infof("[region %v] cancel add operators, old: %s", op.RegionID(), old)
+		if !c.checkAddOperator(op) {
 			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
 			return false
 		}
@@ -483,6 +480,23 @@ func (c *coordinator) addOperators(ops ...*schedule.Operator) bool {
 		c.addOperatorLocked(op)
 	}
 
+	return true
+}
+
+func (c *coordinator) checkAddOperator(op *schedule.Operator) bool {
+	region := c.cluster.GetRegion(op.RegionID())
+	if region == nil {
+		log.Debugf("[region %v] region not found, cancel add operator", op.RegionID())
+		return false
+	}
+	if region.GetRegionEpoch().GetVersion() != op.RegionEpoch().GetVersion() || region.GetRegionEpoch().GetConfVer() != op.RegionEpoch().GetConfVer() {
+		log.Debugf("[region %v] region epoch not match, %v vs %v, cancel add operator", op.RegionID(), region.GetRegionEpoch(), op.RegionEpoch())
+		return false
+	}
+	if old := c.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
+		log.Debugf("[region %v] already have operator %s, cancel add operator", op.RegionID(), old)
+		return false
+	}
 	return true
 }
 

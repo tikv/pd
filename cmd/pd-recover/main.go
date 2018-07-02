@@ -17,13 +17,12 @@ import (
 )
 
 var (
-	endpoints   = flag.String("endpoints", "http://127.0.0.1:2379", "endpoints urls")
-	allocID     = flag.Uint64("alloc-id", 0, "please make sure alloced ID is safe")
-	clusterID   = flag.Uint64("cluster-id", 0, "please make cluster ID match with tikv")
-	maxReplicas = flag.Int("max-replicas", 3, "max replicas is the number of replicas for each region")
-	caPath      = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
-	certPath    = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")
-	keyPath     = flag.String("key", "", "path of file that contains X509 key in PEM format.")
+	endpoints = flag.String("endpoints", "http://127.0.0.1:2379", "endpoints urls")
+	allocID   = flag.Uint64("alloc-id", 0, "please make sure alloced ID is safe")
+	clusterID = flag.Uint64("cluster-id", 0, "please make cluster ID match with tikv")
+	caPath    = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
+	certPath  = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")
+	keyPath   = flag.String("key", "", "path of file that contains X509 key in PEM format.")
 )
 
 const (
@@ -87,10 +86,7 @@ func main() {
 
 	// recover bootstrap
 	// recover meta of cluster
-	clusterMeta := metapb.Cluster{
-		Id:           *clusterID,
-		MaxPeerCount: uint32(*maxReplicas),
-	}
+	clusterMeta := metapb.Cluster{Id: *clusterID}
 	clusterValue, err := clusterMeta.Marshal()
 	if err != nil {
 		exitErr(err)

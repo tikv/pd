@@ -130,7 +130,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
 	if len(steps) == 0 {
 		return nil
 	}
-	return NewOperator("scatter-region", region.GetId(), kind, steps...)
+	return NewOperator("scatter-region", region.GetId(), region.GetRegionEpoch(), kind, steps...)
 }
 
 func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {

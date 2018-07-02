@@ -15,6 +15,7 @@ package server
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/url"
@@ -79,14 +80,25 @@ type Config struct {
 	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
 	// the default size is 2GB, the maximum is 8GB.
 	QuotaBackendBytes typeutil.ByteSize `toml:"quota-backend-bytes" json:"quota-backend-bytes"`
-	// AutoCompactionRetention for mvcc key value store in hour. 0 means disable auto compaction.
-	// the default retention is 1 hour
-	AutoCompactionRetention int `toml:"auto-compaction-retention" json:"auto-compaction-retention"`
+	// AutoCompactionMode is either 'periodic' or 'revision'. The default value is 'periodic'.
+	AutoCompactionMode string `toml:"auto-compaction-mode" json:"auto-compaction-mode"`
+	// AutoCompactionRetention is either duration string with time unit
+	// (e.g. '5m' for 5-minute), or revision unit (e.g. '5000').
+	// If no time unit is provided and compaction mode is 'periodic',
+	// the unit defaults to hour. For example, '5' translates into 5-hour.
+	// The default retention is 1 hour.
+	// Before etcd v3.3.x, the type of retention is int. We add 'v2' suffix to make it backward compatible.
+	AutoCompactionRetention string `toml:"auto-compaction-retention" json:"auto-compaction-retention-v2"`
 
 	// TickInterval is the interval for etcd Raft tick.
 	TickInterval typeutil.Duration `toml:"tick-interval"`
 	// ElectionInterval is the interval for etcd Raft election.
 	ElectionInterval typeutil.Duration `toml:"election-interval"`
+	// Prevote is true to enable Raft Pre-Vote.
+	// If enabled, Raft runs an additional election phase
+	// to check whether it would get enough votes to win
+	// an election, thus minimizing disruptions.
+	PreVote bool `toml:"enable-prevote"`
 
 	Security SecurityConfig `toml:"security" json:"security"`
 
@@ -133,7 +145,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.BoolVar(&cfg.Log.File.LogRotate, "log-rotate", true, "rotate log")
-	fs.StringVar(&cfg.NamespaceClassifier, "namespace-classifier", "default", "namespace classifier (default 'default')")
+	fs.StringVar(&cfg.NamespaceClassifier, "namespace-classifier", "table", "namespace classifier (default 'table')")
 
 	fs.StringVar(&cfg.Security.CAPath, "cacert", "", "Path of file that contains list of trusted TLS CAs")
 	fs.StringVar(&cfg.Security.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format")
@@ -147,12 +159,13 @@ func NewConfig() *Config {
 const (
 	defaultLeaderLease             = int64(3)
 	defaultNextRetryDelay          = time.Second
-	defaultAutoCompactionRetention = 1
+	defaultCompactionMode          = "periodic"
+	defaultAutoCompactionRetention = "1h"
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
 	defaultPeerUrls            = "http://127.0.0.1:2380"
-	defualtInitialClusterState = embed.ClusterStateFlagNew
+	defaultInitialClusterState = embed.ClusterStateFlagNew
 
 	// etcd use 100ms for heartbeat and 1s for election timeout.
 	// We can enlarge both a little to reduce the network aggression.
@@ -212,8 +225,9 @@ func (c *Config) Parse(arguments []string) error {
 	}
 
 	// Load config file if specified.
+	var meta *toml.MetaData
 	if c.configFile != "" {
-		err = c.configFromFile(c.configFile)
+		meta, err = c.configFromFile(c.configFile)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -241,7 +255,7 @@ func (c *Config) Parse(arguments []string) error {
 		return errors.Errorf("'%s' is an invalid flag", c.FlagSet.Arg(0))
 	}
 
-	err = c.adjust()
+	err = c.adjust(meta)
 	return errors.Trace(err)
 }
 
@@ -268,7 +282,7 @@ func (c *Config) validate() error {
 	return nil
 }
 
-func (c *Config) adjust() error {
+func (c *Config) adjust(meta *toml.MetaData) error {
 	adjustString(&c.Name, defaultName)
 	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 
@@ -293,7 +307,7 @@ func (c *Config) adjust() error {
 		}
 	}
 
-	adjustString(&c.InitialClusterState, defualtInitialClusterState)
+	adjustString(&c.InitialClusterState, defaultInitialClusterState)
 
 	if len(c.Join) > 0 {
 		if _, err := url.Parse(c.Join); err != nil {
@@ -308,14 +322,13 @@ func (c *Config) adjust() error {
 	if c.nextRetryDelay == 0 {
 		c.nextRetryDelay = defaultNextRetryDelay
 	}
-	if c.AutoCompactionRetention == 0 {
-		c.AutoCompactionRetention = defaultAutoCompactionRetention
-	}
 
+	adjustString(&c.AutoCompactionMode, defaultCompactionMode)
+	adjustString(&c.AutoCompactionRetention, defaultAutoCompactionRetention)
 	adjustDuration(&c.TickInterval, defaultTickInterval)
 	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
 
-	adjustString(&c.NamespaceClassifier, "default")
+	adjustString(&c.NamespaceClassifier, "table")
 
 	adjustString(&c.Metric.PushJob, c.Name)
 
@@ -327,6 +340,11 @@ func (c *Config) adjust() error {
 	adjustDuration(&c.heartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
 
 	adjustDuration(&c.leaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
+
+	// enable PreVote by default
+	if meta == nil || !meta.IsDefined("enable-prevote") {
+		c.PreVote = true
+	}
 	return nil
 }
 
@@ -337,16 +355,17 @@ func (c *Config) clone() *Config {
 }
 
 func (c *Config) String() string {
-	if c == nil {
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("Config(%+v)", *c)
+	return string(data)
 }
 
 // configFromFile loads config from file.
-func (c *Config) configFromFile(path string) error {
-	_, err := toml.DecodeFile(path, c)
-	return errors.Trace(err)
+func (c *Config) configFromFile(path string) (*toml.MetaData, error) {
+	meta, err := toml.DecodeFile(path, c)
+	return &meta, errors.Trace(err)
 }
 
 // ScheduleConfig is the schedule configuration.
@@ -355,9 +374,15 @@ type ScheduleConfig struct {
 	// it will never be used as a source or target store.
 	MaxSnapshotCount    uint64 `toml:"max-snapshot-count,omitempty" json:"max-snapshot-count"`
 	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count,omitempty" json:"max-pending-peer-count"`
-	// If the size of region is smaller than this value,
+	// If both the size of region is smaller than MaxMergeRegionSize
+	// and the number of rows in region is smaller than MaxMergeRegionRows,
 	// it will try to merge with adjacent regions.
 	MaxMergeRegionSize uint64 `toml:"max-merge-region-size,omitempty" json:"max-merge-region-size"`
+	MaxMergeRegionRows uint64 `toml:"max-merge-region-rows,omitempty" json:"max-merge-region-rows"`
+	// SplitMergeInterval is the minimum interval time to permit merge after split.
+	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval,omitempty" json:"split-merge-interval"`
+	// PatrolRegionInterval is the interval for scanning region during patrol.
+	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval,omitempty" json:"patrol-region-interval"`
 	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
@@ -383,8 +408,8 @@ type ScheduleConfig struct {
 	// HighSpaceRatio is the highest usage ratio of store which regraded as high space.
 	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
 	HighSpaceRatio float64 `toml:"high-space-ratio,omitempty" json:"high-space-ratio"`
-	// EnableRaftLearner is the option for using AddLearnerNode instead of AddNode
-	EnableRaftLearner bool `toml:"enable-raft-learner" json:"enable-raft-learner,string"`
+	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode
+	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string"`
 	// Schedulers support for loding customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 }
@@ -395,8 +420,11 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 	return &ScheduleConfig{
 		MaxSnapshotCount:     c.MaxSnapshotCount,
 		MaxPendingPeerCount:  c.MaxPendingPeerCount,
-		MaxStoreDownTime:     c.MaxStoreDownTime,
 		MaxMergeRegionSize:   c.MaxMergeRegionSize,
+		MaxMergeRegionRows:   c.MaxMergeRegionRows,
+		SplitMergeInterval:   c.SplitMergeInterval,
+		PatrolRegionInterval: c.PatrolRegionInterval,
+		MaxStoreDownTime:     c.MaxStoreDownTime,
 		LeaderScheduleLimit:  c.LeaderScheduleLimit,
 		RegionScheduleLimit:  c.RegionScheduleLimit,
 		ReplicaScheduleLimit: c.ReplicaScheduleLimit,
@@ -404,16 +432,37 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		TolerantSizeRatio:    c.TolerantSizeRatio,
 		LowSpaceRatio:        c.LowSpaceRatio,
 		HighSpaceRatio:       c.HighSpaceRatio,
-		EnableRaftLearner:    c.EnableRaftLearner,
+		DisableLearner:       c.DisableLearner,
 		Schedulers:           schedulers,
 	}
 }
 
+const (
+	defaultMaxReplicas          = 3
+	defaultMaxSnapshotCount     = 3
+	defaultMaxPendingPeerCount  = 16
+	defaultMaxMergeRegionSize   = 20
+	defaultMaxMergeRegionRows   = 200000
+	defaultSplitMergeInterval   = 1 * time.Hour
+	defaultPatrolRegionInterval = 100 * time.Millisecond
+	defaultMaxStoreDownTime     = 30 * time.Minute
+	defaultLeaderScheduleLimit  = 4
+	defaultRegionScheduleLimit  = 4
+	defaultReplicaScheduleLimit = 8
+	defaultMergeScheduleLimit   = 8
+	defaultTolerantSizeRatio    = 5
+	defaultLowSpaceRatio        = 0.8
+	defaultHighSpaceRatio       = 0.6
+)
+
 func (c *ScheduleConfig) adjust() error {
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
-	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
+	adjustUint64(&c.MaxMergeRegionRows, defaultMaxMergeRegionRows)
+	adjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
+	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
+	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
 	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
@@ -452,26 +501,21 @@ type SchedulerConfig struct {
 	Disable bool     `toml:"disable" json:"disable"`
 }
 
-const (
-	defaultMaxReplicas          = 3
-	defaultMaxSnapshotCount     = 3
-	defaultMaxPendingPeerCount  = 16
-	defaultMaxMergeRegionSize   = 0
-	defaultMaxStoreDownTime     = 30 * time.Minute
-	defaultLeaderScheduleLimit  = 4
-	defaultRegionScheduleLimit  = 4
-	defaultReplicaScheduleLimit = 8
-	defaultMergeScheduleLimit   = 8
-	defaultTolerantSizeRatio    = 5
-	defaultLowSpaceRatio        = 0.8
-	defaultHighSpaceRatio       = 0.6
-)
-
 var defaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
 	{Type: "hot-region"},
 	{Type: "label"},
+}
+
+// IsDefaultScheduler checks whether the scheduler is enable by default.
+func IsDefaultScheduler(typ string) bool {
+	for _, c := range defaultSchedulers {
+		if typ == c.Type {
+			return true
+		}
+	}
+	return false
 }
 
 // ReplicationConfig is the replication configuration.
@@ -603,9 +647,11 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.InitialCluster = c.InitialCluster
 	cfg.ClusterState = c.InitialClusterState
 	cfg.EnablePprof = true
+	cfg.PreVote = c.PreVote
 	cfg.StrictReconfigCheck = !c.disableStrictReconfigCheck
 	cfg.TickMs = uint(c.TickInterval.Duration / time.Millisecond)
 	cfg.ElectionMs = uint(c.ElectionInterval.Duration / time.Millisecond)
+	cfg.AutoCompactionMode = c.AutoCompactionMode
 	cfg.AutoCompactionRetention = c.AutoCompactionRetention
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
 

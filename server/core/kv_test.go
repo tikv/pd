@@ -16,6 +16,7 @@ package core
 import (
 	"fmt"
 
+	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
@@ -90,7 +91,7 @@ func (s *testKVSuite) TestLoadStores(c *C) {
 
 	n := 10
 	stores := mustSaveStores(c, kv, n)
-	c.Assert(kv.LoadStores(cache, 3), IsNil)
+	c.Assert(kv.LoadStores(cache), IsNil)
 
 	c.Assert(cache.GetStoreCount(), Equals, n)
 	for _, store := range cache.GetMetaStores() {
@@ -106,7 +107,7 @@ func (s *testKVSuite) TestStoreWeight(c *C) {
 	mustSaveStores(c, kv, n)
 	c.Assert(kv.SaveStoreWeight(1, 2.0, 3.0), IsNil)
 	c.Assert(kv.SaveStoreWeight(2, 0.2, 0.3), IsNil)
-	c.Assert(kv.LoadStores(cache, n), IsNil)
+	c.Assert(kv.LoadStores(cache), IsNil)
 	leaderWeights := []float64{1.0, 2.0, 0.2}
 	regionWeights := []float64{1.0, 3.0, 0.3}
 	for i := 0; i < n; i++ {
@@ -135,12 +136,37 @@ func (s *testKVSuite) TestLoadRegions(c *C) {
 
 	n := 10
 	regions := mustSaveRegions(c, kv, n)
-	c.Assert(kv.LoadRegions(cache, 3), IsNil)
+	c.Assert(kv.LoadRegions(cache), IsNil)
 
 	c.Assert(cache.GetRegionCount(), Equals, n)
 	for _, region := range cache.GetMetaRegions() {
 		c.Assert(region, DeepEquals, regions[region.GetId()])
 	}
+}
+
+func (s *testKVSuite) TestLoadRegionsExceedRangeLimit(c *C) {
+	kv := NewKV(&KVWithMaxRangeLimit{KVBase: NewMemoryKV(), rangeLimit: 500})
+	cache := NewRegionsInfo()
+
+	n := 1000
+	regions := mustSaveRegions(c, kv, n)
+	c.Assert(kv.LoadRegions(cache), IsNil)
+	c.Assert(cache.GetRegionCount(), Equals, n)
+	for _, region := range cache.GetMetaRegions() {
+		c.Assert(region, DeepEquals, regions[region.GetId()])
+	}
+}
+
+type KVWithMaxRangeLimit struct {
+	KVBase
+	rangeLimit int
+}
+
+func (kv *KVWithMaxRangeLimit) LoadRange(key, endKey string, limit int) ([]string, error) {
+	if limit > kv.rangeLimit {
+		return nil, errors.Errorf("limit %v exceed max rangeLimit %v", limit, kv.rangeLimit)
+	}
+	return kv.KVBase.LoadRange(key, endKey, limit)
 }
 
 func newTestRegionMeta(regionID uint64) *metapb.Region {

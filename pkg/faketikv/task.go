@@ -43,6 +43,7 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, clusterInfo *ClusterInfo
 			return &addPeer{
 				regionID: regionID,
 				size:     region.ApproximateSize,
+				rows:     region.ApproximateRows,
 				speed:    100 * 1000 * 1000,
 				epoch:    epoch,
 				peer:     changePeer.GetPeer(),
@@ -51,6 +52,7 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, clusterInfo *ClusterInfo
 			return &removePeer{
 				regionID: regionID,
 				size:     region.ApproximateSize,
+				rows:     region.ApproximateRows,
 				speed:    100 * 1000 * 1000,
 				epoch:    epoch,
 				peer:     changePeer.GetPeer(),
@@ -112,6 +114,7 @@ func (t *transferLeader) IsFinished() bool {
 type addPeer struct {
 	regionID uint64
 	size     int64
+	rows     int64
 	speed    int64
 	epoch    *metapb.RegionEpoch
 	peer     *metapb.Peer
@@ -158,6 +161,7 @@ func (a *addPeer) IsFinished() bool {
 type removePeer struct {
 	regionID uint64
 	size     int64
+	rows     int64
 	speed    int64
 	epoch    *metapb.RegionEpoch
 	peer     *metapb.Peer
@@ -203,7 +207,3 @@ func (a *removePeer) RegionID() uint64 {
 func (a *removePeer) IsFinished() bool {
 	return a.finished
 }
-
-type writeRegion struct{}
-
-type readRegion struct{}
