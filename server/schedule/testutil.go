@@ -19,7 +19,7 @@ import (
 )
 
 func newTestOperator(regionID uint64, kind OperatorKind, steps ...OperatorStep) *Operator {
-	return NewOperator("test", regionID, kind, steps...)
+	return NewOperator("test", regionID, &metapb.RegionEpoch{}, kind, steps...)
 }
 
 func newTestRegion(regionID uint64, leaderPeer uint64, peers ...[2]uint64) *core.RegionInfo {

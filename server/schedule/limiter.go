@@ -15,9 +15,6 @@ package schedule
 
 import (
 	"sync"
-
-	"github.com/pingcap/pd/server/core"
-	log "github.com/sirupsen/logrus"
 )
 
 // Limiter is a counter that limits the number of operators.
@@ -33,34 +30,20 @@ func NewLimiter() *Limiter {
 	}
 }
 
-// AddOperator increases the count by kind.
-func (l *Limiter) AddOperator(op *Operator, region *core.RegionInfo) {
+// UpdateCounts updates resouce counts using current pending operators.
+func (l *Limiter) UpdateCounts(operators map[uint64]*Operator) {
 	l.Lock()
 	defer l.Unlock()
 
-	if _, ok := l.counts[op.Kind()]; !ok {
-		l.counts[op.Kind()] = make(map[uint64]uint64)
-	}
+	l.counts = make(map[OperatorKind]map[uint64]uint64)
 
-	for _, store := range op.InvolvedStores(region) {
-		l.counts[op.Kind()][store]++
-	}
-}
+	for _, op := range operators {
+		if _, ok := l.counts[op.Kind()]; !ok {
+			l.counts[op.Kind()] = make(map[uint64]uint64)
+		}
 
-// RemoveOperator decreases the count by kind.
-func (l *Limiter) RemoveOperator(op *Operator) {
-	l.Lock()
-	defer l.Unlock()
-
-	for _, store := range op.InvolvedStores(nil) {
-		_, ok := l.counts[op.Kind()][store]
-		if ok {
-			if l.counts[op.Kind()][store] == 0 {
-				log.Fatal("the limiter is already 0, no operators need to remove")
-			}
-			l.counts[op.Kind()][store]--
-		} else {
-			log.Fatalf("operator count decrease on nonexisted store %d", store)
+		for _, store := range op.AffectStores() {
+			l.counts[op.Kind()][store]++
 		}
 	}
 }

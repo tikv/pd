@@ -30,8 +30,8 @@ import (
 	"github.com/pingcap/pd/server/schedulers"
 )
 
-func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind schedule.OperatorKind) *schedule.Operator {
-	return schedule.NewOperator("test", regionID, regionEpoch, kind)
+func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind schedule.OperatorKind, steps ...schedule.OperatorStep) *schedule.Operator {
+	return schedule.NewOperator("test", regionID, regionEpoch, kind, steps...)
 }
 
 func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption) {
@@ -138,17 +138,17 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 	defer hbStreams.Close()
 
 	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
-
+	l := co.limiter
 	tc.addLeaderRegion(1, 1)
 
-	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), schedule.OpLeader)
-	co.addOperator(op1)
+	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), schedule.OpLeader, schedule.TransferLeader{FromStore: 1, ToStore: 2})
+	c.Assert(co.addOperator(op1), IsTrue)
 	c.Assert(l.OperatorCount(op1.Kind()), Equals, uint64(1))
 	c.Assert(co.getOperator(1).RegionID(), Equals, op1.RegionID())
 
 	// Region 1 already has an operator, cannot add another one.
-	op2 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), schedule.OpRegion)
-	co.addOperator(op2)
+	op2 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), schedule.OpRegion, schedule.TransferLeader{FromStore: 1, ToStore: 3})
+	c.Assert(co.addOperator(op2), IsFalse)
 	c.Assert(l.OperatorCount(op2.Kind()), Equals, uint64(0))
 
 	// Remove the operator manually, then we can add a new operator.
@@ -655,37 +655,6 @@ func waitOperator(c *C, co *coordinator, regionID uint64) {
 	})
 }
 
-var _ = Suite(&testScheduleLimiterSuite{})
-
-type testScheduleLimiterSuite struct{}
-
-func (s *testScheduleLimiterSuite) TestOperatorCount(c *C) {
-	l := schedule.NewLimiter()
-	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(0))
-	c.Assert(l.OperatorCount(schedule.OpRegion), Equals, uint64(0))
-
-	operators := make(map[uint64]*schedule.Operator)
-
-	operators[1] = newTestOperator(1, nil, schedule.OpLeader)
-	l.UpdateCounts(operators)
-	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(1)) // 1:leader
-	operators[2] = newTestOperator(2, nil, schedule.OpLeader)
-	l.UpdateCounts(operators)
-	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(2)) // 1:leader, 2:leader
-	delete(operators, 1)
-	l.UpdateCounts(operators)
-	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(1)) // 2:leader
-
-	operators[1] = newTestOperator(1, nil, schedule.OpRegion)
-	l.UpdateCounts(operators)
-	c.Assert(l.OperatorCount(schedule.OpRegion), Equals, uint64(1)) // 1:region 2:leader
-	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(1))
-	operators[2] = newTestOperator(2, nil, schedule.OpRegion)
-	l.UpdateCounts(operators)
-	c.Assert(l.OperatorCount(schedule.OpRegion), Equals, uint64(2)) // 1:region 2:region
-	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(0))
-}
-
 var _ = Suite(&testScheduleControllerSuite{})
 
 type testScheduleControllerSuite struct{}
@@ -739,11 +708,11 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 	// count = 0
 	c.Assert(sc.AllowSchedule(), IsTrue)
-	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), schedule.OpLeader)
+	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), schedule.OpLeader, schedule.TransferLeader{FromStore: 1, ToStore: 2})
 	c.Assert(co.addOperator(op1), IsTrue)
 	// count = 1
 	c.Assert(sc.AllowSchedule(), IsTrue)
-	op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), schedule.OpLeader)
+	op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), schedule.OpLeader, schedule.TransferLeader{FromStore: 2, ToStore: 1})
 	c.Assert(co.addOperator(op2), IsTrue)
 	// count = 2
 	c.Assert(sc.AllowSchedule(), IsFalse)
@@ -752,7 +721,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	c.Assert(sc.AllowSchedule(), IsTrue)
 
 	// add a PriorityKind operator will remove old operator
-	op3 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), schedule.OpHotRegion)
+	op3 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), schedule.OpHotRegion|schedule.OpLeader)
 	op3.SetPriorityLevel(core.HighPriority)
 	c.Assert(co.addOperator(op1), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsFalse)
@@ -763,7 +732,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	// add a admin operator will remove old operator
 	c.Assert(co.addOperator(op2), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsFalse)
-	op4 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), schedule.OpAdmin)
+	op4 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), schedule.OpAdmin|schedule.OpLeader)
 	op4.SetPriorityLevel(core.HighPriority)
 	c.Assert(co.addOperator(op4), IsTrue)
 	c.Assert(sc.AllowSchedule(), IsTrue)

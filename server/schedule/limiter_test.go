@@ -26,37 +26,39 @@ func (s *testLimiterSuite) TestOperatorCount(c *C) {
 	c.Assert(l.OperatorCount(OpLeader), Equals, uint64(0))
 	c.Assert(l.OperatorCount(OpRegion), Equals, uint64(0))
 
-	ops := []*Operator{}
+	operators := make(map[uint64]*Operator)
 
 	// init region and operator
 	for i := uint64(1); i <= 3; i++ {
 		op := newTestOperator(i, OpLeader|OpRegion, TransferLeader{FromStore: i + 1, ToStore: 1})
-		region := newTestRegion(i, i+1, [2]uint64{1, 1}, [2]uint64{i + 1, i + 1})
-		l.AddOperator(op, region)
-		ops = append(ops, op)
+		operators[i] = op
 	}
 
+	l.UpdateCounts(operators)
 	c.Assert(l.OperatorCount(OpLeader), Equals, uint64(3))
 	c.Assert(l.StoreOperatorCount(OpLeader, 1), Equals, uint64(3))
 	c.Assert(l.StoreOperatorCount(OpLeader, 2), Equals, uint64(1))
 	c.Assert(l.StoreOperatorCount(OpLeader, 3), Equals, uint64(1))
 	c.Assert(l.StoreOperatorCount(OpLeader, 4), Equals, uint64(1))
 
-	l.RemoveOperator(ops[0])
+	delete(operators, 1)
+	l.UpdateCounts(operators)
 	c.Assert(l.OperatorCount(OpLeader|OpRegion), Equals, uint64(2))
 	c.Assert(l.StoreOperatorCount(OpLeader|OpRegion, 1), Equals, uint64(2))
 	c.Assert(l.StoreOperatorCount(OpLeader|OpRegion, 2), Equals, uint64(0))
 	c.Assert(l.StoreOperatorCount(OpLeader|OpRegion, 3), Equals, uint64(1))
 	c.Assert(l.StoreOperatorCount(OpLeader|OpRegion, 4), Equals, uint64(1))
 
-	l.RemoveOperator(ops[1])
+	delete(operators, 2)
+	l.UpdateCounts(operators)
 	c.Assert(l.OperatorCount(OpRegion), Equals, uint64(1))
 	c.Assert(l.StoreOperatorCount(OpRegion, 1), Equals, uint64(1))
 	c.Assert(l.StoreOperatorCount(OpRegion, 2), Equals, uint64(0))
 	c.Assert(l.StoreOperatorCount(OpRegion, 3), Equals, uint64(0))
 	c.Assert(l.StoreOperatorCount(OpRegion, 4), Equals, uint64(1))
 
-	l.RemoveOperator(ops[2])
+	delete(operators, 3)
+	l.UpdateCounts(operators)
 	c.Assert(l.OperatorCount(OpLeader), Equals, uint64(0))
 	c.Assert(l.StoreOperatorCount(OpLeader, 1), Equals, uint64(0))
 	c.Assert(l.StoreOperatorCount(OpLeader, 2), Equals, uint64(0))
