@@ -224,7 +224,7 @@ func (c *testCluster) WaitLeader() string {
 		if leader := c.GetLeader(); leader != "" {
 			return leader
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 	return ""
 }
