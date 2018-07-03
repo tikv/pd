@@ -21,6 +21,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/osutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
@@ -38,16 +39,22 @@ type clusterInfo struct {
 	opt             *scheduleOption
 	regionStats     *regionStatistics
 	labelLevelStats *labelLevelStatistics
+	pool            *osutil.Pool
 }
 
+const defaultPoolSzie = 100000
+
 func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clusterInfo {
-	return &clusterInfo{
+	c := &clusterInfo{
 		core:            schedule.NewBasicCluster(),
 		id:              id,
 		opt:             opt,
 		kv:              kv,
 		labelLevelStats: newLabelLevelStatistics(),
+		pool:            osutil.NewPool(defaultPoolSzie),
 	}
+	c.pool.Start()
+	return c
 }
 
 // Return nil if cluster is not bootstrapped.
@@ -456,10 +463,16 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	if saveKV && c.kv != nil {
-		if err := c.kv.SaveRegion(region.Region); err != nil {
-			// Not successfully saved to kv is not fatal, it only leads to longer warm-up
-			// after restart. Here we only log the error then go on updating cache.
-			log.Errorf("[region %d] fail to save region %v: %v", region.GetId(), region, err)
+		task := func() {
+			if err := c.kv.SaveRegion(region.Region); err != nil {
+
+				// Not successfully saved to kv is not fatal, it only leads to longer warm-up
+				// after restart. Here we only log the error then go on updating cache.
+				log.Errorf("[region %d] fail to save region %v: %v", region.GetId(), region, err)
+			}
+		}
+		if err := c.pool.Schedule(task); err != nil {
+			log.Errorf("[region %d] fail to save to kv region %v: %v", region.GetId(), region, err)
 		}
 	}
 	if !isWriteUpdate && !isReadUpdate && !saveCache && !isNew {

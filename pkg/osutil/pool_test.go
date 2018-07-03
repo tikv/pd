@@ -10,7 +10,8 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package server
+
+package osutil
 
 import (
 	"testing"
@@ -52,7 +53,6 @@ func (t *testPool) TestWorkerPoolMaxWorkersCount(c *C) {
 	}
 	c.Assert(p.Schedule(task), IsNil)
 	p.Stop()
-	c.Assert(len(p.readyQueue), Equals, 0)
 }
 
 func (t *testPool) TestWorkerPoolMaxIdleDuration(c *C) {
@@ -66,11 +66,11 @@ func (t *testPool) TestWorkerPoolMaxIdleDuration(c *C) {
 	for i := 0; i < 3; i++ {
 		c.Assert(p.Schedule(slowTask), IsNil)
 	}
-	c.Assert(p.workersCount, Equals, 4)
-	time.Sleep(500 * time.Millisecond)
-	c.Assert(p.workersCount, Equals, 3)
+	c.Assert(p.WorkersCount(), Equals, 4)
+	time.Sleep(time.Second)
+	c.Assert(p.WorkersCount(), Equals, 3)
 	close(slowChan)
-	time.Sleep(500 * time.Millisecond)
-	c.Assert(p.workersCount, Equals, 0)
+	time.Sleep(time.Second)
+	c.Assert(p.WorkersCount(), Equals, 0)
 	p.Stop()
 }

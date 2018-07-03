@@ -136,6 +136,7 @@ func (c *RaftCluster) stop() {
 
 	close(c.quit)
 	c.coordinator.stop()
+	c.cachedCluster.pool.Stop()
 	c.wg.Wait()
 }
 

@@ -10,7 +10,8 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package server
+
+package osutil
 
 import (
 	"sync"
@@ -28,7 +29,7 @@ type Worker struct {
 	ch          chan Task
 }
 
-// Pool serves incoming task via schdule the task to one worker in pool,
+// Pool serves incoming task via schedule the task to a worker in the pool,
 // in LIFO order. the most recently stopped worker will serve the next
 // incoming task.
 type Pool struct {
