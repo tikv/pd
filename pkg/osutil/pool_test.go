@@ -18,6 +18,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/pkg/testutil"
 )
 
 func Test(t *testing.T) {
@@ -68,9 +69,8 @@ func (t *testPool) TestWorkerPoolMaxIdleDuration(c *C) {
 	}
 	c.Assert(p.WorkersCount(), Equals, 4)
 	time.Sleep(time.Second)
-	c.Assert(p.WorkersCount(), Equals, 3)
+	testutil.WaitUntil(c, func(c *C) bool { return p.WorkersCount() == 3 })
 	close(slowChan)
-	time.Sleep(time.Second)
-	c.Assert(p.WorkersCount(), Equals, 0)
+	testutil.WaitUntil(c, func(c *C) bool { return p.WorkersCount() == 0 })
 	p.Stop()
 }

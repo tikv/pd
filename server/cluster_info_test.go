@@ -20,6 +20,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -189,11 +190,19 @@ func checkRegion(c *C, a *core.RegionInfo, b *core.RegionInfo) {
 	}
 }
 
-func checkRegionsKV(c *C, kv *core.KV, regions []*core.RegionInfo) {
-	if kv != nil {
+func waitKVWriteFinished(c *C, cluster *clusterInfo) {
+	testutil.WaitUntil(c, func(c *C) bool {
+		return cluster.pool.WorkersCount() == cluster.pool.ReadyWorkersCount()
+	})
+
+}
+
+func checkRegionsKV(c *C, cluster *clusterInfo, regions []*core.RegionInfo) {
+	if cluster.kv != nil {
+		waitKVWriteFinished(c, cluster)
 		for _, region := range regions {
 			var meta metapb.Region
-			ok, err := kv.LoadRegion(region.GetId(), &meta)
+			ok, err := cluster.kv.LoadRegion(region.GetId(), &meta)
 			c.Assert(ok, IsTrue)
 			c.Assert(err, IsNil)
 			c.Assert(&meta, DeepEquals, region.Region)
@@ -338,12 +347,12 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		// region does not exist.
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster, regions[:i+1])
 
 		// region is the same, not updated.
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster, regions[:i+1])
 
 		epoch := region.Clone().GetRegionEpoch()
 
@@ -353,7 +362,7 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		}
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster, regions[:i+1])
 
 		// region is stale (Version).
 		stale := region.Clone()
@@ -362,7 +371,7 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		}
 		c.Assert(cluster.handleRegionHeartbeat(stale), NotNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster, regions[:i+1])
 
 		// region is updated.
 		region.RegionEpoch = &metapb.RegionEpoch{
@@ -371,7 +380,7 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		}
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster, regions[:i+1])
 
 		// region is stale (ConfVer).
 		stale = region.Clone()
@@ -380,7 +389,7 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		}
 		c.Assert(cluster.handleRegionHeartbeat(stale), NotNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster, regions[:i+1])
 
 		// Add a down peer.
 		region.DownPeers = []*pdpb.PeerStats{
@@ -412,12 +421,12 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		region.Peers = region.Peers[:1]
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster, regions[:i+1])
 		// Add peers.
 		region.Peers = origin.Peers
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster, regions[:i+1])
 	}
 
 	regionCounts := make(map[uint64]int)
@@ -469,6 +478,7 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		overlapRegion.StartKey = regions[n-2].StartKey
 		overlapRegion.Region.Id = overlapRegion.Region.Id + 1
 		c.Assert(cluster.handleRegionHeartbeat(overlapRegion), IsNil)
+		waitKVWriteFinished(c, cluster)
 		region := &metapb.Region{}
 		ok, err := kv.LoadRegion(regions[n-1].GetId(), region)
 		c.Assert(ok, IsFalse)

@@ -60,11 +60,18 @@ func (p *Pool) SetMaxIdleWorkerDuration(d time.Duration) {
 	p.maxIdleWorkerDuration = d
 }
 
-// WorkersCount returns the
+// WorkersCount returns the total number of workers.
 func (p *Pool) WorkersCount() int {
 	p.RLock()
 	defer p.RUnlock()
 	return p.workersCount
+}
+
+// ReadyWorkersCount returns the total number of ready workers.
+func (p *Pool) ReadyWorkersCount() int {
+	p.RLock()
+	defer p.RUnlock()
+	return len(p.readyQueue)
 }
 
 // Start starts the pool.
