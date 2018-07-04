@@ -31,12 +31,11 @@ func readJSONRespondError(r *render.Render, w http.ResponseWriter, body io.ReadC
 	if err == nil {
 		return nil
 	}
-	switch err.(type) {
-	case apiutil.JSONError:
-		r.JSON(w, http.StatusBadRequest, err.Error())
-	default:
-		r.JSON(w, http.StatusInternalServerError, err.Error())
+	status := http.StatusInternalServerError
+	if _, ok := errors.Cause(err).(apiutil.JSONError); ok {
+		status = http.StatusBadRequest
 	}
+	r.JSON(w, status, err.Error())
 	return err
 }
 

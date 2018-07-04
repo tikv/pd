@@ -137,11 +137,7 @@ func (h *storeHandler) errorResp(w http.ResponseWriter, err error) {
 		h.rd.JSON(w, http.StatusInternalServerError, "nil error")
 		return
 	}
-	errCode, ok := err.(errcode.ErrorCode)
-	if !ok {
-		errCode, ok = errors.Cause(err).(errcode.ErrorCode)
-	}
-	if ok {
+	if errCode, ok := errors.Cause(err).(errcode.ErrorCode); ok {
 		w.Header().Set("Tidb-Error-Code", string(errCode.Code()))
 		jsonData := errcode.JSONFormat{Code: errCode.Code(), Data: errCode, Msg: errCode.Error()}
 		h.rd.JSON(w, errCode.HTTPCode(), jsonData)

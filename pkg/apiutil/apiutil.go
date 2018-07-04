@@ -31,16 +31,11 @@ func DeferClose(c io.Closer, err *error) {
 
 // JSONError lets callers check for just one error type
 type JSONError struct {
-	err error
+	Err error
 }
 
 func (e JSONError) Error() string {
-	return e.err.Error()
-}
-
-// Cause for compatibility with the errors package
-func (e JSONError) Cause() error {
-	return e.err
+	return e.Err.Error()
 }
 
 func tagJSONError(err error) error {
