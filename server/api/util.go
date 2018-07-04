@@ -21,8 +21,24 @@ import (
 	"net/http"
 
 	"github.com/juju/errors"
+	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
+	"github.com/unrolled/render"
 )
+
+func readJSONRespondError(r *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) error {
+	err := apiutil.ReadJSON(body, data)
+	if err == nil {
+		return nil
+	}
+	switch err.(type) {
+	case apiutil.JSONError:
+		r.JSON(w, http.StatusBadRequest, err.Error())
+	default:
+		r.JSON(w, http.StatusInternalServerError, err.Error())
+	}
+	return err
+}
 
 func readJSON(r io.ReadCloser, data interface{}) error {
 	defer r.Close()

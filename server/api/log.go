@@ -46,7 +46,7 @@ func (h *logHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 	err = json.Unmarshal(data, &level)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
