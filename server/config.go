@@ -413,19 +413,19 @@ type ScheduleConfig struct {
 
 	// DisableRemoveDownReplica is the option to prevent replica checker from
 	// removing down replicas.
-	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica"`
+	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string"`
 	// DisableMakeUpOfflineReplica is the option to prevent replica checker from
 	// making up offline replicas.
-	DisableMakeUpOfflineReplica bool `toml:"disable-make-up-offline-replica" json:"disable-make-up-offline-replica"`
+	DisableMakeUpOfflineReplica bool `toml:"disable-make-up-offline-replica" json:"disable-make-up-offline-replica,string"`
 	// DisableMakeUpReplica is the option to prevent replica checker from making up
 	// replicas when replica count is less than expected.
-	DisableMakeUpReplica bool `toml:"disable-make-up-replica" json:"disable-make-up-replica"`
+	DisableMakeUpReplica bool `toml:"disable-make-up-replica" json:"disable-make-up-replica,string"`
 	// DisableRemoveExtraReplica is the option to prevent replica checker from
 	// removing extra replicas.
-	DisableRemoveExtraReplica bool `toml:"disable-remove-extra-replica" json:"disable-remove-extra-replica"`
+	DisableRemoveExtraReplica bool `toml:"disable-remove-extra-replica" json:"disable-remove-extra-replica,string"`
 	// DisableLocationReplacement is the option to prevent replica checker from
 	// moving replica to a better location.
-	DisableLocationReplacement bool `toml:"disable-location-replacement" json:"disable-location-replacement"`
+	DisableLocationReplacement bool `toml:"disable-location-replacement" json:"disable-location-replacement,string"`
 
 	// Schedulers support for loding customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
