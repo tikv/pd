@@ -218,6 +218,7 @@ func (l *balanceAdjacentRegionScheduler) process(cluster schedule.Cluster) []*sc
 	if op == nil {
 		schedulerCounter.WithLabelValues(l.GetName(), "no_peer").Inc()
 		l.cacheRegions.assignedStoreIds = l.cacheRegions.assignedStoreIds[:0]
+		return nil
 	}
 	return []*schedule.Operator{op}
 }
