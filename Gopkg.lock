@@ -253,15 +253,14 @@
   revision = "1c287c953996ab3a0bf535dba9d53d809d3dc0b6"
 
 [[projects]]
-  branch = "misono/upload-gc-safepoint"
+  branch = "master"
   name = "github.com/pingcap/kvproto"
   packages = [
     "pkg/eraftpb",
     "pkg/metapb",
     "pkg/pdpb"
   ]
-  revision = "11e8f245581483e73bee991d7b8f8c4cc3d7f462"
-  source = "https://github.com/MyonKeminta/kvproto"
+  revision = "4647096953d282e989b79c6e9b325aec3312b8ac"
 
 [[projects]]
   name = "github.com/prometheus/client_golang"
@@ -495,6 +494,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "55c2f9694e021142d0f4134ea8e629a0a6f9a7465d715e28e6f71c70c20cd3ed"
+  inputs-digest = "35a10e6b6253a569486ba0313d5234da82e6908b9e18c6c1628d8b596de5fde4"
   solver-name = "gps-cdcl"
   solver-version = 1
