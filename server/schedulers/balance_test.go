@@ -729,7 +729,7 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 
 	// Move peer to better location.
 	tc.UpdateStorageRatio(4, 0, 1)
-	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 1, 4)
+	CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 1, 4)
 	// If store4 is almost full, do not add peer on it.
 	tc.UpdateStorageRatio(4, 0.9, 0.1)
 	c.Assert(rc.Check(region), IsNil)
@@ -738,10 +738,10 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 	region = tc.GetRegion(2)
 	// Add peer on store4.
 	tc.UpdateStorageRatio(4, 0, 1)
-	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 4)
+	CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 4)
 	// If store4 is almost full, do not add peer on it.
 	tc.UpdateStorageRatio(4, 0.8, 0)
-	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 2)
+	CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 2)
 }
 
 var _ = Suite(&testMergeCheckerSuite{})
