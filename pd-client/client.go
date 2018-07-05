@@ -671,7 +671,7 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("update_gc_safe_point").Observe(time.Since(start).Seconds())
-		c.scheduleCheckLeader()
+		c.ScheduleCheckLeader()
 		return 0, errors.Trace(err)
 	}
 	return resp.GetNewSafePoint(), nil
