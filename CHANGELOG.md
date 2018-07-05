@@ -1,5 +1,21 @@
 # PD Change Log
 
+## V2.1.0-beta
+### Improvements
+* Enable Raft PreVote between PD nodes to avoid leader reelection when network recovers after network isolation
+* Optimize the issue that Balance Scheduler schedules small Regions frequently
+* Optimize the hotspot scheduler to improve its adaptability in traffic statistics information jitters
+* Skip the Regions with a large number of rows when scheduling `region merge` 
+* Enable `raft learner` by default to lower the risk of unavailable data caused by machine failure during scheduling
+* Remove `max-replica` from `pd-recover`
+* Add `Filter` metrics
+### Bug Fixes
+* Fix the issue that Region information is not updated after tikv-ctl unsafe recovery
+* Fix the issue that TiKV disk space is used up caused by replica migration in some scenarios
+### Compatibility notes
+* Do not support rolling back to v2.0.x or earlier due to update of the new version storage engine
+* Enable `raft learner` by default in the new version of PD. If the cluster is upgraded from 1.x to 2.1, the machine should be stopped before upgrade or a rolling update should be first applied to TiKV and then PD 
+
 ## V2.0.4
 ### Improvement
 * Improve the behavior of the unset scheduling argument `max-pending-peer-count` by changing it to no limit for the maximum number of `PendingPeer`s
