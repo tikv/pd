@@ -10,8 +10,6 @@
 // The downside of centralized is the potential need to import types from other packages.
 //
 // A RegisteredCode should never be modified once committed (and released)
-//
-// TODO: separate out actual PD codes
 package errcode
 
 import (
@@ -26,10 +24,7 @@ const (
 	// InternalErrorCode means the operation placed the system is in an inconsistent or unrecoverable state
 	// Essentially a handled panic.
 	// This is the same as a HTTP 500, so it is not necessary to send this code when using HTTP.k
-	// This error code is not specific to the PD server
 	InternalErrorCode RegisteredCode = "internal"
-	// StoreTombstonedCode is an invalid operation was attempted on a store which is in a removed state.
-	StoreTombstonedCode RegisteredCode = "store.state.tombstoned"
 )
 
 // ErrorCode defines constant code functions Code() and HTTPCode().
@@ -53,28 +48,6 @@ type JSONFormat struct {
 
 // DefaultHTTPCode is the default used by an ErrorCode
 const DefaultHTTPCode int = http.StatusBadRequest
-
-// StoreTombstoned is an invalid operation was attempted on a store which is in a removed state.
-type StoreTombstoned struct {
-	StoreID   uint64 `json:"storeId"`
-	Operation string `json:"operation"`
-}
-
-var _ ErrorCode = (*StoreTombstoned)(nil) // assert implements interface
-
-func (e StoreTombstoned) Error() string {
-	return fmt.Sprintf("The store %020d has been removed and the operation %s is invalid", e.StoreID, e.Operation)
-}
-
-// HTTPCode returns 410
-func (e StoreTombstoned) HTTPCode() int {
-	return http.StatusGone
-}
-
-// Code returns StoreTombstonedCode
-func (e StoreTombstoned) Code() RegisteredCode {
-	return StoreTombstonedCode
-}
 
 // InternalError attaches additional data to InternalErrorCode.
 type InternalError struct {
