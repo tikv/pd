@@ -109,6 +109,24 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	}
 }
 
+func (s *testBalanceAdjacentRegionSuite) TestNoNeedToBalance(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	tc := schedule.NewMockCluster(opt)
+
+	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewLimiter())
+	c.Assert(err, IsNil)
+	c.Assert(sc.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
+
+	// Add stores 1,2,3
+	tc.AddLeaderStore(1, 2)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+
+	tc.AddLeaderRegionWithRange(1, "", "a", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(2, "a", "b", 1, 2, 3)
+	c.Assert(sc.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
+}
+
 type sequencer struct {
 	maxID uint64
 	curID uint64
