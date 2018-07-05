@@ -55,7 +55,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 		return op
 	}
 
-	if len(region.GetPeers()) < r.cluster.GetMaxReplicas() {
+	if len(region.GetPeers()) < r.cluster.GetMaxReplicas() && r.cluster.IsMakeUpReplicaEnabled() {
 		log.Debugf("[region %d] has %d peers fewer than max replicas", region.GetId(), len(region.GetPeers()))
 		newPeer, _ := r.selectBestPeerToAddReplica(region, NewStorageThresholdFilter())
 		if newPeer == nil {
@@ -79,7 +79,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 
 	// when add learner peer, the number of peer will exceed max replicas for a wille,
 	// just comparing the the number of voters to avoid too many cancel add operator log.
-	if len(region.GetVoters()) > r.cluster.GetMaxReplicas() {
+	if len(region.GetVoters()) > r.cluster.GetMaxReplicas() && r.cluster.IsRemoveExtraReplicaEnabled() {
 		log.Debugf("[region %d] has %d peers more than max replicas", region.GetId(), len(region.GetPeers()))
 		oldPeer, _ := r.selectWorstPeer(region)
 		if oldPeer == nil {
@@ -150,6 +150,10 @@ func (r *ReplicaChecker) selectWorstPeer(region *core.RegionInfo) (*metapb.Peer,
 }
 
 func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *Operator {
+	if !r.cluster.IsRemoveDownReplicaEnabled() {
+		return nil
+	}
+
 	for _, stats := range region.DownPeers {
 		peer := stats.GetPeer()
 		if peer == nil {
@@ -172,6 +176,10 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *Operator {
 }
 
 func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
+	if !r.cluster.IsMakeUpOfflineReplicaEnabled() {
+		return nil
+	}
+
 	// just skip learner
 	if len(region.Learners) != 0 {
 		return nil
@@ -216,6 +224,10 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 }
 
 func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator {
+	if !r.cluster.IsLocationReplacementEnabled() {
+		return nil
+	}
+
 	oldPeer, oldScore := r.selectWorstPeer(region)
 	if oldPeer == nil {
 		checkerCounter.WithLabelValues("replica_checker", "all_right").Inc()
