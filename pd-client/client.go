@@ -174,7 +174,12 @@ func (c *client) updateLeader() error {
 		members, err := c.getMembers(ctx, u)
 		cancel()
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
-			continue
+			select {
+			case <-c.ctx.Done():
+				return errors.Trace(err)
+			default:
+				continue
+			}
 		}
 		c.updateURLs(members.GetMembers())
 		if err = c.switchLeader(members.GetLeader().GetClientUrls()); err != nil {
@@ -344,9 +349,14 @@ func (c *client) tsLoop() {
 
 		if stream == nil {
 			var ctx context.Context
-			ctx, cancel = context.WithCancel(c.ctx)
+			ctx, cancel = context.WithCancel(loopCtx)
 			stream, err = c.leaderClient().Tso(ctx)
 			if err != nil {
+				select {
+				case <-loopCtx.Done():
+					return
+				default:
+				}
 				log.Errorf("[pd] create tso stream error: %v", err)
 				c.ScheduleCheckLeader()
 				cancel()
@@ -388,6 +398,11 @@ func (c *client) tsLoop() {
 		}
 
 		if err != nil {
+			select {
+			case <-loopCtx.Done():
+				return
+			default:
+			}
 			log.Errorf("[pd] getTS error: %v", err)
 			c.ScheduleCheckLeader()
 			cancel()
