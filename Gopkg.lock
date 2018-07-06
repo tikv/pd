@@ -260,7 +260,11 @@
     "pkg/metapb",
     "pkg/pdpb"
   ]
+<<<<<<< HEAD
   revision = "592f63bfb3ab3ef7e55dc2ee57dbb97594930811"
+=======
+  revision = "4647096953d282e989b79c6e9b325aec3312b8ac"
+>>>>>>> Support save and get GC safe point to PD (#1108)
 
 [[projects]]
   name = "github.com/prometheus/client_golang"
@@ -494,6 +498,10 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
+<<<<<<< HEAD
   inputs-digest = "cef70abdcf1674473089991abf1d41fb771013ac22e5bc73ba85675d718de61c"
+=======
+  inputs-digest = "35a10e6b6253a569486ba0313d5234da82e6908b9e18c6c1628d8b596de5fde4"
+>>>>>>> Support save and get GC safe point to PD (#1108)
   solver-name = "gps-cdcl"
   solver-version = 1

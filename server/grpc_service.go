@@ -574,6 +574,63 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 	}, nil
 }
 
+// GetGCSafePoint implements gRPC PDServer.
+func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePointRequest) (*pdpb.GetGCSafePointResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &pdpb.GetGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	safePoint, err := s.kv.LoadGCSafePoint()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return &pdpb.GetGCSafePointResponse{
+		Header:    s.header(),
+		SafePoint: safePoint,
+	}, nil
+}
+
+// UpdateGCSafePoint implements gRPC PDServer.
+func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSafePointRequest) (*pdpb.UpdateGCSafePointResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &pdpb.UpdateGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	oldSafePoint, err := s.kv.LoadGCSafePoint()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	newSafePoint := request.SafePoint
+
+	// Only save the safe point if it's greater than the previous one
+	if newSafePoint > oldSafePoint {
+		if err := s.kv.SaveGCSafePoint(newSafePoint); err != nil {
+			return nil, errors.Trace(err)
+		}
+		log.Infof("updated gc safe point to %d", newSafePoint)
+	} else if newSafePoint < oldSafePoint {
+		log.Warn("trying to update gc safe point from %d to %d", oldSafePoint, newSafePoint)
+		newSafePoint = oldSafePoint
+	}
+
+	return &pdpb.UpdateGCSafePointResponse{
+		Header:       s.header(),
+		NewSafePoint: newSafePoint,
+	}, nil
+}
+
 // validateRequest checks if Server is leader and clusterID is matched.
 // TODO: Call it in gRPC intercepter.
 func (s *Server) validateRequest(header *pdpb.RequestHeader) error {
