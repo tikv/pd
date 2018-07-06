@@ -1,5 +1,10 @@
 # PD Change Log
 
+## V2.0.5
+### Bug Fixes
+* Fix the issue that replicas migration uses up TiKV disks space in some scenarios
+* Fix the crash issue caused by `AdjacentRegionScheduler`
+
 ## V2.0.4
 ### Improvement
 * Improve the behavior of the unset scheduling argument `max-pending-peer-count` by changing it to no limit for the maximum number of `PendingPeer`s
