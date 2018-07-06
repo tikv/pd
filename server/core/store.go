@@ -41,6 +41,7 @@ type StoreInfo struct {
 	LeaderWeight      float64
 	RegionWeight      float64
 	RollingStoreStats *RollingStoreStats
+	Version           string
 }
 
 // NewStoreInfo creates StoreInfo with meta data.

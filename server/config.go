@@ -77,6 +77,8 @@ type Config struct {
 
 	Namespace map[string]NamespaceConfig `json:"namespace"`
 
+	ClusterVersion Version `json:"cluster_version"`
+
 	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
 	// the default size is 2GB, the maximum is 8GB.
 	QuotaBackendBytes typeutil.ByteSize `toml:"quota-backend-bytes" json:"quota-backend-bytes"`

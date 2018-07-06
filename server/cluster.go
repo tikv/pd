@@ -319,7 +319,6 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 			log.Warnf("missing location label %q in store %v", k, s)
 		}
 	}
-
 	return cluster.putStore(s)
 }
 
