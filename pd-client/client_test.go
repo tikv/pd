@@ -15,6 +15,7 @@ package pd
 
 import (
 	"context"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -220,4 +221,28 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	n, err = s.client.GetStore(context.Background(), store.GetId())
 	c.Assert(err, IsNil)
 	c.Assert(n, IsNil)
+}
+
+func (s *testClientSuite) checkGCSafePoint(c *C, expectedSafePoint uint64) {
+	req := &pdpb.GetGCSafePointRequest{
+		Header: newHeader(s.srv),
+	}
+	resp, err := s.srv.GetGCSafePoint(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.SafePoint, Equals, expectedSafePoint)
+}
+
+func (s *testClientSuite) TestUpdateGCSafePoint(c *C) {
+	s.checkGCSafePoint(c, 0)
+	for _, safePoint := range []uint64{0, 1, 2, 3, 233, 23333, 233333333333, math.MaxUint64} {
+		newSafePoint, err := s.client.UpdateGCSafePoint(context.Background(), safePoint)
+		c.Assert(err, IsNil)
+		c.Assert(newSafePoint, Equals, safePoint)
+		s.checkGCSafePoint(c, safePoint)
+	}
+	// If the new safe point is less than the old one, it should not be updated.
+	newSafePoint, err := s.client.UpdateGCSafePoint(context.Background(), 1)
+	c.Assert(newSafePoint, Equals, uint64(math.MaxUint64))
+	c.Assert(err, IsNil)
+	s.checkGCSafePoint(c, math.MaxUint64)
 }

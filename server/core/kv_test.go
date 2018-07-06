@@ -15,6 +15,7 @@ package core
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/juju/errors"
 	. "github.com/pingcap/check"
@@ -154,6 +155,22 @@ func (s *testKVSuite) TestLoadRegionsExceedRangeLimit(c *C) {
 	c.Assert(cache.GetRegionCount(), Equals, n)
 	for _, region := range cache.GetMetaRegions() {
 		c.Assert(region, DeepEquals, regions[region.GetId()])
+	}
+}
+
+func (s *testKVSuite) TestLoadGCSafePoint(c *C) {
+	kv := NewKV(NewMemoryKV())
+	testData := []uint64{0, 1, 2, 233, 2333, 23333333333, math.MaxUint64}
+
+	r, e := kv.LoadGCSafePoint()
+	c.Assert(r, Equals, uint64(0))
+	c.Assert(e, IsNil)
+	for _, safePoint := range testData {
+		err := kv.SaveGCSafePoint(safePoint)
+		c.Assert(err, IsNil)
+		safePoint1, err := kv.LoadGCSafePoint()
+		c.Assert(err, IsNil)
+		c.Assert(safePoint, Equals, safePoint1)
 	}
 }
 
