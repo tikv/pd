@@ -23,19 +23,44 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/error_code"
+	log "github.com/sirupsen/logrus"
 	"github.com/unrolled/render"
 )
 
-func readJSONRespondError(r *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) error {
+// Respond to the client about the given error.
+// By default an error is assumed to be a 400 Bad Request
+// unless it is recognized as an ErrorCode
+// If the error is nil, this responds with a 500
+func errorResp(rd *render.Render, w http.ResponseWriter, err error) {
+	if err == nil {
+		log.Errorf("nil given to errorResp")
+		rd.JSON(w, http.StatusInternalServerError, "nil error")
+		return
+	}
+	if errCode, ok := errors.Cause(err).(errcode.ErrorCode); ok {
+		w.Header().Set("TiDB-Error-Code", string(errCode.Code()))
+		rd.JSON(w, errcode.GetHTTPCode(errCode), errcode.NewJSONFormat(errCode))
+	} else {
+		rd.JSON(w, http.StatusBadRequest, err.Error())
+	}
+	return
+}
+
+// Write json into data.
+// On error respond with a 400 Bad Request
+func readJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) error {
 	err := apiutil.ReadJSON(body, data)
 	if err == nil {
 		return nil
 	}
-	status := http.StatusInternalServerError
-	if _, ok := errors.Cause(err).(apiutil.JSONError); ok {
-		status = http.StatusBadRequest
+	var errCode errcode.ErrorCode
+	if jsonErr, ok := errors.Cause(err).(apiutil.JSONError); ok {
+		errCode = errcode.NewInvalidInput(jsonErr.Err)
+	} else {
+		errCode = errcode.NewInternalError(err)
 	}
-	r.JSON(w, status, err.Error())
+	errorResp(rd, w, errCode)
 	return err
 }
 

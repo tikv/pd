@@ -14,15 +14,16 @@
 package core
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/error_code"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -311,16 +312,18 @@ type StoreHotRegionInfos struct {
 // StoreHotRegionsStat used to record the hot region statistics group by store
 type StoreHotRegionsStat map[uint64]*HotRegionsStat
 
-var (
-	// ErrStoreNotFound is for log of store no found
-	ErrStoreNotFound = func(storeID uint64) error {
-		return errors.Errorf("store %v not found", storeID)
-	}
-	// ErrStoreIsBlocked is for log of store is blocked
-	ErrStoreIsBlocked = func(storeID uint64) error {
-		return errors.Errorf("store %v is blocked", storeID)
-	}
-)
+type errStoreNotFound struct {
+	storeID uint64
+}
+
+func (e errStoreNotFound) Error() string {
+	return fmt.Sprintf("store %v not found", e.storeID)
+}
+
+// NewStoreNotFound is for log of store not found
+func NewStoreNotFound(storeID uint64) errcode.ErrorCode {
+	return errcode.NewNotFound(errStoreNotFound{storeID})
+}
 
 // StoresInfo is a map of storeID to StoreInfo
 type StoresInfo struct {
@@ -353,10 +356,10 @@ func (s *StoresInfo) SetStore(store *StoreInfo) {
 func (s *StoresInfo) BlockStore(storeID uint64) error {
 	store, ok := s.stores[storeID]
 	if !ok {
-		return ErrStoreNotFound(storeID)
+		return NewStoreNotFound(storeID)
 	}
 	if store.IsBlocked() {
-		return ErrStoreIsBlocked(storeID)
+		return errcode.StoreBlocked{StoreID: storeID}
 	}
 	store.Block()
 	return nil

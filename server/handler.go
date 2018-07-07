@@ -15,6 +15,7 @@ package server
 
 import (
 	"bytes"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -341,7 +342,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 	// Add missing peers.
 	for id := range storeIDs {
 		if c.cluster.GetStore(id) == nil {
-			return core.ErrStoreNotFound(id)
+			return core.NewStoreNotFound(id)
 		}
 		if region.GetStorePeer(id) != nil {
 			continue
@@ -393,7 +394,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 	}
 
 	if c.cluster.GetStore(toStoreID) == nil {
-		return core.ErrStoreNotFound(toStoreID)
+		return core.NewStoreNotFound(toStoreID)
 	}
 	newPeer, err := c.cluster.AllocPeer(toStoreID)
 	if err != nil {
@@ -424,7 +425,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 	}
 
 	if c.cluster.GetStore(toStoreID) == nil {
-		return core.ErrStoreNotFound(toStoreID)
+		return core.NewStoreNotFound(toStoreID)
 	}
 	newPeer, err := c.cluster.AllocPeer(toStoreID)
 	if err != nil {
@@ -600,4 +601,23 @@ func (h *Handler) GetIncorrectNamespaceRegions() ([]*core.RegionInfo, error) {
 		return nil, ErrNotBootstrapped
 	}
 	return c.cachedCluster.GetRegionStatsByType(incorrectNamespace), nil
+}
+
+// FieldError connects an error to a particular field
+type FieldError struct {
+	error
+	field string
+}
+
+// ParseVarUint wraps strconv.ParseUint with detailed error reporting
+func ParseVarUint(vars map[string]string, varName string, base int, bitsize int) (uint64, error) {
+	str, ok := vars[varName]
+	if !ok {
+		return 0, FieldError{field: varName, error: fmt.Errorf("field %s not present", varName)}
+	}
+	parsed, err := strconv.ParseUint(str, base, bitsize)
+	if err == nil {
+		return parsed, nil
+	}
+	return parsed, FieldError{field: varName, error: err}
 }

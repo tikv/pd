@@ -131,22 +131,6 @@ func newStoreHandler(svr *server.Server, rd *render.Render) *storeHandler {
 	}
 }
 
-func (h *storeHandler) errorResp(w http.ResponseWriter, err error) {
-	if err == nil {
-		// TODO: log this condition
-		h.rd.JSON(w, http.StatusInternalServerError, "nil error")
-		return
-	}
-	if errCode, ok := errors.Cause(err).(errcode.ErrorCode); ok {
-		w.Header().Set("Tidb-Error-Code", string(errCode.Code()))
-		jsonData := errcode.JSONFormat{Code: errCode.Code(), Data: errCode, Msg: errCode.Error()}
-		h.rd.JSON(w, errCode.HTTPCode(), jsonData)
-	} else {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
-	}
-	return
-}
-
 func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
@@ -175,15 +159,14 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
+		errorResp(h.rd, w, errcode.NewInternalError(server.ErrNotBootstrapped))
 		return
 	}
 
 	vars := mux.Vars(r)
-	storeIDStr := vars["id"]
-	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
+	storeID, err := server.ParseVarUint(vars, "id", 10, 64)
 	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		errorResp(h.rd, w, errcode.NewInvalidInput(err))
 		return
 	}
 
@@ -195,7 +178,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		h.errorResp(w, err)
+		errorResp(h.rd, w, err)
 		return
 	}
 
