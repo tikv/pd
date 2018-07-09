@@ -11,18 +11,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package errcode is designed to create standardized API error codes.
-// The goal is that clients can reliably check against immutable error codes
+// Package errcode facilitates standardized API error codes.
+// The goal is that clients can reliably understand errors by checking against immutable error codes
+// A RegisteredCode should never be modified once committed (and released for use by clients).
+// Instead a new RegisteredCode should be created.
 //
-// Two approaches can be takend
-// 1) centralized: define all errors in one module
-// 2) modular: define errors where they occur
+// Note that the error codes are strings.
+// Integer error codes have extensibility issues (branches using the same numbers, etc).
 //
-// The centralized approach helps organize information.
-// All errors can be found in one file, and changes can be carefully reviewed.
-// The downside of centralized is the potential need to import types from other packages.
+// This package is designed to have few opinions and be a starting point for how you want to do errors.
+// The only requirement is to satisfy the ErrorCode interface (see documentation of ErrCode).
 //
-// A RegisteredCode should never be modified once committed (and released)
+// A few generic error codes are provided here.
+// You are encouraged to create your own application customized error codes rather than just using generic errors.
+//
+// See JSONFormat for an opinion on how to send back error information to a client.
+// Note that this includes a body of response data (the "data field") with more detailed and structured information.
+// This package provides no help on defining conventions, versioning, etc for that data.
 package errcode
 
 import (
@@ -47,12 +52,36 @@ const (
 	NotFoundCode RegisteredCode = "missing"
 )
 
-// ErrorCode is an interface that allows error codes to be defined without importing this package or
-// being forced to use a particular struct such as CodedError.
+// ErrorCode is the interface that ties an error and RegisteredCode together.
 //
 // Note that there are two additional interfaces (HasHTTPCode and HasClientData) that can be defined by an ErrorCode
 // To further customize behavior
 // For example, internalError implements HasHTTPCode to change it to a 500.
+//
+// ErrorCode allows error codes to be defined without importing this package or
+// being forced to use a particular struct such as CodedError.
+// CodedError is nice for generic errors that wrap many different code errors.
+// Please see the docs for CodedError.
+// For an application specific error with a 1:1 mapping between a go error structure and a RegisteredCode,
+// You probably want to use this interface directly. Example:
+//
+/*
+const PathBlockedCode RegisteredCode = "path.state.blocked"
+
+type PathBlocked struct {
+	start     uint64 `json:"start"`
+	end       uint64 `json:"end"`
+	obstacle  uint64 `json:"end"`
+}
+
+func (e PathBlocked) Error() string {
+	return fmt.Sprintf("The path %d -> %d has obstacle %d", e.start, e.end, e.obstacle)
+}
+
+func (e PathBlocked) Code() RegisteredCode {
+	return PathBlockedCode
+}
+*/
 type ErrorCode interface {
 	Error() string // The Error interface
 	Code() RegisteredCode
@@ -106,12 +135,12 @@ func NewJSONFormat(errCode ErrorCode) JSONFormat {
 	return JSONFormat{Code: errCode.Code(), Data: data, Msg: errCode.Error()}
 }
 
-// CodedError is a convenience to attach a code to an error.
+// CodedError. It is a convenience to attach a code to an error and already satisfy the ErrorCode interface.
 // If the error is a struct, that struct will get preseneted as data to the client.
 //
 // To override the http code or the data representation or just for clearer documentation,
 // you are encouraged to wrap CodeError with your own struct that inherits it.
-// Look at the implementation of invalidInput and internalError
+// Look at the implementation of invalidInput, internalError, and notFound.
 type CodedError struct {
 	RegisteredCode RegisteredCode
 	Err            error
