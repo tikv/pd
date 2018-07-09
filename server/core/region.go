@@ -39,15 +39,15 @@ func HealthRegion() RegionOption {
 // RegionInfo records detail region info.
 type RegionInfo struct {
 	*metapb.Region
-	Learners        []*metapb.Peer
-	Voters          []*metapb.Peer
-	Leader          *metapb.Peer
-	DownPeers       []*pdpb.PeerStats
-	PendingPeers    []*metapb.Peer
-	WrittenBytes    uint64
-	ReadBytes       uint64
-	ApproximateSize int64
-	ApproximateRows int64
+	Learners             []*metapb.Peer
+	Voters               []*metapb.Peer
+	Leader               *metapb.Peer
+	DownPeers            []*pdpb.PeerStats
+	PendingPeers         []*metapb.Peer
+	WrittenBytes         uint64
+	ReadBytes            uint64
+	ApproximateSize      int64
+	ApproximateWriteKeys int64
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -90,14 +90,14 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 	}
 
 	region := &RegionInfo{
-		Region:          heartbeat.GetRegion(),
-		Leader:          heartbeat.GetLeader(),
-		DownPeers:       heartbeat.GetDownPeers(),
-		PendingPeers:    heartbeat.GetPendingPeers(),
-		WrittenBytes:    heartbeat.GetBytesWritten(),
-		ReadBytes:       heartbeat.GetBytesRead(),
-		ApproximateSize: int64(regionSize),
-		ApproximateRows: int64(heartbeat.GetApproximateRows()),
+		Region:               heartbeat.GetRegion(),
+		Leader:               heartbeat.GetLeader(),
+		DownPeers:            heartbeat.GetDownPeers(),
+		PendingPeers:         heartbeat.GetPendingPeers(),
+		WrittenBytes:         heartbeat.GetBytesWritten(),
+		ReadBytes:            heartbeat.GetBytesRead(),
+		ApproximateSize:      int64(regionSize),
+		ApproximateWriteKeys: int64(heartbeat.GetApproximateWriteKeys()),
 	}
 
 	classifyVoterAndLearner(region)
@@ -116,14 +116,14 @@ func (r *RegionInfo) Clone() *RegionInfo {
 	}
 
 	region := &RegionInfo{
-		Region:          proto.Clone(r.Region).(*metapb.Region),
-		Leader:          proto.Clone(r.Leader).(*metapb.Peer),
-		DownPeers:       downPeers,
-		PendingPeers:    pendingPeers,
-		WrittenBytes:    r.WrittenBytes,
-		ReadBytes:       r.ReadBytes,
-		ApproximateSize: r.ApproximateSize,
-		ApproximateRows: r.ApproximateRows,
+		Region:               proto.Clone(r.Region).(*metapb.Region),
+		Leader:               proto.Clone(r.Leader).(*metapb.Peer),
+		DownPeers:            downPeers,
+		PendingPeers:         pendingPeers,
+		WrittenBytes:         r.WrittenBytes,
+		ReadBytes:            r.ReadBytes,
+		ApproximateSize:      r.ApproximateSize,
+		ApproximateWriteKeys: r.ApproximateWriteKeys,
 	}
 
 	classifyVoterAndLearner(region)
@@ -346,10 +346,10 @@ type HotRegionsStat struct {
 
 // regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.
 type regionMap struct {
-	m         map[uint64]*regionEntry
-	ids       []uint64
-	totalSize int64
-	totalRows int64
+	m              map[uint64]*regionEntry
+	ids            []uint64
+	totalSize      int64
+	totalWriteKeys int64
 }
 
 type regionEntry struct {
@@ -384,7 +384,7 @@ func (rm *regionMap) Get(id uint64) *RegionInfo {
 func (rm *regionMap) Put(region *RegionInfo) {
 	if old, ok := rm.m[region.GetId()]; ok {
 		rm.totalSize += region.ApproximateSize - old.ApproximateSize
-		rm.totalRows += region.ApproximateRows - old.ApproximateRows
+		rm.totalWriteKeys += region.ApproximateWriteKeys - old.ApproximateWriteKeys
 		old.RegionInfo = region
 		return
 	}
@@ -394,7 +394,7 @@ func (rm *regionMap) Put(region *RegionInfo) {
 	}
 	rm.ids = append(rm.ids, region.GetId())
 	rm.totalSize += region.ApproximateSize
-	rm.totalRows += region.ApproximateRows
+	rm.totalWriteKeys += region.ApproximateWriteKeys
 }
 
 func (rm *regionMap) RandomRegion() *RegionInfo {
@@ -416,7 +416,7 @@ func (rm *regionMap) Delete(id uint64) {
 		delete(rm.m, id)
 		rm.ids = rm.ids[:len-1]
 		rm.totalSize -= old.ApproximateSize
-		rm.totalRows -= old.ApproximateRows
+		rm.totalWriteKeys -= old.ApproximateWriteKeys
 	}
 }
 
@@ -688,26 +688,26 @@ func (r *RegionsInfo) GetAverageRegionSize() int64 {
 
 // RegionStats records a list of regions' statistics and distribution status.
 type RegionStats struct {
-	Count            int              `json:"count"`
-	EmptyCount       int              `json:"empty_count"`
-	StorageSize      int64            `json:"storage_size"`
-	StorageRows      int64            `json:"storage_rows"`
-	StoreLeaderCount map[uint64]int   `json:"store_leader_count"`
-	StorePeerCount   map[uint64]int   `json:"store_peer_count"`
-	StoreLeaderSize  map[uint64]int64 `json:"store_leader_size"`
-	StoreLeaderRows  map[uint64]int64 `json:"store_leader_rows"`
-	StorePeerSize    map[uint64]int64 `json:"store_peer_size"`
-	StorePeerRows    map[uint64]int64 `json:"store_peer_rows"`
+	Count                int              `json:"count"`
+	EmptyCount           int              `json:"empty_count"`
+	StorageSize          int64            `json:"storage_size"`
+	StorageWriteKeys     int64            `json:"storage_write_keys"`
+	StoreLeaderCount     map[uint64]int   `json:"store_leader_count"`
+	StorePeerCount       map[uint64]int   `json:"store_peer_count"`
+	StoreLeaderSize      map[uint64]int64 `json:"store_leader_size"`
+	StoreLeaderWriteKeys map[uint64]int64 `json:"store_leader_write_keys"`
+	StorePeerSize        map[uint64]int64 `json:"store_peer_size"`
+	StorePeerWriteKeys   map[uint64]int64 `json:"store_peer_write_keys"`
 }
 
 func newRegionStats() *RegionStats {
 	return &RegionStats{
-		StoreLeaderCount: make(map[uint64]int),
-		StorePeerCount:   make(map[uint64]int),
-		StoreLeaderSize:  make(map[uint64]int64),
-		StoreLeaderRows:  make(map[uint64]int64),
-		StorePeerSize:    make(map[uint64]int64),
-		StorePeerRows:    make(map[uint64]int64),
+		StoreLeaderCount:     make(map[uint64]int),
+		StorePeerCount:       make(map[uint64]int),
+		StoreLeaderSize:      make(map[uint64]int64),
+		StoreLeaderWriteKeys: make(map[uint64]int64),
+		StorePeerSize:        make(map[uint64]int64),
+		StorePeerWriteKeys:   make(map[uint64]int64),
 	}
 }
 
@@ -718,16 +718,16 @@ func (s *RegionStats) Observe(r *RegionInfo) {
 		s.EmptyCount++
 	}
 	s.StorageSize += r.ApproximateSize
-	s.StorageRows += r.ApproximateRows
+	s.StorageWriteKeys += r.ApproximateWriteKeys
 	if r.Leader != nil {
 		s.StoreLeaderCount[r.Leader.GetStoreId()]++
 		s.StoreLeaderSize[r.Leader.GetStoreId()] += r.ApproximateSize
-		s.StoreLeaderRows[r.Leader.GetStoreId()] += r.ApproximateRows
+		s.StoreLeaderWriteKeys[r.Leader.GetStoreId()] += r.ApproximateWriteKeys
 	}
 	for _, p := range r.Peers {
 		s.StorePeerCount[p.GetStoreId()]++
 		s.StorePeerSize[p.GetStoreId()] += r.ApproximateSize
-		s.StorePeerRows[p.GetStoreId()] += r.ApproximateRows
+		s.StorePeerWriteKeys[p.GetStoreId()] += r.ApproximateWriteKeys
 	}
 }
 

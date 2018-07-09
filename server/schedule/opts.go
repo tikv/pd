@@ -34,7 +34,7 @@ type Options interface {
 	GetMaxPendingPeerCount() uint64
 	GetMaxStoreDownTime() time.Duration
 	GetMaxMergeRegionSize() uint64
-	GetMaxMergeRegionRows() uint64
+	GetMaxMergeRegionWriteKeys() uint64
 	GetSplitMergeInterval() time.Duration
 
 	GetMaxReplicas() int

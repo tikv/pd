@@ -26,4 +26,4 @@
 
 [[constraint]]
   name = "github.com/pingcap/kvproto"
-  branch = "master"
+  branch = "pdpb/approximate_write_keys"

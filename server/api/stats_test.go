@@ -62,9 +62,9 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 					{Id: 103, StoreId: 3},
 				},
 			},
-			Leader:          &metapb.Peer{Id: 101, StoreId: 1},
-			ApproximateSize: 100,
-			ApproximateRows: 50,
+			Leader:               &metapb.Peer{Id: 101, StoreId: 1},
+			ApproximateSize:      100,
+			ApproximateWriteKeys: 50,
 		},
 		{
 			Region: &metapb.Region{
@@ -77,9 +77,9 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 					{Id: 106, StoreId: 5},
 				},
 			},
-			Leader:          &metapb.Peer{Id: 105, StoreId: 4},
-			ApproximateSize: 200,
-			ApproximateRows: 150,
+			Leader:               &metapb.Peer{Id: 105, StoreId: 4},
+			ApproximateSize:      200,
+			ApproximateWriteKeys: 150,
 		},
 		{
 			Region: &metapb.Region{
@@ -91,9 +91,9 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 					{Id: 107, StoreId: 5},
 				},
 			},
-			Leader:          &metapb.Peer{Id: 107, StoreId: 5},
-			ApproximateSize: 1,
-			ApproximateRows: 1,
+			Leader:               &metapb.Peer{Id: 107, StoreId: 5},
+			ApproximateSize:      1,
+			ApproximateWriteKeys: 1,
 		},
 		{
 			Region: &metapb.Region{
@@ -104,9 +104,9 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 					{Id: 108, StoreId: 4},
 				},
 			},
-			Leader:          &metapb.Peer{Id: 108, StoreId: 4},
-			ApproximateSize: 50,
-			ApproximateRows: 20,
+			Leader:               &metapb.Peer{Id: 108, StoreId: 4},
+			ApproximateSize:      50,
+			ApproximateWriteKeys: 20,
 		},
 	}
 
@@ -122,16 +122,16 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	// 4      ["x", "")   50    20                   	   L
 
 	statsAll := &core.RegionStats{
-		Count:            4,
-		EmptyCount:       1,
-		StorageSize:      351,
-		StorageRows:      221,
-		StoreLeaderCount: map[uint64]int{1: 1, 4: 2, 5: 1},
-		StorePeerCount:   map[uint64]int{1: 3, 2: 1, 3: 1, 4: 2, 5: 2},
-		StoreLeaderSize:  map[uint64]int64{1: 100, 4: 250, 5: 1},
-		StoreLeaderRows:  map[uint64]int64{1: 50, 4: 170, 5: 1},
-		StorePeerSize:    map[uint64]int64{1: 301, 2: 100, 3: 100, 4: 250, 5: 201},
-		StorePeerRows:    map[uint64]int64{1: 201, 2: 50, 3: 50, 4: 170, 5: 151},
+		Count:                4,
+		EmptyCount:           1,
+		StorageSize:          351,
+		StorageWriteKeys:     221,
+		StoreLeaderCount:     map[uint64]int{1: 1, 4: 2, 5: 1},
+		StorePeerCount:       map[uint64]int{1: 3, 2: 1, 3: 1, 4: 2, 5: 2},
+		StoreLeaderSize:      map[uint64]int64{1: 100, 4: 250, 5: 1},
+		StoreLeaderWriteKeys: map[uint64]int64{1: 50, 4: 170, 5: 1},
+		StorePeerSize:        map[uint64]int64{1: 301, 2: 100, 3: 100, 4: 250, 5: 201},
+		StorePeerWriteKeys:   map[uint64]int64{1: 201, 2: 50, 3: 50, 4: 170, 5: 151},
 	}
 	res, err := http.Get(statsURL)
 	c.Assert(err, IsNil)
@@ -141,16 +141,16 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	c.Assert(stats, DeepEquals, statsAll)
 
 	stats23 := &core.RegionStats{
-		Count:            2,
-		EmptyCount:       1,
-		StorageSize:      201,
-		StorageRows:      151,
-		StoreLeaderCount: map[uint64]int{4: 1, 5: 1},
-		StorePeerCount:   map[uint64]int{1: 2, 4: 1, 5: 2},
-		StoreLeaderSize:  map[uint64]int64{4: 200, 5: 1},
-		StoreLeaderRows:  map[uint64]int64{4: 150, 5: 1},
-		StorePeerSize:    map[uint64]int64{1: 201, 4: 200, 5: 201},
-		StorePeerRows:    map[uint64]int64{1: 151, 4: 150, 5: 151},
+		Count:                2,
+		EmptyCount:           1,
+		StorageSize:          201,
+		StorageWriteKeys:     151,
+		StoreLeaderCount:     map[uint64]int{4: 1, 5: 1},
+		StorePeerCount:       map[uint64]int{1: 2, 4: 1, 5: 2},
+		StoreLeaderSize:      map[uint64]int64{4: 200, 5: 1},
+		StoreLeaderWriteKeys: map[uint64]int64{4: 150, 5: 1},
+		StorePeerSize:        map[uint64]int64{1: 201, 4: 200, 5: 201},
+		StorePeerWriteKeys:   map[uint64]int64{1: 151, 4: 150, 5: 151},
 	}
 	args := fmt.Sprintf("?start_key=%s&end_key=%s", url.QueryEscape("\x01\x02"), url.QueryEscape("xyz\x00\x00"))
 	res, err = http.Get(statsURL + args)
