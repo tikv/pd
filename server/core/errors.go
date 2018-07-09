@@ -1,18 +1,20 @@
-// Package errcode defines error codes
-// This file defines PD specific error codes.
+// Package core defines core characteristics of the server.
+// This file uses the errcode packate to define PD specific error codes.
 // Probably this should be a different package.
-package errcode
+package core
 
 import (
 	"fmt"
 	"net/http"
+
+	"github.com/pingcap/pd/server/error_code"
 )
 
 const (
 	// StoreTombstonedCode is an invalid operation was attempted on a store which is in a removed state.
-	StoreTombstonedCode RegisteredCode = "store.state.tombstoned"
+	StoreTombstonedCode errcode.RegisteredCode = "store.state.tombstoned"
 	// StoreBlockedCode is an error due to requesting an operation that is invalid due to a store being in a blocked state
-	StoreBlockedCode RegisteredCode = "store.state.blocked"
+	StoreBlockedCode errcode.RegisteredCode = "store.state.blocked"
 )
 
 // StoreTombstoned is an invalid operation was attempted on a store which is in a removed state.
@@ -25,16 +27,16 @@ func (e StoreTombstoned) Error() string {
 	return fmt.Sprintf("The store %020d has been removed and the operation %s is invalid", e.StoreID, e.Operation)
 }
 
-var _ ErrorCode = (*StoreTombstoned)(nil)   // assert implements interface
-var _ HasHTTPCode = (*StoreTombstoned)(nil) // assert implements interface
+var _ errcode.ErrorCode = (*StoreTombstoned)(nil)   // assert implements interface
+var _ errcode.HasHTTPCode = (*StoreTombstoned)(nil) // assert implements interface
 
 // GetHTTPCode returns 410
-func (e StoreTombstoned) getHTTPCode() int {
+func (e StoreTombstoned) GetHTTPCode() int {
 	return http.StatusGone
 }
 
 // Code returns StoreTombstonedCode
-func (e StoreTombstoned) Code() RegisteredCode {
+func (e StoreTombstoned) Code() errcode.RegisteredCode {
 	return StoreTombstonedCode
 }
 
@@ -47,9 +49,9 @@ func (e StoreBlocked) Error() string {
 	return fmt.Sprintf("store %v is blocked", e.StoreID)
 }
 
-var _ ErrorCode = (*StoreBlocked)(nil) // assert implements interface
+var _ errcode.ErrorCode = (*StoreBlocked)(nil) // assert implements interface
 
 // Code returns StoreBlockedCode
-func (e StoreBlocked) Code() RegisteredCode {
+func (e StoreBlocked) Code() errcode.RegisteredCode {
 	return StoreBlockedCode
 }

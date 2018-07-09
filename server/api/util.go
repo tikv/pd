@@ -40,7 +40,7 @@ func errorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	}
 	if errCode, ok := errors.Cause(err).(errcode.ErrorCode); ok {
 		w.Header().Set("TiDB-Error-Code", string(errCode.Code()))
-		rd.JSON(w, errcode.GetHTTPCode(errCode), errcode.NewJSONFormat(errCode))
+		rd.JSON(w, errcode.HTTPCode(errCode), errcode.NewJSONFormat(errCode))
 	} else {
 		rd.JSON(w, http.StatusBadRequest, err.Error())
 	}

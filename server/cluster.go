@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/error_code"
 	"github.com/pingcap/pd/server/namespace"
 	log "github.com/sirupsen/logrus"
 )
@@ -343,7 +342,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	}
 
 	if store.IsTombstone() {
-		return errcode.StoreTombstoned{StoreID: storeID, Operation: "remove"}
+		return core.StoreTombstoned{StoreID: storeID, Operation: "remove"}
 	}
 
 	store.State = metapb.StoreState_Offline
