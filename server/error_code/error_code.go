@@ -34,13 +34,16 @@ import (
 type RegisteredCode string
 
 const (
-	// InternalErrorCode means the operation placed the system is in an inconsistent or unrecoverable state
+	// InternalErrorCode means the operation placed the system is in an inconsistent or unrecoverable state.
 	// Essentially a handled panic.
 	// This is exactly the same as a HTTP 500, so it is not necessary to send this code over HTTP.
 	InternalErrorCode RegisteredCode = "internal"
-	// InvalidInputCode is a validation failure of an input
-	InvalidInputCode RegisteredCode = "input.invalid"
-	// NotFoundCode indicates a resource is missing
+	// InvalidInputCode is a validation failure of an input.
+	// The response will indicate the exact input issue.
+	InvalidInputCode RegisteredCode = "input"
+	// NotFoundCode indicates a resource is missing.
+	// The response can indicate what resource is missing.
+	// However, when a single resource is requested, that may be implicit.
 	NotFoundCode RegisteredCode = "missing"
 )
 
@@ -49,7 +52,7 @@ const (
 //
 // Note that there are two additional interfaces (HasHTTPCode and HasClientData) that can be defined by an ErrorCode
 // To further customize behavior
-// For example, InternalError implements HasHTTPCode to change it to a 500.
+// For example, internalError implements HasHTTPCode to change it to a 500.
 type ErrorCode interface {
 	Error() string // The Error interface
 	Code() RegisteredCode
@@ -108,7 +111,7 @@ func NewJSONFormat(errCode ErrorCode) JSONFormat {
 //
 // To override the http code or the data representation or just for clearer documentation,
 // you are encouraged to wrap CodeError with your own struct that inherits it.
-// Look at the implementation of InvalidInput and InternalError
+// Look at the implementation of invalidInput and internalError
 type CodedError struct {
 	RegisteredCode RegisteredCode
 	Err            error
@@ -150,44 +153,44 @@ func errorData(err error) interface{} {
 	return err
 }
 
-// InvalidInput gives the code InvalidInputCode
-type InvalidInput struct{ CodedError }
+// invalidInput gives the code InvalidInputCode
+type invalidInput struct{ CodedError }
 
-// NewInvalidInput creates an error code of InvalidInputCode
-func NewInvalidInput(err error) InvalidInput {
-	return InvalidInput{CodedError{RegisteredCode: InvalidInputCode, Err: err}}
+// NewInvalidInput creates an invalidInput with error code of InvalidInputCode
+func NewInvalidInput(err error) ErrorCode {
+	return invalidInput{CodedError{RegisteredCode: InvalidInputCode, Err: err}}
 }
 
-var _ ErrorCode = (*InvalidInput)(nil) // assert implements interface
+var _ ErrorCode = (*invalidInput)(nil) // assert implements interface
 
-// InternalError gives the code InvalidInputCode
-type InternalError struct{ CodedError }
+// internalError gives the code InvalidInputCode
+type internalError struct{ CodedError }
 
 // getHTTPCode returns 500
-func (e InternalError) getHTTPCode() int {
+func (e internalError) getHTTPCode() int {
 	return http.StatusInternalServerError
 }
 
-// NewInternalError creates an error code of InternalErrorCode
-func NewInternalError(err error) InternalError {
-	return InternalError{CodedError{RegisteredCode: InternalErrorCode, Err: err}}
+// NewInternalError creates an internalError with error code InternalErrorCode
+func NewInternalError(err error) ErrorCode {
+	return internalError{CodedError{RegisteredCode: InternalErrorCode, Err: err}}
 }
 
-var _ ErrorCode = (*InternalError)(nil)   // assert implements interface
-var _ HasHTTPCode = (*InternalError)(nil) // assert implements interface
+var _ ErrorCode = (*internalError)(nil)   // assert implements interface
+var _ HasHTTPCode = (*internalError)(nil) // assert implements interface
 
-// NotFound gives the code NotFoundCode
-type NotFound struct{ CodedError }
+// notFound gives the code NotFoundCode
+type notFound struct{ CodedError }
 
 // HTTPCode returns 404
-func (e NotFound) getHTTPCode() int {
+func (e notFound) getHTTPCode() int {
 	return http.StatusNotFound
 }
 
-// NewNotFound creates an error code of InternalErrorCode
-func NewNotFound(err error) NotFound {
-	return NotFound{CodedError{RegisteredCode: NotFoundCode, Err: err}}
+// NewNotFound creates a notFound with error code of InternalErrorCode
+func NewNotFound(err error) ErrorCode {
+	return notFound{CodedError{RegisteredCode: NotFoundCode, Err: err}}
 }
 
-var _ ErrorCode = (*NotFound)(nil)   // assert implements interface
-var _ HasHTTPCode = (*NotFound)(nil) // assert implements interface
+var _ ErrorCode = (*notFound)(nil)   // assert implements interface
+var _ HasHTTPCode = (*notFound)(nil) // assert implements interface
