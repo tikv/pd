@@ -30,41 +30,41 @@ const (
 	StoreBlockedCode errcode.RegisteredCode = "store.state.blocked"
 )
 
-// StoreTombstoned is an invalid operation was attempted on a store which is in a removed state.
-type StoreTombstoned struct {
+// StoreTombstonedErr is an invalid operation was attempted on a store which is in a removed state.
+type StoreTombstonedErr struct {
 	StoreID   uint64 `json:"storeId"`
 	Operation string `json:"operation"`
 }
 
-func (e StoreTombstoned) Error() string {
+func (e StoreTombstonedErr) Error() string {
 	return fmt.Sprintf("The store %020d has been removed and the operation %s is invalid", e.StoreID, e.Operation)
 }
 
-var _ errcode.ErrorCode = (*StoreTombstoned)(nil)   // assert implements interface
-var _ errcode.HasHTTPCode = (*StoreTombstoned)(nil) // assert implements interface
+var _ errcode.ErrorCode = (*StoreTombstonedErr)(nil)   // assert implements interface
+var _ errcode.HasHTTPCode = (*StoreTombstonedErr)(nil) // assert implements interface
 
 // GetHTTPCode returns 410
-func (e StoreTombstoned) GetHTTPCode() int {
+func (e StoreTombstonedErr) GetHTTPCode() int {
 	return http.StatusGone
 }
 
 // Code returns StoreTombstonedCode
-func (e StoreTombstoned) Code() errcode.RegisteredCode {
+func (e StoreTombstonedErr) Code() errcode.RegisteredCode {
 	return StoreTombstonedCode
 }
 
-// StoreBlocked has a Code() of StoreBlockedCode
-type StoreBlocked struct {
+// StoreBlockedErr has a Code() of StoreBlockedCode
+type StoreBlockedErr struct {
 	StoreID uint64
 }
 
-func (e StoreBlocked) Error() string {
+func (e StoreBlockedErr) Error() string {
 	return fmt.Sprintf("store %v is blocked", e.StoreID)
 }
 
-var _ errcode.ErrorCode = (*StoreBlocked)(nil) // assert implements interface
+var _ errcode.ErrorCode = (*StoreBlockedErr)(nil) // assert implements interface
 
 // Code returns StoreBlockedCode
-func (e StoreBlocked) Code() errcode.RegisteredCode {
+func (e StoreBlockedErr) Code() errcode.RegisteredCode {
 	return StoreBlockedCode
 }

@@ -342,7 +342,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 	// Add missing peers.
 	for id := range storeIDs {
 		if c.cluster.GetStore(id) == nil {
-			return core.NewStoreNotFound(id)
+			return core.NewStoreNotFoundErr(id)
 		}
 		if region.GetStorePeer(id) != nil {
 			continue
@@ -394,7 +394,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 	}
 
 	if c.cluster.GetStore(toStoreID) == nil {
-		return core.NewStoreNotFound(toStoreID)
+		return core.NewStoreNotFoundErr(toStoreID)
 	}
 	newPeer, err := c.cluster.AllocPeer(toStoreID)
 	if err != nil {
@@ -425,7 +425,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 	}
 
 	if c.cluster.GetStore(toStoreID) == nil {
-		return core.NewStoreNotFound(toStoreID)
+		return core.NewStoreNotFoundErr(toStoreID)
 	}
 	newPeer, err := c.cluster.AllocPeer(toStoreID)
 	if err != nil {

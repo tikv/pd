@@ -159,14 +159,14 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		errorResp(h.rd, w, errcode.NewInternalError(server.ErrNotBootstrapped))
+		errorResp(h.rd, w, errcode.NewInternalErr(server.ErrNotBootstrapped))
 		return
 	}
 
 	vars := mux.Vars(r)
 	storeID, err := server.ParseVarUint(vars, "id", 10, 64)
 	if err != nil {
-		errorResp(h.rd, w, errcode.NewInvalidInput(err))
+		errorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 		return
 	}
 

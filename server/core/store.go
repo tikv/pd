@@ -312,17 +312,17 @@ type StoreHotRegionInfos struct {
 // StoreHotRegionsStat used to record the hot region statistics group by store
 type StoreHotRegionsStat map[uint64]*HotRegionsStat
 
-type errStoreNotFound struct {
+type storeNotFoundErr struct {
 	storeID uint64
 }
 
-func (e errStoreNotFound) Error() string {
+func (e storeNotFoundErr) Error() string {
 	return fmt.Sprintf("store %v not found", e.storeID)
 }
 
-// NewStoreNotFound is for log of store not found
-func NewStoreNotFound(storeID uint64) errcode.ErrorCode {
-	return errcode.NewNotFound(errStoreNotFound{storeID})
+// NewStoreNotFoundErr is for log of store not found
+func NewStoreNotFoundErr(storeID uint64) errcode.ErrorCode {
+	return errcode.NewNotFoundErr(storeNotFoundErr{storeID})
 }
 
 // StoresInfo is a map of storeID to StoreInfo
@@ -356,10 +356,10 @@ func (s *StoresInfo) SetStore(store *StoreInfo) {
 func (s *StoresInfo) BlockStore(storeID uint64) error {
 	store, ok := s.stores[storeID]
 	if !ok {
-		return NewStoreNotFound(storeID)
+		return NewStoreNotFoundErr(storeID)
 	}
 	if store.IsBlocked() {
-		return StoreBlocked{StoreID: storeID}
+		return StoreBlockedErr{StoreID: storeID}
 	}
 	store.Block()
 	return nil
