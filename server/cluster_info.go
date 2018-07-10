@@ -621,6 +621,26 @@ func (c *clusterInfo) IsRaftLearnerEnabled() bool {
 	return c.opt.IsRaftLearnerEnabled()
 }
 
+func (c *clusterInfo) IsRemoveDownReplicaEnabled() bool {
+	return c.opt.IsRemoveDownReplicaEnabled()
+}
+
+func (c *clusterInfo) IsReplaceOfflineReplicaEnabled() bool {
+	return c.opt.IsReplaceOfflineReplicaEnabled()
+}
+
+func (c *clusterInfo) IsMakeUpReplicaEnabled() bool {
+	return c.opt.IsMakeUpReplicaEnabled()
+}
+
+func (c *clusterInfo) IsRemoveExtraReplicaEnabled() bool {
+	return c.opt.IsRemoveExtraReplicaEnabled()
+}
+
+func (c *clusterInfo) IsLocationReplacementEnabled() bool {
+	return c.opt.IsLocationReplacementEnabled()
+}
+
 func (c *clusterInfo) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
 	return c.opt.CheckLabelProperty(typ, labels)
 }

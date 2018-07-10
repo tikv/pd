@@ -496,6 +496,11 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	region := tc.GetRegion(1)
 	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 4)
 
+	// Disable make up replica feature.
+	opt.DisableMakeUpReplica = true
+	c.Assert(rc.Check(region), IsNil)
+	opt.DisableMakeUpReplica = false
+
 	// Test healthFilter.
 	// If store 4 is down, we add to store 3.
 	tc.SetStoreDown(4)
@@ -520,6 +525,12 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	peer3, _ := tc.AllocPeer(3)
 	region.AddPeer(peer3)
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
+
+	// Disable remove extra replica feature.
+	opt.DisableRemoveExtraReplica = true
+	c.Assert(rc.Check(region), IsNil)
+	opt.DisableRemoveExtraReplica = false
+
 	region.RemoveStorePeer(1)
 
 	// Peer in store 2 is down, remove it.
@@ -663,6 +674,10 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 
 	// Replace peer in store 1 with store 6 because it has a different rack.
 	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 1, 6)
+	// Disable locationReplacement feature.
+	opt.DisableLocationReplacement = true
+	c.Assert(rc.Check(region), IsNil)
+	opt.DisableLocationReplacement = false
 	peer6, _ := tc.AllocPeer(6)
 	region.AddPeer(peer6)
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
@@ -749,6 +764,35 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 	// If store4 is almost full, do not add peer on it.
 	tc.UpdateStorageRatio(4, 0.8, 0)
 	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 2)
+}
+
+func (s *testReplicaCheckerSuite) TestOpts(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	tc := schedule.NewMockCluster(opt)
+	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
+
+	tc.AddRegionStore(1, 100)
+	tc.AddRegionStore(2, 100)
+	tc.AddRegionStore(3, 100)
+	tc.AddRegionStore(4, 100)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	region := tc.GetRegion(1)
+	// Test remove down replica and replace offline replica.
+	tc.SetStoreDown(1)
+	region.DownPeers = []*pdpb.PeerStats{
+		{
+			Peer:        region.GetStorePeer(1),
+			DownSeconds: 24 * 60 * 60,
+		},
+	}
+	tc.SetStoreOffline(2)
+	// RemoveDownReplica has higher priority than replaceOfflineReplica.
+	testutil.CheckRemovePeer(c, rc.Check(region), 1)
+	opt.DisableRemoveDownReplica = true
+	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 2, 4)
+	opt.DisableReplaceOfflineReplica = true
+	c.Assert(rc.Check(region), IsNil)
 }
 
 var _ = Suite(&testMergeCheckerSuite{})
