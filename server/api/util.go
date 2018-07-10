@@ -28,10 +28,12 @@ import (
 	"github.com/unrolled/render"
 )
 
-// Respond to the client about the given error.
-// By default an error is assumed to be a 400 Bad Request
-// unless it is recognized as an ErrorCode
-// If the error is nil, this responds with a 500
+// Respond to the client about the given error, integrating with errcode.ErrorCode.
+//
+// Important: if the `err` is just an error and not an errcode.ErrorCode (given by errors.Cause),
+// then by default an error is assumed to be a 500 Internal Error.
+//
+// If the error is nil, this also responds with a 500 and logs at the error level.
 func errorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	if err == nil {
 		log.Errorf("nil given to errorResp")
@@ -42,7 +44,7 @@ func errorResp(rd *render.Render, w http.ResponseWriter, err error) {
 		w.Header().Set("TiDB-Error-Code", string(errCode.Code()))
 		rd.JSON(w, errcode.HTTPCode(errCode), errcode.NewJSONFormat(errCode))
 	} else {
-		rd.JSON(w, http.StatusBadRequest, err.Error())
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
 	return
 }
