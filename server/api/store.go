@@ -68,6 +68,15 @@ const (
 	downStateName    = "Down"
 )
 
+// parseIDUintRespondErr gets the id from the mux.Vars or returns a 400
+func parseIDUintRespondErr(vars map[string]string, rd *render.Render, w http.ResponseWriter) (uint64, error) {
+	storeID, err := apiutil.ParseVarUint(vars, "id", 10, 64)
+	if err != nil {
+		errorResp(rd, w, errcode.NewInvalidInputErr(err))
+	}
+	return storeID, err
+}
+
 func newStoreInfo(opt *server.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 	s := &StoreInfo{
 		Store: &MetaStore{
@@ -140,10 +149,8 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	storeIDStr := vars["id"]
-	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
+	storeID, err := parseIDUintRespondErr(vars, h.rd, w)
 	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -165,9 +172,8 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	storeID, err := apiutil.ParseVarUint(vars, "id", 10, 64)
+	storeID, err := parseIDUintRespondErr(vars, h.rd, w)
 	if err != nil {
-		errorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 		return
 	}
 
@@ -194,10 +200,8 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	storeIDStr := vars["id"]
-	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
+	storeID, err := parseIDUintRespondErr(vars, h.rd, w)
 	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -225,10 +229,8 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	storeIDStr := vars["id"]
-	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
+	storeID, err := parseIDUintRespondErr(vars, h.rd, w)
 	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -261,10 +263,8 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	storeIDStr := vars["id"]
-	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
+	storeID, err := parseIDUintRespondErr(vars, h.rd, w)
 	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
