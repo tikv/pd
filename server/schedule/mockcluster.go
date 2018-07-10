@@ -432,24 +432,29 @@ const (
 // MockSchedulerOptions is a mock of SchedulerOptions
 // which implements Options interface
 type MockSchedulerOptions struct {
-	RegionScheduleLimit   uint64
-	LeaderScheduleLimit   uint64
-	ReplicaScheduleLimit  uint64
-	MergeScheduleLimit    uint64
-	MaxSnapshotCount      uint64
-	MaxPendingPeerCount   uint64
-	MaxMergeRegionSize    uint64
-	MaxMergeRegionKeys    uint64
-	SplitMergeInterval    time.Duration
-	MaxStoreDownTime      time.Duration
-	MaxReplicas           int
-	LocationLabels        []string
-	HotRegionLowThreshold int
-	TolerantSizeRatio     float64
-	LowSpaceRatio         float64
-	HighSpaceRatio        float64
-	DisableLearner        bool
-	LabelProperties       map[string][]*metapb.StoreLabel
+	RegionScheduleLimit          uint64
+	LeaderScheduleLimit          uint64
+	ReplicaScheduleLimit         uint64
+	MergeScheduleLimit           uint64
+	MaxSnapshotCount             uint64
+	MaxPendingPeerCount          uint64
+	MaxMergeRegionSize           uint64
+	MaxMergeRegionKeys           uint64
+	SplitMergeInterval           time.Duration
+	MaxStoreDownTime             time.Duration
+	MaxReplicas                  int
+	LocationLabels               []string
+	HotRegionLowThreshold        int
+	TolerantSizeRatio            float64
+	LowSpaceRatio                float64
+	HighSpaceRatio               float64
+	DisableLearner               bool
+	DisableRemoveDownReplica     bool
+	DisableReplaceOfflineReplica bool
+	DisableMakeUpReplica         bool
+	DisableRemoveExtraReplica    bool
+	DisableLocationReplacement   bool
+	LabelProperties              map[string][]*metapb.StoreLabel
 }
 
 // NewMockSchedulerOptions creates a mock schedule option.
@@ -561,4 +566,29 @@ func (mso *MockSchedulerOptions) SetMaxReplicas(replicas int) {
 // IsRaftLearnerEnabled mock method
 func (mso *MockSchedulerOptions) IsRaftLearnerEnabled() bool {
 	return !mso.DisableLearner
+}
+
+// IsRemoveDownReplicaEnabled mock method.
+func (mso *MockSchedulerOptions) IsRemoveDownReplicaEnabled() bool {
+	return !mso.DisableRemoveDownReplica
+}
+
+// IsReplaceOfflineReplicaEnabled mock method.
+func (mso *MockSchedulerOptions) IsReplaceOfflineReplicaEnabled() bool {
+	return !mso.DisableReplaceOfflineReplica
+}
+
+// IsMakeUpReplicaEnabled mock method.
+func (mso *MockSchedulerOptions) IsMakeUpReplicaEnabled() bool {
+	return !mso.DisableMakeUpReplica
+}
+
+// IsRemoveExtraReplicaEnabled mock method.
+func (mso *MockSchedulerOptions) IsRemoveExtraReplicaEnabled() bool {
+	return !mso.DisableRemoveExtraReplica
+}
+
+// IsLocationReplacementEnabled mock method.
+func (mso *MockSchedulerOptions) IsLocationReplacementEnabled() bool {
+	return !mso.DisableLocationReplacement
 }
