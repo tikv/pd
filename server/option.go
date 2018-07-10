@@ -148,8 +148,8 @@ func (o *scheduleOption) IsRemoveDownReplicaEnabled() bool {
 	return !o.load().DisableRemoveDownReplica
 }
 
-func (o *scheduleOption) IsMakeUpOfflineReplicaEnabled() bool {
-	return !o.load().DisableMakeUpOfflineReplica
+func (o *scheduleOption) IsReplaceOfflineReplicaEnabled() bool {
+	return !o.load().DisableReplaceOfflineReplica
 }
 
 func (o *scheduleOption) IsMakeUpReplicaEnabled() bool {

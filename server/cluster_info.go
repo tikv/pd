@@ -625,8 +625,8 @@ func (c *clusterInfo) IsRemoveDownReplicaEnabled() bool {
 	return c.opt.IsRemoveDownReplicaEnabled()
 }
 
-func (c *clusterInfo) IsMakeUpOfflineReplicaEnabled() bool {
-	return c.opt.IsMakeUpOfflineReplicaEnabled()
+func (c *clusterInfo) IsReplaceOfflineReplicaEnabled() bool {
+	return c.opt.IsReplaceOfflineReplicaEnabled()
 }
 
 func (c *clusterInfo) IsMakeUpReplicaEnabled() bool {

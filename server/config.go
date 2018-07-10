@@ -414,9 +414,9 @@ type ScheduleConfig struct {
 	// DisableRemoveDownReplica is the option to prevent replica checker from
 	// removing down replicas.
 	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string"`
-	// DisableMakeUpOfflineReplica is the option to prevent replica checker from
-	// making up offline replicas.
-	DisableMakeUpOfflineReplica bool `toml:"disable-make-up-offline-replica" json:"disable-make-up-offline-replica,string"`
+	// DisableReplaceOfflineReplica is the option to prevent replica checker from
+	// repalcing offline replicas.
+	DisableReplaceOfflineReplica bool `toml:"disable-replace-offline-replica" json:"disable-replace-offline-replica,string"`
 	// DisableMakeUpReplica is the option to prevent replica checker from making up
 	// replicas when replica count is less than expected.
 	DisableMakeUpReplica bool `toml:"disable-make-up-replica" json:"disable-make-up-replica,string"`
@@ -435,27 +435,27 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 	schedulers := make(SchedulerConfigs, len(c.Schedulers))
 	copy(schedulers, c.Schedulers)
 	return &ScheduleConfig{
-		MaxSnapshotCount:            c.MaxSnapshotCount,
-		MaxPendingPeerCount:         c.MaxPendingPeerCount,
-		MaxMergeRegionSize:          c.MaxMergeRegionSize,
-		MaxMergeRegionRows:          c.MaxMergeRegionRows,
-		SplitMergeInterval:          c.SplitMergeInterval,
-		PatrolRegionInterval:        c.PatrolRegionInterval,
-		MaxStoreDownTime:            c.MaxStoreDownTime,
-		LeaderScheduleLimit:         c.LeaderScheduleLimit,
-		RegionScheduleLimit:         c.RegionScheduleLimit,
-		ReplicaScheduleLimit:        c.ReplicaScheduleLimit,
-		MergeScheduleLimit:          c.MergeScheduleLimit,
-		TolerantSizeRatio:           c.TolerantSizeRatio,
-		LowSpaceRatio:               c.LowSpaceRatio,
-		HighSpaceRatio:              c.HighSpaceRatio,
-		DisableLearner:              c.DisableLearner,
-		DisableRemoveDownReplica:    c.DisableRemoveDownReplica,
-		DisableMakeUpOfflineReplica: c.DisableMakeUpOfflineReplica,
-		DisableMakeUpReplica:        c.DisableMakeUpReplica,
-		DisableRemoveExtraReplica:   c.DisableRemoveExtraReplica,
-		DisableLocationReplacement:  c.DisableLocationReplacement,
-		Schedulers:                  schedulers,
+		MaxSnapshotCount:             c.MaxSnapshotCount,
+		MaxPendingPeerCount:          c.MaxPendingPeerCount,
+		MaxMergeRegionSize:           c.MaxMergeRegionSize,
+		MaxMergeRegionRows:           c.MaxMergeRegionRows,
+		SplitMergeInterval:           c.SplitMergeInterval,
+		PatrolRegionInterval:         c.PatrolRegionInterval,
+		MaxStoreDownTime:             c.MaxStoreDownTime,
+		LeaderScheduleLimit:          c.LeaderScheduleLimit,
+		RegionScheduleLimit:          c.RegionScheduleLimit,
+		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
+		MergeScheduleLimit:           c.MergeScheduleLimit,
+		TolerantSizeRatio:            c.TolerantSizeRatio,
+		LowSpaceRatio:                c.LowSpaceRatio,
+		HighSpaceRatio:               c.HighSpaceRatio,
+		DisableLearner:               c.DisableLearner,
+		DisableRemoveDownReplica:     c.DisableRemoveDownReplica,
+		DisableReplaceOfflineReplica: c.DisableReplaceOfflineReplica,
+		DisableMakeUpReplica:         c.DisableMakeUpReplica,
+		DisableRemoveExtraReplica:    c.DisableRemoveExtraReplica,
+		DisableLocationReplacement:   c.DisableLocationReplacement,
+		Schedulers:                   schedulers,
 	}
 }
 

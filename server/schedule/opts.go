@@ -48,7 +48,7 @@ type Options interface {
 	IsRaftLearnerEnabled() bool
 
 	IsRemoveDownReplicaEnabled() bool
-	IsMakeUpOfflineReplicaEnabled() bool
+	IsReplaceOfflineReplicaEnabled() bool
 	IsMakeUpReplicaEnabled() bool
 	IsRemoveExtraReplicaEnabled() bool
 	IsLocationReplacementEnabled() bool

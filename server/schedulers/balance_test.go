@@ -778,7 +778,7 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
 	region := tc.GetRegion(1)
-	// Test remove down replica and make up offline replica.
+	// Test remove down replica and replace offline replica.
 	tc.SetStoreDown(1)
 	region.DownPeers = []*pdpb.PeerStats{
 		{
@@ -787,11 +787,11 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 		},
 	}
 	tc.SetStoreOffline(2)
-	// RemoveDownReplica has higher priority than MakeUpOfflineReplica.
+	// RemoveDownReplica has higher priority than replaceOfflineReplica.
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
 	opt.DisableRemoveDownReplica = true
 	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 2, 4)
-	opt.DisableMakeUpOfflineReplica = true
+	opt.DisableReplaceOfflineReplica = true
 	c.Assert(rc.Check(region), IsNil)
 }
 

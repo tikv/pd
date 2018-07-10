@@ -176,7 +176,7 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *Operator {
 }
 
 func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
-	if !r.cluster.IsMakeUpOfflineReplicaEnabled() {
+	if !r.cluster.IsReplaceOfflineReplicaEnabled() {
 		return nil
 	}
 
@@ -217,7 +217,7 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 		if err != nil {
 			return nil
 		}
-		return CreateMovePeerOperator("makeUpOfflineReplica", r.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+		return CreateMovePeerOperator("replaceOfflineReplica", r.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 	}
 
 	return nil
