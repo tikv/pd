@@ -155,7 +155,7 @@ func (e CodedError) Error() string {
 	return e.Err.Error()
 }
 
-// Code returns StoreTombstonedCode
+// Code returns the RegisteredCode field
 func (e CodedError) Code() RegisteredCode {
 	return e.RegisteredCode
 }
