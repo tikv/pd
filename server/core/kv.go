@@ -29,6 +29,7 @@ const (
 	clusterPath  = "raft"
 	configPath   = "config"
 	schedulePath = "schedule"
+	gcPath       = "gc"
 )
 
 const (
@@ -232,6 +233,33 @@ func (kv *KV) LoadRegions(regions *RegionsInfo) error {
 			return nil
 		}
 	}
+}
+
+// SaveGCSafePoint saves new GC safe point to KV.
+func (kv *KV) SaveGCSafePoint(safePoint uint64) error {
+	key := path.Join(gcPath, "safe_point")
+	value := strconv.FormatUint(safePoint, 16)
+	if err := kv.Save(key, value); err != nil {
+		return errors.Trace(err)
+	}
+	return nil
+}
+
+// LoadGCSafePoint loads current GC safe point from KV.
+func (kv *KV) LoadGCSafePoint() (uint64, error) {
+	key := path.Join(gcPath, "safe_point")
+	value, err := kv.Load(key)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+	if value == "" {
+		return 0, nil
+	}
+	safePoint, err := strconv.ParseUint(value, 16, 64)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+	return safePoint, nil
 }
 
 func (kv *KV) loadProto(key string, msg proto.Message) (bool, error) {
