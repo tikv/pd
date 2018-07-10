@@ -163,7 +163,7 @@ func (mc *MockCluster) AddLabelsStore(storeID uint64, regionCount int, labels ma
 func (mc *MockCluster) AddLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
 	regionInfo := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	regionInfo.ApproximateSize = 10
-	regionInfo.ApproximateWriteKeys = 10
+	regionInfo.ApproximateKeys = 10
 	mc.PutRegion(regionInfo)
 }
 
@@ -413,43 +413,43 @@ func (mc *MockCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabe
 }
 
 const (
-	defaultMaxReplicas             = 3
-	defaultMaxSnapshotCount        = 3
-	defaultMaxPendingPeerCount     = 16
-	defaultMaxMergeRegionSize      = 0
-	defaultMaxMergeRegionWriteKeys = 0
-	defaultSplitMergeInterval      = 0
-	defaultMaxStoreDownTime        = 30 * time.Minute
-	defaultLeaderScheduleLimit     = 4
-	defaultRegionScheduleLimit     = 4
-	defaultReplicaScheduleLimit    = 8
-	defaultMergeScheduleLimit      = 8
-	defaultTolerantSizeRatio       = 2.5
-	defaultLowSpaceRatio           = 0.8
-	defaultHighSpaceRatio          = 0.6
+	defaultMaxReplicas          = 3
+	defaultMaxSnapshotCount     = 3
+	defaultMaxPendingPeerCount  = 16
+	defaultMaxMergeRegionSize   = 0
+	defaultMaxMergeRegionKeys   = 0
+	defaultSplitMergeInterval   = 0
+	defaultMaxStoreDownTime     = 30 * time.Minute
+	defaultLeaderScheduleLimit  = 4
+	defaultRegionScheduleLimit  = 4
+	defaultReplicaScheduleLimit = 8
+	defaultMergeScheduleLimit   = 8
+	defaultTolerantSizeRatio    = 2.5
+	defaultLowSpaceRatio        = 0.8
+	defaultHighSpaceRatio       = 0.6
 )
 
 // MockSchedulerOptions is a mock of SchedulerOptions
 // which implements Options interface
 type MockSchedulerOptions struct {
-	RegionScheduleLimit     uint64
-	LeaderScheduleLimit     uint64
-	ReplicaScheduleLimit    uint64
-	MergeScheduleLimit      uint64
-	MaxSnapshotCount        uint64
-	MaxPendingPeerCount     uint64
-	MaxMergeRegionSize      uint64
-	MaxMergeRegionWriteKeys uint64
-	SplitMergeInterval      time.Duration
-	MaxStoreDownTime        time.Duration
-	MaxReplicas             int
-	LocationLabels          []string
-	HotRegionLowThreshold   int
-	TolerantSizeRatio       float64
-	LowSpaceRatio           float64
-	HighSpaceRatio          float64
-	DisableLearner          bool
-	LabelProperties         map[string][]*metapb.StoreLabel
+	RegionScheduleLimit   uint64
+	LeaderScheduleLimit   uint64
+	ReplicaScheduleLimit  uint64
+	MergeScheduleLimit    uint64
+	MaxSnapshotCount      uint64
+	MaxPendingPeerCount   uint64
+	MaxMergeRegionSize    uint64
+	MaxMergeRegionKeys    uint64
+	SplitMergeInterval    time.Duration
+	MaxStoreDownTime      time.Duration
+	MaxReplicas           int
+	LocationLabels        []string
+	HotRegionLowThreshold int
+	TolerantSizeRatio     float64
+	LowSpaceRatio         float64
+	HighSpaceRatio        float64
+	DisableLearner        bool
+	LabelProperties       map[string][]*metapb.StoreLabel
 }
 
 // NewMockSchedulerOptions creates a mock schedule option.
@@ -461,7 +461,7 @@ func NewMockSchedulerOptions() *MockSchedulerOptions {
 	mso.MergeScheduleLimit = defaultMergeScheduleLimit
 	mso.MaxSnapshotCount = defaultMaxSnapshotCount
 	mso.MaxMergeRegionSize = defaultMaxMergeRegionSize
-	mso.MaxMergeRegionWriteKeys = defaultMaxMergeRegionWriteKeys
+	mso.MaxMergeRegionKeys = defaultMaxMergeRegionKeys
 	mso.SplitMergeInterval = defaultSplitMergeInterval
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
@@ -508,9 +508,9 @@ func (mso *MockSchedulerOptions) GetMaxMergeRegionSize() uint64 {
 	return mso.MaxMergeRegionSize
 }
 
-// GetMaxMergeRegionWriteKeys mock method
-func (mso *MockSchedulerOptions) GetMaxMergeRegionWriteKeys() uint64 {
-	return mso.MaxMergeRegionWriteKeys
+// GetMaxMergeRegionKeys mock method
+func (mso *MockSchedulerOptions) GetMaxMergeRegionKeys() uint64 {
+	return mso.MaxMergeRegionKeys
 }
 
 // GetSplitMergeInterval mock method

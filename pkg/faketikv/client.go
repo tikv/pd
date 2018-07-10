@@ -198,15 +198,15 @@ func (c *client) reportRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regio
 		select {
 		case region := <-c.reportRegionHeartbeatCh:
 			request := &pdpb.RegionHeartbeatRequest{
-				Header:               c.requestHeader(),
-				Region:               region.Region,
-				Leader:               region.Leader,
-				DownPeers:            region.DownPeers,
-				PendingPeers:         region.PendingPeers,
-				BytesWritten:         region.WrittenBytes,
-				BytesRead:            region.ReadBytes,
-				ApproximateSize:      uint64(region.ApproximateSize),
-				ApproximateWriteKeys: uint64(region.ApproximateWriteKeys),
+				Header:          c.requestHeader(),
+				Region:          region.Region,
+				Leader:          region.Leader,
+				DownPeers:       region.DownPeers,
+				PendingPeers:    region.PendingPeers,
+				BytesWritten:    region.WrittenBytes,
+				BytesRead:       region.ReadBytes,
+				ApproximateSize: uint64(region.ApproximateSize),
+				ApproximateKeys: uint64(region.ApproximateKeys),
 			}
 			err := stream.Send(request)
 			if err != nil {

@@ -375,10 +375,10 @@ type ScheduleConfig struct {
 	MaxSnapshotCount    uint64 `toml:"max-snapshot-count,omitempty" json:"max-snapshot-count"`
 	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count,omitempty" json:"max-pending-peer-count"`
 	// If both the size of region is smaller than MaxMergeRegionSize
-	// and the number of rows in region is smaller than MaxMergeRegionWriteKeys,
+	// and the number of rows in region is smaller than MaxMergeRegionKeys,
 	// it will try to merge with adjacent regions.
-	MaxMergeRegionSize      uint64 `toml:"max-merge-region-size,omitempty" json:"max-merge-region-size"`
-	MaxMergeRegionWriteKeys uint64 `toml:"max-merge-region-write-keys,omitempty" json:"max-merge-region-write-keys"`
+	MaxMergeRegionSize uint64 `toml:"max-merge-region-size,omitempty" json:"max-merge-region-size"`
+	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys,omitempty" json:"max-merge-region-keys"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval,omitempty" json:"split-merge-interval"`
 	// PatrolRegionInterval is the interval for scanning region during patrol.
@@ -418,48 +418,48 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 	schedulers := make(SchedulerConfigs, len(c.Schedulers))
 	copy(schedulers, c.Schedulers)
 	return &ScheduleConfig{
-		MaxSnapshotCount:        c.MaxSnapshotCount,
-		MaxPendingPeerCount:     c.MaxPendingPeerCount,
-		MaxMergeRegionSize:      c.MaxMergeRegionSize,
-		MaxMergeRegionWriteKeys: c.MaxMergeRegionWriteKeys,
-		SplitMergeInterval:      c.SplitMergeInterval,
-		PatrolRegionInterval:    c.PatrolRegionInterval,
-		MaxStoreDownTime:        c.MaxStoreDownTime,
-		LeaderScheduleLimit:     c.LeaderScheduleLimit,
-		RegionScheduleLimit:     c.RegionScheduleLimit,
-		ReplicaScheduleLimit:    c.ReplicaScheduleLimit,
-		MergeScheduleLimit:      c.MergeScheduleLimit,
-		TolerantSizeRatio:       c.TolerantSizeRatio,
-		LowSpaceRatio:           c.LowSpaceRatio,
-		HighSpaceRatio:          c.HighSpaceRatio,
-		DisableLearner:          c.DisableLearner,
-		Schedulers:              schedulers,
+		MaxSnapshotCount:     c.MaxSnapshotCount,
+		MaxPendingPeerCount:  c.MaxPendingPeerCount,
+		MaxMergeRegionSize:   c.MaxMergeRegionSize,
+		MaxMergeRegionKeys:   c.MaxMergeRegionKeys,
+		SplitMergeInterval:   c.SplitMergeInterval,
+		PatrolRegionInterval: c.PatrolRegionInterval,
+		MaxStoreDownTime:     c.MaxStoreDownTime,
+		LeaderScheduleLimit:  c.LeaderScheduleLimit,
+		RegionScheduleLimit:  c.RegionScheduleLimit,
+		ReplicaScheduleLimit: c.ReplicaScheduleLimit,
+		MergeScheduleLimit:   c.MergeScheduleLimit,
+		TolerantSizeRatio:    c.TolerantSizeRatio,
+		LowSpaceRatio:        c.LowSpaceRatio,
+		HighSpaceRatio:       c.HighSpaceRatio,
+		DisableLearner:       c.DisableLearner,
+		Schedulers:           schedulers,
 	}
 }
 
 const (
-	defaultMaxReplicas             = 3
-	defaultMaxSnapshotCount        = 3
-	defaultMaxPendingPeerCount     = 16
-	defaultMaxMergeRegionSize      = 20
-	defaultMaxMergeRegionWriteKeys = 200000
-	defaultSplitMergeInterval      = 1 * time.Hour
-	defaultPatrolRegionInterval    = 100 * time.Millisecond
-	defaultMaxStoreDownTime        = 30 * time.Minute
-	defaultLeaderScheduleLimit     = 4
-	defaultRegionScheduleLimit     = 4
-	defaultReplicaScheduleLimit    = 8
-	defaultMergeScheduleLimit      = 8
-	defaultTolerantSizeRatio       = 5
-	defaultLowSpaceRatio           = 0.8
-	defaultHighSpaceRatio          = 0.6
+	defaultMaxReplicas          = 3
+	defaultMaxSnapshotCount     = 3
+	defaultMaxPendingPeerCount  = 16
+	defaultMaxMergeRegionSize   = 20
+	defaultMaxMergeRegionKeys   = 200000
+	defaultSplitMergeInterval   = 1 * time.Hour
+	defaultPatrolRegionInterval = 100 * time.Millisecond
+	defaultMaxStoreDownTime     = 30 * time.Minute
+	defaultLeaderScheduleLimit  = 4
+	defaultRegionScheduleLimit  = 4
+	defaultReplicaScheduleLimit = 8
+	defaultMergeScheduleLimit   = 8
+	defaultTolerantSizeRatio    = 5
+	defaultLowSpaceRatio        = 0.8
+	defaultHighSpaceRatio       = 0.6
 )
 
 func (c *ScheduleConfig) adjust() error {
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
 	adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
-	adjustUint64(&c.MaxMergeRegionWriteKeys, defaultMaxMergeRegionWriteKeys)
+	adjustUint64(&c.MaxMergeRegionKeys, defaultMaxMergeRegionKeys)
 	adjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
 	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)

@@ -41,21 +41,21 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, clusterInfo *ClusterInfo
 		switch changePeer.GetChangeType() {
 		case eraftpb.ConfChangeType_AddNode:
 			return &addPeer{
-				regionID:  regionID,
-				size:      region.ApproximateSize,
-				writeKeys: region.ApproximateWriteKeys,
-				speed:     100 * 1000 * 1000,
-				epoch:     epoch,
-				peer:      changePeer.GetPeer(),
+				regionID: regionID,
+				size:     region.ApproximateSize,
+				keys:     region.ApproximateKeys,
+				speed:    100 * 1000 * 1000,
+				epoch:    epoch,
+				peer:     changePeer.GetPeer(),
 			}
 		case eraftpb.ConfChangeType_RemoveNode:
 			return &removePeer{
-				regionID:  regionID,
-				size:      region.ApproximateSize,
-				writeKeys: region.ApproximateWriteKeys,
-				speed:     100 * 1000 * 1000,
-				epoch:     epoch,
-				peer:      changePeer.GetPeer(),
+				regionID: regionID,
+				size:     region.ApproximateSize,
+				keys:     region.ApproximateKeys,
+				speed:    100 * 1000 * 1000,
+				epoch:    epoch,
+				peer:     changePeer.GetPeer(),
 			}
 		}
 	} else if resp.GetTransferLeader() != nil {
@@ -112,13 +112,13 @@ func (t *transferLeader) IsFinished() bool {
 }
 
 type addPeer struct {
-	regionID  uint64
-	size      int64
-	writeKeys int64
-	speed     int64
-	epoch     *metapb.RegionEpoch
-	peer      *metapb.Peer
-	finished  bool
+	regionID uint64
+	size     int64
+	keys     int64
+	speed    int64
+	epoch    *metapb.RegionEpoch
+	peer     *metapb.Peer
+	finished bool
 }
 
 func (a *addPeer) Desc() string {
@@ -159,13 +159,13 @@ func (a *addPeer) IsFinished() bool {
 }
 
 type removePeer struct {
-	regionID  uint64
-	size      int64
-	writeKeys int64
-	speed     int64
-	epoch     *metapb.RegionEpoch
-	peer      *metapb.Peer
-	finished  bool
+	regionID uint64
+	size     int64
+	keys     int64
+	speed    int64
+	epoch    *metapb.RegionEpoch
+	peer     *metapb.Peer
+	finished bool
 }
 
 func (a *removePeer) Desc() string {

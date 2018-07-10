@@ -59,8 +59,8 @@ func (s *testRegionMapSuite) regionInfo(id uint64) *RegionInfo {
 		Region: &metapb.Region{
 			Id: id,
 		},
-		ApproximateSize:      int64(id),
-		ApproximateWriteKeys: int64(id),
+		ApproximateSize: int64(id),
+		ApproximateKeys: int64(id),
 	}
 }
 

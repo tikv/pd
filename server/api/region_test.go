@@ -58,9 +58,9 @@ func newTestRegionInfo(regionID, storeID uint64, start, end []byte) *core.Region
 			EndKey:   end,
 			Peers:    []*metapb.Peer{leader},
 		},
-		Leader:               leader,
-		ApproximateSize:      10,
-		ApproximateWriteKeys: 10,
+		Leader:          leader,
+		ApproximateSize: 10,
+		ApproximateKeys: 10,
 	}
 }
 

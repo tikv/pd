@@ -453,7 +453,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		if region.ApproximateSize != origin.ApproximateSize {
 			saveCache = true
 		}
-		if region.ApproximateWriteKeys != origin.ApproximateWriteKeys {
+		if region.ApproximateKeys != origin.ApproximateKeys {
 			saveCache = true
 		}
 	}
@@ -589,8 +589,8 @@ func (c *clusterInfo) GetMaxMergeRegionSize() uint64 {
 	return c.opt.GetMaxMergeRegionSize()
 }
 
-func (c *clusterInfo) GetMaxMergeRegionWriteKeys() uint64 {
-	return c.opt.GetMaxMergeRegionWriteKeys()
+func (c *clusterInfo) GetMaxMergeRegionKeys() uint64 {
+	return c.opt.GetMaxMergeRegionKeys()
 }
 
 func (c *clusterInfo) GetSplitMergeInterval() time.Duration {

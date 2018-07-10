@@ -84,8 +84,8 @@ func (o *scheduleOption) GetMaxMergeRegionSize() uint64 {
 	return o.load().MaxMergeRegionSize
 }
 
-func (o *scheduleOption) GetMaxMergeRegionWriteKeys() uint64 {
-	return o.load().MaxMergeRegionWriteKeys
+func (o *scheduleOption) GetMaxMergeRegionKeys() uint64 {
+	return o.load().MaxMergeRegionKeys
 }
 
 func (o *scheduleOption) GetSplitMergeInterval() time.Duration {

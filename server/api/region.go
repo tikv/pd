@@ -35,13 +35,13 @@ type regionInfo struct {
 	RegionEpoch *metapb.RegionEpoch `json:"epoch,omitempty"`
 	Peers       []*metapb.Peer      `json:"peers,omitempty"`
 
-	Leader               *metapb.Peer      `json:"leader,omitempty"`
-	DownPeers            []*pdpb.PeerStats `json:"down_peers,omitempty"`
-	PendingPeers         []*metapb.Peer    `json:"pending_peers,omitempty"`
-	WrittenBytes         uint64            `json:"written_bytes,omitempty"`
-	ReadBytes            uint64            `json:"read_bytes,omitempty"`
-	ApproximateSize      int64             `json:"approximate_size,omitempty"`
-	ApproximateWriteKeys int64             `json:"approximate_write_keys,omitempty"`
+	Leader          *metapb.Peer      `json:"leader,omitempty"`
+	DownPeers       []*pdpb.PeerStats `json:"down_peers,omitempty"`
+	PendingPeers    []*metapb.Peer    `json:"pending_peers,omitempty"`
+	WrittenBytes    uint64            `json:"written_bytes,omitempty"`
+	ReadBytes       uint64            `json:"read_bytes,omitempty"`
+	ApproximateSize int64             `json:"approximate_size,omitempty"`
+	ApproximateKeys int64             `json:"approximate_keys,omitempty"`
 }
 
 func newRegionInfo(r *core.RegionInfo) *regionInfo {
@@ -49,18 +49,18 @@ func newRegionInfo(r *core.RegionInfo) *regionInfo {
 		return nil
 	}
 	return &regionInfo{
-		ID:                   r.Id,
-		StartKey:             strings.Trim(fmt.Sprintf("%q", r.StartKey), "\""),
-		EndKey:               strings.Trim(fmt.Sprintf("%q", r.EndKey), "\""),
-		RegionEpoch:          r.RegionEpoch,
-		Peers:                r.Peers,
-		Leader:               r.Leader,
-		DownPeers:            r.DownPeers,
-		PendingPeers:         r.PendingPeers,
-		WrittenBytes:         r.WrittenBytes,
-		ReadBytes:            r.ReadBytes,
-		ApproximateSize:      r.ApproximateSize,
-		ApproximateWriteKeys: r.ApproximateWriteKeys,
+		ID:              r.Id,
+		StartKey:        strings.Trim(fmt.Sprintf("%q", r.StartKey), "\""),
+		EndKey:          strings.Trim(fmt.Sprintf("%q", r.EndKey), "\""),
+		RegionEpoch:     r.RegionEpoch,
+		Peers:           r.Peers,
+		Leader:          r.Leader,
+		DownPeers:       r.DownPeers,
+		PendingPeers:    r.PendingPeers,
+		WrittenBytes:    r.WrittenBytes,
+		ReadBytes:       r.ReadBytes,
+		ApproximateSize: r.ApproximateSize,
+		ApproximateKeys: r.ApproximateKeys,
 	}
 }
 

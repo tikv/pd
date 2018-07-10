@@ -39,11 +39,11 @@ func newAddNodes() *Conf {
 			{Id: id.nextID(), StoreId: uint64(i+2)%4 + 1},
 		}
 		conf.Regions = append(conf.Regions, Region{
-			ID:        id.nextID(),
-			Peers:     peers,
-			Leader:    peers[0],
-			Size:      96 * mb,
-			WriteKeys: 960000,
+			ID:     id.nextID(),
+			Peers:  peers,
+			Leader: peers[0],
+			Size:   96 * mb,
+			Keys:   960000,
 		})
 	}
 	conf.MaxID = id.maxID

@@ -42,11 +42,11 @@ func newHotWrite() *Conf {
 			{Id: id.nextID(), StoreId: uint64(storeIDs[2] + 1)},
 		}
 		conf.Regions = append(conf.Regions, Region{
-			ID:        id.nextID(),
-			Peers:     peers,
-			Leader:    peers[0],
-			Size:      96 * mb,
-			WriteKeys: 960000,
+			ID:     id.nextID(),
+			Peers:  peers,
+			Leader: peers[0],
+			Size:   96 * mb,
+			Keys:   960000,
 		})
 	}
 	conf.MaxID = id.maxID

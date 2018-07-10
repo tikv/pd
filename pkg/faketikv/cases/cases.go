@@ -31,11 +31,11 @@ type Store struct {
 
 // Region is the config to simulate a region.
 type Region struct {
-	ID        uint64
-	Peers     []*metapb.Peer
-	Leader    *metapb.Peer
-	Size      int64
-	WriteKeys int64
+	ID     uint64
+	Peers  []*metapb.Peer
+	Leader *metapb.Peer
+	Size   int64
+	Keys   int64
 }
 
 // CheckerFunc checks if the scheduler is finished.
@@ -43,12 +43,12 @@ type CheckerFunc func(*core.RegionsInfo) bool
 
 // Conf represents a test suite for simulator.
 type Conf struct {
-	Stores               []Store
-	Regions              []Region
-	MaxID                uint64
-	RegionSplitSize      int64
-	RegionSplitWriteKeys int64
-	Events               []EventInner
+	Stores          []Store
+	Regions         []Region
+	MaxID           uint64
+	RegionSplitSize int64
+	RegionSplitKeys int64
+	Events          []EventInner
 
 	Checker CheckerFunc // To check the schedule is finished.
 }
@@ -89,12 +89,12 @@ func NewConf(name string) *Conf {
 }
 
 // NeedSplit checks whether the region need to split according it's size
-// and keys in write cf.
+// and number of keys.
 func (c *Conf) NeedSplit(size, rows int64) bool {
 	if c.RegionSplitSize != 0 && size >= c.RegionSplitSize {
 		return true
 	}
-	if c.RegionSplitWriteKeys != 0 && rows >= c.RegionSplitWriteKeys {
+	if c.RegionSplitKeys != 0 && rows >= c.RegionSplitKeys {
 		return true
 	}
 	return false
