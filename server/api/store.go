@@ -22,6 +22,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
@@ -164,7 +165,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	storeID, err := server.ParseVarUint(vars, "id", 10, 64)
+	storeID, err := apiutil.ParseVarUint(vars, "id", 10, 64)
 	if err != nil {
 		errorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 		return

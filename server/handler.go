@@ -15,7 +15,6 @@ package server
 
 import (
 	"bytes"
-	"fmt"
 	"strconv"
 	"time"
 
@@ -601,23 +600,4 @@ func (h *Handler) GetIncorrectNamespaceRegions() ([]*core.RegionInfo, error) {
 		return nil, ErrNotBootstrapped
 	}
 	return c.cachedCluster.GetRegionStatsByType(incorrectNamespace), nil
-}
-
-// FieldError connects an error to a particular field
-type FieldError struct {
-	error
-	field string
-}
-
-// ParseVarUint wraps strconv.ParseUint with detailed error reporting
-func ParseVarUint(vars map[string]string, varName string, base int, bitsize int) (uint64, error) {
-	str, ok := vars[varName]
-	if !ok {
-		return 0, FieldError{field: varName, error: fmt.Errorf("field %s not present", varName)}
-	}
-	parsed, err := strconv.ParseUint(str, base, bitsize)
-	if err == nil {
-		return parsed, nil
-	}
-	return parsed, FieldError{field: varName, error: err}
 }
