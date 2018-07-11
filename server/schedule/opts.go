@@ -46,6 +46,13 @@ type Options interface {
 	GetHighSpaceRatio() float64
 
 	IsRaftLearnerEnabled() bool
+
+	IsRemoveDownReplicaEnabled() bool
+	IsReplaceOfflineReplicaEnabled() bool
+	IsMakeUpReplicaEnabled() bool
+	IsRemoveExtraReplicaEnabled() bool
+	IsLocationReplacementEnabled() bool
+
 	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 }
 

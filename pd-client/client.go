@@ -53,6 +53,10 @@ type Client interface {
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
 	GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error)
+	// Update GC safe point. TiKV will check it and do GC themselves if necessary.
+	// If the given safePoint is less than the current one, it will not be updated.
+	// Returns the new safePoint after updating.
+	UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error)
 	// Close closes the client.
 	Close()
 }
@@ -174,7 +178,12 @@ func (c *client) updateLeader() error {
 		members, err := c.getMembers(ctx, u)
 		cancel()
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
-			continue
+			select {
+			case <-c.ctx.Done():
+				return errors.Trace(err)
+			default:
+				continue
+			}
 		}
 		c.updateURLs(members.GetMembers())
 		if err = c.switchLeader(members.GetLeader().GetClientUrls()); err != nil {
@@ -344,9 +353,14 @@ func (c *client) tsLoop() {
 
 		if stream == nil {
 			var ctx context.Context
-			ctx, cancel = context.WithCancel(c.ctx)
+			ctx, cancel = context.WithCancel(loopCtx)
 			stream, err = c.leaderClient().Tso(ctx)
 			if err != nil {
+				select {
+				case <-loopCtx.Done():
+					return
+				default:
+				}
 				log.Errorf("[pd] create tso stream error: %v", err)
 				c.ScheduleCheckLeader()
 				cancel()
@@ -388,6 +402,11 @@ func (c *client) tsLoop() {
 		}
 
 		if err != nil {
+			select {
+			case <-loopCtx.Done():
+				return
+			default:
+			}
 			log.Errorf("[pd] getTS error: %v", err)
 			c.ScheduleCheckLeader()
 			cancel()
@@ -632,6 +651,30 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 		return nil, nil
 	}
 	return store, nil
+}
+
+func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.UpdateGCSafePoint", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDuration.WithLabelValues("update_gc_safe_point").Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	resp, err := c.leaderClient().UpdateGCSafePoint(ctx, &pdpb.UpdateGCSafePointRequest{
+		Header:    c.requestHeader(),
+		SafePoint: safePoint,
+	})
+	requestDuration.WithLabelValues("update_gc_safe_point").Observe(time.Since(start).Seconds())
+	cancel()
+
+	if err != nil {
+		cmdFailedDuration.WithLabelValues("update_gc_safe_point").Observe(time.Since(start).Seconds())
+		c.ScheduleCheckLeader()
+		return 0, errors.Trace(err)
+	}
+	return resp.GetNewSafePoint(), nil
 }
 
 func (c *client) requestHeader() *pdpb.RequestHeader {

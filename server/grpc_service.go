@@ -342,7 +342,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		storeLabel := strconv.FormatUint(storeID, 10)
 
 		regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "recv").Inc()
-		regionHeartbeatLatency.WithLabelValues(storeLabel).Observe(float64(time.Now().UnixNano()/int64(time.Millisecond)) - float64(request.GetInterval().GetEndTimestamp()))
+		regionHeartbeatLatency.WithLabelValues(storeLabel).Observe(float64(time.Now().Unix()) - float64(request.GetInterval().GetEndTimestamp()))
 
 		hbStreams := cluster.coordinator.hbStreams
 
@@ -523,6 +523,63 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 
 	return &pdpb.ScatterRegionResponse{
 		Header: s.header(),
+	}, nil
+}
+
+// GetGCSafePoint implements gRPC PDServer.
+func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePointRequest) (*pdpb.GetGCSafePointResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &pdpb.GetGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	safePoint, err := s.kv.LoadGCSafePoint()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	return &pdpb.GetGCSafePointResponse{
+		Header:    s.header(),
+		SafePoint: safePoint,
+	}, nil
+}
+
+// UpdateGCSafePoint implements gRPC PDServer.
+func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSafePointRequest) (*pdpb.UpdateGCSafePointResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &pdpb.UpdateGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	oldSafePoint, err := s.kv.LoadGCSafePoint()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	newSafePoint := request.SafePoint
+
+	// Only save the safe point if it's greater than the previous one
+	if newSafePoint > oldSafePoint {
+		if err := s.kv.SaveGCSafePoint(newSafePoint); err != nil {
+			return nil, errors.Trace(err)
+		}
+		log.Infof("updated gc safe point to %d", newSafePoint)
+	} else if newSafePoint < oldSafePoint {
+		log.Warn("trying to update gc safe point from %d to %d", oldSafePoint, newSafePoint)
+		newSafePoint = oldSafePoint
+	}
+
+	return &pdpb.UpdateGCSafePointResponse{
+		Header:       s.header(),
+		NewSafePoint: newSafePoint,
 	}, nil
 }
 
