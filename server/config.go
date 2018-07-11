@@ -375,10 +375,10 @@ type ScheduleConfig struct {
 	MaxSnapshotCount    uint64 `toml:"max-snapshot-count,omitempty" json:"max-snapshot-count"`
 	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count,omitempty" json:"max-pending-peer-count"`
 	// If both the size of region is smaller than MaxMergeRegionSize
-	// and the number of rows in region is smaller than MaxMergeRegionRows,
+	// and the number of rows in region is smaller than MaxMergeRegionKeys,
 	// it will try to merge with adjacent regions.
 	MaxMergeRegionSize uint64 `toml:"max-merge-region-size,omitempty" json:"max-merge-region-size"`
-	MaxMergeRegionRows uint64 `toml:"max-merge-region-rows,omitempty" json:"max-merge-region-rows"`
+	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys,omitempty" json:"max-merge-region-keys"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval,omitempty" json:"split-merge-interval"`
 	// PatrolRegionInterval is the interval for scanning region during patrol.
@@ -438,7 +438,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		MaxSnapshotCount:             c.MaxSnapshotCount,
 		MaxPendingPeerCount:          c.MaxPendingPeerCount,
 		MaxMergeRegionSize:           c.MaxMergeRegionSize,
-		MaxMergeRegionRows:           c.MaxMergeRegionRows,
+		MaxMergeRegionKeys:           c.MaxMergeRegionKeys,
 		SplitMergeInterval:           c.SplitMergeInterval,
 		PatrolRegionInterval:         c.PatrolRegionInterval,
 		MaxStoreDownTime:             c.MaxStoreDownTime,
@@ -464,7 +464,7 @@ const (
 	defaultMaxSnapshotCount     = 3
 	defaultMaxPendingPeerCount  = 16
 	defaultMaxMergeRegionSize   = 20
-	defaultMaxMergeRegionRows   = 200000
+	defaultMaxMergeRegionKeys   = 200000
 	defaultSplitMergeInterval   = 1 * time.Hour
 	defaultPatrolRegionInterval = 100 * time.Millisecond
 	defaultMaxStoreDownTime     = 30 * time.Minute
@@ -481,7 +481,7 @@ func (c *ScheduleConfig) adjust() error {
 	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
 	adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
-	adjustUint64(&c.MaxMergeRegionRows, defaultMaxMergeRegionRows)
+	adjustUint64(&c.MaxMergeRegionKeys, defaultMaxMergeRegionKeys)
 	adjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
 	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)

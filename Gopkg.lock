@@ -267,10 +267,14 @@
     "pkg/pdpb"
   ]
 <<<<<<< HEAD
+<<<<<<< HEAD
   revision = "592f63bfb3ab3ef7e55dc2ee57dbb97594930811"
 =======
   revision = "4647096953d282e989b79c6e9b325aec3312b8ac"
 >>>>>>> Support save and get GC safe point to PD (#1108)
+=======
+  revision = "0d8a0ddc19cbdca796d486e25caebe2f4bf0fab7"
+>>>>>>> region: use ApproximateKeys instead of ApproximateRows (#1144)
 
 [[projects]]
   name = "github.com/prometheus/client_golang"

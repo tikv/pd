@@ -163,7 +163,7 @@ func (mc *MockCluster) AddLabelsStore(storeID uint64, regionCount int, labels ma
 func (mc *MockCluster) AddLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
 	regionInfo := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	regionInfo.ApproximateSize = 10
-	regionInfo.ApproximateRows = 10
+	regionInfo.ApproximateKeys = 10
 	mc.PutRegion(regionInfo)
 }
 
@@ -417,7 +417,7 @@ const (
 	defaultMaxSnapshotCount     = 3
 	defaultMaxPendingPeerCount  = 16
 	defaultMaxMergeRegionSize   = 0
-	defaultMaxMergeRegionRows   = 0
+	defaultMaxMergeRegionKeys   = 0
 	defaultSplitMergeInterval   = 0
 	defaultMaxStoreDownTime     = 30 * time.Minute
 	defaultLeaderScheduleLimit  = 4
@@ -439,7 +439,7 @@ type MockSchedulerOptions struct {
 	MaxSnapshotCount             uint64
 	MaxPendingPeerCount          uint64
 	MaxMergeRegionSize           uint64
-	MaxMergeRegionRows           uint64
+	MaxMergeRegionKeys           uint64
 	SplitMergeInterval           time.Duration
 	MaxStoreDownTime             time.Duration
 	MaxReplicas                  int
@@ -466,7 +466,7 @@ func NewMockSchedulerOptions() *MockSchedulerOptions {
 	mso.MergeScheduleLimit = defaultMergeScheduleLimit
 	mso.MaxSnapshotCount = defaultMaxSnapshotCount
 	mso.MaxMergeRegionSize = defaultMaxMergeRegionSize
-	mso.MaxMergeRegionRows = defaultMaxMergeRegionRows
+	mso.MaxMergeRegionKeys = defaultMaxMergeRegionKeys
 	mso.SplitMergeInterval = defaultSplitMergeInterval
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
@@ -513,9 +513,9 @@ func (mso *MockSchedulerOptions) GetMaxMergeRegionSize() uint64 {
 	return mso.MaxMergeRegionSize
 }
 
-// GetMaxMergeRegionRows mock method
-func (mso *MockSchedulerOptions) GetMaxMergeRegionRows() uint64 {
-	return mso.MaxMergeRegionRows
+// GetMaxMergeRegionKeys mock method
+func (mso *MockSchedulerOptions) GetMaxMergeRegionKeys() uint64 {
+	return mso.MaxMergeRegionKeys
 }
 
 // GetSplitMergeInterval mock method

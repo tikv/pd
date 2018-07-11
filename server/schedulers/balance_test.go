@@ -806,7 +806,7 @@ type testMergeCheckerSuite struct {
 func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	cfg := schedule.NewMockSchedulerOptions()
 	cfg.MaxMergeRegionSize = 2
-	cfg.MaxMergeRegionRows = 2
+	cfg.MaxMergeRegionKeys = 2
 	s.cluster = schedule.NewMockCluster(cfg)
 	s.regions = []*core.RegionInfo{
 		{
@@ -821,7 +821,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 			},
 			Leader:          &metapb.Peer{Id: 101, StoreId: 1},
 			ApproximateSize: 1,
-			ApproximateRows: 1,
+			ApproximateKeys: 1,
 		},
 		{
 			Region: &metapb.Region{
@@ -836,7 +836,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 			},
 			Leader:          &metapb.Peer{Id: 104, StoreId: 4},
 			ApproximateSize: 200,
-			ApproximateRows: 200,
+			ApproximateKeys: 200,
 		},
 		{
 			Region: &metapb.Region{
@@ -851,7 +851,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 			},
 			Leader:          &metapb.Peer{Id: 108, StoreId: 6},
 			ApproximateSize: 1,
-			ApproximateRows: 1,
+			ApproximateKeys: 1,
 		},
 		{
 			Region: &metapb.Region{
@@ -864,7 +864,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 			},
 			Leader:          &metapb.Peer{Id: 109, StoreId: 4},
 			ApproximateSize: 10,
-			ApproximateRows: 10,
+			ApproximateKeys: 10,
 		},
 	}
 
@@ -1174,7 +1174,7 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 		leader := rand.Intn(4) % 3
 		regionInfo := core.NewRegionInfo(meta, meta.Peers[leader])
 		regionInfo.ApproximateSize = 96
-		regionInfo.ApproximateRows = 96
+		regionInfo.ApproximateKeys = 96
 		tc.Regions.SetRegion(regionInfo)
 	}
 	for i := 0; i < 100; i++ {
