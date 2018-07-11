@@ -23,6 +23,7 @@ import (
 	"syscall"
 
 	"github.com/chzyer/readline"
+	"github.com/mattn/go-shellwords"
 	"github.com/pingcap/pd/pdctl"
 	"github.com/pingcap/pd/server"
 	flag "github.com/spf13/pflag"
@@ -119,11 +120,15 @@ func loop() {
 		if line == "exit" {
 			os.Exit(0)
 		}
-		args := strings.Split(strings.TrimSpace(line), " ")
+		args, err := shellwords.Parse(line)
+		if err != nil {
+			fmt.Printf("parse command err: %v\n", err)
+			continue
+		}
 		args = append(args, "-u", url)
-		args = append(args, "--cacert", caPath)
-		args = append(args, "--cert", certPath)
-		args = append(args, "--key", keyPath)
+		if caPath != "" && certPath != "" && keyPath != "" {
+			args = append(args, "--cacert", caPath, "--cert", certPath, "--key", keyPath)
+		}
 		pdctl.Start(args)
 	}
 }
