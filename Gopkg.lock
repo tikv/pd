@@ -260,7 +260,7 @@
     "pkg/metapb",
     "pkg/pdpb"
   ]
-  revision = "1c97132330a421e762e2aa2b389d702db8206008"
+  revision = "87f65f4fd97bef9f23fa2821da1bd019d9592928"
   source = "https://github.com/nolouch/kvproto"
 
 [[projects]]
