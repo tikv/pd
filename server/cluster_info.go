@@ -78,6 +78,41 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 	return c, nil
 }
 
+func (c *clusterInfo) OnChangeClusterVersion() {
+
+	var (
+		minVersion     Version
+		clusterVersion Version
+	)
+
+	clusterVersion = *c.opt.loadClusterVersion()
+	stores := c.GetStores()
+	for i, s := range stores {
+		if s.IsTombstone() {
+			continue
+		}
+		if i == 0 {
+			v, err := ParseVersion(s.GetVersion())
+			if err != nil {
+				log.Fatalf("on change cluster version meet error: %s", err)
+			}
+			minVersion = v
+			continue
+		}
+		v, err := ParseVersion(s.GetVersion())
+		if err != nil {
+			log.Fatalf("on change cluster version: %s", err)
+		}
+		if minVersion.Less(v) {
+			minVersion = v
+		}
+	}
+	if clusterVersion.Less(minVersion) {
+		c.opt.SetClusterVersion(&minVersion)
+		log.Info("cluster upgrade finished: version changed from %s to %s", clusterVersion, minVersion)
+	}
+}
+
 func (c *clusterInfo) allocID() (uint64, error) {
 	return c.id.Alloc()
 }

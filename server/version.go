@@ -33,7 +33,7 @@ type Version struct {
 }
 
 // Less compare two version.
-func (v *Version) Less(ov Version) bool {
+func (v *Version) Less(ov *Version) bool {
 	if v.Marjor < ov.Marjor {
 		return true
 	} else if v.Minor < ov.Minor {
