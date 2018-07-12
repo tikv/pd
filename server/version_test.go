@@ -12,3 +12,31 @@
 // limitations under the License.
 
 package server
+
+import (
+	. "github.com/pingcap/check"
+)
+
+var _ = Suite(&testVersion{})
+
+type testVersion struct{}
+
+func (t *testVersion) TestVersion(c *C) {
+	vers := []string{
+		"",
+		"v1.0.1",
+		"v1.0.1-beta",
+		"v2.0.1",
+		"2.1.0",
+	}
+	var (
+		lastVersion Version
+		newVersion  Version
+		err         error
+	)
+	for _, ver := range vers {
+		newVersion, err = ParseVersion(ver)
+		c.Assert(err, IsNil)
+		c.Assert(lastVersion.Less(newVersion), IsTrue)
+	}
+}

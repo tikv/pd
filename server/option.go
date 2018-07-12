@@ -43,6 +43,7 @@ func newScheduleOption(cfg *Config) *scheduleOption {
 	}
 	o.rep = newReplication(&cfg.Replication)
 	o.labelProperty.Store(cfg.LabelProperty)
+	o.clusterVersion.Store(cfg.ClusterVersion)
 	return o
 }
 
@@ -226,12 +227,12 @@ func (o *scheduleOption) loadLabelPropertyConfig() LabelPropertyConfig {
 	return o.labelProperty.Load().(LabelPropertyConfig)
 }
 
-func (o *scheduleOption) SetClusterVersion(v *Version) {
+func (o *scheduleOption) SetClusterVersion(v Version) {
 	o.clusterVersion.Store(v)
 }
 
-func (o *scheduleOption) loadClusterVersion() *Version {
-	return o.clusterVersion.Load().(*Version)
+func (o *scheduleOption) loadClusterVersion() Version {
+	return o.clusterVersion.Load().(Version)
 }
 
 func (o *scheduleOption) persist(kv *core.KV) error {
@@ -244,7 +245,7 @@ func (o *scheduleOption) persist(kv *core.KV) error {
 		Replication:    *o.rep.load(),
 		Namespace:      namespaces,
 		LabelProperty:  o.loadLabelPropertyConfig(),
-		ClusterVersion: *o.loadClusterVersion(),
+		ClusterVersion: o.loadClusterVersion(),
 	}
 	err := kv.SaveConfig(cfg)
 	return errors.Trace(err)
@@ -260,7 +261,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		Replication:    *o.rep.load(),
 		Namespace:      namespaces,
 		LabelProperty:  o.loadLabelPropertyConfig().clone(),
-		ClusterVersion: *o.loadClusterVersion(),
+		ClusterVersion: o.loadClusterVersion(),
 	}
 	isExist, err := kv.LoadConfig(cfg)
 	if err != nil {
@@ -275,6 +276,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 			o.ns[name] = newNamespaceOption(&nsCfg)
 		}
 		o.labelProperty.Store(cfg.LabelProperty)
+		o.clusterVersion.Store(cfg.ClusterVersion)
 	}
 	return nil
 }

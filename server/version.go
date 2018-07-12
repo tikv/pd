@@ -33,9 +33,9 @@ const (
 )
 
 var featuresDict = map[VersionFeature]Version{
-	VersionBase:                      Version{Marjor: 1},
-	VersionRegionMergeAndRaftLearner: Version{Marjor: 2, Minor: 0},
-	VersionBatchSplit:                Version{Marjor: 2, Minor: 1},
+	VersionBase:                      {Marjor: 1},
+	VersionRegionMergeAndRaftLearner: {Marjor: 2, Minor: 0},
+	VersionBatchSplit:                {Marjor: 2, Minor: 1},
 }
 
 // TargetVersion get target version by version featrue
@@ -60,19 +60,31 @@ type Version struct {
 func (v *Version) Less(ov Version) bool {
 	if v.Marjor < ov.Marjor {
 		return true
-	} else if v.Minor < ov.Minor {
+	} else if v.Marjor > ov.Marjor {
+		return false
+	}
+	if v.Minor < ov.Minor {
 		return true
-	} else if v.Patch < ov.Patch {
+	} else if v.Minor > ov.Minor {
+		return false
+	}
+	if v.Patch < ov.Patch {
 		return true
-	} else if v.Unstable < ov.Unstable {
+	} else if v.Patch > ov.Patch {
+		return false
+	}
+	if v.Unstable < ov.Unstable {
 		return true
-	} else if v.UnstablePatch < ov.UnstablePatch {
+	} else if v.Unstable > ov.Unstable {
+		return false
+	}
+	if v.UnstablePatch < ov.UnstablePatch {
 		return true
 	}
 	return false
 }
 
-func (v *Version) String() string {
+func (v Version) String() string {
 	convMap := map[int32]string{
 		1: "alpha",
 		2: "beta",
@@ -80,13 +92,13 @@ func (v *Version) String() string {
 	}
 	var res string
 	if unstable, ok := convMap[v.Unstable]; ok {
-		res = fmt.Sprintf("%d.%d.%d-%s", v.Marjor, v.Minor, v.Patch, unstable)
+		res = fmt.Sprintf("v%d.%d.%d-%s", v.Marjor, v.Minor, v.Patch, unstable)
 		if v.UnstablePatch > 0 {
 			res = fmt.Sprintf("%s.%d", res, v.UnstablePatch)
 		}
 		return res
 	}
-	res = fmt.Sprintf("%d.%d.%d", v.Marjor, v.Minor, v.Patch)
+	res = fmt.Sprintf("v%d.%d.%d", v.Marjor, v.Minor, v.Patch)
 	return res
 }
 
@@ -105,6 +117,12 @@ func convUnstable(s string) int32 {
 //ParseVersion parses a version from a string.
 //The string format should be "major.minor.patch-<unstable>".
 func ParseVersion(s string) (Version, error) {
+	if s == "" {
+		return TargetVersion(VersionBase), nil
+	}
+	if strings.HasPrefix(s, "v") {
+		s = s[1:]
+	}
 	splits := strings.Split(s, ".")
 	if len(splits) != 3 && len(splits) != 4 {
 		return Version{}, errors.Errorf("invalid version: %s", s)
@@ -120,7 +138,7 @@ func ParseVersion(s string) (Version, error) {
 	}
 	ints := make([]int32, len(parts))
 	for i, part := range parts {
-		if i == 4 && part != "0" {
+		if i == 3 && part != "0" {
 			r := convUnstable(part)
 			if r < 0 {
 				return Version{}, errors.Errorf("invalid version: %s ", s)
@@ -144,23 +162,4 @@ func ParseVersion(s string) (Version, error) {
 		Unstable:      ints[3],
 		UnstablePatch: ints[4],
 	}, nil
-}
-
-// MarshalJSON returns the version as a JSON string.
-func (v *Version) MarshalJSON() ([]byte, error) {
-	return []byte(v.String()), nil
-}
-
-// UnmarshalJSON parses a JSON string into the version.
-func (v *Version) UnmarshalJSON(text []byte) error {
-	s, err := strconv.Unquote(string(text))
-	if err != nil {
-		return errors.Trace(err)
-	}
-	version, err := ParseVersion(s)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	*v = version
-	return nil
 }

@@ -87,6 +87,7 @@ func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, 
 			Address: fmt.Sprintf("tikv%d", id),
 			State:   state,
 			Labels:  labels,
+			Version: server.TargetVersion(server.VersionRegionMergeAndRaftLearner).String(),
 		},
 	})
 	c.Assert(err, IsNil)

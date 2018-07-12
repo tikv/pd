@@ -400,6 +400,11 @@ func (s *Server) ClusterID() uint64 {
 	return s.clusterID
 }
 
+// ClusterVersion returns the cluster version of this server.
+func (s *Server) ClusterVersion() Version {
+	return s.scheduleOpt.loadClusterVersion()
+}
+
 // txn returns an etcd client transaction wrapper.
 // The wrapper will set a request timeout to the context and log slow transactions.
 func (s *Server) txn() clientv3.Txn {

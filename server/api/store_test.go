@@ -44,23 +44,27 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 			Id:      1,
 			Address: "tikv1",
 			State:   metapb.StoreState_Up,
+			Version: "v2.0.0",
 		},
 		{
 			Id:      4,
 			Address: "tikv4",
 			State:   metapb.StoreState_Up,
+			Version: "v2.0.0",
 		},
 		{
 			// metapb.StoreState_Offline == 1
 			Id:      6,
 			Address: "tikv6",
 			State:   metapb.StoreState_Offline,
+			Version: "v2.0.0",
 		},
 		{
 			// metapb.StoreState_Tombstone == 2
 			Id:      7,
 			Address: "tikv7",
 			State:   metapb.StoreState_Tombstone,
+			Version: "v2.0.0",
 		},
 	}
 

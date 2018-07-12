@@ -116,6 +116,12 @@ func (s *testServer) GetClusterID() uint64 {
 	return s.server.ClusterID()
 }
 
+func (s *testServer) GetClusterVersion() server.Version {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.ClusterVersion()
+}
+
 func (s *testServer) GetServerID() uint64 {
 	s.RLock()
 	defer s.RUnlock()

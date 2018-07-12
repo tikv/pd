@@ -84,7 +84,7 @@ func (c *clusterInfo) OnChangeClusterVersion() {
 		clusterVersion Version
 	)
 
-	clusterVersion = *c.opt.loadClusterVersion()
+	clusterVersion = c.opt.loadClusterVersion()
 	stores := c.GetStores()
 	for i, s := range stores {
 		if s.IsTombstone() {
@@ -102,13 +102,14 @@ func (c *clusterInfo) OnChangeClusterVersion() {
 		if err != nil {
 			log.Fatalf("on change cluster version: %s", err)
 		}
-		if minVersion.Less(v) {
+		if v.Less(minVersion) {
 			minVersion = v
 		}
 	}
 	if clusterVersion.Less(minVersion) {
-		c.opt.SetClusterVersion(&minVersion)
-		log.Info("cluster upgrade finished: version changed from %s to %s", clusterVersion, minVersion)
+		c.opt.SetClusterVersion(minVersion)
+		c.opt.persist(c.kv)
+		log.Infof("cluster version changed from %s to %s", clusterVersion, minVersion)
 	}
 }
 
