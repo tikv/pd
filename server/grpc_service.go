@@ -532,15 +532,6 @@ func (s *Server) validateRequest(header *pdpb.RequestHeader) error {
 	if !s.IsLeader() {
 		return notLeaderError
 	}
-	requireVersion, err := ParseVersion(header.GetRequireMinVersion())
-	if err != nil {
-		return grpc.Errorf(codes.FailedPrecondition, "Header meet error: %s", err.Error())
-	}
-	clusterVersion := s.GetConfig().ClusterVersion
-	if clusterVersion.Less(requireVersion) {
-		return grpc.Errorf(codes.FailedPrecondition, "require version is %s, but now cluster version is %d", requireVersion, clusterVersion)
-
-	}
 	if header.GetClusterId() != s.clusterID {
 		return grpc.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
 	}

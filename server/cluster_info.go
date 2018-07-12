@@ -79,7 +79,6 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 }
 
 func (c *clusterInfo) OnChangeClusterVersion() {
-
 	var (
 		minVersion     Version
 		clusterVersion Version
@@ -111,6 +110,16 @@ func (c *clusterInfo) OnChangeClusterVersion() {
 		c.opt.SetClusterVersion(&minVersion)
 		log.Info("cluster upgrade finished: version changed from %s to %s", clusterVersion, minVersion)
 	}
+}
+
+// IsSupport check if support the features.
+func (c *clusterInfo) IsSupport(f VersionFeature) bool {
+	clusterVersion := c.opt.loadClusterVersion()
+	minSupportVersion := TargetVersion(f)
+	if clusterVersion.Less(minSupportVersion) {
+		return false
+	}
+	return true
 }
 
 func (c *clusterInfo) allocID() (uint64, error) {
@@ -653,6 +662,9 @@ func (c *clusterInfo) GetHotRegionLowThreshold() int {
 }
 
 func (c *clusterInfo) IsRaftLearnerEnabled() bool {
+	if !c.IsSupport(VersionRegionMergeAndRaftLearner) {
+		return false
+	}
 	return c.opt.IsRaftLearnerEnabled()
 }
 

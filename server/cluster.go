@@ -295,7 +295,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		return errors.Errorf("invalid put store %s", err)
 	}
 	clusterVersion := c.cachedCluster.opt.loadClusterVersion()
-	if v.Less(clusterVersion) {
+	if v.Less(*clusterVersion) {
 		return errors.Errorf("version should be %s, got %s", clusterVersion)
 	}
 

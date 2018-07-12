@@ -10,6 +10,7 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package server
 
 import (
@@ -18,10 +19,33 @@ import (
 	"strings"
 
 	"github.com/juju/errors"
+	log "github.com/sirupsen/logrus"
 )
 
-// VersionBase is the empty version
-var VersionBase = Version{Marjor: 1}
+// VersionFeature is a unique identifier for minimum support version.
+type VersionFeature int
+
+// Version Fetures.
+const (
+	VersionBase VersionFeature = iota
+	VersionRegionMergeAndRaftLearner
+	VersionBatchSplit
+)
+
+var featuresDict = map[VersionFeature]Version{
+	VersionBase:                      Version{Marjor: 1},
+	VersionRegionMergeAndRaftLearner: Version{Marjor: 2, Minor: 0},
+	VersionBatchSplit:                Version{Marjor: 2, Minor: 1},
+}
+
+// TargetVersion get target version by version featrue
+func TargetVersion(v VersionFeature) Version {
+	target, ok := featuresDict[v]
+	if !ok {
+		log.Fatalf("version not exist, feature %d", v)
+	}
+	return target
+}
 
 // Version record version information.
 type Version struct {
@@ -33,7 +57,7 @@ type Version struct {
 }
 
 // Less compare two version.
-func (v *Version) Less(ov *Version) bool {
+func (v *Version) Less(ov Version) bool {
 	if v.Marjor < ov.Marjor {
 		return true
 	} else if v.Minor < ov.Minor {
