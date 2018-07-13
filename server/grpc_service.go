@@ -597,7 +597,7 @@ func (s *Server) validateRequest(header *pdpb.RequestHeader) error {
 }
 
 func (s *Server) header() *pdpb.ResponseHeader {
-	return &pdpb.ResponseHeader{ClusterId: s.clusterID, ClusterVersion: s.scheduleOpt.loadClusterVersion().String()}
+	return &pdpb.ResponseHeader{ClusterId: s.clusterID}
 }
 
 func (s *Server) errorHeader(err *pdpb.Error) *pdpb.ResponseHeader {
