@@ -21,6 +21,8 @@ This is a rough outline of what a contributor's workflow looks like:
 - Submit a pull request.
 - Your PR must receive LGTMs from two maintainers.
 
+More specifics on the coding flow are in [development](./docs/development.md).
+
 Thanks for your contributions!
 
 ### Code style

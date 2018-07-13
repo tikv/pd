@@ -84,7 +84,7 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 	}
 	regionInfo := core.NewRegionInfo(region, leader)
 	regionInfo.ApproximateSize = 10
-	regionInfo.ApproximateRows = 10
+	regionInfo.ApproximateKeys = 10
 	c.putRegion(regionInfo)
 }
 

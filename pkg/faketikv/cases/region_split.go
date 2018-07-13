@@ -38,11 +38,11 @@ func newRegionSplit() *Conf {
 		Peers:  peers,
 		Leader: peers[0],
 		Size:   1 * mb,
-		Rows:   10000,
+		Keys:   10000,
 	})
 	conf.MaxID = 5
 	conf.RegionSplitSize = 128 * mb
-	conf.RegionSplitRows = 10000
+	conf.RegionSplitKeys = 10000
 	// Events description
 	e := &WriteFlowOnSpotInner{}
 	e.Step = func(tick int64) map[string]int64 {
