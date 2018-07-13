@@ -527,7 +527,7 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64) error {
 		return ErrRegionNotFound(regionID)
 	}
 
-	step := schedule.SplitRegion{StartKey: region.StartKey, EndKey: region.EndKey}
+	step := schedule.SplitRegion{region.Region}
 	op := schedule.NewOperator("adminSplitRegion", regionID, region.GetRegionEpoch(), schedule.OpAdmin, step)
 	if ok := c.addOperator(op); !ok {
 		return errors.Trace(errAddOperator)

@@ -14,7 +14,6 @@
 package schedule
 
 import (
-	"sync"
 	"time"
 
 	"github.com/juju/errors"
@@ -89,42 +88,4 @@ func CreateScheduler(name string, limiter *Limiter, args ...string) (Scheduler, 
 		return nil, errors.Errorf("create func of %v is not registered", name)
 	}
 	return fn(limiter, args)
-}
-
-// Limiter a counter that limits the number of operators
-type Limiter struct {
-	sync.RWMutex
-	counts map[OperatorKind]uint64
-}
-
-// NewLimiter create a schedule limiter
-func NewLimiter() *Limiter {
-	return &Limiter{
-		counts: make(map[OperatorKind]uint64),
-	}
-}
-
-// UpdateCounts updates resouce counts using current pending operators.
-func (l *Limiter) UpdateCounts(operators map[uint64]*Operator) {
-	l.Lock()
-	defer l.Unlock()
-	for k := range l.counts {
-		delete(l.counts, k)
-	}
-	for _, op := range operators {
-		l.counts[op.Kind()]++
-	}
-}
-
-// OperatorCount gets the count of operators filtered by mask.
-func (l *Limiter) OperatorCount(mask OperatorKind) uint64 {
-	l.RLock()
-	defer l.RUnlock()
-	var total uint64
-	for k, count := range l.counts {
-		if k&mask != 0 {
-			total += count
-		}
-	}
-	return total
 }

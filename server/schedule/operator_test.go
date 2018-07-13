@@ -50,7 +50,7 @@ func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, pe
 }
 
 func (s *testOperatorSuite) TestOperatorStep(c *C) {
-	region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
 	c.Assert(TransferLeader{FromStore: 1, ToStore: 2}.IsFinish(region), IsFalse)
 	c.Assert(TransferLeader{FromStore: 2, ToStore: 1}.IsFinish(region), IsTrue)
 	c.Assert(AddPeer{ToStore: 3, PeerID: 3}.IsFinish(region), IsFalse)
@@ -71,7 +71,7 @@ func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OperatorStep)
 }
 
 func (s *testOperatorSuite) TestOperator(c *C) {
-	region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
 	// addPeer1, transferLeader1, removePeer3
 	steps := []OperatorStep{
 		AddPeer{ToStore: 1, PeerID: 1},
@@ -113,7 +113,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 }
 
 func (s *testOperatorSuite) TestInfluence(c *C) {
-	region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
 	opInfluence := OpInfluence{storesInfluence: make(map[uint64]*StoreInfluence)}
 	storeOpInfluence := opInfluence.storesInfluence
 	storeOpInfluence[1] = &StoreInfluence{}
