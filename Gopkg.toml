@@ -26,4 +26,5 @@
 
 [[constraint]]
   name = "github.com/pingcap/kvproto"
-  branch = "master"
+  source = "github.com/connor1996/kvproto"
+  branch = "check-policy"

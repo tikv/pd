@@ -22,6 +22,7 @@ import (
 
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pingcap/pd/server/core"
@@ -212,10 +213,11 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 // SplitRegion is an OperatorStep that splits a region.
 type SplitRegion struct {
 	StartKey, EndKey []byte
+	Policy           pdpb.CheckPolicy
 }
 
 func (sr SplitRegion) String() string {
-	return "split region"
+	return fmt.Sprintf("split region with policy %s", sr.Policy.String())
 }
 
 // IsFinish checks if current step is finished.

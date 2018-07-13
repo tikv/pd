@@ -16,10 +16,12 @@ package server
 import (
 	"bytes"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	log "github.com/sirupsen/logrus"
@@ -516,7 +518,7 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 }
 
 // AddSplitRegionOperator adds an operator to split a region.
-func (h *Handler) AddSplitRegionOperator(regionID uint64) error {
+func (h *Handler) AddSplitRegionOperator(regionID uint64, policy string) error {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return errors.Trace(err)
@@ -527,7 +529,11 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64) error {
 		return ErrRegionNotFound(regionID)
 	}
 
-	step := schedule.SplitRegion{StartKey: region.StartKey, EndKey: region.EndKey}
+	step := schedule.SplitRegion{
+		StartKey: region.StartKey,
+		EndKey:   region.EndKey,
+		Policy:   pdpb.CheckPolicy(pdpb.CheckPolicy_value[strings.ToUpper(policy)]),
+	}
 	op := schedule.NewOperator("adminSplitRegion", regionID, region.GetRegionEpoch(), schedule.OpAdmin, step)
 	if ok := c.addOperator(op); !ok {
 		return errors.Trace(errAddOperator)
