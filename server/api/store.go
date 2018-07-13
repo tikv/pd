@@ -70,7 +70,7 @@ const (
 
 // parseIDUintRespondErr gets the id from the mux.Vars or returns a 400
 func parseIDUintRespondErr(vars map[string]string, rd *render.Render, w http.ResponseWriter) (uint64, error) {
-	storeID, err := apiutil.ParseVarUint(vars, "id", 10, 64)
+	storeID, err := apiutil.VarsParseUint(vars, "id", 10, 64)
 	if err != nil {
 		errorResp(rd, w, errcode.NewInvalidInputErr(err))
 	}
