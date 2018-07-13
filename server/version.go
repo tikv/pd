@@ -33,12 +33,12 @@ const (
 )
 
 var featuresDict = map[VersionFeature]Version{
-	VersionBase:                      {Marjor: 1},
-	VersionRegionMergeAndRaftLearner: {Marjor: 2, Minor: 0},
-	VersionBatchSplit:                {Marjor: 2, Minor: 1},
+	VersionBase:                      {Major: 1},
+	VersionRegionMergeAndRaftLearner: {Major: 2, Minor: 0},
+	VersionBatchSplit:                {Major: 2, Minor: 1},
 }
 
-// TargetVersion get target version by version featrue
+// TargetVersion get target version by version feature
 func TargetVersion(v VersionFeature) Version {
 	target, ok := featuresDict[v]
 	if !ok {
@@ -49,7 +49,7 @@ func TargetVersion(v VersionFeature) Version {
 
 // Version record version information.
 type Version struct {
-	Marjor        int32
+	Major         int32
 	Minor         int32
 	Patch         int32
 	Unstable      int32
@@ -58,9 +58,9 @@ type Version struct {
 
 // Less compare two version.
 func (v *Version) Less(ov Version) bool {
-	if v.Marjor < ov.Marjor {
+	if v.Major < ov.Major {
 		return true
-	} else if v.Marjor > ov.Marjor {
+	} else if v.Major > ov.Major {
 		return false
 	}
 	if v.Minor < ov.Minor {
@@ -92,13 +92,13 @@ func (v Version) String() string {
 	}
 	var res string
 	if unstable, ok := convMap[v.Unstable]; ok {
-		res = fmt.Sprintf("v%d.%d.%d-%s", v.Marjor, v.Minor, v.Patch, unstable)
+		res = fmt.Sprintf("v%d.%d.%d-%s", v.Major, v.Minor, v.Patch, unstable)
 		if v.UnstablePatch > 0 {
 			res = fmt.Sprintf("%s.%d", res, v.UnstablePatch)
 		}
 		return res
 	}
-	res = fmt.Sprintf("v%d.%d.%d", v.Marjor, v.Minor, v.Patch)
+	res = fmt.Sprintf("v%d.%d.%d", v.Major, v.Minor, v.Patch)
 	return res
 }
 
@@ -156,7 +156,7 @@ func ParseVersion(s string) (Version, error) {
 		ints[i] = int32(val)
 	}
 	return Version{
-		Marjor:        ints[0],
+		Major:         ints[0],
 		Minor:         ints[1],
 		Patch:         ints[2],
 		Unstable:      ints[3],

@@ -138,16 +138,16 @@ func (s *versionTestSuite) TestRollingUpgrade(c *C) {
 		_, err = leaderServer.server.PutStore(context.Background(), store)
 		c.Assert(err, IsNil)
 	}
-	c.Assert(leaderServer.GetClusterVersion(), Equals, server.Version{Marjor: 2, Minor: 0, Patch: 1})
+	c.Assert(leaderServer.GetClusterVersion(), Equals, server.Version{Major: 2, Minor: 0, Patch: 1})
 	// rolling update
 	for i, store := range stores {
 		store.Store.Version = "v2.1.0"
 		resp, err := leaderServer.server.PutStore(context.Background(), store)
 		c.Assert(err, IsNil)
 		if i != len(stores)-1 {
-			c.Assert(leaderServer.GetClusterVersion(), Equals, server.Version{Marjor: 2, Minor: 0, Patch: 1})
+			c.Assert(leaderServer.GetClusterVersion(), Equals, server.Version{Major: 2, Minor: 0, Patch: 1})
 			c.Assert(resp.GetHeader().GetError(), IsNil)
 		}
 	}
-	c.Assert(leaderServer.GetClusterVersion(), Equals, server.Version{Marjor: 2, Minor: 1})
+	c.Assert(leaderServer.GetClusterVersion(), Equals, server.Version{Major: 2, Minor: 1})
 }
