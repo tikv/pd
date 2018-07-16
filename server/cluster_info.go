@@ -113,10 +113,10 @@ func (c *clusterInfo) OnChangeClusterVersion() {
 	}
 }
 
-// IsSupport check if support the features.
-func (c *clusterInfo) IsSupport(f VersionFeature) bool {
+// IsSupported check if support the features.
+func (c *clusterInfo) IsSupported(f Feature) bool {
 	clusterVersion := c.opt.loadClusterVersion()
-	minSupportVersion := TargetVersion(f)
+	minSupportVersion := MinSupportedVersion(f)
 	if clusterVersion.Less(minSupportVersion) {
 		return false
 	}
@@ -663,7 +663,7 @@ func (c *clusterInfo) GetHotRegionLowThreshold() int {
 }
 
 func (c *clusterInfo) IsRaftLearnerEnabled() bool {
-	if !c.IsSupport(VersionRegionMergeAndRaftLearner) {
+	if !c.IsSupported(Version2_0) {
 		return false
 	}
 	return c.opt.IsRaftLearnerEnabled()

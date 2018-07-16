@@ -38,7 +38,7 @@ func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption) {
 	cfg := NewConfig()
 	cfg.adjust(nil)
 	opt := newScheduleOption(cfg)
-	opt.SetClusterVersion(TargetVersion(VersionRegionMergeAndRaftLearner))
+	opt.SetClusterVersion(MinSupportedVersion(Version2_0))
 	return &cfg.Schedule, opt
 }
 

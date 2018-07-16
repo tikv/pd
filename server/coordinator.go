@@ -178,7 +178,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 			return true
 		}
 	}
-	if c.cluster.IsSupport(VersionRegionMergeAndRaftLearner) && c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+	if c.cluster.IsSupported(Version2_0) && c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.replicaChecker.Check(region); op != nil {
 			if c.addOperator(op) {
 				return true

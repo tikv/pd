@@ -108,7 +108,6 @@ func (kv *KV) DeleteRegion(region *metapb.Region) error {
 // SaveConfig stores marshalable cfg to the configPath.
 func (kv *KV) SaveConfig(cfg interface{}) error {
 	value, err := json.Marshal(cfg)
-	fmt.Println("pesist config:", string(value))
 	if err != nil {
 		return errors.Trace(err)
 	}

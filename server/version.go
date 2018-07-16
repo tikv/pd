@@ -22,24 +22,28 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// VersionFeature is a unique identifier for minimum support version.
-type VersionFeature int
+// Feature is now support feature.
+type Feature int
 
-// Version Fetures.
+// Fetures list.
 const (
-	VersionBase VersionFeature = iota
-	VersionRegionMergeAndRaftLearner
-	VersionBatchSplit
+	Base Feature = iota
+	Version2_0
+	RegionMerge
+	RaftLearner
+	BatchSplit
 )
 
-var featuresDict = map[VersionFeature]Version{
-	VersionBase:                      {Major: 1},
-	VersionRegionMergeAndRaftLearner: {Major: 2, Minor: 0},
-	VersionBatchSplit:                {Major: 2, Minor: 1},
+var featuresDict = map[Feature]Version{
+	Base:        {Major: 1},
+	Version2_0:  {Major: 2},
+	RegionMerge: {Major: 2, Minor: 0},
+	RaftLearner: {Major: 2, Minor: 0},
+	BatchSplit:  {Major: 2, Minor: 1, Unstable: 2},
 }
 
-// TargetVersion get target version by version feature
-func TargetVersion(v VersionFeature) Version {
+// MinSupportedVersion returns the minimum support version for the feature.
+func MinSupportedVersion(v Feature) Version {
 	target, ok := featuresDict[v]
 	if !ok {
 		log.Fatalf("version not exist, feature %d", v)
@@ -118,7 +122,7 @@ func convUnstable(s string) int32 {
 //The string format should be "major.minor.patch-<unstable>".
 func ParseVersion(s string) (Version, error) {
 	if s == "" {
-		return TargetVersion(VersionBase), nil
+		return MinSupportedVersion(Base), nil
 	}
 	if strings.HasPrefix(s, "v") {
 		s = s[1:]
