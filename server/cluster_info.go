@@ -81,41 +81,34 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 
 func (c *clusterInfo) OnChangeClusterVersion() {
 	var (
-		minVersion     semver.Version
+		minVersion     *semver.Version
 		clusterVersion semver.Version
 	)
 
 	clusterVersion = c.opt.loadClusterVersion()
 	stores := c.GetStores()
-	for i, s := range stores {
+	for _, s := range stores {
 		if s.IsTombstone() {
-			continue
-		}
-		if i == 0 {
-			minVersion = *MustParseVersion(s.GetVersion())
 			continue
 		}
 		v := MustParseVersion(s.GetVersion())
 
-		if v.LessThan(minVersion) {
-			minVersion = *v
+		if minVersion == nil || v.LessThan(*minVersion) {
+			minVersion = v
 		}
 	}
-	if clusterVersion.LessThan(minVersion) {
-		c.opt.SetClusterVersion(minVersion)
+	if clusterVersion.LessThan(*minVersion) {
+		c.opt.SetClusterVersion(*minVersion)
 		c.opt.persist(c.kv)
 		log.Infof("cluster version changed from %s to %s", clusterVersion, minVersion)
 	}
 }
 
-// IsSupported check if support the feature.
-func (c *clusterInfo) IsSupported(f Feature) bool {
+// IsFeatureSupported check if support the feature.
+func (c *clusterInfo) IsFeatureSupported(f Feature) bool {
 	clusterVersion := c.opt.loadClusterVersion()
 	minSupportVersion := MinSupportedVersion(f)
-	if clusterVersion.LessThan(minSupportVersion) {
-		return false
-	}
-	return true
+	return !clusterVersion.LessThan(minSupportVersion)
 }
 
 func (c *clusterInfo) allocID() (uint64, error) {
@@ -658,7 +651,7 @@ func (c *clusterInfo) GetHotRegionLowThreshold() int {
 }
 
 func (c *clusterInfo) IsRaftLearnerEnabled() bool {
-	if !c.IsSupported(RaftLearner) {
+	if !c.IsFeatureSupported(RaftLearner) {
 		return false
 	}
 	return c.opt.IsRaftLearnerEnabled()

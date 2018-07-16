@@ -133,6 +133,9 @@ func (s *integrationTestSuite) TestRollingUpgrade(c *C) {
 	c.Assert(leaderServer.GetClusterVersion(), Equals, semver.Version{Major: 2, Minor: 0, Patch: 1})
 	// rolling update
 	for i, store := range stores {
+		if i == 0 {
+			store.Store.State = metapb.StoreState_Tombstone
+		}
 		store.Store.Version = "2.1.0"
 		resp, err := leaderServer.server.PutStore(context.Background(), store)
 		c.Assert(err, IsNil)
