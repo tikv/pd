@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coreos/go-semver/semver"
 	"github.com/gogo/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -80,8 +81,8 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 
 func (c *clusterInfo) OnChangeClusterVersion() {
 	var (
-		minVersion     Version
-		clusterVersion Version
+		minVersion     semver.Version
+		clusterVersion semver.Version
 	)
 
 	clusterVersion = c.opt.loadClusterVersion()
@@ -91,22 +92,16 @@ func (c *clusterInfo) OnChangeClusterVersion() {
 			continue
 		}
 		if i == 0 {
-			v, err := ParseVersion(s.GetVersion())
-			if err != nil {
-				log.Fatalf("on change cluster version meet error: %s", err)
-			}
-			minVersion = v
+			minVersion = *semver.New(s.GetVersion())
 			continue
 		}
-		v, err := ParseVersion(s.GetVersion())
-		if err != nil {
-			log.Fatalf("on change cluster version: %s", err)
-		}
-		if v.Less(minVersion) {
-			minVersion = v
+		v := semver.New(s.GetVersion())
+
+		if v.LessThan(minVersion) {
+			minVersion = *v
 		}
 	}
-	if clusterVersion.Less(minVersion) {
+	if clusterVersion.LessThan(minVersion) {
 		c.opt.SetClusterVersion(minVersion)
 		c.opt.persist(c.kv)
 		log.Infof("cluster version changed from %s to %s", clusterVersion, minVersion)
@@ -117,7 +112,7 @@ func (c *clusterInfo) OnChangeClusterVersion() {
 func (c *clusterInfo) IsSupported(f Feature) bool {
 	clusterVersion := c.opt.loadClusterVersion()
 	minSupportVersion := MinSupportedVersion(f)
-	if clusterVersion.Less(minSupportVersion) {
+	if clusterVersion.LessThan(minSupportVersion) {
 		return false
 	}
 	return true

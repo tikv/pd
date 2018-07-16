@@ -16,6 +16,7 @@ package integration
 import (
 	"context"
 
+	"github.com/coreos/go-semver/semver"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -57,7 +58,7 @@ func (s *versionTestSuite) TestStoreRegister(c *C) {
 		Store: &metapb.Store{
 			Id:      1,
 			Address: "mock-1",
-			Version: "v2.0.1",
+			Version: "2.0.1",
 		},
 	}
 	_, err = leaderServer.server.PutStore(context.Background(), putStoreRequest)
@@ -82,7 +83,7 @@ func (s *versionTestSuite) TestStoreRegister(c *C) {
 		Store: &metapb.Store{
 			Id:      4,
 			Address: "mock-4",
-			Version: "v1.0.1",
+			Version: "1.0.1",
 		},
 	}
 	_, err = leaderServer.server.PutStore(context.Background(), putStoreRequest)
@@ -106,7 +107,7 @@ func (s *versionTestSuite) TestRollingUpgrade(c *C) {
 			Store: &metapb.Store{
 				Id:      1,
 				Address: "mock-1",
-				Version: "v2.0.1",
+				Version: "2.0.1",
 			},
 		},
 		{
@@ -114,7 +115,7 @@ func (s *versionTestSuite) TestRollingUpgrade(c *C) {
 			Store: &metapb.Store{
 				Id:      4,
 				Address: "mock-4",
-				Version: "v2.0.1",
+				Version: "2.0.1",
 			},
 		},
 		{
@@ -122,7 +123,7 @@ func (s *versionTestSuite) TestRollingUpgrade(c *C) {
 			Store: &metapb.Store{
 				Id:      6,
 				Address: "mock-6",
-				Version: "v2.0.1",
+				Version: "2.0.1",
 			},
 		},
 		{
@@ -130,7 +131,7 @@ func (s *versionTestSuite) TestRollingUpgrade(c *C) {
 			Store: &metapb.Store{
 				Id:      7,
 				Address: "mock-7",
-				Version: "v2.0.1",
+				Version: "2.0.1",
 			},
 		},
 	}
@@ -138,16 +139,16 @@ func (s *versionTestSuite) TestRollingUpgrade(c *C) {
 		_, err = leaderServer.server.PutStore(context.Background(), store)
 		c.Assert(err, IsNil)
 	}
-	c.Assert(leaderServer.GetClusterVersion(), Equals, server.Version{Major: 2, Minor: 0, Patch: 1})
+	c.Assert(leaderServer.GetClusterVersion(), Equals, semver.Version{Major: 2, Minor: 0, Patch: 1})
 	// rolling update
 	for i, store := range stores {
-		store.Store.Version = "v2.1.0"
+		store.Store.Version = "2.1.0"
 		resp, err := leaderServer.server.PutStore(context.Background(), store)
 		c.Assert(err, IsNil)
 		if i != len(stores)-1 {
-			c.Assert(leaderServer.GetClusterVersion(), Equals, server.Version{Major: 2, Minor: 0, Patch: 1})
+			c.Assert(leaderServer.GetClusterVersion(), Equals, semver.Version{Major: 2, Minor: 0, Patch: 1})
 			c.Assert(resp.GetHeader().GetError(), IsNil)
 		}
 	}
-	c.Assert(leaderServer.GetClusterVersion(), Equals, server.Version{Major: 2, Minor: 1})
+	c.Assert(leaderServer.GetClusterVersion(), Equals, semver.Version{Major: 2, Minor: 1})
 }

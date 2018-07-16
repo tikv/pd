@@ -28,6 +28,7 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/embed"
 	"github.com/coreos/etcd/pkg/types"
+	"github.com/coreos/go-semver/semver"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -401,7 +402,7 @@ func (s *Server) ClusterID() uint64 {
 }
 
 // ClusterVersion returns the cluster version of this server.
-func (s *Server) ClusterVersion() Version {
+func (s *Server) ClusterVersion() semver.Version {
 	return s.scheduleOpt.loadClusterVersion()
 }
 

@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/coreos/go-semver/semver"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
@@ -247,12 +248,12 @@ func (o *scheduleOption) loadLabelPropertyConfig() LabelPropertyConfig {
 	return o.labelProperty.Load().(LabelPropertyConfig)
 }
 
-func (o *scheduleOption) SetClusterVersion(v Version) {
+func (o *scheduleOption) SetClusterVersion(v semver.Version) {
 	o.clusterVersion.Store(v)
 }
 
-func (o *scheduleOption) loadClusterVersion() Version {
-	return o.clusterVersion.Load().(Version)
+func (o *scheduleOption) loadClusterVersion() semver.Version {
+	return o.clusterVersion.Load().(semver.Version)
 }
 
 func (o *scheduleOption) persist(kv *core.KV) error {

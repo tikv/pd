@@ -26,6 +26,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/etcd/embed"
 	"github.com/coreos/etcd/pkg/transport"
+	"github.com/coreos/go-semver/semver"
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
@@ -77,7 +78,7 @@ type Config struct {
 
 	Namespace map[string]NamespaceConfig `json:"namespace"`
 
-	ClusterVersion Version `json:"cluster-version"`
+	ClusterVersion semver.Version `json:"cluster-version"`
 
 	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
 	// the default size is 2GB, the maximum is 8GB.
