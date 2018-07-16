@@ -22,8 +22,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-var _ = Suite(&integrationTestSuite{})
-
 func (s *integrationTestSuite) bootstrapCluster(server *testServer, c *C) {
 	bootstrapReq := &pdpb.BootstrapRequest{
 		Header: &pdpb.RequestHeader{ClusterId: server.GetClusterID()},

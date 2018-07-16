@@ -178,14 +178,14 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 			return true
 		}
 	}
-	if c.cluster.IsSupported(Version2_0) && c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+	if c.cluster.IsSupported(RaftLearner) && c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.replicaChecker.Check(region); op != nil {
 			if c.addOperator(op) {
 				return true
 			}
 		}
 	}
-	if c.limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
+	if c.cluster.IsSupported(RegionMerge) && c.limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 		if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
 			// make sure two operators can add successfully altogether
 			if c.addOperator(op1, op2) {

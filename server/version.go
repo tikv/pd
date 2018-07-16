@@ -35,7 +35,7 @@ var featuresDict = map[Feature]semver.Version{
 	Version2_0:  {Major: 2},
 	RegionMerge: {Major: 2, Minor: 0},
 	RaftLearner: {Major: 2, Minor: 0},
-	BatchSplit:  {Major: 2, Minor: 1, PreRelease: "beta"},
+	BatchSplit:  {Major: 2, Minor: 1},
 }
 
 // MinSupportedVersion returns the minimum support version for the specified feature.
@@ -64,4 +64,12 @@ func MustParseVersion(v string) *semver.Version {
 		log.Fatalf("version string is illegal: %s", err)
 	}
 	return ver
+}
+
+// IsCompatible checks if the clusterVersion is compatible with the specify version.
+func IsCompatible(clusterVersion, v semver.Version) bool {
+	if clusterVersion.LessThan(v) {
+		return true
+	}
+	return clusterVersion.Major == v.Major && clusterVersion.Minor == v.Minor
 }
