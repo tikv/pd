@@ -25,14 +25,13 @@ import (
 type Task interface {
 	Desc() string
 	RegionID() uint64
-	Step(cluster *ClusterInfo)
-	TargetStoreID() uint64
+	Step(r *RaftEngine)
 	IsFinished() bool
 }
 
-func responseToTask(resp *pdpb.RegionHeartbeatResponse, clusterInfo *ClusterInfo) Task {
+func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 	regionID := resp.GetRegionId()
-	region := clusterInfo.GetRegion(regionID)
+	region := r.GetRegion(regionID)
 	epoch := resp.GetRegionEpoch()
 
 	//  change peer
@@ -83,11 +82,11 @@ func (t *transferLeader) Desc() string {
 	return fmt.Sprintf("transfer leader from store %d to store %d", t.fromPeer.GetStoreId(), t.peer.GetStoreId())
 }
 
-func (t *transferLeader) Step(cluster *ClusterInfo) {
+func (t *transferLeader) Step(r *RaftEngine) {
 	if t.finished {
 		return
 	}
-	region := cluster.GetRegion(t.regionID)
+	region := r.GetRegion(t.regionID)
 	if region.RegionEpoch.Version > t.epoch.Version || region.RegionEpoch.ConfVer > t.epoch.ConfVer {
 		t.finished = true
 		return
@@ -96,11 +95,8 @@ func (t *transferLeader) Step(cluster *ClusterInfo) {
 		region.Leader = t.peer
 	}
 	t.finished = true
-	cluster.SetRegion(region)
-}
-
-func (t *transferLeader) TargetStoreID() uint64 {
-	return t.fromPeer.GetStoreId()
+	r.SetRegion(region)
+	r.recordRegionChange(region)
 }
 
 func (t *transferLeader) RegionID() uint64 {
@@ -125,11 +121,11 @@ func (a *addPeer) Desc() string {
 	return fmt.Sprintf("add peer %+v for region %d", a.peer, a.regionID)
 }
 
-func (a *addPeer) Step(cluster *ClusterInfo) {
+func (a *addPeer) Step(r *RaftEngine) {
 	if a.finished {
 		return
 	}
-	region := cluster.GetRegion(a.regionID)
+	region := r.GetRegion(a.regionID)
 	if region.RegionEpoch.Version > a.epoch.Version || region.RegionEpoch.ConfVer > a.epoch.ConfVer {
 		a.finished = true
 		return
@@ -140,14 +136,11 @@ func (a *addPeer) Step(cluster *ClusterInfo) {
 		if region.GetPeer(a.peer.GetId()) == nil {
 			region.Peers = append(region.Peers, a.peer)
 			region.RegionEpoch.ConfVer++
-			cluster.SetRegion(region)
+			r.SetRegion(region)
+			r.recordRegionChange(region)
 		}
 		a.finished = true
 	}
-}
-
-func (a *addPeer) TargetStoreID() uint64 {
-	return a.peer.GetStoreId()
 }
 
 func (a *addPeer) RegionID() uint64 {
@@ -172,11 +165,11 @@ func (a *removePeer) Desc() string {
 	return fmt.Sprintf("remove peer %+v for region %d", a.peer, a.regionID)
 }
 
-func (a *removePeer) Step(cluster *ClusterInfo) {
+func (a *removePeer) Step(r *RaftEngine) {
 	if a.finished {
 		return
 	}
-	region := cluster.GetRegion(a.regionID)
+	region := r.GetRegion(a.regionID)
 	if region.RegionEpoch.Version > a.epoch.Version || region.RegionEpoch.ConfVer > a.epoch.ConfVer {
 		a.finished = true
 		return
@@ -188,16 +181,13 @@ func (a *removePeer) Step(cluster *ClusterInfo) {
 			if peer.GetId() == a.peer.GetId() {
 				region.Peers = append(region.Peers[:i], region.Peers[i+1:]...)
 				region.RegionEpoch.ConfVer++
-				cluster.SetRegion(region)
+				r.SetRegion(region)
+				r.recordRegionChange(region)
 				break
 			}
 		}
 		a.finished = true
 	}
-}
-
-func (a *removePeer) TargetStoreID() uint64 {
-	return a.peer.GetStoreId()
 }
 
 func (a *removePeer) RegionID() uint64 {

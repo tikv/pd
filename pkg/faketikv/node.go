@@ -53,8 +53,7 @@ type Node struct {
 	ctx                      context.Context
 	cancel                   context.CancelFunc
 	state                    NodeState
-	// share cluster information
-	clusterInfo *ClusterInfo
+	raftEngine               *RaftEngine
 }
 
 // NewNode returns a Node.
@@ -108,9 +107,9 @@ func (n *Node) receiveRegionHeartbeat() {
 	for {
 		select {
 		case resp := <-n.receiveRegionHeartbeatCh:
-			task := responseToTask(resp, n.clusterInfo)
+			task := responseToTask(resp, n.raftEngine)
 			if task != nil {
-				n.clusterInfo.AddTask(task)
+				n.AddTask(task)
 			}
 		case <-n.ctx.Done():
 			return
@@ -137,10 +136,9 @@ func (n *Node) stepTask() {
 	n.Lock()
 	defer n.Unlock()
 	for _, task := range n.tasks {
-		task.Step(n.clusterInfo)
+		task.Step(n.raftEngine)
 		if task.IsFinished() {
-			simutil.Logger.Infof("[store %d][region %d] task finished: %s final: %v", n.GetId(), task.RegionID(), task.Desc(), n.clusterInfo.GetRegion(task.RegionID()))
-			n.clusterInfo.reportRegionChange(task.RegionID())
+			simutil.Logger.Infof("[store %d][region %d] task finished: %s final: %v", n.GetId(), task.RegionID(), task.Desc(), n.raftEngine.GetRegion(task.RegionID()))
 			delete(n.tasks, task.RegionID())
 		}
 	}
@@ -171,7 +169,7 @@ func (n *Node) regionHeartBeat() {
 	if n.state != Up {
 		return
 	}
-	regions := n.clusterInfo.GetRegions()
+	regions := n.raftEngine.GetRegions()
 	for _, region := range regions {
 		if region.Leader != nil && region.Leader.GetStoreId() == n.Id {
 			ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
@@ -184,9 +182,9 @@ func (n *Node) regionHeartBeat() {
 	}
 }
 
-func (n *Node) reportRegionChange(regionID uint64) {
-	region := n.clusterInfo.GetRegion(regionID)
-	if region.Leader.GetStoreId() == n.Id {
+func (n *Node) reportRegionChange() {
+	for _, regionID := range n.raftEngine.regionchange[n.Id] {
+		region := n.raftEngine.GetRegion(regionID)
 		ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 		err := n.client.RegionHeartbeat(ctx, region)
 		if err != nil {
@@ -194,6 +192,7 @@ func (n *Node) reportRegionChange(regionID uint64) {
 		}
 		cancel()
 	}
+	delete(n.raftEngine.regionchange, n.Id)
 }
 
 // AddTask adds task in this node.
