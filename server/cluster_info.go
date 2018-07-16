@@ -92,10 +92,10 @@ func (c *clusterInfo) OnChangeClusterVersion() {
 			continue
 		}
 		if i == 0 {
-			minVersion = *semver.New(s.GetVersion())
+			minVersion = *MustParseVersion(s.GetVersion())
 			continue
 		}
-		v := semver.New(s.GetVersion())
+		v := MustParseVersion(s.GetVersion())
 
 		if v.LessThan(minVersion) {
 			minVersion = *v

@@ -15,7 +15,6 @@ package server
 
 import (
 	"fmt"
-	"github.com/coreos/go-semver/semver"
 	"path"
 	"sync"
 	"time"
@@ -291,9 +290,9 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		return errors.Errorf("invalid put store %v", store)
 	}
 
-	v, err := semver.NewVersion(store.GetVersion())
+	v, err := ParseVersion(store.GetVersion())
 	if err != nil {
-		return errors.Errorf("invalid put store %s", err)
+		return errors.Errorf("invalid put store %v, error: %s", store, err)
 	}
 	clusterVersion := c.cachedCluster.opt.loadClusterVersion()
 	if v.LessThan(clusterVersion) {

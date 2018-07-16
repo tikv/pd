@@ -18,7 +18,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Feature is now support feature.
+// Feature supported features.
 type Feature int
 
 // Fetures list.
@@ -38,11 +38,30 @@ var featuresDict = map[Feature]semver.Version{
 	BatchSplit:  {Major: 2, Minor: 1, PreRelease: "beta"},
 }
 
-// MinSupportedVersion returns the minimum support version for the feature.
+// MinSupportedVersion returns the minimum support version for the specified feature.
 func MinSupportedVersion(v Feature) semver.Version {
 	target, ok := featuresDict[v]
 	if !ok {
 		log.Fatalf("version not exist, feature %d", v)
 	}
 	return target
+}
+
+// ParseVersion parses a string to Version.
+func ParseVersion(v string) (*semver.Version, error) {
+	// for compatibility with old version which not support `version` mechanism.
+	baseVersion := MinSupportedVersion(Base)
+	if v == "" {
+		return &baseVersion, nil
+	}
+	return semver.NewVersion(v)
+}
+
+// MustParseVersion wrapping ParseVersion and will panic if err is not nil.
+func MustParseVersion(v string) *semver.Version {
+	ver, err := ParseVersion(v)
+	if err != nil {
+		log.Fatalf("version string is illegal: %s", err)
+	}
+	return ver
 }

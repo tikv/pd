@@ -20,18 +20,11 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server"
 )
 
-var _ = Suite(&versionTestSuite{})
+var _ = Suite(&integrationTestSuite{})
 
-type versionTestSuite struct{}
-
-func (s *versionTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
-
-func (s *versionTestSuite) bootstrapCluster(server *testServer, c *C) {
+func (s *integrationTestSuite) bootstrapCluster(server *testServer, c *C) {
 	bootstrapReq := &pdpb.BootstrapRequest{
 		Header: &pdpb.RequestHeader{ClusterId: server.GetClusterID()},
 		Store:  &metapb.Store{Id: 1, Address: "mock://1"},
@@ -41,7 +34,7 @@ func (s *versionTestSuite) bootstrapCluster(server *testServer, c *C) {
 	c.Assert(err, IsNil)
 }
 
-func (s *versionTestSuite) TestStoreRegister(c *C) {
+func (s *integrationTestSuite) TestStoreRegister(c *C) {
 	c.Parallel()
 	cluster, err := newTestCluster(3)
 	c.Assert(err, IsNil)
@@ -90,7 +83,7 @@ func (s *versionTestSuite) TestStoreRegister(c *C) {
 	c.Assert(err, NotNil)
 }
 
-func (s *versionTestSuite) TestRollingUpgrade(c *C) {
+func (s *integrationTestSuite) TestRollingUpgrade(c *C) {
 	c.Parallel()
 	cluster, err := newTestCluster(3)
 	c.Assert(err, IsNil)
