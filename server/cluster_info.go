@@ -79,7 +79,7 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 	return c, nil
 }
 
-func (c *clusterInfo) OnChangeClusterVersion() {
+func (c *clusterInfo) OnStoreVersionChange() {
 	var (
 		minVersion     *semver.Version
 		clusterVersion semver.Version
