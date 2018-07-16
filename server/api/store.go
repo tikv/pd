@@ -23,10 +23,10 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/apiutil"
+	"github.com/pingcap/pd/pkg/error_code"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/error_code"
 	"github.com/unrolled/render"
 )
 

@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/pingcap/pd/server/error_code"
+	"github.com/pingcap/pd/pkg/error_code"
 )
 
 type MinimalError struct{}

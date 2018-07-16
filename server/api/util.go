@@ -22,8 +22,8 @@ import (
 
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/apiutil"
+	"github.com/pingcap/pd/pkg/error_code"
 	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/error_code"
 	log "github.com/sirupsen/logrus"
 	"github.com/unrolled/render"
 )
