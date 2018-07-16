@@ -401,7 +401,7 @@ func (s *Server) ClusterID() uint64 {
 	return s.clusterID
 }
 
-// ClusterVersion returns the cluster version of this server.
+// ClusterVersion returns the version of the cluster.
 func (s *Server) ClusterVersion() semver.Version {
 	return s.scheduleOpt.loadClusterVersion()
 }

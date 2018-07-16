@@ -104,7 +104,7 @@ func (c *clusterInfo) OnStoreVersionChange() {
 	}
 }
 
-// IsFeatureSupported check if support the feature.
+// IsFeatureSupported checks if the feature is supported by current cluster.
 func (c *clusterInfo) IsFeatureSupported(f Feature) bool {
 	clusterVersion := c.opt.loadClusterVersion()
 	minSupportVersion := MinSupportedVersion(f)
