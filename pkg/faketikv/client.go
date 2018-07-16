@@ -206,7 +206,7 @@ func (c *client) reportRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regio
 				BytesWritten:    region.WrittenBytes,
 				BytesRead:       region.ReadBytes,
 				ApproximateSize: uint64(region.ApproximateSize),
-				ApproximateRows: uint64(region.ApproximateRows),
+				ApproximateKeys: uint64(region.ApproximateKeys),
 			}
 			err := stream.Send(request)
 			if err != nil {

@@ -41,7 +41,7 @@ type regionInfo struct {
 	WrittenBytes    uint64            `json:"written_bytes,omitempty"`
 	ReadBytes       uint64            `json:"read_bytes,omitempty"`
 	ApproximateSize int64             `json:"approximate_size,omitempty"`
-	ApproximateRows int64             `json:"approximate_rows,omitempty"`
+	ApproximateKeys int64             `json:"approximate_keys,omitempty"`
 }
 
 func newRegionInfo(r *core.RegionInfo) *regionInfo {
@@ -60,7 +60,7 @@ func newRegionInfo(r *core.RegionInfo) *regionInfo {
 		WrittenBytes:    r.WrittenBytes,
 		ReadBytes:       r.ReadBytes,
 		ApproximateSize: r.ApproximateSize,
-		ApproximateRows: r.ApproximateRows,
+		ApproximateKeys: r.ApproximateKeys,
 	}
 }
 
