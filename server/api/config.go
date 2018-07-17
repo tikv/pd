@@ -168,3 +168,25 @@ func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
 	}
 	h.rd.JSON(w, http.StatusOK, nil)
 }
+
+func (h *confHandler) GetClusterVersion(w http.ResponseWriter, r *http.Request) {
+	h.rd.JSON(w, http.StatusOK, h.svr.GetClusterVersion())
+}
+
+func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) {
+	input := make(map[string]string)
+	if err := readJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	version, ok := input["cluster-version"]
+	if !ok {
+		h.rd.JSON(w, http.StatusInternalServerError, "not set cluster version")
+		return
+	}
+	err := h.svr.SetClusterVersion(version)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, nil)
+}

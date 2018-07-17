@@ -25,11 +25,12 @@ import (
 )
 
 var (
-	configPrefix        = "pd/api/v1/config"
-	schedulePrefix      = "pd/api/v1/config/schedule"
-	replicationPrefix   = "pd/api/v1/config/replicate"
-	namespacePrefix     = "pd/api/v1/config/namespace"
-	labelPropertyPrefix = "pd/api/v1/config/label-property"
+	configPrefix         = "pd/api/v1/config"
+	schedulePrefix       = "pd/api/v1/config/schedule"
+	replicationPrefix    = "pd/api/v1/config/replicate"
+	namespacePrefix      = "pd/api/v1/config/namespace"
+	labelPropertyPrefix  = "pd/api/v1/config/label-property"
+	clusterVersionPrefix = "pd/api/v1/config/cluster-version"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
@@ -101,12 +102,13 @@ func NewShowLabelPropertyCommand() *cobra.Command {
 // NewSetConfigCommand return a set subcommand of configCmd
 func NewSetConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "set <option> <value>, set namespace <name> <option> <value>, set label-property <type> <key> <value>",
+		Use:   "set <option> <value>, set namespace <name> <option> <value>, set label-property <type> <key> <value>, set cluster-version <version>",
 		Short: "set the option with value",
 		Run:   setConfigCommandFunc,
 	}
 	sc.AddCommand(NewSetNamespaceConfigCommand())
 	sc.AddCommand(NewSetLabelPropertyCommand())
+	sc.AddCommand(NewSetClusterVersionCommand())
 	return sc
 }
 
@@ -126,6 +128,16 @@ func NewSetLabelPropertyCommand() *cobra.Command {
 		Use:   "label-property <type> <key> <value>",
 		Short: "set a label property config item",
 		Run:   setLabelPropertyConfigCommandFunc,
+	}
+	return sc
+}
+
+// NewSetClusterVersionCommand creates a set subcommand of set subcommand
+func NewSetClusterVersionCommand() *cobra.Command {
+	sc := &cobra.Command{
+		Use:   "cluster-version <version>",
+		Short: "set cluster version",
+		Run:   setClusterVersionCommandFunc,
 	}
 	return sc
 }
@@ -304,4 +316,15 @@ func postLabelProperty(cmd *cobra.Command, action string, args []string) {
 	}
 	prefix := path.Join(labelPropertyPrefix)
 	postJSON(cmd, prefix, input)
+}
+
+func setClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+	input := map[string]interface{}{
+		"cluster-version": args[0],
+	}
+	postJSON(cmd, clusterVersionPrefix, input)
 }

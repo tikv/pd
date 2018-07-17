@@ -401,11 +401,6 @@ func (s *Server) ClusterID() uint64 {
 	return s.clusterID
 }
 
-// ClusterVersion returns the version of the cluster.
-func (s *Server) ClusterVersion() semver.Version {
-	return s.scheduleOpt.loadClusterVersion()
-}
-
 // txn returns an etcd client transaction wrapper.
 // The wrapper will set a request timeout to the context and log slow transactions.
 func (s *Server) txn() clientv3.Txn {
@@ -429,6 +424,7 @@ func (s *Server) GetConfig() *Config {
 	}
 	cfg.Namespace = namespaces
 	cfg.LabelProperty = s.scheduleOpt.loadLabelPropertyConfig().clone()
+	cfg.ClusterVersion = s.scheduleOpt.loadClusterVersion()
 	return cfg
 }
 
@@ -544,6 +540,23 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 // GetLabelProperty returns the whole label property config.
 func (s *Server) GetLabelProperty() LabelPropertyConfig {
 	return s.scheduleOpt.loadLabelPropertyConfig().clone()
+}
+
+// SetClusterVersion sets the version of cluster.
+func (s *Server) SetClusterVersion(v string) error {
+	version, err := ParseVersion(v)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	s.scheduleOpt.SetClusterVersion(*version)
+	s.scheduleOpt.persist(s.kv)
+	log.Infof("cluster version is updated to %s", v)
+	return nil
+}
+
+// GetClusterVersion returns the version of cluster.
+func (s *Server) GetClusterVersion() semver.Version {
+	return s.scheduleOpt.loadClusterVersion()
 }
 
 // GetSecurityConfig get the security config.

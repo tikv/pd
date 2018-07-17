@@ -120,7 +120,7 @@ func (s *testServer) GetClusterID() uint64 {
 func (s *testServer) GetClusterVersion() semver.Version {
 	s.RLock()
 	defer s.RUnlock()
-	return s.server.ClusterVersion()
+	return s.server.GetClusterVersion()
 }
 
 func (s *testServer) GetServerID() uint64 {
