@@ -72,15 +72,17 @@ type FieldError struct {
 	field string
 }
 
-// VarsParseUint wraps strconv.ParseUint with detailed error reporting
-func VarsParseUint(vars map[string]string, varName string, base int, bitsize int) (uint64, error) {
+// ParseUint64VarsField connects strconv.ParseUint with request variables
+// It hardcodes the base to 10 and bitsize to 64
+// Any error returned will connect the requested field to the error via FieldError
+func ParseUint64VarsField(vars map[string]string, varName string) (uint64, *FieldError) {
 	str, ok := vars[varName]
 	if !ok {
-		return 0, FieldError{field: varName, error: fmt.Errorf("field %s not present", varName)}
+		return 0, &FieldError{field: varName, error: fmt.Errorf("field %s not present", varName)}
 	}
-	parsed, err := strconv.ParseUint(str, base, bitsize)
+	parsed, err := strconv.ParseUint(str, 10, 64)
 	if err == nil {
 		return parsed, nil
 	}
-	return parsed, FieldError{field: varName, error: err}
+	return parsed, &FieldError{field: varName, error: err}
 }

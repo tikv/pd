@@ -140,9 +140,9 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	storeID, err := apiutil.VarsParseUint(vars, "id", 10, 64)
-	if err != nil {
-		errorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -164,13 +164,14 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	storeID, err := apiutil.VarsParseUint(vars, "id", 10, 64)
-	if err != nil {
-		errorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 
 	_, force := r.URL.Query()["force"]
+	var err error
 	if force {
 		err = cluster.BuryStore(storeID, force)
 	} else {
@@ -193,9 +194,9 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	storeID, err := apiutil.VarsParseUint(vars, "id", 10, 64)
-	if err != nil {
-		errorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -206,7 +207,7 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = cluster.SetStoreState(storeID, metapb.StoreState(state))
+	err := cluster.SetStoreState(storeID, metapb.StoreState(state))
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -223,9 +224,9 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	storeID, err := apiutil.VarsParseUint(vars, "id", 10, 64)
-	if err != nil {
-		errorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -258,9 +259,9 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	storeID, err := apiutil.VarsParseUint(vars, "id", 10, 64)
-	if err != nil {
-		errorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 
