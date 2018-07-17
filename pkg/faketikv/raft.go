@@ -16,6 +16,7 @@ package faketikv
 import (
 	"math/rand"
 	"sort"
+	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/faketikv/cases"
@@ -25,7 +26,8 @@ import (
 
 // RaftEngine records all raft infomations.
 type RaftEngine struct {
-	*core.RegionsInfo
+	sync.RWMutex
+	regionsInfo  *core.RegionsInfo
 	conn         *Conn
 	regionchange map[uint64][]uint64
 }
@@ -33,7 +35,7 @@ type RaftEngine struct {
 // NewRaftEngine creates the initialized raft with the configuration.
 func NewRaftEngine(conf *cases.Conf, conn *Conn) (*RaftEngine, error) {
 	r := &RaftEngine{
-		RegionsInfo:  core.NewRegionsInfo(),
+		regionsInfo:  core.NewRegionsInfo(),
 		conn:         conn,
 		regionchange: make(map[uint64][]uint64),
 	}
@@ -184,6 +186,41 @@ func (r *RaftEngine) electNewLeader(region *core.RegionInfo) *metapb.Peer {
 		}
 	}
 	return nil
+}
+
+// GetRegion returns the RegionInfo with regionID
+func (r *RaftEngine) GetRegion(regionID uint64) *core.RegionInfo {
+	r.RLock()
+	defer r.RUnlock()
+	return r.regionsInfo.GetRegion(regionID)
+}
+
+// GetRegions gets all RegionInfo from regionMap
+func (r *RaftEngine) GetRegions() []*core.RegionInfo {
+	r.RLock()
+	defer r.RUnlock()
+	return r.regionsInfo.GetRegions()
+}
+
+// SetRegion sets the RegionInfo with regionID
+func (r *RaftEngine) SetRegion(region *core.RegionInfo) []*metapb.Region {
+	r.Lock()
+	defer r.Unlock()
+	return r.regionsInfo.SetRegion(region)
+}
+
+// SearchRegion searches the RegionInfo from regionTree
+func (r *RaftEngine) SearchRegion(regionKey []byte) *core.RegionInfo {
+	r.RLock()
+	defer r.RUnlock()
+	return r.regionsInfo.SearchRegion(regionKey)
+}
+
+// RandRegion gets a region by random
+func (r *RaftEngine) RandRegion() *core.RegionInfo {
+	r.RLock()
+	defer r.RUnlock()
+	return r.regionsInfo.RandRegion()
 }
 
 const (

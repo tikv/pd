@@ -120,7 +120,7 @@ func (d *Driver) Tick() {
 
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
-	return d.conf.Checker(d.raftEngine.RegionsInfo)
+	return d.conf.Checker(d.raftEngine.regionsInfo)
 }
 
 // Stop stops all nodes.

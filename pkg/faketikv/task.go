@@ -56,6 +56,15 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 				epoch:    epoch,
 				peer:     changePeer.GetPeer(),
 			}
+		case eraftpb.ConfChangeType_AddLearnerNode:
+			return &addLearner{
+				regionID: regionID,
+				size:     region.ApproximateSize,
+				keys:     region.ApproximateKeys,
+				speed:    100 * 1000 * 1000,
+				epoch:    epoch,
+				peer:     changePeer.GetPeer(),
+			}
 		}
 	} else if resp.GetTransferLeader() != nil {
 		changePeer := resp.GetTransferLeader().GetPeer()
@@ -134,11 +143,13 @@ func (a *addPeer) Step(r *RaftEngine) {
 	a.size -= a.speed
 	if a.size < 0 {
 		if region.GetPeer(a.peer.GetId()) == nil {
-			region.Peers = append(region.Peers, a.peer)
-			region.RegionEpoch.ConfVer++
-			r.SetRegion(region)
-			r.recordRegionChange(region)
+			region.AddPeer(a.peer)
+		} else {
+			region.GetPeer(a.peer.GetId()).IsLearner = false
 		}
+		region.RegionEpoch.ConfVer++
+		r.SetRegion(region)
+		r.recordRegionChange(region)
 		a.finished = true
 	}
 }
@@ -177,9 +188,9 @@ func (a *removePeer) Step(r *RaftEngine) {
 
 	a.size -= a.speed
 	if a.size < 0 {
-		for i, peer := range region.GetPeers() {
+		for _, peer := range region.GetPeers() {
 			if peer.GetId() == a.peer.GetId() {
-				region.Peers = append(region.Peers[:i], region.Peers[i+1:]...)
+				region.RemoveStorePeer(peer.GetStoreId())
 				region.RegionEpoch.ConfVer++
 				r.SetRegion(region)
 				r.recordRegionChange(region)
@@ -195,5 +206,49 @@ func (a *removePeer) RegionID() uint64 {
 }
 
 func (a *removePeer) IsFinished() bool {
+	return a.finished
+}
+
+type addLearner struct {
+	regionID uint64
+	size     int64
+	keys     int64
+	speed    int64
+	epoch    *metapb.RegionEpoch
+	peer     *metapb.Peer
+	finished bool
+}
+
+func (a *addLearner) Desc() string {
+	return fmt.Sprintf("add learner %+v for region %d", a.peer, a.regionID)
+}
+
+func (a *addLearner) Step(r *RaftEngine) {
+	if a.finished {
+		return
+	}
+	region := r.GetRegion(a.regionID)
+	if region.RegionEpoch.Version > a.epoch.Version || region.RegionEpoch.ConfVer > a.epoch.ConfVer {
+		a.finished = true
+		return
+	}
+
+	a.size -= a.speed
+	if a.size < 0 {
+		if region.GetPeer(a.peer.GetId()) == nil {
+			region.AddPeer(a.peer)
+			region.RegionEpoch.ConfVer++
+			r.SetRegion(region)
+			r.recordRegionChange(region)
+		}
+		a.finished = true
+	}
+}
+
+func (a *addLearner) RegionID() uint64 {
+	return a.regionID
+}
+
+func (a *addLearner) IsFinished() bool {
 	return a.finished
 }
