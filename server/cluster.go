@@ -526,7 +526,6 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 			c.checkStores()
 			c.collectMetrics()
 			c.coordinator.pruneHistory()
-			c.cachedCluster.OnStoreVersionChange()
 		}
 	}
 }
