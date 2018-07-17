@@ -56,6 +56,7 @@ func NewShowConfigCommand() *cobra.Command {
 	sc.AddCommand(NewShowNamespaceConfigCommand())
 	sc.AddCommand(NewShowReplicationConfigCommand())
 	sc.AddCommand(NewShowLabelPropertyCommand())
+	sc.AddCommand(NewShowClusterVersionCommand())
 	return sc
 }
 
@@ -95,6 +96,16 @@ func NewShowLabelPropertyCommand() *cobra.Command {
 		Use:   "label-property",
 		Short: "show label property config",
 		Run:   showLabelPropertyConfigCommandFunc,
+	}
+	return sc
+}
+
+// NewShowClusterVersionCommand returns a cluster version subcommand of show subcommand.
+func NewShowClusterVersionCommand() *cobra.Command {
+	sc := &cobra.Command{
+		Use:   "cluster-version",
+		Short: "show the cluster version",
+		Run:   showClusterVersionCommandFunc,
 	}
 	return sc
 }
@@ -218,6 +229,15 @@ func showNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get config: %s\n", err)
+		return
+	}
+	fmt.Println(r)
+}
+
+func showClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
+	r, err := doRequest(cmd, clusterVersionPrefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get cluster version: %s\n", err)
 		return
 	}
 	fmt.Println(r)
