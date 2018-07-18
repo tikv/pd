@@ -32,7 +32,6 @@ package errcode
 
 import (
 	"net/http"
-	"reflect"
 )
 
 // RegisteredCode helps document that we are using a registered error code that must never change
@@ -105,19 +104,18 @@ func HTTPCode(errCode ErrorCode) int {
 // HasClientData is used to defined how to retrieve the data portion of an ErrorCode to be returned to the client.
 // Otherwise the struct itself will be assumed to be all the data.
 // This is provided for exensibility, but may be unecessary for you.
+// Normally data is retrieved with the ClientData function.
 type HasClientData interface {
 	GetClientData() interface{}
 }
 
-// ClientData retrieves data from a structure that impilements HasClientData
-// If HasClientData is defined, use GetClientData()
-// Otherwise use the object itself with a call to ErrorData.
+// ClientData retrieves data from a structure that implements HasClientData
+// If HasClientData is not defined it will use the given ErrorCode object.
+// Normally this function is used rather than GetClientData.
 func ClientData(errCode ErrorCode) interface{} {
 	var data interface{} = errCode
 	if hasData, ok := errCode.(HasClientData); ok {
 		data = hasData.GetClientData()
-	} else {
-		data = ErrorData(errCode)
 	}
 	return data
 }
@@ -162,7 +160,7 @@ func (e CodedError) Code() RegisteredCode {
 
 // GetClientData returns the underlying Err field.
 func (e CodedError) GetClientData() interface{} {
-	return ErrorData(e.Err)
+	return e.Err
 }
 
 // invalidInput gives the code InvalidInputCode
@@ -206,43 +204,3 @@ func NewNotFoundErr(err error) ErrorCode {
 
 var _ ErrorCode = (*notFoundErr)(nil)   // assert implements interface
 var _ HasHTTPCode = (*notFoundErr)(nil) // assert implements interface
-
-// ErrorData avoids sending an error string twice when returning rich data to a client from an error.
-// It checks if an error is just using a simple string or a struct wrapping a string (errors.New).
-// In that case it will return an empty struct.
-// Otherwise it will return the given data.
-func ErrorData(err error) interface{} {
-	justString := false
-	v := reflect.ValueOf(err)
-	vKind := v.Kind()
-	if vKind == reflect.Ptr {
-		v = v.Elem()
-		vKind = v.Kind()
-	}
-	if vKind == reflect.String {
-		justString = true
-	} else if vKind == reflect.Struct {
-		typ := v.Type()
-		numFields := typ.NumField()
-		if numFields == 0 {
-			justString = true
-		} else if numFields == 1 {
-			fieldTyp := typ.Field(0)
-			if fieldTyp.Type.Kind() == reflect.String {
-				fieldV := v.Field(0)
-				if fieldV.CanInterface() {
-					if vstr, ok := fieldV.Interface().(string); ok {
-						justString = vstr == err.Error()
-					}
-				} else {
-					justString = true
-				}
-			}
-		}
-	}
-	if justString {
-		var empty struct{}
-		return empty
-	}
-	return err
-}

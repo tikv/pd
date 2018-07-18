@@ -16,6 +16,7 @@ package errcode_test
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/pingcap/pd/pkg/error_code"
@@ -45,7 +46,7 @@ func (e ErrorWrapper) Error() string {
 	return e.Err.Error()
 }
 func (e ErrorWrapper) GetClientData() interface{} {
-	return errcode.ErrorData(e.Err)
+	return e.Err
 }
 
 type Struct1 struct{ A string }
@@ -68,40 +69,29 @@ func (e Struct2) Error() string {
 	return fmt.Sprintf("error A & B %s & %s", e.A, e.B)
 }
 
-var empty struct{}
-
-func TestErrorData(t *testing.T) {
-	ErrorDataEquals(t, errors.New("errors"), empty)
-	s2 := Struct2{A: "A", B: "B"}
-	ErrorDataEquals(t, s2, s2)
-	s1 := Struct1{A: "A"}
-	ErrorDataEquals(t, s1, empty)
-	sconst := StructConstError1{A: "A"}
-	ErrorDataEquals(t, sconst, sconst)
-}
-
-func ErrorDataEquals(t *testing.T, given error, expected interface{}) {
-	t.Helper()
-	data := errcode.ErrorData(given)
-	if data != expected {
-		t.Errorf("\nErrorData expected: %+v\n but got: %+v", expected, data)
-	}
-}
+var emptyStruct struct{}
 
 func TestMinimalErrorCode(t *testing.T) {
 	minimal := MinimalError{}
 	AssertCodes(t, minimal)
 	ErrorEquals(t, minimal, "error")
-	ClientDataEquals(t, minimal, empty)
+	ClientDataEquals(t, minimal, minimal)
+}
+
+func TestErrorWrapperCode(t *testing.T) {
 	wrapped := ErrorWrapper{Err: errors.New("error")}
 	AssertCodes(t, wrapped)
 	ErrorEquals(t, wrapped, "error")
-	ClientDataEquals(t, wrapped, empty)
+	ClientDataEquals(t, wrapped, errors.New("error"))
 	s2 := Struct2{A: "A", B: "B"}
 	wrappedS2 := ErrorWrapper{Err: s2}
 	AssertCodes(t, wrappedS2)
 	ErrorEquals(t, wrappedS2, "error A & B A & B")
 	ClientDataEquals(t, wrappedS2, s2)
+	s1 := Struct1{A: "A"}
+	ClientDataEquals(t, ErrorWrapper{Err: s1}, s1)
+	sconst := StructConstError1{A: "A"}
+	ClientDataEquals(t, ErrorWrapper{Err: sconst}, sconst)
 }
 
 func AssertCodes(t *testing.T, code errcode.ErrorCode) {
@@ -122,11 +112,11 @@ func ErrorEquals(t *testing.T, err error, msg string) {
 
 func ClientDataEquals(t *testing.T, code errcode.ErrorCode, data interface{}) {
 	t.Helper()
-	if errcode.ClientData(code) != data {
-		t.Errorf("ClientData. expected %v. got: %v", data, errcode.ClientData(code))
+	if !reflect.DeepEqual(errcode.ClientData(code), data) {
+		t.Errorf("\nClientData expected: %#v\n ClientData but got: %#v", data, errcode.ClientData(code))
 	}
 	jsonExpected := errcode.JSONFormat{Data: data, Msg: code.Error(), Code: registeredCode}
-	if errcode.NewJSONFormat(code) != jsonExpected {
+	if !reflect.DeepEqual(errcode.NewJSONFormat(code), jsonExpected) {
 		t.Errorf("\nJSON expected: %+v\n JSON but got: %+v", jsonExpected, errcode.NewJSONFormat(code))
 	}
 }
