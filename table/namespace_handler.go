@@ -58,16 +58,16 @@ func (h *tableNamespaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func readJSONRespondError(r *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) (err error) {
-	if err = apiutil.ReadJSON(body, &data); err != nil {
-		switch err.(type) {
-		case apiutil.JSONError:
-			r.JSON(w, http.StatusBadRequest, err.Error())
-		default:
-			r.JSON(w, http.StatusInternalServerError, err.Error())
-
-		}
+	err = apiutil.ReadJSON(body, &data)
+	if err == nil {
+		return nil
 	}
-	return
+	status := http.StatusInternalServerError
+	if _, ok := errors.Cause(err).(apiutil.JSONError); ok {
+		status = http.StatusBadRequest
+	}
+	r.JSON(w, status, err.Error())
+	return err
 }
 
 // Post creates a namespace.
