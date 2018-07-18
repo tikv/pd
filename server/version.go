@@ -42,7 +42,7 @@ var featuresDict = map[Feature]semver.Version{
 func MinSupportedVersion(v Feature) semver.Version {
 	target, ok := featuresDict[v]
 	if !ok {
-		log.Fatalf("version not exist, feature %d", v)
+		log.Fatalf("the corresponding version of the feature %d doesn't exist", v)
 	}
 	return target
 }
@@ -66,7 +66,7 @@ func MustParseVersion(v string) *semver.Version {
 	return ver
 }
 
-// IsCompatible checks if the clusterVersion is compatible with the specify version.
+// IsCompatible checks if the clusterVersion is compatible with the specified version.
 func IsCompatible(clusterVersion, v semver.Version) bool {
 	if clusterVersion.LessThan(v) {
 		return true
