@@ -88,7 +88,7 @@ func (s *testServer) Stop() error {
 	return nil
 }
 
-func (s *testServer) Destory() error {
+func (s *testServer) Destroy() error {
 	s.Lock()
 	defer s.Unlock()
 	if s.state == Running {
@@ -249,9 +249,9 @@ func (c *testCluster) Join() (*testServer, error) {
 	return s, nil
 }
 
-func (c *testCluster) Destory() error {
+func (c *testCluster) Destroy() error {
 	for _, s := range c.servers {
-		err := s.Destory()
+		err := s.Destroy()
 		if err != nil {
 			return errors.Trace(err)
 		}
