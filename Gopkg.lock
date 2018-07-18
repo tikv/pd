@@ -259,15 +259,14 @@
   revision = "1c287c953996ab3a0bf535dba9d53d809d3dc0b6"
 
 [[projects]]
-  branch = "check-policy"
+  branch = "master"
   name = "github.com/pingcap/kvproto"
   packages = [
     "pkg/eraftpb",
     "pkg/metapb",
     "pkg/pdpb"
   ]
-  revision = "2bc6e19fc4be685376a7cdd3460f957c03312101"
-  source = "github.com/connor1996/kvproto"
+  revision = "7f09068ced84187574699b956cf09530b54884c2"
 
 [[projects]]
   name = "github.com/prometheus/client_golang"
@@ -501,6 +500,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "c2252488f03fcdb5e3f77a04667575f9427441294fb0badfa3fa7fe4efef0e11"
+  inputs-digest = "2bf7150e00a5771891754cdf0f5384ded938c1e9cefe9bc8f4822232aac736c9"
   solver-name = "gps-cdcl"
   solver-version = 1
