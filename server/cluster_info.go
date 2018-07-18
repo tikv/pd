@@ -419,7 +419,7 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	storeID := stats.GetStoreId()
 	store := c.core.Stores.GetStore(storeID)
 	if store == nil {
-		return errors.Trace(core.ErrStoreNotFound(storeID))
+		return core.NewStoreNotFoundErr(storeID)
 	}
 	store.Stats = proto.Clone(stats).(*pdpb.StoreStats)
 	store.LastHeartbeatTS = time.Now()

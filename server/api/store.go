@@ -22,6 +22,8 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/apiutil"
+	"github.com/pingcap/pd/pkg/error_code"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
@@ -138,10 +140,9 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	storeIDStr := vars["id"]
-	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -158,19 +159,19 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
+		errorResp(h.rd, w, errcode.NewInternalErr(server.ErrNotBootstrapped))
 		return
 	}
 
 	vars := mux.Vars(r)
-	storeIDStr := vars["id"]
-	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 
 	_, force := r.URL.Query()["force"]
+	var err error
 	if force {
 		err = cluster.BuryStore(storeID, force)
 	} else {
@@ -178,7 +179,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		errorResp(h.rd, w, err)
 		return
 	}
 
@@ -193,10 +194,9 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	storeIDStr := vars["id"]
-	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -207,7 +207,7 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = cluster.SetStoreState(storeID, metapb.StoreState(state))
+	err := cluster.SetStoreState(storeID, metapb.StoreState(state))
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -224,10 +224,9 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	storeIDStr := vars["id"]
-	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -260,10 +259,9 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	storeIDStr := vars["id"]
-	storeID, err := strconv.ParseUint(storeIDStr, 10, 64)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 

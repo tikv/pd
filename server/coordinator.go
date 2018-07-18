@@ -639,7 +639,9 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 		c.hbStreams.sendMsg(region, cmd)
 	case schedule.SplitRegion:
 		cmd := &pdpb.RegionHeartbeatResponse{
-			SplitRegion: &pdpb.SplitRegion{},
+			SplitRegion: &pdpb.SplitRegion{
+				Policy: s.Policy,
+			},
 		}
 		c.hbStreams.sendMsg(region, cmd)
 	default:

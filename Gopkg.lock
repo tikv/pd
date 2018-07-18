@@ -266,8 +266,12 @@
     "pkg/metapb",
     "pkg/pdpb"
   ]
+<<<<<<< HEAD
   revision = "7e27708b456d3d668fe68f774c86d50d7bdacc30"
   source = "https://github.com/nolouch/kvproto"
+=======
+  revision = "7f09068ced84187574699b956cf09530b54884c2"
+>>>>>>> upstream/master
 
 [[projects]]
   name = "github.com/prometheus/client_golang"
@@ -501,6 +505,10 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
+<<<<<<< HEAD
   inputs-digest = "094f5ca6f62c8202f437b648a06ac9aed91ce959c6ca3867ce56c626d32d916f"
+=======
+  inputs-digest = "2bf7150e00a5771891754cdf0f5384ded938c1e9cefe9bc8f4822232aac736c9"
+>>>>>>> upstream/master
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -341,7 +341,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 
 	store := cluster.GetStore(storeID)
 	if store == nil {
-		return errors.Trace(core.ErrStoreNotFound(storeID))
+		return core.NewStoreNotFoundErr(storeID)
 	}
 
 	// Remove an offline store should be OK, nothing to do.
@@ -350,7 +350,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	}
 
 	if store.IsTombstone() {
-		return errors.New("store has been removed")
+		return core.StoreTombstonedErr{StoreID: storeID, Operation: "remove"}
 	}
 
 	store.State = metapb.StoreState_Offline
@@ -370,7 +370,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 
 	store := cluster.GetStore(storeID)
 	if store == nil {
-		return errors.Trace(core.ErrStoreNotFound(storeID))
+		return core.NewStoreNotFoundErr(storeID)
 	}
 
 	// Bury a tombstone store should be OK, nothing to do.
@@ -399,7 +399,7 @@ func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) err
 
 	store := cluster.GetStore(storeID)
 	if store == nil {
-		return errors.Trace(core.ErrStoreNotFound(storeID))
+		return core.NewStoreNotFoundErr(storeID)
 	}
 
 	store.State = state
@@ -414,7 +414,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) err
 
 	store := c.cachedCluster.GetStore(storeID)
 	if store == nil {
-		return errors.Trace(core.ErrStoreNotFound(storeID))
+		return core.NewStoreNotFoundErr(storeID)
 	}
 
 	if err := c.s.kv.SaveStoreWeight(storeID, leader, region); err != nil {

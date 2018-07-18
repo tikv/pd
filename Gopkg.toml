@@ -26,5 +26,4 @@
 
 [[constraint]]
   name = "github.com/pingcap/kvproto"
-  source = "https://github.com/nolouch/kvproto"
-  branch = "version-introduce"
+  branch = "master"
