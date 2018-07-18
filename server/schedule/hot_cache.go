@@ -49,16 +49,19 @@ func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stores *core.StoresIn
 		WrittenBytesPerSec uint64
 		value              *core.RegionStat
 	)
+
+	WrittenBytesPerSec = uint64(float64(region.WrittenBytes) / float64(RegionHeartBeatReportInterval))
+
 	v, isExist := w.writeFlow.Peek(region.GetId())
-	if isExist && !Simulating {
+	if isExist {
 		value = v.(*core.RegionStat)
-		interval := time.Since(value.LastUpdateTime).Seconds()
-		if interval < minHotRegionReportInterval {
-			return false, nil
+		if !Simulating {
+			interval := time.Since(value.LastUpdateTime).Seconds()
+			if interval < minHotRegionReportInterval {
+				return false, nil
+			}
+			WrittenBytesPerSec = uint64(float64(region.WrittenBytes) / interval)
 		}
-		WrittenBytesPerSec = uint64(float64(region.WrittenBytes) / interval)
-	} else {
-		WrittenBytesPerSec = uint64(float64(region.WrittenBytes) / float64(RegionHeartBeatReportInterval))
 	}
 
 	hotRegionThreshold := calculateWriteHotThreshold(stores)
@@ -71,17 +74,21 @@ func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stores *core.StoresInf
 		ReadBytesPerSec uint64
 		value           *core.RegionStat
 	)
+
+	ReadBytesPerSec = uint64(float64(region.ReadBytes) / float64(RegionHeartBeatReportInterval))
+
 	v, isExist := w.readFlow.Peek(region.GetId())
-	if isExist && !Simulating {
+	if isExist {
 		value = v.(*core.RegionStat)
-		interval := time.Since(value.LastUpdateTime).Seconds()
-		if interval < minHotRegionReportInterval {
-			return false, nil
+		if !Simulating {
+			interval := time.Since(value.LastUpdateTime).Seconds()
+			if interval < minHotRegionReportInterval {
+				return false, nil
+			}
+			ReadBytesPerSec = uint64(float64(region.ReadBytes) / interval)
 		}
-		ReadBytesPerSec = uint64(float64(region.ReadBytes) / interval)
-	} else {
-		ReadBytesPerSec = uint64(float64(region.ReadBytes) / float64(RegionHeartBeatReportInterval))
 	}
+
 	hotRegionThreshold := calculateReadHotThreshold(stores)
 	return w.isNeedUpdateStatCache(region, ReadBytesPerSec, hotRegionThreshold, value, ReadFlow)
 }

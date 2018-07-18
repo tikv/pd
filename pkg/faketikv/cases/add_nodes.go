@@ -57,10 +57,10 @@ func newAddNodes() *Conf {
 			regionCount := regions.GetStoreRegionCount(uint64(i))
 			leaderCounts = append(leaderCounts, leaderCount)
 			regionCounts = append(regionCounts, regionCount)
-			if leaderCount > 130 || leaderCount < 120 {
+			if leaderCount > 135 || leaderCount < 120 {
 				res = false
 			}
-			if regionCount > 380 || regionCount < 360 {
+			if regionCount > 385 || regionCount < 360 {
 				res = false
 			}
 

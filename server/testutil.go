@@ -25,6 +25,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/tempurl"
 	"github.com/pingcap/pd/pkg/typeutil"
+
 	// Register namespace classifiers.
 	_ "github.com/pingcap/pd/table"
 )
@@ -79,6 +80,9 @@ func NewTestSingleConfig() *Config {
 	cfg.leaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
 
 	cfg.adjust(nil)
+
+	cfg.Schedule.RegionScheduleLimit = 128
+
 	return cfg
 }
 

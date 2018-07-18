@@ -561,7 +561,7 @@ func (r *RegionsInfo) SearchRegion(regionKey []byte) *RegionInfo {
 	return r.GetRegion(region.GetId())
 }
 
-// GetRegions get a set of RegionInfo from regionMap
+// GetRegions gets all RegionInfo from regionMap
 func (r *RegionsInfo) GetRegions() []*RegionInfo {
 	regions := make([]*RegionInfo, 0, r.regions.Len())
 	for _, region := range r.regions.m {
