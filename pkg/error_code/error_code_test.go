@@ -24,9 +24,9 @@ import (
 
 type MinimalError struct{}
 
-const registeredCode errcode.RegisteredCode = "registeredCode"
-
 var _ errcode.ErrorCode = (*MinimalError)(nil) // assert implements interface
+
+const registeredCode errcode.RegisteredCode = "registeredCode"
 
 func (e MinimalError) Code() errcode.RegisteredCode {
 	return registeredCode
@@ -35,9 +35,25 @@ func (e MinimalError) Error() string {
 	return "error"
 }
 
+type HTTPError struct{}
+
+var _ errcode.ErrorCode = (*HTTPError)(nil)   // assert implements interface
+var _ errcode.HasHTTPCode = (*HTTPError)(nil) // assert implements interface
+
+func (e HTTPError) Code() errcode.RegisteredCode {
+	return registeredCode
+}
+func (e HTTPError) Error() string {
+	return "error"
+}
+func (e HTTPError) GetHTTPCode() int {
+	return 900
+}
+
 type ErrorWrapper struct{ Err error }
 
-var _ errcode.ErrorCode = (*ErrorWrapper)(nil) // assert implements interface
+var _ errcode.ErrorCode = (*ErrorWrapper)(nil)     // assert implements interface
+var _ errcode.HasClientData = (*ErrorWrapper)(nil) // assert implements interface
 
 func (e ErrorWrapper) Code() errcode.RegisteredCode {
 	return registeredCode
@@ -71,6 +87,13 @@ func (e Struct2) Error() string {
 
 var emptyStruct struct{}
 
+func TestHttpErrorCode(t *testing.T) {
+	http := HTTPError{}
+	AssertHTTPCode(t, http, 900)
+	ErrorEquals(t, http, "error")
+	ClientDataEquals(t, http, http)
+}
+
 func TestMinimalErrorCode(t *testing.T) {
 	minimal := MinimalError{}
 	AssertCodes(t, minimal)
@@ -99,8 +122,12 @@ func AssertCodes(t *testing.T, code errcode.ErrorCode) {
 	if code.Code() != registeredCode {
 		t.Error("bad code")
 	}
-	if errcode.HTTPCode(code) != 400 {
-		t.Error("excpected HTTP Code 400")
+	AssertHTTPCode(t, code, 400)
+}
+
+func AssertHTTPCode(t *testing.T, code errcode.ErrorCode, httpCode int) {
+	if errcode.HTTPCode(code) != httpCode {
+		t.Errorf("excpected HTTP Code %v", httpCode)
 	}
 }
 
