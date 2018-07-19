@@ -22,14 +22,21 @@ import (
 type Feature int
 
 // Fetures list.
+// The cluster provides corresponding new features if the cluster version
+// greater than or equal to the required minimum version of the feature.
 const (
 	Base Feature = iota
 	Version2_0
-	// RegionMerge supports the adjacent regions to be merge.
+	// RegionMerge supports the adjacent regions to be merged.
+	// and PD will periodically check if there is enough small
+	// region to be merged. if there is, will send the corresponding
+	// merge command to the TiKV.
 	RegionMerge
 	// RaftLearner supports add a non-voting member in raft members.
+	// and PD scheduling strategy will replace `addPeer` to `addLearner`,`promotoLearner`.
 	RaftLearner
 	// BatchSplit can speed up the region split.
+	// and PD will response the BatchSplit request.
 	BatchSplit
 )
 
