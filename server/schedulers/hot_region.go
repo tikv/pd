@@ -237,6 +237,10 @@ func (h *balanceHotRegionsScheduler) calcScore(items []*core.RegionStat, cluster
 }
 
 func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, storesStat core.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer, *metapb.Peer) {
+	if h.limiter.OperatorCount(schedule.OpRegion) >= cluster.GetRegionScheduleLimit() {
+		return nil, nil, nil
+	}
+
 	srcStoreID := h.selectSrcStore(storesStat)
 	if srcStoreID == 0 {
 		return nil, nil, nil
@@ -295,6 +299,10 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 }
 
 func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, storesStat core.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer) {
+	if h.limiter.OperatorCount(schedule.OpLeader) >= cluster.GetLeaderScheduleLimit() {
+		return nil, nil
+	}
+
 	srcStoreID := h.selectSrcStore(storesStat)
 	if srcStoreID == 0 {
 		return nil, nil

@@ -1034,6 +1034,13 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 			testutil.CheckTransferPeerWithLeaderTransfer(c, op[0], schedule.OpHotRegion, 1, 6)
 		}
 	}
+
+	// hot region scheduler is restricted by schedule limit.
+	opt.RegionScheduleLimit, opt.LeaderScheduleLimit = 0, 0
+	c.Assert(hb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), HasLen, 0)
+	opt.LeaderScheduleLimit = schedule.NewMockSchedulerOptions().LeaderScheduleLimit
+	opt.RegionScheduleLimit = schedule.NewMockSchedulerOptions().RegionScheduleLimit
+
 	// After transfer a hot region from store 1 to store 5
 	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
 	//|-----------|--------------|----------------|----------------|---------------|
@@ -1056,6 +1063,11 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	// We can find that the leader of all hot regions are on store 1,
 	// so one of the leader will transfer to another store.
 	testutil.CheckTransferLeaderFrom(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpHotRegion, 1)
+
+	// hot region scheduler is restricted by schedule limit.
+	opt.LeaderScheduleLimit = 0
+	c.Assert(hb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), HasLen, 0)
+	opt.LeaderScheduleLimit = schedule.NewMockSchedulerOptions().LeaderScheduleLimit
 
 	// Should not panic if region not found.
 	for i := uint64(1); i <= 3; i++ {
