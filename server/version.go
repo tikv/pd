@@ -61,9 +61,11 @@ func MinSupportedVersion(v Feature) semver.Version {
 // ParseVersion wraps semver.NewVersion and handles compatibility issues.
 func ParseVersion(v string) (*semver.Version, error) {
 	// for compatibility with old version which not support `version` mechanism.
-	baseVersion := semver.New(featuresDict[Base])
 	if v == "" {
-		return baseVersion, nil
+		return semver.New(featuresDict[Base]), nil
+	}
+	if v[0] == 'v' {
+		v = v[1:]
 	}
 	return semver.NewVersion(v)
 }

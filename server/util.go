@@ -66,6 +66,18 @@ func PrintPDInfo() {
 	fmt.Println("UTC Build Time: ", PDBuildTS)
 }
 
+// CheckPDVersion checks if PD needs to be upgrapded.
+func CheckPDVersion(opt *scheduleOption) {
+	pdVersion := MinSupportedVersion(Base)
+	if PDReleaseVersion != "None" {
+		pdVersion = *MustParseVersion(PDReleaseVersion)
+	}
+	clusterVersion := opt.loadClusterVersion()
+	if pdVersion.LessThan(clusterVersion) {
+		log.Warnf("PD version %s less than cluster version: %s, please upgrade PD", pdVersion, clusterVersion)
+	}
+}
+
 // A helper function to get value with key from etcd.
 // TODO: return the value revision for outer use.
 func getValue(c *clientv3.Client, key string, opts ...clientv3.OpOption) ([]byte, error) {

@@ -99,8 +99,12 @@ func (c *clusterInfo) OnStoreVersionChange() {
 	}
 	if clusterVersion.LessThan(*minVersion) {
 		c.opt.SetClusterVersion(*minVersion)
-		c.opt.persist(c.kv)
+		err := c.opt.persist(c.kv)
+		if err != nil {
+			log.Infof("persist cluster version meet error: %s", err)
+		}
 		log.Infof("cluster version changed from %s to %s", clusterVersion, minVersion)
+		CheckPDVersion(c.opt)
 	}
 }
 

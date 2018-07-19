@@ -267,6 +267,7 @@ func (s *Server) campaignLeader() error {
 
 	log.Infof("cluster version is %s", s.scheduleOpt.loadClusterVersion())
 	log.Infof("PD cluster leader %s is ready to serve", s.Name())
+	CheckPDVersion(s.scheduleOpt)
 
 	tsTicker := time.NewTicker(updateTimestampStep)
 	defer tsTicker.Stop()
