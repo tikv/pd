@@ -236,7 +236,18 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	labels := make([]*metapb.StoreLabel, 0, len(input))
+	var err error
 	for k, v := range input {
+		err = server.ValidateLabel(k)
+		if err != nil {
+			errorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+			return
+		}
+		err = server.ValidateLabel(v)
+		if err != nil {
+			errorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+			return
+		}
 		labels = append(labels, &metapb.StoreLabel{
 			Key:   k,
 			Value: v,

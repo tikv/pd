@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"net/http"
 	"time"
+	"unicode"
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/golang/protobuf/proto"
@@ -247,5 +248,23 @@ func InitHTTPClient(svr *Server) error {
 		TLSClientConfig:   tlsConfig,
 		DisableKeepAlives: true,
 	}}
+	return nil
+}
+
+// ValidateLabel checks the legality of the label.
+func ValidateLabel(s string) error {
+	if s == "" || !unicode.IsLetter(rune(s[0])) {
+		return errors.Errorf("invalid label, must start with a letter")
+	}
+	last := len(s) - 1
+	if !unicode.IsLetter(rune(s[last])) && !unicode.IsDigit(rune(s[last])) {
+		return errors.Errorf("invalid label, must end with a letter or a number")
+	}
+	for _, c := range s {
+		if unicode.IsLetter(c) || unicode.IsDigit(c) || c == '_' || c == '-' {
+			continue
+		}
+		return errors.Errorf("invalid label, must consit of numbers, letters, underscore or hyphen")
+	}
 	return nil
 }
