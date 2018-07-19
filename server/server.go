@@ -548,11 +548,11 @@ func (s *Server) SetClusterVersion(v string) error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+	s.scheduleOpt.SetClusterVersion(*version)
 	err = s.scheduleOpt.persist(s.kv)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	s.scheduleOpt.SetClusterVersion(*version)
 	log.Infof("cluster version is updated to %s", v)
 	return nil
 }
