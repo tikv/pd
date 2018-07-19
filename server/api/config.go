@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/juju/errors"
+	"github.com/pingcap/pd/pkg/error_code"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
@@ -180,12 +181,12 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 	}
 	version, ok := input["cluster-version"]
 	if !ok {
-		h.rd.JSON(w, http.StatusInternalServerError, "not set cluster version")
+		errorResp(h.rd, w, errcode.NewInvalidInputErr(errors.New("not set cluster-version")))
 		return
 	}
 	err := h.svr.SetClusterVersion(version)
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		errorResp(h.rd, w, errcode.NewInternalErr(err))
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, nil)

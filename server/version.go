@@ -25,17 +25,20 @@ type Feature int
 const (
 	Base Feature = iota
 	Version2_0
+	// RegionMerge supports the adjacent regions to be merge.
 	RegionMerge
+	// RaftLearner supports add a non-voting member in raft members.
 	RaftLearner
+	// BatchSplit can speed up the region split.
 	BatchSplit
 )
 
-var featuresDict = map[Feature]semver.Version{
-	Base:        {Major: 1},
-	Version2_0:  {Major: 2},
-	RegionMerge: {Major: 2, Minor: 0},
-	RaftLearner: {Major: 2, Minor: 0},
-	BatchSplit:  {Major: 2, Minor: 1},
+var featuresDict = map[Feature]string{
+	Base:        "1.0.0",
+	Version2_0:  "2.0.0",
+	RegionMerge: "2.0.0",
+	RaftLearner: "2.0.0",
+	BatchSplit:  "2.1.0",
 }
 
 // MinSupportedVersion returns the minimum support version for the specified feature.
@@ -44,7 +47,8 @@ func MinSupportedVersion(v Feature) semver.Version {
 	if !ok {
 		log.Fatalf("the corresponding version of the feature %d doesn't exist", v)
 	}
-	return target
+	version := MustParseVersion(target)
+	return *version
 }
 
 // ParseVersion wraps semver.NewVersion and handles compatibility issues.
