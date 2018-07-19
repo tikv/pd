@@ -14,6 +14,7 @@
 package faketikv
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/pingcap/kvproto/pkg/eraftpb"
@@ -75,8 +76,70 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 			fromPeer: fromPeer,
 			peer:     changePeer,
 		}
+	} else if resp.GetMerge() != nil {
+		targetRegion := resp.GetMerge().GetTarget()
+		return &mergeRegion{
+			regionID:     regionID,
+			epoch:        epoch,
+			targetRegion: targetRegion,
+		}
 	}
 	return nil
+}
+
+type mergeRegion struct {
+	regionID     uint64
+	epoch        *metapb.RegionEpoch
+	targetRegion *metapb.Region
+	finished     bool
+}
+
+func (m *mergeRegion) Desc() string {
+	return fmt.Sprintf("merge region %d into %d", m.regionID, m.targetRegion.GetId())
+}
+
+func (m *mergeRegion) Step(r *RaftEngine) {
+	if m.finished {
+		return
+	}
+
+	region := r.GetRegion(m.regionID)
+	// If region equals to nil, it means that the region has already been merged.
+	if region == nil || region.RegionEpoch.ConfVer > m.epoch.ConfVer || region.RegionEpoch.Version > m.epoch.Version {
+		m.finished = true
+		return
+	}
+
+	targetRegion := r.GetRegion(m.targetRegion.Id)
+	if bytes.Compare(m.targetRegion.EndKey, region.StartKey) == 0 {
+		targetRegion.EndKey = region.EndKey
+	} else {
+		targetRegion.StartKey = region.StartKey
+	}
+
+	targetRegion.ApproximateSize += region.ApproximateSize
+	targetRegion.ApproximateKeys += region.ApproximateKeys
+
+	if m.epoch.ConfVer > m.targetRegion.RegionEpoch.ConfVer {
+		targetRegion.RegionEpoch.ConfVer = m.epoch.ConfVer
+	}
+
+	if m.epoch.Version > m.targetRegion.RegionEpoch.Version {
+		targetRegion.RegionEpoch.Version = m.epoch.Version
+	}
+	targetRegion.RegionEpoch.Version++
+
+	r.SetRegion(targetRegion)
+	r.recordRegionChange(targetRegion)
+	m.finished = true
+}
+
+func (m *mergeRegion) RegionID() uint64 {
+	return m.regionID
+}
+
+func (m *mergeRegion) IsFinished() bool {
+	return m.finished
 }
 
 type transferLeader struct {
