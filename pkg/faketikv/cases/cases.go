@@ -76,6 +76,7 @@ var confMap = map[string]func() *Conf{
 	"balance-leader": newBalanceLeader,
 	"add-nodes":      newAddNodes,
 	"region-split":   newRegionSplit,
+	"region-merge":   newRegionMerge,
 	"hot-read":       newHotRead,
 	"hot-write":      newHotWrite,
 }

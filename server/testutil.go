@@ -82,6 +82,8 @@ func NewTestSingleConfig() *Config {
 	cfg.adjust(nil)
 
 	cfg.Schedule.RegionScheduleLimit = 128
+	cfg.Schedule.SplitMergeInterval.Duration = 1 * time.Microsecond
+	cfg.Schedule.MergeScheduleLimit = 32
 
 	return cfg
 }
