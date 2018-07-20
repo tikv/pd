@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/schedule"
 	log "github.com/sirupsen/logrus"
+
 	// Register schedulers.
 	_ "github.com/pingcap/pd/server/schedulers"
 	// Register namespace classifiers.

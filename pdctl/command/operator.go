@@ -262,10 +262,11 @@ func removePeerCommandFunc(cmd *cobra.Command, args []string) {
 // NewSplitRegionCommand returns a command to split a region.
 func NewSplitRegionCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "split-region <region_id>",
+		Use:   "split-region <region_id> [--policy=scan|approximate]",
 		Short: "split a region",
 		Run:   splitRegionCommandFunc,
 	}
+	c.Flags().String("policy", "scan", "the policy to get region split key")
 	return c
 }
 
@@ -281,9 +282,19 @@ func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	policy := cmd.Flags().Lookup("policy").Value.String()
+	switch policy {
+	case "scan", "approximate":
+		break
+	default:
+		fmt.Println("Error: unknown policy")
+		return
+	}
+
 	input := make(map[string]interface{})
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
+	input["policy"] = policy
 	postJSON(cmd, operatorsPrefix, input)
 }
 

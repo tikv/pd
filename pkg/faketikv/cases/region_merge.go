@@ -1,9 +1,10 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2018 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// //     http://www.apache.org/licenses/LICENSE-2.0
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,15 +14,17 @@
 package cases
 
 import (
+	"math/rand"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/faketikv/simutil"
 	"github.com/pingcap/pd/server/core"
 )
 
-func newAddNodes() *Conf {
+func newRegionMerge() *Conf {
 	var conf Conf
-
-	for i := 1; i <= 8; i++ {
+	// Initialize the cluster
+	for i := 1; i <= 4; i++ {
 		conf.Stores = append(conf.Stores, Store{
 			ID:        uint64(i),
 			Status:    metapb.StoreState_Up,
@@ -29,45 +32,35 @@ func newAddNodes() *Conf {
 			Available: 9 * gb,
 		})
 	}
-
 	var id idAllocator
-	id.setMaxID(20)
-	for i := 0; i < 1000; i++ {
+	id.setMaxID(4)
+	for i := 0; i < 40; i++ {
+		storeIDs := rand.Perm(4)
 		peers := []*metapb.Peer{
-			{Id: id.nextID(), StoreId: uint64(i)%4 + 1},
-			{Id: id.nextID(), StoreId: uint64(i+1)%4 + 1},
-			{Id: id.nextID(), StoreId: uint64(i+2)%4 + 1},
+			{Id: id.nextID(), StoreId: uint64(storeIDs[0] + 1)},
+			{Id: id.nextID(), StoreId: uint64(storeIDs[1] + 1)},
+			{Id: id.nextID(), StoreId: uint64(storeIDs[2] + 1)},
 		}
 		conf.Regions = append(conf.Regions, Region{
 			ID:     id.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
-			Size:   96 * mb,
-			Keys:   960000,
+			Size:   10 * mb,
+			Keys:   100000,
 		})
 	}
 	conf.MaxID = id.maxID
 
+	// Checker description
 	conf.Checker = func(regions *core.RegionsInfo) bool {
-		res := true
-		leaderCounts := make([]int, 0, 8)
-		regionCounts := make([]int, 0, 8)
-		for i := 1; i <= 8; i++ {
-			leaderCount := regions.GetStoreLeaderCount(uint64(i))
-			regionCount := regions.GetStoreRegionCount(uint64(i))
-			leaderCounts = append(leaderCounts, leaderCount)
-			regionCounts = append(regionCounts, regionCount)
-			if leaderCount > 135 || leaderCount < 120 {
-				res = false
-			}
-			if regionCount > 385 || regionCount < 360 {
-				res = false
-			}
+		count1 := regions.GetStoreRegionCount(1)
+		count2 := regions.GetStoreRegionCount(2)
+		count3 := regions.GetStoreRegionCount(3)
+		count4 := regions.GetStoreRegionCount(4)
 
-		}
-		simutil.Logger.Infof("leader counts: %v", leaderCounts)
-		simutil.Logger.Infof("region counts: %v", regionCounts)
-		return res
+		sum := count1 + count2 + count3 + count4
+		simutil.Logger.Infof("region counts: %v %v %v %v", count1, count2, count3, count4)
+		return sum == 30
 	}
 	return &conf
 }
