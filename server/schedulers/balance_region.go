@@ -89,6 +89,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 	sourceLabel := strconv.FormatUint(source.GetId(), 10)
 	balanceRegionCounter.WithLabelValues("source_store", sourceLabel).Inc()
 
+	var hasPotentialTarget bool
 	for i := 0; i < balanceRegionRetryLimit; i++ {
 		region := cluster.RandFollowerRegion(source.GetId(), core.HealthRegion())
 		if region == nil {
@@ -114,6 +115,11 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 			continue
 		}
 
+		if !s.hasPotentialTarget(cluster, region, source, opInfluence) {
+			continue
+		}
+		hasPotentialTarget = true
+
 		oldPeer := region.GetStorePeer(source.GetId())
 		if op := s.transferPeer(cluster, region, oldPeer, opInfluence); op != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
@@ -121,10 +127,13 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 		}
 	}
 
-	// If no operator can be created for the selected store, ignore it for a while.
-	log.Debugf("[%s] no operator created for selected store%d", s.GetName(), source.GetId())
-	balanceRegionCounter.WithLabelValues("add_taint", sourceLabel).Inc()
-	s.taintStores.Put(source.GetId())
+	if !hasPotentialTarget {
+		// If no potential target store can be found for the selected store, ignore it for a while.
+		log.Debugf("[%s] no operator created for selected store%d", s.GetName(), source.GetId())
+		balanceRegionCounter.WithLabelValues("add_taint", sourceLabel).Inc()
+		s.taintStores.Put(source.GetId())
+	}
+
 	return nil
 }
 
@@ -164,4 +173,30 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	balanceRegionCounter.WithLabelValues("move_peer", fmt.Sprintf("store%d-out", source.GetId())).Inc()
 	balanceRegionCounter.WithLabelValues("move_peer", fmt.Sprintf("store%d-in", target.GetId())).Inc()
 	return schedule.CreateMovePeerOperator("balance-region", cluster, region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+}
+
+// hasPotentialTarget is used to determine whether the specified sourceStore
+// cannot find a matching targetStore in the long term.
+// The main factor for judgment includes StoreState, DistinctScore, and
+// ResourceScore, while excludes factors such as ServerBusy, too many snapshot,
+// which may recover soon.
+func (s *balanceRegionScheduler) hasPotentialTarget(cluster schedule.Cluster, region *core.RegionInfo, source *core.StoreInfo, opInfluence schedule.OpInfluence) bool {
+	filters := []schedule.Filter{
+		schedule.NewExcludedFilter(nil, region.GetStoreIds()),
+		schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(region), source),
+	}
+
+	for _, store := range cluster.GetStores() {
+		if schedule.FilterTarget(cluster, store, filters) {
+			continue
+		}
+		if !store.IsUp() || store.DownTime() > cluster.GetMaxStoreDownTime() {
+			continue
+		}
+		if !shouldBalance(cluster, source, store, region, core.RegionKind, opInfluence) {
+			continue
+		}
+		return true
+	}
+	return false
 }
