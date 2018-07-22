@@ -49,9 +49,6 @@ type CodeStr string
 
 func (str CodeStr) String() string { return string(str) }
 
-// MetaData is attached to Code for extensibility
-type MetaData map[string]interface{}
-
 // A Code has a CodeStr representation.
 // It is attached to a Parent to find metadata from it.
 // The Meta field is provided for extensibility: e.g. attaching HTTP codes.
@@ -60,9 +57,6 @@ type Code struct {
 	// This allows for equality comparison based on CodeStr.
 	CodeStr CodeStr
 	Parent  *Code
-	// meta data is expected to be sparse, so this field is allocated lazily
-	// by MetaGet and MetaSet.
-	meta MetaData
 }
 
 // NewCode create a new top-level code.
@@ -87,54 +81,40 @@ func (code Code) Child(childStr CodeStr) Code {
 	return child
 }
 
-// MetaGet retrieves MetaData from a Code with the same semantics as a map lookup
-// Internally it avoids allocating an empty map of MetaData.
-func (code Code) MetaGet(key string) (interface{}, bool) {
-	if code.meta == nil {
-		return nil, false
-	}
-	v, ok := code.meta[key]
-	return v, ok
-}
-
-// MetaSet sets MetaData in a Code with the same semantics as a map set
-// Internally this method and MetaGet safely avoid allocating an empty map of MetaData.
-func (code *Code) MetaSet(key string, value interface{}) {
-	if code.meta == nil {
-		code.meta = make(MetaData)
-	}
-	code.meta[key] = value
-}
+// MetaData is a pattern for attaching meta data to codes and inheriting it from a parent.
+// See MetaDataFromAncestors.
+// This is used to attach a HTTP code to a Code.
+type MetaData map[CodeStr]interface{}
 
 // MetaDataFromAncestors looks for meta data starting at the current code.
 // If not found, it traverses up the hierarchy
 // by looking for the first ancestor with the given metadata key.
 // This is used in the HTTPCode implementation to inherit the HTTP Code from ancestors.
-func (code Code) MetaDataFromAncestors(key string) interface{} {
-	if existing, ok := code.MetaGet(key); ok {
+func (code Code) MetaDataFromAncestors(metaData MetaData) interface{} {
+	if existing, ok := metaData[code.CodeStr]; ok {
 		return existing
 	}
 	if code.Parent == nil {
 		return nil
 	}
-	return (*code.Parent).MetaDataFromAncestors(key)
+	return (*code.Parent).MetaDataFromAncestors(metaData)
 }
 
-const httpMetaDataKey = "http"
+var httpMetaData = make(MetaData)
 
 // SetHTTP adds a HTTP code to the meta data
 func (code Code) SetHTTP(httpCode int) Code {
-	if existingCode, ok := code.MetaGet(httpMetaDataKey); ok {
+	if existingCode, ok := httpMetaData[code.CodeStr]; ok {
 		panic(fmt.Sprintf("http already exists %v for %+v", existingCode, code))
 	}
-	code.MetaSet(httpMetaDataKey, httpCode)
+	httpMetaData[code.CodeStr] = httpCode
 	return code
 }
 
 // HTTPCode retrieves the HTTP code for a code or its first ancestor with a HTTP code.
 // If none are specified, it defaults to 400 BadRequest
 func (code Code) HTTPCode() int {
-	httpCode := code.MetaDataFromAncestors(httpMetaDataKey)
+	httpCode := code.MetaDataFromAncestors(httpMetaData)
 	if httpCode == nil {
 		return http.StatusBadRequest
 	}

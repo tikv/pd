@@ -27,7 +27,9 @@ type HTTPError struct{}
 
 func (e HTTPError) Error() string { return "error" }
 
-var codeHttp900 = errcode.InvalidInputCode.Child(codeString).SetHTTP(900)
+const httpCodeStr = "input.http"
+
+var codeHttp900 = errcode.InvalidInputCode.Child(httpCodeStr).SetHTTP(900)
 
 func (e HTTPError) Code() errcode.Code {
 	return codeHttp900
@@ -37,7 +39,7 @@ func TestHttpErrorCode(t *testing.T) {
 	http := HTTPError{}
 	AssertHTTPCode(t, http, 900)
 	ErrorEquals(t, http, "error")
-	ClientDataEquals(t, http, http)
+	ClientDataEquals(t, http, http, httpCodeStr)
 }
 
 // Test a very simple error
@@ -155,6 +157,7 @@ func TestErrorWrapperCode(t *testing.T) {
 }
 
 func AssertCodes(t *testing.T, code errcode.ErrorCode, codeStrs ...errcode.CodeStr) {
+	t.Helper()
 	AssertCode(t, code, codeStrs...)
 	AssertHTTPCode(t, code, 400)
 }
