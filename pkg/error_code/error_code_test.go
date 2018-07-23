@@ -186,7 +186,7 @@ func AssertCode(t *testing.T, code errcode.ErrorCode, codeStrs ...errcode.CodeSt
 	if len(codeStrs) > 0 {
 		codeStr = codeStrs[0]
 	}
-	if code.Code().CodeStr != codeStr {
+	if code.Code().CodeStr() != codeStr {
 		t.Error("bad code")
 	}
 }

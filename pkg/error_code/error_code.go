@@ -53,17 +53,21 @@ func (str CodeStr) String() string { return string(str) }
 // It is attached to a Parent to find metadata from it.
 // The Meta field is provided for extensibility: e.g. attaching HTTP codes.
 type Code struct {
-	// CodeStr contains the full dot-separted path.
-	// This allows for equality comparison based on CodeStr.
-	CodeStr CodeStr
+	codeStr CodeStr
 	Parent  *Code
+}
+
+// CodeStr gives the full dot-separted path.
+// This is what should be used for equality comparison.
+func (code Code) CodeStr() CodeStr {
+	return code.codeStr
 }
 
 // NewCode create a new top-level code.
 // A top-level code must not contain any dot separators: that will panic
 // Most codes should be created from hierachy with the Child method.
 func NewCode(codeRep CodeStr) Code {
-	code := Code{CodeStr: codeRep}
+	code := Code{codeStr: codeRep}
 	if err := code.checkCodePath(); err != nil {
 		panic(err)
 	}
@@ -74,8 +78,8 @@ func NewCode(codeRep CodeStr) Code {
 // childStr must include the parent codes with dot-separation for documentation purposes.
 // An incorrect parent reference in the string panics.
 func (code Code) Child(childStr CodeStr) Code {
-	child := Code{CodeStr: childStr, Parent: &code}
-	child.CodeStr = child.fullPath()
+	child := Code{codeStr: childStr, Parent: &code}
+	child.codeStr = child.fullPath()
 	if err := child.checkCodePath(); err != nil {
 		panic(err)
 	}
@@ -92,7 +96,7 @@ type MetaData map[CodeStr]interface{}
 // by looking for the first ancestor with the given metadata key.
 // This is used in the HTTPCode implementation to inherit the HTTP Code from ancestors.
 func (code Code) MetaDataFromAncestors(metaData MetaData) interface{} {
-	if existing, ok := metaData[code.CodeStr]; ok {
+	if existing, ok := metaData[code.CodeStr()]; ok {
 		return existing
 	}
 	if code.Parent == nil {
@@ -105,10 +109,10 @@ var httpMetaData = make(MetaData)
 
 // SetHTTP adds a HTTP code to the meta data
 func (code Code) SetHTTP(httpCode int) Code {
-	if existingCode, ok := httpMetaData[code.CodeStr]; ok {
+	if existingCode, ok := httpMetaData[code.CodeStr()]; ok {
 		panic(fmt.Sprintf("http already exists %v for %+v", existingCode, code))
 	}
-	httpMetaData[code.CodeStr] = httpCode
+	httpMetaData[code.CodeStr()] = httpCode
 	return code
 }
 
@@ -205,7 +209,7 @@ func NewJSONFormat(errCode ErrorCode) JSONFormat {
 	return JSONFormat{
 		Data: data,
 		Msg:  errCode.Error(),
-		Code: errCode.Code().CodeStr,
+		Code: errCode.Code().CodeStr(),
 	}
 }
 
@@ -292,29 +296,29 @@ var _ HasClientData = (*notFoundErr)(nil) // assert implements interface
 // If only the child path is given (no dots), get the full hierachy path.
 func (code Code) fullPath() CodeStr {
 	if code.Parent == nil {
-		return code.CodeStr
+		return code.codeStr
 	}
-	if strings.Contains(code.CodeStr.String(), ".") {
-		return code.CodeStr
+	if strings.Contains(code.codeStr.String(), ".") {
+		return code.codeStr
 	}
-	return (*code.Parent).fullPath() + "." + code.CodeStr
+	return (*code.Parent).fullPath() + "." + code.codeStr
 }
 
 // checkCodePath checks that the given code string extends the parent code string
 func (code Code) checkCodePath() error {
-	paths := strings.Split(code.CodeStr.String(), ".")
+	paths := strings.Split(code.codeStr.String(), ".")
 	if code.Parent == nil {
 		if len(paths) > 1 {
-			return fmt.Errorf("expected no parent paths: %#v", code.CodeStr)
+			return fmt.Errorf("expected no parent paths: %#v", code.codeStr)
 		}
 	} else {
 		parent := *code.Parent
 		if len(paths) == 1 {
-			return fmt.Errorf("got %#v but expected a path to parent %#v", code.CodeStr, parent.CodeStr)
+			return fmt.Errorf("got %#v but expected a path to parent %#v", code.codeStr, parent.codeStr)
 		}
 		parentPath := strings.Join(paths[:len(paths)-1], ".")
-		if parentPath != parent.CodeStr.String() {
-			return fmt.Errorf("got %#v but expected a path to parent %#v for %#v", parentPath, parent.CodeStr, code.CodeStr)
+		if parentPath != parent.codeStr.String() {
+			return fmt.Errorf("got %#v but expected a path to parent %#v for %#v", parentPath, parent.codeStr, code.codeStr)
 		}
 	}
 	return nil
