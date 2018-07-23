@@ -53,6 +53,8 @@ func (str CodeStr) String() string { return string(str) }
 // It is attached to a Parent to find metadata from it.
 // The Meta field is provided for extensibility: e.g. attaching HTTP codes.
 type Code struct {
+	// codeStr does not include parent paths
+	// The full code (with parent paths) is accessed with CodeStr
 	codeStr CodeStr
 	Parent  *Code
 }
@@ -60,7 +62,10 @@ type Code struct {
 // CodeStr gives the full dot-separted path.
 // This is what should be used for equality comparison.
 func (code Code) CodeStr() CodeStr {
-	return code.codeStr
+	if code.Parent == nil {
+		return code.codeStr
+	}
+	return (*code.Parent).CodeStr() + "." + code.codeStr
 }
 
 // NewCode create a new top-level code.
@@ -75,14 +80,16 @@ func NewCode(codeRep CodeStr) Code {
 }
 
 // Child creates a new code from a parent.
-// childStr must include the parent codes with dot-separation for documentation purposes.
+// For documentation purposes, a childStr may include the parent codes with dot-separation.
 // An incorrect parent reference in the string panics.
 func (code Code) Child(childStr CodeStr) Code {
 	child := Code{codeStr: childStr, Parent: &code}
-	child.codeStr = child.fullPath()
 	if err := child.checkCodePath(); err != nil {
 		panic(err)
 	}
+	// Don't store parent paths, those are re-constructed in CodeStr()
+	paths := strings.Split(child.codeStr.String(), ".")
+	child.codeStr = CodeStr(paths[len(paths)-1])
 	return child
 }
 
@@ -293,30 +300,20 @@ func NewNotFoundErr(err error) ErrorCode {
 var _ ErrorCode = (*notFoundErr)(nil)     // assert implements interface
 var _ HasClientData = (*notFoundErr)(nil) // assert implements interface
 
-// If only the child path is given (no dots), get the full hierachy path.
-func (code Code) fullPath() CodeStr {
-	if code.Parent == nil {
-		return code.codeStr
-	}
-	if strings.Contains(code.codeStr.String(), ".") {
-		return code.codeStr
-	}
-	return (*code.Parent).fullPath() + "." + code.codeStr
-}
-
-// checkCodePath checks that the given code string extends the parent code string
+// checkCodePath checks that the given code string either
+// contains no dots or extends the parent code string
 func (code Code) checkCodePath() error {
 	paths := strings.Split(code.codeStr.String(), ".")
+	if len(paths) == 1 {
+		return nil
+	}
 	if code.Parent == nil {
 		if len(paths) > 1 {
 			return fmt.Errorf("expected no parent paths: %#v", code.codeStr)
 		}
 	} else {
 		parent := *code.Parent
-		if len(paths) == 1 {
-			return fmt.Errorf("got %#v but expected a path to parent %#v", code.codeStr, parent.codeStr)
-		}
-		parentPath := strings.Join(paths[:len(paths)-1], ".")
+		parentPath := paths[len(paths)-2]
 		if parentPath != parent.codeStr.String() {
 			return fmt.Errorf("got %#v but expected a path to parent %#v for %#v", parentPath, parent.codeStr, code.codeStr)
 		}
