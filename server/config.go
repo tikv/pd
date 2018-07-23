@@ -565,7 +565,7 @@ func (c *ReplicationConfig) clone() *ReplicationConfig {
 
 func (c *ReplicationConfig) validate() error {
 	for _, label := range c.LocationLabels {
-		err := ValidateLabel(label)
+		err := ValidateLabelString(label)
 		if err != nil {
 			return err
 		}
