@@ -260,7 +260,7 @@ const matchRule = "^[A-Za-z0-9]([A-Za-z0-9_-]*[A-Za-z0-9])?$"
 func ValidateLabelString(s string) error {
 	isValid, _ := regexp.MatchString(matchRule, s)
 	if !isValid {
-		return errors.Errorf("invalid label :%s", s)
+		return errors.Errorf("invalid label: %s", s)
 	}
 	return nil
 }

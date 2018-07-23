@@ -66,10 +66,6 @@ func (s *testUtilSuite) TestVerifyLabels(c *C) {
 	}
 	for _, t := range tests {
 		err := ValidateLabelString(t.label)
-		if t.hasErr {
-			c.Assert(err, NotNil)
-			continue
-		}
-		c.Assert(err, IsNil)
+		c.Assert(err != nil, Equals, t.hasErr)
 	}
 }
