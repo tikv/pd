@@ -350,7 +350,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	}
 
 	if store.IsTombstone() {
-		return core.StoreTombstonedErr{StoreID: storeID, Operation: "remove"}
+		return core.StoreTombstonedErr{StoreID: storeID, Operation: "store.remove"}
 	}
 
 	store.State = metapb.StoreState_Offline
