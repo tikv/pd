@@ -75,6 +75,7 @@ func NewCode(codeRep CodeStr) Code {
 // An incorrect parent reference in the string panics.
 func (code Code) Child(childStr CodeStr) Code {
 	child := Code{CodeStr: childStr, Parent: &code}
+	child.CodeStr = child.fullPath()
 	if err := child.checkCodePath(); err != nil {
 		panic(err)
 	}
@@ -287,6 +288,17 @@ func NewNotFoundErr(err error) ErrorCode {
 
 var _ ErrorCode = (*notFoundErr)(nil)     // assert implements interface
 var _ HasClientData = (*notFoundErr)(nil) // assert implements interface
+
+// If only the child path is given (no dots), get the full hierachy path.
+func (code Code) fullPath() CodeStr {
+	if code.Parent == nil {
+		return code.CodeStr
+	}
+	if strings.Contains(code.CodeStr.String(), ".") {
+		return code.CodeStr
+	}
+	return (*code.Parent).fullPath() + "." + code.CodeStr
+}
 
 // checkCodePath checks that the given code string extends the parent code string
 func (code Code) checkCodePath() error {

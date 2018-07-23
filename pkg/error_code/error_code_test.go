@@ -62,6 +62,24 @@ func TestMinimalErrorCode(t *testing.T) {
 	ClientDataEquals(t, minimal, minimal)
 }
 
+// We don't prevent duplicate codes
+var childPathOnlyCode errcode.Code = errcode.InvalidInputCode.Child("testcode")
+
+type ChildOnlyError struct{}
+
+func (e ChildOnlyError) Error() string { return "error" }
+
+var _ errcode.ErrorCode = (*ChildOnlyError)(nil) // assert implements interface
+
+func (e ChildOnlyError) Code() errcode.Code { return childPathOnlyCode }
+
+func TestChildOnlyErrorCode(t *testing.T) {
+	coe := ChildOnlyError{}
+	AssertCodes(t, coe)
+	ErrorEquals(t, coe, "error")
+	ClientDataEquals(t, coe, coe)
+}
+
 // Test a top-level error
 type TopError struct{}
 
