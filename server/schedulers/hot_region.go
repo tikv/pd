@@ -119,7 +119,17 @@ func (h *balanceHotRegionsScheduler) GetType() string {
 }
 
 func (h *balanceHotRegionsScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return h.limiter.OperatorCount(schedule.OpHotRegion) < h.limit
+	return h.allowBalanceLeader(cluster) || h.allowBalanceRegion(cluster)
+}
+
+func (h *balanceHotRegionsScheduler) allowBalanceLeader(cluster schedule.Cluster) bool {
+	return h.limiter.OperatorCount(schedule.OpHotRegion) < h.limit &&
+		h.limiter.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
+}
+
+func (h *balanceHotRegionsScheduler) allowBalanceRegion(cluster schedule.Cluster) bool {
+	return h.limiter.OperatorCount(schedule.OpHotRegion) < h.limit &&
+		h.limiter.OperatorCount(schedule.OpRegion) < cluster.GetRegionScheduleLimit()
 }
 
 func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
@@ -237,7 +247,7 @@ func (h *balanceHotRegionsScheduler) calcScore(items []*core.RegionStat, cluster
 }
 
 func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, storesStat core.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer, *metapb.Peer) {
-	if h.limiter.OperatorCount(schedule.OpRegion) >= cluster.GetRegionScheduleLimit() {
+	if !h.allowBalanceRegion(cluster) {
 		return nil, nil, nil
 	}
 
@@ -299,7 +309,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 }
 
 func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, storesStat core.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer) {
-	if h.limiter.OperatorCount(schedule.OpLeader) >= cluster.GetLeaderScheduleLimit() {
+	if !h.allowBalanceLeader(cluster) {
 		return nil, nil
 	}
 
