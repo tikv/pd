@@ -255,8 +255,8 @@ func InitHTTPClient(svr *Server) error {
 const matchRule = "^[A-Za-z]([A-Za-z0-9_-]*[A-Za-z0-9])?$"
 
 // ValidateLabelString checks the legality of the label string.
-// The valid label should start with an alphanumeric character and can have an underscore or hyphen after,
-// but not ending with a hyphen or underscore.
+// The valid label only contain alphanumeric characters, hyphens and underscores,
+// must start with a letter but not ending with a hyphen or underscore.
 func ValidateLabelString(s string) error {
 	isValid, _ := regexp.MatchString(matchRule, s)
 	if !isValid {
