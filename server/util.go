@@ -19,11 +19,13 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/golang/protobuf/proto"
 	"github.com/juju/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	log "github.com/sirupsen/logrus"
@@ -247,5 +249,33 @@ func InitHTTPClient(svr *Server) error {
 		TLSClientConfig:   tlsConfig,
 		DisableKeepAlives: true,
 	}}
+	return nil
+}
+
+const matchRule = "^[A-Za-z]([A-Za-z0-9_-]*[A-Za-z0-9])?$"
+
+// ValidateLabelString checks the legality of the label string.
+// The valid label only contain alphanumeric characters, hyphens and underscores,
+// must start with a letter but not ending with a hyphen or underscore.
+func ValidateLabelString(s string) error {
+	isValid, _ := regexp.MatchString(matchRule, s)
+	if !isValid {
+		return errors.Errorf("invalid label: %s", s)
+	}
+	return nil
+}
+
+// ValidateLabels checks the legality of the labels.
+func ValidateLabels(labels []*metapb.StoreLabel) error {
+	for _, label := range labels {
+		err := ValidateLabelString(label.Key)
+		if err != nil {
+			return err
+		}
+		err = ValidateLabelString(label.Value)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }

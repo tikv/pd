@@ -243,6 +243,11 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	if err := server.ValidateLabels(labels); err != nil {
+		errorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+		return
+	}
+
 	if err := cluster.UpdateStoreLabels(storeID, labels); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
