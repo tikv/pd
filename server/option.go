@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/coreos/go-semver/semver"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
@@ -26,10 +27,11 @@ import (
 
 // scheduleOption is a wrapper to access the configuration safely.
 type scheduleOption struct {
-	v             atomic.Value
-	rep           *Replication
-	ns            map[string]*namespaceOption
-	labelProperty atomic.Value
+	v              atomic.Value
+	rep            *Replication
+	ns             map[string]*namespaceOption
+	labelProperty  atomic.Value
+	clusterVersion atomic.Value
 }
 
 func newScheduleOption(cfg *Config) *scheduleOption {
@@ -42,6 +44,7 @@ func newScheduleOption(cfg *Config) *scheduleOption {
 	}
 	o.rep = newReplication(&cfg.Replication)
 	o.labelProperty.Store(cfg.LabelProperty)
+	o.clusterVersion.Store(cfg.ClusterVersion)
 	return o
 }
 
@@ -245,16 +248,25 @@ func (o *scheduleOption) loadLabelPropertyConfig() LabelPropertyConfig {
 	return o.labelProperty.Load().(LabelPropertyConfig)
 }
 
+func (o *scheduleOption) SetClusterVersion(v semver.Version) {
+	o.clusterVersion.Store(v)
+}
+
+func (o *scheduleOption) loadClusterVersion() semver.Version {
+	return o.clusterVersion.Load().(semver.Version)
+}
+
 func (o *scheduleOption) persist(kv *core.KV) error {
 	namespaces := make(map[string]NamespaceConfig)
 	for name, ns := range o.ns {
 		namespaces[name] = *ns.load()
 	}
 	cfg := &Config{
-		Schedule:      *o.load(),
-		Replication:   *o.rep.load(),
-		Namespace:     namespaces,
-		LabelProperty: o.loadLabelPropertyConfig(),
+		Schedule:       *o.load(),
+		Replication:    *o.rep.load(),
+		Namespace:      namespaces,
+		LabelProperty:  o.loadLabelPropertyConfig(),
+		ClusterVersion: o.loadClusterVersion(),
 	}
 	err := kv.SaveConfig(cfg)
 	return errors.Trace(err)
@@ -266,10 +278,11 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		namespaces[name] = *ns.load()
 	}
 	cfg := &Config{
-		Schedule:      *o.load().clone(),
-		Replication:   *o.rep.load(),
-		Namespace:     namespaces,
-		LabelProperty: o.loadLabelPropertyConfig().clone(),
+		Schedule:       *o.load().clone(),
+		Replication:    *o.rep.load(),
+		Namespace:      namespaces,
+		LabelProperty:  o.loadLabelPropertyConfig().clone(),
+		ClusterVersion: o.loadClusterVersion(),
 	}
 	isExist, err := kv.LoadConfig(cfg)
 	if err != nil {
@@ -284,6 +297,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 			o.ns[name] = newNamespaceOption(&nsCfg)
 		}
 		o.labelProperty.Store(cfg.LabelProperty)
+		o.clusterVersion.Store(cfg.ClusterVersion)
 	}
 	return nil
 }

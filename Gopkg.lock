@@ -269,6 +269,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   revision = "592f63bfb3ab3ef7e55dc2ee57dbb97594930811"
 =======
   revision = "4647096953d282e989b79c6e9b325aec3312b8ac"
@@ -279,6 +280,9 @@
 =======
   revision = "7f09068ced84187574699b956cf09530b54884c2"
 >>>>>>> pd-ctl: add policy selection for split region (#1149)
+=======
+  revision = "5e6e69a5ed381bd4a8afe7cb96cc47f955f6d160"
+>>>>>>> *: Introduce version checking mechanism (#1148)
 
 [[projects]]
   name = "github.com/prometheus/client_golang"
@@ -512,14 +516,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-<<<<<<< HEAD
-<<<<<<< HEAD
-  inputs-digest = "cef70abdcf1674473089991abf1d41fb771013ac22e5bc73ba85675d718de61c"
-=======
-  inputs-digest = "35a10e6b6253a569486ba0313d5234da82e6908b9e18c6c1628d8b596de5fde4"
->>>>>>> Support save and get GC safe point to PD (#1108)
-=======
-  inputs-digest = "2bf7150e00a5771891754cdf0f5384ded938c1e9cefe9bc8f4822232aac736c9"
->>>>>>> pd-ctl: add policy selection for split region (#1149)
+  inputs-digest = "ac20fc02c52f46bfadc23c464c1e9377e5a00e60fd6be6255f58a8e240360b2d"
   solver-name = "gps-cdcl"
   solver-version = 1

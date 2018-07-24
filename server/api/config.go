@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/juju/errors"
+	"github.com/pingcap/pd/pkg/error_code"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
@@ -164,6 +165,28 @@ func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (h *confHandler) GetClusterVersion(w http.ResponseWriter, r *http.Request) {
+	h.rd.JSON(w, http.StatusOK, h.svr.GetClusterVersion())
+}
+
+func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) {
+	input := make(map[string]string)
+	if err := readJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	version, ok := input["cluster-version"]
+	if !ok {
+		errorResp(h.rd, w, errcode.NewInvalidInputErr(errors.New("not set cluster-version")))
+		return
+	}
+	err := h.svr.SetClusterVersion(version)
+	if err != nil {
+		errorResp(h.rd, w, errcode.NewInternalErr(err))
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, nil)

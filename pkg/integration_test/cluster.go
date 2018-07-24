@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/go-semver/semver"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
@@ -114,6 +115,12 @@ func (s *testServer) GetClusterID() uint64 {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.ClusterID()
+}
+
+func (s *testServer) GetClusterVersion() semver.Version {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetClusterVersion()
 }
 
 func (s *testServer) GetServerID() uint64 {

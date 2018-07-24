@@ -218,6 +218,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}
 
 	log.Infof("put store ok - %v", store)
+	cluster.cachedCluster.OnStoreVersionChange()
 
 	return &pdpb.PutStoreResponse{
 		Header: s.header(),
