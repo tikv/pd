@@ -42,6 +42,14 @@ test:
 basic_test:
 	go test $(BASIC_TEST_PKGS)
 
+setup:
+	go get github.com/twitchtv/retool
+	retool add gopkg.in/alecthomas/gometalinter.v2 v2.0.5
+	retool add github.com/kisielk/errcheck v1.1.0
+
+check-slow:
+	CGO_ENABLED=0 retool do gometalinter.v2 --disable-all --enable errcheck server
+
 check:
 	go get github.com/golang/lint/golint
 
