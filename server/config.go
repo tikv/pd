@@ -595,6 +595,7 @@ type NamespaceConfig struct {
 	MaxReplicas uint64 `json:"max-replicas"`
 }
 
+/* unused
 func (c *NamespaceConfig) clone() *NamespaceConfig {
 	return &NamespaceConfig{
 		LeaderScheduleLimit:  c.LeaderScheduleLimit,
@@ -604,6 +605,7 @@ func (c *NamespaceConfig) clone() *NamespaceConfig {
 		MaxReplicas:          c.MaxReplicas,
 	}
 }
+*/
 
 func (c *NamespaceConfig) adjust(opt *scheduleOption) {
 	adjustUint64(&c.LeaderScheduleLimit, opt.GetLeaderScheduleLimit(namespace.DefaultNamespace))

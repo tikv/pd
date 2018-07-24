@@ -85,8 +85,6 @@ func (e Struct2) Error() string {
 	return fmt.Sprintf("error A & B %s & %s", e.A, e.B)
 }
 
-var emptyStruct struct{}
-
 func TestHttpErrorCode(t *testing.T) {
 	http := HTTPError{}
 	AssertHTTPCode(t, http, 900)

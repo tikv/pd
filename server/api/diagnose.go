@@ -16,12 +16,13 @@ package api
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"time"
+
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
-	"net/http"
-	"time"
 )
 
 type diagnoseType int
@@ -34,6 +35,7 @@ type Recommendation struct {
 	Instruction string `json:"instruction"`
 }
 
+//lint:file-ignore U1000 document available levels and modules
 const (
 	// analyze levels
 	levelNormal   = "Normal"

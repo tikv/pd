@@ -51,6 +51,7 @@ func (s *testTrendSuite) TestTrend(c *C) {
 	mustRegionHeartbeat(c, svr, s.newRegionInfo(4, "", "a", 2, 2, []uint64{1, 2}, nil, 2))
 
 	op, err := svr.GetHandler().GetOperator(5)
+	c.Assert(err, IsNil)
 	c.Assert(op, NotNil)
 	newPeerID := op.Step(0).(schedule.AddLearner).PeerID
 	region := s.newRegionInfo(5, "a", "b", 3, 2, []uint64{1, 2}, []uint64{3}, 1)
@@ -61,6 +62,7 @@ func (s *testTrendSuite) TestTrend(c *C) {
 	mustRegionHeartbeat(c, svr, region)
 
 	op, err = svr.GetHandler().GetOperator(6)
+	c.Assert(err, IsNil)
 	c.Assert(op, NotNil)
 	newPeerID = op.Step(0).(schedule.AddLearner).PeerID
 	region = s.newRegionInfo(6, "b", "", 3, 2, []uint64{1, 2}, []uint64{3}, 1)

@@ -129,7 +129,7 @@ func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 }
 
 func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(strings.TrimLeft(addr, "http://"), grpc.WithInsecure())
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
 
 	c.Assert(err, IsNil)
 	return pdpb.NewPDClient(conn)

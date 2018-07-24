@@ -66,16 +66,15 @@ check-slow:
 check:
 	@echo "checking"
 	CGO_ENABLED=0 retool sync
-	# Not running vet and fmt through metalinter becauase it ends up looking at vendor
-	@ gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
+	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
+	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 	retool do vet --shadow $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 
 	CGO_ENABLED=0 retool do gometalinter.v2 --disable-all \
 	  --enable misspell \
+	  --enable megacheck \
 	  $$($(PACKAGE_DIRECTORIES))
 	#  --enable ineffassign \
-	# --enable megacheck \
-	#  --enable misspell \
 
 	@echo "linting"
 	CGO_ENABLED=0 retool do revive -formatter friendly -config revive.toml $$($(PACKAGES))

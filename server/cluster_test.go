@@ -21,7 +21,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server/core"
 	"google.golang.org/grpc"
 )
 
@@ -57,7 +56,7 @@ func (s *testClusterSuite) TearDownSuite(c *C) {
 }
 
 func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(strings.TrimLeft(addr, "http://"), grpc.WithInsecure())
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
 
 	c.Assert(err, IsNil)
 	return pdpb.NewPDClient(conn)
@@ -414,6 +413,7 @@ func (s *testClusterSuite) testRemoveStore(c *C, clusterID uint64, store *metapb
 	}
 }
 
+/* unused
 func (s *testClusterSuite) testCheckStores(c *C, clusterID uint64) {
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
@@ -461,6 +461,7 @@ func (s *testClusterSuite) testCheckStores(c *C, clusterID uint64) {
 	tmpStore = s.getStore(c, clusterID, store.GetId())
 	c.Assert(tmpStore.GetState(), Equals, metapb.StoreState_Tombstone)
 }
+*/
 
 // Make sure PD will not panic if it start and stop again and again.
 func (s *testClusterSuite) TestClosedChannel(c *C) {
