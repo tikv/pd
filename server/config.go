@@ -338,7 +338,9 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	if err := c.Schedule.adjust(); err != nil {
 		return errors.Trace(err)
 	}
-	c.Replication.adjust()
+	if err := c.Replication.adjust(); err != nil {
+		return errors.Trace(err)
+	}
 
 	adjustDuration(&c.heartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
 
@@ -564,8 +566,19 @@ func (c *ReplicationConfig) clone() *ReplicationConfig {
 	}
 }
 
-func (c *ReplicationConfig) adjust() {
+func (c *ReplicationConfig) validate() error {
+	for _, label := range c.LocationLabels {
+		err := ValidateLabelString(label)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *ReplicationConfig) adjust() error {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
+	return c.validate()
 }
 
 // NamespaceConfig is to overwrite the global setting for specific namespace

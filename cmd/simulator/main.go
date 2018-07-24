@@ -22,13 +22,17 @@ import (
 	"syscall"
 	"time"
 
+	etcdlogutil "github.com/coreos/etcd/pkg/logutil"
+	"github.com/coreos/etcd/raft"
 	"github.com/pingcap/pd/pkg/faketikv"
+	"github.com/pingcap/pd/pkg/faketikv/cases"
 	"github.com/pingcap/pd/pkg/faketikv/simutil"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/schedule"
 	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 
 	// Register schedulers.
 	_ "github.com/pingcap/pd/server/schedulers"
@@ -45,6 +49,18 @@ var (
 func main() {
 	flag.Parse()
 
+	initRaftLogger()
+
+	if *confName == "" {
+		for conf := range cases.ConfMap {
+			run(conf)
+		}
+	} else {
+		run(*confName)
+	}
+}
+
+func run(confName string) {
 	simutil.InitLogger(*simLogLevel)
 	start := time.Now()
 
@@ -54,7 +70,7 @@ func main() {
 	if err != nil {
 		simutil.Logger.Fatal("run server error:", err)
 	}
-	driver := faketikv.NewDriver(local.GetAddr(), *confName)
+	driver := faketikv.NewDriver(local.GetAddr(), confName)
 	err = driver.Prepare()
 	if err != nil {
 		simutil.Logger.Fatal("simulator prepare error:", err)
@@ -86,7 +102,7 @@ EXIT:
 	driver.Stop()
 	clean()
 
-	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, *confName, driver.TickCount(), time.Since(start))
+	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, confName, driver.TickCount(), time.Since(start))
 
 	if simResult != "OK" {
 		os.Exit(1)
@@ -117,4 +133,27 @@ func NewSingleServer() (*server.Config, *server.Server, server.CleanupFunc) {
 func cleanServer(cfg *server.Config) {
 	// Clean data directory
 	os.RemoveAll(cfg.DataDir)
+}
+
+func initRaftLogger() {
+	// etcd uses zap as the default Raft logger.
+	lcfg := &zap.Config{
+		Level:       zap.NewAtomicLevelAt(zap.InfoLevel),
+		Development: false,
+		Sampling: &zap.SamplingConfig{
+			Initial:    100,
+			Thereafter: 100,
+		},
+		Encoding:      "json",
+		EncoderConfig: zap.NewProductionEncoderConfig(),
+
+		// Passing no URLs here, because we don't want to output the Raft log.
+		OutputPaths:      []string{},
+		ErrorOutputPaths: []string{},
+	}
+	lg, err := etcdlogutil.NewRaftLogger(lcfg)
+	if err != nil {
+		log.Fatalf("cannot create raft logger %v", err)
+	}
+	raft.SetLogger(lg)
 }
