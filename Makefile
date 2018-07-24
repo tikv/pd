@@ -21,9 +21,9 @@ default: build
 
 all: dev
 
-dev: build simulator check test
+dev: build check test
 
-ci: build simulator check basic_test
+ci: build check basic_test
 
 build:
 ifeq ("$(WITH_RACE)", "1")
@@ -73,5 +73,6 @@ endif
 
 simulator:
 	CGO_ENABLED=0 go build -o bin/simulator cmd/simulator/main.go
+	bin/simulator
 
 .PHONY: update clean
