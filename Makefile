@@ -6,8 +6,7 @@ BASIC_TEST_PKGS := $(filter-out github.com/pingcap/pd/pkg/integration_test,$(TES
 
 PACKAGES := go list ./...
 PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|github.com/pingcap/pd/||'
-GOFILTER := grep -vE 'vendor|testutil'
-GOCHECKER := $(GOFILTER) | awk '{ print } END { if (NR > 0) { exit 1 } }'
+GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 
 LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --dirty)"
 LDFLAGS += -X "$(PD_PKG)/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
@@ -44,9 +43,12 @@ test:
 basic_test:
 	go test $(BASIC_TEST_PKGS)
 
-tool-install:
-	# tool environment
+# setup needs to be ran just once to install dependencies
+setup:
 	go get github.com/twitchtv/retool
+
+tool-install: setup
+	# tool environment
 	# check runner
 	retool add gopkg.in/alecthomas/gometalinter.v2 v2.0.5
 	# check spelling
@@ -74,9 +76,9 @@ static:
 	CGO_ENABLED=0 retool sync
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
-	retool do vet --shadow $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
+	retool do govet --shadow $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 
-	CGO_ENABLED=0 retool do gometalinter.v2 --disable-all \
+	CGO_ENABLED=0 retool do gometalinter.v2 --disable-all --deadline 120s \
 	  --enable misspell \
 	  --enable megacheck \
 	  $$($(PACKAGE_DIRECTORIES))

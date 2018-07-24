@@ -4,7 +4,7 @@ go:
   - 1.10.x
 
 script:
-  - make ci
+  - make setup ci
 
 matrix:
   include:
@@ -14,6 +14,6 @@ matrix:
     env:
       - TRAVIS_COVERAGE=1
     script:
-      - make ci
+      - make setup ci
     after_success:
       - travis_wait make travis_coverage
