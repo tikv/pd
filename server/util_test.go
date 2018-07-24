@@ -59,13 +59,16 @@ func (s *testUtilSuite) TestVerifyLabels(c *C) {
 		{"z_1", false},
 		{"z_1&", true},
 		{"cn", false},
-		{"Zone", false},
+		{"Zo^ne", true},
 		{"z_", true},
 		{"hos&t-15", true},
 		{"_test1", true},
+		{"-test1", true},
+		{"192.168.199.1", false},
+		{"www.pingcap.com", false},
+		{"h_127.0.0.1", false},
 	}
 	for _, t := range tests {
-		err := ValidateLabelString(t.label)
-		c.Assert(err != nil, Equals, t.hasErr)
+		c.Assert(ValidateLabelString(t.label) != nil, Equals, t.hasErr)
 	}
 }
