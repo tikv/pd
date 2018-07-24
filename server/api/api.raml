@@ -165,7 +165,7 @@ types:
       written_bytes?: integer
       read_bytes?: integer
       approximate_size?: integer
-      approximate_rows?: integer
+      approximate_keys?: integer
   RegionEpoch:
     type: object
     properties:
@@ -280,6 +280,9 @@ types:
     discriminatorValue: split-region
     properties:
       region_id: integer
+      policy:
+        type: string
+        enum: [ scan, approximate ]
   ScatterRegionOperator:
     type: Operator
     discriminatorValue: scatter-region
@@ -416,6 +419,8 @@ types:
       responses:
         200:
           description: The PD server is successfully removed.
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
     post:
@@ -428,6 +433,10 @@ types:
       responses:
         200:
           description: The leader priority is updated.
+        400:
+          description: The input is invalid.
+        404:
+          description: The member does not exist.
         500:
           description: PD server failed to proceed the request.
   /id/{id}:
@@ -514,6 +523,8 @@ types:
           body:
             application/json:
               type: ScheduleConfig
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
     post:
@@ -536,6 +547,8 @@ types:
           body:
             application/json:
               type: ReplicationConfig
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
     post:
@@ -562,6 +575,8 @@ types:
           body:
             application/json:
               type: NamespaceConfig
+        404:
+          description: The namespace does not exist.
         500:
           description: PD server failed to proceed the request.
     post:
@@ -573,6 +588,10 @@ types:
       responses:
         200:
           description: The config is updated.
+        400:
+          description: The input is invalid.
+        404:
+          description: The namespace does not exist.
         500:
           description: PD server failed to proceed the request.
     delete:
@@ -580,6 +599,8 @@ types:
       responses:
         200:
           description: The config is removed.
+        404:
+          description: The namespace does not exist.
         500:
           description: PD server failed to proceed the request.
   /label-property:
@@ -591,6 +612,8 @@ types:
           body:
             application/json:
               type: LabelPropertyConfig
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
     post:
@@ -640,6 +663,8 @@ types:
         body:
           application/json:
             type: Store
+      400:
+        description: The input is invalid.
       500:
         description: PD server failed to proceed the request.
   delete:
@@ -650,6 +675,10 @@ types:
     responses:
       200:
         description: The store is set as Offline or Tombstone.
+      400:
+        description: The input is invalid.
+      410:
+        description: The store has already been removed.
       500:
         description: PD server failed to proceed the request.
 
@@ -664,6 +693,8 @@ types:
       responses:
         200:
           description: The store's state is updated.
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
 
@@ -678,6 +709,8 @@ types:
       responses:
         200:
           description: The store's label is updated.
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
 
@@ -693,6 +726,8 @@ types:
       responses:
         200:
           description: The store's weight is udpated.
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
 
@@ -734,6 +769,8 @@ types:
           body:
             application/json:
               type: Region
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
   /key/{key}:
@@ -812,6 +849,10 @@ types:
           body:
             application/json:
               type: Regions
+        400:
+          description: The input is invalid.
+        404:
+          description: The region does not exist.
         500:
           description: PD server failed to proceed the request.
 
@@ -876,6 +917,8 @@ types:
     responses:
       200:
         description: The operator is created.
+      400:
+        description: The input is invalid.
       500:
         description: PD server failed to proceed the request.
   /{regionId}:
@@ -891,6 +934,8 @@ types:
           body:
             application/json:
               type: string
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
     delete:
@@ -898,6 +943,8 @@ types:
       responses:
         200:
           description: The pending operator is cancelled.
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
 
@@ -975,6 +1022,8 @@ types:
     responses:
       200:
         description: The region is removed from server cache.
+      400:
+        description: The input is invalid.
       500:
         description: PD server failed to proceed the request.
 
@@ -989,10 +1038,10 @@ types:
     responses:
       200:
         description: The log level is updated.
+      400:
+        description: The input is invalid.
       500:
         description: PD server failed to proceed the request.
 
 /classifier:
   description: The namespace classifier. Methods depends on current classifier.
-
-
