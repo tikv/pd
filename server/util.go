@@ -252,7 +252,7 @@ func InitHTTPClient(svr *Server) error {
 	return nil
 }
 
-const matchRule = "^[A-Za-z0-9][-A-Za-z0-9_.]*[A-Za-z0-9]$"
+const matchRule = "^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$"
 
 // ValidateLabelString checks the legality of the label string.
 // The valid label consist of alphanumeric characters, '-', '_' or '.',
