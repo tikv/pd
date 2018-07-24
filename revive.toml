@@ -1,5 +1,5 @@
 ignoreGeneratedHeader = false
-severity = "warning"
+severity = "error"
 confidence = 0.8
 errorCode = 0
 warningCode = 0
@@ -12,7 +12,6 @@ warningCode = 0
 [rule.error-naming]
 [rule.exported]
 [rule.if-return]
-[rule.increment-decrement]
 [rule.var-naming]
 [rule.package-comments]
 [rule.range]
@@ -20,8 +19,26 @@ warningCode = 0
 [rule.indent-error-flow]
 [rule.empty-block]
 [rule.superfluous-else]
-[rule.unused-parameter]
-[rule.unreachable-code]
+[rule.modifies-parameter]
+
+# Add these once issues are fixed
+[rule.confusing-naming]
+  severity = "warning"
+[rule.confusing-results]
+  severity = "warning"
+[rule.flag-parameter]
+  severity = "warning"
+
+# Currently this makes too much noise, but should add it in
+# and perhaps ignore it in a few files
+#[rule.unused-parameter]
+#  severity = "warning"
+#[rule.deep-exit]
+#  severity = "warning"
+
+
+# Already checked by megacheck
+# [rule.unreachable-code]
 
 # Adding these will slow down the linter
 # They are already provided by megacheck

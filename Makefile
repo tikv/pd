@@ -63,8 +63,10 @@ tool-install:
 check-slow:
 	CGO_ENABLED=0 retool do gometalinter.v2 --disable-all --enable errcheck server
 
-check:
+check: static lint
 	@echo "checking"
+
+static:
 	CGO_ENABLED=0 retool sync
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
@@ -76,6 +78,7 @@ check:
 	  $$($(PACKAGE_DIRECTORIES))
 	#  --enable ineffassign \
 
+lint:
 	@echo "linting"
 	CGO_ENABLED=0 retool do revive -formatter friendly -config revive.toml $$($(PACKAGES))
 

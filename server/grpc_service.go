@@ -30,6 +30,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+//revive:disable:unused-parameter
+
 // notLeaderError is returned when current server is not the leader and not possible to process request.
 // TODO: work as proxy.
 var notLeaderError = status.Errorf(codes.Unavailable, "not leader")
