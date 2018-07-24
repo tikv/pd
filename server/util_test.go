@@ -47,3 +47,25 @@ func (s *testUtilSuite) TestSubTimeByWallClock(c *C) {
 		c.Assert(duration, Equals, time.Second*time.Duration(r))
 	}
 }
+
+func (s *testUtilSuite) TestVerifyLabels(c *C) {
+	tests := []struct {
+		label  string
+		hasErr bool
+	}{
+		{"z1", false},
+		{"z-1", false},
+		{"h1;", true},
+		{"z_1", false},
+		{"z_1&", true},
+		{"cn", false},
+		{"Zone", false},
+		{"z_", true},
+		{"hos&t-15", true},
+		{"_test1", true},
+	}
+	for _, t := range tests {
+		err := ValidateLabelString(t.label)
+		c.Assert(err != nil, Equals, t.hasErr)
+	}
+}

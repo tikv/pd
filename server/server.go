@@ -456,6 +456,9 @@ func (s *Server) GetReplicationConfig() *ReplicationConfig {
 
 // SetReplicationConfig sets the replication config.
 func (s *Server) SetReplicationConfig(cfg ReplicationConfig) error {
+	if err := cfg.validate(); err != nil {
+		return errors.Trace(err)
+	}
 	old := s.scheduleOpt.rep.load()
 	s.scheduleOpt.rep.store(&cfg)
 	s.scheduleOpt.persist(s.kv)
