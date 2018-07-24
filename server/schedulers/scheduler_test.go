@@ -60,8 +60,23 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
 
-	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewLimiter())
+	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewLimiter(), "32", "2")
 	c.Assert(err, IsNil)
+
+	c.Assert(sc.(*balanceAdjacentRegionScheduler).leaderLimit, Equals, uint64(32))
+	c.Assert(sc.(*balanceAdjacentRegionScheduler).peerLimit, Equals, uint64(2))
+
+	sc.(*balanceAdjacentRegionScheduler).leaderLimit = 0
+	sc.(*balanceAdjacentRegionScheduler).peerLimit = 0
+	c.Assert(sc.IsScheduleAllowed(tc), IsFalse)
+	sc.(*balanceAdjacentRegionScheduler).leaderLimit = defaultAdjacentLeaderLimit
+	c.Assert(sc.IsScheduleAllowed(tc), IsTrue)
+	sc.(*balanceAdjacentRegionScheduler).leaderLimit = 0
+	sc.(*balanceAdjacentRegionScheduler).peerLimit = defaultAdjacentPeerLimit
+	c.Assert(sc.IsScheduleAllowed(tc), IsTrue)
+	sc.(*balanceAdjacentRegionScheduler).leaderLimit = defaultAdjacentLeaderLimit
+	c.Assert(sc.IsScheduleAllowed(tc), IsTrue)
+
 	c.Assert(sc.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
 
 	// Add stores 1,2,3,4
