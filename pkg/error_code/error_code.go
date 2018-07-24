@@ -95,7 +95,7 @@ func (code Code) Child(childStr CodeStr) Code {
 
 // MetaData is a pattern for attaching meta data to codes and inheriting it from a parent.
 // See MetaDataFromAncestors.
-// This is used to attach a HTTP code to a Code.
+// This is used to attach an HTTP code to a Code.
 type MetaData map[CodeStr]interface{}
 
 // MetaDataFromAncestors looks for meta data starting at the current code.
@@ -114,7 +114,7 @@ func (code Code) MetaDataFromAncestors(metaData MetaData) interface{} {
 
 var httpMetaData = make(MetaData)
 
-// SetHTTP adds a HTTP code to the meta data
+// SetHTTP adds an HTTP code to the meta data
 func (code Code) SetHTTP(httpCode int) Code {
 	if existingCode, ok := httpMetaData[code.CodeStr()]; ok {
 		panic(fmt.Sprintf("http already exists %v for %+v", existingCode, code))
@@ -123,7 +123,7 @@ func (code Code) SetHTTP(httpCode int) Code {
 	return code
 }
 
-// HTTPCode retrieves the HTTP code for a code or its first ancestor with a HTTP code.
+// HTTPCode retrieves the HTTP code for a code or its first ancestor with an HTTP code.
 // If none are specified, it defaults to 400 BadRequest
 func (code Code) HTTPCode() int {
 	httpCode := code.MetaDataFromAncestors(httpMetaData)
