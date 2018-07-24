@@ -66,7 +66,7 @@ func PrintPDInfo() {
 	fmt.Println("UTC Build Time: ", PDBuildTS)
 }
 
-// CheckPDVersion checks if PD needs to be upgrapded.
+// CheckPDVersion checks if PD needs to be upgraded.
 func CheckPDVersion(opt *scheduleOption) {
 	pdVersion := MinSupportedVersion(Base)
 	if PDReleaseVersion != "None" {
