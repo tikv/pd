@@ -376,6 +376,13 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
 	testutil.CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 2, 4)
 
+	// If store 4 is busy, no operator will be created.
+	tc.SetStoreBusy(4, true)
+	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
+	// Since busy is a short term state, store2 will not be added to taint cache.
+	c.Assert(cache.Exists(2), IsFalse)
+	tc.SetStoreBusy(4, false)
+
 	// Store 5 has smaller region score than store 1.
 	tc.AddLabelsStore(5, 2, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	cache.Remove(1) // Delete store 1 from cache, or it will be skipped.
@@ -496,6 +503,11 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	region := tc.GetRegion(1)
 	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 4)
 
+	// Disable make up replica feature.
+	opt.DisableMakeUpReplica = true
+	c.Assert(rc.Check(region), IsNil)
+	opt.DisableMakeUpReplica = false
+
 	// Test healthFilter.
 	// If store 4 is down, we add to store 3.
 	tc.SetStoreDown(4)
@@ -520,6 +532,12 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	peer3, _ := tc.AllocPeer(3)
 	region.AddPeer(peer3)
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
+
+	// Disable remove extra replica feature.
+	opt.DisableRemoveExtraReplica = true
+	c.Assert(rc.Check(region), IsNil)
+	opt.DisableRemoveExtraReplica = false
+
 	region.RemoveStorePeer(1)
 
 	// Peer in store 2 is down, remove it.
@@ -663,6 +681,10 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 
 	// Replace peer in store 1 with store 6 because it has a different rack.
 	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 1, 6)
+	// Disable locationReplacement feature.
+	opt.DisableLocationReplacement = true
+	c.Assert(rc.Check(region), IsNil)
+	opt.DisableLocationReplacement = false
 	peer6, _ := tc.AllocPeer(6)
 	region.AddPeer(peer6)
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
@@ -716,6 +738,70 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 }
 
+func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	opt.LocationLabels = []string{"zone"}
+	tc := schedule.NewMockCluster(opt)
+	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
+
+	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	tc.UpdateStorageRatio(1, 0.5, 0.5)
+	tc.UpdateStoreRegionSize(1, 500*1024*1024)
+	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	tc.UpdateStorageRatio(2, 0.1, 0.9)
+	tc.UpdateStoreRegionSize(2, 100*1024*1024)
+	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3"})
+
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+
+	// Move peer to better location.
+	tc.UpdateStorageRatio(4, 0, 1)
+	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 1, 4)
+	// If store4 is almost full, do not add peer on it.
+	tc.UpdateStorageRatio(4, 0.9, 0.1)
+	c.Assert(rc.Check(region), IsNil)
+
+	tc.AddLeaderRegion(2, 1, 3)
+	region = tc.GetRegion(2)
+	// Add peer on store4.
+	tc.UpdateStorageRatio(4, 0, 1)
+	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 4)
+	// If store4 is almost full, do not add peer on it.
+	tc.UpdateStorageRatio(4, 0.8, 0)
+	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 2)
+}
+
+func (s *testReplicaCheckerSuite) TestOpts(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	tc := schedule.NewMockCluster(opt)
+	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
+
+	tc.AddRegionStore(1, 100)
+	tc.AddRegionStore(2, 100)
+	tc.AddRegionStore(3, 100)
+	tc.AddRegionStore(4, 100)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	region := tc.GetRegion(1)
+	// Test remove down replica and replace offline replica.
+	tc.SetStoreDown(1)
+	region.DownPeers = []*pdpb.PeerStats{
+		{
+			Peer:        region.GetStorePeer(1),
+			DownSeconds: 24 * 60 * 60,
+		},
+	}
+	tc.SetStoreOffline(2)
+	// RemoveDownReplica has higher priority than replaceOfflineReplica.
+	testutil.CheckRemovePeer(c, rc.Check(region), 1)
+	opt.DisableRemoveDownReplica = true
+	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 2, 4)
+	opt.DisableReplaceOfflineReplica = true
+	c.Assert(rc.Check(region), IsNil)
+}
+
 var _ = Suite(&testMergeCheckerSuite{})
 
 type testMergeCheckerSuite struct {
@@ -727,7 +813,7 @@ type testMergeCheckerSuite struct {
 func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	cfg := schedule.NewMockSchedulerOptions()
 	cfg.MaxMergeRegionSize = 2
-	cfg.MaxMergeRegionRows = 2
+	cfg.MaxMergeRegionKeys = 2
 	s.cluster = schedule.NewMockCluster(cfg)
 	s.regions = []*core.RegionInfo{
 		{
@@ -742,7 +828,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 			},
 			Leader:          &metapb.Peer{Id: 101, StoreId: 1},
 			ApproximateSize: 1,
-			ApproximateRows: 1,
+			ApproximateKeys: 1,
 		},
 		{
 			Region: &metapb.Region{
@@ -757,7 +843,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 			},
 			Leader:          &metapb.Peer{Id: 104, StoreId: 4},
 			ApproximateSize: 200,
-			ApproximateRows: 200,
+			ApproximateKeys: 200,
 		},
 		{
 			Region: &metapb.Region{
@@ -772,7 +858,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 			},
 			Leader:          &metapb.Peer{Id: 108, StoreId: 6},
 			ApproximateSize: 1,
-			ApproximateRows: 1,
+			ApproximateKeys: 1,
 		},
 		{
 			Region: &metapb.Region{
@@ -785,7 +871,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 			},
 			Leader:          &metapb.Peer{Id: 109, StoreId: 4},
 			ApproximateSize: 10,
-			ApproximateRows: 10,
+			ApproximateKeys: 10,
 		},
 	}
 
@@ -1095,7 +1181,7 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 		leader := rand.Intn(4) % 3
 		regionInfo := core.NewRegionInfo(meta, meta.Peers[leader])
 		regionInfo.ApproximateSize = 96
-		regionInfo.ApproximateRows = 96
+		regionInfo.ApproximateKeys = 96
 		tc.Regions.SetRegion(regionInfo)
 	}
 	for i := 0; i < 100; i++ {

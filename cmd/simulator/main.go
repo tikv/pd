@@ -14,6 +14,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -28,6 +29,7 @@ import (
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/schedule"
 	log "github.com/sirupsen/logrus"
+
 	// Register schedulers.
 	_ "github.com/pingcap/pd/server/schedulers"
 	// Register namespace classifiers.
@@ -48,7 +50,7 @@ func main() {
 
 	schedule.Simulating = true
 	_, local, clean := NewSingleServer()
-	err := local.Run()
+	err := local.Run(context.Background())
 	if err != nil {
 		simutil.Logger.Fatal("run server error:", err)
 	}

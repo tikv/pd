@@ -16,10 +16,12 @@ package server
 import (
 	"bytes"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	log "github.com/sirupsen/logrus"
@@ -341,7 +343,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 	// Add missing peers.
 	for id := range storeIDs {
 		if c.cluster.GetStore(id) == nil {
-			return core.ErrStoreNotFound(id)
+			return core.NewStoreNotFoundErr(id)
 		}
 		if region.GetStorePeer(id) != nil {
 			continue
@@ -393,7 +395,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 	}
 
 	if c.cluster.GetStore(toStoreID) == nil {
-		return core.ErrStoreNotFound(toStoreID)
+		return core.NewStoreNotFoundErr(toStoreID)
 	}
 	newPeer, err := c.cluster.AllocPeer(toStoreID)
 	if err != nil {
@@ -424,7 +426,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 	}
 
 	if c.cluster.GetStore(toStoreID) == nil {
-		return core.ErrStoreNotFound(toStoreID)
+		return core.NewStoreNotFoundErr(toStoreID)
 	}
 	newPeer, err := c.cluster.AllocPeer(toStoreID)
 	if err != nil {
@@ -516,7 +518,7 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 }
 
 // AddSplitRegionOperator adds an operator to split a region.
-func (h *Handler) AddSplitRegionOperator(regionID uint64) error {
+func (h *Handler) AddSplitRegionOperator(regionID uint64, policy string) error {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return errors.Trace(err)
@@ -527,7 +529,11 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64) error {
 		return ErrRegionNotFound(regionID)
 	}
 
-	step := schedule.SplitRegion{StartKey: region.StartKey, EndKey: region.EndKey}
+	step := schedule.SplitRegion{
+		StartKey: region.StartKey,
+		EndKey:   region.EndKey,
+		Policy:   pdpb.CheckPolicy(pdpb.CheckPolicy_value[strings.ToUpper(policy)]),
+	}
 	op := schedule.NewOperator("adminSplitRegion", regionID, region.GetRegionEpoch(), schedule.OpAdmin, step)
 	if ok := c.addOperator(op); !ok {
 		return errors.Trace(errAddOperator)

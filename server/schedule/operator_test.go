@@ -16,6 +16,7 @@ package schedule
 import (
 	"encoding/json"
 	"sync/atomic"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -44,7 +45,7 @@ func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, pe
 	}
 	regionInfo := core.NewRegionInfo(&region, leader)
 	regionInfo.ApproximateSize = 10
-	regionInfo.ApproximateRows = 10
+	regionInfo.ApproximateKeys = 10
 	return regionInfo
 }
 
@@ -81,7 +82,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	s.checkSteps(c, op, steps)
 	c.Assert(op.Check(region), IsNil)
 	c.Assert(op.IsFinish(), IsTrue)
-	op.createTime = op.createTime.Add(-RegionOperatorWaitTime)
+	op.createTime = op.createTime.Add(-RegionOperatorWaitTime - time.Second)
 	c.Assert(op.IsTimeout(), IsFalse)
 
 	// addPeer1, transferLeader1, removePeer2
@@ -95,9 +96,9 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	c.Assert(op.Check(region), Equals, RemovePeer{FromStore: 2})
 	c.Assert(atomic.LoadInt32(&op.currentStep), Equals, int32(2))
 	c.Assert(op.IsTimeout(), IsFalse)
-	op.createTime = op.createTime.Add(-LeaderOperatorWaitTime)
+	op.createTime = op.createTime.Add(-LeaderOperatorWaitTime - time.Second)
 	c.Assert(op.IsTimeout(), IsFalse)
-	op.createTime = op.createTime.Add(-RegionOperatorWaitTime)
+	op.createTime = op.createTime.Add(-RegionOperatorWaitTime - time.Second)
 	c.Assert(op.IsTimeout(), IsTrue)
 	res, err := json.Marshal(op)
 	c.Assert(err, IsNil)
@@ -107,7 +108,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	steps = []OperatorStep{TransferLeader{FromStore: 2, ToStore: 1}}
 	op = s.newTestOperator(1, OpLeader, steps...)
 	c.Assert(op.IsTimeout(), IsFalse)
-	op.createTime = op.createTime.Add(-LeaderOperatorWaitTime)
+	op.createTime = op.createTime.Add(-LeaderOperatorWaitTime - time.Second)
 	c.Assert(op.IsTimeout(), IsTrue)
 }
 

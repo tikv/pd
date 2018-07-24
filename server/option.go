@@ -84,8 +84,8 @@ func (o *scheduleOption) GetMaxMergeRegionSize() uint64 {
 	return o.load().MaxMergeRegionSize
 }
 
-func (o *scheduleOption) GetMaxMergeRegionRows() uint64 {
-	return o.load().MaxMergeRegionRows
+func (o *scheduleOption) GetMaxMergeRegionKeys() uint64 {
+	return o.load().MaxMergeRegionKeys
 }
 
 func (o *scheduleOption) GetSplitMergeInterval() time.Duration {
@@ -142,6 +142,26 @@ func (o *scheduleOption) GetHighSpaceRatio() float64 {
 
 func (o *scheduleOption) IsRaftLearnerEnabled() bool {
 	return !o.load().DisableLearner
+}
+
+func (o *scheduleOption) IsRemoveDownReplicaEnabled() bool {
+	return !o.load().DisableRemoveDownReplica
+}
+
+func (o *scheduleOption) IsReplaceOfflineReplicaEnabled() bool {
+	return !o.load().DisableReplaceOfflineReplica
+}
+
+func (o *scheduleOption) IsMakeUpReplicaEnabled() bool {
+	return !o.load().DisableMakeUpReplica
+}
+
+func (o *scheduleOption) IsRemoveExtraReplicaEnabled() bool {
+	return !o.load().DisableRemoveExtraReplica
+}
+
+func (o *scheduleOption) IsLocationReplacementEnabled() bool {
+	return !o.load().DisableLocationReplacement
 }
 
 func (o *scheduleOption) GetSchedulers() SchedulerConfigs {
@@ -269,7 +289,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 }
 
 func (o *scheduleOption) adjustScheduleCfg(persistentCfg *Config) {
-	scheduleCfg := *o.load()
+	scheduleCfg := o.load().clone()
 	for i, s := range scheduleCfg.Schedulers {
 		for _, ps := range persistentCfg.Schedule.Schedulers {
 			if s.Type == ps.Type && reflect.DeepEqual(s.Args, ps.Args) {
@@ -293,6 +313,7 @@ func (o *scheduleOption) adjustScheduleCfg(persistentCfg *Config) {
 	}
 	scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, restoredSchedulers...)
 	persistentCfg.Schedule.Schedulers = scheduleCfg.Schedulers
+	o.store(scheduleCfg)
 }
 
 func (o *scheduleOption) GetHotRegionLowThreshold() int {

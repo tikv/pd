@@ -386,7 +386,7 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	storeID := stats.GetStoreId()
 	store := c.core.Stores.GetStore(storeID)
 	if store == nil {
-		return errors.Trace(core.ErrStoreNotFound(storeID))
+		return core.NewStoreNotFoundErr(storeID)
 	}
 	store.Stats = proto.Clone(stats).(*pdpb.StoreStats)
 	store.LastHeartbeatTS = time.Now()
@@ -447,10 +447,13 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		if len(origin.DownPeers) > 0 || len(origin.PendingPeers) > 0 {
 			saveCache = true
 		}
+		if len(region.GetPeers()) != len(origin.GetPeers()) {
+			saveKV, saveCache = true, true
+		}
 		if region.ApproximateSize != origin.ApproximateSize {
 			saveCache = true
 		}
-		if region.ApproximateRows != origin.ApproximateRows {
+		if region.ApproximateKeys != origin.ApproximateKeys {
 			saveCache = true
 		}
 	}
@@ -586,8 +589,8 @@ func (c *clusterInfo) GetMaxMergeRegionSize() uint64 {
 	return c.opt.GetMaxMergeRegionSize()
 }
 
-func (c *clusterInfo) GetMaxMergeRegionRows() uint64 {
-	return c.opt.GetMaxMergeRegionRows()
+func (c *clusterInfo) GetMaxMergeRegionKeys() uint64 {
+	return c.opt.GetMaxMergeRegionKeys()
 }
 
 func (c *clusterInfo) GetSplitMergeInterval() time.Duration {
@@ -616,6 +619,26 @@ func (c *clusterInfo) GetHotRegionLowThreshold() int {
 
 func (c *clusterInfo) IsRaftLearnerEnabled() bool {
 	return c.opt.IsRaftLearnerEnabled()
+}
+
+func (c *clusterInfo) IsRemoveDownReplicaEnabled() bool {
+	return c.opt.IsRemoveDownReplicaEnabled()
+}
+
+func (c *clusterInfo) IsReplaceOfflineReplicaEnabled() bool {
+	return c.opt.IsReplaceOfflineReplicaEnabled()
+}
+
+func (c *clusterInfo) IsMakeUpReplicaEnabled() bool {
+	return c.opt.IsMakeUpReplicaEnabled()
+}
+
+func (c *clusterInfo) IsRemoveExtraReplicaEnabled() bool {
+	return c.opt.IsRemoveExtraReplicaEnabled()
+}
+
+func (c *clusterInfo) IsLocationReplacementEnabled() bool {
+	return c.opt.IsLocationReplacementEnabled()
 }
 
 func (c *clusterInfo) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {

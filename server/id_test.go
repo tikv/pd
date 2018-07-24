@@ -28,13 +28,13 @@ type testAllocIDSuite struct {
 	client       *clientv3.Client
 	alloc        *idAllocator
 	svr          *Server
-	cleanup      cleanUpFunc
+	cleanup      cleanupFunc
 	grpcPDClient pdpb.PDClient
 }
 
 func (s *testAllocIDSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = newTestServer(c)
-	err := s.svr.Run()
+	err := s.svr.Run(context.TODO())
 	c.Assert(err, IsNil)
 	s.client = s.svr.client
 	s.alloc = s.svr.idAlloc

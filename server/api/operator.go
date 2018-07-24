@@ -40,7 +40,7 @@ func (h *operatorHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	regionID, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		h.r.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -90,14 +90,13 @@ func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
-	if err := readJSON(r.Body, &input); err != nil {
-		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+	if err := readJSONRespondError(h.r, w, r.Body, &input); err != nil {
 		return
 	}
 
 	name, ok := input["name"].(string)
 	if !ok {
-		h.r.JSON(w, http.StatusInternalServerError, "missing operator name")
+		h.r.JSON(w, http.StatusBadRequest, "missing operator name")
 		return
 	}
 
@@ -207,7 +206,12 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		if err := h.AddSplitRegionOperator(uint64(regionID)); err != nil {
+		policy, ok := input["policy"].(string)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "missing split policy")
+			return
+		}
+		if err := h.AddSplitRegionOperator(uint64(regionID), policy); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -234,7 +238,7 @@ func (h *operatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	regionID, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		h.r.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 

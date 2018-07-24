@@ -46,7 +46,7 @@ func newHotRead() *Conf {
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * mb,
-			Rows:   960000,
+			Keys:   960000,
 		})
 	}
 	conf.MaxID = id.maxID

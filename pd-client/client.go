@@ -53,6 +53,10 @@ type Client interface {
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
 	GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error)
+	// Update GC safe point. TiKV will check it and do GC themselves if necessary.
+	// If the given safePoint is less than the current one, it will not be updated.
+	// Returns the new safePoint after updating.
+	UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error)
 	// Close closes the client.
 	Close()
 }
@@ -174,7 +178,12 @@ func (c *client) updateLeader() error {
 		members, err := c.getMembers(ctx, u)
 		cancel()
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
-			continue
+			select {
+			case <-c.ctx.Done():
+				return errors.Trace(err)
+			default:
+				continue
+			}
 		}
 		c.updateURLs(members.GetMembers())
 		if err = c.switchLeader(members.GetLeader().GetClientUrls()); err != nil {
@@ -344,11 +353,16 @@ func (c *client) tsLoop() {
 
 		if stream == nil {
 			var ctx context.Context
-			ctx, cancel = context.WithCancel(c.ctx)
+			ctx, cancel = context.WithCancel(loopCtx)
 			stream, err = c.leaderClient().Tso(ctx)
 			if err != nil {
+				select {
+				case <-loopCtx.Done():
+					return
+				default:
+				}
 				log.Errorf("[pd] create tso stream error: %v", err)
-				c.scheduleCheckLeader()
+				c.ScheduleCheckLeader()
 				cancel()
 				c.revokeTSORequest(err)
 				select {
@@ -388,8 +402,13 @@ func (c *client) tsLoop() {
 		}
 
 		if err != nil {
+			select {
+			case <-loopCtx.Done():
+				return
+			default:
+			}
 			log.Errorf("[pd] getTS error: %v", err)
-			c.scheduleCheckLeader()
+			c.ScheduleCheckLeader()
 			cancel()
 			stream, cancel = nil, nil
 		}
@@ -482,7 +501,7 @@ func (c *client) leaderClient() pdpb.PDClient {
 	return pdpb.NewPDClient(c.connMu.clientConns[c.connMu.leader])
 }
 
-func (c *client) scheduleCheckLeader() {
+func (c *client) ScheduleCheckLeader() {
 	select {
 	case c.checkLeaderCh <- struct{}{}:
 	default:
@@ -491,6 +510,18 @@ func (c *client) scheduleCheckLeader() {
 
 func (c *client) GetClusterID(context.Context) uint64 {
 	return c.clusterID
+}
+
+// For testing use.
+func (c *client) GetLeaderAddr() string {
+	c.connMu.RLock()
+	defer c.connMu.RUnlock()
+	return c.connMu.leader
+}
+
+// For testing use. It should only be called when the client is closed.
+func (c *client) GetURLs() []string {
+	return c.urls
 }
 
 var tsoReqPool = sync.Pool{
@@ -561,7 +592,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds())
-		c.scheduleCheckLeader()
+		c.ScheduleCheckLeader()
 		return nil, nil, errors.Trace(err)
 	}
 	return resp.GetRegion(), resp.GetLeader(), nil
@@ -585,7 +616,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Re
 
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_region_byid").Observe(time.Since(start).Seconds())
-		c.scheduleCheckLeader()
+		c.ScheduleCheckLeader()
 		return nil, nil, errors.Trace(err)
 	}
 	return resp.GetRegion(), resp.GetLeader(), nil
@@ -609,7 +640,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds())
-		c.scheduleCheckLeader()
+		c.ScheduleCheckLeader()
 		return nil, errors.Trace(err)
 	}
 	store := resp.GetStore()
@@ -620,6 +651,30 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 		return nil, nil
 	}
 	return store, nil
+}
+
+func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.UpdateGCSafePoint", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDuration.WithLabelValues("update_gc_safe_point").Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	resp, err := c.leaderClient().UpdateGCSafePoint(ctx, &pdpb.UpdateGCSafePointRequest{
+		Header:    c.requestHeader(),
+		SafePoint: safePoint,
+	})
+	requestDuration.WithLabelValues("update_gc_safe_point").Observe(time.Since(start).Seconds())
+	cancel()
+
+	if err != nil {
+		cmdFailedDuration.WithLabelValues("update_gc_safe_point").Observe(time.Since(start).Seconds())
+		c.ScheduleCheckLeader()
+		return 0, errors.Trace(err)
+	}
+	return resp.GetNewSafePoint(), nil
 }
 
 func (c *client) requestHeader() *pdpb.RequestHeader {

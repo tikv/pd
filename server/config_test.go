@@ -34,7 +34,7 @@ func (s *testConfigSuite) TestTLS(c *C) {
 func (s *testConfigSuite) TestBadFormatJoinAddr(c *C) {
 	cfg := NewTestSingleConfig()
 	cfg.Join = "127.0.0.1:2379" // Wrong join addr without scheme.
-	c.Assert(cfg.adjust(), NotNil)
+	c.Assert(cfg.adjust(nil), NotNil)
 }
 
 func (s *testConfigSuite) TestReloadConfig(c *C) {
@@ -62,7 +62,7 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 
 func (s *testConfigSuite) TestValidation(c *C) {
 	cfg := NewConfig()
-	c.Assert(cfg.adjust(), IsNil)
+	c.Assert(cfg.adjust(nil), IsNil)
 
 	cfg.Log.File.Filename = path.Join(cfg.DataDir, "test")
 	c.Assert(cfg.validate(), NotNil)

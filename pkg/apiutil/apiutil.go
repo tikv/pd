@@ -15,16 +15,44 @@ package apiutil
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
+	"strconv"
 
 	"github.com/juju/errors"
 )
 
-// ReadJSON reads a JSON data from r and then close it.
-func ReadJSON(r io.ReadCloser, data interface{}) error {
-	defer r.Close()
+// DeferClose captures the error returned from closing (if an error occurs).
+// This is designed to be used in a defer statement.
+func DeferClose(c io.Closer, err *error) {
+	if cerr := c.Close(); cerr != nil && *err == nil {
+		*err = errors.Trace(cerr)
+	}
+}
 
+// JSONError lets callers check for just one error type
+type JSONError struct {
+	Err error
+}
+
+func (e JSONError) Error() string {
+	return e.Err.Error()
+}
+
+func tagJSONError(err error) error {
+	switch err.(type) {
+	case *json.SyntaxError, *json.UnmarshalTypeError:
+		return JSONError{err}
+	}
+	return err
+}
+
+// ReadJSON reads a JSON data from r and then closes it.
+// An error due to invalid json will be returned as a JSONError
+func ReadJSON(r io.ReadCloser, data interface{}) error {
+	var err error
+	defer DeferClose(r, &err)
 	b, err := ioutil.ReadAll(r)
 	if err != nil {
 		return errors.Trace(err)
@@ -32,8 +60,29 @@ func ReadJSON(r io.ReadCloser, data interface{}) error {
 
 	err = json.Unmarshal(b, data)
 	if err != nil {
-		return errors.Trace(err)
+		return tagJSONError(err)
 	}
 
-	return nil
+	return err
+}
+
+// FieldError connects an error to a particular field
+type FieldError struct {
+	error
+	field string
+}
+
+// ParseUint64VarsField connects strconv.ParseUint with request variables
+// It hardcodes the base to 10 and bitsize to 64
+// Any error returned will connect the requested field to the error via FieldError
+func ParseUint64VarsField(vars map[string]string, varName string) (uint64, *FieldError) {
+	str, ok := vars[varName]
+	if !ok {
+		return 0, &FieldError{field: varName, error: fmt.Errorf("field %s not present", varName)}
+	}
+	parsed, err := strconv.ParseUint(str, 10, 64)
+	if err == nil {
+		return parsed, nil
+	}
+	return parsed, &FieldError{field: varName, error: err}
 }
