@@ -60,8 +60,12 @@ tool-install:
 	# linter
 	retool add github.com/mgechev/revive 7773f47324c2bf1c8f7a5500aff2b6c01d3ed73b
 
-check-slow:
-	CGO_ENABLED=0 retool do gometalinter.v2 --disable-all --enable errcheck server
+# These need to be fixed before they can be ran regularly
+check-fail:
+	CGO_ENABLED=0 retool do gometalinter.v2 --disable-all \
+	  --enable errcheck \
+	  --enable ineffassign \
+	  $$($(PACKAGE_DIRECTORIES))
 
 check: static lint
 	@echo "checking"
@@ -76,7 +80,6 @@ static:
 	  --enable misspell \
 	  --enable megacheck \
 	  $$($(PACKAGE_DIRECTORIES))
-	#  --enable ineffassign \
 
 lint:
 	@echo "linting"
