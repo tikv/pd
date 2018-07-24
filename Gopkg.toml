@@ -27,4 +27,3 @@
 [[constraint]]
   name = "github.com/pingcap/kvproto"
   branch = "master"
-

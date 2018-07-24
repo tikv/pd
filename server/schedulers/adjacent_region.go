@@ -39,7 +39,7 @@ func init() {
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
-			peerLimit, err := strconv.ParseUint(args[0], 10, 64)
+			peerLimit, err := strconv.ParseUint(args[1], 10, 64)
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
@@ -123,7 +123,7 @@ func (l *balanceAdjacentRegionScheduler) GetNextInterval(interval time.Duration)
 }
 
 func (l *balanceAdjacentRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return l.allowBalanceLeader() || l.allowBalanceLeader()
+	return l.allowBalanceLeader() || l.allowBalancePeer()
 }
 
 func (l *balanceAdjacentRegionScheduler) allowBalanceLeader() bool {

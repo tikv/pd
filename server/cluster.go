@@ -290,6 +290,15 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		return errors.Errorf("invalid put store %v", store)
 	}
 
+	v, err := ParseVersion(store.GetVersion())
+	if err != nil {
+		return errors.Errorf("invalid put store %v, error: %s", store, err)
+	}
+	clusterVersion := c.cachedCluster.opt.loadClusterVersion()
+	if !IsCompatible(clusterVersion, *v) {
+		return errors.Errorf("version should compatible with version  %s, got %s", clusterVersion, v)
+	}
+
 	cluster := c.cachedCluster
 
 	// Store address can not be the same as other stores.
@@ -310,16 +319,15 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	} else {
 		// Update an existed store.
 		s.Address = store.Address
+		s.Version = store.Version
 		s.MergeLabels(store.Labels)
 	}
-
 	// Check location labels.
 	for _, k := range c.cachedCluster.GetLocationLabels() {
 		if v := s.GetLabelValue(k); len(v) == 0 {
 			log.Warnf("missing location label %q in store %v", k, s)
 		}
 	}
-
 	return cluster.putStore(s)
 }
 

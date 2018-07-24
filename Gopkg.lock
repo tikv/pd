@@ -266,7 +266,7 @@
     "pkg/metapb",
     "pkg/pdpb"
   ]
-  revision = "7f09068ced84187574699b956cf09530b54884c2"
+  revision = "5e6e69a5ed381bd4a8afe7cb96cc47f955f6d160"
 
 [[projects]]
   name = "github.com/prometheus/client_golang"
@@ -500,6 +500,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "2bf7150e00a5771891754cdf0f5384ded938c1e9cefe9bc8f4822232aac736c9"
+  inputs-digest = "ac20fc02c52f46bfadc23c464c1e9377e5a00e60fd6be6255f58a8e240360b2d"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -58,6 +58,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/config/namespace/{name}", confHandler.DeleteNamespace).Methods("DELETE")
 	router.HandleFunc("/api/v1/config/label-property", confHandler.GetLabelProperty).Methods("GET")
 	router.HandleFunc("/api/v1/config/label-property", confHandler.SetLabelProperty).Methods("POST")
+	router.HandleFunc("/api/v1/config/cluster-version", confHandler.GetClusterVersion).Methods("GET")
+	router.HandleFunc("/api/v1/config/cluster-version", confHandler.SetClusterVersion).Methods("POST")
 
 	storeHandler := newStoreHandler(svr, rd)
 	router.HandleFunc("/api/v1/store/{id}", storeHandler.Get).Methods("GET")

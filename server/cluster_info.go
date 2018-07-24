@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coreos/go-semver/semver"
 	"github.com/gogo/protobuf/proto"
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -76,6 +77,42 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 	log.Infof("load %v regions cost %v", c.core.Regions.GetRegionCount(), time.Since(start))
 
 	return c, nil
+}
+
+func (c *clusterInfo) OnStoreVersionChange() {
+	var (
+		minVersion     *semver.Version
+		clusterVersion semver.Version
+	)
+
+	clusterVersion = c.opt.loadClusterVersion()
+	stores := c.GetStores()
+	for _, s := range stores {
+		if s.IsTombstone() {
+			continue
+		}
+		v := MustParseVersion(s.GetVersion())
+
+		if minVersion == nil || v.LessThan(*minVersion) {
+			minVersion = v
+		}
+	}
+	if clusterVersion.LessThan(*minVersion) {
+		c.opt.SetClusterVersion(*minVersion)
+		err := c.opt.persist(c.kv)
+		if err != nil {
+			log.Infof("persist cluster version meet error: %s", err)
+		}
+		log.Infof("cluster version changed from %s to %s", clusterVersion, minVersion)
+		CheckPDVersion(c.opt)
+	}
+}
+
+// IsFeatureSupported checks if the feature is supported by current cluster.
+func (c *clusterInfo) IsFeatureSupported(f Feature) bool {
+	clusterVersion := c.opt.loadClusterVersion()
+	minSupportVersion := MinSupportedVersion(f)
+	return !clusterVersion.LessThan(minSupportVersion)
 }
 
 func (c *clusterInfo) allocID() (uint64, error) {
@@ -618,6 +655,9 @@ func (c *clusterInfo) GetHotRegionLowThreshold() int {
 }
 
 func (c *clusterInfo) IsRaftLearnerEnabled() bool {
+	if !c.IsFeatureSupported(RaftLearner) {
+		return false
+	}
 	return c.opt.IsRaftLearnerEnabled()
 }
 
