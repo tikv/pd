@@ -174,6 +174,62 @@ func TestErrorWrapperCode(t *testing.T) {
 	ClientDataEquals(t, ErrorWrapper{Err: sconst}, sconst)
 }
 
+var internalChildCodeStr errcode.CodeStr = "internal.child.granchild"
+var internalChild = errcode.InternalCode.Child("internal.child").SetHTTP(503).Child(internalChildCodeStr)
+
+type InternalChild struct{}
+
+func (ic InternalChild) Error() string      { return "internal child error" }
+func (ic InternalChild) Code() errcode.Code { return internalChild }
+
+func TestNewInvalidInputErr(t *testing.T) {
+	err := errcode.NewInvalidInputErr(errors.New("new error"))
+	AssertCodes(t, err, "input")
+	ErrorEquals(t, err, "new error")
+	ClientDataEquals(t, err, errors.New("new error"), "input")
+
+	err = errcode.NewInvalidInputErr(MinimalError{})
+	AssertCodes(t, err, "input.testcode")
+	ErrorEquals(t, err, "error")
+	ClientDataEquals(t, err, MinimalError{}, errcode.CodeStr("input.testcode"))
+
+	internalErr := errcode.NewInternalErr(MinimalError{})
+	err = errcode.NewInvalidInputErr(internalErr)
+	internalCodeStr := errcode.CodeStr("internal")
+	AssertCode(t, err, internalCodeStr)
+	AssertHTTPCode(t, err, 500)
+	ErrorEquals(t, err, "error")
+	ClientDataEquals(t, err, MinimalError{}, internalCodeStr)
+
+	err = errcode.NewInvalidInputErr(InternalChild{})
+	AssertCode(t, err, internalChildCodeStr)
+	AssertHTTPCode(t, err, 503)
+	ErrorEquals(t, err, "internal child error")
+	ClientDataEquals(t, err, InternalChild{}, internalChildCodeStr)
+}
+
+func TestNewInternalErr(t *testing.T) {
+	internalCodeStr := errcode.CodeStr("internal")
+	err := errcode.NewInternalErr(errors.New("new error"))
+	AssertCode(t, err, internalCodeStr)
+	AssertHTTPCode(t, err, 500)
+	ErrorEquals(t, err, "new error")
+	ClientDataEquals(t, err, errors.New("new error"), "internal")
+
+	err = errcode.NewInternalErr(MinimalError{})
+	AssertCode(t, err, internalCodeStr)
+	AssertHTTPCode(t, err, 500)
+	ErrorEquals(t, err, "error")
+	ClientDataEquals(t, err, MinimalError{}, errcode.CodeStr("internal"))
+
+	invalidErr := errcode.NewInvalidInputErr(MinimalError{})
+	err = errcode.NewInternalErr(invalidErr)
+	AssertCode(t, err, internalCodeStr)
+	AssertHTTPCode(t, err, 500)
+	ErrorEquals(t, err, "error")
+	ClientDataEquals(t, err, MinimalError{}, internalCodeStr)
+}
+
 func AssertCodes(t *testing.T, code errcode.ErrorCode, codeStrs ...errcode.CodeStr) {
 	t.Helper()
 	AssertCode(t, code, codeStrs...)
@@ -187,7 +243,7 @@ func AssertCode(t *testing.T, code errcode.ErrorCode, codeStrs ...errcode.CodeSt
 		codeStr = codeStrs[0]
 	}
 	if code.Code().CodeStr() != codeStr {
-		t.Error("bad code")
+		t.Errorf("code expected %v\ncode but got %v", codeStr, code.Code().CodeStr())
 	}
 }
 

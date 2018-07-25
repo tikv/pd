@@ -275,6 +275,9 @@ func (e CodedError) Code() Code {
 
 // GetClientData returns the underlying Err field.
 func (e CodedError) GetClientData() interface{} {
+	if errCode, ok := e.Err.(ErrorCode); ok {
+		return ClientData(errCode)
+	}
 	return e.Err
 }
 
