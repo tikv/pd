@@ -93,6 +93,22 @@ func (code Code) Child(childStr CodeStr) Code {
 	return child
 }
 
+// FindAncestor looks for an ancestor satisfying the given test function.
+func (code Code) findAncestor(test func(Code) bool) *Code {
+	if test(code) {
+		return &code
+	}
+	if code.Parent == nil {
+		return nil
+	}
+	return (*code.Parent).findAncestor(test)
+}
+
+// IsAncestor looks for the given code in its ancestors.
+func (code Code) IsAncestor(ancestorCode Code) bool {
+	return nil != code.findAncestor(func(an Code) bool { return an == ancestorCode })
+}
+
 // MetaData is a pattern for attaching meta data to codes and inheriting it from a parent.
 // See MetaDataFromAncestors.
 // This is used to attach an HTTP code to a Code.
@@ -279,9 +295,18 @@ var _ HasClientData = (*invalidInputErr)(nil) // assert implements interface
 type internalErr struct{ CodedError }
 
 // NewInternalErr creates an internalError from an err
-// The code is always set to InternalCode which returns HTTP 500
+// If the given err is an ErrorCode that is a descendant of InternalCode,
+// its code will be used.
+// This ensures the intention of sending an HTTP 50x.
 func NewInternalErr(err error) ErrorCode {
-	return internalErr{CodedError{GetCode: InternalCode, Err: err}}
+	code := InternalCode
+	if errcode, ok := err.(ErrorCode); ok {
+		errCode := errcode.Code()
+		if errCode.IsAncestor(InternalCode) {
+			code = errCode
+		}
+	}
+	return internalErr{CodedError{GetCode: code, Err: err}}
 }
 
 var _ ErrorCode = (*internalErr)(nil)     // assert implements interface
