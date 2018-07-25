@@ -604,7 +604,7 @@ types:
         500:
           description: PD server failed to proceed the request.
   /label-property:
-    description: The label property configuation.
+    description: The label property configuration.
     get:
       description: Get label property config.
       responses:
@@ -725,7 +725,7 @@ types:
           # FIXME: add example. {leader: 2} {region: 0.5}
       responses:
         200:
-          description: The store's weight is udpated.
+          description: The store's weight is updated.
         400:
           description: The input is invalid.
         500:
@@ -799,7 +799,7 @@ types:
         description: PD server failed to proceed the request.
   /writeflow:
     get:
-      description: List regions with highest write flow.
+      description: List regions with the highest write flow.
       queryParameters:
         limit?:
           type: integer
@@ -813,7 +813,7 @@ types:
           description: PD server failed to proceed the request.
   /readflow:
     get:
-      description: List regions with highest read flow.
+      description: List regions with the highest read flow.
       queryParameters:
         limit?:
           type: integer
@@ -999,7 +999,7 @@ types:
 
 
 /trend:
-  description: Trend of data grouth and movements.
+  description: Trend of data growth and movements.
   get:
     description: Get the growth and changes of data in the most recent period of time.
     queryParameters:
@@ -1044,4 +1044,4 @@ types:
         description: PD server failed to proceed the request.
 
 /classifier:
-  description: The namespace classifier. Methods depends on current classifier.
+  description: The namespace classifier. Methods depend on current classifier.
