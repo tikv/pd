@@ -68,7 +68,7 @@ func (code Code) CodeStr() CodeStr {
 	return (*code.Parent).CodeStr() + "." + code.codeStr
 }
 
-// NewCode create a new top-level code.
+// NewCode creates a new top-level code.
 // A top-level code must not contain any dot separators: that will panic
 // Most codes should be created from hierachy with the Child method.
 func NewCode(codeRep CodeStr) Code {
