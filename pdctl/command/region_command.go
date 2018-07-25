@@ -71,7 +71,7 @@ func NewRegionCommand() *cobra.Command {
 }
 
 func showRegionCommandFunc(cmd *cobra.Command, args []string) {
-	var prefix = regionsPrefix
+	prefix := regionsPrefix
 	if len(args) == 1 {
 		if _, err := strconv.Atoi(args[0]); err != nil {
 			fmt.Println("region_id should be a number")
