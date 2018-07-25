@@ -373,8 +373,6 @@ types:
         body:
           application/json:
             type: Version
-      500:
-        description: PD server failed to proceed the request.
 
 /status:
   description: The build info of PD server.
@@ -385,8 +383,6 @@ types:
         body:
           application/json:
             type: BuildStatus
-      500:
-        description: PD server failed to proceed the request。
 
 /diagnose:
   description: Diagnostic information of the cluster.
@@ -421,6 +417,8 @@ types:
           description: The PD server is successfully removed.
         400:
           description: The input is invalid.
+        404:
+          description: The member does not exist.
         500:
           description: PD server failed to proceed the request.
     post:
@@ -448,6 +446,8 @@ types:
       responses:
         200:
           description: The PD server is successfully removed.
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
 
@@ -501,8 +501,6 @@ types:
         body:
           application/json:
             type: Config
-      500:
-        description: PD server failed to proceed the request.
   post:
     description: Update a config item.
     body:
@@ -523,10 +521,6 @@ types:
           body:
             application/json:
               type: ScheduleConfig
-        400:
-          description: The input is invalid.
-        500:
-          description: PD server failed to proceed the request.
     post:
       description: Update a schedule config item.
       body:
@@ -536,6 +530,8 @@ types:
       responses:
         200:
           description: The config is updated.
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
   /replicate:
@@ -547,10 +543,6 @@ types:
           body:
             application/json:
               type: ReplicationConfig
-        400:
-          description: The input is invalid.
-        500:
-          description: PD server failed to proceed the request.
     post:
       description: Update a replication config item.
       body:
@@ -560,6 +552,8 @@ types:
       responses:
         200:
           description: The config is updated.
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
   /namespace/{namespaceName}:
@@ -577,8 +571,6 @@ types:
               type: NamespaceConfig
         404:
           description: The namespace does not exist.
-        500:
-          description: PD server failed to proceed the request.
     post:
       description: Update a namespace config item.
       body:
@@ -592,8 +584,6 @@ types:
           description: The input is invalid.
         404:
           description: The namespace does not exist.
-        500:
-          description: PD server failed to proceed the request.
     delete:
       description: Delete a namespace config.
       responses:
@@ -601,8 +591,6 @@ types:
           description: The config is removed.
         404:
           description: The namespace does not exist.
-        500:
-          description: PD server failed to proceed the request.
   /label-property:
     description: The label property configuration.
     get:
@@ -614,8 +602,6 @@ types:
               type: LabelPropertyConfig
         400:
           description: The input is invalid.
-        500:
-          description: PD server failed to proceed the request.
     post:
       description: Update label property config item.
       body:
@@ -677,6 +663,8 @@ types:
         description: The store is set as Offline or Tombstone.
       400:
         description: The input is invalid.
+      404:
+        description: The store does not exist.
       410:
         description: The store has already been removed.
       500:
@@ -695,6 +683,8 @@ types:
           description: The store's state is updated.
         400:
           description: The input is invalid.
+        404:
+          description: The store does not exist.
         500:
           description: PD server failed to proceed the request.
 
@@ -809,6 +799,8 @@ types:
           body:
             application/json:
               type: Regions
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
   /readflow:
@@ -823,6 +815,8 @@ types:
           body:
             application/json:
               type: Regions
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
   /check/{filter}:
@@ -958,8 +952,6 @@ types:
           body:
             application/json:
               type: HotRegions
-        500:
-          description: PD server failed to proceed the request.
   /regions/read:
     get:
       description: List the hot read regions.
@@ -968,8 +960,6 @@ types:
           body:
             application/json:
               type: HotRegions
-        500:
-          description: PD server failed to proceed the request.
   /stores:
     get:
       description: List the hot stores.
@@ -978,8 +968,6 @@ types:
           body:
             application/json:
               type: HotStores
-        500:
-          description: PD server failed to proceed the request.
 
 /stats:
   description: Statistics of the cluster.
