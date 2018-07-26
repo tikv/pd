@@ -66,7 +66,6 @@ tool-install: setup
 check-fail:
 	CGO_ENABLED=0 retool do gometalinter.v2 --disable-all \
 	  --enable errcheck \
-	  --enable ineffassign \
 	  $$($(PACKAGE_DIRECTORIES))
 
 check: static lint
@@ -81,6 +80,7 @@ static:
 	CGO_ENABLED=0 retool do gometalinter.v2 --disable-all --deadline 120s \
 	  --enable misspell \
 	  --enable megacheck \
+	  --enable ineffassign \
 	  $$($(PACKAGE_DIRECTORIES))
 
 lint:
