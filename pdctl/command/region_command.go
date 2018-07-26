@@ -34,13 +34,6 @@ var (
 	regionKeyPrefix        = "pd/api/v1/region/key"
 )
 
-/* unused
-type regionInfo struct {
-	Region *metapb.Region `json:"region"`
-	Leader *metapb.Peer   `json:"leader"`
-}
-*/
-
 // NewRegionCommand return a region subcommand of rootCmd
 func NewRegionCommand() *cobra.Command {
 	r := &cobra.Command{

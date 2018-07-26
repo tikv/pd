@@ -57,13 +57,6 @@ var (
 	}
 )
 
-/* unused
-func cleanServer(cfg *server.Config) {
-	// Clean data directory
-	os.RemoveAll(cfg.DataDir)
-}
-*/
-
 type testClientSuite struct {
 	cleanup server.CleanupFunc
 

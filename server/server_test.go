@@ -72,16 +72,6 @@ type testLeaderServerSuite struct {
 	leaderPath string
 }
 
-/* unused
-func mustGetEtcdClient(c *C, svrs map[string]*Server) *clientv3.Client {
-	for _, svr := range svrs {
-		return svr.GetClient()
-	}
-	c.Fatal("etcd client none available")
-	return nil
-}
-*/
-
 func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 	s.svrs = make(map[string]*Server)
 

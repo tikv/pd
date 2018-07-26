@@ -306,14 +306,6 @@ func (c *clusterInfo) getRegions() []*core.RegionInfo {
 	return c.core.Regions.GetRegions()
 }
 
-/* unused
-func (c *clusterInfo) randomRegion(opts ...core.RegionOption) *core.RegionInfo {
-	c.RLock()
-	defer c.RUnlock()
-	return c.core.Regions.RandRegion(opts...)
-}
-*/
-
 func (c *clusterInfo) getMetaRegions() []*metapb.Region {
 	c.RLock()
 	defer c.RUnlock()
@@ -345,14 +337,6 @@ func (c *clusterInfo) getStoreRegionCount(storeID uint64) int {
 	defer c.RUnlock()
 	return c.core.Regions.GetStoreRegionCount(storeID)
 }
-
-/* unused
-func (c *clusterInfo) getStoreLeaderCount(storeID uint64) int {
-	c.RLock()
-	defer c.RUnlock()
-	return c.core.Regions.GetStoreLeaderCount(storeID)
-}
-*/
 
 // RandLeaderRegion returns a random region that has leader on the store.
 func (c *clusterInfo) RandLeaderRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {

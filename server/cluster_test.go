@@ -413,56 +413,6 @@ func (s *testClusterSuite) testRemoveStore(c *C, clusterID uint64, store *metapb
 	}
 }
 
-/* unused
-func (s *testClusterSuite) testCheckStores(c *C, clusterID uint64) {
-	cluster := s.svr.GetRaftCluster()
-	c.Assert(cluster, NotNil)
-
-	store := s.newStore(c, 0, "127.0.0.1:11111")
-	putStore(c, s.grpcPDClient, clusterID, store)
-
-	// store is up w/o region peers will not be buried.
-	cluster.checkStores()
-	tmpStore := s.getStore(c, clusterID, store.GetId())
-	c.Assert(tmpStore.GetState(), Equals, metapb.StoreState_Up)
-
-	// Add a region peer to store.
-	leader := &metapb.Peer{StoreId: store.GetId()}
-	region := s.newRegion(c, 0, []byte{'a'}, []byte{'b'}, []*metapb.Peer{leader}, nil)
-	regionInfo := core.NewRegionInfo(region, leader)
-	err := cluster.HandleRegionHeartbeat(regionInfo)
-	c.Assert(err, IsNil)
-	c.Assert(cluster.cachedCluster.getStoreRegionCount(store.GetId()), Equals, 1)
-
-	// store is up w/ region peers will not be buried.
-	cluster.checkStores()
-	tmpStore = s.getStore(c, clusterID, store.GetId())
-	c.Assert(tmpStore.GetState(), Equals, metapb.StoreState_Up)
-
-	err = cluster.RemoveStore(store.GetId())
-	c.Assert(err, IsNil)
-	removedStore := s.getStore(c, clusterID, store.GetId())
-	c.Assert(removedStore.GetState(), Equals, metapb.StoreState_Offline)
-
-	// store is offline w/ region peers will not be buried.
-	cluster.checkStores()
-	tmpStore = s.getStore(c, clusterID, store.GetId())
-	c.Assert(tmpStore.GetState(), Equals, metapb.StoreState_Up)
-
-	// Clear store's region peers.
-	leader.StoreId = 0
-	region.Peers = []*metapb.Peer{leader}
-	err = cluster.HandleRegionHeartbeat(regionInfo)
-	c.Assert(err, IsNil)
-	c.Assert(cluster.cachedCluster.getStoreRegionCount(store.GetId()), Equals, 0)
-
-	// store is offline w/o region peers will be buried.
-	cluster.checkStores()
-	tmpStore = s.getStore(c, clusterID, store.GetId())
-	c.Assert(tmpStore.GetState(), Equals, metapb.StoreState_Tombstone)
-}
-*/
-
 // Make sure PD will not panic if it start and stop again and again.
 func (s *testClusterSuite) TestClosedChannel(c *C) {
 	svr, cleanup := newTestServer(c)
