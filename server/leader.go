@@ -49,7 +49,11 @@ func (s *Server) GetLeader() *pdpb.Member {
 	if leader == nil {
 		return nil
 	}
-	return leader.(*pdpb.Member)
+	member := leader.(*pdpb.Member)
+	if member.GetMemberId() == 0 {
+		return nil
+	}
+	return member
 }
 
 func (s *Server) enableLeader() {
