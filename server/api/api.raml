@@ -61,7 +61,8 @@ types:
       max-snapshot-count?: integer
       max-pending-peer-count?: integer
       max-merge-region-size?: integer
-      split-merge-interval?: integer
+      max-merge-region-keys?: integer
+      split-merge-interval?: string
       patrol-region-interval?: string
       max-store-down-time?: string
       leader-schedule-limit?: integer
@@ -72,6 +73,11 @@ types:
       low-space-ratio?: number
       high-space-ratio?: number
       disable-raft-learner?: boolean
+      disable-remove-down-replica?: boolean
+      disable-replace-offline-replica?: boolean
+      disable-make-up-replica?: boolean
+      disable-remove-extra-replica?: boolean
+      disable-location-replacement?: boolean
       schedulers-v2?: SchedulerConfigs # FIXME: now the output is a map.
   SchedulerConfigs:
     type: object
@@ -121,6 +127,7 @@ types:
         type: string
         enum: [ Up, Disconnected, Down, Offline, Tombstone ]
       labels?: StoreLabel[]
+      version?: string
   StoreLabel:
     type: object
     properties:
@@ -160,6 +167,7 @@ types:
       end_key: string
       epoch?: RegionEpoch
       peers?: Peer[]
+      leader?: Peer
       down_peers?: PeerStats[]
       pending_peers?: Peer[]
       written_bytes?: integer
@@ -309,11 +317,14 @@ types:
       count: integer
       empty_count: integer
       storage_size: integer
+      storage_keys: integer
       # FIXME: maps cannot be described by RAML now.
       store_leader_count: object
       store_peer_count: object
       store_leader_size: object
+      store_leader_keys: object
       store_peer_size: object
+      store_peer_keys: object
 
   Trend:
     type: object
