@@ -125,6 +125,9 @@ func loop() {
 			fmt.Printf("parse command err: %v\n", err)
 			continue
 		}
+		if url != "" && !strings.HasPrefix(url, "http") {
+			url = "http://" + url
+		}
 		args = append(args, "-u", url)
 		if caPath != "" && certPath != "" && keyPath != "" {
 			args = append(args, "--cacert", caPath, "--cert", certPath, "--key", keyPath)
