@@ -61,12 +61,14 @@ tool-install: setup
 	retool add github.com/kisielk/errcheck v1.1.0
 	# linter
 	retool add github.com/mgechev/revive 7773f47324c2bf1c8f7a5500aff2b6c01d3ed73b
+	retool add github.com/securego/gosec/cmd/gosec 1.0.0
 
 # These need to be fixed before they can be ran regularly
 check-fail:
 	CGO_ENABLED=0 retool do gometalinter.v2 --disable-all \
 	  --enable errcheck \
 	  $$($(PACKAGE_DIRECTORIES))
+	CGO_ENABLED=0 retool do gosec $$($(PACKAGE_DIRECTORIES))
 
 check: static lint
 	@echo "checking"

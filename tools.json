@@ -31,6 +31,14 @@
     {
       "Repository": "github.com/client9/misspell/cmd/misspell",
       "Commit": "7888c6b6ce89353cd98e196bce3c3f9e4cdf31f6"
+    },
+    {
+      "Repository": "github.com/securego/gosec",
+      "Commit": "5fb530cda357c16175f2c049577d2030de735b28"
+    },
+    {
+      "Repository": "github.com/securego/gosec/cmd/gosec",
+      "Commit": "5fb530cda357c16175f2c049577d2030de735b28"
     }
   ],
   "RetoolVersion": "1.3.7"
