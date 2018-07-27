@@ -18,7 +18,6 @@ import (
 	"math/rand"
 	"path"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
@@ -36,16 +35,29 @@ var (
 
 // IsLeader returns whether server is leader or not.
 func (s *Server) IsLeader() bool {
-	return atomic.LoadInt64(&s.isLeader) == 1
+	return s.GetLeaderID() == s.ID()
 }
 
-func (s *Server) enableLeader(b bool) {
-	value := int64(0)
-	if b {
-		value = 1
-	}
+// GetLeaderID returns current leader's member ID.
+func (s *Server) GetLeaderID() uint64 {
+	return s.GetLeader().GetMemberId()
+}
 
-	atomic.StoreInt64(&s.isLeader, value)
+// GetLeader returns current leader of pd cluster.
+func (s *Server) GetLeader() *pdpb.Member {
+	leader := s.leader.Load()
+	if leader == nil {
+		return nil
+	}
+	return leader.(*pdpb.Member)
+}
+
+func (s *Server) enableLeader() {
+	s.leader.Store(s.member)
+}
+
+func (s *Server) disableLeader() {
+	s.leader.Store(&pdpb.Member{})
 }
 
 func (s *Server) getLeaderPath() string {
@@ -74,6 +86,12 @@ func (s *Server) leaderLoop() {
 			return
 		}
 
+		if s.GetEtcdLeader() == 0 {
+			log.Error("no etcd leader, check leader later")
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
 		leader, err := getLeader(s.client, s.getLeaderPath())
 		if err != nil {
 			log.Errorf("get leader err %v", err)
@@ -92,12 +110,12 @@ func (s *Server) leaderLoop() {
 				}
 			} else {
 				log.Infof("leader is %s, watch it", leader)
-				s.watchLeader()
+				s.watchLeader(leader)
 				log.Info("leader changed, try to campaign leader")
 			}
 		}
 
-		etcdLeader := s.etcd.Server.Lead()
+		etcdLeader := s.GetEtcdLeader()
 		if etcdLeader != s.ID() {
 			log.Infof("%v is not etcd leader, skip campaign leader and check later", s.Name())
 			time.Sleep(200 * time.Millisecond)
@@ -119,8 +137,8 @@ func (s *Server) etcdLeaderLoop() {
 	for {
 		select {
 		case <-time.After(s.cfg.leaderPriorityCheckInterval.Duration):
-			etcdLeader := s.etcd.Server.Lead()
-			if etcdLeader == s.ID() {
+			etcdLeader := s.GetEtcdLeader()
+			if etcdLeader == s.ID() || etcdLeader == 0 {
 				break
 			}
 			myPriority, err := s.GetMemberLeaderPriority(s.ID())
@@ -165,26 +183,16 @@ func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, error) {
 	return leader, nil
 }
 
-// GetLeader gets pd cluster leader.
-func (s *Server) GetLeader() (*pdpb.Member, error) {
-	if s.isClosed() {
-		return nil, errors.New("server is closed")
-	}
-	leader, err := getLeader(s.client, s.getLeaderPath())
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	if leader == nil {
-		return nil, errors.Trace(errNoLeader)
-	}
-	return leader, nil
+// GetEtcdLeader returns the etcd leader ID.
+func (s *Server) GetEtcdLeader() uint64 {
+	return s.etcd.Server.Lead()
 }
 
 func (s *Server) isSameLeader(leader *pdpb.Member) bool {
 	return leader.GetMemberId() == s.ID()
 }
 
-func (s *Server) marshalLeader() string {
+func (s *Server) memberInfo() (member *pdpb.Member, marshalStr string) {
 	leader := &pdpb.Member{
 		Name:       s.Name(),
 		MemberId:   s.ID(),
@@ -198,7 +206,7 @@ func (s *Server) marshalLeader() string {
 		log.Fatalf("marshal leader %s err %v", leader, err)
 	}
 
-	return string(data)
+	return leader, string(data)
 }
 
 func (s *Server) campaignLeader() error {
@@ -262,8 +270,8 @@ func (s *Server) campaignLeader() error {
 		physical: zeroTime,
 	})
 
-	s.enableLeader(true)
-	defer s.enableLeader(false)
+	s.enableLeader()
+	defer s.disableLeader()
 
 	log.Infof("cluster version is %s", s.scheduleOpt.loadClusterVersion())
 	log.Infof("PD cluster leader %s is ready to serve", s.Name())
@@ -283,7 +291,7 @@ func (s *Server) campaignLeader() error {
 			if err = s.updateTimestamp(); err != nil {
 				return errors.Trace(err)
 			}
-			etcdLeader := s.etcd.Server.Lead()
+			etcdLeader := s.GetEtcdLeader()
 			if etcdLeader != s.ID() {
 				log.Infof("etcd leader changed, %s resigns leadership", s.Name())
 				return nil
@@ -294,7 +302,10 @@ func (s *Server) campaignLeader() error {
 	}
 }
 
-func (s *Server) watchLeader() {
+func (s *Server) watchLeader(leader *pdpb.Member) {
+	s.leader.Store(leader)
+	defer s.leader.Store(&pdpb.Member{})
+
 	watcher := clientv3.NewWatcher(s.client)
 	defer watcher.Close()
 

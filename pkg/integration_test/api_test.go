@@ -17,6 +17,7 @@ import (
 	"net/http"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/pkg/testutil"
 )
 
 func (s *integrationTestSuite) TestReconnect(c *C) {
@@ -48,9 +49,11 @@ func (s *integrationTestSuite) TestReconnect(c *C) {
 	// Make sure they proxy requests to the new leader.
 	for name, s := range cluster.servers {
 		if name != leader {
-			res, e := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
-			c.Assert(e, IsNil)
-			c.Assert(res.StatusCode, Equals, http.StatusOK)
+			testutil.WaitUntil(c, func(c *C) bool {
+				res, e := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
+				c.Assert(e, IsNil)
+				return res.StatusCode == http.StatusOK
+			})
 		}
 	}
 
@@ -61,9 +64,11 @@ func (s *integrationTestSuite) TestReconnect(c *C) {
 	// Request will fail with no leader.
 	for name, s := range cluster.servers {
 		if name != leader && name != newLeader {
-			res, err := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
-			c.Assert(err, IsNil)
-			c.Assert(res.StatusCode, Equals, http.StatusInternalServerError)
+			testutil.WaitUntil(c, func(c *C) bool {
+				res, err := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
+				c.Assert(err, IsNil)
+				return res.StatusCode == http.StatusInternalServerError
+			})
 		}
 	}
 }

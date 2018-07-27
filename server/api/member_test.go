@@ -84,11 +84,8 @@ func (s *testMemberAPISuite) TestMemberList(c *C) {
 }
 
 func (s *testMemberAPISuite) TestMemberLeader(c *C) {
-	leader, err := s.servers[0].GetLeader()
-	c.Assert(err, IsNil)
-
+	leader := s.servers[0].GetLeader()
 	addr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/leader"
-	c.Assert(err, IsNil)
 	resp, err := s.hc.Get(addr)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()

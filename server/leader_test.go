@@ -54,8 +54,7 @@ func (s *testGetLeaderSuite) TearDownSuite(c *C) {
 func (s *testGetLeaderSuite) TestGetLeader(c *C) {
 	mustWaitLeader(c, []*Server{s.svr})
 
-	leader, err := s.svr.GetLeader()
-	c.Assert(err, IsNil)
+	leader := s.svr.GetLeader()
 	c.Assert(leader, NotNil)
 
 	s.done <- true
