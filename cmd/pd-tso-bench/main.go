@@ -29,7 +29,6 @@ import (
 )
 
 var (
-	// sleep       = flag.Duration("sleep", time.Millisecond, "sleep time after a request, used to adjust pressure")
 	pdAddrs     = flag.String("pd", "127.0.0.1:2379", "pd address")
 	concurrency = flag.Int("C", 1000, "concurrency")
 	interval    = flag.Duration("interval", time.Second, "interval to output the statistics")
