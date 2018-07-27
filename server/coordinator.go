@@ -185,7 +185,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 			}
 		}
 	}
-	if c.limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
+	if c.cluster.IsFeatureSupported(RegionMerge) && c.limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 		if op1, op2 := c.mergeChecker.Check(region); op1 != nil && op2 != nil {
 			// make sure two operators can add successfully altogether
 			if c.addOperator(op1, op2) {

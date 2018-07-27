@@ -68,6 +68,18 @@ func PrintPDInfo() {
 	fmt.Println("UTC Build Time: ", PDBuildTS)
 }
 
+// CheckPDVersion checks if PD needs to be upgraded.
+func CheckPDVersion(opt *scheduleOption) {
+	pdVersion := MinSupportedVersion(Base)
+	if PDReleaseVersion != "None" {
+		pdVersion = *MustParseVersion(PDReleaseVersion)
+	}
+	clusterVersion := opt.loadClusterVersion()
+	if pdVersion.LessThan(clusterVersion) {
+		log.Warnf("PD version %s less than cluster version: %s, please upgrade PD", pdVersion, clusterVersion)
+	}
+}
+
 // A helper function to get value with key from etcd.
 // TODO: return the value revision for outer use.
 func getValue(c *clientv3.Client, key string, opts ...clientv3.OpOption) ([]byte, error) {
@@ -252,11 +264,11 @@ func InitHTTPClient(svr *Server) error {
 	return nil
 }
 
-const matchRule = "^[A-Za-z]([A-Za-z0-9_-]*[A-Za-z0-9])?$"
+const matchRule = "^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$"
 
 // ValidateLabelString checks the legality of the label string.
-// The valid label only contain alphanumeric characters, hyphens and underscores,
-// must start with a letter but not ending with a hyphen or underscore.
+// The valid label consist of alphanumeric characters, '-', '_' or '.',
+// and must start and end with an alphanumeric character.
 func ValidateLabelString(s string) error {
 	isValid, _ := regexp.MatchString(matchRule, s)
 	if !isValid {

@@ -46,6 +46,7 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 					Value: "ssd",
 				},
 			},
+			Version: "2.0.0",
 		},
 		{
 			Id:      4,
@@ -61,6 +62,7 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 					Value: "hdd",
 				},
 			},
+			Version: "2.0.0",
 		},
 		{
 			Id:      6,
@@ -76,6 +78,7 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 					Value: "ssd",
 				},
 			},
+			Version: "2.0.0",
 		},
 		{
 			Id:      7,
@@ -95,6 +98,7 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 					Value: "test",
 				},
 			},
+			Version: "2.0.0",
 		},
 	}
 
