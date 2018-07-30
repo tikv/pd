@@ -77,7 +77,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 		return NewOperator("makeUpReplica", region.GetId(), region.GetRegionEpoch(), OpReplica|OpRegion, steps...)
 	}
 
-	// when add learner peer, the number of peer will exceed max replicas for a wille,
+	// when add learner peer, the number of peer will exceed max replicas for a while,
 	// just comparing the the number of voters to avoid too many cancel add operator log.
 	if len(region.GetVoters()) > r.cluster.GetMaxReplicas() && r.cluster.IsRemoveExtraReplicaEnabled() {
 		log.Debugf("[region %d] has %d peers more than max replicas", region.GetId(), len(region.GetPeers()))

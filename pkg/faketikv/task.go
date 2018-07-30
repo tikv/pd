@@ -120,7 +120,7 @@ func (m *mergeRegion) Step(r *RaftEngine) {
 	}
 
 	targetRegion := r.GetRegion(m.targetRegion.Id)
-	if bytes.Compare(m.targetRegion.EndKey, region.StartKey) == 0 {
+	if bytes.Equal(m.targetRegion.EndKey, region.StartKey) {
 		targetRegion.EndKey = region.EndKey
 	} else {
 		targetRegion.StartKey = region.StartKey

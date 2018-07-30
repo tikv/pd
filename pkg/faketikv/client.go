@@ -119,7 +119,7 @@ func (c *client) getMembers(ctx context.Context) (*pdpb.GetMembersResponse, erro
 }
 
 func (c *client) createConn() (*grpc.ClientConn, error) {
-	cc, err := grpc.Dial(strings.TrimLeft(c.url, "http://"), grpc.WithInsecure())
+	cc, err := grpc.Dial(strings.TrimPrefix(c.url, "http://"), grpc.WithInsecure())
 	if err != nil {
 		return nil, errors.Trace(err)
 	}

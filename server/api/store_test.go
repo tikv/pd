@@ -41,6 +41,7 @@ func requestStatusBody(c *C, client *http.Client, method string, url string) (in
 	req, err := http.NewRequest(method, url, nil)
 	c.Assert(err, IsNil)
 	resp, err := client.Do(req)
+	c.Assert(err, IsNil)
 	body, err := ioutil.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	err = resp.Body.Close()

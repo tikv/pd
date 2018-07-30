@@ -22,6 +22,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+//revive:disable:unused-parameter
+
 // Filter is an interface to filter source and target store.
 type Filter interface {
 	Type() string

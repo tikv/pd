@@ -6,3 +6,4 @@ default.pd
 *.swp
 .DS_Store
 tags
+/_tools/

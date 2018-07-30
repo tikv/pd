@@ -103,7 +103,7 @@ func HTTPCode(errCode ErrorCode) int {
 
 // HasClientData is used to defined how to retrieve the data portion of an ErrorCode to be returned to the client.
 // Otherwise the struct itself will be assumed to be all the data.
-// This is provided for exensibility, but may be unecessary for you.
+// This is provided for exensibility, but may be unnecessary for you.
 // Normally data is retrieved with the ClientData function.
 type HasClientData interface {
 	GetClientData() interface{}

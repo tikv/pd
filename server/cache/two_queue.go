@@ -89,7 +89,6 @@ func (c *TwoQueue) Put(key uint64, value interface{}) {
 	// Put it to recent list
 	c.ensureSpace(false)
 	c.recent.Put(key, value)
-	return
 }
 
 func (c *TwoQueue) ensureSpace(ghost bool) {

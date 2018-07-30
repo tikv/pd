@@ -192,7 +192,7 @@ func (mr MergeRegion) String() string {
 // IsFinish checks if current step is finished
 func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 	if mr.IsPassive {
-		return bytes.Compare(region.Region.StartKey, mr.ToRegion.StartKey) != 0 || bytes.Compare(region.Region.EndKey, mr.ToRegion.EndKey) != 0
+		return !bytes.Equal(region.Region.StartKey, mr.ToRegion.StartKey) || !bytes.Equal(region.Region.EndKey, mr.ToRegion.EndKey)
 	}
 	return false
 }
