@@ -46,7 +46,6 @@ func errorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	} else {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
-	return
 }
 
 // Write json into data.

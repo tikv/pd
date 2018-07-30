@@ -24,7 +24,7 @@ func (s *integrationTestSuite) TestReconnect(c *C) {
 
 	cluster, err := newTestCluster(3)
 	c.Assert(err, IsNil)
-	defer cluster.Destory()
+	defer cluster.Destroy()
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)

@@ -257,7 +257,7 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	op = el.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 	c.Assert(op, IsNil)
 
-	// If the peer on store3 is pending, not trasnfer to store3 neither.
+	// If the peer on store3 is pending, not transfer to store3 neither.
 	tc.SetStoreUp(3)
 	region := tc.Regions.GetRegion(1)
 	for _, p := range region.Peers {

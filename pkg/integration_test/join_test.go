@@ -27,7 +27,7 @@ func (s *integrationTestSuite) TestSimpleJoin(c *C) {
 
 	cluster, err := newTestCluster(1)
 	c.Assert(err, IsNil)
-	defer cluster.Destory()
+	defer cluster.Destroy()
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -70,7 +70,7 @@ func (s *integrationTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) 
 
 	cluster, err := newTestCluster(3)
 	c.Assert(err, IsNil)
-	defer cluster.Destory()
+	defer cluster.Destroy()
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -106,7 +106,7 @@ func (s *integrationTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 
 	cluster, err := newTestCluster(3)
 	c.Assert(err, IsNil)
-	defer cluster.Destory()
+	defer cluster.Destroy()
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -141,7 +141,7 @@ func (s *integrationTestSuite) TestFailedPDJoinsPreviousCluster(c *C) {
 
 	cluster, err := newTestCluster(1)
 	c.Assert(err, IsNil)
-	defer cluster.Destory()
+	defer cluster.Destroy()
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -154,7 +154,7 @@ func (s *integrationTestSuite) TestFailedPDJoinsPreviousCluster(c *C) {
 	c.Assert(err, IsNil)
 	err = pd2.Stop()
 	c.Assert(err, IsNil)
-	err = pd2.Destory()
+	err = pd2.Destroy()
 	c.Assert(err, IsNil)
 	c.Assert(server.PrepareJoinCluster(pd2.GetConfig()), NotNil)
 }

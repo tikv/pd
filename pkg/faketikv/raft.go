@@ -244,7 +244,7 @@ func generateKeys(size int) []string {
 	for k := range m {
 		v = append(v, k)
 	}
-	sort.Sort(sort.StringSlice(v))
+	sort.Strings(v)
 	return v
 }
 

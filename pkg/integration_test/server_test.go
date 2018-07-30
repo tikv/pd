@@ -39,7 +39,7 @@ func (s *integrationTestSuite) TestUpdateAdvertiseUrls(c *C) {
 
 	cluster, err := newTestCluster(2)
 	c.Assert(err, IsNil)
-	defer cluster.Destory()
+	defer cluster.Destroy()
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -79,7 +79,7 @@ func (s *integrationTestSuite) TestClusterID(c *C) {
 
 	cluster, err := newTestCluster(3)
 	c.Assert(err, IsNil)
-	defer cluster.Destory()
+	defer cluster.Destroy()
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -106,7 +106,7 @@ func (s *integrationTestSuite) TestLeader(c *C) {
 
 	cluster, err := newTestCluster(3)
 	c.Assert(err, IsNil)
-	defer cluster.Destory()
+	defer cluster.Destroy()
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)

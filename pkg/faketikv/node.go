@@ -54,6 +54,7 @@ type Node struct {
 	cancel                   context.CancelFunc
 	state                    NodeState
 	raftEngine               *RaftEngine
+	ioRate                   int64
 }
 
 // NewNode returns a Node.
@@ -85,6 +86,8 @@ func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
 		tasks:  make(map[uint64]Task),
 		state:  Down,
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
+		// FIXME: This value should be adjusted to a appropriate one.
+		ioRate: 40 * 1000 * 1000,
 	}, nil
 }
 
