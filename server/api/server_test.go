@@ -116,9 +116,6 @@ func mustWaitLeader(c *C, svrs []*server.Server) *server.Server {
 		var leader *pdpb.Member
 		for _, svr := range svrs {
 			l := svr.GetLeader()
-			if l == nil {
-				return false
-			}
 			// All servers' GetLeader should return the same leader.
 			if l == nil || (leader != nil && l.GetMemberId() != leader.GetMemberId()) {
 				return false
