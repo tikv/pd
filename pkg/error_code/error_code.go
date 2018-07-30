@@ -13,16 +13,21 @@
 
 // Package errcode facilitates standardized API error codes.
 // The goal is that clients can reliably understand errors by checking against immutable error codes
-// A RegisteredCode should never be modified once committed (and released for use by clients).
-// Instead a new RegisteredCode should be created.
+// A Code should never be modified once committed (and released for use by clients).
+// Instead a new Code should be created.
 //
-// Note that the error codes are strings.
-// Integer error codes have extensibility issues (branches using the same numbers, etc).
+// Error codes are represented as strings by CodeStr (see CodeStr documentation).
 //
-// This package is designed to have few opinions and be a starting point for how you want to do errors.
-// The only requirement is to satisfy the ErrorCode interface (see documentation of ErrCode).
+// This package is designed to have few opinions and be a starting point for how you want to do errors in your project.
+// Interfaces are provided for extensibility.
+// The main requirement is to satisfy the ErrorCode interface by attaching a Code
+// See the documentation of ErrorCode.
 //
-// A few generic error codes are provided here.
+// Hierarchies are supported: a Code can point to a parent.
+// This is used in the HTTPCode implementation to inherit HTTP codes found with MetaDataFromAncestors.
+// The hierarchy is present in the Code's string representation with a dot separation.
+//
+// A few generic top-level error codes are provided here.
 // You are encouraged to create your own application customized error codes rather than just using generic errors.
 //
 // See JSONFormat for an opinion on how to send back error information to a client.
@@ -31,42 +36,145 @@
 package errcode
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 )
 
-// RegisteredCode helps document that we are using a registered error code that must never change
-type RegisteredCode string
+// CodeStr is a representation of the type of a particular error.
+// The underlying type is string rather than int.
+// This enhances both extensibility (avoids merge conflicts) and user-friendliness.
+// A CodeStr can have dot separators indicating a hierarchy.
+type CodeStr string
 
-const (
-	// InternalCode means the operation placed the system is in an inconsistent or unrecoverable state.
-	// Essentially a handled panic.
-	// This is exactly the same as a HTTP 500, so it is not necessary to send this code over HTTP.
-	InternalCode RegisteredCode = "internal"
-	// InvalidInputCode is a validation failure of an input.
-	// The response will indicate the exact input issue.
-	InvalidInputCode RegisteredCode = "input"
-	// NotFoundCode indicates a resource is missing.
-	// The response can indicate what resource is missing.
-	// However, when a single resource is requested, that may be implicit.
-	NotFoundCode RegisteredCode = "missing"
+func (str CodeStr) String() string { return string(str) }
+
+// A Code has a CodeStr representation.
+// It is attached to a Parent to find metadata from it.
+// The Meta field is provided for extensibility: e.g. attaching HTTP codes.
+type Code struct {
+	// codeStr does not include parent paths
+	// The full code (with parent paths) is accessed with CodeStr
+	codeStr CodeStr
+	Parent  *Code
+}
+
+// CodeStr gives the full dot-separted path.
+// This is what should be used for equality comparison.
+func (code Code) CodeStr() CodeStr {
+	if code.Parent == nil {
+		return code.codeStr
+	}
+	return (*code.Parent).CodeStr() + "." + code.codeStr
+}
+
+// NewCode creates a new top-level code.
+// A top-level code must not contain any dot separators: that will panic
+// Most codes should be created from hierachry with the Child method.
+func NewCode(codeRep CodeStr) Code {
+	code := Code{codeStr: codeRep}
+	if err := code.checkCodePath(); err != nil {
+		panic(err)
+	}
+	return code
+}
+
+// Child creates a new code from a parent.
+// For documentation purposes, a childStr may include the parent codes with dot-separation.
+// An incorrect parent reference in the string panics.
+func (code Code) Child(childStr CodeStr) Code {
+	child := Code{codeStr: childStr, Parent: &code}
+	if err := child.checkCodePath(); err != nil {
+		panic(err)
+	}
+	// Don't store parent paths, those are re-constructed in CodeStr()
+	paths := strings.Split(child.codeStr.String(), ".")
+	child.codeStr = CodeStr(paths[len(paths)-1])
+	return child
+}
+
+// FindAncestor looks for an ancestor satisfying the given test function.
+func (code Code) findAncestor(test func(Code) bool) *Code {
+	if test(code) {
+		return &code
+	}
+	if code.Parent == nil {
+		return nil
+	}
+	return (*code.Parent).findAncestor(test)
+}
+
+// IsAncestor looks for the given code in its ancestors.
+func (code Code) IsAncestor(ancestorCode Code) bool {
+	return nil != code.findAncestor(func(an Code) bool { return an == ancestorCode })
+}
+
+// MetaData is a pattern for attaching meta data to codes and inheriting it from a parent.
+// See MetaDataFromAncestors.
+// This is used to attach an HTTP code to a Code.
+type MetaData map[CodeStr]interface{}
+
+// MetaDataFromAncestors looks for meta data starting at the current code.
+// If not found, it traverses up the hierarchy
+// by looking for the first ancestor with the given metadata key.
+// This is used in the HTTPCode implementation to inherit the HTTP Code from ancestors.
+func (code Code) MetaDataFromAncestors(metaData MetaData) interface{} {
+	if existing, ok := metaData[code.CodeStr()]; ok {
+		return existing
+	}
+	if code.Parent == nil {
+		return nil
+	}
+	return (*code.Parent).MetaDataFromAncestors(metaData)
+}
+
+var httpMetaData = make(MetaData)
+
+// SetHTTP adds an HTTP code to the meta data
+func (code Code) SetHTTP(httpCode int) Code {
+	if existingCode, ok := httpMetaData[code.CodeStr()]; ok {
+		panic(fmt.Sprintf("http already exists %v for %+v", existingCode, code))
+	}
+	httpMetaData[code.CodeStr()] = httpCode
+	return code
+}
+
+// HTTPCode retrieves the HTTP code for a code or its first ancestor with an HTTP code.
+// If none are specified, it defaults to 400 BadRequest
+func (code Code) HTTPCode() int {
+	httpCode := code.MetaDataFromAncestors(httpMetaData)
+	if httpCode == nil {
+		return http.StatusBadRequest
+	}
+	return httpCode.(int)
+}
+
+var (
+	// InternalCode is equivalent to HTTP 500 Internal Server Error
+	InternalCode = NewCode("internal").SetHTTP(http.StatusInternalServerError)
+	// InvalidInputCode is equivalent to HTTP 400 Bad Request
+	InvalidInputCode = NewCode("input").SetHTTP(http.StatusBadRequest)
+	// NotFoundCode is equivalent to HTTP 404 Not Found
+	NotFoundCode = NewCode("missing").SetHTTP(http.StatusNotFound)
+	// StateCode is an error that is invalid due to the current object state
+	// This is mapped to HTTP 400
+	StateCode = NewCode("state").SetHTTP(http.StatusBadRequest)
 )
 
 /*
 ErrorCode is the interface that ties an error and RegisteredCode together.
 
-Note that there are two additional interfaces (HasHTTPCode and HasClientData) that can be defined by an ErrorCode
-To further customize behavior
-For example, internalError implements HasHTTPCode to change it to a 500.
+Note that there is an additional interface (HasClientData, please see the docs) that can be defined by an ErrorCode.
+This customizes finding structured data for the client.
 
 ErrorCode allows error codes to be defined
 without being forced to use a particular struct such as CodedError.
-CodedError is convenient for generic errors that wrap many different code errors.
+CodedError is convenient for generic errors that wrap many different errors with similar codes.
 Please see the docs for CodedError.
 For an application specific error with a 1:1 mapping between a go error structure and a RegisteredCode,
 You probably want to use this interface directly. Example:
 
-	const PathBlockedCode RegisteredCode = "path.state.blocked"
-
+	// First define a normal error type
 	type PathBlocked struct {
 		start     uint64 `json:"start"`
 		end       uint64 `json:"end"`
@@ -77,34 +185,23 @@ You probably want to use this interface directly. Example:
 		return fmt.Sprintf("The path %d -> %d has obstacle %d", e.start, e.end, e.obstacle)
 	}
 
-	func (e PathBlocked) Code() RegisteredCode {
+	// Now define the code
+	var PathBlockedCode = errcode.StateCode.Child("state.blocked")
+
+	// Now attach the code to the error type
+	func (e PathBlocked) Code() Code {
 		return PathBlockedCode
 	}
 */
 type ErrorCode interface {
 	Error() string // The Error interface
-	Code() RegisteredCode
-}
-
-// HasHTTPCode is defined to override the default of 400 Bad Request
-type HasHTTPCode interface {
-	GetHTTPCode() int
-}
-
-// HTTPCode defaults to 400 BadRequest
-// This is overidden by defining the HasHTTPCode interface with a GetHTTPCode function
-func HTTPCode(errCode ErrorCode) int {
-	httpCode := http.StatusBadRequest
-	if hasData, ok := errCode.(HasHTTPCode); ok {
-		httpCode = hasData.GetHTTPCode()
-	}
-	return httpCode
+	Code() Code
 }
 
 // HasClientData is used to defined how to retrieve the data portion of an ErrorCode to be returned to the client.
-// Otherwise the struct itself will be assumed to be all the data.
+// Otherwise the struct itself will be assumed to be all the data by the ClientData method.
 // This is provided for exensibility, but may be unnecessary for you.
-// Normally data is retrieved with the ClientData function.
+// Data should be retrieved with the ClientData method.
 type HasClientData interface {
 	GetClientData() interface{}
 }
@@ -120,19 +217,23 @@ func ClientData(errCode ErrorCode) interface{} {
 	return data
 }
 
-// JSONFormat is a standard way to serilalize an ErrorCode to JSON.
+// JSONFormat is an opinion on how to serilalize an ErrorCode to JSON.
 // Msg is the string from Error().
 // The Data field is filled in by GetClientData
 type JSONFormat struct {
-	Data interface{}    `json:"data"`
-	Msg  string         `json:"msg"`
-	Code RegisteredCode `json:"code"`
+	Data interface{} `json:"data"`
+	Msg  string      `json:"msg"`
+	Code CodeStr     `json:"code"`
 }
 
-// NewJSONFormat turns an ErrCode into a JSONFormat
+// NewJSONFormat turns an ErrorCode into a JSONFormat
 func NewJSONFormat(errCode ErrorCode) JSONFormat {
 	data := ClientData(errCode)
-	return JSONFormat{Code: errCode.Code(), Data: data, Msg: errCode.Error()}
+	return JSONFormat{
+		Data: data,
+		Msg:  errCode.Error(),
+		Code: errCode.Code().CodeStr(),
+	}
 }
 
 // CodedError is a convenience to attach a code to an error and already satisfy the ErrorCode interface.
@@ -142,8 +243,22 @@ func NewJSONFormat(errCode ErrorCode) JSONFormat {
 // you are encouraged to wrap CodeError with your own struct that inherits it.
 // Look at the implementation of invalidInput, internalError, and notFound.
 type CodedError struct {
-	RegisteredCode RegisteredCode
-	Err            error
+	GetCode Code
+	Err     error
+}
+
+// NewCodedError is for constructing broad error kinds (e.g. those representing HTTP codes)
+// Which could have many different underlying go errors.
+// Eventually you may want to give your go errors more specific codes.
+// The second argument is the broad code.
+//
+// If the error given is already an ErrorCode,
+// that will be used as the code instead of the second argument.
+func NewCodedError(err error, code Code) CodedError {
+	if errcode, ok := err.(ErrorCode); ok {
+		code = errcode.Code()
+	}
+	return CodedError{GetCode: code, Err: err}
 }
 
 var _ ErrorCode = (*CodedError)(nil)     // assert implements interface
@@ -153,54 +268,83 @@ func (e CodedError) Error() string {
 	return e.Err.Error()
 }
 
-// Code returns the RegisteredCode field
-func (e CodedError) Code() RegisteredCode {
-	return e.RegisteredCode
+// Code returns the GetCode field
+func (e CodedError) Code() Code {
+	return e.GetCode
 }
 
 // GetClientData returns the underlying Err field.
 func (e CodedError) GetClientData() interface{} {
+	if errCode, ok := e.Err.(ErrorCode); ok {
+		return ClientData(errCode)
+	}
 	return e.Err
 }
 
 // invalidInput gives the code InvalidInputCode
 type invalidInputErr struct{ CodedError }
 
-// NewInvalidInputErr creates an invalidInput with error code of InvalidInputCode
+// NewInvalidInputErr creates an invalidInput from an err
+// If the error is already an ErrorCode it will use that code
+// Otherwise it will use InvalidInputCode which gives HTTP 400
 func NewInvalidInputErr(err error) ErrorCode {
-	return invalidInputErr{CodedError{RegisteredCode: InvalidInputCode, Err: err}}
+	return invalidInputErr{NewCodedError(err, InvalidInputCode)}
 }
 
-var _ ErrorCode = (*invalidInputErr)(nil) // assert implements interface
+var _ ErrorCode = (*invalidInputErr)(nil)     // assert implements interface
+var _ HasClientData = (*invalidInputErr)(nil) // assert implements interface
 
 // internalError gives the code InvalidInputCode
 type internalErr struct{ CodedError }
 
-// GetHTTPCode returns 500
-func (e internalErr) GetHTTPCode() int {
-	return http.StatusInternalServerError
-}
-
-// NewInternalErr creates an internalError with error code InternalCode
+// NewInternalErr creates an internalError from an err
+// If the given err is an ErrorCode that is a descendant of InternalCode,
+// its code will be used.
+// This ensures the intention of sending an HTTP 50x.
 func NewInternalErr(err error) ErrorCode {
-	return internalErr{CodedError{RegisteredCode: InternalCode, Err: err}}
+	code := InternalCode
+	if errcode, ok := err.(ErrorCode); ok {
+		errCode := errcode.Code()
+		if errCode.IsAncestor(InternalCode) {
+			code = errCode
+		}
+	}
+	return internalErr{CodedError{GetCode: code, Err: err}}
 }
 
-var _ ErrorCode = (*internalErr)(nil)   // assert implements interface
-var _ HasHTTPCode = (*internalErr)(nil) // assert implements interface
+var _ ErrorCode = (*internalErr)(nil)     // assert implements interface
+var _ HasClientData = (*internalErr)(nil) // assert implements interface
 
 // notFound gives the code NotFoundCode
 type notFoundErr struct{ CodedError }
 
-// HTTPCode returns 404
-func (e notFoundErr) GetHTTPCode() int {
-	return http.StatusNotFound
-}
-
-// NewNotFoundErr creates a notFound with error code of InternalCode
+// NewNotFoundErr creates a notFound from an err
+// If the error is already an ErrorCode it will use that code
+// Otherwise it will use NotFoundCode which gives HTTP 404
 func NewNotFoundErr(err error) ErrorCode {
-	return notFoundErr{CodedError{RegisteredCode: NotFoundCode, Err: err}}
+	return internalErr{NewCodedError(err, NotFoundCode)}
 }
 
-var _ ErrorCode = (*notFoundErr)(nil)   // assert implements interface
-var _ HasHTTPCode = (*notFoundErr)(nil) // assert implements interface
+var _ ErrorCode = (*notFoundErr)(nil)     // assert implements interface
+var _ HasClientData = (*notFoundErr)(nil) // assert implements interface
+
+// checkCodePath checks that the given code string either
+// contains no dots or extends the parent code string
+func (code Code) checkCodePath() error {
+	paths := strings.Split(code.codeStr.String(), ".")
+	if len(paths) == 1 {
+		return nil
+	}
+	if code.Parent == nil {
+		if len(paths) > 1 {
+			return fmt.Errorf("expected no parent paths: %#v", code.codeStr)
+		}
+	} else {
+		parent := *code.Parent
+		parentPath := paths[len(paths)-2]
+		if parentPath != parent.codeStr.String() {
+			return fmt.Errorf("got %#v but expected a path to parent %#v for %#v", parentPath, parent.codeStr, code.codeStr)
+		}
+	}
+	return nil
+}
