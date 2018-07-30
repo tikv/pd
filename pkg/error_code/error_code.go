@@ -70,7 +70,7 @@ func (code Code) CodeStr() CodeStr {
 
 // NewCode creates a new top-level code.
 // A top-level code must not contain any dot separators: that will panic
-// Most codes should be created from hierachy with the Child method.
+// Most codes should be created from hierachry with the Child method.
 func NewCode(codeRep CodeStr) Code {
 	code := Code{codeStr: codeRep}
 	if err := code.checkCodePath(); err != nil {
