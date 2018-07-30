@@ -13,8 +13,11 @@ We can recommend using VSCode with the Go addon to have this work automatically.
 
 Official lints are ran with:
 
+    make setup
     make check
 
+Setup installs `retool`, which is installed with `go get`.
+`retool` vendors the linter tools local to the project.
 
 ## Testing
 
