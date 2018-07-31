@@ -29,10 +29,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-var (
-	errNoLeader = errors.New("no leader")
-)
-
 // IsLeader returns whether server is leader or not.
 func (s *Server) IsLeader() bool {
 	return s.GetLeaderID() == s.ID()
