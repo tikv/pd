@@ -41,6 +41,7 @@ import (
 )
 
 var (
+	pdAddr         = flag.String("pd", "", "pd address")
 	confName       = flag.String("conf", "", "config name")
 	serverLogLevel = flag.String("serverLog", "fatal", "pd server log level.")
 	simLogLevel    = flag.String("simLog", "fatal", "simulator log level.")
@@ -50,8 +51,13 @@ func main() {
 	flag.Parse()
 
 	initRaftLogger()
+	simutil.InitLogger(*simLogLevel)
+	schedule.Simulating = true
 
 	if *confName == "" {
+		if *pdAddr != "" {
+			simutil.Logger.Fatal("need to specify one config name")
+		}
 		for conf := range cases.ConfMap {
 			run(conf)
 		}
@@ -61,51 +67,17 @@ func main() {
 }
 
 func run(confName string) {
-	simutil.InitLogger(*simLogLevel)
-	start := time.Now()
-
-	schedule.Simulating = true
-	_, local, clean := NewSingleServer()
-	err := local.Run(context.Background())
-	if err != nil {
-		simutil.Logger.Fatal("run server error:", err)
-	}
-	driver := faketikv.NewDriver(local.GetAddr(), confName)
-	err = driver.Prepare()
-	if err != nil {
-		simutil.Logger.Fatal("simulator prepare error:", err)
-	}
-	tick := time.NewTicker(100 * time.Millisecond)
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT)
-
-	simResult := "FAIL"
-
-EXIT:
-	for {
-		select {
-		case <-tick.C:
-			driver.Tick()
-			if driver.Check() {
-				simResult = "OK"
-				break EXIT
-			}
-		case <-sc:
-			break EXIT
+	if *pdAddr != "" {
+		tickInterval := 1 * time.Second
+		simStart(*pdAddr, confName, tickInterval)
+	} else {
+		_, local, clean := NewSingleServer()
+		err := local.Run(context.Background())
+		if err != nil {
+			simutil.Logger.Fatal("run server error:", err)
 		}
-	}
-
-	driver.Stop()
-	clean()
-
-	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, confName, driver.TickCount(), time.Since(start))
-
-	if simResult != "OK" {
-		os.Exit(1)
+		tickInterval := 100 * time.Millisecond
+		simStart(local.GetAddr(), confName, tickInterval, clean)
 	}
 }
 
@@ -156,4 +128,48 @@ func initRaftLogger() {
 		log.Fatalf("cannot create raft logger %v", err)
 	}
 	raft.SetLogger(lg)
+}
+
+func simStart(pdAddr string, confName string, tickInterval time.Duration, clean ...server.CleanupFunc) {
+	start := time.Now()
+	driver := faketikv.NewDriver(pdAddr, confName)
+	err := driver.Prepare()
+	if err != nil {
+		simutil.Logger.Fatal("simulator prepare error:", err)
+	}
+	tick := time.NewTicker(tickInterval)
+	defer tick.Stop()
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+
+	simResult := "FAIL"
+
+EXIT:
+	for {
+		select {
+		case <-tick.C:
+			driver.Tick()
+			if driver.Check() {
+				simResult = "OK"
+				break EXIT
+			}
+		case <-sc:
+			break EXIT
+		}
+	}
+
+	driver.Stop()
+	if len(clean) != 0 {
+		clean[0]()
+	}
+
+	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, confName, driver.TickCount(), time.Since(start))
+
+	if simResult != "OK" {
+		os.Exit(1)
+	}
 }
