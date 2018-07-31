@@ -455,7 +455,7 @@ func (c *RaftCluster) checkOperators() {
 		}
 
 		if op.IsTimeout() {
-			log.Infof("[region %v] operator timeout: %s", op.RegionID, op)
+			log.Infof("[region %v] operator timeout: %s", op.RegionID(), op)
 			operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 			co.removeOperator(op)
 		}

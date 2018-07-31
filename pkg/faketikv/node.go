@@ -63,6 +63,8 @@ func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
 	store := &metapb.Store{
 		Id:      id,
 		Address: addr,
+		// TODO: configurable
+		Version: "2.1.0",
 	}
 	stats := &pdpb.StoreStats{
 		StoreId: id,
