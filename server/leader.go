@@ -31,7 +31,8 @@ import (
 
 // IsLeader returns whether server is leader or not.
 func (s *Server) IsLeader() bool {
-	return s.GetLeaderID() == s.ID()
+	// If server is not started. Both leaderID and ID could be 0.
+	return !s.isClosed() && s.GetLeaderID() == s.ID()
 }
 
 // GetLeaderID returns current leader's member ID.
