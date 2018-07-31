@@ -246,12 +246,24 @@ func (c *client) AllocID(ctx context.Context) (uint64, error) {
 
 func (c *client) Bootstrap(ctx context.Context, store *metapb.Store, region *metapb.Region) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	_, err := c.pdClient().Bootstrap(ctx, &pdpb.BootstrapRequest{
+	defer cancel()
+	req := &pdpb.IsBootstrappedRequest{
+		Header: &pdpb.RequestHeader{
+			ClusterId: c.clusterID,
+		},
+	}
+	resp, err := c.pdClient().IsBootstrapped(ctx, req)
+	if resp.GetBootstrapped() {
+		simutil.Logger.Fatal("failed to bootstrap, server is not clean")
+	}
+	if err != nil {
+		return err
+	}
+	_, err = c.pdClient().Bootstrap(ctx, &pdpb.BootstrapRequest{
 		Header: c.requestHeader(),
 		Store:  store,
 		Region: region,
 	})
-	cancel()
 	if err != nil {
 		return err
 	}
