@@ -73,7 +73,7 @@ type Server struct {
 	clusterID   uint64 // pd cluster id.
 	rootPath    string
 	member      *pdpb.Member // current PD's info.
-	leaderValue string       // leader value saved in etcd leader key.  Every write will use this to check leader validation.
+	leaderValue string       // leader value saved in etcd leader key. Every write will use this to check leader validation.
 
 	// Server services.
 	// for id allocator, we can use one allocator for
