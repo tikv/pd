@@ -16,7 +16,6 @@ package pd
 import (
 	"context"
 	"math"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -57,11 +56,6 @@ var (
 		Peers: []*metapb.Peer{peer},
 	}
 )
-
-func cleanServer(cfg *server.Config) {
-	// Clean data directory
-	os.RemoveAll(cfg.DataDir)
-}
 
 type testClientSuite struct {
 	cleanup server.CleanupFunc

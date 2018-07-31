@@ -31,8 +31,7 @@ import (
 var (
 	dialClient = &http.Client{}
 
-	pingPrefix     = "pd/ping"
-	errInvalidAddr = errors.New("Invalid pd address, Cannot get connect to it")
+	pingPrefix = "pd/ping"
 )
 
 // InitHTTPSClient creates https client with ca file
@@ -120,27 +119,6 @@ func getAddressFromCmd(cmd *cobra.Command, prefix string) string {
 func printResponseError(r *http.Response) {
 	fmt.Printf("[%d]:", r.StatusCode)
 	io.Copy(os.Stdout, r.Body)
-}
-
-func validPDAddr(pd string) error {
-	u, err := url.Parse(pd)
-	if err != nil {
-		return err
-	}
-	if u.Scheme == "" {
-		u.Scheme = "http"
-	}
-	addr := u.String()
-	reps, err := dialClient.Get(fmt.Sprintf("%s/%s", addr, pingPrefix))
-	if err != nil {
-		return err
-	}
-	defer reps.Body.Close()
-	ioutil.ReadAll(reps.Body)
-	if reps.StatusCode != http.StatusOK {
-		return errInvalidAddr
-	}
-	return nil
 }
 
 func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {

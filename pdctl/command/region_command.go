@@ -21,7 +21,6 @@ import (
 	"os/exec"
 	"strconv"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
 )
 
@@ -34,11 +33,6 @@ var (
 	regionIDPrefix         = "pd/api/v1/region/id"
 	regionKeyPrefix        = "pd/api/v1/region/key"
 )
-
-type regionInfo struct {
-	Region *metapb.Region `json:"region"`
-	Leader *metapb.Peer   `json:"leader"`
-}
 
 // NewRegionCommand return a region subcommand of rootCmd
 func NewRegionCommand() *cobra.Command {
@@ -70,8 +64,7 @@ func NewRegionCommand() *cobra.Command {
 }
 
 func showRegionCommandFunc(cmd *cobra.Command, args []string) {
-	var prefix string
-	prefix = regionsPrefix
+	prefix := regionsPrefix
 	if len(args) == 1 {
 		if _, err := strconv.Atoi(args[0]); err != nil {
 			fmt.Println("region_id should be a number")

@@ -57,6 +57,8 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	newHandler(s.svr).AddAddPeerOperator(s.region.GetId(), storeID)
 
 	stream1, stream2 := newRegionheartbeatClient(c, s.grpcPDClient), newRegionheartbeatClient(c, s.grpcPDClient)
+	defer stream1.close()
+	defer stream2.close()
 	checkActiveStream := func() int {
 		select {
 		case <-stream1.respCh:

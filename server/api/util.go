@@ -41,12 +41,11 @@ func errorResp(rd *render.Render, w http.ResponseWriter, err error) {
 		return
 	}
 	if errCode, ok := errors.Cause(err).(errcode.ErrorCode); ok {
-		w.Header().Set("TiDB-Error-Code", string(errCode.Code()))
-		rd.JSON(w, errcode.HTTPCode(errCode), errcode.NewJSONFormat(errCode))
+		w.Header().Set("TiDB-Error-Code", errCode.Code().CodeStr().String())
+		rd.JSON(w, errCode.Code().HTTPCode(), errcode.NewJSONFormat(errCode))
 	} else {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
-	return
 }
 
 // Write json into data.

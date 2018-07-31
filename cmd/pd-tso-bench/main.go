@@ -31,7 +31,6 @@ import (
 var (
 	pdAddrs     = flag.String("pd", "127.0.0.1:2379", "pd address")
 	concurrency = flag.Int("C", 1000, "concurrency")
-	sleep       = flag.Duration("sleep", time.Millisecond, "sleep time after a request, used to adjust pressure")
 	interval    = flag.Duration("interval", time.Second, "interval to output the statistics")
 	caPath      = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
 	certPath    = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")

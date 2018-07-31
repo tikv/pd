@@ -252,6 +252,9 @@ func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
 	}
 	data[key] = val
 	reqData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
 	req, err := getRequest(cmd, path, http.MethodPost, "application/json", bytes.NewBuffer(reqData))
 	if err != nil {
 		return err

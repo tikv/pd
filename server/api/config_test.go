@@ -61,6 +61,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	c.Assert(err, IsNil)
 
 	resp, err = doGet(addr)
+	c.Assert(err, IsNil)
 	newCfg := &server.Config{}
 	err = readJSON(resp.Body, newCfg)
 	c.Assert(err, IsNil)
@@ -79,6 +80,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 
 	sc.MaxStoreDownTime.Duration = time.Second
 	postData, err := json.Marshal(sc)
+	c.Assert(err, IsNil)
 	postAddr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/config/schedule"
 	err = postJSON(postAddr, postData)
 	c.Assert(err, IsNil)
@@ -104,6 +106,7 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 
 	rc1 := map[string]int{"max-replicas": 5}
 	postData, err := json.Marshal(rc1)
+	c.Assert(err, IsNil)
 	postAddr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/config/replicate"
 	err = postJSON(postAddr, postData)
 	c.Assert(err, IsNil)
@@ -111,7 +114,9 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 
 	rc2 := map[string]string{"location-labels": "zone,rack"}
 	postData, err = json.Marshal(rc2)
+	c.Assert(err, IsNil)
 	err = postJSON(postAddr, postData)
+	c.Assert(err, IsNil)
 
 	resp, err = doGet(addr)
 	c.Assert(err, IsNil)

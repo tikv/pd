@@ -47,6 +47,9 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 				speed:    100 * 1000 * 1000,
 				epoch:    epoch,
 				peer:     changePeer.GetPeer(),
+				// This two variables are used to simulate sending and receiving snapshot processes.
+				sendingStat:   &snapshotStat{"sending", region.ApproximateSize, false},
+				receivingStat: &snapshotStat{"receiving", region.ApproximateSize, false},
 			}
 		case eraftpb.ConfChangeType_RemoveNode:
 			return &removePeer{
@@ -87,6 +90,12 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 	return nil
 }
 
+type snapshotStat struct {
+	kind       string
+	remainSize int64
+	finished   bool
+}
+
 type mergeRegion struct {
 	regionID     uint64
 	epoch        *metapb.RegionEpoch
@@ -111,7 +120,7 @@ func (m *mergeRegion) Step(r *RaftEngine) {
 	}
 
 	targetRegion := r.GetRegion(m.targetRegion.Id)
-	if bytes.Compare(m.targetRegion.EndKey, region.StartKey) == 0 {
+	if bytes.Equal(m.targetRegion.EndKey, region.StartKey) {
 		targetRegion.EndKey = region.EndKey
 	} else {
 		targetRegion.StartKey = region.StartKey
@@ -180,13 +189,15 @@ func (t *transferLeader) IsFinished() bool {
 }
 
 type addPeer struct {
-	regionID uint64
-	size     int64
-	keys     int64
-	speed    int64
-	epoch    *metapb.RegionEpoch
-	peer     *metapb.Peer
-	finished bool
+	regionID      uint64
+	size          int64
+	keys          int64
+	speed         int64
+	epoch         *metapb.RegionEpoch
+	peer          *metapb.Peer
+	finished      bool
+	sendingStat   *snapshotStat
+	receivingStat *snapshotStat
 }
 
 func (a *addPeer) Desc() string {
@@ -200,6 +211,17 @@ func (a *addPeer) Step(r *RaftEngine) {
 	region := r.GetRegion(a.regionID)
 	if region.RegionEpoch.Version > a.epoch.Version || region.RegionEpoch.ConfVer > a.epoch.ConfVer {
 		a.finished = true
+		return
+	}
+
+	snapshotSize := region.ApproximateSize
+	sendNode := r.conn.Nodes[region.Leader.GetStoreId()]
+	if !processSnapshot(sendNode, a.sendingStat, snapshotSize) {
+		return
+	}
+
+	recvNode := r.conn.Nodes[a.peer.GetStoreId()]
+	if !processSnapshot(recvNode, a.receivingStat, snapshotSize) {
 		return
 	}
 
@@ -314,4 +336,29 @@ func (a *addLearner) RegionID() uint64 {
 
 func (a *addLearner) IsFinished() bool {
 	return a.finished
+}
+
+func processSnapshot(n *Node, stat *snapshotStat, snapshotSize int64) bool {
+	// If the statement is true, it will start to send or receive the snapshot.
+	if stat.remainSize == snapshotSize {
+		if stat.kind == "sending" {
+			n.stats.SendingSnapCount++
+		} else {
+			n.stats.ReceivingSnapCount++
+		}
+	}
+	stat.remainSize -= n.ioRate
+	// The sending or receiving process has not finished yet.
+	if stat.remainSize > 0 {
+		return false
+	}
+	if !stat.finished {
+		stat.finished = true
+		if stat.kind == "sending" {
+			n.stats.SendingSnapCount--
+		} else {
+			n.stats.ReceivingSnapCount--
+		}
+	}
+	return true
 }

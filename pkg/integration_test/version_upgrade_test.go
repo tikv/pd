@@ -36,7 +36,7 @@ func (s *integrationTestSuite) TestStoreRegister(c *C) {
 	c.Parallel()
 	cluster, err := newTestCluster(3)
 	c.Assert(err, IsNil)
-	defer cluster.Destory()
+	defer cluster.Destroy()
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -85,7 +85,7 @@ func (s *integrationTestSuite) TestRollingUpgrade(c *C) {
 	c.Parallel()
 	cluster, err := newTestCluster(3)
 	c.Assert(err, IsNil)
-	defer cluster.Destory()
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
