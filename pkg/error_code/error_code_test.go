@@ -233,35 +233,44 @@ func TestNewInternalErr(t *testing.T) {
 
 // Test Operation
 type OpErrorHas struct{ MinimalError }
-type OpErrorField struct {
-	MinimalError
-	Operation string
-}
-
-var _ errcode.ErrorCode = (*OpErrorHas)(nil)    // assert implements interface
-var _ errcode.HasOperation = (*OpErrorHas)(nil) // assert implements interface
-var _ errcode.ErrorCode = (*OpErrorField)(nil)  // assert implements interface
 
 func (e OpErrorHas) GetOperation() string { return "has" }
 
+type OpErrorEmbed struct {
+	errcode.EmbedOp
+	MinimalError
+}
+
+var _ errcode.ErrorCode = (*OpErrorHas)(nil)      // assert implements interface
+var _ errcode.HasOperation = (*OpErrorHas)(nil)   // assert implements interface
+var _ errcode.ErrorCode = (*OpErrorEmbed)(nil)    // assert implements interface
+var _ errcode.HasOperation = (*OpErrorEmbed)(nil) // assert implements interface
+
 func TestOpErrorCode(t *testing.T) {
-	AssertOperationValue(t, "foo", "")
+	AssertOperation(t, "foo", "")
 	has := OpErrorHas{}
-	AssertOperationValue(t, has, "")
+	AssertOperation(t, has, "has")
 	AssertCodes(t, has)
 	ErrorEquals(t, has, "error")
 	ClientDataEquals(t, has, has)
 	OpEquals(t, has, "has")
-	OpEquals(t, OpErrorField{}, "")
-	OpEquals(t, OpErrorField{Operation: "field"}, "field")
+
+	OpEquals(t, OpErrorEmbed{}, "")
+	OpEquals(t, OpErrorEmbed{EmbedOp: errcode.MakeOp("field")}, "field")
+
+	OpEquals(t, errcode.AddOp("", MinimalError{}), "")
+	OpEquals(t, errcode.AddOp("add", MinimalError{}), "add")
+
 	OpEquals(t, ErrorWrapper{Err: has}, "has")
-	OpEquals(t, ErrorWrapper{Err: OpErrorField{Operation: "field"}}, "field")
+	OpEquals(t, ErrorWrapper{Err: OpErrorEmbed{EmbedOp: errcode.MakeOp("field")}}, "field")
+
 	opErrCode := errcode.OpErrCode{Operation: "opcode", Err: MinimalError{}}
-	AssertOperationValue(t, opErrCode, "opcode")
+	AssertOperation(t, opErrCode, "opcode")
 	OpEquals(t, opErrCode, "opcode")
+
 	OpEquals(t, ErrorWrapper{Err: opErrCode}, "opcode")
 	wrappedHas := ErrorWrapper{Err: errcode.OpErrCode{Operation: "opcode", Err: has}}
-	AssertOperationValue(t, wrappedHas, "")
+	AssertOperation(t, wrappedHas, "")
 	OpEquals(t, wrappedHas, "opcode")
 	OpEquals(t, errcode.OpErrCode{Operation: "opcode", Err: has}, "opcode")
 }
@@ -325,9 +334,9 @@ func OpEquals(t *testing.T, code errcode.ErrorCode, op string) {
 	}
 }
 
-func AssertOperationValue(t *testing.T, v interface{}, op string) {
+func AssertOperation(t *testing.T, v interface{}, op string) {
 	t.Helper()
-	opGot := errcode.StructFieldOperationValue(v)
+	opGot := errcode.Operation(v)
 	if opGot != op {
 		t.Errorf("\nOp expected: %#v\n Op but got: %#v", op, opGot)
 	}

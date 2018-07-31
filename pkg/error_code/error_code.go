@@ -41,7 +41,6 @@ package errcode
 import (
 	"fmt"
 	"net/http"
-	"reflect"
 	"strings"
 )
 
@@ -349,8 +348,9 @@ var _ HasClientData = (*notFoundErr)(nil) // assert implements interface
 
 // HasOperation defines the operation that occurred during an error
 // GetOperation is defined, but generally Operation() should be used.
-// Operation() will check for a HasOperation definition or an Operation field.
-// You don't need to define this interface if your struct has an Operation field.
+// Operation() will check if a HasOperation interface exists.
+// As an alternative to defining this interface
+// you can use an existing wrapper (OpErrCode) or embedding (EmbedOp)
 type HasOperation interface {
 	GetOperation() string
 }
@@ -362,24 +362,21 @@ func Operation(v interface{}) string {
 	var operation string
 	if hasOp, ok := v.(HasOperation); ok {
 		operation = hasOp.GetOperation()
-	} else {
-		operation = StructFieldOperationValue(v)
 	}
 	return operation
 }
 
-// StructFieldOperationValue looks for a struct field "Operation" of type String.
-// Return that or the empty string.
-func StructFieldOperationValue(i interface{}) string {
-	v := reflect.Indirect(reflect.ValueOf(i))
-	if v.Kind() == reflect.Struct {
-		fieldV := reflect.Indirect(v.FieldByName("Operation"))
-		if fieldV.Kind() == reflect.String {
-			return fieldV.String()
-		}
-	}
-	return ""
+// EmbedOp is designed to be embedded into your error structs.
+// It provides the HasOperation interface already, which can reduce your boilerplate.
+type EmbedOp struct{ Op string }
+
+// GetOperation satisfies the HasOperation interface
+func (e EmbedOp) GetOperation() string {
+	return e.Op
 }
+
+// MakeOp is just an alternative way to construct EmbedOp.
+func MakeOp(operation string) EmbedOp { return EmbedOp{Op: operation} }
 
 // OpErrCode is an ErrorCode with an "Operation" field attached.
 // This may be used as a convenience to record the operation information for the error.
@@ -407,12 +404,19 @@ func (e OpErrCode) Code() Code {
 
 // GetClientData returns the underlying Err field.
 func (e OpErrCode) GetClientData() interface{} {
-	return e.Err
+	return ClientData(e.Err)
 }
 
 var _ ErrorCode = (*OpErrCode)(nil)     // assert implements interface
 var _ HasClientData = (*OpErrCode)(nil) // assert implements interface
 var _ HasOperation = (*OpErrCode)(nil)  // assert implements interface
+
+// AddOp wraps an error code with OpErrCode to add an Operation attribute.
+// Note that the type will change to OpErrCode.
+// An alternative to wrapping is to embed with EmbedOp
+func AddOp(operation string, err ErrorCode) OpErrCode {
+	return OpErrCode{Operation: operation, Err: err}
+}
 
 // checkCodePath checks that the given code string either
 // contains no dots or extends the parent code string

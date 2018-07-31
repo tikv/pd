@@ -359,7 +359,7 @@ func (s *StoresInfo) BlockStore(storeID uint64) error {
 		return NewStoreNotFoundErr(storeID)
 	}
 	if store.IsBlocked() {
-		return StoreBlockedErr{StoreID: storeID, Operation: "store.block"}
+		return errcode.AddOp("store.block", StoreBlockedErr{StoreID: storeID})
 	}
 	store.Block()
 	return nil
