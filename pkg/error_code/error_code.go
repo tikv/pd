@@ -35,7 +35,6 @@
 // JSONFormat includes a body of response data (the "data field") that is by default the data from the Error
 // serialized to JSON.
 // This package provides no help on versioning error data.
-// It also provides just one optional convention: an Operation field.
 package errcode
 
 import (
@@ -346,17 +345,23 @@ func NewNotFoundErr(err error) ErrorCode {
 var _ ErrorCode = (*notFoundErr)(nil)     // assert implements interface
 var _ HasClientData = (*notFoundErr)(nil) // assert implements interface
 
-// HasOperation defines the operation that occurred during an error
-// GetOperation is defined, but generally Operation() should be used.
+// HasOperation is an interface to retrieve the operation that occurred during an error.
+// The end goal is to be able to see a trace of operations in a distributed system to quickly have a good understanding of what occurred.
+// Inspiration is taken from upspin error handling: https://commandcenter.blogspot.com/2017/12/error-handling-in-upspin.html
+// The relationship to error codes is not one-to-one.
+// A given error code can be triggered by multiple different operations,
+// just as a given operation could result in multiple different error codes.
+//
+// GetOperation is defined, but generally the operation should be retrieved with Operation().
 // Operation() will check if a HasOperation interface exists.
 // As an alternative to defining this interface
-// you can use an existing wrapper (OpErrCode) or embedding (EmbedOp)
+// you can use an existing wrapper (OpErrCode via AddOp) or embedding (EmbedOp) that has already defined it.
 type HasOperation interface {
 	GetOperation() string
 }
 
 // Operation will return an operation string if it exists.
-// It looks for either the HasOperation interface or a struct field "Operation".
+// It checks for the HasOperation interface.
 // Otherwise it will return the zero value (empty) string.
 func Operation(v interface{}) string {
 	var operation string
@@ -366,7 +371,7 @@ func Operation(v interface{}) string {
 	return operation
 }
 
-// EmbedOp is designed to be embedded into your error structs.
+// EmbedOp is designed to be embedded into your existing error structs.
 // It provides the HasOperation interface already, which can reduce your boilerplate.
 type EmbedOp struct{ Op string }
 
@@ -386,23 +391,22 @@ type OpErrCode struct {
 	Err       ErrorCode
 }
 
+// Error prefixes the operation to the underlying Err Error.
 func (e OpErrCode) Error() string {
 	return e.Operation + ": " + e.Err.Error()
 }
 
-// GetOperation satisfies the HasOperation interface
-// Because the OpErrCode struct has an Operation field,
-// It is not necessary to define this.
+// GetOperation satisfies the HasOperation interface.
 func (e OpErrCode) GetOperation() string {
 	return e.Operation
 }
 
-// Code returns the GetCode field
+// Code returns the unerlying Code of Err.
 func (e OpErrCode) Code() Code {
 	return e.Err.Code()
 }
 
-// GetClientData returns the underlying Err field.
+// GetClientData returns the ClientData of the underlying Err.
 func (e OpErrCode) GetClientData() interface{} {
 	return ClientData(e.Err)
 }
