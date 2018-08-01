@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	log "github.com/sirupsen/logrus"
@@ -40,7 +41,8 @@ import (
 )
 
 const (
-	etcdTimeout = time.Second * 3
+	etcdTimeout           = time.Second * 3
+	serverMetricsInterval = time.Minute
 	// pdRootPath for all pd servers.
 	pdRootPath      = "/pd"
 	pdAPIPrefix     = "/pd/"
@@ -62,9 +64,9 @@ type Server struct {
 	scheduleOpt *scheduleOption
 	handler     *Handler
 
-	leaderLoopCtx    context.Context
-	leaderLoopCancel func()
-	leaderLoopWg     sync.WaitGroup
+	serverLoopCtx    context.Context
+	serverLoopCancel func()
+	serverLoopWg     sync.WaitGroup
 
 	// Etcd and cluster informations.
 	etcd        *embed.Etcd
@@ -239,7 +241,7 @@ func (s *Server) Close() {
 
 	log.Info("closing server")
 
-	s.stopLeaderLoop()
+	s.stopServerLoop()
 
 	if s.client != nil {
 		s.client.Close()
@@ -280,9 +282,45 @@ func (s *Server) Run(ctx context.Context) error {
 		return errors.Trace(err)
 	}
 
-	s.startLeaderLoop()
+	s.startServerLoop()
 
 	return nil
+}
+
+func (s *Server) startServerLoop() {
+	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(context.Background())
+	s.serverLoopWg.Add(3)
+	go s.leaderLoop()
+	go s.etcdLeaderLoop()
+	go s.serverMetricsLoop()
+}
+
+func (s *Server) stopServerLoop() {
+	s.serverLoopCancel()
+	s.serverLoopWg.Wait()
+}
+
+func (s *Server) serverMetricsLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	for {
+		select {
+		case <-time.After(serverMetricsInterval):
+			s.collectEtcdStateMetrics()
+		case <-ctx.Done():
+			log.Info("server is closed, exit metrics loop")
+			return
+		}
+	}
+}
+
+func (s *Server) collectEtcdStateMetrics() {
+	etcdStateGauge.WithLabelValues("term").Set(float64(s.etcd.Server.Term()))
+	etcdStateGauge.WithLabelValues("appliedIndex").Set(float64(s.etcd.Server.AppliedIndex()))
+	etcdStateGauge.WithLabelValues("committedIndex").Set(float64(s.etcd.Server.CommittedIndex()))
 }
 
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
