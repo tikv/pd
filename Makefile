@@ -70,7 +70,7 @@ check-all: static lint
 	@echo "checking"
 
 check-setup:
-	@which foo >/dev/null 2>&1 || go get github.com/twitchtv/retool
+	@which retool >/dev/null 2>&1 || go get github.com/twitchtv/retool
 	@retool sync
 
 check: check-setup check-all
