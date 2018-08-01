@@ -43,11 +43,7 @@ test:
 basic_test:
 	go test $(BASIC_TEST_PKGS)
 
-# setup needs to be ran just once to install dependencies
-setup:
-	go get github.com/twitchtv/retool
-
-tool-install: setup
+tool-install: check-setup
 	# tool environment
 	# check runner
 	retool add gopkg.in/alecthomas/gometalinter.v2 v2.0.5
@@ -70,11 +66,16 @@ check-fail:
 	  $$($(PACKAGE_DIRECTORIES))
 	CGO_ENABLED=0 retool do gosec $$($(PACKAGE_DIRECTORIES))
 
-check: static lint
+check-all: static lint
 	@echo "checking"
 
+check-setup:
+	@which retool >/dev/null 2>&1 || go get github.com/twitchtv/retool
+	@retool sync
+
+check: check-setup check-all
+
 static:
-	CGO_ENABLED=0 retool sync
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 	retool do govet --shadow $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
