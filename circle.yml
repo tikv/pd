@@ -9,4 +9,4 @@ jobs:
       - checkout
       - run:
           name: "Build & Test"
-          command: make setup ci
+          command: make ci
