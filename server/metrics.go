@@ -147,6 +147,14 @@ var (
 			Help:      "Record critical metadata.",
 		}, []string{"type"})
 
+	etcdStateGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "etcd_state",
+			Help:      "Etcd raft states.",
+		}, []string{"type"})
+
 	patrolCheckRegionsHistogram = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -173,5 +181,6 @@ func init() {
 	prometheus.MustRegister(regionStatusGauge)
 	prometheus.MustRegister(regionLabelLevelGauge)
 	prometheus.MustRegister(metadataGauge)
+	prometheus.MustRegister(etcdStateGauge)
 	prometheus.MustRegister(patrolCheckRegionsHistogram)
 }
