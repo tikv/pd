@@ -415,11 +415,26 @@ var _ ErrorCode = (*OpErrCode)(nil)     // assert implements interface
 var _ HasClientData = (*OpErrCode)(nil) // assert implements interface
 var _ HasOperation = (*OpErrCode)(nil)  // assert implements interface
 
-// AddOp wraps an error code with OpErrCode to add an Operation attribute.
-// Note that the type will change to OpErrCode.
-// An alternative to wrapping is to embed with EmbedOp
-func AddOp(operation string, err ErrorCode) OpErrCode {
-	return OpErrCode{Operation: operation, Err: err}
+// A Modifier returns a new modified ErrorCode
+type Modifier func(ErrorCode) ErrorCode
+
+// Modify applies the Modifier to an ErrorCode
+func (modifier Modifier) Modify(err ErrorCode) ErrorCode {
+	return modifier(err)
+}
+
+/*
+Op is used to Modify an ErrorCode.
+
+op := errcode.Op("path.move.x")
+if start < obstable && obstacle < end  {
+	return op.Modify(PathBlocked{start, end, obstacle})
+}
+*/
+func Op(operation string) Modifier {
+	return func(err ErrorCode) ErrorCode {
+		return OpErrCode{Operation: operation, Err: err}
+	}
 }
 
 // checkCodePath checks that the given code string either

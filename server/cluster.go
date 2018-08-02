@@ -335,6 +335,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 // RemoveStore marks a store as offline in cluster.
 // State transition: Up -> Offline.
 func (c *RaftCluster) RemoveStore(storeID uint64) error {
+	op := errcode.Op("store.remove")
 	c.Lock()
 	defer c.Unlock()
 
@@ -342,7 +343,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 
 	store := cluster.GetStore(storeID)
 	if store == nil {
-		return core.NewStoreNotFoundErr(storeID)
+		return op.Modify(core.NewStoreNotFoundErr(storeID))
 	}
 
 	// Remove an offline store should be OK, nothing to do.
@@ -351,7 +352,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	}
 
 	if store.IsTombstone() {
-		return errcode.AddOp("store.remove", core.StoreTombstonedErr{StoreID: storeID})
+		return op.Modify(core.StoreTombstonedErr{StoreID: storeID})
 	}
 
 	store.State = metapb.StoreState_Offline
