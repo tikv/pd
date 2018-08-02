@@ -125,6 +125,12 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 		checkRegion(c, cache.GetRegion(i), region)
 		checkRegion(c, cache.SearchRegion(regionKey), region)
 		checkRegions(c, cache, regions[0:(i+1)])
+		// previous region
+		if i == 0 {
+			c.Assert(cache.SearchPrevRegion(regionKey), IsNil)
+		} else {
+			checkRegion(c, cache.SearchPrevRegion(regionKey), regions[i-1])
+		}
 
 		// Update leader to peer np-1.
 		region.Leader = region.Peers[np-1]

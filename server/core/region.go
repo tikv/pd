@@ -561,6 +561,15 @@ func (r *RegionsInfo) SearchRegion(regionKey []byte) *RegionInfo {
 	return r.GetRegion(region.GetId())
 }
 
+// SearchPrevRegion search previews RegionInfo from regionTree
+func (r *RegionsInfo) SearchPrevRegion(regionKey []byte) *RegionInfo {
+	region := r.tree.searchPrev(regionKey)
+	if region == nil {
+		return nil
+	}
+	return r.GetRegion(region.GetId())
+}
+
 // GetRegions gets all RegionInfo from regionMap
 func (r *RegionsInfo) GetRegions() []*RegionInfo {
 	regions := make([]*RegionInfo, 0, r.regions.Len())

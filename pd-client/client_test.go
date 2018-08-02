@@ -175,6 +175,44 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 	c.Assert(leader, DeepEquals, peer)
 }
 
+func (s *testClientSuite) TestGetPrevRegion(c *C) {
+	regionLen := 10
+	regions := make([]*metapb.Region, 0, regionLen)
+	for i := 0; i < regionLen; i++ {
+		r := &metapb.Region{
+			Id: 3,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			Peers:    []*metapb.Peer{peer},
+		}
+		regions = append(regions, r)
+		req := &pdpb.RegionHeartbeatRequest{
+			Header: newHeader(s.srv),
+			Region: region,
+			Leader: peer,
+		}
+		err := s.regionHeartbeat.Send(req)
+		c.Assert(err, IsNil)
+	}
+	time.Sleep(time.Millisecond * 200)
+
+	for i := 0; i < 20; i++ {
+		r, leader, err := s.client.GetRegion(context.Background(), []byte{byte(i)})
+		c.Assert(err, IsNil)
+		if i > 0 && i < regionLen {
+			c.Assert(leader, DeepEquals, peer)
+			c.Assert(r, DeepEquals, regions[i-1])
+		} else {
+			c.Assert(leader, IsNil)
+			c.Assert(r, IsNil)
+		}
+	}
+}
+
 func (s *testClientSuite) TestGetRegionByID(c *C) {
 	req := &pdpb.RegionHeartbeatRequest{
 		Header: newHeader(s.srv),

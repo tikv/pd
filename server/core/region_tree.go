@@ -115,6 +115,24 @@ func (t *regionTree) search(regionKey []byte) *metapb.Region {
 	return result.region
 }
 
+// searchPrev returns the previews region of the region where the regionKey is located.
+func (t *regionTree) searchPrev(regionKey []byte) *metapb.Region {
+	curRegion := &metapb.Region{StartKey: regionKey}
+	curRegionItem := t.find(curRegion)
+	if curRegionItem == nil {
+		return nil
+	}
+	prevRegionItem, _ := t.getAdjacentRegions(curRegionItem.region)
+	// previews region may not exist?
+	if prevRegionItem == nil {
+		return nil
+	}
+	if !bytes.Equal(prevRegionItem.region.EndKey, curRegionItem.region.StartKey) {
+		return nil
+	}
+	return prevRegionItem.region
+}
+
 // find is a helper function to find an item that contains the regions start
 // key.
 func (t *regionTree) find(region *metapb.Region) *regionItem {
