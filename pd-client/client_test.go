@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
+	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
 
@@ -180,7 +181,7 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 	regions := make([]*metapb.Region, 0, regionLen)
 	for i := 0; i < regionLen; i++ {
 		r := &metapb.Region{
-			Id: 3,
+			Id: uint64(i + 1),
 			RegionEpoch: &metapb.RegionEpoch{
 				ConfVer: 1,
 				Version: 1,
@@ -192,16 +193,17 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 		regions = append(regions, r)
 		req := &pdpb.RegionHeartbeatRequest{
 			Header: newHeader(s.srv),
-			Region: region,
+			Region: r,
 			Leader: peer,
 		}
+		logrus.Info("client:", req)
 		err := s.regionHeartbeat.Send(req)
 		c.Assert(err, IsNil)
 	}
-	time.Sleep(time.Millisecond * 200)
+	time.Sleep(time.Millisecond * 1000)
 
 	for i := 0; i < 20; i++ {
-		r, leader, err := s.client.GetRegion(context.Background(), []byte{byte(i)})
+		r, leader, err := s.client.GetPrevRegion(context.Background(), []byte{byte(i)})
 		c.Assert(err, IsNil)
 		if i > 0 && i < regionLen {
 			c.Assert(leader, DeepEquals, peer)
