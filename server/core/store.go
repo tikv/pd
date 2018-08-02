@@ -327,7 +327,9 @@ func NewStoreNotFoundErr(storeID uint64) errcode.ErrorCode {
 
 // StoresInfo is a map of storeID to StoreInfo
 type StoresInfo struct {
-	stores map[uint64]*StoreInfo
+	stores         map[uint64]*StoreInfo
+	bytesReadRate  float64
+	bytesWriteRate float64
 }
 
 // NewStoresInfo create a StoresInfo with map of storeID to StoreInfo
@@ -348,8 +350,10 @@ func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 
 // SetStore set a StoreInfo with storeID
 func (s *StoresInfo) SetStore(store *StoreInfo) {
-	store.RollingStoreStats.Observe(store.Stats)
 	s.stores[store.GetId()] = store
+	store.RollingStoreStats.Observe(store.Stats)
+	s.updateTotalBytesReadRate()
+	s.updateTotalBytesWriteRate()
 }
 
 // BlockStore block a StoreInfo with storeID
@@ -432,26 +436,34 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 	}
 }
 
-// TotalBytesWriteRate returns the total written bytes rate of all StoreInfo.
-func (s *StoresInfo) TotalBytesWriteRate() float64 {
-	var totalWriteBytes float64
+func (s *StoresInfo) updateTotalBytesWriteRate() {
+	var totalBytesWirteRate float64
 	for _, s := range s.stores {
 		if s.IsUp() {
-			totalWriteBytes += s.RollingStoreStats.GetBytesWriteRate()
+			totalBytesWirteRate += s.RollingStoreStats.GetBytesWriteRate()
 		}
 	}
-	return totalWriteBytes
+	s.bytesWriteRate = totalBytesWirteRate
+}
+
+// TotalBytesWriteRate returns the total written bytes rate of all StoreInfo.
+func (s *StoresInfo) TotalBytesWriteRate() float64 {
+	return s.bytesWriteRate
+}
+
+func (s *StoresInfo) updateTotalBytesReadRate() {
+	var totalBytesReadRate float64
+	for _, s := range s.stores {
+		if s.IsUp() {
+			totalBytesReadRate += s.RollingStoreStats.GetBytesReadRate()
+		}
+	}
+	s.bytesReadRate = totalBytesReadRate
 }
 
 // TotalBytesReadRate returns the total read bytes rate of all StoreInfo.
 func (s *StoresInfo) TotalBytesReadRate() float64 {
-	var totalReadBytes float64
-	for _, s := range s.stores {
-		if s.IsUp() {
-			totalReadBytes += s.RollingStoreStats.GetBytesReadRate()
-		}
-	}
-	return totalReadBytes
+	return s.bytesReadRate
 }
 
 // GetStoresBytesWriteStat returns the bytes write stat of all StoreInfo.
