@@ -31,7 +31,7 @@ const (
 	OpAdjacent                           // Initiated by adjacent region scheduler.
 	OpReplica                            // Initiated by replica checkers.
 	OpBalance                            // Initiated by balancers.
-	OpMerge                              // Initiated by merge checkers.
+	OpMerge                              // Initiated by merge checkers or merge schedulers.
 	OpRange                              // Initiated by range scheduler.
 	opMax
 )
