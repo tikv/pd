@@ -65,21 +65,9 @@ func (s *Server) getLeaderPath() string {
 	return path.Join(s.rootPath, "leader")
 }
 
-func (s *Server) startLeaderLoop() {
-	s.leaderLoopCtx, s.leaderLoopCancel = context.WithCancel(context.Background())
-	s.leaderLoopWg.Add(2)
-	go s.leaderLoop()
-	go s.etcdLeaderLoop()
-}
-
-func (s *Server) stopLeaderLoop() {
-	s.leaderLoopCancel()
-	s.leaderLoopWg.Wait()
-}
-
 func (s *Server) leaderLoop() {
 	defer logutil.LogPanic()
-	defer s.leaderLoopWg.Done()
+	defer s.serverLoopWg.Done()
 
 	for {
 		if s.isClosed() {
@@ -131,9 +119,9 @@ func (s *Server) leaderLoop() {
 
 func (s *Server) etcdLeaderLoop() {
 	defer logutil.LogPanic()
-	defer s.leaderLoopWg.Done()
+	defer s.serverLoopWg.Done()
 
-	ctx, cancel := context.WithCancel(s.leaderLoopCtx)
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 	for {
 		select {
@@ -161,6 +149,7 @@ func (s *Server) etcdLeaderLoop() {
 				}
 			}
 		case <-ctx.Done():
+			log.Info("server is closed, exit etcd leader loop")
 			return
 		}
 	}
@@ -243,7 +232,7 @@ func (s *Server) campaignLeader() error {
 	}
 
 	// Make the leader keepalived.
-	ctx, cancel = context.WithCancel(s.leaderLoopCtx)
+	ctx, cancel = context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 
 	ch, err := lessor.KeepAlive(ctx, clientv3.LeaseID(leaseResp.ID))
@@ -310,7 +299,7 @@ func (s *Server) watchLeader(leader *pdpb.Member) {
 	watcher := clientv3.NewWatcher(s.client)
 	defer watcher.Close()
 
-	ctx, cancel := context.WithCancel(s.leaderLoopCtx)
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 
 	for {
@@ -357,7 +346,7 @@ func (s *Server) ResignLeader(nextLeader string) error {
 	}
 	nextLeaderID := leaderIDs[rand.Intn(len(leaderIDs))]
 	log.Infof("%s ready to resign leader, next leader: %v", s.Name(), nextLeaderID)
-	err = s.etcd.Server.MoveLeader(s.leaderLoopCtx, s.ID(), nextLeaderID)
+	err = s.etcd.Server.MoveLeader(s.serverLoopCtx, s.ID(), nextLeaderID)
 	return errors.Trace(err)
 }
 
