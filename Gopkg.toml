@@ -26,4 +26,5 @@
 
 [[constraint]]
   name = "github.com/pingcap/kvproto"
-  branch = "master"
+  source = "github.com/liukun4515/kvproto.git"
+  branch = "get_prev_region"
