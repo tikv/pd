@@ -474,8 +474,8 @@ func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.Region
 		IsPassive:  false,
 	})
 
-	op1 := NewOperator(desc, source.GetId(), source.GetRegionEpoch(), kinds|kind, steps...)
-	op2 := NewOperator(desc, target.GetId(), target.GetRegionEpoch(), kind, MergeRegion{
+	op1 := NewOperator(desc, source.GetId(), source.GetRegionEpoch(), kinds|kind|OpMerge, steps...)
+	op2 := NewOperator(desc, target.GetId(), target.GetRegionEpoch(), kind|OpMerge, MergeRegion{
 		FromRegion: source.Region,
 		ToRegion:   target.Region,
 		IsPassive:  true,
