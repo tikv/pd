@@ -325,7 +325,7 @@ func NewStoreNotFoundErr(storeID uint64) errcode.ErrorCode {
 	return errcode.NewNotFoundErr(storeNotFoundErr{storeID})
 }
 
-// StoresInfo is a map of storeID to StoreInfo
+// StoresInfo contains information about all stores.
 type StoresInfo struct {
 	stores         map[uint64]*StoreInfo
 	bytesReadRate  float64
