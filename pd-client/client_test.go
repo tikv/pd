@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/core"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
@@ -37,6 +38,7 @@ func TestClient(t *testing.T) {
 var _ = Suite(&testClientSuite{})
 
 var (
+	regionIDAllocator = &core.MockIDAllocator{}
 	// Note: IDs below are entirely arbitrary. They are only for checking
 	// whether GetRegion/GetStore works.
 	// If we alloc ID in client in the future, these IDs must be updated.
@@ -48,8 +50,9 @@ var (
 		Id:      2,
 		StoreId: store.GetId(),
 	}
-	region = &metapb.Region{
-		Id: 3,
+	regionID, _ = regionIDAllocator.Alloc()
+	region      = &metapb.Region{
+		Id: regionID,
 		RegionEpoch: &metapb.RegionEpoch{
 			ConfVer: 1,
 			Version: 1,
@@ -180,8 +183,9 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 	regionLen := 10
 	regions := make([]*metapb.Region, 0, regionLen)
 	for i := 0; i < regionLen; i++ {
+		regionID, _ := regionIDAllocator.Alloc()
 		r := &metapb.Region{
-			Id: uint64(i + 1),
+			Id: regionID,
 			RegionEpoch: &metapb.RegionEpoch{
 				ConfVer: 1,
 				Version: 1,
