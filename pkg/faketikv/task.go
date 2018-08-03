@@ -235,6 +235,7 @@ func (a *addPeer) Step(r *RaftEngine) {
 		region.RegionEpoch.ConfVer++
 		r.SetRegion(region)
 		r.recordRegionChange(region)
+		recvNode.incUsedSize(uint64(snapshotSize))
 		a.finished = true
 	}
 }
@@ -271,14 +272,17 @@ func (a *removePeer) Step(r *RaftEngine) {
 		return
 	}
 
+	regionSize := uint64(region.ApproximateSize)
 	a.size -= a.speed
 	if a.size < 0 {
 		for _, peer := range region.GetPeers() {
 			if peer.GetId() == a.peer.GetId() {
-				region.RemoveStorePeer(peer.GetStoreId())
+				storeID := peer.GetStoreId()
+				region.RemoveStorePeer(storeID)
 				region.RegionEpoch.ConfVer++
 				r.SetRegion(region)
 				r.recordRegionChange(region)
+				r.conn.Nodes[storeID].decUsedSize(regionSize)
 				break
 			}
 		}

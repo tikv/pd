@@ -802,6 +802,35 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 }
 
+var _ = Suite(&testRandomMergeSchedulerSuite{})
+
+type testRandomMergeSchedulerSuite struct{}
+
+func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	opt.MergeScheduleLimit = 1
+	tc := schedule.NewMockCluster(opt)
+	limiter := schedule.NewLimiter()
+
+	mb, err := schedule.CreateScheduler("random-merge", limiter)
+	c.Assert(err, IsNil)
+
+	tc.AddRegionStore(1, 4)
+	tc.AddLeaderRegion(1, 1)
+	tc.AddLeaderRegion(2, 1)
+	tc.AddLeaderRegion(3, 1)
+	tc.AddLeaderRegion(4, 1)
+
+	c.Assert(mb.IsScheduleAllowed(tc), IsTrue)
+	ops := mb.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+	c.Assert(ops, HasLen, 2)
+	c.Assert(ops[0].Kind()&schedule.OpMerge, Not(Equals), 0)
+	c.Assert(ops[1].Kind()&schedule.OpMerge, Not(Equals), 0)
+
+	limiter.UpdateCounts(map[uint64]*schedule.Operator{ops[0].RegionID(): ops[0], ops[1].RegionID(): ops[1]})
+	c.Assert(mb.IsScheduleAllowed(tc), IsFalse)
+}
+
 var _ = Suite(&testMergeCheckerSuite{})
 
 type testMergeCheckerSuite struct {
@@ -907,6 +936,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 }
 
 func (s *testMergeCheckerSuite) checkSteps(c *C, op *schedule.Operator, steps []schedule.OperatorStep) {
+	c.Assert(op.Kind()&schedule.OpMerge, Not(Equals), 0)
 	c.Assert(steps, NotNil)
 	c.Assert(op.Len(), Equals, len(steps))
 	for i := range steps {

@@ -15,6 +15,7 @@ package faketikv
 
 import (
 	"github.com/pingcap/pd/pkg/faketikv/cases"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
 )
 
 // Event that affect the status of the cluster
@@ -72,7 +73,14 @@ type WriteFlowOnSpot struct {
 // Run implements the event interface
 func (w *WriteFlowOnSpot) Run(tick int64, r *RaftEngine) bool {
 	res := w.in.Step(tick)
-	r.updateRegionSize(res)
+	for key, size := range res {
+		region := r.SearchRegion([]byte(key))
+		if region == nil {
+			simutil.Logger.Errorf("region not found for key %s", key)
+			continue
+		}
+		r.updateRegionStore(region, size)
+	}
 	return false
 }
 
@@ -84,7 +92,14 @@ type WriteFlowOnRegion struct {
 // Run implements the event interface
 func (w *WriteFlowOnRegion) Run(tick int64, r *RaftEngine) bool {
 	res := w.in.Step(tick)
-	r.updateRegionWriteBytes(res)
+	for id, bytes := range res {
+		region := r.GetRegion(id)
+		if region == nil {
+			simutil.Logger.Errorf("region %d not found", id)
+			continue
+		}
+		r.updateRegionStore(region, bytes)
+	}
 	return false
 }
 

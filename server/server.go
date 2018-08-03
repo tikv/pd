@@ -56,7 +56,7 @@ var EnableZap = false
 type Server struct {
 	// Server state.
 	isServing int64
-	isLeader  int64
+	leader    atomic.Value
 
 	// Configs and initial fields.
 	cfg         *Config
@@ -69,12 +69,16 @@ type Server struct {
 	serverLoopWg     sync.WaitGroup
 
 	// Etcd and cluster informations.
-	etcd        *embed.Etcd
-	client      *clientv3.Client
-	id          uint64 // etcd server id.
-	clusterID   uint64 // pd cluster id.
-	rootPath    string
-	leaderValue string // leader value saved in etcd leader key.  Every write will use this to check leader validation.
+	etcd      *embed.Etcd
+	client    *clientv3.Client
+	id        uint64 // etcd server id.
+	clusterID uint64 // pd cluster id.
+	rootPath  string
+	member    *pdpb.Member // current PD's info.
+	// memberValue is the serialized string of `member`. It will be save in
+	// etcd leader key when the PD node is successfully elected as the leader
+	// of the cluster. Every write will use it to check leadership.
+	memberValue string
 
 	// Server services.
 	// for id allocator, we can use one allocator for
@@ -200,7 +204,7 @@ func (s *Server) startServer() error {
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
 
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
-	s.leaderValue = s.marshalLeader()
+	s.member, s.memberValue = s.memberInfo()
 
 	s.idAlloc = &idAllocator{s: s}
 	kvBase := newEtcdKVBase(s)

@@ -78,6 +78,17 @@ func (s *testStoresInfoSuite) TestStores(c *C) {
 	}
 
 	c.Assert(cache.GetStoreCount(), Equals, int(n))
+
+	bytesWritten := uint64(8 * 1024 * 1024)
+	bytesRead := uint64(128 * 1024 * 1024)
+	store := cache.GetStore(1)
+
+	store.Stats.BytesWritten = bytesWritten
+	store.Stats.BytesRead = bytesRead
+	store.Stats.Interval = &pdpb.TimeInterval{EndTimestamp: 10, StartTimestamp: 0}
+	cache.SetStore(store)
+	c.Assert(cache.TotalBytesWriteRate(), Equals, float64(bytesWritten/10))
+	c.Assert(cache.TotalBytesReadRate(), Equals, float64(bytesRead/10))
 }
 
 var _ = Suite(&testRegionsInfoSuite{})
