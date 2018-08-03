@@ -218,3 +218,13 @@ func (n *Node) Stop() {
 	n.wg.Wait()
 	simutil.Logger.Infof("node %d stopped", n.Id)
 }
+
+func (n *Node) incUsedSize(size uint64) {
+	n.stats.Available -= size
+	n.stats.UsedSize += size
+}
+
+func (n *Node) decUsedSize(size uint64) {
+	n.stats.Available += size
+	n.stats.UsedSize -= size
+}
