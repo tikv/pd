@@ -28,8 +28,8 @@ type regionItem struct {
 
 // Less returns true if the region start key is less than the other.
 func (r *regionItem) Less(other btree.Item) bool {
-	left := r.region.StartKey
-	right := other.(*regionItem).region.StartKey
+	left := r.region.GetStartKey()
+	right := other.(*regionItem).region.GetStartKey()
 	return bytes.Compare(left, right) < 0
 }
 
