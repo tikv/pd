@@ -57,6 +57,11 @@ func NewRaftEngine(conf *cases.Conf, conn *Conn) (*RaftEngine, error) {
 		regionInfo.ApproximateSize = region.Size
 		regionInfo.ApproximateKeys = region.Keys
 		r.SetRegion(regionInfo)
+		peers := region.Peers
+		regionSize := uint64(region.Size)
+		for _, peer := range peers {
+			r.conn.Nodes[peer.StoreId].incUsedSize(regionSize)
+		}
 	}
 
 	return r, nil
@@ -128,28 +133,15 @@ func (r *RaftEngine) recordRegionChange(region *core.RegionInfo) {
 	r.regionchange[n] = append(r.regionchange[n], region.Id)
 }
 
-func (r *RaftEngine) updateRegionSize(writtenBytes map[string]int64) {
-	for key, size := range writtenBytes {
-		region := r.SearchRegion([]byte(key))
-		if region == nil {
-			simutil.Logger.Errorf("region not found for key %s", key)
-			continue
-		}
-		region.ApproximateSize += size
-		r.SetRegion(region)
+func (r *RaftEngine) updateRegionStore(region *core.RegionInfo, size int64) {
+	region.ApproximateSize += size
+	wBytes := uint64(size)
+	region.WrittenBytes = wBytes
+	storeIDs := region.GetStoreIds()
+	for storeID := range storeIDs {
+		r.conn.Nodes[storeID].incUsedSize(wBytes)
 	}
-}
-
-func (r *RaftEngine) updateRegionWriteBytes(writeBytes map[uint64]int64) {
-	for id, bytes := range writeBytes {
-		region := r.GetRegion(id)
-		if region == nil {
-			simutil.Logger.Errorf("region %d not found", id)
-			continue
-		}
-		region.WrittenBytes = uint64(bytes)
-		r.SetRegion(region)
-	}
+	r.SetRegion(region)
 }
 
 func (r *RaftEngine) updateRegionReadBytes(readBytes map[uint64]int64) {
