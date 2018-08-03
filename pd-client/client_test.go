@@ -26,7 +26,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
-	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
 
@@ -49,15 +48,6 @@ var (
 	peer = &metapb.Peer{
 		Id:      2,
 		StoreId: store.GetId(),
-	}
-	regionID, _ = regionIDAllocator.Alloc()
-	region      = &metapb.Region{
-		Id: regionID,
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: 1,
-			Version: 1,
-		},
-		Peers: []*metapb.Peer{peer},
 	}
 )
 
@@ -118,12 +108,20 @@ func newHeader(srv *server.Server) *pdpb.RequestHeader {
 }
 
 func bootstrapServer(c *C, header *pdpb.RequestHeader, client pdpb.PDClient) {
+	regionID, _ := regionIDAllocator.Alloc()
+	region := &metapb.Region{
+		Id: regionID,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		Peers: []*metapb.Peer{peer},
+	}
 	req := &pdpb.BootstrapRequest{
 		Header: header,
 		Store:  store,
 		Region: region,
 	}
-
 	_, err := client.Bootstrap(context.Background(), req)
 	c.Assert(err, IsNil)
 }
@@ -163,6 +161,15 @@ func (s *testClientSuite) TestTSORace(c *C) {
 }
 
 func (s *testClientSuite) TestGetRegion(c *C) {
+	regionID, _ := regionIDAllocator.Alloc()
+	region := &metapb.Region{
+		Id: regionID,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		Peers: []*metapb.Peer{peer},
+	}
 	req := &pdpb.RegionHeartbeatRequest{
 		Header: newHeader(s.srv),
 		Region: region,
@@ -219,6 +226,15 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 }
 
 func (s *testClientSuite) TestGetRegionByID(c *C) {
+	regionID, _ := regionIDAllocator.Alloc()
+	region := &metapb.Region{
+		Id: regionID,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		Peers: []*metapb.Peer{peer},
+	}
 	req := &pdpb.RegionHeartbeatRequest{
 		Header: newHeader(s.srv),
 		Region: region,
@@ -226,6 +242,7 @@ func (s *testClientSuite) TestGetRegionByID(c *C) {
 	}
 	err := s.regionHeartbeat.Send(req)
 	c.Assert(err, IsNil)
+	time.Sleep(time.Millisecond * 200)
 
 	r, leader, err := s.client.GetRegionByID(context.Background(), regionID)
 	c.Assert(err, IsNil)
