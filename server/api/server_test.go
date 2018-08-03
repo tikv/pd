@@ -24,6 +24,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"google.golang.org/grpc"
 )
@@ -110,16 +111,25 @@ func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpF
 }
 
 func mustWaitLeader(c *C, svrs []*server.Server) *server.Server {
-	for i := 0; i < 100; i++ {
+	var leaderServer *server.Server
+	testutil.WaitUntil(c, func(c *C) bool {
+		var leader *pdpb.Member
 		for _, svr := range svrs {
-			if svr.IsLeader() {
-				return svr
+			l := svr.GetLeader()
+			// All servers' GetLeader should return the same leader.
+			if l == nil || (leader != nil && l.GetMemberId() != leader.GetMemberId()) {
+				return false
+			}
+			if leader == nil {
+				leader = l
+			}
+			if leader.GetMemberId() == svr.ID() {
+				leaderServer = svr
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	c.Fatal("no leader")
-	return nil
+		return true
+	})
+	return leaderServer
 }
 
 func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
