@@ -200,7 +200,6 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 			Region: r,
 			Leader: peer,
 		}
-		logrus.Info("client:", req)
 		err := s.regionHeartbeat.Send(req)
 		c.Assert(err, IsNil)
 	}
@@ -228,7 +227,7 @@ func (s *testClientSuite) TestGetRegionByID(c *C) {
 	err := s.regionHeartbeat.Send(req)
 	c.Assert(err, IsNil)
 
-	r, leader, err := s.client.GetRegionByID(context.Background(), 3)
+	r, leader, err := s.client.GetRegionByID(context.Background(), regionID)
 	c.Assert(err, IsNil)
 	c.Assert(r, DeepEquals, region)
 	c.Assert(leader, DeepEquals, peer)

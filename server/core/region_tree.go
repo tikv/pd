@@ -123,7 +123,6 @@ func (t *regionTree) searchPrev(regionKey []byte) *metapb.Region {
 		return nil
 	}
 	prevRegionItem, _ := t.getAdjacentRegions(curRegionItem.region)
-	// previews region may not exist?
 	if prevRegionItem == nil {
 		return nil
 	}
