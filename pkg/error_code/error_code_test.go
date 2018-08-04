@@ -221,7 +221,7 @@ func TestNewInternalErr(t *testing.T) {
 	AssertCode(t, err, internalCodeStr)
 	AssertHTTPCode(t, err, 500)
 	ErrorEquals(t, err, "error")
-	ClientDataEquals(t, err, MinimalError{}, errcode.CodeStr("internal"))
+	ClientDataEquals(t, err, MinimalError{}, internalCodeStr)
 
 	invalidErr := errcode.NewInvalidInputErr(MinimalError{})
 	err = errcode.NewInternalErr(invalidErr)

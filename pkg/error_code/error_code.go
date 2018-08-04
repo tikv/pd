@@ -232,7 +232,7 @@ type JSONFormat struct {
 // OperationClientData gives the results of both the ClientData and Operation functions.
 // The Operation function is applied to the original ErrorCode.
 // If that does not return an operation, it is applied to the result of ClientData.
-// This function is uSed by NewJSONFormat to fill JSONFormat.
+// This function is used by NewJSONFormat to fill JSONFormat.
 func OperationClientData(errCode ErrorCode) (string, interface{}) {
 	op := Operation(errCode)
 	data := ClientData(errCode)
