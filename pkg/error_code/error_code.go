@@ -424,8 +424,8 @@ func (modifier Modifier) Modify(err ErrorCode) ErrorCode {
 }
 
 /*
-Op add an operation to an ErrorCode with Modify.
-This converts the error to the type OpErrCode
+Op adds an operation to an ErrorCode with Modify.
+This converts the error to the type OpErrCode.
 
 op := errcode.Op("path.move.x")
 if start < obstable && obstacle < end  {
