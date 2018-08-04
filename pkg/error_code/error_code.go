@@ -339,7 +339,7 @@ type notFoundErr struct{ CodedError }
 // If the error is already an ErrorCode it will use that code
 // Otherwise it will use NotFoundCode which gives HTTP 404
 func NewNotFoundErr(err error) ErrorCode {
-	return internalErr{NewCodedError(err, NotFoundCode)}
+	return notFoundErr{NewCodedError(err, NotFoundCode)}
 }
 
 var _ ErrorCode = (*notFoundErr)(nil)     // assert implements interface
