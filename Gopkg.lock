@@ -315,7 +315,7 @@
   revision = "1c287c953996ab3a0bf535dba9d53d809d3dc0b6"
 
 [[projects]]
-  branch = "get_prev_region"
+  branch = "master"
   digest = "1:12f1858727fc4830e0503e0de7c71d85021a2a4c25a428b27f66a62dea3c2a33"
   name = "github.com/pingcap/kvproto"
   packages = [
@@ -324,8 +324,7 @@
     "pkg/pdpb",
   ]
   pruneopts = "NUT"
-  revision = "02abdd5c18a516f213937a20582a15e861a862e5"
-  source = "https://github.com/liukun4515/kvproto.git"
+  revision = "e76f1c4d455b2f1b7373cc53d2176f5589dfc86e"
 
 [[projects]]
   digest = "1:f07f63c27a5537896f212dd19959ebd59e377f83a26fefa1586b57308d20ce6a"
