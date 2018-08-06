@@ -115,7 +115,7 @@ func (t *regionTree) search(regionKey []byte) *metapb.Region {
 	return result.region
 }
 
-// searchPrev returns the previews region of the region where the regionKey is located.
+// searchPrev returns the previous region of the region where the regionKey is located.
 func (t *regionTree) searchPrev(regionKey []byte) *metapb.Region {
 	curRegion := &metapb.Region{StartKey: regionKey}
 	curRegionItem := t.find(curRegion)

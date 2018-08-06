@@ -561,7 +561,7 @@ func (r *RegionsInfo) SearchRegion(regionKey []byte) *RegionInfo {
 	return r.GetRegion(region.GetId())
 }
 
-// SearchPrevRegion searches previews RegionInfo from regionTree
+// SearchPrevRegion searches previous RegionInfo from regionTree
 func (r *RegionsInfo) SearchPrevRegion(regionKey []byte) *RegionInfo {
 	region := r.tree.searchPrev(regionKey)
 	if region == nil {
