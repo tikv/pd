@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server"
+	log "github.com/sirupsen/logrus"
 	"github.com/unrolled/render"
 )
 
@@ -51,6 +52,22 @@ func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 func (h *memberHandler) listMembers() (*pdpb.GetMembersResponse, error) {
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: h.svr.ClusterID()}}
 	members, err := h.svr.GetMembers(context.Background(), req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	// Fill leader priorities.
+	for _, m := range members.GetMembers() {
+		if h.svr.GetEtcdLeader() == 0 {
+			log.Warnf("no etcd leader, skip get leader priority, member: %v", m.GetMemberId())
+			continue
+		}
+		leaderPriority, e := h.svr.GetMemberLeaderPriority(m.GetMemberId())
+		if e != nil {
+			log.Errorf("failed to load leader priority, member: %v, err: %v", m.GetMemberId(), e)
+			continue
+		}
+		m.LeaderPriority = int32(leaderPriority)
+	}
 	return members, errors.Trace(err)
 }
 
@@ -171,13 +188,7 @@ func newLeaderHandler(svr *server.Server, rd *render.Render) *leaderHandler {
 }
 
 func (h *leaderHandler) Get(w http.ResponseWriter, r *http.Request) {
-	leader, err := h.svr.GetLeader()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	h.rd.JSON(w, http.StatusOK, leader)
+	h.rd.JSON(w, http.StatusOK, h.svr.GetLeader())
 }
 
 func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {

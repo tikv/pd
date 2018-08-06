@@ -55,9 +55,9 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 
 	r.Header.Set(redirectorHeader, h.s.Name())
 
-	leader, err := h.s.GetLeader()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	leader := h.s.GetLeader()
+	if leader == nil {
+		http.Error(w, "no leader", http.StatusServiceUnavailable)
 		return
 	}
 
