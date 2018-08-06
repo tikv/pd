@@ -210,7 +210,7 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 		err := s.regionHeartbeat.Send(req)
 		c.Assert(err, IsNil)
 	}
-	time.Sleep(time.Millisecond * 1000)
+	time.Sleep(time.Second)
 
 	for i := 0; i < 20; i++ {
 		r, leader, err := s.client.GetPrevRegion(context.Background(), []byte{byte(i)})
