@@ -242,7 +242,7 @@ func (s *testClientSuite) TestGetRegionByID(c *C) {
 	}
 	err := s.regionHeartbeat.Send(req)
 	c.Assert(err, IsNil)
-	time.Sleep(time.Millisecond * 200)
+	time.Sleep(time.Second)
 
 	r, leader, err := s.client.GetRegionByID(context.Background(), regionID)
 	c.Assert(err, IsNil)
