@@ -380,9 +380,6 @@ func (e EmbedOp) GetOperation() string {
 	return e.Op
 }
 
-// MakeOp is just an alternative way to construct EmbedOp.
-func MakeOp(operation string) EmbedOp { return EmbedOp{Op: operation} }
-
 // OpErrCode is an ErrorCode with an "Operation" field attached.
 // This may be used as a convenience to record the operation information for the error.
 // However, it isn't required to be used, see the HasOperation documentation for alternatives.

@@ -256,7 +256,7 @@ func TestOpErrorCode(t *testing.T) {
 	OpEquals(t, has, "has")
 
 	OpEquals(t, OpErrorEmbed{}, "")
-	OpEquals(t, OpErrorEmbed{EmbedOp: errcode.MakeOp("field")}, "field")
+	OpEquals(t, OpErrorEmbed{EmbedOp: errcode.EmbedOp{Op: "field"}}, "field")
 
 	opEmpty := errcode.Op("")
 	op := errcode.Op("modify")
@@ -264,7 +264,7 @@ func TestOpErrorCode(t *testing.T) {
 	OpEquals(t, op.Modify(MinimalError{}), "modify")
 
 	OpEquals(t, ErrorWrapper{Err: has}, "has")
-	OpEquals(t, ErrorWrapper{Err: OpErrorEmbed{EmbedOp: errcode.MakeOp("field")}}, "field")
+	OpEquals(t, ErrorWrapper{Err: OpErrorEmbed{EmbedOp: errcode.EmbedOp{Op: "field"}}}, "field")
 
 	opErrCode := errcode.OpErrCode{Operation: "opcode", Err: MinimalError{}}
 	AssertOperation(t, opErrCode, "opcode")
