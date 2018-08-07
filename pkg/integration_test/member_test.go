@@ -58,7 +58,10 @@ func (s *integrationTestSuite) TestMemberDelete(c *C) {
 			req, err := http.NewRequest("DELETE", addr, nil)
 			c.Assert(err, IsNil)
 			res, err := httpClient.Do(req)
-			c.Assert(err, IsNil)
+			if err != nil {
+				c.Log("request err:", err)
+				return false
+			}
 			defer res.Body.Close()
 			// Check by status.
 			if t.status != 0 {
@@ -84,7 +87,9 @@ func (s *integrationTestSuite) checkMemberList(c *C, clientURL string, configs [
 	httpClient := &http.Client{Timeout: 15 * time.Second}
 	addr := clientURL + "/pd/api/v1/members"
 	res, err := httpClient.Get(addr)
-	c.Assert(err, IsNil)
+	if err != nil {
+		return errors.Errorf("load members failed: %v", err)
+	}
 	defer res.Body.Close()
 	buf, err := ioutil.ReadAll(res.Body)
 	c.Assert(err, IsNil)
