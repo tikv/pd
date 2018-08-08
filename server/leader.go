@@ -155,10 +155,6 @@ func (s *Server) etcdLeaderLoop() {
 	}
 }
 
-func getLeaderAddr(leader *pdpb.Member) string {
-	return strings.Join(leader.GetClientUrls(), ",")
-}
-
 // getLeader gets server leader from etcd.
 func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, error) {
 	leader := &pdpb.Member{}
