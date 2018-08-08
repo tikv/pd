@@ -183,14 +183,6 @@ func (s *testClusterBaseSuite) bootstrapCluster(c *C, clusterID uint64, storeAdd
 	c.Assert(err, IsNil)
 }
 
-func (s *testClusterBaseSuite) tryBootstrapCluster(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, storeAddr string) {
-	req := s.newBootstrapRequest(c, clusterID, storeAddr)
-	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
-	if err != nil {
-		c.Assert(resp, NotNil)
-	}
-}
-
 func (s *testClusterBaseSuite) getStore(c *C, clusterID uint64, storeID uint64) *metapb.Store {
 	req := &pdpb.GetStoreRequest{
 		Header:  newRequestHeader(clusterID),
@@ -251,7 +243,7 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	clusterID := s.svr.clusterID
 
 	storeAddr := "127.0.0.1:0"
-	s.tryBootstrapCluster(c, s.grpcPDClient, clusterID, storeAddr)
+	s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, storeAddr))
 
 	// Get region.
 	region := s.getRegion(c, clusterID, []byte("abc"))
