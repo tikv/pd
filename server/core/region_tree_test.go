@@ -14,6 +14,7 @@
 package core
 
 import (
+	"fmt"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -226,6 +227,10 @@ func newRegionItem(start, end []byte) *regionItem {
 	return &regionItem{region: NewRegion(start, end)}
 }
 
-func BenchmarkBTree(b *testing.B) {
-
+func BenchmarkRegionTreeUpdate(b *testing.B) {
+	tree := newRegionTree()
+	for i := 0; i < b.N; i++ {
+		item := &metapb.Region{StartKey: []byte(fmt.Sprintf("%20d", i)), EndKey: []byte(fmt.Sprintf("%20d", i+1))}
+		tree.update(item)
+	}
 }
