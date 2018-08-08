@@ -16,15 +16,16 @@ package integration
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/server"
 )
 
 func (s *integrationTestSuite) TestMemberDelete(c *C) {
@@ -36,32 +37,37 @@ func (s *integrationTestSuite) TestMemberDelete(c *C) {
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-	clientURL := cluster.GetServer("pd1").GetConfig().ClientUrls
-	pd3ID := strconv.FormatUint(cluster.GetServer("pd3").GetServerID(), 10)
-	httpClient := &http.Client{Timeout: 15 * time.Second}
+	leaderName := cluster.WaitLeader()
+	c.Assert(leaderName, Not(Equals), "")
+	leader := cluster.GetServer(leaderName)
+	var members []*testServer
+	for _, s := range cluster.config.InitialServers {
+		if s.Name != leaderName {
+			members = append(members, cluster.GetServer(s.Name))
+		}
+	}
+	c.Assert(members, HasLen, 2)
 
 	var table = []struct {
 		path    string
 		status  int
-		members []*serverConfig
+		members []*server.Config
 	}{
 		{path: "name/foobar", status: http.StatusNotFound},
-		{path: "name/pd2", members: []*serverConfig{cluster.config.InitialServers[0], cluster.config.InitialServers[1]}},
-		{path: "name/pd2", status: http.StatusNotFound},
-		{path: "id/" + pd3ID, members: []*serverConfig{cluster.config.InitialServers[0]}},
+		{path: "name/" + members[0].GetConfig().Name, members: []*server.Config{leader.GetConfig(), members[1].GetConfig()}},
+		{path: "name/" + members[0].GetConfig().Name, status: http.StatusNotFound},
+		{path: fmt.Sprintf("id/%d", members[1].GetServerID()), members: []*server.Config{leader.GetConfig()}},
 	}
+
+	httpClient := &http.Client{Timeout: 15 * time.Second}
 	for _, t := range table {
 		c.Log(time.Now(), "try to delete:", t.path)
 		testutil.WaitUntil(c, func(c *C) bool {
-			addr := clientURL + "/pd/api/v1/members/" + t.path
+			addr := leader.GetConfig().ClientUrls + "/pd/api/v1/members/" + t.path
 			req, err := http.NewRequest("DELETE", addr, nil)
 			c.Assert(err, IsNil)
 			res, err := httpClient.Do(req)
-			if err != nil {
-				c.Log("request err:", err)
-				return false
-			}
+			c.Assert(err, IsNil)
 			defer res.Body.Close()
 			// Check by status.
 			if t.status != 0 {
@@ -73,7 +79,7 @@ func (s *integrationTestSuite) TestMemberDelete(c *C) {
 			}
 			// Check by member list.
 			cluster.WaitLeader()
-			if err = s.checkMemberList(c, clientURL, t.members); err != nil {
+			if err = s.checkMemberList(c, leader.GetConfig().ClientUrls, t.members); err != nil {
 				c.Logf("check member fail: %v", err)
 				time.Sleep(time.Second)
 				return false
@@ -83,13 +89,11 @@ func (s *integrationTestSuite) TestMemberDelete(c *C) {
 	}
 }
 
-func (s *integrationTestSuite) checkMemberList(c *C, clientURL string, configs []*serverConfig) error {
+func (s *integrationTestSuite) checkMemberList(c *C, clientURL string, configs []*server.Config) error {
 	httpClient := &http.Client{Timeout: 15 * time.Second}
 	addr := clientURL + "/pd/api/v1/members"
 	res, err := httpClient.Get(addr)
-	if err != nil {
-		return errors.Errorf("load members failed: %v", err)
-	}
+	c.Assert(err, IsNil)
 	defer res.Body.Close()
 	buf, err := ioutil.ReadAll(res.Body)
 	c.Assert(err, IsNil)
@@ -104,8 +108,8 @@ func (s *integrationTestSuite) checkMemberList(c *C, clientURL string, configs [
 	for _, member := range data["members"] {
 		for _, cfg := range configs {
 			if member.GetName() == cfg.Name {
-				c.Assert(member.ClientUrls, DeepEquals, []string{cfg.ClientURLs})
-				c.Assert(member.PeerUrls, DeepEquals, []string{cfg.PeerURLs})
+				c.Assert(member.ClientUrls, DeepEquals, []string{cfg.ClientUrls})
+				c.Assert(member.PeerUrls, DeepEquals, []string{cfg.PeerUrls})
 			}
 		}
 	}
