@@ -361,10 +361,10 @@ func (s *StoresInfo) BlockStore(storeID uint64) errcode.ErrorCode {
 	op := errcode.Op("store.block")
 	store, ok := s.stores[storeID]
 	if !ok {
-		return op.Modify(NewStoreNotFoundErr(storeID))
+		return op.AddTo(NewStoreNotFoundErr(storeID))
 	}
 	if store.IsBlocked() {
-		return op.Modify(StoreBlockedErr{StoreID: storeID})
+		return op.AddTo(StoreBlockedErr{StoreID: storeID})
 	}
 	store.Block()
 	return nil

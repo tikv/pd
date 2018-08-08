@@ -412,25 +412,25 @@ var _ ErrorCode = (*OpErrCode)(nil)     // assert implements interface
 var _ HasClientData = (*OpErrCode)(nil) // assert implements interface
 var _ HasOperation = (*OpErrCode)(nil)  // assert implements interface
 
-// A Modifier returns a new modified ErrorCode
-type Modifier func(ErrorCode) ErrorCode
+// AddOp is constructed by Op. It allows method chaining with AddTo.
+type AddOp func(ErrorCode) OpErrCode
 
-// Modify applies the Modifier to an ErrorCode
-func (modifier Modifier) Modify(err ErrorCode) ErrorCode {
-	return modifier(err)
+// AddTo adds the operation from Op to the ErrorCode
+func (addOp AddOp) AddTo(err ErrorCode) OpErrCode {
+	return addOp(err)
 }
 
 /*
-Op adds an operation to an ErrorCode with Modify.
+Op adds an operation to an ErrorCode with AddTo.
 This converts the error to the type OpErrCode.
 
 op := errcode.Op("path.move.x")
 if start < obstable && obstacle < end  {
-	return op.Modify(PathBlocked{start, end, obstacle})
+	return op.AddTo(PathBlocked{start, end, obstacle})
 }
 */
-func Op(operation string) Modifier {
-	return func(err ErrorCode) ErrorCode {
+func Op(operation string) AddOp {
+	return func(err ErrorCode) OpErrCode {
 		return OpErrCode{Operation: operation, Err: err}
 	}
 }
