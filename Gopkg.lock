@@ -162,10 +162,11 @@
   version = "v1.1.0"
 
 [[projects]]
-  branch = "master"
+  branch = "improve-iterate"
   name = "github.com/google/btree"
   packages = ["."]
-  revision = "e89373fe6b4a7413d7acd6da1725b83ef713e6e4"
+  revision = "be85ac2827cd3266c48594d4cb1c8e0215d73d99"
+  source = "https://github.com/nolouch/btree"
 
 [[projects]]
   name = "github.com/gorilla/context"
@@ -500,6 +501,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "ac20fc02c52f46bfadc23c464c1e9377e5a00e60fd6be6255f58a8e240360b2d"
+  inputs-digest = "e35c5cad006226a9bc4ee6c3f5e1ef1953d7804ae2345bd891ac1ea6122a74cc"
   solver-name = "gps-cdcl"
   solver-version = 1

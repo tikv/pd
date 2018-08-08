@@ -27,3 +27,8 @@
 [[constraint]]
   name = "github.com/pingcap/kvproto"
   branch = "master"
+
+[[constraint]]
+  name = "github.com/google/btree"
+  source = "https://github.com/nolouch/btree"
+  branch = "improve-iterate"

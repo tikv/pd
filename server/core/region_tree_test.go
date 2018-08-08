@@ -14,6 +14,8 @@
 package core
 
 import (
+	"testing"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -222,4 +224,8 @@ func (s *testRegionSuite) TestRegionTreeSplitAndMerge(c *C) {
 
 func newRegionItem(start, end []byte) *regionItem {
 	return &regionItem{region: NewRegion(start, end)}
+}
+
+func BenchmarkBTree(b *testing.B) {
+
 }
