@@ -129,7 +129,16 @@ func (s *testRegionSuite) TestRegionTree(c *C) {
 	c.Assert(tree.search([]byte("c")), Equals, regionC)
 	c.Assert(tree.search([]byte("d")), IsNil)
 
+	// search previous region
+	c.Assert(tree.searchPrev([]byte("a")), IsNil)
+	c.Assert(tree.searchPrev([]byte("b")), IsNil)
+	c.Assert(tree.searchPrev([]byte("c")), IsNil)
+
 	tree.update(regionB)
+	// search previous region
+	c.Assert(tree.searchPrev([]byte("c")), Equals, regionB)
+	c.Assert(tree.searchPrev([]byte("b")), Equals, regionA)
+
 	tree.remove(regionC)
 	tree.update(regionD)
 	c.Assert(tree.search([]byte{}), IsNil)

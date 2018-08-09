@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/core"
 	"google.golang.org/grpc"
 )
 
@@ -36,6 +37,7 @@ func TestClient(t *testing.T) {
 var _ = Suite(&testClientSuite{})
 
 var (
+	regionIDAllocator = &core.MockIDAllocator{}
 	// Note: IDs below are entirely arbitrary. They are only for checking
 	// whether GetRegion/GetStore works.
 	// If we alloc ID in client in the future, these IDs must be updated.
@@ -46,14 +48,6 @@ var (
 	peer = &metapb.Peer{
 		Id:      2,
 		StoreId: store.GetId(),
-	}
-	region = &metapb.Region{
-		Id: 3,
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: 1,
-			Version: 1,
-		},
-		Peers: []*metapb.Peer{peer},
 	}
 )
 
@@ -114,12 +108,20 @@ func newHeader(srv *server.Server) *pdpb.RequestHeader {
 }
 
 func bootstrapServer(c *C, header *pdpb.RequestHeader, client pdpb.PDClient) {
+	regionID, _ := regionIDAllocator.Alloc()
+	region := &metapb.Region{
+		Id: regionID,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		Peers: []*metapb.Peer{peer},
+	}
 	req := &pdpb.BootstrapRequest{
 		Header: header,
 		Store:  store,
 		Region: region,
 	}
-
 	_, err := client.Bootstrap(context.Background(), req)
 	c.Assert(err, IsNil)
 }
@@ -159,6 +161,15 @@ func (s *testClientSuite) TestTSORace(c *C) {
 }
 
 func (s *testClientSuite) TestGetRegion(c *C) {
+	regionID, _ := regionIDAllocator.Alloc()
+	region := &metapb.Region{
+		Id: regionID,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		Peers: []*metapb.Peer{peer},
+	}
 	req := &pdpb.RegionHeartbeatRequest{
 		Header: newHeader(s.srv),
 		Region: region,
@@ -175,7 +186,55 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 	c.Assert(leader, DeepEquals, peer)
 }
 
+func (s *testClientSuite) TestGetPrevRegion(c *C) {
+	regionLen := 10
+	regions := make([]*metapb.Region, 0, regionLen)
+	for i := 0; i < regionLen; i++ {
+		regionID, _ := regionIDAllocator.Alloc()
+		r := &metapb.Region{
+			Id: regionID,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			Peers:    []*metapb.Peer{peer},
+		}
+		regions = append(regions, r)
+		req := &pdpb.RegionHeartbeatRequest{
+			Header: newHeader(s.srv),
+			Region: r,
+			Leader: peer,
+		}
+		err := s.regionHeartbeat.Send(req)
+		c.Assert(err, IsNil)
+	}
+	time.Sleep(time.Second)
+
+	for i := 0; i < 20; i++ {
+		r, leader, err := s.client.GetPrevRegion(context.Background(), []byte{byte(i)})
+		c.Assert(err, IsNil)
+		if i > 0 && i < regionLen {
+			c.Assert(leader, DeepEquals, peer)
+			c.Assert(r, DeepEquals, regions[i-1])
+		} else {
+			c.Assert(leader, IsNil)
+			c.Assert(r, IsNil)
+		}
+	}
+}
+
 func (s *testClientSuite) TestGetRegionByID(c *C) {
+	regionID, _ := regionIDAllocator.Alloc()
+	region := &metapb.Region{
+		Id: regionID,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		Peers: []*metapb.Peer{peer},
+	}
 	req := &pdpb.RegionHeartbeatRequest{
 		Header: newHeader(s.srv),
 		Region: region,
@@ -183,8 +242,9 @@ func (s *testClientSuite) TestGetRegionByID(c *C) {
 	}
 	err := s.regionHeartbeat.Send(req)
 	c.Assert(err, IsNil)
+	time.Sleep(time.Second)
 
-	r, leader, err := s.client.GetRegionByID(context.Background(), 3)
+	r, leader, err := s.client.GetRegionByID(context.Background(), regionID)
 	c.Assert(err, IsNil)
 	c.Assert(r, DeepEquals, region)
 	c.Assert(leader, DeepEquals, peer)
