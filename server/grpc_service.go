@@ -564,7 +564,7 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 		}
 		log.Infof("updated gc safe point to %d", newSafePoint)
 	} else if newSafePoint < oldSafePoint {
-		log.Warn("trying to update gc safe point from %d to %d", oldSafePoint, newSafePoint)
+		log.Warnf("trying to update gc safe point from %d to %d", oldSafePoint, newSafePoint)
 		newSafePoint = oldSafePoint
 	}
 
