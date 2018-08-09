@@ -47,6 +47,8 @@ type Client interface {
 	// Also it may return nil if PD finds no Region for the key temporarily,
 	// client should retry later.
 	GetRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error)
+	// GetPrevRegion gets the previous region and its leader Peer of the region where the key is located.
+	GetPrevRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
 	GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Region, *metapb.Peer, error)
 	// GetStore gets a store from PD by store id.
@@ -587,11 +589,33 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 		Header:    c.requestHeader(),
 		RegionKey: key,
 	})
-	requestDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds())
 	cancel()
 
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds())
+		c.ScheduleCheckLeader()
+		return nil, nil, errors.Trace(err)
+	}
+	return resp.GetRegion(), resp.GetLeader(), nil
+}
+
+func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.GetPrevRegion", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDuration.WithLabelValues("get_prev_region").Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	resp, err := c.leaderClient().GetPrevRegion(ctx, &pdpb.GetRegionRequest{
+		Header:    c.requestHeader(),
+		RegionKey: key,
+	})
+	cancel()
+
+	if err != nil {
+		cmdFailedDuration.WithLabelValues("get_prev_region").Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, nil, errors.Trace(err)
 	}
@@ -611,7 +635,6 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Re
 		Header:   c.requestHeader(),
 		RegionId: regionID,
 	})
-	requestDuration.WithLabelValues("get_region_byid").Observe(time.Since(start).Seconds())
 	cancel()
 
 	if err != nil {
@@ -635,7 +658,6 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 		Header:  c.requestHeader(),
 		StoreId: storeID,
 	})
-	requestDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds())
 	cancel()
 
 	if err != nil {
@@ -666,7 +688,6 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 		Header:    c.requestHeader(),
 		SafePoint: safePoint,
 	})
-	requestDuration.WithLabelValues("update_gc_safe_point").Observe(time.Since(start).Seconds())
 	cancel()
 
 	if err != nil {
