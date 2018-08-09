@@ -383,6 +383,25 @@ func (s *Server) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) 
 	}, nil
 }
 
+// GetPrevRegion implements gRPC PDServer
+func (s *Server) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	region, leader := cluster.GetPrevRegionByKey(request.GetRegionKey())
+	return &pdpb.GetRegionResponse{
+		Header: s.header(),
+		Region: region,
+		Leader: leader,
+	}, nil
+}
+
 // GetRegionByID implements gRPC PDServer.
 func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDRequest) (*pdpb.GetRegionResponse, error) {
 	if err := s.validateRequest(request.GetHeader()); err != nil {
