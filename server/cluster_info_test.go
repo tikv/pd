@@ -168,7 +168,8 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	}
 
 	// check overlaps
-	overlapRegion := regions[n-1]
+	// clone it otherwise there are two items with the same key in the tree
+	overlapRegion := regions[n-1].Clone()
 	overlapRegion.StartKey = regions[n-2].StartKey
 	cache.AddRegion(overlapRegion)
 	c.Assert(cache.GetRegion(n-2), IsNil)
