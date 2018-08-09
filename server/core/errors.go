@@ -37,23 +37,23 @@ var (
 var _ errcode.ErrorCode = (*StoreTombstonedErr)(nil) // assert implements interface
 var _ errcode.ErrorCode = (*StoreBlockedErr)(nil)    // assert implements interface
 
-// StoreTombstonedErr is an invalid operation was attempted on a store which is in a removed state.
-type StoreTombstonedErr struct {
-	StoreID   uint64 `json:"storeId"`
-	Operation string `json:"operation"`
+// StoreErr can be newtyped or embedded in your own error
+type StoreErr struct {
+	StoreID uint64 `json:"storeId"`
 }
 
+// StoreTombstonedErr is an invalid operation was attempted on a store which is in a removed state.
+type StoreTombstonedErr StoreErr
+
 func (e StoreTombstonedErr) Error() string {
-	return fmt.Sprintf("The store %020d has been removed and the operation %s is invalid", e.StoreID, e.Operation)
+	return fmt.Sprintf("The store %020d has been removed", e.StoreID)
 }
 
 // Code returns StoreTombstonedCode
 func (e StoreTombstonedErr) Code() errcode.Code { return StoreTombstonedCode }
 
 // StoreBlockedErr has a Code() of StoreBlockedCode
-type StoreBlockedErr struct {
-	StoreID uint64
-}
+type StoreBlockedErr StoreErr
 
 func (e StoreBlockedErr) Error() string {
 	return fmt.Sprintf("store %v is blocked", e.StoreID)
