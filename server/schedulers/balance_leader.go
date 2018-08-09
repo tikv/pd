@@ -43,11 +43,7 @@ type balanceLeaderScheduler struct {
 func newBalanceLeaderScheduler(limiter *schedule.Limiter) schedule.Scheduler {
 	taintStores := newTaintCache()
 	filters := []schedule.Filter{
-		schedule.NewBlockFilter(),
-		schedule.NewStateFilter(),
-		schedule.NewHealthFilter(),
-		schedule.NewDisconnectFilter(),
-		schedule.NewRejectLeaderFilter(),
+		schedule.StoreStateFilter{TransferLeader: true},
 		schedule.NewCacheFilter(taintStores),
 	}
 	base := newBaseScheduler(limiter)
