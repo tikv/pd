@@ -552,9 +552,18 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	}
 }
 
-// SearchRegion search RegionInfo from regionTree
+// SearchRegion searches RegionInfo from regionTree
 func (r *RegionsInfo) SearchRegion(regionKey []byte) *RegionInfo {
 	region := r.tree.search(regionKey)
+	if region == nil {
+		return nil
+	}
+	return r.GetRegion(region.GetId())
+}
+
+// SearchPrevRegion searches previous RegionInfo from regionTree
+func (r *RegionsInfo) SearchPrevRegion(regionKey []byte) *RegionInfo {
+	region := r.tree.searchPrev(regionKey)
 	if region == nil {
 		return nil
 	}

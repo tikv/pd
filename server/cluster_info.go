@@ -285,6 +285,12 @@ func (c *clusterInfo) searchRegion(regionKey []byte) *core.RegionInfo {
 	return c.core.Regions.SearchRegion(regionKey)
 }
 
+func (c *clusterInfo) searchPrevRegion(regionKey []byte) *core.RegionInfo {
+	c.RLock()
+	defer c.RUnlock()
+	return c.core.Regions.SearchPrevRegion(regionKey)
+}
+
 func (c *clusterInfo) putRegion(region *core.RegionInfo) error {
 	c.Lock()
 	defer c.Unlock()
