@@ -183,14 +183,6 @@ func (s *testClusterBaseSuite) bootstrapCluster(c *C, clusterID uint64, storeAdd
 	c.Assert(err, IsNil)
 }
 
-func (s *testClusterBaseSuite) tryBootstrapCluster(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, storeAddr string) {
-	req := s.newBootstrapRequest(c, clusterID, storeAddr)
-	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
-	if err != nil {
-		c.Assert(resp, NotNil)
-	}
-}
-
 func (s *testClusterBaseSuite) getStore(c *C, clusterID uint64, storeID uint64) *metapb.Store {
 	req := &pdpb.GetStoreRequest{
 		Header:  newRequestHeader(clusterID),
@@ -251,7 +243,7 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	clusterID := s.svr.clusterID
 
 	storeAddr := "127.0.0.1:0"
-	s.tryBootstrapCluster(c, s.grpcPDClient, clusterID, storeAddr)
+	s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, storeAddr))
 
 	// Get region.
 	region := s.getRegion(c, clusterID, []byte("abc"))
@@ -414,17 +406,12 @@ func (s *testClusterSuite) testRemoveStore(c *C, clusterID uint64, store *metapb
 }
 
 // Make sure PD will not panic if it start and stop again and again.
-func (s *testClusterSuite) TestClosedChannel(c *C) {
+func (s *testClusterSuite) TestRaftClusterRestart(c *C) {
 	svr, cleanup := newTestServer(c)
 	defer cleanup()
 	err := svr.Run(context.TODO())
 	c.Assert(err, IsNil)
-
-	clusterID := svr.clusterID
-	storeAddr := "127.0.0.1:0"
-	leader := mustGetLeader(c, svr.client, svr.getLeaderPath())
-	grpcPDClient := mustNewGrpcClient(c, getLeaderAddr(leader))
-	s.tryBootstrapCluster(c, grpcPDClient, clusterID, storeAddr)
+	svr.bootstrapCluster(s.newBootstrapRequest(c, svr.clusterID, "127.0.0.1:0"))
 
 	cluster := svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
