@@ -26,7 +26,7 @@ func init() {
 
 type shuffleRegionScheduler struct {
 	*baseScheduler
-	selector schedule.Selector
+	selector *schedule.RandomSelector
 }
 
 // newShuffleRegionScheduler creates an admin scheduler that shuffles regions

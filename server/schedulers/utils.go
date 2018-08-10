@@ -25,7 +25,7 @@ import (
 )
 
 // scheduleRemovePeer schedules a region to remove the peer.
-func scheduleRemovePeer(cluster schedule.Cluster, schedulerName string, s schedule.Selector, filters ...schedule.Filter) (*core.RegionInfo, *metapb.Peer) {
+func scheduleRemovePeer(cluster schedule.Cluster, schedulerName string, s *schedule.RandomSelector, filters ...schedule.Filter) (*core.RegionInfo, *metapb.Peer) {
 	stores := cluster.GetStores()
 
 	source := s.SelectSource(cluster, stores, filters...)
@@ -47,7 +47,7 @@ func scheduleRemovePeer(cluster schedule.Cluster, schedulerName string, s schedu
 }
 
 // scheduleAddPeer schedules a new peer.
-func scheduleAddPeer(cluster schedule.Cluster, s schedule.Selector, filters ...schedule.Filter) *metapb.Peer {
+func scheduleAddPeer(cluster schedule.Cluster, s *schedule.RandomSelector, filters ...schedule.Filter) *metapb.Peer {
 	stores := cluster.GetStores()
 
 	target := s.SelectTarget(cluster, stores, filters...)

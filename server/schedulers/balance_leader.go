@@ -34,7 +34,7 @@ const balanceLeaderRetryLimit = 10
 
 type balanceLeaderScheduler struct {
 	*baseScheduler
-	selector    schedule.Selector
+	selector    *schedule.BalanceSelector
 	taintStores *cache.TTLUint64
 }
 

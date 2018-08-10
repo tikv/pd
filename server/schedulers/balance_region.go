@@ -35,7 +35,7 @@ const balanceRegionRetryLimit = 10
 
 type balanceRegionScheduler struct {
 	*baseScheduler
-	selector    schedule.Selector
+	selector    *schedule.BalanceSelector
 	taintStores *cache.TTLUint64
 }
 

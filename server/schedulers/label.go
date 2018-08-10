@@ -27,7 +27,7 @@ func init() {
 
 type labelScheduler struct {
 	*baseScheduler
-	selector schedule.Selector
+	selector *schedule.BalanceSelector
 }
 
 func newLabelScheduler(limiter *schedule.Limiter) schedule.Scheduler {
