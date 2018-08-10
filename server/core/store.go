@@ -348,7 +348,7 @@ func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 	return store.Clone()
 }
 
-// TakeStore returns the point of the origin StoreInfo with the specifiled storeID.
+// TakeStore returns the point of the origin StoreInfo with the specified storeID.
 func (s *StoresInfo) TakeStore(storeID uint64) *StoreInfo {
 	store, ok := s.stores[storeID]
 	if !ok {
