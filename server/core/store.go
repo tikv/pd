@@ -366,13 +366,14 @@ func (s *StoresInfo) SetStore(store *StoreInfo) {
 }
 
 // BlockStore block a StoreInfo with storeID
-func (s *StoresInfo) BlockStore(storeID uint64) error {
+func (s *StoresInfo) BlockStore(storeID uint64) errcode.ErrorCode {
+	op := errcode.Op("store.block")
 	store, ok := s.stores[storeID]
 	if !ok {
-		return NewStoreNotFoundErr(storeID)
+		return op.AddTo(NewStoreNotFoundErr(storeID))
 	}
 	if store.IsBlocked() {
-		return StoreBlockedErr{StoreID: storeID}
+		return op.AddTo(StoreBlockedErr{StoreID: storeID})
 	}
 	store.Block()
 	return nil
