@@ -25,10 +25,10 @@ import (
 )
 
 // scheduleRemovePeer schedules a region to remove the peer.
-func scheduleRemovePeer(cluster schedule.Cluster, schedulerName string, s *schedule.RandomSelector, filters ...schedule.Filter) (*core.RegionInfo, *metapb.Peer) {
+func scheduleRemovePeer(cluster schedule.Cluster, schedulerName string, s *schedule.RandomSelector) (*core.RegionInfo, *metapb.Peer) {
 	stores := cluster.GetStores()
 
-	source := s.SelectSource(cluster, stores, filters...)
+	source := s.SelectSource(cluster, stores)
 	if source == nil {
 		schedulerCounter.WithLabelValues(schedulerName, "no_store").Inc()
 		return nil, nil

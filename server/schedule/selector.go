@@ -36,11 +36,10 @@ func NewBalanceSelector(kind core.ResourceKind, filters []Filter) *BalanceSelect
 
 // SelectSource selects the store that can pass all filters and has the minimal
 // resource score.
-func (s *BalanceSelector) SelectSource(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
-	filters = append(filters, s.filters...)
+func (s *BalanceSelector) SelectSource(opt Options, stores []*core.StoreInfo) *core.StoreInfo {
 	var result *core.StoreInfo
 	for _, store := range stores {
-		if FilterSource(opt, store, filters) {
+		if FilterSource(opt, store, s.filters) {
 			continue
 		}
 		if result == nil ||
@@ -89,15 +88,12 @@ func NewReplicaSelector(regionStores []*core.StoreInfo, labels []string, filters
 
 // SelectSource selects the store that can pass all filters and has the minimal
 // distinct score.
-func (s *ReplicaSelector) SelectSource(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
+func (s *ReplicaSelector) SelectSource(opt Options, stores []*core.StoreInfo) *core.StoreInfo {
 	var (
 		best      *core.StoreInfo
 		bestScore float64
 	)
 	for _, store := range stores {
-		if FilterSource(opt, store, filters) {
-			continue
-		}
 		score := DistinctScore(s.labels, s.regionStores, store)
 		if best == nil || compareStoreScore(opt, store, score, best, bestScore) < 0 {
 			best, bestScore = store, score
@@ -149,12 +145,10 @@ func (s *RandomSelector) rand(stores []*core.StoreInfo) *core.StoreInfo {
 }
 
 // SelectSource randomly selects a source store from those can pass all filters.
-func (s *RandomSelector) SelectSource(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
-	filters = append(filters, s.filters...)
-
+func (s *RandomSelector) SelectSource(opt Options, stores []*core.StoreInfo) *core.StoreInfo {
 	var candidates []*core.StoreInfo
 	for _, store := range stores {
-		if FilterSource(opt, store, filters) {
+		if FilterSource(opt, store, s.filters) {
 			continue
 		}
 		candidates = append(candidates, store)
