@@ -373,9 +373,19 @@ func (c *clusterInfo) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo
 }
 
 func (c *clusterInfo) getRegionStoresLocked(region *core.RegionInfo) []*core.StoreInfo {
-	var stores []*core.StoreInfo
-	for id := range region.GetStoreIds() {
-		if store := c.core.Stores.GetStore(id); store != nil {
+	stores := make([]*core.StoreInfo, 0, len(region.GetPeers()))
+	for _, p := range region.GetPeers() {
+		if store := c.core.Stores.GetStore(p.StoreId); store != nil {
+			stores = append(stores, store)
+		}
+	}
+	return stores
+}
+
+func (c *clusterInfo) takeRegionStoresLocked(region *core.RegionInfo) []*core.StoreInfo {
+	stores := make([]*core.StoreInfo, 0, len(region.GetPeers()))
+	for _, p := range region.GetPeers() {
+		if store := c.core.Stores.TakeStore(p.StoreId); store != nil {
 			stores = append(stores, store)
 		}
 	}
@@ -535,7 +545,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	if c.regionStats != nil {
-		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
+		c.regionStats.Observe(region, c.takeRegionStoresLocked(region))
 	}
 
 	key := region.GetId()
@@ -552,7 +562,7 @@ func (c *clusterInfo) updateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	c.Lock()
 	defer c.Unlock()
 	for _, region := range regions {
-		c.labelLevelStats.Observe(region, c.getRegionStoresLocked(region), c.GetLocationLabels())
+		c.labelLevelStats.Observe(region, c.takeRegionStoresLocked(region), c.GetLocationLabels())
 	}
 }
 
