@@ -8,6 +8,9 @@ PACKAGES := go list ./...
 PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|github.com/pingcap/pd/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 
+GOFAIL_ENABLE  := $$(find $$PWD/ -type d | grep -vE "(\.git|vendor)" | xargs retool do gofail enable)
+GOFAIL_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|vendor)" | xargs retool do gofail disable)
+
 LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --dirty)"
 LDFLAGS += -X "$(PD_PKG)/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "$(PD_PKG)/server.PDGitHash=$(shell git rev-parse HEAD)"
@@ -36,12 +39,16 @@ endif
 	CGO_ENABLED=0 go build -o bin/pd-tso-bench cmd/pd-tso-bench/main.go
 	CGO_ENABLED=0 go build -o bin/pd-recover cmd/pd-recover/main.go
 
-test:
+test: retool-setup
 	# testing..
-	CGO_ENABLED=1 go test -race -cover $(TEST_PKGS)
+	@$(GOFAIL_ENABLE)
+	CGO_ENABLED=1 go test -race -cover $(TEST_PKGS) || { $(GOFAIL_DISABLE); exit 1; }
+	@$(GOFAIL_DISABLE)
 
 basic_test:
-	go test $(BASIC_TEST_PKGS)
+	@$(GOFAIL_ENABLE)
+	go test $(BASIC_TEST_PKGS) || { $(GOFAIL_DISABLE); exit 1; }
+	@$(GOFAIL_DISABLE)
 
 # These need to be fixed before they can be ran regularly
 check-fail:
@@ -53,11 +60,11 @@ check-fail:
 check-all: static lint
 	@echo "checking"
 
-check-setup:
+retool-setup:
 	@which retool >/dev/null 2>&1 || go get github.com/twitchtv/retool
 	@retool sync
 
-check: check-setup check-all
+check: retool-setup check-all
 
 static:
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
@@ -95,5 +102,13 @@ endif
 simulator:
 	CGO_ENABLED=0 go build -o bin/simulator cmd/simulator/main.go
 	bin/simulator
+
+gofail-enable:
+	# Converting gofail failpoints...
+	@$(GOFAIL_ENABLE)
+
+gofail-disable:
+	# Restoring gofail failpoints...
+	@$(GOFAIL_DISABLE)
 
 .PHONY: update clean tool-install

@@ -27,3 +27,7 @@
 [[constraint]]
   name = "github.com/pingcap/kvproto"
   branch = "master"
+
+[[constraint]]
+  name = "github.com/etcd-io/gofail"
+  branch = "master"
