@@ -60,6 +60,7 @@ func TestMinimalErrorCode(t *testing.T) {
 	AssertCodes(t, minimal)
 	ErrorEquals(t, minimal, "error")
 	ClientDataEquals(t, minimal, minimal)
+	OpEquals(t, minimal, "")
 }
 
 // We don't prevent duplicate codes
@@ -220,7 +221,7 @@ func TestNewInternalErr(t *testing.T) {
 	AssertCode(t, err, internalCodeStr)
 	AssertHTTPCode(t, err, 500)
 	ErrorEquals(t, err, "error")
-	ClientDataEquals(t, err, MinimalError{}, errcode.CodeStr("internal"))
+	ClientDataEquals(t, err, MinimalError{}, internalCodeStr)
 
 	invalidErr := errcode.NewInvalidInputErr(MinimalError{})
 	err = errcode.NewInternalErr(invalidErr)
@@ -228,6 +229,52 @@ func TestNewInternalErr(t *testing.T) {
 	AssertHTTPCode(t, err, 500)
 	ErrorEquals(t, err, "error")
 	ClientDataEquals(t, err, MinimalError{}, internalCodeStr)
+}
+
+// Test Operation
+type OpErrorHas struct{ MinimalError }
+
+func (e OpErrorHas) GetOperation() string { return "has" }
+
+type OpErrorEmbed struct {
+	errcode.EmbedOp
+	MinimalError
+}
+
+var _ errcode.ErrorCode = (*OpErrorHas)(nil)      // assert implements interface
+var _ errcode.HasOperation = (*OpErrorHas)(nil)   // assert implements interface
+var _ errcode.ErrorCode = (*OpErrorEmbed)(nil)    // assert implements interface
+var _ errcode.HasOperation = (*OpErrorEmbed)(nil) // assert implements interface
+
+func TestOpErrorCode(t *testing.T) {
+	AssertOperation(t, "foo", "")
+	has := OpErrorHas{}
+	AssertOperation(t, has, "has")
+	AssertCodes(t, has)
+	ErrorEquals(t, has, "error")
+	ClientDataEquals(t, has, has)
+	OpEquals(t, has, "has")
+
+	OpEquals(t, OpErrorEmbed{}, "")
+	OpEquals(t, OpErrorEmbed{EmbedOp: errcode.EmbedOp{Op: "field"}}, "field")
+
+	opEmpty := errcode.Op("")
+	op := errcode.Op("modify")
+	OpEquals(t, opEmpty.AddTo(MinimalError{}), "")
+	OpEquals(t, op.AddTo(MinimalError{}), "modify")
+
+	OpEquals(t, ErrorWrapper{Err: has}, "has")
+	OpEquals(t, ErrorWrapper{Err: OpErrorEmbed{EmbedOp: errcode.EmbedOp{Op: "field"}}}, "field")
+
+	opErrCode := errcode.OpErrCode{Operation: "opcode", Err: MinimalError{}}
+	AssertOperation(t, opErrCode, "opcode")
+	OpEquals(t, opErrCode, "opcode")
+
+	OpEquals(t, ErrorWrapper{Err: opErrCode}, "opcode")
+	wrappedHas := ErrorWrapper{Err: errcode.OpErrCode{Operation: "opcode", Err: has}}
+	AssertOperation(t, wrappedHas, "")
+	OpEquals(t, wrappedHas, "opcode")
+	OpEquals(t, errcode.OpErrCode{Operation: "opcode", Err: has}, "opcode")
 }
 
 func AssertCodes(t *testing.T, code errcode.ErrorCode, codeStrs ...errcode.CodeStr) {
@@ -271,11 +318,28 @@ func ClientDataEquals(t *testing.T, code errcode.ErrorCode, data interface{}, co
 		t.Errorf("\nClientData expected: %#v\n ClientData but got: %#v", data, errcode.ClientData(code))
 	}
 	jsonExpected := errcode.JSONFormat{
-		Data: data,
-		Msg:  code.Error(),
-		Code: codeStr,
+		Data:      data,
+		Msg:       code.Error(),
+		Code:      codeStr,
+		Operation: errcode.Operation(data),
 	}
 	if !reflect.DeepEqual(errcode.NewJSONFormat(code), jsonExpected) {
 		t.Errorf("\nJSON expected: %+v\n JSON but got: %+v", jsonExpected, errcode.NewJSONFormat(code))
+	}
+}
+
+func OpEquals(t *testing.T, code errcode.ErrorCode, op string) {
+	t.Helper()
+	opGot, _ := errcode.OperationClientData(code)
+	if opGot != op {
+		t.Errorf("\nOp expected: %#v\n Op but got: %#v", op, opGot)
+	}
+}
+
+func AssertOperation(t *testing.T, v interface{}, op string) {
+	t.Helper()
+	opGot := errcode.Operation(v)
+	if opGot != op {
+		t.Errorf("\nOp expected: %#v\n Op but got: %#v", op, opGot)
 	}
 }
