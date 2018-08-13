@@ -26,4 +26,12 @@
 
 [[constraint]]
   name = "github.com/pingcap/kvproto"
+<<<<<<< HEAD
   branch = "batch-split"
+=======
+  branch = "master"
+
+[[constraint]]
+  name = "github.com/etcd-io/gofail"
+  branch = "master"
+>>>>>>> server: use gofail to test time fallback (#1186)

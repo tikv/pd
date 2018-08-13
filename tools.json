@@ -39,6 +39,14 @@
     {
       "Repository": "github.com/securego/gosec/cmd/gosec",
       "Commit": "5fb530cda357c16175f2c049577d2030de735b28"
+    },
+    {
+      "Repository": "github.com/etcd-io/gofail/runtime",
+      "Commit": "51ce9a71510a58bad5ae66ddd278ef28762a1550"
+    },
+    {
+      "Repository": "github.com/etcd-io/gofail",
+      "Commit": "51ce9a71510a58bad5ae66ddd278ef28762a1550"
     }
   ],
   "RetoolVersion": "1.3.7"

@@ -2,7 +2,7 @@
 
 
 [[projects]]
-  digest = "1:e0499b93857a1b91efbdc0c21e26f1130685de98035008f3b01eeeb0713798cb"
+  digest = "1:167b6f65a6656de568092189ae791253939f076df60231fdd64588ac703892a1"
   name = "github.com/BurntSushi/toml"
   packages = ["."]
   pruneopts = "NUT"
@@ -35,7 +35,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:05afa25146ba0f84666ad8f079709b9102d4e8e67ec59ee73f20f7c09ae0b5d0"
+  digest = "1:2a2f8e4e89100426685d021dda3131cc22df8c1e5c22af56f6780021ad262067"
   name = "github.com/coreos/etcd"
   packages = [
     "auth",
@@ -152,6 +152,14 @@
   revision = "02af3965c54e8cacf948b97fef38925c4120652c"
 
 [[projects]]
+  branch = "master"
+  digest = "1:f18dbc529543fe5fd5294f8385ea1f71681be964c43461f5f45335bb51ba83ae"
+  name = "github.com/etcd-io/gofail"
+  packages = ["runtime"]
+  pruneopts = "NUT"
+  revision = "51ce9a71510a58bad5ae66ddd278ef28762a1550"
+
+[[projects]]
   digest = "1:81466b4218bf6adddac2572a30ac733a9255919bc2f470b4827a317bd4ee1756"
   name = "github.com/ghodss/yaml"
   packages = ["."]
@@ -160,7 +168,7 @@
   version = "v1.0.0"
 
 [[projects]]
-  digest = "1:739a97b2ce3d1f6d5342b77027ffffdc028bc801a437e8033e01c39aadb4fd7a"
+  digest = "1:2e15dd2dcea234f9f10e96041a3862830d10feadf8fd9c3795ca71fcb4cf2a3d"
   name = "github.com/gogo/protobuf"
   packages = [
     "gogoproto",
@@ -172,7 +180,7 @@
   version = "v1.0.0"
 
 [[projects]]
-  digest = "1:e88560805764aac18c8f1b039f22fb52debd924a43503f235e19350a1a14845b"
+  digest = "1:9aa21412e5a184d06dfcdf5cc7babdf5b29da82727744a2056b9fab91f3f8491"
   name = "github.com/golang/protobuf"
   packages = [
     "jsonpb",
@@ -228,7 +236,7 @@
   version = "v1.1"
 
 [[projects]]
-  digest = "1:7dd8047d931d48ddfccafcb1b1724537a0e4f0a4a074d2754860e584d42fe3c4"
+  digest = "1:5c3363169fc963321cd0789dda2ddff90562817d277e78011b0e1bbf51a6b473"
   name = "github.com/grpc-ecosystem/grpc-gateway"
   packages = [
     "runtime",
@@ -288,7 +296,7 @@
   version = "0.2.0"
 
 [[projects]]
-  digest = "1:cbbefdf66f3efd8ffdd25ecc37bb82c253209a780aafb614c0dcd514d146e17d"
+  digest = "1:6cfa52afba4b02179b23171d9c6f3d49fee1fd936821ea5ccd4f14ab24a2fa0a"
   name = "github.com/opentracing/opentracing-go"
   packages = [
     ".",
@@ -323,11 +331,6 @@
     "pkg/pdpb",
   ]
   pruneopts = "NUT"
-  revision = "592f63bfb3ab3ef7e55dc2ee57dbb97594930811"
-
-[[projects]]
-  digest = "1:f07f63c27a5537896f212dd19959ebd59e377f83a26fefa1586b57308d20ce6a"
-  name = "github.com/prometheus/client_golang"
   packages = [
     "prometheus",
     "prometheus/promhttp",
@@ -339,7 +342,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:53a76eb11bdc815fcf0c757a9648fda0ab6887da13f07587181ff2223b67956c"
+  digest = "1:32d10bdfa8f09ecf13598324dba86ab891f11db3c538b6a34d1c3b5b99d7c36b"
   name = "github.com/prometheus/client_model"
   packages = ["go"]
   pruneopts = "NUT"
@@ -347,7 +350,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:3bbebf77a04cda10bd07834d1686141608aca01c1aeb400d504d8aa026793b5a"
+  digest = "1:768b555b86742de2f28beb37f1dedce9a75f91f871d75b5717c96399c1a78c08"
   name = "github.com/prometheus/common"
   packages = [
     "expfmt",
@@ -359,7 +362,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:19e85ff4fe0e685106d43d0b36bf4a7e441845961d6d0e3c3757e18c6a79da12"
+  digest = "1:c4a213a8d73fbb0b13f717ba7996116602ef18ecb42b91d77405877914cb0349"
   name = "github.com/prometheus/procfs"
   packages = [
     ".",
@@ -387,7 +390,7 @@
   version = "v0.1.4"
 
 [[projects]]
-  digest = "1:88ced8f895c8e6d0aa3a5e9e20473a16440bb015cca06e880a3f555c83f5b3aa"
+  digest = "1:0f156dbd01b40676bdcbc64e51535c09b50f83c9cca5faef3090f82f18bda3c2"
   name = "github.com/spf13/cobra"
   packages = ["."]
   pruneopts = "NUT"
@@ -459,7 +462,7 @@
   version = "v1.1.0"
 
 [[projects]]
-  digest = "1:a607c955b5f17d6320c592a1d3a39f6a63e8ded44f7990dc5846d0714cb32758"
+  digest = "1:25531f2a1f9e75b832a945c670bf84f8caf5bd0fe8d8ad5bab5f13e162680922"
   name = "go.uber.org/zap"
   packages = [
     ".",
@@ -475,7 +478,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:e34276c4871f0db7578e6f5a77cb55a18120dde707740fe1b256aaac33574df3"
+  digest = "1:001a4e7a40e50ff2ef32e2556bca50c4f77daa457db3ac6afc8bea9bb2122cfb"
   name = "golang.org/x/crypto"
   packages = [
     "bcrypt",
@@ -487,7 +490,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:37a3356c2907eab3a8dbf4f91d816ff61d13e9215a628aaf35d060eb2b95efe6"
+  digest = "1:7df0ac6316bc8fe403f0111fa71575e10f6fb90763c3fcbfa2e6b2e53e1414e4"
   name = "golang.org/x/net"
   packages = [
     "context",
@@ -504,7 +507,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:7a210432c02de67f798d20fd5719c30d5c67ca28201463d614de970428293e11"
+  digest = "1:18cdef145482d4635b00782a457effad2b73b7f7ddf13fa1a326777fad35f981"
   name = "golang.org/x/sys"
   packages = [
     "unix",
@@ -514,7 +517,7 @@
   revision = "78d5f264b493f125018180c204871ecf58a2dce1"
 
 [[projects]]
-  digest = "1:a0f29009397dc27c9dc8440f0945d49e5cbb9b72d0b0fc745474d9bfdea2d9f8"
+  digest = "1:e7071ed636b5422cc51c0e3a6cebc229d6c9fffc528814b519a980641422d619"
   name = "golang.org/x/text"
   packages = [
     "collate",
@@ -553,7 +556,7 @@
   revision = "86e600f69ee4704c6efbf6a2a40a5c10700e76c2"
 
 [[projects]]
-  digest = "1:23aaf3fd15042f93cc918c4f9b236c0349bb168321365919f72cb323ede57ac9"
+  digest = "1:7c485de3fafb9d0220cd8a5a53dea873b7a7771d88ad894998fc5b2a1a0b3b35"
   name = "google.golang.org/grpc"
   packages = [
     ".",
@@ -621,6 +624,7 @@
     "github.com/coreos/go-semver/semver",
     "github.com/coreos/pkg/capnslog",
     "github.com/dustin/go-humanize",
+    "github.com/etcd-io/gofail/runtime",
     "github.com/ghodss/yaml",
     "github.com/gogo/protobuf/proto",
     "github.com/golang/protobuf/proto",

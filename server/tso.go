@@ -83,6 +83,11 @@ func (s *Server) syncTimestamp() error {
 	}
 
 	next := time.Now()
+	// gofail: var fallBackSync bool
+	// if fallBackSync {
+	// 	next = next.Add(time.Hour)
+	// }
+
 	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
 	if subTimeByWallClock(next, last) < updateTimestampGuard {
@@ -119,6 +124,11 @@ func (s *Server) syncTimestamp() error {
 func (s *Server) updateTimestamp() error {
 	prev := s.ts.Load().(*atomicObject)
 	now := time.Now()
+
+	// gofail: var fallBackUpdate bool
+	// if fallBackUpdate {
+	// 	now = now.Add(time.Hour)
+	// }
 
 	tsoCounter.WithLabelValues("save").Inc()
 
