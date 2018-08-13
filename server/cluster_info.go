@@ -446,7 +446,6 @@ func (c *clusterInfo) updateStoreStatusLocked(id uint64) {
 
 // handleRegionHeartbeat updates the region information.
 func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
-	region = region.Clone()
 	c.RLock()
 	origin := c.core.Regions.GetRegion(region.GetId())
 	isWriteUpdate, writeItem := c.core.CheckWriteStatus(region)
