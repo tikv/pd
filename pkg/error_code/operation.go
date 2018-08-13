@@ -88,15 +88,14 @@ func (addOp AddOp) AddTo(err ErrorCode) OpErrCode {
 	return addOp(err)
 }
 
-/*
-Op adds an operation to an ErrorCode with AddTo.
-This converts the error to the type OpErrCode.
-
-op := errcode.Op("path.move.x")
-if start < obstable && obstacle < end  {
-	return op.AddTo(PathBlocked{start, end, obstacle})
-}
-*/
+// Op adds an operation to an ErrorCode with AddTo.
+// This converts the error to the type OpErrCode.
+//
+//	op := errcode.Op("path.move.x")
+//	if start < obstable && obstacle < end  {
+//		return op.AddTo(PathBlocked{start, end, obstacle})
+// 	}
+//
 func Op(operation string) AddOp {
 	return func(err ErrorCode) OpErrCode {
 		return OpErrCode{Operation: operation, Err: err}

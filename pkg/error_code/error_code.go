@@ -151,38 +151,36 @@ func (code Code) HTTPCode() int {
 	return httpCode.(int)
 }
 
-/*
-ErrorCode is the interface that ties an error and RegisteredCode together.
-
-Note that there are additional interfaces (HasClientData, HasOperation, please see the docs)
-that can be defined by an ErrorCode to customize finding structured data for the client.
-
-ErrorCode allows error codes to be defined
-without being forced to use a particular struct such as CodedError.
-CodedError is convenient for generic errors that wrap many different errors with similar codes.
-Please see the docs for CodedError.
-For an application specific error with a 1:1 mapping between a go error structure and a RegisteredCode,
-You probably want to use this interface directly. Example:
-
-	// First define a normal error type
-	type PathBlocked struct {
-		start     uint64 `json:"start"`
-		end       uint64 `json:"end"`
-		obstacle  uint64 `json:"end"`
-	}
-
-	func (e PathBlocked) Error() string {
-		return fmt.Sprintf("The path %d -> %d has obstacle %d", e.start, e.end, e.obstacle)
-	}
-
-	// Now define the code
-	var PathBlockedCode = errcode.StateCode.Child("state.blocked")
-
-	// Now attach the code to the error type
-	func (e PathBlocked) Code() Code {
-		return PathBlockedCode
-	}
-*/
+// ErrorCode is the interface that ties an error and RegisteredCode together.
+//
+// Note that there are additional interfaces (HasClientData, HasOperation, please see the docs)
+// that can be defined by an ErrorCode to customize finding structured data for the client.
+//
+// ErrorCode allows error codes to be defined
+// without being forced to use a particular struct such as CodedError.
+// CodedError is convenient for generic errors that wrap many different errors with similar codes.
+// Please see the docs for CodedError.
+// For an application specific error with a 1:1 mapping between a go error structure and a RegisteredCode,
+// You probably want to use this interface directly. Example:
+//
+//	// First define a normal error type
+//	type PathBlocked struct {
+//		start     uint64 `json:"start"`
+//		end       uint64 `json:"end"`
+//		obstacle  uint64 `json:"end"`
+//	}
+//
+//	func (e PathBlocked) Error() string {
+//		return fmt.Sprintf("The path %d -> %d has obstacle %d", e.start, e.end, e.obstacle)
+//	}
+//
+//	// Now define the code
+//	var PathBlockedCode = errcode.StateCode.Child("state.blocked")
+//
+//	// Now attach the code to the error type
+//	func (e PathBlocked) Code() Code {
+//		return PathBlockedCode
+//	}
 type ErrorCode interface {
 	Error() string // The Error interface
 	Code() Code
