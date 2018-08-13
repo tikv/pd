@@ -349,3 +349,71 @@ func (f rejectLeaderFilter) FilterSource(opt Options, store *core.StoreInfo) boo
 func (f rejectLeaderFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
 	return opt.CheckLabelProperty(RejectLeader, store.Labels)
 }
+
+// StoreStateFilter is used to determine whether a store can be selected as the
+// source or target of the schedule based on the store's state.
+type StoreStateFilter struct {
+	// Set true if the schedule involves any transfer leader operation.
+	TransferLeader bool
+	// Set true if the schedule involves any move region operation.
+	MoveRegion bool
+}
+
+// Type returns the type of the Filter.
+func (f StoreStateFilter) Type() string {
+	return "store-state-filter"
+}
+
+// FilterSource returns true when the store cannot be selected as the schedule
+// source.
+func (f StoreStateFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
+	if store.IsTombstone() ||
+		store.DownTime() > opt.GetMaxStoreDownTime() {
+		return true
+	}
+	if f.TransferLeader && (store.IsDisconnected() || store.IsBlocked()) {
+		return true
+	}
+
+	if f.MoveRegion && f.filterMoveRegion(opt, store) {
+		return true
+	}
+	return false
+}
+
+// FilterTarget returns true when the store cannot be selected as the schedule
+// target.
+func (f StoreStateFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
+	if store.IsTombstone() ||
+		store.IsOffline() ||
+		store.DownTime() > opt.GetMaxStoreDownTime() {
+		return true
+	}
+	if f.TransferLeader &&
+		(store.IsDisconnected() ||
+			store.IsBlocked() ||
+			store.Stats.GetIsBusy() ||
+			opt.CheckLabelProperty(RejectLeader, store.Labels)) {
+		return true
+	}
+
+	if f.MoveRegion && f.filterMoveRegion(opt, store) {
+		return true
+	}
+	return false
+}
+
+func (f StoreStateFilter) filterMoveRegion(opt Options, store *core.StoreInfo) bool {
+	if store.Stats.GetIsBusy() {
+		return true
+	}
+	if opt.GetMaxPendingPeerCount() > 0 && store.PendingPeerCount > int(opt.GetMaxPendingPeerCount()) {
+		return true
+	}
+	if uint64(store.Stats.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
+		uint64(store.Stats.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
+		uint64(store.Stats.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount() {
+		return true
+	}
+	return false
+}

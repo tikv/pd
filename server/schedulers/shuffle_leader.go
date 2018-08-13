@@ -32,13 +32,7 @@ type shuffleLeaderScheduler struct {
 // newShuffleLeaderScheduler creates an admin scheduler that shuffles leaders
 // between stores.
 func newShuffleLeaderScheduler(limiter *schedule.Limiter) schedule.Scheduler {
-	filters := []schedule.Filter{
-		schedule.NewBlockFilter(),
-		schedule.NewStateFilter(),
-		schedule.NewHealthFilter(),
-		schedule.NewDisconnectFilter(),
-		schedule.NewRejectLeaderFilter(),
-	}
+	filters := []schedule.Filter{schedule.StoreStateFilter{TransferLeader: true}}
 	base := newBaseScheduler(limiter)
 	return &shuffleLeaderScheduler{
 		baseScheduler: base,
