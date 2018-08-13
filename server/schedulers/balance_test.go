@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	log "github.com/sirupsen/logrus"
 )
 
 func newTestReplication(mso *schedule.MockSchedulerOptions, maxReplicas int, locationLabels ...string) {
@@ -945,6 +946,7 @@ func (s *testMergeCheckerSuite) checkSteps(c *C, op *schedule.Operator, steps []
 }
 
 func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
+	log.Info("start test match peers")
 	// partial store overlap not including leader
 	op1, op2 := s.mc.Check(s.regions[2])
 	s.checkSteps(c, op1, []schedule.OperatorStep{
