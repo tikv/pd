@@ -339,7 +339,7 @@ func NewStoresInfo() *StoresInfo {
 	}
 }
 
-// GetStore return a StoreInfo with storeID
+// GetStore returns a copy of the StoreInfo with the specified storeID.
 func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 	store, ok := s.stores[storeID]
 	if !ok {
@@ -348,7 +348,16 @@ func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 	return store.Clone()
 }
 
-// SetStore set a StoreInfo with storeID
+// TakeStore returns the point of the origin StoreInfo with the specified storeID.
+func (s *StoresInfo) TakeStore(storeID uint64) *StoreInfo {
+	store, ok := s.stores[storeID]
+	if !ok {
+		return nil
+	}
+	return store
+}
+
+// SetStore sets a StoreInfo with storeID.
 func (s *StoresInfo) SetStore(store *StoreInfo) {
 	s.stores[store.GetId()] = store
 	store.RollingStoreStats.Observe(store.Stats)
