@@ -38,7 +38,7 @@ endif
 
 test:
 	# testing..
-	for i in `seq 1 100`; do CGO_ENABLED=1 go test -race -cover github.com/pingcap/pd/server/schedulers -check.f="TestMatchPeers"; done
+	for i in `seq 1 100`; do CGO_ENABLED=1 go test -race -cover $(TEST_PKGS); done
 
 basic_test:
 	go test $(BASIC_TEST_PKGS)
