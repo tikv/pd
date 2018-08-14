@@ -49,12 +49,12 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 	// Update region's epoch to (100, 100).
 	region := cluster.GetRegionInfoByKey([]byte("foo"))
 	region.RegionEpoch.ConfVer, region.RegionEpoch.Version = 100, 100
-	err := cluster.HandleRegionHeartbeat(region)
+	err := cluster.HandleRegionHeartbeat(region.Clone())
 	c.Assert(err, IsNil)
 
 	// Region epoch cannot decrease.
 	region.RegionEpoch.ConfVer, region.RegionEpoch.Version = 50, 50
-	err = cluster.HandleRegionHeartbeat(region)
+	err = cluster.HandleRegionHeartbeat(region.Clone())
 	c.Assert(err, NotNil)
 
 	// After drop region from cache, lower version is accepted.
@@ -65,7 +65,7 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(res.StatusCode, Equals, http.StatusOK)
 	res.Body.Close()
-	err = cluster.HandleRegionHeartbeat(region)
+	err = cluster.HandleRegionHeartbeat(region.Clone())
 	c.Assert(err, IsNil)
 
 	region = cluster.GetRegionInfoByKey([]byte("foo"))
