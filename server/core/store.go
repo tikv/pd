@@ -131,24 +131,28 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 		amplification = float64(s.RegionSize) / used
 	}
 
-	if available-float64(delta)/amplification >= (1-highSpaceRatio)*capacity {
+	// highSpaceBound is the lower bound of the high space stage.
+	highSpaceBound := (1 - highSpaceRatio) * capacity
+	// lowSpaceBound is the upper bound of the low space stage.
+	lowSpaceBound := (1 - lowSpaceRatio) * capacity
+	if available-float64(delta)/amplification >= highSpaceBound {
 		score = float64(s.RegionSize + delta)
-	} else if available-float64(delta)/amplification <= (1-lowSpaceRatio)*capacity {
+	} else if available-float64(delta)/amplification <= lowSpaceBound {
 		score = maxScore - (available - float64(delta)/amplification)
 	} else {
 		// to make the score function continuous, we use linear function y = k * x + b as transition period
 		// from above we know that there are two points must on the function image
 		// note that it is possible that other irrelative files occupy a lot of storage, so capacity == available + used + irrelative
-		// and we regarded as irrelative as fixed value.
+		// and we regarded irrelative as a fixed value.
 		// Then amp = size / used = size / (capacity - irrelative - available)
 		//
-		// when available == (1 - highSpaceRatio) * capacity
-		// we can conclude that size = (capacity - irrelative - (1 - highSpaceRatio) * capacity) * amp = (used+available-(1-highSpaceRatio)*capacity)*amp
-		// Similarly, when available == (1 - lowSpaceRatio) * capacity
-		// we can conclude that size = (capacity - irrelative - (1 - highSpaceRatio) * capacity) * amp = (used+available-(1-lowSpaceRatio)*capacity)*amp
-		// These are the two fixed points' x-coordinates, and y-coordinates can easily get from the above two functions.
-		x1, y1 := (used+available-(1-highSpaceRatio)*capacity)*amplification, (used+available-(1-highSpaceRatio)*capacity)*amplification
-		x2, y2 := (used+available-(1-lowSpaceRatio)*capacity)*amplification, maxScore-(1-lowSpaceRatio)*capacity
+		// When available == highSpaceBound,
+		// we can conclude that size = (capacity - irrelative - highSpaceBound) * amp = (used + available - highSpaceBound) * amp
+		// Similarly, when available == lowSpaceBound,
+		// we can conclude that size = (capacity - irrelative - lowSpaceBound) * amp = (used + available - lowSpaceBound) * amp
+		// These are the two fixed points' x-coordinates, and y-coordinates which can be easily obtained from the above two functions.
+		x1, y1 := (used+available-highSpaceBound)*amplification, (used+available-highSpaceBound)*amplification
+		x2, y2 := (used+available-lowSpaceBound)*amplification, maxScore-lowSpaceBound
 
 		k := (y2 - y1) / (x2 - x1)
 		b := y1 - k*x1
@@ -339,7 +343,7 @@ func NewStoresInfo() *StoresInfo {
 	}
 }
 
-// GetStore return a StoreInfo with storeID
+// GetStore returns a copy of the StoreInfo with the specified storeID.
 func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 	store, ok := s.stores[storeID]
 	if !ok {
@@ -348,7 +352,16 @@ func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 	return store.Clone()
 }
 
-// SetStore set a StoreInfo with storeID
+// TakeStore returns the point of the origin StoreInfo with the specified storeID.
+func (s *StoresInfo) TakeStore(storeID uint64) *StoreInfo {
+	store, ok := s.stores[storeID]
+	if !ok {
+		return nil
+	}
+	return store
+}
+
+// SetStore sets a StoreInfo with storeID.
 func (s *StoresInfo) SetStore(store *StoreInfo) {
 	s.stores[store.GetId()] = store
 	store.RollingStoreStats.Observe(store.Stats)
@@ -357,13 +370,14 @@ func (s *StoresInfo) SetStore(store *StoreInfo) {
 }
 
 // BlockStore block a StoreInfo with storeID
-func (s *StoresInfo) BlockStore(storeID uint64) error {
+func (s *StoresInfo) BlockStore(storeID uint64) errcode.ErrorCode {
+	op := errcode.Op("store.block")
 	store, ok := s.stores[storeID]
 	if !ok {
-		return NewStoreNotFoundErr(storeID)
+		return op.AddTo(NewStoreNotFoundErr(storeID))
 	}
 	if store.IsBlocked() {
-		return StoreBlockedErr{StoreID: storeID}
+		return op.AddTo(StoreBlockedErr{StoreID: storeID})
 	}
 	store.Block()
 	return nil

@@ -69,15 +69,10 @@ type RegionScatterer struct {
 
 // NewRegionScatterer creates a region scatterer.
 func NewRegionScatterer(cluster Cluster, classifier namespace.Classifier) *RegionScatterer {
-	filters := []Filter{
-		NewStateFilter(),
-		NewHealthFilter(),
-	}
-
 	return &RegionScatterer{
 		cluster:    cluster,
 		classifier: classifier,
-		filters:    filters,
+		filters:    []Filter{StoreStateFilter{}},
 		selected:   newSelectedStores(),
 	}
 }
@@ -171,7 +166,7 @@ func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo) map[ui
 	stores := r.cluster.GetStores()
 	targets := make(map[uint64]*core.StoreInfo, len(stores))
 	for _, store := range stores {
-		if !FilterTarget(r.cluster, store, filters) {
+		if !FilterTarget(r.cluster, store, filters) && !store.Stats.GetIsBusy() {
 			targets[store.GetId()] = store
 		}
 	}

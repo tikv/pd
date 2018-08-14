@@ -44,11 +44,8 @@ type balanceRegionScheduler struct {
 func newBalanceRegionScheduler(limiter *schedule.Limiter) schedule.Scheduler {
 	taintStores := newTaintCache()
 	filters := []schedule.Filter{
+		schedule.StoreStateFilter{MoveRegion: true},
 		schedule.NewCacheFilter(taintStores),
-		schedule.NewStateFilter(),
-		schedule.NewHealthFilter(),
-		schedule.NewSnapshotCountFilter(),
-		schedule.NewPendingPeerCountFilter(),
 	}
 	base := newBaseScheduler(limiter)
 	return &balanceRegionScheduler{

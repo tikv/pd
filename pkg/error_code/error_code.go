@@ -19,9 +19,10 @@
 // Error codes are represented as strings by CodeStr (see CodeStr documentation).
 //
 // This package is designed to have few opinions and be a starting point for how you want to do errors in your project.
-// Interfaces are provided for extensibility.
-// The main requirement is to satisfy the ErrorCode interface by attaching a Code
+// The main requirement is to satisfy the ErrorCode interface by attaching a Code to an Error.
 // See the documentation of ErrorCode.
+// Additional optional interfaces HasClientData and HasOperation are provided for extensibility
+// in creating structured error data representations.
 //
 // Hierarchies are supported: a Code can point to a parent.
 // This is used in the HTTPCode implementation to inherit HTTP codes found with MetaDataFromAncestors.
@@ -30,9 +31,10 @@
 // A few generic top-level error codes are provided here.
 // You are encouraged to create your own application customized error codes rather than just using generic errors.
 //
-// See JSONFormat for an opinion on how to send back error information to a client.
-// Note that this includes a body of response data (the "data field") with more detailed and structured information.
-// This package provides no help on defining conventions, versioning, etc for that data.
+// See JSONFormat for an opinion on how to send back meta data about errors with the error data to a client.
+// JSONFormat includes a body of response data (the "data field") that is by default the data from the Error
+// serialized to JSON.
+// This package provides no help on versioning error data.
 package errcode
 
 import (
@@ -164,8 +166,8 @@ var (
 /*
 ErrorCode is the interface that ties an error and RegisteredCode together.
 
-Note that there is an additional interface (HasClientData, please see the docs) that can be defined by an ErrorCode.
-This customizes finding structured data for the client.
+Note that there are additional interfaces (HasClientData, HasOperation, please see the docs)
+that can be defined by an ErrorCode to customize finding structured data for the client.
 
 ErrorCode allows error codes to be defined
 without being forced to use a particular struct such as CodedError.
@@ -217,22 +219,37 @@ func ClientData(errCode ErrorCode) interface{} {
 	return data
 }
 
-// JSONFormat is an opinion on how to serilalize an ErrorCode to JSON.
+// JSONFormat is an opinion on how to serialize an ErrorCode to JSON.
 // Msg is the string from Error().
 // The Data field is filled in by GetClientData
 type JSONFormat struct {
-	Data interface{} `json:"data"`
-	Msg  string      `json:"msg"`
-	Code CodeStr     `json:"code"`
+	Data      interface{} `json:"data"`
+	Msg       string      `json:"msg"`
+	Code      CodeStr     `json:"code"`
+	Operation string      `json:"operation,omitempty"`
+}
+
+// OperationClientData gives the results of both the ClientData and Operation functions.
+// The Operation function is applied to the original ErrorCode.
+// If that does not return an operation, it is applied to the result of ClientData.
+// This function is used by NewJSONFormat to fill JSONFormat.
+func OperationClientData(errCode ErrorCode) (string, interface{}) {
+	op := Operation(errCode)
+	data := ClientData(errCode)
+	if op == "" {
+		op = Operation(data)
+	}
+	return op, data
 }
 
 // NewJSONFormat turns an ErrorCode into a JSONFormat
 func NewJSONFormat(errCode ErrorCode) JSONFormat {
-	data := ClientData(errCode)
+	op, data := OperationClientData(errCode)
 	return JSONFormat{
-		Data: data,
-		Msg:  errCode.Error(),
-		Code: errCode.Code().CodeStr(),
+		Data:      data,
+		Msg:       errCode.Error(),
+		Code:      errCode.Code().CodeStr(),
+		Operation: op,
 	}
 }
 
@@ -322,11 +339,101 @@ type notFoundErr struct{ CodedError }
 // If the error is already an ErrorCode it will use that code
 // Otherwise it will use NotFoundCode which gives HTTP 404
 func NewNotFoundErr(err error) ErrorCode {
-	return internalErr{NewCodedError(err, NotFoundCode)}
+	return notFoundErr{NewCodedError(err, NotFoundCode)}
 }
 
 var _ ErrorCode = (*notFoundErr)(nil)     // assert implements interface
 var _ HasClientData = (*notFoundErr)(nil) // assert implements interface
+
+// HasOperation is an interface to retrieve the operation that occurred during an error.
+// The end goal is to be able to see a trace of operations in a distributed system to quickly have a good understanding of what occurred.
+// Inspiration is taken from upspin error handling: https://commandcenter.blogspot.com/2017/12/error-handling-in-upspin.html
+// The relationship to error codes is not one-to-one.
+// A given error code can be triggered by multiple different operations,
+// just as a given operation could result in multiple different error codes.
+//
+// GetOperation is defined, but generally the operation should be retrieved with Operation().
+// Operation() will check if a HasOperation interface exists.
+// As an alternative to defining this interface
+// you can use an existing wrapper (OpErrCode via AddOp) or embedding (EmbedOp) that has already defined it.
+type HasOperation interface {
+	GetOperation() string
+}
+
+// Operation will return an operation string if it exists.
+// It checks for the HasOperation interface.
+// Otherwise it will return the zero value (empty) string.
+func Operation(v interface{}) string {
+	var operation string
+	if hasOp, ok := v.(HasOperation); ok {
+		operation = hasOp.GetOperation()
+	}
+	return operation
+}
+
+// EmbedOp is designed to be embedded into your existing error structs.
+// It provides the HasOperation interface already, which can reduce your boilerplate.
+type EmbedOp struct{ Op string }
+
+// GetOperation satisfies the HasOperation interface
+func (e EmbedOp) GetOperation() string {
+	return e.Op
+}
+
+// OpErrCode is an ErrorCode with an "Operation" field attached.
+// This may be used as a convenience to record the operation information for the error.
+// However, it isn't required to be used, see the HasOperation documentation for alternatives.
+type OpErrCode struct {
+	Operation string
+	Err       ErrorCode
+}
+
+// Error prefixes the operation to the underlying Err Error.
+func (e OpErrCode) Error() string {
+	return e.Operation + ": " + e.Err.Error()
+}
+
+// GetOperation satisfies the HasOperation interface.
+func (e OpErrCode) GetOperation() string {
+	return e.Operation
+}
+
+// Code returns the unerlying Code of Err.
+func (e OpErrCode) Code() Code {
+	return e.Err.Code()
+}
+
+// GetClientData returns the ClientData of the underlying Err.
+func (e OpErrCode) GetClientData() interface{} {
+	return ClientData(e.Err)
+}
+
+var _ ErrorCode = (*OpErrCode)(nil)     // assert implements interface
+var _ HasClientData = (*OpErrCode)(nil) // assert implements interface
+var _ HasOperation = (*OpErrCode)(nil)  // assert implements interface
+
+// AddOp is constructed by Op. It allows method chaining with AddTo.
+type AddOp func(ErrorCode) OpErrCode
+
+// AddTo adds the operation from Op to the ErrorCode
+func (addOp AddOp) AddTo(err ErrorCode) OpErrCode {
+	return addOp(err)
+}
+
+/*
+Op adds an operation to an ErrorCode with AddTo.
+This converts the error to the type OpErrCode.
+
+op := errcode.Op("path.move.x")
+if start < obstable && obstacle < end  {
+	return op.AddTo(PathBlocked{start, end, obstacle})
+}
+*/
+func Op(operation string) AddOp {
+	return func(err ErrorCode) OpErrCode {
+		return OpErrCode{Operation: operation, Err: err}
+	}
+}
 
 // checkCodePath checks that the given code string either
 // contains no dots or extends the parent code string
