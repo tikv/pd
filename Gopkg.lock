@@ -188,11 +188,10 @@
   version = "v1.1.0"
 
 [[projects]]
-  branch = "improve-iterate"
+  branch = "master"
   name = "github.com/google/btree"
   packages = ["."]
-  revision = "be85ac2827cd3266c48594d4cb1c8e0215d73d99"
-  source = "https://github.com/nolouch/btree"
+  revision = "4030bb1f1f0c35b30ca7009e9ebd06849dd45306"
 
 [[projects]]
   digest = "1:dbd86d229eacaa86a98b10f8fb3e3fc69a1913e0f4e010e7cc1f92bf12edca92"

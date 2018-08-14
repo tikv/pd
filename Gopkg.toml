@@ -30,5 +30,4 @@
 
 [[constraint]]
   name = "github.com/google/btree"
-  source = "https://github.com/nolouch/btree"
-  branch = "improve-iterate"
+  branch = "master"
