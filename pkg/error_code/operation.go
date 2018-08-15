@@ -56,6 +56,11 @@ type OpErrCode struct {
 	Err       ErrorCode
 }
 
+// Cause satisfies the Causer interface
+func (e OpErrCode) Cause() error {
+	return e.Err
+}
+
 // Error prefixes the operation to the underlying Err Error.
 func (e OpErrCode) Error() string {
 	return e.Operation + ": " + e.Err.Error()
@@ -79,6 +84,7 @@ func (e OpErrCode) GetClientData() interface{} {
 var _ ErrorCode = (*OpErrCode)(nil)     // assert implements interface
 var _ HasClientData = (*OpErrCode)(nil) // assert implements interface
 var _ HasOperation = (*OpErrCode)(nil)  // assert implements interface
+var _ Causer = (*OpErrCode)(nil)        // assert implements interface
 
 // AddOp is constructed by Op. It allows method chaining with AddTo.
 type AddOp func(ErrorCode) OpErrCode
@@ -94,7 +100,7 @@ func (addOp AddOp) AddTo(err ErrorCode) OpErrCode {
 //	op := errcode.Op("path.move.x")
 //	if start < obstable && obstacle < end  {
 //		return op.AddTo(PathBlocked{start, end, obstacle})
-// 	}
+//	}
 //
 func Op(operation string) AddOp {
 	return func(err ErrorCode) OpErrCode {

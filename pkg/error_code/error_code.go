@@ -21,7 +21,7 @@
 // This package is designed to have few opinions and be a starting point for how you want to do errors in your project.
 // The main requirement is to satisfy the ErrorCode interface by attaching a Code to an Error.
 // See the documentation of ErrorCode.
-// Additional optional interfaces HasClientData and HasOperation are provided for extensibility
+// Additional optional interfaces HasClientData, HasOperation, Causer, and StackTracer are provided for extensibility
 // in creating structured error data representations.
 //
 // Hierarchies are supported: a Code can point to a parent.
@@ -31,16 +31,20 @@
 // A few generic top-level error codes are provided here.
 // You are encouraged to create your own application customized error codes rather than just using generic errors.
 //
-// See JSONFormat for an opinion on how to send back meta data about errors with the error data to a client.
+// See NewJSONFormat for an opinion on how to send back meta data about errors with the error data to a client.
 // JSONFormat includes a body of response data (the "data field") that is by default the data from the Error
 // serialized to JSON.
-// This package provides no help on versioning error data.
+//
+// Errors are traced via PreviousErrorCode() which shows up as the Previous field in JSONFormat.
+// Stack traces are automatically added by NewInternalErr and show up as the Stack field in JSONFormat.
 package errcode
 
 import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 // CodeStr is a representation of the type of a particular error.
@@ -163,7 +167,7 @@ func (code Code) HTTPCode() int {
 // For an application specific error with a 1:1 mapping between a go error structure and a RegisteredCode,
 // You probably want to use this interface directly. Example:
 //
-//	// First define a normal error type
+// 	// First define a normal error type
 //	type PathBlocked struct {
 //		start     uint64 `json:"start"`
 //		end       uint64 `json:"end"`
@@ -177,7 +181,7 @@ func (code Code) HTTPCode() int {
 //	// Now define the code
 //	var PathBlockedCode = errcode.StateCode.Child("state.blocked")
 //
-//	// Now attach the code to the error type
+// 	// Now attach the code to the error type
 //	func (e PathBlocked) Code() Code {
 //		return PathBlockedCode
 //	}
@@ -206,13 +210,22 @@ func ClientData(errCode ErrorCode) interface{} {
 }
 
 // JSONFormat is an opinion on how to serialize an ErrorCode to JSON.
-// Msg is the string from Error().
-// The Data field is filled in by GetClientData
+// * Code is the error code string (CodeStr)
+// * Msg is the string from Error() and should be friendly to end users.
+// * Data is the ad-hoc data filled in by GetClientData and should be consumable by clients.
+// * Operation is the high-level operation that was happening at the time of the error.
+// The Operation field may be missing, and the Data field may be empty.
+//
+// The rest of the fields may be populated sparsely depending on the application:
+// * Previous gives JSONFormat data for an ErrorCode that was wrapped by this one. It relies on the PreviousErrorCode function.
+// * Stack is a stack trace. Usually only internal errors populate this.
 type JSONFormat struct {
-	Data      interface{} `json:"data"`
-	Msg       string      `json:"msg"`
-	Code      CodeStr     `json:"code"`
-	Operation string      `json:"operation,omitempty"`
+	Code      CodeStr           `json:"code"`
+	Msg       string            `json:"msg"`
+	Data      interface{}       `json:"data"`
+	Operation string            `json:"operation,omitempty"`
+	Previous  *JSONFormat       `json:"previous,omitempty"`
+	Stack     errors.StackTrace `json:"stack,omitempty"`
 }
 
 // OperationClientData gives the results of both the ClientData and Operation functions.
@@ -231,11 +244,20 @@ func OperationClientData(errCode ErrorCode) (string, interface{}) {
 // NewJSONFormat turns an ErrorCode into a JSONFormat
 func NewJSONFormat(errCode ErrorCode) JSONFormat {
 	op, data := OperationClientData(errCode)
+
+	var previous *JSONFormat
+	if prevCode := PreviousErrorCode(errCode); prevCode != nil {
+		ptrVar := NewJSONFormat(prevCode)
+		previous = &ptrVar
+	}
+
 	return JSONFormat{
 		Data:      data,
 		Msg:       errCode.Error(),
 		Code:      errCode.Code().CodeStr(),
 		Operation: op,
+		Stack:     StackTrace(errCode),
+		Previous:  previous,
 	}
 }
 

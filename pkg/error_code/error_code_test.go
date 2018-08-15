@@ -14,12 +14,13 @@
 package errcode_test
 
 import (
-	"errors"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"testing"
 
 	"github.com/pingcap/pd/pkg/error_code"
+	"github.com/pkg/errors"
 )
 
 // Test setting the HTTP code
@@ -202,11 +203,31 @@ func TestNewInvalidInputErr(t *testing.T) {
 	ErrorEquals(t, err, "error")
 	ClientDataEquals(t, err, MinimalError{}, internalCodeStr)
 
+	wrappedInternalErr := errcode.NewInternalErr(internalErr)
+	AssertCode(t, err, internalCodeStr)
+	AssertHTTPCode(t, err, 500)
+	ErrorEquals(t, err, "error")
+	ClientDataEquals(t, wrappedInternalErr, MinimalError{}, internalCodeStr)
+	// It should use the original stack trace, not the wrapped
+	AssertStackEquals(t, wrappedInternalErr, errcode.StackTrace(internalErr))
+
 	err = errcode.NewInvalidInputErr(InternalChild{})
 	AssertCode(t, err, internalChildCodeStr)
 	AssertHTTPCode(t, err, 503)
 	ErrorEquals(t, err, "internal child error")
 	ClientDataEquals(t, err, InternalChild{}, internalChildCodeStr)
+}
+
+func TestStackTrace(t *testing.T) {
+	internalCodeStr := errcode.CodeStr("internal")
+	err := errors.New("errors stack")
+	wrappedInternalErr := errcode.NewInternalErr(err)
+	AssertCode(t, wrappedInternalErr, internalCodeStr)
+	AssertHTTPCode(t, wrappedInternalErr, 500)
+	ErrorEquals(t, err, "errors stack")
+	ClientDataEquals(t, wrappedInternalErr, err, internalCodeStr)
+	// It should use the original stack trace, not the wrapped
+	AssertStackEquals(t, wrappedInternalErr, errcode.StackTrace(err))
 }
 
 func TestNewInternalErr(t *testing.T) {
@@ -314,17 +335,30 @@ func ClientDataEquals(t *testing.T, code errcode.ErrorCode, data interface{}, co
 		codeStr = codeStrs[0]
 	}
 	t.Helper()
-	if !reflect.DeepEqual(errcode.ClientData(code), data) {
-		t.Errorf("\nClientData expected: %#v\n ClientData but got: %#v", data, errcode.ClientData(code))
-	}
+
+	jsonEquals(t, "ClientData", data, errcode.ClientData(code))
+
 	jsonExpected := errcode.JSONFormat{
 		Data:      data,
 		Msg:       code.Error(),
 		Code:      codeStr,
 		Operation: errcode.Operation(data),
+		Stack:     errcode.StackTrace(code),
 	}
-	if !reflect.DeepEqual(errcode.NewJSONFormat(code), jsonExpected) {
-		t.Errorf("\nJSON expected: %+v\n JSON but got: %+v", jsonExpected, errcode.NewJSONFormat(code))
+	newJSON := errcode.NewJSONFormat(code)
+	newJSON.Previous = nil
+	jsonEquals(t, "JSONFormat", jsonExpected, newJSON)
+}
+
+func jsonEquals(t *testing.T, errPrefix string, expectedIn interface{}, gotIn interface{}) {
+	t.Helper()
+	got, err1 := json.Marshal(gotIn)
+	expected, err2 := json.Marshal(expectedIn)
+	if err1 != nil || err2 != nil {
+		t.Errorf("%v could not serialize to json", errPrefix)
+	}
+	if !reflect.DeepEqual(expected, got) {
+		t.Errorf("%v\nClientData expected: %#v\n ClientData but got: %#v", errPrefix, expected, got)
 	}
 }
 
@@ -341,5 +375,13 @@ func AssertOperation(t *testing.T, v interface{}, op string) {
 	opGot := errcode.Operation(v)
 	if opGot != op {
 		t.Errorf("\nOp expected: %#v\n Op but got: %#v", op, opGot)
+	}
+}
+
+func AssertStackEquals(t *testing.T, given errcode.ErrorCode, stExpected errors.StackTrace) {
+	t.Helper()
+	stGiven := errcode.StackTrace(given)
+	if stGiven == nil || stExpected == nil || stGiven[0] != stExpected[0] {
+		t.Errorf("\nStack expected: %#v\n Stack but got: %#v", stExpected[0], stGiven[0])
 	}
 }

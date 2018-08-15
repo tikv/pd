@@ -39,14 +39,16 @@ func NewInvalidInputErr(err error) ErrorCode {
 
 var _ ErrorCode = (*invalidInputErr)(nil)     // assert implements interface
 var _ HasClientData = (*invalidInputErr)(nil) // assert implements interface
+var _ Causer = (*invalidInputErr)(nil)        // assert implements interface
 
-// internalError gives the code InvalidInputCode
-type internalErr struct{ CodedError }
+// internalError gives the code InternalCode
+type internalErr struct{ StackCode }
 
 // NewInternalErr creates an internalError from an err
 // If the given err is an ErrorCode that is a descendant of InternalCode,
 // its code will be used.
 // This ensures the intention of sending an HTTP 50x.
+// This function also records a stack trace.
 func NewInternalErr(err error) ErrorCode {
 	code := InternalCode
 	if errcode, ok := err.(ErrorCode); ok {
@@ -55,11 +57,12 @@ func NewInternalErr(err error) ErrorCode {
 			code = errCode
 		}
 	}
-	return internalErr{CodedError{GetCode: code, Err: err}}
+	return internalErr{NewStackCode(CodedError{GetCode: code, Err: err}, 2)}
 }
 
 var _ ErrorCode = (*internalErr)(nil)     // assert implements interface
 var _ HasClientData = (*internalErr)(nil) // assert implements interface
+var _ Causer = (*internalErr)(nil)        // assert implements interface
 
 // notFound gives the code NotFoundCode
 type notFoundErr struct{ CodedError }
@@ -73,6 +76,7 @@ func NewNotFoundErr(err error) ErrorCode {
 
 var _ ErrorCode = (*notFoundErr)(nil)     // assert implements interface
 var _ HasClientData = (*notFoundErr)(nil) // assert implements interface
+var _ Causer = (*notFoundErr)(nil)        // assert implements interface
 
 // CodedError is a convenience to attach a code to an error and already satisfy the ErrorCode interface.
 // If the error is a struct, that struct will get preseneted as data to the client.
@@ -101,9 +105,15 @@ func NewCodedError(err error, code Code) CodedError {
 
 var _ ErrorCode = (*CodedError)(nil)     // assert implements interface
 var _ HasClientData = (*CodedError)(nil) // assert implements interface
+var _ Causer = (*CodedError)(nil)        // assert implements interface
 
 func (e CodedError) Error() string {
 	return e.Err.Error()
+}
+
+// Cause satisfies the Causer interface.
+func (e CodedError) Cause() error {
+	return e.Err
 }
 
 // Code returns the GetCode field
