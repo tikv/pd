@@ -431,6 +431,9 @@ type ScheduleConfig struct {
 	// DisableLocationReplacement is the option to prevent replica checker from
 	// moving replica to a better location.
 	DisableLocationReplacement bool `toml:"disable-location-replacement" json:"disable-location-replacement,string"`
+	// DisableNamespaceRelocation is the option to prevent namespace checker
+	// from moving replica to the target namespace.
+	DisableNamespaceRelocation bool `toml:"disable-namespace-relocation" json:"disable-namespace-relocation,string"`
 
 	// Schedulers support for loding customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade

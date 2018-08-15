@@ -52,6 +52,7 @@ type Options interface {
 	IsMakeUpReplicaEnabled() bool
 	IsRemoveExtraReplicaEnabled() bool
 	IsLocationReplacementEnabled() bool
+	IsNamespaceRelocationEnabled() bool
 
 	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 }
