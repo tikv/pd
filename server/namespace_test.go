@@ -234,6 +234,10 @@ func (c *mapClassifer) AllowMerge(one *core.RegionInfo, other *core.RegionInfo) 
 	return c.GetRegionNamespace(one) == c.GetRegionNamespace(other)
 }
 
+func (c *mapClassifer) ReloadNamespaces() error {
+	return nil
+}
+
 func (c *mapClassifer) setStore(id uint64, namespace string) {
 	c.stores[id] = namespace
 }
