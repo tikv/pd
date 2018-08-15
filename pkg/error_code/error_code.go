@@ -151,50 +151,36 @@ func (code Code) HTTPCode() int {
 	return httpCode.(int)
 }
 
-var (
-	// InternalCode is equivalent to HTTP 500 Internal Server Error
-	InternalCode = NewCode("internal").SetHTTP(http.StatusInternalServerError)
-	// InvalidInputCode is equivalent to HTTP 400 Bad Request
-	InvalidInputCode = NewCode("input").SetHTTP(http.StatusBadRequest)
-	// NotFoundCode is equivalent to HTTP 404 Not Found
-	NotFoundCode = NewCode("missing").SetHTTP(http.StatusNotFound)
-	// StateCode is an error that is invalid due to the current object state
-	// This is mapped to HTTP 400
-	StateCode = NewCode("state").SetHTTP(http.StatusBadRequest)
-)
-
-/*
-ErrorCode is the interface that ties an error and RegisteredCode together.
-
-Note that there are additional interfaces (HasClientData, HasOperation, please see the docs)
-that can be defined by an ErrorCode to customize finding structured data for the client.
-
-ErrorCode allows error codes to be defined
-without being forced to use a particular struct such as CodedError.
-CodedError is convenient for generic errors that wrap many different errors with similar codes.
-Please see the docs for CodedError.
-For an application specific error with a 1:1 mapping between a go error structure and a RegisteredCode,
-You probably want to use this interface directly. Example:
-
-	// First define a normal error type
-	type PathBlocked struct {
-		start     uint64 `json:"start"`
-		end       uint64 `json:"end"`
-		obstacle  uint64 `json:"end"`
-	}
-
-	func (e PathBlocked) Error() string {
-		return fmt.Sprintf("The path %d -> %d has obstacle %d", e.start, e.end, e.obstacle)
-	}
-
-	// Now define the code
-	var PathBlockedCode = errcode.StateCode.Child("state.blocked")
-
-	// Now attach the code to the error type
-	func (e PathBlocked) Code() Code {
-		return PathBlockedCode
-	}
-*/
+// ErrorCode is the interface that ties an error and RegisteredCode together.
+//
+// Note that there are additional interfaces (HasClientData, HasOperation, please see the docs)
+// that can be defined by an ErrorCode to customize finding structured data for the client.
+//
+// ErrorCode allows error codes to be defined
+// without being forced to use a particular struct such as CodedError.
+// CodedError is convenient for generic errors that wrap many different errors with similar codes.
+// Please see the docs for CodedError.
+// For an application specific error with a 1:1 mapping between a go error structure and a RegisteredCode,
+// You probably want to use this interface directly. Example:
+//
+//	// First define a normal error type
+//	type PathBlocked struct {
+//		start     uint64 `json:"start"`
+//		end       uint64 `json:"end"`
+//		obstacle  uint64 `json:"end"`
+//	}
+//
+//	func (e PathBlocked) Error() string {
+//		return fmt.Sprintf("The path %d -> %d has obstacle %d", e.start, e.end, e.obstacle)
+//	}
+//
+//	// Now define the code
+//	var PathBlockedCode = errcode.StateCode.Child("state.blocked")
+//
+//	// Now attach the code to the error type
+//	func (e PathBlocked) Code() Code {
+//		return PathBlockedCode
+//	}
 type ErrorCode interface {
 	Error() string // The Error interface
 	Code() Code
@@ -250,188 +236,6 @@ func NewJSONFormat(errCode ErrorCode) JSONFormat {
 		Msg:       errCode.Error(),
 		Code:      errCode.Code().CodeStr(),
 		Operation: op,
-	}
-}
-
-// CodedError is a convenience to attach a code to an error and already satisfy the ErrorCode interface.
-// If the error is a struct, that struct will get preseneted as data to the client.
-//
-// To override the http code or the data representation or just for clearer documentation,
-// you are encouraged to wrap CodeError with your own struct that inherits it.
-// Look at the implementation of invalidInput, internalError, and notFound.
-type CodedError struct {
-	GetCode Code
-	Err     error
-}
-
-// NewCodedError is for constructing broad error kinds (e.g. those representing HTTP codes)
-// Which could have many different underlying go errors.
-// Eventually you may want to give your go errors more specific codes.
-// The second argument is the broad code.
-//
-// If the error given is already an ErrorCode,
-// that will be used as the code instead of the second argument.
-func NewCodedError(err error, code Code) CodedError {
-	if errcode, ok := err.(ErrorCode); ok {
-		code = errcode.Code()
-	}
-	return CodedError{GetCode: code, Err: err}
-}
-
-var _ ErrorCode = (*CodedError)(nil)     // assert implements interface
-var _ HasClientData = (*CodedError)(nil) // assert implements interface
-
-func (e CodedError) Error() string {
-	return e.Err.Error()
-}
-
-// Code returns the GetCode field
-func (e CodedError) Code() Code {
-	return e.GetCode
-}
-
-// GetClientData returns the underlying Err field.
-func (e CodedError) GetClientData() interface{} {
-	if errCode, ok := e.Err.(ErrorCode); ok {
-		return ClientData(errCode)
-	}
-	return e.Err
-}
-
-// invalidInput gives the code InvalidInputCode
-type invalidInputErr struct{ CodedError }
-
-// NewInvalidInputErr creates an invalidInput from an err
-// If the error is already an ErrorCode it will use that code
-// Otherwise it will use InvalidInputCode which gives HTTP 400
-func NewInvalidInputErr(err error) ErrorCode {
-	return invalidInputErr{NewCodedError(err, InvalidInputCode)}
-}
-
-var _ ErrorCode = (*invalidInputErr)(nil)     // assert implements interface
-var _ HasClientData = (*invalidInputErr)(nil) // assert implements interface
-
-// internalError gives the code InvalidInputCode
-type internalErr struct{ CodedError }
-
-// NewInternalErr creates an internalError from an err
-// If the given err is an ErrorCode that is a descendant of InternalCode,
-// its code will be used.
-// This ensures the intention of sending an HTTP 50x.
-func NewInternalErr(err error) ErrorCode {
-	code := InternalCode
-	if errcode, ok := err.(ErrorCode); ok {
-		errCode := errcode.Code()
-		if errCode.IsAncestor(InternalCode) {
-			code = errCode
-		}
-	}
-	return internalErr{CodedError{GetCode: code, Err: err}}
-}
-
-var _ ErrorCode = (*internalErr)(nil)     // assert implements interface
-var _ HasClientData = (*internalErr)(nil) // assert implements interface
-
-// notFound gives the code NotFoundCode
-type notFoundErr struct{ CodedError }
-
-// NewNotFoundErr creates a notFound from an err
-// If the error is already an ErrorCode it will use that code
-// Otherwise it will use NotFoundCode which gives HTTP 404
-func NewNotFoundErr(err error) ErrorCode {
-	return notFoundErr{NewCodedError(err, NotFoundCode)}
-}
-
-var _ ErrorCode = (*notFoundErr)(nil)     // assert implements interface
-var _ HasClientData = (*notFoundErr)(nil) // assert implements interface
-
-// HasOperation is an interface to retrieve the operation that occurred during an error.
-// The end goal is to be able to see a trace of operations in a distributed system to quickly have a good understanding of what occurred.
-// Inspiration is taken from upspin error handling: https://commandcenter.blogspot.com/2017/12/error-handling-in-upspin.html
-// The relationship to error codes is not one-to-one.
-// A given error code can be triggered by multiple different operations,
-// just as a given operation could result in multiple different error codes.
-//
-// GetOperation is defined, but generally the operation should be retrieved with Operation().
-// Operation() will check if a HasOperation interface exists.
-// As an alternative to defining this interface
-// you can use an existing wrapper (OpErrCode via AddOp) or embedding (EmbedOp) that has already defined it.
-type HasOperation interface {
-	GetOperation() string
-}
-
-// Operation will return an operation string if it exists.
-// It checks for the HasOperation interface.
-// Otherwise it will return the zero value (empty) string.
-func Operation(v interface{}) string {
-	var operation string
-	if hasOp, ok := v.(HasOperation); ok {
-		operation = hasOp.GetOperation()
-	}
-	return operation
-}
-
-// EmbedOp is designed to be embedded into your existing error structs.
-// It provides the HasOperation interface already, which can reduce your boilerplate.
-type EmbedOp struct{ Op string }
-
-// GetOperation satisfies the HasOperation interface
-func (e EmbedOp) GetOperation() string {
-	return e.Op
-}
-
-// OpErrCode is an ErrorCode with an "Operation" field attached.
-// This may be used as a convenience to record the operation information for the error.
-// However, it isn't required to be used, see the HasOperation documentation for alternatives.
-type OpErrCode struct {
-	Operation string
-	Err       ErrorCode
-}
-
-// Error prefixes the operation to the underlying Err Error.
-func (e OpErrCode) Error() string {
-	return e.Operation + ": " + e.Err.Error()
-}
-
-// GetOperation satisfies the HasOperation interface.
-func (e OpErrCode) GetOperation() string {
-	return e.Operation
-}
-
-// Code returns the unerlying Code of Err.
-func (e OpErrCode) Code() Code {
-	return e.Err.Code()
-}
-
-// GetClientData returns the ClientData of the underlying Err.
-func (e OpErrCode) GetClientData() interface{} {
-	return ClientData(e.Err)
-}
-
-var _ ErrorCode = (*OpErrCode)(nil)     // assert implements interface
-var _ HasClientData = (*OpErrCode)(nil) // assert implements interface
-var _ HasOperation = (*OpErrCode)(nil)  // assert implements interface
-
-// AddOp is constructed by Op. It allows method chaining with AddTo.
-type AddOp func(ErrorCode) OpErrCode
-
-// AddTo adds the operation from Op to the ErrorCode
-func (addOp AddOp) AddTo(err ErrorCode) OpErrCode {
-	return addOp(err)
-}
-
-/*
-Op adds an operation to an ErrorCode with AddTo.
-This converts the error to the type OpErrCode.
-
-op := errcode.Op("path.move.x")
-if start < obstable && obstacle < end  {
-	return op.AddTo(PathBlocked{start, end, obstacle})
-}
-*/
-func Op(operation string) AddOp {
-	return func(err ErrorCode) OpErrCode {
-		return OpErrCode{Operation: operation, Err: err}
 	}
 }
 
