@@ -33,7 +33,6 @@ func WaitUntil(c *check.C, f CheckFunc) {
 	c.Log("wait start")
 	for i := 0; i < waitMaxRetry; i++ {
 		if f(c) {
-			c.Succeed()
 			return
 		}
 		time.Sleep(waitRetrySleep)

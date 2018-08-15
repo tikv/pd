@@ -185,6 +185,7 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 		return c.Check(r, DeepEquals, region) &&
 			c.Check(leader, DeepEquals, peer)
 	})
+	c.Succeed()
 }
 
 func (s *testClientSuite) TestGetPrevRegion(c *C) {
@@ -223,6 +224,7 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 				c.Check(r, IsNil)
 		})
 	}
+	c.Succeed()
 }
 
 func (s *testClientSuite) TestGetRegionByID(c *C) {
@@ -249,6 +251,7 @@ func (s *testClientSuite) TestGetRegionByID(c *C) {
 		return c.Check(r, DeepEquals, region) &&
 			c.Check(leader, DeepEquals, peer)
 	})
+	c.Succeed()
 }
 
 func (s *testClientSuite) TestGetStore(c *C) {
