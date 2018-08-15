@@ -197,11 +197,11 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:245bd4eb633039cd66106a5d340ae826d87f4e36a8602fcc940e14176fd26ea7"
+  digest = "1:05f95ffdfcf651bdb0f05b40b69e7f5663047f8da75c72d58728acb59b5cc107"
   name = "github.com/google/btree"
   packages = ["."]
   pruneopts = "NUT"
-  revision = "e89373fe6b4a7413d7acd6da1725b83ef713e6e4"
+  revision = "4030bb1f1f0c35b30ca7009e9ebd06849dd45306"
 
 [[projects]]
   digest = "1:dbd86d229eacaa86a98b10f8fb3e3fc69a1913e0f4e010e7cc1f92bf12edca92"
@@ -331,6 +331,11 @@
     "pkg/pdpb",
   ]
   pruneopts = "NUT"
+  revision = "e76f1c4d455b2f1b7373cc53d2176f5589dfc86e"
+
+[[projects]]
+  digest = "1:8d8f554bbb62fb7aecf661b85b25e227f6ab6cfe2b4395ea65ef478bfc174940"
+  name = "github.com/prometheus/client_golang"
   packages = [
     "prometheus",
     "prometheus/promhttp",

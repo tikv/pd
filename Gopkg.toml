@@ -32,6 +32,10 @@
   branch = "master"
 
 [[constraint]]
+  name = "github.com/google/btree"
+  branch = "master"
+
+[[constraint]]
   name = "github.com/etcd-io/gofail"
   branch = "master"
 >>>>>>> server: use gofail to test time fallback (#1186)
