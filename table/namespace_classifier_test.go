@@ -26,10 +26,13 @@ var _ = Suite(&testTableNamespaceSuite{})
 const (
 	testTable1 = 1 + iota
 	testTable2
+	testTable3
 	testNS1
 	testNS2
+	testNS3
 	testStore1
 	testStore2
+	testStore3
 )
 
 type testTableNamespaceSuite struct {
@@ -63,8 +66,8 @@ func (s *testTableNamespaceSuite) newClassifier(c *C) *tableNamespaceClassifier 
 		Meta: true,
 	}
 
-	tableClassifier.nsInfo.setNamespace(&testNamespace1)
-	tableClassifier.nsInfo.setNamespace(&testNamespace2)
+	tableClassifier.putNamespaceLocked(&testNamespace1)
+	tableClassifier.putNamespaceLocked(&testNamespace2)
 	return tableClassifier
 }
 
@@ -198,4 +201,32 @@ func (s *testTableNamespaceSuite) TestNamespaceOperation(c *C) {
 	// Remove from test1.
 	c.Assert(tableClassifier.RemoveMeta("test1"), IsNil)
 	c.Assert(tableClassifier.AddMetaToNamespace("test2"), IsNil)
+}
+
+func (s *testTableNamespaceSuite) TestTableNameSpaceReloadNamespaces(c *C) {
+	classifier := s.newClassifier(c)
+
+	classifier.nsInfo.setNamespace(&Namespace{
+		ID:   testNS3,
+		Name: "ns3",
+		TableIDs: map[int64]bool{
+			testTable3: true,
+		},
+		StoreIDs: map[uint64]bool{
+			testStore3: true,
+		},
+		Meta: false,
+	})
+
+	ns := classifier.GetAllNamespaces()
+	sort.Strings(ns)
+	c.Assert(ns, DeepEquals, []string{"global", "ns1", "ns2", "ns3"})
+
+	err := classifier.ReloadNamespaces()
+	c.Assert(err, IsNil)
+
+	ns = classifier.GetAllNamespaces()
+	sort.Strings(ns)
+	c.Assert(ns, DeepEquals, []string{"global", "ns1", "ns2"})
+
 }

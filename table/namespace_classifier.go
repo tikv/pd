@@ -310,6 +310,20 @@ func (c *tableNamespaceClassifier) RemoveNamespaceStoreID(name string, storeID u
 	return c.putNamespaceLocked(n)
 }
 
+// ReloadNamespaces reloads ns info from kv storage
+func (c *tableNamespaceClassifier) ReloadNamespaces() error {
+	nsInfo := newNamespacesInfo()
+	c.Lock()
+	defer c.Unlock()
+
+	if err := nsInfo.loadNamespaces(c.kv, kvRangeLimit); err != nil {
+		return errors.Trace(err)
+	}
+
+	c.nsInfo = nsInfo
+	return nil
+}
+
 func (c *tableNamespaceClassifier) putNamespaceLocked(ns *Namespace) error {
 	if c.kv != nil {
 		if err := c.nsInfo.saveNamespace(c.kv, ns); err != nil {
