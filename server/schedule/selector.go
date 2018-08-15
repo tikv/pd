@@ -51,7 +51,7 @@ func (s *BalanceSelector) SelectSource(opt Options, stores []*core.StoreInfo) *c
 	return result
 }
 
-// SelectTarget selects the store that can pass all filters and hos the maximal
+// SelectTarget selects the store that can pass all filters and has the maximal
 // resource score.
 func (s *BalanceSelector) SelectTarget(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
@@ -69,7 +69,7 @@ func (s *BalanceSelector) SelectTarget(opt Options, stores []*core.StoreInfo, fi
 	return result
 }
 
-// ReplicaSelector selects source/target store candidates based on their their
+// ReplicaSelector selects source/target store candidates based on their
 // distinct scores based on a region's peer stores.
 type ReplicaSelector struct {
 	regionStores []*core.StoreInfo
@@ -137,7 +137,7 @@ func NewRandomSelector(filters []Filter) *RandomSelector {
 	return &RandomSelector{filters: filters}
 }
 
-func (s *RandomSelector) rand(stores []*core.StoreInfo) *core.StoreInfo {
+func (s *RandomSelector) randStore(stores []*core.StoreInfo) *core.StoreInfo {
 	if len(stores) == 0 {
 		return nil
 	}
@@ -153,7 +153,7 @@ func (s *RandomSelector) SelectSource(opt Options, stores []*core.StoreInfo) *co
 		}
 		candidates = append(candidates, store)
 	}
-	return s.rand(candidates)
+	return s.randStore(candidates)
 }
 
 // SelectTarget randomly selects a target store from those can pass all filters.
@@ -167,5 +167,5 @@ func (s *RandomSelector) SelectTarget(opt Options, stores []*core.StoreInfo, fil
 		}
 		candidates = append(candidates, store)
 	}
-	return s.rand(candidates)
+	return s.randStore(candidates)
 }
