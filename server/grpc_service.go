@@ -468,7 +468,7 @@ func (s *Server) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitR
 	}
 	split, err := cluster.handleAskBatchSplit(req)
 	if err != nil {
-		return nil, grpc.Errorf(codes.Unknown, err.Error())
+		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
 	return &pdpb.AskBatchSplitResponse{
@@ -507,9 +507,10 @@ func (s *Server) ReportBatchSplit(ctx context.Context, request *pdpb.ReportBatch
 	if cluster == nil {
 		return &pdpb.ReportBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
+
 	_, err := cluster.handleBatchReportSplit(request)
 	if err != nil {
-		return nil, grpc.Errorf(codes.Unknown, err.Error())
+		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
 	return &pdpb.ReportBatchSplitResponse{
