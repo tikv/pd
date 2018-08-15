@@ -459,6 +459,9 @@ func (s *Server) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitR
 	if cluster == nil {
 		return &pdpb.AskBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
+	if !cluster.cachedCluster.IsFeatureSupported(BatchSplit) {
+		return &pdpb.AskBatchSplitResponse{Header: s.incompatibleVersion("batch_split")}, nil
+	}
 	if request.GetRegion() == nil {
 		return nil, errors.New("missing region for split")
 	}
@@ -669,5 +672,13 @@ func (s *Server) notBootstrappedHeader() *pdpb.ResponseHeader {
 	return s.errorHeader(&pdpb.Error{
 		Type:    pdpb.ErrorType_NOT_BOOTSTRAPPED,
 		Message: "cluster is not bootstrapped",
+	})
+}
+
+func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
+	msg := fmt.Sprintf("%s incompatible with current cluster version %s", tag, s.scheduleOpt.loadClusterVersion())
+	return s.errorHeader(&pdpb.Error{
+		Type:    pdpb.ErrorType_INCOMPATIBLE_VERSION,
+		Message: msg,
 	})
 }
