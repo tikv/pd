@@ -324,6 +324,7 @@
 
 [[projects]]
   branch = "batch-split"
+  digest = "1:75621eb75db363679073cd51e53d64acb071417086798aaa62d76f9e9611b984"
   name = "github.com/pingcap/kvproto"
   packages = [
     "pkg/eraftpb",
@@ -331,7 +332,7 @@
     "pkg/pdpb",
   ]
   pruneopts = "NUT"
-  revision = "e76f1c4d455b2f1b7373cc53d2176f5589dfc86e"
+  revision = "e48a0f290e6fdb3c388b93562a4f4656498a7475"
 
 [[projects]]
   digest = "1:8d8f554bbb62fb7aecf661b85b25e227f6ab6cfe2b4395ea65ef478bfc174940"
