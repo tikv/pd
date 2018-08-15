@@ -31,13 +31,7 @@ type labelScheduler struct {
 }
 
 func newLabelScheduler(limiter *schedule.Limiter) schedule.Scheduler {
-	filters := []schedule.Filter{
-		schedule.NewBlockFilter(),
-		schedule.NewStateFilter(),
-		schedule.NewHealthFilter(),
-		schedule.NewDisconnectFilter(),
-		schedule.NewRejectLeaderFilter(),
-	}
+	filters := []schedule.Filter{schedule.StoreStateFilter{TransferLeader: true}}
 	return &labelScheduler{
 		baseScheduler: newBaseScheduler(limiter),
 		selector:      schedule.NewBalanceSelector(core.LeaderKind, filters),

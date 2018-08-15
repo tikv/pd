@@ -34,10 +34,7 @@ type randomMergeScheduler struct {
 // newRandomMergeScheduler creates an admin scheduler that shuffles regions
 // between stores.
 func newRandomMergeScheduler(limiter *schedule.Limiter) schedule.Scheduler {
-	filters := []schedule.Filter{
-		schedule.NewStateFilter(),
-		schedule.NewHealthFilter(),
-	}
+	filters := []schedule.Filter{schedule.StoreStateFilter{MoveRegion: true}}
 	base := newBaseScheduler(limiter)
 	return &randomMergeScheduler{
 		baseScheduler: base,
