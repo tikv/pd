@@ -27,6 +27,7 @@ type Store struct {
 	Available    uint64
 	LeaderWeight float32
 	RegionWeight float32
+	Version      string
 }
 
 // Region is the config to simulate a region.
@@ -43,7 +44,7 @@ type CheckerFunc func(*core.RegionsInfo) bool
 
 // Conf represents a test suite for simulator.
 type Conf struct {
-	Stores          []Store
+	Stores          []*Store
 	Regions         []Region
 	MaxID           uint64
 	RegionSplitSize int64
@@ -53,10 +54,13 @@ type Conf struct {
 	Checker CheckerFunc // To check the schedule is finished.
 }
 
+// unit of storage
 const (
-	kb = 1024
-	mb = kb * 1024
-	gb = mb * 1024
+	B = 1 << (iota * 10)
+	KB
+	MB
+	GB
+	TB
 )
 
 type idAllocator struct {

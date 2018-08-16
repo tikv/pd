@@ -25,11 +25,12 @@ func newRegionMerge() *Conf {
 	var conf Conf
 	// Initialize the cluster
 	for i := 1; i <= 4; i++ {
-		conf.Stores = append(conf.Stores, Store{
+		conf.Stores = append(conf.Stores, &Store{
 			ID:        uint64(i),
 			Status:    metapb.StoreState_Up,
-			Capacity:  10 * gb,
-			Available: 9 * gb,
+			Capacity:  1 * TB,
+			Available: 900 * GB,
+			Version:   "2.1.0",
 		})
 	}
 	var id idAllocator
@@ -45,7 +46,7 @@ func newRegionMerge() *Conf {
 			ID:     id.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
-			Size:   10 * mb,
+			Size:   10 * MB,
 			Keys:   100000,
 		})
 	}

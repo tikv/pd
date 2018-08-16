@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/faketikv/cases"
 	"github.com/pingcap/pd/pkg/faketikv/simutil"
 )
 
@@ -58,22 +59,20 @@ type Node struct {
 }
 
 // NewNode returns a Node.
-func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
+func NewNode(s *cases.Store, pdAddr string) (*Node, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	store := &metapb.Store{
-		Id:      id,
-		Address: addr,
-		// TODO: configurable
-		Version: "2.1.0",
+		Id:      s.ID,
+		Address: fmt.Sprintf("mock:://tikv-%d", s.ID),
+		Version: s.Version,
 	}
 	stats := &pdpb.StoreStats{
-		StoreId: id,
-		// TODO: configurable
-		Capacity:  1000000000000,
-		Available: 1000000000000,
+		StoreId:   s.ID,
+		Capacity:  s.Capacity,
+		Available: s.Available,
 		StartTime: uint32(time.Now().Unix()),
 	}
-	tag := fmt.Sprintf("store %d", id)
+	tag := fmt.Sprintf("store %d", s.ID)
 	client, receiveRegionHeartbeatCh, err := NewClient(pdAddr, tag)
 	if err != nil {
 		cancel()
