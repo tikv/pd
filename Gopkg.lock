@@ -335,6 +335,12 @@
   revision = "279515615485b0f2d12f1421cc412fe2784e0190"
 
 [[projects]]
+  name = "github.com/pkg/errors"
+  packages = ["."]
+  revision = "645ef00459ed84a119197bfb8d8205042c6df63d"
+  version = "v0.8.0"
+
+[[projects]]
   digest = "1:8d8f554bbb62fb7aecf661b85b25e227f6ab6cfe2b4395ea65ef478bfc174940"
   name = "github.com/prometheus/client_golang"
   packages = [
