@@ -29,5 +29,9 @@
   branch = "master"
 
 [[constraint]]
+  name = "github.com/google/btree"
+  branch = "master"
+
+[[constraint]]
   name = "github.com/etcd-io/gofail"
   branch = "master"

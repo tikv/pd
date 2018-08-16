@@ -76,6 +76,12 @@ func run(confName string) {
 		if err != nil {
 			simutil.Logger.Fatal("run server error:", err)
 		}
+		for {
+			if local.IsLeader() {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
 		tickInterval := 100 * time.Millisecond
 		simStart(local.GetAddr(), confName, tickInterval, clean)
 	}
