@@ -104,6 +104,12 @@ func (c *RaftCluster) start() error {
 	if cluster == nil {
 		return nil
 	}
+
+	err = c.s.classifier.ReloadNamespaces()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
 	c.cachedCluster = cluster
 	c.coordinator = newCoordinator(c.cachedCluster, c.s.hbStreams, c.s.classifier)
 	c.cachedCluster.regionStats = newRegionStatistics(c.s.scheduleOpt, c.s.classifier)

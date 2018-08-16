@@ -454,6 +454,7 @@ type MockSchedulerOptions struct {
 	DisableMakeUpReplica         bool
 	DisableRemoveExtraReplica    bool
 	DisableLocationReplacement   bool
+	DisableNamespaceRelocation   bool
 	LabelProperties              map[string][]*metapb.StoreLabel
 }
 
@@ -591,4 +592,9 @@ func (mso *MockSchedulerOptions) IsRemoveExtraReplicaEnabled() bool {
 // IsLocationReplacementEnabled mock method.
 func (mso *MockSchedulerOptions) IsLocationReplacementEnabled() bool {
 	return !mso.DisableLocationReplacement
+}
+
+// IsNamespaceRelocationEnabled mock method.
+func (mso *MockSchedulerOptions) IsNamespaceRelocationEnabled() bool {
+	return !mso.DisableNamespaceRelocation
 }

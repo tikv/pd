@@ -167,6 +167,10 @@ func (o *scheduleOption) IsLocationReplacementEnabled() bool {
 	return !o.load().DisableLocationReplacement
 }
 
+func (o *scheduleOption) IsNamespaceRelocationEnabled() bool {
+	return !o.load().DisableNamespaceRelocation
+}
+
 func (o *scheduleOption) GetSchedulers() SchedulerConfigs {
 	return o.load().Schedulers
 }

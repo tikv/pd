@@ -270,9 +270,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 
 		srcStore := cluster.GetStore(srcStoreID)
 		filters := []schedule.Filter{
-			schedule.NewHealthFilter(),
-			schedule.NewStateFilter(),
-			schedule.NewSnapshotCountFilter(),
+			schedule.StoreStateFilter{MoveRegion: true},
 			schedule.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
 			schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
 		}
@@ -326,13 +324,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 			continue
 		}
 
-		filters := []schedule.Filter{
-			schedule.NewHealthFilter(),
-			schedule.NewStateFilter(),
-			schedule.NewDisconnectFilter(),
-			schedule.NewBlockFilter(),
-			schedule.NewRejectLeaderFilter(),
-		}
+		filters := []schedule.Filter{schedule.StoreStateFilter{TransferLeader: true}}
 		candidateStoreIDs := make([]uint64, 0, len(srcRegion.Peers)-1)
 		for _, store := range cluster.GetFollowerStores(srcRegion) {
 			if !schedule.FilterTarget(cluster, store, filters) {

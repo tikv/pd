@@ -174,11 +174,16 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 		}
 	}
 
-	if op := c.namespaceChecker.Check(region); op != nil {
-		if c.addOperator(op) {
-			return true
+	if c.limiter.OperatorCount(schedule.OpLeader) < c.cluster.GetLeaderScheduleLimit() &&
+		c.limiter.OperatorCount(schedule.OpRegion) < c.cluster.GetRegionScheduleLimit() &&
+		c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+		if op := c.namespaceChecker.Check(region); op != nil {
+			if c.addOperator(op) {
+				return true
+			}
 		}
 	}
+
 	if c.limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.replicaChecker.Check(region); op != nil {
 			if c.addOperator(op) {

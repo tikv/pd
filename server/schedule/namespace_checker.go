@@ -29,10 +29,7 @@ type NamespaceChecker struct {
 
 // NewNamespaceChecker creates a namespace checker.
 func NewNamespaceChecker(cluster Cluster, classifier namespace.Classifier) *NamespaceChecker {
-	filters := []Filter{
-		NewHealthFilter(),
-		NewSnapshotCountFilter(),
-	}
+	filters := []Filter{StoreStateFilter{MoveRegion: true}}
 
 	return &NamespaceChecker{
 		cluster:    cluster,
@@ -43,6 +40,10 @@ func NewNamespaceChecker(cluster Cluster, classifier namespace.Classifier) *Name
 
 // Check verifies a region's namespace, creating an Operator if need.
 func (n *NamespaceChecker) Check(region *core.RegionInfo) *Operator {
+	if !n.cluster.IsNamespaceRelocationEnabled() {
+		return nil
+	}
+
 	checkerCounter.WithLabelValues("namespace_checker", "check").Inc()
 
 	// fail-fast if there is only ONE namespace
@@ -63,7 +64,7 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *Operator {
 			continue
 		}
 		log.Debugf("[region %d] peer %v is not located in namespace target stores", region.GetId(), peer)
-		newPeer := n.SelectBestPeerToRelocate(region, targetStores, n.filters...)
+		newPeer := n.SelectBestPeerToRelocate(region, targetStores)
 		if newPeer == nil {
 			checkerCounter.WithLabelValues("namespace_checker", "no_target_peer").Inc()
 			return nil
@@ -77,8 +78,8 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *Operator {
 }
 
 // SelectBestPeerToRelocate return a new peer that to be used to move a region
-func (n *NamespaceChecker) SelectBestPeerToRelocate(region *core.RegionInfo, targets []*core.StoreInfo, filters ...Filter) *metapb.Peer {
-	storeID := n.SelectBestStoreToRelocate(region, targets, filters...)
+func (n *NamespaceChecker) SelectBestPeerToRelocate(region *core.RegionInfo, targets []*core.StoreInfo) *metapb.Peer {
+	storeID := n.SelectBestStoreToRelocate(region, targets)
 	if storeID == 0 {
 		log.Debugf("[region %d] has no best store to relocate", region.GetId())
 		return nil
@@ -91,15 +92,9 @@ func (n *NamespaceChecker) SelectBestPeerToRelocate(region *core.RegionInfo, tar
 }
 
 // SelectBestStoreToRelocate randomly returns the store to relocate
-func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, targets []*core.StoreInfo, filters ...Filter) uint64 {
-	newFilters := []Filter{
-		NewStateFilter(),
-		NewExcludedFilter(nil, region.GetStoreIds()),
-	}
-	filters = append(filters, newFilters...)
-
+func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, targets []*core.StoreInfo) uint64 {
 	selector := NewRandomSelector(n.filters)
-	target := selector.SelectTarget(n.cluster, targets, filters...)
+	target := selector.SelectTarget(n.cluster, targets, NewExcludedFilter(nil, region.GetStoreIds()))
 	if target == nil {
 		return 0
 	}

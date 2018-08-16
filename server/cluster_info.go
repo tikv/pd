@@ -685,6 +685,10 @@ func (c *clusterInfo) IsLocationReplacementEnabled() bool {
 	return c.opt.IsLocationReplacementEnabled()
 }
 
+func (c *clusterInfo) IsNamespaceRelocationEnabled() bool {
+	return c.opt.IsNamespaceRelocationEnabled()
+}
+
 func (c *clusterInfo) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
 	return c.opt.CheckLabelProperty(typ, labels)
 }
