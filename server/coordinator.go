@@ -87,9 +87,10 @@ func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifie
 	}
 }
 
-func (c *coordinator) dispatch(region *core.RegionInfo) {
+func (c *coordinator) dispatch(origin *core.RegionInfo) {
 	// Check existed operator.
-	if op := c.getOperator(region.GetId()); op != nil {
+	if op := c.getOperator(origin.GetId()); op != nil {
+		region := origin.Clone()
 		timeout := op.IsTimeout()
 		if step := op.Check(region); step != nil && !timeout {
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
