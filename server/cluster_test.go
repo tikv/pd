@@ -467,6 +467,7 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 		_, err := s.svr.StoreHeartbeat(context.TODO(), req)
 		c.Assert(err, IsNil)
 		stream, err := s.grpcPDClient.RegionHeartbeat(context.Background())
+		c.Assert(err, IsNil)
 		peer := &metapb.Peer{Id: s.allocID(c), StoreId: store.GetId()}
 		regionReq := &pdpb.RegionHeartbeatRequest{
 			Header: newRequestHeader(s.svr.clusterID),
@@ -478,7 +479,7 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 		}
 		err = stream.Send(regionReq)
 		c.Assert(err, IsNil)
-		// let the first store receive the response
+		// make sure the first store can receive one response
 		if i == 0 {
 			wg.Add(1)
 		}
@@ -503,7 +504,7 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 			Id:       s.allocID(c),
 			StartKey: []byte(fmt.Sprintf("%5d", i)),
 			EndKey:   []byte(fmt.Sprintf("%5d", i+1)),
-			Peers:    []*metapb.Peer{&metapb.Peer{Id: s.allocID(c), StoreId: stores[0].GetId()}},
+			Peers:    []*metapb.Peer{{Id: s.allocID(c), StoreId: stores[0].GetId()}},
 		}
 		if i == 0 {
 			region.StartKey = []byte("")
