@@ -140,7 +140,7 @@ func (c *RaftCluster) checkSplitRegion(left *metapb.Region, right *metapb.Region
 }
 
 func (c *RaftCluster) checkSplitRegions(regions []*metapb.Region) error {
-	if len(regions) == 0 || len(regions) == 1 {
+	if len(regions) <= 1 {
 		return errors.New("invalid split region")
 	}
 
@@ -183,7 +183,8 @@ func (c *RaftCluster) handleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 		log.Warnf("report batch split region is invalid - %v, %v", request, errors.ErrorStack(err))
 		return nil, errors.Trace(err)
 	}
-	originRegion := proto.Clone(regions[len(regions)-1]).(*metapb.Region)
-	log.Infof("[region %d] region split, generate %d new regions: %v", originRegion.GetId(), len(regions))
+	last := len(regions) - 1
+	originRegion := proto.Clone(regions[last]).(*metapb.Region)
+	log.Infof("[region %d] region split, generate %d new regions: %v", originRegion.GetId(), last, regions[:last])
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }
