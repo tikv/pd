@@ -45,6 +45,10 @@ func (c mockClassifier) AllowMerge(*core.RegionInfo, *core.RegionInfo) bool {
 	return true
 }
 
+func (c mockClassifier) ReloadNamespaces() error {
+	return nil
+}
+
 var _ = Suite(&testRegionStatisticsSuite{})
 
 type testRegionStatisticsSuite struct{}

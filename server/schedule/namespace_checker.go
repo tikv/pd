@@ -40,6 +40,10 @@ func NewNamespaceChecker(cluster Cluster, classifier namespace.Classifier) *Name
 
 // Check verifies a region's namespace, creating an Operator if need.
 func (n *NamespaceChecker) Check(region *core.RegionInfo) *Operator {
+	if !n.cluster.IsNamespaceRelocationEnabled() {
+		return nil
+	}
+
 	checkerCounter.WithLabelValues("namespace_checker", "check").Inc()
 
 	// fail-fast if there is only ONE namespace

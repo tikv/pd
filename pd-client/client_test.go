@@ -24,6 +24,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
 	"google.golang.org/grpc"
@@ -178,12 +179,13 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 	err := s.regionHeartbeat.Send(req)
 	c.Assert(err, IsNil)
 
-	time.Sleep(time.Millisecond * 200)
-
-	r, leader, err := s.client.GetRegion(context.Background(), []byte("a"))
-	c.Assert(err, IsNil)
-	c.Assert(r, DeepEquals, region)
-	c.Assert(leader, DeepEquals, peer)
+	testutil.WaitUntil(c, func(c *C) bool {
+		r, leader, err := s.client.GetRegion(context.Background(), []byte("a"))
+		c.Assert(err, IsNil)
+		return c.Check(r, DeepEquals, region) &&
+			c.Check(leader, DeepEquals, peer)
+	})
+	c.Succeed()
 }
 
 func (s *testClientSuite) TestGetPrevRegion(c *C) {
@@ -210,19 +212,19 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 		err := s.regionHeartbeat.Send(req)
 		c.Assert(err, IsNil)
 	}
-	time.Sleep(time.Second)
-
 	for i := 0; i < 20; i++ {
-		r, leader, err := s.client.GetPrevRegion(context.Background(), []byte{byte(i)})
-		c.Assert(err, IsNil)
-		if i > 0 && i < regionLen {
-			c.Assert(leader, DeepEquals, peer)
-			c.Assert(r, DeepEquals, regions[i-1])
-		} else {
-			c.Assert(leader, IsNil)
-			c.Assert(r, IsNil)
-		}
+		testutil.WaitUntil(c, func(c *C) bool {
+			r, leader, err := s.client.GetPrevRegion(context.Background(), []byte{byte(i)})
+			c.Assert(err, IsNil)
+			if i > 0 && i < regionLen {
+				return c.Check(leader, DeepEquals, peer) &&
+					c.Check(r, DeepEquals, regions[i-1])
+			}
+			return c.Check(leader, IsNil) &&
+				c.Check(r, IsNil)
+		})
 	}
+	c.Succeed()
 }
 
 func (s *testClientSuite) TestGetRegionByID(c *C) {
@@ -242,12 +244,14 @@ func (s *testClientSuite) TestGetRegionByID(c *C) {
 	}
 	err := s.regionHeartbeat.Send(req)
 	c.Assert(err, IsNil)
-	time.Sleep(time.Second)
 
-	r, leader, err := s.client.GetRegionByID(context.Background(), regionID)
-	c.Assert(err, IsNil)
-	c.Assert(r, DeepEquals, region)
-	c.Assert(leader, DeepEquals, peer)
+	testutil.WaitUntil(c, func(c *C) bool {
+		r, leader, err := s.client.GetRegionByID(context.Background(), regionID)
+		c.Assert(err, IsNil)
+		return c.Check(r, DeepEquals, region) &&
+			c.Check(leader, DeepEquals, peer)
+	})
+	c.Succeed()
 }
 
 func (s *testClientSuite) TestGetStore(c *C) {
