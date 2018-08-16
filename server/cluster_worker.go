@@ -150,7 +150,7 @@ func (c *RaftCluster) checkSplitRegions(regions []*metapb.Region) error {
 		if !bytes.Equal(left.GetEndKey(), right.GetStartKey()) {
 			return errors.New("invalid split region")
 		}
-		if len(right.GetEndKey()) != 0 && bytes.Compare(left.GetStartKey(), right.GetEndKey()) > 0 {
+		if len(right.GetEndKey()) != 0 && bytes.Compare(left.GetStartKey(), right.GetEndKey()) >= 0 {
 			return errors.New("invalid split region")
 		}
 	}
