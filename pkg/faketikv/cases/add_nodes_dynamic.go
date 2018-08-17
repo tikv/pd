@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2018 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
-func newAddNodes() *Conf {
+func newAddNodesDynamic() *Conf {
 	var conf Conf
 	var id idAllocator
 
@@ -28,15 +28,19 @@ func newAddNodes() *Conf {
 			Status:    metapb.StoreState_Up,
 			Capacity:  1 * TB,
 			Available: 900 * GB,
-			Version:   "2.1.0",
 		})
 	}
 
-	for i := 0; i < 1000; i++ {
+	var ids []uint64
+	for i := 1; i <= 8; i++ {
+		ids = append(ids, id.nextID())
+	}
+
+	for i := 0; i < 2000; i++ {
 		peers := []*metapb.Peer{
-			{Id: id.nextID(), StoreId: uint64(i)%4 + 1},
-			{Id: id.nextID(), StoreId: uint64(i+1)%4 + 1},
-			{Id: id.nextID(), StoreId: uint64(i+2)%4 + 1},
+			{Id: id.nextID(), StoreId: uint64(i)%8 + 1},
+			{Id: id.nextID(), StoreId: uint64(i+1)%8 + 1},
+			{Id: id.nextID(), StoreId: uint64(i+2)%8 + 1},
 		}
 		conf.Regions = append(conf.Regions, Region{
 			ID:     id.nextID(),
@@ -48,11 +52,24 @@ func newAddNodes() *Conf {
 	}
 	conf.MaxID = id.maxID
 
+	numNodes := 8
+	e := &AddNodesDynamicInner{}
+	e.Step = func(tick int64) uint64 {
+		if tick%100 == 0 && numNodes < 16 {
+			numNodes++
+			nodeID := ids[0]
+			ids = append(ids[:0], ids[1:]...)
+			return nodeID
+		}
+		return 0
+	}
+	conf.Events = []EventInner{e}
+
 	conf.Checker = func(regions *core.RegionsInfo) bool {
 		res := true
-		leaderCounts := make([]int, 0, 8)
-		regionCounts := make([]int, 0, 8)
-		for i := 1; i <= 8; i++ {
+		leaderCounts := make([]int, 0, numNodes)
+		regionCounts := make([]int, 0, numNodes)
+		for i := 1; i <= numNodes; i++ {
 			leaderCount := regions.GetStoreLeaderCount(uint64(i))
 			regionCount := regions.GetStoreRegionCount(uint64(i))
 			leaderCounts = append(leaderCounts, leaderCount)

@@ -111,7 +111,7 @@ func (d *Driver) Prepare() error {
 func (d *Driver) Tick() {
 	d.tickCount++
 	d.raftEngine.stepRegions(d.clusterInfo)
-	d.eventRunner.Tick(d.tickCount, d.raftEngine)
+	d.eventRunner.Tick(d)
 	for _, n := range d.clusterInfo.Nodes {
 		n.reportRegionChange()
 		n.Tick()
@@ -135,7 +135,7 @@ func (d *Driver) TickCount() int64 {
 	return d.tickCount
 }
 
-// AddNode adds new node.
+// AddNode adds a new node.
 func (d *Driver) AddNode(id uint64) {
 	if _, ok := d.clusterInfo.Nodes[id]; ok {
 		simutil.Logger.Infof("Node %d already existed", id)
@@ -150,15 +150,15 @@ func (d *Driver) AddNode(id uint64) {
 	}
 	n, err := NewNode(s, d.addr)
 	if err != nil {
-		simutil.Logger.Debug("Add node failed:", err)
+		simutil.Logger.Errorf("Add node %d failed: %v", id, err)
 		return
 	}
+	d.clusterInfo.Nodes[id] = n
+	n.raftEngine = d.raftEngine
 	err = n.Start()
 	if err != nil {
-		simutil.Logger.Debug("Start node failed:", err)
-		return
+		simutil.Logger.Errorf("Start node %d failed: %v", id, err)
 	}
-	d.clusterInfo.Nodes[n.Id] = n
 }
 
 // DeleteNode deletes a node.

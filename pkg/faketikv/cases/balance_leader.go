@@ -21,10 +21,11 @@ import (
 
 func newBalanceLeader() *Conf {
 	var conf Conf
+	var id idAllocator
 
 	for i := 1; i <= 3; i++ {
 		conf.Stores = append(conf.Stores, &Store{
-			ID:        uint64(i),
+			ID:        id.nextID(),
 			Status:    metapb.StoreState_Up,
 			Capacity:  1 * TB,
 			Available: 900 * GB,
@@ -32,8 +33,6 @@ func newBalanceLeader() *Conf {
 		})
 	}
 
-	var id idAllocator
-	id.setMaxID(3)
 	for i := 0; i < 1000; i++ {
 		peers := []*metapb.Peer{
 			{Id: id.nextID(), StoreId: 1},
