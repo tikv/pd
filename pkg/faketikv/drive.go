@@ -15,9 +15,9 @@ package faketikv
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/juju/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/faketikv/cases"
 	"github.com/pingcap/pd/pkg/faketikv/simutil"
 )
@@ -141,7 +141,14 @@ func (d *Driver) AddNode(id uint64) {
 		simutil.Logger.Infof("Node %d already existed", id)
 		return
 	}
-	n, err := NewNode(id, fmt.Sprintf("mock://tikv-%d", id), d.addr)
+	s := &cases.Store{
+		ID:        id,
+		Status:    metapb.StoreState_Up,
+		Capacity:  1 * cases.TB,
+		Available: 1 * cases.TB,
+		Version:   "2.1.0",
+	}
+	n, err := NewNode(s, d.addr)
 	if err != nil {
 		simutil.Logger.Debug("Add node failed:", err)
 		return

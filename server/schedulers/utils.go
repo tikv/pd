@@ -17,52 +17,10 @@ import (
 	"time"
 
 	"github.com/montanaflynn/stats"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
-	log "github.com/sirupsen/logrus"
 )
-
-// scheduleRemovePeer schedules a region to remove the peer.
-func scheduleRemovePeer(cluster schedule.Cluster, schedulerName string, s schedule.Selector, filters ...schedule.Filter) (*core.RegionInfo, *metapb.Peer) {
-	stores := cluster.GetStores()
-
-	source := s.SelectSource(cluster, stores, filters...)
-	if source == nil {
-		schedulerCounter.WithLabelValues(schedulerName, "no_store").Inc()
-		return nil, nil
-	}
-
-	region := cluster.RandFollowerRegion(source.GetId(), core.HealthRegion())
-	if region == nil {
-		region = cluster.RandLeaderRegion(source.GetId(), core.HealthRegion())
-	}
-	if region == nil {
-		schedulerCounter.WithLabelValues(schedulerName, "no_region").Inc()
-		return nil, nil
-	}
-
-	return region, region.GetStorePeer(source.GetId())
-}
-
-// scheduleAddPeer schedules a new peer.
-func scheduleAddPeer(cluster schedule.Cluster, s schedule.Selector, filters ...schedule.Filter) *metapb.Peer {
-	stores := cluster.GetStores()
-
-	target := s.SelectTarget(cluster, stores, filters...)
-	if target == nil {
-		return nil
-	}
-
-	newPeer, err := cluster.AllocPeer(target.GetId())
-	if err != nil {
-		log.Errorf("failed to allocate peer: %v", err)
-		return nil
-	}
-
-	return newPeer
-}
 
 func minUint64(a, b uint64) uint64 {
 	if a < b {

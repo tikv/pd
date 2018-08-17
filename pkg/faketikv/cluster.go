@@ -15,7 +15,6 @@ package faketikv
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -36,7 +35,7 @@ func NewClusterInfo(pdAddr string, conf *cases.Conf) (*ClusterInfo, error) {
 	}
 
 	for _, store := range conf.Stores {
-		node, err := NewNode(store.ID, fmt.Sprintf("mock:://tikv-%d", store.ID), pdAddr)
+		node, err := NewNode(store, pdAddr)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

@@ -26,7 +26,7 @@ func init() {
 
 type shuffleLeaderScheduler struct {
 	*baseScheduler
-	selector schedule.Selector
+	selector *schedule.RandomSelector
 }
 
 // newShuffleLeaderScheduler creates an admin scheduler that shuffles leaders

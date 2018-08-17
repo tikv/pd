@@ -39,7 +39,7 @@ type evictLeaderScheduler struct {
 	*baseScheduler
 	name     string
 	storeID  uint64
-	selector schedule.Selector
+	selector *schedule.RandomSelector
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders

@@ -25,11 +25,12 @@ func newHotWrite() *Conf {
 	var conf Conf
 	// Initialize the cluster
 	for i := 1; i <= 10; i++ {
-		conf.Stores = append(conf.Stores, Store{
+		conf.Stores = append(conf.Stores, &Store{
 			ID:        uint64(i),
 			Status:    metapb.StoreState_Up,
-			Capacity:  10 * gb,
-			Available: 9 * gb,
+			Capacity:  1 * TB,
+			Available: 900 * GB,
+			Version:   "2.1.0",
 		})
 	}
 	var id idAllocator
@@ -45,7 +46,7 @@ func newHotWrite() *Conf {
 			ID:     id.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
-			Size:   96 * mb,
+			Size:   96 * MB,
 			Keys:   960000,
 		})
 	}
@@ -56,7 +57,7 @@ func newHotWrite() *Conf {
 	writeFlow := make(map[uint64]int64, 5)
 	for _, r := range conf.Regions {
 		if r.Leader.GetStoreId() == 1 {
-			writeFlow[r.ID] = 2 * mb
+			writeFlow[r.ID] = 2 * MB
 			if len(writeFlow) == 5 {
 				break
 			}

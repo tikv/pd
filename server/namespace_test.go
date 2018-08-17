@@ -24,14 +24,15 @@ import (
 var _ = Suite(&testNamespaceSuite{})
 
 type testNamespaceSuite struct {
-	classifier *mapClassifer
-	tc         *testClusterInfo
-	opt        *scheduleOption
+	classifier     *mapClassifer
+	tc             *testClusterInfo
+	opt            *scheduleOption
+	scheduleConfig *ScheduleConfig
 }
 
 func (s *testNamespaceSuite) SetUpTest(c *C) {
 	s.classifier = newMapClassifer()
-	_, s.opt = newTestScheduleConfig()
+	s.scheduleConfig, s.opt = newTestScheduleConfig()
 	s.tc = newTestClusterInfo(s.opt)
 }
 
@@ -103,6 +104,11 @@ func (s *testNamespaceSuite) TestNamespaceChecker(c *C) {
 	// Move the peer with questions to the right store if the region has multiple peers.
 	s.classifier.setRegion(5, "ns1")
 	s.tc.addLeaderRegion(5, 1, 1, 3)
+
+	s.scheduleConfig.DisableNamespaceRelocation = true
+	c.Assert(checker.Check(s.tc.GetRegion(5)), IsNil)
+	s.scheduleConfig.DisableNamespaceRelocation = false
+
 	op = checker.Check(s.tc.GetRegion(5))
 	testutil.CheckTransferPeer(c, op, schedule.OpReplica, 3, 2)
 }

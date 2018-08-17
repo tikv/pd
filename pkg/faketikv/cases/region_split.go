@@ -23,11 +23,12 @@ func newRegionSplit() *Conf {
 	var conf Conf
 	// Initialize the cluster
 	for i := 1; i <= 3; i++ {
-		conf.Stores = append(conf.Stores, Store{
+		conf.Stores = append(conf.Stores, &Store{
 			ID:        uint64(i),
 			Status:    metapb.StoreState_Up,
-			Capacity:  10 * gb,
-			Available: 9 * gb,
+			Capacity:  1 * TB,
+			Available: 900 * GB,
+			Version:   "2.1.0",
 		})
 	}
 	peers := []*metapb.Peer{
@@ -37,17 +38,17 @@ func newRegionSplit() *Conf {
 		ID:     5,
 		Peers:  peers,
 		Leader: peers[0],
-		Size:   1 * mb,
+		Size:   1 * MB,
 		Keys:   10000,
 	})
 	conf.MaxID = 5
-	conf.RegionSplitSize = 128 * mb
+	conf.RegionSplitSize = 128 * MB
 	conf.RegionSplitKeys = 10000
 	// Events description
 	e := &WriteFlowOnSpotInner{}
 	e.Step = func(tick int64) map[string]int64 {
 		return map[string]int64{
-			"foobar": 8 * mb,
+			"foobar": 8 * MB,
 		}
 	}
 	conf.Events = []EventInner{e}

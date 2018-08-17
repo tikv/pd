@@ -56,7 +56,7 @@ func init() {
 // 2. the two regions' leader will not in the public store of this two regions
 type balanceAdjacentRegionScheduler struct {
 	*baseScheduler
-	selector             schedule.Selector
+	selector             *schedule.RandomSelector
 	leaderLimit          uint64
 	peerLimit            uint64
 	lastKey              []byte

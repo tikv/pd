@@ -22,11 +22,12 @@ func newAddNodes() *Conf {
 	var conf Conf
 
 	for i := 1; i <= 8; i++ {
-		conf.Stores = append(conf.Stores, Store{
+		conf.Stores = append(conf.Stores, &Store{
 			ID:        uint64(i),
 			Status:    metapb.StoreState_Up,
-			Capacity:  10 * gb,
-			Available: 9 * gb,
+			Capacity:  1 * TB,
+			Available: 900 * GB,
+			Version:   "2.1.0",
 		})
 	}
 
@@ -42,7 +43,7 @@ func newAddNodes() *Conf {
 			ID:     id.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
-			Size:   96 * mb,
+			Size:   96 * MB,
 			Keys:   960000,
 		})
 	}
