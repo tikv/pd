@@ -72,18 +72,15 @@ func (a *idAllocator) nextID() uint64 {
 	return a.maxID
 }
 
-func (a *idAllocator) setMaxID(id uint64) {
-	a.maxID = id
-}
-
 // ConfMap is a mapping of the cases to the their corresponding initialize functions.
 var ConfMap = map[string]func() *Conf{
-	"balance-leader": newBalanceLeader,
-	"add-nodes":      newAddNodes,
-	"region-split":   newRegionSplit,
-	"region-merge":   newRegionMerge,
-	"hot-read":       newHotRead,
-	"hot-write":      newHotWrite,
+	"balance-leader":    newBalanceLeader,
+	"add-nodes":         newAddNodes,
+	"add-nodes-dynamic": newAddNodesDynamic,
+	"region-split":      newRegionSplit,
+	"region-merge":      newRegionMerge,
+	"hot-read":          newHotRead,
+	"hot-write":         newHotWrite,
 }
 
 // NewConf creates a config to initialize simulator cluster.

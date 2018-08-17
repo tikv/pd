@@ -48,14 +48,12 @@ func (w *ReadFlowOnRegionInner) Type() string {
 	return "read-flow-on-region"
 }
 
-// AddNode adds a node
-type AddNode struct {
-	Tick   int64
-	NodeID uint64
+// AddNodesDynamicInner adds nodes dynamically
+type AddNodesDynamicInner struct {
+	Step func(tick int64) uint64
 }
 
-// RemoveNode removes a node
-type RemoveNode struct {
-	Tick   int64
-	NodeID uint64
+// Type implements the EventInner interface
+func (w *AddNodesDynamicInner) Type() string {
+	return "add-nodes-dynamic"
 }
