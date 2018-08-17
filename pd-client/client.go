@@ -556,6 +556,7 @@ type TSFuture interface {
 }
 
 func (req *tsoRequest) Wait() (int64, int64, error) {
+	waitStart := time.Now()
 	select {
 	case err := <-req.done:
 		defer tsoReqPool.Put(req)
@@ -564,7 +565,11 @@ func (req *tsoRequest) Wait() (int64, int64, error) {
 			return 0, 0, errors.Trace(err)
 		}
 		physical, logical := req.physical, req.logical
+		// If tso commands execute slow, we can observe high value of both 'tso' and
+		// 'tso_wait'. If tso commands execute fast, but it takes too long for Wait()
+		// be called, we will observe high value of 'tso' and low value of 'tso_wait'.
 		cmdDuration.WithLabelValues("tso").Observe(time.Since(req.start).Seconds())
+		cmdDuration.WithLabelValues("tso_wait").Observe(time.Since(waitStart).Seconds())
 		return physical, logical, err
 	case <-req.ctx.Done():
 		return 0, 0, errors.Trace(req.ctx.Err())
