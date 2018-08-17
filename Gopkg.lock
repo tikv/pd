@@ -323,7 +323,7 @@
   revision = "1c287c953996ab3a0bf535dba9d53d809d3dc0b6"
 
 [[projects]]
-  branch = "batch-split"
+  branch = "master"
   digest = "1:3be99496a5d1fc018eb176c53a81df986408af94bece871d829eaceddf7c5325"
   name = "github.com/pingcap/kvproto"
   packages = [
@@ -332,7 +332,7 @@
     "pkg/pdpb",
   ]
   pruneopts = "NUT"
-  revision = "0e78dc4acc51c0b17d04ef0bba0874acb969af8b"
+  revision = "279515615485b0f2d12f1421cc412fe2784e0190"
 
 [[projects]]
   digest = "1:8d8f554bbb62fb7aecf661b85b25e227f6ab6cfe2b4395ea65ef478bfc174940"
