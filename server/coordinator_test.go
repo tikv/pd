@@ -223,7 +223,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	stream := newMockHeartbeatStream()
 
 	// Transfer peer.
-	region := tc.GetRegion(1)
+	region := tc.GetRegion(1).Clone()
 	dispatchHeartbeat(c, co, region, stream)
 	waitAddLearner(c, stream, region, 1)
 	dispatchHeartbeat(c, co, region, stream)
@@ -236,7 +236,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	waitNoResponse(c, stream)
 
 	// Transfer leader.
-	region = tc.GetRegion(2)
+	region = tc.GetRegion(2).Clone()
 	dispatchHeartbeat(c, co, region, stream)
 	waitTransferLeader(c, stream, region, 2)
 	dispatchHeartbeat(c, co, region, stream)
