@@ -54,7 +54,7 @@ func (mc *MockCluster) ScanRegions(startKey []byte, limit int) []*core.RegionInf
 func (mc *MockCluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 	//  regions load from etcd will have no leader
 	r := mc.newMockRegionInfo(regionID, 0, followerIds...)
-	r.Leader = nil
+	r.SetLeader(nil)
 	mc.PutRegion(r)
 }
 
@@ -162,23 +162,23 @@ func (mc *MockCluster) AddLabelsStore(storeID uint64, regionCount int, labels ma
 // AddLeaderRegion adds region with specified leader and followers.
 func (mc *MockCluster) AddLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
 	regionInfo := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
-	regionInfo.ApproximateSize = 10
-	regionInfo.ApproximateKeys = 10
+	regionInfo.SetApproximateSize(int64(10))
+	regionInfo.SetApproximateKeys(int64(10))
 	mc.PutRegion(regionInfo)
 }
 
 // AddLeaderRegionWithRange adds region with specified leader, followers and key range.
 func (mc *MockCluster) AddLeaderRegionWithRange(regionID uint64, startKey string, endKey string, leaderID uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
-	r.StartKey = []byte(startKey)
-	r.EndKey = []byte(endKey)
+	r.SetStartKey([]byte(startKey))
+	r.SetEndKey([]byte(endKey))
 	mc.PutRegion(r)
 }
 
 // AddLeaderRegionWithReadInfo adds region with specified leader, followers and read info.
 func (mc *MockCluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
-	r.ReadBytes = readBytes
+	r.SetBytesRead(readBytes)
 	isUpdate, item := mc.BasicCluster.CheckReadStatus(r)
 	if isUpdate {
 		mc.HotCache.Update(regionID, item, ReadFlow)
@@ -189,7 +189,7 @@ func (mc *MockCluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uin
 // AddLeaderRegionWithWriteInfo adds region with specified leader, followers and write info.
 func (mc *MockCluster) AddLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
-	r.WrittenBytes = writtenBytes
+	r.SetBytesWritten(writtenBytes)
 	isUpdate, item := mc.BasicCluster.CheckWriteStatus(r)
 	if isUpdate {
 		mc.HotCache.Update(regionID, item, WriteFlow)
@@ -319,12 +319,12 @@ func (mc *MockCluster) newMockRegionInfo(regionID uint64, leaderID uint64, follo
 
 // ApplyOperator mocks apply oeprator.
 func (mc *MockCluster) ApplyOperator(op *Operator) {
-	region := mc.GetRegion(op.RegionID())
+	region := mc.GetRegion(op.RegionID()).Clone()
 	for !op.IsFinish() {
 		if step := op.Check(region); step != nil {
 			switch s := step.(type) {
 			case TransferLeader:
-				region.Leader = region.GetStorePeer(s.ToStore)
+				region.SetLeader(region.GetStorePeer(s.ToStore))
 			case AddPeer:
 				if region.GetStorePeer(s.ToStore) != nil {
 					panic("Add peer that exists")
@@ -364,7 +364,18 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 			}
 		}
 	}
+	//	fmt.Println("a", region.GetMeta())
 	mc.PutRegion(region)
+	//	leaderStr := "leader:"
+	//	regionStr := "region:"
+	//	for i := 1; i <= 5; i++ {
+	//		storeID := uint64(i)
+	//		leaderStr = fmt.Sprintf("%s %d", leaderStr, mc.Regions.GetStoreLeaderCount(storeID))
+	//		regionStr = fmt.Sprintf("%s %d", regionStr, mc.Regions.GetStoreRegionCount(storeID))
+	//	}
+	//	fmt.Println(leaderStr)
+	//	fmt.Println(regionStr)
+	//	fmt.Println(" \n ==========end====================")
 	for id := range region.GetStoreIds() {
 		mc.UpdateStoreStatus(id)
 	}

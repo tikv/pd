@@ -318,7 +318,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 		return errors.Errorf("region has no voter in store %v", storeID)
 	}
 
-	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: newLeader.GetStoreId()}
+	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: newLeader.GetStoreId()}
 	op := schedule.NewOperator("adminTransferLeader", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpLeader, step)
 	if ok := c.addOperator(op); !ok {
 		return errors.Trace(errAddOperator)
@@ -491,19 +491,19 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotFound(targetID)
 	}
 
-	if len(region.DownPeers) > 0 || len(region.PendingPeers) > 0 || len(region.Learners) > 0 ||
-		len(region.Region.GetPeers()) != c.cluster.GetMaxReplicas() {
+	if len(region.GetDownPeers()) > 0 || len(region.GetPendingPeers()) > 0 || len(region.GetLearners()) > 0 ||
+		len(region.GetPeers()) != c.cluster.GetMaxReplicas() {
 		return ErrRegionAbnormalPeer(regionID)
 	}
 
-	if len(target.DownPeers) > 0 || len(target.PendingPeers) > 0 || len(target.Learners) > 0 ||
-		len(target.Region.GetPeers()) != c.cluster.GetMaxReplicas() {
+	if len(target.GetDownPeers()) > 0 || len(target.GetPendingPeers()) > 0 || len(target.GetLearners()) > 0 ||
+		len(target.GetMeta().GetPeers()) != c.cluster.GetMaxReplicas() {
 		return ErrRegionAbnormalPeer(targetID)
 	}
 
 	// for the case first region (start key is nil) with the last region (end key is nil) but not adjacent
-	if (bytes.Equal(region.StartKey, target.EndKey) || len(region.StartKey) == 0) &&
-		(bytes.Equal(region.EndKey, target.StartKey) || len(region.EndKey) == 0) {
+	if (bytes.Equal(region.GetStartKey(), target.GetEndKey()) || len(region.GetStartKey()) == 0) &&
+		(bytes.Equal(region.GetEndKey(), target.GetStartKey()) || len(region.GetEndKey()) == 0) {
 		return ErrRegionNotAdjacent
 	}
 
@@ -530,8 +530,8 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policy string) error {
 	}
 
 	step := schedule.SplitRegion{
-		StartKey: region.StartKey,
-		EndKey:   region.EndKey,
+		StartKey: region.GetStartKey(),
+		EndKey:   region.GetEndKey(),
 		Policy:   pdpb.CheckPolicy(pdpb.CheckPolicy_value[strings.ToUpper(policy)]),
 	}
 	op := schedule.NewOperator("adminSplitRegion", regionID, region.GetRegionEpoch(), schedule.OpAdmin, step)

@@ -83,8 +83,8 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 		region.Peers = append(region.Peers, peer)
 	}
 	regionInfo := core.NewRegionInfo(region, leader)
-	regionInfo.ApproximateSize = 10
-	regionInfo.ApproximateKeys = 10
+	regionInfo.SetApproximateKeys(10)
+	regionInfo.SetApproximateSize(10)
 	c.putRegion(regionInfo)
 }
 
@@ -244,7 +244,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 }
 
 func dispatchHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream *mockHeartbeatStream) {
-	co.hbStreams.bindStream(region.Leader.GetStoreId(), stream)
+	co.hbStreams.bindStream(region.GetLeader().GetStoreId(), stream)
 	co.cluster.putRegion(region)
 	co.dispatch(region)
 }
@@ -295,7 +295,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	r := tc.GetRegion(1)
 	p := &metapb.Peer{Id: 1, StoreId: 1, IsLearner: true}
 	r.AddPeer(p)
-	r.PendingPeers = append(r.PendingPeers, p)
+	r.SetPendingPeers(append(r.GetPendingPeers(), p))
 	tc.putRegion(r)
 	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
 	co.stop()
@@ -313,7 +313,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	tc.addRegionStore(1, 1)
 	tc.putRegion(r)
 	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
-	r.PendingPeers = nil
+	r.SetPendingPeers(nil)
 	tc.putRegion(r)
 	c.Assert(co.checkRegion(tc.GetRegion(1)), IsTrue)
 	waitOperator(c, co, 1)
@@ -360,10 +360,10 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 		Peer:        region.GetStorePeer(3),
 		DownSeconds: 24 * 60 * 60,
 	}
-	region.DownPeers = append(region.DownPeers, downPeer)
+	region.SetDownPeers(append(region.GetDownPeers(), downPeer))
 	dispatchHeartbeat(c, co, region, stream)
 	waitRemovePeer(c, stream, region, 3)
-	region.DownPeers = nil
+	region.SetDownPeers(nil)
 	dispatchHeartbeat(c, co, region, stream)
 	waitAddLearner(c, stream, region, 4)
 	dispatchHeartbeat(c, co, region, stream)
@@ -383,7 +383,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	tc.addLeaderRegion(3, 1, 2, 3)
 	tc.setStoreOffline(3)
 	region = tc.GetRegion(3)
-	region.PendingPeers = []*metapb.Peer{region.GetStorePeer(3)}
+	region.SetPendingPeers([]*metapb.Peer{region.GetStorePeer(3)})
 	dispatchHeartbeat(c, co, region, stream)
 	waitNoResponse(c, stream)
 }
@@ -420,14 +420,14 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	waitPromoteLearner(c, stream, region, 1)
 
 	// If the new peer is pending, the operator will not finish.
-	region.PendingPeers = append(region.PendingPeers, region.GetStorePeer(1))
+	region.SetPendingPeers(append(region.GetPendingPeers(), region.GetStorePeer(1)))
 	dispatchHeartbeat(c, co, region, stream)
 	waitNoResponse(c, stream)
-	c.Assert(co.getOperator(region.GetId()), NotNil)
+	c.Assert(co.getOperator(region.GetID()), NotNil)
 
 	// The new peer is not pending now, the operator will finish.
 	// And we will proceed to remove peer in store 4.
-	region.PendingPeers = nil
+	region.SetPendingPeers(nil)
 	dispatchHeartbeat(c, co, region, stream)
 	waitRemovePeer(c, stream, region, 4)
 	tc.addLeaderRegion(1, 1, 2, 3)
@@ -463,8 +463,8 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	}
 
 	for _, t := range tbl {
-		r := tc.GetRegion(t.regionID)
-		r.Leader = r.Peers[0]
+		r := tc.GetRegion(t.regionID).Clone()
+		r.SetLeader(r.GetPeers()[0])
 		tc.handleRegionHeartbeat(r)
 		c.Assert(co.shouldRun(), Equals, t.shouldRun)
 	}
@@ -807,24 +807,24 @@ func waitAddLearner(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, 
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
-			return res.GetRegionId() == region.GetId() &&
+			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddLearnerNode &&
 				res.GetChangePeer().GetPeer().GetStoreId() == storeID
 		}
 		return false
 	})
 	region.AddPeer(res.GetChangePeer().GetPeer())
-	region.RegionEpoch = &metapb.RegionEpoch{
+	region.SetRegionEpoch(&metapb.RegionEpoch{
 		ConfVer: region.GetRegionEpoch().GetConfVer() + 1,
 		Version: region.GetRegionEpoch().GetVersion(),
-	}
+	})
 }
 
 func waitPromoteLearner(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
-			return res.GetRegionId() == region.GetId() &&
+			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddNode &&
 				res.GetChangePeer().GetPeer().GetStoreId() == storeID
 		}
@@ -839,28 +839,28 @@ func waitRemovePeer(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, 
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
-			return res.GetRegionId() == region.GetId() &&
+			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_RemoveNode &&
 				res.GetChangePeer().GetPeer().GetStoreId() == storeID
 		}
 		return false
 	})
 	region.RemoveStorePeer(storeID)
-	region.RegionEpoch = &metapb.RegionEpoch{
+	region.SetRegionEpoch(&metapb.RegionEpoch{
 		ConfVer: region.GetRegionEpoch().GetConfVer() + 1,
 		Version: region.GetRegionEpoch().GetVersion(),
-	}
+	})
 }
 
 func waitTransferLeader(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
-			return res.GetRegionId() == region.GetId() && res.GetTransferLeader().GetPeer().GetStoreId() == storeID
+			return res.GetRegionId() == region.GetID() && res.GetTransferLeader().GetPeer().GetStoreId() == storeID
 		}
 		return false
 	})
-	region.Leader = res.GetTransferLeader().GetPeer()
+	region.SetLeader(res.GetTransferLeader().GetPeer())
 }
 
 func waitNoResponse(c *C, stream *mockHeartbeatStream) {

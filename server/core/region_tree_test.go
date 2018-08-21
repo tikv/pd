@@ -43,14 +43,14 @@ func (s *testRegionSuite) TestRegionInfo(c *C) {
 	downPeer, pendingPeer := peers[0], peers[1]
 
 	info := NewRegionInfo(region, peers[0])
-	info.DownPeers = []*pdpb.PeerStats{{Peer: downPeer}}
-	info.PendingPeers = []*metapb.Peer{pendingPeer}
+	info.downPeers = []*pdpb.PeerStats{{Peer: downPeer}}
+	info.pendingPeers = []*metapb.Peer{pendingPeer}
 
 	r := info.Clone()
 	c.Assert(r, DeepEquals, info)
 
 	for i := uint64(0); i < n; i++ {
-		c.Assert(r.GetPeer(i), Equals, r.Peers[i])
+		c.Assert(r.GetPeer(i), Equals, r.meta.Peers[i])
 	}
 	c.Assert(r.GetPeer(n), IsNil)
 	c.Assert(r.GetDownPeer(n), IsNil)
@@ -67,16 +67,16 @@ func (s *testRegionSuite) TestRegionInfo(c *C) {
 		Id:      n,
 		StoreId: n,
 	}
-	r.Peers = append(r.Peers, removePeer)
+	r.meta.Peers = append(r.meta.Peers, removePeer)
 	c.Assert(DiffRegionPeersInfo(info, r), Matches, "Add peer.*")
 	c.Assert(DiffRegionPeersInfo(r, info), Matches, "Remove peer.*")
 	c.Assert(r.GetStorePeer(n), DeepEquals, removePeer)
 	r.RemoveStorePeer(n)
 	c.Assert(DiffRegionPeersInfo(r, info), Equals, "")
 	c.Assert(r.GetStorePeer(n), IsNil)
-	r.Region.StartKey = []byte{0}
+	r.meta.StartKey = []byte{0}
 	c.Assert(DiffRegionKeyInfo(r, info), Matches, "StartKey Changed.*")
-	r.Region.EndKey = []byte{1}
+	r.meta.EndKey = []byte{1}
 	c.Assert(DiffRegionKeyInfo(r, info), Matches, ".*EndKey Changed.*")
 
 	stores := r.GetStoreIds()

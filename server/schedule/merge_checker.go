@@ -57,7 +57,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 		return nil, nil
 	}
 
-	if m.splitCache.Exists(region.GetId()) {
+	if m.splitCache.Exists(region.GetID()) {
 		checkerCounter.WithLabelValues("merge_checker", "recently_split").Inc()
 		return nil, nil
 	}
@@ -68,31 +68,31 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	// but the size for these loaded region info is 0
 	// pd don't know the real size of one region until the first heartbeat of the region
 	// thus here when size is 0, just skip.
-	if region.ApproximateSize == 0 {
+	if region.GetApproximateSize() == 0 {
 		checkerCounter.WithLabelValues("merge_checker", "skip").Inc()
 		return nil, nil
 	}
 
 	// region is not small enough
-	if region.ApproximateSize > int64(m.cluster.GetMaxMergeRegionSize()) ||
-		region.ApproximateKeys > int64(m.cluster.GetMaxMergeRegionKeys()) {
+	if region.GetApproximateSize() > int64(m.cluster.GetMaxMergeRegionSize()) ||
+		region.GetApproximateKeys() > int64(m.cluster.GetMaxMergeRegionKeys()) {
 		checkerCounter.WithLabelValues("merge_checker", "no_need").Inc()
 		return nil, nil
 	}
 
 	// skip region has down peers or pending peers or learner peers
-	if len(region.DownPeers) > 0 || len(region.PendingPeers) > 0 || len(region.Learners) > 0 {
+	if len(region.GetDownPeers()) > 0 || len(region.GetPendingPeers()) > 0 || len(region.GetLearners()) > 0 {
 		checkerCounter.WithLabelValues("merge_checker", "special_peer").Inc()
 		return nil, nil
 	}
 
-	if len(region.Region.GetPeers()) != m.cluster.GetMaxReplicas() {
+	if len(region.GetPeers()) != m.cluster.GetMaxReplicas() {
 		checkerCounter.WithLabelValues("merge_checker", "abnormal_replica").Inc()
 		return nil, nil
 	}
 
 	// skip hot region
-	if m.cluster.IsRegionHot(region.GetId()) {
+	if m.cluster.IsRegionHot(region.GetID()) {
 		checkerCounter.WithLabelValues("merge_checker", "hot_region").Inc()
 		return nil, nil
 	}
@@ -119,13 +119,13 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 
 func (m *MergeChecker) checkTarget(region, adjacent, target *core.RegionInfo) *core.RegionInfo {
 	// if is not hot region and under same namesapce
-	if adjacent != nil && !m.cluster.IsRegionHot(adjacent.GetId()) &&
+	if adjacent != nil && !m.cluster.IsRegionHot(adjacent.GetID()) &&
 		m.classifier.AllowMerge(region, adjacent) &&
-		len(adjacent.DownPeers) == 0 && len(adjacent.PendingPeers) == 0 && len(adjacent.Learners) == 0 {
+		len(adjacent.GetDownPeers()) == 0 && len(adjacent.GetPendingPeers()) == 0 && len(adjacent.GetLearners()) == 0 {
 		// if both region is not hot, prefer the one with smaller size
-		if target == nil || target.ApproximateSize > adjacent.ApproximateSize {
+		if target == nil || target.GetApproximateSize() > adjacent.GetApproximateSize() {
 			// peer count should equal
-			if len(adjacent.Region.GetPeers()) == m.cluster.GetMaxReplicas() {
+			if len(adjacent.GetPeers()) == m.cluster.GetMaxReplicas() {
 				target = adjacent
 			}
 		}

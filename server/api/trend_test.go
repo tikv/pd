@@ -55,10 +55,10 @@ func (s *testTrendSuite) TestTrend(c *C) {
 	c.Assert(op, NotNil)
 	newPeerID := op.Step(0).(schedule.AddLearner).PeerID
 	region := s.newRegionInfo(5, "a", "b", 3, 2, []uint64{1, 2}, []uint64{3}, 1)
-	region.Learners[0].Id = newPeerID
+	region.GetLearners()[0].Id = newPeerID
 	mustRegionHeartbeat(c, svr, region)
 	region = s.newRegionInfo(5, "a", "b", 4, 2, []uint64{1, 3}, nil, 1)
-	region.Peers[1].Id = newPeerID
+	region.GetPeers()[1].Id = newPeerID
 	mustRegionHeartbeat(c, svr, region)
 
 	op, err = svr.GetHandler().GetOperator(6)
@@ -66,10 +66,10 @@ func (s *testTrendSuite) TestTrend(c *C) {
 	c.Assert(op, NotNil)
 	newPeerID = op.Step(0).(schedule.AddLearner).PeerID
 	region = s.newRegionInfo(6, "b", "", 3, 2, []uint64{1, 2}, []uint64{3}, 1)
-	region.Learners[0].Id = newPeerID
+	region.GetLearners()[0].Id = newPeerID
 	mustRegionHeartbeat(c, svr, region)
 	region = s.newRegionInfo(6, "b", "", 4, 2, []uint64{2, 3}, nil, 2)
-	region.Peers[1].Id = newPeerID
+	region.GetPeers()[1].Id = newPeerID
 	mustRegionHeartbeat(c, svr, region)
 
 	var trend Trend

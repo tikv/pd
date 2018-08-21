@@ -51,23 +51,22 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	statsURL := s.urlPrefix + "/stats/region"
 
 	regions := []*core.RegionInfo{
-		{
-			Region: &metapb.Region{
-				Id:       1,
-				StartKey: []byte(""),
-				EndKey:   []byte("a"),
-				Peers: []*metapb.Peer{
-					{Id: 101, StoreId: 1},
-					{Id: 102, StoreId: 2},
-					{Id: 103, StoreId: 3},
-				},
+		core.NewRegionInfoWithOption(&metapb.Region{
+			Id:       1,
+			StartKey: []byte(""),
+			EndKey:   []byte("a"),
+			Peers: []*metapb.Peer{
+				{Id: 101, StoreId: 1},
+				{Id: 102, StoreId: 2},
+				{Id: 103, StoreId: 3},
 			},
-			Leader:          &metapb.Peer{Id: 101, StoreId: 1},
-			ApproximateSize: 100,
-			ApproximateKeys: 50,
 		},
-		{
-			Region: &metapb.Region{
+			&metapb.Peer{Id: 101, StoreId: 1},
+			100,
+			50,
+		),
+		core.NewRegionInfoWithOption(
+			&metapb.Region{
 				Id:       2,
 				StartKey: []byte("a"),
 				EndKey:   []byte("t"),
@@ -77,12 +76,12 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 					{Id: 106, StoreId: 5},
 				},
 			},
-			Leader:          &metapb.Peer{Id: 105, StoreId: 4},
-			ApproximateSize: 200,
-			ApproximateKeys: 150,
-		},
-		{
-			Region: &metapb.Region{
+			&metapb.Peer{Id: 105, StoreId: 4},
+			200,
+			150,
+		),
+		core.NewRegionInfoWithOption(
+			&metapb.Region{
 				Id:       3,
 				StartKey: []byte("t"),
 				EndKey:   []byte("x"),
@@ -91,12 +90,12 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 					{Id: 107, StoreId: 5},
 				},
 			},
-			Leader:          &metapb.Peer{Id: 107, StoreId: 5},
-			ApproximateSize: 1,
-			ApproximateKeys: 1,
-		},
-		{
-			Region: &metapb.Region{
+			&metapb.Peer{Id: 107, StoreId: 5},
+			1,
+			1,
+		),
+		core.NewRegionInfoWithOption(
+			&metapb.Region{
 				Id:       4,
 				StartKey: []byte("x"),
 				EndKey:   []byte(""),
@@ -104,10 +103,10 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 					{Id: 108, StoreId: 4},
 				},
 			},
-			Leader:          &metapb.Peer{Id: 108, StoreId: 4},
-			ApproximateSize: 50,
-			ApproximateKeys: 20,
-		},
+			&metapb.Peer{Id: 108, StoreId: 4},
+			50,
+			20,
+		),
 	}
 
 	for _, r := range regions {

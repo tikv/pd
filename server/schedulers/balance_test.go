@@ -83,9 +83,9 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		tc.AddLeaderStore(2, int(t.targetCount))
 		source := tc.GetStore(1)
 		target := tc.GetStore(2)
-		region := tc.GetRegion(1)
-		region.ApproximateSize = t.regionSize
-		tc.PutRegion(region.Clone())
+		region := tc.GetRegion(1).Clone()
+		region.SetApproximateSize(t.regionSize)
+		tc.PutRegion(region)
 		c.Assert(shouldBalance(tc, source, target, region, core.LeaderKind, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
 	}
 
@@ -94,8 +94,8 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		tc.AddRegionStore(2, int(t.targetCount))
 		source := tc.GetStore(1)
 		target := tc.GetStore(2)
-		region := tc.GetRegion(1)
-		region.ApproximateSize = t.regionSize
+		region := tc.GetRegion(1).Clone()
+		region.SetApproximateSize(t.regionSize)
 		tc.PutRegion(region)
 		c.Assert(shouldBalance(tc, source, target, region, core.RegionKind, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
 	}
@@ -546,9 +546,9 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 		Peer:        region.GetStorePeer(2),
 		DownSeconds: 24 * 60 * 60,
 	}
-	region.DownPeers = append(region.DownPeers, downPeer)
+	region.SetDownPeers(append(region.GetDownPeers(), downPeer))
 	testutil.CheckRemovePeer(c, rc.Check(region), 2)
-	region.DownPeers = nil
+	region.SetDownPeers(nil)
 	c.Assert(rc.Check(region), IsNil)
 
 	// Peer in store 3 is offline, transfer peer to store 1.
@@ -787,12 +787,12 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	region := tc.GetRegion(1)
 	// Test remove down replica and replace offline replica.
 	tc.SetStoreDown(1)
-	region.DownPeers = []*pdpb.PeerStats{
+	region.SetDownPeers([]*pdpb.PeerStats{
 		{
 			Peer:        region.GetStorePeer(1),
 			DownSeconds: 24 * 60 * 60,
 		},
-	}
+	})
 	tc.SetStoreOffline(2)
 	// RemoveDownReplica has higher priority than replaceOfflineReplica.
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
@@ -845,8 +845,8 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	cfg.MaxMergeRegionKeys = 2
 	s.cluster = schedule.NewMockCluster(cfg)
 	s.regions = []*core.RegionInfo{
-		{
-			Region: &metapb.Region{
+		core.NewRegionInfoWithOption(
+			&metapb.Region{
 				Id:       1,
 				StartKey: []byte(""),
 				EndKey:   []byte("a"),
@@ -855,12 +855,12 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 					{Id: 102, StoreId: 2},
 				},
 			},
-			Leader:          &metapb.Peer{Id: 101, StoreId: 1},
-			ApproximateSize: 1,
-			ApproximateKeys: 1,
-		},
-		{
-			Region: &metapb.Region{
+			&metapb.Peer{Id: 101, StoreId: 1},
+			1,
+			1,
+		),
+		core.NewRegionInfoWithOption(
+			&metapb.Region{
 				Id:       2,
 				StartKey: []byte("a"),
 				EndKey:   []byte("t"),
@@ -870,12 +870,12 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 					{Id: 105, StoreId: 5},
 				},
 			},
-			Leader:          &metapb.Peer{Id: 104, StoreId: 4},
-			ApproximateSize: 200,
-			ApproximateKeys: 200,
-		},
-		{
-			Region: &metapb.Region{
+			&metapb.Peer{Id: 104, StoreId: 4},
+			200,
+			200,
+		),
+		core.NewRegionInfoWithOption(
+			&metapb.Region{
 				Id:       3,
 				StartKey: []byte("t"),
 				EndKey:   []byte("x"),
@@ -885,12 +885,12 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 					{Id: 108, StoreId: 6},
 				},
 			},
-			Leader:          &metapb.Peer{Id: 108, StoreId: 6},
-			ApproximateSize: 1,
-			ApproximateKeys: 1,
-		},
-		{
-			Region: &metapb.Region{
+			&metapb.Peer{Id: 108, StoreId: 6},
+			1,
+			1,
+		),
+		core.NewRegionInfoWithOption(
+			&metapb.Region{
 				Id:       4,
 				StartKey: []byte("x"),
 				EndKey:   []byte(""),
@@ -898,10 +898,10 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 					{Id: 109, StoreId: 4},
 				},
 			},
-			Leader:          &metapb.Peer{Id: 109, StoreId: 4},
-			ApproximateSize: 10,
-			ApproximateKeys: 10,
-		},
+			&metapb.Peer{Id: 109, StoreId: 4},
+			10,
+			10,
+		),
 	}
 
 	for _, region := range s.regions {
@@ -926,7 +926,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(op1, NotNil)
 	c.Assert(op2, NotNil)
 	// Skip recently split regions.
-	s.mc.RecordRegionSplit(s.regions[2].GetId())
+	s.mc.RecordRegionSplit(s.regions[2].GetID())
 	op1, op2 = s.mc.Check(s.regions[2])
 	c.Assert(op1, IsNil)
 	c.Assert(op2, IsNil)
@@ -953,21 +953,21 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 		schedule.TransferLeader{FromStore: 6, ToStore: 4},
 		schedule.RemovePeer{FromStore: 6},
 		schedule.MergeRegion{
-			FromRegion: s.regions[2].Region,
-			ToRegion:   s.regions[1].Region,
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
 	s.checkSteps(c, op2, []schedule.OperatorStep{
 		schedule.MergeRegion{
-			FromRegion: s.regions[2].Region,
-			ToRegion:   s.regions[1].Region,
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  true,
 		},
 	})
 
 	// partial store overlap including leader
-	s.regions[2].Leader = &metapb.Peer{Id: 106, StoreId: 1}
+	s.regions[2].SetLeader(&metapb.Peer{Id: 106, StoreId: 1})
 	s.cluster.PutRegion(s.regions[2])
 	op1, op2 = s.mc.Check(s.regions[2])
 	s.checkSteps(c, op1, []schedule.OperatorStep{
@@ -975,38 +975,38 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 		schedule.PromoteLearner{ToStore: 4, PeerID: 2},
 		schedule.RemovePeer{FromStore: 6},
 		schedule.MergeRegion{
-			FromRegion: s.regions[2].Region,
-			ToRegion:   s.regions[1].Region,
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
 	s.checkSteps(c, op2, []schedule.OperatorStep{
 		schedule.MergeRegion{
-			FromRegion: s.regions[2].Region,
-			ToRegion:   s.regions[1].Region,
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  true,
 		},
 	})
 
 	// all store overlap
-	s.regions[2].Peers = []*metapb.Peer{
+	s.regions[2].SetPeers([]*metapb.Peer{
 		{Id: 106, StoreId: 1},
 		{Id: 107, StoreId: 5},
 		{Id: 108, StoreId: 4},
-	}
+	})
 	s.cluster.PutRegion(s.regions[2])
 	op1, op2 = s.mc.Check(s.regions[2])
 	s.checkSteps(c, op1, []schedule.OperatorStep{
 		schedule.MergeRegion{
-			FromRegion: s.regions[2].Region,
-			ToRegion:   s.regions[1].Region,
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
 	s.checkSteps(c, op2, []schedule.OperatorStep{
 		schedule.MergeRegion{
-			FromRegion: s.regions[2].Region,
-			ToRegion:   s.regions[1].Region,
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  true,
 		},
 	})
@@ -1152,7 +1152,7 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	// check randomly pick hot region
 	r := tc.RandHotRegionFromStore(2, schedule.ReadFlow)
 	c.Assert(r, NotNil)
-	c.Assert(r.GetId(), Equals, uint64(2))
+	c.Assert(r.GetID(), Equals, uint64(2))
 	// check hot items
 	stats := tc.HotCache.RegionStats(schedule.ReadFlow)
 	c.Assert(len(stats), Equals, 3)
@@ -1222,8 +1222,8 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	for _, meta := range regions {
 		leader := rand.Intn(4) % 3
 		regionInfo := core.NewRegionInfo(meta, meta.Peers[leader])
-		regionInfo.ApproximateSize = 96
-		regionInfo.ApproximateKeys = 96
+		regionInfo.SetApproximateKeys(96)
+		regionInfo.SetApproximateSize(96)
 		tc.Regions.SetRegion(regionInfo)
 	}
 	for i := 0; i < 100; i++ {
@@ -1250,8 +1250,8 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	}
 	for i := 1; i <= 5; i++ {
 		leaderCount := tc.Regions.GetStoreLeaderCount(uint64(i))
-		c.Assert(leaderCount, LessEqual, 12)
+		c.Check(leaderCount, LessEqual, 12)
 		regionCount := tc.Regions.GetStoreRegionCount(uint64(i))
-		c.Assert(regionCount, LessEqual, 32)
+		c.Check(regionCount, LessEqual, 32)
 	}
 }

@@ -56,7 +56,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 	}
 
 	if len(region.GetPeers()) < r.cluster.GetMaxReplicas() && r.cluster.IsMakeUpReplicaEnabled() {
-		log.Debugf("[region %d] has %d peers fewer than max replicas", region.GetId(), len(region.GetPeers()))
+		log.Debugf("[region %d] has %d peers fewer than max replicas", region.GetID(), len(region.GetPeers()))
 		newPeer, _ := r.selectBestPeerToAddReplica(region, NewStorageThresholdFilter())
 		if newPeer == nil {
 			checkerCounter.WithLabelValues("replica_checker", "no_target_store").Inc()
@@ -74,13 +74,13 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 			}
 		}
 		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
-		return NewOperator("makeUpReplica", region.GetId(), region.GetRegionEpoch(), OpReplica|OpRegion, steps...)
+		return NewOperator("makeUpReplica", region.GetID(), region.GetRegionEpoch(), OpReplica|OpRegion, steps...)
 	}
 
 	// when add learner peer, the number of peer will exceed max replicas for a while,
 	// just comparing the the number of voters to avoid too many cancel add operator log.
 	if len(region.GetVoters()) > r.cluster.GetMaxReplicas() && r.cluster.IsRemoveExtraReplicaEnabled() {
-		log.Debugf("[region %d] has %d peers more than max replicas", region.GetId(), len(region.GetPeers()))
+		log.Debugf("[region %d] has %d peers more than max replicas", region.GetID(), len(region.GetPeers()))
 		oldPeer, _ := r.selectWorstPeer(region)
 		if oldPeer == nil {
 			checkerCounter.WithLabelValues("replica_checker", "no_worst_peer").Inc()
@@ -105,7 +105,7 @@ func (r *ReplicaChecker) SelectBestReplacementStore(region *core.RegionInfo, old
 func (r *ReplicaChecker) selectBestPeerToAddReplica(region *core.RegionInfo, filters ...Filter) (*metapb.Peer, float64) {
 	storeID, score := r.selectBestStoreToAddReplica(region, filters...)
 	if storeID == 0 {
-		log.Debugf("[region %d] no best store to add replica", region.GetId())
+		log.Debugf("[region %d] no best store to add replica", region.GetID())
 		return nil, 0
 	}
 	newPeer, err := r.cluster.AllocPeer(storeID)
@@ -143,7 +143,7 @@ func (r *ReplicaChecker) selectWorstPeer(region *core.RegionInfo) (*metapb.Peer,
 	selector := NewReplicaSelector(regionStores, r.cluster.GetLocationLabels(), r.filters...)
 	worstStore := selector.SelectSource(r.cluster, regionStores)
 	if worstStore == nil {
-		log.Debugf("[region %d] no worst store", region.GetId())
+		log.Debugf("[region %d] no worst store", region.GetID())
 		return nil, 0
 	}
 	return region.GetStorePeer(worstStore.GetId()), DistinctScore(r.cluster.GetLocationLabels(), regionStores, worstStore)
@@ -154,7 +154,7 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *Operator {
 		return nil
 	}
 
-	for _, stats := range region.DownPeers {
+	for _, stats := range region.GetDownPeers() {
 		peer := stats.GetPeer()
 		if peer == nil {
 			continue
@@ -181,7 +181,7 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 	}
 
 	// just skip learner
-	if len(region.Learners) != 0 {
+	if len(region.GetLearners()) != 0 {
 		return nil
 	}
 
@@ -210,7 +210,7 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 
 		storeID, _ := r.SelectBestReplacementStore(region, peer, NewStorageThresholdFilter())
 		if storeID == 0 {
-			log.Debugf("[region %d] no best store to add replica", region.GetId())
+			log.Debugf("[region %d] no best store to add replica", region.GetID())
 			return nil
 		}
 		newPeer, err := r.cluster.AllocPeer(storeID)
@@ -240,7 +240,7 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator
 	}
 	// Make sure the new peer is better than the old peer.
 	if newScore <= oldScore {
-		log.Debugf("[region %d] newScore %f is not better than oldScore %f", region.GetId(), newScore, oldScore)
+		log.Debugf("[region %d] newScore %f is not better than oldScore %f", region.GetID(), newScore, oldScore)
 		checkerCounter.WithLabelValues("replica_checker", "not_better").Inc()
 		return nil
 	}

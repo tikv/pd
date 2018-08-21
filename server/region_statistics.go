@@ -74,26 +74,26 @@ func (r *regionStatistics) deleteEntry(deleteIndex regionStatisticType, regionID
 
 func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo) {
 	// Region state.
-	regionID := region.GetId()
+	regionID := region.GetID()
 	namespace := r.classifier.GetRegionNamespace(region)
 	var (
 		peerTypeIndex regionStatisticType
 		deleteIndex   regionStatisticType
 	)
-	if len(region.Peers) < r.opt.GetMaxReplicas(namespace) {
+	if len(region.GetPeers()) < r.opt.GetMaxReplicas(namespace) {
 		r.stats[missPeer][regionID] = region
 		peerTypeIndex |= missPeer
-	} else if len(region.Peers) > r.opt.GetMaxReplicas(namespace) {
+	} else if len(region.GetPeers()) > r.opt.GetMaxReplicas(namespace) {
 		r.stats[extraPeer][regionID] = region
 		peerTypeIndex |= extraPeer
 	}
 
-	if len(region.DownPeers) > 0 {
+	if len(region.GetDownPeers()) > 0 {
 		r.stats[downPeer][regionID] = region
 		peerTypeIndex |= downPeer
 	}
 
-	if len(region.PendingPeers) > 0 {
+	if len(region.GetPendingPeers()) > 0 {
 		r.stats[pendingPeer][regionID] = region
 		peerTypeIndex |= pendingPeer
 	}
@@ -156,7 +156,7 @@ func newLabelLevelStatistics() *labelLevelStatistics {
 }
 
 func (l *labelLevelStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo, labels []string) {
-	regionID := region.GetId()
+	regionID := region.GetID()
 	regionLabelLevel := getRegionLabelIsolationLevel(stores, labels)
 	if level, ok := l.regionLabelLevelStats[regionID]; ok {
 		if level == regionLabelLevel {

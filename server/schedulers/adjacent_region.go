@@ -155,11 +155,11 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster, opIn
 	adjacentRegions = append(adjacentRegions, regions[0])
 	maxLen := 0
 	for i, r := range regions[1:] {
-		l.lastKey = r.StartKey
+		l.lastKey = r.GetStartKey()
 
 		// append if the region are adjacent
 		lastRegion := adjacentRegions[len(adjacentRegions)-1]
-		if lastRegion.Leader.GetStoreId() == r.Leader.GetStoreId() && bytes.Equal(lastRegion.EndKey, r.StartKey) {
+		if lastRegion.GetLeader().GetStoreId() == r.GetLeader().GetStoreId() && bytes.Equal(lastRegion.GetEndKey(), r.GetStartKey()) {
 			adjacentRegions = append(adjacentRegions, r)
 			if i != len(regions)-2 { // not the last element
 				continue
@@ -197,7 +197,7 @@ func (l *balanceAdjacentRegionScheduler) process(cluster schedule.Cluster) []*sc
 			log.Fatalf("[%s]the cache overflow should never happen", l.GetName())
 		}
 		l.cacheRegions.head = head + 1
-		l.lastKey = r2.StartKey
+		l.lastKey = r2.GetStartKey()
 	}()
 	if l.unsafeToBalance(cluster, r1) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
@@ -220,13 +220,13 @@ func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster schedule.Cluste
 	if len(region.GetPeers()) != cluster.GetMaxReplicas() {
 		return true
 	}
-	store := cluster.GetStore(region.Leader.GetStoreId())
+	store := cluster.GetStore(region.GetLeader().GetStoreId())
 	s := l.selector.SelectSource(cluster, []*core.StoreInfo{store})
 	if s == nil {
 		return true
 	}
 	// Skip hot regions.
-	if cluster.IsRegionHot(region.GetId()) {
+	if cluster.IsRegionHot(region.GetID()) {
 		schedulerCounter.WithLabelValues(l.GetName(), "region_hot").Inc()
 		return true
 	}
@@ -249,8 +249,8 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster schedule.Cluster
 	if target == nil {
 		return nil
 	}
-	step := schedule.TransferLeader{FromStore: before.Leader.GetStoreId(), ToStore: target.GetId()}
-	op := schedule.NewOperator("balance-adjacent-leader", before.GetId(), before.GetRegionEpoch(), schedule.OpAdjacent|schedule.OpLeader, step)
+	step := schedule.TransferLeader{FromStore: before.GetLeader().GetStoreId(), ToStore: target.GetId()}
+	op := schedule.NewOperator("balance-adjacent-leader", before.GetID(), before.GetRegionEpoch(), schedule.OpAdjacent|schedule.OpLeader, step)
 	op.SetPriorityLevel(core.LowPriority)
 	schedulerCounter.WithLabelValues(l.GetName(), "adjacent_leader").Inc()
 	return op
@@ -261,7 +261,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, 
 		return nil
 	}
 	// scoreGuard guarantees that the distinct score will not decrease.
-	leaderStoreID := region.Leader.GetStoreId()
+	leaderStoreID := region.GetLeader().GetStoreId()
 	stores := cluster.GetRegionStores(region)
 	source := cluster.GetStore(leaderStoreID)
 	scoreGuard := schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), stores, source)

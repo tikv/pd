@@ -211,7 +211,7 @@ func (c *RaftCluster) GetRegionByKey(regionKey []byte) (*metapb.Region, *metapb.
 	if region == nil {
 		return nil, nil
 	}
-	return region.Region, region.Leader
+	return region.GetMeta(), region.GetLeader()
 }
 
 // GetPrevRegionByKey gets previous region and leader peer by the region key from cluster.
@@ -220,7 +220,7 @@ func (c *RaftCluster) GetPrevRegionByKey(regionKey []byte) (*metapb.Region, *met
 	if region == nil {
 		return nil, nil
 	}
-	return region.Region, region.Leader
+	return region.GetMeta(), region.GetLeader()
 }
 
 // GetRegionInfoByKey gets regionInfo by region key from cluster.
@@ -234,7 +234,7 @@ func (c *RaftCluster) GetRegionByID(regionID uint64) (*metapb.Region, *metapb.Pe
 	if region == nil {
 		return nil, nil
 	}
-	return region.Region, region.Leader
+	return region.GetMeta(), region.GetLeader()
 }
 
 // GetRegionInfoByID gets regionInfo by regionID from cluster.
