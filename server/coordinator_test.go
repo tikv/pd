@@ -463,9 +463,9 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	}
 
 	for _, t := range tbl {
-		r := tc.GetRegion(t.regionID).Clone()
-		r.SetLeader(r.GetPeers()[0])
-		tc.handleRegionHeartbeat(r)
+		r := tc.GetRegion(t.regionID)
+		nr := r.Clone(core.WithLeader(r.GetPeers()[0]))
+		tc.handleRegionHeartbeat(nr)
 		c.Assert(co.shouldRun(), Equals, t.shouldRun)
 	}
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
@@ -813,11 +813,14 @@ func waitAddLearner(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, 
 		}
 		return false
 	})
-	region.AddPeer(res.GetChangePeer().GetPeer())
-	region.SetRegionEpoch(&metapb.RegionEpoch{
-		ConfVer: region.GetRegionEpoch().GetConfVer() + 1,
-		Version: region.GetRegionEpoch().GetVersion(),
-	})
+	newRegion := region.Clone(
+		core.WithAddPeer(res.GetChangePeer().GetPeer()),
+		core.SetRegionEpoch(&metapb.RegionEpoch{
+			ConfVer: region.GetRegionEpoch().GetConfVer() + 1,
+			Version: region.GetRegionEpoch().GetVersion(),
+		}),
+	)
+	region = newRegion
 }
 
 func waitPromoteLearner(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {
@@ -831,8 +834,11 @@ func waitPromoteLearner(c *C, stream *mockHeartbeatStream, region *core.RegionIn
 		return false
 	})
 	// Remove learner than add voter.
-	region.RemoveStorePeer(storeID)
-	region.AddPeer(res.GetChangePeer().GetPeer())
+	newRegion := region.Clone(
+		core.WithRemoveStorePeer(storeID),
+		core.WithAddPeer(res.GetChangePeer().GetPeer()),
+	)
+	region = newRegion
 }
 
 func waitRemovePeer(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {
@@ -845,11 +851,14 @@ func waitRemovePeer(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, 
 		}
 		return false
 	})
-	region.RemoveStorePeer(storeID)
-	region.SetRegionEpoch(&metapb.RegionEpoch{
-		ConfVer: region.GetRegionEpoch().GetConfVer() + 1,
-		Version: region.GetRegionEpoch().GetVersion(),
-	})
+	newRegion := region.Clone(
+		core.WithRemoveStorePeer(storeID),
+		core.SetRegionEpoch(&metapb.RegionEpoch{
+			ConfVer: region.GetRegionEpoch().GetConfVer() + 1,
+			Version: region.GetRegionEpoch().GetVersion(),
+		}),
+	)
+	region = newRegion
 }
 
 func waitTransferLeader(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {
@@ -860,7 +869,10 @@ func waitTransferLeader(c *C, stream *mockHeartbeatStream, region *core.RegionIn
 		}
 		return false
 	})
-	region.SetLeader(res.GetTransferLeader().GetPeer())
+	newRegion := region.Clone(
+		core.WithLeader(res.GetTransferLeader().GetPeer()),
+	)
+	region = newRegion
 }
 
 func waitNoResponse(c *C, stream *mockHeartbeatStream) {

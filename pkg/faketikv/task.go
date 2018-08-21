@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 )
 
 // Task running in node.
@@ -172,12 +173,13 @@ func (t *transferLeader) Step(r *RaftEngine) {
 		t.finished = true
 		return
 	}
+	var newRegion *core.RegionInfo
 	if region.GetPeer(t.peer.GetId()) != nil {
-		region.SetLeader(t.peer)
+		newRegion = region.Clone(core.WithLeader(t.peer))
 	}
 	t.finished = true
-	r.SetRegion(region)
-	r.recordRegionChange(region)
+	r.SetRegion(newRegion)
+	r.recordRegionChange(newRegion)
 }
 
 func (t *transferLeader) RegionID() uint64 {

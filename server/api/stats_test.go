@@ -51,7 +51,7 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	statsURL := s.urlPrefix + "/stats/region"
 
 	regions := []*core.RegionInfo{
-		core.NewRegionInfoWithOption(&metapb.Region{
+		core.NewRegionInfo(&metapb.Region{
 			Id:       1,
 			StartKey: []byte(""),
 			EndKey:   []byte("a"),
@@ -62,10 +62,10 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 			},
 		},
 			&metapb.Peer{Id: 101, StoreId: 1},
-			100,
-			50,
+			core.SetApproximateSize(100),
+			core.SetApproximateKeys(50),
 		),
-		core.NewRegionInfoWithOption(
+		core.NewRegionInfo(
 			&metapb.Region{
 				Id:       2,
 				StartKey: []byte("a"),
@@ -77,10 +77,10 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 				},
 			},
 			&metapb.Peer{Id: 105, StoreId: 4},
-			200,
-			150,
+			core.SetApproximateSize(200),
+			core.SetApproximateKeys(150),
 		),
-		core.NewRegionInfoWithOption(
+		core.NewRegionInfo(
 			&metapb.Region{
 				Id:       3,
 				StartKey: []byte("t"),
@@ -91,10 +91,10 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 				},
 			},
 			&metapb.Peer{Id: 107, StoreId: 5},
-			1,
-			1,
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(1),
 		),
-		core.NewRegionInfoWithOption(
+		core.NewRegionInfo(
 			&metapb.Region{
 				Id:       4,
 				StartKey: []byte("x"),
@@ -104,8 +104,8 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 				},
 			},
 			&metapb.Peer{Id: 108, StoreId: 4},
-			50,
-			20,
+			core.SetApproximateSize(50),
+			core.SetApproximateKeys(20),
 		),
 	}
 

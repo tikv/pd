@@ -26,18 +26,123 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-// RegionOption used to select region
+// RegionOption used to select region.
 type RegionOption func(region *RegionInfo) bool
 
-// HealthRegion checks if the region is healthy
+// HealthRegion checks if the region is healthy.
 func HealthRegion() RegionOption {
 	return func(region *RegionInfo) bool {
 		return len(region.downPeers) == 0 && len(region.pendingPeers) == 0 && len(region.learners) == 0
 	}
 }
 
+// RegionCreateOption used to create region.
+type RegionCreateOption func(region *RegionInfo)
+
+// WithDownPeers sets the down peers for the region.
+func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.downPeers = downPeers
+	}
+}
+
+// WithPendingPeers sets the pending peers for the region.
+func WithPendingPeers(pengdingPeers []*metapb.Peer) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.pendingPeers = pengdingPeers
+	}
+}
+
+// WithLearners sets the learners for the region.
+func WithLearners(learners []*metapb.Peer) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.learners = learners
+	}
+}
+
+// WithLeader sets the leader for the region.
+func WithLeader(leader *metapb.Peer) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.leader = leader
+	}
+}
+
+// WithStartKey sets the start key for the region.
+func WithStartKey(key []byte) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.meta.StartKey = key
+	}
+}
+
+// WithEndKey sets the end key for the region.
+func WithEndKey(key []byte) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.meta.StartKey = key
+	}
+}
+
+// SetWrittenBytes sets the written bytes for the region.
+func SetWrittenBytes(v uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.writtenBytes = v
+	}
+}
+
+// WithRemoveStorePeer remove the specified peer for the region.
+func WithRemoveStorePeer(storeID uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		var peers []*metapb.Peer
+		for _, peer := range region.meta.GetPeers() {
+			if peer.GetStoreId() != storeID {
+				peers = append(peers, peer)
+			}
+		}
+		region.meta.Peers = peers
+
+	}
+}
+
+// SetReadBytes sets the read bytes for the region.
+func SetReadBytes(v uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.readBytes = v
+	}
+}
+
+// SetApproximateSize sets the approximate size for the region.
+func SetApproximateSize(v int64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.approximateSize = v
+	}
+}
+
+// SetApproximateKeys sets the approximate keysfor the region.
+func SetApproximateKeys(v int64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.approximateKeys = v
+	}
+}
+
+func SetRegionEpoch(epoch *metapb.RegionEpoch) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.meta.RegionEpoch = epoch
+	}
+}
+
+// WithAddPeer adds a peer for the region.
+func WithAddPeer(peer *metapb.Peer) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.meta.Peers = append(region.meta.Peers, peer)
+		if peer.IsLearner {
+			region.learners = append(region.learners, peer)
+		} else {
+			region.voters = append(region.voters, peer)
+		}
+	}
+}
+
 // RegionInfo records detail region info.
-// Only-Read
+// Read-Only once created.
 type RegionInfo struct {
 	meta            *metapb.Region
 	learners        []*metapb.Peer
@@ -52,26 +157,16 @@ type RegionInfo struct {
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
-func NewRegionInfo(region *metapb.Region, leader *metapb.Peer) *RegionInfo {
+func NewRegionInfo(region *metapb.Region, leader *metapb.Peer, opts ...RegionCreateOption) *RegionInfo {
 	regionInfo := &RegionInfo{
 		meta:   region,
 		leader: leader,
 	}
 
-	classifyVoterAndLearner(regionInfo)
-	return regionInfo
-}
-
-// NewRegionInfoWithOption creates RegionInfo with region's meta and leader peer.
-func NewRegionInfoWithOption(region *metapb.Region, leader *metapb.Peer, size, keys int64) *RegionInfo {
-	regionInfo := &RegionInfo{
-		meta:   region,
-		leader: leader,
+	for _, opt := range opts {
+		opt(regionInfo)
 	}
-
 	classifyVoterAndLearner(regionInfo)
-	regionInfo.approximateSize = size
-	regionInfo.approximateKeys = keys
 	return regionInfo
 }
 
@@ -119,7 +214,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 }
 
 // Clone returns a copy of current regionInfo.
-func (r *RegionInfo) Clone() *RegionInfo {
+func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	downPeers := make([]*pdpb.PeerStats, 0, len(r.downPeers))
 	for _, peer := range r.downPeers {
 		downPeers = append(downPeers, proto.Clone(peer).(*pdpb.PeerStats))
@@ -140,6 +235,9 @@ func (r *RegionInfo) Clone() *RegionInfo {
 		approximateKeys: r.approximateKeys,
 	}
 
+	for _, opt := range opts {
+		opt(region)
+	}
 	classifyVoterAndLearner(region)
 	return region
 }

@@ -845,7 +845,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	cfg.MaxMergeRegionKeys = 2
 	s.cluster = schedule.NewMockCluster(cfg)
 	s.regions = []*core.RegionInfo{
-		core.NewRegionInfoWithOption(
+		core.NewRegionInfo(
 			&metapb.Region{
 				Id:       1,
 				StartKey: []byte(""),
@@ -856,10 +856,10 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 				},
 			},
 			&metapb.Peer{Id: 101, StoreId: 1},
-			1,
-			1,
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(1),
 		),
-		core.NewRegionInfoWithOption(
+		core.NewRegionInfo(
 			&metapb.Region{
 				Id:       2,
 				StartKey: []byte("a"),
@@ -871,10 +871,10 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 				},
 			},
 			&metapb.Peer{Id: 104, StoreId: 4},
-			200,
-			200,
+			core.SetApproximateSize(200),
+			core.SetApproximateKeys(200),
 		),
-		core.NewRegionInfoWithOption(
+		core.NewRegionInfo(
 			&metapb.Region{
 				Id:       3,
 				StartKey: []byte("t"),
@@ -886,10 +886,10 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 				},
 			},
 			&metapb.Peer{Id: 108, StoreId: 6},
-			1,
-			1,
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(1),
 		),
-		core.NewRegionInfoWithOption(
+		core.NewRegionInfo(
 			&metapb.Region{
 				Id:       4,
 				StartKey: []byte("x"),
@@ -899,8 +899,8 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 				},
 			},
 			&metapb.Peer{Id: 109, StoreId: 4},
-			10,
-			10,
+			core.SetApproximateSize(10),
+			core.SetApproximateKeys(10),
 		),
 	}
 
@@ -967,7 +967,8 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	})
 
 	// partial store overlap including leader
-	s.regions[2].SetLeader(&metapb.Peer{Id: 106, StoreId: 1})
+	newRegion := s.regions[2].Clone(core.WithLeader(&metapb.Peer{Id: 106, StoreId: 1}))
+	s.regions[2] = newRegion
 	s.cluster.PutRegion(s.regions[2])
 	op1, op2 = s.mc.Check(s.regions[2])
 	s.checkSteps(c, op1, []schedule.OperatorStep{

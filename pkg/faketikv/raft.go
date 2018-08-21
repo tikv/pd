@@ -80,15 +80,15 @@ func (r *RaftEngine) stepLeader(region *core.RegionInfo) {
 		return
 	}
 	newLeader := r.electNewLeader(region)
-	region.SetLeader(newLeader)
+	newRegion := region.Clone(core.WithLeader(newLeader))
 	if newLeader == nil {
-		r.SetRegion(region)
+		r.SetRegion(newRegion)
 		simutil.Logger.Infof("[region %d] no leader", region.GetID())
 		return
 	}
 	simutil.Logger.Infof("[region %d] elect new leader: %+v,old leader: %+v", region.GetID(), newLeader, region.GetLeader())
-	r.SetRegion(region)
-	r.recordRegionChange(region)
+	r.SetRegion(newRegion)
+	r.recordRegionChange(newRegion)
 }
 
 func (r *RaftEngine) stepSplit(region *core.RegionInfo, c *ClusterInfo) {

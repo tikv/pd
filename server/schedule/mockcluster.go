@@ -53,8 +53,7 @@ func (mc *MockCluster) ScanRegions(startKey []byte, limit int) []*core.RegionInf
 // LoadRegion put region info without leader
 func (mc *MockCluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 	//  regions load from etcd will have no leader
-	r := mc.newMockRegionInfo(regionID, 0, followerIds...)
-	r.SetLeader(nil)
+	r := mc.newMockRegionInfo(regionID, 0, followerIds...).Clone(core.WithLeader(nil))
 	mc.PutRegion(r)
 }
 
@@ -319,12 +318,13 @@ func (mc *MockCluster) newMockRegionInfo(regionID uint64, leaderID uint64, follo
 
 // ApplyOperator mocks apply oeprator.
 func (mc *MockCluster) ApplyOperator(op *Operator) {
-	region := mc.GetRegion(op.RegionID()).Clone()
+	region := mc.GetRegion(op.RegionID())
+	var newRegion *core.RegionInfo
 	for !op.IsFinish() {
 		if step := op.Check(region); step != nil {
 			switch s := step.(type) {
 			case TransferLeader:
-				region.SetLeader(region.GetStorePeer(s.ToStore))
+				newRegion = region.Clone(core.WithLeader(region.GetStorePeer(s.ToStore)))
 			case AddPeer:
 				if region.GetStorePeer(s.ToStore) != nil {
 					panic("Add peer that exists")
@@ -333,12 +333,12 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 					Id:      s.PeerID,
 					StoreId: s.ToStore,
 				}
-				region.AddPeer(peer)
+				newRegion = region.Clone(core.WithAddPeer(peer))
 			case RemovePeer:
 				if region.GetStorePeer(s.FromStore) == nil {
 					panic("Remove peer that doesn't exist")
 				}
-				region.RemoveStorePeer(s.FromStore)
+				newRegion = region.Clone(core.WithRemoveStorePeer(s.FromStore))
 			case AddLearner:
 				if region.GetStorePeer(s.ToStore) != nil {
 					panic("Add learner that exists")
@@ -348,24 +348,23 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 					StoreId:   s.ToStore,
 					IsLearner: true,
 				}
-				region.AddPeer(peer)
+				newRegion = region.Clone(core.WithAddPeer(peer))
 			case PromoteLearner:
 				if region.GetStoreLearner(s.ToStore) == nil {
 					panic("promote peer that doesn't exist")
 				}
-				region.RemoveStorePeer(s.ToStore)
 				peer := &metapb.Peer{
 					Id:      s.PeerID,
 					StoreId: s.ToStore,
 				}
-				region.AddPeer(peer)
+				newRegion = region.Clone(core.WithRemoveStorePeer(s.ToStore), core.WithAddPeer(peer))
 			default:
 				panic("Unknown operator step")
 			}
 		}
 	}
 	//	fmt.Println("a", region.GetMeta())
-	mc.PutRegion(region)
+	mc.PutRegion(newRegion)
 	//	leaderStr := "leader:"
 	//	regionStr := "region:"
 	//	for i := 1; i <= 5; i++ {
@@ -377,6 +376,9 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 	//	fmt.Println(regionStr)
 	//	fmt.Println(" \n ==========end====================")
 	for id := range region.GetStoreIds() {
+		mc.UpdateStoreStatus(id)
+	}
+	for id := range newRegion.GetStoreIds() {
 		mc.UpdateStoreStatus(id)
 	}
 }

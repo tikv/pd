@@ -142,12 +142,12 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 		} else {
 			checkRegion(c, cache.SearchPrevRegion(regionKey), regions[i-1])
 		}
-
 		// Update leader to peer np-1.
-		region.SetLeader(region.GetPeers()[np-1])
-		cache.SetRegion(region)
-		checkRegion(c, cache.GetRegion(i), region)
-		checkRegion(c, cache.SearchRegion(regionKey), region)
+		newRegion := region.Clone(core.WithLeader(region.GetPeers()[np-1]))
+		regions[i] = newRegion
+		cache.SetRegion(newRegion)
+		checkRegion(c, cache.GetRegion(i), newRegion)
+		checkRegion(c, cache.SearchRegion(regionKey), newRegion)
 		checkRegions(c, cache, regions[0:(i+1)])
 
 		cache.RemoveRegion(region)
@@ -156,11 +156,12 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 		checkRegions(c, cache, regions[0:i])
 
 		// Reset leader to peer 0.
-		region.SetLeader(region.GetPeers()[0])
-		cache.AddRegion(region)
-		checkRegion(c, cache.GetRegion(i), region)
+		newRegion = region.Clone(core.WithLeader(region.GetPeers()[0]))
+		regions[i] = newRegion
+		cache.AddRegion(newRegion)
+		checkRegion(c, cache.GetRegion(i), newRegion)
 		checkRegions(c, cache, regions[0:(i+1)])
-		checkRegion(c, cache.SearchRegion(regionKey), region)
+		checkRegion(c, cache.SearchRegion(regionKey), newRegion)
 	}
 
 	for i := uint64(0); i < n; i++ {
@@ -175,8 +176,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 
 	// check overlaps
 	// clone it otherwise there are two items with the same key in the tree
-	overlapRegion := regions[n-1].Clone()
-	overlapRegion.SetStartKey(regions[n-2].GetStartKey())
+	overlapRegion := regions[n-1].Clone(core.WithStartKey(regions[n-2].GetStartKey()))
 	cache.AddRegion(overlapRegion)
 	c.Assert(cache.GetRegion(n-2), IsNil)
 	c.Assert(cache.GetRegion(n-1), NotNil)
@@ -185,8 +185,8 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	for i := uint64(0); i < n; i++ {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
 			region := cache.RandLeaderRegion(i, core.HealthRegion())
-			region.SetPendingPeers(region.GetPeers())
-			cache.SetRegion(region)
+			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
+			cache.SetRegion(newRegion)
 		}
 		c.Assert(cache.RandLeaderRegion(i, core.HealthRegion()), IsNil)
 	}
