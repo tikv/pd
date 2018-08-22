@@ -322,6 +322,9 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 	region := mc.GetRegion(op.RegionID())
 	var newRegion *core.RegionInfo
 	for !op.IsFinish() {
+		if newRegion != nil {
+			region = newRegion
+		}
 		if step := op.Check(region); step != nil {
 			switch s := step.(type) {
 			case TransferLeader:

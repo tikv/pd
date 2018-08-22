@@ -20,8 +20,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/pkg/faketikv/simutil"
+	"github.com/pingcap/pd/server/core"
 )
 
 // Task running in node.
@@ -224,7 +224,7 @@ func (a *addPeer) Step(r *RaftEngine) {
 		return
 	}
 
-	snapshotSize := region.ApproximateSize()
+	snapshotSize := region.GetApproximateSize()
 	sendNode := r.conn.Nodes[region.GetLeader().GetStoreId()]
 	if sendNode == nil {
 		simutil.Logger.Errorf("failed to sent snapshot: node %d has been deleted", sendNode.Id)
@@ -300,17 +300,18 @@ func (a *removePeer) Step(r *RaftEngine) {
 		for _, peer := range region.GetPeers() {
 			if peer.GetId() == a.peer.GetId() {
 				storeID := peer.GetStoreId()
+				var downPeers []*pdpb.PeerStats
 				if r.conn.Nodes[storeID] == nil {
-					for i, downPeer := range region.DownPeers {
-						if downPeer.Peer.StoreId == storeID {
-							region.DownPeers = append(region.DownPeers[:i], region.DownPeers[i+1:]...)
+					for _, downPeer := range region.GetDownPeers() {
+						if downPeer.Peer.StoreId != storeID {
+							downPeers = append(downPeers, downPeer)
 						}
 					}
 				}
 				newRegion := region.Clone(
 					core.WithRemoveStorePeer(storeID),
 					core.WithIncConfVer(),
-					core.WithDownPeers(region.GetDownPeers())
+					core.WithDownPeers(downPeers),
 				)
 				r.SetRegion(newRegion)
 				r.recordRegionChange(newRegion)

@@ -1238,7 +1238,6 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	for i := 1; i <= 5; i++ {
 		tc.UpdateStoreStatus(uint64(i))
 	}
-
 	hb, err := schedule.CreateScheduler("scatter-range", schedule.NewLimiter(), "s_00", "s_50", "t")
 	c.Assert(err, IsNil)
 	limit := 0

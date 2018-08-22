@@ -77,7 +77,7 @@ func WithStartKey(key []byte) RegionCreateOption {
 // WithEndKey sets the end key for the region.
 func WithEndKey(key []byte) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.meta.StartKey = key
+		region.meta.EndKey = key
 	}
 }
 
