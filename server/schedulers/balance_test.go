@@ -83,9 +83,8 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		tc.AddLeaderStore(2, int(t.targetCount))
 		source := tc.GetStore(1)
 		target := tc.GetStore(2)
-		region := tc.GetRegion(1)
-		region.ApproximateSize = t.regionSize
-		tc.PutRegion(region.Clone())
+		region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
+		tc.PutRegion(region)
 		c.Assert(shouldBalance(tc, source, target, region, core.LeaderKind, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
 	}
 
@@ -94,8 +93,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		tc.AddRegionStore(2, int(t.targetCount))
 		source := tc.GetStore(1)
 		target := tc.GetStore(2)
-		region := tc.GetRegion(1)
-		region.ApproximateSize = t.regionSize
+		region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 		tc.PutRegion(region)
 		c.Assert(shouldBalance(tc, source, target, region, core.RegionKind, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
 	}
@@ -525,12 +523,12 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 
 	// Add peer in store 4, and we have enough replicas.
 	peer4, _ := tc.AllocPeer(4)
-	region.AddPeer(peer4)
+	region = region.Clone(core.WithAddPeer(peer4))
 	c.Assert(rc.Check(region), IsNil)
 
 	// Add peer in store 3, and we have redundant replicas.
 	peer3, _ := tc.AllocPeer(3)
-	region.AddPeer(peer3)
+	region = region.Clone(core.WithAddPeer(peer3))
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
 
 	// Disable remove extra replica feature.
@@ -538,7 +536,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 	opt.DisableRemoveExtraReplica = false
 
-	region.RemoveStorePeer(1)
+	region = region.Clone(core.WithRemoveStorePeer(1))
 
 	// Peer in store 2 is down, remove it.
 	tc.SetStoreDown(2)
@@ -546,9 +544,12 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 		Peer:        region.GetStorePeer(2),
 		DownSeconds: 24 * 60 * 60,
 	}
-	region.DownPeers = append(region.DownPeers, downPeer)
+	region = region.Clone(
+		core.WithRemoveStorePeer(1),
+		core.WithDownPeers(append(region.GetDownPeers(), downPeer)),
+	)
 	testutil.CheckRemovePeer(c, rc.Check(region), 2)
-	region.DownPeers = nil
+	region = region.Clone(core.WithDownPeers(nil))
 	c.Assert(rc.Check(region), IsNil)
 
 	// Peer in store 3 is offline, transfer peer to store 1.
@@ -593,16 +594,16 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	// Store 2 has different zone and smallest region score.
 	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 2)
 	peer2, _ := tc.AllocPeer(2)
-	region.AddPeer(peer2)
+	region = region.Clone(core.WithAddPeer(peer2))
 
 	// Store 3 has different zone and smallest region score.
 	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 3)
 	peer3, _ := tc.AllocPeer(3)
-	region.AddPeer(peer3)
+	region = region.Clone(core.WithAddPeer(peer3))
 
 	// Store 4 has the same zone with store 3 and larger region score.
 	peer4, _ := tc.AllocPeer(4)
-	region.AddPeer(peer4)
+	region = region.Clone(core.WithAddPeer(peer4))
 	testutil.CheckRemovePeer(c, rc.Check(region), 4)
 
 	// Test healthFilter.
@@ -616,7 +617,7 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	// remove the peer
 	tc.SetStoreOffline(3)
 	testutil.CheckRemovePeer(c, rc.Check(region), 3)
-	region.RemoveStorePeer(4)
+	region = region.Clone(core.WithRemoveStorePeer(4))
 	// the number of region peers equals the maxReplicas
 	// Transfer peer to store 4.
 	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 3, 4)
@@ -647,7 +648,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	region := tc.GetRegion(1)
 	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 2)
 	peer2, _ := tc.AllocPeer(2)
-	region.AddPeer(peer2)
+	region = region.Clone(core.WithAddPeer(peer2))
 
 	// Store 1,2,3 have the same zone, rack, and host.
 	tc.AddLabelsStore(3, 5, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -677,7 +678,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 
 	// Add peer to store 7.
 	peer7, _ := tc.AllocPeer(7)
-	region.AddPeer(peer7)
+	region = region.Clone(core.WithAddPeer(peer7))
 
 	// Replace peer in store 1 with store 6 because it has a different rack.
 	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 1, 6)
@@ -686,9 +687,9 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 	opt.DisableLocationReplacement = false
 	peer6, _ := tc.AllocPeer(6)
-	region.AddPeer(peer6)
+	region = region.Clone(core.WithAddPeer(peer6))
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
-	region.RemoveStorePeer(1)
+	region = region.Clone(core.WithRemoveStorePeer(1))
 	c.Assert(rc.Check(region), IsNil)
 
 	// Store 8 has the same zone and different rack with store 7.
@@ -703,9 +704,9 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	tc.AddLabelsStore(10, 1, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
 	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 2, 10)
 	peer10, _ := tc.AllocPeer(10)
-	region.AddPeer(peer10)
+	region = region.Clone(core.WithAddPeer(peer10))
 	testutil.CheckRemovePeer(c, rc.Check(region), 2)
-	region.RemoveStorePeer(2)
+	region = region.Clone(core.WithRemoveStorePeer(2))
 	c.Assert(rc.Check(region), IsNil)
 }
 
@@ -729,11 +730,11 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 
 	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 6)
 	peer6, _ := tc.AllocPeer(6)
-	region.AddPeer(peer6)
+	region = region.Clone(core.WithAddPeer(peer6))
 
 	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 5)
 	peer5, _ := tc.AllocPeer(5)
-	region.AddPeer(peer5)
+	region = region.Clone(core.WithAddPeer(peer5))
 
 	c.Assert(rc.Check(region), IsNil)
 }
@@ -787,12 +788,12 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	region := tc.GetRegion(1)
 	// Test remove down replica and replace offline replica.
 	tc.SetStoreDown(1)
-	region.DownPeers = []*pdpb.PeerStats{
+	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
 		{
 			Peer:        region.GetStorePeer(1),
 			DownSeconds: 24 * 60 * 60,
 		},
-	}
+	}))
 	tc.SetStoreOffline(2)
 	// RemoveDownReplica has higher priority than replaceOfflineReplica.
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
@@ -845,8 +846,8 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	cfg.MaxMergeRegionKeys = 2
 	s.cluster = schedule.NewMockCluster(cfg)
 	s.regions = []*core.RegionInfo{
-		{
-			Region: &metapb.Region{
+		core.NewRegionInfo(
+			&metapb.Region{
 				Id:       1,
 				StartKey: []byte(""),
 				EndKey:   []byte("a"),
@@ -855,12 +856,12 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 					{Id: 102, StoreId: 2},
 				},
 			},
-			Leader:          &metapb.Peer{Id: 101, StoreId: 1},
-			ApproximateSize: 1,
-			ApproximateKeys: 1,
-		},
-		{
-			Region: &metapb.Region{
+			&metapb.Peer{Id: 101, StoreId: 1},
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(1),
+		),
+		core.NewRegionInfo(
+			&metapb.Region{
 				Id:       2,
 				StartKey: []byte("a"),
 				EndKey:   []byte("t"),
@@ -870,12 +871,12 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 					{Id: 105, StoreId: 5},
 				},
 			},
-			Leader:          &metapb.Peer{Id: 104, StoreId: 4},
-			ApproximateSize: 200,
-			ApproximateKeys: 200,
-		},
-		{
-			Region: &metapb.Region{
+			&metapb.Peer{Id: 104, StoreId: 4},
+			core.SetApproximateSize(200),
+			core.SetApproximateKeys(200),
+		),
+		core.NewRegionInfo(
+			&metapb.Region{
 				Id:       3,
 				StartKey: []byte("t"),
 				EndKey:   []byte("x"),
@@ -885,12 +886,12 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 					{Id: 108, StoreId: 6},
 				},
 			},
-			Leader:          &metapb.Peer{Id: 108, StoreId: 6},
-			ApproximateSize: 1,
-			ApproximateKeys: 1,
-		},
-		{
-			Region: &metapb.Region{
+			&metapb.Peer{Id: 108, StoreId: 6},
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(1),
+		),
+		core.NewRegionInfo(
+			&metapb.Region{
 				Id:       4,
 				StartKey: []byte("x"),
 				EndKey:   []byte(""),
@@ -898,10 +899,10 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 					{Id: 109, StoreId: 4},
 				},
 			},
-			Leader:          &metapb.Peer{Id: 109, StoreId: 4},
-			ApproximateSize: 10,
-			ApproximateKeys: 10,
-		},
+			&metapb.Peer{Id: 109, StoreId: 4},
+			core.SetApproximateSize(10),
+			core.SetApproximateKeys(10),
+		),
 	}
 
 	for _, region := range s.regions {
@@ -926,7 +927,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(op1, NotNil)
 	c.Assert(op2, NotNil)
 	// Skip recently split regions.
-	s.mc.RecordRegionSplit(s.regions[2].GetId())
+	s.mc.RecordRegionSplit(s.regions[2].GetID())
 	op1, op2 = s.mc.Check(s.regions[2])
 	c.Assert(op1, IsNil)
 	c.Assert(op2, IsNil)
@@ -953,21 +954,22 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 		schedule.TransferLeader{FromStore: 6, ToStore: 4},
 		schedule.RemovePeer{FromStore: 6},
 		schedule.MergeRegion{
-			FromRegion: s.regions[2].Region,
-			ToRegion:   s.regions[1].Region,
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
 	s.checkSteps(c, op2, []schedule.OperatorStep{
 		schedule.MergeRegion{
-			FromRegion: s.regions[2].Region,
-			ToRegion:   s.regions[1].Region,
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  true,
 		},
 	})
 
 	// partial store overlap including leader
-	s.regions[2].Leader = &metapb.Peer{Id: 106, StoreId: 1}
+	newRegion := s.regions[2].Clone(core.WithLeader(&metapb.Peer{Id: 106, StoreId: 1}))
+	s.regions[2] = newRegion
 	s.cluster.PutRegion(s.regions[2])
 	op1, op2 = s.mc.Check(s.regions[2])
 	s.checkSteps(c, op1, []schedule.OperatorStep{
@@ -975,38 +977,38 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 		schedule.PromoteLearner{ToStore: 4, PeerID: 2},
 		schedule.RemovePeer{FromStore: 6},
 		schedule.MergeRegion{
-			FromRegion: s.regions[2].Region,
-			ToRegion:   s.regions[1].Region,
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
 	s.checkSteps(c, op2, []schedule.OperatorStep{
 		schedule.MergeRegion{
-			FromRegion: s.regions[2].Region,
-			ToRegion:   s.regions[1].Region,
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  true,
 		},
 	})
 
 	// all store overlap
-	s.regions[2].Peers = []*metapb.Peer{
+	s.regions[2] = s.regions[2].Clone(core.SetPeers([]*metapb.Peer{
 		{Id: 106, StoreId: 1},
 		{Id: 107, StoreId: 5},
 		{Id: 108, StoreId: 4},
-	}
+	}))
 	s.cluster.PutRegion(s.regions[2])
 	op1, op2 = s.mc.Check(s.regions[2])
 	s.checkSteps(c, op1, []schedule.OperatorStep{
 		schedule.MergeRegion{
-			FromRegion: s.regions[2].Region,
-			ToRegion:   s.regions[1].Region,
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
 	s.checkSteps(c, op2, []schedule.OperatorStep{
 		schedule.MergeRegion{
-			FromRegion: s.regions[2].Region,
-			ToRegion:   s.regions[1].Region,
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  true,
 		},
 	})
@@ -1152,7 +1154,7 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	// check randomly pick hot region
 	r := tc.RandHotRegionFromStore(2, schedule.ReadFlow)
 	c.Assert(r, NotNil)
-	c.Assert(r.GetId(), Equals, uint64(2))
+	c.Assert(r.GetID(), Equals, uint64(2))
 	// check hot items
 	stats := tc.HotCache.RegionStats(schedule.ReadFlow)
 	c.Assert(len(stats), Equals, 3)
@@ -1221,9 +1223,13 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	regions[49].EndKey = []byte("")
 	for _, meta := range regions {
 		leader := rand.Intn(4) % 3
-		regionInfo := core.NewRegionInfo(meta, meta.Peers[leader])
-		regionInfo.ApproximateSize = 96
-		regionInfo.ApproximateKeys = 96
+		regionInfo := core.NewRegionInfo(
+			meta,
+			meta.Peers[leader],
+			core.SetApproximateKeys(96),
+			core.SetApproximateSize(96),
+		)
+
 		tc.Regions.SetRegion(regionInfo)
 	}
 	for i := 0; i < 100; i++ {
@@ -1232,7 +1238,6 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	for i := 1; i <= 5; i++ {
 		tc.UpdateStoreStatus(uint64(i))
 	}
-
 	hb, err := schedule.CreateScheduler("scatter-range", schedule.NewLimiter(), "s_00", "s_50", "t")
 	c.Assert(err, IsNil)
 	limit := 0
@@ -1250,8 +1255,8 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	}
 	for i := 1; i <= 5; i++ {
 		leaderCount := tc.Regions.GetStoreLeaderCount(uint64(i))
-		c.Assert(leaderCount, LessEqual, 12)
+		c.Check(leaderCount, LessEqual, 12)
 		regionCount := tc.Regions.GetStoreRegionCount(uint64(i))
-		c.Assert(regionCount, LessEqual, 32)
+		c.Check(regionCount, LessEqual, 32)
 	}
 }
