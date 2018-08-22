@@ -287,9 +287,11 @@ func (a *removePeer) Step(r *RaftEngine) {
 		for _, peer := range region.GetPeers() {
 			if peer.GetId() == a.peer.GetId() {
 				storeID := peer.GetStoreId()
-				region.RemoveStorePeer(storeID)
-				region.GetRegionEpoch().ConfVer++
-				r.SetRegion(region)
+				newRegion := region.Clone(
+					core.WithRemoveStorePeer(storeID),
+					core.WithIncConfVer(),
+				)
+				r.SetRegion(newRegion)
 				r.recordRegionChange(region)
 				r.conn.Nodes[storeID].decUsedSize(regionSize)
 				break

@@ -228,7 +228,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	waitPromoteLearner(c, stream, region, 1)
 	dispatchHeartbeat(c, co, region, stream)
 	waitRemovePeer(c, stream, region, 4)
-	region.RemoveStorePeer(4)
+	region = region.Clone(core.WithRemoveStorePeer(4))
 	dispatchHeartbeat(c, co, region, stream)
 	dispatchHeartbeat(c, co, region, stream)
 	waitNoResponse(c, stream)

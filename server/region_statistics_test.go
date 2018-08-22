@@ -110,7 +110,7 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.stats[offlinePeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 1)
 
-	region1.RemoveStorePeer(7)
+	region1 = region1.Clone(core.WithRemoveStorePeer(7))
 	regionStats.Observe(region1, stores[0:3])
 	c.Assert(len(regionStats.stats[extraPeer]), Equals, 0)
 	c.Assert(len(regionStats.stats[missPeer]), Equals, 1)

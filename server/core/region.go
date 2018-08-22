@@ -399,19 +399,6 @@ func (r *RegionInfo) GetStoreLearner(storeID uint64) *metapb.Peer {
 	return nil
 }
 
-// RemoveStorePeer removes the peer in specified store.
-// Only for test.
-func (r *RegionInfo) RemoveStorePeer(storeID uint64) {
-	var peers []*metapb.Peer
-	for _, peer := range r.meta.GetPeers() {
-		if peer.GetStoreId() != storeID {
-			peers = append(peers, peer)
-		}
-	}
-	r.meta.Peers = peers
-	classifyVoterAndLearner(r)
-}
-
 // AddPeer adds the peer in region info.
 // Only for test.
 func (r *RegionInfo) AddPeer(peer *metapb.Peer) {

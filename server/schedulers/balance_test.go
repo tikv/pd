@@ -536,7 +536,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 	opt.DisableRemoveExtraReplica = false
 
-	region.RemoveStorePeer(1)
+	region = region.Clone(core.WithRemoveStorePeer(1))
 
 	// Peer in store 2 is down, remove it.
 	tc.SetStoreDown(2)
@@ -617,7 +617,7 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	// remove the peer
 	tc.SetStoreOffline(3)
 	testutil.CheckRemovePeer(c, rc.Check(region), 3)
-	region.RemoveStorePeer(4)
+	region = region.Clone(core.WithRemoveStorePeer(4))
 	// the number of region peers equals the maxReplicas
 	// Transfer peer to store 4.
 	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 3, 4)
@@ -689,7 +689,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	peer6, _ := tc.AllocPeer(6)
 	region.AddPeer(peer6)
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
-	region.RemoveStorePeer(1)
+	region = region.Clone(core.WithRemoveStorePeer(1))
 	c.Assert(rc.Check(region), IsNil)
 
 	// Store 8 has the same zone and different rack with store 7.
@@ -706,7 +706,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	peer10, _ := tc.AllocPeer(10)
 	region.AddPeer(peer10)
 	testutil.CheckRemovePeer(c, rc.Check(region), 2)
-	region.RemoveStorePeer(2)
+	region = region.Clone(core.WithRemoveStorePeer(2))
 	c.Assert(rc.Check(region), IsNil)
 }
 

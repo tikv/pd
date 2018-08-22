@@ -96,8 +96,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 // SelectBestReplacementStore returns a store id that to be used to replace the old peer and distinct score.
 func (r *ReplicaChecker) SelectBestReplacementStore(region *core.RegionInfo, oldPeer *metapb.Peer, filters ...Filter) (uint64, float64) {
 	filters = append(filters, NewExcludedFilter(nil, region.GetStoreIds()))
-	newRegion := region.Clone()
-	newRegion.RemoveStorePeer(oldPeer.GetStoreId())
+	newRegion := region.Clone(core.WithRemoveStorePeer(oldPeer.GetStoreId()))
 	return r.selectBestStoreToAddReplica(newRegion, filters...)
 }
 

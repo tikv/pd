@@ -71,7 +71,7 @@ func (s *testRegionSuite) TestRegionInfo(c *C) {
 	c.Assert(DiffRegionPeersInfo(info, r), Matches, "Add peer.*")
 	c.Assert(DiffRegionPeersInfo(r, info), Matches, "Remove peer.*")
 	c.Assert(r.GetStorePeer(n), DeepEquals, removePeer)
-	r.RemoveStorePeer(n)
+	r = r.Clone(WithRemoveStorePeer(n))
 	c.Assert(DiffRegionPeersInfo(r, info), Equals, "")
 	c.Assert(r.GetStorePeer(n), IsNil)
 	r.meta.StartKey = []byte{0}
