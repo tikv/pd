@@ -178,7 +178,7 @@ func (mc *MockCluster) AddLeaderRegionWithRange(regionID uint64, startKey string
 // AddLeaderRegionWithReadInfo adds region with specified leader, followers and read info.
 func (mc *MockCluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
-	r.SetBytesRead(readBytes)
+	r = r.Clone(core.SetReadBytes(readBytes))
 	isUpdate, item := mc.BasicCluster.CheckReadStatus(r)
 	if isUpdate {
 		mc.HotCache.Update(regionID, item, ReadFlow)
@@ -189,7 +189,7 @@ func (mc *MockCluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uin
 // AddLeaderRegionWithWriteInfo adds region with specified leader, followers and write info.
 func (mc *MockCluster) AddLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
-	r.SetBytesWritten(writtenBytes)
+	r = r.Clone(core.SetWrittenBytes(writtenBytes))
 	isUpdate, item := mc.BasicCluster.CheckWriteStatus(r)
 	if isUpdate {
 		mc.HotCache.Update(regionID, item, WriteFlow)

@@ -539,18 +539,6 @@ func (r *RegionInfo) GetRegionEpoch() *metapb.RegionEpoch {
 	return r.meta.RegionEpoch
 }
 
-// SetBytesWritten sets the written bytes of the region.
-// Only for test and simulator.
-func (r *RegionInfo) SetBytesWritten(v uint64) {
-	r.writtenBytes = v
-}
-
-// SetBytesRead sets the read bytes of the region.
-// Only for test and simulator.
-func (r *RegionInfo) SetBytesRead(v uint64) {
-	r.readBytes = v
-}
-
 // SetDownPeers sets the down peers of the region.
 // Only for test and simulator.
 func (r *RegionInfo) SetDownPeers(peers []*pdpb.PeerStats) {

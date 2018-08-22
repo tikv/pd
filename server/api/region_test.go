@@ -45,7 +45,7 @@ func (s *testRegionSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func newTestRegionInfo(regionID, storeID uint64, start, end []byte) *core.RegionInfo {
+func newTestRegionInfo(regionID, storeID uint64, start, end []byte, opts ...core.RegionCreateOption) *core.RegionInfo {
 	leader := &metapb.Peer{
 		Id:      regionID,
 		StoreId: storeID,
@@ -56,8 +56,12 @@ func newTestRegionInfo(regionID, storeID uint64, start, end []byte) *core.Region
 		EndKey:   end,
 		Peers:    []*metapb.Peer{leader},
 	}
-
-	region := core.NewRegionInfo(metaRegion, leader, core.SetApproximateKeys(10), core.SetApproximateSize(10))
+	newOpts := []core.RegionCreateOption{
+		core.SetApproximateKeys(10),
+		core.SetApproximateSize(10),
+	}
+	newOpts = append(newOpts, opts...)
+	region := core.NewRegionInfo(metaRegion, leader, newOpts...)
 	return region
 }
 
@@ -78,17 +82,11 @@ func (s *testRegionSuite) TestRegion(c *C) {
 }
 
 func (s *testRegionSuite) TestTopFlow(c *C) {
-	r1 := newTestRegionInfo(1, 1, []byte("a"), []byte("b"))
-	r1.SetBytesWritten(1000)
-	r1.SetBytesRead(1000)
+	r1 := newTestRegionInfo(1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000))
 	mustRegionHeartbeat(c, s.svr, r1)
-	r2 := newTestRegionInfo(2, 1, []byte("b"), []byte("c"))
-	r2.SetBytesWritten(2000)
-	r2.SetBytesRead(0)
+	r2 := newTestRegionInfo(2, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0))
 	mustRegionHeartbeat(c, s.svr, r2)
-	r3 := newTestRegionInfo(3, 1, []byte("c"), []byte("d"))
-	r3.SetBytesWritten(500)
-	r3.SetBytesRead(800)
+	r3 := newTestRegionInfo(3, 1, []byte("c"), []byte("d"), core.SetWrittenBytes(500), core.SetReadBytes(800))
 	mustRegionHeartbeat(c, s.svr, r3)
 	s.checkTopFlow(c, fmt.Sprintf("%s/regions/writeflow", s.urlPrefix), []uint64{2, 1, 3})
 	s.checkTopFlow(c, fmt.Sprintf("%s/regions/readflow", s.urlPrefix), []uint64{1, 3, 2})
@@ -111,8 +109,7 @@ func (s *testRegionSuite) TestTopN(c *C) {
 		regions := make([]*core.RegionInfo, 0, len(writtenBytes))
 		for _, i := range rand.Perm(len(writtenBytes)) {
 			id := uint64(i + 1)
-			region := newTestRegionInfo(id, id, nil, nil)
-			region.SetBytesWritten(uint64(writtenBytes[i]))
+			region := newTestRegionInfo(id, id, nil, nil, core.SetWrittenBytes(uint64(writtenBytes[i])))
 			regions = append(regions, region)
 		}
 		topN := topNRegions(regions, func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, n)

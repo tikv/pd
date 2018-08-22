@@ -159,8 +159,8 @@ func (r *RaftEngine) updateRegionReadBytes(readBytes map[uint64]int64) {
 			simutil.Logger.Errorf("region %d not found", id)
 			continue
 		}
-		region.SetBytesRead(uint64(bytes))
-		r.SetRegion(region)
+		newRegion := region.Clone(core.SetReadBytes(uint64(bytes)))
+		r.SetRegion(newRegion)
 	}
 }
 
