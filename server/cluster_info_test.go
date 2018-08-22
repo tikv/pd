@@ -113,7 +113,7 @@ func newTestRegions(n, np uint64) []*core.RegionInfo {
 			Peers:       peers,
 			StartKey:    []byte{byte(i)},
 			EndKey:      []byte{byte(i + 1)},
-			RegionEpoch: &metapb.RegionEpoch{1, 1},
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 		}
 		regions = append(regions, core.NewRegionInfo(region, peers[0]))
 	}
@@ -635,12 +635,10 @@ func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
 			StoreId: 4,
 		},
 	}
-	origin := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[:3]}, peers[0])
-	origin.SetPendingPeers(peers[1:3])
+	origin := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[:3]}, peers[0], core.WithPendingPeers(peers[1:3]))
 	tc.handleRegionHeartbeat(origin)
 	checkPendingPeerCount([]int{0, 1, 1, 0}, tc.clusterInfo, c)
-	newRegion := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[1:]}, peers[1])
-	newRegion.SetPendingPeers(peers[3:4])
+	newRegion := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[1:]}, peers[1], core.WithPendingPeers(peers[3:4]))
 	tc.handleRegionHeartbeat(newRegion)
 	checkPendingPeerCount([]int{0, 0, 0, 1}, tc.clusterInfo, c)
 }

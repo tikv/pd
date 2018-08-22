@@ -17,6 +17,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	log "github.com/sirupsen/logrus"
@@ -262,7 +263,7 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	region := tc.Regions.GetRegion(1)
 	for _, p := range region.GetPeers() {
 		if p.GetStoreId() == 3 {
-			region.SetPendingPeers(append(region.GetPendingPeers(), p))
+			region = region.Clone(core.WithPendingPeers(append(region.GetPendingPeers(), p)))
 			break
 		}
 	}

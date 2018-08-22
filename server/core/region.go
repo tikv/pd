@@ -539,18 +539,6 @@ func (r *RegionInfo) GetRegionEpoch() *metapb.RegionEpoch {
 	return r.meta.RegionEpoch
 }
 
-// SetDownPeers sets the down peers of the region.
-// Only for test and simulator.
-func (r *RegionInfo) SetDownPeers(peers []*pdpb.PeerStats) {
-	r.downPeers = peers
-}
-
-// SetPendingPeers sets the pending peers of the region.
-// Only for test and simulator.
-func (r *RegionInfo) SetPendingPeers(peers []*metapb.Peer) {
-	r.pendingPeers = peers
-}
-
 // SetPeers sets the peers of the region.
 // Only for test and simulator.
 func (r *RegionInfo) SetPeers(peers []*metapb.Peer) {
