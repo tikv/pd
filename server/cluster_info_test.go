@@ -109,10 +109,11 @@ func newTestRegions(n, np uint64) []*core.RegionInfo {
 			peers = append(peers, peer)
 		}
 		region := &metapb.Region{
-			Id:       i,
-			Peers:    peers,
-			StartKey: []byte{byte(i)},
-			EndKey:   []byte{byte(i + 1)},
+			Id:          i,
+			Peers:       peers,
+			StartKey:    []byte{byte(i)},
+			EndKey:      []byte{byte(i + 1)},
+			RegionEpoch: &metapb.RegionEpoch{1, 1},
 		}
 		regions = append(regions, core.NewRegionInfo(region, peers[0]))
 	}
@@ -362,77 +363,75 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 		checkRegionsKV(c, cluster.kv, regions[:i+1])
-
-		epoch := region.Clone().GetRegionEpoch()
-
+		origin := region
 		// region is updated.
-		region.SetRegionEpoch(&metapb.RegionEpoch{
-			Version: epoch.GetVersion() + 1,
-		})
+		region = origin.Clone(core.WithIncVersion())
+		regions[i] = region
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 		checkRegionsKV(c, cluster.kv, regions[:i+1])
 
 		// region is stale (Version).
-		stale := region.Clone()
-		stale.SetRegionEpoch(&metapb.RegionEpoch{
-			ConfVer: epoch.GetConfVer() + 1,
-		})
+		stale := origin.Clone(core.WithIncConfVer())
 		c.Assert(cluster.handleRegionHeartbeat(stale), NotNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 		checkRegionsKV(c, cluster.kv, regions[:i+1])
 
 		// region is updated.
-		region.SetRegionEpoch(&metapb.RegionEpoch{
-			Version: epoch.GetVersion() + 1,
-			ConfVer: epoch.GetConfVer() + 1,
-		})
+		region = origin.Clone(
+			core.WithIncVersion(),
+			core.WithIncConfVer(),
+		)
+		regions[i] = region
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 		checkRegionsKV(c, cluster.kv, regions[:i+1])
 
 		// region is stale (ConfVer).
-		stale = region.Clone()
-		stale.SetRegionEpoch(&metapb.RegionEpoch{
-			Version: epoch.GetVersion() + 1,
-		})
+		stale = origin.Clone(core.WithIncConfVer())
 		c.Assert(cluster.handleRegionHeartbeat(stale), NotNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 		checkRegionsKV(c, cluster.kv, regions[:i+1])
 
 		// Add a down peer.
-		region.SetDownPeers([]*pdpb.PeerStats{
+		region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
 			{
 				Peer:        region.GetPeers()[rand.Intn(len(region.GetPeers()))],
 				DownSeconds: 42,
 			},
-		})
+		}))
+		regions[i] = region
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 
 		// Add a pending peer.
-		region.SetPendingPeers([]*metapb.Peer{region.GetPeers()[rand.Intn(len(region.GetPeers()))]})
+		region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[rand.Intn(len(region.GetPeers()))]}))
+		regions[i] = region
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 
 		// Clear down peers.
-		region.SetDownPeers(nil)
+		region = region.Clone(core.WithDownPeers(nil))
+		regions[i] = region
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 
 		// Clear pending peers.
-		region.SetPendingPeers(nil)
+		region = region.Clone(core.WithPendingPeers(nil))
+		regions[i] = region
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 
 		// Remove  peers.
-		origin := region.Clone()
-		region.SetPeers(region.GetPeers()[:1])
+		origin = region
+		region = origin.Clone(core.SetPeers(region.GetPeers()[:1]))
+		regions[i] = region
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 		checkRegionsKV(c, cluster.kv, regions[:i+1])
 		// Add peers.
-		region.SetPeers(origin.GetPeers())
+		region = origin
+		regions[i] = region
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 		checkRegionsKV(c, cluster.kv, regions[:i+1])
@@ -483,9 +482,10 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		}
 
 		// check overlap
-		overlapRegion := regions[n-1].Clone()
-		overlapRegion.SetStartKey(regions[n-2].GetStartKey())
-		overlapRegion.SetID(overlapRegion.GetID() + 1)
+		overlapRegion := regions[n-1].Clone(
+			core.WithStartKey(regions[n-2].GetStartKey()),
+			core.WithNewRegionID(regions[n-1].GetID()+1),
+		)
 		c.Assert(cluster.handleRegionHeartbeat(overlapRegion), IsNil)
 		region := &metapb.Region{}
 		ok, err := kv.LoadRegion(regions[n-1].GetID(), region)

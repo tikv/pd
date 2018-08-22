@@ -169,6 +169,13 @@ func SetRegionEpoch(epoch *metapb.RegionEpoch) RegionCreateOption {
 	}
 }
 
+// SetPeers sets the peers for the region.
+func SetPeers(peers []*metapb.Peer) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.meta.Peers = peers
+	}
+}
+
 // WithAddPeer adds a peer for the region.
 func WithAddPeer(peer *metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -566,12 +573,6 @@ func (r *RegionInfo) SetDownPeers(peers []*pdpb.PeerStats) {
 // Only for test and simulator.
 func (r *RegionInfo) SetPendingPeers(peers []*metapb.Peer) {
 	r.pendingPeers = peers
-}
-
-// SetRegionEpoch sets the region epoch of the region.
-// Only for test and simulator.
-func (r *RegionInfo) SetRegionEpoch(epoch *metapb.RegionEpoch) {
-	r.meta.RegionEpoch = epoch
 }
 
 // SetPeers sets the peers of the region.

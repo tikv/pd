@@ -19,6 +19,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/faketikv/cases"
+	"github.com/pingcap/pd/server/core"
 )
 
 // ClusterInfo records all cluster information.
@@ -51,7 +52,12 @@ func (c *ClusterInfo) GetBootstrapInfo(r *RaftEngine) (*metapb.Store, *metapb.Re
 	if origin == nil {
 		return nil, nil, errors.New("no region found for bootstrap")
 	}
-	region := origin.Clone()
+	region := origin.Clone(
+		core.WithStartKey([]byte("")),
+		core.WithEndKey([]byte("")),
+		core.SetRegionEpoch(&metapb.RegionEpoch{}),
+		core.SetPeers([]*metapb.Peer{origin.GetLeader()}),
+	)
 	if region.GetLeader() == nil {
 		return nil, nil, errors.New("bootstrap region has no leader")
 	}
@@ -59,10 +65,6 @@ func (c *ClusterInfo) GetBootstrapInfo(r *RaftEngine) (*metapb.Store, *metapb.Re
 	if store == nil {
 		return nil, nil, errors.Errorf("bootstrap store %v not found", region.GetLeader().GetStoreId())
 	}
-	region.SetStartKey([]byte(""))
-	region.SetEndKey([]byte(""))
-	region.SetRegionEpoch(&metapb.RegionEpoch{})
-	region.SetPeers([]*metapb.Peer{region.GetLeader()})
 	return store.Store, region.GetMeta(), nil
 }
 
