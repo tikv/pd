@@ -50,9 +50,9 @@ func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stores *core.StoresIn
 		value              *core.RegionStat
 	)
 
-	WrittenBytesPerSec = uint64(float64(region.WrittenBytes) / float64(RegionHeartBeatReportInterval))
+	WrittenBytesPerSec = uint64(float64(region.GetBytesWritten()) / float64(RegionHeartBeatReportInterval))
 
-	v, isExist := w.writeFlow.Peek(region.GetId())
+	v, isExist := w.writeFlow.Peek(region.GetID())
 	if isExist {
 		value = v.(*core.RegionStat)
 		if !Simulating {
@@ -60,7 +60,7 @@ func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stores *core.StoresIn
 			if interval < minHotRegionReportInterval {
 				return false, nil
 			}
-			WrittenBytesPerSec = uint64(float64(region.WrittenBytes) / interval)
+			WrittenBytesPerSec = uint64(float64(region.GetBytesWritten()) / interval)
 		}
 	}
 
@@ -75,9 +75,9 @@ func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stores *core.StoresInf
 		value           *core.RegionStat
 	)
 
-	ReadBytesPerSec = uint64(float64(region.ReadBytes) / float64(RegionHeartBeatReportInterval))
+	ReadBytesPerSec = uint64(float64(region.GetBytesRead()) / float64(RegionHeartBeatReportInterval))
 
-	v, isExist := w.readFlow.Peek(region.GetId())
+	v, isExist := w.readFlow.Peek(region.GetID())
 	if isExist {
 		value = v.(*core.RegionStat)
 		if !Simulating {
@@ -85,7 +85,7 @@ func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stores *core.StoresInf
 			if interval < minHotRegionReportInterval {
 				return false, nil
 			}
-			ReadBytesPerSec = uint64(float64(region.ReadBytes) / interval)
+			ReadBytesPerSec = uint64(float64(region.GetBytesRead()) / interval)
 		}
 	}
 
@@ -132,15 +132,7 @@ func calculateReadHotThreshold(stores *core.StoresInfo) uint64 {
 const rollingWindowsSize = 5
 
 func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes uint64, hotRegionThreshold uint64, oldItem *core.RegionStat, kind FlowKind) (bool, *core.RegionStat) {
-	newItem := &core.RegionStat{
-		RegionID:       region.GetId(),
-		FlowBytes:      flowBytes,
-		LastUpdateTime: time.Now(),
-		StoreID:        region.Leader.GetStoreId(),
-		Version:        region.GetRegionEpoch().GetVersion(),
-		AntiCount:      hotRegionAntiCount,
-	}
-
+	newItem := core.NewRegionStat(region, flowBytes, hotRegionAntiCount)
 	if oldItem != nil {
 		newItem.HotDegree = oldItem.HotDegree + 1
 		newItem.Stats = oldItem.Stats

@@ -124,14 +124,14 @@ func (s *heartbeatStreams) bindStream(storeID uint64, stream heartbeatStream) {
 }
 
 func (s *heartbeatStreams) sendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
-	if region.Leader == nil {
+	if region.GetLeader() == nil {
 		return
 	}
 
 	msg.Header = &pdpb.ResponseHeader{ClusterId: s.clusterID}
-	msg.RegionId = region.GetId()
+	msg.RegionId = region.GetID()
 	msg.RegionEpoch = region.GetRegionEpoch()
-	msg.TargetPeer = region.Leader
+	msg.TargetPeer = region.GetLeader()
 
 	select {
 	case s.msgCh <- msg:

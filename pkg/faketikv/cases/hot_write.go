@@ -75,8 +75,8 @@ func newHotWrite() *Conf {
 		var leaderCount, peerCount [10]int
 		for id := range writeFlow {
 			region := regions.GetRegion(id)
-			leaderCount[int(region.Leader.GetStoreId()-1)]++
-			for _, p := range region.Peers {
+			leaderCount[int(region.GetLeader().GetStoreId()-1)]++
+			for _, p := range region.GetPeers() {
 				peerCount[int(p.GetStoreId()-1)]++
 			}
 		}

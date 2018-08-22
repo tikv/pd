@@ -344,12 +344,12 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		}
 
 		region := core.RegionFromHeartbeat(request)
-		if region.GetId() == 0 {
+		if region.GetID() == 0 {
 			msg := fmt.Sprintf("invalid request region, %v", request)
 			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)
 			continue
 		}
-		if region.Leader == nil {
+		if region.GetLeader() == nil {
 			msg := fmt.Sprintf("invalid request leader, %v", request)
 			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)
 			continue

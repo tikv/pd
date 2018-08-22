@@ -56,22 +56,22 @@ func (s *testRegionMapSuite) TestRegionMap(c *C) {
 
 func (s *testRegionMapSuite) regionInfo(id uint64) *RegionInfo {
 	return &RegionInfo{
-		Region: &metapb.Region{
+		meta: &metapb.Region{
 			Id: id,
 		},
-		ApproximateSize: int64(id),
-		ApproximateKeys: int64(id),
+		approximateSize: int64(id),
+		approximateKeys: int64(id),
 	}
 }
 
 func (s *testRegionMapSuite) check(c *C, rm *regionMap, ids ...uint64) {
 	// Check position.
 	for _, r := range rm.m {
-		c.Assert(rm.ids[r.pos], Equals, r.Id)
+		c.Assert(rm.ids[r.pos], Equals, r.meta.GetId())
 	}
 	// Check Get.
 	for _, id := range ids {
-		c.Assert(rm.Get(id).Id, Equals, id)
+		c.Assert(rm.Get(id).GetID(), Equals, id)
 	}
 	// Check Len.
 	c.Assert(rm.Len(), Equals, len(ids))
@@ -82,7 +82,7 @@ func (s *testRegionMapSuite) check(c *C, rm *regionMap, ids ...uint64) {
 	}
 	set1 := make(map[uint64]struct{})
 	for _, r := range rm.m {
-		set1[r.Id] = struct{}{}
+		set1[r.GetID()] = struct{}{}
 	}
 	set2 := make(map[uint64]struct{})
 	for _, id := range rm.ids {
