@@ -539,18 +539,6 @@ func (r *RegionInfo) GetRegionEpoch() *metapb.RegionEpoch {
 	return r.meta.RegionEpoch
 }
 
-// SetPeers sets the peers of the region.
-// Only for test and simulator.
-func (r *RegionInfo) SetPeers(peers []*metapb.Peer) {
-	r.meta.Peers = peers
-}
-
-// SetID sets the id of the region.
-// Only for test and simulator.
-func (r *RegionInfo) SetID(id uint64) {
-	r.meta.Id = id
-}
-
 // RegionStat records each hot region's statistics
 type RegionStat struct {
 	RegionID  uint64 `json:"region_id"`

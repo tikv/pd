@@ -991,11 +991,11 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	})
 
 	// all store overlap
-	s.regions[2].SetPeers([]*metapb.Peer{
+	s.regions[2] = s.regions[2].Clone(core.SetPeers([]*metapb.Peer{
 		{Id: 106, StoreId: 1},
 		{Id: 107, StoreId: 5},
 		{Id: 108, StoreId: 4},
-	})
+	}))
 	s.cluster.PutRegion(s.regions[2])
 	op1, op2 = s.mc.Check(s.regions[2])
 	s.checkSteps(c, op1, []schedule.OperatorStep{
