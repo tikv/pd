@@ -53,9 +53,12 @@ func NewRaftEngine(conf *cases.Conf, conn *Conn) (*RaftEngine, error) {
 		if i < len(conf.Regions)-1 {
 			meta.EndKey = []byte(splitKeys[i])
 		}
-		regionInfo := core.NewRegionInfo(meta, region.Leader)
-		regionInfo.SetApproximateSize(region.Size)
-		regionInfo.SetApproximateKeys(region.Keys)
+		regionInfo := core.NewRegionInfo(
+			meta,
+			region.Leader,
+			core.SetApproximateSize(region.Size),
+			core.SetApproximateKeys(region.Keys),
+		)
 		r.SetRegion(regionInfo)
 		peers := region.Peers
 		regionSize := uint64(region.Size)
@@ -108,26 +111,28 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo, c *ClusterInfo) {
 		}
 	}
 
-	region.GetRegionEpoch().Version++
-	region.SetApproximateSize(region.GetApproximateSize() / 2)
-	region.SetApproximateKeys(region.GetApproximateKeys() / 2)
-
-	newRegion := region.Clone()
-	newRegion.SetPendingPeers(nil)
-	newRegion.SetDownPeers(nil)
-	for i, peer := range newRegion.GetPeers() {
-		peer.Id = ids[i]
-	}
-	newRegion.SetID(ids[len(ids)-1])
-
 	splitKey := generateSplitKey(region.GetStartKey(), region.GetEndKey())
-	newRegion.SetEndKey(splitKey)
-	region.SetStartKey(splitKey)
+	left := region.Clone(
+		core.WithNewRegionID(ids[len(ids)-1]),
+		core.WithNewPeerIds(ids[0:len(ids)-1]...),
+		core.WithIncVersion(),
+		core.SetApproximateKeys(region.GetApproximateKeys()/2),
+		core.SetApproximateSize(region.GetApproximateSize()/2),
+		core.WithPendingPeers(nil),
+		core.WithDownPeers(nil),
+		core.WithEndKey(splitKey),
+	)
+	right := region.Clone(
+		core.WithIncVersion(),
+		core.SetApproximateKeys(region.GetApproximateKeys()/2),
+		core.SetApproximateSize(region.GetApproximateSize()/2),
+		core.WithStartKey(splitKey),
+	)
 
-	r.SetRegion(region)
-	r.SetRegion(newRegion)
-	r.recordRegionChange(region)
-	r.recordRegionChange(newRegion)
+	r.SetRegion(right)
+	r.SetRegion(left)
+	r.recordRegionChange(left)
+	r.recordRegionChange(right)
 }
 
 func (r *RaftEngine) recordRegionChange(region *core.RegionInfo) {
@@ -136,14 +141,15 @@ func (r *RaftEngine) recordRegionChange(region *core.RegionInfo) {
 }
 
 func (r *RaftEngine) updateRegionStore(region *core.RegionInfo, size int64) {
-	region.SetApproximateSize(region.GetApproximateSize() + size)
-	wBytes := uint64(size)
-	region.SetBytesWritten(wBytes)
+	newRegion := region.Clone(
+		core.SetApproximateSize(region.GetApproximateSize()+size),
+		core.SetWrittenBytes(uint64(size)),
+	)
 	storeIDs := region.GetStoreIds()
 	for storeID := range storeIDs {
-		r.conn.Nodes[storeID].incUsedSize(wBytes)
+		r.conn.Nodes[storeID].incUsedSize(uint64(size))
 	}
-	r.SetRegion(region)
+	r.SetRegion(newRegion)
 }
 
 func (r *RaftEngine) updateRegionReadBytes(readBytes map[uint64]int64) {

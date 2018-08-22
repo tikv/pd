@@ -82,9 +82,7 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 		peer, _ := c.AllocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	regionInfo := core.NewRegionInfo(region, leader)
-	regionInfo.SetApproximateKeys(10)
-	regionInfo.SetApproximateSize(10)
+	regionInfo := core.NewRegionInfo(region, leader, core.SetApproximateSize(10), core.SetApproximateKeys(10))
 	c.putRegion(regionInfo)
 }
 

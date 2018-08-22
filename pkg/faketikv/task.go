@@ -121,26 +121,33 @@ func (m *mergeRegion) Step(r *RaftEngine) {
 	}
 
 	targetRegion := r.GetRegion(m.targetRegion.Id)
+	var startKey, endKey []byte
 	if bytes.Equal(m.targetRegion.EndKey, region.GetStartKey()) {
-		targetRegion.SetEndKey(region.GetEndKey())
+		startKey = targetRegion.GetStartKey()
+		endKey = region.GetEndKey()
 	} else {
-		targetRegion.SetStartKey(region.GetStartKey())
+		startKey = region.GetStartKey()
+		endKey = targetRegion.GetEndKey()
 	}
 
-	targetRegion.SetApproximateSize(targetRegion.GetApproximateSize() + region.GetApproximateSize())
-	targetRegion.SetApproximateKeys(targetRegion.GetApproximateKeys() + region.GetApproximateKeys())
-
+	epoch := targetRegion.GetRegionEpoch()
 	if m.epoch.ConfVer > m.targetRegion.RegionEpoch.ConfVer {
-		targetRegion.GetRegionEpoch().ConfVer = m.epoch.ConfVer
+		epoch.ConfVer = m.epoch.ConfVer
 	}
 
 	if m.epoch.Version > m.targetRegion.RegionEpoch.Version {
-		targetRegion.GetRegionEpoch().Version = m.epoch.Version
+		epoch.Version = m.epoch.Version
 	}
-	targetRegion.GetRegionEpoch().Version++
-
-	r.SetRegion(targetRegion)
-	r.recordRegionChange(targetRegion)
+	epoch.Version++
+	mergeRegion := targetRegion.Clone(
+		core.WithStartKey(startKey),
+		core.WithEndKey(endKey),
+		core.SetRegionEpoch(epoch),
+		core.SetApproximateSize(targetRegion.GetApproximateSize()+region.GetApproximateSize()),
+		core.SetApproximateKeys(targetRegion.GetApproximateKeys()+region.GetApproximateKeys()),
+	)
+	r.SetRegion(mergeRegion)
+	r.recordRegionChange(mergeRegion)
 	m.finished = true
 }
 

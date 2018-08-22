@@ -81,6 +81,45 @@ func WithEndKey(key []byte) RegionCreateOption {
 	}
 }
 
+// WithNewRegionID sets new id for the region.
+func WithNewRegionID(id uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.meta.Id = id
+	}
+}
+
+// WithNewPeerIds sets new ids for peers.
+func WithNewPeerIds(peerIds ...uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		if len(peerIds) != len(region.meta.GetPeers()) {
+			return
+		}
+		for i, p := range region.meta.GetPeers() {
+			p.Id = peerIds[i]
+		}
+	}
+}
+
+// WithIncVersion increase the version of the region.
+func WithIncVersion() RegionCreateOption {
+	return func(region *RegionInfo) {
+		e := region.meta.GetRegionEpoch()
+		if e != nil {
+			e.Version++
+		}
+	}
+}
+
+// WithIncConfVer increase the config version of the region.
+func WithIncConfVer() RegionCreateOption {
+	return func(region *RegionInfo) {
+		e := region.meta.GetRegionEpoch()
+		if e != nil {
+			e.ConfVer++
+		}
+	}
+}
+
 // SetWrittenBytes sets the written bytes for the region.
 func SetWrittenBytes(v uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -116,13 +155,14 @@ func SetApproximateSize(v int64) RegionCreateOption {
 	}
 }
 
-// SetApproximateKeys sets the approximate keysfor the region.
+// SetApproximateKeys sets the approximate keys for the region.
 func SetApproximateKeys(v int64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.approximateKeys = v
 	}
 }
 
+// SetRegionEpoch sets the epoch for the reigon.
 func SetRegionEpoch(epoch *metapb.RegionEpoch) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.meta.RegionEpoch = epoch
@@ -490,24 +530,6 @@ func (r *RegionInfo) GetPeers() []*metapb.Peer {
 // GetRegionEpoch returns the region epoch of the region.
 func (r *RegionInfo) GetRegionEpoch() *metapb.RegionEpoch {
 	return r.meta.RegionEpoch
-}
-
-// SetLeader sets the leader of the region.
-// Only for test and simulator.
-func (r *RegionInfo) SetLeader(leader *metapb.Peer) {
-	r.leader = leader
-}
-
-// SetApproximateSize sets the approximate size of the region.
-// Only for test and simulator.
-func (r *RegionInfo) SetApproximateSize(v int64) {
-	r.approximateSize = v
-}
-
-// SetApproximateKeys sets the approximate keys of the region.
-// Only for test and simulator.
-func (r *RegionInfo) SetApproximateKeys(v int64) {
-	r.approximateKeys = v
 }
 
 // SetStartKey sets the start key.

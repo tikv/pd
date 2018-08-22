@@ -83,8 +83,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		tc.AddLeaderStore(2, int(t.targetCount))
 		source := tc.GetStore(1)
 		target := tc.GetStore(2)
-		region := tc.GetRegion(1).Clone()
-		region.SetApproximateSize(t.regionSize)
+		region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 		tc.PutRegion(region)
 		c.Assert(shouldBalance(tc, source, target, region, core.LeaderKind, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
 	}
@@ -94,8 +93,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		tc.AddRegionStore(2, int(t.targetCount))
 		source := tc.GetStore(1)
 		target := tc.GetStore(2)
-		region := tc.GetRegion(1).Clone()
-		region.SetApproximateSize(t.regionSize)
+		region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 		tc.PutRegion(region)
 		c.Assert(shouldBalance(tc, source, target, region, core.RegionKind, schedule.NewOpInfluence(nil, tc)), Equals, t.expectedResult)
 	}
@@ -1222,9 +1220,13 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	regions[49].EndKey = []byte("")
 	for _, meta := range regions {
 		leader := rand.Intn(4) % 3
-		regionInfo := core.NewRegionInfo(meta, meta.Peers[leader])
-		regionInfo.SetApproximateKeys(96)
-		regionInfo.SetApproximateSize(96)
+		regionInfo := core.NewRegionInfo(
+			meta,
+			meta.Peers[leader],
+			core.SetApproximateKeys(96),
+			core.SetApproximateSize(96),
+		)
+
 		tc.Regions.SetRegion(regionInfo)
 	}
 	for i := 0; i < 100; i++ {

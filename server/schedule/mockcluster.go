@@ -160,10 +160,9 @@ func (mc *MockCluster) AddLabelsStore(storeID uint64, regionCount int, labels ma
 
 // AddLeaderRegion adds region with specified leader and followers.
 func (mc *MockCluster) AddLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
-	regionInfo := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
-	regionInfo.SetApproximateSize(int64(10))
-	regionInfo.SetApproximateKeys(int64(10))
-	mc.PutRegion(regionInfo)
+	origin := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+	region := origin.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
+	mc.PutRegion(region)
 }
 
 // AddLeaderRegionWithRange adds region with specified leader, followers and key range.

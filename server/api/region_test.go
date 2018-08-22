@@ -57,9 +57,7 @@ func newTestRegionInfo(regionID, storeID uint64, start, end []byte) *core.Region
 		Peers:    []*metapb.Peer{leader},
 	}
 
-	region := core.NewRegionInfo(metaRegion, leader)
-	region.SetApproximateKeys(10)
-	region.SetApproximateSize(10)
+	region := core.NewRegionInfo(metaRegion, leader, core.SetApproximateKeys(10), core.SetApproximateSize(10))
 	return region
 }
 
