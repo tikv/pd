@@ -292,8 +292,10 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 
 	r := tc.GetRegion(1)
 	p := &metapb.Peer{Id: 1, StoreId: 1, IsLearner: true}
-	r.AddPeer(p)
-	r = r.Clone(core.WithPendingPeers(append(r.GetPendingPeers(), p)))
+	r = r.Clone(
+		core.WithAddPeer(p),
+		core.WithPendingPeers(append(r.GetPendingPeers(), p)),
+	)
 	tc.putRegion(r)
 	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
 	co.stop()

@@ -523,12 +523,12 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 
 	// Add peer in store 4, and we have enough replicas.
 	peer4, _ := tc.AllocPeer(4)
-	region.AddPeer(peer4)
+	region = region.Clone(core.WithAddPeer(peer4))
 	c.Assert(rc.Check(region), IsNil)
 
 	// Add peer in store 3, and we have redundant replicas.
 	peer3, _ := tc.AllocPeer(3)
-	region.AddPeer(peer3)
+	region = region.Clone(core.WithAddPeer(peer3))
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
 
 	// Disable remove extra replica feature.
@@ -594,16 +594,16 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	// Store 2 has different zone and smallest region score.
 	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 2)
 	peer2, _ := tc.AllocPeer(2)
-	region.AddPeer(peer2)
+	region = region.Clone(core.WithAddPeer(peer2))
 
 	// Store 3 has different zone and smallest region score.
 	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 3)
 	peer3, _ := tc.AllocPeer(3)
-	region.AddPeer(peer3)
+	region = region.Clone(core.WithAddPeer(peer3))
 
 	// Store 4 has the same zone with store 3 and larger region score.
 	peer4, _ := tc.AllocPeer(4)
-	region.AddPeer(peer4)
+	region = region.Clone(core.WithAddPeer(peer4))
 	testutil.CheckRemovePeer(c, rc.Check(region), 4)
 
 	// Test healthFilter.
@@ -648,7 +648,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	region := tc.GetRegion(1)
 	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 2)
 	peer2, _ := tc.AllocPeer(2)
-	region.AddPeer(peer2)
+	region = region.Clone(core.WithAddPeer(peer2))
 
 	// Store 1,2,3 have the same zone, rack, and host.
 	tc.AddLabelsStore(3, 5, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -678,7 +678,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 
 	// Add peer to store 7.
 	peer7, _ := tc.AllocPeer(7)
-	region.AddPeer(peer7)
+	region = region.Clone(core.WithAddPeer(peer7))
 
 	// Replace peer in store 1 with store 6 because it has a different rack.
 	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 1, 6)
@@ -687,7 +687,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 	opt.DisableLocationReplacement = false
 	peer6, _ := tc.AllocPeer(6)
-	region.AddPeer(peer6)
+	region = region.Clone(core.WithAddPeer(peer6))
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
 	region = region.Clone(core.WithRemoveStorePeer(1))
 	c.Assert(rc.Check(region), IsNil)
@@ -704,7 +704,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	tc.AddLabelsStore(10, 1, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
 	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 2, 10)
 	peer10, _ := tc.AllocPeer(10)
-	region.AddPeer(peer10)
+	region = region.Clone(core.WithAddPeer(peer10))
 	testutil.CheckRemovePeer(c, rc.Check(region), 2)
 	region = region.Clone(core.WithRemoveStorePeer(2))
 	c.Assert(rc.Check(region), IsNil)
@@ -730,11 +730,11 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 
 	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 6)
 	peer6, _ := tc.AllocPeer(6)
-	region.AddPeer(peer6)
+	region = region.Clone(core.WithAddPeer(peer6))
 
 	testutil.CheckAddPeer(c, rc.Check(region), schedule.OpReplica, 5)
 	peer5, _ := tc.AllocPeer(5)
-	region.AddPeer(peer5)
+	region = region.Clone(core.WithAddPeer(peer5))
 
 	c.Assert(rc.Check(region), IsNil)
 }

@@ -236,14 +236,16 @@ func (a *addPeer) Step(r *RaftEngine) {
 
 	a.size -= a.speed
 	if a.size < 0 {
+		var opts []core.RegionCreateOption
 		if region.GetPeer(a.peer.GetId()) == nil {
-			region.AddPeer(a.peer)
+			opts = append(opts, core.WithAddPeer(a.peer))
 		} else {
-			region.GetPeer(a.peer.GetId()).IsLearner = false
+			opts = append(opts, core.WithPromoteLearner(a.peer.GetId()))
 		}
-		region.GetRegionEpoch().ConfVer++
-		r.SetRegion(region)
-		r.recordRegionChange(region)
+		opts = append(opts, core.WithIncConfVer())
+		newRegion := region.Clone(opts...)
+		r.SetRegion(newRegion)
+		r.recordRegionChange(newRegion)
 		recvNode.incUsedSize(uint64(snapshotSize))
 		a.finished = true
 	}
@@ -336,10 +338,12 @@ func (a *addLearner) Step(r *RaftEngine) {
 	a.size -= a.speed
 	if a.size < 0 {
 		if region.GetPeer(a.peer.GetId()) == nil {
-			region.AddPeer(a.peer)
-			region.GetRegionEpoch().ConfVer++
-			r.SetRegion(region)
-			r.recordRegionChange(region)
+			newRegion := region.Clone(
+				core.WithAddPeer(a.peer),
+				core.WithIncConfVer(),
+			)
+			r.SetRegion(newRegion)
+			r.recordRegionChange(newRegion)
 		}
 		a.finished = true
 	}

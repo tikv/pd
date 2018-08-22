@@ -188,6 +188,22 @@ func WithAddPeer(peer *metapb.Peer) RegionCreateOption {
 	}
 }
 
+// WithPromoteLearner promotes the learner.
+func WithPromoteLearner(peerID uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		for _, p := range region.GetPeers() {
+			if p.GetId() == peerID {
+				p.IsLearner = false
+			}
+		}
+		for _, l := range region.learners {
+			if l.GetId() == peerID {
+				l.IsLearner = false
+			}
+		}
+	}
+}
+
 // RegionInfo records detail region info.
 // Read-Only once created.
 type RegionInfo struct {
@@ -397,17 +413,6 @@ func (r *RegionInfo) GetStoreLearner(storeID uint64) *metapb.Peer {
 		}
 	}
 	return nil
-}
-
-// AddPeer adds the peer in region info.
-// Only for test.
-func (r *RegionInfo) AddPeer(peer *metapb.Peer) {
-	r.meta.Peers = append(r.meta.Peers, peer)
-	if peer.IsLearner {
-		r.learners = append(r.learners, peer)
-	} else {
-		r.voters = append(r.voters, peer)
-	}
 }
 
 // GetStoreIds returns a map indicate the region distributed.
