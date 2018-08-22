@@ -167,9 +167,11 @@ func (mc *MockCluster) AddLeaderRegion(regionID uint64, leaderID uint64, followe
 
 // AddLeaderRegionWithRange adds region with specified leader, followers and key range.
 func (mc *MockCluster) AddLeaderRegionWithRange(regionID uint64, startKey string, endKey string, leaderID uint64, followerIds ...uint64) {
-	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
-	r.SetStartKey([]byte(startKey))
-	r.SetEndKey([]byte(endKey))
+	o := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+	r := o.Clone(
+		core.WithStartKey([]byte(startKey)),
+		core.WithEndKey([]byte(endKey)),
+	)
 	mc.PutRegion(r)
 }
 

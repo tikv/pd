@@ -543,8 +543,10 @@ func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
 	checkRegion(c, cluster.searchRegion([]byte("foo")), region1)
 
 	// split 1 to 2: [nil, m) 1: [m, nil), sync 2 first.
-	region1.SetStartKey([]byte("m"))
-	region1.GetRegionEpoch().Version = 2
+	region1 = region1.Clone(
+		core.WithStartKey([]byte("m")),
+		core.WithIncVersion(),
+	)
 	region2 := core.NewRegionInfo(&metapb.Region{Id: 2, EndKey: []byte("m"), RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
 	c.Assert(cluster.handleRegionHeartbeat(region2), IsNil)
 	checkRegion(c, cluster.searchRegion([]byte("a")), region2)
@@ -555,8 +557,10 @@ func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
 	checkRegion(c, cluster.searchRegion([]byte("z")), region1)
 
 	// split 1 to 3: [m, q) 1: [q, nil), sync 1 first.
-	region1.SetStartKey([]byte("q"))
-	region1.GetRegionEpoch().Version = 3
+	region1 = region1.Clone(
+		core.WithStartKey([]byte("q")),
+		core.WithIncVersion(),
+	)
 	region3 := core.NewRegionInfo(&metapb.Region{Id: 3, StartKey: []byte("m"), EndKey: []byte("q"), RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
 	c.Assert(cluster.handleRegionHeartbeat(region1), IsNil)
 	checkRegion(c, cluster.searchRegion([]byte("z")), region1)

@@ -539,18 +539,6 @@ func (r *RegionInfo) GetRegionEpoch() *metapb.RegionEpoch {
 	return r.meta.RegionEpoch
 }
 
-// SetStartKey sets the start key.
-// Only for test and simulator.
-func (r *RegionInfo) SetStartKey(key []byte) {
-	r.meta.StartKey = key
-}
-
-// SetEndKey sets the end key.
-// Only for test and simulator.
-func (r *RegionInfo) SetEndKey(key []byte) {
-	r.meta.EndKey = key
-}
-
 // SetBytesWritten sets the written bytes of the region.
 // Only for test and simulator.
 func (r *RegionInfo) SetBytesWritten(v uint64) {
