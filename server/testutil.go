@@ -25,6 +25,7 @@ import (
 	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/tempurl"
 	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/server/schedule"
 
 	// Register namespace classifiers.
 	_ "github.com/pingcap/pd/table"
@@ -81,9 +82,13 @@ func NewTestSingleConfig() *Config {
 
 	cfg.adjust(nil)
 
-	cfg.Schedule.RegionScheduleLimit = 128
-	cfg.Schedule.SplitMergeInterval.Duration = 1 * time.Microsecond
-	cfg.Schedule.MergeScheduleLimit = 32
+	if schedule.Simulating {
+		cfg.Schedule.RegionScheduleLimit = 128
+		cfg.Schedule.SplitMergeInterval.Duration = 1 * time.Microsecond
+		cfg.Schedule.MergeScheduleLimit = 32
+		cfg.Schedule.ReplicaScheduleLimit = 32
+		cfg.Schedule.MaxStoreDownTime.Duration = 30 * time.Second
+	}
 
 	return cfg
 }

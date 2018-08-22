@@ -50,6 +50,8 @@ func parserEvent(e cases.EventInner) Event {
 		return &ReadFlowOnRegion{in: v}
 	case *cases.AddNodesDynamicInner:
 		return &AddNodesDynamic{in: v}
+	case *cases.DeleteNodesInner:
+		return &DeleteNodes{in: v}
 	}
 	return nil
 }
@@ -131,5 +133,20 @@ func (w *AddNodesDynamic) Run(driver *Driver) bool {
 		return false
 	}
 	driver.AddNode(res)
+	return false
+}
+
+// DeleteNodes deletes nodes randomly
+type DeleteNodes struct {
+	in *cases.DeleteNodesInner
+}
+
+// Run implements the event interface
+func (w *DeleteNodes) Run(driver *Driver) bool {
+	res := w.in.Step(driver.tickCount)
+	if res == 0 {
+		return false
+	}
+	driver.DeleteNode(res)
 	return false
 }

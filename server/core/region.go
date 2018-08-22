@@ -137,7 +137,6 @@ func WithRemoveStorePeer(storeID uint64) RegionCreateOption {
 			}
 		}
 		region.meta.Peers = peers
-
 	}
 }
 

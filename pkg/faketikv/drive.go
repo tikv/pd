@@ -18,6 +18,7 @@ import (
 
 	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/faketikv/cases"
 	"github.com/pingcap/pd/pkg/faketikv/simutil"
 )
@@ -162,4 +163,25 @@ func (d *Driver) AddNode(id uint64) {
 }
 
 // DeleteNode deletes a node.
-func (d *Driver) DeleteNode() {}
+func (d *Driver) DeleteNode(id uint64) {
+	node := d.clusterInfo.Nodes[id]
+	if node == nil {
+		simutil.Logger.Errorf("Node %d not existed", id)
+		return
+	}
+	delete(d.clusterInfo.Nodes, id)
+	node.Stop()
+
+	regions := d.raftEngine.GetRegions()
+	for _, region := range regions {
+		storeIDs := region.GetStoreIds()
+		if _, ok := storeIDs[id]; ok {
+			downPeer := &pdpb.PeerStats{
+				Peer:        region.GetStorePeer(id),
+				DownSeconds: 24 * 60 * 60,
+			}
+			region.DownPeers = append(region.DownPeers, downPeer)
+			d.raftEngine.SetRegion(region)
+		}
+	}
+}

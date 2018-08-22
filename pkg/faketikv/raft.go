@@ -83,6 +83,7 @@ func (r *RaftEngine) stepLeader(region *core.RegionInfo) {
 		return
 	}
 	newLeader := r.electNewLeader(region)
+	originLeader := region.GetLeader()
 	newRegion := region.Clone(core.WithLeader(newLeader))
 	if newLeader == nil {
 		r.SetRegion(newRegion)
