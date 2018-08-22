@@ -367,18 +367,7 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 			}
 		}
 	}
-	//	fmt.Println("a", region.GetMeta())
 	mc.PutRegion(newRegion)
-	//	leaderStr := "leader:"
-	//	regionStr := "region:"
-	//	for i := 1; i <= 5; i++ {
-	//		storeID := uint64(i)
-	//		leaderStr = fmt.Sprintf("%s %d", leaderStr, mc.Regions.GetStoreLeaderCount(storeID))
-	//		regionStr = fmt.Sprintf("%s %d", regionStr, mc.Regions.GetStoreRegionCount(storeID))
-	//	}
-	//	fmt.Println(leaderStr)
-	//	fmt.Println(regionStr)
-	//	fmt.Println(" \n ==========end====================")
 	for id := range region.GetStoreIds() {
 		mc.UpdateStoreStatus(id)
 	}
