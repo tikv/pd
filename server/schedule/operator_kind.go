@@ -16,7 +16,7 @@ package schedule
 import (
 	"strings"
 
-	"github.com/juju/errors"
+	"github.com/pkg/errors"
 )
 
 // OperatorKind is a bit field to identify operator types.

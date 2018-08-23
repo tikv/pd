@@ -19,12 +19,12 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/gogo/protobuf/proto"
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -58,7 +58,7 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 	c.meta = &metapb.Cluster{}
 	ok, err := kv.LoadMeta(c.meta)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	if !ok {
 		return nil, nil
@@ -66,13 +66,13 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 
 	start := time.Now()
 	if err := kv.LoadStores(c.core.Stores); err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	log.Infof("load %v stores cost %v", c.core.Stores.GetStoreCount(), time.Since(start))
 
 	start = time.Now()
 	if err := kv.LoadRegions(c.core.Regions); err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	log.Infof("load %v regions cost %v", c.core.Regions.GetRegionCount(), time.Since(start))
 
@@ -124,7 +124,7 @@ func (c *clusterInfo) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := c.allocID()
 	if err != nil {
 		log.Errorf("failed to alloc peer: %v", err)
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	peer := &metapb.Peer{
 		Id:      peerID,
@@ -154,7 +154,7 @@ func (c *clusterInfo) putMeta(meta *metapb.Cluster) error {
 func (c *clusterInfo) putMetaLocked(meta *metapb.Cluster) error {
 	if c.kv != nil {
 		if err := c.kv.SaveMeta(meta); err != nil {
-			return errors.Trace(err)
+			return errors.WithStack(err)
 		}
 	}
 	c.meta = meta
@@ -177,7 +177,7 @@ func (c *clusterInfo) putStore(store *core.StoreInfo) error {
 func (c *clusterInfo) putStoreLocked(store *core.StoreInfo) error {
 	if c.kv != nil {
 		if err := c.kv.SaveStore(store.Store); err != nil {
-			return errors.Trace(err)
+			return errors.WithStack(err)
 		}
 	}
 	return c.core.PutStore(store)
@@ -300,7 +300,7 @@ func (c *clusterInfo) putRegion(region *core.RegionInfo) error {
 func (c *clusterInfo) putRegionLocked(region *core.RegionInfo) error {
 	if c.kv != nil {
 		if err := c.kv.SaveRegion(region.Region); err != nil {
-			return errors.Trace(err)
+			return errors.WithStack(err)
 		}
 	}
 	return c.core.PutRegion(region)
@@ -465,7 +465,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		o := origin.GetRegionEpoch()
 		// Region meta is stale, return an error.
 		if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
-			return errors.Trace(ErrRegionIsStale(region.Region, origin.Region))
+			return errors.WithStack(ErrRegionIsStale(region.Region, origin.Region))
 		}
 		if r.GetVersion() > o.GetVersion() {
 			log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetId(), core.DiffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion())

@@ -16,8 +16,8 @@ package namespace
 import (
 	"fmt"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pkg/errors"
 )
 
 // DefaultNamespace is the namespace all the store and region belong to by

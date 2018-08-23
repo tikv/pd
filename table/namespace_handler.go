@@ -19,8 +19,8 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/apiutil"
+	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
 

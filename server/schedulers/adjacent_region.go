@@ -18,9 +18,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -37,11 +37,11 @@ func init() {
 		if len(args) == 2 {
 			leaderLimit, err := strconv.ParseUint(args[0], 10, 64)
 			if err != nil {
-				return nil, errors.Trace(err)
+				return nil, errors.WithStack(err)
 			}
 			peerLimit, err := strconv.ParseUint(args[1], 10, 64)
 			if err != nil {
-				return nil, errors.Trace(err)
+				return nil, errors.WithStack(err)
 			}
 			return newBalanceAdjacentRegionScheduler(limiter, leaderLimit, peerLimit), nil
 		}

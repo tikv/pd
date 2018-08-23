@@ -18,8 +18,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pkg/errors"
 )
 
 func init() {

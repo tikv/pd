@@ -22,7 +22,7 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/etcdserver"
 	"github.com/coreos/etcd/pkg/types"
-	"github.com/juju/errors"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -76,7 +76,7 @@ func AddEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddR
 	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
 	addResp, err := client.MemberAdd(ctx, urls)
 	cancel()
-	return addResp, errors.Trace(err)
+	return addResp, errors.WithStack(err)
 }
 
 // ListEtcdMembers returns a list of internal etcd members.
@@ -84,7 +84,7 @@ func ListEtcdMembers(client *clientv3.Client) (*clientv3.MemberListResponse, err
 	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
 	listResp, err := client.MemberList(ctx)
 	cancel()
-	return listResp, errors.Trace(err)
+	return listResp, errors.WithStack(err)
 }
 
 // RemoveEtcdMember removes a member by the given id.
@@ -92,5 +92,5 @@ func RemoveEtcdMember(client *clientv3.Client, id uint64) (*clientv3.MemberRemov
 	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
 	rmResp, err := client.MemberRemove(ctx, id)
 	cancel()
-	return rmResp, errors.Trace(err)
+	return rmResp, errors.WithStack(err)
 }

@@ -17,9 +17,9 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pkg/errors"
 )
 
 var _ = Suite(&testKVSuite{})

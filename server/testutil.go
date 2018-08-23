@@ -22,10 +22,10 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/embed"
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/tempurl"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pkg/errors"
 
 	// Register namespace classifiers.
 	_ "github.com/pingcap/pd/table"
@@ -44,10 +44,10 @@ func NewTestServer() (*Config, *Server, CleanupFunc, error) {
 	cfg := NewTestSingleConfig()
 	s, err := CreateServer(cfg, nil)
 	if err != nil {
-		return nil, nil, nil, errors.Trace(err)
+		return nil, nil, nil, errors.WithStack(err)
 	}
 	if err = s.Run(context.TODO()); err != nil {
-		return nil, nil, nil, errors.Trace(err)
+		return nil, nil, nil, errors.WithStack(err)
 	}
 
 	cleanup := func() {
