@@ -121,9 +121,18 @@ func (*testRegionKey) TestRegionKey(c *C) {
 		s := fmt.Sprintln(&metapb.Region{StartKey: []byte(got)})
 		c.Assert(strings.Contains(s, t.expect), IsTrue)
 
+		// start key changed
 		orgion := NewRegionInfo(&metapb.Region{EndKey: []byte(got)}, nil)
 		region := NewRegionInfo(&metapb.Region{StartKey: []byte(got), EndKey: []byte(got)}, nil)
 		s = DiffRegionKeyInfo(orgion, region)
+		c.Assert(s, Matches, ".*StartKey Changed.*")
+		c.Assert(strings.Contains(s, t.expect), IsTrue)
+
+		// end key changed
+		orgion = NewRegionInfo(&metapb.Region{StartKey: []byte(got)}, nil)
+		region = NewRegionInfo(&metapb.Region{StartKey: []byte(got), EndKey: []byte(got)}, nil)
+		s = DiffRegionKeyInfo(orgion, region)
+		c.Assert(s, Matches, ".*EndKey Changed.*")
 		c.Assert(strings.Contains(s, t.expect), IsTrue)
 	}
 }
