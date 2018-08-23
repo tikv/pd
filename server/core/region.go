@@ -816,7 +816,7 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 		otherKey := &metapb.Region{StartKey: other.Region.StartKey}
 		ret = append(ret, fmt.Sprintf("StartKey Changed:{%s} -> {%s}", originKey, otherKey))
 	} else {
-		ret = append(ret, fmt.Sprintf("StartKey:{%s}", &metapb.Region{EndKey: origin.Region.StartKey}))
+		ret = append(ret, fmt.Sprintf("StartKey:{%s}", &metapb.Region{StartKey: origin.Region.StartKey}))
 	}
 	if !bytes.Equal(origin.Region.EndKey, other.Region.EndKey) {
 		originKey := &metapb.Region{EndKey: origin.Region.EndKey}
