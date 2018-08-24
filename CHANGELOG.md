@@ -17,7 +17,7 @@
 * Prohibit using special characters in `label`
 * Improve the scheduling simulator
 * Support splitting Regions using statistics in pd-ctl
-* Support format JSON output by calling `jq` in pd-ctl
+* Support formatting JSON output by calling `jq` in pd-ctl
 * Add metrics about etcd Raft state machine
 ### Bug fixes
 * Fix the issue that the namespace is not reloaded after switching Leader
