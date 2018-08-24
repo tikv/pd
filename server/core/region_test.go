@@ -15,6 +15,7 @@ package core
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -114,9 +115,8 @@ func (*testRegionKey) TestRegionKey(c *C) {
 		{"\"\\x80\\x00\\x00\\x00\\x00\\x00\\x00\\xff\\x05\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xf8\"",
 			`"\200\000\000\000\000\000\000\377\005\000\000\000\000\000\000\000\370"`},
 	}
-	got := make([]byte, 30)
 	for _, t := range testCase {
-		_, err := fmt.Sscanf(t.key, "%q", &got)
+		got, err := strconv.Unquote(t.key)
 		c.Assert(err, IsNil)
 		s := fmt.Sprintln(&metapb.Region{StartKey: []byte(got)})
 		c.Assert(strings.Contains(s, t.expect), IsTrue)
