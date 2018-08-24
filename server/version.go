@@ -45,7 +45,7 @@ var featuresDict = map[Feature]string{
 	Version2_0:  "2.0.0",
 	RegionMerge: "2.0.0",
 	RaftLearner: "2.0.0",
-	BatchSplit:  "2.1.0-rc1",
+	BatchSplit:  "2.1.0-rc.1",
 }
 
 // MinSupportedVersion returns the minimum support version for the specified feature.
