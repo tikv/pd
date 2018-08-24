@@ -35,3 +35,7 @@
 [[constraint]]
   name = "github.com/etcd-io/gofail"
   branch = "master"
+
+[[override]]
+  name = "github.com/BurntSushi/toml"
+  revision = "3012a1dbe2e4bd1391d42b32f0577cb7bbc7f005"
