@@ -16,8 +16,8 @@ package api
 import (
 	"net/http"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/server"
+	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
 

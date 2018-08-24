@@ -263,14 +263,6 @@
   version = "v0.1.0"
 
 [[projects]]
-  branch = "master"
-  digest = "1:0550b06297ebdd7dde9a20c5129f941abfdba6e47f8111bfdd0f1830c58dc800"
-  name = "github.com/juju/errors"
-  packages = ["."]
-  pruneopts = "NUT"
-  revision = "c7d06af17c68cd34c835053720b21f6549d9b0ee"
-
-[[projects]]
   digest = "1:d0164259ed17929689df11205194d80288e8ae25351778f7a3421a24774c36f8"
   name = "github.com/mattn/go-shellwords"
   packages = ["."]
@@ -332,6 +324,14 @@
   ]
   pruneopts = "NUT"
   revision = "279515615485b0f2d12f1421cc412fe2784e0190"
+
+[[projects]]
+  digest = "1:5cf3f025cbee5951a4ee961de067c8a89fc95a5adabead774f82822efabab121"
+  name = "github.com/pkg/errors"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "645ef00459ed84a119197bfb8d8205042c6df63d"
+  version = "v0.8.0"
 
 [[projects]]
   digest = "1:8d8f554bbb62fb7aecf661b85b25e227f6ab6cfe2b4395ea65ef478bfc174940"
@@ -636,7 +636,6 @@
     "github.com/google/btree",
     "github.com/gorilla/mux",
     "github.com/grpc-ecosystem/go-grpc-prometheus",
-    "github.com/juju/errors",
     "github.com/mattn/go-shellwords",
     "github.com/montanaflynn/stats",
     "github.com/opentracing/opentracing-go",
@@ -644,6 +643,7 @@
     "github.com/pingcap/kvproto/pkg/eraftpb",
     "github.com/pingcap/kvproto/pkg/metapb",
     "github.com/pingcap/kvproto/pkg/pdpb",
+    "github.com/pkg/errors",
     "github.com/prometheus/client_golang/prometheus",
     "github.com/prometheus/client_golang/prometheus/push",
     "github.com/sirupsen/logrus",

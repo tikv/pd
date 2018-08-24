@@ -21,11 +21,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/juju/errors"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pkg/errors"
 )
 
 func (s *integrationTestSuite) TestMemberDelete(c *C) {

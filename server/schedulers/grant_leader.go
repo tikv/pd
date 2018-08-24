@@ -17,9 +17,9 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pkg/errors"
 )
 
 func init() {
@@ -29,7 +29,7 @@ func init() {
 		}
 		id, err := strconv.ParseUint(args[0], 10, 64)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, errors.WithStack(err)
 		}
 		return newGrantLeaderScheduler(limiter, id), nil
 	})
@@ -61,7 +61,7 @@ func (s *grantLeaderScheduler) GetType() string {
 	return "grant-leader"
 }
 func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
-	return errors.Trace(cluster.BlockStore(s.storeID))
+	return errors.WithStack(cluster.BlockStore(s.storeID))
 }
 
 func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {

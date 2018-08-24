@@ -16,10 +16,10 @@ package faketikv
 import (
 	"context"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/faketikv/cases"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pkg/errors"
 )
 
 // ClusterInfo records all cluster information.
@@ -38,7 +38,7 @@ func NewClusterInfo(pdAddr string, conf *cases.Conf) (*ClusterInfo, error) {
 	for _, store := range conf.Stores {
 		node, err := NewNode(store, pdAddr)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, errors.WithStack(err)
 		}
 		cluster.Nodes[store.ID] = node
 	}
@@ -75,5 +75,5 @@ func (c *ClusterInfo) allocID(storeID uint64) (uint64, error) {
 		return 0, errors.Errorf("node %d not found", storeID)
 	}
 	id, err := node.client.AllocID(context.Background())
-	return id, errors.Trace(err)
+	return id, errors.WithStack(err)
 }

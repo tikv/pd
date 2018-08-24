@@ -20,14 +20,14 @@ import (
 	"io/ioutil"
 	"strconv"
 
-	"github.com/juju/errors"
+	"github.com/pkg/errors"
 )
 
 // DeferClose captures the error returned from closing (if an error occurs).
 // This is designed to be used in a defer statement.
 func DeferClose(c io.Closer, err *error) {
 	if cerr := c.Close(); cerr != nil && *err == nil {
-		*err = errors.Trace(cerr)
+		*err = errors.WithStack(cerr)
 	}
 }
 
@@ -55,7 +55,7 @@ func ReadJSON(r io.ReadCloser, data interface{}) error {
 	defer DeferClose(r, &err)
 	b, err := ioutil.ReadAll(r)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	err = json.Unmarshal(b, data)
