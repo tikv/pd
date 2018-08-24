@@ -24,7 +24,7 @@ import (
 	"sync"
 
 	"github.com/coreos/pkg/capnslog"
-	"github.com/juju/errors"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
@@ -242,7 +242,7 @@ func InitLogger(cfg *LogConfig) error {
 		err = InitFileLog(&cfg.File)
 	})
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	return nil
 }

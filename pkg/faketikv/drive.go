@@ -16,10 +16,11 @@ package faketikv
 import (
 	"context"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/faketikv/cases"
 	"github.com/pingcap/pd/pkg/faketikv/simutil"
+	"github.com/pkg/errors"
 )
 
 // Driver promotes the cluster status change.
@@ -51,18 +52,18 @@ func (d *Driver) Prepare() error {
 
 	clusterInfo, err := NewClusterInfo(d.addr, d.conf)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	d.clusterInfo = clusterInfo
 
 	conn, err := NewConn(d.clusterInfo.Nodes)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	raftEngine, err := NewRaftEngine(d.conf, conn)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	d.raftEngine = raftEngine
 
@@ -73,7 +74,7 @@ func (d *Driver) Prepare() error {
 	// Bootstrap.
 	store, region, err := clusterInfo.GetBootstrapInfo(d.raftEngine)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	d.client = clusterInfo.Nodes[store.GetId()].client
 
@@ -90,7 +91,7 @@ func (d *Driver) Prepare() error {
 	for {
 		id, err := d.client.AllocID(context.Background())
 		if err != nil {
-			return errors.Trace(err)
+			return errors.WithStack(err)
 		}
 		if id > d.conf.MaxID {
 			break
@@ -162,4 +163,25 @@ func (d *Driver) AddNode(id uint64) {
 }
 
 // DeleteNode deletes a node.
-func (d *Driver) DeleteNode() {}
+func (d *Driver) DeleteNode(id uint64) {
+	node := d.clusterInfo.Nodes[id]
+	if node == nil {
+		simutil.Logger.Errorf("Node %d not existed", id)
+		return
+	}
+	delete(d.clusterInfo.Nodes, id)
+	node.Stop()
+
+	regions := d.raftEngine.GetRegions()
+	for _, region := range regions {
+		storeIDs := region.GetStoreIds()
+		if _, ok := storeIDs[id]; ok {
+			downPeer := &pdpb.PeerStats{
+				Peer:        region.GetStorePeer(id),
+				DownSeconds: 24 * 60 * 60,
+			}
+			region.DownPeers = append(region.DownPeers, downPeer)
+			d.raftEngine.SetRegion(region)
+		}
+	}
+}

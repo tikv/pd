@@ -57,3 +57,13 @@ type AddNodesDynamicInner struct {
 func (w *AddNodesDynamicInner) Type() string {
 	return "add-nodes-dynamic"
 }
+
+// DeleteNodesInner removes nodes randomly.
+type DeleteNodesInner struct {
+	Step func(tick int64) uint64
+}
+
+// Type implements the EventInner interface
+func (w *DeleteNodesInner) Type() string {
+	return "delete-nodes"
+}

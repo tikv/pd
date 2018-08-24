@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
 )
 
 // Task running in node.
@@ -216,11 +217,21 @@ func (a *addPeer) Step(r *RaftEngine) {
 
 	snapshotSize := region.ApproximateSize
 	sendNode := r.conn.Nodes[region.Leader.GetStoreId()]
+	if sendNode == nil {
+		simutil.Logger.Errorf("failed to sent snapshot: node %d has been deleted", sendNode.Id)
+		a.finished = true
+		return
+	}
 	if !processSnapshot(sendNode, a.sendingStat, snapshotSize) {
 		return
 	}
 
 	recvNode := r.conn.Nodes[a.peer.GetStoreId()]
+	if recvNode == nil {
+		simutil.Logger.Errorf("failed to receive snapshot: node %d has been deleted", recvNode.Id)
+		a.finished = true
+		return
+	}
 	if !processSnapshot(recvNode, a.receivingStat, snapshotSize) {
 		return
 	}
@@ -280,8 +291,19 @@ func (a *removePeer) Step(r *RaftEngine) {
 				storeID := peer.GetStoreId()
 				region.RemoveStorePeer(storeID)
 				region.RegionEpoch.ConfVer++
+				if r.conn.Nodes[storeID] == nil {
+					for i, downPeer := range region.DownPeers {
+						if downPeer.Peer.StoreId == storeID {
+							region.DownPeers = append(region.DownPeers[:i], region.DownPeers[i+1:]...)
+						}
+					}
+				}
 				r.SetRegion(region)
 				r.recordRegionChange(region)
+				if r.conn.Nodes[storeID] == nil {
+					a.finished = true
+					return
+				}
 				r.conn.Nodes[storeID].decUsedSize(regionSize)
 				break
 			}

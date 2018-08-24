@@ -20,13 +20,13 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/pkg/error_code"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
 
@@ -360,7 +360,7 @@ func newStoreStateFilter(u *url.URL) (*storeStateFilter, error) {
 		for _, s := range v {
 			state, err := strconv.Atoi(s)
 			if err != nil {
-				return nil, errors.Trace(err)
+				return nil, errors.WithStack(err)
 			}
 
 			storeState := metapb.StoreState(state)

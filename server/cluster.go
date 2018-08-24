@@ -19,13 +19,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/error_code"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -76,14 +76,14 @@ func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 func (c *RaftCluster) loadClusterStatus() (*ClusterStatus, error) {
 	data, err := c.s.kv.Load((c.s.kv.ClusterStatePath("raft_bootstrap_time")))
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	if len(data) == 0 {
 		return &ClusterStatus{}, nil
 	}
 	t, err := parseTimestamp([]byte(data))
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	return &ClusterStatus{RaftBootstrapTime: t}, nil
 }
@@ -99,7 +99,7 @@ func (c *RaftCluster) start() error {
 
 	cluster, err := loadClusterInfo(c.s.idAlloc, c.s.kv, c.s.scheduleOpt)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	if cluster == nil {
 		return nil
@@ -107,7 +107,7 @@ func (c *RaftCluster) start() error {
 
 	err = c.s.classifier.ReloadNamespaces()
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	c.cachedCluster = cluster
@@ -295,7 +295,7 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 	storeMeta.Labels = labels
 	// putStore will perform label merge.
 	err := c.putStore(storeMeta)
-	return errors.Trace(err)
+	return errors.WithStack(err)
 }
 
 func (c *RaftCluster) putStore(store *metapb.Store) error {
@@ -435,7 +435,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) err
 	}
 
 	if err := c.s.kv.SaveStoreWeight(storeID, leader, region); err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	store.LeaderWeight, store.RegionWeight = leader, region

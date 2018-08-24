@@ -21,8 +21,8 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/embed"
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -84,7 +84,7 @@ func PrepareJoinCluster(cfg *Config) error {
 	// Below are cases without data directory.
 	tlsConfig, err := cfg.Security.ToTLSConfig()
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   strings.Split(cfg.Join, ","),
@@ -92,13 +92,13 @@ func PrepareJoinCluster(cfg *Config) error {
 		TLS:         tlsConfig,
 	})
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	defer client.Close()
 
 	listResp, err := etcdutil.ListEtcdMembers(client)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	existed := false
@@ -117,12 +117,12 @@ func PrepareJoinCluster(cfg *Config) error {
 	// - A deleted PD joins to previous cluster.
 	addResp, err := etcdutil.AddEtcdMember(client, []string{cfg.AdvertisePeerUrls})
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	listResp, err = etcdutil.ListEtcdMembers(client)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	pds := []string{}

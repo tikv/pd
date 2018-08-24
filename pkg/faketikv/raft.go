@@ -80,13 +80,14 @@ func (r *RaftEngine) stepLeader(region *core.RegionInfo) {
 		return
 	}
 	newLeader := r.electNewLeader(region)
+	originLeader := region.Leader
 	region.Leader = newLeader
 	if newLeader == nil {
 		r.SetRegion(region)
 		simutil.Logger.Infof("[region %d] no leader", region.GetId())
 		return
 	}
-	simutil.Logger.Infof("[region %d] elect new leader: %+v,old leader: %+v", region.GetId(), newLeader, region.Leader)
+	simutil.Logger.Infof("[region %d] elect new leader: %+v,old leader: %+v", region.GetId(), originLeader, newLeader)
 	r.SetRegion(region)
 	r.recordRegionChange(region)
 }
