@@ -71,7 +71,7 @@ func (e OpErrCode) GetOperation() string {
 	return e.Operation
 }
 
-// Code returns the unerlying Code of Err.
+// Code returns the underlying Code of Err.
 func (e OpErrCode) Code() Code {
 	return e.Err.Code()
 }

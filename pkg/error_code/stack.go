@@ -53,7 +53,7 @@ func (e StackCode) StackTrace() errors.StackTrace {
 	return e.GetStackTrace
 }
 
-// NewStackCode constrcuts a StackCode, which is an ErrorCode with stack trace information
+// NewStackCode constructs a StackCode, which is an ErrorCode with stack trace information
 // The second variable is an optional stack position gets rid of information about function calls to construct the stack trace.
 // It is defaulted to 1 to remove this function call.
 //
@@ -92,7 +92,7 @@ func (e StackCode) Error() string {
 	return e.Err.Error()
 }
 
-// Code returns the unerlying Code of Err.
+// Code returns the underlying Code of Err.
 func (e StackCode) Code() Code {
 	return e.Err.Code()
 }
