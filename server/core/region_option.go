@@ -153,10 +153,17 @@ func SetApproximateKeys(v int64) RegionCreateOption {
 	}
 }
 
-// SetRegionEpoch sets the epoch for the reigon.
-func SetRegionEpoch(epoch *metapb.RegionEpoch) RegionCreateOption {
+// SetRegionConfVer sets the config version for the reigon.
+func SetRegionConfVer(confVer uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.meta.RegionEpoch = epoch
+		region.meta.RegionEpoch.ConfVer = confVer
+	}
+}
+
+// SetRegionVersion sets the version for the reigon.
+func SetRegionVersion(version uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.meta.RegionEpoch.Version = version
 	}
 }
 
