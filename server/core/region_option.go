@@ -18,7 +18,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-// RegionOption used to select region.
+// RegionOption is used to select region.
 type RegionOption func(region *RegionInfo) bool
 
 // HealthRegion checks if the region is healthy.
@@ -92,7 +92,7 @@ func WithNewPeerIds(peerIds ...uint64) RegionCreateOption {
 	}
 }
 
-// WithIncVersion increase the version of the region.
+// WithIncVersion increases the version of the region.
 func WithIncVersion() RegionCreateOption {
 	return func(region *RegionInfo) {
 		e := region.meta.GetRegionEpoch()
@@ -119,7 +119,7 @@ func SetWrittenBytes(v uint64) RegionCreateOption {
 	}
 }
 
-// WithRemoveStorePeer remove the specified peer for the region.
+// WithRemoveStorePeer removes the specified peer for the region.
 func WithRemoveStorePeer(storeID uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		var peers []*metapb.Peer
