@@ -29,12 +29,15 @@ type StackTracer interface {
 // If there is not StackTrace it will return nil
 //
 // StackTrace looks to see if the error is a StackTracer or if a Causer of the error is a StackTracer.
+// It will return the stack trace from the deepest error it can find.
 func StackTrace(err error) errors.StackTrace {
+	if prev := WrappedError(err); prev != nil {
+		if trace := StackTrace(prev); trace != nil {
+			return trace
+		}
+	}
 	if stackTraceErr, ok := err.(StackTracer); ok {
 		return stackTraceErr.StackTrace()
-	}
-	if prev := WrappedError(err); prev != nil {
-		return StackTrace(prev)
 	}
 	return nil
 }
