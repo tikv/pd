@@ -55,7 +55,8 @@ func (c *ClusterInfo) GetBootstrapInfo(r *RaftEngine) (*metapb.Store, *metapb.Re
 	region := origin.Clone(
 		core.WithStartKey([]byte("")),
 		core.WithEndKey([]byte("")),
-		core.SetRegionEpoch(&metapb.RegionEpoch{}),
+		core.SetRegionConfVer(1),
+		core.SetRegionVersion(1),
 		core.SetPeers([]*metapb.Peer{origin.GetLeader()}),
 	)
 	if region.GetLeader() == nil {

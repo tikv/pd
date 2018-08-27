@@ -143,7 +143,8 @@ func (m *mergeRegion) Step(r *RaftEngine) {
 	mergeRegion := targetRegion.Clone(
 		core.WithStartKey(startKey),
 		core.WithEndKey(endKey),
-		core.SetRegionEpoch(epoch),
+		core.SetRegionConfVer(epoch.ConfVer),
+		core.SetRegionVersion(epoch.Version),
 		core.SetApproximateSize(targetRegion.GetApproximateSize()+region.GetApproximateSize()),
 		core.SetApproximateKeys(targetRegion.GetApproximateKeys()+region.GetApproximateKeys()),
 	)
