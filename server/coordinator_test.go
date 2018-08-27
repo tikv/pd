@@ -817,10 +817,7 @@ func waitAddLearner(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, 
 	})
 	newRegion := region.Clone(
 		core.WithAddPeer(res.GetChangePeer().GetPeer()),
-		core.SetRegionEpoch(&metapb.RegionEpoch{
-			ConfVer: region.GetRegionEpoch().GetConfVer() + 1,
-			Version: region.GetRegionEpoch().GetVersion(),
-		}),
+		core.WithIncConfVer(),
 	)
 	*region = *newRegion
 }
@@ -855,10 +852,7 @@ func waitRemovePeer(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, 
 	})
 	newRegion := region.Clone(
 		core.WithRemoveStorePeer(storeID),
-		core.SetRegionEpoch(&metapb.RegionEpoch{
-			ConfVer: region.GetRegionEpoch().GetConfVer() + 1,
-			Version: region.GetRegionEpoch().GetVersion(),
-		}),
+		core.WithIncConfVer(),
 	)
 	*region = *newRegion
 }

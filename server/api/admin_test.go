@@ -18,7 +18,6 @@ import (
 	"net/http"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
 )
@@ -50,18 +49,17 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 
 	// Update region's epoch to (100, 100).
 	region := cluster.GetRegionInfoByKey([]byte("foo")).Clone(
-		core.SetRegionEpoch(&metapb.RegionEpoch{
-			ConfVer: 100,
-			Version: 100,
-		}))
+		core.SetRegionConfVer(100),
+		core.SetRegionVersion(100),
+	)
 	err := cluster.HandleRegionHeartbeat(region)
 	c.Assert(err, IsNil)
 
 	// Region epoch cannot decrease.
-	region = region.Clone(core.SetRegionEpoch(&metapb.RegionEpoch{
-		ConfVer: 50,
-		Version: 50,
-	}))
+	region = region.Clone(
+		core.SetRegionConfVer(50),
+		core.SetRegionVersion(50),
+	)
 	err = cluster.HandleRegionHeartbeat(region)
 	c.Assert(err, NotNil)
 
