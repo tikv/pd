@@ -218,7 +218,7 @@ func ClientData(errCode ErrorCode) interface{} {
 //
 // The rest of the fields may be populated sparsely depending on the application:
 // * Previous gives JSONFormat data for an ErrorCode that was wrapped by this one. It relies on the PreviousErrorCode function.
-// * Stack is a stack trace. Usually only internal errors populate this.
+// * Stack is a stack trace. This is only given for internal errors.
 type JSONFormat struct {
 	Code      CodeStr           `json:"code"`
 	Msg       string            `json:"msg"`
