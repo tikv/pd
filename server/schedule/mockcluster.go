@@ -319,16 +319,13 @@ func (mc *MockCluster) newMockRegionInfo(regionID uint64, leaderID uint64, follo
 
 // ApplyOperator mocks apply oeprator.
 func (mc *MockCluster) ApplyOperator(op *Operator) {
-	region := mc.GetRegion(op.RegionID())
-	var newRegion *core.RegionInfo
+	origin := mc.GetRegion(op.RegionID())
+	region := origin
 	for !op.IsFinish() {
-		if newRegion != nil {
-			region = newRegion
-		}
 		if step := op.Check(region); step != nil {
 			switch s := step.(type) {
 			case TransferLeader:
-				newRegion = region.Clone(core.WithLeader(region.GetStorePeer(s.ToStore)))
+				region = region.Clone(core.WithLeader(region.GetStorePeer(s.ToStore)))
 			case AddPeer:
 				if region.GetStorePeer(s.ToStore) != nil {
 					panic("Add peer that exists")
@@ -337,12 +334,12 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 					Id:      s.PeerID,
 					StoreId: s.ToStore,
 				}
-				newRegion = region.Clone(core.WithAddPeer(peer))
+				region = region.Clone(core.WithAddPeer(peer))
 			case RemovePeer:
 				if region.GetStorePeer(s.FromStore) == nil {
 					panic("Remove peer that doesn't exist")
 				}
-				newRegion = region.Clone(core.WithRemoveStorePeer(s.FromStore))
+				region = region.Clone(core.WithRemoveStorePeer(s.FromStore))
 			case AddLearner:
 				if region.GetStorePeer(s.ToStore) != nil {
 					panic("Add learner that exists")
@@ -352,7 +349,7 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 					StoreId:   s.ToStore,
 					IsLearner: true,
 				}
-				newRegion = region.Clone(core.WithAddPeer(peer))
+				region = region.Clone(core.WithAddPeer(peer))
 			case PromoteLearner:
 				if region.GetStoreLearner(s.ToStore) == nil {
 					panic("promote peer that doesn't exist")
@@ -361,17 +358,17 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 					Id:      s.PeerID,
 					StoreId: s.ToStore,
 				}
-				newRegion = region.Clone(core.WithRemoveStorePeer(s.ToStore), core.WithAddPeer(peer))
+				region = region.Clone(core.WithRemoveStorePeer(s.ToStore), core.WithAddPeer(peer))
 			default:
 				panic("Unknown operator step")
 			}
 		}
 	}
-	mc.PutRegion(newRegion)
+	mc.PutRegion(region)
 	for id := range region.GetStoreIds() {
 		mc.UpdateStoreStatus(id)
 	}
-	for id := range newRegion.GetStoreIds() {
+	for id := range origin.GetStoreIds() {
 		mc.UpdateStoreStatus(id)
 	}
 }
