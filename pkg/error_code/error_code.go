@@ -251,12 +251,17 @@ func NewJSONFormat(errCode ErrorCode) JSONFormat {
 		previous = &ptrVar
 	}
 
+	var stack errors.StackTrace
+	if errCode.Code().IsAncestor(InternalCode) {
+		stack = StackTrace(errCode)
+	}
+
 	return JSONFormat{
 		Data:      data,
 		Msg:       errCode.Error(),
 		Code:      errCode.Code().CodeStr(),
 		Operation: op,
-		Stack:     StackTrace(errCode),
+		Stack:     stack,
 		Previous:  previous,
 	}
 }
