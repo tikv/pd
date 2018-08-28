@@ -14,8 +14,8 @@
 package schedule
 
 import (
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -161,7 +161,7 @@ func (bc *BasicCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.Regio
 
 // BlockStore stops balancer from selecting the store.
 func (bc *BasicCluster) BlockStore(storeID uint64) error {
-	return errors.Trace(bc.Stores.BlockStore(storeID))
+	return errors.WithStack(bc.Stores.BlockStore(storeID))
 }
 
 // UnblockStore allows balancer to select the store.

@@ -20,10 +20,10 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/pkg/error_code"
 	"github.com/pingcap/pd/server"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/unrolled/render"
 )
@@ -70,11 +70,11 @@ func readJSON(r io.ReadCloser, data interface{}) error {
 
 	b, err := ioutil.ReadAll(r)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	err = json.Unmarshal(b, data)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	return nil
@@ -83,7 +83,7 @@ func readJSON(r io.ReadCloser, data interface{}) error {
 func postJSON(url string, data []byte) error {
 	resp, err := server.DialClient.Post(url, "application/json", bytes.NewBuffer(data))
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	res, err := ioutil.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -112,7 +112,7 @@ func doDelete(url string) error {
 func doGet(url string) (*http.Response, error) {
 	resp, err := server.DialClient.Get(url)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, errors.Errorf("http get url %s return code %d", url, resp.StatusCode)

@@ -24,7 +24,7 @@ import (
 	"os"
 
 	"github.com/coreos/etcd/pkg/transport"
-	"github.com/juju/errors"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -43,7 +43,7 @@ func InitHTTPSClient(CAPath, CertPath, KeyPath string) error {
 	}
 	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	dialClient = &http.Client{Transport: &http.Transport{

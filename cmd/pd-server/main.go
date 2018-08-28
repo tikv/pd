@@ -16,16 +16,17 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	// Register schedulers.
@@ -50,12 +51,12 @@ func main() {
 	case flag.ErrHelp:
 		os.Exit(0)
 	default:
-		log.Fatalf("parse cmd flags error: %s\n", errors.ErrorStack(err))
+		log.Fatalf("parse cmd flags error: %s\n", fmt.Sprintf("%+v", err))
 	}
 
 	err = logutil.InitLogger(&cfg.Log)
 	if err != nil {
-		log.Fatalf("initialize logger error: %s\n", errors.ErrorStack(err))
+		log.Fatalf("initialize logger error: %s\n", fmt.Sprintf("%+v", err))
 	}
 
 	server.LogPDInfo()
@@ -71,15 +72,15 @@ func main() {
 
 	err = server.PrepareJoinCluster(cfg)
 	if err != nil {
-		log.Fatal("join error ", errors.ErrorStack(err))
+		log.Fatal("join error ", fmt.Sprintf("%+v", err))
 	}
 	svr, err := server.CreateServer(cfg, api.NewHandler)
 	if err != nil {
-		log.Fatalf("create server failed: %v", errors.ErrorStack(err))
+		log.Fatalf("create server failed: %v", fmt.Sprintf("%+v", err))
 	}
 
 	if err = server.InitHTTPClient(svr); err != nil {
-		log.Fatalf("initial http client for api handler failed: %v", errors.ErrorStack(err))
+		log.Fatalf("initial http client for api handler failed: %v", fmt.Sprintf("%+v", err))
 	}
 
 	sc := make(chan os.Signal, 1)
@@ -97,7 +98,7 @@ func main() {
 	}()
 
 	if err := svr.Run(ctx); err != nil {
-		log.Fatalf("run server failed: %v", errors.ErrorStack(err))
+		log.Fatalf("run server failed: %v", fmt.Sprintf("%+v", err))
 	}
 
 	<-ctx.Done()

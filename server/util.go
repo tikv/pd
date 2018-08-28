@@ -24,10 +24,10 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/golang/protobuf/proto"
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -85,7 +85,7 @@ func CheckPDVersion(opt *scheduleOption) {
 func getValue(c *clientv3.Client, key string, opts ...clientv3.OpOption) ([]byte, error) {
 	resp, err := kvGet(c, key, opts...)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 
 	if n := len(resp.Kvs); n == 0 {
@@ -102,14 +102,14 @@ func getValue(c *clientv3.Client, key string, opts ...clientv3.OpOption) ([]byte
 func getProtoMsg(c *clientv3.Client, key string, msg proto.Message, opts ...clientv3.OpOption) (bool, error) {
 	value, err := getValue(c, key, opts...)
 	if err != nil {
-		return false, errors.Trace(err)
+		return false, errors.WithStack(err)
 	}
 	if value == nil {
 		return false, nil
 	}
 
 	if err = proto.Unmarshal(value, msg); err != nil {
-		return false, errors.Trace(err)
+		return false, errors.WithStack(err)
 	}
 
 	return true, nil
@@ -133,7 +133,7 @@ func initOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 		Else(clientv3.OpGet(key)).
 		Commit()
 	if err != nil {
-		return 0, errors.Trace(err)
+		return 0, errors.WithStack(err)
 	}
 
 	// Txn commits ok, return the generated cluster ID.
@@ -213,14 +213,14 @@ func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	txnCounter.WithLabelValues(label).Inc()
 	txnDuration.WithLabelValues(label).Observe(cost.Seconds())
 
-	return resp, errors.Trace(err)
+	return resp, errors.WithStack(err)
 }
 
 // GetMembers return a slice of Members.
 func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
 	listResp, err := etcdutil.ListEtcdMembers(etcdClient)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 
 	members := make([]*pdpb.Member, 0, len(listResp.Members))
@@ -240,7 +240,7 @@ func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
 func parseTimestamp(data []byte) (time.Time, error) {
 	nano, err := bytesToUint64(data)
 	if err != nil {
-		return zeroTime, errors.Trace(err)
+		return zeroTime, errors.WithStack(err)
 	}
 
 	return time.Unix(0, int64(nano)), nil
@@ -254,7 +254,7 @@ func subTimeByWallClock(after time.Time, before time.Time) time.Duration {
 func InitHTTPClient(svr *Server) error {
 	tlsConfig, err := svr.GetSecurityConfig().ToTLSConfig()
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	DialClient = &http.Client{Transport: &http.Transport{

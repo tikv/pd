@@ -18,9 +18,9 @@ import (
 	"io/ioutil"
 	"strings"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/tempurl"
 	"github.com/pingcap/pd/server"
+	"github.com/pkg/errors"
 )
 
 type serverConfig struct {
@@ -64,7 +64,7 @@ func (c *serverConfig) Generate() (*server.Config, error) {
 	cfg := server.NewConfig()
 	err := cfg.Parse(arguments)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	return cfg, nil
 }

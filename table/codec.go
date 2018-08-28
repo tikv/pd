@@ -17,7 +17,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/juju/errors"
+	"github.com/pkg/errors"
 )
 
 var (

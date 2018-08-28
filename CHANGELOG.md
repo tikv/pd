@@ -1,6 +1,32 @@
 # PD Change Log
 
-## V2.1.0-beta
+## v2.1.0-rc1
+### Features
+* Introduce the version control mechanism and support rolling update of the cluster with compatibility
+* Enable the `region merge` feature
+* Support the `GetPrevRegion` interface
+* Support splitting Regions in batch
+* Support storing the GC safepoint
+### Improvements
+* Optimize the issue that TSO allocation is affected by the system clock going backwards
+* Optimize the performance of handling Region hearbeats
+* Optimize the Region tree performance
+* Optimize the performance of computing hotspot statistics
+* Optimize returning the error code of API interface
+* Add options of controlling scheduling strategies
+* Prohibit using special characters in `label`
+* Improve the scheduling simulator
+* Support splitting Regions using statistics in pd-ctl
+* Support formatting JSON output by calling `jq` in pd-ctl
+* Add metrics about etcd Raft state machine
+### Bug fixes
+* Fix the issue that the namespace is not reloaded after switching Leader
+* Fix the issue that namespace scheduling exceeds the schedule limit
+* Fix the issue that hotspot scheduling exceeds the schedule limit
+* Fix the issue that wrong logs are output when the PD client closes
+* Fix the wrong statistics of Region heartbeat latency
+
+## v2.1.0-beta
 ### Improvements
 * Enable Raft PreVote between PD nodes to avoid leader reelection when network recovers after network isolation
 * Optimize the issue that Balance Scheduler schedules small Regions frequently
@@ -16,7 +42,7 @@
 * Do not support rolling back to v2.0.x or earlier due to update of the new version storage engine
 * Enable `raft learner` by default in the new version of PD. If the cluster is upgraded from 1.x to 2.1, the machine should be stopped before upgrade or a rolling update should be first applied to TiKV and then PD 
 
-## V2.0.4
+## v2.0.4
 ### Improvement
 * Improve the behavior of the unset scheduling argument `max-pending-peer-count` by changing it to no limit for the maximum number of `PendingPeer`s
 

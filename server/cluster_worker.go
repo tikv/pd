@@ -15,19 +15,20 @@ package server
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.
 func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	if err := c.cachedCluster.handleRegionHeartbeat(region); err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	// If the region peer count is 0, then we should not handle this.
@@ -44,18 +45,18 @@ func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	reqRegion := request.GetRegion()
 	err := c.validRequestRegion(reqRegion)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 
 	newRegionID, err := c.s.idAlloc.Alloc()
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 
 	peerIDs := make([]uint64, len(request.Region.Peers))
 	for i := 0; i < len(peerIDs); i++ {
 		if peerIDs[i], err = c.s.idAlloc.Alloc(); err != nil {
-			return nil, errors.Trace(err)
+			return nil, errors.WithStack(err)
 		}
 	}
 
@@ -92,7 +93,7 @@ func (c *RaftCluster) handleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	splitCount := request.GetSplitCount()
 	err := c.validRequestRegion(reqRegion)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 
@@ -101,13 +102,13 @@ func (c *RaftCluster) handleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	for i := 0; i < int(splitCount); i++ {
 		newRegionID, err := c.s.idAlloc.Alloc()
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, errors.WithStack(err)
 		}
 
 		peerIDs := make([]uint64, len(request.Region.Peers))
 		for i := 0; i < len(peerIDs); i++ {
 			if peerIDs[i], err = c.s.idAlloc.Alloc(); err != nil {
-				return nil, errors.Trace(err)
+				return nil, errors.WithStack(err)
 			}
 		}
 
@@ -163,8 +164,8 @@ func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 
 	err := c.checkSplitRegion(left, right)
 	if err != nil {
-		log.Warnf("report split region is invalid - %v, %v", request, errors.ErrorStack(err))
-		return nil, errors.Trace(err)
+		log.Warnf("report split region is invalid - %v, %v", request, fmt.Sprintf("%+v", err))
+		return nil, errors.WithStack(err)
 	}
 
 	// Build origin region by using left and right.
@@ -180,8 +181,8 @@ func (c *RaftCluster) handleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 
 	err := c.checkSplitRegions(regions)
 	if err != nil {
-		log.Warnf("report batch split region is invalid - %v, %v", request, errors.ErrorStack(err))
-		return nil, errors.Trace(err)
+		log.Warnf("report batch split region is invalid - %v, %v", request, fmt.Sprintf("%+v", err))
+		return nil, errors.WithStack(err)
 	}
 	last := len(regions) - 1
 	originRegion := proto.Clone(regions[last]).(*metapb.Region)

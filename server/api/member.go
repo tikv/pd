@@ -20,10 +20,10 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/unrolled/render"
 )
@@ -53,7 +53,7 @@ func (h *memberHandler) listMembers() (*pdpb.GetMembersResponse, error) {
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: h.svr.ClusterID()}}
 	members, err := h.svr.GetMembers(context.Background(), req)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	// Fill leader priorities.
 	for _, m := range members.GetMembers() {
@@ -68,7 +68,7 @@ func (h *memberHandler) listMembers() (*pdpb.GetMembersResponse, error) {
 		}
 		m.LeaderPriority = int32(leaderPriority)
 	}
-	return members, errors.Trace(err)
+	return members, errors.WithStack(err)
 }
 
 func (h *memberHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
