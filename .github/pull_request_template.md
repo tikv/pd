@@ -2,7 +2,7 @@
 Thank you for working on PD! Please read PD's [CONTRIBUTING](https://github.com/pingcap/pd/blob/master/CONTRIBUTING.md) document **BEFORE** filing this PR.
 -->
 
-### What problem does this PR solve? <!--add issue link with summary if exists-->
+### What problem does this PR solve? <!--add the issue link with summary if it exists-->
 
 
 ### What is changed and how it works?
@@ -34,4 +34,4 @@ Related changes
  - Need to cherry-pick to the release branch
  - Need to update the documentation
  - Need to update the `tidb-ansible` repository
- - Need to be included in the release note
+ - Need to be included in the release notes
