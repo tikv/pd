@@ -69,12 +69,8 @@ func NewStackCode(err ErrorCode, position ...int) StackCode {
 	}
 
 	// if there is an existing trace, take that: it should be deeper
-	var prev error = err
-	for prev != nil {
-		if stackTraceErr, ok := prev.(StackTracer); ok {
-			return StackCode{Err: err, GetStackTrace: stackTraceErr.StackTrace()}
-		}
-		prev = WrappedError(prev)
+	if trace := StackTrace(err); trace != nil {
+		return StackCode{Err: err, GetStackTrace: trace}
 	}
 
 	// we must go through some contortions to get a stack trace from pkg/errors
