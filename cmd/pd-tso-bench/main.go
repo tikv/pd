@@ -24,8 +24,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/pd-client"
+	"github.com/pkg/errors"
 )
 
 var (

@@ -16,12 +16,12 @@ package faketikv
 import (
 	"context"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/faketikv/cases"
 	"github.com/pingcap/pd/pkg/faketikv/simutil"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pkg/errors"
 )
 
 // Driver promotes the cluster status change.
@@ -53,18 +53,18 @@ func (d *Driver) Prepare() error {
 
 	clusterInfo, err := NewClusterInfo(d.addr, d.conf)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	d.clusterInfo = clusterInfo
 
 	conn, err := NewConn(d.clusterInfo.Nodes)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	raftEngine, err := NewRaftEngine(d.conf, conn)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	d.raftEngine = raftEngine
 
@@ -75,7 +75,7 @@ func (d *Driver) Prepare() error {
 	// Bootstrap.
 	store, region, err := clusterInfo.GetBootstrapInfo(d.raftEngine)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	d.client = clusterInfo.Nodes[store.GetId()].client
 
@@ -92,7 +92,7 @@ func (d *Driver) Prepare() error {
 	for {
 		id, err := d.client.AllocID(context.Background())
 		if err != nil {
-			return errors.Trace(err)
+			return errors.WithStack(err)
 		}
 		if id > d.conf.MaxID {
 			break

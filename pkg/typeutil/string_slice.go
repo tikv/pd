@@ -17,7 +17,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/juju/errors"
+	"github.com/pkg/errors"
 )
 
 //StringSlice is more friendly to json encode/decode
@@ -32,7 +32,7 @@ func (s StringSlice) MarshalJSON() ([]byte, error) {
 func (s *StringSlice) UnmarshalJSON(text []byte) error {
 	data, err := strconv.Unquote(string(text))
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	if len(data) == 0 {
 		*s = nil

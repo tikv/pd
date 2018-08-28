@@ -17,9 +17,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 

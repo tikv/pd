@@ -18,10 +18,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
 
@@ -116,7 +116,7 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 	}
 	stores, err := h.GetStores()
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 
 	trendStores := make([]trendStore, 0, len(stores))
@@ -157,7 +157,7 @@ func (h *trendHandler) getStoreFlow(stats core.StoreHotRegionsStat, storeID uint
 func (h *trendHandler) getTrendHistory(start time.Time) (*trendHistory, error) {
 	operatorHistory, err := h.GetHistory(start)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	// Use a tmp map to merge same histories together.
 	historyMap := make(map[trendHistoryEntry]int)

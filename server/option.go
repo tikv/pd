@@ -19,10 +19,10 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pkg/errors"
 )
 
 // scheduleOption is a wrapper to access the configuration safely.
@@ -205,7 +205,7 @@ func (o *scheduleOption) RemoveSchedulerCfg(name string) error {
 		// To create a temporary scheduler is just used to get scheduler's name
 		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, schedule.NewLimiter(), schedulerCfg.Args...)
 		if err != nil {
-			return errors.Trace(err)
+			return errors.WithStack(err)
 		}
 		if tmp.GetName() == name {
 			if IsDefaultScheduler(tmp.GetType()) {
@@ -273,7 +273,7 @@ func (o *scheduleOption) persist(kv *core.KV) error {
 		ClusterVersion: o.loadClusterVersion(),
 	}
 	err := kv.SaveConfig(cfg)
-	return errors.Trace(err)
+	return errors.WithStack(err)
 }
 
 func (o *scheduleOption) reload(kv *core.KV) error {
@@ -290,7 +290,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 	}
 	isExist, err := kv.LoadConfig(cfg)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	o.adjustScheduleCfg(cfg)
 	if isExist {
