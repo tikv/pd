@@ -68,12 +68,12 @@ func NewClient(pdAddr string, tag string) (Client, <-chan *pdpb.RegionHeartbeatR
 	simutil.Logger.Infof("[%s][pd] create pd client with endpoints %v", tag, pdAddr)
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &client{
-		url: pdAddr,
+		url:                      pdAddr,
 		reportRegionHeartbeatCh:  make(chan *core.RegionInfo, 1),
 		receiveRegionHeartbeatCh: make(chan *pdpb.RegionHeartbeatResponse, 1),
-		ctx:    ctx,
-		cancel: cancel,
-		tag:    tag,
+		ctx:                      ctx,
+		cancel:                   cancel,
+		tag:                      tag,
 	}
 	cc, err := c.createConn()
 	if err != nil {
