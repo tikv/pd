@@ -19,6 +19,7 @@ import (
 	"math/rand"
 	"net/http"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -208,7 +209,8 @@ func (s *Server) startServer() error {
 
 	s.idAlloc = &idAllocator{s: s}
 	kvBase := newEtcdKVBase(s)
-	s.kv = core.NewKV(kvBase)
+	path := filepath.Join(s.cfg.DataDir, "leveldb")
+	s.kv = core.NewKV(kvBase, core.WithLevelDBKV(path))
 	s.cluster = newRaftCluster(s, s.clusterID)
 	s.hbStreams = newHeartbeatStreams(s.clusterID)
 	if s.classifier, err = namespace.CreateClassifier(s.cfg.NamespaceClassifier, s.kv, s.idAlloc); err != nil {
@@ -258,7 +260,7 @@ func (s *Server) Close() {
 	if s.hbStreams != nil {
 		s.hbStreams.Close()
 	}
-
+	s.kv.Close()
 	log.Info("close server")
 }
 

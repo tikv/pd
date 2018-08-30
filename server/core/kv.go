@@ -19,6 +19,7 @@ import (
 	"math"
 	"path"
 	"strconv"
+	"sync"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -37,16 +38,38 @@ const (
 	minKVRangeLimit = 100
 )
 
+// WithLevelDBKV store the regions information in levelDB.
+func WithLevelDBKV(path string) func(*KV) {
+	return func(kv *KV) {
+		levelDB, err := NewLeveldbKV(path)
+		if err != nil {
+			fmt.Println("meet error with leveldb: ", err)
+			return
+		}
+		kv.regionKV = levelDB
+	}
+}
+
 // KV wraps all kv operations, keep it stateless.
 type KV struct {
 	KVBase
+	mu           sync.RWMutex
+	batch        int
+	batchRegions map[string]*metapb.Region
+	regionKV     KVBase
 }
 
 // NewKV creates KV instance with KVBase.
-func NewKV(base KVBase) *KV {
-	return &KV{
-		KVBase: base,
+func NewKV(base KVBase, opts ...func(*KV)) *KV {
+	kv := &KV{
+		KVBase:       base,
+		batch:        100,
+		batchRegions: make(map[string]*metapb.Region),
 	}
+	for _, opt := range opts {
+		opt(kv)
+	}
+	return kv
 }
 
 func (kv *KV) storePath(storeID uint64) string {
@@ -72,36 +95,59 @@ func (kv *KV) storeRegionWeightPath(storeID uint64) string {
 
 // LoadMeta loads cluster meta from KV store.
 func (kv *KV) LoadMeta(meta *metapb.Cluster) (bool, error) {
-	return kv.loadProto(clusterPath, meta)
+	return loadProto(kv.KVBase, clusterPath, meta)
 }
 
 // SaveMeta save cluster meta to KV store.
 func (kv *KV) SaveMeta(meta *metapb.Cluster) error {
-	return kv.saveProto(clusterPath, meta)
+	return saveProto(kv.KVBase, clusterPath, meta)
 }
 
 // LoadStore loads one store from KV.
 func (kv *KV) LoadStore(storeID uint64, store *metapb.Store) (bool, error) {
-	return kv.loadProto(kv.storePath(storeID), store)
+	return loadProto(kv.KVBase, kv.storePath(storeID), store)
 }
 
 // SaveStore saves one store to KV.
 func (kv *KV) SaveStore(store *metapb.Store) error {
-	return kv.saveProto(kv.storePath(store.GetId()), store)
+	return saveProto(kv.KVBase, kv.storePath(store.GetId()), store)
 }
 
 // LoadRegion loads one regoin from KV.
 func (kv *KV) LoadRegion(regionID uint64, region *metapb.Region) (bool, error) {
-	return kv.loadProto(kv.regionPath(regionID), region)
+	if kv.regionKV != nil {
+		return loadProto(kv.regionKV, kv.regionPath(regionID), region)
+	}
+	return loadProto(kv.KVBase, kv.regionPath(regionID), region)
 }
 
 // SaveRegion saves one region to KV.
 func (kv *KV) SaveRegion(region *metapb.Region) error {
-	return kv.saveProto(kv.regionPath(region.GetId()), region)
+	if kv.regionKV != nil {
+		kv.mu.Lock()
+		defer kv.mu.Unlock()
+		if kv.batch < 100 {
+			kv.batchRegions[kv.regionPath(region.GetId())] = region
+			kv.batch++
+			return nil
+		}
+		err := kv.regionKV.(*leveldbKV).SaveRegions(kv.batchRegions)
+		if err != nil {
+			return err
+		}
+		kv.batch = 0
+		kv.batchRegions = make(map[string]*metapb.Region)
+		return nil
+		//return saveProto(kv.regionKV, kv.regionPath(region.GetId()), region)
+	}
+	return saveProto(kv.KVBase, kv.regionPath(region.GetId()), region)
 }
 
 // DeleteRegion deletes one region from KV.
 func (kv *KV) DeleteRegion(region *metapb.Region) error {
+	if kv.regionKV != nil {
+		return kv.regionKV.Delete(kv.regionPath(region.GetId()))
+	}
 	return kv.Delete(kv.regionPath(region.GetId()))
 }
 
@@ -200,10 +246,13 @@ func (kv *KV) LoadRegions(regions *RegionsInfo) error {
 	// the message packet to exceed the grpc message size limit (4MB). Here we use
 	// a variable rangeLimit to work around.
 	rangeLimit := maxKVRangeLimit
-
+	loadKV := kv.KVBase
+	if kv.regionKV != nil {
+		loadKV = kv.regionKV
+	}
 	for {
 		key := kv.regionPath(nextID)
-		res, err := kv.LoadRange(key, endKey, rangeLimit)
+		res, err := loadKV.LoadRange(key, endKey, rangeLimit)
 		if err != nil {
 			if rangeLimit /= 2; rangeLimit >= minKVRangeLimit {
 				continue
@@ -256,7 +305,7 @@ func (kv *KV) LoadGCSafePoint() (uint64, error) {
 	return safePoint, nil
 }
 
-func (kv *KV) loadProto(key string, msg proto.Message) (bool, error) {
+func loadProto(kv KVBase, key string, msg proto.Message) (bool, error) {
 	value, err := kv.Load(key)
 	if err != nil {
 		return false, err
@@ -268,10 +317,17 @@ func (kv *KV) loadProto(key string, msg proto.Message) (bool, error) {
 	return true, errors.WithStack(err)
 }
 
-func (kv *KV) saveProto(key string, msg proto.Message) error {
+func saveProto(kv KVBase, key string, msg proto.Message) error {
 	value, err := proto.Marshal(msg)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 	return kv.Save(key, string(value))
+}
+
+// Close closes the kv.
+func (kv *KV) Close() {
+	if kv.regionKV != nil {
+		kv.regionKV.(*leveldbKV).db.Close()
+	}
 }

@@ -615,10 +615,14 @@ func (s *Server) UpdateRegion(ctx context.Context, request *pdpb.UpdateRegionReq
 	if request.GetHeader().GetClusterId() != s.clusterID {
 		return nil, status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
 	}
-
-	infos := make([]byte, request.Data.Size())
-	var [] core.RegionInfo
-	s.kv.Save()
+	var p pdpb.MetaRegions
+	p.Unmarshal(request.Data)
+	for i := uint32(0); i < p.GetCount(); i++ {
+		s.kv.SaveRegion(p.Regions[i])
+	}
+	return &pdpb.UpdateRegionResponse{
+		Header: s.header(),
+	}, nil
 }
 
 // UpdateGCSafePoint implements gRPC PDServer.
