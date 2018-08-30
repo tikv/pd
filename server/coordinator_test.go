@@ -639,7 +639,6 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	tc.addRegionStore(2, 2)
 	tc.addRegionStore(3, 3)
 	tc.addLeaderRegion(1, 1)
-	//tc.activeRegions = 1
 	region := tc.GetRegion(1)
 	tc.prepareChecker.collect(region)
 
