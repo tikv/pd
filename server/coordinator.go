@@ -34,6 +34,7 @@ import (
 const (
 	runSchedulerCheckInterval = 3 * time.Second
 	collectFactor             = 0.8
+	collectTimeout            = 5 * time.Minute
 	historyKeepTime           = 5 * time.Minute
 	maxScheduleRetries        = 10
 

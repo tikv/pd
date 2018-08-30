@@ -486,10 +486,6 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*metapb.Region {
 
 	r.regions.Put(region)
 
-	if region.Leader == nil {
-		return overlaps
-	}
-
 	// Add to leaders and followers.
 	for _, peer := range region.GetVoters() {
 		storeID := peer.GetStoreId()

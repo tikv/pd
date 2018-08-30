@@ -35,10 +35,10 @@ type clusterInfo struct {
 	id              core.IDAllocator
 	kv              *core.KV
 	meta            *metapb.Cluster
-	activeRegions   int
 	opt             *scheduleOption
 	regionStats     *regionStatistics
 	labelLevelStats *labelLevelStatistics
+	prepareChecker  *prepareChecker
 }
 
 func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clusterInfo {
@@ -48,6 +48,7 @@ func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clus
 		opt:             opt,
 		kv:              kv,
 		labelLevelStats: newLabelLevelStatistics(),
+		prepareChecker:  newPrepareChecker(),
 	}
 }
 
@@ -416,7 +417,7 @@ func (c *clusterInfo) GetFollowerStores(region *core.RegionInfo) []*core.StoreIn
 func (c *clusterInfo) isPrepared() bool {
 	c.RLock()
 	defer c.RUnlock()
-	return float64(c.core.Regions.Length())*collectFactor <= float64(c.activeRegions)
+	return c.prepareChecker.check(c)
 }
 
 // handleStoreHeartbeat updates the store status.
@@ -514,7 +515,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	c.Lock()
 	defer c.Unlock()
 	if isNew {
-		c.activeRegions++
+		c.prepareChecker.collect(region)
 	}
 
 	if saveCache {
@@ -704,4 +705,45 @@ func (c *clusterInfo) RegionReadStats() []*core.RegionStat {
 func (c *clusterInfo) RegionWriteStats() []*core.RegionStat {
 	// RegionStats is a thread-safe method
 	return c.core.HotCache.RegionStats(schedule.WriteFlow)
+}
+
+type prepareChecker struct {
+	reactiveRegions map[uint64]int
+	start           time.Time
+	sum             int
+	isPrepared      bool
+}
+
+func newPrepareChecker() *prepareChecker {
+	return &prepareChecker{
+		start:           time.Now(),
+		reactiveRegions: make(map[uint64]int),
+	}
+}
+
+func (checker *prepareChecker) check(c *clusterInfo) bool {
+	if checker.isPrepared || time.Since(checker.start) > collectTimeout {
+		return true
+	}
+	if float64(c.core.Regions.Length())*collectFactor > float64(checker.sum) {
+		return false
+	}
+	for _, store := range c.core.GetStores() {
+		if !store.IsUp() {
+			continue
+		}
+		storeID := store.GetId()
+		if float64(c.core.Regions.GetStoreRegionCount(storeID))*collectFactor > float64(checker.reactiveRegions[storeID]) {
+			return false
+		}
+	}
+	checker.isPrepared = true
+	return true
+}
+
+func (checker *prepareChecker) collect(region *core.RegionInfo) {
+	for _, p := range region.GetPeers() {
+		checker.reactiveRegions[p.GetStoreId()]++
+	}
+	checker.sum++
 }
