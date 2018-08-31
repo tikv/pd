@@ -55,9 +55,12 @@ func NewRaftEngine(conf *cases.Conf, conn *Conn) (*RaftEngine, error) {
 		if i < len(conf.Regions)-1 {
 			meta.EndKey = []byte(splitKeys[i])
 		}
-		regionInfo := core.NewRegionInfo(meta, region.Leader)
-		regionInfo.ApproximateSize = region.Size
-		regionInfo.ApproximateKeys = region.Keys
+		regionInfo := core.NewRegionInfo(
+			meta,
+			region.Leader,
+			core.SetApproximateSize(region.Size),
+			core.SetApproximateKeys(region.Keys),
+		)
 		r.SetRegion(regionInfo)
 		peers := region.Peers
 		regionSize := uint64(region.Size)
@@ -78,73 +81,77 @@ func (r *RaftEngine) stepRegions(c *ClusterInfo) {
 }
 
 func (r *RaftEngine) stepLeader(region *core.RegionInfo) {
-	if region.Leader != nil && r.conn.nodeHealth(region.Leader.GetStoreId()) {
+	if region.GetLeader() != nil && r.conn.nodeHealth(region.GetLeader().GetStoreId()) {
 		return
 	}
 	newLeader := r.electNewLeader(region)
-	originLeader := region.Leader
-	region.Leader = newLeader
+	newRegion := region.Clone(core.WithLeader(newLeader))
 	if newLeader == nil {
-		r.SetRegion(region)
-		simutil.Logger.Infof("[region %d] no leader", region.GetId())
+		r.SetRegion(newRegion)
+		simutil.Logger.Infof("[region %d] no leader", region.GetID())
 		return
 	}
-	simutil.Logger.Infof("[region %d] elect new leader: %+v,old leader: %+v", region.GetId(), originLeader, newLeader)
-	r.SetRegion(region)
-	r.recordRegionChange(region)
+	simutil.Logger.Infof("[region %d] elect new leader: %+v,old leader: %+v", region.GetID(), newLeader, region.GetLeader())
+	r.SetRegion(newRegion)
+	r.recordRegionChange(newRegion)
 }
 
 func (r *RaftEngine) stepSplit(region *core.RegionInfo, c *ClusterInfo) {
-	if region.Leader == nil {
+	if region.GetLeader() == nil {
 		return
 	}
-	if !c.conf.NeedSplit(region.ApproximateSize, region.ApproximateKeys) {
+	if !c.conf.NeedSplit(region.GetApproximateSize(), region.GetApproximateKeys()) {
 		return
 	}
-	ids := make([]uint64, 1+len(region.Peers))
+	ids := make([]uint64, 1+len(region.GetPeers()))
 	for i := range ids {
 		var err error
-		ids[i], err = c.allocID(region.Leader.GetStoreId())
+		ids[i], err = c.allocID(region.GetLeader().GetStoreId())
 		if err != nil {
 			simutil.Logger.Infof("alloc id failed: %s", err)
 			return
 		}
 	}
 
-	region.RegionEpoch.Version++
-	region.ApproximateSize /= 2
-	region.ApproximateKeys /= 2
+	splitKey := generateSplitKey(region.GetStartKey(), region.GetEndKey())
+	left := region.Clone(
+		core.WithNewRegionID(ids[len(ids)-1]),
+		core.WithNewPeerIds(ids[0:len(ids)-1]...),
+		core.WithIncVersion(),
+		core.SetApproximateKeys(region.GetApproximateKeys()/2),
+		core.SetApproximateSize(region.GetApproximateSize()/2),
+		core.WithPendingPeers(nil),
+		core.WithDownPeers(nil),
+		core.WithEndKey(splitKey),
+	)
+	right := region.Clone(
+		core.WithIncVersion(),
+		core.SetApproximateKeys(region.GetApproximateKeys()/2),
+		core.SetApproximateSize(region.GetApproximateSize()/2),
+		core.WithStartKey(splitKey),
+	)
 
-	newRegion := region.Clone()
-	newRegion.PendingPeers, newRegion.DownPeers = nil, nil
-	for i, peer := range newRegion.Peers {
-		peer.Id = ids[i]
-	}
-	newRegion.Id = ids[len(ids)-1]
-
-	splitKey := generateSplitKey(region.StartKey, region.EndKey)
-	newRegion.EndKey, region.StartKey = splitKey, splitKey
-
-	r.SetRegion(region)
-	r.SetRegion(newRegion)
-	r.recordRegionChange(region)
-	r.recordRegionChange(newRegion)
+	r.SetRegion(right)
+	r.SetRegion(left)
+	r.recordRegionChange(left)
+	r.recordRegionChange(right)
 }
 
 func (r *RaftEngine) recordRegionChange(region *core.RegionInfo) {
-	n := region.Leader.GetStoreId()
-	r.regionchange[n] = append(r.regionchange[n], region.Id)
+	n := region.GetLeader().GetStoreId()
+	r.regionchange[n] = append(r.regionchange[n], region.GetID())
 }
 
 func (r *RaftEngine) updateRegionStore(region *core.RegionInfo, size int64) {
-	region.ApproximateSize += size
-	wBytes := uint64(size)
-	region.WrittenBytes = wBytes
+	newRegion := region.Clone(
+		core.SetApproximateSize(region.GetApproximateSize()+size),
+		core.SetWrittenBytes(uint64(size)),
+	)
 	storeIDs := region.GetStoreIds()
 	for storeID := range storeIDs {
-		r.conn.Nodes[storeID].incUsedSize(wBytes)
+		r.conn.Nodes[storeID].incUsedSize(uint64(size))
 	}
-	r.SetRegion(region)
+	r.SetRegion(newRegion)
 }
 
 func (r *RaftEngine) updateRegionReadBytes(readBytes map[uint64]int64) {
@@ -154,8 +161,8 @@ func (r *RaftEngine) updateRegionReadBytes(readBytes map[uint64]int64) {
 			simutil.Logger.Errorf("region %d not found", id)
 			continue
 		}
-		region.ReadBytes = uint64(bytes)
-		r.SetRegion(region)
+		newRegion := region.Clone(core.SetReadBytes(uint64(bytes)))
+		r.SetRegion(newRegion)
 	}
 }
 
@@ -175,7 +182,7 @@ func (r *RaftEngine) electNewLeader(region *core.RegionInfo) *metapb.Peer {
 	if unhealth > len(ids)/2 {
 		return nil
 	}
-	for _, peer := range region.Peers {
+	for _, peer := range region.GetPeers() {
 		if peer.GetStoreId() == newLeaderStoreID {
 			return peer
 		}

@@ -96,18 +96,18 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 			schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
 			continue
 		}
-		log.Debugf("[%s] select region%d", s.GetName(), region.GetId())
+		log.Debugf("[%s] select region%d", s.GetName(), region.GetID())
 
 		// We don't schedule region with abnormal number of replicas.
 		if len(region.GetPeers()) != cluster.GetMaxReplicas() {
-			log.Debugf("[%s] region%d has abnormal replica count", s.GetName(), region.GetId())
+			log.Debugf("[%s] region%d has abnormal replica count", s.GetName(), region.GetID())
 			schedulerCounter.WithLabelValues(s.GetName(), "abnormal_replica").Inc()
 			continue
 		}
 
 		// Skip hot regions.
-		if cluster.IsRegionHot(region.GetId()) {
-			log.Debugf("[%s] region%d is hot", s.GetName(), region.GetId())
+		if cluster.IsRegionHot(region.GetID()) {
+			log.Debugf("[%s] region%d is hot", s.GetName(), region.GetID())
 			schedulerCounter.WithLabelValues(s.GetName(), "region_hot").Inc()
 			continue
 		}
@@ -148,11 +148,11 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 
 	target := cluster.GetStore(storeID)
-	log.Debugf("[region %d] source store id is %v, target store id is %v", region.GetId(), source.GetId(), target.GetId())
+	log.Debugf("[region %d] source store id is %v, target store id is %v", region.GetID(), source.GetId(), target.GetId())
 
 	if !shouldBalance(cluster, source, target, region, core.RegionKind, opInfluence) {
 		log.Debugf("[%s] skip balance region %d, source %d to target %d ,source size: %v, source score: %v, source influence: %v, target size: %v, target score: %v, target influence: %v, average region size: %v",
-			s.GetName(), region.GetId(), source.GetId(), target.GetId(),
+			s.GetName(), region.GetID(), source.GetId(), target.GetId(),
 			source.RegionSize, source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
 			opInfluence.GetStoreInfluence(source.GetId()).ResourceSize(core.RegionKind),
 			target.RegionSize, target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
