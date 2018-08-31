@@ -194,10 +194,5 @@ func WithPromoteLearner(peerID uint64) RegionCreateOption {
 				p.IsLearner = false
 			}
 		}
-		for _, l := range region.learners {
-			if l.GetId() == peerID {
-				l.IsLearner = false
-			}
-		}
 	}
 }
