@@ -79,13 +79,13 @@ func NewNode(s *cases.Store, pdAddr string) (*Node, error) {
 		return nil, err
 	}
 	return &Node{
-		Store:  store,
-		stats:  stats,
-		client: client,
-		ctx:    ctx,
-		cancel: cancel,
-		tasks:  make(map[uint64]Task),
-		state:  Down,
+		Store:                    store,
+		stats:                    stats,
+		client:                   client,
+		ctx:                      ctx,
+		cancel:                   cancel,
+		tasks:                    make(map[uint64]Task),
+		state:                    Down,
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
 		// FIXME: This value should be adjusted to a appropriate one.
 		ioRate: 40 * 1000 * 1000,

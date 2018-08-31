@@ -27,17 +27,19 @@ import (
 // RaftEngine records all raft infomations.
 type RaftEngine struct {
 	sync.RWMutex
-	regionsInfo  *core.RegionsInfo
-	conn         *Conn
-	regionchange map[uint64][]uint64
+	regionsInfo    *core.RegionsInfo
+	conn           *Conn
+	regionchange   map[uint64][]uint64
+	schedulerStats *schedulerStatistics
 }
 
 // NewRaftEngine creates the initialized raft with the configuration.
 func NewRaftEngine(conf *cases.Conf, conn *Conn) (*RaftEngine, error) {
 	r := &RaftEngine{
-		regionsInfo:  core.NewRegionsInfo(),
-		conn:         conn,
-		regionchange: make(map[uint64][]uint64),
+		regionsInfo:    core.NewRegionsInfo(),
+		conn:           conn,
+		regionchange:   make(map[uint64][]uint64),
+		schedulerStats: newSchedulerStatistics(),
 	}
 
 	splitKeys := generateKeys(len(conf.Regions) - 1)

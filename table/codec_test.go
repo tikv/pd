@@ -63,17 +63,17 @@ func (s *testCodecSuite) TestDecodeBytes(c *C) {
 
 func (s *testCodecSuite) TestTableID(c *C) {
 	key := encodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\xff"))
-	c.Assert(Key(key).TableID(), Equals, int64(0xff))
+	c.Assert(key.TableID(), Equals, int64(0xff))
 
 	key = encodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\xff_i\x01\x02"))
-	c.Assert(Key(key).TableID(), Equals, int64(0xff))
+	c.Assert(key.TableID(), Equals, int64(0xff))
 
 	key = []byte("t\x80\x00\x00\x00\x00\x00\x00\xff")
-	c.Assert(Key(key).TableID(), Equals, int64(0))
+	c.Assert(key.TableID(), Equals, int64(0))
 
 	key = encodeBytes([]byte("T\x00\x00\x00\x00\x00\x00\x00\xff"))
-	c.Assert(Key(key).TableID(), Equals, int64(0))
+	c.Assert(key.TableID(), Equals, int64(0))
 
 	key = encodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\xff"))
-	c.Assert(Key(key).TableID(), Equals, int64(0))
+	c.Assert(key.TableID(), Equals, int64(0))
 }
