@@ -61,7 +61,7 @@ func (s *testStoresInfoSuite) TestStores(c *C) {
 		c.Assert(cache.BlockStore(id), NotNil)
 		cache.SetStore(store)
 		c.Assert(cache.GetStore(id), DeepEquals, store)
-		c.Assert(cache.GetStoreCount(), Equals, int(i+1))
+		c.Assert(cache.GetStoreCount(), Equals, i+1)
 		c.Assert(cache.BlockStore(id), IsNil)
 		c.Assert(cache.GetStore(id).IsBlocked(), IsTrue)
 		c.Assert(cache.BlockStore(id), NotNil)
@@ -317,7 +317,7 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 		c.Assert(cluster.handleStoreHeartbeat(storeStats), NotNil)
 
 		c.Assert(cluster.putStore(store), IsNil)
-		c.Assert(cluster.getStoreCount(), Equals, int(i+1))
+		c.Assert(cluster.getStoreCount(), Equals, i+1)
 
 		c.Assert(store.LastHeartbeatTS.IsZero(), IsTrue)
 

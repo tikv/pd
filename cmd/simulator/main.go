@@ -174,6 +174,7 @@ EXIT:
 	}
 
 	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, confName, driver.TickCount(), time.Since(start))
+	driver.PrintStatistics()
 
 	if simResult != "OK" {
 		os.Exit(1)

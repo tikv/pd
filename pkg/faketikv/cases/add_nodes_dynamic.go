@@ -28,6 +28,7 @@ func newAddNodesDynamic() *Conf {
 			Status:    metapb.StoreState_Up,
 			Capacity:  1 * TB,
 			Available: 900 * GB,
+			Version:   "2.1.0",
 		})
 	}
 
@@ -80,8 +81,8 @@ func newAddNodesDynamic() *Conf {
 			if regionCount > 390 || regionCount < 360 {
 				res = false
 			}
-
 		}
+
 		simutil.Logger.Infof("leader counts: %v", leaderCounts)
 		simutil.Logger.Infof("region counts: %v", regionCounts)
 		return res

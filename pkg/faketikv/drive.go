@@ -124,6 +124,11 @@ func (d *Driver) Check() bool {
 	return d.conf.Checker(d.raftEngine.regionsInfo)
 }
 
+// PrintStatistics prints the statistics of the scheduler.
+func (d *Driver) PrintStatistics() {
+	d.raftEngine.schedulerStats.PrintStatistics()
+}
+
 // Stop stops all nodes.
 func (d *Driver) Stop() {
 	for _, n := range d.clusterInfo.Nodes {

@@ -127,7 +127,7 @@ func (d *diagnoseHandler) membersDiagnose(rdd *[]*Recommendation) error {
 				continue
 			}
 			runningMemberIDs = append(runningMemberIDs, m.MemberId)
-			if time.Since(pm.LeaderInfo.StartTime) < time.Duration(time.Minute) {
+			if time.Since(pm.LeaderInfo.StartTime) < time.Minute {
 				newLeaderID = m.MemberId
 			}
 		}

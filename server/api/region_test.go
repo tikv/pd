@@ -112,7 +112,7 @@ func (s *testRegionSuite) TestTopN(c *C) {
 		for _, i := range rand.Perm(len(writtenBytes)) {
 			id := uint64(i + 1)
 			region := newTestRegionInfo(id, id, nil, nil)
-			region.WrittenBytes = uint64(writtenBytes[i])
+			region.WrittenBytes = writtenBytes[i]
 			regions = append(regions, region)
 		}
 		topN := topNRegions(regions, func(a, b *core.RegionInfo) bool { return a.WrittenBytes < b.WrittenBytes }, n)
