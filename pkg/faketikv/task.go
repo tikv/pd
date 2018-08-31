@@ -264,10 +264,10 @@ func (a *addPeer) Step(r *RaftEngine) {
 		var opts []core.RegionCreateOption
 		if region.GetPeer(a.peer.GetId()) == nil {
 			opts = append(opts, core.WithAddPeer(a.peer))
-			r.schedulerStats.taskStats.addPeer[region.GetId()]++
+			r.schedulerStats.taskStats.addPeer[region.GetID()]++
 		} else {
 			opts = append(opts, core.WithPromoteLearner(a.peer.GetId()))
-			r.schedulerStats.taskStats.promoteLeaner[region.GetId()]++
+			r.schedulerStats.taskStats.promoteLeaner[region.GetID()]++
 		}
 		opts = append(opts, core.WithIncConfVer())
 		newRegion := region.Clone(opts...)
@@ -331,7 +331,7 @@ func (a *removePeer) Step(r *RaftEngine) {
 				)
 				r.SetRegion(newRegion)
 				r.recordRegionChange(newRegion)
-				r.schedulerStats.taskStats.removePeer[region.GetId()]++
+				r.schedulerStats.taskStats.removePeer[region.GetID()]++
 				if r.conn.Nodes[storeID] == nil {
 					a.finished = true
 					return
@@ -385,7 +385,7 @@ func (a *addLearner) Step(r *RaftEngine) {
 			)
 			r.SetRegion(newRegion)
 			r.recordRegionChange(newRegion)
-			r.schedulerStats.taskStats.addLearner[region.GetId()]++
+			r.schedulerStats.taskStats.addLearner[region.GetID()]++
 		}
 		a.finished = true
 	}
