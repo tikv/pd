@@ -293,7 +293,7 @@ func putStore(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, store *metapb.
 }
 
 func (s *testClusterSuite) testPutStore(c *C, clusterID uint64, store *metapb.Store) {
-	// Update storetestPutStore.
+	// Update store.
 	_, err := putStore(c, s.grpcPDClient, clusterID, store)
 	c.Assert(err, IsNil)
 	updatedStore := s.getStore(c, clusterID, store.GetId())
