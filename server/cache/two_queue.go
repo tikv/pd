@@ -91,6 +91,7 @@ func (c *TwoQueue) Put(key uint64, value interface{}) {
 	c.recent.Put(key, value)
 }
 
+// revive:disable-next-line:flag-parameter
 func (c *TwoQueue) ensureSpace(ghost bool) {
 	recentLen := c.recent.Len()
 	frequentLen := c.frequent.Len()

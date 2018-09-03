@@ -41,7 +41,7 @@ func newMemberHandler(svr *server.Server, rd *render.Render) *memberHandler {
 }
 
 func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
-	members, err := h.listMembers()
+	members, err := h.getMembers()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -49,7 +49,7 @@ func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, members)
 }
 
-func (h *memberHandler) listMembers() (*pdpb.GetMembersResponse, error) {
+func (h *memberHandler) getMembers() (*pdpb.GetMembersResponse, error) {
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: h.svr.ClusterID()}}
 	members, err := h.svr.GetMembers(context.Background(), req)
 	if err != nil {
@@ -68,7 +68,7 @@ func (h *memberHandler) listMembers() (*pdpb.GetMembersResponse, error) {
 		}
 		m.LeaderPriority = int32(leaderPriority)
 	}
-	return members, errors.WithStack(err)
+	return members, nil
 }
 
 func (h *memberHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +134,7 @@ func (h *memberHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.Request) {
-	members, membersErr := h.listMembers()
+	members, membersErr := h.getMembers()
 	if membersErr != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, membersErr.Error())
 		return

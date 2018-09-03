@@ -142,11 +142,11 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.
 	defer h.Unlock()
 	switch typ {
 	case hotReadRegionBalance:
-		h.stats.readStatAsLeader = h.calcScore(cluster.RegionReadStats(), cluster, false)
+		h.stats.readStatAsLeader = h.calcScore(cluster.RegionReadStats(), cluster, core.LeaderKind)
 		return h.balanceHotReadRegions(cluster)
 	case hotWriteRegionBalance:
-		h.stats.writeStatAsLeader = h.calcScore(cluster.RegionWriteStats(), cluster, false)
-		h.stats.writeStatAsPeer = h.calcScore(cluster.RegionWriteStats(), cluster, true)
+		h.stats.writeStatAsLeader = h.calcScore(cluster.RegionWriteStats(), cluster, core.LeaderKind)
+		h.stats.writeStatAsPeer = h.calcScore(cluster.RegionWriteStats(), cluster, core.RegionKind)
 		return h.balanceHotWriteRegions(cluster)
 	}
 	return nil
@@ -199,7 +199,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	return nil
 }
 
-func (h *balanceHotRegionsScheduler) calcScore(items []*core.RegionStat, cluster schedule.Cluster, isCountReplica bool) core.StoreHotRegionsStat {
+func (h *balanceHotRegionsScheduler) calcScore(items []*core.RegionStat, cluster schedule.Cluster, kind core.ResourceKind) core.StoreHotRegionsStat {
 	stats := make(core.StoreHotRegionsStat)
 	for _, r := range items {
 		if r.HotDegree < cluster.GetHotRegionLowThreshold() {
@@ -212,11 +212,12 @@ func (h *balanceHotRegionsScheduler) calcScore(items []*core.RegionStat, cluster
 		}
 
 		var storeIDs []uint64
-		if isCountReplica {
+		switch kind {
+		case core.RegionKind:
 			for id := range regionInfo.GetStoreIds() {
 				storeIDs = append(storeIDs, id)
 			}
-		} else {
+		case core.LeaderKind:
 			storeIDs = append(storeIDs, regionInfo.Leader.GetStoreId())
 		}
 

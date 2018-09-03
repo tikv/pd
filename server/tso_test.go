@@ -29,7 +29,7 @@ var _ = Suite(&testTsoSuite{})
 type testTsoSuite struct {
 	client       *clientv3.Client
 	svr          *Server
-	cleanup      cleanupFunc
+	cleanup      CleanupFunc
 	grpcPDClient pdpb.PDClient
 }
 
@@ -97,7 +97,7 @@ var _ = Suite(&testTimeFallBackSuite{})
 type testTimeFallBackSuite struct {
 	client       *clientv3.Client
 	svr          *Server
-	cleanup      cleanupFunc
+	cleanup      CleanupFunc
 	grpcPDClient pdpb.PDClient
 }
 
