@@ -22,10 +22,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/juju/errors"
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
@@ -55,6 +55,10 @@ type Client interface {
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
 	GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error)
+	// GetAllStores gets all stores from pd.
+	// The store may expire later. Caller is responsible for caching and taking care
+	// of store change.
+	GetAllStores(ctx context.Context) ([]*metapb.Store, error)
 	// Update GC safe point. TiKV will check it and do GC themselves if necessary.
 	// If the given safePoint is less than the current one, it will not be updated.
 	// Returns the new safePoint after updating.
@@ -131,10 +135,10 @@ func NewClient(pdAddrs []string, security SecurityOption) (Client, error) {
 	c.connMu.clientConns = make(map[string]*grpc.ClientConn)
 
 	if err := c.initClusterID(); err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	if err := c.updateLeader(); err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	log.Infof("[pd] init cluster id %v", c.clusterID)
 
@@ -171,7 +175,7 @@ func (c *client) initClusterID() error {
 		time.Sleep(time.Second)
 	}
 
-	return errors.Trace(errFailInitClusterID)
+	return errors.WithStack(errFailInitClusterID)
 }
 
 func (c *client) updateLeader() error {
@@ -182,14 +186,14 @@ func (c *client) updateLeader() error {
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
 			select {
 			case <-c.ctx.Done():
-				return errors.Trace(err)
+				return errors.WithStack(err)
 			default:
 				continue
 			}
 		}
 		c.updateURLs(members.GetMembers())
 		if err = c.switchLeader(members.GetLeader().GetClientUrls()); err != nil {
-			return errors.Trace(err)
+			return errors.WithStack(err)
 		}
 		return nil
 	}
@@ -199,11 +203,11 @@ func (c *client) updateLeader() error {
 func (c *client) getMembers(ctx context.Context, url string) (*pdpb.GetMembersResponse, error) {
 	cc, err := c.getOrCreateGRPCConn(url)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	return members, nil
 }
@@ -222,7 +226,7 @@ func (c *client) switchLeader(addrs []string) error {
 
 	log.Infof("[pd] leader switches to: %v, previous: %v", addr, oldLeader)
 	if _, err := c.getOrCreateGRPCConn(addr); err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	c.connMu.Lock()
@@ -273,11 +277,11 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 	}
 	u, err := url.Parse(addr)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	cc, err := grpc.Dial(u.Host, opt)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
@@ -440,20 +444,20 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 
 	if err := stream.Send(req); err != nil {
 		c.finishTSORequest(requests, 0, 0, err)
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	resp, err := stream.Recv()
 	if err != nil {
-		c.finishTSORequest(requests, 0, 0, errors.Trace(err))
-		return errors.Trace(err)
+		c.finishTSORequest(requests, 0, 0, errors.WithStack(err))
+		return errors.WithStack(err)
 	}
 	requestDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds())
 	if err == nil && resp.GetCount() != uint32(len(requests)) {
 		err = errTSOLength
 	}
 	if err != nil {
-		c.finishTSORequest(requests, 0, 0, errors.Trace(err))
-		return errors.Trace(err)
+		c.finishTSORequest(requests, 0, 0, errors.WithStack(err))
+		return errors.WithStack(err)
 	}
 
 	physical, logical := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical()
@@ -477,7 +481,7 @@ func (c *client) revokeTSORequest(err error) {
 	n := len(c.tsoRequests)
 	for i := 0; i < n; i++ {
 		req := <-c.tsoRequests
-		req.done <- errors.Trace(err)
+		req.done <- errors.WithStack(err)
 	}
 }
 
@@ -556,18 +560,21 @@ type TSFuture interface {
 }
 
 func (req *tsoRequest) Wait() (int64, int64, error) {
+	// If tso command duration is observed very high, the reason could be it
+	// takes too long for Wait() be called.
+	cmdDuration.WithLabelValues("tso_async_wait").Observe(time.Since(req.start).Seconds())
 	select {
 	case err := <-req.done:
 		defer tsoReqPool.Put(req)
 		if err != nil {
 			cmdFailedDuration.WithLabelValues("tso").Observe(time.Since(req.start).Seconds())
-			return 0, 0, errors.Trace(err)
+			return 0, 0, errors.WithStack(err)
 		}
 		physical, logical := req.physical, req.logical
 		cmdDuration.WithLabelValues("tso").Observe(time.Since(req.start).Seconds())
 		return physical, logical, err
 	case <-req.ctx.Done():
-		return 0, 0, errors.Trace(req.ctx.Err())
+		return 0, 0, errors.WithStack(req.ctx.Err())
 	}
 }
 
@@ -594,7 +601,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return nil, nil, errors.Trace(err)
+		return nil, nil, errors.WithStack(err)
 	}
 	return resp.GetRegion(), resp.GetLeader(), nil
 }
@@ -617,7 +624,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*metapb.Region,
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_prev_region").Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return nil, nil, errors.Trace(err)
+		return nil, nil, errors.WithStack(err)
 	}
 	return resp.GetRegion(), resp.GetLeader(), nil
 }
@@ -640,7 +647,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Re
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_region_byid").Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return nil, nil, errors.Trace(err)
+		return nil, nil, errors.WithStack(err)
 	}
 	return resp.GetRegion(), resp.GetLeader(), nil
 }
@@ -663,7 +670,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	store := resp.GetStore()
 	if store == nil {
@@ -673,6 +680,29 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 		return nil, nil
 	}
 	return store, nil
+}
+
+func (c *client) GetAllStores(ctx context.Context) ([]*metapb.Store, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.GetAllStores", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDuration.WithLabelValues("get_all_stores").Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	resp, err := c.leaderClient().GetAllStores(ctx, &pdpb.GetAllStoresRequest{
+		Header: c.requestHeader(),
+	})
+	cancel()
+
+	if err != nil {
+		cmdFailedDuration.WithLabelValues("get_all_stores").Observe(time.Since(start).Seconds())
+		c.ScheduleCheckLeader()
+		return nil, errors.WithStack(err)
+	}
+	stores := resp.GetStores()
+	return stores, nil
 }
 
 func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error) {
@@ -693,7 +723,7 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("update_gc_safe_point").Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return 0, errors.Trace(err)
+		return 0, errors.WithStack(err)
 	}
 	return resp.GetNewSafePoint(), nil
 }

@@ -39,17 +39,17 @@ func GenRangeCluster(cluster Cluster, startKey, endKey []byte) *RangeCluster {
 			break
 		}
 		for _, r := range collect {
-			if bytes.Compare(r.StartKey, endKey) < 0 {
+			if bytes.Compare(r.GetStartKey(), endKey) < 0 {
 				regions.SetRegion(r)
 			} else {
 				loopEnd = true
 				break
 			}
-			if string(r.EndKey) == "" {
+			if string(r.GetEndKey()) == "" {
 				loopEnd = true
 				break
 			}
-			scanKey = r.EndKey
+			scanKey = r.GetEndKey()
 		}
 	}
 	return &RangeCluster{

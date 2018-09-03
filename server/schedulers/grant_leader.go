@@ -17,9 +17,9 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pkg/errors"
 )
 
 func init() {
@@ -29,7 +29,7 @@ func init() {
 		}
 		id, err := strconv.ParseUint(args[0], 10, 64)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, errors.WithStack(err)
 		}
 		return newGrantLeaderScheduler(limiter, id), nil
 	})
@@ -61,7 +61,7 @@ func (s *grantLeaderScheduler) GetType() string {
 	return "grant-leader"
 }
 func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
-	return errors.Trace(cluster.BlockStore(s.storeID))
+	return errors.WithStack(cluster.BlockStore(s.storeID))
 }
 
 func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {
@@ -80,8 +80,8 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence sc
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: s.storeID}
-	op := schedule.NewOperator("grant-leader", region.GetId(), region.GetRegionEpoch(), schedule.OpLeader, step)
+	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: s.storeID}
+	op := schedule.NewOperator("grant-leader", region.GetID(), region.GetRegionEpoch(), schedule.OpLeader, step)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*schedule.Operator{op}
 }

@@ -20,7 +20,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -28,6 +27,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -87,10 +87,9 @@ func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifie
 	}
 }
 
-func (c *coordinator) dispatch(origin *core.RegionInfo) {
+func (c *coordinator) dispatch(region *core.RegionInfo) {
 	// Check existed operator.
-	if op := c.getOperator(origin.GetId()); op != nil {
-		region := origin.Clone()
+	if op := c.getOperator(region.GetID()); op != nil {
 		timeout := op.IsTimeout()
 		if step := op.Check(region); step != nil && !timeout {
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
@@ -98,13 +97,13 @@ func (c *coordinator) dispatch(origin *core.RegionInfo) {
 			return
 		}
 		if op.IsFinish() {
-			log.Infof("[region %v] operator finish: %s", region.GetId(), op)
+			log.Infof("[region %v] operator finish: %s", region.GetID(), op)
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 			operatorDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 			c.pushHistory(op)
 			c.removeOperator(op)
 		} else if timeout {
-			log.Infof("[region %v] operator timeout: %s", region.GetId(), op)
+			log.Infof("[region %v] operator timeout: %s", region.GetID(), op)
 			operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 			c.removeOperator(op)
 		}
@@ -138,7 +137,7 @@ func (c *coordinator) patrolRegions() {
 
 		for _, region := range regions {
 			// Skip the region if there is already a pending operator.
-			if c.getOperator(region.GetId()) != nil {
+			if c.getOperator(region.GetID()) != nil {
 				continue
 			}
 
@@ -168,7 +167,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 			ToStore: p.GetStoreId(),
 			PeerID:  p.GetId(),
 		}
-		op := schedule.NewOperator("promoteLearner", region.GetId(), region.GetRegionEpoch(), schedule.OpRegion, step)
+		op := schedule.NewOperator("promoteLearner", region.GetID(), region.GetRegionEpoch(), schedule.OpRegion, step)
 		if c.addOperator(op) {
 			return true
 		}
@@ -387,7 +386,7 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 
 	s := newScheduleController(c, scheduler)
 	if err := s.Prepare(c.cluster); err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	c.wg.Add(1)
@@ -411,7 +410,7 @@ func (c *coordinator) removeScheduler(name string) error {
 	delete(c.schedulers, name)
 
 	if err := c.cluster.opt.RemoveSchedulerCfg(name); err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	return nil
@@ -573,7 +572,7 @@ func (c *coordinator) getHistory(start time.Time) []schedule.OperatorHistory {
 }
 
 func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule.OperatorStep) {
-	log.Infof("[region %v] send schedule command: %s", region.GetId(), step)
+	log.Infof("[region %v] send schedule command: %s", region.GetID(), step)
 	switch s := step.(type) {
 	case schedule.TransferLeader:
 		cmd := &pdpb.RegionHeartbeatResponse{

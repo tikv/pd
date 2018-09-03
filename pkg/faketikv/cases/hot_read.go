@@ -23,18 +23,18 @@ import (
 
 func newHotRead() *Conf {
 	var conf Conf
+	var id idAllocator
 	// Initialize the cluster
 	for i := 1; i <= 5; i++ {
 		conf.Stores = append(conf.Stores, &Store{
-			ID:        uint64(i),
+			ID:        id.nextID(),
 			Status:    metapb.StoreState_Up,
 			Capacity:  1 * TB,
 			Available: 900 * GB,
 			Version:   "2.1.0",
 		})
 	}
-	var id idAllocator
-	id.setMaxID(5)
+
 	for i := 0; i < 500; i++ {
 		storeIDs := rand.Perm(5)
 		peers := []*metapb.Peer{
@@ -72,7 +72,7 @@ func newHotRead() *Conf {
 	conf.Checker = func(regions *core.RegionsInfo) bool {
 		var leaderCount [5]int
 		for id := range readFlow {
-			leaderStore := regions.GetRegion(id).Leader.GetStoreId()
+			leaderStore := regions.GetRegion(id).GetLeader().GetStoreId()
 			leaderCount[int(leaderStore-1)]++
 		}
 		simutil.Logger.Infof("hot region count: %v", leaderCount)

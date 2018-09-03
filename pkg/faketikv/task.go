@@ -20,6 +20,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/faketikv/simutil"
+	"github.com/pingcap/pd/server/core"
 )
 
 // Task running in node.
@@ -42,20 +44,20 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 		case eraftpb.ConfChangeType_AddNode:
 			return &addPeer{
 				regionID: regionID,
-				size:     region.ApproximateSize,
-				keys:     region.ApproximateKeys,
+				size:     region.GetApproximateSize(),
+				keys:     region.GetApproximateKeys(),
 				speed:    100 * 1000 * 1000,
 				epoch:    epoch,
 				peer:     changePeer.GetPeer(),
 				// This two variables are used to simulate sending and receiving snapshot processes.
-				sendingStat:   &snapshotStat{"sending", region.ApproximateSize, false},
-				receivingStat: &snapshotStat{"receiving", region.ApproximateSize, false},
+				sendingStat:   &snapshotStat{"sending", region.GetApproximateSize(), false},
+				receivingStat: &snapshotStat{"receiving", region.GetApproximateSize(), false},
 			}
 		case eraftpb.ConfChangeType_RemoveNode:
 			return &removePeer{
 				regionID: regionID,
-				size:     region.ApproximateSize,
-				keys:     region.ApproximateKeys,
+				size:     region.GetApproximateSize(),
+				keys:     region.GetApproximateKeys(),
 				speed:    100 * 1000 * 1000,
 				epoch:    epoch,
 				peer:     changePeer.GetPeer(),
@@ -63,8 +65,8 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 		case eraftpb.ConfChangeType_AddLearnerNode:
 			return &addLearner{
 				regionID: regionID,
-				size:     region.ApproximateSize,
-				keys:     region.ApproximateKeys,
+				size:     region.GetApproximateSize(),
+				keys:     region.GetApproximateKeys(),
 				speed:    100 * 1000 * 1000,
 				epoch:    epoch,
 				peer:     changePeer.GetPeer(),
@@ -72,7 +74,7 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 		}
 	} else if resp.GetTransferLeader() != nil {
 		changePeer := resp.GetTransferLeader().GetPeer()
-		fromPeer := region.Leader
+		fromPeer := region.GetLeader()
 		return &transferLeader{
 			regionID: regionID,
 			epoch:    epoch,
@@ -114,32 +116,41 @@ func (m *mergeRegion) Step(r *RaftEngine) {
 
 	region := r.GetRegion(m.regionID)
 	// If region equals to nil, it means that the region has already been merged.
-	if region == nil || region.RegionEpoch.ConfVer > m.epoch.ConfVer || region.RegionEpoch.Version > m.epoch.Version {
+	if region == nil || region.GetRegionEpoch().GetConfVer() > m.epoch.ConfVer || region.GetRegionEpoch().GetVersion() > m.epoch.Version {
 		m.finished = true
 		return
 	}
 
 	targetRegion := r.GetRegion(m.targetRegion.Id)
-	if bytes.Equal(m.targetRegion.EndKey, region.StartKey) {
-		targetRegion.EndKey = region.EndKey
+	var startKey, endKey []byte
+	if bytes.Equal(m.targetRegion.EndKey, region.GetStartKey()) {
+		startKey = targetRegion.GetStartKey()
+		endKey = region.GetEndKey()
 	} else {
-		targetRegion.StartKey = region.StartKey
+		startKey = region.GetStartKey()
+		endKey = targetRegion.GetEndKey()
 	}
 
-	targetRegion.ApproximateSize += region.ApproximateSize
-	targetRegion.ApproximateKeys += region.ApproximateKeys
-
+	epoch := targetRegion.GetRegionEpoch()
 	if m.epoch.ConfVer > m.targetRegion.RegionEpoch.ConfVer {
-		targetRegion.RegionEpoch.ConfVer = m.epoch.ConfVer
+		epoch.ConfVer = m.epoch.ConfVer
 	}
 
 	if m.epoch.Version > m.targetRegion.RegionEpoch.Version {
-		targetRegion.RegionEpoch.Version = m.epoch.Version
+		epoch.Version = m.epoch.Version
 	}
-	targetRegion.RegionEpoch.Version++
-
-	r.SetRegion(targetRegion)
-	r.recordRegionChange(targetRegion)
+	epoch.Version++
+	mergeRegion := targetRegion.Clone(
+		core.WithStartKey(startKey),
+		core.WithEndKey(endKey),
+		core.SetRegionConfVer(epoch.ConfVer),
+		core.SetRegionVersion(epoch.Version),
+		core.SetApproximateSize(targetRegion.GetApproximateSize()+region.GetApproximateSize()),
+		core.SetApproximateKeys(targetRegion.GetApproximateKeys()+region.GetApproximateKeys()),
+	)
+	r.SetRegion(mergeRegion)
+	r.recordRegionChange(mergeRegion)
+	r.schedulerStats.taskStats.mergeRegion++
 	m.finished = true
 }
 
@@ -168,16 +179,27 @@ func (t *transferLeader) Step(r *RaftEngine) {
 		return
 	}
 	region := r.GetRegion(t.regionID)
-	if region.RegionEpoch.Version > t.epoch.Version || region.RegionEpoch.ConfVer > t.epoch.ConfVer {
+	if region.GetRegionEpoch().GetVersion() > t.epoch.Version || region.GetRegionEpoch().GetConfVer() > t.epoch.ConfVer {
 		t.finished = true
 		return
 	}
+	var newRegion *core.RegionInfo
 	if region.GetPeer(t.peer.GetId()) != nil {
-		region.Leader = t.peer
+		newRegion = region.Clone(core.WithLeader(t.peer))
 	}
 	t.finished = true
-	r.SetRegion(region)
-	r.recordRegionChange(region)
+	r.SetRegion(newRegion)
+	r.recordRegionChange(newRegion)
+	fromPeerID := t.fromPeer.GetId()
+	toPeerID := t.peer.GetId()
+	_, ok := r.schedulerStats.taskStats.transferLeader[fromPeerID]
+	if ok {
+		r.schedulerStats.taskStats.transferLeader[fromPeerID][toPeerID]++
+	} else {
+		m := make(map[uint64]int)
+		m[toPeerID]++
+		r.schedulerStats.taskStats.transferLeader[fromPeerID] = m
+	}
 }
 
 func (t *transferLeader) RegionID() uint64 {
@@ -209,32 +231,48 @@ func (a *addPeer) Step(r *RaftEngine) {
 		return
 	}
 	region := r.GetRegion(a.regionID)
-	if region.RegionEpoch.Version > a.epoch.Version || region.RegionEpoch.ConfVer > a.epoch.ConfVer {
+	if region.GetRegionEpoch().GetVersion() > a.epoch.Version || region.GetRegionEpoch().GetConfVer() > a.epoch.ConfVer {
 		a.finished = true
 		return
 	}
 
-	snapshotSize := region.ApproximateSize
-	sendNode := r.conn.Nodes[region.Leader.GetStoreId()]
+	snapshotSize := region.GetApproximateSize()
+	sendNode := r.conn.Nodes[region.GetLeader().GetStoreId()]
+	if sendNode == nil {
+		simutil.Logger.Errorf("failed to sent snapshot: node %d has been deleted", sendNode.Id)
+		a.finished = true
+		return
+	}
 	if !processSnapshot(sendNode, a.sendingStat, snapshotSize) {
 		return
 	}
+	r.schedulerStats.snapshotStats.send[sendNode.Id]++
 
 	recvNode := r.conn.Nodes[a.peer.GetStoreId()]
+	if recvNode == nil {
+		simutil.Logger.Errorf("failed to receive snapshot: node %d has been deleted", recvNode.Id)
+		a.finished = true
+		return
+	}
 	if !processSnapshot(recvNode, a.receivingStat, snapshotSize) {
 		return
 	}
+	r.schedulerStats.snapshotStats.receive[recvNode.Id]++
 
 	a.size -= a.speed
 	if a.size < 0 {
+		var opts []core.RegionCreateOption
 		if region.GetPeer(a.peer.GetId()) == nil {
-			region.AddPeer(a.peer)
+			opts = append(opts, core.WithAddPeer(a.peer))
+			r.schedulerStats.taskStats.addPeer[region.GetID()]++
 		} else {
-			region.GetPeer(a.peer.GetId()).IsLearner = false
+			opts = append(opts, core.WithPromoteLearner(a.peer.GetId()))
+			r.schedulerStats.taskStats.promoteLeaner[region.GetID()]++
 		}
-		region.RegionEpoch.ConfVer++
-		r.SetRegion(region)
-		r.recordRegionChange(region)
+		opts = append(opts, core.WithIncConfVer())
+		newRegion := region.Clone(opts...)
+		r.SetRegion(newRegion)
+		r.recordRegionChange(newRegion)
 		recvNode.incUsedSize(uint64(snapshotSize))
 		a.finished = true
 	}
@@ -267,21 +305,37 @@ func (a *removePeer) Step(r *RaftEngine) {
 		return
 	}
 	region := r.GetRegion(a.regionID)
-	if region.RegionEpoch.Version > a.epoch.Version || region.RegionEpoch.ConfVer > a.epoch.ConfVer {
+	if region.GetRegionEpoch().GetVersion() > a.epoch.Version || region.GetRegionEpoch().GetConfVer() > a.epoch.ConfVer {
 		a.finished = true
 		return
 	}
 
-	regionSize := uint64(region.ApproximateSize)
+	regionSize := uint64(region.GetApproximateSize())
 	a.size -= a.speed
 	if a.size < 0 {
 		for _, peer := range region.GetPeers() {
 			if peer.GetId() == a.peer.GetId() {
 				storeID := peer.GetStoreId()
-				region.RemoveStorePeer(storeID)
-				region.RegionEpoch.ConfVer++
-				r.SetRegion(region)
-				r.recordRegionChange(region)
+				var downPeers []*pdpb.PeerStats
+				if r.conn.Nodes[storeID] == nil {
+					for _, downPeer := range region.GetDownPeers() {
+						if downPeer.Peer.StoreId != storeID {
+							downPeers = append(downPeers, downPeer)
+						}
+					}
+				}
+				newRegion := region.Clone(
+					core.WithRemoveStorePeer(storeID),
+					core.WithIncConfVer(),
+					core.WithDownPeers(downPeers),
+				)
+				r.SetRegion(newRegion)
+				r.recordRegionChange(newRegion)
+				r.schedulerStats.taskStats.removePeer[region.GetID()]++
+				if r.conn.Nodes[storeID] == nil {
+					a.finished = true
+					return
+				}
 				r.conn.Nodes[storeID].decUsedSize(regionSize)
 				break
 			}
@@ -317,7 +371,7 @@ func (a *addLearner) Step(r *RaftEngine) {
 		return
 	}
 	region := r.GetRegion(a.regionID)
-	if region.RegionEpoch.Version > a.epoch.Version || region.RegionEpoch.ConfVer > a.epoch.ConfVer {
+	if region.GetRegionEpoch().GetVersion() > a.epoch.Version || region.GetRegionEpoch().GetConfVer() > a.epoch.ConfVer {
 		a.finished = true
 		return
 	}
@@ -325,10 +379,13 @@ func (a *addLearner) Step(r *RaftEngine) {
 	a.size -= a.speed
 	if a.size < 0 {
 		if region.GetPeer(a.peer.GetId()) == nil {
-			region.AddPeer(a.peer)
-			region.RegionEpoch.ConfVer++
-			r.SetRegion(region)
-			r.recordRegionChange(region)
+			newRegion := region.Clone(
+				core.WithAddPeer(a.peer),
+				core.WithIncConfVer(),
+			)
+			r.SetRegion(newRegion)
+			r.recordRegionChange(newRegion)
+			r.schedulerStats.taskStats.addLearner[region.GetID()]++
 		}
 		a.finished = true
 	}

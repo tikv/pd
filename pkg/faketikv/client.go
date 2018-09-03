@@ -19,11 +19,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/faketikv/simutil"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 )
 
@@ -68,20 +68,20 @@ func NewClient(pdAddr string, tag string) (Client, <-chan *pdpb.RegionHeartbeatR
 	simutil.Logger.Infof("[%s][pd] create pd client with endpoints %v", tag, pdAddr)
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &client{
-		url: pdAddr,
+		url:                      pdAddr,
 		reportRegionHeartbeatCh:  make(chan *core.RegionInfo, 1),
 		receiveRegionHeartbeatCh: make(chan *pdpb.RegionHeartbeatResponse, 1),
-		ctx:    ctx,
-		cancel: cancel,
-		tag:    tag,
+		ctx:                      ctx,
+		cancel:                   cancel,
+		tag:                      tag,
 	}
 	cc, err := c.createConn()
 	if err != nil {
-		return nil, nil, errors.Trace(err)
+		return nil, nil, errors.WithStack(err)
 	}
 	c.clientConn = cc
 	if err := c.initClusterID(); err != nil {
-		return nil, nil, errors.Trace(err)
+		return nil, nil, errors.WithStack(err)
 	}
 	simutil.Logger.Infof("[%s][pd] init cluster id %v", tag, c.clusterID)
 	c.wg.Add(1)
@@ -107,13 +107,13 @@ func (c *client) initClusterID() error {
 		return nil
 	}
 
-	return errors.Trace(errFailInitClusterID)
+	return errors.WithStack(errFailInitClusterID)
 }
 
 func (c *client) getMembers(ctx context.Context) (*pdpb.GetMembersResponse, error) {
 	members, err := c.pdClient().GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	return members, nil
 }
@@ -121,7 +121,7 @@ func (c *client) getMembers(ctx context.Context) (*pdpb.GetMembersResponse, erro
 func (c *client) createConn() (*grpc.ClientConn, error) {
 	cc, err := grpc.Dial(strings.TrimPrefix(c.url, "http://"), grpc.WithInsecure())
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	return cc, nil
 }
@@ -199,14 +199,14 @@ func (c *client) reportRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regio
 		case region := <-c.reportRegionHeartbeatCh:
 			request := &pdpb.RegionHeartbeatRequest{
 				Header:          c.requestHeader(),
-				Region:          region.Region,
-				Leader:          region.Leader,
-				DownPeers:       region.DownPeers,
-				PendingPeers:    region.PendingPeers,
-				BytesWritten:    region.WrittenBytes,
-				BytesRead:       region.ReadBytes,
-				ApproximateSize: uint64(region.ApproximateSize),
-				ApproximateKeys: uint64(region.ApproximateKeys),
+				Region:          region.GetMeta(),
+				Leader:          region.GetLeader(),
+				DownPeers:       region.GetDownPeers(),
+				PendingPeers:    region.GetPendingPeers(),
+				BytesWritten:    region.GetBytesWritten(),
+				BytesRead:       region.GetBytesRead(),
+				ApproximateSize: uint64(region.GetApproximateSize()),
+				ApproximateKeys: uint64(region.GetApproximateKeys()),
 			}
 			err := stream.Send(request)
 			if err != nil {

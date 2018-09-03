@@ -28,7 +28,7 @@ func init() {
 
 type randomMergeScheduler struct {
 	*baseScheduler
-	selector schedule.Selector
+	selector *schedule.RandomSelector
 }
 
 // newRandomMergeScheduler creates an admin scheduler that shuffles regions

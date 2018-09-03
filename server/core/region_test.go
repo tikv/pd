@@ -14,6 +14,9 @@
 package core
 
 import (
+	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -56,22 +59,22 @@ func (s *testRegionMapSuite) TestRegionMap(c *C) {
 
 func (s *testRegionMapSuite) regionInfo(id uint64) *RegionInfo {
 	return &RegionInfo{
-		Region: &metapb.Region{
+		meta: &metapb.Region{
 			Id: id,
 		},
-		ApproximateSize: int64(id),
-		ApproximateKeys: int64(id),
+		approximateSize: int64(id),
+		approximateKeys: int64(id),
 	}
 }
 
 func (s *testRegionMapSuite) check(c *C, rm *regionMap, ids ...uint64) {
 	// Check position.
 	for _, r := range rm.m {
-		c.Assert(rm.ids[r.pos], Equals, r.Id)
+		c.Assert(rm.ids[r.pos], Equals, r.meta.GetId())
 	}
 	// Check Get.
 	for _, id := range ids {
-		c.Assert(rm.Get(id).Id, Equals, id)
+		c.Assert(rm.Get(id).GetID(), Equals, id)
 	}
 	// Check Len.
 	c.Assert(rm.Len(), Equals, len(ids))
@@ -82,7 +85,7 @@ func (s *testRegionMapSuite) check(c *C, rm *regionMap, ids ...uint64) {
 	}
 	set1 := make(map[uint64]struct{})
 	for _, r := range rm.m {
-		set1[r.Id] = struct{}{}
+		set1[r.GetID()] = struct{}{}
 	}
 	set2 := make(map[uint64]struct{})
 	for _, id := range rm.ids {
@@ -96,4 +99,40 @@ func (s *testRegionMapSuite) check(c *C, rm *regionMap, ids ...uint64) {
 		total += int64(id)
 	}
 	c.Assert(rm.TotalSize(), Equals, total)
+}
+
+var _ = Suite(&testRegionKey{})
+
+type testRegionKey struct{}
+
+func (*testRegionKey) TestRegionKey(c *C) {
+	testCase := []struct {
+		key    string
+		expect string
+	}{
+		{`"t\x80\x00\x00\x00\x00\x00\x00\xff!_r\x80\x00\x00\x00\x00\xff\x02\u007fY\x00\x00\x00\x00\x00\xfa"`,
+			`"t\200\000\000\000\000\000\000\377!_r\200\000\000\000\000\377\002\177Y\000\000\000\000\000\372"`},
+		{"\"\\x80\\x00\\x00\\x00\\x00\\x00\\x00\\xff\\x05\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xf8\"",
+			`"\200\000\000\000\000\000\000\377\005\000\000\000\000\000\000\000\370"`},
+	}
+	for _, t := range testCase {
+		got, err := strconv.Unquote(t.key)
+		c.Assert(err, IsNil)
+		s := fmt.Sprintln(&metapb.Region{StartKey: []byte(got)})
+		c.Assert(strings.Contains(s, t.expect), IsTrue)
+
+		// start key changed
+		orgion := NewRegionInfo(&metapb.Region{EndKey: []byte(got)}, nil)
+		region := NewRegionInfo(&metapb.Region{StartKey: []byte(got), EndKey: []byte(got)}, nil)
+		s = DiffRegionKeyInfo(orgion, region)
+		c.Assert(s, Matches, ".*StartKey Changed.*")
+		c.Assert(strings.Contains(s, t.expect), IsTrue)
+
+		// end key changed
+		orgion = NewRegionInfo(&metapb.Region{StartKey: []byte(got)}, nil)
+		region = NewRegionInfo(&metapb.Region{StartKey: []byte(got), EndKey: []byte(got)}, nil)
+		s = DiffRegionKeyInfo(orgion, region)
+		c.Assert(s, Matches, ".*EndKey Changed.*")
+		c.Assert(strings.Contains(s, t.expect), IsTrue)
+	}
 }

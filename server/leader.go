@@ -15,6 +15,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"path"
 	"strings"
@@ -22,10 +23,10 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/mvcc/mvccpb"
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/logutil"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -112,7 +113,7 @@ func (s *Server) leaderLoop() {
 		}
 
 		if err = s.campaignLeader(); err != nil {
-			log.Errorf("campaign leader err %s", errors.ErrorStack(err))
+			log.Errorf("campaign leader err %s", fmt.Sprintf("%+v", err))
 		}
 	}
 }
@@ -160,7 +161,7 @@ func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, error) {
 	leader := &pdpb.Member{}
 	ok, err := getProtoMsg(c, leaderPath, leader)
 	if err != nil {
-		return nil, errors.Trace(err)
+		return nil, errors.WithStack(err)
 	}
 	if !ok {
 		return nil, nil
@@ -211,17 +212,17 @@ func (s *Server) campaignLeader() error {
 	}
 
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	leaderKey := s.getLeaderPath()
 	// The leader key must not exist, so the CreateRevision is 0.
 	resp, err := s.txn().
 		If(clientv3.Compare(clientv3.CreateRevision(leaderKey), "=", 0)).
-		Then(clientv3.OpPut(leaderKey, s.memberValue, clientv3.WithLease(clientv3.LeaseID(leaseResp.ID)))).
+		Then(clientv3.OpPut(leaderKey, s.memberValue, clientv3.WithLease(leaseResp.ID))).
 		Commit()
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
 		return errors.New("campaign leader failed, other server may campaign ok")
@@ -231,26 +232,26 @@ func (s *Server) campaignLeader() error {
 	ctx, cancel = context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 
-	ch, err := lessor.KeepAlive(ctx, clientv3.LeaseID(leaseResp.ID))
+	ch, err := lessor.KeepAlive(ctx, leaseResp.ID)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	log.Debugf("campaign leader ok %s", s.Name())
 
 	err = s.scheduleOpt.reload(s.kv)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	// Try to create raft cluster.
 	err = s.createRaftCluster()
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	defer s.stopRaftCluster()
 
 	log.Debug("sync timestamp for tso")
 	if err = s.syncTimestamp(); err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	defer s.ts.Store(&atomicObject{
 		physical: zeroTime,
@@ -275,7 +276,7 @@ func (s *Server) campaignLeader() error {
 			}
 		case <-tsTicker.C:
 			if err = s.updateTimestamp(); err != nil {
-				return errors.Trace(err)
+				return errors.WithStack(err)
 			}
 			etcdLeader := s.GetEtcdLeader()
 			if etcdLeader != s.ID() {
@@ -330,7 +331,7 @@ func (s *Server) ResignLeader(nextLeader string) error {
 	var leaderIDs []uint64
 	res, err := etcdutil.ListEtcdMembers(s.client)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	for _, member := range res.Members {
 		if (nextLeader == "" && member.ID != s.id) || (nextLeader != "" && member.Name == nextLeader) {
@@ -343,7 +344,7 @@ func (s *Server) ResignLeader(nextLeader string) error {
 	nextLeaderID := leaderIDs[rand.Intn(len(leaderIDs))]
 	log.Infof("%s ready to resign leader, next leader: %v", s.Name(), nextLeaderID)
 	err = s.etcd.Server.MoveLeader(s.serverLoopCtx, s.ID(), nextLeaderID)
-	return errors.Trace(err)
+	return errors.WithStack(err)
 }
 
 func (s *Server) deleteLeaderKey() error {
@@ -351,7 +352,7 @@ func (s *Server) deleteLeaderKey() error {
 	leaderKey := s.getLeaderPath()
 	resp, err := s.leaderTxn().Then(clientv3.OpDelete(leaderKey)).Commit()
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
 		return errors.New("resign leader failed, we are not leader already")

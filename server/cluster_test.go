@@ -193,7 +193,7 @@ func (s *testClusterBaseSuite) getStore(c *C, clusterID uint64, storeID uint64) 
 	}
 	resp, err := s.grpcPDClient.GetStore(context.Background(), req)
 	c.Assert(err, IsNil)
-	c.Assert(resp.GetStore().GetId(), Equals, uint64(storeID))
+	c.Assert(resp.GetStore().GetId(), Equals, storeID)
 
 	return resp.GetStore()
 }

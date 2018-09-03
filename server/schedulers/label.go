@@ -27,7 +27,7 @@ func init() {
 
 type labelScheduler struct {
 	*baseScheduler
-	selector schedule.Selector
+	selector *schedule.BalanceSelector
 }
 
 func newLabelScheduler(limiter *schedule.Limiter) schedule.Scheduler {
@@ -66,25 +66,25 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule
 	log.Debugf("label scheduler reject leader store list: %v", rejectLeaderStores)
 	for id := range rejectLeaderStores {
 		if region := cluster.RandLeaderRegion(id); region != nil {
-			log.Debugf("label scheduler selects region %d to transfer leader", region.GetId())
+			log.Debugf("label scheduler selects region %d to transfer leader", region.GetID())
 			excludeStores := make(map[uint64]struct{})
-			for _, p := range region.DownPeers {
+			for _, p := range region.GetDownPeers() {
 				excludeStores[p.GetPeer().GetStoreId()] = struct{}{}
 			}
-			for _, p := range region.PendingPeers {
+			for _, p := range region.GetPendingPeers() {
 				excludeStores[p.GetStoreId()] = struct{}{}
 			}
 			filter := schedule.NewExcludedFilter(nil, excludeStores)
 			target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region), filter)
 			if target == nil {
-				log.Debugf("label scheduler no target found for region %d", region.GetId())
+				log.Debugf("label scheduler no target found for region %d", region.GetID())
 				schedulerCounter.WithLabelValues(s.GetName(), "no_target").Inc()
 				continue
 			}
 
 			schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 			step := schedule.TransferLeader{FromStore: id, ToStore: target.GetId()}
-			op := schedule.NewOperator("label-reject-leader", region.GetId(), region.GetRegionEpoch(), schedule.OpLeader, step)
+			op := schedule.NewOperator("label-reject-leader", region.GetID(), region.GetRegionEpoch(), schedule.OpLeader, step)
 			return []*schedule.Operator{op}
 		}
 	}

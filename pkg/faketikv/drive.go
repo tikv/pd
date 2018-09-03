@@ -16,10 +16,12 @@ package faketikv
 import (
 	"context"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/faketikv/cases"
 	"github.com/pingcap/pd/pkg/faketikv/simutil"
+	"github.com/pingcap/pd/server/core"
+	"github.com/pkg/errors"
 )
 
 // Driver promotes the cluster status change.
@@ -51,18 +53,18 @@ func (d *Driver) Prepare() error {
 
 	clusterInfo, err := NewClusterInfo(d.addr, d.conf)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	d.clusterInfo = clusterInfo
 
 	conn, err := NewConn(d.clusterInfo.Nodes)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	raftEngine, err := NewRaftEngine(d.conf, conn)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	d.raftEngine = raftEngine
 
@@ -73,7 +75,7 @@ func (d *Driver) Prepare() error {
 	// Bootstrap.
 	store, region, err := clusterInfo.GetBootstrapInfo(d.raftEngine)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	d.client = clusterInfo.Nodes[store.GetId()].client
 
@@ -90,7 +92,7 @@ func (d *Driver) Prepare() error {
 	for {
 		id, err := d.client.AllocID(context.Background())
 		if err != nil {
-			return errors.Trace(err)
+			return errors.WithStack(err)
 		}
 		if id > d.conf.MaxID {
 			break
@@ -111,7 +113,7 @@ func (d *Driver) Prepare() error {
 func (d *Driver) Tick() {
 	d.tickCount++
 	d.raftEngine.stepRegions(d.clusterInfo)
-	d.eventRunner.Tick(d.tickCount, d.raftEngine)
+	d.eventRunner.Tick(d)
 	for _, n := range d.clusterInfo.Nodes {
 		n.reportRegionChange()
 		n.Tick()
@@ -121,6 +123,11 @@ func (d *Driver) Tick() {
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
 	return d.conf.Checker(d.raftEngine.regionsInfo)
+}
+
+// PrintStatistics prints the statistics of the scheduler.
+func (d *Driver) PrintStatistics() {
+	d.raftEngine.schedulerStats.PrintStatistics()
 }
 
 // Stop stops all nodes.
@@ -135,7 +142,7 @@ func (d *Driver) TickCount() int64 {
 	return d.tickCount
 }
 
-// AddNode adds new node.
+// AddNode adds a new node.
 func (d *Driver) AddNode(id uint64) {
 	if _, ok := d.clusterInfo.Nodes[id]; ok {
 		simutil.Logger.Infof("Node %d already existed", id)
@@ -150,16 +157,37 @@ func (d *Driver) AddNode(id uint64) {
 	}
 	n, err := NewNode(s, d.addr)
 	if err != nil {
-		simutil.Logger.Debug("Add node failed:", err)
+		simutil.Logger.Errorf("Add node %d failed: %v", id, err)
 		return
 	}
+	d.clusterInfo.Nodes[id] = n
+	n.raftEngine = d.raftEngine
 	err = n.Start()
 	if err != nil {
-		simutil.Logger.Debug("Start node failed:", err)
-		return
+		simutil.Logger.Errorf("Start node %d failed: %v", id, err)
 	}
-	d.clusterInfo.Nodes[n.Id] = n
 }
 
 // DeleteNode deletes a node.
-func (d *Driver) DeleteNode() {}
+func (d *Driver) DeleteNode(id uint64) {
+	node := d.clusterInfo.Nodes[id]
+	if node == nil {
+		simutil.Logger.Errorf("Node %d not existed", id)
+		return
+	}
+	delete(d.clusterInfo.Nodes, id)
+	node.Stop()
+
+	regions := d.raftEngine.GetRegions()
+	for _, region := range regions {
+		storeIDs := region.GetStoreIds()
+		if _, ok := storeIDs[id]; ok {
+			downPeer := &pdpb.PeerStats{
+				Peer:        region.GetStorePeer(id),
+				DownSeconds: 24 * 60 * 60,
+			}
+			region = region.Clone(core.WithDownPeers(append(region.GetDownPeers(), downPeer)))
+			d.raftEngine.SetRegion(region)
+		}
+	}
+}

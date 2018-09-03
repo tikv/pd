@@ -19,9 +19,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
+	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
 
@@ -115,7 +115,7 @@ func (d *diagnoseHandler) membersDiagnose(rdd *[]*Recommendation) error {
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: d.svr.ClusterID()}}
 	members, err := d.svr.GetMembers(context.Background(), req)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	lenMembers := len(members.Members)
 	if lenMembers > 0 {
@@ -127,7 +127,7 @@ func (d *diagnoseHandler) membersDiagnose(rdd *[]*Recommendation) error {
 				continue
 			}
 			runningMemberIDs = append(runningMemberIDs, m.MemberId)
-			if time.Since(pm.LeaderInfo.StartTime) < time.Duration(time.Minute) {
+			if time.Since(pm.LeaderInfo.StartTime) < time.Minute {
 				newLeaderID = m.MemberId
 			}
 		}

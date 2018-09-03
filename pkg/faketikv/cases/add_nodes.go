@@ -20,10 +20,11 @@ import (
 
 func newAddNodes() *Conf {
 	var conf Conf
+	var id idAllocator
 
 	for i := 1; i <= 8; i++ {
 		conf.Stores = append(conf.Stores, &Store{
-			ID:        uint64(i),
+			ID:        id.nextID(),
 			Status:    metapb.StoreState_Up,
 			Capacity:  1 * TB,
 			Available: 900 * GB,
@@ -31,8 +32,6 @@ func newAddNodes() *Conf {
 		})
 	}
 
-	var id idAllocator
-	id.setMaxID(20)
 	for i := 0; i < 1000; i++ {
 		peers := []*metapb.Peer{
 			{Id: id.nextID(), StoreId: uint64(i)%4 + 1},
@@ -58,14 +57,14 @@ func newAddNodes() *Conf {
 			regionCount := regions.GetStoreRegionCount(uint64(i))
 			leaderCounts = append(leaderCounts, leaderCount)
 			regionCounts = append(regionCounts, regionCount)
-			if leaderCount > 135 || leaderCount < 120 {
+			if leaderCount > 135 || leaderCount < 115 {
 				res = false
 			}
-			if regionCount > 385 || regionCount < 360 {
+			if regionCount > 390 || regionCount < 360 {
 				res = false
 			}
-
 		}
+
 		simutil.Logger.Infof("leader counts: %v", leaderCounts)
 		simutil.Logger.Infof("region counts: %v", regionCounts)
 		return res

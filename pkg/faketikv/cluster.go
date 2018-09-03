@@ -16,9 +16,10 @@ package faketikv
 import (
 	"context"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/faketikv/cases"
+	"github.com/pingcap/pd/server/core"
+	"github.com/pkg/errors"
 )
 
 // ClusterInfo records all cluster information.
@@ -37,7 +38,7 @@ func NewClusterInfo(pdAddr string, conf *cases.Conf) (*ClusterInfo, error) {
 	for _, store := range conf.Stores {
 		node, err := NewNode(store, pdAddr)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, errors.WithStack(err)
 		}
 		cluster.Nodes[store.ID] = node
 	}
@@ -51,18 +52,21 @@ func (c *ClusterInfo) GetBootstrapInfo(r *RaftEngine) (*metapb.Store, *metapb.Re
 	if origin == nil {
 		return nil, nil, errors.New("no region found for bootstrap")
 	}
-	region := origin.Clone()
-	if region.Leader == nil {
+	region := origin.Clone(
+		core.WithStartKey([]byte("")),
+		core.WithEndKey([]byte("")),
+		core.SetRegionConfVer(1),
+		core.SetRegionVersion(1),
+		core.SetPeers([]*metapb.Peer{origin.GetLeader()}),
+	)
+	if region.GetLeader() == nil {
 		return nil, nil, errors.New("bootstrap region has no leader")
 	}
-	store := c.Nodes[region.Leader.GetStoreId()]
+	store := c.Nodes[region.GetLeader().GetStoreId()]
 	if store == nil {
-		return nil, nil, errors.Errorf("bootstrap store %v not found", region.Leader.GetStoreId())
+		return nil, nil, errors.Errorf("bootstrap store %v not found", region.GetLeader().GetStoreId())
 	}
-	region.StartKey, region.EndKey = []byte(""), []byte("")
-	region.RegionEpoch = &metapb.RegionEpoch{}
-	region.Peers = []*metapb.Peer{region.Leader}
-	return store.Store, region.Region, nil
+	return store.Store, region.GetMeta(), nil
 }
 
 func (c *ClusterInfo) allocID(storeID uint64) (uint64, error) {
@@ -71,5 +75,5 @@ func (c *ClusterInfo) allocID(storeID uint64) (uint64, error) {
 		return 0, errors.Errorf("node %d not found", storeID)
 	}
 	id, err := node.client.AllocID(context.Background())
-	return id, errors.Trace(err)
+	return id, errors.WithStack(err)
 }

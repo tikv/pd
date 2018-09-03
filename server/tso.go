@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
-	"github.com/juju/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -47,7 +47,7 @@ func (s *Server) getTimestampPath() string {
 func (s *Server) loadTimestamp() (time.Time, error) {
 	data, err := getValue(s.client, s.getTimestampPath())
 	if err != nil {
-		return zeroTime, errors.Trace(err)
+		return zeroTime, errors.WithStack(err)
 	}
 	if len(data) == 0 {
 		return zeroTime, nil
@@ -63,7 +63,7 @@ func (s *Server) saveTimestamp(ts time.Time) error {
 
 	resp, err := s.leaderTxn().Then(clientv3.OpPut(key, string(data))).Commit()
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
 		return errors.New("save timestamp failed, maybe we lost leader")
@@ -79,13 +79,13 @@ func (s *Server) syncTimestamp() error {
 
 	last, err := s.loadTimestamp()
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	next := time.Now()
 	// gofail: var fallBackSync bool
 	// if fallBackSync {
-	// 	next = next.Add(time.Hour)
+	//	next = next.Add(time.Hour)
 	// }
 
 	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
@@ -97,7 +97,7 @@ func (s *Server) syncTimestamp() error {
 
 	save := next.Add(s.cfg.TsoSaveInterval.Duration)
 	if err = s.saveTimestamp(save); err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 
 	tsoCounter.WithLabelValues("sync_ok").Inc()
@@ -127,7 +127,7 @@ func (s *Server) updateTimestamp() error {
 
 	// gofail: var fallBackUpdate bool
 	// if fallBackUpdate {
-	// 	now = now.Add(time.Hour)
+	//	now = now.Add(time.Hour)
 	// }
 
 	tsoCounter.WithLabelValues("save").Inc()
@@ -163,7 +163,7 @@ func (s *Server) updateTimestamp() error {
 	if subTimeByWallClock(s.lastSavedTime, next) <= updateTimestampGuard {
 		save := next.Add(s.cfg.TsoSaveInterval.Duration)
 		if err := s.saveTimestamp(save); err != nil {
-			return errors.Trace(err)
+			return errors.WithStack(err)
 		}
 	}
 

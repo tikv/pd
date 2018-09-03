@@ -17,9 +17,9 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/juju/errors"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pkg/errors"
 )
 
 func init() {
@@ -29,7 +29,7 @@ func init() {
 		}
 		id, err := strconv.ParseUint(args[0], 10, 64)
 		if err != nil {
-			return nil, errors.Trace(err)
+			return nil, errors.WithStack(err)
 		}
 		return newEvictLeaderScheduler(limiter, id), nil
 	})
@@ -39,7 +39,7 @@ type evictLeaderScheduler struct {
 	*baseScheduler
 	name     string
 	storeID  uint64
-	selector schedule.Selector
+	selector *schedule.RandomSelector
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
@@ -64,7 +64,7 @@ func (s *evictLeaderScheduler) GetType() string {
 }
 
 func (s *evictLeaderScheduler) Prepare(cluster schedule.Cluster) error {
-	return errors.Trace(cluster.BlockStore(s.storeID))
+	return errors.WithStack(cluster.BlockStore(s.storeID))
 }
 
 func (s *evictLeaderScheduler) Cleanup(cluster schedule.Cluster) {
@@ -88,8 +88,8 @@ func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence sc
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: target.GetId()}
-	op := schedule.NewOperator("evict-leader", region.GetId(), region.GetRegionEpoch(), schedule.OpLeader, step)
+	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: target.GetId()}
+	op := schedule.NewOperator("evict-leader", region.GetID(), region.GetRegionEpoch(), schedule.OpLeader, step)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*schedule.Operator{op}
 }

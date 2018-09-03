@@ -20,7 +20,7 @@ import (
 
 // Event that affect the status of the cluster
 type Event interface {
-	Run(tick int64, r *RaftEngine) bool
+	Run(driver *Driver) bool
 }
 
 // EventRunner includes all events
@@ -48,15 +48,19 @@ func parserEvent(e cases.EventInner) Event {
 		return &WriteFlowOnRegion{in: v}
 	case *cases.ReadFlowOnRegionInner:
 		return &ReadFlowOnRegion{in: v}
+	case *cases.AddNodesDynamicInner:
+		return &AddNodesDynamic{in: v}
+	case *cases.DeleteNodesInner:
+		return &DeleteNodes{in: v}
 	}
 	return nil
 }
 
 // Tick ticks the event run
-func (er *EventRunner) Tick(tick int64, r *RaftEngine) {
+func (er *EventRunner) Tick(driver *Driver) {
 	var finishedIndex int
 	for i, e := range er.events {
-		isFinished := e.Run(tick, r)
+		isFinished := e.Run(driver)
 		if isFinished {
 			er.events[i], er.events[finishedIndex] = er.events[finishedIndex], er.events[i]
 			finishedIndex++
@@ -71,15 +75,16 @@ type WriteFlowOnSpot struct {
 }
 
 // Run implements the event interface
-func (w *WriteFlowOnSpot) Run(tick int64, r *RaftEngine) bool {
-	res := w.in.Step(tick)
+func (w *WriteFlowOnSpot) Run(driver *Driver) bool {
+	raft := driver.raftEngine
+	res := w.in.Step(driver.tickCount)
 	for key, size := range res {
-		region := r.SearchRegion([]byte(key))
+		region := raft.SearchRegion([]byte(key))
 		if region == nil {
 			simutil.Logger.Errorf("region not found for key %s", key)
 			continue
 		}
-		r.updateRegionStore(region, size)
+		raft.updateRegionStore(region, size)
 	}
 	return false
 }
@@ -90,15 +95,16 @@ type WriteFlowOnRegion struct {
 }
 
 // Run implements the event interface
-func (w *WriteFlowOnRegion) Run(tick int64, r *RaftEngine) bool {
-	res := w.in.Step(tick)
+func (w *WriteFlowOnRegion) Run(driver *Driver) bool {
+	raft := driver.raftEngine
+	res := w.in.Step(driver.tickCount)
 	for id, bytes := range res {
-		region := r.GetRegion(id)
+		region := raft.GetRegion(id)
 		if region == nil {
 			simutil.Logger.Errorf("region %d not found", id)
 			continue
 		}
-		r.updateRegionStore(region, bytes)
+		raft.updateRegionStore(region, bytes)
 	}
 	return false
 }
@@ -109,8 +115,38 @@ type ReadFlowOnRegion struct {
 }
 
 // Run implements the event interface
-func (w *ReadFlowOnRegion) Run(tick int64, r *RaftEngine) bool {
-	res := w.in.Step(tick)
-	r.updateRegionReadBytes(res)
+func (w *ReadFlowOnRegion) Run(driver *Driver) bool {
+	res := w.in.Step(driver.tickCount)
+	driver.raftEngine.updateRegionReadBytes(res)
+	return false
+}
+
+// AddNodesDynamic adds nodes dynamically.
+type AddNodesDynamic struct {
+	in *cases.AddNodesDynamicInner
+}
+
+// Run implements the event interface.
+func (w *AddNodesDynamic) Run(driver *Driver) bool {
+	res := w.in.Step(driver.tickCount)
+	if res == 0 {
+		return false
+	}
+	driver.AddNode(res)
+	return false
+}
+
+// DeleteNodes deletes nodes randomly
+type DeleteNodes struct {
+	in *cases.DeleteNodesInner
+}
+
+// Run implements the event interface
+func (w *DeleteNodes) Run(driver *Driver) bool {
+	res := w.in.Step(driver.tickCount)
+	if res == 0 {
+		return false
+	}
+	driver.DeleteNode(res)
 	return false
 }

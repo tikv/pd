@@ -23,18 +23,18 @@ import (
 
 func newHotWrite() *Conf {
 	var conf Conf
+	var id idAllocator
 	// Initialize the cluster
 	for i := 1; i <= 10; i++ {
 		conf.Stores = append(conf.Stores, &Store{
-			ID:        uint64(i),
+			ID:        id.nextID(),
 			Status:    metapb.StoreState_Up,
 			Capacity:  1 * TB,
 			Available: 900 * GB,
 			Version:   "2.1.0",
 		})
 	}
-	var id idAllocator
-	id.setMaxID(10)
+
 	for i := 0; i < 500; i++ {
 		storeIDs := rand.Perm(10)
 		peers := []*metapb.Peer{
@@ -75,8 +75,8 @@ func newHotWrite() *Conf {
 		var leaderCount, peerCount [10]int
 		for id := range writeFlow {
 			region := regions.GetRegion(id)
-			leaderCount[int(region.Leader.GetStoreId()-1)]++
-			for _, p := range region.Peers {
+			leaderCount[int(region.GetLeader().GetStoreId()-1)]++
+			for _, p := range region.GetPeers() {
 				peerCount[int(p.GetStoreId()-1)]++
 			}
 		}

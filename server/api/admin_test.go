@@ -19,6 +19,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/core"
 )
 
 var _ = Suite(&testAdminSuite{})
@@ -47,18 +48,23 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 	cluster := s.svr.GetRaftCluster()
 
 	// Update region's epoch to (100, 100).
-	region := cluster.GetRegionInfoByKey([]byte("foo"))
-	region.RegionEpoch.ConfVer, region.RegionEpoch.Version = 100, 100
-	err := cluster.HandleRegionHeartbeat(region.Clone())
+	region := cluster.GetRegionInfoByKey([]byte("foo")).Clone(
+		core.SetRegionConfVer(100),
+		core.SetRegionVersion(100),
+	)
+	err := cluster.HandleRegionHeartbeat(region)
 	c.Assert(err, IsNil)
 
 	// Region epoch cannot decrease.
-	region.RegionEpoch.ConfVer, region.RegionEpoch.Version = 50, 50
-	err = cluster.HandleRegionHeartbeat(region.Clone())
+	region = region.Clone(
+		core.SetRegionConfVer(50),
+		core.SetRegionVersion(50),
+	)
+	err = cluster.HandleRegionHeartbeat(region)
 	c.Assert(err, NotNil)
 
 	// After drop region from cache, lower version is accepted.
-	url := fmt.Sprintf("%s/admin/cache/region/%d", s.urlPrefix, region.Id)
+	url := fmt.Sprintf("%s/admin/cache/region/%d", s.urlPrefix, region.GetID())
 	req, err := http.NewRequest("DELETE", url, nil)
 	c.Assert(err, IsNil)
 	res, err := http.DefaultClient.Do(req)
