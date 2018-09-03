@@ -610,6 +610,17 @@ func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePoin
 	}, nil
 }
 
+// UpdateRegion updates the regions
+func (s *Server) UpdateRegion(ctx context.Context, request *pdpb.UpdateRegionRequest) (*pdpb.UpdateRegionResponse, error) {
+	if request.GetHeader().GetClusterId() != s.clusterID {
+		return nil, status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
+	}
+
+	infos := make([]byte, request.Data.Size())
+	var [] core.RegionInfo
+	s.kv.Save()
+}
+
 // UpdateGCSafePoint implements gRPC PDServer.
 func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSafePointRequest) (*pdpb.UpdateGCSafePointResponse, error) {
 	if err := s.validateRequest(request.GetHeader()); err != nil {

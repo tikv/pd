@@ -196,6 +196,14 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:7f114b78210bf5b75f307fc97cff293633c835bab1e0ea8a744a44b39c042dfe"
+  name = "github.com/golang/snappy"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "2e65f85255dbc3072edf28d6b5b8efc472979f5a"
+
+[[projects]]
+  branch = "master"
   digest = "1:05f95ffdfcf651bdb0f05b40b69e7f5663047f8da75c72d58728acb59b5cc107"
   name = "github.com/google/btree"
   packages = ["."]
@@ -314,8 +322,8 @@
   revision = "1c287c953996ab3a0bf535dba9d53d809d3dc0b6"
 
 [[projects]]
-  branch = "master"
-  digest = "1:3be99496a5d1fc018eb176c53a81df986408af94bece871d829eaceddf7c5325"
+  branch = "sync-region"
+  digest = "1:baa23afb37e648588158262f6a50a2845338674b1afba1e9fe568708458df26a"
   name = "github.com/pingcap/kvproto"
   packages = [
     "pkg/eraftpb",
@@ -323,7 +331,16 @@
     "pkg/pdpb",
   ]
   pruneopts = "NUT"
-  revision = "279515615485b0f2d12f1421cc412fe2784e0190"
+  revision = "126e2158f7703917288d22823fff13608fb4d40a"
+  source = "https://github.com/nolouch/kvproto.git"
+
+[[projects]]
+  branch = "master"
+  digest = "1:a1e55eae8157c58576c7f2551cc6b0c7efa86730dc79bbd783c8763540b4e5d6"
+  name = "github.com/pingcap/tipb"
+  packages = ["sharedbytes"]
+  pruneopts = "NUT"
+  revision = "5e46e0ec647edfee8fe001c5b51609460fb655bf"
 
 [[projects]]
   digest = "1:5cf3f025cbee5951a4ee961de067c8a89fc95a5adabead774f82822efabab121"
@@ -409,6 +426,27 @@
   pruneopts = "NUT"
   revision = "583c0c0531f06d5278b7d917446061adc344b5cd"
   version = "v1.0.1"
+
+[[projects]]
+  branch = "master"
+  digest = "1:f2ffd421680b0a3f7887501b3c6974bcf19217ecd301d0e2c9b681940ec363d5"
+  name = "github.com/syndtr/goleveldb"
+  packages = [
+    "leveldb",
+    "leveldb/cache",
+    "leveldb/comparer",
+    "leveldb/errors",
+    "leveldb/filter",
+    "leveldb/iterator",
+    "leveldb/journal",
+    "leveldb/memdb",
+    "leveldb/opt",
+    "leveldb/storage",
+    "leveldb/table",
+    "leveldb/util",
+  ]
+  pruneopts = "NUT"
+  revision = "ae2bd5eed72d46b28834ec3f60db3a3ebedd8dbd"
 
 [[projects]]
   branch = "master"
@@ -649,6 +687,8 @@
     "github.com/sirupsen/logrus",
     "github.com/spf13/cobra",
     "github.com/spf13/pflag",
+    "github.com/syndtr/goleveldb/leveldb",
+    "github.com/syndtr/goleveldb/leveldb/util",
     "github.com/unrolled/render",
     "github.com/urfave/negroni",
     "go.uber.org/zap",
