@@ -364,12 +364,10 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 		core.WithDownPeers(append(region.GetDownPeers(), downPeer)),
 	)
 	dispatchHeartbeat(c, co, region, stream)
-	waitRemovePeer(c, stream, region, 3)
-	region = region.Clone(core.WithDownPeers(nil))
-	dispatchHeartbeat(c, co, region, stream)
 	waitAddLearner(c, stream, region, 4)
 	dispatchHeartbeat(c, co, region, stream)
 	waitPromoteLearner(c, stream, region, 4)
+	region = region.Clone(core.WithDownPeers(nil))
 	dispatchHeartbeat(c, co, region, stream)
 	waitNoResponse(c, stream)
 

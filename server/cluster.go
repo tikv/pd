@@ -252,6 +252,11 @@ func (c *RaftCluster) GetRegions() []*core.RegionInfo {
 	return c.cachedCluster.getRegions()
 }
 
+// GetStoreRegions returns all regions info with a given storeID.
+func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
+	return c.cachedCluster.getStoreRegions(storeID)
+}
+
 // GetRegionStats returns region statistics from cluster.
 func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *core.RegionStats {
 	return c.cachedCluster.getRegionStats(startKey, endKey)
@@ -379,7 +384,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 // State transition:
 // Case 1: Up -> Tombstone (if force is true);
 // Case 2: Offline -> Tombstone.
-func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
+func (c *RaftCluster) BuryStore(storeID uint64, force bool) error { // revive:disable-line:flag-parameter
 	c.Lock()
 	defer c.Unlock()
 

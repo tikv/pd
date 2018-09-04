@@ -544,11 +544,9 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 		Peer:        region.GetStorePeer(2),
 		DownSeconds: 24 * 60 * 60,
 	}
-	region = region.Clone(
-		core.WithRemoveStorePeer(1),
-		core.WithDownPeers(append(region.GetDownPeers(), downPeer)),
-	)
-	testutil.CheckRemovePeer(c, rc.Check(region), 2)
+
+	region = region.Clone(core.WithDownPeers(append(region.GetDownPeers(), downPeer)))
+	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 2, 1)
 	region = region.Clone(core.WithDownPeers(nil))
 	c.Assert(rc.Check(region), IsNil)
 
@@ -796,7 +794,7 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	}))
 	tc.SetStoreOffline(2)
 	// RemoveDownReplica has higher priority than replaceOfflineReplica.
-	testutil.CheckRemovePeer(c, rc.Check(region), 1)
+	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 1, 4)
 	opt.DisableRemoveDownReplica = true
 	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 2, 4)
 	opt.DisableReplaceOfflineReplica = true

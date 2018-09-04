@@ -861,6 +861,20 @@ types:
           description: The region does not exist.
         500:
           description: PD server failed to proceed the request.
+  /store/{id}:
+    uriParameters:
+      id: integer
+    get:
+      description: List all regions of a specific store.
+      responses:
+        200:
+          body:
+            application/json:
+              type: Regions
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
 
 /schedulers:
   description: Running schedulers.

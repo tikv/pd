@@ -74,14 +74,15 @@ func (a *idAllocator) nextID() uint64 {
 
 // ConfMap is a mapping of the cases to the their corresponding initialize functions.
 var ConfMap = map[string]func() *Conf{
-	"balance-leader":    newBalanceLeader,
-	"add-nodes":         newAddNodes,
-	"add-nodes-dynamic": newAddNodesDynamic,
-	"delete-nodes":      newDeleteNodes,
-	"region-split":      newRegionSplit,
-	"region-merge":      newRegionMerge,
-	"hot-read":          newHotRead,
-	"hot-write":         newHotWrite,
+	"balance-leader":       newBalanceLeader,
+	"add-nodes":            newAddNodes,
+	"add-nodes-dynamic":    newAddNodesDynamic,
+	"delete-nodes":         newDeleteNodes,
+	"region-split":         newRegionSplit,
+	"region-merge":         newRegionMerge,
+	"hot-read":             newHotRead,
+	"hot-write":            newHotWrite,
+	"makeup-down-replicas": newMakeupDownReplicas,
 }
 
 // NewConf creates a config to initialize simulator cluster.
