@@ -298,7 +298,11 @@ func (s *Server) watchLeader(leader *pdpb.Member) {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
-
+	err := s.cluster.regionSyncer.statSyncerWithLeader(leader.GetClientUrls()[0])
+	if err != nil {
+		log.Errorf("Syncer with leader meet with error %s", err)
+	}
+	defer s.cluster.regionSyncer.stopSyncerWithLeader()
 	for {
 		rch := watcher.Watch(ctx, s.getLeaderPath())
 		for wresp := range rch {

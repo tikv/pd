@@ -26,7 +26,7 @@ type leveldbKV struct {
 }
 
 // NewLeveldbKV to store regions information.
-func NewLeveldbKV(path string) (KVBase, error) {
+func NewLeveldbKV(path string) (RegionKV, error) {
 	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
 		return nil, err
@@ -81,4 +81,8 @@ func (kv *leveldbKV) SaveRegions(regions map[string]*metapb.Region) error {
 		batch.Put([]byte(key), value)
 	}
 	return kv.db.Write(batch, nil)
+}
+
+func (kv *leveldbKV) Close() error {
+	return kv.db.Close()
 }

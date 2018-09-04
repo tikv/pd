@@ -54,7 +54,8 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	storeID, err := s.svr.idAlloc.Alloc()
 	c.Assert(err, IsNil)
 	putStore(c, s.grpcPDClient, s.svr.clusterID, &metapb.Store{Id: storeID, Address: "127.0.0.1:1"})
-	newHandler(s.svr).AddAddPeerOperator(s.region.GetId(), storeID)
+	err = newHandler(s.svr).AddAddPeerOperator(s.region.GetId(), storeID)
+	c.Assert(err, IsNil)
 
 	stream1, stream2 := newRegionheartbeatClient(c, s.grpcPDClient), newRegionheartbeatClient(c, s.grpcPDClient)
 	defer stream1.close()

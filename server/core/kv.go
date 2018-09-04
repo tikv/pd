@@ -20,6 +20,7 @@ import (
 	"path"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -36,10 +37,18 @@ const (
 const (
 	maxKVRangeLimit = 10000
 	minKVRangeLimit = 100
+	dirtyFlushTick  = time.Second
+)
+
+const (
+	//DefaultSyncRegionTTL is the ttl to sync the regions to kv storage.
+	DefaultSyncRegionTTL = 3 * time.Second
+	//DefaultBatchSize is the batch size to save the regions to kv storage.
+	DefaultBatchSize = 100
 )
 
 // WithLevelDBKV store the regions information in levelDB.
-func WithLevelDBKV(path string) func(*KV) {
+func WithLevelDBKV(path string, batchSize int, ttl time.Duration) func(*KV) {
 	return func(kv *KV) {
 		levelDB, err := NewLeveldbKV(path)
 		if err != nil {
@@ -47,24 +56,31 @@ func WithLevelDBKV(path string) func(*KV) {
 			return
 		}
 		kv.regionKV = levelDB
+		kv.batchRegions = make(map[string]*metapb.Region)
+		kv.ttl = ttl
+		kv.batchSize = batchSize
+		kv.flushTime = time.Now().Add(ttl)
+		kv.doGC()
 	}
 }
 
 // KV wraps all kv operations, keep it stateless.
 type KV struct {
 	KVBase
+	// save region in another way
+	regionKV     RegionKV
 	mu           sync.RWMutex
-	batch        int
 	batchRegions map[string]*metapb.Region
-	regionKV     KVBase
+	batchSize    int
+	cacheSize    int
+	ttl          time.Duration
+	flushTime    time.Time
 }
 
 // NewKV creates KV instance with KVBase.
 func NewKV(base KVBase, opts ...func(*KV)) *KV {
 	kv := &KV{
-		KVBase:       base,
-		batch:        100,
-		batchRegions: make(map[string]*metapb.Region),
+		KVBase: base,
 	}
 	for _, opt := range opts {
 		opt(kv)
@@ -126,17 +142,18 @@ func (kv *KV) SaveRegion(region *metapb.Region) error {
 	if kv.regionKV != nil {
 		kv.mu.Lock()
 		defer kv.mu.Unlock()
-		if kv.batch < 100 {
+		if kv.cacheSize < kv.batchSize {
 			kv.batchRegions[kv.regionPath(region.GetId())] = region
-			kv.batch++
+			kv.cacheSize++
+			kv.flushTime = time.Now().Add(kv.ttl)
 			return nil
 		}
-		err := kv.regionKV.(*leveldbKV).SaveRegions(kv.batchRegions)
+		err := kv.regionKV.SaveRegions(kv.batchRegions)
 		if err != nil {
 			return err
 		}
-		kv.batch = 0
-		kv.batchRegions = make(map[string]*metapb.Region)
+		kv.cacheSize = 0
+		kv.batchRegions = make(map[string]*metapb.Region, kv.batchSize)
 		return nil
 		//return saveProto(kv.regionKV, kv.regionPath(region.GetId()), region)
 	}
@@ -326,8 +343,42 @@ func saveProto(kv KVBase, key string, msg proto.Message) error {
 }
 
 // Close closes the kv.
-func (kv *KV) Close() {
+func (kv *KV) Close() error {
 	if kv.regionKV != nil {
-		kv.regionKV.(*leveldbKV).db.Close()
+		return kv.regionKV.Close()
 	}
+	return nil
+}
+
+func (kv *KV) doGC() {
+	tick := time.NewTicker(dirtyFlushTick)
+	defer tick.Stop()
+	var isFlush bool
+	go func() {
+		for {
+			<-tick.C
+			kv.mu.RLock()
+			isFlush = kv.flushTime.Before(time.Now())
+			kv.mu.RUnlock()
+			if !isFlush {
+				continue
+			}
+			kv.FlushRegion()
+		}
+	}()
+}
+
+// FlushRegion save the cache region to region kv storage.
+func (kv *KV) FlushRegion() error {
+	if kv.regionKV != nil {
+		kv.mu.Lock()
+		defer kv.mu.Unlock()
+		if err := kv.regionKV.SaveRegions(kv.batchRegions); err != nil {
+			return err
+		}
+		kv.cacheSize = 0
+		kv.batchRegions = make(map[string]*metapb.Region, kv.batchSize)
+		return nil
+	}
+	return nil
 }

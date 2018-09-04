@@ -700,6 +700,7 @@ func mustSaveRegions(c *C, kv *core.KV, n int) []*metapb.Region {
 	for _, region := range regions {
 		c.Assert(kv.SaveRegion(region), IsNil)
 	}
+	c.Assert(kv.FlushRegion(), IsNil)
 
 	return regions
 }

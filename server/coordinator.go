@@ -221,7 +221,7 @@ func (c *coordinator) run() {
 	log.Info("coordinator: Run scheduler")
 
 	k := 0
-	scheduleCfg := c.cluster.opt.load()
+	scheduleCfg := c.cluster.opt.load().clone()
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
 		if schedulerCfg.Disable {
 			scheduleCfg.Schedulers[k] = schedulerCfg

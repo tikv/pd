@@ -38,7 +38,10 @@ type clusterInfo struct {
 	regionStats     *regionStatistics
 	labelLevelStats *labelLevelStatistics
 	prepareChecker  *prepareChecker
+	changedRegions  chan *core.RegionInfo
 }
+
+var defaultChangedRegionsLimit = 10000
 
 func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clusterInfo {
 	return &clusterInfo{
@@ -48,6 +51,7 @@ func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clus
 		kv:              kv,
 		labelLevelStats: newLabelLevelStatistics(),
 		prepareChecker:  newPrepareChecker(),
+		changedRegions:  make(chan *core.RegionInfo, defaultChangedRegionsLimit),
 	}
 }
 
@@ -106,6 +110,10 @@ func (c *clusterInfo) OnStoreVersionChange() {
 		log.Infof("cluster version changed from %s to %s", clusterVersion, minVersion)
 		CheckPDVersion(c.opt)
 	}
+}
+
+func (c *clusterInfo) getChangedRegions() <-chan *core.RegionInfo {
+	return c.changedRegions
 }
 
 // IsFeatureSupported checks if the feature is supported by current cluster.
@@ -511,6 +519,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			// after restart. Here we only log the error then go on updating cache.
 			log.Errorf("[region %d] fail to save region %v: %v", region.GetID(), region, err)
 		}
+		c.changedRegions <- region
 	}
 	if !isWriteUpdate && !isReadUpdate && !saveCache && !isNew {
 		return nil

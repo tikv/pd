@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/error_code"
@@ -55,8 +56,10 @@ type RaftCluster struct {
 
 	coordinator *coordinator
 
-	wg   sync.WaitGroup
-	quit chan struct{}
+	wg           sync.WaitGroup
+	quit         chan struct{}
+	clients      map[string]pdpb.PDClient
+	regionSyncer *regionSyncer
 }
 
 // ClusterStatus saves some state information
@@ -66,10 +69,12 @@ type ClusterStatus struct {
 
 func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 	return &RaftCluster{
-		s:           s,
-		running:     false,
-		clusterID:   clusterID,
-		clusterRoot: s.getClusterRootPath(),
+		s:            s,
+		running:      false,
+		clusterID:    clusterID,
+		clusterRoot:  s.getClusterRootPath(),
+		clients:      make(map[string]pdpb.PDClient),
+		regionSyncer: newRegionSyncer(s),
 	}
 }
 
@@ -115,13 +120,53 @@ func (c *RaftCluster) start() error {
 	c.cachedCluster.regionStats = newRegionStatistics(c.s.scheduleOpt, c.s.classifier)
 	c.quit = make(chan struct{})
 
-	c.wg.Add(2)
+	c.wg.Add(3)
 	go c.runCoordinator()
 	go c.runBackgroundJobs(backgroundJobInterval)
-
+	go c.runSyncRegions()
 	c.running = true
 
 	return nil
+}
+
+func (c *RaftCluster) runSyncRegions() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+	var requests []*metapb.Region
+	// grpc has limit on message size
+	maxBatchSize := 100
+	for {
+		select {
+		case <-c.quit:
+			return
+		case first := <-c.cachedCluster.getChangedRegions():
+			requests = append(requests, first.GetMeta())
+			pending := len(c.cachedCluster.getChangedRegions())
+			for i := 0; i < pending && i < maxBatchSize; i++ {
+				region := <-c.cachedCluster.getChangedRegions()
+				requests = append(requests, region.GetMeta())
+			}
+			msg := &pdpb.MetaRegions{
+				Count:   uint32(len(requests)),
+				Regions: requests}
+			data, err := proto.Marshal(msg)
+			if err != nil {
+				log.Errorf("Report regions meet error: %s", err)
+				continue
+			}
+			req := &pdpb.SyncRegionResponse{
+				Header: &pdpb.ResponseHeader{ClusterId: c.s.clusterID},
+				Data:   data,
+			}
+			for _, stream := range c.regionSyncer.streams {
+				err := stream.Send(req)
+				if err != nil {
+					log.Errorf("Report regions meet error: %s", err)
+				}
+			}
+		}
+		requests = requests[:0]
+	}
 }
 
 func (c *RaftCluster) runCoordinator() {

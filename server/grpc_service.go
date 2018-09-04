@@ -610,19 +610,28 @@ func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePoin
 	}, nil
 }
 
-// UpdateRegion updates the regions
-func (s *Server) UpdateRegion(ctx context.Context, request *pdpb.UpdateRegionRequest) (*pdpb.UpdateRegionResponse, error) {
-	if request.GetHeader().GetClusterId() != s.clusterID {
-		return nil, status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
+// SyncRegions syncs the regions.
+func (s *Server) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
+	for {
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if request.GetHeader().GetClusterId() != s.clusterID {
+			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
+		}
+		switch request.GetTp() {
+		case 1:
+			log.Infof("Establish sync region stream with %s [%s]", request.GetMember().GetName(), request.GetMember().GetClientUrls()[0])
+			if s.cluster.regionSyncer != nil {
+				s.cluster.regionSyncer.bindStream(request.GetMember().GetName(), stream)
+			}
+		default:
+		}
 	}
-	var p pdpb.MetaRegions
-	p.Unmarshal(request.Data)
-	for i := uint32(0); i < p.GetCount(); i++ {
-		s.kv.SaveRegion(p.Regions[i])
-	}
-	return &pdpb.UpdateRegionResponse{
-		Header: s.header(),
-	}, nil
 }
 
 // UpdateGCSafePoint implements gRPC PDServer.

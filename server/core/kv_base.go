@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/google/btree"
+	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
 // KVBase is an abstract interface for load/save pd cluster data.
@@ -25,6 +26,13 @@ type KVBase interface {
 	LoadRange(key, endKey string, limit int) ([]string, error)
 	Save(key, value string) error
 	Delete(key string) error
+}
+
+// RegionKV used to save region metadata.
+type RegionKV interface {
+	KVBase
+	SaveRegions(regions map[string]*metapb.Region) error
+	Close() error
 }
 
 type memoryKV struct {
