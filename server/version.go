@@ -69,7 +69,7 @@ func ParseVersion(v string) (*semver.Version, error) {
 		v = v[1:]
 	}
 	ver, err := semver.NewVersion(v)
-	return ver, errors.WithStack(err)
+	return ver, errors.WithStack(err) // wrap semver error.
 }
 
 // MustParseVersion wraps ParseVersion and will panic if error is not nil.
