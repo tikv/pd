@@ -252,6 +252,11 @@ func (c *RaftCluster) GetRegions() []*core.RegionInfo {
 	return c.cachedCluster.getRegions()
 }
 
+// GetStoreRegions returns all regions info with a given storeID.
+func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
+	return c.cachedCluster.getStoreRegions(storeID)
+}
+
 // GetRegionStats returns region statistics from cluster.
 func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *core.RegionStats {
 	return c.cachedCluster.getRegionStats(startKey, endKey)

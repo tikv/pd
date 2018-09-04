@@ -16,6 +16,7 @@ package api
 import (
 	"fmt"
 	"math/rand"
+	"sort"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -79,6 +80,43 @@ func (s *testRegionSuite) TestRegion(c *C) {
 	err = readJSONWithURL(url, r2)
 	c.Assert(err, IsNil)
 	c.Assert(r2, DeepEquals, newRegionInfo(r))
+}
+
+func (s *testRegionSuite) TestStoreRegions(c *C) {
+	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	r2 := newTestRegionInfo(3, 1, []byte("b"), []byte("c"))
+	r3 := newTestRegionInfo(4, 2, []byte("c"), []byte("d"))
+	mustRegionHeartbeat(c, s.svr, r1)
+	mustRegionHeartbeat(c, s.svr, r2)
+	mustRegionHeartbeat(c, s.svr, r3)
+
+	regionIDs := []uint64{2, 3}
+	url := fmt.Sprintf("%s/regions/store/%d", s.urlPrefix, 1)
+	r4 := &regionsInfo{}
+	err := readJSONWithURL(url, r4)
+	c.Assert(err, IsNil)
+	c.Assert(r4.Count, Equals, len(regionIDs))
+	sort.Slice(r4.Regions, func(i, j int) bool { return r4.Regions[i].ID < r4.Regions[j].ID })
+	for i, r := range r4.Regions {
+		c.Assert(r.ID, Equals, regionIDs[i])
+	}
+
+	regionIDs = []uint64{4}
+	url = fmt.Sprintf("%s/regions/store/%d", s.urlPrefix, 2)
+	r5 := &regionsInfo{}
+	err = readJSONWithURL(url, r5)
+	c.Assert(err, IsNil)
+	c.Assert(r5.Count, Equals, len(regionIDs))
+	for i, r := range r5.Regions {
+		c.Assert(r.ID, Equals, regionIDs[i])
+	}
+
+	regionIDs = []uint64{}
+	url = fmt.Sprintf("%s/regions/store/%d", s.urlPrefix, 3)
+	r6 := &regionsInfo{}
+	err = readJSONWithURL(url, r6)
+	c.Assert(err, IsNil)
+	c.Assert(r6.Count, Equals, len(regionIDs))
 }
 
 func (s *testRegionSuite) TestTopFlow(c *C) {

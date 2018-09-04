@@ -311,6 +311,12 @@ func (c *clusterInfo) getRegions() []*core.RegionInfo {
 	return c.core.Regions.GetRegions()
 }
 
+func (c *clusterInfo) getStoreRegions(storeID uint64) []*core.RegionInfo {
+	c.RLock()
+	defer c.RUnlock()
+	return c.core.Regions.GetStoreRegions(storeID)
+}
+
 func (c *clusterInfo) getMetaRegions() []*metapb.Region {
 	c.RLock()
 	defer c.RUnlock()
