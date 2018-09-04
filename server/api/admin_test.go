@@ -71,7 +71,7 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(res.StatusCode, Equals, http.StatusOK)
 	res.Body.Close()
-	err = cluster.HandleRegionHeartbeat(region.Clone())
+	err = cluster.HandleRegionHeartbeat(region)
 	c.Assert(err, IsNil)
 
 	region = cluster.GetRegionInfoByKey([]byte("foo"))

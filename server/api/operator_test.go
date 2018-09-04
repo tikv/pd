@@ -95,7 +95,7 @@ func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, 
 
 func mustRegionHeartbeat(c *C, svr *server.Server, region *core.RegionInfo) {
 	cluster := svr.GetRaftCluster()
-	err := cluster.HandleRegionHeartbeat(region.Clone())
+	err := cluster.HandleRegionHeartbeat(region)
 	c.Assert(err, IsNil)
 }
 
