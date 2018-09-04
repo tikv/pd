@@ -151,7 +151,7 @@ func (bc *BasicCluster) GetFollowerStores(region *core.RegionInfo) []*core.Store
 
 // GetLeaderStore returns all Stores that contains the region's leader peer.
 func (bc *BasicCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
-	return bc.Stores.GetStore(region.Leader.GetStoreId())
+	return bc.Stores.GetStore(region.GetLeader().GetStoreId())
 }
 
 // GetAdjacentRegions returns region's info that is adjacent with specific region

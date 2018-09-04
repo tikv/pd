@@ -299,7 +299,7 @@ func (c *clusterInfo) putRegion(region *core.RegionInfo) error {
 
 func (c *clusterInfo) putRegionLocked(region *core.RegionInfo) error {
 	if c.kv != nil {
-		if err := c.kv.SaveRegion(region.Region); err != nil {
+		if err := c.kv.SaveRegion(region.GetMeta()); err != nil {
 			return errors.WithStack(err)
 		}
 	}
@@ -396,7 +396,7 @@ func (c *clusterInfo) takeRegionStoresLocked(region *core.RegionInfo) []*core.St
 func (c *clusterInfo) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
-	return c.core.Stores.GetStore(region.Leader.GetStoreId())
+	return c.core.Stores.GetStore(region.GetLeader().GetStoreId())
 }
 
 // GetFollowerStores returns all stores that contains the region's follower peer.
@@ -448,7 +448,7 @@ func (c *clusterInfo) updateStoreStatusLocked(id uint64) {
 func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	region = region.Clone()
 	c.RLock()
-	origin := c.core.Regions.GetRegion(region.GetId())
+	origin := c.core.Regions.GetRegion(region.GetID())
 	isWriteUpdate, writeItem := c.core.CheckWriteStatus(region)
 	isReadUpdate, readItem := c.core.CheckReadStatus(region)
 	c.RUnlock()
@@ -458,53 +458,53 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	// Mark isNew if the region in cache does not have leader.
 	var saveKV, saveCache, isNew bool
 	if origin == nil {
-		log.Debugf("[region %d] Insert new region {%v}", region.GetId(), region)
+		log.Debugf("[region %d] Insert new region {%v}", region.GetID(), region)
 		saveKV, saveCache, isNew = true, true, true
 	} else {
 		r := region.GetRegionEpoch()
 		o := origin.GetRegionEpoch()
 		// Region meta is stale, return an error.
 		if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
-			return errors.WithStack(ErrRegionIsStale(region.Region, origin.Region))
+			return errors.WithStack(ErrRegionIsStale(region.GetMeta(), origin.GetMeta()))
 		}
 		if r.GetVersion() > o.GetVersion() {
-			log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetId(), core.DiffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion())
+			log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetID(), core.DiffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion())
 			saveKV, saveCache = true, true
 		}
 		if r.GetConfVer() > o.GetConfVer() {
-			log.Infof("[region %d] %s, ConfVer changed from {%d} to {%d}", region.GetId(), core.DiffRegionPeersInfo(origin, region), o.GetConfVer(), r.GetConfVer())
+			log.Infof("[region %d] %s, ConfVer changed from {%d} to {%d}", region.GetID(), core.DiffRegionPeersInfo(origin, region), o.GetConfVer(), r.GetConfVer())
 			saveKV, saveCache = true, true
 		}
-		if region.Leader.GetId() != origin.Leader.GetId() {
-			if origin.Leader.GetId() == 0 {
+		if region.GetLeader().GetId() != origin.GetLeader().GetId() {
+			if origin.GetLeader().GetId() == 0 {
 				isNew = true
 			} else {
-				log.Infof("[region %d] Leader changed from store {%d} to {%d}", region.GetId(), origin.Leader.GetStoreId(), region.Leader.GetStoreId())
+				log.Infof("[region %d] Leader changed from store {%d} to {%d}", region.GetID(), origin.GetLeader().GetStoreId(), region.GetLeader().GetStoreId())
 			}
 			saveCache = true
 		}
-		if len(region.DownPeers) > 0 || len(region.PendingPeers) > 0 {
+		if len(region.GetDownPeers()) > 0 || len(region.GetPendingPeers()) > 0 {
 			saveCache = true
 		}
-		if len(origin.DownPeers) > 0 || len(origin.PendingPeers) > 0 {
+		if len(origin.GetDownPeers()) > 0 || len(origin.GetPendingPeers()) > 0 {
 			saveCache = true
 		}
 		if len(region.GetPeers()) != len(origin.GetPeers()) {
 			saveKV, saveCache = true, true
 		}
-		if region.ApproximateSize != origin.ApproximateSize {
+		if region.GetApproximateSize() != origin.GetApproximateSize() {
 			saveCache = true
 		}
-		if region.ApproximateKeys != origin.ApproximateKeys {
+		if region.GetApproximateKeys() != origin.GetApproximateKeys() {
 			saveCache = true
 		}
 	}
 
 	if saveKV && c.kv != nil {
-		if err := c.kv.SaveRegion(region.Region); err != nil {
+		if err := c.kv.SaveRegion(region.GetMeta()); err != nil {
 			// Not successfully saved to kv is not fatal, it only leads to longer warm-up
 			// after restart. Here we only log the error then go on updating cache.
-			log.Errorf("[region %d] fail to save region %v: %v", region.GetId(), region, err)
+			log.Errorf("[region %d] fail to save region %v: %v", region.GetID(), region, err)
 		}
 	}
 	if !isWriteUpdate && !isReadUpdate && !saveCache && !isNew {
@@ -535,11 +535,11 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 
 		// Update related stores.
 		if origin != nil {
-			for _, p := range origin.Peers {
+			for _, p := range origin.GetPeers() {
 				c.updateStoreStatusLocked(p.GetStoreId())
 			}
 		}
-		for _, p := range region.Peers {
+		for _, p := range region.GetPeers() {
 			c.updateStoreStatusLocked(p.GetStoreId())
 		}
 	}
@@ -548,7 +548,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		c.regionStats.Observe(region, c.takeRegionStoresLocked(region))
 	}
 
-	key := region.GetId()
+	key := region.GetID()
 	if isWriteUpdate {
 		c.core.HotCache.Update(key, writeItem, schedule.WriteFlow)
 	}

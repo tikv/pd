@@ -72,7 +72,7 @@ func newHotRead() *Conf {
 	conf.Checker = func(regions *core.RegionsInfo) bool {
 		var leaderCount [5]int
 		for id := range readFlow {
-			leaderStore := regions.GetRegion(id).Leader.GetStoreId()
+			leaderStore := regions.GetRegion(id).GetLeader().GetStoreId()
 			leaderCount[int(leaderStore-1)]++
 		}
 		simutil.Logger.Infof("hot region count: %v", leaderCount)

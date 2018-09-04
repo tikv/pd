@@ -38,9 +38,12 @@ func (s *testTrendSuite) TestTrend(c *C) {
 	}
 
 	// Create 3 regions, all peers on store1 and store2, and the leaders are all on store1.
-	mustRegionHeartbeat(c, svr, s.newRegionInfo(4, "", "a", 2, 2, []uint64{1, 2}, nil, 1))
-	mustRegionHeartbeat(c, svr, s.newRegionInfo(5, "a", "b", 2, 2, []uint64{1, 2}, nil, 1))
-	mustRegionHeartbeat(c, svr, s.newRegionInfo(6, "b", "", 2, 2, []uint64{1, 2}, nil, 1))
+	region4 := s.newRegionInfo(4, "", "a", 2, 2, []uint64{1, 2}, nil, 1)
+	region5 := s.newRegionInfo(5, "a", "b", 2, 2, []uint64{1, 2}, nil, 1)
+	region6 := s.newRegionInfo(6, "b", "", 2, 2, []uint64{1, 2}, nil, 1)
+	mustRegionHeartbeat(c, svr, region4)
+	mustRegionHeartbeat(c, svr, region5)
+	mustRegionHeartbeat(c, svr, region6)
 
 	// Create 3 operators that transfers leader, moves follower, moves leader.
 	svr.GetHandler().AddTransferLeaderOperator(4, 2)
@@ -48,29 +51,25 @@ func (s *testTrendSuite) TestTrend(c *C) {
 	svr.GetHandler().AddTransferPeerOperator(6, 1, 3)
 
 	// Complete the operators.
-	mustRegionHeartbeat(c, svr, s.newRegionInfo(4, "", "a", 2, 2, []uint64{1, 2}, nil, 2))
+	mustRegionHeartbeat(c, svr, region4.Clone(core.WithLeader(region4.GetStorePeer(2))))
 
 	op, err := svr.GetHandler().GetOperator(5)
 	c.Assert(err, IsNil)
 	c.Assert(op, NotNil)
 	newPeerID := op.Step(0).(schedule.AddLearner).PeerID
-	region := s.newRegionInfo(5, "a", "b", 3, 2, []uint64{1, 2}, []uint64{3}, 1)
-	region.Learners[0].Id = newPeerID
-	mustRegionHeartbeat(c, svr, region)
-	region = s.newRegionInfo(5, "a", "b", 4, 2, []uint64{1, 3}, nil, 1)
-	region.Peers[1].Id = newPeerID
-	mustRegionHeartbeat(c, svr, region)
+	region5 = region5.Clone(core.WithAddPeer(&metapb.Peer{Id: newPeerID, StoreId: 3, IsLearner: true}), core.WithIncConfVer())
+	mustRegionHeartbeat(c, svr, region5)
+	region5 = region5.Clone(core.WithPromoteLearner(newPeerID), core.WithRemoveStorePeer(2), core.WithIncConfVer())
+	mustRegionHeartbeat(c, svr, region5)
 
 	op, err = svr.GetHandler().GetOperator(6)
 	c.Assert(err, IsNil)
 	c.Assert(op, NotNil)
 	newPeerID = op.Step(0).(schedule.AddLearner).PeerID
-	region = s.newRegionInfo(6, "b", "", 3, 2, []uint64{1, 2}, []uint64{3}, 1)
-	region.Learners[0].Id = newPeerID
-	mustRegionHeartbeat(c, svr, region)
-	region = s.newRegionInfo(6, "b", "", 4, 2, []uint64{2, 3}, nil, 2)
-	region.Peers[1].Id = newPeerID
-	mustRegionHeartbeat(c, svr, region)
+	region6 = region6.Clone(core.WithAddPeer(&metapb.Peer{Id: newPeerID, StoreId: 3, IsLearner: true}), core.WithIncConfVer())
+	mustRegionHeartbeat(c, svr, region6)
+	region6 = region6.Clone(core.WithPromoteLearner(newPeerID), core.WithLeader(region6.GetStorePeer(2)), core.WithRemoveStorePeer(1), core.WithIncConfVer())
+	mustRegionHeartbeat(c, svr, region6)
 
 	var trend Trend
 	err = readJSONWithURL(fmt.Sprintf("%s%s/api/v1/trend", svr.GetAddr(), apiPrefix), &trend)
