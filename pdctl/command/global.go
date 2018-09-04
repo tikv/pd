@@ -43,7 +43,7 @@ func InitHTTPSClient(CAPath, CertPath, KeyPath string) error {
 	}
 	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap etcd error.
 	}
 
 	dialClient = &http.Client{Transport: &http.Transport{

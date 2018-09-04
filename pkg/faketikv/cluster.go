@@ -38,7 +38,7 @@ func NewClusterInfo(pdAddr string, conf *cases.Conf) (*ClusterInfo, error) {
 	for _, store := range conf.Stores {
 		node, err := NewNode(store, pdAddr)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 		cluster.Nodes[store.ID] = node
 	}
@@ -75,5 +75,5 @@ func (c *ClusterInfo) allocID(storeID uint64) (uint64, error) {
 		return 0, errors.Errorf("node %d not found", storeID)
 	}
 	id, err := node.client.AllocID(context.Background())
-	return id, errors.WithStack(err)
+	return id, errors.WithStack(err) // wrap gRPC error.
 }

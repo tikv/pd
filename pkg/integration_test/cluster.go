@@ -46,17 +46,17 @@ var initHTTPClientOnce sync.Once
 func newTestServer(cfg *server.Config) (*testServer, error) {
 	err := server.PrepareJoinCluster(cfg)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	svr, err := server.CreateServer(cfg, api.NewHandler)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	initHTTPClientOnce.Do(func() {
 		err = server.InitHTTPClient(svr)
 	})
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	return &testServer{
 		server: svr,
@@ -71,7 +71,7 @@ func (s *testServer) Run(ctx context.Context) error {
 		return errors.Errorf("server(state%d) cannot run", s.state)
 	}
 	if err := s.server.Run(ctx); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	s.state = Running
 	return nil
@@ -141,7 +141,7 @@ func (s *testServer) GetEtcdLeader() (string, error) {
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
 	members, err := s.server.GetMembers(context.TODO(), req)
 	if err != nil {
-		return "", errors.WithStack(err)
+		return "", errors.WithStack(err) // wrap gRPC error.
 	}
 	return members.GetEtcdLeader().GetName(), nil
 }
@@ -163,11 +163,11 @@ func newTestCluster(initialServerCount int) (*testCluster, error) {
 	for _, conf := range config.InitialServers {
 		serverConf, err := conf.Generate()
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 		s, err := newTestServer(serverConf)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 		servers[conf.Name] = s
 	}
@@ -190,7 +190,7 @@ func (c *testCluster) RunServers(ctx context.Context, servers []*testServer) err
 	}
 	for _, c := range res {
 		if err := <-c; err != nil {
-			return errors.WithStack(err)
+			return errors.WithStack(err) // wrap error from another goroutine.
 		}
 	}
 	return nil
@@ -207,7 +207,7 @@ func (c *testCluster) RunInitialServers() error {
 func (c *testCluster) StopAll() error {
 	for _, s := range c.servers {
 		if err := s.Stop(); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 	}
 	return nil
@@ -239,11 +239,11 @@ func (c *testCluster) WaitLeader() string {
 func (c *testCluster) Join() (*testServer, error) {
 	conf, err := c.config.Join().Generate()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	s, err := newTestServer(conf)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	c.servers[conf.Name] = s
 	return s, nil
@@ -253,7 +253,7 @@ func (c *testCluster) Destroy() error {
 	for _, s := range c.servers {
 		err := s.Destroy()
 		if err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 	}
 	return nil

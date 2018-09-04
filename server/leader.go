@@ -161,7 +161,7 @@ func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, error) {
 	leader := &pdpb.Member{}
 	ok, err := getProtoMsg(c, leaderPath, leader)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	if !ok {
 		return nil, nil
@@ -212,7 +212,7 @@ func (s *Server) campaignLeader() error {
 	}
 
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap etcd error.
 	}
 
 	leaderKey := s.getLeaderPath()
@@ -222,7 +222,7 @@ func (s *Server) campaignLeader() error {
 		Then(clientv3.OpPut(leaderKey, s.memberValue, clientv3.WithLease(leaseResp.ID))).
 		Commit()
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap etcd error.
 	}
 	if !resp.Succeeded {
 		return errors.New("campaign leader failed, other server may campaign ok")
@@ -234,24 +234,24 @@ func (s *Server) campaignLeader() error {
 
 	ch, err := lessor.KeepAlive(ctx, leaseResp.ID)
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap etcd error.
 	}
 	log.Debugf("campaign leader ok %s", s.Name())
 
 	err = s.scheduleOpt.reload(s.kv)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	// Try to create raft cluster.
 	err = s.createRaftCluster()
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	defer s.stopRaftCluster()
 
 	log.Debug("sync timestamp for tso")
 	if err = s.syncTimestamp(); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	defer s.ts.Store(&atomicObject{
 		physical: zeroTime,
@@ -276,7 +276,7 @@ func (s *Server) campaignLeader() error {
 			}
 		case <-tsTicker.C:
 			if err = s.updateTimestamp(); err != nil {
-				return errors.WithStack(err)
+				return err
 			}
 			etcdLeader := s.GetEtcdLeader()
 			if etcdLeader != s.ID() {
@@ -331,7 +331,7 @@ func (s *Server) ResignLeader(nextLeader string) error {
 	var leaderIDs []uint64
 	res, err := etcdutil.ListEtcdMembers(s.client)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	for _, member := range res.Members {
 		if (nextLeader == "" && member.ID != s.id) || (nextLeader != "" && member.Name == nextLeader) {
@@ -344,7 +344,7 @@ func (s *Server) ResignLeader(nextLeader string) error {
 	nextLeaderID := leaderIDs[rand.Intn(len(leaderIDs))]
 	log.Infof("%s ready to resign leader, next leader: %v", s.Name(), nextLeaderID)
 	err = s.etcd.Server.MoveLeader(s.serverLoopCtx, s.ID(), nextLeaderID)
-	return errors.WithStack(err)
+	return errors.WithStack(err) // wrap etcd error.
 }
 
 func (s *Server) deleteLeaderKey() error {
@@ -352,7 +352,7 @@ func (s *Server) deleteLeaderKey() error {
 	leaderKey := s.getLeaderPath()
 	resp, err := s.leaderTxn().Then(clientv3.OpDelete(leaderKey)).Commit()
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap etcd error.
 	}
 	if !resp.Succeeded {
 		return errors.New("resign leader failed, we are not leader already")

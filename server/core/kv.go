@@ -109,7 +109,7 @@ func (kv *KV) DeleteRegion(region *metapb.Region) error {
 func (kv *KV) SaveConfig(cfg interface{}) error {
 	value, err := json.Marshal(cfg)
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap json error.
 	}
 	return kv.Save(configPath, string(value))
 }
@@ -118,14 +118,14 @@ func (kv *KV) SaveConfig(cfg interface{}) error {
 func (kv *KV) LoadConfig(cfg interface{}) (bool, error) {
 	value, err := kv.Load(configPath)
 	if err != nil {
-		return false, errors.WithStack(err)
+		return false, err
 	}
 	if value == "" {
 		return false, nil
 	}
 	err = json.Unmarshal([]byte(value), cfg)
 	if err != nil {
-		return false, errors.WithStack(err)
+		return false, errors.WithStack(err) // wrap json error.
 	}
 	return true, nil
 }
@@ -138,22 +138,22 @@ func (kv *KV) LoadStores(stores *StoresInfo) error {
 		key := kv.storePath(nextID)
 		res, err := kv.LoadRange(key, endKey, minKVRangeLimit)
 		if err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 		for _, s := range res {
 			store := &metapb.Store{}
 			if err := store.Unmarshal([]byte(s)); err != nil {
-				return errors.WithStack(err)
+				return errors.WithStack(err) // wrap protobuf error.
 			}
 			storeInfo := NewStoreInfo(store)
 			leaderWeight, err := kv.loadFloatWithDefaultValue(kv.storeLeaderWeightPath(storeInfo.GetId()), 1.0)
 			if err != nil {
-				return errors.WithStack(err)
+				return err
 			}
 			storeInfo.LeaderWeight = leaderWeight
 			regionWeight, err := kv.loadFloatWithDefaultValue(kv.storeRegionWeightPath(storeInfo.GetId()), 1.0)
 			if err != nil {
-				return errors.WithStack(err)
+				return err
 			}
 			storeInfo.RegionWeight = regionWeight
 
@@ -170,26 +170,23 @@ func (kv *KV) LoadStores(stores *StoresInfo) error {
 func (kv *KV) SaveStoreWeight(storeID uint64, leader, region float64) error {
 	leaderValue := strconv.FormatFloat(leader, 'f', -1, 64)
 	if err := kv.Save(kv.storeLeaderWeightPath(storeID), leaderValue); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	regionValue := strconv.FormatFloat(region, 'f', -1, 64)
-	if err := kv.Save(kv.storeRegionWeightPath(storeID), regionValue); err != nil {
-		return errors.WithStack(err)
-	}
-	return nil
+	return kv.Save(kv.storeRegionWeightPath(storeID), regionValue)
 }
 
 func (kv *KV) loadFloatWithDefaultValue(path string, def float64) (float64, error) {
 	res, err := kv.Load(path)
 	if err != nil {
-		return 0, errors.WithStack(err)
+		return 0, err
 	}
 	if res == "" {
 		return def, nil
 	}
 	val, err := strconv.ParseFloat(res, 64)
 	if err != nil {
-		return 0, errors.WithStack(err)
+		return 0, errors.WithStack(err) // wrap strconv error.
 	}
 	return val, nil
 }
@@ -211,20 +208,20 @@ func (kv *KV) LoadRegions(regions *RegionsInfo) error {
 			if rangeLimit /= 2; rangeLimit >= minKVRangeLimit {
 				continue
 			}
-			return errors.WithStack(err)
+			return err
 		}
 
 		for _, s := range res {
 			region := &metapb.Region{}
 			if err := region.Unmarshal([]byte(s)); err != nil {
-				return errors.WithStack(err)
+				return errors.WithStack(err) // wrap protobuf error.
 			}
 
 			nextID = region.GetId() + 1
 			overlaps := regions.SetRegion(NewRegionInfo(region, nil))
 			for _, item := range overlaps {
 				if err := kv.DeleteRegion(item); err != nil {
-					return errors.WithStack(err)
+					return err
 				}
 			}
 		}
@@ -239,10 +236,7 @@ func (kv *KV) LoadRegions(regions *RegionsInfo) error {
 func (kv *KV) SaveGCSafePoint(safePoint uint64) error {
 	key := path.Join(gcPath, "safe_point")
 	value := strconv.FormatUint(safePoint, 16)
-	if err := kv.Save(key, value); err != nil {
-		return errors.WithStack(err)
-	}
-	return nil
+	return kv.Save(key, value)
 }
 
 // LoadGCSafePoint loads current GC safe point from KV.
@@ -250,14 +244,14 @@ func (kv *KV) LoadGCSafePoint() (uint64, error) {
 	key := path.Join(gcPath, "safe_point")
 	value, err := kv.Load(key)
 	if err != nil {
-		return 0, errors.WithStack(err)
+		return 0, err
 	}
 	if value == "" {
 		return 0, nil
 	}
 	safePoint, err := strconv.ParseUint(value, 16, 64)
 	if err != nil {
-		return 0, errors.WithStack(err)
+		return 0, err
 	}
 	return safePoint, nil
 }
@@ -265,18 +259,19 @@ func (kv *KV) LoadGCSafePoint() (uint64, error) {
 func (kv *KV) loadProto(key string, msg proto.Message) (bool, error) {
 	value, err := kv.Load(key)
 	if err != nil {
-		return false, errors.WithStack(err)
+		return false, err
 	}
 	if value == "" {
 		return false, nil
 	}
-	return true, proto.Unmarshal([]byte(value), msg)
+	err = proto.Unmarshal([]byte(value), msg)
+	return true, errors.WithStack(err) // wrap protobuf error.
 }
 
 func (kv *KV) saveProto(key string, msg proto.Message) error {
 	value, err := proto.Marshal(msg)
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap protobuf error.
 	}
 	return kv.Save(key, string(value))
 }

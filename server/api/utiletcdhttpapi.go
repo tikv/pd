@@ -16,8 +16,6 @@ package api
 import (
 	"fmt"
 	"time"
-
-	"github.com/pkg/errors"
 )
 
 const (
@@ -45,11 +43,11 @@ func getEtcdPeerStats(etcdClientURL string) (*PeerStats, error) {
 	ps := &PeerStats{}
 	resp, err := doGet(fmt.Sprintf("%s%s", etcdClientURL, etcdPeerStatsAPI))
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if err := readJSON(resp.Body, ps); err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	return ps, nil
 }

@@ -29,7 +29,7 @@ func init() {
 		}
 		id, err := strconv.ParseUint(args[0], 10, 64)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, errors.WithStack(err) // wrap strconv error.
 		}
 		return newEvictLeaderScheduler(limiter, id), nil
 	})
@@ -64,7 +64,7 @@ func (s *evictLeaderScheduler) GetType() string {
 }
 
 func (s *evictLeaderScheduler) Prepare(cluster schedule.Cluster) error {
-	return errors.WithStack(cluster.BlockStore(s.storeID))
+	return cluster.BlockStore(s.storeID)
 }
 
 func (s *evictLeaderScheduler) Cleanup(cluster schedule.Cluster) {

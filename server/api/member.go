@@ -53,7 +53,7 @@ func (h *memberHandler) getMembers() (*pdpb.GetMembersResponse, error) {
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: h.svr.ClusterID()}}
 	members, err := h.svr.GetMembers(context.Background(), req)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errors.WithStack(err) // wrap gRPC error.
 	}
 	// Fill leader priorities.
 	for _, m := range members.GetMembers() {

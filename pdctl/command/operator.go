@@ -355,7 +355,7 @@ func parseUint64s(args []string) ([]uint64, error) {
 	for _, arg := range args {
 		v, err := strconv.ParseUint(arg, 10, 64)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, errors.WithStack(err) // wrap strconv error.
 		}
 		results = append(results, v)
 	}

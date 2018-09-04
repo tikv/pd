@@ -76,14 +76,14 @@ func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 func (c *RaftCluster) loadClusterStatus() (*ClusterStatus, error) {
 	data, err := c.s.kv.Load((c.s.kv.ClusterStatePath("raft_bootstrap_time")))
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	if len(data) == 0 {
 		return &ClusterStatus{}, nil
 	}
 	t, err := parseTimestamp([]byte(data))
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	return &ClusterStatus{RaftBootstrapTime: t}, nil
 }
@@ -99,7 +99,7 @@ func (c *RaftCluster) start() error {
 
 	cluster, err := loadClusterInfo(c.s.idAlloc, c.s.kv, c.s.scheduleOpt)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	if cluster == nil {
 		return nil
@@ -107,7 +107,7 @@ func (c *RaftCluster) start() error {
 
 	err = c.s.classifier.ReloadNamespaces()
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	c.cachedCluster = cluster
@@ -295,7 +295,7 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 	storeMeta.Labels = labels
 	// putStore will perform label merge.
 	err := c.putStore(storeMeta)
-	return errors.WithStack(err)
+	return err
 }
 
 func (c *RaftCluster) putStore(store *metapb.Store) error {
@@ -435,7 +435,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) err
 	}
 
 	if err := c.s.kv.SaveStoreWeight(storeID, leader, region); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	store.LeaderWeight, store.RegionWeight = leader, region

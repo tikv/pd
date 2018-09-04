@@ -47,7 +47,7 @@ func (s *Server) getTimestampPath() string {
 func (s *Server) loadTimestamp() (time.Time, error) {
 	data, err := getValue(s.client, s.getTimestampPath())
 	if err != nil {
-		return zeroTime, errors.WithStack(err)
+		return zeroTime, err
 	}
 	if len(data) == 0 {
 		return zeroTime, nil
@@ -63,7 +63,7 @@ func (s *Server) saveTimestamp(ts time.Time) error {
 
 	resp, err := s.leaderTxn().Then(clientv3.OpPut(key, string(data))).Commit()
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap etcd error.
 	}
 	if !resp.Succeeded {
 		return errors.New("save timestamp failed, maybe we lost leader")
@@ -79,7 +79,7 @@ func (s *Server) syncTimestamp() error {
 
 	last, err := s.loadTimestamp()
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	next := time.Now()
@@ -97,7 +97,7 @@ func (s *Server) syncTimestamp() error {
 
 	save := next.Add(s.cfg.TsoSaveInterval.Duration)
 	if err = s.saveTimestamp(save); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	tsoCounter.WithLabelValues("sync_ok").Inc()
@@ -163,7 +163,7 @@ func (s *Server) updateTimestamp() error {
 	if subTimeByWallClock(s.lastSavedTime, next) <= updateTimestampGuard {
 		save := next.Add(s.cfg.TsoSaveInterval.Duration)
 		if err := s.saveTimestamp(save); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 	}
 

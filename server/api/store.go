@@ -360,7 +360,7 @@ func newStoreStateFilter(u *url.URL) (*storeStateFilter, error) {
 		for _, s := range v {
 			state, err := strconv.Atoi(s)
 			if err != nil {
-				return nil, errors.WithStack(err)
+				return nil, errors.WithStack(err) // wrap strconv error.
 			}
 
 			storeState := metapb.StoreState(state)

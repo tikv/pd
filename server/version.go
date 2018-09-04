@@ -15,6 +15,7 @@ package server
 
 import (
 	"github.com/coreos/go-semver/semver"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -67,7 +68,8 @@ func ParseVersion(v string) (*semver.Version, error) {
 	if v[0] == 'v' {
 		v = v[1:]
 	}
-	return semver.NewVersion(v)
+	ver, err := semver.NewVersion(v)
+	return ver, errors.WithStack(err)
 }
 
 // MustParseVersion wraps ParseVersion and will panic if error is not nil.

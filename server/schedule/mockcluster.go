@@ -21,7 +21,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -76,7 +75,7 @@ func (mc *MockCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := mc.allocID()
 	if err != nil {
 		log.Errorf("failed to alloc peer: %v", err)
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	peer := &metapb.Peer{
 		Id:      peerID,

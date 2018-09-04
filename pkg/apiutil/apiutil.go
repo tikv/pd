@@ -27,7 +27,7 @@ import (
 // This is designed to be used in a defer statement.
 func DeferClose(c io.Closer, err *error) {
 	if cerr := c.Close(); cerr != nil && *err == nil {
-		*err = errors.WithStack(cerr)
+		*err = errors.WithStack(cerr) // wrap io error.
 	}
 }
 
@@ -55,7 +55,7 @@ func ReadJSON(r io.ReadCloser, data interface{}) error {
 	defer DeferClose(r, &err)
 	b, err := ioutil.ReadAll(r)
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap ioutil error.
 	}
 
 	err = json.Unmarshal(b, data)

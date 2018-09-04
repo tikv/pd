@@ -51,7 +51,7 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 
 	resp, err := kvGet(kv.server.client, key)
 	if err != nil {
-		return "", errors.WithStack(err)
+		return "", err
 	}
 	if n := len(resp.Kvs); n == 0 {
 		return "", nil
@@ -69,7 +69,7 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, error)
 	withLimit := clientv3.WithLimit(int64(limit))
 	resp, err := kvGet(kv.server.client, key, withRange, withLimit)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	res := make([]string, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {
@@ -84,10 +84,10 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	resp, err := kv.server.leaderTxn().Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
 		log.Errorf("save to etcd error: %v", err)
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap etcd error.
 	}
 	if !resp.Succeeded {
-		return errors.WithStack(errTxnFailed)
+		return errors.WithStack(errTxnFailed) // wrap error variable.
 	}
 	return nil
 }
@@ -98,10 +98,10 @@ func (kv *etcdKVBase) Delete(key string) error {
 	resp, err := kv.server.leaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
 		log.Errorf("delete from etcd error: %v", err)
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap etcd error.
 	}
 	if !resp.Succeeded {
-		return errors.WithStack(errTxnFailed)
+		return errors.WithStack(errTxnFailed) // wrap error variable.
 	}
 	return nil
 }
@@ -119,5 +119,5 @@ func kvGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3
 		log.Warnf("kv gets too slow: key %v cost %v err %v", key, cost, err)
 	}
 
-	return resp, errors.WithStack(err)
+	return resp, errors.WithStack(err) // wrap etcd error.
 }

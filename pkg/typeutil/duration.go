@@ -40,11 +40,11 @@ func (d *Duration) MarshalJSON() ([]byte, error) {
 func (d *Duration) UnmarshalJSON(text []byte) error {
 	s, err := strconv.Unquote(string(text))
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap strconv error.
 	}
 	duration, err := time.ParseDuration(s)
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap time error.
 	}
 	d.Duration = duration
 	return nil
@@ -54,5 +54,5 @@ func (d *Duration) UnmarshalJSON(text []byte) error {
 func (d *Duration) UnmarshalText(text []byte) error {
 	var err error
 	d.Duration, err = time.ParseDuration(string(text))
-	return errors.WithStack(err)
+	return errors.WithStack(err) // wrap time error.
 }

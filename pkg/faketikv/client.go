@@ -77,11 +77,11 @@ func NewClient(pdAddr string, tag string) (Client, <-chan *pdpb.RegionHeartbeatR
 	}
 	cc, err := c.createConn()
 	if err != nil {
-		return nil, nil, errors.WithStack(err)
+		return nil, nil, err
 	}
 	c.clientConn = cc
 	if err := c.initClusterID(); err != nil {
-		return nil, nil, errors.WithStack(err)
+		return nil, nil, err
 	}
 	simutil.Logger.Infof("[%s][pd] init cluster id %v", tag, c.clusterID)
 	c.wg.Add(1)
@@ -107,13 +107,13 @@ func (c *client) initClusterID() error {
 		return nil
 	}
 
-	return errors.WithStack(errFailInitClusterID)
+	return errors.WithStack(errFailInitClusterID) // wrap error variable.
 }
 
 func (c *client) getMembers(ctx context.Context) (*pdpb.GetMembersResponse, error) {
 	members, err := c.pdClient().GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errors.WithStack(err) // wrap gRPC error.
 	}
 	return members, nil
 }
@@ -121,7 +121,7 @@ func (c *client) getMembers(ctx context.Context) (*pdpb.GetMembersResponse, erro
 func (c *client) createConn() (*grpc.ClientConn, error) {
 	cc, err := grpc.Dial(strings.TrimPrefix(c.url, "http://"), grpc.WithInsecure())
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errors.WithStack(err) // wrap gRPC error.
 	}
 	return cc, nil
 }

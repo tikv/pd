@@ -241,10 +241,7 @@ func InitLogger(cfg *LogConfig) error {
 
 		err = InitFileLog(&cfg.File)
 	})
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	return nil
+	return err
 }
 
 // LogPanic logs the panic reason and stack, then exit the process.

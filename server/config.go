@@ -224,7 +224,7 @@ func (c *Config) Parse(arguments []string) error {
 	// Parse first to get config file.
 	err := c.FlagSet.Parse(arguments)
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap flag error.
 	}
 
 	// Load config file if specified.
@@ -232,7 +232,7 @@ func (c *Config) Parse(arguments []string) error {
 	if c.configFile != "" {
 		meta, err = c.configFromFile(c.configFile)
 		if err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 
 		// Backward compatibility for toml config
@@ -251,7 +251,7 @@ func (c *Config) Parse(arguments []string) error {
 	// Parse again to replace with command line options.
 	err = c.FlagSet.Parse(arguments)
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap flag error.
 	}
 
 	if len(c.FlagSet.Args()) != 0 {
@@ -259,7 +259,7 @@ func (c *Config) Parse(arguments []string) error {
 	}
 
 	err = c.adjust(meta)
-	return errors.WithStack(err)
+	return err
 }
 
 func (c *Config) validate() error {
@@ -268,15 +268,15 @@ func (c *Config) validate() error {
 	}
 	dataDir, err := filepath.Abs(c.DataDir)
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap filepath error.
 	}
 	logFile, err := filepath.Abs(c.Log.File.Filename)
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap filepath error.
 	}
 	rel, err := filepath.Rel(dataDir, filepath.Dir(logFile))
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.WithStack(err) // wrap filepath error.
 	}
 	if !strings.HasPrefix(rel, "..") {
 		return errors.New("log directory shouldn't be the subdirectory of data directory")
@@ -290,7 +290,7 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 
 	if err := c.validate(); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	adjustString(&c.ClientUrls, defaultClientUrls)
@@ -336,10 +336,10 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	adjustString(&c.Metric.PushJob, c.Name)
 
 	if err := c.Schedule.adjust(); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	if err := c.Replication.adjust(); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	adjustDuration(&c.heartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
@@ -370,7 +370,7 @@ func (c *Config) String() string {
 // configFromFile loads config from file.
 func (c *Config) configFromFile(path string) (*toml.MetaData, error) {
 	meta, err := toml.DecodeFile(path, c)
-	return &meta, errors.WithStack(err)
+	return &meta, errors.WithStack(err) // wrap toml error.
 }
 
 // ScheduleConfig is the schedule configuration.
@@ -628,7 +628,7 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 	}
 	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errors.WithStack(err) // wrap etcd error.
 	}
 	return tlsConfig, nil
 }
@@ -660,7 +660,7 @@ func ParseUrls(s string) ([]url.URL, error) {
 	for _, item := range items {
 		u, err := url.Parse(item)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, errors.WithStack(err) // wrap url error.
 		}
 
 		urls = append(urls, *u)
@@ -698,22 +698,22 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 
 	cfg.LPUrls, err = ParseUrls(c.PeerUrls)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	cfg.APUrls, err = ParseUrls(c.AdvertisePeerUrls)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	cfg.LCUrls, err = ParseUrls(c.ClientUrls)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	cfg.ACUrls, err = ParseUrls(c.AdvertiseClientUrls)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	return cfg, nil

@@ -53,18 +53,18 @@ func (d *Driver) Prepare() error {
 
 	clusterInfo, err := NewClusterInfo(d.addr, d.conf)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	d.clusterInfo = clusterInfo
 
 	conn, err := NewConn(d.clusterInfo.Nodes)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	raftEngine, err := NewRaftEngine(d.conf, conn)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	d.raftEngine = raftEngine
 
@@ -75,7 +75,7 @@ func (d *Driver) Prepare() error {
 	// Bootstrap.
 	store, region, err := clusterInfo.GetBootstrapInfo(d.raftEngine)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	d.client = clusterInfo.Nodes[store.GetId()].client
 
@@ -92,7 +92,7 @@ func (d *Driver) Prepare() error {
 	for {
 		id, err := d.client.AllocID(context.Background())
 		if err != nil {
-			return errors.WithStack(err)
+			return errors.WithStack(err) // wrap gRPC error.
 		}
 		if id > d.conf.MaxID {
 			break
