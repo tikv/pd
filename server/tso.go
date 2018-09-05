@@ -85,7 +85,7 @@ func (s *Server) syncTimestamp() error {
 	next := time.Now()
 	// gofail: var fallBackSync bool
 	// if fallBackSync {
-	// 	next = next.Add(time.Hour)
+	//	next = next.Add(time.Hour)
 	// }
 
 	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
@@ -127,7 +127,7 @@ func (s *Server) updateTimestamp() error {
 
 	// gofail: var fallBackUpdate bool
 	// if fallBackUpdate {
-	// 	now = now.Add(time.Hour)
+	//	now = now.Add(time.Hour)
 	// }
 
 	tsoCounter.WithLabelValues("save").Inc()

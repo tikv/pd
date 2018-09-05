@@ -229,7 +229,7 @@ func (kv *KV) LoadRegions(regions *RegionsInfo) error {
 			}
 		}
 
-		if len(res) < int(rangeLimit) {
+		if len(res) < rangeLimit {
 			return nil
 		}
 	}

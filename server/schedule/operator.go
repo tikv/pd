@@ -55,7 +55,7 @@ func (tl TransferLeader) String() string {
 
 // IsFinish checks if current step is finished.
 func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
-	return region.Leader.GetStoreId() == tl.ToStore
+	return region.GetLeader().GetStoreId() == tl.ToStore
 }
 
 // Influence calculates the store difference that current step make
@@ -63,9 +63,9 @@ func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionI
 	from := opInfluence.GetStoreInfluence(tl.FromStore)
 	to := opInfluence.GetStoreInfluence(tl.ToStore)
 
-	from.LeaderSize -= region.ApproximateSize
+	from.LeaderSize -= region.GetApproximateSize()
 	from.LeaderCount--
-	to.LeaderSize += region.ApproximateSize
+	to.LeaderSize += region.GetApproximateSize()
 	to.LeaderCount++
 }
 
@@ -94,7 +94,7 @@ func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
 func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(ap.ToStore)
 
-	to.RegionSize += region.ApproximateSize
+	to.RegionSize += region.GetApproximateSize()
 	to.RegionCount++
 }
 
@@ -123,7 +123,7 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(al.ToStore)
 
-	to.RegionSize += region.ApproximateSize
+	to.RegionSize += region.GetApproximateSize()
 	to.RegionCount++
 }
 
@@ -168,7 +168,7 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(rp.FromStore)
 
-	from.RegionSize -= region.ApproximateSize
+	from.RegionSize -= region.GetApproximateSize()
 	from.RegionCount--
 }
 
@@ -192,7 +192,7 @@ func (mr MergeRegion) String() string {
 // IsFinish checks if current step is finished
 func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 	if mr.IsPassive {
-		return !bytes.Equal(region.Region.StartKey, mr.ToRegion.StartKey) || !bytes.Equal(region.Region.EndKey, mr.ToRegion.EndKey)
+		return !bytes.Equal(region.GetStartKey(), mr.ToRegion.StartKey) || !bytes.Equal(region.GetEndKey(), mr.ToRegion.EndKey)
 	}
 	return false
 }
@@ -203,7 +203,7 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 		for _, p := range region.GetPeers() {
 			o := opInfluence.GetStoreInfluence(p.GetStoreId())
 			o.RegionCount--
-			if region.Leader.GetId() == p.GetId() {
+			if region.GetLeader().GetId() == p.GetId() {
 				o.LeaderCount--
 			}
 		}
@@ -222,15 +222,15 @@ func (sr SplitRegion) String() string {
 
 // IsFinish checks if current step is finished.
 func (sr SplitRegion) IsFinish(region *core.RegionInfo) bool {
-	return !bytes.Equal(region.StartKey, sr.StartKey) || !bytes.Equal(region.EndKey, sr.EndKey)
+	return !bytes.Equal(region.GetStartKey(), sr.StartKey) || !bytes.Equal(region.GetEndKey(), sr.EndKey)
 }
 
 // Influence calculates the store difference that current step make.
 func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
-	for _, p := range region.Peers {
+	for _, p := range region.GetPeers() {
 		inf := opInfluence.GetStoreInfluence(p.GetStoreId())
 		inf.RegionCount++
-		if region.Leader.GetId() == p.GetId() {
+		if region.GetLeader().GetId() == p.GetId() {
 			inf.LeaderCount++
 		}
 	}
@@ -423,7 +423,7 @@ func (o *Operator) History() []OperatorHistory {
 // CreateRemovePeerOperator creates an Operator that removes a peer from region.
 func CreateRemovePeerOperator(desc string, cluster Cluster, kind OperatorKind, region *core.RegionInfo, storeID uint64) *Operator {
 	removeKind, steps := removePeerSteps(cluster, region, storeID)
-	return NewOperator(desc, region.GetId(), region.GetRegionEpoch(), removeKind|kind, steps...)
+	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), removeKind|kind, steps...)
 }
 
 // CreateMovePeerOperator creates an Operator that replaces an old peer with a new peer.
@@ -441,12 +441,12 @@ func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInf
 		}
 	}
 	steps = append(st, steps...)
-	return NewOperator(desc, region.GetId(), region.GetRegionEpoch(), removeKind|kind|OpRegion, steps...)
+	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), removeKind|kind|OpRegion, steps...)
 }
 
 // removePeerSteps returns the steps to safely remove a peer. It prevents removing leader by transfer its leadership first.
 func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64) (kind OperatorKind, steps []OperatorStep) {
-	if region.Leader != nil && region.Leader.GetStoreId() == storeID {
+	if region.GetLeader() != nil && region.GetLeader().GetStoreId() == storeID {
 		for id := range region.GetFollowers() {
 			follower := cluster.GetStore(id)
 			if follower != nil && !cluster.CheckLabelProperty(RejectLeader, follower.Labels) {
@@ -469,15 +469,15 @@ func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.Region
 	}
 
 	steps = append(steps, MergeRegion{
-		FromRegion: source.Region,
-		ToRegion:   target.Region,
+		FromRegion: source.GetMeta(),
+		ToRegion:   target.GetMeta(),
 		IsPassive:  false,
 	})
 
-	op1 := NewOperator(desc, source.GetId(), source.GetRegionEpoch(), kinds|kind|OpMerge, steps...)
-	op2 := NewOperator(desc, target.GetId(), target.GetRegionEpoch(), kind|OpMerge, MergeRegion{
-		FromRegion: source.Region,
-		ToRegion:   target.Region,
+	op1 := NewOperator(desc, source.GetID(), source.GetRegionEpoch(), kinds|kind|OpMerge, steps...)
+	op2 := NewOperator(desc, target.GetID(), target.GetRegionEpoch(), kind|OpMerge, MergeRegion{
+		FromRegion: source.GetMeta(),
+		ToRegion:   target.GetMeta(),
 		IsPassive:  true,
 	})
 
@@ -490,8 +490,8 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 	var steps []OperatorStep
 	var kind OperatorKind
 
-	sourcePeers := source.Region.GetPeers()
-	targetPeers := target.Region.GetPeers()
+	sourcePeers := source.GetPeers()
+	targetPeers := target.GetPeers()
 
 	for _, peer := range targetPeers {
 		storeIDs[peer.GetStoreId()] = struct{}{}
@@ -520,7 +520,7 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 
 	// Check whether to transfer leader or not
 	intersection := getIntersectionStores(sourcePeers, targetPeers)
-	leaderID := source.Leader.GetStoreId()
+	leaderID := source.GetLeader().GetStoreId()
 	isFound := false
 	for _, storeID := range intersection {
 		if storeID == leaderID {
@@ -529,7 +529,7 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 		}
 	}
 	if !isFound {
-		steps = append(steps, TransferLeader{FromStore: source.Leader.GetStoreId(), ToStore: target.Leader.GetStoreId()})
+		steps = append(steps, TransferLeader{FromStore: source.GetLeader().GetStoreId(), ToStore: target.GetLeader().GetStoreId()})
 		kind |= OpLeader
 	}
 

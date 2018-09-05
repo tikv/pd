@@ -49,7 +49,7 @@ func (c *namespaceCluster) checkRegion(region *core.RegionInfo) bool {
 	if c.classifier.GetRegionNamespace(region) != c.namespace {
 		return false
 	}
-	for _, p := range region.Peers {
+	for _, p := range region.GetPeers() {
 		if _, ok := c.stores[p.GetStoreId()]; !ok {
 			return false
 		}

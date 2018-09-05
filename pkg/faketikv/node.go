@@ -175,11 +175,11 @@ func (n *Node) regionHeartBeat() {
 	}
 	regions := n.raftEngine.GetRegions()
 	for _, region := range regions {
-		if region.Leader != nil && region.Leader.GetStoreId() == n.Id {
+		if region.GetLeader() != nil && region.GetLeader().GetStoreId() == n.Id {
 			ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 			err := n.client.RegionHeartbeat(ctx, region)
 			if err != nil {
-				simutil.Logger.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetId(), err)
+				simutil.Logger.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetID(), err)
 			}
 			cancel()
 		}
@@ -192,7 +192,7 @@ func (n *Node) reportRegionChange() {
 		ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 		err := n.client.RegionHeartbeat(ctx, region)
 		if err != nil {
-			simutil.Logger.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetId(), err)
+			simutil.Logger.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetID(), err)
 		}
 		cancel()
 	}

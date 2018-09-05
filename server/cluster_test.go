@@ -34,7 +34,7 @@ var _ = Suite(&testClusterSuite{})
 type testClusterBaseSuite struct {
 	client       *clientv3.Client
 	svr          *Server
-	cleanup      cleanupFunc
+	cleanup      CleanupFunc
 	grpcPDClient pdpb.PDClient
 }
 
@@ -43,10 +43,10 @@ type testClusterSuite struct {
 }
 
 func (s *testClusterSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = newTestServer(c)
-	s.client = s.svr.client
-	err := s.svr.Run(context.TODO())
+	var err error
+	_, s.svr, s.cleanup, err = NewTestServer()
 	c.Assert(err, IsNil)
+	s.client = s.svr.client
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 }
@@ -190,7 +190,7 @@ func (s *testClusterBaseSuite) getStore(c *C, clusterID uint64, storeID uint64) 
 	}
 	resp, err := s.grpcPDClient.GetStore(context.Background(), req)
 	c.Assert(err, IsNil)
-	c.Assert(resp.GetStore().GetId(), Equals, uint64(storeID))
+	c.Assert(resp.GetStore().GetId(), Equals, storeID)
 
 	return resp.GetStore()
 }
@@ -407,10 +407,9 @@ func (s *testClusterSuite) testRemoveStore(c *C, clusterID uint64, store *metapb
 
 // Make sure PD will not panic if it start and stop again and again.
 func (s *testClusterSuite) TestRaftClusterRestart(c *C) {
-	svr, cleanup := newTestServer(c)
-	defer cleanup()
-	err := svr.Run(context.TODO())
+	_, svr, cleanup, err := NewTestServer()
 	c.Assert(err, IsNil)
+	defer cleanup()
 	svr.bootstrapCluster(s.newBootstrapRequest(c, svr.clusterID, "127.0.0.1:0"))
 
 	cluster := svr.GetRaftCluster()

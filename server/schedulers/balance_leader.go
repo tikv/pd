@@ -122,7 +122,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(source *core.StoreInfo, clust
 	}
 	target := l.selector.SelectTarget(cluster, cluster.GetFollowerStores(region))
 	if target == nil {
-		log.Debugf("[%s] region %d has no target store", l.GetName(), region.GetId())
+		log.Debugf("[%s] region %d has no target store", l.GetName(), region.GetID())
 		schedulerCounter.WithLabelValues(l.GetName(), "no_target_store").Inc()
 		return nil
 	}
@@ -136,9 +136,9 @@ func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluste
 		schedulerCounter.WithLabelValues(l.GetName(), "no_follower_region").Inc()
 		return nil
 	}
-	source := cluster.GetStore(region.Leader.GetStoreId())
+	source := cluster.GetStore(region.GetLeader().GetStoreId())
 	if source == nil {
-		log.Debugf("[%s] region %d has no leader", l.GetName(), region.GetId())
+		log.Debugf("[%s] region %d has no leader", l.GetName(), region.GetID())
 		schedulerCounter.WithLabelValues(l.GetName(), "no_leader").Inc()
 		return nil
 	}
@@ -146,15 +146,15 @@ func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluste
 }
 
 func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source, target *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
-	if cluster.IsRegionHot(region.GetId()) {
-		log.Debugf("[%s] region %d is hot region, ignore it", l.GetName(), region.GetId())
+	if cluster.IsRegionHot(region.GetID()) {
+		log.Debugf("[%s] region %d is hot region, ignore it", l.GetName(), region.GetID())
 		schedulerCounter.WithLabelValues(l.GetName(), "region_hot").Inc()
 		return nil
 	}
 
 	if !shouldBalance(cluster, source, target, region, core.LeaderKind, opInfluence) {
 		log.Debugf("[%s] skip balance region %d, source %d to target %d, source size: %v, source score: %v, source influence: %v, target size: %v, target score: %v, target influence: %v, average region size: %v",
-			l.GetName(), region.GetId(), source.GetId(), target.GetId(),
+			l.GetName(), region.GetID(), source.GetId(), target.GetId(),
 			source.LeaderSize, source.LeaderScore(0), opInfluence.GetStoreInfluence(source.GetId()).ResourceSize(core.LeaderKind),
 			target.LeaderSize, target.LeaderScore(0), opInfluence.GetStoreInfluence(target.GetId()).ResourceSize(core.LeaderKind),
 			cluster.GetAverageRegionSize())
@@ -165,7 +165,7 @@ func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source,
 	schedulerCounter.WithLabelValues(l.GetName(), "new_operator").Inc()
 	balanceLeaderCounter.WithLabelValues("move_leader", fmt.Sprintf("store%d-out", source.GetId())).Inc()
 	balanceLeaderCounter.WithLabelValues("move_leader", fmt.Sprintf("store%d-in", target.GetId())).Inc()
-	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: target.GetId()}
-	op := schedule.NewOperator("balance-leader", region.GetId(), region.GetRegionEpoch(), schedule.OpBalance|schedule.OpLeader, step)
+	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: target.GetId()}
+	op := schedule.NewOperator("balance-leader", region.GetID(), region.GetRegionEpoch(), schedule.OpBalance|schedule.OpLeader, step)
 	return []*schedule.Operator{op}
 }

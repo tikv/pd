@@ -219,7 +219,7 @@ func (s *Server) campaignLeader() error {
 	// The leader key must not exist, so the CreateRevision is 0.
 	resp, err := s.txn().
 		If(clientv3.Compare(clientv3.CreateRevision(leaderKey), "=", 0)).
-		Then(clientv3.OpPut(leaderKey, s.memberValue, clientv3.WithLease(clientv3.LeaseID(leaseResp.ID)))).
+		Then(clientv3.OpPut(leaderKey, s.memberValue, clientv3.WithLease(leaseResp.ID))).
 		Commit()
 	if err != nil {
 		return errors.WithStack(err)
@@ -232,7 +232,7 @@ func (s *Server) campaignLeader() error {
 	ctx, cancel = context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 
-	ch, err := lessor.KeepAlive(ctx, clientv3.LeaseID(leaseResp.ID))
+	ch, err := lessor.KeepAlive(ctx, leaseResp.ID)
 	if err != nil {
 		return errors.WithStack(err)
 	}

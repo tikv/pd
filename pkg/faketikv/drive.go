@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/faketikv/cases"
 	"github.com/pingcap/pd/pkg/faketikv/simutil"
+	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
 )
 
@@ -124,6 +125,11 @@ func (d *Driver) Check() bool {
 	return d.conf.Checker(d.raftEngine.regionsInfo)
 }
 
+// PrintStatistics prints the statistics of the scheduler.
+func (d *Driver) PrintStatistics() {
+	d.raftEngine.schedulerStats.PrintStatistics()
+}
+
 // Stop stops all nodes.
 func (d *Driver) Stop() {
 	for _, n := range d.clusterInfo.Nodes {
@@ -180,7 +186,7 @@ func (d *Driver) DeleteNode(id uint64) {
 				Peer:        region.GetStorePeer(id),
 				DownSeconds: 24 * 60 * 60,
 			}
-			region.DownPeers = append(region.DownPeers, downPeer)
+			region = region.Clone(core.WithDownPeers(append(region.GetDownPeers(), downPeer)))
 			d.raftEngine.SetRegion(region)
 		}
 	}

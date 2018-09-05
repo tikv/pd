@@ -58,7 +58,7 @@ func newDeleteNodes() *Conf {
 	numNodes := 8
 	e := &DeleteNodesInner{}
 	e.Step = func(tick int64) uint64 {
-		if tick%100 == 0 && numNodes > 7 {
+		if numNodes > 7 && tick%100 == 0 {
 			idx := rand.Intn(numNodes)
 			numNodes--
 			nodeID := ids[idx]
@@ -84,8 +84,8 @@ func newDeleteNodes() *Conf {
 			if regionCount > 443 || regionCount < 413 {
 				res = false
 			}
-
 		}
+
 		simutil.Logger.Infof("leader counts: %v", leaderCounts)
 		simutil.Logger.Infof("region counts: %v", regionCounts)
 		return res
