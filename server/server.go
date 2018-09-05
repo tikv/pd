@@ -135,13 +135,13 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	log.Info("start embed etcd")
 	etcd, err := embed.StartEtcd(s.etcdCfg)
 	if err != nil {
-		return errors.WithStack(err) // wrap etcd error.
+		return errors.WithStack(err)
 	}
 
 	// Check cluster ID
 	urlmap, err := types.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
-		return errors.WithStack(err) // wrap etcd error.
+		return errors.WithStack(err)
 	}
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
@@ -167,7 +167,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		TLS:         tlsConfig,
 	})
 	if err != nil {
-		return errors.WithStack(err) // wrap etcd error.
+		return errors.WithStack(err)
 	}
 
 	etcdServerID := uint64(etcd.Server.ID())
@@ -344,7 +344,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	// Set cluster meta
 	clusterValue, err := clusterMeta.Marshal()
 	if err != nil {
-		return nil, errors.WithStack(err) // wrap protobuf error.
+		return nil, errors.WithStack(err)
 	}
 	clusterRootPath := s.getClusterRootPath()
 
@@ -363,13 +363,13 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	storePath := makeStoreKey(clusterRootPath, storeMeta.GetId())
 	storeValue, err := storeMeta.Marshal()
 	if err != nil {
-		return nil, errors.WithStack(err) // wrap protobuf error.
+		return nil, errors.WithStack(err)
 	}
 	ops = append(ops, clientv3.OpPut(storePath, string(storeValue)))
 
 	regionValue, err := req.GetRegion().Marshal()
 	if err != nil {
-		return nil, errors.WithStack(err) // wrap protobuf error.
+		return nil, errors.WithStack(err)
 	}
 
 	// Set region meta with region id.
@@ -380,7 +380,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
 	resp, err := s.txn().If(bootstrapCmp).Then(ops...).Commit()
 	if err != nil {
-		return nil, errors.WithStack(err) // wrap etcd error.
+		return nil, errors.WithStack(err)
 	}
 	if !resp.Succeeded {
 		log.Warnf("cluster %d already bootstrapped", clusterID)
@@ -658,7 +658,7 @@ func (s *Server) SetMemberLeaderPriority(id uint64, priority int) error {
 	key := s.getMemberLeaderPriorityPath(id)
 	res, err := s.leaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
 	if err != nil {
-		return errors.WithStack(err) // wrap etcd error.
+		return errors.WithStack(err)
 	}
 	if !res.Succeeded {
 		return errors.New("save leader priority failed, maybe not leader")
@@ -671,7 +671,7 @@ func (s *Server) DeleteMemberLeaderPriority(id uint64) error {
 	key := s.getMemberLeaderPriorityPath(id)
 	res, err := s.leaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
-		return errors.WithStack(err) // wrap etcd error.
+		return errors.WithStack(err)
 	}
 	if !res.Succeeded {
 		return errors.New("delete leader priority failed, maybe not leader")
@@ -691,7 +691,7 @@ func (s *Server) GetMemberLeaderPriority(id uint64) (int, error) {
 	}
 	priority, err := strconv.ParseInt(string(res.Kvs[0].Value), 10, 32)
 	if err != nil {
-		return 0, errors.WithStack(err) // wrap strconv error.
+		return 0, errors.WithStack(err)
 	}
 	return int(priority), nil
 }

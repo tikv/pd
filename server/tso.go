@@ -63,7 +63,7 @@ func (s *Server) saveTimestamp(ts time.Time) error {
 
 	resp, err := s.leaderTxn().Then(clientv3.OpPut(key, string(data))).Commit()
 	if err != nil {
-		return errors.WithStack(err) // wrap etcd error.
+		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
 		return errors.New("save timestamp failed, maybe we lost leader")

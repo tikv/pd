@@ -109,7 +109,7 @@ func getProtoMsg(c *clientv3.Client, key string, msg proto.Message, opts ...clie
 	}
 
 	if err = proto.Unmarshal(value, msg); err != nil {
-		return false, errors.WithStack(err) // wrap protobuf error.
+		return false, errors.WithStack(err)
 	}
 
 	return true, nil
@@ -133,7 +133,7 @@ func initOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 		Else(clientv3.OpGet(key)).
 		Commit()
 	if err != nil {
-		return 0, errors.WithStack(err) // wrap etcd error.
+		return 0, errors.WithStack(err)
 	}
 
 	// Txn commits ok, return the generated cluster ID.
@@ -213,7 +213,7 @@ func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	txnCounter.WithLabelValues(label).Inc()
 	txnDuration.WithLabelValues(label).Observe(cost.Seconds())
 
-	return resp, errors.WithStack(err) // wrap etcd error.
+	return resp, errors.WithStack(err)
 }
 
 // GetMembers return a slice of Members.

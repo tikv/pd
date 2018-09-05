@@ -107,13 +107,13 @@ func (c *client) initClusterID() error {
 		return nil
 	}
 
-	return errors.WithStack(errFailInitClusterID) // wrap error variable.
+	return errors.WithStack(errFailInitClusterID)
 }
 
 func (c *client) getMembers(ctx context.Context) (*pdpb.GetMembersResponse, error) {
 	members, err := c.pdClient().GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
-		return nil, errors.WithStack(err) // wrap gRPC error.
+		return nil, errors.WithStack(err)
 	}
 	return members, nil
 }
@@ -121,7 +121,7 @@ func (c *client) getMembers(ctx context.Context) (*pdpb.GetMembersResponse, erro
 func (c *client) createConn() (*grpc.ClientConn, error) {
 	cc, err := grpc.Dial(strings.TrimPrefix(c.url, "http://"), grpc.WithInsecure())
 	if err != nil {
-		return nil, errors.WithStack(err) // wrap gRPC error.
+		return nil, errors.WithStack(err)
 	}
 	return cc, nil
 }

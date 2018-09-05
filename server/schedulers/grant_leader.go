@@ -29,7 +29,7 @@ func init() {
 		}
 		id, err := strconv.ParseUint(args[0], 10, 64)
 		if err != nil {
-			return nil, errors.WithStack(err) // wrap strconv error.
+			return nil, errors.WithStack(err)
 		}
 		return newGrantLeaderScheduler(limiter, id), nil
 	})

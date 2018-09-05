@@ -141,7 +141,7 @@ func (s *testServer) GetEtcdLeader() (string, error) {
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
 	members, err := s.server.GetMembers(context.TODO(), req)
 	if err != nil {
-		return "", errors.WithStack(err) // wrap gRPC error.
+		return "", errors.WithStack(err)
 	}
 	return members.GetEtcdLeader().GetName(), nil
 }
@@ -190,7 +190,7 @@ func (c *testCluster) RunServers(ctx context.Context, servers []*testServer) err
 	}
 	for _, c := range res {
 		if err := <-c; err != nil {
-			return errors.WithStack(err) // wrap error from another goroutine.
+			return errors.WithStack(err)
 		}
 	}
 	return nil

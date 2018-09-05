@@ -92,7 +92,7 @@ func (d *Driver) Prepare() error {
 	for {
 		id, err := d.client.AllocID(context.Background())
 		if err != nil {
-			return errors.WithStack(err) // wrap gRPC error.
+			return errors.WithStack(err)
 		}
 		if id > d.conf.MaxID {
 			break

@@ -407,7 +407,7 @@ func (namespaceInfo *namespacesInfo) namespacePath(nsID uint64) string {
 func (namespaceInfo *namespacesInfo) saveNamespace(kv *core.KV, ns *Namespace) error {
 	value, err := json.Marshal(ns)
 	if err != nil {
-		return errors.WithStack(err) // wrap json error.
+		return errors.WithStack(err)
 	}
 	err = kv.Save(namespaceInfo.namespacePath(ns.GetID()), string(value))
 	return err
@@ -428,7 +428,7 @@ func (namespaceInfo *namespacesInfo) loadNamespaces(kv *core.KV, rangeLimit int)
 		for _, s := range res {
 			ns := &Namespace{}
 			if err := json.Unmarshal([]byte(s), ns); err != nil {
-				return errors.WithStack(err) // wrap json error.
+				return errors.WithStack(err)
 			}
 			nextID = ns.GetID() + 1
 			namespaceInfo.setNamespace(ns)

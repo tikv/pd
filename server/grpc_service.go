@@ -71,7 +71,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return nil
 		}
 		if err != nil {
-			return errors.WithStack(err) // wrap gRPC error.
+			return errors.WithStack(err)
 		}
 		if err = s.validateRequest(request.GetHeader()); err != nil {
 			return err
@@ -87,7 +87,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			Count:     count,
 		}
 		if err := stream.Send(response); err != nil {
-			return errors.WithStack(err) // wrap gRPC error.
+			return errors.WithStack(err)
 		}
 	}
 }
@@ -284,10 +284,10 @@ func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
 		if err != nil {
 			atomic.StoreInt32(&s.closed, 1)
 		}
-		return errors.WithStack(err) // wrap gRPC error.
+		return errors.WithStack(err)
 	case <-time.After(regionHeartbeatSendTimeout):
 		atomic.StoreInt32(&s.closed, 1)
-		return errors.WithStack(errSendRegionHeartbeatTimeout) // wrap error variable.
+		return errors.WithStack(errSendRegionHeartbeatTimeout)
 	}
 }
 
@@ -298,7 +298,7 @@ func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 	req, err := s.stream.Recv()
 	if err != nil {
 		atomic.StoreInt32(&s.closed, 1)
-		return nil, errors.WithStack(err) // wrap gRPC error.
+		return nil, errors.WithStack(err)
 	}
 	return req, nil
 }
@@ -312,7 +312,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			Header: s.notBootstrappedHeader(),
 		}
 		err := server.Send(resp)
-		return errors.WithStack(err) // wrap gRPC error.
+		return errors.WithStack(err)
 	}
 
 	var lastBind time.Time
@@ -322,7 +322,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			return nil
 		}
 		if err != nil {
-			return errors.WithStack(err) // wrap gRPC error.
+			return errors.WithStack(err)
 		}
 
 		if err = s.validateRequest(request.GetHeader()); err != nil {
@@ -649,7 +649,7 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 // TODO: Call it in gRPC intercepter.
 func (s *Server) validateRequest(header *pdpb.RequestHeader) error {
 	if !s.IsLeader() {
-		return errors.WithStack(notLeaderError) // wrap error variable.
+		return errors.WithStack(notLeaderError)
 	}
 	if header.GetClusterId() != s.clusterID {
 		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())

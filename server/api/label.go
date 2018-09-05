@@ -102,11 +102,11 @@ func newStoresLabelFilter(name, value string) (*storesLabelFilter, error) {
 	// add (?i) to set a case-insensitive flag
 	keyPattern, err := regexp.Compile("(?i)" + name)
 	if err != nil {
-		return nil, errors.WithStack(err) // wrap regexp error.
+		return nil, errors.WithStack(err)
 	}
 	valuePattern, err := regexp.Compile("(?i)" + value)
 	if err != nil {
-		return nil, errors.WithStack(err) // wrap regexp error.
+		return nil, errors.WithStack(err)
 	}
 	return &storesLabelFilter{
 		keyPattern:   keyPattern,

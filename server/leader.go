@@ -212,7 +212,7 @@ func (s *Server) campaignLeader() error {
 	}
 
 	if err != nil {
-		return errors.WithStack(err) // wrap etcd error.
+		return errors.WithStack(err) 
 	}
 
 	leaderKey := s.getLeaderPath()
@@ -222,7 +222,7 @@ func (s *Server) campaignLeader() error {
 		Then(clientv3.OpPut(leaderKey, s.memberValue, clientv3.WithLease(leaseResp.ID))).
 		Commit()
 	if err != nil {
-		return errors.WithStack(err) // wrap etcd error.
+		return errors.WithStack(err) 
 	}
 	if !resp.Succeeded {
 		return errors.New("campaign leader failed, other server may campaign ok")
@@ -234,7 +234,7 @@ func (s *Server) campaignLeader() error {
 
 	ch, err := lessor.KeepAlive(ctx, leaseResp.ID)
 	if err != nil {
-		return errors.WithStack(err) // wrap etcd error.
+		return errors.WithStack(err) 
 	}
 	log.Debugf("campaign leader ok %s", s.Name())
 
@@ -344,7 +344,7 @@ func (s *Server) ResignLeader(nextLeader string) error {
 	nextLeaderID := leaderIDs[rand.Intn(len(leaderIDs))]
 	log.Infof("%s ready to resign leader, next leader: %v", s.Name(), nextLeaderID)
 	err = s.etcd.Server.MoveLeader(s.serverLoopCtx, s.ID(), nextLeaderID)
-	return errors.WithStack(err) // wrap etcd error.
+	return errors.WithStack(err) 
 }
 
 func (s *Server) deleteLeaderKey() error {
@@ -352,7 +352,7 @@ func (s *Server) deleteLeaderKey() error {
 	leaderKey := s.getLeaderPath()
 	resp, err := s.leaderTxn().Then(clientv3.OpDelete(leaderKey)).Commit()
 	if err != nil {
-		return errors.WithStack(err) // wrap etcd error.
+		return errors.WithStack(err) 
 	}
 	if !resp.Succeeded {
 		return errors.New("resign leader failed, we are not leader already")

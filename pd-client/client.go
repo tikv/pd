@@ -175,7 +175,7 @@ func (c *client) initClusterID() error {
 		time.Sleep(time.Second)
 	}
 
-	return errors.WithStack(errFailInitClusterID) // wrap error variable.
+	return errors.WithStack(errFailInitClusterID)
 }
 
 func (c *client) updateLeader() error {
@@ -186,7 +186,7 @@ func (c *client) updateLeader() error {
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
 			select {
 			case <-c.ctx.Done():
-				return errors.WithStack(err) // wrap gRPC error.
+				return errors.WithStack(err)
 			default:
 				continue
 			}
@@ -204,7 +204,7 @@ func (c *client) getMembers(ctx context.Context, url string) (*pdpb.GetMembersRe
 	}
 	members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
-		return nil, errors.WithStack(err) // wrap gRPC error.
+		return nil, errors.WithStack(err)
 	}
 	return members, nil
 }
@@ -274,11 +274,11 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 	}
 	u, err := url.Parse(addr)
 	if err != nil {
-		return nil, errors.WithStack(err) // wrap url error.
+		return nil, errors.WithStack(err)
 	}
 	cc, err := grpc.Dial(u.Host, opt)
 	if err != nil {
-		return nil, errors.WithStack(err) // wrap gRPC error.
+		return nil, errors.WithStack(err)
 	}
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
@@ -367,7 +367,7 @@ func (c *client) tsLoop() {
 				log.Errorf("[pd] create tso stream error: %v", err)
 				c.ScheduleCheckLeader()
 				cancel()
-				c.revokeTSORequest(errors.WithStack(err)) // wrap gRPC error.
+				c.revokeTSORequest(errors.WithStack(err))
 				select {
 				case <-time.After(time.Second):
 				case <-loopCtx.Done():
@@ -440,19 +440,19 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 	}
 
 	if err := stream.Send(req); err != nil {
-		err = errors.WithStack(err) // wrap gRPC error.
+		err = errors.WithStack(err)
 		c.finishTSORequest(requests, 0, 0, err)
 		return err
 	}
 	resp, err := stream.Recv()
 	if err != nil {
-		err = errors.WithStack(err) // wrap gRPC error.
+		err = errors.WithStack(err)
 		c.finishTSORequest(requests, 0, 0, err)
 		return err
 	}
 	requestDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds())
 	if resp.GetCount() != uint32(len(requests)) {
-		err = errors.WithStack(errTSOLength) // wrap error variable.
+		err = errors.WithStack(errTSOLength)
 		c.finishTSORequest(requests, 0, 0, err)
 		return err
 	}
@@ -486,7 +486,7 @@ func (c *client) Close() {
 	c.cancel()
 	c.wg.Wait()
 
-	c.revokeTSORequest(errors.WithStack(errClosing)) // wrap error variable.
+	c.revokeTSORequest(errors.WithStack(errClosing))
 
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
@@ -562,7 +562,7 @@ func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
 	cmdDuration.WithLabelValues("tso_async_wait").Observe(time.Since(req.start).Seconds())
 	select {
 	case err = <-req.done:
-		err = errors.WithStack(err) // wrap error from another goroutine.
+		err = errors.WithStack(err)
 		defer tsoReqPool.Put(req)
 		if err != nil {
 			cmdFailedDuration.WithLabelValues("tso").Observe(time.Since(req.start).Seconds())
@@ -572,7 +572,7 @@ func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
 		cmdDuration.WithLabelValues("tso").Observe(time.Since(req.start).Seconds())
 		return
 	case <-req.ctx.Done():
-		return 0, 0, errors.WithStack(req.ctx.Err()) // wrap context error.
+		return 0, 0, errors.WithStack(req.ctx.Err())
 	}
 }
 
@@ -599,7 +599,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return nil, nil, errors.WithStack(err) // wrap gRPC error.
+		return nil, nil, errors.WithStack(err)
 	}
 	return resp.GetRegion(), resp.GetLeader(), nil
 }
@@ -622,7 +622,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*metapb.Region,
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_prev_region").Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return nil, nil, errors.WithStack(err) // wrap gRPC error.
+		return nil, nil, errors.WithStack(err)
 	}
 	return resp.GetRegion(), resp.GetLeader(), nil
 }
@@ -645,7 +645,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Re
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_region_byid").Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return nil, nil, errors.WithStack(err) // wrap gRPC error.
+		return nil, nil, errors.WithStack(err)
 	}
 	return resp.GetRegion(), resp.GetLeader(), nil
 }
@@ -668,7 +668,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return nil, errors.WithStack(err) // wrap gRPC error.
+		return nil, errors.WithStack(err)
 	}
 	store := resp.GetStore()
 	if store == nil {
@@ -697,7 +697,7 @@ func (c *client) GetAllStores(ctx context.Context) ([]*metapb.Store, error) {
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("get_all_stores").Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return nil, errors.WithStack(err) // wrap gRPC error.
+		return nil, errors.WithStack(err)
 	}
 	stores := resp.GetStores()
 	return stores, nil
@@ -721,7 +721,7 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("update_gc_safe_point").Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return 0, errors.WithStack(err) // wrap gRPC error.
+		return 0, errors.WithStack(err)
 	}
 	return resp.GetNewSafePoint(), nil
 }

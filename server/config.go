@@ -224,7 +224,7 @@ func (c *Config) Parse(arguments []string) error {
 	// Parse first to get config file.
 	err := c.FlagSet.Parse(arguments)
 	if err != nil {
-		return errors.WithStack(err) // wrap flag error.
+		return errors.WithStack(err)
 	}
 
 	// Load config file if specified.
@@ -251,7 +251,7 @@ func (c *Config) Parse(arguments []string) error {
 	// Parse again to replace with command line options.
 	err = c.FlagSet.Parse(arguments)
 	if err != nil {
-		return errors.WithStack(err) // wrap flag error.
+		return errors.WithStack(err)
 	}
 
 	if len(c.FlagSet.Args()) != 0 {
@@ -268,15 +268,15 @@ func (c *Config) validate() error {
 	}
 	dataDir, err := filepath.Abs(c.DataDir)
 	if err != nil {
-		return errors.WithStack(err) // wrap filepath error.
+		return errors.WithStack(err)
 	}
 	logFile, err := filepath.Abs(c.Log.File.Filename)
 	if err != nil {
-		return errors.WithStack(err) // wrap filepath error.
+		return errors.WithStack(err)
 	}
 	rel, err := filepath.Rel(dataDir, filepath.Dir(logFile))
 	if err != nil {
-		return errors.WithStack(err) // wrap filepath error.
+		return errors.WithStack(err)
 	}
 	if !strings.HasPrefix(rel, "..") {
 		return errors.New("log directory shouldn't be the subdirectory of data directory")
@@ -370,7 +370,7 @@ func (c *Config) String() string {
 // configFromFile loads config from file.
 func (c *Config) configFromFile(path string) (*toml.MetaData, error) {
 	meta, err := toml.DecodeFile(path, c)
-	return &meta, errors.WithStack(err) // wrap toml error.
+	return &meta, errors.WithStack(err)
 }
 
 // ScheduleConfig is the schedule configuration.
@@ -628,7 +628,7 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 	}
 	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {
-		return nil, errors.WithStack(err) // wrap etcd error.
+		return nil, errors.WithStack(err)
 	}
 	return tlsConfig, nil
 }
@@ -660,7 +660,7 @@ func ParseUrls(s string) ([]url.URL, error) {
 	for _, item := range items {
 		u, err := url.Parse(item)
 		if err != nil {
-			return nil, errors.WithStack(err) // wrap url error.
+			return nil, errors.WithStack(err)
 		}
 
 		urls = append(urls, *u)
