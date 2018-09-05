@@ -255,6 +255,18 @@ func (h *regionsHandler) GetTopReadFlow(w http.ResponseWriter, r *http.Request) 
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() })
 }
 
+func (h *regionsHandler) GetTopConfVer(w http.ResponseWriter, r *http.Request) {
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
+		return a.GetMeta().GetRegionEpoch().GetConfVer() < b.GetMeta().GetRegionEpoch().GetConfVer()
+	})
+}
+
+func (h *regionsHandler) GetTopVersion(w http.ResponseWriter, r *http.Request) {
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
+		return a.GetMeta().GetRegionEpoch().GetVersion() < b.GetMeta().GetRegionEpoch().GetVersion()
+	})
+}
+
 func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
