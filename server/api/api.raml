@@ -831,6 +831,38 @@ types:
           description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
+  /confver:
+    get:
+      description: List regions with the largest conf version.
+      queryParameters:
+        limit?:
+          type: integer
+          default: 16
+      responses:
+        200:
+          body:
+            application/json:
+              type: Regions
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
+  /version:
+    get:
+      description: List regions with the largest version.
+      queryParameters:
+        limit?:
+          type: integer
+          default: 16
+      responses:
+        200:
+          body:
+            application/json:
+              type: Regions
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
   /check/{filter}:
     uriParameters:
       filter:

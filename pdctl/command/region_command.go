@@ -30,6 +30,8 @@ var (
 	regionsCheckPrefix     = "pd/api/v1/regions/check"
 	regionsWriteflowPrefix = "pd/api/v1/regions/writeflow"
 	regionsReadflowPrefix  = "pd/api/v1/regions/readflow"
+	regionsConfVerPrefix   = "pd/api/v1/regions/confver"
+	regionsVersionPrefix   = "pd/api/v1/regions/version"
 	regionsSiblingPrefix   = "pd/api/v1/regions/sibling"
 	regionIDPrefix         = "pd/api/v1/region/id"
 	regionKeyPrefix        = "pd/api/v1/region/key"
@@ -60,6 +62,20 @@ func NewRegionCommand() *cobra.Command {
 		Run:   showRegionTopWriteCommandFunc,
 	}
 	r.AddCommand(topWrite)
+
+	topConfVer := &cobra.Command{
+		Use:   "topconfver <limit>",
+		Short: "show regions with top conf version",
+		Run:   showRegionTopConfVerCommandFunc,
+	}
+	r.AddCommand(topConfVer)
+
+	topVersion := &cobra.Command{
+		Use:   "topversion <limit>",
+		Short: "show regions with top version",
+		Run:   showRegionTopVersionCommandFunc,
+	}
+	r.AddCommand(topVersion)
 	r.Flags().String("jq", "", "jq query")
 
 	return r
@@ -121,7 +137,41 @@ func showRegionTopReadCommandFunc(cmd *cobra.Command, args []string) {
 	fmt.Println(r)
 }
 
-// NewRegionWithKeyCommand returns a region with key subcommand of regionCmd
+func showRegionTopConfVerCommandFunc(cmd *cobra.Command, args []string) {
+	prefix := regionsConfVerPrefix
+	if len(args) == 1 {
+		if _, err := strconv.Atoi(args[0]); err != nil {
+			fmt.Println("limit should be a number")
+			return
+		}
+		prefix += "?limit=" + args[0]
+	}
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get regions: %s\n", err)
+		return
+	}
+	fmt.Println(r)
+}
+
+func showRegionTopVersionCommandFunc(cmd *cobra.Command, args []string) {
+	prefix := regionsVersionPrefix
+	if len(args) == 1 {
+		if _, err := strconv.Atoi(args[0]); err != nil {
+			fmt.Println("limit should be a number")
+			return
+		}
+		prefix += "?limit=" + args[0]
+	}
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get regions: %s\n", err)
+		return
+	}
+	fmt.Println(r)
+}
+
+// NewRegionWithKeyCommand return a region with key subcommand of regionCmd
 func NewRegionWithKeyCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   "key [--format=raw|pb|proto|protobuf] <key>",

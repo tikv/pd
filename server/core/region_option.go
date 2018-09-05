@@ -156,14 +156,22 @@ func SetApproximateKeys(v int64) RegionCreateOption {
 // SetRegionConfVer sets the config version for the reigon.
 func SetRegionConfVer(confVer uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.meta.RegionEpoch.ConfVer = confVer
+		if region.meta.RegionEpoch == nil {
+			region.meta.RegionEpoch = &metapb.RegionEpoch{ConfVer: confVer, Version: 1}
+		} else {
+			region.meta.RegionEpoch.ConfVer = confVer
+		}
 	}
 }
 
 // SetRegionVersion sets the version for the reigon.
 func SetRegionVersion(version uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.meta.RegionEpoch.Version = version
+		if region.meta.RegionEpoch == nil {
+			region.meta.RegionEpoch = &metapb.RegionEpoch{ConfVer: 1, Version: version}
+		} else {
+			region.meta.RegionEpoch.Version = version
+		}
 	}
 }
 
