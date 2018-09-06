@@ -657,7 +657,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	dispatchHeartbeat(c, co, region, stream)
 	region = waitAddLearner(c, stream, region, 3)
 	dispatchHeartbeat(c, co, region, stream)
-	region = waitPromoteLearner(c, stream, region, 3)
+	waitPromoteLearner(c, stream, region, 3)
 	co.stop()
 }
 
