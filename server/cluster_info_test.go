@@ -20,7 +20,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pkg/errors"
 )
 
 var _ = Suite(&testStoresInfoSuite{})
@@ -32,7 +31,7 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 	e := region.GetRegionEpoch()
 
 	if e.GetVersion() < o.GetVersion() || e.GetConfVer() < o.GetConfVer() {
-		return errors.WithStack(ErrRegionIsStale(region, origin))
+		return ErrRegionIsStale(region, origin)
 	}
 
 	return nil

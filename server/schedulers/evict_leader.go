@@ -64,7 +64,7 @@ func (s *evictLeaderScheduler) GetType() string {
 }
 
 func (s *evictLeaderScheduler) Prepare(cluster schedule.Cluster) error {
-	return errors.WithStack(cluster.BlockStore(s.storeID))
+	return cluster.BlockStore(s.storeID)
 }
 
 func (s *evictLeaderScheduler) Cleanup(cluster schedule.Cluster) {

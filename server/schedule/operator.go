@@ -22,7 +22,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pingcap/pd/server/core"
@@ -465,7 +464,7 @@ func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64) (
 func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.RegionInfo, target *core.RegionInfo, kind OperatorKind) (*Operator, *Operator, error) {
 	steps, kinds, err := matchPeerSteps(cluster, source, target)
 	if err != nil {
-		return nil, nil, errors.WithStack(err)
+		return nil, nil, err
 	}
 
 	steps = append(steps, MergeRegion{
@@ -505,7 +504,7 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 		peer, err := cluster.AllocPeer(id)
 		if err != nil {
 			log.Debugf("peer alloc failed: %v", err)
-			return nil, kind, errors.WithStack(err)
+			return nil, kind, err
 		}
 		if cluster.IsRaftLearnerEnabled() {
 			steps = append(steps,

@@ -61,7 +61,7 @@ func (s *grantLeaderScheduler) GetType() string {
 	return "grant-leader"
 }
 func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
-	return errors.WithStack(cluster.BlockStore(s.storeID))
+	return cluster.BlockStore(s.storeID)
 }
 
 func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {

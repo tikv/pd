@@ -77,11 +77,11 @@ func NewClient(pdAddr string, tag string) (Client, <-chan *pdpb.RegionHeartbeatR
 	}
 	cc, err := c.createConn()
 	if err != nil {
-		return nil, nil, errors.WithStack(err)
+		return nil, nil, err
 	}
 	c.clientConn = cc
 	if err := c.initClusterID(); err != nil {
-		return nil, nil, errors.WithStack(err)
+		return nil, nil, err
 	}
 	simutil.Logger.Infof("[%s][pd] init cluster id %v", tag, c.clusterID)
 	c.wg.Add(1)

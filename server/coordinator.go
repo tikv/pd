@@ -387,7 +387,7 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 
 	s := newScheduleController(c, scheduler)
 	if err := s.Prepare(c.cluster); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	c.wg.Add(1)
@@ -410,11 +410,7 @@ func (c *coordinator) removeScheduler(name string) error {
 	s.Stop()
 	delete(c.schedulers, name)
 
-	if err := c.cluster.opt.RemoveSchedulerCfg(name); err != nil {
-		return errors.WithStack(err)
-	}
-
-	return nil
+	return c.cluster.opt.RemoveSchedulerCfg(name)
 }
 
 func (c *coordinator) runScheduler(s *scheduleController) {

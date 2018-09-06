@@ -38,7 +38,7 @@ func NewClusterInfo(pdAddr string, conf *cases.Conf) (*ClusterInfo, error) {
 	for _, store := range conf.Stores {
 		node, err := NewNode(store, pdAddr)
 		if err != nil {
-			return nil, errors.WithStack(err)
+			return nil, err
 		}
 		cluster.Nodes[store.ID] = node
 	}

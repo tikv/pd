@@ -232,7 +232,7 @@ func (c *Config) Parse(arguments []string) error {
 	if c.configFile != "" {
 		meta, err = c.configFromFile(c.configFile)
 		if err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 
 		// Backward compatibility for toml config
@@ -259,7 +259,7 @@ func (c *Config) Parse(arguments []string) error {
 	}
 
 	err = c.adjust(meta)
-	return errors.WithStack(err)
+	return err
 }
 
 func (c *Config) validate() error {
@@ -290,7 +290,7 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 
 	if err := c.validate(); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	adjustString(&c.ClientUrls, defaultClientUrls)
@@ -336,10 +336,10 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	adjustString(&c.Metric.PushJob, c.Name)
 
 	if err := c.Schedule.adjust(); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	if err := c.Replication.adjust(); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	adjustDuration(&c.heartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
@@ -698,22 +698,22 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 
 	cfg.LPUrls, err = ParseUrls(c.PeerUrls)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	cfg.APUrls, err = ParseUrls(c.AdvertisePeerUrls)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	cfg.LCUrls, err = ParseUrls(c.ClientUrls)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	cfg.ACUrls, err = ParseUrls(c.AdvertiseClientUrls)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	return cfg, nil
