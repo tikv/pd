@@ -428,7 +428,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	// And we will proceed to remove peer in store 4.
 	region = region.Clone(core.WithPendingPeers(nil))
 	dispatchHeartbeat(c, co, region, stream)
-	region = waitRemovePeer(c, stream, region, 4)
+	waitRemovePeer(c, stream, region, 4)
 	tc.addLeaderRegion(1, 1, 2, 3)
 	region = tc.GetRegion(1).Clone()
 	dispatchHeartbeat(c, co, region, stream)
