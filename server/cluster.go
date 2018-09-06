@@ -448,18 +448,38 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) err
 }
 
 func (c *RaftCluster) checkStores() {
+	var offlineStores []*metapb.Store
+	var upStoreCount uint64
+
 	cluster := c.cachedCluster
-	for _, store := range cluster.getMetaStores() {
+
+	for _, store := range cluster.GetStores() {
 		if store.GetState() != metapb.StoreState_Offline {
-			continue
-		}
-		if c.storeIsEmpty(store.GetId()) {
-			err := c.BuryStore(store.GetId(), false)
-			if err != nil {
-				log.Errorf("bury store %v failed: %v", store, err)
-			} else {
-				log.Infof("buried store %v", store)
+			if store.GetState() == metapb.StoreState_Up && !store.IsLowSpace(cluster.GetLowSpaceRatio()) {
+				upStoreCount++
 			}
+		}
+		offlineStore := store.Store
+		// If the store is empty, it can be buried.
+		if cluster.getStoreRegionCount(offlineStore.GetId()) == 0 {
+			err := c.BuryStore(offlineStore.GetId(), false)
+			if err != nil {
+				log.Errorf("bury store %v failed: %v", offlineStore, err)
+			} else {
+				log.Infof("buried store %v", offlineStore)
+			}
+		} else {
+			offlineStores = append(offlineStores, offlineStore)
+		}
+	}
+
+	if len(offlineStores) == 0 {
+		return
+	}
+
+	if upStoreCount < c.s.GetConfig().Replication.MaxReplicas {
+		for _, offlineStore := range offlineStores {
+			log.Warnf("store %v may not turn into Tombstone, there are no extra up node has enough space to accommodate the extra replica", offlineStore)
 		}
 	}
 }
@@ -481,25 +501,6 @@ func (c *RaftCluster) checkOperators() {
 			co.removeOperator(op)
 		}
 	}
-}
-
-func (c *RaftCluster) storeIsEmpty(storeID uint64) bool {
-	cluster := c.cachedCluster
-	if cluster.getStoreRegionCount(storeID) > 0 {
-		return false
-	}
-	// If pd-server is started recently, or becomes leader recently, the check may
-	// happen before any heartbeat from tikv. So we need to check region metas to
-	// verify no region's peer is on the store.
-	regions := cluster.getMetaRegions()
-	for _, region := range regions {
-		for _, p := range region.GetPeers() {
-			if p.GetStoreId() == storeID {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 func (c *RaftCluster) collectMetrics() {
