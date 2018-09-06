@@ -242,7 +242,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 
 func dispatchHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream *mockHeartbeatStream) {
 	co.hbStreams.bindStream(region.GetLeader().GetStoreId(), stream)
-	co.cluster.putRegion(region)
+	co.cluster.putRegion(region.Clone())
 	co.dispatch(region)
 }
 
