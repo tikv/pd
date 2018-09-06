@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/faketikv/cases"
 	"github.com/pingcap/pd/pkg/faketikv/simutil"
+	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
 )
 
@@ -52,18 +53,18 @@ func (d *Driver) Prepare() error {
 
 	clusterInfo, err := NewClusterInfo(d.addr, d.conf)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	d.clusterInfo = clusterInfo
 
 	conn, err := NewConn(d.clusterInfo.Nodes)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	raftEngine, err := NewRaftEngine(d.conf, conn)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	d.raftEngine = raftEngine
 
@@ -74,7 +75,7 @@ func (d *Driver) Prepare() error {
 	// Bootstrap.
 	store, region, err := clusterInfo.GetBootstrapInfo(d.raftEngine)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	d.client = clusterInfo.Nodes[store.GetId()].client
 
@@ -122,6 +123,11 @@ func (d *Driver) Tick() {
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
 	return d.conf.Checker(d.raftEngine.regionsInfo)
+}
+
+// PrintStatistics prints the statistics of the scheduler.
+func (d *Driver) PrintStatistics() {
+	d.raftEngine.schedulerStats.PrintStatistics()
 }
 
 // Stop stops all nodes.
@@ -180,7 +186,7 @@ func (d *Driver) DeleteNode(id uint64) {
 				Peer:        region.GetStorePeer(id),
 				DownSeconds: 24 * 60 * 60,
 			}
-			region.DownPeers = append(region.DownPeers, downPeer)
+			region = region.Clone(core.WithDownPeers(append(region.GetDownPeers(), downPeer)))
 			d.raftEngine.SetRegion(region)
 		}
 	}

@@ -103,7 +103,7 @@ const kvRangeLimit = 1000
 func NewTableNamespaceClassifier(kv *core.KV, idAlloc core.IDAllocator) (namespace.Classifier, error) {
 	nsInfo := newNamespacesInfo()
 	if err := nsInfo.loadNamespaces(kv, kvRangeLimit); err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	c := &tableNamespaceClassifier{
 		nsInfo:  nsInfo,
@@ -143,8 +143,8 @@ func (c *tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInf
 	c.RLock()
 	defer c.RUnlock()
 
-	isMeta := Key(regionInfo.StartKey).IsMeta()
-	tableID := Key(regionInfo.StartKey).TableID()
+	isMeta := Key(regionInfo.GetStartKey()).IsMeta()
+	tableID := Key(regionInfo.GetStartKey()).TableID()
 	if tableID == 0 && !isMeta {
 		return namespace.DefaultNamespace
 	}
@@ -159,7 +159,7 @@ func (c *tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInf
 }
 
 func (c *tableNamespaceClassifier) AllowMerge(one *core.RegionInfo, other *core.RegionInfo) bool {
-	return Key(one.StartKey).TableID() == Key(other.StartKey).TableID()
+	return Key(one.GetStartKey()).TableID() == Key(other.GetStartKey()).TableID()
 }
 
 // GetNamespaces returns all namespace details.
@@ -197,12 +197,12 @@ func (c *tableNamespaceClassifier) CreateNamespace(name string) error {
 
 	id, err := c.idAlloc.Alloc()
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	ns := NewNamespace(id, name)
 	err = c.putNamespaceLocked(ns)
-	return errors.WithStack(err)
+	return err
 }
 
 // AddNamespaceTableID adds table ID to namespace.
@@ -317,7 +317,7 @@ func (c *tableNamespaceClassifier) ReloadNamespaces() error {
 	defer c.Unlock()
 
 	if err := nsInfo.loadNamespaces(c.kv, kvRangeLimit); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	c.nsInfo = nsInfo
@@ -327,7 +327,7 @@ func (c *tableNamespaceClassifier) ReloadNamespaces() error {
 func (c *tableNamespaceClassifier) putNamespaceLocked(ns *Namespace) error {
 	if c.kv != nil {
 		if err := c.nsInfo.saveNamespace(c.kv, ns); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 	}
 	c.nsInfo.setNamespace(ns)
@@ -410,7 +410,7 @@ func (namespaceInfo *namespacesInfo) saveNamespace(kv *core.KV, ns *Namespace) e
 		return errors.WithStack(err)
 	}
 	err = kv.Save(namespaceInfo.namespacePath(ns.GetID()), string(value))
-	return errors.WithStack(err)
+	return err
 }
 
 func (namespaceInfo *namespacesInfo) loadNamespaces(kv *core.KV, rangeLimit int) error {
@@ -423,7 +423,7 @@ func (namespaceInfo *namespacesInfo) loadNamespaces(kv *core.KV, rangeLimit int)
 		key := namespaceInfo.namespacePath(nextID)
 		res, err := kv.LoadRange(key, endKey, rangeLimit)
 		if err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 		for _, s := range res {
 			ns := &Namespace{}

@@ -49,18 +49,18 @@ func newRegionInfo(r *core.RegionInfo) *regionInfo {
 		return nil
 	}
 	return &regionInfo{
-		ID:              r.Id,
-		StartKey:        strings.Trim(fmt.Sprintf("%q", r.StartKey), "\""),
-		EndKey:          strings.Trim(fmt.Sprintf("%q", r.EndKey), "\""),
-		RegionEpoch:     r.RegionEpoch,
-		Peers:           r.Peers,
-		Leader:          r.Leader,
-		DownPeers:       r.DownPeers,
-		PendingPeers:    r.PendingPeers,
-		WrittenBytes:    r.WrittenBytes,
-		ReadBytes:       r.ReadBytes,
-		ApproximateSize: r.ApproximateSize,
-		ApproximateKeys: r.ApproximateKeys,
+		ID:              r.GetID(),
+		StartKey:        strings.Trim(fmt.Sprintf("%q", r.GetStartKey()), "\""),
+		EndKey:          strings.Trim(fmt.Sprintf("%q", r.GetEndKey()), "\""),
+		RegionEpoch:     r.GetRegionEpoch(),
+		Peers:           r.GetPeers(),
+		Leader:          r.GetLeader(),
+		DownPeers:       r.GetDownPeers(),
+		PendingPeers:    r.GetPendingPeers(),
+		WrittenBytes:    r.GetBytesWritten(),
+		ReadBytes:       r.GetBytesRead(),
+		ApproximateSize: r.GetApproximateSize(),
+		ApproximateKeys: r.GetApproximateKeys(),
 	}
 }
 
@@ -134,7 +134,32 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	regions := cluster.GetMetaRegions()
 	regionInfos := make([]*regionInfo, len(regions))
 	for i, r := range regions {
-		regionInfos[i] = newRegionInfo(&core.RegionInfo{Region: r})
+		regionInfos[i] = newRegionInfo(core.NewRegionInfo(r, nil))
+	}
+	regionsInfo := &regionsInfo{
+		Count:   len(regions),
+		Regions: regionInfos,
+	}
+	h.rd.JSON(w, http.StatusOK, regionsInfo)
+}
+
+func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request) {
+	cluster := h.svr.GetRaftCluster()
+	if cluster == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
+		return
+	}
+
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	regions := cluster.GetStoreRegions(uint64(id))
+	regionInfos := make([]*regionInfo, len(regions))
+	for i, r := range regions {
+		regionInfos[i] = newRegionInfo(r)
 	}
 	regionsInfo := &regionsInfo{
 		Count:   len(regions),
@@ -223,11 +248,23 @@ const (
 )
 
 func (h *regionsHandler) GetTopWriteFlow(w http.ResponseWriter, r *http.Request) {
-	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.WrittenBytes < b.WrittenBytes })
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() })
 }
 
 func (h *regionsHandler) GetTopReadFlow(w http.ResponseWriter, r *http.Request) {
-	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.ReadBytes < b.ReadBytes })
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() })
+}
+
+func (h *regionsHandler) GetTopConfVer(w http.ResponseWriter, r *http.Request) {
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
+		return a.GetMeta().GetRegionEpoch().GetConfVer() < b.GetMeta().GetRegionEpoch().GetConfVer()
+	})
+}
+
+func (h *regionsHandler) GetTopVersion(w http.ResponseWriter, r *http.Request) {
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
+		return a.GetMeta().GetRegionEpoch().GetVersion() < b.GetMeta().GetRegionEpoch().GetVersion()
+	})
 }
 
 func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {

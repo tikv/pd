@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -35,10 +34,10 @@ type clusterInfo struct {
 	id              core.IDAllocator
 	kv              *core.KV
 	meta            *metapb.Cluster
-	activeRegions   int
 	opt             *scheduleOption
 	regionStats     *regionStatistics
 	labelLevelStats *labelLevelStatistics
+	prepareChecker  *prepareChecker
 }
 
 func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clusterInfo {
@@ -48,6 +47,7 @@ func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clus
 		opt:             opt,
 		kv:              kv,
 		labelLevelStats: newLabelLevelStatistics(),
+		prepareChecker:  newPrepareChecker(),
 	}
 }
 
@@ -58,7 +58,7 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 	c.meta = &metapb.Cluster{}
 	ok, err := kv.LoadMeta(c.meta)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	if !ok {
 		return nil, nil
@@ -66,13 +66,13 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 
 	start := time.Now()
 	if err := kv.LoadStores(c.core.Stores); err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	log.Infof("load %v stores cost %v", c.core.Stores.GetStoreCount(), time.Since(start))
 
 	start = time.Now()
 	if err := kv.LoadRegions(c.core.Regions); err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	log.Infof("load %v regions cost %v", c.core.Regions.GetRegionCount(), time.Since(start))
 
@@ -124,7 +124,7 @@ func (c *clusterInfo) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := c.allocID()
 	if err != nil {
 		log.Errorf("failed to alloc peer: %v", err)
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	peer := &metapb.Peer{
 		Id:      peerID,
@@ -154,7 +154,7 @@ func (c *clusterInfo) putMeta(meta *metapb.Cluster) error {
 func (c *clusterInfo) putMetaLocked(meta *metapb.Cluster) error {
 	if c.kv != nil {
 		if err := c.kv.SaveMeta(meta); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 	}
 	c.meta = meta
@@ -177,7 +177,7 @@ func (c *clusterInfo) putStore(store *core.StoreInfo) error {
 func (c *clusterInfo) putStoreLocked(store *core.StoreInfo) error {
 	if c.kv != nil {
 		if err := c.kv.SaveStore(store.Store); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 	}
 	return c.core.PutStore(store)
@@ -299,8 +299,8 @@ func (c *clusterInfo) putRegion(region *core.RegionInfo) error {
 
 func (c *clusterInfo) putRegionLocked(region *core.RegionInfo) error {
 	if c.kv != nil {
-		if err := c.kv.SaveRegion(region.Region); err != nil {
-			return errors.WithStack(err)
+		if err := c.kv.SaveRegion(region.GetMeta()); err != nil {
+			return err
 		}
 	}
 	return c.core.PutRegion(region)
@@ -310,6 +310,12 @@ func (c *clusterInfo) getRegions() []*core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.core.Regions.GetRegions()
+}
+
+func (c *clusterInfo) getStoreRegions(storeID uint64) []*core.RegionInfo {
+	c.RLock()
+	defer c.RUnlock()
+	return c.core.Regions.GetStoreRegions(storeID)
 }
 
 func (c *clusterInfo) getMetaRegions() []*metapb.Region {
@@ -396,7 +402,7 @@ func (c *clusterInfo) takeRegionStoresLocked(region *core.RegionInfo) []*core.St
 func (c *clusterInfo) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
 	c.RLock()
 	defer c.RUnlock()
-	return c.core.Stores.GetStore(region.Leader.GetStoreId())
+	return c.core.Stores.GetStore(region.GetLeader().GetStoreId())
 }
 
 // GetFollowerStores returns all stores that contains the region's follower peer.
@@ -416,7 +422,7 @@ func (c *clusterInfo) GetFollowerStores(region *core.RegionInfo) []*core.StoreIn
 func (c *clusterInfo) isPrepared() bool {
 	c.RLock()
 	defer c.RUnlock()
-	return float64(c.core.Regions.Length())*collectFactor <= float64(c.activeRegions)
+	return c.prepareChecker.check(c)
 }
 
 // handleStoreHeartbeat updates the store status.
@@ -446,9 +452,8 @@ func (c *clusterInfo) updateStoreStatusLocked(id uint64) {
 
 // handleRegionHeartbeat updates the region information.
 func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
-	region = region.Clone()
 	c.RLock()
-	origin := c.core.Regions.GetRegion(region.GetId())
+	origin := c.core.Regions.GetRegion(region.GetID())
 	isWriteUpdate, writeItem := c.core.CheckWriteStatus(region)
 	isReadUpdate, readItem := c.core.CheckReadStatus(region)
 	c.RUnlock()
@@ -458,53 +463,53 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	// Mark isNew if the region in cache does not have leader.
 	var saveKV, saveCache, isNew bool
 	if origin == nil {
-		log.Debugf("[region %d] Insert new region {%v}", region.GetId(), region)
+		log.Debugf("[region %d] Insert new region {%v}", region.GetID(), region)
 		saveKV, saveCache, isNew = true, true, true
 	} else {
 		r := region.GetRegionEpoch()
 		o := origin.GetRegionEpoch()
 		// Region meta is stale, return an error.
 		if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
-			return errors.WithStack(ErrRegionIsStale(region.Region, origin.Region))
+			return ErrRegionIsStale(region.GetMeta(), origin.GetMeta())
 		}
 		if r.GetVersion() > o.GetVersion() {
-			log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetId(), core.DiffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion())
+			log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetID(), core.DiffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion())
 			saveKV, saveCache = true, true
 		}
 		if r.GetConfVer() > o.GetConfVer() {
-			log.Infof("[region %d] %s, ConfVer changed from {%d} to {%d}", region.GetId(), core.DiffRegionPeersInfo(origin, region), o.GetConfVer(), r.GetConfVer())
+			log.Infof("[region %d] %s, ConfVer changed from {%d} to {%d}", region.GetID(), core.DiffRegionPeersInfo(origin, region), o.GetConfVer(), r.GetConfVer())
 			saveKV, saveCache = true, true
 		}
-		if region.Leader.GetId() != origin.Leader.GetId() {
-			if origin.Leader.GetId() == 0 {
+		if region.GetLeader().GetId() != origin.GetLeader().GetId() {
+			if origin.GetLeader().GetId() == 0 {
 				isNew = true
 			} else {
-				log.Infof("[region %d] Leader changed from store {%d} to {%d}", region.GetId(), origin.Leader.GetStoreId(), region.Leader.GetStoreId())
+				log.Infof("[region %d] Leader changed from store {%d} to {%d}", region.GetID(), origin.GetLeader().GetStoreId(), region.GetLeader().GetStoreId())
 			}
 			saveCache = true
 		}
-		if len(region.DownPeers) > 0 || len(region.PendingPeers) > 0 {
+		if len(region.GetDownPeers()) > 0 || len(region.GetPendingPeers()) > 0 {
 			saveCache = true
 		}
-		if len(origin.DownPeers) > 0 || len(origin.PendingPeers) > 0 {
+		if len(origin.GetDownPeers()) > 0 || len(origin.GetPendingPeers()) > 0 {
 			saveCache = true
 		}
 		if len(region.GetPeers()) != len(origin.GetPeers()) {
 			saveKV, saveCache = true, true
 		}
-		if region.ApproximateSize != origin.ApproximateSize {
+		if region.GetApproximateSize() != origin.GetApproximateSize() {
 			saveCache = true
 		}
-		if region.ApproximateKeys != origin.ApproximateKeys {
+		if region.GetApproximateKeys() != origin.GetApproximateKeys() {
 			saveCache = true
 		}
 	}
 
 	if saveKV && c.kv != nil {
-		if err := c.kv.SaveRegion(region.Region); err != nil {
+		if err := c.kv.SaveRegion(region.GetMeta()); err != nil {
 			// Not successfully saved to kv is not fatal, it only leads to longer warm-up
 			// after restart. Here we only log the error then go on updating cache.
-			log.Errorf("[region %d] fail to save region %v: %v", region.GetId(), region, err)
+			log.Errorf("[region %d] fail to save region %v: %v", region.GetID(), region, err)
 		}
 	}
 	if !isWriteUpdate && !isReadUpdate && !saveCache && !isNew {
@@ -514,7 +519,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	c.Lock()
 	defer c.Unlock()
 	if isNew {
-		c.activeRegions++
+		c.prepareChecker.collect(region)
 	}
 
 	if saveCache {
@@ -535,11 +540,11 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 
 		// Update related stores.
 		if origin != nil {
-			for _, p := range origin.Peers {
+			for _, p := range origin.GetPeers() {
 				c.updateStoreStatusLocked(p.GetStoreId())
 			}
 		}
-		for _, p := range region.Peers {
+		for _, p := range region.GetPeers() {
 			c.updateStoreStatusLocked(p.GetStoreId())
 		}
 	}
@@ -548,7 +553,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		c.regionStats.Observe(region, c.takeRegionStoresLocked(region))
 	}
 
-	key := region.GetId()
+	key := region.GetID()
 	if isWriteUpdate {
 		c.core.HotCache.Update(key, writeItem, schedule.WriteFlow)
 	}
@@ -704,4 +709,45 @@ func (c *clusterInfo) RegionReadStats() []*core.RegionStat {
 func (c *clusterInfo) RegionWriteStats() []*core.RegionStat {
 	// RegionStats is a thread-safe method
 	return c.core.HotCache.RegionStats(schedule.WriteFlow)
+}
+
+type prepareChecker struct {
+	reactiveRegions map[uint64]int
+	start           time.Time
+	sum             int
+	isPrepared      bool
+}
+
+func newPrepareChecker() *prepareChecker {
+	return &prepareChecker{
+		start:           time.Now(),
+		reactiveRegions: make(map[uint64]int),
+	}
+}
+
+func (checker *prepareChecker) check(c *clusterInfo) bool {
+	if checker.isPrepared || time.Since(checker.start) > collectTimeout {
+		return true
+	}
+	if float64(c.core.Regions.Length())*collectFactor > float64(checker.sum) {
+		return false
+	}
+	for _, store := range c.core.GetStores() {
+		if !store.IsUp() {
+			continue
+		}
+		storeID := store.GetId()
+		if float64(c.core.Regions.GetStoreRegionCount(storeID))*collectFactor > float64(checker.reactiveRegions[storeID]) {
+			return false
+		}
+	}
+	checker.isPrepared = true
+	return true
+}
+
+func (checker *prepareChecker) collect(region *core.RegionInfo) {
+	for _, p := range region.GetPeers() {
+		checker.reactiveRegions[p.GetStoreId()]++
+	}
+	checker.sum++
 }

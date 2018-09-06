@@ -26,15 +26,18 @@ import (
 
 var (
 	regionsPrefix          = "pd/api/v1/regions"
+	regionsStorePrefix     = "pd/api/v1/regions/store"
 	regionsCheckPrefix     = "pd/api/v1/regions/check"
 	regionsWriteflowPrefix = "pd/api/v1/regions/writeflow"
 	regionsReadflowPrefix  = "pd/api/v1/regions/readflow"
+	regionsConfVerPrefix   = "pd/api/v1/regions/confver"
+	regionsVersionPrefix   = "pd/api/v1/regions/version"
 	regionsSiblingPrefix   = "pd/api/v1/regions/sibling"
 	regionIDPrefix         = "pd/api/v1/region/id"
 	regionKeyPrefix        = "pd/api/v1/region/key"
 )
 
-// NewRegionCommand return a region subcommand of rootCmd
+// NewRegionCommand returns a region subcommand of rootCmd
 func NewRegionCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   `region <region_id> [-jq="<query string>"]`,
@@ -44,6 +47,7 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRegionWithKeyCommand())
 	r.AddCommand(NewRegionWithCheckCommand())
 	r.AddCommand(NewRegionWithSiblingCommand())
+	r.AddCommand(NewRegionWithStoreCommand())
 
 	topRead := &cobra.Command{
 		Use:   "topread <limit>",
@@ -58,6 +62,20 @@ func NewRegionCommand() *cobra.Command {
 		Run:   showRegionTopWriteCommandFunc,
 	}
 	r.AddCommand(topWrite)
+
+	topConfVer := &cobra.Command{
+		Use:   "topconfver <limit>",
+		Short: "show regions with top conf version",
+		Run:   showRegionTopConfVerCommandFunc,
+	}
+	r.AddCommand(topConfVer)
+
+	topVersion := &cobra.Command{
+		Use:   "topversion <limit>",
+		Short: "show regions with top version",
+		Run:   showRegionTopVersionCommandFunc,
+	}
+	r.AddCommand(topVersion)
 	r.Flags().String("jq", "", "jq query")
 
 	return r
@@ -104,6 +122,40 @@ func showRegionTopWriteCommandFunc(cmd *cobra.Command, args []string) {
 
 func showRegionTopReadCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := regionsReadflowPrefix
+	if len(args) == 1 {
+		if _, err := strconv.Atoi(args[0]); err != nil {
+			fmt.Println("limit should be a number")
+			return
+		}
+		prefix += "?limit=" + args[0]
+	}
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get regions: %s\n", err)
+		return
+	}
+	fmt.Println(r)
+}
+
+func showRegionTopConfVerCommandFunc(cmd *cobra.Command, args []string) {
+	prefix := regionsConfVerPrefix
+	if len(args) == 1 {
+		if _, err := strconv.Atoi(args[0]); err != nil {
+			fmt.Println("limit should be a number")
+			return
+		}
+		prefix += "?limit=" + args[0]
+	}
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get regions: %s\n", err)
+		return
+	}
+	fmt.Println(r)
+}
+
+func showRegionTopVersionCommandFunc(cmd *cobra.Command, args []string) {
+	prefix := regionsVersionPrefix
 	if len(args) == 1 {
 		if _, err := strconv.Atoi(args[0]); err != nil {
 			fmt.Println("limit should be a number")
@@ -188,7 +240,7 @@ func decodeProtobufText(text string) (string, error) {
 	return string(buf), nil
 }
 
-// NewRegionWithCheckCommand return a region with check subcommand of regionCmd
+// NewRegionWithCheckCommand returns a region with check subcommand of regionCmd
 func NewRegionWithCheckCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   "check [miss-peer|extra-peer|down-peer|pending-peer|incorrect-ns]",
@@ -213,7 +265,7 @@ func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
 	fmt.Println(r)
 }
 
-// NewRegionWithSiblingCommand return a region with check subcommand of regionCmd
+// NewRegionWithSiblingCommand returns a region with sibling subcommand of regionCmd
 func NewRegionWithSiblingCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   "sibling <region_id>",
@@ -233,6 +285,31 @@ func showRegionWithSiblingCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		fmt.Printf("Failed to get region sibling: %s\n", err)
+		return
+	}
+	fmt.Println(r)
+}
+
+// NewRegionWithStoreCommand returns regions with store subcommand of regionCmd
+func NewRegionWithStoreCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "store <store_id>",
+		Short: "show the regions of a specific store",
+		Run:   showRegionWithStoreCommandFunc,
+	}
+	return r
+}
+
+func showRegionWithStoreCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+	storeID := args[0]
+	prefix := regionsStorePrefix + "/" + storeID
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get regions with the given storeID: %s\n", err)
 		return
 	}
 	fmt.Println(r)

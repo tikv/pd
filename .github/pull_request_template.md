@@ -2,41 +2,36 @@
 Thank you for working on PD! Please read PD's [CONTRIBUTING](https://github.com/pingcap/pd/blob/master/CONTRIBUTING.md) document **BEFORE** filing this PR.
 -->
 
-## What have you changed? (required)
+### What problem does this PR solve? <!--add the issue link with summary if it exists-->
 
-<!--
-Please explain **IN DETAIL** what the changes are in this PR and why they are needed:
-- Summarize your change (required)
-- How does this PR work? Need a brief introduction for the changed logic (optional)
-- Describe clearly one logical change and avoid lazy messages (optional)
-- Describe any limitations of the current code (optional)
 
-Please **NOTE** that:
-- Do not assume the code is self-evident
-- Do not assume reviewers understand the original issue
--->
+### What is changed and how it works?
 
-## What are the type of the changes (required)?
 
-<!--
-The currently defined types are listed below, please pick one of the types for this PR by removing the others:
--->
-- New feature (non-breaking change which adds functionality)
-- Improvement (non-breaking change which is an improvement to an existing feature)
-- Bug fix (non-breaking change which fixes an issue)
-- Breaking change (fix or feature that would cause existing functionality to not work as expected)
+### Check List <!--REMOVE the items that are not applicable-->
 
-## How has this PR been tested (required)?
-<!--
-Please describe the tests that you ran to verify your changes. Have you finished unit tests, integration tests, or manual tests?
--->
-## Does this PR affect documentation (docs/docs-cn) update? (optional)
-<!--
-If there is document change, please file a PR in ([docs](https://github.com/pingcap/docs) and [docs-cn](https://github.com/pingcap/docs-cn)) and add the PR number here.
--->
-## Refer to a related PR or issue link (optional)
+Tests <!-- At least one of them must be included. -->
 
-## Benchmark result if necessary (optional)
+ - Unit test
+ - Integration test
+ - Manual test (add detailed scripts or steps below)
+ - No code
 
-## Add a few positive/negative examples (optional)
+Code changes
 
+ - Has configuration change
+ - Has HTTP API interfaces change
+ - Has persistent data change
+
+Side effects
+
+ - Possible performance regression
+ - Increased code complexity
+ - Breaking backward compatibility
+
+Related changes
+
+ - Need to cherry-pick to the release branch
+ - Need to update the documentation
+ - Need to update the `tidb-ansible` repository
+ - Need to be included in the release notes

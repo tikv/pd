@@ -27,25 +27,9 @@ func TestServer(t *testing.T) {
 	TestingT(t)
 }
 
-type cleanupFunc func()
-
-func newTestServer(c *C) (*Server, cleanupFunc) {
-	cfg := NewTestSingleConfig()
-
-	svr, err := CreateServer(cfg, nil)
-	c.Assert(err, IsNil)
-
-	cleanup := func() {
-		svr.Close()
-		cleanServer(svr.cfg)
-	}
-
-	return svr, cleanup
-}
-
-func mustRunTestServer(c *C) (*Server, cleanupFunc) {
-	server, cleanup := newTestServer(c)
-	err := server.Run(context.TODO())
+func mustRunTestServer(c *C) (*Server, CleanupFunc) {
+	var err error
+	_, server, cleanup, err := NewTestServer()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{server})
 	return server, cleanup
@@ -108,7 +92,7 @@ var _ = Suite(&testServerSuite{})
 
 type testServerSuite struct{}
 
-func newTestServersWithCfgs(c *C, cfgs []*Config) ([]*Server, cleanupFunc) {
+func newTestServersWithCfgs(c *C, cfgs []*Config) ([]*Server, CleanupFunc) {
 	svrs := make([]*Server, 0, len(cfgs))
 
 	ch := make(chan *Server)

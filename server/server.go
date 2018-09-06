@@ -112,7 +112,7 @@ func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server,
 	// Adjust etcd config.
 	etcdCfg, err := s.cfg.genEmbedEtcdConfig()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	if apiRegister != nil {
 		etcdCfg.UserHandlers = map[string]http.Handler{
@@ -145,10 +145,10 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap, tlsConfig); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	select {
@@ -175,7 +175,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	// update advertise peer urls.
 	etcdMembers, err := etcdutil.ListEtcdMembers(client)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	for _, m := range etcdMembers.Members {
 		if etcdServerID == m.ID {
@@ -196,7 +196,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 func (s *Server) startServer() error {
 	var err error
 	if err = s.initClusterID(); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	log.Infof("init cluster id %v", s.clusterID)
 	// It may lose accuracy if use float64 to store uint64. So we store the
@@ -212,7 +212,7 @@ func (s *Server) startServer() error {
 	s.cluster = newRaftCluster(s, s.clusterID)
 	s.hbStreams = newHeartbeatStreams(s.clusterID)
 	if s.classifier, err = namespace.CreateClassifier(s.cfg.NamespaceClassifier, s.kv, s.idAlloc); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	// Server has started.
@@ -224,16 +224,16 @@ func (s *Server) initClusterID() error {
 	// Get any cluster key to parse the cluster ID.
 	resp, err := kvGet(s.client, pdClusterIDPath)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	// If no key exist, generate a random cluster ID.
 	if len(resp.Kvs) == 0 {
 		s.clusterID, err = initOrGetClusterID(s.client, pdClusterIDPath)
-		return errors.WithStack(err)
+		return err
 	}
 	s.clusterID, err = bytesToUint64(resp.Kvs[0].Value)
-	return errors.WithStack(err)
+	return err
 }
 
 // Close closes the server.
@@ -279,11 +279,11 @@ func (s *Server) Run(ctx context.Context) error {
 	})
 
 	if err := s.startEtcd(ctx); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	if err := s.startServer(); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	s.startServerLoop()
@@ -333,7 +333,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	log.Infof("try to bootstrap raft cluster %d with %v", clusterID, req)
 
 	if err := checkBootstrapRequest(clusterID, req); err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	clusterMeta := metapb.Cluster{
@@ -390,7 +390,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	log.Infof("bootstrap cluster %d ok", clusterID)
 
 	if err := s.cluster.start(); err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	return &pdpb.BootstrapResponse{}, nil
@@ -480,12 +480,12 @@ func (s *Server) GetScheduleConfig() *ScheduleConfig {
 // SetScheduleConfig sets the balance config information.
 func (s *Server) SetScheduleConfig(cfg ScheduleConfig) error {
 	if err := cfg.validate(); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	old := s.scheduleOpt.load()
 	s.scheduleOpt.store(&cfg)
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	log.Infof("schedule config is updated: %+v, old: %+v", cfg, old)
 	return nil
@@ -501,13 +501,13 @@ func (s *Server) GetReplicationConfig() *ReplicationConfig {
 // SetReplicationConfig sets the replication config.
 func (s *Server) SetReplicationConfig(cfg ReplicationConfig) error {
 	if err := cfg.validate(); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	old := s.scheduleOpt.rep.load()
 	s.scheduleOpt.rep.store(&cfg)
 	s.scheduleOpt.persist(s.kv)
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	log.Infof("replication config is updated: %+v, old: %+v", cfg, old)
 	return nil
@@ -565,7 +565,7 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 	s.scheduleOpt.SetLabelProperty(typ, labelKey, labelValue)
 	err := s.scheduleOpt.persist(s.kv)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	log.Infof("label property config is updated: %+v", s.scheduleOpt.loadLabelPropertyConfig())
 	return nil
@@ -576,7 +576,7 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 	s.scheduleOpt.DeleteLabelProperty(typ, labelKey, labelValue)
 	err := s.scheduleOpt.persist(s.kv)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	log.Infof("label property config is updated: %+v", s.scheduleOpt.loadLabelPropertyConfig())
 	return nil
@@ -591,12 +591,12 @@ func (s *Server) GetLabelProperty() LabelPropertyConfig {
 func (s *Server) SetClusterVersion(v string) error {
 	version, err := ParseVersion(v)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	s.scheduleOpt.SetClusterVersion(*version)
 	err = s.scheduleOpt.persist(s.kv)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	log.Infof("cluster version is updated to %s", v)
 	return nil
@@ -684,7 +684,7 @@ func (s *Server) GetMemberLeaderPriority(id uint64) (int, error) {
 	key := s.getMemberLeaderPriorityPath(id)
 	res, err := kvGet(s.client, key)
 	if err != nil {
-		return 0, errors.WithStack(err)
+		return 0, err
 	}
 	if len(res.Kvs) == 0 {
 		return 0, nil

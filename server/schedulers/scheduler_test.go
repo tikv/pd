@@ -17,6 +17,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	log "github.com/sirupsen/logrus"
@@ -260,9 +261,9 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	// If the peer on store3 is pending, not transfer to store3 neither.
 	tc.SetStoreUp(3)
 	region := tc.Regions.GetRegion(1)
-	for _, p := range region.Peers {
+	for _, p := range region.GetPeers() {
 		if p.GetStoreId() == 3 {
-			region.PendingPeers = append(region.PendingPeers, p)
+			region = region.Clone(core.WithPendingPeers(append(region.GetPendingPeers(), p)))
 			break
 		}
 	}

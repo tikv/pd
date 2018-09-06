@@ -79,7 +79,7 @@ func NewRegionScatterer(cluster Cluster, classifier namespace.Classifier) *Regio
 
 // Scatter relocates the region.
 func (r *RegionScatterer) Scatter(region *core.RegionInfo) *Operator {
-	if r.cluster.IsRegionHot(region.GetId()) {
+	if r.cluster.IsRegionHot(region.GetID()) {
 		return nil
 	}
 
@@ -125,7 +125,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
 	if len(steps) == 0 {
 		return nil
 	}
-	return NewOperator("scatter-region", region.GetId(), region.GetRegionEpoch(), kind, steps...)
+	return NewOperator("scatter-region", region.GetID(), region.GetRegionEpoch(), kind, steps...)
 }
 
 func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {

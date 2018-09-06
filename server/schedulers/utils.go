@@ -47,7 +47,7 @@ func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, reg
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
-	regionSize := region.ApproximateSize
+	regionSize := region.GetApproximateSize()
 	if regionSize < cluster.GetAverageRegionSize() {
 		regionSize = cluster.GetAverageRegionSize()
 	}

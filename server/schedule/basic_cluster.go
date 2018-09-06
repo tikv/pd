@@ -15,7 +15,6 @@ package schedule
 
 import (
 	"github.com/pingcap/pd/server/core"
-	"github.com/pkg/errors"
 )
 
 var (
@@ -151,7 +150,7 @@ func (bc *BasicCluster) GetFollowerStores(region *core.RegionInfo) []*core.Store
 
 // GetLeaderStore returns all Stores that contains the region's leader peer.
 func (bc *BasicCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
-	return bc.Stores.GetStore(region.Leader.GetStoreId())
+	return bc.Stores.GetStore(region.GetLeader().GetStoreId())
 }
 
 // GetAdjacentRegions returns region's info that is adjacent with specific region
@@ -161,7 +160,7 @@ func (bc *BasicCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.Regio
 
 // BlockStore stops balancer from selecting the store.
 func (bc *BasicCluster) BlockStore(storeID uint64) error {
-	return errors.WithStack(bc.Stores.BlockStore(storeID))
+	return bc.Stores.BlockStore(storeID)
 }
 
 // UnblockStore allows balancer to select the store.

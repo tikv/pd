@@ -47,7 +47,7 @@ func (s *Server) getTimestampPath() string {
 func (s *Server) loadTimestamp() (time.Time, error) {
 	data, err := getValue(s.client, s.getTimestampPath())
 	if err != nil {
-		return zeroTime, errors.WithStack(err)
+		return zeroTime, err
 	}
 	if len(data) == 0 {
 		return zeroTime, nil
@@ -79,13 +79,13 @@ func (s *Server) syncTimestamp() error {
 
 	last, err := s.loadTimestamp()
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	next := time.Now()
 	// gofail: var fallBackSync bool
 	// if fallBackSync {
-	// 	next = next.Add(time.Hour)
+	//	next = next.Add(time.Hour)
 	// }
 
 	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
@@ -97,7 +97,7 @@ func (s *Server) syncTimestamp() error {
 
 	save := next.Add(s.cfg.TsoSaveInterval.Duration)
 	if err = s.saveTimestamp(save); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	tsoCounter.WithLabelValues("sync_ok").Inc()
@@ -127,7 +127,7 @@ func (s *Server) updateTimestamp() error {
 
 	// gofail: var fallBackUpdate bool
 	// if fallBackUpdate {
-	// 	now = now.Add(time.Hour)
+	//	now = now.Add(time.Hour)
 	// }
 
 	tsoCounter.WithLabelValues("save").Inc()
@@ -163,7 +163,7 @@ func (s *Server) updateTimestamp() error {
 	if subTimeByWallClock(s.lastSavedTime, next) <= updateTimestampGuard {
 		save := next.Add(s.cfg.TsoSaveInterval.Duration)
 		if err := s.saveTimestamp(save); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 	}
 

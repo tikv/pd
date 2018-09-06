@@ -61,7 +61,7 @@ func (s *grantLeaderScheduler) GetType() string {
 	return "grant-leader"
 }
 func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
-	return errors.WithStack(cluster.BlockStore(s.storeID))
+	return cluster.BlockStore(s.storeID)
 }
 
 func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {
@@ -80,8 +80,8 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence sc
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	step := schedule.TransferLeader{FromStore: region.Leader.GetStoreId(), ToStore: s.storeID}
-	op := schedule.NewOperator("grant-leader", region.GetId(), region.GetRegionEpoch(), schedule.OpLeader, step)
+	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: s.storeID}
+	op := schedule.NewOperator("grant-leader", region.GetID(), region.GetRegionEpoch(), schedule.OpLeader, step)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*schedule.Operator{op}
 }

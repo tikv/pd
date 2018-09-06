@@ -51,7 +51,7 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 
 	resp, err := kvGet(kv.server.client, key)
 	if err != nil {
-		return "", errors.WithStack(err)
+		return "", err
 	}
 	if n := len(resp.Kvs); n == 0 {
 		return "", nil
@@ -69,7 +69,7 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, error)
 	withLimit := clientv3.WithLimit(int64(limit))
 	resp, err := kvGet(kv.server.client, key, withRange, withLimit)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	res := make([]string, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {

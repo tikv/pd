@@ -281,6 +281,15 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	c.Assert(n, IsNil)
 }
 
+func (s *testClientSuite) TestGetAllStores(c *C) {
+	cluster := s.srv.GetRaftCluster()
+	c.Assert(cluster, NotNil)
+
+	stores, err := s.client.GetAllStores(context.Background())
+	c.Assert(err, IsNil)
+	c.Assert(stores, DeepEquals, []*metapb.Store{store})
+}
+
 func (s *testClientSuite) checkGCSafePoint(c *C, expectedSafePoint uint64) {
 	req := &pdpb.GetGCSafePointRequest{
 		Header: newHeader(s.srv),

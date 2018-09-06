@@ -76,14 +76,14 @@ func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 func (c *RaftCluster) loadClusterStatus() (*ClusterStatus, error) {
 	data, err := c.s.kv.Load((c.s.kv.ClusterStatePath("raft_bootstrap_time")))
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	if len(data) == 0 {
 		return &ClusterStatus{}, nil
 	}
 	t, err := parseTimestamp([]byte(data))
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	return &ClusterStatus{RaftBootstrapTime: t}, nil
 }
@@ -99,7 +99,7 @@ func (c *RaftCluster) start() error {
 
 	cluster, err := loadClusterInfo(c.s.idAlloc, c.s.kv, c.s.scheduleOpt)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	if cluster == nil {
 		return nil
@@ -107,7 +107,7 @@ func (c *RaftCluster) start() error {
 
 	err = c.s.classifier.ReloadNamespaces()
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	c.cachedCluster = cluster
@@ -211,7 +211,7 @@ func (c *RaftCluster) GetRegionByKey(regionKey []byte) (*metapb.Region, *metapb.
 	if region == nil {
 		return nil, nil
 	}
-	return region.Region, region.Leader
+	return region.GetMeta(), region.GetLeader()
 }
 
 // GetPrevRegionByKey gets previous region and leader peer by the region key from cluster.
@@ -220,7 +220,7 @@ func (c *RaftCluster) GetPrevRegionByKey(regionKey []byte) (*metapb.Region, *met
 	if region == nil {
 		return nil, nil
 	}
-	return region.Region, region.Leader
+	return region.GetMeta(), region.GetLeader()
 }
 
 // GetRegionInfoByKey gets regionInfo by region key from cluster.
@@ -234,7 +234,7 @@ func (c *RaftCluster) GetRegionByID(regionID uint64) (*metapb.Region, *metapb.Pe
 	if region == nil {
 		return nil, nil
 	}
-	return region.Region, region.Leader
+	return region.GetMeta(), region.GetLeader()
 }
 
 // GetRegionInfoByID gets regionInfo by regionID from cluster.
@@ -250,6 +250,11 @@ func (c *RaftCluster) GetMetaRegions() []*metapb.Region {
 // GetRegions returns all regions info in detail.
 func (c *RaftCluster) GetRegions() []*core.RegionInfo {
 	return c.cachedCluster.getRegions()
+}
+
+// GetStoreRegions returns all regions info with a given storeID.
+func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
+	return c.cachedCluster.getStoreRegions(storeID)
 }
 
 // GetRegionStats returns region statistics from cluster.
@@ -295,7 +300,7 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 	storeMeta.Labels = labels
 	// putStore will perform label merge.
 	err := c.putStore(storeMeta)
-	return errors.WithStack(err)
+	return err
 }
 
 func (c *RaftCluster) putStore(store *metapb.Store) error {
@@ -379,7 +384,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 // State transition:
 // Case 1: Up -> Tombstone (if force is true);
 // Case 2: Offline -> Tombstone.
-func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
+func (c *RaftCluster) BuryStore(storeID uint64, force bool) error { // revive:disable-line:flag-parameter
 	c.Lock()
 	defer c.Unlock()
 
@@ -435,7 +440,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) err
 	}
 
 	if err := c.s.kv.SaveStoreWeight(storeID, leader, region); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	store.LeaderWeight, store.RegionWeight = leader, region
@@ -443,18 +448,38 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) err
 }
 
 func (c *RaftCluster) checkStores() {
+	var offlineStores []*metapb.Store
+	var upStoreCount uint64
+
 	cluster := c.cachedCluster
-	for _, store := range cluster.getMetaStores() {
+
+	for _, store := range cluster.GetStores() {
 		if store.GetState() != metapb.StoreState_Offline {
-			continue
-		}
-		if c.storeIsEmpty(store.GetId()) {
-			err := c.BuryStore(store.GetId(), false)
-			if err != nil {
-				log.Errorf("bury store %v failed: %v", store, err)
-			} else {
-				log.Infof("buried store %v", store)
+			if store.GetState() == metapb.StoreState_Up && !store.IsLowSpace(cluster.GetLowSpaceRatio()) {
+				upStoreCount++
 			}
+		}
+		offlineStore := store.Store
+		// If the store is empty, it can be buried.
+		if cluster.getStoreRegionCount(offlineStore.GetId()) == 0 {
+			err := c.BuryStore(offlineStore.GetId(), false)
+			if err != nil {
+				log.Errorf("bury store %v failed: %v", offlineStore, err)
+			} else {
+				log.Infof("buried store %v", offlineStore)
+			}
+		} else {
+			offlineStores = append(offlineStores, offlineStore)
+		}
+	}
+
+	if len(offlineStores) == 0 {
+		return
+	}
+
+	if upStoreCount < c.s.GetConfig().Replication.MaxReplicas {
+		for _, offlineStore := range offlineStores {
+			log.Warnf("store %v may not turn into Tombstone, there are no extra up node has enough space to accommodate the extra replica", offlineStore)
 		}
 	}
 }
@@ -476,25 +501,6 @@ func (c *RaftCluster) checkOperators() {
 			co.removeOperator(op)
 		}
 	}
-}
-
-func (c *RaftCluster) storeIsEmpty(storeID uint64) bool {
-	cluster := c.cachedCluster
-	if cluster.getStoreRegionCount(storeID) > 0 {
-		return false
-	}
-	// If pd-server is started recently, or becomes leader recently, the check may
-	// happen before any heartbeat from tikv. So we need to check region metas to
-	// verify no region's peer is on the store.
-	regions := cluster.getMetaRegions()
-	for _, region := range regions {
-		for _, p := range region.GetPeers() {
-			if p.GetStoreId() == storeID {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 func (c *RaftCluster) collectMetrics() {

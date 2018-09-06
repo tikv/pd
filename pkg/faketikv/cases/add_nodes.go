@@ -63,8 +63,8 @@ func newAddNodes() *Conf {
 			if regionCount > 390 || regionCount < 360 {
 				res = false
 			}
-
 		}
+
 		simutil.Logger.Infof("leader counts: %v", leaderCounts)
 		simutil.Logger.Infof("region counts: %v", regionCounts)
 		return res

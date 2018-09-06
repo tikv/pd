@@ -199,7 +199,7 @@ func (c *mapClassifer) GetStoreNamespace(store *core.StoreInfo) string {
 }
 
 func (c *mapClassifer) GetRegionNamespace(region *core.RegionInfo) string {
-	if ns, ok := c.regions[region.GetId()]; ok {
+	if ns, ok := c.regions[region.GetID()]; ok {
 		return ns
 	}
 	return namespace.DefaultNamespace

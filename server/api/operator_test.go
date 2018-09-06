@@ -59,7 +59,7 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	regionInfo := core.NewRegionInfo(region, peer1)
 	mustRegionHeartbeat(c, s.svr, regionInfo)
 
-	regionURL := fmt.Sprintf("%s/operators/%d", s.urlPrefix, region.Id)
+	regionURL := fmt.Sprintf("%s/operators/%d", s.urlPrefix, region.GetId())
 	operator := mustReadURL(c, regionURL)
 	c.Assert(strings.Contains(operator, "operator not found"), IsTrue)
 
