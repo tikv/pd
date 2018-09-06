@@ -223,12 +223,11 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	// Transfer peer.
 	region := tc.GetRegion(1).Clone()
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddLearner(c, stream, region, 1)
+	region = waitAddLearner(c, stream, region, 1)
 	dispatchHeartbeat(c, co, region, stream)
-	waitPromoteLearner(c, stream, region, 1)
+	region = waitPromoteLearner(c, stream, region, 1)
 	dispatchHeartbeat(c, co, region, stream)
-	waitRemovePeer(c, stream, region, 4)
-	region = region.Clone(core.WithRemoveStorePeer(4))
+	region = waitRemovePeer(c, stream, region, 4)
 	dispatchHeartbeat(c, co, region, stream)
 	dispatchHeartbeat(c, co, region, stream)
 	waitNoResponse(c, stream)
@@ -348,9 +347,9 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	tc.addLeaderRegion(1, 2, 3)
 	region := tc.GetRegion(1)
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddLearner(c, stream, region, 1)
+	region = waitAddLearner(c, stream, region, 1)
 	dispatchHeartbeat(c, co, region, stream)
-	waitPromoteLearner(c, stream, region, 1)
+	region = waitPromoteLearner(c, stream, region, 1)
 	dispatchHeartbeat(c, co, region, stream)
 	waitNoResponse(c, stream)
 
@@ -364,9 +363,9 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 		core.WithDownPeers(append(region.GetDownPeers(), downPeer)),
 	)
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddLearner(c, stream, region, 4)
+	region = waitAddLearner(c, stream, region, 4)
 	dispatchHeartbeat(c, co, region, stream)
-	waitPromoteLearner(c, stream, region, 4)
+	region = waitPromoteLearner(c, stream, region, 4)
 	region = region.Clone(core.WithDownPeers(nil))
 	dispatchHeartbeat(c, co, region, stream)
 	waitNoResponse(c, stream)
@@ -375,7 +374,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	tc.addLeaderRegion(2, 1, 2, 3, 4)
 	region = tc.GetRegion(2)
 	dispatchHeartbeat(c, co, region, stream)
-	waitRemovePeer(c, stream, region, 4)
+	region = waitRemovePeer(c, stream, region, 4)
 	dispatchHeartbeat(c, co, region, stream)
 	waitNoResponse(c, stream)
 
@@ -415,9 +414,9 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 
 	// Add new peer.
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddLearner(c, stream, region, 1)
+	region = waitAddLearner(c, stream, region, 1)
 	dispatchHeartbeat(c, co, region, stream)
-	waitPromoteLearner(c, stream, region, 1)
+	region = waitPromoteLearner(c, stream, region, 1)
 
 	// If the new peer is pending, the operator will not finish.
 	region = region.Clone(core.WithPendingPeers(append(region.GetPendingPeers(), region.GetStorePeer(1))))
@@ -529,14 +528,14 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	waitOperator(c, co, 2)
 	region2 := tc.GetRegion(2)
 	dispatchHeartbeat(c, co, region2, stream)
-	waitTransferLeader(c, stream, region2, 1)
+	region2 = waitTransferLeader(c, stream, region2, 1)
 	dispatchHeartbeat(c, co, region2, stream)
 	waitNoResponse(c, stream)
 
 	waitOperator(c, co, 3)
 	region3 := tc.GetRegion(3)
 	dispatchHeartbeat(c, co, region3, stream)
-	waitTransferLeader(c, stream, region3, 1)
+	region3 = waitTransferLeader(c, stream, region3, 1)
 	dispatchHeartbeat(c, co, region3, stream)
 	waitNoResponse(c, stream)
 }
@@ -647,16 +646,16 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	co.run()
 	stream := newMockHeartbeatStream()
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddLearner(c, stream, region, 2)
+	region = waitAddLearner(c, stream, region, 2)
 	dispatchHeartbeat(c, co, region, stream)
-	waitPromoteLearner(c, stream, region, 2)
+	region = waitPromoteLearner(c, stream, region, 2)
 	co.stop()
 
 	// Recreate coodinator then add another replica on store 3.
 	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	dispatchHeartbeat(c, co, region, stream)
-	waitAddLearner(c, stream, region, 3)
+	region = waitAddLearner(c, stream, region, 3)
 	dispatchHeartbeat(c, co, region, stream)
 	waitPromoteLearner(c, stream, region, 3)
 	co.stop()
@@ -813,7 +812,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	}
 }
 
-func waitAddLearner(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {
+func waitAddLearner(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
@@ -823,14 +822,13 @@ func waitAddLearner(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, 
 		}
 		return false
 	})
-	newRegion := region.Clone(
+	return region.Clone(
 		core.WithAddPeer(res.GetChangePeer().GetPeer()),
 		core.WithIncConfVer(),
 	)
-	*region = *newRegion
 }
 
-func waitPromoteLearner(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {
+func waitPromoteLearner(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
@@ -841,14 +839,13 @@ func waitPromoteLearner(c *C, stream *mockHeartbeatStream, region *core.RegionIn
 		return false
 	})
 	// Remove learner than add voter.
-	newRegion := region.Clone(
+	return region.Clone(
 		core.WithRemoveStorePeer(storeID),
 		core.WithAddPeer(res.GetChangePeer().GetPeer()),
 	)
-	*region = *newRegion
 }
 
-func waitRemovePeer(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {
+func waitRemovePeer(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
@@ -858,14 +855,13 @@ func waitRemovePeer(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, 
 		}
 		return false
 	})
-	newRegion := region.Clone(
+	return region.Clone(
 		core.WithRemoveStorePeer(storeID),
 		core.WithIncConfVer(),
 	)
-	*region = *newRegion
 }
 
-func waitTransferLeader(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) {
+func waitTransferLeader(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
@@ -873,10 +869,9 @@ func waitTransferLeader(c *C, stream *mockHeartbeatStream, region *core.RegionIn
 		}
 		return false
 	})
-	newRegion := region.Clone(
+	return region.Clone(
 		core.WithLeader(res.GetTransferLeader().GetPeer()),
 	)
-	*region = *newRegion
 }
 
 func waitNoResponse(c *C, stream *mockHeartbeatStream) {
