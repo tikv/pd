@@ -14,6 +14,8 @@
 package schedule
 
 import (
+	"fmt"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
@@ -169,7 +171,8 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *Operator {
 		if stats.GetDownSeconds() < uint64(r.cluster.GetMaxStoreDownTime().Seconds()) {
 			continue
 		}
-		return CreateRemovePeerOperator("removeDownReplica", r.cluster, OpReplica, region, peer.GetStoreId())
+
+		return r.fixPeer(region, peer, "Down")
 	}
 	return nil
 }
@@ -194,29 +197,7 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 			continue
 		}
 
-		// Check the number of replicas first.
-		if len(region.GetPeers()) > r.cluster.GetMaxReplicas() {
-			return CreateRemovePeerOperator("removeExtraOfflineReplica", r.cluster, OpReplica, region, peer.GetStoreId())
-		}
-
-		// Consider we have 3 peers (A, B, C), we set the store that contains C to
-		// offline while C is pending. If we generate an operator that adds a replica
-		// D then removes C, D will not be successfully added util C is normal again.
-		// So it's better to remove C directly.
-		if region.GetPendingPeer(peer.GetId()) != nil {
-			return CreateRemovePeerOperator("removePendingOfflineReplica", r.cluster, OpReplica, region, peer.GetStoreId())
-		}
-
-		storeID, _ := r.SelectBestReplacementStore(region, peer, NewStorageThresholdFilter())
-		if storeID == 0 {
-			log.Debugf("[region %d] no best store to add replica", region.GetID())
-			return nil
-		}
-		newPeer, err := r.cluster.AllocPeer(storeID)
-		if err != nil {
-			return nil
-		}
-		return CreateMovePeerOperator("replaceOfflineReplica", r.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+		return r.fixPeer(region, peer, "Offline")
 	}
 
 	return nil
@@ -249,4 +230,34 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator
 	}
 	checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
 	return CreateMovePeerOperator("moveToBetterLocation", r.cluster, region, OpReplica, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+}
+
+func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, status string) *Operator {
+	removeExtra := fmt.Sprintf("removeExtra%sReplica", status)
+	// Check the number of replicas first.
+	if len(region.GetPeers()) > r.cluster.GetMaxReplicas() {
+		return CreateRemovePeerOperator(removeExtra, r.cluster, OpReplica, region, peer.GetStoreId())
+	}
+
+	removePending := fmt.Sprintf("removePending%sReplica", status)
+	// Consider we have 3 peers (A, B, C), we set the store that contains C to
+	// offline/down while C is pending. If we generate an operator that adds a replica
+	// D then removes C, D will not be successfully added util C is normal again.
+	// So it's better to remove C directly.
+	if region.GetPendingPeer(peer.GetId()) != nil {
+		return CreateRemovePeerOperator(removePending, r.cluster, OpReplica, region, peer.GetStoreId())
+	}
+
+	storeID, _ := r.SelectBestReplacementStore(region, peer, NewStorageThresholdFilter())
+	if storeID == 0 {
+		log.Debugf("[region %d] no best store to add replica", region.GetID())
+		return nil
+	}
+	newPeer, err := r.cluster.AllocPeer(storeID)
+	if err != nil {
+		return nil
+	}
+
+	replace := fmt.Sprintf("replace%sReplica", status)
+	return CreateMovePeerOperator(replace, r.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }

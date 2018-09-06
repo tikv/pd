@@ -364,12 +364,10 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 		core.WithDownPeers(append(region.GetDownPeers(), downPeer)),
 	)
 	dispatchHeartbeat(c, co, region, stream)
-	waitRemovePeer(c, stream, region, 3)
-	region = region.Clone(core.WithDownPeers(nil))
-	dispatchHeartbeat(c, co, region, stream)
 	waitAddLearner(c, stream, region, 4)
 	dispatchHeartbeat(c, co, region, stream)
 	waitPromoteLearner(c, stream, region, 4)
+	region = region.Clone(core.WithDownPeers(nil))
 	dispatchHeartbeat(c, co, region, stream)
 	waitNoResponse(c, stream)
 
@@ -446,12 +444,19 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 
 	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 
+	tc.addLeaderStore(1, 5)
+	tc.addLeaderStore(2, 2)
+	tc.addLeaderStore(3, 0)
+	tc.addLeaderStore(4, 0)
 	tc.LoadRegion(1, 1, 2, 3)
 	tc.LoadRegion(2, 1, 2, 3)
 	tc.LoadRegion(3, 1, 2, 3)
 	tc.LoadRegion(4, 1, 2, 3)
 	tc.LoadRegion(5, 1, 2, 3)
+	tc.LoadRegion(6, 2, 1, 4)
+	tc.LoadRegion(7, 2, 1, 4)
 	c.Assert(co.shouldRun(), IsFalse)
+	c.Assert(tc.core.Regions.GetStoreRegionCount(4), Equals, 2)
 
 	tbl := []struct {
 		regionID  uint64
@@ -460,8 +465,11 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 		{1, false},
 		{2, false},
 		{3, false},
-		{4, true},
-		{5, true},
+		{4, false},
+		{5, false},
+		// store4 needs collect two region
+		{6, false},
+		{7, true},
 	}
 
 	for _, t := range tbl {
@@ -473,7 +481,7 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)
 	tc.handleRegionHeartbeat(newRegion)
-	c.Assert(co.cluster.activeRegions, Equals, 6)
+	c.Assert(co.cluster.prepareChecker.sum, Equals, 7)
 
 }
 
@@ -631,8 +639,8 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	tc.addRegionStore(2, 2)
 	tc.addRegionStore(3, 3)
 	tc.addLeaderRegion(1, 1)
-	tc.activeRegions = 1
 	region := tc.GetRegion(1)
+	tc.prepareChecker.collect(region)
 
 	// Add 1 replica on store 2.
 	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
