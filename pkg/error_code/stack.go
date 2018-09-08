@@ -17,27 +17,14 @@ import (
 	"github.com/pkg/errors"
 )
 
-// StackTracer is the interface defined but not exported from pkg/errors
-// The StackTrace() function (not method) is a preferred way to access the StackTrace
-//
-// Generally you should only bother with stack traces for internal errors.
-type StackTracer interface {
-	StackTrace() errors.StackTrace
-}
-
 // StackTrace retrieves the errors.StackTrace from the error if it is present.
 // If there is not StackTrace it will return nil
 //
 // StackTrace looks to see if the error is a StackTracer or if a Causer of the error is a StackTracer.
 // It will return the stack trace from the deepest error it can find.
 func StackTrace(err error) errors.StackTrace {
-	if prev := WrappedError(err); prev != nil {
-		if trace := StackTrace(prev); trace != nil {
-			return trace
-		}
-	}
-	if stackTraceErr, ok := err.(StackTracer); ok {
-		return stackTraceErr.StackTrace()
+	if tracer := errors.GetStackTracer(err); tracer != nil {
+		return tracer.StackTrace()
 	}
 	return nil
 }
@@ -47,13 +34,13 @@ func StackTrace(err error) errors.StackTrace {
 // Generally stack traces aren't needed for user errors, but they are provided by NewInternalErr.
 // Its also possible to define your own structures that satisfy the StackTracer interface.
 type StackCode struct {
-	Err           ErrorCode
-	GetStackTrace errors.StackTrace
+	Err      ErrorCode
+	GetStack errors.StackTracer
 }
 
 // StackTrace fulfills the StackTracer interface
 func (e StackCode) StackTrace() errors.StackTrace {
-	return e.GetStackTrace
+	return e.GetStack.StackTrace()
 }
 
 // NewStackCode constructs a StackCode, which is an ErrorCode with stack trace information
@@ -69,16 +56,11 @@ func NewStackCode(err ErrorCode, position ...int) StackCode {
 	}
 
 	// if there is an existing trace, take that: it should be deeper
-	if trace := StackTrace(err); trace != nil {
-		return StackCode{Err: err, GetStackTrace: trace}
+	if tracer := errors.GetStackTracer(err); tracer != nil {
+		return StackCode{Err: err, GetStack: tracer}
 	}
 
-	// we must go through some contortions to get a stack trace from pkg/errors
-	stackedErr := errors.WithStack(err)
-	if stackTraceErr, ok := stackedErr.(StackTracer); ok {
-		return StackCode{Err: err, GetStackTrace: stackTraceErr.StackTrace()[stackPosition:]}
-	}
-	panic("NewStackCode: pkg/errors WithStack StackTrace interface changed")
+	return StackCode{Err: err, GetStack: errors.NewStack(stackPosition)}
 }
 
 // Cause satisfies the Causer interface
