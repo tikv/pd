@@ -47,7 +47,7 @@ func (e StackCode) StackTrace() errors.StackTrace {
 // The second variable is an optional stack position gets rid of information about function calls to construct the stack trace.
 // It is defaulted to 1 to remove this function call.
 //
-// NewStackCode first looks at the underlying error via WrappedError to see if it already has a StackTrace.
+// NewStackCode first looks at the underlying error chain to see if it already has a StackTrace.
 // If so, that StackTrace is used.
 func NewStackCode(err ErrorCode, position ...int) StackCode {
 	stackPosition := 1

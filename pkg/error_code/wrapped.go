@@ -13,24 +13,18 @@
 
 package errcode
 
+import (
+	"github.com/pkg/errors"
+)
+
 // Causer allows the abstract retrieval of the underlying error.
 // This is the interface that pkg/errors does not export but is considered part of the stable public API.
 //
 // Types that wrap errors should implement this to allow viewing of the underlying error.
-// Generally you would use this via pkg/errors.Cause or WrappedError.
+// Generally you would use this via pkg/errors.Cause or pkg/errors.Unwrap.
 // PreviousErrorCode and StackTrace use Causer to check if the underlying error is an ErrorCode or a StackTracer.
 type Causer interface {
 	Cause() error
-}
-
-// WrappedError retrieves the wrapped error via Causer.
-// Unlike pkg/errors.Cause, it goes just one level deep and does not recursively traverse.
-// Return nil is there is no wrapped error.
-func WrappedError(err error) error {
-	if hasCause, ok := err.(Causer); ok {
-		return hasCause.Cause()
-	}
-	return nil
 }
 
 // EmbedErr is designed to be embedded into your existing error structs.
@@ -57,7 +51,7 @@ func PreviousErrorCode(err ErrorCode) ErrorCode {
 }
 
 func previousErrorCodeCompare(code Code, err error) ErrorCode {
-	prev := WrappedError(err)
+	prev := errors.Unwrap(err)
 	if prev == nil {
 		return nil
 	}
@@ -77,12 +71,12 @@ func GetErrorCode(err error) ErrorCode {
 	if errcode, ok := err.(ErrorCode); ok {
 		return errcode
 	}
-	prev := WrappedError(err)
+	prev := errors.Unwrap(err)
 	for prev != nil {
 		if errcode, ok := prev.(ErrorCode); ok {
 			return WrappedErrorCode{errcode, err}
 		}
-		prev = WrappedError(err)
+		prev = errors.Unwrap(err)
 	}
 	return nil
 }
@@ -105,7 +99,7 @@ func (err WrappedErrorCode) Error() string {
 
 // Cause satisfies the Causer interface
 func (err WrappedErrorCode) Cause() error {
-	if wrapped := WrappedError(err.Top); wrapped != nil {
+	if wrapped := errors.Unwrap(err.Top); wrapped != nil {
 		return wrapped
 	}
 	// There should be a wrapped error and this should not be reached
