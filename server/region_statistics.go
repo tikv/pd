@@ -59,7 +59,7 @@ func newRegionStatistics(opt *scheduleOption, classifier namespace.Classifier) *
 func (r *regionStatistics) getRegionStatsByType(typ regionStatisticType) []*core.RegionInfo {
 	res := make([]*core.RegionInfo, 0, len(r.stats[typ]))
 	for _, r := range r.stats[typ] {
-		res = append(res, r.Clone())
+		res = append(res, r)
 	}
 	return res
 }

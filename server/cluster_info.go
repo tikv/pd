@@ -294,7 +294,7 @@ func (c *clusterInfo) searchPrevRegion(regionKey []byte) *core.RegionInfo {
 func (c *clusterInfo) putRegion(region *core.RegionInfo) error {
 	c.Lock()
 	defer c.Unlock()
-	return c.putRegionLocked(region.Clone())
+	return c.putRegionLocked(region)
 }
 
 func (c *clusterInfo) putRegionLocked(region *core.RegionInfo) error {
