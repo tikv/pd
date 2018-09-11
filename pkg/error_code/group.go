@@ -113,7 +113,7 @@ func ErrorCodeChain(err error) ErrorCode {
 
 	for err != nil {
 		if errcode, ok := err.(ErrorCode); ok {
-			if code != nil && code.Code() != errcode.Code() {
+			if code == nil || code.Code() != errcode.Code() {
 				chainErrCode(errcode)
 			}
 		} else if eg, ok := err.(errors.ErrorGroup); ok {
@@ -181,9 +181,9 @@ func (err ChainContext) Format(s fmt.State, verb rune) {
 		}
 		fallthrough
 	case 's':
-		fmt.Fprintf(s, "Code: %s. %s", err.ErrCode.Code(), err.Top)
+		fmt.Fprintf(s, "Code: %s. %s", err.ErrCode.Code().CodeStr(), err.Top)
 	case 'q':
-		fmt.Fprintf(s, "Code: %q. %q", err.ErrCode.Code(), err.Top)
+		fmt.Fprintf(s, "Code: %q. %q", err.ErrCode.Code().CodeStr(), err.Top)
 	}
 }
 
