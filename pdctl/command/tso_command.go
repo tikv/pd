@@ -48,7 +48,7 @@ func showTSOCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	logical := ts & logicalBits
 	physical := ts >> physicalShiftBits
-	physicalTime := time.Unix(int64(physical/1000), 0)
+	physicalTime := time.Unix(int64(physical/1000), int64(physical%1000)*time.Millisecond.Nanoseconds())
 	fmt.Println("system: ", physicalTime)
 	fmt.Println("logic: ", logical)
 }
