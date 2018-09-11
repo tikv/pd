@@ -31,6 +31,7 @@ type scheduleOption struct {
 	ns             map[string]*namespaceOption
 	labelProperty  atomic.Value
 	clusterVersion atomic.Value
+	pdServerConfig atomic.Value
 }
 
 func newScheduleOption(cfg *Config) *scheduleOption {
@@ -42,6 +43,7 @@ func newScheduleOption(cfg *Config) *scheduleOption {
 		o.ns[name] = newNamespaceOption(&nsCfg)
 	}
 	o.rep = newReplication(&cfg.Replication)
+	o.pdServerConfig.Store(&cfg.PDServerCfg)
 	o.labelProperty.Store(cfg.LabelProperty)
 	o.clusterVersion.Store(cfg.ClusterVersion)
 	return o
@@ -259,6 +261,10 @@ func (o *scheduleOption) loadClusterVersion() semver.Version {
 	return o.clusterVersion.Load().(semver.Version)
 }
 
+func (o *scheduleOption) loadPDServerConfig() *PDServerConfig {
+	return o.pdServerConfig.Load().(*PDServerConfig)
+}
+
 func (o *scheduleOption) persist(kv *core.KV) error {
 	namespaces := make(map[string]NamespaceConfig)
 	for name, ns := range o.ns {
@@ -270,6 +276,7 @@ func (o *scheduleOption) persist(kv *core.KV) error {
 		Namespace:      namespaces,
 		LabelProperty:  o.loadLabelPropertyConfig(),
 		ClusterVersion: o.loadClusterVersion(),
+		PDServerCfg:    *o.loadPDServerConfig(),
 	}
 	err := kv.SaveConfig(cfg)
 	return err
@@ -286,6 +293,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		Namespace:      namespaces,
 		LabelProperty:  o.loadLabelPropertyConfig().clone(),
 		ClusterVersion: o.loadClusterVersion(),
+		PDServerCfg:    *o.loadPDServerConfig(),
 	}
 	isExist, err := kv.LoadConfig(cfg)
 	if err != nil {
@@ -301,6 +309,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		}
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.clusterVersion.Store(cfg.ClusterVersion)
+		o.pdServerConfig.Store(&cfg.PDServerCfg)
 	}
 	return nil
 }

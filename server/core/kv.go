@@ -68,13 +68,14 @@ func WithLevelDBKV(path string, batchSize int, ttl time.Duration) func(*KV) {
 type KV struct {
 	KVBase
 	// save region in another way
-	regionKV     RegionKV
-	mu           sync.RWMutex
-	batchRegions map[string]*metapb.Region
-	batchSize    int
-	cacheSize    int
-	ttl          time.Duration
-	flushTime    time.Time
+	enableRegionKV bool
+	regionKV       RegionKV
+	mu             sync.RWMutex
+	batchRegions   map[string]*metapb.Region
+	batchSize      int
+	cacheSize      int
+	ttl            time.Duration
+	flushTime      time.Time
 }
 
 // NewKV creates KV instance with KVBase.
@@ -131,7 +132,7 @@ func (kv *KV) SaveStore(store *metapb.Store) error {
 
 // LoadRegion loads one regoin from KV.
 func (kv *KV) LoadRegion(regionID uint64, region *metapb.Region) (bool, error) {
-	if kv.regionKV != nil {
+	if kv.regionKV != nil && kv.enableRegionKV {
 		return loadProto(kv.regionKV, kv.regionPath(regionID), region)
 	}
 	return loadProto(kv.KVBase, kv.regionPath(regionID), region)
@@ -139,7 +140,7 @@ func (kv *KV) LoadRegion(regionID uint64, region *metapb.Region) (bool, error) {
 
 // SaveRegion saves one region to KV.
 func (kv *KV) SaveRegion(region *metapb.Region) error {
-	if kv.regionKV != nil {
+	if kv.regionKV != nil && kv.enableRegionKV {
 		kv.mu.Lock()
 		defer kv.mu.Unlock()
 		if kv.cacheSize < kv.batchSize {
@@ -264,7 +265,7 @@ func (kv *KV) LoadRegions(regions *RegionsInfo) error {
 	// a variable rangeLimit to work around.
 	rangeLimit := maxKVRangeLimit
 	loadKV := kv.KVBase
-	if kv.regionKV != nil {
+	if kv.regionKV != nil && kv.enableRegionKV {
 		loadKV = kv.regionKV
 	}
 	for {
@@ -381,4 +382,10 @@ func (kv *KV) FlushRegion() error {
 		return nil
 	}
 	return nil
+}
+
+// SwitchRegionKV is a switch to decide whether region storage is enabled.
+// This method is not thread safe, and use it should before serve.
+func (kv *KV) SwitchRegionKV(isEnable bool) {
+	kv.enableRegionKV = isEnable
 }

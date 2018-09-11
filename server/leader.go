@@ -238,7 +238,7 @@ func (s *Server) campaignLeader() error {
 	}
 	log.Debugf("campaign leader ok %s", s.Name())
 
-	err = s.scheduleOpt.reload(s.kv)
+	err = s.reloadConfigFromKV()
 	if err != nil {
 		return err
 	}
@@ -298,9 +298,15 @@ func (s *Server) watchLeader(leader *pdpb.Member) {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
-	err := s.cluster.regionSyncer.statSyncerWithLeader(leader.GetClientUrls()[0])
+	err := s.reloadConfigFromKV()
+	if err != nil {
+		log.Error("reload config failed:", err)
+		return
+	}
+	err = s.cluster.regionSyncer.statSyncerWithLeader(leader.GetClientUrls()[0])
 	if err != nil {
 		log.Errorf("Syncer with leader meet with error %s", err)
+		return
 	}
 	defer s.cluster.regionSyncer.stopSyncerWithLeader()
 	for {
@@ -367,4 +373,19 @@ func (s *Server) deleteLeaderKey() error {
 
 func (s *Server) leaderCmp() clientv3.Cmp {
 	return clientv3.Compare(clientv3.Value(s.getLeaderPath()), "=", s.memberValue)
+}
+
+func (s *Server) reloadConfigFromKV() error {
+	err := s.scheduleOpt.reload(s.kv)
+	if err != nil {
+		return err
+	}
+	enableRegionKV := s.scheduleOpt.loadPDServerConfig().EnableRegionStorage
+	s.kv.SwitchRegionKV(enableRegionKV)
+	if enableRegionKV {
+		log.Info("enable region storage")
+	} else {
+		log.Info("disable region storage")
+	}
+	return nil
 }

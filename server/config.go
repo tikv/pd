@@ -78,6 +78,8 @@ type Config struct {
 
 	Namespace map[string]NamespaceConfig `json:"namespace"`
 
+	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
+
 	ClusterVersion semver.Version `json:"cluster-version"`
 
 	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
@@ -631,6 +633,12 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 		return nil, errors.WithStack(err)
 	}
 	return tlsConfig, nil
+}
+
+// PDServerConfig is the configuration for pd server.
+type PDServerConfig struct {
+	//  EnableRegionStorage enable the independent region  storage.
+	EnableRegionStorage bool `toml:"enable-region-storage" json:"enable-region-storage"`
 }
 
 // StoreLabel is the config item of LabelPropertyConfig.

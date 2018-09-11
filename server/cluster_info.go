@@ -519,7 +519,9 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			// after restart. Here we only log the error then go on updating cache.
 			log.Errorf("[region %d] fail to save region %v: %v", region.GetID(), region, err)
 		}
-		c.changedRegions <- region
+		if c.opt.loadPDServerConfig().EnableRegionStorage {
+			c.changedRegions <- region
+		}
 	}
 	if !isWriteUpdate && !isReadUpdate && !saveCache && !isNew {
 		return nil
