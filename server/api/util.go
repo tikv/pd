@@ -40,7 +40,7 @@ func errorResp(rd *render.Render, w http.ResponseWriter, err error) {
 		rd.JSON(w, http.StatusInternalServerError, "nil error")
 		return
 	}
-	if errCode := errcode.GetErrorCode(err); errCode != nil {
+	if errCode := errcode.ErrorCodeChain(err); errCode != nil {
 		w.Header().Set("TiDB-Error-Code", errCode.Code().CodeStr().String())
 		rd.JSON(w, errCode.Code().HTTPCode(), errcode.NewJSONFormat(errCode))
 	} else {

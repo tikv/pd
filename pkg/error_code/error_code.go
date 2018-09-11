@@ -35,7 +35,7 @@
 // JSONFormat includes a body of response data (the "data field") that is by default the data from the Error
 // serialized to JSON.
 //
-// Errors are traced via PreviousErrorCode() which shows up as the Previous field in JSONFormat.
+// Errors are traced via ErrorChainContext() which show up as the Others field in JSONFormat.
 // Stack traces are automatically added by NewInternalErr and show up as the Stack field in JSONFormat.
 package errcode
 
@@ -190,6 +190,16 @@ type ErrorCode interface {
 	Code() Code
 }
 
+// Causer allows the abstract retrieval of the underlying error.
+// This is the interface that pkg/errors does not export but is considered part of the stable public API.
+// TODO: export this from pkg/errors
+//
+// Types that wrap errors should implement this to allow viewing of the underlying error.
+// Generally you would use this via pkg/errors.Cause or pkg/errors.Unwrap.
+type Causer interface {
+	Cause() error
+}
+
 // HasClientData is used to defined how to retrieve the data portion of an ErrorCode to be returned to the client.
 // Otherwise the struct itself will be assumed to be all the data by the ClientData method.
 // This is provided for exensibility, but may be unnecessary for you.
@@ -217,15 +227,15 @@ func ClientData(errCode ErrorCode) interface{} {
 // The Operation field may be missing, and the Data field may be empty.
 //
 // The rest of the fields may be populated sparsely depending on the application:
-// * Previous gives JSONFormat data for an ErrorCode that was wrapped by this one. It relies on the PreviousErrorCode function.
 // * Stack is a stack trace. This is only given for internal errors.
+// * Others gives other errors that occurred (perhaps due to parallel requests).
 type JSONFormat struct {
 	Code      CodeStr           `json:"code"`
 	Msg       string            `json:"msg"`
 	Data      interface{}       `json:"data"`
 	Operation string            `json:"operation,omitempty"`
-	Previous  *JSONFormat       `json:"previous,omitempty"`
 	Stack     errors.StackTrace `json:"stack,omitempty"`
+	Others    []JSONFormat      `json:"others,omitempty"`
 }
 
 // OperationClientData gives the results of both the ClientData and Operation functions.
@@ -241,23 +251,18 @@ func OperationClientData(errCode ErrorCode) (string, interface{}) {
 	return op, data
 }
 
-// NewJSONFormat turns an ErrorCode into a JSONFormat
+// NewJSONFormat turns an ErrorCode into a JSONFormat.
+// If you use ErrorCodeChain first, you will ensure proper population of the Others field.
 func NewJSONFormat(errCode ErrorCode) JSONFormat {
 	// Gather up multiple errors.
 	// We discard any that are not ErrorCode.
 	errorCodes := ErrorCodes(errCode)
-	additional := make([]JSONFormat, len(errorCodes)-1)
+	others := make([]JSONFormat, len(errorCodes)-1)
 	for i, err := range errorCodes[1:] {
-		additional[i] = NewJSONFormat(err)
+		others[i] = NewJSONFormat(err)
 	}
 
 	op, data := OperationClientData(errCode)
-
-	var previous *JSONFormat
-	if prevCode := PreviousErrorCode(errCode); prevCode != nil {
-		ptrVar := NewJSONFormat(prevCode)
-		previous = &ptrVar
-	}
 
 	var stack errors.StackTrace
 	if errCode.Code().IsAncestor(InternalCode) {
@@ -270,7 +275,7 @@ func NewJSONFormat(errCode ErrorCode) JSONFormat {
 		Code:      errCode.Code().CodeStr(),
 		Operation: op,
 		Stack:     stack,
-		Previous:  previous,
+		Others:    others,
 	}
 }
 

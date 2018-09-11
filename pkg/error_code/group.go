@@ -13,29 +13,16 @@
 
 package errcode
 
-// ErrorGroup is the same interface as provided by uber-go/multierr
-// Other multi error packages provide similar interfaces.
-//
-// There are two concepts around multiple errors
-// * Wrapping errors (We have this already with Causer)
-// * multiple parallel/sibling errors: this is ErrorGroup
-type ErrorGroup interface {
-	Errors() []error
-}
+import (
+	"fmt"
 
-// Errors uses the ErrorGroup interface to return a slice of errors.
-// If the ErrorGroup interface is not implemented it returns an array containing just the given error.
-func Errors(err error) []error {
-	if eg, ok := err.(ErrorGroup); ok {
-		return eg.Errors()
-	}
-	return []error{err}
-}
+	"github.com/pkg/errors"
+)
 
 // ErrorCodes return all errors (from an ErrorGroup) that are of interface ErrorCode.
 // It first calls the Errors function.
 func ErrorCodes(err error) []ErrorCode {
-	errors := Errors(err)
+	errors := errors.Errors(err)
 	errorCodes := make([]ErrorCode, len(errors))
 	for i, errItem := range errors {
 		if errcode, ok := errItem.(ErrorCode); ok {
@@ -49,31 +36,37 @@ func ErrorCodes(err error) []ErrorCode {
 // The Error method will produce a string of all the errors with a semi-colon separation.
 // Later code (such as a JSON response) needs to look for the ErrorGroup interface.
 type MultiErrCode struct {
-	ErrorCode ErrorCode
-	all       []error
+	ErrCode ErrorCode
+	rest    []error
 }
 
 // Combine constructs a MultiErrCode.
 // It will combine any other MultiErrCode into just one MultiErrCode.
-func Combine(override ErrorCode, others ...ErrorCode) ErrorCode {
-	all := Errors(override)
+// This is "horizontal" composition.
+// If you want normal "vertical" composition use BuildChain.
+func Combine(initial ErrorCode, others ...ErrorCode) ErrorCode {
+	var rest []error
+	if group, ok := initial.(errors.ErrorGroup); ok {
+		rest = group.Errors()
+	}
 	for _, other := range others {
-		all = append(all, Errors(other)...)
+		rest = append(rest, errors.Errors(other)...)
 	}
 	return MultiErrCode{
-		ErrorCode: override,
-		all:       all,
+		ErrCode: initial,
+		rest:    rest,
 	}
 }
 
-var _ ErrorCode = (*MultiErrCode)(nil)     // assert implements interface
-var _ HasClientData = (*MultiErrCode)(nil) // assert implements interface
-var _ Causer = (*MultiErrCode)(nil)        // assert implements interface
-var _ ErrorGroup = (*MultiErrCode)(nil)    // assert implements interface
+var _ ErrorCode = (*MultiErrCode)(nil)         // assert implements interface
+var _ HasClientData = (*MultiErrCode)(nil)     // assert implements interface
+var _ Causer = (*MultiErrCode)(nil)            // assert implements interface
+var _ errors.ErrorGroup = (*MultiErrCode)(nil) // assert implements interface
+var _ fmt.Formatter = (*MultiErrCode)(nil)     // assert implements interface
 
 func (e MultiErrCode) Error() string {
-	output := e.ErrorCode.Error()
-	for _, item := range e.all[1:] {
+	output := e.ErrCode.Error()
+	for _, item := range e.rest {
 		output += "; " + item.Error()
 	}
 	return output
@@ -81,20 +74,142 @@ func (e MultiErrCode) Error() string {
 
 // Errors fullfills the ErrorGroup inteface
 func (e MultiErrCode) Errors() []error {
-	return e.all
+	return append([]error{e.ErrCode.(error)}, e.rest...)
 }
 
 // Code fullfills the ErrorCode inteface
 func (e MultiErrCode) Code() Code {
-	return e.ErrorCode.Code()
+	return e.ErrCode.Code()
 }
 
 // Cause fullfills the Causer inteface
 func (e MultiErrCode) Cause() error {
-	return e.ErrorCode
+	return e.ErrCode
 }
 
 // GetClientData fullfills the HasClientData inteface
 func (e MultiErrCode) GetClientData() interface{} {
-	return ClientData(e.ErrorCode)
+	return ClientData(e.ErrCode)
+}
+
+// ErrorCodeChain resolves an error chain down to a chain of just error codes
+// Any ErrorGroups found are converted to a MultiErrCode.
+// Passed over error inforation is retained using ChainContext.
+// If a code was overidden in the chain, it will show up as a MultiErrCode.
+func ErrorCodeChain(err error) ErrorCode {
+	var code ErrorCode
+	currentErr := err
+	chainErrCode := func(errcode ErrorCode) {
+		if errcode.(error) != currentErr {
+			errcode = ChainContext{currentErr, errcode}
+		}
+		if code == nil {
+			code = errcode
+		} else {
+			code = MultiErrCode{code, []error{code.(error), errcode.(error)}}
+		}
+		currentErr = errcode
+	}
+
+	for err != nil {
+		if errcode, ok := err.(ErrorCode); ok {
+			if code != nil && code.Code() != errcode.Code() {
+				chainErrCode(errcode)
+			}
+		} else if eg, ok := err.(errors.ErrorGroup); ok {
+			group := []ErrorCode{}
+			for _, errItem := range eg.Errors() {
+				group = append(group, ErrorCodeChain(errItem))
+			}
+			if len(group) > 0 {
+				chainErrCode(Combine(group[0], group[1:]...))
+			}
+		}
+		err = errors.Unwrap(err)
+	}
+
+	return code
+}
+
+// ChainContext is returned by ErrorCodeChain
+// to retain the full wrapped error message of the error chain.
+// If you add context to an error code, this retains that in the Error() message.
+type ChainContext struct {
+	Top     error
+	ErrCode ErrorCode
+}
+
+// Code satisfies the ErrorCode interface
+func (err ChainContext) Code() Code {
+	return err.ErrCode.Code()
+}
+
+// Error satisfies the Error interface
+func (err ChainContext) Error() string {
+	return err.Top.Error()
+}
+
+// Cause satisfies the Causer interface
+func (err ChainContext) Cause() error {
+	if wrapped := errors.Unwrap(err.Top); wrapped != nil {
+		return wrapped
+	}
+	return err.ErrCode
+}
+
+// GetClientData satisfies the HasClientData interface
+func (err ChainContext) GetClientData() interface{} {
+	return ClientData(err.ErrCode)
+}
+
+var _ ErrorCode = (*ChainContext)(nil)
+var _ HasClientData = (*ChainContext)(nil)
+var _ Causer = (*ChainContext)(nil)
+
+// Format implements the Formatter interface
+func (err ChainContext) Format(s fmt.State, verb rune) {
+	switch verb {
+	case 'v':
+		if s.Flag('+') {
+			fmt.Fprintf(s, "%+v\n", err.ErrCode)
+			if errors.HasStack(err.ErrCode) {
+				fmt.Fprintf(s, "%v", err.Top)
+			} else {
+				fmt.Fprintf(s, "%+v", err.Top)
+			}
+			return
+		}
+		fallthrough
+	case 's':
+		fmt.Fprintf(s, "Code: %s. %s", err.ErrCode.Code(), err.Top)
+	case 'q':
+		fmt.Fprintf(s, "Code: %q. %q", err.ErrCode.Code(), err.Top)
+	}
+}
+
+// Format implements the Formatter interface
+func (e MultiErrCode) Format(s fmt.State, verb rune) {
+	switch verb {
+	case 'v':
+		if s.Flag('+') {
+			fmt.Fprintf(s, "%+v\n", e.ErrCode)
+			if errors.HasStack(e.ErrCode) {
+				for _, nextErr := range e.rest {
+					fmt.Fprintf(s, "%v", nextErr)
+				}
+			} else {
+				for _, nextErr := range e.rest {
+					fmt.Fprintf(s, "%v", nextErr)
+				}
+			}
+			return
+		}
+		fallthrough
+	case 's':
+		fmt.Fprintf(s, "%s\n", e.ErrCode)
+		fmt.Fprintf(s, "%s", e.rest)
+	case 'q':
+		fmt.Fprintf(s, "%q\n", e.ErrCode)
+		fmt.Fprintf(s, "%q\n", e.rest)
+	}
 }

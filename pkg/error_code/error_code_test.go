@@ -350,7 +350,6 @@ func ClientDataEquals(t *testing.T, code errcode.ErrorCode, data interface{}, co
 		Stack:     stack,
 	}
 	newJSON := errcode.NewJSONFormat(code)
-	newJSON.Previous = nil
 	jsonEquals(t, "JSONFormat", jsonExpected, newJSON)
 }
 
