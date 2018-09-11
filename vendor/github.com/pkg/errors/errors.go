@@ -173,22 +173,6 @@ func AddStack(err error) error {
 	return WithStack(err)
 }
 
-// GetStackTracer will return the first StackTracer in the causer chain.
-// This function is used by AddStack to avoid creating redundant stack traces.
-//
-// You can also use the StackTracer interface on the returned error to get the stack trace.
-func GetStackTracer(origErr error) StackTracer {
-	var stacked StackTracer
-	WalkDeep(origErr, func(err error) bool {
-		if stackTracer, ok := err.(StackTracer); ok {
-			stacked = stackTracer
-			return true
-		}
-		return false
-	})
-	return stacked
-}
-
 type withStack struct {
 	error
 	*stack

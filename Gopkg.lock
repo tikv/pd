@@ -326,13 +326,13 @@
   revision = "279515615485b0f2d12f1421cc412fe2784e0190"
 
 [[projects]]
-  digest = "1:91fee14a873676b2118c54e08c2e04897ea5c141b55a9b9fb8cf0721458d0d85"
+  digest = "1:1ddea2d64730f05a189090d765b5108370acf83208d5074b2024a113096f4792"
   name = "github.com/pkg/errors"
   packages = ["."]
   pruneopts = "NUT"
-  revision = "9316aeb006f59424c65ff505c217f90c43d6445d"
+  revision = "0c849bcccef2ad68bca21ce43782f28e68996375"
   source = "https://github.com/pingcap/errors"
-  version = "v0.9.0"
+  version = "v0.10.0"
 
 [[projects]]
   digest = "1:8d8f554bbb62fb7aecf661b85b25e227f6ab6cfe2b4395ea65ef478bfc174940"
