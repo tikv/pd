@@ -92,7 +92,7 @@ func PrepareJoinCluster(cfg *Config) error {
 		TLS:         tlsConfig,
 	})
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.AddStack(err)
 	}
 	defer client.Close()
 

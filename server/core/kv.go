@@ -109,7 +109,7 @@ func (kv *KV) DeleteRegion(region *metapb.Region) error {
 func (kv *KV) SaveConfig(cfg interface{}) error {
 	value, err := json.Marshal(cfg)
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.AddStack(err)
 	}
 	return kv.Save(configPath, string(value))
 }
@@ -125,7 +125,7 @@ func (kv *KV) LoadConfig(cfg interface{}) (bool, error) {
 	}
 	err = json.Unmarshal([]byte(value), cfg)
 	if err != nil {
-		return false, errors.WithStack(err)
+		return false, errors.AddStack(err)
 	}
 	return true, nil
 }
@@ -143,7 +143,7 @@ func (kv *KV) LoadStores(stores *StoresInfo) error {
 		for _, s := range res {
 			store := &metapb.Store{}
 			if err := store.Unmarshal([]byte(s)); err != nil {
-				return errors.WithStack(err)
+				return errors.AddStack(err)
 			}
 			storeInfo := NewStoreInfo(store)
 			leaderWeight, err := kv.loadFloatWithDefaultValue(kv.storeLeaderWeightPath(storeInfo.GetId()), 1.0)
@@ -186,7 +186,7 @@ func (kv *KV) loadFloatWithDefaultValue(path string, def float64) (float64, erro
 	}
 	val, err := strconv.ParseFloat(res, 64)
 	if err != nil {
-		return 0, errors.WithStack(err)
+		return 0, errors.AddStack(err)
 	}
 	return val, nil
 }
@@ -214,7 +214,7 @@ func (kv *KV) LoadRegions(regions *RegionsInfo) error {
 		for _, s := range res {
 			region := &metapb.Region{}
 			if err := region.Unmarshal([]byte(s)); err != nil {
-				return errors.WithStack(err)
+				return errors.AddStack(err)
 			}
 
 			nextID = region.GetId() + 1
@@ -265,13 +265,13 @@ func (kv *KV) loadProto(key string, msg proto.Message) (bool, error) {
 		return false, nil
 	}
 	err = proto.Unmarshal([]byte(value), msg)
-	return true, errors.WithStack(err)
+	return true, errors.AddStack(err)
 }
 
 func (kv *KV) saveProto(key string, msg proto.Message) error {
 	value, err := proto.Marshal(msg)
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.AddStack(err)
 	}
 	return kv.Save(key, string(value))
 }

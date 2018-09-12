@@ -32,7 +32,7 @@ func (s StringSlice) MarshalJSON() ([]byte, error) {
 func (s *StringSlice) UnmarshalJSON(text []byte) error {
 	data, err := strconv.Unquote(string(text))
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.AddStack(err)
 	}
 	if len(data) == 0 {
 		*s = nil

@@ -253,7 +253,7 @@ func (r *RaftEngine) allocID(storeID uint64) (uint64, error) {
 		return 0, errors.Errorf("node %d not found", storeID)
 	}
 	id, err := node.client.AllocID(context.Background())
-	return id, errors.WithStack(err)
+	return id, errors.AddStack(err)
 }
 
 const (
