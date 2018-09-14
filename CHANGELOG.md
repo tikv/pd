@@ -5,10 +5,10 @@
 * Support the `GetAllStores` interface
 * Add the statistics of schedule estimation in Simulator
 ### Improvements
-* Optimize the handling process of down stores and make up replicas
-* Optimize the start of Coordinator to reduce the unnecessary schedule
+* Optimize the handling process of down stores to make up replicas as soon as possible
+* Optimize the start of Coordinator to reduce the unnecessary scheduling caused by restarting PD
 * Optimize the memory usage to reduce the overhead caused by heartbeats
-* Optimize error handling and complete the log information
+* Optimize error handling and improve the log information
 * Support querying the Region information of a specific store in pd-ctl
 * Support querying the topN Region information based on version
 * Support more accurate TSO decoding in pd-ctl
