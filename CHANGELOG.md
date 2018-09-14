@@ -3,7 +3,7 @@
 ## v2.1.0-rc2
 ### Features
 * Support the `GetAllStores` interface
-* Add the statistics of schedule estimation in Simulator
+* Add the statistics of scheduling estimation in Simulator
 ### Improvements
 * Optimize the handling process of down stores to make up replicas as soon as possible
 * Optimize the start of Coordinator to reduce the unnecessary scheduling caused by restarting PD
