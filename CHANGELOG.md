@@ -12,7 +12,7 @@
 * Support querying the Region information of a specific store in pd-ctl
 * Support querying the topN Region information based on version
 * Support more accurate TSO decoding in pd-ctl
-### Bug fixes
+### Bug fix
 * Fix the issue that pd-ctl uses the `hot store` command to exit wrongly
 
 ## v2.1.0-rc1
