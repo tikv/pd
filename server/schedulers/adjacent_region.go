@@ -144,8 +144,8 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster, opIn
 	regions := cluster.ScanRegions(l.lastKey, scanLimit)
 	// scan to the end
 	if len(regions) <= 1 {
-		l.adjacentRegionsCount = 0
 		schedulerStatus.WithLabelValues(l.GetName(), "adjacent_count").Set(float64(l.adjacentRegionsCount))
+		l.adjacentRegionsCount = 0
 		l.lastKey = []byte("")
 		return nil
 	}
