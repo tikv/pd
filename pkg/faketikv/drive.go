@@ -80,7 +80,7 @@ func (d *Driver) Prepare() error {
 		var id uint64
 		id, err = d.client.AllocID(context.Background())
 		if err != nil {
-			return errors.WithStack(err)
+			return errors.AddStack(err)
 		}
 		if id > d.simCase.MaxID {
 			break

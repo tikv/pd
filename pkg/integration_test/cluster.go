@@ -141,7 +141,7 @@ func (s *testServer) GetEtcdLeader() (string, error) {
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
 	members, err := s.server.GetMembers(context.TODO(), req)
 	if err != nil {
-		return "", errors.WithStack(err)
+		return "", errors.AddStack(err)
 	}
 	return members.GetEtcdLeader().GetName(), nil
 }
@@ -190,7 +190,7 @@ func (c *testCluster) RunServers(ctx context.Context, servers []*testServer) err
 	}
 	for _, c := range res {
 		if err := <-c; err != nil {
-			return errors.WithStack(err)
+			return errors.AddStack(err)
 		}
 	}
 	return nil

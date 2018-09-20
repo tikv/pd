@@ -84,10 +84,10 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	resp, err := kv.server.leaderTxn().Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
 		log.Errorf("save to etcd error: %v", err)
-		return errors.WithStack(err)
+		return errors.AddStack(err)
 	}
 	if !resp.Succeeded {
-		return errors.WithStack(errTxnFailed)
+		return errors.AddStack(errTxnFailed)
 	}
 	return nil
 }
@@ -98,10 +98,10 @@ func (kv *etcdKVBase) Delete(key string) error {
 	resp, err := kv.server.leaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
 		log.Errorf("delete from etcd error: %v", err)
-		return errors.WithStack(err)
+		return errors.AddStack(err)
 	}
 	if !resp.Succeeded {
-		return errors.WithStack(errTxnFailed)
+		return errors.AddStack(errTxnFailed)
 	}
 	return nil
 }
@@ -119,5 +119,5 @@ func kvGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3
 		log.Warnf("kv gets too slow: key %v cost %v err %v", key, cost, err)
 	}
 
-	return resp, errors.WithStack(err)
+	return resp, errors.AddStack(err)
 }

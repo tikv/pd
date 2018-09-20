@@ -32,11 +32,11 @@ func (b ByteSize) MarshalJSON() ([]byte, error) {
 func (b *ByteSize) UnmarshalJSON(text []byte) error {
 	s, err := strconv.Unquote(string(text))
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.AddStack(err)
 	}
 	v, err := gh.ParseBytes(s)
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.AddStack(err)
 	}
 	*b = ByteSize(v)
 	return nil
@@ -46,7 +46,7 @@ func (b *ByteSize) UnmarshalJSON(text []byte) error {
 func (b *ByteSize) UnmarshalText(text []byte) error {
 	v, err := gh.ParseBytes(string(text))
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.AddStack(err)
 	}
 	*b = ByteSize(v)
 	return nil
