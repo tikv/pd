@@ -463,6 +463,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		DisableMakeUpReplica:         c.DisableMakeUpReplica,
 		DisableRemoveExtraReplica:    c.DisableRemoveExtraReplica,
 		DisableLocationReplacement:   c.DisableLocationReplacement,
+		DisableNamespaceRelocation:   c.DisableNamespaceRelocation,
 		Schedulers:                   schedulers,
 	}
 }
