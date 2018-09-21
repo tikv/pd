@@ -115,22 +115,38 @@ func (h *Handler) GetHotReadRegions() *core.StoreHotRegionInfos {
 
 // GetHotBytesWriteStores gets all hot write stores stats.
 func (h *Handler) GetHotBytesWriteStores() map[uint64]uint64 {
-	return h.s.cluster.cachedCluster.getStoresBytesWriteStat()
+	cluster := h.s.GetRaftCluster()
+	if cluster == nil {
+		return nil
+	}
+	return cluster.cachedCluster.getStoresBytesWriteStat()
 }
 
 // GetHotBytesReadStores gets all hot write stores stats.
 func (h *Handler) GetHotBytesReadStores() map[uint64]uint64 {
-	return h.s.cluster.cachedCluster.getStoresBytesReadStat()
+	cluster := h.s.GetRaftCluster()
+	if cluster == nil {
+		return nil
+	}
+	return cluster.cachedCluster.getStoresBytesReadStat()
 }
 
 // GetHotKeysWriteStores gets all hot write stores stats.
 func (h *Handler) GetHotKeysWriteStores() map[uint64]uint64 {
-	return h.s.cluster.cachedCluster.getStoresKeysWriteStat()
+	cluster := h.s.GetRaftCluster()
+	if cluster == nil {
+		return nil
+	}
+	return cluster.cachedCluster.getStoresKeysWriteStat()
 }
 
 // GetHotKeysReadStores gets all hot write stores stats.
 func (h *Handler) GetHotKeysReadStores() map[uint64]uint64 {
-	return h.s.cluster.cachedCluster.getStoresKeysReadStat()
+	cluster := h.s.GetRaftCluster()
+	if cluster == nil {
+		return nil
+	}
+	return cluster.cachedCluster.getStoresKeysReadStat()
 }
 
 // AddScheduler adds a scheduler.
