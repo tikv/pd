@@ -322,8 +322,8 @@
   revision = "1c287c953996ab3a0bf535dba9d53d809d3dc0b6"
 
 [[projects]]
-  branch = "sync-region"
-  digest = "1:baa23afb37e648588158262f6a50a2845338674b1afba1e9fe568708458df26a"
+  branch = "sync-regions"
+  digest = "1:94d3fa0d66021a886bcc2cb35fad3571afc5d9cda8f295bcf05b0c15a86c8520"
   name = "github.com/pingcap/kvproto"
   packages = [
     "pkg/eraftpb",
@@ -331,16 +331,8 @@
     "pkg/pdpb",
   ]
   pruneopts = "NUT"
-  revision = "126e2158f7703917288d22823fff13608fb4d40a"
+  revision = "fa493f613b452dc8bac6f74d5448c9eed5eb173d"
   source = "https://github.com/nolouch/kvproto.git"
-
-[[projects]]
-  branch = "master"
-  digest = "1:a1e55eae8157c58576c7f2551cc6b0c7efa86730dc79bbd783c8763540b4e5d6"
-  name = "github.com/pingcap/tipb"
-  packages = ["sharedbytes"]
-  pruneopts = "NUT"
-  revision = "5e46e0ec647edfee8fe001c5b51609460fb655bf"
 
 [[projects]]
   digest = "1:5cf3f025cbee5951a4ee961de067c8a89fc95a5adabead774f82822efabab121"
