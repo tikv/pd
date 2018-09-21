@@ -6,12 +6,12 @@ import (
 
 // ==================== juju adaptor start ========================
 
-// Trace annotates err with a stack trace at the point WithStack was called.
-// If err is nil or already contain stack trace return directly.
+// Trace just calls AddStack.
 func Trace(err error) error {
 	return AddStack(err)
 }
 
+// Annotate adds a message and ensures there is a stack trace.
 func Annotate(err error, message string) error {
 	if err == nil {
 		return nil
@@ -31,6 +31,7 @@ func Annotate(err error, message string) error {
 	}
 }
 
+// Annotatef adds a message and ensures there is a stack trace.
 func Annotatef(err error, format string, args ...interface{}) error {
 	if err == nil {
 		return nil
@@ -51,6 +52,8 @@ func Annotatef(err error, format string, args ...interface{}) error {
 }
 
 // ErrorStack will format a stack trace if it is available, otherwise it will be Error()
+// If the error is nil, the empty string is returned
+// Note that this just calls fmt.Sprintf("%+v", err)
 func ErrorStack(err error) string {
 	if err == nil {
 		return ""
