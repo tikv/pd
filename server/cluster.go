@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/error_code"
@@ -58,7 +57,6 @@ type RaftCluster struct {
 
 	wg           sync.WaitGroup
 	quit         chan struct{}
-	clients      map[string]pdpb.PDClient
 	regionSyncer *regionSyncer
 }
 
@@ -73,7 +71,6 @@ func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 		running:      false,
 		clusterID:    clusterID,
 		clusterRoot:  s.getClusterRootPath(),
-		clients:      make(map[string]pdpb.PDClient),
 		regionSyncer: newRegionSyncer(s),
 	}
 }
@@ -134,7 +131,6 @@ func (c *RaftCluster) runSyncRegions() {
 	defer c.wg.Done()
 	var requests []*metapb.Region
 	// grpc has limit on message size
-	maxBatchSize := 100
 	for {
 		select {
 		case <-c.quit:
@@ -142,28 +138,15 @@ func (c *RaftCluster) runSyncRegions() {
 		case first := <-c.cachedCluster.getChangedRegions():
 			requests = append(requests, first.GetMeta())
 			pending := len(c.cachedCluster.getChangedRegions())
-			for i := 0; i < pending && i < maxBatchSize; i++ {
+			for i := 0; i < pending && i < maxSyncRegionBatchSize; i++ {
 				region := <-c.cachedCluster.getChangedRegions()
 				requests = append(requests, region.GetMeta())
 			}
-			msg := &pdpb.MetaRegions{
-				Count:   uint32(len(requests)),
-				Regions: requests}
-			data, err := proto.Marshal(msg)
-			if err != nil {
-				log.Errorf("Report regions meet error: %s", err)
-				continue
+			regions := &pdpb.SyncRegionResponse{
+				Header:  &pdpb.ResponseHeader{ClusterId: c.s.clusterID},
+				Regions: requests,
 			}
-			req := &pdpb.SyncRegionResponse{
-				Header: &pdpb.ResponseHeader{ClusterId: c.s.clusterID},
-				Data:   data,
-			}
-			for _, stream := range c.regionSyncer.streams {
-				err := stream.Send(req)
-				if err != nil {
-					log.Errorf("Report regions meet error: %s", err)
-				}
-			}
+			c.regionSyncer.broadcast(regions)
 		}
 		requests = requests[:0]
 	}

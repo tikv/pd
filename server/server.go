@@ -209,8 +209,8 @@ func (s *Server) startServer() error {
 
 	s.idAlloc = &idAllocator{s: s}
 	kvBase := newEtcdKVBase(s)
-	path := filepath.Join(s.cfg.DataDir, "leveldb")
-	s.kv = core.NewKV(kvBase, core.WithLevelDBKV(path, core.DefaultBatchSize, core.DefaultSyncRegionTTL))
+	path := filepath.Join(s.cfg.DataDir, "region-meta")
+	s.kv = core.NewKV(kvBase, core.WithLevelDBKV(path, core.DefaultBatchSize, core.DefaultSyncRegionRate))
 	s.cluster = newRaftCluster(s, s.clusterID)
 	s.hbStreams = newHeartbeatStreams(s.clusterID)
 	if s.classifier, err = namespace.CreateClassifier(s.cfg.NamespaceClassifier, s.kv, s.idAlloc); err != nil {
@@ -393,8 +393,14 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}
 
 	log.Infof("bootstrap cluster %d ok", clusterID)
-	s.kv.SaveRegion(req.GetRegion())
-	s.kv.FlushRegion()
+	err = s.kv.SaveRegion(req.GetRegion())
+	if err != nil {
+		log.Warnf("save the bootstrap region faild: %s", err)
+	}
+	err = s.kv.FlushRegion()
+	if err != nil {
+		log.Warnf("flush the bootstrap region faild: %s", err)
+	}
 	if err := s.cluster.start(); err != nil {
 		return nil, err
 	}

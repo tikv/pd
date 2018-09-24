@@ -25,7 +25,7 @@ type leveldbKV struct {
 	db *leveldb.DB
 }
 
-// NewLeveldbKV to store regions information.
+// NewLeveldbKV is used to store regions information.
 func NewLeveldbKV(path string) (RegionKV, error) {
 	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
@@ -42,12 +42,8 @@ func (kv *leveldbKV) Load(key string) (string, error) {
 	return string(v), err
 }
 
-//LoadRange(key, endKey string, limit int) ([]string, error)
-//Save(key, value string) error
-//Delete(key string) error
-
-func (kv *leveldbKV) LoadRange(key, endKey string, limit int) ([]string, error) {
-	iter := kv.db.NewIterator(&util.Range{Start: []byte(key), Limit: []byte(endKey)}, nil)
+func (kv *leveldbKV) LoadRange(startKey, endKey string, limit int) ([]string, error) {
+	iter := kv.db.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
 	values := make([]string, 0, limit)
 	count := 0
 	for iter.Next() {
@@ -58,7 +54,6 @@ func (kv *leveldbKV) LoadRange(key, endKey string, limit int) ([]string, error) 
 		count++
 	}
 	iter.Release()
-	//iter.Error()
 	return values, nil
 }
 

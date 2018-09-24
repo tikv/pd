@@ -28,7 +28,7 @@ type KVBase interface {
 	Delete(key string) error
 }
 
-// RegionKV used to save region metadata.
+// RegionKV is used to save region metadata.
 type RegionKV interface {
 	KVBase
 	SaveRegions(regions map[string]*metapb.Region) error

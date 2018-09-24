@@ -623,13 +623,9 @@ func (s *Server) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
 		if request.GetHeader().GetClusterId() != s.clusterID {
 			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
 		}
-		switch request.GetTp() {
-		case 1:
-			log.Infof("Establish sync region stream with %s [%s]", request.GetMember().GetName(), request.GetMember().GetClientUrls()[0])
-			if s.cluster.regionSyncer != nil {
-				s.cluster.regionSyncer.bindStream(request.GetMember().GetName(), stream)
-			}
-		default:
+		log.Infof("Establish sync region stream with %s [%s]", request.GetMember().GetName(), request.GetMember().GetClientUrls()[0])
+		if s.cluster.regionSyncer != nil {
+			s.cluster.regionSyncer.bindStream(request.GetMember().GetName(), stream)
 		}
 	}
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -41,13 +42,13 @@ const (
 )
 
 const (
-	//DefaultSyncRegionTTL is the ttl to sync the regions to kv storage.
-	DefaultSyncRegionTTL = 3 * time.Second
+	//DefaultSyncRegionRate is the ttl to sync the regions to kv storage.
+	DefaultSyncRegionRate = 3 * time.Second
 	//DefaultBatchSize is the batch size to save the regions to kv storage.
 	DefaultBatchSize = 100
 )
 
-// WithLevelDBKV store the regions information in levelDB.
+// WithLevelDBKV stores the regions information in levelDB.
 func WithLevelDBKV(path string, batchSize int, ttl time.Duration) func(*KV) {
 	return func(kv *KV) {
 		levelDB, err := NewLeveldbKV(path)
@@ -60,7 +61,7 @@ func WithLevelDBKV(path string, batchSize int, ttl time.Duration) func(*KV) {
 		kv.ttl = ttl
 		kv.batchSize = batchSize
 		kv.flushTime = time.Now().Add(ttl)
-		kv.doGC()
+		kv.backgroundFlush()
 	}
 }
 
@@ -156,7 +157,6 @@ func (kv *KV) SaveRegion(region *metapb.Region) error {
 		kv.cacheSize = 0
 		kv.batchRegions = make(map[string]*metapb.Region, kv.batchSize)
 		return nil
-		//return saveProto(kv.regionKV, kv.regionPath(region.GetId()), region)
 	}
 	return saveProto(kv.KVBase, kv.regionPath(region.GetId()), region)
 }
@@ -351,10 +351,13 @@ func (kv *KV) Close() error {
 	return nil
 }
 
-func (kv *KV) doGC() {
+func (kv *KV) backgroundFlush() {
 	tick := time.NewTicker(dirtyFlushTick)
 	defer tick.Stop()
-	var isFlush bool
+	var (
+		isFlush bool
+		err     error
+	)
 	go func() {
 		for {
 			<-tick.C
@@ -364,12 +367,14 @@ func (kv *KV) doGC() {
 			if !isFlush {
 				continue
 			}
-			kv.FlushRegion()
+			if err = kv.FlushRegion(); err != nil {
+				log.Info("flush regions error: ", err)
+			}
 		}
 	}()
 }
 
-// FlushRegion save the cache region to region kv storage.
+// FlushRegion saves the cache region to region kv storage.
 func (kv *KV) FlushRegion() error {
 	if kv.regionKV != nil {
 		kv.mu.Lock()

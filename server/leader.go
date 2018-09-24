@@ -303,12 +303,8 @@ func (s *Server) watchLeader(leader *pdpb.Member) {
 		log.Error("reload config failed:", err)
 		return
 	}
-	err = s.cluster.regionSyncer.statSyncerWithLeader(leader.GetClientUrls()[0])
-	if err != nil {
-		log.Errorf("Syncer with leader meet with error %s", err)
-		return
-	}
-	defer s.cluster.regionSyncer.stopSyncerWithLeader()
+	s.cluster.regionSyncer.startSyncWithLeader(leader.GetClientUrls()[0])
+	defer s.cluster.regionSyncer.stopSyncWithLeader()
 	for {
 		rch := watcher.Watch(ctx, s.getLeaderPath())
 		for wresp := range rch {
