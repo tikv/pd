@@ -87,8 +87,7 @@ func (s *testRegionSuite) TestRegions(c *C) {
 	rs := []*core.RegionInfo{
 		newTestRegionInfo(2, 1, []byte("a"), []byte("b")),
 		newTestRegionInfo(3, 1, []byte("b"), []byte("c")),
-		newTestRegionInfo(4, 1, []byte("c"), []byte("d")),
-		newTestRegionInfo(5, 1, []byte("d"), []byte("e")),
+		newTestRegionInfo(4, 2, []byte("c"), []byte("d")),
 	}
 	regions := make([]*regionInfo, 0)
 	for _, r := range rs {
@@ -105,6 +104,8 @@ func (s *testRegionSuite) TestRegions(c *C) {
 	})
 	for i, r := range regionsInfo.Regions {
 		c.Assert(r.ID, Equals, regions[i].ID)
+		c.Assert(r.ApproximateSize, Equals, regions[i].ApproximateSize)
+		c.Assert(r.ApproximateKeys, Equals, regions[i].ApproximateKeys)
 	}
 }
 
