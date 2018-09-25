@@ -157,11 +157,14 @@ type testCluster struct {
 	servers map[string]*testServer
 }
 
-func newTestCluster(initialServerCount int) (*testCluster, error) {
+// ConfigOption is used to define customize settings in test.
+type ConfigOption func(conf *server.Config)
+
+func newTestCluster(initialServerCount int, opts ...ConfigOption) (*testCluster, error) {
 	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*testServer)
 	for _, conf := range config.InitialServers {
-		serverConf, err := conf.Generate()
+		serverConf, err := conf.Generate(opts...)
 		if err != nil {
 			return nil, err
 		}

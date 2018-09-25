@@ -31,7 +31,7 @@ func (s *testKVSuite) TestBasic(c *C) {
 	kv := NewKV(NewMemoryKV())
 
 	c.Assert(kv.storePath(123), Equals, "raft/s/00000000000000000123")
-	c.Assert(kv.regionPath(123), Equals, "raft/r/00000000000000000123")
+	c.Assert(regionPath(123), Equals, "raft/r/00000000000000000123")
 
 	meta := &metapb.Cluster{Id: 123}
 	ok, err := kv.LoadMeta(meta)

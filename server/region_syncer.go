@@ -22,6 +22,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -29,52 +31,72 @@ const (
 	maxSyncRegionBatchSize = 100
 )
 
+type syncerClient interface {
+	Recv() (*pdpb.SyncRegionResponse, error)
+	CloseSend() error
+}
+type syncerServer interface {
+	Send(regions *pdpb.SyncRegionResponse) error
+}
+
 type regionSyncer struct {
 	sync.RWMutex
-	streams map[string]pdpb.PD_SyncRegionsServer
+	streams map[string]syncerServer
 	ctx     context.Context
 	cancel  context.CancelFunc
-	wg      sync.WaitGroup
 	server  *Server
+	closed  chan struct{}
+	wg      sync.WaitGroup
 }
 
 func newRegionSyncer(server *Server) *regionSyncer {
 	return &regionSyncer{
-		streams: make(map[string]pdpb.PD_SyncRegionsServer),
+		streams: make(map[string]syncerServer),
 		server:  server,
+		closed:  make(chan struct{}),
 	}
 }
 
-func (s *regionSyncer) bindStream(name string, stream pdpb.PD_SyncRegionsServer) {
+func (s *regionSyncer) bindStream(name string, stream syncerServer) {
 	s.Lock()
+	defer s.Unlock()
 	s.streams[name] = stream
-	s.Unlock()
 }
 
 func (s *regionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
-	s.Lock()
+	s.RLock()
 	for _, sender := range s.streams {
 		err := sender.Send(regions)
 		if err != nil {
 			log.Error("region syncer send data meet error:", err)
 		}
 	}
-	s.Unlock()
+	s.RUnlock()
 }
 
 func (s *regionSyncer) stopSyncWithLeader() {
+	s.reset()
+	s.Lock()
+	close(s.closed)
+	s.closed = make(chan struct{})
+	s.Unlock()
+	s.wg.Wait()
+}
+
+func (s *regionSyncer) reset() {
+	s.Lock()
+	defer s.Unlock()
+
 	if s.cancel == nil {
 		return
 	}
 	s.cancel()
 	s.cancel, s.ctx = nil, nil
-	s.wg.Wait()
 }
 
-func (s *regionSyncer) establish(addr string) (pdpb.PD_SyncRegionsClient, error) {
-	if s.cancel != nil {
-		s.stopSyncWithLeader()
-	}
+func (s *regionSyncer) establish(addr string) (syncerClient, error) {
+	s.reset()
+
 	u, err := url.Parse(addr)
 	if err != nil {
 		return nil, err
@@ -85,7 +107,7 @@ func (s *regionSyncer) establish(addr string) (pdpb.PD_SyncRegionsClient, error)
 		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(s.server.serverLoopCtx)
 	client, err := pdpb.NewPDClient(cc).SyncRegions(ctx)
 	if err != nil {
 		cancel()
@@ -99,18 +121,33 @@ func (s *regionSyncer) establish(addr string) (pdpb.PD_SyncRegionsClient, error)
 		cancel()
 		return nil, err
 	}
+	s.Lock()
 	s.ctx, s.cancel = ctx, cancel
+	s.Unlock()
 	return client, nil
 }
 
 func (s *regionSyncer) startSyncWithLeader(addr string) {
 	s.wg.Add(1)
+	s.RLock()
+	closed := s.closed
+	s.RUnlock()
 	go func() {
 		defer s.wg.Done()
 		for {
+			select {
+			case <-closed:
+				return
+			default:
+			}
 			// establish client
 			client, err := s.establish(addr)
 			if err != nil {
+				if ev, ok := status.FromError(err); ok {
+					if ev.Code() == codes.Canceled {
+						return
+					}
+				}
 				log.Errorf("%s failed to establish sync stream with leader %s: %s", s.server.member.GetName(), s.server.GetLeader().GetName(), err)
 				time.Sleep(time.Second)
 				continue
@@ -120,6 +157,7 @@ func (s *regionSyncer) startSyncWithLeader(addr string) {
 				resp, err := client.Recv()
 				if err != nil {
 					log.Error("region sync with leader meet error:", err)
+					client.CloseSend()
 					break
 				}
 				for _, r := range resp.GetRegions() {

@@ -25,8 +25,8 @@ type leveldbKV struct {
 	db *leveldb.DB
 }
 
-// NewLeveldbKV is used to store regions information.
-func NewLeveldbKV(path string) (RegionKV, error) {
+// newLeveldbKV is used to store regions information.
+func newLeveldbKV(path string) (*leveldbKV, error) {
 	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
 		return nil, err

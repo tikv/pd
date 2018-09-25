@@ -19,13 +19,12 @@ import (
 	"math"
 	"path"
 	"strconv"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -41,60 +40,94 @@ const (
 	dirtyFlushTick  = time.Second
 )
 
-const (
-	//DefaultSyncRegionRate is the ttl to sync the regions to kv storage.
-	DefaultSyncRegionRate = 3 * time.Second
-	//DefaultBatchSize is the batch size to save the regions to kv storage.
-	DefaultBatchSize = 100
-)
+// KVProxy is a proxy of KV storage.
+type KVProxy struct {
+	defaultKV KVBase
+	regionKV  *RegionKV
+	isDefault atomic.Value
+}
 
-// WithLevelDBKV stores the regions information in levelDB.
-func WithLevelDBKV(path string, batchSize int, ttl time.Duration) func(*KV) {
-	return func(kv *KV) {
-		levelDB, err := NewLeveldbKV(path)
-		if err != nil {
-			fmt.Println("meet error with leveldb: ", err)
-			return
-		}
-		kv.regionKV = levelDB
-		kv.batchRegions = make(map[string]*metapb.Region)
-		kv.ttl = ttl
-		kv.batchSize = batchSize
-		kv.flushTime = time.Now().Add(ttl)
-		kv.backgroundFlush()
+// NewKVProxy return a proxy of KV storage.
+func NewKVProxy(defaultKV KVBase, regionKV *RegionKV) *KVProxy {
+	kv := &KVProxy{
+		defaultKV: defaultKV,
+		regionKV:  regionKV,
 	}
+	kv.isDefault.Store(true)
+	return kv
+}
+func (kv *KVProxy) getKVBase() KVBase {
+	isDefault := kv.isDefault.Load().(bool)
+	if isDefault {
+		return kv.defaultKV
+	}
+	return kv.regionKV
+}
+
+// LoadRegion loads one regoin from KV.
+func (kv *KVProxy) LoadRegion(regionID uint64, region *metapb.Region) (bool, error) {
+	kvBase := kv.getKVBase()
+	return loadProto(kvBase, regionPath(regionID), region)
+}
+
+// LoadRegions loads all regions from KV to RegionsInfo.
+func (kv *KVProxy) LoadRegions(regions *RegionsInfo) error {
+	kvBase := kv.getKVBase()
+	return loadRegions(kvBase, regions)
+}
+
+// SaveRegion saves one region to KV.
+func (kv *KVProxy) SaveRegion(region *metapb.Region) error {
+	isDefault := kv.isDefault.Load().(bool)
+	if isDefault {
+		return saveProto(kv.defaultKV, regionPath(region.GetId()), region)
+	}
+	return kv.regionKV.SaveRegion(region)
+}
+
+// DeleteRegion deletes one region from KV.
+func (kv *KVProxy) DeleteRegion(region *metapb.Region) error {
+	kvBase := kv.getKVBase()
+	return kvBase.Delete(regionPath(region.GetId()))
+}
+
+func (kv *KVProxy) switchRegionStorage(useDefault bool) {
+	if kv.regionKV == nil {
+		return
+	}
+	kv.isDefault.Store(useDefault)
 }
 
 // KV wraps all kv operations, keep it stateless.
 type KV struct {
 	KVBase
-	// save region in another way
-	enableRegionKV bool
-	regionKV       RegionKV
-	mu             sync.RWMutex
-	batchRegions   map[string]*metapb.Region
-	batchSize      int
-	cacheSize      int
-	ttl            time.Duration
-	flushTime      time.Time
+	proxy *KVProxy
 }
 
 // NewKV creates KV instance with KVBase.
-func NewKV(base KVBase, opts ...func(*KV)) *KV {
-	kv := &KV{
+func NewKV(base KVBase) *KV {
+	return &KV{
 		KVBase: base,
+		proxy:  NewKVProxy(base, nil),
 	}
-	for _, opt := range opts {
-		opt(kv)
-	}
+}
+
+// SetProxyWithRegionKV sets the proxy with specified region storage.
+func (kv *KV) SetProxyWithRegionKV(regionKV *RegionKV) *KV {
+	kv.proxy.regionKV = regionKV
 	return kv
+}
+
+// SwitchRegionStorage switch the region storage.
+func (kv *KV) SwitchRegionStorage(useDefault bool) {
+	kv.proxy.switchRegionStorage(useDefault)
 }
 
 func (kv *KV) storePath(storeID uint64) string {
 	return path.Join(clusterPath, "s", fmt.Sprintf("%020d", storeID))
 }
 
-func (kv *KV) regionPath(regionID uint64) string {
+func regionPath(regionID uint64) string {
 	return path.Join(clusterPath, "r", fmt.Sprintf("%020d", regionID))
 }
 
@@ -133,40 +166,22 @@ func (kv *KV) SaveStore(store *metapb.Store) error {
 
 // LoadRegion loads one regoin from KV.
 func (kv *KV) LoadRegion(regionID uint64, region *metapb.Region) (bool, error) {
-	if kv.regionKV != nil && kv.enableRegionKV {
-		return loadProto(kv.regionKV, kv.regionPath(regionID), region)
-	}
-	return loadProto(kv.KVBase, kv.regionPath(regionID), region)
+	return kv.proxy.LoadRegion(regionID, region)
+}
+
+// LoadRegions loads all regions from KV to RegionsInfo.
+func (kv *KV) LoadRegions(regions *RegionsInfo) error {
+	return kv.proxy.LoadRegions(regions)
 }
 
 // SaveRegion saves one region to KV.
 func (kv *KV) SaveRegion(region *metapb.Region) error {
-	if kv.regionKV != nil && kv.enableRegionKV {
-		kv.mu.Lock()
-		defer kv.mu.Unlock()
-		if kv.cacheSize < kv.batchSize {
-			kv.batchRegions[kv.regionPath(region.GetId())] = region
-			kv.cacheSize++
-			kv.flushTime = time.Now().Add(kv.ttl)
-			return nil
-		}
-		err := kv.regionKV.SaveRegions(kv.batchRegions)
-		if err != nil {
-			return err
-		}
-		kv.cacheSize = 0
-		kv.batchRegions = make(map[string]*metapb.Region, kv.batchSize)
-		return nil
-	}
-	return saveProto(kv.KVBase, kv.regionPath(region.GetId()), region)
+	return kv.proxy.SaveRegion(region)
 }
 
 // DeleteRegion deletes one region from KV.
 func (kv *KV) DeleteRegion(region *metapb.Region) error {
-	if kv.regionKV != nil {
-		return kv.regionKV.Delete(kv.regionPath(region.GetId()))
-	}
-	return kv.Delete(kv.regionPath(region.GetId()))
+	return kv.proxy.DeleteRegion(region)
 }
 
 // SaveConfig stores marshalable cfg to the configPath.
@@ -255,48 +270,20 @@ func (kv *KV) loadFloatWithDefaultValue(path string, def float64) (float64, erro
 	return val, nil
 }
 
-// LoadRegions loads all regions from KV to RegionsInfo.
-func (kv *KV) LoadRegions(regions *RegionsInfo) error {
-	nextID := uint64(0)
-	endKey := kv.regionPath(math.MaxUint64)
-
-	// Since the region key may be very long, using a larger rangeLimit will cause
-	// the message packet to exceed the grpc message size limit (4MB). Here we use
-	// a variable rangeLimit to work around.
-	rangeLimit := maxKVRangeLimit
-	loadKV := kv.KVBase
-	if kv.regionKV != nil && kv.enableRegionKV {
-		loadKV = kv.regionKV
+// Flush flush the dirty region to storage.
+func (kv *KV) Flush() error {
+	if kv.proxy.regionKV != nil {
+		return kv.proxy.regionKV.FlushRegion()
 	}
-	for {
-		key := kv.regionPath(nextID)
-		res, err := loadKV.LoadRange(key, endKey, rangeLimit)
-		if err != nil {
-			if rangeLimit /= 2; rangeLimit >= minKVRangeLimit {
-				continue
-			}
-			return err
-		}
+	return nil
+}
 
-		for _, s := range res {
-			region := &metapb.Region{}
-			if err := region.Unmarshal([]byte(s)); err != nil {
-				return errors.WithStack(err)
-			}
-
-			nextID = region.GetId() + 1
-			overlaps := regions.SetRegion(NewRegionInfo(region, nil))
-			for _, item := range overlaps {
-				if err := kv.DeleteRegion(item); err != nil {
-					return err
-				}
-			}
-		}
-
-		if len(res) < rangeLimit {
-			return nil
-		}
+// Close close the kv.
+func (kv *KV) Close() error {
+	if kv.proxy.regionKV != nil {
+		return kv.proxy.regionKV.Close()
 	}
+	return nil
 }
 
 // SaveGCSafePoint saves new GC safe point to KV.
@@ -341,56 +328,4 @@ func saveProto(kv KVBase, key string, msg proto.Message) error {
 		return errors.WithStack(err)
 	}
 	return kv.Save(key, string(value))
-}
-
-// Close closes the kv.
-func (kv *KV) Close() error {
-	if kv.regionKV != nil {
-		return kv.regionKV.Close()
-	}
-	return nil
-}
-
-func (kv *KV) backgroundFlush() {
-	tick := time.NewTicker(dirtyFlushTick)
-	defer tick.Stop()
-	var (
-		isFlush bool
-		err     error
-	)
-	go func() {
-		for {
-			<-tick.C
-			kv.mu.RLock()
-			isFlush = kv.flushTime.Before(time.Now())
-			kv.mu.RUnlock()
-			if !isFlush {
-				continue
-			}
-			if err = kv.FlushRegion(); err != nil {
-				log.Info("flush regions error: ", err)
-			}
-		}
-	}()
-}
-
-// FlushRegion saves the cache region to region kv storage.
-func (kv *KV) FlushRegion() error {
-	if kv.regionKV != nil {
-		kv.mu.Lock()
-		defer kv.mu.Unlock()
-		if err := kv.regionKV.SaveRegions(kv.batchRegions); err != nil {
-			return err
-		}
-		kv.cacheSize = 0
-		kv.batchRegions = make(map[string]*metapb.Region, kv.batchSize)
-		return nil
-	}
-	return nil
-}
-
-// SwitchRegionKV is a switch to decide whether region storage is enabled.
-// This method is not thread safe, and use it should before serve.
-func (kv *KV) SwitchRegionKV(isEnable bool) {
-	kv.enableRegionKV = isEnable
 }

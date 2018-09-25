@@ -637,7 +637,7 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 
 // PDServerConfig is the configuration for pd server.
 type PDServerConfig struct {
-	// EnableRegionStorage enables the independent region  storage.
+	// EnableRegionStorage enables the independent region storage.
 	EnableRegionStorage bool `toml:"enable-region-storage" json:"enable-region-storage"`
 }
 
