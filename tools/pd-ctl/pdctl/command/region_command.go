@@ -32,6 +32,7 @@ var (
 	regionsReadflowPrefix  = "pd/api/v1/regions/readflow"
 	regionsConfVerPrefix   = "pd/api/v1/regions/confver"
 	regionsVersionPrefix   = "pd/api/v1/regions/version"
+	regionsSizePrefix      = "pd/api/v1/regions/size"
 	regionsSiblingPrefix   = "pd/api/v1/regions/sibling"
 	regionIDPrefix         = "pd/api/v1/region/id"
 	regionKeyPrefix        = "pd/api/v1/region/key"
@@ -76,6 +77,13 @@ func NewRegionCommand() *cobra.Command {
 		Run:   showRegionTopVersionCommandFunc,
 	}
 	r.AddCommand(topVersion)
+
+	topSize := &cobra.Command{
+		Use:   "topsize <limit>",
+		Short: "show regions with top size",
+		Run:   showRegionTopSizeCommandFunc,
+	}
+	r.AddCommand(topSize)
 	r.Flags().String("jq", "", "jq query")
 
 	return r
@@ -156,6 +164,23 @@ func showRegionTopConfVerCommandFunc(cmd *cobra.Command, args []string) {
 
 func showRegionTopVersionCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := regionsVersionPrefix
+	if len(args) == 1 {
+		if _, err := strconv.Atoi(args[0]); err != nil {
+			fmt.Println("limit should be a number")
+			return
+		}
+		prefix += "?limit=" + args[0]
+	}
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get regions: %s\n", err)
+		return
+	}
+	fmt.Println(r)
+}
+
+func showRegionTopSizeCommandFunc(cmd *cobra.Command, args []string) {
+	prefix := regionsSizePrefix
 	if len(args) == 1 {
 		if _, err := strconv.Atoi(args[0]); err != nil {
 			fmt.Println("limit should be a number")
