@@ -17,7 +17,9 @@ This section describes how to use the simulator.
 ```
 -pd string
       Specify a PD address (if this parameter is not set, it will start a PD server from the simulator inside)
--conf string
+-config string
+      Specify a configuration file for the PD simulator
+-case string
       Specify the case which the simulator is going to run
 -serverLogLevel string
       Specify the PD server log level (default: "fatal")
@@ -31,8 +33,8 @@ Run all cases:
 
 Run a specific case with an internal PD:
 
-    ./pd-simulator -conf="casename"
+    ./pd-simulator -case="casename"
 
 Run a specific case with an external PD:
 
-    ./pd-simulator -pd="http://127.0.0.1:2379" -conf="casename"
+    ./pd-simulator -pd="http://127.0.0.1:2379" -case="casename"

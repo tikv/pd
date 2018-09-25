@@ -130,11 +130,10 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
 		return
 	}
-
-	regions := cluster.GetMetaRegions()
+	regions := cluster.GetRegions()
 	regionInfos := make([]*regionInfo, len(regions))
 	for i, r := range regions {
-		regionInfos[i] = newRegionInfo(core.NewRegionInfo(r, nil))
+		regionInfos[i] = newRegionInfo(r)
 	}
 	regionsInfo := &regionsInfo{
 		Count:   len(regions),
