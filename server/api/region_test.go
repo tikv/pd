@@ -100,7 +100,12 @@ func (s *testRegionSuite) TestRegions(c *C) {
 	err := readJSONWithURL(url, regionsInfo)
 	c.Assert(err, IsNil)
 	c.Assert(regionsInfo.Count, Equals, len(regions))
-	c.Assert(regionsInfo.Regions, DeepEquals, regions)
+	sort.Slice(regionsInfo.Regions, func(i, j int) bool {
+		return regionsInfo.Regions[i].ID < regionsInfo.Regions[j].ID
+	})
+	for i, r := range regionsInfo.Regions {
+		c.Assert(r.ID, Equals, regions[i].ID)
+	}
 }
 
 func (s *testRegionSuite) TestStoreRegions(c *C) {
