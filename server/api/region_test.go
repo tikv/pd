@@ -83,6 +83,26 @@ func (s *testRegionSuite) TestRegion(c *C) {
 	c.Assert(r2, DeepEquals, newRegionInfo(r))
 }
 
+func (s *testRegionSuite) TestRegions(c *C) {
+	regions := []*core.RegionInfo{
+		newTestRegionInfo(2, 1, []byte("a"), []byte("b")),
+		newTestRegionInfo(3, 1, []byte("b"), []byte("c")),
+		newTestRegionInfo(4, 1, []byte("c"), []byte("d")),
+		newTestRegionInfo(5, 1, []byte("d"), []byte("e")),
+	}
+	regionsInfo := make([]*regionInfo, 0, len(regions))
+	for i, region := range regions {
+		regionsInfo[i] = newRegionInfo(region)
+		mustRegionHeartbeat(c, s.svr, region)
+	}
+
+	url := fmt.Sprintf("%s/regions", s.urlPrefix)
+	rs := &regionsInfo{}
+	err := readJSONWithURL(url, rs)
+	c.Assert(err, IsNil)
+	c.Assert(rs, DeepEquals, regionsInfo)
+}
+
 func (s *testRegionSuite) TestStoreRegions(c *C) {
 	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r2 := newTestRegionInfo(3, 1, []byte("b"), []byte("c"))
