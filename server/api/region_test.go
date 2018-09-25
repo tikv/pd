@@ -84,23 +84,23 @@ func (s *testRegionSuite) TestRegion(c *C) {
 }
 
 func (s *testRegionSuite) TestRegions(c *C) {
-	regions := []*core.RegionInfo{
+	rs := []*core.RegionInfo{
 		newTestRegionInfo(2, 1, []byte("a"), []byte("b")),
 		newTestRegionInfo(3, 1, []byte("b"), []byte("c")),
 		newTestRegionInfo(4, 1, []byte("c"), []byte("d")),
 		newTestRegionInfo(5, 1, []byte("d"), []byte("e")),
 	}
-	regionsInfo := make([]*regionInfo, 0, len(regions))
-	for i, region := range regions {
-		regionsInfo[i] = newRegionInfo(region)
-		mustRegionHeartbeat(c, s.svr, region)
+	regions := make([]*regionInfo, 0)
+	for _, r := range rs {
+		regions = append(regions, newRegionInfo(r))
+		mustRegionHeartbeat(c, s.svr, r)
 	}
-
 	url := fmt.Sprintf("%s/regions", s.urlPrefix)
-	rs := &regionsInfo{}
-	err := readJSONWithURL(url, rs)
+	regionsInfo := &regionsInfo{}
+	err := readJSONWithURL(url, regionsInfo)
 	c.Assert(err, IsNil)
-	c.Assert(rs, DeepEquals, regionsInfo)
+	c.Assert(regionsInfo.Count, Equals, len(regions))
+	c.Assert(regionsInfo.Regions, DeepEquals, regions)
 }
 
 func (s *testRegionSuite) TestStoreRegions(c *C) {
