@@ -14,7 +14,7 @@
 package errcode
 
 import (
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 )
 
 // StackTrace retrieves the errors.StackTrace from the error if it is present.

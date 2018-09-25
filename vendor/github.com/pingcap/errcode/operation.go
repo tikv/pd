@@ -48,8 +48,8 @@ func (e EmbedOp) GetOperation() string {
 	return e.Op
 }
 
-// OpErrCode is an ErrorCode with an "Operation" field attached.
-// This may be used as a convenience to record the operation information for the error.
+// OpErrCode is an ErrorCode with an Operation field attached.
+// This can be conveniently constructed with Op() and AddTo() to record the operation information for the error.
 // However, it isn't required to be used, see the HasOperation documentation for alternatives.
 type OpErrCode struct {
 	Operation string

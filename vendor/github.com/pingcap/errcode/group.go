@@ -16,7 +16,7 @@ package errcode
 import (
 	"fmt"
 
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 )
 
 // ErrorCodes return all errors (from an ErrorGroup) that are of interface ErrorCode.
@@ -44,7 +44,7 @@ type MultiErrCode struct {
 // It will combine any other MultiErrCode into just one MultiErrCode.
 // This is "horizontal" composition.
 // If you want normal "vertical" composition use BuildChain.
-func Combine(initial ErrorCode, others ...ErrorCode) ErrorCode {
+func Combine(initial ErrorCode, others ...ErrorCode) MultiErrCode {
 	var rest []error
 	if group, ok := initial.(errors.ErrorGroup); ok {
 		rest = group.Errors()
@@ -92,23 +92,29 @@ func (e MultiErrCode) GetClientData() interface{} {
 	return ClientData(e.ErrCode)
 }
 
-// ErrorCodeChain resolves an error chain down to a chain of just error codes
+// CodeChain resolves an error chain down to a chain of just error codes
 // Any ErrorGroups found are converted to a MultiErrCode.
 // Passed over error inforation is retained using ChainContext.
 // If a code was overidden in the chain, it will show up as a MultiErrCode.
-func ErrorCodeChain(err error) ErrorCode {
+func CodeChain(err error) ErrorCode {
 	var code ErrorCode
 	currentErr := err
 	chainErrCode := func(errcode ErrorCode) {
 		if errcode.(error) != currentErr {
-			errcode = ChainContext{currentErr, errcode}
+			if chained, ok := errcode.(ChainContext); ok {
+				// Perhaps this is a hack because we should be passing the context to recursive CodeChain calls
+				chained.Top = currentErr
+				errcode = chained
+			} else {
+				errcode = ChainContext{currentErr, errcode}
+			}
 		}
 		if code == nil {
 			code = errcode
 		} else {
 			code = MultiErrCode{code, []error{code.(error), errcode.(error)}}
 		}
-		currentErr = errcode
+		currentErr = errcode.(error)
 	}
 
 	for err != nil {
@@ -119,10 +125,18 @@ func ErrorCodeChain(err error) ErrorCode {
 		} else if eg, ok := err.(errors.ErrorGroup); ok {
 			group := []ErrorCode{}
 			for _, errItem := range eg.Errors() {
-				group = append(group, ErrorCodeChain(errItem))
+				if itemCode := CodeChain(errItem); itemCode != nil {
+					group = append(group, itemCode)
+				}
 			}
 			if len(group) > 0 {
-				chainErrCode(Combine(group[0], group[1:]...))
+				var codeGroup ErrorCode
+				if len(group) == 1 {
+					codeGroup = group[0]
+				} else {
+					codeGroup = Combine(group[0], group[1:]...)
+				}
+				chainErrCode(codeGroup)
 			}
 		}
 		err = errors.Unwrap(err)
@@ -133,7 +147,8 @@ func ErrorCodeChain(err error) ErrorCode {
 
 // ChainContext is returned by ErrorCodeChain
 // to retain the full wrapped error message of the error chain.
-// If you add context to an error code, this retains that in the Error() message.
+// If you annotated an ErrorCode with additional information, it is retained in the Top field.
+// The Top field is used for the Error() and Cause() methods.
 type ChainContext struct {
 	Top     error
 	ErrCode ErrorCode
@@ -179,11 +194,15 @@ func (err ChainContext) Format(s fmt.State, verb rune) {
 			}
 			return
 		}
+		if s.Flag('#') {
+			fmt.Fprintf(s, "ChainContext{Code: %#v, Top: %#v}", err.ErrCode, err.Top)
+			return
+		}
 		fallthrough
 	case 's':
-		fmt.Fprintf(s, "Code: %s. %s", err.ErrCode.Code().CodeStr(), err.Top)
+		fmt.Fprintf(s, "Code: %s. Top Error: %s", err.ErrCode.Code().CodeStr(), err.Top)
 	case 'q':
-		fmt.Fprintf(s, "Code: %q. %q", err.ErrCode.Code().CodeStr(), err.Top)
+		fmt.Fprintf(s, "Code: %q. Top Error: %q", err.ErrCode.Code().CodeStr(), err.Top)
 	}
 }
 
@@ -199,7 +218,7 @@ func (e MultiErrCode) Format(s fmt.State, verb rune) {
 				}
 			} else {
 				for _, nextErr := range e.rest {
-					fmt.Fprintf(s, "%v", nextErr)
+					fmt.Fprintf(s, "%+v", nextErr)
 				}
 			}
 			return

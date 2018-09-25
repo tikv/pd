@@ -13,8 +13,8 @@
 
 // Package errcode facilitates standardized API error codes.
 // The goal is that clients can reliably understand errors by checking against immutable error codes
-// A Code should never be modified once committed (and released for use by clients).
-// Instead a new Code should be created.
+//
+// This godoc documents usage. For broader context, see https://github.com/pingcap/errcode/tree/master/README.md
 //
 // Error codes are represented as strings by CodeStr (see CodeStr documentation).
 //
@@ -28,15 +28,18 @@
 // This is used in the HTTPCode implementation to inherit HTTP codes found with MetaDataFromAncestors.
 // The hierarchy is present in the Code's string representation with a dot separation.
 //
-// A few generic top-level error codes are provided here.
-// You are encouraged to create your own application customized error codes rather than just using generic errors.
+// A few generic top-level error codes are provided (see the variables section of the doc).
+// You are encouraged to create your own error codes customized to your application rather than solely using generic errors.
 //
 // See NewJSONFormat for an opinion on how to send back meta data about errors with the error data to a client.
 // JSONFormat includes a body of response data (the "data field") that is by default the data from the Error
 // serialized to JSON.
 //
-// Errors are traced via ErrorChainContext() which show up as the Others field in JSONFormat.
 // Stack traces are automatically added by NewInternalErr and show up as the Stack field in JSONFormat.
+// Errors can be grouped with Combine() and ungrouped via Errors() which show up as the Others field in JSONFormat.
+//
+// To extract any ErrorCodes from an error, use CodeChain().
+// This extracts error codes without information loss (using ChainContext).
 package errcode
 
 import (
@@ -44,20 +47,23 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 )
 
-// CodeStr is a representation of the type of a particular error.
+// CodeStr is the name of the error code.
+// It is a representation of the type of a particular error.
 // The underlying type is string rather than int.
 // This enhances both extensibility (avoids merge conflicts) and user-friendliness.
 // A CodeStr can have dot separators indicating a hierarchy.
+//
+// Generally a CodeStr should never be modified once used by clients.
+// Instead a new CodeStr should be created.
 type CodeStr string
 
 func (str CodeStr) String() string { return string(str) }
 
 // A Code has a CodeStr representation.
 // It is attached to a Parent to find metadata from it.
-// The Meta field is provided for extensibility: e.g. attaching HTTP codes.
 type Code struct {
 	// codeStr does not include parent paths
 	// The full code (with parent paths) is accessed with CodeStr
@@ -115,9 +121,9 @@ func (code Code) IsAncestor(ancestorCode Code) bool {
 	return nil != code.findAncestor(func(an Code) bool { return an == ancestorCode })
 }
 
-// MetaData is a pattern for attaching meta data to codes and inheriting it from a parent.
+// MetaData is used in a pattern for attaching meta data to codes and inheriting it from a parent.
 // See MetaDataFromAncestors.
-// This is used to attach an HTTP code to a Code.
+// This is used to attach an HTTP code to a Code as meta data.
 type MetaData map[CodeStr]interface{}
 
 // MetaDataFromAncestors looks for meta data starting at the current code.
