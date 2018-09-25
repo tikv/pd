@@ -89,7 +89,7 @@ func (s *testRegionSuite) TestRegions(c *C) {
 		newTestRegionInfo(3, 1, []byte("b"), []byte("c")),
 		newTestRegionInfo(4, 2, []byte("c"), []byte("d")),
 	}
-	regions := make([]*regionInfo, 0)
+	regions := make([]*regionInfo, 0, len(rs))
 	for _, r := range rs {
 		regions = append(regions, newRegionInfo(r))
 		mustRegionHeartbeat(c, s.svr, r)
