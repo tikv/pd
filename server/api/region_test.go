@@ -170,7 +170,7 @@ func (s *testRegionSuite) TestTopSize(c *C) {
 	r2 := newTestRegionInfo(8, 1, []byte("b"), []byte("c"), opt)
 	mustRegionHeartbeat(c, s.svr, r2)
 	opt = core.SetApproximateSize(800)
-	r3 := newTestRegionInfo(9, 1, []byte("c"), []byte("d"))
+	r3 := newTestRegionInfo(9, 1, []byte("c"), []byte("d"), opt)
 	mustRegionHeartbeat(c, s.svr, r3)
 	// query with limit
 	s.checkTopRegions(c, fmt.Sprintf("%s/regions/size?limit=%d", s.urlPrefix, 2), []uint64{7, 8})
