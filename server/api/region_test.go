@@ -136,6 +136,20 @@ func (s *testRegionSuite) TestTopFlow(c *C) {
 	s.checkTopRegions(c, fmt.Sprintf("%s/regions/version?limit=2", s.urlPrefix), []uint64{2, 3})
 }
 
+func (s *testRegionSuite) TestTopSize(c *C) {
+	opt := core.SetApproximateSize(1000)
+	r1 := newTestRegionInfo(7, 1, []byte("a"), []byte("b"), opt)
+	mustRegionHeartbeat(c, s.svr, r1)
+	opt = core.SetApproximateSize(900)
+	r2 := newTestRegionInfo(8, 1, []byte("b"), []byte("c"), opt)
+	mustRegionHeartbeat(c, s.svr, r2)
+	opt = core.SetApproximateSize(800)
+	r3 := newTestRegionInfo(9, 1, []byte("c"), []byte("d"))
+	mustRegionHeartbeat(c, s.svr, r3)
+	// query with limit
+	s.checkTopRegions(c, fmt.Sprintf("%s/regions/size?limit=%d", s.urlPrefix, 2), []uint64{7, 8})
+}
+
 func (s *testRegionSuite) checkTopRegions(c *C, url string, regionIDs []uint64) {
 	regions := &regionsInfo{}
 	err := readJSONWithURL(url, regions)

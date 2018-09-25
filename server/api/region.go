@@ -267,6 +267,12 @@ func (h *regionsHandler) GetTopVersion(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *regionsHandler) GetTopSize(w http.ResponseWriter, r *http.Request) {
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
+		return a.GetApproximateSize() < b.GetApproximateSize()
+	})
+}
+
 func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
