@@ -41,6 +41,8 @@ const (
 	LRUCache Type = 1
 	// TwoQueueCache is for 2Q cache
 	TwoQueueCache Type = 2
+	// TinyLFUCache is for TinyLFU cache
+	TinyLFUCache Type = 3
 )
 
 var (
@@ -110,6 +112,8 @@ func NewCache(size int, cacheType Type) Cache {
 		return newThreadSafeCache(newLRU(size))
 	case TwoQueueCache:
 		return newThreadSafeCache(newTwoQueue(size))
+	case TinyLFUCache:
+		return newThreadSafeCache(newTinyLFU(size))
 	default:
 		panic("Unknown cache type")
 	}

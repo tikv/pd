@@ -45,18 +45,25 @@ func newLRU(maxCount int) *LRU {
 
 // Put puts an item into cache.
 func (c *LRU) Put(key uint64, value interface{}) {
+	c.put(key, value)
+}
+
+func (c *LRU) put(key uint64, value interface{}) *Item {
 	if ele, ok := c.cache[key]; ok {
 		c.ll.MoveToFront(ele)
 		ele.Value.(*Item).Value = value
-		return
+		return nil
 	}
 
 	kv := &Item{Key: key, Value: value}
 	ele := c.ll.PushFront(kv)
 	c.cache[key] = ele
 	if c.maxCount != 0 && c.ll.Len() > c.maxCount {
+		back := c.ll.Back()
 		c.removeOldest()
+		return back.Value.(*Item)
 	}
+	return nil
 }
 
 // Get retrives an item from cache.
