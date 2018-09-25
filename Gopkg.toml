@@ -38,8 +38,11 @@
 
 [[constraint]]
   name = "github.com/pkg/errors"
-  version = ">= 0.10.1"
-  source = "https://github.com/pingcap/errors"
+  version = ">= 0.8.0"
+
+[[constraint]]
+  name = "github.com/pingcap/errcode"
+  version = ">= 0.1.0"
 
 [[override]]
   name = "github.com/BurntSushi/toml"

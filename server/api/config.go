@@ -20,7 +20,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/pd/pkg/error_code"
+	"github.com/pingcap/errcode"
 	"github.com/pingcap/pd/server"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"

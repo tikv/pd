@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/pingcap/pd/pkg/error_code"
+	"github.com/pingcap/errcode"
 )
 
 var (
