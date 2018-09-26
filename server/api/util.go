@@ -20,8 +20,8 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/errcode"
+	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
