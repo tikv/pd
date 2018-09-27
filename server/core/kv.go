@@ -40,85 +40,34 @@ const (
 	dirtyFlushTick  = time.Second
 )
 
-// KVProxy is a proxy of KV storage.
-type KVProxy struct {
-	defaultKV KVBase
-	regionKV  *RegionKV
-	isDefault atomic.Value
-}
-
-// NewKVProxy return a proxy of KV storage.
-func NewKVProxy(defaultKV KVBase) *KVProxy {
-	kv := &KVProxy{defaultKV: defaultKV}
-	kv.isDefault.Store(true)
-	return kv
-}
-
-func (kv *KVProxy) getKVBase() KVBase {
-	isDefault := kv.isDefault.Load().(bool)
-	if isDefault {
-		return kv.defaultKV
-	}
-	return kv.regionKV
-}
-
-// LoadRegion loads one regoin from KV.
-func (kv *KVProxy) LoadRegion(regionID uint64, region *metapb.Region) (bool, error) {
-	kvBase := kv.getKVBase()
-	return loadProto(kvBase, regionPath(regionID), region)
-}
-
-// LoadRegions loads all regions from KV to RegionsInfo.
-func (kv *KVProxy) LoadRegions(regions *RegionsInfo) error {
-	kvBase := kv.getKVBase()
-	return loadRegions(kvBase, regions)
-}
-
-// SaveRegion saves one region to KV.
-func (kv *KVProxy) SaveRegion(region *metapb.Region) error {
-	isDefault := kv.isDefault.Load().(bool)
-	if isDefault {
-		return saveProto(kv.defaultKV, regionPath(region.GetId()), region)
-	}
-	return kv.regionKV.SaveRegion(region)
-}
-
-// DeleteRegion deletes one region from KV.
-func (kv *KVProxy) DeleteRegion(region *metapb.Region) error {
-	kvBase := kv.getKVBase()
-	return kvBase.Delete(regionPath(region.GetId()))
-}
-
-func (kv *KVProxy) switchRegionStorage(useDefault bool) {
-	if kv.regionKV == nil {
-		return
-	}
-	kv.isDefault.Store(useDefault)
-}
-
 // KV wraps all kv operations, keep it stateless.
 type KV struct {
 	KVBase
-	proxy *KVProxy
+	regionKV    *RegionKV
+	useRegionKV int32
 }
 
 // NewKV creates KV instance with KVBase.
 func NewKV(base KVBase) *KV {
 	return &KV{
 		KVBase: base,
-		proxy:  NewKVProxy(base),
 	}
 }
 
 // SetProxyWithRegionKV sets the proxy with specified region storage.
 func (kv *KV) SetProxyWithRegionKV(regionKV *RegionKV) *KV {
-	kv.proxy.regionKV = regionKV
+	kv.regionKV = regionKV
 	return kv
 }
 
-// SwitchRegionStorage switch the region storage.
-func (kv *KV) SwitchRegionStorage(useDefault bool) {
-	kv.proxy.switchRegionStorage(useDefault)
+// SwitchToRegionStorage switch to the region storage.
+func (kv *KV) SwitchToRegionStorage() {
+	atomic.StoreInt32(&kv.useRegionKV, 1)
+}
+
+// SwitchToDefaultStorage switch to the to default storage.
+func (kv *KV) SwitchToDefaultStorage() {
+	atomic.StoreInt32(&kv.useRegionKV, 0)
 }
 
 func (kv *KV) storePath(storeID uint64) string {
@@ -164,22 +113,34 @@ func (kv *KV) SaveStore(store *metapb.Store) error {
 
 // LoadRegion loads one regoin from KV.
 func (kv *KV) LoadRegion(regionID uint64, region *metapb.Region) (bool, error) {
-	return kv.proxy.LoadRegion(regionID, region)
+	if atomic.LoadInt32(&kv.useRegionKV) > 0 {
+		return loadProto(kv.regionKV, regionPath(regionID), region)
+	}
+	return loadProto(kv.KVBase, regionPath(regionID), region)
 }
 
 // LoadRegions loads all regions from KV to RegionsInfo.
 func (kv *KV) LoadRegions(regions *RegionsInfo) error {
-	return kv.proxy.LoadRegions(regions)
+	if atomic.LoadInt32(&kv.useRegionKV) > 0 {
+		return loadRegions(kv.regionKV, regions)
+	}
+	return loadRegions(kv.KVBase, regions)
 }
 
 // SaveRegion saves one region to KV.
 func (kv *KV) SaveRegion(region *metapb.Region) error {
-	return kv.proxy.SaveRegion(region)
+	if atomic.LoadInt32(&kv.useRegionKV) > 0 {
+		return kv.regionKV.SaveRegion(region)
+	}
+	return saveProto(kv.KVBase, regionPath(region.GetId()), region)
 }
 
 // DeleteRegion deletes one region from KV.
 func (kv *KV) DeleteRegion(region *metapb.Region) error {
-	return kv.proxy.DeleteRegion(region)
+	if atomic.LoadInt32(&kv.useRegionKV) > 0 {
+		return deleteRegion(kv.regionKV, region)
+	}
+	return deleteRegion(kv.KVBase, region)
 }
 
 // SaveConfig stores marshalable cfg to the configPath.
@@ -270,16 +231,16 @@ func (kv *KV) loadFloatWithDefaultValue(path string, def float64) (float64, erro
 
 // Flush flush the dirty region to storage.
 func (kv *KV) Flush() error {
-	if kv.proxy.regionKV != nil {
-		return kv.proxy.regionKV.FlushRegion()
+	if kv.regionKV != nil {
+		kv.regionKV.FlushRegion()
 	}
 	return nil
 }
 
 // Close close the kv.
 func (kv *KV) Close() error {
-	if kv.proxy.regionKV != nil {
-		return kv.proxy.regionKV.Close()
+	if kv.regionKV != nil {
+		return kv.regionKV.Close()
 	}
 	return nil
 }

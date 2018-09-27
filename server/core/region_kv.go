@@ -111,21 +111,6 @@ func (kv *RegionKV) SaveRegion(region *metapb.Region) error {
 	return nil
 }
 
-// DeleteRegion deletes one region from KV.
-func (kv *RegionKV) DeleteRegion(region *metapb.Region) error {
-	return deleteRegion(kv, region)
-}
-
-// LoadRegion loads one regoin from KV.
-func (kv *RegionKV) LoadRegion(regionID uint64, region *metapb.Region) (bool, error) {
-	return loadProto(kv, regionPath(regionID), region)
-}
-
-// LoadRegions loads all regions from KV to RegionsInfo.
-func (kv *RegionKV) LoadRegions(regions *RegionsInfo) error {
-	return loadRegions(kv, regions)
-}
-
 func deleteRegion(kv KVBase, region *metapb.Region) error {
 	return kv.Delete(regionPath(region.GetId()))
 }

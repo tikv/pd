@@ -26,6 +26,7 @@ type KVBase interface {
 	Save(key, value string) error
 	Delete(key string) error
 }
+
 type memoryKV struct {
 	sync.RWMutex
 	tree *btree.BTree

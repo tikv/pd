@@ -303,15 +303,11 @@ func (s *Server) watchLeader(leader *pdpb.Member) {
 		log.Error("reload config failed:", err)
 		return
 	}
-	isSync := s.scheduleOpt.loadPDServerConfig().EnableRegionStorage
-	if isSync {
+	if s.scheduleOpt.loadPDServerConfig().EnableRegionStorage {
 		s.cluster.regionSyncer.startSyncWithLeader(leader.GetClientUrls()[0])
+		defer s.cluster.regionSyncer.stopSyncWithLeader()
 	}
-	defer func() {
-		if isSync {
-			s.cluster.regionSyncer.stopSyncWithLeader()
-		}
-	}()
+
 	for {
 		rch := watcher.Watch(ctx, s.getLeaderPath())
 		for wresp := range rch {
@@ -383,11 +379,11 @@ func (s *Server) reloadConfigFromKV() error {
 	if err != nil {
 		return err
 	}
-	enableRegionKV := s.scheduleOpt.loadPDServerConfig().EnableRegionStorage
-	s.kv.SwitchRegionStorage(!enableRegionKV)
-	if enableRegionKV {
+	if s.scheduleOpt.loadPDServerConfig().EnableRegionStorage {
+		s.kv.SwitchToRegionStorage()
 		log.Info("server enable region storage")
 	} else {
+		s.kv.SwitchToDefaultStorage()
 		log.Info("server disable region storage")
 	}
 	return nil

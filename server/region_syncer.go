@@ -64,14 +64,24 @@ func (s *regionSyncer) bindStream(name string, stream syncerServer) {
 }
 
 func (s *regionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
+	failed := make([]string, 0, 3)
 	s.RLock()
-	for _, sender := range s.streams {
+	for name, sender := range s.streams {
 		err := sender.Send(regions)
 		if err != nil {
 			log.Error("region syncer send data meet error:", err)
+			failed = append(failed, name)
 		}
 	}
 	s.RUnlock()
+	if len(failed) > 0 {
+		s.Lock()
+		for _, name := range failed {
+			delete(s.streams, name)
+			log.Infof("region syncer delete the stream of %s", name)
+		}
+		s.Unlock()
+	}
 }
 
 func (s *regionSyncer) stopSyncWithLeader() {
