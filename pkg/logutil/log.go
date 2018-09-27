@@ -23,9 +23,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/coreos/etcd/raft"
 	"github.com/coreos/pkg/capnslog"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"google.golang.org/grpc/grpclog"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -217,6 +219,14 @@ func InitFileLog(cfg *FileLogConfig) error {
 	return nil
 }
 
+type wrapLogrus struct {
+	*log.Logger
+}
+
+func (lg *wrapLogrus) V(l int) bool {
+	return true
+}
+
 var once sync.Once
 
 // InitLogger initializes PD's logger.
@@ -234,6 +244,11 @@ func InitLogger(cfg *LogConfig) error {
 
 		// etcd log
 		capnslog.SetFormatter(&redirectFormatter{})
+		// grpc log
+		lg := &wrapLogrus{log.StandardLogger()}
+		grpclog.SetLoggerV2(lg)
+		// raft log
+		raft.SetLogger(lg)
 
 		if len(cfg.File.Filename) == 0 {
 			return
