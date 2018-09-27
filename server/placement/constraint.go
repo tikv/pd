@@ -13,8 +13,6 @@
 
 package placement
 
-import "github.com/pingcap/pd/server/core"
-
 // Config is consist of a list of constraints.
 type Config struct {
 	Constraints []*Constraint
@@ -35,12 +33,4 @@ type Constraint struct {
 // expression.
 type Filter struct {
 	Key, Value string
-}
-
-// Cluster provides an overview of a cluster's region distribution.
-type Cluster interface {
-	GetRegion(id uint64) *core.RegionInfo
-	GetStores() []*core.StoreInfo
-	GetStore(id uint64) *core.StoreInfo
-	GetRegionStores(id uint64) []*core.StoreInfo
 }

@@ -50,10 +50,14 @@ func (s *testPlacementSuite) TestConfigParse(c *C) {
 			source: " count ( )  <5 ;; \tlabel_values\t ( zone : z1 , \thost , ssd ) > -1 ;;;",
 			config: s.config(s.constraint("count", "<", 5), s.constraint("label_values", ">", -1, "zone", "z1", "host", "", "ssd", "")),
 		},
+		// Wrong format configs.
 		{source: "count=3"},
+		{source: "count()=abc"},
 		{source: "count()=<3"},
 		{source: "count()"},
 		{source: "+count()"},
+		{source: "count(a=b)=1"},
+		{source: "count(a;b;c)=1"},
 	}
 
 	for _, t := range cases {
