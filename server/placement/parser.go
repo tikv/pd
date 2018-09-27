@@ -69,11 +69,12 @@ func parseConstraint(str string) (*Constraint, error) {
 
 func parserFunctionName(str string) (string, error) {
 	str = strings.TrimSpace(str)
-	ok, _ := regexp.MatchString(`^[a-zA-Z0-9_]+$`, str)
-	if !ok {
-		return "", errors.Errorf("invalid function '%s'", str)
+	for _, f := range functionList {
+		if str == f {
+			return str, nil
+		}
 	}
-	return str, nil
+	return "", errors.Errorf("unexpected function name '%s'", str)
 }
 
 func parseArguments(str string) (filters []Filter, labels []string, err error) {

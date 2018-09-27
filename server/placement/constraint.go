@@ -34,3 +34,5 @@ type Constraint struct {
 type Filter struct {
 	Key, Value string
 }
+
+var functionList = []string{"count", "label_values", "count_leader", "isolation_level"}
