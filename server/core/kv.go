@@ -54,18 +54,18 @@ func NewKV(base KVBase) *KV {
 	}
 }
 
-// SetProxyWithRegionKV sets the proxy with specified region storage.
-func (kv *KV) SetProxyWithRegionKV(regionKV *RegionKV) *KV {
+// SetRegionKV sets the region storage.
+func (kv *KV) SetRegionKV(regionKV *RegionKV) *KV {
 	kv.regionKV = regionKV
 	return kv
 }
 
-// SwitchToRegionStorage switch to the region storage.
+// SwitchToRegionStorage switches to the region storage.
 func (kv *KV) SwitchToRegionStorage() {
 	atomic.StoreInt32(&kv.useRegionKV, 1)
 }
 
-// SwitchToDefaultStorage switch to the to default storage.
+// SwitchToDefaultStorage switches to the to default storage.
 func (kv *KV) SwitchToDefaultStorage() {
 	atomic.StoreInt32(&kv.useRegionKV, 0)
 }

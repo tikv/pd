@@ -214,7 +214,7 @@ func (s *Server) startServer() error {
 	if err != nil {
 		return err
 	}
-	s.kv = core.NewKV(kvBase).SetProxyWithRegionKV(regionKV)
+	s.kv = core.NewKV(kvBase).SetRegionKV(regionKV)
 	s.cluster = newRaftCluster(s, s.clusterID)
 	s.hbStreams = newHeartbeatStreams(s.clusterID)
 	if s.classifier, err = namespace.CreateClassifier(s.cfg.NamespaceClassifier, s.kv, s.idAlloc); err != nil {

@@ -130,7 +130,7 @@ func (c *RaftCluster) runSyncRegions() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 	var requests []*metapb.Region
-	// grpc has limit on message size
+	ticker := time.NewTicker(syncerKeepAliveInterval)
 	for {
 		select {
 		case <-c.quit:
@@ -147,6 +147,9 @@ func (c *RaftCluster) runSyncRegions() {
 				Regions: requests,
 			}
 			c.regionSyncer.broadcast(regions)
+		case <-ticker.C:
+			alive := &pdpb.SyncRegionResponse{Header: &pdpb.ResponseHeader{ClusterId: c.s.clusterID}}
+			c.regionSyncer.broadcast(alive)
 		}
 		requests = requests[:0]
 	}

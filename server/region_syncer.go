@@ -27,8 +27,9 @@ import (
 )
 
 const (
-	msgSize                = 8 * 1024 * 1024
-	maxSyncRegionBatchSize = 100
+	msgSize                 = 8 * 1024 * 1024
+	maxSyncRegionBatchSize  = 100
+	syncerKeepAliveInterval = 10 * time.Second
 )
 
 type syncerClient interface {
