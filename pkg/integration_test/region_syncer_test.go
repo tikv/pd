@@ -14,7 +14,6 @@
 package integration
 
 import (
-	"fmt"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -62,13 +61,14 @@ func (s *integrationTestSuite) TestRegionSyncer(c *C) {
 		regions = append(regions, core.NewRegionInfo(r, r.Peers[0]))
 	}
 	for _, region := range regions {
-		rc.HandleRegionHeartbeat(region)
+		err = rc.HandleRegionHeartbeat(region)
+		c.Assert(err, IsNil)
 	}
 	// ensure flush to region kv
 	time.Sleep(3 * time.Second)
-	leaderServer.Stop()
-	leader := cluster.WaitLeader()
-	fmt.Println("leader:", leader)
+	err = leaderServer.Stop()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
 	leaderServer = cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer, NotNil)
 	loadRegions := leaderServer.server.GetRaftCluster().GetRegions()

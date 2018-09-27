@@ -48,14 +48,12 @@ type KVProxy struct {
 }
 
 // NewKVProxy return a proxy of KV storage.
-func NewKVProxy(defaultKV KVBase, regionKV *RegionKV) *KVProxy {
-	kv := &KVProxy{
-		defaultKV: defaultKV,
-		regionKV:  regionKV,
-	}
+func NewKVProxy(defaultKV KVBase) *KVProxy {
+	kv := &KVProxy{defaultKV: defaultKV}
 	kv.isDefault.Store(true)
 	return kv
 }
+
 func (kv *KVProxy) getKVBase() KVBase {
 	isDefault := kv.isDefault.Load().(bool)
 	if isDefault {
@@ -108,7 +106,7 @@ type KV struct {
 func NewKV(base KVBase) *KV {
 	return &KV{
 		KVBase: base,
-		proxy:  NewKVProxy(base, nil),
+		proxy:  NewKVProxy(base),
 	}
 }
 
