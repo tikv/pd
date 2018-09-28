@@ -23,9 +23,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/coreos/etcd/raft"
 	"github.com/coreos/pkg/capnslog"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"google.golang.org/grpc/grpclog"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -217,6 +219,22 @@ func InitFileLog(cfg *FileLogConfig) error {
 	return nil
 }
 
+type wrapLogrus struct {
+	*log.Logger
+}
+
+// V provides the functionality that returns whether a particular log level is at
+// least l - this is needed to meet the LoggerV2 interface.  GRPC's logging levels
+// are: https://github.com/grpc/grpc-go/blob/master/grpclog/loggerv2.go#L71
+// 0=info, 1=warning, 2=error, 3=fatal
+// logrus's are: https://github.com/sirupsen/logrus/blob/master/logrus.go
+// 0=panic, 1=fatal, 2=error, 3=warn, 4=info, 5=debug
+func (lg *wrapLogrus) V(l int) bool {
+	// translate to logrus level
+	logrusLevel := 4 - l
+	return int(lg.Logger.Level) <= logrusLevel
+}
+
 var once sync.Once
 
 // InitLogger initializes PD's logger.
@@ -234,6 +252,11 @@ func InitLogger(cfg *LogConfig) error {
 
 		// etcd log
 		capnslog.SetFormatter(&redirectFormatter{})
+		// grpc log
+		lg := &wrapLogrus{log.StandardLogger()}
+		grpclog.SetLoggerV2(lg)
+		// raft log
+		raft.SetLogger(lg)
 
 		if len(cfg.File.Filename) == 0 {
 			return
