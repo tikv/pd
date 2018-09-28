@@ -306,7 +306,7 @@ func showRegionsFromStartKeyCommandFunc(cmd *cobra.Command, args []string) {
 	// TODO: Deal with path escaped
 	prefix := regionKeyPrefix + "/" + key
 	if len(args) == 2 {
-		if _, err := strconv.Atoi(args[1]); err != nil {
+		if _, err = strconv.Atoi(args[1]); err != nil {
 			fmt.Println("limit should be a number")
 			return
 		}

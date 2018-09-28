@@ -169,7 +169,7 @@ func (h *regionsHandler) ScanRegionsByKey(w http.ResponseWriter, r *http.Request
 	for _, region := range regions {
 		regionInfos = append(regionInfos, newRegionInfo(region))
 	}
-	regionsInfo := regionsInfo{
+	regionsInfo := &regionsInfo{
 		Count:   len(regionInfos),
 		Regions: regionInfos,
 	}
