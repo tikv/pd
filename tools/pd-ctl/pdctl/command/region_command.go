@@ -32,6 +32,7 @@ var (
 	regionsReadflowPrefix  = "pd/api/v1/regions/readflow"
 	regionsConfVerPrefix   = "pd/api/v1/regions/confver"
 	regionsVersionPrefix   = "pd/api/v1/regions/version"
+	regionsSizePrefix      = "pd/api/v1/regions/size"
 	regionsSiblingPrefix   = "pd/api/v1/regions/sibling"
 	regionIDPrefix         = "pd/api/v1/region/id"
 	regionKeyPrefix        = "pd/api/v1/region/key"
@@ -48,6 +49,7 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRegionWithCheckCommand())
 	r.AddCommand(NewRegionWithSiblingCommand())
 	r.AddCommand(NewRegionWithStoreCommand())
+	r.AddCommand(NewRegionsWithStartKeyCommand())
 
 	topRead := &cobra.Command{
 		Use:   "topread <limit>",
@@ -76,6 +78,13 @@ func NewRegionCommand() *cobra.Command {
 		Run:   showRegionTopVersionCommandFunc,
 	}
 	r.AddCommand(topVersion)
+
+	topSize := &cobra.Command{
+		Use:   "topsize <limit>",
+		Short: "show regions with top size",
+		Run:   showRegionTopSizeCommandFunc,
+	}
+	r.AddCommand(topSize)
 	r.Flags().String("jq", "", "jq query")
 
 	return r
@@ -171,6 +180,23 @@ func showRegionTopVersionCommandFunc(cmd *cobra.Command, args []string) {
 	fmt.Println(r)
 }
 
+func showRegionTopSizeCommandFunc(cmd *cobra.Command, args []string) {
+	prefix := regionsSizePrefix
+	if len(args) == 1 {
+		if _, err := strconv.Atoi(args[0]); err != nil {
+			fmt.Println("limit should be a number")
+			return
+		}
+		prefix += "?limit=" + args[0]
+	}
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get regions: %s\n", err)
+		return
+	}
+	fmt.Println(r)
+}
+
 // NewRegionWithKeyCommand return a region with key subcommand of regionCmd
 func NewRegionWithKeyCommand() *cobra.Command {
 	r := &cobra.Command{
@@ -238,6 +264,60 @@ func decodeProtobufText(text string) (string, error) {
 		buf = append(buf, c)
 	}
 	return string(buf), nil
+}
+
+// NewRegionsWithStartKeyCommand returns regions from startkey subcommand of regionCmd.
+func NewRegionsWithStartKeyCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "startkey [--format=raw|pb|proto|protobuf] <key> <limit>",
+		Short: "show regions from start key",
+		Run:   showRegionsFromStartKeyCommandFunc,
+	}
+
+	r.Flags().String("format", "raw", "the key format")
+	return r
+}
+
+func showRegionsFromStartKeyCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) < 1 || len(args) > 2 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+
+	var (
+		key string
+		err error
+	)
+
+	format := cmd.Flags().Lookup("format").Value.String()
+	switch format {
+	case "raw":
+		key = args[0]
+	case "pb", "proto", "protobuf":
+		key, err = decodeProtobufText(args[0])
+		if err != nil {
+			fmt.Println("Error: ", err)
+			return
+		}
+	default:
+		fmt.Println("Error: unknown format")
+		return
+	}
+	// TODO: Deal with path escaped
+	prefix := regionKeyPrefix + "/" + key
+	if len(args) == 2 {
+		if _, err = strconv.Atoi(args[1]); err != nil {
+			fmt.Println("limit should be a number")
+			return
+		}
+		prefix += "?limit=" + args[1]
+	}
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get region: %s\n", err)
+		return
+	}
+	fmt.Println(r)
 }
 
 // NewRegionWithCheckCommand returns a region with check subcommand of regionCmd
