@@ -322,7 +322,7 @@
   revision = "1c287c953996ab3a0bf535dba9d53d809d3dc0b6"
 
 [[projects]]
-  branch = "sync-regions"
+  branch = "master"
   digest = "1:94d3fa0d66021a886bcc2cb35fad3571afc5d9cda8f295bcf05b0c15a86c8520"
   name = "github.com/pingcap/kvproto"
   packages = [
@@ -331,8 +331,8 @@
     "pkg/pdpb",
   ]
   pruneopts = "NUT"
-  revision = "fa493f613b452dc8bac6f74d5448c9eed5eb173d"
-  source = "https://github.com/nolouch/kvproto.git"
+  revision = "fae11119f066d7fed2ae3d785fedd9f446143f70"
+  source = "https://github.com/pingcap/kvproto.git"
 
 [[projects]]
   digest = "1:5cf3f025cbee5951a4ee961de067c8a89fc95a5adabead774f82822efabab121"
@@ -688,6 +688,7 @@
     "google.golang.org/grpc",
     "google.golang.org/grpc/codes",
     "google.golang.org/grpc/credentials",
+    "google.golang.org/grpc/grpclog",
     "google.golang.org/grpc/status",
     "gopkg.in/natefinch/lumberjack.v2",
   ]

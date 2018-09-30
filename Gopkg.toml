@@ -26,8 +26,8 @@
 
 [[constraint]]
   name = "github.com/pingcap/kvproto"
-  source = "https://github.com/nolouch/kvproto.git"
-  branch = "sync-regions"
+  source = "https://github.com/pingcap/kvproto.git"
+  branch = "master"
 
 [[constraint]]
   name = "github.com/google/btree"
