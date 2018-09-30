@@ -1,5 +1,20 @@
 # PD Change Log
 
+## v2.1.0-rc2
+### Features
+* Support the `GetAllStores` interface
+* Add the statistics of scheduling estimation in Simulator
+### Improvements
+* Optimize the handling process of down stores to make up replicas as soon as possible
+* Optimize the start of Coordinator to reduce the unnecessary scheduling caused by restarting PD
+* Optimize the memory usage to reduce the overhead caused by heartbeats
+* Optimize error handling and improve the log information
+* Support querying the Region information of a specific store in pd-ctl
+* Support querying the topN Region information based on version
+* Support more accurate TSO decoding in pd-ctl
+### Bug fix
+* Fix the issue that pd-ctl uses the `hot store` command to exit wrongly
+
 ## v2.1.0-rc1
 ### Features
 * Introduce the version control mechanism and support rolling update of the cluster with compatibility

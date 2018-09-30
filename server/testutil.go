@@ -57,7 +57,7 @@ func NewTestServer() (*Config, *Server, CleanupFunc, error) {
 }
 
 // NewTestSingleConfig is only for test to create one pd.
-// Because pd-client also needs this, so export here.
+// Because PD client also needs this, so export here.
 func NewTestSingleConfig() *Config {
 	cfg := &Config{
 		Name:       "pd",
@@ -93,7 +93,7 @@ func NewTestSingleConfig() *Config {
 }
 
 // NewTestMultiConfig is only for test to create multiple pd configurations.
-// Because pd-client also needs this, so export here.
+// Because PD client also needs this, so export here.
 func NewTestMultiConfig(count int) []*Config {
 	cfgs := make([]*Config, count)
 

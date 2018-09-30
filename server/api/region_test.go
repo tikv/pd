@@ -83,6 +83,51 @@ func (s *testRegionSuite) TestRegion(c *C) {
 	c.Assert(r2, DeepEquals, newRegionInfo(r))
 }
 
+func (s *testRegionSuite) TestRegions(c *C) {
+	rs := []*core.RegionInfo{
+		newTestRegionInfo(2, 1, []byte("a"), []byte("b")),
+		newTestRegionInfo(3, 1, []byte("b"), []byte("c")),
+		newTestRegionInfo(4, 2, []byte("c"), []byte("d")),
+	}
+	regions := make([]*regionInfo, 0, len(rs))
+	for _, r := range rs {
+		regions = append(regions, newRegionInfo(r))
+		mustRegionHeartbeat(c, s.svr, r)
+	}
+	url := fmt.Sprintf("%s/regions", s.urlPrefix)
+	regionsInfo := &regionsInfo{}
+	err := readJSONWithURL(url, regionsInfo)
+	c.Assert(err, IsNil)
+	c.Assert(regionsInfo.Count, Equals, len(regions))
+	sort.Slice(regionsInfo.Regions, func(i, j int) bool {
+		return regionsInfo.Regions[i].ID < regionsInfo.Regions[j].ID
+	})
+	for i, r := range regionsInfo.Regions {
+		c.Assert(r.ID, Equals, regions[i].ID)
+		c.Assert(r.ApproximateSize, Equals, regions[i].ApproximateSize)
+		c.Assert(r.ApproximateKeys, Equals, regions[i].ApproximateKeys)
+	}
+}
+
+func (s *testRegionSuite) TestScanRegionByKey(c *C) {
+	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	r2 := newTestRegionInfo(3, 1, []byte("b"), []byte("c"))
+	r3 := newTestRegionInfo(4, 2, []byte("c"), []byte("d"))
+	mustRegionHeartbeat(c, s.svr, r1)
+	mustRegionHeartbeat(c, s.svr, r2)
+	mustRegionHeartbeat(c, s.svr, r3)
+
+	url := fmt.Sprintf("%s/regions/key/%s", s.urlPrefix, "b")
+	regionIds := []uint64{3, 4}
+	regions := &regionsInfo{}
+	err := readJSONWithURL(url, regions)
+	c.Assert(err, IsNil)
+	c.Assert(len(regionIds), Equals, regions.Count)
+	for i, v := range regionIds {
+		c.Assert(v, Equals, regions.Regions[i].ID)
+	}
+}
+
 func (s *testRegionSuite) TestStoreRegions(c *C) {
 	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r2 := newTestRegionInfo(3, 1, []byte("b"), []byte("c"))
@@ -134,6 +179,20 @@ func (s *testRegionSuite) TestTopFlow(c *C) {
 	s.checkTopRegions(c, fmt.Sprintf("%s/regions/confver?limit=2", s.urlPrefix), []uint64{3, 2})
 	s.checkTopRegions(c, fmt.Sprintf("%s/regions/version", s.urlPrefix), []uint64{2, 3, 1})
 	s.checkTopRegions(c, fmt.Sprintf("%s/regions/version?limit=2", s.urlPrefix), []uint64{2, 3})
+}
+
+func (s *testRegionSuite) TestTopSize(c *C) {
+	opt := core.SetApproximateSize(1000)
+	r1 := newTestRegionInfo(7, 1, []byte("a"), []byte("b"), opt)
+	mustRegionHeartbeat(c, s.svr, r1)
+	opt = core.SetApproximateSize(900)
+	r2 := newTestRegionInfo(8, 1, []byte("b"), []byte("c"), opt)
+	mustRegionHeartbeat(c, s.svr, r2)
+	opt = core.SetApproximateSize(800)
+	r3 := newTestRegionInfo(9, 1, []byte("c"), []byte("d"), opt)
+	mustRegionHeartbeat(c, s.svr, r3)
+	// query with limit
+	s.checkTopRegions(c, fmt.Sprintf("%s/regions/size?limit=%d", s.urlPrefix, 2), []uint64{7, 8})
 }
 
 func (s *testRegionSuite) checkTopRegions(c *C, url string, regionIDs []uint64) {

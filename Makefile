@@ -7,9 +7,10 @@ BASIC_TEST_PKGS := $(filter-out github.com/pingcap/pd/pkg/integration_test,$(TES
 PACKAGES := go list ./...
 PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|github.com/pingcap/pd/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
+RETOOL:= ./hack/retool
 
-GOFAIL_ENABLE  := $$(find $$PWD/ -type d | grep -vE "(\.git|vendor)" | xargs retool do gofail enable)
-GOFAIL_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|vendor)" | xargs retool do gofail disable)
+GOFAIL_ENABLE  := $$(find $$PWD/ -type d | grep -vE "(\.git|vendor)" | xargs ./hack/retool do gofail enable)
+GOFAIL_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|vendor)" | xargs ./hack/retool do gofail disable)
 
 LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --dirty)"
 LDFLAGS += -X "$(PD_PKG)/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
@@ -35,9 +36,9 @@ ifeq ("$(WITH_RACE)", "1")
 else
 	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
-	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl cmd/pd-ctl/main.go
-	CGO_ENABLED=0 go build -o bin/pd-tso-bench cmd/pd-tso-bench/main.go
-	CGO_ENABLED=0 go build -o bin/pd-recover cmd/pd-recover/main.go
+	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl tools/pd-ctl/main.go
+	CGO_ENABLED=0 go build -o bin/pd-tso-bench tools/pd-tso-bench/main.go
+	CGO_ENABLED=0 go build -o bin/pd-recover tools/pd-recover/main.go
 
 test: retool-setup
 	# testing..
@@ -52,26 +53,26 @@ basic_test:
 
 # These need to be fixed before they can be ran regularly
 check-fail:
-	CGO_ENABLED=0 retool do gometalinter.v2 --disable-all \
+	CGO_ENABLED=0 ./hack/retool do gometalinter.v2 --disable-all \
 	  --enable errcheck \
 	  $$($(PACKAGE_DIRECTORIES))
-	CGO_ENABLED=0 retool do gosec $$($(PACKAGE_DIRECTORIES))
+	CGO_ENABLED=0 ./hack/retool do gosec $$($(PACKAGE_DIRECTORIES))
 
 check-all: static lint
 	@echo "checking"
 
 retool-setup:
 	@which retool >/dev/null 2>&1 || go get github.com/twitchtv/retool
-	@retool sync
+	@./hack/retool sync
 
 check: retool-setup check-all
 
 static:
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
-	retool do govet --shadow $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
+	./hack/retool do govet --shadow $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 
-	CGO_ENABLED=0 retool do gometalinter.v2 --disable-all --deadline 120s \
+	CGO_ENABLED=0 ./hack/retool do gometalinter.v2 --disable-all --deadline 120s \
 	  --enable misspell \
 	  --enable megacheck \
 	  --enable ineffassign \
@@ -79,7 +80,7 @@ static:
 
 lint:
 	@echo "linting"
-	CGO_ENABLED=0 retool do revive -formatter friendly -config revive.toml $$($(PACKAGES))
+	CGO_ENABLED=0 ./hack/retool do revive -formatter friendly -config revive.toml $$($(PACKAGES))
 
 travis_coverage:
 ifeq ("$(TRAVIS_COVERAGE)", "1")
@@ -100,7 +101,7 @@ endif
 	bash ./hack/clean_vendor.sh
 
 simulator:
-	CGO_ENABLED=0 go build -o bin/simulator cmd/simulator/main.go
+	CGO_ENABLED=0 go build -o bin/pd-simulator tools/pd-simulator/main.go
 
 gofail-enable:
 	# Converting gofail failpoints...

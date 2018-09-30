@@ -144,8 +144,8 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster, opIn
 	regions := cluster.ScanRegions(l.lastKey, scanLimit)
 	// scan to the end
 	if len(regions) <= 1 {
-		l.adjacentRegionsCount = 0
 		schedulerStatus.WithLabelValues(l.GetName(), "adjacent_count").Set(float64(l.adjacentRegionsCount))
+		l.adjacentRegionsCount = 0
 		l.lastKey = []byte("")
 		return nil
 	}
@@ -199,7 +199,9 @@ func (l *balanceAdjacentRegionScheduler) process(cluster schedule.Cluster) []*sc
 		l.cacheRegions.head = head + 1
 		l.lastKey = r2.GetStartKey()
 	}()
-	if l.unsafeToBalance(cluster, r1) {
+	// after the cluster is prepared, there is a gap that some regions heartbeats are not received.
+	// Leader of those region is nil, and we should skip them.
+	if r1.GetLeader() == nil || r2.GetLeader() == nil || l.unsafeToBalance(cluster, r1) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}
@@ -221,6 +223,9 @@ func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster schedule.Cluste
 		return true
 	}
 	store := cluster.GetStore(region.GetLeader().GetStoreId())
+	if store == nil {
+		return true
+	}
 	s := l.selector.SelectSource(cluster, []*core.StoreInfo{store})
 	if s == nil {
 		return true
