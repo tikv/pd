@@ -109,6 +109,25 @@ func (s *testRegionSuite) TestRegions(c *C) {
 	}
 }
 
+func (s *testRegionSuite) TestScanRegionByKey(c *C) {
+	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	r2 := newTestRegionInfo(3, 1, []byte("b"), []byte("c"))
+	r3 := newTestRegionInfo(4, 2, []byte("c"), []byte("d"))
+	mustRegionHeartbeat(c, s.svr, r1)
+	mustRegionHeartbeat(c, s.svr, r2)
+	mustRegionHeartbeat(c, s.svr, r3)
+
+	url := fmt.Sprintf("%s/regions/key/%s", s.urlPrefix, "b")
+	regionIds := []uint64{3, 4}
+	regions := &regionsInfo{}
+	err := readJSONWithURL(url, regions)
+	c.Assert(err, IsNil)
+	c.Assert(len(regionIds), Equals, regions.Count)
+	for i, v := range regionIds {
+		c.Assert(v, Equals, regions.Regions[i].ID)
+	}
+}
+
 func (s *testRegionSuite) TestStoreRegions(c *C) {
 	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r2 := newTestRegionInfo(3, 1, []byte("b"), []byte("c"))

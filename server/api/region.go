@@ -142,6 +142,40 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
+func (h *regionsHandler) ScanRegionsByKey(w http.ResponseWriter, r *http.Request) {
+	cluster := h.svr.GetRaftCluster()
+	if cluster == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
+		return
+	}
+	vars := mux.Vars(r)
+	startKey := vars["key"]
+
+	limit := defaultRegionLimit
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if limit > maxRegionLimit {
+		limit = maxRegionLimit
+	}
+	regions := cluster.ScanRegionsByKey([]byte(startKey), limit)
+
+	regionInfos := make([]*regionInfo, 0, len(regions))
+	for _, region := range regions {
+		regionInfos = append(regionInfos, newRegionInfo(region))
+	}
+	regionsInfo := &regionsInfo{
+		Count:   len(regionInfos),
+		Regions: regionInfos,
+	}
+	h.rd.JSON(w, http.StatusOK, regionsInfo)
+}
+
 func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {

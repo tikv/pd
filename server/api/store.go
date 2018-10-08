@@ -20,9 +20,9 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/apiutil"
-	"github.com/pingcap/pd/pkg/error_code"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"

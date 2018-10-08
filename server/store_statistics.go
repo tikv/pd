@@ -45,6 +45,7 @@ func newStoreStatistics(opt *scheduleOption, namespace string) *storeStatistics 
 }
 
 func (s *storeStatistics) Observe(store *core.StoreInfo) {
+	id := strconv.FormatUint(store.GetId(), 10)
 	// Store state.
 	switch store.GetState() {
 	case metapb.StoreState_Up:
@@ -61,6 +62,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 		s.Offline++
 	case metapb.StoreState_Tombstone:
 		s.Tombstone++
+		s.resetStoreStatistics(id)
 		return
 	}
 	if store.IsLowSpace(s.opt.GetLowSpaceRatio()) {
@@ -73,7 +75,6 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	s.RegionCount += store.RegionCount
 	s.LeaderCount += store.LeaderCount
 
-	id := strconv.FormatUint(store.GetId(), 10)
 	storeStatusGauge.WithLabelValues(s.namespace, id, "region_score").Set(store.RegionScore(s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
 	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_score").Set(store.LeaderScore(0))
 	storeStatusGauge.WithLabelValues(s.namespace, id, "region_size").Set(float64(store.RegionSize))
@@ -102,6 +103,18 @@ func (s *storeStatistics) Collect() {
 	for label, value := range metrics {
 		clusterStatusGauge.WithLabelValues(label, s.namespace).Set(value)
 	}
+}
+
+func (s *storeStatistics) resetStoreStatistics(id string) {
+	storeStatusGauge.WithLabelValues(s.namespace, id, "region_score").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_score").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, id, "region_size").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, id, "region_count").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_size").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_count").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, id, "store_available").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, id, "store_used").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, id, "store_capacity").Set(0)
 }
 
 type storeStatisticsMap struct {

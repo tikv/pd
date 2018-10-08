@@ -19,9 +19,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/error_code"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
@@ -226,6 +226,11 @@ func (c *RaftCluster) GetPrevRegionByKey(regionKey []byte) (*metapb.Region, *met
 // GetRegionInfoByKey gets regionInfo by region key from cluster.
 func (c *RaftCluster) GetRegionInfoByKey(regionKey []byte) *core.RegionInfo {
 	return c.cachedCluster.searchRegion(regionKey)
+}
+
+// ScanRegionsByKey scans region with start key, until number greater than limit.
+func (c *RaftCluster) ScanRegionsByKey(startKey []byte, limit int) []*core.RegionInfo {
+	return c.cachedCluster.ScanRegions(startKey, limit)
 }
 
 // GetRegionByID gets region and leader peer by regionID from cluster.

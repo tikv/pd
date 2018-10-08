@@ -13,47 +13,57 @@
 
 // Package errcode facilitates standardized API error codes.
 // The goal is that clients can reliably understand errors by checking against immutable error codes
-// A Code should never be modified once committed (and released for use by clients).
-// Instead a new Code should be created.
+//
+// This godoc documents usage. For broader context, see https://github.com/pingcap/errcode/tree/master/README.md
 //
 // Error codes are represented as strings by CodeStr (see CodeStr documentation).
 //
 // This package is designed to have few opinions and be a starting point for how you want to do errors in your project.
 // The main requirement is to satisfy the ErrorCode interface by attaching a Code to an Error.
 // See the documentation of ErrorCode.
-// Additional optional interfaces HasClientData and HasOperation are provided for extensibility
+// Additional optional interfaces HasClientData, HasOperation, Causer, and StackTracer are provided for extensibility
 // in creating structured error data representations.
 //
 // Hierarchies are supported: a Code can point to a parent.
 // This is used in the HTTPCode implementation to inherit HTTP codes found with MetaDataFromAncestors.
 // The hierarchy is present in the Code's string representation with a dot separation.
 //
-// A few generic top-level error codes are provided here.
-// You are encouraged to create your own application customized error codes rather than just using generic errors.
+// A few generic top-level error codes are provided (see the variables section of the doc).
+// You are encouraged to create your own error codes customized to your application rather than solely using generic errors.
 //
-// See JSONFormat for an opinion on how to send back meta data about errors with the error data to a client.
+// See NewJSONFormat for an opinion on how to send back meta data about errors with the error data to a client.
 // JSONFormat includes a body of response data (the "data field") that is by default the data from the Error
 // serialized to JSON.
-// This package provides no help on versioning error data.
+//
+// Stack traces are automatically added by NewInternalErr and show up as the Stack field in JSONFormat.
+// Errors can be grouped with Combine() and ungrouped via Errors() which show up as the Others field in JSONFormat.
+//
+// To extract any ErrorCodes from an error, use CodeChain().
+// This extracts error codes without information loss (using ChainContext).
 package errcode
 
 import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/pingcap/errors"
 )
 
-// CodeStr is a representation of the type of a particular error.
+// CodeStr is the name of the error code.
+// It is a representation of the type of a particular error.
 // The underlying type is string rather than int.
 // This enhances both extensibility (avoids merge conflicts) and user-friendliness.
 // A CodeStr can have dot separators indicating a hierarchy.
+//
+// Generally a CodeStr should never be modified once used by clients.
+// Instead a new CodeStr should be created.
 type CodeStr string
 
 func (str CodeStr) String() string { return string(str) }
 
 // A Code has a CodeStr representation.
 // It is attached to a Parent to find metadata from it.
-// The Meta field is provided for extensibility: e.g. attaching HTTP codes.
 type Code struct {
 	// codeStr does not include parent paths
 	// The full code (with parent paths) is accessed with CodeStr
@@ -111,9 +121,9 @@ func (code Code) IsAncestor(ancestorCode Code) bool {
 	return nil != code.findAncestor(func(an Code) bool { return an == ancestorCode })
 }
 
-// MetaData is a pattern for attaching meta data to codes and inheriting it from a parent.
+// MetaData is used in a pattern for attaching meta data to codes and inheriting it from a parent.
 // See MetaDataFromAncestors.
-// This is used to attach an HTTP code to a Code.
+// This is used to attach an HTTP code to a Code as meta data.
 type MetaData map[CodeStr]interface{}
 
 // MetaDataFromAncestors looks for meta data starting at the current code.
@@ -163,7 +173,7 @@ func (code Code) HTTPCode() int {
 // For an application specific error with a 1:1 mapping between a go error structure and a RegisteredCode,
 // You probably want to use this interface directly. Example:
 //
-//	// First define a normal error type
+// 	// First define a normal error type
 //	type PathBlocked struct {
 //		start     uint64 `json:"start"`
 //		end       uint64 `json:"end"`
@@ -177,13 +187,23 @@ func (code Code) HTTPCode() int {
 //	// Now define the code
 //	var PathBlockedCode = errcode.StateCode.Child("state.blocked")
 //
-//	// Now attach the code to the error type
+// 	// Now attach the code to the error type
 //	func (e PathBlocked) Code() Code {
 //		return PathBlockedCode
 //	}
 type ErrorCode interface {
 	Error() string // The Error interface
 	Code() Code
+}
+
+// Causer allows the abstract retrieval of the underlying error.
+// This is the interface that pkg/errors does not export but is considered part of the stable public API.
+// TODO: export this from pkg/errors
+//
+// Types that wrap errors should implement this to allow viewing of the underlying error.
+// Generally you would use this via pkg/errors.Cause or pkg/errors.Unwrap.
+type Causer interface {
+	Cause() error
 }
 
 // HasClientData is used to defined how to retrieve the data portion of an ErrorCode to be returned to the client.
@@ -206,13 +226,22 @@ func ClientData(errCode ErrorCode) interface{} {
 }
 
 // JSONFormat is an opinion on how to serialize an ErrorCode to JSON.
-// Msg is the string from Error().
-// The Data field is filled in by GetClientData
+// * Code is the error code string (CodeStr)
+// * Msg is the string from Error() and should be friendly to end users.
+// * Data is the ad-hoc data filled in by GetClientData and should be consumable by clients.
+// * Operation is the high-level operation that was happening at the time of the error.
+// The Operation field may be missing, and the Data field may be empty.
+//
+// The rest of the fields may be populated sparsely depending on the application:
+// * Stack is a stack trace. This is only given for internal errors.
+// * Others gives other errors that occurred (perhaps due to parallel requests).
 type JSONFormat struct {
-	Data      interface{} `json:"data"`
-	Msg       string      `json:"msg"`
-	Code      CodeStr     `json:"code"`
-	Operation string      `json:"operation,omitempty"`
+	Code      CodeStr           `json:"code"`
+	Msg       string            `json:"msg"`
+	Data      interface{}       `json:"data"`
+	Operation string            `json:"operation,omitempty"`
+	Stack     errors.StackTrace `json:"stack,omitempty"`
+	Others    []JSONFormat      `json:"others,omitempty"`
 }
 
 // OperationClientData gives the results of both the ClientData and Operation functions.
@@ -228,14 +257,31 @@ func OperationClientData(errCode ErrorCode) (string, interface{}) {
 	return op, data
 }
 
-// NewJSONFormat turns an ErrorCode into a JSONFormat
+// NewJSONFormat turns an ErrorCode into a JSONFormat.
+// If you use ErrorCodeChain first, you will ensure proper population of the Others field.
 func NewJSONFormat(errCode ErrorCode) JSONFormat {
+	// Gather up multiple errors.
+	// We discard any that are not ErrorCode.
+	errorCodes := ErrorCodes(errCode)
+	others := make([]JSONFormat, len(errorCodes)-1)
+	for i, err := range errorCodes[1:] {
+		others[i] = NewJSONFormat(err)
+	}
+
 	op, data := OperationClientData(errCode)
+
+	var stack errors.StackTrace
+	if errCode.Code().IsAncestor(InternalCode) {
+		stack = StackTrace(errCode)
+	}
+
 	return JSONFormat{
 		Data:      data,
 		Msg:       errCode.Error(),
 		Code:      errCode.Code().CodeStr(),
 		Operation: op,
+		Stack:     stack,
+		Others:    others,
 	}
 }
 
