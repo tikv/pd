@@ -314,6 +314,22 @@
   revision = "1c287c953996ab3a0bf535dba9d53d809d3dc0b6"
 
 [[projects]]
+  digest = "1:cffc7d72991e2d84e164a07a0fabbc67a3fce70745d425e41245358a0c107d66"
+  name = "github.com/pingcap/errcode"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "a1a7271709d9bea2d0a0d2aab8a97d7a2ce0ea51"
+  version = "v0.1"
+
+[[projects]]
+  digest = "1:677ff2ee188099669fbecf583de8c23111020adee48d71a6f60c733f6b2fea7a"
+  name = "github.com/pingcap/errors"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "31ffda8a65b0f910c6d65f1fef40e761fd606384"
+  version = "v0.10.1"
+
+[[projects]]
   branch = "master"
   digest = "1:3be99496a5d1fc018eb176c53a81df986408af94bece871d829eaceddf7c5325"
   name = "github.com/pingcap/kvproto"
@@ -640,6 +656,7 @@
     "github.com/montanaflynn/stats",
     "github.com/opentracing/opentracing-go",
     "github.com/pingcap/check",
+    "github.com/pingcap/errcode",
     "github.com/pingcap/kvproto/pkg/eraftpb",
     "github.com/pingcap/kvproto/pkg/metapb",
     "github.com/pingcap/kvproto/pkg/pdpb",

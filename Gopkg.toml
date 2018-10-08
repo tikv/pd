@@ -40,6 +40,10 @@
   name = "github.com/pkg/errors"
   version = ">= 0.8.0"
 
+[[constraint]]
+  name = "github.com/pingcap/errcode"
+  version = ">= 0.1.0"
+
 [[override]]
   name = "github.com/BurntSushi/toml"
   revision = "3012a1dbe2e4bd1391d42b32f0577cb7bbc7f005"

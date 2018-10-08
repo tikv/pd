@@ -20,8 +20,8 @@ import (
 	"io/ioutil"
 	"net/http"
 
+	"github.com/pingcap/errcode"
 	"github.com/pingcap/pd/pkg/apiutil"
-	"github.com/pingcap/pd/pkg/error_code"
 	"github.com/pingcap/pd/server"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -40,7 +40,7 @@ func errorResp(rd *render.Render, w http.ResponseWriter, err error) {
 		rd.JSON(w, http.StatusInternalServerError, "nil error")
 		return
 	}
-	if errCode, ok := errors.Cause(err).(errcode.ErrorCode); ok {
+	if errCode := errcode.CodeChain(err); errCode != nil {
 		w.Header().Set("TiDB-Error-Code", errCode.Code().CodeStr().String())
 		rd.JSON(w, errCode.Code().HTTPCode(), errcode.NewJSONFormat(errCode))
 	} else {

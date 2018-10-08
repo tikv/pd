@@ -42,5 +42,5 @@ Consider that raml2html depends on various npm packages and can only be run unde
 
 ## Error responses
 
-Error responses from the server are switching to using [error codes](../pkg/error_code/error_code.go).
+Error responses from the server are switching to using [errcode codes](https://github.com/pingcap/errcode).
 The should use the `errorResp` function. Please look at other places in the codebase that use `errorResp`.
