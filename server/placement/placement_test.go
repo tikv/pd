@@ -133,7 +133,7 @@ func (s *testPlacementSuite) TestFunctions(c *C) {
 		{"isolation_level()=0", []uint64{1, 4}},
 		{"isolation_level(zone,host)=1", []uint64{2, 3, 4}},
 		{"isolation_level(zone,host,disk)=2", []uint64{2, 3, 4}},
-		{"isolation_level(zone,host, disk)=0", []uint64{1, 2}},
+		{"isolation_level(zone,host,disk)=0", []uint64{1, 2}},
 		{"isolation_level(host)=0", []uint64{2, 4}},
 		{"isolation_level(host,zone)=1", []uint64{2, 4}},
 	}
