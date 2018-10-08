@@ -95,7 +95,7 @@ func (kv *RegionKV) backgroundFlush() {
 func (kv *RegionKV) SaveRegion(region *metapb.Region) error {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	if kv.cacheSize < kv.batchSize {
+	if kv.cacheSize < kv.batchSize-1 {
 		kv.batchRegions[regionPath(region.GetId())] = region
 		kv.cacheSize++
 

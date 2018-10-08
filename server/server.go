@@ -403,7 +403,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}
 	err = s.kv.Flush()
 	if err != nil {
-		log.Warnf("flush the bootstrap region faild: %s", err)
+		log.Warnf("flush the bootstrap region failed: %s", err)
 	}
 	if err := s.cluster.start(); err != nil {
 		return nil, err
