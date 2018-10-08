@@ -44,7 +44,7 @@ const (
 	defaultBatchSize = 100
 )
 
-// NewRegionKV return a kv storage that is used to save regions.
+// NewRegionKV returns a kv storage that is used to save regions.
 func NewRegionKV(path string) (*RegionKV, error) {
 	levelDB, err := newLeveldbKV(path)
 	if err != nil {
@@ -82,7 +82,7 @@ func (kv *RegionKV) backgroundFlush() {
 					continue
 				}
 				if err = kv.FlushRegion(); err != nil {
-					log.Info("flush regions error: ", err)
+					log.Error("flush regions error: ", err)
 				}
 			case <-kv.ctx.Done():
 				return
@@ -124,8 +124,8 @@ func loadRegions(kv KVBase, regions *RegionsInfo) error {
 	// a variable rangeLimit to work around.
 	rangeLimit := maxKVRangeLimit
 	for {
-		key := regionPath(nextID)
-		res, err := kv.LoadRange(key, endKey, rangeLimit)
+		startKey := regionPath(nextID)
+		res, err := kv.LoadRange(startKey, endKey, rangeLimit)
 		if err != nil {
 			if rangeLimit /= 2; rangeLimit >= minKVRangeLimit {
 				continue
@@ -172,6 +172,10 @@ func (kv *RegionKV) flush() error {
 
 // Close closes the kv.
 func (kv *RegionKV) Close() error {
+	err := kv.FlushRegion()
+	if err != nil {
+		log.Error("meet error before close the region storage: ", err)
+	}
 	kv.cancel()
 	return kv.db.Close()
 }

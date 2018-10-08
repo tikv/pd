@@ -229,7 +229,7 @@ func (kv *KV) loadFloatWithDefaultValue(path string, def float64) (float64, erro
 	return val, nil
 }
 
-// Flush flush the dirty region to storage.
+// Flush flushs the dirty region to storage.
 func (kv *KV) Flush() error {
 	if kv.regionKV != nil {
 		kv.regionKV.FlushRegion()
@@ -237,7 +237,7 @@ func (kv *KV) Flush() error {
 	return nil
 }
 
-// Close close the kv.
+// Close closes the kv.
 func (kv *KV) Close() error {
 	if kv.regionKV != nil {
 		return kv.regionKV.Close()

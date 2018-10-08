@@ -399,7 +399,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	log.Infof("bootstrap cluster %d ok", clusterID)
 	err = s.kv.SaveRegion(req.GetRegion())
 	if err != nil {
-		log.Warnf("save the bootstrap region faild: %s", err)
+		log.Warnf("save the bootstrap region failed: %s", err)
 	}
 	err = s.kv.Flush()
 	if err != nil {

@@ -36,6 +36,7 @@ func (s *integrationTestSuite) TestRegionSyncer(c *C) {
 	c.Parallel()
 	cluster, err := newTestCluster(3, func(conf *server.Config) { conf.PDServerCfg.EnableRegionStorage = true })
 	c.Assert(err, IsNil)
+	defer cluster.Destroy()
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -73,5 +74,4 @@ func (s *integrationTestSuite) TestRegionSyncer(c *C) {
 	c.Assert(leaderServer, NotNil)
 	loadRegions := leaderServer.server.GetRaftCluster().GetRegions()
 	c.Assert(len(loadRegions), Equals, regionLen)
-	cluster.Destroy()
 }
