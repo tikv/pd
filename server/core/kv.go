@@ -20,7 +20,6 @@ import (
 	"path"
 	"strconv"
 	"sync/atomic"
-	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -37,7 +36,6 @@ const (
 const (
 	maxKVRangeLimit = 10000
 	minKVRangeLimit = 100
-	dirtyFlushTick  = time.Second
 )
 
 // KV wraps all kv operations, keep it stateless.
@@ -229,7 +227,7 @@ func (kv *KV) loadFloatWithDefaultValue(path string, def float64) (float64, erro
 	return val, nil
 }
 
-// Flush flushs the dirty region to storage.
+// Flush flushes the dirty region to storage.
 func (kv *KV) Flush() error {
 	if kv.regionKV != nil {
 		kv.regionKV.FlushRegion()

@@ -24,6 +24,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+var dirtyFlushTick = time.Second
+
 // RegionKV is used to save regions.
 type RegionKV struct {
 	*leveldbKV
