@@ -29,7 +29,7 @@ type leveldbKV struct {
 func newLeveldbKV(path string) (*leveldbKV, error) {
 	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 	return &leveldbKV{db: db}, nil
 }
@@ -37,7 +37,7 @@ func newLeveldbKV(path string) (*leveldbKV, error) {
 func (kv *leveldbKV) Load(key string) (string, error) {
 	v, err := kv.db.Get([]byte(key), nil)
 	if err != nil {
-		return "", err
+		return "", errors.WithStack(err)
 	}
 	return string(v), err
 }
@@ -58,11 +58,11 @@ func (kv *leveldbKV) LoadRange(startKey, endKey string, limit int) ([]string, er
 }
 
 func (kv *leveldbKV) Save(key, value string) error {
-	return kv.db.Put([]byte(key), []byte(value), nil)
+	return errors.WithStack(kv.db.Put([]byte(key), []byte(value), nil))
 }
 
 func (kv *leveldbKV) Delete(key string) error {
-	return kv.db.Delete([]byte(key), nil)
+	return errors.WithStack(kv.db.Delete([]byte(key), nil))
 }
 
 func (kv *leveldbKV) SaveRegions(regions map[string]*metapb.Region) error {
@@ -75,9 +75,9 @@ func (kv *leveldbKV) SaveRegions(regions map[string]*metapb.Region) error {
 		}
 		batch.Put([]byte(key), value)
 	}
-	return kv.db.Write(batch, nil)
+	return errors.WithStack(kv.db.Write(batch, nil))
 }
 
 func (kv *leveldbKV) Close() error {
-	return kv.db.Close()
+	return errors.WithStack(kv.db.Close())
 }
