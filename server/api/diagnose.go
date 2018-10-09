@@ -71,11 +71,11 @@ var (
 		memberLostPeers:             {modMember, levelMajor, "some PD instances is down.", "please check host load and traffic."},
 		memberLostPeersMoreThanHalf: {modMember, levelCritical, "more than half PD instances is down.", "please check host load and traffic."},
 		memberLeaderChanged:         {modMember, levelMinor, "PD cluster leader is changed.", "please check host load and traffic."},
-		tikvCap70:                   {modTiKV, levelWarning, "some TiKV stroage used more than 70%.", "plase add TiKV node."},
-		tikvCap80:                   {modTiKV, levelMinor, "some TiKV stroage used more than 80%.", "plase add TiKV node."},
-		tikvCap90:                   {modTiKV, levelMajor, "some TiKV stroage used more than 90%.", "plase add TiKV node."},
-		tikvLostPeers:               {modTiKV, levelWarning, "some TiKV lost connect.", "plase check network."},
-		tikvLostPeersLongTime:       {modTiKV, levelMajor, "some TiKV lost connect more than 1h.", "plase check network."},
+		tikvCap70:                   {modTiKV, levelWarning, "some TiKV storage used more than 70%.", "please add TiKV node."},
+		tikvCap80:                   {modTiKV, levelMinor, "some TiKV storage used more than 80%.", "please add TiKV node."},
+		tikvCap90:                   {modTiKV, levelMajor, "some TiKV storage used more than 90%.", "please add TiKV node."},
+		tikvLostPeers:               {modTiKV, levelWarning, "some TiKV lost connect.", "please check network."},
+		tikvLostPeersLongTime:       {modTiKV, levelMajor, "some TiKV lost connect more than 1h.", "please check network."},
 	}
 )
 

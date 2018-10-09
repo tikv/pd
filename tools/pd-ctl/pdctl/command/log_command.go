@@ -23,7 +23,7 @@ import (
 )
 
 var (
-	logPrefix = "pd/api/v1/log"
+	logPrefix = "pd/api/v1/admin/log"
 )
 
 // NewLogCommand New a log subcommand of the rootCmd

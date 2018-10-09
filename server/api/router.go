@@ -126,7 +126,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion).Methods("DELETE")
 
 	logHanler := newlogHandler(svr, rd)
-	router.HandleFunc("/api/v1/log", logHanler.Handle).Methods("POST")
+	router.HandleFunc("/api/v1/admin/log", logHanler.Handle).Methods("POST")
 
 	router.HandleFunc(pingAPI, func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 	router.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")

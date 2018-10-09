@@ -1094,34 +1094,36 @@ types:
       500:
         description: PD server failed to proceed the request.
 
-/admin/cache/region/{id}:
-  uriParameters:
-    id: integer
-  delete:
-    description: Drop a specific region from cache.
-    responses:
-      200:
-        description: The region is removed from server cache.
-      400:
-        description: The input is invalid.
-      500:
-        description: PD server failed to proceed the request.
+/admin:
+  /cache/region/{id}:
+    uriParameters:
+      id: integer
+    delete:
+      description: Drop a specific region from cache.
+      responses:
+                200:
+                  description: The region is removed from server cache.
+                400:
+                  description: The input is invalid.
+                500:
+                  description: PD server failed to proceed the request.
 
-/log:
-  description: The log level of PD server.
-  post:
-    description: Set log level.
-    body:
-      application/json:
-        type: string
-        enum: [ debug, info, warning, error, fatal ]
-    responses:
-      200:
-        description: The log level is updated.
-      400:
-        description: The input is invalid.
-      500:
-        description: PD server failed to proceed the request.
+  /log:
+    description: The log level of PD server.
+    post:
+      description: Set log level.
+      body:
+        application/json:
+          type: string
+          enum: [ debug, info, warning, error, fatal ]
+      responses:
+        200:
+          description: The log level is updated.
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
+
 
 /classifier:
   description: The namespace classifier. Methods depend on current classifier.
