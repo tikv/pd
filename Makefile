@@ -28,7 +28,7 @@ all: dev
 
 dev: build check test
 
-ci: build check basic_test
+ci: build check basic-test
 
 build:
 ifeq ("$(WITH_RACE)", "1")
@@ -46,7 +46,7 @@ test: retool-setup
 	CGO_ENABLED=1 go test -race -cover $(TEST_PKGS) || { $(GOFAIL_DISABLE); exit 1; }
 	@$(GOFAIL_DISABLE)
 
-basic_test:
+basic-test:
 	@$(GOFAIL_ENABLE)
 	go test $(BASIC_TEST_PKGS) || { $(GOFAIL_DISABLE); exit 1; }
 	@$(GOFAIL_DISABLE)
@@ -102,6 +102,11 @@ endif
 
 simulator:
 	CGO_ENABLED=0 go build -o bin/pd-simulator tools/pd-simulator/main.go
+
+clean-test:
+	rm -rf /tmp/test_pd*
+	rm -rf /tmp/pd-integration-test*
+	rm -rf /tmp/test_etcd*
 
 gofail-enable:
 	# Converting gofail failpoints...
