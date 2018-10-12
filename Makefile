@@ -17,6 +17,16 @@ LDFLAGS += -X "$(PD_PKG)/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "$(PD_PKG)/server.PDGitHash=$(shell git rev-parse HEAD)"
 LDFLAGS += -X "$(PD_PKG)/server.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
 
+GOMOD := -mod=vendor
+
+GOVER_MAJOR := $(shell go version | sed -e "s/.*go\([0-9]\+\)[.]\([0-9]\+\).*/\1/")
+GOVER_MINOR := $(shell go version | sed -e "s/.*go\([0-9]\+\)[.]\([0-9]\+\).*/\2/")
+GO111 := $(shell [ $(GOVER_MAJOR) -gt 1 ] || [ $(GOVER_MAJOR) -eq 1 ] && [ $(GOVER_MINOR) -ge 11 ]; echo $$?)
+ifeq ($(GO111), 1)
+$(warning "go below 1.11 does not support modules")
+GOMOD :=
+endif
+
 # Ignore following files's coverage.
 #
 # See more: https://godoc.org/path/filepath#Match
@@ -30,25 +40,26 @@ dev: build check test
 
 ci: build check basic-test
 
+build: export GO111MODULE=on
 build:
 ifeq ("$(WITH_RACE)", "1")
-	CGO_ENABLED=1 go build -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=1 go build $(GOMOD) -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 else
-	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=0 go build $(GOMOD) -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
-	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl tools/pd-ctl/main.go
-	CGO_ENABLED=0 go build -o bin/pd-tso-bench tools/pd-tso-bench/main.go
-	CGO_ENABLED=0 go build -o bin/pd-recover tools/pd-recover/main.go
+	CGO_ENABLED=0 go build $(GOMOD) -ldflags '$(LDFLAGS)' -o bin/pd-ctl tools/pd-ctl/main.go
+	CGO_ENABLED=0 go build $(GOMOD) -o bin/pd-tso-bench tools/pd-tso-bench/main.go
+	CGO_ENABLED=0 go build $(GOMOD) -o bin/pd-recover tools/pd-recover/main.go
 
 test: retool-setup
 	# testing..
 	@$(GOFAIL_ENABLE)
-	CGO_ENABLED=1 go test -race -cover $(TEST_PKGS) || { $(GOFAIL_DISABLE); exit 1; }
+	CGO_ENABLED=1 GO111MODULE=on go test $(GOMOD) -race -cover $(TEST_PKGS) || { $(GOFAIL_DISABLE); exit 1; }
 	@$(GOFAIL_DISABLE)
 
 basic-test:
 	@$(GOFAIL_ENABLE)
-	go test $(BASIC_TEST_PKGS) || { $(GOFAIL_DISABLE); exit 1; }
+	GO111MODULE=on go test $(GOMOD) $(BASIC_TEST_PKGS) || { $(GOFAIL_DISABLE); exit 1; }
 	@$(GOFAIL_DISABLE)
 
 # These need to be fixed before they can be ran regularly
@@ -61,7 +72,8 @@ check-fail:
 check-all: static lint
 	@echo "checking"
 
-retool-setup:
+retool-setup: export GO111MODULE=off
+retool-setup: 
 	@which retool >/dev/null 2>&1 || go get github.com/twitchtv/retool
 	@./hack/retool sync
 
@@ -89,15 +101,8 @@ else
 	@echo "coverage only runs in travis."
 endif
 
-update:
-	which dep 2>/dev/null || go get -u github.com/golang/dep/cmd/dep
-ifdef PKG
-	dep ensure -add ${PKG}
-else
-	dep ensure -update
-endif
-	@echo "removing test files"
-	dep prune
+vendor:
+	GO111MODULE=on go mod vendor
 	bash ./hack/clean_vendor.sh
 
 simulator:
@@ -116,4 +121,4 @@ gofail-disable:
 	# Restoring gofail failpoints...
 	@$(GOFAIL_DISABLE)
 
-.PHONY: update clean tool-install
+.PHONY: all ci vendor clean-test
