@@ -42,7 +42,8 @@ import (
 )
 
 const (
-	etcdTimeout = time.Second * 3
+	etcdTimeout      = time.Second * 3
+	etcdStartTimeout = time.Minute * 5
 	// pdRootPath for all pd servers.
 	pdRootPath      = "/pd"
 	pdAPIPrefix     = "/pd/"
@@ -120,6 +121,9 @@ func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server,
 
 func (s *Server) startEtcd() error {
 	log.Info("start embed etcd")
+	ctx, cancel := context.WithTimeout(ctx, etcdStartTimeout)
+	defer cancel()
+
 	etcd, err := embed.StartEtcd(s.etcdCfg)
 	if err != nil {
 		return errors.Trace(err)
