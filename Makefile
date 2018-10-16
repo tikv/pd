@@ -19,8 +19,8 @@ LDFLAGS += -X "$(PD_PKG)/server.PDGitBranch=$(shell git rev-parse --abbrev-ref H
 
 GOMOD := -mod=vendor
 
-GOVER_MAJOR := $(shell go version | sed -e "s/.*go\([0-9]\+\)[.]\([0-9]\+\).*/\1/")
-GOVER_MINOR := $(shell go version | sed -e "s/.*go\([0-9]\+\)[.]\([0-9]\+\).*/\2/")
+GOVER_MAJOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\1/")
+GOVER_MINOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\2/")
 GO111 := $(shell [ $(GOVER_MAJOR) -gt 1 ] || [ $(GOVER_MAJOR) -eq 1 ] && [ $(GOVER_MINOR) -ge 11 ]; echo $$?)
 ifeq ($(GO111), 1)
 $(warning "go below 1.11 does not support modules")
