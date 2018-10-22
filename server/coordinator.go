@@ -214,7 +214,6 @@ func (c *coordinator) run() {
 		select {
 		case <-ticker.C:
 		case <-c.ctx.Done():
-			log.Info("coordinator: Stopped coordinator")
 			return
 		}
 	}
@@ -258,7 +257,6 @@ func (c *coordinator) run() {
 
 func (c *coordinator) stop() {
 	c.cancel()
-	c.wg.Wait()
 }
 
 // Hack to retrive info from scheduler.

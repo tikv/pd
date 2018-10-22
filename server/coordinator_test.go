@@ -194,6 +194,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 
 	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
+	defer co.wg.Wait()
 	defer co.stop()
 
 	// Transfer peer from store 4 to store 1.
@@ -298,12 +299,14 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	tc.putRegion(r)
 	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
 	co.stop()
+	co.wg.Wait()
 
 	// new cluster with learner disabled
 	cfg.DisableLearner = true
 	tc = newTestClusterInfo(opt)
 	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
+	defer co.wg.Wait()
 	defer co.stop()
 
 	tc.addRegionStore(4, 4)
@@ -334,6 +337,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 
 	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
+	defer co.wg.Wait()
 	defer co.stop()
 
 	tc.addRegionStore(1, 1)
@@ -395,6 +399,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 
 	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
+	defer co.wg.Wait()
 	defer co.stop()
 
 	// Transfer peer from store 4 to store 1.
@@ -493,6 +498,7 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	defer hbStreams.Close()
 	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
+	defer co.wg.Wait()
 	defer co.stop()
 
 	c.Assert(co.schedulers, HasLen, 4)
@@ -571,6 +577,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(co.schedulers, HasLen, 2)
 	c.Assert(co.cluster.opt.persist(co.cluster.kv), IsNil)
 	co.stop()
+	co.wg.Wait()
 	// make a new coordinator for testing
 	// whether the schedulers added or removed in dynamic way are recorded in opt
 	_, newOpt := newTestScheduleConfig()
@@ -587,6 +594,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	co.run()
 	c.Assert(co.schedulers, HasLen, 3)
 	co.stop()
+	co.wg.Wait()
 	// suppose restart PD again
 	_, newOpt = newTestScheduleConfig()
 	newOpt.reload(tc.kv)
@@ -610,6 +618,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(co.schedulers, HasLen, 4)
 	c.Assert(co.cluster.opt.persist(co.cluster.kv), IsNil)
 	co.stop()
+	co.wg.Wait()
 
 	_, newOpt = newTestScheduleConfig()
 	newOpt.reload(co.cluster.kv)
@@ -617,6 +626,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 
 	co.run()
+	defer co.wg.Wait()
 	defer co.stop()
 	c.Assert(co.schedulers, HasLen, 4)
 	c.Assert(co.removeScheduler("grant-leader-scheduler-2"), IsNil)
@@ -650,6 +660,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	dispatchHeartbeat(c, co, region, stream)
 	region = waitPromoteLearner(c, stream, region, 2)
 	co.stop()
+	co.wg.Wait()
 
 	// Recreate coodinator then add another replica on store 3.
 	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
@@ -659,6 +670,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	dispatchHeartbeat(c, co, region, stream)
 	waitPromoteLearner(c, stream, region, 3)
 	co.stop()
+	co.wg.Wait()
 }
 
 func waitOperator(c *C, co *coordinator, regionID uint64) {

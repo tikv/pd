@@ -27,7 +27,7 @@ import (
 var _ = Suite(&testHeartbeatStreamSuite{})
 
 type testHeartbeatStreamSuite struct {
-	testClusterBaseSuite
+	baseCluster
 	region *metapb.Region
 }
 

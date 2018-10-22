@@ -2,7 +2,7 @@
   "Tools": [
     {
       "Repository": "honnef.co/go/tools/cmd/megacheck",
-      "Commit": "3ac6a802416d2efd6654491fe47f693e56d8eb4e"
+      "Commit": "f1b53a58b0229ba115f39ce1da090b35b09149b5"
     },
     {
       "Repository": "gopkg.in/alecthomas/gometalinter.v2",

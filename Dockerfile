@@ -6,7 +6,8 @@ COPY . /go/src/github.com/pingcap/pd
 
 RUN cd /go/src/github.com/pingcap/pd/ && \
     make && \
-    cp -f ./bin/pd-server /go/bin/pd-server
+    cp -f ./bin/pd-server /go/bin/pd-server && \
+    rm -rf ../pd
 
 EXPOSE 2379 2380
 

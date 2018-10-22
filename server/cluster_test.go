@@ -34,7 +34,7 @@ const (
 
 var _ = Suite(&testClusterSuite{})
 
-type testClusterBaseSuite struct {
+type baseCluster struct {
 	client       *clientv3.Client
 	svr          *Server
 	cleanup      CleanupFunc
@@ -42,20 +42,7 @@ type testClusterBaseSuite struct {
 }
 
 type testClusterSuite struct {
-	testClusterBaseSuite
-}
-
-func (s *testClusterSuite) SetUpSuite(c *C) {
-	var err error
-	_, s.svr, s.cleanup, err = NewTestServer()
-	c.Assert(err, IsNil)
-	s.client = s.svr.client
-	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
-}
-
-func (s *testClusterSuite) TearDownSuite(c *C) {
-	s.cleanup()
+	baseCluster
 }
 
 func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
@@ -65,7 +52,7 @@ func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
 	return pdpb.NewPDClient(conn)
 }
 
-func (s *testClusterBaseSuite) allocID(c *C) uint64 {
+func (s *baseCluster) allocID(c *C) uint64 {
 	id, err := s.svr.idAlloc.Alloc()
 	c.Assert(err, IsNil)
 	return id
@@ -77,7 +64,7 @@ func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 	}
 }
 
-func (s *testClusterBaseSuite) newPeer(c *C, storeID uint64, peerID uint64) *metapb.Peer {
+func (s *baseCluster) newPeer(c *C, storeID uint64, peerID uint64) *metapb.Peer {
 	c.Assert(storeID, Greater, uint64(0))
 
 	if peerID == 0 {
@@ -90,7 +77,7 @@ func (s *testClusterBaseSuite) newPeer(c *C, storeID uint64, peerID uint64) *met
 	}
 }
 
-func (s *testClusterBaseSuite) newStore(c *C, storeID uint64, addr string) *metapb.Store {
+func (s *baseCluster) newStore(c *C, storeID uint64, addr string) *metapb.Store {
 	if storeID == 0 {
 		storeID = s.allocID(c)
 	}
@@ -101,7 +88,7 @@ func (s *testClusterBaseSuite) newStore(c *C, storeID uint64, addr string) *meta
 	}
 }
 
-func (s *testClusterBaseSuite) newRegion(c *C, regionID uint64, startKey []byte,
+func (s *baseCluster) newRegion(c *C, regionID uint64, startKey []byte,
 	endKey []byte, peers []*metapb.Peer, epoch *metapb.RegionEpoch) *metapb.Region {
 	if regionID == 0 {
 		regionID = s.allocID(c)
@@ -129,7 +116,13 @@ func (s *testClusterBaseSuite) newRegion(c *C, regionID uint64, startKey []byte,
 }
 
 func (s *testClusterSuite) TestBootstrap(c *C) {
-
+	var err error
+	_, s.svr, s.cleanup, err = NewTestServer()
+	c.Assert(err, IsNil)
+	s.client = s.svr.client
+	mustWaitLeader(c, []*Server{s.svr})
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	defer s.cleanup()
 	clusterID := s.svr.clusterID
 
 	// IsBootstrapped returns false.
@@ -157,7 +150,7 @@ func (s *testClusterSuite) TestBootstrap(c *C) {
 	c.Assert(respBoot.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_ALREADY_BOOTSTRAPPED)
 }
 
-func (s *testClusterBaseSuite) newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {
+func (s *baseCluster) newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {
 	req := &pdpb.IsBootstrappedRequest{
 		Header: newRequestHeader(clusterID),
 	}
@@ -165,7 +158,7 @@ func (s *testClusterBaseSuite) newIsBootstrapRequest(clusterID uint64) *pdpb.IsB
 	return req
 }
 
-func (s *testClusterBaseSuite) newBootstrapRequest(c *C, clusterID uint64, storeAddr string) *pdpb.BootstrapRequest {
+func (s *baseCluster) newBootstrapRequest(c *C, clusterID uint64, storeAddr string) *pdpb.BootstrapRequest {
 	store := s.newStore(c, 0, storeAddr)
 	peer := s.newPeer(c, store.GetId(), 0)
 	region := s.newRegion(c, 0, []byte{}, []byte{}, []*metapb.Peer{peer}, nil)
@@ -180,13 +173,13 @@ func (s *testClusterBaseSuite) newBootstrapRequest(c *C, clusterID uint64, store
 }
 
 // helper function to check and bootstrap.
-func (s *testClusterBaseSuite) bootstrapCluster(c *C, clusterID uint64, storeAddr string) {
+func (s *baseCluster) bootstrapCluster(c *C, clusterID uint64, storeAddr string) {
 	req := s.newBootstrapRequest(c, clusterID, storeAddr)
 	_, err := s.grpcPDClient.Bootstrap(context.Background(), req)
 	c.Assert(err, IsNil)
 }
 
-func (s *testClusterBaseSuite) getStore(c *C, clusterID uint64, storeID uint64) *metapb.Store {
+func (s *baseCluster) getStore(c *C, clusterID uint64, storeID uint64) *metapb.Store {
 	req := &pdpb.GetStoreRequest{
 		Header:  newRequestHeader(clusterID),
 		StoreId: storeID,
@@ -198,7 +191,7 @@ func (s *testClusterBaseSuite) getStore(c *C, clusterID uint64, storeID uint64) 
 	return resp.GetStore()
 }
 
-func (s *testClusterBaseSuite) getRegion(c *C, clusterID uint64, regionKey []byte) *metapb.Region {
+func (s *baseCluster) getRegion(c *C, clusterID uint64, regionKey []byte) *metapb.Region {
 	req := &pdpb.GetRegionRequest{
 		Header:    newRequestHeader(clusterID),
 		RegionKey: regionKey,
@@ -211,7 +204,7 @@ func (s *testClusterBaseSuite) getRegion(c *C, clusterID uint64, regionKey []byt
 	return resp.GetRegion()
 }
 
-func (s *testClusterBaseSuite) getRegionByID(c *C, clusterID uint64, regionID uint64) *metapb.Region {
+func (s *baseCluster) getRegionByID(c *C, clusterID uint64, regionID uint64) *metapb.Region {
 	req := &pdpb.GetRegionByIDRequest{
 		Header:   newRequestHeader(clusterID),
 		RegionId: regionID,
@@ -224,13 +217,13 @@ func (s *testClusterBaseSuite) getRegionByID(c *C, clusterID uint64, regionID ui
 	return resp.GetRegion()
 }
 
-func (s *testClusterBaseSuite) getRaftCluster(c *C) *RaftCluster {
+func (s *baseCluster) getRaftCluster(c *C) *RaftCluster {
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 	return cluster
 }
 
-func (s *testClusterBaseSuite) getClusterConfig(c *C, clusterID uint64) *metapb.Cluster {
+func (s *baseCluster) getClusterConfig(c *C, clusterID uint64) *metapb.Cluster {
 	req := &pdpb.GetClusterConfigRequest{
 		Header: newRequestHeader(clusterID),
 	}
@@ -243,6 +236,13 @@ func (s *testClusterBaseSuite) getClusterConfig(c *C, clusterID uint64) *metapb.
 }
 
 func (s *testClusterSuite) TestGetPutConfig(c *C) {
+	var err error
+	_, s.svr, s.cleanup, err = NewTestServer()
+	c.Assert(err, IsNil)
+	s.client = s.svr.client
+	mustWaitLeader(c, []*Server{s.svr})
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	defer s.cleanup()
 	clusterID := s.svr.clusterID
 
 	storeAddr := "127.0.0.1:0"
@@ -292,7 +292,7 @@ func putStore(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, store *metapb.
 	return resp, err
 }
 
-func (s *testClusterSuite) testPutStore(c *C, clusterID uint64, store *metapb.Store) {
+func (s *baseCluster) testPutStore(c *C, clusterID uint64, store *metapb.Store) {
 	// Update store.
 	_, err := putStore(c, s.grpcPDClient, clusterID, store)
 	c.Assert(err, IsNil)
@@ -327,7 +327,7 @@ func (s *testClusterSuite) testPutStore(c *C, clusterID uint64, store *metapb.St
 	c.Assert(err, NotNil)
 }
 
-func (s *testClusterSuite) resetStoreState(c *C, storeID uint64, state metapb.StoreState) {
+func (s *baseCluster) resetStoreState(c *C, storeID uint64, state metapb.StoreState) {
 	cluster := s.svr.GetRaftCluster().cachedCluster
 	c.Assert(cluster, NotNil)
 	store := cluster.GetStore(storeID)
@@ -336,7 +336,7 @@ func (s *testClusterSuite) resetStoreState(c *C, storeID uint64, state metapb.St
 	cluster.putStore(store)
 }
 
-func (s *testClusterSuite) testRemoveStore(c *C, clusterID uint64, store *metapb.Store) {
+func (s *baseCluster) testRemoveStore(c *C, clusterID uint64, store *metapb.Store) {
 	cluster := s.getRaftCluster(c)
 
 	// When store is up:
@@ -427,7 +427,13 @@ func (s *testClusterSuite) TestRaftClusterRestart(c *C) {
 }
 
 func (s *testClusterSuite) TestGetPDMembers(c *C) {
-
+	var err error
+	_, s.svr, s.cleanup, err = NewTestServer()
+	c.Assert(err, IsNil)
+	s.client = s.svr.client
+	mustWaitLeader(c, []*Server{s.svr})
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	defer s.cleanup()
 	req := &pdpb.GetMembersRequest{
 		Header: newRequestHeader(s.svr.ClusterID()),
 	}
@@ -439,6 +445,12 @@ func (s *testClusterSuite) TestGetPDMembers(c *C) {
 }
 
 func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
+	var err error
+	_, s.svr, s.cleanup, err = NewTestServer()
+	c.Assert(err, IsNil)
+	s.client = s.svr.client
+	mustWaitLeader(c, []*Server{s.svr})
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
 	s.svr.cluster.cachedCluster.Lock()
