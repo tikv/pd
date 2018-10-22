@@ -30,6 +30,7 @@ import (
 	"github.com/coreos/etcd/embed"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/go-semver/semver"
+	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
@@ -304,6 +305,11 @@ func (s *Server) Run(ctx context.Context) error {
 	return nil
 }
 
+// Context returns the loop context of server.
+func (s *Server) Context() context.Context {
+	return s.serverLoopCtx
+}
+
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(context.Background())
 	s.serverLoopWg.Add(3)
@@ -433,6 +439,11 @@ func (s *Server) GetAddr() string {
 	return s.cfg.AdvertiseClientUrls
 }
 
+// GetMemberInfo returns the server member information.
+func (s *Server) GetMemberInfo() *pdpb.Member {
+	return proto.Clone(s.member).(*pdpb.Member)
+}
+
 // GetHandler returns the handler for API.
 func (s *Server) GetHandler() *Handler {
 	return s.handler
@@ -446,6 +457,11 @@ func (s *Server) GetEndpoints() []string {
 // GetClient returns builtin etcd client.
 func (s *Server) GetClient() *clientv3.Client {
 	return s.client
+}
+
+// GetStorage returns the backend storage of server.
+func (s *Server) GetStorage() *core.KV {
+	return s.kv
 }
 
 // ID returns the unique etcd ID for this server in etcd cluster.

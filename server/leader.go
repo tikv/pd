@@ -304,8 +304,8 @@ func (s *Server) watchLeader(leader *pdpb.Member) {
 		return
 	}
 	if s.scheduleOpt.loadPDServerConfig().EnableRegionStorage {
-		s.cluster.regionSyncer.startSyncWithLeader(leader.GetClientUrls()[0])
-		defer s.cluster.regionSyncer.stopSyncWithLeader()
+		s.cluster.regionSyncer.StartSyncWithLeader(leader.GetClientUrls()[0])
+		defer s.cluster.regionSyncer.StopSyncWithLeader()
 	}
 
 	for {

@@ -112,7 +112,7 @@ func (c *clusterInfo) OnStoreVersionChange() {
 	}
 }
 
-func (c *clusterInfo) getChangedRegions() <-chan *core.RegionInfo {
+func (c *clusterInfo) changedRegionNotifier() <-chan *core.RegionInfo {
 	return c.changedRegions
 }
 
