@@ -25,9 +25,10 @@ import (
 )
 
 const (
-	msgSize                 = 8 * 1024 * 1024
-	maxSyncRegionBatchSize  = 100
-	syncerKeepAliveInterval = 10 * time.Second
+	msgSize                  = 8 * 1024 * 1024
+	maxSyncRegionBatchSize   = 100
+	syncerKeepAliveInterval  = 10 * time.Second
+	defaultHistoryBufferSize = 10000
 )
 
 // ClientStream is the client side of the region syncer.
@@ -59,6 +60,7 @@ type RegionSyncer struct {
 	server  Server
 	closed  chan struct{}
 	wg      sync.WaitGroup
+	history *historyBuffer
 }
 
 // NewRegionSyncer returns a region syncer.
@@ -71,6 +73,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		streams: make(map[string]ServerStream),
 		server:  s,
 		closed:  make(chan struct{}),
+		history: newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionKV()),
 	}
 }
 
@@ -86,10 +89,12 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 			return
 		case first := <-regionNotifier:
 			requests = append(requests, first.GetMeta())
+			s.history.record(first)
 			pending := len(regionNotifier)
 			for i := 0; i < pending && i < maxSyncRegionBatchSize; i++ {
 				region := <-regionNotifier
 				requests = append(requests, region.GetMeta())
+				s.history.record(region)
 			}
 			regions := &pdpb.SyncRegionResponse{
 				Header:  &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},

@@ -58,6 +58,11 @@ func (kv *KV) SetRegionKV(regionKV *RegionKV) *KV {
 	return kv
 }
 
+// GetRegionKV gets the region storage.
+func (kv *KV) GetRegionKV() *RegionKV {
+	return kv.regionKV
+}
+
 // SwitchToRegionStorage switches to the region storage.
 func (kv *KV) SwitchToRegionStorage() {
 	atomic.StoreInt32(&kv.useRegionKV, 1)
