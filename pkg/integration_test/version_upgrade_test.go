@@ -65,6 +65,7 @@ func (s *integrationTestSuite) TestStoreRegister(c *C) {
 	cluster.WaitLeader()
 
 	leaderServer = cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer, NotNil)
 	newVersion := leaderServer.GetClusterVersion()
 	c.Assert(version, Equals, newVersion)
 
