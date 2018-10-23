@@ -16,6 +16,7 @@ package integration
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -45,7 +46,7 @@ func (s *integrationTestSuite) TestSimpleJoin(c *C) {
 	c.Assert(err, IsNil)
 	err = pd2.Run(context.TODO())
 	c.Assert(err, IsNil)
-	_, err = os.Stat(pd2.GetConfig().DataDir + "/join")
+	_, err = os.Stat(filepath.Join(pd2.GetConfig().DataDir, "join"))
 	c.Assert(os.IsNotExist(err), IsFalse)
 	members, err = etcdutil.ListEtcdMembers(client)
 	c.Assert(err, IsNil)
@@ -60,7 +61,7 @@ func (s *integrationTestSuite) TestSimpleJoin(c *C) {
 	c.Assert(err, IsNil)
 	err = pd3.Run(context.TODO())
 	c.Assert(err, IsNil)
-	_, err = os.Stat(pd3.GetConfig().DataDir + "/join")
+	_, err = os.Stat(filepath.Join(pd3.GetConfig().DataDir, "join"))
 	c.Assert(os.IsNotExist(err), IsFalse)
 	members, err = etcdutil.ListEtcdMembers(client)
 	c.Assert(err, IsNil)
