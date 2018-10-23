@@ -126,6 +126,9 @@ func PrepareJoinCluster(cfg *Config) error {
 
 	existed := false
 	for _, m := range listResp.Members {
+		if len(m.Name) == 0 {
+			return errors.New("exsist a member that the join is not completed")
+		}
 		if m.Name == cfg.Name {
 			existed = true
 		}
@@ -153,6 +156,9 @@ func PrepareJoinCluster(cfg *Config) error {
 		n := memb.Name
 		if memb.ID == addResp.Member.ID {
 			n = cfg.Name
+		}
+		if len(n) == 0 {
+			return errors.New("exsist a member that the join is not completed")
 		}
 		for _, m := range memb.PeerURLs {
 			pds = append(pds, fmt.Sprintf("%s=%s", n, m))
