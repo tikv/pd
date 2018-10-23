@@ -63,7 +63,7 @@ type RegionSyncer struct {
 
 // NewRegionSyncer returns a region syncer.
 // The final consistency is ensured by the heartbeat.
-// Strong consistency is not graranteed.
+// Strong consistency is not guaranteed.
 // Usually open the region syncer in huge cluster and the carrier
 // no longer etcd but go-leveldb.
 func NewRegionSyncer(c Carrier) *RegionSyncer {
@@ -104,7 +104,7 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 	}
 }
 
-// BindStream bind the established server stream.
+// BindStream binds the established server stream.
 func (s *RegionSyncer) BindStream(name string, stream ServerStream) {
 	s.Lock()
 	defer s.Unlock()
