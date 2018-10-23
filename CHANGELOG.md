@@ -1,6 +1,21 @@
 # PD Change Log
 
-## v2.1.0-rc2
+## v2.1.0-rc.4
+- Fix the issue that the tombstone TiKV is not removed from Grafana [#1261](https://github.com/pingcap/pd/pull/1261)
+- Fix the data race issue when grpc-go configures the status [#1265](https://github.com/pingcap/pd/pull/1265)
+- Fix the issue that the PD server gets stuck caused by etcd startup failure [#1267](https://github.com/pingcap/pd/pull/1267)
+- Fix the issue that data race might occur during leader switching [#1273](https://github.com/pingcap/pd/pull/1273)
+- Fix the issue that extra warning logs might be output when TiKV becomes tombstone [#1280](https://github.com/pingcap/pd/pull/1273)
+
+## v2.1.0-rc.3
+### New feature
+- Add the API to get the Region list by size in reverse order [#1254](https://github.com/pingcap/pd/pull/1254)
+### Improvement
+- Return more detailed information in the Region API [#1252](https://github.com/pingcap/pd/pull/1252)
+### Bug fix
+- Fix the issue that `adjacent-region-scheduler` might lead to a crash after PD switches the leader [#1250](https://github.com/pingcap/pd/pull/1250)
+
+## v2.1.0-rc.2
 ### Features
 * Support the `GetAllStores` interface
 * Add the statistics of scheduling estimation in Simulator
@@ -15,7 +30,7 @@
 ### Bug fix
 * Fix the issue that pd-ctl uses the `hot store` command to exit wrongly
 
-## v2.1.0-rc1
+## v2.1.0-rc.1
 ### Features
 * Introduce the version control mechanism and support rolling update of the cluster with compatibility
 * Enable the `region merge` feature
