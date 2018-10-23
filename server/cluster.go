@@ -495,6 +495,7 @@ func (c *RaftCluster) checkStores() {
 		if store.GetState() != metapb.StoreState_Offline {
 			if store.GetState() == metapb.StoreState_Up && !store.IsLowSpace(cluster.GetLowSpaceRatio()) {
 				upStoreCount++
+				continue
 			}
 		}
 		offlineStore := store.Store
