@@ -59,15 +59,15 @@ func (s *RegionSyncer) establish(addr string) (ClientStream, error) {
 		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(s.carrier.Context())
+	ctx, cancel := context.WithCancel(s.server.Context())
 	client, err := pdpb.NewPDClient(cc).SyncRegions(ctx)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
 	err = client.Send(&pdpb.SyncRegionRequest{
-		Header: &pdpb.RequestHeader{ClusterId: s.carrier.ClusterID()},
-		Member: s.carrier.GetMemberInfo(),
+		Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()},
+		Member: s.server.GetMemberInfo(),
 	})
 	if err != nil {
 		cancel()
@@ -101,11 +101,11 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						return
 					}
 				}
-				log.Errorf("%s failed to establish sync stream with leader %s: %s", s.carrier.GetMemberInfo().GetName(), s.carrier.GetLeader().GetName(), err)
+				log.Errorf("%s failed to establish sync stream with leader %s: %s", s.server.GetMemberInfo().GetName(), s.server.GetLeader().GetName(), err)
 				time.Sleep(time.Second)
 				continue
 			}
-			log.Infof("%s start sync with leader %s", s.carrier.GetMemberInfo().GetName(), s.carrier.GetLeader().GetName())
+			log.Infof("%s start sync with leader %s", s.server.GetMemberInfo().GetName(), s.server.GetLeader().GetName())
 			for {
 				resp, err := client.Recv()
 				if err != nil {
@@ -114,7 +114,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					break
 				}
 				for _, r := range resp.GetRegions() {
-					s.carrier.GetStorage().SaveRegion(r)
+					s.server.GetStorage().SaveRegion(r)
 				}
 			}
 		}

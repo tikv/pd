@@ -30,7 +30,7 @@ const (
 	syncerKeepAliveInterval = 10 * time.Second
 )
 
-// ClientStream is the client side of the region sycner.
+// ClientStream is the client side of the region syncer.
 type ClientStream interface {
 	Recv() (*pdpb.SyncRegionResponse, error)
 	CloseSend() error
@@ -41,8 +41,8 @@ type ServerStream interface {
 	Send(regions *pdpb.SyncRegionResponse) error
 }
 
-// Carrier is the abstraction of the syncer storage carrier.
-type Carrier interface {
+// Server is the abstraction of the syncer storage server.
+type Server interface {
 	Context() context.Context
 	ClusterID() uint64
 	GetMemberInfo() *pdpb.Member
@@ -56,7 +56,7 @@ type RegionSyncer struct {
 	streams map[string]ServerStream
 	ctx     context.Context
 	cancel  context.CancelFunc
-	carrier Carrier
+	server  Server
 	closed  chan struct{}
 	wg      sync.WaitGroup
 }
@@ -64,12 +64,12 @@ type RegionSyncer struct {
 // NewRegionSyncer returns a region syncer.
 // The final consistency is ensured by the heartbeat.
 // Strong consistency is not guaranteed.
-// Usually open the region syncer in huge cluster and the carrier
+// Usually open the region syncer in huge cluster and the server
 // no longer etcd but go-leveldb.
-func NewRegionSyncer(c Carrier) *RegionSyncer {
+func NewRegionSyncer(s Server) *RegionSyncer {
 	return &RegionSyncer{
 		streams: make(map[string]ServerStream),
-		carrier: c,
+		server:  s,
 		closed:  make(chan struct{}),
 	}
 }
@@ -92,12 +92,12 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 				requests = append(requests, region.GetMeta())
 			}
 			regions := &pdpb.SyncRegionResponse{
-				Header:  &pdpb.ResponseHeader{ClusterId: s.carrier.ClusterID()},
+				Header:  &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
 				Regions: requests,
 			}
 			s.broadcast(regions)
 		case <-ticker.C:
-			alive := &pdpb.SyncRegionResponse{Header: &pdpb.ResponseHeader{ClusterId: s.carrier.ClusterID()}}
+			alive := &pdpb.SyncRegionResponse{Header: &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()}}
 			s.broadcast(alive)
 		}
 		requests = requests[:0]
@@ -112,7 +112,7 @@ func (s *RegionSyncer) BindStream(name string, stream ServerStream) {
 }
 
 func (s *RegionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
-	failed := make([]string, 0, 3)
+	var failed []string
 	s.RLock()
 	for name, sender := range s.streams {
 		err := sender.Send(regions)
