@@ -161,7 +161,7 @@ func PrepareJoinCluster(cfg *Config) error {
 	initialCluster = strings.Join(pds, ",")
 	cfg.InitialCluster = initialCluster
 	cfg.InitialClusterState = embed.ClusterStateFlagExisting
-	err = os.Mkdir(cfg.DataDir, privateDirMode)
+	err = os.MkdirAll(cfg.DataDir, privateDirMode)
 	if err != nil && !os.IsExist(err) {
 		return err
 	}
