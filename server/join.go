@@ -33,8 +33,6 @@ const (
 	privateFileMode = 0600
 	// privateDirMode grants owner to make/remove files inside the directory.
 	privateDirMode = 0700
-
-	retryTimes = 100
 )
 
 // PrepareJoinCluster sends MemberAdd command to PD cluster,
@@ -127,7 +125,7 @@ func PrepareJoinCluster(cfg *Config) error {
 	existed := false
 	for _, m := range listResp.Members {
 		if len(m.Name) == 0 {
-			return errors.New("exsist a member that the join is not completed")
+			return errors.New("there is a member that has not joined successfully")
 		}
 		if m.Name == cfg.Name {
 			existed = true
@@ -158,7 +156,7 @@ func PrepareJoinCluster(cfg *Config) error {
 			n = cfg.Name
 		}
 		if len(n) == 0 {
-			return errors.New("exsist a member that the join is not completed")
+			return errors.New("there is a member that has not joined successfully")
 		}
 		for _, m := range memb.PeerURLs {
 			pds = append(pds, fmt.Sprintf("%s=%s", n, m))
@@ -169,18 +167,11 @@ func PrepareJoinCluster(cfg *Config) error {
 	cfg.InitialClusterState = embed.ClusterStateFlagExisting
 	err = os.MkdirAll(cfg.DataDir, privateDirMode)
 	if err != nil && !os.IsExist(err) {
-		return err
+		return errors.WithStack(err)
 	}
 
-	for i := 0; i < retryTimes; i++ {
-		err = ioutil.WriteFile(filePath, []byte(cfg.InitialCluster), privateFileMode)
-		if err != nil {
-			log.Errorf("persist join config failed: %s", err)
-			continue
-		}
-		break
-	}
-	return err
+	err = ioutil.WriteFile(filePath, []byte(cfg.InitialCluster), privateFileMode)
+	return errors.WithStack(err)
 }
 
 func isDataExist(d string) bool {
