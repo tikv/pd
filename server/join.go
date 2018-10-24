@@ -18,7 +18,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 
 	"github.com/coreos/etcd/clientv3"
@@ -82,7 +81,7 @@ func PrepareJoinCluster(cfg *Config) error {
 		return errors.New("join self is forbidden")
 	}
 
-	filePath := filepath.Join(cfg.DataDir, "join")
+	filePath := path.Join(cfg.DataDir, "join")
 	// Read the persist join config
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
 		s, err := ioutil.ReadFile(filePath)
