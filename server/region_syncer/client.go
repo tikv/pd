@@ -11,12 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package syncer
 
 import (
 	"context"
 	"net/url"
-	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -26,66 +25,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const (
-	msgSize                 = 8 * 1024 * 1024
-	maxSyncRegionBatchSize  = 100
-	syncerKeepAliveInterval = 10 * time.Second
-)
-
-type syncerClient interface {
-	Recv() (*pdpb.SyncRegionResponse, error)
-	CloseSend() error
-}
-type syncerServer interface {
-	Send(regions *pdpb.SyncRegionResponse) error
-}
-
-type regionSyncer struct {
-	sync.RWMutex
-	streams map[string]syncerServer
-	ctx     context.Context
-	cancel  context.CancelFunc
-	server  *Server
-	closed  chan struct{}
-	wg      sync.WaitGroup
-}
-
-func newRegionSyncer(server *Server) *regionSyncer {
-	return &regionSyncer{
-		streams: make(map[string]syncerServer),
-		server:  server,
-		closed:  make(chan struct{}),
-	}
-}
-
-func (s *regionSyncer) bindStream(name string, stream syncerServer) {
-	s.Lock()
-	defer s.Unlock()
-	s.streams[name] = stream
-}
-
-func (s *regionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
-	failed := make([]string, 0, 3)
-	s.RLock()
-	for name, sender := range s.streams {
-		err := sender.Send(regions)
-		if err != nil {
-			log.Error("region syncer send data meet error:", err)
-			failed = append(failed, name)
-		}
-	}
-	s.RUnlock()
-	if len(failed) > 0 {
-		s.Lock()
-		for _, name := range failed {
-			delete(s.streams, name)
-			log.Infof("region syncer delete the stream of %s", name)
-		}
-		s.Unlock()
-	}
-}
-
-func (s *regionSyncer) stopSyncWithLeader() {
+// StopSyncWithLeader stop to sync the region with leader.
+func (s *RegionSyncer) StopSyncWithLeader() {
 	s.reset()
 	s.Lock()
 	close(s.closed)
@@ -94,7 +35,7 @@ func (s *regionSyncer) stopSyncWithLeader() {
 	s.wg.Wait()
 }
 
-func (s *regionSyncer) reset() {
+func (s *RegionSyncer) reset() {
 	s.Lock()
 	defer s.Unlock()
 
@@ -105,7 +46,7 @@ func (s *regionSyncer) reset() {
 	s.cancel, s.ctx = nil, nil
 }
 
-func (s *regionSyncer) establish(addr string) (syncerClient, error) {
+func (s *RegionSyncer) establish(addr string) (ClientStream, error) {
 	s.reset()
 
 	u, err := url.Parse(addr)
@@ -118,15 +59,15 @@ func (s *regionSyncer) establish(addr string) (syncerClient, error) {
 		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(s.server.serverLoopCtx)
+	ctx, cancel := context.WithCancel(s.server.Context())
 	client, err := pdpb.NewPDClient(cc).SyncRegions(ctx)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
 	err = client.Send(&pdpb.SyncRegionRequest{
-		Header: &pdpb.RequestHeader{ClusterId: s.server.clusterID},
-		Member: s.server.member,
+		Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()},
+		Member: s.server.GetMemberInfo(),
 	})
 	if err != nil {
 		cancel()
@@ -138,7 +79,8 @@ func (s *regionSyncer) establish(addr string) (syncerClient, error) {
 	return client, nil
 }
 
-func (s *regionSyncer) startSyncWithLeader(addr string) {
+// StartSyncWithLeader starts to sync with leader.
+func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	s.wg.Add(1)
 	s.RLock()
 	closed := s.closed
@@ -159,11 +101,11 @@ func (s *regionSyncer) startSyncWithLeader(addr string) {
 						return
 					}
 				}
-				log.Errorf("%s failed to establish sync stream with leader %s: %s", s.server.member.GetName(), s.server.GetLeader().GetName(), err)
+				log.Errorf("%s failed to establish sync stream with leader %s: %s", s.server.GetMemberInfo().GetName(), s.server.GetLeader().GetName(), err)
 				time.Sleep(time.Second)
 				continue
 			}
-			log.Infof("%s start sync with leader %s", s.server.member.GetName(), s.server.GetLeader().GetName())
+			log.Infof("%s start sync with leader %s", s.server.GetMemberInfo().GetName(), s.server.GetLeader().GetName())
 			for {
 				resp, err := client.Recv()
 				if err != nil {
@@ -172,7 +114,7 @@ func (s *regionSyncer) startSyncWithLeader(addr string) {
 					break
 				}
 				for _, r := range resp.GetRegions() {
-					s.server.kv.SaveRegion(r)
+					s.server.GetStorage().SaveRegion(r)
 				}
 			}
 		}

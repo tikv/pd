@@ -51,15 +51,15 @@ func (m *MergeChecker) RecordRegionSplit(regionID uint64) {
 }
 
 // Check verifies a region's replicas, creating an Operator if need.
-func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
+func (m *MergeChecker) Check(region *core.RegionInfo) []*Operator {
 	if m.splitCache.Exists(mergeBlockMarker) {
 		checkerCounter.WithLabelValues("merge_checker", "recently_start").Inc()
-		return nil, nil
+		return nil
 	}
 
 	if m.splitCache.Exists(region.GetID()) {
 		checkerCounter.WithLabelValues("merge_checker", "recently_split").Inc()
-		return nil, nil
+		return nil
 	}
 
 	checkerCounter.WithLabelValues("merge_checker", "check").Inc()
@@ -70,31 +70,31 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 	// thus here when size is 0, just skip.
 	if region.GetApproximateSize() == 0 {
 		checkerCounter.WithLabelValues("merge_checker", "skip").Inc()
-		return nil, nil
+		return nil
 	}
 
 	// region is not small enough
 	if region.GetApproximateSize() > int64(m.cluster.GetMaxMergeRegionSize()) ||
 		region.GetApproximateKeys() > int64(m.cluster.GetMaxMergeRegionKeys()) {
 		checkerCounter.WithLabelValues("merge_checker", "no_need").Inc()
-		return nil, nil
+		return nil
 	}
 
 	// skip region has down peers or pending peers or learner peers
 	if len(region.GetDownPeers()) > 0 || len(region.GetPendingPeers()) > 0 || len(region.GetLearners()) > 0 {
 		checkerCounter.WithLabelValues("merge_checker", "special_peer").Inc()
-		return nil, nil
+		return nil
 	}
 
 	if len(region.GetPeers()) != m.cluster.GetMaxReplicas() {
 		checkerCounter.WithLabelValues("merge_checker", "abnormal_replica").Inc()
-		return nil, nil
+		return nil
 	}
 
 	// skip hot region
 	if m.cluster.IsRegionHot(region.GetID()) {
 		checkerCounter.WithLabelValues("merge_checker", "hot_region").Inc()
-		return nil, nil
+		return nil
 	}
 
 	var target *core.RegionInfo
@@ -105,16 +105,16 @@ func (m *MergeChecker) Check(region *core.RegionInfo) (*Operator, *Operator) {
 
 	if target == nil {
 		checkerCounter.WithLabelValues("merge_checker", "no_target").Inc()
-		return nil, nil
+		return nil
 	}
 
 	checkerCounter.WithLabelValues("merge_checker", "new_operator").Inc()
 	log.Debugf("try to merge region {%v} into region {%v}", region, target)
-	op1, op2, err := CreateMergeRegionOperator("merge-region", m.cluster, region, target, OpMerge)
+	ops, err := CreateMergeRegionOperator("merge-region", m.cluster, region, target, OpMerge)
 	if err != nil {
-		return nil, nil
+		return nil
 	}
-	return op1, op2
+	return ops
 }
 
 func (m *MergeChecker) checkTarget(region, adjacent, target *core.RegionInfo) *core.RegionInfo {

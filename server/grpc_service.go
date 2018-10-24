@@ -580,7 +580,7 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 
 	co := cluster.coordinator
 	if op := co.regionScatterer.Scatter(region); op != nil {
-		co.addOperator(op)
+		co.opController.AddOperator(op)
 	}
 
 	return &pdpb.ScatterRegionResponse{
@@ -625,7 +625,7 @@ func (s *Server) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
 		}
 		log.Infof("establish sync region stream with %s [%s]", request.GetMember().GetName(), request.GetMember().GetClientUrls()[0])
 		if s.cluster.regionSyncer != nil {
-			s.cluster.regionSyncer.bindStream(request.GetMember().GetName(), stream)
+			s.cluster.regionSyncer.BindStream(request.GetMember().GetName(), stream)
 		}
 	}
 }

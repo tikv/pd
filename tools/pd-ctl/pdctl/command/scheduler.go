@@ -73,6 +73,12 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewShuffleLeaderSchedulerCommand())
 	c.AddCommand(NewShuffleRegionSchedulerCommand())
 	c.AddCommand(NewScatterRangeSchedulerCommand())
+	c.AddCommand(NewBalanceLeaderSchedulerCommand())
+	c.AddCommand(NewBalanceRegionSchedulerCommand())
+	c.AddCommand(NewBalanceHotRegionSchedulerCommand())
+	c.AddCommand(NewRandomMergeSchedulerCommand())
+	c.AddCommand(NewBalanceAdjacentRegionSchedulerCommand())
+	c.AddCommand(NewLabelSchedulerCommand())
 	return c
 }
 
@@ -134,6 +140,56 @@ func NewShuffleRegionSchedulerCommand() *cobra.Command {
 	return c
 }
 
+// NewBalanceLeaderSchedulerCommand returns a command to add a balance-leader-scheduler.
+func NewBalanceLeaderSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-leader-scheduler",
+		Short: "add a scheduler to balance leaders between stores",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
+// NewBalanceRegionSchedulerCommand returns a command to add a balance-region-scheduler.
+func NewBalanceRegionSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-region-scheduler",
+		Short: "add a scheduler to balance regions between stores",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
+// NewBalanceHotRegionSchedulerCommand returns a command to add a balance-hot-region-scheduler.
+func NewBalanceHotRegionSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-hot-region-scheduler",
+		Short: "add a scheduler to balance hot regions between stores",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
+// NewRandomMergeSchedulerCommand returns a command to add a random-merge-scheduler.
+func NewRandomMergeSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "random-merge-scheduler",
+		Short: "add a scheduler to merge regions randomly",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
+// NewLabelSchedulerCommand returns a command to add a label-scheduler.
+func NewLabelSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "label-scheduler",
+		Short: "add a scheduler to schedule regions according to the label",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
 func addSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 0 {
 		fmt.Println(cmd.UsageString())
@@ -166,6 +222,33 @@ func addSchedulerForScatterRangeCommandFunc(cmd *cobra.Command, args []string) {
 	input["start_key"] = url.QueryEscape(args[0])
 	input["end_key"] = url.QueryEscape(args[1])
 	input["range_name"] = args[2]
+	postJSON(cmd, schedulersPrefix, input)
+}
+
+// NewBalanceAdjacentRegionSchedulerCommand returns a command to add a balance-adjacent-region-scheduler.
+func NewBalanceAdjacentRegionSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-adjacent-region-scheduler [leader_limit] [peer_limit]",
+		Short: "add a scheduler to disperse adjacent regions on each store",
+		Run:   addSchedulerForBalanceAdjacentRegionCommandFunc,
+	}
+	return c
+}
+
+func addSchedulerForBalanceAdjacentRegionCommandFunc(cmd *cobra.Command, args []string) {
+	l := len(args)
+	input := make(map[string]interface{})
+	if l > 2 {
+		fmt.Println(cmd.UsageString())
+		return
+	} else if l == 1 {
+		input["leader_limit"] = url.QueryEscape(args[0])
+	} else if l == 2 {
+		input["leader_limit"] = url.QueryEscape(args[0])
+		input["peer_limit"] = url.QueryEscape(args[1])
+	}
+	input["name"] = cmd.Name()
+
 	postJSON(cmd, schedulersPrefix, input)
 }
 

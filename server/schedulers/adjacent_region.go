@@ -34,7 +34,8 @@ const (
 
 func init() {
 	schedule.RegisterScheduler("adjacent-region", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
-		if len(args) == 2 {
+		l := len(args)
+		if l == 2 {
 			leaderLimit, err := strconv.ParseUint(args[0], 10, 64)
 			if err != nil {
 				return nil, errors.WithStack(err)
@@ -44,6 +45,12 @@ func init() {
 				return nil, errors.WithStack(err)
 			}
 			return newBalanceAdjacentRegionScheduler(limiter, leaderLimit, peerLimit), nil
+		} else if l == 1 {
+			leaderLimit, err := strconv.ParseUint(args[0], 10, 64)
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			return newBalanceAdjacentRegionScheduler(limiter, leaderLimit), nil
 		}
 		return newBalanceAdjacentRegionScheduler(limiter), nil
 	})
@@ -92,7 +99,10 @@ func newBalanceAdjacentRegionScheduler(limiter *schedule.Limiter, args ...uint64
 		peerLimit:     defaultAdjacentPeerLimit,
 		lastKey:       []byte(""),
 	}
-	if len(args) == 2 {
+	l := len(args)
+	if l == 1 {
+		s.leaderLimit = args[0]
+	} else if l == 2 {
 		s.leaderLimit = args[0]
 		s.peerLimit = args[1]
 	}

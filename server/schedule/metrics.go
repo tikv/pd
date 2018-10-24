@@ -48,6 +48,23 @@ var (
 			Name:      "filter",
 			Help:      "Counter of the filter",
 		}, []string{"action", "store", "type"})
+
+	operatorCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "operators_count",
+			Help:      "Counter of schedule operators.",
+		}, []string{"type", "event"})
+
+	operatorDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "finish_operators_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of finished operator.",
+			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 16),
+		}, []string{"type"})
 )
 
 func init() {
@@ -55,4 +72,6 @@ func init() {
 	prometheus.MustRegister(operatorStepDuration)
 	prometheus.MustRegister(hotCacheStatusGauge)
 	prometheus.MustRegister(filterCounter)
+	prometheus.MustRegister(operatorCounter)
+	prometheus.MustRegister(operatorDuration)
 }

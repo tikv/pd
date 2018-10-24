@@ -124,7 +124,7 @@ type Config struct {
 
 	heartbeatStreamBindInterval typeutil.Duration
 
-	leaderPriorityCheckInterval typeutil.Duration
+	LeaderPriorityCheckInterval typeutil.Duration
 }
 
 // NewConfig creates a new config.
@@ -260,7 +260,7 @@ func (c *Config) Parse(arguments []string) error {
 		return errors.Errorf("'%s' is an invalid flag", c.FlagSet.Arg(0))
 	}
 
-	err = c.adjust(meta)
+	err = c.Adjust(meta)
 	return err
 }
 
@@ -287,7 +287,8 @@ func (c *Config) validate() error {
 	return nil
 }
 
-func (c *Config) adjust(meta *toml.MetaData) error {
+// Adjust is used to adjust the PD configurations.
+func (c *Config) Adjust(meta *toml.MetaData) error {
 	adjustString(&c.Name, defaultName)
 	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 
@@ -346,7 +347,7 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 
 	adjustDuration(&c.heartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
 
-	adjustDuration(&c.leaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
+	adjustDuration(&c.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
 
 	// enable PreVote by default
 	if meta == nil || !meta.IsDefined("enable-prevote") {
