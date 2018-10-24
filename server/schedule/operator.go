@@ -359,13 +359,20 @@ func (o *Operator) IsFinish() bool {
 
 // IsTimeout checks the operator's create time and determines if it is timeout.
 func (o *Operator) IsTimeout() bool {
+	var timeout bool
 	if o.IsFinish() {
 		return false
 	}
 	if o.kind&OpRegion != 0 {
-		return time.Since(o.createTime) > RegionOperatorWaitTime
+		timeout = time.Since(o.createTime) > RegionOperatorWaitTime
+	} else {
+		timeout = time.Since(o.createTime) > LeaderOperatorWaitTime
 	}
-	return time.Since(o.createTime) > LeaderOperatorWaitTime
+	if timeout {
+		operatorCounter.WithLabelValues(o.Desc(), "timeout").Inc()
+		return true
+	}
+	return false
 }
 
 // Influence calculates the store difference which unfinished operator steps make
@@ -461,10 +468,10 @@ func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64) (
 }
 
 // CreateMergeRegionOperator creates an Operator that merge two region into one
-func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.RegionInfo, target *core.RegionInfo, kind OperatorKind) (*Operator, *Operator, error) {
+func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.RegionInfo, target *core.RegionInfo, kind OperatorKind) ([]*Operator, error) {
 	steps, kinds, err := matchPeerSteps(cluster, source, target)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	steps = append(steps, MergeRegion{
@@ -480,7 +487,7 @@ func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.Region
 		IsPassive:  true,
 	})
 
-	return op1, op2, nil
+	return []*Operator{op1, op2}, nil
 }
 
 // matchPeerSteps returns the steps to match the location of peer stores of source region with target's.

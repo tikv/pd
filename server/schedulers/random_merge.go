@@ -78,9 +78,9 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, opInfluence sc
 	}
 
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	op1, op2, err := schedule.CreateMergeRegionOperator("random-merge", cluster, region, target, schedule.OpAdmin)
+	ops, err := schedule.CreateMergeRegionOperator("random-merge", cluster, region, target, schedule.OpAdmin)
 	if err != nil {
 		return nil
 	}
-	return []*schedule.Operator{op1, op2}
+	return ops
 }

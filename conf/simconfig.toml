@@ -3,8 +3,6 @@
 [tick]
 # the tick interval when starting PD inside (default: "100ms")
 sim-tick-interval = "100ms"
-# the tick interval when connecting with an external PD (default: "1s")
-norm-tick-interval = "1s"
 
 [store]
 # the capacity size of a new store in GB (default: 1024)
@@ -15,3 +13,19 @@ store-available = 1024
 store-io-per-second = 40
 # the version of a new store (default: "2.1.0")
 store-version = "2.1.0"
+
+# the meaning of these configurations below are similar with config.toml
+[server]
+lease = 1
+tso-save-interval = "200ms"
+tick-interval = "100ms"
+election-interval = "3s"
+leader-priority-check-interval = "100ms"
+
+[server.schedule]
+split-merge-interval = "1ms"
+max-store-down-time = "30s"
+leader-schedule-limit = 32
+region-schedule-limit = 128
+replica-schedule-limit = 32
+merge-schedule-limit = 32

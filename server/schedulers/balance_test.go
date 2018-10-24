@@ -914,24 +914,19 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	s.cluster.MockSchedulerOptions.SplitMergeInterval = time.Hour
 
 	// should with same peer count
-	op1, op2 := s.mc.Check(s.regions[0])
-	c.Assert(op1, IsNil)
-	c.Assert(op2, IsNil)
-	// size should be small enough
-	op1, op2 = s.mc.Check(s.regions[1])
-	c.Assert(op1, IsNil)
-	c.Assert(op2, IsNil)
-	op1, op2 = s.mc.Check(s.regions[2])
-	c.Assert(op1, NotNil)
-	c.Assert(op2, NotNil)
+	ops := s.mc.Check(s.regions[0])
+	c.Assert(ops, IsNil)
+	// The size should be small enough.
+	ops = s.mc.Check(s.regions[1])
+	c.Assert(ops, IsNil)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
 	// Skip recently split regions.
 	s.mc.RecordRegionSplit(s.regions[2].GetID())
-	op1, op2 = s.mc.Check(s.regions[2])
-	c.Assert(op1, IsNil)
-	c.Assert(op2, IsNil)
-	op1, op2 = s.mc.Check(s.regions[3])
-	c.Assert(op1, IsNil)
-	c.Assert(op2, IsNil)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, IsNil)
+	ops = s.mc.Check(s.regions[3])
+	c.Assert(ops, IsNil)
 }
 
 func (s *testMergeCheckerSuite) checkSteps(c *C, op *schedule.Operator, steps []schedule.OperatorStep) {
@@ -945,8 +940,8 @@ func (s *testMergeCheckerSuite) checkSteps(c *C, op *schedule.Operator, steps []
 
 func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	// partial store overlap not including leader
-	op1, op2 := s.mc.Check(s.regions[2])
-	s.checkSteps(c, op1, []schedule.OperatorStep{
+	ops := s.mc.Check(s.regions[2])
+	s.checkSteps(c, ops[0], []schedule.OperatorStep{
 		schedule.AddLearner{ToStore: 4, PeerID: 1},
 		schedule.PromoteLearner{ToStore: 4, PeerID: 1},
 		schedule.TransferLeader{FromStore: 6, ToStore: 4},
@@ -957,7 +952,7 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 			IsPassive:  false,
 		},
 	})
-	s.checkSteps(c, op2, []schedule.OperatorStep{
+	s.checkSteps(c, ops[1], []schedule.OperatorStep{
 		schedule.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
@@ -969,8 +964,8 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	newRegion := s.regions[2].Clone(core.WithLeader(&metapb.Peer{Id: 106, StoreId: 1}))
 	s.regions[2] = newRegion
 	s.cluster.PutRegion(s.regions[2])
-	op1, op2 = s.mc.Check(s.regions[2])
-	s.checkSteps(c, op1, []schedule.OperatorStep{
+	ops = s.mc.Check(s.regions[2])
+	s.checkSteps(c, ops[0], []schedule.OperatorStep{
 		schedule.AddLearner{ToStore: 4, PeerID: 2},
 		schedule.PromoteLearner{ToStore: 4, PeerID: 2},
 		schedule.RemovePeer{FromStore: 6},
@@ -980,7 +975,7 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 			IsPassive:  false,
 		},
 	})
-	s.checkSteps(c, op2, []schedule.OperatorStep{
+	s.checkSteps(c, ops[1], []schedule.OperatorStep{
 		schedule.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
@@ -995,15 +990,15 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 		{Id: 108, StoreId: 4},
 	}))
 	s.cluster.PutRegion(s.regions[2])
-	op1, op2 = s.mc.Check(s.regions[2])
-	s.checkSteps(c, op1, []schedule.OperatorStep{
+	ops = s.mc.Check(s.regions[2])
+	s.checkSteps(c, ops[0], []schedule.OperatorStep{
 		schedule.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
-	s.checkSteps(c, op2, []schedule.OperatorStep{
+	s.checkSteps(c, ops[1], []schedule.OperatorStep{
 		schedule.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),

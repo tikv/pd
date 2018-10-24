@@ -24,7 +24,6 @@ import (
 	"github.com/coreos/etcd/embed"
 	"github.com/pingcap/pd/pkg/tempurl"
 	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server/schedule"
 
 	// Register namespace classifiers.
 	_ "github.com/pingcap/pd/table"
@@ -76,18 +75,10 @@ func NewTestSingleConfig() *Config {
 	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
 	cfg.disableStrictReconfigCheck = true
 	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)
-	cfg.ElectionInterval = typeutil.NewDuration(3000 * time.Millisecond)
-	cfg.leaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
+	cfg.ElectionInterval = typeutil.NewDuration(3 * time.Second)
+	cfg.LeaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
 
-	cfg.adjust(nil)
-
-	if schedule.Simulating {
-		cfg.Schedule.RegionScheduleLimit = 128
-		cfg.Schedule.SplitMergeInterval.Duration = 1 * time.Microsecond
-		cfg.Schedule.MergeScheduleLimit = 32
-		cfg.Schedule.ReplicaScheduleLimit = 32
-		cfg.Schedule.MaxStoreDownTime.Duration = 30 * time.Second
-	}
+	cfg.Adjust(nil)
 
 	return cfg
 }

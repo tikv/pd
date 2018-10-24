@@ -123,7 +123,7 @@ func (s *heartbeatStreams) bindStream(storeID uint64, stream heartbeatStream) {
 	}
 }
 
-func (s *heartbeatStreams) sendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
+func (s *heartbeatStreams) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
 	if region.GetLeader() == nil {
 		return
 	}

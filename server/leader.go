@@ -126,7 +126,7 @@ func (s *Server) etcdLeaderLoop() {
 	defer cancel()
 	for {
 		select {
-		case <-time.After(s.cfg.leaderPriorityCheckInterval.Duration):
+		case <-time.After(s.cfg.LeaderPriorityCheckInterval.Duration):
 			etcdLeader := s.GetEtcdLeader()
 			if etcdLeader == s.ID() || etcdLeader == 0 {
 				break
