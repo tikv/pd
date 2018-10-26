@@ -328,7 +328,10 @@ func (s *baseCluster) testPutStore(c *C, clusterID uint64, store *metapb.Store) 
 }
 
 func (s *baseCluster) resetStoreState(c *C, storeID uint64, state metapb.StoreState) {
-	cluster := s.svr.GetRaftCluster().cachedCluster
+	raftCluster := s.svr.GetRaftCluster()
+	raftCluster.RLock()
+	defer raftCluster.RUnlock()
+	cluster := raftCluster.cachedCluster
 	c.Assert(cluster, NotNil)
 	store := cluster.GetStore(storeID)
 	c.Assert(store, NotNil)
@@ -453,9 +456,11 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
+	s.svr.cluster.RLock()
 	s.svr.cluster.cachedCluster.Lock()
 	s.svr.cluster.cachedCluster.kv = core.NewKV(core.NewMemoryKV())
 	s.svr.cluster.cachedCluster.Unlock()
+	s.svr.cluster.RUnlock()
 	var stores []*metapb.Store
 	for _, addr := range storeAddrs {
 		store := s.newStore(c, 0, addr)
