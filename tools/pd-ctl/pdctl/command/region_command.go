@@ -201,7 +201,7 @@ func showRegionTopSizeCommandFunc(cmd *cobra.Command, args []string) {
 // NewRegionWithKeyCommand return a region with key subcommand of regionCmd
 func NewRegionWithKeyCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "key [--format=raw|pb|proto|protobuf] <key>",
+		Use:   "key [--format=raw|encode] <key>",
 		Short: "show the region with key",
 		Run:   showRegionWithTableCommandFunc,
 	}
@@ -224,8 +224,8 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 	switch format {
 	case "raw":
 		key = args[0]
-	case "pb", "proto", "protobuf":
-		key, err = decodeProtobufText(args[0])
+	case "encode":
+		key, err = decodeKey(args[0])
 		if err != nil {
 			fmt.Println("Error: ", err)
 			return
@@ -243,10 +243,9 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	fmt.Println(r)
-
 }
 
-func decodeProtobufText(text string) (string, error) {
+func decodeKey(text string) (string, error) {
 	var buf []byte
 	r := bytes.NewBuffer([]byte(text))
 	for {
@@ -257,13 +256,35 @@ func decodeProtobufText(text string) (string, error) {
 			}
 			break
 		}
-		if c == '\\' {
-			_, err := fmt.Sscanf(string(r.Next(3)), "%03o", &c)
+		if c != '\\' {
+			buf = append(buf, c)
+			continue
+		}
+		n := r.Next(1)
+		switch n[0] {
+		case '"':
+			buf = append(buf, '"')
+		case '\'':
+			buf = append(buf, '\'')
+		case '\\':
+			buf = append(buf, '\\')
+		case 'n':
+			buf = append(buf, '\n')
+		case 't':
+			buf = append(buf, '\t')
+		case 'r':
+			buf = append(buf, '\r')
+		case 'x':
+			fmt.Sscanf(string(r.Next(2)), "%02x", &c)
+			buf = append(buf, c)
+		default:
+			n = append(n, r.Next(2)...)
+			_, err := fmt.Sscanf(string(n), "%03o", &c)
 			if err != nil {
 				return "", err
 			}
+			buf = append(buf, c)
 		}
-		buf = append(buf, c)
 	}
 	return string(buf), nil
 }
@@ -271,7 +292,7 @@ func decodeProtobufText(text string) (string, error) {
 // NewRegionsWithStartKeyCommand returns regions from startkey subcommand of regionCmd.
 func NewRegionsWithStartKeyCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "startkey [--format=raw|pb|proto|protobuf] <key> <limit>",
+		Use:   "startkey [--format=raw|encode] <key> <limit>",
 		Short: "show regions from start key",
 		Run:   showRegionsFromStartKeyCommandFunc,
 	}
@@ -295,8 +316,8 @@ func showRegionsFromStartKeyCommandFunc(cmd *cobra.Command, args []string) {
 	switch format {
 	case "raw":
 		key = args[0]
-	case "pb", "proto", "protobuf":
-		key, err = decodeProtobufText(args[0])
+	case "encode":
+		key, err = decodeKey(args[0])
 		if err != nil {
 			fmt.Println("Error: ", err)
 			return

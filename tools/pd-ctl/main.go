@@ -52,6 +52,7 @@ func main() {
 	if pdAddr != "" {
 		os.Args = append(os.Args, "-u", pdAddr)
 	}
+	flag.CommandLine.ParseErrorsWhitelist.UnknownFlags = true
 	flag.Parse()
 
 	if version {
