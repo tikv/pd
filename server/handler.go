@@ -435,25 +435,36 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 	return nil
 }
 
-// AddAddPeerOperator adds an operator to add peer.
-func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
+// checkAdminAddPeerOperator checks adminAddPeer operator with given region ID and store ID.
+func (h *Handler) checkAdminAddPeerOperator(regionID uint64, toStoreID uint64) (*coordinator, *core.RegionInfo, error) {
 	c, err := h.getCoordinator()
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	region := c.cluster.GetRegion(regionID)
 	if region == nil {
-		return ErrRegionNotFound(regionID)
+		return nil, nil, ErrRegionNotFound(regionID)
 	}
 
 	if region.GetStorePeer(toStoreID) != nil {
-		return errors.Errorf("region already has peer in store %v", toStoreID)
+		return nil, nil, errors.Errorf("region already has peer in store %v", toStoreID)
 	}
 
 	if c.cluster.GetStore(toStoreID) == nil {
-		return core.NewStoreNotFoundErr(toStoreID)
+		return nil, nil, core.NewStoreNotFoundErr(toStoreID)
 	}
+
+	return c, region, nil
+}
+
+// AddAddPeerOperator adds an operator to add peer.
+func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
+	c, region, err := h.checkAdminAddPeerOperator(regionID, toStoreID)
+	if err != nil {
+		return err
+	}
+
 	newPeer, err := c.cluster.AllocPeer(toStoreID)
 	if err != nil {
 		return err
@@ -469,6 +480,32 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		steps = []schedule.OperatorStep{
 			schedule.AddPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
 		}
+	}
+	op := schedule.NewOperator("adminAddPeer", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
+	if ok := c.opController.AddOperator(op); !ok {
+		return errors.WithStack(errAddOperator)
+	}
+	return nil
+}
+
+// AddAddLearnerOperator adds an operator to add learner.
+func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error {
+	c, region, err := h.checkAdminAddPeerOperator(regionID, toStoreID)
+	if err != nil {
+		return err
+	}
+
+	if !c.cluster.IsRaftLearnerEnabled() {
+		return ErrOperatorNotFound
+	}
+
+	newPeer, err := c.cluster.AllocPeer(toStoreID)
+	if err != nil {
+		return err
+	}
+
+	steps := []schedule.OperatorStep{
+		schedule.AddLearner{ToStore: toStoreID, PeerID: newPeer.GetId()},
 	}
 	op := schedule.NewOperator("adminAddPeer", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
 	if ok := c.opController.AddOperator(op); !ok {
