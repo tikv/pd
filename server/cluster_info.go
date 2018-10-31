@@ -150,7 +150,7 @@ func (c *clusterInfo) getClusterID() uint64 {
 func (c *clusterInfo) GetSlaveStoreIDs() []uint64 {
 	c.RLock()
 	defer c.RUnlock()
-	c.core.Stores.GetSlaveStoreIDs()
+	return c.core.Stores.GetSlaveStoreIDs()
 }
 
 func (c *clusterInfo) getMeta() *metapb.Cluster {
@@ -502,13 +502,13 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			}
 			saveCache = true
 		}
-		if len(region.GetDownPeers()) > 0 || len(region.GetPendingPeers()) > 0 {
+		if len(region.GetDownPeers()) > 0 || len(region.GetPendingPeers()) > 0 || len(region.GetSlavePendingPeers()) > 0 || len(region.GetSlaveDownPeers()) > 0 {
 			saveCache = true
 		}
-		if len(origin.GetDownPeers()) > 0 || len(origin.GetPendingPeers()) > 0 {
+		if len(origin.GetDownPeers()) > 0 || len(origin.GetPendingPeers()) > 0 || len(origin.GetSlaveDownPeers()) > 0 || len(origin.GetSlavePendingPeers()) > 0 {
 			saveCache = true
 		}
-		if len(region.GetPeers()) != len(origin.GetPeers()) {
+		if len(region.GetPeers()) != len(origin.GetPeers()) || len(region.GetSlavePeers()) != len(origin.GetSlavePeers()) {
 			saveKV, saveCache = true, true
 		}
 		if region.GetApproximateSize() != origin.GetApproximateSize() {
@@ -561,8 +561,14 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			for _, p := range origin.GetPeers() {
 				c.updateStoreStatusLocked(p.GetStoreId())
 			}
+			for _, p := range origin.GetSlavePeers() {
+				c.updateStoreStatusLocked(p.GetStoreId())
+			}
 		}
 		for _, p := range region.GetPeers() {
+			c.updateStoreStatusLocked(p.GetStoreId())
+		}
+		for _, p := range region.GetSlavePeers() {
 			c.updateStoreStatusLocked(p.GetStoreId())
 		}
 	}

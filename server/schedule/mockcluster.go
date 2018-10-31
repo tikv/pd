@@ -123,6 +123,11 @@ func (mc *MockCluster) SetStoreBusy(storeID uint64, busy bool) {
 	mc.PutStore(store)
 }
 
+// GetSlaveStoreIDs gets id of the slaves.
+func (mc *MockCluster) GetSlaveStoreIDs() []uint64 {
+	return nil
+}
+
 // AddLeaderStore adds store with specified count of leader.
 func (mc *MockCluster) AddLeaderStore(storeID uint64, leaderCount int) {
 	store := core.NewStoreInfo(&metapb.Store{Id: storeID})

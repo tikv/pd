@@ -56,6 +56,7 @@ type coordinator struct {
 	regionScatterer  *schedule.RegionScatterer
 	namespaceChecker *schedule.NamespaceChecker
 	mergeChecker     *schedule.MergeChecker
+	slaveChecker     *schedule.SlaveChecker
 	schedulers       map[string]*scheduleController
 	opController     *schedule.OperatorController
 	classifier       namespace.Classifier
@@ -72,6 +73,7 @@ func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifie
 		regionScatterer:  schedule.NewRegionScatterer(cluster, classifier),
 		namespaceChecker: schedule.NewNamespaceChecker(cluster, classifier),
 		mergeChecker:     schedule.NewMergeChecker(cluster, classifier),
+		slaveChecker:     schedule.NewSlaveChecker(cluster, classifier),
 		schedulers:       make(map[string]*scheduleController),
 		opController:     schedule.NewOperatorController(cluster, hbStreams),
 		classifier:       classifier,
@@ -164,6 +166,14 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 		if ops := c.mergeChecker.Check(region); ops != nil {
 			// make sure two operators can add successfully altogether
 			if c.opController.AddOperator(ops...) {
+				return true
+			}
+		}
+	}
+
+	if limiter.OperatorCount(schedule.OpRegion) < c.cluster.GetRegionScheduleLimit() {
+		if op := c.slaveChecker.Check(region); op != nil {
+			if c.opController.AddOperator(op) {
 				return true
 			}
 		}
