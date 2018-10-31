@@ -34,6 +34,7 @@ import (
 type MetaStore struct {
 	*metapb.Store
 	StateName string `json:"state_name"`
+	Role      string `json:"role"`
 }
 
 // StoreStatus contains status about a store.
@@ -66,6 +67,8 @@ type StoreInfo struct {
 const (
 	disconnectedName = "Disconnected"
 	downStateName    = "Down"
+	slaveRole        = "slave"
+	normalRole       = "normal"
 )
 
 func newStoreInfo(opt *server.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
@@ -91,7 +94,11 @@ func newStoreInfo(opt *server.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			IsBusy:             store.Stats.GetIsBusy(),
 		},
 	}
-
+	if store.IsSlave {
+		s.Store.Role = slaveRole
+	} else {
+		s.Store.Role = normalRole
+	}
 	if store.Stats != nil {
 		startTS := store.GetStartTS()
 		s.Status.StartTS = &startTS

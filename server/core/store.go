@@ -32,7 +32,9 @@ type StoreInfo struct {
 	*metapb.Store
 	Stats *pdpb.StoreStats
 	// Blocked means that the store is blocked from balance.
-	blocked           bool
+	blocked bool
+	// slave store place the learner which never to be a voter.
+	IsSlave           bool
 	LeaderCount       int
 	RegionCount       int
 	LeaderSize        int64
@@ -61,6 +63,7 @@ func (s *StoreInfo) Clone() *StoreInfo {
 		Store:             proto.Clone(s.Store).(*metapb.Store),
 		Stats:             proto.Clone(s.Stats).(*pdpb.StoreStats),
 		blocked:           s.blocked,
+		IsSlave:           s.IsSlave,
 		LeaderCount:       s.LeaderCount,
 		RegionCount:       s.RegionCount,
 		LeaderSize:        s.LeaderSize,
@@ -392,11 +395,24 @@ func (s *StoresInfo) UnblockStore(storeID uint64) {
 	store.Unblock()
 }
 
-// GetStores get a complete set of StoreInfo
+// GetStores gets a complete set of StoreInfo
 func (s *StoresInfo) GetStores() []*StoreInfo {
 	stores := make([]*StoreInfo, 0, len(s.stores))
 	for _, store := range s.stores {
-		stores = append(stores, store.Clone())
+		if !store.IsSlave {
+			stores = append(stores, store.Clone())
+		}
+	}
+	return stores
+}
+
+// GetSlaveStoreIDs gets id of the slaves.
+func (s *StoresInfo) GetSlaveStoreIDs() []uint64 {
+	stores := make([]uint64, 0, len(s.stores))
+	for _, store := range s.stores {
+		if store.IsSlave {
+			stores = append(stores, store.GetId())
+		}
 	}
 	return stores
 }

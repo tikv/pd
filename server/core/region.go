@@ -29,16 +29,19 @@ import (
 // RegionInfo records detail region info.
 // Read-Only once created.
 type RegionInfo struct {
-	meta            *metapb.Region
-	learners        []*metapb.Peer
-	voters          []*metapb.Peer
-	leader          *metapb.Peer
-	downPeers       []*pdpb.PeerStats
-	pendingPeers    []*metapb.Peer
-	writtenBytes    uint64
-	readBytes       uint64
-	approximateSize int64
-	approximateKeys int64
+	meta              *metapb.Region
+	learners          []*metapb.Peer
+	voters            []*metapb.Peer
+	leader            *metapb.Peer
+	downPeers         []*pdpb.PeerStats
+	pendingPeers      []*metapb.Peer
+	slavePeers        []*metapb.Peer
+	slaveDownPeers    []*pdpb.PeerStats
+	slavePendingPeers []*metapb.Peer
+	writtenBytes      uint64
+	readBytes         uint64
+	approximateSize   int64
+	approximateKeys   int64
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -75,23 +78,78 @@ func classifyVoterAndLearner(region *RegionInfo) {
 const EmptyRegionApproximateSize = 1
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
-func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
+func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, slaveIDs []uint64) *RegionInfo {
 	// Convert unit to MB.
 	// If region is empty or less than 1MB, use 1MB instead.
 	regionSize := heartbeat.GetApproximateSize() / (1 << 20)
 	if regionSize < EmptyRegionApproximateSize {
 		regionSize = EmptyRegionApproximateSize
 	}
-
-	region := &RegionInfo{
-		meta:            heartbeat.GetRegion(),
-		leader:          heartbeat.GetLeader(),
-		downPeers:       heartbeat.GetDownPeers(),
-		pendingPeers:    heartbeat.GetPendingPeers(),
-		writtenBytes:    heartbeat.GetBytesWritten(),
-		readBytes:       heartbeat.GetBytesRead(),
-		approximateSize: int64(regionSize),
-		approximateKeys: int64(heartbeat.GetApproximateKeys()),
+	var (
+		normalPeers        []*metapb.Peer
+		slavePeers         []*metapb.Peer
+		normalDownPeers    []*pdpb.PeerStats
+		slaveDownPeers     []*pdpb.PeerStats
+		normalPendingPeers []*metapb.Peer
+		slavePendingPeers  []*metapb.Peer
+		region             *RegionInfo
+	)
+	if len(slaveIDs) == 0 {
+		region = &RegionInfo{
+			meta:            heartbeat.GetRegion(),
+			leader:          heartbeat.GetLeader(),
+			downPeers:       heartbeat.GetDownPeers(),
+			pendingPeers:    heartbeat.GetPendingPeers(),
+			writtenBytes:    heartbeat.GetBytesWritten(),
+			readBytes:       heartbeat.GetBytesRead(),
+			approximateSize: int64(regionSize),
+			approximateKeys: int64(heartbeat.GetApproximateKeys()),
+		}
+	} else {
+		isNormal := func(storeID uint64) bool {
+			for _, id := range slaveIDs {
+				if storeID == id {
+					return false
+				}
+			}
+			return true
+		}
+		for _, p := range heartbeat.GetRegion().GetPeers() {
+			if isNormal(p.GetStoreId()) {
+				normalPeers = append(normalPeers, p)
+			} else {
+				slavePeers = append(slavePeers, p)
+			}
+		}
+		for _, p := range heartbeat.GetDownPeers() {
+			if isNormal(p.GetPeer().GetStoreId()) {
+				normalDownPeers = append(normalDownPeers, p)
+			} else {
+				slaveDownPeers = append(slaveDownPeers, p)
+			}
+		}
+		for _, p := range heartbeat.GetPendingPeers() {
+			if isNormal(p.GetStoreId()) {
+				normalPendingPeers = append(normalPendingPeers, p)
+			} else {
+				slavePendingPeers = append(slavePendingPeers, p)
+			}
+		}
+		meta := heartbeat.GetRegion()
+		meta.Peers = normalPeers
+		region = &RegionInfo{
+			meta:              meta,
+			leader:            heartbeat.GetLeader(),
+			downPeers:         normalDownPeers,
+			pendingPeers:      normalPendingPeers,
+			slavePeers:        slavePeers,
+			slaveDownPeers:    slaveDownPeers,
+			slavePendingPeers: slavePendingPeers,
+			writtenBytes:      heartbeat.GetBytesWritten(),
+			readBytes:         heartbeat.GetBytesRead(),
+			approximateSize:   int64(regionSize),
+			approximateKeys:   int64(heartbeat.GetApproximateKeys()),
+		}
 	}
 
 	classifyVoterAndLearner(region)

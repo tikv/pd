@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/region_syncer"
+	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -367,6 +368,9 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	}
 
 	cluster := c.cachedCluster
+	if cluster == nil {
+		log.Fatalf("cluster should be created in server %s", c.s.Name())
+	}
 
 	// Store address can not be the same as other stores.
 	for _, s := range cluster.GetStores() {
@@ -390,10 +394,14 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		s.MergeLabels(store.Labels)
 	}
 	// Check location labels.
-	for _, k := range c.cachedCluster.GetLocationLabels() {
+	for _, k := range cluster.GetLocationLabels() {
 		if v := s.GetLabelValue(k); len(v) == 0 {
 			log.Warnf("missing location label %q in store %v", k, s)
 		}
+	}
+
+	if cluster.CheckLabelProperty(schedule.SlaveLabel, store.GetLabels()) {
+		s.IsSlave = true
 	}
 	return cluster.putStore(s)
 }

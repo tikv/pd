@@ -349,7 +349,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			lastBind = time.Now()
 		}
 
-		region := core.RegionFromHeartbeat(request)
+		region := core.RegionFromHeartbeat(request, cluster.cachedCluster.GetSlaveStoreIDs())
 		if region.GetID() == 0 {
 			msg := fmt.Sprintf("invalid request region, %v", request)
 			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)
