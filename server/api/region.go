@@ -150,8 +150,8 @@ func (h *regionsHandler) ScanRegionsByKey(w http.ResponseWriter, r *http.Request
 		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
 		return
 	}
-	vars := mux.Vars(r)
-	startKey := vars["key"]
+
+	startKey := r.URL.Query().Get("key")
 
 	limit := defaultRegionLimit
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
