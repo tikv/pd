@@ -92,7 +92,7 @@ func (h *historyBuffer) get(index uint64) *core.RegionInfo {
 func (h *historyBuffer) reload() {
 	v, err := h.kv.Load(historyKey)
 	if err != nil {
-		log.Warnf("load history index failed: %s", err)
+		log.Fatalf("load history index failed: %s", err)
 	}
 	if v != "" {
 		h.index, err = strconv.ParseUint(v, 10, 64)
