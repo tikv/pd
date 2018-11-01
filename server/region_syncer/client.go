@@ -114,10 +114,14 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					client.CloseSend()
 					break
 				}
+				if s.history.GetNextIndex() != resp.GetStartIndex() {
+					log.Warnf("server %s region syncer record index not match the leader, own: %d, leader: %d", s.server.GetMemberInfo().GetName(), s.history.GetNextIndex(), resp.GetStartIndex())
+					s.history.ResetWithIndex(resp.GetStartIndex())
+				}
 				for _, r := range resp.GetRegions() {
 					err = s.server.GetStorage().SaveRegion(r)
 					if err != nil {
-						s.history.record(core.NewRegionInfo(r, nil))
+						s.history.Record(core.NewRegionInfo(r, nil))
 					}
 				}
 			}
