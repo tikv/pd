@@ -43,9 +43,10 @@ func newHistoryBuffer(size int, kv core.KVBase) *historyBuffer {
 	}
 	records := make([]*core.RegionInfo, size)
 	h := &historyBuffer{
-		records: records,
-		size:    size,
-		kv:      kv,
+		records:    records,
+		size:       size,
+		kv:         kv,
+		flushCount: defaultFlushCount,
 	}
 	h.reload()
 	return h
@@ -58,7 +59,7 @@ func (h *historyBuffer) len() int {
 	return h.tail - h.head
 }
 
-func (h *historyBuffer) lastIndex() uint64 {
+func (h *historyBuffer) nextIndex() uint64 {
 	return h.index
 }
 
@@ -67,21 +68,23 @@ func (h *historyBuffer) firstIndex() uint64 {
 }
 
 func (h *historyBuffer) record(r *core.RegionInfo) {
-	if (h.tail+1)%h.size == h.head {
+	h.records[h.tail] = r
+	h.tail = (h.tail + 1) % h.size
+	if h.tail == h.head {
 		h.head = (h.head + 1) % h.size
 	}
-	h.tail = (h.tail + 1) % h.size
-	h.records[h.tail] = r
 	h.index++
 	h.flushCount--
 	if h.flushCount <= 0 {
 		h.persist()
+		h.flushCount = defaultFlushCount
 	}
 }
 
 func (h *historyBuffer) get(index uint64) *core.RegionInfo {
-	if index <= h.lastIndex() && index > h.firstIndex() {
-		return h.records[index%uint64(h.size)]
+	if index < h.nextIndex() && index >= h.firstIndex() {
+		pos := (h.head + int(index-h.firstIndex())) % h.size
+		return h.records[pos]
 	}
 	return nil
 }
@@ -89,18 +92,19 @@ func (h *historyBuffer) get(index uint64) *core.RegionInfo {
 func (h *historyBuffer) reload() {
 	v, err := h.kv.Load(historyKey)
 	if err != nil {
-		log.Warnf("load history index failed: %s", err)
+		log.Fatalf("load history index failed: %s", err)
 	}
-	h.index, err = strconv.ParseUint(v, 10, 64)
-	if err != nil {
-		log.Warnf("load history index failed: %s", err)
+	if v != "" {
+		h.index, err = strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			log.Fatalf("load history index failed: %s", err)
+		}
 	}
-	h.flushCount = defaultFlushCount
 }
 
 func (h *historyBuffer) persist() {
-	err := h.kv.Save(historyKey, strconv.FormatUint(h.lastIndex(), 10))
+	err := h.kv.Save(historyKey, strconv.FormatUint(h.nextIndex(), 10))
 	if err != nil {
-		log.Warnf("persist history index (%d) failed: %v", h.lastIndex(), err)
+		log.Warnf("persist history index (%d) failed: %v", h.nextIndex(), err)
 	}
 }

@@ -31,43 +31,55 @@ func Test(t *testing.T) {
 
 func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	var regions []*core.RegionInfo
-	for i := 0; i < 100; i++ {
+	for i := 0; i <= 100; i++ {
 		regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: uint64(i)}, nil))
 	}
 
-	// size equal 1
+	// size equals 1
 	h := newHistoryBuffer(1, core.NewMemoryKV())
 	c.Assert(h.len(), Equals, 0)
 	for _, r := range regions {
 		h.record(r)
 	}
 	c.Assert(h.len(), Equals, 1)
-	c.Assert(h.get(100), Equals, regions[h.lastIndex()-1])
+	c.Assert(h.get(100), Equals, regions[h.nextIndex()-1])
 	c.Assert(h.get(99), IsNil)
 
-	// size equal 2
+	// size equals 2
 	h = newHistoryBuffer(2, core.NewMemoryKV())
 	for _, r := range regions {
 		h.record(r)
 	}
 	c.Assert(h.len(), Equals, 2)
-	c.Assert(h.get(100), Equals, regions[h.lastIndex()-1])
-	c.Assert(h.get(99), Equals, regions[h.lastIndex()-2])
+	c.Assert(h.get(100), Equals, regions[h.nextIndex()-1])
+	c.Assert(h.get(99), Equals, regions[h.nextIndex()-2])
 	c.Assert(h.get(98), IsNil)
 
-	// size eqaul 100
-	h = newHistoryBuffer(100, core.NewMemoryKV())
+	// size eqauls 100
+	kv := core.NewMemoryKV()
+	h1 := newHistoryBuffer(100, kv)
+	for i := 0; i < 6; i++ {
+		h1.record(regions[i])
+	}
+	c.Assert(h1.len(), Equals, 6)
+	c.Assert(h1.nextIndex(), Equals, uint64(6))
+	h1.persist()
+
+	// restart the buffer
+	h2 := newHistoryBuffer(100, kv)
+	c.Assert(h2.nextIndex(), Equals, uint64(6))
+	c.Assert(h2.get(h.nextIndex()-1), IsNil)
+	c.Assert(h2.len(), Equals, 0)
 	for _, r := range regions {
-		h.record(r)
+		index := h2.nextIndex()
+		h2.record(r)
+		c.Assert(h2.get(uint64(index)), Equals, r)
 	}
-	c.Assert(h.len(), Equals, 100)
-	for i, r := range regions {
-		// index start with 1
-		index := i + 1
-		c.Assert(h.get(uint64(index)), Equals, r)
-	}
-	c.Assert(h.get(0), IsNil)
-	s, err := h.kv.Load(historyKey)
+
+	c.Assert(h2.nextIndex(), Equals, uint64(107))
+	c.Assert(h2.get(h2.nextIndex()), IsNil)
+	s, err := h2.kv.Load(historyKey)
 	c.Assert(err, IsNil)
-	c.Assert(s, Equals, "100")
+	// flush in index 106
+	c.Assert(s, Equals, "106")
 }
