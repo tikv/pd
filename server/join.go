@@ -15,6 +15,7 @@ package server
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path"
 	"strings"
@@ -24,6 +25,13 @@ import (
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+)
+
+const (
+	// privateFileMode grants owner to read/write a file.
+	privateFileMode = 0600
+	// privateDirMode grants owner to make/remove files inside the directory.
+	privateDirMode = 0700
 )
 
 // PrepareJoinCluster sends MemberAdd command to PD cluster,
@@ -73,8 +81,20 @@ func PrepareJoinCluster(cfg *Config) error {
 		return errors.New("join self is forbidden")
 	}
 
-	// Cases with data directory.
+	filePath := path.Join(cfg.DataDir, "join")
+	// Read the persist join config
+	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+		s, err := ioutil.ReadFile(filePath)
+		if err != nil {
+			log.Fatal("read the join config meet error: ", err)
+		}
+		cfg.InitialCluster = strings.TrimSpace(string(s))
+		cfg.InitialClusterState = embed.ClusterStateFlagExisting
+		return nil
+	}
+
 	initialCluster := ""
+	// Cases with data directory.
 	if isDataExist(path.Join(cfg.DataDir, "member")) {
 		cfg.InitialCluster = initialCluster
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
@@ -103,6 +123,9 @@ func PrepareJoinCluster(cfg *Config) error {
 
 	existed := false
 	for _, m := range listResp.Members {
+		if len(m.Name) == 0 {
+			return errors.New("there is a member that has not joined successfully")
+		}
 		if m.Name == cfg.Name {
 			existed = true
 		}
@@ -131,6 +154,9 @@ func PrepareJoinCluster(cfg *Config) error {
 		if memb.ID == addResp.Member.ID {
 			n = cfg.Name
 		}
+		if len(n) == 0 {
+			return errors.New("there is a member that has not joined successfully")
+		}
 		for _, m := range memb.PeerURLs {
 			pds = append(pds, fmt.Sprintf("%s=%s", n, m))
 		}
@@ -138,7 +164,13 @@ func PrepareJoinCluster(cfg *Config) error {
 	initialCluster = strings.Join(pds, ",")
 	cfg.InitialCluster = initialCluster
 	cfg.InitialClusterState = embed.ClusterStateFlagExisting
-	return nil
+	err = os.MkdirAll(cfg.DataDir, privateDirMode)
+	if err != nil && !os.IsExist(err) {
+		return errors.WithStack(err)
+	}
+
+	err = ioutil.WriteFile(filePath, []byte(cfg.InitialCluster), privateFileMode)
+	return errors.WithStack(err)
 }
 
 func isDataExist(d string) bool {

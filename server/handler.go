@@ -65,6 +65,8 @@ func (h *Handler) getCoordinator() (*coordinator, error) {
 	if cluster == nil {
 		return nil, errors.WithStack(ErrNotBootstrapped)
 	}
+	cluster.RLock()
+	defer cluster.RUnlock()
 	return cluster.coordinator, nil
 }
 
@@ -119,6 +121,8 @@ func (h *Handler) GetHotBytesWriteStores() map[uint64]uint64 {
 	if cluster == nil {
 		return nil
 	}
+	cluster.RLock()
+	defer cluster.RUnlock()
 	return cluster.cachedCluster.getStoresBytesWriteStat()
 }
 
@@ -128,6 +132,8 @@ func (h *Handler) GetHotBytesReadStores() map[uint64]uint64 {
 	if cluster == nil {
 		return nil
 	}
+	cluster.RLock()
+	defer cluster.RUnlock()
 	return cluster.cachedCluster.getStoresBytesReadStat()
 }
 
@@ -137,6 +143,8 @@ func (h *Handler) GetHotKeysWriteStores() map[uint64]uint64 {
 	if cluster == nil {
 		return nil
 	}
+	cluster.RLock()
+	defer cluster.RUnlock()
 	return cluster.cachedCluster.getStoresKeysWriteStat()
 }
 
@@ -146,6 +154,8 @@ func (h *Handler) GetHotKeysReadStores() map[uint64]uint64 {
 	if cluster == nil {
 		return nil
 	}
+	cluster.RLock()
+	defer cluster.RUnlock()
 	return cluster.cachedCluster.getStoresKeysReadStat()
 }
 
@@ -585,6 +595,8 @@ func (h *Handler) GetDownPeerRegions() ([]*core.RegionInfo, error) {
 	if c == nil {
 		return nil, ErrNotBootstrapped
 	}
+	c.RLock()
+	defer c.RUnlock()
 	return c.cachedCluster.GetRegionStatsByType(downPeer), nil
 }
 
@@ -594,6 +606,8 @@ func (h *Handler) GetExtraPeerRegions() ([]*core.RegionInfo, error) {
 	if c == nil {
 		return nil, ErrNotBootstrapped
 	}
+	c.RLock()
+	defer c.RUnlock()
 	return c.cachedCluster.GetRegionStatsByType(extraPeer), nil
 }
 
@@ -603,6 +617,8 @@ func (h *Handler) GetMissPeerRegions() ([]*core.RegionInfo, error) {
 	if c == nil {
 		return nil, ErrNotBootstrapped
 	}
+	c.RLock()
+	defer c.RUnlock()
 	return c.cachedCluster.GetRegionStatsByType(missPeer), nil
 }
 
@@ -612,6 +628,8 @@ func (h *Handler) GetPendingPeerRegions() ([]*core.RegionInfo, error) {
 	if c == nil {
 		return nil, ErrNotBootstrapped
 	}
+	c.RLock()
+	defer c.RUnlock()
 	return c.cachedCluster.GetRegionStatsByType(pendingPeer), nil
 }
 
@@ -621,5 +639,7 @@ func (h *Handler) GetIncorrectNamespaceRegions() ([]*core.RegionInfo, error) {
 	if c == nil {
 		return nil, ErrNotBootstrapped
 	}
+	c.RLock()
+	defer c.RUnlock()
 	return c.cachedCluster.GetRegionStatsByType(incorrectNamespace), nil
 }

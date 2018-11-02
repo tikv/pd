@@ -218,6 +218,8 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 
 // GetRegionByKey gets region and leader peer by region key from cluster.
 func (c *RaftCluster) GetRegionByKey(regionKey []byte) (*metapb.Region, *metapb.Peer) {
+	c.RLock()
+	defer c.RUnlock()
 	region := c.cachedCluster.searchRegion(regionKey)
 	if region == nil {
 		return nil, nil
@@ -227,6 +229,8 @@ func (c *RaftCluster) GetRegionByKey(regionKey []byte) (*metapb.Region, *metapb.
 
 // GetPrevRegionByKey gets previous region and leader peer by the region key from cluster.
 func (c *RaftCluster) GetPrevRegionByKey(regionKey []byte) (*metapb.Region, *metapb.Peer) {
+	c.RLock()
+	defer c.RUnlock()
 	region := c.cachedCluster.searchPrevRegion(regionKey)
 	if region == nil {
 		return nil, nil
@@ -236,16 +240,22 @@ func (c *RaftCluster) GetPrevRegionByKey(regionKey []byte) (*metapb.Region, *met
 
 // GetRegionInfoByKey gets regionInfo by region key from cluster.
 func (c *RaftCluster) GetRegionInfoByKey(regionKey []byte) *core.RegionInfo {
+	c.RLock()
+	defer c.RUnlock()
 	return c.cachedCluster.searchRegion(regionKey)
 }
 
 // ScanRegionsByKey scans region with start key, until number greater than limit.
 func (c *RaftCluster) ScanRegionsByKey(startKey []byte, limit int) []*core.RegionInfo {
+	c.RLock()
+	defer c.RUnlock()
 	return c.cachedCluster.ScanRegions(startKey, limit)
 }
 
 // GetRegionByID gets region and leader peer by regionID from cluster.
 func (c *RaftCluster) GetRegionByID(regionID uint64) (*metapb.Region, *metapb.Peer) {
+	c.RLock()
+	defer c.RUnlock()
 	region := c.cachedCluster.GetRegion(regionID)
 	if region == nil {
 		return nil, nil
@@ -255,41 +265,57 @@ func (c *RaftCluster) GetRegionByID(regionID uint64) (*metapb.Region, *metapb.Pe
 
 // GetRegionInfoByID gets regionInfo by regionID from cluster.
 func (c *RaftCluster) GetRegionInfoByID(regionID uint64) *core.RegionInfo {
+	c.RLock()
+	defer c.RUnlock()
 	return c.cachedCluster.GetRegion(regionID)
 }
 
 // GetMetaRegions gets regions from cluster.
 func (c *RaftCluster) GetMetaRegions() []*metapb.Region {
+	c.RLock()
+	defer c.RUnlock()
 	return c.cachedCluster.getMetaRegions()
 }
 
 // GetRegions returns all regions info in detail.
 func (c *RaftCluster) GetRegions() []*core.RegionInfo {
+	c.RLock()
+	defer c.RUnlock()
 	return c.cachedCluster.getRegions()
 }
 
 // GetStoreRegions returns all regions info with a given storeID.
 func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
+	c.RLock()
+	defer c.RUnlock()
 	return c.cachedCluster.getStoreRegions(storeID)
 }
 
 // GetRegionStats returns region statistics from cluster.
 func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *core.RegionStats {
+	c.RLock()
+	defer c.RUnlock()
 	return c.cachedCluster.getRegionStats(startKey, endKey)
 }
 
 // DropCacheRegion removes a region from the cache.
 func (c *RaftCluster) DropCacheRegion(id uint64) {
+	c.RLock()
+	defer c.RUnlock()
 	c.cachedCluster.dropRegion(id)
 }
 
 // GetStores gets stores from cluster.
 func (c *RaftCluster) GetStores() []*metapb.Store {
+	c.RLock()
+	defer c.RUnlock()
 	return c.cachedCluster.getMetaStores()
 }
 
 // GetStore gets store from cluster.
 func (c *RaftCluster) GetStore(storeID uint64) (*core.StoreInfo, error) {
+	c.RLock()
+	defer c.RUnlock()
 	if storeID == 0 {
 		return nil, errors.New("invalid zero store id")
 	}
@@ -303,11 +329,15 @@ func (c *RaftCluster) GetStore(storeID uint64) (*core.StoreInfo, error) {
 
 // GetAdjacentRegions returns region's info that is adjacent with specific region id.
 func (c *RaftCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo) {
+	c.RLock()
+	defer c.RUnlock()
 	return c.cachedCluster.GetAdjacentRegions(region)
 }
 
 // UpdateStoreLabels updates a store's location labels.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel) error {
+	c.RLock()
+	defer c.RUnlock()
 	store := c.cachedCluster.GetStore(storeID)
 	if store == nil {
 		return errors.Errorf("invalid store ID %d, not found", storeID)
@@ -320,8 +350,8 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 }
 
 func (c *RaftCluster) putStore(store *metapb.Store) error {
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	defer c.RUnlock()
 
 	if store.GetId() == 0 {
 		return errors.Errorf("invalid put store %v", store)
@@ -372,8 +402,8 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 // State transition: Up -> Offline.
 func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	op := errcode.Op("store.remove")
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	defer c.RUnlock()
 
 	cluster := c.cachedCluster
 
@@ -401,8 +431,8 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 // Case 1: Up -> Tombstone (if force is true);
 // Case 2: Offline -> Tombstone.
 func (c *RaftCluster) BuryStore(storeID uint64, force bool) error { // revive:disable-line:flag-parameter
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	defer c.RUnlock()
 
 	cluster := c.cachedCluster
 
@@ -430,8 +460,8 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error { // revive:di
 
 // SetStoreState sets up a store's state.
 func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) error {
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	defer c.RUnlock()
 
 	cluster := c.cachedCluster
 
@@ -447,8 +477,8 @@ func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) err
 
 // SetStoreWeight sets up a store's leader/region balance weight.
 func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) error {
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	defer c.RUnlock()
 
 	store := c.cachedCluster.GetStore(storeID)
 	if store == nil {
@@ -571,10 +601,14 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 
 // GetConfig gets config from cluster.
 func (c *RaftCluster) GetConfig() *metapb.Cluster {
+	c.RLock()
+	defer c.RUnlock()
 	return c.cachedCluster.getMeta()
 }
 
 func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
+	c.RLock()
+	defer c.RUnlock()
 	if meta.GetId() != c.clusterID {
 		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
 	}

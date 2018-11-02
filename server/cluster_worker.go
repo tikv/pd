@@ -27,6 +27,8 @@ import (
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.
 func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
+	c.RLock()
+	defer c.RUnlock()
 	if err := c.cachedCluster.handleRegionHeartbeat(region); err != nil {
 		return err
 	}
@@ -60,6 +62,8 @@ func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 		}
 	}
 
+	c.RLock()
+	defer c.RUnlock()
 	// Disable merge for the 2 regions in a period of time.
 	c.coordinator.mergeChecker.RecordRegionSplit(reqRegion.GetId())
 	c.coordinator.mergeChecker.RecordRegionSplit(newRegionID)
@@ -97,6 +101,8 @@ func (c *RaftCluster) handleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	}
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 
+	c.RLock()
+	defer c.RUnlock()
 	// Disable merge the regions in a period of time.
 	c.coordinator.mergeChecker.RecordRegionSplit(reqRegion.GetId())
 	for i := 0; i < int(splitCount); i++ {

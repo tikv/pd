@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strconv"
@@ -25,7 +26,6 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -208,6 +208,8 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}
 
 	log.Infof("put store ok - %v", store)
+	cluster.RLock()
+	defer cluster.RUnlock()
 	cluster.cachedCluster.OnStoreVersionChange()
 
 	return &pdpb.PutStoreResponse{
@@ -252,6 +254,8 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 		}, nil
 	}
 
+	cluster.RLock()
+	defer cluster.RUnlock()
 	err := cluster.cachedCluster.handleStoreHeartbeat(request.Stats)
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
@@ -335,7 +339,9 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "recv").Inc()
 		regionHeartbeatLatency.WithLabelValues(storeLabel).Observe(float64(time.Now().Unix()) - float64(request.GetInterval().GetEndTimestamp()))
 
+		cluster.RLock()
 		hbStreams := cluster.coordinator.hbStreams
+		cluster.RUnlock()
 
 		if time.Since(lastBind) > s.cfg.heartbeatStreamBindInterval.Duration {
 			regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "bind").Inc()
@@ -459,6 +465,9 @@ func (s *Server) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitR
 	if cluster == nil {
 		return &pdpb.AskBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
+
+	cluster.RLock()
+	defer cluster.RUnlock()
 	if !cluster.cachedCluster.IsFeatureSupported(BatchSplit) {
 		return &pdpb.AskBatchSplitResponse{Header: s.incompatibleVersion("batch_split")}, nil
 	}
@@ -577,7 +586,8 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		}
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
 	}
-
+	cluster.RLock()
+	defer cluster.RUnlock()
 	co := cluster.coordinator
 	if op := co.regionScatterer.Scatter(region); op != nil {
 		co.opController.AddOperator(op)
