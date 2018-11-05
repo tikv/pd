@@ -15,7 +15,7 @@ package api
 
 import (
 	"container/heap"
-	"fmt"
+	"encoding/hex"
 	"net/http"
 	"strconv"
 	"strings"
@@ -50,8 +50,8 @@ func newRegionInfo(r *core.RegionInfo) *regionInfo {
 	}
 	return &regionInfo{
 		ID:              r.GetID(),
-		StartKey:        strings.Trim(fmt.Sprintf("%q", r.GetStartKey()), "\""),
-		EndKey:          strings.Trim(fmt.Sprintf("%q", r.GetEndKey()), "\""),
+		StartKey:        strings.ToUpper(hex.EncodeToString(r.GetStartKey())),
+		EndKey:          strings.ToUpper(hex.EncodeToString(r.GetEndKey())),
 		RegionEpoch:     r.GetRegionEpoch(),
 		Peers:           r.GetPeers(),
 		Leader:          r.GetLeader(),
