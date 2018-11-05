@@ -66,6 +66,10 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if err := h.svr.SetPDServerConfig(config.PDServerCfg); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 
