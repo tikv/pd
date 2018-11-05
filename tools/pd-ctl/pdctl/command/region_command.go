@@ -203,11 +203,11 @@ func showRegionTopSizeCommandFunc(cmd *cobra.Command, args []string) {
 // NewRegionWithKeyCommand return a region with key subcommand of regionCmd
 func NewRegionWithKeyCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "key [--format=raw|encode] <key>",
+		Use:   "key [--format=raw|encode|hex] <key>",
 		Short: "show the region with key",
 		Run:   showRegionWithTableCommandFunc,
 	}
-	r.Flags().String("format", "raw", "the key format")
+	r.Flags().String("format", "hex", "the key format")
 	return r
 }
 
@@ -299,7 +299,7 @@ func NewRegionsWithStartKeyCommand() *cobra.Command {
 		Run:   showRegionsFromStartKeyCommandFunc,
 	}
 
-	r.Flags().String("format", "raw", "the key format")
+	r.Flags().String("format", "hex", "the key format")
 	return r
 }
 
