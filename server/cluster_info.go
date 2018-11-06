@@ -471,7 +471,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	// Mark isNew if the region in cache does not have leader.
 	var saveKV, saveCache, isNew bool
 	if origin == nil {
-		log.Debugf("[region %d] Insert new region {%v}", region.GetID(), region)
+		log.Debugf("[region %d] Insert new region {%v}", region.GetID(), core.HexRegionMeta(region.GetMeta()))
 		saveKV, saveCache, isNew = true, true, true
 	} else {
 		r := region.GetRegionEpoch()
@@ -517,7 +517,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		if err := c.kv.SaveRegion(region.GetMeta()); err != nil {
 			// Not successfully saved to kv is not fatal, it only leads to longer warm-up
 			// after restart. Here we only log the error then go on updating cache.
-			log.Errorf("[region %d] fail to save region %v: %v", region.GetID(), region, err)
+			log.Errorf("[region %d] fail to save region %v: %v", region.GetID(), core.HexRegionMeta(region.GetMeta()), err)
 		}
 		select {
 		case c.changedRegions <- region:
@@ -539,7 +539,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		if c.kv != nil {
 			for _, item := range overlaps {
 				if err := c.kv.DeleteRegion(item); err != nil {
-					log.Errorf("[region %d] fail to delete region %v: %v", item.GetId(), item, err)
+					log.Errorf("[region %d] fail to delete region %v: %v", item.GetId(), core.HexRegionMeta(item), err)
 				}
 			}
 		}

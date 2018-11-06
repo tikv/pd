@@ -31,7 +31,7 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
 
-	sl, err := schedule.CreateScheduler("shuffle-leader", schedule.NewLimiter())
+	sl, err := schedule.CreateScheduler("shuffle-leader", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
 	c.Assert(sl.Schedule(tc, schedule.OpInfluence{}), IsNil)
 
@@ -61,7 +61,7 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
 
-	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewLimiter(), "32", "2")
+	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewOperatorController(nil, nil), "32", "2")
 	c.Assert(err, IsNil)
 
 	c.Assert(sc.(*balanceAdjacentRegionScheduler).leaderLimit, Equals, uint64(32))
@@ -129,7 +129,7 @@ func (s *testBalanceAdjacentRegionSuite) TestNoNeedToBalance(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
 
-	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewLimiter())
+	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
 	c.Assert(sc.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
 
@@ -235,7 +235,7 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	tc.AddLeaderRegion(2, 2, 1, 3)
 
 	// The label scheduler transfers leader out of store1.
-	sl, err := schedule.CreateScheduler("label", schedule.NewLimiter())
+	sl, err := schedule.CreateScheduler("label", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
 	op := sl.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 	testutil.CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 3)
@@ -247,13 +247,13 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 
 	// As store3 is disconnected, store1 rejects leader. Balancer will not create
 	// any operators.
-	bs, err := schedule.CreateScheduler("balance-leader", schedule.NewLimiter())
+	bs, err := schedule.CreateScheduler("balance-leader", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
 	op = bs.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 	c.Assert(op, IsNil)
 
 	// Can't evict leader from store2, neither.
-	el, err := schedule.CreateScheduler("evict-leader", schedule.NewLimiter(), "2")
+	el, err := schedule.CreateScheduler("evict-leader", schedule.NewOperatorController(nil, nil), "2")
 	c.Assert(err, IsNil)
 	op = el.Schedule(tc, schedule.NewOpInfluence(nil, tc))
 	c.Assert(op, IsNil)

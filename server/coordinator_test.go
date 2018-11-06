@@ -138,24 +138,23 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 
 	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	oc := co.opController
-	l := oc.Limiter
 
 	tc.addLeaderRegion(1, 1)
 
 	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), schedule.OpLeader)
 	oc.AddOperator(op1)
-	c.Assert(l.OperatorCount(op1.Kind()), Equals, uint64(1))
+	c.Assert(oc.OperatorCount(op1.Kind()), Equals, uint64(1))
 	c.Assert(oc.GetOperator(1).RegionID(), Equals, op1.RegionID())
 
 	// Region 1 already has an operator, cannot add another one.
 	op2 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), schedule.OpRegion)
 	oc.AddOperator(op2)
-	c.Assert(l.OperatorCount(op2.Kind()), Equals, uint64(0))
+	c.Assert(oc.OperatorCount(op2.Kind()), Equals, uint64(0))
 
 	// Remove the operator manually, then we can add a new operator.
 	oc.RemoveOperator(op1)
 	oc.AddOperator(op2)
-	c.Assert(l.OperatorCount(op2.Kind()), Equals, uint64(1))
+	c.Assert(oc.OperatorCount(op2.Kind()), Equals, uint64(1))
 	c.Assert(oc.GetOperator(1).RegionID(), Equals, op2.RegionID())
 }
 
@@ -522,12 +521,13 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	// Add regions 3 with leader in store 3 and followers in stores 1,2
 	tc.addLeaderRegion(3, 3, 1, 2)
 
-	gls, err := schedule.CreateScheduler("grant-leader", co.opController.Limiter, "0")
+	oc := co.opController
+	gls, err := schedule.CreateScheduler("grant-leader", oc, "0")
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), NotNil)
 	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
 
-	gls, err = schedule.CreateScheduler("grant-leader", co.opController.Limiter, "1")
+	gls, err = schedule.CreateScheduler("grant-leader", oc, "1")
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), IsNil)
 
@@ -563,10 +563,11 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	tc.addLeaderStore(2, 1)
 
 	c.Assert(co.schedulers, HasLen, 4)
-	gls1, err := schedule.CreateScheduler("grant-leader", co.opController.Limiter, "1")
+	oc := co.opController
+	gls1, err := schedule.CreateScheduler("grant-leader", oc, "1")
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls1, "1"), IsNil)
-	gls2, err := schedule.CreateScheduler("grant-leader", co.opController.Limiter, "2")
+	gls2, err := schedule.CreateScheduler("grant-leader", oc, "2")
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls2, "2"), IsNil)
 	c.Assert(co.schedulers, HasLen, 6)
@@ -582,7 +583,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// make a new coordinator for testing
 	// whether the schedulers added or removed in dynamic way are recorded in opt
 	_, newOpt := newTestScheduleConfig()
-	_, err = schedule.CreateScheduler("adjacent-region", co.opController.Limiter)
+	_, err = schedule.CreateScheduler("adjacent-region", oc)
 	c.Assert(err, IsNil)
 	// suppose we add a new default enable scheduler
 	newOpt.AddSchedulerCfg("adjacent-region", []string{})
@@ -603,10 +604,10 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	c.Assert(co.schedulers, HasLen, 3)
-	bls, err := schedule.CreateScheduler("balance-leader", co.opController.Limiter)
+	bls, err := schedule.CreateScheduler("balance-leader", oc)
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(bls), IsNil)
-	brs, err := schedule.CreateScheduler("balance-region", co.opController.Limiter)
+	brs, err := schedule.CreateScheduler("balance-region", oc)
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(brs), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
@@ -680,35 +681,39 @@ func waitOperator(c *C, co *coordinator, regionID uint64) {
 	})
 }
 
-var _ = Suite(&testScheduleLimiterSuite{})
+var _ = Suite(&testOperatorControllerSuite{})
 
-type testScheduleLimiterSuite struct{}
+type testOperatorControllerSuite struct{}
 
-func (s *testScheduleLimiterSuite) TestOperatorCount(c *C) {
-	l := schedule.NewLimiter()
-	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(0))
-	c.Assert(l.OperatorCount(schedule.OpRegion), Equals, uint64(0))
+func (s *testOperatorControllerSuite) TestOperatorCount(c *C) {
+	_, opt := newTestScheduleConfig()
+	tc := newTestClusterInfo(opt)
+	hbStreams := schedule.NewMockHeartbeatStreams(tc.clusterInfo.getClusterID())
 
-	operators := make(map[uint64]*schedule.Operator)
+	oc := schedule.NewOperatorController(tc.clusterInfo, hbStreams)
+	c.Assert(oc.OperatorCount(schedule.OpLeader), Equals, uint64(0))
+	c.Assert(oc.OperatorCount(schedule.OpRegion), Equals, uint64(0))
 
-	operators[1] = newTestOperator(1, nil, schedule.OpLeader)
-	l.UpdateCounts(operators)
-	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(1)) // 1:leader
-	operators[2] = newTestOperator(2, nil, schedule.OpLeader)
-	l.UpdateCounts(operators)
-	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(2)) // 1:leader, 2:leader
-	delete(operators, 1)
-	l.UpdateCounts(operators)
-	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(1)) // 2:leader
+	tc.addLeaderRegion(1, 1)
+	tc.addLeaderRegion(2, 2)
+	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), schedule.OpLeader)
+	oc.AddOperator(op1)
+	c.Assert(oc.OperatorCount(schedule.OpLeader), Equals, uint64(1)) // 1:leader
+	op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), schedule.OpLeader)
+	oc.AddOperator(op2)
+	c.Assert(oc.OperatorCount(schedule.OpLeader), Equals, uint64(2)) // 1:leader, 2:leader
+	oc.RemoveOperator(op1)
+	c.Assert(oc.OperatorCount(schedule.OpLeader), Equals, uint64(1)) // 2:leader
 
-	operators[1] = newTestOperator(1, nil, schedule.OpRegion)
-	l.UpdateCounts(operators)
-	c.Assert(l.OperatorCount(schedule.OpRegion), Equals, uint64(1)) // 1:region 2:leader
-	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(1))
-	operators[2] = newTestOperator(2, nil, schedule.OpRegion)
-	l.UpdateCounts(operators)
-	c.Assert(l.OperatorCount(schedule.OpRegion), Equals, uint64(2)) // 1:region 2:region
-	c.Assert(l.OperatorCount(schedule.OpLeader), Equals, uint64(0))
+	op1 = newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), schedule.OpRegion)
+	oc.AddOperator(op1)
+	c.Assert(oc.OperatorCount(schedule.OpRegion), Equals, uint64(1)) // 1:region 2:leader
+	c.Assert(oc.OperatorCount(schedule.OpLeader), Equals, uint64(1))
+	op2 = newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), schedule.OpRegion)
+	op2.SetPriorityLevel(core.HighPriority)
+	oc.AddOperator(op2)
+	c.Assert(oc.OperatorCount(schedule.OpRegion), Equals, uint64(2)) // 1:region 2:region
+	c.Assert(oc.OperatorCount(schedule.OpLeader), Equals, uint64(0))
 }
 
 var _ = Suite(&testScheduleControllerSuite{})
@@ -719,7 +724,7 @@ type testScheduleControllerSuite struct{}
 type mockLimitScheduler struct {
 	schedule.Scheduler
 	limit   uint64
-	counter *schedule.Limiter
+	counter *schedule.OperatorController
 	kind    schedule.OperatorKind
 }
 
@@ -738,11 +743,11 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	oc := co.opController
-	scheduler, err := schedule.CreateScheduler("balance-leader", oc.Limiter)
+	scheduler, err := schedule.CreateScheduler("balance-leader", oc)
 	c.Assert(err, IsNil)
 	lb := &mockLimitScheduler{
 		Scheduler: scheduler,
-		counter:   oc.Limiter,
+		counter:   oc,
 		kind:      schedule.OpLeader,
 	}
 
@@ -811,7 +816,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	defer hbStreams.Close()
 
 	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
-	lb, err := schedule.CreateScheduler("balance-leader", co.opController.Limiter)
+	lb, err := schedule.CreateScheduler("balance-leader", co.opController)
 	c.Assert(err, IsNil)
 	sc := newScheduleController(co, lb)
 

@@ -33,7 +33,7 @@ const (
 )
 
 func init() {
-	schedule.RegisterScheduler("adjacent-region", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("adjacent-region", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
 		l := len(args)
 		if l == 2 {
 			leaderLimit, err := strconv.ParseUint(args[0], 10, 64)
@@ -44,15 +44,15 @@ func init() {
 			if err != nil {
 				return nil, errors.WithStack(err)
 			}
-			return newBalanceAdjacentRegionScheduler(limiter, leaderLimit, peerLimit), nil
+			return newBalanceAdjacentRegionScheduler(opController, leaderLimit, peerLimit), nil
 		} else if l == 1 {
 			leaderLimit, err := strconv.ParseUint(args[0], 10, 64)
 			if err != nil {
 				return nil, errors.WithStack(err)
 			}
-			return newBalanceAdjacentRegionScheduler(limiter, leaderLimit), nil
+			return newBalanceAdjacentRegionScheduler(opController, leaderLimit), nil
 		}
-		return newBalanceAdjacentRegionScheduler(limiter), nil
+		return newBalanceAdjacentRegionScheduler(opController), nil
 	})
 }
 
@@ -89,9 +89,9 @@ func (a *adjacentState) len() int {
 
 // newBalanceAdjacentRegionScheduler creates a scheduler that tends to disperse adjacent region
 // on each store.
-func newBalanceAdjacentRegionScheduler(limiter *schedule.Limiter, args ...uint64) schedule.Scheduler {
+func newBalanceAdjacentRegionScheduler(opController *schedule.OperatorController, args ...uint64) schedule.Scheduler {
 	filters := []schedule.Filter{schedule.StoreStateFilter{TransferLeader: true, MoveRegion: true}}
-	base := newBaseScheduler(limiter)
+	base := newBaseScheduler(opController)
 	s := &balanceAdjacentRegionScheduler{
 		baseScheduler: base,
 		selector:      schedule.NewRandomSelector(filters),
@@ -130,11 +130,11 @@ func (l *balanceAdjacentRegionScheduler) IsScheduleAllowed(cluster schedule.Clus
 }
 
 func (l *balanceAdjacentRegionScheduler) allowBalanceLeader() bool {
-	return l.limiter.OperatorCount(schedule.OpAdjacent|schedule.OpLeader) < l.leaderLimit
+	return l.opController.OperatorCount(schedule.OpAdjacent|schedule.OpLeader) < l.leaderLimit
 }
 
 func (l *balanceAdjacentRegionScheduler) allowBalancePeer() bool {
-	return l.limiter.OperatorCount(schedule.OpAdjacent|schedule.OpRegion) < l.peerLimit
+	return l.opController.OperatorCount(schedule.OpAdjacent|schedule.OpRegion) < l.peerLimit
 }
 
 func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {

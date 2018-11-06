@@ -23,7 +23,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("evict-leader", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("evict-leader", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
 		if len(args) != 1 {
 			return nil, errors.New("evict-leader needs 1 argument")
 		}
@@ -31,7 +31,7 @@ func init() {
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
-		return newEvictLeaderScheduler(limiter, id), nil
+		return newEvictLeaderScheduler(opController, id), nil
 	})
 }
 
@@ -44,9 +44,9 @@ type evictLeaderScheduler struct {
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
-func newEvictLeaderScheduler(limiter *schedule.Limiter, storeID uint64) schedule.Scheduler {
+func newEvictLeaderScheduler(opController *schedule.OperatorController, storeID uint64) schedule.Scheduler {
 	filters := []schedule.Filter{schedule.StoreStateFilter{TransferLeader: true}}
-	base := newBaseScheduler(limiter)
+	base := newBaseScheduler(opController)
 	return &evictLeaderScheduler{
 		baseScheduler: base,
 		name:          fmt.Sprintf("evict-leader-scheduler-%d", storeID),
@@ -72,7 +72,7 @@ func (s *evictLeaderScheduler) Cleanup(cluster schedule.Cluster) {
 }
 
 func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return s.limiter.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {

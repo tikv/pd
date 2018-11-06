@@ -124,7 +124,7 @@ type testBalanceLeaderSchedulerSuite struct {
 func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	s.tc = schedule.NewMockCluster(opt)
-	lb, err := schedule.CreateScheduler("balance-leader", schedule.NewLimiter())
+	lb, err := schedule.CreateScheduler("balance-leader", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
 	s.lb = lb
 }
@@ -319,7 +319,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
 
-	sb, err := schedule.CreateScheduler("balance-region", schedule.NewLimiter())
+	sb, err := schedule.CreateScheduler("balance-region", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
 	cache := sb.(*balanceRegionScheduler).taintStores
 
@@ -355,7 +355,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", schedule.NewLimiter())
+	sb, err := schedule.CreateScheduler("balance-region", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
 	cache := sb.(*balanceRegionScheduler).taintStores
 
@@ -422,7 +422,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 
 	newTestReplication(opt, 5, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", schedule.NewLimiter())
+	sb, err := schedule.CreateScheduler("balance-region", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
 
 	tc.AddLabelsStore(1, 4, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -457,7 +457,7 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
 
-	sb, err := schedule.CreateScheduler("balance-region", schedule.NewLimiter())
+	sb, err := schedule.CreateScheduler("balance-region", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
 	opt.SetMaxReplicas(1)
 
@@ -809,9 +809,10 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	opt.MergeScheduleLimit = 1
 	tc := schedule.NewMockCluster(opt)
-	limiter := schedule.NewLimiter()
+	hb := schedule.NewMockHeartbeatStreams(tc.ID)
+	oc := schedule.NewOperatorController(tc, hb)
 
-	mb, err := schedule.CreateScheduler("random-merge", limiter)
+	mb, err := schedule.CreateScheduler("random-merge", oc)
 	c.Assert(err, IsNil)
 
 	tc.AddRegionStore(1, 4)
@@ -826,7 +827,7 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	c.Assert(ops[0].Kind()&schedule.OpMerge, Not(Equals), 0)
 	c.Assert(ops[1].Kind()&schedule.OpMerge, Not(Equals), 0)
 
-	limiter.UpdateCounts(map[uint64]*schedule.Operator{ops[0].RegionID(): ops[0], ops[1].RegionID(): ops[1]})
+	oc.AddOperator(ops...)
 	c.Assert(mb.IsScheduleAllowed(tc), IsFalse)
 }
 
@@ -1015,7 +1016,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	newTestReplication(opt, 3, "zone", "host")
 	tc := schedule.NewMockCluster(opt)
-	hb, err := schedule.CreateScheduler("hot-write-region", schedule.NewLimiter())
+	hb, err := schedule.CreateScheduler("hot-write-region", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5, 6  with region counts 3, 2, 2, 2, 0, 0.
@@ -1113,7 +1114,7 @@ type testBalanceHotReadRegionSchedulerSuite struct{}
 func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
-	hb, err := schedule.CreateScheduler("hot-read-region", schedule.NewLimiter())
+	hb, err := schedule.CreateScheduler("hot-read-region", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
@@ -1231,7 +1232,7 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	for i := 1; i <= 5; i++ {
 		tc.UpdateStoreStatus(uint64(i))
 	}
-	hb, err := schedule.CreateScheduler("scatter-range", schedule.NewLimiter(), "s_00", "s_50", "t")
+	hb, err := schedule.CreateScheduler("scatter-range", schedule.NewOperatorController(nil, nil), "s_00", "s_50", "t")
 	c.Assert(err, IsNil)
 	limit := 0
 	for {

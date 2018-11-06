@@ -128,6 +128,7 @@ func (c *coordinator) patrolRegions() {
 func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it may be disable learner feature but still some learners to promote.
+	opController := c.opController
 	for _, p := range region.GetLearners() {
 		if region.GetPendingLearner(p.GetId()) != nil {
 			continue
@@ -137,33 +138,32 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 			PeerID:  p.GetId(),
 		}
 		op := schedule.NewOperator("promoteLearner", region.GetID(), region.GetRegionEpoch(), schedule.OpRegion, step)
-		if c.opController.AddOperator(op) {
+		if opController.AddOperator(op) {
 			return true
 		}
 	}
 
-	limiter := c.opController.Limiter
-	if limiter.OperatorCount(schedule.OpLeader) < c.cluster.GetLeaderScheduleLimit() &&
-		limiter.OperatorCount(schedule.OpRegion) < c.cluster.GetRegionScheduleLimit() &&
-		limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+	if opController.OperatorCount(schedule.OpLeader) < c.cluster.GetLeaderScheduleLimit() &&
+		opController.OperatorCount(schedule.OpRegion) < c.cluster.GetRegionScheduleLimit() &&
+		opController.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.namespaceChecker.Check(region); op != nil {
-			if c.opController.AddOperator(op) {
+			if opController.AddOperator(op) {
 				return true
 			}
 		}
 	}
 
-	if limiter.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+	if opController.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.replicaChecker.Check(region); op != nil {
-			if c.opController.AddOperator(op) {
+			if opController.AddOperator(op) {
 				return true
 			}
 		}
 	}
-	if c.cluster.IsFeatureSupported(RegionMerge) && limiter.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
+	if c.cluster.IsFeatureSupported(RegionMerge) && opController.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 		if ops := c.mergeChecker.Check(region); ops != nil {
 			// make sure two operators can add successfully altogether
-			if c.opController.AddOperator(ops...) {
+			if opController.AddOperator(ops...) {
 				return true
 			}
 		}
@@ -197,7 +197,7 @@ func (c *coordinator) run() {
 			log.Info("skip create ", schedulerCfg.Type)
 			continue
 		}
-		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController.Limiter, schedulerCfg.Args...)
+		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, schedulerCfg.Args...)
 		if err != nil {
 			log.Errorf("can not create scheduler %s: %v", schedulerCfg.Type, err)
 		} else {
@@ -412,7 +412,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 type scheduleController struct {
 	schedule.Scheduler
 	cluster      *clusterInfo
-	limiter      *schedule.Limiter
+	opController *schedule.OperatorController
 	classifier   namespace.Classifier
 	nextInterval time.Duration
 	ctx          context.Context
@@ -424,7 +424,7 @@ func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleContro
 	return &scheduleController{
 		Scheduler:    s,
 		cluster:      c.cluster,
-		limiter:      c.opController.Limiter,
+		opController: c.opController,
 		nextInterval: s.GetMinInterval(),
 		classifier:   c.classifier,
 		ctx:          ctx,

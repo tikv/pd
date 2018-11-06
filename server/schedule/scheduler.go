@@ -68,7 +68,7 @@ type Scheduler interface {
 }
 
 // CreateSchedulerFunc is for creating scheudler.
-type CreateSchedulerFunc func(limiter *Limiter, args []string) (Scheduler, error)
+type CreateSchedulerFunc func(opController *OperatorController, args []string) (Scheduler, error)
 
 var schedulerMap = make(map[string]CreateSchedulerFunc)
 
@@ -82,10 +82,10 @@ func RegisterScheduler(name string, createFn CreateSchedulerFunc) {
 }
 
 // CreateScheduler creates a scheduler with registered creator func.
-func CreateScheduler(name string, limiter *Limiter, args ...string) (Scheduler, error) {
+func CreateScheduler(name string, opController *OperatorController, args ...string) (Scheduler, error) {
 	fn, ok := schedulerMap[name]
 	if !ok {
 		return nil, errors.Errorf("create func of %v is not registered", name)
 	}
-	return fn(limiter, args)
+	return fn(opController, args)
 }
