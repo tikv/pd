@@ -15,6 +15,7 @@ package core
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"reflect"
@@ -875,19 +876,33 @@ func DiffRegionPeersInfo(origin *RegionInfo, other *RegionInfo) string {
 func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 	var ret []string
 	if !bytes.Equal(origin.meta.StartKey, other.meta.StartKey) {
-		originKey := &metapb.Region{StartKey: origin.meta.StartKey}
-		otherKey := &metapb.Region{StartKey: other.meta.StartKey}
-		ret = append(ret, fmt.Sprintf("StartKey Changed:{%s} -> {%s}", originKey, otherKey))
+		ret = append(ret, fmt.Sprintf("StartKey Changed:%s -> %s", HexRegionKey(origin.meta.StartKey), HexRegionKey(other.meta.StartKey)))
 	} else {
-		ret = append(ret, fmt.Sprintf("StartKey:{%s}", &metapb.Region{StartKey: origin.meta.StartKey}))
+		ret = append(ret, fmt.Sprintf("StartKey:%s", HexRegionKey(origin.meta.StartKey)))
 	}
 	if !bytes.Equal(origin.meta.EndKey, other.meta.EndKey) {
-		originKey := &metapb.Region{EndKey: origin.meta.EndKey}
-		otherKey := &metapb.Region{EndKey: other.meta.EndKey}
-		ret = append(ret, fmt.Sprintf("EndKey Changed:{%s} -> {%s}", originKey, otherKey))
+		ret = append(ret, fmt.Sprintf("EndKey Changed:%s -> %s", HexRegionKey(origin.meta.EndKey), HexRegionKey(other.meta.EndKey)))
 	} else {
-		ret = append(ret, fmt.Sprintf("EndKey:{%s}", &metapb.Region{EndKey: origin.meta.EndKey}))
+		ret = append(ret, fmt.Sprintf("EndKey:%s", HexRegionKey(origin.meta.EndKey)))
 	}
 
 	return strings.Join(ret, ", ")
+}
+
+// HexRegionKey converts region key to hex format. Used for formating region in
+// logs.
+func HexRegionKey(key []byte) []byte {
+	return []byte(strings.ToUpper(hex.EncodeToString(key)))
+}
+
+// HexRegionMeta converts a region meta's keys to hex format. Used for formating
+// region in logs.
+func HexRegionMeta(meta *metapb.Region) *metapb.Region {
+	if meta == nil {
+		return nil
+	}
+	meta = proto.Clone(meta).(*metapb.Region)
+	meta.StartKey = HexRegionKey(meta.StartKey)
+	meta.EndKey = HexRegionKey(meta.EndKey)
+	return meta
 }

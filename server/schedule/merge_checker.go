@@ -109,7 +109,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*Operator {
 	}
 
 	checkerCounter.WithLabelValues("merge_checker", "new_operator").Inc()
-	log.Debugf("try to merge region {%v} into region {%v}", region, target)
+	log.Debugf("try to merge region %v into region %v", core.HexRegionMeta(region.GetMeta()), core.HexRegionMeta(target.GetMeta()))
 	ops, err := CreateMergeRegionOperator("merge-region", m.cluster, region, target, OpMerge)
 	if err != nil {
 		return nil

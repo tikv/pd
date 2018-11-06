@@ -25,6 +25,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var (
@@ -216,7 +217,7 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println(cmd.UsageString())
 		return
 	}
-	key, err := parseKey(args[0], cmd.Flags().Lookup("format").Value.String())
+	key, err := parseKey(cmd.Flags(), args[0])
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return
@@ -231,14 +232,14 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 	fmt.Println(r)
 }
 
-func parseKey(arg, format string) (string, error) {
-	switch format {
+func parseKey(flags *pflag.FlagSet, key string) (string, error) {
+	switch flags.Lookup("format").Value.String() {
 	case "raw":
-		return arg, nil
+		return key, nil
 	case "encode":
-		return decodeKey(arg)
+		return decodeKey(key)
 	case "hex":
-		key, err := hex.DecodeString(arg)
+		key, err := hex.DecodeString(key)
 		if err != nil {
 			return "", errors.WithStack(err)
 		}
@@ -308,7 +309,7 @@ func showRegionsFromStartKeyCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println(cmd.UsageString())
 		return
 	}
-	key, err := parseKey(args[0], cmd.Flags().Lookup("format").Value.String())
+	key, err := parseKey(cmd.Flags(), args[0])
 	if err != nil {
 		fmt.Println("Error: ", err)
 		return
