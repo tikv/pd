@@ -141,9 +141,12 @@ func (h *historyBuffer) reload() {
 			log.Fatalf("load history index failed: %s", err)
 		}
 	}
+	log.Info("history index start at: ", h.firstIndex())
 }
 
 func (h *historyBuffer) persist() {
+	regionSyncerStatus.WithLabelValues("first_index").Set(float64(h.firstIndex()))
+	regionSyncerStatus.WithLabelValues("last_index").Set(float64(h.firstIndex()))
 	err := h.kv.Save(historyKey, strconv.FormatUint(h.nextIndex(), 10))
 	if err != nil {
 		log.Warnf("persist history index (%d) failed: %v", h.nextIndex(), err)
