@@ -97,6 +97,8 @@ func (h *historyBuffer) RecordsFrom(index uint64) []*core.RegionInfo {
 	var pos int
 	if index < h.nextIndex() && index >= h.firstIndex() {
 		pos = (h.head + int(index-h.firstIndex())) % h.size
+	} else {
+		return nil
 	}
 	records := make([]*core.RegionInfo, 0, h.distanceToTail(pos))
 	for i := pos; i != h.tail; i = (i + 1) % h.size {
