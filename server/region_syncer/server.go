@@ -16,6 +16,7 @@ package syncer
 import (
 	"context"
 	"io"
+	"math"
 	"sync"
 	"time"
 
@@ -108,7 +109,11 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 			}
 			s.broadcast(regions)
 		case <-ticker.C:
-			alive := &pdpb.SyncRegionResponse{Header: &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()}}
+			alive := &pdpb.SyncRegionResponse{
+				Header: &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+				// use max uint64 to mark keepalive.
+				StartIndex: math.MaxUint64,
+			}
 			s.broadcast(alive)
 		}
 		requests = requests[:0]

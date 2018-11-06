@@ -15,6 +15,7 @@ package syncer
 
 import (
 	"context"
+	"math"
 	"net/url"
 	"time"
 
@@ -116,7 +117,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					time.Sleep(time.Second)
 					break
 				}
-				if s.history.GetNextIndex() != resp.GetStartIndex() {
+				if s.history.GetNextIndex() != resp.GetStartIndex() && resp.GetStartIndex() != math.MaxUint64 {
 					log.Warnf("server %s region syncer index not match the leader, own: %d, leader: %d, len:%d", s.server.GetMemberInfo().GetName(), s.history.GetNextIndex(), resp.GetStartIndex(), len(resp.GetRegions()))
 					s.history.ResetWithIndex(resp.GetStartIndex())
 				}
