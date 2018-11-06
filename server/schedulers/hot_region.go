@@ -26,15 +26,15 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("hot-region", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
-		return newBalanceHotRegionsScheduler(limiter), nil
+	schedule.RegisterScheduler("hot-region", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+		return newBalanceHotRegionsScheduler(opController), nil
 	})
 	// FIXME: remove this two schedule after the balance test move in schedulers package
-	schedule.RegisterScheduler("hot-write-region", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
-		return newBalanceHotWriteRegionsScheduler(limiter), nil
+	schedule.RegisterScheduler("hot-write-region", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+		return newBalanceHotWriteRegionsScheduler(opController), nil
 	})
-	schedule.RegisterScheduler("hot-read-region", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
-		return newBalanceHotReadRegionsScheduler(limiter), nil
+	schedule.RegisterScheduler("hot-read-region", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+		return newBalanceHotReadRegionsScheduler(opController), nil
 	})
 }
 
@@ -77,8 +77,8 @@ type balanceHotRegionsScheduler struct {
 	r     *rand.Rand
 }
 
-func newBalanceHotRegionsScheduler(limiter *schedule.Limiter) *balanceHotRegionsScheduler {
-	base := newBaseScheduler(limiter)
+func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *balanceHotRegionsScheduler {
+	base := newBaseScheduler(opController)
 	return &balanceHotRegionsScheduler{
 		baseScheduler: base,
 		limit:         1,
@@ -88,8 +88,8 @@ func newBalanceHotRegionsScheduler(limiter *schedule.Limiter) *balanceHotRegions
 	}
 }
 
-func newBalanceHotReadRegionsScheduler(limiter *schedule.Limiter) *balanceHotRegionsScheduler {
-	base := newBaseScheduler(limiter)
+func newBalanceHotReadRegionsScheduler(opController *schedule.OperatorController) *balanceHotRegionsScheduler {
+	base := newBaseScheduler(opController)
 	return &balanceHotRegionsScheduler{
 		baseScheduler: base,
 		limit:         1,
@@ -99,8 +99,8 @@ func newBalanceHotReadRegionsScheduler(limiter *schedule.Limiter) *balanceHotReg
 	}
 }
 
-func newBalanceHotWriteRegionsScheduler(limiter *schedule.Limiter) *balanceHotRegionsScheduler {
-	base := newBaseScheduler(limiter)
+func newBalanceHotWriteRegionsScheduler(opController *schedule.OperatorController) *balanceHotRegionsScheduler {
+	base := newBaseScheduler(opController)
 	return &balanceHotRegionsScheduler{
 		baseScheduler: base,
 		limit:         1,
@@ -123,13 +123,13 @@ func (h *balanceHotRegionsScheduler) IsScheduleAllowed(cluster schedule.Cluster)
 }
 
 func (h *balanceHotRegionsScheduler) allowBalanceLeader(cluster schedule.Cluster) bool {
-	return h.limiter.OperatorCount(schedule.OpHotRegion) < h.limit &&
-		h.limiter.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return h.opController.OperatorCount(schedule.OpHotRegion) < h.limit &&
+		h.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (h *balanceHotRegionsScheduler) allowBalanceRegion(cluster schedule.Cluster) bool {
-	return h.limiter.OperatorCount(schedule.OpHotRegion) < h.limit &&
-		h.limiter.OperatorCount(schedule.OpRegion) < cluster.GetRegionScheduleLimit()
+	return h.opController.OperatorCount(schedule.OpHotRegion) < h.limit &&
+		h.opController.OperatorCount(schedule.OpRegion) < cluster.GetRegionScheduleLimit()
 }
 
 func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {

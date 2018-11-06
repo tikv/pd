@@ -20,8 +20,8 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("label", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
-		return newLabelScheduler(limiter), nil
+	schedule.RegisterScheduler("label", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+		return newLabelScheduler(opController), nil
 	})
 }
 
@@ -30,10 +30,10 @@ type labelScheduler struct {
 	selector *schedule.BalanceSelector
 }
 
-func newLabelScheduler(limiter *schedule.Limiter) schedule.Scheduler {
+func newLabelScheduler(opController *schedule.OperatorController) schedule.Scheduler {
 	filters := []schedule.Filter{schedule.StoreStateFilter{TransferLeader: true}}
 	return &labelScheduler{
-		baseScheduler: newBaseScheduler(limiter),
+		baseScheduler: newBaseScheduler(opController),
 		selector:      schedule.NewBalanceSelector(core.LeaderKind, filters),
 	}
 }
@@ -47,7 +47,7 @@ func (s *labelScheduler) GetType() string {
 }
 
 func (s *labelScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return s.limiter.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (s *labelScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {

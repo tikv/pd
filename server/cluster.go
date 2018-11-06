@@ -532,19 +532,19 @@ func (c *RaftCluster) checkStores() {
 }
 
 func (c *RaftCluster) checkOperators() {
-	oc := c.coordinator.opController
-	for _, op := range oc.GetOperators() {
+	opController := c.coordinator.opController
+	for _, op := range opController.GetOperators() {
 		// after region is merged, it will not heartbeat anymore
 		// the operator of merged region will not timeout actively
 		if c.cachedCluster.GetRegion(op.RegionID()) == nil {
 			log.Debugf("remove operator %v cause region %d is merged", op, op.RegionID())
-			oc.RemoveOperator(op)
+			opController.RemoveOperator(op)
 			continue
 		}
 
 		if op.IsTimeout() {
 			log.Infof("[region %v] operator timeout: %s", op.RegionID(), op)
-			oc.RemoveOperator(op)
+			opController.RemoveOperator(op)
 		}
 	}
 }

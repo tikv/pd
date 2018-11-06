@@ -23,7 +23,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("grant-leader", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("grant-leader", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
 		if len(args) != 1 {
 			return nil, errors.New("grant-leader needs 1 argument")
 		}
@@ -31,7 +31,7 @@ func init() {
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
-		return newGrantLeaderScheduler(limiter, id), nil
+		return newGrantLeaderScheduler(opController, id), nil
 	})
 }
 
@@ -44,8 +44,8 @@ type grantLeaderScheduler struct {
 
 // newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
-func newGrantLeaderScheduler(limiter *schedule.Limiter, storeID uint64) schedule.Scheduler {
-	base := newBaseScheduler(limiter)
+func newGrantLeaderScheduler(opController *schedule.OperatorController, storeID uint64) schedule.Scheduler {
+	base := newBaseScheduler(opController)
 	return &grantLeaderScheduler{
 		baseScheduler: base,
 		name:          fmt.Sprintf("grant-leader-scheduler-%d", storeID),
@@ -69,7 +69,7 @@ func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {
 }
 
 func (s *grantLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return s.limiter.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
