@@ -23,7 +23,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("scatter-range", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("scatter-range", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
 		if len(args) != 3 {
 			return nil, errors.New("should specify the range and the name")
 		}
@@ -36,7 +36,7 @@ func init() {
 			return nil, err
 		}
 		name := args[2]
-		return newScatterRangeScheduler(limiter, []string{startKey, endKey, name}), nil
+		return newScatterRangeScheduler(opController, []string{startKey, endKey, name}), nil
 	})
 }
 
@@ -51,15 +51,15 @@ type scatterRangeScheduler struct {
 
 // newScatterRangeScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
-func newScatterRangeScheduler(limiter *schedule.Limiter, args []string) schedule.Scheduler {
-	base := newBaseScheduler(limiter)
+func newScatterRangeScheduler(opController *schedule.OperatorController, args []string) schedule.Scheduler {
+	base := newBaseScheduler(opController)
 	return &scatterRangeScheduler{
 		baseScheduler: base,
 		startKey:      []byte(args[0]),
 		endKey:        []byte(args[1]),
 		rangeName:     args[2],
-		balanceLeader: newBalanceLeaderScheduler(limiter),
-		balanceRegion: newBalanceRegionScheduler(limiter),
+		balanceLeader: newBalanceLeaderScheduler(opController),
+		balanceRegion: newBalanceRegionScheduler(opController),
 	}
 }
 
@@ -72,7 +72,7 @@ func (l *scatterRangeScheduler) GetType() string {
 }
 
 func (l *scatterRangeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return l.limiter.OperatorCount(schedule.OpRange) < cluster.GetRegionScheduleLimit()
+	return l.opController.OperatorCount(schedule.OpRange) < cluster.GetRegionScheduleLimit()
 }
 
 func (l *scatterRangeScheduler) getOperators(opInfuence schedule.OpInfluence) []*schedule.Operator {

@@ -165,7 +165,7 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	s, err := schedule.CreateScheduler(name, c.opController.Limiter, args...)
+	s, err := schedule.CreateScheduler(name, c.opController, args...)
 	if err != nil {
 		return err
 	}

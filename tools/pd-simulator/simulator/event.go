@@ -33,7 +33,7 @@ type EventRunner struct {
 }
 
 // NewEventRunner creates an event runner.
-func NewEventRunner(events []cases.EventInner, raftEngine *RaftEngine) *EventRunner {
+func NewEventRunner(events []cases.EventDescriptor, raftEngine *RaftEngine) *EventRunner {
 	er := &EventRunner{events: make([]Event, 0, len(events)), raftEngine: raftEngine}
 	for _, e := range events {
 		event := parserEvent(e)
@@ -44,18 +44,18 @@ func NewEventRunner(events []cases.EventInner, raftEngine *RaftEngine) *EventRun
 	return er
 }
 
-func parserEvent(e cases.EventInner) Event {
-	switch v := e.(type) {
-	case *cases.WriteFlowOnSpotInner:
-		return &WriteFlowOnSpot{in: v}
-	case *cases.WriteFlowOnRegionInner:
-		return &WriteFlowOnRegion{in: v}
-	case *cases.ReadFlowOnRegionInner:
-		return &ReadFlowOnRegion{in: v}
-	case *cases.AddNodesInner:
-		return &AddNodes{in: v}
-	case *cases.DeleteNodesInner:
-		return &DeleteNodes{in: v}
+func parserEvent(e cases.EventDescriptor) Event {
+	switch t := e.(type) {
+	case *cases.WriteFlowOnSpotDescriptor:
+		return &WriteFlowOnSpot{descriptor: t}
+	case *cases.WriteFlowOnRegionDescriptor:
+		return &WriteFlowOnRegion{descriptor: t}
+	case *cases.ReadFlowOnRegionDescriptor:
+		return &ReadFlowOnRegion{descriptor: t}
+	case *cases.AddNodesDescriptor:
+		return &AddNodes{descriptor: t}
+	case *cases.DeleteNodesDescriptor:
+		return &DeleteNodes{descriptor: t}
 	}
 	return nil
 }
@@ -75,12 +75,12 @@ func (er *EventRunner) Tick(tickCount int64) {
 
 // WriteFlowOnSpot writes bytes in some range.
 type WriteFlowOnSpot struct {
-	in *cases.WriteFlowOnSpotInner
+	descriptor *cases.WriteFlowOnSpotDescriptor
 }
 
 // Run implements the event interface.
 func (e *WriteFlowOnSpot) Run(raft *RaftEngine, tickCount int64) bool {
-	res := e.in.Step(tickCount)
+	res := e.descriptor.Step(tickCount)
 	for key, size := range res {
 		region := raft.SearchRegion([]byte(key))
 		if region == nil {
@@ -94,12 +94,12 @@ func (e *WriteFlowOnSpot) Run(raft *RaftEngine, tickCount int64) bool {
 
 // WriteFlowOnRegion writes bytes in some region.
 type WriteFlowOnRegion struct {
-	in *cases.WriteFlowOnRegionInner
+	descriptor *cases.WriteFlowOnRegionDescriptor
 }
 
 // Run implements the event interface.
 func (e *WriteFlowOnRegion) Run(raft *RaftEngine, tickCount int64) bool {
-	res := e.in.Step(tickCount)
+	res := e.descriptor.Step(tickCount)
 	for id, bytes := range res {
 		region := raft.GetRegion(id)
 		if region == nil {
@@ -113,24 +113,24 @@ func (e *WriteFlowOnRegion) Run(raft *RaftEngine, tickCount int64) bool {
 
 // ReadFlowOnRegion reads bytes in some region
 type ReadFlowOnRegion struct {
-	in *cases.ReadFlowOnRegionInner
+	descriptor *cases.ReadFlowOnRegionDescriptor
 }
 
 // Run implements the event interface.
 func (e *ReadFlowOnRegion) Run(raft *RaftEngine, tickCount int64) bool {
-	res := e.in.Step(tickCount)
+	res := e.descriptor.Step(tickCount)
 	raft.updateRegionReadBytes(res)
 	return false
 }
 
 // AddNodes adds nodes.
 type AddNodes struct {
-	in *cases.AddNodesInner
+	descriptor *cases.AddNodesDescriptor
 }
 
 // Run implements the event interface.
 func (e *AddNodes) Run(raft *RaftEngine, tickCount int64) bool {
-	id := e.in.Step(tickCount)
+	id := e.descriptor.Step(tickCount)
 	if id == 0 {
 		return false
 	}
@@ -164,12 +164,12 @@ func (e *AddNodes) Run(raft *RaftEngine, tickCount int64) bool {
 
 // DeleteNodes deletes nodes.
 type DeleteNodes struct {
-	in *cases.DeleteNodesInner
+	descriptor *cases.DeleteNodesDescriptor
 }
 
 // Run implements the event interface.
 func (e *DeleteNodes) Run(raft *RaftEngine, tickCount int64) bool {
-	id := e.in.Step(tickCount)
+	id := e.descriptor.Step(tickCount)
 	if id == 0 {
 		return false
 	}

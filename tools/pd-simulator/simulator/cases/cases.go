@@ -46,10 +46,9 @@ type CheckerFunc func(*core.RegionsInfo) bool
 type Case struct {
 	Stores          []*Store
 	Regions         []Region
-	MaxID           uint64
 	RegionSplitSize int64
 	RegionSplitKeys int64
-	Events          []EventInner
+	Events          []EventDescriptor
 
 	Checker CheckerFunc // To check the schedule is finished.
 }
@@ -63,14 +62,29 @@ const (
 	TB
 )
 
+// IDAllocator is used to alloc unique ID.
 type idAllocator struct {
-	maxID uint64
+	id uint64
 }
 
+// nextID gets the next unique ID.
 func (a *idAllocator) nextID() uint64 {
-	a.maxID++
-	return a.maxID
+	a.id++
+	return a.id
 }
+
+// ResetID resets the IDAllocator.
+func (a *idAllocator) ResetID() {
+	a.id = 0
+}
+
+// GetID gets the current ID.
+func (a *idAllocator) GetID() uint64 {
+	return a.id
+}
+
+// IDAllocator is used to alloc unique ID.
+var IDAllocator idAllocator
 
 // CaseMap is a mapping of the cases to the their corresponding initialize functions.
 var CaseMap = map[string]func() *Case{

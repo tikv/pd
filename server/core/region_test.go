@@ -111,14 +111,14 @@ func (*testRegionKey) TestRegionKey(c *C) {
 		expect string
 	}{
 		{`"t\x80\x00\x00\x00\x00\x00\x00\xff!_r\x80\x00\x00\x00\x00\xff\x02\u007fY\x00\x00\x00\x00\x00\xfa"`,
-			`"t\200\000\000\000\000\000\000\377!_r\200\000\000\000\000\377\002\177Y\000\000\000\000\000\372"`},
+			`7480000000000000FF215F728000000000FF027F590000000000FA`},
 		{"\"\\x80\\x00\\x00\\x00\\x00\\x00\\x00\\xff\\x05\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xf8\"",
-			`"\200\000\000\000\000\000\000\377\005\000\000\000\000\000\000\000\370"`},
+			`80000000000000FF0500000000000000F8`},
 	}
 	for _, t := range testCase {
 		got, err := strconv.Unquote(t.key)
 		c.Assert(err, IsNil)
-		s := fmt.Sprintln(&metapb.Region{StartKey: []byte(got)})
+		s := fmt.Sprintln(HexRegionMeta(&metapb.Region{StartKey: []byte(got)}))
 		c.Assert(strings.Contains(s, t.expect), IsTrue)
 
 		// start key changed
