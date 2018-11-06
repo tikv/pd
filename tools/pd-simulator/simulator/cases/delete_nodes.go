@@ -22,11 +22,10 @@ import (
 
 func newDeleteNodes() *Case {
 	var simCase Case
-	var id idAllocator
 
 	for i := 1; i <= 8; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:        id.nextID(),
+			ID:        IDAllocator.nextID(),
 			Status:    metapb.StoreState_Up,
 			Capacity:  1 * TB,
 			Available: 900 * GB,
@@ -36,19 +35,18 @@ func newDeleteNodes() *Case {
 
 	for i := 0; i < 1000; i++ {
 		peers := []*metapb.Peer{
-			{Id: id.nextID(), StoreId: uint64(i)%8 + 1},
-			{Id: id.nextID(), StoreId: uint64(i+1)%8 + 1},
-			{Id: id.nextID(), StoreId: uint64(i+2)%8 + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i)%8 + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%8 + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%8 + 1},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     id.nextID(),
+			ID:     IDAllocator.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * MB,
 			Keys:   960000,
 		})
 	}
-	simCase.MaxID = id.maxID
 
 	var ids []uint64
 	for _, store := range simCase.Stores {
@@ -56,7 +54,7 @@ func newDeleteNodes() *Case {
 	}
 
 	numNodes := 8
-	e := &DeleteNodesInner{}
+	e := &DeleteNodesDescriptor{}
 	e.Step = func(tick int64) uint64 {
 		if numNodes > 7 && tick%100 == 0 {
 			idx := rand.Intn(numNodes)
@@ -67,7 +65,7 @@ func newDeleteNodes() *Case {
 		}
 		return 0
 	}
-	simCase.Events = []EventInner{e}
+	simCase.Events = []EventDescriptor{e}
 
 	simCase.Checker = func(regions *core.RegionsInfo) bool {
 		res := true

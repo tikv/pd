@@ -495,7 +495,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) err
 
 func (c *RaftCluster) checkStores() {
 	var offlineStores []*metapb.Store
-	var upStoreCount uint64
+	var upStoreCount int
 
 	cluster := c.cachedCluster
 
@@ -524,7 +524,7 @@ func (c *RaftCluster) checkStores() {
 		return
 	}
 
-	if upStoreCount < c.s.GetConfig().Replication.MaxReplicas {
+	if upStoreCount < cluster.GetMaxReplicas() {
 		for _, offlineStore := range offlineStores {
 			log.Warnf("store %v may not turn into Tombstone, there are no extra up node has enough space to accommodate the extra replica", offlineStore)
 		}
