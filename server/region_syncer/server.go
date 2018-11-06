@@ -150,6 +150,10 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 	name := request.GetMember().GetName()
 	records := s.history.RecordsFrom(startIndex)
 	if len(records) == 0 {
+		if s.history.GetNextIndex() == startIndex {
+			log.Infof("%s already in sync with %s, the last index is %d", name, s.server.GetMemberInfo().GetName(), startIndex)
+			return nil
+		}
 		log.Warnf("no history regions form index %d, the leader maybe restarted", startIndex)
 		// TODO: Full synchronization
 		// if startIndex == 0 {}
