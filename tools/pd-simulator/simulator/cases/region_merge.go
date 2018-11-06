@@ -23,11 +23,10 @@ import (
 
 func newRegionMerge() *Case {
 	var simCase Case
-	var id idAllocator
 	// Initialize the cluster
 	for i := 1; i <= 4; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:        id.nextID(),
+			ID:        IDAllocator.nextID(),
 			Status:    metapb.StoreState_Up,
 			Capacity:  1 * TB,
 			Available: 900 * GB,
@@ -38,19 +37,18 @@ func newRegionMerge() *Case {
 	for i := 0; i < 40; i++ {
 		storeIDs := rand.Perm(4)
 		peers := []*metapb.Peer{
-			{Id: id.nextID(), StoreId: uint64(storeIDs[0] + 1)},
-			{Id: id.nextID(), StoreId: uint64(storeIDs[1] + 1)},
-			{Id: id.nextID(), StoreId: uint64(storeIDs[2] + 1)},
+			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[0] + 1)},
+			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[1] + 1)},
+			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[2] + 1)},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     id.nextID(),
+			ID:     IDAllocator.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   10 * MB,
 			Keys:   100000,
 		})
 	}
-	simCase.MaxID = id.maxID
 
 	// Checker description
 	simCase.Checker = func(regions *core.RegionsInfo) bool {

@@ -25,8 +25,8 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("balance-region", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
-		return newBalanceRegionScheduler(limiter), nil
+	schedule.RegisterScheduler("balance-region", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+		return newBalanceRegionScheduler(opController), nil
 	})
 }
 
@@ -41,13 +41,13 @@ type balanceRegionScheduler struct {
 
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
 // each store balanced.
-func newBalanceRegionScheduler(limiter *schedule.Limiter) schedule.Scheduler {
+func newBalanceRegionScheduler(opController *schedule.OperatorController) schedule.Scheduler {
 	taintStores := newTaintCache()
 	filters := []schedule.Filter{
 		schedule.StoreStateFilter{MoveRegion: true},
 		schedule.NewCacheFilter(taintStores),
 	}
-	base := newBaseScheduler(limiter)
+	base := newBaseScheduler(opController)
 	return &balanceRegionScheduler{
 		baseScheduler: base,
 		selector:      schedule.NewBalanceSelector(core.RegionKind, filters),
@@ -64,7 +64,7 @@ func (s *balanceRegionScheduler) GetType() string {
 }
 
 func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return s.limiter.OperatorCount(schedule.OpRegion) < cluster.GetRegionScheduleLimit()
+	return s.opController.OperatorCount(schedule.OpRegion) < cluster.GetRegionScheduleLimit()
 }
 
 func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {

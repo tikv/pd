@@ -21,8 +21,8 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("random-merge", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
-		return newRandomMergeScheduler(limiter), nil
+	schedule.RegisterScheduler("random-merge", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+		return newRandomMergeScheduler(opController), nil
 	})
 }
 
@@ -31,10 +31,11 @@ type randomMergeScheduler struct {
 	selector *schedule.RandomSelector
 }
 
-// newRandomMergeScheduler creates an admin scheduler that merges regions randomly.
-func newRandomMergeScheduler(limiter *schedule.Limiter) schedule.Scheduler {
+// newRandomMergeScheduler creates an admin scheduler that shuffles regions
+// between stores.
+func newRandomMergeScheduler(opController *schedule.OperatorController) schedule.Scheduler {
 	filters := []schedule.Filter{schedule.StoreStateFilter{MoveRegion: true}}
-	base := newBaseScheduler(limiter)
+	base := newBaseScheduler(opController)
 	return &randomMergeScheduler{
 		baseScheduler: base,
 		selector:      schedule.NewRandomSelector(filters),
@@ -50,7 +51,7 @@ func (s *randomMergeScheduler) GetType() string {
 }
 
 func (s *randomMergeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return s.limiter.OperatorCount(schedule.OpMerge) < cluster.GetMergeScheduleLimit()
+	return s.opController.OperatorCount(schedule.OpMerge) < cluster.GetMergeScheduleLimit()
 }
 
 func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
