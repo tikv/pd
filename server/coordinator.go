@@ -189,7 +189,7 @@ func (c *coordinator) run() {
 	log.Info("coordinator: Run scheduler")
 
 	k := 0
-	scheduleCfg := c.cluster.opt.load()
+	scheduleCfg := c.cluster.opt.load().clone()
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
 		if schedulerCfg.Disable {
 			scheduleCfg.Schedulers[k] = schedulerCfg
@@ -216,6 +216,7 @@ func (c *coordinator) run() {
 
 	// remove invalid scheduler config and persist
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
+	c.cluster.opt.store(scheduleCfg)
 	if err := c.cluster.opt.persist(c.cluster.kv); err != nil {
 		log.Errorf("can't persist schedule config: %v", err)
 	}
