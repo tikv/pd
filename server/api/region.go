@@ -15,10 +15,8 @@ package api
 
 import (
 	"container/heap"
-	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -50,8 +48,8 @@ func newRegionInfo(r *core.RegionInfo) *regionInfo {
 	}
 	return &regionInfo{
 		ID:              r.GetID(),
-		StartKey:        strings.Trim(fmt.Sprintf("%q", r.GetStartKey()), "\""),
-		EndKey:          strings.Trim(fmt.Sprintf("%q", r.GetEndKey()), "\""),
+		StartKey:        string(core.HexRegionKey(r.GetStartKey())),
+		EndKey:          string(core.HexRegionKey(r.GetEndKey())),
 		RegionEpoch:     r.GetRegionEpoch(),
 		Peers:           r.GetPeers(),
 		Leader:          r.GetLeader(),

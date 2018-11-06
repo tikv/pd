@@ -15,6 +15,7 @@ package command
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,7 +24,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var (
@@ -201,11 +204,11 @@ func showRegionTopSizeCommandFunc(cmd *cobra.Command, args []string) {
 // NewRegionWithKeyCommand return a region with key subcommand of regionCmd
 func NewRegionWithKeyCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "key [--format=raw|encode] <key>",
+		Use:   "key [--format=raw|encode|hex] <key>",
 		Short: "show the region with key",
 		Run:   showRegionWithTableCommandFunc,
 	}
-	r.Flags().String("format", "raw", "the key format")
+	r.Flags().String("format", "hex", "the key format")
 	return r
 }
 
@@ -214,27 +217,11 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println(cmd.UsageString())
 		return
 	}
-
-	var (
-		key string
-		err error
-	)
-
-	format := cmd.Flags().Lookup("format").Value.String()
-	switch format {
-	case "raw":
-		key = args[0]
-	case "encode":
-		key, err = decodeKey(args[0])
-		if err != nil {
-			fmt.Println("Error: ", err)
-			return
-		}
-	default:
-		fmt.Println("Error: unknown format")
+	key, err := parseKey(cmd.Flags(), args[0])
+	if err != nil {
+		fmt.Println("Error: ", err)
 		return
 	}
-
 	key = url.QueryEscape(key)
 	prefix := regionKeyPrefix + "/" + key
 	r, err := doRequest(cmd, prefix, http.MethodGet)
@@ -245,6 +232,22 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 	fmt.Println(r)
 }
 
+func parseKey(flags *pflag.FlagSet, key string) (string, error) {
+	switch flags.Lookup("format").Value.String() {
+	case "raw":
+		return key, nil
+	case "encode":
+		return decodeKey(key)
+	case "hex":
+		key, err := hex.DecodeString(key)
+		if err != nil {
+			return "", errors.WithStack(err)
+		}
+		return string(key), nil
+	}
+	return "", errors.New("unknown format")
+}
+
 func decodeKey(text string) (string, error) {
 	var buf []byte
 	r := bytes.NewBuffer([]byte(text))
@@ -252,7 +255,7 @@ func decodeKey(text string) (string, error) {
 		c, err := r.ReadByte()
 		if err != nil {
 			if err != io.EOF {
-				return "", err
+				return "", errors.WithStack(err)
 			}
 			break
 		}
@@ -278,12 +281,51 @@ func decodeKey(text string) (string, error) {
 			n = append(n, r.Next(2)...)
 			_, err := fmt.Sscanf(string(n), "%03o", &c)
 			if err != nil {
-				return "", err
+				return "", errors.WithStack(err)
 			}
 			buf = append(buf, c)
 		}
 	}
 	return string(buf), nil
+}
+
+// NewRegionsWithStartKeyCommand returns regions from startkey subcommand of regionCmd.
+func NewRegionsWithStartKeyCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "startkey [--format=raw|encode|hex] <key> <limit>",
+		Short: "show regions from start key",
+		Run:   showRegionsFromStartKeyCommandFunc,
+	}
+
+	r.Flags().String("format", "hex", "the key format")
+	return r
+}
+
+func showRegionsFromStartKeyCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) < 1 || len(args) > 2 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+	key, err := parseKey(cmd.Flags(), args[0])
+	if err != nil {
+		fmt.Println("Error: ", err)
+		return
+	}
+	key = url.QueryEscape(key)
+	prefix := regionKeyPrefix + "/" + key
+	if len(args) == 2 {
+		if _, err = strconv.Atoi(args[1]); err != nil {
+			fmt.Println("limit should be a number")
+			return
+		}
+		prefix += "?limit=" + args[1]
+	}
+	r, err := doRequest(cmd, prefix, http.MethodGet)
+	if err != nil {
+		fmt.Printf("Failed to get region: %s\n", err)
+		return
+	}
+	fmt.Println(r)
 }
 
 // NewRegionWithCheckCommand returns a region with check subcommand of regionCmd

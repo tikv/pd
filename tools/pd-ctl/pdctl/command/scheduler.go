@@ -148,10 +148,11 @@ func addSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 // NewScatterRangeSchedulerCommand returns a command to add a scatter-range-scheduler.
 func NewScatterRangeSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "scatter-range <start_key> <end_key> <range_name>",
+		Use:   "scatter-range [--format=raw|encode|hex] <start_key> <end_key> <range_name>",
 		Short: "add a scheduler to scatter range",
 		Run:   addSchedulerForScatterRangeCommandFunc,
 	}
+	c.Flags().String("format", "hex", "the key format")
 	return c
 }
 
@@ -160,11 +161,21 @@ func addSchedulerForScatterRangeCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println(cmd.UsageString())
 		return
 	}
+	startKey, err := parseKey(cmd.Flags(), args[0])
+	if err != nil {
+		fmt.Println("Error: ", err)
+		return
+	}
+	endKey, err := parseKey(cmd.Flags(), args[1])
+	if err != nil {
+		fmt.Println("Error: ", err)
+		return
+	}
 
 	input := make(map[string]interface{})
 	input["name"] = cmd.Name()
-	input["start_key"] = url.QueryEscape(args[0])
-	input["end_key"] = url.QueryEscape(args[1])
+	input["start_key"] = url.QueryEscape(startKey)
+	input["end_key"] = url.QueryEscape(endKey)
 	input["range_name"] = args[2]
 	postJSON(cmd, schedulersPrefix, input)
 }
