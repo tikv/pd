@@ -136,7 +136,7 @@ func (s *RegionSyncer) Sync(stream pdpb.PD_SyncRegionsServer) error {
 		}
 		log.Infof("establish sync region stream with %s [%s]", request.GetMember().GetName(), request.GetMember().GetClientUrls()[0])
 
-		err = s.syncHistoryRegion(request.GetStartIndex(), stream)
+		err = s.syncHistoryRegion(request, stream)
 		if err != nil {
 			return err
 		}
@@ -144,7 +144,10 @@ func (s *RegionSyncer) Sync(stream pdpb.PD_SyncRegionsServer) error {
 	}
 }
 
-func (s *RegionSyncer) syncHistoryRegion(startIndex uint64, stream pdpb.PD_SyncRegionsServer) error {
+func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream pdpb.PD_SyncRegionsServer) error {
+
+	startIndex := request.GetStartIndex()
+	name := request.GetMember().GetName()
 	records := s.history.RecordsFrom(startIndex)
 	if len(records) == 0 {
 		log.Warnf("no history regions form index %d, the leader maybe restarted", startIndex)
@@ -152,7 +155,8 @@ func (s *RegionSyncer) syncHistoryRegion(startIndex uint64, stream pdpb.PD_SyncR
 		// if startIndex == 0 {}
 		return nil
 	}
-	log.Infof("syncer server sync the history regions from index:%d, got records length: %d", startIndex, len(records))
+	log.Infof("sync the history regions with %s from index:%d, own last index:%d, got records length: %d",
+		name, startIndex, s.history.GetNextIndex(), len(records))
 	regions := make([]*metapb.Region, len(records))
 	for i, r := range records {
 		regions[i] = r.GetMeta()
