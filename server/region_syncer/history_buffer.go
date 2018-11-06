@@ -109,7 +109,6 @@ func (h *historyBuffer) ResetWithIndex(index uint64) {
 	h.Lock()
 	defer h.Unlock()
 	h.index = index
-	h.records = h.records[:0]
 	h.head = 0
 	h.tail = 0
 	h.flushCount = defaultFlushCount

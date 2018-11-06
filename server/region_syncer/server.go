@@ -93,6 +93,7 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 			return
 		case first := <-regionNotifier:
 			requests = append(requests, first.GetMeta())
+			startIndex := s.history.GetNextIndex()
 			s.history.Record(first)
 			pending := len(regionNotifier)
 			for i := 0; i < pending && i < maxSyncRegionBatchSize; i++ {
@@ -101,8 +102,9 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 				s.history.Record(region)
 			}
 			regions := &pdpb.SyncRegionResponse{
-				Header:  &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
-				Regions: requests,
+				Header:     &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+				Regions:    requests,
+				StartIndex: startIndex,
 			}
 			s.broadcast(regions)
 		case <-ticker.C:
@@ -139,6 +141,7 @@ func (s *RegionSyncer) Sync(stream pdpb.PD_SyncRegionsServer) error {
 
 func (s *RegionSyncer) syncHistoryRegion(startIndex uint64, stream pdpb.PD_SyncRegionsServer) error {
 	records := s.history.RecordsFrom(startIndex)
+	log.Infof("syncer server sync the history regions from index:%d, got records: %d", startIndex, len(records))
 	regions := make([]*metapb.Region, len(records))
 	for i, r := range records {
 		regions[i] = r.GetMeta()

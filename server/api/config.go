@@ -58,6 +58,10 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if err := json.Unmarshal(data, &config.PDServerCfg); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if err := h.svr.SetScheduleConfig(config.Schedule); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
