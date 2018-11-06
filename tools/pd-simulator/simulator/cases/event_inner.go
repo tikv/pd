@@ -13,57 +13,57 @@
 
 package cases
 
-// EventInner is a detail template for custom events.
-type EventInner interface {
+// EventDescriptor is a detail template for custom events.
+type EventDescriptor interface {
 	Type() string
 }
 
-// WriteFlowOnSpotInner writes bytes in some range.
-type WriteFlowOnSpotInner struct {
+// WriteFlowOnSpotDescriptor writes bytes in some range.
+type WriteFlowOnSpotDescriptor struct {
 	Step func(tick int64) map[string]int64
 }
 
-// Type implements the EventInner interface.
-func (w *WriteFlowOnSpotInner) Type() string {
+// Type implements the EventDescriptor interface.
+func (w *WriteFlowOnSpotDescriptor) Type() string {
 	return "write-flow-on-spot"
 }
 
-// WriteFlowOnRegionInner writes bytes in some region.
-type WriteFlowOnRegionInner struct {
+// WriteFlowOnRegionDescriptor writes bytes in some region.
+type WriteFlowOnRegionDescriptor struct {
 	Step func(tick int64) map[uint64]int64
 }
 
-// Type implements the EventInner interface.
-func (w *WriteFlowOnRegionInner) Type() string {
+// Type implements the EventDescriptor interface.
+func (w *WriteFlowOnRegionDescriptor) Type() string {
 	return "write-flow-on-region"
 }
 
-// ReadFlowOnRegionInner reads bytes in some region.
-type ReadFlowOnRegionInner struct {
+// ReadFlowOnRegionDescriptor reads bytes in some region.
+type ReadFlowOnRegionDescriptor struct {
 	Step func(tick int64) map[uint64]int64
 }
 
-// Type implements the EventInner interface.
-func (w *ReadFlowOnRegionInner) Type() string {
+// Type implements the EventDescriptor interface.
+func (w *ReadFlowOnRegionDescriptor) Type() string {
 	return "read-flow-on-region"
 }
 
-// AddNodesInner adds nodes.
-type AddNodesInner struct {
+// AddNodesDescriptor adds nodes.
+type AddNodesDescriptor struct {
 	Step func(tick int64) uint64
 }
 
-// Type implements the EventInner interface.
-func (w *AddNodesInner) Type() string {
+// Type implements the EventDescriptor interface.
+func (w *AddNodesDescriptor) Type() string {
 	return "add-nodes"
 }
 
-// DeleteNodesInner removes nodes.
-type DeleteNodesInner struct {
+// DeleteNodesDescriptor removes nodes.
+type DeleteNodesDescriptor struct {
 	Step func(tick int64) uint64
 }
 
-// Type implements the EventInner interface.
-func (w *DeleteNodesInner) Type() string {
+// Type implements the EventDescriptor interface.
+func (w *DeleteNodesDescriptor) Type() string {
 	return "delete-nodes"
 }

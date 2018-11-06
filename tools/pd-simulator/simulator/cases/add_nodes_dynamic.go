@@ -20,11 +20,10 @@ import (
 
 func newAddNodesDynamic() *Case {
 	var simCase Case
-	var id idAllocator
 
 	for i := 1; i <= 8; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:        id.nextID(),
+			ID:        IDAllocator.nextID(),
 			Status:    metapb.StoreState_Up,
 			Capacity:  1 * TB,
 			Available: 900 * GB,
@@ -34,27 +33,26 @@ func newAddNodesDynamic() *Case {
 
 	var ids []uint64
 	for i := 1; i <= 8; i++ {
-		ids = append(ids, id.nextID())
+		ids = append(ids, IDAllocator.nextID())
 	}
 
 	for i := 0; i < 2000; i++ {
 		peers := []*metapb.Peer{
-			{Id: id.nextID(), StoreId: uint64(i)%8 + 1},
-			{Id: id.nextID(), StoreId: uint64(i+1)%8 + 1},
-			{Id: id.nextID(), StoreId: uint64(i+2)%8 + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i)%8 + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%8 + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%8 + 1},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     id.nextID(),
+			ID:     IDAllocator.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * MB,
 			Keys:   960000,
 		})
 	}
-	simCase.MaxID = id.maxID
 
 	numNodes := 8
-	e := &AddNodesInner{}
+	e := &AddNodesDescriptor{}
 	e.Step = func(tick int64) uint64 {
 		if tick%100 == 0 && numNodes < 16 {
 			numNodes++
@@ -64,7 +62,7 @@ func newAddNodesDynamic() *Case {
 		}
 		return 0
 	}
-	simCase.Events = []EventInner{e}
+	simCase.Events = []EventDescriptor{e}
 
 	simCase.Checker = func(regions *core.RegionsInfo) bool {
 		res := true
