@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -114,7 +115,10 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					break
 				}
 				for _, r := range resp.GetRegions() {
-					s.server.GetStorage().SaveRegion(r)
+					err = s.server.GetStorage().SaveRegion(r)
+					if err != nil {
+						s.history.record(core.NewRegionInfo(r, nil))
+					}
 				}
 			}
 		}
