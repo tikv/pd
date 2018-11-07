@@ -317,8 +317,8 @@ func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, 
 		limit = maxRegionLimit
 	}
 	regions := topNRegions(cluster.GetRegions(), less, limit)
-	res := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, res)
+	regionsInfo := convertToAPIRegions(regions)
+	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
 // RegionHeap implements heap.Interface, used for selecting top n regions.

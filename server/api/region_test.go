@@ -19,10 +19,9 @@ import (
 	"net/url"
 	"sort"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
 )
@@ -108,7 +107,6 @@ func (s *testRegionSuite) TestRegionCheck(c *C) {
 	err = readJSONWithURL(url, r3)
 	c.Assert(err, IsNil)
 	c.Assert(r3, DeepEquals, &regionsInfo{Count: 1, Regions: []*regionInfo{newRegionInfo(r)}})
-
 }
 
 func (s *testRegionSuite) TestRegions(c *C) {
