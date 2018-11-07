@@ -21,6 +21,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
 )
@@ -82,6 +83,30 @@ func (s *testRegionSuite) TestRegion(c *C) {
 	err = readJSONWithURL(url, r2)
 	c.Assert(err, IsNil)
 	c.Assert(r2, DeepEquals, newRegionInfo(r))
+}
+
+func (s *testRegionSuite) TestRegionCheck(c *C) {
+	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	downPeer := &metapb.Peer{Id: 13, StoreId: 2}
+	r = r.Clone(core.WithAddPeer(downPeer), core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}), core.WithPendingPeers([]*metapb.Peer{downPeer}))
+	mustRegionHeartbeat(c, s.svr, r)
+	url := fmt.Sprintf("%s/region/id/%d", s.urlPrefix, r.GetID())
+	r1 := &regionInfo{}
+	err := readJSONWithURL(url, r1)
+	c.Assert(err, IsNil)
+	c.Assert(r1, DeepEquals, newRegionInfo(r))
+
+	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "down-peer")
+	r2 := &regionsInfo{}
+	err = readJSONWithURL(url, r2)
+	c.Assert(err, IsNil)
+	c.Assert(r2, DeepEquals, &regionsInfo{Count: 1, Regions: []*regionInfo{newRegionInfo(r)}})
+
+	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "pending-peer")
+	r3 := &regionsInfo{}
+	err = readJSONWithURL(url, r3)
+	c.Assert(err, IsNil)
+	c.Assert(r3, DeepEquals, &regionsInfo{Count: 1, Regions: []*regionInfo{newRegionInfo(r)}})
 }
 
 func (s *testRegionSuite) TestRegions(c *C) {
