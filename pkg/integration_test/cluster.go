@@ -117,6 +117,12 @@ func (s *testServer) GetClusterID() uint64 {
 	return s.server.ClusterID()
 }
 
+func (s *testServer) GetLeader() *pdpb.Member {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetLeader()
+}
+
 func (s *testServer) GetClusterVersion() semver.Version {
 	s.RLock()
 	defer s.RUnlock()
