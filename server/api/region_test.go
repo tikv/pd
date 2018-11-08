@@ -17,9 +17,11 @@ import (
 	"fmt"
 	"math/rand"
 	"net/url"
+	"sort"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
 )
@@ -78,6 +80,93 @@ func (s *testRegionSuite) TestRegion(c *C) {
 	err = readJSONWithURL(url, r2)
 	c.Assert(err, IsNil)
 	c.Assert(r2, DeepEquals, newRegionInfo(r))
+}
+
+func (s *testRegionSuite) TestRegionCheck(c *C) {
+	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	downPeer := &metapb.Peer{Id: 13, StoreId: 2}
+	r = r.Clone(core.WithAddPeer(downPeer), core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}), core.WithPendingPeers([]*metapb.Peer{downPeer}))
+	mustRegionHeartbeat(c, s.svr, r)
+	url := fmt.Sprintf("%s/region/id/%d", s.urlPrefix, r.GetID())
+	r1 := &regionInfo{}
+	err := readJSONWithURL(url, r1)
+	c.Assert(err, IsNil)
+	c.Assert(r1, DeepEquals, newRegionInfo(r))
+
+	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "down-peer")
+	r2 := &regionsInfo{}
+	err = readJSONWithURL(url, r2)
+	c.Assert(err, IsNil)
+	c.Assert(r2, DeepEquals, &regionsInfo{Count: 1, Regions: []*regionInfo{newRegionInfo(r)}})
+
+	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "pending-peer")
+	r3 := &regionsInfo{}
+	err = readJSONWithURL(url, r3)
+	c.Assert(err, IsNil)
+	c.Assert(r3, DeepEquals, &regionsInfo{Count: 1, Regions: []*regionInfo{newRegionInfo(r)}})
+}
+
+func (s *testRegionSuite) TestRegions(c *C) {
+	rs := []*core.RegionInfo{
+		newTestRegionInfo(2, 1, []byte("a"), []byte("b")),
+		newTestRegionInfo(3, 1, []byte("b"), []byte("c")),
+		newTestRegionInfo(4, 2, []byte("c"), []byte("d")),
+	}
+	regions := make([]*regionInfo, 0, len(rs))
+	for _, r := range rs {
+		regions = append(regions, newRegionInfo(r))
+		mustRegionHeartbeat(c, s.svr, r)
+	}
+	url := fmt.Sprintf("%s/regions", s.urlPrefix)
+	regionsInfo := &regionsInfo{}
+	err := readJSONWithURL(url, regionsInfo)
+	c.Assert(err, IsNil)
+	c.Assert(regionsInfo.Count, Equals, len(regions))
+	sort.Slice(regionsInfo.Regions, func(i, j int) bool {
+		return regionsInfo.Regions[i].ID < regionsInfo.Regions[j].ID
+	})
+	for i, r := range regionsInfo.Regions {
+		c.Assert(r.ID, Equals, regions[i].ID)
+		c.Assert(r.ApproximateSize, Equals, regions[i].ApproximateSize)
+		c.Assert(r.ApproximateKeys, Equals, regions[i].ApproximateKeys)
+	}
+}
+
+func (s *testRegionSuite) TestStoreRegions(c *C) {
+	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	r2 := newTestRegionInfo(3, 1, []byte("b"), []byte("c"))
+	r3 := newTestRegionInfo(4, 2, []byte("c"), []byte("d"))
+	mustRegionHeartbeat(c, s.svr, r1)
+	mustRegionHeartbeat(c, s.svr, r2)
+	mustRegionHeartbeat(c, s.svr, r3)
+
+	regionIDs := []uint64{2, 3}
+	url := fmt.Sprintf("%s/regions/store/%d", s.urlPrefix, 1)
+	r4 := &regionsInfo{}
+	err := readJSONWithURL(url, r4)
+	c.Assert(err, IsNil)
+	c.Assert(r4.Count, Equals, len(regionIDs))
+	sort.Slice(r4.Regions, func(i, j int) bool { return r4.Regions[i].ID < r4.Regions[j].ID })
+	for i, r := range r4.Regions {
+		c.Assert(r.ID, Equals, regionIDs[i])
+	}
+
+	regionIDs = []uint64{4}
+	url = fmt.Sprintf("%s/regions/store/%d", s.urlPrefix, 2)
+	r5 := &regionsInfo{}
+	err = readJSONWithURL(url, r5)
+	c.Assert(err, IsNil)
+	c.Assert(r5.Count, Equals, len(regionIDs))
+	for i, r := range r5.Regions {
+		c.Assert(r.ID, Equals, regionIDs[i])
+	}
+
+	regionIDs = []uint64{}
+	url = fmt.Sprintf("%s/regions/store/%d", s.urlPrefix, 3)
+	r6 := &regionsInfo{}
+	err = readJSONWithURL(url, r6)
+	c.Assert(err, IsNil)
+	c.Assert(r6.Count, Equals, len(regionIDs))
 }
 
 func (s *testRegionSuite) TestTopFlow(c *C) {
