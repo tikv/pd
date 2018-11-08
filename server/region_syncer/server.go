@@ -120,7 +120,7 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 	}
 }
 
-// Sync fistlly try to sync the history records to client.
+// Sync fistlly tries to sync the history records to client.
 // then to sync the newly records.
 func (s *RegionSyncer) Sync(stream pdpb.PD_SyncRegionsServer) error {
 	for {

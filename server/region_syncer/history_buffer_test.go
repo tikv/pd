@@ -90,5 +90,4 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	c.Assert(len(histories), Equals, 100)
 	c.Assert(h2.firstIndex(), Equals, uint64(7))
 	c.Assert(histories, DeepEquals, regions[1:])
-
 }

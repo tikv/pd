@@ -108,7 +108,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				time.Sleep(time.Second)
 				continue
 			}
-			log.Infof("%s start sync with leader %s , the request index is %d", s.server.GetMemberInfo().GetName(), s.server.GetLeader().GetName(), s.history.GetNextIndex())
+			log.Infof("%s start sync with leader %s, the request index is %d", s.server.GetMemberInfo().GetName(), s.server.GetLeader().GetName(), s.history.GetNextIndex())
 			for {
 				resp, err := client.Recv()
 				if err != nil {
@@ -118,7 +118,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					break
 				}
 				if s.history.GetNextIndex() != resp.GetStartIndex() && resp.GetStartIndex() != math.MaxUint64 {
-					log.Warnf("%s sync index not match the leader, own: %d, leader: %d, records length:%d",
+					log.Warnf("%s sync index not match the leader, own: %d, leader: %d, records length: %d",
 						s.server.GetMemberInfo().GetName(), s.history.GetNextIndex(), resp.GetStartIndex(), len(resp.GetRegions()))
 					// reset index
 					s.history.ResetWithIndex(resp.GetStartIndex())
