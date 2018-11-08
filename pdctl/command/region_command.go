@@ -18,7 +18,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
@@ -122,7 +124,7 @@ func showRegionTopReadCommandFunc(cmd *cobra.Command, args []string) {
 // NewRegionWithKeyCommand return a region with key subcommand of regionCmd
 func NewRegionWithKeyCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "key [--format=raw|pb|proto|protobuf] <key>",
+		Use:   "key [--format=raw|encode] <key>",
 		Short: "show the region with key",
 		Run:   showRegionWithTableCommandFunc,
 	}
@@ -145,8 +147,8 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 	switch format {
 	case "raw":
 		key = args[0]
-	case "pb", "proto", "protobuf":
-		key, err = decodeProtobufText(args[0])
+	case "encode":
+		key, err = decodeKey(args[0])
 		if err != nil {
 			fmt.Println("Error: ", err)
 			return
@@ -155,7 +157,8 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println("Error: unknown format")
 		return
 	}
-	// TODO: Deal with path escaped
+
+	key = url.QueryEscape(key)
 	prefix := regionKeyPrefix + "/" + key
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
@@ -163,10 +166,9 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	fmt.Println(r)
-
 }
 
-func decodeProtobufText(text string) (string, error) {
+func decodeKey(text string) (string, error) {
 	var buf []byte
 	r := bytes.NewBuffer([]byte(text))
 	for {
@@ -177,13 +179,32 @@ func decodeProtobufText(text string) (string, error) {
 			}
 			break
 		}
-		if c == '\\' {
-			_, err := fmt.Sscanf(string(r.Next(3)), "%03o", &c)
+		if c != '\\' {
+			buf = append(buf, c)
+			continue
+		}
+		n := r.Next(1)
+		if len(n) == 0 {
+			return "", io.EOF
+		}
+		// See: https://golang.org/ref/spec#Rune_literals
+		if idx := strings.IndexByte(`abfnrtv\'"`, n[0]); idx != -1 {
+			buf = append(buf, []byte("\a\b\f\n\r\t\v\\'\"")[idx])
+			continue
+		}
+
+		switch n[0] {
+		case 'x':
+			fmt.Sscanf(string(r.Next(2)), "%02x", &c)
+			buf = append(buf, c)
+		default:
+			n = append(n, r.Next(2)...)
+			_, err := fmt.Sscanf(string(n), "%03o", &c)
 			if err != nil {
 				return "", err
 			}
+			buf = append(buf, c)
 		}
-		buf = append(buf, c)
 	}
 	return string(buf), nil
 }
