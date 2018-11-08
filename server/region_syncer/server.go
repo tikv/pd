@@ -145,7 +145,6 @@ func (s *RegionSyncer) Sync(stream pdpb.PD_SyncRegionsServer) error {
 }
 
 func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream pdpb.PD_SyncRegionsServer) error {
-
 	startIndex := request.GetStartIndex()
 	name := request.GetMember().GetName()
 	records := s.history.RecordsFrom(startIndex)
