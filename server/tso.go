@@ -182,6 +182,11 @@ const maxRetryCount = 100
 
 func (s *Server) getRespTS(count uint32) (pdpb.Timestamp, error) {
 	var resp pdpb.Timestamp
+
+	if count == 0 {
+		return resp, errors.New("tso count should be positive")
+	}
+
 	for i := 0; i < maxRetryCount; i++ {
 		current, ok := s.ts.Load().(*atomicObject)
 		if !ok || current.physical == zeroTime {

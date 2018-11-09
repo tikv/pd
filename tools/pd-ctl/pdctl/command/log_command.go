@@ -16,7 +16,6 @@ package command
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/spf13/cobra"
@@ -39,24 +38,24 @@ func NewLogCommand() *cobra.Command {
 func logCommandFunc(cmd *cobra.Command, args []string) {
 	var err error
 	if len(args) != 1 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 
 	data, err := json.Marshal(args[0])
 	if err != nil {
-		fmt.Printf("Failed to set log level: %s\n", err)
+		cmd.Printf("Failed to set log level: %s\n", err)
 		return
 	}
 	req, err := getRequest(cmd, logPrefix, http.MethodPost, "application/json", bytes.NewBuffer(data))
 	if err != nil {
-		fmt.Printf("Failed to set log level: %s\n", err)
+		cmd.Printf("Failed to set log level: %s\n", err)
 		return
 	}
 	_, err = dail(req)
 	if err != nil {
-		fmt.Printf("Failed to set log level: %s\n", err)
+		cmd.Printf("Failed to set log level: %s\n", err)
 		return
 	}
-	fmt.Println("Success!")
+	cmd.Println("Success!")
 }

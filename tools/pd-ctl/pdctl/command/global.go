@@ -101,13 +101,13 @@ func genResponseError(r *http.Response) error {
 func getAddressFromCmd(cmd *cobra.Command, prefix string) string {
 	p, err := cmd.Flags().GetString("pd")
 	if err != nil {
-		fmt.Println("Get pd address error,should set flag with '-u'")
+		cmd.Println("Get pd address error,should set flag with '-u'")
 		os.Exit(1)
 	}
 
 	u, err := url.Parse(p)
 	if err != nil {
-		fmt.Println("address is wrong format,should like 'http://127.0.0.1:2379'")
+		cmd.Println("address is wrong format,should like 'http://127.0.0.1:2379'")
 	}
 	if u.Scheme == "" {
 		u.Scheme = "http"
@@ -124,14 +124,14 @@ func printResponseError(r *http.Response) {
 func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 	data, err := json.Marshal(input)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 
 	url := getAddressFromCmd(cmd, prefix)
 	r, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 	defer r.Body.Close()

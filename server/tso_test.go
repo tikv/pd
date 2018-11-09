@@ -92,6 +92,17 @@ func (s *testTsoSuite) TestTso(c *C) {
 	wg.Wait()
 }
 
+func (s *testTsoSuite) TestTsoCount0(c *C) {
+	req := &pdpb.TsoRequest{Header: newRequestHeader(s.svr.clusterID)}
+	tsoClient, err := s.grpcPDClient.Tso(context.Background())
+	c.Assert(err, IsNil)
+	defer tsoClient.CloseSend()
+	err = tsoClient.Send(req)
+	c.Assert(err, IsNil)
+	_, err = tsoClient.Recv()
+	c.Assert(err, NotNil)
+}
+
 var _ = Suite(&testTimeFallBackSuite{})
 
 type testTimeFallBackSuite struct {

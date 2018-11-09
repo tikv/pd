@@ -14,7 +14,6 @@
 package command
 
 import (
-	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -50,16 +49,16 @@ func NewShowSchedulerCommand() *cobra.Command {
 
 func showSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 0 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 
 	r, err := doRequest(cmd, schedulersPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
-	fmt.Println(r)
+	cmd.Println(r)
 }
 
 // NewAddSchedulerCommand returns a command to add scheduler.
@@ -104,13 +103,13 @@ func NewEvictLeaderSchedulerCommand() *cobra.Command {
 
 func addSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 
 	storeID, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 
@@ -192,7 +191,7 @@ func NewLabelSchedulerCommand() *cobra.Command {
 
 func addSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 0 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 
@@ -214,17 +213,17 @@ func NewScatterRangeSchedulerCommand() *cobra.Command {
 
 func addSchedulerForScatterRangeCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 3 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 	startKey, err := parseKey(cmd.Flags(), args[0])
 	if err != nil {
-		fmt.Println("Error: ", err)
+		cmd.Println("Error: ", err)
 		return
 	}
 	endKey, err := parseKey(cmd.Flags(), args[1])
 	if err != nil {
-		fmt.Println("Error: ", err)
+		cmd.Println("Error: ", err)
 		return
 	}
 
@@ -250,7 +249,7 @@ func addSchedulerForBalanceAdjacentRegionCommandFunc(cmd *cobra.Command, args []
 	l := len(args)
 	input := make(map[string]interface{})
 	if l > 2 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	} else if l == 1 {
 		input["leader_limit"] = url.QueryEscape(args[0])
@@ -275,14 +274,14 @@ func NewRemoveSchedulerCommand() *cobra.Command {
 
 func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		fmt.Println(cmd.Usage())
+		cmd.Println(cmd.Usage())
 		return
 	}
 
 	path := schedulersPrefix + "/" + args[0]
 	_, err := doRequest(cmd, path, http.MethodDelete)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 }

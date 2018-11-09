@@ -49,10 +49,10 @@ func NewLabelListStoresCommand() *cobra.Command {
 func showLabelsCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, labelsPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get labels: %s\n", err)
+		cmd.Printf("Failed to get labels: %s\n", err)
 		return
 	}
-	fmt.Println(r)
+	cmd.Println(r)
 }
 
 func getValue(args []string, i int) string {
@@ -64,7 +64,7 @@ func getValue(args []string, i int) string {
 
 func showLabelListStoresCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) > 2 {
-		fmt.Println("Usage: label store name [value]")
+		cmd.Println("Usage: label store name [value]")
 		return
 	}
 	namePrefix := fmt.Sprintf("name=%s", getValue(args, 0))
@@ -72,8 +72,8 @@ func showLabelListStoresCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := fmt.Sprintf("%s?%s&%s", labelsStorePrefix, namePrefix, valuePrefix)
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get stores through label: %s\n", err)
+		cmd.Printf("Failed to get stores through label: %s\n", err)
 		return
 	}
-	fmt.Println(r)
+	cmd.Println(r)
 }
