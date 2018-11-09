@@ -81,7 +81,6 @@ func CheckPDVersion(opt *scheduleOption) {
 }
 
 // A helper function to get value with key from etcd.
-// TODO: return the value revision for outer use.
 func getValue(c *clientv3.Client, key string, opts ...clientv3.OpOption) ([]byte, error) {
 	resp, err := get(c, key, opts...)
 	if err != nil {
