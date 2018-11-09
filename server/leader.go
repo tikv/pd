@@ -82,7 +82,7 @@ func (s *Server) leaderLoop() {
 			continue
 		}
 
-		leader, err := getLeader(s.client, s.getLeaderPath())
+		leader, rev, err := getLeader(s.client, s.getLeaderPath())
 		if err != nil {
 			log.Errorf("get leader err %v", err)
 			time.Sleep(200 * time.Millisecond)
@@ -100,7 +100,7 @@ func (s *Server) leaderLoop() {
 				}
 			} else {
 				log.Infof("leader is %s, watch it", leader)
-				s.watchLeader(leader)
+				s.watchLeader(leader, rev)
 				log.Info("leader changed, try to campaign leader")
 			}
 		}
@@ -157,17 +157,17 @@ func (s *Server) etcdLeaderLoop() {
 }
 
 // getLeader gets server leader from etcd.
-func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, error) {
+func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, error) {
 	leader := &pdpb.Member{}
-	ok, err := getProtoMsg(c, leaderPath, leader)
+	ok, rev, err := getProtoMsgWithModRev(c, leaderPath, leader)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if !ok {
-		return nil, nil
+		return nil, 0, nil
 	}
 
-	return leader, nil
+	return leader, rev, nil
 }
 
 // GetEtcdLeader returns the etcd leader ID.
@@ -289,7 +289,7 @@ func (s *Server) campaignLeader() error {
 	}
 }
 
-func (s *Server) watchLeader(leader *pdpb.Member) {
+func (s *Server) watchLeader(leader *pdpb.Member, revision int64) {
 	s.leader.Store(leader)
 	defer s.leader.Store(&pdpb.Member{})
 
@@ -300,7 +300,8 @@ func (s *Server) watchLeader(leader *pdpb.Member) {
 	defer cancel()
 
 	for {
-		rch := watcher.Watch(ctx, s.getLeaderPath())
+		// gofail: var delayWatcher struct{}
+		rch := watcher.Watch(ctx, s.getLeaderPath(), clientv3.WithRev(revision))
 		for wresp := range rch {
 			if wresp.Canceled {
 				return
