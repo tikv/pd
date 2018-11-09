@@ -135,14 +135,14 @@ func scanRegionCommandFunc(cmd *cobra.Command, args []string) {
 		uri := fmt.Sprintf("%s?key=%s&limit=%d", regionsKeyPrefix, url.QueryEscape(string(key)), limit)
 		r, err := doRequest(cmd, uri, http.MethodGet)
 		if err != nil {
-			fmt.Printf("Failed to scan regions: %s\n", err)
+			cmd.Printf("Failed to scan regions: %s\n", err)
 			return
 		}
 
 		if flag := cmd.Flag("jq"); flag != nil && flag.Value.String() != "" {
 			printWithJQFilter(r, flag.Value.String())
 		} else {
-			fmt.Println(r)
+			cmd.Println(r)
 		}
 
 		// Extract last region's endkey for next batch.
@@ -154,7 +154,7 @@ func scanRegionCommandFunc(cmd *cobra.Command, args []string) {
 
 		var regions regionsInfo
 		if err = json.Unmarshal([]byte(r), &regions); err != nil {
-			fmt.Printf("Failed to unmarshal regions: %s\n", err)
+			cmd.Printf("Failed to unmarshal regions: %s\n", err)
 			return
 		}
 		if len(regions.Regions) == 0 {
@@ -168,7 +168,7 @@ func scanRegionCommandFunc(cmd *cobra.Command, args []string) {
 
 		key, err = hex.DecodeString(lastEndKey)
 		if err != nil {
-			fmt.Println("Bad format region key: ", key)
+			cmd.Println("Bad format region key: ", key)
 			return
 		}
 	}
