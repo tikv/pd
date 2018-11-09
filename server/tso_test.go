@@ -182,7 +182,7 @@ func (s *testTimeFallBackSuite) TestTimeFallBack(c *C) {
 
 func mustGetLeader(c *C, client *clientv3.Client, leaderPath string) *pdpb.Member {
 	for i := 0; i < 20; i++ {
-		leader, err := getLeader(client, leaderPath)
+		leader, _, err := getLeader(client, leaderPath)
 		c.Assert(err, IsNil)
 		if leader != nil {
 			return leader
