@@ -1,5 +1,11 @@
 # PD Change Log
 
+## v2.1.0-rc.5
+- Fix the issues related to `pd-ctl` reading the Region key [#1298](https://github.com/pingcap/pd/pull/1298) [#1299](https://github.com/pingcap/pd/pull/1299) [#1308](https://github.com/pingcap/pd/pull/1308)
+- Fix the issue that the `regions/check` API returns the wrong result [#1311](https://github.com/pingcap/pd/pull/1311)
+- Fix the issue that PD cannot restart join after a PD join failure [1279](https://github.com/pingcap/pd/pull/1279)
+- Fix the issue that `watch leader` might lose events in some cases [1317](https://github.com/pingcap/pd/pull/1317)
+
 ## v2.1.0-rc.4
 - Fix the issue that the tombstone TiKV is not removed from Grafana [#1261](https://github.com/pingcap/pd/pull/1261)
 - Fix the data race issue when grpc-go configures the status [#1265](https://github.com/pingcap/pd/pull/1265)
