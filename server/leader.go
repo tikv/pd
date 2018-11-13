@@ -309,7 +309,10 @@ func (s *Server) watchLeader(leader *pdpb.Member, revision int64) {
 	}
 
 	for {
-		// gofail: var delayWatcher struct{}
+		// gofail: var delayWatcher bool
+		// if delayWatcher{
+		// gofail: wait
+		// }
 		rch := watcher.Watch(ctx, s.getLeaderPath(), clientv3.WithRev(revision))
 		for wresp := range rch {
 			if wresp.Canceled {
