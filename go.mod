@@ -29,6 +29,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway v1.4.1 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/jonboulle/clockwork v0.1.0 // indirect
+	github.com/juju/ratelimit v1.0.1 // indirect
 	github.com/mattn/go-shellwords v1.0.3
 	github.com/matttproud/golang_protobuf_extensions v1.0.0 // indirect
 	github.com/montanaflynn/stats v0.0.0-20151014174947-eeaced052adb

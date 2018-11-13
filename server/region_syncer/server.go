@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/juju/ratelimit"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
@@ -30,6 +31,7 @@ import (
 
 const (
 	msgSize                  = 8 * 1024 * 1024
+	defaultRateLimit         = 20 * 1024 * 1024 // 20MB/s
 	maxSyncRegionBatchSize   = 100
 	syncerKeepAliveInterval  = 10 * time.Second
 	defaultHistoryBufferSize = 10000
@@ -54,6 +56,7 @@ type Server interface {
 	GetLeader() *pdpb.Member
 	GetStorage() *core.KV
 	Name() string
+	GetMetaRegions() []*metapb.Region
 }
 
 // RegionSyncer is used to sync the region information without raft.
@@ -66,6 +69,7 @@ type RegionSyncer struct {
 	closed  chan struct{}
 	wg      sync.WaitGroup
 	history *historyBuffer
+	limit   *ratelimit.Bucket
 }
 
 // NewRegionSyncer returns a region syncer.
@@ -79,6 +83,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		server:  s,
 		closed:  make(chan struct{}),
 		history: newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionKV()),
+		limit:   ratelimit.NewBucketWithRate(defaultRateLimit, defaultRateLimit),
 	}
 }
 
@@ -153,9 +158,28 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 			log.Infof("%s already in sync with %s, the last index is %d", name, s.server.Name(), startIndex)
 			return nil
 		}
-		log.Warnf("no history regions from index %d, the leader maybe restarted", startIndex)
-		// TODO: Full synchronization
-		// if startIndex == 0 {}
+		log.Warnf("no history regions form index %d, the leader maybe restarted", startIndex)
+		// do full synchronization
+		if startIndex == 0 {
+			regions := s.server.GetMetaRegions()
+			num := 0
+			res := make([]*metapb.Region, 0, maxSyncRegionBatchSize)
+			for _, r := range regions {
+				if num < maxSyncRegionBatchSize {
+					num++
+					res = append(res, r)
+					continue
+				}
+				resp := &pdpb.SyncRegionResponse{
+					Header:     &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+					Regions:    res,
+					StartIndex: s.history.GetNextIndex(),
+				}
+				s.limit.Wait(int64(resp.Size()))
+				num = 0
+				stream.Send(resp)
+			}
+		}
 		return nil
 	}
 	log.Infof("sync the history regions with %s from index: %d, own last index: %d, got records length: %d",

@@ -685,6 +685,15 @@ func (s *Server) GetCluster() *metapb.Cluster {
 	}
 }
 
+// GetMetaRegions gets meta regions from cluster.
+func (s *Server) GetMetaRegions() []*metapb.Regions {
+	cluster := s.GetRaftCluster()
+	if cluster != nil {
+		return cluster.GetMetaRegions()
+	}
+	return nil
+}
+
 // GetClusterStatus gets cluster status.
 func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
 	s.cluster.Lock()
