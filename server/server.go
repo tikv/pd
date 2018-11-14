@@ -121,7 +121,7 @@ func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server,
 
 func (s *Server) startEtcd() error {
 	log.Info("start embed etcd")
-	ctx, cancel := context.WithTimeout(ctx, etcdStartTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), etcdStartTimeout)
 	defer cancel()
 
 	etcd, err := embed.StartEtcd(s.etcdCfg)
@@ -154,6 +154,8 @@ func (s *Server) startEtcd() error {
 	case <-etcd.Server.ReadyNotify():
 	case sig := <-sc:
 		return errors.Errorf("receive signal %v when waiting embed etcd to be ready", sig)
+	case <-ctx.Done():
+		return errors.Errorf("canceled when waiting embed etcd to be ready")
 	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
