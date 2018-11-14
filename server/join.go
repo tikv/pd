@@ -167,9 +167,9 @@ func PrepareJoinCluster(cfg *Config) error {
 	cfg.InitialClusterState = embed.ClusterStateFlagExisting
 	err = os.MkdirAll(cfg.DataDir, privateDirMode)
 	if err != nil && !os.IsExist(err) {
-		return errors.WithStack(err)
+		return errors.Trace(err)
 	}
 
 	err = ioutil.WriteFile(filePath, []byte(cfg.InitialCluster), privateFileMode)
-	return errors.WithStack(err)
+	return errors.Trace(err)
 }
