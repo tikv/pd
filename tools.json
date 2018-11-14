@@ -41,12 +41,9 @@
       "Commit": "5fb530cda357c16175f2c049577d2030de735b28"
     },
     {
-      "Repository": "github.com/pingcap/gofail/runtime",
-      "Commit": "f377f34bbe08b84cf9c79bb18af3961a2e09abf8"
-    },
-    {
       "Repository": "github.com/etcd-io/gofail",
-      "Commit": "f377f34bbe08b84cf9c79bb18af3961a2e09abf8"
+      "Commit": "fbac950f3c9cc717cdecd9b07cda912dc930eca7",
+	  "Fork" : "github.com/pingcap/gofail"
     }
   ],
   "RetoolVersion": "1.3.7"
