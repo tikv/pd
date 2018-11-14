@@ -78,13 +78,13 @@ func NewNode(id uint64, addr string, pdAddr string) (*Node, error) {
 		return nil, err
 	}
 	return &Node{
-		Store:  store,
-		stats:  stats,
-		client: client,
-		ctx:    ctx,
-		cancel: cancel,
-		tasks:  make(map[uint64]Task),
-		state:  Down,
+		Store:                   store,
+		stats:                   stats,
+		client:                  client,
+		ctx:                     ctx,
+		cancel:                  cancel,
+		tasks:                   make(map[uint64]Task),
+		state:                   Down,
 		reciveRegionHeartbeatCh: reciveRegionHeartbeatCh,
 	}, nil
 }
