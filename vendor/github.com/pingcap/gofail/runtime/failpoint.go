@@ -52,13 +52,8 @@ func (fp *Failpoint) Acquire() (interface{}, error) {
 // Release is called when the failpoint exists.
 func (fp *Failpoint) Release() { fp.mu.RUnlock() }
 
-// Notify notify waiting channel.
-func (fp *Failpoint) Notify() {
-	fp.waitChan <- struct{}{}
-}
-
-// Wait wait the wait channel of the failpoint.
-func (fp *Failpoint) Wait() {
+// Pause will pause until the failpoint is disabled.
+func (fp *Failpoint) Pause() {
 	<-fp.waitChan
 }
 
