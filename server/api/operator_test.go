@@ -77,6 +77,20 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	operator = mustReadURL(c, regionURL)
 	c.Log(operator)
 	c.Assert(strings.Contains(operator, "remove peer on store 2"), IsTrue)
+
+	err = doDelete(regionURL)
+	c.Assert(err, IsNil)
+
+	// Fail to add peer to tombstone store.
+	err = s.svr.GetRaftCluster().BuryStore(3, true)
+	c.Assert(err, IsNil)
+	err = postJSON(fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`))
+	c.Assert(err, NotNil)
+	err = postJSON(fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-peer", "region_id": 1, "from_store_id": 1, "to_store_id": 3}`))
+	c.Assert(err, NotNil)
+	err = postJSON(fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2, 3]}`))
+	c.Assert(err, NotNil)
+
 }
 
 func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, labels []*metapb.StoreLabel) {

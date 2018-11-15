@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
@@ -368,11 +369,15 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 
 	// Add missing peers.
 	for id := range storeIDs {
-		if c.cluster.GetStore(id) == nil {
+		store := c.cluster.GetStore(id)
+		if store == nil {
 			return core.NewStoreNotFoundErr(id)
 		}
 		if region.GetStorePeer(id) != nil {
 			continue
+		}
+		if store.IsTombstone() {
+			return errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: id})
 		}
 		peer, err := c.cluster.AllocPeer(id)
 		if err != nil {
@@ -420,9 +425,14 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return errors.Errorf("region has no peer in store %v", fromStoreID)
 	}
 
-	if c.cluster.GetStore(toStoreID) == nil {
+	toStore := c.cluster.GetStore(toStoreID)
+	if toStore == nil {
 		return core.NewStoreNotFoundErr(toStoreID)
 	}
+	if toStore.IsTombstone() {
+		return errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: toStoreID})
+	}
+
 	newPeer, err := c.cluster.AllocPeer(toStoreID)
 	if err != nil {
 		return err
@@ -451,8 +461,12 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		return errors.Errorf("region already has peer in store %v", toStoreID)
 	}
 
-	if c.cluster.GetStore(toStoreID) == nil {
+	toStore := c.cluster.GetStore(toStoreID)
+	if toStore == nil {
 		return core.NewStoreNotFoundErr(toStoreID)
+	}
+	if toStore.IsTombstone() {
+		return errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: toStoreID})
 	}
 	newPeer, err := c.cluster.AllocPeer(toStoreID)
 	if err != nil {
