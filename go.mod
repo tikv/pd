@@ -32,7 +32,7 @@ require (
 	github.com/pingcap/check v0.0.0-20171206051426-1c287c953996
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/errors v0.10.1 // indirect
-	github.com/pingcap/gofail v0.0.0-20181114040049-f377f34bbe08 // indirect
+	github.com/pingcap/gofail v0.0.0-20181114040049-f377f34bbe08
 	github.com/pingcap/kvproto v0.0.0-20180930052200-fae11119f066
 	github.com/pkg/errors v0.8.0
 	github.com/prometheus/client_golang v0.8.0
