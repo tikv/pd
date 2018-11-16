@@ -33,7 +33,7 @@
   branch = "master"
 
 [[constraint]]
-  name = "github.com/etcd-io/gofail"
+  name = "github.com/pingcap/gofail"
   branch = "master"
 
 [[constraint]]

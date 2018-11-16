@@ -151,14 +151,6 @@
   revision = "02af3965c54e8cacf948b97fef38925c4120652c"
 
 [[projects]]
-  branch = "master"
-  digest = "1:f18dbc529543fe5fd5294f8385ea1f71681be964c43461f5f45335bb51ba83ae"
-  name = "github.com/etcd-io/gofail"
-  packages = ["runtime"]
-  pruneopts = "NUT"
-  revision = "51ce9a71510a58bad5ae66ddd278ef28762a1550"
-
-[[projects]]
   digest = "1:81466b4218bf6adddac2572a30ac733a9255919bc2f470b4827a317bd4ee1756"
   name = "github.com/ghodss/yaml"
   packages = ["."]
@@ -312,6 +304,14 @@
   packages = ["."]
   pruneopts = "NUT"
   revision = "1c287c953996ab3a0bf535dba9d53d809d3dc0b6"
+
+[[projects]]
+  branch = "master"
+  digest = "1:31424d275d7e184593f34f271e44eb1f02ade7d87e2b11af1a2c9fc217ddbd63"
+  name = "github.com/pingcap/gofail"
+  packages = ["runtime"]
+  pruneopts = "NUT"
+  revision = "c3f835e5a7d8cedf2f61cc55f961d4d120ae90eb"
 
 [[projects]]
   branch = "master"
@@ -629,7 +629,6 @@
     "github.com/coreos/go-semver/semver",
     "github.com/coreos/pkg/capnslog",
     "github.com/dustin/go-humanize",
-    "github.com/etcd-io/gofail/runtime",
     "github.com/ghodss/yaml",
     "github.com/gogo/protobuf/proto",
     "github.com/golang/protobuf/proto",
@@ -640,6 +639,7 @@
     "github.com/montanaflynn/stats",
     "github.com/opentracing/opentracing-go",
     "github.com/pingcap/check",
+    "github.com/pingcap/gofail/runtime",
     "github.com/pingcap/kvproto/pkg/eraftpb",
     "github.com/pingcap/kvproto/pkg/metapb",
     "github.com/pingcap/kvproto/pkg/pdpb",
@@ -656,6 +656,7 @@
     "google.golang.org/grpc",
     "google.golang.org/grpc/codes",
     "google.golang.org/grpc/credentials",
+    "google.golang.org/grpc/grpclog",
     "google.golang.org/grpc/status",
     "gopkg.in/natefinch/lumberjack.v2",
   ]
