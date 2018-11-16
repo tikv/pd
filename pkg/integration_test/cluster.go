@@ -21,6 +21,7 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/go-semver/semver"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
@@ -123,6 +124,12 @@ func (s *testServer) GetLeader() *pdpb.Member {
 	return s.server.GetLeader()
 }
 
+func (s *testServer) GetCluster() *metapb.Cluster {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetCluster()
+}
+
 func (s *testServer) GetClusterVersion() semver.Version {
 	s.RLock()
 	defer s.RUnlock()
@@ -156,6 +163,12 @@ func (s *testServer) GetEtcdClient() *clientv3.Client {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetClient()
+}
+
+func (s *testServer) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.CheckHealth(members)
 }
 
 type testCluster struct {
@@ -243,6 +256,21 @@ func (c *testCluster) WaitLeader() string {
 		time.Sleep(500 * time.Millisecond)
 	}
 	return ""
+}
+
+func (c *testCluster) GetCluster() *metapb.Cluster {
+	leader := c.GetLeader()
+	return c.servers[leader].GetCluster()
+}
+
+func (c *testCluster) GetEtcdClient() *clientv3.Client {
+	leader := c.GetLeader()
+	return c.servers[leader].GetEtcdClient()
+}
+
+func (c *testCluster) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
+	leader := c.GetLeader()
+	return c.servers[leader].CheckHealth(members)
 }
 
 func (c *testCluster) Join() (*testServer, error) {
