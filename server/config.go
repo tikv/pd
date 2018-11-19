@@ -639,8 +639,8 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 
 // PDServerConfig is the configuration for pd server.
 type PDServerConfig struct {
-	// EnableRegionStorage enables the independent region storage.
-	EnableRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
+	// UseRegionStorageenables the independent region storage.
+	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
 }
 
 // StoreLabel is the config item of LabelPropertyConfig.

@@ -76,6 +76,7 @@ func (h *historyBuffer) firstIndex() uint64 {
 
 func (h *historyBuffer) Record(r *core.RegionInfo) {
 	h.Lock()
+	defer h.Unlock()
 	regionSyncerStatus.WithLabelValues("sync_index").Set(float64(h.index))
 	h.records[h.tail] = r
 	h.tail = (h.tail + 1) % h.size
@@ -88,7 +89,6 @@ func (h *historyBuffer) Record(r *core.RegionInfo) {
 		h.persist()
 		h.flushCount = defaultFlushCount
 	}
-	h.Unlock()
 }
 
 func (h *historyBuffer) RecordsFrom(index uint64) []*core.RegionInfo {

@@ -43,7 +43,7 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	scheduleCfg := opt.load()
 	scheduleCfg.MaxSnapshotCount = 10
 	opt.SetMaxReplicas(5)
-	opt.loadPDServerConfig().EnableRegionStorage = true
+	opt.loadPDServerConfig().UseRegionStorage = true
 	opt.persist(kv)
 
 	// suppose we add a new default enable scheduler "adjacent-region"

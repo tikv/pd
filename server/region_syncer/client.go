@@ -15,7 +15,6 @@ package syncer
 
 import (
 	"context"
-	"math"
 	"net/url"
 	"time"
 
@@ -104,11 +103,11 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						return
 					}
 				}
-				log.Errorf("%s failed to establish sync stream with leader %s: %s", s.server.GetMemberInfo().GetName(), s.server.GetLeader().GetName(), err)
+				log.Errorf("%s failed to establish sync stream with leader %s: %s", s.server.Name(), s.server.GetLeader().GetName(), err)
 				time.Sleep(time.Second)
 				continue
 			}
-			log.Infof("%s start sync with leader %s, the request index is %d", s.server.GetMemberInfo().GetName(), s.server.GetLeader().GetName(), s.history.GetNextIndex())
+			log.Infof("%s start sync with leader %s, the request index is %d", s.server.Name(), s.server.GetLeader().GetName(), s.history.GetNextIndex())
 			for {
 				resp, err := client.Recv()
 				if err != nil {
@@ -117,9 +116,9 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					time.Sleep(time.Second)
 					break
 				}
-				if s.history.GetNextIndex() != resp.GetStartIndex() && resp.GetStartIndex() != math.MaxUint64 {
+				if s.history.GetNextIndex() != resp.GetStartIndex() {
 					log.Warnf("%s sync index not match the leader, own: %d, leader: %d, records length: %d",
-						s.server.GetMemberInfo().GetName(), s.history.GetNextIndex(), resp.GetStartIndex(), len(resp.GetRegions()))
+						s.server.Name(), s.history.GetNextIndex(), resp.GetStartIndex(), len(resp.GetRegions()))
 					// reset index
 					s.history.ResetWithIndex(resp.GetStartIndex())
 				}

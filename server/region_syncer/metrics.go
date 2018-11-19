@@ -20,7 +20,7 @@ var regionSyncerStatus = prometheus.NewGaugeVec(
 		Namespace: "pd",
 		Subsystem: "region_syncer",
 		Name:      "status",
-		Help:      "Inner status of the scheduler.",
+		Help:      "Inner status of the region syncer.",
 	}, []string{"type"})
 
 func init() {
