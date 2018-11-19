@@ -1,5 +1,12 @@
 # PD Change Log
 
+## v2.0.9
+### Bug Fixes
+* Fix the issue that the PD server gets stuck caused by etcd startup failure [#1267](https://github.com/pingcap/pd/pull/1267)
+* Fix the issues related to `pd-ctl` reading the Region key [#1298](https://github.com/pingcap/pd/pull/1298) [#1299](https://github.com/pingcap/pd/pull/1299) [#1308](https://github.com/pingcap/pd/pull/1308)
+* Fix the issue that the `regions/check` API returns the wrong result [#1311](https://github.com/pingcap/pd/pull/1311)
+* Fix the issue that PD cannot restart join after a PD join failure [#1279](https://github.com/pingcap/pd/pull/1279)
+
 ## V2.0.5
 ### Bug Fixes
 * Fix the issue that replicas migration uses up TiKV disks space in some scenarios
