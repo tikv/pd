@@ -53,7 +53,7 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	newOpt.reload(kv)
 	schedulers := newOpt.GetSchedulers()
 	c.Assert(schedulers, HasLen, 5)
-	c.Assert(newOpt.loadPDServerConfig().EnableRegionStorage, IsTrue)
+	c.Assert(newOpt.loadPDServerConfig().UseRegionStorage, IsTrue)
 	for i, s := range schedulers {
 		c.Assert(s.Type, Equals, defaultSchedulers[i])
 		c.Assert(s.Disable, IsFalse)
