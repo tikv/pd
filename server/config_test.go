@@ -16,6 +16,8 @@ package server
 import (
 	"path"
 
+	"github.com/BurntSushi/toml"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server/core"
 )
@@ -80,4 +82,30 @@ func (s *testConfigSuite) TestValidation(c *C) {
 	c.Assert(cfg.Schedule.validate(), IsNil)
 	cfg.Schedule.TolerantSizeRatio = -0.6
 	c.Assert(cfg.Schedule.validate(), NotNil)
+}
+
+func (s *testConfigSuite) TestAdjust(c *C) {
+	cfgData := `
+name = ""
+lease = 0
+
+[schedule]
+max-merge-region-size = 0
+leader-schedule-limit = 0
+`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta)
+	c.Assert(err, IsNil)
+
+	// When invalid, use default values.
+	c.Assert(cfg.Name, Equals, defaultName)
+	c.Assert(cfg.LeaderLease, Equals, defaultLeaderLease)
+	// When defined, use values from config file.
+	c.Assert(cfg.Schedule.MaxMergeRegionSize, Equals, uint64(0))
+	c.Assert(cfg.Schedule.LeaderScheduleLimit, Equals, uint64(0))
+	// When undefined, use default values.
+	c.Assert(cfg.PreVote, IsTrue)
+	c.Assert(cfg.Schedule.MaxMergeRegionKeys, Equals, uint64(defaultMaxMergeRegionKeys))
 }
