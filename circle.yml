@@ -7,6 +7,14 @@ jobs:
     working_directory: /go/src/github.com/pingcap/pd
     steps:
       - checkout
+      - restore_cache:
+        keys:
+          - go-build-cache-v1-{{ checksum "go.mod" }}-{{ checksum "go.sum" }}
       - run:
           name: "Build & Test"
           command: make ci
+      - save_cache:
+        key: go-build-cache-v1-{{ checksum "go.mod" }}-{{ checksum "go.sum" }}
+        paths:
+          - $HOME/.cache/go-build
+          - $GOPATH/pkg/mod
