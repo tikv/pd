@@ -11,6 +11,9 @@ jobs:
           keys:
             - go-build-cache-v1-{{ checksum "go.mod" }}-{{ checksum "go.sum" }}
       - run:
+          name: "Show go env"
+          command: go env
+      - run:
           name: "Build & Test"
           command: make ci
       - save_cache:
