@@ -8,16 +8,22 @@ jobs:
     steps:
       - checkout
       - restore_cache:
-          keys:
-            - go-build-cache-v1-{{ checksum "go.mod" }}-{{ checksum "go.sum" }}
-      - run:
-          name: "Show go env"
-          command: go env
+          name: "Restore Build Cache"
+          key: go-build-cache-v1-{{ checksum "go.mod" }}-{{ checksum "go.sum" }}
+      - restore_cache:
+          name: "Restore Tools"
+          key: retools-v1-{{ checksum "tools.json" }}
       - run:
           name: "Build & Test"
           command: make ci
       - save_cache:
+          name: "Save Build Cache"
           key: go-build-cache-v1-{{ checksum "go.mod" }}-{{ checksum "go.sum" }}
           paths:
-            - $HOME/.cache/go-build
-            - $GOPATH/pkg/mod
+            - /root/.cache/go-build
+            - /go/pkg/mod
+      - save_cache:
+          name: "Save Tools"
+          key: retools-v1-{{ checksum "tools.json" }}
+          paths:
+            - .retools
