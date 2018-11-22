@@ -275,7 +275,7 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 	mustRegionHeartbeat(c, s.svr, r3)
 	mustRegionHeartbeat(c, s.svr, r)
 
-	url := fmt.Sprintf("%s/regions/key/%s", s.urlPrefix, "b")
+	url := fmt.Sprintf("%s/regions/key?key=%s", s.urlPrefix, "b")
 	regionIds := []uint64{3, 4, 99}
 	regions := &regionsInfo{}
 	err := readJSONWithURL(url, regions)

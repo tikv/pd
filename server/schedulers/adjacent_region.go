@@ -137,7 +137,7 @@ func (l *balanceAdjacentRegionScheduler) allowBalancePeer() bool {
 	return l.opController.OperatorCount(schedule.OpAdjacent|schedule.OpRegion) < l.peerLimit
 }
 
-func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
+func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
 	if l.cacheRegions == nil {
 		l.cacheRegions = &adjacentState{
 			assignedStoreIds: make([]uint64, 0, len(cluster.GetStores())),

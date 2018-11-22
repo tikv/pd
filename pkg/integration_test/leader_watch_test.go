@@ -17,8 +17,8 @@ import (
 	"context"
 	"time"
 
-	gofail "github.com/etcd-io/gofail/runtime"
 	. "github.com/pingcap/check"
+	gofail "github.com/pingcap/gofail/runtime"
 	"github.com/pingcap/pd/pkg/testutil"
 )
 
@@ -43,7 +43,7 @@ func (s *integrationTestSuite) TestWatcher(c *C) {
 	time.Sleep(5 * time.Second)
 	pd3, err := cluster.Join()
 	c.Assert(err, IsNil)
-	gofail.Enable("github.com/pingcap/pd/server/delayWatcher", `sleep("15s")`)
+	gofail.Enable("github.com/pingcap/pd/server/delayWatcher", `pause`)
 	err = pd3.Run(context.Background())
 	c.Assert(err, IsNil)
 	time.Sleep(200 * time.Millisecond)
@@ -51,6 +51,7 @@ func (s *integrationTestSuite) TestWatcher(c *C) {
 	pd1.Stop()
 	cluster.WaitLeader()
 	c.Assert(pd2.GetLeader().GetName(), Equals, pd2.GetConfig().Name)
+	gofail.Disable("github.com/pingcap/pd/server/delayWatcher")
 	testutil.WaitUntil(c, func(c *C) bool {
 		return c.Check(pd3.GetLeader().GetName(), Equals, pd2.GetConfig().Name)
 	})

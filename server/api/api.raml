@@ -879,12 +879,12 @@ types:
             description: The input is invalid.
           500:
             description: PD server failed to proceed the request.
-  /key/{key}:
-        uriParameters:
-          key: string
+  /key:
         get:
-          description: List regions from a key.
+          description: List regions start from a key.
           queryParameters:
+            key:
+              type: string
             limit?:
               type: integer
               default: 16

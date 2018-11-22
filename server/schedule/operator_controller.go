@@ -316,3 +316,89 @@ func (oc *OperatorController) OperatorCount(mask OperatorKind) uint64 {
 	}
 	return total
 }
+
+// GetOpInfluence gets OpInfluence.
+func (oc *OperatorController) GetOpInfluence(cluster Cluster) OpInfluence {
+	oc.RLock()
+	defer oc.RUnlock()
+
+	var res []*Operator
+	operators := oc.GetOperators()
+	for _, op := range operators {
+		if !op.IsTimeout() && !op.IsFinish() {
+			region := cluster.GetRegion(op.RegionID())
+			if region != nil {
+				res = append(res, op)
+			}
+		}
+	}
+	return NewOpInfluence(res, cluster)
+}
+
+// NewOpInfluence creates a OpInfluence.
+func NewOpInfluence(operators []*Operator, cluster Cluster) OpInfluence {
+	influence := OpInfluence{
+		storesInfluence:  make(map[uint64]*StoreInfluence),
+		regionsInfluence: make(map[uint64]*Operator),
+	}
+
+	for _, op := range operators {
+		if !op.IsTimeout() && !op.IsFinish() {
+			region := cluster.GetRegion(op.RegionID())
+			if region != nil {
+				op.Influence(influence, region)
+			}
+		}
+		influence.regionsInfluence[op.RegionID()] = op
+	}
+
+	return influence
+}
+
+// OpInfluence records the influence of the cluster.
+type OpInfluence struct {
+	storesInfluence  map[uint64]*StoreInfluence
+	regionsInfluence map[uint64]*Operator
+}
+
+// GetStoreInfluence get storeInfluence of specific store.
+func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
+	storeInfluence, ok := m.storesInfluence[id]
+	if !ok {
+		storeInfluence = &StoreInfluence{}
+		m.storesInfluence[id] = storeInfluence
+	}
+	return storeInfluence
+}
+
+// GetRegionsInfluence gets regionInfluence of specific region.
+func (m OpInfluence) GetRegionsInfluence() map[uint64]*Operator {
+	return m.regionsInfluence
+}
+
+// StoreInfluence records influences that pending operators will make.
+type StoreInfluence struct {
+	RegionSize  int64
+	RegionCount int64
+	LeaderSize  int64
+	LeaderCount int64
+}
+
+// ResourceSize returns delta size of leader/region by influence.
+func (s StoreInfluence) ResourceSize(kind core.ResourceKind) int64 {
+	switch kind {
+	case core.LeaderKind:
+		return s.LeaderSize
+	case core.RegionKind:
+		return s.RegionSize
+	default:
+		return 0
+	}
+}
+
+// SetOperator is only used for test
+func (oc *OperatorController) SetOperator(op *Operator) {
+	oc.Lock()
+	defer oc.Unlock()
+	oc.operators[op.RegionID()] = op
+}
