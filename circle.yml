@@ -8,13 +8,13 @@ jobs:
     steps:
       - checkout
       - restore_cache:
-        keys:
-          - go-build-cache-v1-{{ checksum "go.mod" }}-{{ checksum "go.sum" }}
+          keys:
+            - go-build-cache-v1-{{ checksum "go.mod" }}-{{ checksum "go.sum" }}
       - run:
           name: "Build & Test"
           command: make ci
       - save_cache:
-        key: go-build-cache-v1-{{ checksum "go.mod" }}-{{ checksum "go.sum" }}
-        paths:
-          - $HOME/.cache/go-build
-          - $GOPATH/pkg/mod
+          key: go-build-cache-v1-{{ checksum "go.mod" }}-{{ checksum "go.sum" }}
+          paths:
+            - $HOME/.cache/go-build
+            - $GOPATH/pkg/mod
