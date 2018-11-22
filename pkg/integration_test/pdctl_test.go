@@ -18,16 +18,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tools/pd-ctl/pdctl"
 	"github.com/pingcap/pd/tools/pd-ctl/pdctl/command"
 	"github.com/spf13/cobra"
+
+	// Register schedulers.
+	_ "github.com/pingcap/pd/server/schedulers"
 )
 
 func (s *integrationTestSuite) TestCluster(c *C) {
@@ -276,6 +282,120 @@ func (s *integrationTestSuite) TestLabel(c *C) {
 	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
 	ss = []*metapb.Store{stores[0], stores[2]}
 	checkStoresInfo(c, storesInfo.Stores, ss)
+}
+
+func (s *integrationTestSuite) TestTSO(c *C) {
+	c.Parallel()
+	cmd := initCommand()
+
+	const (
+		physicalShiftBits = 18
+		logicalBits       = 0x3FFFF
+	)
+
+	// tso command
+	ts := "395181938313123110"
+	args := []string{"-u", "127.0.0.1", "tso", ts}
+	_, output, err := executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	t, e := strconv.ParseUint(ts, 10, 64)
+	c.Assert(e, IsNil)
+	c.Assert(err, IsNil)
+	logicalTime := t & logicalBits
+	physical := t >> physicalShiftBits
+	physicalTime := time.Unix(int64(physical/1000), int64(physical%1000)*time.Millisecond.Nanoseconds())
+	str := fmt.Sprintln("system: ", physicalTime) + fmt.Sprintln("logic: ", logicalTime)
+	c.Assert(str, Equals, string(output))
+}
+
+func (s *integrationTestSuite) TestScheduler(c *C) {
+	c.Parallel()
+
+	cluster, err := newTestCluster(1)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.config.GetClientURLs()
+	cmd := initCommand()
+
+	store := metapb.Store{
+		Id:    1,
+		State: metapb.StoreState_Up,
+	}
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	s.bootstrapCluster(leaderServer, c)
+	mustPutStore(c, leaderServer.server, store.Id, store.State, store.Labels)
+
+	region := core.NewRegionInfo(&metapb.Region{
+		Id:       1,
+		StartKey: []byte("a"),
+		EndKey:   []byte("b"),
+		Peers: []*metapb.Peer{
+			{Id: 2, StoreId: 1},
+		},
+	},
+		&metapb.Peer{Id: 2, StoreId: 1},
+	)
+	err = cluster.HandleRegionHeartbeat(region)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	time.Sleep(3 * time.Second)
+	// scheduler show command
+	args := []string{"-u", pdAddr, "scheduler", "show"}
+	_, output, err := executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	var schedulers []string
+	c.Assert(json.Unmarshal(output, &schedulers), IsNil)
+	expected := map[string]bool{
+		"balance-region-scheduler":     true,
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"label-scheduler":              true,
+	}
+	for _, scheduler := range schedulers {
+		c.Assert(expected[scheduler], Equals, true)
+	}
+
+	// scheduler add command
+	args = []string{"-u", pdAddr, "scheduler", "add", "grant-leader-scheduler", "1"}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "scheduler", "show"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	schedulers = schedulers[:0]
+	c.Assert(json.Unmarshal(output, &schedulers), IsNil)
+	expected = map[string]bool{
+		"balance-region-scheduler":     true,
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"label-scheduler":              true,
+		"grant-leader-scheduler-1":     true,
+	}
+	for _, scheduler := range schedulers {
+		c.Assert(expected[scheduler], Equals, true)
+	}
+
+	// scheduler delete command
+	args = []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "scheduler", "show"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	schedulers = schedulers[:0]
+	c.Assert(json.Unmarshal(output, &schedulers), IsNil)
+	expected = map[string]bool{
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"label-scheduler":              true,
+		"grant-leader-scheduler-1":     true,
+	}
+	for _, scheduler := range schedulers {
+		c.Assert(expected[scheduler], Equals, true)
+	}
 }
 
 func initCommand() *cobra.Command {
