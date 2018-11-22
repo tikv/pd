@@ -119,18 +119,20 @@ var _ = Suite(&testBalanceLeaderSchedulerSuite{})
 type testBalanceLeaderSchedulerSuite struct {
 	tc *schedule.MockCluster
 	lb schedule.Scheduler
+	oc *schedule.OperatorController
 }
 
 func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	s.tc = schedule.NewMockCluster(opt)
-	lb, err := schedule.CreateScheduler("balance-leader", schedule.NewOperatorController(nil, nil))
+	s.oc = schedule.NewOperatorController(nil, nil)
+	lb, err := schedule.CreateScheduler("balance-leader", s.oc)
 	c.Assert(err, IsNil)
 	s.lb = lb
 }
 
-func (s *testBalanceLeaderSchedulerSuite) schedule(operators []*schedule.Operator) []*schedule.Operator {
-	return s.lb.Schedule(s.tc, schedule.NewOpInfluence(operators, s.tc))
+func (s *testBalanceLeaderSchedulerSuite) schedule() []*schedule.Operator {
+	return s.lb.Schedule(s.tc)
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
@@ -142,13 +144,13 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
 	s.tc.AddLeaderStore(3, 0)
 	s.tc.AddLeaderStore(4, 0)
 	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	c.Check(s.schedule(nil), IsNil)
+	c.Check(s.schedule(), IsNil)
 
 	// Stores:     1    2    3    4
 	// Leaders:    16   0    0    0
 	// Region1:    L    F    F    F
 	s.tc.UpdateLeaderCount(1, 16)
-	c.Check(s.schedule(nil), NotNil)
+	c.Check(s.schedule(), NotNil)
 
 	// Stores:     1    2    3    4
 	// Leaders:    7    8    9   10
@@ -158,13 +160,13 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
 	s.tc.UpdateLeaderCount(3, 9)
 	s.tc.UpdateLeaderCount(4, 10)
 	s.tc.AddLeaderRegion(1, 4, 1, 2, 3)
-	c.Check(s.schedule(nil), IsNil)
+	c.Check(s.schedule(), IsNil)
 
 	// Stores:     1    2    3    4
 	// Leaders:    7    8    9   16
 	// Region1:    F    F    F    L
 	s.tc.UpdateLeaderCount(4, 16)
-	c.Check(s.schedule(nil), NotNil)
+	c.Check(s.schedule(), NotNil)
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
@@ -176,12 +178,13 @@ func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
 	s.tc.AddLeaderStore(3, 9)
 	s.tc.AddLeaderStore(4, 14)
 	s.tc.AddLeaderRegion(1, 4, 1, 2, 3)
-	op := s.schedule(nil)[0]
+	op := s.schedule()[0]
 	c.Check(op, NotNil)
+	s.oc.SetOperator(op)
 	// After considering the scheduled operator, leaders of store1 and store4 are 8
 	// and 13 respectively. As the `TolerantSizeRatio` is 2.5, `shouldBalance`
 	// returns false when leader differece is not greater than 5.
-	c.Check(s.schedule([]*schedule.Operator{op}), IsNil)
+	c.Check(s.schedule(), IsNil)
 
 	// Stores:     1    2    3    4
 	// Leaders:    8    8    9   13
@@ -191,7 +194,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
 	s.tc.UpdateLeaderCount(3, 9)
 	s.tc.UpdateLeaderCount(4, 13)
 	s.tc.AddLeaderRegion(1, 4, 1, 2, 3)
-	c.Check(s.schedule(nil), IsNil)
+	c.Check(s.schedule(), IsNil)
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
@@ -204,27 +207,27 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
 	s.tc.AddLeaderStore(4, 16)
 	s.tc.AddLeaderRegion(1, 4, 1, 2, 3)
 
-	testutil.CheckTransferLeader(c, s.schedule(nil)[0], schedule.OpBalance, 4, 1)
+	testutil.CheckTransferLeader(c, s.schedule()[0], schedule.OpBalance, 4, 1)
 	// Test stateFilter.
 	// if store 4 is offline, we schould consider it
 	// because it still provides services
 	s.tc.SetStoreOffline(4)
-	testutil.CheckTransferLeader(c, s.schedule(nil)[0], schedule.OpBalance, 4, 1)
+	testutil.CheckTransferLeader(c, s.schedule()[0], schedule.OpBalance, 4, 1)
 	// If store 1 is down, it will be filtered,
 	// store 2 becomes the store with least leaders.
 	s.tc.SetStoreDown(1)
-	testutil.CheckTransferLeader(c, s.schedule(nil)[0], schedule.OpBalance, 4, 2)
+	testutil.CheckTransferLeader(c, s.schedule()[0], schedule.OpBalance, 4, 2)
 
 	// Test healthFilter.
 	// If store 2 is busy, it will be filtered,
 	// store 3 becomes the store with least leaders.
 	s.tc.SetStoreBusy(2, true)
-	testutil.CheckTransferLeader(c, s.schedule(nil)[0], schedule.OpBalance, 4, 3)
+	testutil.CheckTransferLeader(c, s.schedule()[0], schedule.OpBalance, 4, 3)
 
 	// Test disconnectFilter.
 	// If store 3 is disconnected, no operator can be created.
 	s.tc.SetStoreDisconnect(3)
-	c.Assert(s.schedule(nil), HasLen, 0)
+	c.Assert(s.schedule(), HasLen, 0)
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestLeaderWeight(c *C) {
@@ -242,9 +245,9 @@ func (s *testBalanceLeaderSchedulerSuite) TestLeaderWeight(c *C) {
 	s.tc.UpdateStoreLeaderWeight(3, 1)
 	s.tc.UpdateStoreLeaderWeight(4, 2)
 	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	testutil.CheckTransferLeader(c, s.schedule(nil)[0], schedule.OpBalance, 1, 4)
+	testutil.CheckTransferLeader(c, s.schedule()[0], schedule.OpBalance, 1, 4)
 	s.tc.UpdateLeaderCount(4, 30)
-	testutil.CheckTransferLeader(c, s.schedule(nil)[0], schedule.OpBalance, 1, 3)
+	testutil.CheckTransferLeader(c, s.schedule()[0], schedule.OpBalance, 1, 3)
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
@@ -260,7 +263,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	s.tc.AddLeaderRegion(2, 3, 1, 2)
 	// store4 has max leader score, store1 has min leader score.
 	// The scheduler try to move a leader out of 16 first.
-	testutil.CheckTransferLeader(c, s.schedule(nil)[0], schedule.OpBalance, 4, 2)
+	testutil.CheckTransferLeader(c, s.schedule()[0], schedule.OpBalance, 4, 2)
 
 	// Stores:     1    2    3    4
 	// Leaders:    1    14   15   16
@@ -269,7 +272,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	s.tc.UpdateLeaderCount(2, 14)
 	s.tc.UpdateLeaderCount(3, 15)
 	// Cannot move leader out of store4, move a leader into store1.
-	testutil.CheckTransferLeader(c, s.schedule(nil)[0], schedule.OpBalance, 3, 1)
+	testutil.CheckTransferLeader(c, s.schedule()[0], schedule.OpBalance, 3, 1)
 
 	// Stores:     1    2    3    4
 	// Leaders:    1    2    15   16
@@ -279,10 +282,10 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	s.tc.AddLeaderRegion(1, 3, 2, 4)
 	s.tc.AddLeaderRegion(2, 1, 2, 3)
 	// No leader in store16, no follower in store1. No operator is created.
-	c.Assert(s.schedule(nil), IsNil)
+	c.Assert(s.schedule(), IsNil)
 	// store4 and store1 are marked taint.
 	// Now source and target are store3 and store2.
-	testutil.CheckTransferLeader(c, s.schedule(nil)[0], schedule.OpBalance, 3, 2)
+	testutil.CheckTransferLeader(c, s.schedule()[0], schedule.OpBalance, 3, 2)
 
 	// Stores:     1    2    3    4
 	// Leaders:    9    10   10   11
@@ -295,8 +298,8 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	s.tc.AddLeaderRegion(1, 4, 2, 3)
 	s.tc.AddLeaderRegion(2, 1, 2, 3)
 	// The cluster is balanced.
-	c.Assert(s.schedule(nil), IsNil) // store1, store4 are marked taint.
-	c.Assert(s.schedule(nil), IsNil) // store2, store3 are marked taint.
+	c.Assert(s.schedule(), IsNil) // store1, store4 are marked taint.
+	c.Assert(s.schedule(), IsNil) // store2, store3 are marked taint.
 
 	// store3's leader drops:
 	// Stores:     1    2    3    4
@@ -307,8 +310,8 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	s.tc.AddLeaderStore(2, 13)
 	s.tc.AddLeaderStore(3, 0)
 	s.tc.AddLeaderStore(4, 16)
-	c.Assert(s.schedule(nil), IsNil)                                              // All stores are marked taint.
-	testutil.CheckTransferLeader(c, s.schedule(nil)[0], schedule.OpBalance, 4, 3) // The taint store will be clear.
+	c.Assert(s.schedule(), IsNil)                                              // All stores are marked taint.
+	testutil.CheckTransferLeader(c, s.schedule()[0], schedule.OpBalance, 4, 3) // The taint store will be clear.
 }
 
 var _ = Suite(&testBalanceRegionSchedulerSuite{})
@@ -318,11 +321,12 @@ type testBalanceRegionSchedulerSuite struct{}
 func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
+	oc := schedule.NewOperatorController(nil, nil)
 
-	sb, err := schedule.CreateScheduler("balance-region", schedule.NewOperatorController(nil, nil))
+	sb, err := schedule.CreateScheduler("balance-region", oc)
 	c.Assert(err, IsNil)
-	cache := sb.(*balanceRegionScheduler).taintStores
 
+	cache := sb.(*balanceRegionScheduler).taintStores
 	opt.SetMaxReplicas(1)
 
 	// Add stores 1,2,3,4.
@@ -332,7 +336,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	tc.AddRegionStore(4, 16)
 	// Add region 1 with leader in store 4.
 	tc.AddLeaderRegion(1, 4)
-	testutil.CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 4, 1)
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 4, 1)
 
 	// Test stateFilter.
 	tc.SetStoreOffline(1)
@@ -340,23 +344,25 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	cache.Remove(4)
 	// When store 1 is offline, it will be filtered,
 	// store 2 becomes the store with least regions.
-	testutil.CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 4, 2)
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 4, 2)
 	opt.SetMaxReplicas(3)
-	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
+	c.Assert(sb.Schedule(tc), IsNil)
 
 	cache.Clear()
 	opt.SetMaxReplicas(1)
-	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), NotNil)
+	c.Assert(sb.Schedule(tc), NotNil)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
+	oc := schedule.NewOperatorController(nil, nil)
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", schedule.NewOperatorController(nil, nil))
+	sb, err := schedule.CreateScheduler("balance-region", oc)
 	c.Assert(err, IsNil)
+
 	cache := sb.(*balanceRegionScheduler).taintStores
 
 	// Store 1 has the largest region score, so the balancer try to replace peer in store 1.
@@ -367,16 +373,16 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	// This schedule try to replace peer in store 1, but we have no other stores,
 	// so store 1 will be set in the cache and skipped next schedule.
-	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
+	c.Assert(sb.Schedule(tc), IsNil)
 	c.Assert(cache.Exists(1), IsTrue)
 
 	// Store 4 has smaller region score than store 2.
 	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
-	testutil.CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 2, 4)
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 2, 4)
 
 	// If store 4 is busy, no operator will be created.
 	tc.SetStoreBusy(4, true)
-	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
+	c.Assert(sb.Schedule(tc), IsNil)
 	// Since busy is a short term state, store2 will not be added to taint cache.
 	c.Assert(cache.Exists(2), IsFalse)
 	tc.SetStoreBusy(4, false)
@@ -384,45 +390,46 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	// Store 5 has smaller region score than store 1.
 	tc.AddLabelsStore(5, 2, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	cache.Remove(1) // Delete store 1 from cache, or it will be skipped.
-	testutil.CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 1, 5)
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 1, 5)
 
 	// Store 6 has smaller region score than store 5.
 	tc.AddLabelsStore(6, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
-	testutil.CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 1, 6)
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 1, 6)
 
 	// Store 7 has smaller region score with store 6.
 	tc.AddLabelsStore(7, 0, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"})
-	testutil.CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 1, 7)
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 1, 7)
 
 	// If store 7 is not available, will choose store 6.
 	tc.SetStoreDown(7)
-	testutil.CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 1, 6)
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 1, 6)
 
 	// Store 8 has smaller region score than store 7, but the distinct score decrease.
 	tc.AddLabelsStore(8, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h3"})
-	testutil.CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 1, 6)
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 1, 6)
 
 	// Take down 4,5,6,7
 	tc.SetStoreDown(4)
 	tc.SetStoreDown(5)
 	tc.SetStoreDown(6)
 	tc.SetStoreDown(7)
-	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
+	c.Assert(sb.Schedule(tc), IsNil)
 	c.Assert(cache.Exists(1), IsTrue)
 	cache.Remove(1)
 
 	// Store 9 has different zone with other stores but larger region score than store 1.
 	tc.AddLabelsStore(9, 20, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
-	c.Assert(sb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), IsNil)
+	c.Assert(sb.Schedule(tc), IsNil)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
+	oc := schedule.NewOperatorController(nil, nil)
 
 	newTestReplication(opt, 5, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", schedule.NewOperatorController(nil, nil))
+	sb, err := schedule.CreateScheduler("balance-region", oc)
 	c.Assert(err, IsNil)
 
 	tc.AddLabelsStore(1, 4, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -435,29 +442,30 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 
 	// Store 6 has smaller region score.
 	tc.AddLabelsStore(6, 1, map[string]string{"zone": "z5", "rack": "r2", "host": "h1"})
-	testutil.CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 5, 6)
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 5, 6)
 
 	// Store 7 has larger region score and same distinct score with store 6.
 	tc.AddLabelsStore(7, 5, map[string]string{"zone": "z6", "rack": "r1", "host": "h1"})
-	testutil.CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 5, 6)
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 5, 6)
 
 	// Store 1 has smaller region score and higher distinct score.
 	tc.AddLeaderRegion(1, 2, 3, 4, 5, 6)
-	testutil.CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 5, 1)
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 5, 1)
 
 	// Store 6 has smaller region score and higher distinct score.
 	tc.AddLabelsStore(11, 29, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
 	tc.AddLabelsStore(12, 8, map[string]string{"zone": "z2", "rack": "r2", "host": "h1"})
 	tc.AddLabelsStore(13, 7, map[string]string{"zone": "z3", "rack": "r2", "host": "h1"})
 	tc.AddLeaderRegion(1, 2, 3, 11, 12, 13)
-	testutil.CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 11, 6)
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 11, 6)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
+	oc := schedule.NewOperatorController(nil, nil)
 
-	sb, err := schedule.CreateScheduler("balance-region", schedule.NewOperatorController(nil, nil))
+	sb, err := schedule.CreateScheduler("balance-region", oc)
 	c.Assert(err, IsNil)
 	opt.SetMaxReplicas(1)
 
@@ -471,10 +479,10 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	tc.UpdateStoreRegionWeight(4, 2.0)
 
 	tc.AddLeaderRegion(1, 1)
-	testutil.CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 1, 4)
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 1, 4)
 
 	tc.UpdateRegionCount(4, 30)
-	testutil.CheckTransferPeer(c, sb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpBalance, 1, 3)
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 1, 3)
 }
 
 var _ = Suite(&testReplicaCheckerSuite{})
@@ -822,7 +830,7 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	tc.AddLeaderRegion(4, 1)
 
 	c.Assert(mb.IsScheduleAllowed(tc), IsTrue)
-	ops := mb.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+	ops := mb.Schedule(tc)
 	c.Assert(ops, HasLen, 2)
 	c.Assert(ops[0].Kind()&schedule.OpMerge, Not(Equals), 0)
 	c.Assert(ops[1].Kind()&schedule.OpMerge, Not(Equals), 0)
@@ -1051,7 +1059,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 
 	// Will transfer a hot region from store 1, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
-	op := hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+	op := hb.Schedule(tc)
 	c.Assert(op, NotNil)
 	switch op[0].Len() {
 	case 1:
@@ -1070,7 +1078,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 
 	// hot region scheduler is restricted by schedule limit.
 	opt.RegionScheduleLimit, opt.LeaderScheduleLimit = 0, 0
-	c.Assert(hb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), HasLen, 0)
+	c.Assert(hb.Schedule(tc), HasLen, 0)
 	opt.LeaderScheduleLimit = schedule.NewMockSchedulerOptions().LeaderScheduleLimit
 	opt.RegionScheduleLimit = schedule.NewMockSchedulerOptions().RegionScheduleLimit
 
@@ -1095,18 +1103,18 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*1024*schedule.RegionHeartBeatReportInterval, 4, 5)
 	// We can find that the leader of all hot regions are on store 1,
 	// so one of the leader will transfer to another store.
-	testutil.CheckTransferLeaderFrom(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpHotRegion, 1)
+	testutil.CheckTransferLeaderFrom(c, hb.Schedule(tc)[0], schedule.OpHotRegion, 1)
 
 	// hot region scheduler is restricted by schedule limit.
 	opt.LeaderScheduleLimit = 0
-	c.Assert(hb.Schedule(tc, schedule.NewOpInfluence(nil, tc)), HasLen, 0)
+	c.Assert(hb.Schedule(tc), HasLen, 0)
 	opt.LeaderScheduleLimit = schedule.NewMockSchedulerOptions().LeaderScheduleLimit
 
 	// Should not panic if region not found.
 	for i := uint64(1); i <= 3; i++ {
 		tc.Regions.RemoveRegion(tc.GetRegion(i))
 	}
-	hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+	hb.Schedule(tc)
 }
 
 type testBalanceHotReadRegionSchedulerSuite struct{}
@@ -1157,7 +1165,7 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	}
 	// Will transfer a hot region leader from store 1 to store 3, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
-	testutil.CheckTransferLeader(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpHotRegion, 1, 3)
+	testutil.CheckTransferLeader(c, hb.Schedule(tc)[0], schedule.OpHotRegion, 1, 3)
 	// assume handle the operator
 	tc.AddLeaderRegionWithReadInfo(3, 3, 512*1024*schedule.RegionHeartBeatReportInterval, 1, 2)
 
@@ -1173,13 +1181,13 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 
 	// Now appear two read hot region in store 1 and 4
 	// We will Transfer peer from 1 to 5
-	testutil.CheckTransferPeerWithLeaderTransfer(c, hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))[0], schedule.OpHotRegion, 1, 5)
+	testutil.CheckTransferPeerWithLeaderTransfer(c, hb.Schedule(tc)[0], schedule.OpHotRegion, 1, 5)
 
 	// Should not panic if region not found.
 	for i := uint64(1); i <= 3; i++ {
 		tc.Regions.RemoveRegion(tc.GetRegion(i))
 	}
-	hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+	hb.Schedule(tc)
 }
 
 var _ = Suite(&testScatterRangeLeaderSuite{})
@@ -1232,15 +1240,15 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	for i := 1; i <= 5; i++ {
 		tc.UpdateStoreStatus(uint64(i))
 	}
-	hb, err := schedule.CreateScheduler("scatter-range", schedule.NewOperatorController(nil, nil), "s_00", "s_50", "t")
+	oc := schedule.NewOperatorController(nil, nil)
+	hb, err := schedule.CreateScheduler("scatter-range", oc, "s_00", "s_50", "t")
 	c.Assert(err, IsNil)
 	limit := 0
 	for {
 		if limit > 100 {
 			break
 		}
-
-		ops := hb.Schedule(tc, schedule.NewOpInfluence(nil, tc))
+		ops := hb.Schedule(tc)
 		if ops == nil {
 			limit++
 			continue

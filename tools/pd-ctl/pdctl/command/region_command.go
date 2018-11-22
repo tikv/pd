@@ -16,6 +16,7 @@ package command
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,6 +39,7 @@ var (
 	regionsConfVerPrefix   = "pd/api/v1/regions/confver"
 	regionsVersionPrefix   = "pd/api/v1/regions/version"
 	regionsSizePrefix      = "pd/api/v1/regions/size"
+	regionsKeyPrefix       = "pd/api/v1/regions/key"
 	regionsSiblingPrefix   = "pd/api/v1/regions/sibling"
 	regionIDPrefix         = "pd/api/v1/region/id"
 	regionKeyPrefix        = "pd/api/v1/region/key"
@@ -90,6 +92,15 @@ func NewRegionCommand() *cobra.Command {
 		Run:   showRegionTopSizeCommandFunc,
 	}
 	r.AddCommand(topSize)
+
+	scanRegion := &cobra.Command{
+		Use:   `scan [-jq="<query string>"]`,
+		Short: "scan all regions",
+		Run:   scanRegionCommandFunc,
+	}
+	scanRegion.Flags().String("jq", "", "jq query")
+	r.AddCommand(scanRegion)
+
 	r.Flags().String("jq", "", "jq query")
 
 	return r
@@ -115,6 +126,52 @@ func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	cmd.Println(r)
+}
+
+func scanRegionCommandFunc(cmd *cobra.Command, args []string) {
+	const limit = 1024
+	var key []byte
+	for {
+		uri := fmt.Sprintf("%s?key=%s&limit=%d", regionsKeyPrefix, url.QueryEscape(string(key)), limit)
+		r, err := doRequest(cmd, uri, http.MethodGet)
+		if err != nil {
+			cmd.Printf("Failed to scan regions: %s\n", err)
+			return
+		}
+
+		if flag := cmd.Flag("jq"); flag != nil && flag.Value.String() != "" {
+			printWithJQFilter(r, flag.Value.String())
+		} else {
+			cmd.Println(r)
+		}
+
+		// Extract last region's endkey for next batch.
+		type regionsInfo struct {
+			Regions []*struct {
+				EndKey string `json:"end_key"`
+			} `json:"regions"`
+		}
+
+		var regions regionsInfo
+		if err = json.Unmarshal([]byte(r), &regions); err != nil {
+			cmd.Printf("Failed to unmarshal regions: %s\n", err)
+			return
+		}
+		if len(regions.Regions) == 0 {
+			return
+		}
+
+		lastEndKey := regions.Regions[len(regions.Regions)-1].EndKey
+		if lastEndKey == "" {
+			return
+		}
+
+		key, err = hex.DecodeString(lastEndKey)
+		if err != nil {
+			cmd.Println("Bad format region key: ", key)
+			return
+		}
+	}
 }
 
 func showRegionTopWriteCommandFunc(cmd *cobra.Command, args []string) {
@@ -313,13 +370,13 @@ func showRegionsFromStartKeyCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	key = url.QueryEscape(key)
-	prefix := regionKeyPrefix + "/" + key
+	prefix := regionsKeyPrefix + "?key=" + key
 	if len(args) == 2 {
 		if _, err = strconv.Atoi(args[1]); err != nil {
 			cmd.Println("limit should be a number")
 			return
 		}
-		prefix += "?limit=" + args[1]
+		prefix += "&limit=" + args[1]
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {

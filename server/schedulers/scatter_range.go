@@ -16,7 +16,6 @@ package schedulers
 import (
 	"fmt"
 	"net/url"
-	"strings"
 
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
@@ -75,30 +74,18 @@ func (l *scatterRangeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool
 	return l.opController.OperatorCount(schedule.OpRange) < cluster.GetRegionScheduleLimit()
 }
 
-func (l *scatterRangeScheduler) getOperators(opInfuence schedule.OpInfluence) []*schedule.Operator {
-	var res []*schedule.Operator
-	ops := opInfuence.GetRegionsInfluence()
-	for _, op := range ops {
-		if strings.HasSuffix(op.Desc(), l.rangeName) {
-			res = append(res, op)
-		}
-	}
-	return res
-}
-
-func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
+func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 	c := schedule.GenRangeCluster(cluster, l.startKey, l.endKey)
 	c.SetTolerantSizeRatio(2)
-	influence := l.getOperators(opInfluence)
-	ops := l.balanceLeader.Schedule(c, schedule.NewOpInfluence(influence, cluster))
+	ops := l.balanceLeader.Schedule(c)
 	if len(ops) > 0 {
 		ops[0].SetDesc(fmt.Sprintf("scatter-range-leader-%s", l.rangeName))
 		ops[0].AttachKind(schedule.OpRange)
 		schedulerCounter.WithLabelValues(l.GetName(), "new-leader-operator").Inc()
 		return ops
 	}
-	ops = l.balanceRegion.Schedule(c, schedule.NewOpInfluence(influence, cluster))
+	ops = l.balanceRegion.Schedule(c)
 	if len(ops) > 0 {
 		ops[0].SetDesc(fmt.Sprintf("scatter-range-region-%s", l.rangeName))
 		ops[0].AttachKind(schedule.OpRange)
