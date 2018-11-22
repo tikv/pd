@@ -505,7 +505,7 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 
 	// there is a case that a follower is added and transfer leader to it,
 	// and the apply process of it is slow so leader regards it as voter
-	// but actually it is stll learner. Once that, the follower can't be leader,
+	// but actually it is still learner. Once that, the follower can't be leader,
 	// but old leader can't know that so there is no leader to serve for a while.
 	var targetLeader uint64
 	// Add missing peers.
@@ -543,7 +543,7 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 		targetLeader = storeID
 	}
 	if targetLeader != 0 {
-		// target leader should be trans
+		// target leader should be  to the first added follower if there is no transection stores.
 		steps = append(steps, TransferLeader{FromStore: source.GetLeader().GetStoreId(), ToStore: targetLeader})
 		kind |= OpLeader
 	}
