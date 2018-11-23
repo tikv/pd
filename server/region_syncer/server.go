@@ -119,8 +119,8 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 	}
 }
 
-// Sync firstlly tries to sync the history records to client.
-// then to sync the newly records.
+// Sync firstly tries to sync the history records to client.
+// then to sync the latest records.
 func (s *RegionSyncer) Sync(stream pdpb.PD_SyncRegionsServer) error {
 	for {
 		request, err := stream.Recv()
