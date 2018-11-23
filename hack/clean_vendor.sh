@@ -1,7 +1,7 @@
 # delete internal vendor folders
 find vendor -type d -name "_vendor" | xargs -I {} rm -r {}
 # delete all files that are not go, c, h, or legal
-find vendor -type f -not -name "*.go" -not -name "NOTICE*" -not -name "COPYING*"  -not -name "LICENSE*" -not -name "*.s" -not -name "PATENTS*" -not -name "*.h" -not -name "*.c" | xargs -I {} rm {}
+find vendor -type f -not -name "*.go" -not -name "modules.txt" -not -name "NOTICE*" -not -name "COPYING*"  -not -name "LICENSE*" -not -name "*.s" -not -name "PATENTS*" -not -name "*.h" -not -name "*.c" | xargs -I {} rm {}
 # delete all generated files
 find vendor -type f -name "*_generated.go" | xargs -I {} rm {}
 # delete all test files

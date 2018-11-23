@@ -876,14 +876,14 @@ func DiffRegionPeersInfo(origin *RegionInfo, other *RegionInfo) string {
 func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 	var ret []string
 	if !bytes.Equal(origin.meta.StartKey, other.meta.StartKey) {
-		ret = append(ret, fmt.Sprintf("StartKey Changed:%s -> %s", HexRegionKey(origin.meta.StartKey), HexRegionKey(other.meta.StartKey)))
+		ret = append(ret, fmt.Sprintf("StartKey Changed:{%s} -> {%s}", HexRegionKey(origin.meta.StartKey), HexRegionKey(other.meta.StartKey)))
 	} else {
-		ret = append(ret, fmt.Sprintf("StartKey:%s", HexRegionKey(origin.meta.StartKey)))
+		ret = append(ret, fmt.Sprintf("StartKey:{%s}", HexRegionKey(origin.meta.StartKey)))
 	}
 	if !bytes.Equal(origin.meta.EndKey, other.meta.EndKey) {
-		ret = append(ret, fmt.Sprintf("EndKey Changed:%s -> %s", HexRegionKey(origin.meta.EndKey), HexRegionKey(other.meta.EndKey)))
+		ret = append(ret, fmt.Sprintf("EndKey Changed:{%s} -> {%s}", HexRegionKey(origin.meta.EndKey), HexRegionKey(other.meta.EndKey)))
 	} else {
-		ret = append(ret, fmt.Sprintf("EndKey:%s", HexRegionKey(origin.meta.EndKey)))
+		ret = append(ret, fmt.Sprintf("EndKey:{%s}", HexRegionKey(origin.meta.EndKey)))
 	}
 
 	return strings.Join(ret, ", ")

@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
 )
 
@@ -165,6 +166,18 @@ func (s *testServer) GetEtcdClient() *clientv3.Client {
 	return s.server.GetClient()
 }
 
+func (s *testServer) GetStores() []*metapb.Store {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetRaftCluster().GetStores()
+}
+
+func (s *testServer) GetRaftCluster() *server.RaftCluster {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetRaftCluster()
+}
+
 func (s *testServer) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
 	s.RLock()
 	defer s.RUnlock()
@@ -271,6 +284,16 @@ func (c *testCluster) GetEtcdClient() *clientv3.Client {
 func (c *testCluster) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
 	leader := c.GetLeader()
 	return c.servers[leader].CheckHealth(members)
+}
+
+func (c *testCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
+	leader := c.GetLeader()
+	cluster := c.servers[leader].GetRaftCluster()
+	err := cluster.HandleRegionHeartbeat(region)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *testCluster) Join() (*testServer, error) {

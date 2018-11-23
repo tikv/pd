@@ -42,7 +42,7 @@
     },
     {
       "Repository": "github.com/pingcap/gofail",
-      "Commit": "e47081505b9cbcb513b138a2e45ff94a4bd5af4d"
+      "Commit": "c3f835e5a7d8cedf2f61cc55f961d4d120ae90eb"
     }
   ],
   "RetoolVersion": "1.3.7"
