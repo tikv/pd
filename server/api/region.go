@@ -26,7 +26,8 @@ import (
 	"github.com/unrolled/render"
 )
 
-type regionInfo struct {
+// RegionInfo records detail region info for api usage.
+type RegionInfo struct {
 	ID          uint64              `json:"id"`
 	StartKey    string              `json:"start_key"`
 	EndKey      string              `json:"end_key"`
@@ -42,11 +43,12 @@ type regionInfo struct {
 	ApproximateKeys int64             `json:"approximate_keys,omitempty"`
 }
 
-func newRegionInfo(r *core.RegionInfo) *regionInfo {
+// NewRegionInfo create a new api RegionInfo.
+func NewRegionInfo(r *core.RegionInfo) *RegionInfo {
 	if r == nil {
 		return nil
 	}
-	return &regionInfo{
+	return &RegionInfo{
 		ID:              r.GetID(),
 		StartKey:        string(core.HexRegionKey(r.GetStartKey())),
 		EndKey:          string(core.HexRegionKey(r.GetEndKey())),
@@ -62,9 +64,10 @@ func newRegionInfo(r *core.RegionInfo) *regionInfo {
 	}
 }
 
-type regionsInfo struct {
+// RegionsInfo contains some regions with the detailed region info.
+type RegionsInfo struct {
 	Count   int           `json:"count"`
-	Regions []*regionInfo `json:"regions"`
+	Regions []*RegionInfo `json:"regions"`
 }
 
 type regionHandler struct {
@@ -95,7 +98,7 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	regionInfo := cluster.GetRegionInfoByID(regionID)
-	h.rd.JSON(w, http.StatusOK, newRegionInfo(regionInfo))
+	h.rd.JSON(w, http.StatusOK, NewRegionInfo(regionInfo))
 }
 
 func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +110,7 @@ func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	key := vars["key"]
 	regionInfo := cluster.GetRegionInfoByKey([]byte(key))
-	h.rd.JSON(w, http.StatusOK, newRegionInfo(regionInfo))
+	h.rd.JSON(w, http.StatusOK, NewRegionInfo(regionInfo))
 }
 
 type regionsHandler struct {
@@ -122,12 +125,12 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 	}
 }
 
-func convertToAPIRegions(regions []*core.RegionInfo) *regionsInfo {
-	regionInfos := make([]*regionInfo, len(regions))
+func convertToAPIRegions(regions []*core.RegionInfo) *RegionsInfo {
+	regionInfos := make([]*RegionInfo, len(regions))
 	for i, r := range regions {
-		regionInfos[i] = newRegionInfo(r)
+		regionInfos[i] = NewRegionInfo(r)
 	}
-	return &regionsInfo{
+	return &RegionsInfo{
 		Count:   len(regions),
 		Regions: regionInfos,
 	}
@@ -263,8 +266,8 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 	}
 
 	left, right := cluster.GetAdjacentRegions(region)
-	res := []*regionInfo{newRegionInfo(left), newRegionInfo(right)}
-	h.rd.JSON(w, http.StatusOK, res)
+	regionsInfo := convertToAPIRegions([]*core.RegionInfo{left, right})
+	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
 const (
@@ -316,7 +319,7 @@ func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, 
 	if limit > maxRegionLimit {
 		limit = maxRegionLimit
 	}
-	regions := topNRegions(cluster.GetRegions(), less, limit)
+	regions := TopNRegions(cluster.GetRegions(), less, limit)
 	regionsInfo := convertToAPIRegions(regions)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
@@ -353,7 +356,8 @@ func (h *RegionHeap) Min() *core.RegionInfo {
 	return h.regions[0]
 }
 
-func topNRegions(regions []*core.RegionInfo, less func(a, b *core.RegionInfo) bool, n int) []*core.RegionInfo {
+// TopNRegions returns top n regions according to the given rule.
+func TopNRegions(regions []*core.RegionInfo, less func(a, b *core.RegionInfo) bool, n int) []*core.RegionInfo {
 	if n <= 0 {
 		return nil
 	}

@@ -1047,7 +1047,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	tc.UpdateStorageWrittenBytes(6, 0)
 
 	// Region 1, 2 and 3 are hot regions.
-	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
+	//| region_id | leader_store | follower_store | follower_store | written_bytes |
 	//|-----------|--------------|----------------|----------------|---------------|
 	//|     1     |       1      |        2       |       3        |      512KB    |
 	//|     2     |       1      |        3       |       4        |      512KB    |
@@ -1083,7 +1083,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	opt.RegionScheduleLimit = schedule.NewMockSchedulerOptions().RegionScheduleLimit
 
 	// After transfer a hot region from store 1 to store 5
-	//| region_id | leader_sotre | follower_store | follower_store | written_bytes |
+	//| region_id | leader_store | follower_store | follower_store | written_bytes |
 	//|-----------|--------------|----------------|----------------|---------------|
 	//|     1     |       1      |        2       |       3        |      512KB    |
 	//|     2     |       1      |        3       |       4        |      512KB    |
@@ -1140,7 +1140,7 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	tc.UpdateStorageReadBytes(5, 0)
 
 	// Region 1, 2 and 3 are hot regions.
-	//| region_id | leader_sotre | follower_store | follower_store |   read_bytes  |
+	//| region_id | leader_store | follower_store | follower_store |   read_bytes  |
 	//|-----------|--------------|----------------|----------------|---------------|
 	//|     1     |       1      |        2       |       3        |      512KB    |
 	//|     2     |       2      |        1       |       3        |      512KB    |

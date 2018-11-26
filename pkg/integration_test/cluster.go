@@ -178,6 +178,31 @@ func (s *testServer) GetRaftCluster() *server.RaftCluster {
 	return s.server.GetRaftCluster()
 }
 
+func (s *testServer) GetRegions() []*core.RegionInfo {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetRaftCluster().GetRegions()
+}
+
+func (s *testServer) GetRegionInfoByID(regionID uint64) *core.RegionInfo {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetRaftCluster().GetRegionInfoByID(regionID)
+}
+
+func (s *testServer) GetAdjacentRegions(region *core.RegionInfo) []*core.RegionInfo {
+	s.RLock()
+	defer s.RUnlock()
+	left, right := s.server.GetRaftCluster().GetAdjacentRegions(region)
+	return []*core.RegionInfo{left, right}
+}
+
+func (s *testServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetRaftCluster().GetStoreRegions(storeID)
+}
+
 func (s *testServer) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
 	s.RLock()
 	defer s.RUnlock()
@@ -289,11 +314,7 @@ func (c *testCluster) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Membe
 func (c *testCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	leader := c.GetLeader()
 	cluster := c.servers[leader].GetRaftCluster()
-	err := cluster.HandleRegionHeartbeat(region)
-	if err != nil {
-		return err
-	}
-	return nil
+	return cluster.HandleRegionHeartbeat(region)
 }
 
 func (c *testCluster) Join() (*testServer, error) {

@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -319,26 +320,32 @@ func (s *integrationTestSuite) TestScheduler(c *C) {
 	pdAddr := cluster.config.GetClientURLs()
 	cmd := initCommand()
 
-	store := metapb.Store{
-		Id:    1,
-		State: metapb.StoreState_Up,
+	stores := []*metapb.Store{
+		{
+			Id:    1,
+			State: metapb.StoreState_Up,
+		},
+		{
+			Id:    2,
+			State: metapb.StoreState_Up,
+		},
+		{
+			Id:    3,
+			State: metapb.StoreState_Up,
+		},
+		{
+			Id:    4,
+			State: metapb.StoreState_Up,
+		},
 	}
+
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	s.bootstrapCluster(leaderServer, c)
-	mustPutStore(c, leaderServer.server, store.Id, store.State, store.Labels)
+	for _, store := range stores {
+		mustPutStore(c, leaderServer.server, store.Id, store.State, store.Labels)
+	}
 
-	region := core.NewRegionInfo(&metapb.Region{
-		Id:       1,
-		StartKey: []byte("a"),
-		EndKey:   []byte("b"),
-		Peers: []*metapb.Peer{
-			{Id: 2, StoreId: 1},
-		},
-	},
-		&metapb.Peer{Id: 2, StoreId: 1},
-	)
-	err = cluster.HandleRegionHeartbeat(region)
-	c.Assert(err, IsNil)
+	mustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"))
 	defer cluster.Destroy()
 
 	time.Sleep(3 * time.Second)
@@ -398,6 +405,197 @@ func (s *integrationTestSuite) TestScheduler(c *C) {
 	}
 }
 
+func (s *integrationTestSuite) TestRegion(c *C) {
+	c.Parallel()
+
+	cluster, err := newTestCluster(1)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.config.GetClientURLs()
+	cmd := initCommand()
+
+	store := metapb.Store{
+		Id:    1,
+		State: metapb.StoreState_Up,
+	}
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	s.bootstrapCluster(leaderServer, c)
+	mustPutStore(c, leaderServer.server, store.Id, store.State, store.Labels)
+
+	downPeer := &metapb.Peer{Id: 8, StoreId: 3}
+	r1 := mustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"),
+		core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetApproximateSize(10),
+		core.SetPeers([]*metapb.Peer{
+			{Id: 1, StoreId: 1},
+			{Id: 5, StoreId: 2},
+			{Id: 6, StoreId: 3},
+			{Id: 7, StoreId: 4},
+		}))
+	r2 := mustPutRegion(c, cluster, 2, 1, []byte("b"), []byte("c"),
+		core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3), core.SetApproximateSize(20))
+	r3 := mustPutRegion(c, cluster, 3, 1, []byte("c"), []byte("d"),
+		core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2), core.SetApproximateSize(30),
+		core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}),
+		core.WithPendingPeers([]*metapb.Peer{downPeer}))
+	r4 := mustPutRegion(c, cluster, 4, 1, []byte("d"), []byte("e"),
+		core.SetWrittenBytes(100), core.SetReadBytes(100), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetApproximateSize(10))
+	defer cluster.Destroy()
+
+	// region command
+	args := []string{"-u", pdAddr, "region"}
+	_, output, err := executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionsInfo := api.RegionsInfo{}
+	json.Unmarshal(output, &regionsInfo)
+	regions := leaderServer.GetRegions()
+	checkRegionsInfo(c, regionsInfo, regions)
+
+	// region <region_id> command
+	args = []string{"-u", pdAddr, "region", "1"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionInfo := api.RegionInfo{}
+	json.Unmarshal(output, &regionInfo)
+	region := leaderServer.GetRegionInfoByID(1)
+	c.Assert(api.NewRegionInfo(region), DeepEquals, &regionInfo)
+
+	// region sibling <region_id> command
+	args = []string{"-u", pdAddr, "region", "sibling", "2"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionsInfo = api.RegionsInfo{}
+	json.Unmarshal(output, &regionsInfo)
+	region = leaderServer.GetRegionInfoByID(2)
+	regions = leaderServer.GetAdjacentRegions(region)
+	checkRegionsInfo(c, regionsInfo, regions)
+
+	// region store <store_id> command
+	args = []string{"-u", pdAddr, "region", "store", "1"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionsInfo = api.RegionsInfo{}
+	json.Unmarshal(output, &regionsInfo)
+	regions = leaderServer.GetStoreRegions(1)
+	checkRegionsInfo(c, regionsInfo, regions)
+
+	// region topread [limit] command
+	args = []string{"-u", pdAddr, "region", "topread", "2"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionsInfo = api.RegionsInfo{}
+	json.Unmarshal(output, &regionsInfo)
+	regions = api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() }, 2)
+	checkRegionsInfo(c, regionsInfo, regions)
+
+	// region topwrite [limit] command
+	args = []string{"-u", pdAddr, "region", "topwrite", "2"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionsInfo = api.RegionsInfo{}
+	json.Unmarshal(output, &regionsInfo)
+	regions = api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, 2)
+	checkRegionsInfo(c, regionsInfo, regions)
+
+	// region topconfver [limit] command
+	args = []string{"-u", pdAddr, "region", "topconfver", "2"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionsInfo = api.RegionsInfo{}
+	json.Unmarshal(output, &regionsInfo)
+	regions = api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
+		return a.GetMeta().GetRegionEpoch().GetConfVer() < b.GetMeta().GetRegionEpoch().GetConfVer()
+	}, 2)
+	checkRegionsInfo(c, regionsInfo, regions)
+
+	// region topversion [limit] command
+	args = []string{"-u", pdAddr, "region", "topversion", "2"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionsInfo = api.RegionsInfo{}
+	json.Unmarshal(output, &regionsInfo)
+	regions = api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
+		return a.GetMeta().GetRegionEpoch().GetVersion() < b.GetMeta().GetRegionEpoch().GetVersion()
+	}, 2)
+	checkRegionsInfo(c, regionsInfo, regions)
+
+	// region topsize [limit] command
+	args = []string{"-u", pdAddr, "region", "topsize", "2"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionsInfo = api.RegionsInfo{}
+	json.Unmarshal(output, &regionsInfo)
+	regions = api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
+		return a.GetApproximateSize() < b.GetApproximateSize()
+	}, 2)
+	checkRegionsInfo(c, regionsInfo, regions)
+
+	// region check extra-peer command
+	args = []string{"-u", pdAddr, "region", "check", "extra-peer"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionsInfo = api.RegionsInfo{}
+	json.Unmarshal(output, &regionsInfo)
+	checkRegionsInfo(c, regionsInfo, []*core.RegionInfo{r1})
+
+	// region check miss-peer command
+	args = []string{"-u", pdAddr, "region", "check", "miss-peer"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionsInfo = api.RegionsInfo{}
+	json.Unmarshal(output, &regionsInfo)
+	checkRegionsInfo(c, regionsInfo, []*core.RegionInfo{r2, r3, r4})
+
+	// region check pending-peer command
+	args = []string{"-u", pdAddr, "region", "check", "pending-peer"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionsInfo = api.RegionsInfo{}
+	json.Unmarshal(output, &regionsInfo)
+	checkRegionsInfo(c, regionsInfo, []*core.RegionInfo{r3})
+
+	// region check down-peer command
+	args = []string{"-u", pdAddr, "region", "check", "down-peer"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionsInfo = api.RegionsInfo{}
+	json.Unmarshal(output, &regionsInfo)
+	checkRegionsInfo(c, regionsInfo, []*core.RegionInfo{r3})
+
+	// region key --format=raw <key> command
+	args = []string{"-u", pdAddr, "region", "key", "--format=raw", "b"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionInfo = api.RegionInfo{}
+	json.Unmarshal(output, &regionInfo)
+	c.Assert(&regionInfo, DeepEquals, api.NewRegionInfo(r2))
+
+	// region key --format=hex <key> command
+	args = []string{"-u", pdAddr, "region", "key", "--format=hex", "62"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionInfo = api.RegionInfo{}
+	json.Unmarshal(output, &regionInfo)
+	c.Assert(&regionInfo, DeepEquals, api.NewRegionInfo(r2))
+
+	// region startkey --format=raw <key> command
+	args = []string{"-u", pdAddr, "region", "startkey", "--format=raw", "b", "2"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionsInfo = api.RegionsInfo{}
+	json.Unmarshal(output, &regionsInfo)
+	checkRegionsInfo(c, regionsInfo, []*core.RegionInfo{r2, r3})
+
+	// region startkey --format=hex <key> command
+	args = []string{"-u", pdAddr, "region", "startkey", "--format=hex", "63", "2"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionsInfo = api.RegionsInfo{}
+	json.Unmarshal(output, &regionsInfo)
+	checkRegionsInfo(c, regionsInfo, []*core.RegionInfo{r3, r4})
+}
+
 func initCommand() *cobra.Command {
 	commandFlags := pdctl.CommandFlags{}
 	rootCmd := &cobra.Command{}
@@ -434,16 +632,30 @@ func executeCommandC(root *cobra.Command, args ...string) (c *cobra.Command, out
 	return c, buf.Bytes(), err
 }
 
-func checkStoresInfo(c *C, ss []*api.StoreInfo, want []*metapb.Store) {
-	c.Assert(len(ss), Equals, len(want))
+func checkStoresInfo(c *C, stores []*api.StoreInfo, want []*metapb.Store) {
+	c.Assert(len(stores), Equals, len(want))
 	mapWant := make(map[uint64]*metapb.Store)
 	for _, s := range want {
 		if _, ok := mapWant[s.Id]; !ok {
 			mapWant[s.Id] = s
 		}
 	}
-	for _, s := range ss {
+	for _, s := range stores {
 		c.Assert(s.Store.Store, DeepEquals, mapWant[s.Store.Store.Id])
+	}
+}
+
+func checkRegionsInfo(c *C, output api.RegionsInfo, expected []*core.RegionInfo) {
+	c.Assert(output.Count, Equals, len(expected))
+	got := output.Regions
+	sort.Slice(got, func(i, j int) bool {
+		return got[i].ID < got[j].ID
+	})
+	sort.Slice(expected, func(i, j int) bool {
+		return expected[i].GetID() < expected[j].GetID()
+	})
+	for i, region := range expected {
+		c.Assert(api.NewRegionInfo(region), DeepEquals, got[i])
 	}
 }
 
@@ -459,4 +671,22 @@ func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, 
 		},
 	})
 	c.Assert(err, IsNil)
+}
+
+func mustPutRegion(c *C, cluster *testCluster, regionID, storeID uint64, start, end []byte, opts ...core.RegionCreateOption) *core.RegionInfo {
+	leader := &metapb.Peer{
+		Id:      regionID,
+		StoreId: storeID,
+	}
+	metaRegion := &metapb.Region{
+		Id:          regionID,
+		StartKey:    start,
+		EndKey:      end,
+		Peers:       []*metapb.Peer{leader},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+	}
+	r := core.NewRegionInfo(metaRegion, leader, opts...)
+	err := cluster.HandleRegionHeartbeat(r)
+	c.Assert(err, IsNil)
+	return r
 }
