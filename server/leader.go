@@ -312,7 +312,14 @@ func (s *Server) watchLeader(leader *pdpb.Member, revision int64) {
 		// gofail: var delayWatcher struct{}
 		rch := watcher.Watch(ctx, s.getLeaderPath(), clientv3.WithRev(revision))
 		for wresp := range rch {
+			// meet compacted error, use current revision.
+			if wresp.CompactRevision != 0 {
+				log.Warnf("required revision %d has been compacted, use current revision", revision)
+				revision = 0
+				break
+			}
 			if wresp.Canceled {
+				log.Errorf("leader watcher is canceled with revision: %d, error: %s", revision, wresp.Err())
 				return
 			}
 
