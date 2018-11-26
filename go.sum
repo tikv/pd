@@ -78,8 +78,8 @@ github.com/pingcap/errors v0.10.1 h1:fGVuPMtwNcxbzQ3aoRyyi6kxvXKMkEsceP81f3b8wsk
 github.com/pingcap/errors v0.10.1/go.mod h1:Oi8TUi2kEtXXLMJk9l1cGmz20kV3TaQ0usTwv5KuLY8=
 github.com/pingcap/gofail v0.0.0-20181115114620-e47081505b9c h1:nYlcWGAYxDMdiRLjyhNJB9tMSuGaqu2M/CVd2RJx4QQ=
 github.com/pingcap/gofail v0.0.0-20181115114620-e47081505b9c/go.mod h1:DazNTg0PTldtpsQiT9I5tVJwV1onHMKBBgXzmJUlMns=
-github.com/pingcap/kvproto v0.0.0-20180930052200-fae11119f066 h1:ulo0ph8sxCzY3GYI+5wh2x3h/gTO3BeIvCFy6U/EKks=
-github.com/pingcap/kvproto v0.0.0-20180930052200-fae11119f066/go.mod h1:0gwbe1F2iBIjuQ9AH0DbQhL+Dpr5GofU8fgYyXk+ykk=
+github.com/pingcap/kvproto v0.0.0-20181123124450-d48563486f61 h1:Yms1MiO/ezhE9ozwEOnlh/HrEFHX/r3fPCV6vNThGDM=
+github.com/pingcap/kvproto v0.0.0-20181123124450-d48563486f61/go.mod h1:0gwbe1F2iBIjuQ9AH0DbQhL+Dpr5GofU8fgYyXk+ykk=
 github.com/pkg/errors v0.8.0 h1:WdK/asTD0HN+q6hsWO3/vpuAkAr+tw6aNJNDFFf0+qw=
 github.com/pkg/errors v0.8.0/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

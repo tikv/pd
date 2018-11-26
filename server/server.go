@@ -503,6 +503,7 @@ func (s *Server) GetConfig() *Config {
 	cfg.Namespace = namespaces
 	cfg.LabelProperty = s.scheduleOpt.loadLabelPropertyConfig().clone()
 	cfg.ClusterVersion = s.scheduleOpt.loadClusterVersion()
+	cfg.PDServerCfg = *s.scheduleOpt.loadPDServerConfig()
 	return cfg
 }
 
@@ -541,7 +542,17 @@ func (s *Server) SetReplicationConfig(cfg ReplicationConfig) error {
 	}
 	old := s.scheduleOpt.rep.load()
 	s.scheduleOpt.rep.store(&cfg)
-	s.scheduleOpt.persist(s.kv)
+	if err := s.scheduleOpt.persist(s.kv); err != nil {
+		return err
+	}
+	log.Infof("replication config is updated: %+v, old: %+v", cfg, old)
+	return nil
+}
+
+// SetPDServerConfig sets the server config.
+func (s *Server) SetPDServerConfig(cfg PDServerConfig) error {
+	old := s.scheduleOpt.loadPDServerConfig()
+	s.scheduleOpt.pdServerConfig.Store(&cfg)
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
 		return err
 	}

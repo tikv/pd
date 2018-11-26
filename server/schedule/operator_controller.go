@@ -323,8 +323,7 @@ func (oc *OperatorController) GetOpInfluence(cluster Cluster) OpInfluence {
 	defer oc.RUnlock()
 
 	var res []*Operator
-	operators := oc.GetOperators()
-	for _, op := range operators {
+	for _, op := range oc.operators {
 		if !op.IsTimeout() && !op.IsFinish() {
 			region := cluster.GetRegion(op.RegionID())
 			if region != nil {
