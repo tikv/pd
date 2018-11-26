@@ -14,6 +14,7 @@
 package schedule
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -27,21 +28,22 @@ import (
 // MockCluster is used to mock clusterInfo for test use
 type MockCluster struct {
 	*BasicCluster
-	id *core.MockIDAllocator
+	*core.MockIDAllocator
 	*MockSchedulerOptions
+	ID uint64
 }
 
 // NewMockCluster creates a new MockCluster
 func NewMockCluster(opt *MockSchedulerOptions) *MockCluster {
 	return &MockCluster{
 		BasicCluster:         NewBasicCluster(),
-		id:                   core.NewMockIDAllocator(),
+		MockIDAllocator:      core.NewMockIDAllocator(),
 		MockSchedulerOptions: opt,
 	}
 }
 
 func (mc *MockCluster) allocID() (uint64, error) {
-	return mc.id.Alloc()
+	return mc.Alloc()
 }
 
 // ScanRegions scan region with start key, until number greater than limit.
@@ -599,4 +601,41 @@ func (mso *MockSchedulerOptions) IsLocationReplacementEnabled() bool {
 // IsNamespaceRelocationEnabled mock method.
 func (mso *MockSchedulerOptions) IsNamespaceRelocationEnabled() bool {
 	return !mso.DisableNamespaceRelocation
+}
+
+// MockHeartbeatStreams is used to mock heartbeatstreams for test use.
+type MockHeartbeatStreams struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	clusterID uint64
+	msgCh     chan *pdpb.RegionHeartbeatResponse
+}
+
+// NewMockHeartbeatStreams creates a new MockHeartbeatStreams.
+func NewMockHeartbeatStreams(clusterID uint64) *MockHeartbeatStreams {
+	ctx, cancel := context.WithCancel(context.Background())
+	hs := &MockHeartbeatStreams{
+		ctx:       ctx,
+		cancel:    cancel,
+		clusterID: clusterID,
+		msgCh:     make(chan *pdpb.RegionHeartbeatResponse, 1024),
+	}
+	return hs
+}
+
+// SendMsg is used to send the message.
+func (mhs *MockHeartbeatStreams) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
+	if region.GetLeader() == nil {
+		return
+	}
+
+	msg.Header = &pdpb.ResponseHeader{ClusterId: mhs.clusterID}
+	msg.RegionId = region.GetID()
+	msg.RegionEpoch = region.GetRegionEpoch()
+	msg.TargetPeer = region.GetLeader()
+
+	select {
+	case mhs.msgCh <- msg:
+	case <-mhs.ctx.Done():
+	}
 }

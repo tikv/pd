@@ -21,6 +21,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
 )
@@ -72,16 +73,40 @@ func (s *testRegionSuite) TestRegion(c *C) {
 	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	mustRegionHeartbeat(c, s.svr, r)
 	url := fmt.Sprintf("%s/region/id/%d", s.urlPrefix, r.GetID())
-	r1 := &regionInfo{}
+	r1 := &RegionInfo{}
 	err := readJSONWithURL(url, r1)
 	c.Assert(err, IsNil)
-	c.Assert(r1, DeepEquals, newRegionInfo(r))
+	c.Assert(r1, DeepEquals, NewRegionInfo(r))
 
 	url = fmt.Sprintf("%s/region/key/%s", s.urlPrefix, "a")
-	r2 := &regionInfo{}
+	r2 := &RegionInfo{}
 	err = readJSONWithURL(url, r2)
 	c.Assert(err, IsNil)
-	c.Assert(r2, DeepEquals, newRegionInfo(r))
+	c.Assert(r2, DeepEquals, NewRegionInfo(r))
+}
+
+func (s *testRegionSuite) TestRegionCheck(c *C) {
+	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	downPeer := &metapb.Peer{Id: 13, StoreId: 2}
+	r = r.Clone(core.WithAddPeer(downPeer), core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}), core.WithPendingPeers([]*metapb.Peer{downPeer}))
+	mustRegionHeartbeat(c, s.svr, r)
+	url := fmt.Sprintf("%s/region/id/%d", s.urlPrefix, r.GetID())
+	r1 := &RegionInfo{}
+	err := readJSONWithURL(url, r1)
+	c.Assert(err, IsNil)
+	c.Assert(r1, DeepEquals, NewRegionInfo(r))
+
+	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "down-peer")
+	r2 := &RegionsInfo{}
+	err = readJSONWithURL(url, r2)
+	c.Assert(err, IsNil)
+	c.Assert(r2, DeepEquals, &RegionsInfo{Count: 1, Regions: []*RegionInfo{NewRegionInfo(r)}})
+
+	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "pending-peer")
+	r3 := &RegionsInfo{}
+	err = readJSONWithURL(url, r3)
+	c.Assert(err, IsNil)
+	c.Assert(r3, DeepEquals, &RegionsInfo{Count: 1, Regions: []*RegionInfo{NewRegionInfo(r)}})
 }
 
 func (s *testRegionSuite) TestRegions(c *C) {
@@ -90,20 +115,20 @@ func (s *testRegionSuite) TestRegions(c *C) {
 		newTestRegionInfo(3, 1, []byte("b"), []byte("c")),
 		newTestRegionInfo(4, 2, []byte("c"), []byte("d")),
 	}
-	regions := make([]*regionInfo, 0, len(rs))
+	regions := make([]*RegionInfo, 0, len(rs))
 	for _, r := range rs {
-		regions = append(regions, newRegionInfo(r))
+		regions = append(regions, NewRegionInfo(r))
 		mustRegionHeartbeat(c, s.svr, r)
 	}
 	url := fmt.Sprintf("%s/regions", s.urlPrefix)
-	regionsInfo := &regionsInfo{}
-	err := readJSONWithURL(url, regionsInfo)
+	RegionsInfo := &RegionsInfo{}
+	err := readJSONWithURL(url, RegionsInfo)
 	c.Assert(err, IsNil)
-	c.Assert(regionsInfo.Count, Equals, len(regions))
-	sort.Slice(regionsInfo.Regions, func(i, j int) bool {
-		return regionsInfo.Regions[i].ID < regionsInfo.Regions[j].ID
+	c.Assert(RegionsInfo.Count, Equals, len(regions))
+	sort.Slice(RegionsInfo.Regions, func(i, j int) bool {
+		return RegionsInfo.Regions[i].ID < RegionsInfo.Regions[j].ID
 	})
-	for i, r := range regionsInfo.Regions {
+	for i, r := range RegionsInfo.Regions {
 		c.Assert(r.ID, Equals, regions[i].ID)
 		c.Assert(r.ApproximateSize, Equals, regions[i].ApproximateSize)
 		c.Assert(r.ApproximateKeys, Equals, regions[i].ApproximateKeys)
@@ -120,7 +145,7 @@ func (s *testRegionSuite) TestStoreRegions(c *C) {
 
 	regionIDs := []uint64{2, 3}
 	url := fmt.Sprintf("%s/regions/store/%d", s.urlPrefix, 1)
-	r4 := &regionsInfo{}
+	r4 := &RegionsInfo{}
 	err := readJSONWithURL(url, r4)
 	c.Assert(err, IsNil)
 	c.Assert(r4.Count, Equals, len(regionIDs))
@@ -131,7 +156,7 @@ func (s *testRegionSuite) TestStoreRegions(c *C) {
 
 	regionIDs = []uint64{4}
 	url = fmt.Sprintf("%s/regions/store/%d", s.urlPrefix, 2)
-	r5 := &regionsInfo{}
+	r5 := &RegionsInfo{}
 	err = readJSONWithURL(url, r5)
 	c.Assert(err, IsNil)
 	c.Assert(r5.Count, Equals, len(regionIDs))
@@ -141,7 +166,7 @@ func (s *testRegionSuite) TestStoreRegions(c *C) {
 
 	regionIDs = []uint64{}
 	url = fmt.Sprintf("%s/regions/store/%d", s.urlPrefix, 3)
-	r6 := &regionsInfo{}
+	r6 := &RegionsInfo{}
 	err = readJSONWithURL(url, r6)
 	c.Assert(err, IsNil)
 	c.Assert(r6.Count, Equals, len(regionIDs))
@@ -178,7 +203,7 @@ func (s *testRegionSuite) TestTopSize(c *C) {
 }
 
 func (s *testRegionSuite) checkTopRegions(c *C, url string, regionIDs []uint64) {
-	regions := &regionsInfo{}
+	regions := &RegionsInfo{}
 	err := readJSONWithURL(url, regions)
 	c.Assert(err, IsNil)
 	c.Assert(regions.Count, Equals, len(regionIDs))
@@ -196,7 +221,7 @@ func (s *testRegionSuite) TestTopN(c *C) {
 			region := newTestRegionInfo(id, id, nil, nil, core.SetWrittenBytes(uint64(writtenBytes[i])))
 			regions = append(regions, region)
 		}
-		topN := topNRegions(regions, func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, n)
+		topN := TopNRegions(regions, func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, n)
 		if n > len(writtenBytes) {
 			c.Assert(len(topN), Equals, len(writtenBytes))
 		} else {
@@ -234,10 +259,10 @@ func (s *testGetRegionSuite) TestRegionKey(c *C) {
 	r := newTestRegionInfo(99, 1, []byte{0xFF, 0xFF, 0xAA}, []byte{0xFF, 0xFF, 0xCC}, core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
 	mustRegionHeartbeat(c, s.svr, r)
 	url := fmt.Sprintf("%s/region/key/%s", s.urlPrefix, url.QueryEscape(string([]byte{0xFF, 0xFF, 0xBB})))
-	regionInfo := &regionInfo{}
-	err := readJSONWithURL(url, regionInfo)
+	RegionInfo := &RegionInfo{}
+	err := readJSONWithURL(url, RegionInfo)
 	c.Assert(err, IsNil)
-	c.Assert(r.GetID(), Equals, regionInfo.ID)
+	c.Assert(r.GetID(), Equals, RegionInfo.ID)
 }
 
 func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
@@ -250,9 +275,9 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 	mustRegionHeartbeat(c, s.svr, r3)
 	mustRegionHeartbeat(c, s.svr, r)
 
-	url := fmt.Sprintf("%s/regions/key/%s", s.urlPrefix, "b")
+	url := fmt.Sprintf("%s/regions/key?key=%s", s.urlPrefix, "b")
 	regionIds := []uint64{3, 4, 99}
-	regions := &regionsInfo{}
+	regions := &RegionsInfo{}
 	err := readJSONWithURL(url, regions)
 	c.Assert(err, IsNil)
 	c.Assert(len(regionIds), Equals, regions.Count)

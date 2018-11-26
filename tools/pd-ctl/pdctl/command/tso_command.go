@@ -14,7 +14,6 @@
 package command
 
 import (
-	"fmt"
 	"strconv"
 	"time"
 
@@ -38,17 +37,17 @@ func NewTSOCommand() *cobra.Command {
 
 func showTSOCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		fmt.Println("Usage: tso <timestamp>")
+		cmd.Println("Usage: tso <timestamp>")
 		return
 	}
 	ts, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
-		fmt.Printf("Failed to parse TSO: %s\n", err)
+		cmd.Printf("Failed to parse TSO: %s\n", err)
 		return
 	}
 	logical := ts & logicalBits
 	physical := ts >> physicalShiftBits
 	physicalTime := time.Unix(int64(physical/1000), int64(physical%1000)*time.Millisecond.Nanoseconds())
-	fmt.Println("system: ", physicalTime)
-	fmt.Println("logic: ", logical)
+	cmd.Println("system: ", physicalTime)
+	cmd.Println("logic: ", logical)
 }

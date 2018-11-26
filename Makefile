@@ -9,22 +9,19 @@ PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|github.com/pingcap/pd/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 RETOOL:= ./hack/retool
 
-GOFAIL_ENABLE  := $$(find $$PWD/ -type d | grep -vE "(\.git|vendor)" | xargs ./hack/retool do gofail enable)
-GOFAIL_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|vendor)" | xargs ./hack/retool do gofail disable)
+GOFAIL_ENABLE  := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./hack/retool do gofail enable)
+GOFAIL_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./hack/retool do gofail disable)
 
 LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --dirty)"
 LDFLAGS += -X "$(PD_PKG)/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "$(PD_PKG)/server.PDGitHash=$(shell git rev-parse HEAD)"
 LDFLAGS += -X "$(PD_PKG)/server.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
 
-GOMOD := -mod=vendor
-
 GOVER_MAJOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\1/")
 GOVER_MINOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\2/")
 GO111 := $(shell [ $(GOVER_MAJOR) -gt 1 ] || [ $(GOVER_MAJOR) -eq 1 ] && [ $(GOVER_MINOR) -ge 11 ]; echo $$?)
 ifeq ($(GO111), 1)
-$(warning "go below 1.11 does not support modules")
-GOMOD :=
+$(error "go below 1.11 does not support modules")
 endif
 
 # Ignore following files's coverage.
@@ -43,23 +40,23 @@ ci: build check basic-test
 build: export GO111MODULE=on
 build:
 ifeq ("$(WITH_RACE)", "1")
-	CGO_ENABLED=1 go build $(GOMOD) -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=1 go build -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 else
-	CGO_ENABLED=0 go build $(GOMOD) -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
-	CGO_ENABLED=0 go build $(GOMOD) -ldflags '$(LDFLAGS)' -o bin/pd-ctl tools/pd-ctl/main.go
-	CGO_ENABLED=0 go build $(GOMOD) -o bin/pd-tso-bench tools/pd-tso-bench/main.go
-	CGO_ENABLED=0 go build $(GOMOD) -o bin/pd-recover tools/pd-recover/main.go
+	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl tools/pd-ctl/main.go
+	CGO_ENABLED=0 go build -o bin/pd-tso-bench tools/pd-tso-bench/main.go
+	CGO_ENABLED=0 go build -o bin/pd-recover tools/pd-recover/main.go
 
 test: retool-setup
 	# testing..
 	@$(GOFAIL_ENABLE)
-	CGO_ENABLED=1 GO111MODULE=on go test $(GOMOD) -race -cover $(TEST_PKGS) || { $(GOFAIL_DISABLE); exit 1; }
+	CGO_ENABLED=1 GO111MODULE=on go test -race -cover $(TEST_PKGS) || { $(GOFAIL_DISABLE); exit 1; }
 	@$(GOFAIL_DISABLE)
 
 basic-test:
 	@$(GOFAIL_ENABLE)
-	GO111MODULE=on go test $(GOMOD) $(BASIC_TEST_PKGS) || { $(GOFAIL_DISABLE); exit 1; }
+	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(GOFAIL_DISABLE); exit 1; }
 	@$(GOFAIL_DISABLE)
 
 # These need to be fixed before they can be ran regularly
@@ -101,10 +98,7 @@ else
 	@echo "coverage only runs in travis."
 endif
 
-vendor:
-	GO111MODULE=on go mod vendor
-	bash ./hack/clean_vendor.sh
-
+simulator: export GO111MODULE=on
 simulator:
 	CGO_ENABLED=0 go build -o bin/pd-simulator tools/pd-simulator/main.go
 

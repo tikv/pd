@@ -16,14 +16,13 @@ package schedulers
 import (
 	"fmt"
 	"net/url"
-	"strings"
 
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
 )
 
 func init() {
-	schedule.RegisterScheduler("scatter-range", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("scatter-range", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
 		if len(args) != 3 {
 			return nil, errors.New("should specify the range and the name")
 		}
@@ -36,7 +35,7 @@ func init() {
 			return nil, err
 		}
 		name := args[2]
-		return newScatterRangeScheduler(limiter, []string{startKey, endKey, name}), nil
+		return newScatterRangeScheduler(opController, []string{startKey, endKey, name}), nil
 	})
 }
 
@@ -51,15 +50,15 @@ type scatterRangeScheduler struct {
 
 // newScatterRangeScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
-func newScatterRangeScheduler(limiter *schedule.Limiter, args []string) schedule.Scheduler {
-	base := newBaseScheduler(limiter)
+func newScatterRangeScheduler(opController *schedule.OperatorController, args []string) schedule.Scheduler {
+	base := newBaseScheduler(opController)
 	return &scatterRangeScheduler{
 		baseScheduler: base,
 		startKey:      []byte(args[0]),
 		endKey:        []byte(args[1]),
 		rangeName:     args[2],
-		balanceLeader: newBalanceLeaderScheduler(limiter),
-		balanceRegion: newBalanceRegionScheduler(limiter),
+		balanceLeader: newBalanceLeaderScheduler(opController),
+		balanceRegion: newBalanceRegionScheduler(opController),
 	}
 }
 
@@ -72,33 +71,21 @@ func (l *scatterRangeScheduler) GetType() string {
 }
 
 func (l *scatterRangeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return l.limiter.OperatorCount(schedule.OpRange) < cluster.GetRegionScheduleLimit()
+	return l.opController.OperatorCount(schedule.OpRange) < cluster.GetRegionScheduleLimit()
 }
 
-func (l *scatterRangeScheduler) getOperators(opInfuence schedule.OpInfluence) []*schedule.Operator {
-	var res []*schedule.Operator
-	ops := opInfuence.GetRegionsInfluence()
-	for _, op := range ops {
-		if strings.HasSuffix(op.Desc(), l.rangeName) {
-			res = append(res, op)
-		}
-	}
-	return res
-}
-
-func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
+func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 	c := schedule.GenRangeCluster(cluster, l.startKey, l.endKey)
 	c.SetTolerantSizeRatio(2)
-	influence := l.getOperators(opInfluence)
-	ops := l.balanceLeader.Schedule(c, schedule.NewOpInfluence(influence, cluster))
+	ops := l.balanceLeader.Schedule(c)
 	if len(ops) > 0 {
 		ops[0].SetDesc(fmt.Sprintf("scatter-range-leader-%s", l.rangeName))
 		ops[0].AttachKind(schedule.OpRange)
 		schedulerCounter.WithLabelValues(l.GetName(), "new-leader-operator").Inc()
 		return ops
 	}
-	ops = l.balanceRegion.Schedule(c, schedule.NewOpInfluence(influence, cluster))
+	ops = l.balanceRegion.Schedule(c)
 	if len(ops) > 0 {
 		ops[0].SetDesc(fmt.Sprintf("scatter-range-region-%s", l.rangeName))
 		ops[0].AttachKind(schedule.OpRange)

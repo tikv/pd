@@ -24,8 +24,8 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("balance-leader", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
-		return newBalanceLeaderScheduler(limiter), nil
+	schedule.RegisterScheduler("balance-leader", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+		return newBalanceLeaderScheduler(opController), nil
 	})
 }
 
@@ -34,24 +34,27 @@ const balanceLeaderRetryLimit = 10
 
 type balanceLeaderScheduler struct {
 	*baseScheduler
-	selector    *schedule.BalanceSelector
-	taintStores *cache.TTLUint64
+	selector     *schedule.BalanceSelector
+	taintStores  *cache.TTLUint64
+	opController *schedule.OperatorController
 }
 
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
-func newBalanceLeaderScheduler(limiter *schedule.Limiter) schedule.Scheduler {
+func newBalanceLeaderScheduler(opController *schedule.OperatorController) schedule.Scheduler {
 	taintStores := newTaintCache()
 	filters := []schedule.Filter{
 		schedule.StoreStateFilter{TransferLeader: true},
 		schedule.NewCacheFilter(taintStores),
 	}
-	base := newBaseScheduler(limiter)
-	return &balanceLeaderScheduler{
+	base := newBaseScheduler(opController)
+	s := &balanceLeaderScheduler{
 		baseScheduler: base,
 		selector:      schedule.NewBalanceSelector(core.LeaderKind, filters),
 		taintStores:   taintStores,
+		opController:  opController,
 	}
+	return s
 }
 
 func (l *balanceLeaderScheduler) GetName() string {
@@ -63,10 +66,10 @@ func (l *balanceLeaderScheduler) GetType() string {
 }
 
 func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return l.limiter.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return l.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
+func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
 	stores := cluster.GetStores()
@@ -93,6 +96,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 	balanceLeaderCounter.WithLabelValues("high_score", sourceStoreLabel).Inc()
 	balanceLeaderCounter.WithLabelValues("low_score", targetStoreLabel).Inc()
 
+	opInfluence := l.opController.GetOpInfluence(cluster)
 	for i := 0; i < balanceLeaderRetryLimit; i++ {
 		if op := l.transferLeaderOut(source, cluster, opInfluence); op != nil {
 			balanceLeaderCounter.WithLabelValues("transfer_out", sourceStoreLabel).Inc()

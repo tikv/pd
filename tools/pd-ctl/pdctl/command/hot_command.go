@@ -14,7 +14,6 @@
 package command
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/spf13/cobra"
@@ -51,10 +50,10 @@ func NewHotWriteRegionCommand() *cobra.Command {
 func showHotWriteRegionsCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, hotWriteRegionsPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get hotspot: %s\n", err)
+		cmd.Printf("Failed to get hotspot: %s\n", err)
 		return
 	}
-	fmt.Println(r)
+	cmd.Println(r)
 }
 
 // NewHotReadRegionCommand return a hot read regions subcommand of hotSpotCmd
@@ -70,10 +69,10 @@ func NewHotReadRegionCommand() *cobra.Command {
 func showHotReadRegionsCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, hotReadRegionsPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get hotspot: %s\n", err)
+		cmd.Printf("Failed to get hotspot: %s\n", err)
 		return
 	}
-	fmt.Println(r)
+	cmd.Println(r)
 }
 
 // NewHotStoreCommand return a hot stores subcommand of hotSpotCmd
@@ -89,8 +88,8 @@ func NewHotStoreCommand() *cobra.Command {
 func showHotStoresCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, hotStoresPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get hotspot: %s\n", err)
+		cmd.Printf("Failed to get hotspot: %s\n", err)
 		return
 	}
-	fmt.Println(r)
+	cmd.Println(r)
 }

@@ -55,16 +55,16 @@ func showOperatorCommandFunc(cmd *cobra.Command, args []string) {
 	} else if len(args) == 1 {
 		path = fmt.Sprintf("%s?kind=%s", operatorsPrefix, args[0])
 	} else {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 
 	r, err := doRequest(cmd, path, http.MethodGet)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
-	fmt.Println(r)
+	cmd.Println(r)
 }
 
 // NewAddOperatorCommand returns a command to add operators.
@@ -97,13 +97,13 @@ func NewTransferLeaderCommand() *cobra.Command {
 
 func transferLeaderCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 
 	ids, err := parseUint64s(args)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 
@@ -126,13 +126,13 @@ func NewTransferRegionCommand() *cobra.Command {
 
 func transferRegionCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) <= 2 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 
 	ids, err := parseUint64s(args)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 
@@ -155,13 +155,13 @@ func NewTransferPeerCommand() *cobra.Command {
 
 func transferPeerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 3 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 
 	ids, err := parseUint64s(args)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 
@@ -185,13 +185,13 @@ func NewAddPeerCommand() *cobra.Command {
 
 func addPeerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 
 	ids, err := parseUint64s(args)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 
@@ -243,13 +243,13 @@ func NewMergeRegionCommand() *cobra.Command {
 
 func mergeRegionCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 
 	ids, err := parseUint64s(args)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 
@@ -272,13 +272,13 @@ func NewRemovePeerCommand() *cobra.Command {
 
 func removePeerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 
 	ids, err := parseUint64s(args)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 
@@ -302,13 +302,13 @@ func NewSplitRegionCommand() *cobra.Command {
 
 func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 
 	ids, err := parseUint64s(args)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 
@@ -317,7 +317,7 @@ func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
 	case "scan", "approximate":
 		break
 	default:
-		fmt.Println("Error: unknown policy")
+		cmd.Println("Error: unknown policy")
 		return
 	}
 
@@ -340,13 +340,13 @@ func NewScatterRegionCommand() *cobra.Command {
 
 func scatterRegionCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 
 	ids, err := parseUint64s(args)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 
@@ -368,14 +368,14 @@ func NewRemoveOperatorCommand() *cobra.Command {
 
 func removeOperatorCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 
 	path := operatorsPrefix + "/" + args[0]
 	_, err := doRequest(cmd, path, http.MethodDelete)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 }

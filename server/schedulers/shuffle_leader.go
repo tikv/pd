@@ -19,8 +19,8 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("shuffle-leader", func(limiter *schedule.Limiter, args []string) (schedule.Scheduler, error) {
-		return newShuffleLeaderScheduler(limiter), nil
+	schedule.RegisterScheduler("shuffle-leader", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+		return newShuffleLeaderScheduler(opController), nil
 	})
 }
 
@@ -31,9 +31,9 @@ type shuffleLeaderScheduler struct {
 
 // newShuffleLeaderScheduler creates an admin scheduler that shuffles leaders
 // between stores.
-func newShuffleLeaderScheduler(limiter *schedule.Limiter) schedule.Scheduler {
+func newShuffleLeaderScheduler(opController *schedule.OperatorController) schedule.Scheduler {
 	filters := []schedule.Filter{schedule.StoreStateFilter{TransferLeader: true}}
-	base := newBaseScheduler(limiter)
+	base := newBaseScheduler(opController)
 	return &shuffleLeaderScheduler{
 		baseScheduler: base,
 		selector:      schedule.NewRandomSelector(filters),
@@ -49,10 +49,10 @@ func (s *shuffleLeaderScheduler) GetType() string {
 }
 
 func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return s.limiter.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
+func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
 	// We shuffle leaders between stores by:
 	// 1. random select a valid store.
 	// 2. transfer a leader to the store.

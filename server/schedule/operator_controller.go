@@ -37,9 +37,9 @@ type OperatorController struct {
 	sync.RWMutex
 	cluster   Cluster
 	operators map[uint64]*Operator
-	Limiter   *Limiter
 	hbStreams HeartbeatStreams
 	histories *list.List
+	counts    map[OperatorKind]uint64
 }
 
 // NewOperatorController creates a OperatorController.
@@ -47,9 +47,9 @@ func NewOperatorController(cluster Cluster, hbStreams HeartbeatStreams) *Operato
 	return &OperatorController{
 		cluster:   cluster,
 		operators: make(map[uint64]*Operator),
-		Limiter:   NewLimiter(),
 		hbStreams: hbStreams,
 		histories: list.New(),
+		counts:    make(map[OperatorKind]uint64),
 	}
 }
 
@@ -129,7 +129,7 @@ func (oc *OperatorController) addOperatorLocked(op *Operator) bool {
 	}
 
 	oc.operators[regionID] = op
-	oc.Limiter.UpdateCounts(oc.operators)
+	oc.updateCounts(oc.operators)
 
 	if region := oc.cluster.GetRegion(op.RegionID()); region != nil {
 		if step := op.Check(region); step != nil {
@@ -151,7 +151,7 @@ func (oc *OperatorController) RemoveOperator(op *Operator) {
 func (oc *OperatorController) removeOperatorLocked(op *Operator) {
 	regionID := op.RegionID()
 	delete(oc.operators, regionID)
-	oc.Limiter.UpdateCounts(oc.operators)
+	oc.updateCounts(oc.operators)
 	operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 }
 
@@ -294,40 +294,110 @@ func (oc *OperatorController) GetHistory(start time.Time) []OperatorHistory {
 	return histories
 }
 
-// Limiter is a counter that limits the number of operators.
-type Limiter struct {
-	sync.RWMutex
-	counts map[OperatorKind]uint64
-}
-
-// NewLimiter creates a schedule limiter.
-func NewLimiter() *Limiter {
-	return &Limiter{
-		counts: make(map[OperatorKind]uint64),
-	}
-}
-
-// UpdateCounts updates resource counts using current pending operators.
-func (l *Limiter) UpdateCounts(operators map[uint64]*Operator) {
-	l.Lock()
-	defer l.Unlock()
-	for k := range l.counts {
-		delete(l.counts, k)
+// updateCounts updates resource counts using current pending operators.
+func (oc *OperatorController) updateCounts(operators map[uint64]*Operator) {
+	for k := range oc.counts {
+		delete(oc.counts, k)
 	}
 	for _, op := range operators {
-		l.counts[op.Kind()]++
+		oc.counts[op.Kind()]++
 	}
 }
 
 // OperatorCount gets the count of operators filtered by mask.
-func (l *Limiter) OperatorCount(mask OperatorKind) uint64 {
-	l.RLock()
-	defer l.RUnlock()
+func (oc *OperatorController) OperatorCount(mask OperatorKind) uint64 {
+	oc.RLock()
+	defer oc.RUnlock()
 	var total uint64
-	for k, count := range l.counts {
+	for k, count := range oc.counts {
 		if k&mask != 0 {
 			total += count
 		}
 	}
 	return total
+}
+
+// GetOpInfluence gets OpInfluence.
+func (oc *OperatorController) GetOpInfluence(cluster Cluster) OpInfluence {
+	oc.RLock()
+	defer oc.RUnlock()
+
+	var res []*Operator
+	for _, op := range oc.operators {
+		if !op.IsTimeout() && !op.IsFinish() {
+			region := cluster.GetRegion(op.RegionID())
+			if region != nil {
+				res = append(res, op)
+			}
+		}
+	}
+	return NewOpInfluence(res, cluster)
+}
+
+// NewOpInfluence creates a OpInfluence.
+func NewOpInfluence(operators []*Operator, cluster Cluster) OpInfluence {
+	influence := OpInfluence{
+		storesInfluence:  make(map[uint64]*StoreInfluence),
+		regionsInfluence: make(map[uint64]*Operator),
+	}
+
+	for _, op := range operators {
+		if !op.IsTimeout() && !op.IsFinish() {
+			region := cluster.GetRegion(op.RegionID())
+			if region != nil {
+				op.Influence(influence, region)
+			}
+		}
+		influence.regionsInfluence[op.RegionID()] = op
+	}
+
+	return influence
+}
+
+// OpInfluence records the influence of the cluster.
+type OpInfluence struct {
+	storesInfluence  map[uint64]*StoreInfluence
+	regionsInfluence map[uint64]*Operator
+}
+
+// GetStoreInfluence get storeInfluence of specific store.
+func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
+	storeInfluence, ok := m.storesInfluence[id]
+	if !ok {
+		storeInfluence = &StoreInfluence{}
+		m.storesInfluence[id] = storeInfluence
+	}
+	return storeInfluence
+}
+
+// GetRegionsInfluence gets regionInfluence of specific region.
+func (m OpInfluence) GetRegionsInfluence() map[uint64]*Operator {
+	return m.regionsInfluence
+}
+
+// StoreInfluence records influences that pending operators will make.
+type StoreInfluence struct {
+	RegionSize  int64
+	RegionCount int64
+	LeaderSize  int64
+	LeaderCount int64
+}
+
+// ResourceSize returns delta size of leader/region by influence.
+func (s StoreInfluence) ResourceSize(kind core.ResourceKind) int64 {
+	switch kind {
+	case core.LeaderKind:
+		return s.LeaderSize
+	case core.RegionKind:
+		return s.RegionSize
+	default:
+		return 0
+	}
+}
+
+// SetOperator is only used for test
+func (oc *OperatorController) SetOperator(op *Operator) {
+	oc.Lock()
+	defer oc.Unlock()
+	oc.operators[op.RegionID()] = op
 }

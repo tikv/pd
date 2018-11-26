@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
-	gofail "github.com/etcd-io/gofail/runtime"
 	. "github.com/pingcap/check"
+	gofail "github.com/pingcap/gofail/runtime"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
@@ -90,6 +90,17 @@ func (s *testTsoSuite) TestTso(c *C) {
 	}
 
 	wg.Wait()
+}
+
+func (s *testTsoSuite) TestTsoCount0(c *C) {
+	req := &pdpb.TsoRequest{Header: newRequestHeader(s.svr.clusterID)}
+	tsoClient, err := s.grpcPDClient.Tso(context.Background())
+	c.Assert(err, IsNil)
+	defer tsoClient.CloseSend()
+	err = tsoClient.Send(req)
+	c.Assert(err, IsNil)
+	_, err = tsoClient.Recv()
+	c.Assert(err, NotNil)
 }
 
 var _ = Suite(&testTimeFallBackSuite{})
@@ -171,7 +182,7 @@ func (s *testTimeFallBackSuite) TestTimeFallBack(c *C) {
 
 func mustGetLeader(c *C, client *clientv3.Client, leaderPath string) *pdpb.Member {
 	for i := 0; i < 20; i++ {
-		leader, err := getLeader(client, leaderPath)
+		leader, _, err := getLeader(client, leaderPath)
 		c.Assert(err, IsNil)
 		if leader != nil {
 			return leader
