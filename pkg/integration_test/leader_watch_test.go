@@ -20,6 +20,7 @@ import (
 	. "github.com/pingcap/check"
 	gofail "github.com/pingcap/gofail/runtime"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/server"
 )
 
 func (s *integrationTestSuite) TestWatcher(c *C) {
@@ -54,6 +55,31 @@ func (s *integrationTestSuite) TestWatcher(c *C) {
 	gofail.Disable("github.com/pingcap/pd/server/delayWatcher")
 	testutil.WaitUntil(c, func(c *C) bool {
 		return c.Check(pd3.GetLeader().GetName(), Equals, pd2.GetConfig().Name)
+	})
+	c.Succeed()
+}
+
+func (s *integrationTestSuite) TestWatcherCompacted(c *C) {
+	c.Parallel()
+	cluster, err := newTestCluster(1, func(conf *server.Config) { conf.AutoCompactionRetention = "1s" })
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pd1 := cluster.GetServer(cluster.GetLeader())
+	c.Assert(pd1, NotNil)
+	client := pd1.GetEtcdClient()
+	client.Put(context.Background(), "test", "v")
+	// wait compaction
+	time.Sleep(2 * time.Second)
+	pd2, err := cluster.Join()
+	c.Assert(err, IsNil)
+	err = pd2.Run(context.Background())
+	c.Assert(err, IsNil)
+	testutil.WaitUntil(c, func(c *C) bool {
+		return c.Check(pd2.GetLeader().GetName(), Equals, pd1.GetConfig().Name)
 	})
 	c.Succeed()
 }
