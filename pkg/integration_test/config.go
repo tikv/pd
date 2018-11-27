@@ -22,6 +22,9 @@ import (
 	"github.com/pingcap/pd/server"
 )
 
+// ConfigOption is used to define customize settings in test.
+type ConfigOption func(conf *server.Config)
+
 type serverConfig struct {
 	Name                string
 	DataDir             string
@@ -45,7 +48,7 @@ func newServerConfig(name string, cc *clusterConfig, join bool) *serverConfig {
 	}
 }
 
-func (c *serverConfig) Generate() (*server.Config, error) {
+func (c *serverConfig) Generate(opts ...ConfigOption) (*server.Config, error) {
 	arguments := []string{
 		"--name=" + c.Name,
 		"--data-dir=" + c.DataDir,
@@ -64,6 +67,9 @@ func (c *serverConfig) Generate() (*server.Config, error) {
 	err := cfg.Parse(arguments)
 	if err != nil {
 		return nil, err
+	}
+	for _, opt := range opts {
+		opt(cfg)
 	}
 	return cfg, nil
 }
