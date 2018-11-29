@@ -686,7 +686,7 @@ func (s *Server) GetCluster() *metapb.Cluster {
 }
 
 // GetMetaRegions gets meta regions from cluster.
-func (s *Server) GetMetaRegions() []*metapb.Regions {
+func (s *Server) GetMetaRegions() []*metapb.Region {
 	cluster := s.GetRaftCluster()
 	if cluster != nil {
 		return cluster.GetMetaRegions()

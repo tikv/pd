@@ -158,28 +158,33 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 			log.Infof("%s already in sync with %s, the last index is %d", name, s.server.Name(), startIndex)
 			return nil
 		}
-		log.Warnf("no history regions form index %d, the leader maybe restarted", startIndex)
 		// do full synchronization
 		if startIndex == 0 {
+			log.Infof("%s start full sync with %s", name, s.server.Name())
 			regions := s.server.GetMetaRegions()
-			num := 0
+			start := 0
 			res := make([]*metapb.Region, 0, maxSyncRegionBatchSize)
-			for _, r := range regions {
-				if num < maxSyncRegionBatchSize {
-					num++
-					res = append(res, r)
-					continue
+			for syncedIndex, r := range regions {
+				res = append(res, r)
+				if len(res) < maxSyncRegionBatchSize {
+					if syncedIndex < len(regions)-1 {
+						continue
+					}
 				}
 				resp := &pdpb.SyncRegionResponse{
 					Header:     &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
 					Regions:    res,
-					StartIndex: s.history.GetNextIndex(),
+					StartIndex: uint64(start),
 				}
 				s.limit.Wait(int64(resp.Size()))
-				num = 0
+				start += len(res)
 				stream.Send(resp)
+				res = res[:0]
 			}
+			log.Infof("%s finish full sync with %s", name, s.server.Name())
+			return nil
 		}
+		log.Warnf("no history regions form index %d, the leader maybe restarted", startIndex)
 		return nil
 	}
 	log.Infof("sync the history regions with %s from index: %d, own last index: %d, got records length: %d",

@@ -101,6 +101,12 @@ func (s *testServer) Destroy() error {
 	return nil
 }
 
+func (s *testServer) ResignLeader() error {
+	s.Lock()
+	defer s.Unlock()
+	return s.server.ResignLeader("")
+}
+
 func (s *testServer) State() int32 {
 	s.RLock()
 	defer s.RUnlock()
@@ -294,6 +300,14 @@ func (c *testCluster) WaitLeader() string {
 		time.Sleep(500 * time.Millisecond)
 	}
 	return ""
+}
+
+func (c *testCluster) ResignLeader() error {
+	leader := c.GetLeader()
+	if len(leader) != 0 {
+		return c.servers[leader].ResignLeader()
+	}
+	return errors.New("no leader")
 }
 
 func (c *testCluster) GetCluster() *metapb.Cluster {

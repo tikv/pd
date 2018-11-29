@@ -14,6 +14,7 @@
 package integration
 
 import (
+	"context"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -73,5 +74,61 @@ func (s *integrationTestSuite) TestRegionSyncer(c *C) {
 	leaderServer = cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer, NotNil)
 	loadRegions := leaderServer.server.GetRaftCluster().GetRegions()
+	c.Assert(len(loadRegions), Equals, regionLen)
+}
+
+func (s *integrationTestSuite) TestFullSyncWithAddMember(c *C) {
+	c.Parallel()
+	cluster, err := newTestCluster(1, func(conf *server.Config) { conf.PDServerCfg.UseRegionStorage = true })
+
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	s.bootstrapCluster(leaderServer, c)
+	rc := leaderServer.server.GetRaftCluster()
+	c.Assert(rc, NotNil)
+	regionLen := 110
+	id := &idAllocator{}
+	regions := make([]*core.RegionInfo, 0, regionLen)
+	for i := 0; i < regionLen; i++ {
+		r := &metapb.Region{
+			Id: id.Alloc(),
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			Peers:    []*metapb.Peer{{Id: id.Alloc(), StoreId: uint64(0)}},
+		}
+		regions = append(regions, core.NewRegionInfo(r, r.Peers[0]))
+	}
+	for _, region := range regions {
+		err = rc.HandleRegionHeartbeat(region)
+		c.Assert(err, IsNil)
+	}
+	// ensure flush to region kv
+	time.Sleep(3 * time.Second)
+	// restart pd1
+	err = leaderServer.Stop()
+	c.Assert(err, IsNil)
+	err = leaderServer.Run(context.TODO())
+	c.Assert(cluster.WaitLeader(), Equals, "pd1")
+
+	// joint new pd
+	pd2, err := cluster.Join()
+	c.Assert(err, IsNil)
+	err = pd2.Run(context.TODO())
+	c.Assert(err, IsNil)
+	c.Assert(cluster.WaitLeader(), Equals, "pd1")
+	// wait full sync
+	time.Sleep(3 * time.Second)
+	err = cluster.ResignLeader()
+	c.Assert(cluster.WaitLeader(), Equals, "pd2")
+	loadRegions := pd2.server.GetRaftCluster().GetRegions()
 	c.Assert(len(loadRegions), Equals, regionLen)
 }
