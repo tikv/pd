@@ -7,10 +7,10 @@ BASIC_TEST_PKGS := $(filter-out github.com/pingcap/pd/pkg/integration_test,$(TES
 PACKAGES := go list ./...
 PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|github.com/pingcap/pd/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
-RETOOL:= ./hack/retool
+RETOOL:= ./scripts/retool
 
-GOFAIL_ENABLE  := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./hack/retool do gofail enable)
-GOFAIL_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./hack/retool do gofail disable)
+GOFAIL_ENABLE  := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do gofail enable)
+GOFAIL_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do gofail disable)
 
 LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --dirty)"
 LDFLAGS += -X "$(PD_PKG)/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
@@ -61,10 +61,10 @@ basic-test:
 
 # These need to be fixed before they can be ran regularly
 check-fail:
-	CGO_ENABLED=0 ./hack/retool do gometalinter.v2 --disable-all \
+	CGO_ENABLED=0 ./scripts/retool do gometalinter.v2 --disable-all \
 	  --enable errcheck \
 	  $$($(PACKAGE_DIRECTORIES))
-	CGO_ENABLED=0 ./hack/retool do gosec $$($(PACKAGE_DIRECTORIES))
+	CGO_ENABLED=0 ./scripts/retool do gosec $$($(PACKAGE_DIRECTORIES))
 
 check-all: static lint
 	@echo "checking"
@@ -72,16 +72,16 @@ check-all: static lint
 retool-setup: export GO111MODULE=off
 retool-setup: 
 	@which retool >/dev/null 2>&1 || go get github.com/twitchtv/retool
-	@./hack/retool sync
+	@./scripts/retool sync
 
 check: retool-setup check-all
 
 static:
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
-	./hack/retool do govet --shadow $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
+	./scripts/retool do govet --shadow $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 
-	CGO_ENABLED=0 ./hack/retool do gometalinter.v2 --disable-all --deadline 120s \
+	CGO_ENABLED=0 ./scripts/retool do gometalinter.v2 --disable-all --deadline 120s \
 	  --enable misspell \
 	  --enable megacheck \
 	  --enable ineffassign \
@@ -89,7 +89,7 @@ static:
 
 lint:
 	@echo "linting"
-	CGO_ENABLED=0 ./hack/retool do revive -formatter friendly -config revive.toml $$($(PACKAGES))
+	CGO_ENABLED=0 ./scripts/retool do revive -formatter friendly -config revive.toml $$($(PACKAGES))
 
 travis_coverage:
 ifeq ("$(TRAVIS_COVERAGE)", "1")
