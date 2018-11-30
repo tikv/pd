@@ -1,5 +1,45 @@
 # PD Change Log
 
+## v2.1.0
++ Optimize availability
+    - Introduce the version control mechanism and support rolling update of the cluster compatibly 
+    - [Enable `Raft PreVote`](https://github.com/pingcap/pd/blob/5c7b18cf3af91098f07cf46df0b59fbf8c7c5462/conf/config.toml#L22) among PD nodes to avoid leader reelection when network recovers after network isolation
+    - Enable `raft learner` by default to lower the risk of unavailable data caused by machine failure during scheduling
+    - TSO allocation is no longer affected by the system clock going backwards
+    - Support the `Region merge` feature to reduce the overhead brought by metadata
+
++ Optimize the scheduler
+    - Optimize the processing of Down Store to speed up making up replicas
+    - Optimize the hotspot scheduler to improve its adaptability when traffic statistics information jitters
+    - Optimize the start of Coordinator to reduce the unnecessary scheduling caused by restarting PD
+    - Optimize the issue that Balance Scheduler schedules small Regions frequently
+    - Optimize Region merge to consider the number of rows within the Region
+    - [Add more commands to control the scheduling policy](https://pingcap.com/docs/tools/pd-control/#config-show--set-option-value)
+    - Improve [PD simulator](https://github.com/pingcap/pd/tree/release-2.1/tools/pd-simulator) to simulate the scheduling scenarios
+
++ API and operation tools 
+    - Add the [`GetPrevRegion` interface](https://github.com/pingcap/kvproto/blob/8e3f33ac49297d7c93b61a955531191084a2f685/proto/pdpb.proto#L40) to support the `TiDB reverse scan` feature
+    - Add the [`BatchSplitRegion` interface](https://github.com/pingcap/kvproto/blob/8e3f33ac49297d7c93b61a955531191084a2f685/proto/pdpb.proto#L54) to speed up TiKV Region splitting
+    - Add the [`GCSafePoint` interface](https://github.com/pingcap/kvproto/blob/8e3f33ac49297d7c93b61a955531191084a2f685/proto/pdpb.proto#L64-L66) to support distributed GC in TiDB
+    - Add the [`GetAllStores` interface](https://github.com/pingcap/kvproto/blob/8e3f33ac49297d7c93b61a955531191084a2f685/proto/pdpb.proto#L32), to support distributed GC in TiDB
+    - pd-ctl supports:
+        - [using statistics for Region split](https://pingcap.com/docs/tools/pd-control/#operator-show--add--remove)
+        - [calling `jq` to format the JSON output](https://pingcap.com/docs/tools/pd-control/#jq-formatted-json-output-usage)
+        - [checking the Region information of the specified store](https://pingcap.com/docs/tools/pd-control/#region-store-store-id)
+        - [checking topN Region list sorted by versions](https://pingcap.com/docs/tools/pd-control/#region-topconfver-limit)
+        - [checking topN Region list sorted by size](https://pingcap.com/docs/tools/pd-control/#region-topsize-limit)
+        - [more precise TSO encoding](https://pingcap.com/docs/tools/pd-control/#tso)
+    - [pd-recover](https://pingcap.com/docs/tools/pd-recover) doesn't need to provide the `max-replica` parameter
+
++ Metrics
+    - Add related metrics for `Filter`
+    - Add metrics about etcd Raft state machine
+
++ Performance
+    - Optimize the performance of Region heartbeat to reduce the memory overhead brought by heartbeats
+    - Optimize the Region tree performance
+    - Optimize the performance of computing hotspot statistics
+
 ## v2.1.0-rc.5
 - Fix the issues related to `pd-ctl` reading the Region key [#1298](https://github.com/pingcap/pd/pull/1298) [#1299](https://github.com/pingcap/pd/pull/1299) [#1308](https://github.com/pingcap/pd/pull/1308)
 - Fix the issue that the `regions/check` API returns the wrong result [#1311](https://github.com/pingcap/pd/pull/1311)
