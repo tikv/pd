@@ -160,28 +160,26 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 		}
 		// do full synchronization
 		if startIndex == 0 {
-			log.Infof("%s start full sync with %s", name, s.server.Name())
 			regions := s.server.GetMetaRegions()
-			start := 0
+			lastIndex := 0
+			start := time.Now()
 			res := make([]*metapb.Region, 0, maxSyncRegionBatchSize)
 			for syncedIndex, r := range regions {
 				res = append(res, r)
-				if len(res) < maxSyncRegionBatchSize {
-					if syncedIndex < len(regions)-1 {
-						continue
-					}
+				if len(res) < maxSyncRegionBatchSize && syncedIndex < len(regions)-1 {
+					continue
 				}
 				resp := &pdpb.SyncRegionResponse{
 					Header:     &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
 					Regions:    res,
-					StartIndex: uint64(start),
+					StartIndex: uint64(lastIndex),
 				}
 				s.limit.Wait(int64(resp.Size()))
-				start += len(res)
+				lastIndex += len(res)
 				stream.Send(resp)
 				res = res[:0]
 			}
-			log.Infof("%s finish full sync with %s", name, s.server.Name())
+			log.Infof("%s has completed full synchronization with %s, spend %v", name, s.server.Name(), time.Since(start))
 			return nil
 		}
 		log.Warnf("no history regions form index %d, the leader maybe restarted", startIndex)

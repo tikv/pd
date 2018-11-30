@@ -117,6 +117,7 @@ func (s *integrationTestSuite) TestFullSyncWithAddMember(c *C) {
 	err = leaderServer.Stop()
 	c.Assert(err, IsNil)
 	err = leaderServer.Run(context.TODO())
+	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd1")
 
 	// joint new pd
@@ -125,9 +126,10 @@ func (s *integrationTestSuite) TestFullSyncWithAddMember(c *C) {
 	err = pd2.Run(context.TODO())
 	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd1")
-	// wait full sync
+	// wait full syn
 	time.Sleep(3 * time.Second)
 	err = cluster.ResignLeader()
+	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd2")
 	loadRegions := pd2.server.GetRaftCluster().GetRegions()
 	c.Assert(len(loadRegions), Equals, regionLen)
