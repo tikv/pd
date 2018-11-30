@@ -943,9 +943,9 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	// partial store overlap not including leader
 	ops := s.mc.Check(s.regions[2])
 	s.checkSteps(c, ops[0], []schedule.OperatorStep{
+		schedule.TransferLeader{FromStore: 6, ToStore: 5},
 		schedule.AddLearner{ToStore: 4, PeerID: 1},
 		schedule.PromoteLearner{ToStore: 4, PeerID: 1},
-		schedule.TransferLeader{FromStore: 6, ToStore: 5},
 		schedule.RemovePeer{FromStore: 6},
 		schedule.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
@@ -1018,14 +1018,14 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.checkSteps(c, ops[0], []schedule.OperatorStep{
 		schedule.AddLearner{ToStore: 1, PeerID: 3},
 		schedule.PromoteLearner{ToStore: 1, PeerID: 3},
+		schedule.RemovePeer{FromStore: 3},
 		schedule.AddLearner{ToStore: 4, PeerID: 4},
 		schedule.PromoteLearner{ToStore: 4, PeerID: 4},
+		schedule.RemovePeer{FromStore: 6},
 		schedule.AddLearner{ToStore: 5, PeerID: 5},
 		schedule.PromoteLearner{ToStore: 5, PeerID: 5},
 		schedule.TransferLeader{FromStore: 2, ToStore: 1},
 		schedule.RemovePeer{FromStore: 2},
-		schedule.RemovePeer{FromStore: 3},
-		schedule.RemovePeer{FromStore: 6},
 		schedule.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
