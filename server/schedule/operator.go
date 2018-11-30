@@ -504,19 +504,20 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 		return nil, kind, errors.New("mismatch count of peer")
 	}
 
-	// there is a case that a follower is added and transfer leader to it,
+	// There is a case that a follower is added and transfer leader to it,
 	// and the apply process of it is slow so leader regards it as voter
 	// but actually it is still learner. Once that, the follower can't be leader,
 	// but old leader can't know that so there is no leader to serve for a while.
+	// So target leader should be the first added follower if there is no transection stores.
 	var targetLeader uint64
 	var toAdds [][]OperatorStep
 
-	// Check whether to transfer leader or not
+	// get overlapped part of the peers of two regions
 	intersection := getIntersectionStores(sourcePeers, targetPeers)
 	for _, peer := range targetPeers {
 		storeID := peer.GetStoreId()
+		// find missing peers.
 		if _, found := intersection[storeID]; !found {
-			// Find missing peers.
 			var addSteps []OperatorStep
 
 			peer, err := cluster.AllocPeer(storeID)
@@ -534,6 +535,7 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 			}
 			toAdds = append(toAdds, addSteps)
 
+			// record the first added peer
 			if targetLeader == 0 {
 				targetLeader = storeID
 			}
@@ -543,6 +545,7 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 
 	leaderID := source.GetLeader().GetStoreId()
 	for storeID := range intersection {
+		// if leader belongs to overlapped part, no need to transfer
 		if storeID == leaderID {
 			targetLeader = 0
 			break
@@ -550,16 +553,15 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 		targetLeader = storeID
 	}
 
+	// if intersection is not empty and leader doesn't belong to intersection, transfer leader to store in overlapped part
 	if len(intersection) != 0 && targetLeader != 0 {
-		// if intersection is not empty and leader doesn't belong to intersection, transfer leader to store in intersection
 		steps = append(steps, TransferLeader{FromStore: source.GetLeader().GetStoreId(), ToStore: targetLeader})
 		kind |= OpLeader
 		targetLeader = 0
 	}
 
-	// target leader should be the first added follower if there is no transection stores.
 	index := 0
-	// Remove redundant peers.
+	// remove redundant peers.
 	for _, peer := range sourcePeers {
 		if _, found := intersection[peer.GetStoreId()]; found {
 			continue
@@ -576,7 +578,7 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 		index++
 	}
 
-	// remove leader
+	// transfer leader before remove leader
 	if targetLeader != 0 {
 		steps = append(steps, toAdds[index]...)
 		steps = append(steps, TransferLeader{FromStore: leaderID, ToStore: targetLeader})
