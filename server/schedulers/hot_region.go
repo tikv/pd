@@ -14,8 +14,14 @@
 package schedulers
 
 import (
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"math"
 	"math/rand"
+	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -283,7 +289,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 			destStoreIDs = append(destStoreIDs, store.GetId())
 		}
 
-		destStoreID = h.selectDestStore(destStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
+		destStoreID, _ = h.selectDestStore(destStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
 		if destStoreID != 0 {
 			h.adjustBalanceLimit(srcStoreID, storesStat)
 
@@ -335,7 +341,8 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 		if len(candidateStoreIDs) == 0 {
 			continue
 		}
-		destStoreID := h.selectDestStore(candidateStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
+		destStoreID, mstr := h.selectDestStore(candidateStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
+		postJSON("", mstr, srcStoreID, destStoreID, srcRegion)
 		if destStoreID == 0 {
 			continue
 		}
@@ -343,10 +350,87 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 		destPeer := srcRegion.GetStoreVoter(destStoreID)
 		if destPeer != nil {
 			h.adjustBalanceLimit(srcStoreID, storesStat)
-			return srcRegion, destPeer
+			step := schedule.TransferLeader{FromStore: srcRegion.GetLeader().GetStoreId(), ToStore: destPeer.GetStoreId()}
+			ddPeer := postJSON(step.String(), mstr, srcStoreID, destStoreID, srcRegion)
+			return srcRegion, ddPeer
 		}
 	}
 	return nil, nil
+}
+
+func postJSON(s string, ms []Feature, srcStoreID, destStoreID uint64, srcRegion *core.RegionInfo) *metapb.Peer {
+	if s == "" || ms == nil {
+		return nil
+	}
+	b, err := json.Marshal(ms)
+	if err != nil {
+		log.Println(err)
+	}
+
+	step := "[" + "\"" + s + "\"" + ","
+	str := "{\"updates\":[" + step + string(b) + "],"
+
+	str = str[:len(str)-1]
+	str = str + "]}"
+
+	// PUT model service
+	httpClient("PUT", str, srcStoreID, destStoreID)
+
+	// POST model
+	gstr := "{\"features\": [" + string(b) + "]}"
+	dsID := httpClient("POST", gstr, srcStoreID, destStoreID)
+
+	destPeer := srcRegion.GetStoreVoter(dsID)
+	if destPeer != nil {
+		return destPeer
+	}
+	return nil
+}
+
+var reqURL = "http://localhost:8000/model/pd"
+
+func httpClient(method, jsonStr string, srcStoreID, destStoreID uint64) uint64 {
+	logStr := "[HT]method:" + method + ", URL:>" + reqURL
+
+	req, err := http.NewRequest(method, reqURL, strings.NewReader(jsonStr))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+
+	if resp == nil || err != nil {
+		log.Println("[HOT] http request error or resp is nil, ", err)
+		return 0
+	}
+	defer resp.Body.Close()
+
+	body, _ := ioutil.ReadAll(resp.Body)
+	headStr := fmt.Sprintf("%v", resp.Header)
+	logStr += ", response Status:" + resp.Status + ", response Headers:" + headStr + ", response Body:" + string(body)
+	var destStoreIDD int
+	if strings.Contains(string(body), "predictions") {
+		var maxProbability float64
+		var v map[string][]interface{}
+		json.Unmarshal(body, &v)
+		v2 := v["predictions"]
+		var ke string
+		for k, v := range v2[0].(map[string]interface{}) {
+			if maxProbability < v.(float64) {
+				maxProbability = v.(float64)
+				ke = k
+			}
+		}
+		logStr += "\nsuggest step: " + ke + ", maxProbability:" + fmt.Sprintf("%.15f", maxProbability)
+		// suggest step: transfer leader from store 7 to store 2, maxProbability:0.432223661517613
+		srcStoreIDD, _ := strconv.Atoi(ke[27:28])
+		destStoreIDD, _ = strconv.Atoi(ke[38:39])
+		if srcStoreID == uint64(srcStoreIDD) && destStoreID == uint64(destStoreIDD) {
+			logStr += "-[HIT]"
+		} else {
+			logStr += "-[MISS], srcStoreID:" + strconv.Itoa(int(srcStoreID)) + ",destStoreID:" + strconv.Itoa(int(destStoreID))
+		}
+	}
+	log.Println(logStr)
+	return uint64(destStoreIDD)
 }
 
 // Select the store to move hot regions from.
@@ -369,36 +453,74 @@ func (h *balanceHotRegionsScheduler) selectSrcStore(stats core.StoreHotRegionsSt
 	return
 }
 
+type Feature struct {
+	// 	[{"feature_type":"Category", "name":"hotRegionsCount1", "value":"true"},{"feature_type":"Category", "name":"minRegionsCount1", "value":"true"}]
+	FeatureType string `json:"feature_type"`
+	Name        string `json:"name"`
+	Value       string `json:"value"`
+}
+
 // selectDestStore selects a target store to hold the region of the source region.
 // We choose a target store based on the hot region number and flow bytes of this store.
-func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64, regionFlowBytes uint64, srcStoreID uint64, storesStat core.StoreHotRegionsStat) (destStoreID uint64) {
+func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64, regionFlowBytes uint64, srcStoreID uint64, storesStat core.StoreHotRegionsStat) (uint64, []Feature) {
 	sr := storesStat[srcStoreID]
 	srcFlowBytes := sr.TotalFlowBytes
 	srcHotRegionsCount := sr.RegionsStat.Len()
 
 	var (
+		destStoreID     uint64
 		minFlowBytes    uint64 = math.MaxUint64
 		minRegionsCount        = int(math.MaxInt32)
 	)
+	var strategies []Feature
 	for _, storeID := range candidateStoreIDs {
 		if s, ok := storesStat[storeID]; ok {
 			if srcHotRegionsCount-s.RegionsStat.Len() > 1 && minRegionsCount > s.RegionsStat.Len() {
 				destStoreID = storeID
 				minFlowBytes = s.TotalFlowBytes
 				minRegionsCount = s.RegionsStat.Len()
+				str1 := fmt.Sprintf("hotRegionsCount%d", storeID)
+				str2 := fmt.Sprintf("minRegionsCount%d", storeID)
+				strategy := Feature{}
+				strategy.FeatureType = "Category"
+				strategy.Name = str1
+				strategy.Value = "true"
+				strategies = append(strategies, strategy)
+				strategy1 := Feature{}
+				strategy1.FeatureType = "Category"
+				strategy1.Name = str2
+				strategy1.Value = "true"
+				strategies = append(strategies, strategy1)
 				continue
 			}
 			if minRegionsCount == s.RegionsStat.Len() && minFlowBytes > s.TotalFlowBytes &&
 				uint64(float64(srcFlowBytes)*hotRegionScheduleFactor) > s.TotalFlowBytes+2*regionFlowBytes {
 				minFlowBytes = s.TotalFlowBytes
 				destStoreID = storeID
+				str1 := fmt.Sprintf("minFlowBytes%d", storeID)
+				str2 := fmt.Sprintf("srcFlowBytes%d", storeID)
+				strategy2 := Feature{}
+				strategy2.FeatureType = "Category"
+				strategy2.Name = str1
+				strategy2.Value = "true"
+				strategies = append(strategies, strategy2)
+				strategy3 := Feature{}
+				strategy3.FeatureType = "Category"
+				strategy3.Name = str2
+				strategy3.Value = "true"
+				strategies = append(strategies, strategy3)
 			}
 		} else {
 			destStoreID = storeID
-			return
+			return destStoreID, strategies
 		}
 	}
-	return
+	strategy := Feature{}
+	strategy.FeatureType = "Category"
+	strategy.Name = "srcRegion"
+	strategy.Value = fmt.Sprintf("%d", srcStoreID)
+	strategies = append(strategies, strategy)
+	return destStoreID, strategies
 }
 
 func (h *balanceHotRegionsScheduler) adjustBalanceLimit(storeID uint64, storesStat core.StoreHotRegionsStat) {
