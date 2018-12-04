@@ -584,13 +584,19 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 		steps = append(steps, TransferLeader{FromStore: leaderID, ToStore: targetLeader})
 		steps = append(steps, RemovePeer{FromStore: leaderID})
 		kind |= OpLeader | OpRegion
+		index++
 	}
+
+	if index != len(toAdds) {
+		return nil, kind, errors.New("wrong count of add steps")
+	}
+
 	return steps, kind, nil
 }
 
 // getIntersectionStores returns the stores included in two region's peers.
 func getIntersectionStores(a []*metapb.Peer, b []*metapb.Peer) map[uint64]struct{} {
-	set := make(map[uint64]struct{})
+	intersection := make(map[uint64]struct{})
 	hash := make(map[uint64]struct{})
 
 	for _, peer := range a {
@@ -599,9 +605,9 @@ func getIntersectionStores(a []*metapb.Peer, b []*metapb.Peer) map[uint64]struct
 
 	for _, peer := range b {
 		if _, found := hash[peer.GetStoreId()]; found {
-			set[peer.GetStoreId()] = struct{}{}
+			intersection[peer.GetStoreId()] = struct{}{}
 		}
 	}
 
-	return set
+	return intersection
 }
