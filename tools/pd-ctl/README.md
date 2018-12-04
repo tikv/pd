@@ -353,6 +353,7 @@ Usage:
 >> operator show leader                                 // Display all leader operators
 >> operator show region                                 // Display all Region operators
 >> operator add add-peer 1 2                            // Add a replica of Region 1 on store 2
+>> operator add add-learner 1 2                         // Add a learner replica of Region 1 on store 2
 >> operator add remove-peer 1 2                         // Remove a replica of Region 1 on store 2
 >> operator add transfer-leader 1 2                     // Schedule the leader of Region 1 to store 2
 >> operator add transfer-region 1 2 3 4                 // Schedule Region 1 to stores 2,3,4
@@ -575,7 +576,7 @@ Use this command to view the namespace information of the table.
 Usage:
 
 ```bash
->> table_ns add ts1 1            // Add the table with the table id of 1 to the namespace named ts1 
+>> table_ns add ts1 1            // Add the table with the table id of 1 to the namespace named ts1
 >> table_ns create ts1           // Add the namespace named ts1
 >> table_ns remove ts1 1         // Remove the table with the table id of 1 from the namespace named ts1
 >> table_ns rm_meta ts1          // Remove the metadata from the namespace named ts1

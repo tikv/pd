@@ -67,8 +67,9 @@ func (s *RegionSyncer) establish(addr string) (ClientStream, error) {
 		return nil, err
 	}
 	err = client.Send(&pdpb.SyncRegionRequest{
-		Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()},
-		Member: s.server.GetMemberInfo(),
+		Header:     &pdpb.RequestHeader{ClusterId: s.server.ClusterID()},
+		Member:     s.server.GetMemberInfo(),
+		StartIndex: s.history.GetNextIndex(),
 	})
 	if err != nil {
 		cancel()
@@ -102,22 +103,29 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						return
 					}
 				}
-				log.Errorf("%s failed to establish sync stream with leader %s: %s", s.server.GetMemberInfo().GetName(), s.server.GetLeader().GetName(), err)
+				log.Errorf("%s failed to establish sync stream with leader %s: %s", s.server.Name(), s.server.GetLeader().GetName(), err)
 				time.Sleep(time.Second)
 				continue
 			}
-			log.Infof("%s start sync with leader %s", s.server.GetMemberInfo().GetName(), s.server.GetLeader().GetName())
+			log.Infof("%s start sync with leader %s, the request index is %d", s.server.Name(), s.server.GetLeader().GetName(), s.history.GetNextIndex())
 			for {
 				resp, err := client.Recv()
 				if err != nil {
 					log.Error("region sync with leader meet error:", err)
 					client.CloseSend()
+					time.Sleep(time.Second)
 					break
+				}
+				if s.history.GetNextIndex() != resp.GetStartIndex() {
+					log.Warnf("%s sync index not match the leader, own: %d, leader: %d, records length: %d",
+						s.server.Name(), s.history.GetNextIndex(), resp.GetStartIndex(), len(resp.GetRegions()))
+					// reset index
+					s.history.ResetWithIndex(resp.GetStartIndex())
 				}
 				for _, r := range resp.GetRegions() {
 					err = s.server.GetStorage().SaveRegion(r)
-					if err != nil {
-						s.history.record(core.NewRegionInfo(r, nil))
+					if err == nil {
+						s.history.Record(core.NewRegionInfo(r, nil))
 					}
 				}
 			}

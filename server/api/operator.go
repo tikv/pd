@@ -170,6 +170,21 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	case "add-learner":
+		regionID, ok := input["region_id"].(float64)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "missing region id")
+			return
+		}
+		storeID, ok := input["store_id"].(float64)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "invalid store id to transfer peer to")
+			return
+		}
+		if err := h.AddAddLearnerOperator(uint64(regionID), uint64(storeID)); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	case "remove-peer":
 		regionID, ok := input["region_id"].(float64)
 		if !ok {

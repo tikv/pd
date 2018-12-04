@@ -132,7 +132,7 @@ func (h *balanceHotRegionsScheduler) allowBalanceRegion(cluster schedule.Cluster
 		h.opController.OperatorCount(schedule.OpRegion) < cluster.GetRegionScheduleLimit()
 }
 
-func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
+func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
 	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster)
 }

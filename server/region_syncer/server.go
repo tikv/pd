@@ -15,13 +15,17 @@ package syncer
 
 import (
 	"context"
+	"io"
 	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -49,6 +53,7 @@ type Server interface {
 	GetMemberInfo() *pdpb.Member
 	GetLeader() *pdpb.Member
 	GetStorage() *core.KV
+	Name() string
 }
 
 // RegionSyncer is used to sync the region information without raft.
@@ -89,28 +94,86 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 			return
 		case first := <-regionNotifier:
 			requests = append(requests, first.GetMeta())
-			s.history.record(first)
+			startIndex := s.history.GetNextIndex()
+			s.history.Record(first)
 			pending := len(regionNotifier)
 			for i := 0; i < pending && i < maxSyncRegionBatchSize; i++ {
 				region := <-regionNotifier
 				requests = append(requests, region.GetMeta())
-				s.history.record(region)
+				s.history.Record(region)
 			}
 			regions := &pdpb.SyncRegionResponse{
-				Header:  &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
-				Regions: requests,
+				Header:     &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+				Regions:    requests,
+				StartIndex: startIndex,
 			}
 			s.broadcast(regions)
 		case <-ticker.C:
-			alive := &pdpb.SyncRegionResponse{Header: &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()}}
+			alive := &pdpb.SyncRegionResponse{
+				Header:     &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+				StartIndex: s.history.GetNextIndex(),
+			}
 			s.broadcast(alive)
 		}
 		requests = requests[:0]
 	}
 }
 
-// BindStream binds the established server stream.
-func (s *RegionSyncer) BindStream(name string, stream ServerStream) {
+// Sync firstly tries to sync the history records to client.
+// then to sync the latest records.
+func (s *RegionSyncer) Sync(stream pdpb.PD_SyncRegionsServer) error {
+	for {
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		clusterID := request.GetHeader().GetClusterId()
+		if clusterID != s.server.ClusterID() {
+			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.server.ClusterID(), clusterID)
+		}
+		log.Infof("establish sync region stream with %s [%s]", request.GetMember().GetName(), request.GetMember().GetClientUrls()[0])
+
+		err = s.syncHistoryRegion(request, stream)
+		if err != nil {
+			return err
+		}
+		s.bindStream(request.GetMember().GetName(), stream)
+	}
+}
+
+func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream pdpb.PD_SyncRegionsServer) error {
+	startIndex := request.GetStartIndex()
+	name := request.GetMember().GetName()
+	records := s.history.RecordsFrom(startIndex)
+	if len(records) == 0 {
+		if s.history.GetNextIndex() == startIndex {
+			log.Infof("%s already in sync with %s, the last index is %d", name, s.server.Name(), startIndex)
+			return nil
+		}
+		log.Warnf("no history regions from index %d, the leader maybe restarted", startIndex)
+		// TODO: Full synchronization
+		// if startIndex == 0 {}
+		return nil
+	}
+	log.Infof("sync the history regions with %s from index: %d, own last index: %d, got records length: %d",
+		name, startIndex, s.history.GetNextIndex(), len(records))
+	regions := make([]*metapb.Region, len(records))
+	for i, r := range records {
+		regions[i] = r.GetMeta()
+	}
+	resp := &pdpb.SyncRegionResponse{
+		Header:     &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+		Regions:    regions,
+		StartIndex: startIndex,
+	}
+	return stream.Send(resp)
+}
+
+// bindStream binds the established server stream.
+func (s *RegionSyncer) bindStream(name string, stream ServerStream) {
 	s.Lock()
 	defer s.Unlock()
 	s.streams[name] = stream

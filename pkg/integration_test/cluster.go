@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
 )
 
@@ -171,6 +172,37 @@ func (s *testServer) GetStores() []*metapb.Store {
 	return s.server.GetRaftCluster().GetStores()
 }
 
+func (s *testServer) GetRaftCluster() *server.RaftCluster {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetRaftCluster()
+}
+
+func (s *testServer) GetRegions() []*core.RegionInfo {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetRaftCluster().GetRegions()
+}
+
+func (s *testServer) GetRegionInfoByID(regionID uint64) *core.RegionInfo {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetRaftCluster().GetRegionInfoByID(regionID)
+}
+
+func (s *testServer) GetAdjacentRegions(region *core.RegionInfo) []*core.RegionInfo {
+	s.RLock()
+	defer s.RUnlock()
+	left, right := s.server.GetRaftCluster().GetAdjacentRegions(region)
+	return []*core.RegionInfo{left, right}
+}
+
+func (s *testServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetRaftCluster().GetStoreRegions(storeID)
+}
+
 func (s *testServer) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
 	s.RLock()
 	defer s.RUnlock()
@@ -277,6 +309,12 @@ func (c *testCluster) GetEtcdClient() *clientv3.Client {
 func (c *testCluster) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
 	leader := c.GetLeader()
 	return c.servers[leader].CheckHealth(members)
+}
+
+func (c *testCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
+	leader := c.GetLeader()
+	cluster := c.servers[leader].GetRaftCluster()
+	return cluster.HandleRegionHeartbeat(region)
 }
 
 func (c *testCluster) Join() (*testServer, error) {

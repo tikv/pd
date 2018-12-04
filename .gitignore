@@ -7,3 +7,4 @@ default.pd
 .DS_Store
 tags
 /.retools/
+vendor

@@ -34,7 +34,7 @@ func (alloc *idAllocator) Alloc() uint64 {
 
 func (s *integrationTestSuite) TestRegionSyncer(c *C) {
 	c.Parallel()
-	cluster, err := newTestCluster(3, func(conf *server.Config) { conf.PDServerCfg.EnableRegionStorage = true })
+	cluster, err := newTestCluster(3, func(conf *server.Config) { conf.PDServerCfg.UseRegionStorage = true })
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 

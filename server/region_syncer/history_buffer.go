@@ -15,6 +15,7 @@ package syncer
 
 import (
 	"strconv"
+	"sync"
 
 	"github.com/pingcap/pd/server/core"
 	log "github.com/sirupsen/logrus"
@@ -26,6 +27,7 @@ const (
 )
 
 type historyBuffer struct {
+	sync.RWMutex
 	index      uint64
 	records    []*core.RegionInfo
 	head       int
@@ -53,10 +55,15 @@ func newHistoryBuffer(size int, kv core.KVBase) *historyBuffer {
 }
 
 func (h *historyBuffer) len() int {
-	if h.tail < h.head {
-		return h.tail + h.size - h.head
+	return h.distanceToTail(h.head)
+}
+
+func (h *historyBuffer) distanceToTail(pos int) int {
+	if h.tail < pos {
+		return h.tail + h.size - pos
 	}
-	return h.tail - h.head
+	return h.tail - pos
+
 }
 
 func (h *historyBuffer) nextIndex() uint64 {
@@ -67,7 +74,10 @@ func (h *historyBuffer) firstIndex() uint64 {
 	return h.index - uint64(h.len())
 }
 
-func (h *historyBuffer) record(r *core.RegionInfo) {
+func (h *historyBuffer) Record(r *core.RegionInfo) {
+	h.Lock()
+	defer h.Unlock()
+	regionSyncerStatus.WithLabelValues("sync_index").Set(float64(h.index))
 	h.records[h.tail] = r
 	h.tail = (h.tail + 1) % h.size
 	if h.tail == h.head {
@@ -79,6 +89,37 @@ func (h *historyBuffer) record(r *core.RegionInfo) {
 		h.persist()
 		h.flushCount = defaultFlushCount
 	}
+}
+
+func (h *historyBuffer) RecordsFrom(index uint64) []*core.RegionInfo {
+	h.RLock()
+	defer h.RUnlock()
+	var pos int
+	if index < h.nextIndex() && index >= h.firstIndex() {
+		pos = (h.head + int(index-h.firstIndex())) % h.size
+	} else {
+		return nil
+	}
+	records := make([]*core.RegionInfo, 0, h.distanceToTail(pos))
+	for i := pos; i != h.tail; i = (i + 1) % h.size {
+		records = append(records, h.records[i])
+	}
+	return records
+}
+
+func (h *historyBuffer) ResetWithIndex(index uint64) {
+	h.Lock()
+	defer h.Unlock()
+	h.index = index
+	h.head = 0
+	h.tail = 0
+	h.flushCount = defaultFlushCount
+}
+
+func (h *historyBuffer) GetNextIndex() uint64 {
+	h.RLock()
+	defer h.RUnlock()
+	return h.index
 }
 
 func (h *historyBuffer) get(index uint64) *core.RegionInfo {
@@ -100,9 +141,12 @@ func (h *historyBuffer) reload() {
 			log.Fatalf("load history index failed: %s", err)
 		}
 	}
+	log.Info("history index start at: ", h.firstIndex())
 }
 
 func (h *historyBuffer) persist() {
+	regionSyncerStatus.WithLabelValues("first_index").Set(float64(h.firstIndex()))
+	regionSyncerStatus.WithLabelValues("last_index").Set(float64(h.nextIndex()))
 	err := h.kv.Save(historyKey, strconv.FormatUint(h.nextIndex(), 10))
 	if err != nil {
 		log.Warnf("persist history index (%d) failed: %v", h.nextIndex(), err)

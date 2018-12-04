@@ -271,6 +271,12 @@ types:
     properties:
       region_id: integer
       store_id: integer
+  AddLearnerOperator:
+    type: Operator
+    discriminatorValue: add-learner
+    properties:
+      region_id: integer
+      store_id: integer
   RemovePeerOperator:
     type: Operator
     discriminatorValue: remove-peer
@@ -1025,7 +1031,7 @@ types:
         500:
           description: PD server failed to proceed the request.
     delete:
-      description: Cancel a Region's pending operator.      
+      description: Cancel a Region's pending operator.
       responses:
         200:
           description: The pending operator is cancelled.

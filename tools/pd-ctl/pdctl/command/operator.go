@@ -77,6 +77,7 @@ func NewAddOperatorCommand() *cobra.Command {
 	c.AddCommand(NewTransferRegionCommand())
 	c.AddCommand(NewTransferPeerCommand())
 	c.AddCommand(NewAddPeerCommand())
+	c.AddCommand(NewAddLearnerCommand())
 	c.AddCommand(NewRemovePeerCommand())
 	c.AddCommand(NewMergeRegionCommand())
 	c.AddCommand(NewSplitRegionCommand())
@@ -191,6 +192,35 @@ func addPeerCommandFunc(cmd *cobra.Command, args []string) {
 	ids, err := parseUint64s(args)
 	if err != nil {
 		cmd.Println(err)
+		return
+	}
+
+	input := make(map[string]interface{})
+	input["name"] = cmd.Name()
+	input["region_id"] = ids[0]
+	input["store_id"] = ids[1]
+	postJSON(cmd, operatorsPrefix, input)
+}
+
+// NewAddLearnerCommand returns a command to add region learner.
+func NewAddLearnerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "add-learner <region_id> <to_store_id>",
+		Short: "add a region learner on specified store",
+		Run:   addLearnerCommandFunc,
+	}
+	return c
+}
+
+func addLearnerCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 2 {
+		fmt.Println(cmd.UsageString())
+		return
+	}
+
+	ids, err := parseUint64s(args)
+	if err != nil {
+		fmt.Println(err)
 		return
 	}
 

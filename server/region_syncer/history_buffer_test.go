@@ -39,7 +39,7 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	h := newHistoryBuffer(1, core.NewMemoryKV())
 	c.Assert(h.len(), Equals, 0)
 	for _, r := range regions {
-		h.record(r)
+		h.Record(r)
 	}
 	c.Assert(h.len(), Equals, 1)
 	c.Assert(h.get(100), Equals, regions[h.nextIndex()-1])
@@ -48,7 +48,7 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	// size equals 2
 	h = newHistoryBuffer(2, core.NewMemoryKV())
 	for _, r := range regions {
-		h.record(r)
+		h.Record(r)
 	}
 	c.Assert(h.len(), Equals, 2)
 	c.Assert(h.get(100), Equals, regions[h.nextIndex()-1])
@@ -59,7 +59,7 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	kv := core.NewMemoryKV()
 	h1 := newHistoryBuffer(100, kv)
 	for i := 0; i < 6; i++ {
-		h1.record(regions[i])
+		h1.Record(regions[i])
 	}
 	c.Assert(h1.len(), Equals, 6)
 	c.Assert(h1.nextIndex(), Equals, uint64(6))
@@ -68,11 +68,12 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	// restart the buffer
 	h2 := newHistoryBuffer(100, kv)
 	c.Assert(h2.nextIndex(), Equals, uint64(6))
+	c.Assert(h2.firstIndex(), Equals, uint64(6))
 	c.Assert(h2.get(h.nextIndex()-1), IsNil)
 	c.Assert(h2.len(), Equals, 0)
 	for _, r := range regions {
 		index := h2.nextIndex()
-		h2.record(r)
+		h2.Record(r)
 		c.Assert(h2.get(uint64(index)), Equals, r)
 	}
 
@@ -82,4 +83,11 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	c.Assert(err, IsNil)
 	// flush in index 106
 	c.Assert(s, Equals, "106")
+
+	histories := h2.RecordsFrom(uint64(1))
+	c.Assert(len(histories), Equals, 0)
+	histories = h2.RecordsFrom(h2.firstIndex())
+	c.Assert(len(histories), Equals, 100)
+	c.Assert(h2.firstIndex(), Equals, uint64(7))
+	c.Assert(histories, DeepEquals, regions[1:])
 }

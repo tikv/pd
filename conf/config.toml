@@ -57,8 +57,8 @@ interval = "15s"
 address = ""
 
 [schedule]
-max-merge-region-size = 0
-max-merge-region-keys = 0
+max-merge-region-size = 20
+max-merge-region-keys = 200000
 split-merge-interval = "1h"
 max-snapshot-count = 3
 max-pending-peer-count = 16
