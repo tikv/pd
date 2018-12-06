@@ -199,7 +199,7 @@ func (c *coordinator) run() {
 		}
 		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, schedulerCfg.Args...)
 		if err != nil {
-			log.Errorf("can not create scheduler %s: %v", schedulerCfg.Type, err)
+			panic(fmt.Sprintf("can not create scheduler %s: %v", schedulerCfg.Type, err))
 		} else {
 			log.Infof("create scheduler %s", s.GetName())
 			if err = c.addScheduler(s, schedulerCfg.Args...); err != nil {
