@@ -327,7 +327,7 @@ func (m *configMetaData) CheckUndecoded() error {
 	for _, key := range undecoded {
 		errInfo += key.String() + ", "
 	}
-	return errors.New(errInfo)
+	return errors.New(errInfo[:len(errInfo)-2])
 }
 
 // Adjust is used to adjust the PD configurations.
