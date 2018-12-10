@@ -32,14 +32,17 @@ type regionInfo struct {
 	EndKey      string              `json:"end_key"`
 	RegionEpoch *metapb.RegionEpoch `json:"epoch,omitempty"`
 	Peers       []*metapb.Peer      `json:"peers,omitempty"`
+	SlavePeers  []*metapb.Peer      `json:"slave_peers,omitempty"`
 
-	Leader          *metapb.Peer      `json:"leader,omitempty"`
-	DownPeers       []*pdpb.PeerStats `json:"down_peers,omitempty"`
-	PendingPeers    []*metapb.Peer    `json:"pending_peers,omitempty"`
-	WrittenBytes    uint64            `json:"written_bytes,omitempty"`
-	ReadBytes       uint64            `json:"read_bytes,omitempty"`
-	ApproximateSize int64             `json:"approximate_size,omitempty"`
-	ApproximateKeys int64             `json:"approximate_keys,omitempty"`
+	Leader            *metapb.Peer      `json:"leader,omitempty"`
+	DownPeers         []*pdpb.PeerStats `json:"down_peers,omitempty"`
+	DownSlavePeers    []*pdpb.PeerStats `json:"down_slave_peers,omitempty"`
+	PendingPeers      []*metapb.Peer    `json:"pending_peers,omitempty"`
+	PendingSlavePeers []*metapb.Peer    `json:"pending_slave_peers,omitempty"`
+	WrittenBytes      uint64            `json:"written_bytes,omitempty"`
+	ReadBytes         uint64            `json:"read_bytes,omitempty"`
+	ApproximateSize   int64             `json:"approximate_size,omitempty"`
+	ApproximateKeys   int64             `json:"approximate_keys,omitempty"`
 }
 
 func newRegionInfo(r *core.RegionInfo) *regionInfo {
@@ -47,18 +50,21 @@ func newRegionInfo(r *core.RegionInfo) *regionInfo {
 		return nil
 	}
 	return &regionInfo{
-		ID:              r.GetID(),
-		StartKey:        string(core.HexRegionKey(r.GetStartKey())),
-		EndKey:          string(core.HexRegionKey(r.GetEndKey())),
-		RegionEpoch:     r.GetRegionEpoch(),
-		Peers:           r.GetPeers(),
-		Leader:          r.GetLeader(),
-		DownPeers:       r.GetDownPeers(),
-		PendingPeers:    r.GetPendingPeers(),
-		WrittenBytes:    r.GetBytesWritten(),
-		ReadBytes:       r.GetBytesRead(),
-		ApproximateSize: r.GetApproximateSize(),
-		ApproximateKeys: r.GetApproximateKeys(),
+		ID:                r.GetID(),
+		StartKey:          string(core.HexRegionKey(r.GetStartKey())),
+		EndKey:            string(core.HexRegionKey(r.GetEndKey())),
+		RegionEpoch:       r.GetRegionEpoch(),
+		Peers:             r.GetPeers(),
+		SlavePeers:        r.GetSlavePeers(),
+		Leader:            r.GetLeader(),
+		DownPeers:         r.GetDownPeers(),
+		DownSlavePeers:    r.GetSlaveDownPeers(),
+		PendingPeers:      r.GetPendingPeers(),
+		PendingSlavePeers: r.GetSlavePendingPeers(),
+		WrittenBytes:      r.GetBytesWritten(),
+		ReadBytes:         r.GetBytesRead(),
+		ApproximateSize:   r.GetApproximateSize(),
+		ApproximateKeys:   r.GetApproximateKeys(),
 	}
 }
 
