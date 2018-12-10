@@ -14,6 +14,8 @@
 package server
 
 import (
+	"fmt"
+	"os"
 	"path"
 
 	"github.com/BurntSushi/toml"
@@ -102,7 +104,9 @@ leader-schedule-limit = 0
 	c.Assert(err, IsNil)
 
 	// When invalid, use default values.
-	c.Assert(cfg.Name, Equals, defaultName)
+	host, err := os.Hostname()
+	c.Assert(err, IsNil)
+	c.Assert(cfg.Name, Equals, fmt.Sprintf("%s-%s", defaultName, host))
 	c.Assert(cfg.LeaderLease, Equals, defaultLeaderLease)
 	// When defined, use values from config file.
 	c.Assert(cfg.Schedule.MaxMergeRegionSize, Equals, uint64(0))
