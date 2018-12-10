@@ -125,16 +125,4 @@ type = "random-merge"
 	c.Assert(err, IsNil)
 	err = cfg.Adjust(&meta)
 	c.Assert(err, NotNil)
-
-	// Check wrong scheduler name
-	cfgData = `
-[[schedule.schedulers]]
-type = "random-merge-scheduler"
-args = [""]
-`
-	cfg = NewConfig()
-	meta, err = toml.Decode(cfgData, &cfg)
-	c.Assert(err, IsNil)
-	err = cfg.Adjust(&meta)
-	c.Assert(err, NotNil)
 }
