@@ -16,7 +16,6 @@ package command
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"path"
 	"strconv"
@@ -187,60 +186,60 @@ func NewDeleteLabelPropertyConfigCommand() *cobra.Command {
 func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, schedulePrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get config: %s\n", err)
+		cmd.Printf("Failed to get config: %s\n", err)
 		return
 	}
-	fmt.Println(r)
+	cmd.Println(r)
 }
 
 func showReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, replicationPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get config: %s\n", err)
+		cmd.Printf("Failed to get config: %s\n", err)
 		return
 	}
-	fmt.Println(r)
+	cmd.Println(r)
 }
 
 func showLabelPropertyConfigCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, labelPropertyPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get config: %s\n", err)
+		cmd.Printf("Failed to get config: %s\n", err)
 		return
 	}
-	fmt.Println(r)
+	cmd.Println(r)
 }
 
 func showAllConfigCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, configPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get config: %s\n", err)
+		cmd.Printf("Failed to get config: %s\n", err)
 		return
 	}
-	fmt.Println(r)
+	cmd.Println(r)
 }
 
 func showNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 	prefix := path.Join(namespacePrefix, args[0])
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get config: %s\n", err)
+		cmd.Printf("Failed to get config: %s\n", err)
 		return
 	}
-	fmt.Println(r)
+	cmd.Println(r)
 }
 
 func showClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, clusterVersionPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get cluster version: %s\n", err)
+		cmd.Printf("Failed to get cluster version: %s\n", err)
 		return
 	}
-	fmt.Println(r)
+	cmd.Println(r)
 }
 
 func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
@@ -268,36 +267,36 @@ func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
 
 func setConfigCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 	opt, val := args[0], args[1]
 	err := postConfigDataWithPath(cmd, opt, val, configPrefix)
 	if err != nil {
-		fmt.Printf("Failed to set config: %s\n", err)
+		cmd.Printf("Failed to set config: %s\n", err)
 		return
 	}
-	fmt.Println("Success!")
+	cmd.Println("Success!")
 }
 
 func setNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 3 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 	name, opt, val := args[0], args[1], args[2]
 	prefix := path.Join(namespacePrefix, name)
 	err := postConfigDataWithPath(cmd, opt, val, prefix)
 	if err != nil {
-		fmt.Printf("Failed to set namespace:%s config: %s\n", name, err)
+		cmd.Printf("Failed to set namespace:%s config: %s\n", name, err)
 		return
 	}
-	fmt.Println("Success!")
+	cmd.Println("Success!")
 }
 
 func deleteNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 && len(args) != 2 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 	name, opt := args[0], args[1]
@@ -312,10 +311,10 @@ func deleteNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	if err != nil {
-		fmt.Printf("Failed to delete namespace:%s config %s: %s\n", name, opt, err)
+		cmd.Printf("Failed to delete namespace:%s config %s: %s\n", name, opt, err)
 		return
 	}
-	fmt.Println("Success!")
+	cmd.Println("Success!")
 }
 
 func setLabelPropertyConfigCommandFunc(cmd *cobra.Command, args []string) {
@@ -328,7 +327,7 @@ func deleteLabelPropertyConfigCommandFunc(cmd *cobra.Command, args []string) {
 
 func postLabelProperty(cmd *cobra.Command, action string, args []string) {
 	if len(args) != 3 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 	input := map[string]interface{}{
@@ -343,7 +342,7 @@ func postLabelProperty(cmd *cobra.Command, action string, args []string) {
 
 func setClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 	input := map[string]interface{}{

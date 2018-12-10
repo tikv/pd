@@ -19,6 +19,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -137,7 +138,7 @@ func NewConfig() *Config {
 	fs.BoolVar(&cfg.Version, "version", false, "print version information and exit")
 	fs.StringVar(&cfg.configFile, "config", "", "Config file")
 
-	fs.StringVar(&cfg.Name, "name", defaultName, "human-readable name for this pd member")
+	fs.StringVar(&cfg.Name, "name", "", "human-readable name for this pd member")
 
 	fs.StringVar(&cfg.DataDir, "data-dir", "", "path to the data directory (default 'default.${name}')")
 	fs.StringVar(&cfg.ClientUrls, "client-urls", defaultClientUrls, "url for client traffic")
@@ -287,9 +288,45 @@ func (c *Config) validate() error {
 	return nil
 }
 
+// Utility to test if a configuration is defined.
+type configMetaData struct {
+	meta *toml.MetaData
+	path []string
+}
+
+func newConfigMetadata(meta *toml.MetaData) *configMetaData {
+	return &configMetaData{meta: meta}
+}
+
+func (m *configMetaData) IsDefined(key string) bool {
+	if m.meta == nil {
+		return false
+	}
+	keys := append([]string(nil), m.path...)
+	keys = append(keys, key)
+	return m.meta.IsDefined(keys...)
+}
+
+func (m *configMetaData) Child(path ...string) *configMetaData {
+	newPath := append([]string(nil), m.path...)
+	newPath = append(newPath, path...)
+	return &configMetaData{
+		meta: m.meta,
+		path: newPath,
+	}
+}
+
 // Adjust is used to adjust the PD configurations.
 func (c *Config) Adjust(meta *toml.MetaData) error {
-	adjustString(&c.Name, defaultName)
+	configMetaData := newConfigMetadata(meta)
+
+	if c.Name == "" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			return err
+		}
+		adjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
+	}
 	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 
 	if err := c.validate(); err != nil {
@@ -338,10 +375,10 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	adjustString(&c.Metric.PushJob, c.Name)
 
-	if err := c.Schedule.adjust(); err != nil {
+	if err := c.Schedule.adjust(configMetaData.Child("schedule")); err != nil {
 		return err
 	}
-	if err := c.Replication.adjust(); err != nil {
+	if err := c.Replication.adjust(configMetaData.Child("replication")); err != nil {
 		return err
 	}
 
@@ -349,8 +386,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	adjustDuration(&c.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
 
-	// enable PreVote by default
-	if meta == nil || !meta.IsDefined("enable-prevote") {
+	if !configMetaData.IsDefined("enable-prevote") {
 		c.PreVote = true
 	}
 	return nil
@@ -489,19 +525,37 @@ const (
 	defaultHighSpaceRatio       = 0.6
 )
 
-func (c *ScheduleConfig) adjust() error {
-	adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
-	adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
-	adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
-	adjustUint64(&c.MaxMergeRegionKeys, defaultMaxMergeRegionKeys)
+func (c *ScheduleConfig) adjust(meta *configMetaData) error {
+	if !meta.IsDefined("max-snapshot-count") {
+		adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
+	}
+	if !meta.IsDefined("max-pending-peer-count") {
+		adjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
+	}
+	if !meta.IsDefined("max-merge-region-size") {
+		adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
+	}
+	if !meta.IsDefined("max-merge-region-keys") {
+		adjustUint64(&c.MaxMergeRegionKeys, defaultMaxMergeRegionKeys)
+	}
 	adjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
 	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
-	adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
-	adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
-	adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
-	adjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
-	adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
+	if !meta.IsDefined("leader-schedule-limit") {
+		adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
+	}
+	if !meta.IsDefined("region-schedule-limit") {
+		adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
+	}
+	if !meta.IsDefined("replica-schedule-limit") {
+		adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
+	}
+	if !meta.IsDefined("merge-schedule-limit") {
+		adjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
+	}
+	if !meta.IsDefined("tolerant-size-ratio") {
+		adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
+	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
@@ -583,7 +637,7 @@ func (c *ReplicationConfig) validate() error {
 	return nil
 }
 
-func (c *ReplicationConfig) adjust() error {
+func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 	return c.validate()
 }
@@ -639,8 +693,8 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 
 // PDServerConfig is the configuration for pd server.
 type PDServerConfig struct {
-	// EnableRegionStorage enables the independent region storage.
-	EnableRegionStorage bool `toml:"enable-region-storage" json:"enable-region-storage"`
+	// UseRegionStorage enables the independent region storage.
+	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
 }
 
 // StoreLabel is the config item of LabelPropertyConfig.

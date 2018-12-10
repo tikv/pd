@@ -14,7 +14,7 @@
 package pdctl
 
 import (
-	"fmt"
+	"os"
 
 	"github.com/pingcap/pd/tools/pd-ctl/pdctl/command"
 	"github.com/spf13/cobra"
@@ -68,15 +68,16 @@ func Start(args []string) {
 	rootCmd.SilenceErrors = true
 	rootCmd.ParseFlags(args)
 	rootCmd.SetUsageTemplate(command.UsageTemplate)
+	rootCmd.SetOutput(os.Stdout)
 
 	if len(commandFlags.CAPath) != 0 {
 		if err := command.InitHTTPSClient(commandFlags.CAPath, commandFlags.CertPath, commandFlags.KeyPath); err != nil {
-			fmt.Println(err)
+			rootCmd.Println(err)
 			return
 		}
 	}
 
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(rootCmd.UsageString())
+		rootCmd.Println(rootCmd.UsageString())
 	}
 }

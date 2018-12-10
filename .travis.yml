@@ -1,5 +1,11 @@
 language: go
 
+cache:
+  directories:
+    - $HOME/.cache/go-build
+    - $GOPATH/pkg/mod
+    - $GOPATH/src/github.com/pingcap/pd/.retools
+
 go:
   - 1.11.x
 

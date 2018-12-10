@@ -14,7 +14,6 @@
 package command
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/spf13/cobra"
@@ -37,8 +36,8 @@ func NewHealthCommand() *cobra.Command {
 func showHealthCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, healthPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
-	fmt.Println(r)
+	cmd.Println(r)
 }

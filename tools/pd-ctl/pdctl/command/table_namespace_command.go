@@ -78,15 +78,15 @@ func NewRemoveTableIDCommand() *cobra.Command {
 func showNamespaceCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, namespacesPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Printf("Failed to get the namespace information: %s\n", err)
+		cmd.Printf("Failed to get the namespace information: %s\n", err)
 		return
 	}
-	fmt.Println(r)
+	cmd.Println(r)
 }
 
 func createNamespaceCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		fmt.Println("Usage: namespace create <name>")
+		cmd.Println("Usage: namespace create <name>")
 		return
 	}
 
@@ -99,11 +99,11 @@ func createNamespaceCommandFunc(cmd *cobra.Command, args []string) {
 
 func addTableCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
-		fmt.Println("Usage: namespace add <name> <table_id>")
+		cmd.Println("Usage: namespace add <name> <table_id>")
 		return
 	}
 	if _, err := strconv.Atoi(args[1]); err != nil {
-		fmt.Println("table_id shoud be a number")
+		cmd.Println("table_id shoud be a number")
 		return
 	}
 
@@ -118,11 +118,11 @@ func addTableCommandFunc(cmd *cobra.Command, args []string) {
 
 func removeTableCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
-		fmt.Println("Usage: namespace remove <name> <table_id>")
+		cmd.Println("Usage: namespace remove <name> <table_id>")
 		return
 	}
 	if _, err := strconv.Atoi(args[1]); err != nil {
-		fmt.Println("table_id shoud be a number")
+		cmd.Println("table_id shoud be a number")
 		return
 	}
 
@@ -159,12 +159,12 @@ func NewRemoveNamespaceStoreCommand() *cobra.Command {
 
 func setNamespaceStoreCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
-		fmt.Println("Usage: namespace set_ns <store_id> <namespace>")
+		cmd.Println("Usage: namespace set_ns <store_id> <namespace>")
 		return
 	}
 	_, err := strconv.Atoi(args[0])
 	if err != nil {
-		fmt.Println("store_id should be a number")
+		cmd.Println("store_id should be a number")
 		return
 	}
 	prefix := fmt.Sprintf(storeNsPrefix, args[0])
@@ -176,12 +176,12 @@ func setNamespaceStoreCommandFunc(cmd *cobra.Command, args []string) {
 
 func removeNamespaceStoreCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
-		fmt.Println("Usage: namespace rm_ns <store_id> <namespace>")
+		cmd.Println("Usage: namespace rm_ns <store_id> <namespace>")
 		return
 	}
 	_, err := strconv.Atoi(args[0])
 	if err != nil {
-		fmt.Println("store_id should be a number")
+		cmd.Println("store_id should be a number")
 		return
 	}
 	prefix := fmt.Sprintf(storeNsPrefix, args[0])
@@ -209,7 +209,7 @@ func newRemoveMetaNamespaceCommand() *cobra.Command {
 
 func setMetaNamespaceCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		fmt.Println("Usage: set_meta <namespace>")
+		cmd.Println("Usage: set_meta <namespace>")
 		return
 	}
 	input := map[string]interface{}{
@@ -221,7 +221,7 @@ func setMetaNamespaceCommandFunc(cmd *cobra.Command, args []string) {
 
 func removeMetaNamespaceCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		fmt.Println("Usage: rm_meta <namespace>")
+		cmd.Println("Usage: rm_meta <namespace>")
 		return
 	}
 	input := map[string]interface{}{

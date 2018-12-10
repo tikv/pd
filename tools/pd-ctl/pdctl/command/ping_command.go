@@ -14,7 +14,6 @@
 package command
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 
@@ -35,9 +34,9 @@ func showPingCommandFunc(cmd *cobra.Command, args []string) {
 	start := time.Now()
 	_, err := doRequest(cmd, pingPrefix, http.MethodGet)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 	elapsed := time.Since(start)
-	fmt.Println("time:", elapsed)
+	cmd.Println("time:", elapsed)
 }

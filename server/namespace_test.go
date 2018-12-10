@@ -125,18 +125,20 @@ func (s *testNamespaceSuite) TestSchedulerBalanceRegion(c *C) {
 	s.classifier.setStore(2, "ns1")
 	s.classifier.setStore(3, "ns2")
 	s.opt.SetMaxReplicas(1)
-	sched, _ := schedule.CreateScheduler("balance-region", schedule.NewOperatorController(nil, nil))
+
+	oc := schedule.NewOperatorController(nil, nil)
+	sched, _ := schedule.CreateScheduler("balance-region", oc)
 
 	// Balance is limited within a namespace.
 	s.tc.addLeaderRegion(1, 2)
 	s.classifier.setRegion(1, "ns1")
-	op := scheduleByNamespace(s.tc, s.classifier, sched, schedule.NewOpInfluence(nil, s.tc))
+	op := scheduleByNamespace(s.tc, s.classifier, sched)
 	testutil.CheckTransferPeer(c, op[0], schedule.OpBalance, 2, 1)
 
 	// If no more store in the namespace, balance stops.
 	s.tc.addLeaderRegion(1, 3)
 	s.classifier.setRegion(1, "ns2")
-	op = scheduleByNamespace(s.tc, s.classifier, sched, schedule.NewOpInfluence(nil, s.tc))
+	op = scheduleByNamespace(s.tc, s.classifier, sched)
 	c.Assert(op, IsNil)
 
 	// If region is not in the correct namespace, it will not be balanced. The
@@ -146,7 +148,7 @@ func (s *testNamespaceSuite) TestSchedulerBalanceRegion(c *C) {
 	s.classifier.setStore(4, "ns2")
 	s.tc.addLeaderRegion(1, 3)
 	s.classifier.setRegion(1, "ns1")
-	op = scheduleByNamespace(s.tc, s.classifier, sched, schedule.NewOpInfluence(nil, s.tc))
+	op = scheduleByNamespace(s.tc, s.classifier, sched)
 	c.Assert(op, IsNil)
 }
 
@@ -164,18 +166,20 @@ func (s *testNamespaceSuite) TestSchedulerBalanceLeader(c *C) {
 	s.classifier.setStore(2, "ns1")
 	s.classifier.setStore(3, "ns2")
 	s.classifier.setStore(4, "ns2")
-	sched, _ := schedule.CreateScheduler("balance-leader", schedule.NewOperatorController(nil, nil))
+
+	oc := schedule.NewOperatorController(nil, nil)
+	sched, _ := schedule.CreateScheduler("balance-leader", oc)
 
 	// Balance is limited within a namespace.
 	s.tc.addLeaderRegion(1, 2, 1)
 	s.classifier.setRegion(1, "ns1")
-	op := scheduleByNamespace(s.tc, s.classifier, sched, schedule.NewOpInfluence(nil, s.tc))
+	op := scheduleByNamespace(s.tc, s.classifier, sched)
 	testutil.CheckTransferLeader(c, op[0], schedule.OpBalance, 2, 1)
 
 	// If region is not in the correct namespace, it will not be balanced.
 	s.tc.addLeaderRegion(1, 4, 1)
 	s.classifier.setRegion(1, "ns1")
-	op = scheduleByNamespace(s.tc, s.classifier, sched, schedule.NewOpInfluence(nil, s.tc))
+	op = scheduleByNamespace(s.tc, s.classifier, sched)
 	c.Assert(op, IsNil)
 }
 

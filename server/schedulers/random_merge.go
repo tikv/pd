@@ -54,7 +54,7 @@ func (s *randomMergeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 	return s.opController.OperatorCount(schedule.OpMerge) < cluster.GetMergeScheduleLimit()
 }
 
-func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
+func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
 	stores := cluster.GetStores()

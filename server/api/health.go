@@ -25,7 +25,8 @@ type healthHandler struct {
 	rd  *render.Render
 }
 
-type health struct {
+// Health reflects the cluster's health.
+type Health struct {
 	Name       string   `json:"name"`
 	MemberID   uint64   `json:"member_id"`
 	ClientUrls []string `json:"client_urls"`
@@ -47,9 +48,9 @@ func (h *healthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	unhealthMembers := h.svr.CheckHealth(members)
-	healths := []health{}
+	healths := []Health{}
 	for _, member := range members {
-		h := health{
+		h := Health{
 			Name:       member.Name,
 			MemberID:   member.MemberId,
 			ClientUrls: member.ClientUrls,
