@@ -72,6 +72,12 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 	if err := kv.LoadStores(c.core.Stores); err != nil {
 		return nil, err
 	}
+	// setup slaves
+	slaveChecker := func(store *core.StoreInfo) bool {
+		return c.opt.CheckLabelProperty(schedule.SlaveLabel, store.GetLabels())
+	}
+	c.core.Stores.SetupSlaveStores(slaveChecker)
+
 	log.Infof("load %v stores cost %v", c.core.Stores.GetStoreCount(), time.Since(start))
 
 	start = time.Now()

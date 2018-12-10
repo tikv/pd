@@ -417,6 +417,15 @@ func (s *StoresInfo) GetSlaveStoreIDs() []uint64 {
 	return stores
 }
 
+// SetupSlaveStores set the store to slaves if the checker is true.
+func (s *StoresInfo) SetupSlaveStores(check func(store *StoreInfo) bool) {
+	for _, store := range s.stores {
+		if check(store) {
+			store.IsSlave = true
+		}
+	}
+}
+
 // GetMetaStores get a complete set of metapb.Store
 func (s *StoresInfo) GetMetaStores() []*metapb.Store {
 	stores := make([]*metapb.Store, 0, len(s.stores))
