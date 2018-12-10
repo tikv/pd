@@ -284,8 +284,7 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	hb, err := schedule.CreateScheduler("shuffle-hot-region", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
 
-	// Add stores 1, 2, 3, 4, 5, 6  with region counts 3, 2, 2, 2, 0, 0.
-
+	// Add stores 1, 2, 3, 4, 5, 6  with hot peer counts 3, 2, 2, 2, 0, 0.
 	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
 	tc.AddLabelsStore(2, 2, map[string]string{"zone": "z2", "host": "h2"})
 	tc.AddLabelsStore(3, 2, map[string]string{"zone": "z3", "host": "h3"})
@@ -312,8 +311,7 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 4)
 	opt.HotRegionLowThreshold = 0
 
-	// Will transfer a hot region from store 1, because the total count of peers
-	// which is hot for store 1 is more larger than other stores.
+	// try to get a operator
 	var op []*schedule.Operator
 	for i := 0; i < 100; i++ {
 		op = hb.Schedule(tc)
@@ -321,6 +319,7 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 			break
 		}
 	}
+	c.Assert(op, NotNil)
 	c.Assert(op[0].Step(1).(schedule.PromoteLearner).ToStore, Equals, op[0].Step(2).(schedule.TransferLeader).ToStore)
 	c.Assert(op[0].Step(1).(schedule.PromoteLearner).ToStore, Not(Equals), 6)
 }
