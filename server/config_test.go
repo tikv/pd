@@ -111,13 +111,26 @@ leader-schedule-limit = 0
 	c.Assert(cfg.PreVote, IsTrue)
 	c.Assert(cfg.Schedule.MaxMergeRegionKeys, Equals, uint64(defaultMaxMergeRegionKeys))
 
+	// Check undefined config fields
 	cfgData = `
-lalala = ""
+type = "pd"
 name = ""
 lease = 0
 
 [schedule]
 type = "random-merge"
+`
+	cfg = NewConfig()
+	meta, err = toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta)
+	c.Assert(err, NotNil)
+
+	// Check wrong scheduler name
+	cfgData = `
+[[schedule.schedulers]]
+type = "random-merge-scheduler"
+args = [""]
 `
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)
