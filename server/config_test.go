@@ -108,4 +108,19 @@ leader-schedule-limit = 0
 	// When undefined, use default values.
 	c.Assert(cfg.PreVote, IsTrue)
 	c.Assert(cfg.Schedule.MaxMergeRegionKeys, Equals, uint64(defaultMaxMergeRegionKeys))
+
+	// Check undefined config fields
+	cfgData = `
+type = "pd"
+name = ""
+lease = 0
+
+[schedule]
+type = "random-merge"
+`
+	cfg = NewConfig()
+	meta, err = toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta)
+	c.Assert(err, NotNil)
 }

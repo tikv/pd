@@ -313,9 +313,27 @@ func (m *configMetaData) Child(path ...string) *configMetaData {
 	}
 }
 
+func (m *configMetaData) CheckUndecoded() error {
+	if m.meta == nil {
+		return nil
+	}
+	undecoded := m.meta.Undecoded()
+	if len(undecoded) == 0 {
+		return nil
+	}
+	errInfo := "Config contains undefined item: "
+	for _, key := range undecoded {
+		errInfo += key.String() + ", "
+	}
+	return errors.New(errInfo[:len(errInfo)-2])
+}
+
 // Adjust is used to adjust the PD configurations.
 func (c *Config) Adjust(meta *toml.MetaData) error {
 	configMetaData := newConfigMetadata(meta)
+	if err := configMetaData.CheckUndecoded(); err != nil {
+		return err
+	}
 	adjustString(&c.Name, defaultName)
 	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 
