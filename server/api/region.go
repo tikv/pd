@@ -51,7 +51,7 @@ func NewRegionInfo(r *core.RegionInfo) *RegionInfo {
 	if r == nil {
 		return nil
 	}
-	return &regionInfo{
+	return &RegionInfo{
 		ID:                r.GetID(),
 		StartKey:          string(core.HexRegionKey(r.GetStartKey())),
 		EndKey:            string(core.HexRegionKey(r.GetEndKey())),
