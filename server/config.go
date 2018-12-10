@@ -19,6 +19,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -137,7 +138,7 @@ func NewConfig() *Config {
 	fs.BoolVar(&cfg.Version, "version", false, "print version information and exit")
 	fs.StringVar(&cfg.configFile, "config", "", "Config file")
 
-	fs.StringVar(&cfg.Name, "name", defaultName, "human-readable name for this pd member")
+	fs.StringVar(&cfg.Name, "name", "", "human-readable name for this pd member")
 
 	fs.StringVar(&cfg.DataDir, "data-dir", "", "path to the data directory (default 'default.${name}')")
 	fs.StringVar(&cfg.ClientUrls, "client-urls", defaultClientUrls, "url for client traffic")
@@ -318,7 +319,14 @@ func (m *configMetaData) Child(path ...string) *configMetaData {
 // Adjust is used to adjust the PD configurations.
 func (c *Config) Adjust(meta *toml.MetaData) error {
 	configMetaData := newConfigMetadata(meta)
-	adjustString(&c.Name, defaultName)
+
+	if c.Name == "" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			return err
+		}
+		adjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
+	}
 	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 
 	if err := c.validate(); err != nil {
