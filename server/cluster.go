@@ -30,7 +30,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const (
+var (
 	backgroundJobInterval = time.Minute
 )
 
@@ -120,6 +120,10 @@ func (c *RaftCluster) start() error {
 
 	c.wg.Add(3)
 	go c.runCoordinator()
+	// gofail: var highFrequencyClusterJobs bool
+	// if highFrequencyClusterJobs{
+	//		backgroundJobInterval = 100 * time.Microsecond
+	// }
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.syncRegions()
 	c.running = true
@@ -144,9 +148,9 @@ func (c *RaftCluster) syncRegions() {
 
 func (c *RaftCluster) stop() {
 	c.Lock()
-	defer c.Unlock()
 
 	if !c.running {
+		c.Unlock()
 		return
 	}
 
@@ -154,6 +158,7 @@ func (c *RaftCluster) stop() {
 
 	close(c.quit)
 	c.coordinator.stop()
+	c.Unlock()
 	c.wg.Wait()
 }
 
