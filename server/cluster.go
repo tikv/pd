@@ -30,9 +30,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-var (
-	backgroundJobInterval = time.Minute
-)
+var backgroundJobInterval = time.Minute
 
 // RaftCluster is used for cluster config management.
 // Raft cluster key format:
@@ -121,8 +119,8 @@ func (c *RaftCluster) start() error {
 	c.wg.Add(3)
 	go c.runCoordinator()
 	// gofail: var highFrequencyClusterJobs bool
-	// if highFrequencyClusterJobs{
-	//		backgroundJobInterval = 100 * time.Microsecond
+	// if highFrequencyClusterJobs {
+	//     backgroundJobInterval = 100 * time.Microsecond
 	// }
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.syncRegions()

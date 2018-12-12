@@ -440,7 +440,7 @@ func (s *testClusterSuite) TestRaftClusterMultipleRestar(c *C) {
 	mustWaitLeader(c, []*Server{s.svr})
 	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
 	c.Assert(err, IsNil)
-	// add a offline store
+	// add an offline store
 	store := s.newStore(c, s.allocID(c), "127.0.0.1:4")
 	store.State = metapb.StoreState_Offline
 	cluster := s.svr.GetRaftCluster()
