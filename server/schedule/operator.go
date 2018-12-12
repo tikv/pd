@@ -116,6 +116,14 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 		}
 		return region.GetPendingLearner(p.GetId()) == nil
 	}
+
+	if p := region.GetStoreSlavePeer(al.ToStore); p != nil {
+		if p.GetId() != al.PeerID {
+			log.Warnf("expect %v, but obtain learner %v", al.String(), p.GetId())
+			return false
+		}
+		return region.GetStoreSlavePendingPeer(p.GetId()) == nil
+	}
 	return false
 }
 
@@ -161,7 +169,7 @@ func (rp RemovePeer) String() string {
 
 // IsFinish checks if current step is finished.
 func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
-	return region.GetStorePeer(rp.FromStore) == nil
+	return region.GetStorePeer(rp.FromStore) == nil && region.GetStoreSlavePeer(rp.FromStore) == nil
 }
 
 // Influence calculates the store difference that current step make

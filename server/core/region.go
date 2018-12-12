@@ -291,6 +291,26 @@ func (r *RegionInfo) GetStorePeer(storeID uint64) *metapb.Peer {
 	return nil
 }
 
+// GetStoreSlavePeer returns the slave peer in specified store.
+func (r *RegionInfo) GetStoreSlavePeer(storeID uint64) *metapb.Peer {
+	for _, peer := range r.GetSlavePeers() {
+		if peer.GetStoreId() == storeID {
+			return peer
+		}
+	}
+	return nil
+}
+
+// GetStoreSlavePendingPeer returns the slave peer in specified store.
+func (r *RegionInfo) GetStoreSlavePendingPeer(peerID uint64) *metapb.Peer {
+	for _, peer := range r.GetSlavePendingPeers() {
+		if peer.GetId() == peerID {
+			return peer
+		}
+	}
+	return nil
+}
+
 // GetStoreVoter returns the voter in specified store.
 func (r *RegionInfo) GetStoreVoter(storeID uint64) *metapb.Peer {
 	for _, peer := range r.voters {
