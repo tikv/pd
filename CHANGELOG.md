@@ -2,7 +2,7 @@
 
 ## v2.1.1
 - Fix the issue that some configuration items cannot be set to `0` in the configuration file [#1334](https://github.com/pingcap/pd/pull/1334) 
-- Check the undefined configuration when PD is started [#1362](https://github.com/pingcap/pd/pull/1362)
+- Check the undefined configuration when starting PD [#1362](https://github.com/pingcap/pd/pull/1362)
 - Avoid transferring the leader to a newly created peer, to optimize the possible delay [#1339](https://github.com/pingcap/pd/pull/1339)
 - Fix the issue that `RaftCluster` cannot stop caused by deadlock [#1370](https://github.com/pingcap/pd/pull/1370) 
 
