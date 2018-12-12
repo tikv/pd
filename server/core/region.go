@@ -167,16 +167,31 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	for _, peer := range r.pendingPeers {
 		pendingPeers = append(pendingPeers, proto.Clone(peer).(*metapb.Peer))
 	}
+	slaveDownPeers := make([]*pdpb.PeerStats, 0, len(r.slaveDownPeers))
+	for _, peer := range r.slaveDownPeers {
+		slaveDownPeers = append(slaveDownPeers, proto.Clone(peer).(*pdpb.PeerStats))
+	}
+	slavePendingPeers := make([]*metapb.Peer, 0, len(r.slavePendingPeers))
+	for _, peer := range r.slavePendingPeers {
+		slavePendingPeers = append(slavePendingPeers, proto.Clone(peer).(*metapb.Peer))
+	}
+	slavePeers := make([]*metapb.Peer, 0, len(r.slavePeers))
+	for _, peer := range r.slavePeers {
+		slavePeers = append(slavePeers, proto.Clone(peer).(*metapb.Peer))
+	}
 
 	region := &RegionInfo{
-		meta:            proto.Clone(r.meta).(*metapb.Region),
-		leader:          proto.Clone(r.leader).(*metapb.Peer),
-		downPeers:       downPeers,
-		pendingPeers:    pendingPeers,
-		writtenBytes:    r.writtenBytes,
-		readBytes:       r.readBytes,
-		approximateSize: r.approximateSize,
-		approximateKeys: r.approximateKeys,
+		meta:              proto.Clone(r.meta).(*metapb.Region),
+		leader:            proto.Clone(r.leader).(*metapb.Peer),
+		slavePeers:        slavePeers,
+		downPeers:         downPeers,
+		slaveDownPeers:    slaveDownPeers,
+		pendingPeers:      pendingPeers,
+		slavePendingPeers: slavePendingPeers,
+		writtenBytes:      r.writtenBytes,
+		readBytes:         r.readBytes,
+		approximateSize:   r.approximateSize,
+		approximateKeys:   r.approximateKeys,
 	}
 
 	for _, opt := range opts {
