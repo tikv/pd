@@ -92,8 +92,9 @@ func (r *SlaveChecker) Check(region *core.RegionInfo) *Operator {
 			return op
 		}
 		return r.selectBestReplacementStore(region)
-	case slaveCount > 1:
-		log.Fatalf("[region %d] not expect slave peers: %+v", region.GetID(), region)
+	case slaveCount > 2:
+		peer := region.GetSlavePeers()[0]
+		return NewOperator("removeExtraSlave", region.GetID(), region.GetRegionEpoch(), OpReplica|OpRegion, RemovePeer{FromStore: peer.GetStoreId()})
 	default:
 	}
 	return nil
