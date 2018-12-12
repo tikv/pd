@@ -202,7 +202,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		}
 		oc.hbStreams.SendMsg(region, cmd)
 	case AddLearner:
-		if region.GetStorePeer(st.ToStore) != nil {
+		if region.GetStorePeer(st.ToStore) != nil || region.GetStoreSlavePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
 		}
@@ -230,10 +230,18 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		}
 		oc.hbStreams.SendMsg(region, cmd)
 	case RemovePeer:
+		peer := region.GetStorePeer(st.FromStore)
+		if peer == nil {
+			peer = region.GetStoreSlavePeer(st.FromStore)
+		}
+		if peer == nil {
+			log.Errorf("[region %d] Cannot find the peer on store %d", region.GetID(), st.FromStore)
+			return
+		}
 		cmd := &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_RemoveNode,
-				Peer:       region.GetStorePeer(st.FromStore),
+				Peer:       peer,
 			},
 		}
 		oc.hbStreams.SendMsg(region, cmd)
