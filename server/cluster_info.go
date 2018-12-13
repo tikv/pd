@@ -462,6 +462,14 @@ func (c *clusterInfo) updateStoreStatusLocked(id uint64) {
 func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
 	origin := c.core.Regions.GetRegion(region.GetID())
+	if origin == nil {
+		for _, item := range c.core.Regions.GetOverlaps(region) {
+			if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
+				c.RUnlock()
+				return ErrRegionIsStale(region.GetMeta(), nil)
+			}
+		}
+	}
 	isWriteUpdate, writeItem := c.core.CheckWriteStatus(region)
 	isReadUpdate, readItem := c.core.CheckReadStatus(region)
 	c.RUnlock()
@@ -472,11 +480,6 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	var saveKV, saveCache, isNew bool
 	if origin == nil {
 		log.Debugf("[region %d] Insert new region {%v}", region.GetID(), core.HexRegionMeta(region.GetMeta()))
-		for _, item := range c.core.Regions.GetOverlaps(region) {
-			if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
-				return ErrRegionIsStale(region.GetMeta(), nil)
-			}
-		}
 		saveKV, saveCache, isNew = true, true, true
 	} else {
 		r := region.GetRegionEpoch()
