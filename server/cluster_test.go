@@ -432,7 +432,7 @@ func (s *testClusterSuite) TestRaftClusterRestart(c *C) {
 }
 
 // Make sure PD will not deadlock if it start and stop again and again.
-func (s *testClusterSuite) TestRaftClusterMultipleRestar(c *C) {
+func (s *testClusterSuite) TestRaftClusterMultipleRestart(c *C) {
 	var err error
 	_, s.svr, s.cleanup, err = NewTestServer()
 	defer s.cleanup()
