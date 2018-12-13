@@ -472,6 +472,11 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	var saveKV, saveCache, isNew bool
 	if origin == nil {
 		log.Debugf("[region %d] Insert new region {%v}", region.GetID(), core.HexRegionMeta(region.GetMeta()))
+		for _, item := range c.core.Regions.GetOverlaps(region) {
+			if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
+				return ErrRegionIsStale(region.GetMeta(), nil)
+			}
+		}
 		saveKV, saveCache, isNew = true, true, true
 	} else {
 		r := region.GetRegionEpoch()
