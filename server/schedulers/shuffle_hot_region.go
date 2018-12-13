@@ -38,6 +38,10 @@ func init() {
 	})
 }
 
+// ShuffleHotRegionScheduler mainly used to test.
+// It will randomly pick a hot peer, and move the peer
+// to a random store, and then transfer the leader to
+// the hot peer.
 type shuffleHotRegionScheduler struct {
 	*baseScheduler
 	stats *storeStatistics
