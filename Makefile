@@ -37,7 +37,7 @@ all: dev
 
 dev: build check test
 
-ci: build check basic-test
+ci: build check basic-test travis_coverage
 
 build: export GO111MODULE=on
 build:
@@ -93,6 +93,7 @@ lint:
 	@echo "linting"
 	CGO_ENABLED=0 ./scripts/retool do revive -formatter friendly -config revive.toml $$($(PACKAGES))
 
+travis_coverage: export GO111MODULE=on
 travis_coverage:
 ifeq ("$(TRAVIS_COVERAGE)", "1")
 	@$(GOFAIL_ENABLE)
@@ -102,8 +103,6 @@ ifeq ("$(TRAVIS_COVERAGE)", "1")
 else
 	@echo "coverage only runs in travis."
 endif
-
-
 
 simulator: export GO111MODULE=on
 simulator:
