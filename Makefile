@@ -37,7 +37,7 @@ all: dev
 
 dev: build check test
 
-ci: build check basic-test travis_coverage
+ci: build check basic-test
 
 build: export GO111MODULE=on
 build:
