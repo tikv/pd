@@ -552,6 +552,10 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 			StartKey: []byte(fmt.Sprintf("%5d", i)),
 			EndKey:   []byte(fmt.Sprintf("%5d", i+1)),
 			Peers:    []*metapb.Peer{{Id: s.allocID(c), StoreId: stores[0].GetId()}},
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: initEpochConfVer,
+				Version: initEpochVersion,
+			},
 		}
 		if i == 0 {
 			region.StartKey = []byte("")

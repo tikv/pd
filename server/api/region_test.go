@@ -189,14 +189,15 @@ func (s *testRegionSuite) TestTopFlow(c *C) {
 }
 
 func (s *testRegionSuite) TestTopSize(c *C) {
+	baseOpt := []core.RegionCreateOption{core.SetRegionConfVer(3), core.SetRegionVersion(3)}
 	opt := core.SetApproximateSize(1000)
-	r1 := newTestRegionInfo(7, 1, []byte("a"), []byte("b"), opt)
+	r1 := newTestRegionInfo(7, 1, []byte("a"), []byte("b"), append(baseOpt, opt)...)
 	mustRegionHeartbeat(c, s.svr, r1)
 	opt = core.SetApproximateSize(900)
-	r2 := newTestRegionInfo(8, 1, []byte("b"), []byte("c"), opt)
+	r2 := newTestRegionInfo(8, 1, []byte("b"), []byte("c"), append(baseOpt, opt)...)
 	mustRegionHeartbeat(c, s.svr, r2)
 	opt = core.SetApproximateSize(800)
-	r3 := newTestRegionInfo(9, 1, []byte("c"), []byte("d"), opt)
+	r3 := newTestRegionInfo(9, 1, []byte("c"), []byte("d"), append(baseOpt, opt)...)
 	mustRegionHeartbeat(c, s.svr, r3)
 	// query with limit
 	s.checkTopRegions(c, fmt.Sprintf("%s/regions/size?limit=%d", s.urlPrefix, 2), []uint64{7, 8})

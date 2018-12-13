@@ -466,7 +466,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		for _, item := range c.core.Regions.GetOverlaps(region) {
 			if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
 				c.RUnlock()
-				return ErrRegionIsStale(region.GetMeta(), nil)
+				return ErrRegionIsStale(region.GetMeta(), item)
 			}
 		}
 	}
