@@ -1,5 +1,9 @@
 # PD Change Log
 
+## v2.0.10
+### Bug Fixes
+Fix the issue that RaftCluster cannot stop caused by deadlock [#1370](https://github.com/pingcap/pd/pull/1370)
+
 ## v2.0.9
 ### Bug Fixes
 * Fix the issue that the PD server gets stuck caused by etcd startup failure [#1267](https://github.com/pingcap/pd/pull/1267)
