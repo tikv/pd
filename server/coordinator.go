@@ -199,12 +199,11 @@ func (c *coordinator) run() {
 		}
 		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, schedulerCfg.Args...)
 		if err != nil {
-			log.Errorf("can not create scheduler %s: %v", schedulerCfg.Type, err)
-		} else {
-			log.Infof("create scheduler %s", s.GetName())
-			if err = c.addScheduler(s, schedulerCfg.Args...); err != nil {
-				log.Errorf("can not add scheduler %s: %v", s.GetName(), err)
-			}
+			log.Fatalf("can not create scheduler %s: %v", schedulerCfg.Type, err)
+		}
+		log.Infof("create scheduler %s", s.GetName())
+		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil {
+			log.Errorf("can not add scheduler %s: %v", s.GetName(), err)
 		}
 
 		// only record valid scheduler config

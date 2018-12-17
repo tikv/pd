@@ -102,12 +102,32 @@ func WithIncVersion() RegionCreateOption {
 	}
 }
 
-// WithIncConfVer increase the config version of the region.
+// WithDecVersion decreases the version of the region.
+func WithDecVersion() RegionCreateOption {
+	return func(region *RegionInfo) {
+		e := region.meta.GetRegionEpoch()
+		if e != nil {
+			e.Version--
+		}
+	}
+}
+
+// WithIncConfVer increases the config version of the region.
 func WithIncConfVer() RegionCreateOption {
 	return func(region *RegionInfo) {
 		e := region.meta.GetRegionEpoch()
 		if e != nil {
 			e.ConfVer++
+		}
+	}
+}
+
+// WithDecConfVer decreases the config version of the region.
+func WithDecConfVer() RegionCreateOption {
+	return func(region *RegionInfo) {
+		e := region.meta.GetRegionEpoch()
+		if e != nil {
+			e.ConfVer--
 		}
 	}
 }

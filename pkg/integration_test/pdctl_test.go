@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coreos/go-semver/semver"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -594,6 +595,143 @@ func (s *integrationTestSuite) TestRegion(c *C) {
 	regionsInfo = api.RegionsInfo{}
 	json.Unmarshal(output, &regionsInfo)
 	checkRegionsInfo(c, regionsInfo, []*core.RegionInfo{r3, r4})
+}
+
+func (s *integrationTestSuite) TestConfig(c *C) {
+	c.Parallel()
+
+	cluster, err := newTestCluster(1)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.config.GetClientURLs()
+	cmd := initCommand()
+
+	store := metapb.Store{
+		Id:    1,
+		State: metapb.StoreState_Up,
+	}
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	s.bootstrapCluster(leaderServer, c)
+	mustPutStore(c, leaderServer.server, store.Id, store.State, store.Labels)
+
+	// config show
+	args := []string{"-u", pdAddr, "config", "show"}
+	_, output, err := executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	scheduleCfg := server.ScheduleConfig{}
+	json.Unmarshal(output, &scheduleCfg)
+	c.Assert(&scheduleCfg, DeepEquals, leaderServer.server.GetScheduleConfig())
+
+	// config show replication
+	args = []string{"-u", pdAddr, "config", "show", "replication"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	replicationCfg := server.ReplicationConfig{}
+	json.Unmarshal(output, &replicationCfg)
+	c.Assert(&replicationCfg, DeepEquals, leaderServer.server.GetReplicationConfig())
+
+	// config show cluster-version
+	args1 := []string{"-u", pdAddr, "config", "show", "cluster-version"}
+	_, output, err = executeCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	clusterVersion := semver.Version{}
+	json.Unmarshal(output, &clusterVersion)
+	c.Assert(clusterVersion, DeepEquals, leaderServer.server.GetClusterVersion())
+
+	// config set cluster-version <value>
+	args2 := []string{"-u", pdAddr, "config", "set", "cluster-version", "2.1.0-rc.5"}
+	_, _, err = executeCommandC(cmd, args2...)
+	c.Assert(err, IsNil)
+	c.Assert(clusterVersion, Not(DeepEquals), leaderServer.server.GetClusterVersion())
+	_, output, err = executeCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	clusterVersion = semver.Version{}
+	json.Unmarshal(output, &clusterVersion)
+	c.Assert(clusterVersion, DeepEquals, leaderServer.server.GetClusterVersion())
+
+	// config show namespace <name> && config set namespace <type> <key> <value>
+	args = []string{"-u", pdAddr, "table_ns", "create", "ts1"}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "table_ns", "set_store", "1", "ts1"}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args1 = []string{"-u", pdAddr, "config", "show", "namespace", "ts1"}
+	_, output, err = executeCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	namespaceCfg := server.NamespaceConfig{}
+	json.Unmarshal(output, &namespaceCfg)
+	args2 = []string{"-u", pdAddr, "config", "set", "namespace", "ts1", "region-schedule-limit", "128"}
+	_, _, err = executeCommandC(cmd, args2...)
+	c.Assert(err, IsNil)
+	c.Assert(namespaceCfg.RegionScheduleLimit, Not(Equals), leaderServer.server.GetNamespaceConfig("ts1").RegionScheduleLimit)
+	_, output, err = executeCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	namespaceCfg = server.NamespaceConfig{}
+	json.Unmarshal(output, &namespaceCfg)
+	c.Assert(namespaceCfg.RegionScheduleLimit, Equals, leaderServer.server.GetNamespaceConfig("ts1").RegionScheduleLimit)
+
+	// config delete namespace <name>
+	args3 := []string{"-u", pdAddr, "config", "delete", "namespace", "ts1"}
+	_, _, err = executeCommandC(cmd, args3...)
+	c.Assert(err, IsNil)
+	_, output, err = executeCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	namespaceCfg = server.NamespaceConfig{}
+	json.Unmarshal(output, &namespaceCfg)
+	c.Assert(namespaceCfg.RegionScheduleLimit, Not(Equals), leaderServer.server.GetNamespaceConfig("ts1").RegionScheduleLimit)
+
+	// config show label-property
+	args1 = []string{"-u", pdAddr, "config", "show", "label-property"}
+	_, output, err = executeCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	labelPropertyCfg := server.LabelPropertyConfig{}
+	json.Unmarshal(output, &labelPropertyCfg)
+	c.Assert(labelPropertyCfg, DeepEquals, leaderServer.server.GetLabelProperty())
+
+	// config set label-property <type> <key> <value>
+	args2 = []string{"-u", pdAddr, "config", "set", "label-property", "reject-leader", "zone", "cn"}
+	_, _, err = executeCommandC(cmd, args2...)
+	c.Assert(err, IsNil)
+	c.Assert(labelPropertyCfg, Not(DeepEquals), leaderServer.server.GetLabelProperty())
+	_, output, err = executeCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	labelPropertyCfg = server.LabelPropertyConfig{}
+	json.Unmarshal(output, &labelPropertyCfg)
+	c.Assert(labelPropertyCfg, DeepEquals, leaderServer.server.GetLabelProperty())
+
+	// config delete label-property <type> <key> <value>
+	args3 = []string{"-u", pdAddr, "config", "delete", "label-property", "reject-leader", "zone", "cn"}
+	_, _, err = executeCommandC(cmd, args3...)
+	c.Assert(err, IsNil)
+	c.Assert(labelPropertyCfg, Not(DeepEquals), leaderServer.server.GetLabelProperty())
+	_, output, err = executeCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	labelPropertyCfg = server.LabelPropertyConfig{}
+	json.Unmarshal(output, &labelPropertyCfg)
+	c.Assert(labelPropertyCfg, DeepEquals, leaderServer.server.GetLabelProperty())
+
+	// config set <option> <value>
+	args1 = []string{"-u", pdAddr, "config", "set", "leader-schedule-limit", "64"}
+	_, _, err = executeCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	args2 = []string{"-u", pdAddr, "config", "show"}
+	_, output, err = executeCommandC(cmd, args2...)
+	c.Assert(err, IsNil)
+	scheduleCfg = server.ScheduleConfig{}
+	json.Unmarshal(output, &scheduleCfg)
+	c.Assert(scheduleCfg.LeaderScheduleLimit, Equals, leaderServer.server.GetScheduleConfig().LeaderScheduleLimit)
+	args1 = []string{"-u", pdAddr, "config", "set", "disable-raft-learner", "true"}
+	_, _, err = executeCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	args2 = []string{"-u", pdAddr, "config", "show"}
+	_, output, err = executeCommandC(cmd, args2...)
+	c.Assert(err, IsNil)
+	scheduleCfg = server.ScheduleConfig{}
+	json.Unmarshal(output, &scheduleCfg)
+	c.Assert(scheduleCfg.DisableLearner, Equals, leaderServer.server.GetScheduleConfig().DisableLearner)
 }
 
 func initCommand() *cobra.Command {
