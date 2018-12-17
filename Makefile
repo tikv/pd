@@ -97,7 +97,7 @@ travis_coverage: export GO111MODULE=on
 travis_coverage:
 ifeq ("$(TRAVIS_COVERAGE)", "1")
 	@$(GOFAIL_ENABLE)
-	CGO_ENABLED=1 ./scripts/retool do $(OVERALLS) -project=github.com/pingcap/pd -covermode=count -ignore='.git,vendor' || { $(GOFAIL_DISABLE); exit 1; }
+	CGO_ENABLED=1 ./scripts/retool do $(OVERALLS) -project=github.com/pingcap/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(GOFAIL_DISABLE); exit 1; }
 	CGO_ENABLED=0 ./scripts/retool do $(GOVERALLS) -service=travis-ci -coverprofile=overalls.coverprofile || { $(GOFAIL_DISABLE); exit 1; }
 	@$(GOFAIL_DISABLE)
 else
