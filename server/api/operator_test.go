@@ -55,7 +55,14 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 
 	peer1 := &metapb.Peer{Id: 1, StoreId: 1}
 	peer2 := &metapb.Peer{Id: 2, StoreId: 2}
-	region := &metapb.Region{Id: 1, Peers: []*metapb.Peer{peer1, peer2}}
+	region := &metapb.Region{
+		Id:    1,
+		Peers: []*metapb.Peer{peer1, peer2},
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+	}
 	regionInfo := core.NewRegionInfo(region, peer1)
 	mustRegionHeartbeat(c, s.svr, regionInfo)
 
