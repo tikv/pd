@@ -49,7 +49,10 @@ func (s *testStatsSuite) TearDownSuite(c *C) {
 
 func (s *testStatsSuite) TestRegionStats(c *C) {
 	statsURL := s.urlPrefix + "/stats/region"
-
+	epoch := &metapb.RegionEpoch{
+		ConfVer: 1,
+		Version: 1,
+	}
 	regions := []*core.RegionInfo{
 		core.NewRegionInfo(&metapb.Region{
 			Id:       1,
@@ -60,10 +63,7 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 				{Id: 102, StoreId: 2},
 				{Id: 103, StoreId: 3},
 			},
-			RegionEpoch: &metapb.RegionEpoch{
-				ConfVer: 1,
-				Version: 1,
-			},
+			RegionEpoch: epoch,
 		},
 			&metapb.Peer{Id: 101, StoreId: 1},
 			core.SetApproximateSize(100),
@@ -79,10 +79,7 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 					{Id: 105, StoreId: 4},
 					{Id: 106, StoreId: 5},
 				},
-				RegionEpoch: &metapb.RegionEpoch{
-					ConfVer: 1,
-					Version: 1,
-				},
+				RegionEpoch: epoch,
 			},
 			&metapb.Peer{Id: 105, StoreId: 4},
 			core.SetApproximateSize(200),
@@ -97,10 +94,7 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 					{Id: 106, StoreId: 1},
 					{Id: 107, StoreId: 5},
 				},
-				RegionEpoch: &metapb.RegionEpoch{
-					ConfVer: 1,
-					Version: 1,
-				},
+				RegionEpoch: epoch,
 			},
 			&metapb.Peer{Id: 107, StoreId: 5},
 			core.SetApproximateSize(1),
@@ -114,10 +108,7 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 				Peers: []*metapb.Peer{
 					{Id: 108, StoreId: 4},
 				},
-				RegionEpoch: &metapb.RegionEpoch{
-					ConfVer: 1,
-					Version: 1,
-				},
+				RegionEpoch: epoch,
 			},
 			&metapb.Peer{Id: 108, StoreId: 4},
 			core.SetApproximateSize(50),

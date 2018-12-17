@@ -534,7 +534,7 @@ func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*metapb.Region {
 	return r.tree.getOverlaps(region.meta)
 }
 
-// AddRegion adds RegionInfo to regionTree and regionMap, also update leadres and followers by region peers
+// AddRegion adds RegionInfo to regionTree and regionMap, also update leaders and followers by region peers
 func (r *RegionsInfo) AddRegion(region *RegionInfo) []*metapb.Region {
 	// Add to tree and regions.
 	overlaps := r.tree.update(region.meta)
