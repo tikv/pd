@@ -719,6 +719,11 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 		r.learners[storeID].Delete(region.GetID())
 		r.pendingPeers[storeID].Delete(region.GetID())
 	}
+	// Remove slaves
+	for _, peer := range region.GetSlavePeers() {
+		storeID := peer.GetStoreId()
+		r.slaves[storeID].Delete(region.GetID())
+	}
 }
 
 // SearchRegion searches RegionInfo from regionTree
