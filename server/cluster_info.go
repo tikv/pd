@@ -73,10 +73,7 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 		return nil, err
 	}
 	// setup slaves
-	slaveChecker := func(store *core.StoreInfo) bool {
-		return c.opt.CheckLabelProperty(schedule.SlaveLabel, store.GetLabels())
-	}
-	c.core.Stores.SetupSlaveStores(slaveChecker)
+	c.SetupSlaveStores()
 
 	log.Infof("load %v stores cost %v", c.core.Stores.GetStoreCount(), time.Since(start))
 
@@ -116,6 +113,16 @@ func (c *clusterInfo) OnStoreVersionChange() {
 		log.Infof("cluster version changed from %s to %s", clusterVersion, minVersion)
 		CheckPDVersion(c.opt)
 	}
+}
+
+func (c *clusterInfo) SetupSlaveStores() {
+	c.Lock()
+	defer c.Unlock()
+	// setup slaves
+	slaveChecker := func(store *core.StoreInfo) bool {
+		return c.opt.CheckLabelProperty(schedule.SlaveLabel, store.GetLabels())
+	}
+	c.core.Stores.SetupSlaveStores(slaveChecker)
 }
 
 func (c *clusterInfo) changedRegionNotifier() <-chan *core.RegionInfo {

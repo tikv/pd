@@ -37,6 +37,7 @@ import (
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -615,6 +616,13 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 		return err
 	}
 	log.Infof("label property config is updated: %+v", s.scheduleOpt.loadLabelPropertyConfig())
+	if typ == schedule.SlaveLabel {
+		cluster := s.GetRaftCluster()
+		if cluster == nil {
+			return nil
+		}
+		cluster.cachedCluster.SetupSlaveStores()
+	}
 	return nil
 }
 
