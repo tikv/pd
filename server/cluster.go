@@ -383,6 +383,17 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		}
 	}
 
+	// Store address can not be the same as other stores.
+	for _, s := range cluster.GetSlaveStores() {
+		// It's OK to start a new store on the same address if the old store has been removed.
+		if s.IsTombstone() {
+			continue
+		}
+		if s.GetId() != store.GetId() && s.GetAddress() == store.GetAddress() {
+			return errors.Errorf("duplicated store address: %v, already registered by %v", store, s.Store)
+		}
+	}
+
 	s := cluster.GetStore(store.GetId())
 	if s == nil {
 		// Add a new store.

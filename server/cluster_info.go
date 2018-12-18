@@ -166,6 +166,12 @@ func (c *clusterInfo) GetSlaveStoreIDs() []uint64 {
 	return c.core.Stores.GetSlaveStoreIDs()
 }
 
+func (c *clusterInfo) GetSlaveStores() []*core.StoreInfo {
+	c.RLock()
+	defer c.RUnlock()
+	return c.core.Stores.GetSlaveStores()
+}
+
 func (c *clusterInfo) getMeta() *metapb.Cluster {
 	c.RLock()
 	defer c.RUnlock()

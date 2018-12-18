@@ -417,6 +417,17 @@ func (s *StoresInfo) GetSlaveStoreIDs() []uint64 {
 	return stores
 }
 
+// GetSlaveStores gets the slaves.
+func (s *StoresInfo) GetSlaveStores() []*StoreInfo {
+	stores := make([]*StoreInfo, 0, len(s.stores))
+	for _, store := range s.stores {
+		if store.IsSlave {
+			stores = append(stores, store.Clone())
+		}
+	}
+	return stores
+}
+
 // SetupSlaveStores set the store to slaves if the checker is true.
 func (s *StoresInfo) SetupSlaveStores(check func(store *StoreInfo) bool) {
 	for _, store := range s.stores {
