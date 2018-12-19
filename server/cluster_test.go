@@ -18,9 +18,11 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
+	gofail "github.com/pingcap/gofail/runtime"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
@@ -426,6 +428,35 @@ func (s *testClusterSuite) TestRaftClusterRestart(c *C) {
 	cluster.stop()
 }
 
+// Make sure PD will not deadlock if it start and stop again and again.
+func (s *testClusterSuite) TestRaftClusterMultipleRestar(c *C) {
+	var err error
+	_, s.svr, s.cleanup, err = NewTestServer()
+	defer s.cleanup()
+	c.Assert(err, IsNil)
+	mustWaitLeader(c, []*Server{s.svr})
+	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
+	c.Assert(err, IsNil)
+	// add an offline store
+	store := s.newStore(c, s.allocID(c), "127.0.0.1:4")
+	store.State = metapb.StoreState_Offline
+	cluster := s.svr.GetRaftCluster()
+	err = cluster.putStore(store)
+	c.Assert(err, IsNil)
+	c.Assert(cluster, NotNil)
+
+	// let the job run at small interval
+	gofail.Enable("github.com/pingcap/pd/server/highFrequencyClusterJobs", `return(true)`)
+	for i := 0; i < 100; i++ {
+		err = s.svr.createRaftCluster()
+		c.Assert(err, IsNil)
+		time.Sleep(time.Millisecond)
+		cluster = s.svr.GetRaftCluster()
+		c.Assert(cluster, NotNil)
+		cluster.stop()
+	}
+}
+
 func (s *testClusterSuite) TestGetPDMembers(c *C) {
 
 	req := &pdpb.GetMembersRequest{
@@ -504,6 +535,10 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 			StartKey: []byte(fmt.Sprintf("%5d", i)),
 			EndKey:   []byte(fmt.Sprintf("%5d", i+1)),
 			Peers:    []*metapb.Peer{{Id: s.allocID(c), StoreId: stores[0].GetId()}},
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: initEpochConfVer,
+				Version: initEpochVersion,
+			},
 		}
 		if i == 0 {
 			region.StartKey = []byte("")

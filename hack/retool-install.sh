@@ -22,4 +22,4 @@ which retool >/dev/null || go get github.com/twitchtv/retool
 ./hack/retool add github.com/mgechev/revive 7773f47324c2bf1c8f7a5500aff2b6c01d3ed73b
 ./hack/retool add github.com/securego/gosec/cmd/gosec 1.0.0
 # go fail
-./hack/retool add github.com/etcd-io/gofail master
+./hack/retool add github.com/pingcap/gofail master

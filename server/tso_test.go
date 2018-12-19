@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
-	gofail "github.com/etcd-io/gofail/runtime"
 	. "github.com/pingcap/check"
+	gofail "github.com/pingcap/gofail/runtime"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
@@ -171,7 +171,7 @@ func (s *testTimeFallBackSuite) TestTimeFallBack(c *C) {
 
 func mustGetLeader(c *C, client *clientv3.Client, leaderPath string) *pdpb.Member {
 	for i := 0; i < 20; i++ {
-		leader, err := getLeader(client, leaderPath)
+		leader, _, err := getLeader(client, leaderPath)
 		c.Assert(err, IsNil)
 		if leader != nil {
 			return leader

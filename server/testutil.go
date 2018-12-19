@@ -79,7 +79,7 @@ func NewTestSingleConfig() *Config {
 	cfg.ElectionInterval = typeutil.NewDuration(3000 * time.Millisecond)
 	cfg.leaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
 
-	cfg.adjust(nil)
+	cfg.Adjust(nil)
 
 	if schedule.Simulating {
 		cfg.Schedule.RegionScheduleLimit = 128

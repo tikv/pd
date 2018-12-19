@@ -112,7 +112,7 @@ func newTestRegions(n, np uint64) []*core.RegionInfo {
 			Peers:       peers,
 			StartKey:    []byte{byte(i)},
 			EndKey:      []byte{byte(i + 1)},
-			RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
 		}
 		regions = append(regions, core.NewRegionInfo(region, peers[0]))
 	}
@@ -421,7 +421,7 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 
-		// Remove  peers.
+		// Remove peers.
 		origin = region
 		region = origin.Clone(core.SetPeers(region.GetPeers()[:1]))
 		regions[i] = region
@@ -480,14 +480,35 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 			c.Assert(tmp, DeepEquals, region.GetMeta())
 		}
 
-		// check overlap
+		// Check overlap with stale version
 		overlapRegion := regions[n-1].Clone(
+			core.WithStartKey([]byte("")),
+			core.WithEndKey([]byte("")),
+			core.WithNewRegionID(10000),
+			core.WithDecVersion(),
+		)
+		c.Assert(cluster.handleRegionHeartbeat(overlapRegion), NotNil)
+		region := &metapb.Region{}
+		ok, err := kv.LoadRegion(regions[n-1].GetID(), region)
+		c.Assert(ok, IsTrue)
+		c.Assert(err, IsNil)
+		c.Assert(region, DeepEquals, regions[n-1].GetMeta())
+		ok, err = kv.LoadRegion(regions[n-2].GetID(), region)
+		c.Assert(ok, IsTrue)
+		c.Assert(err, IsNil)
+		c.Assert(region, DeepEquals, regions[n-2].GetMeta())
+		ok, err = kv.LoadRegion(overlapRegion.GetID(), region)
+		c.Assert(ok, IsFalse)
+		c.Assert(err, IsNil)
+
+		// Check overlap
+		overlapRegion = regions[n-1].Clone(
 			core.WithStartKey(regions[n-2].GetStartKey()),
 			core.WithNewRegionID(regions[n-1].GetID()+1),
 		)
 		c.Assert(cluster.handleRegionHeartbeat(overlapRegion), IsNil)
-		region := &metapb.Region{}
-		ok, err := kv.LoadRegion(regions[n-1].GetID(), region)
+		region = &metapb.Region{}
+		ok, err = kv.LoadRegion(regions[n-1].GetID(), region)
 		c.Assert(ok, IsFalse)
 		c.Assert(err, IsNil)
 		ok, err = kv.LoadRegion(regions[n-2].GetID(), region)

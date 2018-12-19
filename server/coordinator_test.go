@@ -36,7 +36,7 @@ func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind sche
 
 func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption) {
 	cfg := NewConfig()
-	cfg.adjust(nil)
+	cfg.Adjust(nil)
 	opt := newScheduleOption(cfg)
 	opt.SetClusterVersion(MinSupportedVersion(Version2_0))
 	return &cfg.Schedule, opt

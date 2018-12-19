@@ -81,8 +81,18 @@ func CheckPDVersion(opt *scheduleOption) {
 }
 
 // A helper function to get value with key from etcd.
-// TODO: return the value revision for outer use.
 func getValue(c *clientv3.Client, key string, opts ...clientv3.OpOption) ([]byte, error) {
+	resp, err := get(c, key, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, nil
+	}
+	return resp.Kvs[0].Value, nil
+}
+
+func get(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
 	resp, err := kvGet(c, key, opts...)
 	if err != nil {
 		return nil, err
@@ -93,26 +103,23 @@ func getValue(c *clientv3.Client, key string, opts ...clientv3.OpOption) ([]byte
 	} else if n > 1 {
 		return nil, errors.Errorf("invalid get value resp %v, must only one", resp.Kvs)
 	}
-
-	return resp.Kvs[0].Value, nil
+	return resp, nil
 }
 
 // Return boolean to indicate whether the key exists or not.
-// TODO: return the value revision for outer use.
-func getProtoMsg(c *clientv3.Client, key string, msg proto.Message, opts ...clientv3.OpOption) (bool, error) {
-	value, err := getValue(c, key, opts...)
+func getProtoMsgWithModRev(c *clientv3.Client, key string, msg proto.Message, opts ...clientv3.OpOption) (bool, int64, error) {
+	resp, err := get(c, key, opts...)
 	if err != nil {
-		return false, err
+		return false, 0, err
 	}
-	if value == nil {
-		return false, nil
+	if resp == nil {
+		return false, 0, nil
 	}
-
+	value := resp.Kvs[0].Value
 	if err = proto.Unmarshal(value, msg); err != nil {
-		return false, errors.WithStack(err)
+		return false, 0, errors.WithStack(err)
 	}
-
-	return true, nil
+	return true, resp.Kvs[0].ModRevision, nil
 }
 
 func initOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {

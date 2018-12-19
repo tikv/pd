@@ -117,6 +117,12 @@ func (s *testServer) GetClusterID() uint64 {
 	return s.server.ClusterID()
 }
 
+func (s *testServer) GetLeader() *pdpb.Member {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetLeader()
+}
+
 func (s *testServer) GetClusterVersion() semver.Version {
 	s.RLock()
 	defer s.RUnlock()
@@ -157,11 +163,11 @@ type testCluster struct {
 	servers map[string]*testServer
 }
 
-func newTestCluster(initialServerCount int) (*testCluster, error) {
+func newTestCluster(initialServerCount int, opts ...ConfigOption) (*testCluster, error) {
 	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*testServer)
 	for _, conf := range config.InitialServers {
-		serverConf, err := conf.Generate()
+		serverConf, err := conf.Generate(opts...)
 		if err != nil {
 			return nil, err
 		}

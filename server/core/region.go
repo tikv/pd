@@ -501,7 +501,7 @@ func NewRegionsInfo() *RegionsInfo {
 	}
 }
 
-// GetRegion return the RegionInfo with regionID
+// GetRegion returns the RegionInfo with regionID
 func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 	region := r.regions.Get(regionID)
 	if region == nil {
@@ -510,7 +510,7 @@ func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 	return region
 }
 
-// SetRegion set the RegionInfo with regionID
+// SetRegion sets the RegionInfo with regionID
 func (r *RegionsInfo) SetRegion(region *RegionInfo) []*metapb.Region {
 	if origin := r.regions.Get(region.GetID()); origin != nil {
 		r.RemoveRegion(origin)
@@ -518,17 +518,22 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) []*metapb.Region {
 	return r.AddRegion(region)
 }
 
-// Length return the RegionsInfo length
+// Length returns the RegionsInfo length
 func (r *RegionsInfo) Length() int {
 	return r.regions.Len()
 }
 
-// TreeLength return the RegionsInfo tree length(now only used in test)
+// TreeLength returns the RegionsInfo tree length(now only used in test)
 func (r *RegionsInfo) TreeLength() int {
 	return r.tree.length()
 }
 
-// AddRegion add RegionInfo to regionTree and regionMap, also update leadres and followers by region peers
+// GetOverlaps returns the regions which are overlapped with the specified region range.
+func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*metapb.Region {
+	return r.tree.getOverlaps(region.meta)
+}
+
+// AddRegion adds RegionInfo to regionTree and regionMap, also update leaders and followers by region peers
 func (r *RegionsInfo) AddRegion(region *RegionInfo) []*metapb.Region {
 	// Add to tree and regions.
 	overlaps := r.tree.update(region.meta)
@@ -584,7 +589,7 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*metapb.Region {
 	return overlaps
 }
 
-// RemoveRegion remove RegionInfo from regionTree and regionMap
+// RemoveRegion removes RegionInfo from regionTree and regionMap
 func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	// Remove from tree and regions.
 	r.tree.remove(region.meta)
