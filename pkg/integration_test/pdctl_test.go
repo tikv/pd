@@ -854,6 +854,132 @@ func (s *integrationTestSuite) TestTableNS(c *C) {
 	c.Assert(classifier.IsStoreIDExist(1), IsFalse)
 }
 
+func (s *integrationTestSuite) TestOperator(c *C) {
+	c.Parallel()
+
+	var err error
+	cluster, err := newTestCluster(3, func(conf *server.Config) { conf.Replication.MaxReplicas = 2 })
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.config.GetClientURLs()
+	cmd := initCommand()
+
+	stores := []*metapb.Store{
+		{
+			Id:    1,
+			State: metapb.StoreState_Up,
+		},
+		{
+			Id:    2,
+			State: metapb.StoreState_Up,
+		},
+		{
+			Id:    3,
+			State: metapb.StoreState_Up,
+		},
+	}
+
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	s.bootstrapCluster(leaderServer, c)
+	for _, store := range stores {
+		mustPutStore(c, leaderServer.server, store.Id, store.State, store.Labels)
+	}
+
+	mustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
+		{Id: 1, StoreId: 1},
+		{Id: 2, StoreId: 2},
+	}))
+	mustPutRegion(c, cluster, 3, 2, []byte("b"), []byte("c"), core.SetPeers([]*metapb.Peer{
+		{Id: 3, StoreId: 1},
+		{Id: 4, StoreId: 2},
+	}))
+	defer cluster.Destroy()
+
+	var testCases = []struct {
+		cmd    []string
+		show   []string
+		expect string
+		reset  []string
+	}{
+		{
+			// operator add add-peer <region_id> <to_store_id>
+			cmd:    []string{"-u", pdAddr, "operator", "add", "add-peer", "1", "3"},
+			show:   []string{"-u", pdAddr, "operator", "show"},
+			expect: "promote learner peer 1 on store 3",
+			reset:  []string{"-u", pdAddr, "operator", "remove", "1"},
+		},
+		{
+			// operator add remove-peer <region_id> <to_store_id>
+			cmd:    []string{"-u", pdAddr, "operator", "add", "remove-peer", "1", "2"},
+			show:   []string{"-u", pdAddr, "operator", "show"},
+			expect: "remove peer on store 2",
+			reset:  []string{"-u", pdAddr, "operator", "remove", "1"},
+		},
+		{
+			// operator add transfer-leader <region_id> <to_store_id>
+			cmd:    []string{"-u", pdAddr, "operator", "add", "transfer-leader", "1", "2"},
+			show:   []string{"-u", pdAddr, "operator", "show", "leader"},
+			expect: "transfer leader from store 1 to store 2",
+			reset:  []string{"-u", pdAddr, "operator", "remove", "1"},
+		},
+		{
+			// operator add transfer-region <region_id> <to_store_id>...
+			cmd:    []string{"-u", pdAddr, "operator", "add", "transfer-region", "1", "2", "3"},
+			show:   []string{"-u", pdAddr, "operator", "show", "region"},
+			expect: "remove peer on store 1",
+			reset:  []string{"-u", pdAddr, "operator", "remove", "1"},
+		},
+		{
+			// operator add transfer-peer <region_id> <from_store_id> <to_store_id>
+			cmd:    []string{"-u", pdAddr, "operator", "add", "transfer-peer", "1", "2", "3"},
+			show:   []string{"-u", pdAddr, "operator", "show"},
+			expect: "remove peer on store 2",
+			reset:  []string{"-u", pdAddr, "operator", "remove", "1"},
+		},
+		{
+			// operator add split-region <region_id> [--policy=scan|approximate]
+			cmd:    []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=scan"},
+			show:   []string{"-u", pdAddr, "operator", "show"},
+			expect: "split region with policy SCAN",
+			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
+		},
+		{
+			// operator add split-region <region_id> [--policy=scan|approximate]
+			cmd:    []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=approximate"},
+			show:   []string{"-u", pdAddr, "operator", "show"},
+			expect: "split region with policy APPROXIMATE",
+			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
+		},
+	}
+
+	for _, testCase := range testCases {
+		_, _, e := executeCommandC(cmd, testCase.cmd...)
+		c.Assert(e, IsNil)
+		_, output, e := executeCommandC(cmd, testCase.show...)
+		c.Assert(e, IsNil)
+		c.Assert(strings.Contains(string(output), testCase.expect), IsTrue)
+		_, _, e = executeCommandC(cmd, testCase.reset...)
+		c.Assert(e, IsNil)
+	}
+
+	// operator add merge-region <source_region_id> <target_region_id>
+	args := []string{"-u", pdAddr, "operator", "add", "merge-region", "1", "3"}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "operator", "show"}
+	_, output, err := executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "merge region 1 into region 3"), IsTrue)
+	args = []string{"-u", pdAddr, "operator", "remove", "1"}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "operator", "remove", "3"}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+}
+
 func initCommand() *cobra.Command {
 	commandFlags := pdctl.CommandFlags{}
 	rootCmd := &cobra.Command{}
