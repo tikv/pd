@@ -94,6 +94,7 @@ func (oc *OperatorController) AddOperator(ops ...*Operator) bool {
 	return true
 }
 
+// checkAddOperator check if the operator can be added.
 func (oc *OperatorController) checkAddOperator(op *Operator) bool {
 	region := oc.cluster.GetRegion(op.RegionID())
 	if region == nil {
