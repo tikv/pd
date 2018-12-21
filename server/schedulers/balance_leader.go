@@ -136,7 +136,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(source *core.StoreInfo, clust
 	return l.createOperator(region, source, target, cluster, opInfluence)
 }
 
-// transferLeaderIn transfers leader to the target store.
+// transferLeaderIn transfers the leader to the target store.
 // randomly select a health region from the target store, then pick
 // the worst follower peer and transfer the leader.
 func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
