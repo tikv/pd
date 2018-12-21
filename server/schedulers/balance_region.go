@@ -92,10 +92,10 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	var hasPotentialTarget bool
 	for i := 0; i < balanceRegionRetryLimit; i++ {
-		// Priority the region does not have the leader in the source store
+		// Priority the region that has a follower in the source store.
 		region := cluster.RandFollowerRegion(source.GetId(), core.HealthRegion())
 		if region == nil {
-			//Then hte region have the leader in the source store
+			// Then the region has the leader in the source store
 			region = cluster.RandLeaderRegion(source.GetId(), core.HealthRegion())
 		}
 		if region == nil {

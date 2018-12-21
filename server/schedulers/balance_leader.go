@@ -156,8 +156,8 @@ func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluste
 }
 
 // createOperator creates the operator according to the source and target store.
-// If the rgion is hot or the difference between the two store is tolerable, then
-// no new operator need to be created, otherwise create an operator that transfer
+// If the region is hot or the difference between the two stores is tolerable, then
+// no new operator need to be created, otherwise create an operator that transfers
 // the leader from the source store to the target store for the region.
 func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source, target *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	if cluster.IsRegionHot(region.GetID()) {

@@ -204,7 +204,7 @@ func (h *balanceHotRegionsScheduler) calcScore(items []*core.RegionStat, cluster
 	stats := make(core.StoreHotRegionsStat)
 	for _, r := range items {
 		// HotDegree is the update times on the hot cache. If the heartbeat report
-		// the flow of the region exceeds the threshold, will update the region in
+		// the flow of the region exceeds the threshold, the scheduler will update the region in
 		// the hot cache and the hotdegree of the region will increase.
 		if r.HotDegree < cluster.GetHotRegionLowThreshold() {
 			continue
