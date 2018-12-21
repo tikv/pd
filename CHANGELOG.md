@@ -1,5 +1,8 @@
 # PD Change Log
 
+## v2.1.2
+- Fix the Region information update issue about Region merge [#1377](https://github.com/pingcap/pd/pull/1377)
+
 ## v2.1.1
 - Fix the issue that some configuration items cannot be set to `0` in the configuration file [#1334](https://github.com/pingcap/pd/pull/1334) 
 - Check the undefined configuration when starting PD [#1362](https://github.com/pingcap/pd/pull/1362)
