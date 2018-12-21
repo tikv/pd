@@ -48,7 +48,7 @@ type scatterRangeScheduler struct {
 	balanceRegion schedule.Scheduler
 }
 
-// newScatterRangeScheduler creates a scheduler that balance the distribution leader and region that in specified key range.
+// newScatterRangeScheduler creates a scheduler that balances the distribution of leaders and regions that in the specified key range.
 func newScatterRangeScheduler(opController *schedule.OperatorController, args []string) schedule.Scheduler {
 	base := newBaseScheduler(opController)
 	return &scatterRangeScheduler{

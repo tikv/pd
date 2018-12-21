@@ -118,8 +118,8 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 }
 
 // transferLeaderOut transfers leader from the source store.
-// randomly select a health region from source store, then pick
-// the best follower peer and transfer the leader.
+// It randomly selects a health region from the source store, then picks
+// the best follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderOut(source *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	region := cluster.RandLeaderRegion(source.GetId(), core.HealthRegion())
 	if region == nil {
@@ -156,9 +156,9 @@ func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluste
 }
 
 // createOperator creates the operator according to the source and target store.
-// if the rgion is hot or the difference between the two store is tolerable, then
-// no new operator need to be created, otherwise create a operator that transfer
-// the leader from source store to the target store for the region.
+// If the rgion is hot or the difference between the two store is tolerable, then
+// no new operator need to be created, otherwise create an operator that transfer
+// the leader from the source store to the target store for the region.
 func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source, target *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
 	if cluster.IsRegionHot(region.GetID()) {
 		log.Debugf("[%s] region %d is hot region, ignore it", l.GetName(), region.GetID())

@@ -30,7 +30,7 @@ type labelScheduler struct {
 	selector *schedule.BalanceSelector
 }
 
-// LabelScheduler mainly based on the store's label information for scheduling.
+// LabelScheduler is mainly based on the store's label information for scheduling.
 // Now only used for reject leader schedule, that will move the leader out of
 // the store with the specific label.
 func newLabelScheduler(opController *schedule.OperatorController) schedule.Scheduler {
