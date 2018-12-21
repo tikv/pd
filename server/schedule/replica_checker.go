@@ -26,7 +26,7 @@ import (
 // Including the following:
 // Replica number management.
 // Unhealth replica management, mainly used for disaster recovery of TiKV.
-// Location management, mainly used for Corss-DC deployment.
+// Location management, mainly used for corss data center deployment.
 type ReplicaChecker struct {
 	cluster    Cluster
 	classifier namespace.Classifier
