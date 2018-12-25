@@ -49,6 +49,18 @@ func (c mockClassifier) ReloadNamespaces() error {
 	return nil
 }
 
+func (c mockClassifier) IsMetaExist() bool {
+	return false
+}
+
+func (c mockClassifier) IsTableIDExist(tableID int64) bool {
+	return false
+}
+
+func (c mockClassifier) IsStoreIDExist(storeID uint64) bool {
+	return false
+}
+
 var _ = Suite(&testRegionStatisticsSuite{})
 
 type testRegionStatisticsSuite struct{}
