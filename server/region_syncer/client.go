@@ -124,6 +124,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				}
 				for _, r := range resp.GetRegions() {
 					err = s.server.GetStorage().SaveRegion(r)
+					log.Debugf("%s recv region %d", s.server.Name(), r.GetId())
 					if err == nil {
 						s.history.Record(core.NewRegionInfo(r, nil))
 					}
