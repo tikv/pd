@@ -182,7 +182,7 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 			log.Infof("%s has completed full synchronization with %s, spend %v", name, s.server.Name(), time.Since(start))
 			return nil
 		}
-		log.Warnf("no history regions form index %d, the leader maybe restarted", startIndex)
+		log.Warnf("no history regions from index %d, the leader maybe restarted", startIndex)
 		return nil
 	}
 	log.Infof("sync the history regions with %s from index: %d, own last index: %d, got records length: %d",
