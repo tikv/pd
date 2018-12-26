@@ -144,6 +144,7 @@ func loadRegions(kv KVBase, regions *RegionsInfo) error {
 			nextID = region.GetId() + 1
 			overlaps := regions.SetRegion(NewRegionInfo(region, nil))
 			for _, item := range overlaps {
+				log.Warnf("exsist overlap item %+v", item)
 				if err := deleteRegion(kv, item); err != nil {
 					return err
 				}
@@ -164,6 +165,7 @@ func (kv *RegionKV) FlushRegion() error {
 }
 
 func (kv *RegionKV) flush() error {
+	log.Infof("regionkv persist %d items", len(kv.batchRegions))
 	if err := kv.SaveRegions(kv.batchRegions); err != nil {
 		return err
 	}

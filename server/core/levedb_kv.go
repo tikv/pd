@@ -19,6 +19,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type leveldbKV struct {
@@ -54,6 +56,7 @@ func (kv *leveldbKV) LoadRange(startKey, endKey string, limit int) ([]string, er
 		count++
 	}
 	iter.Release()
+	log.Infof("leveldb load range %d items", len(values))
 	return values, nil
 }
 
