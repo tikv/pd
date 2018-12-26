@@ -314,8 +314,8 @@ func (s *Server) watchLeader(leader *pdpb.Member, revision int64) {
 		for wresp := range rch {
 			// meet compacted error, use current revision.
 			if wresp.CompactRevision != 0 {
-				log.Warnf("required revision %d has been compacted, use current revision", revision)
-				revision = 0
+				log.Warnf("required revision %d has been compacted, use the compact revision %d", revision, wresp.CompactRevision)
+				revision = wresp.CompactRevision
 				break
 			}
 			if wresp.Canceled {

@@ -25,7 +25,7 @@ import (
 
 func (s *integrationTestSuite) TestWatcher(c *C) {
 	c.Parallel()
-	cluster, err := newTestCluster(1)
+	cluster, err := newTestCluster(1, func(conf *server.Config) { conf.AutoCompactionRetention = "1s" })
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
