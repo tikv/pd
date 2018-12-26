@@ -284,7 +284,9 @@ func (s *Server) campaignLeader() error {
 				return nil
 			}
 		case <-ctx.Done():
-			return errors.New("server closed")
+			// Server is closed and it should return nil.
+			log.Info("server is closed")
+			return nil
 		}
 	}
 }

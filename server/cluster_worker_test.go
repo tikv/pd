@@ -17,11 +17,14 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 )
 
 var _ = Suite(&testClusterWorkerSuite{})
 
-type testClusterWorkerSuite struct{}
+type testClusterWorkerSuite struct {
+	baseCluster
+}
 
 func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	var cluster RaftCluster
@@ -43,4 +46,43 @@ func (s *testClusterWorkerSuite) TestReportBatchSplit(c *C) {
 	}
 	_, err := cluster.handleBatchReportSplit(&pdpb.ReportBatchSplitRequest{Regions: regions})
 	c.Assert(err, IsNil)
+}
+
+func (s *testClusterWorkerSuite) TestValidRequestRegion(c *C) {
+	var err error
+	_, s.svr, s.cleanup, err = NewTestServer()
+	c.Assert(err, IsNil)
+	s.client = s.svr.client
+	mustWaitLeader(c, []*Server{s.svr})
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	defer s.cleanup()
+	s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
+
+	cluster := s.svr.GetRaftCluster()
+	c.Assert(cluster, NotNil)
+
+	r1 := core.NewRegionInfo(&metapb.Region{
+		Id:       1,
+		StartKey: []byte(""),
+		EndKey:   []byte("a"),
+		Peers: []*metapb.Peer{{
+			Id:      1,
+			StoreId: 1,
+		}},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
+	}, &metapb.Peer{
+		Id:      1,
+		StoreId: 1,
+	})
+	err = cluster.HandleRegionHeartbeat(r1)
+	c.Assert(err, IsNil)
+	r2 := &metapb.Region{Id: 2, StartKey: []byte("a"), EndKey: []byte("b")}
+	c.Assert(cluster.validRequestRegion(r2), NotNil)
+	r3 := &metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 2}}
+	c.Assert(cluster.validRequestRegion(r3), NotNil)
+	r4 := &metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 1}}
+	c.Assert(cluster.validRequestRegion(r4), NotNil)
+	r5 := &metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2}}
+	c.Assert(cluster.validRequestRegion(r5), IsNil)
+	cluster.stop()
 }

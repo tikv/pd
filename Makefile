@@ -8,6 +8,8 @@ PACKAGES := go list ./...
 PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|github.com/pingcap/pd/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 RETOOL:= ./scripts/retool
+OVERALLS  := overalls
+GOVERALLS := goveralls
 
 GOFAIL_ENABLE  := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do gofail enable)
 GOFAIL_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do gofail disable)
@@ -66,7 +68,7 @@ check-fail:
 	  $$($(PACKAGE_DIRECTORIES))
 	CGO_ENABLED=0 ./scripts/retool do gosec $$($(PACKAGE_DIRECTORIES))
 
-check-all: static lint
+check-all: static lint tidy
 	@echo "checking"
 
 retool-setup: export GO111MODULE=off
@@ -91,9 +93,18 @@ lint:
 	@echo "linting"
 	CGO_ENABLED=0 ./scripts/retool do revive -formatter friendly -config revive.toml $$($(PACKAGES))
 
+tidy:
+	@echo "go mod tidy"
+	GO111MODULE=on go mod tidy
+	git diff --quiet
+
+travis_coverage: export GO111MODULE=on
 travis_coverage:
 ifeq ("$(TRAVIS_COVERAGE)", "1")
-	GOPATH=$(VENDOR) $(HOME)/gopath/bin/goveralls -service=travis-ci -ignore $(COVERIGNORE)
+	@$(GOFAIL_ENABLE)
+	CGO_ENABLED=1 ./scripts/retool do $(OVERALLS) -project=github.com/pingcap/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(GOFAIL_DISABLE); exit 1; }
+	CGO_ENABLED=0 ./scripts/retool do $(GOVERALLS) -service=travis-ci -coverprofile=overalls.coverprofile || { $(GOFAIL_DISABLE); exit 1; }
+	@$(GOFAIL_DISABLE)
 else
 	@echo "coverage only runs in travis."
 endif
@@ -115,4 +126,4 @@ gofail-disable:
 	# Restoring gofail failpoints...
 	@$(GOFAIL_DISABLE)
 
-.PHONY: all ci vendor clean-test
+.PHONY: all ci vendor clean-test tidy
