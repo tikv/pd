@@ -199,9 +199,13 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	return nil
 }
 
+// calcSocre calculates the statistics of hotspots through the hot cache.
 func (h *balanceHotRegionsScheduler) calcScore(items []*core.RegionStat, cluster schedule.Cluster, kind core.ResourceKind) core.StoreHotRegionsStat {
 	stats := make(core.StoreHotRegionsStat)
 	for _, r := range items {
+		// HotDegree is the update times on the hot cache. If the heartbeat report
+		// the flow of the region exceeds the threshold, the scheduler will update the region in
+		// the hot cache and the hotdegree of the region will increase.
 		if r.HotDegree < cluster.GetHotRegionLowThreshold() {
 			continue
 		}
@@ -247,6 +251,7 @@ func (h *balanceHotRegionsScheduler) calcScore(items []*core.RegionStat, cluster
 	return stats
 }
 
+// balanceByPeer balances the peer distribution of hot regions.
 func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, storesStat core.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer, *metapb.Peer) {
 	if !h.allowBalanceRegion(cluster) {
 		return nil, nil, nil
@@ -307,6 +312,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 	return nil, nil, nil
 }
 
+// balanceByLeader balances the leader distribution of hot regions.
 func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, storesStat core.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer) {
 	if !h.allowBalanceLeader(cluster) {
 		return nil, nil

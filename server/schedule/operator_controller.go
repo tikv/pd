@@ -94,6 +94,11 @@ func (oc *OperatorController) AddOperator(ops ...*Operator) bool {
 	return true
 }
 
+// checkAddOperator checks if the operator can be added.
+// There are several situations that cannot be added:
+// - There is no such region in the cluster
+// - The epoch of the operator and the epoch of the corresponding region are no longer consistent.
+// - The region already has a higher priority or same priority operator.
 func (oc *OperatorController) checkAddOperator(op *Operator) bool {
 	region := oc.cluster.GetRegion(op.RegionID())
 	if region == nil {

@@ -48,8 +48,7 @@ type scatterRangeScheduler struct {
 	balanceRegion schedule.Scheduler
 }
 
-// newScatterRangeScheduler creates a scheduler that tends to keep leaders on
-// each store balanced.
+// newScatterRangeScheduler creates a scheduler that balances the distribution of leaders and regions that in the specified key range.
 func newScatterRangeScheduler(opController *schedule.OperatorController, args []string) schedule.Scheduler {
 	base := newBaseScheduler(opController)
 	return &scatterRangeScheduler{
@@ -76,6 +75,7 @@ func (l *scatterRangeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool
 
 func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
+	// isolate a new cluster according to the key range
 	c := schedule.GenRangeCluster(cluster, l.startKey, l.endKey)
 	c.SetTolerantSizeRatio(2)
 	ops := l.balanceLeader.Schedule(c)
