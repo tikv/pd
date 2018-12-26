@@ -479,6 +479,11 @@ func (s *Server) ClusterID() uint64 {
 	return s.clusterID
 }
 
+// GetClassifier returns the classifier of this server.
+func (s *Server) GetClassifier() namespace.Classifier {
+	return s.classifier
+}
+
 // txn returns an etcd client transaction wrapper.
 // The wrapper will set a request timeout to the context and log slow transactions.
 func (s *Server) txn() clientv3.Txn {

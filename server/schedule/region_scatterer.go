@@ -68,6 +68,7 @@ type RegionScatterer struct {
 }
 
 // NewRegionScatterer creates a region scatterer.
+// RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
 func NewRegionScatterer(cluster Cluster, classifier namespace.Classifier) *RegionScatterer {
 	return &RegionScatterer{
 		cluster:    cluster,

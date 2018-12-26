@@ -888,7 +888,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 				StartKey: []byte("t"),
 				EndKey:   []byte("x"),
 				Peers: []*metapb.Peer{
-					{Id: 106, StoreId: 1},
+					{Id: 106, StoreId: 2},
 					{Id: 107, StoreId: 5},
 					{Id: 108, StoreId: 6},
 				},
@@ -951,30 +951,10 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	// partial store overlap not including leader
 	ops := s.mc.Check(s.regions[2])
 	s.checkSteps(c, ops[0], []schedule.OperatorStep{
-		schedule.AddLearner{ToStore: 4, PeerID: 1},
-		schedule.PromoteLearner{ToStore: 4, PeerID: 1},
-		schedule.TransferLeader{FromStore: 6, ToStore: 4},
-		schedule.RemovePeer{FromStore: 6},
-		schedule.MergeRegion{
-			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[1].GetMeta(),
-			IsPassive:  false,
-		},
-	})
-	s.checkSteps(c, ops[1], []schedule.OperatorStep{
-		schedule.MergeRegion{
-			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[1].GetMeta(),
-			IsPassive:  true,
-		},
-	})
-
-	// partial store overlap including leader
-	newRegion := s.regions[2].Clone(core.WithLeader(&metapb.Peer{Id: 106, StoreId: 1}))
-	s.regions[2] = newRegion
-	s.cluster.PutRegion(s.regions[2])
-	ops = s.mc.Check(s.regions[2])
-	s.checkSteps(c, ops[0], []schedule.OperatorStep{
+		schedule.TransferLeader{FromStore: 6, ToStore: 5},
+		schedule.AddLearner{ToStore: 1, PeerID: 1},
+		schedule.PromoteLearner{ToStore: 1, PeerID: 1},
+		schedule.RemovePeer{FromStore: 2},
 		schedule.AddLearner{ToStore: 4, PeerID: 2},
 		schedule.PromoteLearner{ToStore: 4, PeerID: 2},
 		schedule.RemovePeer{FromStore: 6},
@@ -992,7 +972,37 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 		},
 	})
 
-	// all store overlap
+	// partial store overlap including leader
+	newRegion := s.regions[2].Clone(
+		core.SetPeers([]*metapb.Peer{
+			{Id: 106, StoreId: 1},
+			{Id: 107, StoreId: 5},
+			{Id: 108, StoreId: 6},
+		}),
+		core.WithLeader(&metapb.Peer{Id: 106, StoreId: 1}),
+	)
+	s.regions[2] = newRegion
+	s.cluster.PutRegion(s.regions[2])
+	ops = s.mc.Check(s.regions[2])
+	s.checkSteps(c, ops[0], []schedule.OperatorStep{
+		schedule.AddLearner{ToStore: 4, PeerID: 3},
+		schedule.PromoteLearner{ToStore: 4, PeerID: 3},
+		schedule.RemovePeer{FromStore: 6},
+		schedule.MergeRegion{
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
+			IsPassive:  false,
+		},
+	})
+	s.checkSteps(c, ops[1], []schedule.OperatorStep{
+		schedule.MergeRegion{
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
+			IsPassive:  true,
+		},
+	})
+
+	// all stores overlap
 	s.regions[2] = s.regions[2].Clone(core.SetPeers([]*metapb.Peer{
 		{Id: 106, StoreId: 1},
 		{Id: 107, StoreId: 5},
@@ -1001,6 +1011,39 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.cluster.PutRegion(s.regions[2])
 	ops = s.mc.Check(s.regions[2])
 	s.checkSteps(c, ops[0], []schedule.OperatorStep{
+		schedule.MergeRegion{
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
+			IsPassive:  false,
+		},
+	})
+	s.checkSteps(c, ops[1], []schedule.OperatorStep{
+		schedule.MergeRegion{
+			FromRegion: s.regions[2].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
+			IsPassive:  true,
+		},
+	})
+
+	// all stores not overlap
+	s.regions[2] = s.regions[2].Clone(core.SetPeers([]*metapb.Peer{
+		{Id: 109, StoreId: 2},
+		{Id: 110, StoreId: 3},
+		{Id: 111, StoreId: 6},
+	}), core.WithLeader(&metapb.Peer{Id: 109, StoreId: 2}))
+	s.cluster.PutRegion(s.regions[2])
+	ops = s.mc.Check(s.regions[2])
+	s.checkSteps(c, ops[0], []schedule.OperatorStep{
+		schedule.AddLearner{ToStore: 1, PeerID: 4},
+		schedule.PromoteLearner{ToStore: 1, PeerID: 4},
+		schedule.RemovePeer{FromStore: 3},
+		schedule.AddLearner{ToStore: 4, PeerID: 5},
+		schedule.PromoteLearner{ToStore: 4, PeerID: 5},
+		schedule.RemovePeer{FromStore: 6},
+		schedule.AddLearner{ToStore: 5, PeerID: 6},
+		schedule.PromoteLearner{ToStore: 5, PeerID: 6},
+		schedule.TransferLeader{FromStore: 2, ToStore: 1},
+		schedule.RemovePeer{FromStore: 2},
 		schedule.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),

@@ -25,14 +25,12 @@ import (
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	"github.com/pingcap/pd/server/region_syncer"
+	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	backgroundJobInterval = time.Minute
-)
+var backgroundJobInterval = time.Minute
 
 // RaftCluster is used for cluster config management.
 // Raft cluster key format:
@@ -120,6 +118,10 @@ func (c *RaftCluster) start() error {
 
 	c.wg.Add(3)
 	go c.runCoordinator()
+	// gofail: var highFrequencyClusterJobs bool
+	// if highFrequencyClusterJobs {
+	//     backgroundJobInterval = 100 * time.Microsecond
+	// }
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.syncRegions()
 	c.running = true
@@ -144,9 +146,9 @@ func (c *RaftCluster) syncRegions() {
 
 func (c *RaftCluster) stop() {
 	c.Lock()
-	defer c.Unlock()
 
 	if !c.running {
+		c.Unlock()
 		return
 	}
 
@@ -154,6 +156,7 @@ func (c *RaftCluster) stop() {
 
 	close(c.quit)
 	c.coordinator.stop()
+	c.Unlock()
 	c.wg.Wait()
 }
 
@@ -500,20 +503,21 @@ func (c *RaftCluster) checkStores() {
 	cluster := c.cachedCluster
 
 	for _, store := range cluster.GetStores() {
-		if store.GetState() != metapb.StoreState_Offline {
-			if store.GetState() == metapb.StoreState_Up && !store.IsLowSpace(cluster.GetLowSpaceRatio()) {
-				upStoreCount++
-				continue
-			}
+		// the store has already been tombstone
+		if store.IsTombstone() {
+			continue
 		}
+
+		if store.IsUp() && !store.IsLowSpace(cluster.GetLowSpaceRatio()) {
+			upStoreCount++
+			continue
+		}
+
 		offlineStore := store.Store
 		// If the store is empty, it can be buried.
 		if cluster.getStoreRegionCount(offlineStore.GetId()) == 0 {
-			err := c.BuryStore(offlineStore.GetId(), false)
-			if err != nil {
+			if err := c.BuryStore(offlineStore.GetId(), false); err != nil {
 				log.Errorf("bury store %v failed: %v", offlineStore, err)
-			} else {
-				log.Infof("buried store %v", offlineStore)
 			}
 		} else {
 			offlineStores = append(offlineStores, offlineStore)

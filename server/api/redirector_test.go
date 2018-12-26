@@ -36,8 +36,12 @@ func (s *testRedirectorSuite) TearDownSuite(c *C) {
 }
 
 func (s *testRedirectorSuite) TestRedirect(c *C) {
+	leader := mustWaitLeader(c, s.servers)
+	header := mustRequestSuccess(c, leader)
 	for _, svr := range s.servers {
-		mustRequestSuccess(c, svr)
+		if svr != leader {
+			c.Assert(header, DeepEquals, mustRequestSuccess(c, svr))
+		}
 	}
 }
 
@@ -76,7 +80,8 @@ func mustRequest(c *C, s *server.Server) *http.Response {
 	return resp
 }
 
-func mustRequestSuccess(c *C, s *server.Server) {
+func mustRequestSuccess(c *C, s *server.Server) http.Header {
 	resp := mustRequest(c, s)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	return resp.Header
 }
