@@ -280,14 +280,14 @@ func (c *RaftCluster) GetMetaRegions() []*metapb.Region {
 	return c.cachedCluster.getMetaRegions()
 }
 
-// GetRegions returns all regions info in detail.
+// GetRegions returns all regions' information in detail.
 func (c *RaftCluster) GetRegions() []*core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.cachedCluster.getRegions()
 }
 
-// GetStoreRegions returns all regions info with a given storeID.
+// GetStoreRegions returns all regions' information with a given storeID.
 func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
@@ -330,7 +330,7 @@ func (c *RaftCluster) GetStore(storeID uint64) (*core.StoreInfo, error) {
 	return store, nil
 }
 
-// GetAdjacentRegions returns region's info that is adjacent with specific region id.
+// GetAdjacentRegions returns regions' information that are adjacent with the specific region ID.
 func (c *RaftCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo) {
 	c.RLock()
 	defer c.RUnlock()

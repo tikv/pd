@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package server_test
 
 import (
 	"bytes"
@@ -25,13 +25,14 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/tests"
 	"github.com/pkg/errors"
 )
 
-func (s *integrationTestSuite) TestMemberDelete(c *C) {
+func (s *serverTestSuite) TestMemberDelete(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(3)
+	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -40,8 +41,8 @@ func (s *integrationTestSuite) TestMemberDelete(c *C) {
 	leaderName := cluster.WaitLeader()
 	c.Assert(leaderName, Not(Equals), "")
 	leader := cluster.GetServer(leaderName)
-	var members []*testServer
-	for _, s := range cluster.config.InitialServers {
+	var members []*tests.TestServer
+	for _, s := range cluster.GetConfig().InitialServers {
 		if s.Name != leaderName {
 			members = append(members, cluster.GetServer(s.Name))
 		}
@@ -89,7 +90,7 @@ func (s *integrationTestSuite) TestMemberDelete(c *C) {
 	}
 }
 
-func (s *integrationTestSuite) checkMemberList(c *C, clientURL string, configs []*server.Config) error {
+func (s *serverTestSuite) checkMemberList(c *C, clientURL string, configs []*server.Config) error {
 	httpClient := &http.Client{Timeout: 15 * time.Second}
 	addr := clientURL + "/pd/api/v1/members"
 	res, err := httpClient.Get(addr)
@@ -116,10 +117,10 @@ func (s *integrationTestSuite) checkMemberList(c *C, clientURL string, configs [
 	return nil
 }
 
-func (s *integrationTestSuite) TestLeaderPriority(c *C) {
+func (s *serverTestSuite) TestLeaderPriority(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(3)
+	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -146,7 +147,7 @@ func (s *integrationTestSuite) TestLeaderPriority(c *C) {
 	})
 }
 
-func (s *integrationTestSuite) post(c *C, url string, body string) {
+func (s *serverTestSuite) post(c *C, url string, body string) {
 	testutil.WaitUntil(c, func(c *C) bool {
 		res, err := http.Post(url, "", bytes.NewBufferString(body))
 		c.Assert(err, IsNil)
@@ -158,7 +159,7 @@ func (s *integrationTestSuite) post(c *C, url string, body string) {
 	})
 }
 
-func (s *integrationTestSuite) waitEtcdLeaderChange(c *C, server *testServer, old string) string {
+func (s *serverTestSuite) waitEtcdLeaderChange(c *C, server *tests.TestServer, old string) string {
 	var leader string
 	testutil.WaitUntil(c, func(c *C) bool {
 		var err error
@@ -175,10 +176,10 @@ func (s *integrationTestSuite) waitEtcdLeaderChange(c *C, server *testServer, ol
 	return leader
 }
 
-func (s *integrationTestSuite) TestLeaderResign(c *C) {
+func (s *serverTestSuite) TestLeaderResign(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(3)
+	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -197,7 +198,7 @@ func (s *integrationTestSuite) TestLeaderResign(c *C) {
 	c.Assert(leader3, Equals, leader1)
 }
 
-func (s *integrationTestSuite) waitLeaderChange(c *C, cluster *testCluster, old string) string {
+func (s *serverTestSuite) waitLeaderChange(c *C, cluster *tests.TestCluster, old string) string {
 	var leader string
 	testutil.WaitUntil(c, func(c *C) bool {
 		leader = cluster.GetLeader()

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package server_test
 
 import (
 	"context"
@@ -21,11 +21,12 @@ import (
 	gofail "github.com/pingcap/gofail/runtime"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/tests"
 )
 
-func (s *integrationTestSuite) TestWatcher(c *C) {
+func (s *serverTestSuite) TestWatcher(c *C) {
 	c.Parallel()
-	cluster, err := newTestCluster(1)
+	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -59,9 +60,9 @@ func (s *integrationTestSuite) TestWatcher(c *C) {
 	c.Succeed()
 }
 
-func (s *integrationTestSuite) TestWatcherCompacted(c *C) {
+func (s *serverTestSuite) TestWatcherCompacted(c *C) {
 	c.Parallel()
-	cluster, err := newTestCluster(1, func(conf *server.Config) { conf.AutoCompactionRetention = "1s" })
+	cluster, err := tests.NewTestCluster(1, func(conf *server.Config) { conf.AutoCompactionRetention = "1s" })
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
