@@ -16,6 +16,7 @@ package tests
 import (
 	"context"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -286,7 +287,19 @@ func NewTestCluster(initialServerCount int, opts ...ConfigOption) (*TestCluster,
 // RunServer starts to run TestServer.
 func (c *TestCluster) RunServer(ctx context.Context, server *TestServer) <-chan error {
 	resC := make(chan error)
-	go func() { resC <- server.Run(ctx) }()
+	go func() {
+		for i := 0; i < 10; i++ {
+			err := server.Run(ctx)
+			// retryable error
+			if err != nil && strings.Contains(err.Error(), "address already in use") {
+				server.Stop()
+				time.Sleep(time.Second)
+				continue
+			}
+			resC <- err
+			return
+		}
+	}()
 	return resC
 }
 
