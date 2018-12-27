@@ -78,9 +78,9 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	c.Assert(len(loadRegions), Equals, regionLen)
 }
 
-func (s *integrationTestSuite) TestFullSyncWithAddMember(c *C) {
+func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 	c.Parallel()
-	cluster, err := newTestCluster(1, func(conf *server.Config) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(1, func(conf *server.Config) { conf.PDServerCfg.UseRegionStorage = true })
 
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -89,8 +89,8 @@ func (s *integrationTestSuite) TestFullSyncWithAddMember(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	s.bootstrapCluster(leaderServer, c)
-	rc := leaderServer.server.GetRaftCluster()
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	rc := leaderServer.GetServer().GetRaftCluster()
 	c.Assert(rc, NotNil)
 	regionLen := 110
 	id := &idAllocator{}
@@ -132,6 +132,6 @@ func (s *integrationTestSuite) TestFullSyncWithAddMember(c *C) {
 	err = cluster.ResignLeader()
 	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd2")
-	loadRegions := pd2.server.GetRaftCluster().GetRegions()
+	loadRegions := pd2.GetServer().GetRaftCluster().GetRegions()
 	c.Assert(len(loadRegions), Equals, regionLen)
 }
