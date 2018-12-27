@@ -105,7 +105,7 @@ travis_coverage:
 ifeq ("$(TRAVIS_COVERAGE)", "1")
 	@$(GOFAIL_ENABLE)
 	CGO_ENABLED=1 ./scripts/retool do $(OVERALLS) -project=github.com/pingcap/pd -covermode=count -ignore='.git,vendor,tools' -- -coverpkg=./... || { $(GOFAIL_DISABLE); exit 1; }
-	@echo "Note: ignre tools"
+	@echo "Note: ignore tools"
 	grep -vE "tools" overalls.coverprofile > coverage.out
 	CGO_ENABLED=0 ./scripts/retool do $(GOVERALLS) -service=travis-ci -coverprofile=coverage.out || { $(GOFAIL_DISABLE); exit 1; }
 	@$(GOFAIL_DISABLE)
