@@ -101,6 +101,8 @@ func (c *clusterInfo) OnStoreVersionChange() {
 			minVersion = v
 		}
 	}
+	// If the cluster version of PD is less than the minimum version of all stores,
+	// it will update the cluster version.
 	if clusterVersion.LessThan(*minVersion) {
 		c.opt.SetClusterVersion(*minVersion)
 		err := c.opt.persist(c.kv)
@@ -462,6 +464,14 @@ func (c *clusterInfo) updateStoreStatusLocked(id uint64) {
 func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
 	origin := c.core.Regions.GetRegion(region.GetID())
+	if origin == nil {
+		for _, item := range c.core.Regions.GetOverlaps(region) {
+			if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
+				c.RUnlock()
+				return ErrRegionIsStale(region.GetMeta(), item)
+			}
+		}
+	}
 	isWriteUpdate, writeItem := c.core.CheckWriteStatus(region)
 	isReadUpdate, readItem := c.core.CheckReadStatus(region)
 	c.RUnlock()
@@ -737,10 +747,12 @@ func newPrepareChecker() *prepareChecker {
 	}
 }
 
+// Before starting up the scheduler, we need to take the proportion of the regions on each store into consideration.
 func (checker *prepareChecker) check(c *clusterInfo) bool {
 	if checker.isPrepared || time.Since(checker.start) > collectTimeout {
 		return true
 	}
+	// The number of active regions should be more than total region of all stores * collectFactor
 	if float64(c.core.Regions.Length())*collectFactor > float64(checker.sum) {
 		return false
 	}
@@ -749,6 +761,7 @@ func (checker *prepareChecker) check(c *clusterInfo) bool {
 			continue
 		}
 		storeID := store.GetId()
+		// For each store, the number of active regions should be more than total region of the store * collectFactor
 		if float64(c.core.Regions.GetStoreRegionCount(storeID))*collectFactor > float64(checker.reactiveRegions[storeID]) {
 			return false
 		}

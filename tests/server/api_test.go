@@ -11,19 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package server_test
 
 import (
 	"net/http"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/tests"
 )
 
-func (s *integrationTestSuite) TestReconnect(c *C) {
+func (s *serverTestSuite) TestReconnect(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(3)
+	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -33,7 +34,7 @@ func (s *integrationTestSuite) TestReconnect(c *C) {
 	// Make connections to followers.
 	// Make sure they proxy requests to the leader.
 	leader := cluster.WaitLeader()
-	for name, s := range cluster.servers {
+	for name, s := range cluster.GetServers() {
 		if name != leader {
 			res, e := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 			c.Assert(e, IsNil)
@@ -47,7 +48,7 @@ func (s *integrationTestSuite) TestReconnect(c *C) {
 	newLeader := cluster.WaitLeader()
 
 	// Make sure they proxy requests to the new leader.
-	for name, s := range cluster.servers {
+	for name, s := range cluster.GetServers() {
 		if name != leader {
 			testutil.WaitUntil(c, func(c *C) bool {
 				res, e := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
@@ -62,7 +63,7 @@ func (s *integrationTestSuite) TestReconnect(c *C) {
 	c.Assert(err, IsNil)
 
 	// Request will fail with no leader.
-	for name, s := range cluster.servers {
+	for name, s := range cluster.GetServers() {
 		if name != leader && name != newLeader {
 			testutil.WaitUntil(c, func(c *C) bool {
 				res, err := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")

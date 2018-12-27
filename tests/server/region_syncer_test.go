@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package server_test
 
 import (
 	"time"
@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/tests"
 )
 
 type idAllocator struct {
@@ -32,9 +33,9 @@ func (alloc *idAllocator) Alloc() uint64 {
 	return alloc.id
 }
 
-func (s *integrationTestSuite) TestRegionSyncer(c *C) {
+func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	c.Parallel()
-	cluster, err := newTestCluster(3, func(conf *server.Config) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(3, func(conf *server.Config) { conf.PDServerCfg.UseRegionStorage = true })
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -42,8 +43,8 @@ func (s *integrationTestSuite) TestRegionSyncer(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	s.bootstrapCluster(leaderServer, c)
-	rc := leaderServer.server.GetRaftCluster()
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	rc := leaderServer.GetServer().GetRaftCluster()
 	c.Assert(rc, NotNil)
 	regionLen := 110
 	id := &idAllocator{}
@@ -72,6 +73,6 @@ func (s *integrationTestSuite) TestRegionSyncer(c *C) {
 	cluster.WaitLeader()
 	leaderServer = cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer, NotNil)
-	loadRegions := leaderServer.server.GetRaftCluster().GetRegions()
+	loadRegions := leaderServer.GetServer().GetRaftCluster().GetRegions()
 	c.Assert(len(loadRegions), Equals, regionLen)
 }

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package server_test
 
 import (
 	"testing"
@@ -20,24 +20,28 @@ import (
 	"github.com/pingcap/pd/pkg/tempurl"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/tests"
+
+	// Register schedulers.
+	_ "github.com/pingcap/pd/server/schedulers"
 )
 
-func TestAll(t *testing.T) {
+func Test(t *testing.T) {
 	TestingT(t)
 }
 
-var _ = Suite(&integrationTestSuite{})
+var _ = Suite(&serverTestSuite{})
 
-type integrationTestSuite struct{}
+type serverTestSuite struct{}
 
-func (s *integrationTestSuite) SetUpSuite(c *C) {
+func (s *serverTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
 }
 
-func (s *integrationTestSuite) TestUpdateAdvertiseUrls(c *C) {
+func (s *serverTestSuite) TestUpdateAdvertiseUrls(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(2)
+	cluster, err := tests.NewTestCluster(2)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -45,7 +49,7 @@ func (s *integrationTestSuite) TestUpdateAdvertiseUrls(c *C) {
 	c.Assert(err, IsNil)
 
 	// AdvertisePeerUrls should equals to PeerUrls.
-	for _, conf := range cluster.config.InitialServers {
+	for _, conf := range cluster.GetConfig().InitialServers {
 		serverConf := cluster.GetServer(conf.Name).GetConfig()
 		c.Assert(serverConf.AdvertisePeerUrls, Equals, conf.PeerURLs)
 		c.Assert(serverConf.AdvertiseClientUrls, Equals, conf.ClientURLs)
@@ -56,28 +60,28 @@ func (s *integrationTestSuite) TestUpdateAdvertiseUrls(c *C) {
 
 	// Change config will not affect peer urls.
 	// Recreate servers with new peer URLs.
-	for _, conf := range cluster.config.InitialServers {
+	for _, conf := range cluster.GetConfig().InitialServers {
 		conf.AdvertisePeerURLs = conf.PeerURLs + "," + tempurl.Alloc()
 	}
-	for _, conf := range cluster.config.InitialServers {
+	for _, conf := range cluster.GetConfig().InitialServers {
 		serverConf, e := conf.Generate()
 		c.Assert(e, IsNil)
-		s, e := newTestServer(serverConf)
+		s, e := tests.NewTestServer(serverConf)
 		c.Assert(e, IsNil)
-		cluster.servers[conf.Name] = s
+		cluster.GetServers()[conf.Name] = s
 	}
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
-	for _, conf := range cluster.config.InitialServers {
+	for _, conf := range cluster.GetConfig().InitialServers {
 		serverConf := cluster.GetServer(conf.Name).GetConfig()
 		c.Assert(serverConf.AdvertisePeerUrls, Equals, conf.PeerURLs)
 	}
 }
 
-func (s *integrationTestSuite) TestClusterID(c *C) {
+func (s *serverTestSuite) TestClusterID(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(3)
+	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -85,7 +89,7 @@ func (s *integrationTestSuite) TestClusterID(c *C) {
 	c.Assert(err, IsNil)
 
 	clusterID := cluster.GetServer("pd1").GetClusterID()
-	for _, s := range cluster.servers {
+	for _, s := range cluster.GetServers() {
 		c.Assert(s.GetClusterID(), Equals, clusterID)
 	}
 
@@ -96,15 +100,15 @@ func (s *integrationTestSuite) TestClusterID(c *C) {
 	c.Assert(err, IsNil)
 
 	// All PDs should have the same cluster ID as before.
-	for _, s := range cluster.servers {
+	for _, s := range cluster.GetServers() {
 		c.Assert(s.GetClusterID(), Equals, clusterID)
 	}
 }
 
-func (s *integrationTestSuite) TestLeader(c *C) {
+func (s *serverTestSuite) TestLeader(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(3)
+	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 

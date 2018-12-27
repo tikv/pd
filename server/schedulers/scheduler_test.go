@@ -186,7 +186,9 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 
 	// Add regions 1~4.
 	seq := newSequencer(numStores)
-	for i := uint64(1); i <= numRegions; i++ {
+	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	for i := uint64(2); i <= numRegions; i++ {
 		tc.AddLeaderRegion(i, seq.next(), seq.next(), seq.next())
 	}
 
