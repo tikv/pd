@@ -673,7 +673,7 @@ func (s *Server) getClusterRootPath() string {
 	return path.Join(s.rootPath, "raft")
 }
 
-// GetRaftCluster gets raft cluster.
+// GetRaftCluster gets Raft cluster.
 // If cluster has not been bootstrapped, return nil.
 func (s *Server) GetRaftCluster() *RaftCluster {
 	if s.isClosed() || !s.cluster.isRunning() {
@@ -755,7 +755,7 @@ func (s *Server) SetLogLevel(level string) {
 
 var healthURL = "/pd/ping"
 
-// CheckHealth checks if members are healthy
+// CheckHealth checks if members are healthy.
 func (s *Server) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
 	unhealthMembers := make(map[uint64]*pdpb.Member)
 	for _, member := range members {

@@ -92,8 +92,10 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	var hasPotentialTarget bool
 	for i := 0; i < balanceRegionRetryLimit; i++ {
+		// Priority the region that has a follower in the source store.
 		region := cluster.RandFollowerRegion(source.GetId(), core.HealthRegion())
 		if region == nil {
+			// Then the region has the leader in the source store
 			region = cluster.RandLeaderRegion(source.GetId(), core.HealthRegion())
 		}
 		if region == nil {
@@ -138,6 +140,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 	return nil
 }
 
+// transferPeer selects the best store to create a new peer to replace the old peer.
 func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer, opInfluence schedule.OpInfluence) *schedule.Operator {
 	// scoreGuard guarantees that the distinct score will not decrease.
 	stores := cluster.GetRegionStores(region)

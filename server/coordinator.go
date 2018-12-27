@@ -44,6 +44,7 @@ var (
 	errSchedulerNotFound = errors.New("scheduler not found")
 )
 
+// coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
 type coordinator struct {
 	sync.RWMutex
 
@@ -62,6 +63,7 @@ type coordinator struct {
 	hbStreams        *heartbeatStreams
 }
 
+// newCoordinator creates a new coordinator.
 func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
@@ -79,6 +81,8 @@ func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifie
 	}
 }
 
+// patrolRegions is used to scan regions.
+// The checkers will check these regions to decide if they need to do some operations.
 func (c *coordinator) patrolRegions() {
 	defer logutil.LogPanic()
 
@@ -99,13 +103,13 @@ func (c *coordinator) patrolRegions() {
 
 		regions := c.cluster.ScanRegions(key, patrolScanRegionLimit)
 		if len(regions) == 0 {
-			// reset scan key.
+			// Resets the scan key.
 			key = nil
 			continue
 		}
 
 		for _, region := range regions {
-			// Skip the region if there is already a pending operator.
+			// Skips the region if there is already a pending operator.
 			if c.opController.GetOperator(region.GetID()) != nil {
 				continue
 			}
@@ -116,7 +120,7 @@ func (c *coordinator) patrolRegions() {
 				break
 			}
 		}
-		// update label level isolation statistics.
+		// Updates the label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
 		if len(key) == 0 {
 			patrolCheckRegionsHistogram.Observe(time.Since(start).Seconds())
@@ -127,7 +131,7 @@ func (c *coordinator) patrolRegions() {
 
 func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 	// If PD has restarted, it need to check learners added before and promote them.
-	// Don't check isRaftLearnerEnabled cause it may be disable learner feature but still some learners to promote.
+	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
 	for _, p := range region.GetLearners() {
 		if region.GetPendingLearner(p.GetId()) != nil {
@@ -162,7 +166,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 	}
 	if c.cluster.IsFeatureSupported(RegionMerge) && opController.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 		if ops := c.mergeChecker.Check(region); ops != nil {
-			// make sure two operators can add successfully altogether
+			// It makes sure that two operators can be added successfully altogether.
 			if opController.AddOperator(ops...) {
 				return true
 			}
@@ -206,14 +210,14 @@ func (c *coordinator) run() {
 			log.Errorf("can not add scheduler %s: %v", s.GetName(), err)
 		}
 
-		// only record valid scheduler config
+		// Only records the valid scheduler config.
 		if err == nil {
 			scheduleCfg.Schedulers[k] = schedulerCfg
 			k++
 		}
 	}
 
-	// remove invalid scheduler config and persist
+	// Removes the invalid scheduler config and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
 	c.cluster.opt.store(scheduleCfg)
 	if err := c.cluster.opt.persist(c.cluster.kv); err != nil {
@@ -221,6 +225,7 @@ func (c *coordinator) run() {
 	}
 
 	c.wg.Add(1)
+	// Starts to patrol regions.
 	go c.patrolRegions()
 }
 
@@ -277,6 +282,8 @@ func (c *coordinator) collectSchedulerMetrics() {
 	defer c.RUnlock()
 	for _, s := range c.schedulers {
 		var allowScheduler float64
+		// If the scheduler is not allowed to schedule, it will disappear in Grafana panel.
+		// See issue #1341.
 		if s.AllowSchedule() {
 			allowScheduler = 1
 		}
@@ -287,7 +294,7 @@ func (c *coordinator) collectSchedulerMetrics() {
 func (c *coordinator) collectHotSpotMetrics() {
 	c.RLock()
 	defer c.RUnlock()
-	// collect hot write region metrics
+	// Collects hot write region metrics.
 	s, ok := c.schedulers[hotRegionScheduleName]
 	if !ok {
 		return
@@ -321,7 +328,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 		}
 	}
 
-	// collect hot read region metrics
+	// Collects hot read region metrics.
 	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
 	for _, s := range stores {
 		store := fmt.Sprintf("store_%d", s.GetId())
@@ -407,6 +414,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 	}
 }
 
+// scheduleController is used to manage a scheduler to schedule.
 type scheduleController struct {
 	schedule.Scheduler
 	cluster      *clusterInfo
@@ -417,6 +425,7 @@ type scheduleController struct {
 	cancel       context.CancelFunc
 }
 
+// newScheduleController creates a new scheduleController.
 func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleController {
 	ctx, cancel := context.WithCancel(c.ctx)
 	return &scheduleController{
@@ -450,10 +459,12 @@ func (s *scheduleController) Schedule() []*schedule.Operator {
 	return nil
 }
 
+// GetInterval returns the interval of scheduling for a scheduler.
 func (s *scheduleController) GetInterval() time.Duration {
 	return s.nextInterval
 }
 
+// AllowSchedule returns if a scheduler is allowed to schedule.
 func (s *scheduleController) AllowSchedule() bool {
 	return s.Scheduler.IsScheduleAllowed(s.cluster)
 }

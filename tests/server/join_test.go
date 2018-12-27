@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package server_test
 
 import (
 	"context"
@@ -22,12 +22,13 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/tests"
 )
 
-func (s *integrationTestSuite) TestSimpleJoin(c *C) {
+func (s *serverTestSuite) TestSimpleJoin(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(1)
+	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -71,10 +72,10 @@ func (s *integrationTestSuite) TestSimpleJoin(c *C) {
 
 // A failed PD tries to join the previous cluster but it has been deleted
 // during its downtime.
-func (s *integrationTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
+func (s *serverTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(3)
+	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -107,10 +108,10 @@ func (s *integrationTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) 
 }
 
 // A deleted PD joins the previous cluster.
-func (s *integrationTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
+func (s *serverTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(3)
+	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -142,10 +143,10 @@ func (s *integrationTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 	c.Assert(members.Members, HasLen, 2)
 }
 
-func (s *integrationTestSuite) TestFailedPDJoinsPreviousCluster(c *C) {
+func (s *serverTestSuite) TestFailedPDJoinsPreviousCluster(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(1)
+	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 

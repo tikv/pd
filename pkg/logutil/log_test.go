@@ -51,6 +51,22 @@ func (s *testLogSuite) TestStringToLogLevel(c *C) {
 	c.Assert(StringToLogLevel("whatever"), Equals, log.InfoLevel)
 }
 
+func (s *testLogSuite) TestStringToLogFormatter(c *C) {
+	c.Assert(StringToLogFormatter("text", true), DeepEquals, &textFormatter{
+		DisableTimestamp: true,
+	})
+	c.Assert(StringToLogFormatter("json", true), DeepEquals, &log.JSONFormatter{
+		DisableTimestamp: true,
+		TimestampFormat:  defaultLogTimeFormat,
+	})
+	c.Assert(StringToLogFormatter("console", true), DeepEquals, &log.TextFormatter{
+		DisableTimestamp: true,
+		FullTimestamp:    true,
+		TimestampFormat:  defaultLogTimeFormat,
+	})
+	c.Assert(StringToLogFormatter("", true), DeepEquals, &textFormatter{})
+}
+
 // TestLogging assure log format and log redirection works.
 func (s *testLogSuite) TestLogging(c *C) {
 	conf := &LogConfig{Level: "warn", File: FileLogConfig{}}
@@ -75,4 +91,9 @@ func (s *testLogSuite) TestLogging(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(entry, Matches, logPattern)
 	c.Assert(strings.Contains(entry, "log_test.go"), IsTrue)
+}
+
+func (s *testLogSuite) TestFileLog(c *C) {
+	c.Assert(InitFileLog(&FileLogConfig{Filename: "/tmp"}), NotNil)
+	c.Assert(InitFileLog(&FileLogConfig{Filename: "/tmp/test_file_log", MaxSize: 0}), IsNil)
 }
