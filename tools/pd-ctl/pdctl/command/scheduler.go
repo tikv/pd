@@ -71,6 +71,7 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewEvictLeaderSchedulerCommand())
 	c.AddCommand(NewShuffleLeaderSchedulerCommand())
 	c.AddCommand(NewShuffleRegionSchedulerCommand())
+	c.AddCommand(NewShuffleHotRegionSchedulerCommand())
 	c.AddCommand(NewScatterRangeSchedulerCommand())
 	c.AddCommand(NewBalanceLeaderSchedulerCommand())
 	c.AddCommand(NewBalanceRegionSchedulerCommand())
@@ -137,6 +138,36 @@ func NewShuffleRegionSchedulerCommand() *cobra.Command {
 		Run:   addSchedulerCommandFunc,
 	}
 	return c
+}
+
+// NewShuffleHotRegionSchedulerCommand returns a command to add a shuffle-hot-region-scheduler.
+func NewShuffleHotRegionSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "shuffle-hot-region-scheduler [limit]",
+		Short: "add a scheduler to shuffle hot regions",
+		Run:   addSchedulerForShuffleHotRegionCommandFunc,
+	}
+	return c
+}
+
+func addSchedulerForShuffleHotRegionCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) > 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	limit := uint64(1)
+	if len(args) == 1 {
+		l, err := strconv.ParseUint(args[0], 10, 64)
+		if err != nil {
+			cmd.Println("Error: ", err)
+			return
+		}
+		limit = l
+	}
+	input := make(map[string]interface{})
+	input["name"] = cmd.Name()
+	input["limit"] = limit
+	postJSON(cmd, schedulersPrefix, input)
 }
 
 // NewBalanceLeaderSchedulerCommand returns a command to add a balance-leader-scheduler.
