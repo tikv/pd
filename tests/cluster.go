@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package tests
 
 import (
 	"context"
@@ -29,7 +29,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-// testServer states.
+// TestServer states.
 const (
 	Initial int32 = iota
 	Running
@@ -37,7 +37,8 @@ const (
 	Destroy
 )
 
-type testServer struct {
+// TestServer is only for test.
+type TestServer struct {
 	sync.RWMutex
 	server *server.Server
 	state  int32
@@ -45,7 +46,8 @@ type testServer struct {
 
 var initHTTPClientOnce sync.Once
 
-func newTestServer(cfg *server.Config) (*testServer, error) {
+// NewTestServer creates a new TestServer.
+func NewTestServer(cfg *server.Config) (*TestServer, error) {
 	err := server.PrepareJoinCluster(cfg)
 	if err != nil {
 		return nil, err
@@ -60,13 +62,14 @@ func newTestServer(cfg *server.Config) (*testServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &testServer{
+	return &TestServer{
 		server: svr,
 		state:  Initial,
 	}, nil
 }
 
-func (s *testServer) Run(ctx context.Context) error {
+// Run starts to run a TestServer.
+func (s *TestServer) Run(ctx context.Context) error {
 	s.Lock()
 	defer s.Unlock()
 	if s.state != Initial && s.state != Stop {
@@ -79,7 +82,8 @@ func (s *testServer) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *testServer) Stop() error {
+// Stop is used to stop a TestServer.
+func (s *TestServer) Stop() error {
 	s.Lock()
 	defer s.Unlock()
 	if s.state != Running {
@@ -90,7 +94,8 @@ func (s *testServer) Stop() error {
 	return nil
 }
 
-func (s *testServer) Destroy() error {
+// Destroy is used to destroy a TestServer.
+func (s *TestServer) Destroy() error {
 	s.Lock()
 	defer s.Unlock()
 	if s.state == Running {
@@ -101,55 +106,71 @@ func (s *testServer) Destroy() error {
 	return nil
 }
 
-func (s *testServer) State() int32 {
+// State returns the current TestServer's state.
+func (s *TestServer) State() int32 {
 	s.RLock()
 	defer s.RUnlock()
 	return s.state
 }
 
-func (s *testServer) GetConfig() *server.Config {
+// GetConfig returns the current TestServer's configuration.
+func (s *TestServer) GetConfig() *server.Config {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetConfig()
 }
 
-func (s *testServer) GetClusterID() uint64 {
+// GetServer returns the real server of TestServer.
+func (s *TestServer) GetServer() *server.Server {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server
+}
+
+// GetClusterID returns the cluster ID.
+func (s *TestServer) GetClusterID() uint64 {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.ClusterID()
 }
 
-func (s *testServer) GetLeader() *pdpb.Member {
+// GetLeader returns current leader of PD cluster.
+func (s *TestServer) GetLeader() *pdpb.Member {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetLeader()
 }
 
-func (s *testServer) GetCluster() *metapb.Cluster {
+// GetCluster returns PD cluster.
+func (s *TestServer) GetCluster() *metapb.Cluster {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetCluster()
 }
 
-func (s *testServer) GetClusterVersion() semver.Version {
+// GetClusterVersion returns PD cluster version.
+func (s *TestServer) GetClusterVersion() semver.Version {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetClusterVersion()
 }
 
-func (s *testServer) GetServerID() uint64 {
+// GetServerID returns the unique etcd ID for this server in etcd cluster.
+func (s *TestServer) GetServerID() uint64 {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.ID()
 }
 
-func (s *testServer) IsLeader() bool {
+// IsLeader returns whether the server is leader or not.
+func (s *TestServer) IsLeader() bool {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.IsLeader()
 }
 
-func (s *testServer) GetEtcdLeader() (string, error) {
+// GetEtcdLeader returns the builtin etcd leader.
+func (s *TestServer) GetEtcdLeader() (string, error) {
 	s.RLock()
 	defer s.RUnlock()
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
@@ -160,90 +181,117 @@ func (s *testServer) GetEtcdLeader() (string, error) {
 	return members.GetEtcdLeader().GetName(), nil
 }
 
-func (s *testServer) GetEtcdClient() *clientv3.Client {
+// GetEtcdClient returns the builtin etcd client.
+func (s *TestServer) GetEtcdClient() *clientv3.Client {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetClient()
 }
 
-func (s *testServer) GetStores() []*metapb.Store {
+// GetStores returns the stores of the cluster.
+func (s *TestServer) GetStores() []*metapb.Store {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetRaftCluster().GetStores()
 }
 
-func (s *testServer) GetRaftCluster() *server.RaftCluster {
+// GetRaftCluster returns Raft cluster.
+// If cluster has not been bootstrapped, return nil.
+func (s *TestServer) GetRaftCluster() *server.RaftCluster {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetRaftCluster()
 }
 
-func (s *testServer) GetRegions() []*core.RegionInfo {
+// GetRegions returns all regions' information in detail.
+func (s *TestServer) GetRegions() []*core.RegionInfo {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetRaftCluster().GetRegions()
 }
 
-func (s *testServer) GetRegionInfoByID(regionID uint64) *core.RegionInfo {
+// GetRegionInfoByID returns regionInfo by regionID from cluster.
+func (s *TestServer) GetRegionInfoByID(regionID uint64) *core.RegionInfo {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetRaftCluster().GetRegionInfoByID(regionID)
 }
 
-func (s *testServer) GetAdjacentRegions(region *core.RegionInfo) []*core.RegionInfo {
+// GetAdjacentRegions returns regions' information that are adjacent with the specific region ID.
+func (s *TestServer) GetAdjacentRegions(region *core.RegionInfo) []*core.RegionInfo {
 	s.RLock()
 	defer s.RUnlock()
 	left, right := s.server.GetRaftCluster().GetAdjacentRegions(region)
 	return []*core.RegionInfo{left, right}
 }
 
-func (s *testServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
+// GetStoreRegions returns all regions' information with a given storeID.
+func (s *TestServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetRaftCluster().GetStoreRegions(storeID)
 }
 
-func (s *testServer) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
+// CheckHealth checks if members are healthy.
+func (s *TestServer) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.CheckHealth(members)
 }
 
-type testCluster struct {
+// BootstrapCluster is used to bootstrap the cluster.
+func (s *TestServer) BootstrapCluster() error {
+	bootstrapReq := &pdpb.BootstrapRequest{
+		Header: &pdpb.RequestHeader{ClusterId: s.GetClusterID()},
+		Store:  &metapb.Store{Id: 1, Address: "mock://1"},
+		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, IsLearner: false}}},
+	}
+	_, err := s.server.Bootstrap(context.Background(), bootstrapReq)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// TestCluster is only for test.
+type TestCluster struct {
 	config  *clusterConfig
-	servers map[string]*testServer
+	servers map[string]*TestServer
 }
 
 // ConfigOption is used to define customize settings in test.
 type ConfigOption func(conf *server.Config)
 
-func newTestCluster(initialServerCount int, opts ...ConfigOption) (*testCluster, error) {
+// NewTestCluster creates a new TestCluster.
+func NewTestCluster(initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
 	config := newClusterConfig(initialServerCount)
-	servers := make(map[string]*testServer)
+	servers := make(map[string]*TestServer)
 	for _, conf := range config.InitialServers {
 		serverConf, err := conf.Generate(opts...)
 		if err != nil {
 			return nil, err
 		}
-		s, err := newTestServer(serverConf)
+		s, err := NewTestServer(serverConf)
 		if err != nil {
 			return nil, err
 		}
 		servers[conf.Name] = s
 	}
-	return &testCluster{
+	return &TestCluster{
 		config:  config,
 		servers: servers,
 	}, nil
 }
 
-func (c *testCluster) RunServer(ctx context.Context, server *testServer) <-chan error {
+// RunServer starts to run TestServer.
+func (c *TestCluster) RunServer(ctx context.Context, server *TestServer) <-chan error {
 	resC := make(chan error)
 	go func() { resC <- server.Run(ctx) }()
 	return resC
 }
 
-func (c *testCluster) RunServers(ctx context.Context, servers []*testServer) error {
+// RunServers starts to run multiple TestServer.
+func (c *TestCluster) RunServers(ctx context.Context, servers []*TestServer) error {
 	res := make([]<-chan error, len(servers))
 	for i, s := range servers {
 		res[i] = c.RunServer(ctx, s)
@@ -256,15 +304,17 @@ func (c *testCluster) RunServers(ctx context.Context, servers []*testServer) err
 	return nil
 }
 
-func (c *testCluster) RunInitialServers() error {
-	var servers []*testServer
+// RunInitialServers starts to run servers in InitialServers.
+func (c *TestCluster) RunInitialServers() error {
+	var servers []*TestServer
 	for _, conf := range c.config.InitialServers {
 		servers = append(servers, c.GetServer(conf.Name))
 	}
 	return c.RunServers(context.Background(), servers)
 }
 
-func (c *testCluster) StopAll() error {
+// StopAll is used to stop all servers.
+func (c *TestCluster) StopAll() error {
 	for _, s := range c.servers {
 		if err := s.Stop(); err != nil {
 			return err
@@ -273,11 +323,18 @@ func (c *testCluster) StopAll() error {
 	return nil
 }
 
-func (c *testCluster) GetServer(name string) *testServer {
+// GetServer returns a server with a given name.
+func (c *TestCluster) GetServer(name string) *TestServer {
 	return c.servers[name]
 }
 
-func (c *testCluster) GetLeader() string {
+// GetServers returns all servers.
+func (c *TestCluster) GetServers() map[string]*TestServer {
+	return c.servers
+}
+
+// GetLeader returns the leader of all servers
+func (c *TestCluster) GetLeader() string {
 	for name, s := range c.servers {
 		if s.IsLeader() {
 			return name
@@ -286,7 +343,9 @@ func (c *testCluster) GetLeader() string {
 	return ""
 }
 
-func (c *testCluster) WaitLeader() string {
+// WaitLeader is used to get leader.
+// If it exceeds the maximum number of loops, it will return an empty string.
+func (c *TestCluster) WaitLeader() string {
 	for i := 0; i < 100; i++ {
 		if leader := c.GetLeader(); leader != "" {
 			return leader
@@ -296,33 +355,43 @@ func (c *testCluster) WaitLeader() string {
 	return ""
 }
 
-func (c *testCluster) GetCluster() *metapb.Cluster {
+// GetCluster returns PD cluster.
+func (c *TestCluster) GetCluster() *metapb.Cluster {
 	leader := c.GetLeader()
 	return c.servers[leader].GetCluster()
 }
 
-func (c *testCluster) GetEtcdClient() *clientv3.Client {
+// GetEtcdClient returns the builtin etcd client.
+func (c *TestCluster) GetEtcdClient() *clientv3.Client {
 	leader := c.GetLeader()
 	return c.servers[leader].GetEtcdClient()
 }
 
-func (c *testCluster) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
+// GetConfig returns the current TestCluster's configuration.
+func (c *TestCluster) GetConfig() *clusterConfig {
+	return c.config
+}
+
+// CheckHealth checks if members are healthy.
+func (c *TestCluster) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
 	leader := c.GetLeader()
 	return c.servers[leader].CheckHealth(members)
 }
 
-func (c *testCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
+// HandleRegionHeartbeat processes RegionInfo reports from the client.
+func (c *TestCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	leader := c.GetLeader()
 	cluster := c.servers[leader].GetRaftCluster()
 	return cluster.HandleRegionHeartbeat(region)
 }
 
-func (c *testCluster) Join() (*testServer, error) {
+// Join is used to add a new TestServer into the cluster.
+func (c *TestCluster) Join() (*TestServer, error) {
 	conf, err := c.config.Join().Generate()
 	if err != nil {
 		return nil, err
 	}
-	s, err := newTestServer(conf)
+	s, err := NewTestServer(conf)
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +399,8 @@ func (c *testCluster) Join() (*testServer, error) {
 	return s, nil
 }
 
-func (c *testCluster) Destroy() error {
+// Destroy is used to destroy a TestCluster.
+func (c *TestCluster) Destroy() error {
 	for _, s := range c.servers {
 		err := s.Destroy()
 		if err != nil {

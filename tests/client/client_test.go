@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package client_test
 
 import (
 	"context"
@@ -19,13 +19,28 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
 	pd "github.com/pingcap/pd/client"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/tests"
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
+var _ = Suite(&serverTestSuite{})
+
+type serverTestSuite struct{}
+
+func (s *serverTestSuite) SetUpSuite(c *C) {
+	server.EnableZap = true
+}
 
 type client interface {
 	GetLeaderAddr() string
@@ -33,10 +48,10 @@ type client interface {
 	GetURLs() []string
 }
 
-func (s *integrationTestSuite) TestClientLeaderChange(c *C) {
+func (s *serverTestSuite) TestClientLeaderChange(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(3)
+	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -45,7 +60,7 @@ func (s *integrationTestSuite) TestClientLeaderChange(c *C) {
 	cluster.WaitLeader()
 
 	var endpoints []string
-	for _, s := range cluster.servers {
+	for _, s := range cluster.GetServers() {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
 	cli, err := pd.NewClient(endpoints, pd.SecurityOption{})
@@ -89,10 +104,10 @@ func (s *integrationTestSuite) TestClientLeaderChange(c *C) {
 	c.Assert(urls, DeepEquals, endpoints)
 }
 
-func (s *integrationTestSuite) TestLeaderTransfer(c *C) {
+func (s *serverTestSuite) TestLeaderTransfer(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(2)
+	cluster, err := tests.NewTestCluster(2)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -101,7 +116,7 @@ func (s *integrationTestSuite) TestLeaderTransfer(c *C) {
 	cluster.WaitLeader()
 
 	var endpoints []string
-	for _, s := range cluster.servers {
+	for _, s := range cluster.GetServers() {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
 	cli, err := pd.NewClient(endpoints, pd.SecurityOption{})
@@ -157,13 +172,13 @@ func (s *integrationTestSuite) TestLeaderTransfer(c *C) {
 	wg.Wait()
 }
 
-func (s *integrationTestSuite) waitLeader(c *C, cli client, leader string) {
+func (s *serverTestSuite) waitLeader(c *C, cli client, leader string) {
 	testutil.WaitUntil(c, func(c *C) bool {
 		cli.ScheduleCheckLeader()
 		return cli.GetLeaderAddr() == leader
 	})
 }
 
-func (s *integrationTestSuite) makeTS(physical, logical int64) uint64 {
+func (s *serverTestSuite) makeTS(physical, logical int64) uint64 {
 	return uint64(physical<<18 + logical)
 }

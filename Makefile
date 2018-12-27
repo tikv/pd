@@ -2,7 +2,9 @@ PD_PKG := github.com/pingcap/pd
 
 TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
                      uniq | sed -e "s/^\./github.com\/pingcap\/pd/")
-BASIC_TEST_PKGS := $(filter-out github.com/pingcap/pd/pkg/integration_test,$(TEST_PKGS))
+INTEGRATION_TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
+                     uniq | sed -e "s/^\./github.com\/pingcap\/pd/" | grep -E "tests")
+BASIC_TEST_PKGS := $(filter-out $(INTEGRATION_TEST_PKGS),$(TEST_PKGS))
 
 PACKAGES := go list ./...
 PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|github.com/pingcap/pd/||'
@@ -115,7 +117,7 @@ simulator:
 
 clean-test:
 	rm -rf /tmp/test_pd*
-	rm -rf /tmp/pd-integration-test*
+	rm -rf /tmp/pd-tests*
 	rm -rf /tmp/test_etcd*
 
 gofail-enable:
