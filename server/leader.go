@@ -30,7 +30,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// IsLeader returns whether server is leader or not.
+// IsLeader returns whether the server is leader or not.
 func (s *Server) IsLeader() bool {
 	// If server is not started. Both leaderID and ID could be 0.
 	return !s.isClosed() && s.GetLeaderID() == s.ID()
@@ -41,7 +41,7 @@ func (s *Server) GetLeaderID() uint64 {
 	return s.GetLeader().GetMemberId()
 }
 
-// GetLeader returns current leader of pd cluster.
+// GetLeader returns current leader of PD cluster.
 func (s *Server) GetLeader() *pdpb.Member {
 	leader := s.leader.Load()
 	if leader == nil {

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package tests
 
 import (
 	"fmt"
@@ -34,7 +34,7 @@ type serverConfig struct {
 }
 
 func newServerConfig(name string, cc *clusterConfig, join bool) *serverConfig {
-	tempDir, _ := ioutil.TempDir("/tmp", "pd-integration-test")
+	tempDir, _ := ioutil.TempDir("/tmp", "pd-tests")
 	return &serverConfig{
 		Name:          name,
 		DataDir:       tempDir,

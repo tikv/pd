@@ -274,3 +274,109 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	op = sl.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
 }
+
+var _ = Suite(&testShuffleHotRegionSchedulerSuite{})
+
+type testShuffleHotRegionSchedulerSuite struct{}
+
+func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	newTestReplication(opt, 3, "zone", "host")
+	tc := schedule.NewMockCluster(opt)
+	hb, err := schedule.CreateScheduler("shuffle-hot-region", schedule.NewOperatorController(nil, nil))
+	c.Assert(err, IsNil)
+
+	// Add stores 1, 2, 3, 4, 5, 6  with hot peer counts 3, 2, 2, 2, 0, 0.
+	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 2, map[string]string{"zone": "z2", "host": "h2"})
+	tc.AddLabelsStore(3, 2, map[string]string{"zone": "z3", "host": "h3"})
+	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z4", "host": "h4"})
+	tc.AddLabelsStore(5, 0, map[string]string{"zone": "z5", "host": "h5"})
+	tc.AddLabelsStore(6, 0, map[string]string{"zone": "z4", "host": "h6"})
+
+	// Report store written bytes.
+	tc.UpdateStorageWrittenBytes(1, 75*1024*1024)
+	tc.UpdateStorageWrittenBytes(2, 45*1024*1024)
+	tc.UpdateStorageWrittenBytes(3, 45*1024*1024)
+	tc.UpdateStorageWrittenBytes(4, 60*1024*1024)
+	tc.UpdateStorageWrittenBytes(5, 0)
+	tc.UpdateStorageWrittenBytes(6, 0)
+
+	// Region 1, 2 and 3 are hot regions.
+	//| region_id | leader_store | follower_store | follower_store | written_bytes |
+	//|-----------|--------------|----------------|----------------|---------------|
+	//|     1     |       1      |        2       |       3        |      512KB    |
+	//|     2     |       1      |        3       |       4        |      512KB    |
+	//|     3     |       1      |        2       |       4        |      512KB    |
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 3, 4)
+	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 4)
+	opt.HotRegionLowThreshold = 0
+
+	// try to get an operator
+	var op []*schedule.Operator
+	for i := 0; i < 100; i++ {
+		op = hb.Schedule(tc)
+		if op != nil {
+			break
+		}
+	}
+	c.Assert(op, NotNil)
+	c.Assert(op[0].Step(1).(schedule.PromoteLearner).ToStore, Equals, op[0].Step(2).(schedule.TransferLeader).ToStore)
+	c.Assert(op[0].Step(1).(schedule.PromoteLearner).ToStore, Not(Equals), 6)
+}
+
+var _ = Suite(&testEvictLeaderSuite{})
+
+type testEvictLeaderSuite struct{}
+
+func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	tc := schedule.NewMockCluster(opt)
+
+	// Add stores 1, 2, 3
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	// Add regions 1, 2, 3 with leaders in stores 1, 2, 3
+	tc.AddLeaderRegion(1, 1, 2)
+	tc.AddLeaderRegion(2, 2, 1)
+	tc.AddLeaderRegion(3, 3, 1)
+
+	sl, err := schedule.CreateScheduler("evict-leader", schedule.NewOperatorController(nil, nil), "1")
+	c.Assert(err, IsNil)
+	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
+	op := sl.Schedule(tc)
+	testutil.CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
+}
+
+var _ = Suite(&testShuffleRegionSuite{})
+
+type testShuffleRegionSuite struct{}
+
+func (s *testShuffleRegionSuite) TestShuffle(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	tc := schedule.NewMockCluster(opt)
+
+	sl, err := schedule.CreateScheduler("shuffle-region", schedule.NewOperatorController(nil, nil))
+	c.Assert(err, IsNil)
+	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
+	c.Assert(sl.Schedule(tc), IsNil)
+
+	// Add stores 1, 2, 3, 4
+	tc.AddRegionStore(1, 6)
+	tc.AddRegionStore(2, 7)
+	tc.AddRegionStore(3, 8)
+	tc.AddRegionStore(4, 9)
+	// Add regions 1, 2, 3, 4 with leaders in stores 1,2,3,4
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+	tc.AddLeaderRegion(3, 3, 4, 1)
+	tc.AddLeaderRegion(4, 4, 1, 2)
+
+	for i := 0; i < 4; i++ {
+		op := sl.Schedule(tc)
+		c.Assert(op, NotNil)
+		c.Assert(op[0].Kind(), Equals, schedule.OpRegion|schedule.OpAdmin)
+	}
+}

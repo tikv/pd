@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package cmd_test
 
 import (
 	"bytes"
@@ -21,15 +21,18 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tools/pd-ctl/pdctl"
 	"github.com/pingcap/pd/tools/pd-ctl/pdctl/command"
 	"github.com/spf13/cobra"
@@ -38,19 +41,31 @@ import (
 	_ "github.com/pingcap/pd/server/schedulers"
 )
 
-func (s *integrationTestSuite) TestCluster(c *C) {
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
+var _ = Suite(&cmdTestSuite{})
+
+type cmdTestSuite struct{}
+
+func (s *cmdTestSuite) SetUpSuite(c *C) {
+	server.EnableZap = true
+}
+
+func (s *cmdTestSuite) TestClusterAndPing(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(1)
+	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.config.GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURLs()
 	cmd := initCommand()
 	defer cluster.Destroy()
 
-	// cluster command
+	// cluster
 	args := []string{"-u", pdAddr, "cluster"}
 	_, output, err := executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
@@ -58,23 +73,30 @@ func (s *integrationTestSuite) TestCluster(c *C) {
 	c.Assert(json.Unmarshal(output, ci), IsNil)
 	c.Assert(ci, DeepEquals, cluster.GetCluster())
 
+	// cluster status
 	args = []string{"-u", pdAddr, "cluster", "status"}
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	ci = &metapb.Cluster{}
 	c.Assert(json.Unmarshal(output, ci), IsNil)
 	c.Assert(ci, DeepEquals, cluster.GetCluster())
+
+	// ping
+	args = []string{"-u", pdAddr, "ping"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(output, NotNil)
 }
 
-func (s *integrationTestSuite) TestHealth(c *C) {
+func (s *cmdTestSuite) TestHealth(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(3)
+	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.config.GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURLs()
 	cmd := initCommand()
 	defer cluster.Destroy()
 
@@ -106,15 +128,15 @@ func (s *integrationTestSuite) TestHealth(c *C) {
 	c.Assert(h, DeepEquals, healths)
 }
 
-func (s *integrationTestSuite) TestStore(c *C) {
+func (s *cmdTestSuite) TestStore(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(1)
+	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.config.GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURLs()
 	cmd := initCommand()
 
 	stores := []*metapb.Store{
@@ -133,10 +155,10 @@ func (s *integrationTestSuite) TestStore(c *C) {
 	}
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	s.bootstrapCluster(leaderServer, c)
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 
 	for _, store := range stores {
-		mustPutStore(c, leaderServer.server, store.Id, store.State, store.Labels)
+		mustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
 	}
 	defer cluster.Destroy()
 
@@ -194,15 +216,15 @@ func (s *integrationTestSuite) TestStore(c *C) {
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
 }
 
-func (s *integrationTestSuite) TestLabel(c *C) {
+func (s *cmdTestSuite) TestLabel(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(1)
+	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.config.GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURLs()
 	cmd := initCommand()
 
 	stores := []*metapb.Store{
@@ -245,10 +267,10 @@ func (s *integrationTestSuite) TestLabel(c *C) {
 	}
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	s.bootstrapCluster(leaderServer, c)
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 
 	for _, store := range stores {
-		mustPutStore(c, leaderServer.server, store.Id, store.State, store.Labels)
+		mustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
 	}
 	defer cluster.Destroy()
 
@@ -286,7 +308,7 @@ func (s *integrationTestSuite) TestLabel(c *C) {
 	checkStoresInfo(c, storesInfo.Stores, ss)
 }
 
-func (s *integrationTestSuite) TestTSO(c *C) {
+func (s *cmdTestSuite) TestTSO(c *C) {
 	c.Parallel()
 	cmd := initCommand()
 
@@ -310,15 +332,15 @@ func (s *integrationTestSuite) TestTSO(c *C) {
 	c.Assert(str, Equals, string(output))
 }
 
-func (s *integrationTestSuite) TestScheduler(c *C) {
+func (s *cmdTestSuite) TestScheduler(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(1)
+	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.config.GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURLs()
 	cmd := initCommand()
 
 	stores := []*metapb.Store{
@@ -341,9 +363,9 @@ func (s *integrationTestSuite) TestScheduler(c *C) {
 	}
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	s.bootstrapCluster(leaderServer, c)
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	for _, store := range stores {
-		mustPutStore(c, leaderServer.server, store.Id, store.State, store.Labels)
+		mustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
 	}
 
 	mustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"))
@@ -406,15 +428,15 @@ func (s *integrationTestSuite) TestScheduler(c *C) {
 	}
 }
 
-func (s *integrationTestSuite) TestRegion(c *C) {
+func (s *cmdTestSuite) TestRegion(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(1)
+	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.config.GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURLs()
 	cmd := initCommand()
 
 	store := metapb.Store{
@@ -422,8 +444,8 @@ func (s *integrationTestSuite) TestRegion(c *C) {
 		State: metapb.StoreState_Up,
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	s.bootstrapCluster(leaderServer, c)
-	mustPutStore(c, leaderServer.server, store.Id, store.State, store.Labels)
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	mustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
 
 	downPeer := &metapb.Peer{Id: 8, StoreId: 3}
 	r1 := mustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"),
@@ -597,15 +619,15 @@ func (s *integrationTestSuite) TestRegion(c *C) {
 	checkRegionsInfo(c, regionsInfo, []*core.RegionInfo{r3, r4})
 }
 
-func (s *integrationTestSuite) TestConfig(c *C) {
+func (s *cmdTestSuite) TestConfig(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(1)
+	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.config.GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURLs()
 	cmd := initCommand()
 
 	store := metapb.Store{
@@ -613,8 +635,9 @@ func (s *integrationTestSuite) TestConfig(c *C) {
 		State: metapb.StoreState_Up,
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	s.bootstrapCluster(leaderServer, c)
-	mustPutStore(c, leaderServer.server, store.Id, store.State, store.Labels)
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	svr := leaderServer.GetServer()
+	mustPutStore(c, svr, store.Id, store.State, store.Labels)
 	defer cluster.Destroy()
 
 	// config show
@@ -623,7 +646,7 @@ func (s *integrationTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	scheduleCfg := server.ScheduleConfig{}
 	json.Unmarshal(output, &scheduleCfg)
-	c.Assert(&scheduleCfg, DeepEquals, leaderServer.server.GetScheduleConfig())
+	c.Assert(&scheduleCfg, DeepEquals, svr.GetScheduleConfig())
 
 	// config show replication
 	args = []string{"-u", pdAddr, "config", "show", "replication"}
@@ -631,7 +654,7 @@ func (s *integrationTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	replicationCfg := server.ReplicationConfig{}
 	json.Unmarshal(output, &replicationCfg)
-	c.Assert(&replicationCfg, DeepEquals, leaderServer.server.GetReplicationConfig())
+	c.Assert(&replicationCfg, DeepEquals, svr.GetReplicationConfig())
 
 	// config show cluster-version
 	args1 := []string{"-u", pdAddr, "config", "show", "cluster-version"}
@@ -639,18 +662,18 @@ func (s *integrationTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	clusterVersion := semver.Version{}
 	json.Unmarshal(output, &clusterVersion)
-	c.Assert(clusterVersion, DeepEquals, leaderServer.server.GetClusterVersion())
+	c.Assert(clusterVersion, DeepEquals, svr.GetClusterVersion())
 
 	// config set cluster-version <value>
 	args2 := []string{"-u", pdAddr, "config", "set", "cluster-version", "2.1.0-rc.5"}
 	_, _, err = executeCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
-	c.Assert(clusterVersion, Not(DeepEquals), leaderServer.server.GetClusterVersion())
+	c.Assert(clusterVersion, Not(DeepEquals), svr.GetClusterVersion())
 	_, output, err = executeCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	clusterVersion = semver.Version{}
 	json.Unmarshal(output, &clusterVersion)
-	c.Assert(clusterVersion, DeepEquals, leaderServer.server.GetClusterVersion())
+	c.Assert(clusterVersion, DeepEquals, svr.GetClusterVersion())
 
 	// config show namespace <name> && config set namespace <type> <key> <value>
 	args = []string{"-u", pdAddr, "table_ns", "create", "ts1"}
@@ -667,12 +690,12 @@ func (s *integrationTestSuite) TestConfig(c *C) {
 	args2 = []string{"-u", pdAddr, "config", "set", "namespace", "ts1", "region-schedule-limit", "128"}
 	_, _, err = executeCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
-	c.Assert(namespaceCfg.RegionScheduleLimit, Not(Equals), leaderServer.server.GetNamespaceConfig("ts1").RegionScheduleLimit)
+	c.Assert(namespaceCfg.RegionScheduleLimit, Not(Equals), svr.GetNamespaceConfig("ts1").RegionScheduleLimit)
 	_, output, err = executeCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	namespaceCfg = server.NamespaceConfig{}
 	json.Unmarshal(output, &namespaceCfg)
-	c.Assert(namespaceCfg.RegionScheduleLimit, Equals, leaderServer.server.GetNamespaceConfig("ts1").RegionScheduleLimit)
+	c.Assert(namespaceCfg.RegionScheduleLimit, Equals, svr.GetNamespaceConfig("ts1").RegionScheduleLimit)
 
 	// config delete namespace <name>
 	args3 := []string{"-u", pdAddr, "config", "delete", "namespace", "ts1"}
@@ -682,7 +705,7 @@ func (s *integrationTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	namespaceCfg = server.NamespaceConfig{}
 	json.Unmarshal(output, &namespaceCfg)
-	c.Assert(namespaceCfg.RegionScheduleLimit, Not(Equals), leaderServer.server.GetNamespaceConfig("ts1").RegionScheduleLimit)
+	c.Assert(namespaceCfg.RegionScheduleLimit, Not(Equals), svr.GetNamespaceConfig("ts1").RegionScheduleLimit)
 
 	// config show label-property
 	args1 = []string{"-u", pdAddr, "config", "show", "label-property"}
@@ -690,29 +713,29 @@ func (s *integrationTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	labelPropertyCfg := server.LabelPropertyConfig{}
 	json.Unmarshal(output, &labelPropertyCfg)
-	c.Assert(labelPropertyCfg, DeepEquals, leaderServer.server.GetLabelProperty())
+	c.Assert(labelPropertyCfg, DeepEquals, svr.GetLabelProperty())
 
 	// config set label-property <type> <key> <value>
 	args2 = []string{"-u", pdAddr, "config", "set", "label-property", "reject-leader", "zone", "cn"}
 	_, _, err = executeCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
-	c.Assert(labelPropertyCfg, Not(DeepEquals), leaderServer.server.GetLabelProperty())
+	c.Assert(labelPropertyCfg, Not(DeepEquals), svr.GetLabelProperty())
 	_, output, err = executeCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	labelPropertyCfg = server.LabelPropertyConfig{}
 	json.Unmarshal(output, &labelPropertyCfg)
-	c.Assert(labelPropertyCfg, DeepEquals, leaderServer.server.GetLabelProperty())
+	c.Assert(labelPropertyCfg, DeepEquals, svr.GetLabelProperty())
 
 	// config delete label-property <type> <key> <value>
 	args3 = []string{"-u", pdAddr, "config", "delete", "label-property", "reject-leader", "zone", "cn"}
 	_, _, err = executeCommandC(cmd, args3...)
 	c.Assert(err, IsNil)
-	c.Assert(labelPropertyCfg, Not(DeepEquals), leaderServer.server.GetLabelProperty())
+	c.Assert(labelPropertyCfg, Not(DeepEquals), svr.GetLabelProperty())
 	_, output, err = executeCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	labelPropertyCfg = server.LabelPropertyConfig{}
 	json.Unmarshal(output, &labelPropertyCfg)
-	c.Assert(labelPropertyCfg, DeepEquals, leaderServer.server.GetLabelProperty())
+	c.Assert(labelPropertyCfg, DeepEquals, svr.GetLabelProperty())
 
 	// config set <option> <value>
 	args1 = []string{"-u", pdAddr, "config", "set", "leader-schedule-limit", "64"}
@@ -723,7 +746,7 @@ func (s *integrationTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	scheduleCfg = server.ScheduleConfig{}
 	json.Unmarshal(output, &scheduleCfg)
-	c.Assert(scheduleCfg.LeaderScheduleLimit, Equals, leaderServer.server.GetScheduleConfig().LeaderScheduleLimit)
+	c.Assert(scheduleCfg.LeaderScheduleLimit, Equals, svr.GetScheduleConfig().LeaderScheduleLimit)
 	args1 = []string{"-u", pdAddr, "config", "set", "disable-raft-learner", "true"}
 	_, _, err = executeCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
@@ -732,18 +755,18 @@ func (s *integrationTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	scheduleCfg = server.ScheduleConfig{}
 	json.Unmarshal(output, &scheduleCfg)
-	c.Assert(scheduleCfg.DisableLearner, Equals, leaderServer.server.GetScheduleConfig().DisableLearner)
+	c.Assert(scheduleCfg.DisableLearner, Equals, svr.GetScheduleConfig().DisableLearner)
 }
 
-func (s *integrationTestSuite) TestLog(c *C) {
+func (s *cmdTestSuite) TestLog(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(1)
+	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.config.GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURLs()
 	cmd := initCommand()
 
 	store := metapb.Store{
@@ -751,8 +774,9 @@ func (s *integrationTestSuite) TestLog(c *C) {
 		State: metapb.StoreState_Up,
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	s.bootstrapCluster(leaderServer, c)
-	mustPutStore(c, leaderServer.server, store.Id, store.State, store.Labels)
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	svr := leaderServer.GetServer()
+	mustPutStore(c, svr, store.Id, store.State, store.Labels)
 	defer cluster.Destroy()
 
 	var testCases = []struct {
@@ -785,19 +809,19 @@ func (s *integrationTestSuite) TestLog(c *C) {
 	for _, testCase := range testCases {
 		_, _, err = executeCommandC(cmd, testCase.cmd...)
 		c.Assert(err, IsNil)
-		c.Assert(leaderServer.server.GetConfig().Log.Level, Equals, testCase.expect)
+		c.Assert(svr.GetConfig().Log.Level, Equals, testCase.expect)
 	}
 }
 
-func (s *integrationTestSuite) TestTableNS(c *C) {
+func (s *cmdTestSuite) TestTableNS(c *C) {
 	c.Parallel()
 
-	cluster, err := newTestCluster(1)
+	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.config.GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURLs()
 	cmd := initCommand()
 
 	store := metapb.Store{
@@ -805,17 +829,18 @@ func (s *integrationTestSuite) TestTableNS(c *C) {
 		State: metapb.StoreState_Up,
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	s.bootstrapCluster(leaderServer, c)
-	mustPutStore(c, leaderServer.server, store.Id, store.State, store.Labels)
-	classifier := leaderServer.server.GetClassifier()
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	svr := leaderServer.GetServer()
+	mustPutStore(c, svr, store.Id, store.State, store.Labels)
+	classifier := svr.GetClassifier()
 	defer cluster.Destroy()
 
 	// table_ns create <namespace>
-	c.Assert(leaderServer.server.IsNamespaceExist("ts1"), IsFalse)
+	c.Assert(svr.IsNamespaceExist("ts1"), IsFalse)
 	args := []string{"-u", pdAddr, "table_ns", "create", "ts1"}
 	_, _, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	c.Assert(leaderServer.server.IsNamespaceExist("ts1"), IsTrue)
+	c.Assert(svr.IsNamespaceExist("ts1"), IsTrue)
 
 	// table_ns add <name> <table_id>
 	args = []string{"-u", pdAddr, "table_ns", "add", "ts1", "1"}
@@ -854,16 +879,21 @@ func (s *integrationTestSuite) TestTableNS(c *C) {
 	c.Assert(classifier.IsStoreIDExist(1), IsFalse)
 }
 
-func (s *integrationTestSuite) TestOperator(c *C) {
+func (s *cmdTestSuite) TestOperator(c *C) {
 	c.Parallel()
 
 	var err error
-	cluster, err := newTestCluster(3, func(conf *server.Config) { conf.Replication.MaxReplicas = 2 })
+	var t time.Time
+	t = t.Add(time.Hour)
+	cluster, err := tests.NewTestCluster(3,
+		func(conf *server.Config) { conf.Replication.MaxReplicas = 2 },
+		func(conf *server.Config) { conf.Schedule.MaxStoreDownTime.Duration = time.Since(t) },
+	)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.config.GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURLs()
 	cmd := initCommand()
 
 	stores := []*metapb.Store{
@@ -882,9 +912,9 @@ func (s *integrationTestSuite) TestOperator(c *C) {
 	}
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	s.bootstrapCluster(leaderServer, c)
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	for _, store := range stores {
-		mustPutStore(c, leaderServer.server, store.Id, store.State, store.Labels)
+		mustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
 	}
 
 	mustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
@@ -978,6 +1008,136 @@ func (s *integrationTestSuite) TestOperator(c *C) {
 	args = []string{"-u", pdAddr, "operator", "remove", "3"}
 	_, _, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
+
+	// operator add scatter-region <region_id>
+	args = []string{"-u", pdAddr, "operator", "add", "scatter-region", "3"}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "operator", "add", "scatter-region", "1"}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "operator", "show", "region"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "transfer leader from store 0 to store 3"), IsTrue)
+}
+
+func (s *cmdTestSuite) TestMember(c *C) {
+	c.Parallel()
+
+	cluster, err := tests.NewTestCluster(3)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURLs()
+	c.Assert(err, IsNil)
+	cmd := initCommand()
+	svr := cluster.GetServer("pd2")
+	id := svr.GetServerID()
+	name := svr.GetServer().Name()
+	client := cluster.GetServer("pd1").GetEtcdClient()
+	defer cluster.Destroy()
+
+	// member leader show
+	args := []string{"-u", pdAddr, "member", "leader", "show"}
+	_, output, err := executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	leader := pdpb.Member{}
+	c.Assert(json.Unmarshal(output, &leader), IsNil)
+	c.Assert(&leader, DeepEquals, svr.GetLeader())
+
+	// member leader transfer <member_name>
+	args = []string{"-u", pdAddr, "member", "leader", "transfer", "pd2"}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert("pd2", Equals, svr.GetLeader().GetName())
+
+	// member leader resign
+	args = []string{"-u", pdAddr, "member", "leader", "resign"}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert("pd2", Not(Equals), svr.GetLeader().GetName())
+
+	// member leader_priority <member_name> <priority>
+	args = []string{"-u", pdAddr, "member", "leader_priority", name, "100"}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	priority, err := svr.GetServer().GetMemberLeaderPriority(id)
+	c.Assert(err, IsNil)
+	c.Assert(priority, Equals, 100)
+
+	// member delete name <member_name>
+	svr.Destroy()
+	members, err := etcdutil.ListEtcdMembers(client)
+	c.Assert(err, IsNil)
+	c.Assert(len(members.Members), Equals, 3)
+	args = []string{"-u", pdAddr, "member", "delete", "name", name}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	members, err = etcdutil.ListEtcdMembers(client)
+	c.Assert(err, IsNil)
+	c.Assert(len(members.Members), Equals, 2)
+
+	// member delete id <member_id>
+	args = []string{"-u", pdAddr, "member", "delete", "id", string(id)}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	members, err = etcdutil.ListEtcdMembers(client)
+	c.Assert(err, IsNil)
+	c.Assert(len(members.Members), Equals, 2)
+}
+
+func (s *cmdTestSuite) TestHot(c *C) {
+	c.Parallel()
+
+	cluster, err := tests.NewTestCluster(1)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURLs()
+	cmd := initCommand()
+
+	store := metapb.Store{
+		Id:      1,
+		Address: "tikv1",
+		State:   metapb.StoreState_Up,
+		Version: "2.0.0",
+	}
+
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	mustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
+	defer cluster.Destroy()
+
+	ss, err := leaderServer.GetStore(1)
+	c.Assert(err, IsNil)
+	bytesWritten := uint64(8 * 1024 * 1024)
+	ss.Stats.BytesWritten = bytesWritten
+	now := time.Now().Second()
+	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - 10), EndTimestamp: uint64(now)}
+	ss.Stats.Interval = interval
+	ss.RollingStoreStats.Observe(ss.Stats)
+
+	// TODO: Provide a way to test the result of hot read and hot write commands
+	// hot read
+	args := []string{"-u", pdAddr, "hot", "read"}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+
+	// hot write
+	args = []string{"-u", pdAddr, "hot", "write"}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+
+	// hot store
+	args = []string{"-u", pdAddr, "hot", "store"}
+	_, output, err := executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	hotStores := api.HotStoreStats{}
+	c.Assert(json.Unmarshal(output, &hotStores), IsNil)
+	c.Assert(hotStores.BytesWriteStats[1], Equals, bytesWritten/10)
 }
 
 func initCommand() *cobra.Command {
@@ -1057,7 +1217,7 @@ func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, 
 	c.Assert(err, IsNil)
 }
 
-func mustPutRegion(c *C, cluster *testCluster, regionID, storeID uint64, start, end []byte, opts ...core.RegionCreateOption) *core.RegionInfo {
+func mustPutRegion(c *C, cluster *tests.TestCluster, regionID, storeID uint64, start, end []byte, opts ...core.RegionCreateOption) *core.RegionInfo {
 	leader := &metapb.Peer{
 		Id:      regionID,
 		StoreId: storeID,
