@@ -292,7 +292,6 @@ func (c *TestCluster) RunServer(ctx context.Context, server *TestServer) <-chan 
 			err := server.Run(ctx)
 			// retryable error
 			if err != nil && strings.Contains(err.Error(), "address already in use") {
-				server.Stop()
 				time.Sleep(time.Second)
 				continue
 			}
