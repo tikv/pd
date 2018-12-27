@@ -237,6 +237,13 @@ func (c *clusterInfo) GetStores() []*core.StoreInfo {
 	return c.core.GetStores()
 }
 
+// GetAllStores returns all stores in the cluster.
+func (c *clusterInfo) GetAllStores() []*core.StoreInfo {
+	c.RLock()
+	defer c.RUnlock()
+	return c.core.Stores.GetAllStores()
+}
+
 func (c *clusterInfo) getMetaStores() []*metapb.Store {
 	c.RLock()
 	defer c.RUnlock()

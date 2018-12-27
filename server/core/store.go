@@ -395,6 +395,15 @@ func (s *StoresInfo) UnblockStore(storeID uint64) {
 	store.Unblock()
 }
 
+// GetAllStores gets a complete set of StoreInfo
+func (s *StoresInfo) GetAllStores() []*StoreInfo {
+	stores := make([]*StoreInfo, 0, len(s.stores))
+	for _, store := range s.stores {
+		stores = append(stores, store.Clone())
+	}
+	return stores
+}
+
 // GetStores gets a complete set of StoreInfo
 func (s *StoresInfo) GetStores() []*StoreInfo {
 	stores := make([]*StoreInfo, 0, len(s.stores))
