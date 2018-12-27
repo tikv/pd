@@ -274,3 +274,58 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	op = sl.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
 }
+
+var _ = Suite(&testEvictLeaderSuite{})
+
+type testEvictLeaderSuite struct{}
+
+func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	tc := schedule.NewMockCluster(opt)
+
+	// Add stores 1, 2, 3
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	// Add regions 1, 2, 3 with leaders in stores 1, 2, 3
+	tc.AddLeaderRegion(1, 1, 2)
+	tc.AddLeaderRegion(2, 2, 1)
+	tc.AddLeaderRegion(3, 3, 1)
+
+	sl, err := schedule.CreateScheduler("evict-leader", schedule.NewOperatorController(nil, nil), "1")
+	c.Assert(err, IsNil)
+	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
+	op := sl.Schedule(tc)
+	testutil.CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
+}
+
+var _ = Suite(&testShuffleRegionSuite{})
+
+type testShuffleRegionSuite struct{}
+
+func (s *testShuffleRegionSuite) TestShuffle(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	tc := schedule.NewMockCluster(opt)
+
+	sl, err := schedule.CreateScheduler("shuffle-region", schedule.NewOperatorController(nil, nil))
+	c.Assert(err, IsNil)
+	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
+	c.Assert(sl.Schedule(tc), IsNil)
+
+	// Add stores 1, 2, 3, 4
+	tc.AddRegionStore(1, 6)
+	tc.AddRegionStore(2, 7)
+	tc.AddRegionStore(3, 8)
+	tc.AddRegionStore(4, 9)
+	// Add regions 1, 2, 3, 4 with leaders in stores 1,2,3,4
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+	tc.AddLeaderRegion(3, 3, 4, 1)
+	tc.AddLeaderRegion(4, 4, 1, 2)
+
+	for i := 0; i < 4; i++ {
+		op := sl.Schedule(tc)
+		c.Assert(op, NotNil)
+		c.Assert(op[0].Kind(), Equals, schedule.OpRegion|schedule.OpAdmin)
+	}
+}
