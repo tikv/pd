@@ -107,7 +107,6 @@ ifeq ("$(TRAVIS_COVERAGE)", "1")
 	CGO_ENABLED=1 ./scripts/retool do $(OVERALLS) -project=github.com/pingcap/pd -covermode=count -ignore='.git,vendor,tools' -- -coverpkg=./... || { $(GOFAIL_DISABLE); exit 1; }
 	@echo "Note: ignre tools"
 	grep -vE "tools" overalls.coverprofile > coverage.out
-	cat coverage.out
 	CGO_ENABLED=0 ./scripts/retool do $(GOVERALLS) -service=travis-ci -coverprofile=coverage.out || { $(GOFAIL_DISABLE); exit 1; }
 	@$(GOFAIL_DISABLE)
 else
