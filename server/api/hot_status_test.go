@@ -45,7 +45,7 @@ func (s *testHotStatusSuite) TearDownSuite(c *C) {
 }
 
 func (s testHotStatusSuite) TestGetHotStore(c *C) {
-	stat := hotStoreStats{}
+	stat := HotStoreStats{}
 	resp, err := http.Get(s.urlPrefix + "/stores")
 	c.Assert(err, IsNil)
 	err = readJSON(resp.Body, &stat)
