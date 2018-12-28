@@ -106,7 +106,7 @@ func (s *TestServer) Destroy() error {
 	return nil
 }
 
-// ResignLeader resign the leader of the server.
+// ResignLeader resigns the leader of the server.
 func (s *TestServer) ResignLeader() error {
 	s.Lock()
 	defer s.Unlock()
@@ -369,7 +369,7 @@ func (c *TestCluster) WaitLeader() string {
 	return ""
 }
 
-// ResignLeader resign the leader of the cluster.
+// ResignLeader resigns the leader of the cluster.
 func (c *TestCluster) ResignLeader() error {
 	leader := c.GetLeader()
 	if len(leader) != 0 {
