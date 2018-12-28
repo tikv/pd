@@ -243,6 +243,11 @@ func (h *Handler) AddShuffleRegionScheduler() error {
 	return h.AddScheduler("shuffle-region")
 }
 
+// AddShuffleHotRegionScheduler adds a shuffle-hot-region-scheduler.
+func (h *Handler) AddShuffleHotRegionScheduler(limit uint64) error {
+	return h.AddScheduler("shuffle-hot-region", strconv.FormatUint(limit, 10))
+}
+
 // AddRandomMergeScheduler adds a random-merge-scheduler.
 func (h *Handler) AddRandomMergeScheduler() error {
 	return h.AddScheduler("random-merge")

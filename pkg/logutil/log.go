@@ -173,7 +173,8 @@ func (f *textFormatter) Format(entry *log.Entry) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func stringToLogFormatter(format string, disableTimestamp bool) log.Formatter {
+// StringToLogFormatter uses the different log formatter according to a given format name.
+func StringToLogFormatter(format string, disableTimestamp bool) log.Formatter {
 	switch strings.ToLower(format) {
 	case "text":
 		return &textFormatter{
@@ -248,7 +249,7 @@ func InitLogger(cfg *LogConfig) error {
 		if cfg.Format == "" {
 			cfg.Format = defaultLogFormat
 		}
-		log.SetFormatter(stringToLogFormatter(cfg.Format, cfg.DisableTimestamp))
+		log.SetFormatter(StringToLogFormatter(cfg.Format, cfg.DisableTimestamp))
 
 		// etcd log
 		capnslog.SetFormatter(&redirectFormatter{})
