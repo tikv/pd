@@ -237,6 +237,11 @@ types:
   ShuffleRegionScheduler:
     type: Scheduler
     discriminatorValue: shuffle-region-scheduler
+  ShuffleHotRegionScheduler:
+    type: Scheduler
+    discriminatorValue: shuffle-hot-region-scheduler
+    properties:
+      limit: integer
   RandomMergeScheduler:
     type: Scheduler
     discriminatorValue: random-merge-scheduler

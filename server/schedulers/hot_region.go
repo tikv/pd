@@ -142,11 +142,11 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.
 	defer h.Unlock()
 	switch typ {
 	case hotReadRegionBalance:
-		h.stats.readStatAsLeader = h.calcScore(cluster.RegionReadStats(), cluster, core.LeaderKind)
+		h.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), cluster, core.LeaderKind)
 		return h.balanceHotReadRegions(cluster)
 	case hotWriteRegionBalance:
-		h.stats.writeStatAsLeader = h.calcScore(cluster.RegionWriteStats(), cluster, core.LeaderKind)
-		h.stats.writeStatAsPeer = h.calcScore(cluster.RegionWriteStats(), cluster, core.RegionKind)
+		h.stats.writeStatAsLeader = calcScore(cluster.RegionWriteStats(), cluster, core.LeaderKind)
+		h.stats.writeStatAsPeer = calcScore(cluster.RegionWriteStats(), cluster, core.RegionKind)
 		return h.balanceHotWriteRegions(cluster)
 	}
 	return nil
@@ -199,8 +199,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	return nil
 }
 
-// calcSocre calculates the statistics of hotspots through the hot cache.
-func (h *balanceHotRegionsScheduler) calcScore(items []*core.RegionStat, cluster schedule.Cluster, kind core.ResourceKind) core.StoreHotRegionsStat {
+func calcScore(items []*core.RegionStat, cluster schedule.Cluster, kind core.ResourceKind) core.StoreHotRegionsStat {
 	stats := make(core.StoreHotRegionsStat)
 	for _, r := range items {
 		// HotDegree is the update times on the hot cache. If the heartbeat report
