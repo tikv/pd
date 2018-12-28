@@ -302,9 +302,8 @@ func (c *TestCluster) RunServer(ctx context.Context, server *TestServer) <-chan 
 			if err != nil && strings.Contains(err.Error(), "address already in use") {
 				time.Sleep(time.Second)
 				continue
-			} else {
-				break
 			}
+			break
 		}
 		resC <- err
 	}()
