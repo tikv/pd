@@ -23,3 +23,4 @@ matrix:
       - make ci
     after_success:
       - travis_wait make travis_coverage
+      - bash <(curl -s https://codecov.io/bash)
