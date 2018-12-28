@@ -295,16 +295,18 @@ func NewTestCluster(initialServerCount int, opts ...ConfigOption) (*TestCluster,
 func (c *TestCluster) RunServer(ctx context.Context, server *TestServer) <-chan error {
 	resC := make(chan error)
 	go func() {
+		var err error
 		for i := 0; i < 10; i++ {
-			err := server.Run(ctx)
+			err = server.Run(ctx)
 			// retryable error
 			if err != nil && strings.Contains(err.Error(), "address already in use") {
 				time.Sleep(time.Second)
 				continue
+			} else {
+				break
 			}
-			resC <- err
-			return
 		}
+		resC <- err
 	}()
 	return resC
 }
