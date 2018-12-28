@@ -9,11 +9,10 @@ BASIC_TEST_PKGS := $(filter-out $(INTEGRATION_TEST_PKGS),$(TEST_PKGS))
 PACKAGES := go list ./...
 PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|github.com/pingcap/pd/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
-RETOOL:= ./scripts/retool
-OVERALLS  := overalls
-GOVERALLS := goveralls
+RETOOL := ./scripts/retool
+OVERALLS := overalls
 
-GOFAIL_ENABLE  := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do gofail enable)
+GOFAIL_ENABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do gofail enable)
 GOFAIL_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do gofail disable)
 
 LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --dirty)"
@@ -27,11 +26,6 @@ GO111 := $(shell [ $(GOVER_MAJOR) -gt 1 ] || [ $(GOVER_MAJOR) -eq 1 ] && [ $(GOV
 ifeq ($(GO111), 1)
 $(error "go below 1.11 does not support modules")
 endif
-
-# Ignore following files's coverage.
-#
-# See more: https://godoc.org/path/filepath#Match
-COVERIGNORE := "cmd/*/*,pdctl/*,pdctl/*/*,server/api/bindata_assetfs.go"
 
 default: build
 
@@ -105,7 +99,6 @@ travis_coverage:
 ifeq ("$(TRAVIS_COVERAGE)", "1")
 	@$(GOFAIL_ENABLE)
 	CGO_ENABLED=1 ./scripts/retool do $(OVERALLS) -project=github.com/pingcap/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(GOFAIL_DISABLE); exit 1; }
-	CGO_ENABLED=0 ./scripts/retool do $(GOVERALLS) -service=travis-ci -coverprofile=overalls.coverprofile || { $(GOFAIL_DISABLE); exit 1; }
 	@$(GOFAIL_DISABLE)
 else
 	@echo "coverage only runs in travis."
