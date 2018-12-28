@@ -121,13 +121,13 @@ func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd1")
 
-	// joint new pd
+	// join new PD
 	pd2, err := cluster.Join()
 	c.Assert(err, IsNil)
 	err = pd2.Run(context.TODO())
 	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd1")
-	// wait full syn
+	// waiting for synchronization to complete
 	time.Sleep(3 * time.Second)
 	err = cluster.ResignLeader()
 	c.Assert(err, IsNil)
