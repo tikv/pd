@@ -144,6 +144,16 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	case "shuffle-hot-region-scheduler":
+		limit := uint64(1)
+		l, ok := input["limit"].(float64)
+		if ok {
+			limit = uint64(l)
+		}
+		if err := h.AddShuffleHotRegionScheduler(limit); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	default:
 		h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
 		return

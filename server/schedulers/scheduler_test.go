@@ -275,6 +275,57 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	testutil.CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
 }
 
+var _ = Suite(&testShuffleHotRegionSchedulerSuite{})
+
+type testShuffleHotRegionSchedulerSuite struct{}
+
+func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	newTestReplication(opt, 3, "zone", "host")
+	tc := schedule.NewMockCluster(opt)
+	hb, err := schedule.CreateScheduler("shuffle-hot-region", schedule.NewOperatorController(nil, nil))
+	c.Assert(err, IsNil)
+
+	// Add stores 1, 2, 3, 4, 5, 6  with hot peer counts 3, 2, 2, 2, 0, 0.
+	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 2, map[string]string{"zone": "z2", "host": "h2"})
+	tc.AddLabelsStore(3, 2, map[string]string{"zone": "z3", "host": "h3"})
+	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z4", "host": "h4"})
+	tc.AddLabelsStore(5, 0, map[string]string{"zone": "z5", "host": "h5"})
+	tc.AddLabelsStore(6, 0, map[string]string{"zone": "z4", "host": "h6"})
+
+	// Report store written bytes.
+	tc.UpdateStorageWrittenBytes(1, 75*1024*1024)
+	tc.UpdateStorageWrittenBytes(2, 45*1024*1024)
+	tc.UpdateStorageWrittenBytes(3, 45*1024*1024)
+	tc.UpdateStorageWrittenBytes(4, 60*1024*1024)
+	tc.UpdateStorageWrittenBytes(5, 0)
+	tc.UpdateStorageWrittenBytes(6, 0)
+
+	// Region 1, 2 and 3 are hot regions.
+	//| region_id | leader_store | follower_store | follower_store | written_bytes |
+	//|-----------|--------------|----------------|----------------|---------------|
+	//|     1     |       1      |        2       |       3        |      512KB    |
+	//|     2     |       1      |        3       |       4        |      512KB    |
+	//|     3     |       1      |        2       |       4        |      512KB    |
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 3, 4)
+	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 4)
+	opt.HotRegionLowThreshold = 0
+
+	// try to get an operator
+	var op []*schedule.Operator
+	for i := 0; i < 100; i++ {
+		op = hb.Schedule(tc)
+		if op != nil {
+			break
+		}
+	}
+	c.Assert(op, NotNil)
+	c.Assert(op[0].Step(1).(schedule.PromoteLearner).ToStore, Equals, op[0].Step(2).(schedule.TransferLeader).ToStore)
+	c.Assert(op[0].Step(1).(schedule.PromoteLearner).ToStore, Not(Equals), 6)
+}
+
 var _ = Suite(&testEvictLeaderSuite{})
 
 type testEvictLeaderSuite struct{}
