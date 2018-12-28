@@ -31,6 +31,7 @@ var (
 func Alloc() string {
 	for i := 0; i < 10; i++ {
 		if u := tryAllocTestURL(); u != "" {
+			log.Infof("alloc url: %s", u)
 			return u
 		}
 		time.Sleep(time.Second)
