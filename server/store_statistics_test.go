@@ -69,4 +69,5 @@ func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
 	c.Assert(stats.LabelCounter["zone:z3"], Equals, 2)
 	c.Assert(stats.LabelCounter["host:h1"], Equals, 4)
 	c.Assert(stats.LabelCounter["host:h2"], Equals, 4)
+	c.Assert(stats.LabelCounter["zone:unknow"], Equals, 2)
 }
