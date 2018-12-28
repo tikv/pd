@@ -419,7 +419,17 @@ func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDR
 		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 	id := request.GetRegionId()
-	region, leader := cluster.GetRegionByID(id)
+	r := cluster.GetRegionInfoByID(id)
+	var (
+		region *metapb.Region
+		leader *metapb.Peer
+	)
+
+	if r != nil {
+		nr := r.Clone(core.WithAddPeers(r.GetSlavePeers()))
+		region = nr.GetMeta()
+		leader = nr.GetLeader()
+	}
 	return &pdpb.GetRegionResponse{
 		Header: s.header(),
 		Region: region,
