@@ -31,7 +31,8 @@ import (
 
 const (
 	msgSize                  = 8 * 1024 * 1024
-	defaultRateLimit         = 20 * 1024 * 1024 // 20MB/s
+	defaultBucketRate        = 20 * 1024 * 1024 // 20MB/s
+	defaultBucketCapacity    = 20 * 1024 * 1024 // 20MB
 	maxSyncRegionBatchSize   = 100
 	syncerKeepAliveInterval  = 10 * time.Second
 	defaultHistoryBufferSize = 10000
@@ -83,7 +84,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		server:  s,
 		closed:  make(chan struct{}),
 		history: newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionKV()),
-		limit:   ratelimit.NewBucketWithRate(defaultRateLimit, defaultRateLimit),
+		limit:   ratelimit.NewBucketWithRate(defaultBucketRate, defaultBucketCapacity),
 	}
 }
 
