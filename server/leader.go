@@ -299,14 +299,17 @@ func (s *Server) watchLeader(leader *pdpb.Member, revision int64) {
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 
+	// The revision is the revision of last modification on this key.
+	// If the revision is compacted, will meet required revision has been compacted error.
+	// In this case, use the compact revision to re-watch the key.
 	for {
 		// gofail: var delayWatcher struct{}
 		rch := watcher.Watch(ctx, s.getLeaderPath(), clientv3.WithRev(revision))
 		for wresp := range rch {
-			// meet compacted error, use current revision.
+			// meet compacted error, use the compact revision.
 			if wresp.CompactRevision != 0 {
-				log.Warnf("required revision %d has been compacted, use current revision", revision)
-				revision = 0
+				log.Warnf("required revision %d has been compacted, use the compact revision %d", revision, wresp.CompactRevision)
+				revision = wresp.CompactRevision
 				break
 			}
 			if wresp.Canceled {
