@@ -37,7 +37,7 @@ require (
 	github.com/pingcap/check v0.0.0-20171206051426-1c287c953996
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/errors v0.10.1 // indirect
-	github.com/pingcap/gofail v0.0.0-20181115114620-e47081505b9c
+	github.com/pingcap/gofail v0.0.0-20181217135706-6a951c1e42c3
 	github.com/pingcap/kvproto v0.0.0-20181123124450-d48563486f61
 	github.com/pkg/errors v0.8.0
 	github.com/pmezard/go-difflib v1.0.0 // indirect
@@ -68,5 +68,3 @@ require (
 	gopkg.in/gemnasium/logrus-airbrake-hook.v2 v2.1.2 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0-20170531160350-a96e63847dc3
 )
-
-replace github.com/etcd-io/gofail => github.com/pingcap/gofail v0.0.0-20181114091844-fbac950f3c9c
