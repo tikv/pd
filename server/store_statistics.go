@@ -14,11 +14,17 @@
 package server
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+)
+
+const (
+	unknown   = "unknown"
+	labelType = "label"
 )
 
 type storeStatistics struct {
@@ -35,16 +41,26 @@ type storeStatistics struct {
 	StorageCapacity uint64
 	RegionCount     int
 	LeaderCount     int
+	LabelCounter    map[string]int
 }
 
 func newStoreStatistics(opt *scheduleOption, namespace string) *storeStatistics {
 	return &storeStatistics{
-		opt:       opt,
-		namespace: namespace,
+		opt:          opt,
+		namespace:    namespace,
+		LabelCounter: make(map[string]int),
 	}
 }
 
 func (s *storeStatistics) Observe(store *core.StoreInfo) {
+	for _, k := range s.opt.GetLocationLabels() {
+		v := store.GetLabelValue(k)
+		if v == "" {
+			v = unknown
+		}
+		key := fmt.Sprintf("%s:%s", k, v)
+		s.LabelCounter[key]++
+	}
 	id := strconv.FormatUint(store.GetId(), 10)
 	// Store state.
 	switch store.GetState() {
@@ -100,8 +116,12 @@ func (s *storeStatistics) Collect() {
 	metrics["storage_size"] = float64(s.StorageSize)
 	metrics["storage_capacity"] = float64(s.StorageCapacity)
 
-	for label, value := range metrics {
-		clusterStatusGauge.WithLabelValues(label, s.namespace).Set(value)
+	for typ, value := range metrics {
+		clusterStatusGauge.WithLabelValues(typ, s.namespace).Set(value)
+	}
+
+	for name, value := range s.LabelCounter {
+		placementStatusGauge.WithLabelValues(labelType, name, s.namespace).Set(float64(value))
 	}
 }
 

@@ -41,6 +41,14 @@ var (
 			Help:      "Status of the cluster.",
 		}, []string{"type", "namespace"})
 
+	placementStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "placement_status",
+			Help:      "Status of the cluster placement.",
+		}, []string{"type", "name", "namespace"})
+
 	healthStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -164,4 +172,5 @@ func init() {
 	prometheus.MustRegister(metadataGauge)
 	prometheus.MustRegister(etcdStateGauge)
 	prometheus.MustRegister(patrolCheckRegionsHistogram)
+	prometheus.MustRegister(placementStatusGauge)
 }
