@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	unknow    = "unknow"
+	unknown   = "unknown"
 	labelType = "label"
 )
 
@@ -56,7 +56,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	for _, k := range s.opt.GetLocationLabels() {
 		v := store.GetLabelValue(k)
 		if v == "" {
-			v = unknow
+			v = unknown
 		}
 		key := fmt.Sprintf("%s:%s", k, v)
 		s.LabelCounter[key]++
