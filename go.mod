@@ -38,7 +38,7 @@ require (
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/errors v0.10.1 // indirect
 	github.com/pingcap/gofail v0.0.0-20181115114620-e47081505b9c
-	github.com/pingcap/kvproto v0.0.0-20181123124450-d48563486f61
+	github.com/pingcap/kvproto v0.0.0-20190103102256-7da6b53ea081
 	github.com/pkg/errors v0.8.0
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v0.8.0
@@ -62,7 +62,6 @@ require (
 	golang.org/x/crypto v0.0.0-20180503215945-1f94bef427e3 // indirect
 	golang.org/x/sync v0.0.0-20181108010431-42b317875d0f // indirect
 	golang.org/x/time v0.0.0-20180412165947-fbb02b2291d2 // indirect
-	google.golang.org/genproto v0.0.0-20180427144745-86e600f69ee4 // indirect
 	google.golang.org/grpc v1.12.2
 	gopkg.in/airbrake/gobrake.v2 v2.0.9 // indirect
 	gopkg.in/gemnasium/logrus-airbrake-hook.v2 v2.1.2 // indirect

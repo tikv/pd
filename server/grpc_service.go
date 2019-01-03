@@ -381,11 +381,23 @@ func (s *Server) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) 
 	if cluster == nil {
 		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-	region, leader := cluster.GetRegionByKey(request.GetRegionKey())
+	r := cluster.GetRegionInfoByKey(request.GetRegionKey())
+	var (
+		region *metapb.Region
+		leader *metapb.Peer
+		slaves []*metapb.Peer
+	)
+	if r != nil {
+		nr := r.Clone(core.WithAddPeers(r.GetSlavePeers()))
+		slaves = r.GetSlavePeers()
+		region = nr.GetMeta()
+		leader = nr.GetLeader()
+	}
 	return &pdpb.GetRegionResponse{
 		Header: s.header(),
 		Region: region,
 		Leader: leader,
+		Slaves: slaves,
 	}, nil
 }
 
@@ -423,10 +435,12 @@ func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDR
 	var (
 		region *metapb.Region
 		leader *metapb.Peer
+		slaves []*metapb.Peer
 	)
 
 	if r != nil {
 		nr := r.Clone(core.WithAddPeers(r.GetSlavePeers()))
+		slaves = r.GetSlavePeers()
 		region = nr.GetMeta()
 		leader = nr.GetLeader()
 	}
@@ -434,6 +448,7 @@ func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDR
 		Header: s.header(),
 		Region: region,
 		Leader: leader,
+		Slaves: slaves,
 	}, nil
 }
 
