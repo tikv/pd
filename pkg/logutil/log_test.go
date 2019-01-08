@@ -94,6 +94,10 @@ func (s *testLogSuite) TestLogging(c *C) {
 }
 
 func (s *testLogSuite) TestFileLog(c *C) {
-	c.Assert(InitFileLog(&FileLogConfig{Filename: "/tmp"}), NotNil)
-	c.Assert(InitFileLog(&FileLogConfig{Filename: "/tmp/test_file_log", MaxSize: 0}), IsNil)
+	output, err := InitFileLog(&FileLogConfig{Filename: "/tmp"})
+	c.Assert(err, NotNil)
+	c.Assert(output, IsNil)
+	output, err = InitFileLog(&FileLogConfig{Filename: "/tmp/test_file_log", MaxSize: 0})
+	c.Assert(err, IsNil)
+	c.Assert(output, NotNil)
 }

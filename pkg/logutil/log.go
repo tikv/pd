@@ -16,17 +16,22 @@ package logutil
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
+	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/coreos/etcd/raft"
 	"github.com/coreos/pkg/capnslog"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc/grpclog"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
@@ -62,6 +67,11 @@ type LogConfig struct {
 	DisableTimestamp bool `toml:"disable-timestamp" json:"disable-timestamp"`
 	// File log config.
 	File FileLogConfig `toml:"file" json:"file"`
+	// Development
+	Development       bool
+	DisableCaller     bool
+	DisableStacktrace bool
+	Sampling          *zap.SamplingConfig `toml:"sampling" json:"sampling"`
 }
 
 // redirectFormatter will redirect etcd logs to logrus logs.
@@ -197,10 +207,10 @@ func StringToLogFormatter(format string, disableTimestamp bool) log.Formatter {
 }
 
 // InitFileLog initializes file based logging options.
-func InitFileLog(cfg *FileLogConfig) error {
+func InitFileLog(cfg *FileLogConfig) (*lumberjack.Logger, error) {
 	if st, err := os.Stat(cfg.Filename); err == nil {
 		if st.IsDir() {
-			return errors.New("can't use directory as log file name")
+			return nil, errors.New("can't use directory as log file name")
 		}
 	}
 	if cfg.MaxSize == 0 {
@@ -208,16 +218,13 @@ func InitFileLog(cfg *FileLogConfig) error {
 	}
 
 	// use lumberjack to logrotate
-	output := &lumberjack.Logger{
+	return &lumberjack.Logger{
 		Filename:   cfg.Filename,
 		MaxSize:    cfg.MaxSize,
 		MaxBackups: cfg.MaxBackups,
 		MaxAge:     cfg.MaxDays,
 		LocalTime:  true,
-	}
-
-	log.SetOutput(output)
-	return nil
+	}, nil
 }
 
 type wrapLogrus struct {
@@ -240,7 +247,10 @@ var once sync.Once
 
 // InitLogger initializes PD's logger.
 func InitLogger(cfg *LogConfig) error {
-	var err error
+	var (
+		err    error
+		output io.Writer
+	)
 
 	once.Do(func() {
 		log.SetLevel(StringToLogLevel(cfg.Level))
@@ -263,9 +273,89 @@ func InitLogger(cfg *LogConfig) error {
 			return
 		}
 
-		err = InitFileLog(&cfg.File)
+		output, err = InitFileLog(&cfg.File)
+		if err == nil {
+			log.SetOutput(output)
+		}
+
 	})
 	return err
+}
+
+// InitZapLogger init the zap log.
+func InitZapLogger(cfg *LogConfig) (*zap.Logger, error) {
+	var (
+		output zapcore.WriteSyncer
+	)
+	if len(cfg.File.Filename) > 0 {
+		lg, err := InitFileLog(&cfg.File)
+		if err != nil {
+			return nil, err
+		}
+		output = zapcore.AddSync(lg)
+	} else {
+		stdOut, close, err := zap.Open([]string{"stdout"}...)
+		if err != nil {
+			close()
+			return nil, err
+		}
+		output = stdOut
+	}
+
+	cc := zapcore.EncoderConfig{
+		// Keys can be anything except the empty string.
+		TimeKey:        "Time",
+		LevelKey:       "Level",
+		NameKey:        "Name",
+		CallerKey:      "Caller",
+		MessageKey:     "Message",
+		StacktraceKey:  "Stack",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    zapcore.CapitalLevelEncoder,
+		EncodeTime:     DefaultTimeEncoder,
+		EncodeDuration: zapcore.StringDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	}
+
+	level := zap.NewAtomicLevel()
+	err := level.UnmarshalText([]byte(cfg.Level))
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println(level, output)
+	enc, err := NewTextEncoder(cc)
+	if err != nil {
+		return nil, err
+	}
+	lg := zap.New(zapcore.NewCore(enc, output, level), cfg.buildOptions(output)...)
+	return lg, nil
+}
+
+func (cfg *LogConfig) buildOptions(errSink zapcore.WriteSyncer) []zap.Option {
+	opts := []zap.Option{zap.ErrorOutput(errSink)}
+
+	if cfg.Development {
+		opts = append(opts, zap.Development())
+	}
+
+	if !cfg.DisableCaller {
+		opts = append(opts, zap.AddCaller())
+	}
+
+	stackLevel := zap.ErrorLevel
+	if cfg.Development {
+		stackLevel = zap.WarnLevel
+	}
+	if !cfg.DisableStacktrace {
+		opts = append(opts, zap.AddStacktrace(stackLevel))
+	}
+
+	if cfg.Sampling != nil {
+		opts = append(opts, zap.WrapCore(func(core zapcore.Core) zapcore.Core {
+			return zapcore.NewSampler(core, time.Second, int(cfg.Sampling.Initial), int(cfg.Sampling.Thereafter))
+		}))
+	}
+	return opts
 }
 
 // LogPanic logs the panic reason and stack, then exit the process.

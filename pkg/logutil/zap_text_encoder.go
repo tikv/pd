@@ -41,9 +41,19 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"go.uber.org/zap"
 	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
 )
+
+func init() {
+	zap.RegisterEncoder("custom", NewTextEncoder)
+}
+
+// DefaultTimeEncoder serializes a time.Time to an human-readable formatted string
+func DefaultTimeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+	enc.AppendString(t.Format("2006/01/02 15:04:05.000 +08:00"))
+}
 
 // For JSON-escaping; see textEncoder.safeAddString below.
 const _hex = "0123456789abcdef"

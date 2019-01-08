@@ -17,7 +17,6 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"go.uber.org/zap"
 )
 
 var _ = Suite(&testZapLogSuite{})
@@ -25,20 +24,10 @@ var _ = Suite(&testZapLogSuite{})
 type testZapLogSuite struct{}
 
 func (t *testZapLogSuite) TestLog(c *C) {
-	zap.RegisterEncoder("custom", NewTextEncoder)
-	cc := zap.NewDevelopmentEncoderConfig()
-	cc.MessageKey = "message"
-	cfg := zap.Config{
-		Level:            zap.NewAtomicLevelAt(zap.DebugLevel),
-		Development:      true,
-		Encoding:         "custom",
-		EncoderConfig:    cc,
-		OutputPaths:      []string{"stderr"},
-		ErrorOutputPaths: []string{"stderr"},
-	}
-	logger, err := cfg.Build()
+	conf := &LogConfig{Level: "debug", File: FileLogConfig{}}
+	lg, err := InitZapLogger(conf)
 	c.Assert(err, IsNil)
-	sugar := logger.Sugar()
+	sugar := lg.Sugar()
 
 	defer sugar.Sync()
 	sugar.Infow("failed to fetch URL",
@@ -48,4 +37,25 @@ func (t *testZapLogSuite) TestLog(c *C) {
 	)
 	//	var cfg zap.Config
 	sugar.Infof(`failed to "fetch" [URL]: %s`, "http://example.com")
+}
+
+func (t *testZapLogSuite) TestFileLog(c *C) {
+	conf := &LogConfig{
+		Level: "info",
+		File: FileLogConfig{
+			Filename: "/tmp/test.log",
+			MaxSize:  1,
+		},
+	}
+	lg, err := InitZapLogger(conf)
+	c.Assert(err, IsNil)
+	var data []byte
+	for i := 1; i <= 2*1024*1024; i++ {
+		if i%1000 != 0 {
+			data = append(data, 'd')
+			continue
+		}
+		lg.Info(string(data))
+		data = data[:0]
+	}
 }
