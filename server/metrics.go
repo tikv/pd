@@ -154,6 +154,14 @@ var (
 			Help:      "Bucketed histogram of time spend(s) of patrol checks region.",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 15),
 		})
+
+	configStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "config",
+			Name:      "status",
+			Help:      "Status of the scheduling configurations.",
+		}, []string{"type", "namespace"})
 )
 
 func init() {
@@ -173,4 +181,5 @@ func init() {
 	prometheus.MustRegister(etcdStateGauge)
 	prometheus.MustRegister(patrolCheckRegionsHistogram)
 	prometheus.MustRegister(placementStatusGauge)
+	prometheus.MustRegister(configStatusGauge)
 }
