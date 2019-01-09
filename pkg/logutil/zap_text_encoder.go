@@ -41,14 +41,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"go.uber.org/zap"
 	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
 )
-
-func init() {
-	zap.RegisterEncoder("custom", NewTextEncoder)
-}
 
 // DefaultTimeEncoder serializes a time.Time to an human-readable formatted string
 func DefaultTimeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
@@ -98,15 +93,11 @@ type textEncoder struct {
 
 // NewTextEncoder creates a fast, low-allocation Text encoder. The encoder
 // appropriately escapes all field keys and values.
-func NewTextEncoder(cfg zapcore.EncoderConfig) (zapcore.Encoder, error) {
-	return newTextEncoder(cfg, false), nil
-}
-
-func newTextEncoder(cfg zapcore.EncoderConfig, spaced bool) *textEncoder {
+func NewTextEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
 	return &textEncoder{
 		EncoderConfig: &cfg,
 		buf:           _pool.Get(),
-		spaced:        spaced,
+		spaced:        false,
 	}
 }
 
@@ -274,9 +265,7 @@ func (enc *textEncoder) AppendHeaderString(val string) {
 
 func (enc *textEncoder) AppendString(val string) {
 	enc.addElementSeparator()
-	enc.buf.AppendByte('"')
-	enc.safeAddString(val)
-	enc.buf.AppendByte('"')
+	enc.safeAddStringWithQuote(val)
 }
 
 func (enc *textEncoder) AppendTime(val time.Time) {
@@ -290,12 +279,14 @@ func (enc *textEncoder) AppendTime(val time.Time) {
 }
 
 func (enc *textEncoder) beginQuoteFiled() {
+	if enc.buf.Len() > 0 {
+		enc.buf.AppendByte(' ')
+	}
 	enc.buf.AppendByte('[')
 }
 
 func (enc *textEncoder) endQuoteFiled() {
 	enc.buf.AppendByte(']')
-	enc.buf.AppendByte(' ')
 }
 
 func (enc *textEncoder) AppendUint64(val uint64) {
@@ -328,12 +319,12 @@ func (enc *textEncoder) AppendUint8(v uint8)                { enc.AppendUint64(u
 func (enc *textEncoder) AppendUintptr(v uintptr)            { enc.AppendUint64(uint64(v)) }
 
 func (enc *textEncoder) Clone() zapcore.Encoder {
-	clone := enc.clone()
+	clone := enc.cloned()
 	clone.buf.Write(enc.buf.Bytes())
 	return clone
 }
 
-func (enc *textEncoder) clone() *textEncoder {
+func (enc *textEncoder) cloned() *textEncoder {
 	clone := getTextEncoder()
 	clone.EncoderConfig = enc.EncoderConfig
 	clone.spaced = enc.spaced
@@ -343,8 +334,7 @@ func (enc *textEncoder) clone() *textEncoder {
 }
 
 func (enc *textEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
-	final := enc.clone()
-
+	final := enc.cloned()
 	if final.TimeKey != "" {
 		final.beginQuoteFiled()
 		final.AppendTime(ent.Time)
@@ -393,18 +383,17 @@ func (enc *textEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (
 		}
 		final.endQuoteFiled()
 	}
-
+	// add Message
+	if len(ent.Message) > 0 {
+		final.beginQuoteFiled()
+		final.AppendString(ent.Message)
+		final.endQuoteFiled()
+	}
 	if enc.buf.Len() > 0 {
 		final.addElementSeparator()
 		final.buf.Write(enc.buf.Bytes())
 	}
 	addFields(final, fields)
-	if final.MessageKey != "" {
-		final.beginQuoteFiled()
-		final.addKey(enc.MessageKey)
-		final.AppendString(ent.Message)
-		final.endQuoteFiled()
-	}
 	final.closeOpenNamespaces()
 	if ent.Stack != "" && final.StacktraceKey != "" {
 		final.beginQuoteFiled()
@@ -435,11 +424,8 @@ func (enc *textEncoder) closeOpenNamespaces() {
 
 func (enc *textEncoder) addKey(key string) {
 	enc.addElementSeparator()
-	enc.safeAddString(key)
+	enc.safeAddStringWithQuote(key)
 	enc.buf.AppendByte('=')
-	if enc.spaced {
-		enc.buf.AppendByte(' ')
-	}
 }
 
 func (enc *textEncoder) addElementSeparator() {
@@ -452,9 +438,6 @@ func (enc *textEncoder) addElementSeparator() {
 		return
 	default:
 		enc.buf.AppendByte(',')
-		if enc.spaced {
-			enc.buf.AppendByte(' ')
-		}
 	}
 }
 
@@ -491,6 +474,17 @@ func (enc *textEncoder) safeAddString(s string) {
 	}
 }
 
+// safeAddStringWithQuote will automatically add quotoes.
+func (enc *textEncoder) safeAddStringWithQuote(s string) {
+	if !enc.needDoubleQuotes(s) {
+		enc.buf.AppendString(s)
+		return
+	}
+	enc.buf.AppendByte('"')
+	enc.safeAddString(s)
+	enc.buf.AppendByte('"')
+}
+
 // safeAddByteString is no-alloc equivalent of safeAddString(string(s)) for s []byte.
 func (enc *textEncoder) safeAddByteString(s []byte) {
 	for i := 0; i < len(s); {
@@ -506,6 +500,27 @@ func (enc *textEncoder) safeAddByteString(s []byte) {
 		enc.buf.Write(s[i : i+size])
 		i += size
 	}
+}
+
+// For https://github.com/tikv/rfcs/blob/master/text/2018-12-19-unified-log-format.md#log-fields-section.
+func (enc *textEncoder) needDoubleQuotes(s string) bool {
+	for i := 0; i < len(s); {
+		b := s[i]
+		if b <= 0x20 {
+			return true
+		}
+		switch b {
+		case '\\', '"', '[', ']', '=':
+			return true
+		case '\n', '\t', '\r':
+			return true
+		}
+		if b >= utf8.RuneSelf {
+			return true
+		}
+		i++
+	}
+	return false
 }
 
 // tryAddRuneSelf appends b if it is valid UTF-8 character represented in a single byte.

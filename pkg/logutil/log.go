@@ -301,7 +301,16 @@ func InitZapLogger(cfg *LogConfig) (*zap.Logger, error) {
 		}
 		output = stdOut
 	}
+	level := zap.NewAtomicLevel()
+	err := level.UnmarshalText([]byte(cfg.Level))
+	if err != nil {
+		return nil, err
+	}
+	lg := zap.New(zapcore.NewCore(newZapTextEncoder(cfg), output, level), cfg.buildOptions(output)...)
+	return lg, nil
+}
 
+func newZapTextEncoder(cfg *LogConfig) zapcore.Encoder {
 	cc := zapcore.EncoderConfig{
 		// Keys can be anything except the empty string.
 		TimeKey:        "Time",
@@ -316,19 +325,10 @@ func InitZapLogger(cfg *LogConfig) (*zap.Logger, error) {
 		EncodeDuration: zapcore.StringDurationEncoder,
 		EncodeCaller:   zapcore.ShortCallerEncoder,
 	}
-
-	level := zap.NewAtomicLevel()
-	err := level.UnmarshalText([]byte(cfg.Level))
-	if err != nil {
-		return nil, err
+	if cfg.DisableTimestamp {
+		cc.TimeKey = ""
 	}
-	fmt.Println(level, output)
-	enc, err := NewTextEncoder(cc)
-	if err != nil {
-		return nil, err
-	}
-	lg := zap.New(zapcore.NewCore(enc, output, level), cfg.buildOptions(output)...)
-	return lg, nil
+	return NewTextEncoder(cc)
 }
 
 func (cfg *LogConfig) buildOptions(errSink zapcore.WriteSyncer) []zap.Option {
