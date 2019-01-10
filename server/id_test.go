@@ -34,7 +34,7 @@ type testAllocIDSuite struct {
 
 func (s *testAllocIDSuite) SetUpSuite(c *C) {
 	var err error
-	_, s.svr, s.cleanup, err = NewTestServer()
+	_, s.svr, s.cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	s.client = s.svr.client
 	s.alloc = s.svr.idAlloc

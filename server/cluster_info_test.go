@@ -264,7 +264,8 @@ func (s *testClusterInfoSuite) TestLoadClusterInfo(c *C) {
 	defer cleanup()
 
 	kv := server.kv
-	_, opt := newTestScheduleConfig()
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
 
 	// Cluster is not bootstrapped.
 	cluster, err := loadClusterInfo(server.idAlloc, kv, opt)
@@ -295,7 +296,8 @@ func (s *testClusterInfoSuite) TestLoadClusterInfo(c *C) {
 }
 
 func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
-	_, opt := newTestScheduleConfig()
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
 	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
 
 	n, np := uint64(3), uint64(3)
@@ -340,7 +342,8 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 }
 
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
-	_, opt := newTestScheduleConfig()
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
 	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
 
 	n, np := uint64(3), uint64(3)
@@ -349,7 +352,7 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	regions := newTestRegions(n, np)
 
 	for _, store := range stores {
-		cluster.putStore(store)
+		c.Assert(cluster.putStore(store), IsNil)
 	}
 
 	for i, region := range regions {
@@ -554,7 +557,8 @@ func heartbeatRegions(c *C, cluster *clusterInfo, regions []*metapb.Region) {
 }
 
 func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
-	_, opt := newTestScheduleConfig()
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
 	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, nil)
 
 	// 1: [nil, nil)
@@ -592,7 +596,8 @@ func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
 }
 
 func (s *testClusterInfoSuite) TestRegionSplitAndMerge(c *C) {
-	_, opt := newTestScheduleConfig()
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
 	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, nil)
 
 	regions := []*metapb.Region{
@@ -631,11 +636,12 @@ func (s *testClusterInfoSuite) TestRegionSplitAndMerge(c *C) {
 }
 
 func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
-	_, opt := newTestScheduleConfig()
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
 	tc := newTestClusterInfo(opt)
 	stores := newTestStores(5)
 	for _, s := range stores {
-		tc.putStore(s)
+		c.Assert(tc.putStore(s), IsNil)
 	}
 	peers := []*metapb.Peer{
 		{
@@ -656,10 +662,10 @@ func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
 		},
 	}
 	origin := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[:3]}, peers[0], core.WithPendingPeers(peers[1:3]))
-	tc.handleRegionHeartbeat(origin)
+	c.Assert(tc.handleRegionHeartbeat(origin), IsNil)
 	checkPendingPeerCount([]int{0, 1, 1, 0}, tc.clusterInfo, c)
 	newRegion := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[1:]}, peers[1], core.WithPendingPeers(peers[3:4]))
-	tc.handleRegionHeartbeat(newRegion)
+	c.Assert(tc.handleRegionHeartbeat(newRegion), IsNil)
 	checkPendingPeerCount([]int{0, 0, 0, 1}, tc.clusterInfo, c)
 }
 

@@ -93,7 +93,7 @@ func (s *testMemberAPISuite) TestMemberLeader(c *C) {
 	c.Assert(err, IsNil)
 
 	var got pdpb.Member
-	json.Unmarshal(buf, &got)
+	c.Assert(json.Unmarshal(buf, &got), IsNil)
 	c.Assert(got.GetClientUrls(), DeepEquals, leader.GetClientUrls())
 	c.Assert(got.GetMemberId(), Equals, leader.GetMemberId())
 }

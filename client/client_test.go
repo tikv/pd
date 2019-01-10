@@ -63,7 +63,7 @@ type testClientSuite struct {
 
 func (s *testClientSuite) SetUpSuite(c *C) {
 	var err error
-	_, s.srv, s.cleanup, err = server.NewTestServer()
+	_, s.srv, s.cleanup, err = server.NewTestServer(c)
 	c.Assert(err, IsNil)
 	s.grpcPDClient = mustNewGrpcClient(c, s.srv.GetAddr())
 

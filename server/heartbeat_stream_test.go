@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/pkg/typeutil"
+	log "github.com/sirupsen/logrus"
 )
 
 var _ = Suite(&testHeartbeatStreamSuite{})
@@ -31,29 +32,26 @@ type testHeartbeatStreamSuite struct {
 	region *metapb.Region
 }
 
-func (s *testHeartbeatStreamSuite) SetUpSuite(c *C) {
+func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	var err error
-	_, s.svr, s.cleanup, err = NewTestServer()
+	var cleanup func()
+	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	s.svr.cfg.heartbeatStreamBindInterval = typeutil.NewDuration(time.Second)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	defer cleanup()
 
 	bootstrapReq := s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0")
 	_, err = s.svr.bootstrapCluster(bootstrapReq)
 	c.Assert(err, IsNil)
 	s.region = bootstrapReq.Region
-}
 
-func (s *testHeartbeatStreamSuite) TearDownSuite(c *C) {
-	s.cleanup()
-}
-
-func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	// Add a new store and an addPeer operator.
 	storeID, err := s.svr.idAlloc.Alloc()
 	c.Assert(err, IsNil)
-	putStore(c, s.grpcPDClient, s.svr.clusterID, &metapb.Store{Id: storeID, Address: "127.0.0.1:1"})
+	_, err = putStore(c, s.grpcPDClient, s.svr.clusterID, &metapb.Store{Id: storeID, Address: "127.0.0.1:1"})
+	c.Assert(err, IsNil)
 	err = newHandler(s.svr).AddAddPeerOperator(s.region.GetId(), storeID)
 	c.Assert(err, IsNil)
 
@@ -77,14 +75,14 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 		Region: s.region,
 	}
 	// Active stream is stream1.
-	stream1.stream.Send(req)
+	c.Assert(stream1.stream.Send(req), IsNil)
 	c.Assert(checkActiveStream(), Equals, 1)
 	// Rebind to stream2.
-	stream2.stream.Send(req)
+	c.Assert(stream2.stream.Send(req), IsNil)
 	c.Assert(checkActiveStream(), Equals, 2)
 	// Rebind to stream1 if no more heartbeats sent through stream2.
 	testutil.WaitUntil(c, func(c *C) bool {
-		stream1.stream.Send(req)
+		c.Assert(stream1.stream.Send(req), IsNil)
 		return checkActiveStream() == 1
 	})
 }
@@ -114,11 +112,15 @@ func newRegionheartbeatClient(c *C, grpcClient pdpb.PDClient) *regionHeartbeatCl
 }
 
 func (c *regionHeartbeatClient) close() {
-	c.stream.CloseSend()
+	if err := c.stream.CloseSend(); err != nil {
+		log.Errorf("Failed to terminate client stream: %v", err)
+	}
 }
 
 func (c *regionHeartbeatClient) SendRecv(msg *pdpb.RegionHeartbeatRequest, timeout time.Duration) *pdpb.RegionHeartbeatResponse {
-	c.stream.Send(msg)
+	if err := c.stream.Send(msg); err != nil {
+		log.Errorf("send heartbeat message fail: %v", err)
+	}
 	select {
 	case <-time.After(timeout):
 		return nil

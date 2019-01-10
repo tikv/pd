@@ -31,8 +31,7 @@ type testGetLeaderSuite struct {
 }
 
 func (s *testGetLeaderSuite) SetUpSuite(c *C) {
-	cfg := NewTestSingleConfig()
-
+	cfg := NewTestSingleConfig(c)
 	s.wg.Add(1)
 	s.done = make(chan bool)
 	svr, err := CreateServer(cfg, nil)
@@ -77,7 +76,7 @@ func (s *testGetLeaderSuite) sendRequest(c *C, addr string) {
 			// just make sure the server will not panic.
 			grpcPDClient := mustNewGrpcClient(c, addr)
 			if grpcPDClient != nil {
-				grpcPDClient.AllocID(context.Background(), req)
+				_, _ = grpcPDClient.AllocID(context.Background(), req)
 			}
 		}
 		time.Sleep(10 * time.Millisecond)

@@ -27,7 +27,8 @@ var _ = Suite(&testStoreStatisticsSuite{})
 type testStoreStatisticsSuite struct{}
 
 func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
-	_, opt := newTestScheduleConfig()
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
 	rep := opt.GetReplication().load()
 	rep.LocationLabels = []string{"zone", "host"}
 

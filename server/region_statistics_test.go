@@ -66,7 +66,8 @@ var _ = Suite(&testRegionStatisticsSuite{})
 type testRegionStatisticsSuite struct{}
 
 func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
-	_, opt := newTestScheduleConfig()
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
 	peers := []*metapb.Peer{
 		{Id: 5, StoreId: 1},
 		{Id: 6, StoreId: 2},

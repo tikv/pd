@@ -471,7 +471,10 @@ func printWithJQFilter(data, filter string) {
 
 	go func() {
 		defer stdin.Close()
-		io.WriteString(stdin, data)
+		_, err = io.WriteString(stdin, data)
+		if err != nil {
+			fmt.Println(err)
+		}
 	}()
 
 	out, err := cmd.CombinedOutput()

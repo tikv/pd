@@ -80,7 +80,7 @@ func adjustInt64(v *int64, defValue int64) {
 }
 
 // Adjust is used to adjust configurations
-func (sc *SimConfig) Adjust() {
+func (sc *SimConfig) Adjust() error {
 	adjustDuration(&sc.SimTickInterval, defaultSimTickInterval)
 	adjustUint64(&sc.StoreCapacityGB, defaultStoreCapacityGB)
 	adjustUint64(&sc.StoreAvailableGB, defaultStoreAvailableGB)
@@ -92,5 +92,5 @@ func (sc *SimConfig) Adjust() {
 	adjustDuration(&sc.ServerConfig.ElectionInterval, defaultElectionInterval)
 	adjustDuration(&sc.ServerConfig.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
 
-	sc.ServerConfig.Adjust(nil)
+	return sc.ServerConfig.Adjust(nil)
 }

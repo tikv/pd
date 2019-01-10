@@ -50,13 +50,14 @@ func (s *testClusterWorkerSuite) TestReportBatchSplit(c *C) {
 
 func (s *testClusterWorkerSuite) TestValidRequestRegion(c *C) {
 	var err error
-	_, s.svr, s.cleanup, err = NewTestServer()
+	var cleanup func()
+	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
-	s.client = s.svr.client
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
-	defer s.cleanup()
-	s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
+	defer cleanup()
+	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
+	c.Assert(err, IsNil)
 
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)

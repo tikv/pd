@@ -75,7 +75,7 @@ func mustNewServer(c *C) (*server.Server, cleanUpFunc) {
 
 func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpFunc) {
 	svrs := make([]*server.Server, 0, num)
-	cfgs := server.NewTestMultiConfig(num)
+	cfgs := server.NewTestMultiConfig(c, num)
 
 	ch := make(chan *server.Server, num)
 	for _, cfg := range cfgs {

@@ -38,19 +38,15 @@ type Recommendation struct {
 //lint:file-ignore U1000 document available levels and modules
 const (
 	// analyze levels
-	levelNormal   = "Normal"
 	levelWarning  = "Warning"
 	levelMinor    = "Minor"
 	levelMajor    = "Major"
 	levelCritical = "Critical"
-	levelFatal    = "Fatal"
 
 	// analyze modules
-	modMember   = "member"
-	modTiKV     = "TiKV"
-	modReplica  = "Replic"
-	modSchedule = "Schedule"
-	modDefault  = "Default"
+	modMember  = "member"
+	modTiKV    = "TiKV"
+	modDefault = "Default"
 
 	memberOneInstance diagnoseType = iota
 	memberEvenInstance

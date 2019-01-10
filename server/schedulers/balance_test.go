@@ -913,7 +913,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	}
 
 	for _, region := range s.regions {
-		c.Assert(s.cluster.PutRegion(region), IsNil)
+		s.cluster.PutRegion(region)
 	}
 
 	s.mc = schedule.NewMergeChecker(s.cluster, namespace.DefaultClassifier)
@@ -1278,7 +1278,8 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 		tc.Regions.SetRegion(regionInfo)
 	}
 	for i := 0; i < 100; i++ {
-		tc.AllocPeer(1)
+		_, err := tc.AllocPeer(1)
+		c.Assert(err, IsNil)
 	}
 	for i := 1; i <= 5; i++ {
 		tc.UpdateStoreStatus(uint64(i))

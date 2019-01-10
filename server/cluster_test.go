@@ -20,7 +20,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
 	gofail "github.com/pingcap/gofail/runtime"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -37,9 +36,7 @@ const (
 var _ = Suite(&testClusterSuite{})
 
 type baseCluster struct {
-	client       *clientv3.Client
 	svr          *Server
-	cleanup      CleanupFunc
 	grpcPDClient pdpb.PDClient
 }
 
@@ -119,12 +116,12 @@ func (s *baseCluster) newRegion(c *C, regionID uint64, startKey []byte,
 
 func (s *testClusterSuite) TestBootstrap(c *C) {
 	var err error
-	_, s.svr, s.cleanup, err = NewTestServer()
+	var cleanup func()
+	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
-	s.client = s.svr.client
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
-	defer s.cleanup()
+	defer cleanup()
 	clusterID := s.svr.clusterID
 
 	// IsBootstrapped returns false.
@@ -239,16 +236,17 @@ func (s *baseCluster) getClusterConfig(c *C, clusterID uint64) *metapb.Cluster {
 
 func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	var err error
-	_, s.svr, s.cleanup, err = NewTestServer()
+	var cleanup func()
+	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
-	s.client = s.svr.client
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
-	defer s.cleanup()
+	defer cleanup()
 	clusterID := s.svr.clusterID
 
 	storeAddr := "127.0.0.1:0"
-	s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, storeAddr))
+	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, storeAddr))
+	c.Assert(err, IsNil)
 
 	// Get region.
 	region := s.getRegion(c, clusterID, []byte("abc"))
@@ -338,7 +336,7 @@ func (s *baseCluster) resetStoreState(c *C, storeID uint64, state metapb.StoreSt
 	store := cluster.GetStore(storeID)
 	c.Assert(store, NotNil)
 	store.State = state
-	cluster.putStore(store)
+	c.Assert(cluster.putStore(store), IsNil)
 }
 
 func (s *baseCluster) testRemoveStore(c *C, clusterID uint64, store *metapb.Store) {
@@ -414,19 +412,23 @@ func (s *baseCluster) testRemoveStore(c *C, clusterID uint64, store *metapb.Stor
 
 // Make sure PD will not panic if it start and stop again and again.
 func (s *testClusterSuite) TestRaftClusterRestart(c *C) {
-	_, svr, cleanup, err := NewTestServer()
+	var err error
+	var cleanup func()
+	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	defer cleanup()
-	svr.bootstrapCluster(s.newBootstrapRequest(c, svr.clusterID, "127.0.0.1:0"))
+	mustWaitLeader(c, []*Server{s.svr})
+	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
+	c.Assert(err, IsNil)
 
-	cluster := svr.GetRaftCluster()
+	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 	cluster.stop()
 
-	err = svr.createRaftCluster()
+	err = s.svr.createRaftCluster()
 	c.Assert(err, IsNil)
 
-	cluster = svr.GetRaftCluster()
+	cluster = s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 	cluster.stop()
 }
@@ -434,8 +436,9 @@ func (s *testClusterSuite) TestRaftClusterRestart(c *C) {
 // Make sure PD will not deadlock if it start and stop again and again.
 func (s *testClusterSuite) TestRaftClusterMultipleRestart(c *C) {
 	var err error
-	_, s.svr, s.cleanup, err = NewTestServer()
-	defer s.cleanup()
+	var cleanup func()
+	_, s.svr, cleanup, err = NewTestServer(c)
+	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
@@ -462,12 +465,12 @@ func (s *testClusterSuite) TestRaftClusterMultipleRestart(c *C) {
 
 func (s *testClusterSuite) TestGetPDMembers(c *C) {
 	var err error
-	_, s.svr, s.cleanup, err = NewTestServer()
+	var cleanup func()
+	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
-	s.client = s.svr.client
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
-	defer s.cleanup()
+	defer cleanup()
 	req := &pdpb.GetMembersRequest{
 		Header: newRequestHeader(s.svr.ClusterID()),
 	}
@@ -480,13 +483,13 @@ func (s *testClusterSuite) TestGetPDMembers(c *C) {
 
 func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 	var err error
-	_, s.svr, s.cleanup, err = NewTestServer()
+	_, s.svr, _, err = NewTestServer(c)
 	c.Assert(err, IsNil)
-	s.client = s.svr.client
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
-	s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
+	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
+	c.Assert(err, IsNil)
 	s.svr.cluster.RLock()
 	s.svr.cluster.cachedCluster.Lock()
 	s.svr.cluster.cachedCluster.kv = core.NewKV(core.NewMemoryKV())
