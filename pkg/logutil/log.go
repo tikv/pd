@@ -25,12 +25,11 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/coreos/etcd/raft"
 	"github.com/coreos/pkg/capnslog"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc/grpclog"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
@@ -306,7 +305,17 @@ func InitZapLogger(cfg *LogConfig) (*zap.Logger, error) {
 	if err != nil {
 		return nil, err
 	}
-	lg := zap.New(zapcore.NewCore(newZapTextEncoder(cfg), output, level), cfg.buildOptions(output)...)
+	core := zapcore.NewCore(newZapTextEncoder(cfg), output, level)
+	lg := zap.New(core, cfg.buildOptions(output)...)
+	once.Do(func() {
+		// raft log
+		raft.SetLogger(NewRaftLoggerFromZapCore(core, output))
+		// grpc log
+		grpclog.SetLoggerV2(NewGRPCLoggerV2FromZapCore(core, output))
+		// zap global
+		zap.ReplaceGlobals(lg)
+	})
+
 	return lg, nil
 }
 
