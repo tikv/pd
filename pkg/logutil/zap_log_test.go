@@ -118,15 +118,17 @@ func (t *testZapLogSuite) TestLog(c *C) {
 func (t *testZapLogSuite) TestTimeEncoder(c *C) {
 	sec := int64(1547192741)
 	nsec := int64(165279177)
-	tt := time.Unix(sec, nsec)
+	as, err := time.LoadLocation("Asia/Shanghai")
+	c.Assert(err, IsNil)
+	tt := time.Unix(sec, nsec).In(as)
 	conf := &LogConfig{Level: "deug", File: FileLogConfig{}, DisableTimestamp: true}
 	enc := newZapTextEncoder(conf).(*textEncoder)
 	DefaultTimeEncoder(tt, enc)
 	c.Assert(enc.buf.String(), Equals, `2019/01/11 15:45:41.165 +08:00`)
 	enc.buf.Reset()
-	loc, err := time.LoadLocation("UTC")
+	utc, err := time.LoadLocation("UTC")
 	c.Assert(err, IsNil)
-	utcTime := tt.In(loc)
+	utcTime := tt.In(utc)
 	DefaultTimeEncoder(utcTime, enc)
 	c.Assert(enc.buf.String(), Equals, `2019/01/11 07:45:41.165 +00:00`)
 }
