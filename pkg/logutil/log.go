@@ -332,7 +332,7 @@ func newZapTextEncoder(cfg *LogConfig) zapcore.Encoder {
 		EncodeLevel:    zapcore.CapitalLevelEncoder,
 		EncodeTime:     DefaultTimeEncoder,
 		EncodeDuration: zapcore.StringDurationEncoder,
-		EncodeCaller:   zapcore.ShortCallerEncoder,
+		EncodeCaller:   ShortCallerEncoder,
 	}
 	if cfg.DisableTimestamp {
 		cc.TimeKey = ""

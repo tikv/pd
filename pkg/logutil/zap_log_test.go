@@ -17,8 +17,10 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"os"
 	"time"
+	"unsafe"
 
 	. "github.com/pingcap/check"
 	"go.uber.org/zap"
@@ -79,7 +81,6 @@ func (t *testZapLogSuite) TestLog(c *C) {
 	conf := &LogConfig{Level: "debug", File: FileLogConfig{}, DisableTimestamp: true}
 	lg := newZapTestLogger(conf, c)
 	sugar := lg.Sugar()
-
 	defer sugar.Sync()
 	sugar.Infow("failed to fetch URL",
 		"url", "http://example.com",
@@ -93,12 +94,65 @@ func (t *testZapLogSuite) TestLog(c *C) {
 		"duration", 1300*time.Millisecond,
 		"process keys", 1500,
 	)
-
-	lg.AssertMessage(
-		`[INFO] [logutil/zap_log_test.go:84] ["failed to fetch URL"] [url=http://example.com] [attempt=3] [backoff=1s]`,
-		`[INFO] [logutil/zap_log_test.go:89] ["failed to \"fetch\" [URL]: http://example.com"]`,
-		`[DEBUG] [logutil/zap_log_test.go:90] ["Slow query"] [sql="SELECT * FROM TABLE\n\tWHERE ID=\"abc\""] [duration=1.3s] ["process keys"=1500]`,
+	sugar.Info("Welcome")
+	sugar.Info("Welcome TiDB")
+	sugar.Info("欢迎")
+	sugar.Info("欢迎来到 TiDB")
+	sugar.Warnw("Type",
+		"Counter", math.NaN(),
+		"Score", math.Inf(1),
 	)
+	lg.AssertMessage(
+		`[INFO] [zap_log_test.go:85] ["failed to fetch URL"] [url=http://example.com] [attempt=3] [backoff=1s]`,
+		`[INFO] [zap_log_test.go:90] ["failed to \"fetch\" [URL]: http://example.com"]`,
+		`[DEBUG] [zap_log_test.go:91] ["Slow query"] [sql="SELECT * FROM TABLE\n\tWHERE ID=\"abc\""] [duration=1.3s] ["process keys"=1500]`,
+		`[INFO] [zap_log_test.go:97] [Welcome]`,
+		`[INFO] [zap_log_test.go:98] ["Welcome TiDB"]`,
+		`[INFO] [zap_log_test.go:99] [欢迎]`,
+		`[INFO] [zap_log_test.go:100] ["欢迎来到 TiDB"]`,
+		`[WARN] [zap_log_test.go:101] [Type] [Counter=NaN] [Score=+Inf]`,
+	)
+	c.Assert(func() { sugar.Panic("unknown") }, PanicMatches, `unknown`)
+}
+
+func (t *testZapLogSuite) TestTimeEncoder(c *C) {
+	sec := int64(1547192741)
+	nsec := int64(165279177)
+	tt := time.Unix(sec, nsec)
+	conf := &LogConfig{Level: "deug", File: FileLogConfig{}, DisableTimestamp: true}
+	enc := newZapTextEncoder(conf).(*textEncoder)
+	DefaultTimeEncoder(tt, enc)
+	c.Assert(enc.buf.String(), Equals, `2019/01/11 15:45:41.165 +08:00`)
+	enc.buf.Reset()
+	loc, err := time.LoadLocation("UTC")
+	c.Assert(err, IsNil)
+	utcTime := tt.In(loc)
+	DefaultTimeEncoder(utcTime, enc)
+	c.Assert(enc.buf.String(), Equals, `2019/01/11 07:45:41.165 +00:00`)
+}
+
+// https://github.com/tikv/rfcs/blob/master/text/2018-12-19-unified-log-format.md#log-header-section
+func (t *testZapLogSuite) TestZapCaller(c *C) {
+	data := []zapcore.EntryCaller{
+		{Defined: true, PC: uintptr(unsafe.Pointer(nil)), File: "server.go", Line: 132},
+		{Defined: true, PC: uintptr(unsafe.Pointer(nil)), File: "server/coordinator.go", Line: 20},
+		{Defined: true, PC: uintptr(unsafe.Pointer(nil)), File: `z\test_coordinator1.go`, Line: 20},
+		{Defined: false, PC: uintptr(unsafe.Pointer(nil)), File: "", Line: 0},
+	}
+	expect := []string{
+		"server.go:132",
+		"coordinator.go:20",
+		"ztest_coordinator1.go:20",
+		"<unknown>",
+	}
+	conf := &LogConfig{Level: "deug", File: FileLogConfig{}, DisableTimestamp: true}
+	enc := newZapTextEncoder(conf).(*textEncoder)
+
+	for i, d := range data {
+		ShortCallerEncoder(d, enc)
+		c.Assert(enc.buf.String(), Equals, expect[i])
+		enc.buf.Reset()
+	}
 }
 
 func (t *testZapLogSuite) TestRotateLog(c *C) {

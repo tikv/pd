@@ -37,6 +37,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"math"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -47,7 +48,47 @@ import (
 
 // DefaultTimeEncoder serializes a time.Time to an human-readable formatted string
 func DefaultTimeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
-	enc.AppendString(t.Format("2006/01/02 15:04:05.000 +08:00"))
+	s := t.Format("2006/01/02 15:04:05.000 -07:00")
+	if e, ok := enc.(*textEncoder); ok {
+		for _, c := range []byte(s) {
+			e.buf.AppendByte(c)
+		}
+		return
+	}
+	enc.AppendString(s)
+}
+
+// ShortCallerEncoder serializes a caller in file:line format.
+func ShortCallerEncoder(caller zapcore.EntryCaller, enc zapcore.PrimitiveArrayEncoder) {
+	enc.AppendString(getCallerString(caller))
+}
+
+func getCallerString(ec zapcore.EntryCaller) string {
+	if !ec.Defined {
+		return "<unknown>"
+	}
+
+	idx := strings.LastIndexByte(ec.File, '/')
+	buf := _pool.Get()
+	for i := idx + 1; i < len(ec.File); i++ {
+		b := ec.File[i]
+		switch {
+		case b >= 'A' && b <= 'Z':
+			buf.AppendByte(b)
+		case b >= 'a' && b <= 'z':
+			buf.AppendByte(b)
+		case b >= '0' && b <= '9':
+			buf.AppendByte(b)
+		case b == '.' || b == '-' || b == '_':
+			buf.AppendByte(b)
+		default:
+		}
+	}
+	buf.AppendByte(':')
+	buf.AppendInt(int64(ec.Line))
+	caller := buf.String()
+	buf.Free()
+	return caller
 }
 
 // For JSON-escaping; see textEncoder.safeAddString below.
@@ -445,11 +486,11 @@ func (enc *textEncoder) appendFloat(val float64, bitSize int) {
 	enc.addElementSeparator()
 	switch {
 	case math.IsNaN(val):
-		enc.buf.AppendString(`"NaN"`)
+		enc.buf.AppendString("NaN")
 	case math.IsInf(val, 1):
-		enc.buf.AppendString(`"+Inf"`)
+		enc.buf.AppendString("+Inf")
 	case math.IsInf(val, -1):
-		enc.buf.AppendString(`"-Inf"`)
+		enc.buf.AppendString("-Inf")
 	default:
 		enc.buf.AppendFloat(val, bitSize)
 	}
@@ -513,9 +554,6 @@ func (enc *textEncoder) needDoubleQuotes(s string) bool {
 		case '\\', '"', '[', ']', '=':
 			return true
 		case '\n', '\t', '\r':
-			return true
-		}
-		if b >= utf8.RuneSelf {
 			return true
 		}
 		i++
