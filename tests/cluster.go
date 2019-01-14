@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 )
 
 // TestServer states.
@@ -101,7 +102,9 @@ func (s *TestServer) Destroy() error {
 	if s.state == Running {
 		s.server.Close()
 	}
-	os.RemoveAll(s.server.GetConfig().DataDir)
+	if err := os.RemoveAll(s.server.GetConfig().DataDir); err != nil {
+		return err
+	}
 	s.state = Destroy
 	return nil
 }
@@ -423,12 +426,11 @@ func (c *TestCluster) Join() (*TestServer, error) {
 }
 
 // Destroy is used to destroy a TestCluster.
-func (c *TestCluster) Destroy() error {
+func (c *TestCluster) Destroy() {
 	for _, s := range c.servers {
 		err := s.Destroy()
 		if err != nil {
-			return err
+			log.Errorf("failed to destroy the cluster: %v", err)
 		}
 	}
-	return nil
 }

@@ -71,7 +71,9 @@ func run(simCase string) {
 			simutil.Logger.Fatal(err)
 		}
 	}
-	simConfig.Adjust()
+	if err := simConfig.Adjust(); err != nil {
+		simutil.Logger.Fatal(err)
+	}
 
 	if *pdAddr != "" {
 		simStart(*pdAddr, simCase, simConfig)

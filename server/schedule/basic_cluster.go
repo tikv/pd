@@ -138,15 +138,13 @@ func (bc *BasicCluster) RegionReadStats() []*core.RegionStat {
 }
 
 // PutStore put a store
-func (bc *BasicCluster) PutStore(store *core.StoreInfo) error {
+func (bc *BasicCluster) PutStore(store *core.StoreInfo) {
 	bc.Stores.SetStore(store)
-	return nil
 }
 
 // PutRegion put a region
-func (bc *BasicCluster) PutRegion(region *core.RegionInfo) error {
+func (bc *BasicCluster) PutRegion(region *core.RegionInfo) {
 	bc.Regions.SetRegion(region)
-	return nil
 }
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.

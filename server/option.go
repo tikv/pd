@@ -176,7 +176,7 @@ func (o *scheduleOption) GetSchedulers() SchedulerConfigs {
 	return o.load().Schedulers
 }
 
-func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) error {
+func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) {
 	c := o.load()
 	v := c.clone()
 	for i, schedulerCfg := range v.Schedulers {
@@ -184,19 +184,18 @@ func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) error {
 		// such as two schedulers of type "evict-leader",
 		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
 		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{Type: tp, Args: args, Disable: false}) {
-			return nil
+			return
 		}
 
 		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{Type: tp, Args: args, Disable: true}) {
 			schedulerCfg.Disable = false
 			v.Schedulers[i] = schedulerCfg
 			o.store(v)
-			return nil
+			return
 		}
 	}
 	v.Schedulers = append(v.Schedulers, SchedulerConfig{Type: tp, Args: args, Disable: false})
 	o.store(v)
-	return nil
 }
 
 func (o *scheduleOption) RemoveSchedulerCfg(name string) error {

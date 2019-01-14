@@ -34,7 +34,7 @@ func (s *testDiagnoseAPISuite) SetUpSuite(c *C) {
 
 func checkDiagnoseResponse(c *C, body []byte) {
 	got := []Recommendation{}
-	json.Unmarshal(body, &got)
+	c.Assert(json.Unmarshal(body, &got), IsNil)
 	for _, r := range got {
 		c.Assert(len(r.Module) != 0, IsTrue)
 		c.Assert(len(r.Level) != 0, IsTrue)

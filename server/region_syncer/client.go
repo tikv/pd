@@ -112,7 +112,9 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				resp, err := client.Recv()
 				if err != nil {
 					log.Error("region sync with leader meet error:", err)
-					client.CloseSend()
+					if err = client.CloseSend(); err != nil {
+						log.Errorf("Failed to terminate client stream: %v", err)
+					}
 					time.Sleep(time.Second)
 					break
 				}
