@@ -66,10 +66,16 @@ type LogConfig struct {
 	DisableTimestamp bool `toml:"disable-timestamp" json:"disable-timestamp"`
 	// File log config.
 	File FileLogConfig `toml:"file" json:"file"`
-	// Development
-	Development       bool
-	DisableCaller     bool
-	DisableStacktrace bool
+	// Development puts the logger in development mode, which changes the
+	// behavior of DPanicLevel and takes stacktraces more liberally.
+	Development bool `toml:"development" json:"development"`
+	// DisableCaller stops annotating logs with the calling function's file
+	// name and line number. By default, all logs are annotated.
+	DisableCaller bool `toml:"disableCaller" json:"disableCaller"`
+	// DisableStacktrace completely disables automatic stacktrace capturing. By
+	// default, stacktraces are captured for WarnLevel and above logs in
+	// development and ErrorLevel and above in production.
+	DisableStacktrace bool `toml:"disableStacktrace" json:"disableStacktrace"`
 	// SamplingConfig sets a sampling strategy for the logger. Sampling caps the
 	// global CPU and I/O load that logging puts on your process while attempting
 	// to preserve a representative subset of your logs.
