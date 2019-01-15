@@ -70,7 +70,12 @@ type LogConfig struct {
 	Development       bool
 	DisableCaller     bool
 	DisableStacktrace bool
-	Sampling          *zap.SamplingConfig `toml:"sampling" json:"sampling"`
+	// SamplingConfig sets a sampling strategy for the logger. Sampling caps the
+	// global CPU and I/O load that logging puts on your process while attempting
+	// to preserve a representative subset of your logs.
+	//
+	// Values configured here are per-second. See zapcore.NewSampler for details.
+	Sampling *zap.SamplingConfig `toml:"sampling" json:"sampling"`
 }
 
 // redirectFormatter will redirect etcd logs to logrus logs.
@@ -281,11 +286,9 @@ func InitLogger(cfg *LogConfig) error {
 	return err
 }
 
-// InitZapLogger init the zap log.
+// InitZapLogger initializes the zap logger.
 func InitZapLogger(cfg *LogConfig) (*zap.Logger, error) {
-	var (
-		output zapcore.WriteSyncer
-	)
+	var output zapcore.WriteSyncer
 	if len(cfg.File.Filename) > 0 {
 		lg, err := InitFileLog(&cfg.File)
 		if err != nil {
@@ -307,14 +310,6 @@ func InitZapLogger(cfg *LogConfig) (*zap.Logger, error) {
 	}
 	core := zapcore.NewCore(newZapTextEncoder(cfg), output, level)
 	lg := zap.New(core, cfg.buildOptions(output)...)
-	once.Do(func() {
-		// raft log
-		raft.SetLogger(NewRaftLoggerFromZapCore(core, output))
-		// grpc log
-		grpclog.SetLoggerV2(NewGRPCLoggerV2FromZapCore(core, output))
-		// zap global
-		zap.ReplaceGlobals(lg)
-	})
 
 	return lg, nil
 }
@@ -322,12 +317,12 @@ func InitZapLogger(cfg *LogConfig) (*zap.Logger, error) {
 func newZapTextEncoder(cfg *LogConfig) zapcore.Encoder {
 	cc := zapcore.EncoderConfig{
 		// Keys can be anything except the empty string.
-		TimeKey:        "Time",
-		LevelKey:       "Level",
-		NameKey:        "Name",
-		CallerKey:      "Caller",
-		MessageKey:     "Message",
-		StacktraceKey:  "Stack",
+		TimeKey:        "time",
+		LevelKey:       "level",
+		NameKey:        "name",
+		CallerKey:      "caller",
+		MessageKey:     "message",
+		StacktraceKey:  "stack",
 		LineEnding:     zapcore.DefaultLineEnding,
 		EncodeLevel:    zapcore.CapitalLevelEncoder,
 		EncodeTime:     DefaultTimeEncoder,

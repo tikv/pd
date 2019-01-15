@@ -203,8 +203,8 @@ func (enc *textEncoder) AddReflected(key string, obj interface{}) error {
 	}
 	enc.reflectBuf.TrimNewline()
 	enc.addKey(key)
-	_, err = enc.buf.Write(enc.reflectBuf.Bytes())
-	return err
+	enc.AppendByteString(enc.reflectBuf.Bytes())
+	return nil
 }
 
 func (enc *textEncoder) OpenNamespace(key string) {
@@ -230,9 +230,11 @@ func (enc *textEncoder) AddUint64(key string, val uint64) {
 
 func (enc *textEncoder) AppendArray(arr zapcore.ArrayMarshaler) error {
 	enc.addElementSeparator()
+	enc.buf.AppendByte('"')
 	enc.buf.AppendByte('[')
 	err := arr.MarshalLogArray(enc)
 	enc.buf.AppendByte(']')
+	enc.buf.AppendByte('"')
 	return err
 }
 
@@ -251,6 +253,10 @@ func (enc *textEncoder) AppendBool(val bool) {
 
 func (enc *textEncoder) AppendByteString(val []byte) {
 	enc.addElementSeparator()
+	if !enc.needDoubleQuotes(string(val)) {
+		enc.safeAddByteString(val)
+		return
+	}
 	enc.buf.AppendByte('"')
 	enc.safeAddByteString(val)
 	enc.buf.AppendByte('"')
@@ -292,16 +298,8 @@ func (enc *textEncoder) AppendReflected(val interface{}) error {
 		return err
 	}
 	enc.reflectBuf.TrimNewline()
-	enc.addElementSeparator()
-	_, err = enc.buf.Write(enc.reflectBuf.Bytes())
-	return err
-}
-
-func (enc *textEncoder) AppendHeaderString(val string) {
-	enc.addElementSeparator()
-	enc.buf.AppendByte('"')
-	enc.safeAddString(val)
-	enc.buf.AppendByte('"')
+	enc.AppendByteString(enc.reflectBuf.Bytes())
+	return nil
 }
 
 func (enc *textEncoder) AppendString(val string) {
@@ -518,7 +516,7 @@ func (enc *textEncoder) safeAddString(s string) {
 // safeAddStringWithQuote will automatically add quotoes.
 func (enc *textEncoder) safeAddStringWithQuote(s string) {
 	if !enc.needDoubleQuotes(s) {
-		enc.buf.AppendString(s)
+		enc.safeAddString(s)
 		return
 	}
 	enc.buf.AppendByte('"')

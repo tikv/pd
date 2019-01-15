@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math"
+	"net"
 	"os"
 	"time"
 	"unsafe"
@@ -77,6 +78,13 @@ func newZapTestLogger(cfg *LogConfig, c *C) verifyLogger {
 	}
 }
 
+type username string
+
+func (n username) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("username", string(n))
+	return nil
+}
+
 func (t *testZapLogSuite) TestLog(c *C) {
 	conf := &LogConfig{Level: "debug", File: FileLogConfig{}, DisableTimestamp: true}
 	lg := newZapTestLogger(conf, c)
@@ -102,15 +110,50 @@ func (t *testZapLogSuite) TestLog(c *C) {
 		"Counter", math.NaN(),
 		"Score", math.Inf(1),
 	)
+	lg.Info("Testing typs",
+		zap.String("filed1", "noquote"),
+		zap.String("filed2", "in quote"),
+		zap.Strings("urls", []string{"http://mock1.com:2347", "http://mock2.com:2432"}),
+		zap.Strings("urls-peer", []string{"t1", "t2 fine"}),
+		zap.Uint64s("store ids", []uint64{1, 4, 5}),
+		zap.Object("object", username("user1")),
+		zap.Object("object2", username("user 2")),
+		zap.Binary("binary", []byte("ab123")),
+		zap.Bool("is processed", true),
+		zap.ByteString("bytestring", []byte("noquote")),
+		zap.ByteString("bytestring", []byte("in quote")),
+		zap.Int8("int8", int8(1)),
+		zap.Uintptr("ptr", 0xa),
+		zap.Reflect("reflect", []int{1, 2}),
+		zap.Stringer("stringer", net.ParseIP("127.0.0.1")),
+		zap.Bools("array bools", []bool{true}),
+		zap.Bools("array bools", []bool{true, true, false}),
+		zap.Complex128("complex128", 1+2i),
+		zap.Strings("test", []string{
+			"💖",
+			"�",
+			"☺☻☹",
+			"日a本b語ç日ð本Ê語þ日¥本¼語i日©",
+			"日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©",
+			"\x80\x80\x80\x80"}),
+	)
+
 	lg.AssertMessage(
-		`[INFO] [zap_log_test.go:85] ["failed to fetch URL"] [url=http://example.com] [attempt=3] [backoff=1s]`,
-		`[INFO] [zap_log_test.go:90] ["failed to \"fetch\" [URL]: http://example.com"]`,
-		`[DEBUG] [zap_log_test.go:91] ["Slow query"] [sql="SELECT * FROM TABLE\n\tWHERE ID=\"abc\""] [duration=1.3s] ["process keys"=1500]`,
-		`[INFO] [zap_log_test.go:97] [Welcome]`,
-		`[INFO] [zap_log_test.go:98] ["Welcome TiDB"]`,
-		`[INFO] [zap_log_test.go:99] [欢迎]`,
-		`[INFO] [zap_log_test.go:100] ["欢迎来到 TiDB"]`,
-		`[WARN] [zap_log_test.go:101] [Type] [Counter=NaN] [Score=+Inf]`,
+		`[INFO] [zap_log_test.go:93] ["failed to fetch URL"] [url=http://example.com] [attempt=3] [backoff=1s]`,
+		`[INFO] [zap_log_test.go:98] ["failed to \"fetch\" [URL]: http://example.com"]`,
+		`[DEBUG] [zap_log_test.go:99] ["Slow query"] [sql="SELECT * FROM TABLE\n\tWHERE ID=\"abc\""] [duration=1.3s] ["process keys"=1500]`,
+		`[INFO] [zap_log_test.go:105] [Welcome]`,
+		`[INFO] [zap_log_test.go:106] ["Welcome TiDB"]`,
+		`[INFO] [zap_log_test.go:107] [欢迎]`,
+		`[INFO] [zap_log_test.go:108] ["欢迎来到 TiDB"]`,
+		`[WARN] [zap_log_test.go:109] [Type] [Counter=NaN] [Score=+Inf]`,
+		`[INFO] [zap_log_test.go:113] ["Testing typs"] [filed1=noquote] `+
+			`[filed2="in quote"] [urls="[http://mock1.com:2347,http://mock2.com:2432]"] `+
+			`[urls-peer="[t1,"t2 fine"]"] ["store ids"="[1,4,5]"] [object={username=user1}] `+
+			`[object2={username="user 2"}] [binary="YWIxMjM="] ["is processed"=true] `+
+			`[bytestring=noquote] [bytestring="in quote"] [int8=1] [ptr=10] [reflect="[1,2]"] [stringer=127.0.0.1] `+
+			`["array bools"="[true]"] ["array bools"="[true,true,false]"] [complex128="1+2i"] `+
+			`[test="[💖,�,☺☻☹,日a本b語ç日ð本Ê語þ日¥本¼語i日©,日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©,\ufffd\ufffd\ufffd\ufffd]"]`,
 	)
 	c.Assert(func() { sugar.Panic("unknown") }, PanicMatches, `unknown`)
 }
