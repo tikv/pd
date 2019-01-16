@@ -138,8 +138,8 @@ func (t *testZapLogSuite) TestLog(c *C) {
 			"\x80\x80\x80\x80",
 			"<car><mirror>XML</mirror></car>",
 		}),
+		zap.Duration("duration", 10*time.Second),
 	)
-
 	lg.AssertMessage(
 		`[INFO] [zap_log_test.go:93] ["failed to fetch URL"] [url=http://example.com] [attempt=3] [backoff=1s]`,
 		`[INFO] [zap_log_test.go:98] ["failed to \"fetch\" [URL]: http://example.com"]`,
@@ -151,12 +151,12 @@ func (t *testZapLogSuite) TestLog(c *C) {
 		`[WARN] [zap_log_test.go:109] [Type] [Counter=NaN] [Score=+Inf]`,
 		`[INFO] [zap_log_test.go:113] ["Testing typs"] [filed1=noquote] `+
 			`[filed2="in quote"] [urls="[http://mock1.com:2347,http://mock2.com:2432]"] `+
-			`[urls-peer="[t1,"t2 fine"]"] ["store ids"="[1,4,5]"] [object={username=user1}] `+
-			`[object2={username="user 2"}] [binary="YWIxMjM="] ["is processed"=true] `+
+			`[urls-peer="[t1,\"t2 fine\"]"] ["store ids"="[1,4,5]"] [object="{username=user1}"] `+
+			`[object2="{username=\"user 2\"}"] [binary="YWIxMjM="] ["is processed"=true] `+
 			`[bytestring=noquote] [bytestring="in quote"] [int8=1] [ptr=10] [reflect="[1,2]"] [stringer=127.0.0.1] `+
 			`["array bools"="[true]"] ["array bools"="[true,true,false]"] [complex128="1+2i"] `+
-			`[test="[💖,�,☺☻☹,日a本b語ç日ð本Ê語þ日¥本¼語i日©,日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©,\ufffd\ufffd\ufffd\ufffd,`+
-			`<car><mirror>XML</mirror></car>]"]`,
+			`[test="[💖,�,☺☻☹,日a本b語ç日ð本Ê語þ日¥本¼語i日©,日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©,\\ufffd\\ufffd\\ufffd\\ufffd,`+
+			`<car><mirror>XML</mirror></car>]"] [duration=10s]`,
 	)
 	c.Assert(func() { sugar.Panic("unknown") }, PanicMatches, `unknown`)
 }

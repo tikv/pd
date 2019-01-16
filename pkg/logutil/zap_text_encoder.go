@@ -230,19 +230,25 @@ func (enc *textEncoder) AddUint64(key string, val uint64) {
 
 func (enc *textEncoder) AppendArray(arr zapcore.ArrayMarshaler) error {
 	enc.addElementSeparator()
-	enc.buf.AppendByte('"')
-	enc.buf.AppendByte('[')
-	err := arr.MarshalLogArray(enc)
-	enc.buf.AppendByte(']')
-	enc.buf.AppendByte('"')
+	ne := enc.cloned()
+	ne.buf.AppendByte('[')
+	err := arr.MarshalLogArray(ne)
+	ne.buf.AppendByte(']')
+	enc.AppendByteString(ne.buf.Bytes())
+	ne.buf.Free()
+	putTextEncoder(ne)
 	return err
 }
 
 func (enc *textEncoder) AppendObject(obj zapcore.ObjectMarshaler) error {
 	enc.addElementSeparator()
-	enc.buf.AppendByte('{')
-	err := obj.MarshalLogObject(enc)
-	enc.buf.AppendByte('}')
+	ne := enc.cloned()
+	ne.buf.AppendByte('{')
+	err := obj.MarshalLogObject(ne)
+	ne.buf.AppendByte('}')
+	enc.AppendByteString(ne.buf.Bytes())
+	ne.buf.Free()
+	putTextEncoder(ne)
 	return err
 }
 
