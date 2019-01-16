@@ -135,7 +135,9 @@ func (t *testZapLogSuite) TestLog(c *C) {
 			"☺☻☹",
 			"日a本b語ç日ð本Ê語þ日¥本¼語i日©",
 			"日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©",
-			"\x80\x80\x80\x80"}),
+			"\x80\x80\x80\x80",
+			"<car><mirror>XML</mirror></car>",
+		}),
 	)
 
 	lg.AssertMessage(
@@ -153,7 +155,8 @@ func (t *testZapLogSuite) TestLog(c *C) {
 			`[object2={username="user 2"}] [binary="YWIxMjM="] ["is processed"=true] `+
 			`[bytestring=noquote] [bytestring="in quote"] [int8=1] [ptr=10] [reflect="[1,2]"] [stringer=127.0.0.1] `+
 			`["array bools"="[true]"] ["array bools"="[true,true,false]"] [complex128="1+2i"] `+
-			`[test="[💖,�,☺☻☹,日a本b語ç日ð本Ê語þ日¥本¼語i日©,日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©,\ufffd\ufffd\ufffd\ufffd]"]`,
+			`[test="[💖,�,☺☻☹,日a本b語ç日ð本Ê語þ日¥本¼語i日©,日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©,\ufffd\ufffd\ufffd\ufffd,`+
+			`<car><mirror>XML</mirror></car>]"]`,
 	)
 	c.Assert(func() { sugar.Panic("unknown") }, PanicMatches, `unknown`)
 }
