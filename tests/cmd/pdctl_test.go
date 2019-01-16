@@ -471,7 +471,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err := executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionsInfo := api.RegionsInfo{}
-	json.Unmarshal(output, &regionsInfo)
+	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	regions := leaderServer.GetRegions()
 	checkRegionsInfo(c, regionsInfo, regions)
 
@@ -480,7 +480,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionInfo := api.RegionInfo{}
-	json.Unmarshal(output, &regionInfo)
+	c.Assert(json.Unmarshal(output, &regionInfo), IsNil)
 	region := leaderServer.GetRegionInfoByID(1)
 	c.Assert(api.NewRegionInfo(region), DeepEquals, &regionInfo)
 
@@ -489,7 +489,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionsInfo = api.RegionsInfo{}
-	json.Unmarshal(output, &regionsInfo)
+	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	region = leaderServer.GetRegionInfoByID(2)
 	regions = leaderServer.GetAdjacentRegions(region)
 	checkRegionsInfo(c, regionsInfo, regions)
@@ -499,7 +499,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionsInfo = api.RegionsInfo{}
-	json.Unmarshal(output, &regionsInfo)
+	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	regions = leaderServer.GetStoreRegions(1)
 	checkRegionsInfo(c, regionsInfo, regions)
 
@@ -508,7 +508,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionsInfo = api.RegionsInfo{}
-	json.Unmarshal(output, &regionsInfo)
+	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	regions = api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() }, 2)
 	checkRegionsInfo(c, regionsInfo, regions)
 
@@ -517,7 +517,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionsInfo = api.RegionsInfo{}
-	json.Unmarshal(output, &regionsInfo)
+	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	regions = api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, 2)
 	checkRegionsInfo(c, regionsInfo, regions)
 
@@ -526,7 +526,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionsInfo = api.RegionsInfo{}
-	json.Unmarshal(output, &regionsInfo)
+	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	regions = api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
 		return a.GetMeta().GetRegionEpoch().GetConfVer() < b.GetMeta().GetRegionEpoch().GetConfVer()
 	}, 2)
@@ -537,7 +537,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionsInfo = api.RegionsInfo{}
-	json.Unmarshal(output, &regionsInfo)
+	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	regions = api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
 		return a.GetMeta().GetRegionEpoch().GetVersion() < b.GetMeta().GetRegionEpoch().GetVersion()
 	}, 2)
@@ -548,7 +548,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionsInfo = api.RegionsInfo{}
-	json.Unmarshal(output, &regionsInfo)
+	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	regions = api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
 		return a.GetApproximateSize() < b.GetApproximateSize()
 	}, 2)
@@ -559,7 +559,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionsInfo = api.RegionsInfo{}
-	json.Unmarshal(output, &regionsInfo)
+	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	checkRegionsInfo(c, regionsInfo, []*core.RegionInfo{r1})
 
 	// region check miss-peer command
@@ -567,7 +567,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionsInfo = api.RegionsInfo{}
-	json.Unmarshal(output, &regionsInfo)
+	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	checkRegionsInfo(c, regionsInfo, []*core.RegionInfo{r2, r3, r4})
 
 	// region check pending-peer command
@@ -575,7 +575,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionsInfo = api.RegionsInfo{}
-	json.Unmarshal(output, &regionsInfo)
+	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	checkRegionsInfo(c, regionsInfo, []*core.RegionInfo{r3})
 
 	// region check down-peer command
@@ -583,7 +583,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionsInfo = api.RegionsInfo{}
-	json.Unmarshal(output, &regionsInfo)
+	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	checkRegionsInfo(c, regionsInfo, []*core.RegionInfo{r3})
 
 	// region key --format=raw <key> command
@@ -591,7 +591,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionInfo = api.RegionInfo{}
-	json.Unmarshal(output, &regionInfo)
+	c.Assert(json.Unmarshal(output, &regionInfo), IsNil)
 	c.Assert(&regionInfo, DeepEquals, api.NewRegionInfo(r2))
 
 	// region key --format=hex <key> command
@@ -599,7 +599,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionInfo = api.RegionInfo{}
-	json.Unmarshal(output, &regionInfo)
+	c.Assert(json.Unmarshal(output, &regionInfo), IsNil)
 	c.Assert(&regionInfo, DeepEquals, api.NewRegionInfo(r2))
 
 	// region startkey --format=raw <key> command
@@ -607,7 +607,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionsInfo = api.RegionsInfo{}
-	json.Unmarshal(output, &regionsInfo)
+	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	checkRegionsInfo(c, regionsInfo, []*core.RegionInfo{r2, r3})
 
 	// region startkey --format=hex <key> command
@@ -615,7 +615,7 @@ func (s *cmdTestSuite) TestRegion(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	regionsInfo = api.RegionsInfo{}
-	json.Unmarshal(output, &regionsInfo)
+	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	checkRegionsInfo(c, regionsInfo, []*core.RegionInfo{r3, r4})
 }
 
@@ -645,7 +645,7 @@ func (s *cmdTestSuite) TestConfig(c *C) {
 	_, output, err := executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	scheduleCfg := server.ScheduleConfig{}
-	json.Unmarshal(output, &scheduleCfg)
+	c.Assert(json.Unmarshal(output, &scheduleCfg), IsNil)
 	c.Assert(&scheduleCfg, DeepEquals, svr.GetScheduleConfig())
 
 	// config show replication
@@ -653,7 +653,7 @@ func (s *cmdTestSuite) TestConfig(c *C) {
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	replicationCfg := server.ReplicationConfig{}
-	json.Unmarshal(output, &replicationCfg)
+	c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
 	c.Assert(&replicationCfg, DeepEquals, svr.GetReplicationConfig())
 
 	// config show cluster-version
@@ -661,7 +661,7 @@ func (s *cmdTestSuite) TestConfig(c *C) {
 	_, output, err = executeCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	clusterVersion := semver.Version{}
-	json.Unmarshal(output, &clusterVersion)
+	c.Assert(json.Unmarshal(output, &clusterVersion), IsNil)
 	c.Assert(clusterVersion, DeepEquals, svr.GetClusterVersion())
 
 	// config set cluster-version <value>
@@ -672,7 +672,7 @@ func (s *cmdTestSuite) TestConfig(c *C) {
 	_, output, err = executeCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	clusterVersion = semver.Version{}
-	json.Unmarshal(output, &clusterVersion)
+	c.Assert(json.Unmarshal(output, &clusterVersion), IsNil)
 	c.Assert(clusterVersion, DeepEquals, svr.GetClusterVersion())
 
 	// config show namespace <name> && config set namespace <type> <key> <value>
@@ -686,7 +686,7 @@ func (s *cmdTestSuite) TestConfig(c *C) {
 	_, output, err = executeCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	namespaceCfg := server.NamespaceConfig{}
-	json.Unmarshal(output, &namespaceCfg)
+	c.Assert(json.Unmarshal(output, &namespaceCfg), IsNil)
 	args2 = []string{"-u", pdAddr, "config", "set", "namespace", "ts1", "region-schedule-limit", "128"}
 	_, _, err = executeCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
@@ -694,7 +694,7 @@ func (s *cmdTestSuite) TestConfig(c *C) {
 	_, output, err = executeCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	namespaceCfg = server.NamespaceConfig{}
-	json.Unmarshal(output, &namespaceCfg)
+	c.Assert(json.Unmarshal(output, &namespaceCfg), IsNil)
 	c.Assert(namespaceCfg.RegionScheduleLimit, Equals, svr.GetNamespaceConfig("ts1").RegionScheduleLimit)
 
 	// config delete namespace <name>
@@ -704,7 +704,7 @@ func (s *cmdTestSuite) TestConfig(c *C) {
 	_, output, err = executeCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	namespaceCfg = server.NamespaceConfig{}
-	json.Unmarshal(output, &namespaceCfg)
+	c.Assert(json.Unmarshal(output, &namespaceCfg), IsNil)
 	c.Assert(namespaceCfg.RegionScheduleLimit, Not(Equals), svr.GetNamespaceConfig("ts1").RegionScheduleLimit)
 
 	// config show label-property
@@ -712,7 +712,7 @@ func (s *cmdTestSuite) TestConfig(c *C) {
 	_, output, err = executeCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	labelPropertyCfg := server.LabelPropertyConfig{}
-	json.Unmarshal(output, &labelPropertyCfg)
+	c.Assert(json.Unmarshal(output, &labelPropertyCfg), IsNil)
 	c.Assert(labelPropertyCfg, DeepEquals, svr.GetLabelProperty())
 
 	// config set label-property <type> <key> <value>
@@ -723,7 +723,7 @@ func (s *cmdTestSuite) TestConfig(c *C) {
 	_, output, err = executeCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	labelPropertyCfg = server.LabelPropertyConfig{}
-	json.Unmarshal(output, &labelPropertyCfg)
+	c.Assert(json.Unmarshal(output, &labelPropertyCfg), IsNil)
 	c.Assert(labelPropertyCfg, DeepEquals, svr.GetLabelProperty())
 
 	// config delete label-property <type> <key> <value>
@@ -734,7 +734,7 @@ func (s *cmdTestSuite) TestConfig(c *C) {
 	_, output, err = executeCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	labelPropertyCfg = server.LabelPropertyConfig{}
-	json.Unmarshal(output, &labelPropertyCfg)
+	c.Assert(json.Unmarshal(output, &labelPropertyCfg), IsNil)
 	c.Assert(labelPropertyCfg, DeepEquals, svr.GetLabelProperty())
 
 	// config set <option> <value>
@@ -745,7 +745,7 @@ func (s *cmdTestSuite) TestConfig(c *C) {
 	_, output, err = executeCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
 	scheduleCfg = server.ScheduleConfig{}
-	json.Unmarshal(output, &scheduleCfg)
+	c.Assert(json.Unmarshal(output, &scheduleCfg), IsNil)
 	c.Assert(scheduleCfg.LeaderScheduleLimit, Equals, svr.GetScheduleConfig().LeaderScheduleLimit)
 	args1 = []string{"-u", pdAddr, "config", "set", "disable-raft-learner", "true"}
 	_, _, err = executeCommandC(cmd, args1...)
@@ -754,7 +754,7 @@ func (s *cmdTestSuite) TestConfig(c *C) {
 	_, output, err = executeCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
 	scheduleCfg = server.ScheduleConfig{}
-	json.Unmarshal(output, &scheduleCfg)
+	c.Assert(json.Unmarshal(output, &scheduleCfg), IsNil)
 	c.Assert(scheduleCfg.DisableLearner, Equals, svr.GetScheduleConfig().DisableLearner)
 }
 
@@ -1068,7 +1068,8 @@ func (s *cmdTestSuite) TestMember(c *C) {
 	c.Assert(priority, Equals, 100)
 
 	// member delete name <member_name>
-	svr.Destroy()
+	err = svr.Destroy()
+	c.Assert(err, IsNil)
 	members, err := etcdutil.ListEtcdMembers(client)
 	c.Assert(err, IsNil)
 	c.Assert(len(members.Members), Equals, 3)

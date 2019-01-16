@@ -66,8 +66,8 @@ func (s *testTableNamespaceSuite) newClassifier(c *C) *tableNamespaceClassifier 
 		Meta: true,
 	}
 
-	tableClassifier.putNamespaceLocked(&testNamespace1)
-	tableClassifier.putNamespaceLocked(&testNamespace2)
+	c.Assert(tableClassifier.putNamespaceLocked(&testNamespace1), IsNil)
+	c.Assert(tableClassifier.putNamespaceLocked(&testNamespace2), IsNil)
 	return tableClassifier
 }
 

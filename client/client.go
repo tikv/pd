@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/opentracing/opentracing-go"
+	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pkg/errors"
@@ -363,6 +363,7 @@ func (c *client) tsLoop() {
 			if err != nil {
 				select {
 				case <-loopCtx.Done():
+					cancel()
 					return
 				default:
 				}
@@ -395,6 +396,7 @@ func (c *client) tsLoop() {
 			select {
 			case c.tsDeadlineCh <- dl:
 			case <-loopCtx.Done():
+				cancel()
 				return
 			}
 			opts = extractSpanReference(requests, opts[:0])
@@ -409,6 +411,7 @@ func (c *client) tsLoop() {
 		if err != nil {
 			select {
 			case <-loopCtx.Done():
+				cancel()
 				return
 			default:
 			}

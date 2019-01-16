@@ -190,7 +190,8 @@ func (c *clusterInfo) putStoreLocked(store *core.StoreInfo) error {
 			return err
 		}
 	}
-	return c.core.PutStore(store)
+	c.core.PutStore(store)
+	return nil
 }
 
 // BlockStore stops balancer from selecting the store.
@@ -313,7 +314,8 @@ func (c *clusterInfo) putRegionLocked(region *core.RegionInfo) error {
 			return err
 		}
 	}
-	return c.core.PutRegion(region)
+	c.core.PutRegion(region)
+	return nil
 }
 
 func (c *clusterInfo) getRegions() []*core.RegionInfo {

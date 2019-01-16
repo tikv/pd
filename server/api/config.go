@@ -104,7 +104,10 @@ func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.svr.SetReplicationConfig(*config)
+	if err := h.svr.SetReplicationConfig(*config); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 
@@ -136,7 +139,10 @@ func (h *confHandler) SetNamespace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.svr.SetNamespaceConfig(name, *config)
+	if err := h.svr.SetNamespaceConfig(name, *config); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 
@@ -148,8 +154,11 @@ func (h *confHandler) DeleteNamespace(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("invalid namespace Name %s, not found", name))
 		return
 	}
-	h.svr.DeleteNamespaceConfig(name)
 
+	if err := h.svr.DeleteNamespaceConfig(name); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 

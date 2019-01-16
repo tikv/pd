@@ -36,25 +36,27 @@ func (s *testConfigSuite) TestTLS(c *C) {
 }
 
 func (s *testConfigSuite) TestBadFormatJoinAddr(c *C) {
-	cfg := NewTestSingleConfig()
+	cfg := NewTestSingleConfig(c)
 	cfg.Join = "127.0.0.1:2379" // Wrong join addr without scheme.
 	c.Assert(cfg.Adjust(nil), NotNil)
 }
 
 func (s *testConfigSuite) TestReloadConfig(c *C) {
-	_, opt := newTestScheduleConfig()
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
 	kv := core.NewKV(core.NewMemoryKV())
 	scheduleCfg := opt.load()
 	scheduleCfg.MaxSnapshotCount = 10
 	opt.SetMaxReplicas(5)
 	opt.loadPDServerConfig().UseRegionStorage = true
-	opt.persist(kv)
+	c.Assert(opt.persist(kv), IsNil)
 
 	// suppose we add a new default enable scheduler "adjacent-region"
 	defaultSchedulers := []string{"balance-region", "balance-leader", "hot-region", "label", "adjacent-region"}
-	_, newOpt := newTestScheduleConfig()
+	_, newOpt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
 	newOpt.AddSchedulerCfg("adjacent-region", []string{})
-	newOpt.reload(kv)
+	c.Assert(newOpt.reload(kv), IsNil)
 	schedulers := newOpt.GetSchedulers()
 	c.Assert(schedulers, HasLen, 5)
 	c.Assert(newOpt.loadPDServerConfig().UseRegionStorage, IsTrue)

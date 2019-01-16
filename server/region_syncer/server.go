@@ -177,7 +177,9 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 				}
 				s.limit.Wait(int64(resp.Size()))
 				lastIndex += len(res)
-				stream.Send(resp)
+				if err := stream.Send(resp); err != nil {
+					log.Errorf("failed to send sync region response, error: %v", err)
+				}
 				res = res[:0]
 			}
 			log.Infof("%s has completed full synchronization with %s, spend %v", name, s.server.Name(), time.Since(start))

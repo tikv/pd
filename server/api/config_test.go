@@ -76,7 +76,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 	resp, err := doGet(addr)
 	c.Assert(err, IsNil)
 	sc := &server.ScheduleConfig{}
-	readJSON(resp.Body, sc)
+	c.Assert(readJSON(resp.Body, sc), IsNil)
 
 	sc.MaxStoreDownTime.Duration = time.Second
 	postData, err := json.Marshal(sc)
@@ -88,7 +88,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 	resp, err = doGet(addr)
 	c.Assert(err, IsNil)
 	sc1 := &server.ScheduleConfig{}
-	readJSON(resp.Body, sc1)
+	c.Assert(readJSON(resp.Body, sc1), IsNil)
 
 	c.Assert(*sc, DeepEquals, *sc1)
 }

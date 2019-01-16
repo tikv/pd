@@ -34,7 +34,7 @@ func (s *testStatusAPISuite) SetUpSuite(c *C) {
 
 func checkStatusResponse(c *C, body []byte, cfgs []*server.Config) {
 	got := status{}
-	json.Unmarshal(body, &got)
+	c.Assert(json.Unmarshal(body, &got), IsNil)
 
 	c.Assert(got.BuildTS, Equals, server.PDBuildTS)
 	c.Assert(got.GitHash, Equals, server.PDGitHash)

@@ -589,27 +589,35 @@ func (s *Server) GetNamespaceConfigWithAdjust(name string) *NamespaceConfig {
 }
 
 // SetNamespaceConfig sets the namespace config.
-func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) {
+func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) error {
 	if n, ok := s.scheduleOpt.ns[name]; ok {
 		old := s.scheduleOpt.ns[name].load()
 		n.store(&cfg)
-		s.scheduleOpt.persist(s.kv)
+		if err := s.scheduleOpt.persist(s.kv); err != nil {
+			return err
+		}
 		log.Infof("namespace:%v config is updated: %+v, old: %+v", name, cfg, old)
 	} else {
 		s.scheduleOpt.ns[name] = newNamespaceOption(&cfg)
-		s.scheduleOpt.persist(s.kv)
+		if err := s.scheduleOpt.persist(s.kv); err != nil {
+			return err
+		}
 		log.Infof("namespace:%v config is added: %+v", name, cfg)
 	}
+	return nil
 }
 
 // DeleteNamespaceConfig deletes the namespace config.
-func (s *Server) DeleteNamespaceConfig(name string) {
+func (s *Server) DeleteNamespaceConfig(name string) error {
 	if n, ok := s.scheduleOpt.ns[name]; ok {
 		cfg := n.load()
 		delete(s.scheduleOpt.ns, name)
-		s.scheduleOpt.persist(s.kv)
+		if err := s.scheduleOpt.persist(s.kv); err != nil {
+			return err
+		}
 		log.Infof("namespace:%v config is deleted: %+v", name, *cfg)
 	}
+	return nil
 }
 
 // SetLabelProperty inserts a label property config.
