@@ -32,7 +32,6 @@ import (
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/namespace"
-	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
 )
 
@@ -535,23 +534,25 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 }
 
 const (
-	defaultMaxReplicas                = 3
-	defaultMaxSnapshotCount           = 3
-	defaultMaxPendingPeerCount        = 16
-	defaultMaxMergeRegionSize         = 20
-	defaultMaxMergeRegionKeys         = 200000
-	defaultSplitMergeInterval         = 1 * time.Hour
-	defaultPatrolRegionInterval       = 100 * time.Millisecond
-	defaultMaxStoreDownTime           = 30 * time.Minute
-	defaultLeaderScheduleLimit        = 4
-	defaultRegionScheduleLimit        = 4
-	defaultReplicaScheduleLimit       = 8
-	defaultMergeScheduleLimit         = 8
-	defaultHotRegionScheduleLimit     = 2
-	defaultTolerantSizeRatio          = 5
-	defaultLowSpaceRatio              = 0.8
-	defaultHighSpaceRatio             = 0.6
-	defautHotRegionCacheHitsThreshold = schedule.DefaultHotRegionCacheHitsThreshold
+	defaultMaxReplicas            = 3
+	defaultMaxSnapshotCount       = 3
+	defaultMaxPendingPeerCount    = 16
+	defaultMaxMergeRegionSize     = 20
+	defaultMaxMergeRegionKeys     = 200000
+	defaultSplitMergeInterval     = 1 * time.Hour
+	defaultPatrolRegionInterval   = 100 * time.Millisecond
+	defaultMaxStoreDownTime       = 30 * time.Minute
+	defaultLeaderScheduleLimit    = 4
+	defaultRegionScheduleLimit    = 4
+	defaultReplicaScheduleLimit   = 8
+	defaultMergeScheduleLimit     = 8
+	defaultHotRegionScheduleLimit = 2
+	defaultTolerantSizeRatio      = 5
+	defaultLowSpaceRatio          = 0.8
+	defaultHighSpaceRatio         = 0.6
+	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
+	// hot region.
+	defautHotRegionCacheHitsThreshold = 3
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {

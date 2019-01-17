@@ -18,12 +18,6 @@ import (
 )
 
 const (
-	// DefaultHotRegionCacheHitsThreshold is the low hit number threshold of the
-	// hot region.
-	DefaultHotRegionCacheHitsThreshold = 3
-)
-
-const (
 	// RegionHeartBeatReportInterval is the heartbeat report interval of a region
 	RegionHeartBeatReportInterval = 60
 

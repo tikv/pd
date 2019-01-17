@@ -422,21 +422,22 @@ func (mc *MockCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabe
 }
 
 const (
-	defaultMaxReplicas            = 3
-	defaultMaxSnapshotCount       = 3
-	defaultMaxPendingPeerCount    = 16
-	defaultMaxMergeRegionSize     = 0
-	defaultMaxMergeRegionKeys     = 0
-	defaultSplitMergeInterval     = 0
-	defaultMaxStoreDownTime       = 30 * time.Minute
-	defaultLeaderScheduleLimit    = 4
-	defaultRegionScheduleLimit    = 4
-	defaultReplicaScheduleLimit   = 8
-	defaultMergeScheduleLimit     = 8
-	defaultHotRegionScheduleLimit = 2
-	defaultTolerantSizeRatio      = 2.5
-	defaultLowSpaceRatio          = 0.8
-	defaultHighSpaceRatio         = 0.6
+	defaultMaxReplicas                 = 3
+	defaultMaxSnapshotCount            = 3
+	defaultMaxPendingPeerCount         = 16
+	defaultMaxMergeRegionSize          = 0
+	defaultMaxMergeRegionKeys          = 0
+	defaultSplitMergeInterval          = 0
+	defaultMaxStoreDownTime            = 30 * time.Minute
+	defaultLeaderScheduleLimit         = 4
+	defaultRegionScheduleLimit         = 4
+	defaultReplicaScheduleLimit        = 8
+	defaultMergeScheduleLimit          = 8
+	defaultHotRegionScheduleLimit      = 2
+	defaultTolerantSizeRatio           = 2.5
+	defaultLowSpaceRatio               = 0.8
+	defaultHighSpaceRatio              = 0.6
+	defaultHotRegionCacheHitsThreshold = 3
 )
 
 // MockSchedulerOptions is a mock of SchedulerOptions
@@ -483,7 +484,7 @@ func NewMockSchedulerOptions() *MockSchedulerOptions {
 	mso.SplitMergeInterval = defaultSplitMergeInterval
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
-	mso.HotRegionCacheHitsThreshold = DefaultHotRegionCacheHitsThreshold
+	mso.HotRegionCacheHitsThreshold = defaultHotRegionCacheHitsThreshold
 	mso.MaxPendingPeerCount = defaultMaxPendingPeerCount
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
 	mso.LowSpaceRatio = defaultLowSpaceRatio
