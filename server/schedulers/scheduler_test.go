@@ -311,7 +311,7 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
 	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 3, 4)
 	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 4)
-	opt.HotRegionLowThreshold = 0
+	opt.HotRegionCacheHitsThreshold = 0
 
 	// try to get an operator
 	var op []*schedule.Operator

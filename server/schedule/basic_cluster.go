@@ -17,9 +17,10 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
-var (
-	// HotRegionLowThreshold is the low threadshold of hot region
-	HotRegionLowThreshold = 3
+const (
+	// DefaultHotRegionCacheHitsThreshold is the low hit number threshold of the
+	// hot region.
+	DefaultHotRegionCacheHitsThreshold = 3
 )
 
 const (

@@ -132,6 +132,13 @@ func (o *scheduleOption) GetMergeScheduleLimit(name string) uint64 {
 	return o.load().MergeScheduleLimit
 }
 
+func (o *scheduleOption) GetHotRegionScheduleLimit(name string) uint64 {
+	if n, ok := o.ns[name]; ok {
+		return n.GetHotRegionScheduleLimit()
+	}
+	return o.load().HotRegionScheduleLimit
+}
+
 func (o *scheduleOption) GetTolerantSizeRatio() float64 {
 	return o.load().TolerantSizeRatio
 }
@@ -341,8 +348,8 @@ func (o *scheduleOption) adjustScheduleCfg(persistentCfg *Config) {
 	o.store(scheduleCfg)
 }
 
-func (o *scheduleOption) GetHotRegionLowThreshold() int {
-	return schedule.HotRegionLowThreshold
+func (o *scheduleOption) GetHotRegionCacheHitsThreshold() int {
+	return int(o.load().HotRegionCacheHitsThreshold)
 }
 
 func (o *scheduleOption) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
@@ -436,4 +443,9 @@ func (n *namespaceOption) GetReplicaScheduleLimit() uint64 {
 // GetMergeScheduleLimit returns the limit for merge schedule.
 func (n *namespaceOption) GetMergeScheduleLimit() uint64 {
 	return n.load().MergeScheduleLimit
+}
+
+// GetHotRegionScheduleLimit returns the limit for hot region schedule.
+func (n *namespaceOption) GetHotRegionScheduleLimit() uint64 {
+	return n.load().HotRegionScheduleLimit
 }

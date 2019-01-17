@@ -29,6 +29,7 @@ type Options interface {
 	GetRegionScheduleLimit() uint64
 	GetReplicaScheduleLimit() uint64
 	GetMergeScheduleLimit() uint64
+	GetHotRegionScheduleLimit() uint64
 
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
@@ -40,7 +41,7 @@ type Options interface {
 	GetMaxReplicas() int
 	GetLocationLabels() []string
 
-	GetHotRegionLowThreshold() int
+	GetHotRegionCacheHitsThreshold() int
 	GetTolerantSizeRatio() float64
 	GetLowSpaceRatio() float64
 	GetHighSpaceRatio() float64

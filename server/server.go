@@ -572,10 +572,12 @@ func (s *Server) GetNamespaceConfig(name string) *NamespaceConfig {
 	}
 
 	cfg := &NamespaceConfig{
-		LeaderScheduleLimit:  s.scheduleOpt.GetLeaderScheduleLimit(name),
-		RegionScheduleLimit:  s.scheduleOpt.GetRegionScheduleLimit(name),
-		ReplicaScheduleLimit: s.scheduleOpt.GetReplicaScheduleLimit(name),
-		MaxReplicas:          uint64(s.scheduleOpt.GetMaxReplicas(name)),
+		LeaderScheduleLimit:    s.scheduleOpt.GetLeaderScheduleLimit(name),
+		RegionScheduleLimit:    s.scheduleOpt.GetRegionScheduleLimit(name),
+		ReplicaScheduleLimit:   s.scheduleOpt.GetReplicaScheduleLimit(name),
+		HotRegionScheduleLimit: s.scheduleOpt.GetHotRegionScheduleLimit(name),
+		MergeScheduleLimit:     s.scheduleOpt.GetMergeScheduleLimit(name),
+		MaxReplicas:            uint64(s.scheduleOpt.GetMaxReplicas(name)),
 	}
 
 	return cfg

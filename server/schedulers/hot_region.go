@@ -122,13 +122,19 @@ func (h *balanceHotRegionsScheduler) IsScheduleAllowed(cluster schedule.Cluster)
 	return h.allowBalanceLeader(cluster) || h.allowBalanceRegion(cluster)
 }
 
+func min(a, b uint64) uint64 {
+	if a < b {
+		return a
+	}
+	return b
+}
 func (h *balanceHotRegionsScheduler) allowBalanceLeader(cluster schedule.Cluster) bool {
-	return h.opController.OperatorCount(schedule.OpHotRegion) < h.limit &&
+	return h.opController.OperatorCount(schedule.OpHotRegion) < min(h.limit, cluster.GetHotRegionScheduleLimit()) &&
 		h.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (h *balanceHotRegionsScheduler) allowBalanceRegion(cluster schedule.Cluster) bool {
-	return h.opController.OperatorCount(schedule.OpHotRegion) < h.limit &&
+	return h.opController.OperatorCount(schedule.OpHotRegion) < min(h.limit, cluster.GetHotRegionScheduleLimit()) &&
 		h.opController.OperatorCount(schedule.OpRegion) < cluster.GetRegionScheduleLimit()
 }
 
@@ -205,7 +211,7 @@ func calcScore(items []*core.RegionStat, cluster schedule.Cluster, kind core.Res
 		// HotDegree is the update times on the hot cache. If the heartbeat report
 		// the flow of the region exceeds the threshold, the scheduler will update the region in
 		// the hot cache and the hotdegree of the region will increase.
-		if r.HotDegree < cluster.GetHotRegionLowThreshold() {
+		if r.HotDegree < cluster.GetHotRegionCacheHitsThreshold() {
 			continue
 		}
 

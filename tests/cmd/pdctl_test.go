@@ -741,12 +741,23 @@ func (s *cmdTestSuite) TestConfig(c *C) {
 	args1 = []string{"-u", pdAddr, "config", "set", "leader-schedule-limit", "64"}
 	_, _, err = executeCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
+	args1 = []string{"-u", pdAddr, "config", "set", "hot-region-schedule-limit", "64"}
+	_, _, err = executeCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	args1 = []string{"-u", pdAddr, "config", "set", "hot-region-cache-hits-threshold", "5"}
+	_, _, err = executeCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
 	args2 = []string{"-u", pdAddr, "config", "show"}
 	_, output, err = executeCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
 	scheduleCfg = server.ScheduleConfig{}
 	c.Assert(json.Unmarshal(output, &scheduleCfg), IsNil)
 	c.Assert(scheduleCfg.LeaderScheduleLimit, Equals, svr.GetScheduleConfig().LeaderScheduleLimit)
+	c.Assert(scheduleCfg.HotRegionScheduleLimit, Equals, svr.GetScheduleConfig().HotRegionScheduleLimit)
+	c.Assert(scheduleCfg.HotRegionCacheHitsThreshold, Equals, svr.GetScheduleConfig().HotRegionCacheHitsThreshold)
+	c.Assert(scheduleCfg.HotRegionCacheHitsThreshold, Equals, uint64(5))
+	c.Assert(scheduleCfg.HotRegionScheduleLimit, Equals, uint64(64))
+	c.Assert(scheduleCfg.LeaderScheduleLimit, Equals, uint64(64))
 	args1 = []string{"-u", pdAddr, "config", "set", "disable-raft-learner", "true"}
 	_, _, err = executeCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
