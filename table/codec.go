@@ -21,8 +21,9 @@ import (
 )
 
 var (
-	tablePrefix = []byte{'t'}
-	metaPrefix  = []byte{'m'}
+	tablePrefix  = []byte{'t'}
+	metaPrefix   = []byte{'m'}
+	recordPrefix = []byte{'r'}
 )
 
 const (
@@ -38,7 +39,7 @@ type Key []byte
 
 // TableID returns the table ID of the key, if the key is not table key, returns 0.
 func (k Key) TableID() int64 {
-	_, key, err := decodeBytes(k)
+	_, key, err := DecodeBytes(k)
 	if err != nil {
 		// should never happen
 		return 0
@@ -54,11 +55,56 @@ func (k Key) TableID() int64 {
 
 // IsMeta returns if the key is a meta key.
 func (k Key) IsMeta() bool {
-	_, key, err := decodeBytes(k)
+	_, key, err := DecodeBytes(k)
 	if err != nil {
 		return false
 	}
 	return bytes.HasPrefix(key, metaPrefix)
+}
+
+var pads = make([]byte, encGroupSize)
+
+// EncodeBytes guarantees the encoded value is in ascending order for comparison,
+// encoding with the following rule:
+//  [group1][marker1]...[groupN][markerN]
+//  group is 8 bytes slice which is padding with 0.
+//  marker is `0xFF - padding 0 count`
+// For example:
+//   [] -> [0, 0, 0, 0, 0, 0, 0, 0, 247]
+//   [1, 2, 3] -> [1, 2, 3, 0, 0, 0, 0, 0, 250]
+//   [1, 2, 3, 0] -> [1, 2, 3, 0, 0, 0, 0, 0, 251]
+//   [1, 2, 3, 4, 5, 6, 7, 8] -> [1, 2, 3, 4, 5, 6, 7, 8, 255, 0, 0, 0, 0, 0, 0, 0, 0, 247]
+// Refer: https://github.com/facebook/mysql-5.6/wiki/MyRocks-record-format#memcomparable-format
+func EncodeBytes(data []byte) Key {
+	// Allocate more space to avoid unnecessary slice growing.
+	// Assume that the byte slice size is about `(len(data) / encGroupSize + 1) * (encGroupSize + 1)` bytes,
+	// that is `(len(data) / 8 + 1) * 9` in our implement.
+	dLen := len(data)
+	result := make([]byte, 0, (dLen/encGroupSize+1)*(encGroupSize+1))
+	for idx := 0; idx <= dLen; idx += encGroupSize {
+		remain := dLen - idx
+		padCount := 0
+		if remain >= encGroupSize {
+			result = append(result, data[idx:idx+encGroupSize]...)
+		} else {
+			padCount = encGroupSize - remain
+			result = append(result, data[idx:]...)
+			result = append(result, pads[:padCount]...)
+		}
+
+		marker := encMarker - byte(padCount)
+		result = append(result, marker)
+	}
+	return result
+}
+
+// EncodeInt appends the encoded value to slice b and returns the appended slice.
+// EncodeInt guarantees that the encoded value is in ascending order for comparison.
+func EncodeInt(b []byte, v int64) []byte {
+	var data [8]byte
+	u := encodeIntToCmpUint(v)
+	binary.BigEndian.PutUint64(data[:], u)
+	return append(b, data[:]...)
 }
 
 // DecodeInt decodes value encoded by EncodeInt before.
@@ -74,11 +120,18 @@ func DecodeInt(b []byte) ([]byte, int64, error) {
 	return b, v, nil
 }
 
+func encodeIntToCmpUint(v int64) uint64 {
+	return uint64(v) ^ signMask
+}
+
 func decodeCmpUintToInt(u uint64) int64 {
 	return int64(u ^ signMask)
 }
 
-func decodeBytes(b []byte) ([]byte, []byte, error) {
+// DecodeBytes decodes bytes which is encoded by EncodeBytes before,
+// returns the leftover bytes and decoded value if no error.
+func DecodeBytes(b []byte) ([]byte, []byte, error) {
+
 	data := make([]byte, 0, len(b))
 	for {
 		if len(b) < encGroupSize+1 {
@@ -111,4 +164,22 @@ func decodeBytes(b []byte) ([]byte, []byte, error) {
 		}
 	}
 	return b, data, nil
+}
+
+// GenerateTableKey generates a table split key.
+func GenerateTableKey(tableID int64) []byte {
+	buf := make([]byte, 0, len(tablePrefix)+8)
+	buf = append(buf, tablePrefix...)
+	buf = EncodeInt(buf, tableID)
+	return buf
+}
+
+// GenerateRowKey generates a row key.
+func GenerateRowKey(tableID, rowID int64) []byte {
+	buf := make([]byte, 0, len(tablePrefix)+len(recordPrefix)+8*2)
+	buf = append(buf, tablePrefix...)
+	buf = EncodeInt(buf, tableID)
+	buf = append(buf, recordPrefix...)
+	buf = EncodeInt(buf, rowID)
+	return buf
 }

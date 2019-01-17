@@ -14,6 +14,7 @@
 package simulator
 
 import (
+	"bytes"
 	"context"
 	"math/rand"
 	"sort"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/table"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/cases"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 	"github.com/pkg/errors"
@@ -29,13 +31,14 @@ import (
 // RaftEngine records all raft infomations.
 type RaftEngine struct {
 	sync.RWMutex
-	regionsInfo     *core.RegionsInfo
-	conn            *Connection
-	regionChange    map[uint64][]uint64
-	schedulerStats  *schedulerStatistics
-	regionSplitSize int64
-	regionSplitKeys int64
-	storeConfig     *SimConfig
+	regionsInfo       *core.RegionsInfo
+	conn              *Connection
+	regionChange      map[uint64][]uint64
+	schedulerStats    *schedulerStatistics
+	regionSplitSize   int64
+	regionSplitKeys   int64
+	storeConfig       *SimConfig
+	useTiDBEncodedKey bool
 }
 
 // NewRaftEngine creates the initialized raft with the configuration.
@@ -49,8 +52,14 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *SimConfig) *
 		regionSplitKeys: conf.RegionSplitKeys,
 		storeConfig:     storeConfig,
 	}
+	var splitKeys []string
+	if conf.TableNumber > 0 {
+		splitKeys = generateTableKeys(conf.TableNumber, len(conf.Regions)-1)
+		r.useTiDBEncodedKey = true
+	} else {
+		splitKeys = generateKeys(len(conf.Regions) - 1)
+	}
 
-	splitKeys := generateKeys(len(conf.Regions) - 1)
 	for i, region := range conf.Regions {
 		meta := &metapb.Region{
 			Id:          region.ID,
@@ -125,7 +134,12 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 		}
 	}
 
-	splitKey := generateSplitKey(region.GetStartKey(), region.GetEndKey())
+	var splitKey []byte
+	if r.useTiDBEncodedKey {
+		splitKey = generateTiDBEncodedSplitKey(region.GetStartKey(), region.GetEndKey())
+	} else {
+		splitKey = generateSplitKey(region.GetStartKey(), region.GetEndKey())
+	}
 	left := region.Clone(
 		core.WithNewRegionID(ids[len(ids)-1]),
 		core.WithNewPeerIds(ids[0:len(ids)-1]...),
@@ -145,6 +159,7 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 
 	r.SetRegion(right)
 	r.SetRegion(left)
+	simutil.Logger.Debugf("[region %d] origin: %v split to left:%v, right:%v", region.GetID(), region.GetMeta(), left.GetMeta(), right.GetMeta())
 	r.recordRegionChange(left)
 	r.recordRegionChange(right)
 }
@@ -283,6 +298,30 @@ func generateKeys(size int) []string {
 	return v
 }
 
+func generateTableKey(tableID, rowID int64) []byte {
+	key := table.GenerateRowKey(tableID, rowID)
+	// append 0xFF use to split
+	key = append(key, 0xFF)
+
+	return table.EncodeBytes(key)
+}
+
+func generateTableKeys(tableCount, size int) []string {
+	v := make([]string, 0, size)
+	groupNumber := size / tableCount
+	tableID := 0
+	var key []byte
+	for size > 0 {
+		tableID++
+		for rowID := 0; rowID < groupNumber && size > 0; rowID++ {
+			key = generateTableKey(int64(tableID), int64(rowID))
+			v = append(v, string(key))
+			size--
+		}
+	}
+	return v
+}
+
 func generateSplitKey(start, end []byte) []byte {
 	var key []byte
 	// lessThanEnd is set as true when the key is already less than end key.
@@ -304,4 +343,70 @@ func generateSplitKey(start, end []byte) []byte {
 	}
 	key = append(key, ('a'+'z')/2)
 	return key
+}
+
+func mustDecodeMvccKey(key []byte) []byte {
+	// FIXME: seems nil key not encode to order compare key
+	if len(key) == 0 {
+		return nil
+	}
+
+	left, res, err := table.DecodeBytes(key)
+	if len(left) > 0 {
+		simutil.Logger.Fatalf("Decode key left some bytes: %v", key)
+	}
+	if err != nil {
+		simutil.Logger.Fatalf("Decode key %v meet error: %v", res, err)
+	}
+	return res
+}
+
+// generateTiDBEncodedSplitKey calculates the split key with start and end key,
+// the keys are encoded according to the TiDB encoding rules.
+func generateTiDBEncodedSplitKey(start, end []byte) []byte {
+	if len(start) == 0 && len(end) == 0 {
+		// suppose use table key with table ID 0 and row ID 0.
+		return generateTableKey(0, 0)
+	}
+
+	start = mustDecodeMvccKey(start)
+	end = mustDecodeMvccKey(end)
+	originStartLen := len(start)
+
+	// make the start key and end key in same length.
+	if len(end) == 0 {
+		end = make([]byte, 0, len(start))
+		for i := range end {
+			end[i] = 0xFF
+		}
+	} else if len(start) < len(end) {
+		pad := make([]byte, len(end)-len(start))
+		start = append(start, pad...)
+	} else if len(end) < len(start) {
+		pad := make([]byte, len(start)-len(end))
+		end = append(end, pad...)
+	}
+
+	switch bytes.Compare(start, end) {
+	case 0, 1:
+		simutil.Logger.Fatalf("invalid start key(decode): %v  end key(decode): %v", start[:originStartLen], end)
+	case -1:
+	}
+	for i := len(end) - 1; i >= 0; i-- {
+		if i == 0 {
+			simutil.Logger.Fatalf("invalid end key: %v to split", end)
+		}
+		if end[i] == 0 {
+			end[i] = 0xFF
+		} else {
+			end[i]--
+			break
+		}
+	}
+	// if endKey equal to startKey after reduce 1.
+	// we append 0xFF to the split key
+	if bytes.Equal(end, start) {
+		end = append(end, 0xFF)
+	}
+	return table.EncodeBytes(end)
 }

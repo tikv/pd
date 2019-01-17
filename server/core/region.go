@@ -742,6 +742,11 @@ func (r *RegionsInfo) ScanRange(startKey []byte, limit int) []*RegionInfo {
 	return res
 }
 
+// ScanRangeWithIterator scans region with start key, until iterator returns false.
+func (r *RegionsInfo) ScanRangeWithIterator(startKey []byte, iterator func(metaRegion *metapb.Region) bool) {
+	r.tree.scanRange(startKey, iterator)
+}
+
 // GetAdjacentRegions returns region's info that is adjacent with specific region
 func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo) {
 	metaPrev, metaNext := r.tree.getAdjacentRegions(region.meta)
