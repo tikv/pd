@@ -21,9 +21,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/embed"
-	"github.com/coreos/etcd/pkg/types"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/pkg/types"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/tempurl"
 )

@@ -18,7 +18,7 @@ import (
 	"path"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
+	"go.etcd.io/etcd/clientv3"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )

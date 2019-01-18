@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
+	"go.etcd.io/etcd/clientv3"
 	. "github.com/pingcap/check"
 	pd "github.com/pingcap/pd/client"
 	"github.com/pingcap/pd/pkg/testutil"

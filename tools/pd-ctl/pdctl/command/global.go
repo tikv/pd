@@ -23,7 +23,7 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/coreos/etcd/pkg/transport"
+	"go.etcd.io/etcd/pkg/transport"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )

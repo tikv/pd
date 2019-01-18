@@ -23,7 +23,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/coreos/etcd/raft"
+	"go.etcd.io/etcd/raft"
 	"github.com/coreos/pkg/capnslog"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"

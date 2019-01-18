@@ -25,8 +25,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/coreos/etcd/embed"
-	"github.com/coreos/etcd/pkg/transport"
+	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/pkg/transport"
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
