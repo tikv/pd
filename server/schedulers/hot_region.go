@@ -128,6 +128,7 @@ func min(a, b uint64) uint64 {
 	}
 	return b
 }
+
 func (h *balanceHotRegionsScheduler) allowBalanceLeader(cluster schedule.Cluster) bool {
 	return h.opController.OperatorCount(schedule.OpHotRegion) < min(h.limit, cluster.GetHotRegionScheduleLimit()) &&
 		h.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
