@@ -1,5 +1,13 @@
 # PD Change Log
 
+## v3.0.0-beta
+- Add `RegionStorage` to store Region metadata separately [#1237](https://github.com/pingcap/pd/pull/1237)
+- Add shuffle hot Region scheduler [#1361](https://github.com/pingcap/pd/pull/1361)
+- Add scheduling parameter related metrics [#1406](https://github.com/pingcap/pd/pull/1406)
+- Add cluster label related metrics [#1402](https://github.com/pingcap/pd/pull/1402)
+- Add the importing data simulator [#1263](https://github.com/pingcap/pd/pull/1263)
+- Fix the `Watch` issue about leader election [#1396](https://github.com/pingcap/pd/pull/1396)
+
 ## v2.1.2
 - Fix the Region information update issue about Region merge [#1377](https://github.com/pingcap/pd/pull/1377)
 
