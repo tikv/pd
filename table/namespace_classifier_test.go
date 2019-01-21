@@ -112,14 +112,14 @@ func (s *testTableNamespaceSuite) TestTableNameSpaceGetRegionNamespace(c *C) {
 		{false, "t\x80\x00\x00\x00\x00\x00\x00\x03", "t\x80\x00\x00\x00\x00\x00\x00\x04", 3, false, "global"},
 		{false, "m\x80\x00\x00\x00\x00\x00\x00\x01", "", 0, true, "ns2"},
 		{false, "", "m\x80\x00\x00\x00\x00\x00\x00\x01", 0, false, "global"},
-		{true, string(encodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\x01"))), "", testTable1, false, "ns1"},
+		{true, string(EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\x01"))), "", testTable1, false, "ns1"},
 		{true, "t\x80\x00\x00\x00\x00\x00\x00\x01", "", 0, false, "global"}, // decode error
 	}
 	classifier := s.newClassifier(c)
 	for _, t := range testCases {
 		startKey, endKey := Key(t.startKey), Key(t.endKey)
 		if !t.endcoded {
-			startKey, endKey = encodeBytes(startKey), encodeBytes(endKey)
+			startKey, endKey = EncodeBytes(startKey), EncodeBytes(endKey)
 		}
 		c.Assert(startKey.TableID(), Equals, t.tableID)
 		c.Assert(startKey.IsMeta(), Equals, t.isMeta)

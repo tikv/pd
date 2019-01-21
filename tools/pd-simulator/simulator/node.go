@@ -130,7 +130,7 @@ func (n *Node) stepTask() {
 	for _, task := range n.tasks {
 		task.Step(n.raftEngine)
 		if task.IsFinished() {
-			simutil.Logger.Infof("[store %d][region %d] task finished: %s final: %v", n.GetId(), task.RegionID(), task.Desc(), n.raftEngine.GetRegion(task.RegionID()))
+			simutil.Logger.Debugf("[store %d][region %d] task finished: %s final: %+v", n.GetId(), task.RegionID(), task.Desc(), n.raftEngine.GetRegion(task.RegionID()).GetMeta())
 			delete(n.tasks, task.RegionID())
 		}
 	}

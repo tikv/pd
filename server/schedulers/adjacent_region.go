@@ -258,7 +258,9 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster schedule.Cluster
 	}
 	storesInfo := make([]*core.StoreInfo, 0, len(diffPeers))
 	for _, p := range diffPeers {
-		storesInfo = append(storesInfo, cluster.GetStore(p.GetStoreId()))
+		if store := cluster.GetStore(p.GetStoreId()); store != nil {
+			storesInfo = append(storesInfo, store)
+		}
 	}
 	target := l.selector.SelectTarget(cluster, storesInfo)
 	if target == nil {
@@ -279,6 +281,10 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, 
 	leaderStoreID := region.GetLeader().GetStoreId()
 	stores := cluster.GetRegionStores(region)
 	source := cluster.GetStore(leaderStoreID)
+	if source == nil {
+		return nil
+	}
+
 	scoreGuard := schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), stores, source)
 	excludeStores := region.GetStoreIds()
 	for _, storeID := range l.cacheRegions.assignedStoreIds {
