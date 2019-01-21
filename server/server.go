@@ -127,7 +127,7 @@ func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server,
 	if EnableZap {
 		// The etcd master version has removed embed.Config.SetupLogging.
 		// Now logger is set up automatically based on embed.Config.Logger, embed.Config.LogOutputs, embed.Config.Debug fields.
-		// Use zap logger in the test, otherwise will panic. Reference: https://go.etcd.io/etcd/blob/master/embed/config_logging.go#L45
+		// Use zap logger in the test, otherwise will panic. Reference: https://github.com/etcd-io/etcd/blob/master/embed/config_logging.go#L45
 		s.etcdCfg.Logger = "zap"
 		s.etcdCfg.LogOutputs = []string{"stdout"}
 	}
