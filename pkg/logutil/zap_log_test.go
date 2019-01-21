@@ -154,7 +154,7 @@ func (t *testZapLogSuite) TestLog(c *C) {
 			`[urls-peer="[t1,\"t2 fine\"]"] ["store ids"="[1,4,5]"] [object="{username=user1}"] `+
 			`[object2="{username=\"user 2\"}"] [binary="YWIxMjM="] ["is processed"=true] `+
 			`[bytestring=noquote] [bytestring="in quote"] [int8=1] [ptr=10] [reflect="[1,2]"] [stringer=127.0.0.1] `+
-			`["array bools"="[true]"] ["array bools"="[true,true,false]"] [complex128="1+2i"] `+
+			`["array bools"="[true]"] ["array bools"="[true,true,false]"] [complex128=1+2i] `+
 			`[test="[💖,�,☺☻☹,日a本b語ç日ð本Ê語þ日¥本¼語i日©,日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©日a本b語ç日ð本Ê語þ日¥本¼語i日©,\\ufffd\\ufffd\\ufffd\\ufffd,`+
 			`<car><mirror>XML</mirror></car>]"] [duration=10s]`,
 	)
@@ -167,7 +167,7 @@ func (t *testZapLogSuite) TestTimeEncoder(c *C) {
 	as, err := time.LoadLocation("Asia/Shanghai")
 	c.Assert(err, IsNil)
 	tt := time.Unix(sec, nsec).In(as)
-	conf := &LogConfig{Level: "deug", File: FileLogConfig{}, DisableTimestamp: true}
+	conf := &LogConfig{Level: "debug", File: FileLogConfig{}, DisableTimestamp: true}
 	enc := newZapTextEncoder(conf).(*textEncoder)
 	DefaultTimeEncoder(tt, enc)
 	c.Assert(enc.buf.String(), Equals, `2019/01/11 15:45:41.165 +08:00`)

@@ -272,14 +272,10 @@ func (enc *textEncoder) AppendComplex128(val complex128) {
 	enc.addElementSeparator()
 	// Cast to a platform-independent, fixed-size type.
 	r, i := float64(real(val)), float64(imag(val))
-	enc.buf.AppendByte('"')
-	// Because we're always in a quoted string, we can use strconv without
-	// special-casing NaN and +/-Inf.
 	enc.buf.AppendFloat(r, 64)
 	enc.buf.AppendByte('+')
 	enc.buf.AppendFloat(i, 64)
 	enc.buf.AppendByte('i')
-	enc.buf.AppendByte('"')
 }
 
 func (enc *textEncoder) AppendDuration(val time.Duration) {
@@ -556,8 +552,6 @@ func (enc *textEncoder) needDoubleQuotes(s string) bool {
 		}
 		switch b {
 		case '\\', '"', '[', ']', '=':
-			return true
-		case '\n', '\t', '\r':
 			return true
 		}
 		i++
