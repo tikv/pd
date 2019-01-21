@@ -20,11 +20,11 @@ import (
 	"path"
 	"strings"
 
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/embed"
 )
 
 const (

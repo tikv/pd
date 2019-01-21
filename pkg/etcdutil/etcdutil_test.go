@@ -21,11 +21,11 @@ import (
 	"os"
 	"testing"
 
+	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/pkg/tempurl"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/types"
-	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/pkg/tempurl"
 )
 
 func Test(t *testing.T) {

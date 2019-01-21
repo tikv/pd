@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/pkg/transport"
-	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
 var (
