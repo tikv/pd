@@ -19,11 +19,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/etcdserver"
-	"github.com/coreos/etcd/pkg/types"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/etcdserver"
+	"go.etcd.io/etcd/pkg/types"
 )
 
 const (

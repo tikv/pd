@@ -7,14 +7,14 @@ cache:
     - $GOPATH/src/github.com/pingcap/pd/.retools
 
 go:
-  - 1.11.2
+  - 1.11.4
 
 script:
   - make ci
 
 matrix:
   include:
-  - go: 1.11.2
+  - go: 1.11.4
     install:
       - go get github.com/mattn/goveralls
     env:
