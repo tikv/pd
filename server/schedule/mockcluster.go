@@ -58,12 +58,12 @@ func (mc *MockCluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 
 // IsRegionHot checks if the region is hot
 func (mc *MockCluster) IsRegionHot(id uint64) bool {
-	return mc.BasicCluster.IsRegionHot(id, mc.GetHotRegionLowThreshold())
+	return mc.BasicCluster.IsRegionHot(id, mc.GetHotRegionCacheHitsThreshold())
 }
 
 // RandHotRegionFromStore random picks a hot region in specify store.
 func (mc *MockCluster) RandHotRegionFromStore(store uint64, kind FlowKind) *core.RegionInfo {
-	r := mc.HotCache.RandHotRegionFromStore(store, kind, mc.GetHotRegionLowThreshold())
+	r := mc.HotCache.RandHotRegionFromStore(store, kind, mc.GetHotRegionCacheHitsThreshold())
 	if r == nil {
 		return nil
 	}
@@ -406,6 +406,11 @@ func (mc *MockCluster) GetMergeScheduleLimit() uint64 {
 	return mc.MockSchedulerOptions.GetMergeScheduleLimit(namespace.DefaultNamespace)
 }
 
+// GetHotRegionScheduleLimit mocks method.
+func (mc *MockCluster) GetHotRegionScheduleLimit() uint64 {
+	return mc.MockSchedulerOptions.GetHotRegionScheduleLimit(namespace.DefaultNamespace)
+}
+
 // GetMaxReplicas mocks method.
 func (mc *MockCluster) GetMaxReplicas() int {
 	return mc.MockSchedulerOptions.GetMaxReplicas(namespace.DefaultNamespace)
@@ -424,20 +429,22 @@ func (mc *MockCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabe
 }
 
 const (
-	defaultMaxReplicas          = 3
-	defaultMaxSnapshotCount     = 3
-	defaultMaxPendingPeerCount  = 16
-	defaultMaxMergeRegionSize   = 0
-	defaultMaxMergeRegionKeys   = 0
-	defaultSplitMergeInterval   = 0
-	defaultMaxStoreDownTime     = 30 * time.Minute
-	defaultLeaderScheduleLimit  = 4
-	defaultRegionScheduleLimit  = 4
-	defaultReplicaScheduleLimit = 8
-	defaultMergeScheduleLimit   = 8
-	defaultTolerantSizeRatio    = 2.5
-	defaultLowSpaceRatio        = 0.8
-	defaultHighSpaceRatio       = 0.6
+	defaultMaxReplicas                 = 3
+	defaultMaxSnapshotCount            = 3
+	defaultMaxPendingPeerCount         = 16
+	defaultMaxMergeRegionSize          = 0
+	defaultMaxMergeRegionKeys          = 0
+	defaultSplitMergeInterval          = 0
+	defaultMaxStoreDownTime            = 30 * time.Minute
+	defaultLeaderScheduleLimit         = 4
+	defaultRegionScheduleLimit         = 4
+	defaultReplicaScheduleLimit        = 8
+	defaultMergeScheduleLimit          = 8
+	defaultHotRegionScheduleLimit      = 2
+	defaultTolerantSizeRatio           = 2.5
+	defaultLowSpaceRatio               = 0.8
+	defaultHighSpaceRatio              = 0.6
+	defaultHotRegionCacheHitsThreshold = 3
 )
 
 // MockSchedulerOptions is a mock of SchedulerOptions
@@ -447,6 +454,7 @@ type MockSchedulerOptions struct {
 	LeaderScheduleLimit          uint64
 	ReplicaScheduleLimit         uint64
 	MergeScheduleLimit           uint64
+	HotRegionScheduleLimit       uint64
 	MaxSnapshotCount             uint64
 	MaxPendingPeerCount          uint64
 	MaxMergeRegionSize           uint64
@@ -455,7 +463,7 @@ type MockSchedulerOptions struct {
 	MaxStoreDownTime             time.Duration
 	MaxReplicas                  int
 	LocationLabels               []string
-	HotRegionLowThreshold        int
+	HotRegionCacheHitsThreshold  int
 	TolerantSizeRatio            float64
 	LowSpaceRatio                float64
 	HighSpaceRatio               float64
@@ -476,13 +484,14 @@ func NewMockSchedulerOptions() *MockSchedulerOptions {
 	mso.LeaderScheduleLimit = defaultLeaderScheduleLimit
 	mso.ReplicaScheduleLimit = defaultReplicaScheduleLimit
 	mso.MergeScheduleLimit = defaultMergeScheduleLimit
+	mso.HotRegionScheduleLimit = defaultHotRegionScheduleLimit
 	mso.MaxSnapshotCount = defaultMaxSnapshotCount
 	mso.MaxMergeRegionSize = defaultMaxMergeRegionSize
 	mso.MaxMergeRegionKeys = defaultMaxMergeRegionKeys
 	mso.SplitMergeInterval = defaultSplitMergeInterval
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
-	mso.HotRegionLowThreshold = HotRegionLowThreshold
+	mso.HotRegionCacheHitsThreshold = defaultHotRegionCacheHitsThreshold
 	mso.MaxPendingPeerCount = defaultMaxPendingPeerCount
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
 	mso.LowSpaceRatio = defaultLowSpaceRatio
@@ -508,6 +517,11 @@ func (mso *MockSchedulerOptions) GetReplicaScheduleLimit(name string) uint64 {
 // GetMergeScheduleLimit mock method
 func (mso *MockSchedulerOptions) GetMergeScheduleLimit(name string) uint64 {
 	return mso.MergeScheduleLimit
+}
+
+// GetHotRegionScheduleLimit mock method
+func (mso *MockSchedulerOptions) GetHotRegionScheduleLimit(name string) uint64 {
+	return mso.HotRegionScheduleLimit
 }
 
 // GetMaxSnapshotCount mock method
@@ -550,9 +564,9 @@ func (mso *MockSchedulerOptions) GetLocationLabels() []string {
 	return mso.LocationLabels
 }
 
-// GetHotRegionLowThreshold mock method
-func (mso *MockSchedulerOptions) GetHotRegionLowThreshold() int {
-	return mso.HotRegionLowThreshold
+// GetHotRegionCacheHitsThreshold mock method
+func (mso *MockSchedulerOptions) GetHotRegionCacheHitsThreshold() int {
+	return mso.HotRegionCacheHitsThreshold
 }
 
 // GetTolerantSizeRatio mock method

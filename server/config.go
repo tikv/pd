@@ -446,6 +446,12 @@ type ScheduleConfig struct {
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit,omitempty" json:"replica-schedule-limit"`
 	// MergeScheduleLimit is the max coexist merge schedules.
 	MergeScheduleLimit uint64 `toml:"merge-schedule-limit,omitempty" json:"merge-schedule-limit"`
+	// HotRegionScheduleLimit is the max coexist hot region schedules.
+	HotRegionScheduleLimit uint64 `toml:"hot-region-schedule-limit,omitempty" json:"hot-region-schedule-limit"`
+	// HotRegionCacheHitThreshold is the cache hits threshold of the hot region.
+	// If the number of times a region hits the hot cache is greater than this
+	// threshold, it is considered a hot region.
+	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold,omitempty" json:"hot-region-cache-hits-threshold"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
 	//
@@ -501,6 +507,8 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
+		HotRegionScheduleLimit:       c.HotRegionScheduleLimit,
+		HotRegionCacheHitsThreshold:  c.HotRegionCacheHitsThreshold,
 		TolerantSizeRatio:            c.TolerantSizeRatio,
 		LowSpaceRatio:                c.LowSpaceRatio,
 		HighSpaceRatio:               c.HighSpaceRatio,
@@ -516,21 +524,25 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 }
 
 const (
-	defaultMaxReplicas          = 3
-	defaultMaxSnapshotCount     = 3
-	defaultMaxPendingPeerCount  = 16
-	defaultMaxMergeRegionSize   = 0
-	defaultMaxMergeRegionKeys   = 0
-	defaultSplitMergeInterval   = 1 * time.Hour
-	defaultPatrolRegionInterval = 100 * time.Millisecond
-	defaultMaxStoreDownTime     = 30 * time.Minute
-	defaultLeaderScheduleLimit  = 4
-	defaultRegionScheduleLimit  = 4
-	defaultReplicaScheduleLimit = 8
-	defaultMergeScheduleLimit   = 8
-	defaultTolerantSizeRatio    = 5
-	defaultLowSpaceRatio        = 0.8
-	defaultHighSpaceRatio       = 0.6
+	defaultMaxReplicas            = 3
+	defaultMaxSnapshotCount       = 3
+	defaultMaxPendingPeerCount    = 16
+	defaultMaxMergeRegionSize     = 0
+	defaultMaxMergeRegionKeys     = 0
+	defaultSplitMergeInterval     = 1 * time.Hour
+	defaultPatrolRegionInterval   = 100 * time.Millisecond
+	defaultMaxStoreDownTime       = 30 * time.Minute
+	defaultLeaderScheduleLimit    = 4
+	defaultRegionScheduleLimit    = 4
+	defaultReplicaScheduleLimit   = 8
+	defaultMergeScheduleLimit     = 8
+	defaultHotRegionScheduleLimit = 2
+	defaultTolerantSizeRatio      = 5
+	defaultLowSpaceRatio          = 0.8
+	defaultHighSpaceRatio         = 0.6
+	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
+	// hot region.
+	defautHotRegionCacheHitsThreshold = 3
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -560,6 +572,12 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("merge-schedule-limit") {
 		adjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
+	}
+	if !meta.IsDefined("hot-region-schedule-limit") {
+		adjustUint64(&c.HotRegionScheduleLimit, defaultHotRegionScheduleLimit)
+	}
+	if !meta.IsDefined("hot-region-cache-hits-threshold") {
+		adjustUint64(&c.HotRegionCacheHitsThreshold, defautHotRegionCacheHitsThreshold)
 	}
 	if !meta.IsDefined("tolerant-size-ratio") {
 		adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
@@ -660,6 +678,8 @@ type NamespaceConfig struct {
 	ReplicaScheduleLimit uint64 `json:"replica-schedule-limit"`
 	// MergeScheduleLimit is the max coexist merge schedules.
 	MergeScheduleLimit uint64 `json:"merge-schedule-limit"`
+	// HotRegionScheduleLimit is the max coexist hot region schedules.
+	HotRegionScheduleLimit uint64 `json:"hot-region-schedule-limit"`
 	// MaxReplicas is the number of replicas for each region.
 	MaxReplicas uint64 `json:"max-replicas"`
 }
@@ -669,6 +689,7 @@ func (c *NamespaceConfig) adjust(opt *scheduleOption) {
 	adjustUint64(&c.RegionScheduleLimit, opt.GetRegionScheduleLimit(namespace.DefaultNamespace))
 	adjustUint64(&c.ReplicaScheduleLimit, opt.GetReplicaScheduleLimit(namespace.DefaultNamespace))
 	adjustUint64(&c.MergeScheduleLimit, opt.GetMergeScheduleLimit(namespace.DefaultNamespace))
+	adjustUint64(&c.HotRegionScheduleLimit, opt.GetHotRegionScheduleLimit(namespace.DefaultNamespace))
 	adjustUint64(&c.MaxReplicas, uint64(opt.GetMaxReplicas(namespace.DefaultNamespace)))
 }
 

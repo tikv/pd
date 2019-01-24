@@ -265,14 +265,14 @@ func (c *clusterInfo) GetRegion(regionID uint64) *core.RegionInfo {
 func (c *clusterInfo) IsRegionHot(id uint64) bool {
 	c.RLock()
 	defer c.RUnlock()
-	return c.core.IsRegionHot(id, c.GetHotRegionLowThreshold())
+	return c.core.IsRegionHot(id, c.GetHotRegionCacheHitsThreshold())
 }
 
 // RandHotRegionFromStore randomly picks a hot region in specified store.
 func (c *clusterInfo) RandHotRegionFromStore(store uint64, kind schedule.FlowKind) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
-	r := c.core.HotCache.RandHotRegionFromStore(store, kind, c.GetHotRegionLowThreshold())
+	r := c.core.HotCache.RandHotRegionFromStore(store, kind, c.GetHotRegionCacheHitsThreshold())
 	if r == nil {
 		return nil
 	}
@@ -620,6 +620,10 @@ func (c *clusterInfo) GetMergeScheduleLimit() uint64 {
 	return c.opt.GetMergeScheduleLimit(namespace.DefaultNamespace)
 }
 
+func (c *clusterInfo) GetHotRegionScheduleLimit() uint64 {
+	return c.opt.GetHotRegionScheduleLimit(namespace.DefaultNamespace)
+}
+
 func (c *clusterInfo) GetTolerantSizeRatio() float64 {
 	return c.opt.GetTolerantSizeRatio()
 }
@@ -668,8 +672,8 @@ func (c *clusterInfo) GetLocationLabels() []string {
 	return c.opt.GetLocationLabels()
 }
 
-func (c *clusterInfo) GetHotRegionLowThreshold() int {
-	return c.opt.GetHotRegionLowThreshold()
+func (c *clusterInfo) GetHotRegionCacheHitsThreshold() int {
+	return c.opt.GetHotRegionCacheHitsThreshold()
 }
 
 func (c *clusterInfo) IsRaftLearnerEnabled() bool {

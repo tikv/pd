@@ -17,11 +17,6 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
-var (
-	// HotRegionLowThreshold is the low threadshold of hot region
-	HotRegionLowThreshold = 3
-)
-
 const (
 	// RegionHeartBeatReportInterval is the heartbeat report interval of a region
 	RegionHeartBeatReportInterval = 60
