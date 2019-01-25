@@ -1,5 +1,8 @@
 # PD Change Log
 
+## v2.1.3
+- Fix the `Watch` issue about leader election [#1404](https://github.com/pingcap/pd/pull/1404)
+
 ## v2.1.2
 - Fix the Region information update issue about Region merge [#1377](https://github.com/pingcap/pd/pull/1377)
 
