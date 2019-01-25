@@ -22,12 +22,12 @@ import (
 	"syscall"
 
 	"github.com/grpc-ecosystem/go-grpc-prometheus"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 
 	// Register schedulers.
 	_ "github.com/pingcap/pd/server/schedulers"
@@ -51,18 +51,24 @@ func main() {
 	case flag.ErrHelp:
 		os.Exit(0)
 	default:
-		log.Fatalf("parse cmd flags error: %s\n", fmt.Sprintf("%+v", err))
+		log.S().Fatalf("parse cmd flags error: %s\n", fmt.Sprintf("%+v", err))
+	}
+	// New zap logger
+	err = cfg.SetupLogger()
+	if err != nil {
+		log.S().Fatalf("initialize logger error: %s\n", fmt.Sprintf("%+v", err))
 	}
 
+	// The old logger
 	err = logutil.InitLogger(&cfg.Log)
 	if err != nil {
-		log.Fatalf("initialize logger error: %s\n", fmt.Sprintf("%+v", err))
+		log.S().Fatalf("initialize logger error: %s\n", fmt.Sprintf("%+v", err))
 	}
 
 	server.LogPDInfo()
 
 	for _, msg := range cfg.WarningMsgs {
-		log.Warn(msg)
+		log.L().Warn(msg)
 	}
 
 	// TODO: Make it configurable if it has big impact on performance.
@@ -72,15 +78,15 @@ func main() {
 
 	err = server.PrepareJoinCluster(cfg)
 	if err != nil {
-		log.Fatal("join error ", fmt.Sprintf("%+v", err))
+		log.S().Fatal("join error ", fmt.Sprintf("%+v", err))
 	}
 	svr, err := server.CreateServer(cfg, api.NewHandler)
 	if err != nil {
-		log.Fatalf("create server failed: %v", fmt.Sprintf("%+v", err))
+		log.S().Fatalf("create server failed: %v", fmt.Sprintf("%+v", err))
 	}
 
 	if err = server.InitHTTPClient(svr); err != nil {
-		log.Fatalf("initial http client for api handler failed: %v", fmt.Sprintf("%+v", err))
+		log.S().Fatalf("initial http client for api handler failed: %v", fmt.Sprintf("%+v", err))
 	}
 
 	sc := make(chan os.Signal, 1)
@@ -98,11 +104,11 @@ func main() {
 	}()
 
 	if err := svr.Run(ctx); err != nil {
-		log.Fatalf("run server failed: %v", fmt.Sprintf("%+v", err))
+		log.S().Fatalf("run server failed: %v", fmt.Sprintf("%+v", err))
 	}
 
 	<-ctx.Done()
-	log.Infof("Got signal [%d] to exit.", sig)
+	log.S().Infof("Got signal [%d] to exit.", sig)
 
 	svr.Close()
 	switch sig {

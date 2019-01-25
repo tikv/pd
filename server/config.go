@@ -24,9 +24,12 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
-	"github.com/pingcap/pd/pkg/logutil"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/namespace"
@@ -62,7 +65,7 @@ type Config struct {
 	LeaderLease int64 `toml:"lease" json:"lease"`
 
 	// Log related config.
-	Log logutil.LogConfig `toml:"log" json:"log"`
+	Log log.Config `toml:"log" json:"log"`
 
 	// Backward compatibility.
 	LogFileDeprecated  string `toml:"log-file" json:"log-file"`
@@ -126,6 +129,9 @@ type Config struct {
 	heartbeatStreamBindInterval typeutil.Duration
 
 	LeaderPriorityCheckInterval typeutil.Duration
+
+	logger    *zap.Logger
+	logSyncer zapcore.WriteSyncer
 }
 
 // NewConfig creates a new config.
@@ -772,6 +778,18 @@ func ParseUrls(s string) ([]url.URL, error) {
 	return urls, nil
 }
 
+// SetupLogger setup the logger.
+func (c *Config) SetupLogger() error {
+	lg, syncer, err := log.InitLogger(&c.Log)
+	if err != nil {
+		return err
+	}
+	c.logger = lg
+	c.logSyncer = syncer
+	log.ReplaceGlobals(lg)
+	return nil
+}
+
 // generates a configuration for embedded etcd.
 func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg := embed.NewConfig()
@@ -796,7 +814,8 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.PeerTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.PeerTLSInfo.CertFile = c.Security.CertPath
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
-
+	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logSyncer)
+	cfg.Logger = "zap"
 	var err error
 
 	cfg.LPUrls, err = ParseUrls(c.PeerUrls)

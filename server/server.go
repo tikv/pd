@@ -30,15 +30,17 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/types"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 )
 
@@ -99,11 +101,14 @@ type Server struct {
 	lastSavedTime time.Time
 	// For async region heartbeat.
 	hbStreams *heartbeatStreams
+	// For the logger
+	lg        *zap.Logger
+	logSyncer zapcore.WriteSyncer
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server, error) {
-	log.Infof("PD config - %v", cfg)
+	log.S().Infof("PD config - %v", cfg)
 	rand.Seed(time.Now().UnixNano())
 
 	s := &Server{
@@ -124,18 +129,13 @@ func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server,
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) { pdpb.RegisterPDServer(gs, s) }
 	s.etcdCfg = etcdCfg
-	if EnableZap {
-		// The etcd master version has removed embed.Config.SetupLogging.
-		// Now logger is set up automatically based on embed.Config.Logger, embed.Config.LogOutputs, embed.Config.Debug fields.
-		// Use zap logger in the test, otherwise will panic. Reference: https://github.com/etcd-io/etcd/blob/master/embed/config_logging.go#L45
-		s.etcdCfg.Logger = "zap"
-		s.etcdCfg.LogOutputs = []string{"stdout"}
-	}
+	s.lg = cfg.logger
+	s.logSyncer = cfg.logSyncer
 	return s, nil
 }
 
 func (s *Server) startEtcd(ctx context.Context) error {
-	log.Info("start embed etcd")
+	log.L().Info("start embed etcd")
 	ctx, cancel := context.WithTimeout(ctx, etcdStartTimeout)
 	defer cancel()
 
@@ -165,7 +165,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
-	log.Infof("create etcd v3 client with endpoints %v", endpoints)
+	log.S().Infof("create etcd v3 client with endpoints %v", endpoints)
 
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
@@ -187,7 +187,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		if etcdServerID == m.ID {
 			etcdPeerURLs := strings.Join(m.PeerURLs, ",")
 			if s.cfg.AdvertisePeerUrls != etcdPeerURLs {
-				log.Infof("update advertise peer urls from %s to %s", s.cfg.AdvertisePeerUrls, etcdPeerURLs)
+				log.S().Infof("update advertise peer urls from %s to %s", s.cfg.AdvertisePeerUrls, etcdPeerURLs)
 				s.cfg.AdvertisePeerUrls = etcdPeerURLs
 			}
 		}
@@ -204,7 +204,7 @@ func (s *Server) startServer() error {
 	if err = s.initClusterID(); err != nil {
 		return err
 	}
-	log.Infof("init cluster id %v", s.clusterID)
+	log.S().Infof("init cluster id %v", s.clusterID)
 	// It may lose accuracy if use float64 to store uint64. So we store the
 	// cluster id in label.
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
@@ -254,7 +254,7 @@ func (s *Server) Close() {
 		return
 	}
 
-	log.Info("closing server")
+	log.L().Info("closing server")
 
 	s.stopServerLoop()
 
@@ -270,10 +270,10 @@ func (s *Server) Close() {
 		s.hbStreams.Close()
 	}
 	if err := s.kv.Close(); err != nil {
-		log.Errorf("close kv meet error: %s", err)
+		log.S().Errorf("close kv meet error: %s", err)
 	}
 
-	log.Info("close server")
+	log.L().Info("close server")
 }
 
 // isClosed checks whether server is closed or not.
@@ -287,7 +287,7 @@ var timeMonitorOnce sync.Once
 func (s *Server) Run(ctx context.Context) error {
 	timeMonitorOnce.Do(func() {
 		go StartMonitor(time.Now, func() {
-			log.Errorf("system time jumps backward")
+			log.S().Errorf("system time jumps backward")
 			timeJumpBackCounter.Inc()
 		})
 	})
@@ -334,7 +334,7 @@ func (s *Server) serverMetricsLoop() {
 		case <-time.After(serverMetricsInterval):
 			s.collectEtcdStateMetrics()
 		case <-ctx.Done():
-			log.Info("server is closed, exit metrics loop")
+			log.L().Info("server is closed, exit metrics loop")
 			return
 		}
 	}
@@ -349,7 +349,7 @@ func (s *Server) collectEtcdStateMetrics() {
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
 	clusterID := s.clusterID
 
-	log.Infof("try to bootstrap raft cluster %d with %v", clusterID, req)
+	log.S().Infof("try to bootstrap raft cluster %d with %v", clusterID, req)
 
 	if err := checkBootstrapRequest(clusterID, req); err != nil {
 		return nil, err
@@ -402,18 +402,18 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		return nil, errors.WithStack(err)
 	}
 	if !resp.Succeeded {
-		log.Warnf("cluster %d already bootstrapped", clusterID)
+		log.S().Warnf("cluster %d already bootstrapped", clusterID)
 		return nil, errors.Errorf("cluster %d already bootstrapped", clusterID)
 	}
 
-	log.Infof("bootstrap cluster %d ok", clusterID)
+	log.S().Infof("bootstrap cluster %d ok", clusterID)
 	err = s.kv.SaveRegion(req.GetRegion())
 	if err != nil {
-		log.Warnf("save the bootstrap region failed: %s", err)
+		log.S().Warnf("save the bootstrap region failed: %s", err)
 	}
 	err = s.kv.Flush()
 	if err != nil {
-		log.Warnf("flush the bootstrap region failed: %s", err)
+		log.S().Warnf("flush the bootstrap region failed: %s", err)
 	}
 	if err := s.cluster.start(); err != nil {
 		return nil, err
@@ -529,7 +529,7 @@ func (s *Server) SetScheduleConfig(cfg ScheduleConfig) error {
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
 		return err
 	}
-	log.Infof("schedule config is updated: %+v, old: %+v", cfg, old)
+	log.S().Infof("schedule config is updated: %+v, old: %+v", cfg, old)
 	return nil
 }
 
@@ -550,7 +550,7 @@ func (s *Server) SetReplicationConfig(cfg ReplicationConfig) error {
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
 		return err
 	}
-	log.Infof("replication config is updated: %+v, old: %+v", cfg, old)
+	log.S().Infof("replication config is updated: %+v, old: %+v", cfg, old)
 	return nil
 }
 
@@ -561,7 +561,7 @@ func (s *Server) SetPDServerConfig(cfg PDServerConfig) error {
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
 		return err
 	}
-	log.Infof("replication config is updated: %+v, old: %+v", cfg, old)
+	log.S().Infof("replication config is updated: %+v, old: %+v", cfg, old)
 	return nil
 }
 
@@ -598,13 +598,13 @@ func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) error {
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
 			return err
 		}
-		log.Infof("namespace:%v config is updated: %+v, old: %+v", name, cfg, old)
+		log.S().Infof("namespace:%v config is updated: %+v, old: %+v", name, cfg, old)
 	} else {
 		s.scheduleOpt.ns[name] = newNamespaceOption(&cfg)
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
 			return err
 		}
-		log.Infof("namespace:%v config is added: %+v", name, cfg)
+		log.S().Infof("namespace:%v config is added: %+v", name, cfg)
 	}
 	return nil
 }
@@ -617,7 +617,7 @@ func (s *Server) DeleteNamespaceConfig(name string) error {
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
 			return err
 		}
-		log.Infof("namespace:%v config is deleted: %+v", name, *cfg)
+		log.S().Infof("namespace:%v config is deleted: %+v", name, *cfg)
 	}
 	return nil
 }
@@ -629,7 +629,7 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 	if err != nil {
 		return err
 	}
-	log.Infof("label property config is updated: %+v", s.scheduleOpt.loadLabelPropertyConfig())
+	log.S().Infof("label property config is updated: %+v", s.scheduleOpt.loadLabelPropertyConfig())
 	return nil
 }
 
@@ -640,7 +640,7 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 	if err != nil {
 		return err
 	}
-	log.Infof("label property config is updated: %+v", s.scheduleOpt.loadLabelPropertyConfig())
+	log.S().Infof("label property config is updated: %+v", s.scheduleOpt.loadLabelPropertyConfig())
 	return nil
 }
 
@@ -660,7 +660,7 @@ func (s *Server) SetClusterVersion(v string) error {
 	if err != nil {
 		return err
 	}
-	log.Infof("cluster version is updated to %s", v)
+	log.S().Infof("cluster version is updated to %s", v)
 	return nil
 }
 

@@ -24,6 +24,7 @@ import (
 	"sync"
 
 	"github.com/coreos/pkg/capnslog"
+	zaplog "github.com/pingcap/log"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"go.etcd.io/etcd/raft"
@@ -197,7 +198,7 @@ func StringToLogFormatter(format string, disableTimestamp bool) log.Formatter {
 }
 
 // InitFileLog initializes file based logging options.
-func InitFileLog(cfg *FileLogConfig) error {
+func InitFileLog(cfg *zaplog.FileLogConfig) error {
 	if st, err := os.Stat(cfg.Filename); err == nil {
 		if st.IsDir() {
 			return errors.New("can't use directory as log file name")
@@ -239,7 +240,7 @@ func (lg *wrapLogrus) V(l int) bool {
 var once sync.Once
 
 // InitLogger initializes PD's logger.
-func InitLogger(cfg *LogConfig) error {
+func InitLogger(cfg *zaplog.Config) error {
 	var err error
 
 	once.Do(func() {
