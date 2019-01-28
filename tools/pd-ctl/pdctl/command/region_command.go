@@ -48,7 +48,7 @@ var (
 // NewRegionCommand returns a region subcommand of rootCmd
 func NewRegionCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   `region <region_id> [--jq="<query string>"]`,
+		Use:   `region <region_id> [-jq="<query string>"]`,
 		Short: "show the region status",
 		Run:   showRegionCommandFunc,
 	}
@@ -71,6 +71,7 @@ func NewRegionCommand() *cobra.Command {
 		Short: "show regions with top write flow",
 		Run:   showRegionTopWriteCommandFunc,
 	}
+	topWrite.Flags().String("jq", "", "jq query")
 	r.AddCommand(topWrite)
 
 	topConfVer := &cobra.Command{
@@ -78,6 +79,7 @@ func NewRegionCommand() *cobra.Command {
 		Short: "show regions with top conf version",
 		Run:   showRegionTopConfVerCommandFunc,
 	}
+	topConfVer.Flags().String("jq", "", "jq query")
 	r.AddCommand(topConfVer)
 
 	topVersion := &cobra.Command{
@@ -85,6 +87,7 @@ func NewRegionCommand() *cobra.Command {
 		Short: "show regions with top version",
 		Run:   showRegionTopVersionCommandFunc,
 	}
+	topVersion.Flags().String("jq", "", "jq query")
 	r.AddCommand(topVersion)
 
 	topSize := &cobra.Command{
@@ -92,6 +95,7 @@ func NewRegionCommand() *cobra.Command {
 		Short: "show regions with top size",
 		Run:   showRegionTopSizeCommandFunc,
 	}
+	topSize.Flags().String("jq", "", "jq query")
 	r.AddCommand(topSize)
 
 	scanRegion := &cobra.Command{
@@ -102,7 +106,7 @@ func NewRegionCommand() *cobra.Command {
 	scanRegion.Flags().String("jq", "", "jq query")
 	r.AddCommand(scanRegion)
 
-	//r.Flags().String("jq", "", "jq query")
+	r.Flags().String("jq", "", "jq query")
 
 	return r
 }
