@@ -25,8 +25,8 @@ import (
 // ReplicaChecker ensures region has the best replicas.
 // Including the following:
 // Replica number management.
-// Unhealth replica management, mainly used for disaster recovery of TiKV.
-// Location management, mainly used for corss data center deployment.
+// Unhealthy replica management, mainly used for disaster recovery of TiKV.
+// Location management, mainly used for cross data center deployment.
 type ReplicaChecker struct {
 	cluster    Cluster
 	classifier namespace.Classifier
