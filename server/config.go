@@ -24,9 +24,6 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/log"
@@ -36,6 +33,8 @@ import (
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/transport"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // Config is the pd server configuration.

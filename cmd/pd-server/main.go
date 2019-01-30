@@ -58,6 +58,11 @@ func main() {
 	if err != nil {
 		log.S().Fatalf("initialize logger error: %s\n", fmt.Sprintf("%+v", err))
 	}
+	// Flushing any buffered log entries
+	defer func() {
+		log.S().Sync()
+		log.L().Sync()
+	}()
 
 	// The old logger
 	err = logutil.InitLogger(&cfg.Log)

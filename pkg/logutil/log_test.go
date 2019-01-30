@@ -20,7 +20,7 @@ import (
 
 	"github.com/coreos/pkg/capnslog"
 	. "github.com/pingcap/check"
-	zap "github.com/pingcap/log"
+	zaplog "github.com/pingcap/log"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -70,7 +70,7 @@ func (s *testLogSuite) TestStringToLogFormatter(c *C) {
 
 // TestLogging assure log format and log redirection works.
 func (s *testLogSuite) TestLogging(c *C) {
-	conf := &zap.Config{Level: "warn", File: zap.FileLogConfig{}}
+	conf := &zaplog.Config{Level: "warn", File: zaplog.FileLogConfig{}}
 	c.Assert(InitLogger(conf), IsNil)
 
 	log.SetOutput(s.buf)
@@ -95,6 +95,6 @@ func (s *testLogSuite) TestLogging(c *C) {
 }
 
 func (s *testLogSuite) TestFileLog(c *C) {
-	c.Assert(InitFileLog(&zap.FileLogConfig{Filename: "/tmp"}), NotNil)
-	c.Assert(InitFileLog(&zap.FileLogConfig{Filename: "/tmp/test_file_log", MaxSize: 0}), IsNil)
+	c.Assert(InitFileLog(&zaplog.FileLogConfig{Filename: "/tmp"}), NotNil)
+	c.Assert(InitFileLog(&zaplog.FileLogConfig{Filename: "/tmp/test_file_log", MaxSize: 0}), IsNil)
 }

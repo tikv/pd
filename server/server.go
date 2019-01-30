@@ -101,7 +101,7 @@ type Server struct {
 	lastSavedTime time.Time
 	// For async region heartbeat.
 	hbStreams *heartbeatStreams
-	// For the logger
+	// Zap logger
 	lg        *zap.Logger
 	logSyncer zapcore.WriteSyncer
 }
