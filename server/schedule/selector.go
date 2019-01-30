@@ -37,14 +37,18 @@ func NewBalanceSelector(kind core.ResourceKind, filters []Filter) *BalanceSelect
 // SelectSource selects the store that can pass all filters and has the minimal
 // resource score.
 func (s *BalanceSelector) SelectSource(opt Options, stores []*core.StoreInfo) *core.StoreInfo {
-	var result *core.StoreInfo
+	var (
+		result         *core.StoreInfo
+		lowSpaceRatio  = opt.GetLowSpaceRatio()
+		highSpaceRatio = opt.GetHighSpaceRatio()
+	)
 	for _, store := range stores {
 		if FilterSource(opt, store, s.filters) {
 			continue
 		}
 		if result == nil ||
-			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) <
-				store.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) {
+			result.ResourceScore(s.kind, highSpaceRatio, lowSpaceRatio, 0) <
+				store.ResourceScore(s.kind, highSpaceRatio, lowSpaceRatio, 0) {
 			result = store
 		}
 	}
@@ -55,14 +59,18 @@ func (s *BalanceSelector) SelectSource(opt Options, stores []*core.StoreInfo) *c
 // resource score.
 func (s *BalanceSelector) SelectTarget(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
-	var result *core.StoreInfo
+	var (
+		result         *core.StoreInfo
+		lowSpaceRatio  = opt.GetLowSpaceRatio()
+		highSpaceRatio = opt.GetHighSpaceRatio()
+	)
 	for _, store := range stores {
 		if FilterTarget(opt, store, filters) {
 			continue
 		}
 		if result == nil ||
-			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) >
-				store.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) {
+			result.ResourceScore(s.kind, highSpaceRatio, lowSpaceRatio, 0) >
+				store.ResourceScore(s.kind, highSpaceRatio, lowSpaceRatio, 0) {
 			result = store
 		}
 	}

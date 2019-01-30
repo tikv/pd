@@ -182,10 +182,11 @@ func (p *pendingPeerCountFilter) Type() string {
 }
 
 func (p *pendingPeerCountFilter) filter(opt Options, store *core.StoreInfo) bool {
-	if opt.GetMaxPendingPeerCount() == 0 {
+	maxPendingPeerCount := opt.GetMaxPendingPeerCount()
+	if maxPendingPeerCount == 0 {
 		return false
 	}
-	return store.PendingPeerCount > int(opt.GetMaxPendingPeerCount())
+	return store.PendingPeerCount > int(maxPendingPeerCount)
 }
 
 func (p *pendingPeerCountFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
@@ -209,9 +210,10 @@ func (f *snapshotCountFilter) Type() string {
 }
 
 func (f *snapshotCountFilter) filter(opt Options, store *core.StoreInfo) bool {
-	return uint64(store.Stats.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.Stats.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.Stats.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount()
+	maxSnapshotCount := opt.GetMaxSnapshotCount()
+	return uint64(store.Stats.GetSendingSnapCount()) > maxSnapshotCount ||
+		uint64(store.Stats.GetReceivingSnapCount()) > maxSnapshotCount ||
+		uint64(store.Stats.GetApplyingSnapCount()) > maxSnapshotCount
 }
 
 func (f *snapshotCountFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
@@ -407,12 +409,14 @@ func (f StoreStateFilter) filterMoveRegion(opt Options, store *core.StoreInfo) b
 	if store.Stats.GetIsBusy() {
 		return true
 	}
-	if opt.GetMaxPendingPeerCount() > 0 && store.PendingPeerCount > int(opt.GetMaxPendingPeerCount()) {
+	maxPendingPeerCount := opt.GetMaxPendingPeerCount()
+	if maxPendingPeerCount > 0 && store.PendingPeerCount > int(maxPendingPeerCount) {
 		return true
 	}
-	if uint64(store.Stats.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.Stats.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.Stats.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount() {
+	maxSnapshotCount := opt.GetMaxSnapshotCount()
+	if uint64(store.Stats.GetSendingSnapCount()) > maxSnapshotCount ||
+		uint64(store.Stats.GetReceivingSnapCount()) > maxSnapshotCount ||
+		uint64(store.Stats.GetApplyingSnapCount()) > maxSnapshotCount {
 		return true
 	}
 	return false
