@@ -78,6 +78,8 @@ func NewTestSingleConfig(c *check.C) *Config {
 	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)
 	cfg.ElectionInterval = typeutil.NewDuration(3 * time.Second)
 	cfg.LeaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
+	err := cfg.SetupLogger()
+	c.Assert(err, check.IsNil)
 
 	c.Assert(cfg.Adjust(nil), check.IsNil)
 

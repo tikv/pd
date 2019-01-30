@@ -49,7 +49,11 @@ var initHTTPClientOnce sync.Once
 
 // NewTestServer creates a new TestServer.
 func NewTestServer(cfg *server.Config) (*TestServer, error) {
-	err := server.PrepareJoinCluster(cfg)
+	err := cfg.SetupLogger()
+	if err != nil {
+		return nil, err
+	}
+	err = server.PrepareJoinCluster(cfg)
 	if err != nil {
 		return nil, err
 	}
