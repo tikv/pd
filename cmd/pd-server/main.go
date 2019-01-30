@@ -16,7 +16,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -28,6 +27,7 @@ import (
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 
 	// Register schedulers.
 	_ "github.com/pingcap/pd/server/schedulers"
@@ -51,12 +51,12 @@ func main() {
 	case flag.ErrHelp:
 		os.Exit(0)
 	default:
-		log.S().Fatalf("parse cmd flags error: %s\n", fmt.Sprintf("%+v", err))
+		log.L().Fatal("parse cmd flags error", zap.Error(err))
 	}
 	// New zap logger
 	err = cfg.SetupLogger()
 	if err != nil {
-		log.S().Fatalf("initialize logger error: %s\n", fmt.Sprintf("%+v", err))
+		log.L().Fatal("initialize logger error", zap.Error(err))
 	}
 	// Flushing any buffered log entries
 	defer func() {
@@ -67,7 +67,7 @@ func main() {
 	// The old logger
 	err = logutil.InitLogger(&cfg.Log)
 	if err != nil {
-		log.S().Fatalf("initialize logger error: %s\n", fmt.Sprintf("%+v", err))
+		log.L().Fatal("initialize logger error", zap.Error(err))
 	}
 
 	server.LogPDInfo()
@@ -83,15 +83,15 @@ func main() {
 
 	err = server.PrepareJoinCluster(cfg)
 	if err != nil {
-		log.S().Fatal("join error ", fmt.Sprintf("%+v", err))
+		log.L().Fatal("join meet error", zap.Error(err))
 	}
 	svr, err := server.CreateServer(cfg, api.NewHandler)
 	if err != nil {
-		log.S().Fatalf("create server failed: %v", fmt.Sprintf("%+v", err))
+		log.L().Fatal("create server failed", zap.Error(err))
 	}
 
 	if err = server.InitHTTPClient(svr); err != nil {
-		log.S().Fatalf("initial http client for api handler failed: %v", fmt.Sprintf("%+v", err))
+		log.L().Fatal("initial http client for api handler failed", zap.Error(err))
 	}
 
 	sc := make(chan os.Signal, 1)
@@ -109,11 +109,11 @@ func main() {
 	}()
 
 	if err := svr.Run(ctx); err != nil {
-		log.S().Fatalf("run server failed: %v", fmt.Sprintf("%+v", err))
+		log.L().Fatal("run server failed", zap.Error(err))
 	}
 
 	<-ctx.Done()
-	log.S().Infof("Got signal [%d] to exit.", sig)
+	log.L().Info("Got signal to exit", zap.String("signal", sig.String()))
 
 	svr.Close()
 	switch sig {

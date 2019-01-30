@@ -108,7 +108,7 @@ type Server struct {
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server, error) {
-	log.S().Infof("PD config - %v", cfg)
+	log.L().Info("PD config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
 
 	s := &Server{
@@ -165,7 +165,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
-	log.S().Infof("create etcd v3 client with endpoints %v", endpoints)
+	log.L().Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
 
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
@@ -187,7 +187,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		if etcdServerID == m.ID {
 			etcdPeerURLs := strings.Join(m.PeerURLs, ",")
 			if s.cfg.AdvertisePeerUrls != etcdPeerURLs {
-				log.S().Infof("update advertise peer urls from %s to %s", s.cfg.AdvertisePeerUrls, etcdPeerURLs)
+				log.L().Info("update advertise peer urls", zap.String("from", s.cfg.AdvertisePeerUrls), zap.String("to", etcdPeerURLs))
 				s.cfg.AdvertisePeerUrls = etcdPeerURLs
 			}
 		}
@@ -204,7 +204,7 @@ func (s *Server) startServer() error {
 	if err = s.initClusterID(); err != nil {
 		return err
 	}
-	log.S().Infof("init cluster id %v", s.clusterID)
+	log.L().Info("Init cluster id", zap.Uint64("cluster id", s.clusterID))
 	// It may lose accuracy if use float64 to store uint64. So we store the
 	// cluster id in label.
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
@@ -270,7 +270,7 @@ func (s *Server) Close() {
 		s.hbStreams.Close()
 	}
 	if err := s.kv.Close(); err != nil {
-		log.S().Errorf("close kv meet error: %s", err)
+		log.L().Error("close kv meet error", zap.Error(err))
 	}
 
 	log.L().Info("close server")
@@ -287,7 +287,7 @@ var timeMonitorOnce sync.Once
 func (s *Server) Run(ctx context.Context) error {
 	timeMonitorOnce.Do(func() {
 		go StartMonitor(time.Now, func() {
-			log.S().Errorf("system time jumps backward")
+			log.L().Error("system time jumps backward")
 			timeJumpBackCounter.Inc()
 		})
 	})
@@ -349,7 +349,9 @@ func (s *Server) collectEtcdStateMetrics() {
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
 	clusterID := s.clusterID
 
-	log.S().Infof("try to bootstrap raft cluster %d with %v", clusterID, req)
+	log.L().Info("try to bootstrap raft cluster",
+		zap.Uint64("cluster-id", clusterID),
+		zap.String("request", fmt.Sprintf("%v", req)))
 
 	if err := checkBootstrapRequest(clusterID, req); err != nil {
 		return nil, err
@@ -402,18 +404,18 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		return nil, errors.WithStack(err)
 	}
 	if !resp.Succeeded {
-		log.S().Warnf("cluster %d already bootstrapped", clusterID)
+		log.L().Warn("cluster already bootstrapped", zap.Uint64("cluster-id", clusterID))
 		return nil, errors.Errorf("cluster %d already bootstrapped", clusterID)
 	}
 
-	log.S().Infof("bootstrap cluster %d ok", clusterID)
+	log.L().Info("bootstrap cluster ok", zap.Uint64("cluster-id", clusterID))
 	err = s.kv.SaveRegion(req.GetRegion())
 	if err != nil {
-		log.S().Warnf("save the bootstrap region failed: %s", err)
+		log.L().Warn("save the bootstrap region failed", zap.Error(err))
 	}
 	err = s.kv.Flush()
 	if err != nil {
-		log.S().Warnf("flush the bootstrap region failed: %s", err)
+		log.L().Warn("flush the bootstrap region failed", zap.Error(err))
 	}
 	if err := s.cluster.start(); err != nil {
 		return nil, err
@@ -529,7 +531,7 @@ func (s *Server) SetScheduleConfig(cfg ScheduleConfig) error {
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
 		return err
 	}
-	log.S().Infof("schedule config is updated: %+v, old: %+v", cfg, old)
+	log.L().Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -550,7 +552,7 @@ func (s *Server) SetReplicationConfig(cfg ReplicationConfig) error {
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
 		return err
 	}
-	log.S().Infof("replication config is updated: %+v, old: %+v", cfg, old)
+	log.L().Info("replication config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -561,7 +563,7 @@ func (s *Server) SetPDServerConfig(cfg PDServerConfig) error {
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
 		return err
 	}
-	log.S().Infof("replication config is updated: %+v, old: %+v", cfg, old)
+	log.L().Info("PD server config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -598,13 +600,13 @@ func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) error {
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
 			return err
 		}
-		log.S().Infof("namespace:%v config is updated: %+v, old: %+v", name, cfg, old)
+		log.L().Info("namespace config is updated", zap.String("name", name), zap.Reflect("new", cfg), zap.Reflect("old", old))
 	} else {
 		s.scheduleOpt.ns[name] = newNamespaceOption(&cfg)
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
 			return err
 		}
-		log.S().Infof("namespace:%v config is added: %+v", name, cfg)
+		log.L().Info("namespace config is added", zap.String("name", name), zap.Reflect("new", cfg))
 	}
 	return nil
 }
@@ -617,7 +619,7 @@ func (s *Server) DeleteNamespaceConfig(name string) error {
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
 			return err
 		}
-		log.S().Infof("namespace:%v config is deleted: %+v", name, *cfg)
+		log.L().Info("namespace config is deleted", zap.String("name", name), zap.Reflect("config", *cfg))
 	}
 	return nil
 }
@@ -629,7 +631,7 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 	if err != nil {
 		return err
 	}
-	log.S().Infof("label property config is updated: %+v", s.scheduleOpt.loadLabelPropertyConfig())
+	log.L().Info("label property config is updated", zap.Reflect("config", s.scheduleOpt.loadLabelPropertyConfig()))
 	return nil
 }
 
@@ -640,7 +642,7 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 	if err != nil {
 		return err
 	}
-	log.S().Infof("label property config is updated: %+v", s.scheduleOpt.loadLabelPropertyConfig())
+	log.L().Info("label property config is deleted", zap.Reflect("config", s.scheduleOpt.loadLabelPropertyConfig()))
 	return nil
 }
 
@@ -660,7 +662,7 @@ func (s *Server) SetClusterVersion(v string) error {
 	if err != nil {
 		return err
 	}
-	log.S().Infof("cluster version is updated to %s", v)
+	log.L().Info("cluster version is updated", zap.String("new-version", v))
 	return nil
 }
 
