@@ -26,6 +26,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/embed"
+	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -36,9 +39,6 @@ import (
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/pkg/types"
 	"google.golang.org/grpc"
 )
 
@@ -127,7 +127,7 @@ func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server,
 	if EnableZap {
 		// The etcd master version has removed embed.Config.SetupLogging.
 		// Now logger is set up automatically based on embed.Config.Logger, embed.Config.LogOutputs, embed.Config.Debug fields.
-		// Use zap logger in the test, otherwise will panic. Reference: https://github.com/etcd-io/etcd/blob/master/embed/config_logging.go#L45
+		// Use zap logger in the test, otherwise will panic. Reference: https://github.com/coreos/etcd/blob/master/embed/config_logging.go#L45
 		s.etcdCfg.Logger = "zap"
 		s.etcdCfg.LogOutputs = []string{"stdout"}
 	}

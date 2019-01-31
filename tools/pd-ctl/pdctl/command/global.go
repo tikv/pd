@@ -23,9 +23,9 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/coreos/etcd/pkg/transport"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	"go.etcd.io/etcd/pkg/transport"
 )
 
 var (
