@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -345,10 +346,10 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 	if store == nil {
 		return errors.Errorf("invalid store ID %d, not found", storeID)
 	}
-	storeMeta := store.Store
-	storeMeta.Labels = labels
+	newStore := proto.Clone(store.GetMeta()).(*metapb.Store)
+	newStore.Labels = labels
 	// putStore will perform label merge.
-	err := c.putStore(storeMeta)
+	err := c.putStore(newStore)
 	return err
 }
 
@@ -377,8 +378,8 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		if s.IsTombstone() {
 			continue
 		}
-		if s.GetId() != store.GetId() && s.GetAddress() == store.GetAddress() {
-			return errors.Errorf("duplicated store address: %v, already registered by %v", store, s.Store)
+		if s.GetID() != store.GetId() && s.GetAddress() == store.GetAddress() {
+			return errors.Errorf("duplicated store address: %v, already registered by %v", store, s.GetMeta())
 		}
 	}
 
@@ -388,9 +389,13 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		s = core.NewStoreInfo(store)
 	} else {
 		// Update an existed store.
-		s.Address = store.Address
-		s.Version = store.Version
-		s.MergeLabels(store.Labels)
+		labels := s.MergeLabels(store.GetLabels())
+
+		s = s.Clone(
+			core.SetStoreAddress(store.Address),
+			core.SetStoreVersion(store.Version),
+			core.SetStoreLabels(labels),
+		)
 	}
 	// Check location labels.
 	for _, k := range c.cachedCluster.GetLocationLabels() {
@@ -424,9 +429,9 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 		return op.AddTo(core.StoreTombstonedErr{StoreID: storeID})
 	}
 
-	store.State = metapb.StoreState_Offline
-	log.Warnf("[store %d] store %s has been Offline", store.GetId(), store.GetAddress())
-	return cluster.putStore(store)
+	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline))
+	log.Warnf("[store %d] store %s has been Offline", newStore.GetID(), newStore.GetAddress())
+	return cluster.putStore(newStore)
 }
 
 // BuryStore marks a store as tombstone in cluster.
@@ -456,9 +461,9 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error { // revive:di
 		log.Warnf("forcedly bury store %v", store)
 	}
 
-	store.State = metapb.StoreState_Tombstone
-	log.Warnf("[store %d] store %s has been Tombstone", store.GetId(), store.GetAddress())
-	return cluster.putStore(store)
+	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	log.Warnf("[store %d] store %s has been Tombstone", newStore.GetID(), newStore.GetAddress())
+	return cluster.putStore(newStore)
 }
 
 // SetStoreState sets up a store's state.
@@ -473,13 +478,13 @@ func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) err
 		return core.NewStoreNotFoundErr(storeID)
 	}
 
-	store.State = state
+	newStore := store.Clone(core.SetStoreState(state))
 	log.Warnf("[store %d] set state to %v", storeID, state.String())
-	return cluster.putStore(store)
+	return cluster.putStore(newStore)
 }
 
 // SetStoreWeight sets up a store's leader/region balance weight.
-func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) error {
+func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight float64) error {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -488,12 +493,16 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) err
 		return core.NewStoreNotFoundErr(storeID)
 	}
 
-	if err := c.s.kv.SaveStoreWeight(storeID, leader, region); err != nil {
+	if err := c.s.kv.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
 		return err
 	}
 
-	store.LeaderWeight, store.RegionWeight = leader, region
-	return c.cachedCluster.putStore(store)
+	newStore := store.Clone(
+		core.SetLeaderWeight(leaderWeight),
+		core.SetRegionWeight(regionWeight),
+	)
+
+	return c.cachedCluster.putStore(newStore)
 }
 
 func (c *RaftCluster) checkStores() {
@@ -513,7 +522,7 @@ func (c *RaftCluster) checkStores() {
 			continue
 		}
 
-		offlineStore := store.Store
+		offlineStore := store.GetMeta()
 		// If the store is empty, it can be buried.
 		if cluster.getStoreRegionCount(offlineStore.GetId()) == 0 {
 			if err := c.BuryStore(offlineStore.GetId(), false); err != nil {

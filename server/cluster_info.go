@@ -181,12 +181,12 @@ func (c *clusterInfo) GetStore(storeID uint64) *core.StoreInfo {
 func (c *clusterInfo) putStore(store *core.StoreInfo) error {
 	c.Lock()
 	defer c.Unlock()
-	return c.putStoreLocked(store.Clone())
+	return c.putStoreLocked(store)
 }
 
 func (c *clusterInfo) putStoreLocked(store *core.StoreInfo) error {
 	if c.kv != nil {
-		if err := c.kv.SaveStore(store.Store); err != nil {
+		if err := c.kv.SaveStore(store.GetMeta()); err != nil {
 			return err
 		}
 	}
@@ -447,19 +447,18 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	if store == nil {
 		return core.NewStoreNotFoundErr(storeID)
 	}
-	store.Stats = proto.Clone(stats).(*pdpb.StoreStats)
-	store.LastHeartbeatTS = time.Now()
-
-	c.core.Stores.SetStore(store)
+	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
+	c.core.Stores.SetStore(newStore)
 	return nil
 }
 
 func (c *clusterInfo) updateStoreStatusLocked(id uint64) {
-	c.core.Stores.SetLeaderCount(id, c.core.Regions.GetStoreLeaderCount(id))
-	c.core.Stores.SetRegionCount(id, c.core.Regions.GetStoreRegionCount(id))
-	c.core.Stores.SetPendingPeerCount(id, c.core.Regions.GetStorePendingPeerCount(id))
-	c.core.Stores.SetLeaderSize(id, c.core.Regions.GetStoreLeaderRegionSize(id))
-	c.core.Stores.SetRegionSize(id, c.core.Regions.GetStoreRegionSize(id))
+	leaderCount := c.core.Regions.GetStoreLeaderCount(id)
+	regionCount := c.core.Regions.GetStoreRegionCount(id)
+	pendingPeerCount := c.core.Regions.GetStorePendingPeerCount(id)
+	leaderRegionSize := c.core.Regions.GetStoreLeaderRegionSize(id)
+	regionSize := c.core.Regions.GetStoreRegionSize(id)
+	c.core.Stores.UpdateStoreStatusLocked(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
 // handleRegionHeartbeat updates the region information.
@@ -766,7 +765,7 @@ func (checker *prepareChecker) check(c *clusterInfo) bool {
 		if !store.IsUp() {
 			continue
 		}
-		storeID := store.GetId()
+		storeID := store.GetID()
 		// For each store, the number of active regions should be more than total region of the store * collectFactor
 		if float64(c.core.Regions.GetStoreRegionCount(storeID))*collectFactor > float64(checker.reactiveRegions[storeID]) {
 			return false

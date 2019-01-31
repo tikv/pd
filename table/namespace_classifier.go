@@ -131,7 +131,7 @@ func (c *tableNamespaceClassifier) GetStoreNamespace(storeInfo *core.StoreInfo) 
 	defer c.RUnlock()
 
 	for name, ns := range c.nsInfo.namespaces {
-		_, ok := ns.StoreIDs[storeInfo.Id]
+		_, ok := ns.StoreIDs[storeInfo.GetID()]
 		if ok {
 			return name
 		}

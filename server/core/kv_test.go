@@ -112,8 +112,8 @@ func (s *testKVSuite) TestStoreWeight(c *C) {
 	leaderWeights := []float64{1.0, 2.0, 0.2}
 	regionWeights := []float64{1.0, 3.0, 0.3}
 	for i := 0; i < n; i++ {
-		c.Assert(cache.GetStore(uint64(i)).LeaderWeight, Equals, leaderWeights[i])
-		c.Assert(cache.GetStore(uint64(i)).RegionWeight, Equals, regionWeights[i])
+		c.Assert(cache.GetStore(uint64(i)).GetLeaderWeight(), Equals, leaderWeights[i])
+		c.Assert(cache.GetStore(uint64(i)).GetRegionWeight(), Equals, regionWeights[i])
 	}
 }
 

@@ -90,9 +90,9 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		return nil
 	}
 
-	log.Debugf("[%s] store%d has the max leader score, store%d has the min leader score", l.GetName(), source.GetId(), target.GetId())
-	sourceStoreLabel := strconv.FormatUint(source.GetId(), 10)
-	targetStoreLabel := strconv.FormatUint(target.GetId(), 10)
+	log.Debugf("[%s] store%d has the max leader score, store%d has the min leader score", l.GetName(), source.GetID(), target.GetID())
+	sourceStoreLabel := strconv.FormatUint(source.GetID(), 10)
+	targetStoreLabel := strconv.FormatUint(target.GetID(), 10)
 	balanceLeaderCounter.WithLabelValues("high_score", sourceStoreLabel).Inc()
 	balanceLeaderCounter.WithLabelValues("low_score", targetStoreLabel).Inc()
 
@@ -109,11 +109,11 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 	}
 
 	// If no operator can be created for the selected stores, ignore them for a while.
-	log.Debugf("[%s] no operator created for selected store%d and store%d", l.GetName(), source.GetId(), target.GetId())
-	balanceLeaderCounter.WithLabelValues("add_taint", strconv.FormatUint(source.GetId(), 10)).Inc()
-	l.taintStores.Put(source.GetId())
-	balanceLeaderCounter.WithLabelValues("add_taint", strconv.FormatUint(target.GetId(), 10)).Inc()
-	l.taintStores.Put(target.GetId())
+	log.Debugf("[%s] no operator created for selected store%d and store%d", l.GetName(), source.GetID(), target.GetID())
+	balanceLeaderCounter.WithLabelValues("add_taint", strconv.FormatUint(source.GetID(), 10)).Inc()
+	l.taintStores.Put(source.GetID())
+	balanceLeaderCounter.WithLabelValues("add_taint", strconv.FormatUint(target.GetID(), 10)).Inc()
+	l.taintStores.Put(target.GetID())
 	return nil
 }
 
@@ -121,9 +121,9 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderOut(source *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
-	region := cluster.RandLeaderRegion(source.GetId(), core.HealthRegion())
+	region := cluster.RandLeaderRegion(source.GetID(), core.HealthRegion())
 	if region == nil {
-		log.Debugf("[%s] store%d has no leader", l.GetName(), source.GetId())
+		log.Debugf("[%s] store%d has no leader", l.GetName(), source.GetID())
 		schedulerCounter.WithLabelValues(l.GetName(), "no_leader_region").Inc()
 		return nil
 	}
@@ -140,9 +140,9 @@ func (l *balanceLeaderScheduler) transferLeaderOut(source *core.StoreInfo, clust
 // It randomly selects a health region from the target store, then picks
 // the worst follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluster schedule.Cluster, opInfluence schedule.OpInfluence) []*schedule.Operator {
-	region := cluster.RandFollowerRegion(target.GetId(), core.HealthRegion())
+	region := cluster.RandFollowerRegion(target.GetID(), core.HealthRegion())
 	if region == nil {
-		log.Debugf("[%s] store%d has no follower", l.GetName(), target.GetId())
+		log.Debugf("[%s] store%d has no follower", l.GetName(), target.GetID())
 		schedulerCounter.WithLabelValues(l.GetName(), "no_follower_region").Inc()
 		return nil
 	}
@@ -168,18 +168,18 @@ func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source,
 
 	if !shouldBalance(cluster, source, target, region, core.LeaderKind, opInfluence) {
 		log.Debugf("[%s] skip balance region %d, source %d to target %d, source size: %v, source score: %v, source influence: %v, target size: %v, target score: %v, target influence: %v, average region size: %v",
-			l.GetName(), region.GetID(), source.GetId(), target.GetId(),
-			source.LeaderSize, source.LeaderScore(0), opInfluence.GetStoreInfluence(source.GetId()).ResourceSize(core.LeaderKind),
-			target.LeaderSize, target.LeaderScore(0), opInfluence.GetStoreInfluence(target.GetId()).ResourceSize(core.LeaderKind),
+			l.GetName(), region.GetID(), source.GetID(), target.GetID(),
+			source.GetLeaderSize(), source.LeaderScore(0), opInfluence.GetStoreInfluence(source.GetID()).ResourceSize(core.LeaderKind),
+			target.GetLeaderSize(), target.LeaderScore(0), opInfluence.GetStoreInfluence(target.GetID()).ResourceSize(core.LeaderKind),
 			cluster.GetAverageRegionSize())
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}
 
 	schedulerCounter.WithLabelValues(l.GetName(), "new_operator").Inc()
-	balanceLeaderCounter.WithLabelValues("move_leader", fmt.Sprintf("store%d-out", source.GetId())).Inc()
-	balanceLeaderCounter.WithLabelValues("move_leader", fmt.Sprintf("store%d-in", target.GetId())).Inc()
-	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: target.GetId()}
+	balanceLeaderCounter.WithLabelValues("move_leader", fmt.Sprintf("store%d-out", source.GetID())).Inc()
+	balanceLeaderCounter.WithLabelValues("move_leader", fmt.Sprintf("store%d-in", target.GetID())).Inc()
+	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: target.GetID()}
 	op := schedule.NewOperator("balance-leader", region.GetID(), region.GetRegionEpoch(), schedule.OpBalance|schedule.OpLeader, step)
 	return []*schedule.Operator{op}
 }

@@ -35,7 +35,7 @@ type Filter interface {
 
 // FilterSource checks if store can pass all Filters as source store.
 func FilterSource(opt Options, store *core.StoreInfo, filters []Filter) bool {
-	storeID := fmt.Sprintf("store%d", store.GetId())
+	storeID := fmt.Sprintf("store%d", store.GetID())
 	for _, filter := range filters {
 		if filter.FilterSource(opt, store) {
 			log.Debugf("[filter %T] filters store %v from source", filter, store)
@@ -48,7 +48,7 @@ func FilterSource(opt Options, store *core.StoreInfo, filters []Filter) bool {
 
 // FilterTarget checks if store can pass all Filters as target store.
 func FilterTarget(opt Options, store *core.StoreInfo, filters []Filter) bool {
-	storeID := fmt.Sprintf("store%d", store.GetId())
+	storeID := fmt.Sprintf("store%d", store.GetID())
 	for _, filter := range filters {
 		if filter.FilterTarget(opt, store) {
 			log.Debugf("[filter %T] filters store %v from target", filter, store)
@@ -77,12 +77,12 @@ func (f *excludedFilter) Type() string {
 }
 
 func (f *excludedFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
-	_, ok := f.sources[store.GetId()]
+	_, ok := f.sources[store.GetID()]
 	return ok
 }
 
 func (f *excludedFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
-	_, ok := f.targets[store.GetId()]
+	_, ok := f.targets[store.GetID()]
 	return ok
 }
 
@@ -136,7 +136,7 @@ func (f *healthFilter) Type() string {
 }
 
 func (f *healthFilter) filter(opt Options, store *core.StoreInfo) bool {
-	if store.Stats.GetIsBusy() {
+	if store.GetIsBusy() {
 		return true
 	}
 	return store.DownTime() > opt.GetMaxStoreDownTime()
@@ -185,7 +185,7 @@ func (p *pendingPeerCountFilter) filter(opt Options, store *core.StoreInfo) bool
 	if opt.GetMaxPendingPeerCount() == 0 {
 		return false
 	}
-	return store.PendingPeerCount > int(opt.GetMaxPendingPeerCount())
+	return store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount())
 }
 
 func (p *pendingPeerCountFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
@@ -209,9 +209,9 @@ func (f *snapshotCountFilter) Type() string {
 }
 
 func (f *snapshotCountFilter) filter(opt Options, store *core.StoreInfo) bool {
-	return uint64(store.Stats.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.Stats.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.Stats.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount()
+	return uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
+		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
+		uint64(store.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount()
 }
 
 func (f *snapshotCountFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
@@ -236,7 +236,7 @@ func (f *cacheFilter) Type() string {
 }
 
 func (f *cacheFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
-	return f.cache.Exists(store.GetId())
+	return f.cache.Exists(store.GetID())
 }
 
 func (f *cacheFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
@@ -275,7 +275,7 @@ type distinctScoreFilter struct {
 func NewDistinctScoreFilter(labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
 	newStores := make([]*core.StoreInfo, 0, len(stores)-1)
 	for _, s := range stores {
-		if s.GetId() == source.GetId() {
+		if s.GetID() == source.GetID() {
 			continue
 		}
 		newStores = append(newStores, s)
@@ -347,7 +347,7 @@ func (f rejectLeaderFilter) FilterSource(opt Options, store *core.StoreInfo) boo
 }
 
 func (f rejectLeaderFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
-	return opt.CheckLabelProperty(RejectLeader, store.Labels)
+	return opt.CheckLabelProperty(RejectLeader, store.GetLabels())
 }
 
 // StoreStateFilter is used to determine whether a store can be selected as the
@@ -392,8 +392,8 @@ func (f StoreStateFilter) FilterTarget(opt Options, store *core.StoreInfo) bool 
 	if f.TransferLeader &&
 		(store.IsDisconnected() ||
 			store.IsBlocked() ||
-			store.Stats.GetIsBusy() ||
-			opt.CheckLabelProperty(RejectLeader, store.Labels)) {
+			store.GetIsBusy() ||
+			opt.CheckLabelProperty(RejectLeader, store.GetLabels())) {
 		return true
 	}
 
@@ -404,15 +404,15 @@ func (f StoreStateFilter) FilterTarget(opt Options, store *core.StoreInfo) bool 
 }
 
 func (f StoreStateFilter) filterMoveRegion(opt Options, store *core.StoreInfo) bool {
-	if store.Stats.GetIsBusy() {
+	if store.GetIsBusy() {
 		return true
 	}
-	if opt.GetMaxPendingPeerCount() > 0 && store.PendingPeerCount > int(opt.GetMaxPendingPeerCount()) {
+	if opt.GetMaxPendingPeerCount() > 0 && store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount()) {
 		return true
 	}
-	if uint64(store.Stats.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.Stats.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.Stats.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount() {
+	if uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
+		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
+		uint64(store.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount() {
 		return true
 	}
 	return false

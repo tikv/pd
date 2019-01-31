@@ -71,32 +71,32 @@ const (
 func newStoreInfo(opt *server.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 	s := &StoreInfo{
 		Store: &MetaStore{
-			Store:     store.Store,
-			StateName: store.State.String(),
+			Store:     store.GetMeta(),
+			StateName: store.GetState().String(),
 		},
 		Status: &StoreStatus{
-			Capacity:           typeutil.ByteSize(store.Stats.GetCapacity()),
-			Available:          typeutil.ByteSize(store.Stats.GetAvailable()),
-			LeaderCount:        store.LeaderCount,
-			LeaderWeight:       store.LeaderWeight,
+			Capacity:           typeutil.ByteSize(store.GetCapacity()),
+			Available:          typeutil.ByteSize(store.GetAvailable()),
+			LeaderCount:        store.GetLeaderCount(),
+			LeaderWeight:       store.GetLeaderWeight(),
 			LeaderScore:        store.LeaderScore(0),
-			LeaderSize:         store.LeaderSize,
-			RegionCount:        store.RegionCount,
-			RegionWeight:       store.RegionWeight,
+			LeaderSize:         store.GetLeaderSize(),
+			RegionCount:        store.GetRegionCount(),
+			RegionWeight:       store.GetRegionWeight(),
 			RegionScore:        store.RegionScore(opt.HighSpaceRatio, opt.LowSpaceRatio, 0),
-			RegionSize:         store.RegionSize,
-			SendingSnapCount:   store.Stats.GetSendingSnapCount(),
-			ReceivingSnapCount: store.Stats.GetReceivingSnapCount(),
-			ApplyingSnapCount:  store.Stats.GetApplyingSnapCount(),
-			IsBusy:             store.Stats.GetIsBusy(),
+			RegionSize:         store.GetRegionSize(),
+			SendingSnapCount:   store.GetSendingSnapCount(),
+			ReceivingSnapCount: store.GetReceivingSnapCount(),
+			ApplyingSnapCount:  store.GetApplyingSnapCount(),
+			IsBusy:             store.GetIsBusy(),
 		},
 	}
 
-	if store.Stats != nil {
+	if store.GetStoreStats() != nil {
 		startTS := store.GetStartTS()
 		s.Status.StartTS = &startTS
 	}
-	if lastHeartbeat := store.LastHeartbeatTS; !lastHeartbeat.IsZero() {
+	if lastHeartbeat := store.GetLastHeartbeatTS(); !lastHeartbeat.IsZero() {
 		s.Status.LastHeartbeatTS = &lastHeartbeat
 	}
 	if upTime := store.GetUptime(); upTime > 0 {
@@ -104,7 +104,7 @@ func newStoreInfo(opt *server.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 		s.Status.Uptime = &duration
 	}
 
-	if store.State == metapb.StoreState_Up {
+	if store.GetState() == metapb.StoreState_Up {
 		if store.DownTime() > opt.MaxStoreDownTime.Duration {
 			s.Store.StateName = downStateName
 		} else if store.IsDisconnected() {

@@ -34,7 +34,7 @@ func newNamespaceCluster(c schedule.Cluster, classifier namespace.Classifier, na
 	stores := make(map[uint64]*core.StoreInfo)
 	for _, s := range c.GetStores() {
 		if classifier.GetStoreNamespace(s) == namespace {
-			stores[s.GetId()] = s
+			stores[s.GetID()] = s
 		}
 	}
 	return &namespaceCluster{
@@ -91,8 +91,8 @@ func (c *namespaceCluster) RandLeaderRegion(storeID uint64, opts ...core.RegionO
 func (c *namespaceCluster) GetAverageRegionSize() int64 {
 	var totalCount, totalSize int64
 	for _, s := range c.stores {
-		totalCount += int64(s.RegionCount)
-		totalSize += s.RegionSize
+		totalCount += int64(s.GetRegionCount())
+		totalSize += s.GetRegionSize()
 	}
 	if totalCount == 0 {
 		return 0

@@ -165,7 +165,7 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 	}
 	return &pdpb.GetStoreResponse{
 		Header: s.header(),
-		Store:  store.Store,
+		Store:  store.GetMeta(),
 	}, nil
 }
 

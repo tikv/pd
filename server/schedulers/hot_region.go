@@ -291,7 +291,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 			if schedule.FilterTarget(cluster, store, filters) {
 				continue
 			}
-			destStoreIDs = append(destStoreIDs, store.GetId())
+			destStoreIDs = append(destStoreIDs, store.GetID())
 		}
 
 		destStoreID = h.selectDestStore(destStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
@@ -341,7 +341,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 		candidateStoreIDs := make([]uint64, 0, len(srcRegion.GetPeers())-1)
 		for _, store := range cluster.GetFollowerStores(srcRegion) {
 			if !schedule.FilterTarget(cluster, store, filters) {
-				candidateStoreIDs = append(candidateStoreIDs, store.GetId())
+				candidateStoreIDs = append(candidateStoreIDs, store.GetID())
 			}
 		}
 		if len(candidateStoreIDs) == 0 {

@@ -84,16 +84,16 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*
 		return nil, nil
 	}
 
-	region := cluster.RandFollowerRegion(source.GetId(), core.HealthRegion())
+	region := cluster.RandFollowerRegion(source.GetID(), core.HealthRegion())
 	if region == nil {
-		region = cluster.RandLeaderRegion(source.GetId(), core.HealthRegion())
+		region = cluster.RandLeaderRegion(source.GetID(), core.HealthRegion())
 	}
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
 		return nil, nil
 	}
 
-	return region, region.GetStorePeer(source.GetId())
+	return region, region.GetStorePeer(source.GetID())
 }
 
 func (s *shuffleRegionScheduler) scheduleAddPeer(cluster schedule.Cluster, filter schedule.Filter) *metapb.Peer {
@@ -104,7 +104,7 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster schedule.Cluster, filte
 		return nil
 	}
 
-	newPeer, err := cluster.AllocPeer(target.GetId())
+	newPeer, err := cluster.AllocPeer(target.GetID())
 	if err != nil {
 		log.Errorf("failed to allocate peer: %v", err)
 		return nil

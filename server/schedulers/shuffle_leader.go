@@ -63,13 +63,13 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		schedulerCounter.WithLabelValues(s.GetName(), "no_target_store").Inc()
 		return nil
 	}
-	region := cluster.RandFollowerRegion(targetStore.GetId(), core.HealthRegion())
+	region := cluster.RandFollowerRegion(targetStore.GetID(), core.HealthRegion())
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_follower").Inc()
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: targetStore.GetId()}
+	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: targetStore.GetID()}
 	op := schedule.NewOperator("shuffleLeader", region.GetID(), region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpLeader, step)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*schedule.Operator{op}

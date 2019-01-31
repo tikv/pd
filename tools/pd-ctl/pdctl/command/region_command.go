@@ -59,42 +59,47 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRegionsWithStartKeyCommand())
 
 	topRead := &cobra.Command{
-		Use:   "topread <limit>",
+		Use:   `topread <limit> [--jq="<query string>"]`,
 		Short: "show regions with top read flow",
 		Run:   showRegionTopReadCommandFunc,
 	}
+	topRead.Flags().String("jq", "", "jq query")
 	r.AddCommand(topRead)
 
 	topWrite := &cobra.Command{
-		Use:   "topwrite <limit>",
+		Use:   `topwrite <limit> [--jq="<query string>"]`,
 		Short: "show regions with top write flow",
 		Run:   showRegionTopWriteCommandFunc,
 	}
+	topWrite.Flags().String("jq", "", "jq query")
 	r.AddCommand(topWrite)
 
 	topConfVer := &cobra.Command{
-		Use:   "topconfver <limit>",
+		Use:   `topconfver <limit> [--jq="<query string>"]`,
 		Short: "show regions with top conf version",
 		Run:   showRegionTopConfVerCommandFunc,
 	}
+	topConfVer.Flags().String("jq", "", "jq query")
 	r.AddCommand(topConfVer)
 
 	topVersion := &cobra.Command{
-		Use:   "topversion <limit>",
+		Use:   `topversion <limit> [--jq="<query string>"]`,
 		Short: "show regions with top version",
 		Run:   showRegionTopVersionCommandFunc,
 	}
+	topVersion.Flags().String("jq", "", "jq query")
 	r.AddCommand(topVersion)
 
 	topSize := &cobra.Command{
-		Use:   "topsize <limit>",
+		Use:   `topsize <limit> [--jq="<query string>"]`,
 		Short: "show regions with top size",
 		Run:   showRegionTopSizeCommandFunc,
 	}
+	topSize.Flags().String("jq", "", "jq query")
 	r.AddCommand(topSize)
 
 	scanRegion := &cobra.Command{
-		Use:   `scan [-jq="<query string>"]`,
+		Use:   `scan [--jq="<query string>"]`,
 		Short: "scan all regions",
 		Run:   scanRegionCommandFunc,
 	}
@@ -188,6 +193,10 @@ func showRegionTopWriteCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("Failed to get regions: %s\n", err)
 		return
 	}
+	if flag := cmd.Flag("jq"); flag != nil && flag.Value.String() != "" {
+		printWithJQFilter(r, flag.Value.String())
+		return
+	}
 	cmd.Println(r)
 }
 
@@ -203,6 +212,10 @@ func showRegionTopReadCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get regions: %s\n", err)
+		return
+	}
+	if flag := cmd.Flag("jq"); flag != nil && flag.Value.String() != "" {
+		printWithJQFilter(r, flag.Value.String())
 		return
 	}
 	cmd.Println(r)
@@ -222,6 +235,10 @@ func showRegionTopConfVerCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("Failed to get regions: %s\n", err)
 		return
 	}
+	if flag := cmd.Flag("jq"); flag != nil && flag.Value.String() != "" {
+		printWithJQFilter(r, flag.Value.String())
+		return
+	}
 	cmd.Println(r)
 }
 
@@ -239,6 +256,10 @@ func showRegionTopVersionCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("Failed to get regions: %s\n", err)
 		return
 	}
+	if flag := cmd.Flag("jq"); flag != nil && flag.Value.String() != "" {
+		printWithJQFilter(r, flag.Value.String())
+		return
+	}
 	cmd.Println(r)
 }
 
@@ -254,6 +275,10 @@ func showRegionTopSizeCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get regions: %s\n", err)
+		return
+	}
+	if flag := cmd.Flag("jq"); flag != nil && flag.Value.String() != "" {
+		printWithJQFilter(r, flag.Value.String())
 		return
 	}
 	cmd.Println(r)

@@ -27,7 +27,7 @@ func (c mockClassifier) GetAllNamespaces() []string {
 }
 
 func (c mockClassifier) GetStoreNamespace(store *core.StoreInfo) string {
-	if store.GetId() < 5 {
+	if store.GetID() < 5 {
 		return "global"
 	}
 	return "unknown"
@@ -91,7 +91,9 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 		{Peer: peers[0], DownSeconds: 3608},
 		{Peer: peers[1], DownSeconds: 3608},
 	}
-	stores[3].State = metapb.StoreState_Offline
+
+	store3 := stores[3].Clone(core.SetStoreState(metapb.StoreState_Offline))
+	stores[3] = store3
 	r1 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("aa"), EndKey: []byte("bb")}
 	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
 	region1 := core.NewRegionInfo(r1, peers[0])
@@ -133,7 +135,8 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.stats[offlinePeer]), Equals, 0)
 	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 0)
 
-	stores[3].State = metapb.StoreState_Up
+	store3 = stores[3].Clone(core.SetStoreState(metapb.StoreState_Up))
+	stores[3] = store3
 	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[offlinePeer]), Equals, 0)
 }
@@ -178,10 +181,12 @@ func (t *testRegionStatisticsSuite) TestRegionLabelIsolationLevel(c *C) {
 		}
 		stores := make([]*core.StoreInfo, 0, len(labels))
 		for i, m := range metaStores {
-			s := core.NewStoreInfo(m)
+			var newLabels []*metapb.StoreLabel
 			for k, v := range labels[i] {
-				s.Labels = append(s.Labels, &metapb.StoreLabel{Key: k, Value: v})
+				newLabels = append(newLabels, &metapb.StoreLabel{Key: k, Value: v})
 			}
+			s := core.NewStoreInfo(m, core.SetStoreLabels(newLabels))
+
 			stores = append(stores, s)
 		}
 		region := core.NewRegionInfo(&metapb.Region{Id: uint64(regionID)}, nil)

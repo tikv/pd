@@ -16,6 +16,8 @@ package schedule
 import (
 	"bytes"
 
+	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -59,21 +61,31 @@ func GenRangeCluster(cluster Cluster, startKey, endKey []byte) *RangeCluster {
 	}
 }
 
-func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) {
-	id := s.GetId()
+func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
+	id := s.GetID()
 
-	used := float64(s.Stats.GetUsedSize()) / (1 << 20)
+	used := float64(s.GetUsedSize()) / (1 << 20)
 	if used == 0 {
-		return
+		return s
 	}
-	amplification := float64(s.RegionSize) / used
-	s.LeaderCount = r.regions.GetStoreLeaderCount(id)
-	s.LeaderSize = r.regions.GetStoreLeaderRegionSize(id)
-	s.RegionCount = r.regions.GetStoreRegionCount(id)
-	s.RegionSize = r.regions.GetStoreRegionSize(id)
-	s.PendingPeerCount = r.regions.GetStorePendingPeerCount(id)
-	s.Stats.UsedSize = uint64(float64(s.RegionSize)/amplification) * (1 << 20)
-	s.Stats.Available = s.Stats.GetCapacity() - s.Stats.GetUsedSize()
+	amplification := float64(s.GetRegionSize()) / used
+	leaderCount := r.regions.GetStoreLeaderCount(id)
+	leaderSize := r.regions.GetStoreLeaderRegionSize(id)
+	regionCount := r.regions.GetStoreRegionCount(id)
+	regionSize := r.regions.GetStoreRegionSize(id)
+	pendingPeerCount := r.regions.GetStorePendingPeerCount(id)
+	newStats := proto.Clone(s.GetStoreStats()).(*pdpb.StoreStats)
+	newStats.UsedSize = uint64(float64(s.GetRegionSize())/amplification) * (1 << 20)
+	newStats.Available = s.GetCapacity() - s.GetUsedSize()
+	newStore := s.Clone(
+		core.SetStoreStats(newStats),
+		core.SetLeaderCount(leaderCount),
+		core.SetRegionCount(regionCount),
+		core.SetPendingPeerCount(pendingPeerCount),
+		core.SetLeaderSize(leaderSize),
+		core.SetRegionSize(regionSize),
+	)
+	return newStore
 }
 
 // GetStore searches for a store by ID.
@@ -86,10 +98,11 @@ func (r *RangeCluster) GetStore(id uint64) *core.StoreInfo {
 // GetStores returns all Stores in the cluster.
 func (r *RangeCluster) GetStores() []*core.StoreInfo {
 	stores := r.Cluster.GetStores()
+	var newStores []*core.StoreInfo
 	for _, s := range stores {
-		r.updateStoreInfo(s)
+		newStores = append(newStores, r.updateStoreInfo(s))
 	}
-	return stores
+	return newStores
 }
 
 // SetTolerantSizeRatio sets the tolerant size ratio.

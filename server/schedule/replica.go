@@ -26,7 +26,7 @@ const replicaBaseScore = 100
 func DistinctScore(labels []string, stores []*core.StoreInfo, other *core.StoreInfo) float64 {
 	var score float64
 	for _, s := range stores {
-		if s.GetId() == other.GetId() {
+		if s.GetID() == other.GetID() {
 			continue
 		}
 		if index := s.CompareLocation(other, labels); index != -1 {

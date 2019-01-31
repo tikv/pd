@@ -93,14 +93,17 @@ func (s *testReplicationSuite) newStoreInfo(id uint64, regionCount int, labels m
 			Value: v,
 		})
 	}
-	store := core.NewStoreInfo(&metapb.Store{
-		Id:     id,
-		Labels: storeLabels,
-	})
-	store.RegionCount = regionCount
-	store.RegionSize = int64(regionCount) * 10
-	store.Stats = &pdpb.StoreStats{}
-	store.Stats.Capacity = uint64(1024)
-	store.Stats.Available = store.Stats.Capacity
+	stats := &pdpb.StoreStats{}
+	stats.Capacity = uint64(1024)
+	stats.Available = uint64(1024)
+	store := core.NewStoreInfo(
+		&metapb.Store{
+			Id:     id,
+			Labels: storeLabels,
+		},
+		core.SetStoreStats(stats),
+		core.SetRegionCount(regionCount),
+		core.SetRegionSize(int64(regionCount)*10),
+	)
 	return store
 }

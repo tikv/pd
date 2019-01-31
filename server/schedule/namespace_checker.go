@@ -98,12 +98,12 @@ func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, ta
 	if target == nil {
 		return 0
 	}
-	return target.GetId()
+	return target.GetID()
 }
 
 func (n *NamespaceChecker) isExists(stores []*core.StoreInfo, storeID uint64) bool {
 	for _, store := range stores {
-		if store.Id == storeID {
+		if store.GetID() == storeID {
 			return true
 		}
 	}

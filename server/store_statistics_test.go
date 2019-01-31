@@ -44,13 +44,14 @@ func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
 	}
 	var stores []*core.StoreInfo
 	for _, m := range metaStores {
-		s := core.NewStoreInfo(m)
-		s.LastHeartbeatTS = time.Now()
+		s := core.NewStoreInfo(m, core.SetLastHeartbeatTS(time.Now()))
 		stores = append(stores, s)
 	}
 
-	stores[3].State = metapb.StoreState_Offline
-	stores[4].LastHeartbeatTS = stores[4].LastHeartbeatTS.Add(-time.Hour)
+	store3 := stores[3].Clone(core.SetStoreState(metapb.StoreState_Offline))
+	stores[3] = store3
+	store4 := stores[4].Clone(core.SetLastHeartbeatTS(stores[4].GetLastHeartbeatTS().Add(-time.Hour)))
+	stores[4] = store4
 	storeStats := newStoreStatisticsMap(opt, namespace.DefaultClassifier)
 	for _, store := range stores {
 		storeStats.Observe(store)

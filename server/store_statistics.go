@@ -61,7 +61,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 		key := fmt.Sprintf("%s:%s", k, v)
 		s.LabelCounter[key]++
 	}
-	id := strconv.FormatUint(store.GetId(), 10)
+	id := strconv.FormatUint(store.GetID(), 10)
 	// Store state.
 	switch store.GetState() {
 	case metapb.StoreState_Up:
@@ -87,19 +87,19 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 
 	// Store stats.
 	s.StorageSize += store.StorageSize()
-	s.StorageCapacity += store.Stats.GetCapacity()
-	s.RegionCount += store.RegionCount
-	s.LeaderCount += store.LeaderCount
+	s.StorageCapacity += store.GetCapacity()
+	s.RegionCount += store.GetRegionCount()
+	s.LeaderCount += store.GetLeaderCount()
 
 	storeStatusGauge.WithLabelValues(s.namespace, id, "region_score").Set(store.RegionScore(s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
 	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_score").Set(store.LeaderScore(0))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "region_size").Set(float64(store.RegionSize))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "region_count").Set(float64(store.RegionCount))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_size").Set(float64(store.LeaderSize))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_count").Set(float64(store.LeaderCount))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "store_available").Set(float64(store.Stats.GetAvailable()))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "store_used").Set(float64(store.Stats.GetUsedSize()))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "store_capacity").Set(float64(store.Stats.GetCapacity()))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "region_size").Set(float64(store.GetRegionSize()))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "region_count").Set(float64(store.GetRegionCount()))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_size").Set(float64(store.GetLeaderSize()))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_count").Set(float64(store.GetLeaderCount()))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "store_available").Set(float64(store.GetAvailable()))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "store_used").Set(float64(store.GetUsedSize()))
+	storeStatusGauge.WithLabelValues(s.namespace, id, "store_capacity").Set(float64(store.GetCapacity()))
 }
 
 func (s *storeStatistics) Collect() {
