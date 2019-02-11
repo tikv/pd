@@ -23,11 +23,12 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 // TestServer states.
@@ -47,12 +48,17 @@ type TestServer struct {
 
 var initHTTPClientOnce sync.Once
 
+var zapLogOnce = new(sync.Once)
+
 // NewTestServer creates a new TestServer.
 func NewTestServer(cfg *server.Config) (*TestServer, error) {
 	err := cfg.SetupLogger()
 	if err != nil {
 		return nil, err
 	}
+	zapLogOnce.Do(func() {
+		log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
+	})
 	err = server.PrepareJoinCluster(cfg)
 	if err != nil {
 		return nil, err
@@ -434,7 +440,7 @@ func (c *TestCluster) Destroy() {
 	for _, s := range c.servers {
 		err := s.Destroy()
 		if err != nil {
-			log.Errorf("failed to destroy the cluster: %v", err)
+			log.Error("failed to destroy the cluster:", zap.Error(err))
 		}
 	}
 }

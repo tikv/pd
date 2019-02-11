@@ -19,10 +19,12 @@ import (
 	"io/ioutil"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coreos/etcd/embed"
 	"github.com/pingcap/check"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/tempurl"
 	"github.com/pingcap/pd/pkg/typeutil"
 
@@ -56,6 +58,8 @@ func NewTestServer(c *check.C) (*Config, *Server, CleanupFunc, error) {
 	return cfg, s, cleanup, nil
 }
 
+var zapLogOnce = new(sync.Once)
+
 // NewTestSingleConfig is only for test to create one pd.
 // Because PD client also needs this, so export here.
 func NewTestSingleConfig(c *check.C) *Config {
@@ -80,6 +84,9 @@ func NewTestSingleConfig(c *check.C) *Config {
 	cfg.LeaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
 	err := cfg.SetupLogger()
 	c.Assert(err, check.IsNil)
+	zapLogOnce.Do(func() {
+		log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
+	})
 
 	c.Assert(cfg.Adjust(nil), check.IsNil)
 
