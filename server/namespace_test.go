@@ -198,7 +198,7 @@ func newMapClassifer() *mapClassifer {
 }
 
 func (c *mapClassifer) GetStoreNamespace(store *core.StoreInfo) string {
-	if ns, ok := c.stores[store.GetId()]; ok {
+	if ns, ok := c.stores[store.GetID()]; ok {
 		return ns
 	}
 	return namespace.DefaultNamespace

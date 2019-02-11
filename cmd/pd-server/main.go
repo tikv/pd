@@ -20,7 +20,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/grpc-ecosystem/go-grpc-prometheus"
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
@@ -41,7 +40,7 @@ func main() {
 
 	if cfg.Version {
 		server.PrintPDInfo()
-		os.Exit(0)
+		exit(0)
 	}
 
 	defer logutil.LogPanic()
@@ -49,31 +48,30 @@ func main() {
 	switch errors.Cause(err) {
 	case nil:
 	case flag.ErrHelp:
-		os.Exit(0)
+		exit(0)
 	default:
-		log.L().Fatal("parse cmd flags error", zap.Error(err))
+		log.Fatal("parse cmd flags error", zap.Error(err))
 	}
 	// New zap logger
 	err = cfg.SetupLogger()
-	if err != nil {
-		log.L().Fatal("initialize logger error", zap.Error(err))
+	if err == nil {
+		log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
+	} else {
+		log.Fatal("initialize logger error", zap.Error(err))
 	}
 	// Flushing any buffered log entries
-	defer func() {
-		log.S().Sync()
-		log.L().Sync()
-	}()
+	defer log.Sync()
 
 	// The old logger
 	err = logutil.InitLogger(&cfg.Log)
 	if err != nil {
-		log.L().Fatal("initialize logger error", zap.Error(err))
+		log.Fatal("initialize logger error", zap.Error(err))
 	}
 
 	server.LogPDInfo()
 
 	for _, msg := range cfg.WarningMsgs {
-		log.L().Warn(msg)
+		log.Warn(msg)
 	}
 
 	// TODO: Make it configurable if it has big impact on performance.
@@ -83,15 +81,15 @@ func main() {
 
 	err = server.PrepareJoinCluster(cfg)
 	if err != nil {
-		log.L().Fatal("join meet error", zap.Error(err))
+		log.Fatal("join meet error", zap.Error(err))
 	}
 	svr, err := server.CreateServer(cfg, api.NewHandler)
 	if err != nil {
-		log.L().Fatal("create server failed", zap.Error(err))
+		log.Fatal("create server failed", zap.Error(err))
 	}
 
 	if err = server.InitHTTPClient(svr); err != nil {
-		log.L().Fatal("initial http client for api handler failed", zap.Error(err))
+		log.Fatal("initial http client for api handler failed", zap.Error(err))
 	}
 
 	sc := make(chan os.Signal, 1)
@@ -109,17 +107,22 @@ func main() {
 	}()
 
 	if err := svr.Run(ctx); err != nil {
-		log.L().Fatal("run server failed", zap.Error(err))
+		log.Fatal("run server failed", zap.Error(err))
 	}
 
 	<-ctx.Done()
-	log.L().Info("Got signal to exit", zap.String("signal", sig.String()))
+	log.Info("Got signal to exit", zap.String("signal", sig.String()))
 
 	svr.Close()
 	switch sig {
 	case syscall.SIGTERM:
-		os.Exit(0)
+		exit(0)
 	default:
-		os.Exit(1)
+		exit(1)
 	}
+}
+
+func exit(code int) {
+	log.Sync()
+	os.Exit(code)
 }

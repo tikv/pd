@@ -28,11 +28,11 @@ func (s *testReplicationSuite) TestPendingPeerFilter(c *C) {
 	tc := NewMockCluster(opt)
 	store := core.NewStoreInfo(&metapb.Store{Id: 1})
 	c.Assert(filter.FilterSource(tc, store), IsFalse)
-	store.PendingPeerCount = 30
-	c.Assert(filter.FilterSource(tc, store), IsTrue)
-	c.Assert(filter.FilterTarget(tc, store), IsTrue)
+	newStore := store.Clone(core.SetPendingPeerCount(30))
+	c.Assert(filter.FilterSource(tc, newStore), IsTrue)
+	c.Assert(filter.FilterTarget(tc, newStore), IsTrue)
 	// set to 0 means no limit
 	opt.MaxPendingPeerCount = 0
-	c.Assert(filter.FilterSource(tc, store), IsFalse)
-	c.Assert(filter.FilterTarget(tc, store), IsFalse)
+	c.Assert(filter.FilterSource(tc, newStore), IsFalse)
+	c.Assert(filter.FilterTarget(tc, newStore), IsFalse)
 }

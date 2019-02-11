@@ -186,20 +186,18 @@ func (kv *KV) LoadStores(stores *StoresInfo) error {
 			if err := store.Unmarshal([]byte(s)); err != nil {
 				return errors.WithStack(err)
 			}
-			storeInfo := NewStoreInfo(store)
-			leaderWeight, err := kv.loadFloatWithDefaultValue(kv.storeLeaderWeightPath(storeInfo.GetId()), 1.0)
+			leaderWeight, err := kv.loadFloatWithDefaultValue(kv.storeLeaderWeightPath(store.GetId()), 1.0)
 			if err != nil {
 				return err
 			}
-			storeInfo.LeaderWeight = leaderWeight
-			regionWeight, err := kv.loadFloatWithDefaultValue(kv.storeRegionWeightPath(storeInfo.GetId()), 1.0)
+			regionWeight, err := kv.loadFloatWithDefaultValue(kv.storeRegionWeightPath(store.GetId()), 1.0)
 			if err != nil {
 				return err
 			}
-			storeInfo.RegionWeight = regionWeight
+			newStoreInfo := NewStoreInfo(store, SetLeaderWeight(leaderWeight), SetRegionWeight(regionWeight))
 
 			nextID = store.GetId() + 1
-			stores.SetStore(storeInfo)
+			stores.SetStore(newStoreInfo)
 		}
 		if len(res) < minKVRangeLimit {
 			return nil

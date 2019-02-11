@@ -302,8 +302,8 @@ func (c *coordinator) collectHotSpotMetrics() {
 	stores := c.cluster.GetStores()
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
 	for _, s := range stores {
-		store := fmt.Sprintf("store_%d", s.GetId())
-		stat, ok := status.AsPeer[s.GetId()]
+		store := fmt.Sprintf("store_%d", s.GetID())
+		stat, ok := status.AsPeer[s.GetID()]
 		if ok {
 			totalWriteBytes := float64(stat.TotalFlowBytes)
 			hotWriteRegionCount := float64(stat.RegionsCount)
@@ -315,7 +315,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 			hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_peer").Set(0)
 		}
 
-		stat, ok = status.AsLeader[s.GetId()]
+		stat, ok = status.AsLeader[s.GetID()]
 		if ok {
 			totalWriteBytes := float64(stat.TotalFlowBytes)
 			hotWriteRegionCount := float64(stat.RegionsCount)
@@ -331,8 +331,8 @@ func (c *coordinator) collectHotSpotMetrics() {
 	// Collects hot read region metrics.
 	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
 	for _, s := range stores {
-		store := fmt.Sprintf("store_%d", s.GetId())
-		stat, ok := status.AsLeader[s.GetId()]
+		store := fmt.Sprintf("store_%d", s.GetID())
+		stat, ok := status.AsLeader[s.GetID()]
 		if ok {
 			totalReadBytes := float64(stat.TotalFlowBytes)
 			hotReadRegionCount := float64(stat.RegionsCount)

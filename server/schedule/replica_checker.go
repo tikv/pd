@@ -139,7 +139,7 @@ func (r *ReplicaChecker) selectBestStoreToAddReplica(region *core.RegionInfo, fi
 	if target == nil {
 		return 0, 0
 	}
-	return target.GetId(), DistinctScore(r.cluster.GetLocationLabels(), regionStores, target)
+	return target.GetID(), DistinctScore(r.cluster.GetLocationLabels(), regionStores, target)
 }
 
 // selectWorstPeer returns the worst peer in the region.
@@ -151,7 +151,7 @@ func (r *ReplicaChecker) selectWorstPeer(region *core.RegionInfo) (*metapb.Peer,
 		log.Debugf("[region %d] no worst store", region.GetID())
 		return nil, 0
 	}
-	return region.GetStorePeer(worstStore.GetId()), DistinctScore(r.cluster.GetLocationLabels(), regionStores, worstStore)
+	return region.GetStorePeer(worstStore.GetID()), DistinctScore(r.cluster.GetLocationLabels(), regionStores, worstStore)
 }
 
 func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *Operator {

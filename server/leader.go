@@ -21,13 +21,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/mvcc/mvccpb"
 )
 
 // IsLeader returns whether the server is leader or not.

@@ -17,9 +17,9 @@ import (
 	"context"
 	"sync"
 
+	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"go.etcd.io/etcd/clientv3"
 )
 
 var _ = Suite(&testAllocIDSuite{})

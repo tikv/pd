@@ -26,6 +26,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/embed"
+	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -36,11 +39,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pkg/errors"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 )
 
@@ -102,13 +101,13 @@ type Server struct {
 	// For async region heartbeat.
 	hbStreams *heartbeatStreams
 	// Zap logger
-	lg        *zap.Logger
-	logSyncer zapcore.WriteSyncer
+	lg       *zap.Logger
+	logProps *log.ZapProperties
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server, error) {
-	log.L().Info("PD config", zap.Reflect("config", cfg))
+	log.Info("PD config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
 
 	s := &Server{
@@ -130,12 +129,12 @@ func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server,
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) { pdpb.RegisterPDServer(gs, s) }
 	s.etcdCfg = etcdCfg
 	s.lg = cfg.logger
-	s.logSyncer = cfg.logSyncer
+	s.logProps = cfg.logProps
 	return s, nil
 }
 
 func (s *Server) startEtcd(ctx context.Context) error {
-	log.L().Info("start embed etcd")
+	log.Info("start embed etcd")
 	ctx, cancel := context.WithTimeout(ctx, etcdStartTimeout)
 	defer cancel()
 
@@ -165,7 +164,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
-	log.L().Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
+	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
 
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
@@ -187,7 +186,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		if etcdServerID == m.ID {
 			etcdPeerURLs := strings.Join(m.PeerURLs, ",")
 			if s.cfg.AdvertisePeerUrls != etcdPeerURLs {
-				log.L().Info("update advertise peer urls", zap.String("from", s.cfg.AdvertisePeerUrls), zap.String("to", etcdPeerURLs))
+				log.Info("update advertise peer urls", zap.String("from", s.cfg.AdvertisePeerUrls), zap.String("to", etcdPeerURLs))
 				s.cfg.AdvertisePeerUrls = etcdPeerURLs
 			}
 		}
@@ -204,7 +203,7 @@ func (s *Server) startServer() error {
 	if err = s.initClusterID(); err != nil {
 		return err
 	}
-	log.L().Info("Init cluster id", zap.Uint64("cluster id", s.clusterID))
+	log.Info("Init cluster id", zap.Uint64("cluster id", s.clusterID))
 	// It may lose accuracy if use float64 to store uint64. So we store the
 	// cluster id in label.
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
@@ -254,7 +253,7 @@ func (s *Server) Close() {
 		return
 	}
 
-	log.L().Info("closing server")
+	log.Info("closing server")
 
 	s.stopServerLoop()
 
@@ -270,10 +269,10 @@ func (s *Server) Close() {
 		s.hbStreams.Close()
 	}
 	if err := s.kv.Close(); err != nil {
-		log.L().Error("close kv meet error", zap.Error(err))
+		log.Error("close kv meet error", zap.Error(err))
 	}
 
-	log.L().Info("close server")
+	log.Info("close server")
 }
 
 // isClosed checks whether server is closed or not.
@@ -287,7 +286,7 @@ var timeMonitorOnce sync.Once
 func (s *Server) Run(ctx context.Context) error {
 	timeMonitorOnce.Do(func() {
 		go StartMonitor(time.Now, func() {
-			log.L().Error("system time jumps backward")
+			log.Error("system time jumps backward")
 			timeJumpBackCounter.Inc()
 		})
 	})
@@ -334,7 +333,7 @@ func (s *Server) serverMetricsLoop() {
 		case <-time.After(serverMetricsInterval):
 			s.collectEtcdStateMetrics()
 		case <-ctx.Done():
-			log.L().Info("server is closed, exit metrics loop")
+			log.Info("server is closed, exit metrics loop")
 			return
 		}
 	}
@@ -349,7 +348,7 @@ func (s *Server) collectEtcdStateMetrics() {
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
 	clusterID := s.clusterID
 
-	log.L().Info("try to bootstrap raft cluster",
+	log.Info("try to bootstrap raft cluster",
 		zap.Uint64("cluster-id", clusterID),
 		zap.String("request", fmt.Sprintf("%v", req)))
 
@@ -404,18 +403,18 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		return nil, errors.WithStack(err)
 	}
 	if !resp.Succeeded {
-		log.L().Warn("cluster already bootstrapped", zap.Uint64("cluster-id", clusterID))
+		log.Warn("cluster already bootstrapped", zap.Uint64("cluster-id", clusterID))
 		return nil, errors.Errorf("cluster %d already bootstrapped", clusterID)
 	}
 
-	log.L().Info("bootstrap cluster ok", zap.Uint64("cluster-id", clusterID))
+	log.Info("bootstrap cluster ok", zap.Uint64("cluster-id", clusterID))
 	err = s.kv.SaveRegion(req.GetRegion())
 	if err != nil {
-		log.L().Warn("save the bootstrap region failed", zap.Error(err))
+		log.Warn("save the bootstrap region failed", zap.Error(err))
 	}
 	err = s.kv.Flush()
 	if err != nil {
-		log.L().Warn("flush the bootstrap region failed", zap.Error(err))
+		log.Warn("flush the bootstrap region failed", zap.Error(err))
 	}
 	if err := s.cluster.start(); err != nil {
 		return nil, err
@@ -531,7 +530,7 @@ func (s *Server) SetScheduleConfig(cfg ScheduleConfig) error {
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
 		return err
 	}
-	log.L().Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -552,7 +551,7 @@ func (s *Server) SetReplicationConfig(cfg ReplicationConfig) error {
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
 		return err
 	}
-	log.L().Info("replication config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	log.Info("replication config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -563,7 +562,7 @@ func (s *Server) SetPDServerConfig(cfg PDServerConfig) error {
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
 		return err
 	}
-	log.L().Info("PD server config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	log.Info("PD server config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -600,13 +599,13 @@ func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) error {
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
 			return err
 		}
-		log.L().Info("namespace config is updated", zap.String("name", name), zap.Reflect("new", cfg), zap.Reflect("old", old))
+		log.Info("namespace config is updated", zap.String("name", name), zap.Reflect("new", cfg), zap.Reflect("old", old))
 	} else {
 		s.scheduleOpt.ns[name] = newNamespaceOption(&cfg)
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
 			return err
 		}
-		log.L().Info("namespace config is added", zap.String("name", name), zap.Reflect("new", cfg))
+		log.Info("namespace config is added", zap.String("name", name), zap.Reflect("new", cfg))
 	}
 	return nil
 }
@@ -619,7 +618,7 @@ func (s *Server) DeleteNamespaceConfig(name string) error {
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
 			return err
 		}
-		log.L().Info("namespace config is deleted", zap.String("name", name), zap.Reflect("config", *cfg))
+		log.Info("namespace config is deleted", zap.String("name", name), zap.Reflect("config", *cfg))
 	}
 	return nil
 }
@@ -631,7 +630,7 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 	if err != nil {
 		return err
 	}
-	log.L().Info("label property config is updated", zap.Reflect("config", s.scheduleOpt.loadLabelPropertyConfig()))
+	log.Info("label property config is updated", zap.Reflect("config", s.scheduleOpt.loadLabelPropertyConfig()))
 	return nil
 }
 
@@ -642,7 +641,7 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 	if err != nil {
 		return err
 	}
-	log.L().Info("label property config is deleted", zap.Reflect("config", s.scheduleOpt.loadLabelPropertyConfig()))
+	log.Info("label property config is deleted", zap.Reflect("config", s.scheduleOpt.loadLabelPropertyConfig()))
 	return nil
 }
 
@@ -662,7 +661,7 @@ func (s *Server) SetClusterVersion(v string) error {
 	if err != nil {
 		return err
 	}
-	log.L().Info("cluster version is updated", zap.String("new-version", v))
+	log.Info("cluster version is updated", zap.String("new-version", v))
 	return nil
 }
 

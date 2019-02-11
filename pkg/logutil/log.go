@@ -23,11 +23,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/coreos/etcd/raft"
 	"github.com/coreos/pkg/capnslog"
 	zaplog "github.com/pingcap/log"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"go.etcd.io/etcd/raft"
 	"google.golang.org/grpc/grpclog"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )

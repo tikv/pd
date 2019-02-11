@@ -63,7 +63,7 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*schedule.Op
 		schedulerCounter.WithLabelValues(s.GetName(), "no_store").Inc()
 		return nil
 	}
-	region := cluster.RandLeaderRegion(store.GetId(), core.HealthRegion())
+	region := cluster.RandLeaderRegion(store.GetID(), core.HealthRegion())
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
 		return nil

@@ -16,6 +16,7 @@ package server
 import (
 	"math/rand"
 
+	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -55,7 +56,7 @@ func (s *testStoresInfoSuite) TestStores(c *C) {
 	stores := newTestStores(n)
 
 	for i, store := range stores {
-		id := store.GetId()
+		id := store.GetID()
 		c.Assert(cache.GetStore(id), IsNil)
 		c.Assert(cache.BlockStore(id), NotNil)
 		cache.SetStore(store)
@@ -70,10 +71,10 @@ func (s *testStoresInfoSuite) TestStores(c *C) {
 	c.Assert(cache.GetStoreCount(), Equals, int(n))
 
 	for _, store := range cache.GetStores() {
-		c.Assert(store, DeepEquals, stores[store.GetId()-1])
+		c.Assert(store, DeepEquals, stores[store.GetID()-1])
 	}
 	for _, store := range cache.GetMetaStores() {
-		c.Assert(store, DeepEquals, stores[store.GetId()-1].Store)
+		c.Assert(store, DeepEquals, stores[store.GetId()-1].GetMeta())
 	}
 
 	c.Assert(cache.GetStoreCount(), Equals, int(n))
@@ -82,10 +83,12 @@ func (s *testStoresInfoSuite) TestStores(c *C) {
 	bytesRead := uint64(128 * 1024 * 1024)
 	store := cache.GetStore(1)
 
-	store.Stats.BytesWritten = bytesWritten
-	store.Stats.BytesRead = bytesRead
-	store.Stats.Interval = &pdpb.TimeInterval{EndTimestamp: 10, StartTimestamp: 0}
-	cache.SetStore(store)
+	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
+	newStats.BytesWritten = bytesWritten
+	newStats.BytesRead = bytesRead
+	newStats.Interval = &pdpb.TimeInterval{EndTimestamp: 10, StartTimestamp: 0}
+	newStore := store.Clone(core.SetStoreStats(newStats))
+	cache.SetStore(newStore)
 	c.Assert(cache.TotalBytesWriteRate(), Equals, float64(bytesWritten/10))
 	c.Assert(cache.TotalBytesReadRate(), Equals, float64(bytesRead/10))
 }
@@ -311,7 +314,7 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 
 	for i, store := range stores {
 		storeStats := &pdpb.StoreStats{
-			StoreId:     store.GetId(),
+			StoreId:     store.GetID(),
 			Capacity:    100,
 			Available:   50,
 			RegionCount: 1,
@@ -321,23 +324,23 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 		c.Assert(cluster.putStore(store), IsNil)
 		c.Assert(cluster.getStoreCount(), Equals, i+1)
 
-		c.Assert(store.LastHeartbeatTS.IsZero(), IsTrue)
+		c.Assert(store.GetLastHeartbeatTS().IsZero(), IsTrue)
 
 		c.Assert(cluster.handleStoreHeartbeat(storeStats), IsNil)
 
-		s := cluster.GetStore(store.GetId())
-		c.Assert(s.LastHeartbeatTS.IsZero(), IsFalse)
-		c.Assert(s.Stats, DeepEquals, storeStats)
+		s := cluster.GetStore(store.GetID())
+		c.Assert(s.GetLastHeartbeatTS().IsZero(), IsFalse)
+		c.Assert(s.GetStoreStats(), DeepEquals, storeStats)
 	}
 
 	c.Assert(cluster.getStoreCount(), Equals, int(n))
 
 	for _, store := range stores {
 		tmp := &metapb.Store{}
-		ok, err := cluster.kv.LoadStore(store.GetId(), tmp)
+		ok, err := cluster.kv.LoadStore(store.GetID(), tmp)
 		c.Assert(ok, IsTrue)
 		c.Assert(err, IsNil)
-		c.Assert(tmp, DeepEquals, store.Store)
+		c.Assert(tmp, DeepEquals, store.GetMeta())
 	}
 }
 
@@ -458,19 +461,19 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 
 	for _, region := range regions {
 		for _, store := range cluster.GetRegionStores(region) {
-			c.Assert(region.GetStorePeer(store.GetId()), NotNil)
+			c.Assert(region.GetStorePeer(store.GetID()), NotNil)
 		}
 		for _, store := range cluster.GetFollowerStores(region) {
-			peer := region.GetStorePeer(store.GetId())
+			peer := region.GetStorePeer(store.GetID())
 			c.Assert(peer.GetId(), Not(Equals), region.GetLeader().GetId())
 		}
 	}
 
 	for _, store := range cluster.core.Stores.GetStores() {
-		c.Assert(store.LeaderCount, Equals, cluster.core.Regions.GetStoreLeaderCount(store.GetId()))
-		c.Assert(store.RegionCount, Equals, cluster.core.Regions.GetStoreRegionCount(store.GetId()))
-		c.Assert(store.LeaderSize, Equals, cluster.core.Regions.GetStoreLeaderRegionSize(store.GetId()))
-		c.Assert(store.RegionSize, Equals, cluster.core.Regions.GetStoreRegionSize(store.GetId()))
+		c.Assert(store.GetLeaderCount(), Equals, cluster.core.Regions.GetStoreLeaderCount(store.GetID()))
+		c.Assert(store.GetRegionCount(), Equals, cluster.core.Regions.GetStoreRegionCount(store.GetID()))
+		c.Assert(store.GetLeaderSize(), Equals, cluster.core.Regions.GetStoreLeaderRegionSize(store.GetID()))
+		c.Assert(store.GetRegionSize(), Equals, cluster.core.Regions.GetStoreRegionSize(store.GetID()))
 	}
 
 	// Test with kv.
@@ -672,7 +675,7 @@ func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
 func checkPendingPeerCount(expect []int, cluster *clusterInfo, c *C) {
 	for i, e := range expect {
 		s := cluster.core.Stores.GetStore(uint64(i + 1))
-		c.Assert(s.PendingPeerCount, Equals, e)
+		c.Assert(s.GetPendingPeerCount(), Equals, e)
 	}
 }
 

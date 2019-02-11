@@ -58,8 +58,8 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator
 	stores := cluster.GetStores()
 	rejectLeaderStores := make(map[uint64]struct{})
 	for _, s := range stores {
-		if cluster.CheckLabelProperty(schedule.RejectLeader, s.Labels) {
-			rejectLeaderStores[s.GetId()] = struct{}{}
+		if cluster.CheckLabelProperty(schedule.RejectLeader, s.GetLabels()) {
+			rejectLeaderStores[s.GetID()] = struct{}{}
 		}
 	}
 	if len(rejectLeaderStores) == 0 {
@@ -86,7 +86,7 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator
 			}
 
 			schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-			step := schedule.TransferLeader{FromStore: id, ToStore: target.GetId()}
+			step := schedule.TransferLeader{FromStore: id, ToStore: target.GetID()}
 			op := schedule.NewOperator("label-reject-leader", region.GetID(), region.GetRegionEpoch(), schedule.OpLeader, step)
 			return []*schedule.Operator{op}
 		}

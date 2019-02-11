@@ -105,7 +105,7 @@ func (r *regionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 
 	for _, store := range stores {
 		if store.IsOffline() {
-			peer := region.GetStorePeer(store.GetId())
+			peer := region.GetStorePeer(store.GetID())
 			if peer != nil {
 				r.stats[offlinePeer][regionID] = region
 				peerTypeIndex |= offlinePeer

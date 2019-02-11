@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -1126,11 +1127,13 @@ func (s *cmdTestSuite) TestHot(c *C) {
 	ss, err := leaderServer.GetStore(1)
 	c.Assert(err, IsNil)
 	bytesWritten := uint64(8 * 1024 * 1024)
-	ss.Stats.BytesWritten = bytesWritten
 	now := time.Now().Second()
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - 10), EndTimestamp: uint64(now)}
-	ss.Stats.Interval = interval
-	ss.RollingStoreStats.Observe(ss.Stats)
+	newStats := proto.Clone(ss.GetStoreStats()).(*pdpb.StoreStats)
+	newStats.BytesWritten = bytesWritten
+	newStats.Interval = interval
+	newStore := ss.Clone(core.SetStoreStats(newStats))
+	newStore.GetRollingStoreStats().Observe(newStore.GetStoreStats())
 
 	// TODO: Provide a way to test the result of hot read and hot write commands
 	// hot read

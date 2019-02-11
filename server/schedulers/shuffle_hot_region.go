@@ -116,7 +116,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, sto
 			if schedule.FilterTarget(cluster, store, filters) {
 				continue
 			}
-			destStoreIDs = append(destStoreIDs, store.GetId())
+			destStoreIDs = append(destStoreIDs, store.GetID())
 		}
 		if len(destStoreIDs) == 0 {
 			return nil

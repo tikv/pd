@@ -85,18 +85,18 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		return nil
 	}
 
-	log.Debugf("[%s] store%d has the max region score", s.GetName(), source.GetId())
-	sourceLabel := strconv.FormatUint(source.GetId(), 10)
+	log.Debugf("[%s] store%d has the max region score", s.GetName(), source.GetID())
+	sourceLabel := strconv.FormatUint(source.GetID(), 10)
 	balanceRegionCounter.WithLabelValues("source_store", sourceLabel).Inc()
 
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	var hasPotentialTarget bool
 	for i := 0; i < balanceRegionRetryLimit; i++ {
 		// Priority the region that has a follower in the source store.
-		region := cluster.RandFollowerRegion(source.GetId(), core.HealthRegion())
+		region := cluster.RandFollowerRegion(source.GetID(), core.HealthRegion())
 		if region == nil {
 			// Then the region has the leader in the source store
-			region = cluster.RandLeaderRegion(source.GetId(), core.HealthRegion())
+			region = cluster.RandLeaderRegion(source.GetID(), core.HealthRegion())
 		}
 		if region == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
@@ -123,7 +123,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		}
 		hasPotentialTarget = true
 
-		oldPeer := region.GetStorePeer(source.GetId())
+		oldPeer := region.GetStorePeer(source.GetID())
 		if op := s.transferPeer(cluster, region, oldPeer, opInfluence); op != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 			return []*schedule.Operator{op}
@@ -132,9 +132,9 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 
 	if !hasPotentialTarget {
 		// If no potential target store can be found for the selected store, ignore it for a while.
-		log.Debugf("[%s] no operator created for selected store%d", s.GetName(), source.GetId())
+		log.Debugf("[%s] no operator created for selected store%d", s.GetName(), source.GetID())
 		balanceRegionCounter.WithLabelValues("add_taint", sourceLabel).Inc()
-		s.taintStores.Put(source.GetId())
+		s.taintStores.Put(source.GetID())
 	}
 
 	return nil
@@ -155,15 +155,15 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 
 	target := cluster.GetStore(storeID)
-	log.Debugf("[region %d] source store id is %v, target store id is %v", region.GetID(), source.GetId(), target.GetId())
+	log.Debugf("[region %d] source store id is %v, target store id is %v", region.GetID(), source.GetID(), target.GetID())
 
 	if !shouldBalance(cluster, source, target, region, core.RegionKind, opInfluence) {
 		log.Debugf("[%s] skip balance region %d, source %d to target %d ,source size: %v, source score: %v, source influence: %v, target size: %v, target score: %v, target influence: %v, average region size: %v",
-			s.GetName(), region.GetID(), source.GetId(), target.GetId(),
-			source.RegionSize, source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
-			opInfluence.GetStoreInfluence(source.GetId()).ResourceSize(core.RegionKind),
-			target.RegionSize, target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
-			opInfluence.GetStoreInfluence(target.GetId()).ResourceSize(core.RegionKind),
+			s.GetName(), region.GetID(), source.GetID(), target.GetID(),
+			source.GetRegionSize(), source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
+			opInfluence.GetStoreInfluence(source.GetID()).ResourceSize(core.RegionKind),
+			target.GetRegionSize(), target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
+			opInfluence.GetStoreInfluence(target.GetID()).ResourceSize(core.RegionKind),
 			cluster.GetAverageRegionSize())
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
@@ -174,8 +174,8 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
 		return nil
 	}
-	balanceRegionCounter.WithLabelValues("move_peer", fmt.Sprintf("store%d-out", source.GetId())).Inc()
-	balanceRegionCounter.WithLabelValues("move_peer", fmt.Sprintf("store%d-in", target.GetId())).Inc()
+	balanceRegionCounter.WithLabelValues("move_peer", fmt.Sprintf("store%d-out", source.GetID())).Inc()
+	balanceRegionCounter.WithLabelValues("move_peer", fmt.Sprintf("store%d-in", target.GetID())).Inc()
 	return schedule.CreateMovePeerOperator("balance-region", cluster, region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }
 

@@ -53,8 +53,8 @@ func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, reg
 	}
 
 	regionSize = int64(float64(regionSize) * cluster.GetTolerantSizeRatio())
-	sourceDelta := opInfluence.GetStoreInfluence(source.GetId()).ResourceSize(kind) - regionSize
-	targetDelta := opInfluence.GetStoreInfluence(target.GetId()).ResourceSize(kind) + regionSize
+	sourceDelta := opInfluence.GetStoreInfluence(source.GetID()).ResourceSize(kind) - regionSize
+	targetDelta := opInfluence.GetStoreInfluence(target.GetID()).ResourceSize(kind) + regionSize
 
 	// Make sure after move, source score is still greater than target score.
 	return source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceDelta) >

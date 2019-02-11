@@ -66,13 +66,15 @@ func newTestRegionMeta(regionID uint64) *metapb.Region {
 }
 
 func (c *testClusterInfo) addRegionStore(storeID uint64, regionCount int) error {
-	store := core.NewStoreInfo(&metapb.Store{Id: storeID})
-	store.Stats = &pdpb.StoreStats{}
-	store.LastHeartbeatTS = time.Now()
-	store.RegionCount = regionCount
-	store.RegionSize = int64(regionCount) * 10
-	store.Stats.Capacity = 1000 * (1 << 20)
-	store.Stats.Available = store.Stats.Capacity - uint64(store.RegionSize)
+	stats := &pdpb.StoreStats{}
+	stats.Capacity = 1000 * (1 << 20)
+	stats.Available = stats.Capacity - uint64(regionCount)*10
+	store := core.NewStoreInfo(&metapb.Store{Id: storeID},
+		core.SetStoreStats(stats),
+		core.SetRegionCount(regionCount),
+		core.SetRegionSize(int64(regionCount)*10),
+		core.SetLastHeartbeatTS(time.Now()),
+	)
 	return c.putStore(store)
 }
 
@@ -90,31 +92,37 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 
 func (c *testClusterInfo) updateLeaderCount(storeID uint64, leaderCount int) error {
 	store := c.GetStore(storeID)
-	store.LeaderCount = leaderCount
-	store.LeaderSize = int64(leaderCount) * 10
-	return c.putStore(store)
+	newStore := store.Clone(
+		core.SetLeaderCount(leaderCount),
+		core.SetLeaderSize(int64(leaderCount)*10),
+	)
+	return c.putStore(newStore)
 }
 
 func (c *testClusterInfo) addLeaderStore(storeID uint64, leaderCount int) error {
-	store := core.NewStoreInfo(&metapb.Store{Id: storeID})
-	store.Stats = &pdpb.StoreStats{}
-	store.LastHeartbeatTS = time.Now()
-	store.LeaderCount = leaderCount
-	store.LeaderSize = int64(leaderCount) * 10
+	stats := &pdpb.StoreStats{}
+	store := core.NewStoreInfo(&metapb.Store{Id: storeID},
+		core.SetStoreStats(stats),
+		core.SetLeaderCount(leaderCount),
+		core.SetLeaderSize(int64(leaderCount)*10),
+		core.SetLastHeartbeatTS(time.Now()),
+	)
 	return c.putStore(store)
 }
 
 func (c *testClusterInfo) setStoreDown(storeID uint64) error {
 	store := c.GetStore(storeID)
-	store.State = metapb.StoreState_Up
-	store.LastHeartbeatTS = time.Time{}
-	return c.putStore(store)
+	newStore := store.Clone(
+		core.SetStoreState(metapb.StoreState_Up),
+		core.SetLastHeartbeatTS(time.Time{}),
+	)
+	return c.putStore(newStore)
 }
 
 func (c *testClusterInfo) setStoreOffline(storeID uint64) error {
 	store := c.GetStore(storeID)
-	store.State = metapb.StoreState_Offline
-	return c.putStore(store)
+	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline))
+	return c.putStore(newStore)
 }
 
 func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) error {
