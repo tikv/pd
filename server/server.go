@@ -128,6 +128,14 @@ func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server,
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) { pdpb.RegisterPDServer(gs, s) }
 	s.etcdCfg = etcdCfg
+	if EnableZap {
+		// The etcd master version has removed embed.Config.SetupLogging.
+		// Now logger is set up automatically based on embed.Config.Logger,
+		// Use zap logger in the test, otherwise will panic.
+		// Reference: https://github.com/coreos/etcd/blob/master/embed/config_logging.go#L45
+		s.etcdCfg.Logger = "zap"
+		s.etcdCfg.LogOutputs = []string{"stdout"}
+	}
 	s.lg = cfg.logger
 	s.logProps = cfg.logProps
 	return s, nil
