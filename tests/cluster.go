@@ -48,7 +48,7 @@ type TestServer struct {
 
 var initHTTPClientOnce sync.Once
 
-var zapLogOnce = new(sync.Once)
+var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
 func NewTestServer(cfg *server.Config) (*TestServer, error) {

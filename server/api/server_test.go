@@ -75,7 +75,7 @@ func mustNewServer(c *C) (*server.Server, cleanUpFunc) {
 	return svrs[0], cleanup
 }
 
-var zapLogOnce = new(sync.Once)
+var zapLogOnce sync.Once
 
 func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpFunc) {
 	svrs := make([]*server.Server, 0, num)

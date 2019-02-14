@@ -107,7 +107,7 @@ type Server struct {
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(cfg *Config, apiRegister func(*Server) http.Handler) (*Server, error) {
-	log.Info("PD config", zap.Reflect("config", cfg))
+	log.Info("PD Config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
 
 	s := &Server{
@@ -211,7 +211,7 @@ func (s *Server) startServer() error {
 	if err = s.initClusterID(); err != nil {
 		return err
 	}
-	log.Info("Init cluster id", zap.Uint64("cluster id", s.clusterID))
+	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
 	// It may lose accuracy if use float64 to store uint64. So we store the
 	// cluster id in label.
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)

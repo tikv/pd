@@ -55,10 +55,10 @@ var DialClient = &http.Client{
 // LogPDInfo prints the PD version information.
 func LogPDInfo() {
 	log.Info("Welcome to Placement Driver (PD)")
-	log.Info("PD", zap.String("Release Version", PDReleaseVersion))
-	log.Info("PD", zap.String("Git Commit Hash", PDGitHash))
-	log.Info("PD", zap.String("Git Branch", PDGitBranch))
-	log.Info("PD", zap.String("UTC Build Time", PDBuildTS))
+	log.Info("PD", zap.String("release-version", PDReleaseVersion))
+	log.Info("PD", zap.String("git-hash", PDGitHash))
+	log.Info("PD", zap.String("git-branch", PDGitBranch))
+	log.Info("PD", zap.String("utc-build-time", PDBuildTS))
 }
 
 // PrintPDInfo prints the PD version information without log info.
@@ -79,8 +79,8 @@ func CheckPDVersion(opt *scheduleOption) {
 	if pdVersion.LessThan(clusterVersion) {
 		log.Warn(
 			"PD version less than cluster version, please upgrade PD",
-			zap.String("PD Version", pdVersion.String()),
-			zap.String("Cluster Version", clusterVersion.String()))
+			zap.String("PD-version", pdVersion.String()),
+			zap.String("cluster-version", clusterVersion.String()))
 	}
 }
 

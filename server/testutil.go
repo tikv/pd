@@ -58,7 +58,7 @@ func NewTestServer(c *check.C) (*Config, *Server, CleanupFunc, error) {
 	return cfg, s, cleanup, nil
 }
 
-var zapLogOnce = new(sync.Once)
+var zapLogOnce sync.Once
 
 // NewTestSingleConfig is only for test to create one pd.
 // Because PD client also needs this, so export here.
