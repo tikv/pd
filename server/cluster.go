@@ -23,12 +23,13 @@ import (
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 var backgroundJobInterval = time.Minute
@@ -400,7 +401,9 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	// Check location labels.
 	for _, k := range c.cachedCluster.GetLocationLabels() {
 		if v := s.GetLabelValue(k); len(v) == 0 {
-			log.Warnf("missing location label %q in store %v", k, s)
+			log.Warn("missing location label",
+				zap.Stringer("store", s.GetMeta()),
+				zap.String("label-key", k))
 		}
 	}
 	return cluster.putStore(s)
@@ -430,7 +433,9 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	}
 
 	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline))
-	log.Warnf("[store %d] store %s has been Offline", newStore.GetID(), newStore.GetAddress())
+	log.Warn("store has been offline",
+		zap.Uint64("store-id", newStore.GetID()),
+		zap.String("store-address", newStore.GetAddress()))
 	return cluster.putStore(newStore)
 }
 
@@ -458,11 +463,13 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error { // revive:di
 		if !force {
 			return errors.New("store is still up, please remove store gracefully")
 		}
-		log.Warnf("forcedly bury store %v", store)
+		log.Warn("forcedly bury store", zap.Stringer("store", store.GetMeta()))
 	}
 
 	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
-	log.Warnf("[store %d] store %s has been Tombstone", newStore.GetID(), newStore.GetAddress())
+	log.Warn("store has been Tombstone",
+		zap.Uint64("store-id", newStore.GetID()),
+		zap.String("store-address", newStore.GetAddress()))
 	return cluster.putStore(newStore)
 }
 
@@ -479,7 +486,9 @@ func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) err
 	}
 
 	newStore := store.Clone(core.SetStoreState(state))
-	log.Warnf("[store %d] set state to %v", storeID, state.String())
+	log.Warn("store update state",
+		zap.Uint64("store-id", storeID),
+		zap.Stringer("new-state", state))
 	return cluster.putStore(newStore)
 }
 
@@ -526,7 +535,9 @@ func (c *RaftCluster) checkStores() {
 		// If the store is empty, it can be buried.
 		if cluster.getStoreRegionCount(offlineStore.GetId()) == 0 {
 			if err := c.BuryStore(offlineStore.GetId(), false); err != nil {
-				log.Errorf("bury store %v failed: %v", offlineStore, err)
+				log.Error("bury store failed",
+					zap.Stringer("store", offlineStore),
+					zap.Error(err))
 			}
 		} else {
 			offlineStores = append(offlineStores, offlineStore)
@@ -539,7 +550,7 @@ func (c *RaftCluster) checkStores() {
 
 	if upStoreCount < cluster.GetMaxReplicas() {
 		for _, offlineStore := range offlineStores {
-			log.Warnf("store %v may not turn into Tombstone, there are no extra up node has enough space to accommodate the extra replica", offlineStore)
+			log.Warn("store may not turn into Tombstone, there are no extra up node has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
 		}
 	}
 }
@@ -550,13 +561,17 @@ func (c *RaftCluster) checkOperators() {
 		// after region is merged, it will not heartbeat anymore
 		// the operator of merged region will not timeout actively
 		if c.cachedCluster.GetRegion(op.RegionID()) == nil {
-			log.Debugf("remove operator %v cause region %d is merged", op, op.RegionID())
+			log.Debug("remove operator cause region is merged",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Stringer("operator", op))
 			opController.RemoveOperator(op)
 			continue
 		}
 
 		if op.IsTimeout() {
-			log.Infof("[region %v] operator timeout: %s", op.RegionID(), op)
+			log.Info("operator timeout",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Stringer("operator", op))
 			opController.RemoveOperator(op)
 		}
 	}
@@ -580,7 +595,7 @@ func (c *RaftCluster) collectHealthStatus() {
 	client := c.s.GetClient()
 	members, err := GetMembers(client)
 	if err != nil {
-		log.Info("get members error:", err)
+		log.Error("get members error", zap.Error(err))
 	}
 	unhealth := c.s.CheckHealth(members)
 	for _, member := range members {

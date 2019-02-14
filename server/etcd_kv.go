@@ -19,8 +19,9 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
+	log "github.com/pingcap/log"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 const (
@@ -83,7 +84,7 @@ func (kv *etcdKVBase) Save(key, value string) error {
 
 	resp, err := kv.server.leaderTxn().Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
-		log.Errorf("save to etcd error: %v", err)
+		log.Error("save to etcd meet error", zap.Error(err))
 		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
@@ -97,7 +98,7 @@ func (kv *etcdKVBase) Delete(key string) error {
 
 	resp, err := kv.server.leaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
-		log.Errorf("delete from etcd error: %v", err)
+		log.Error("delete from etcd meet error", zap.Error(err))
 		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
@@ -113,10 +114,10 @@ func kvGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3
 	start := time.Now()
 	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
 	if err != nil {
-		log.Errorf("load from etcd error: %v", err)
+		log.Error("load from etcd meet error", zap.Error(err))
 	}
 	if cost := time.Since(start); cost > kvSlowRequestTime {
-		log.Warnf("kv gets too slow: key %v cost %v err %v", key, cost, err)
+		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), zap.Error(err))
 	}
 
 	return resp, errors.WithStack(err)

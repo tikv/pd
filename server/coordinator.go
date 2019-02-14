@@ -19,12 +19,13 @@ import (
 	"sync"
 	"time"
 
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 const (
@@ -198,16 +199,16 @@ func (c *coordinator) run() {
 		if schedulerCfg.Disable {
 			scheduleCfg.Schedulers[k] = schedulerCfg
 			k++
-			log.Info("skip create ", schedulerCfg.Type)
+			log.Info("skip create scheduler", zap.String("scheduler-type", schedulerCfg.Type))
 			continue
 		}
 		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, schedulerCfg.Args...)
 		if err != nil {
-			log.Fatalf("can not create scheduler %s: %v", schedulerCfg.Type, err)
+			log.Fatal("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Error(err))
 		}
-		log.Infof("create scheduler %s", s.GetName())
+		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil {
-			log.Errorf("can not add scheduler %s: %v", s.GetName(), err)
+			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		}
 
 		// Only records the valid scheduler config.
@@ -221,7 +222,7 @@ func (c *coordinator) run() {
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
 	c.cluster.opt.store(scheduleCfg)
 	if err := c.cluster.opt.persist(c.cluster.kv); err != nil {
-		log.Errorf("can't persist schedule config: %v", err)
+		log.Error("can't persist schedule config", zap.Error(err))
 	}
 
 	c.wg.Add(1)
@@ -408,7 +409,9 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			}
 
 		case <-s.Ctx().Done():
-			log.Infof("%v stopped: %v", s.GetName(), s.Ctx().Err())
+			log.Info("stopped scheduler",
+				zap.String("scheduler-name", s.GetName()),
+				zap.Error(s.Ctx().Err()))
 			return
 		}
 	}

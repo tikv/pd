@@ -15,8 +15,9 @@ package server
 
 import (
 	"github.com/coreos/go-semver/semver"
+	log "github.com/pingcap/log"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 // Feature supported features.
@@ -53,7 +54,7 @@ var featuresDict = map[Feature]string{
 func MinSupportedVersion(v Feature) semver.Version {
 	target, ok := featuresDict[v]
 	if !ok {
-		log.Fatalf("the corresponding version of the feature %d doesn't exist", v)
+		log.Fatal("the corresponding version of the feature doesn't exist", zap.Int("feature-number", int(v)))
 	}
 	version := MustParseVersion(target)
 	return *version
@@ -76,7 +77,7 @@ func ParseVersion(v string) (*semver.Version, error) {
 func MustParseVersion(v string) *semver.Version {
 	ver, err := ParseVersion(v)
 	if err != nil {
-		log.Fatalf("version string is illegal: %s", err)
+		log.Fatal("version string is illegal", zap.Error(err))
 	}
 	return ver
 }
