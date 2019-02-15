@@ -17,9 +17,10 @@ import (
 	"fmt"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 // ReplicaChecker ensures region has the best replicas.
@@ -58,7 +59,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 	}
 
 	if len(region.GetPeers()) < r.cluster.GetMaxReplicas() && r.cluster.IsMakeUpReplicaEnabled() {
-		log.Debugf("[region %d] has %d peers fewer than max replicas", region.GetID(), len(region.GetPeers()))
+		log.Debug("region has fewer than max replicas", zap.Uint64("region-id", region.GetID()), zap.Int("peers", len(region.GetPeers())))
 		newPeer, _ := r.selectBestPeerToAddReplica(region, NewStorageThresholdFilter())
 		if newPeer == nil {
 			checkerCounter.WithLabelValues("replica_checker", "no_target_store").Inc()
@@ -82,7 +83,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 	// when add learner peer, the number of peer will exceed max replicas for a while,
 	// just comparing the the number of voters to avoid too many cancel add operator log.
 	if len(region.GetVoters()) > r.cluster.GetMaxReplicas() && r.cluster.IsRemoveExtraReplicaEnabled() {
-		log.Debugf("[region %d] has %d peers more than max replicas", region.GetID(), len(region.GetPeers()))
+		log.Debug("region has more than max replicas", zap.Uint64("region-id", region.GetID()), zap.Int("peers", len(region.GetPeers())))
 		oldPeer, _ := r.selectWorstPeer(region)
 		if oldPeer == nil {
 			checkerCounter.WithLabelValues("replica_checker", "no_worst_peer").Inc()
@@ -111,7 +112,7 @@ func (r *ReplicaChecker) SelectBestReplacementStore(region *core.RegionInfo, old
 func (r *ReplicaChecker) selectBestPeerToAddReplica(region *core.RegionInfo, filters ...Filter) (*metapb.Peer, float64) {
 	storeID, score := r.selectBestStoreToAddReplica(region, filters...)
 	if storeID == 0 {
-		log.Debugf("[region %d] no best store to add replica", region.GetID())
+		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
 		return nil, 0
 	}
 	newPeer, err := r.cluster.AllocPeer(storeID)
@@ -149,7 +150,7 @@ func (r *ReplicaChecker) selectWorstPeer(region *core.RegionInfo) (*metapb.Peer,
 	selector := NewReplicaSelector(regionStores, r.cluster.GetLocationLabels(), r.filters...)
 	worstStore := selector.SelectSource(r.cluster, regionStores)
 	if worstStore == nil {
-		log.Debugf("[region %d] no worst store", region.GetID())
+		log.Debug("no worst store", zap.Uint64("region-id", region.GetID()))
 		return nil, 0
 	}
 	return region.GetStorePeer(worstStore.GetId()), DistinctScore(r.cluster.GetLocationLabels(), regionStores, worstStore)
@@ -167,7 +168,7 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *Operator {
 		}
 		store := r.cluster.GetStore(peer.GetStoreId())
 		if store == nil {
-			log.Infof("lost the store %d, maybe you are recovering the PD cluster.", peer.GetStoreId())
+			log.Info("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", peer.GetStoreId()))
 			return nil
 		}
 		if store.DownTime() < r.cluster.GetMaxStoreDownTime() {
@@ -195,7 +196,7 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
 		if store == nil {
-			log.Infof("lost the store %d, maybe you are recovering the PD cluster.", peer.GetStoreId())
+			log.Info("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", peer.GetStoreId()))
 			return nil
 		}
 		if store.IsUp() {
@@ -225,7 +226,7 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator
 	}
 	// Make sure the new peer is better than the old peer.
 	if newScore <= oldScore {
-		log.Debugf("[region %d] newScore %f is not better than oldScore %f", region.GetID(), newScore, oldScore)
+		log.Debug("no better peer", zap.Uint64("region-id", region.GetID()), zap.Float64("new-score", newScore), zap.Float64("old-score", oldScore))
 		checkerCounter.WithLabelValues("replica_checker", "not_better").Inc()
 		return nil
 	}
@@ -270,7 +271,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 
 	storeID, _ := r.SelectBestReplacementStore(region, peer, NewStorageThresholdFilter())
 	if storeID == 0 {
-		log.Debugf("[region %d] no best store to add replica", region.GetID())
+		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
 		return nil
 	}
 	newPeer, err := r.cluster.AllocPeer(storeID)

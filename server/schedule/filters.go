@@ -19,7 +19,6 @@ import (
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	log "github.com/sirupsen/logrus"
 )
 
 //revive:disable:unused-parameter
@@ -38,7 +37,6 @@ func FilterSource(opt Options, store *core.StoreInfo, filters []Filter) bool {
 	storeID := fmt.Sprintf("store%d", store.GetId())
 	for _, filter := range filters {
 		if filter.FilterSource(opt, store) {
-			log.Debugf("[filter %T] filters store %v from source", filter, store)
 			filterCounter.WithLabelValues("filter-source", storeID, filter.Type()).Inc()
 			return true
 		}
@@ -51,7 +49,6 @@ func FilterTarget(opt Options, store *core.StoreInfo, filters []Filter) bool {
 	storeID := fmt.Sprintf("store%d", store.GetId())
 	for _, filter := range filters {
 		if filter.FilterTarget(opt, store) {
-			log.Debugf("[filter %T] filters store %v from target", filter, store)
 			filterCounter.WithLabelValues("filter-target", storeID, filter.Type()).Inc()
 			return true
 		}

@@ -20,10 +20,10 @@ import (
 	"io/ioutil"
 	"net/http"
 
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/apiutil"
 	errcode "github.com/pingcap/pd/pkg/error_code"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/unrolled/render"
 )
 
@@ -42,7 +42,7 @@ var dialClient = &http.Client{
 // If the error is nil, this also responds with a 500 and logs at the error level.
 func errorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	if err == nil {
-		log.Errorf("nil given to errorResp")
+		log.Error("nil is given to errorResp")
 		rd.JSON(w, http.StatusInternalServerError, "nil error")
 		return
 	}
