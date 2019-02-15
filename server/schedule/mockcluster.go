@@ -21,9 +21,10 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 // MockCluster is used to mock clusterInfo for test use
@@ -77,7 +78,7 @@ func (mc *MockCluster) RandHotRegionFromStore(store uint64, kind FlowKind) *core
 func (mc *MockCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := mc.allocID()
 	if err != nil {
-		log.Errorf("failed to alloc peer: %v", err)
+		log.Error("failed to alloc peer", zap.Error(err))
 		return nil, err
 	}
 	peer := &metapb.Peer{

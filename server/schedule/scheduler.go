@@ -17,9 +17,10 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 // Cluster provides an overview of a cluster's regions distribution.
@@ -76,7 +77,7 @@ var schedulerMap = make(map[string]CreateSchedulerFunc)
 // func of a package.
 func RegisterScheduler(name string, createFn CreateSchedulerFunc) {
 	if _, ok := schedulerMap[name]; ok {
-		log.Fatalf("duplicated scheduler name: %v", name)
+		log.Fatal("duplicated scheduler", zap.String("name", name))
 	}
 	schedulerMap[name] = createFn
 }

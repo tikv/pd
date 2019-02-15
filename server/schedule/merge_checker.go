@@ -16,10 +16,11 @@ package schedule
 import (
 	"time"
 
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 // As region split history is not persisted. We put a special marker into
@@ -109,7 +110,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*Operator {
 	}
 
 	checkerCounter.WithLabelValues("merge_checker", "new_operator").Inc()
-	log.Debugf("try to merge region %v into region %v", core.HexRegionMeta(region.GetMeta()), core.HexRegionMeta(target.GetMeta()))
+	log.Debug("try to merge region", zap.Reflect("from", core.HexRegionMeta(region.GetMeta())), zap.Reflect("to", core.HexRegionMeta(target.GetMeta())))
 	ops, err := CreateMergeRegionOperator("merge-region", m.cluster, region, target, OpMerge)
 	if err != nil {
 		return nil

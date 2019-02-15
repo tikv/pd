@@ -19,8 +19,9 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -103,24 +104,27 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						return
 					}
 				}
-				log.Errorf("%s failed to establish sync stream with leader %s: %s", s.server.Name(), s.server.GetLeader().GetName(), err)
+				log.Error("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Error(err))
 				time.Sleep(time.Second)
 				continue
 			}
-			log.Infof("%s start sync with leader %s, the request index is %d", s.server.Name(), s.server.GetLeader().GetName(), s.history.GetNextIndex())
+			log.Info("server starts to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.history.GetNextIndex()))
 			for {
 				resp, err := client.Recv()
 				if err != nil {
-					log.Error("region sync with leader meet error:", err)
+					log.Error("region sync with leader meet error", zap.Error(err))
 					if err = client.CloseSend(); err != nil {
-						log.Errorf("Failed to terminate client stream: %v", err)
+						log.Error("failed to terminate client stream", zap.Error(err))
 					}
 					time.Sleep(time.Second)
 					break
 				}
 				if s.history.GetNextIndex() != resp.GetStartIndex() {
-					log.Warnf("%s sync index not match the leader, own: %d, leader: %d, records length: %d",
-						s.server.Name(), s.history.GetNextIndex(), resp.GetStartIndex(), len(resp.GetRegions()))
+					log.Warn("server sync index not match the leader",
+						zap.String("server", s.server.Name()),
+						zap.Uint64("own", s.history.GetNextIndex()),
+						zap.Uint64("leader", resp.GetStartIndex()),
+						zap.Int("records-length", len(resp.GetRegions())))
 					// reset index
 					s.history.ResetWithIndex(resp.GetStartIndex())
 				}

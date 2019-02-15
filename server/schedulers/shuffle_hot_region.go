@@ -18,10 +18,11 @@ import (
 	"strconv"
 	"time"
 
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 func init() {
@@ -132,7 +133,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, sto
 		}
 		destPeer, err := cluster.AllocPeer(destStoreID)
 		if err != nil {
-			log.Errorf("failed to allocate peer: %v", err)
+			log.Error("failed to allocate peer", zap.Error(err))
 			return nil
 		}
 		schedulerCounter.WithLabelValues(s.GetName(), "create_operator").Inc()
