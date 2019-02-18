@@ -23,8 +23,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	etcdlogutil "github.com/coreos/etcd/pkg/logutil"
-	"github.com/coreos/etcd/raft"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
@@ -32,7 +31,6 @@ import (
 	"github.com/pingcap/pd/tools/pd-simulator/simulator"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/cases"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
-	log "github.com/sirupsen/logrus"
 	"go.uber.org/zap"
 
 	// Register schedulers.
@@ -52,7 +50,6 @@ var (
 func main() {
 	flag.Parse()
 
-	initRaftLogger()
 	simutil.InitLogger(*simLogLevel)
 	schedule.Simulating = true
 
@@ -72,18 +69,17 @@ func run(simCase string) {
 	simConfig := simulator.NewSimConfig()
 	if *configFile != "" {
 		if _, err := toml.DecodeFile(*configFile, simConfig); err != nil {
-			simutil.Logger.Fatal(err)
+			simutil.Logger.Fatal("fail to decode file ", zap.Error(err))
 		}
 	}
 	simConfig.Adjust()
-
 	if *pdAddr != "" {
 		simStart(*pdAddr, simCase, simConfig)
 	} else {
 		_, local, clean := NewSingleServer()
 		err := local.Run(context.Background())
 		if err != nil {
-			simutil.Logger.Fatal("run server error:", err)
+			simutil.Logger.Fatal("run server error", zap.Error(err))
 		}
 		for {
 			if local.IsLeader() {
@@ -101,7 +97,7 @@ func NewSingleServer() (*server.Config, *server.Server, server.CleanupFunc) {
 	cfg.Log.Level = *serverLogLevel
 	err := logutil.InitLogger(&cfg.Log)
 	if err != nil {
-		log.Fatalf("initialize logger error: %s\n", err)
+		log.Fatal("initialize logger error", zap.Error(err))
 	}
 
 	s, err := server.CreateServer(cfg, api.NewHandler)
@@ -121,39 +117,16 @@ func cleanServer(cfg *server.Config) {
 	os.RemoveAll(cfg.DataDir)
 }
 
-func initRaftLogger() {
-	// etcd uses zap as the default Raft logger.
-	lcfg := &zap.Config{
-		Level:       zap.NewAtomicLevelAt(zap.InfoLevel),
-		Development: false,
-		Sampling: &zap.SamplingConfig{
-			Initial:    100,
-			Thereafter: 100,
-		},
-		Encoding:      "json",
-		EncoderConfig: zap.NewProductionEncoderConfig(),
-
-		// Passing no URLs here, because we don't want to output the Raft log.
-		OutputPaths:      []string{},
-		ErrorOutputPaths: []string{},
-	}
-	lg, err := etcdlogutil.NewRaftLogger(lcfg)
-	if err != nil {
-		log.Fatalf("cannot create raft logger %v", err)
-	}
-	raft.SetLogger(lg)
-}
-
 func simStart(pdAddr string, simCase string, simConfig *simulator.SimConfig, clean ...server.CleanupFunc) {
 	start := time.Now()
 	driver, err := simulator.NewDriver(pdAddr, simCase, simConfig)
 	if err != nil {
-		simutil.Logger.Fatal("create driver error:", err)
+		simutil.Logger.Fatal("create driver error", zap.Error(err))
 	}
 
 	err = driver.Prepare()
 	if err != nil {
-		simutil.Logger.Fatal("simulator prepare error:", err)
+		simutil.Logger.Fatal("simulator prepare error", zap.Error(err))
 	}
 
 	var runInternal bool

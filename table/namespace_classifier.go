@@ -23,10 +23,11 @@ import (
 	"sync"
 	"time"
 
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 func init() {
@@ -435,7 +436,9 @@ func (namespaceInfo *namespacesInfo) loadNamespaces(kv *core.KV, rangeLimit int)
 		}
 
 		if len(res) < rangeLimit {
-			log.Infof("load %v namespacesInfo cost %v", namespaceInfo.getNamespaceCount(), time.Since(start))
+			log.Info("load namespaces information",
+				zap.Int("namespace-count", namespaceInfo.getNamespaceCount()),
+				zap.Duration("cost", time.Since(start)))
 			return nil
 		}
 	}

@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/cases"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
 
 // RaftEngine records all raft infomations.
@@ -100,10 +101,13 @@ func (r *RaftEngine) stepLeader(region *core.RegionInfo) {
 	newRegion := region.Clone(core.WithLeader(newLeader))
 	if newLeader == nil {
 		r.SetRegion(newRegion)
-		simutil.Logger.Infof("[region %d] no leader", region.GetID())
+		simutil.Logger.Info("region has no leader", zap.Uint64("region-id", region.GetID()))
 		return
 	}
-	simutil.Logger.Infof("[region %d] elect new leader: %+v,old leader: %+v", region.GetID(), newLeader, region.GetLeader())
+	simutil.Logger.Info("region elects a new leader",
+		zap.Uint64("region-id", region.GetID()),
+		zap.Reflect("new-leader", newLeader),
+		zap.Reflect("old-leader", region.GetLeader()))
 	r.SetRegion(newRegion)
 	r.recordRegionChange(newRegion)
 }
@@ -120,7 +124,7 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 		var err error
 		ids[i], err = r.allocID(region.GetLeader().GetStoreId())
 		if err != nil {
-			simutil.Logger.Infof("alloc id failed: %s", err)
+			simutil.Logger.Error("alloc id failed", zap.Error(err))
 			return
 		}
 	}
@@ -145,6 +149,11 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 
 	r.SetRegion(right)
 	r.SetRegion(left)
+	simutil.Logger.Debug("region split",
+		zap.Uint64("region-id", region.GetID()),
+		zap.Reflect("origin", region.GetMeta()),
+		zap.Reflect("left", left.GetMeta()),
+		zap.Reflect("right", right.GetMeta()))
 	r.recordRegionChange(left)
 	r.recordRegionChange(right)
 }
@@ -182,7 +191,7 @@ func (r *RaftEngine) updateRegionReadBytes(readBytes map[uint64]int64) {
 	for id, bytes := range readBytes {
 		region := r.GetRegion(id)
 		if region == nil {
-			simutil.Logger.Errorf("region %d not found", id)
+			simutil.Logger.Error("region is not found", zap.Uint64("region-id", id))
 			continue
 		}
 		newRegion := region.Clone(core.SetReadBytes(uint64(bytes)))

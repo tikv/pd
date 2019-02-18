@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/pingcap/log"
 )
 
 var (
@@ -42,12 +42,12 @@ func Alloc() string {
 func tryAllocTestURL() string {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal(fmt.Sprintf("%v", err))
 	}
 	addr := fmt.Sprintf("http://%s", l.Addr())
 	err = l.Close()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal(fmt.Sprintf("%v", err))
 	}
 
 	testAddrMutex.Lock()
