@@ -26,8 +26,9 @@ import (
 	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -121,7 +122,7 @@ type SecurityOption struct {
 
 // NewClient creates a PD client.
 func NewClient(pdAddrs []string, security SecurityOption) (Client, error) {
-	log.Infof("[pd] create pd client with endpoints %v", pdAddrs)
+	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", pdAddrs))
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &client{
 		urls:          addrsToUrls(pdAddrs),
@@ -140,7 +141,7 @@ func NewClient(pdAddrs []string, security SecurityOption) (Client, error) {
 	if err := c.updateLeader(); err != nil {
 		return nil, err
 	}
-	log.Infof("[pd] init cluster id %v", c.clusterID)
+	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
 
 	c.wg.Add(3)
 	go c.tsLoop()
@@ -167,7 +168,7 @@ func (c *client) initClusterID() error {
 			members, err := c.getMembers(timeoutCtx, u)
 			timeoutCancel()
 			if err != nil || members.GetHeader() == nil {
-				log.Errorf("[pd] failed to get cluster id: %v", err)
+				log.Error("[pd] failed to get cluster id", zap.Error(err))
 				continue
 			}
 			c.clusterID = members.GetHeader().GetClusterId()
@@ -223,7 +224,7 @@ func (c *client) switchLeader(addrs []string) error {
 		return nil
 	}
 
-	log.Infof("[pd] leader switches to: %v, previous: %v", addr, oldLeader)
+	log.Info("[pd] switch leader", zap.String("new-leader", addr), zap.String("old-leader", oldLeader))
 	if _, err := c.getOrCreateGRPCConn(addr); err != nil {
 		return err
 	}
@@ -308,7 +309,7 @@ func (c *client) leaderLoop() {
 		}
 
 		if err := c.updateLeader(); err != nil {
-			log.Errorf("[pd] failed updateLeader: %v", err)
+			log.Error("[pd] failed updateLeader", zap.Error(err))
 		}
 	}
 }
@@ -367,7 +368,7 @@ func (c *client) tsLoop() {
 					return
 				default:
 				}
-				log.Errorf("[pd] create tso stream error: %v", err)
+				log.Error("[pd] create tso stream error", zap.Error(err))
 				c.ScheduleCheckLeader()
 				cancel()
 				c.revokeTSORequest(errors.WithStack(err))
@@ -415,7 +416,7 @@ func (c *client) tsLoop() {
 				return
 			default:
 			}
-			log.Errorf("[pd] getTS error: %v", err)
+			log.Error("[pd] getTS error", zap.Error(err))
 			c.ScheduleCheckLeader()
 			cancel()
 			stream, cancel = nil, nil
@@ -497,7 +498,7 @@ func (c *client) Close() {
 	defer c.connMu.Unlock()
 	for _, cc := range c.connMu.clientConns {
 		if err := cc.Close(); err != nil {
-			log.Errorf("[pd] failed close grpc clientConn: %v", err)
+			log.Error("[pd] failed close grpc clientConn", zap.Error(err))
 		}
 	}
 }

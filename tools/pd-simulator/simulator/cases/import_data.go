@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"math/rand"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/table"
@@ -127,14 +129,11 @@ func newImportData() *Case {
 			}
 			totalPeerLog = fmt.Sprintf("%s [store %d]:%.2f%%", totalPeerLog, storeID, regionProp)
 		}
-		simutil.Logger.Infof(`
-******* table 2 *******
-%s
-%s
-*******  global *******
-%s
-%s
-`, tableLeaderLog, tablePeerLog, totalLeaderLog, totalPeerLog)
+		simutil.Logger.Info("import data information",
+			zap.String("table-leader", tableLeaderLog),
+			zap.String("table-peer", tablePeerLog),
+			zap.String("total-leader", totalLeaderLog),
+			zap.String("total-peer", totalPeerLog))
 		return isEnd
 	}
 	return &simCase

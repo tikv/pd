@@ -17,6 +17,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
+	"go.uber.org/zap"
 )
 
 func newRegionSplit() *Case {
@@ -58,7 +59,10 @@ func newRegionSplit() *Case {
 		count1 := regions.GetStoreRegionCount(1)
 		count2 := regions.GetStoreRegionCount(2)
 		count3 := regions.GetStoreRegionCount(3)
-		simutil.Logger.Infof("region counts: %v %v %v", count1, count2, count3)
+		simutil.Logger.Info("current region counts",
+			zap.Int("first-store", count1),
+			zap.Int("second-store", count2),
+			zap.Int("third-store", count3))
 		return count1 > 5 && count2 > 5 && count3 > 5
 	}
 	return &simCase

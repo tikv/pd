@@ -14,15 +14,16 @@
 package simutil
 
 import (
-	"github.com/pingcap/pd/pkg/logutil"
-	log "github.com/sirupsen/logrus"
+	log "github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 // Logger is the global logger used for simulator.
-var Logger *log.Logger
+var Logger *zap.Logger
 
-// InitLogger initializes the Logger with log level.
-func InitLogger(level string) {
-	Logger = log.New()
-	Logger.Level = logutil.StringToLogLevel(level)
+// InitLogger initializes the Logger with -log level.
+func InitLogger(l string) {
+	conf := &log.Config{Level: l, File: log.FileLogConfig{}}
+	lg, _, _ := log.InitLogger(conf)
+	Logger = lg
 }

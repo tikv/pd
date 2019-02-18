@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/cases"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
+	"go.uber.org/zap"
 )
 
 // Event affects the status of the cluster.
@@ -83,9 +84,9 @@ func (e *WriteFlowOnSpot) Run(raft *RaftEngine, tickCount int64) bool {
 	res := e.descriptor.Step(tickCount)
 	for key, size := range res {
 		region := raft.SearchRegion([]byte(key))
-		simutil.Logger.Debugf("search the region: %v", region.GetMeta())
+		simutil.Logger.Debug("search the region", zap.Reflect("region", region.GetMeta()))
 		if region == nil {
-			simutil.Logger.Errorf("region not found for key %s", key)
+			simutil.Logger.Error("region not found for key", zap.String("key", key))
 			continue
 		}
 		raft.updateRegionStore(region, size)
@@ -104,7 +105,7 @@ func (e *WriteFlowOnRegion) Run(raft *RaftEngine, tickCount int64) bool {
 	for id, bytes := range res {
 		region := raft.GetRegion(id)
 		if region == nil {
-			simutil.Logger.Errorf("region %d not found", id)
+			simutil.Logger.Error("region is not found", zap.Uint64("region-id", id))
 			continue
 		}
 		raft.updateRegionStore(region, bytes)
@@ -137,7 +138,7 @@ func (e *AddNodes) Run(raft *RaftEngine, tickCount int64) bool {
 	}
 
 	if _, ok := raft.conn.Nodes[id]; ok {
-		simutil.Logger.Infof("Node %d already existed", id)
+		simutil.Logger.Info("node has already existed", zap.Uint64("node-id", id))
 		return false
 	}
 
@@ -151,14 +152,14 @@ func (e *AddNodes) Run(raft *RaftEngine, tickCount int64) bool {
 	}
 	n, err := NewNode(s, raft.conn.pdAddr, config.StoreIOMBPerSecond)
 	if err != nil {
-		simutil.Logger.Errorf("Add node %d failed: %v", id, err)
+		simutil.Logger.Error("add node failed", zap.Uint64("node-id", id), zap.Error(err))
 		return false
 	}
 	raft.conn.Nodes[id] = n
 	n.raftEngine = raft
 	err = n.Start()
 	if err != nil {
-		simutil.Logger.Errorf("Start node %d failed: %v", id, err)
+		simutil.Logger.Error("start node failed", zap.Uint64("node-id", id), zap.Error(err))
 	}
 	return false
 }
@@ -177,7 +178,7 @@ func (e *DeleteNodes) Run(raft *RaftEngine, tickCount int64) bool {
 
 	node := raft.conn.Nodes[id]
 	if node == nil {
-		simutil.Logger.Errorf("Node %d not existed", id)
+		simutil.Logger.Error("node is not existed", zap.Uint64("node-id", id))
 		return false
 	}
 	delete(raft.conn.Nodes, id)
