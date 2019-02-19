@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2019 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// It is for query with --prefix
+// It is for operator with --prefix
 type parameter struct {
 	Key       string `json:"key"`
 	Range_end string `json:"range_end"`
@@ -72,13 +72,6 @@ func formatJSON(str string) (string, error) {
 	return res, nil
 }
 
-var (
-	rangeQueryDDLInfo = &parameter{
-		Key:       base64Encode("/tidb/ddl"),
-		Range_end: base64Encode("/tidb/ddm"),
-	}
-)
-
 // NewEtcdCommand return a etcd subcommand of rootCmd
 func NewEtcdCommand() *cobra.Command {
 	m := &cobra.Command{
@@ -119,6 +112,11 @@ func NewDelSchemaVersion() *cobra.Command {
 }
 
 func showDDLInfoCommandFunc(cmd *cobra.Command, args []string) {
+	var rangeQueryDDLInfo = &parameter{
+		Key:       base64Encode("/tidb/ddl"),
+		Range_end: base64Encode("/tidb/ddm"),
+	}
+
 	reqData, _ := json.Marshal(rangeQueryDDLInfo)
 	req, err := getRequest(cmd, rangeQueryPrefix, http.MethodPost, "application/json",
 		bytes.NewBuffer(reqData))
