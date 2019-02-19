@@ -48,24 +48,30 @@ func base64Decode(str string) (string, error) {
 }
 
 func formatJSON(str string) (string, error) {
-	var t interface{}
-	err := json.Unmarshal([]byte(str), &t)
-	for _, v := range t.(map[string]interface{}) {
-		for kk, vv := range v.(map[string]interface{}) {
-			if kk == "key" || kk == "value" {
-				vv, err = base64Decode(vv.(string))
-				if err != nil {
-					return "", err
-				}
-				v.(map[string]interface{})[kk] = vv
-			}
+	var jsn struct {
+		Count  string              `json:"count"`
+		Header map[string]string   `json:"header"`
+		Kvs    []map[string]string `json:"kvs"`
+	}
 
+	err := json.Unmarshal([]byte(str), &jsn)
+
+	for k, v := range jsn.Kvs {
+		for kk, vv := range v {
+			if kk == "key" || kk == "lease" {
+				vv, err = base64Decode(vv)
+				if err != nil {
+					return "", nil
+				}
+				jsn.Kvs[k][kk] = vv
+			}
 		}
 	}
+
 	if err != nil {
 		return "", err
 	}
-	resByte, err := json.MarshalIndent(&t, "", "\t")
+	resByte, err := json.MarshalIndent(&jsn, "", "\t")
 	if err != nil {
 		return "", err
 	}
