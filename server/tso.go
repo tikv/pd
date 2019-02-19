@@ -200,7 +200,7 @@ func (s *Server) getRespTS(count uint32) (pdpb.Timestamp, error) {
 		resp.Logical = atomic.AddInt64(&current.logical, int64(count))
 		if resp.Logical >= maxLogical {
 			log.Error("logical part outside of max logical interval, please check ntp time",
-				zap.Any("response", resp),
+				zap.Reflect("response", resp),
 				zap.Int("retry-count", i))
 			tsoCounter.WithLabelValues("logical_overflow").Inc()
 			time.Sleep(updateTimestampStep)

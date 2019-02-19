@@ -493,7 +493,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	if origin == nil {
 		log.Debug("Insert new region",
 			zap.Uint64("region-id", region.GetID()),
-			zap.Any("meta-region", core.HexRegionMeta(region.GetMeta())),
+			zap.Reflect("meta-region", core.HexRegionMeta(region.GetMeta())),
 		)
 		saveKV, saveCache, isNew = true, true, true
 	} else {
@@ -556,7 +556,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			// after restart. Here we only log the error then go on updating cache.
 			log.Error("fail to save region to kv",
 				zap.Uint64("region-id", region.GetID()),
-				zap.Any("region-meta", core.HexRegionMeta(region.GetMeta())),
+				zap.Reflect("region-meta", core.HexRegionMeta(region.GetMeta())),
 				zap.Error(err))
 		}
 		select {

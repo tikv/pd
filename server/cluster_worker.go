@@ -35,7 +35,7 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 
 	// If the region peer count is 0, then we should not handle this.
 	if len(region.GetPeers()) == 0 {
-		log.Warn("invalid region, zero region peer count", zap.Any("region-meta", core.HexRegionMeta(region.GetMeta())))
+		log.Warn("invalid region, zero region peer count", zap.Reflect("region-meta", core.HexRegionMeta(region.GetMeta())))
 		return errors.Errorf("invalid region, zero region peer count: %v", core.HexRegionMeta(region.GetMeta()))
 	}
 
@@ -171,8 +171,8 @@ func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	err := c.checkSplitRegion(left, right)
 	if err != nil {
 		log.Warn("report split region is invalid",
-			zap.Any("left-region", core.HexRegionMeta(left)),
-			zap.Any("right-region", core.HexRegionMeta(right)),
+			zap.Reflect("left-region", core.HexRegionMeta(left)),
+			zap.Reflect("right-region", core.HexRegionMeta(right)),
 			zap.Error(err))
 		return nil, err
 	}
@@ -183,7 +183,7 @@ func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	originRegion.StartKey = left.GetStartKey()
 	log.Info("region split, generate new region",
 		zap.Uint64("region-id", originRegion.GetId()),
-		zap.Any("region-meta", core.HexRegionMeta(left)))
+		zap.Reflect("region-meta", core.HexRegionMeta(left)))
 	return &pdpb.ReportSplitResponse{}, nil
 }
 
@@ -197,7 +197,7 @@ func (c *RaftCluster) handleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 	err := c.checkSplitRegions(regions)
 	if err != nil {
 		log.Warn("report batch split region is invalid",
-			zap.Any("region-meta", hexRegionMetas),
+			zap.Reflect("region-meta", hexRegionMetas),
 			zap.Error(err))
 		return nil, err
 	}
@@ -205,7 +205,7 @@ func (c *RaftCluster) handleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 	originRegion := proto.Clone(regions[last]).(*metapb.Region)
 	log.Info("region batch split, generate new regions",
 		zap.Uint64("region-id", originRegion.GetId()),
-		zap.Any("origin", hexRegionMetas[:last]),
+		zap.Reflect("origin", hexRegionMetas[:last]),
 		zap.Int("total", last))
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }

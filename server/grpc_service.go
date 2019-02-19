@@ -562,7 +562,7 @@ func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb.PutClusterC
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
-	log.Info("put cluster config ok", zap.Any("config", conf))
+	log.Info("put cluster config ok", zap.Reflect("config", conf))
 
 	return &pdpb.PutClusterConfigResponse{
 		Header: s.header(),
