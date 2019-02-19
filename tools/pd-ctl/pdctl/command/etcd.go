@@ -47,6 +47,31 @@ func base64Decode(str string) (string, error) {
 	return string(data), nil
 }
 
+func formatJSON(str string) (string, error) {
+	var t interface{}
+	err := json.Unmarshal([]byte(str), &t)
+	for _, v := range t.(map[string]interface{}) {
+		for kk, vv := range v.(map[string]interface{}) {
+			if kk == "key" || kk == "value" {
+				vv, err = base64Decode(vv.(string))
+				if err != nil {
+					return "", err
+				}
+			}
+
+		}
+	}
+	if err != nil {
+		return "", err
+	}
+	resByte, err := json.MarshalIndent(&t, "", "\t")
+	if err != nil {
+		return "", err
+	}
+	res := string(resByte)
+	return res, nil
+}
+
 var (
 	rangeQueryDDLInfo = &parameter{
 		Key:       base64Encode("/tidb/ddl"),
@@ -107,23 +132,11 @@ func showDDLInfoCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// format JSON
-	var t interface{}
-	_ = json.Unmarshal([]byte(res), &t)
-	for _, v := range t.(map[string]interface{}) {
-		for kk, vv := range v.(map[string]interface{}) {
-			if kk == "key" || kk == "value" {
-				vv, err = base64Decode(vv.(string))
-				if err != nil {
-					cmd.Printf("Failed to show DDLInfo: %v\n", err)
-					return
-				}
-			}
-
-		}
+	res, err = formatJSON(res)
+	if err != nil {
+		cmd.Printf("Failed to show DDLInfo: %v\n", err)
+		return
 	}
-	resByte, _ := json.MarshalIndent(&t, "", "\t")
-	res = string(resByte)
 
 	cmd.Println(res)
 }
@@ -153,12 +166,11 @@ func delOwnerCampaign(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// format JSON
-	var t interface{}
-	_ = json.Unmarshal([]byte(res), &t)
-	resByte, _ := json.MarshalIndent(&t, "", "\t")
-	res = string(resByte)
-
+	res, err = formatJSON(res)
+	if err != nil {
+		cmd.Printf("Failed to delete schema version: %v\n", err)
+		return
+	}
 	cmd.Println(res)
 }
 
@@ -187,11 +199,10 @@ func delSchemaVersion(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// format JSON
-	var t interface{}
-	_ = json.Unmarshal([]byte(res), &t)
-	resByte, _ := json.MarshalIndent(&t, "", "\t")
-	res = string(resByte)
-
+	res, err = formatJSON(res)
+	if err != nil {
+		cmd.Printf("Failed to delete schema version: %v\n", err)
+		return
+	}
 	cmd.Println(res)
 }
