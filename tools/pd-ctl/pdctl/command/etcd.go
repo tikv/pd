@@ -32,6 +32,7 @@ var (
 	rangeQueryPrefix       = "v3/kv/range"
 	rangeDelPrefix         = "v3/kv/deleterange"
 	delOwnerCampaignPrefix = "/tidb/ddl/fg/owner/"
+	delSchemaVersionPrefix = "/tidb/ddl/all_schema_bersions/DDL_ID"
 )
 
 func base64Encode(str string) string {
@@ -61,6 +62,7 @@ func NewEtcdCommand() *cobra.Command {
 	}
 	m.AddCommand(NewShowDDLInfoCommand())
 	m.AddCommand(NewDelOwnerCampaign())
+	m.AddCommand(NewDelSchemaVersion())
 	return m
 }
 
@@ -78,6 +80,15 @@ func NewDelOwnerCampaign() *cobra.Command {
 		Use:   "delowner",
 		Short: "delete DDL Owner Campaign by LeaseID",
 		Run:   delOwnerCampaign,
+	}
+	return m
+}
+
+func NewDelSchemaVersion() *cobra.Command {
+	m := &cobra.Command{
+		Use:   "delschema",
+		Short: "delete schema version by DDLID",
+		Run:   delSchemaVersion,
 	}
 	return m
 }
@@ -123,14 +134,48 @@ func delOwnerCampaign(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	leaseID := base64Encode(args[0])
+	leaseID := args[0]
+
+	var para = &parameter{
+		Key: base64Encode(delOwnerCampaignPrefix + leaseID),
+	}
+
+	reqData, _ := json.Marshal(para)
+	req, err := getRequest(cmd, rangeDelPrefix, http.MethodPost, "application/json",
+		bytes.NewBuffer(reqData))
+	if err != nil {
+		cmd.Printf("Failed to show DDLInfo: %v\n", err)
+		return
+	}
+	res, err := dail(req)
+	if err != nil {
+		cmd.Printf("Failed to show DDLInfo: %v\n", err)
+		return
+	}
+
+	// format JSON
+	var t interface{}
+	_ = json.Unmarshal([]byte(res), &t)
+	resByte, _ := json.MarshalIndent(&t, "", "\t")
+	res = string(resByte)
+
+	cmd.Println(res)
+}
+
+func delSchemaVersion(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+
+	leaseID := args[0]
 
 	var para = &parameter{
 		Key: leaseID,
 	}
 
 	reqData, _ := json.Marshal(para)
-	req, err := getRequest(cmd, rangeQueryPrefix, http.MethodPost, "application/json",
+	req, err := getRequest(cmd, delSchemaVersionPrefix, http.MethodPost, "application/json",
 		bytes.NewBuffer(reqData))
 	if err != nil {
 		cmd.Printf("Failed to show DDLInfo: %v\n", err)
