@@ -20,8 +20,9 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 const (
@@ -91,7 +92,7 @@ func (s *Server) syncTimestamp() error {
 	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
 	if subTimeByWallClock(next, last) < updateTimestampGuard {
-		log.Errorf("system time may be incorrect: last: %v next %v", last, next)
+		log.Error("system time may be incorrect", zap.Time("last", last), zap.Time("next", next))
 		next = last.Add(updateTimestampGuard)
 	}
 
@@ -101,7 +102,7 @@ func (s *Server) syncTimestamp() error {
 	}
 
 	tsoCounter.WithLabelValues("sync_ok").Inc()
-	log.Infof("sync and save timestamp: last %v save %v next %v", last, save, next)
+	log.Info("sync and save timestamp", zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
 
 	current := &atomicObject{
 		physical: next,
@@ -134,7 +135,7 @@ func (s *Server) updateTimestamp() error {
 
 	jetLag := subTimeByWallClock(now, prev.physical)
 	if jetLag > 3*updateTimestampStep {
-		log.Warnf("clock offset: %v, prev: %v, now: %v", jetLag, prev.physical, now)
+		log.Warn("clock offset", zap.Duration("jet-lag", jetLag), zap.Time("prev-physical", prev.physical), zap.Time("now", now))
 		tsoCounter.WithLabelValues("slow_save").Inc()
 	}
 
@@ -150,7 +151,7 @@ func (s *Server) updateTimestamp() error {
 	} else if prevLogical > maxLogical/2 {
 		// The reason choosing maxLogical/2 here is that it's big enough for common cases.
 		// Because there is enough timestamp can be allocated before next update.
-		log.Warnf("the logical time may be not enough, prevLogical: %v", prevLogical)
+		log.Warn("the logical time may be not enough", zap.Int64("prev-logical", prevLogical))
 		next = prev.physical.Add(time.Millisecond)
 	} else {
 		// It will still use the previous physical time to alloc the timestamp.
@@ -185,7 +186,7 @@ func (s *Server) getRespTS(count uint32) (pdpb.Timestamp, error) {
 	for i := 0; i < maxRetryCount; i++ {
 		current, ok := s.ts.Load().(*atomicObject)
 		if !ok || current.physical == zeroTime {
-			log.Errorf("we haven't synced timestamp ok, wait and retry, retry count %d", i)
+			log.Error("we haven't synced timestamp ok, wait and retry", zap.Int("retry-count", i))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -193,7 +194,9 @@ func (s *Server) getRespTS(count uint32) (pdpb.Timestamp, error) {
 		resp.Physical = current.physical.UnixNano() / int64(time.Millisecond)
 		resp.Logical = atomic.AddInt64(&current.logical, int64(count))
 		if resp.Logical >= maxLogical {
-			log.Errorf("logical part outside of max logical interval %v, please check ntp time, retry count %d", resp, i)
+			log.Error("logical part outside of max logical interval, please check ntp time",
+				zap.Reflect("response", resp),
+				zap.Int("retry-count", i))
 			tsoCounter.WithLabelValues("logical_overflow").Inc()
 			time.Sleep(updateTimestampStep)
 			continue

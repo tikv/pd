@@ -23,13 +23,14 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 const (
@@ -101,14 +102,14 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 			return
 		}
 		if op.IsFinish() {
-			log.Infof("[region %v] operator finish: %s", region.GetID(), op)
+			log.Info("operator finish", zap.Uint64("region-id", region.GetID()), zap.Reflect("operator", op))
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 			operatorDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 			c.pushHistory(op)
 			c.opRecords.Put(op, pdpb.OperatorStatus_SUCCESS)
 			c.removeOperator(op)
 		} else if timeout {
-			log.Infof("[region %v] operator timeout: %s", region.GetID(), op)
+			log.Info("operator timeout", zap.Uint64("region-id", region.GetID()), zap.Reflect("operator", op))
 			operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 			c.removeOperator(op)
 			c.opRecords.Put(op, pdpb.OperatorStatus_TIMEOUT)
@@ -232,16 +233,16 @@ func (c *coordinator) run() {
 		if schedulerCfg.Disable {
 			scheduleCfg.Schedulers[k] = schedulerCfg
 			k++
-			log.Info("skip create ", schedulerCfg.Type)
+			log.Info("skip create scheduler", zap.String("scheduler-type", schedulerCfg.Type))
 			continue
 		}
 		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.limiter, schedulerCfg.Args...)
 		if err != nil {
-			log.Fatalf("can not create scheduler %s: %v", schedulerCfg.Type, err)
+			log.Fatal("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Error(err))
 		}
-		log.Infof("create scheduler %s", s.GetName())
+		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil {
-			log.Errorf("can not add scheduler %s: %v", s.GetName(), err)
+			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		}
 
 		// only record valid scheduler config
@@ -254,7 +255,7 @@ func (c *coordinator) run() {
 	// remove invalid scheduler config and persist
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
 	if err := c.cluster.opt.persist(c.cluster.kv); err != nil {
-		log.Errorf("can't persist schedule config: %v", err)
+		log.Error("cannot persist schedule config", zap.Error(err))
 	}
 
 	c.wg.Add(1)
@@ -439,7 +440,9 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			}
 
 		case <-s.Ctx().Done():
-			log.Infof("%v has been stopped: %v", s.GetName(), s.Ctx().Err())
+			log.Info("stopped scheduler",
+				zap.String("scheduler-name", s.GetName()),
+				zap.Error(s.Ctx().Err()))
 			return
 		}
 	}
@@ -448,12 +451,12 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 func (c *coordinator) addOperatorLocked(op *schedule.Operator) bool {
 	regionID := op.RegionID()
 
-	log.Infof("[region %v] add operator: %s", regionID, op)
+	log.Info("add operator", zap.Uint64("region-id", regionID), zap.Reflect("operator", op))
 
 	// If there is an old operator, replace it. The priority should be checked
 	// already.
 	if old, ok := c.operators[regionID]; ok {
-		log.Infof("[region %v] replace old operator: %s", regionID, old)
+		log.Info("replace old operator", zap.Uint64("region-id", regionID), zap.Reflect("operator", old))
 		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
 		c.opRecords.Put(old, pdpb.OperatorStatus_REPLACE)
 		c.removeOperatorLocked(old)
@@ -493,15 +496,15 @@ func (c *coordinator) addOperator(ops ...*schedule.Operator) bool {
 func (c *coordinator) checkAddOperator(op *schedule.Operator) bool {
 	region := c.cluster.GetRegion(op.RegionID())
 	if region == nil {
-		log.Debugf("[region %v] region not found, cancel add operator", op.RegionID())
+		log.Debug("region not found, cancel add operator", zap.Uint64("region-id", op.RegionID()))
 		return false
 	}
 	if region.GetRegionEpoch().GetVersion() != op.RegionEpoch().GetVersion() || region.GetRegionEpoch().GetConfVer() != op.RegionEpoch().GetConfVer() {
-		log.Debugf("[region %v] region epoch not match, %v vs %v, cancel add operator", op.RegionID(), region.GetRegionEpoch(), op.RegionEpoch())
+		log.Debug("region epoch not match, cancel add operator", zap.Uint64("region-id", op.RegionID()), zap.Reflect("old", region.GetRegionEpoch()), zap.Reflect("new", op.RegionEpoch()))
 		return false
 	}
 	if old := c.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
-		log.Debugf("[region %v] already have operator %s, cancel add operator", op.RegionID(), old)
+		log.Debug("already have operator, cancel add operator", zap.Uint64("region-id", op.RegionID()), zap.Reflect("old", old))
 		return false
 	}
 	return true
@@ -576,7 +579,7 @@ func (c *coordinator) getHistory(start time.Time) []schedule.OperatorHistory {
 }
 
 func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule.OperatorStep) {
-	log.Infof("[region %v] send schedule command: %s", region.GetID(), step)
+	log.Info("send schedule command", zap.Uint64("region-id", region.GetID()), zap.Stringer("step", step))
 	switch s := step.(type) {
 	case schedule.TransferLeader:
 		cmd := &pdpb.RegionHeartbeatResponse{
@@ -654,7 +657,7 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 		}
 		c.hbStreams.sendMsg(region, cmd)
 	default:
-		log.Errorf("unknown operatorStep: %v", step)
+		log.Error("unknown operator step", zap.Reflect("step", step))
 	}
 }
 

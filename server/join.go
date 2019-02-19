@@ -22,9 +22,10 @@ import (
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/embed"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 const (
@@ -86,7 +87,7 @@ func PrepareJoinCluster(cfg *Config) error {
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
 		s, err := ioutil.ReadFile(filePath)
 		if err != nil {
-			log.Fatal("read the join config meet error: ", err)
+			log.Fatal("read the join config meet error", zap.Error(err))
 		}
 		cfg.InitialCluster = strings.TrimSpace(string(s))
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
@@ -176,14 +177,14 @@ func PrepareJoinCluster(cfg *Config) error {
 func isDataExist(d string) bool {
 	dir, err := os.Open(d)
 	if err != nil {
-		log.Error("failed to open:", err)
+		log.Error("failed to open directory", zap.Error(err))
 		return false
 	}
 	defer dir.Close()
 
 	names, err := dir.Readdirnames(-1)
 	if err != nil {
-		log.Error("failed to list:", err)
+		log.Error("failed to list directory", zap.Error(err))
 		return false
 	}
 	return len(names) != 0

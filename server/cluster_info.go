@@ -21,10 +21,11 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 type clusterInfo struct {
@@ -68,13 +69,19 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 	if err := kv.LoadStores(c.core.Stores); err != nil {
 		return nil, err
 	}
-	log.Infof("load %v stores cost %v", c.core.Stores.GetStoreCount(), time.Since(start))
+	log.Info("load stores",
+		zap.Int("count", c.core.Stores.GetStoreCount()),
+		zap.Duration("cost", time.Since(start)),
+	)
 
 	start = time.Now()
 	if err := kv.LoadRegions(c.core.Regions); err != nil {
 		return nil, err
 	}
-	log.Infof("load %v regions cost %v", c.core.Regions.GetRegionCount(), time.Since(start))
+	log.Info("load regions",
+		zap.Int("count", c.core.Regions.GetRegionCount()),
+		zap.Duration("cost", time.Since(start)),
+	)
 
 	return c, nil
 }
@@ -101,9 +108,11 @@ func (c *clusterInfo) OnStoreVersionChange() {
 		c.opt.SetClusterVersion(*minVersion)
 		err := c.opt.persist(c.kv)
 		if err != nil {
-			log.Infof("persist cluster version meet error: %s", err)
+			log.Error("persist cluster version meet error", zap.Error(err))
 		}
-		log.Infof("cluster version changed from %s to %s", clusterVersion, minVersion)
+		log.Info("cluster version changed",
+			zap.Stringer("old-cluster-version", clusterVersion),
+			zap.Stringer("new-cluster-version", minVersion))
 		CheckPDVersion(c.opt)
 	}
 }
@@ -123,7 +132,7 @@ func (c *clusterInfo) allocID() (uint64, error) {
 func (c *clusterInfo) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	peerID, err := c.allocID()
 	if err != nil {
-		log.Errorf("failed to alloc peer: %v", err)
+		log.Error("failed to alloc peer", zap.Error(err))
 		return nil, err
 	}
 	peer := &metapb.Peer{
@@ -471,7 +480,10 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	// Mark isNew if the region in cache does not have leader.
 	var saveKV, saveCache, isNew bool
 	if origin == nil {
-		log.Debugf("[region %d] Insert new region {%v}", region.GetID(), core.HexRegionMeta(region.GetMeta()))
+		log.Debug("insert new region",
+			zap.Uint64("region-id", region.GetID()),
+			zap.Reflect("meta-region", core.HexRegionMeta(region.GetMeta())),
+		)
 		saveKV, saveCache, isNew = true, true, true
 	} else {
 		r := region.GetRegionEpoch()
@@ -481,18 +493,32 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			return ErrRegionIsStale(region.GetMeta(), origin.GetMeta())
 		}
 		if r.GetVersion() > o.GetVersion() {
-			log.Infof("[region %d] %s, Version changed from {%d} to {%d}", region.GetID(), core.DiffRegionKeyInfo(origin, region), o.GetVersion(), r.GetVersion())
+			log.Info("region Version changed",
+				zap.Uint64("region-id", region.GetID()),
+				zap.String("detail", core.DiffRegionKeyInfo(origin, region)),
+				zap.Uint64("old-version", o.GetVersion()),
+				zap.Uint64("new-version", r.GetVersion()),
+			)
 			saveKV, saveCache = true, true
 		}
 		if r.GetConfVer() > o.GetConfVer() {
-			log.Infof("[region %d] %s, ConfVer changed from {%d} to {%d}", region.GetID(), core.DiffRegionPeersInfo(origin, region), o.GetConfVer(), r.GetConfVer())
+			log.Info("region ConfVer changed",
+				zap.Uint64("region-id", region.GetID()),
+				zap.String("detail", core.DiffRegionPeersInfo(origin, region)),
+				zap.Uint64("old-confver", o.GetConfVer()),
+				zap.Uint64("new-confver", r.GetConfVer()),
+			)
 			saveKV, saveCache = true, true
 		}
 		if region.GetLeader().GetId() != origin.GetLeader().GetId() {
 			if origin.GetLeader().GetId() == 0 {
 				isNew = true
 			} else {
-				log.Infof("[region %d] Leader changed from store {%d} to {%d}", region.GetID(), origin.GetLeader().GetStoreId(), region.GetLeader().GetStoreId())
+				log.Info("leader changed",
+					zap.Uint64("region-id", region.GetID()),
+					zap.Uint64("from", origin.GetLeader().GetStoreId()),
+					zap.Uint64("to", region.GetLeader().GetStoreId()),
+				)
 			}
 			saveCache = true
 		}
@@ -517,7 +543,10 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		if err := c.kv.SaveRegion(region.GetMeta()); err != nil {
 			// Not successfully saved to kv is not fatal, it only leads to longer warm-up
 			// after restart. Here we only log the error then go on updating cache.
-			log.Errorf("[region %d] fail to save region %v: %v", region.GetID(), core.HexRegionMeta(region.GetMeta()), err)
+			log.Error("fail to save region to kv",
+				zap.Uint64("region-id", region.GetID()),
+				zap.Reflect("region-meta", core.HexRegionMeta(region.GetMeta())),
+				zap.Error(err))
 		}
 	}
 	if !isWriteUpdate && !isReadUpdate && !saveCache && !isNew {
@@ -535,7 +564,10 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		if c.kv != nil {
 			for _, item := range overlaps {
 				if err := c.kv.DeleteRegion(item); err != nil {
-					log.Errorf("[region %d] fail to delete region %v: %v", item.GetId(), core.HexRegionMeta(item), err)
+					log.Error("fail to delete region from kv",
+						zap.Uint64("region-id", item.GetId()),
+						zap.Reflect("region-meta", core.HexRegionMeta(item)),
+						zap.Error(err))
 				}
 			}
 		}

@@ -17,8 +17,9 @@ import (
 	"sync"
 
 	"github.com/coreos/etcd/clientv3"
+	log "github.com/pingcap/log"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 const (
@@ -87,7 +88,7 @@ func (alloc *idAllocator) generate() (uint64, error) {
 		return 0, errors.New("generate id failed, we may not leader")
 	}
 
-	log.Infof("idAllocator allocates a new id: %d", end)
+	log.Info("idAllocator allocates a new id", zap.Uint64("alloc-id", end))
 	metadataGauge.WithLabelValues("idalloc").Set(float64(end))
 	return end, nil
 }

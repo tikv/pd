@@ -15,7 +15,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"path"
 	"strings"
@@ -24,10 +23,11 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 // The timeout to wait transfer etcd leader to complete.
@@ -75,7 +75,7 @@ func (s *Server) leaderLoop() {
 
 	for {
 		if s.isClosed() {
-			log.Infof("server is closed, return leader loop")
+			log.Info("server is closed, return leader loop")
 			return
 		}
 
@@ -87,7 +87,7 @@ func (s *Server) leaderLoop() {
 
 		leader, rev, err := getLeader(s.client, s.getLeaderPath())
 		if err != nil {
-			log.Errorf("get leader err %v", err)
+			log.Error("get leader meet error", zap.Error(err))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -95,14 +95,14 @@ func (s *Server) leaderLoop() {
 			if s.isSameLeader(leader) {
 				// oh, we are already leader, we may meet something wrong
 				// in previous campaignLeader. we can delete and campaign again.
-				log.Warnf("leader is still %s, delete and campaign again", leader)
+				log.Warn("the leader has not changed, delete and campaign again", zap.Stringer("old-leader", leader))
 				if err = s.deleteLeaderKey(); err != nil {
-					log.Errorf("delete leader key err %s", err)
+					log.Error("delete leader key meet error", zap.Error(err))
 					time.Sleep(200 * time.Millisecond)
 					continue
 				}
 			} else {
-				log.Infof("leader is %s, watch it", leader)
+				log.Info("start watch leader", zap.Stringer("leader", leader))
 				s.watchLeader(leader, rev)
 				log.Info("leader changed, try to campaign leader")
 			}
@@ -110,13 +110,15 @@ func (s *Server) leaderLoop() {
 
 		etcdLeader := s.GetEtcdLeader()
 		if etcdLeader != s.ID() {
-			log.Infof("%v is not etcd leader, skip campaign leader and check later", s.Name())
+			log.Info("skip campaign leader and check later",
+				zap.String("server-name", s.Name()),
+				zap.Uint64("etcd-leader-id", etcdLeader))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
 		if err = s.campaignLeader(); err != nil {
-			log.Errorf("campaign leader err %s", fmt.Sprintf("%+v", err))
+			log.Error("campaign leader meet error", zap.Error(err))
 		}
 	}
 }
@@ -136,20 +138,22 @@ func (s *Server) etcdLeaderLoop() {
 			}
 			myPriority, err := s.GetMemberLeaderPriority(s.ID())
 			if err != nil {
-				log.Errorf("failed to load leader priority: %v", err)
+				log.Error("failed to load leader priority", zap.Error(err))
 				break
 			}
 			leaderPriority, err := s.GetMemberLeaderPriority(etcdLeader)
 			if err != nil {
-				log.Errorf("failed to load leader priority: %v", err)
+				log.Error("failed to load leader priority", zap.Error(err))
 				break
 			}
 			if myPriority > leaderPriority {
 				err := s.MoveEtcdLeader(ctx, etcdLeader, s.ID())
 				if err != nil {
-					log.Errorf("failed to transfer etcd leader: %v", err)
+					log.Error("failed to transfer etcd leader", zap.Error(err))
 				} else {
-					log.Infof("etcd leader moved from %v to %v", etcdLeader, s.ID())
+					log.Info("transfer etcd leader",
+						zap.Uint64("from", etcdLeader),
+						zap.Uint64("to", s.ID()))
 				}
 			}
 		case <-ctx.Done():
@@ -200,14 +204,14 @@ func (s *Server) memberInfo() (member *pdpb.Member, marshalStr string) {
 	data, err := leader.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
-		log.Fatalf("marshal leader %s err %v", leader, err)
+		log.Fatal("marshal leader meet error", zap.Stringer("leader", leader), zap.Error(err))
 	}
 
 	return leader, string(data)
 }
 
 func (s *Server) campaignLeader() error {
-	log.Infof("start to campaign leader %s", s.Name())
+	log.Info("begin to campaign leader", zap.String("campaign-leader-name", s.Name()))
 
 	lessor := clientv3.NewLease(s.client)
 	defer func() {
@@ -221,7 +225,7 @@ func (s *Server) campaignLeader() error {
 	cancel()
 
 	if cost := time.Since(start); cost > slowRequestTime {
-		log.Warnf("lessor grants too slow, cost %s", cost)
+		log.Warn("lessor grants too slow", zap.Duration("cost", cost))
 	}
 
 	if err != nil {
@@ -249,7 +253,7 @@ func (s *Server) campaignLeader() error {
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	log.Infof("campaign leader ok %s", s.Name())
+	log.Info("campaign leader ok", zap.String("campaign-leader-name", s.Name()))
 
 	err = s.scheduleOpt.reload(s.kv)
 	if err != nil {
@@ -273,8 +277,8 @@ func (s *Server) campaignLeader() error {
 	s.enableLeader()
 	defer s.disableLeader()
 
-	log.Infof("cluster version is %s", s.scheduleOpt.loadClusterVersion())
-	log.Infof("PD cluster leader %s is ready to serve", s.Name())
+	log.Info("load cluster version", zap.Stringer("cluster-version", s.scheduleOpt.loadClusterVersion()))
+	log.Info("PD cluster leader is ready to serve", zap.String("leader-name", s.Name()))
 	CheckPDVersion(s.scheduleOpt)
 
 	tsTicker := time.NewTicker(updateTimestampStep)
@@ -294,7 +298,7 @@ func (s *Server) campaignLeader() error {
 			}
 			etcdLeader := s.GetEtcdLeader()
 			if etcdLeader != s.ID() {
-				log.Infof("etcd leader changed, %s resigns leadership", s.Name())
+				log.Info("etcd leader changed, resigns leadership", zap.String("old-leader-name", s.Name()))
 				return nil
 			}
 		case <-ctx.Done():
@@ -322,12 +326,14 @@ func (s *Server) watchLeader(leader *pdpb.Member, revision int64) {
 		for wresp := range rch {
 			// meet compacted error, use the compact revision.
 			if wresp.CompactRevision != 0 {
-				log.Warnf("required revision %d has been compacted, use the compact revision %d", revision, wresp.CompactRevision)
+				log.Warn("required revision has been compacted, use the compact revision",
+					zap.Int64("required-revision", revision),
+					zap.Int64("compact-revision", wresp.CompactRevision))
 				revision = wresp.CompactRevision
 				break
 			}
 			if wresp.Canceled {
-				log.Errorf("leader watcher is canceled with revision: %d, error: %s", revision, wresp.Err())
+				log.Error("leader watcher is canceled with", zap.Int64("revision", revision), zap.Error(wresp.Err()))
 				return
 			}
 
@@ -351,7 +357,7 @@ func (s *Server) watchLeader(leader *pdpb.Member, revision int64) {
 // ResignLeader resigns current PD's leadership. If nextLeader is empty, all
 // other pd-servers can campaign.
 func (s *Server) ResignLeader(nextLeader string) error {
-	log.Infof("%s tries to resign leader with next leader directive: %v", s.Name(), nextLeader)
+	log.Info("try to resign leader to next leader", zap.String("from", s.Name()), zap.String("to", nextLeader))
 	// Determine next leaders.
 	var leaderIDs []uint64
 	res, err := etcdutil.ListEtcdMembers(s.client)
@@ -367,7 +373,7 @@ func (s *Server) ResignLeader(nextLeader string) error {
 		return errors.New("no valid pd to transfer leader")
 	}
 	nextLeaderID := leaderIDs[rand.Intn(len(leaderIDs))]
-	log.Infof("%s ready to resign leader, next leader: %v", s.Name(), nextLeaderID)
+	log.Info("ready to resign leader", zap.String("name", s.Name()), zap.Uint64("next-id", nextLeaderID))
 	err = s.MoveEtcdLeader(s.serverLoopCtx, s.ID(), nextLeaderID)
 	return errors.WithStack(err)
 }

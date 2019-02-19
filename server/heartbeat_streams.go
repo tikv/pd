@@ -20,9 +20,10 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 const heartbeatStreamKeepAliveInterval = time.Minute
@@ -80,21 +81,24 @@ func (s *heartbeatStreams) run() {
 			storeLabel := strconv.FormatUint(storeID, 10)
 			if stream, ok := s.streams[storeID]; ok {
 				if err := stream.Send(msg); err != nil {
-					log.Errorf("[region %v] send heartbeat message fail: %v", msg.RegionId, err)
+					log.Error("send heartbeat message fail",
+						zap.Uint64("region-id", msg.RegionId), zap.Error(err))
 					delete(s.streams, storeID)
 					regionHeartbeatCounter.WithLabelValues(storeLabel, "push", "err").Inc()
 				} else {
 					regionHeartbeatCounter.WithLabelValues(storeLabel, "push", "ok").Inc()
 				}
 			} else {
-				log.Debugf("[region %v] heartbeat stream not found for store %v, skip send message", msg.RegionId, storeID)
+				log.Debug("heartbeat stream not found, skip send message", zap.Uint64("region-id", msg.RegionId), zap.Uint64("store-id", storeID))
 				regionHeartbeatCounter.WithLabelValues(storeLabel, "push", "skip").Inc()
 			}
 		case <-keepAliveTicker.C:
 			for storeID, stream := range s.streams {
 				storeLabel := strconv.FormatUint(storeID, 10)
 				if err := stream.Send(keepAlive); err != nil {
-					log.Errorf("[store %v] send keepalive message fail: %v", storeID, err)
+					log.Error("send keepalive message fail",
+						zap.Uint64("target-store-id", storeID),
+						zap.Error(err))
 					delete(s.streams, storeID)
 					regionHeartbeatCounter.WithLabelValues(storeLabel, "keepalive", "err").Inc()
 				} else {

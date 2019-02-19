@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strconv"
@@ -22,10 +23,10 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/net/context"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -210,7 +211,9 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
-	log.Infof("put store ok - %v", store)
+	log.Info("put store ok", zap.Stringer("store", store))
+	cluster.RLock()
+	defer cluster.RUnlock()
 	cluster.cachedCluster.OnStoreVersionChange()
 
 	return &pdpb.PutStoreResponse{
@@ -567,7 +570,7 @@ func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb.PutClusterC
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
-	log.Infof("put cluster config ok - %v", conf)
+	log.Info("put cluster config ok", zap.Reflect("config", conf))
 
 	return &pdpb.PutClusterConfigResponse{
 		Header: s.header(),
@@ -654,9 +657,12 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 		if err := s.kv.SaveGCSafePoint(newSafePoint); err != nil {
 			return nil, err
 		}
-		log.Infof("updated gc safe point to %d", newSafePoint)
+		log.Info("updated gc safe point",
+			zap.Uint64("safe-point", newSafePoint))
 	} else if newSafePoint < oldSafePoint {
-		log.Warnf("trying to update gc safe point from %d to %d", oldSafePoint, newSafePoint)
+		log.Warn("trying to update gc safe point",
+			zap.Uint64("old-safe-point", oldSafePoint),
+			zap.Uint64("new-safe-point", newSafePoint))
 		newSafePoint = oldSafePoint
 	}
 

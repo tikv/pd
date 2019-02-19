@@ -21,10 +21,11 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 var (
@@ -159,11 +160,11 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	log.Infof("create scheduler %s", s.GetName())
+	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 	if err = c.addScheduler(s, args...); err != nil {
-		log.Errorf("can not add scheduler %v: %v", s.GetName(), err)
+		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 	} else if err = h.opt.persist(c.cluster.kv); err != nil {
-		log.Errorf("can not persist scheduler config: %v", err)
+		log.Error("can not persist scheduler config", zap.Error(err))
 	}
 	return err
 }
@@ -175,9 +176,9 @@ func (h *Handler) RemoveScheduler(name string) error {
 		return err
 	}
 	if err = c.removeScheduler(name); err != nil {
-		log.Errorf("can not remove scheduler %v: %v", name, err)
+		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
 	} else if err = h.opt.persist(c.cluster.kv); err != nil {
-		log.Errorf("can not persist scheduler config: %v", err)
+		log.Error("can not persist scheduler config", zap.Error(err))
 	}
 	return err
 }

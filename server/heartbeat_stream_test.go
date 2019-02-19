@@ -20,8 +20,10 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/pkg/typeutil"
+	"go.uber.org/zap"
 )
 
 var _ = Suite(&testHeartbeatStreamSuite{})
@@ -113,11 +115,15 @@ func newRegionheartbeatClient(c *C, grpcClient pdpb.PDClient) *regionHeartbeatCl
 }
 
 func (c *regionHeartbeatClient) close() {
-	c.stream.CloseSend()
+	if err := c.stream.CloseSend(); err != nil {
+		log.Error("failed to terminate client stream", zap.Error(err))
+	}
 }
 
 func (c *regionHeartbeatClient) SendRecv(msg *pdpb.RegionHeartbeatRequest, timeout time.Duration) *pdpb.RegionHeartbeatResponse {
-	c.stream.Send(msg)
+	if err := c.stream.Send(msg); err != nil {
+		log.Error("send heartbeat message fail", zap.Error(err))
+	}
 	select {
 	case <-time.After(timeout):
 		return nil
