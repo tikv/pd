@@ -23,14 +23,15 @@ import (
 )
 
 // It is for query with --prefix
-type rangeQuery struct {
+type parameter struct {
 	Key       string `json:"key"`
 	Range_end string `json:"range_end"`
 }
 
 var (
-	rangeQueryPrefix = "v3/kv/range"
-	//rangeDeletePrefix = "v3/kv/deleterange"
+	rangeQueryPrefix       = "v3/kv/range"
+	rangeDelPrefix         = "v3/kv/deleterange"
+	delOwnerCampaignPrefix = "/tidb/ddl/fg/owner/"
 )
 
 func base64Encode(str string) string {
@@ -46,7 +47,7 @@ func base64Decode(str string) (string, error) {
 }
 
 var (
-	rangeQueryDDLInfo = &rangeQuery{
+	rangeQueryDDLInfo = &parameter{
 		Key:       base64Encode("/tidb/ddl"),
 		Range_end: base64Encode("/tidb/ddm"),
 	}
@@ -59,6 +60,7 @@ func NewEtcdCommand() *cobra.Command {
 		Short: "control the info about etcd by grpc_gateway",
 	}
 	m.AddCommand(NewShowDDLInfoCommand())
+	m.AddCommand(NewDelOwnerCampaign())
 	return m
 }
 
@@ -67,6 +69,15 @@ func NewShowDDLInfoCommand() *cobra.Command {
 		Use:   "ddlinfo",
 		Short: "Show All Information about DDL",
 		Run:   showDDLInfoCommandFunc,
+	}
+	return m
+}
+
+func NewDelOwnerCampaign() *cobra.Command {
+	m := &cobra.Command{
+		Use:   "delowner",
+		Short: "delete DDL Owner Campaign by LeaseID",
+		Run:   delOwnerCampaign,
 	}
 	return m
 }
@@ -100,6 +111,40 @@ func showDDLInfoCommandFunc(cmd *cobra.Command, args []string) {
 
 		}
 	}
+	resByte, _ := json.MarshalIndent(&t, "", "\t")
+	res = string(resByte)
+
+	cmd.Println(res)
+}
+
+func delOwnerCampaign(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+
+	leaseID := base64Encode(args[0])
+
+	var para = &parameter{
+		Key: leaseID,
+	}
+
+	reqData, _ := json.Marshal(para)
+	req, err := getRequest(cmd, rangeQueryPrefix, http.MethodPost, "application/json",
+		bytes.NewBuffer(reqData))
+	if err != nil {
+		cmd.Printf("Failed to show DDLInfo: %v\n", err)
+		return
+	}
+	res, err := dail(req)
+	if err != nil {
+		cmd.Printf("Failed to show DDLInfo: %v\n", err)
+		return
+	}
+
+	// format JSON
+	var t interface{}
+	_ = json.Unmarshal([]byte(res), &t)
 	resByte, _ := json.MarshalIndent(&t, "", "\t")
 	res = string(resByte)
 
