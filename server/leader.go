@@ -354,7 +354,7 @@ func (s *Server) watchLeader(leader *pdpb.Member, revision int64) {
 // ResignLeader resigns current PD's leadership. If nextLeader is empty, all
 // other pd-servers can campaign.
 func (s *Server) ResignLeader(nextLeader string) error {
-	log.Info("tries to resign leader to next leader", zap.String("from", s.Name()), zap.String("to", nextLeader))
+	log.Info("try to resign leader to next leader", zap.String("from", s.Name()), zap.String("to", nextLeader))
 	// Determine next leaders.
 	var leaderIDs []uint64
 	res, err := etcdutil.ListEtcdMembers(s.client)

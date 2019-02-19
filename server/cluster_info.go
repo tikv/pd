@@ -491,7 +491,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	// Mark isNew if the region in cache does not have leader.
 	var saveKV, saveCache, isNew bool
 	if origin == nil {
-		log.Debug("Insert new region",
+		log.Debug("insert new region",
 			zap.Uint64("region-id", region.GetID()),
 			zap.Reflect("meta-region", core.HexRegionMeta(region.GetMeta())),
 		)
@@ -504,7 +504,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			return ErrRegionIsStale(region.GetMeta(), origin.GetMeta())
 		}
 		if r.GetVersion() > o.GetVersion() {
-			log.Info("Region Version Changed",
+			log.Info("region Version changed",
 				zap.Uint64("region-id", region.GetID()),
 				zap.String("detail", core.DiffRegionKeyInfo(origin, region)),
 				zap.Uint64("old-version", o.GetVersion()),
@@ -513,7 +513,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			saveKV, saveCache = true, true
 		}
 		if r.GetConfVer() > o.GetConfVer() {
-			log.Info("Region ConfVer Changed",
+			log.Info("region ConfVer changed",
 				zap.Uint64("region-id", region.GetID()),
 				zap.String("detail", core.DiffRegionPeersInfo(origin, region)),
 				zap.Uint64("old-confver", o.GetConfVer()),
@@ -525,7 +525,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			if origin.GetLeader().GetId() == 0 {
 				isNew = true
 			} else {
-				log.Info("Leader Changed",
+				log.Info("leader changed",
 					zap.Uint64("region-id", region.GetID()),
 					zap.Uint64("from", origin.GetLeader().GetStoreId()),
 					zap.Uint64("to", region.GetLeader().GetStoreId()),
@@ -581,7 +581,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 				if err := c.kv.DeleteRegion(item); err != nil {
 					log.Error("fail to delete region from kv",
 						zap.Uint64("region-id", item.GetId()),
-						zap.Stringer("region-meta", core.HexRegionMeta(item)),
+						zap.Reflect("region-meta", core.HexRegionMeta(item)),
 						zap.Error(err))
 				}
 			}

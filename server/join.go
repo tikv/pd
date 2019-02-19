@@ -177,14 +177,14 @@ func PrepareJoinCluster(cfg *Config) error {
 func isDataExist(d string) bool {
 	dir, err := os.Open(d)
 	if err != nil {
-		log.Error("failed to open", zap.Error(err))
+		log.Error("failed to open directory", zap.Error(err))
 		return false
 	}
 	defer dir.Close()
 
 	names, err := dir.Readdirnames(-1)
 	if err != nil {
-		log.Error("failed to list", zap.Error(err))
+		log.Error("failed to list directory", zap.Error(err))
 		return false
 	}
 	return len(names) != 0

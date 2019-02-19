@@ -114,7 +114,7 @@ func newRegionheartbeatClient(c *C, grpcClient pdpb.PDClient) *regionHeartbeatCl
 
 func (c *regionHeartbeatClient) close() {
 	if err := c.stream.CloseSend(); err != nil {
-		log.Error("Failed to terminate client stream", zap.Error(err))
+		log.Error("failed to terminate client stream", zap.Error(err))
 	}
 }
 

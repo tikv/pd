@@ -222,7 +222,7 @@ func (c *coordinator) run() {
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
 	c.cluster.opt.store(scheduleCfg)
 	if err := c.cluster.opt.persist(c.cluster.kv); err != nil {
-		log.Error("can't persist schedule config", zap.Error(err))
+		log.Error("cannot persist schedule config", zap.Error(err))
 	}
 
 	c.wg.Add(1)
