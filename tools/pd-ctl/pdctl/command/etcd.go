@@ -22,10 +22,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// It is for operator with --prefix
 type parameter struct {
-	Key       string `json:"key"`
-	Range_end string `json:"range_end"`
+	// It is parameter for api_grpc_gateway
+	Key      string `json:"key"`
+	RangeEnd string `json:"range_end"`
 }
 
 var (
@@ -57,6 +57,7 @@ func formatJSON(str string) (string, error) {
 				if err != nil {
 					return "", err
 				}
+				v.(map[string]interface{})[kk] = vv
 			}
 
 		}
@@ -84,6 +85,7 @@ func NewEtcdCommand() *cobra.Command {
 	return m
 }
 
+// NewShowDDLInfoCommand return a show ddl information subcommand of EtcdCommand
 func NewShowDDLInfoCommand() *cobra.Command {
 	m := &cobra.Command{
 		Use:   "ddlinfo",
@@ -93,6 +95,7 @@ func NewShowDDLInfoCommand() *cobra.Command {
 	return m
 }
 
+// NewDelOwnerCampaign return a delete owner campaign subcommand of EtcdCommand
 func NewDelOwnerCampaign() *cobra.Command {
 	m := &cobra.Command{
 		Use:   "delowner",
@@ -102,6 +105,7 @@ func NewDelOwnerCampaign() *cobra.Command {
 	return m
 }
 
+// NewDelSchemaVersion return a delete schema version subcommand of EtcdCommand
 func NewDelSchemaVersion() *cobra.Command {
 	m := &cobra.Command{
 		Use:   "delschema",
@@ -113,8 +117,8 @@ func NewDelSchemaVersion() *cobra.Command {
 
 func showDDLInfoCommandFunc(cmd *cobra.Command, args []string) {
 	var rangeQueryDDLInfo = &parameter{
-		Key:       base64Encode("/tidb/ddl"),
-		Range_end: base64Encode("/tidb/ddm"),
+		Key:      base64Encode("/tidb/ddl"),
+		RangeEnd: base64Encode("/tidb/ddm"),
 	}
 
 	reqData, _ := json.Marshal(rangeQueryDDLInfo)
