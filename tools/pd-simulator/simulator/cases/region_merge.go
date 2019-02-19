@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
+	"go.uber.org/zap"
 )
 
 func newRegionMerge() *Case {
@@ -58,7 +59,11 @@ func newRegionMerge() *Case {
 		count4 := regions.GetStoreRegionCount(4)
 
 		sum := count1 + count2 + count3 + count4
-		simutil.Logger.Infof("region counts: %v %v %v %v", count1, count2, count3, count4)
+		simutil.Logger.Info("current region counts",
+			zap.Int("first-store", count1),
+			zap.Int("second-store", count2),
+			zap.Int("third-store", count3),
+			zap.Int("fourth-store", count4))
 		return sum == 30
 	}
 	return &simCase

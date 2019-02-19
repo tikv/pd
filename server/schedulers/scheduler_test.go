@@ -20,7 +20,6 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
-	log "github.com/sirupsen/logrus"
 )
 
 var _ = Suite(&testShuffleLeaderSuite{})
@@ -197,7 +196,6 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
 		if op := scatterer.Scatter(region); op != nil {
-			log.Info(op)
 			tc.ApplyOperator(op)
 		}
 	}

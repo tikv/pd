@@ -21,10 +21,10 @@ import (
 	"net/http"
 
 	"github.com/pingcap/errcode"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/unrolled/render"
 )
 
@@ -36,7 +36,7 @@ import (
 // If the error is nil, this also responds with a 500 and logs at the error level.
 func errorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	if err == nil {
-		log.Errorf("nil given to errorResp")
+		log.Error("nil is given to errorResp")
 		rd.JSON(w, http.StatusInternalServerError, "nil error")
 		return
 	}

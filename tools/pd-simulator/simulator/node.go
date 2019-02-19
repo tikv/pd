@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/cases"
@@ -130,7 +132,10 @@ func (n *Node) stepTask() {
 	for _, task := range n.tasks {
 		task.Step(n.raftEngine)
 		if task.IsFinished() {
-			simutil.Logger.Debugf("[store %d][region %d] task finished: %s final: %+v", n.GetId(), task.RegionID(), task.Desc(), n.raftEngine.GetRegion(task.RegionID()).GetMeta())
+			simutil.Logger.Debug("task finished",
+				zap.Uint64("node-id", n.Id),
+				zap.Uint64("region-id", task.RegionID()),
+				zap.String("task", task.Desc()))
 			delete(n.tasks, task.RegionID())
 		}
 	}
@@ -152,7 +157,9 @@ func (n *Node) storeHeartBeat() {
 	ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 	err := n.client.StoreHeartbeat(ctx, n.stats)
 	if err != nil {
-		simutil.Logger.Infof("[store %d] report heartbeat error: %s", n.GetId(), err)
+		simutil.Logger.Info("report heartbeat error",
+			zap.Uint64("node-id", n.GetId()),
+			zap.Error(err))
 	}
 	cancel()
 }
@@ -167,7 +174,10 @@ func (n *Node) regionHeartBeat() {
 			ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 			err := n.client.RegionHeartbeat(ctx, region)
 			if err != nil {
-				simutil.Logger.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetID(), err)
+				simutil.Logger.Info("report heartbeat error",
+					zap.Uint64("node-id", n.Id),
+					zap.Uint64("region-id", region.GetID()),
+					zap.Error(err))
 			}
 			cancel()
 		}
@@ -180,7 +190,10 @@ func (n *Node) reportRegionChange() {
 		ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 		err := n.client.RegionHeartbeat(ctx, region)
 		if err != nil {
-			simutil.Logger.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetID(), err)
+			simutil.Logger.Info("report heartbeat error",
+				zap.Uint64("node-id", n.Id),
+				zap.Uint64("region-id", region.GetID()),
+				zap.Error(err))
 		}
 		cancel()
 	}
@@ -192,7 +205,10 @@ func (n *Node) AddTask(task Task) {
 	n.Lock()
 	defer n.Unlock()
 	if t, ok := n.tasks[task.RegionID()]; ok {
-		simutil.Logger.Infof("[node %d][region %d] already exists task : %s", n.Id, task.RegionID(), t.Desc())
+		simutil.Logger.Info("task has already existed",
+			zap.Uint64("node-id", n.Id),
+			zap.Uint64("region-id", task.RegionID()),
+			zap.String("task", t.Desc()))
 		return
 	}
 	n.tasks[task.RegionID()] = task
@@ -203,7 +219,7 @@ func (n *Node) Stop() {
 	n.cancel()
 	n.client.Close()
 	n.wg.Wait()
-	simutil.Logger.Infof("node %d stopped", n.Id)
+	simutil.Logger.Info("node stopped", zap.Uint64("node-id", n.Id))
 }
 
 func (n *Node) incUsedSize(size uint64) {

@@ -21,11 +21,12 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 type memberHandler struct {
@@ -58,12 +59,12 @@ func (h *memberHandler) getMembers() (*pdpb.GetMembersResponse, error) {
 	// Fill leader priorities.
 	for _, m := range members.GetMembers() {
 		if h.svr.GetEtcdLeader() == 0 {
-			log.Warnf("no etcd leader, skip get leader priority, member: %v", m.GetMemberId())
+			log.Warn("no etcd leader, skip get leader priority", zap.Uint64("member", m.GetMemberId()))
 			continue
 		}
 		leaderPriority, e := h.svr.GetMemberLeaderPriority(m.GetMemberId())
 		if e != nil {
-			log.Errorf("failed to load leader priority, member: %v, err: %v", m.GetMemberId(), e)
+			log.Error("failed to load leader priority", zap.Uint64("member", m.GetMemberId()), zap.Error(err))
 			continue
 		}
 		m.LeaderPriority = int32(leaderPriority)

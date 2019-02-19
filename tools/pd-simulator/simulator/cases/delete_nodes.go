@@ -18,6 +18,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
+	"go.uber.org/zap"
 )
 
 func newDeleteNodes() *Case {
@@ -84,8 +85,7 @@ func newDeleteNodes() *Case {
 			}
 		}
 
-		simutil.Logger.Infof("leader counts: %v", leaderCounts)
-		simutil.Logger.Infof("region counts: %v", regionCounts)
+		simutil.Logger.Info("current counts", zap.Ints("leader", leaderCounts), zap.Ints("region", regionCounts))
 		return res
 	}
 	return &simCase

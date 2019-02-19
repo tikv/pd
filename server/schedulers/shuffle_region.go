@@ -15,9 +15,10 @@ package schedulers
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 func init() {
@@ -106,7 +107,7 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster schedule.Cluster, filte
 
 	newPeer, err := cluster.AllocPeer(target.GetID())
 	if err != nil {
-		log.Errorf("failed to allocate peer: %v", err)
+		log.Error("failed to allocate peer", zap.Error(err))
 		return nil
 	}
 

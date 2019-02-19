@@ -18,10 +18,11 @@ import (
 	"strconv"
 	"time"
 
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 const (
@@ -204,7 +205,7 @@ func (l *balanceAdjacentRegionScheduler) process(cluster schedule.Cluster) []*sc
 
 	defer func() {
 		if l.cacheRegions.len() < 0 {
-			log.Fatalf("[%s]the cache overflow should never happen", l.GetName())
+			log.Fatal("cache overflow", zap.String("scheduler", l.GetName()))
 		}
 		l.cacheRegions.head = head + 1
 		l.lastKey = r2.GetStartKey()
