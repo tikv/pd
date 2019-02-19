@@ -32,7 +32,7 @@ var (
 	rangeQueryPrefix       = "v3/kv/range"
 	rangeDelPrefix         = "v3/kv/deleterange"
 	delOwnerCampaignPrefix = "/tidb/ddl/fg/owner/"
-	delSchemaVersionPrefix = "/tidb/ddl/all_schema_bersions/DDL_ID"
+	delSchemaVersionPrefix = "/tidb/ddl/all_schema_bersions/DDL_ID/"
 )
 
 func base64Encode(str string) string {
@@ -144,12 +144,12 @@ func delOwnerCampaign(cmd *cobra.Command, args []string) {
 	req, err := getRequest(cmd, rangeDelPrefix, http.MethodPost, "application/json",
 		bytes.NewBuffer(reqData))
 	if err != nil {
-		cmd.Printf("Failed to show DDLInfo: %v\n", err)
+		cmd.Printf("Failed to delete owner campaign : %v\n", err)
 		return
 	}
 	res, err := dail(req)
 	if err != nil {
-		cmd.Printf("Failed to show DDLInfo: %v\n", err)
+		cmd.Printf("Failed to delete owner campaign : %v\n", err)
 		return
 	}
 
@@ -171,19 +171,19 @@ func delSchemaVersion(cmd *cobra.Command, args []string) {
 	leaseID := args[0]
 
 	var para = &parameter{
-		Key: leaseID,
+		Key: base64Encode(delSchemaVersionPrefix + leaseID),
 	}
 
 	reqData, _ := json.Marshal(para)
-	req, err := getRequest(cmd, delSchemaVersionPrefix, http.MethodPost, "application/json",
+	req, err := getRequest(cmd, rangeDelPrefix, http.MethodPost, "application/json",
 		bytes.NewBuffer(reqData))
 	if err != nil {
-		cmd.Printf("Failed to show DDLInfo: %v\n", err)
+		cmd.Printf("Failed to delete schema version: %v\n", err)
 		return
 	}
 	res, err := dail(req)
 	if err != nil {
-		cmd.Printf("Failed to show DDLInfo: %v\n", err)
+		cmd.Printf("Failed to delete schema version: %v\n", err)
 		return
 	}
 
