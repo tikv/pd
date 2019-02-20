@@ -1169,7 +1169,7 @@ func (s *cmdTestSuite) TestEtcd(c *C) {
 
 	//etcd ddlinfo
 	args := []string{"-u", pdAddr, "etcd", "ddlinfo"}
-	_, output, err := executeCommandC(cmd, args...)
+	_, output, err = executeCommandC(cmd, args...)
 	//	fmt.Printf("\n\n\n\n\n\n\n\n\n*******************\n\n")
 	//	fmt.Println(string(output))
 	//	fmt.Printf("\n\n*******************\n\n\n\n\n\n\n\n\n")
