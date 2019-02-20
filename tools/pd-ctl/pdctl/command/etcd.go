@@ -58,7 +58,7 @@ func formatJSON(str string) (string, error) {
 
 	for k, v := range jsn.Kvs {
 		for kk, vv := range v {
-			if kk == "key" || kk == "lease" {
+			if kk == "key" || kk == "value" {
 				vv, err = base64Decode(vv)
 				if err != nil {
 					return "", nil
