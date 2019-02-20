@@ -1169,19 +1169,22 @@ func (s *cmdTestSuite) TestEtcd(c *C) {
 
 	//etcd ddlinfo
 	args := []string{"-u", pdAddr, "etcd", "ddlinfo"}
-	_, output, err = executeCommandC(cmd, args...)
-	//	fmt.Printf("\n\n\n\n\n\n\n\n\n*******************\n\n")
-	//	fmt.Println(string(output))
-	//	fmt.Printf("\n\n*******************\n\n\n\n\n\n\n\n\n")
+	_, output, err := executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(output, NotNil)
 
-	//	args = []string{"-u", pdAddr, "etcd", "delowner"}
-	//	_, output, err = executeCommandC(cmd, args...)
-	//	fmt.Printf("\n\n\n\n\n\n\n\n\n*******************\n\n")
-	//	fmt.Println(string(output))
-	//	fmt.Println(err)
-	//	fmt.Printf("\n\n*******************\n\n\n\n\n\n\n\n\n")
+	//TODO: Add more strong test
+	//etcd delowner
+	args = []string{"-u", pdAddr, "etcd", "delowner", "LeaseID"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(output, NotNil)
+
+	//etcd delschema
+	args = []string{"-u", pdAddr, "etcd", "delschema", "DDLID"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(output, NotNil)
 
 }
 
