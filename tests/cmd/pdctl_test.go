@@ -1155,6 +1155,36 @@ func (s *cmdTestSuite) TestHot(c *C) {
 	c.Assert(hotStores.BytesWriteStats[1], Equals, bytesWritten/10)
 }
 
+func (s *cmdTestSuite) TestEtcd(c *C) {
+	c.Parallel()
+
+	cluster, err := tests.NewTestCluster(1)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURLs()
+	cmd := initCommand()
+	defer cluster.Destroy()
+
+	//etcd ddlinfo
+	args := []string{"-u", pdAddr, "etcd", "ddlinfo"}
+	_, output, err := executeCommandC(cmd, args...)
+	//	fmt.Printf("\n\n\n\n\n\n\n\n\n*******************\n\n")
+	//	fmt.Println(string(output))
+	//	fmt.Printf("\n\n*******************\n\n\n\n\n\n\n\n\n")
+	c.Assert(err, IsNil)
+	c.Assert(output, NotNil)
+
+	//	args = []string{"-u", pdAddr, "etcd", "delowner"}
+	//	_, output, err = executeCommandC(cmd, args...)
+	//	fmt.Printf("\n\n\n\n\n\n\n\n\n*******************\n\n")
+	//	fmt.Println(string(output))
+	//	fmt.Println(err)
+	//	fmt.Printf("\n\n*******************\n\n\n\n\n\n\n\n\n")
+
+}
+
 func initCommand() *cobra.Command {
 	commandFlags := pdctl.CommandFlags{}
 	rootCmd := &cobra.Command{}
@@ -1178,6 +1208,7 @@ func initCommand() *cobra.Command {
 		command.NewTableNamespaceCommand(),
 		command.NewHealthCommand(),
 		command.NewLogCommand(),
+		command.NewEtcdCommand(),
 	)
 	return rootCmd
 }
