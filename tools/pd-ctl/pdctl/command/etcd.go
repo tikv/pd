@@ -61,7 +61,7 @@ func formatJSON(str string) (string, error) {
 			if kk == "key" || kk == "value" {
 				vv, err = base64Decode(vv)
 				if err != nil {
-					return "", nil
+					return "", err
 				}
 				jsn.Kvs[k][kk] = vv
 			}
