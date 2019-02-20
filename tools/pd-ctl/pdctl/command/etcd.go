@@ -127,7 +127,11 @@ func showDDLInfoCommandFunc(cmd *cobra.Command, args []string) {
 		RangeEnd: base64Encode("/tidb/ddm"),
 	}
 
-	reqData, _ := json.Marshal(rangeQueryDDLInfo)
+	reqData, err := json.Marshal(rangeQueryDDLInfo)
+	if err != nil {
+		cmd.Printf("Failed to show DDLInfo: %v\n", err)
+		return
+	}
 	req, err := getRequest(cmd, rangeQueryPrefix, http.MethodPost, "application/json",
 		bytes.NewBuffer(reqData))
 	if err != nil {
@@ -161,7 +165,12 @@ func delOwnerCampaign(cmd *cobra.Command, args []string) {
 		Key: base64Encode(delOwnerCampaignPrefix + leaseID),
 	}
 
-	reqData, _ := json.Marshal(para)
+	reqData, err := json.Marshal(para)
+
+	if err != nil {
+		cmd.Printf("Failed to delete owner campaign : %v\n", err)
+		return
+	}
 	req, err := getRequest(cmd, rangeDelPrefix, http.MethodPost, "application/json",
 		bytes.NewBuffer(reqData))
 	if err != nil {
@@ -194,7 +203,11 @@ func delSchemaVersion(cmd *cobra.Command, args []string) {
 		Key: base64Encode(delSchemaVersionPrefix + leaseID),
 	}
 
-	reqData, _ := json.Marshal(para)
+	reqData, err := json.Marshal(para)
+	if err != nil {
+		cmd.Printf("Failed to delete owner campaign : %v\n", err)
+		return
+	}
 	req, err := getRequest(cmd, rangeDelPrefix, http.MethodPost, "application/json",
 		bytes.NewBuffer(reqData))
 	if err != nil {
