@@ -151,7 +151,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	log.Debugf("[region %d] source store id is %v, target store id is %v", region.GetID(), source.GetId(), target.GetId())
 
 	if !shouldBalance(cluster, source, target, region, core.RegionKind, opInfluence) {
-		log.Debugf("[%s] skip balance region %d, source %d to target %d ,source size: %v, source score: %v, source influence: %v, target size: %v, target score: %v, target influence: %v, average region size: %v",
+		log.Debugf("[%s] skip balance region %d, source %d to target %d, source size: %v, source score: %v, source influence: %v, target size: %v, target score: %v, target influence: %v, average region size: %v",
 			s.GetName(), region.GetID(), source.GetId(), target.GetId(),
 			source.RegionSize, source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
 			opInfluence.GetStoreInfluence(source.GetId()).ResourceSize(core.RegionKind),
@@ -193,6 +193,13 @@ func (s *balanceRegionScheduler) hasPotentialTarget(cluster schedule.Cluster, re
 		if !shouldBalance(cluster, source, store, region, core.RegionKind, opInfluence) {
 			continue
 		}
+		log.Debugf("[region %d] has potential target %d, source size: %v, source score: %v, source influence: %v, target size: %v, target score: %v, target influence: %v, average region size: %v",
+			region.GetID(), store.GetId(),
+			source.RegionSize, source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
+			opInfluence.GetStoreInfluence(source.GetId()).ResourceSize(core.RegionKind),
+			store.RegionSize, store.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
+			opInfluence.GetStoreInfluence(store.GetId()).ResourceSize(core.RegionKind),
+			cluster.GetAverageRegionSize())
 		return true
 	}
 	return false
