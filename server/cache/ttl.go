@@ -17,7 +17,8 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 type ttlCacheItem struct {
@@ -124,7 +125,7 @@ func (c *TTL) doGC() {
 		}
 		c.Unlock()
 
-		log.Debugf("GC %d items", count)
+		log.Debug("TTL GC items", zap.Int("count", count))
 	}
 }
 
