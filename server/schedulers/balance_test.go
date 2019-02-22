@@ -1306,3 +1306,69 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 		c.Check(regionCount, LessEqual, 32)
 	}
 }
+
+func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	tc := schedule.NewMockCluster(opt)
+	// Add stores 1,2,3.
+	tc.AddRegionStore(1, 0)
+	tc.AddRegionStore(2, 0)
+	tc.AddRegionStore(3, 0)
+	var (
+		id      uint64
+		regions []*metapb.Region
+	)
+	for i := 0; i < 10; i++ {
+		peers := []*metapb.Peer{
+			{Id: id + 1, StoreId: 1},
+			{Id: id + 2, StoreId: 2},
+			{Id: id + 3, StoreId: 3},
+		}
+		regions = append(regions, &metapb.Region{
+			Id:       id + 4,
+			Peers:    peers,
+			StartKey: []byte(fmt.Sprintf("s_%02d", i)),
+			EndKey:   []byte(fmt.Sprintf("s_%02d", i+1)),
+		})
+		id += 4
+	}
+	// empty case
+	regions[9].EndKey = []byte("")
+
+	// To simulate server prepared,
+	// store 1 contains 8 leader region peers and leaders of 2 regions are unknown yet.
+	for _, meta := range regions {
+		var leader *metapb.Peer
+		if meta.Id < 8 {
+			leader = meta.Peers[0]
+		}
+		regionInfo := core.NewRegionInfo(
+			meta,
+			leader,
+			core.SetApproximateKeys(96),
+			core.SetApproximateSize(96),
+		)
+
+		tc.Regions.SetRegion(regionInfo)
+	}
+
+	for i := 1; i <= 3; i++ {
+		tc.UpdateStoreStatus(uint64(i))
+	}
+
+	oc := schedule.NewOperatorController(nil, nil)
+	hb := newScatterRangeScheduler(oc, []string{"s_00", "s_09", "t"})
+
+	limit := 0
+	for {
+		if limit > 100 {
+			break
+		}
+		ops := hb.Schedule(tc)
+		if ops == nil {
+			limit++
+			continue
+		}
+		tc.ApplyOperator(ops[0])
+	}
+}
