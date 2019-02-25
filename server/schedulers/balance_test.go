@@ -460,6 +460,65 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 11, 6)
 }
 
+// TestBalance2 for cornor case 1:
+// 11 regions distributed across 5 stores.
+//| region_id | leader_store | follower_store | follower_store |
+//|-----------|--------------|----------------|----------------|
+//|     1     |       1      |        2       |       3        |
+//|     2     |       1      |        2       |       3        |
+//|     3     |       1      |        2       |       3        |
+//|     4     |       1      |        2       |       3        |
+//|     5     |       1      |        2       |       3        |
+//|     6     |       1      |        2       |       3        |
+//|     7     |       1      |        2       |       4        |
+//|     8     |       1      |        2       |       4        |
+//|     9     |       1      |        2       |       4        |
+//|    10     |       1      |        4       |       5        |
+//|    11     |       1      |        4       |       5        |
+// and the space of last store 5 if very small, about 5 * regionsize
+// the source region is more likely distributed in store[1, 2, 3].
+func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	tc := schedule.NewMockCluster(opt)
+	oc := schedule.NewOperatorController(nil, nil)
+
+	opt.TolerantSizeRatio = 1
+
+	sb, err := schedule.CreateScheduler("balance-region", oc)
+	c.Assert(err, IsNil)
+
+	tc.AddRegionStore(1, 11)
+	tc.AddRegionStore(2, 9)
+	tc.AddRegionStore(3, 6)
+	tc.AddRegionStore(4, 5)
+	tc.AddRegionStore(5, 2)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.AddLeaderRegion(2, 1, 2, 3)
+
+	c.Assert(sb.Schedule(tc)[0], NotNil)
+	// if the space of store 5 is normal, we can balance region to store 5
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 1, 5)
+
+	// the used size of  store 5 reach (highSpace, lowSpace)
+	origin := tc.GetStore(5)
+	stats := origin.GetStoreStats()
+	stats.Capacity = 50
+	stats.Available = 28
+	stats.UsedSize = 20
+	store5 := origin.Clone(core.SetStoreStats(stats))
+	tc.PutStore(store5)
+
+	// the scheduler always pick store 1 as source store,
+	// and store 5 as target store, but cannot pass `shouldBalance`.
+	c.Assert(sb.Schedule(tc), IsNil)
+	// hits the store many times
+	for i := 0; i < 1000; i++ {
+		sb.Schedule(tc)
+	}
+	// now filte the store 5, and can transfer store 1 to store 4
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 1, 4)
+}
+
 func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
