@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"time"
 
 	"github.com/BurntSushi/toml"
 
@@ -131,4 +132,18 @@ type = "random-merge"
 	c.Assert(err, IsNil)
 	err = cfg.Adjust(&meta)
 	c.Assert(err, NotNil)
+
+	cfgData = `
+[metric]
+interval = "35s"
+address = "localhost:9090"
+`
+	cfg = NewConfig()
+	meta, err = toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta)
+	c.Assert(err, IsNil)
+
+	c.Assert(cfg.Metric.PushInterval.Duration, Equals, 35*time.Second)
+	c.Assert(cfg.Metric.PushAddress, Equals, "localhost:9090")
 }

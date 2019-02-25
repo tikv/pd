@@ -152,6 +152,8 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
 	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
 
+	fs.StringVar(&cfg.Metric.PushAddress, "metrics-addr", "", "prometheus pushgateway address, leaves it empty will disable prometheus push.")
+
 	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.BoolVar(&cfg.Log.File.LogRotate, "log-rotate", true, "rotate log")
@@ -184,6 +186,8 @@ const (
 	defaultTickInterval = 500 * time.Millisecond
 	// embed etcd has a check that `5 * tick > election`
 	defaultElectionInterval = 3000 * time.Millisecond
+
+	defaultMetricsPushInterval = 15 * time.Second
 
 	defaultHeartbeatStreamRebindInterval = time.Minute
 
@@ -359,6 +363,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	adjustString(&c.AdvertiseClientUrls, c.ClientUrls)
 	adjustString(&c.PeerUrls, defaultPeerUrls)
 	adjustString(&c.AdvertisePeerUrls, c.PeerUrls)
+	adjustDuration(&c.Metric.PushInterval, defaultMetricsPushInterval)
 
 	if len(c.InitialCluster) == 0 {
 		// The advertise peer urls may be http://127.0.0.1:2380,http://127.0.0.1:2381
