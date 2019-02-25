@@ -271,12 +271,12 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	// Mark the store as offline.
 	err = cluster.RemoveStore(store.GetId())
 	c.Assert(err, IsNil)
+	offlineStore := proto.Clone(store).(*metapb.Store)
+	offlineStore.State = metapb.StoreState_Offline
 
 	// Get an offline store should be OK.
 	n, err = s.client.GetStore(context.Background(), store.GetId())
 	c.Assert(err, IsNil)
-	offlineStore := proto.Clone(store).(*metapb.Store)
-	offlineStore.State = metapb.StoreState_Offline
 	c.Assert(n, DeepEquals, offlineStore)
 
 	// Should return offline stores.
@@ -287,14 +287,21 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	// Mark the store as tombstone.
 	err = cluster.BuryStore(store.GetId(), true)
 	c.Assert(err, IsNil)
+	tombstoneStore := proto.Clone(store).(*metapb.Store)
+	tombstoneStore.State = metapb.StoreState_Tombstone
 
 	// Get a tombstone store should fail.
 	n, err = s.client.GetStore(context.Background(), store.GetId())
 	c.Assert(err, IsNil)
 	c.Assert(n, IsNil)
 
-	// Should not return tombstone stores.
+	// Should return tombstone stores.
 	stores, err = s.client.GetAllStores(context.Background())
+	c.Assert(err, IsNil)
+	c.Assert(stores, DeepEquals, []*metapb.Store{tombstoneStore})
+
+	// Should not return tombstone stores.
+	stores, err = s.client.GetAllStores(context.Background(), WithExcludeTombstone())
 	c.Assert(err, IsNil)
 	c.Assert(stores, IsNil)
 }

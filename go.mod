@@ -17,7 +17,6 @@ require (
 	github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 // indirect
 	github.com/ghodss/yaml v1.0.0
 	github.com/gogo/protobuf v1.0.0
-	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b // indirect
 	github.com/golang/groupcache v0.0.0-20181024230925-c65c006176ff // indirect
 	github.com/golang/protobuf v1.2.0
 	github.com/golang/snappy v0.0.0-20180518054509-2e65f85255db // indirect
@@ -40,7 +39,7 @@ require (
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/errors v0.10.1 // indirect
 	github.com/pingcap/gofail v0.0.0-20181217135706-6a951c1e42c3
-	github.com/pingcap/kvproto v0.0.0-20181123124450-d48563486f61
+	github.com/pingcap/kvproto v0.0.0-20190225084405-84f2c621d8e8
 	github.com/pingcap/log v0.0.0-20190214045112-b37da76f67a7
 	github.com/pkg/errors v0.8.1
 	github.com/prometheus/client_golang v0.8.0
@@ -59,9 +58,7 @@ require (
 	github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18 // indirect
 	go.uber.org/zap v1.9.1
 	golang.org/x/crypto v0.0.0-20180503215945-1f94bef427e3 // indirect
-	golang.org/x/sync v0.0.0-20181108010431-42b317875d0f // indirect
 	golang.org/x/time v0.0.0-20180412165947-fbb02b2291d2 // indirect
-	google.golang.org/genproto v0.0.0-20180427144745-86e600f69ee4 // indirect
 	google.golang.org/grpc v1.12.2
 	gopkg.in/airbrake/gobrake.v2 v2.0.9 // indirect
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
