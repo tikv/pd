@@ -19,11 +19,10 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	log "github.com/pingcap/log"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
 
 var dirtyFlushTick = time.Second
