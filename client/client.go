@@ -58,13 +58,26 @@ type Client interface {
 	// GetAllStores gets all stores from pd.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
-	GetAllStores(ctx context.Context) ([]*metapb.Store, error)
+	GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*metapb.Store, error)
 	// Update GC safe point. TiKV will check it and do GC themselves if necessary.
 	// If the given safePoint is less than the current one, it will not be updated.
 	// Returns the new safePoint after updating.
 	UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error)
 	// Close closes the client.
 	Close()
+}
+
+// GetStoreOp represents available options when getting stores.
+type GetStoreOp struct {
+	excludeTombstone bool
+}
+
+// GetStoreOption configures GetStoreOp.
+type GetStoreOption func(*GetStoreOp)
+
+// WithExcludeTombstone excludes tombstone stores from the result.
+func WithExcludeTombstone() GetStoreOption {
+	return func(op *GetStoreOp) { op.excludeTombstone = true }
 }
 
 type tsoRequest struct {
@@ -682,7 +695,13 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 	return store, nil
 }
 
-func (c *client) GetAllStores(ctx context.Context) ([]*metapb.Store, error) {
+func (c *client) GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*metapb.Store, error) {
+	// Applies options
+	options := &GetStoreOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetAllStores", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -692,7 +711,8 @@ func (c *client) GetAllStores(ctx context.Context) ([]*metapb.Store, error) {
 
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().GetAllStores(ctx, &pdpb.GetAllStoresRequest{
-		Header: c.requestHeader(),
+		Header:                 c.requestHeader(),
+		ExcludeTombstoneStores: options.excludeTombstone,
 	})
 	cancel()
 

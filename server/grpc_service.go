@@ -226,9 +226,21 @@ func (s *Server) GetAllStores(ctx context.Context, request *pdpb.GetAllStoresReq
 		return &pdpb.GetAllStoresResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
+	// Don't return tombstone stores.
+	var stores []*metapb.Store
+	if request.GetExcludeTombstoneStores() {
+		for _, store := range cluster.GetStores() {
+			if store.GetState() != metapb.StoreState_Tombstone {
+				stores = append(stores, store)
+			}
+		}
+	} else {
+		stores = cluster.GetStores()
+	}
+
 	return &pdpb.GetAllStoresResponse{
 		Header: s.header(),
-		Stores: cluster.GetStores(),
+		Stores: stores,
 	}, nil
 }
 

@@ -314,8 +314,8 @@
   revision = "c3f835e5a7d8cedf2f61cc55f961d4d120ae90eb"
 
 [[projects]]
-  branch = "master"
-  digest = "1:3be99496a5d1fc018eb176c53a81df986408af94bece871d829eaceddf7c5325"
+  branch = "release-2.1"
+  digest = "1:46b8534b22cbf0c55eeeed2cc4d85a685d3efaeb27fcb01b9f68717c8381ab09"
   name = "github.com/pingcap/kvproto"
   packages = [
     "pkg/eraftpb",
@@ -323,7 +323,7 @@
     "pkg/pdpb",
   ]
   pruneopts = "NUT"
-  revision = "279515615485b0f2d12f1421cc412fe2784e0190"
+  revision = "f6c0b7ffff11487bef94a10a3b6aeed8bb474705"
 
 [[projects]]
   digest = "1:5cf3f025cbee5951a4ee961de067c8a89fc95a5adabead774f82822efabab121"

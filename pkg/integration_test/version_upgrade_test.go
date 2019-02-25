@@ -26,7 +26,7 @@ func (s *integrationTestSuite) bootstrapCluster(server *testServer, c *C) {
 	bootstrapReq := &pdpb.BootstrapRequest{
 		Header: &pdpb.RequestHeader{ClusterId: server.GetClusterID()},
 		Store:  &metapb.Store{Id: 1, Address: "mock://1"},
-		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{3, 1, false}}},
+		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, IsLearner: false}}},
 	}
 	_, err := server.server.Bootstrap(context.Background(), bootstrapReq)
 	c.Assert(err, IsNil)
