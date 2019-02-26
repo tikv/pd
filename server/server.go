@@ -713,6 +713,8 @@ func (s *Server) GetMemberLeaderPriority(id uint64) (int, error) {
 // SetLogLevel sets log level.
 func (s *Server) SetLogLevel(level string) {
 	s.cfg.Log.Level = level
+	log.SetLevel(logutil.StringToZapLogLevel(level))
+	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
 }
 
 var healthURL = "/pd/ping"
