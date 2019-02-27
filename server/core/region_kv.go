@@ -20,8 +20,9 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	log "github.com/pingcap/log"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 var dirtyFlushTick = time.Second
@@ -84,7 +85,7 @@ func (kv *RegionKV) backgroundFlush() {
 					continue
 				}
 				if err = kv.FlushRegion(); err != nil {
-					log.Error("flush regions error: ", err)
+					log.Error("flush regions meet error", zap.Error(err))
 				}
 			case <-kv.ctx.Done():
 				return
@@ -176,7 +177,7 @@ func (kv *RegionKV) flush() error {
 func (kv *RegionKV) Close() error {
 	err := kv.FlushRegion()
 	if err != nil {
-		log.Error("meet error before close the region storage: ", err)
+		log.Error("meet error before close the region storage", zap.Error(err))
 	}
 	kv.cancel()
 	return kv.db.Close()
