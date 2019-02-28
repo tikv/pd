@@ -68,8 +68,16 @@ func (o *scheduleOption) GetMaxReplicas(name string) int {
 	return o.rep.GetMaxReplicas()
 }
 
+func (o *scheduleOption) GetMaxLearnerReplicas(name string) int {
+	return o.rep.GetMaxLearnerReplicas()
+}
+
 func (o *scheduleOption) SetMaxReplicas(replicas int) {
 	o.rep.SetMaxReplicas(replicas)
+}
+
+func (o *scheduleOption) SetMaxLearnerReplicas(replicas int) {
+	o.rep.SetMaxLearnerReplicas(replicas)
 }
 
 func (o *scheduleOption) GetLocationLabels() []string {
@@ -382,11 +390,24 @@ func (r *Replication) GetMaxReplicas() int {
 	return int(r.load().MaxReplicas)
 }
 
+// GetMaxLearnerReplicas returns the number of replicas for each region.
+func (r *Replication) GetMaxLearnerReplicas() int {
+	return int(r.load().MaxLearnerReplicas)
+}
+
 // SetMaxReplicas set the replicas for each region.
 func (r *Replication) SetMaxReplicas(replicas int) {
 	c := r.load()
 	v := c.clone()
 	v.MaxReplicas = uint64(replicas)
+	r.store(v)
+}
+
+// SetMaxLearnerReplicas set the replicas for each region.
+func (r *Replication) SetMaxLearnerReplicas(replicas int) {
+	c := r.load()
+	v := c.clone()
+	v.MaxLearnerReplicas = uint64(replicas)
 	r.store(v)
 }
 

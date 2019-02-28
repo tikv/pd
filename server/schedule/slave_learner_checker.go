@@ -65,7 +65,7 @@ func (r *SlaveChecker) Check(region *core.RegionInfo) *Operator {
 	}
 	slaveCount := len(region.GetSlavePeers())
 	switch {
-	case slaveCount == 0:
+	case slaveCount < r.cluster.GetMaxLearnerReplicas():
 		store := r.selectBestSlavesStore(region, stores)
 		if store == nil {
 			return nil
@@ -82,7 +82,7 @@ func (r *SlaveChecker) Check(region *core.RegionInfo) *Operator {
 		}
 		checkerCounter.WithLabelValues("slave_checker", "new_operator").Inc()
 		return NewOperator("addSlaveLearner", region.GetID(), region.GetRegionEpoch(), OpReplica|OpRegion, steps...)
-	case slaveCount == 1:
+	case slaveCount == r.cluster.GetMaxLearnerReplicas():
 		op := r.checkDownSlavePeer(region)
 		if op != nil {
 			return op
@@ -92,7 +92,7 @@ func (r *SlaveChecker) Check(region *core.RegionInfo) *Operator {
 			return op
 		}
 		return r.selectBestReplacementStore(region)
-	case slaveCount > 1:
+	case slaveCount > r.cluster.GetMaxLearnerReplicas():
 		length := len(region.GetSlavePeers())
 		peer := region.GetSlavePeers()[rand.Intn(length)]
 		return NewOperator("removeExtraSlave", region.GetID(), region.GetRegionEpoch(), OpReplica|OpRegion, RemovePeer{FromStore: peer.GetStoreId()})

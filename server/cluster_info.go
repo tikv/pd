@@ -706,6 +706,10 @@ func (c *clusterInfo) GetMaxReplicas() int {
 	return c.opt.GetMaxReplicas(namespace.DefaultNamespace)
 }
 
+func (c *clusterInfo) GetMaxLearnerReplicas() int {
+	return c.opt.GetMaxLearnerReplicas(namespace.DefaultNamespace)
+}
+
 func (c *clusterInfo) GetLocationLabels() []string {
 	return c.opt.GetLocationLabels()
 }

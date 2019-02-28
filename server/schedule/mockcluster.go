@@ -409,6 +409,11 @@ func (mc *MockCluster) GetMaxReplicas() int {
 	return mc.MockSchedulerOptions.GetMaxReplicas(namespace.DefaultNamespace)
 }
 
+// GetMaxLearnerReplicas mocks method.
+func (mc *MockCluster) GetMaxLearnerReplicas() int {
+	return mc.MockSchedulerOptions.GetMaxLearnerReplicas(namespace.DefaultNamespace)
+}
+
 // CheckLabelProperty checks label property.
 func (mc *MockCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
 	for _, cfg := range mc.LabelProperties[typ] {
@@ -452,6 +457,7 @@ type MockSchedulerOptions struct {
 	SplitMergeInterval           time.Duration
 	MaxStoreDownTime             time.Duration
 	MaxReplicas                  int
+	MaxLearnerReplicas           int
 	LocationLabels               []string
 	HotRegionLowThreshold        int
 	TolerantSizeRatio            float64
@@ -543,6 +549,11 @@ func (mso *MockSchedulerOptions) GetMaxReplicas(name string) int {
 	return mso.MaxReplicas
 }
 
+// GetMaxLearnerReplicas mock method
+func (mso *MockSchedulerOptions) GetMaxLearnerReplicas(name string) int {
+	return mso.MaxLearnerReplicas
+}
+
 // GetLocationLabels mock method
 func (mso *MockSchedulerOptions) GetLocationLabels() []string {
 	return mso.LocationLabels
@@ -571,6 +582,11 @@ func (mso *MockSchedulerOptions) GetHighSpaceRatio() float64 {
 // SetMaxReplicas mock method
 func (mso *MockSchedulerOptions) SetMaxReplicas(replicas int) {
 	mso.MaxReplicas = replicas
+}
+
+// SetMaxLearnerReplicas mock method
+func (mso *MockSchedulerOptions) SetMaxLearnerReplicas(replicas int) {
+	mso.MaxLearnerReplicas = replicas
 }
 
 // IsRaftLearnerEnabled mock method

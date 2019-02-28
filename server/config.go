@@ -527,6 +527,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 
 const (
 	defaultMaxReplicas          = 3
+	defaultMaxLearnerReplicas   = 1
 	defaultMaxSnapshotCount     = 3
 	defaultMaxPendingPeerCount  = 16
 	defaultMaxMergeRegionSize   = 20
@@ -629,6 +630,8 @@ type ReplicationConfig struct {
 	// MaxReplicas is the number of replicas for each region.
 	MaxReplicas uint64 `toml:"max-replicas,omitempty" json:"max-replicas"`
 
+	MaxLearnerReplicas uint64 `toml:"max-learner-replicas,omitempty" json:"max-learner-replicas"`
+
 	// The label keys specified the location of a store.
 	// The placement priorities is implied by the order of label keys.
 	// For example, ["zone", "rack"] means that we should place replicas to
@@ -640,8 +643,9 @@ func (c *ReplicationConfig) clone() *ReplicationConfig {
 	locationLabels := make(typeutil.StringSlice, len(c.LocationLabels))
 	copy(locationLabels, c.LocationLabels)
 	return &ReplicationConfig{
-		MaxReplicas:    c.MaxReplicas,
-		LocationLabels: locationLabels,
+		MaxReplicas:        c.MaxReplicas,
+		MaxLearnerReplicas: c.MaxLearnerReplicas,
+		LocationLabels:     locationLabels,
 	}
 }
 
@@ -657,6 +661,7 @@ func (c *ReplicationConfig) validate() error {
 
 func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
+	adjustUint64(&c.MaxLearnerReplicas, defaultMaxLearnerReplicas)
 	return c.validate()
 }
 

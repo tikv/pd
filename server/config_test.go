@@ -47,6 +47,7 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	scheduleCfg := opt.load()
 	scheduleCfg.MaxSnapshotCount = 10
 	opt.SetMaxReplicas(5)
+	opt.SetMaxLearnerReplicas(5)
 	opt.loadPDServerConfig().UseRegionStorage = true
 	opt.persist(kv)
 
@@ -63,6 +64,7 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 		c.Assert(s.Disable, IsFalse)
 	}
 	c.Assert(newOpt.GetMaxReplicas("default"), Equals, 5)
+	c.Assert(newOpt.GetMaxLearnerReplicas("default"), Equals, 5)
 	c.Assert(newOpt.GetMaxSnapshotCount(), Equals, uint64(10))
 }
 

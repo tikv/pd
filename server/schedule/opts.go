@@ -39,6 +39,7 @@ type Options interface {
 
 	GetMaxReplicas() int
 	GetLocationLabels() []string
+	GetMaxLearnerReplicas() int
 
 	GetHotRegionLowThreshold() int
 	GetTolerantSizeRatio() float64
