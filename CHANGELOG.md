@@ -1,5 +1,8 @@
 # PD Change Log
 
+## v2.1.5
+- Provide the `exclude_tombstone_stores` option in the `GetAllStores` interface to remove the Tombstone store from the returned result [#1444](https://github.com/pingcap/pd/pull/1444)
+
 ## v2.1.3
 - Fix the `Watch` issue about leader election [#1404](https://github.com/pingcap/pd/pull/1404)
 
