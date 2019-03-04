@@ -133,6 +133,34 @@ type = "random-merge"
 	err = cfg.Adjust(&meta)
 	c.Assert(err, NotNil)
 
+	// Check misspelled schedulers name
+	cfgData = `
+name = ""
+lease = 0
+
+[[schedule.schedulers]]
+type = "random-merge-schedulers"
+`
+	cfg = NewConfig()
+	meta, err = toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta)
+	c.Assert(err, NotNil)
+
+	// Check correct schedulers name
+	cfgData = `
+name = ""
+lease = 0
+
+[[schedule.schedulers]]
+type = "random-merge"
+`
+	cfg = NewConfig()
+	meta, err = toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta)
+	c.Assert(err, IsNil)
+
 	cfgData = `
 [metric]
 interval = "35s"

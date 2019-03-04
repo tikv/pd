@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -620,6 +621,11 @@ func (c *ScheduleConfig) validate() error {
 	}
 	if c.LowSpaceRatio <= c.HighSpaceRatio {
 		return errors.New("low-space-ratio should be larger than high-space-ratio")
+	}
+	for _, scheduleConfig := range c.Schedulers {
+		if !schedule.IsSchedulerRegistered(scheduleConfig.Type) {
+			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
+		}
 	}
 	return nil
 }
