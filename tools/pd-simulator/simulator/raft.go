@@ -29,7 +29,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// RaftEngine records all raft infomations.
+// RaftEngine records all raft information.
 type RaftEngine struct {
 	sync.RWMutex
 	regionsInfo       *core.RegionsInfo
