@@ -326,7 +326,6 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	sb, err := schedule.CreateScheduler("balance-region", oc)
 	c.Assert(err, IsNil)
 
-	cache := sb.(*balanceRegionScheduler).taintStores
 	opt.SetMaxReplicas(1)
 
 	// Add stores 1,2,3,4.
@@ -341,14 +340,13 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	// Test stateFilter.
 	tc.SetStoreOffline(1)
 	tc.UpdateRegionCount(2, 6)
-	cache.Remove(4)
+
 	// When store 1 is offline, it will be filtered,
 	// store 2 becomes the store with least regions.
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 4, 2)
 	opt.SetMaxReplicas(3)
 	c.Assert(sb.Schedule(tc), IsNil)
 
-	cache.Clear()
 	opt.SetMaxReplicas(1)
 	c.Assert(sb.Schedule(tc), NotNil)
 }
@@ -363,8 +361,6 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	sb, err := schedule.CreateScheduler("balance-region", oc)
 	c.Assert(err, IsNil)
 
-	cache := sb.(*balanceRegionScheduler).taintStores
-
 	// Store 1 has the largest region score, so the balancer try to replace peer in store 1.
 	tc.AddLabelsStore(1, 16, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 15, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
@@ -374,22 +370,22 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	// This schedule try to replace peer in store 1, but we have no other stores,
 	// so store 1 will be set in the cache and skipped next schedule.
 	c.Assert(sb.Schedule(tc), IsNil)
-	c.Assert(cache.Exists(1), IsTrue)
+	for i := 0; i <= hintsStoreCountThreshold/balanceRegionRetryLimit; i++ {
+		sb.Schedule(tc)
+	}
+	hint := sb.(*balanceRegionScheduler).hintsCounter
+	c.Assert(hint.buildSourceFilter(tc).FilterSource(tc, tc.GetStore(1)), IsTrue)
+	c.Assert(hint.buildSourceFilter(tc).FilterSource(tc, tc.GetStore(2)), IsFalse)
+	c.Assert(hint.buildSourceFilter(tc).FilterSource(tc, tc.GetStore(3)), IsFalse)
 
 	// Store 4 has smaller region score than store 2.
 	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
+	fmt.Println(sb.Schedule(tc))
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 2, 4)
-
-	// If store 4 is busy, no operator will be created.
-	tc.SetStoreBusy(4, true)
-	c.Assert(sb.Schedule(tc), IsNil)
-	// Since busy is a short term state, store2 will not be added to taint cache.
-	c.Assert(cache.Exists(2), IsFalse)
-	tc.SetStoreBusy(4, false)
 
 	// Store 5 has smaller region score than store 1.
 	tc.AddLabelsStore(5, 2, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
-	cache.Remove(1) // Delete store 1 from cache, or it will be skipped.
+	hint.miss(tc.GetStore(1), nil)
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 1, 5)
 
 	// Store 6 has smaller region score than store 5.
@@ -413,9 +409,12 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	tc.SetStoreDown(5)
 	tc.SetStoreDown(6)
 	tc.SetStoreDown(7)
-	c.Assert(sb.Schedule(tc), IsNil)
-	c.Assert(cache.Exists(1), IsTrue)
-	cache.Remove(1)
+	tc.SetStoreDown(8)
+	for i := 0; i <= hintsStoreCountThreshold/balanceRegionRetryLimit; i++ {
+		c.Assert(sb.Schedule(tc), IsNil)
+	}
+	c.Assert(hint.buildSourceFilter(tc).FilterSource(tc, tc.GetStore(1)), IsTrue)
+	hint.miss(tc.GetStore(1), nil)
 
 	// Store 9 has different zone with other stores but larger region score than store 1.
 	tc.AddLabelsStore(9, 20, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
