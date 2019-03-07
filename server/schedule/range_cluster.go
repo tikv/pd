@@ -91,7 +91,9 @@ func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 // GetStore searches for a store by ID.
 func (r *RangeCluster) GetStore(id uint64) *core.StoreInfo {
 	s := r.Cluster.GetStore(id)
-	r.updateStoreInfo(s)
+	if s != nil {
+		r.updateStoreInfo(s)
+	}
 	return s
 }
 
@@ -154,6 +156,8 @@ func (r *RangeCluster) GetFollowerStores(region *core.RegionInfo) []*core.StoreI
 // GetLeaderStore returns all stores that contains the region's leader peer.
 func (r *RangeCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
 	s := r.Cluster.GetLeaderStore(region)
-	r.updateStoreInfo(s)
+	if s != nil {
+		r.updateStoreInfo(s)
+	}
 	return s
 }

@@ -18,9 +18,9 @@ import (
 	"io/ioutil"
 	"net/http"
 
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server"
-	log "github.com/sirupsen/logrus"
 	"github.com/unrolled/render"
 )
 
@@ -51,7 +51,7 @@ func (h *logHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.svr.SetLogLevel(level)
-	log.SetLevel(logutil.StringToLogLevel(level))
+	log.SetLevel(logutil.StringToZapLogLevel(level))
 
 	h.rd.JSON(w, http.StatusOK, nil)
 }

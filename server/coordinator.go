@@ -15,7 +15,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -204,7 +203,8 @@ func (c *coordinator) run() {
 		}
 		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, schedulerCfg.Args...)
 		if err != nil {
-			log.Fatal("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Error(err))
+			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Error(err))
+			continue
 		}
 		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil {
@@ -303,17 +303,17 @@ func (c *coordinator) collectHotSpotMetrics() {
 	stores := c.cluster.GetStores()
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
 	for _, s := range stores {
-		store := fmt.Sprintf("store_%d", s.GetID())
+		storeAddress := s.GetAddress()
 		stat, ok := status.AsPeer[s.GetID()]
 		if ok {
 			totalWriteBytes := float64(stat.TotalFlowBytes)
 			hotWriteRegionCount := float64(stat.RegionsCount)
 
-			hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_peer").Set(totalWriteBytes)
-			hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_peer").Set(hotWriteRegionCount)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_peer").Set(totalWriteBytes)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_peer").Set(hotWriteRegionCount)
 		} else {
-			hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_peer").Set(0)
-			hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_peer").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_peer").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_peer").Set(0)
 		}
 
 		stat, ok = status.AsLeader[s.GetID()]
@@ -321,28 +321,28 @@ func (c *coordinator) collectHotSpotMetrics() {
 			totalWriteBytes := float64(stat.TotalFlowBytes)
 			hotWriteRegionCount := float64(stat.RegionsCount)
 
-			hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_leader").Set(totalWriteBytes)
-			hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_leader").Set(hotWriteRegionCount)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_leader").Set(totalWriteBytes)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_leader").Set(hotWriteRegionCount)
 		} else {
-			hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_leader").Set(0)
 		}
 	}
 
 	// Collects hot read region metrics.
 	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
 	for _, s := range stores {
-		store := fmt.Sprintf("store_%d", s.GetID())
+		storeAddress := s.GetAddress()
 		stat, ok := status.AsLeader[s.GetID()]
 		if ok {
 			totalReadBytes := float64(stat.TotalFlowBytes)
 			hotReadRegionCount := float64(stat.RegionsCount)
 
-			hotSpotStatusGauge.WithLabelValues(store, "total_read_bytes_as_leader").Set(totalReadBytes)
-			hotSpotStatusGauge.WithLabelValues(store, "hot_read_region_as_leader").Set(hotReadRegionCount)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_read_bytes_as_leader").Set(totalReadBytes)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_read_region_as_leader").Set(hotReadRegionCount)
 		} else {
-			hotSpotStatusGauge.WithLabelValues(store, "total_read_bytes_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(store, "hot_read_region_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_read_bytes_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_read_region_as_leader").Set(0)
 		}
 	}
 

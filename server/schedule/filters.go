@@ -14,8 +14,6 @@
 package schedule
 
 import (
-	"fmt"
-
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
@@ -34,10 +32,10 @@ type Filter interface {
 
 // FilterSource checks if store can pass all Filters as source store.
 func FilterSource(opt Options, store *core.StoreInfo, filters []Filter) bool {
-	storeID := fmt.Sprintf("store%d", store.GetID())
+	storeAddress := store.GetAddress()
 	for _, filter := range filters {
 		if filter.FilterSource(opt, store) {
-			filterCounter.WithLabelValues("filter-source", storeID, filter.Type()).Inc()
+			filterCounter.WithLabelValues("filter-source", storeAddress, filter.Type()).Inc()
 			return true
 		}
 	}
@@ -46,10 +44,10 @@ func FilterSource(opt Options, store *core.StoreInfo, filters []Filter) bool {
 
 // FilterTarget checks if store can pass all Filters as target store.
 func FilterTarget(opt Options, store *core.StoreInfo, filters []Filter) bool {
-	storeID := fmt.Sprintf("store%d", store.GetID())
+	storeAddress := store.GetAddress()
 	for _, filter := range filters {
 		if filter.FilterTarget(opt, store) {
-			filterCounter.WithLabelValues("filter-target", storeID, filter.Type()).Inc()
+			filterCounter.WithLabelValues("filter-target", storeAddress, filter.Type()).Inc()
 			return true
 		}
 	}

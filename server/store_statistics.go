@@ -15,7 +15,6 @@ package server
 
 import (
 	"fmt"
-	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
@@ -61,7 +60,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 		key := fmt.Sprintf("%s:%s", k, v)
 		s.LabelCounter[key]++
 	}
-	id := strconv.FormatUint(store.GetID(), 10)
+	storeAddress := store.GetAddress()
 	// Store state.
 	switch store.GetState() {
 	case metapb.StoreState_Up:
@@ -78,7 +77,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 		s.Offline++
 	case metapb.StoreState_Tombstone:
 		s.Tombstone++
-		s.resetStoreStatistics(id)
+		s.resetStoreStatistics(storeAddress)
 		return
 	}
 	if store.IsLowSpace(s.opt.GetLowSpaceRatio()) {
@@ -91,15 +90,15 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	s.RegionCount += store.GetRegionCount()
 	s.LeaderCount += store.GetLeaderCount()
 
-	storeStatusGauge.WithLabelValues(s.namespace, id, "region_score").Set(store.RegionScore(s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_score").Set(store.LeaderScore(0))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "region_size").Set(float64(store.GetRegionSize()))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "region_count").Set(float64(store.GetRegionCount()))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_size").Set(float64(store.GetLeaderSize()))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_count").Set(float64(store.GetLeaderCount()))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "store_available").Set(float64(store.GetAvailable()))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "store_used").Set(float64(store.GetUsedSize()))
-	storeStatusGauge.WithLabelValues(s.namespace, id, "store_capacity").Set(float64(store.GetCapacity()))
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "region_score").Set(store.RegionScore(s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "leader_score").Set(store.LeaderScore(0))
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "region_size").Set(float64(store.GetRegionSize()))
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "region_count").Set(float64(store.GetRegionCount()))
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "leader_size").Set(float64(store.GetLeaderSize()))
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "leader_count").Set(float64(store.GetLeaderCount()))
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "store_available").Set(float64(store.GetAvailable()))
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "store_used").Set(float64(store.GetUsedSize()))
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "store_capacity").Set(float64(store.GetCapacity()))
 }
 
 func (s *storeStatistics) Collect() {
@@ -163,16 +162,16 @@ func (s *storeStatistics) Collect() {
 	}
 }
 
-func (s *storeStatistics) resetStoreStatistics(id string) {
-	storeStatusGauge.WithLabelValues(s.namespace, id, "region_score").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_score").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, id, "region_size").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, id, "region_count").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_size").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, id, "leader_count").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, id, "store_available").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, id, "store_used").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, id, "store_capacity").Set(0)
+func (s *storeStatistics) resetStoreStatistics(storeAddress string) {
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "region_score").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "leader_score").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "region_size").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "region_count").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "leader_size").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "leader_count").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "store_available").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "store_used").Set(0)
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, "store_capacity").Set(0)
 }
 
 type storeStatisticsMap struct {

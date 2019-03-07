@@ -15,7 +15,6 @@ package schedulers
 
 import (
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -90,8 +89,8 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 	}
 
 	log.Debug("store has the max region score", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", source.GetID()))
-	sourceLabel := strconv.FormatUint(source.GetID(), 10)
-	balanceRegionCounter.WithLabelValues("source_store", sourceLabel).Inc()
+	sourceAddress := source.GetAddress()
+	balanceRegionCounter.WithLabelValues("source_store", sourceAddress).Inc()
 
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	for i := 0; i < balanceRegionRetryLimit; i++ {
@@ -169,8 +168,8 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
 		return nil
 	}
-	balanceRegionCounter.WithLabelValues("move_peer", fmt.Sprintf("store%d-out", source.GetID())).Inc()
-	balanceRegionCounter.WithLabelValues("move_peer", fmt.Sprintf("store%d-in", target.GetID())).Inc()
+	balanceRegionCounter.WithLabelValues("move_peer", source.GetAddress()+"-out").Inc()
+	balanceRegionCounter.WithLabelValues("move_peer", target.GetAddress()+"-in").Inc()
 	s.hintsCounter.miss(source, target)
 	s.hintsCounter.miss(source, nil)
 	return schedule.CreateMovePeerOperator("balance-region", cluster, region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())

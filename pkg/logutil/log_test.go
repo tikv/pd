@@ -22,6 +22,7 @@ import (
 	. "github.com/pingcap/check"
 	zaplog "github.com/pingcap/log"
 	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap/zapcore"
 )
 
 const (
@@ -50,6 +51,16 @@ func (s *testLogSuite) TestStringToLogLevel(c *C) {
 	c.Assert(StringToLogLevel("debug"), Equals, log.DebugLevel)
 	c.Assert(StringToLogLevel("info"), Equals, log.InfoLevel)
 	c.Assert(StringToLogLevel("whatever"), Equals, log.InfoLevel)
+}
+
+func (s *testLogSuite) TestStringToZapLogLevel(c *C) {
+	c.Assert(StringToZapLogLevel("fatal"), Equals, zapcore.FatalLevel)
+	c.Assert(StringToZapLogLevel("ERROR"), Equals, zapcore.ErrorLevel)
+	c.Assert(StringToZapLogLevel("warn"), Equals, zapcore.WarnLevel)
+	c.Assert(StringToZapLogLevel("warning"), Equals, zapcore.WarnLevel)
+	c.Assert(StringToZapLogLevel("debug"), Equals, zapcore.DebugLevel)
+	c.Assert(StringToZapLogLevel("info"), Equals, zapcore.InfoLevel)
+	c.Assert(StringToZapLogLevel("whatever"), Equals, zapcore.InfoLevel)
 }
 
 func (s *testLogSuite) TestStringToLogFormatter(c *C) {

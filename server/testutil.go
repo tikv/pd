@@ -30,6 +30,8 @@ import (
 
 	// Register namespace classifiers.
 	_ "github.com/pingcap/pd/table"
+	// Register schedulers
+	_ "github.com/pingcap/pd/server/schedulers"
 )
 
 // CleanupFunc closes test pd server(s) and deletes any files left behind.

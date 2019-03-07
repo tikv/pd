@@ -19,7 +19,6 @@ import (
 	"os"
 	"path"
 	"runtime"
-	"runtime/debug"
 	"strings"
 	"sync"
 
@@ -28,6 +27,8 @@ import (
 	zaplog "github.com/pingcap/log"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc/grpclog"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
@@ -143,6 +144,23 @@ func StringToLogLevel(level string) log.Level {
 		return log.InfoLevel
 	}
 	return defaultLogLevel
+}
+
+// StringToZapLogLevel translates log level string to log level.
+func StringToZapLogLevel(level string) zapcore.Level {
+	switch strings.ToLower(level) {
+	case "fatal":
+		return zapcore.FatalLevel
+	case "error":
+		return zapcore.ErrorLevel
+	case "warn", "warning":
+		return zapcore.WarnLevel
+	case "debug":
+		return zapcore.DebugLevel
+	case "info":
+		return zapcore.InfoLevel
+	}
+	return zapcore.InfoLevel
 }
 
 // textFormatter is for compatibility with ngaut/log
@@ -273,6 +291,6 @@ func InitLogger(cfg *zaplog.Config) error {
 // Commonly used with a `defer`.
 func LogPanic() {
 	if e := recover(); e != nil {
-		log.Fatalf("panic: %v, stack: %s", e, string(debug.Stack()))
+		zaplog.Fatal("panic", zap.Reflect("recover", e))
 	}
 }

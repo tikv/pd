@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -263,31 +264,46 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(n, DeepEquals, store)
 
-	// Get a removed store should return error.
+	stores, err := s.client.GetAllStores(context.Background())
+	c.Assert(err, IsNil)
+	c.Assert(stores, DeepEquals, []*metapb.Store{store})
+
+	// Mark the store as offline.
 	err = cluster.RemoveStore(store.GetId())
 	c.Assert(err, IsNil)
+	offlineStore := proto.Clone(store).(*metapb.Store)
+	offlineStore.State = metapb.StoreState_Offline
 
 	// Get an offline store should be OK.
 	n, err = s.client.GetStore(context.Background(), store.GetId())
 	c.Assert(err, IsNil)
-	c.Assert(n.GetState(), Equals, metapb.StoreState_Offline)
+	c.Assert(n, DeepEquals, offlineStore)
 
+	// Should return offline stores.
+	stores, err = s.client.GetAllStores(context.Background())
+	c.Assert(err, IsNil)
+	c.Assert(stores, DeepEquals, []*metapb.Store{offlineStore})
+
+	// Mark the store as tombstone.
 	err = cluster.BuryStore(store.GetId(), true)
 	c.Assert(err, IsNil)
+	tombstoneStore := proto.Clone(store).(*metapb.Store)
+	tombstoneStore.State = metapb.StoreState_Tombstone
 
 	// Get a tombstone store should fail.
 	n, err = s.client.GetStore(context.Background(), store.GetId())
 	c.Assert(err, IsNil)
 	c.Assert(n, IsNil)
-}
 
-func (s *testClientSuite) TestGetAllStores(c *C) {
-	cluster := s.srv.GetRaftCluster()
-	c.Assert(cluster, NotNil)
-
-	stores, err := s.client.GetAllStores(context.Background())
+	// Should return tombstone stores.
+	stores, err = s.client.GetAllStores(context.Background())
 	c.Assert(err, IsNil)
-	c.Assert(stores, DeepEquals, []*metapb.Store{store})
+	c.Assert(stores, DeepEquals, []*metapb.Store{tombstoneStore})
+
+	// Should not return tombstone stores.
+	stores, err = s.client.GetAllStores(context.Background(), WithExcludeTombstone())
+	c.Assert(err, IsNil)
+	c.Assert(stores, IsNil)
 }
 
 func (s *testClientSuite) checkGCSafePoint(c *C, expectedSafePoint uint64) {

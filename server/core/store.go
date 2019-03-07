@@ -23,7 +23,8 @@ import (
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/sirupsen/logrus"
+	log "github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 // StoreInfo contains information about a store.
@@ -529,7 +530,8 @@ func (s *StoresInfo) BlockStore(storeID uint64) errcode.ErrorCode {
 func (s *StoresInfo) UnblockStore(storeID uint64) {
 	store, ok := s.stores[storeID]
 	if !ok {
-		log.Fatalf("store %d is unblocked, but it is not found", storeID)
+		log.Fatal("store is unblocked, but it is not found",
+			zap.Uint64("store-id", storeID))
 	}
 	s.stores[storeID] = store.Clone(SetStoreUnBlock())
 }

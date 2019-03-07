@@ -69,7 +69,6 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 			return 0
 		}
 	}
-
 	req := &pdpb.RegionHeartbeatRequest{
 		Header: newRequestHeader(s.svr.clusterID),
 		Leader: s.region.Peers[0],

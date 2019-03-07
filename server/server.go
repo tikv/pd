@@ -228,7 +228,7 @@ func (s *Server) startServer() error {
 	}
 	s.kv = core.NewKV(kvBase).SetRegionKV(regionKV)
 	s.cluster = newRaftCluster(s, s.clusterID)
-	s.hbStreams = newHeartbeatStreams(s.clusterID)
+	s.hbStreams = newHeartbeatStreams(s.clusterID, s.cluster)
 	if s.classifier, err = namespace.CreateClassifier(s.cfg.NamespaceClassifier, s.kv, s.idAlloc); err != nil {
 		return err
 	}
@@ -779,6 +779,8 @@ func (s *Server) GetMemberLeaderPriority(id uint64) (int, error) {
 // SetLogLevel sets log level.
 func (s *Server) SetLogLevel(level string) {
 	s.cfg.Log.Level = level
+	log.SetLevel(logutil.StringToZapLogLevel(level))
+	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
 }
 
 var healthURL = "/pd/ping"

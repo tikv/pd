@@ -17,7 +17,8 @@ import (
 
 	"github.com/google/btree"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	log "github.com/sirupsen/logrus"
+	log "github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 var _ btree.Item = &regionItem{}
@@ -89,7 +90,10 @@ func (t *regionTree) getOverlaps(region *metapb.Region) []*metapb.Region {
 func (t *regionTree) update(region *metapb.Region) []*metapb.Region {
 	overlaps := t.getOverlaps(region)
 	for _, item := range overlaps {
-		log.Debugf("[region %d] delete region %v, cause overlapping with region %v", item.GetId(), HexRegionMeta(item), HexRegionMeta(region))
+		log.Debug("overlapping region",
+			zap.Uint64("region-id", item.GetId()),
+			zap.Reflect("delete-region", HexRegionMeta(item)),
+			zap.Reflect("update-region", HexRegionMeta(region)))
 		t.tree.Delete(&regionItem{item})
 	}
 

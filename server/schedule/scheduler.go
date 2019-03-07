@@ -82,6 +82,12 @@ func RegisterScheduler(name string, createFn CreateSchedulerFunc) {
 	schedulerMap[name] = createFn
 }
 
+// IsSchedulerRegistered check where the named scheduler type is registered.
+func IsSchedulerRegistered(name string) bool {
+	_, ok := schedulerMap[name]
+	return ok
+}
+
 // CreateScheduler creates a scheduler with registered creator func.
 func CreateScheduler(name string, opController *OperatorController, args ...string) (Scheduler, error) {
 	fn, ok := schedulerMap[name]
