@@ -103,6 +103,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		}
 		if region == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
+			s.hintsCounter.hint(source, nil)
 			continue
 		}
 		log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
@@ -111,6 +112,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		if len(region.GetPeers()) != cluster.GetMaxReplicas() {
 			log.Debug("region has abnormal replica count", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
 			schedulerCounter.WithLabelValues(s.GetName(), "abnormal_replica").Inc()
+			s.hintsCounter.hint(source, nil)
 			continue
 		}
 
@@ -118,6 +120,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		if cluster.IsRegionHot(region.GetID()) {
 			log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
 			schedulerCounter.WithLabelValues(s.GetName(), "region_hot").Inc()
+			s.hintsCounter.hint(source, nil)
 			continue
 		}
 
@@ -126,7 +129,6 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 			schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 			return []*schedule.Operator{op}
 		}
-		s.hintsCounter.hint(source, nil)
 	}
 	return nil
 }
@@ -142,6 +144,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard, hintsFilter)
 	if storeID == 0 {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_replacement").Inc()
+		s.hintsCounter.hint(source, nil)
 		return nil
 	}
 
