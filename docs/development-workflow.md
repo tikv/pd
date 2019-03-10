@@ -32,7 +32,7 @@ $ git checkout -b my-feature
 After your code changes, make sure
 
 - To add test cases for the new code.
-- To run `make test`
+- To run `make test`.
 
 
 ### Commit changes
