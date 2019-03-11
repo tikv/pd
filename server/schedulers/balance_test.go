@@ -370,13 +370,13 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	// This schedule try to replace peer in store 1, but we have no other stores,
 	// so store 1 will be set in the cache and skipped next schedule.
 	c.Assert(sb.Schedule(tc), IsNil)
-	for i := 0; i <= hintsStoreCountThreshold/balanceRegionRetryLimit; i++ {
+	for i := 0; i <= hitsStoreCountThreshold/balanceRegionRetryLimit; i++ {
 		sb.Schedule(tc)
 	}
-	hint := sb.(*balanceRegionScheduler).hintsCounter
-	c.Assert(hint.buildSourceFilter(tc).FilterSource(tc, tc.GetStore(1)), IsTrue)
-	c.Assert(hint.buildSourceFilter(tc).FilterSource(tc, tc.GetStore(2)), IsFalse)
-	c.Assert(hint.buildSourceFilter(tc).FilterSource(tc, tc.GetStore(3)), IsFalse)
+	hit := sb.(*balanceRegionScheduler).hitsCounter
+	c.Assert(hit.buildSourceFilter(tc).FilterSource(tc, tc.GetStore(1)), IsTrue)
+	c.Assert(hit.buildSourceFilter(tc).FilterSource(tc, tc.GetStore(2)), IsFalse)
+	c.Assert(hit.buildSourceFilter(tc).FilterSource(tc, tc.GetStore(3)), IsFalse)
 
 	// Store 4 has smaller region score than store 2.
 	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
@@ -385,7 +385,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 
 	// Store 5 has smaller region score than store 1.
 	tc.AddLabelsStore(5, 2, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
-	hint.miss(tc.GetStore(1), nil)
+	hit.miss(tc.GetStore(1), nil)
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 1, 5)
 
 	// Store 6 has smaller region score than store 5.
@@ -410,11 +410,11 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	tc.SetStoreDown(6)
 	tc.SetStoreDown(7)
 	tc.SetStoreDown(8)
-	for i := 0; i <= hintsStoreCountThreshold/balanceRegionRetryLimit; i++ {
+	for i := 0; i <= hitsStoreCountThreshold/balanceRegionRetryLimit; i++ {
 		c.Assert(sb.Schedule(tc), IsNil)
 	}
-	c.Assert(hint.buildSourceFilter(tc).FilterSource(tc, tc.GetStore(1)), IsTrue)
-	hint.miss(tc.GetStore(1), nil)
+	c.Assert(hit.buildSourceFilter(tc).FilterSource(tc, tc.GetStore(1)), IsTrue)
+	hit.miss(tc.GetStore(1), nil)
 
 	// Store 9 has different zone with other stores but larger region score than store 1.
 	tc.AddLabelsStore(9, 20, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})

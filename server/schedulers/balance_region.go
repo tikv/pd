@@ -19,7 +19,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"go.uber.org/zap"
@@ -33,17 +32,19 @@ func init() {
 
 const (
 	// balanceRegionRetryLimit is the limit to retry schedule for selected store.
-	balanceRegionRetryLimit  = 10
-	hintsStoreTTL            = 5 * time.Minute
-	hintsStoreCountThreshold = 350 // pow(1.3, 35) = 9727
+	balanceRegionRetryLimit = 10
+	hitsStoreTTL            = 5 * time.Minute
+	// ScheduleIntervalFactor default is 1.3 , and MinScheduleInterval is 10ms,
+	// the total time spend  t = a1 * (1-pow(q,n)) / (1 - q), a1 = 10, q = 1.3,
+	// and n = 30, so t = 87299ms ≈ 87s.
+	hitsStoreCountThreshold = 30 * balanceRegionRetryLimit
 )
 
 type balanceRegionScheduler struct {
 	*baseScheduler
 	selector     *schedule.BalanceSelector
-	taintStores  *cache.TTLUint64
 	opController *schedule.OperatorController
-	hintsCounter *hintsStoreBuilder
+	hitsCounter  *hitsStoreBuilder
 }
 
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
@@ -57,7 +58,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController) schedu
 		baseScheduler: base,
 		selector:      schedule.NewBalanceSelector(core.RegionKind, filters),
 		opController:  opController,
-		hintsCounter:  newHitsStoreBuilder(hintsStoreTTL, hintsStoreCountThreshold),
+		hitsCounter:   newHitsStoreBuilder(hitsStoreTTL, hitsStoreCountThreshold),
 	}
 	return s
 }
@@ -79,7 +80,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 	stores := cluster.GetStores()
 
 	// source is the store with highest region score in the list that can be selected as balance source.
-	source := s.selector.SelectSource(cluster, stores, s.hintsCounter.buildSourceFilter(cluster))
+	source := s.selector.SelectSource(cluster, stores, s.hitsCounter.buildSourceFilter(cluster))
 	if source == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_store").Inc()
 		// Unlike the balanceLeaderScheduler, we don't need to clear the taintCache
@@ -102,7 +103,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		}
 		if region == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
-			s.hintsCounter.hint(source, nil)
+			s.hitsCounter.hit(source, nil)
 			continue
 		}
 		log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
@@ -111,7 +112,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		if len(region.GetPeers()) != cluster.GetMaxReplicas() {
 			log.Debug("region has abnormal replica count", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
 			schedulerCounter.WithLabelValues(s.GetName(), "abnormal_replica").Inc()
-			s.hintsCounter.hint(source, nil)
+			s.hitsCounter.hit(source, nil)
 			continue
 		}
 
@@ -119,7 +120,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		if cluster.IsRegionHot(region.GetID()) {
 			log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
 			schedulerCounter.WithLabelValues(s.GetName(), "region_hot").Inc()
-			s.hintsCounter.hint(source, nil)
+			s.hitsCounter.hit(source, nil)
 			continue
 		}
 
@@ -138,12 +139,12 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	stores := cluster.GetRegionStores(region)
 	source := cluster.GetStore(oldPeer.GetStoreId())
 	scoreGuard := schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), stores, source)
-	hintsFilter := s.hintsCounter.buildTargetFilter(cluster, source)
+	hitsFilter := s.hitsCounter.buildTargetFilter(cluster, source)
 	checker := schedule.NewReplicaChecker(cluster, nil)
-	storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard, hintsFilter)
+	storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard, hitsFilter)
 	if storeID == 0 {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_replacement").Inc()
-		s.hintsCounter.hint(source, nil)
+		s.hitsCounter.hit(source, nil)
 		return nil
 	}
 
@@ -159,7 +160,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 			zap.Int64("target-influence", opInfluence.GetStoreInfluence(target.GetID()).ResourceSize(core.RegionKind)),
 			zap.Int64("average-region-size", cluster.GetAverageRegionSize()))
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
-		s.hintsCounter.hint(source, target)
+		s.hitsCounter.hit(source, target)
 		return nil
 	}
 
@@ -170,8 +171,8 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 	balanceRegionCounter.WithLabelValues("move_peer", source.GetAddress()+"-out").Inc()
 	balanceRegionCounter.WithLabelValues("move_peer", target.GetAddress()+"-in").Inc()
-	s.hintsCounter.miss(source, target)
-	s.hintsCounter.miss(source, nil)
+	s.hitsCounter.miss(source, target)
+	s.hitsCounter.miss(source, nil)
 	return schedule.CreateMovePeerOperator("balance-region", cluster, region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 }
 
@@ -179,21 +180,21 @@ type record struct {
 	lastTime time.Time
 	count    int
 }
-type hintsStoreBuilder struct {
-	hints     map[string]*record
+type hitsStoreBuilder struct {
+	hits      map[string]*record
 	ttl       time.Duration
 	threshold int
 }
 
-func newHitsStoreBuilder(ttl time.Duration, threshold int) *hintsStoreBuilder {
-	return &hintsStoreBuilder{
-		hints:     make(map[string]*record),
+func newHitsStoreBuilder(ttl time.Duration, threshold int) *hitsStoreBuilder {
+	return &hitsStoreBuilder{
+		hits:      make(map[string]*record),
 		ttl:       ttl,
 		threshold: threshold,
 	}
 }
 
-func (h *hintsStoreBuilder) getKey(source, target *core.StoreInfo) string {
+func (h *hitsStoreBuilder) getKey(source, target *core.StoreInfo) string {
 	var key string
 	if source == nil || source == nil && target == nil {
 		return ""
@@ -205,11 +206,11 @@ func (h *hintsStoreBuilder) getKey(source, target *core.StoreInfo) string {
 	return key
 }
 
-func (h *hintsStoreBuilder) filter(source, target *core.StoreInfo) bool {
+func (h *hitsStoreBuilder) filter(source, target *core.StoreInfo) bool {
 	key := h.getKey(source, target)
-	if item, ok := h.hints[key]; ok && key != "" {
+	if item, ok := h.hits[key]; ok && key != "" {
 		if time.Since(item.lastTime) > h.ttl {
-			delete(h.hints, key)
+			delete(h.hits, key)
 		}
 		if time.Since(item.lastTime) < h.ttl && item.count >= h.threshold {
 			return true
@@ -218,16 +219,16 @@ func (h *hintsStoreBuilder) filter(source, target *core.StoreInfo) bool {
 	return false
 }
 
-func (h *hintsStoreBuilder) miss(source, target *core.StoreInfo) {
+func (h *hitsStoreBuilder) miss(source, target *core.StoreInfo) {
 	key := h.getKey(source, target)
-	if _, ok := h.hints[key]; ok && key != "" {
-		delete(h.hints, key)
+	if _, ok := h.hits[key]; ok && key != "" {
+		delete(h.hits, key)
 	}
 }
 
-func (h *hintsStoreBuilder) hint(source, target *core.StoreInfo) {
+func (h *hitsStoreBuilder) hit(source, target *core.StoreInfo) {
 	key := h.getKey(source, target)
-	if item, ok := h.hints[key]; ok && key != "" {
+	if item, ok := h.hits[key]; ok && key != "" {
 		if time.Since(item.lastTime) >= h.ttl {
 			item.count = 0
 		} else {
@@ -236,12 +237,12 @@ func (h *hintsStoreBuilder) hint(source, target *core.StoreInfo) {
 		item.lastTime = time.Now()
 	} else {
 		item := &record{lastTime: time.Now()}
-		h.hints[key] = item
+		h.hits[key] = item
 	}
 }
 
-func (h *hintsStoreBuilder) buildSourceFilter(cluster schedule.Cluster) schedule.Filter {
-	filter := schedule.NewBlacklistStoreFilter(schedule.BlackSource)
+func (h *hitsStoreBuilder) buildSourceFilter(cluster schedule.Cluster) schedule.Filter {
+	filter := schedule.NewBlacklistStoreFilter(schedule.SignSource)
 	for _, source := range cluster.GetStores() {
 		if h.filter(source, nil) {
 			filter.Add(source.GetID())
@@ -250,8 +251,8 @@ func (h *hintsStoreBuilder) buildSourceFilter(cluster schedule.Cluster) schedule
 	return filter
 }
 
-func (h *hintsStoreBuilder) buildTargetFilter(cluster schedule.Cluster, source *core.StoreInfo) schedule.Filter {
-	filter := schedule.NewBlacklistStoreFilter(schedule.BlackTarget)
+func (h *hitsStoreBuilder) buildTargetFilter(cluster schedule.Cluster, source *core.StoreInfo) schedule.Filter {
+	filter := schedule.NewBlacklistStoreFilter(schedule.SignTarget)
 	for _, target := range cluster.GetStores() {
 		if h.filter(source, target) {
 			filter.Add(target.GetID())
