@@ -601,6 +601,11 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 			return nil, errors.Errorf("region %d not found", request.GetRegionId())
 		}
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
+		// PD may have not received any heartbeat from the new split region,
+		// So scatter region requests take the new split region info.
+		if err := cluster.cachedCluster.handleRegionHeartbeat(region); err != nil {
+			return nil, err
+		}
 	}
 	cluster.RLock()
 	defer cluster.RUnlock()
