@@ -1,7 +1,7 @@
 # Development Workflow
 
 
-Start by forking the pd GitHub repository, make changes in a branch and then send a pull request. 
+Start by forking the `pd` GitHub repository, make changes in a branch and then send a pull request. 
 
 ### Setup your pd GitHub Repository
 
