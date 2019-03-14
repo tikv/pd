@@ -34,9 +34,12 @@ const (
 	// balanceRegionRetryLimit is the limit to retry schedule for selected store.
 	balanceRegionRetryLimit = 10
 	hitsStoreTTL            = 5 * time.Minute
+	// The scheduler selects the same source or source-target for a long time
+	// and do not create an operator will trigger the hit filter. the
+	// calculation of this time is as follows:
 	// ScheduleIntervalFactor default is 1.3 , and MinScheduleInterval is 10ms,
-	// the total time spend  t = a1 * (1-pow(q,n)) / (1 - q), a1 = 10, q = 1.3,
-	// and n = 30, so t = 87299ms ≈ 87s.
+	// the total time spend  t = a1 * (1-pow(q,n)) / (1 - q), where a1 = 10,
+	// q = 1.3, and n = 30, so t = 87299ms ≈ 87s.
 	hitsStoreCountThreshold = 30 * balanceRegionRetryLimit
 )
 
@@ -201,7 +204,7 @@ func (h *hitsStoreBuilder) getKey(source, target *core.StoreInfo) string {
 	} else if target == nil {
 		key = fmt.Sprintf("s%d", source.GetID())
 	} else {
-		key = fmt.Sprintf("t%d<-s%d", source.GetID(), target.GetID())
+		key = fmt.Sprintf("s%d->t%d", source.GetID(), target.GetID())
 	}
 	return key
 }
@@ -212,7 +215,7 @@ func (h *hitsStoreBuilder) filter(source, target *core.StoreInfo) bool {
 		if time.Since(item.lastTime) > h.ttl {
 			delete(h.hits, key)
 		}
-		if time.Since(item.lastTime) < h.ttl && item.count >= h.threshold {
+		if time.Since(item.lastTime) <= h.ttl && item.count >= h.threshold {
 			return true
 		}
 	}

@@ -418,18 +418,21 @@ type BlacklistType int
 
 // some flags about blacklist type.
 const (
+	// blacklist associated with the source.
 	SignSource BlacklistType = iota + 1
+	// blacklist associated with the target.
 	SignTarget
+	// blacklist associated with the source and target.
 	SignSourceAndTarget
 )
 
-// BlacklistStoreFilter filter the store according to the blacklist.
+// BlacklistStoreFilter filters the store according to the blacklist.
 type BlacklistStoreFilter struct {
 	blacklist map[uint64]struct{}
 	flag      BlacklistType
 }
 
-// NewBlacklistStoreFilter create a blacklist filter.
+// NewBlacklistStoreFilter creates a blacklist filter.
 func NewBlacklistStoreFilter(typ BlacklistType) *BlacklistStoreFilter {
 	return &BlacklistStoreFilter{
 		blacklist: make(map[uint64]struct{}),
