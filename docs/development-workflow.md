@@ -1,12 +1,16 @@
 # Development Workflow
 
 
-Start by forking the `pd` GitHub repository, make changes in a branch and then send a pull request. 
+Start bythe `pd` GitHub repository, make changes in a branch and then send a pull request. The development workflow consists of the following steps:
 
-### Setup your pd GitHub Repository
+1. Fork the pd repository.
+2. Make changes in a branch.
+3. Send a pull request.
+
+### Set up your pd GitHub Repository
 
 
-Fork [pd upstream](https://github.com/pingcap/pd/fork) source repository to your own personal repository.
+Fork the [pd upstream](https://github.com/pingcap/pd/fork) source repository to your personal repository.
 
 ```sh
 $ mkdir -p $GOPATH/src/github.com/pingcap
@@ -15,7 +19,7 @@ $ git clone < your personal forked pd repo>
 $ cd pd
 ```
 
-### Set up git remote as ``upstream``
+### Set git remote as ``upstream``
 
 
 ```sh
@@ -29,7 +33,7 @@ $ git merge upstream/master
 ### Create your feature branch
 
 
-Before making code changes, make sure you create a separate branch for these changes.
+Before making code changes, make sure you create a separate branch for them.
 
 ```
 $ git checkout -b my-feature
