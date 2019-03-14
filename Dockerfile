@@ -1,4 +1,4 @@
-FROM golang:1.11.1-alpine as builder
+FROM golang:1.12-alpine as builder
 MAINTAINER siddontang
 
 RUN apk add --no-cache \
