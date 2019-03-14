@@ -1,7 +1,7 @@
 # Development Workflow
 
 
-Start bythe `pd` GitHub repository, make changes in a branch and then send a pull request. The development workflow consists of the following steps:
+Start by forking the `pd` GitHub repository, make changes in a branch and then send a pull request. The development workflow consists of the following steps:
 
 1. Fork the pd repository.
 2. Make changes in a branch.
