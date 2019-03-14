@@ -1,5 +1,7 @@
 module github.com/pingcap/pd
 
+go 1.12
+
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973 // indirect
