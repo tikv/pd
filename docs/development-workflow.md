@@ -6,7 +6,7 @@ Start by forking the `pd` GitHub repository, make changes in a branch and then s
 ### Set up your pd GitHub Repository
 
 
-After forking the [pd upstream](https://github.com/pingcap/pd/fork) source repository to your personal repository. You can set up personal development environment for pd project.
+After forking the [pd upstream](https://github.com/pingcap/pd/fork) source repository to your personal repository. You can set up your personal development environment for pd project.
 
 ```sh
 $ mkdir -p $GOPATH/src/github.com/pingcap
