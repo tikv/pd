@@ -336,7 +336,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	tc.AddRegionStore(4, 16)
 	// Add region 1 with leader in store 4.
 	tc.AddLeaderRegion(1, 4)
-	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 4, 1)
+	testutil.CheckTransferPeerWithLeaderTransfer(c, sb.Schedule(tc)[0], schedule.OpBalance, 4, 1)
 
 	// Test stateFilter.
 	tc.SetStoreOffline(1)
@@ -344,7 +344,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	cache.Remove(4)
 	// When store 1 is offline, it will be filtered,
 	// store 2 becomes the store with least regions.
-	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 4, 2)
+	testutil.CheckTransferPeerWithLeaderTransfer(c, sb.Schedule(tc)[0], schedule.OpBalance, 4, 2)
 	opt.SetMaxReplicas(3)
 	c.Assert(sb.Schedule(tc), IsNil)
 
