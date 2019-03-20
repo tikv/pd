@@ -26,12 +26,13 @@ import (
 
 // scheduleOption is a wrapper to access the configuration safely.
 type scheduleOption struct {
-	v              atomic.Value
-	rep            *Replication
-	ns             map[string]*namespaceOption
-	labelProperty  atomic.Value
-	clusterVersion atomic.Value
-	pdServerConfig atomic.Value
+	v               atomic.Value
+	rep             *Replication
+	ns              map[string]*namespaceOption
+	labelProperty   atomic.Value
+	clusterVersion  atomic.Value
+	pdServerConfig  atomic.Value
+	configBytesHash atomic.Value //use to justify whether config changed
 }
 
 func newScheduleOption(cfg *Config) *scheduleOption {
@@ -271,6 +272,14 @@ func (o *scheduleOption) loadPDServerConfig() *PDServerConfig {
 	return o.pdServerConfig.Load().(*PDServerConfig)
 }
 
+func (o *scheduleOption) loadConfigHash() string {
+	return o.configBytesHash.Load().(string)
+}
+
+func (o *scheduleOption) saveConfigHash(hash string) {
+	o.configBytesHash.Store(hash)
+}
+
 func (o *scheduleOption) persist(kv *core.KV) error {
 	namespaces := make(map[string]NamespaceConfig)
 	for name, ns := range o.ns {
@@ -307,6 +316,10 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 	}
 	o.adjustScheduleCfg(cfg)
 	if isExist {
+		configHash, err := kv.LoadConfigHash()
+		if err != nil {
+			return err
+		}
 		o.store(&cfg.Schedule)
 		o.rep.store(&cfg.Replication)
 		for name, nsCfg := range cfg.Namespace {
@@ -316,6 +329,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.clusterVersion.Store(cfg.ClusterVersion)
 		o.pdServerConfig.Store(&cfg.PDServerCfg)
+		o.saveConfigHash(configHash)
 	}
 	return nil
 }

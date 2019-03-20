@@ -14,6 +14,8 @@
 package core
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -169,6 +171,18 @@ func (kv *KV) LoadConfig(cfg interface{}) (bool, error) {
 		return false, errors.WithStack(err)
 	}
 	return true, nil
+}
+
+// LoadConfig loads config from configPath then unmarshal it to cfg.
+func (kv *KV) LoadConfigHash() (string, error) {
+	value, err := kv.Load(configPath)
+	if err != nil {
+		return "", err
+	}
+	signByte := []byte(value)
+	hash := md5.New()
+	hash.Write(signByte)
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 // LoadStores loads all stores from KV to StoresInfo.
