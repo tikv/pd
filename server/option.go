@@ -272,12 +272,8 @@ func (o *scheduleOption) loadPDServerConfig() *PDServerConfig {
 	return o.pdServerConfig.Load().(*PDServerConfig)
 }
 
-func (o *scheduleOption) loadConfigHash() string {
-	return o.configBytesHash.Load().(string)
-}
-
-func (o *scheduleOption) saveConfigHash(hash string) {
-	o.configBytesHash.Store(hash)
+func (o *scheduleOption) loadConfigHash() *string {
+	return o.configBytesHash.Load().(*string)
 }
 
 func (o *scheduleOption) persist(kv *core.KV) error {
@@ -329,7 +325,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.clusterVersion.Store(cfg.ClusterVersion)
 		o.pdServerConfig.Store(&cfg.PDServerCfg)
-		o.saveConfigHash(configHash)
+		o.configBytesHash.Store(&configHash)
 	}
 	return nil
 }

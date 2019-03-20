@@ -300,7 +300,7 @@ func (s *Server) campaignLeader() error {
 			return nil
 		}
 
-		if strings.Compare(s.scheduleOpt.loadConfigHash(), configHash) != 0 {
+		if strings.Compare(*s.scheduleOpt.loadConfigHash(), configHash) != 0 {
 			err := s.reloadConfigFromKV()
 			if err != nil {
 				log.Error("load config failed", zap.Error(err))
@@ -340,7 +340,7 @@ func (s *Server) watchLeader(leader *pdpb.Member, revision int64) {
 			return
 		}
 
-		if strings.Compare(s.scheduleOpt.loadConfigHash(), configHash) != 0 {
+		if strings.Compare(*s.scheduleOpt.loadConfigHash(), configHash) != 0 {
 			err := s.reloadConfigFromKV()
 			if err != nil {
 				log.Error("load config failed", zap.Error(err))
