@@ -554,6 +554,15 @@ func (s *StoresInfo) GetMetaStores() []*metapb.Store {
 	return stores
 }
 
+// RemoveTombStoneStores remove all the record of tombstone Store.
+func (s *StoresInfo) RemoveTombStoneRecords() {
+	for storeId, store := range s.stores {
+		if store.IsTombstone() {
+			delete(s.stores, storeId)
+		}
+	}
+}
+
 // GetStoreCount returns the total count of storeInfo.
 func (s *StoresInfo) GetStoreCount() int {
 	return len(s.stores)

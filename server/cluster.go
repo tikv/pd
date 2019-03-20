@@ -557,6 +557,13 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
+// GetStores gets stores from cluster.
+func (c *RaftCluster) RemoveTombStoneRecords() {
+	c.RLock()
+	defer c.RUnlock()
+	c.cachedCluster.core.Stores.RemoveTombStoneRecords()
+}
+
 func (c *RaftCluster) checkOperators() {
 	opController := c.coordinator.opController
 	for _, op := range opController.GetOperators() {

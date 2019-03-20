@@ -186,6 +186,18 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 
+func (h *storeHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) {
+	cluster := h.svr.GetRaftCluster()
+	if cluster == nil {
+		errorResp(h.rd, w, errcode.NewInternalErr(server.ErrNotBootstrapped))
+		return
+	}
+
+	cluster.RemoveTombStoneRecords()
+
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
 func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
