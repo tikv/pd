@@ -390,7 +390,10 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return errors.Trace(err)
 	}
 
-	op := schedule.CreateMovePeerOperator("adminMovePeer", c.cluster, region, schedule.OpAdmin, fromStoreID, toStoreID, newPeer.GetId())
+	op, err := schedule.CreateMovePeerOperator("adminMovePeer", c.cluster, region, schedule.OpAdmin, fromStoreID, toStoreID, newPeer.GetId())
+	if err != nil {
+		return err
+	}
 	if ok := c.addOperator(op); !ok {
 		return errors.Trace(errAddOperator)
 	}
@@ -455,7 +458,10 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 		return errors.Errorf("region has no peer in store %v", fromStoreID)
 	}
 
-	op := schedule.CreateRemovePeerOperator("adminRemovePeer", c.cluster, schedule.OpAdmin, region, fromStoreID)
+	op, err := schedule.CreateRemovePeerOperator("adminRemovePeer", c.cluster, schedule.OpAdmin, region, fromStoreID)
+	if err != nil {
+		return err
+	}
 	if ok := c.addOperator(op); !ok {
 		return errors.Trace(errAddOperator)
 	}

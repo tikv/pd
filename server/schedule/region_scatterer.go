@@ -120,8 +120,11 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
 		delete(stores, newPeer.GetStoreId())
 		r.selected.put(newPeer.GetStoreId())
 
-		op := CreateMovePeerOperator("scatter-peer", r.cluster, region, OpAdmin,
+		op, err := CreateMovePeerOperator("scatter-peer", r.cluster, region, OpAdmin,
 			peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+		if err != nil {
+			continue
+		}
 		steps = append(steps, op.steps...)
 		steps = append(steps, TransferLeader{ToStore: newPeer.GetStoreId()})
 		kind |= op.Kind()

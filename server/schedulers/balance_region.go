@@ -163,5 +163,10 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 	balanceRegionCounter.WithLabelValues("move_peer", fmt.Sprintf("store%d-out", source.GetId())).Inc()
 	balanceRegionCounter.WithLabelValues("move_peer", fmt.Sprintf("store%d-in", target.GetId())).Inc()
-	return schedule.CreateMovePeerOperator("balance-region", cluster, region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	op, err := schedule.CreateMovePeerOperator("balance-region", cluster, region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	if err != nil {
+		schedulerCounter.WithLabelValues(s.GetName(), "create_operator_fail").Inc()
+		return nil
+	}
+	return op
 }

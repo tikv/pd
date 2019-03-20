@@ -68,8 +68,13 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *Operator {
 			checkerCounter.WithLabelValues("namespace_checker", "no_target_peer").Inc()
 			return nil
 		}
+		op, err := CreateMovePeerOperator("makeNamespaceRelocation", n.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+		if err != nil {
+			checkerCounter.WithLabelValues("namespace_checker", "create_operator_fail").Inc()
+			return nil
+		}
 		checkerCounter.WithLabelValues("namespace_checker", "new_operator").Inc()
-		return CreateMovePeerOperator("makeNamespaceRelocation", n.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+		return op
 	}
 
 	checkerCounter.WithLabelValues("namespace_checker", "all_right").Inc()

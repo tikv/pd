@@ -62,3 +62,11 @@ func CheckTransferPeer(c *check.C, op *schedule.Operator, kind schedule.Operator
 	kind |= schedule.OpRegion
 	c.Assert(op.Kind()&kind, check.Equals, kind)
 }
+
+// CheckTransferPeerWithLeaderTransfer checks if the operator is to transfer
+// peer between the specified source and target stores and it meanwhile
+// transfers the leader out of source store.
+func CheckTransferPeerWithLeaderTransfer(c *check.C, op *schedule.Operator, kind schedule.OperatorKind, sourceID, targetID uint64) {
+	c.Assert(op.Len(), check.Equals, 3)
+	CheckTransferPeer(c, op, kind, sourceID, targetID)
+}

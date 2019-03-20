@@ -70,8 +70,12 @@ func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster, opInfluence 
 		return nil
 	}
 
+	op, err := schedule.CreateMovePeerOperator("shuffle-region", cluster, region, schedule.OpAdmin, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	if err != nil {
+		schedulerCounter.WithLabelValues(s.GetName(), "create_operator_fail").Inc()
+		return nil
+	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	op := schedule.CreateMovePeerOperator("shuffle-region", cluster, region, schedule.OpAdmin, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 	op.SetPriorityLevel(core.HighPriority)
 	return []*schedule.Operator{op}
 }
