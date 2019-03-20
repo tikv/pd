@@ -279,6 +279,19 @@ func (o *scheduleOption) loadConfigHash() *string {
 	return o.configBytesHash.Load().(*string)
 }
 
+func (o *scheduleOption) saveConfigHash(cfg interface{}) error {
+	value, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	signByte := []byte(value)
+	hash := md5.New()
+	hash.Write(signByte)
+	configHash := hex.EncodeToString(hash.Sum(nil))
+	o.configBytesHash.Store(&configHash)
+	return nil
+}
+
 func (o *scheduleOption) persist(kv *core.KV) error {
 	namespaces := make(map[string]NamespaceConfig)
 	for name, ns := range o.ns {
@@ -293,6 +306,7 @@ func (o *scheduleOption) persist(kv *core.KV) error {
 		PDServerCfg:    *o.loadPDServerConfig(),
 	}
 	err := kv.SaveConfig(cfg)
+	o.saveConfigHash(cfg)
 	return err
 }
 
@@ -329,16 +343,11 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		o.clusterVersion.Store(cfg.ClusterVersion)
 		o.pdServerConfig.Store(&cfg.PDServerCfg)
 		o.configBytesHash.Store(&configHash)
-	} else {
-		value, err := json.Marshal(cfg)
+	}else{
+		err = o.saveConfigHash(cfg)
 		if err != nil {
 			return err
 		}
-		signByte := []byte(value)
-		hash := md5.New()
-		hash.Write(signByte)
-		configHash := hex.EncodeToString(hash.Sum(nil))
-		o.configBytesHash.Store(&configHash)
 	}
 	return nil
 }
