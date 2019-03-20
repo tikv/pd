@@ -292,6 +292,21 @@ func (s *Server) campaignLeader() error {
 			log.Info("server is closed")
 			return nil
 		}
+
+		// leader apply config
+		configHash, err := s.kv.LoadConfigHash()
+		if err != nil {
+			log.Error("load config hash failed", zap.Error(err))
+			return nil
+		}
+
+		if strings.Compare(s.scheduleOpt.loadConfigHash(), configHash) != 0 {
+			err := s.reloadConfigFromKV()
+			if err != nil {
+				log.Error("load config failed", zap.Error(err))
+				return nil
+			}
+		}
 	}
 }
 
@@ -318,6 +333,7 @@ func (s *Server) watchLeader(leader *pdpb.Member, revision int64) {
 	// If the revision is compacted, will meet required revision has been compacted error.
 	// In this case, use the compact revision to re-watch the key.
 	for {
+		//follower watch config change and apply it
 		configHash, err := s.kv.LoadConfigHash()
 		if err != nil {
 			log.Error("load config hash failed", zap.Error(err))
