@@ -16,6 +16,7 @@ package simulator
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -79,6 +80,7 @@ func NewNode(s *cases.Store, pdAddr string, ioRate int64) (*Node, error) {
 		tasks:                    make(map[uint64]Task),
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
 		ioRate:                   ioRate * cases.MB,
+		tick:                     uint64(rand.Intn(storeHeartBeatPeriod)),
 	}, nil
 }
 
@@ -112,7 +114,8 @@ func (n *Node) receiveRegionHeartbeat() {
 }
 
 // Tick steps node status change.
-func (n *Node) Tick() {
+func (n *Node) Tick(wg *sync.WaitGroup) {
+	defer wg.Done()
 	if n.GetState() != metapb.StoreState_Up {
 		return
 	}
@@ -185,7 +188,8 @@ func (n *Node) regionHeartBeat() {
 }
 
 func (n *Node) reportRegionChange() {
-	for _, regionID := range n.raftEngine.regionChange[n.Id] {
+	regionIDs := n.raftEngine.GetRegionChange(n.Id)
+	for _, regionID := range regionIDs {
 		region := n.raftEngine.GetRegion(regionID)
 		ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 		err := n.client.RegionHeartbeat(ctx, region)
@@ -195,9 +199,9 @@ func (n *Node) reportRegionChange() {
 				zap.Uint64("region-id", region.GetID()),
 				zap.Error(err))
 		}
+		n.raftEngine.ResetRegionChange(n.Id, regionID)
 		cancel()
 	}
-	delete(n.raftEngine.regionChange, n.Id)
 }
 
 // AddTask adds task in this node.

@@ -526,8 +526,10 @@ func (c *RaftCluster) checkStores() {
 			continue
 		}
 
-		if store.IsUp() && !store.IsLowSpace(cluster.GetLowSpaceRatio()) {
-			upStoreCount++
+		if store.IsUp() {
+			if !store.IsLowSpace(cluster.GetLowSpaceRatio()) {
+				upStoreCount++
+			}
 			continue
 		}
 

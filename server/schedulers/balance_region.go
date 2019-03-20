@@ -174,9 +174,14 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 	balanceRegionCounter.WithLabelValues("move_peer", source.GetAddress()+"-out").Inc()
 	balanceRegionCounter.WithLabelValues("move_peer", target.GetAddress()+"-in").Inc()
+	op, err := schedule.CreateMovePeerOperator("balance-region", cluster, region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	if err != nil {
+		schedulerCounter.WithLabelValues(s.GetName(), "create_operator_fail").Inc()
+		return nil
+	}
 	s.hitsCounter.miss(source, target)
 	s.hitsCounter.miss(source, nil)
-	return schedule.CreateMovePeerOperator("balance-region", cluster, region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	return op
 }
 
 type record struct {

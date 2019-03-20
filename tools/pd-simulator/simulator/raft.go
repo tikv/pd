@@ -237,11 +237,31 @@ func (r *RaftEngine) electNewLeader(region *core.RegionInfo) *metapb.Peer {
 	return nil
 }
 
-// GetRegion returns the RegionInfo with regionID
+// GetRegion returns the RegionInfo with regionID.
 func (r *RaftEngine) GetRegion(regionID uint64) *core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
 	return r.regionsInfo.GetRegion(regionID)
+}
+
+// GetRegionChange returns a list of RegionID for a given store.
+func (r *RaftEngine) GetRegionChange(storeID uint64) []uint64 {
+	r.RLock()
+	defer r.RUnlock()
+	return r.regionChange[storeID]
+}
+
+// ResetRegionChange resets RegionInfo on a specific store with a given Region ID
+func (r *RaftEngine) ResetRegionChange(storeID uint64, regionID uint64) {
+	r.Lock()
+	defer r.Unlock()
+	regionIDs := r.regionChange[storeID]
+	for i, id := range regionIDs {
+		if id == regionID {
+			r.regionChange[storeID] = append(r.regionChange[storeID][:i], r.regionChange[storeID][i+1:]...)
+			return
+		}
+	}
 }
 
 // GetRegions gets all RegionInfo from regionMap

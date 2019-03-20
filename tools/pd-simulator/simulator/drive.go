@@ -15,6 +15,7 @@ package simulator
 
 import (
 	"context"
+	"sync"
 
 	"go.uber.org/zap"
 
@@ -27,6 +28,7 @@ import (
 
 // Driver promotes the cluster status change.
 type Driver struct {
+	wg          sync.WaitGroup
 	pdAddr      string
 	simCase     *cases.Case
 	client      Client
@@ -106,8 +108,10 @@ func (d *Driver) Tick() {
 	d.eventRunner.Tick(d.tickCount)
 	for _, n := range d.conn.Nodes {
 		n.reportRegionChange()
-		n.Tick()
+		d.wg.Add(1)
+		go n.Tick(&d.wg)
 	}
+	d.wg.Wait()
 }
 
 // Check checks if the simulation is completed.
