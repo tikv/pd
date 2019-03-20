@@ -173,7 +173,7 @@ func (kv *KV) LoadConfig(cfg interface{}) (bool, error) {
 	return true, nil
 }
 
-// LoadConfig loads config from configPath then unmarshal it to cfg.
+// LoadConfig loads config hash from configPath.
 func (kv *KV) LoadConfigHash() (string, error) {
 	value, err := kv.Load(configPath)
 	if err != nil {
