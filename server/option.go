@@ -329,7 +329,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		o.clusterVersion.Store(cfg.ClusterVersion)
 		o.pdServerConfig.Store(&cfg.PDServerCfg)
 		o.configBytesHash.Store(&configHash)
-	}else{
+	} else {
 		value, err := json.Marshal(cfg)
 		if err != nil {
 			return err
