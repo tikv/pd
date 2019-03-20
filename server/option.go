@@ -14,6 +14,9 @@
 package server
 
 import (
+	"crypto/md5"
+	"encoding/hex"
+	"encoding/json"
 	"reflect"
 	"sync/atomic"
 	"time"
@@ -325,6 +328,16 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.clusterVersion.Store(cfg.ClusterVersion)
 		o.pdServerConfig.Store(&cfg.PDServerCfg)
+		o.configBytesHash.Store(&configHash)
+	}else{
+		value, err := json.Marshal(cfg)
+		if err != nil {
+			return err
+		}
+		signByte := []byte(value)
+		hash := md5.New()
+		hash.Write(signByte)
+		configHash := hex.EncodeToString(hash.Sum(nil))
 		o.configBytesHash.Store(&configHash)
 	}
 	return nil
