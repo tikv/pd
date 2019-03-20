@@ -344,7 +344,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		o.pdServerConfig.Store(&cfg.PDServerCfg)
 		o.configBytesHash.Store(&configHash)
 	} else {
-		err = o.saveConfigHash(cfg)
+		err := o.saveConfigHash(cfg)
 		if err != nil {
 			return err
 		}
