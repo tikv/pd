@@ -554,11 +554,11 @@ func (s *StoresInfo) GetMetaStores() []*metapb.Store {
 	return stores
 }
 
-// RemoveTombStoneStores remove all the record of tombstone Store.
+// RemoveTombStoneRecords remove all the record of tombstone Records.
 func (s *StoresInfo) RemoveTombStoneRecords() {
-	for storeId, store := range s.stores {
+	for storeID, store := range s.stores {
 		if store.IsTombstone() {
-			delete(s.stores, storeId)
+			delete(s.stores, storeID)
 		}
 	}
 }
