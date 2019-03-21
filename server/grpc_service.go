@@ -383,9 +383,11 @@ func (s *Server) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) 
 	}
 	r := cluster.GetRegionInfoByKey(request.GetRegionKey())
 	var (
-		region *metapb.Region
-		leader *metapb.Peer
-		slaves []*metapb.Peer
+		region       *metapb.Region
+		leader       *metapb.Peer
+		slaves       []*metapb.Peer
+		downPeers    []*pdpb.PeerStats
+		pendingPeers []*metapb.Peer
 	)
 	if r != nil {
 		nr := r.Clone(core.WithAddPeers(r.GetSlavePeers()))
@@ -393,11 +395,17 @@ func (s *Server) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) 
 		region = nr.GetMeta()
 		leader = nr.GetLeader()
 	}
+	downPeers = append(downPeers, r.GetDownPeers()...)
+	downPeers = append(downPeers, r.GetSlaveDownPeers()...)
+	pendingPeers = append(pendingPeers, r.GetPendingPeers()...)
+	pendingPeers = append(pendingPeers, r.GetSlavePendingPeers()...)
 	return &pdpb.GetRegionResponse{
-		Header: s.header(),
-		Region: region,
-		Leader: leader,
-		Slaves: slaves,
+		Header:       s.header(),
+		Region:       region,
+		Leader:       leader,
+		Slaves:       slaves,
+		DownPeers:    downPeers,
+		PendingPeers: pendingPeers,
 	}, nil
 }
 
@@ -433,9 +441,11 @@ func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDR
 	id := request.GetRegionId()
 	r := cluster.GetRegionInfoByID(id)
 	var (
-		region *metapb.Region
-		leader *metapb.Peer
-		slaves []*metapb.Peer
+		region       *metapb.Region
+		leader       *metapb.Peer
+		slaves       []*metapb.Peer
+		downPeers    []*pdpb.PeerStats
+		pendingPeers []*metapb.Peer
 	)
 
 	if r != nil {
@@ -444,11 +454,17 @@ func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDR
 		region = nr.GetMeta()
 		leader = nr.GetLeader()
 	}
+	downPeers = append(downPeers, r.GetDownPeers()...)
+	downPeers = append(downPeers, r.GetSlaveDownPeers()...)
+	pendingPeers = append(pendingPeers, r.GetPendingPeers()...)
+	pendingPeers = append(pendingPeers, r.GetSlavePendingPeers()...)
 	return &pdpb.GetRegionResponse{
-		Header: s.header(),
-		Region: region,
-		Leader: leader,
-		Slaves: slaves,
+		Header:       s.header(),
+		Region:       region,
+		Leader:       leader,
+		Slaves:       slaves,
+		DownPeers:    downPeers,
+		PendingPeers: pendingPeers,
 	}, nil
 }
 

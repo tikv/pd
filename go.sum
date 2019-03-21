@@ -82,6 +82,9 @@ github.com/pingcap/gofail v0.0.0-20181115114620-e47081505b9c h1:nYlcWGAYxDMdiRLj
 github.com/pingcap/gofail v0.0.0-20181115114620-e47081505b9c/go.mod h1:DazNTg0PTldtpsQiT9I5tVJwV1onHMKBBgXzmJUlMns=
 github.com/pingcap/kvproto v0.0.0-20190103102256-7da6b53ea081 h1:r4u2A86/WuTVOxp3kvhKNTXe24OF5hOSZahL5zmd4DE=
 github.com/pingcap/kvproto v0.0.0-20190103102256-7da6b53ea081/go.mod h1:vaHRAMINJGaWG44vstD9eGT+JdUQVlRIKIK1qpUEMtU=
+github.com/pingcap/kvproto v0.0.0-20190317222333-fbcaeb18dbfc h1:TTsV9t5WlR9VAlLU6S8JukqEKJvNg1MbUqlAGeM9oZc=
+github.com/pingcap/kvproto v0.0.0-20190321092711-cc66a603cf29 h1:VCPkVhGFmZk9fofJxueJ0MP/sFcrpbGjHX7RdJMnvkM=
+github.com/pingcap/kvproto v0.0.0-20190321092711-cc66a603cf29/go.mod h1:vaHRAMINJGaWG44vstD9eGT+JdUQVlRIKIK1qpUEMtU=
 github.com/pingcap/tipb v0.0.0-20170310053819-1043caee48da/go.mod h1:RtkHW8WbcNxj8lsbzjaILci01CtYnYbIkQhjyZWrWVI=
 github.com/pkg/errors v0.8.0 h1:WdK/asTD0HN+q6hsWO3/vpuAkAr+tw6aNJNDFFf0+qw=
 github.com/pkg/errors v0.8.0/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=

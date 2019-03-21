@@ -38,7 +38,7 @@ require (
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/errors v0.10.1 // indirect
 	github.com/pingcap/gofail v0.0.0-20181115114620-e47081505b9c
-	github.com/pingcap/kvproto v0.0.0-20190103102256-7da6b53ea081
+	github.com/pingcap/kvproto v0.0.0-20190321092711-cc66a603cf29
 	github.com/pkg/errors v0.8.0
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v0.8.0
