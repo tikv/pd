@@ -70,6 +70,15 @@ func NewSetStoreWeightCommand() *cobra.Command {
 	}
 }
 
+// NewSetStoreWeightCommand returns a weight subcommand of storeCmd.
+func NewRemoveTombStoneCommandFunc() *cobra.Command {
+	return &cobra.Command{
+		Use:   "remove-tombstone",
+		Short: "remove tombstone record if only safe",
+		Run:   removeTombStoneCommandFunc,
+	}
+}
+
 func showStoreCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := storesPrefix
 	if len(args) == 1 {
@@ -142,4 +151,14 @@ func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {
 		"leader": leader,
 		"region": region,
 	})
+}
+
+func removeTombStoneCommandFunc(cmd *cobra.Command, args []string) {
+	prefix := fmt.Sprintf(path.Join(storePrefix, "remove-tombstone"))
+	_, err := doRequest(cmd, prefix, http.MethodDelete)
+	if err != nil {
+		cmd.Printf("Failed to remove tombstone store %s \n", err)
+		return
+	}
+	cmd.Println("Success!")
 }
