@@ -70,7 +70,7 @@ func NewSetStoreWeightCommand() *cobra.Command {
 	}
 }
 
-// NewSetStoreWeightCommand returns a weight subcommand of storeCmd.
+// NewRemoveTombStoneCommandFunc returns a weight subcommand of storeCmd.
 func NewRemoveTombStoneCommandFunc() *cobra.Command {
 	return &cobra.Command{
 		Use:   "remove-tombstone",
