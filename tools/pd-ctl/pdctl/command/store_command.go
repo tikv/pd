@@ -70,7 +70,7 @@ func NewSetStoreWeightCommand() *cobra.Command {
 	}
 }
 
-// NewStoresCommand return a store subcommand of rootCmd
+// NewStoresCommand returns a store subcommand of rootCmd
 func NewStoresCommand() *cobra.Command {
 	s := &cobra.Command{
 		Use:   `stores [remove-tombstone]`,
