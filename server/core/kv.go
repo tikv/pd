@@ -114,6 +114,7 @@ func (kv *KV) SaveStore(store *metapb.Store) error {
 	return saveProto(kv.KVBase, kv.storePath(store.GetId()), store)
 }
 
+// DeleteStore delete one store from KV.
 func (kv *KV) DeleteStore(store *metapb.Store) error {
 	return kv.Delete(kv.storePath(store.GetId()))
 }
