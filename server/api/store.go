@@ -186,22 +186,6 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 
-func (h *storeHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		errorResp(h.rd, w, errcode.NewInternalErr(server.ErrNotBootstrapped))
-		return
-	}
-
-	err := cluster.RemoveTombStoneRecords()
-	if err != nil {
-		errorResp(h.rd, w, err)
-		return
-	}
-
-	h.rd.JSON(w, http.StatusOK, nil)
-}
-
 func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
@@ -331,6 +315,23 @@ func newStoresHandler(svr *server.Server, rd *render.Render) *storesHandler {
 		rd:  rd,
 	}
 }
+
+func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) {
+	cluster := h.svr.GetRaftCluster()
+	if cluster == nil {
+		errorResp(h.rd, w, errcode.NewInternalErr(server.ErrNotBootstrapped))
+		return
+	}
+
+	err := cluster.RemoveTombStoneRecords()
+	if err != nil {
+		errorResp(h.rd, w, err)
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
 
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()

@@ -70,8 +70,18 @@ func NewSetStoreWeightCommand() *cobra.Command {
 	}
 }
 
-// NewRemoveTombStoneCommandFunc returns a weight subcommand of storeCmd.
-func NewRemoveTombStoneCommandFunc() *cobra.Command {
+// NewStoresCommand return a store subcommand of rootCmd
+func NewStoresCommand() *cobra.Command {
+	s := &cobra.Command{
+		Use:   `stores [remove-tombstone]`,
+		Short: "show the store status",
+	}
+	s.AddCommand(NewRemoveTombStoneCommand())
+	return s
+}
+
+// NewRemoveTombStoneCommand returns a tombstone subcommand of storesCmd.
+func NewRemoveTombStoneCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "remove-tombstone",
 		Short: "remove tombstone record if only safe",

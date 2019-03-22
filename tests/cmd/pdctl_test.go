@@ -216,7 +216,7 @@ func (s *cmdTestSuite) TestStore(c *C) {
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
 
-	args = []string{"-u", pdAddr, "store", "remove-tombstone"}
+	args = []string{"-u", pdAddr, "stores", "remove-tombstone"}
 	_, _, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store"}
@@ -1176,6 +1176,7 @@ func initCommand() *cobra.Command {
 		command.NewConfigCommand(),
 		command.NewRegionCommand(),
 		command.NewStoreCommand(),
+		command.NewStoresCommand(),
 		command.NewMemberCommand(),
 		command.NewExitCommand(),
 		command.NewLabelCommand(),
