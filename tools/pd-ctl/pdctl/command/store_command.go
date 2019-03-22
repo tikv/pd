@@ -27,7 +27,7 @@ var (
 	storePrefix  = "pd/api/v1/store/%s"
 )
 
-// NewStoreCommand return a store subcommand of rootCmd
+// NewStoreCommand return a stores subcommand of rootCmd
 func NewStoreCommand() *cobra.Command {
 	s := &cobra.Command{
 		Use:   `store [delete|label|weight] <store_id> [--jq="<query string>"]`,

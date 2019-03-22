@@ -137,7 +137,7 @@ func (bc *BasicCluster) PutStore(store *core.StoreInfo) {
 	bc.Stores.SetStore(store)
 }
 
-// DeleteStore delete a store
+// DeleteStore deletes a store
 func (bc *BasicCluster) DeleteStore(store *core.StoreInfo) {
 	bc.Stores.DeleteStore(store)
 }

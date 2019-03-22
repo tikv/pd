@@ -554,7 +554,7 @@ func (s *StoresInfo) GetMetaStores() []*metapb.Store {
 	return stores
 }
 
-// DeleteStore remove tombstone record form store
+// DeleteStore deletes tombstone record form store
 func (s *StoresInfo) DeleteStore(store *StoreInfo) {
 	delete(s.stores, store.GetID())
 }
