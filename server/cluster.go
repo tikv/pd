@@ -557,7 +557,7 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
-// RemoveTombStoneRecords remove the tombStone Records.
+// RemoveTombStoneRecords removes the tombStone Records.
 func (c *RaftCluster) RemoveTombStoneRecords() error {
 	c.RLock()
 	defer c.RUnlock()
