@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"go.uber.org/zap"
 )
 
@@ -555,12 +555,8 @@ func (s *StoresInfo) GetMetaStores() []*metapb.Store {
 }
 
 // RemoveTombStoneRecords remove all the record of tombstone Records.
-func (s *StoresInfo) RemoveTombStoneRecords() {
-	for storeID, store := range s.stores {
-		if store.IsTombstone() {
-			delete(s.stores, storeID)
-		}
-	}
+func (s *StoresInfo) DeleteStore(store *StoreInfo) {
+	delete(s.stores, store.GetID())
 }
 
 // GetStoreCount returns the total count of storeInfo.
