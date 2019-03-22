@@ -332,7 +332,6 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 
-
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
