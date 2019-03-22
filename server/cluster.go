@@ -569,6 +569,9 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 			// the store has already been tombstone
 			err := cluster.deleteStore(store)
 			if err != nil {
+				log.Error("delete store failed",
+					zap.Stringer("store", store.GetMeta()),
+					zap.Error(err))
 				return err
 			}
 		}

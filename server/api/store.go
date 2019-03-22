@@ -193,7 +193,11 @@ func (h *storeHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cluster.RemoveTombStoneRecords()
+	err := cluster.RemoveTombStoneRecords()
+	if err != nil {
+		errorResp(h.rd, w, err)
+		return
+	}
 
 	h.rd.JSON(w, http.StatusOK, nil)
 }
