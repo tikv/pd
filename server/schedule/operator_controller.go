@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
+	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"go.uber.org/zap"
 )
@@ -41,6 +42,7 @@ type OperatorController struct {
 	hbStreams HeartbeatStreams
 	histories *list.List
 	counts    map[OperatorKind]uint64
+	opRecords *OperatorRecords
 }
 
 // NewOperatorController creates a OperatorController.
@@ -51,6 +53,7 @@ func NewOperatorController(cluster Cluster, hbStreams HeartbeatStreams) *Operato
 		hbStreams: hbStreams,
 		histories: list.New(),
 		counts:    make(map[OperatorKind]uint64),
+		opRecords: NewOperatorRecords(),
 	}
 }
 
@@ -69,10 +72,12 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo) {
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 			operatorDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 			oc.pushHistory(op)
+			oc.opRecords.Push(op, pdpb.GetOperatorResponse_SUCCESS)
 			oc.RemoveOperator(op)
 		} else if timeout {
 			log.Info("operator timeout", zap.Uint64("region-id", region.GetID()), zap.Reflect("operator", op))
 			oc.RemoveOperator(op)
+			oc.opRecords.Push(op, pdpb.GetOperatorResponse_TIMEOUT)
 		}
 	}
 }
@@ -85,6 +90,7 @@ func (oc *OperatorController) AddOperator(ops ...*Operator) bool {
 	for _, op := range ops {
 		if !oc.checkAddOperator(op) {
 			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
+			oc.opRecords.Push(op, pdpb.GetOperatorResponse_CANCEL)
 			return false
 		}
 	}
@@ -152,6 +158,12 @@ func (oc *OperatorController) RemoveOperator(op *Operator) {
 	oc.Lock()
 	defer oc.Unlock()
 	oc.removeOperatorLocked(op)
+}
+
+func (oc *OperatorController) GetOperatorStatus(id uint64) *OperatorRecord {
+	oc.Lock()
+	defer oc.Unlock()
+	return oc.opRecords.Get(id)
 }
 
 func (oc *OperatorController) removeOperatorLocked(op *Operator) {
@@ -406,4 +418,36 @@ func (oc *OperatorController) SetOperator(op *Operator) {
 	oc.Lock()
 	defer oc.Unlock()
 	oc.operators[op.RegionID()] = op
+}
+
+type OperatorRecord struct {
+	Op     *Operator
+	Status pdpb.GetOperatorResponse_OperatorStatus
+}
+
+type OperatorRecords struct {
+	ttl *cache.TTL
+}
+
+func NewOperatorRecords() *OperatorRecords {
+	return &OperatorRecords{
+		ttl: cache.NewTTL(time.Minute, 10*time.Minute),
+	}
+}
+
+func (o *OperatorRecords) Get(id uint64) *OperatorRecord {
+	v, exist := o.ttl.Get(id)
+	if !exist {
+		return nil
+	}
+	return v.(*OperatorRecord)
+}
+
+func (o *OperatorRecords) Push(op *Operator, status pdpb.GetOperatorResponse_OperatorStatus) {
+	id := op.regionID
+	record := &OperatorRecord{
+		Op:     op,
+		Status: status,
+	}
+	o.ttl.Put(id, record)
 }

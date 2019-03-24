@@ -166,6 +166,7 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 	return &pdpb.GetStoreResponse{
 		Header: s.header(),
 		Store:  store.GetMeta(),
+		Stats:  store.GetStoreStats(),
 	}, nil
 }
 
@@ -680,6 +681,33 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 	return &pdpb.UpdateGCSafePointResponse{
 		Header:       s.header(),
 		NewSafePoint: newSafePoint,
+	}, nil
+}
+
+func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &pdpb.GetOperatorResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	opController := cluster.coordinator.opController
+	requestID := request.GetRegionId()
+	r := opController.GetOperatorStatus(requestID)
+	if r == nil {
+		// Fix me: new error type
+		return &pdpb.GetOperatorResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	return &pdpb.GetOperatorResponse{
+		Header:   s.header(),
+		RegionId: requestID,
+		Desc:     []byte(r.Op.Desc()),
+		Kind:     []byte(r.Op.Kind().String()),
+		Status:   r.Status,
 	}, nil
 }
 
