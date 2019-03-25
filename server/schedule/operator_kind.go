@@ -24,40 +24,43 @@ type OperatorKind uint32
 
 // Flags for operators.
 const (
-	OpLeader    OperatorKind = 1 << iota // Include leader transfer.
-	OpRegion                             // Include peer movement.
-	OpAdmin                              // Initiated by admin.
-	OpHotRegion                          // Initiated by hot region scheduler.
-	OpAdjacent                           // Initiated by adjacent region scheduler.
-	OpReplica                            // Initiated by replica checkers.
-	OpBalance                            // Initiated by balancers.
-	OpMerge                              // Initiated by merge checkers or merge schedulers.
-	OpRange                              // Initiated by range scheduler.
+	OpLeader        OperatorKind = 1 << iota // Include leader transfer.
+	OpRegion                                 // Include peer movement.
+	OpAdmin                                  // Initiated by admin.
+	OpHotRegion                              // Initiated by hot region scheduler.
+	OpAdjacent                               // Initiated by adjacent region scheduler.
+	OpReplica                                // Initiated by replica checkers.
+	OpBalance                                // Initiated by balancers.
+	OpMerge                                  // Initiated by merge checkers or merge schedulers.
+	OpRange                                  // Initiated by range scheduler.
+	OpScatterRegion                          // Initiated by scatter region.
 	opMax
 )
 
 var flagToName = map[OperatorKind]string{
-	OpLeader:    "leader",
-	OpRegion:    "region",
-	OpAdmin:     "admin",
-	OpHotRegion: "hotRegion",
-	OpAdjacent:  "adjacent",
-	OpReplica:   "replica",
-	OpBalance:   "balance",
-	OpMerge:     "merge",
-	OpRange:     "range",
+	OpLeader:        "leader",
+	OpRegion:        "region",
+	OpAdmin:         "admin",
+	OpHotRegion:     "hot-region",
+	OpAdjacent:      "adjacent",
+	OpReplica:       "replica",
+	OpBalance:       "balance",
+	OpMerge:         "merge",
+	OpScatterRegion: "scatter-region",
+	OpRange:         "range",
 }
 
 var nameToFlag = map[string]OperatorKind{
-	"leader":    OpLeader,
-	"region":    OpRegion,
-	"admin":     OpAdmin,
-	"hotRegion": OpHotRegion,
-	"adjacent":  OpAdjacent,
-	"replica":   OpReplica,
-	"balance":   OpBalance,
-	"merge":     OpMerge,
-	"range":     OpRange,
+	"leader":         OpLeader,
+	"region":         OpRegion,
+	"admin":          OpAdmin,
+	"hot-region":     OpHotRegion,
+	"adjacent":       OpAdjacent,
+	"replica":        OpReplica,
+	"balance":        OpBalance,
+	"merge":          OpMerge,
+	"range":          OpRange,
+	"scatter-reigon": OpScatterRegion,
 }
 
 func (k OperatorKind) String() string {

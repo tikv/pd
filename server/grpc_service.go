@@ -698,8 +698,11 @@ func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorReque
 	requestID := request.GetRegionId()
 	r := opController.GetOperatorStatus(requestID)
 	if r == nil {
-		// Fix me: new error type
-		return &pdpb.GetOperatorResponse{Header: s.notBootstrappedHeader()}, nil
+		header := s.errorHeader(&pdpb.Error{
+			Type:    pdpb.ErrorType_REGION_NOT_FOUND,
+			Message: "not found",
+		})
+		return &pdpb.GetOperatorResponse{Header: header}, nil
 	}
 
 	return &pdpb.GetOperatorResponse{

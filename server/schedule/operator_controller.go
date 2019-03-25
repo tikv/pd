@@ -72,12 +72,12 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo) {
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 			operatorDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 			oc.pushHistory(op)
-			oc.opRecords.Push(op, pdpb.GetOperatorResponse_SUCCESS)
+			oc.opRecords.Push(op, pdpb.OperatorStatus_SUCCESS)
 			oc.RemoveOperator(op)
 		} else if timeout {
 			log.Info("operator timeout", zap.Uint64("region-id", region.GetID()), zap.Reflect("operator", op))
 			oc.RemoveOperator(op)
-			oc.opRecords.Push(op, pdpb.GetOperatorResponse_TIMEOUT)
+			oc.opRecords.Push(op, pdpb.OperatorStatus_TIMEOUT)
 		}
 	}
 }
@@ -90,7 +90,7 @@ func (oc *OperatorController) AddOperator(ops ...*Operator) bool {
 	for _, op := range ops {
 		if !oc.checkAddOperator(op) {
 			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
-			oc.opRecords.Push(op, pdpb.GetOperatorResponse_CANCEL)
+			oc.opRecords.Push(op, pdpb.OperatorStatus_CANCEL)
 			return false
 		}
 	}
@@ -137,6 +137,7 @@ func (oc *OperatorController) addOperatorLocked(op *Operator) bool {
 	if old, ok := oc.operators[regionID]; ok {
 		log.Info("replace old operator", zap.Uint64("region-id", regionID), zap.Reflect("operator", old))
 		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
+		oc.opRecords.Push(old, pdpb.OperatorStatus_REPLACE)
 		oc.removeOperatorLocked(old)
 	}
 
@@ -163,6 +164,12 @@ func (oc *OperatorController) RemoveOperator(op *Operator) {
 func (oc *OperatorController) GetOperatorStatus(id uint64) *OperatorRecord {
 	oc.Lock()
 	defer oc.Unlock()
+	if op, ok := oc.operators[id]; ok {
+		return &OperatorRecord{
+			Op:     op,
+			Status: pdpb.OperatorStatus_RUNNING,
+		}
+	}
 	return oc.opRecords.Get(id)
 }
 
@@ -422,7 +429,7 @@ func (oc *OperatorController) SetOperator(op *Operator) {
 
 type OperatorRecord struct {
 	Op     *Operator
-	Status pdpb.GetOperatorResponse_OperatorStatus
+	Status pdpb.OperatorStatus
 }
 
 type OperatorRecords struct {
@@ -443,7 +450,7 @@ func (o *OperatorRecords) Get(id uint64) *OperatorRecord {
 	return v.(*OperatorRecord)
 }
 
-func (o *OperatorRecords) Push(op *Operator, status pdpb.GetOperatorResponse_OperatorStatus) {
+func (o *OperatorRecords) Push(op *Operator, status pdpb.OperatorStatus) {
 	id := op.regionID
 	record := &OperatorRecord{
 		Op:     op,
