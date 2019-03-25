@@ -536,6 +536,9 @@ func (s *Server) SetScheduleConfig(cfg ScheduleConfig) error {
 	old := s.scheduleOpt.load()
 	s.scheduleOpt.store(&cfg)
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
+		s.scheduleOpt.store(old)
+		log.Error("schedule config updated failed",
+			zap.Error(err))
 		return err
 	}
 	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -557,6 +560,9 @@ func (s *Server) SetReplicationConfig(cfg ReplicationConfig) error {
 	old := s.scheduleOpt.rep.load()
 	s.scheduleOpt.rep.store(&cfg)
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
+		s.scheduleOpt.rep.store(old)
+		log.Error("replication config updated failed",
+			zap.Error(err))
 		return err
 	}
 	log.Info("replication config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -568,6 +574,9 @@ func (s *Server) SetPDServerConfig(cfg PDServerConfig) error {
 	old := s.scheduleOpt.loadPDServerConfig()
 	s.scheduleOpt.pdServerConfig.Store(&cfg)
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
+		s.scheduleOpt.pdServerConfig.Store(old)
+		log.Error("PDServer config updated failed",
+			zap.Error(err))
 		return err
 	}
 	log.Info("PD server config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -605,6 +614,10 @@ func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) error {
 		old := s.scheduleOpt.ns[name].load()
 		n.store(&cfg)
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
+			s.scheduleOpt.ns[name].store(old)
+			log.Error("namespace config updated failed",
+				zap.String("name", name),
+				zap.Error(err))
 			return err
 		}
 		log.Info("namespace config is updated", zap.String("name", name), zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -624,6 +637,10 @@ func (s *Server) DeleteNamespaceConfig(name string) error {
 		cfg := n.load()
 		delete(s.scheduleOpt.ns, name)
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
+			s.scheduleOpt.ns[name] = newNamespaceOption(cfg)
+			log.Error("namespace config deleted failed",
+				zap.String("name", name),
+				zap.Error(err))
 			return err
 		}
 		log.Info("namespace config is deleted", zap.String("name", name), zap.Reflect("config", *cfg))
@@ -636,6 +653,12 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 	s.scheduleOpt.SetLabelProperty(typ, labelKey, labelValue)
 	err := s.scheduleOpt.persist(s.kv)
 	if err != nil {
+		s.scheduleOpt.DeleteLabelProperty(typ, labelKey, labelValue)
+		log.Error("label property config updated failed",
+			zap.String("typ", typ),
+			zap.String("labelKey", labelKey),
+			zap.String("labelValue", labelValue),
+			zap.Error(err))
 		return err
 	}
 	log.Info("label property config is updated", zap.Reflect("config", s.scheduleOpt.loadLabelPropertyConfig()))
@@ -647,6 +670,12 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 	s.scheduleOpt.DeleteLabelProperty(typ, labelKey, labelValue)
 	err := s.scheduleOpt.persist(s.kv)
 	if err != nil {
+		s.scheduleOpt.SetLabelProperty(typ, labelKey, labelValue)
+		log.Error("label property config deleted failed",
+			zap.String("typ", typ),
+			zap.String("labelKey", labelKey),
+			zap.String("labelValue", labelValue),
+			zap.Error(err))
 		return err
 	}
 	log.Info("label property config is deleted", zap.Reflect("config", s.scheduleOpt.loadLabelPropertyConfig()))
@@ -664,9 +693,14 @@ func (s *Server) SetClusterVersion(v string) error {
 	if err != nil {
 		return err
 	}
+	old := s.scheduleOpt.loadClusterVersion()
 	s.scheduleOpt.SetClusterVersion(*version)
 	err = s.scheduleOpt.persist(s.kv)
 	if err != nil {
+		s.scheduleOpt.SetClusterVersion(old)
+		log.Error("cluster version set failed",
+			zap.String("version", v),
+			zap.Error(err))
 		return err
 	}
 	log.Info("cluster version is updated", zap.String("new-version", v))
