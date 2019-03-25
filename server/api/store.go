@@ -316,6 +316,22 @@ func newStoresHandler(svr *server.Server, rd *render.Render) *storesHandler {
 	}
 }
 
+func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) {
+	cluster := h.svr.GetRaftCluster()
+	if cluster == nil {
+		errorResp(h.rd, w, errcode.NewInternalErr(server.ErrNotBootstrapped))
+		return
+	}
+
+	err := cluster.RemoveTombStoneRecords()
+	if err != nil {
+		errorResp(h.rd, w, err)
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {

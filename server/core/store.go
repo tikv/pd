@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"go.uber.org/zap"
 )
 
@@ -552,6 +552,11 @@ func (s *StoresInfo) GetMetaStores() []*metapb.Store {
 		stores = append(stores, store.GetMeta())
 	}
 	return stores
+}
+
+// DeleteStore deletes tombstone record form store
+func (s *StoresInfo) DeleteStore(store *StoreInfo) {
+	delete(s.stores, store.GetID())
 }
 
 // GetStoreCount returns the total count of storeInfo.
