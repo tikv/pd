@@ -708,7 +708,7 @@ func (s *Server) SetClusterVersion(v string) error {
 	err = s.scheduleOpt.persist(s.kv)
 	if err != nil {
 		s.scheduleOpt.SetClusterVersion(old)
-		log.Error("cluster version set failed",
+		log.Error("cluster version updated failed",
 			zap.String("old-version", old.String()),
 			zap.String("new-version", v),
 			zap.Error(err))
