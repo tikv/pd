@@ -538,6 +538,8 @@ func (s *Server) SetScheduleConfig(cfg ScheduleConfig) error {
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
 		s.scheduleOpt.store(old)
 		log.Error("schedule config updated failed",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
 			zap.Error(err))
 		return err
 	}
@@ -562,6 +564,8 @@ func (s *Server) SetReplicationConfig(cfg ReplicationConfig) error {
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
 		s.scheduleOpt.rep.store(old)
 		log.Error("replication config updated failed",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
 			zap.Error(err))
 		return err
 	}
@@ -576,6 +580,8 @@ func (s *Server) SetPDServerConfig(cfg PDServerConfig) error {
 	if err := s.scheduleOpt.persist(s.kv); err != nil {
 		s.scheduleOpt.pdServerConfig.Store(old)
 		log.Error("PDServer config updated failed",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
 			zap.Error(err))
 		return err
 	}
@@ -617,6 +623,8 @@ func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) error {
 			s.scheduleOpt.ns[name].store(old)
 			log.Error("namespace config updated failed",
 				zap.String("name", name),
+				zap.Reflect("new", cfg),
+				zap.Reflect("old", old),
 				zap.Error(err))
 			return err
 		}
@@ -658,6 +666,7 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 			zap.String("typ", typ),
 			zap.String("labelKey", labelKey),
 			zap.String("labelValue", labelValue),
+			zap.Reflect("config", s.scheduleOpt.loadLabelPropertyConfig()),
 			zap.Error(err))
 		return err
 	}
@@ -675,6 +684,7 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 			zap.String("typ", typ),
 			zap.String("labelKey", labelKey),
 			zap.String("labelValue", labelValue),
+			zap.Reflect("config", s.scheduleOpt.loadLabelPropertyConfig()),
 			zap.Error(err))
 		return err
 	}
