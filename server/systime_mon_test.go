@@ -22,11 +22,11 @@ import (
 func TestSystimeMonitor(t *testing.T) {
 	var jumpForward int32
 
-	trigged := false
+	var trigged int32 = 0
 	go StartMonitor(
 		func() time.Time {
-			if !trigged {
-				trigged = true
+			if atomic.LoadInt32(&trigged) != 1 {
+				atomic.StoreInt32(&trigged, 1)
 				return time.Now()
 			}
 
