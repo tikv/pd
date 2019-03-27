@@ -632,6 +632,11 @@ func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) error {
 	} else {
 		s.scheduleOpt.ns[name] = newNamespaceOption(&cfg)
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
+			delete(s.scheduleOpt.ns, name)
+			log.Error("namespace config added failed",
+				zap.String("name", name),
+				zap.Reflect("new", cfg),
+				zap.Error(err))
 			return err
 		}
 		log.Info("namespace config is added", zap.String("name", name), zap.Reflect("new", cfg))
