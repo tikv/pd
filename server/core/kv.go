@@ -114,6 +114,11 @@ func (kv *KV) SaveStore(store *metapb.Store) error {
 	return saveProto(kv.KVBase, kv.storePath(store.GetId()), store)
 }
 
+// DeleteStore deletes one store from KV.
+func (kv *KV) DeleteStore(store *metapb.Store) error {
+	return kv.Delete(kv.storePath(store.GetId()))
+}
+
 // LoadRegion loads one regoin from KV.
 func (kv *KV) LoadRegion(regionID uint64, region *metapb.Region) (bool, error) {
 	if atomic.LoadInt32(&kv.useRegionKV) > 0 {

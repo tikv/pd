@@ -234,7 +234,7 @@ func (c *coordinator) stop() {
 	c.cancel()
 }
 
-// Hack to retrive info from scheduler.
+// Hack to retrieve info from scheduler.
 // TODO: remove it.
 type hasHotStatus interface {
 	GetHotReadStatus() *core.StoreHotRegionInfos
