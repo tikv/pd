@@ -630,3 +630,24 @@ func getIntersectionStores(a []*metapb.Peer, b []*metapb.Peer) map[uint64]struct
 
 	return intersection
 }
+
+// CheckOperatorValid checks if the operator is valid.
+func CheckOperatorValid(op *Operator) bool {
+	removeStores := []uint64{}
+	for _, step := range op.steps {
+		if tr, ok := step.(TransferLeader); ok {
+			for _, store := range removeStores {
+				if store == tr.FromStore {
+					return false
+				}
+				if store == tr.ToStore {
+					return false
+				}
+			}
+		}
+		if rp, ok := step.(RemovePeer); ok {
+			removeStores = append(removeStores, rp.FromStore)
+		}
+	}
+	return true
+}

@@ -96,6 +96,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
 
 	stores := r.collectAvailableStores(region)
 	var kind OperatorKind
+	newRegion := region.Clone()
 	for _, peer := range region.GetPeers() {
 		if len(stores) == 0 {
 			// Reset selected stores if we have no available stores.
@@ -116,13 +117,14 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
 		delete(stores, newPeer.GetStoreId())
 		r.selected.put(newPeer.GetStoreId())
 
-		op, err := CreateMovePeerOperator("scatter-peer", r.cluster, region, OpAdmin,
+		op, err := CreateMovePeerOperator("scatter-peer", r.cluster, newRegion, OpAdmin,
 			peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 		if err != nil {
 			continue
 		}
 		steps = append(steps, op.steps...)
-		steps = append(steps, TransferLeader{ToStore: newPeer.GetStoreId()})
+		newRegion = newRegion.Clone(core.WithRemoveStorePeer(peer.GetStoreId()), core.WithAddPeer(newPeer))
+
 		kind |= op.Kind()
 	}
 
