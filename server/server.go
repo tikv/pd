@@ -632,7 +632,7 @@ func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) error {
 	} else {
 		s.scheduleOpt.ns[name] = newNamespaceOption(&cfg)
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
-			delete(s.scheduleOpt.ns, name)
+			s.scheduleOpt.ns[name].store(&NamespaceConfig{})
 			log.Error("namespace config added failed",
 				zap.String("name", name),
 				zap.Reflect("new", cfg),
@@ -648,9 +648,9 @@ func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) error {
 func (s *Server) DeleteNamespaceConfig(name string) error {
 	if n, ok := s.scheduleOpt.ns[name]; ok {
 		cfg := n.load()
-		delete(s.scheduleOpt.ns, name)
+		s.scheduleOpt.ns[name].store(&NamespaceConfig{})
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
-			s.scheduleOpt.ns[name] = newNamespaceOption(cfg)
+			s.scheduleOpt.ns[name].store(cfg)
 			log.Error("namespace config deleted failed",
 				zap.String("name", name),
 				zap.Error(err))
