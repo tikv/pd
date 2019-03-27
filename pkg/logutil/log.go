@@ -22,11 +22,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/coreos/etcd/raft"
 	"github.com/coreos/pkg/capnslog"
 	zaplog "github.com/pingcap/log"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"go.etcd.io/etcd/raft"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc/grpclog"

@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -28,6 +27,7 @@ import (
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
