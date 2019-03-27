@@ -22,11 +22,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/etcd/embed"
 	"github.com/pingcap/check"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/tempurl"
 	"github.com/pingcap/pd/pkg/typeutil"
+	"go.etcd.io/etcd/embed"
 
 	// Register namespace classifiers.
 	_ "github.com/pingcap/pd/table"
