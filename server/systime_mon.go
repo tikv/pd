@@ -28,8 +28,11 @@ func StartMonitor(now func() time.Time, systimeErrHandler func()) {
 	for {
 		last := now().UnixNano()
 		<-tick.C
-		if now().UnixNano() < last {
-			log.Error("system time jump backward", zap.Int64("last", last))
+		now := now().UnixNano()
+		if now < last {
+			log.Error("system time jump backward",
+				zap.Int64("last", last),
+				zap.Int64("now", now))
 			systimeErrHandler()
 		}
 	}
