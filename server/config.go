@@ -25,8 +25,6 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/coreos/etcd/embed"
-	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/metricutil"
@@ -34,6 +32,8 @@ import (
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
+	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
 )
 
@@ -832,9 +832,8 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.PeerTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.PeerTLSInfo.CertFile = c.Security.CertPath
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
-	// TODO: update etcd
-	// cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logSyncer)
-	// cfg.Logger = "zap"
+	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
+	cfg.Logger = "zap"
 	var err error
 
 	cfg.LPUrls, err = ParseUrls(c.PeerUrls)
