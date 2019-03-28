@@ -1,5 +1,8 @@
 # PD Change Log
 
+## v2.1.7
+- Fix the issue that the transferring leader step cannot be created in the balance-region when the number of replicas is one [#1462](https://github.com/pingcap/pd/pull/1462)
+
 ## v2.1.5
 - Provide the `ExcludeTombstoneStores` option in the `GetAllStores` interface to remove the Tombstone store from the returned result [#1444](https://github.com/pingcap/pd/pull/1444)
 
@@ -10,14 +13,14 @@
 - Fix the Region information update issue about Region merge [#1377](https://github.com/pingcap/pd/pull/1377)
 
 ## v2.1.1
-- Fix the issue that some configuration items cannot be set to `0` in the configuration file [#1334](https://github.com/pingcap/pd/pull/1334) 
+- Fix the issue that some configuration items cannot be set to `0` in the configuration file [#1334](https://github.com/pingcap/pd/pull/1334)
 - Check the undefined configuration when starting PD [#1362](https://github.com/pingcap/pd/pull/1362)
 - Avoid transferring the leader to a newly created peer, to optimize the possible delay [#1339](https://github.com/pingcap/pd/pull/1339)
-- Fix the issue that `RaftCluster` cannot stop caused by deadlock [#1370](https://github.com/pingcap/pd/pull/1370) 
+- Fix the issue that `RaftCluster` cannot stop caused by deadlock [#1370](https://github.com/pingcap/pd/pull/1370)
 
 ## v2.1.0
 + Optimize availability
-    - Introduce the version control mechanism and support rolling update of the cluster compatibly 
+    - Introduce the version control mechanism and support rolling update of the cluster compatibly
     - [Enable `Raft PreVote`](https://github.com/pingcap/pd/blob/5c7b18cf3af91098f07cf46df0b59fbf8c7c5462/conf/config.toml#L22) among PD nodes to avoid leader reelection when network recovers after network isolation
     - Enable `raft learner` by default to lower the risk of unavailable data caused by machine failure during scheduling
     - TSO allocation is no longer affected by the system clock going backwards
@@ -32,7 +35,7 @@
     - [Add more commands to control the scheduling policy](https://pingcap.com/docs/tools/pd-control/#config-show--set-option-value)
     - Improve [PD simulator](https://github.com/pingcap/pd/tree/release-2.1/tools/pd-simulator) to simulate the scheduling scenarios
 
-+ API and operation tools 
++ API and operation tools
     - Add the [`GetPrevRegion` interface](https://github.com/pingcap/kvproto/blob/8e3f33ac49297d7c93b61a955531191084a2f685/proto/pdpb.proto#L40) to support the `TiDB reverse scan` feature
     - Add the [`BatchSplitRegion` interface](https://github.com/pingcap/kvproto/blob/8e3f33ac49297d7c93b61a955531191084a2f685/proto/pdpb.proto#L54) to speed up TiKV Region splitting
     - Add the [`GCSafePoint` interface](https://github.com/pingcap/kvproto/blob/8e3f33ac49297d7c93b61a955531191084a2f685/proto/pdpb.proto#L64-L66) to support distributed GC in TiDB
@@ -122,7 +125,7 @@
 * Enable Raft PreVote between PD nodes to avoid leader reelection when network recovers after network isolation
 * Optimize the issue that Balance Scheduler schedules small Regions frequently
 * Optimize the hotspot scheduler to improve its adaptability in traffic statistics information jitters
-* Skip the Regions with a large number of rows when scheduling `region merge` 
+* Skip the Regions with a large number of rows when scheduling `region merge`
 * Enable `raft learner` by default to lower the risk of unavailable data caused by machine failure during scheduling
 * Remove `max-replica` from `pd-recover`
 * Add `Filter` metrics
@@ -131,7 +134,7 @@
 * Fix the issue that TiKV disk space is used up caused by replica migration in some scenarios
 ### Compatibility notes
 * Do not support rolling back to v2.0.x or earlier due to update of the new version storage engine
-* Enable `raft learner` by default in the new version of PD. If the cluster is upgraded from 1.x to 2.1, the machine should be stopped before upgrade or a rolling update should be first applied to TiKV and then PD 
+* Enable `raft learner` by default in the new version of PD. If the cluster is upgraded from 1.x to 2.1, the machine should be stopped before upgrade or a rolling update should be first applied to TiKV and then PD
 
 ## v2.0.4
 ### Improvement
