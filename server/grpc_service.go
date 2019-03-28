@@ -83,13 +83,13 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
 
-		if response == nil{
+		if response == nil {
 			response = &pdpb.TsoResponse{
 				Header:    s.header(),
 				Timestamp: &ts,
 				Count:     count,
 			}
-		}else{
+		} else {
 			response.Header = s.header()
 			response.Timestamp = &ts
 			response.Count = count
