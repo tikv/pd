@@ -66,7 +66,7 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 // Tso implements gRPC PDServer.
 func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 	response := &pdpb.TsoResponse{
-		Header:    &pdpb.ResponseHeader{},
+		Header:  s.header(),
 		Timestamp: &pdpb.Timestamp{},
 	}
 	var request *pdpb.TsoRequest
@@ -88,7 +88,6 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
-		response.Header = s.header()
 
 		if err = stream.Send(response); err != nil {
 			return errors.WithStack(err)
