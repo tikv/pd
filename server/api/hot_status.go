@@ -52,7 +52,7 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 	bytesWriteStats := h.GetHotBytesWriteStores()
 	bytesReadStats := h.GetHotBytesReadStores()
 	keysWriteStats := h.GetHotKeysWriteStores()
-	keysReadStats := h.GetHotKeysWriteStores()
+	keysReadStats := h.GetHotKeysReadStores()
 
 	stats := HotStoreStats{
 		BytesWriteStats: bytesWriteStats,
