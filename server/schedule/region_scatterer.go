@@ -131,7 +131,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
 }
 
 func (r *RegionScatterer) createOperator(origin *core.RegionInfo, replacedPeers, targetPeers []*metapb.Peer) *Operator {
-	// random pick a leader
+	// Randomly pick a leader
 	i := rand.Intn(len(targetPeers))
 	targetLeaderPeer := targetPeers[i]
 
@@ -139,8 +139,8 @@ func (r *RegionScatterer) createOperator(origin *core.RegionInfo, replacedPeers,
 	steps := make([]OperatorStep, 0, len(targetPeers)*2+1)
 	deferSteps := make([]OperatorStep, 0, 2)
 	var kind OperatorKind
-	// no need to do anything
 	sameLeader := targetLeaderPeer.GetStoreId() == origin.GetLeader().GetStoreId()
+	// No need to do anything
 	if sameLeader {
 		isSame := true
 		for _, peer := range targetPeers {
@@ -154,11 +154,11 @@ func (r *RegionScatterer) createOperator(origin *core.RegionInfo, replacedPeers,
 		}
 	}
 
-	// create first step
+	// Creates the first step
 	if _, ok := storeIDs[targetLeaderPeer.GetStoreId()]; !ok {
 		st := CreateAddPeerSteps(targetLeaderPeer.GetStoreId(), targetLeaderPeer.GetId(), r.cluster.IsRaftLearnerEnabled())
 		steps = append(steps, st...)
-		// do not transfer leader to newly added peer
+		// Do not transfer leader to the newly added peer
 		deferSteps = append(deferSteps, TransferLeader{FromStore: origin.GetLeader().GetStoreId(), ToStore: targetLeaderPeer.GetStoreId()})
 		deferSteps = append(deferSteps, RemovePeer{FromStore: replacedPeers[i].GetStoreId()})
 		kind |= OpLeader
@@ -170,7 +170,7 @@ func (r *RegionScatterer) createOperator(origin *core.RegionInfo, replacedPeers,
 		}
 	}
 
-	// for the other steps
+	// For the other steps
 	for j, peer := range targetPeers {
 		if peer.GetId() == targetLeaderPeer.GetId() {
 			continue
