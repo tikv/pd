@@ -436,10 +436,10 @@ func CreateRemovePeerOperator(desc string, cluster Cluster, kind OperatorKind, r
 	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), removeKind|kind, steps...), nil
 }
 
-// CreateMovePeerOperator creates an OperatorStep list that add a new Peer.
-func CreateAddPeerSteps(newStore uint64, peerID uint64, isRaftLearnerEnabled bool) []OperatorStep {
+// CreateAddPeerSteps creates an OperatorStep list that add a new Peer.
+func CreateAddPeerSteps(newStore uint64, peerID uint64, cluster Cluster) []OperatorStep {
 	var st []OperatorStep
-	if isRaftLearnerEnabled {
+	if cluster.IsRaftLearnerEnabled() {
 		st = []OperatorStep{
 			AddLearner{ToStore: newStore, PeerID: peerID},
 			PromoteLearner{ToStore: newStore, PeerID: peerID},
@@ -458,7 +458,7 @@ func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInf
 	if err != nil {
 		return nil, err
 	}
-	st := CreateAddPeerSteps(newStore, peerID, cluster.IsRaftLearnerEnabled())
+	st := CreateAddPeerSteps(newStore, peerID, cluster)
 	steps = append(st, steps...)
 	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), removeKind|kind|OpRegion, steps...), nil
 }

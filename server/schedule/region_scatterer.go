@@ -156,7 +156,7 @@ func (r *RegionScatterer) createOperator(origin *core.RegionInfo, replacedPeers,
 
 	// Creates the first step
 	if _, ok := storeIDs[targetLeaderPeer.GetStoreId()]; !ok {
-		st := CreateAddPeerSteps(targetLeaderPeer.GetStoreId(), targetLeaderPeer.GetId(), r.cluster.IsRaftLearnerEnabled())
+		st := CreateAddPeerSteps(targetLeaderPeer.GetStoreId(), targetLeaderPeer.GetId(), r.cluster)
 		steps = append(steps, st...)
 		// Do not transfer leader to the newly added peer
 		deferSteps = append(deferSteps, TransferLeader{FromStore: origin.GetLeader().GetStoreId(), ToStore: targetLeaderPeer.GetStoreId()})
@@ -179,13 +179,13 @@ func (r *RegionScatterer) createOperator(origin *core.RegionInfo, replacedPeers,
 			continue
 		}
 		if replacedPeers[j].GetStoreId() == origin.GetLeader().GetStoreId() {
-			st := CreateAddPeerSteps(peer.GetStoreId(), peer.GetId(), r.cluster.IsRaftLearnerEnabled())
+			st := CreateAddPeerSteps(peer.GetStoreId(), peer.GetId(), r.cluster)
 			st = append(st, RemovePeer{FromStore: replacedPeers[j].GetStoreId()})
 			deferSteps = append(deferSteps, st...)
 			kind |= OpRegion | OpLeader
 			continue
 		}
-		st := CreateAddPeerSteps(peer.GetStoreId(), peer.GetId(), r.cluster.IsRaftLearnerEnabled())
+		st := CreateAddPeerSteps(peer.GetStoreId(), peer.GetId(), r.cluster)
 		steps = append(steps, st...)
 		steps = append(steps, RemovePeer{FromStore: replacedPeers[j].GetStoreId()})
 		kind |= OpRegion
