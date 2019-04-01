@@ -602,10 +602,15 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		}
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
 	}
+
 	cluster.RLock()
 	defer cluster.RUnlock()
 	co := cluster.coordinator
-	if op := co.regionScatterer.Scatter(region); op != nil {
+	op, err := co.regionScatterer.Scatter(region)
+	if err != nil {
+		return nil, err
+	}
+	if op != nil {
 		co.opController.AddOperator(op)
 	}
 

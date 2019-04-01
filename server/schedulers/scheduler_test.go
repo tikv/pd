@@ -202,7 +202,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
 		fmt.Printf("scatter region: %+v\n", region.GetMeta())
-		if op := scatterer.Scatter(region); op != nil {
+		if op, _ := scatterer.Scatter(region); op != nil {
 			fmt.Printf("got scatter operator: %s\n", op)
 			s.checkOperator(op, c)
 			tc.ApplyOperator(op)

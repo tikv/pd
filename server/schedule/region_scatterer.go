@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pkg/errors"
 )
 
 type selectedStores struct {
@@ -79,24 +80,28 @@ func NewRegionScatterer(cluster Cluster, classifier namespace.Classifier) *Regio
 }
 
 // Scatter relocates the region.
-func (r *RegionScatterer) Scatter(region *core.RegionInfo) *Operator {
+func (r *RegionScatterer) Scatter(region *core.RegionInfo) (*Operator, error) {
 	if r.cluster.IsRegionHot(region.GetID()) {
-		return nil
+		return nil, errors.Errorf("region %d is a hot region", region.GetID())
 	}
 
 	if len(region.GetPeers()) != r.cluster.GetMaxReplicas() {
-		return nil
+		return nil, errors.Errorf("the number replicas of region %d is not expected", region.GetID())
 	}
 
-	return r.scatterRegion(region)
+	if region.GetLeader() == nil {
+		return nil, errors.Errorf("region %d has no leader", region.GetID())
+	}
+
+	return r.scatterRegion(region), nil
 }
 
 func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
-	steps := make([]OperatorStep, 0, len(region.GetPeers()))
-
 	stores := r.collectAvailableStores(region)
-	var kind OperatorKind
-	newRegion := region.Clone()
+	var (
+		targetPeers   []*metapb.Peer
+		replacedPeers []*metapb.Peer
+	)
 	for _, peer := range region.GetPeers() {
 		if len(stores) == 0 {
 			// Reset selected stores if we have no available stores.
@@ -106,32 +111,90 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
 
 		if r.selected.put(peer.GetStoreId()) {
 			delete(stores, peer.GetStoreId())
+			targetPeers = append(targetPeers, peer)
+			replacedPeers = append(replacedPeers, peer)
 			continue
 		}
 		newPeer := r.selectPeerToReplace(stores, region, peer)
 		if newPeer == nil {
+			targetPeers = append(targetPeers, peer)
+			replacedPeers = append(replacedPeers, peer)
 			continue
 		}
-
 		// Remove it from stores and mark it as selected.
 		delete(stores, newPeer.GetStoreId())
 		r.selected.put(newPeer.GetStoreId())
+		targetPeers = append(targetPeers, newPeer)
+		replacedPeers = append(replacedPeers, peer)
+	}
+	return r.createOperator(region, replacedPeers, targetPeers)
+}
 
-		op, err := CreateMovePeerOperator("scatter-peer", r.cluster, newRegion, OpAdmin,
-			peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
-		if err != nil {
+func (r *RegionScatterer) createOperator(origin *core.RegionInfo, replacedPeers, targetPeers []*metapb.Peer) *Operator {
+	// random pick a leader
+	i := rand.Intn(len(targetPeers))
+	targetLeaderPeer := targetPeers[i]
+
+	storeIDs := origin.GetStoreIds()
+	steps := make([]OperatorStep, 0, len(targetPeers)*2+1)
+	deferSteps := make([]OperatorStep, 0, 2)
+	var kind OperatorKind
+	// no need to do anything
+	sameLeader := targetLeaderPeer.GetStoreId() == origin.GetLeader().GetStoreId()
+	if sameLeader {
+		isSame := true
+		for _, peer := range targetPeers {
+			if _, ok := storeIDs[peer.GetStoreId()]; !ok {
+				isSame = false
+				break
+			}
+		}
+		if isSame {
+			return nil
+		}
+	}
+
+	// create first step
+	if _, ok := storeIDs[targetLeaderPeer.GetStoreId()]; !ok {
+		st := CreateAddPeerSteps(targetLeaderPeer.GetStoreId(), targetLeaderPeer.GetId(), r.cluster.IsRaftLearnerEnabled())
+		steps = append(steps, st...)
+		// do not transfer leader to newly added peer
+		deferSteps = append(deferSteps, TransferLeader{FromStore: origin.GetLeader().GetStoreId(), ToStore: targetLeaderPeer.GetStoreId()})
+		deferSteps = append(deferSteps, RemovePeer{FromStore: replacedPeers[i].GetStoreId()})
+		kind |= OpLeader
+		kind |= OpRegion
+	} else {
+		if !sameLeader {
+			steps = append(steps, TransferLeader{FromStore: origin.GetLeader().GetStoreId(), ToStore: targetLeaderPeer.GetStoreId()})
+			kind |= OpLeader
+		}
+	}
+
+	// for the other steps
+	for j, peer := range targetPeers {
+		if peer.GetId() == targetLeaderPeer.GetId() {
 			continue
 		}
-		steps = append(steps, op.steps...)
-		newRegion = newRegion.Clone(core.WithRemoveStorePeer(peer.GetStoreId()), core.WithAddPeer(newPeer))
-
-		kind |= op.Kind()
+		if _, ok := storeIDs[peer.GetStoreId()]; ok {
+			continue
+		}
+		if replacedPeers[j].GetStoreId() == origin.GetLeader().GetStoreId() {
+			st := CreateAddPeerSteps(peer.GetStoreId(), peer.GetId(), r.cluster.IsRaftLearnerEnabled())
+			st = append(st, RemovePeer{FromStore: replacedPeers[j].GetStoreId()})
+			deferSteps = append(deferSteps, st...)
+			kind |= OpRegion | OpLeader
+			continue
+		}
+		st := CreateAddPeerSteps(peer.GetStoreId(), peer.GetId(), r.cluster.IsRaftLearnerEnabled())
+		steps = append(steps, st...)
+		steps = append(steps, RemovePeer{FromStore: replacedPeers[j].GetStoreId()})
+		kind |= OpRegion
 	}
 
-	if len(steps) == 0 {
-		return nil
-	}
-	return NewOperator("scatter-region", region.GetID(), region.GetRegionEpoch(), kind, steps...)
+	steps = append(steps, deferSteps...)
+	op := NewOperator("scatter-region", origin.GetID(), origin.GetRegionEpoch(), kind, steps...)
+	op.SetPriorityLevel(core.HighPriority)
+	return op
 }
 
 func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {

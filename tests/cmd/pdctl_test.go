@@ -1041,6 +1041,7 @@ func (s *cmdTestSuite) TestOperator(c *C) {
 	args = []string{"-u", pdAddr, "operator", "show", "region"}
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "scatter-region"), IsTrue)
 }
 
 func (s *cmdTestSuite) TestMember(c *C) {
