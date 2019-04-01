@@ -1136,11 +1136,17 @@ func (s *cmdTestSuite) TestHot(c *C) {
 
 	ss, err := leaderServer.GetStore(1)
 	c.Assert(err, IsNil)
-	bytesWritten := uint64(8 * 1024 * 1024)
 	now := time.Now().Second()
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - 10), EndTimestamp: uint64(now)}
 	newStats := proto.Clone(ss.GetStoreStats()).(*pdpb.StoreStats)
+	bytesWritten := uint64(8 * 1024 * 1024)
+	bytesRead := uint64(16 * 1024 * 1024)
+	keysWritten := uint64(2000)
+	keysRead := uint64(4000)
 	newStats.BytesWritten = bytesWritten
+	newStats.BytesRead = bytesRead
+	newStats.KeysWritten = keysWritten
+	newStats.KeysRead = keysRead
 	newStats.Interval = interval
 	newStore := ss.Clone(core.SetStoreStats(newStats))
 	newStore.GetRollingStoreStats().Observe(newStore.GetStoreStats())
@@ -1163,6 +1169,9 @@ func (s *cmdTestSuite) TestHot(c *C) {
 	hotStores := api.HotStoreStats{}
 	c.Assert(json.Unmarshal(output, &hotStores), IsNil)
 	c.Assert(hotStores.BytesWriteStats[1], Equals, bytesWritten/10)
+	c.Assert(hotStores.BytesReadStats[1], Equals, bytesRead/10)
+	c.Assert(hotStores.KeysWriteStats[1], Equals, keysWritten/10)
+	c.Assert(hotStores.KeysReadStats[1], Equals, keysRead/10)
 }
 
 func initCommand() *cobra.Command {

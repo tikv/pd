@@ -329,7 +329,7 @@ func (mc *MockCluster) UpdateStorageWrittenBytes(storeID uint64, bytesWritten ui
 func (mc *MockCluster) UpdateStorageReadBytes(storeID uint64, bytesRead uint64) {
 	store := mc.GetStore(storeID)
 	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
-	newStats.BytesWritten = bytesRead
+	newStats.BytesRead = bytesRead
 	now := time.Now().Second()
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - storeHeartBeatReportInterval), EndTimestamp: uint64(now)}
 	newStats.Interval = interval
