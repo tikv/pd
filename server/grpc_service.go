@@ -705,7 +705,7 @@ func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorReque
 	if r == nil {
 		header := s.errorHeader(&pdpb.Error{
 			Type:    pdpb.ErrorType_REGION_NOT_FOUND,
-			Message: "not found",
+			Message: "Not Found",
 		})
 		return &pdpb.GetOperatorResponse{Header: header}, nil
 	}
