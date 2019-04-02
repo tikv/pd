@@ -16,9 +16,9 @@ package server
 import (
 	"sync"
 
-	"github.com/coreos/etcd/clientv3"
 	log "github.com/pingcap/log"
 	"github.com/pkg/errors"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 

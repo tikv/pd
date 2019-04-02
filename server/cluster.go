@@ -557,6 +557,30 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
+// RemoveTombStoneRecords removes the tombStone Records.
+func (c *RaftCluster) RemoveTombStoneRecords() error {
+	c.RLock()
+	defer c.RUnlock()
+
+	cluster := c.cachedCluster
+
+	for _, store := range cluster.GetStores() {
+		if store.IsTombstone() {
+			// the store has already been tombstone
+			err := cluster.deleteStore(store)
+			if err != nil {
+				log.Error("delete store failed",
+					zap.Stringer("store", store.GetMeta()),
+					zap.Error(err))
+				return err
+			}
+			log.Info("delete store successed",
+				zap.Stringer("store", store.GetMeta()))
+		}
+	}
+	return nil
+}
+
 func (c *RaftCluster) checkOperators() {
 	opController := c.coordinator.opController
 	for _, op := range opController.GetOperators() {

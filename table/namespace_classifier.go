@@ -144,8 +144,7 @@ func (c *tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInf
 	c.RLock()
 	defer c.RUnlock()
 
-	isMeta := Key(regionInfo.GetStartKey()).IsMeta()
-	tableID := Key(regionInfo.GetStartKey()).TableID()
+	isMeta, tableID := Key(regionInfo.GetStartKey()).MetaOrTable()
 	if tableID == 0 && !isMeta {
 		return namespace.DefaultNamespace
 	}

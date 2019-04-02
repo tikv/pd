@@ -27,7 +27,7 @@ var (
 	storePrefix  = "pd/api/v1/store/%s"
 )
 
-// NewStoreCommand return a store subcommand of rootCmd
+// NewStoreCommand return a stores subcommand of rootCmd
 func NewStoreCommand() *cobra.Command {
 	s := &cobra.Command{
 		Use:   `store [delete|label|weight] <store_id> [--jq="<query string>"]`,
@@ -67,6 +67,25 @@ func NewSetStoreWeightCommand() *cobra.Command {
 		Use:   "weight <store_id> <leader_weight> <region_weight>",
 		Short: "set a store's leader and region balance weight",
 		Run:   setStoreWeightCommandFunc,
+	}
+}
+
+// NewStoresCommand returns a store subcommand of rootCmd
+func NewStoresCommand() *cobra.Command {
+	s := &cobra.Command{
+		Use:   `stores [remove-tombstone]`,
+		Short: "show the store status",
+	}
+	s.AddCommand(NewRemoveTombStoneCommand())
+	return s
+}
+
+// NewRemoveTombStoneCommand returns a tombstone subcommand of storesCmd.
+func NewRemoveTombStoneCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "remove-tombstone",
+		Short: "remove tombstone record if only safe",
+		Run:   removeTombStoneCommandFunc,
 	}
 }
 
@@ -142,4 +161,14 @@ func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {
 		"leader": leader,
 		"region": region,
 	})
+}
+
+func removeTombStoneCommandFunc(cmd *cobra.Command, args []string) {
+	prefix := fmt.Sprintf(path.Join(storePrefix, "remove-tombstone"), "")
+	_, err := doRequest(cmd, prefix, http.MethodDelete)
+	if err != nil {
+		cmd.Printf("Failed to remove tombstone store %s \n", err)
+		return
+	}
+	cmd.Println("Success!")
 }

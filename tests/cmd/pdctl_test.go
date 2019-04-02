@@ -215,6 +215,16 @@ func (s *cmdTestSuite) TestStore(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
+
+	args = []string{"-u", pdAddr, "stores", "remove-tombstone"}
+	_, _, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "store"}
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	storesInfo = new(api.StoresInfo)
+	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
+	c.Assert(len([]*api.StoreInfo{storeInfo}), Equals, 1)
 }
 
 func (s *cmdTestSuite) TestLabel(c *C) {
@@ -1031,7 +1041,7 @@ func (s *cmdTestSuite) TestOperator(c *C) {
 	args = []string{"-u", pdAddr, "operator", "show", "region"}
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "transfer leader from store 0 to store 3"), IsTrue)
+	c.Assert(strings.Contains(string(output), "scatter-region"), IsTrue)
 }
 
 func (s *cmdTestSuite) TestMember(c *C) {
@@ -1126,11 +1136,17 @@ func (s *cmdTestSuite) TestHot(c *C) {
 
 	ss, err := leaderServer.GetStore(1)
 	c.Assert(err, IsNil)
-	bytesWritten := uint64(8 * 1024 * 1024)
 	now := time.Now().Second()
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - 10), EndTimestamp: uint64(now)}
 	newStats := proto.Clone(ss.GetStoreStats()).(*pdpb.StoreStats)
+	bytesWritten := uint64(8 * 1024 * 1024)
+	bytesRead := uint64(16 * 1024 * 1024)
+	keysWritten := uint64(2000)
+	keysRead := uint64(4000)
 	newStats.BytesWritten = bytesWritten
+	newStats.BytesRead = bytesRead
+	newStats.KeysWritten = keysWritten
+	newStats.KeysRead = keysRead
 	newStats.Interval = interval
 	newStore := ss.Clone(core.SetStoreStats(newStats))
 	newStore.GetRollingStoreStats().Observe(newStore.GetStoreStats())
@@ -1153,6 +1169,9 @@ func (s *cmdTestSuite) TestHot(c *C) {
 	hotStores := api.HotStoreStats{}
 	c.Assert(json.Unmarshal(output, &hotStores), IsNil)
 	c.Assert(hotStores.BytesWriteStats[1], Equals, bytesWritten/10)
+	c.Assert(hotStores.BytesReadStats[1], Equals, bytesRead/10)
+	c.Assert(hotStores.KeysWriteStats[1], Equals, keysWritten/10)
+	c.Assert(hotStores.KeysReadStats[1], Equals, keysRead/10)
 }
 
 func initCommand() *cobra.Command {
@@ -1166,6 +1185,7 @@ func initCommand() *cobra.Command {
 		command.NewConfigCommand(),
 		command.NewRegionCommand(),
 		command.NewStoreCommand(),
+		command.NewStoresCommand(),
 		command.NewMemberCommand(),
 		command.NewExitCommand(),
 		command.NewLabelCommand(),
