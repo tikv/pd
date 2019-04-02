@@ -338,6 +338,9 @@ func (mc *MockCluster) ApplyOperator(op *Operator) {
 				if region.GetStorePeer(s.FromStore) == nil {
 					panic("Remove peer that doesn't exist")
 				}
+				if region.GetLeader().GetStoreId() == s.FromStore {
+					panic("Cannot remove the leader peer")
+				}
 				region = region.Clone(core.WithRemoveStorePeer(s.FromStore))
 			case AddLearner:
 				if region.GetStorePeer(s.ToStore) != nil {

@@ -429,12 +429,8 @@ func CreateRemovePeerOperator(desc string, cluster Cluster, kind OperatorKind, r
 	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), removeKind|kind, steps...), nil
 }
 
-// CreateMovePeerOperator creates an Operator that replaces an old peer with a new peer.
-func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OperatorKind, oldStore, newStore uint64, peerID uint64) (*Operator, error) {
-	removeKind, steps, err := removePeerSteps(cluster, region, oldStore, append(getRegionFollowerIDs(region), newStore))
-	if err != nil {
-		return nil, err
-	}
+// CreateAddPeerSteps creates an OperatorStep list that add a new Peer.
+func CreateAddPeerSteps(newStore uint64, peerID uint64, cluster Cluster) []OperatorStep {
 	var st []OperatorStep
 	if cluster.IsRaftLearnerEnabled() {
 		st = []OperatorStep{
@@ -446,6 +442,16 @@ func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInf
 			AddPeer{ToStore: newStore, PeerID: peerID},
 		}
 	}
+	return st
+}
+
+// CreateMovePeerOperator creates an Operator that replaces an old peer with a new peer.
+func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OperatorKind, oldStore, newStore uint64, peerID uint64) (*Operator, error) {
+	removeKind, steps, err := removePeerSteps(cluster, region, oldStore, append(getRegionFollowerIDs(region), newStore))
+	if err != nil {
+		return nil, err
+	}
+	st := CreateAddPeerSteps(newStore, peerID, cluster)
 	steps = append(st, steps...)
 	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), removeKind|kind|OpRegion, steps...), nil
 }
@@ -622,4 +628,25 @@ func getIntersectionStores(a []*metapb.Peer, b []*metapb.Peer) map[uint64]struct
 	}
 
 	return intersection
+}
+
+// CheckOperatorValid checks if the operator is valid.
+func CheckOperatorValid(op *Operator) bool {
+	removeStores := []uint64{}
+	for _, step := range op.steps {
+		if tr, ok := step.(TransferLeader); ok {
+			for _, store := range removeStores {
+				if store == tr.FromStore {
+					return false
+				}
+				if store == tr.ToStore {
+					return false
+				}
+			}
+		}
+		if rp, ok := step.(RemovePeer); ok {
+			removeStores = append(removeStores, rp.FromStore)
+		}
+	}
+	return true
 }

@@ -575,7 +575,11 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64) error {
 		return ErrRegionNotFound(regionID)
 	}
 
-	op := c.regionScatterer.Scatter(region)
+	op, err := c.regionScatterer.Scatter(region)
+	if err != nil {
+		return err
+	}
+
 	if op == nil {
 		return nil
 	}

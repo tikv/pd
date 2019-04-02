@@ -20,7 +20,6 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
-	log "github.com/sirupsen/logrus"
 )
 
 var _ = Suite(&testShuffleLeaderSuite{})
@@ -175,6 +174,10 @@ func (s *testScatterRegionSuite) TestFiveStores(c *C) {
 	s.scatter(c, 5, 5)
 }
 
+func (s *testScatterRegionSuite) checkOperator(op *schedule.Operator, c *C) {
+	c.Assert(schedule.CheckOperatorValid(op), IsTrue)
+}
+
 func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
@@ -185,7 +188,8 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 	}
 
 	// Add regions 1~4.
-	seq := newSequencer(numStores)
+	seq := newSequencer(3)
+	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
 	for i := uint64(1); i <= numRegions; i++ {
 		tc.AddLeaderRegion(i, seq.next(), seq.next(), seq.next())
 	}
@@ -194,8 +198,8 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
-		if op := scatterer.Scatter(region); op != nil {
-			log.Info(op)
+		if op, _ := scatterer.Scatter(region); op != nil {
+			s.checkOperator(op, c)
 			tc.ApplyOperator(op)
 		}
 	}
