@@ -72,12 +72,12 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo) {
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 			operatorDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 			oc.pushHistory(op)
-			oc.opRecords.Push(op, pdpb.OperatorStatus_SUCCESS)
+			oc.opRecords.Put(op, pdpb.OperatorStatus_SUCCESS)
 			oc.RemoveOperator(op)
 		} else if timeout {
 			log.Info("operator timeout", zap.Uint64("region-id", region.GetID()), zap.Reflect("operator", op))
 			oc.RemoveOperator(op)
-			oc.opRecords.Push(op, pdpb.OperatorStatus_TIMEOUT)
+			oc.opRecords.Put(op, pdpb.OperatorStatus_TIMEOUT)
 		}
 	}
 }
@@ -90,7 +90,7 @@ func (oc *OperatorController) AddOperator(ops ...*Operator) bool {
 	for _, op := range ops {
 		if !oc.checkAddOperator(op) {
 			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
-			oc.opRecords.Push(op, pdpb.OperatorStatus_CANCEL)
+			oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
 			return false
 		}
 	}
@@ -137,7 +137,7 @@ func (oc *OperatorController) addOperatorLocked(op *Operator) bool {
 	if old, ok := oc.operators[regionID]; ok {
 		log.Info("replace old operator", zap.Uint64("region-id", regionID), zap.Reflect("operator", old))
 		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
-		oc.opRecords.Push(old, pdpb.OperatorStatus_REPLACE)
+		oc.opRecords.Put(old, pdpb.OperatorStatus_REPLACE)
 		oc.removeOperatorLocked(old)
 	}
 
@@ -161,11 +161,12 @@ func (oc *OperatorController) RemoveOperator(op *Operator) {
 	oc.removeOperatorLocked(op)
 }
 
-func (oc *OperatorController) GetOperatorStatus(id uint64) *OperatorRecord {
+// GetOperatorStatus gets the operator and its status with the specify id.
+func (oc *OperatorController) GetOperatorStatus(id uint64) *OperatorWithStatus {
 	oc.Lock()
 	defer oc.Unlock()
 	if op, ok := oc.operators[id]; ok {
-		return &OperatorRecord{
+		return &OperatorWithStatus{
 			Op:     op,
 			Status: pdpb.OperatorStatus_RUNNING,
 		}
@@ -420,39 +421,44 @@ func (s StoreInfluence) ResourceSize(kind core.ResourceKind) int64 {
 	}
 }
 
-// SetOperator is only used for test
+// SetOperator is only used for test.
 func (oc *OperatorController) SetOperator(op *Operator) {
 	oc.Lock()
 	defer oc.Unlock()
 	oc.operators[op.RegionID()] = op
 }
 
-type OperatorRecord struct {
+// OperatorWithStatus records the operator and its status.
+type OperatorWithStatus struct {
 	Op     *Operator
 	Status pdpb.OperatorStatus
 }
 
+// OperatorRecords remains the operator and its status for a while.
 type OperatorRecords struct {
 	ttl *cache.TTL
 }
 
+// NewOperatorRecords returns a OperatorRecords.
 func NewOperatorRecords() *OperatorRecords {
 	return &OperatorRecords{
 		ttl: cache.NewTTL(time.Minute, 10*time.Minute),
 	}
 }
 
-func (o *OperatorRecords) Get(id uint64) *OperatorRecord {
+// Get gets the operator and its status.
+func (o *OperatorRecords) Get(id uint64) *OperatorWithStatus {
 	v, exist := o.ttl.Get(id)
 	if !exist {
 		return nil
 	}
-	return v.(*OperatorRecord)
+	return v.(*OperatorWithStatus)
 }
 
-func (o *OperatorRecords) Push(op *Operator, status pdpb.OperatorStatus) {
+// Put puts the operator and its status.
+func (o *OperatorRecords) Put(op *Operator, status pdpb.OperatorStatus) {
 	id := op.regionID
-	record := &OperatorRecord{
+	record := &OperatorWithStatus{
 		Op:     op,
 		Status: status,
 	}

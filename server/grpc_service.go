@@ -689,6 +689,7 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 	}, nil
 }
 
+// GetOperator gets information about the operator belonging to the speicfy region.
 func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
