@@ -183,7 +183,7 @@ func (oc *OperatorController) GetOperators() []*Operator {
 
 // SendScheduleCommand sends a command to the region.
 func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step OperatorStep) {
-	log.Info("send schedule command", zap.Uint64("region-id", region.GetID()), zap.Reflect("step", step))
+	log.Info("send schedule command", zap.Uint64("region-id", region.GetID()), zap.Stringer("step", step))
 	switch st := step.(type) {
 	case TransferLeader:
 		cmd := &pdpb.RegionHeartbeatResponse{
