@@ -564,7 +564,7 @@ const (
 	defaultHighSpaceRatio         = 0.6
 	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
 	// hot region.
-	defautHotRegionCacheHitsThreshold = 3
+	defaultHotRegionCacheHitsThreshold = 3
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -599,7 +599,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 		adjustUint64(&c.HotRegionScheduleLimit, defaultHotRegionScheduleLimit)
 	}
 	if !meta.IsDefined("hot-region-cache-hits-threshold") {
-		adjustUint64(&c.HotRegionCacheHitsThreshold, defautHotRegionCacheHitsThreshold)
+		adjustUint64(&c.HotRegionCacheHitsThreshold, defaultHotRegionCacheHitsThreshold)
 	}
 	if !meta.IsDefined("tolerant-size-ratio") {
 		adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
