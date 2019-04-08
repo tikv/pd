@@ -439,10 +439,12 @@ type OperatorRecords struct {
 	ttl *cache.TTL
 }
 
+const operatorStatusRemainTime = 10 * time.Minute
+
 // NewOperatorRecords returns a OperatorRecords.
 func NewOperatorRecords() *OperatorRecords {
 	return &OperatorRecords{
-		ttl: cache.NewTTL(time.Minute, 10*time.Minute),
+		ttl: cache.NewTTL(time.Minute, operatorStatusRemainTime),
 	}
 }
 

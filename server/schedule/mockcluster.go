@@ -411,7 +411,7 @@ func (mc *MockCluster) ApplyOperatorStep(region *core.RegionInfo, op *Operator) 
 			region = region.Clone(core.WithAddPeer(peer))
 		case PromoteLearner:
 			if region.GetStoreLearner(s.ToStore) == nil {
-				panic("promote peer that doesn't exist")
+				panic("Promote peer that doesn't exist")
 			}
 			peer := &metapb.Peer{
 				Id:      s.PeerID,
