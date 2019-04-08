@@ -824,6 +824,32 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	}
 }
 
+func (s *testScheduleControllerSuite) TestOperatorStatus(c *C) {
+	_, opt := newTestScheduleConfig()
+	tc := newTestClusterInfo(opt)
+	hbStreams := newHeartbeatStreams(tc.getClusterID())
+	defer hbStreams.Close()
+
+	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	tc.addLeaderStore(1, 2)
+	tc.addLeaderStore(2, 0)
+	tc.addLeaderRegion(1, 1, 2)
+	tc.addLeaderRegion(2, 1, 2)
+	steps := []schedule.OperatorStep{
+		schedule.RemovePeer{FromStore: 2},
+	}
+	op := schedule.NewOperator("testOperator", 1, &metapb.RegionEpoch{1, 1}, schedule.OpRegion, steps...)
+	region := tc.GetRegion(1)
+	co.addOperator(op)
+	c.Assert(co.GetOperatorStatus(1).Status, Equals, pdpb.OperatorStatus_RUNNING)
+	co.dispatch(region)
+	c.Assert(co.GetOperatorStatus(1).Status, Equals, pdpb.OperatorStatus_RUNNING)
+	// apply the operator
+	region = region.Clone(core.WithRemoveStorePeer(2))
+	co.dispatch(region)
+	c.Assert(co.GetOperatorStatus(1).Status, Equals, pdpb.OperatorStatus_SUCCESS)
+}
+
 func waitAddLearner(c *C, stream *mockHeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {

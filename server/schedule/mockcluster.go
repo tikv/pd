@@ -316,55 +316,61 @@ func (mc *MockCluster) newMockRegionInfo(regionID uint64, leaderID uint64, follo
 	return core.NewRegionInfo(region, leader)
 }
 
-// ApplyOperator mocks apply oeprator.
+// ApplyOperatorStep mocks apply operator step.
+func (mc *MockCluster) ApplyOperatorStep(region *core.RegionInfo, op *Operator) *core.RegionInfo {
+	if step := op.Check(region); step != nil {
+		switch s := step.(type) {
+		case TransferLeader:
+			region = region.Clone(core.WithLeader(region.GetStorePeer(s.ToStore)))
+		case AddPeer:
+			if region.GetStorePeer(s.ToStore) != nil {
+				panic("Add peer that exists")
+			}
+			peer := &metapb.Peer{
+				Id:      s.PeerID,
+				StoreId: s.ToStore,
+			}
+			region = region.Clone(core.WithAddPeer(peer))
+		case RemovePeer:
+			if region.GetStorePeer(s.FromStore) == nil {
+				panic("Remove peer that doesn't exist")
+			}
+			if region.GetLeader().GetStoreId() == s.FromStore {
+				panic("Cannot remove the leader peer")
+			}
+			region = region.Clone(core.WithRemoveStorePeer(s.FromStore))
+		case AddLearner:
+			if region.GetStorePeer(s.ToStore) != nil {
+				panic("Add learner that exists")
+			}
+			peer := &metapb.Peer{
+				Id:        s.PeerID,
+				StoreId:   s.ToStore,
+				IsLearner: true,
+			}
+			region = region.Clone(core.WithAddPeer(peer))
+		case PromoteLearner:
+			if region.GetStoreLearner(s.ToStore) == nil {
+				panic("Promote peer that doesn't exist")
+			}
+			peer := &metapb.Peer{
+				Id:      s.PeerID,
+				StoreId: s.ToStore,
+			}
+			region = region.Clone(core.WithRemoveStorePeer(s.ToStore), core.WithAddPeer(peer))
+		default:
+			panic("Unknown operator step")
+		}
+	}
+	return region
+}
+
+// ApplyOperator mocks apply operator.
 func (mc *MockCluster) ApplyOperator(op *Operator) {
 	origin := mc.GetRegion(op.RegionID())
 	region := origin
 	for !op.IsFinish() {
-		if step := op.Check(region); step != nil {
-			switch s := step.(type) {
-			case TransferLeader:
-				region = region.Clone(core.WithLeader(region.GetStorePeer(s.ToStore)))
-			case AddPeer:
-				if region.GetStorePeer(s.ToStore) != nil {
-					panic("Add peer that exists")
-				}
-				peer := &metapb.Peer{
-					Id:      s.PeerID,
-					StoreId: s.ToStore,
-				}
-				region = region.Clone(core.WithAddPeer(peer))
-			case RemovePeer:
-				if region.GetStorePeer(s.FromStore) == nil {
-					panic("Remove peer that doesn't exist")
-				}
-				if region.GetLeader().GetStoreId() == s.FromStore {
-					panic("Cannot remove the leader peer")
-				}
-				region = region.Clone(core.WithRemoveStorePeer(s.FromStore))
-			case AddLearner:
-				if region.GetStorePeer(s.ToStore) != nil {
-					panic("Add learner that exists")
-				}
-				peer := &metapb.Peer{
-					Id:        s.PeerID,
-					StoreId:   s.ToStore,
-					IsLearner: true,
-				}
-				region = region.Clone(core.WithAddPeer(peer))
-			case PromoteLearner:
-				if region.GetStoreLearner(s.ToStore) == nil {
-					panic("promote peer that doesn't exist")
-				}
-				peer := &metapb.Peer{
-					Id:      s.PeerID,
-					StoreId: s.ToStore,
-				}
-				region = region.Clone(core.WithRemoveStorePeer(s.ToStore), core.WithAddPeer(peer))
-			default:
-				panic("Unknown operator step")
-			}
-		}
+		region = mc.ApplyOperatorStep(region, op)
 	}
 	mc.PutRegion(region)
 	for id := range region.GetStoreIds() {

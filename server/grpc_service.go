@@ -168,6 +168,7 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 	return &pdpb.GetStoreResponse{
 		Header: s.header(),
 		Store:  store.Store,
+		Stats:  store.Stats,
 	}, nil
 }
 
@@ -662,6 +663,37 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 	return &pdpb.UpdateGCSafePointResponse{
 		Header:       s.header(),
 		NewSafePoint: newSafePoint,
+	}, nil
+}
+
+// GetOperator gets information about the operator belonging to the speicfy region.
+func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &pdpb.GetOperatorResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	co := cluster.coordinator
+	requestID := request.GetRegionId()
+	r := co.GetOperatorStatus(requestID)
+	if r == nil {
+		header := s.errorHeader(&pdpb.Error{
+			Type:    pdpb.ErrorType_REGION_NOT_FOUND,
+			Message: "Not Found",
+		})
+		return &pdpb.GetOperatorResponse{Header: header}, nil
+	}
+
+	return &pdpb.GetOperatorResponse{
+		Header:   s.header(),
+		RegionId: requestID,
+		Desc:     []byte(r.Op.Desc()),
+		Kind:     []byte(r.Op.Kind().String()),
+		Status:   r.Status,
 	}, nil
 }
 

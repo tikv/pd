@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/logutil"
+	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
@@ -67,6 +68,7 @@ type coordinator struct {
 	classifier       namespace.Classifier
 	histories        *list.List
 	hbStreams        *heartbeatStreams
+	opRecords        *OperatorRecords
 }
 
 func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
@@ -85,6 +87,7 @@ func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifie
 		classifier:       classifier,
 		histories:        list.New(),
 		hbStreams:        hbStreams,
+		opRecords:        NewOperatorRecords(),
 	}
 }
 
@@ -102,11 +105,13 @@ func (c *coordinator) dispatch(region *core.RegionInfo) {
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 			operatorDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 			c.pushHistory(op)
+			c.opRecords.Put(op, pdpb.OperatorStatus_SUCCESS)
 			c.removeOperator(op)
 		} else if timeout {
 			log.Infof("[region %v] operator timeout: %s", region.GetID(), op)
 			operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 			c.removeOperator(op)
+			c.opRecords.Put(op, pdpb.OperatorStatus_TIMEOUT)
 		}
 	}
 }
@@ -448,6 +453,7 @@ func (c *coordinator) addOperatorLocked(op *schedule.Operator) bool {
 	if old, ok := c.operators[regionID]; ok {
 		log.Infof("[region %v] replace old operator: %s", regionID, old)
 		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
+		c.opRecords.Put(old, pdpb.OperatorStatus_REPLACE)
 		c.removeOperatorLocked(old)
 	}
 
@@ -471,6 +477,7 @@ func (c *coordinator) addOperator(ops ...*schedule.Operator) bool {
 	for _, op := range ops {
 		if !c.checkAddOperator(op) {
 			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
+			c.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
 			return false
 		}
 	}
@@ -649,6 +656,19 @@ func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule
 	}
 }
 
+// GetOperatorStatus gets the operator and its status with the specify id.
+func (c *coordinator) GetOperatorStatus(id uint64) *OperatorWithStatus {
+	c.Lock()
+	defer c.Unlock()
+	if op, ok := c.operators[id]; ok {
+		return &OperatorWithStatus{
+			Op:     op,
+			Status: pdpb.OperatorStatus_RUNNING,
+		}
+	}
+	return c.opRecords.Get(id)
+}
+
 type scheduleController struct {
 	schedule.Scheduler
 	cluster      *clusterInfo
@@ -698,4 +718,43 @@ func (s *scheduleController) GetInterval() time.Duration {
 
 func (s *scheduleController) AllowSchedule() bool {
 	return s.Scheduler.IsScheduleAllowed(s.cluster)
+}
+
+// OperatorWithStatus records the operator and its status.
+type OperatorWithStatus struct {
+	Op     *schedule.Operator
+	Status pdpb.OperatorStatus
+}
+
+// OperatorRecords remains the operator and its status for a while.
+type OperatorRecords struct {
+	ttl *cache.TTL
+}
+
+const operatorStatusRemainTime = 10 * time.Minute
+
+// NewOperatorRecords returns a OperatorRecords.
+func NewOperatorRecords() *OperatorRecords {
+	return &OperatorRecords{
+		ttl: cache.NewTTL(time.Minute, operatorStatusRemainTime),
+	}
+}
+
+// Get gets the operator and its status.
+func (o *OperatorRecords) Get(id uint64) *OperatorWithStatus {
+	v, exist := o.ttl.Get(id)
+	if !exist {
+		return nil
+	}
+	return v.(*OperatorWithStatus)
+}
+
+// Put puts the operator and its status.
+func (o *OperatorRecords) Put(op *schedule.Operator, status pdpb.OperatorStatus) {
+	id := op.RegionID()
+	record := &OperatorWithStatus{
+		Op:     op,
+		Status: status,
+	}
+	o.ttl.Put(id, record)
 }
