@@ -333,8 +333,6 @@ func (h *Handler) GetHistory(start time.Time) ([]schedule.OperatorHistory, error
 	return c.opController.GetHistory(start), nil
 }
 
-var errAddOperator = errors.New("failed to add operator, maybe already have one")
-
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.
 func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) error {
 	c, err := h.getCoordinator()
@@ -354,7 +352,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: newLeader.GetStoreId()}
 	op := schedule.NewOperator("adminTransferLeader", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpLeader, step)
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }
@@ -409,7 +407,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 
 	op := schedule.NewOperator("adminMoveRegion", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }
@@ -449,7 +447,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return err
 	}
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }
@@ -506,7 +504,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 	}
 	op := schedule.NewOperator("adminAddPeer", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }
@@ -532,7 +530,7 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 	}
 	op := schedule.NewOperator("adminAddPeer", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }
@@ -558,7 +556,7 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 		return err
 	}
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }
@@ -625,7 +623,7 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policy string) error {
 	}
 	op := schedule.NewOperator("adminSplitRegion", regionID, region.GetRegionEpoch(), schedule.OpAdmin, step)
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }
@@ -642,12 +640,16 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64) error {
 		return ErrRegionNotFound(regionID)
 	}
 
-	op := c.regionScatterer.Scatter(region)
+	op, err := c.regionScatterer.Scatter(region)
+	if err != nil {
+		return err
+	}
+
 	if op == nil {
 		return nil
 	}
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }

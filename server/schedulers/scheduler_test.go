@@ -174,6 +174,10 @@ func (s *testScatterRegionSuite) TestFiveStores(c *C) {
 	s.scatter(c, 5, 5)
 }
 
+func (s *testScatterRegionSuite) checkOperator(op *schedule.Operator, c *C) {
+	c.Assert(schedule.CheckOperatorValid(op), IsTrue)
+}
+
 func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 	opt := schedule.NewMockSchedulerOptions()
 	tc := schedule.NewMockCluster(opt)
@@ -184,7 +188,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 	}
 
 	// Add regions 1~4.
-	seq := newSequencer(numStores)
+	seq := newSequencer(3)
 	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	for i := uint64(2); i <= numRegions; i++ {
@@ -195,7 +199,8 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
-		if op := scatterer.Scatter(region); op != nil {
+		if op, _ := scatterer.Scatter(region); op != nil {
+			s.checkOperator(op, c)
 			tc.ApplyOperator(op)
 		}
 	}

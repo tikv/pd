@@ -508,8 +508,7 @@ func (s *StoresInfo) TakeStore(storeID uint64) *StoreInfo {
 func (s *StoresInfo) SetStore(store *StoreInfo) {
 	s.stores[store.GetID()] = store
 	store.GetRollingStoreStats().Observe(store.GetStoreStats())
-	s.updateTotalBytesReadRate()
-	s.updateTotalBytesWriteRate()
+	s.updateTotalBytesRate()
 }
 
 // BlockStore blocks a StoreInfo with storeID.
@@ -611,29 +610,24 @@ func (s *StoresInfo) UpdateStoreStatusLocked(storeID uint64, leaderCount int, re
 	}
 }
 
-func (s *StoresInfo) updateTotalBytesWriteRate() {
+func (s *StoresInfo) updateTotalBytesRate() {
 	var totalBytesWirteRate float64
+	var totalBytesReadRate float64
+	var writeRate, readRate float64
 	for _, s := range s.stores {
 		if s.IsUp() {
-			totalBytesWirteRate += s.GetRollingStoreStats().GetBytesWriteRate()
+			writeRate, readRate = s.GetRollingStoreStats().GetBytesRate()
+			totalBytesWirteRate += writeRate
+			totalBytesReadRate += readRate
 		}
 	}
 	s.bytesWriteRate = totalBytesWirteRate
+	s.bytesReadRate = totalBytesReadRate
 }
 
 // TotalBytesWriteRate returns the total written bytes rate of all StoreInfo.
 func (s *StoresInfo) TotalBytesWriteRate() float64 {
 	return s.bytesWriteRate
-}
-
-func (s *StoresInfo) updateTotalBytesReadRate() {
-	var totalBytesReadRate float64
-	for _, s := range s.stores {
-		if s.IsUp() {
-			totalBytesReadRate += s.GetRollingStoreStats().GetBytesReadRate()
-		}
-	}
-	s.bytesReadRate = totalBytesReadRate
 }
 
 // TotalBytesReadRate returns the total read bytes rate of all StoreInfo.
@@ -645,7 +639,8 @@ func (s *StoresInfo) TotalBytesReadRate() float64 {
 func (s *StoresInfo) GetStoresBytesWriteStat() map[uint64]uint64 {
 	res := make(map[uint64]uint64, len(s.stores))
 	for _, s := range s.stores {
-		res[s.GetID()] = uint64(s.GetRollingStoreStats().GetBytesWriteRate())
+		writeRate, _ := s.GetRollingStoreStats().GetBytesRate()
+		res[s.GetID()] = uint64(writeRate)
 	}
 	return res
 }
@@ -654,7 +649,8 @@ func (s *StoresInfo) GetStoresBytesWriteStat() map[uint64]uint64 {
 func (s *StoresInfo) GetStoresBytesReadStat() map[uint64]uint64 {
 	res := make(map[uint64]uint64, len(s.stores))
 	for _, s := range s.stores {
-		res[s.GetID()] = uint64(s.GetRollingStoreStats().GetBytesReadRate())
+		_, readRate := s.GetRollingStoreStats().GetBytesRate()
+		res[s.GetID()] = uint64(readRate)
 	}
 	return res
 }
@@ -699,7 +695,8 @@ func newRollingStoreStats() *RollingStoreStats {
 
 // Observe records current statistics.
 func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
-	interval := stats.GetInterval().GetEndTimestamp() - stats.GetInterval().GetStartTimestamp()
+	statInterval := stats.GetInterval()
+	interval := statInterval.GetEndTimestamp() - statInterval.GetStartTimestamp()
 	if interval == 0 {
 		return
 	}
@@ -711,18 +708,11 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	r.keysReadRate.Add(float64(stats.KeysRead / interval))
 }
 
-// GetBytesWriteRate returns the bytes write rate.
-func (r *RollingStoreStats) GetBytesWriteRate() float64 {
+// GetBytesRate returns the bytes write rate and the bytes read rate.
+func (r *RollingStoreStats) GetBytesRate() (writeRate float64, readRate float64) {
 	r.RLock()
 	defer r.RUnlock()
-	return r.bytesWriteRate.Median()
-}
-
-// GetBytesReadRate returns the bytes read rate.
-func (r *RollingStoreStats) GetBytesReadRate() float64 {
-	r.RLock()
-	defer r.RUnlock()
-	return r.bytesReadRate.Median()
+	return r.bytesWriteRate.Median(), r.bytesReadRate.Median()
 }
 
 // GetKeysWriteRate returns the keys write rate.

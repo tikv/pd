@@ -121,8 +121,9 @@ func (s *testTableNamespaceSuite) TestTableNameSpaceGetRegionNamespace(c *C) {
 		if !t.endcoded {
 			startKey, endKey = EncodeBytes(startKey), EncodeBytes(endKey)
 		}
-		c.Assert(startKey.TableID(), Equals, t.tableID)
-		c.Assert(startKey.IsMeta(), Equals, t.isMeta)
+		isMeta, tableID := startKey.MetaOrTable()
+		c.Assert(tableID, Equals, t.tableID)
+		c.Assert(isMeta, Equals, t.isMeta)
 
 		region := core.NewRegionInfo(&metapb.Region{
 			StartKey: startKey,
