@@ -185,6 +185,8 @@ func (r *RaftEngine) NeedSplit(size, rows int64) bool {
 }
 
 func (r *RaftEngine) recordRegionChange(region *core.RegionInfo) {
+	r.Lock()
+	defer r.Unlock()
 	n := region.GetLeader().GetStoreId()
 	r.regionChange[n] = append(r.regionChange[n], region.GetID())
 }
