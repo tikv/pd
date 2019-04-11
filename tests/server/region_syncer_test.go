@@ -68,7 +68,7 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 		c.Assert(err, IsNil)
 	}
 	// ensure flush to region kv
-	time.Sleep(5 * time.Second)
+	time.Sleep(3 * time.Second)
 	err = leaderServer.Stop()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
@@ -113,7 +113,7 @@ func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 		c.Assert(err, IsNil)
 	}
 	// ensure flush to region kv
-	time.Sleep(5 * time.Second)
+	time.Sleep(3 * time.Second)
 	// restart pd1
 	err = leaderServer.Stop()
 	c.Assert(err, IsNil)
