@@ -75,6 +75,8 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 	c.Assert(err, IsNil)
 	s.regionHeartbeat, err = s.grpcPDClient.RegionHeartbeat(context.Background())
 	c.Assert(err, IsNil)
+	err = s.srv.SetReplicationConfig(server.ReplicationConfig{MaxReplicas: 1})
+	c.Assert(err, IsNil)
 }
 
 func (s *testClientSuite) TearDownSuite(c *C) {
@@ -328,4 +330,36 @@ func (s *testClientSuite) TestUpdateGCSafePoint(c *C) {
 	c.Assert(newSafePoint, Equals, uint64(math.MaxUint64))
 	c.Assert(err, IsNil)
 	s.checkGCSafePoint(c, math.MaxUint64)
+}
+
+func (s *testClientSuite) TestScatterRegion(c *C) {
+	regionID, _ := regionIDAllocator.Alloc()
+	region := &metapb.Region{
+		Id: regionID,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		Peers: []*metapb.Peer{peer},
+	}
+	req := &pdpb.RegionHeartbeatRequest{
+		Header: newHeader(s.srv),
+		Region: region,
+		Leader: peer,
+	}
+	err := s.regionHeartbeat.Send(req)
+	c.Assert(err, IsNil)
+	testutil.WaitUntil(c, func(c *C) bool {
+		err := s.client.ScatterRegion(context.Background(), regionID)
+		if c.Check(err, NotNil) {
+			return false
+		}
+		// no operator will create cause of the store number is 1.
+		resp, err := s.client.GetOperator(context.Background(), regionID)
+		if c.Check(err, NotNil) {
+			return false
+		}
+		return c.Check(resp.GetHeader().GetError().GetType(), DeepEquals, pdpb.ErrorType_REGION_NOT_FOUND)
+	})
+	c.Succeed()
 }
