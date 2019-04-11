@@ -143,7 +143,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, sto
 			schedule.TransferLeader{ToStore: destStoreID, FromStore: srcStoreID},
 			schedule.RemovePeer{FromStore: srcRegion.GetLeader().GetStoreId()},
 		}
-		return []*schedule.Operator{schedule.NewOperator("randomMoveHotRegion", srcRegion.GetID(), srcRegion.GetRegionEpoch(), schedule.OpRegion|schedule.OpLeader, st...)}
+		return []*schedule.Operator{schedule.NewOperator("random-move-hot-region", srcRegion.GetID(), srcRegion.GetRegionEpoch(), schedule.OpRegion|schedule.OpLeader, st...)}
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 	return nil

@@ -40,7 +40,7 @@ var flagToName = map[OperatorKind]string{
 	OpLeader:    "leader",
 	OpRegion:    "region",
 	OpAdmin:     "admin",
-	OpHotRegion: "hotRegion",
+	OpHotRegion: "hot-region",
 	OpAdjacent:  "adjacent",
 	OpReplica:   "replica",
 	OpBalance:   "balance",
@@ -49,15 +49,15 @@ var flagToName = map[OperatorKind]string{
 }
 
 var nameToFlag = map[string]OperatorKind{
-	"leader":    OpLeader,
-	"region":    OpRegion,
-	"admin":     OpAdmin,
-	"hotRegion": OpHotRegion,
-	"adjacent":  OpAdjacent,
-	"replica":   OpReplica,
-	"balance":   OpBalance,
-	"merge":     OpMerge,
-	"range":     OpRange,
+	"leader":     OpLeader,
+	"region":     OpRegion,
+	"admin":      OpAdmin,
+	"hot-region": OpHotRegion,
+	"adjacent":   OpAdjacent,
+	"replica":    OpReplica,
+	"balance":    OpBalance,
+	"merge":      OpMerge,
+	"range":      OpRange,
 }
 
 func (k OperatorKind) String() string {

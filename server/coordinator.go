@@ -141,7 +141,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 			ToStore: p.GetStoreId(),
 			PeerID:  p.GetId(),
 		}
-		op := schedule.NewOperator("promoteLearner", region.GetID(), region.GetRegionEpoch(), schedule.OpRegion, step)
+		op := schedule.NewOperator("promote-learner", region.GetID(), region.GetRegionEpoch(), schedule.OpRegion, step)
 		if opController.AddOperator(op) {
 			return true
 		}
