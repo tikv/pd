@@ -1,5 +1,11 @@
 # PD Change Log
 
+## v2.1.8
+- Fix the issue that `regionScatterer` might generate an invalid `OperatorStep` [#1482](https://github.com/pingcap/pd/pull/1482)
+- Fix the issue that a hot store makes incorrect statistics of keys [#1487](https://github.com/pingcap/pd/pull/1487)
+- Fix the issue that too short timeout of `MergeRegion` causes unfinished merge process [#1495](https://github.com/pingcap/pd/pull/1495)
+- Add the time metrics of the PD server handling TSO requests [#1502](https://github.com/pingcap/pd/pull/1502)
+
 ## v2.1.7
 - Fix the issue that the transferring leader step cannot be created in the balance-region when the number of replicas is one [#1462](https://github.com/pingcap/pd/pull/1462)
 
