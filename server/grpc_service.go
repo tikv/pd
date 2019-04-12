@@ -73,6 +73,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if err != nil {
 			return errors.WithStack(err)
 		}
+		start := time.Now()
 		if err = s.validateRequest(request.GetHeader()); err != nil {
 			return err
 		}
@@ -89,6 +90,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if err := stream.Send(response); err != nil {
 			return errors.WithStack(err)
 		}
+		tsoHandleDuration.Observe(time.Since(start).Seconds())
 	}
 }
 

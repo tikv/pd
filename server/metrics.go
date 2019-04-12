@@ -163,6 +163,15 @@ var (
 			Help:      "Bucketed histogram of time spend(s) of patrol checks region.",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 15),
 		})
+
+	tsoHandleDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "handle_tso_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled tso requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		})
 )
 
 func init() {
@@ -183,4 +192,5 @@ func init() {
 	prometheus.MustRegister(metadataGauge)
 	prometheus.MustRegister(etcdStateGauge)
 	prometheus.MustRegister(patrolCheckRegionsHistogram)
+	prometheus.MustRegister(tsoHandleDuration)
 }
