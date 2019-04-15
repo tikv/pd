@@ -759,6 +759,13 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 }
 
 func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.ScatterRegion", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDuration.WithLabelValues("scatter_region").Observe(time.Since(start).Seconds()) }()
+
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().ScatterRegion(ctx, &pdpb.ScatterRegionRequest{
 		Header:   c.requestHeader(),
@@ -775,6 +782,13 @@ func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
 }
 
 func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.GetOperator", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDuration.WithLabelValues("get_operator").Observe(time.Since(start).Seconds()) }()
+
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	defer cancel()
 	return c.leaderClient().GetOperator(ctx, &pdpb.GetOperatorRequest{
