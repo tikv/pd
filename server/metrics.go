@@ -162,6 +162,15 @@ var (
 			Name:      "status",
 			Help:      "Status of the scheduling configurations.",
 		}, []string{"type", "namespace"})
+
+	tsoHandleDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "handle_tso_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled tso requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		})
 )
 
 func init() {
@@ -182,4 +191,5 @@ func init() {
 	prometheus.MustRegister(patrolCheckRegionsHistogram)
 	prometheus.MustRegister(placementStatusGauge)
 	prometheus.MustRegister(configStatusGauge)
+	prometheus.MustRegister(tsoHandleDuration)
 }
