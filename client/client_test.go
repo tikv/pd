@@ -349,10 +349,9 @@ func (s *testClientSuite) TestGetStore(c *C) {
 
 	// Should not return tombstone stores.
 	stores, err = s.client.GetAllStores(context.Background(), WithExcludeTombstone())
+	c.Assert(err, IsNil)
 	for _, store := range stores {
-		if store.GetId() == tombstoneStore.GetId() {
-			c.Assert(store, Not(Equals), tombstoneStore)
-		}
+		c.Assert(store, Not(Equals), tombstoneStore)
 	}
 }
 
@@ -402,7 +401,6 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 		if c.Check(err, NotNil) {
 			return false
 		}
-		// no operator will create cause of the store number is 1.
 		resp, err := s.client.GetOperator(context.Background(), regionID)
 		if c.Check(err, NotNil) {
 			return false
