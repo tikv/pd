@@ -153,10 +153,10 @@ func NewClient(pdAddrs []string, security SecurityOption) (Client, error) {
 	}
 	c.connMu.clientConns = make(map[string]*grpc.ClientConn)
 
-	if err := c.initClusterID(); err != nil {
+	if err := c.initRetry(c.initClusterID); err != nil {
 		return nil, err
 	}
-	if err := c.updateLeader(); err != nil {
+	if err := c.initRetry(c.updateLeader); err != nil {
 		return nil, err
 	}
 	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
@@ -177,25 +177,31 @@ func (c *client) updateURLs(members []*pdpb.Member) {
 	c.urls = urls
 }
 
+func (c *client) initRetry(f func() error) error {
+	var err error
+	for i := 0; i < maxInitClusterRetries; i++ {
+		if err = f(); err == nil {
+			return nil
+		}
+		time.Sleep(time.Second)
+	}
+	return errors.WithStack(err)
+}
+
 func (c *client) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
-	for i := 0; i < maxInitClusterRetries; i++ {
-		for _, u := range c.urls {
-			timeoutCtx, timeoutCancel := context.WithTimeout(ctx, pdTimeout)
-			members, err := c.getMembers(timeoutCtx, u)
-			timeoutCancel()
-			if err != nil || members.GetHeader() == nil {
-				log.Error("[pd] failed to get cluster id", zap.Error(err))
-				continue
-			}
-			c.clusterID = members.GetHeader().GetClusterId()
-			return nil
+	for _, u := range c.urls {
+		timeoutCtx, timeoutCancel := context.WithTimeout(ctx, pdTimeout)
+		members, err := c.getMembers(timeoutCtx, u)
+		timeoutCancel()
+		if err != nil || members.GetHeader() == nil {
+			log.Error("[pd] failed to get cluster id", zap.Error(err))
+			continue
 		}
-
-		time.Sleep(time.Second)
+		c.clusterID = members.GetHeader().GetClusterId()
+		return nil
 	}
-
 	return errors.WithStack(errFailInitClusterID)
 }
 
