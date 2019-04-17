@@ -511,9 +511,21 @@ func (s *Server) GetConfig() *Config {
 	cfg.Schedule = *s.scheduleOpt.load()
 	cfg.Replication = *s.scheduleOpt.rep.load()
 	namespaces := make(map[string]NamespaceConfig)
-	for name, opt := range s.scheduleOpt.ns {
-		namespaces[name] = *opt.load()
+
+	f := func(k, v interface{}) bool {
+		var kstr string
+		var ok bool
+		if kstr, ok = k.(string); !ok {
+			return false
+		}
+		if ns, ok := v.(*namespaceOption); ok {
+			namespaces[kstr] = *ns.load()
+			return true
+		}
+		return false
 	}
+	s.scheduleOpt.ns.Range(f)
+
 	cfg.Namespace = namespaces
 	cfg.LabelProperty = s.scheduleOpt.loadLabelPropertyConfig().clone()
 	cfg.ClusterVersion = s.scheduleOpt.loadClusterVersion()
@@ -591,7 +603,7 @@ func (s *Server) SetPDServerConfig(cfg PDServerConfig) error {
 
 // GetNamespaceConfig get the namespace config.
 func (s *Server) GetNamespaceConfig(name string) *NamespaceConfig {
-	if _, ok := s.scheduleOpt.ns[name]; !ok {
+	if _, ok := s.scheduleOpt.getNS(name); !ok {
 		return &NamespaceConfig{}
 	}
 
@@ -616,11 +628,11 @@ func (s *Server) GetNamespaceConfigWithAdjust(name string) *NamespaceConfig {
 
 // SetNamespaceConfig sets the namespace config.
 func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) error {
-	if n, ok := s.scheduleOpt.ns[name]; ok {
-		old := s.scheduleOpt.ns[name].load()
+	if n, ok := s.scheduleOpt.getNS(name); ok {
+		old := n.load()
 		n.store(&cfg)
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
-			s.scheduleOpt.ns[name].store(old)
+			s.scheduleOpt.ns.Store(name, old)
 			log.Error("failed to update namespace config",
 				zap.String("name", name),
 				zap.Reflect("new", cfg),
@@ -630,9 +642,9 @@ func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) error {
 		}
 		log.Info("namespace config is updated", zap.String("name", name), zap.Reflect("new", cfg), zap.Reflect("old", old))
 	} else {
-		s.scheduleOpt.ns[name] = newNamespaceOption(&cfg)
+		s.scheduleOpt.ns.Store(name, newNamespaceOption(&cfg))
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
-			s.scheduleOpt.ns[name].store(&NamespaceConfig{})
+			s.scheduleOpt.ns.Delete(name)
 			log.Error("failed to add namespace config",
 				zap.String("name", name),
 				zap.Reflect("new", cfg),
@@ -646,11 +658,11 @@ func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) error {
 
 // DeleteNamespaceConfig deletes the namespace config.
 func (s *Server) DeleteNamespaceConfig(name string) error {
-	if n, ok := s.scheduleOpt.ns[name]; ok {
+	if n, ok := s.scheduleOpt.getNS(name); ok {
 		cfg := n.load()
-		s.scheduleOpt.ns[name].store(&NamespaceConfig{})
+		s.scheduleOpt.ns.Delete(name)
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
-			s.scheduleOpt.ns[name].store(cfg)
+			s.scheduleOpt.ns.Store(name, cfg)
 			log.Error("failed to delete namespace config",
 				zap.String("name", name),
 				zap.Error(err))
