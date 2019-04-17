@@ -93,7 +93,7 @@ lint:
 tidy:
 	@echo "go mod tidy"
 	GO111MODULE=on go mod tidy
-	git diff --quiet
+	git diff --quiet go.mod go.sum
 
 travis_coverage: export GO111MODULE=on
 travis_coverage:
