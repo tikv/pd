@@ -679,6 +679,7 @@ func (s *testClusterSuite) TestSetScheduleOpt(c *C) {
 	//DELETE failed
 	s.svr.kv = oldKV
 	c.Assert(s.svr.SetNamespaceConfig("testNS", nsConfig), IsNil)
+	c.Assert(s.svr.GetNamespaceConfig("testNS").LeaderScheduleLimit, Equals, uint64(200))
 	c.Assert(s.svr.SetReplicationConfig(*replicateCfg), IsNil)
 
 	s.svr.kv = core.NewKV(&testErrorKV{})

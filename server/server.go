@@ -632,7 +632,7 @@ func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) error {
 		old := n.load()
 		n.store(&cfg)
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
-			s.scheduleOpt.ns.Store(name, old)
+			s.scheduleOpt.ns.Store(name, newNamespaceOption(old))
 			log.Error("failed to update namespace config",
 				zap.String("name", name),
 				zap.Reflect("new", cfg),
@@ -662,7 +662,7 @@ func (s *Server) DeleteNamespaceConfig(name string) error {
 		cfg := n.load()
 		s.scheduleOpt.ns.Delete(name)
 		if err := s.scheduleOpt.persist(s.kv); err != nil {
-			s.scheduleOpt.ns.Store(name, cfg)
+			s.scheduleOpt.ns.Store(name, newNamespaceOption(cfg))
 			log.Error("failed to delete namespace config",
 				zap.String("name", name),
 				zap.Error(err))
