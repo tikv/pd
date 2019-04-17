@@ -16,6 +16,7 @@ package server
 import (
 	"context"
 	"path"
+	"strings"
 	"time"
 
 	log "github.com/pingcap/log"
@@ -75,7 +76,7 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 	keys := make([]string, 0, len(resp.Kvs))
 	values := make([]string, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {
-		keys = append(keys, string(item.Key))
+		keys = append(keys, strings.TrimPrefix(strings.TrimPrefix(string(item.Key), kv.rootPath), "/"))
 		values = append(values, string(item.Value))
 	}
 	return keys, values, nil
