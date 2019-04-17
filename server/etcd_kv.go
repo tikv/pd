@@ -62,7 +62,7 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 	return string(resp.Kvs[0].Value), nil
 }
 
-func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, error) {
+func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
 	key = path.Join(kv.rootPath, key)
 	endKey = path.Join(kv.rootPath, endKey)
 
@@ -70,13 +70,15 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, error)
 	withLimit := clientv3.WithLimit(int64(limit))
 	resp, err := kvGet(kv.server.client, key, withRange, withLimit)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	res := make([]string, 0, len(resp.Kvs))
+	keys := make([]string, 0, len(resp.Kvs))
+	values := make([]string, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {
-		res = append(res, string(item.Value))
+		keys = append(keys, string(item.Key))
+		values = append(values, string(item.Value))
 	}
-	return res, nil
+	return keys, values, nil
 }
 
 func (kv *etcdKVBase) Save(key, value string) error {

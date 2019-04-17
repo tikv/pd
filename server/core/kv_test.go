@@ -179,9 +179,9 @@ type KVWithMaxRangeLimit struct {
 	rangeLimit int
 }
 
-func (kv *KVWithMaxRangeLimit) LoadRange(key, endKey string, limit int) ([]string, error) {
+func (kv *KVWithMaxRangeLimit) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
 	if limit > kv.rangeLimit {
-		return nil, errors.Errorf("limit %v exceed max rangeLimit %v", limit, kv.rangeLimit)
+		return nil, nil, errors.Errorf("limit %v exceed max rangeLimit %v", limit, kv.rangeLimit)
 	}
 	return kv.KVBase.LoadRange(key, endKey, limit)
 }

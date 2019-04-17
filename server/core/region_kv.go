@@ -128,7 +128,7 @@ func loadRegions(kv KVBase, regions *RegionsInfo) error {
 	rangeLimit := maxKVRangeLimit
 	for {
 		startKey := regionPath(nextID)
-		res, err := kv.LoadRange(startKey, endKey, rangeLimit)
+		_, res, err := kv.LoadRange(startKey, endKey, rangeLimit)
 		if err != nil {
 			if rangeLimit /= 2; rangeLimit >= minKVRangeLimit {
 				continue
