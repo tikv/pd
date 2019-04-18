@@ -442,7 +442,7 @@ func (namespaceInfo *namespacesInfo) loadNamespaces(kv *core.KV, rangeLimit int)
 
 	for {
 		key := namespaceInfo.namespacePath(nextID)
-		res, err := kv.LoadRange(key, endKey, rangeLimit)
+		_, res, err := kv.LoadRange(key, endKey, rangeLimit)
 		if err != nil {
 			return err
 		}
