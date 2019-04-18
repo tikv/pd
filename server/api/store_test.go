@@ -275,21 +275,21 @@ func (s *testStoreSuite) TestUrlStoreFilter(c *C) {
 }
 
 func (s *testStoreSuite) TestDownState(c *C) {
-	store := &core.StoreInfo{
-		Store: &metapb.Store{
+	store := core.NewStoreInfo(
+		&metapb.Store{
 			State: metapb.StoreState_Up,
 		},
-		Stats:           &pdpb.StoreStats{},
-		LastHeartbeatTS: time.Now(),
-	}
+		core.SetStoreStats(&pdpb.StoreStats{}),
+		core.SetLastHeartbeatTS(time.Now()),
+	)
 	storeInfo := newStoreInfo(s.svr.GetScheduleConfig(), store)
 	c.Assert(storeInfo.Store.StateName, Equals, metapb.StoreState_Up.String())
 
-	store.LastHeartbeatTS = time.Now().Add(-time.Minute * 2)
-	storeInfo = newStoreInfo(s.svr.GetScheduleConfig(), store)
+	newStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Minute * 2)))
+	storeInfo = newStoreInfo(s.svr.GetScheduleConfig(), newStore)
 	c.Assert(storeInfo.Store.StateName, Equals, disconnectedName)
 
-	store.LastHeartbeatTS = time.Now().Add(-time.Hour * 2)
-	storeInfo = newStoreInfo(s.svr.GetScheduleConfig(), store)
+	newStore = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour * 2)))
+	storeInfo = newStoreInfo(s.svr.GetScheduleConfig(), newStore)
 	c.Assert(storeInfo.Store.StateName, Equals, downStateName)
 }

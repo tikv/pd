@@ -17,6 +17,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
+	"go.uber.org/zap"
 )
 
 func newBalanceLeader() *Case {
@@ -51,7 +52,10 @@ func newBalanceLeader() *Case {
 		count1 := regions.GetStoreLeaderCount(1)
 		count2 := regions.GetStoreLeaderCount(2)
 		count3 := regions.GetStoreLeaderCount(3)
-		simutil.Logger.Infof("leader counts: %v %v %v", count1, count2, count3)
+		simutil.Logger.Info("current leader counts",
+			zap.Int("first-store", count1),
+			zap.Int("second-store", count2),
+			zap.Int("third-store", count3))
 
 		return count1 <= 350 &&
 			count2 >= 300 &&

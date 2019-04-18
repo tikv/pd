@@ -15,9 +15,10 @@ package schedule
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 // NamespaceChecker ensures region to go to the right place.
@@ -63,14 +64,19 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *Operator {
 		if n.isExists(targetStores, peer.StoreId) {
 			continue
 		}
-		log.Debugf("[region %d] peer %v is not located in namespace target stores", region.GetID(), peer)
+		log.Debug("peer is not located in namespace target stores", zap.Uint64("region-id", region.GetID()), zap.Reflect("peer", peer))
 		newPeer := n.SelectBestPeerToRelocate(region, targetStores)
 		if newPeer == nil {
 			checkerCounter.WithLabelValues("namespace_checker", "no_target_peer").Inc()
 			return nil
 		}
+		op, err := CreateMovePeerOperator("make-namespace-relocation", n.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+		if err != nil {
+			checkerCounter.WithLabelValues("namespace_checker", "create_operator_fail").Inc()
+			return nil
+		}
 		checkerCounter.WithLabelValues("namespace_checker", "new_operator").Inc()
-		return CreateMovePeerOperator("makeNamespaceRelocation", n.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+		return op
 	}
 
 	checkerCounter.WithLabelValues("namespace_checker", "all_right").Inc()
@@ -81,7 +87,7 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *Operator {
 func (n *NamespaceChecker) SelectBestPeerToRelocate(region *core.RegionInfo, targets []*core.StoreInfo) *metapb.Peer {
 	storeID := n.SelectBestStoreToRelocate(region, targets)
 	if storeID == 0 {
-		log.Debugf("[region %d] has no best store to relocate", region.GetID())
+		log.Debug("has no best store to relocate", zap.Uint64("region-id", region.GetID()))
 		return nil
 	}
 	newPeer, err := n.cluster.AllocPeer(storeID)
@@ -98,12 +104,12 @@ func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, ta
 	if target == nil {
 		return 0
 	}
-	return target.GetId()
+	return target.GetID()
 }
 
 func (n *NamespaceChecker) isExists(stores []*core.StoreInfo, storeID uint64) bool {
 	for _, store := range stores {
-		if store.Id == storeID {
+		if store.GetID() == storeID {
 			return true
 		}
 	}

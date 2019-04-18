@@ -18,9 +18,10 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
-	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
+	gofail "github.com/pingcap/gofail/runtime"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
@@ -35,9 +36,7 @@ const (
 var _ = Suite(&testClusterSuite{})
 
 type baseCluster struct {
-	client       *clientv3.Client
 	svr          *Server
-	cleanup      CleanupFunc
 	grpcPDClient pdpb.PDClient
 }
 
@@ -117,12 +116,12 @@ func (s *baseCluster) newRegion(c *C, regionID uint64, startKey []byte,
 
 func (s *testClusterSuite) TestBootstrap(c *C) {
 	var err error
-	_, s.svr, s.cleanup, err = NewTestServer()
+	var cleanup func()
+	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
-	s.client = s.svr.client
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
-	defer s.cleanup()
+	defer cleanup()
 	clusterID := s.svr.clusterID
 
 	// IsBootstrapped returns false.
@@ -237,16 +236,17 @@ func (s *baseCluster) getClusterConfig(c *C, clusterID uint64) *metapb.Cluster {
 
 func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	var err error
-	_, s.svr, s.cleanup, err = NewTestServer()
+	var cleanup func()
+	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
-	s.client = s.svr.client
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
-	defer s.cleanup()
+	defer cleanup()
 	clusterID := s.svr.clusterID
 
 	storeAddr := "127.0.0.1:0"
-	s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, storeAddr))
+	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, storeAddr))
+	c.Assert(err, IsNil)
 
 	// Get region.
 	region := s.getRegion(c, clusterID, []byte("abc"))
@@ -335,8 +335,8 @@ func (s *baseCluster) resetStoreState(c *C, storeID uint64, state metapb.StoreSt
 	c.Assert(cluster, NotNil)
 	store := cluster.GetStore(storeID)
 	c.Assert(store, NotNil)
-	store.State = state
-	cluster.putStore(store)
+	newStore := store.Clone(core.SetStoreState(state))
+	c.Assert(cluster.putStore(newStore), IsNil)
 }
 
 func (s *baseCluster) testRemoveStore(c *C, clusterID uint64, store *metapb.Store) {
@@ -412,31 +412,65 @@ func (s *baseCluster) testRemoveStore(c *C, clusterID uint64, store *metapb.Stor
 
 // Make sure PD will not panic if it start and stop again and again.
 func (s *testClusterSuite) TestRaftClusterRestart(c *C) {
-	_, svr, cleanup, err := NewTestServer()
+	var err error
+	var cleanup func()
+	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	defer cleanup()
-	svr.bootstrapCluster(s.newBootstrapRequest(c, svr.clusterID, "127.0.0.1:0"))
+	mustWaitLeader(c, []*Server{s.svr})
+	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
+	c.Assert(err, IsNil)
 
-	cluster := svr.GetRaftCluster()
+	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 	cluster.stop()
 
-	err = svr.createRaftCluster()
+	err = s.svr.createRaftCluster()
 	c.Assert(err, IsNil)
 
-	cluster = svr.GetRaftCluster()
+	cluster = s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
 	cluster.stop()
 }
 
+// Make sure PD will not deadlock if it start and stop again and again.
+func (s *testClusterSuite) TestRaftClusterMultipleRestart(c *C) {
+	var err error
+	var cleanup func()
+	_, s.svr, cleanup, err = NewTestServer(c)
+	defer cleanup()
+	c.Assert(err, IsNil)
+	mustWaitLeader(c, []*Server{s.svr})
+	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
+	c.Assert(err, IsNil)
+	// add an offline store
+	store := s.newStore(c, s.allocID(c), "127.0.0.1:4")
+	store.State = metapb.StoreState_Offline
+	cluster := s.svr.GetRaftCluster()
+	err = cluster.putStore(store)
+	c.Assert(err, IsNil)
+	c.Assert(cluster, NotNil)
+
+	// let the job run at small interval
+	gofail.Enable("github.com/pingcap/pd/server/highFrequencyClusterJobs", `return(true)`)
+	for i := 0; i < 100; i++ {
+		err = s.svr.createRaftCluster()
+		c.Assert(err, IsNil)
+		time.Sleep(time.Millisecond)
+		cluster = s.svr.GetRaftCluster()
+		c.Assert(cluster, NotNil)
+		cluster.stop()
+	}
+}
+
 func (s *testClusterSuite) TestGetPDMembers(c *C) {
 	var err error
-	_, s.svr, s.cleanup, err = NewTestServer()
+	var cleanup func()
+	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
-	s.client = s.svr.client
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
-	defer s.cleanup()
+	defer cleanup()
 	req := &pdpb.GetMembersRequest{
 		Header: newRequestHeader(s.svr.ClusterID()),
 	}
@@ -449,13 +483,13 @@ func (s *testClusterSuite) TestGetPDMembers(c *C) {
 
 func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 	var err error
-	_, s.svr, s.cleanup, err = NewTestServer()
+	_, s.svr, _, err = NewTestServer(c)
 	c.Assert(err, IsNil)
-	s.client = s.svr.client
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
-	s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
+	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
+	c.Assert(err, IsNil)
 	s.svr.cluster.RLock()
 	s.svr.cluster.cachedCluster.Lock()
 	s.svr.cluster.cachedCluster.kv = core.NewKV(core.NewMemoryKV())
@@ -521,6 +555,10 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 			StartKey: []byte(fmt.Sprintf("%5d", i)),
 			EndKey:   []byte(fmt.Sprintf("%5d", i+1)),
 			Peers:    []*metapb.Peer{{Id: s.allocID(c), StoreId: stores[0].GetId()}},
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: initEpochConfVer,
+				Version: initEpochVersion,
+			},
 		}
 		if i == 0 {
 			region.StartKey = []byte("")
@@ -536,4 +574,29 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 		}()
 	}
 	wg.Wait()
+}
+
+var _ = Suite(&testGetStoresSuite{})
+
+type testGetStoresSuite struct {
+	cluster *clusterInfo
+}
+
+func (s *testGetStoresSuite) SetUpSuite(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	s.cluster = newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
+
+	stores := newTestStores(200)
+
+	for _, store := range stores {
+		c.Assert(s.cluster.putStore(store), IsNil)
+	}
+}
+
+func (s *testGetStoresSuite) BenchmarkGetStores(c *C) {
+	for i := 0; i < c.N; i++ {
+		// Logic to benchmark
+		s.cluster.core.Stores.GetStores()
+	}
 }

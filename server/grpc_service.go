@@ -17,15 +17,15 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strconv"
 	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -73,6 +73,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if err != nil {
 			return errors.WithStack(err)
 		}
+		start := time.Now()
 		if err = s.validateRequest(request.GetHeader()); err != nil {
 			return err
 		}
@@ -89,6 +90,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if err := stream.Send(response); err != nil {
 			return errors.WithStack(err)
 		}
+		tsoHandleDuration.Observe(time.Since(start).Seconds())
 	}
 }
 
@@ -165,7 +167,8 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 	}
 	return &pdpb.GetStoreResponse{
 		Header: s.header(),
-		Store:  store.Store,
+		Store:  store.GetMeta(),
+		Stats:  store.GetStoreStats(),
 	}, nil
 }
 
@@ -207,7 +210,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
-	log.Infof("put store ok - %v", store)
+	log.Info("put store ok", zap.Stringer("store", store))
 	cluster.RLock()
 	defer cluster.RUnlock()
 	cluster.cachedCluster.OnStoreVersionChange()
@@ -228,9 +231,21 @@ func (s *Server) GetAllStores(ctx context.Context, request *pdpb.GetAllStoresReq
 		return &pdpb.GetAllStoresResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
+	// Don't return tombstone stores.
+	var stores []*metapb.Store
+	if request.GetExcludeTombstoneStores() {
+		for _, store := range cluster.GetStores() {
+			if store.GetState() != metapb.StoreState_Tombstone {
+				stores = append(stores, store)
+			}
+		}
+	} else {
+		stores = cluster.GetStores()
+	}
+
 	return &pdpb.GetAllStoresResponse{
 		Header: s.header(),
-		Stores: cluster.GetStores(),
+		Stores: stores,
 	}, nil
 }
 
@@ -334,17 +349,21 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		}
 
 		storeID := request.GetLeader().GetStoreId()
-		storeLabel := strconv.FormatUint(storeID, 10)
+		store, err := cluster.GetStore(storeID)
+		if err != nil {
+			return err
+		}
+		storeAddress := store.GetAddress()
 
-		regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "recv").Inc()
-		regionHeartbeatLatency.WithLabelValues(storeLabel).Observe(float64(time.Now().Unix()) - float64(request.GetInterval().GetEndTimestamp()))
+		regionHeartbeatCounter.WithLabelValues(storeAddress, "report", "recv").Inc()
+		regionHeartbeatLatency.WithLabelValues(storeAddress).Observe(float64(time.Now().Unix()) - float64(request.GetInterval().GetEndTimestamp()))
 
 		cluster.RLock()
 		hbStreams := cluster.coordinator.hbStreams
 		cluster.RUnlock()
 
 		if time.Since(lastBind) > s.cfg.heartbeatStreamBindInterval.Duration {
-			regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "bind").Inc()
+			regionHeartbeatCounter.WithLabelValues(storeAddress, "report", "bind").Inc()
 			hbStreams.bindStream(storeID, server)
 			lastBind = time.Now()
 		}
@@ -352,22 +371,22 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		region := core.RegionFromHeartbeat(request, cluster.cachedCluster.GetSlaveStoreIDs())
 		if region.GetID() == 0 {
 			msg := fmt.Sprintf("invalid request region, %v", request)
-			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)
+			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, storeAddress)
 			continue
 		}
 		if region.GetLeader() == nil {
 			msg := fmt.Sprintf("invalid request leader, %v", request)
-			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)
+			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, storeAddress)
 			continue
 		}
 
 		err = cluster.HandleRegionHeartbeat(region)
 		if err != nil {
 			msg := err.Error()
-			hbStreams.sendErr(region, pdpb.ErrorType_UNKNOWN, msg, storeLabel)
+			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, storeAddress)
 		}
 
-		regionHeartbeatCounter.WithLabelValues(storeLabel, "report", "ok").Inc()
+		regionHeartbeatCounter.WithLabelValues(storeAddress, "report", "ok").Inc()
 	}
 }
 
@@ -602,7 +621,7 @@ func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb.PutClusterC
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
-	log.Infof("put cluster config ok - %v", conf)
+	log.Info("put cluster config ok", zap.Reflect("config", conf))
 
 	return &pdpb.PutClusterConfigResponse{
 		Header: s.header(),
@@ -627,10 +646,15 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		}
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
 	}
+
 	cluster.RLock()
 	defer cluster.RUnlock()
 	co := cluster.coordinator
-	if op := co.regionScatterer.Scatter(region); op != nil {
+	op, err := co.regionScatterer.Scatter(region)
+	if err != nil {
+		return nil, err
+	}
+	if op != nil {
 		co.opController.AddOperator(op)
 	}
 
@@ -693,15 +717,49 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 		if err := s.kv.SaveGCSafePoint(newSafePoint); err != nil {
 			return nil, err
 		}
-		log.Infof("updated gc safe point to %d", newSafePoint)
+		log.Info("updated gc safe point",
+			zap.Uint64("safe-point", newSafePoint))
 	} else if newSafePoint < oldSafePoint {
-		log.Warnf("trying to update gc safe point from %d to %d", oldSafePoint, newSafePoint)
+		log.Warn("trying to update gc safe point",
+			zap.Uint64("old-safe-point", oldSafePoint),
+			zap.Uint64("new-safe-point", newSafePoint))
 		newSafePoint = oldSafePoint
 	}
 
 	return &pdpb.UpdateGCSafePointResponse{
 		Header:       s.header(),
 		NewSafePoint: newSafePoint,
+	}, nil
+}
+
+// GetOperator gets information about the operator belonging to the speicfy region.
+func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &pdpb.GetOperatorResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	opController := cluster.coordinator.opController
+	requestID := request.GetRegionId()
+	r := opController.GetOperatorStatus(requestID)
+	if r == nil {
+		header := s.errorHeader(&pdpb.Error{
+			Type:    pdpb.ErrorType_REGION_NOT_FOUND,
+			Message: "Not Found",
+		})
+		return &pdpb.GetOperatorResponse{Header: header}, nil
+	}
+
+	return &pdpb.GetOperatorResponse{
+		Header:   s.header(),
+		RegionId: requestID,
+		Desc:     []byte(r.Op.Desc()),
+		Kind:     []byte(r.Op.Kind().String()),
+		Status:   r.Status,
 	}, nil
 }
 

@@ -15,9 +15,10 @@ package schedulers
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 func init() {
@@ -69,8 +70,12 @@ func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		return nil
 	}
 
+	op, err := schedule.CreateMovePeerOperator("shuffle-region", cluster, region, schedule.OpAdmin, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	if err != nil {
+		schedulerCounter.WithLabelValues(s.GetName(), "create_operator_fail").Inc()
+		return nil
+	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	op := schedule.CreateMovePeerOperator("shuffle-region", cluster, region, schedule.OpAdmin, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 	op.SetPriorityLevel(core.HighPriority)
 	return []*schedule.Operator{op}
 }
@@ -84,16 +89,16 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*
 		return nil, nil
 	}
 
-	region := cluster.RandFollowerRegion(source.GetId(), core.HealthRegion())
+	region := cluster.RandFollowerRegion(source.GetID(), core.HealthRegion())
 	if region == nil {
-		region = cluster.RandLeaderRegion(source.GetId(), core.HealthRegion())
+		region = cluster.RandLeaderRegion(source.GetID(), core.HealthRegion())
 	}
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
 		return nil, nil
 	}
 
-	return region, region.GetStorePeer(source.GetId())
+	return region, region.GetStorePeer(source.GetID())
 }
 
 func (s *shuffleRegionScheduler) scheduleAddPeer(cluster schedule.Cluster, filter schedule.Filter) *metapb.Peer {
@@ -104,9 +109,9 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster schedule.Cluster, filte
 		return nil
 	}
 
-	newPeer, err := cluster.AllocPeer(target.GetId())
+	newPeer, err := cluster.AllocPeer(target.GetID())
 	if err != nil {
-		log.Errorf("failed to allocate peer: %v", err)
+		log.Error("failed to allocate peer", zap.Error(err))
 		return nil
 	}
 

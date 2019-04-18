@@ -66,8 +66,8 @@ func (s *testTableNamespaceSuite) newClassifier(c *C) *tableNamespaceClassifier 
 		Meta: true,
 	}
 
-	tableClassifier.putNamespaceLocked(&testNamespace1)
-	tableClassifier.putNamespaceLocked(&testNamespace2)
+	c.Assert(tableClassifier.putNamespaceLocked(&testNamespace1), IsNil)
+	c.Assert(tableClassifier.putNamespaceLocked(&testNamespace2), IsNil)
 	return tableClassifier
 }
 
@@ -112,17 +112,18 @@ func (s *testTableNamespaceSuite) TestTableNameSpaceGetRegionNamespace(c *C) {
 		{false, "t\x80\x00\x00\x00\x00\x00\x00\x03", "t\x80\x00\x00\x00\x00\x00\x00\x04", 3, false, "global"},
 		{false, "m\x80\x00\x00\x00\x00\x00\x00\x01", "", 0, true, "ns2"},
 		{false, "", "m\x80\x00\x00\x00\x00\x00\x00\x01", 0, false, "global"},
-		{true, string(encodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\x01"))), "", testTable1, false, "ns1"},
+		{true, string(EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\x01"))), "", testTable1, false, "ns1"},
 		{true, "t\x80\x00\x00\x00\x00\x00\x00\x01", "", 0, false, "global"}, // decode error
 	}
 	classifier := s.newClassifier(c)
 	for _, t := range testCases {
 		startKey, endKey := Key(t.startKey), Key(t.endKey)
 		if !t.endcoded {
-			startKey, endKey = encodeBytes(startKey), encodeBytes(endKey)
+			startKey, endKey = EncodeBytes(startKey), EncodeBytes(endKey)
 		}
-		c.Assert(startKey.TableID(), Equals, t.tableID)
-		c.Assert(startKey.IsMeta(), Equals, t.isMeta)
+		isMeta, tableID := startKey.MetaOrTable()
+		c.Assert(tableID, Equals, t.tableID)
+		c.Assert(isMeta, Equals, t.isMeta)
 
 		region := core.NewRegionInfo(&metapb.Region{
 			StartKey: startKey,
@@ -163,7 +164,7 @@ func (s *testTableNamespaceSuite) TestNamespaceOperation(c *C) {
 
 	namespaces = tableClassifier.GetNamespaces()
 	c.Assert(namespaces, HasLen, 2)
-	c.Assert(nsInfo.IsTableIDExist(1), IsTrue)
+	c.Assert(nsInfo.isTableIDExist(1), IsTrue)
 
 	// Add storeID
 	err = tableClassifier.AddNamespaceStoreID("test1", 456)
@@ -171,7 +172,7 @@ func (s *testTableNamespaceSuite) TestNamespaceOperation(c *C) {
 
 	namespaces = tableClassifier.GetNamespaces()
 	c.Assert(namespaces, HasLen, 2)
-	c.Assert(nsInfo.IsStoreIDExist(456), IsTrue)
+	c.Assert(nsInfo.isStoreIDExist(456), IsTrue)
 
 	// Ensure that duplicate tableID cannot exist in one namespace
 	err = tableClassifier.AddNamespaceTableID("test1", 1)
@@ -228,5 +229,4 @@ func (s *testTableNamespaceSuite) TestTableNameSpaceReloadNamespaces(c *C) {
 	ns = classifier.GetAllNamespaces()
 	sort.Strings(ns)
 	c.Assert(ns, DeepEquals, []string{"global", "ns1", "ns2"})
-
 }

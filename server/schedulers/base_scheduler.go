@@ -16,8 +16,8 @@ package schedulers
 import (
 	"time"
 
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/schedule"
-	log "github.com/sirupsen/logrus"
 )
 
 // options for interval of schedulers
@@ -37,6 +37,7 @@ const (
 	zeroGrowth
 )
 
+// intervalGrow calculates the next interval of balance.
 func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowthType) time.Duration {
 	switch typ {
 	case exponentailGrowth:
@@ -46,7 +47,7 @@ func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowth
 	case zeroGrowth:
 		return x
 	default:
-		log.Fatal("unKnow interval growth type")
+		log.Fatal("unknown interval growth type")
 	}
 	return 0
 }

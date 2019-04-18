@@ -41,6 +41,14 @@ var (
 			Help:      "Status of the cluster.",
 		}, []string{"type", "namespace"})
 
+	placementStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "placement_status",
+			Help:      "Status of the cluster placement.",
+		}, []string{"type", "name", "namespace"})
+
 	healthStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -87,7 +95,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "region_heartbeat",
 			Help:      "Counter of region hearbeat.",
-		}, []string{"store", "type", "status"})
+		}, []string{"address", "type", "status"})
 
 	regionHeartbeatLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -96,7 +104,7 @@ var (
 			Name:      "region_heartbeat_latency_seconds",
 			Help:      "Bucketed histogram of latency (s) of receiving heartbeat.",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
-		}, []string{"store"})
+		}, []string{"address"})
 
 	storeStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -104,7 +112,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "store_status",
 			Help:      "Store status for schedule",
-		}, []string{"namespace", "store", "type"})
+		}, []string{"namespace", "address", "type"})
 
 	hotSpotStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -112,7 +120,7 @@ var (
 			Subsystem: "hotspot",
 			Name:      "status",
 			Help:      "Status of the hotspot.",
-		}, []string{"store", "type"})
+		}, []string{"address", "type"})
 
 	tsoCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -146,6 +154,23 @@ var (
 			Help:      "Bucketed histogram of time spend(s) of patrol checks region.",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 15),
 		})
+
+	configStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "config",
+			Name:      "status",
+			Help:      "Status of the scheduling configurations.",
+		}, []string{"type", "namespace"})
+
+	tsoHandleDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "handle_tso_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled tso requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		})
 )
 
 func init() {
@@ -164,4 +189,7 @@ func init() {
 	prometheus.MustRegister(metadataGauge)
 	prometheus.MustRegister(etcdStateGauge)
 	prometheus.MustRegister(patrolCheckRegionsHistogram)
+	prometheus.MustRegister(placementStatusGauge)
+	prometheus.MustRegister(configStatusGauge)
+	prometheus.MustRegister(tsoHandleDuration)
 }

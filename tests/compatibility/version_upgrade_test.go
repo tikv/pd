@@ -11,30 +11,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package compatibility_test
 
 import (
 	"context"
+	"testing"
 
 	"github.com/coreos/go-semver/semver"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/tests"
 )
 
-func (s *integrationTestSuite) bootstrapCluster(server *testServer, c *C) {
-	bootstrapReq := &pdpb.BootstrapRequest{
-		Header: &pdpb.RequestHeader{ClusterId: server.GetClusterID()},
-		Store:  &metapb.Store{Id: 1, Address: "mock://1"},
-		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, IsLearner: false}}},
-	}
-	_, err := server.server.Bootstrap(context.Background(), bootstrapReq)
-	c.Assert(err, IsNil)
+func Test(t *testing.T) {
+	TestingT(t)
 }
 
-func (s *integrationTestSuite) TestStoreRegister(c *C) {
+var _ = Suite(&compatibilityTestSuite{})
+
+type compatibilityTestSuite struct{}
+
+func (s *compatibilityTestSuite) SetUpSuite(c *C) {
+	server.EnableZap = true
+}
+
+func (s *compatibilityTestSuite) TestStoreRegister(c *C) {
 	c.Parallel()
-	cluster, err := newTestCluster(3)
+	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -42,7 +47,7 @@ func (s *integrationTestSuite) TestStoreRegister(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	s.bootstrapCluster(leaderServer, c)
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 
 	putStoreRequest := &pdpb.PutStoreRequest{
 		Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
@@ -52,7 +57,9 @@ func (s *integrationTestSuite) TestStoreRegister(c *C) {
 			Version: "2.0.1",
 		},
 	}
-	_, err = leaderServer.server.PutStore(context.Background(), putStoreRequest)
+
+	svr := leaderServer.GetServer()
+	_, err = svr.PutStore(context.Background(), putStoreRequest)
 	c.Assert(err, IsNil)
 	// FIX ME: read v0.0.0 in sometime
 	cluster.WaitLeader()
@@ -78,20 +85,20 @@ func (s *integrationTestSuite) TestStoreRegister(c *C) {
 			Version: "1.0.1",
 		},
 	}
-	_, err = leaderServer.server.PutStore(context.Background(), putStoreRequest)
+	_, err = svr.PutStore(context.Background(), putStoreRequest)
 	c.Assert(err, NotNil)
 }
 
-func (s *integrationTestSuite) TestRollingUpgrade(c *C) {
+func (s *compatibilityTestSuite) TestRollingUpgrade(c *C) {
 	c.Parallel()
-	cluster, err := newTestCluster(3)
+	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	s.bootstrapCluster(leaderServer, c)
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 
 	stores := []*pdpb.PutStoreRequest{
 		{
@@ -127,8 +134,10 @@ func (s *integrationTestSuite) TestRollingUpgrade(c *C) {
 			},
 		},
 	}
+
+	svr := leaderServer.GetServer()
 	for _, store := range stores {
-		_, err = leaderServer.server.PutStore(context.Background(), store)
+		_, err = svr.PutStore(context.Background(), store)
 		c.Assert(err, IsNil)
 	}
 	c.Assert(leaderServer.GetClusterVersion(), Equals, semver.Version{Major: 2, Minor: 0, Patch: 1})
@@ -138,7 +147,7 @@ func (s *integrationTestSuite) TestRollingUpgrade(c *C) {
 			store.Store.State = metapb.StoreState_Tombstone
 		}
 		store.Store.Version = "2.1.0"
-		resp, err := leaderServer.server.PutStore(context.Background(), store)
+		resp, err := svr.PutStore(context.Background(), store)
 		c.Assert(err, IsNil)
 		if i != len(stores)-1 {
 			c.Assert(leaderServer.GetClusterVersion(), Equals, semver.Version{Major: 2, Minor: 0, Patch: 1})

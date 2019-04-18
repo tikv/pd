@@ -16,14 +16,15 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net/http"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/etcdserver"
-	"github.com/coreos/etcd/pkg/types"
+	log "github.com/pingcap/log"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/etcdserver"
+	"go.etcd.io/etcd/pkg/types"
 )
 
 const (
@@ -59,7 +60,7 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Co
 		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
-			log.Error(gerr)
+			log.Error(fmt.Sprintf("%v", gerr))
 			continue
 		}
 

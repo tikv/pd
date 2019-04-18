@@ -17,11 +17,6 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
-var (
-	// HotRegionLowThreshold is the low threadshold of hot region
-	HotRegionLowThreshold = 3
-)
-
 const (
 	// RegionHeartBeatReportInterval is the heartbeat report interval of a region
 	RegionHeartBeatReportInterval = 60
@@ -138,15 +133,18 @@ func (bc *BasicCluster) RegionReadStats() []*core.RegionStat {
 }
 
 // PutStore put a store
-func (bc *BasicCluster) PutStore(store *core.StoreInfo) error {
+func (bc *BasicCluster) PutStore(store *core.StoreInfo) {
 	bc.Stores.SetStore(store)
-	return nil
+}
+
+// DeleteStore deletes a store
+func (bc *BasicCluster) DeleteStore(store *core.StoreInfo) {
+	bc.Stores.DeleteStore(store)
 }
 
 // PutRegion put a region
-func (bc *BasicCluster) PutRegion(region *core.RegionInfo) error {
+func (bc *BasicCluster) PutRegion(region *core.RegionInfo) {
 	bc.Regions.SetRegion(region)
-	return nil
 }
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.

@@ -72,7 +72,7 @@ func (r *SlaveChecker) Check(region *core.RegionInfo) *Operator {
 		}
 		var steps []OperatorStep
 		if r.cluster.IsRaftLearnerEnabled() {
-			peer, err := r.cluster.AllocPeer(store.GetId())
+			peer, err := r.cluster.AllocPeer(store.GetID())
 			if err != nil {
 				return nil
 			}
@@ -114,8 +114,8 @@ func (r SlaveChecker) selectBestReplacementStore(region *core.RegionInfo) *Opera
 	slave := slaves[0]
 	source := r.cluster.GetStore(slave.GetStoreId())
 
-	// random pick region
-	if rand.Intn(source.RegionCount)%2 == 0 {
+	// randomly pick region
+	if rand.Intn(source.GetRegionCount())%2 == 0 {
 		return nil
 	}
 
@@ -149,14 +149,14 @@ func (r SlaveChecker) selectBestReplacementStore(region *core.RegionInfo) *Opera
 		return nil
 	}
 
-	newPeer, err := r.cluster.AllocPeer(target.GetId())
+	newPeer, err := r.cluster.AllocPeer(target.GetID())
 	if err != nil {
 		checkerCounter.WithLabelValues("slave_learner_checker", "no_peer").Inc()
 		return nil
 	}
 	steps := []OperatorStep{
-		RemovePeer{FromStore: source.GetId()},
-		AddLearner{ToStore: target.GetId(), PeerID: newPeer.GetId()},
+		RemovePeer{FromStore: source.GetID()},
+		AddLearner{ToStore: target.GetID(), PeerID: newPeer.GetId()},
 	}
 	return NewOperator("replaceSlavePeer", region.GetID(), region.GetRegionEpoch(), OpReplica|OpRegion, steps...)
 }
@@ -171,8 +171,8 @@ func (r *SlaveChecker) shouldBalance(source, target *core.StoreInfo, region *cor
 	}
 
 	regionSize = int64(float64(regionSize) * r.cluster.GetTolerantSizeRatio())
-	sourceDelta := opInfluence.GetStoreInfluence(source.GetId()).RegionSize - regionSize
-	targetDelta := opInfluence.GetStoreInfluence(target.GetId()).RegionSize + regionSize
+	sourceDelta := opInfluence.GetStoreInfluence(source.GetID()).RegionSize - regionSize
+	targetDelta := opInfluence.GetStoreInfluence(target.GetID()).RegionSize + regionSize
 
 	// Make sure after move, source score is still greater than target score.
 	return source.RegionScore(r.cluster.GetHighSpaceRatio(), r.cluster.GetLowSpaceRatio(), sourceDelta) >
@@ -200,7 +200,8 @@ func (r *SlaveChecker) checkDownSlavePeer(region *core.RegionInfo) *Operator {
 		if stats.GetDownSeconds() < uint64(r.cluster.GetMaxStoreDownTime().Seconds()) {
 			continue
 		}
-		return CreateRemovePeerOperator("removeDownSlavePeer", r.cluster, OpReplica, region, peer.GetStoreId())
+		op, _ := CreateRemovePeerOperator("removeDownSlavePeer", r.cluster, OpReplica, region, peer.GetStoreId())
+		return op
 	}
 	return nil
 }
@@ -219,7 +220,8 @@ func (r *SlaveChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 		if store.IsUp() {
 			continue
 		}
-		return CreateRemovePeerOperator("removeOfflineSlavePeer", r.cluster, OpReplica, region, peer.GetStoreId())
+		op, _ := CreateRemovePeerOperator("removeOfflineSlavePeer", r.cluster, OpReplica, region, peer.GetStoreId())
+		return op
 	}
 
 	return nil

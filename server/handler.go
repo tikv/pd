@@ -22,10 +22,11 @@ import (
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 var (
@@ -170,11 +171,11 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	log.Infof("create scheduler %s", s.GetName())
+	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 	if err = c.addScheduler(s, args...); err != nil {
-		log.Errorf("can not add scheduler %v: %v", s.GetName(), err)
+		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 	} else if err = h.opt.persist(c.cluster.kv); err != nil {
-		log.Errorf("can not persist scheduler config: %v", err)
+		log.Error("can not persist scheduler config", zap.Error(err))
 	}
 	return err
 }
@@ -186,9 +187,9 @@ func (h *Handler) RemoveScheduler(name string) error {
 		return err
 	}
 	if err = c.removeScheduler(name); err != nil {
-		log.Errorf("can not remove scheduler %v: %v", name, err)
+		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
 	} else if err = h.opt.persist(c.cluster.kv); err != nil {
-		log.Errorf("can not persist scheduler config: %v", err)
+		log.Error("can not persist scheduler config", zap.Error(err))
 	}
 	return err
 }
@@ -241,6 +242,11 @@ func (h *Handler) AddShuffleLeaderScheduler() error {
 // AddShuffleRegionScheduler adds a shuffle-region-scheduler.
 func (h *Handler) AddShuffleRegionScheduler() error {
 	return h.AddScheduler("shuffle-region")
+}
+
+// AddShuffleHotRegionScheduler adds a shuffle-hot-region-scheduler.
+func (h *Handler) AddShuffleHotRegionScheduler(limit uint64) error {
+	return h.AddScheduler("shuffle-hot-region", strconv.FormatUint(limit, 10))
 }
 
 // AddRandomMergeScheduler adds a random-merge-scheduler.
@@ -327,8 +333,6 @@ func (h *Handler) GetHistory(start time.Time) ([]schedule.OperatorHistory, error
 	return c.opController.GetHistory(start), nil
 }
 
-var errAddOperator = errors.New("failed to add operator, maybe already have one")
-
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.
 func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) error {
 	c, err := h.getCoordinator()
@@ -346,9 +350,9 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 	}
 
 	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: newLeader.GetStoreId()}
-	op := schedule.NewOperator("adminTransferLeader", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpLeader, step)
+	op := schedule.NewOperator("admin-transfer-leader", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpLeader, step)
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }
@@ -401,9 +405,9 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		steps = append(steps, schedule.RemovePeer{FromStore: peer.GetStoreId()})
 	}
 
-	op := schedule.NewOperator("adminMoveRegion", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
+	op := schedule.NewOperator("admin-move-region", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }
@@ -438,9 +442,12 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return err
 	}
 
-	op := schedule.CreateMovePeerOperator("adminMovePeer", c.cluster, region, schedule.OpAdmin, fromStoreID, toStoreID, newPeer.GetId())
+	op, err := schedule.CreateMovePeerOperator("admin-move-peer", c.cluster, region, schedule.OpAdmin, fromStoreID, toStoreID, newPeer.GetId())
+	if err != nil {
+		return err
+	}
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }
@@ -495,9 +502,9 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 			schedule.AddPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
 		}
 	}
-	op := schedule.NewOperator("adminAddPeer", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
+	op := schedule.NewOperator("admin-add-peer", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }
@@ -521,9 +528,9 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 	steps := []schedule.OperatorStep{
 		schedule.AddLearner{ToStore: toStoreID, PeerID: newPeer.GetId()},
 	}
-	op := schedule.NewOperator("adminAddPeer", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
+	op := schedule.NewOperator("admin-add-peer", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }
@@ -544,9 +551,12 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 		return errors.Errorf("region has no peer in store %v", fromStoreID)
 	}
 
-	op := schedule.CreateRemovePeerOperator("adminRemovePeer", c.cluster, schedule.OpAdmin, region, fromStoreID)
+	op, err := schedule.CreateRemovePeerOperator("admin-remove-peer", c.cluster, schedule.OpAdmin, region, fromStoreID)
+	if err != nil {
+		return err
+	}
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }
@@ -584,7 +594,7 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotAdjacent
 	}
 
-	ops, err := schedule.CreateMergeRegionOperator("adminMergeRegion", c.cluster, region, target, schedule.OpAdmin)
+	ops, err := schedule.CreateMergeRegionOperator("admin-merge-region", c.cluster, region, target, schedule.OpAdmin)
 	if err != nil {
 		return err
 	}
@@ -611,9 +621,9 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policy string) error {
 		EndKey:   region.GetEndKey(),
 		Policy:   pdpb.CheckPolicy(pdpb.CheckPolicy_value[strings.ToUpper(policy)]),
 	}
-	op := schedule.NewOperator("adminSplitRegion", regionID, region.GetRegionEpoch(), schedule.OpAdmin, step)
+	op := schedule.NewOperator("admin-split-region", regionID, region.GetRegionEpoch(), schedule.OpAdmin, step)
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }
@@ -630,12 +640,16 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64) error {
 		return ErrRegionNotFound(regionID)
 	}
 
-	op := c.regionScatterer.Scatter(region)
+	op, err := c.regionScatterer.Scatter(region)
+	if err != nil {
+		return err
+	}
+
 	if op == nil {
 		return nil
 	}
 	if ok := c.opController.AddOperator(op); !ok {
-		return errors.WithStack(errAddOperator)
+		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }

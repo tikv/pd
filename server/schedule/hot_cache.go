@@ -55,6 +55,7 @@ func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stores *core.StoresIn
 	v, isExist := w.writeFlow.Peek(region.GetID())
 	if isExist {
 		value = v.(*core.RegionStat)
+		// This is used for the simulator.
 		if !Simulating {
 			interval := time.Since(value.LastUpdateTime).Seconds()
 			if interval < minHotRegionReportInterval {
@@ -80,6 +81,7 @@ func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stores *core.StoresInf
 	v, isExist := w.readFlow.Peek(region.GetID())
 	if isExist {
 		value = v.(*core.RegionStat)
+		// This is used for the simulator.
 		if !Simulating {
 			interval := time.Since(value.LastUpdateTime).Seconds()
 			if interval < minHotRegionReportInterval {
@@ -103,7 +105,7 @@ func (w *HotSpotCache) incMetrics(name string, kind FlowKind) {
 }
 
 func calculateWriteHotThreshold(stores *core.StoresInfo) uint64 {
-	// hotRegionThreshold is use to pick hot region
+	// hotRegionThreshold is used to pick hot region
 	// suppose the number of the hot Regions is statCacheMaxLen
 	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
 	// divide 2 because the store reports data about two times than the region record write to rocksdb
@@ -117,8 +119,8 @@ func calculateWriteHotThreshold(stores *core.StoresInfo) uint64 {
 }
 
 func calculateReadHotThreshold(stores *core.StoresInfo) uint64 {
-	// hotRegionThreshold is use to pick hot region
-	// suppose the number of the hot Regions is statLRUMaxLen
+	// hotRegionThreshold is used to pick hot region
+	// suppose the number of the hot Regions is statCacheMaxLen
 	// and we use total Read Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
 	divisor := float64(statCacheMaxLen)
 	hotRegionThreshold := uint64(stores.TotalBytesReadRate() / divisor)

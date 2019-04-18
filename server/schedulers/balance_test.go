@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -336,7 +335,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	tc.AddRegionStore(4, 16)
 	// Add region 1 with leader in store 4.
 	tc.AddLeaderRegion(1, 4)
-	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 4, 1)
+	testutil.CheckTransferPeerWithLeaderTransfer(c, sb.Schedule(tc)[0], schedule.OpBalance, 4, 1)
 
 	// Test stateFilter.
 	tc.SetStoreOffline(1)
@@ -344,7 +343,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	cache.Remove(4)
 	// When store 1 is offline, it will be filtered,
 	// store 2 becomes the store with least regions.
-	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 4, 2)
+	testutil.CheckTransferPeerWithLeaderTransfer(c, sb.Schedule(tc)[0], schedule.OpBalance, 4, 2)
 	opt.SetMaxReplicas(3)
 	c.Assert(sb.Schedule(tc), IsNil)
 
@@ -839,226 +838,6 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	c.Assert(mb.IsScheduleAllowed(tc), IsFalse)
 }
 
-var _ = Suite(&testMergeCheckerSuite{})
-
-type testMergeCheckerSuite struct {
-	cluster *schedule.MockCluster
-	mc      *schedule.MergeChecker
-	regions []*core.RegionInfo
-}
-
-func (s *testMergeCheckerSuite) SetUpTest(c *C) {
-	cfg := schedule.NewMockSchedulerOptions()
-	cfg.MaxMergeRegionSize = 2
-	cfg.MaxMergeRegionKeys = 2
-	s.cluster = schedule.NewMockCluster(cfg)
-	s.regions = []*core.RegionInfo{
-		core.NewRegionInfo(
-			&metapb.Region{
-				Id:       1,
-				StartKey: []byte(""),
-				EndKey:   []byte("a"),
-				Peers: []*metapb.Peer{
-					{Id: 101, StoreId: 1},
-					{Id: 102, StoreId: 2},
-				},
-			},
-			&metapb.Peer{Id: 101, StoreId: 1},
-			core.SetApproximateSize(1),
-			core.SetApproximateKeys(1),
-		),
-		core.NewRegionInfo(
-			&metapb.Region{
-				Id:       2,
-				StartKey: []byte("a"),
-				EndKey:   []byte("t"),
-				Peers: []*metapb.Peer{
-					{Id: 103, StoreId: 1},
-					{Id: 104, StoreId: 4},
-					{Id: 105, StoreId: 5},
-				},
-			},
-			&metapb.Peer{Id: 104, StoreId: 4},
-			core.SetApproximateSize(200),
-			core.SetApproximateKeys(200),
-		),
-		core.NewRegionInfo(
-			&metapb.Region{
-				Id:       3,
-				StartKey: []byte("t"),
-				EndKey:   []byte("x"),
-				Peers: []*metapb.Peer{
-					{Id: 106, StoreId: 2},
-					{Id: 107, StoreId: 5},
-					{Id: 108, StoreId: 6},
-				},
-			},
-			&metapb.Peer{Id: 108, StoreId: 6},
-			core.SetApproximateSize(1),
-			core.SetApproximateKeys(1),
-		),
-		core.NewRegionInfo(
-			&metapb.Region{
-				Id:       4,
-				StartKey: []byte("x"),
-				EndKey:   []byte(""),
-				Peers: []*metapb.Peer{
-					{Id: 109, StoreId: 4},
-				},
-			},
-			&metapb.Peer{Id: 109, StoreId: 4},
-			core.SetApproximateSize(10),
-			core.SetApproximateKeys(10),
-		),
-	}
-
-	for _, region := range s.regions {
-		c.Assert(s.cluster.PutRegion(region), IsNil)
-	}
-
-	s.mc = schedule.NewMergeChecker(s.cluster, namespace.DefaultClassifier)
-}
-
-func (s *testMergeCheckerSuite) TestBasic(c *C) {
-	s.cluster.MockSchedulerOptions.SplitMergeInterval = time.Hour
-
-	// should with same peer count
-	ops := s.mc.Check(s.regions[0])
-	c.Assert(ops, IsNil)
-	// The size should be small enough.
-	ops = s.mc.Check(s.regions[1])
-	c.Assert(ops, IsNil)
-	ops = s.mc.Check(s.regions[2])
-	c.Assert(ops, NotNil)
-	// Skip recently split regions.
-	s.mc.RecordRegionSplit(s.regions[2].GetID())
-	ops = s.mc.Check(s.regions[2])
-	c.Assert(ops, IsNil)
-	ops = s.mc.Check(s.regions[3])
-	c.Assert(ops, IsNil)
-}
-
-func (s *testMergeCheckerSuite) checkSteps(c *C, op *schedule.Operator, steps []schedule.OperatorStep) {
-	c.Assert(op.Kind()&schedule.OpMerge, Not(Equals), 0)
-	c.Assert(steps, NotNil)
-	c.Assert(op.Len(), Equals, len(steps))
-	for i := range steps {
-		c.Assert(op.Step(i), DeepEquals, steps[i])
-	}
-}
-
-func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
-	// partial store overlap not including leader
-	ops := s.mc.Check(s.regions[2])
-	s.checkSteps(c, ops[0], []schedule.OperatorStep{
-		schedule.TransferLeader{FromStore: 6, ToStore: 5},
-		schedule.AddLearner{ToStore: 1, PeerID: 1},
-		schedule.PromoteLearner{ToStore: 1, PeerID: 1},
-		schedule.RemovePeer{FromStore: 2},
-		schedule.AddLearner{ToStore: 4, PeerID: 2},
-		schedule.PromoteLearner{ToStore: 4, PeerID: 2},
-		schedule.RemovePeer{FromStore: 6},
-		schedule.MergeRegion{
-			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[1].GetMeta(),
-			IsPassive:  false,
-		},
-	})
-	s.checkSteps(c, ops[1], []schedule.OperatorStep{
-		schedule.MergeRegion{
-			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[1].GetMeta(),
-			IsPassive:  true,
-		},
-	})
-
-	// partial store overlap including leader
-	newRegion := s.regions[2].Clone(
-		core.SetPeers([]*metapb.Peer{
-			{Id: 106, StoreId: 1},
-			{Id: 107, StoreId: 5},
-			{Id: 108, StoreId: 6},
-		}),
-		core.WithLeader(&metapb.Peer{Id: 106, StoreId: 1}),
-	)
-	s.regions[2] = newRegion
-	s.cluster.PutRegion(s.regions[2])
-	ops = s.mc.Check(s.regions[2])
-	s.checkSteps(c, ops[0], []schedule.OperatorStep{
-		schedule.AddLearner{ToStore: 4, PeerID: 3},
-		schedule.PromoteLearner{ToStore: 4, PeerID: 3},
-		schedule.RemovePeer{FromStore: 6},
-		schedule.MergeRegion{
-			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[1].GetMeta(),
-			IsPassive:  false,
-		},
-	})
-	s.checkSteps(c, ops[1], []schedule.OperatorStep{
-		schedule.MergeRegion{
-			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[1].GetMeta(),
-			IsPassive:  true,
-		},
-	})
-
-	// all stores overlap
-	s.regions[2] = s.regions[2].Clone(core.SetPeers([]*metapb.Peer{
-		{Id: 106, StoreId: 1},
-		{Id: 107, StoreId: 5},
-		{Id: 108, StoreId: 4},
-	}))
-	s.cluster.PutRegion(s.regions[2])
-	ops = s.mc.Check(s.regions[2])
-	s.checkSteps(c, ops[0], []schedule.OperatorStep{
-		schedule.MergeRegion{
-			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[1].GetMeta(),
-			IsPassive:  false,
-		},
-	})
-	s.checkSteps(c, ops[1], []schedule.OperatorStep{
-		schedule.MergeRegion{
-			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[1].GetMeta(),
-			IsPassive:  true,
-		},
-	})
-
-	// all stores not overlap
-	s.regions[2] = s.regions[2].Clone(core.SetPeers([]*metapb.Peer{
-		{Id: 109, StoreId: 2},
-		{Id: 110, StoreId: 3},
-		{Id: 111, StoreId: 6},
-	}), core.WithLeader(&metapb.Peer{Id: 109, StoreId: 2}))
-	s.cluster.PutRegion(s.regions[2])
-	ops = s.mc.Check(s.regions[2])
-	s.checkSteps(c, ops[0], []schedule.OperatorStep{
-		schedule.AddLearner{ToStore: 1, PeerID: 4},
-		schedule.PromoteLearner{ToStore: 1, PeerID: 4},
-		schedule.RemovePeer{FromStore: 3},
-		schedule.AddLearner{ToStore: 4, PeerID: 5},
-		schedule.PromoteLearner{ToStore: 4, PeerID: 5},
-		schedule.RemovePeer{FromStore: 6},
-		schedule.AddLearner{ToStore: 5, PeerID: 6},
-		schedule.PromoteLearner{ToStore: 5, PeerID: 6},
-		schedule.TransferLeader{FromStore: 2, ToStore: 1},
-		schedule.RemovePeer{FromStore: 2},
-		schedule.MergeRegion{
-			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[1].GetMeta(),
-			IsPassive:  false,
-		},
-	})
-	s.checkSteps(c, ops[1], []schedule.OperatorStep{
-		schedule.MergeRegion{
-			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[1].GetMeta(),
-			IsPassive:  true,
-		},
-	})
-}
-
 var _ = Suite(&testBalanceHotWriteRegionSchedulerSuite{})
 
 type testBalanceHotWriteRegionSchedulerSuite struct{}
@@ -1098,7 +877,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
 	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 3, 4)
 	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 4)
-	opt.HotRegionLowThreshold = 0
+	opt.HotRegionCacheHitsThreshold = 0
 
 	// Will transfer a hot region from store 1, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
@@ -1193,7 +972,7 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	tc.AddLeaderRegionWithReadInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
 	// lower than hot read flow rate, but higher than write flow rate
 	tc.AddLeaderRegionWithReadInfo(11, 1, 24*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
-	opt.HotRegionLowThreshold = 0
+	opt.HotRegionCacheHitsThreshold = 0
 	c.Assert(tc.IsRegionHot(1), IsTrue)
 	c.Assert(tc.IsRegionHot(11), IsFalse)
 	// check randomly pick hot region
@@ -1278,7 +1057,8 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 		tc.Regions.SetRegion(regionInfo)
 	}
 	for i := 0; i < 100; i++ {
-		tc.AllocPeer(1)
+		_, err := tc.AllocPeer(1)
+		c.Assert(err, IsNil)
 	}
 	for i := 1; i <= 5; i++ {
 		tc.UpdateStoreStatus(uint64(i))
@@ -1303,5 +1083,71 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 		c.Check(leaderCount, LessEqual, 12)
 		regionCount := tc.Regions.GetStoreRegionCount(uint64(i))
 		c.Check(regionCount, LessEqual, 32)
+	}
+}
+
+func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	tc := schedule.NewMockCluster(opt)
+	// Add stores 1,2,3.
+	tc.AddRegionStore(1, 0)
+	tc.AddRegionStore(2, 0)
+	tc.AddRegionStore(3, 0)
+	var (
+		id      uint64
+		regions []*metapb.Region
+	)
+	for i := 0; i < 10; i++ {
+		peers := []*metapb.Peer{
+			{Id: id + 1, StoreId: 1},
+			{Id: id + 2, StoreId: 2},
+			{Id: id + 3, StoreId: 3},
+		}
+		regions = append(regions, &metapb.Region{
+			Id:       id + 4,
+			Peers:    peers,
+			StartKey: []byte(fmt.Sprintf("s_%02d", i)),
+			EndKey:   []byte(fmt.Sprintf("s_%02d", i+1)),
+		})
+		id += 4
+	}
+	// empty case
+	regions[9].EndKey = []byte("")
+
+	// To simulate server prepared,
+	// store 1 contains 8 leader region peers and leaders of 2 regions are unknown yet.
+	for _, meta := range regions {
+		var leader *metapb.Peer
+		if meta.Id < 8 {
+			leader = meta.Peers[0]
+		}
+		regionInfo := core.NewRegionInfo(
+			meta,
+			leader,
+			core.SetApproximateKeys(96),
+			core.SetApproximateSize(96),
+		)
+
+		tc.Regions.SetRegion(regionInfo)
+	}
+
+	for i := 1; i <= 3; i++ {
+		tc.UpdateStoreStatus(uint64(i))
+	}
+
+	oc := schedule.NewOperatorController(nil, nil)
+	hb := newScatterRangeScheduler(oc, []string{"s_00", "s_09", "t"})
+
+	limit := 0
+	for {
+		if limit > 100 {
+			break
+		}
+		ops := hb.Schedule(tc)
+		if ops == nil {
+			limit++
+			continue
+		}
+		tc.ApplyOperator(ops[0])
 	}
 }

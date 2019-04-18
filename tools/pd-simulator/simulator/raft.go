@@ -14,6 +14,7 @@
 package simulator
 
 import (
+	"bytes"
 	"context"
 	"math/rand"
 	"sort"
@@ -21,21 +22,24 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/table"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/cases"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
 
-// RaftEngine records all raft infomations.
+// RaftEngine records all raft information.
 type RaftEngine struct {
 	sync.RWMutex
-	regionsInfo     *core.RegionsInfo
-	conn            *Connection
-	regionChange    map[uint64][]uint64
-	schedulerStats  *schedulerStatistics
-	regionSplitSize int64
-	regionSplitKeys int64
-	storeConfig     *SimConfig
+	regionsInfo       *core.RegionsInfo
+	conn              *Connection
+	regionChange      map[uint64][]uint64
+	schedulerStats    *schedulerStatistics
+	regionSplitSize   int64
+	regionSplitKeys   int64
+	storeConfig       *SimConfig
+	useTiDBEncodedKey bool
 }
 
 // NewRaftEngine creates the initialized raft with the configuration.
@@ -49,8 +53,14 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *SimConfig) *
 		regionSplitKeys: conf.RegionSplitKeys,
 		storeConfig:     storeConfig,
 	}
+	var splitKeys []string
+	if conf.TableNumber > 0 {
+		splitKeys = generateTableKeys(conf.TableNumber, len(conf.Regions)-1)
+		r.useTiDBEncodedKey = true
+	} else {
+		splitKeys = generateKeys(len(conf.Regions) - 1)
+	}
 
-	splitKeys := generateKeys(len(conf.Regions) - 1)
 	for i, region := range conf.Regions {
 		meta := &metapb.Region{
 			Id:          region.ID,
@@ -100,10 +110,13 @@ func (r *RaftEngine) stepLeader(region *core.RegionInfo) {
 	newRegion := region.Clone(core.WithLeader(newLeader))
 	if newLeader == nil {
 		r.SetRegion(newRegion)
-		simutil.Logger.Infof("[region %d] no leader", region.GetID())
+		simutil.Logger.Info("region has no leader", zap.Uint64("region-id", region.GetID()))
 		return
 	}
-	simutil.Logger.Infof("[region %d] elect new leader: %+v,old leader: %+v", region.GetID(), newLeader, region.GetLeader())
+	simutil.Logger.Info("region elects a new leader",
+		zap.Uint64("region-id", region.GetID()),
+		zap.Reflect("new-leader", newLeader),
+		zap.Reflect("old-leader", region.GetLeader()))
 	r.SetRegion(newRegion)
 	r.recordRegionChange(newRegion)
 }
@@ -120,12 +133,17 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 		var err error
 		ids[i], err = r.allocID(region.GetLeader().GetStoreId())
 		if err != nil {
-			simutil.Logger.Infof("alloc id failed: %s", err)
+			simutil.Logger.Error("alloc id failed", zap.Error(err))
 			return
 		}
 	}
 
-	splitKey := generateSplitKey(region.GetStartKey(), region.GetEndKey())
+	var splitKey []byte
+	if r.useTiDBEncodedKey {
+		splitKey = generateTiDBEncodedSplitKey(region.GetStartKey(), region.GetEndKey())
+	} else {
+		splitKey = generateSplitKey(region.GetStartKey(), region.GetEndKey())
+	}
 	left := region.Clone(
 		core.WithNewRegionID(ids[len(ids)-1]),
 		core.WithNewPeerIds(ids[0:len(ids)-1]...),
@@ -145,6 +163,11 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 
 	r.SetRegion(right)
 	r.SetRegion(left)
+	simutil.Logger.Debug("region split",
+		zap.Uint64("region-id", region.GetID()),
+		zap.Reflect("origin", region.GetMeta()),
+		zap.Reflect("left", left.GetMeta()),
+		zap.Reflect("right", right.GetMeta()))
 	r.recordRegionChange(left)
 	r.recordRegionChange(right)
 }
@@ -162,6 +185,8 @@ func (r *RaftEngine) NeedSplit(size, rows int64) bool {
 }
 
 func (r *RaftEngine) recordRegionChange(region *core.RegionInfo) {
+	r.Lock()
+	defer r.Unlock()
 	n := region.GetLeader().GetStoreId()
 	r.regionChange[n] = append(r.regionChange[n], region.GetID())
 }
@@ -182,7 +207,7 @@ func (r *RaftEngine) updateRegionReadBytes(readBytes map[uint64]int64) {
 	for id, bytes := range readBytes {
 		region := r.GetRegion(id)
 		if region == nil {
-			simutil.Logger.Errorf("region %d not found", id)
+			simutil.Logger.Error("region is not found", zap.Uint64("region-id", id))
 			continue
 		}
 		newRegion := region.Clone(core.SetReadBytes(uint64(bytes)))
@@ -214,11 +239,31 @@ func (r *RaftEngine) electNewLeader(region *core.RegionInfo) *metapb.Peer {
 	return nil
 }
 
-// GetRegion returns the RegionInfo with regionID
+// GetRegion returns the RegionInfo with regionID.
 func (r *RaftEngine) GetRegion(regionID uint64) *core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
 	return r.regionsInfo.GetRegion(regionID)
+}
+
+// GetRegionChange returns a list of RegionID for a given store.
+func (r *RaftEngine) GetRegionChange(storeID uint64) []uint64 {
+	r.RLock()
+	defer r.RUnlock()
+	return r.regionChange[storeID]
+}
+
+// ResetRegionChange resets RegionInfo on a specific store with a given Region ID
+func (r *RaftEngine) ResetRegionChange(storeID uint64, regionID uint64) {
+	r.Lock()
+	defer r.Unlock()
+	regionIDs := r.regionChange[storeID]
+	for i, id := range regionIDs {
+		if id == regionID {
+			r.regionChange[storeID] = append(r.regionChange[storeID][:i], r.regionChange[storeID][i+1:]...)
+			return
+		}
+	}
 }
 
 // GetRegions gets all RegionInfo from regionMap
@@ -283,6 +328,30 @@ func generateKeys(size int) []string {
 	return v
 }
 
+func generateTableKey(tableID, rowID int64) []byte {
+	key := table.GenerateRowKey(tableID, rowID)
+	// append 0xFF use to split
+	key = append(key, 0xFF)
+
+	return table.EncodeBytes(key)
+}
+
+func generateTableKeys(tableCount, size int) []string {
+	v := make([]string, 0, size)
+	groupNumber := size / tableCount
+	tableID := 0
+	var key []byte
+	for size > 0 {
+		tableID++
+		for rowID := 0; rowID < groupNumber && size > 0; rowID++ {
+			key = generateTableKey(int64(tableID), int64(rowID))
+			v = append(v, string(key))
+			size--
+		}
+	}
+	return v
+}
+
 func generateSplitKey(start, end []byte) []byte {
 	var key []byte
 	// lessThanEnd is set as true when the key is already less than end key.
@@ -304,4 +373,70 @@ func generateSplitKey(start, end []byte) []byte {
 	}
 	key = append(key, ('a'+'z')/2)
 	return key
+}
+
+func mustDecodeMvccKey(key []byte) []byte {
+	// FIXME: seems nil key not encode to order compare key
+	if len(key) == 0 {
+		return nil
+	}
+
+	left, res, err := table.DecodeBytes(key)
+	if len(left) > 0 {
+		simutil.Logger.Fatal("decode key left some bytes", zap.ByteString("key", key))
+	}
+	if err != nil {
+		simutil.Logger.Fatal("decode key meet error", zap.ByteString("key", res), zap.Error(err))
+	}
+	return res
+}
+
+// generateTiDBEncodedSplitKey calculates the split key with start and end key,
+// the keys are encoded according to the TiDB encoding rules.
+func generateTiDBEncodedSplitKey(start, end []byte) []byte {
+	if len(start) == 0 && len(end) == 0 {
+		// suppose use table key with table ID 0 and row ID 0.
+		return generateTableKey(0, 0)
+	}
+
+	start = mustDecodeMvccKey(start)
+	end = mustDecodeMvccKey(end)
+	originStartLen := len(start)
+
+	// make the start key and end key in same length.
+	if len(end) == 0 {
+		end = make([]byte, 0, len(start))
+		for i := range end {
+			end[i] = 0xFF
+		}
+	} else if len(start) < len(end) {
+		pad := make([]byte, len(end)-len(start))
+		start = append(start, pad...)
+	} else if len(end) < len(start) {
+		pad := make([]byte, len(start)-len(end))
+		end = append(end, pad...)
+	}
+
+	switch bytes.Compare(start, end) {
+	case 0, 1:
+		simutil.Logger.Fatal("invalid key", zap.ByteString("start-key", start[:originStartLen]), zap.ByteString("end-key", end))
+	case -1:
+	}
+	for i := len(end) - 1; i >= 0; i-- {
+		if i == 0 {
+			simutil.Logger.Fatal("invalid end key to split", zap.ByteString("end-key", end))
+		}
+		if end[i] == 0 {
+			end[i] = 0xFF
+		} else {
+			end[i]--
+			break
+		}
+	}
+	// if endKey equal to startKey after reduce 1.
+	// we append 0xFF to the split key
+	if bytes.Equal(end, start) {
+		end = append(end, 0xFF)
+	}
+	return table.EncodeBytes(end)
 }

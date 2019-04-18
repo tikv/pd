@@ -8,3 +8,4 @@ default.pd
 tags
 /.retools/
 vendor
+default*

@@ -38,6 +38,10 @@ type Classifier interface {
 	AllowMerge(*core.RegionInfo, *core.RegionInfo) bool
 	// Reload underlying namespaces
 	ReloadNamespaces() error
+	// These function below are only for tests
+	IsMetaExist() bool
+	IsTableIDExist(int64) bool
+	IsStoreIDExist(uint64) bool
 }
 
 type defaultClassifier struct{}
@@ -64,6 +68,18 @@ func (c defaultClassifier) AllowMerge(one *core.RegionInfo, other *core.RegionIn
 
 func (c defaultClassifier) ReloadNamespaces() error {
 	return nil
+}
+
+func (c defaultClassifier) IsMetaExist() bool {
+	return false
+}
+
+func (c defaultClassifier) IsTableIDExist(tableID int64) bool {
+	return false
+}
+
+func (c defaultClassifier) IsStoreIDExist(storeID uint64) bool {
+	return false
 }
 
 // CreateClassifierFunc is for creating namespace classifier.

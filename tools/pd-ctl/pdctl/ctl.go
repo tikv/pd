@@ -50,6 +50,7 @@ func Start(args []string) {
 		command.NewConfigCommand(),
 		command.NewRegionCommand(),
 		command.NewStoreCommand(),
+		command.NewStoresCommand(),
 		command.NewMemberCommand(),
 		command.NewExitCommand(),
 		command.NewLabelCommand(),
@@ -66,7 +67,9 @@ func Start(args []string) {
 
 	rootCmd.SetArgs(args)
 	rootCmd.SilenceErrors = true
-	rootCmd.ParseFlags(args)
+	if err := rootCmd.ParseFlags(args); err != nil {
+		rootCmd.Println(err)
+	}
 	rootCmd.SetUsageTemplate(command.UsageTemplate)
 	rootCmd.SetOutput(os.Stdout)
 

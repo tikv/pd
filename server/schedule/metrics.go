@@ -47,7 +47,7 @@ var (
 			Subsystem: "schedule",
 			Name:      "filter",
 			Help:      "Counter of the filter",
-		}, []string{"action", "store", "type"})
+		}, []string{"action", "address", "type"})
 
 	operatorCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{

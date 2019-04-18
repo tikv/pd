@@ -46,9 +46,9 @@ func (s *testTrendSuite) TestTrend(c *C) {
 	mustRegionHeartbeat(c, svr, region6)
 
 	// Create 3 operators that transfers leader, moves follower, moves leader.
-	svr.GetHandler().AddTransferLeaderOperator(4, 2)
-	svr.GetHandler().AddTransferPeerOperator(5, 2, 3)
-	svr.GetHandler().AddTransferPeerOperator(6, 1, 3)
+	c.Assert(svr.GetHandler().AddTransferLeaderOperator(4, 2), IsNil)
+	c.Assert(svr.GetHandler().AddTransferPeerOperator(5, 2, 3), IsNil)
+	c.Assert(svr.GetHandler().AddTransferPeerOperator(6, 1, 3), IsNil)
 
 	// Complete the operators.
 	mustRegionHeartbeat(c, svr, region4.Clone(core.WithLeader(region4.GetStorePeer(2))))

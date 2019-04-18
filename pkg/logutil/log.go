@@ -19,14 +19,16 @@ import (
 	"os"
 	"path"
 	"runtime"
-	"runtime/debug"
 	"strings"
 	"sync"
 
-	"github.com/coreos/etcd/raft"
 	"github.com/coreos/pkg/capnslog"
+	zaplog "github.com/pingcap/log"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"go.etcd.io/etcd/raft"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc/grpclog"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
@@ -144,6 +146,23 @@ func StringToLogLevel(level string) log.Level {
 	return defaultLogLevel
 }
 
+// StringToZapLogLevel translates log level string to log level.
+func StringToZapLogLevel(level string) zapcore.Level {
+	switch strings.ToLower(level) {
+	case "fatal":
+		return zapcore.FatalLevel
+	case "error":
+		return zapcore.ErrorLevel
+	case "warn", "warning":
+		return zapcore.WarnLevel
+	case "debug":
+		return zapcore.DebugLevel
+	case "info":
+		return zapcore.InfoLevel
+	}
+	return zapcore.InfoLevel
+}
+
 // textFormatter is for compatibility with ngaut/log
 type textFormatter struct {
 	DisableTimestamp bool
@@ -173,7 +192,8 @@ func (f *textFormatter) Format(entry *log.Entry) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func stringToLogFormatter(format string, disableTimestamp bool) log.Formatter {
+// StringToLogFormatter uses the different log formatter according to a given format name.
+func StringToLogFormatter(format string, disableTimestamp bool) log.Formatter {
 	switch strings.ToLower(format) {
 	case "text":
 		return &textFormatter{
@@ -196,7 +216,7 @@ func stringToLogFormatter(format string, disableTimestamp bool) log.Formatter {
 }
 
 // InitFileLog initializes file based logging options.
-func InitFileLog(cfg *FileLogConfig) error {
+func InitFileLog(cfg *zaplog.FileLogConfig) error {
 	if st, err := os.Stat(cfg.Filename); err == nil {
 		if st.IsDir() {
 			return errors.New("can't use directory as log file name")
@@ -238,7 +258,7 @@ func (lg *wrapLogrus) V(l int) bool {
 var once sync.Once
 
 // InitLogger initializes PD's logger.
-func InitLogger(cfg *LogConfig) error {
+func InitLogger(cfg *zaplog.Config) error {
 	var err error
 
 	once.Do(func() {
@@ -248,7 +268,7 @@ func InitLogger(cfg *LogConfig) error {
 		if cfg.Format == "" {
 			cfg.Format = defaultLogFormat
 		}
-		log.SetFormatter(stringToLogFormatter(cfg.Format, cfg.DisableTimestamp))
+		log.SetFormatter(StringToLogFormatter(cfg.Format, cfg.DisableTimestamp))
 
 		// etcd log
 		capnslog.SetFormatter(&redirectFormatter{})
@@ -271,6 +291,6 @@ func InitLogger(cfg *LogConfig) error {
 // Commonly used with a `defer`.
 func LogPanic() {
 	if e := recover(); e != nil {
-		log.Fatalf("panic: %v, stack: %s", e, string(debug.Stack()))
+		zaplog.Fatal("panic", zap.Reflect("recover", e))
 	}
 }

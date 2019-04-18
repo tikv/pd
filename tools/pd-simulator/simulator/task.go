@@ -21,7 +21,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 )
 
 // Task running in node.
@@ -150,7 +149,7 @@ func (m *mergeRegion) Step(r *RaftEngine) {
 	)
 	r.SetRegion(mergeRegion)
 	r.recordRegionChange(mergeRegion)
-	r.schedulerStats.taskStats.mergeRegion++
+	r.schedulerStats.taskStats.incMergeRegion()
 	m.finished = true
 }
 
@@ -192,14 +191,7 @@ func (t *transferLeader) Step(r *RaftEngine) {
 	r.recordRegionChange(newRegion)
 	fromPeerID := t.fromPeer.GetId()
 	toPeerID := t.peer.GetId()
-	_, ok := r.schedulerStats.taskStats.transferLeader[fromPeerID]
-	if ok {
-		r.schedulerStats.taskStats.transferLeader[fromPeerID][toPeerID]++
-	} else {
-		m := make(map[uint64]int)
-		m[toPeerID]++
-		r.schedulerStats.taskStats.transferLeader[fromPeerID] = m
-	}
+	r.schedulerStats.taskStats.incTransferLeader(fromPeerID, toPeerID)
 }
 
 func (t *transferLeader) RegionID() uint64 {
@@ -239,35 +231,33 @@ func (a *addPeer) Step(r *RaftEngine) {
 	snapshotSize := region.GetApproximateSize()
 	sendNode := r.conn.Nodes[region.GetLeader().GetStoreId()]
 	if sendNode == nil {
-		simutil.Logger.Errorf("failed to sent snapshot: node %d has been deleted", sendNode.Id)
 		a.finished = true
 		return
 	}
 	if !processSnapshot(sendNode, a.sendingStat, snapshotSize) {
 		return
 	}
-	r.schedulerStats.snapshotStats.send[sendNode.Id]++
+	r.schedulerStats.snapshotStats.incSendSnapshot(sendNode.Id)
 
 	recvNode := r.conn.Nodes[a.peer.GetStoreId()]
 	if recvNode == nil {
-		simutil.Logger.Errorf("failed to receive snapshot: node %d has been deleted", recvNode.Id)
 		a.finished = true
 		return
 	}
 	if !processSnapshot(recvNode, a.receivingStat, snapshotSize) {
 		return
 	}
-	r.schedulerStats.snapshotStats.receive[recvNode.Id]++
+	r.schedulerStats.snapshotStats.incReceiveSnapshot(recvNode.Id)
 
 	a.size -= a.speed
 	if a.size < 0 {
 		var opts []core.RegionCreateOption
 		if region.GetPeer(a.peer.GetId()) == nil {
 			opts = append(opts, core.WithAddPeer(a.peer))
-			r.schedulerStats.taskStats.addPeer[region.GetID()]++
+			r.schedulerStats.taskStats.incAddPeer(region.GetID())
 		} else {
 			opts = append(opts, core.WithPromoteLearner(a.peer.GetId()))
-			r.schedulerStats.taskStats.promoteLeaner[region.GetID()]++
+			r.schedulerStats.taskStats.incPromoteLeaner(region.GetID())
 		}
 		opts = append(opts, core.WithIncConfVer())
 		newRegion := region.Clone(opts...)
@@ -331,7 +321,7 @@ func (a *removePeer) Step(r *RaftEngine) {
 				)
 				r.SetRegion(newRegion)
 				r.recordRegionChange(newRegion)
-				r.schedulerStats.taskStats.removePeer[region.GetID()]++
+				r.schedulerStats.taskStats.incRemovePeer(region.GetID())
 				if r.conn.Nodes[storeID] == nil {
 					a.finished = true
 					return
@@ -385,7 +375,7 @@ func (a *addLearner) Step(r *RaftEngine) {
 			)
 			r.SetRegion(newRegion)
 			r.recordRegionChange(newRegion)
-			r.schedulerStats.taskStats.addLearner[region.GetID()]++
+			r.schedulerStats.taskStats.incAddLeaner(region.GetID())
 		}
 		a.finished = true
 	}

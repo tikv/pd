@@ -18,12 +18,14 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"google.golang.org/grpc"
@@ -73,13 +75,20 @@ func mustNewServer(c *C) (*server.Server, cleanUpFunc) {
 	return svrs[0], cleanup
 }
 
+var zapLogOnce sync.Once
+
 func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpFunc) {
 	svrs := make([]*server.Server, 0, num)
-	cfgs := server.NewTestMultiConfig(num)
+	cfgs := server.NewTestMultiConfig(c, num)
 
 	ch := make(chan *server.Server, num)
 	for _, cfg := range cfgs {
 		go func(cfg *server.Config) {
+			err := cfg.SetupLogger()
+			c.Assert(err, IsNil)
+			zapLogOnce.Do(func() {
+				log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
+			})
 			s, err := server.CreateServer(cfg, NewHandler)
 			c.Assert(err, IsNil)
 			err = s.Run(context.TODO())

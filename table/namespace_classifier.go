@@ -23,10 +23,11 @@ import (
 	"sync"
 	"time"
 
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 func init() {
@@ -131,7 +132,7 @@ func (c *tableNamespaceClassifier) GetStoreNamespace(storeInfo *core.StoreInfo) 
 	defer c.RUnlock()
 
 	for name, ns := range c.nsInfo.namespaces {
-		_, ok := ns.StoreIDs[storeInfo.Id]
+		_, ok := ns.StoreIDs[storeInfo.GetID()]
 		if ok {
 			return name
 		}
@@ -143,8 +144,7 @@ func (c *tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInf
 	c.RLock()
 	defer c.RUnlock()
 
-	isMeta := Key(regionInfo.GetStartKey()).IsMeta()
-	tableID := Key(regionInfo.GetStartKey()).TableID()
+	isMeta, tableID := Key(regionInfo.GetStartKey()).MetaOrTable()
 	if tableID == 0 && !isMeta {
 		return namespace.DefaultNamespace
 	}
@@ -169,11 +169,32 @@ func (c *tableNamespaceClassifier) GetNamespaces() []*Namespace {
 	return c.nsInfo.getNamespaces()
 }
 
-// GetNamespaceByName returns whether namespace exists
+// IsNamespaceExist returns whether namespace exists.
 func (c *tableNamespaceClassifier) IsNamespaceExist(name string) bool {
 	c.RLock()
 	defer c.RUnlock()
 	return c.nsInfo.getNamespaceByName(name) != nil
+}
+
+// IsTableIDExist returns whether table ID exists in namespacesInfo.
+func (c *tableNamespaceClassifier) IsTableIDExist(tableID int64) bool {
+	c.RLock()
+	defer c.RUnlock()
+	return c.nsInfo.isTableIDExist(tableID)
+}
+
+// IsStoreIDExist returns whether store ID exists in namespacesInfo.
+func (c *tableNamespaceClassifier) IsStoreIDExist(storeID uint64) bool {
+	c.RLock()
+	defer c.RUnlock()
+	return c.nsInfo.isStoreIDExist(storeID)
+}
+
+// IsMetaExist returns whether meta is binded to a namespace.
+func (c *tableNamespaceClassifier) IsMetaExist() bool {
+	c.RLock()
+	defer c.RUnlock()
+	return c.nsInfo.isMetaExist()
 }
 
 // CreateNamespace creates a new Namespace.
@@ -215,7 +236,7 @@ func (c *tableNamespaceClassifier) AddNamespaceTableID(name string, tableID int6
 		return errors.Errorf("invalid namespace Name %s, not found", name)
 	}
 
-	if c.nsInfo.IsTableIDExist(tableID) {
+	if c.nsInfo.isTableIDExist(tableID) {
 		return errors.New("Table ID already exists in this cluster")
 	}
 
@@ -250,7 +271,7 @@ func (c *tableNamespaceClassifier) AddMetaToNamespace(name string) error {
 	if n == nil {
 		return errors.Errorf("invalid namespace Name %s, not found", name)
 	}
-	if c.nsInfo.IsMetaExist() {
+	if c.nsInfo.isMetaExist() {
 		return errors.New("meta is already set")
 	}
 
@@ -284,7 +305,7 @@ func (c *tableNamespaceClassifier) AddNamespaceStoreID(name string, storeID uint
 		return errors.Errorf("invalid namespace Name %s, not found", name)
 	}
 
-	if c.nsInfo.IsStoreIDExist(storeID) {
+	if c.nsInfo.isStoreIDExist(storeID) {
 		return errors.New("Store ID already exists in this namespace")
 	}
 
@@ -368,8 +389,8 @@ func (namespaceInfo *namespacesInfo) getNamespaces() []*Namespace {
 	return nsList
 }
 
-// IsTableIDExist returns true if table ID exists in namespacesInfo
-func (namespaceInfo *namespacesInfo) IsTableIDExist(tableID int64) bool {
+// isTableIDExist returns true if table ID exists in namespacesInfo
+func (namespaceInfo *namespacesInfo) isTableIDExist(tableID int64) bool {
 	for _, ns := range namespaceInfo.namespaces {
 		_, ok := ns.TableIDs[tableID]
 		if ok {
@@ -379,8 +400,8 @@ func (namespaceInfo *namespacesInfo) IsTableIDExist(tableID int64) bool {
 	return false
 }
 
-// IsStoreIDExist returns true if store ID exists in namespacesInfo
-func (namespaceInfo *namespacesInfo) IsStoreIDExist(storeID uint64) bool {
+// isStoreIDExist returns true if store ID exists in namespacesInfo
+func (namespaceInfo *namespacesInfo) isStoreIDExist(storeID uint64) bool {
 	for _, ns := range namespaceInfo.namespaces {
 		_, ok := ns.StoreIDs[storeID]
 		if ok {
@@ -390,8 +411,8 @@ func (namespaceInfo *namespacesInfo) IsStoreIDExist(storeID uint64) bool {
 	return false
 }
 
-// IsMetaExist returns true if meta is binded to a namespace.
-func (namespaceInfo *namespacesInfo) IsMetaExist() bool {
+// isMetaExist returns true if meta is binded to a namespace.
+func (namespaceInfo *namespacesInfo) isMetaExist() bool {
 	for _, ns := range namespaceInfo.namespaces {
 		if ns.Meta {
 			return true
@@ -435,7 +456,9 @@ func (namespaceInfo *namespacesInfo) loadNamespaces(kv *core.KV, rangeLimit int)
 		}
 
 		if len(res) < rangeLimit {
-			log.Infof("load %v namespacesInfo cost %v", namespaceInfo.getNamespaceCount(), time.Since(start))
+			log.Info("load namespaces information",
+				zap.Int("namespace-count", namespaceInfo.getNamespaceCount()),
+				zap.Duration("cost", time.Since(start)))
 			return nil
 		}
 	}

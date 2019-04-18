@@ -14,14 +14,12 @@
 package schedulers
 
 import (
-	"fmt"
-	"strconv"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 func init() {
@@ -85,33 +83,35 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		return nil
 	}
 
-	log.Debugf("[%s] store%d has the max region score", s.GetName(), source.GetId())
-	sourceLabel := strconv.FormatUint(source.GetId(), 10)
-	balanceRegionCounter.WithLabelValues("source_store", sourceLabel).Inc()
+	log.Debug("store has the max region score", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", source.GetID()))
+	sourceAddress := source.GetAddress()
+	balanceRegionCounter.WithLabelValues("source_store", sourceAddress).Inc()
 
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	var hasPotentialTarget bool
 	for i := 0; i < balanceRegionRetryLimit; i++ {
-		region := cluster.RandFollowerRegion(source.GetId(), core.HealthRegion())
+		// Priority the region that has a follower in the source store.
+		region := cluster.RandFollowerRegion(source.GetID(), core.HealthRegion())
 		if region == nil {
-			region = cluster.RandLeaderRegion(source.GetId(), core.HealthRegion())
+			// Then the region has the leader in the source store
+			region = cluster.RandLeaderRegion(source.GetID(), core.HealthRegion())
 		}
 		if region == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
 			continue
 		}
-		log.Debugf("[%s] select region%d", s.GetName(), region.GetID())
+		log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
 
 		// We don't schedule region with abnormal number of replicas.
 		if len(region.GetPeers()) != cluster.GetMaxReplicas() {
-			log.Debugf("[%s] region%d has abnormal replica count", s.GetName(), region.GetID())
+			log.Debug("region has abnormal replica count", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
 			schedulerCounter.WithLabelValues(s.GetName(), "abnormal_replica").Inc()
 			continue
 		}
 
 		// Skip hot regions.
 		if cluster.IsRegionHot(region.GetID()) {
-			log.Debugf("[%s] region%d is hot", s.GetName(), region.GetID())
+			log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
 			schedulerCounter.WithLabelValues(s.GetName(), "region_hot").Inc()
 			continue
 		}
@@ -121,7 +121,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		}
 		hasPotentialTarget = true
 
-		oldPeer := region.GetStorePeer(source.GetId())
+		oldPeer := region.GetStorePeer(source.GetID())
 		if op := s.transferPeer(cluster, region, oldPeer, opInfluence); op != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 			return []*schedule.Operator{op}
@@ -130,14 +130,15 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 
 	if !hasPotentialTarget {
 		// If no potential target store can be found for the selected store, ignore it for a while.
-		log.Debugf("[%s] no operator created for selected store%d", s.GetName(), source.GetId())
-		balanceRegionCounter.WithLabelValues("add_taint", sourceLabel).Inc()
-		s.taintStores.Put(source.GetId())
+		log.Debug("no operator created for selected store", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", source.GetID()))
+		balanceRegionCounter.WithLabelValues("add_taint", sourceAddress).Inc()
+		s.taintStores.Put(source.GetID())
 	}
 
 	return nil
 }
 
+// transferPeer selects the best store to create a new peer to replace the old peer.
 func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer, opInfluence schedule.OpInfluence) *schedule.Operator {
 	// scoreGuard guarantees that the distinct score will not decrease.
 	stores := cluster.GetRegionStores(region)
@@ -152,16 +153,16 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 
 	target := cluster.GetStore(storeID)
-	log.Debugf("[region %d] source store id is %v, target store id is %v", region.GetID(), source.GetId(), target.GetId())
+	log.Debug("", zap.Uint64("region-id", region.GetID()), zap.Uint64("source-store", source.GetID()), zap.Uint64("target-store", target.GetID()))
 
 	if !shouldBalance(cluster, source, target, region, core.RegionKind, opInfluence) {
-		log.Debugf("[%s] skip balance region %d, source %d to target %d ,source size: %v, source score: %v, source influence: %v, target size: %v, target score: %v, target influence: %v, average region size: %v",
-			s.GetName(), region.GetID(), source.GetId(), target.GetId(),
-			source.RegionSize, source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
-			opInfluence.GetStoreInfluence(source.GetId()).ResourceSize(core.RegionKind),
-			target.RegionSize, target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0),
-			opInfluence.GetStoreInfluence(target.GetId()).ResourceSize(core.RegionKind),
-			cluster.GetAverageRegionSize())
+		log.Debug("skip balance region",
+			zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()), zap.Uint64("source-store", source.GetID()), zap.Uint64("target-store", target.GetID()),
+			zap.Int64("source-size", source.GetRegionSize()), zap.Float64("source-score", source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)),
+			zap.Int64("source-influence", opInfluence.GetStoreInfluence(source.GetID()).ResourceSize(core.RegionKind)),
+			zap.Int64("target-size", target.GetRegionSize()), zap.Float64("target-score", target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)),
+			zap.Int64("target-influence", opInfluence.GetStoreInfluence(target.GetID()).ResourceSize(core.RegionKind)),
+			zap.Int64("average-region-size", cluster.GetAverageRegionSize()))
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
 	}
@@ -171,9 +172,14 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
 		return nil
 	}
-	balanceRegionCounter.WithLabelValues("move_peer", fmt.Sprintf("store%d-out", source.GetId())).Inc()
-	balanceRegionCounter.WithLabelValues("move_peer", fmt.Sprintf("store%d-in", target.GetId())).Inc()
-	return schedule.CreateMovePeerOperator("balance-region", cluster, region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	balanceRegionCounter.WithLabelValues("move_peer", source.GetAddress()+"-out").Inc()
+	balanceRegionCounter.WithLabelValues("move_peer", target.GetAddress()+"-in").Inc()
+	op, err := schedule.CreateMovePeerOperator("balance-region", cluster, region, schedule.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	if err != nil {
+		schedulerCounter.WithLabelValues(s.GetName(), "create_operator_fail").Inc()
+		return nil
+	}
+	return op
 }
 
 // hasPotentialTarget is used to determine whether the specified sourceStore

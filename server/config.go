@@ -25,14 +25,16 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/coreos/etcd/embed"
-	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/go-semver/semver"
-	"github.com/pingcap/pd/pkg/logutil"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
+	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/pkg/transport"
+	"go.uber.org/zap"
 )
 
 // Config is the pd server configuration.
@@ -46,8 +48,9 @@ type Config struct {
 	AdvertiseClientUrls string `toml:"advertise-client-urls" json:"advertise-client-urls"`
 	AdvertisePeerUrls   string `toml:"advertise-peer-urls" json:"advertise-peer-urls"`
 
-	Name    string `toml:"name" json:"name"`
-	DataDir string `toml:"data-dir" json:"data-dir"`
+	Name            string `toml:"name" json:"name"`
+	DataDir         string `toml:"data-dir" json:"data-dir"`
+	ForceNewCluster bool   `json:"force-new-cluster"`
 
 	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
 	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
@@ -62,7 +65,7 @@ type Config struct {
 	LeaderLease int64 `toml:"lease" json:"lease"`
 
 	// Log related config.
-	Log logutil.LogConfig `toml:"log" json:"log"`
+	Log log.Config `toml:"log" json:"log"`
 
 	// Backward compatibility.
 	LogFileDeprecated  string `toml:"log-file" json:"log-file"`
@@ -126,6 +129,9 @@ type Config struct {
 	heartbeatStreamBindInterval typeutil.Duration
 
 	LeaderPriorityCheckInterval typeutil.Duration
+
+	logger   *zap.Logger
+	logProps *log.ZapProperties
 }
 
 // NewConfig creates a new config.
@@ -148,6 +154,8 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
 	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
 
+	fs.StringVar(&cfg.Metric.PushAddress, "metrics-addr", "", "prometheus pushgateway address, leaves it empty will disable prometheus push.")
+
 	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.BoolVar(&cfg.Log.File.LogRotate, "log-rotate", true, "rotate log")
@@ -156,6 +164,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Security.CAPath, "cacert", "", "Path of file that contains list of trusted TLS CAs")
 	fs.StringVar(&cfg.Security.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "Path of file that contains X509 key in PEM format")
+	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster")
 
 	cfg.Namespace = make(map[string]NamespaceConfig)
 
@@ -180,6 +189,8 @@ const (
 	defaultTickInterval = 500 * time.Millisecond
 	// embed etcd has a check that `5 * tick > election`
 	defaultElectionInterval = 3000 * time.Millisecond
+
+	defaultMetricsPushInterval = 15 * time.Second
 
 	defaultHeartbeatStreamRebindInterval = time.Minute
 
@@ -355,6 +366,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	adjustString(&c.AdvertiseClientUrls, c.ClientUrls)
 	adjustString(&c.PeerUrls, defaultPeerUrls)
 	adjustString(&c.AdvertisePeerUrls, c.PeerUrls)
+	adjustDuration(&c.Metric.PushInterval, defaultMetricsPushInterval)
 
 	if len(c.InitialCluster) == 0 {
 		// The advertise peer urls may be http://127.0.0.1:2380,http://127.0.0.1:2381
@@ -456,6 +468,12 @@ type ScheduleConfig struct {
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit,omitempty" json:"replica-schedule-limit"`
 	// MergeScheduleLimit is the max coexist merge schedules.
 	MergeScheduleLimit uint64 `toml:"merge-schedule-limit,omitempty" json:"merge-schedule-limit"`
+	// HotRegionScheduleLimit is the max coexist hot region schedules.
+	HotRegionScheduleLimit uint64 `toml:"hot-region-schedule-limit,omitempty" json:"hot-region-schedule-limit"`
+	// HotRegionCacheHitThreshold is the cache hits threshold of the hot region.
+	// If the number of times a region hits the hot cache is greater than this
+	// threshold, it is considered a hot region.
+	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold,omitempty" json:"hot-region-cache-hits-threshold"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
 	//
@@ -511,6 +529,8 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
+		HotRegionScheduleLimit:       c.HotRegionScheduleLimit,
+		HotRegionCacheHitsThreshold:  c.HotRegionCacheHitsThreshold,
 		TolerantSizeRatio:            c.TolerantSizeRatio,
 		LowSpaceRatio:                c.LowSpaceRatio,
 		HighSpaceRatio:               c.HighSpaceRatio,
@@ -526,22 +546,26 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 }
 
 const (
-	defaultMaxReplicas          = 3
-	defaultMaxLearnerReplicas   = 1
-	defaultMaxSnapshotCount     = 3
-	defaultMaxPendingPeerCount  = 16
-	defaultMaxMergeRegionSize   = 20
-	defaultMaxMergeRegionKeys   = 200000
-	defaultSplitMergeInterval   = 1 * time.Hour
-	defaultPatrolRegionInterval = 100 * time.Millisecond
-	defaultMaxStoreDownTime     = 30 * time.Minute
-	defaultLeaderScheduleLimit  = 4
-	defaultRegionScheduleLimit  = 4
-	defaultReplicaScheduleLimit = 8
-	defaultMergeScheduleLimit   = 8
-	defaultTolerantSizeRatio    = 5
-	defaultLowSpaceRatio        = 0.8
-	defaultHighSpaceRatio       = 0.6
+	defaultMaxReplicas            = 3
+	defaultMaxLearnerReplicas     = 1
+	defaultMaxSnapshotCount       = 3
+	defaultMaxPendingPeerCount    = 16
+	defaultMaxMergeRegionSize     = 20
+	defaultMaxMergeRegionKeys     = 200000
+	defaultSplitMergeInterval     = 1 * time.Hour
+	defaultPatrolRegionInterval   = 100 * time.Millisecond
+	defaultMaxStoreDownTime       = 30 * time.Minute
+	defaultLeaderScheduleLimit    = 4
+	defaultRegionScheduleLimit    = 4
+	defaultReplicaScheduleLimit   = 8
+	defaultMergeScheduleLimit     = 8
+	defaultHotRegionScheduleLimit = 2
+	defaultTolerantSizeRatio      = 5
+	defaultLowSpaceRatio          = 0.8
+	defaultHighSpaceRatio         = 0.6
+	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
+	// hot region.
+	defaultHotRegionCacheHitsThreshold = 3
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -572,6 +596,12 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("merge-schedule-limit") {
 		adjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
 	}
+	if !meta.IsDefined("hot-region-schedule-limit") {
+		adjustUint64(&c.HotRegionScheduleLimit, defaultHotRegionScheduleLimit)
+	}
+	if !meta.IsDefined("hot-region-cache-hits-threshold") {
+		adjustUint64(&c.HotRegionCacheHitsThreshold, defaultHotRegionCacheHitsThreshold)
+	}
 	if !meta.IsDefined("tolerant-size-ratio") {
 		adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
 	}
@@ -594,6 +624,11 @@ func (c *ScheduleConfig) validate() error {
 	}
 	if c.LowSpaceRatio <= c.HighSpaceRatio {
 		return errors.New("low-space-ratio should be larger than high-space-ratio")
+	}
+	for _, scheduleConfig := range c.Schedulers {
+		if !schedule.IsSchedulerRegistered(scheduleConfig.Type) {
+			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
+		}
 	}
 	return nil
 }
@@ -675,6 +710,8 @@ type NamespaceConfig struct {
 	ReplicaScheduleLimit uint64 `json:"replica-schedule-limit"`
 	// MergeScheduleLimit is the max coexist merge schedules.
 	MergeScheduleLimit uint64 `json:"merge-schedule-limit"`
+	// HotRegionScheduleLimit is the max coexist hot region schedules.
+	HotRegionScheduleLimit uint64 `json:"hot-region-schedule-limit"`
 	// MaxReplicas is the number of replicas for each region.
 	MaxReplicas uint64 `json:"max-replicas"`
 }
@@ -684,6 +721,7 @@ func (c *NamespaceConfig) adjust(opt *scheduleOption) {
 	adjustUint64(&c.RegionScheduleLimit, opt.GetRegionScheduleLimit(namespace.DefaultNamespace))
 	adjustUint64(&c.ReplicaScheduleLimit, opt.GetReplicaScheduleLimit(namespace.DefaultNamespace))
 	adjustUint64(&c.MergeScheduleLimit, opt.GetMergeScheduleLimit(namespace.DefaultNamespace))
+	adjustUint64(&c.HotRegionScheduleLimit, opt.GetHotRegionScheduleLimit(namespace.DefaultNamespace))
 	adjustUint64(&c.MaxReplicas, uint64(opt.GetMaxReplicas(namespace.DefaultNamespace)))
 }
 
@@ -756,6 +794,27 @@ func ParseUrls(s string) ([]url.URL, error) {
 	return urls, nil
 }
 
+// SetupLogger setup the logger.
+func (c *Config) SetupLogger() error {
+	lg, p, err := log.InitLogger(&c.Log)
+	if err != nil {
+		return err
+	}
+	c.logger = lg
+	c.logProps = p
+	return nil
+}
+
+// GetZapLogger gets the created zap logger.
+func (c *Config) GetZapLogger() *zap.Logger {
+	return c.logger
+}
+
+// GetZapLogProperties gets properties of the zap logger.
+func (c *Config) GetZapLogProperties() *log.ZapProperties {
+	return c.logProps
+}
+
 // generates a configuration for embedded etcd.
 func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg := embed.NewConfig()
@@ -780,7 +839,9 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.PeerTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.PeerTLSInfo.CertFile = c.Security.CertPath
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
-
+	cfg.ForceNewCluster = c.ForceNewCluster
+	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
+	cfg.Logger = "zap"
 	var err error
 
 	cfg.LPUrls, err = ParseUrls(c.PeerUrls)

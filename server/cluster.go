@@ -19,21 +19,21 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	"github.com/pingcap/pd/server/region_syncer"
+	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
-const (
-	backgroundJobInterval = time.Minute
-)
+var backgroundJobInterval = time.Minute
 
 // RaftCluster is used for cluster config management.
 // Raft cluster key format:
@@ -121,6 +121,10 @@ func (c *RaftCluster) start() error {
 
 	c.wg.Add(3)
 	go c.runCoordinator()
+	// gofail: var highFrequencyClusterJobs bool
+	// if highFrequencyClusterJobs {
+	//     backgroundJobInterval = 100 * time.Microsecond
+	// }
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.syncRegions()
 	c.running = true
@@ -145,9 +149,9 @@ func (c *RaftCluster) syncRegions() {
 
 func (c *RaftCluster) stop() {
 	c.Lock()
-	defer c.Unlock()
 
 	if !c.running {
+		c.Unlock()
 		return
 	}
 
@@ -155,6 +159,7 @@ func (c *RaftCluster) stop() {
 
 	close(c.quit)
 	c.coordinator.stop()
+	c.Unlock()
 	c.wg.Wait()
 }
 
@@ -278,14 +283,14 @@ func (c *RaftCluster) GetMetaRegions() []*metapb.Region {
 	return c.cachedCluster.getMetaRegions()
 }
 
-// GetRegions returns all regions info in detail.
+// GetRegions returns all regions' information in detail.
 func (c *RaftCluster) GetRegions() []*core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
 	return c.cachedCluster.getRegions()
 }
 
-// GetStoreRegions returns all regions info with a given storeID.
+// GetStoreRegions returns all regions' information with a given storeID.
 func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
@@ -328,7 +333,7 @@ func (c *RaftCluster) GetStore(storeID uint64) (*core.StoreInfo, error) {
 	return store, nil
 }
 
-// GetAdjacentRegions returns region's info that is adjacent with specific region id.
+// GetAdjacentRegions returns regions' information that are adjacent with the specific region ID.
 func (c *RaftCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo) {
 	c.RLock()
 	defer c.RUnlock()
@@ -343,10 +348,10 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 	if store == nil {
 		return errors.Errorf("invalid store ID %d, not found", storeID)
 	}
-	storeMeta := store.Store
-	storeMeta.Labels = labels
+	newStore := proto.Clone(store.GetMeta()).(*metapb.Store)
+	newStore.Labels = labels
 	// putStore will perform label merge.
-	err := c.putStore(storeMeta)
+	err := c.putStore(newStore)
 	return err
 }
 
@@ -369,7 +374,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 
 	cluster := c.cachedCluster
 	if cluster == nil {
-		log.Fatalf("cluster should be created in server %s", c.s.Name())
+		log.Fatal("cluster should be created", zap.String("name", c.s.Name()))
 	}
 
 	// Store address can not be the same as other stores.
@@ -378,8 +383,8 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		if s.IsTombstone() {
 			continue
 		}
-		if s.GetId() != store.GetId() && s.GetAddress() == store.GetAddress() {
-			return errors.Errorf("duplicated store address: %v, already registered by %v", store, s.Store)
+		if s.GetID() != store.GetId() && s.GetAddress() == store.GetAddress() {
+			return errors.Errorf("duplicated store address: %v, already registered by %v", store, s.GetMeta())
 		}
 	}
 
@@ -389,8 +394,8 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		if s.IsTombstone() {
 			continue
 		}
-		if s.GetId() != store.GetId() && s.GetAddress() == store.GetAddress() {
-			return errors.Errorf("duplicated store address: %v, already registered by %v", store, s.Store)
+		if s.GetID() != store.GetId() && s.GetAddress() == store.GetAddress() {
+			return errors.Errorf("duplicated store address: %v, already registered by %v", store, s.GetMeta())
 		}
 	}
 
@@ -400,19 +405,25 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		s = core.NewStoreInfo(store)
 	} else {
 		// Update an existed store.
-		s.Address = store.Address
-		s.Version = store.Version
-		s.MergeLabels(store.Labels)
+		labels := s.MergeLabels(store.GetLabels())
+
+		s = s.Clone(
+			core.SetStoreAddress(store.Address),
+			core.SetStoreVersion(store.Version),
+			core.SetStoreLabels(labels),
+		)
 	}
 	// Check location labels.
 	for _, k := range cluster.GetLocationLabels() {
 		if v := s.GetLabelValue(k); len(v) == 0 {
-			log.Warnf("missing location label %q in store %v", k, s)
+			log.Warn("missing location label",
+				zap.Stringer("store", s.GetMeta()),
+				zap.String("label-key", k))
 		}
 	}
 
 	if cluster.CheckLabelProperty(schedule.SlaveLabel, store.GetLabels()) {
-		s.IsSlave = true
+		s.SetSlave(true)
 	}
 	return cluster.putStore(s)
 }
@@ -440,9 +451,11 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 		return op.AddTo(core.StoreTombstonedErr{StoreID: storeID})
 	}
 
-	store.State = metapb.StoreState_Offline
-	log.Warnf("[store %d] store %s has been Offline", store.GetId(), store.GetAddress())
-	return cluster.putStore(store)
+	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline))
+	log.Warn("store has been offline",
+		zap.Uint64("store-id", newStore.GetID()),
+		zap.String("store-address", newStore.GetAddress()))
+	return cluster.putStore(newStore)
 }
 
 // BuryStore marks a store as tombstone in cluster.
@@ -469,12 +482,14 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error { // revive:di
 		if !force {
 			return errors.New("store is still up, please remove store gracefully")
 		}
-		log.Warnf("forcedly bury store %v", store)
+		log.Warn("forcedly bury store", zap.Stringer("store", store.GetMeta()))
 	}
 
-	store.State = metapb.StoreState_Tombstone
-	log.Warnf("[store %d] store %s has been Tombstone", store.GetId(), store.GetAddress())
-	return cluster.putStore(store)
+	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	log.Warn("store has been Tombstone",
+		zap.Uint64("store-id", newStore.GetID()),
+		zap.String("store-address", newStore.GetAddress()))
+	return cluster.putStore(newStore)
 }
 
 // SetStoreState sets up a store's state.
@@ -489,13 +504,15 @@ func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) err
 		return core.NewStoreNotFoundErr(storeID)
 	}
 
-	store.State = state
-	log.Warnf("[store %d] set state to %v", storeID, state.String())
-	return cluster.putStore(store)
+	newStore := store.Clone(core.SetStoreState(state))
+	log.Warn("store update state",
+		zap.Uint64("store-id", storeID),
+		zap.Stringer("new-state", state))
+	return cluster.putStore(newStore)
 }
 
 // SetStoreWeight sets up a store's leader/region balance weight.
-func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) error {
+func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight float64) error {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -504,12 +521,16 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leader, region float64) err
 		return core.NewStoreNotFoundErr(storeID)
 	}
 
-	if err := c.s.kv.SaveStoreWeight(storeID, leader, region); err != nil {
+	if err := c.s.kv.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
 		return err
 	}
 
-	store.LeaderWeight, store.RegionWeight = leader, region
-	return c.cachedCluster.putStore(store)
+	newStore := store.Clone(
+		core.SetLeaderWeight(leaderWeight),
+		core.SetRegionWeight(regionWeight),
+	)
+
+	return c.cachedCluster.putStore(newStore)
 }
 
 func (c *RaftCluster) checkStores() {
@@ -518,21 +539,26 @@ func (c *RaftCluster) checkStores() {
 
 	cluster := c.cachedCluster
 
-	for _, store := range cluster.GetAllStores() {
-		if store.GetState() != metapb.StoreState_Offline {
-			if store.GetState() == metapb.StoreState_Up && !store.IsLowSpace(cluster.GetLowSpaceRatio()) {
-				upStoreCount++
-				continue
-			}
+	for _, store := range cluster.GetStores() {
+		// the store has already been tombstone
+		if store.IsTombstone() {
+			continue
 		}
-		offlineStore := store.Store
+
+		if store.IsUp() {
+			if !store.IsLowSpace(cluster.GetLowSpaceRatio()) {
+				upStoreCount++
+			}
+			continue
+		}
+
+		offlineStore := store.GetMeta()
 		// If the store is empty, it can be buried.
 		if cluster.getStoreRegionCount(offlineStore.GetId()) == 0 {
-			err := c.BuryStore(offlineStore.GetId(), false)
-			if err != nil {
-				log.Errorf("bury store %v failed: %v", offlineStore, err)
-			} else {
-				log.Infof("buried store %v", offlineStore)
+			if err := c.BuryStore(offlineStore.GetId(), false); err != nil {
+				log.Error("bury store failed",
+					zap.Stringer("store", offlineStore),
+					zap.Error(err))
 			}
 		} else {
 			offlineStores = append(offlineStores, offlineStore)
@@ -545,9 +571,33 @@ func (c *RaftCluster) checkStores() {
 
 	if upStoreCount < cluster.GetMaxReplicas() {
 		for _, offlineStore := range offlineStores {
-			log.Warnf("store %v may not turn into Tombstone, there are no extra up node has enough space to accommodate the extra replica", offlineStore)
+			log.Warn("store may not turn into Tombstone, there are no extra up node has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
 		}
 	}
+}
+
+// RemoveTombStoneRecords removes the tombStone Records.
+func (c *RaftCluster) RemoveTombStoneRecords() error {
+	c.RLock()
+	defer c.RUnlock()
+
+	cluster := c.cachedCluster
+
+	for _, store := range cluster.GetStores() {
+		if store.IsTombstone() {
+			// the store has already been tombstone
+			err := cluster.deleteStore(store)
+			if err != nil {
+				log.Error("delete store failed",
+					zap.Stringer("store", store.GetMeta()),
+					zap.Error(err))
+				return err
+			}
+			log.Info("delete store successed",
+				zap.Stringer("store", store.GetMeta()))
+		}
+	}
+	return nil
 }
 
 func (c *RaftCluster) checkOperators() {
@@ -556,13 +606,17 @@ func (c *RaftCluster) checkOperators() {
 		// after region is merged, it will not heartbeat anymore
 		// the operator of merged region will not timeout actively
 		if c.cachedCluster.GetRegion(op.RegionID()) == nil {
-			log.Debugf("remove operator %v cause region %d is merged", op, op.RegionID())
+			log.Debug("remove operator cause region is merged",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Stringer("operator", op))
 			opController.RemoveOperator(op)
 			continue
 		}
 
 		if op.IsTimeout() {
-			log.Infof("[region %v] operator timeout: %s", op.RegionID(), op)
+			log.Info("operator timeout",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Stringer("operator", op))
 			opController.RemoveOperator(op)
 		}
 	}
@@ -586,7 +640,7 @@ func (c *RaftCluster) collectHealthStatus() {
 	client := c.s.GetClient()
 	members, err := GetMembers(client)
 	if err != nil {
-		log.Info("get members error:", err)
+		log.Error("get members error", zap.Error(err))
 	}
 	unhealth := c.s.CheckHealth(members)
 	for _, member := range members {

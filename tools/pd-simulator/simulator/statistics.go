@@ -16,9 +16,11 @@ package simulator
 import (
 	"fmt"
 	"math"
+	"sync"
 )
 
 type taskStatistics struct {
+	sync.RWMutex
 	addPeer        map[uint64]int
 	removePeer     map[uint64]int
 	addLearner     map[uint64]int
@@ -38,6 +40,8 @@ func newTaskStatistics() *taskStatistics {
 }
 
 func (t *taskStatistics) getStatistics() map[string]int {
+	t.RLock()
+	defer t.RUnlock()
 	stats := make(map[string]int)
 	addpeer := getSum(t.addPeer)
 	removePeer := getSum(t.removePeer)
@@ -61,7 +65,51 @@ func (t *taskStatistics) getStatistics() map[string]int {
 	return stats
 }
 
+func (t *taskStatistics) incAddPeer(regionID uint64) {
+	t.Lock()
+	defer t.Unlock()
+	t.addPeer[regionID]++
+}
+
+func (t *taskStatistics) incAddLeaner(regionID uint64) {
+	t.Lock()
+	defer t.Unlock()
+	t.addLearner[regionID]++
+}
+
+func (t *taskStatistics) incPromoteLeaner(regionID uint64) {
+	t.Lock()
+	defer t.Unlock()
+	t.promoteLeaner[regionID]++
+}
+
+func (t *taskStatistics) incRemovePeer(regionID uint64) {
+	t.Lock()
+	defer t.Unlock()
+	t.removePeer[regionID]++
+}
+
+func (t *taskStatistics) incMergeRegion() {
+	t.Lock()
+	defer t.Unlock()
+	t.mergeRegion++
+}
+
+func (t *taskStatistics) incTransferLeader(fromPeerID, toPeerID uint64) {
+	t.Lock()
+	defer t.Unlock()
+	_, ok := t.transferLeader[fromPeerID]
+	if ok {
+		t.transferLeader[fromPeerID][toPeerID]++
+	} else {
+		m := make(map[uint64]int)
+		m[toPeerID]++
+		t.transferLeader[fromPeerID] = m
+	}
+}
+
 type snapshotStatistics struct {
+	sync.RWMutex
 	receive map[uint64]int
 	send    map[uint64]int
 }
@@ -86,6 +134,8 @@ func newSchedulerStatistics() *schedulerStatistics {
 }
 
 func (s *snapshotStatistics) getStatistics() map[string]int {
+	s.RLock()
+	defer s.RUnlock()
 	maxSend := getMax(s.send)
 	maxReceive := getMax(s.receive)
 	minSend := getMin(s.send)
@@ -102,6 +152,18 @@ func (s *snapshotStatistics) getStatistics() map[string]int {
 	}
 
 	return stats
+}
+
+func (s *snapshotStatistics) incSendSnapshot(storeID uint64) {
+	s.Lock()
+	defer s.Unlock()
+	s.send[storeID]++
+}
+
+func (s *snapshotStatistics) incReceiveSnapshot(storeID uint64) {
+	s.Lock()
+	defer s.Unlock()
+	s.receive[storeID]++
 }
 
 // PrintStatistics prints the statistics of the scheduler.

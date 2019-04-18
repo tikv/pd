@@ -18,10 +18,11 @@ import (
 	"strconv"
 	"time"
 
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 const (
@@ -204,7 +205,7 @@ func (l *balanceAdjacentRegionScheduler) process(cluster schedule.Cluster) []*sc
 
 	defer func() {
 		if l.cacheRegions.len() < 0 {
-			log.Fatalf("[%s]the cache overflow should never happen", l.GetName())
+			log.Fatal("cache overflow", zap.String("scheduler", l.GetName()))
 		}
 		l.cacheRegions.head = head + 1
 		l.lastKey = r2.GetStartKey()
@@ -258,13 +259,15 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster schedule.Cluster
 	}
 	storesInfo := make([]*core.StoreInfo, 0, len(diffPeers))
 	for _, p := range diffPeers {
-		storesInfo = append(storesInfo, cluster.GetStore(p.GetStoreId()))
+		if store := cluster.GetStore(p.GetStoreId()); store != nil {
+			storesInfo = append(storesInfo, store)
+		}
 	}
 	target := l.selector.SelectTarget(cluster, storesInfo)
 	if target == nil {
 		return nil
 	}
-	step := schedule.TransferLeader{FromStore: before.GetLeader().GetStoreId(), ToStore: target.GetId()}
+	step := schedule.TransferLeader{FromStore: before.GetLeader().GetStoreId(), ToStore: target.GetID()}
 	op := schedule.NewOperator("balance-adjacent-leader", before.GetID(), before.GetRegionEpoch(), schedule.OpAdjacent|schedule.OpLeader, step)
 	op.SetPriorityLevel(core.LowPriority)
 	schedulerCounter.WithLabelValues(l.GetName(), "adjacent_leader").Inc()
@@ -279,6 +282,10 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, 
 	leaderStoreID := region.GetLeader().GetStoreId()
 	stores := cluster.GetRegionStores(region)
 	source := cluster.GetStore(leaderStoreID)
+	if source == nil {
+		return nil
+	}
+
 	scoreGuard := schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), stores, source)
 	excludeStores := region.GetStoreIds()
 	for _, storeID := range l.cacheRegions.assignedStoreIds {
@@ -295,7 +302,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, 
 	if target == nil {
 		return nil
 	}
-	newPeer, err := cluster.AllocPeer(target.GetId())
+	newPeer, err := cluster.AllocPeer(target.GetID())
 	if err != nil {
 		return nil
 	}
@@ -307,7 +314,11 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, 
 	// record the store id and exclude it in next time
 	l.cacheRegions.assignedStoreIds = append(l.cacheRegions.assignedStoreIds, newPeer.GetStoreId())
 
-	op := schedule.CreateMovePeerOperator("balance-adjacent-peer", cluster, region, schedule.OpAdjacent, leaderStoreID, newPeer.GetStoreId(), newPeer.GetId())
+	op, err := schedule.CreateMovePeerOperator("balance-adjacent-peer", cluster, region, schedule.OpAdjacent, leaderStoreID, newPeer.GetStoreId(), newPeer.GetId())
+	if err != nil {
+		schedulerCounter.WithLabelValues(l.GetName(), "create_operator_fail").Inc()
+		return nil
+	}
 	op.SetPriorityLevel(core.LowPriority)
 	schedulerCounter.WithLabelValues(l.GetName(), "adjacent_peer").Inc()
 	return op

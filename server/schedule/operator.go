@@ -23,9 +23,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/sirupsen/logrus"
-
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
+	"go.uber.org/zap"
 )
 
 const (
@@ -82,7 +82,7 @@ func (ap AddPeer) String() string {
 func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
 	if p := region.GetStoreVoter(ap.ToStore); p != nil {
 		if p.GetId() != ap.PeerID {
-			log.Warnf("expect %v, but obtain voter %v", ap.String(), p.GetId())
+			log.Warn("obtain unexpected peer", zap.String("expect", ap.String()), zap.Uint64("obtain-voter", p.GetId()))
 			return false
 		}
 		return region.GetPendingVoter(p.GetId()) == nil
@@ -111,7 +111,7 @@ func (al AddLearner) String() string {
 func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 	if p := region.GetStoreLearner(al.ToStore); p != nil {
 		if p.GetId() != al.PeerID {
-			log.Warnf("expect %v, but obtain learner %v", al.String(), p.GetId())
+			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", p.GetId()))
 			return false
 		}
 		return region.GetPendingLearner(p.GetId()) == nil
@@ -119,7 +119,7 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 
 	if p := region.GetStoreSlavePeer(al.ToStore); p != nil {
 		if p.GetId() != al.PeerID {
-			log.Warnf("expect %v, but obtain learner %v", al.String(), p.GetId())
+			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", p.GetId()))
 			return false
 		}
 		return region.GetStoreSlavePendingPeer(p.GetId()) == nil
@@ -148,7 +148,7 @@ func (pl PromoteLearner) String() string {
 func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 	if p := region.GetStoreVoter(pl.ToStore); p != nil {
 		if p.GetId() != pl.PeerID {
-			log.Warnf("expect %v, but obtain voter %v", pl.String(), p.GetId())
+			log.Warn("obtain unexpected peer", zap.String("expect", pl.String()), zap.Uint64("obtain-voter", p.GetId()))
 		}
 		return p.GetId() == pl.PeerID
 	}
@@ -436,14 +436,16 @@ func (o *Operator) History() []OperatorHistory {
 }
 
 // CreateRemovePeerOperator creates an Operator that removes a peer from region.
-func CreateRemovePeerOperator(desc string, cluster Cluster, kind OperatorKind, region *core.RegionInfo, storeID uint64) *Operator {
-	removeKind, steps := removePeerSteps(cluster, region, storeID)
-	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), removeKind|kind, steps...)
+func CreateRemovePeerOperator(desc string, cluster Cluster, kind OperatorKind, region *core.RegionInfo, storeID uint64) (*Operator, error) {
+	removeKind, steps, err := removePeerSteps(cluster, region, storeID, getRegionFollowerIDs(region))
+	if err != nil {
+		return nil, err
+	}
+	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), removeKind|kind, steps...), nil
 }
 
-// CreateMovePeerOperator creates an Operator that replaces an old peer with a new peer.
-func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OperatorKind, oldStore, newStore uint64, peerID uint64) *Operator {
-	removeKind, steps := removePeerSteps(cluster, region, oldStore)
+// CreateAddPeerSteps creates an OperatorStep list that add a new Peer.
+func CreateAddPeerSteps(newStore uint64, peerID uint64, cluster Cluster) []OperatorStep {
 	var st []OperatorStep
 	if cluster.IsRaftLearnerEnabled() {
 		st = []OperatorStep{
@@ -455,20 +457,43 @@ func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInf
 			AddPeer{ToStore: newStore, PeerID: peerID},
 		}
 	}
+	return st
+}
+
+// CreateMovePeerOperator creates an Operator that replaces an old peer with a new peer.
+func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OperatorKind, oldStore, newStore uint64, peerID uint64) (*Operator, error) {
+	removeKind, steps, err := removePeerSteps(cluster, region, oldStore, append(getRegionFollowerIDs(region), newStore))
+	if err != nil {
+		return nil, err
+	}
+	st := CreateAddPeerSteps(newStore, peerID, cluster)
 	steps = append(st, steps...)
-	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), removeKind|kind|OpRegion, steps...)
+	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), removeKind|kind|OpRegion, steps...), nil
+}
+
+func getRegionFollowerIDs(region *core.RegionInfo) []uint64 {
+	var ids []uint64
+	for id := range region.GetFollowers() {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // removePeerSteps returns the steps to safely remove a peer. It prevents removing leader by transfer its leadership first.
-func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64) (kind OperatorKind, steps []OperatorStep) {
+func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64, followerIDs []uint64) (kind OperatorKind, steps []OperatorStep, err error) {
 	if region.GetLeader() != nil && region.GetLeader().GetStoreId() == storeID {
-		for id := range region.GetFollowers() {
+		for _, id := range followerIDs {
 			follower := cluster.GetStore(id)
-			if follower != nil && !cluster.CheckLabelProperty(RejectLeader, follower.Labels) {
+			if follower != nil && !cluster.CheckLabelProperty(RejectLeader, follower.GetLabels()) {
 				steps = append(steps, TransferLeader{FromStore: storeID, ToStore: id})
 				kind = OpLeader
 				break
 			}
+		}
+		if len(steps) == 0 {
+			err = errors.New("no suitable follower to become region leader")
+			log.Debug("fail to create remove peer operator", zap.Uint64("region-id", region.GetID()), zap.Error(err))
+			return
 		}
 	}
 	steps = append(steps, RemovePeer{FromStore: storeID})
@@ -490,7 +515,7 @@ func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.Region
 	})
 
 	op1 := NewOperator(desc, source.GetID(), source.GetRegionEpoch(), kinds|kind|OpMerge, steps...)
-	op2 := NewOperator(desc, target.GetID(), target.GetRegionEpoch(), kind|OpMerge, MergeRegion{
+	op2 := NewOperator(desc, target.GetID(), target.GetRegionEpoch(), kinds|kind|OpMerge, MergeRegion{
 		FromRegion: source.GetMeta(),
 		ToRegion:   target.GetMeta(),
 		IsPassive:  true,
@@ -530,7 +555,7 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 
 			peer, err := cluster.AllocPeer(storeID)
 			if err != nil {
-				log.Debugf("peer alloc failed: %v", err)
+				log.Debug("peer alloc failed", zap.Error(err))
 				return nil, kind, err
 			}
 			if cluster.IsRaftLearnerEnabled() {
@@ -618,4 +643,25 @@ func getIntersectionStores(a []*metapb.Peer, b []*metapb.Peer) map[uint64]struct
 	}
 
 	return intersection
+}
+
+// CheckOperatorValid checks if the operator is valid.
+func CheckOperatorValid(op *Operator) bool {
+	removeStores := []uint64{}
+	for _, step := range op.steps {
+		if tr, ok := step.(TransferLeader); ok {
+			for _, store := range removeStores {
+				if store == tr.FromStore {
+					return false
+				}
+				if store == tr.ToStore {
+					return false
+				}
+			}
+		}
+		if rp, ok := step.(RemovePeer); ok {
+			removeStores = append(removeStores, rp.FromStore)
+		}
+	}
+	return true
 }

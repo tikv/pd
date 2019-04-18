@@ -15,6 +15,9 @@ package simulator
 
 import (
 	"context"
+	"sync"
+
+	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
@@ -25,6 +28,7 @@ import (
 
 // Driver promotes the cluster status change.
 type Driver struct {
+	wg          sync.WaitGroup
 	pdAddr      string
 	simCase     *cases.Case
 	client      Client
@@ -70,9 +74,9 @@ func (d *Driver) Prepare() error {
 	err = d.client.Bootstrap(ctx, store, region)
 	cancel()
 	if err != nil {
-		simutil.Logger.Fatal("bootstrapped error: ", err)
+		simutil.Logger.Fatal("bootstrap error", zap.Error(err))
 	} else {
-		simutil.Logger.Debug("Bootstrap success")
+		simutil.Logger.Debug("bootstrap success")
 	}
 
 	// Setup alloc id.
@@ -104,8 +108,10 @@ func (d *Driver) Tick() {
 	d.eventRunner.Tick(d.tickCount)
 	for _, n := range d.conn.Nodes {
 		n.reportRegionChange()
-		n.Tick()
+		d.wg.Add(1)
+		go n.Tick(&d.wg)
 	}
+	d.wg.Wait()
 }
 
 // Check checks if the simulation is completed.

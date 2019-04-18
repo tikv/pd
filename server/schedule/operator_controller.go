@@ -21,8 +21,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
+	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 var historyKeepTime = 5 * time.Minute
@@ -40,6 +42,7 @@ type OperatorController struct {
 	hbStreams HeartbeatStreams
 	histories *list.List
 	counts    map[OperatorKind]uint64
+	opRecords *OperatorRecords
 }
 
 // NewOperatorController creates a OperatorController.
@@ -50,6 +53,7 @@ func NewOperatorController(cluster Cluster, hbStreams HeartbeatStreams) *Operato
 		hbStreams: hbStreams,
 		histories: list.New(),
 		counts:    make(map[OperatorKind]uint64),
+		opRecords: NewOperatorRecords(),
 	}
 }
 
@@ -64,14 +68,16 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo) {
 			return
 		}
 		if op.IsFinish() {
-			log.Infof("[region %v] operator finish: %s", region.GetID(), op)
+			log.Info("operator finish", zap.Uint64("region-id", region.GetID()), zap.Reflect("operator", op))
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 			operatorDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 			oc.pushHistory(op)
+			oc.opRecords.Put(op, pdpb.OperatorStatus_SUCCESS)
 			oc.RemoveOperator(op)
 		} else if timeout {
-			log.Infof("[region %v] operator timeout: %s", region.GetID(), op)
+			log.Info("operator timeout", zap.Uint64("region-id", region.GetID()), zap.Reflect("operator", op))
 			oc.RemoveOperator(op)
+			oc.opRecords.Put(op, pdpb.OperatorStatus_TIMEOUT)
 		}
 	}
 }
@@ -84,6 +90,7 @@ func (oc *OperatorController) AddOperator(ops ...*Operator) bool {
 	for _, op := range ops {
 		if !oc.checkAddOperator(op) {
 			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
+			oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
 			return false
 		}
 	}
@@ -94,18 +101,23 @@ func (oc *OperatorController) AddOperator(ops ...*Operator) bool {
 	return true
 }
 
+// checkAddOperator checks if the operator can be added.
+// There are several situations that cannot be added:
+// - There is no such region in the cluster
+// - The epoch of the operator and the epoch of the corresponding region are no longer consistent.
+// - The region already has a higher priority or same priority operator.
 func (oc *OperatorController) checkAddOperator(op *Operator) bool {
 	region := oc.cluster.GetRegion(op.RegionID())
 	if region == nil {
-		log.Debugf("[region %v] region not found, cancel add operator", op.RegionID())
+		log.Debug("region not found, cancel add operator", zap.Uint64("region-id", op.RegionID()))
 		return false
 	}
 	if region.GetRegionEpoch().GetVersion() != op.RegionEpoch().GetVersion() || region.GetRegionEpoch().GetConfVer() != op.RegionEpoch().GetConfVer() {
-		log.Debugf("[region %v] region epoch not match, %v vs %v, cancel add operator", op.RegionID(), region.GetRegionEpoch(), op.RegionEpoch())
+		log.Debug("region epoch not match, cancel add operator", zap.Uint64("region-id", op.RegionID()), zap.Reflect("old", region.GetRegionEpoch()), zap.Reflect("new", op.RegionEpoch()))
 		return false
 	}
 	if old := oc.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
-		log.Debugf("[region %v] already have operator %s, cancel add operator", op.RegionID(), old)
+		log.Debug("already have operator, cancel add operator", zap.Uint64("region-id", op.RegionID()), zap.Reflect("old", old))
 		return false
 	}
 	return true
@@ -118,13 +130,14 @@ func isHigherPriorityOperator(new, old *Operator) bool {
 func (oc *OperatorController) addOperatorLocked(op *Operator) bool {
 	regionID := op.RegionID()
 
-	log.Infof("[region %v] add operator: %s", regionID, op)
+	log.Info("add operator", zap.Uint64("region-id", regionID), zap.Reflect("operator", op))
 
 	// If there is an old operator, replace it. The priority should be checked
 	// already.
 	if old, ok := oc.operators[regionID]; ok {
-		log.Infof("[region %v] replace old operator: %s", regionID, old)
+		log.Info("replace old operator", zap.Uint64("region-id", regionID), zap.Reflect("operator", old))
 		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
+		oc.opRecords.Put(old, pdpb.OperatorStatus_REPLACE)
 		oc.removeOperatorLocked(old)
 	}
 
@@ -146,6 +159,19 @@ func (oc *OperatorController) RemoveOperator(op *Operator) {
 	oc.Lock()
 	defer oc.Unlock()
 	oc.removeOperatorLocked(op)
+}
+
+// GetOperatorStatus gets the operator and its status with the specify id.
+func (oc *OperatorController) GetOperatorStatus(id uint64) *OperatorWithStatus {
+	oc.Lock()
+	defer oc.Unlock()
+	if op, ok := oc.operators[id]; ok {
+		return &OperatorWithStatus{
+			Op:     op,
+			Status: pdpb.OperatorStatus_RUNNING,
+		}
+	}
+	return oc.opRecords.Get(id)
 }
 
 func (oc *OperatorController) removeOperatorLocked(op *Operator) {
@@ -177,7 +203,7 @@ func (oc *OperatorController) GetOperators() []*Operator {
 
 // SendScheduleCommand sends a command to the region.
 func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step OperatorStep) {
-	log.Infof("[region %v] send schedule command: %s", region.GetID(), step)
+	log.Info("send schedule command", zap.Uint64("region-id", region.GetID()), zap.Stringer("step", step))
 	switch st := step.(type) {
 	case TransferLeader:
 		cmd := &pdpb.RegionHeartbeatResponse{
@@ -235,7 +261,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			peer = region.GetStoreSlavePeer(st.FromStore)
 		}
 		if peer == nil {
-			log.Errorf("[region %d] Cannot find the peer on store %d", region.GetID(), st.FromStore)
+			log.Error("Cannot find the peer", zap.Uint64("region-id", region.GetID()), zap.Uint64("store-id", st.FromStore))
 			return
 		}
 		cmd := &pdpb.RegionHeartbeatResponse{
@@ -263,7 +289,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		}
 		oc.hbStreams.SendMsg(region, cmd)
 	default:
-		log.Errorf("unknown operatorStep: %v", step)
+		log.Error("unknown operator step", zap.Reflect("step", step))
 	}
 }
 
@@ -403,9 +429,48 @@ func (s StoreInfluence) ResourceSize(kind core.ResourceKind) int64 {
 	}
 }
 
-// SetOperator is only used for test
+// SetOperator is only used for test.
 func (oc *OperatorController) SetOperator(op *Operator) {
 	oc.Lock()
 	defer oc.Unlock()
 	oc.operators[op.RegionID()] = op
+}
+
+// OperatorWithStatus records the operator and its status.
+type OperatorWithStatus struct {
+	Op     *Operator
+	Status pdpb.OperatorStatus
+}
+
+// OperatorRecords remains the operator and its status for a while.
+type OperatorRecords struct {
+	ttl *cache.TTL
+}
+
+const operatorStatusRemainTime = 10 * time.Minute
+
+// NewOperatorRecords returns a OperatorRecords.
+func NewOperatorRecords() *OperatorRecords {
+	return &OperatorRecords{
+		ttl: cache.NewTTL(time.Minute, operatorStatusRemainTime),
+	}
+}
+
+// Get gets the operator and its status.
+func (o *OperatorRecords) Get(id uint64) *OperatorWithStatus {
+	v, exist := o.ttl.Get(id)
+	if !exist {
+		return nil
+	}
+	return v.(*OperatorWithStatus)
+}
+
+// Put puts the operator and its status.
+func (o *OperatorRecords) Put(op *Operator, status pdpb.OperatorStatus) {
+	id := op.regionID
+	record := &OperatorWithStatus{
+		Op:     op,
+		Status: status,
+	}
+	o.ttl.Put(id, record)
 }

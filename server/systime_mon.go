@@ -16,7 +16,8 @@ package server
 import (
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 // StartMonitor calls systimeErrHandler if system time jump backward.
@@ -28,7 +29,7 @@ func StartMonitor(now func() time.Time, systimeErrHandler func()) {
 		last := now().UnixNano()
 		<-tick.C
 		if now().UnixNano() < last {
-			log.Errorf("system time jump backward, last:%v", last)
+			log.Error("system time jump backward", zap.Int64("last", last))
 			systimeErrHandler()
 		}
 	}

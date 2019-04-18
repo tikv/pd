@@ -15,16 +15,16 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 const (
@@ -44,6 +44,7 @@ var (
 	errSchedulerNotFound = errors.New("scheduler not found")
 )
 
+// coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
 type coordinator struct {
 	sync.RWMutex
 
@@ -63,6 +64,7 @@ type coordinator struct {
 	hbStreams        *heartbeatStreams
 }
 
+// newCoordinator creates a new coordinator.
 func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	opController := schedule.NewOperatorController(cluster, hbStreams)
@@ -82,6 +84,8 @@ func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifie
 	}
 }
 
+// patrolRegions is used to scan regions.
+// The checkers will check these regions to decide if they need to do some operations.
 func (c *coordinator) patrolRegions() {
 	defer logutil.LogPanic()
 
@@ -102,13 +106,13 @@ func (c *coordinator) patrolRegions() {
 
 		regions := c.cluster.ScanRegions(key, patrolScanRegionLimit)
 		if len(regions) == 0 {
-			// reset scan key.
+			// Resets the scan key.
 			key = nil
 			continue
 		}
 
 		for _, region := range regions {
-			// Skip the region if there is already a pending operator.
+			// Skips the region if there is already a pending operator.
 			if c.opController.GetOperator(region.GetID()) != nil {
 				continue
 			}
@@ -119,7 +123,7 @@ func (c *coordinator) patrolRegions() {
 				break
 			}
 		}
-		// update label level isolation statistics.
+		// Updates the label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
 		if len(key) == 0 {
 			patrolCheckRegionsHistogram.Observe(time.Since(start).Seconds())
@@ -130,7 +134,7 @@ func (c *coordinator) patrolRegions() {
 
 func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 	// If PD has restarted, it need to check learners added before and promote them.
-	// Don't check isRaftLearnerEnabled cause it may be disable learner feature but still some learners to promote.
+	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
 	for _, p := range region.GetLearners() {
 		if region.GetPendingLearner(p.GetId()) != nil {
@@ -140,7 +144,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 			ToStore: p.GetStoreId(),
 			PeerID:  p.GetId(),
 		}
-		op := schedule.NewOperator("promoteLearner", region.GetID(), region.GetRegionEpoch(), schedule.OpRegion, step)
+		op := schedule.NewOperator("promote-learner", region.GetID(), region.GetRegionEpoch(), schedule.OpRegion, step)
 		if opController.AddOperator(op) {
 			return true
 		}
@@ -165,7 +169,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 	}
 	if c.cluster.IsFeatureSupported(RegionMerge) && opController.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 		if ops := c.mergeChecker.Check(region); ops != nil {
-			// make sure two operators can add successfully altogether
+			// It makes sure that two operators can be added successfully altogether.
 			if opController.AddOperator(ops...) {
 				return true
 			}
@@ -205,33 +209,35 @@ func (c *coordinator) run() {
 		if schedulerCfg.Disable {
 			scheduleCfg.Schedulers[k] = schedulerCfg
 			k++
-			log.Info("skip create ", schedulerCfg.Type)
+			log.Info("skip create scheduler", zap.String("scheduler-type", schedulerCfg.Type))
 			continue
 		}
 		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, schedulerCfg.Args...)
 		if err != nil {
-			log.Fatalf("can not create scheduler %s: %v", schedulerCfg.Type, err)
+			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Error(err))
+			continue
 		}
-		log.Infof("create scheduler %s", s.GetName())
+		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil {
-			log.Errorf("can not add scheduler %s: %v", s.GetName(), err)
+			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		}
 
-		// only record valid scheduler config
+		// Only records the valid scheduler config.
 		if err == nil {
 			scheduleCfg.Schedulers[k] = schedulerCfg
 			k++
 		}
 	}
 
-	// remove invalid scheduler config and persist
+	// Removes the invalid scheduler config and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
 	c.cluster.opt.store(scheduleCfg)
 	if err := c.cluster.opt.persist(c.cluster.kv); err != nil {
-		log.Errorf("can't persist schedule config: %v", err)
+		log.Error("cannot persist schedule config", zap.Error(err))
 	}
 
 	c.wg.Add(1)
+	// Starts to patrol regions.
 	go c.patrolRegions()
 }
 
@@ -239,7 +245,7 @@ func (c *coordinator) stop() {
 	c.cancel()
 }
 
-// Hack to retrive info from scheduler.
+// Hack to retrieve info from scheduler.
 // TODO: remove it.
 type hasHotStatus interface {
 	GetHotReadStatus() *core.StoreHotRegionInfos
@@ -288,6 +294,8 @@ func (c *coordinator) collectSchedulerMetrics() {
 	defer c.RUnlock()
 	for _, s := range c.schedulers {
 		var allowScheduler float64
+		// If the scheduler is not allowed to schedule, it will disappear in Grafana panel.
+		// See issue #1341.
 		if s.AllowSchedule() {
 			allowScheduler = 1
 		}
@@ -298,7 +306,7 @@ func (c *coordinator) collectSchedulerMetrics() {
 func (c *coordinator) collectHotSpotMetrics() {
 	c.RLock()
 	defer c.RUnlock()
-	// collect hot write region metrics
+	// Collects hot write region metrics.
 	s, ok := c.schedulers[hotRegionScheduleName]
 	if !ok {
 		return
@@ -306,46 +314,46 @@ func (c *coordinator) collectHotSpotMetrics() {
 	stores := c.cluster.GetStores()
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
 	for _, s := range stores {
-		store := fmt.Sprintf("store_%d", s.GetId())
-		stat, ok := status.AsPeer[s.GetId()]
+		storeAddress := s.GetAddress()
+		stat, ok := status.AsPeer[s.GetID()]
 		if ok {
 			totalWriteBytes := float64(stat.TotalFlowBytes)
 			hotWriteRegionCount := float64(stat.RegionsCount)
 
-			hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_peer").Set(totalWriteBytes)
-			hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_peer").Set(hotWriteRegionCount)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_peer").Set(totalWriteBytes)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_peer").Set(hotWriteRegionCount)
 		} else {
-			hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_peer").Set(0)
-			hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_peer").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_peer").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_peer").Set(0)
 		}
 
-		stat, ok = status.AsLeader[s.GetId()]
+		stat, ok = status.AsLeader[s.GetID()]
 		if ok {
 			totalWriteBytes := float64(stat.TotalFlowBytes)
 			hotWriteRegionCount := float64(stat.RegionsCount)
 
-			hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_leader").Set(totalWriteBytes)
-			hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_leader").Set(hotWriteRegionCount)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_leader").Set(totalWriteBytes)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_leader").Set(hotWriteRegionCount)
 		} else {
-			hotSpotStatusGauge.WithLabelValues(store, "total_written_bytes_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(store, "hot_write_region_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_leader").Set(0)
 		}
 	}
 
-	// collect hot read region metrics
+	// Collects hot read region metrics.
 	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
 	for _, s := range stores {
-		store := fmt.Sprintf("store_%d", s.GetId())
-		stat, ok := status.AsLeader[s.GetId()]
+		storeAddress := s.GetAddress()
+		stat, ok := status.AsLeader[s.GetID()]
 		if ok {
 			totalReadBytes := float64(stat.TotalFlowBytes)
 			hotReadRegionCount := float64(stat.RegionsCount)
 
-			hotSpotStatusGauge.WithLabelValues(store, "total_read_bytes_as_leader").Set(totalReadBytes)
-			hotSpotStatusGauge.WithLabelValues(store, "hot_read_region_as_leader").Set(hotReadRegionCount)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_read_bytes_as_leader").Set(totalReadBytes)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_read_region_as_leader").Set(hotReadRegionCount)
 		} else {
-			hotSpotStatusGauge.WithLabelValues(store, "total_read_bytes_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(store, "hot_read_region_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_read_bytes_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_read_region_as_leader").Set(0)
 		}
 	}
 
@@ -412,12 +420,15 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			}
 
 		case <-s.Ctx().Done():
-			log.Infof("%v stopped: %v", s.GetName(), s.Ctx().Err())
+			log.Info("stopped scheduler",
+				zap.String("scheduler-name", s.GetName()),
+				zap.Error(s.Ctx().Err()))
 			return
 		}
 	}
 }
 
+// scheduleController is used to manage a scheduler to schedule.
 type scheduleController struct {
 	schedule.Scheduler
 	cluster      *clusterInfo
@@ -428,6 +439,7 @@ type scheduleController struct {
 	cancel       context.CancelFunc
 }
 
+// newScheduleController creates a new scheduleController.
 func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleController {
 	ctx, cancel := context.WithCancel(c.ctx)
 	return &scheduleController{
@@ -461,10 +473,12 @@ func (s *scheduleController) Schedule() []*schedule.Operator {
 	return nil
 }
 
+// GetInterval returns the interval of scheduling for a scheduler.
 func (s *scheduleController) GetInterval() time.Duration {
 	return s.nextInterval
 }
 
+// AllowSchedule returns if a scheduler is allowed to schedule.
 func (s *scheduleController) AllowSchedule() bool {
 	return s.Scheduler.IsScheduleAllowed(s.cluster)
 }

@@ -114,6 +114,11 @@ func (kv *KV) SaveStore(store *metapb.Store) error {
 	return saveProto(kv.KVBase, kv.storePath(store.GetId()), store)
 }
 
+// DeleteStore deletes one store from KV.
+func (kv *KV) DeleteStore(store *metapb.Store) error {
+	return kv.Delete(kv.storePath(store.GetId()))
+}
+
 // LoadRegion loads one regoin from KV.
 func (kv *KV) LoadRegion(regionID uint64, region *metapb.Region) (bool, error) {
 	if atomic.LoadInt32(&kv.useRegionKV) > 0 {
@@ -186,20 +191,18 @@ func (kv *KV) LoadStores(stores *StoresInfo) error {
 			if err := store.Unmarshal([]byte(s)); err != nil {
 				return errors.WithStack(err)
 			}
-			storeInfo := NewStoreInfo(store)
-			leaderWeight, err := kv.loadFloatWithDefaultValue(kv.storeLeaderWeightPath(storeInfo.GetId()), 1.0)
+			leaderWeight, err := kv.loadFloatWithDefaultValue(kv.storeLeaderWeightPath(store.GetId()), 1.0)
 			if err != nil {
 				return err
 			}
-			storeInfo.LeaderWeight = leaderWeight
-			regionWeight, err := kv.loadFloatWithDefaultValue(kv.storeRegionWeightPath(storeInfo.GetId()), 1.0)
+			regionWeight, err := kv.loadFloatWithDefaultValue(kv.storeRegionWeightPath(store.GetId()), 1.0)
 			if err != nil {
 				return err
 			}
-			storeInfo.RegionWeight = regionWeight
+			newStoreInfo := NewStoreInfo(store, SetLeaderWeight(leaderWeight), SetRegionWeight(regionWeight))
 
 			nextID = store.GetId() + 1
-			stores.SetStore(storeInfo)
+			stores.SetStore(newStoreInfo)
 		}
 		if len(res) < minKVRangeLimit {
 			return nil
@@ -235,7 +238,7 @@ func (kv *KV) loadFloatWithDefaultValue(path string, def float64) (float64, erro
 // Flush flushes the dirty region to storage.
 func (kv *KV) Flush() error {
 	if kv.regionKV != nil {
-		kv.regionKV.FlushRegion()
+		return kv.regionKV.FlushRegion()
 	}
 	return nil
 }

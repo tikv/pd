@@ -31,8 +31,8 @@ type randomMergeScheduler struct {
 	selector *schedule.RandomSelector
 }
 
-// newRandomMergeScheduler creates an admin scheduler that shuffles regions
-// between stores.
+// newRandomMergeScheduler creates an admin scheduler that randomly picks two adjacent regions
+// then merges them.
 func newRandomMergeScheduler(opController *schedule.OperatorController) schedule.Scheduler {
 	filters := []schedule.Filter{schedule.StoreStateFilter{MoveRegion: true}}
 	base := newBaseScheduler(opController)
@@ -63,7 +63,7 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*schedule.Op
 		schedulerCounter.WithLabelValues(s.GetName(), "no_store").Inc()
 		return nil
 	}
-	region := cluster.RandLeaderRegion(store.GetId(), core.HealthRegion())
+	region := cluster.RandLeaderRegion(store.GetID(), core.HealthRegion())
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
 		return nil

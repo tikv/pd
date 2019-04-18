@@ -14,9 +14,10 @@
 package schedulers
 
 import (
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 func init() {
@@ -30,6 +31,9 @@ type labelScheduler struct {
 	selector *schedule.BalanceSelector
 }
 
+// LabelScheduler is mainly based on the store's label information for scheduling.
+// Now only used for reject leader schedule, that will move the leader out of
+// the store with the specific label.
 func newLabelScheduler(opController *schedule.OperatorController) schedule.Scheduler {
 	filters := []schedule.Filter{schedule.StoreStateFilter{TransferLeader: true}}
 	return &labelScheduler{
@@ -55,18 +59,18 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator
 	stores := cluster.GetStores()
 	rejectLeaderStores := make(map[uint64]struct{})
 	for _, s := range stores {
-		if cluster.CheckLabelProperty(schedule.RejectLeader, s.Labels) {
-			rejectLeaderStores[s.GetId()] = struct{}{}
+		if cluster.CheckLabelProperty(schedule.RejectLeader, s.GetLabels()) {
+			rejectLeaderStores[s.GetID()] = struct{}{}
 		}
 	}
 	if len(rejectLeaderStores) == 0 {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
 	}
-	log.Debugf("label scheduler reject leader store list: %v", rejectLeaderStores)
+	log.Debug("label scheduler reject leader store list", zap.Reflect("stores", rejectLeaderStores))
 	for id := range rejectLeaderStores {
 		if region := cluster.RandLeaderRegion(id); region != nil {
-			log.Debugf("label scheduler selects region %d to transfer leader", region.GetID())
+			log.Debug("label scheduler selects region to transfer leader", zap.Uint64("region-id", region.GetID()))
 			excludeStores := make(map[uint64]struct{})
 			for _, p := range region.GetDownPeers() {
 				excludeStores[p.GetPeer().GetStoreId()] = struct{}{}
@@ -77,13 +81,13 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator
 			filter := schedule.NewExcludedFilter(nil, excludeStores)
 			target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region), filter)
 			if target == nil {
-				log.Debugf("label scheduler no target found for region %d", region.GetID())
+				log.Debug("label scheduler no target found for region", zap.Uint64("region-id", region.GetID()))
 				schedulerCounter.WithLabelValues(s.GetName(), "no_target").Inc()
 				continue
 			}
 
 			schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-			step := schedule.TransferLeader{FromStore: id, ToStore: target.GetId()}
+			step := schedule.TransferLeader{FromStore: id, ToStore: target.GetID()}
 			op := schedule.NewOperator("label-reject-leader", region.GetID(), region.GetRegionEpoch(), schedule.OpLeader, step)
 			return []*schedule.Operator{op}
 		}

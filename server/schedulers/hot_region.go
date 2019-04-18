@@ -20,9 +20,10 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 func init() {
@@ -122,13 +123,20 @@ func (h *balanceHotRegionsScheduler) IsScheduleAllowed(cluster schedule.Cluster)
 	return h.allowBalanceLeader(cluster) || h.allowBalanceRegion(cluster)
 }
 
+func min(a, b uint64) uint64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func (h *balanceHotRegionsScheduler) allowBalanceLeader(cluster schedule.Cluster) bool {
-	return h.opController.OperatorCount(schedule.OpHotRegion) < h.limit &&
+	return h.opController.OperatorCount(schedule.OpHotRegion) < min(h.limit, cluster.GetHotRegionScheduleLimit()) &&
 		h.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (h *balanceHotRegionsScheduler) allowBalanceRegion(cluster schedule.Cluster) bool {
-	return h.opController.OperatorCount(schedule.OpHotRegion) < h.limit &&
+	return h.opController.OperatorCount(schedule.OpHotRegion) < min(h.limit, cluster.GetHotRegionScheduleLimit()) &&
 		h.opController.OperatorCount(schedule.OpRegion) < cluster.GetRegionScheduleLimit()
 }
 
@@ -142,11 +150,11 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.
 	defer h.Unlock()
 	switch typ {
 	case hotReadRegionBalance:
-		h.stats.readStatAsLeader = h.calcScore(cluster.RegionReadStats(), cluster, core.LeaderKind)
+		h.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), cluster, core.LeaderKind)
 		return h.balanceHotReadRegions(cluster)
 	case hotWriteRegionBalance:
-		h.stats.writeStatAsLeader = h.calcScore(cluster.RegionWriteStats(), cluster, core.LeaderKind)
-		h.stats.writeStatAsPeer = h.calcScore(cluster.RegionWriteStats(), cluster, core.RegionKind)
+		h.stats.writeStatAsLeader = calcScore(cluster.RegionWriteStats(), cluster, core.LeaderKind)
+		h.stats.writeStatAsPeer = calcScore(cluster.RegionWriteStats(), cluster, core.RegionKind)
 		return h.balanceHotWriteRegions(cluster)
 	}
 	return nil
@@ -158,14 +166,22 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 		step := schedule.TransferLeader{FromStore: srcRegion.GetLeader().GetStoreId(), ToStore: newLeader.GetStoreId()}
-		return []*schedule.Operator{schedule.NewOperator("transferHotReadLeader", srcRegion.GetID(), srcRegion.GetRegionEpoch(), schedule.OpHotRegion|schedule.OpLeader, step)}
+		op := schedule.NewOperator("transfer-hot-read-leader", srcRegion.GetID(), srcRegion.GetRegionEpoch(), schedule.OpHotRegion|schedule.OpLeader, step)
+		op.SetPriorityLevel(core.HighPriority)
+		return []*schedule.Operator{op}
 	}
 
 	// balance by peer
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
+		op, err := schedule.CreateMovePeerOperator("move-hot-read-region", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
+		if err != nil {
+			schedulerCounter.WithLabelValues(h.GetName(), "create_operator_fail").Inc()
+			return nil
+		}
+		op.SetPriorityLevel(core.HighPriority)
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return []*schedule.Operator{schedule.CreateMovePeerOperator("moveHotReadRegion", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())}
+		return []*schedule.Operator{op}
 	}
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 	return nil
@@ -181,8 +197,14 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 			// balance by peer
 			srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
 			if srcRegion != nil {
+				op, err := schedule.CreateMovePeerOperator("move-hot-write-region", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
+				if err != nil {
+					schedulerCounter.WithLabelValues(h.GetName(), "create_operator_fail").Inc()
+					return nil
+				}
+				op.SetPriorityLevel(core.HighPriority)
 				schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-				return []*schedule.Operator{schedule.CreateMovePeerOperator("moveHotWriteRegion", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())}
+				return []*schedule.Operator{op}
 			}
 		case 1:
 			// balance by leader
@@ -190,7 +212,9 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 			if srcRegion != nil {
 				schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 				step := schedule.TransferLeader{FromStore: srcRegion.GetLeader().GetStoreId(), ToStore: newLeader.GetStoreId()}
-				return []*schedule.Operator{schedule.NewOperator("transferHotWriteLeader", srcRegion.GetID(), srcRegion.GetRegionEpoch(), schedule.OpHotRegion|schedule.OpLeader, step)}
+				op := schedule.NewOperator("transfer-hot-write-leader", srcRegion.GetID(), srcRegion.GetRegionEpoch(), schedule.OpHotRegion|schedule.OpLeader, step)
+				op.SetPriorityLevel(core.HighPriority)
+				return []*schedule.Operator{op}
 			}
 		}
 	}
@@ -199,10 +223,13 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	return nil
 }
 
-func (h *balanceHotRegionsScheduler) calcScore(items []*core.RegionStat, cluster schedule.Cluster, kind core.ResourceKind) core.StoreHotRegionsStat {
+func calcScore(items []*core.RegionStat, cluster schedule.Cluster, kind core.ResourceKind) core.StoreHotRegionsStat {
 	stats := make(core.StoreHotRegionsStat)
 	for _, r := range items {
-		if r.HotDegree < cluster.GetHotRegionLowThreshold() {
+		// HotDegree is the update times on the hot cache. If the heartbeat report
+		// the flow of the region exceeds the threshold, the scheduler will update the region in
+		// the hot cache and the hotdegree of the region will increase.
+		if r.HotDegree < cluster.GetHotRegionCacheHitsThreshold() {
 			continue
 		}
 
@@ -247,6 +274,7 @@ func (h *balanceHotRegionsScheduler) calcScore(items []*core.RegionStat, cluster
 	return stats
 }
 
+// balanceByPeer balances the peer distribution of hot regions.
 func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, storesStat core.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer, *metapb.Peer) {
 	if !h.allowBalanceRegion(cluster) {
 		return nil, nil, nil
@@ -280,7 +308,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 			if schedule.FilterTarget(cluster, store, filters) {
 				continue
 			}
-			destStoreIDs = append(destStoreIDs, store.GetId())
+			destStoreIDs = append(destStoreIDs, store.GetID())
 		}
 
 		destStoreID = h.selectDestStore(destStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
@@ -296,7 +324,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 			// because it doesn't exist in the system right now.
 			destPeer, err := cluster.AllocPeer(destStoreID)
 			if err != nil {
-				log.Errorf("failed to allocate peer: %v", err)
+				log.Error("failed to allocate peer", zap.Error(err))
 				return nil, nil, nil
 			}
 
@@ -307,6 +335,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 	return nil, nil, nil
 }
 
+// balanceByLeader balances the leader distribution of hot regions.
 func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, storesStat core.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer) {
 	if !h.allowBalanceLeader(cluster) {
 		return nil, nil
@@ -329,7 +358,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 		candidateStoreIDs := make([]uint64, 0, len(srcRegion.GetPeers())-1)
 		for _, store := range cluster.GetFollowerStores(srcRegion) {
 			if !schedule.FilterTarget(cluster, store, filters) {
-				candidateStoreIDs = append(candidateStoreIDs, store.GetId())
+				candidateStoreIDs = append(candidateStoreIDs, store.GetID())
 			}
 		}
 		if len(candidateStoreIDs) == 0 {

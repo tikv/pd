@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package integration
+package server_test
 
 import (
 	"context"
@@ -21,11 +21,12 @@ import (
 	gofail "github.com/pingcap/gofail/runtime"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/tests"
 )
 
-func (s *integrationTestSuite) TestWatcher(c *C) {
+func (s *serverTestSuite) TestWatcher(c *C) {
 	c.Parallel()
-	cluster, err := newTestCluster(1)
+	cluster, err := tests.NewTestCluster(1, func(conf *server.Config) { conf.AutoCompactionRetention = "1s" })
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -49,7 +50,8 @@ func (s *integrationTestSuite) TestWatcher(c *C) {
 	c.Assert(err, IsNil)
 	time.Sleep(200 * time.Millisecond)
 	c.Assert(pd3.GetLeader().GetName(), Equals, pd1.GetConfig().Name)
-	pd1.Stop()
+	err = pd1.Stop()
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	c.Assert(pd2.GetLeader().GetName(), Equals, pd2.GetConfig().Name)
 	gofail.Disable("github.com/pingcap/pd/server/delayWatcher")
@@ -59,9 +61,9 @@ func (s *integrationTestSuite) TestWatcher(c *C) {
 	c.Succeed()
 }
 
-func (s *integrationTestSuite) TestWatcherCompacted(c *C) {
+func (s *serverTestSuite) TestWatcherCompacted(c *C) {
 	c.Parallel()
-	cluster, err := newTestCluster(1, func(conf *server.Config) { conf.AutoCompactionRetention = "1s" })
+	cluster, err := tests.NewTestCluster(1, func(conf *server.Config) { conf.AutoCompactionRetention = "1s" })
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -71,7 +73,8 @@ func (s *integrationTestSuite) TestWatcherCompacted(c *C) {
 	pd1 := cluster.GetServer(cluster.GetLeader())
 	c.Assert(pd1, NotNil)
 	client := pd1.GetEtcdClient()
-	client.Put(context.Background(), "test", "v")
+	_, err = client.Put(context.Background(), "test", "v")
+	c.Assert(err, IsNil)
 	// wait compaction
 	time.Sleep(2 * time.Second)
 	pd2, err := cluster.Join()

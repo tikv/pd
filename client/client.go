@@ -23,11 +23,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/opentracing/opentracing-go"
+	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -58,13 +59,31 @@ type Client interface {
 	// GetAllStores gets all stores from pd.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
-	GetAllStores(ctx context.Context) ([]*metapb.Store, error)
+	GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*metapb.Store, error)
 	// Update GC safe point. TiKV will check it and do GC themselves if necessary.
 	// If the given safePoint is less than the current one, it will not be updated.
 	// Returns the new safePoint after updating.
 	UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error)
+	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
+	// and the distribution of these regions will be dispersed.
+	ScatterRegion(ctx context.Context, regionID uint64) error
+	// GetOperator gets the status of operator of the specified region.
+	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
 	// Close closes the client.
 	Close()
+}
+
+// GetStoreOp represents available options when getting stores.
+type GetStoreOp struct {
+	excludeTombstone bool
+}
+
+// GetStoreOption configures GetStoreOp.
+type GetStoreOption func(*GetStoreOp)
+
+// WithExcludeTombstone excludes tombstone stores from the result.
+func WithExcludeTombstone() GetStoreOption {
+	return func(op *GetStoreOp) { op.excludeTombstone = true }
 }
 
 type tsoRequest struct {
@@ -121,7 +140,7 @@ type SecurityOption struct {
 
 // NewClient creates a PD client.
 func NewClient(pdAddrs []string, security SecurityOption) (Client, error) {
-	log.Infof("[pd] create pd client with endpoints %v", pdAddrs)
+	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", pdAddrs))
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &client{
 		urls:          addrsToUrls(pdAddrs),
@@ -140,7 +159,7 @@ func NewClient(pdAddrs []string, security SecurityOption) (Client, error) {
 	if err := c.updateLeader(); err != nil {
 		return nil, err
 	}
-	log.Infof("[pd] init cluster id %v", c.clusterID)
+	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
 
 	c.wg.Add(3)
 	go c.tsLoop()
@@ -167,7 +186,7 @@ func (c *client) initClusterID() error {
 			members, err := c.getMembers(timeoutCtx, u)
 			timeoutCancel()
 			if err != nil || members.GetHeader() == nil {
-				log.Errorf("[pd] failed to get cluster id: %v", err)
+				log.Error("[pd] failed to get cluster id", zap.Error(err))
 				continue
 			}
 			c.clusterID = members.GetHeader().GetClusterId()
@@ -223,7 +242,7 @@ func (c *client) switchLeader(addrs []string) error {
 		return nil
 	}
 
-	log.Infof("[pd] leader switches to: %v, previous: %v", addr, oldLeader)
+	log.Info("[pd] switch leader", zap.String("new-leader", addr), zap.String("old-leader", oldLeader))
 	if _, err := c.getOrCreateGRPCConn(addr); err != nil {
 		return err
 	}
@@ -308,7 +327,7 @@ func (c *client) leaderLoop() {
 		}
 
 		if err := c.updateLeader(); err != nil {
-			log.Errorf("[pd] failed updateLeader: %v", err)
+			log.Error("[pd] failed updateLeader", zap.Error(err))
 		}
 	}
 }
@@ -363,10 +382,11 @@ func (c *client) tsLoop() {
 			if err != nil {
 				select {
 				case <-loopCtx.Done():
+					cancel()
 					return
 				default:
 				}
-				log.Errorf("[pd] create tso stream error: %v", err)
+				log.Error("[pd] create tso stream error", zap.Error(err))
 				c.ScheduleCheckLeader()
 				cancel()
 				c.revokeTSORequest(errors.WithStack(err))
@@ -395,6 +415,7 @@ func (c *client) tsLoop() {
 			select {
 			case c.tsDeadlineCh <- dl:
 			case <-loopCtx.Done():
+				cancel()
 				return
 			}
 			opts = extractSpanReference(requests, opts[:0])
@@ -409,10 +430,11 @@ func (c *client) tsLoop() {
 		if err != nil {
 			select {
 			case <-loopCtx.Done():
+				cancel()
 				return
 			default:
 			}
-			log.Errorf("[pd] getTS error: %v", err)
+			log.Error("[pd] getTS error", zap.Error(err))
 			c.ScheduleCheckLeader()
 			cancel()
 			stream, cancel = nil, nil
@@ -494,11 +516,12 @@ func (c *client) Close() {
 	defer c.connMu.Unlock()
 	for _, cc := range c.connMu.clientConns {
 		if err := cc.Close(); err != nil {
-			log.Errorf("[pd] failed close grpc clientConn: %v", err)
+			log.Error("[pd] failed close grpc clientConn", zap.Error(err))
 		}
 	}
 }
 
+// leaderClient gets the client of current PD leader.
 func (c *client) leaderClient() pdpb.PDClient {
 	c.connMu.RLock()
 	defer c.connMu.RUnlock()
@@ -682,7 +705,13 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 	return store, nil
 }
 
-func (c *client) GetAllStores(ctx context.Context) ([]*metapb.Store, error) {
+func (c *client) GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*metapb.Store, error) {
+	// Applies options
+	options := &GetStoreOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetAllStores", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -692,7 +721,8 @@ func (c *client) GetAllStores(ctx context.Context) ([]*metapb.Store, error) {
 
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().GetAllStores(ctx, &pdpb.GetAllStoresRequest{
-		Header: c.requestHeader(),
+		Header:                 c.requestHeader(),
+		ExcludeTombstoneStores: options.excludeTombstone,
 	})
 	cancel()
 
@@ -726,6 +756,45 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 		return 0, errors.WithStack(err)
 	}
 	return resp.GetNewSafePoint(), nil
+}
+
+func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.ScatterRegion", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDuration.WithLabelValues("scatter_region").Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	resp, err := c.leaderClient().ScatterRegion(ctx, &pdpb.ScatterRegionRequest{
+		Header:   c.requestHeader(),
+		RegionId: regionID,
+	})
+	cancel()
+	if err != nil {
+		return err
+	}
+	if resp.Header.GetError() != nil {
+		return errors.Errorf("scatter region %d failed: %s", regionID, resp.Header.GetError().String())
+	}
+	return nil
+}
+
+func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.GetOperator", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDuration.WithLabelValues("get_operator").Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	defer cancel()
+	return c.leaderClient().GetOperator(ctx, &pdpb.GetOperatorRequest{
+		Header:   c.requestHeader(),
+		RegionId: regionID,
+	})
 }
 
 func (c *client) requestHeader() *pdpb.RequestHeader {

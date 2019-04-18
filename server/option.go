@@ -140,6 +140,13 @@ func (o *scheduleOption) GetMergeScheduleLimit(name string) uint64 {
 	return o.load().MergeScheduleLimit
 }
 
+func (o *scheduleOption) GetHotRegionScheduleLimit(name string) uint64 {
+	if n, ok := o.ns[name]; ok {
+		return n.GetHotRegionScheduleLimit()
+	}
+	return o.load().HotRegionScheduleLimit
+}
+
 func (o *scheduleOption) GetTolerantSizeRatio() float64 {
 	return o.load().TolerantSizeRatio
 }
@@ -184,7 +191,7 @@ func (o *scheduleOption) GetSchedulers() SchedulerConfigs {
 	return o.load().Schedulers
 }
 
-func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) error {
+func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) {
 	c := o.load()
 	v := c.clone()
 	for i, schedulerCfg := range v.Schedulers {
@@ -192,19 +199,18 @@ func (o *scheduleOption) AddSchedulerCfg(tp string, args []string) error {
 		// such as two schedulers of type "evict-leader",
 		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
 		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{Type: tp, Args: args, Disable: false}) {
-			return nil
+			return
 		}
 
 		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{Type: tp, Args: args, Disable: true}) {
 			schedulerCfg.Disable = false
 			v.Schedulers[i] = schedulerCfg
 			o.store(v)
-			return nil
+			return
 		}
 	}
 	v.Schedulers = append(v.Schedulers, SchedulerConfig{Type: tp, Args: args, Disable: false})
 	o.store(v)
-	return nil
 }
 
 func (o *scheduleOption) RemoveSchedulerCfg(name string) error {
@@ -350,8 +356,8 @@ func (o *scheduleOption) adjustScheduleCfg(persistentCfg *Config) {
 	o.store(scheduleCfg)
 }
 
-func (o *scheduleOption) GetHotRegionLowThreshold() int {
-	return schedule.HotRegionLowThreshold
+func (o *scheduleOption) GetHotRegionCacheHitsThreshold() int {
+	return int(o.load().HotRegionCacheHitsThreshold)
 }
 
 func (o *scheduleOption) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
@@ -458,4 +464,9 @@ func (n *namespaceOption) GetReplicaScheduleLimit() uint64 {
 // GetMergeScheduleLimit returns the limit for merge schedule.
 func (n *namespaceOption) GetMergeScheduleLimit() uint64 {
 	return n.load().MergeScheduleLimit
+}
+
+// GetHotRegionScheduleLimit returns the limit for hot region schedule.
+func (n *namespaceOption) GetHotRegionScheduleLimit() uint64 {
+	return n.load().HotRegionScheduleLimit
 }

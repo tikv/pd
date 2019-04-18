@@ -35,7 +35,7 @@ func (s *testHealthAPISuite) SetUpSuite(c *C) {
 
 func checkSliceResponse(c *C, body []byte, cfgs []*server.Config, unhealth string) {
 	got := []Health{}
-	json.Unmarshal(body, &got)
+	c.Assert(json.Unmarshal(body, &got), IsNil)
 
 	c.Assert(len(got), Equals, len(cfgs))
 

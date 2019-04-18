@@ -17,9 +17,9 @@ import (
 	"context"
 	"sync"
 
-	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"go.etcd.io/etcd/clientv3"
 )
 
 var _ = Suite(&testAllocIDSuite{})
@@ -34,7 +34,7 @@ type testAllocIDSuite struct {
 
 func (s *testAllocIDSuite) SetUpSuite(c *C) {
 	var err error
-	_, s.svr, s.cleanup, err = NewTestServer()
+	_, s.svr, s.cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	s.client = s.svr.client
 	s.alloc = s.svr.idAlloc

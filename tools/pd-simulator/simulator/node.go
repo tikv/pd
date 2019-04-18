@@ -16,8 +16,11 @@ package simulator
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -77,6 +80,7 @@ func NewNode(s *cases.Store, pdAddr string, ioRate int64) (*Node, error) {
 		tasks:                    make(map[uint64]Task),
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
 		ioRate:                   ioRate * cases.MB,
+		tick:                     uint64(rand.Intn(storeHeartBeatPeriod)),
 	}, nil
 }
 
@@ -110,7 +114,8 @@ func (n *Node) receiveRegionHeartbeat() {
 }
 
 // Tick steps node status change.
-func (n *Node) Tick() {
+func (n *Node) Tick(wg *sync.WaitGroup) {
+	defer wg.Done()
 	if n.GetState() != metapb.StoreState_Up {
 		return
 	}
@@ -130,7 +135,10 @@ func (n *Node) stepTask() {
 	for _, task := range n.tasks {
 		task.Step(n.raftEngine)
 		if task.IsFinished() {
-			simutil.Logger.Infof("[store %d][region %d] task finished: %s final: %v", n.GetId(), task.RegionID(), task.Desc(), n.raftEngine.GetRegion(task.RegionID()))
+			simutil.Logger.Debug("task finished",
+				zap.Uint64("node-id", n.Id),
+				zap.Uint64("region-id", task.RegionID()),
+				zap.String("task", task.Desc()))
 			delete(n.tasks, task.RegionID())
 		}
 	}
@@ -152,7 +160,9 @@ func (n *Node) storeHeartBeat() {
 	ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 	err := n.client.StoreHeartbeat(ctx, n.stats)
 	if err != nil {
-		simutil.Logger.Infof("[store %d] report heartbeat error: %s", n.GetId(), err)
+		simutil.Logger.Info("report heartbeat error",
+			zap.Uint64("node-id", n.GetId()),
+			zap.Error(err))
 	}
 	cancel()
 }
@@ -167,7 +177,10 @@ func (n *Node) regionHeartBeat() {
 			ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 			err := n.client.RegionHeartbeat(ctx, region)
 			if err != nil {
-				simutil.Logger.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetID(), err)
+				simutil.Logger.Info("report heartbeat error",
+					zap.Uint64("node-id", n.Id),
+					zap.Uint64("region-id", region.GetID()),
+					zap.Error(err))
 			}
 			cancel()
 		}
@@ -175,16 +188,20 @@ func (n *Node) regionHeartBeat() {
 }
 
 func (n *Node) reportRegionChange() {
-	for _, regionID := range n.raftEngine.regionChange[n.Id] {
+	regionIDs := n.raftEngine.GetRegionChange(n.Id)
+	for _, regionID := range regionIDs {
 		region := n.raftEngine.GetRegion(regionID)
 		ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 		err := n.client.RegionHeartbeat(ctx, region)
 		if err != nil {
-			simutil.Logger.Infof("[node %d][region %d] report heartbeat error: %s", n.Id, region.GetID(), err)
+			simutil.Logger.Info("report heartbeat error",
+				zap.Uint64("node-id", n.Id),
+				zap.Uint64("region-id", region.GetID()),
+				zap.Error(err))
 		}
+		n.raftEngine.ResetRegionChange(n.Id, regionID)
 		cancel()
 	}
-	delete(n.raftEngine.regionChange, n.Id)
 }
 
 // AddTask adds task in this node.
@@ -192,7 +209,10 @@ func (n *Node) AddTask(task Task) {
 	n.Lock()
 	defer n.Unlock()
 	if t, ok := n.tasks[task.RegionID()]; ok {
-		simutil.Logger.Infof("[node %d][region %d] already exists task : %s", n.Id, task.RegionID(), t.Desc())
+		simutil.Logger.Info("task has already existed",
+			zap.Uint64("node-id", n.Id),
+			zap.Uint64("region-id", task.RegionID()),
+			zap.String("task", t.Desc()))
 		return
 	}
 	n.tasks[task.RegionID()] = task
@@ -203,7 +223,7 @@ func (n *Node) Stop() {
 	n.cancel()
 	n.client.Close()
 	n.wg.Wait()
-	simutil.Logger.Infof("node %d stopped", n.Id)
+	simutil.Logger.Info("node stopped", zap.Uint64("node-id", n.Id))
 }
 
 func (n *Node) incUsedSize(size uint64) {

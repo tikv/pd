@@ -19,17 +19,21 @@ import (
 	"sync"
 	"time"
 
+	"github.com/juju/ratelimit"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 const (
 	msgSize                  = 8 * 1024 * 1024
+	defaultBucketRate        = 20 * 1024 * 1024 // 20MB/s
+	defaultBucketCapacity    = 20 * 1024 * 1024 // 20MB
 	maxSyncRegionBatchSize   = 100
 	syncerKeepAliveInterval  = 10 * time.Second
 	defaultHistoryBufferSize = 10000
@@ -54,6 +58,7 @@ type Server interface {
 	GetLeader() *pdpb.Member
 	GetStorage() *core.KV
 	Name() string
+	GetMetaRegions() []*metapb.Region
 }
 
 // RegionSyncer is used to sync the region information without raft.
@@ -66,6 +71,7 @@ type RegionSyncer struct {
 	closed  chan struct{}
 	wg      sync.WaitGroup
 	history *historyBuffer
+	limit   *ratelimit.Bucket
 }
 
 // NewRegionSyncer returns a region syncer.
@@ -79,6 +85,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		server:  s,
 		closed:  make(chan struct{}),
 		history: newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionKV()),
+		limit:   ratelimit.NewBucketWithRate(defaultBucketRate, defaultBucketCapacity),
 	}
 }
 
@@ -134,7 +141,9 @@ func (s *RegionSyncer) Sync(stream pdpb.PD_SyncRegionsServer) error {
 		if clusterID != s.server.ClusterID() {
 			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.server.ClusterID(), clusterID)
 		}
-		log.Infof("establish sync region stream with %s [%s]", request.GetMember().GetName(), request.GetMember().GetClientUrls()[0])
+		log.Info("establish sync region stream",
+			zap.String("requested-server", request.GetMember().GetName()),
+			zap.String("url", request.GetMember().GetClientUrls()[0]))
 
 		err = s.syncHistoryRegion(request, stream)
 		if err != nil {
@@ -150,16 +159,45 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 	records := s.history.RecordsFrom(startIndex)
 	if len(records) == 0 {
 		if s.history.GetNextIndex() == startIndex {
-			log.Infof("%s already in sync with %s, the last index is %d", name, s.server.Name(), startIndex)
+			log.Info("requested server has already in sync with server",
+				zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Uint64("last-index", startIndex))
 			return nil
 		}
-		log.Warnf("no history regions from index %d, the leader maybe restarted", startIndex)
-		// TODO: Full synchronization
-		// if startIndex == 0 {}
+		// do full synchronization
+		if startIndex == 0 {
+			regions := s.server.GetMetaRegions()
+			lastIndex := 0
+			start := time.Now()
+			res := make([]*metapb.Region, 0, maxSyncRegionBatchSize)
+			for syncedIndex, r := range regions {
+				res = append(res, r)
+				if len(res) < maxSyncRegionBatchSize && syncedIndex < len(regions)-1 {
+					continue
+				}
+				resp := &pdpb.SyncRegionResponse{
+					Header:     &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+					Regions:    res,
+					StartIndex: uint64(lastIndex),
+				}
+				s.limit.Wait(int64(resp.Size()))
+				lastIndex += len(res)
+				if err := stream.Send(resp); err != nil {
+					log.Error("failed to send sync region response", zap.Error(err))
+				}
+				res = res[:0]
+			}
+			log.Info("requested server has completed full synchronization with server",
+				zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Duration("cost", time.Since(start)))
+			return nil
+		}
+		log.Warn("no history regions from index, the leader may be restarted", zap.Uint64("index", startIndex))
 		return nil
 	}
-	log.Infof("sync the history regions with %s from index: %d, own last index: %d, got records length: %d",
-		name, startIndex, s.history.GetNextIndex(), len(records))
+	log.Info("sync the history regions with server",
+		zap.String("server", name),
+		zap.Uint64("from-index", startIndex),
+		zap.Uint64("last-index", s.history.GetNextIndex()),
+		zap.Int("records-length", len(records)))
 	regions := make([]*metapb.Region, len(records))
 	for i, r := range records {
 		regions[i] = r.GetMeta()
@@ -185,7 +223,7 @@ func (s *RegionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
 	for name, sender := range s.streams {
 		err := sender.Send(regions)
 		if err != nil {
-			log.Error("region syncer send data meet error:", err)
+			log.Error("region syncer send data meet error", zap.Error(err))
 			failed = append(failed, name)
 		}
 	}
@@ -194,7 +232,7 @@ func (s *RegionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
 		s.Lock()
 		for _, name := range failed {
 			delete(s.streams, name)
-			log.Infof("region syncer delete the stream of %s", name)
+			log.Info("region syncer delete the stream", zap.String("stream", name))
 		}
 		s.Unlock()
 	}
