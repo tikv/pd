@@ -44,7 +44,7 @@ func (h *operatorHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	op, err := h.GetOperator(regionID)
+	op, err := h.GetOperatorStatus(regionID)
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
