@@ -23,7 +23,7 @@ import (
 	"syscall"
 
 	"github.com/chzyer/readline"
-	"github.com/mattn/go-shellwords"
+	shellwords "github.com/mattn/go-shellwords"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/tools/pd-ctl/pdctl"
 	flag "github.com/spf13/pflag"
@@ -125,9 +125,6 @@ func loop() {
 		if err != nil {
 			fmt.Printf("parse command err: %v\n", err)
 			continue
-		}
-		if url != "" && !strings.HasPrefix(url, "http") {
-			url = "http://" + url
 		}
 		args = append(args, "-u", url)
 		if caPath != "" && certPath != "" && keyPath != "" {

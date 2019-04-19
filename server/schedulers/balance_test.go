@@ -887,7 +887,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	case 1:
 		// balance by leader selected
 		testutil.CheckTransferLeaderFrom(c, op[0], schedule.OpHotRegion, 1)
-	case 3:
+	case 4:
 		// balance by peer selected
 		if op[0].RegionID() == 2 {
 			// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
@@ -904,13 +904,12 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	opt.LeaderScheduleLimit = schedule.NewMockSchedulerOptions().LeaderScheduleLimit
 	opt.RegionScheduleLimit = schedule.NewMockSchedulerOptions().RegionScheduleLimit
 
-	// After transfer a hot region from store 1 to store 5
 	//| region_id | leader_store | follower_store | follower_store | written_bytes |
 	//|-----------|--------------|----------------|----------------|---------------|
 	//|     1     |       1      |        2       |       3        |      512KB    |
-	//|     2     |       1      |        3       |       4        |      512KB    |
-	//|     3     |       6      |        2       |       4        |      512KB    |
-	//|     4     |       5      |        6       |       1        |      512KB    |
+	//|     2     |       1      |        2       |       3        |      512KB    |
+	//|     3     |       6      |        1       |       4        |      512KB    |
+	//|     4     |       5      |        6       |       4        |      512KB    |
 	//|     5     |       3      |        4       |       5        |      512KB    |
 	tc.UpdateStorageWrittenBytes(1, 60*1024*1024)
 	tc.UpdateStorageWrittenBytes(2, 30*1024*1024)
@@ -925,7 +924,10 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*1024*schedule.RegionHeartBeatReportInterval, 4, 5)
 	// We can find that the leader of all hot regions are on store 1,
 	// so one of the leader will transfer to another store.
-	testutil.CheckTransferLeaderFrom(c, hb.Schedule(tc)[0], schedule.OpHotRegion, 1)
+	op = hb.Schedule(tc)
+	if op != nil {
+		testutil.CheckTransferLeaderFrom(c, op[0], schedule.OpHotRegion, 1)
+	}
 
 	// hot region scheduler is restricted by schedule limit.
 	opt.LeaderScheduleLimit = 0
