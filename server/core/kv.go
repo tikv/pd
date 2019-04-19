@@ -182,7 +182,7 @@ func (kv *KV) LoadStores(stores *StoresInfo) error {
 	endKey := kv.storePath(math.MaxUint64)
 	for {
 		key := kv.storePath(nextID)
-		res, err := kv.LoadRange(key, endKey, minKVRangeLimit)
+		_, res, err := kv.LoadRange(key, endKey, minKVRangeLimit)
 		if err != nil {
 			return err
 		}

@@ -22,7 +22,7 @@ import (
 // KVBase is an abstract interface for load/save pd cluster data.
 type KVBase interface {
 	Load(key string) (string, error)
-	LoadRange(key, endKey string, limit int) ([]string, error)
+	LoadRange(key, endKey string, limit int) (keys []string, values []string, err error)
 	Save(key, value string) error
 	Delete(key string) error
 }
@@ -57,15 +57,17 @@ func (kv *memoryKV) Load(key string) (string, error) {
 	return item.(memoryKVItem).value, nil
 }
 
-func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, error) {
+func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
-	res := make([]string, 0, limit)
+	keys := make([]string, 0, limit)
+	values := make([]string, 0, limit)
 	kv.tree.AscendRange(memoryKVItem{key, ""}, memoryKVItem{endKey, ""}, func(item btree.Item) bool {
-		res = append(res, item.(memoryKVItem).value)
-		return len(res) < limit
+		keys = append(keys, item.(memoryKVItem).key)
+		values = append(values, item.(memoryKVItem).value)
+		return len(keys) < limit
 	})
-	return res, nil
+	return keys, values, nil
 }
 
 func (kv *memoryKV) Save(key, value string) error {
