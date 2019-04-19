@@ -97,7 +97,7 @@ func getValue(c *clientv3.Client, key string, opts ...clientv3.OpOption) ([]byte
 }
 
 func get(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
-	resp, err := kvGet(c, key, opts...)
+	resp, err := etcdutil.EtcdKVGet(c, key, opts...)
 	if err != nil {
 		return nil, err
 	}

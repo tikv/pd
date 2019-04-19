@@ -14,6 +14,7 @@
 package etcdutil
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io/ioutil"
@@ -139,4 +140,51 @@ func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {
 	etcd2.Close()
 	cleanConfig(cfg1)
 	cleanConfig(cfg2)
+}
+
+func (s *testEtcdutilSuite) TestEtcdKVGet(c *C) {
+	cfg := newTestSingleConfig()
+	etcd, err := embed.StartEtcd(cfg)
+	c.Assert(err, IsNil)
+
+	ep := cfg.LCUrls[0].String()
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints: []string{ep},
+	})
+	c.Assert(err, IsNil)
+
+	<-etcd.Server.ReadyNotify()
+
+	keys := []string{"test/key1", "test/key2", "test/key3", "test/key4", "test/key5"}
+	vals := []string{"val1", "val2", "val3", "val4", "val5"}
+
+	kv := clientv3.NewKV(client)
+	for i := range keys {
+		_, err = kv.Put(context.TODO(), keys[i], vals[i])
+		c.Assert(err, IsNil)
+	}
+
+	// Test simple point get
+	resp, err := EtcdKVGet(client, "test/key1")
+	c.Assert(err, IsNil)
+	c.Assert(string(resp.Kvs[0].Value), Equals, "val1")
+
+	// Test range get
+	withRange := clientv3.WithRange("test/zzzz")
+	withLimit := clientv3.WithLimit(3)
+	resp, err = EtcdKVGet(client, "test/", withRange, withLimit, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+	c.Assert(err, IsNil)
+	c.Assert(len(resp.Kvs), Equals, 3)
+
+	for i := range resp.Kvs {
+		c.Assert(string(resp.Kvs[i].Key), Equals, keys[i])
+		c.Assert(string(resp.Kvs[i].Value), Equals, vals[i])
+	}
+
+	lastKey := string(resp.Kvs[len(resp.Kvs)-1].Key)
+	next := clientv3.GetPrefixRangeEnd(lastKey)
+	resp, err = EtcdKVGet(client, next, withRange, withLimit, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+	c.Assert(err, IsNil)
+	c.Assert(len(resp.Kvs), Equals, 2)
+
 }
