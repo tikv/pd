@@ -45,6 +45,7 @@ endif
 	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl tools/pd-ctl/main.go
 	CGO_ENABLED=0 go build -o bin/pd-tso-bench tools/pd-tso-bench/main.go
 	CGO_ENABLED=0 go build -o bin/pd-recover tools/pd-recover/main.go
+	CGO_ENABLED=0 go build -o bin/pd-client tools/pd-client/main.go
 
 test: retool-setup
 	# testing..

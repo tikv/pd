@@ -99,7 +99,8 @@ type Server struct {
 	ts            atomic.Value
 	lastSavedTime time.Time
 	// For async region heartbeat.
-	hbStreams *heartbeatStreams
+	hbStreams    *heartbeatStreams
+	watchStreams *watchStreams
 	// Zap logger
 	lg       *zap.Logger
 	logProps *log.ZapProperties
@@ -203,6 +204,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	s.etcd = etcd
 	s.client = client
 	s.id = etcdServerID
+	s.watchStreams = NewWatchStreams(client)
 	return nil
 }
 

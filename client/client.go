@@ -17,8 +17,10 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"io/ioutil"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -69,6 +71,7 @@ type Client interface {
 	ScatterRegion(ctx context.Context, regionID uint64) error
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
+	Watch(ctx context.Context) error
 	// Close closes the client.
 	Close()
 }
@@ -801,6 +804,47 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 		Header:   c.requestHeader(),
 		RegionId: regionID,
 	})
+}
+
+func (c *client) Watch(ctx context.Context) error {
+	cc := c.leaderClient()
+
+	stream, err := cc.Watch(context.Background())
+	if err != nil {
+		log.Error("failed to call: %v", zap.Error(err))
+		return err
+	}
+
+	if err != nil {
+		log.Error("failed to get key: %v", zap.Error(err))
+		return err
+	}
+
+	stream.Send(&pdpb.WatchRequest{WatchId: int64(2)})
+	if err != nil {
+		log.Error("failed to send: %v", zap.Error(err))
+		return err
+	}
+
+	for {
+		_, cancel := context.WithCancel(ctx)
+		defer func() {
+			cancel()
+			fmt.Println("exit watch")
+		}()
+
+		reply, err := stream.Recv()
+		if err != nil {
+			log.Error("failed to recv: %v", zap.Error(err))
+			break
+		}
+		for i := 0; i < len(reply.Events); i++ {
+			log.Info("Get Event", zap.String("CompactRevision", strconv.Itoa(int(reply.CompactRevision))),
+				zap.String("key", string(reply.Events[i].Kv.Key)))
+		}
+	}
+
+	return nil
 }
 
 func (c *client) requestHeader() *pdpb.RequestHeader {
