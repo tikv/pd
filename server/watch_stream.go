@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/mvcc/mvccpb"
 	"io"
 	"log"
-	"strconv"
 )
 
 type watchStreams struct {
@@ -48,23 +48,43 @@ func (s *Server) Watch(ws pdpb.PD_WatchServer) error {
 	}
 
 	s.watchStreams.watcher[in.WatchId] = clientv3.NewWatcher(s.watchStreams.proxyClient)
-	fmt.Println("startRevision")
 	rch := s.watchStreams.watcher[in.WatchId].Watch(ctx,
-		"/pd/"+strconv.FormatUint(s.clusterID, 10)+"/config",
+		string(in.Key),
 		clientv3.WithRev(resp.Kvs[0].Version))
 
 	for wresp := range rch {
 		wsResp := &pdpb.WatchResponse{}
 		wsResp.CompactRevision = wresp.CompactRevision
-		fmt.Println("one watch response start")
 		for i := 0; i < len(wresp.Events); i++ {
 			wsResp.Events = append(wsResp.Events, &pdpb.Event{
 				Kv: &pdpb.KeyValue{
-					Value: wresp.Events[i].Kv.Value,
-					Key:   wresp.Events[i].Kv.Key,
+					Value:          wresp.Events[i].Kv.Value,
+					Key:            wresp.Events[i].Kv.Key,
+					Version:        wresp.Events[i].Kv.Version,
+					CreateRevision: wresp.Events[i].Kv.CreateRevision,
+					ModRevision:    wresp.Events[i].Kv.ModRevision,
+					Lease:          wresp.Events[i].Kv.Lease,
 				},
 			})
-			fmt.Println(wresp.Events[i].Kv.Version)
+			if wresp.Events[i].PrevKv != nil {
+				fmt.Println("prekv not nil")
+				wsResp.Events[i].PrevKv = &pdpb.KeyValue{
+					Value:          wresp.Events[i].PrevKv.Value,
+					Key:            wresp.Events[i].PrevKv.Key,
+					Version:        wresp.Events[i].PrevKv.Version,
+					CreateRevision: wresp.Events[i].PrevKv.CreateRevision,
+					ModRevision:    wresp.Events[i].PrevKv.ModRevision,
+					Lease:          wresp.Events[i].PrevKv.Lease,
+				}
+			}
+			switch wresp.Events[i].Type {
+			case mvccpb.DELETE:
+				wsResp.Events[i].Type = pdpb.Event_DELETE
+			case mvccpb.PUT:
+				wsResp.Events[i].Type = pdpb.Event_PUT
+			default:
+				break
+			}
 		}
 		ws.Send(wsResp)
 	}

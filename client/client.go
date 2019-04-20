@@ -842,6 +842,11 @@ func (c *client) Watch(ctx context.Context, key []byte) error {
 			log.Info("Get Event", zap.String("CompactRevision", strconv.Itoa(int(reply.CompactRevision))),
 				zap.String("key", string(reply.Events[i].Kv.Key)),
 				zap.String("version", strconv.Itoa(int(reply.Events[i].Kv.Version))))
+			if reply.Events[i].PrevKv != nil{
+				log.Info("Get Event", zap.String("CompactRevision", strconv.Itoa(int(reply.CompactRevision))),
+					zap.String("prekey", string(reply.Events[i].PrevKv.Key)),
+					zap.String("preversion", strconv.Itoa(int(reply.Events[i].PrevKv.Version))))
+			}
 		}
 	}
 
