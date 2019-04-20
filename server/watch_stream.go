@@ -42,7 +42,7 @@ func (s *Server) Watch(ws pdpb.PD_WatchServer) error {
 	ctx, cancle := context.WithCancel(s.serverLoopCtx)
 	defer cancle()
 
-	resp, err := get(s.client, "/pd/"+strconv.FormatUint(s.clusterID, 10)+"/config")
+	resp, err := get(s.client, string(in.Key))
 	if err != nil || resp == nil {
 		return nil
 	}
@@ -66,7 +66,6 @@ func (s *Server) Watch(ws pdpb.PD_WatchServer) error {
 			})
 			fmt.Println(wresp.Events[i].Kv.Version)
 		}
-		fmt.Println("one watch response start")
 		ws.Send(wsResp)
 	}
 

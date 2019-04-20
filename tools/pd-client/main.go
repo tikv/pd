@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -49,5 +50,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	pdCli.Watch(ctx)
+
+
+	pdCli.Watch(ctx,[]byte("/pd/"+strconv.FormatUint(pdCli.GetClusterID(ctx), 10)+"/config"))
 }

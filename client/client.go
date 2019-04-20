@@ -71,7 +71,7 @@ type Client interface {
 	ScatterRegion(ctx context.Context, regionID uint64) error
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
-	Watch(ctx context.Context) error
+	Watch(ctx context.Context,key []byte) error
 	// Close closes the client.
 	Close()
 }
@@ -806,7 +806,7 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 	})
 }
 
-func (c *client) Watch(ctx context.Context) error {
+func (c *client) Watch(ctx context.Context, key []byte) error {
 	cc := c.leaderClient()
 
 	stream, err := cc.Watch(context.Background())
@@ -820,7 +820,7 @@ func (c *client) Watch(ctx context.Context) error {
 		return err
 	}
 
-	stream.Send(&pdpb.WatchRequest{WatchId: int64(2)})
+	stream.Send(&pdpb.WatchRequest{WatchId: int64(2), Key: key})
 	if err != nil {
 		log.Error("failed to send: %v", zap.Error(err))
 		return err
@@ -840,7 +840,8 @@ func (c *client) Watch(ctx context.Context) error {
 		}
 		for i := 0; i < len(reply.Events); i++ {
 			log.Info("Get Event", zap.String("CompactRevision", strconv.Itoa(int(reply.CompactRevision))),
-				zap.String("key", string(reply.Events[i].Kv.Key)))
+				zap.String("key", string(reply.Events[i].Kv.Key)),
+				zap.String("version", strconv.Itoa(int(reply.Events[i].Kv.Version))))
 		}
 	}
 
