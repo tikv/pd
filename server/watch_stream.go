@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
@@ -37,14 +36,18 @@ func (s *Server) Watch(ws pdpb.PD_WatchServer) error {
 		log.Printf("failed to recv: %v", err)
 		return err
 	}
-	fmt.Println(in.WatchId)
+
+	if err := s.validateRequest(in.GetHeader()); err != nil {
+		return err
+	}
+
 
 	ctx, cancle := context.WithCancel(s.serverLoopCtx)
 	defer cancle()
 
 	resp, err := get(s.client, string(in.Key))
 	if err != nil || resp == nil {
-		return nil
+		return err
 	}
 
 	s.watchStreams.watcher[in.WatchId] = clientv3.NewWatcher(s.watchStreams.proxyClient)
@@ -53,6 +56,10 @@ func (s *Server) Watch(ws pdpb.PD_WatchServer) error {
 		clientv3.WithRev(resp.Kvs[0].Version))
 
 	for wresp := range rch {
+		if err := s.validateRequest(in.GetHeader()); err != nil {
+			return err
+		}
+
 		wsResp := &pdpb.WatchResponse{}
 		wsResp.CompactRevision = wresp.CompactRevision
 		for i := 0; i < len(wresp.Events); i++ {
@@ -67,7 +74,6 @@ func (s *Server) Watch(ws pdpb.PD_WatchServer) error {
 				},
 			})
 			if wresp.Events[i].PrevKv != nil {
-				fmt.Println("prekv not nil")
 				wsResp.Events[i].PrevKv = &pdpb.KeyValue{
 					Value:          wresp.Events[i].PrevKv.Value,
 					Key:            wresp.Events[i].PrevKv.Key,
