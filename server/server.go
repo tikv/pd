@@ -240,7 +240,7 @@ func (s *Server) startServer() error {
 
 func (s *Server) initClusterID() error {
 	// Get any cluster key to parse the cluster ID.
-	resp, err := kvGet(s.client, pdClusterIDPath)
+	resp, err := etcdutil.EtcdKVGet(s.client, pdClusterIDPath)
 	if err != nil {
 		return err
 	}
@@ -762,7 +762,7 @@ func (s *Server) DeleteMemberLeaderPriority(id uint64) error {
 // GetMemberLeaderPriority loads a member's priority to be elected as the etcd leader.
 func (s *Server) GetMemberLeaderPriority(id uint64) (int, error) {
 	key := s.getMemberLeaderPriorityPath(id)
-	res, err := kvGet(s.client, key)
+	res, err := etcdutil.EtcdKVGet(s.client, key)
 	if err != nil {
 		return 0, err
 	}

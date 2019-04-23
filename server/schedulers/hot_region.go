@@ -303,15 +303,15 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 			schedule.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
 			schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
 		}
-		destStoreIDs := make([]uint64, 0, len(stores))
+		candidateStoreIDs := make([]uint64, 0, len(stores))
 		for _, store := range stores {
 			if schedule.FilterTarget(cluster, store, filters) {
 				continue
 			}
-			destStoreIDs = append(destStoreIDs, store.GetID())
+			candidateStoreIDs = append(candidateStoreIDs, store.GetID())
 		}
 
-		destStoreID = h.selectDestStore(destStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
+		destStoreID = h.selectDestStore(candidateStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
 		if destStoreID != 0 {
 			h.adjustBalanceLimit(srcStoreID, storesStat)
 

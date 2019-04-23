@@ -25,6 +25,7 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/etcdserver"
 	"go.etcd.io/etcd/pkg/types"
+	"go.uber.org/zap"
 )
 
 const (
@@ -94,4 +95,21 @@ func RemoveEtcdMember(client *clientv3.Client, id uint64) (*clientv3.MemberRemov
 	rmResp, err := client.MemberRemove(ctx, id)
 	cancel()
 	return rmResp, errors.WithStack(err)
+}
+
+// EtcdKVGet returns the etcd GetResponse by given key or key prefix
+func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+	ctx, cancel := context.WithTimeout(c.Ctx(), DefaultRequestTimeout)
+	defer cancel()
+
+	start := time.Now()
+	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
+	if err != nil {
+		log.Error("load from etcd meet error", zap.Error(err))
+	}
+	if cost := time.Since(start); cost > DefaultSlowRequestTime {
+		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), zap.Error(err))
+	}
+
+	return resp, errors.WithStack(err)
 }
