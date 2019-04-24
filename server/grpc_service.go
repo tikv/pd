@@ -413,11 +413,14 @@ func (s *Server) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) 
 		slaves = r.GetSlavePeers()
 		region = nr.GetMeta()
 		leader = nr.GetLeader()
+		downPeers = append(downPeers, r.GetDownPeers()...)
+		downPeers = append(downPeers, r.GetSlaveDownPeers()...)
+		pendingPeers = append(pendingPeers, r.GetPendingPeers()...)
+		pendingPeers = append(pendingPeers, r.GetSlavePendingPeers()...)
+	} else {
+		log.Error("got a nil region by key", zap.String("key", string(core.HexRegionKey(request.GetRegionKey()))))
 	}
-	downPeers = append(downPeers, r.GetDownPeers()...)
-	downPeers = append(downPeers, r.GetSlaveDownPeers()...)
-	pendingPeers = append(pendingPeers, r.GetPendingPeers()...)
-	pendingPeers = append(pendingPeers, r.GetSlavePendingPeers()...)
+
 	return &pdpb.GetRegionResponse{
 		Header:       s.header(),
 		Region:       region,
