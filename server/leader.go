@@ -204,7 +204,10 @@ func (s *Server) campaignLeader() error {
 	log.Debug("begin to campaign leader", zap.String("campaign-leader-name", s.Name()))
 
 	lessor := clientv3.NewLease(s.client)
-	defer lessor.Close()
+	defer func() {
+		lessor.Close()
+		log.Info("exit campaign leader")
+	}()
 
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(s.client.Ctx(), requestTimeout)

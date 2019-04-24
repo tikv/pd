@@ -15,6 +15,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -98,6 +99,7 @@ func (c *coordinator) patrolRegions() {
 		case <-timer.C:
 			timer.Reset(c.cluster.GetPatrolRegionInterval())
 		case <-c.ctx.Done():
+			log.Info("patrol regions has been stopped")
 			return
 		}
 
@@ -304,28 +306,30 @@ func (c *coordinator) collectHotSpotMetrics() {
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
-		stat, ok := status.AsPeer[s.GetID()]
+		storeID := s.GetID()
+		storeLabel := fmt.Sprintf("%d", storeID)
+		stat, ok := status.AsPeer[storeID]
 		if ok {
 			totalWriteBytes := float64(stat.TotalFlowBytes)
 			hotWriteRegionCount := float64(stat.RegionsCount)
 
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_peer").Set(totalWriteBytes)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_peer").Set(hotWriteRegionCount)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(totalWriteBytes)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(hotWriteRegionCount)
 		} else {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_peer").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_peer").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(0)
 		}
 
-		stat, ok = status.AsLeader[s.GetID()]
+		stat, ok = status.AsLeader[storeID]
 		if ok {
 			totalWriteBytes := float64(stat.TotalFlowBytes)
 			hotWriteRegionCount := float64(stat.RegionsCount)
 
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_leader").Set(totalWriteBytes)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_leader").Set(hotWriteRegionCount)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(totalWriteBytes)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(hotWriteRegionCount)
 		} else {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(0)
 		}
 	}
 
@@ -333,16 +337,18 @@ func (c *coordinator) collectHotSpotMetrics() {
 	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
-		stat, ok := status.AsLeader[s.GetID()]
+		storeID := s.GetID()
+		storeLabel := fmt.Sprintf("%d", storeID)
+		stat, ok := status.AsLeader[storeID]
 		if ok {
 			totalReadBytes := float64(stat.TotalFlowBytes)
 			hotReadRegionCount := float64(stat.RegionsCount)
 
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_read_bytes_as_leader").Set(totalReadBytes)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_read_region_as_leader").Set(hotReadRegionCount)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(totalReadBytes)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(hotReadRegionCount)
 		} else {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_read_bytes_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_read_region_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(0)
 		}
 	}
 
@@ -409,7 +415,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			}
 
 		case <-s.Ctx().Done():
-			log.Info("stopped scheduler",
+			log.Info("scheduler has been stopped",
 				zap.String("scheduler-name", s.GetName()),
 				zap.Error(s.Ctx().Err()))
 			return

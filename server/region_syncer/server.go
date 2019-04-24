@@ -97,7 +97,7 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 	for {
 		select {
 		case <-quit:
-			log.Info("exit region syncer")
+			log.Info("region syncer has been stopped")
 			return
 		case first := <-regionNotifier:
 			requests = append(requests, first.GetMeta())

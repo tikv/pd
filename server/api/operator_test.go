@@ -75,6 +75,7 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	c.Assert(err, IsNil)
 	operator = mustReadURL(c, regionURL)
 	c.Assert(strings.Contains(operator, "add learner peer 1 on store 3"), IsTrue)
+	c.Assert(strings.Contains(operator, "RUNNING"), IsTrue)
 
 	err = doDelete(regionURL)
 	c.Assert(err, IsNil)
@@ -82,7 +83,7 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	err = postJSON(fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"remove-peer", "region_id": 1, "store_id": 2}`))
 	c.Assert(err, IsNil)
 	operator = mustReadURL(c, regionURL)
-	c.Log(operator)
+	c.Assert(strings.Contains(operator, "RUNNING"), IsTrue)
 	c.Assert(strings.Contains(operator, "remove peer on store 2"), IsTrue)
 
 	err = doDelete(regionURL)

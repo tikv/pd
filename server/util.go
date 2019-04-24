@@ -35,6 +35,7 @@ import (
 const (
 	requestTimeout  = etcdutil.DefaultRequestTimeout
 	slowRequestTime = etcdutil.DefaultSlowRequestTime
+	clientTimeout   = 30 * time.Second
 )
 
 // Version information.
@@ -47,6 +48,7 @@ var (
 
 // DialClient used to dail http request.
 var DialClient = &http.Client{
+	Timeout: clientTimeout,
 	Transport: &http.Transport{
 		DisableKeepAlives: true,
 	},
@@ -271,10 +273,13 @@ func InitHTTPClient(svr *Server) error {
 		return err
 	}
 
-	DialClient = &http.Client{Transport: &http.Transport{
-		TLSClientConfig:   tlsConfig,
-		DisableKeepAlives: true,
-	}}
+	DialClient = &http.Client{
+		Timeout: clientTimeout,
+		Transport: &http.Transport{
+			TLSClientConfig:   tlsConfig,
+			DisableKeepAlives: true,
+		},
+	}
 	return nil
 }
 

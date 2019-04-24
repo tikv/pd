@@ -95,7 +95,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "region_heartbeat",
 			Help:      "Counter of region hearbeat.",
-		}, []string{"address", "type", "status"})
+		}, []string{"address", "store", "type", "status"})
 
 	regionHeartbeatLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -104,7 +104,7 @@ var (
 			Name:      "region_heartbeat_latency_seconds",
 			Help:      "Bucketed histogram of latency (s) of receiving heartbeat.",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
-		}, []string{"address"})
+		}, []string{"address", "store"})
 
 	storeStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -112,7 +112,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "store_status",
 			Help:      "Store status for schedule",
-		}, []string{"namespace", "address", "type"})
+		}, []string{"namespace", "address", "store", "type"})
 
 	hotSpotStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -120,7 +120,7 @@ var (
 			Subsystem: "hotspot",
 			Name:      "status",
 			Help:      "Status of the hotspot.",
-		}, []string{"address", "type"})
+		}, []string{"address", "store", "type"})
 
 	tsoCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{

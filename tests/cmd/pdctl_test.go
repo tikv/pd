@@ -1004,6 +1004,20 @@ func (s *cmdTestSuite) TestOperator(c *C) {
 			expect: "split region with policy APPROXIMATE",
 			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
 		},
+		{
+			// operator add split-region <region_id> [--policy=scan|approximate]
+			cmd:    []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=scan"},
+			show:   []string{"-u", pdAddr, "operator", "check", "3"},
+			expect: "split region with policy SCAN",
+			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
+		},
+		{
+			// operator add split-region <region_id> [--policy=scan|approximate]
+			cmd:    []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=approximate"},
+			show:   []string{"-u", pdAddr, "operator", "check", "3"},
+			expect: "status: RUNNING",
+			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
+		},
 	}
 
 	for _, testCase := range testCases {

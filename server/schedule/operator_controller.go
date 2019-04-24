@@ -15,6 +15,7 @@ package schedule
 
 import (
 	"container/list"
+	"fmt"
 	"sync"
 	"time"
 
@@ -432,6 +433,11 @@ func (oc *OperatorController) SetOperator(op *Operator) {
 type OperatorWithStatus struct {
 	Op     *Operator
 	Status pdpb.OperatorStatus
+}
+
+// MarshalJSON returns the status of operator as a JSON string
+func (o *OperatorWithStatus) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + fmt.Sprintf("status: %s, operator: %s", o.Status.String(), o.Op.String()) + `"`), nil
 }
 
 // OperatorRecords remains the operator and its status for a while.
