@@ -269,6 +269,21 @@ func (h *Handler) GetOperator(regionID uint64) (*schedule.Operator, error) {
 	return op, nil
 }
 
+// GetOperatorStatus returns the status of the region operator.
+func (h *Handler) GetOperatorStatus(regionID uint64) (*schedule.OperatorWithStatus, error) {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return nil, err
+	}
+
+	op := c.opController.GetOperatorStatus(regionID)
+	if op == nil {
+		return nil, ErrOperatorNotFound
+	}
+
+	return op, nil
+}
+
 // RemoveOperator removes the region operator.
 func (h *Handler) RemoveOperator(regionID uint64) error {
 	c, err := h.getCoordinator()

@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -30,7 +31,7 @@ import (
 )
 
 var (
-	dialClient = &http.Client{}
+	dialClient = &http.Client{Timeout: 30 * time.Second}
 
 	pingPrefix = "pd/ping"
 )
@@ -47,9 +48,12 @@ func InitHTTPSClient(CAPath, CertPath, KeyPath string) error {
 		return errors.WithStack(err)
 	}
 
-	dialClient = &http.Client{Transport: &http.Transport{
-		TLSClientConfig: tlsConfig,
-	}}
+	dialClient = &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
+	}
 
 	return nil
 }

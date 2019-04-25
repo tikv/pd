@@ -33,8 +33,19 @@ func NewOperatorCommand() *cobra.Command {
 		Short: "operator commands",
 	}
 	c.AddCommand(NewShowOperatorCommand())
+	c.AddCommand(NewCheckOperatorCommand())
 	c.AddCommand(NewAddOperatorCommand())
 	c.AddCommand(NewRemoveOperatorCommand())
+	return c
+}
+
+// NewCheckOperatorCommand returns a command to show status of the operator.
+func NewCheckOperatorCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "check [region_id]",
+		Short: "checks the status of operator",
+		Run:   checkOperatorCommandFunc,
+	}
 	return c
 }
 
@@ -54,6 +65,25 @@ func showOperatorCommandFunc(cmd *cobra.Command, args []string) {
 		path = operatorsPrefix
 	} else if len(args) == 1 {
 		path = fmt.Sprintf("%s?kind=%s", operatorsPrefix, args[0])
+	} else {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+
+	r, err := doRequest(cmd, path, http.MethodGet)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println(r)
+}
+
+func checkOperatorCommandFunc(cmd *cobra.Command, args []string) {
+	var path string
+	if len(args) == 0 {
+		path = operatorsPrefix
+	} else if len(args) == 1 {
+		path = fmt.Sprintf("%s/%s", operatorsPrefix, args[0])
 	} else {
 		cmd.Println(cmd.UsageString())
 		return

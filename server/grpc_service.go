@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -349,21 +350,22 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		}
 
 		storeID := request.GetLeader().GetStoreId()
+		storeLabel := strconv.FormatUint(storeID, 10)
 		store, err := cluster.GetStore(storeID)
 		if err != nil {
 			return err
 		}
 		storeAddress := store.GetAddress()
 
-		regionHeartbeatCounter.WithLabelValues(storeAddress, "report", "recv").Inc()
-		regionHeartbeatLatency.WithLabelValues(storeAddress).Observe(float64(time.Now().Unix()) - float64(request.GetInterval().GetEndTimestamp()))
+		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "recv").Inc()
+		regionHeartbeatLatency.WithLabelValues(storeAddress, storeLabel).Observe(float64(time.Now().Unix()) - float64(request.GetInterval().GetEndTimestamp()))
 
 		cluster.RLock()
 		hbStreams := cluster.coordinator.hbStreams
 		cluster.RUnlock()
 
 		if time.Since(lastBind) > s.cfg.heartbeatStreamBindInterval.Duration {
-			regionHeartbeatCounter.WithLabelValues(storeAddress, "report", "bind").Inc()
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "bind").Inc()
 			hbStreams.bindStream(storeID, server)
 			lastBind = time.Now()
 		}
@@ -371,22 +373,22 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		region := core.RegionFromHeartbeat(request)
 		if region.GetID() == 0 {
 			msg := fmt.Sprintf("invalid request region, %v", request)
-			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, storeAddress)
+			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, storeAddress, storeLabel)
 			continue
 		}
 		if region.GetLeader() == nil {
 			msg := fmt.Sprintf("invalid request leader, %v", request)
-			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, storeAddress)
+			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, storeAddress, storeLabel)
 			continue
 		}
 
 		err = cluster.HandleRegionHeartbeat(region)
 		if err != nil {
 			msg := err.Error()
-			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, storeAddress)
+			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, storeAddress, storeLabel)
 		}
 
-		regionHeartbeatCounter.WithLabelValues(storeAddress, "report", "ok").Inc()
+		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
 	}
 }
 
