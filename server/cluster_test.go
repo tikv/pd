@@ -535,16 +535,13 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 		}
 		go func(isReciver bool) {
 			if isReciver {
-				resp, err := stream.Recv()
+				_, err := stream.Recv()
 				c.Assert(err, IsNil)
-				c.Assert(resp.Header.GetError(), IsNil)
-				fmt.Println("get resp:", resp)
 				wg.Done()
 			}
 			for {
-				resp, err := stream.Recv()
+				_, err := stream.Recv()
 				c.Assert(err, IsNil)
-				c.Assert(resp.Header.GetError(), IsNil)
 			}
 		}(i == 0)
 	}
