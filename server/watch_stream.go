@@ -2,12 +2,16 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"io"
 	"log"
+	"time"
 )
+
+const watchStreamKeepAliveInterval = time.Minute
 
 type watchStreams struct {
 	proxyClient *clientv3.Client
@@ -41,7 +45,6 @@ func (s *Server) Watch(ws pdpb.PD_WatchServer) error {
 		return err
 	}
 
-
 	ctx, cancle := context.WithCancel(s.serverLoopCtx)
 	defer cancle()
 
@@ -49,6 +52,8 @@ func (s *Server) Watch(ws pdpb.PD_WatchServer) error {
 	if err != nil || resp == nil {
 		return err
 	}
+
+	fmt.Println(resp.Kvs[0].Version)
 
 	s.watchStreams.watcher[in.WatchId] = clientv3.NewWatcher(s.watchStreams.proxyClient)
 	rch := s.watchStreams.watcher[in.WatchId].Watch(ctx,
