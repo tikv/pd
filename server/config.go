@@ -195,6 +195,8 @@ const (
 	defaultHeartbeatStreamRebindInterval = time.Minute
 
 	defaultLeaderPriorityCheckInterval = time.Minute
+
+	defaultUseRegionStorage = true
 )
 
 func adjustString(v *string, defValue string) {
@@ -409,6 +411,10 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 		return err
 	}
 	if err := c.Replication.adjust(configMetaData.Child("replication")); err != nil {
+		return err
+	}
+
+	if err := c.PDServerCfg.adjust(configMetaData.Child("pd-server")); err != nil {
 		return err
 	}
 
@@ -751,6 +757,13 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 type PDServerConfig struct {
 	// UseRegionStorage enables the independent region storage.
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
+}
+
+func (c *PDServerConfig) adjust(meta *configMetaData) error {
+	if !meta.IsDefined("use-region-storage") {
+		c.UseRegionStorage = defaultUseRegionStorage
+	}
+	return nil
 }
 
 // StoreLabel is the config item of LabelPropertyConfig.
