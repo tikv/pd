@@ -100,7 +100,7 @@ type Server struct {
 	lastSavedTime time.Time
 	// For async region heartbeat.
 	hbStreams    *heartbeatStreams
-	watchStreams *watchStreams
+	watchProxyServer *WatchProxyServer
 	// Zap logger
 	lg       *zap.Logger
 	logProps *log.ZapProperties
@@ -204,7 +204,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	s.etcd = etcd
 	s.client = client
 	s.id = etcdServerID
-	s.watchStreams = NewWatchStreams(client)
+	s.watchProxyServer = NewWatchProxyServer(client)
 	return nil
 }
 
@@ -309,6 +309,7 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	}
 
+	go s.runWatchProxy()
 	s.startServerLoop()
 
 	return nil

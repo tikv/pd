@@ -21,6 +21,7 @@ var (
 	caPath      = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
 	certPath    = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")
 	keyPath     = flag.String("key", "", "path of file that contains X509 key in PEM format.")
+	watchKey    = flag.String("watchkey", "", "type of watch key.Default is config")
 	wg          sync.WaitGroup
 )
 
@@ -45,12 +46,16 @@ func main() {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 
-	go func(){
+	go func() {
 		<-sc
 		os.Exit(0)
 	}()
 
+	if *watchKey == "" {
+		pdCli.Watch(ctx, []byte("/pd/"+strconv.FormatUint(pdCli.GetClusterID(ctx), 10)+"/config"))
+	} else {
+		pdCli.Watch(ctx, []byte("mykey"))
+	}
 
 
-	pdCli.Watch(ctx,[]byte("/pd/"+strconv.FormatUint(pdCli.GetClusterID(ctx), 10)+"/config"))
 }

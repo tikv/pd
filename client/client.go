@@ -19,6 +19,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io/ioutil"
+	"math/rand"
 	"net/url"
 	"strconv"
 	"strings"
@@ -71,7 +72,7 @@ type Client interface {
 	ScatterRegion(ctx context.Context, regionID uint64) error
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
-	Watch(ctx context.Context,key []byte) error
+	Watch(ctx context.Context, key []byte) error
 	// Close closes the client.
 	Close()
 }
@@ -820,7 +821,9 @@ func (c *client) Watch(ctx context.Context, key []byte) error {
 		return err
 	}
 
-	stream.Send(&pdpb.WatchRequest{WatchId: int64(2), Key: key})
+	randWatchID := rand.New(rand.NewSource(time.Now().UnixNano())).Int63()
+
+	stream.Send(&pdpb.WatchRequest{WatchId: randWatchID, Key: key, Header: c.requestHeader()})
 	if err != nil {
 		log.Error("failed to send: %v", zap.Error(err))
 		return err
@@ -842,7 +845,7 @@ func (c *client) Watch(ctx context.Context, key []byte) error {
 			log.Info("Get Event", zap.String("CompactRevision", strconv.Itoa(int(reply.CompactRevision))),
 				zap.String("key", string(reply.Events[i].Kv.Key)),
 				zap.String("version", strconv.Itoa(int(reply.Events[i].Kv.Version))))
-			if reply.Events[i].PrevKv != nil{
+			if reply.Events[i].PrevKv != nil {
 				log.Info("Get Event", zap.String("CompactRevision", strconv.Itoa(int(reply.CompactRevision))),
 					zap.String("prekey", string(reply.Events[i].PrevKv.Key)),
 					zap.String("preversion", strconv.Itoa(int(reply.Events[i].PrevKv.Version))))
