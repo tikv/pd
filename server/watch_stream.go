@@ -55,20 +55,20 @@ func NewWatchProxyServer(client *clientv3.Client) *WatchProxyServer {
 	return watchProxy
 }
 
-func (s *Server) runWatchProxy() {
-	leaderAliveTicker := time.NewTicker(time.Duration(s.cfg.LeaderLease) * time.Second)
+func (s *Server) runWatchProxy(wps *WatchProxyServer, leaderLease int64) {
+	leaderAliveTicker := time.NewTicker(time.Duration(leaderLease) * time.Second)
 	defer leaderAliveTicker.Stop()
 	for {
 		select {
-		case <-s.watchProxyServer.stopCtx.Done():
+		case <-wps.stopCtx.Done():
 			return
 		case <-leaderAliveTicker.C:
 			if !s.IsLeader() {
-				s.watchProxyServer.closedAllWatcherChan <- closed(1)
+				wps.closedAllWatcherChan <- closed(1)
 			}
-		case <-s.watchProxyServer.closedAllWatcherChan:
-			for key := range s.watchProxyServer.watchers {
-				s.watchProxyServer.watchers[key].closedChan <- closed(1)
+		case <-wps.closedAllWatcherChan:
+			for key := range wps.watchers {
+				wps.watchers[key].closedChan <- closed(1)
 			}
 		}
 	}

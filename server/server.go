@@ -204,7 +204,6 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	s.etcd = etcd
 	s.client = client
 	s.id = etcdServerID
-	s.watchProxyServer = NewWatchProxyServer(client)
 	return nil
 }
 
@@ -309,7 +308,8 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	}
 
-	go s.runWatchProxy()
+	s.watchProxyServer = NewWatchProxyServer(s.client)
+	go s.runWatchProxy(s.watchProxyServer,s.cfg.LeaderLease)
 	s.startServerLoop()
 
 	return nil
