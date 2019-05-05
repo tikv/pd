@@ -823,7 +823,7 @@ func (c *client) Watch(ctx context.Context, key []byte) error {
 
 	randWatchID := rand.New(rand.NewSource(time.Now().UnixNano())).Int63()
 
-	stream.Send(&pdpb.WatchRequest{WatchId: randWatchID, Key: key, Header: c.requestHeader()})
+	stream.Send(&pdpb.WatchRequest{WatchId: randWatchID, Type: []byte("pdcli"), Key: key, Header: c.requestHeader()})
 	if err != nil {
 		log.Error("failed to send: %v", zap.Error(err))
 		return err

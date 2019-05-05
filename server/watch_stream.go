@@ -2,33 +2,38 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
-	"io"
-	"log"
-	"strconv"
 	"time"
 )
 
 type WatchChan chan pdpb.WatchResponse
 
+// type + watch_id = observerid
+// type is used to mark the type of component,
+// it tell us what kind of component is trying to observer the key in pd
 type ObserverID string
+type closed int64
+
+// If many observer is watching the same key, considering performance,
+// we'd better create a watcher  and notify all them
+// when watcher received a event
+type watchKey string
 
 type WatchProxyServer struct {
-	stopCtx         context.Context
-	stopCancel      context.CancelFunc
-	ProxyClient     *clientv3.Client
-	Watchers        map[string]Watcher
-	stopWatcherChan chan int64
+	stopCtx              context.Context
+	stopCancel           context.CancelFunc
+	ProxyClient          *clientv3.Client
+	Watchers             map[watchKey]Watcher
+	closedAllWatcherChan chan closed
 }
 
 type Watcher struct { // one watchUnit correspond to a key
 	watchChan    WatchChan
 	watcher      clientv3.Watcher
 	watchStreams map[ObserverID]watchStream
-	closedChan   chan int64
+	closedChan   chan closed
 }
 
 type watchStream struct {
@@ -38,11 +43,11 @@ type watchStream struct {
 func NewWatchProxyServer(client *clientv3.Client) *WatchProxyServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	watchProxy := &WatchProxyServer{
-		stopCtx:         ctx,
-		stopCancel:      cancel,
-		ProxyClient:     client,
-		Watchers:        make(map[string]Watcher),
-		stopWatcherChan: make(chan int64),
+		stopCtx:              ctx,
+		stopCancel:           cancel,
+		ProxyClient:          client,
+		Watchers:             make(map[watchKey]Watcher),
+		closedAllWatcherChan: make(chan closed),
 	}
 	return watchProxy
 }
@@ -56,94 +61,27 @@ func (s *Server) runWatchProxy() {
 			return
 		case <-leaderAliveTicker.C:
 			if !s.IsLeader() {
-				s.watchProxyServer.stopWatcherChan <- 1
+				s.watchProxyServer.closedAllWatcherChan <- closed(1)
 			}
-		case <-s.watchProxyServer.stopWatcherChan:
+		case <-s.watchProxyServer.closedAllWatcherChan:
 			for key, _ := range s.watchProxyServer.Watchers {
-				s.watchProxyServer.Watchers[key].closedChan <- 1
+				s.watchProxyServer.Watchers[key].closedChan <- closed(1)
 			}
 		}
 	}
 }
 
-func (s *Server) Watch(stream pdpb.PD_WatchServer) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	//get the info from client
-	in, err := stream.Recv()
-	if err == io.EOF {
-		return nil
-	}
-
-	if err = s.validateRequest(in.GetHeader()); err != nil {
-		return err
-	}
-
-	if err != nil {
-		log.Printf("failed to recv: %v", err)
-		return err
-	}
-
-	resp, err := get(s.client, string(in.Key))
-	if err != nil || resp == nil {
-		return err
-	}
-
-	if _, ok := s.watchProxyServer.Watchers[string(in.Key)]; !ok {
-		s.watchProxyServer.Watchers[string(in.Key)] = Watcher{
-			watchChan:    make(chan pdpb.WatchResponse),
-			watcher:      clientv3.NewWatcher(s.watchProxyServer.ProxyClient),
-			watchStreams: make(map[ObserverID]watchStream),
-			closedChan:   make(chan int64),
-		}
-	}
-	observerID := ObserverID("region-" + strconv.FormatInt(in.WatchId, 10))
-
-	//create or update stream
-	s.watchProxyServer.Watchers[string(in.Key)].watchStreams[observerID] = watchStream{stream: stream}
-
-	if len(s.watchProxyServer.Watchers[string(in.Key)].watchStreams) == 1 {
-		go s.watchRoutine(ctx, string(in.Key), resp.Kvs[len(resp.Kvs)-1].Version)
-		go s.notifyObserver(string(in.Key))
-	} else {
-		s.watchProxyServer.Watchers[string(in.Key)].
-			watchStreams[observerID].stream.Send(getRespConvert(*resp))
-	}
-
-	select {
-	case <-s.watchProxyServer.Watchers[string(in.Key)].closedChan:
-		return err
-	}
-
-	return nil
-}
-
-func (s *Server) watchRoutine(ctx context.Context, key string, revision int64) {
-	rch := s.watchProxyServer.Watchers[key].watcher.Watch(ctx, key, clientv3.WithRev(revision))
-
-	for wresp := range rch {
-		if !s.IsLeader() {
-			s.watchProxyServer.stopWatcherChan <- 1
-		} else if wresp.Canceled {
-			fmt.Println(key, " is canceld")
-			s.watchProxyServer.Watchers[key].closedChan <- 1
-		} else {
-			s.watchProxyServer.Watchers[key].watchChan <- *watchEventConvert(wresp)
-		}
-	}
-}
-
-func (s *Server) notifyObserver(key string){
+func (wps *WatchProxyServer) notifyAllObservers(key watchKey) {
 	for {
 		select {
-		case watchResp := <-s.watchProxyServer.Watchers[key].watchChan:
-			for _, ws := range s.watchProxyServer.Watchers[key].watchStreams {
+		// we heard a event from etcd and notify all observer
+		case watchResp := <-wps.Watchers[key].watchChan:
+			for _, ws := range wps.Watchers[key].watchStreams {
 				ws.stream.Send(&watchResp)
 			}
-		case <-s.watchProxyServer.Watchers[key].closedChan:
+		case <-wps.Watchers[key].closedChan:
 			return
-		case <-s.watchProxyServer.stopCtx.Done():
+		case <-wps.stopCtx.Done():
 			return
 		}
 	}

@@ -16,6 +16,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"go.etcd.io/etcd/clientv3"
 	"io"
 	"strconv"
 	"sync/atomic"
@@ -721,6 +722,77 @@ func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorReque
 		Kind:     []byte(r.Op.Kind().String()),
 		Status:   r.Status,
 	}, nil
+}
+
+func (s *Server) Watch(stream pdpb.PD_WatchServer) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	//get the info from client
+	request, err := stream.Recv()
+	if err == io.EOF {
+		log.Error("EOF", zap.Error(err))
+		return  err
+	}
+
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		log.Error("failed to validate request", zap.Error(err))
+		return  err
+	}
+
+	resp, err := get(s.client, string(request.Key))
+	if err != nil || resp == nil {
+		log.Error("failed to get key", zap.Error(err))
+		return  err
+	}
+
+	if _, ok := s.watchProxyServer.Watchers[watchKey(request.Key)]; !ok {
+		s.watchProxyServer.Watchers[watchKey(request.Key)] = Watcher{
+			watchChan:    make(chan pdpb.WatchResponse),
+			watcher:      clientv3.NewWatcher(s.watchProxyServer.ProxyClient),
+			watchStreams: make(map[ObserverID]watchStream),
+			closedChan:   make(chan closed),
+		}
+	}
+	observerID := ObserverID(string(request.Type) + strconv.FormatInt(request.WatchId, 10))
+	fmt.Println(observerID)
+
+	//create or update stream
+	s.watchProxyServer.Watchers[watchKey(request.Key)].watchStreams[observerID] = watchStream{stream: stream}
+
+	if len(s.watchProxyServer.Watchers[watchKey(request.Key)].watchStreams) == 1 {
+		// watcherRoutine is used to listen the event from etcd
+		go s.watcherRoutine(ctx, watchKey(request.Key), resp.Kvs[len(resp.Kvs)-1].Version)
+		// when we heard watch event from event, we will notify all observers:
+		go s.watchProxyServer.notifyAllObservers(watchKey(request.Key))
+	} else {
+		s.watchProxyServer.Watchers[watchKey(request.Key)].
+			watchStreams[observerID].stream.Send(getRespConvert(*resp))
+	}
+
+	select {
+	case <-s.watchProxyServer.Watchers[watchKey(request.Key)].closedChan:
+		err := errors.New("watcher is closed")
+		log.Error("watcher is closed", zap.Error(err))
+		return err
+	}
+}
+
+func (s *Server) watcherRoutine(ctx context.Context, key watchKey, revision int64) {
+	rch := s.watchProxyServer.Watchers[key].watcher.Watch(ctx, string(key), clientv3.WithRev(revision))
+
+	for wresp := range rch {
+		// we will check whether we are still leader when we received a event
+		// If not, we will stop all watchers
+		if !s.IsLeader() {
+			s.watchProxyServer.closedAllWatcherChan <- 1
+		} else if wresp.Canceled {
+			//  watchers[key] is closed,we should notify all observers for `key`
+			s.watchProxyServer.Watchers[key].closedChan <- 1
+		} else {
+			s.watchProxyServer.Watchers[key].watchChan <- *watchEventConvert(wresp)
+		}
+	}
 }
 
 // validateRequest checks if Server is leader and clusterID is matched.
