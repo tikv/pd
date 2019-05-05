@@ -99,7 +99,7 @@ type Server struct {
 	ts            atomic.Value
 	lastSavedTime time.Time
 	// For async region heartbeat.
-	hbStreams    *heartbeatStreams
+	hbStreams        *heartbeatStreams
 	watchProxyServer *WatchProxyServer
 	// Zap logger
 	lg       *zap.Logger

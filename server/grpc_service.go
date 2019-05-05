@@ -732,18 +732,18 @@ func (s *Server) Watch(stream pdpb.PD_WatchServer) error {
 	request, err := stream.Recv()
 	if err == io.EOF {
 		log.Error("EOF", zap.Error(err))
-		return  err
+		return err
 	}
 
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		log.Error("failed to validate request", zap.Error(err))
-		return  err
+		return err
 	}
 
 	resp, err := get(s.client, string(request.Key))
 	if err != nil || resp == nil {
 		log.Error("failed to get key", zap.Error(err))
-		return  err
+		return err
 	}
 
 	if _, ok := s.watchProxyServer.Watchers[watchKey(request.Key)]; !ok {
