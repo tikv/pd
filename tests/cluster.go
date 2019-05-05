@@ -375,14 +375,18 @@ func (c *TestCluster) GetLeader() string {
 func (c *TestCluster) WaitLeader() string {
 	for i := 0; i < 100; i++ {
 		counter := make(map[string]int)
+		running := 0
 		for _, s := range c.servers {
+			if s.state == Running {
+				running++
+			}
 			if s.GetLeader().GetName() != "" {
 				counter[s.GetLeader().GetName()]++
 			}
 		}
-		for leader, num := range counter {
-			if num == len(c.servers) {
-				return leader
+		for name, num := range counter {
+			if num == running && c.GetServer(name).IsLeader() {
+				return name
 			}
 		}
 		time.Sleep(500 * time.Millisecond)
