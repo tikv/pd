@@ -789,10 +789,10 @@ func (s *Server) watcherRoutine(ctx context.Context, key watchKey, revision int6
 		// we will check whether we are still leader when we received a event
 		// If not, we will stop all watchers
 		if !s.IsLeader() {
-			s.watchProxyServer.closedAllWatcherChan <- 1
+			s.watchProxyServer.closedAllWatcherChan <- closed(1)
 		} else if wresp.Canceled {
 			//  watchers[key] is closed,we should notify all observers for `key`
-			s.watchProxyServer.watchers[key].closedChan <- 1
+			s.watchProxyServer.watchers[key].closedChan <- closed(1)
 		} else {
 			s.watchProxyServer.watchers[key].watchChan <- *watchEventConvert(wresp)
 		}

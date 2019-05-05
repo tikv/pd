@@ -75,7 +75,6 @@ func (s *Server) runWatchProxy(wps *WatchProxyServer, leaderLease int64) {
 			}
 		}
 	}()
-
 }
 
 func (wps *WatchProxyServer) notifyAllObservers(key watchKey) {
