@@ -97,9 +97,9 @@ func (wps *WatchProxyServer) notifyAllObservers(key watchKey) {
 }
 
 // Close closes watchProxyServer
-func (s *WatchProxyServer) Close() {
-	s.stopCancel()
-	s.wg.Wait()
+func (wps *WatchProxyServer) Close() {
+	wps.stopCancel()
+	wps.wg.Wait()
 }
 
 func getRespConvert(getRsp clientv3.GetResponse) *pdpb.WatchResponse {
