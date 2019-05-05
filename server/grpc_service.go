@@ -755,7 +755,9 @@ func (s *Server) Watch(stream pdpb.PD_WatchServer) error {
 		}
 	}
 	observerID := ObserverID(string(request.Type) + strconv.FormatInt(request.WatchId, 10))
-	fmt.Println(observerID)
+	log.Info("receive watchrequest",
+		zap.String("observerID", string(observerID)),
+		zap.String("watchKey", string(request.Key)))
 
 	//create or update stream
 	s.watchProxyServer.Watchers[watchKey(request.Key)].watchStreams[observerID] = watchStream{stream: stream}
