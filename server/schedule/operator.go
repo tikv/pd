@@ -180,7 +180,7 @@ type MergeRegion struct {
 	// so to keep them from other scheduler,
 	// both of them should add MerRegion operatorStep.
 	// But actually, tikv just need the region want to be merged to get the merge request,
-	// thus use a IsPssive mark to indicate that
+	// thus use a IsPassive mark to indicate that
 	// this region doesn't need to send merge request to tikv.
 	IsPassive bool
 }
@@ -299,7 +299,7 @@ func (o *Operator) RegionID() uint64 {
 	return o.regionID
 }
 
-// RegionEpoch returns the region's epoch that is attched to the operator.
+// RegionEpoch returns the region's epoch that is attached to the operator.
 func (o *Operator) RegionEpoch() *metapb.RegionEpoch {
 	return o.regionEpoch
 }

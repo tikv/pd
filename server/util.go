@@ -78,6 +78,7 @@ func CheckPDVersion(opt *scheduleOption) {
 		pdVersion = *MustParseVersion(PDReleaseVersion)
 	}
 	clusterVersion := opt.loadClusterVersion()
+	log.Info("load cluster version", zap.Stringer("cluster-version", clusterVersion))
 	if pdVersion.LessThan(clusterVersion) {
 		log.Warn(
 			"PD version less than cluster version, please upgrade PD",
