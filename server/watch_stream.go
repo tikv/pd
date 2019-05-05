@@ -62,6 +62,7 @@ func (s *Server) runWatchProxy(wps *WatchProxyServer, leaderLease int64) {
 	defer wps.wg.Done()
 	go func() {
 		leaderAliveTicker := time.NewTicker(time.Duration(leaderLease) * time.Second)
+		defer leaderAliveTicker.Stop()
 	DONE:
 		for {
 			select {
