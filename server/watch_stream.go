@@ -5,6 +5,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
+	"sync"
 	"time"
 )
 
@@ -56,22 +57,28 @@ func NewWatchProxyServer(client *clientv3.Client) *WatchProxyServer {
 }
 
 func (s *Server) runWatchProxy(wps *WatchProxyServer, leaderLease int64) {
+	var swg sync.WaitGroup
+	swg.Add(1)
 	leaderAliveTicker := time.NewTicker(time.Duration(leaderLease) * time.Second)
 	defer leaderAliveTicker.Stop()
-	for {
-		select {
-		case <-wps.stopCtx.Done():
-			return
-		case <-leaderAliveTicker.C:
-			if !s.IsLeader() {
-				wps.closedAllWatcherChan <- closed(1)
-			}
-		case <-wps.closedAllWatcherChan:
-			for key := range wps.watchers {
-				wps.watchers[key].closedChan <- closed(1)
+	go func() {
+		for {
+			select {
+			case <-wps.stopCtx.Done():
+				swg.Done()
+				return
+			case <-leaderAliveTicker.C:
+				if !s.IsLeader() {
+					wps.closedAllWatcherChan <- closed(1)
+				}
+			case <-wps.closedAllWatcherChan:
+				for key := range wps.watchers {
+					wps.watchers[key].closedChan <- closed(1)
+				}
 			}
 		}
-	}
+	}()
+	swg.Wait()
 }
 
 func (wps *WatchProxyServer) notifyAllObservers(key watchKey) {

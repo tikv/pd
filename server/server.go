@@ -309,7 +309,8 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	s.watchProxyServer = NewWatchProxyServer(s.client)
-	go s.runWatchProxy(s.watchProxyServer, s.cfg.LeaderLease)
+	s.runWatchProxy(s.watchProxyServer, s.cfg.LeaderLease)
+
 	s.startServerLoop()
 
 	return nil
