@@ -5,6 +5,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
+	"sync"
 	"time"
 )
 
@@ -23,6 +24,7 @@ type watchKey string
 
 // WatchProxyServer manages all Watcher
 type WatchProxyServer struct {
+	wg                   sync.WaitGroup
 	stopCtx              context.Context
 	stopCancel           context.CancelFunc
 	proxyClient          *clientv3.Client
@@ -52,6 +54,7 @@ func NewWatchProxyServer(client *clientv3.Client) *WatchProxyServer {
 		watchers:             make(map[watchKey]Watcher),
 		closedAllWatcherChan: make(chan closed),
 	}
+	watchProxy.wg.Add(1)
 	return watchProxy
 }
 
@@ -91,6 +94,12 @@ func (wps *WatchProxyServer) notifyAllObservers(key watchKey) {
 			return
 		}
 	}
+}
+
+// Close closes watchProxyServer
+func (s *WatchProxyServer) Close() {
+	s.stopCancel()
+	s.wg.Wait()
 }
 
 func getRespConvert(getRsp clientv3.GetResponse) *pdpb.WatchResponse {

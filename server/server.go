@@ -230,6 +230,8 @@ func (s *Server) startServer() error {
 	s.kv = core.NewKV(kvBase).SetRegionKV(regionKV)
 	s.cluster = newRaftCluster(s, s.clusterID)
 	s.hbStreams = newHeartbeatStreams(s.clusterID, s.cluster)
+	s.watchProxyServer = NewWatchProxyServer(s.client)
+	s.runWatchProxy(s.watchProxyServer, s.cfg.LeaderLease)
 	if s.classifier, err = namespace.CreateClassifier(s.cfg.NamespaceClassifier, s.kv, s.idAlloc); err != nil {
 		return err
 	}
@@ -277,6 +279,9 @@ func (s *Server) Close() {
 	if s.hbStreams != nil {
 		s.hbStreams.Close()
 	}
+	if s.watchProxyServer != nil {
+		s.watchProxyServer.Close()
+	}
 	if err := s.kv.Close(); err != nil {
 		log.Error("close kv meet error", zap.Error(err))
 	}
@@ -307,9 +312,6 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := s.startServer(); err != nil {
 		return err
 	}
-
-	s.watchProxyServer = NewWatchProxyServer(s.client)
-	s.runWatchProxy(s.watchProxyServer, s.cfg.LeaderLease)
 
 	s.startServerLoop()
 
