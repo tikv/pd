@@ -62,11 +62,12 @@ func (s *Server) runWatchProxy(wps *WatchProxyServer, leaderLease int64) {
 	leaderAliveTicker := time.NewTicker(time.Duration(leaderLease) * time.Second)
 	defer leaderAliveTicker.Stop()
 	go func() {
+	DONE:
 		for {
 			select {
 			case <-wps.stopCtx.Done():
 				swg.Done()
-				return
+				break DONE
 			case <-leaderAliveTicker.C:
 				if !s.IsLeader() {
 					wps.closedAllWatcherChan <- closed(1)
