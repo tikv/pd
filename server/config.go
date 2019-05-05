@@ -61,7 +61,7 @@ type Config struct {
 	// LeaderLease time, if leader doesn't update its TTL
 	// in etcd after lease time, etcd will expire the leader key
 	// and other servers can campaign the leader again.
-	// Etcd onlys support seoncds TTL, so here is second too.
+	// Etcd only supports seconds TTL, so here is second too.
 	LeaderLease int64 `toml:"lease" json:"lease"`
 
 	// Log related config.
@@ -495,7 +495,7 @@ type ScheduleConfig struct {
 	// removing down replicas.
 	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string"`
 	// DisableReplaceOfflineReplica is the option to prevent replica checker from
-	// repalcing offline replicas.
+	// replacing offline replicas.
 	DisableReplaceOfflineReplica bool `toml:"disable-replace-offline-replica" json:"disable-replace-offline-replica,string"`
 	// DisableMakeUpReplica is the option to prevent replica checker from making up
 	// replicas when replica count is less than expected.
@@ -510,7 +510,7 @@ type ScheduleConfig struct {
 	// from moving replica to the target namespace.
 	DisableNamespaceRelocation bool `toml:"disable-namespace-relocation" json:"disable-namespace-relocation,string"`
 
-	// Schedulers support for loding customized schedulers
+	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 }
 

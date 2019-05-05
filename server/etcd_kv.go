@@ -14,12 +14,12 @@
 package server
 
 import (
-	"context"
 	"path"
 	"strings"
 	"time"
 
 	log "github.com/pingcap/log"
+	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -51,7 +51,7 @@ func newEtcdKVBase(s *Server) *etcdKVBase {
 func (kv *etcdKVBase) Load(key string) (string, error) {
 	key = path.Join(kv.rootPath, key)
 
-	resp, err := kvGet(kv.server.client, key)
+	resp, err := etcdutil.EtcdKVGet(kv.server.client, key)
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +69,7 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 
 	withRange := clientv3.WithRange(endKey)
 	withLimit := clientv3.WithLimit(int64(limit))
-	resp, err := kvGet(kv.server.client, key, withRange, withLimit)
+	resp, err := etcdutil.EtcdKVGet(kv.server.client, key, withRange, withLimit)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -108,20 +108,4 @@ func (kv *etcdKVBase) Delete(key string) error {
 		return errors.WithStack(errTxnFailed)
 	}
 	return nil
-}
-
-func kvGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
-	ctx, cancel := context.WithTimeout(c.Ctx(), kvRequestTimeout)
-	defer cancel()
-
-	start := time.Now()
-	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
-	if err != nil {
-		log.Error("load from etcd meet error", zap.Error(err))
-	}
-	if cost := time.Since(start); cost > kvSlowRequestTime {
-		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), zap.Error(err))
-	}
-
-	return resp, errors.WithStack(err)
 }

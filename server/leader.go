@@ -140,7 +140,7 @@ func (s *Server) etcdLeaderLoop() {
 			}
 			leaderPriority, err := s.GetMemberLeaderPriority(etcdLeader)
 			if err != nil {
-				log.Error("failed to load leader priority", zap.Error(err))
+				log.Error("failed to load etcd leader priority", zap.Error(err))
 				break
 			}
 			if myPriority > leaderPriority {
@@ -201,10 +201,13 @@ func (s *Server) memberInfo() (member *pdpb.Member, marshalStr string) {
 }
 
 func (s *Server) campaignLeader() error {
-	log.Debug("begin to campaign leader", zap.String("campaign-leader-name", s.Name()))
+	log.Info("start to campaign leader", zap.String("campaign-leader-name", s.Name()))
 
 	lessor := clientv3.NewLease(s.client)
-	defer lessor.Close()
+	defer func() {
+		lessor.Close()
+		log.Info("exit campaign leader")
+	}()
 
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(s.client.Ctx(), requestTimeout)
@@ -229,7 +232,7 @@ func (s *Server) campaignLeader() error {
 		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
-		return errors.New("campaign leader failed, other server may campaign ok")
+		return errors.New("failed to campaign leader, other server may campaign ok")
 	}
 
 	// Make the leader keepalived.
@@ -240,7 +243,7 @@ func (s *Server) campaignLeader() error {
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	log.Debug("campaign leader ok", zap.String("campaign-leader-name", s.Name()))
+	log.Info("campaign leader ok", zap.String("campaign-leader-name", s.Name()))
 
 	err = s.reloadConfigFromKV()
 	if err != nil {
@@ -264,9 +267,8 @@ func (s *Server) campaignLeader() error {
 	s.enableLeader()
 	defer s.disableLeader()
 
-	log.Info("load cluster version", zap.Stringer("cluster-version", s.scheduleOpt.loadClusterVersion()))
-	log.Info("PD cluster leader is ready to serve", zap.String("leader-name", s.Name()))
 	CheckPDVersion(s.scheduleOpt)
+	log.Info("PD cluster leader is ready to serve", zap.String("leader-name", s.Name()))
 
 	tsTicker := time.NewTicker(updateTimestampStep)
 	defer tsTicker.Stop()
@@ -280,6 +282,7 @@ func (s *Server) campaignLeader() error {
 			}
 		case <-tsTicker.C:
 			if err = s.updateTimestamp(); err != nil {
+				log.Info("failed to update timestamp")
 				return err
 			}
 			etcdLeader := s.GetEtcdLeader()
