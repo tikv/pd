@@ -724,6 +724,7 @@ func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorReque
 	}, nil
 }
 
+// Watch implements gRPC PDServer.
 func (s *Server) Watch(stream pdpb.PD_WatchServer) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -746,42 +747,43 @@ func (s *Server) Watch(stream pdpb.PD_WatchServer) error {
 		return err
 	}
 
-	if _, ok := s.watchProxyServer.Watchers[watchKey(request.Key)]; !ok {
-		s.watchProxyServer.Watchers[watchKey(request.Key)] = Watcher{
+	if _, ok := s.watchProxyServer.watchers[watchKey(request.Key)]; !ok {
+		s.watchProxyServer.watchers[watchKey(request.Key)] = Watcher{
 			watchChan:    make(chan pdpb.WatchResponse),
-			watcher:      clientv3.NewWatcher(s.watchProxyServer.ProxyClient),
-			watchStreams: make(map[ObserverID]watchStream),
+			watcher:      clientv3.NewWatcher(s.watchProxyServer.proxyClient),
+			watchStreams: make(map[observerID]watchStream),
 			closedChan:   make(chan closed),
 		}
 	}
-	observerID := ObserverID(string(request.Type) + strconv.FormatInt(request.WatchId, 10))
+	observerID := observerID(string(request.Type) + strconv.FormatInt(request.WatchId, 10))
 	log.Info("receive watchrequest",
 		zap.String("observerID", string(observerID)),
 		zap.String("watchKey", string(request.Key)))
 
 	//create or update stream
-	s.watchProxyServer.Watchers[watchKey(request.Key)].watchStreams[observerID] = watchStream{stream: stream}
+	s.watchProxyServer.watchers[watchKey(request.Key)].watchStreams[observerID] = watchStream{stream: stream}
 
-	if len(s.watchProxyServer.Watchers[watchKey(request.Key)].watchStreams) == 1 {
+	if len(s.watchProxyServer.watchers[watchKey(request.Key)].watchStreams) == 1 {
 		// watcherRoutine is used to listen the event from etcd
 		go s.watcherRoutine(ctx, watchKey(request.Key), resp.Kvs[len(resp.Kvs)-1].Version)
 		// when we heard watch event from event, we will notify all observers:
 		go s.watchProxyServer.notifyAllObservers(watchKey(request.Key))
 	} else {
-		s.watchProxyServer.Watchers[watchKey(request.Key)].
+		s.watchProxyServer.watchers[watchKey(request.Key)].
 			watchStreams[observerID].stream.Send(getRespConvert(*resp))
 	}
 
 	select {
-	case <-s.watchProxyServer.Watchers[watchKey(request.Key)].closedChan:
+	case <-s.watchProxyServer.watchers[watchKey(request.Key)].closedChan:
 		err := errors.New("watcher is closed")
 		log.Error("watcher is closed", zap.Error(err))
 		return err
 	}
 }
 
+// watcherRoutine starts a goroutine for a watcher in the watchProxyServer
 func (s *Server) watcherRoutine(ctx context.Context, key watchKey, revision int64) {
-	rch := s.watchProxyServer.Watchers[key].watcher.Watch(ctx, string(key), clientv3.WithRev(revision))
+	rch := s.watchProxyServer.watchers[key].watcher.Watch(ctx, string(key), clientv3.WithRev(revision))
 
 	for wresp := range rch {
 		// we will check whether we are still leader when we received a event
@@ -790,9 +792,9 @@ func (s *Server) watcherRoutine(ctx context.Context, key watchKey, revision int6
 			s.watchProxyServer.closedAllWatcherChan <- 1
 		} else if wresp.Canceled {
 			//  watchers[key] is closed,we should notify all observers for `key`
-			s.watchProxyServer.Watchers[key].closedChan <- 1
+			s.watchProxyServer.watchers[key].closedChan <- 1
 		} else {
-			s.watchProxyServer.Watchers[key].watchChan <- *watchEventConvert(wresp)
+			s.watchProxyServer.watchers[key].watchChan <- *watchEventConvert(wresp)
 		}
 	}
 }
