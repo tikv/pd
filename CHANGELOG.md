@@ -1,5 +1,9 @@
 # PD Change Log
 
+## v2.1.9
+- Support the GetOperator service [#1514](https://github.com/pingcap/pd/pull/1514)
+- Improve leader election related logs [#1529](https://github.com/pingcap/pd/pull/1529)
+
 ## v2.1.8
 - Fix the issue that `regionScatterer` might generate an invalid `OperatorStep` [#1482](https://github.com/pingcap/pd/pull/1482)
 - Fix the issue that a hot store makes incorrect statistics of keys [#1487](https://github.com/pingcap/pd/pull/1487)
