@@ -68,7 +68,7 @@ type NamespaceOptions interface {
 }
 
 const (
-	// RejectLeader is the label property type that sugguests a store should not
+	// RejectLeader is the label property type that suggests a store should not
 	// have any region leaders.
 	RejectLeader = "reject-leader"
 )

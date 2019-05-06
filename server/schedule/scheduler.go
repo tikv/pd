@@ -68,7 +68,7 @@ type Scheduler interface {
 	IsScheduleAllowed(cluster Cluster) bool
 }
 
-// CreateSchedulerFunc is for creating scheudler.
+// CreateSchedulerFunc is for creating scheduler.
 type CreateSchedulerFunc func(opController *OperatorController, args []string) (Scheduler, error)
 
 var schedulerMap = make(map[string]CreateSchedulerFunc)

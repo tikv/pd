@@ -176,7 +176,7 @@ func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source,
 	sourceID := source.GetID()
 	targetID := target.GetID()
 	if !shouldBalance(cluster, source, target, region, core.LeaderKind, opInfluence) {
-		log.Debug("skip balance region",
+		log.Debug("skip balance leader",
 			zap.String("scheduler", l.GetName()), zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
 			zap.Int64("source-size", source.GetLeaderSize()), zap.Float64("source-score", source.LeaderScore(0)),
 			zap.Int64("source-influence", opInfluence.GetStoreInfluence(sourceID).ResourceSize(core.LeaderKind)),
