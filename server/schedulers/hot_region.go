@@ -316,7 +316,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 
 		destStoreID = h.selectDestStore(candidateStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
 		if destStoreID != 0 {
-			h.adjustBalanceLimit(srcStoreID, storesStat, func(limit uint64) { h.peerLimit = limit })
+			h.peerLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
 
 			srcPeer := srcRegion.GetStorePeer(srcStoreID)
 			if srcPeer == nil {
@@ -374,7 +374,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 
 		destPeer := srcRegion.GetStoreVoter(destStoreID)
 		if destPeer != nil {
-			h.adjustBalanceLimit(srcStoreID, storesStat, func(limit uint64) { h.leaderLimit = limit })
+			h.leaderLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
 
 			return srcRegion, destPeer
 		}
@@ -434,7 +434,7 @@ func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64,
 	return
 }
 
-func (h *balanceHotRegionsScheduler) adjustBalanceLimit(storeID uint64, storesStat core.StoreHotRegionsStat, setFunc func(limit uint64)) {
+func (h *balanceHotRegionsScheduler) adjustBalanceLimit(storeID uint64, storesStat core.StoreHotRegionsStat) uint64 {
 	srcStoreStatistics := storesStat[storeID]
 
 	var hotRegionTotalCount float64
@@ -444,8 +444,7 @@ func (h *balanceHotRegionsScheduler) adjustBalanceLimit(storeID uint64, storesSt
 
 	avgRegionCount := hotRegionTotalCount / float64(len(storesStat))
 	// Multiplied by hotRegionLimitFactor to avoid transfer back and forth
-	limit := uint64((float64(srcStoreStatistics.RegionsStat.Len()) - avgRegionCount) * hotRegionLimitFactor)
-	setFunc(maxUint64(1, limit))
+	return uint64((float64(srcStoreStatistics.RegionsStat.Len()) - avgRegionCount) * hotRegionLimitFactor)
 }
 
 func (h *balanceHotRegionsScheduler) GetHotReadStatus() *core.StoreHotRegionInfos {
