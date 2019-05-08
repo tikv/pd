@@ -134,7 +134,7 @@ func (h *historyBuffer) get(index uint64) *core.RegionInfo {
 func (h *historyBuffer) reload() {
 	v, err := h.kv.Load(historyKey)
 	if err != nil {
-		log.Warn("load history index failed", zap.Error(err))
+		log.Warn("load history index failed", zap.String("error", err.Error()))
 	}
 	if v != "" {
 		h.index, err = strconv.ParseUint(v, 10, 64)
