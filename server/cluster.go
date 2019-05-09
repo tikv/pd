@@ -539,7 +539,7 @@ func (c *RaftCluster) checkStores() {
 
 	cluster := c.cachedCluster
 
-	for _, store := range cluster.GetStores() {
+	for _, store := range cluster.GetAllStores() {
 		// the store has already been tombstone
 		if store.IsTombstone() {
 			continue
