@@ -70,8 +70,9 @@ func newStoreStaticstics() *storeStatistics {
 type balanceHotRegionsScheduler struct {
 	*baseScheduler
 	sync.RWMutex
-	limit uint64
-	types []BalanceType
+	leaderLimit uint64
+	peerLimit   uint64
+	types       []BalanceType
 
 	// store id -> hot regions statistics as the role of leader
 	stats *storeStatistics
@@ -82,7 +83,8 @@ func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *b
 	base := newBaseScheduler(opController)
 	return &balanceHotRegionsScheduler{
 		baseScheduler: base,
-		limit:         1,
+		leaderLimit:   1,
+		peerLimit:     1,
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotWriteRegionBalance, hotReadRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
@@ -93,7 +95,8 @@ func newBalanceHotReadRegionsScheduler(opController *schedule.OperatorController
 	base := newBaseScheduler(opController)
 	return &balanceHotRegionsScheduler{
 		baseScheduler: base,
-		limit:         1,
+		leaderLimit:   1,
+		peerLimit:     1,
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotReadRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
@@ -104,7 +107,8 @@ func newBalanceHotWriteRegionsScheduler(opController *schedule.OperatorControlle
 	base := newBaseScheduler(opController)
 	return &balanceHotRegionsScheduler{
 		baseScheduler: base,
-		limit:         1,
+		leaderLimit:   1,
+		peerLimit:     1,
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotWriteRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
@@ -131,13 +135,12 @@ func min(a, b uint64) uint64 {
 }
 
 func (h *balanceHotRegionsScheduler) allowBalanceLeader(cluster schedule.Cluster) bool {
-	return h.opController.OperatorCount(schedule.OpHotRegion) < min(h.limit, cluster.GetHotRegionScheduleLimit()) &&
+	return h.opController.OperatorCount(schedule.OpHotRegion) < min(h.leaderLimit, cluster.GetHotRegionScheduleLimit()) &&
 		h.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (h *balanceHotRegionsScheduler) allowBalanceRegion(cluster schedule.Cluster) bool {
-	return h.opController.OperatorCount(schedule.OpHotRegion) < min(h.limit, cluster.GetHotRegionScheduleLimit()) &&
-		h.opController.OperatorCount(schedule.OpRegion) < cluster.GetRegionScheduleLimit()
+	return h.opController.OperatorCount(schedule.OpHotRegion) < min(h.peerLimit, cluster.GetHotRegionScheduleLimit())
 }
 
 func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
@@ -313,7 +316,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 
 		destStoreID = h.selectDestStore(candidateStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
 		if destStoreID != 0 {
-			h.adjustBalanceLimit(srcStoreID, storesStat)
+			h.peerLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
 
 			srcPeer := srcRegion.GetStorePeer(srcStoreID)
 			if srcPeer == nil {
@@ -371,7 +374,8 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 
 		destPeer := srcRegion.GetStoreVoter(destStoreID)
 		if destPeer != nil {
-			h.adjustBalanceLimit(srcStoreID, storesStat)
+			h.leaderLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
+
 			return srcRegion, destPeer
 		}
 	}
@@ -430,7 +434,7 @@ func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64,
 	return
 }
 
-func (h *balanceHotRegionsScheduler) adjustBalanceLimit(storeID uint64, storesStat core.StoreHotRegionsStat) {
+func (h *balanceHotRegionsScheduler) adjustBalanceLimit(storeID uint64, storesStat core.StoreHotRegionsStat) uint64 {
 	srcStoreStatistics := storesStat[storeID]
 
 	var hotRegionTotalCount float64
@@ -440,8 +444,7 @@ func (h *balanceHotRegionsScheduler) adjustBalanceLimit(storeID uint64, storesSt
 
 	avgRegionCount := hotRegionTotalCount / float64(len(storesStat))
 	// Multiplied by hotRegionLimitFactor to avoid transfer back and forth
-	limit := uint64((float64(srcStoreStatistics.RegionsStat.Len()) - avgRegionCount) * hotRegionLimitFactor)
-	h.limit = maxUint64(1, limit)
+	return uint64((float64(srcStoreStatistics.RegionsStat.Len()) - avgRegionCount) * hotRegionLimitFactor)
 }
 
 func (h *balanceHotRegionsScheduler) GetHotReadStatus() *core.StoreHotRegionInfos {

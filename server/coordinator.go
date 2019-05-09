@@ -91,7 +91,7 @@ func (c *coordinator) patrolRegions() {
 	timer := time.NewTimer(c.cluster.GetPatrolRegionInterval())
 	defer timer.Stop()
 
-	log.Info("coordinator: start patrol regions")
+	log.Info("coordinator starts patrol regions")
 	start := time.Now()
 	var key []byte
 	for {
@@ -180,19 +180,20 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 func (c *coordinator) run() {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
 	defer ticker.Stop()
-	log.Info("coordinator: Start collect cluster information")
+	log.Info("coordinator starts to collect cluster information")
 	for {
 		if c.shouldRun() {
-			log.Info("coordinator: Cluster information is prepared")
+			log.Info("coordinator has finished cluster information preparation")
 			break
 		}
 		select {
 		case <-ticker.C:
 		case <-c.ctx.Done():
+			log.Info("coordinator stops running")
 			return
 		}
 	}
-	log.Info("coordinator: Run scheduler")
+	log.Info("coordinator starts to run schedulers")
 
 	k := 0
 	scheduleCfg := c.cluster.opt.load().clone()

@@ -62,7 +62,7 @@ type Config struct {
 	// LeaderLease time, if leader doesn't update its TTL
 	// in etcd after lease time, etcd will expire the leader key
 	// and other servers can campaign the leader again.
-	// Etcd onlys support seoncds TTL, so here is second too.
+	// Etcd only supports seconds TTL, so here is second too.
 	LeaderLease int64 `toml:"lease" json:"lease"`
 
 	// Log related config.
@@ -196,6 +196,8 @@ const (
 	defaultHeartbeatStreamRebindInterval = time.Minute
 
 	defaultLeaderPriorityCheckInterval = time.Minute
+
+	defaultUseRegionStorage = true
 )
 
 func adjustString(v *string, defValue string) {
@@ -413,6 +415,10 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 		return err
 	}
 
+	if err := c.PDServerCfg.adjust(configMetaData.Child("pd-server")); err != nil {
+		return err
+	}
+
 	adjustDuration(&c.heartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
 
 	adjustDuration(&c.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
@@ -496,7 +502,7 @@ type ScheduleConfig struct {
 	// removing down replicas.
 	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string"`
 	// DisableReplaceOfflineReplica is the option to prevent replica checker from
-	// repalcing offline replicas.
+	// replacing offline replicas.
 	DisableReplaceOfflineReplica bool `toml:"disable-replace-offline-replica" json:"disable-replace-offline-replica,string"`
 	// DisableMakeUpReplica is the option to prevent replica checker from making up
 	// replicas when replica count is less than expected.
@@ -511,7 +517,7 @@ type ScheduleConfig struct {
 	// from moving replica to the target namespace.
 	DisableNamespaceRelocation bool `toml:"disable-namespace-relocation" json:"disable-namespace-relocation,string"`
 
-	// Schedulers support for loding customized schedulers
+	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 }
 
@@ -752,6 +758,13 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 type PDServerConfig struct {
 	// UseRegionStorage enables the independent region storage.
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
+}
+
+func (c *PDServerConfig) adjust(meta *configMetaData) error {
+	if !meta.IsDefined("use-region-storage") {
+		c.UseRegionStorage = defaultUseRegionStorage
+	}
+	return nil
 }
 
 // StoreLabel is the config item of LabelPropertyConfig.

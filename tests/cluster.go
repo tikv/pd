@@ -374,8 +374,20 @@ func (c *TestCluster) GetLeader() string {
 // If it exceeds the maximum number of loops, it will return an empty string.
 func (c *TestCluster) WaitLeader() string {
 	for i := 0; i < 100; i++ {
-		if leader := c.GetLeader(); leader != "" {
-			return leader
+		counter := make(map[string]int)
+		running := 0
+		for _, s := range c.servers {
+			if s.state == Running {
+				running++
+			}
+			if s.GetLeader().GetName() != "" {
+				counter[s.GetLeader().GetName()]++
+			}
+		}
+		for name, num := range counter {
+			if num == running && c.GetServer(name).IsLeader() {
+				return name
+			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
