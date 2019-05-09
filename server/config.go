@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // Config is the pd server configuration.
@@ -762,7 +763,7 @@ func ParseUrls(s string) ([]url.URL, error) {
 
 // SetupLogger setup the logger.
 func (c *Config) SetupLogger() error {
-	lg, p, err := log.InitLogger(&c.Log)
+	lg, p, err := log.InitLogger(&c.Log, zap.AddStacktrace(zapcore.FatalLevel))
 	if err != nil {
 		return err
 	}
