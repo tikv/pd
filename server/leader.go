@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
@@ -321,7 +322,7 @@ func (s *Server) watchLeader(leader *pdpb.Member, revision int64) {
 	// If the revision is compacted, will meet required revision has been compacted error.
 	// In this case, use the compact revision to re-watch the key.
 	for {
-		// gofail: var delayWatcher struct{}
+		failpoint.Inject("delayWatcher", nil)
 		rch := watcher.Watch(ctx, s.getLeaderPath(), clientv3.WithRev(revision))
 		for wresp := range rch {
 			// meet compacted error, use the compact revision.
