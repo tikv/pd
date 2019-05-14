@@ -447,6 +447,25 @@ func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDR
 	}, nil
 }
 
+// ScanRegions implements gRPC PDServer.
+func (s *Server) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &pdpb.ScanRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+	regions := cluster.ScanRegionsByKey(request.GetRegionKey(), int(request.GetLimit()))
+	resp := &pdpb.ScanRegionsResponse{Header: s.header()}
+	for _, r := range regions {
+		resp.Regions = append(resp.Regions, r.GetMeta())
+		resp.Leaders = append(resp.Leaders, r.GetLeader())
+	}
+	return resp, nil
+}
+
 // AskSplit implements gRPC PDServer.
 func (s *Server) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
 	if err := s.validateRequest(request.GetHeader()); err != nil {
