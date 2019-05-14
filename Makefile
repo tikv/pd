@@ -13,7 +13,7 @@ RETOOL := ./scripts/retool
 OVERALLS := overalls
 
 FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do failpoint-ctl enable)
-FAILPOITN_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do failpoint-ctl disable)
+FAILPOINT_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do failpoint-ctl disable)
 
 LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --dirty)"
 LDFLAGS += -X "$(PD_PKG)/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
@@ -49,13 +49,13 @@ endif
 test: retool-setup
 	# testing..
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 GO111MODULE=on go test -race -cover $(TEST_PKGS) || { $(FAILPOITN_DISABLE); exit 1; }
-	@$(FAILPOITN_DISABLE)
+	CGO_ENABLED=1 GO111MODULE=on go test -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	@$(FAILPOINT_DISABLE)
 
 basic-test:
 	@$(FAILPOINT_ENABLE)
-	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(FAILPOITN_DISABLE); exit 1; }
-	@$(FAILPOITN_DISABLE)
+	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	@$(FAILPOINT_DISABLE)
 
 # These need to be fixed before they can be ran regularly
 check-fail:
@@ -99,8 +99,8 @@ travis_coverage: export GO111MODULE=on
 travis_coverage:
 ifeq ("$(TRAVIS_COVERAGE)", "1")
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 ./scripts/retool do $(OVERALLS) -project=github.com/pingcap/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(FAILPOITN_DISABLE); exit 1; }
-	@$(FAILPOITN_DISABLE)
+	CGO_ENABLED=1 ./scripts/retool do $(OVERALLS) -project=github.com/pingcap/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(FAILPOINT_DISABLE); exit 1; }
+	@$(FAILPOINT_DISABLE)
 else
 	@echo "coverage only runs in travis."
 endif
@@ -120,6 +120,6 @@ failpoint-enable:
 
 failpoint-disable:
 	# Restoring failpoints...
-	@$(FAILPOITN_DISABLE)
+	@$(FAILPOINT_DISABLE)
 
 .PHONY: all ci vendor clean-test tidy
