@@ -693,9 +693,9 @@ func (c *client) ScanRegions(ctx context.Context, key []byte, limit int) ([]*met
 	defer cmdDuration.WithLabelValues("scan_regions").Observe(time.Since(start).Seconds())
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().ScanRegions(ctx, &pdpb.ScanRegionsRequest{
-		Header:    c.requestHeader(),
-		RegionKey: key,
-		Limit:     int32(limit),
+		Header:   c.requestHeader(),
+		StartKey: key,
+		Limit:    int32(limit),
 	})
 	cancel()
 	if err != nil {
