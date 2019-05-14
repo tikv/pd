@@ -260,6 +260,53 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 	c.Succeed()
 }
 
+func (s *testClientSuite) TestScanRegions(c *C) {
+	regionLen := 10
+	regions := make([]*metapb.Region, 0, regionLen)
+	for i := 0; i < regionLen; i++ {
+		regionID := regionIDAllocator.alloc()
+		r := &metapb.Region{
+			Id: regionID,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			Peers:    peers,
+		}
+		regions = append(regions, r)
+		req := &pdpb.RegionHeartbeatRequest{
+			Header: newHeader(s.srv),
+			Region: r,
+			Leader: peers[0],
+		}
+		err := s.regionHeartbeat.Send(req)
+		c.Assert(err, IsNil)
+	}
+
+	// Wait for region heartbeats.
+	testutil.WaitUntil(c, func(c *C) bool {
+		regions, _, err := s.client.ScanRegions(context.Background(), []byte{0}, 10)
+		return err == nil && len(regions) == 10
+	})
+
+	check := func(start []byte, limit int, expect []*metapb.Region) {
+		regions, leaders, err := s.client.ScanRegions(context.Background(), start, limit)
+		c.Assert(err, IsNil)
+		c.Assert(regions, HasLen, len(expect))
+		c.Assert(leaders, HasLen, len(expect))
+		for i := range expect {
+			c.Assert(regions[i], DeepEquals, expect[i])
+			c.Assert(leaders[i], DeepEquals, expect[i].Peers[0])
+		}
+	}
+
+	check([]byte{0}, 10, regions)
+	check([]byte{1}, 5, regions[1:6])
+	check([]byte{100}, 1, nil)
+}
+
 func (s *testClientSuite) TestGetRegionByID(c *C) {
 	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{
