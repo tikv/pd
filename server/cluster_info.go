@@ -717,6 +717,10 @@ func (c *clusterInfo) GetReplicaScheduleLimit() uint64 {
 	return c.opt.GetReplicaScheduleLimit(namespace.DefaultNamespace)
 }
 
+func (c *clusterInfo) GetLearnerScheduleLimit() uint64 {
+	return c.opt.GetLearnerScheduleLimit()
+}
+
 func (c *clusterInfo) GetMergeScheduleLimit() uint64 {
 	return c.opt.GetMergeScheduleLimit(namespace.DefaultNamespace)
 }

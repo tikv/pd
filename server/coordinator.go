@@ -176,7 +176,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 		}
 	}
 
-	if opController.OperatorCount(schedule.OpRegion) < c.cluster.GetRegionScheduleLimit() {
+	if opController.OperatorCount(schedule.OpLearner) < c.cluster.GetLearnerScheduleLimit() {
 		if op := c.slaveChecker.Check(region); op != nil {
 			if c.opController.AddOperator(op) {
 				return true

@@ -133,6 +133,10 @@ func (o *scheduleOption) GetReplicaScheduleLimit(name string) uint64 {
 	return o.load().ReplicaScheduleLimit
 }
 
+func (o *scheduleOption) GetLearnerScheduleLimit() uint64 {
+	return o.load().LearnerScheduleLimit
+}
+
 func (o *scheduleOption) GetMergeScheduleLimit(name string) uint64 {
 	if n, ok := o.ns[name]; ok {
 		return n.GetMergeScheduleLimit()

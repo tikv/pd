@@ -81,7 +81,7 @@ func (r *SlaveChecker) Check(region *core.RegionInfo) *Operator {
 			return nil
 		}
 		checkerCounter.WithLabelValues("slave_checker", "new_operator").Inc()
-		return NewOperator("addSlaveLearner", region.GetID(), region.GetRegionEpoch(), OpReplica|OpRegion, steps...)
+		return NewOperator("addSlaveLearner", region.GetID(), region.GetRegionEpoch(), OpLearner, steps...)
 	case slaveCount == r.cluster.GetMaxLearnerReplicas():
 		op := r.checkDownSlavePeer(region)
 		if op != nil {
@@ -95,7 +95,8 @@ func (r *SlaveChecker) Check(region *core.RegionInfo) *Operator {
 	case slaveCount > r.cluster.GetMaxLearnerReplicas():
 		length := len(region.GetSlavePeers())
 		peer := region.GetSlavePeers()[rand.Intn(length)]
-		return NewOperator("removeExtraSlave", region.GetID(), region.GetRegionEpoch(), OpReplica|OpRegion, RemovePeer{FromStore: peer.GetStoreId()})
+		checkerCounter.WithLabelValues("slave_learner_checker", "extra_slave").Inc()
+		return NewOperator("removeExtraSlave", region.GetID(), region.GetRegionEpoch(), OpLearner, RemovePeer{FromStore: peer.GetStoreId()})
 	default:
 	}
 	return nil
@@ -106,12 +107,8 @@ func (r SlaveChecker) selectBestReplacementStore(region *core.RegionInfo) *Opera
 		checkerCounter.WithLabelValues("slave_learner_checker", "unhealth_slave").Inc()
 		return nil
 	}
-	slaves := region.GetSlavePeers()
-	if len(slaves) != 1 {
-		checkerCounter.WithLabelValues("slave_learner_checker", "extra_slave").Inc()
-		return nil
-	}
-	slave := slaves[0]
+	length := len(region.GetSlavePeers())
+	slave := region.GetSlavePeers()[rand.Intn(length)]
 	source := r.cluster.GetStore(slave.GetStoreId())
 
 	// randomly pick region
@@ -158,7 +155,7 @@ func (r SlaveChecker) selectBestReplacementStore(region *core.RegionInfo) *Opera
 		RemovePeer{FromStore: source.GetID()},
 		AddLearner{ToStore: target.GetID(), PeerID: newPeer.GetId()},
 	}
-	return NewOperator("replaceSlavePeer", region.GetID(), region.GetRegionEpoch(), OpReplica|OpRegion, steps...)
+	return NewOperator("replaceSlavePeer", region.GetID(), region.GetRegionEpoch(), OpLearner, steps...)
 }
 
 func (r *SlaveChecker) shouldBalance(source, target *core.StoreInfo, region *core.RegionInfo, opInfluence OpInfluence) bool {

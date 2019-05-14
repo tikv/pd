@@ -33,6 +33,7 @@ const (
 	OpBalance                            // Initiated by balancers.
 	OpMerge                              // Initiated by merge checkers or merge schedulers.
 	OpRange                              // Initiated by range scheduler.
+	OpLearner                            // Initiated by learner scheduler.
 	opMax
 )
 

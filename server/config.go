@@ -466,6 +466,8 @@ type ScheduleConfig struct {
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit,omitempty" json:"replica-schedule-limit"`
+	// LearnerScheduleLimit is the max coexist learner schedules.
+	LearnerScheduleLimit uint64 `toml:"learner-schedule-limit,omitempty" json:"learner-schedule-limit"`
 	// MergeScheduleLimit is the max coexist merge schedules.
 	MergeScheduleLimit uint64 `toml:"merge-schedule-limit,omitempty" json:"merge-schedule-limit"`
 	// HotRegionScheduleLimit is the max coexist hot region schedules.
@@ -528,6 +530,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		LeaderScheduleLimit:          c.LeaderScheduleLimit,
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
+		LearnerScheduleLimit:         c.LearnerScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
 		HotRegionScheduleLimit:       c.HotRegionScheduleLimit,
 		HotRegionCacheHitsThreshold:  c.HotRegionCacheHitsThreshold,
@@ -558,6 +561,7 @@ const (
 	defaultLeaderScheduleLimit    = 4
 	defaultRegionScheduleLimit    = 4
 	defaultReplicaScheduleLimit   = 8
+	defaultLearnerScheduleLimit   = 16
 	defaultMergeScheduleLimit     = 8
 	defaultHotRegionScheduleLimit = 2
 	defaultTolerantSizeRatio      = 5
@@ -592,6 +596,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("replica-schedule-limit") {
 		adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
+	}
+	if !meta.IsDefined("learner-schedule-limit") {
+		adjustUint64(&c.LearnerScheduleLimit, defaultLearnerScheduleLimit)
 	}
 	if !meta.IsDefined("merge-schedule-limit") {
 		adjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)

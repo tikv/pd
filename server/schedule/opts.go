@@ -28,6 +28,7 @@ type Options interface {
 	GetLeaderScheduleLimit() uint64
 	GetRegionScheduleLimit() uint64
 	GetReplicaScheduleLimit() uint64
+	GetLearnerScheduleLimit() uint64
 	GetMergeScheduleLimit() uint64
 	GetHotRegionScheduleLimit() uint64
 

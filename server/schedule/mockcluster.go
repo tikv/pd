@@ -466,6 +466,11 @@ func (mc *MockCluster) GetReplicaScheduleLimit() uint64 {
 	return mc.MockSchedulerOptions.GetReplicaScheduleLimit(namespace.DefaultNamespace)
 }
 
+// GetLearnerScheduleLimit mocks method.
+func (mc *MockCluster) GetLearnerScheduleLimit() uint64 {
+	return mc.MockSchedulerOptions.GetLearnerScheduleLimit(namespace.DefaultNamespace)
+}
+
 // GetMergeScheduleLimit mocks method.
 func (mc *MockCluster) GetMergeScheduleLimit() uint64 {
 	return mc.MockSchedulerOptions.GetMergeScheduleLimit(namespace.DefaultNamespace)
@@ -509,6 +514,7 @@ const (
 	defaultLeaderScheduleLimit         = 4
 	defaultRegionScheduleLimit         = 4
 	defaultReplicaScheduleLimit        = 8
+	defaultLearnerScheduleLimit        = 16
 	defaultMergeScheduleLimit          = 8
 	defaultHotRegionScheduleLimit      = 2
 	defaultTolerantSizeRatio           = 2.5
@@ -523,6 +529,7 @@ type MockSchedulerOptions struct {
 	RegionScheduleLimit          uint64
 	LeaderScheduleLimit          uint64
 	ReplicaScheduleLimit         uint64
+	LearnerScheduleLimit         uint64
 	MergeScheduleLimit           uint64
 	HotRegionScheduleLimit       uint64
 	MaxSnapshotCount             uint64
@@ -554,6 +561,7 @@ func NewMockSchedulerOptions() *MockSchedulerOptions {
 	mso.RegionScheduleLimit = defaultRegionScheduleLimit
 	mso.LeaderScheduleLimit = defaultLeaderScheduleLimit
 	mso.ReplicaScheduleLimit = defaultReplicaScheduleLimit
+	mso.LearnerScheduleLimit = defaultLearnerScheduleLimit
 	mso.MergeScheduleLimit = defaultMergeScheduleLimit
 	mso.HotRegionScheduleLimit = defaultHotRegionScheduleLimit
 	mso.MaxSnapshotCount = defaultMaxSnapshotCount
@@ -583,6 +591,11 @@ func (mso *MockSchedulerOptions) GetRegionScheduleLimit(name string) uint64 {
 // GetReplicaScheduleLimit mock method
 func (mso *MockSchedulerOptions) GetReplicaScheduleLimit(name string) uint64 {
 	return mso.ReplicaScheduleLimit
+}
+
+// GetLearnerScheduleLimit mock method
+func (mso *MockSchedulerOptions) GetLearnerScheduleLimit(name string) uint64 {
+	return mso.LearnerScheduleLimit
 }
 
 // GetMergeScheduleLimit mock method
