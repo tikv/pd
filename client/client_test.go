@@ -287,17 +287,17 @@ func (s *testClientSuite) TestScanRegions(c *C) {
 
 	// Wait for region heartbeats.
 	testutil.WaitUntil(c, func(c *C) bool {
-		regions, _, err := s.client.ScanRegions(context.Background(), []byte{0}, 10)
-		return err == nil && len(regions) == 10
+		scanRegions, _, err := s.client.ScanRegions(context.Background(), []byte{0}, 10)
+		return err == nil && len(scanRegions) == 10
 	})
 
 	check := func(start []byte, limit int, expect []*metapb.Region) {
-		regions, leaders, err := s.client.ScanRegions(context.Background(), start, limit)
+		scanRegions, leaders, err := s.client.ScanRegions(context.Background(), start, limit)
 		c.Assert(err, IsNil)
-		c.Assert(regions, HasLen, len(expect))
+		c.Assert(scanRegions, HasLen, len(expect))
 		c.Assert(leaders, HasLen, len(expect))
 		for i := range expect {
-			c.Assert(regions[i], DeepEquals, expect[i])
+			c.Assert(scanRegions[i], DeepEquals, expect[i])
 			c.Assert(leaders[i], DeepEquals, expect[i].Peers[0])
 		}
 	}

@@ -686,7 +686,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Re
 
 func (c *client) ScanRegions(ctx context.Context, key []byte, limit int) ([]*metapb.Region, []*metapb.Peer, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span := opentracing.StartSpan("pdclient.ScanRegions", opentracing.ChildOf(span.Context()))
+		span = opentracing.StartSpan("pdclient.ScanRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
