@@ -45,7 +45,7 @@ func (s *serverTestSuite) TestWatcher(c *C) {
 	time.Sleep(5 * time.Second)
 	pd3, err := cluster.Join()
 	c.Assert(err, IsNil)
-	failpoint.Enable("github.com/pingcap/pd/server/delayWatcher", `pause`)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/delayWatcher", `pause`), IsNil)
 	err = pd3.Run(context.Background())
 	c.Assert(err, IsNil)
 	time.Sleep(200 * time.Millisecond)
