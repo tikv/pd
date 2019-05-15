@@ -35,6 +35,7 @@ import (
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // Config is the pd server configuration.
@@ -195,6 +196,8 @@ const (
 	defaultHeartbeatStreamRebindInterval = time.Minute
 
 	defaultLeaderPriorityCheckInterval = time.Minute
+
+	defaultUseRegionStorage = true
 )
 
 func adjustString(v *string, defValue string) {
@@ -409,6 +412,10 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 		return err
 	}
 	if err := c.Replication.adjust(configMetaData.Child("replication")); err != nil {
+		return err
+	}
+
+	if err := c.PDServerCfg.adjust(configMetaData.Child("pd-server")); err != nil {
 		return err
 	}
 
@@ -753,6 +760,13 @@ type PDServerConfig struct {
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
 }
 
+func (c *PDServerConfig) adjust(meta *configMetaData) error {
+	if !meta.IsDefined("use-region-storage") {
+		c.UseRegionStorage = defaultUseRegionStorage
+	}
+	return nil
+}
+
 // StoreLabel is the config item of LabelPropertyConfig.
 type StoreLabel struct {
 	Key   string `toml:"key" json:"key"`
@@ -791,7 +805,7 @@ func ParseUrls(s string) ([]url.URL, error) {
 
 // SetupLogger setup the logger.
 func (c *Config) SetupLogger() error {
-	lg, p, err := log.InitLogger(&c.Log)
+	lg, p, err := log.InitLogger(&c.Log, zap.AddStacktrace(zapcore.FatalLevel))
 	if err != nil {
 		return err
 	}

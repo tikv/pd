@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/core"
@@ -1066,6 +1067,8 @@ func (s *cmdTestSuite) TestMember(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	pdAddr := cluster.GetConfig().GetClientURLs()
 	c.Assert(err, IsNil)
 	cmd := initCommand()
@@ -1087,15 +1090,22 @@ func (s *cmdTestSuite) TestMember(c *C) {
 	args = []string{"-u", pdAddr, "member", "leader", "transfer", "pd2"}
 	_, _, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	c.Assert("pd2", Equals, svr.GetLeader().GetName())
+	testutil.WaitUntil(c, func(c *C) bool {
+		return c.Check("pd2", Equals, svr.GetLeader().GetName())
+	})
 
 	// member leader resign
+	cluster.WaitLeader()
 	args = []string{"-u", pdAddr, "member", "leader", "resign"}
-	_, _, err = executeCommandC(cmd, args...)
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(strings.Contains(string(output), "Success"), IsTrue)
 	c.Assert(err, IsNil)
-	c.Assert("pd2", Not(Equals), svr.GetLeader().GetName())
+	testutil.WaitUntil(c, func(c *C) bool {
+		return c.Check("pd2", Not(Equals), svr.GetLeader().GetName())
+	})
 
 	// member leader_priority <member_name> <priority>
+	cluster.WaitLeader()
 	args = []string{"-u", pdAddr, "member", "leader_priority", name, "100"}
 	_, _, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
@@ -1123,6 +1133,7 @@ func (s *cmdTestSuite) TestMember(c *C) {
 	members, err = etcdutil.ListEtcdMembers(client)
 	c.Assert(err, IsNil)
 	c.Assert(len(members.Members), Equals, 2)
+	c.Succeed()
 }
 
 func (s *cmdTestSuite) TestHot(c *C) {

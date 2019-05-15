@@ -21,7 +21,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	gofail "github.com/pingcap/gofail/runtime"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
@@ -452,7 +452,7 @@ func (s *testClusterSuite) TestRaftClusterMultipleRestart(c *C) {
 	c.Assert(cluster, NotNil)
 
 	// let the job run at small interval
-	gofail.Enable("github.com/pingcap/pd/server/highFrequencyClusterJobs", `return(true)`)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/highFrequencyClusterJobs", `return(true)`), IsNil)
 	for i := 0; i < 100; i++ {
 		err = s.svr.createRaftCluster()
 		c.Assert(err, IsNil)

@@ -898,11 +898,13 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 		}
 	}
 
-	// hot region scheduler is restricted by schedule limit.
-	opt.RegionScheduleLimit, opt.LeaderScheduleLimit = 0, 0
+	// hot region scheduler is restricted by `hot-region-schedule-limit`.
+	opt.HotRegionScheduleLimit = 0
 	c.Assert(hb.Schedule(tc), HasLen, 0)
-	opt.LeaderScheduleLimit = schedule.NewMockSchedulerOptions().LeaderScheduleLimit
-	opt.RegionScheduleLimit = schedule.NewMockSchedulerOptions().RegionScheduleLimit
+	// hot region scheduler is not affect by `balance-region-schedule-limit`.
+	opt.HotRegionScheduleLimit = schedule.NewMockSchedulerOptions().HotRegionScheduleLimit
+	opt.RegionScheduleLimit = 0
+	c.Assert(hb.Schedule(tc), HasLen, 1)
 
 	//| region_id | leader_store | follower_store | follower_store | written_bytes |
 	//|-----------|--------------|----------------|----------------|---------------|

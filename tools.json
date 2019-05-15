@@ -9,8 +9,8 @@
       "Commit": "4a96d43e39d340b63daa8bc5576985aa599885f6"
     },
     {
-      "Repository": "github.com/pingcap/gofail",
-      "Commit": "c3f835e5a7d8cedf2f61cc55f961d4d120ae90eb"
+      "Repository": "github.com/pingcap/failpoint/failpoint-ctl",
+      "Commit": "30cc7431d99c6a7f2836387d4bb255a3bd6a5e0a"
     },
     {
       "Repository": "github.com/go-playground/overalls",
