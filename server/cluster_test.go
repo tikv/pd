@@ -452,7 +452,7 @@ func (s *testClusterSuite) TestRaftClusterMultipleRestart(c *C) {
 	c.Assert(cluster, NotNil)
 
 	// let the job run at small interval
-	failpoint.Enable("github.com/pingcap/pd/server/highFrequencyClusterJobs", `return(true)`)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/highFrequencyClusterJobs", `return(true)`), IsNil)
 	for i := 0; i < 100; i++ {
 		err = s.svr.createRaftCluster()
 		c.Assert(err, IsNil)
