@@ -114,7 +114,7 @@ type testTimeFallBackSuite struct {
 
 func (s *testTimeFallBackSuite) SetUpSuite(c *C) {
 	failpoint.Enable("github.com/pingcap/pd/server/fallBackSync", `return(true)`)
-	failpoint.Enable("github.com/pingcap/pd/server/fallBackUpadte", `return(true)`)
+	failpoint.Enable("github.com/pingcap/pd/server/fallBackUpdate", `return(true)`)
 	s.svr, s.cleanup = mustRunTestServer(c)
 	s.client = s.svr.client
 	mustWaitLeader(c, []*Server{s.svr})
