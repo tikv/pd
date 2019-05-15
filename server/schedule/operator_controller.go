@@ -14,6 +14,7 @@
 package schedule
 
 import (
+	"container/heap"
 	"container/list"
 	"fmt"
 	"sync"
@@ -28,7 +29,15 @@ import (
 	"go.uber.org/zap"
 )
 
-var historyKeepTime = 5 * time.Minute
+var (
+	historyKeepTime    = 5 * time.Minute
+	slowNotifyInterval = 10 * time.Second
+	fastNotifyInterval = 3 * time.Second
+	// PushOperatorLimit is the limit of push operator in one time.
+	PushOperatorLimit = 20
+	// PushOperatorTickInterval is the interval try to push the operator.
+	PushOperatorTickInterval = 500 * time.Millisecond
+)
 
 // HeartbeatStreams is an interface of async region heartbeat.
 type HeartbeatStreams interface {
@@ -38,23 +47,25 @@ type HeartbeatStreams interface {
 // OperatorController is used to limit the speed of scheduling.
 type OperatorController struct {
 	sync.RWMutex
-	cluster   Cluster
-	operators map[uint64]*Operator
-	hbStreams HeartbeatStreams
-	histories *list.List
-	counts    map[OperatorKind]uint64
-	opRecords *OperatorRecords
+	cluster         Cluster
+	operators       map[uint64]*Operator
+	hbStreams       HeartbeatStreams
+	histories       *list.List
+	counts          map[OperatorKind]uint64
+	opRecords       *OperatorRecords
+	opNotifierQueue operatorQueue
 }
 
 // NewOperatorController creates a OperatorController.
 func NewOperatorController(cluster Cluster, hbStreams HeartbeatStreams) *OperatorController {
 	return &OperatorController{
-		cluster:   cluster,
-		operators: make(map[uint64]*Operator),
-		hbStreams: hbStreams,
-		histories: list.New(),
-		counts:    make(map[OperatorKind]uint64),
-		opRecords: NewOperatorRecords(),
+		cluster:         cluster,
+		operators:       make(map[uint64]*Operator),
+		hbStreams:       hbStreams,
+		histories:       list.New(),
+		counts:          make(map[OperatorKind]uint64),
+		opRecords:       NewOperatorRecords(),
+		opNotifierQueue: make(operatorQueue, 0),
 	}
 }
 
@@ -83,6 +94,62 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo) {
 	}
 }
 
+func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
+	oc.Lock()
+	defer oc.Unlock()
+	if oc.opNotifierQueue.Len() == 0 {
+		return nil, false
+	}
+	item := oc.opNotifierQueue[0]
+	regionID := item.op.regionID
+	op, ok := oc.operators[regionID]
+	if !ok || op == nil {
+		oc.opNotifierQueue.Pop()
+		return nil, true
+	}
+	r = oc.cluster.GetRegion(regionID)
+	if r == nil {
+		heap.Pop(&oc.opNotifierQueue)
+		return nil, true
+	}
+	step := op.Check(r)
+	if step == nil {
+		heap.Pop(&oc.opNotifierQueue)
+		return r, true
+	}
+	now := time.Now()
+	if now.UnixNano() < item.time {
+		return nil, false
+	}
+	nextTime := slowNotifyInterval
+	switch step.(type) {
+	case TransferLeader, PromoteLearner:
+		nextTime = fastNotifyInterval
+	}
+	item.time = now.Add(nextTime).UnixNano()
+	heap.Fix(&oc.opNotifierQueue, item.index)
+	return r, true
+}
+
+// PushOperators periodically pushs the unfinished operator to the excutor(TiKV).
+func (oc *OperatorController) PushOperators(limit int) {
+	dispatched := 0
+	for {
+		r, next := oc.pollNeedDispatchRegion()
+		if r == nil && !next {
+			break
+		}
+		if r == nil {
+			continue
+		}
+		log.Info("actively dispatch operator", zap.Reflect("region", r))
+		oc.Dispatch(r)
+		if dispatched >= limit {
+			break
+		}
+	}
+}
+
 // AddOperator adds operators to the running operators.
 func (oc *OperatorController) AddOperator(ops ...*Operator) bool {
 	oc.Lock()
@@ -98,7 +165,6 @@ func (oc *OperatorController) AddOperator(ops ...*Operator) bool {
 	for _, op := range ops {
 		oc.addOperatorLocked(op)
 	}
-
 	return true
 }
 
@@ -151,6 +217,8 @@ func (oc *OperatorController) addOperatorLocked(op *Operator) bool {
 		}
 	}
 
+	heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op, time: time.Now().Add(slowNotifyInterval).UnixNano()})
+	log.Info("Push the operator the heap", zap.Reflect("heap", oc.opNotifierQueue))
 	operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
 	return true
 }

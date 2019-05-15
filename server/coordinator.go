@@ -131,6 +131,23 @@ func (c *coordinator) patrolRegions() {
 	}
 }
 
+// drivePushOperator is used to push the unfinished operator to the excutor.
+func (c *coordinator) drivePushOperator() {
+	defer logutil.LogPanic()
+
+	defer c.wg.Done()
+	log.Info("coordinator begin to actively drive push operator")
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("drive push operator has been stopped")
+			return
+		case <-time.After(schedule.PushOperatorTickInterval):
+		}
+		c.opController.PushOperators(schedule.PushOperatorLimit)
+	}
+}
+
 func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
@@ -231,6 +248,7 @@ func (c *coordinator) run() {
 	c.wg.Add(1)
 	// Starts to patrol regions.
 	go c.patrolRegions()
+	go c.drivePushOperator()
 }
 
 func (c *coordinator) stop() {
