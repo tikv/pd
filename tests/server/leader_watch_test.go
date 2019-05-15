@@ -18,7 +18,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	gofail "github.com/pingcap/gofail/runtime"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/tests"
@@ -45,7 +45,7 @@ func (s *serverTestSuite) TestWatcher(c *C) {
 	time.Sleep(5 * time.Second)
 	pd3, err := cluster.Join()
 	c.Assert(err, IsNil)
-	gofail.Enable("github.com/pingcap/pd/server/delayWatcher", `pause`)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/delayWatcher", `pause`), IsNil)
 	err = pd3.Run(context.Background())
 	c.Assert(err, IsNil)
 	time.Sleep(200 * time.Millisecond)
@@ -54,7 +54,7 @@ func (s *serverTestSuite) TestWatcher(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	c.Assert(pd2.GetLeader().GetName(), Equals, pd2.GetConfig().Name)
-	gofail.Disable("github.com/pingcap/pd/server/delayWatcher")
+	failpoint.Disable("github.com/pingcap/pd/server/delayWatcher")
 	testutil.WaitUntil(c, func(c *C) bool {
 		return c.Check(pd3.GetLeader().GetName(), Equals, pd2.GetConfig().Name)
 	})
