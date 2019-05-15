@@ -126,7 +126,7 @@ func (s *Server) updateTimestamp() error {
 	prev := s.ts.Load().(*atomicObject)
 	now := time.Now()
 
-	failpoint.Inject("fallBackUpdate", func(_ failpoint.Value) {
+	failpoint.Inject("fallBackUpdate", func() {
 		now = now.Add(time.Hour)
 	})
 
