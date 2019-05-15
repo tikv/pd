@@ -85,7 +85,7 @@ func (s *Server) syncTimestamp() error {
 	}
 
 	next := time.Now()
-	failpoint.Inject("fallBackSync", func(_ failpoint.Value) {
+	failpoint.Inject("fallBackSync", func() {
 		next = next.Add(time.Hour)
 	})
 
