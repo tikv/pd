@@ -144,7 +144,7 @@ func (c *coordinator) drivePushOperator() {
 			return
 		case <-time.After(schedule.PushOperatorTickInterval):
 		}
-		c.opController.PushOperators(schedule.PushOperatorLimit)
+		c.opController.PushOperators()
 	}
 }
 

@@ -33,8 +33,6 @@ var (
 	historyKeepTime    = 5 * time.Minute
 	slowNotifyInterval = 10 * time.Second
 	fastNotifyInterval = 3 * time.Second
-	// PushOperatorLimit is the limit of push operator in one time.
-	PushOperatorLimit = 20
 	// PushOperatorTickInterval is the interval try to push the operator.
 	PushOperatorTickInterval = 500 * time.Millisecond
 )
@@ -94,6 +92,15 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo) {
 	}
 }
 
+func (oc *OperatorController) getNextPushOperatorTime(step OperatorStep, now time.Time) int64 {
+	nextTime := slowNotifyInterval
+	switch step.(type) {
+	case TransferLeader, PromoteLearner:
+		nextTime = fastNotifyInterval
+	}
+	return now.Add(nextTime).UnixNano()
+}
+
 func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
 	oc.Lock()
 	defer oc.Unlock()
@@ -104,7 +111,7 @@ func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next
 	regionID := item.op.regionID
 	op, ok := oc.operators[regionID]
 	if !ok || op == nil {
-		oc.opNotifierQueue.Pop()
+		heap.Pop(&oc.opNotifierQueue)
 		return nil, true
 	}
 	r = oc.cluster.GetRegion(regionID)
@@ -115,25 +122,19 @@ func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next
 	step := op.Check(r)
 	if step == nil {
 		heap.Pop(&oc.opNotifierQueue)
-		return r, true
+		return nil, true
 	}
 	now := time.Now()
 	if now.UnixNano() < item.time {
 		return nil, false
 	}
-	nextTime := slowNotifyInterval
-	switch step.(type) {
-	case TransferLeader, PromoteLearner:
-		nextTime = fastNotifyInterval
-	}
-	item.time = now.Add(nextTime).UnixNano()
+	item.time = oc.getNextPushOperatorTime(step, now)
 	heap.Fix(&oc.opNotifierQueue, item.index)
 	return r, true
 }
 
 // PushOperators periodically pushs the unfinished operator to the excutor(TiKV).
-func (oc *OperatorController) PushOperators(limit int) {
-	dispatched := 0
+func (oc *OperatorController) PushOperators() {
 	for {
 		r, next := oc.pollNeedDispatchRegion()
 		if r == nil && !next {
@@ -142,11 +143,7 @@ func (oc *OperatorController) PushOperators(limit int) {
 		if r == nil {
 			continue
 		}
-		log.Info("actively dispatch operator", zap.Reflect("region", r))
 		oc.Dispatch(r)
-		if dispatched >= limit {
-			break
-		}
 	}
 }
 
@@ -211,14 +208,14 @@ func (oc *OperatorController) addOperatorLocked(op *Operator) bool {
 	oc.operators[regionID] = op
 	oc.updateCounts(oc.operators)
 
+	var step OperatorStep
 	if region := oc.cluster.GetRegion(op.RegionID()); region != nil {
-		if step := op.Check(region); step != nil {
+		if step = op.Check(region); step != nil {
 			oc.SendScheduleCommand(region, step)
 		}
 	}
 
-	heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op, time: time.Now().Add(slowNotifyInterval).UnixNano()})
-	log.Info("Push the operator the heap", zap.Reflect("heap", oc.opNotifierQueue))
+	heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op, time: oc.getNextPushOperatorTime(step, time.Now())})
 	operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
 	return true
 }
