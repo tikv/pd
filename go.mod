@@ -29,7 +29,7 @@ require (
 	github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/errors v0.10.1 // indirect
-	github.com/pingcap/gofail v0.0.0-20181217135706-6a951c1e42c3
+	github.com/pingcap/failpoint v0.0.0-20190512135322-30cc7431d99c
 	github.com/pingcap/kvproto v0.0.0-20190327032727-3d8cb3a30d5d
 	github.com/pingcap/log v0.0.0-20190214045112-b37da76f67a7
 	github.com/pkg/errors v0.8.1
