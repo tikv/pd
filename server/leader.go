@@ -159,7 +159,7 @@ func getLeaderAddr(leader *pdpb.Member) string {
 func (s *Server) MoveEtcdLeader(ctx context.Context, old, new uint64) error {
 	moveCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
 	defer cancel()
-	return errors.WithStack(s.etcd.Server.MoveLeader(moveCtx, old, new))
+	return errors.Trace(s.etcd.Server.MoveLeader(moveCtx, old, new))
 }
 
 // getLeader gets server leader from etcd.
@@ -354,7 +354,7 @@ func (s *Server) ResignLeader(nextLeader string) error {
 	}
 	nextLeaderID := leaderIDs[rand.Intn(len(leaderIDs))]
 	log.Infof("%s ready to resign leader, next leader: %v", s.Name(), nextLeaderID)
-	err = s.MoveEtcdLeader(s.serverLoopCtx, s.ID(), nextLeaderID)
+	err = s.MoveEtcdLeader(s.leaderLoopCtx, s.ID(), nextLeaderID)
 	return errors.Trace(err)
 }
 
