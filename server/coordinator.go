@@ -136,15 +136,15 @@ func (c *coordinator) drivePushOperator() {
 	defer logutil.LogPanic()
 
 	defer c.wg.Done()
-	log.Info("coordinator begin to actively drive push operator")
+	log.Info("coordinator begins to actively drive push operator")
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("drive push operator has been stopped")
 			return
 		case <-time.After(schedule.PushOperatorTickInterval):
+			c.opController.PushOperators()
 		}
-		c.opController.PushOperators()
 	}
 }
 
@@ -245,7 +245,7 @@ func (c *coordinator) run() {
 		log.Error("cannot persist schedule config", zap.Error(err))
 	}
 
-	c.wg.Add(1)
+	c.wg.Add(2)
 	// Starts to patrol regions.
 	go c.patrolRegions()
 	go c.drivePushOperator()

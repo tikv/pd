@@ -29,6 +29,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// The source of dispatched region.
+const (
+	DispatchFromHeartBeat     = "heartbeat"
+	DispatchFromNotifierQueue = "active push"
+	DispatchFromCreate        = "create"
+)
+
 var (
 	historyKeepTime    = 5 * time.Minute
 	slowNotifyInterval = 5 * time.Second
@@ -92,13 +99,13 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 	}
 }
 
-func (oc *OperatorController) getNextPushOperatorTime(step OperatorStep, now time.Time) int64 {
+func (oc *OperatorController) getNextPushOperatorTime(step OperatorStep, now time.Time) time.Time {
 	nextTime := slowNotifyInterval
 	switch step.(type) {
 	case TransferLeader, PromoteLearner:
 		nextTime = fastNotifyInterval
 	}
-	return now.Add(nextTime).UnixNano()
+	return now.Add(nextTime)
 }
 
 func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
@@ -107,29 +114,29 @@ func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next
 	if oc.opNotifierQueue.Len() == 0 {
 		return nil, false
 	}
-	item := oc.opNotifierQueue[0]
+	item := heap.Pop(&oc.opNotifierQueue).(*operatorWithTime)
 	regionID := item.op.regionID
 	op, ok := oc.operators[regionID]
 	if !ok || op == nil {
-		heap.Pop(&oc.opNotifierQueue)
 		return nil, true
 	}
 	r = oc.cluster.GetRegion(regionID)
 	if r == nil {
-		heap.Pop(&oc.opNotifierQueue)
 		return nil, true
 	}
 	step := op.Check(r)
 	if step == nil {
-		heap.Pop(&oc.opNotifierQueue)
 		return nil, true
 	}
 	now := time.Now()
-	if now.UnixNano() < item.time {
+	if now.Before(item.time) {
+		heap.Push(&oc.opNotifierQueue, item)
 		return nil, false
 	}
+
+	// pushs with new notify time.
 	item.time = oc.getNextPushOperatorTime(step, now)
-	heap.Fix(&oc.opNotifierQueue, item.index)
+	heap.Push(&oc.opNotifierQueue, item)
 	return r, true
 }
 
@@ -143,7 +150,7 @@ func (oc *OperatorController) PushOperators() {
 		if r == nil {
 			continue
 		}
-		oc.Dispatch(r, "active push")
+		oc.Dispatch(r, DispatchFromNotifierQueue)
 	}
 }
 
@@ -211,7 +218,7 @@ func (oc *OperatorController) addOperatorLocked(op *Operator) bool {
 	var step OperatorStep
 	if region := oc.cluster.GetRegion(op.RegionID()); region != nil {
 		if step = op.Check(region); step != nil {
-			oc.SendScheduleCommand(region, step, "create")
+			oc.SendScheduleCommand(region, step, DispatchFromCreate)
 		}
 	}
 

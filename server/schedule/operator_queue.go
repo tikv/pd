@@ -13,10 +13,11 @@
 
 package schedule
 
+import "time"
+
 type operatorWithTime struct {
-	op    *Operator
-	time  int64
-	index int
+	op   *Operator
+	time time.Time
 }
 
 type operatorQueue []*operatorWithTime
@@ -24,19 +25,15 @@ type operatorQueue []*operatorWithTime
 func (opn operatorQueue) Len() int { return len(opn) }
 
 func (opn operatorQueue) Less(i, j int) bool {
-	return opn[i].time < opn[j].time
+	return opn[i].time.Before(opn[j].time)
 }
 
 func (opn operatorQueue) Swap(i, j int) {
 	opn[i], opn[j] = opn[j], opn[i]
-	opn[i].index = i
-	opn[j].index = j
 }
 
 func (opn *operatorQueue) Push(x interface{}) {
-	n := len(*opn)
 	item := x.(*operatorWithTime)
-	item.index = n
 	*opn = append(*opn, item)
 }
 
@@ -44,7 +41,6 @@ func (opn *operatorQueue) Pop() interface{} {
 	old := *opn
 	n := len(old)
 	item := old[n-1]
-	item.index = -1
 	*opn = old[0 : n-1]
 	return item
 }
