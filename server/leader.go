@@ -35,7 +35,10 @@ var (
 	nextLeaderTTL = 10 // in seconds
 )
 
-// IsLeader returns whether server is leader or not.
+// The timeout to wait transfer etcd leader to complete.
+const moveLeaderTimeout = 5 * time.Second
+
+// IsLeader returns whether the server is leader or not.
 func (s *Server) IsLeader() bool {
 	return atomic.LoadInt64(&s.isLeader) == 1
 }
@@ -135,7 +138,7 @@ func (s *Server) etcdLeaderLoop() {
 				break
 			}
 			if myPriority > leaderPriority {
-				err := s.etcd.Server.MoveLeader(ctx, etcdLeader, s.ID())
+				err := s.MoveEtcdLeader(ctx, etcdLeader, s.ID())
 				if err != nil {
 					log.Errorf("failed to transfer etcd leader: %v", err)
 				} else {
@@ -150,6 +153,13 @@ func (s *Server) etcdLeaderLoop() {
 
 func getLeaderAddr(leader *pdpb.Member) string {
 	return strings.Join(leader.GetClientUrls(), ",")
+}
+
+// MoveEtcdLeader tries to transfer etcd leader.
+func (s *Server) MoveEtcdLeader(ctx context.Context, old, new uint64) error {
+	moveCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
+	defer cancel()
+	return errors.WithStack(s.etcd.Server.MoveLeader(moveCtx, old, new))
 }
 
 // getLeader gets server leader from etcd.
@@ -344,7 +354,7 @@ func (s *Server) ResignLeader(nextLeader string) error {
 	}
 	nextLeaderID := leaderIDs[rand.Intn(len(leaderIDs))]
 	log.Infof("%s ready to resign leader, next leader: %v", s.Name(), nextLeaderID)
-	err = s.etcd.Server.MoveLeader(s.leaderLoopCtx, s.ID(), nextLeaderID)
+	err = s.MoveEtcdLeader(s.serverLoopCtx, s.ID(), nextLeaderID)
 	return errors.Trace(err)
 }
 
