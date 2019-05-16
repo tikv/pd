@@ -68,13 +68,13 @@ func NewOperatorController(cluster Cluster, hbStreams HeartbeatStreams) *Operato
 }
 
 // Dispatch is used to dispatch the operator of a region.
-func (oc *OperatorController) Dispatch(region *core.RegionInfo) {
+func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 	// Check existed operator.
 	if op := oc.GetOperator(region.GetID()); op != nil {
 		timeout := op.IsTimeout()
 		if step := op.Check(region); step != nil && !timeout {
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
-			oc.SendScheduleCommand(region, step)
+			oc.SendScheduleCommand(region, step, source)
 			return
 		}
 		if op.IsFinish() {
@@ -143,7 +143,7 @@ func (oc *OperatorController) PushOperators() {
 		if r == nil {
 			continue
 		}
-		oc.Dispatch(r)
+		oc.Dispatch(r, "active push")
 	}
 }
 
@@ -211,7 +211,7 @@ func (oc *OperatorController) addOperatorLocked(op *Operator) bool {
 	var step OperatorStep
 	if region := oc.cluster.GetRegion(op.RegionID()); region != nil {
 		if step = op.Check(region); step != nil {
-			oc.SendScheduleCommand(region, step)
+			oc.SendScheduleCommand(region, step, "create")
 		}
 	}
 
@@ -268,8 +268,8 @@ func (oc *OperatorController) GetOperators() []*Operator {
 }
 
 // SendScheduleCommand sends a command to the region.
-func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step OperatorStep) {
-	log.Info("send schedule command", zap.Uint64("region-id", region.GetID()), zap.Stringer("step", step))
+func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step OperatorStep, source string) {
+	log.Info("send schedule command", zap.Uint64("region-id", region.GetID()), zap.Stringer("step", step), zap.String("source", source))
 	switch st := step.(type) {
 	case TransferLeader:
 		cmd := &pdpb.RegionHeartbeatResponse{
