@@ -201,6 +201,25 @@ func (s *TestServer) GetEtcdLeader() (string, error) {
 	return members.GetEtcdLeader().GetName(), nil
 }
 
+// GetEtcdLeaderID returns the builtin etcd leader ID.
+func (s *TestServer) GetEtcdLeaderID() (uint64, error) {
+	s.RLock()
+	defer s.RUnlock()
+	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
+	members, err := s.server.GetMembers(context.TODO(), req)
+	if err != nil {
+		return 0, errors.WithStack(err)
+	}
+	return members.GetEtcdLeader().GetMemberId(), nil
+}
+
+// MoveEtcdLeader moves etcd leader from old to new.
+func (s *TestServer) MoveEtcdLeader(old, new uint64) error {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.MoveEtcdLeader(context.Background(), old, new)
+}
+
 // GetEtcdClient returns the builtin etcd client.
 func (s *TestServer) GetEtcdClient() *clientv3.Client {
 	s.RLock()

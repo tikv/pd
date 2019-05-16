@@ -31,6 +31,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// The timeout to wait transfer etcd leader to complete.
+const moveLeaderTimeout = 5 * time.Second
+
 // IsLeader returns whether the server is leader or not.
 func (s *Server) IsLeader() bool {
 	// If server is not started. Both leaderID and ID could be 0.
@@ -145,7 +148,7 @@ func (s *Server) etcdLeaderLoop() {
 				break
 			}
 			if myPriority > leaderPriority {
-				err := s.etcd.Server.MoveLeader(ctx, etcdLeader, s.ID())
+				err := s.MoveEtcdLeader(ctx, etcdLeader, s.ID())
 				if err != nil {
 					log.Error("failed to transfer etcd leader", zap.Error(err))
 				} else {
@@ -159,6 +162,13 @@ func (s *Server) etcdLeaderLoop() {
 			return
 		}
 	}
+}
+
+// MoveEtcdLeader tries to transfer etcd leader.
+func (s *Server) MoveEtcdLeader(ctx context.Context, old, new uint64) error {
+	moveCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
+	defer cancel()
+	return errors.WithStack(s.etcd.Server.MoveLeader(moveCtx, old, new))
 }
 
 // getLeader gets server leader from etcd.
@@ -374,8 +384,7 @@ func (s *Server) ResignLeader(nextLeader string) error {
 		return errors.New("no valid pd to transfer leader")
 	}
 	nextLeaderID := leaderIDs[rand.Intn(len(leaderIDs))]
-	err = s.etcd.Server.MoveLeader(s.serverLoopCtx, s.ID(), nextLeaderID)
-	return errors.WithStack(err)
+	return s.MoveEtcdLeader(s.serverLoopCtx, s.ID(), nextLeaderID)
 }
 
 func (s *Server) deleteLeaderKey() error {
