@@ -460,8 +460,12 @@ func (s *Server) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsReque
 	regions := cluster.ScanRegionsByKey(request.GetStartKey(), int(request.GetLimit()))
 	resp := &pdpb.ScanRegionsResponse{Header: s.header()}
 	for _, r := range regions {
+		leader := r.GetLeader()
+		if leader == nil {
+			leader = &metapb.Peer{}
+		}
 		resp.Regions = append(resp.Regions, r.GetMeta())
-		resp.Leaders = append(resp.Leaders, r.GetLeader())
+		resp.Leaders = append(resp.Leaders, leader)
 	}
 	return resp, nil
 }

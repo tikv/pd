@@ -291,14 +291,25 @@ func (s *testClientSuite) TestScanRegions(c *C) {
 		return err == nil && len(scanRegions) == 10
 	})
 
+	// Set leader of region3 to nil.
+	region3 := core.NewRegionInfo(regions[3], nil)
+	s.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
+
 	check := func(start []byte, limit int, expect []*metapb.Region) {
 		scanRegions, leaders, err := s.client.ScanRegions(context.Background(), start, limit)
 		c.Assert(err, IsNil)
 		c.Assert(scanRegions, HasLen, len(expect))
 		c.Assert(leaders, HasLen, len(expect))
+		c.Log("scanRegions", scanRegions)
+		c.Log("expect", expect)
+		c.Log("scanLeaders", leaders)
 		for i := range expect {
 			c.Assert(scanRegions[i], DeepEquals, expect[i])
-			c.Assert(leaders[i], DeepEquals, expect[i].Peers[0])
+			if scanRegions[i].GetId() == region3.GetID() {
+				c.Assert(leaders[i], DeepEquals, &metapb.Peer{})
+			} else {
+				c.Assert(leaders[i], DeepEquals, expect[i].Peers[0])
+			}
 		}
 	}
 
