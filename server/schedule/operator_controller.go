@@ -134,22 +134,23 @@ func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next
 		return nil, false
 	}
 
-	// pushs with new notify time.
+	// pushes with new notify time.
 	item.time = oc.getNextPushOperatorTime(step, now)
 	heap.Push(&oc.opNotifierQueue, item)
 	return r, true
 }
 
-// PushOperators periodically pushs the unfinished operator to the excutor(TiKV).
+// PushOperators periodically pushes the unfinished operator to the executor(TiKV).
 func (oc *OperatorController) PushOperators() {
 	for {
 		r, next := oc.pollNeedDispatchRegion()
-		if r == nil && !next {
-			break
-		}
 		if r == nil {
+			if !next {
+				break
+			}
 			continue
 		}
+
 		oc.Dispatch(r, DispatchFromNotifierQueue)
 	}
 }

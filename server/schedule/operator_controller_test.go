@@ -111,7 +111,7 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	op2 := NewOperator("test", 2, &metapb.RegionEpoch{}, OpRegion, steps...)
 	region1 := tc.GetRegion(1)
 	region2 := tc.GetRegion(2)
-	// Adds operator and pushs to the notifier queue.
+	// Adds operator and pushes to the notifier queue.
 	{
 		oc.SetOperator(op1)
 		oc.SetOperator(op2)
