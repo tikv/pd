@@ -108,6 +108,9 @@ func (oc *OperatorController) getNextPushOperatorTime(step OperatorStep, now tim
 	return now.Add(nextTime)
 }
 
+// pollNeedDispatchRegion returns the region need to dispatch,
+// "next" is true to indicate that it may exist in next attempt,
+// and false is the end for the poll.
 func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
 	oc.Lock()
 	defer oc.Unlock()
@@ -144,10 +147,10 @@ func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next
 func (oc *OperatorController) PushOperators() {
 	for {
 		r, next := oc.pollNeedDispatchRegion()
+		if !next {
+			break
+		}
 		if r == nil {
-			if !next {
-				break
-			}
 			continue
 		}
 

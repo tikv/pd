@@ -137,12 +137,14 @@ func (c *coordinator) drivePushOperator() {
 
 	defer c.wg.Done()
 	log.Info("coordinator begins to actively drive push operator")
+	ticker := time.NewTicker(schedule.PushOperatorTickInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("drive push operator has been stopped")
 			return
-		case <-time.After(schedule.PushOperatorTickInterval):
+		case <-ticker.C:
 			c.opController.PushOperators()
 		}
 	}

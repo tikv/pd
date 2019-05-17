@@ -40,6 +40,9 @@ func (opn *operatorQueue) Push(x interface{}) {
 func (opn *operatorQueue) Pop() interface{} {
 	old := *opn
 	n := len(old)
+	if n == 0 {
+		return nil
+	}
 	item := old[n-1]
 	*opn = old[0 : n-1]
 	return item
