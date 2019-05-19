@@ -243,8 +243,16 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 
 func dispatchHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream *mockHeartbeatStream) {
 	co.hbStreams.bindStream(region.GetLeader().GetStoreId(), stream)
+<<<<<<< HEAD
 	co.cluster.putRegion(region.Clone())
 	co.dispatch(region)
+=======
+	if err := co.cluster.putRegion(region.Clone()); err != nil {
+		return err
+	}
+	co.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
+	return nil
+>>>>>>> b6150ca1... schedule: actively push operator  (#1536)
 }
 
 func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {

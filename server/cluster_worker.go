@@ -37,7 +37,7 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return errors.Errorf("invalid region, zero region peer count: %v", core.RegionToHexMeta(region.GetMeta()))
 	}
 
-	c.coordinator.dispatch(region)
+	c.coordinator.dispatch(region, DispatchFromHeartBeat)
 	return nil
 }
 

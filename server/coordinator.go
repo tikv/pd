@@ -14,6 +14,7 @@
 package server
 
 import (
+	"container/heap"
 	"container/list"
 	"context"
 	"fmt"
@@ -44,6 +45,14 @@ const (
 	hotRegionScheduleName      = "balance-hot-region-scheduler"
 
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
+
+	DispatchFromHeartBeat     = "heartbeat"
+	DispatchFromNotifierQueue = "active push"
+	DispatchFromCreate        = "create"
+	slowNotifyInterval        = 5 * time.Second
+	fastNotifyInterval        = 2 * time.Second
+	// PushOperatorTickInterval is the interval try to push the operator.
+	PushOperatorTickInterval = 500 * time.Millisecond
 )
 
 var (
@@ -70,6 +79,7 @@ type coordinator struct {
 	histories        *list.List
 	hbStreams        *heartbeatStreams
 	opRecords        *OperatorRecords
+	opNotifierQueue  operatorQueue
 }
 
 func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
@@ -89,16 +99,17 @@ func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifie
 		histories:        list.New(),
 		hbStreams:        hbStreams,
 		opRecords:        NewOperatorRecords(),
+		opNotifierQueue:  make(operatorQueue, 0),
 	}
 }
 
-func (c *coordinator) dispatch(region *core.RegionInfo) {
+func (c *coordinator) dispatch(region *core.RegionInfo, source string) {
 	// Check existed operator.
 	if op := c.getOperator(region.GetID()); op != nil {
 		timeout := op.IsTimeout()
 		if step := op.Check(region); step != nil && !timeout {
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
-			c.sendScheduleCommand(region, step)
+			c.sendScheduleCommand(region, step, source)
 			return
 		}
 		if op.IsFinish() {
@@ -160,6 +171,25 @@ func (c *coordinator) patrolRegions() {
 		if len(key) == 0 {
 			patrolCheckRegionsHistogram.Observe(time.Since(start).Seconds())
 			start = time.Now()
+		}
+	}
+}
+
+// drivePushOperator is used to push the unfinished operator to the excutor.
+func (c *coordinator) drivePushOperator() {
+	defer logutil.LogPanic()
+
+	defer c.wg.Done()
+	log.Info("coordinator begins to actively drive push operator")
+	ticker := time.NewTicker(PushOperatorTickInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("drive push operator has been stopped")
+			return
+		case <-ticker.C:
+			c.PushOperators()
 		}
 	}
 }
@@ -258,8 +288,10 @@ func (c *coordinator) run() {
 		log.Error("cannot persist schedule config", zap.Error(err))
 	}
 
-	c.wg.Add(1)
+	c.wg.Add(2)
+	// Starts to patrol regions.
 	go c.patrolRegions()
+	go c.drivePushOperator()
 }
 
 func (c *coordinator) stop() {
@@ -465,12 +497,14 @@ func (c *coordinator) addOperatorLocked(op *schedule.Operator) bool {
 	c.operators[regionID] = op
 	c.limiter.UpdateCounts(c.operators)
 
+	var step schedule.OperatorStep
 	if region := c.cluster.GetRegion(op.RegionID()); region != nil {
-		if step := op.Check(region); step != nil {
-			c.sendScheduleCommand(region, step)
+		if step = op.Check(region); step != nil {
+			c.sendScheduleCommand(region, step, DispatchFromCreate)
 		}
 	}
 
+	heap.Push(&c.opNotifierQueue, &operatorWithTime{op, c.getNextPushOperatorTime(step, time.Now())})
 	operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
 	return true
 }
@@ -578,8 +612,8 @@ func (c *coordinator) getHistory(start time.Time) []schedule.OperatorHistory {
 	return histories
 }
 
-func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule.OperatorStep) {
-	log.Info("send schedule command", zap.Uint64("region-id", region.GetID()), zap.Stringer("step", step))
+func (c *coordinator) sendScheduleCommand(region *core.RegionInfo, step schedule.OperatorStep, source string) {
+	log.Info("send schedule command", zap.Uint64("region-id", region.GetID()), zap.Stringer("step", step), zap.String("source", source))
 	switch s := step.(type) {
 	case schedule.TransferLeader:
 		cmd := &pdpb.RegionHeartbeatResponse{
@@ -672,6 +706,65 @@ func (c *coordinator) GetOperatorStatus(id uint64) *OperatorWithStatus {
 		}
 	}
 	return c.opRecords.Get(id)
+}
+
+func (oc *coordinator) getNextPushOperatorTime(step schedule.OperatorStep, now time.Time) time.Time {
+	nextTime := slowNotifyInterval
+	switch step.(type) {
+	case schedule.TransferLeader, schedule.PromoteLearner:
+		nextTime = fastNotifyInterval
+	}
+	return now.Add(nextTime)
+}
+
+// pollNeedDispatchRegion returns the region need to dispatch,
+// "next" is true to indicate that it may exist in next attempt,
+// and false is the end for the poll.
+func (oc *coordinator) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
+	oc.Lock()
+	defer oc.Unlock()
+	if oc.opNotifierQueue.Len() == 0 {
+		return nil, false
+	}
+	item := heap.Pop(&oc.opNotifierQueue).(*operatorWithTime)
+	regionID := item.op.RegionID()
+	op, ok := oc.operators[regionID]
+	if !ok || op == nil {
+		return nil, true
+	}
+	r = oc.cluster.GetRegion(regionID)
+	if r == nil {
+		return nil, true
+	}
+	step := op.Check(r)
+	if step == nil {
+		return nil, true
+	}
+	now := time.Now()
+	if now.Before(item.time) {
+		heap.Push(&oc.opNotifierQueue, item)
+		return nil, false
+	}
+
+	// pushes with new notify time.
+	item.time = oc.getNextPushOperatorTime(step, now)
+	heap.Push(&oc.opNotifierQueue, item)
+	return r, true
+}
+
+// PushOperators periodically pushes the unfinished operator to the executor(TiKV).
+func (oc *coordinator) PushOperators() {
+	for {
+		r, next := oc.pollNeedDispatchRegion()
+		if !next {
+			break
+		}
+		if r == nil {
+			continue
+		}
+
+		oc.dispatch(r, DispatchFromNotifierQueue)
+	}
 }
 
 type scheduleController struct {
