@@ -147,7 +147,7 @@ func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes 
 		newItem.Stats.Add(float64(flowBytes))
 		return true, newItem
 	}
-	// smaller than hotReionThreshold
+	// smaller than hotRegionThreshold
 	if oldItem == nil {
 		return false, newItem
 	}

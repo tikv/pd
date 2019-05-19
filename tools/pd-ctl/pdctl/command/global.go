@@ -22,6 +22,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -29,7 +31,7 @@ import (
 )
 
 var (
-	dialClient = &http.Client{}
+	dialClient = &http.Client{Timeout: 30 * time.Second}
 
 	pingPrefix = "pd/ping"
 )
@@ -46,9 +48,12 @@ func InitHTTPSClient(CAPath, CertPath, KeyPath string) error {
 		return errors.WithStack(err)
 	}
 
-	dialClient = &http.Client{Transport: &http.Transport{
-		TLSClientConfig: tlsConfig,
-	}}
+	dialClient = &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
+	}
 
 	return nil
 }
@@ -101,17 +106,19 @@ func genResponseError(r *http.Response) error {
 func getAddressFromCmd(cmd *cobra.Command, prefix string) string {
 	p, err := cmd.Flags().GetString("pd")
 	if err != nil {
-		cmd.Println("Get pd address error,should set flag with '-u'")
+		cmd.Println("get pd address error, should set flag with '-u'")
 		os.Exit(1)
+	}
+
+	if p != "" && !strings.HasPrefix(p, "http") {
+		p = "http://" + p
 	}
 
 	u, err := url.Parse(p)
 	if err != nil {
-		cmd.Println("address is wrong format,should like 'http://127.0.0.1:2379'")
+		cmd.Println("address format is wrong, should like 'http://127.0.0.1:2379' or '127.0.0.1:2379'")
 	}
-	if u.Scheme == "" {
-		u.Scheme = "http"
-	}
+
 	s := fmt.Sprintf("%s/%s", u, prefix)
 	return s
 }

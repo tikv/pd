@@ -259,7 +259,7 @@ func dispatchHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream *m
 	if err := co.cluster.putRegion(region.Clone()); err != nil {
 		return err
 	}
-	co.opController.Dispatch(region)
+	co.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
 	return nil
 }
 

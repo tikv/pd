@@ -35,6 +35,7 @@ import (
 const (
 	requestTimeout  = etcdutil.DefaultRequestTimeout
 	slowRequestTime = etcdutil.DefaultSlowRequestTime
+	clientTimeout   = 30 * time.Second
 )
 
 // Version information.
@@ -47,6 +48,7 @@ var (
 
 // DialClient used to dail http request.
 var DialClient = &http.Client{
+	Timeout: clientTimeout,
 	Transport: &http.Transport{
 		DisableKeepAlives: true,
 	},
@@ -76,6 +78,7 @@ func CheckPDVersion(opt *scheduleOption) {
 		pdVersion = *MustParseVersion(PDReleaseVersion)
 	}
 	clusterVersion := opt.loadClusterVersion()
+	log.Info("load cluster version", zap.Stringer("cluster-version", clusterVersion))
 	if pdVersion.LessThan(clusterVersion) {
 		log.Warn(
 			"PD version less than cluster version, please upgrade PD",
@@ -97,7 +100,7 @@ func getValue(c *clientv3.Client, key string, opts ...clientv3.OpOption) ([]byte
 }
 
 func get(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
-	resp, err := kvGet(c, key, opts...)
+	resp, err := etcdutil.EtcdKVGet(c, key, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -271,10 +274,13 @@ func InitHTTPClient(svr *Server) error {
 		return err
 	}
 
-	DialClient = &http.Client{Transport: &http.Transport{
-		TLSClientConfig:   tlsConfig,
-		DisableKeepAlives: true,
-	}}
+	DialClient = &http.Client{
+		Timeout: clientTimeout,
+		Transport: &http.Transport{
+			TLSClientConfig:   tlsConfig,
+			DisableKeepAlives: true,
+		},
+	}
 	return nil
 }
 

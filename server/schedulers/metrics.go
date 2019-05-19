@@ -37,7 +37,7 @@ var balanceLeaderCounter = prometheus.NewCounterVec(
 		Subsystem: "scheduler",
 		Name:      "balance_leader",
 		Help:      "Counter of balance leader scheduler.",
-	}, []string{"type", "address"})
+	}, []string{"type", "address", "store"})
 
 var balanceRegionCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
@@ -45,7 +45,7 @@ var balanceRegionCounter = prometheus.NewCounterVec(
 		Subsystem: "scheduler",
 		Name:      "balance_region",
 		Help:      "Counter of balance region scheduler.",
-	}, []string{"type", "address"})
+	}, []string{"type", "address", "store"})
 
 func init() {
 	prometheus.MustRegister(schedulerCounter)

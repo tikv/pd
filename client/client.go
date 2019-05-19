@@ -52,6 +52,11 @@ type Client interface {
 	GetPrevRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
 	GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Region, *metapb.Peer, error)
+	// ScanRegion gets a list of regions, starts from the region that contains key.
+	// Limit limits the maximum number of regions returned.
+	// If a region has no leader, corresponding leader will be placed by a peer
+	// with empty value (PeerID is 0).
+	ScanRegions(ctx context.Context, key []byte, limit int) ([]*metapb.Region, []*metapb.Peer, error)
 	// GetStore gets a store from PD by store id.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
@@ -64,6 +69,11 @@ type Client interface {
 	// If the given safePoint is less than the current one, it will not be updated.
 	// Returns the new safePoint after updating.
 	UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error)
+	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
+	// and the distribution of these regions will be dispersed.
+	ScatterRegion(ctx context.Context, regionID uint64) error
+	// GetOperator gets the status of operator of the specified region.
+	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
 	// Close closes the client.
 	Close()
 }
@@ -148,10 +158,10 @@ func NewClient(pdAddrs []string, security SecurityOption) (Client, error) {
 	}
 	c.connMu.clientConns = make(map[string]*grpc.ClientConn)
 
-	if err := c.initClusterID(); err != nil {
+	if err := c.initRetry(c.initClusterID); err != nil {
 		return nil, err
 	}
-	if err := c.updateLeader(); err != nil {
+	if err := c.initRetry(c.updateLeader); err != nil {
 		return nil, err
 	}
 	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
@@ -172,25 +182,31 @@ func (c *client) updateURLs(members []*pdpb.Member) {
 	c.urls = urls
 }
 
+func (c *client) initRetry(f func() error) error {
+	var err error
+	for i := 0; i < maxInitClusterRetries; i++ {
+		if err = f(); err == nil {
+			return nil
+		}
+		time.Sleep(time.Second)
+	}
+	return errors.WithStack(err)
+}
+
 func (c *client) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
-	for i := 0; i < maxInitClusterRetries; i++ {
-		for _, u := range c.urls {
-			timeoutCtx, timeoutCancel := context.WithTimeout(ctx, pdTimeout)
-			members, err := c.getMembers(timeoutCtx, u)
-			timeoutCancel()
-			if err != nil || members.GetHeader() == nil {
-				log.Error("[pd] failed to get cluster id", zap.Error(err))
-				continue
-			}
-			c.clusterID = members.GetHeader().GetClusterId()
-			return nil
+	for _, u := range c.urls {
+		timeoutCtx, timeoutCancel := context.WithTimeout(ctx, pdTimeout)
+		members, err := c.getMembers(timeoutCtx, u)
+		timeoutCancel()
+		if err != nil || members.GetHeader() == nil {
+			log.Error("[pd] failed to get cluster id", zap.Error(err))
+			continue
 		}
-
-		time.Sleep(time.Second)
+		c.clusterID = members.GetHeader().GetClusterId()
+		return nil
 	}
-
 	return errors.WithStack(errFailInitClusterID)
 }
 
@@ -516,6 +532,7 @@ func (c *client) Close() {
 	}
 }
 
+// leaderClient gets the client of current PD leader.
 func (c *client) leaderClient() pdpb.PDClient {
 	c.connMu.RLock()
 	defer c.connMu.RUnlock()
@@ -669,6 +686,28 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Re
 	return resp.GetRegion(), resp.GetLeader(), nil
 }
 
+func (c *client) ScanRegions(ctx context.Context, key []byte, limit int) ([]*metapb.Region, []*metapb.Peer, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.ScanRegions", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer cmdDuration.WithLabelValues("scan_regions").Observe(time.Since(start).Seconds())
+	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	resp, err := c.leaderClient().ScanRegions(ctx, &pdpb.ScanRegionsRequest{
+		Header:   c.requestHeader(),
+		StartKey: key,
+		Limit:    int32(limit),
+	})
+	cancel()
+	if err != nil {
+		cmdFailedDuration.WithLabelValues("scan_regions").Observe(time.Since(start).Seconds())
+		c.ScheduleCheckLeader()
+		return nil, nil, errors.WithStack(err)
+	}
+	return resp.GetRegions(), resp.GetLeaders(), nil
+}
+
 func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetStore", opentracing.ChildOf(span.Context()))
@@ -750,6 +789,45 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 		return 0, errors.WithStack(err)
 	}
 	return resp.GetNewSafePoint(), nil
+}
+
+func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.ScatterRegion", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDuration.WithLabelValues("scatter_region").Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	resp, err := c.leaderClient().ScatterRegion(ctx, &pdpb.ScatterRegionRequest{
+		Header:   c.requestHeader(),
+		RegionId: regionID,
+	})
+	cancel()
+	if err != nil {
+		return err
+	}
+	if resp.Header.GetError() != nil {
+		return errors.Errorf("scatter region %d failed: %s", regionID, resp.Header.GetError().String())
+	}
+	return nil
+}
+
+func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.GetOperator", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDuration.WithLabelValues("get_operator").Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	defer cancel()
+	return c.leaderClient().GetOperator(ctx, &pdpb.GetOperatorRequest{
+		Header:   c.requestHeader(),
+		RegionId: regionID,
+	})
 }
 
 func (c *client) requestHeader() *pdpb.RequestHeader {

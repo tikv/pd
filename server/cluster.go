@@ -21,6 +21,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errcode"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
@@ -120,10 +121,9 @@ func (c *RaftCluster) start() error {
 
 	c.wg.Add(3)
 	go c.runCoordinator()
-	// gofail: var highFrequencyClusterJobs bool
-	// if highFrequencyClusterJobs {
-	//     backgroundJobInterval = 100 * time.Microsecond
-	// }
+	failpoint.Inject("highFrequencyClusterJobs", func() {
+		backgroundJobInterval = 100 * time.Microsecond
+	})
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.syncRegions()
 	c.running = true
@@ -134,10 +134,13 @@ func (c *RaftCluster) start() error {
 func (c *RaftCluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	defer c.coordinator.wg.Wait()
+	defer func() {
+		c.coordinator.wg.Wait()
+		log.Info("coordinator has been stopped")
+	}()
 	c.coordinator.run()
 	<-c.coordinator.ctx.Done()
-	log.Info("coordinator: Stopped coordinator")
+	log.Info("coordinator is stopping")
 }
 
 func (c *RaftCluster) syncRegions() {
@@ -643,6 +646,7 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 	for {
 		select {
 		case <-c.quit:
+			log.Info("background jobs has been stopped")
 			return
 		case <-ticker.C:
 			c.checkOperators()

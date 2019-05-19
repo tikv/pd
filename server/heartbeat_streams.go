@@ -15,9 +15,11 @@ package server
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
@@ -79,6 +81,7 @@ func (s *heartbeatStreams) run() {
 			s.streams[update.storeID] = update.stream
 		case msg := <-s.msgCh:
 			storeID := msg.GetTargetPeer().GetStoreId()
+			storeLabel := strconv.FormatUint(storeID, 10)
 			store, err := s.cluster.GetStore(storeID)
 			if err != nil {
 				log.Error("fail to get store",
@@ -94,15 +97,15 @@ func (s *heartbeatStreams) run() {
 					log.Error("send heartbeat message fail",
 						zap.Uint64("region-id", msg.RegionId), zap.Error(err))
 					delete(s.streams, storeID)
-					regionHeartbeatCounter.WithLabelValues(storeAddress, "push", "err").Inc()
+					regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "push", "err").Inc()
 				} else {
-					regionHeartbeatCounter.WithLabelValues(storeAddress, "push", "ok").Inc()
+					regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "push", "ok").Inc()
 				}
 			} else {
 				log.Debug("heartbeat stream not found, skip send message",
 					zap.Uint64("region-id", msg.RegionId),
 					zap.Uint64("store-id", storeID))
-				regionHeartbeatCounter.WithLabelValues(storeAddress, "push", "skip").Inc()
+				regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "push", "skip").Inc()
 			}
 		case <-keepAliveTicker.C:
 			for storeID, stream := range s.streams {
@@ -113,14 +116,15 @@ func (s *heartbeatStreams) run() {
 					continue
 				}
 				storeAddress := store.GetAddress()
+				storeLabel := strconv.FormatUint(storeID, 10)
 				if err := stream.Send(keepAlive); err != nil {
 					log.Error("send keepalive message fail",
 						zap.Uint64("target-store-id", storeID),
 						zap.Error(err))
 					delete(s.streams, storeID)
-					regionHeartbeatCounter.WithLabelValues(storeAddress, "keepalive", "err").Inc()
+					regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "keepalive", "err").Inc()
 				} else {
-					regionHeartbeatCounter.WithLabelValues(storeAddress, "keepalive", "ok").Inc()
+					regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "keepalive", "ok").Inc()
 				}
 			}
 		case <-s.ctx.Done():
@@ -161,8 +165,8 @@ func (s *heartbeatStreams) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHear
 	}
 }
 
-func (s *heartbeatStreams) sendErr(errType pdpb.ErrorType, errMsg string, storeAddress string) {
-	regionHeartbeatCounter.WithLabelValues(storeAddress, "report", "err").Inc()
+func (s *heartbeatStreams) sendErr(errType pdpb.ErrorType, errMsg string, targetPeer *metapb.Peer, storeAddress, storeLabel string) {
+	regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
 
 	msg := &pdpb.RegionHeartbeatResponse{
 		Header: &pdpb.ResponseHeader{
@@ -172,6 +176,7 @@ func (s *heartbeatStreams) sendErr(errType pdpb.ErrorType, errMsg string, storeA
 				Message: errMsg,
 			},
 		},
+		TargetPeer: targetPeer,
 	}
 
 	select {

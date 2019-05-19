@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/core"
@@ -1004,6 +1005,20 @@ func (s *cmdTestSuite) TestOperator(c *C) {
 			expect: "split region with policy APPROXIMATE",
 			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
 		},
+		{
+			// operator add split-region <region_id> [--policy=scan|approximate]
+			cmd:    []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=scan"},
+			show:   []string{"-u", pdAddr, "operator", "check", "3"},
+			expect: "split region with policy SCAN",
+			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
+		},
+		{
+			// operator add split-region <region_id> [--policy=scan|approximate]
+			cmd:    []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=approximate"},
+			show:   []string{"-u", pdAddr, "operator", "check", "3"},
+			expect: "status: RUNNING",
+			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
+		},
 	}
 
 	for _, testCase := range testCases {
@@ -1041,7 +1056,7 @@ func (s *cmdTestSuite) TestOperator(c *C) {
 	args = []string{"-u", pdAddr, "operator", "show", "region"}
 	_, output, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "transfer leader from store 0 to store 3"), IsTrue)
+	c.Assert(strings.Contains(string(output), "scatter-region"), IsTrue)
 }
 
 func (s *cmdTestSuite) TestMember(c *C) {
@@ -1052,6 +1067,8 @@ func (s *cmdTestSuite) TestMember(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	pdAddr := cluster.GetConfig().GetClientURLs()
 	c.Assert(err, IsNil)
 	cmd := initCommand()
@@ -1073,15 +1090,22 @@ func (s *cmdTestSuite) TestMember(c *C) {
 	args = []string{"-u", pdAddr, "member", "leader", "transfer", "pd2"}
 	_, _, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	c.Assert("pd2", Equals, svr.GetLeader().GetName())
+	testutil.WaitUntil(c, func(c *C) bool {
+		return c.Check("pd2", Equals, svr.GetLeader().GetName())
+	})
 
 	// member leader resign
+	cluster.WaitLeader()
 	args = []string{"-u", pdAddr, "member", "leader", "resign"}
-	_, _, err = executeCommandC(cmd, args...)
+	_, output, err = executeCommandC(cmd, args...)
+	c.Assert(strings.Contains(string(output), "Success"), IsTrue)
 	c.Assert(err, IsNil)
-	c.Assert("pd2", Not(Equals), svr.GetLeader().GetName())
+	testutil.WaitUntil(c, func(c *C) bool {
+		return c.Check("pd2", Not(Equals), svr.GetLeader().GetName())
+	})
 
 	// member leader_priority <member_name> <priority>
+	cluster.WaitLeader()
 	args = []string{"-u", pdAddr, "member", "leader_priority", name, "100"}
 	_, _, err = executeCommandC(cmd, args...)
 	c.Assert(err, IsNil)
@@ -1109,6 +1133,7 @@ func (s *cmdTestSuite) TestMember(c *C) {
 	members, err = etcdutil.ListEtcdMembers(client)
 	c.Assert(err, IsNil)
 	c.Assert(len(members.Members), Equals, 2)
+	c.Succeed()
 }
 
 func (s *cmdTestSuite) TestHot(c *C) {

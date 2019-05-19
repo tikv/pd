@@ -53,13 +53,24 @@ func (k Key) TableID() int64 {
 	return tableID
 }
 
-// IsMeta returns if the key is a meta key.
-func (k Key) IsMeta() bool {
+// MetaOrTable checks if the key is a meta key or table key.
+// If the key is a meta key, it returns true and 0.
+// If the key is a table key, it returns false and table ID.
+// Otherwise, it returns false and 0.
+func (k Key) MetaOrTable() (bool, int64) {
 	_, key, err := DecodeBytes(k)
 	if err != nil {
-		return false
+		return false, 0
 	}
-	return bytes.HasPrefix(key, metaPrefix)
+	if bytes.HasPrefix(key, metaPrefix) {
+		return true, 0
+	}
+	if bytes.HasPrefix(key, tablePrefix) {
+		key = key[len(tablePrefix):]
+		_, tableID, _ := DecodeInt(key)
+		return false, tableID
+	}
+	return false, 0
 }
 
 var pads = make([]byte, encGroupSize)

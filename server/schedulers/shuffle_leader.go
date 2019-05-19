@@ -70,7 +70,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: targetStore.GetID()}
-	op := schedule.NewOperator("shuffleLeader", region.GetID(), region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpLeader, step)
+	op := schedule.NewOperator("shuffle-leader", region.GetID(), region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpLeader, step)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*schedule.Operator{op}
 }

@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -73,6 +74,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if err != nil {
 			return errors.WithStack(err)
 		}
+		start := time.Now()
 		if err = s.validateRequest(request.GetHeader()); err != nil {
 			return err
 		}
@@ -89,6 +91,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		if err := stream.Send(response); err != nil {
 			return errors.WithStack(err)
 		}
+		tsoHandleDuration.Observe(time.Since(start).Seconds())
 	}
 }
 
@@ -166,6 +169,7 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 	return &pdpb.GetStoreResponse{
 		Header: s.header(),
 		Store:  store.GetMeta(),
+		Stats:  store.GetStoreStats(),
 	}, nil
 }
 
@@ -346,44 +350,44 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		}
 
 		storeID := request.GetLeader().GetStoreId()
+		storeLabel := strconv.FormatUint(storeID, 10)
 		store, err := cluster.GetStore(storeID)
 		if err != nil {
 			return err
 		}
 		storeAddress := store.GetAddress()
 
-		regionHeartbeatCounter.WithLabelValues(storeAddress, "report", "recv").Inc()
-		regionHeartbeatLatency.WithLabelValues(storeAddress).Observe(float64(time.Now().Unix()) - float64(request.GetInterval().GetEndTimestamp()))
+		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "recv").Inc()
+		regionHeartbeatLatency.WithLabelValues(storeAddress, storeLabel).Observe(float64(time.Now().Unix()) - float64(request.GetInterval().GetEndTimestamp()))
 
 		cluster.RLock()
 		hbStreams := cluster.coordinator.hbStreams
 		cluster.RUnlock()
 
 		if time.Since(lastBind) > s.cfg.heartbeatStreamBindInterval.Duration {
-			regionHeartbeatCounter.WithLabelValues(storeAddress, "report", "bind").Inc()
+			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "bind").Inc()
 			hbStreams.bindStream(storeID, server)
 			lastBind = time.Now()
 		}
 
 		region := core.RegionFromHeartbeat(request)
-		if region.GetID() == 0 {
-			msg := fmt.Sprintf("invalid request region, %v", request)
-			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, storeAddress)
+		if region.GetLeader() == nil {
+			log.Error("invalid request, the leader is nil", zap.Reflect("reqeust", request))
 			continue
 		}
-		if region.GetLeader() == nil {
-			msg := fmt.Sprintf("invalid request leader, %v", request)
-			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, storeAddress)
+		if region.GetID() == 0 {
+			msg := fmt.Sprintf("invalid request region, %v", request)
+			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader(), storeAddress, storeLabel)
 			continue
 		}
 
 		err = cluster.HandleRegionHeartbeat(region)
 		if err != nil {
 			msg := err.Error()
-			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, storeAddress)
+			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader(), storeAddress, storeLabel)
 		}
 
-		regionHeartbeatCounter.WithLabelValues(storeAddress, "report", "ok").Inc()
+		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
 	}
 }
 
@@ -441,6 +445,29 @@ func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDR
 		Region: region,
 		Leader: leader,
 	}, nil
+}
+
+// ScanRegions implements gRPC PDServer.
+func (s *Server) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &pdpb.ScanRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+	regions := cluster.ScanRegionsByKey(request.GetStartKey(), int(request.GetLimit()))
+	resp := &pdpb.ScanRegionsResponse{Header: s.header()}
+	for _, r := range regions {
+		leader := r.GetLeader()
+		if leader == nil {
+			leader = &metapb.Peer{}
+		}
+		resp.Regions = append(resp.Regions, r.GetMeta())
+		resp.Leaders = append(resp.Leaders, leader)
+	}
+	return resp, nil
 }
 
 // AskSplit implements gRPC PDServer.
@@ -602,10 +629,15 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		}
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
 	}
+
 	cluster.RLock()
 	defer cluster.RUnlock()
 	co := cluster.coordinator
-	if op := co.regionScatterer.Scatter(region); op != nil {
+	op, err := co.regionScatterer.Scatter(region)
+	if err != nil {
+		return nil, err
+	}
+	if op != nil {
 		co.opController.AddOperator(op)
 	}
 
@@ -680,6 +712,37 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 	return &pdpb.UpdateGCSafePointResponse{
 		Header:       s.header(),
 		NewSafePoint: newSafePoint,
+	}, nil
+}
+
+// GetOperator gets information about the operator belonging to the speicfy region.
+func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &pdpb.GetOperatorResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	opController := cluster.coordinator.opController
+	requestID := request.GetRegionId()
+	r := opController.GetOperatorStatus(requestID)
+	if r == nil {
+		header := s.errorHeader(&pdpb.Error{
+			Type:    pdpb.ErrorType_REGION_NOT_FOUND,
+			Message: "Not Found",
+		})
+		return &pdpb.GetOperatorResponse{Header: header}, nil
+	}
+
+	return &pdpb.GetOperatorResponse{
+		Header:   s.header(),
+		RegionId: requestID,
+		Desc:     []byte(r.Op.Desc()),
+		Kind:     []byte(r.Op.Kind().String()),
+		Status:   r.Status,
 	}, nil
 }
 
