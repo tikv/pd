@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
@@ -164,7 +165,7 @@ func (s *heartbeatStreams) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHear
 	}
 }
 
-func (s *heartbeatStreams) sendErr(errType pdpb.ErrorType, errMsg string, storeAddress string, storeLabel string) {
+func (s *heartbeatStreams) sendErr(errType pdpb.ErrorType, errMsg string, targetPeer *metapb.Peer, storeAddress, storeLabel string) {
 	regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
 
 	msg := &pdpb.RegionHeartbeatResponse{
@@ -175,6 +176,7 @@ func (s *heartbeatStreams) sendErr(errType pdpb.ErrorType, errMsg string, storeA
 				Message: errMsg,
 			},
 		},
+		TargetPeer: targetPeer,
 	}
 
 	select {

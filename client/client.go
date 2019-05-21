@@ -52,6 +52,11 @@ type Client interface {
 	GetPrevRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
 	GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Region, *metapb.Peer, error)
+	// ScanRegion gets a list of regions, starts from the region that contains key.
+	// Limit limits the maximum number of regions returned.
+	// If a region has no leader, corresponding leader will be placed by a peer
+	// with empty value (PeerID is 0).
+	ScanRegions(ctx context.Context, key []byte, limit int) ([]*metapb.Region, []*metapb.Peer, error)
 	// GetStore gets a store from PD by store id.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
@@ -679,6 +684,28 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Re
 		return nil, nil, errors.WithStack(err)
 	}
 	return resp.GetRegion(), resp.GetLeader(), nil
+}
+
+func (c *client) ScanRegions(ctx context.Context, key []byte, limit int) ([]*metapb.Region, []*metapb.Peer, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.ScanRegions", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer cmdDuration.WithLabelValues("scan_regions").Observe(time.Since(start).Seconds())
+	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	resp, err := c.leaderClient().ScanRegions(ctx, &pdpb.ScanRegionsRequest{
+		Header:   c.requestHeader(),
+		StartKey: key,
+		Limit:    int32(limit),
+	})
+	cancel()
+	if err != nil {
+		cmdFailedDuration.WithLabelValues("scan_regions").Observe(time.Since(start).Seconds())
+		c.ScheduleCheckLeader()
+		return nil, nil, errors.WithStack(err)
+	}
+	return resp.GetRegions(), resp.GetLeaders(), nil
 }
 
 func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error) {

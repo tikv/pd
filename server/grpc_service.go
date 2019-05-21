@@ -371,21 +371,20 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		}
 
 		region := core.RegionFromHeartbeat(request)
-		if region.GetID() == 0 {
-			msg := fmt.Sprintf("invalid request region, %v", request)
-			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, storeAddress, storeLabel)
+		if region.GetLeader() == nil {
+			log.Error("invalid request, the leader is nil", zap.Reflect("reqeust", request))
 			continue
 		}
-		if region.GetLeader() == nil {
-			msg := fmt.Sprintf("invalid request leader, %v", request)
-			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, storeAddress, storeLabel)
+		if region.GetID() == 0 {
+			msg := fmt.Sprintf("invalid request region, %v", request)
+			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader(), storeAddress, storeLabel)
 			continue
 		}
 
 		err = cluster.HandleRegionHeartbeat(region)
 		if err != nil {
 			msg := err.Error()
-			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, storeAddress, storeLabel)
+			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader(), storeAddress, storeLabel)
 		}
 
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
@@ -446,6 +445,29 @@ func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDR
 		Region: region,
 		Leader: leader,
 	}, nil
+}
+
+// ScanRegions implements gRPC PDServer.
+func (s *Server) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &pdpb.ScanRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+	regions := cluster.ScanRegionsByKey(request.GetStartKey(), int(request.GetLimit()))
+	resp := &pdpb.ScanRegionsResponse{Header: s.header()}
+	for _, r := range regions {
+		leader := r.GetLeader()
+		if leader == nil {
+			leader = &metapb.Peer{}
+		}
+		resp.Regions = append(resp.Regions, r.GetMeta())
+		resp.Leaders = append(resp.Leaders, leader)
+	}
+	return resp, nil
 }
 
 // AskSplit implements gRPC PDServer.

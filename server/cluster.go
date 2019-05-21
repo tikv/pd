@@ -21,6 +21,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errcode"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
@@ -120,10 +121,9 @@ func (c *RaftCluster) start() error {
 
 	c.wg.Add(3)
 	go c.runCoordinator()
-	// gofail: var highFrequencyClusterJobs bool
-	// if highFrequencyClusterJobs {
-	//     backgroundJobInterval = 100 * time.Microsecond
-	// }
+	failpoint.Inject("highFrequencyClusterJobs", func() {
+		backgroundJobInterval = 100 * time.Microsecond
+	})
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.syncRegions()
 	c.running = true

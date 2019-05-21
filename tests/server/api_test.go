@@ -15,16 +15,22 @@ package server_test
 
 import (
 	"net/http"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/tests"
 )
 
 func (s *serverTestSuite) TestReconnect(c *C) {
 	c.Parallel()
 
-	cluster, err := tests.NewTestCluster(3)
+	cluster, err := tests.NewTestCluster(3, func(conf *server.Config) {
+		conf.TickInterval = typeutil.Duration{50 * time.Millisecond}
+		conf.ElectionInterval = typeutil.Duration{250 * time.Millisecond}
+	})
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -46,6 +52,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 	err = cluster.GetServer(leader).Stop()
 	c.Assert(err, IsNil)
 	newLeader := cluster.WaitLeader()
+	c.Assert(len(newLeader), Not(Equals), 0)
 
 	// Make sure they proxy requests to the new leader.
 	for name, s := range cluster.GetServers() {

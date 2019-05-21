@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
 	"github.com/pkg/errors"
@@ -84,10 +85,9 @@ func (s *Server) syncTimestamp() error {
 	}
 
 	next := time.Now()
-	// gofail: var fallBackSync bool
-	// if fallBackSync {
-	//	next = next.Add(time.Hour)
-	// }
+	failpoint.Inject("fallBackSync", func() {
+		next = next.Add(time.Hour)
+	})
 
 	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
@@ -126,10 +126,9 @@ func (s *Server) updateTimestamp() error {
 	prev := s.ts.Load().(*atomicObject)
 	now := time.Now()
 
-	// gofail: var fallBackUpdate bool
-	// if fallBackUpdate {
-	//	now = now.Add(time.Hour)
-	// }
+	failpoint.Inject("fallBackUpdate", func() {
+		now = now.Add(time.Hour)
+	})
 
 	tsoCounter.WithLabelValues("save").Inc()
 

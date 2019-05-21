@@ -91,7 +91,7 @@ func (c *coordinator) patrolRegions() {
 	timer := time.NewTimer(c.cluster.GetPatrolRegionInterval())
 	defer timer.Stop()
 
-	log.Info("coordinator: start patrol regions")
+	log.Info("coordinator starts patrol regions")
 	start := time.Now()
 	var key []byte
 	for {
@@ -127,6 +127,25 @@ func (c *coordinator) patrolRegions() {
 		if len(key) == 0 {
 			patrolCheckRegionsHistogram.Observe(time.Since(start).Seconds())
 			start = time.Now()
+		}
+	}
+}
+
+// drivePushOperator is used to push the unfinished operator to the excutor.
+func (c *coordinator) drivePushOperator() {
+	defer logutil.LogPanic()
+
+	defer c.wg.Done()
+	log.Info("coordinator begins to actively drive push operator")
+	ticker := time.NewTicker(schedule.PushOperatorTickInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("drive push operator has been stopped")
+			return
+		case <-ticker.C:
+			c.opController.PushOperators()
 		}
 	}
 }
@@ -180,19 +199,20 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 func (c *coordinator) run() {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
 	defer ticker.Stop()
-	log.Info("coordinator: Start collect cluster information")
+	log.Info("coordinator starts to collect cluster information")
 	for {
 		if c.shouldRun() {
-			log.Info("coordinator: Cluster information is prepared")
+			log.Info("coordinator has finished cluster information preparation")
 			break
 		}
 		select {
 		case <-ticker.C:
 		case <-c.ctx.Done():
+			log.Info("coordinator stops running")
 			return
 		}
 	}
-	log.Info("coordinator: Run scheduler")
+	log.Info("coordinator starts to run schedulers")
 
 	k := 0
 	scheduleCfg := c.cluster.opt.load().clone()
@@ -227,9 +247,10 @@ func (c *coordinator) run() {
 		log.Error("cannot persist schedule config", zap.Error(err))
 	}
 
-	c.wg.Add(1)
+	c.wg.Add(2)
 	// Starts to patrol regions.
 	go c.patrolRegions()
+	go c.drivePushOperator()
 }
 
 func (c *coordinator) stop() {

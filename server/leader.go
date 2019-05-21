@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
@@ -29,6 +30,9 @@ import (
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.uber.org/zap"
 )
+
+// The timeout to wait transfer etcd leader to complete.
+const moveLeaderTimeout = 5 * time.Second
 
 // IsLeader returns whether the server is leader or not.
 func (s *Server) IsLeader() bool {
@@ -140,11 +144,11 @@ func (s *Server) etcdLeaderLoop() {
 			}
 			leaderPriority, err := s.GetMemberLeaderPriority(etcdLeader)
 			if err != nil {
-				log.Error("failed to load leader priority", zap.Error(err))
+				log.Error("failed to load etcd leader priority", zap.Error(err))
 				break
 			}
 			if myPriority > leaderPriority {
-				err := s.etcd.Server.MoveLeader(ctx, etcdLeader, s.ID())
+				err := s.MoveEtcdLeader(ctx, etcdLeader, s.ID())
 				if err != nil {
 					log.Error("failed to transfer etcd leader", zap.Error(err))
 				} else {
@@ -158,6 +162,13 @@ func (s *Server) etcdLeaderLoop() {
 			return
 		}
 	}
+}
+
+// MoveEtcdLeader tries to transfer etcd leader.
+func (s *Server) MoveEtcdLeader(ctx context.Context, old, new uint64) error {
+	moveCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
+	defer cancel()
+	return errors.WithStack(s.etcd.Server.MoveLeader(moveCtx, old, new))
 }
 
 // getLeader gets server leader from etcd.
@@ -201,7 +212,7 @@ func (s *Server) memberInfo() (member *pdpb.Member, marshalStr string) {
 }
 
 func (s *Server) campaignLeader() error {
-	log.Debug("begin to campaign leader", zap.String("campaign-leader-name", s.Name()))
+	log.Info("start to campaign leader", zap.String("campaign-leader-name", s.Name()))
 
 	lessor := clientv3.NewLease(s.client)
 	defer func() {
@@ -232,7 +243,7 @@ func (s *Server) campaignLeader() error {
 		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
-		return errors.New("campaign leader failed, other server may campaign ok")
+		return errors.New("failed to campaign leader, other server may campaign ok")
 	}
 
 	// Make the leader keepalived.
@@ -243,7 +254,7 @@ func (s *Server) campaignLeader() error {
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	log.Debug("campaign leader ok", zap.String("campaign-leader-name", s.Name()))
+	log.Info("campaign leader ok", zap.String("campaign-leader-name", s.Name()))
 
 	err = s.reloadConfigFromKV()
 	if err != nil {
@@ -267,9 +278,8 @@ func (s *Server) campaignLeader() error {
 	s.enableLeader()
 	defer s.disableLeader()
 
-	log.Info("load cluster version", zap.Stringer("cluster-version", s.scheduleOpt.loadClusterVersion()))
-	log.Info("PD cluster leader is ready to serve", zap.String("leader-name", s.Name()))
 	CheckPDVersion(s.scheduleOpt)
+	log.Info("PD cluster leader is ready to serve", zap.String("leader-name", s.Name()))
 
 	tsTicker := time.NewTicker(updateTimestampStep)
 	defer tsTicker.Stop()
@@ -283,6 +293,7 @@ func (s *Server) campaignLeader() error {
 			}
 		case <-tsTicker.C:
 			if err = s.updateTimestamp(); err != nil {
+				log.Info("failed to update timestamp")
 				return err
 			}
 			etcdLeader := s.GetEtcdLeader()
@@ -321,7 +332,7 @@ func (s *Server) watchLeader(leader *pdpb.Member, revision int64) {
 	// If the revision is compacted, will meet required revision has been compacted error.
 	// In this case, use the compact revision to re-watch the key.
 	for {
-		// gofail: var delayWatcher struct{}
+		failpoint.Inject("delayWatcher", nil)
 		rch := watcher.Watch(ctx, s.getLeaderPath(), clientv3.WithRev(revision))
 		for wresp := range rch {
 			// meet compacted error, use the compact revision.
@@ -373,8 +384,7 @@ func (s *Server) ResignLeader(nextLeader string) error {
 		return errors.New("no valid pd to transfer leader")
 	}
 	nextLeaderID := leaderIDs[rand.Intn(len(leaderIDs))]
-	err = s.etcd.Server.MoveLeader(s.serverLoopCtx, s.ID(), nextLeaderID)
-	return errors.WithStack(err)
+	return s.MoveEtcdLeader(s.serverLoopCtx, s.ID(), nextLeaderID)
 }
 
 func (s *Server) deleteLeaderKey() error {
