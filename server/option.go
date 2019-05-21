@@ -71,6 +71,25 @@ func (o *scheduleOption) getNS(name string) (*namespaceOption, bool) {
 	return nil, false
 }
 
+func (o *scheduleOption) loadNSConfig() map[string]NamespaceConfig {
+	namespaces := make(map[string]NamespaceConfig)
+	f := func(k, v interface{}) bool {
+		var kstr string
+		var ok bool
+		if kstr, ok = k.(string); !ok {
+			return false
+		}
+		if ns, ok := v.(*namespaceOption); ok {
+			namespaces[kstr] = *ns.load()
+			return true
+		}
+		return false
+	}
+	o.ns.Range(f)
+	
+	return namespaces
+}
+
 func (o *scheduleOption) GetMaxReplicas(name string) int {
 	if n, ok := o.getNS(name); ok {
 		return n.GetMaxReplicas()
@@ -282,21 +301,7 @@ func (o *scheduleOption) loadPDServerConfig() *PDServerConfig {
 }
 
 func (o *scheduleOption) persist(kv *core.KV) error {
-	namespaces := make(map[string]NamespaceConfig)
-
-	f := func(k, v interface{}) bool {
-		var kstr string
-		var ok bool
-		if kstr, ok = k.(string); !ok {
-			return false
-		}
-		if ns, ok := v.(*namespaceOption); ok {
-			namespaces[kstr] = *ns.load()
-			return true
-		}
-		return false
-	}
-	o.ns.Range(f)
+	namespaces := o.loadNSConfig()
 
 	cfg := &Config{
 		Schedule:       *o.load(),
@@ -311,21 +316,7 @@ func (o *scheduleOption) persist(kv *core.KV) error {
 }
 
 func (o *scheduleOption) reload(kv *core.KV) error {
-	namespaces := make(map[string]NamespaceConfig)
-
-	f := func(k, v interface{}) bool {
-		var kstr string
-		var ok bool
-		if kstr, ok = k.(string); !ok {
-			return false
-		}
-		if ns, ok := v.(*namespaceOption); ok {
-			namespaces[kstr] = *ns.load()
-			return true
-		}
-		return false
-	}
-	o.ns.Range(f)
+	namespaces := o.loadNSConfig()
 
 	cfg := &Config{
 		Schedule:       *o.load().clone(),

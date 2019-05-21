@@ -510,21 +510,7 @@ func (s *Server) GetConfig() *Config {
 	cfg := s.cfg.clone()
 	cfg.Schedule = *s.scheduleOpt.load()
 	cfg.Replication = *s.scheduleOpt.rep.load()
-	namespaces := make(map[string]NamespaceConfig)
-
-	f := func(k, v interface{}) bool {
-		var kstr string
-		var ok bool
-		if kstr, ok = k.(string); !ok {
-			return false
-		}
-		if ns, ok := v.(*namespaceOption); ok {
-			namespaces[kstr] = *ns.load()
-			return true
-		}
-		return false
-	}
-	s.scheduleOpt.ns.Range(f)
+	namespaces:= s.scheduleOpt.loadNSConfig()
 
 	cfg.Namespace = namespaces
 	cfg.LabelProperty = s.scheduleOpt.loadLabelPropertyConfig().clone()
