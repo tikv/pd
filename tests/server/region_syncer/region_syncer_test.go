@@ -15,6 +15,7 @@ package server_test
 
 import (
 	"context"
+	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -24,6 +25,18 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tests"
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
+var _ = Suite(&serverTestSuite{})
+
+type serverTestSuite struct{}
+
+func (s *serverTestSuite) SetUpSuite(c *C) {
+	server.EnableZap = true
+}
 
 type idAllocator struct {
 	id uint64
