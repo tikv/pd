@@ -86,7 +86,7 @@ func (o *scheduleOption) loadNSConfig() map[string]NamespaceConfig {
 		return false
 	}
 	o.ns.Range(f)
-	
+
 	return namespaces
 }
 

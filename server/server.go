@@ -510,7 +510,7 @@ func (s *Server) GetConfig() *Config {
 	cfg := s.cfg.clone()
 	cfg.Schedule = *s.scheduleOpt.load()
 	cfg.Replication = *s.scheduleOpt.rep.load()
-	namespaces:= s.scheduleOpt.loadNSConfig()
+	namespaces := s.scheduleOpt.loadNSConfig()
 
 	cfg.Namespace = namespaces
 	cfg.LabelProperty = s.scheduleOpt.loadLabelPropertyConfig().clone()
