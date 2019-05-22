@@ -15,6 +15,7 @@ package server
 
 import (
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -28,7 +29,7 @@ import (
 type scheduleOption struct {
 	v              atomic.Value
 	rep            *Replication
-	ns             map[string]*namespaceOption
+	ns             sync.Map // concurrent map[string]*namespaceOption
 	labelProperty  atomic.Value
 	clusterVersion atomic.Value
 	pdServerConfig atomic.Value
@@ -37,10 +38,10 @@ type scheduleOption struct {
 func newScheduleOption(cfg *Config) *scheduleOption {
 	o := &scheduleOption{}
 	o.store(&cfg.Schedule)
-	o.ns = make(map[string]*namespaceOption)
+	o.ns = sync.Map{}
 	for name, nsCfg := range cfg.Namespace {
 		nsCfg := nsCfg
-		o.ns[name] = newNamespaceOption(&nsCfg)
+		o.ns.Store(name, newNamespaceOption(&nsCfg))
 	}
 	o.rep = newReplication(&cfg.Replication)
 	o.pdServerConfig.Store(&cfg.PDServerCfg)
@@ -61,8 +62,36 @@ func (o *scheduleOption) GetReplication() *Replication {
 	return o.rep
 }
 
+func (o *scheduleOption) getNS(name string) (*namespaceOption, bool) {
+	if n, ok := o.ns.Load(name); ok {
+		if n, ok := n.(*namespaceOption); ok {
+			return n, true
+		}
+	}
+	return nil, false
+}
+
+func (o *scheduleOption) loadNSConfig() map[string]NamespaceConfig {
+	namespaces := make(map[string]NamespaceConfig)
+	f := func(k, v interface{}) bool {
+		var kstr string
+		var ok bool
+		if kstr, ok = k.(string); !ok {
+			return false
+		}
+		if ns, ok := v.(*namespaceOption); ok {
+			namespaces[kstr] = *ns.load()
+			return true
+		}
+		return false
+	}
+	o.ns.Range(f)
+
+	return namespaces
+}
+
 func (o *scheduleOption) GetMaxReplicas(name string) int {
-	if n, ok := o.ns[name]; ok {
+	if n, ok := o.getNS(name); ok {
 		return n.GetMaxReplicas()
 	}
 	return o.rep.GetMaxReplicas()
@@ -105,35 +134,35 @@ func (o *scheduleOption) GetMaxStoreDownTime() time.Duration {
 }
 
 func (o *scheduleOption) GetLeaderScheduleLimit(name string) uint64 {
-	if n, ok := o.ns[name]; ok {
+	if n, ok := o.getNS(name); ok {
 		return n.GetLeaderScheduleLimit()
 	}
 	return o.load().LeaderScheduleLimit
 }
 
 func (o *scheduleOption) GetRegionScheduleLimit(name string) uint64 {
-	if n, ok := o.ns[name]; ok {
+	if n, ok := o.getNS(name); ok {
 		return n.GetRegionScheduleLimit()
 	}
 	return o.load().RegionScheduleLimit
 }
 
 func (o *scheduleOption) GetReplicaScheduleLimit(name string) uint64 {
-	if n, ok := o.ns[name]; ok {
+	if n, ok := o.getNS(name); ok {
 		return n.GetReplicaScheduleLimit()
 	}
 	return o.load().ReplicaScheduleLimit
 }
 
 func (o *scheduleOption) GetMergeScheduleLimit(name string) uint64 {
-	if n, ok := o.ns[name]; ok {
+	if n, ok := o.getNS(name); ok {
 		return n.GetMergeScheduleLimit()
 	}
 	return o.load().MergeScheduleLimit
 }
 
 func (o *scheduleOption) GetHotRegionScheduleLimit(name string) uint64 {
-	if n, ok := o.ns[name]; ok {
+	if n, ok := o.getNS(name); ok {
 		return n.GetHotRegionScheduleLimit()
 	}
 	return o.load().HotRegionScheduleLimit
@@ -272,10 +301,8 @@ func (o *scheduleOption) loadPDServerConfig() *PDServerConfig {
 }
 
 func (o *scheduleOption) persist(kv *core.KV) error {
-	namespaces := make(map[string]NamespaceConfig)
-	for name, ns := range o.ns {
-		namespaces[name] = *ns.load()
-	}
+	namespaces := o.loadNSConfig()
+
 	cfg := &Config{
 		Schedule:       *o.load(),
 		Replication:    *o.rep.load(),
@@ -289,10 +316,8 @@ func (o *scheduleOption) persist(kv *core.KV) error {
 }
 
 func (o *scheduleOption) reload(kv *core.KV) error {
-	namespaces := make(map[string]NamespaceConfig)
-	for name, ns := range o.ns {
-		namespaces[name] = *ns.load()
-	}
+	namespaces := o.loadNSConfig()
+
 	cfg := &Config{
 		Schedule:       *o.load().clone(),
 		Replication:    *o.rep.load(),
@@ -311,7 +336,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		o.rep.store(&cfg.Replication)
 		for name, nsCfg := range cfg.Namespace {
 			nsCfg := nsCfg
-			o.ns[name] = newNamespaceOption(&nsCfg)
+			o.ns.Store(name, newNamespaceOption(&nsCfg))
 		}
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.clusterVersion.Store(cfg.ClusterVersion)

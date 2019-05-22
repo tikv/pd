@@ -601,7 +601,7 @@ func (c *RaftCluster) checkOperators() {
 			log.Info("operator timeout",
 				zap.Uint64("region-id", op.RegionID()),
 				zap.Stringer("operator", op))
-			opController.RemoveOperator(op)
+			opController.RemoveTimeoutOperator(op)
 		}
 	}
 }
