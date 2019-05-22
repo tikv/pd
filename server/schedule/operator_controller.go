@@ -93,7 +93,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			oc.RemoveOperator(op)
 		} else if timeout {
 			log.Info("operator timeout", zap.Uint64("region-id", region.GetID()), zap.Reflect("operator", op))
-			oc.RemoveOperator(op)
+			oc.RemoveTimeoutOperator(op)
 			oc.opRecords.Put(op, pdpb.OperatorStatus_TIMEOUT)
 		}
 	}
@@ -235,6 +235,14 @@ func (oc *OperatorController) addOperatorLocked(op *Operator) bool {
 func (oc *OperatorController) RemoveOperator(op *Operator) {
 	oc.Lock()
 	defer oc.Unlock()
+	oc.removeOperatorLocked(op)
+}
+
+// RemoveTimeoutOperator removes a operator which is timeout from the running operators.
+func (oc *OperatorController) RemoveTimeoutOperator(op *Operator) {
+	oc.Lock()
+	defer oc.Unlock()
+	operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 	oc.removeOperatorLocked(op)
 }
 
