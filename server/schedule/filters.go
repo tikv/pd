@@ -419,11 +419,9 @@ type BlacklistType int
 // some flags about blacklist type.
 const (
 	// blacklist associated with the source.
-	SignSource BlacklistType = iota + 1
+	SignSource BlacklistType = 1 << iota
 	// blacklist associated with the target.
 	SignTarget
-	// blacklist associated with the source and target.
-	SignSourceAndTarget
 )
 
 // BlacklistStoreFilter filters the store according to the blacklist.
@@ -447,7 +445,7 @@ func (f *BlacklistStoreFilter) Type() string {
 
 // FilterSource implements the Filter.
 func (f *BlacklistStoreFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
-	if f.flag&SignSource != SignSource {
+	if f.flag&SignSource == SignSource {
 		return false
 	}
 	return f.filter(store)
@@ -460,7 +458,7 @@ func (f *BlacklistStoreFilter) Add(storeID uint64) {
 
 // FilterTarget implements the Filter.
 func (f *BlacklistStoreFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
-	if f.flag&SignTarget != SignTarget {
+	if f.flag&SignTarget == SignTarget {
 		return false
 	}
 	return f.filter(store)
