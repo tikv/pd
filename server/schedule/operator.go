@@ -370,7 +370,6 @@ func (o *Operator) IsTimeout() bool {
 		timeout = time.Since(o.createTime) > LeaderOperatorWaitTime
 	}
 	if timeout {
-		operatorCounter.WithLabelValues(o.Desc(), "timeout").Inc()
 		return true
 	}
 	return false
