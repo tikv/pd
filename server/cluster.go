@@ -402,11 +402,27 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		)
 	}
 	// Check location labels.
-	for _, k := range c.cachedCluster.GetLocationLabels() {
+	keysSet := make(map[string]struct{})
+	for _, k := range cluster.GetLocationLabels() {
+		keysSet[k] = struct{}{}
 		if v := s.GetLabelValue(k); len(v) == 0 {
 			log.Warn("missing location label",
 				zap.Stringer("store", s.GetMeta()),
 				zap.String("label-key", k))
+			if cluster.GetStrictlyMatchLabel() {
+				return errors.Errorf("miss location label, label key: %s ", k)
+			}
+		}
+	}
+	for _, label := range s.GetLabels() {
+		key := label.GetKey()
+		if _, ok := keysSet[key]; !ok {
+			log.Warn("no location label found ",
+				zap.Stringer("store", s.GetMeta()),
+				zap.String("label-key", key))
+			if cluster.GetStrictlyMatchLabel() {
+				return errors.Errorf("no location label found, label key: %s ", key)
+			}
 		}
 	}
 	return cluster.putStore(s)

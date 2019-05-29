@@ -231,7 +231,7 @@ func (s *cmdTestSuite) TestStore(c *C) {
 func (s *cmdTestSuite) TestLabel(c *C) {
 	c.Parallel()
 
-	cluster, err := tests.NewTestCluster(1)
+	cluster, err := tests.NewTestCluster(1, func(cfg *server.Config) { cfg.Replication.StrictlyMatchLabel = false })
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)

@@ -511,6 +511,7 @@ const (
 	defaultLowSpaceRatio               = 0.8
 	defaultHighSpaceRatio              = 0.6
 	defaultHotRegionCacheHitsThreshold = 3
+	defaultStrictlyMatchLabel          = true
 )
 
 // MockSchedulerOptions is a mock of SchedulerOptions
@@ -530,6 +531,7 @@ type MockSchedulerOptions struct {
 	MaxStoreDownTime             time.Duration
 	MaxReplicas                  int
 	LocationLabels               []string
+	StrictlyMatchLabel           bool
 	HotRegionCacheHitsThreshold  int
 	TolerantSizeRatio            float64
 	LowSpaceRatio                float64
@@ -559,6 +561,7 @@ func NewMockSchedulerOptions() *MockSchedulerOptions {
 	mso.SplitMergeInterval = defaultSplitMergeInterval
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
+	mso.StrictlyMatchLabel = defaultStrictlyMatchLabel
 	mso.HotRegionCacheHitsThreshold = defaultHotRegionCacheHitsThreshold
 	mso.MaxPendingPeerCount = defaultMaxPendingPeerCount
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
@@ -635,6 +638,11 @@ func (mso *MockSchedulerOptions) GetMaxReplicas(name string) int {
 // GetLocationLabels mock method
 func (mso *MockSchedulerOptions) GetLocationLabels() []string {
 	return mso.LocationLabels
+}
+
+// GetStrictlyMatchLabel mock method
+func (mso *MockSchedulerOptions) GetStrictlyMatchLabel() bool {
+	return mso.StrictlyMatchLabel
 }
 
 // GetHotRegionCacheHitsThreshold mock method

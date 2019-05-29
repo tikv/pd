@@ -70,14 +70,14 @@ func cleanServer(cfg *server.Config) {
 
 type cleanUpFunc func()
 
-func mustNewServer(c *C) (*server.Server, cleanUpFunc) {
-	_, svrs, cleanup := mustNewCluster(c, 1)
+func mustNewServer(c *C, opts ...func(cfg *server.Config)) (*server.Server, cleanUpFunc) {
+	_, svrs, cleanup := mustNewCluster(c, 1, opts...)
 	return svrs[0], cleanup
 }
 
 var zapLogOnce sync.Once
 
-func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpFunc) {
+func mustNewCluster(c *C, num int, opts ...func(cfg *server.Config)) ([]*server.Config, []*server.Server, cleanUpFunc) {
 	svrs := make([]*server.Server, 0, num)
 	cfgs := server.NewTestMultiConfig(c, num)
 
@@ -89,6 +89,9 @@ func mustNewCluster(c *C, num int) ([]*server.Config, []*server.Server, cleanUpF
 			zapLogOnce.Do(func() {
 				log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
 			})
+			for _, opt := range opts {
+				opt(cfg)
+			}
 			s, err := server.CreateServer(cfg, NewHandler)
 			c.Assert(err, IsNil)
 			err = s.Run(context.TODO())
