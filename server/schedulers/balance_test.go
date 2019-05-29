@@ -909,6 +909,9 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	opt.HotRegionScheduleLimit = mockoption.NewScheduleOptions().HotRegionScheduleLimit
 	opt.RegionScheduleLimit = 0
 	c.Assert(hb.Schedule(tc), HasLen, 1)
+	// Always produce operator
+	c.Assert(hb.Schedule(tc), HasLen, 1)
+	c.Assert(hb.Schedule(tc), HasLen, 1)
 
 	//| region_id | leader_store | follower_store | follower_store | written_bytes |
 	//|-----------|--------------|----------------|----------------|---------------|
