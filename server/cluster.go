@@ -406,22 +406,22 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	for _, k := range cluster.GetLocationLabels() {
 		keysSet[k] = struct{}{}
 		if v := s.GetLabelValue(k); len(v) == 0 {
-			log.Warn("missing location label",
+			log.Warn("label configuration is incorrect",
 				zap.Stringer("store", s.GetMeta()),
 				zap.String("label-key", k))
 			if cluster.GetStrictlyMatchLabel() {
-				return errors.Errorf("miss location label, label key: %s ", k)
+				return errors.Errorf("label configuration is incorrect, need to specify the key: %s ", k)
 			}
 		}
 	}
 	for _, label := range s.GetLabels() {
 		key := label.GetKey()
 		if _, ok := keysSet[key]; !ok {
-			log.Warn("no location label found ",
+			log.Warn("not found the key match with the store label",
 				zap.Stringer("store", s.GetMeta()),
 				zap.String("label-key", key))
 			if cluster.GetStrictlyMatchLabel() {
-				return errors.Errorf("no location label found, label key: %s ", key)
+				return errors.Errorf("key matching the label was not found in the PD, store label key: %s ", key)
 			}
 		}
 	}

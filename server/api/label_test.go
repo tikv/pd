@@ -228,7 +228,7 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 				Version: "3.0.0",
 			},
 			valid:       false,
-			expectError: "miss location label",
+			expectError: "label configuration is incorrect",
 		},
 		{
 			store: &metapb.Store{
@@ -252,7 +252,7 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 				Version: "3.0.0",
 			},
 			valid:       false,
-			expectError: "no location label found",
+			expectError: "key matching the label was not found",
 		},
 	}
 
