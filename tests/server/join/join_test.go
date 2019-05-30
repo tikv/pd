@@ -11,12 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server_test
+package join_test
 
 import (
 	"context"
 	"os"
 	"path"
+	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -24,6 +25,18 @@ import (
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/tests"
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
+var _ = Suite(&serverTestSuite{})
+
+type serverTestSuite struct{}
+
+func (s *serverTestSuite) SetUpSuite(c *C) {
+	server.EnableZap = true
+}
 
 func (s *serverTestSuite) TestSimpleJoin(c *C) {
 	c.Parallel()
