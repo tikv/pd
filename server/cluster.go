@@ -65,6 +65,7 @@ type RaftCluster struct {
 // ClusterStatus saves some state information
 type ClusterStatus struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
+	IsInitialized     bool      `json:"is_initialized"`
 }
 
 func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
@@ -78,18 +79,40 @@ func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 }
 
 func (c *RaftCluster) loadClusterStatus() (*ClusterStatus, error) {
-	data, err := c.s.kv.Load((c.s.kv.ClusterStatePath("raft_bootstrap_time")))
+	bootstrapTime, err := c.loadBootstrapTime()
 	if err != nil {
 		return nil, err
+	}
+	var isInitialized bool
+	if bootstrapTime != zeroTime {
+		isInitialized = c.isInitialized()
+	}
+	return &ClusterStatus{
+		RaftBootstrapTime: bootstrapTime,
+		IsInitialized:     isInitialized,
+	}, nil
+}
+
+func (c *RaftCluster) isInitialized() bool {
+	if c.cachedCluster.getRegionCount() > 1 {
+		return true
+	}
+	region := c.cachedCluster.searchRegion(nil)
+	return region != nil &&
+		len(region.GetVoters()) >= int(c.s.GetReplicationConfig().MaxReplicas) &&
+		len(region.GetPendingPeers()) == 0
+}
+
+func (c *RaftCluster) loadBootstrapTime() (t time.Time, err error) {
+	var data string
+	data, err = c.s.kv.Load(c.s.kv.ClusterStatePath("raft_bootstrap_time"))
+	if err != nil {
+		return
 	}
 	if len(data) == 0 {
-		return &ClusterStatus{}, nil
+		return
 	}
-	t, err := parseTimestamp([]byte(data))
-	if err != nil {
-		return nil, err
-	}
-	return &ClusterStatus{RaftBootstrapTime: t}, nil
+	return parseTimestamp([]byte(data))
 }
 
 func (c *RaftCluster) start() error {
