@@ -757,6 +757,10 @@ func (c *clusterInfo) GetLocationLabels() []string {
 	return c.opt.GetLocationLabels()
 }
 
+func (c *clusterInfo) GetStrictlyMatchLabel() bool {
+	return c.opt.rep.GetStrictlyMatchLabel()
+}
+
 func (c *clusterInfo) GetHotRegionCacheHitsThreshold() int {
 	return c.opt.GetHotRegionCacheHitsThreshold()
 }

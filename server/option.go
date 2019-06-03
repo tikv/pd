@@ -434,6 +434,11 @@ func (r *Replication) GetLocationLabels() []string {
 	return r.load().LocationLabels
 }
 
+// GetStrictlyMatchLabel returns whether check label strict.
+func (r *Replication) GetStrictlyMatchLabel() bool {
+	return r.load().StrictlyMatchLabel
+}
+
 // namespaceOption is a wrapper to access the configuration safely.
 type namespaceOption struct {
 	namespaceCfg atomic.Value

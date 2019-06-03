@@ -19,6 +19,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -151,6 +152,12 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	b, err := json.Marshal(labels)
 	c.Assert(err, IsNil)
 	err = postJSON(url+"/label", b)
+	c.Assert(strings.Contains(err.Error(), "key matching the label was not found"), IsTrue)
+	locationLabels := map[string]string{"location-labels": "zone,host"}
+	ll, _ := json.Marshal(locationLabels)
+	err = postJSON(s.urlPrefix+"/config", ll)
+	c.Assert(err, IsNil)
+	err = postJSON(url+"/label", b)
 	c.Assert(err, IsNil)
 
 	err = readJSONWithURL(url, &info)
@@ -161,6 +168,12 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	}
 
 	// Test merge.
+	// disable label match check.
+	labelCheck := map[string]string{"strictly-match-label": "false"}
+	lc, _ := json.Marshal(labelCheck)
+	err = postJSON(s.urlPrefix+"/config", lc)
+	c.Assert(err, IsNil)
+
 	labels = map[string]string{"zack": "zack1", "Host": "host1"}
 	b, err = json.Marshal(labels)
 	c.Assert(err, IsNil)
