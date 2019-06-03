@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/statistics"
 )
 
 var _ = Suite(&testShuffleLeaderSuite{})
@@ -339,9 +340,9 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	//|     1     |       1      |        2       |       3        |      512KB    |
 	//|     2     |       1      |        3       |       4        |      512KB    |
 	//|     3     |       1      |        2       |       4        |      512KB    |
-	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 3, 4)
-	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 4)
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 3, 4)
+	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 4)
 	opt.HotRegionCacheHitsThreshold = 0
 
 	// try to get an operator

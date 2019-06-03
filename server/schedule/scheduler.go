@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -47,7 +48,7 @@ type Cluster interface {
 	IsRegionHot(id uint64) bool
 	RegionWriteStats() []*core.RegionStat
 	RegionReadStats() []*core.RegionStat
-	RandHotRegionFromStore(store uint64, kind FlowKind) *core.RegionInfo
+	RandHotRegionFromStore(store uint64, kind statistics.FlowKind) *core.RegionInfo
 
 	// get config methods
 	GetOpt() NamespaceOptions

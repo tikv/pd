@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -40,6 +41,7 @@ type clusterInfo struct {
 	labelLevelStats *labelLevelStatistics
 	prepareChecker  *prepareChecker
 	changedRegions  chan *core.RegionInfo
+	hotSpotCache    *statistics.HotSpotCache
 }
 
 var defaultChangedRegionsLimit = 10000
@@ -53,6 +55,7 @@ func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clus
 		labelLevelStats: newLabelLevelStatistics(),
 		prepareChecker:  newPrepareChecker(),
 		changedRegions:  make(chan *core.RegionInfo, defaultChangedRegionsLimit),
+		hotSpotCache:    statistics.NewHotSpotCache(),
 	}
 }
 
@@ -308,14 +311,14 @@ func (c *clusterInfo) GetRegion(regionID uint64) *core.RegionInfo {
 func (c *clusterInfo) IsRegionHot(id uint64) bool {
 	c.RLock()
 	defer c.RUnlock()
-	return c.core.IsRegionHot(id, c.GetHotRegionCacheHitsThreshold())
+	return c.hotSpotCache.IsRegionHot(id, c.GetHotRegionCacheHitsThreshold())
 }
 
 // RandHotRegionFromStore randomly picks a hot region in specified store.
-func (c *clusterInfo) RandHotRegionFromStore(store uint64, kind schedule.FlowKind) *core.RegionInfo {
+func (c *clusterInfo) RandHotRegionFromStore(store uint64, kind statistics.FlowKind) *core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
-	r := c.core.HotCache.RandHotRegionFromStore(store, kind, c.GetHotRegionCacheHitsThreshold())
+	r := c.hotSpotCache.RandHotRegionFromStore(store, kind, c.GetHotRegionCacheHitsThreshold())
 	if r == nil {
 		return nil
 	}
@@ -505,8 +508,8 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			}
 		}
 	}
-	isWriteUpdate, writeItem := c.core.CheckWriteStatus(region)
-	isReadUpdate, readItem := c.core.CheckReadStatus(region)
+	isWriteUpdate, writeItem := c.CheckWriteStatus(region)
+	isReadUpdate, readItem := c.CheckReadStatus(region)
 	c.RUnlock()
 
 	// Save to KV if meta is updated.
@@ -633,10 +636,10 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 
 	key := region.GetID()
 	if isWriteUpdate {
-		c.core.HotCache.Update(key, writeItem, schedule.WriteFlow)
+		c.hotSpotCache.Update(key, writeItem, statistics.WriteFlow)
 	}
 	if isReadUpdate {
-		c.core.HotCache.Update(key, readItem, schedule.ReadFlow)
+		c.hotSpotCache.Update(key, readItem, statistics.ReadFlow)
 	}
 	return nil
 }
@@ -658,7 +661,7 @@ func (c *clusterInfo) collectMetrics() {
 	c.regionStats.Collect()
 	c.labelLevelStats.Collect()
 	// collect hot cache metrics
-	c.core.HotCache.CollectMetrics(c.core.Stores)
+	c.hotSpotCache.CollectMetrics(c.core.Stores)
 }
 
 func (c *clusterInfo) GetRegionStatsByType(typ regionStatisticType) []*core.RegionInfo {
@@ -796,13 +799,23 @@ func (c *clusterInfo) CheckLabelProperty(typ string, labels []*metapb.StoreLabel
 // RegionReadStats returns hot region's read stats.
 func (c *clusterInfo) RegionReadStats() []*core.RegionStat {
 	// RegionStats is a thread-safe method
-	return c.core.HotCache.RegionStats(schedule.ReadFlow)
+	return c.hotSpotCache.RegionStats(statistics.ReadFlow)
 }
 
 // RegionWriteStats returns hot region's write stats.
 func (c *clusterInfo) RegionWriteStats() []*core.RegionStat {
 	// RegionStats is a thread-safe method
-	return c.core.HotCache.RegionStats(schedule.WriteFlow)
+	return c.hotSpotCache.RegionStats(statistics.WriteFlow)
+}
+
+// CheckWriteStatus checks the write status, returns whether need update statistics and item.
+func (c *clusterInfo) CheckWriteStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
+	return c.hotSpotCache.CheckWrite(region, c.core.Stores)
+}
+
+// CheckReadStatus checks the read status, returns whether need update statistics and item.
+func (c *clusterInfo) CheckReadStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
+	return c.hotSpotCache.CheckRead(region, c.core.Stores)
 }
 
 type prepareChecker struct {

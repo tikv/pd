@@ -33,14 +33,6 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 16),
 		}, []string{"type"})
 
-	hotCacheStatusGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "hotcache",
-			Name:      "status",
-			Help:      "Status of the hotspot.",
-		}, []string{"name", "type"})
-
 	filterCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -78,7 +70,6 @@ var (
 func init() {
 	prometheus.MustRegister(checkerCounter)
 	prometheus.MustRegister(operatorStepDuration)
-	prometheus.MustRegister(hotCacheStatusGauge)
 	prometheus.MustRegister(filterCounter)
 	prometheus.MustRegister(operatorCounter)
 	prometheus.MustRegister(operatorDuration)

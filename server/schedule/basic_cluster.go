@@ -17,31 +17,17 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
-const (
-	// RegionHeartBeatReportInterval is the heartbeat report interval of a region
-	RegionHeartBeatReportInterval = 60
-
-	statCacheMaxLen              = 1000
-	hotWriteRegionMinFlowRate    = 16 * 1024
-	hotReadRegionMinFlowRate     = 128 * 1024
-	storeHeartBeatReportInterval = 10
-	minHotRegionReportInterval   = 3
-	hotRegionAntiCount           = 1
-)
-
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
-	Stores   *core.StoresInfo
-	Regions  *core.RegionsInfo
-	HotCache *HotSpotCache
+	Stores  *core.StoresInfo
+	Regions *core.RegionsInfo
 }
 
 // NewBasicCluster creates a BasicCluster.
 func NewBasicCluster() *BasicCluster {
 	return &BasicCluster{
-		Stores:   core.NewStoresInfo(),
-		Regions:  core.NewRegionsInfo(),
-		HotCache: newHotSpotCache(),
+		Stores:  core.NewStoresInfo(),
+		Regions: core.NewRegionsInfo(),
 	}
 }
 
@@ -122,21 +108,6 @@ func (bc *BasicCluster) GetAverageRegionSize() int64 {
 	return bc.Regions.GetAverageRegionSize()
 }
 
-// IsRegionHot checks if a region is in hot state.
-func (bc *BasicCluster) IsRegionHot(id uint64, hotThreshold int) bool {
-	return bc.HotCache.isRegionHot(id, hotThreshold)
-}
-
-// RegionWriteStats returns hot region's write stats.
-func (bc *BasicCluster) RegionWriteStats() []*core.RegionStat {
-	return bc.HotCache.RegionStats(WriteFlow)
-}
-
-// RegionReadStats returns hot region's read stats.
-func (bc *BasicCluster) RegionReadStats() []*core.RegionStat {
-	return bc.HotCache.RegionStats(ReadFlow)
-}
-
 // PutStore put a store
 func (bc *BasicCluster) PutStore(store *core.StoreInfo) {
 	bc.Stores.SetStore(store)
@@ -150,14 +121,4 @@ func (bc *BasicCluster) DeleteStore(store *core.StoreInfo) {
 // PutRegion put a region
 func (bc *BasicCluster) PutRegion(region *core.RegionInfo) {
 	bc.Regions.SetRegion(region)
-}
-
-// CheckWriteStatus checks the write status, returns whether need update statistics and item.
-func (bc *BasicCluster) CheckWriteStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
-	return bc.HotCache.CheckWrite(region, bc.Stores)
-}
-
-// CheckReadStatus checks the read status, returns whether need update statistics and item.
-func (bc *BasicCluster) CheckReadStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
-	return bc.HotCache.CheckRead(region, bc.Stores)
 }

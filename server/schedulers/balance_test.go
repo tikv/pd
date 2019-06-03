@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/statistics"
 )
 
 func newTestReplication(mso *schedule.MockSchedulerOptions, maxReplicas int, locationLabels ...string) {
@@ -182,7 +183,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
 	s.oc.SetOperator(op)
 	// After considering the scheduled operator, leaders of store1 and store4 are 8
 	// and 13 respectively. As the `TolerantSizeRatio` is 2.5, `shouldBalance`
-	// returns false when leader differece is not greater than 5.
+	// returns false when leader difference is not greater than 5.
 	c.Check(s.schedule(), IsNil)
 
 	// Stores:     1    2    3    4
@@ -208,7 +209,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
 
 	testutil.CheckTransferLeader(c, s.schedule()[0], schedule.OpBalance, 4, 1)
 	// Test stateFilter.
-	// if store 4 is offline, we schould consider it
+	// if store 4 is offline, we should consider it
 	// because it still provides services
 	s.tc.SetStoreOffline(4)
 	testutil.CheckTransferLeader(c, s.schedule()[0], schedule.OpBalance, 4, 1)
@@ -875,9 +876,9 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	//|     1     |       1      |        2       |       3        |      512KB    |
 	//|     2     |       1      |        3       |       4        |      512KB    |
 	//|     3     |       1      |        2       |       4        |      512KB    |
-	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 3, 4)
-	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 4)
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 3, 4)
+	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 4)
 	opt.HotRegionCacheHitsThreshold = 0
 
 	// Will transfer a hot region from store 1, because the total count of peers
@@ -920,11 +921,11 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	tc.UpdateStorageWrittenBytes(4, 30*1024*1024)
 	tc.UpdateStorageWrittenBytes(5, 0*1024*1024)
 	tc.UpdateStorageWrittenBytes(6, 30*1024*1024)
-	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithWriteInfo(3, 6, 512*1024*schedule.RegionHeartBeatReportInterval, 1, 4)
-	tc.AddLeaderRegionWithWriteInfo(4, 5, 512*1024*schedule.RegionHeartBeatReportInterval, 6, 4)
-	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*1024*schedule.RegionHeartBeatReportInterval, 4, 5)
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithWriteInfo(3, 6, 512*1024*statistics.RegionHeartBeatReportInterval, 1, 4)
+	tc.AddLeaderRegionWithWriteInfo(4, 5, 512*1024*statistics.RegionHeartBeatReportInterval, 6, 4)
+	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*1024*statistics.RegionHeartBeatReportInterval, 4, 5)
 	// We can find that the leader of all hot regions are on store 1,
 	// so one of the leader will transfer to another store.
 	op = hb.Schedule(tc)
@@ -972,20 +973,20 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	//|     1     |       1      |        2       |       3        |      512KB    |
 	//|     2     |       2      |        1       |       3        |      512KB    |
 	//|     3     |       1      |        2       |       3        |      512KB    |
-	tc.AddLeaderRegionWithReadInfo(1, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithReadInfo(2, 2, 512*1024*schedule.RegionHeartBeatReportInterval, 1, 3)
-	tc.AddLeaderRegionWithReadInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithReadInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithReadInfo(2, 2, 512*1024*statistics.RegionHeartBeatReportInterval, 1, 3)
+	tc.AddLeaderRegionWithReadInfo(3, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
 	// lower than hot read flow rate, but higher than write flow rate
-	tc.AddLeaderRegionWithReadInfo(11, 1, 24*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithReadInfo(11, 1, 24*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
 	opt.HotRegionCacheHitsThreshold = 0
 	c.Assert(tc.IsRegionHot(1), IsTrue)
 	c.Assert(tc.IsRegionHot(11), IsFalse)
 	// check randomly pick hot region
-	r := tc.RandHotRegionFromStore(2, schedule.ReadFlow)
+	r := tc.RandHotRegionFromStore(2, statistics.ReadFlow)
 	c.Assert(r, NotNil)
 	c.Assert(r.GetID(), Equals, uint64(2))
 	// check hot items
-	stats := tc.HotCache.RegionStats(schedule.ReadFlow)
+	stats := tc.HotSpotCache.RegionStats(statistics.ReadFlow)
 	c.Assert(len(stats), Equals, 3)
 	for _, s := range stats {
 		c.Assert(s.FlowBytes, Equals, uint64(512*1024))
@@ -994,7 +995,7 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	// which is hot for store 1 is more larger than other stores.
 	testutil.CheckTransferLeader(c, hb.Schedule(tc)[0], schedule.OpHotRegion, 1, 3)
 	// assume handle the operator
-	tc.AddLeaderRegionWithReadInfo(3, 3, 512*1024*schedule.RegionHeartBeatReportInterval, 1, 2)
+	tc.AddLeaderRegionWithReadInfo(3, 3, 512*1024*statistics.RegionHeartBeatReportInterval, 1, 2)
 
 	// After transfer a hot region leader from store 1 to store 3
 	// the tree region leader will be evenly distributed in three stores
@@ -1003,8 +1004,8 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	tc.UpdateStorageReadBytes(3, 60*1024*1024)
 	tc.UpdateStorageReadBytes(4, 30*1024*1024)
 	tc.UpdateStorageReadBytes(5, 30*1024*1024)
-	tc.AddLeaderRegionWithReadInfo(4, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithReadInfo(5, 4, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 5)
+	tc.AddLeaderRegionWithReadInfo(4, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithReadInfo(5, 4, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 5)
 
 	// Now appear two read hot region in store 1 and 4
 	// We will Transfer peer from 1 to 5

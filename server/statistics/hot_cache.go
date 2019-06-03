@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package statistics
 
 import (
 	"math/rand"
@@ -19,6 +19,23 @@ import (
 
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
+)
+
+// Simulating is an option to overpass the impact of accelerated time. Should
+// only turned on by the simulator.
+var Simulating bool
+
+const (
+	// RegionHeartBeatReportInterval is the heartbeat report interval of a region.
+	RegionHeartBeatReportInterval = 60
+	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
+	StoreHeartBeatReportInterval = 10
+
+	statCacheMaxLen            = 1000
+	hotWriteRegionMinFlowRate  = 16 * 1024
+	hotReadRegionMinFlowRate   = 128 * 1024
+	minHotRegionReportInterval = 3
+	hotRegionAntiCount         = 1
 )
 
 // FlowKind is a identify Flow types.
@@ -36,7 +53,8 @@ type HotSpotCache struct {
 	readFlow  cache.Cache
 }
 
-func newHotSpotCache() *HotSpotCache {
+// NewHotSpotCache creates a new hot spot cache.
+func NewHotSpotCache() *HotSpotCache {
 	return &HotSpotCache{
 		writeFlow: cache.NewCache(statCacheMaxLen, cache.TwoQueueCache),
 		readFlow:  cache.NewCache(statCacheMaxLen, cache.TwoQueueCache),
@@ -219,7 +237,8 @@ func (w *HotSpotCache) CollectMetrics(stores *core.StoresInfo) {
 	hotCacheStatusGauge.WithLabelValues("hotThreshold", "read").Set(float64(threshold))
 }
 
-func (w *HotSpotCache) isRegionHot(id uint64, hotThreshold int) bool {
+// IsRegionHot checks if the region is hot.
+func (w *HotSpotCache) IsRegionHot(id uint64, hotThreshold int) bool {
 	if stat, ok := w.writeFlow.Peek(id); ok {
 		if stat.(*core.RegionStat).HotDegree >= hotThreshold {
 			return true

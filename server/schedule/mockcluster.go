@@ -24,6 +24,7 @@ import (
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -40,6 +41,7 @@ type MockCluster struct {
 	*BasicCluster
 	*core.MockIDAllocator
 	*MockSchedulerOptions
+	*statistics.HotSpotCache
 	ID uint64
 }
 
@@ -49,6 +51,7 @@ func NewMockCluster(opt *MockSchedulerOptions) *MockCluster {
 		BasicCluster:         NewBasicCluster(),
 		MockIDAllocator:      core.NewMockIDAllocator(),
 		MockSchedulerOptions: opt,
+		HotSpotCache:         statistics.NewHotSpotCache(),
 	}
 }
 
@@ -73,14 +76,24 @@ func (mc *MockCluster) GetStoreRegionCount(storeID uint64) int {
 	return mc.Regions.GetStoreRegionCount(storeID)
 }
 
-// IsRegionHot checks if the region is hot
+// IsRegionHot checks if the region is hot.
 func (mc *MockCluster) IsRegionHot(id uint64) bool {
-	return mc.BasicCluster.IsRegionHot(id, mc.GetHotRegionCacheHitsThreshold())
+	return mc.HotSpotCache.IsRegionHot(id, mc.GetHotRegionCacheHitsThreshold())
+}
+
+// RegionReadStats returns hot region's read stats.
+func (mc *MockCluster) RegionReadStats() []*core.RegionStat {
+	return mc.HotSpotCache.RegionStats(statistics.ReadFlow)
+}
+
+// RegionWriteStats returns hot region's write stats.
+func (mc *MockCluster) RegionWriteStats() []*core.RegionStat {
+	return mc.HotSpotCache.RegionStats(statistics.WriteFlow)
 }
 
 // RandHotRegionFromStore random picks a hot region in specify store.
-func (mc *MockCluster) RandHotRegionFromStore(store uint64, kind FlowKind) *core.RegionInfo {
-	r := mc.HotCache.RandHotRegionFromStore(store, kind, mc.GetHotRegionCacheHitsThreshold())
+func (mc *MockCluster) RandHotRegionFromStore(store uint64, kind statistics.FlowKind) *core.RegionInfo {
+	r := mc.HotSpotCache.RandHotRegionFromStore(store, kind, mc.GetHotRegionCacheHitsThreshold())
 	if r == nil {
 		return nil
 	}
@@ -223,9 +236,9 @@ func (mc *MockCluster) AddLeaderRegionWithRange(regionID uint64, startKey string
 func (mc *MockCluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetReadBytes(readBytes))
-	isUpdate, item := mc.BasicCluster.CheckReadStatus(r)
+	isUpdate, item := mc.HotSpotCache.CheckRead(r, mc.Stores)
 	if isUpdate {
-		mc.HotCache.Update(regionID, item, ReadFlow)
+		mc.HotSpotCache.Update(regionID, item, statistics.ReadFlow)
 	}
 	mc.PutRegion(r)
 }
@@ -234,9 +247,9 @@ func (mc *MockCluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uin
 func (mc *MockCluster) AddLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
-	isUpdate, item := mc.BasicCluster.CheckWriteStatus(r)
+	isUpdate, item := mc.HotSpotCache.CheckWrite(r, mc.Stores)
 	if isUpdate {
-		mc.HotCache.Update(regionID, item, WriteFlow)
+		mc.HotSpotCache.Update(regionID, item, statistics.WriteFlow)
 	}
 	mc.PutRegion(r)
 }
@@ -332,7 +345,7 @@ func (mc *MockCluster) UpdateStorageWrittenBytes(storeID uint64, bytesWritten ui
 	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
 	newStats.BytesWritten = bytesWritten
 	now := time.Now().Second()
-	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - storeHeartBeatReportInterval), EndTimestamp: uint64(now)}
+	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
 	newStats.Interval = interval
 	newStore := store.Clone(core.SetStoreStats(newStats))
 	mc.PutStore(newStore)
@@ -344,7 +357,7 @@ func (mc *MockCluster) UpdateStorageReadBytes(storeID uint64, bytesRead uint64) 
 	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
 	newStats.BytesRead = bytesRead
 	now := time.Now().Second()
-	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - storeHeartBeatReportInterval), EndTimestamp: uint64(now)}
+	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
 	newStats.Interval = interval
 	newStore := store.Clone(core.SetStoreStats(newStats))
 	mc.PutStore(newStore)
