@@ -65,6 +65,7 @@ type RaftCluster struct {
 // ClusterStatus saves some state information
 type ClusterStatus struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
+	IsInitialized     bool      `json:"is_initialized"`
 }
 
 func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
@@ -78,18 +79,43 @@ func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 }
 
 func (c *RaftCluster) loadClusterStatus() (*ClusterStatus, error) {
-	data, err := c.s.kv.Load((c.s.kv.ClusterStatePath("raft_bootstrap_time")))
+	bootstrapTime, err := c.loadBootstrapTime()
 	if err != nil {
 		return nil, err
 	}
-	if len(data) == 0 {
-		return &ClusterStatus{}, nil
+	var isInitialized bool
+	if bootstrapTime != zeroTime {
+		isInitialized = c.isInitialized()
 	}
-	t, err := parseTimestamp([]byte(data))
+	return &ClusterStatus{
+		RaftBootstrapTime: bootstrapTime,
+		IsInitialized:     isInitialized,
+	}, nil
+}
+
+func (c *RaftCluster) isInitialized() bool {
+	if c.cachedCluster.getRegionCount() > 1 {
+		return true
+	}
+	region := c.cachedCluster.searchRegion(nil)
+	return region != nil &&
+		len(region.GetVoters()) >= int(c.s.GetReplicationConfig().MaxReplicas) &&
+		len(region.GetPendingPeers()) == 0
+}
+
+// loadBootstrapTime loads the saved bootstrap time from etcd. It returns zero
+// value of time.Time when there is error or the cluster is not bootstrapped
+// yet.
+func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
+	var t time.Time
+	data, err := c.s.kv.Load(c.s.kv.ClusterStatePath("raft_bootstrap_time"))
 	if err != nil {
-		return nil, err
+		return t, err
 	}
-	return &ClusterStatus{RaftBootstrapTime: t}, nil
+	if data == "" {
+		return t, nil
+	}
+	return parseTimestamp([]byte(data))
 }
 
 func (c *RaftCluster) start() error {
