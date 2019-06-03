@@ -103,14 +103,17 @@ func (c *RaftCluster) isInitialized() bool {
 		len(region.GetPendingPeers()) == 0
 }
 
-func (c *RaftCluster) loadBootstrapTime() (t time.Time, err error) {
-	var data string
-	data, err = c.s.kv.Load(c.s.kv.ClusterStatePath("raft_bootstrap_time"))
+// loadBootstrapTime loads the saved bootstrap time from etcd. It returns zero
+// value of time.Time when there is error or the cluster is not bootstrapped
+// yet.
+func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
+	var t time.Time
+	data, err := c.s.kv.Load(c.s.kv.ClusterStatePath("raft_bootstrap_time"))
 	if err != nil {
-		return
+		return t, err
 	}
-	if len(data) == 0 {
-		return
+	if data == "" {
+		return t, nil
 	}
 	return parseTimestamp([]byte(data))
 }
