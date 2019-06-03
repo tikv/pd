@@ -14,14 +14,18 @@
 package api
 
 import (
+	"context"
 	"fmt"
+	"strings"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 )
 
 var _ = Suite(&testLabelsStoreSuite{})
+var _ = Suite(&testStrictlyLabelsStoreSuite{})
 
 type testLabelsStoreSuite struct {
 	svr       *server.Server
@@ -102,7 +106,7 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 		},
 	}
 
-	s.svr, s.cleanup = mustNewServer(c)
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *server.Config) { cfg.Replication.StrictlyMatchLabel = false })
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
@@ -169,4 +173,108 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 	}
 	_, err := newStoresLabelFilter("test", ".[test")
 	c.Assert(err, NotNil)
+}
+
+type testStrictlyLabelsStoreSuite struct {
+	svr       *server.Server
+	cleanup   cleanUpFunc
+	urlPrefix string
+}
+
+func (s *testStrictlyLabelsStoreSuite) SetUpSuite(c *C) {
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *server.Config) {
+		cfg.Replication.LocationLabels = []string{"zone", "disk"}
+		cfg.Replication.StrictlyMatchLabel = true
+	})
+	mustWaitLeader(c, []*server.Server{s.svr})
+
+	addr := s.svr.GetAddr()
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+
+	mustBootstrapCluster(c, s.svr)
+}
+
+func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
+	cases := []struct {
+		store       *metapb.Store
+		valid       bool
+		expectError string
+	}{
+		{
+			store: &metapb.Store{
+				Id:      1,
+				Address: "tikv1",
+				State:   metapb.StoreState_Up,
+				Labels: []*metapb.StoreLabel{
+					{
+						Key:   "zone",
+						Value: "us-west-1",
+					},
+					{
+						Key:   "disk",
+						Value: "ssd",
+					},
+				},
+				Version: "3.0.0",
+			},
+			valid: true,
+		},
+		{
+			store: &metapb.Store{
+				Id:      2,
+				Address: "tikv2",
+				State:   metapb.StoreState_Up,
+				Labels:  []*metapb.StoreLabel{},
+				Version: "3.0.0",
+			},
+			valid:       false,
+			expectError: "label configuration is incorrect",
+		},
+		{
+			store: &metapb.Store{
+				Id:      2,
+				Address: "tikv2",
+				State:   metapb.StoreState_Up,
+				Labels: []*metapb.StoreLabel{
+					{
+						Key:   "zone",
+						Value: "cn-beijing-1",
+					},
+					{
+						Key:   "disk",
+						Value: "ssd",
+					},
+					{
+						Key:   "other",
+						Value: "unknown",
+					},
+				},
+				Version: "3.0.0",
+			},
+			valid:       false,
+			expectError: "key matching the label was not found",
+		},
+	}
+
+	for _, t := range cases {
+		_, err := s.svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
+			Store: &metapb.Store{
+				Id:      t.store.Id,
+				Address: fmt.Sprintf("tikv%d", t.store.Id),
+				State:   t.store.State,
+				Labels:  t.store.Labels,
+				Version: t.store.Version,
+			},
+		})
+		if t.valid {
+			c.Assert(err, IsNil)
+		} else {
+			c.Assert(strings.Contains(err.Error(), t.expectError), IsTrue)
+		}
+	}
+}
+
+func (s *testStrictlyLabelsStoreSuite) TearDownSuite(c *C) {
+	s.cleanup()
 }
