@@ -530,7 +530,9 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 	var kind OperatorKind
 
 	sourcePeers := source.GetPeers()
+	sourcePeers = append(sourcePeers, source.GetSlavePeers()...)
 	targetPeers := target.GetPeers()
+	targetPeers = append(targetPeers, target.GetSlavePeers()...)
 
 	// make sure the peer count is same
 	if len(sourcePeers) != len(targetPeers) {
