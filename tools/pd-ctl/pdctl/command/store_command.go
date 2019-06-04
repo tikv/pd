@@ -228,6 +228,7 @@ func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 	for _, store := range storeInfo.Stores {
 		if store.Store.Address == addr {
 			id = store.Store.ID
+			break
 		}
 	}
 
