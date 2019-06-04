@@ -221,6 +221,7 @@ func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 	}{}
 	if err = json.Unmarshal([]byte(r), &storeInfo); err != nil {
 		cmd.Printf("Failed to parse store info: %s\n", err)
+		return
 	}
 
 	// filter by the addr
