@@ -16,7 +16,6 @@ package command
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"path"
 	"strconv"
@@ -200,10 +199,7 @@ func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	addr := args[0]
-	if _, _, err := net.SplitHostPort(addr); err != nil {
-		cmd.Printf("invalid address: %v\n", err)
-		return
-	}
+
 	// fetch all the stores
 	r, err := doRequest(cmd, storesPrefix, http.MethodGet)
 	if err != nil {
