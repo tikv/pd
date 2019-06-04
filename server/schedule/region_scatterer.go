@@ -160,7 +160,7 @@ func (r *RegionScatterer) createOperator(origin *core.RegionInfo, replacedPeers,
 
 	// Creates the first step
 	if _, ok := originStoreIDs[targetLeaderPeer.GetStoreId()]; !ok {
-		st := CreateAddPeerSteps(targetLeaderPeer.GetStoreId(), targetLeaderPeer.GetId(), r.cluster)
+		st := CreateAddLightPeerSteps(targetLeaderPeer.GetStoreId(), targetLeaderPeer.GetId(), r.cluster)
 		steps = append(steps, st...)
 		// Do not transfer leader to the newly added peer
 		// Ref: https://github.com/tikv/tikv/issues/3819
@@ -184,13 +184,13 @@ func (r *RegionScatterer) createOperator(origin *core.RegionInfo, replacedPeers,
 			continue
 		}
 		if replacedPeers[j].GetStoreId() == originLeaderStoreID {
-			st := CreateAddPeerSteps(peer.GetStoreId(), peer.GetId(), r.cluster)
+			st := CreateAddLightPeerSteps(peer.GetStoreId(), peer.GetId(), r.cluster)
 			st = append(st, RemovePeer{FromStore: replacedPeers[j].GetStoreId()})
 			deferSteps = append(deferSteps, st...)
 			kind |= OpRegion | OpLeader
 			continue
 		}
-		st := CreateAddPeerSteps(peer.GetStoreId(), peer.GetId(), r.cluster)
+		st := CreateAddLightPeerSteps(peer.GetStoreId(), peer.GetId(), r.cluster)
 		steps = append(steps, st...)
 		steps = append(steps, RemovePeer{FromStore: replacedPeers[j].GetStoreId()})
 		kind |= OpRegion

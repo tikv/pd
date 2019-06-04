@@ -338,7 +338,38 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			},
 		}
 		oc.hbStreams.SendMsg(region, cmd)
+	case AddLightPeer:
+		if region.GetStorePeer(st.ToStore) != nil {
+			// The newly added peer is pending.
+			return
+		}
+		cmd := &pdpb.RegionHeartbeatResponse{
+			ChangePeer: &pdpb.ChangePeer{
+				ChangeType: eraftpb.ConfChangeType_AddNode,
+				Peer: &metapb.Peer{
+					Id:      st.PeerID,
+					StoreId: st.ToStore,
+				},
+			},
+		}
+		oc.hbStreams.SendMsg(region, cmd)
 	case AddLearner:
+		if region.GetStorePeer(st.ToStore) != nil {
+			// The newly added peer is pending.
+			return
+		}
+		cmd := &pdpb.RegionHeartbeatResponse{
+			ChangePeer: &pdpb.ChangePeer{
+				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
+				Peer: &metapb.Peer{
+					Id:        st.PeerID,
+					StoreId:   st.ToStore,
+					IsLearner: true,
+				},
+			},
+		}
+		oc.hbStreams.SendMsg(region, cmd)
+	case AddLightLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return

@@ -60,7 +60,7 @@ func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
 	return region.GetLeader().GetStoreId() == tl.ToStore
 }
 
-// Influence calculates the store difference that current step make
+// Influence calculates the store difference that current step makes.
 func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(tl.FromStore)
 	to := opInfluence.GetStoreInfluence(tl.ToStore)
@@ -92,7 +92,7 @@ func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// Influence calculates the store difference that current step make
+// Influence calculates the store difference that current step makes.
 func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(ap.ToStore)
 
@@ -122,7 +122,7 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// Influence calculates the store difference that current step make
+// Influence calculates the store difference that current step makes.
 func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(al.ToStore)
 
@@ -151,7 +151,7 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// Influence calculates the store difference that current step make
+// Influence calculates the store difference that current step makes.
 func (pl PromoteLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
 
 // RemovePeer is an OperatorStep that removes a region peer.
@@ -168,7 +168,7 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 	return region.GetStorePeer(rp.FromStore) == nil
 }
 
-// Influence calculates the store difference that current step make
+// Influence calculates the store difference that current step makes.
 func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(rp.FromStore)
 
@@ -183,9 +183,9 @@ type MergeRegion struct {
 	// there are two regions involved in merge process,
 	// so to keep them from other scheduler,
 	// both of them should add MerRegion operatorStep.
-	// But actually, tikv just need the region want to be merged to get the merge request,
+	// But actually, TiKV just needs the region want to be merged to get the merge request,
 	// thus use a IsPassive mark to indicate that
-	// this region doesn't need to send merge request to tikv.
+	// this region doesn't need to send merge request to TiKV.
 	IsPassive bool
 }
 
@@ -193,7 +193,7 @@ func (mr MergeRegion) String() string {
 	return fmt.Sprintf("merge region %v into region %v", mr.FromRegion.GetId(), mr.ToRegion.GetId())
 }
 
-// IsFinish checks if current step is finished
+// IsFinish checks if current step is finished.
 func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 	if mr.IsPassive {
 		return !bytes.Equal(region.GetStartKey(), mr.ToRegion.StartKey) || !bytes.Equal(region.GetEndKey(), mr.ToRegion.EndKey)
@@ -201,7 +201,7 @@ func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// Influence calculates the store difference that current step make
+// Influence calculates the store difference that current step makes.
 func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	if mr.IsPassive {
 		for _, p := range region.GetPeers() {
@@ -229,7 +229,7 @@ func (sr SplitRegion) IsFinish(region *core.RegionInfo) bool {
 	return !bytes.Equal(region.GetStartKey(), sr.StartKey) || !bytes.Equal(region.GetEndKey(), sr.EndKey)
 }
 
-// Influence calculates the store difference that current step make.
+// Influence calculates the store difference that current step makes.
 func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	for _, p := range region.GetPeers() {
 		inf := opInfluence.GetStoreInfluence(p.GetStoreId())
@@ -238,6 +238,64 @@ func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 			inf.LeaderCount++
 		}
 	}
+}
+
+// AddLightPeer is an OperatorStep that adds a region peer without considering the influence.
+type AddLightPeer struct {
+	ToStore, PeerID uint64
+}
+
+func (ap AddLightPeer) String() string {
+	return fmt.Sprintf("add peer %v on store %v", ap.PeerID, ap.ToStore)
+}
+
+// IsFinish checks if current step is finished.
+func (ap AddLightPeer) IsFinish(region *core.RegionInfo) bool {
+	if p := region.GetStoreVoter(ap.ToStore); p != nil {
+		if p.GetId() != ap.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", ap.String()), zap.Uint64("obtain-voter", p.GetId()))
+			return false
+		}
+		return region.GetPendingVoter(p.GetId()) == nil
+	}
+	return false
+}
+
+// Influence calculates the store difference that current step makes.
+func (ap AddLightPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+	to := opInfluence.GetStoreInfluence(ap.ToStore)
+
+	to.RegionSize += region.GetApproximateSize()
+	to.RegionCount++
+}
+
+// AddLightLearner is an OperatorStep that adds a region learner peer without considering the influence.
+type AddLightLearner struct {
+	ToStore, PeerID uint64
+}
+
+func (al AddLightLearner) String() string {
+	return fmt.Sprintf("add learner peer %v on store %v", al.PeerID, al.ToStore)
+}
+
+// IsFinish checks if current step is finished.
+func (al AddLightLearner) IsFinish(region *core.RegionInfo) bool {
+	if p := region.GetStoreLearner(al.ToStore); p != nil {
+		if p.GetId() != al.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", p.GetId()))
+			return false
+		}
+		return region.GetPendingLearner(p.GetId()) == nil
+	}
+	return false
+}
+
+// Influence calculates the store difference that current step makes.
+func (al AddLightLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+	to := opInfluence.GetStoreInfluence(al.ToStore)
+
+	to.RegionSize += region.GetApproximateSize()
+	to.RegionCount++
 }
 
 // Operator contains execution steps generated by scheduler.
@@ -278,7 +336,7 @@ func (o *Operator) String() string {
 	return s
 }
 
-// MarshalJSON serialize custom types to JSON
+// MarshalJSON serializes custom types to JSON.
 func (o *Operator) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + o.String() + `"`), nil
 }
@@ -347,12 +405,12 @@ func (o *Operator) Check(region *core.RegionInfo) OperatorStep {
 	return nil
 }
 
-// SetPriorityLevel set the priority level for operator
+// SetPriorityLevel sets the priority level for operator.
 func (o *Operator) SetPriorityLevel(level core.PriorityLevel) {
 	o.level = level
 }
 
-// GetPriorityLevel get the priority level
+// GetPriorityLevel gets the priority level.
 func (o *Operator) GetPriorityLevel() core.PriorityLevel {
 	return o.level
 }
@@ -379,7 +437,7 @@ func (o *Operator) IsTimeout() bool {
 	return false
 }
 
-// UnfinishedInfluence calculates the store difference which unfinished operator steps make
+// UnfinishedInfluence calculates the store difference which unfinished operator steps make.
 func (o *Operator) UnfinishedInfluence(opInfluence OpInfluence, region *core.RegionInfo) {
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if !o.steps[int(step)].IsFinish(region) {
@@ -388,7 +446,7 @@ func (o *Operator) UnfinishedInfluence(opInfluence OpInfluence, region *core.Reg
 	}
 }
 
-// TotalInfluence calculates the store difference which whole operator steps make
+// TotalInfluence calculates the store difference which whole operator steps make.
 func (o *Operator) TotalInfluence(opInfluence OpInfluence, region *core.RegionInfo) {
 	for step := 0; step < len(o.steps); step++ {
 		o.steps[int(step)].Influence(opInfluence, region)
@@ -418,7 +476,11 @@ func (o *Operator) History() []OperatorHistory {
 			})
 		case AddPeer:
 			addPeerStores = append(addPeerStores, s.ToStore)
+		case AddLightPeer:
+			addPeerStores = append(addPeerStores, s.ToStore)
 		case AddLearner:
+			addPeerStores = append(addPeerStores, s.ToStore)
+		case AddLightLearner:
 			addPeerStores = append(addPeerStores, s.ToStore)
 		case RemovePeer:
 			removePeerStores = append(removePeerStores, s.FromStore)
@@ -437,7 +499,7 @@ func (o *Operator) History() []OperatorHistory {
 	return histories
 }
 
-// CreateRemovePeerOperator creates an Operator that removes a peer from region.
+// CreateRemovePeerOperator creates an operator that removes a peer from region.
 func CreateRemovePeerOperator(desc string, cluster Cluster, kind OperatorKind, region *core.RegionInfo, storeID uint64) (*Operator, error) {
 	removeKind, steps, err := removePeerSteps(cluster, region, storeID, getRegionFollowerIDs(region))
 	if err != nil {
@@ -446,7 +508,7 @@ func CreateRemovePeerOperator(desc string, cluster Cluster, kind OperatorKind, r
 	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), removeKind|kind, steps...), nil
 }
 
-// CreateAddPeerSteps creates an OperatorStep list that add a new Peer.
+// CreateAddPeerSteps creates an OperatorStep list that add a new peer.
 func CreateAddPeerSteps(newStore uint64, peerID uint64, cluster Cluster) []OperatorStep {
 	var st []OperatorStep
 	if cluster.IsRaftLearnerEnabled() {
@@ -462,7 +524,23 @@ func CreateAddPeerSteps(newStore uint64, peerID uint64, cluster Cluster) []Opera
 	return st
 }
 
-// CreateMovePeerOperator creates an Operator that replaces an old peer with a new peer.
+// CreateAddLightPeerSteps creates an OperatorStep list that add a new peer without considering the influence.
+func CreateAddLightPeerSteps(newStore uint64, peerID uint64, cluster Cluster) []OperatorStep {
+	var st []OperatorStep
+	if cluster.IsRaftLearnerEnabled() {
+		st = []OperatorStep{
+			AddLightLearner{ToStore: newStore, PeerID: peerID},
+			PromoteLearner{ToStore: newStore, PeerID: peerID},
+		}
+	} else {
+		st = []OperatorStep{
+			AddLightPeer{ToStore: newStore, PeerID: peerID},
+		}
+	}
+	return st
+}
+
+// CreateMovePeerOperator creates an operator that replaces an old peer with a new peer.
 func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OperatorKind, oldStore, newStore uint64, peerID uint64) (*Operator, error) {
 	removeKind, steps, err := removePeerSteps(cluster, region, oldStore, append(getRegionFollowerIDs(region), newStore))
 	if err != nil {
@@ -503,7 +581,7 @@ func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64, f
 	return
 }
 
-// CreateMergeRegionOperator creates an Operator that merge two region into one
+// CreateMergeRegionOperator creates an operator that merge two region into one.
 func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.RegionInfo, target *core.RegionInfo, kind OperatorKind) ([]*Operator, error) {
 	steps, kinds, err := matchPeerSteps(cluster, source, target)
 	if err != nil {

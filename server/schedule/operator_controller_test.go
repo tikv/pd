@@ -20,7 +20,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server/core"
 )
 
 var _ = Suite(&testOperatorControllerSuite{})
@@ -56,17 +55,10 @@ func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 	c.Assert(oc.GetOperator(2), NotNil)
 }
 
-type mockHeadbeatStream struct{}
-
-func (m mockHeadbeatStream) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
-	return
-}
-
 func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 	opt := NewMockSchedulerOptions()
 	tc := NewMockCluster(opt)
-	oc := NewOperatorController(tc, nil)
-	oc.hbStreams = mockHeadbeatStream{}
+	oc := NewOperatorController(tc, MockHeadbeatStream{})
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderRegion(1, 1, 2)
@@ -98,8 +90,7 @@ func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	opt := NewMockSchedulerOptions()
 	tc := NewMockCluster(opt)
-	oc := NewOperatorController(tc, nil)
-	oc.hbStreams = mockHeadbeatStream{}
+	oc := NewOperatorController(tc, MockHeadbeatStream{})
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderRegion(1, 1, 2)

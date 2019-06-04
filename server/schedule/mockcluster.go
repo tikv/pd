@@ -28,7 +28,15 @@ import (
 	"go.uber.org/zap"
 )
 
-// MockCluster is used to mock clusterInfo for test use
+// MockHeadbeatStream is used to mock HeadbeatStream for test use.
+type MockHeadbeatStream struct{}
+
+// SendMsg is used to send the message.
+func (m MockHeadbeatStream) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
+	return
+}
+
+// MockCluster is used to mock clusterInfo for test use.
 type MockCluster struct {
 	*BasicCluster
 	*core.MockIDAllocator
@@ -409,6 +417,15 @@ func (mc *MockCluster) ApplyOperatorStep(region *core.RegionInfo, op *Operator) 
 				StoreId: s.ToStore,
 			}
 			region = region.Clone(core.WithAddPeer(peer))
+		case AddLightPeer:
+			if region.GetStorePeer(s.ToStore) != nil {
+				panic("Add peer that exists")
+			}
+			peer := &metapb.Peer{
+				Id:      s.PeerID,
+				StoreId: s.ToStore,
+			}
+			region = region.Clone(core.WithAddPeer(peer))
 		case RemovePeer:
 			if region.GetStorePeer(s.FromStore) == nil {
 				panic("Remove peer that doesn't exist")
@@ -418,6 +435,16 @@ func (mc *MockCluster) ApplyOperatorStep(region *core.RegionInfo, op *Operator) 
 			}
 			region = region.Clone(core.WithRemoveStorePeer(s.FromStore))
 		case AddLearner:
+			if region.GetStorePeer(s.ToStore) != nil {
+				panic("Add learner that exists")
+			}
+			peer := &metapb.Peer{
+				Id:        s.PeerID,
+				StoreId:   s.ToStore,
+				IsLearner: true,
+			}
+			region = region.Clone(core.WithAddPeer(peer))
+		case AddLightLearner:
 			if region.GetStorePeer(s.ToStore) != nil {
 				panic("Add learner that exists")
 			}

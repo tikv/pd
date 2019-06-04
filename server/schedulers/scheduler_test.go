@@ -220,6 +220,34 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 	}
 }
 
+func (s *testScatterRegionSuite) TestStorelimit(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	tc := schedule.NewMockCluster(opt)
+	oc := schedule.NewOperatorController(tc, schedule.MockHeadbeatStream{})
+
+	// Add stores 1~6.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+
+	// Add regions 1~4.
+	seq := newSequencer(3)
+	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	for i := uint64(2); i <= 5; i++ {
+		tc.AddLeaderRegion(i, seq.next(), seq.next(), seq.next())
+	}
+
+	scatterer := schedule.NewRegionScatterer(tc, namespace.DefaultClassifier)
+
+	for i := uint64(1); i <= 5; i++ {
+		region := tc.GetRegion(i)
+		if op, _ := scatterer.Scatter(region); op != nil {
+			c.Assert(oc.AddOperator(op), IsTrue)
+		}
+	}
+}
+
 var _ = Suite(&testRejectLeaderSuite{})
 
 type testRejectLeaderSuite struct{}
