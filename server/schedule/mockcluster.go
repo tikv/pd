@@ -194,6 +194,13 @@ func (mc *MockCluster) AddLabelsStore(storeID uint64, regionCount int, labels ma
 	mc.PutStore(store)
 }
 
+// AddLeaderRegionWithLearner adds region with specified leader, followers and learners.
+func (mc *MockCluster) AddLeaderRegionWithLearner(regionID uint64, leaderID uint64, followerIds []uint64, learnerIds ...uint64) {
+	origin := mc.newMockRegionInfoWithLearner(regionID, leaderID, followerIds, learnerIds...)
+	region := origin.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
+	mc.PutRegion(region)
+}
+
 // AddLeaderRegion adds region with specified leader and followers.
 func (mc *MockCluster) AddLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
 	origin := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
@@ -378,6 +385,26 @@ func (mc *MockCluster) newMockRegionInfo(regionID uint64, leaderID uint64, follo
 		region.Peers = append(region.Peers, peer)
 	}
 
+	return core.NewRegionInfo(region, leader)
+}
+
+func (mc *MockCluster) newMockRegionInfoWithLearner(regionID uint64, leaderID uint64, followerIds []uint64, learnerIds ...uint64) *core.RegionInfo {
+	region := &metapb.Region{
+		Id:       regionID,
+		StartKey: []byte(fmt.Sprintf("%20d", regionID)),
+		EndKey:   []byte(fmt.Sprintf("%20d", regionID+1)),
+	}
+	leader, _ := mc.AllocPeer(leaderID)
+	region.Peers = []*metapb.Peer{leader}
+	for _, id := range followerIds {
+		peer, _ := mc.AllocPeer(id)
+		region.Peers = append(region.Peers, peer)
+	}
+	for _, id := range learnerIds {
+		peer, _ := mc.AllocPeer(id)
+		peer.IsLearner = true
+		region.Peers = append(region.Peers, peer)
+	}
 	return core.NewRegionInfo(region, leader)
 }
 

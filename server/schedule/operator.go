@@ -534,7 +534,7 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 
 	// make sure the peer count is same
 	if len(sourcePeers) != len(targetPeers) {
-		return nil, kind, errors.New("mismatch count of peer")
+		return nil, kind, fmt.Errorf("mismatch count of peer, source: %+v target: %+v", sourcePeers, targetPeers)
 	}
 
 	// There is a case that a follower is added and transfer leader to it,
@@ -550,6 +550,7 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 	for _, peer := range targetPeers {
 		storeID := peer.GetStoreId()
 		// find missing peers.
+		isLearner := peer.IsLearner
 		if _, found := intersection[storeID]; !found {
 			var addSteps []OperatorStep
 
@@ -558,11 +559,18 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 				log.Debug("peer alloc failed", zap.Error(err))
 				return nil, kind, err
 			}
+
 			if cluster.IsRaftLearnerEnabled() {
-				addSteps = append(addSteps,
-					AddLearner{ToStore: storeID, PeerID: peer.Id},
-					PromoteLearner{ToStore: storeID, PeerID: peer.Id},
-				)
+				if isLearner {
+					addSteps = append(addSteps,
+						AddLearner{ToStore: storeID, PeerID: peer.Id},
+					)
+				} else {
+					addSteps = append(addSteps,
+						AddLearner{ToStore: storeID, PeerID: peer.Id},
+						PromoteLearner{ToStore: storeID, PeerID: peer.Id},
+					)
+				}
 			} else {
 				addSteps = append(addSteps, AddPeer{ToStore: storeID, PeerID: peer.Id})
 			}

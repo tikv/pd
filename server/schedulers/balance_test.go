@@ -838,6 +838,30 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	c.Assert(mb.IsScheduleAllowed(tc), IsFalse)
 }
 
+func (s *testRandomMergeSchedulerSuite) TestMergeWithLearner(c *C) {
+	opt := schedule.NewMockSchedulerOptions()
+	opt.MergeScheduleLimit = 1
+	tc := schedule.NewMockCluster(opt)
+	hb := schedule.NewMockHeartbeatStreams(tc.ID)
+	oc := schedule.NewOperatorController(tc, hb)
+
+	mb, err := schedule.CreateScheduler("random-merge", oc)
+	c.Assert(err, IsNil)
+
+	tc.AddRegionStore(1, 4)
+	tc.AddLeaderRegionWithLearner(1, 1, []uint64{2}, 3)
+	tc.AddLeaderRegionWithLearner(2, 1, []uint64{2}, 4)
+
+	c.Assert(mb.IsScheduleAllowed(tc), IsTrue)
+	ops := mb.Schedule(tc)
+	c.Assert(ops, HasLen, 2)
+	c.Assert(ops[0].Kind()&schedule.OpMerge, Not(Equals), 0)
+	c.Assert(ops[1].Kind()&schedule.OpMerge, Not(Equals), 0)
+
+	oc.AddOperator(ops...)
+	c.Assert(mb.IsScheduleAllowed(tc), IsFalse)
+}
+
 var _ = Suite(&testBalanceHotWriteRegionSchedulerSuite{})
 
 type testBalanceHotWriteRegionSchedulerSuite struct{}

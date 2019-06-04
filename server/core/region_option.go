@@ -28,6 +28,13 @@ func HealthRegion() RegionOption {
 	}
 }
 
+// HealthRegion checks if the region is healthy allows learner.
+func HealthRegionAllowLearner() RegionOption {
+	return func(region *RegionInfo) bool {
+		return len(region.downPeers) == 0 && len(region.pendingPeers) == 0
+	}
+}
+
 // RegionCreateOption used to create region.
 type RegionCreateOption func(region *RegionInfo)
 
