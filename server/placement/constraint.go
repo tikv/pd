@@ -44,5 +44,5 @@ type Cluster interface {
 	GetRegion(id uint64) *core.RegionInfo
 	GetStores() []*core.StoreInfo
 	GetStore(id uint64) *core.StoreInfo
-	GetRegionStores(id uint64) []*core.StoreInfo
+	GetRegionStores(region *core.RegionInfo) []*core.StoreInfo
 }

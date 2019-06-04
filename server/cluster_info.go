@@ -24,15 +24,13 @@ import (
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
 type clusterInfo struct {
 	sync.RWMutex
-	core *schedule.BasicCluster
-
+	core            *core.BasicCluster
 	id              core.IDAllocator
 	kv              *core.KV
 	meta            *metapb.Cluster
@@ -48,7 +46,7 @@ var defaultChangedRegionsLimit = 10000
 
 func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clusterInfo {
 	return &clusterInfo{
-		core:            schedule.NewBasicCluster(),
+		core:            core.NewBasicCluster(),
 		id:              id,
 		opt:             opt,
 		kv:              kv,
@@ -680,7 +678,7 @@ func (c *clusterInfo) GetRegionStatsByType(typ regionStatisticType) []*core.Regi
 	return c.regionStats.getRegionStatsByType(typ)
 }
 
-func (c *clusterInfo) GetOpt() schedule.NamespaceOptions {
+func (c *clusterInfo) GetOpt() namespace.ScheduleOptions {
 	return c.opt
 }
 

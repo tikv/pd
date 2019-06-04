@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/mock"
 )
 
 func TestSchedule(t *testing.T) {
@@ -29,12 +30,12 @@ func TestSchedule(t *testing.T) {
 var _ = Suite(&testReplicationSuite{})
 
 type testReplicationSuite struct {
-	tc *MockCluster
+	tc *mock.Cluster
 }
 
 func (s *testReplicationSuite) SetUpSuite(c *C) {
-	opt := NewMockSchedulerOptions()
-	s.tc = NewMockCluster(opt)
+	opt := mock.NewScheduleOptions()
+	s.tc = mock.NewCluster(opt)
 }
 
 func (s *testReplicationSuite) TestDistinctScore(c *C) {

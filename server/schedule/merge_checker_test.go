@@ -19,22 +19,23 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/mock"
 	"github.com/pingcap/pd/server/namespace"
 )
 
 var _ = Suite(&testMergeCheckerSuite{})
 
 type testMergeCheckerSuite struct {
-	cluster *MockCluster
+	cluster *mock.Cluster
 	mc      *MergeChecker
 	regions []*core.RegionInfo
 }
 
 func (s *testMergeCheckerSuite) SetUpTest(c *C) {
-	cfg := NewMockSchedulerOptions()
+	cfg := mock.NewScheduleOptions()
 	cfg.MaxMergeRegionSize = 2
 	cfg.MaxMergeRegionKeys = 2
-	s.cluster = NewMockCluster(cfg)
+	s.cluster = mock.NewCluster(cfg)
 	s.regions = []*core.RegionInfo{
 		core.NewRegionInfo(
 			&metapb.Region{
@@ -103,7 +104,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 }
 
 func (s *testMergeCheckerSuite) TestBasic(c *C) {
-	s.cluster.MockSchedulerOptions.SplitMergeInterval = time.Hour
+	s.cluster.ScheduleOptions.SplitMergeInterval = time.Hour
 
 	// should with same peer count
 	ops := s.mc.Check(s.regions[0])

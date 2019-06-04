@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/mock"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 )
@@ -591,7 +592,7 @@ type testGetStoresSuite struct {
 func (s *testGetStoresSuite) SetUpSuite(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	s.cluster = newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
+	s.cluster = newClusterInfo(mock.NewIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
 
 	stores := newTestStores(200)
 

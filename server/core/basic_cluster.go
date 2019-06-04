@@ -11,44 +11,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
-
-import (
-	"github.com/pingcap/pd/server/core"
-)
+package core
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
-	Stores  *core.StoresInfo
-	Regions *core.RegionsInfo
+	Stores  *StoresInfo
+	Regions *RegionsInfo
 }
 
 // NewBasicCluster creates a BasicCluster.
 func NewBasicCluster() *BasicCluster {
 	return &BasicCluster{
-		Stores:  core.NewStoresInfo(),
-		Regions: core.NewRegionsInfo(),
+		Stores:  NewStoresInfo(),
+		Regions: NewRegionsInfo(),
 	}
 }
 
 // GetStores returns all Stores in the cluster.
-func (bc *BasicCluster) GetStores() []*core.StoreInfo {
+func (bc *BasicCluster) GetStores() []*StoreInfo {
 	return bc.Stores.GetStores()
 }
 
 // GetStore searches for a store by ID.
-func (bc *BasicCluster) GetStore(storeID uint64) *core.StoreInfo {
+func (bc *BasicCluster) GetStore(storeID uint64) *StoreInfo {
 	return bc.Stores.GetStore(storeID)
 }
 
 // GetRegion searches for a region by ID.
-func (bc *BasicCluster) GetRegion(regionID uint64) *core.RegionInfo {
+func (bc *BasicCluster) GetRegion(regionID uint64) *RegionInfo {
 	return bc.Regions.GetRegion(regionID)
 }
 
 // GetRegionStores returns all Stores that contains the region's peer.
-func (bc *BasicCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
-	var Stores []*core.StoreInfo
+func (bc *BasicCluster) GetRegionStores(region *RegionInfo) []*StoreInfo {
+	var Stores []*StoreInfo
 	for id := range region.GetStoreIds() {
 		if store := bc.Stores.GetStore(id); store != nil {
 			Stores = append(Stores, store)
@@ -58,8 +54,8 @@ func (bc *BasicCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreIn
 }
 
 // GetFollowerStores returns all Stores that contains the region's follower peer.
-func (bc *BasicCluster) GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo {
-	var Stores []*core.StoreInfo
+func (bc *BasicCluster) GetFollowerStores(region *RegionInfo) []*StoreInfo {
+	var Stores []*StoreInfo
 	for id := range region.GetFollowers() {
 		if store := bc.Stores.GetStore(id); store != nil {
 			Stores = append(Stores, store)
@@ -69,12 +65,12 @@ func (bc *BasicCluster) GetFollowerStores(region *core.RegionInfo) []*core.Store
 }
 
 // GetLeaderStore returns all Stores that contains the region's leader peer.
-func (bc *BasicCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
+func (bc *BasicCluster) GetLeaderStore(region *RegionInfo) *StoreInfo {
 	return bc.Stores.GetStore(region.GetLeader().GetStoreId())
 }
 
 // GetAdjacentRegions returns region's info that is adjacent with specific region
-func (bc *BasicCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo) {
+func (bc *BasicCluster) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo) {
 	return bc.Regions.GetAdjacentRegions(region)
 }
 
@@ -99,12 +95,12 @@ func (bc *BasicCluster) ResetStoreOverload(storeID uint64) {
 }
 
 // RandFollowerRegion returns a random region that has a follower on the store.
-func (bc *BasicCluster) RandFollowerRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
+func (bc *BasicCluster) RandFollowerRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
 	return bc.Regions.RandFollowerRegion(storeID, opts...)
 }
 
 // RandLeaderRegion returns a random region that has leader on the store.
-func (bc *BasicCluster) RandLeaderRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
+func (bc *BasicCluster) RandLeaderRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
 	return bc.Regions.RandLeaderRegion(storeID, opts...)
 }
 
@@ -114,16 +110,16 @@ func (bc *BasicCluster) GetAverageRegionSize() int64 {
 }
 
 // PutStore put a store
-func (bc *BasicCluster) PutStore(store *core.StoreInfo) {
+func (bc *BasicCluster) PutStore(store *StoreInfo) {
 	bc.Stores.SetStore(store)
 }
 
 // DeleteStore deletes a store
-func (bc *BasicCluster) DeleteStore(store *core.StoreInfo) {
+func (bc *BasicCluster) DeleteStore(store *StoreInfo) {
 	bc.Stores.DeleteStore(store)
 }
 
 // PutRegion put a region
-func (bc *BasicCluster) PutRegion(region *core.RegionInfo) {
+func (bc *BasicCluster) PutRegion(region *RegionInfo) {
 	bc.Regions.SetRegion(region)
 }
