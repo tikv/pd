@@ -14,8 +14,6 @@
 package schedulers
 
 import (
-	"math/rand"
-
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
@@ -71,10 +69,7 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*schedule.Op
 		return nil
 	}
 
-	target, other := cluster.GetAdjacentRegions(region)
-	if (rand.Int()%2 == 0 && other != nil) || target == nil {
-		target = other
-	}
+	_, target := cluster.GetAdjacentRegions(region)
 	if target == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_adjacent").Inc()
 		return nil

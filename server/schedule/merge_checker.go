@@ -98,13 +98,10 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*Operator {
 		return nil
 	}
 
-	var target *core.RegionInfo
-	prev, next := m.cluster.GetAdjacentRegions(region)
+	// Always merge left into right.
+	_, target := m.cluster.GetAdjacentRegions(region)
 
-	target = m.checkTarget(region, prev, target)
-	target = m.checkTarget(region, next, target)
-
-	if target == nil {
+	if !m.checkTarget(region, target) {
 		checkerCounter.WithLabelValues("merge_checker", "no_target").Inc()
 		return nil
 	}
@@ -118,18 +115,13 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*Operator {
 	return ops
 }
 
-func (m *MergeChecker) checkTarget(region, adjacent, target *core.RegionInfo) *core.RegionInfo {
+func (m *MergeChecker) checkTarget(region, target *core.RegionInfo) bool {
 	// if is not hot region and under same namespace
-	if adjacent != nil && !m.cluster.IsRegionHot(adjacent.GetID()) &&
-		m.classifier.AllowMerge(region, adjacent) &&
-		len(adjacent.GetDownPeers()) == 0 && len(adjacent.GetPendingPeers()) == 0 && len(adjacent.GetLearners()) == 0 {
-		// if both region is not hot, prefer the one with smaller size
-		if target == nil || target.GetApproximateSize() > adjacent.GetApproximateSize() {
-			// peer count should equal
-			if len(adjacent.GetPeers()) == m.cluster.GetMaxReplicas() {
-				target = adjacent
-			}
-		}
+	if target != nil && !m.cluster.IsRegionHot(target.GetID()) &&
+		m.classifier.AllowMerge(region, target) &&
+		len(target.GetDownPeers()) == 0 && len(target.GetPendingPeers()) == 0 && len(target.GetLearners()) == 0 {
+		// peer count should equal
+		return len(target.GetPeers()) == m.cluster.GetMaxReplicas()
 	}
-	return target
+	return false
 }
