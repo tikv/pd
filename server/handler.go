@@ -16,12 +16,10 @@ package server
 import (
 	"bytes"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
@@ -398,13 +396,13 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 	if region == nil {
 		return ErrRegionNotFound(regionID)
 	}
+
 	newLeader := region.GetStoreVoter(storeID)
 	if newLeader == nil {
 		return errors.Errorf("region has no voter in store %v", storeID)
 	}
 
-	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: newLeader.GetStoreId()}
-	op := schedule.NewOperator("admin-transfer-leader", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpLeader, step)
+	op := schedule.CreateTransferLeaderOperator("admin-transfer-leader", region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), schedule.OpAdmin)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -423,43 +421,24 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		return ErrRegionNotFound(regionID)
 	}
 
-	var steps []schedule.OperatorStep
+	if len(storeIDs) > c.cluster.GetMaxReplicas() {
+		return errors.Errorf("the number of stores is %v, beyond the max replicas", len(storeIDs))
+	}
 
-	// Add missing peers.
 	for id := range storeIDs {
 		store := c.cluster.GetStore(id)
 		if store == nil {
 			return core.NewStoreNotFoundErr(id)
 		}
-		if region.GetStorePeer(id) != nil {
-			continue
-		}
 		if store.IsTombstone() {
 			return errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: id})
 		}
-		peer, err := c.cluster.AllocPeer(id)
-		if err != nil {
-			return err
-		}
-		if c.cluster.IsRaftLearnerEnabled() {
-			steps = append(steps,
-				schedule.AddLearner{ToStore: id, PeerID: peer.Id},
-				schedule.PromoteLearner{ToStore: id, PeerID: peer.Id},
-			)
-		} else {
-			steps = append(steps, schedule.AddPeer{ToStore: id, PeerID: peer.Id})
-		}
 	}
 
-	// Remove redundant peers.
-	for _, peer := range region.GetPeers() {
-		if _, ok := storeIDs[peer.GetStoreId()]; ok {
-			continue
-		}
-		steps = append(steps, schedule.RemovePeer{FromStore: peer.GetStoreId()})
+	op, err := schedule.CreateMoveRegionOperator("admin-move-region", c.cluster, region, schedule.OpAdmin, storeIDs)
+	if err != nil {
+		return err
 	}
-
-	op := schedule.NewOperator("admin-move-region", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -545,18 +524,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		return err
 	}
 
-	var steps []schedule.OperatorStep
-	if c.cluster.IsRaftLearnerEnabled() {
-		steps = []schedule.OperatorStep{
-			schedule.AddLearner{ToStore: toStoreID, PeerID: newPeer.GetId()},
-			schedule.PromoteLearner{ToStore: toStoreID, PeerID: newPeer.GetId()},
-		}
-	} else {
-		steps = []schedule.OperatorStep{
-			schedule.AddPeer{ToStore: toStoreID, PeerID: newPeer.GetId()},
-		}
-	}
-	op := schedule.NewOperator("admin-add-peer", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
+	op := schedule.CreateAddPeerOperator("admin-add-peer", c.cluster, region, newPeer.GetId(), toStoreID, schedule.OpAdmin)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -579,10 +547,7 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 		return err
 	}
 
-	steps := []schedule.OperatorStep{
-		schedule.AddLearner{ToStore: toStoreID, PeerID: newPeer.GetId()},
-	}
-	op := schedule.NewOperator("admin-add-peer", regionID, region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpRegion, steps...)
+	op := schedule.CreateAddLearnerOperator("admin-add-learner", c.cluster, region, newPeer.GetId(), toStoreID, schedule.OpAdmin)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -670,12 +635,7 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policy string) error {
 		return ErrRegionNotFound(regionID)
 	}
 
-	step := schedule.SplitRegion{
-		StartKey: region.GetStartKey(),
-		EndKey:   region.GetEndKey(),
-		Policy:   pdpb.CheckPolicy(pdpb.CheckPolicy_value[strings.ToUpper(policy)]),
-	}
-	op := schedule.NewOperator("admin-split-region", regionID, region.GetRegionEpoch(), schedule.OpAdmin, step)
+	op := schedule.CreateSplitRegionOperator("admin-split-region", region, schedule.OpAdmin, policy)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}

@@ -158,11 +158,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 		if region.GetPendingLearner(p.GetId()) != nil {
 			continue
 		}
-		step := schedule.PromoteLearner{
-			ToStore: p.GetStoreId(),
-			PeerID:  p.GetId(),
-		}
-		op := schedule.NewOperator("promote-learner", region.GetID(), region.GetRegionEpoch(), schedule.OpRegion, step)
+		op := schedule.CreatePromoteLearnerOperator("promote-learner", region, p)
 		if opController.AddOperator(op) {
 			return true
 		}
