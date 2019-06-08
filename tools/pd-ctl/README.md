@@ -13,11 +13,11 @@ pd-ctl is a command line tool for PD, pd-ctl obtains the state information of th
 
 Single-command mode:
 
-    ./pd-ctl store -d -u http://127.0.0.1:2379
+    ./pd-ctl store -u http://127.0.0.1:2379
 
 Interactive mode:
 
-    ./pd-ctl -u http://127.0.0.1:2379
+    ./pd-ctl -i -u http://127.0.0.1:2379
 
 Use environment variables:
 
@@ -40,9 +40,9 @@ Use TLS to encrypt:
 + Default address: http://127.0.0.1:2379
 + Environment variable: PD_ADDR
 
-### \-\-detach,-d
+### \-\-interact,-i
 
-+ Use single command line mode (not entering readline)
++ Use interactive mode (entering readline)
 + Default: false
 
 ### --cacert
