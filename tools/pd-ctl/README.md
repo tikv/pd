@@ -40,6 +40,11 @@ Use TLS to encrypt:
 + Default address: http://127.0.0.1:2379
 + Environment variable: PD_ADDR
 
+### \-\-detach,-d
+
++ Use single command line mode (not entering readline)
++ Default: true
+
 ### \-\-interact,-i
 
 + Use interactive mode (entering readline)
