@@ -16,10 +16,8 @@ package placement
 import (
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
-
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/mock"
 )
 
 func TestPlacement(t *testing.T) {
@@ -98,11 +96,12 @@ func (s *testPlacementSuite) config(constraints ...*Constraint) *Config {
 }
 
 func (s *testPlacementSuite) TestFunctions(c *C) {
-	cluster := newMockCluster()
-	cluster.PutStore(1, "zone", "z1", "host", "h1", "disk", "ssd")
-	cluster.PutStore(2, "zone", "z1", "host", "h1", "disk", "ssd")
-	cluster.PutStore(3, "zone", "z1", "host", "h2", "disk", "hdd")
-	cluster.PutStore(4, "zone", "z2", "host", "h1", "disk", "ssd")
+	opt := mock.NewScheduleOptions()
+	cluster := mock.NewCluster(opt)
+	cluster.PutStoreWithLabels(1, "zone", "z1", "host", "h1", "disk", "ssd")
+	cluster.PutStoreWithLabels(2, "zone", "z1", "host", "h1", "disk", "ssd")
+	cluster.PutStoreWithLabels(3, "zone", "z1", "host", "h2", "disk", "hdd")
+	cluster.PutStoreWithLabels(4, "zone", "z2", "host", "h1", "disk", "ssd")
 
 	cases := []struct {
 		config       string
@@ -141,17 +140,18 @@ func (s *testPlacementSuite) TestFunctions(c *C) {
 	for _, t := range cases {
 		constraint, err := parseConstraint(t.config)
 		c.Assert(err, IsNil)
-		cluster.PutRegion(1, t.regionStores...)
+		cluster.PutRegionStores(1, t.regionStores...)
 		c.Assert(constraint.Score(cluster.GetRegion(1), cluster), Equals, 0)
 	}
 }
 
 func (s *testPlacementSuite) TestScore(c *C) {
-	cluster := newMockCluster()
-	cluster.PutStore(1)
-	cluster.PutStore(2)
-	cluster.PutStore(3)
-	cluster.PutRegion(1, 1, 2, 3)
+	opt := mock.NewScheduleOptions()
+	cluster := mock.NewCluster(opt)
+	cluster.PutStoreWithLabels(1)
+	cluster.PutStoreWithLabels(2)
+	cluster.PutStoreWithLabels(3)
+	cluster.PutRegionStores(1, 1, 2, 3)
 
 	cases := []struct {
 		config string
@@ -193,63 +193,4 @@ func (s *testPlacementSuite) TestScore(c *C) {
 		c.Assert(err, IsNil)
 		c.Assert(constraint.Score(cluster.GetRegion(1), cluster), Equals, t.score)
 	}
-}
-
-type mockCluster struct {
-	regions map[uint64]*core.RegionInfo
-	stores  map[uint64]*core.StoreInfo
-}
-
-func newMockCluster() *mockCluster {
-	return &mockCluster{
-		regions: make(map[uint64]*core.RegionInfo),
-		stores:  make(map[uint64]*core.StoreInfo),
-	}
-}
-
-func (c *mockCluster) GetRegion(id uint64) *core.RegionInfo {
-	return c.regions[id]
-}
-
-func (c *mockCluster) GetStores() []*core.StoreInfo {
-	stores := make([]*core.StoreInfo, 0, len(c.stores))
-	for _, s := range c.stores {
-		stores = append(stores, s)
-	}
-	return stores
-}
-
-func (c *mockCluster) GetStore(id uint64) *core.StoreInfo {
-	return c.stores[id]
-}
-
-func (c *mockCluster) GetRegionStores(id uint64) []*core.StoreInfo {
-	region := c.GetRegion(id)
-	if region == nil {
-		return nil
-	}
-	stores := make([]*core.StoreInfo, 0, len(region.GetPeers()))
-	for _, p := range region.GetPeers() {
-		store := c.GetStore(p.GetStoreId())
-		if store != nil {
-			stores = append(stores, store)
-		}
-	}
-	return stores
-}
-
-func (c *mockCluster) PutRegion(id uint64, stores ...uint64) {
-	meta := &metapb.Region{Id: id}
-	for _, s := range stores {
-		meta.Peers = append(meta.Peers, &metapb.Peer{StoreId: s})
-	}
-	c.regions[id] = core.NewRegionInfo(meta, &metapb.Peer{StoreId: stores[0]})
-}
-
-func (c *mockCluster) PutStore(id uint64, labelPairs ...string) {
-	var labels []*metapb.StoreLabel
-	for i := 0; i < len(labelPairs); i += 2 {
-		labels = append(labels, &metapb.StoreLabel{Key: labelPairs[i], Value: labelPairs[i+1]})
-	}
-	c.stores[id] = core.NewStoreInfo(&metapb.Store{Id: id, Labels: labels})
 }
