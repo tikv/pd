@@ -147,6 +147,12 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.Labels, HasLen, 0)
 
+	// Test merge.
+	// enable label match check.
+	labelCheck := map[string]string{"strictly-match-label": "true"}
+	lc, _ := json.Marshal(labelCheck)
+	err = postJSON(s.urlPrefix+"/config", lc)
+	c.Assert(err, IsNil)
 	// Test set.
 	labels := map[string]string{"zone": "cn", "host": "local"}
 	b, err := json.Marshal(labels)
@@ -169,8 +175,8 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 
 	// Test merge.
 	// disable label match check.
-	labelCheck := map[string]string{"strictly-match-label": "false"}
-	lc, _ := json.Marshal(labelCheck)
+	labelCheck = map[string]string{"strictly-match-label": "false"}
+	lc, _ = json.Marshal(labelCheck)
 	err = postJSON(s.urlPrefix+"/config", lc)
 	c.Assert(err, IsNil)
 
