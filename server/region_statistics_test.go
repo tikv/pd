@@ -18,48 +18,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/mock"
 )
-
-type mockClassifier struct{}
-
-func (c mockClassifier) GetAllNamespaces() []string {
-	return []string{"global", "unknown"}
-}
-
-func (c mockClassifier) GetStoreNamespace(store *core.StoreInfo) string {
-	if store.GetID() < 5 {
-		return "global"
-	}
-	return "unknown"
-}
-
-func (c mockClassifier) GetRegionNamespace(*core.RegionInfo) string {
-	return "global"
-}
-
-func (c mockClassifier) IsNamespaceExist(name string) bool {
-	return true
-}
-
-func (c mockClassifier) AllowMerge(*core.RegionInfo, *core.RegionInfo) bool {
-	return true
-}
-
-func (c mockClassifier) ReloadNamespaces() error {
-	return nil
-}
-
-func (c mockClassifier) IsMetaExist() bool {
-	return false
-}
-
-func (c mockClassifier) IsTableIDExist(tableID int64) bool {
-	return false
-}
-
-func (c mockClassifier) IsStoreIDExist(storeID uint64) bool {
-	return false
-}
 
 var _ = Suite(&testRegionStatisticsSuite{})
 
@@ -98,7 +58,7 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
 	region1 := core.NewRegionInfo(r1, peers[0])
 	region2 := core.NewRegionInfo(r2, peers[0])
-	regionStats := newRegionStatistics(opt, mockClassifier{})
+	regionStats := newRegionStatistics(opt, mock.Classifier{})
 	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[extraPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[learnerPeer]), Equals, 1)

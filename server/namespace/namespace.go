@@ -24,6 +24,15 @@ import (
 // default.
 const DefaultNamespace = "global"
 
+// ScheduleOptions for namespace cluster.
+type ScheduleOptions interface {
+	GetLeaderScheduleLimit(name string) uint64
+	GetRegionScheduleLimit(name string) uint64
+	GetReplicaScheduleLimit(name string) uint64
+	GetMergeScheduleLimit(name string) uint64
+	GetMaxReplicas(name string) int
+}
+
 // DefaultClassifier is a classifier that classifies all regions and stores to
 // DefaultNamespace.
 var DefaultClassifier = defaultClassifier{}

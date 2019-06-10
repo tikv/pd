@@ -58,15 +58,6 @@ type Options interface {
 	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 }
 
-// NamespaceOptions for namespace cluster.
-type NamespaceOptions interface {
-	GetLeaderScheduleLimit(name string) uint64
-	GetRegionScheduleLimit(name string) uint64
-	GetReplicaScheduleLimit(name string) uint64
-	GetMergeScheduleLimit(name string) uint64
-	GetMaxReplicas(name string) int
-}
-
 const (
 	// RejectLeader is the label property type that suggests a store should not
 	// have any region leaders.
