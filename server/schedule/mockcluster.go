@@ -551,7 +551,7 @@ const (
 	defaultLowSpaceRatio               = 0.8
 	defaultHighSpaceRatio              = 0.6
 	defaultHotRegionCacheHitsThreshold = 3
-	defaultStrictlyMatchLabel          = true
+	defaultStrictlyMatchLabel          = false
 )
 
 // MockSchedulerOptions is a mock of SchedulerOptions
