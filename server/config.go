@@ -198,7 +198,7 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage   = true
-	defaultStrictlyMatchLabel = true
+	defaultStrictlyMatchLabel = false
 )
 
 func adjustString(v *string, defValue string) {
