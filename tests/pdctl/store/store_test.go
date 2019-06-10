@@ -56,8 +56,14 @@ func (s *storeTestSuite) TestStore(c *C) {
 			Version: "2.0.0",
 		},
 		{
-			Id:      2,
+			Id:      3,
 			Address: "tikv3",
+			State:   metapb.StoreState_Up,
+			Version: "2.0.0",
+		},
+		{
+			Id:      2,
+			Address: "tikv2",
 			State:   metapb.StoreState_Tombstone,
 			Version: "2.0.0",
 		},
@@ -77,7 +83,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(err, IsNil)
 	storesInfo := new(api.StoresInfo)
 	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
-	pdctl.CheckStoresInfo(c, storesInfo.Stores, stores[:1])
+	pdctl.CheckStoresInfo(c, storesInfo.Stores, stores[:2])
 
 	// store <store_id> command
 	args = []string{"-u", pdAddr, "store", "1"}
@@ -119,6 +125,17 @@ func (s *storeTestSuite) TestStore(c *C) {
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store", "1"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
+	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
+
+	// store delete addr <address>
+	args = []string{"-u", pdAddr, "store", "delete", "addr", "tikv3"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(string(output), Equals, "Success!\n")
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "store", "3"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)

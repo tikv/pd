@@ -136,14 +136,12 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, sto
 			log.Error("failed to allocate peer", zap.Error(err))
 			return nil
 		}
-		schedulerCounter.WithLabelValues(s.GetName(), "create_operator").Inc()
-		st := []schedule.OperatorStep{
-			schedule.AddLearner{ToStore: destStoreID, PeerID: destPeer.GetId()},
-			schedule.PromoteLearner{ToStore: destStoreID, PeerID: destPeer.GetId()},
-			schedule.TransferLeader{ToStore: destStoreID, FromStore: srcStoreID},
-			schedule.RemovePeer{FromStore: srcRegion.GetLeader().GetStoreId()},
+		op, err := schedule.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, schedule.OpRegion|schedule.OpLeader, srcStoreID, destStoreID, destPeer.GetId())
+		if err != nil {
+			return nil
 		}
-		return []*schedule.Operator{schedule.NewOperator("random-move-hot-region", srcRegion.GetID(), srcRegion.GetRegionEpoch(), schedule.OpRegion|schedule.OpLeader, st...)}
+		schedulerCounter.WithLabelValues(s.GetName(), "create_operator").Inc()
+		return []*schedule.Operator{op}
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 	return nil

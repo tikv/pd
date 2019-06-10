@@ -129,76 +129,10 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
 		targetPeers = append(targetPeers, newPeer)
 		replacedPeers = append(replacedPeers, peer)
 	}
-	return r.createOperator(region, replacedPeers, targetPeers)
-}
-
-func (r *RegionScatterer) createOperator(origin *core.RegionInfo, replacedPeers, targetPeers []*metapb.Peer) *Operator {
-	// Randomly pick a leader
-	i := rand.Intn(len(targetPeers))
-	targetLeaderPeer := targetPeers[i]
-	originLeaderStoreID := origin.GetLeader().GetStoreId()
-
-	originStoreIDs := origin.GetStoreIds()
-	steps := make([]OperatorStep, 0, len(targetPeers)*3+1)
-	// deferSteps will append to the end of the steps
-	deferSteps := make([]OperatorStep, 0, 5)
-	var kind OperatorKind
-	sameLeader := targetLeaderPeer.GetStoreId() == originLeaderStoreID
-	// No need to do anything
-	if sameLeader {
-		isSame := true
-		for _, peer := range targetPeers {
-			if _, ok := originStoreIDs[peer.GetStoreId()]; !ok {
-				isSame = false
-				break
-			}
-		}
-		if isSame {
-			return nil
-		}
+	op := CreateScatterRegionOperator("scatter-region", r.cluster, region, replacedPeers, targetPeers)
+	if op != nil {
+		op.SetPriorityLevel(core.HighPriority)
 	}
-
-	// Creates the first step
-	if _, ok := originStoreIDs[targetLeaderPeer.GetStoreId()]; !ok {
-		st := CreateAddLightPeerSteps(targetLeaderPeer.GetStoreId(), targetLeaderPeer.GetId(), r.cluster)
-		steps = append(steps, st...)
-		// Do not transfer leader to the newly added peer
-		// Ref: https://github.com/tikv/tikv/issues/3819
-		deferSteps = append(deferSteps, TransferLeader{FromStore: originLeaderStoreID, ToStore: targetLeaderPeer.GetStoreId()})
-		deferSteps = append(deferSteps, RemovePeer{FromStore: replacedPeers[i].GetStoreId()})
-		kind |= OpLeader
-		kind |= OpRegion
-	} else {
-		if !sameLeader {
-			steps = append(steps, TransferLeader{FromStore: originLeaderStoreID, ToStore: targetLeaderPeer.GetStoreId()})
-			kind |= OpLeader
-		}
-	}
-
-	// For the other steps
-	for j, peer := range targetPeers {
-		if peer.GetId() == targetLeaderPeer.GetId() {
-			continue
-		}
-		if _, ok := originStoreIDs[peer.GetStoreId()]; ok {
-			continue
-		}
-		if replacedPeers[j].GetStoreId() == originLeaderStoreID {
-			st := CreateAddLightPeerSteps(peer.GetStoreId(), peer.GetId(), r.cluster)
-			st = append(st, RemovePeer{FromStore: replacedPeers[j].GetStoreId()})
-			deferSteps = append(deferSteps, st...)
-			kind |= OpRegion | OpLeader
-			continue
-		}
-		st := CreateAddLightPeerSteps(peer.GetStoreId(), peer.GetId(), r.cluster)
-		steps = append(steps, st...)
-		steps = append(steps, RemovePeer{FromStore: replacedPeers[j].GetStoreId()})
-		kind |= OpRegion
-	}
-
-	steps = append(steps, deferSteps...)
-	op := NewOperator("scatter-region", origin.GetID(), origin.GetRegionEpoch(), kind, steps...)
-	op.SetPriorityLevel(core.HighPriority)
 	return op
 }
 

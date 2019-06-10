@@ -14,6 +14,7 @@
 package command
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"path"
@@ -24,7 +25,7 @@ import (
 
 var (
 	storesPrefix = "pd/api/v1/stores"
-	storePrefix  = "pd/api/v1/store/%s"
+	storePrefix  = "pd/api/v1/store/%v"
 )
 
 // NewStoreCommand return a stores subcommand of rootCmd
@@ -42,6 +43,16 @@ func NewStoreCommand() *cobra.Command {
 	return s
 }
 
+// NewDeleteStoreByAddrCommand returns a subcommand of delete
+func NewDeleteStoreByAddrCommand() *cobra.Command {
+	d := &cobra.Command{
+		Use:   "addr <address>",
+		Short: "delete store by its address",
+		Run:   deleteStoreCommandByAddrFunc,
+	}
+	return d
+}
+
 // NewDeleteStoreCommand return a  delete subcommand of storeCmd
 func NewDeleteStoreCommand() *cobra.Command {
 	d := &cobra.Command{
@@ -49,6 +60,7 @@ func NewDeleteStoreCommand() *cobra.Command {
 		Short: "delete the store",
 		Run:   deleteStoreCommandFunc,
 	}
+	d.AddCommand(NewDeleteStoreByAddrCommand())
 	return d
 }
 
@@ -165,7 +177,7 @@ func showStoreCommandFunc(cmd *cobra.Command, args []string) {
 
 func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Println("Usage: store delete <store_id>")
+		cmd.Usage()
 		return
 	}
 	if _, err := strconv.Atoi(args[0]); err != nil {
@@ -174,6 +186,57 @@ func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	prefix := fmt.Sprintf(storePrefix, args[0])
 	_, err := doRequest(cmd, prefix, http.MethodDelete)
+	if err != nil {
+		cmd.Printf("Failed to delete store %s: %s\n", args[0], err)
+		return
+	}
+	cmd.Println("Success!")
+}
+
+func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Usage()
+		return
+	}
+	addr := args[0]
+
+	// fetch all the stores
+	r, err := doRequest(cmd, storesPrefix, http.MethodGet)
+	if err != nil {
+		cmd.Printf("Failed to get store: %s\n", err)
+		return
+	}
+
+	storeInfo := struct {
+		Stores []struct {
+			Store struct {
+				ID      int    `json:"id"`
+				Address string `json:"address"`
+			} `json:"store"`
+		} `json:"stores"`
+	}{}
+	if err = json.Unmarshal([]byte(r), &storeInfo); err != nil {
+		cmd.Printf("Failed to parse store info: %s\n", err)
+		return
+	}
+
+	// filter by the addr
+	id := -1
+	for _, store := range storeInfo.Stores {
+		if store.Store.Address == addr {
+			id = store.Store.ID
+			break
+		}
+	}
+
+	if id == -1 {
+		cmd.Printf("address not found: %s\n", addr)
+		return
+	}
+
+	// delete store by its ID
+	prefix := fmt.Sprintf(storePrefix, id)
+	_, err = doRequest(cmd, prefix, http.MethodDelete)
 	if err != nil {
 		cmd.Printf("Failed to delete store %s: %s\n", args[0], err)
 		return

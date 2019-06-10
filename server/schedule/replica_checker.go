@@ -70,19 +70,8 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 			checkerCounter.WithLabelValues("replica_checker", "no_target_store").Inc()
 			return nil
 		}
-		var steps []OperatorStep
-		if r.cluster.IsRaftLearnerEnabled() {
-			steps = []OperatorStep{
-				AddLearner{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()},
-				PromoteLearner{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()},
-			}
-		} else {
-			steps = []OperatorStep{
-				AddPeer{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()},
-			}
-		}
 		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
-		return NewOperator("make-up-replica", region.GetID(), region.GetRegionEpoch(), OpReplica|OpRegion, steps...)
+		return CreateAddPeerOperator("make-up-replica", r.cluster, region, newPeer.GetId(), newPeer.GetStoreId(), OpReplica)
 	}
 
 	// when add learner peer, the number of peer will exceed max replicas for a while,

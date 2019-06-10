@@ -269,8 +269,7 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster schedule.Cluster
 	if target == nil {
 		return nil
 	}
-	step := schedule.TransferLeader{FromStore: before.GetLeader().GetStoreId(), ToStore: target.GetID()}
-	op := schedule.NewOperator("balance-adjacent-leader", before.GetID(), before.GetRegionEpoch(), schedule.OpAdjacent|schedule.OpLeader, step)
+	op := schedule.CreateTransferLeaderOperator("balance-adjacent-leader", before, before.GetLeader().GetStoreId(), target.GetID(), schedule.OpAdjacent)
 	op.SetPriorityLevel(core.LowPriority)
 	schedulerCounter.WithLabelValues(l.GetName(), "adjacent_leader").Inc()
 	return op

@@ -192,7 +192,6 @@ func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source,
 	targetLabel := strconv.FormatUint(targetID, 10)
 	balanceLeaderCounter.WithLabelValues("move_leader", source.GetAddress()+"-out", sourceLabel).Inc()
 	balanceLeaderCounter.WithLabelValues("move_leader", target.GetAddress()+"-in", targetLabel).Inc()
-	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: targetID}
-	op := schedule.NewOperator("balance-leader", regionID, region.GetRegionEpoch(), schedule.OpBalance|schedule.OpLeader, step)
+	op := schedule.CreateTransferLeaderOperator("balance-leader", region, region.GetLeader().GetStoreId(), targetID, schedule.OpBalance)
 	return []*schedule.Operator{op}
 }
