@@ -32,7 +32,6 @@ import (
 
 var (
 	dialClient = &http.Client{Timeout: 30 * time.Second}
-
 	pingPrefix = "pd/ping"
 )
 
