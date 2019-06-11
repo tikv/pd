@@ -266,7 +266,7 @@ func (h *hitsStoreBuilder) hit(source, target *core.StoreInfo) {
 }
 
 func (h *hitsStoreBuilder) buildSourceFilter(cluster schedule.Cluster) schedule.Filter {
-	filter := schedule.NewBlacklistStoreFilter(schedule.SignSource)
+	filter := schedule.NewBlacklistStoreFilter(schedule.BlacklistSource)
 	for _, source := range cluster.GetStores() {
 		if h.filter(source, nil) {
 			filter.Add(source.GetID())
@@ -276,7 +276,7 @@ func (h *hitsStoreBuilder) buildSourceFilter(cluster schedule.Cluster) schedule.
 }
 
 func (h *hitsStoreBuilder) buildTargetFilter(cluster schedule.Cluster, source *core.StoreInfo) schedule.Filter {
-	filter := schedule.NewBlacklistStoreFilter(schedule.SignTarget)
+	filter := schedule.NewBlacklistStoreFilter(schedule.BlacklistTarget)
 	for _, target := range cluster.GetStores() {
 		if h.filter(source, target) {
 			filter.Add(target.GetID())
