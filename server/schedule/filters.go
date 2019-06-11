@@ -493,6 +493,6 @@ func (f *BlacklistStoreFilter) FilterTarget(opt Options, store *core.StoreInfo) 
 }
 
 func (f *BlacklistStoreFilter) filter(store *core.StoreInfo) bool {
-	 _, ok := f.blacklist[store.GetID()]
+	_, ok := f.blacklist[store.GetID()]
 	return ok
 }
