@@ -23,6 +23,7 @@ import (
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -108,7 +109,7 @@ func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 }
 
 // GetHotWriteRegions gets all hot write regions stats.
-func (h *Handler) GetHotWriteRegions() *core.StoreHotRegionInfos {
+func (h *Handler) GetHotWriteRegions() *statistics.StoreHotRegionInfos {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil
@@ -117,7 +118,7 @@ func (h *Handler) GetHotWriteRegions() *core.StoreHotRegionInfos {
 }
 
 // GetHotReadRegions gets all hot read regions stats.
-func (h *Handler) GetHotReadRegions() *core.StoreHotRegionInfos {
+func (h *Handler) GetHotReadRegions() *statistics.StoreHotRegionInfos {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil

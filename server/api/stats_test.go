@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/statistics"
 )
 
 var _ = Suite(&testStatsSuite{})
@@ -127,7 +128,7 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	// 3      ["t", "x")  1     1	  F                           L
 	// 4      ["x", "")   50    20                   	   L
 
-	statsAll := &core.RegionStats{
+	statsAll := &statistics.RegionStats{
 		Count:            4,
 		EmptyCount:       1,
 		StorageSize:      351,
@@ -141,12 +142,12 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	}
 	res, err := http.Get(statsURL)
 	c.Assert(err, IsNil)
-	stats := &core.RegionStats{}
+	stats := &statistics.RegionStats{}
 	err = apiutil.ReadJSON(res.Body, stats)
 	c.Assert(err, IsNil)
 	c.Assert(stats, DeepEquals, statsAll)
 
-	stats23 := &core.RegionStats{
+	stats23 := &statistics.RegionStats{
 		Count:            2,
 		EmptyCount:       1,
 		StorageSize:      201,
@@ -161,7 +162,7 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	args := fmt.Sprintf("?start_key=%s&end_key=%s", url.QueryEscape("\x01\x02"), url.QueryEscape("xyz\x00\x00"))
 	res, err = http.Get(statsURL + args)
 	c.Assert(err, IsNil)
-	stats = &core.RegionStats{}
+	stats = &statistics.RegionStats{}
 	err = apiutil.ReadJSON(res.Body, stats)
 	c.Assert(err, IsNil)
 	c.Assert(stats, DeepEquals, stats23)

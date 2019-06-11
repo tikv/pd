@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/statistics"
 )
 
 // namespaceCluster is part of a global cluster that contains stores and regions
@@ -124,9 +125,9 @@ func (c *namespaceCluster) GetRegion(id uint64) *core.RegionInfo {
 }
 
 // RegionWriteStats returns hot region's write stats.
-func (c *namespaceCluster) RegionWriteStats() []*core.RegionStat {
+func (c *namespaceCluster) RegionWriteStats() []*statistics.RegionStat {
 	allStats := c.Cluster.RegionWriteStats()
-	stats := make([]*core.RegionStat, 0, len(allStats))
+	stats := make([]*statistics.RegionStat, 0, len(allStats))
 	for _, s := range allStats {
 		if c.GetRegion(s.RegionID) != nil {
 			stats = append(stats, s)

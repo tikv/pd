@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/server/statistics"
 )
 
 var _ = Suite(&testStoreStatisticsSuite{})
@@ -42,9 +43,11 @@ func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
 		{Id: 7, Address: "mock://tikv-7", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h1"}}},
 		{Id: 8, Address: "mock://tikv-8", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h2"}}},
 	}
+	storesStats := statistics.NewStoresStats()
 	var stores []*core.StoreInfo
 	for _, m := range metaStores {
 		s := core.NewStoreInfo(m, core.SetLastHeartbeatTS(time.Now()))
+		storesStats.CreateRollingStoreStats(m.GetId())
 		stores = append(stores, s)
 	}
 
@@ -54,7 +57,7 @@ func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
 	stores[4] = store4
 	storeStats := newStoreStatisticsMap(opt, namespace.DefaultClassifier)
 	for _, store := range stores {
-		storeStats.Observe(store)
+		storeStats.Observe(store, storesStats)
 	}
 	stats := storeStats.stats["global"]
 

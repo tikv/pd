@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/server/statistics"
 )
 
 const (
@@ -52,7 +53,7 @@ func newStoreStatistics(opt *scheduleOption, namespace string) *storeStatistics 
 	}
 }
 
-func (s *storeStatistics) Observe(store *core.StoreInfo) {
+func (s *storeStatistics) Observe(store *core.StoreInfo, stats *statistics.StoresStats) {
 	for _, k := range s.opt.GetLocationLabels() {
 		v := store.GetLabelValue(k)
 		if v == "" {
@@ -103,7 +104,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_capacity").Set(float64(store.GetCapacity()))
 
 	// Store flows.
-	storeFlowStats := store.GetRollingStoreStats()
+	storeFlowStats := stats.GetRollingStoreStats(store.GetID())
 	storeWriteRateBytes, storeReadRateBytes := storeFlowStats.GetBytesRate()
 	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_write_rate_bytes").Set(float64(storeWriteRateBytes))
 	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_read_rate_bytes").Set(float64(storeReadRateBytes))
@@ -199,14 +200,14 @@ func newStoreStatisticsMap(opt *scheduleOption, classifier namespace.Classifier)
 	}
 }
 
-func (m *storeStatisticsMap) Observe(store *core.StoreInfo) {
+func (m *storeStatisticsMap) Observe(store *core.StoreInfo, stats *statistics.StoresStats) {
 	namespace := m.classifier.GetStoreNamespace(store)
 	stat, ok := m.stats[namespace]
 	if !ok {
 		stat = newStoreStatistics(m.opt, namespace)
 		m.stats[namespace] = stat
 	}
-	stat.Observe(store)
+	stat.Observe(store, stats)
 }
 
 func (m *storeStatisticsMap) Collect() {

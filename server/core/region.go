@@ -20,7 +20,6 @@ import (
 	"math/rand"
 	"reflect"
 	"strings"
-	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -352,49 +351,6 @@ func (r *RegionInfo) GetPeers() []*metapb.Peer {
 // GetRegionEpoch returns the region epoch of the region.
 func (r *RegionInfo) GetRegionEpoch() *metapb.RegionEpoch {
 	return r.meta.RegionEpoch
-}
-
-// RegionStat records each hot region's statistics
-type RegionStat struct {
-	RegionID  uint64 `json:"region_id"`
-	FlowBytes uint64 `json:"flow_bytes"`
-	// HotDegree records the hot region update times
-	HotDegree int `json:"hot_degree"`
-	// LastUpdateTime used to calculate average write
-	LastUpdateTime time.Time `json:"last_update_time"`
-	StoreID        uint64    `json:"-"`
-	// AntiCount used to eliminate some noise when remove region in cache
-	AntiCount int
-	// Version used to check the region split times
-	Version uint64
-	// Stats is a rolling statistics, recording some recently added records.
-	Stats *RollingStats
-}
-
-// NewRegionStat returns a RegionStat.
-func NewRegionStat(region *RegionInfo, flowBytes uint64, antiCount int) *RegionStat {
-	return &RegionStat{
-		RegionID:       region.GetID(),
-		FlowBytes:      flowBytes,
-		LastUpdateTime: time.Now(),
-		StoreID:        region.leader.GetStoreId(),
-		Version:        region.meta.GetRegionEpoch().GetVersion(),
-		AntiCount:      antiCount,
-	}
-}
-
-// RegionsStat is a list of a group region state type
-type RegionsStat []RegionStat
-
-func (m RegionsStat) Len() int           { return len(m) }
-func (m RegionsStat) Swap(i, j int)      { m[i], m[j] = m[j], m[i] }
-func (m RegionsStat) Less(i, j int) bool { return m[i].FlowBytes < m[j].FlowBytes }
-
-// HotRegionsStat records all hot regions statistics
-type HotRegionsStat struct {
-	TotalFlowBytes uint64      `json:"total_flow_bytes"`
-	RegionsCount   int         `json:"regions_count"`
-	RegionsStat    RegionsStat `json:"statistics"`
 }
 
 // regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.
@@ -742,6 +698,21 @@ func (r *RegionsInfo) ScanRange(startKey []byte, limit int) []*RegionInfo {
 	return res
 }
 
+// ScanRangeWithEndKey scans region with start key and end key.
+func (r *RegionsInfo) ScanRangeWithEndKey(startKey, endKey []byte) []*RegionInfo {
+	var regions []*RegionInfo
+	r.tree.scanRange(startKey, func(meta *metapb.Region) bool {
+		if len(endKey) > 0 && (len(meta.EndKey) == 0 || bytes.Compare(meta.EndKey, endKey) >= 0) {
+			return false
+		}
+		if region := r.GetRegion(meta.GetId()); region != nil {
+			regions = append(regions, region)
+		}
+		return true
+	})
+	return regions
+}
+
 // ScanRangeWithIterator scans region with start key, until iterator returns false.
 func (r *RegionsInfo) ScanRangeWithIterator(startKey []byte, iterator func(metaRegion *metapb.Region) bool) {
 	r.tree.scanRange(startKey, iterator)
@@ -767,67 +738,6 @@ func (r *RegionsInfo) GetAverageRegionSize() int64 {
 		return 0
 	}
 	return r.regions.TotalSize() / int64(r.regions.Len())
-}
-
-// RegionStats records a list of regions' statistics and distribution status.
-type RegionStats struct {
-	Count            int              `json:"count"`
-	EmptyCount       int              `json:"empty_count"`
-	StorageSize      int64            `json:"storage_size"`
-	StorageKeys      int64            `json:"storage_keys"`
-	StoreLeaderCount map[uint64]int   `json:"store_leader_count"`
-	StorePeerCount   map[uint64]int   `json:"store_peer_count"`
-	StoreLeaderSize  map[uint64]int64 `json:"store_leader_size"`
-	StoreLeaderKeys  map[uint64]int64 `json:"store_leader_keys"`
-	StorePeerSize    map[uint64]int64 `json:"store_peer_size"`
-	StorePeerKeys    map[uint64]int64 `json:"store_peer_keys"`
-}
-
-func newRegionStats() *RegionStats {
-	return &RegionStats{
-		StoreLeaderCount: make(map[uint64]int),
-		StorePeerCount:   make(map[uint64]int),
-		StoreLeaderSize:  make(map[uint64]int64),
-		StoreLeaderKeys:  make(map[uint64]int64),
-		StorePeerSize:    make(map[uint64]int64),
-		StorePeerKeys:    make(map[uint64]int64),
-	}
-}
-
-// Observe adds a region's statistics into RegionStats.
-func (s *RegionStats) Observe(r *RegionInfo) {
-	s.Count++
-	if r.approximateSize <= EmptyRegionApproximateSize {
-		s.EmptyCount++
-	}
-	s.StorageSize += r.approximateSize
-	s.StorageKeys += r.approximateKeys
-	if r.leader != nil {
-		s.StoreLeaderCount[r.leader.GetStoreId()]++
-		s.StoreLeaderSize[r.leader.GetStoreId()] += r.approximateSize
-		s.StoreLeaderKeys[r.leader.GetStoreId()] += r.approximateKeys
-	}
-	for _, p := range r.meta.Peers {
-		s.StorePeerCount[p.GetStoreId()]++
-		s.StorePeerSize[p.GetStoreId()] += r.approximateSize
-		s.StorePeerKeys[p.GetStoreId()] += r.approximateKeys
-	}
-}
-
-// GetRegionStats scans regions that inside range [startKey, endKey) and sums up
-// their statistics.
-func (r *RegionsInfo) GetRegionStats(startKey, endKey []byte) *RegionStats {
-	stats := newRegionStats()
-	r.tree.scanRange(startKey, func(meta *metapb.Region) bool {
-		if len(endKey) > 0 && (len(meta.EndKey) == 0 || bytes.Compare(meta.EndKey, endKey) >= 0) {
-			return false
-		}
-		if region := r.GetRegion(meta.GetId()); region != nil {
-			stats.Observe(region)
-		}
-		return true
-	})
-	return stats
 }
 
 const randomRegionMaxRetry = 10

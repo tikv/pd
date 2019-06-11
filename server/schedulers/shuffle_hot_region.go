@@ -21,6 +21,7 @@ import (
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -95,7 +96,7 @@ func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster schedule.C
 	return nil
 }
 
-func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, storeStats core.StoreHotRegionsStat) []*schedule.Operator {
+func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, storeStats statistics.StoreHotRegionsStat) []*schedule.Operator {
 	for _, stats := range storeStats {
 		i := s.r.Intn(stats.RegionsStat.Len())
 		r := stats.RegionsStat[i]

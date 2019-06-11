@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	syncer "github.com/pingcap/pd/server/region_syncer"
+	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -326,10 +327,17 @@ func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 }
 
 // GetRegionStats returns region statistics from cluster.
-func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *core.RegionStats {
+func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.RegionStats {
 	c.RLock()
 	defer c.RUnlock()
 	return c.cachedCluster.getRegionStats(startKey, endKey)
+}
+
+// GetStoresStats returns stores' statistics from cluster.
+func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
+	c.RLock()
+	defer c.RUnlock()
+	return c.cachedCluster.storesStats
 }
 
 // DropCacheRegion removes a region from the cache.
@@ -652,7 +660,7 @@ func (c *RaftCluster) collectMetrics() {
 	cluster := c.cachedCluster
 	statsMap := newStoreStatisticsMap(c.cachedCluster.opt, c.GetNamespaceClassifier())
 	for _, s := range cluster.GetStores() {
-		statsMap.Observe(s)
+		statsMap.Observe(s, cluster.storesStats)
 	}
 	statsMap.Collect()
 

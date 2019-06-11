@@ -1174,8 +1174,8 @@ func (s *cmdTestSuite) TestHot(c *C) {
 	newStats.KeysWritten = keysWritten
 	newStats.KeysRead = keysRead
 	newStats.Interval = interval
-	newStore := ss.Clone(core.SetStoreStats(newStats))
-	newStore.GetRollingStoreStats().Observe(newStore.GetStoreStats())
+	rc := leaderServer.GetRaftCluster()
+	rc.GetStoresStats().Observe(ss.GetID(), newStats)
 
 	// TODO: Provide a way to test the result of hot read and hot write commands
 	// hot read

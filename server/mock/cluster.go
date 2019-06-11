@@ -33,6 +33,7 @@ type Cluster struct {
 	*IDAllocator
 	*ScheduleOptions
 	*statistics.HotSpotCache
+	*statistics.StoresStats
 	ID uint64
 }
 
@@ -43,6 +44,7 @@ func NewCluster(opt *ScheduleOptions) *Cluster {
 		IDAllocator:     NewIDAllocator(),
 		ScheduleOptions: opt,
 		HotSpotCache:    statistics.NewHotSpotCache(),
+		StoresStats:     statistics.NewStoresStats(),
 	}
 }
 
@@ -73,12 +75,12 @@ func (mc *Cluster) IsRegionHot(id uint64) bool {
 }
 
 // RegionReadStats returns hot region's read stats.
-func (mc *Cluster) RegionReadStats() []*core.RegionStat {
+func (mc *Cluster) RegionReadStats() []*statistics.RegionStat {
 	return mc.HotSpotCache.RegionStats(statistics.ReadFlow)
 }
 
 // RegionWriteStats returns hot region's write stats.
-func (mc *Cluster) RegionWriteStats() []*core.RegionStat {
+func (mc *Cluster) RegionWriteStats() []*statistics.RegionStat {
 	return mc.HotSpotCache.RegionStats(statistics.WriteFlow)
 }
 
@@ -227,7 +229,7 @@ func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, en
 func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetReadBytes(readBytes))
-	isUpdate, item := mc.HotSpotCache.CheckRead(r, mc.Stores)
+	isUpdate, item := mc.HotSpotCache.CheckRead(r, mc.StoresStats)
 	if isUpdate {
 		mc.HotSpotCache.Update(regionID, item, statistics.ReadFlow)
 	}
@@ -238,7 +240,7 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64,
 func (mc *Cluster) AddLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
-	isUpdate, item := mc.HotSpotCache.CheckWrite(r, mc.Stores)
+	isUpdate, item := mc.HotSpotCache.CheckWrite(r, mc.StoresStats)
 	if isUpdate {
 		mc.HotSpotCache.Update(regionID, item, statistics.WriteFlow)
 	}
