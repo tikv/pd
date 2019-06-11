@@ -203,20 +203,22 @@ func newHitsStoreBuilder(ttl time.Duration, threshold int) *hitsStoreBuilder {
 }
 
 func (h *hitsStoreBuilder) getKey(source, target *core.StoreInfo) string {
-	var key string
-	if source == nil || source == nil && target == nil {
+	if source == nil {
 		return ""
-	} else if target == nil {
-		key = fmt.Sprintf("s%d", source.GetID())
-	} else {
-		key = fmt.Sprintf("s%d->t%d", source.GetID(), target.GetID())
+	}
+	key := fmt.Sprintf("s%d", source.GetID())
+	if target != nil {
+		key = fmt.Sprintf("%s->t%d", key, source.GetID())
 	}
 	return key
 }
 
 func (h *hitsStoreBuilder) filter(source, target *core.StoreInfo) bool {
 	key := h.getKey(source, target)
-	if item, ok := h.hits[key]; ok && key != "" {
+	if key == "" {
+		return false
+	}
+	if item, ok := h.hits[key]; ok {
 		if time.Since(item.lastTime) > h.ttl {
 			delete(h.hits, key)
 		}
@@ -236,7 +238,10 @@ func (h *hitsStoreBuilder) miss(source, target *core.StoreInfo) {
 
 func (h *hitsStoreBuilder) hit(source, target *core.StoreInfo) {
 	key := h.getKey(source, target)
-	if item, ok := h.hits[key]; ok && key != "" {
+	if key == "" {
+		return
+	}
+	if item, ok := h.hits[key]; ok {
 		if time.Since(item.lastTime) >= h.ttl {
 			item.count = 0
 		} else {
