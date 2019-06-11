@@ -23,10 +23,16 @@ import (
 	"github.com/pingcap/errcode"
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/apiutil"
-	"github.com/pingcap/pd/server"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
+
+// dialClient used to dail http request.
+var dialClient = &http.Client{
+	Transport: &http.Transport{
+		DisableKeepAlives: true,
+	},
+}
 
 // Respond to the client about the given error, integrating with errcode.ErrorCode.
 //
@@ -81,7 +87,7 @@ func readJSON(r io.ReadCloser, data interface{}) error {
 }
 
 func postJSON(url string, data []byte) error {
-	resp, err := server.DialClient.Post(url, "application/json", bytes.NewBuffer(data))
+	resp, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -101,7 +107,7 @@ func doDelete(url string) error {
 	if err != nil {
 		return err
 	}
-	res, err := server.DialClient.Do(req)
+	res, err := dialClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -110,7 +116,7 @@ func doDelete(url string) error {
 }
 
 func doGet(url string) (*http.Response, error) {
-	resp, err := server.DialClient.Get(url)
+	resp, err := dialClient.Get(url)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
