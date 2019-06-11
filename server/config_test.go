@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -131,7 +132,8 @@ type = "random-merge"
 	meta, err = toml.Decode(cfgData, &cfg)
 	c.Assert(err, IsNil)
 	err = cfg.Adjust(&meta)
-	c.Assert(err, NotNil)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(cfg.WarningMsgs[0], "Config contains undefined item"), IsTrue)
 
 	// Check misspelled schedulers name
 	cfgData = `
