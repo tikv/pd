@@ -1,4 +1,5 @@
 // Copyright 2017 PingCAP, Inc.
+
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -84,7 +85,8 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 	stores := cluster.GetStores()
 
 	// source is the store with highest region score in the list that can be selected as balance source.
-	source := s.selector.SelectSource(cluster, stores, s.hitsCounter.buildSourceFilter(cluster))
+	filter := s.hitsCounter.buildSourceFilter(cluster)
+	source := s.selector.SelectSource(cluster, stores, filter)
 	if source == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_store").Inc()
 		// Unlike the balanceLeaderScheduler, we don't need to clear the taintCache
@@ -217,7 +219,7 @@ func (h *hitsStoreBuilder) getKey(source, target *core.StoreInfo) string {
 	}
 	key := fmt.Sprintf("s%d", source.GetID())
 	if target != nil {
-		key = fmt.Sprintf("%s->t%d", key, source.GetID())
+		key = fmt.Sprintf("%s->t%d", key, target.GetID())
 	}
 	return key
 }

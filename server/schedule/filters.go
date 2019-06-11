@@ -473,7 +473,7 @@ func (f *BlacklistStoreFilter) Type() string {
 
 // FilterSource implements the Filter.
 func (f *BlacklistStoreFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
-	if f.flag&SignSource == SignSource {
+	if f.flag&SignSource != SignSource {
 		return false
 	}
 	return f.filter(store)
@@ -486,7 +486,7 @@ func (f *BlacklistStoreFilter) Add(storeID uint64) {
 
 // FilterTarget implements the Filter.
 func (f *BlacklistStoreFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
-	if f.flag&SignTarget == SignTarget {
+	if f.flag&SignTarget != SignTarget {
 		return false
 	}
 	return f.filter(store)
