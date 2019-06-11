@@ -19,7 +19,6 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
-	"time"
 
 	"github.com/pingcap/errcode"
 	log "github.com/pingcap/log"
@@ -28,11 +27,8 @@ import (
 	"github.com/unrolled/render"
 )
 
-const clientTimeout = 30 * time.Second
-
 // dialClient used to dail http request.
 var dialClient = &http.Client{
-	Timeout: clientTimeout,
 	Transport: &http.Transport{
 		DisableKeepAlives: true,
 	},
