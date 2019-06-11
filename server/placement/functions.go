@@ -53,12 +53,12 @@ func (c Constraint) eval(region *core.RegionInfo, cluster Cluster) int {
 }
 
 func (c Constraint) evalCount(region *core.RegionInfo, cluster Cluster) int {
-	stores := c.filterStores(cluster.GetRegionStores(region.GetID()))
+	stores := c.filterStores(cluster.GetRegionStores(region))
 	return len(stores)
 }
 
 func (c Constraint) evalLabelValues(region *core.RegionInfo, cluster Cluster) int {
-	stores := c.filterStores(cluster.GetRegionStores(region.GetID()))
+	stores := c.filterStores(cluster.GetRegionStores(region))
 	return c.countLabelValues(stores, c.Labels)
 }
 
@@ -71,7 +71,7 @@ func (c Constraint) evalCountLeader(region *core.RegionInfo, cluster Cluster) in
 }
 
 func (c Constraint) evalIsolationLevel(region *core.RegionInfo, cluster Cluster) int {
-	stores := c.filterStores(cluster.GetRegionStores(region.GetID()))
+	stores := c.filterStores(cluster.GetRegionStores(region))
 	for i := range c.Labels {
 		if c.countLabelValues(stores, c.Labels[:i+1]) == len(stores) {
 			return len(c.Labels) - i

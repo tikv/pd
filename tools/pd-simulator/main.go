@@ -27,7 +27,7 @@ import (
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
-	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/statistics"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/cases"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
@@ -51,7 +51,7 @@ func main() {
 	flag.Parse()
 
 	simutil.InitLogger(*simLogLevel)
-	schedule.Simulating = true
+	statistics.Simulating = true
 
 	if *caseName == "" {
 		if *pdAddr != "" {

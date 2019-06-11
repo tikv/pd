@@ -25,8 +25,6 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/coreos/etcd/embed"
-	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/metricutil"
@@ -34,7 +32,10 @@ import (
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
+	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // Config is the pd server configuration.
@@ -48,8 +49,9 @@ type Config struct {
 	AdvertiseClientUrls string `toml:"advertise-client-urls" json:"advertise-client-urls"`
 	AdvertisePeerUrls   string `toml:"advertise-peer-urls" json:"advertise-peer-urls"`
 
-	Name    string `toml:"name" json:"name"`
-	DataDir string `toml:"data-dir" json:"data-dir"`
+	Name            string `toml:"name" json:"name"`
+	DataDir         string `toml:"data-dir" json:"data-dir"`
+	ForceNewCluster bool   `json:"force-new-cluster"`
 
 	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
 	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
@@ -60,7 +62,7 @@ type Config struct {
 	// LeaderLease time, if leader doesn't update its TTL
 	// in etcd after lease time, etcd will expire the leader key
 	// and other servers can campaign the leader again.
-	// Etcd onlys support seoncds TTL, so here is second too.
+	// Etcd only supports seconds TTL, so here is second too.
 	LeaderLease int64 `toml:"lease" json:"lease"`
 
 	// Log related config.
@@ -163,6 +165,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Security.CAPath, "cacert", "", "Path of file that contains list of trusted TLS CAs")
 	fs.StringVar(&cfg.Security.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "Path of file that contains X509 key in PEM format")
+	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster")
 
 	cfg.Namespace = make(map[string]NamespaceConfig)
 
@@ -193,6 +196,9 @@ const (
 	defaultHeartbeatStreamRebindInterval = time.Minute
 
 	defaultLeaderPriorityCheckInterval = time.Minute
+
+	defaultUseRegionStorage   = true
+	defaultStrictlyMatchLabel = false
 )
 
 func adjustString(v *string, defValue string) {
@@ -410,6 +416,10 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 		return err
 	}
 
+	if err := c.PDServerCfg.adjust(configMetaData.Child("pd-server")); err != nil {
+		return err
+	}
+
 	adjustDuration(&c.heartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
 
 	adjustDuration(&c.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
@@ -472,6 +482,8 @@ type ScheduleConfig struct {
 	// If the number of times a region hits the hot cache is greater than this
 	// threshold, it is considered a hot region.
 	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold,omitempty" json:"hot-region-cache-hits-threshold"`
+	// StoreBalanceRate is the maximum of balance rate for each store.
+	StoreBalanceRate float64 `toml:"store-balance-rate,omitempty" json:"store-balance-rate"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
 	//
@@ -493,7 +505,7 @@ type ScheduleConfig struct {
 	// removing down replicas.
 	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string"`
 	// DisableReplaceOfflineReplica is the option to prevent replica checker from
-	// repalcing offline replicas.
+	// replacing offline replicas.
 	DisableReplaceOfflineReplica bool `toml:"disable-replace-offline-replica" json:"disable-replace-offline-replica,string"`
 	// DisableMakeUpReplica is the option to prevent replica checker from making up
 	// replicas when replica count is less than expected.
@@ -508,7 +520,7 @@ type ScheduleConfig struct {
 	// from moving replica to the target namespace.
 	DisableNamespaceRelocation bool `toml:"disable-namespace-relocation" json:"disable-namespace-relocation,string"`
 
-	// Schedulers support for loding customized schedulers
+	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 }
 
@@ -529,6 +541,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		MergeScheduleLimit:           c.MergeScheduleLimit,
 		HotRegionScheduleLimit:       c.HotRegionScheduleLimit,
 		HotRegionCacheHitsThreshold:  c.HotRegionCacheHitsThreshold,
+		StoreBalanceRate:             c.StoreBalanceRate,
 		TolerantSizeRatio:            c.TolerantSizeRatio,
 		LowSpaceRatio:                c.LowSpaceRatio,
 		HighSpaceRatio:               c.HighSpaceRatio,
@@ -552,17 +565,18 @@ const (
 	defaultSplitMergeInterval     = 1 * time.Hour
 	defaultPatrolRegionInterval   = 100 * time.Millisecond
 	defaultMaxStoreDownTime       = 30 * time.Minute
-	defaultLeaderScheduleLimit    = 4
-	defaultRegionScheduleLimit    = 4
-	defaultReplicaScheduleLimit   = 8
+	defaultLeaderScheduleLimit    = 8
+	defaultRegionScheduleLimit    = 1024
+	defaultReplicaScheduleLimit   = 1024
 	defaultMergeScheduleLimit     = 8
 	defaultHotRegionScheduleLimit = 2
-	defaultTolerantSizeRatio      = 5
+	defaultStoreBalanceRate       = 1
+	defaultTolerantSizeRatio      = 0
 	defaultLowSpaceRatio          = 0.8
 	defaultHighSpaceRatio         = 0.6
 	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
 	// hot region.
-	defautHotRegionCacheHitsThreshold = 3
+	defaultHotRegionCacheHitsThreshold = 3
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -597,11 +611,12 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 		adjustUint64(&c.HotRegionScheduleLimit, defaultHotRegionScheduleLimit)
 	}
 	if !meta.IsDefined("hot-region-cache-hits-threshold") {
-		adjustUint64(&c.HotRegionCacheHitsThreshold, defautHotRegionCacheHitsThreshold)
+		adjustUint64(&c.HotRegionCacheHitsThreshold, defaultHotRegionCacheHitsThreshold)
 	}
 	if !meta.IsDefined("tolerant-size-ratio") {
 		adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
 	}
+	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
@@ -667,14 +682,17 @@ type ReplicationConfig struct {
 	// For example, ["zone", "rack"] means that we should place replicas to
 	// different zones first, then to different racks if we don't have enough zones.
 	LocationLabels typeutil.StringSlice `toml:"location-labels,omitempty" json:"location-labels"`
+	// StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocaltionLabels.
+	StrictlyMatchLabel bool `toml:"strictly-match-label,omitempty" json:"strictly-match-label,string"`
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {
 	locationLabels := make(typeutil.StringSlice, len(c.LocationLabels))
 	copy(locationLabels, c.LocationLabels)
 	return &ReplicationConfig{
-		MaxReplicas:    c.MaxReplicas,
-		LocationLabels: locationLabels,
+		MaxReplicas:        c.MaxReplicas,
+		LocationLabels:     locationLabels,
+		StrictlyMatchLabel: c.StrictlyMatchLabel,
 	}
 }
 
@@ -690,6 +708,9 @@ func (c *ReplicationConfig) validate() error {
 
 func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
+	if !meta.IsDefined("strictly-match-label") {
+		c.StrictlyMatchLabel = defaultStrictlyMatchLabel
+	}
 	return c.validate()
 }
 
@@ -751,6 +772,13 @@ type PDServerConfig struct {
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
 }
 
+func (c *PDServerConfig) adjust(meta *configMetaData) error {
+	if !meta.IsDefined("use-region-storage") {
+		c.UseRegionStorage = defaultUseRegionStorage
+	}
+	return nil
+}
+
 // StoreLabel is the config item of LabelPropertyConfig.
 type StoreLabel struct {
 	Key   string `toml:"key" json:"key"`
@@ -789,7 +817,7 @@ func ParseUrls(s string) ([]url.URL, error) {
 
 // SetupLogger setup the logger.
 func (c *Config) SetupLogger() error {
-	lg, p, err := log.InitLogger(&c.Log)
+	lg, p, err := log.InitLogger(&c.Log, zap.AddStacktrace(zapcore.FatalLevel))
 	if err != nil {
 		return err
 	}
@@ -832,9 +860,9 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.PeerTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.PeerTLSInfo.CertFile = c.Security.CertPath
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
-	// TODO: update etcd
-	// cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logSyncer)
-	// cfg.Logger = "zap"
+	cfg.ForceNewCluster = c.ForceNewCluster
+	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
+	cfg.Logger = "zap"
 	var err error
 
 	cfg.LPUrls, err = ParseUrls(c.PeerUrls)

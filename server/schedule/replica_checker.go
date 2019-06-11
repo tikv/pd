@@ -27,7 +27,7 @@ import (
 // Including the following:
 // Replica number management.
 // Unhealth replica management, mainly used for disaster recovery of TiKV.
-// Location management, mainly used for corss data center deployment.
+// Location management, mainly used for cross data center deployment.
 type ReplicaChecker struct {
 	cluster    Cluster
 	classifier namespace.Classifier
@@ -37,6 +37,7 @@ type ReplicaChecker struct {
 // NewReplicaChecker creates a replica checker.
 func NewReplicaChecker(cluster Cluster, classifier namespace.Classifier) *ReplicaChecker {
 	filters := []Filter{
+		NewOverloadFilter(),
 		NewHealthFilter(),
 		NewSnapshotCountFilter(),
 	}
@@ -69,19 +70,8 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 			checkerCounter.WithLabelValues("replica_checker", "no_target_store").Inc()
 			return nil
 		}
-		var steps []OperatorStep
-		if r.cluster.IsRaftLearnerEnabled() {
-			steps = []OperatorStep{
-				AddLearner{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()},
-				PromoteLearner{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()},
-			}
-		} else {
-			steps = []OperatorStep{
-				AddPeer{ToStore: newPeer.GetStoreId(), PeerID: newPeer.GetId()},
-			}
-		}
 		checkerCounter.WithLabelValues("replica_checker", "new_operator").Inc()
-		return NewOperator("makeUpReplica", region.GetID(), region.GetRegionEpoch(), OpReplica|OpRegion, steps...)
+		return CreateAddPeerOperator("make-up-replica", r.cluster, region, newPeer.GetId(), newPeer.GetStoreId(), OpReplica)
 	}
 
 	// when add learner peer, the number of peer will exceed max replicas for a while,
@@ -93,7 +83,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *Operator {
 			checkerCounter.WithLabelValues("replica_checker", "no_worst_peer").Inc()
 			return nil
 		}
-		op, err := CreateRemovePeerOperator("removeExtraReplica", r.cluster, OpReplica, region, oldPeer.GetStoreId())
+		op, err := CreateRemovePeerOperator("remove-extra-replica", r.cluster, OpReplica, region, oldPeer.GetStoreId())
 		if err != nil {
 			checkerCounter.WithLabelValues("replica_checker", "create_operator_fail").Inc()
 			return nil
@@ -182,7 +172,7 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *Operator {
 			continue
 		}
 
-		return r.fixPeer(region, peer, "Down")
+		return r.fixPeer(region, peer, "down")
 	}
 	return nil
 }
@@ -207,7 +197,7 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *Operator {
 			continue
 		}
 
-		return r.fixPeer(region, peer, "Offline")
+		return r.fixPeer(region, peer, "offline")
 	}
 
 	return nil
@@ -238,7 +228,7 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator
 	if err != nil {
 		return nil
 	}
-	op, err := CreateMovePeerOperator("moveToBetterLocation", r.cluster, region, OpReplica, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	op, err := CreateMovePeerOperator("move-to-better-location", r.cluster, region, OpReplica, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 	if err != nil {
 		checkerCounter.WithLabelValues("replica_checker", "create_operator_fail").Inc()
 		return nil
@@ -248,7 +238,7 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *Operator
 }
 
 func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, status string) *Operator {
-	removeExtra := fmt.Sprintf("removeExtra%sReplica", status)
+	removeExtra := fmt.Sprintf("remove-extra-%s-replica", status)
 	// Check the number of replicas first.
 	if len(region.GetPeers()) > r.cluster.GetMaxReplicas() {
 		op, err := CreateRemovePeerOperator(removeExtra, r.cluster, OpReplica, region, peer.GetStoreId())
@@ -259,7 +249,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 		return op
 	}
 
-	removePending := fmt.Sprintf("removePending%sReplica", status)
+	removePending := fmt.Sprintf("remove-pending-%s-replica", status)
 	// Consider we have 3 peers (A, B, C), we set the store that contains C to
 	// offline/down while C is pending. If we generate an operator that adds a replica
 	// D then removes C, D will not be successfully added util C is normal again.
@@ -283,7 +273,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 		return nil
 	}
 
-	replace := fmt.Sprintf("replace%sReplica", status)
+	replace := fmt.Sprintf("replace-%s-replica", status)
 	op, err := CreateMovePeerOperator(replace, r.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 	if err != nil {
 		return nil

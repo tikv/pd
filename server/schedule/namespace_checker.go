@@ -30,7 +30,9 @@ type NamespaceChecker struct {
 
 // NewNamespaceChecker creates a namespace checker.
 func NewNamespaceChecker(cluster Cluster, classifier namespace.Classifier) *NamespaceChecker {
-	filters := []Filter{StoreStateFilter{MoveRegion: true}}
+	filters := []Filter{
+		StoreStateFilter{MoveRegion: true},
+	}
 
 	return &NamespaceChecker{
 		cluster:    cluster,
@@ -70,7 +72,7 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *Operator {
 			checkerCounter.WithLabelValues("namespace_checker", "no_target_peer").Inc()
 			return nil
 		}
-		op, err := CreateMovePeerOperator("makeNamespaceRelocation", n.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+		op, err := CreateMovePeerOperator("make-namespace-relocation", n.cluster, region, OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 		if err != nil {
 			checkerCounter.WithLabelValues("namespace_checker", "create_operator_fail").Inc()
 			return nil

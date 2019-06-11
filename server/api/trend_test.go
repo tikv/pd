@@ -15,6 +15,7 @@ package api
 
 import (
 	"fmt"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -48,6 +49,7 @@ func (s *testTrendSuite) TestTrend(c *C) {
 	// Create 3 operators that transfers leader, moves follower, moves leader.
 	c.Assert(svr.GetHandler().AddTransferLeaderOperator(4, 2), IsNil)
 	c.Assert(svr.GetHandler().AddTransferPeerOperator(5, 2, 3), IsNil)
+	time.Sleep(2 * time.Second)
 	c.Assert(svr.GetHandler().AddTransferPeerOperator(6, 1, 3), IsNil)
 
 	// Complete the operators.

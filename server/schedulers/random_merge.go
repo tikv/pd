@@ -34,7 +34,9 @@ type randomMergeScheduler struct {
 // newRandomMergeScheduler creates an admin scheduler that randomly picks two adjacent regions
 // then merges them.
 func newRandomMergeScheduler(opController *schedule.OperatorController) schedule.Scheduler {
-	filters := []schedule.Filter{schedule.StoreStateFilter{MoveRegion: true}}
+	filters := []schedule.Filter{
+		schedule.StoreStateFilter{MoveRegion: true},
+	}
 	base := newBaseScheduler(opController)
 	return &randomMergeScheduler{
 		baseScheduler: base,
@@ -78,10 +80,10 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*schedule.Op
 		return nil
 	}
 
-	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	ops, err := schedule.CreateMergeRegionOperator("random-merge", cluster, region, target, schedule.OpAdmin)
 	if err != nil {
 		return nil
 	}
+	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 	return ops
 }

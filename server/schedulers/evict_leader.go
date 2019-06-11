@@ -45,7 +45,9 @@ type evictLeaderScheduler struct {
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
 func newEvictLeaderScheduler(opController *schedule.OperatorController, storeID uint64) schedule.Scheduler {
-	filters := []schedule.Filter{schedule.StoreStateFilter{TransferLeader: true}}
+	filters := []schedule.Filter{
+		schedule.StoreStateFilter{TransferLeader: true},
+	}
 	base := newBaseScheduler(opController)
 	return &evictLeaderScheduler{
 		baseScheduler: base,
@@ -88,8 +90,7 @@ func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.Op
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: target.GetID()}
-	op := schedule.NewOperator("evict-leader", region.GetID(), region.GetRegionEpoch(), schedule.OpLeader, step)
+	op := schedule.CreateTransferLeaderOperator("evict-leader", region, region.GetLeader().GetStoreId(), target.GetID(), schedule.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*schedule.Operator{op}
 }

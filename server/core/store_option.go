@@ -65,6 +65,20 @@ func SetStoreUnBlock() StoreCreateOption {
 	}
 }
 
+// SetStoreOverload stops balancer from selecting the store.
+func SetStoreOverload() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.overloaded = true
+	}
+}
+
+// ResetStoreOverload allows balancer to select the store.
+func ResetStoreOverload() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.overloaded = false
+	}
+}
+
 // SetLeaderCount sets the leader count for the store.
 func SetLeaderCount(leaderCount int) StoreCreateOption {
 	return func(store *StoreInfo) {

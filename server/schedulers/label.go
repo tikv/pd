@@ -35,7 +35,9 @@ type labelScheduler struct {
 // Now only used for reject leader schedule, that will move the leader out of
 // the store with the specific label.
 func newLabelScheduler(opController *schedule.OperatorController) schedule.Scheduler {
-	filters := []schedule.Filter{schedule.StoreStateFilter{TransferLeader: true}}
+	filters := []schedule.Filter{
+		schedule.StoreStateFilter{TransferLeader: true},
+	}
 	return &labelScheduler{
 		baseScheduler: newBaseScheduler(opController),
 		selector:      schedule.NewBalanceSelector(core.LeaderKind, filters),
@@ -87,8 +89,7 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator
 			}
 
 			schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-			step := schedule.TransferLeader{FromStore: id, ToStore: target.GetID()}
-			op := schedule.NewOperator("label-reject-leader", region.GetID(), region.GetRegionEpoch(), schedule.OpLeader, step)
+			op := schedule.CreateTransferLeaderOperator("label-reject-leader", region, id, target.GetID(), schedule.OpLeader)
 			return []*schedule.Operator{op}
 		}
 	}

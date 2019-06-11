@@ -14,6 +14,8 @@
 package schedule
 
 import (
+	"fmt"
+
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
@@ -33,9 +35,10 @@ type Filter interface {
 // FilterSource checks if store can pass all Filters as source store.
 func FilterSource(opt Options, store *core.StoreInfo, filters []Filter) bool {
 	storeAddress := store.GetAddress()
+	storeID := fmt.Sprintf("%d", store.GetID())
 	for _, filter := range filters {
 		if filter.FilterSource(opt, store) {
-			filterCounter.WithLabelValues("filter-source", storeAddress, filter.Type()).Inc()
+			filterCounter.WithLabelValues("filter-source", storeAddress, storeID, filter.Type()).Inc()
 			return true
 		}
 	}
@@ -45,9 +48,10 @@ func FilterSource(opt Options, store *core.StoreInfo, filters []Filter) bool {
 // FilterTarget checks if store can pass all Filters as target store.
 func FilterTarget(opt Options, store *core.StoreInfo, filters []Filter) bool {
 	storeAddress := store.GetAddress()
+	storeID := fmt.Sprintf("%d", store.GetID())
 	for _, filter := range filters {
 		if filter.FilterTarget(opt, store) {
-			filterCounter.WithLabelValues("filter-target", storeAddress, filter.Type()).Inc()
+			filterCounter.WithLabelValues("filter-target", storeAddress, storeID, filter.Type()).Inc()
 			return true
 		}
 	}
@@ -98,6 +102,25 @@ func (f *blockFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
 
 func (f *blockFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
 	return store.IsBlocked()
+}
+
+type overloadFilter struct{}
+
+// NewOverloadFilter creates a Filter that filters all stores that are overloaded from balance.
+func NewOverloadFilter() Filter {
+	return &overloadFilter{}
+}
+
+func (f *overloadFilter) Type() string {
+	return "overload-filter"
+}
+
+func (f *overloadFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
+	return store.IsOverloaded()
+}
+
+func (f *overloadFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
+	return store.IsOverloaded()
 }
 
 type stateFilter struct{}
@@ -402,6 +425,11 @@ func (f StoreStateFilter) filterMoveRegion(opt Options, store *core.StoreInfo) b
 	if store.GetIsBusy() {
 		return true
 	}
+
+	if store.IsOverloaded() {
+		return true
+	}
+
 	if opt.GetMaxPendingPeerCount() > 0 && store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount()) {
 		return true
 	}

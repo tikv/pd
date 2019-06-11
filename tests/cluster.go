@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -28,6 +27,7 @@ import (
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
@@ -199,6 +199,25 @@ func (s *TestServer) GetEtcdLeader() (string, error) {
 		return "", errors.WithStack(err)
 	}
 	return members.GetEtcdLeader().GetName(), nil
+}
+
+// GetEtcdLeaderID returns the builtin etcd leader ID.
+func (s *TestServer) GetEtcdLeaderID() (uint64, error) {
+	s.RLock()
+	defer s.RUnlock()
+	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
+	members, err := s.server.GetMembers(context.TODO(), req)
+	if err != nil {
+		return 0, errors.WithStack(err)
+	}
+	return members.GetEtcdLeader().GetMemberId(), nil
+}
+
+// MoveEtcdLeader moves etcd leader from old to new.
+func (s *TestServer) MoveEtcdLeader(old, new uint64) error {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.MoveEtcdLeader(context.Background(), old, new)
 }
 
 // GetEtcdClient returns the builtin etcd client.
@@ -374,8 +393,20 @@ func (c *TestCluster) GetLeader() string {
 // If it exceeds the maximum number of loops, it will return an empty string.
 func (c *TestCluster) WaitLeader() string {
 	for i := 0; i < 100; i++ {
-		if leader := c.GetLeader(); leader != "" {
-			return leader
+		counter := make(map[string]int)
+		running := 0
+		for _, s := range c.servers {
+			if s.state == Running {
+				running++
+			}
+			if s.GetLeader().GetName() != "" {
+				counter[s.GetLeader().GetName()]++
+			}
+		}
+		for name, num := range counter {
+			if num == running && c.GetServer(name).IsLeader() {
+				return name
+			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}

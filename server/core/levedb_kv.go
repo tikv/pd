@@ -42,19 +42,21 @@ func (kv *leveldbKV) Load(key string) (string, error) {
 	return string(v), err
 }
 
-func (kv *leveldbKV) LoadRange(startKey, endKey string, limit int) ([]string, error) {
+func (kv *leveldbKV) LoadRange(startKey, endKey string, limit int) ([]string, []string, error) {
 	iter := kv.db.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
+	keys := make([]string, 0, limit)
 	values := make([]string, 0, limit)
 	count := 0
 	for iter.Next() {
 		if count >= limit {
 			break
 		}
+		keys = append(keys, string(iter.Key()))
 		values = append(values, string(iter.Value()))
 		count++
 	}
 	iter.Release()
-	return values, nil
+	return keys, values, nil
 }
 
 func (kv *leveldbKV) Save(key, value string) error {

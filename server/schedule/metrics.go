@@ -33,21 +33,13 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 16),
 		}, []string{"type"})
 
-	hotCacheStatusGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "hotcache",
-			Name:      "status",
-			Help:      "Status of the hotspot.",
-		}, []string{"name", "type"})
-
 	filterCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "schedule",
 			Name:      "filter",
 			Help:      "Counter of the filter",
-		}, []string{"action", "address", "type"})
+		}, []string{"action", "address", "store", "type"})
 
 	operatorCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -65,13 +57,21 @@ var (
 			Help:      "Bucketed histogram of processing time (s) of finished operator.",
 			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 16),
 		}, []string{"type"})
+
+	storeLimit = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "store_limit",
+			Help:      "Limit of store.",
+		}, []string{"store", "type"})
 )
 
 func init() {
 	prometheus.MustRegister(checkerCounter)
 	prometheus.MustRegister(operatorStepDuration)
-	prometheus.MustRegister(hotCacheStatusGauge)
 	prometheus.MustRegister(filterCounter)
 	prometheus.MustRegister(operatorCounter)
 	prometheus.MustRegister(operatorDuration)
+	prometheus.MustRegister(storeLimit)
 }

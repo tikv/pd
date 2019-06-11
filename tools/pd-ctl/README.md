@@ -13,11 +13,11 @@ pd-ctl is a command line tool for PD, pd-ctl obtains the state information of th
 
 Single-command mode:
 
-    ./pd-ctl store -d -u http://127.0.0.1:2379
+    ./pd-ctl store -u http://127.0.0.1:2379
 
 Interactive mode:
 
-    ./pd-ctl -u http://127.0.0.1:2379
+    ./pd-ctl -i -u http://127.0.0.1:2379
 
 Use environment variables:
 
@@ -38,11 +38,16 @@ Use TLS to encrypt:
 
 + PD address
 + Default address: http://127.0.0.1:2379
-+ Enviroment variable: PD_ADDR
++ Environment variable: PD_ADDR
 
 ### \-\-detach,-d
 
 + Use single command line mode (not entering readline)
++ Default: true
+
+### \-\-interact,-i
+
++ Use interactive mode (entering readline)
 + Default: false
 
 ### --cacert
@@ -611,9 +616,9 @@ logic:  120102
 ### Query the remaining space of the node
 
 ```bash
-» store --jq=".stores[] | {id: .store.id, avaiable: .status.available}"
-{"id":1,"avaiable":"10 GiB"}
-{"id":30,"avaiable":"10 GiB"}
+» store --jq=".stores[] | {id: .store.id, available: .status.available}"
+{"id":1,"available":"10 GiB"}
+{"id":30,"available":"10 GiB"}
 ...
 ```
 

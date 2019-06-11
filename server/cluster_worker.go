@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -39,7 +40,7 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return errors.Errorf("invalid region, zero region peer count: %v", core.HexRegionMeta(region.GetMeta()))
 	}
 
-	c.coordinator.opController.Dispatch(region)
+	c.coordinator.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
 	return nil
 }
 

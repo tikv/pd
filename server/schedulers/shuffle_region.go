@@ -35,7 +35,9 @@ type shuffleRegionScheduler struct {
 // newShuffleRegionScheduler creates an admin scheduler that shuffles regions
 // between stores.
 func newShuffleRegionScheduler(opController *schedule.OperatorController) schedule.Scheduler {
-	filters := []schedule.Filter{schedule.StoreStateFilter{MoveRegion: true}}
+	filters := []schedule.Filter{
+		schedule.StoreStateFilter{MoveRegion: true},
+	}
 	base := newBaseScheduler(opController)
 	return &shuffleRegionScheduler{
 		baseScheduler: base,

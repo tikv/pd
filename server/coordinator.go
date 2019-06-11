@@ -15,6 +15,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -90,7 +92,7 @@ func (c *coordinator) patrolRegions() {
 	timer := time.NewTimer(c.cluster.GetPatrolRegionInterval())
 	defer timer.Stop()
 
-	log.Info("coordinator: start patrol regions")
+	log.Info("coordinator starts patrol regions")
 	start := time.Now()
 	var key []byte
 	for {
@@ -98,6 +100,7 @@ func (c *coordinator) patrolRegions() {
 		case <-timer.C:
 			timer.Reset(c.cluster.GetPatrolRegionInterval())
 		case <-c.ctx.Done():
+			log.Info("patrol regions has been stopped")
 			return
 		}
 
@@ -129,6 +132,25 @@ func (c *coordinator) patrolRegions() {
 	}
 }
 
+// drivePushOperator is used to push the unfinished operator to the excutor.
+func (c *coordinator) drivePushOperator() {
+	defer logutil.LogPanic()
+
+	defer c.wg.Done()
+	log.Info("coordinator begins to actively drive push operator")
+	ticker := time.NewTicker(schedule.PushOperatorTickInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("drive push operator has been stopped")
+			return
+		case <-ticker.C:
+			c.opController.PushOperators()
+		}
+	}
+}
+
 func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
@@ -137,11 +159,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 		if region.GetPendingLearner(p.GetId()) != nil {
 			continue
 		}
-		step := schedule.PromoteLearner{
-			ToStore: p.GetStoreId(),
-			PeerID:  p.GetId(),
-		}
-		op := schedule.NewOperator("promoteLearner", region.GetID(), region.GetRegionEpoch(), schedule.OpRegion, step)
+		op := schedule.CreatePromoteLearnerOperator("promote-learner", region, p)
 		if opController.AddOperator(op) {
 			return true
 		}
@@ -178,19 +196,20 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 func (c *coordinator) run() {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
 	defer ticker.Stop()
-	log.Info("coordinator: Start collect cluster information")
+	log.Info("coordinator starts to collect cluster information")
 	for {
 		if c.shouldRun() {
-			log.Info("coordinator: Cluster information is prepared")
+			log.Info("coordinator has finished cluster information preparation")
 			break
 		}
 		select {
 		case <-ticker.C:
 		case <-c.ctx.Done():
+			log.Info("coordinator stops running")
 			return
 		}
 	}
-	log.Info("coordinator: Run scheduler")
+	log.Info("coordinator starts to run schedulers")
 
 	k := 0
 	scheduleCfg := c.cluster.opt.load().clone()
@@ -225,23 +244,24 @@ func (c *coordinator) run() {
 		log.Error("cannot persist schedule config", zap.Error(err))
 	}
 
-	c.wg.Add(1)
+	c.wg.Add(2)
 	// Starts to patrol regions.
 	go c.patrolRegions()
+	go c.drivePushOperator()
 }
 
 func (c *coordinator) stop() {
 	c.cancel()
 }
 
-// Hack to retrive info from scheduler.
+// Hack to retrieve info from scheduler.
 // TODO: remove it.
 type hasHotStatus interface {
-	GetHotReadStatus() *core.StoreHotRegionInfos
-	GetHotWriteStatus() *core.StoreHotRegionInfos
+	GetHotReadStatus() *statistics.StoreHotRegionInfos
+	GetHotWriteStatus() *statistics.StoreHotRegionInfos
 }
 
-func (c *coordinator) getHotWriteRegions() *core.StoreHotRegionInfos {
+func (c *coordinator) getHotWriteRegions() *statistics.StoreHotRegionInfos {
 	c.RLock()
 	defer c.RUnlock()
 	s, ok := c.schedulers[hotRegionScheduleName]
@@ -254,7 +274,7 @@ func (c *coordinator) getHotWriteRegions() *core.StoreHotRegionInfos {
 	return nil
 }
 
-func (c *coordinator) getHotReadRegions() *core.StoreHotRegionInfos {
+func (c *coordinator) getHotReadRegions() *statistics.StoreHotRegionInfos {
 	c.RLock()
 	defer c.RUnlock()
 	s, ok := c.schedulers[hotRegionScheduleName]
@@ -304,28 +324,30 @@ func (c *coordinator) collectHotSpotMetrics() {
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
-		stat, ok := status.AsPeer[s.GetID()]
+		storeID := s.GetID()
+		storeLabel := fmt.Sprintf("%d", storeID)
+		stat, ok := status.AsPeer[storeID]
 		if ok {
 			totalWriteBytes := float64(stat.TotalFlowBytes)
 			hotWriteRegionCount := float64(stat.RegionsCount)
 
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_peer").Set(totalWriteBytes)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_peer").Set(hotWriteRegionCount)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(totalWriteBytes)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(hotWriteRegionCount)
 		} else {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_peer").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_peer").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(0)
 		}
 
-		stat, ok = status.AsLeader[s.GetID()]
+		stat, ok = status.AsLeader[storeID]
 		if ok {
 			totalWriteBytes := float64(stat.TotalFlowBytes)
 			hotWriteRegionCount := float64(stat.RegionsCount)
 
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_leader").Set(totalWriteBytes)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_leader").Set(hotWriteRegionCount)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(totalWriteBytes)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(hotWriteRegionCount)
 		} else {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_written_bytes_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_write_region_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(0)
 		}
 	}
 
@@ -333,16 +355,18 @@ func (c *coordinator) collectHotSpotMetrics() {
 	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
-		stat, ok := status.AsLeader[s.GetID()]
+		storeID := s.GetID()
+		storeLabel := fmt.Sprintf("%d", storeID)
+		stat, ok := status.AsLeader[storeID]
 		if ok {
 			totalReadBytes := float64(stat.TotalFlowBytes)
 			hotReadRegionCount := float64(stat.RegionsCount)
 
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_read_bytes_as_leader").Set(totalReadBytes)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_read_region_as_leader").Set(hotReadRegionCount)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(totalReadBytes)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(hotReadRegionCount)
 		} else {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "total_read_bytes_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, "hot_read_region_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(0)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(0)
 		}
 	}
 
@@ -409,7 +433,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			}
 
 		case <-s.Ctx().Done():
-			log.Info("stopped scheduler",
+			log.Info("scheduler has been stopped",
 				zap.String("scheduler-name", s.GetName()),
 				zap.Error(s.Ctx().Err()))
 			return

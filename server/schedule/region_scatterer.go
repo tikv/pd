@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pkg/errors"
 )
 
 type selectedStores struct {
@@ -73,29 +74,36 @@ func NewRegionScatterer(cluster Cluster, classifier namespace.Classifier) *Regio
 	return &RegionScatterer{
 		cluster:    cluster,
 		classifier: classifier,
-		filters:    []Filter{StoreStateFilter{}},
-		selected:   newSelectedStores(),
+		filters: []Filter{
+			StoreStateFilter{},
+		},
+		selected: newSelectedStores(),
 	}
 }
 
 // Scatter relocates the region.
-func (r *RegionScatterer) Scatter(region *core.RegionInfo) *Operator {
+func (r *RegionScatterer) Scatter(region *core.RegionInfo) (*Operator, error) {
 	if r.cluster.IsRegionHot(region.GetID()) {
-		return nil
+		return nil, errors.Errorf("region %d is a hot region", region.GetID())
 	}
 
 	if len(region.GetPeers()) != r.cluster.GetMaxReplicas() {
-		return nil
+		return nil, errors.Errorf("the number replicas of region %d is not expected", region.GetID())
 	}
 
-	return r.scatterRegion(region)
+	if region.GetLeader() == nil {
+		return nil, errors.Errorf("region %d has no leader", region.GetID())
+	}
+
+	return r.scatterRegion(region), nil
 }
 
 func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
-	steps := make([]OperatorStep, 0, len(region.GetPeers()))
-
 	stores := r.collectAvailableStores(region)
-	var kind OperatorKind
+	var (
+		targetPeers   []*metapb.Peer
+		replacedPeers []*metapb.Peer
+	)
 	for _, peer := range region.GetPeers() {
 		if len(stores) == 0 {
 			// Reset selected stores if we have no available stores.
@@ -105,31 +113,27 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
 
 		if r.selected.put(peer.GetStoreId()) {
 			delete(stores, peer.GetStoreId())
+			targetPeers = append(targetPeers, peer)
+			replacedPeers = append(replacedPeers, peer)
 			continue
 		}
 		newPeer := r.selectPeerToReplace(stores, region, peer)
 		if newPeer == nil {
+			targetPeers = append(targetPeers, peer)
+			replacedPeers = append(replacedPeers, peer)
 			continue
 		}
-
 		// Remove it from stores and mark it as selected.
 		delete(stores, newPeer.GetStoreId())
 		r.selected.put(newPeer.GetStoreId())
-
-		op, err := CreateMovePeerOperator("scatter-peer", r.cluster, region, OpAdmin,
-			peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
-		if err != nil {
-			continue
-		}
-		steps = append(steps, op.steps...)
-		steps = append(steps, TransferLeader{ToStore: newPeer.GetStoreId()})
-		kind |= op.Kind()
+		targetPeers = append(targetPeers, newPeer)
+		replacedPeers = append(replacedPeers, peer)
 	}
-
-	if len(steps) == 0 {
-		return nil
+	op := CreateScatterRegionOperator("scatter-region", r.cluster, region, replacedPeers, targetPeers)
+	if op != nil {
+		op.SetPriorityLevel(core.HighPriority)
 	}
-	return NewOperator("scatter-region", region.GetID(), region.GetRegionEpoch(), kind, steps...)
+	return op
 }
 
 func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {

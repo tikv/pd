@@ -109,17 +109,17 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*Operator {
 		return nil
 	}
 
-	checkerCounter.WithLabelValues("merge_checker", "new_operator").Inc()
 	log.Debug("try to merge region", zap.Reflect("from", core.HexRegionMeta(region.GetMeta())), zap.Reflect("to", core.HexRegionMeta(target.GetMeta())))
 	ops, err := CreateMergeRegionOperator("merge-region", m.cluster, region, target, OpMerge)
 	if err != nil {
 		return nil
 	}
+	checkerCounter.WithLabelValues("merge_checker", "new_operator").Inc()
 	return ops
 }
 
 func (m *MergeChecker) checkTarget(region, adjacent, target *core.RegionInfo) *core.RegionInfo {
-	// if is not hot region and under same namesapce
+	// if is not hot region and under same namespace
 	if adjacent != nil && !m.cluster.IsRegionHot(adjacent.GetID()) &&
 		m.classifier.AllowMerge(region, adjacent) &&
 		len(adjacent.GetDownPeers()) == 0 && len(adjacent.GetPendingPeers()) == 0 && len(adjacent.GetLearners()) == 0 {

@@ -22,12 +22,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
 	pd "github.com/pingcap/pd/client"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/tests"
+	"go.etcd.io/etcd/clientv3"
 )
 
 func Test(t *testing.T) {

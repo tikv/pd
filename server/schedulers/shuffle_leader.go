@@ -32,7 +32,9 @@ type shuffleLeaderScheduler struct {
 // newShuffleLeaderScheduler creates an admin scheduler that shuffles leaders
 // between stores.
 func newShuffleLeaderScheduler(opController *schedule.OperatorController) schedule.Scheduler {
-	filters := []schedule.Filter{schedule.StoreStateFilter{TransferLeader: true}}
+	filters := []schedule.Filter{
+		schedule.StoreStateFilter{TransferLeader: true},
+	}
 	base := newBaseScheduler(opController)
 	return &shuffleLeaderScheduler{
 		baseScheduler: base,
@@ -69,8 +71,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	step := schedule.TransferLeader{FromStore: region.GetLeader().GetStoreId(), ToStore: targetStore.GetID()}
-	op := schedule.NewOperator("shuffleLeader", region.GetID(), region.GetRegionEpoch(), schedule.OpAdmin|schedule.OpLeader, step)
+	op := schedule.CreateTransferLeaderOperator("shuffle-leader", region, region.GetLeader().GetId(), targetStore.GetID(), schedule.OpAdmin)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*schedule.Operator{op}
 }

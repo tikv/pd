@@ -58,7 +58,7 @@ func (s *testOperatorSuite) TestOperatorStep(c *C) {
 }
 
 func (s *testOperatorSuite) newTestOperator(regionID uint64, kind OperatorKind, steps ...OperatorStep) *Operator {
-	return NewOperator("testOperator", regionID, &metapb.RegionEpoch{}, OpAdmin|kind, steps...)
+	return NewOperator("test", regionID, &metapb.RegionEpoch{}, OpAdmin|kind, steps...)
 }
 
 func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OperatorStep) {
@@ -123,6 +123,7 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		LeaderCount: 0,
 		RegionSize:  10,
 		RegionCount: 1,
+		StepCost:    1000,
 	})
 
 	TransferLeader{FromStore: 1, ToStore: 2}.Influence(opInfluence, region)
@@ -131,12 +132,14 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		LeaderCount: -1,
 		RegionSize:  0,
 		RegionCount: 0,
+		StepCost:    0,
 	})
 	c.Assert(*storeOpInfluence[2], DeepEquals, StoreInfluence{
 		LeaderSize:  10,
 		LeaderCount: 1,
 		RegionSize:  10,
 		RegionCount: 1,
+		StepCost:    1000,
 	})
 
 	RemovePeer{FromStore: 1}.Influence(opInfluence, region)
@@ -145,12 +148,14 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		LeaderCount: -1,
 		RegionSize:  -10,
 		RegionCount: -1,
+		StepCost:    0,
 	})
 	c.Assert(*storeOpInfluence[2], DeepEquals, StoreInfluence{
 		LeaderSize:  10,
 		LeaderCount: 1,
 		RegionSize:  10,
 		RegionCount: 1,
+		StepCost:    1000,
 	})
 
 	MergeRegion{IsPassive: false}.Influence(opInfluence, region)
@@ -159,12 +164,14 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		LeaderCount: -1,
 		RegionSize:  -10,
 		RegionCount: -1,
+		StepCost:    0,
 	})
 	c.Assert(*storeOpInfluence[2], DeepEquals, StoreInfluence{
 		LeaderSize:  10,
 		LeaderCount: 1,
 		RegionSize:  10,
 		RegionCount: 1,
+		StepCost:    1000,
 	})
 
 	MergeRegion{IsPassive: true}.Influence(opInfluence, region)
@@ -173,12 +180,14 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		LeaderCount: -2,
 		RegionSize:  -10,
 		RegionCount: -2,
+		StepCost:    0,
 	})
 	c.Assert(*storeOpInfluence[2], DeepEquals, StoreInfluence{
 		LeaderSize:  10,
 		LeaderCount: 1,
 		RegionSize:  10,
 		RegionCount: 0,
+		StepCost:    1000,
 	})
 }
 

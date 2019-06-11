@@ -23,7 +23,7 @@ import (
 	"syscall"
 
 	"github.com/chzyer/readline"
-	"github.com/mattn/go-shellwords"
+	shellwords "github.com/mattn/go-shellwords"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/tools/pd-ctl/pdctl"
 	flag "github.com/spf13/pflag"
@@ -32,6 +32,7 @@ import (
 var (
 	url      string
 	detach   bool
+	interact bool
 	version  bool
 	caPath   string
 	certPath string
@@ -40,7 +41,8 @@ var (
 
 func init() {
 	flag.StringVarP(&url, "pd", "u", "http://127.0.0.1:2379", "The pd address")
-	flag.BoolVarP(&detach, "detach", "d", false, "Run pdctl without readline")
+	flag.BoolVarP(&detach, "detach", "d", true, "Run pdctl without readline")
+	flag.BoolVarP(&interact, "interact", "i", false, "Run pdctl with readline")
 	flag.BoolVarP(&version, "version", "V", false, "print version information and exit")
 	flag.StringVar(&caPath, "cacert", "", "path of file that contains list of trusted SSL CAs.")
 	flag.StringVar(&certPath, "cert", "", "path of file that contains X509 certificate in PEM format.")
@@ -88,11 +90,11 @@ func main() {
 		}
 		input = strings.Split(strings.TrimSpace(string(b[:])), " ")
 	}
-	if detach {
-		pdctl.Start(append(os.Args[1:], input...))
+	if interact {
+		loop()
 		return
 	}
-	loop()
+	pdctl.Start(append(os.Args[1:], input...))
 }
 
 func loop() {
@@ -125,9 +127,6 @@ func loop() {
 		if err != nil {
 			fmt.Printf("parse command err: %v\n", err)
 			continue
-		}
-		if url != "" && !strings.HasPrefix(url, "http") {
-			url = "http://" + url
 		}
 		args = append(args, "-u", url)
 		if caPath != "" && certPath != "" && keyPath != "" {

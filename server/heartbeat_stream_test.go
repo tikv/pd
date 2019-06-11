@@ -60,10 +60,19 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	defer stream1.close()
 	defer stream2.close()
 	checkActiveStream := func() int {
+		// 1 means stream1 got a valid response
+		// 2 means stream2 got a valid response
+		// 3 means got an invalid response
 		select {
-		case <-stream1.respCh:
+		case resp := <-stream1.respCh:
+			if resp.GetHeader().GetError() != nil {
+				return 3
+			}
 			return 1
-		case <-stream2.respCh:
+		case resp := <-stream2.respCh:
+			if resp.GetHeader().GetError() != nil {
+				return 3
+			}
 			return 2
 		case <-time.After(time.Second):
 			return 0
@@ -74,12 +83,21 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 		Leader: s.region.Peers[0],
 		Region: s.region,
 	}
+	invalidRegion := &metapb.Region{Id: 0}
+	invalidReq := &pdpb.RegionHeartbeatRequest{
+		Header: newRequestHeader(s.svr.clusterID),
+		Leader: s.region.Peers[0],
+		Region: invalidRegion,
+	}
 	// Active stream is stream1.
 	c.Assert(stream1.stream.Send(req), IsNil)
 	c.Assert(checkActiveStream(), Equals, 1)
 	// Rebind to stream2.
 	c.Assert(stream2.stream.Send(req), IsNil)
 	c.Assert(checkActiveStream(), Equals, 2)
+	// SendErr to stream2.
+	c.Assert(stream2.stream.Send(invalidReq), IsNil)
+	c.Assert(checkActiveStream(), Equals, 3)
 	// Rebind to stream1 if no more heartbeats sent through stream2.
 	testutil.WaitUntil(c, func(c *C) bool {
 		c.Assert(stream1.stream.Send(req), IsNil)

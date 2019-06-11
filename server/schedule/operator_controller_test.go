@@ -14,10 +14,13 @@
 package schedule
 
 import (
+	"container/heap"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/mock"
 )
 
 var _ = Suite(&testOperatorControllerSuite{})
@@ -26,16 +29,17 @@ type testOperatorControllerSuite struct{}
 
 // issue #1338
 func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
-	opt := NewMockSchedulerOptions()
-	tc := NewMockCluster(opt)
+	opt := mock.NewScheduleOptions()
+	tc := mock.NewCluster(opt)
 	oc := NewOperatorController(tc, nil)
+	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 1, 2)
 	tc.AddLeaderRegion(2, 1, 2)
 	steps := []OperatorStep{
 		RemovePeer{FromStore: 2},
 	}
-	op1 := NewOperator("testOperator", 1, &metapb.RegionEpoch{}, OpRegion, steps...)
-	op2 := NewOperator("testOperator", 2, &metapb.RegionEpoch{}, OpRegion, steps...)
+	op1 := NewOperator("test", 1, &metapb.RegionEpoch{}, OpRegion, steps...)
+	op2 := NewOperator("test", 2, &metapb.RegionEpoch{}, OpRegion, steps...)
 	oc.SetOperator(op1)
 	oc.SetOperator(op2)
 	go func() {
@@ -50,4 +54,82 @@ func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 	}()
 	time.Sleep(1 * time.Second)
 	c.Assert(oc.GetOperator(2), NotNil)
+}
+
+func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
+	opt := mock.NewScheduleOptions()
+	tc := mock.NewCluster(opt)
+	oc := NewOperatorController(tc, mock.NewHeartbeatStream())
+	tc.AddLeaderStore(1, 2)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderRegion(1, 1, 2)
+	tc.AddLeaderRegion(2, 1, 2)
+	steps := []OperatorStep{
+		RemovePeer{FromStore: 2},
+		AddPeer{ToStore: 2, PeerID: 4},
+	}
+	op1 := NewOperator("test", 1, &metapb.RegionEpoch{}, OpRegion, steps...)
+	op2 := NewOperator("test", 2, &metapb.RegionEpoch{}, OpRegion, steps...)
+	region1 := tc.GetRegion(1)
+	region2 := tc.GetRegion(2)
+	oc.SetOperator(op1)
+	oc.SetOperator(op2)
+	c.Assert(oc.GetOperatorStatus(1).Status, Equals, pdpb.OperatorStatus_RUNNING)
+	c.Assert(oc.GetOperatorStatus(2).Status, Equals, pdpb.OperatorStatus_RUNNING)
+	op1.createTime = time.Now().Add(-10 * time.Minute)
+	region2 = ApplyOperatorStep(region2, op2)
+	tc.PutRegion(region2)
+	oc.Dispatch(region1, "test")
+	oc.Dispatch(region2, "test")
+	c.Assert(oc.GetOperatorStatus(1).Status, Equals, pdpb.OperatorStatus_TIMEOUT)
+	c.Assert(oc.GetOperatorStatus(2).Status, Equals, pdpb.OperatorStatus_RUNNING)
+	ApplyOperator(tc, op2)
+	oc.Dispatch(region2, "test")
+	c.Assert(oc.GetOperatorStatus(2).Status, Equals, pdpb.OperatorStatus_SUCCESS)
+}
+
+func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
+	opt := mock.NewScheduleOptions()
+	tc := mock.NewCluster(opt)
+	oc := NewOperatorController(tc, mock.NewHeartbeatStream())
+	tc.AddLeaderStore(1, 2)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderRegion(1, 1, 2)
+	tc.AddLeaderRegion(2, 1, 2)
+	steps := []OperatorStep{
+		RemovePeer{FromStore: 2},
+		AddPeer{ToStore: 2, PeerID: 4},
+	}
+	op1 := NewOperator("test", 1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
+	op2 := NewOperator("test", 2, &metapb.RegionEpoch{}, OpRegion, steps...)
+	region1 := tc.GetRegion(1)
+	region2 := tc.GetRegion(2)
+	// Adds operator and pushes to the notifier queue.
+	{
+		oc.SetOperator(op1)
+		oc.SetOperator(op2)
+		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
+		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
+	}
+	// fisrt poll got nil
+	r, next := oc.pollNeedDispatchRegion()
+	c.Assert(r, IsNil)
+	c.Assert(next, IsFalse)
+
+	// after wait 100 millisecond, the region1 need to dispatch, but not region2.
+	time.Sleep(100 * time.Millisecond)
+	r, next = oc.pollNeedDispatchRegion()
+	c.Assert(r, NotNil)
+	c.Assert(next, IsTrue)
+	c.Assert(r.GetID(), Equals, region1.GetID())
+	r, next = oc.pollNeedDispatchRegion()
+	c.Assert(r, IsNil)
+	c.Assert(next, IsFalse)
+
+	// after waiting 500 millseconds, the region2 need to dispatch
+	time.Sleep(400 * time.Millisecond)
+	r, next = oc.pollNeedDispatchRegion()
+	c.Assert(r, NotNil)
+	c.Assert(next, IsTrue)
+	c.Assert(r.GetID(), Equals, region2.GetID())
 }

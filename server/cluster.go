@@ -21,6 +21,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errcode"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
@@ -28,6 +29,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	syncer "github.com/pingcap/pd/server/region_syncer"
+	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -64,6 +66,7 @@ type RaftCluster struct {
 // ClusterStatus saves some state information
 type ClusterStatus struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
+	IsInitialized     bool      `json:"is_initialized"`
 }
 
 func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
@@ -77,18 +80,43 @@ func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
 }
 
 func (c *RaftCluster) loadClusterStatus() (*ClusterStatus, error) {
-	data, err := c.s.kv.Load((c.s.kv.ClusterStatePath("raft_bootstrap_time")))
+	bootstrapTime, err := c.loadBootstrapTime()
 	if err != nil {
 		return nil, err
 	}
-	if len(data) == 0 {
-		return &ClusterStatus{}, nil
+	var isInitialized bool
+	if bootstrapTime != zeroTime {
+		isInitialized = c.isInitialized()
 	}
-	t, err := parseTimestamp([]byte(data))
+	return &ClusterStatus{
+		RaftBootstrapTime: bootstrapTime,
+		IsInitialized:     isInitialized,
+	}, nil
+}
+
+func (c *RaftCluster) isInitialized() bool {
+	if c.cachedCluster.getRegionCount() > 1 {
+		return true
+	}
+	region := c.cachedCluster.searchRegion(nil)
+	return region != nil &&
+		len(region.GetVoters()) >= int(c.s.GetReplicationConfig().MaxReplicas) &&
+		len(region.GetPendingPeers()) == 0
+}
+
+// loadBootstrapTime loads the saved bootstrap time from etcd. It returns zero
+// value of time.Time when there is error or the cluster is not bootstrapped
+// yet.
+func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
+	var t time.Time
+	data, err := c.s.kv.Load(c.s.kv.ClusterStatePath("raft_bootstrap_time"))
 	if err != nil {
-		return nil, err
+		return t, err
 	}
-	return &ClusterStatus{RaftBootstrapTime: t}, nil
+	if data == "" {
+		return t, nil
+	}
+	return parseTimestamp([]byte(data))
 }
 
 func (c *RaftCluster) start() error {
@@ -120,10 +148,9 @@ func (c *RaftCluster) start() error {
 
 	c.wg.Add(3)
 	go c.runCoordinator()
-	// gofail: var highFrequencyClusterJobs bool
-	// if highFrequencyClusterJobs {
-	//     backgroundJobInterval = 100 * time.Microsecond
-	// }
+	failpoint.Inject("highFrequencyClusterJobs", func() {
+		backgroundJobInterval = 100 * time.Microsecond
+	})
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.syncRegions()
 	c.running = true
@@ -134,10 +161,13 @@ func (c *RaftCluster) start() error {
 func (c *RaftCluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	defer c.coordinator.wg.Wait()
+	defer func() {
+		c.coordinator.wg.Wait()
+		log.Info("coordinator has been stopped")
+	}()
 	c.coordinator.run()
 	<-c.coordinator.ctx.Done()
-	log.Info("coordinator: Stopped coordinator")
+	log.Info("coordinator is stopping")
 }
 
 func (c *RaftCluster) syncRegions() {
@@ -297,10 +327,17 @@ func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 }
 
 // GetRegionStats returns region statistics from cluster.
-func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *core.RegionStats {
+func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.RegionStats {
 	c.RLock()
 	defer c.RUnlock()
 	return c.cachedCluster.getRegionStats(startKey, endKey)
+}
+
+// GetStoresStats returns stores' statistics from cluster.
+func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
+	c.RLock()
+	defer c.RUnlock()
+	return c.cachedCluster.storesStats
 }
 
 // DropCacheRegion removes a region from the cache.
@@ -399,11 +436,27 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		)
 	}
 	// Check location labels.
-	for _, k := range c.cachedCluster.GetLocationLabels() {
+	keysSet := make(map[string]struct{})
+	for _, k := range cluster.GetLocationLabels() {
+		keysSet[k] = struct{}{}
 		if v := s.GetLabelValue(k); len(v) == 0 {
-			log.Warn("missing location label",
+			log.Warn("label configuration is incorrect",
 				zap.Stringer("store", s.GetMeta()),
 				zap.String("label-key", k))
+			if cluster.GetStrictlyMatchLabel() {
+				return errors.Errorf("label configuration is incorrect, need to specify the key: %s ", k)
+			}
+		}
+	}
+	for _, label := range s.GetLabels() {
+		key := label.GetKey()
+		if _, ok := keysSet[key]; !ok {
+			log.Warn("not found the key match with the store label",
+				zap.Stringer("store", s.GetMeta()),
+				zap.String("label-key", key))
+			if cluster.GetStrictlyMatchLabel() {
+				return errors.Errorf("key matching the label was not found in the PD, store label key: %s ", key)
+			}
 		}
 	}
 	return cluster.putStore(s)
@@ -535,7 +588,7 @@ func (c *RaftCluster) checkStores() {
 
 		offlineStore := store.GetMeta()
 		// If the store is empty, it can be buried.
-		if cluster.getStoreRegionCount(offlineStore.GetId()) == 0 {
+		if cluster.GetStoreRegionCount(offlineStore.GetId()) == 0 {
 			if err := c.BuryStore(offlineStore.GetId(), false); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", offlineStore),
@@ -557,6 +610,30 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
+// RemoveTombStoneRecords removes the tombStone Records.
+func (c *RaftCluster) RemoveTombStoneRecords() error {
+	c.RLock()
+	defer c.RUnlock()
+
+	cluster := c.cachedCluster
+
+	for _, store := range cluster.GetStores() {
+		if store.IsTombstone() {
+			// the store has already been tombstone
+			err := cluster.deleteStore(store)
+			if err != nil {
+				log.Error("delete store failed",
+					zap.Stringer("store", store.GetMeta()),
+					zap.Error(err))
+				return err
+			}
+			log.Info("delete store successed",
+				zap.Stringer("store", store.GetMeta()))
+		}
+	}
+	return nil
+}
+
 func (c *RaftCluster) checkOperators() {
 	opController := c.coordinator.opController
 	for _, op := range opController.GetOperators() {
@@ -574,7 +651,7 @@ func (c *RaftCluster) checkOperators() {
 			log.Info("operator timeout",
 				zap.Uint64("region-id", op.RegionID()),
 				zap.Stringer("operator", op))
-			opController.RemoveOperator(op)
+			opController.RemoveTimeoutOperator(op)
 		}
 	}
 }
@@ -583,7 +660,7 @@ func (c *RaftCluster) collectMetrics() {
 	cluster := c.cachedCluster
 	statsMap := newStoreStatisticsMap(c.cachedCluster.opt, c.GetNamespaceClassifier())
 	for _, s := range cluster.GetStores() {
-		statsMap.Observe(s)
+		statsMap.Observe(s, cluster.storesStats)
 	}
 	statsMap.Collect()
 
@@ -619,6 +696,7 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 	for {
 		select {
 		case <-c.quit:
+			log.Info("background jobs has been stopped")
 			return
 		case <-ticker.C:
 			c.checkOperators()

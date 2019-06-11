@@ -18,8 +18,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/mock"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/statistics"
 )
 
 var _ = Suite(&testShuffleLeaderSuite{})
@@ -27,8 +29,8 @@ var _ = Suite(&testShuffleLeaderSuite{})
 type testShuffleLeaderSuite struct{}
 
 func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
-	opt := schedule.NewMockSchedulerOptions()
-	tc := schedule.NewMockCluster(opt)
+	opt := mock.NewScheduleOptions()
+	tc := mock.NewCluster(opt)
 
 	sl, err := schedule.CreateScheduler("shuffle-leader", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
@@ -57,8 +59,8 @@ var _ = Suite(&testBalanceAdjacentRegionSuite{})
 type testBalanceAdjacentRegionSuite struct{}
 
 func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
-	opt := schedule.NewMockSchedulerOptions()
-	tc := schedule.NewMockCluster(opt)
+	opt := mock.NewScheduleOptions()
+	tc := mock.NewCluster(opt)
 
 	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewOperatorController(nil, nil), "32", "2")
 	c.Assert(err, IsNil)
@@ -125,8 +127,8 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 }
 
 func (s *testBalanceAdjacentRegionSuite) TestNoNeedToBalance(c *C) {
-	opt := schedule.NewMockSchedulerOptions()
-	tc := schedule.NewMockCluster(opt)
+	opt := mock.NewScheduleOptions()
+	tc := mock.NewCluster(opt)
 
 	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
@@ -174,9 +176,13 @@ func (s *testScatterRegionSuite) TestFiveStores(c *C) {
 	s.scatter(c, 5, 5)
 }
 
+func (s *testScatterRegionSuite) checkOperator(op *schedule.Operator, c *C) {
+	c.Assert(schedule.CheckOperatorValid(op), IsTrue)
+}
+
 func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
-	opt := schedule.NewMockSchedulerOptions()
-	tc := schedule.NewMockCluster(opt)
+	opt := mock.NewScheduleOptions()
+	tc := mock.NewCluster(opt)
 
 	// Add stores 1~6.
 	for i := uint64(1); i <= numStores; i++ {
@@ -184,7 +190,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 	}
 
 	// Add regions 1~4.
-	seq := newSequencer(numStores)
+	seq := newSequencer(3)
 	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	for i := uint64(2); i <= numRegions; i++ {
@@ -195,8 +201,9 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
-		if op := scatterer.Scatter(region); op != nil {
-			tc.ApplyOperator(op)
+		if op, _ := scatterer.Scatter(region); op != nil {
+			s.checkOperator(op, c)
+			schedule.ApplyOperator(tc, op)
 		}
 	}
 
@@ -214,16 +221,44 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 	}
 }
 
+func (s *testScatterRegionSuite) TestStorelimit(c *C) {
+	opt := mock.NewScheduleOptions()
+	tc := mock.NewCluster(opt)
+	oc := schedule.NewOperatorController(tc, mock.NewHeartbeatStream())
+
+	// Add stores 1~6.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+
+	// Add regions 1~4.
+	seq := newSequencer(3)
+	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	for i := uint64(2); i <= 5; i++ {
+		tc.AddLeaderRegion(i, seq.next(), seq.next(), seq.next())
+	}
+
+	scatterer := schedule.NewRegionScatterer(tc, namespace.DefaultClassifier)
+
+	for i := uint64(1); i <= 5; i++ {
+		region := tc.GetRegion(i)
+		if op, _ := scatterer.Scatter(region); op != nil {
+			c.Assert(oc.AddOperator(op), IsTrue)
+		}
+	}
+}
+
 var _ = Suite(&testRejectLeaderSuite{})
 
 type testRejectLeaderSuite struct{}
 
 func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
-	opt := schedule.NewMockSchedulerOptions()
+	opt := mock.NewScheduleOptions()
 	opt.LabelProperties = map[string][]*metapb.StoreLabel{
 		schedule.RejectLeader: {{Key: "noleader", Value: "true"}},
 	}
-	tc := schedule.NewMockCluster(opt)
+	tc := mock.NewCluster(opt)
 
 	// Add 3 stores 1,2,3.
 	tc.AddLabelsStore(1, 1, map[string]string{"noleader": "true"})
@@ -278,9 +313,9 @@ var _ = Suite(&testShuffleHotRegionSchedulerSuite{})
 type testShuffleHotRegionSchedulerSuite struct{}
 
 func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
-	opt := schedule.NewMockSchedulerOptions()
+	opt := mock.NewScheduleOptions()
 	newTestReplication(opt, 3, "zone", "host")
-	tc := schedule.NewMockCluster(opt)
+	tc := mock.NewCluster(opt)
 	hb, err := schedule.CreateScheduler("shuffle-hot-region", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
 
@@ -306,9 +341,9 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	//|     1     |       1      |        2       |       3        |      512KB    |
 	//|     2     |       1      |        3       |       4        |      512KB    |
 	//|     3     |       1      |        2       |       4        |      512KB    |
-	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 3, 4)
-	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*1024*schedule.RegionHeartBeatReportInterval, 2, 4)
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 3, 4)
+	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 4)
 	opt.HotRegionCacheHitsThreshold = 0
 
 	// try to get an operator
@@ -329,8 +364,8 @@ var _ = Suite(&testEvictLeaderSuite{})
 type testEvictLeaderSuite struct{}
 
 func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
-	opt := schedule.NewMockSchedulerOptions()
-	tc := schedule.NewMockCluster(opt)
+	opt := mock.NewScheduleOptions()
+	tc := mock.NewCluster(opt)
 
 	// Add stores 1, 2, 3
 	tc.AddLeaderStore(1, 0)
@@ -353,8 +388,8 @@ var _ = Suite(&testShuffleRegionSuite{})
 type testShuffleRegionSuite struct{}
 
 func (s *testShuffleRegionSuite) TestShuffle(c *C) {
-	opt := schedule.NewMockSchedulerOptions()
-	tc := schedule.NewMockCluster(opt)
+	opt := mock.NewScheduleOptions()
+	tc := mock.NewCluster(opt)
 
 	sl, err := schedule.CreateScheduler("shuffle-region", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)

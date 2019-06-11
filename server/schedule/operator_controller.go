@@ -14,19 +14,37 @@
 package schedule
 
 import (
+	"container/heap"
 	"container/list"
+	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/juju/ratelimit"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
+	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"go.uber.org/zap"
 )
 
-var historyKeepTime = 5 * time.Minute
+// The source of dispatched region.
+const (
+	DispatchFromHeartBeat     = "heartbeat"
+	DispatchFromNotifierQueue = "active push"
+	DispatchFromCreate        = "create"
+)
+
+var (
+	historyKeepTime    = 5 * time.Minute
+	slowNotifyInterval = 5 * time.Second
+	fastNotifyInterval = 2 * time.Second
+	// PushOperatorTickInterval is the interval try to push the operator.
+	PushOperatorTickInterval = 500 * time.Millisecond
+)
 
 // HeartbeatStreams is an interface of async region heartbeat.
 type HeartbeatStreams interface {
@@ -41,27 +59,34 @@ type OperatorController struct {
 	hbStreams HeartbeatStreams
 	histories *list.List
 	counts    map[OperatorKind]uint64
+	opRecords *OperatorRecords
+	// TODO: Need to clean up the unused store ID.
+	storesLimit     map[uint64]*ratelimit.Bucket
+	opNotifierQueue operatorQueue
 }
 
 // NewOperatorController creates a OperatorController.
 func NewOperatorController(cluster Cluster, hbStreams HeartbeatStreams) *OperatorController {
 	return &OperatorController{
-		cluster:   cluster,
-		operators: make(map[uint64]*Operator),
-		hbStreams: hbStreams,
-		histories: list.New(),
-		counts:    make(map[OperatorKind]uint64),
+		cluster:         cluster,
+		operators:       make(map[uint64]*Operator),
+		hbStreams:       hbStreams,
+		histories:       list.New(),
+		counts:          make(map[OperatorKind]uint64),
+		opRecords:       NewOperatorRecords(),
+		storesLimit:     make(map[uint64]*ratelimit.Bucket),
+		opNotifierQueue: make(operatorQueue, 0),
 	}
 }
 
 // Dispatch is used to dispatch the operator of a region.
-func (oc *OperatorController) Dispatch(region *core.RegionInfo) {
+func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 	// Check existed operator.
 	if op := oc.GetOperator(region.GetID()); op != nil {
 		timeout := op.IsTimeout()
 		if step := op.Check(region); step != nil && !timeout {
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
-			oc.SendScheduleCommand(region, step)
+			oc.SendScheduleCommand(region, step, source)
 			return
 		}
 		if op.IsFinish() {
@@ -69,11 +94,72 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo) {
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 			operatorDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 			oc.pushHistory(op)
+			oc.opRecords.Put(op, pdpb.OperatorStatus_SUCCESS)
 			oc.RemoveOperator(op)
 		} else if timeout {
 			log.Info("operator timeout", zap.Uint64("region-id", region.GetID()), zap.Reflect("operator", op))
-			oc.RemoveOperator(op)
+			oc.RemoveTimeoutOperator(op)
+			oc.opRecords.Put(op, pdpb.OperatorStatus_TIMEOUT)
 		}
+	}
+}
+
+func (oc *OperatorController) getNextPushOperatorTime(step OperatorStep, now time.Time) time.Time {
+	nextTime := slowNotifyInterval
+	switch step.(type) {
+	case TransferLeader, PromoteLearner:
+		nextTime = fastNotifyInterval
+	}
+	return now.Add(nextTime)
+}
+
+// pollNeedDispatchRegion returns the region need to dispatch,
+// "next" is true to indicate that it may exist in next attempt,
+// and false is the end for the poll.
+func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
+	oc.Lock()
+	defer oc.Unlock()
+	if oc.opNotifierQueue.Len() == 0 {
+		return nil, false
+	}
+	item := heap.Pop(&oc.opNotifierQueue).(*operatorWithTime)
+	regionID := item.op.regionID
+	op, ok := oc.operators[regionID]
+	if !ok || op == nil {
+		return nil, true
+	}
+	r = oc.cluster.GetRegion(regionID)
+	if r == nil {
+		return nil, true
+	}
+	step := op.Check(r)
+	if step == nil {
+		return nil, true
+	}
+	now := time.Now()
+	if now.Before(item.time) {
+		heap.Push(&oc.opNotifierQueue, item)
+		return nil, false
+	}
+
+	// pushes with new notify time.
+	item.time = oc.getNextPushOperatorTime(step, now)
+	heap.Push(&oc.opNotifierQueue, item)
+	return r, true
+}
+
+// PushOperators periodically pushes the unfinished operator to the executor(TiKV).
+func (oc *OperatorController) PushOperators() {
+	for {
+		r, next := oc.pollNeedDispatchRegion()
+		if !next {
+			break
+		}
+		if r == nil {
+			continue
+		}
+
+		oc.Dispatch(r, DispatchFromNotifierQueue)
 	}
 }
 
@@ -82,16 +168,16 @@ func (oc *OperatorController) AddOperator(ops ...*Operator) bool {
 	oc.Lock()
 	defer oc.Unlock()
 
-	for _, op := range ops {
-		if !oc.checkAddOperator(op) {
+	if oc.exceedStoreLimit(ops...) || !oc.checkAddOperator(ops...) {
+		for _, op := range ops {
 			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
-			return false
+			oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
 		}
+		return false
 	}
 	for _, op := range ops {
 		oc.addOperatorLocked(op)
 	}
-
 	return true
 }
 
@@ -100,19 +186,21 @@ func (oc *OperatorController) AddOperator(ops ...*Operator) bool {
 // - There is no such region in the cluster
 // - The epoch of the operator and the epoch of the corresponding region are no longer consistent.
 // - The region already has a higher priority or same priority operator.
-func (oc *OperatorController) checkAddOperator(op *Operator) bool {
-	region := oc.cluster.GetRegion(op.RegionID())
-	if region == nil {
-		log.Debug("region not found, cancel add operator", zap.Uint64("region-id", op.RegionID()))
-		return false
-	}
-	if region.GetRegionEpoch().GetVersion() != op.RegionEpoch().GetVersion() || region.GetRegionEpoch().GetConfVer() != op.RegionEpoch().GetConfVer() {
-		log.Debug("region epoch not match, cancel add operator", zap.Uint64("region-id", op.RegionID()), zap.Reflect("old", region.GetRegionEpoch()), zap.Reflect("new", op.RegionEpoch()))
-		return false
-	}
-	if old := oc.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
-		log.Debug("already have operator, cancel add operator", zap.Uint64("region-id", op.RegionID()), zap.Reflect("old", old))
-		return false
+func (oc *OperatorController) checkAddOperator(ops ...*Operator) bool {
+	for _, op := range ops {
+		region := oc.cluster.GetRegion(op.RegionID())
+		if region == nil {
+			log.Debug("region not found, cancel add operator", zap.Uint64("region-id", op.RegionID()))
+			return false
+		}
+		if region.GetRegionEpoch().GetVersion() != op.RegionEpoch().GetVersion() || region.GetRegionEpoch().GetConfVer() != op.RegionEpoch().GetConfVer() {
+			log.Debug("region epoch not match, cancel add operator", zap.Uint64("region-id", op.RegionID()), zap.Reflect("old", region.GetRegionEpoch()), zap.Reflect("new", op.RegionEpoch()))
+			return false
+		}
+		if old := oc.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
+			log.Debug("already have operator, cancel add operator", zap.Uint64("region-id", op.RegionID()), zap.Reflect("old", old))
+			return false
+		}
 	}
 	return true
 }
@@ -131,18 +219,30 @@ func (oc *OperatorController) addOperatorLocked(op *Operator) bool {
 	if old, ok := oc.operators[regionID]; ok {
 		log.Info("replace old operator", zap.Uint64("region-id", regionID), zap.Reflect("operator", old))
 		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
+		oc.opRecords.Put(old, pdpb.OperatorStatus_REPLACE)
 		oc.removeOperatorLocked(old)
 	}
 
 	oc.operators[regionID] = op
+	opInfluence := NewTotalOpInfluence([]*Operator{op}, oc.cluster)
+	for storeID := range opInfluence.storesInfluence {
+		stepCost := opInfluence.GetStoreInfluence(storeID).StepCost
+		if stepCost == 0 {
+			continue
+		}
+		storeLimit.WithLabelValues(strconv.FormatUint(storeID, 10), "take").Set(float64(stepCost) / float64(RegionInfluence))
+		oc.storesLimit[storeID].Take(stepCost)
+	}
 	oc.updateCounts(oc.operators)
 
+	var step OperatorStep
 	if region := oc.cluster.GetRegion(op.RegionID()); region != nil {
-		if step := op.Check(region); step != nil {
-			oc.SendScheduleCommand(region, step)
+		if step = op.Check(region); step != nil {
+			oc.SendScheduleCommand(region, step, DispatchFromCreate)
 		}
 	}
 
+	heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op, time: oc.getNextPushOperatorTime(step, time.Now())})
 	operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
 	return true
 }
@@ -154,9 +254,40 @@ func (oc *OperatorController) RemoveOperator(op *Operator) {
 	oc.removeOperatorLocked(op)
 }
 
+// RemoveTimeoutOperator removes a operator which is timeout from the running operators.
+func (oc *OperatorController) RemoveTimeoutOperator(op *Operator) {
+	oc.Lock()
+	defer oc.Unlock()
+	operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
+	oc.removeOperatorLocked(op)
+}
+
+// GetOperatorStatus gets the operator and its status with the specify id.
+func (oc *OperatorController) GetOperatorStatus(id uint64) *OperatorWithStatus {
+	oc.Lock()
+	defer oc.Unlock()
+	if op, ok := oc.operators[id]; ok {
+		return &OperatorWithStatus{
+			Op:     op,
+			Status: pdpb.OperatorStatus_RUNNING,
+		}
+	}
+	return oc.opRecords.Get(id)
+}
+
 func (oc *OperatorController) removeOperatorLocked(op *Operator) {
 	regionID := op.RegionID()
 	delete(oc.operators, regionID)
+	opInfluence := NewTotalOpInfluence([]*Operator{op}, oc.cluster)
+	for storeID := range opInfluence.storesInfluence {
+		if opInfluence.GetStoreInfluence(storeID).StepCost == 0 {
+			continue
+		}
+		if oc.cluster.GetStore(storeID).IsOverloaded() &&
+			oc.storesLimit[storeID].Available() >= RegionInfluence {
+			oc.cluster.ResetStoreOverload(storeID)
+		}
+	}
 	oc.updateCounts(oc.operators)
 	operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 }
@@ -182,8 +313,8 @@ func (oc *OperatorController) GetOperators() []*Operator {
 }
 
 // SendScheduleCommand sends a command to the region.
-func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step OperatorStep) {
-	log.Info("send schedule command", zap.Uint64("region-id", region.GetID()), zap.Reflect("step", step))
+func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step OperatorStep, source string) {
+	log.Info("send schedule command", zap.Uint64("region-id", region.GetID()), zap.Stringer("step", step), zap.String("source", source))
 	switch st := step.(type) {
 	case TransferLeader:
 		cmd := &pdpb.RegionHeartbeatResponse{
@@ -207,7 +338,38 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			},
 		}
 		oc.hbStreams.SendMsg(region, cmd)
+	case AddLightPeer:
+		if region.GetStorePeer(st.ToStore) != nil {
+			// The newly added peer is pending.
+			return
+		}
+		cmd := &pdpb.RegionHeartbeatResponse{
+			ChangePeer: &pdpb.ChangePeer{
+				ChangeType: eraftpb.ConfChangeType_AddNode,
+				Peer: &metapb.Peer{
+					Id:      st.PeerID,
+					StoreId: st.ToStore,
+				},
+			},
+		}
+		oc.hbStreams.SendMsg(region, cmd)
 	case AddLearner:
+		if region.GetStorePeer(st.ToStore) != nil {
+			// The newly added peer is pending.
+			return
+		}
+		cmd := &pdpb.RegionHeartbeatResponse{
+			ChangePeer: &pdpb.ChangePeer{
+				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
+				Peer: &metapb.Peer{
+					Id:        st.PeerID,
+					StoreId:   st.ToStore,
+					IsLearner: true,
+				},
+			},
+		}
+		oc.hbStreams.SendMsg(region, cmd)
+	case AddLightLearner:
 		if region.GetStorePeer(st.ToStore) != nil {
 			// The newly added peer is pending.
 			return
@@ -337,24 +499,38 @@ func (oc *OperatorController) GetOpInfluence(cluster Cluster) OpInfluence {
 			}
 		}
 	}
-	return NewOpInfluence(res, cluster)
+	return NewUnfinishedOpInfluence(res, cluster)
 }
 
-// NewOpInfluence creates a OpInfluence.
-func NewOpInfluence(operators []*Operator, cluster Cluster) OpInfluence {
+// NewTotalOpInfluence creates a OpInfluence.
+func NewTotalOpInfluence(operators []*Operator, cluster Cluster) OpInfluence {
 	influence := OpInfluence{
-		storesInfluence:  make(map[uint64]*StoreInfluence),
-		regionsInfluence: make(map[uint64]*Operator),
+		storesInfluence: make(map[uint64]*StoreInfluence),
+	}
+
+	for _, op := range operators {
+		region := cluster.GetRegion(op.RegionID())
+		if region != nil {
+			op.TotalInfluence(influence, region)
+		}
+	}
+
+	return influence
+}
+
+// NewUnfinishedOpInfluence creates a OpInfluence.
+func NewUnfinishedOpInfluence(operators []*Operator, cluster Cluster) OpInfluence {
+	influence := OpInfluence{
+		storesInfluence: make(map[uint64]*StoreInfluence),
 	}
 
 	for _, op := range operators {
 		if !op.IsTimeout() && !op.IsFinish() {
 			region := cluster.GetRegion(op.RegionID())
 			if region != nil {
-				op.Influence(influence, region)
+				op.UnfinishedInfluence(influence, region)
 			}
 		}
-		influence.regionsInfluence[op.RegionID()] = op
 	}
 
 	return influence
@@ -362,8 +538,7 @@ func NewOpInfluence(operators []*Operator, cluster Cluster) OpInfluence {
 
 // OpInfluence records the influence of the cluster.
 type OpInfluence struct {
-	storesInfluence  map[uint64]*StoreInfluence
-	regionsInfluence map[uint64]*Operator
+	storesInfluence map[uint64]*StoreInfluence
 }
 
 // GetStoreInfluence get storeInfluence of specific store.
@@ -376,17 +551,13 @@ func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
 	return storeInfluence
 }
 
-// GetRegionsInfluence gets regionInfluence of specific region.
-func (m OpInfluence) GetRegionsInfluence() map[uint64]*Operator {
-	return m.regionsInfluence
-}
-
 // StoreInfluence records influences that pending operators will make.
 type StoreInfluence struct {
 	RegionSize  int64
 	RegionCount int64
 	LeaderSize  int64
 	LeaderCount int64
+	StepCost    int64
 }
 
 // ResourceSize returns delta size of leader/region by influence.
@@ -401,9 +572,115 @@ func (s StoreInfluence) ResourceSize(kind core.ResourceKind) int64 {
 	}
 }
 
-// SetOperator is only used for test
+// SetOperator is only used for test.
 func (oc *OperatorController) SetOperator(op *Operator) {
 	oc.Lock()
 	defer oc.Unlock()
 	oc.operators[op.RegionID()] = op
+}
+
+// OperatorWithStatus records the operator and its status.
+type OperatorWithStatus struct {
+	Op     *Operator
+	Status pdpb.OperatorStatus
+}
+
+// MarshalJSON returns the status of operator as a JSON string
+func (o *OperatorWithStatus) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + fmt.Sprintf("status: %s, operator: %s", o.Status.String(), o.Op.String()) + `"`), nil
+}
+
+// OperatorRecords remains the operator and its status for a while.
+type OperatorRecords struct {
+	ttl *cache.TTL
+}
+
+const operatorStatusRemainTime = 10 * time.Minute
+
+// NewOperatorRecords returns a OperatorRecords.
+func NewOperatorRecords() *OperatorRecords {
+	return &OperatorRecords{
+		ttl: cache.NewTTL(time.Minute, operatorStatusRemainTime),
+	}
+}
+
+// Get gets the operator and its status.
+func (o *OperatorRecords) Get(id uint64) *OperatorWithStatus {
+	v, exist := o.ttl.Get(id)
+	if !exist {
+		return nil
+	}
+	return v.(*OperatorWithStatus)
+}
+
+// Put puts the operator and its status.
+func (o *OperatorRecords) Put(op *Operator, status pdpb.OperatorStatus) {
+	id := op.regionID
+	record := &OperatorWithStatus{
+		Op:     op,
+		Status: status,
+	}
+	o.ttl.Put(id, record)
+}
+
+// exceedStoreLimit returns true if the store exceeds the cost limit after adding the operator. Otherwise, returns false.
+func (oc *OperatorController) exceedStoreLimit(ops ...*Operator) bool {
+	opInfluence := NewTotalOpInfluence(ops, oc.cluster)
+	for storeID := range opInfluence.storesInfluence {
+		if oc.storesLimit[storeID] == nil {
+			rate := oc.cluster.GetStoreBalanceRate()
+			oc.newStoreLimit(storeID, rate)
+		}
+		stepCost := opInfluence.GetStoreInfluence(storeID).StepCost
+		if stepCost == 0 {
+			continue
+		}
+		available := oc.storesLimit[storeID].Available()
+		storeLimit.WithLabelValues(strconv.FormatUint(storeID, 10), "available").Set(float64(available) / float64(RegionInfluence))
+		if available < stepCost {
+			oc.cluster.SetStoreOverload(storeID)
+			return true
+		}
+	}
+	return false
+}
+
+// SetAllStoresLimit is used to set limit of all stores.
+func (oc *OperatorController) SetAllStoresLimit(rate float64) {
+	oc.Lock()
+	defer oc.Unlock()
+	for storeID := range oc.storesLimit {
+		oc.newStoreLimit(storeID, rate)
+	}
+}
+
+// SetStoreLimit is used to set the limit of a store.
+func (oc *OperatorController) SetStoreLimit(storeID uint64, rate float64) {
+	oc.Lock()
+	defer oc.Unlock()
+	oc.newStoreLimit(storeID, rate)
+}
+
+// newStoreLimit is used to create the limit of a store.
+func (oc *OperatorController) newStoreLimit(storeID uint64, rate float64) {
+	capacity := RegionInfluence
+	if rate > 1 {
+		capacity = int64(rate * float64(RegionInfluence))
+	}
+	rate *= float64(RegionInfluence)
+	oc.storesLimit[storeID] = ratelimit.NewBucketWithRate(rate, capacity)
+}
+
+// GetAllStoresLimit is used to get limit of all stores.
+func (oc *OperatorController) GetAllStoresLimit() map[uint64]float64 {
+	oc.RLock()
+	defer oc.RUnlock()
+	ret := make(map[uint64]float64)
+	for storeID, limit := range oc.storesLimit {
+		store := oc.cluster.GetStore(storeID)
+		if !store.IsTombstone() {
+			ret[storeID] = limit.Rate() / float64(RegionInfluence)
+		}
+	}
+	return ret
 }

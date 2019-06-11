@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server_test
+package member_test
 
 import (
 	"bytes"
@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"sync"
+	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -28,6 +30,18 @@ import (
 	"github.com/pingcap/pd/tests"
 	"github.com/pkg/errors"
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
+var _ = Suite(&serverTestSuite{})
+
+type serverTestSuite struct{}
+
+func (s *serverTestSuite) SetUpSuite(c *C) {
+	server.EnableZap = true
+}
 
 func (s *serverTestSuite) TestMemberDelete(c *C) {
 	c.Parallel()
@@ -209,4 +223,42 @@ func (s *serverTestSuite) waitLeaderChange(c *C, cluster *tests.TestCluster, old
 		return true
 	})
 	return leader
+}
+
+func (s *serverTestSuite) TestMoveLeader(c *C) {
+	c.Parallel()
+
+	cluster, err := tests.NewTestCluster(5)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	var wg sync.WaitGroup
+	wg.Add(5)
+	for _, s := range cluster.GetServers() {
+		go func(s *tests.TestServer) {
+			defer wg.Done()
+			if s.IsLeader() {
+				s.ResignLeader()
+			} else {
+				old, _ := s.GetEtcdLeaderID()
+				s.MoveEtcdLeader(old, s.GetServerID())
+			}
+		}(s)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		c.Fatal("move etcd leader does not return in 10 seconds")
+	}
 }

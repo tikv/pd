@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/mock"
 	"google.golang.org/grpc"
 )
 
@@ -38,18 +39,45 @@ func TestClient(t *testing.T) {
 
 var _ = Suite(&testClientSuite{})
 
+type idAllocator struct {
+	allocator *mock.IDAllocator
+}
+
+func (i *idAllocator) alloc() uint64 {
+	id, _ := i.allocator.Alloc()
+	return id
+}
+
 var (
-	regionIDAllocator = &core.MockIDAllocator{}
+	regionIDAllocator = &idAllocator{allocator: &mock.IDAllocator{}}
 	// Note: IDs below are entirely arbitrary. They are only for checking
 	// whether GetRegion/GetStore works.
 	// If we alloc ID in client in the future, these IDs must be updated.
-	store = &metapb.Store{
-		Id:      1,
-		Address: "localhost",
+	stores = []*metapb.Store{
+		{Id: 1,
+			Address: "localhost:1",
+		},
+		{Id: 2,
+			Address: "localhost:2",
+		},
+		{Id: 3,
+			Address: "localhost:3",
+		},
+		{Id: 4,
+			Address: "localhost:4",
+		},
 	}
-	peer = &metapb.Peer{
-		Id:      2,
-		StoreId: store.GetId(),
+
+	peers = []*metapb.Peer{
+		{Id: regionIDAllocator.alloc(),
+			StoreId: stores[0].GetId(),
+		},
+		{Id: regionIDAllocator.alloc(),
+			StoreId: stores[1].GetId(),
+		},
+		{Id: regionIDAllocator.alloc(),
+			StoreId: stores[2].GetId(),
+		},
 	}
 )
 
@@ -75,6 +103,11 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 	c.Assert(err, IsNil)
 	s.regionHeartbeat, err = s.grpcPDClient.RegionHeartbeat(context.Background())
 	c.Assert(err, IsNil)
+	cluster := s.srv.GetRaftCluster()
+	c.Assert(cluster, NotNil)
+	for _, store := range stores {
+		s.srv.PutStore(context.Background(), &pdpb.PutStoreRequest{Header: newHeader(s.srv), Store: store})
+	}
 }
 
 func (s *testClientSuite) TearDownSuite(c *C) {
@@ -110,18 +143,18 @@ func newHeader(srv *server.Server) *pdpb.RequestHeader {
 }
 
 func bootstrapServer(c *C, header *pdpb.RequestHeader, client pdpb.PDClient) {
-	regionID, _ := regionIDAllocator.Alloc()
+	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{
 		Id: regionID,
 		RegionEpoch: &metapb.RegionEpoch{
 			ConfVer: 1,
 			Version: 1,
 		},
-		Peers: []*metapb.Peer{peer},
+		Peers: peers[:1],
 	}
 	req := &pdpb.BootstrapRequest{
 		Header: header,
-		Store:  store,
+		Store:  stores[0],
 		Region: region,
 	}
 	_, err := client.Bootstrap(context.Background(), req)
@@ -163,19 +196,19 @@ func (s *testClientSuite) TestTSORace(c *C) {
 }
 
 func (s *testClientSuite) TestGetRegion(c *C) {
-	regionID, _ := regionIDAllocator.Alloc()
+	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{
 		Id: regionID,
 		RegionEpoch: &metapb.RegionEpoch{
 			ConfVer: 1,
 			Version: 1,
 		},
-		Peers: []*metapb.Peer{peer},
+		Peers: peers,
 	}
 	req := &pdpb.RegionHeartbeatRequest{
 		Header: newHeader(s.srv),
 		Region: region,
-		Leader: peer,
+		Leader: peers[0],
 	}
 	err := s.regionHeartbeat.Send(req)
 	c.Assert(err, IsNil)
@@ -184,7 +217,7 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 		r, leader, err := s.client.GetRegion(context.Background(), []byte("a"))
 		c.Assert(err, IsNil)
 		return c.Check(r, DeepEquals, region) &&
-			c.Check(leader, DeepEquals, peer)
+			c.Check(leader, DeepEquals, peers[0])
 	})
 	c.Succeed()
 }
@@ -193,7 +226,7 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 	regionLen := 10
 	regions := make([]*metapb.Region, 0, regionLen)
 	for i := 0; i < regionLen; i++ {
-		regionID, _ := regionIDAllocator.Alloc()
+		regionID := regionIDAllocator.alloc()
 		r := &metapb.Region{
 			Id: regionID,
 			RegionEpoch: &metapb.RegionEpoch{
@@ -202,13 +235,13 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 			},
 			StartKey: []byte{byte(i)},
 			EndKey:   []byte{byte(i + 1)},
-			Peers:    []*metapb.Peer{peer},
+			Peers:    peers,
 		}
 		regions = append(regions, r)
 		req := &pdpb.RegionHeartbeatRequest{
 			Header: newHeader(s.srv),
 			Region: r,
-			Leader: peer,
+			Leader: peers[0],
 		}
 		err := s.regionHeartbeat.Send(req)
 		c.Assert(err, IsNil)
@@ -218,7 +251,7 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 			r, leader, err := s.client.GetPrevRegion(context.Background(), []byte{byte(i)})
 			c.Assert(err, IsNil)
 			if i > 0 && i < regionLen {
-				return c.Check(leader, DeepEquals, peer) &&
+				return c.Check(leader, DeepEquals, peers[0]) &&
 					c.Check(r, DeepEquals, regions[i-1])
 			}
 			return c.Check(leader, IsNil) &&
@@ -228,20 +261,78 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 	c.Succeed()
 }
 
+func (s *testClientSuite) TestScanRegions(c *C) {
+	regionLen := 10
+	regions := make([]*metapb.Region, 0, regionLen)
+	for i := 0; i < regionLen; i++ {
+		regionID := regionIDAllocator.alloc()
+		r := &metapb.Region{
+			Id: regionID,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			Peers:    peers,
+		}
+		regions = append(regions, r)
+		req := &pdpb.RegionHeartbeatRequest{
+			Header: newHeader(s.srv),
+			Region: r,
+			Leader: peers[0],
+		}
+		err := s.regionHeartbeat.Send(req)
+		c.Assert(err, IsNil)
+	}
+
+	// Wait for region heartbeats.
+	testutil.WaitUntil(c, func(c *C) bool {
+		scanRegions, _, err := s.client.ScanRegions(context.Background(), []byte{0}, 10)
+		return err == nil && len(scanRegions) == 10
+	})
+
+	// Set leader of region3 to nil.
+	region3 := core.NewRegionInfo(regions[3], nil)
+	s.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
+
+	check := func(start []byte, limit int, expect []*metapb.Region) {
+		scanRegions, leaders, err := s.client.ScanRegions(context.Background(), start, limit)
+		c.Assert(err, IsNil)
+		c.Assert(scanRegions, HasLen, len(expect))
+		c.Assert(leaders, HasLen, len(expect))
+		c.Log("scanRegions", scanRegions)
+		c.Log("expect", expect)
+		c.Log("scanLeaders", leaders)
+		for i := range expect {
+			c.Assert(scanRegions[i], DeepEquals, expect[i])
+			if scanRegions[i].GetId() == region3.GetID() {
+				c.Assert(leaders[i], DeepEquals, &metapb.Peer{})
+			} else {
+				c.Assert(leaders[i], DeepEquals, expect[i].Peers[0])
+			}
+		}
+	}
+
+	check([]byte{0}, 10, regions)
+	check([]byte{1}, 5, regions[1:6])
+	check([]byte{100}, 1, nil)
+}
+
 func (s *testClientSuite) TestGetRegionByID(c *C) {
-	regionID, _ := regionIDAllocator.Alloc()
+	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{
 		Id: regionID,
 		RegionEpoch: &metapb.RegionEpoch{
 			ConfVer: 1,
 			Version: 1,
 		},
-		Peers: []*metapb.Peer{peer},
+		Peers: peers,
 	}
 	req := &pdpb.RegionHeartbeatRequest{
 		Header: newHeader(s.srv),
 		Region: region,
-		Leader: peer,
+		Leader: peers[0],
 	}
 	err := s.regionHeartbeat.Send(req)
 	c.Assert(err, IsNil)
@@ -250,7 +341,7 @@ func (s *testClientSuite) TestGetRegionByID(c *C) {
 		r, leader, err := s.client.GetRegionByID(context.Background(), regionID)
 		c.Assert(err, IsNil)
 		return c.Check(r, DeepEquals, region) &&
-			c.Check(leader, DeepEquals, peer)
+			c.Check(leader, DeepEquals, peers[0])
 	})
 	c.Succeed()
 }
@@ -258,6 +349,7 @@ func (s *testClientSuite) TestGetRegionByID(c *C) {
 func (s *testClientSuite) TestGetStore(c *C) {
 	cluster := s.srv.GetRaftCluster()
 	c.Assert(cluster, NotNil)
+	store := stores[0]
 
 	// Get an up store should be OK.
 	n, err := s.client.GetStore(context.Background(), store.GetId())
@@ -266,7 +358,7 @@ func (s *testClientSuite) TestGetStore(c *C) {
 
 	stores, err := s.client.GetAllStores(context.Background())
 	c.Assert(err, IsNil)
-	c.Assert(stores, DeepEquals, []*metapb.Store{store})
+	c.Assert(stores, DeepEquals, stores)
 
 	// Mark the store as offline.
 	err = cluster.RemoveStore(store.GetId())
@@ -280,9 +372,16 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	c.Assert(n, DeepEquals, offlineStore)
 
 	// Should return offline stores.
+	contains := false
 	stores, err = s.client.GetAllStores(context.Background())
 	c.Assert(err, IsNil)
-	c.Assert(stores, DeepEquals, []*metapb.Store{offlineStore})
+	for _, store := range stores {
+		if store.GetId() == offlineStore.GetId() {
+			contains = true
+			c.Assert(store, DeepEquals, offlineStore)
+		}
+	}
+	c.Assert(contains, IsTrue)
 
 	// Mark the store as tombstone.
 	err = cluster.BuryStore(store.GetId(), true)
@@ -296,14 +395,23 @@ func (s *testClientSuite) TestGetStore(c *C) {
 	c.Assert(n, IsNil)
 
 	// Should return tombstone stores.
+	contains = false
 	stores, err = s.client.GetAllStores(context.Background())
 	c.Assert(err, IsNil)
-	c.Assert(stores, DeepEquals, []*metapb.Store{tombstoneStore})
+	for _, store := range stores {
+		if store.GetId() == tombstoneStore.GetId() {
+			contains = true
+			c.Assert(store, DeepEquals, tombstoneStore)
+		}
+	}
+	c.Assert(contains, IsTrue)
 
 	// Should not return tombstone stores.
 	stores, err = s.client.GetAllStores(context.Background(), WithExcludeTombstone())
 	c.Assert(err, IsNil)
-	c.Assert(stores, IsNil)
+	for _, store := range stores {
+		c.Assert(store, Not(Equals), tombstoneStore)
+	}
 }
 
 func (s *testClientSuite) checkGCSafePoint(c *C, expectedSafePoint uint64) {
@@ -328,4 +436,35 @@ func (s *testClientSuite) TestUpdateGCSafePoint(c *C) {
 	c.Assert(newSafePoint, Equals, uint64(math.MaxUint64))
 	c.Assert(err, IsNil)
 	s.checkGCSafePoint(c, math.MaxUint64)
+}
+
+func (s *testClientSuite) TestScatterRegion(c *C) {
+	regionID := regionIDAllocator.alloc()
+	region := &metapb.Region{
+		Id: regionID,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		Peers: peers,
+	}
+	req := &pdpb.RegionHeartbeatRequest{
+		Header: newHeader(s.srv),
+		Region: region,
+		Leader: peers[0],
+	}
+	err := s.regionHeartbeat.Send(req)
+	c.Assert(err, IsNil)
+	testutil.WaitUntil(c, func(c *C) bool {
+		err := s.client.ScatterRegion(context.Background(), regionID)
+		if c.Check(err, NotNil) {
+			return false
+		}
+		resp, err := s.client.GetOperator(context.Background(), regionID)
+		if c.Check(err, NotNil) {
+			return false
+		}
+		return c.Check(resp.GetRegionId(), Equals, regionID) && c.Check(string(resp.GetDesc()), Equals, "scatter-region") && c.Check(resp.GetStatus(), Equals, pdpb.OperatorStatus_RUNNING)
+	})
+	c.Succeed()
 }

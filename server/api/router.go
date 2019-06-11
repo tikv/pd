@@ -43,8 +43,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/schedulers", schedulerHandler.Post).Methods("POST")
 	router.HandleFunc("/api/v1/schedulers/{name}", schedulerHandler.Delete).Methods("DELETE")
 
-	router.Handle("/api/v1/cluster", newClusterHandler(svr, rd)).Methods("GET")
-	router.HandleFunc("/api/v1/cluster/status", newClusterHandler(svr, rd).GetClusterStatus).Methods("GET")
+	clusterHandler := newClusterHandler(svr, rd)
+	router.Handle("/api/v1/cluster", clusterHandler).Methods("GET")
+	router.HandleFunc("/api/v1/cluster/status", clusterHandler.GetClusterStatus).Methods("GET")
 
 	confHandler := newConfHandler(svr, rd)
 	router.HandleFunc("/api/v1/config", confHandler.Get).Methods("GET")
@@ -61,13 +62,18 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/config/cluster-version", confHandler.GetClusterVersion).Methods("GET")
 	router.HandleFunc("/api/v1/config/cluster-version", confHandler.SetClusterVersion).Methods("POST")
 
-	storeHandler := newStoreHandler(svr, rd)
+	storeHandler := newStoreHandler(handler, rd)
 	router.HandleFunc("/api/v1/store/{id}", storeHandler.Get).Methods("GET")
 	router.HandleFunc("/api/v1/store/{id}", storeHandler.Delete).Methods("DELETE")
 	router.HandleFunc("/api/v1/store/{id}/state", storeHandler.SetState).Methods("POST")
 	router.HandleFunc("/api/v1/store/{id}/label", storeHandler.SetLabels).Methods("POST")
 	router.HandleFunc("/api/v1/store/{id}/weight", storeHandler.SetWeight).Methods("POST")
-	router.Handle("/api/v1/stores", newStoresHandler(svr, rd)).Methods("GET")
+	router.HandleFunc("/api/v1/store/{id}/limit", storeHandler.SetLimit).Methods("POST")
+	storesHandler := newStoresHandler(handler, rd)
+	router.Handle("/api/v1/stores", storesHandler).Methods("GET")
+	router.HandleFunc("/api/v1/stores/remove-tombstone", storesHandler.RemoveTombStone).Methods("DELETE")
+	router.HandleFunc("/api/v1/stores/limit", storesHandler.GetAllLimit).Methods("GET")
+	router.HandleFunc("/api/v1/stores/limit", storesHandler.SetAllLimit).Methods("POST")
 
 	labelsHandler := newLabelsHandler(svr, rd)
 	router.HandleFunc("/api/v1/labels", labelsHandler.Get).Methods("GET")

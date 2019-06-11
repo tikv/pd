@@ -19,10 +19,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
-// Simulating is an option to overpass the impact of accelerated time. Should
-// only turned on by the simulator.
-var Simulating bool
-
 // Options for schedulers.
 type Options interface {
 	GetLeaderScheduleLimit() uint64
@@ -30,6 +26,9 @@ type Options interface {
 	GetReplicaScheduleLimit() uint64
 	GetMergeScheduleLimit() uint64
 	GetHotRegionScheduleLimit() uint64
+
+	// store limit
+	GetStoreBalanceRate() float64
 
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
@@ -40,6 +39,7 @@ type Options interface {
 
 	GetMaxReplicas() int
 	GetLocationLabels() []string
+	GetStrictlyMatchLabel() bool
 
 	GetHotRegionCacheHitsThreshold() int
 	GetTolerantSizeRatio() float64
@@ -58,17 +58,8 @@ type Options interface {
 	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 }
 
-// NamespaceOptions for namespace cluster.
-type NamespaceOptions interface {
-	GetLeaderScheduleLimit(name string) uint64
-	GetRegionScheduleLimit(name string) uint64
-	GetReplicaScheduleLimit(name string) uint64
-	GetMergeScheduleLimit(name string) uint64
-	GetMaxReplicas(name string) int
-}
-
 const (
-	// RejectLeader is the label property type that sugguests a store should not
+	// RejectLeader is the label property type that suggests a store should not
 	// have any region leaders.
 	RejectLeader = "reject-leader"
 )

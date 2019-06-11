@@ -21,10 +21,12 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	gofail "github.com/pingcap/gofail/runtime"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/mock"
+	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 )
 
@@ -42,6 +44,14 @@ type baseCluster struct {
 
 type testClusterSuite struct {
 	baseCluster
+}
+
+type testErrorKV struct {
+	core.KVBase
+}
+
+func (kv *testErrorKV) Save(key, value string) error {
+	return errors.New("save failed")
 }
 
 func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
@@ -452,7 +462,7 @@ func (s *testClusterSuite) TestRaftClusterMultipleRestart(c *C) {
 	c.Assert(cluster, NotNil)
 
 	// let the job run at small interval
-	gofail.Enable("github.com/pingcap/pd/server/highFrequencyClusterJobs", `return(true)`)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/highFrequencyClusterJobs", `return(true)`), IsNil)
 	for i := 0; i < 100; i++ {
 		err = s.svr.createRaftCluster()
 		c.Assert(err, IsNil)
@@ -535,16 +545,13 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 		}
 		go func(isReciver bool) {
 			if isReciver {
-				resp, err := stream.Recv()
+				_, err := stream.Recv()
 				c.Assert(err, IsNil)
-				c.Assert(resp.Header.GetError(), IsNil)
-				fmt.Println("get resp:", resp)
 				wg.Done()
 			}
 			for {
-				resp, err := stream.Recv()
+				_, err := stream.Recv()
 				c.Assert(err, IsNil)
-				c.Assert(resp.Header.GetError(), IsNil)
 			}
 		}(i == 0)
 	}
@@ -585,7 +592,7 @@ type testGetStoresSuite struct {
 func (s *testGetStoresSuite) SetUpSuite(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	s.cluster = newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
+	s.cluster = newClusterInfo(mock.NewIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
 
 	stores := newTestStores(200)
 
@@ -599,4 +606,85 @@ func (s *testGetStoresSuite) BenchmarkGetStores(c *C) {
 		// Logic to benchmark
 		s.cluster.core.Stores.GetStores()
 	}
+}
+
+func (s *testClusterSuite) TestSetScheduleOpt(c *C) {
+	var err error
+	var cleanup func()
+	_, s.svr, cleanup, err = NewTestServer(c)
+	c.Assert(err, IsNil)
+	mustWaitLeader(c, []*Server{s.svr})
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	defer cleanup()
+	clusterID := s.svr.clusterID
+
+	storeAddr := "127.0.0.1:0"
+	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, clusterID, storeAddr))
+	c.Assert(err, IsNil)
+
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+
+	scheduleCfg := opt.load()
+	replicateCfg := s.svr.GetReplicationConfig()
+	pdServerCfg := s.svr.scheduleOpt.loadPDServerConfig()
+
+	//PUT GET DELETE successed
+	replicateCfg.MaxReplicas = 5
+	scheduleCfg.MaxSnapshotCount = 10
+	pdServerCfg.UseRegionStorage = true
+	typ, labelKey, labelValue := "testTyp", "testKey", "testValue"
+	nsConfig := NamespaceConfig{LeaderScheduleLimit: uint64(200)}
+
+	c.Assert(s.svr.SetScheduleConfig(*scheduleCfg), IsNil)
+	c.Assert(s.svr.SetPDServerConfig(*pdServerCfg), IsNil)
+	c.Assert(s.svr.SetLabelProperty(typ, labelKey, labelValue), IsNil)
+	c.Assert(s.svr.SetNamespaceConfig("testNS", nsConfig), IsNil)
+	c.Assert(s.svr.SetReplicationConfig(*replicateCfg), IsNil)
+
+	c.Assert(s.svr.GetReplicationConfig().MaxReplicas, Equals, uint64(5))
+	c.Assert(s.svr.scheduleOpt.GetMaxSnapshotCount(), Equals, uint64(10))
+	c.Assert(s.svr.scheduleOpt.loadPDServerConfig().UseRegionStorage, Equals, true)
+	c.Assert(s.svr.scheduleOpt.loadLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
+	c.Assert(s.svr.scheduleOpt.loadLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
+	c.Assert(s.svr.GetNamespaceConfig("testNS").LeaderScheduleLimit, Equals, uint64(200))
+
+	c.Assert(s.svr.DeleteNamespaceConfig("testNS"), IsNil)
+	c.Assert(s.svr.DeleteLabelProperty(typ, labelKey, labelValue), IsNil)
+
+	c.Assert(s.svr.GetNamespaceConfig("testNS").LeaderScheduleLimit, Equals, uint64(0))
+	c.Assert(len(s.svr.scheduleOpt.loadLabelPropertyConfig()[typ]), Equals, 0)
+
+	//PUT GET failed
+	oldKV := s.svr.kv
+	s.svr.kv = core.NewKV(&testErrorKV{})
+	replicateCfg.MaxReplicas = 7
+	scheduleCfg.MaxSnapshotCount = 20
+	pdServerCfg.UseRegionStorage = false
+
+	c.Assert(s.svr.SetScheduleConfig(*scheduleCfg), NotNil)
+	c.Assert(s.svr.SetReplicationConfig(*replicateCfg), NotNil)
+	c.Assert(s.svr.SetPDServerConfig(*pdServerCfg), NotNil)
+	c.Assert(s.svr.SetLabelProperty(typ, labelKey, labelValue), NotNil)
+	c.Assert(s.svr.SetNamespaceConfig("testNS", nsConfig), NotNil)
+
+	c.Assert(s.svr.GetReplicationConfig().MaxReplicas, Equals, uint64(5))
+	c.Assert(s.svr.scheduleOpt.GetMaxSnapshotCount(), Equals, uint64(10))
+	c.Assert(s.svr.scheduleOpt.loadPDServerConfig().UseRegionStorage, Equals, true)
+	c.Assert(s.svr.GetNamespaceConfig("testNS").LeaderScheduleLimit, Equals, uint64(0))
+	c.Assert(len(s.svr.scheduleOpt.loadLabelPropertyConfig()[typ]), Equals, 0)
+
+	//DELETE failed
+	s.svr.kv = oldKV
+	c.Assert(s.svr.SetNamespaceConfig("testNS", nsConfig), IsNil)
+	c.Assert(s.svr.SetReplicationConfig(*replicateCfg), IsNil)
+
+	s.svr.kv = core.NewKV(&testErrorKV{})
+	c.Assert(s.svr.DeleteLabelProperty(typ, labelKey, labelValue), NotNil)
+	c.Assert(s.svr.GetNamespaceConfig("testNS").LeaderScheduleLimit, Equals, uint64(200))
+	c.Assert(s.svr.DeleteNamespaceConfig("testNS"), NotNil)
+
+	c.Assert(s.svr.GetNamespaceConfig("testNS").LeaderScheduleLimit, Equals, uint64(200))
+	c.Assert(s.svr.scheduleOpt.loadLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
+	c.Assert(s.svr.scheduleOpt.loadLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
 }

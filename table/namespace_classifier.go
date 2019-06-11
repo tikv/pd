@@ -144,8 +144,7 @@ func (c *tableNamespaceClassifier) GetRegionNamespace(regionInfo *core.RegionInf
 	c.RLock()
 	defer c.RUnlock()
 
-	isMeta := Key(regionInfo.GetStartKey()).IsMeta()
-	tableID := Key(regionInfo.GetStartKey()).TableID()
+	isMeta, tableID := Key(regionInfo.GetStartKey()).MetaOrTable()
 	if tableID == 0 && !isMeta {
 		return namespace.DefaultNamespace
 	}
@@ -443,7 +442,7 @@ func (namespaceInfo *namespacesInfo) loadNamespaces(kv *core.KV, rangeLimit int)
 
 	for {
 		key := namespaceInfo.namespacePath(nextID)
-		res, err := kv.LoadRange(key, endKey, rangeLimit)
+		_, res, err := kv.LoadRange(key, endKey, rangeLimit)
 		if err != nil {
 			return err
 		}

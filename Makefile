@@ -12,8 +12,8 @@ GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 RETOOL := ./scripts/retool
 OVERALLS := overalls
 
-GOFAIL_ENABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do gofail enable)
-GOFAIL_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do gofail disable)
+FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do failpoint-ctl enable)
+FAILPOINT_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do failpoint-ctl disable)
 
 LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --dirty)"
 LDFLAGS += -X "$(PD_PKG)/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
@@ -35,27 +35,35 @@ dev: build check test
 
 ci: build check basic-test
 
-build: export GO111MODULE=on
-build:
+build: pd-server pd-ctl pd-tso-bench pd-recover
+pd-server: export GO111MODULE=on
+pd-server:
 ifeq ("$(WITH_RACE)", "1")
 	CGO_ENABLED=1 go build -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 else
 	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
+
+pd-ctl: export GO111MODULE=on
+pd-ctl:
 	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl tools/pd-ctl/main.go
+pd-tso-bench: export GO111MODULE=on
+pd-tso-bench:
 	CGO_ENABLED=0 go build -o bin/pd-tso-bench tools/pd-tso-bench/main.go
+pd-recover: export GO111MODULE=on
+pd-recover:
 	CGO_ENABLED=0 go build -o bin/pd-recover tools/pd-recover/main.go
 
 test: retool-setup
 	# testing..
-	@$(GOFAIL_ENABLE)
-	CGO_ENABLED=1 GO111MODULE=on go test -race -cover $(TEST_PKGS) || { $(GOFAIL_DISABLE); exit 1; }
-	@$(GOFAIL_DISABLE)
+	@$(FAILPOINT_ENABLE)
+	CGO_ENABLED=1 GO111MODULE=on go test -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	@$(FAILPOINT_DISABLE)
 
 basic-test:
-	@$(GOFAIL_ENABLE)
-	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(GOFAIL_DISABLE); exit 1; }
-	@$(GOFAIL_DISABLE)
+	@$(FAILPOINT_ENABLE)
+	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	@$(FAILPOINT_DISABLE)
 
 # These need to be fixed before they can be ran regularly
 check-fail:
@@ -74,14 +82,15 @@ retool-setup:
 
 check: retool-setup check-all
 
+static: export GO111MODULE=on
 static:
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 	./scripts/retool do govet --shadow $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 
-	CGO_ENABLED=0 ./scripts/retool do gometalinter.v2 --disable-all --deadline 120s \
+	CGO_ENABLED=0 ./scripts/retool do golangci-lint run --disable-all --deadline 120s \
 	  --enable misspell \
-	  --enable megacheck \
+	  --enable staticcheck \
 	  --enable ineffassign \
 	  $$($(PACKAGE_DIRECTORIES))
 
@@ -92,14 +101,14 @@ lint:
 tidy:
 	@echo "go mod tidy"
 	GO111MODULE=on go mod tidy
-	git diff --quiet
+	git diff --quiet go.mod go.sum
 
 travis_coverage: export GO111MODULE=on
 travis_coverage:
 ifeq ("$(TRAVIS_COVERAGE)", "1")
-	@$(GOFAIL_ENABLE)
-	CGO_ENABLED=1 ./scripts/retool do $(OVERALLS) -project=github.com/pingcap/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(GOFAIL_DISABLE); exit 1; }
-	@$(GOFAIL_DISABLE)
+	@$(FAILPOINT_ENABLE)
+	CGO_ENABLED=1 ./scripts/retool do $(OVERALLS) -project=github.com/pingcap/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(FAILPOINT_DISABLE); exit 1; }
+	@$(FAILPOINT_DISABLE)
 else
 	@echo "coverage only runs in travis."
 endif
@@ -113,12 +122,12 @@ clean-test:
 	rm -rf /tmp/pd-tests*
 	rm -rf /tmp/test_etcd*
 
-gofail-enable:
-	# Converting gofail failpoints...
-	@$(GOFAIL_ENABLE)
+failpoint-enable:
+	# Converting failpoints...
+	@$(FAILPOINT_ENABLE)
 
-gofail-disable:
-	# Restoring gofail failpoints...
-	@$(GOFAIL_DISABLE)
+failpoint-disable:
+	# Restoring failpoints...
+	@$(FAILPOINT_DISABLE)
 
 .PHONY: all ci vendor clean-test tidy
