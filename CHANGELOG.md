@@ -1,7 +1,7 @@
 # PD Change Log
 
 ## v2.1.12
-- Use different timeouts for http clients [1574](https://github.com/pingcap/pd/pull/1574)
+- Use different timeouts for HTTP clients [1574](https://github.com/pingcap/pd/pull/1574)
 
 ## v2.1.11
 - Fix the issue that hots Region may fail to be scheduled due to `balance-region` [#1551](https://github.com/pingcap/pd/pull/1551)
