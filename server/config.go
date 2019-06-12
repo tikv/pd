@@ -682,7 +682,7 @@ type ReplicationConfig struct {
 	// For example, ["zone", "rack"] means that we should place replicas to
 	// different zones first, then to different racks if we don't have enough zones.
 	LocationLabels typeutil.StringSlice `toml:"location-labels,omitempty" json:"location-labels"`
-	// StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocaltionLabels.
+	// StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocationLabels.
 	StrictlyMatchLabel bool `toml:"strictly-match-label,omitempty" json:"strictly-match-label,string"`
 }
 

@@ -83,7 +83,7 @@ max-replicas = 3
 # For example, ["zone", "rack"] means that we should place replicas to
 # different zones first, then to different racks if we don't have enough zones.
 location-labels = []
-# Strictly checks if the label of TiKV is matched with localtion labels.
+# Strictly checks if the label of TiKV is matched with location labels.
 #strictly-match-label = false
 
 [label-property]
