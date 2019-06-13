@@ -99,6 +99,7 @@ lease = 0
 
 [schedule]
 max-merge-region-size = 0
+enable-two-way-merge = true
 leader-schedule-limit = 0
 `
 	cfg := NewConfig()
@@ -114,6 +115,7 @@ leader-schedule-limit = 0
 	c.Assert(cfg.LeaderLease, Equals, defaultLeaderLease)
 	// When defined, use values from config file.
 	c.Assert(cfg.Schedule.MaxMergeRegionSize, Equals, uint64(0))
+	c.Assert(cfg.Schedule.EnableTwoWayMerge, Equals, true)
 	c.Assert(cfg.Schedule.LeaderScheduleLimit, Equals, uint64(0))
 	// When undefined, use default values.
 	c.Assert(cfg.PreVote, IsTrue)

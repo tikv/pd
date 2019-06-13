@@ -101,7 +101,9 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*Operator {
 	var target *core.RegionInfo
 	prev, next := m.cluster.GetAdjacentRegions(region)
 
-	target = m.checkTarget(region, prev, target)
+	if m.cluster.GetEnableTwoWayMerge() {
+		target = m.checkTarget(region, prev, target)
+	}
 	target = m.checkTarget(region, next, target)
 
 	if target == nil {

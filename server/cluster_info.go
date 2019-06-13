@@ -746,6 +746,10 @@ func (c *clusterInfo) GetSplitMergeInterval() time.Duration {
 	return c.opt.GetSplitMergeInterval()
 }
 
+func (c *clusterInfo) GetEnableTwoWayMerge() bool {
+	return c.opt.GetEnableTwoWayMerge()
+}
+
 func (c *clusterInfo) GetPatrolRegionInterval() time.Duration {
 	return c.opt.GetPatrolRegionInterval()
 }

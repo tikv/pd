@@ -71,8 +71,8 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*schedule.Op
 		return nil
 	}
 
-	target, other := cluster.GetAdjacentRegions(region)
-	if (rand.Int()%2 == 0 && other != nil) || target == nil {
+	other, target := cluster.GetAdjacentRegions(region)
+	if cluster.GetEnableTwoWayMerge() && ((rand.Int()%2 == 0 && other != nil) || target == nil) {
 		target = other
 	}
 	if target == nil {
